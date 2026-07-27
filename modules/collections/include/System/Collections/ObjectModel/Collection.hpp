@@ -29,11 +29,31 @@ private:
     class Enumerator : public Generic::IEnumerator<T> {
         const std::vector<T>& items_;
         intcs index_ = -1;
+        System::Collections::detail::EnumeratorState state_;
     public:
         explicit Enumerator(const std::vector<T>& items) : items_(items) {}
-        bool MoveNext() override { return ++index_ < static_cast<intcs>(items_.size()); }
-        void Reset() override { index_ = -1; }
-        [[nodiscard]] const T& Current() const override { return items_[static_cast<size_t>(index_)]; }
+        bool MoveNext() override {
+            if (state_.isAfterLast()) return false;
+
+            const intcs next = index_ + 1;
+            if (next < static_cast<intcs>(items_.size())) {
+                index_ = next;
+                state_.setCurrent();
+                return true;
+            }
+
+            index_ = static_cast<intcs>(items_.size());
+            state_.setAfterLast();
+            return false;
+        }
+        void Reset() override {
+            index_ = -1;
+            state_.Reset();
+        }
+        [[nodiscard]] const T& Current() const override {
+            state_.requireCurrent();
+            return items_[static_cast<size_t>(index_)];
+        }
     };
 
     void requireIndexInRange(intcs index) const {

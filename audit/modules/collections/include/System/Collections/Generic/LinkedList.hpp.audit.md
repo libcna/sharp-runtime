@@ -16,6 +16,15 @@
 - Tests do not retain nodes across Remove/Clear/owner destruction or assert a deterministic detached-node result.
 - Ownership/liveness state must be observable before any node value, next, previous, comparison, or implicit conversion dereference.
 
+## Related enumerator remediation
+
+Ticket #1767 remediated this file's SR-AUD-356 enumerator-lifecycle aspect:
+`Current` now uses the shared before-start/after-end guard, and `Reset`
+restores the native iterator to the beginning. The permanent family regression
+and direct ASan/UBSan replacement probe pass. This does **not** change
+SR-AUD-357: copied `LinkedListNode` ownership/liveness remains confirmed and
+requires its own design-first ticket.
+
 ## Final assessment
 
 AUDITED. The confirmed finding(s) above have reproducible evidence and a focused remediation target.

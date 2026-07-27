@@ -7,7 +7,8 @@ eligible tracked first-party text-like files has exactly one mirrored report
 under `audit/<source-path>.audit.md`; the 1,699 runtime-module files are also
 fully covered. No production source or test was changed during this phase.
 
-The findings index records 364 confirmed issues:
+At audit closure, the findings index recorded 364 confirmed issues. It now
+retains all 364 entries while marking 362 `confirmed` and two `remediated`:
 
 | Severity | Count |
 |---|---:|
@@ -41,11 +42,11 @@ coordinated repairs rather than isolated symptom patches.
   probes establish the associated public-contract findings cited by the
   per-file reports.
 
-The broad local CI gate remains environment-limited rather than green: six
+During the audit phase, the broad local CI gate was environment-limited: six
 `Net.Http` local-server tests fail at socket creation in this sandbox
-(`Socket::Socket: socket() failed`). The tests remain enabled. A
-network-permitted environment must run the full gate before declaring any
-subsequent remediation batch complete.
+(`Socket::Socket: socket() failed`). The tests remained enabled. The first
+post-audit remediation batch later satisfied this prerequisite in a
+network-permitted run; see the status below.
 
 ## Repair handoff
 
@@ -59,3 +60,22 @@ leave sibling public paths unsafe.
 
 The audit phase is closed. The next phase is user-approved post-audit
 remediation planning, not further source changes under ticket #1766.
+
+## Post-audit remediation status
+
+Ticket #1767 completed the first bounded remediation batch on 2026-07-27.
+SR-AUD-356 and SR-AUD-364 / CCF-018 are marked `remediated`; their original
+audit evidence remains in place. A shared lifecycle guard now prevents invalid
+`Current` access across the ten affected collection enumerators, and
+`BitArray` uses mutation-version checks.
+
+Closure evidence is 13/13 permanent focused regressions, 1,435/1,435
+Collections.Core tests, a clean direct ASan/UBSan probe, and
+`scripts/local_ci_check.sh build` in a network-permitted environment:
+12,694/12,694 tests across 37 executables with zero build warnings/errors.
+Boundary validation remains 41 physical modules and 90 dependency edges;
+catalogue, database consistency, and diff checks pass. Doxygen 1.9.8 reports
+1,941 warnings against the 1,942-warning ceiling. LeakSanitizer alone could
+not initialize under the sandbox's `ptrace` policy, so its probe was rerun
+with leak detection disabled while AddressSanitizer and UndefinedBehaviorSanitizer
+remained active.

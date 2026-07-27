@@ -3,12 +3,12 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-27. Branch: `feature/audit`. The P0 component-boundary
+*Last verified: 2026-07-27. Branch: `feature/remediation-coll-enum`. The P0 component-boundary
 repair, three P1 parity repairs, P1 portability revalidation, and twenty-two bounded
 P2 API slices are complete: 41 physical modules, 90 production dependency
-edges, and 12,681 tests across 37 executables. The repository-wide,
+edges, and 12,694 tests across 37 executables. The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766); its
-separately authorized remediation phase has not started.*
+first bounded remediation ticket #1767 is complete.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -20,18 +20,25 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   1,748-file first-party scope and the mirrored
   `audit/<source-path>.audit.md` convention; `AUDIT_FINAL_REPORT.md`,
   `AUDIT_MANIFEST.md`, and `AUDIT_PROGRESS.md` record the reconciled evidence
-  and remediation backlog. Production repairs remain out of scope until a
-  separately authorized remediation ticket is selected.
+  and remediation backlog.
+- Post-audit remediation ticket #1767 completed on
+  `feature/remediation-coll-enum`. It remediates SR-AUD-356 and SR-AUD-364 /
+  CCF-018 with one guarded lifecycle state across ten collection enumerators
+  and BitArray mutation invalidation. SR-AUD-357 and SR-AUD-358 remain
+  separate design-first work; no repair ticket is active.
 - Initial audit validation passed boundary validation, catalogue freshness, and
   a zero-warning native build. It could not complete the full suite in this
   sandbox because the six local-server `Net.Http` cases fail immediately with
   `Socket::Socket: socket() failed`; this matches the documented requirement
-  for local-network permission. The tests remain enabled and need a
-  network-permitted final-gate rerun.
+  for local-network permission. The tests remained enabled. Ticket #1767's
+  network-permitted closure rerun subsequently passed all 12,694 tests,
+  including the six HTTP cases.
 - Final audit reconciliation completed all configured build targets with
   `gmake -C build -j4`; plan-database consistency, module-boundary validation
   (41 physical modules, 90 production edges), and `git diff --check` passed.
-- All 1,748 audit reports are complete and confirm three hundred sixty-four findings. The final
+- All 1,748 audit reports are complete and confirmed three hundred sixty-four
+  findings at audit closure. The index now records 362 open `confirmed`
+  findings and two `remediated` findings. The final
   142-file `Collections` shard passed 1,422/1,422 focused tests and adds SR-AUD-356 through
   SR-AUD-364: invalid enumerator Current paths can reach ASan-confirmed out-of-bounds reads;
   retained LinkedListNode handles use freed storage; raw ICollection CopyTo can ASan-crash;
@@ -948,12 +955,13 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   matrix currently covers only nine fixtures and omits that direct consumer;
   this is recorded as `SR-AUD-001`. Text.Json retains its target absence and
   negative include-leakage assertions.
-- The full native baseline is a warning-free build with 12,681 passing tests
+- The full native baseline is a warning-free build with 12,694 passing tests
   across 36 component executables and one integration executable.
-- Doxygen 1.9.8 emits 1,942 warnings with the tracked configuration. Run
-  `scripts/check_doxygen_warnings.sh` to prevent increases; lower totals are
-  accepted, and a dedicated Ubuntu 24.04 CI job enforces the same limit. A
-  Doxygen-version change requires a deliberate re-baseline.
+- Doxygen 1.9.8 currently emits 1,941 warnings against the tracked
+  1,942-warning ceiling. Run `scripts/check_doxygen_warnings.sh` to prevent
+  increases; lower totals are accepted, and a dedicated Ubuntu 24.04 CI job
+  enforces the same limit. A Doxygen-version change requires a deliberate
+  re-baseline.
 - `TaskT<TResult>::ContinueWith` now supports both action and result-producing
   callbacks. It runs inline on completion; `NotOn*` and `OnlyOn*` filter the
   antecedent state, while scheduler and parent-task options remain no-ops.
@@ -1017,8 +1025,9 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   generic task continuations, and `TaskExtensions::Unwrap` are clean; matching
   ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
-The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,765 completed tickets, including closed audit ticket #1766. Ticket #1737 records the completed P0 split, tickets
+The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows,
+1,767 completed tickets including closed audit ticket #1766 and remediation
+ticket #1767; no ticket is active. Ticket #1737 records the completed P0 split, tickets
 #1738/#1739 the MemoryStream and generic-continuation repairs, ticket #1740 the
 XML whitespace repair, #1741 the completed cross-build revalidation and
 `WebProxy` portability fix, #1742 focused sanitizer evidence, and #1743 the
@@ -1180,10 +1189,27 @@ full-list/range order and invalid range validation.
 Ticket #1766 is closed as an evidence-only audit.  The next work is *not* a
 return to the old consumer-driven P2 queue: it is a separately authorised
 remediation phase against the 364-item audit inventory (91 high, 262 medium,
-11 low).  Do not begin a repair merely because it appears in this file.  The
-first remediation session must choose one bounded ticket, its owning branch,
-and its compatibility target with the user; until that decision, `feature/audit`
-remains an audit-handoff branch.
+11 low).  The first bounded repair, ticket #1767 on
+`feature/remediation-coll-enum`, is complete. It covers SR-AUD-356 and
+SR-AUD-364 / CCF-018 with the project's safe C++ reference-returning
+enumerator lifecycle and current .NET BitArray mutation semantics.
+`feature/audit` remains the audit-handoff snapshot.
+
+### Completed first remediation ticket
+
+Ticket #1767 makes `Current` throw `InvalidOperationException` before
+the first successful `MoveNext` and after enumeration ends across List, Queue,
+Stack, SortedList, LinkedList, ObjectModel Collection/ReadOnlyCollection, and
+ConcurrentBag/Queue/Stack snapshot enumerators. BitArray enforces the same
+lifecycle and rejects enumeration after collection mutation. Its 13/13
+permanent regressions, 1,435/1,435 Collections.Core target, direct ASan/UBSan
+probe, warning-free configured build, 41-module/90-edge boundary check,
+database/catalogue/diff controls, and network-permitted 12,694/12,694 full
+gate pass. Doxygen is below its ceiling at 1,941/1,942. LeakSanitizer alone
+could not initialize under the sandbox's
+`ptrace` policy; the probe is clean with ASan and UBSan active. The scope excludes
+LinkedListNode ownership (SR-AUD-357) and the raw ICollection CopyTo redesign
+(SR-AUD-358).
 
 ### Opening a remediation ticket
 
@@ -1207,11 +1233,9 @@ one reproduction changes shape.
 1. **Plan the collection safety contracts before patching their symptoms.**
    These are the immediate high-priority handoff items from the final shard:
 
-   - A proposed `REMED-COLL-ENUM` ticket should cover SR-AUD-356 and
-     SR-AUD-364 / CCF-018: `IEnumerator<T>::Current` must reject both
-     pre-first and post-end states before any native container access.  It
-     needs one lifecycle policy and permanent regressions across the affected
-     storage categories, not a List-only bounds check.
+   - Completed `REMED-COLL-ENUM` ticket #1767 covers SR-AUD-356 and
+     SR-AUD-364 / CCF-018 with one lifecycle policy and permanent regressions
+     across all affected storage categories.
    - A proposed `REMED-COLL-LIFETIME` ticket should cover SR-AUD-357's
      `LinkedListNode` owner/iterator lifetime.  CCF-019 also contains JsonNode
      and XML LINQ instances, but they should remain separate repair tickets
@@ -1316,10 +1340,9 @@ HTTP, socket, and ping tests require permission for local network operations.
   classification work.
 - Do not add cross-platform CI, dependencies, or broad public-header refactors
   without direction.
-- Keep the audit evidence intact.  Before the first production remediation,
-  agree with the user whether it continues on `feature/audit` or starts on a
-  dedicated remediation branch; do not merge to `develop`/`master` or create
-  tags without explicit approval.
+- Keep the audit evidence intact. Continue later repairs on dedicated bounded
+  branches; do not merge to `develop`/`master` or create tags without explicit
+  approval.
 
 ## Cold resume
 
@@ -1330,12 +1353,10 @@ HTTP, socket, and ping tests require permission for local network operations.
 2. Inspect `git status --short --branch`, `audit/AUDIT_PROGRESS.md`, and the
    selected finding's mirrored reports and current implementation/tests.  Do
    not search for a new audit shard: the 1,748-file audit is complete.
-3. With the user, select exactly one proposed remediation ticket from the
-   roadmap, decide the remediation branch, state its public compatibility
-   contract and validation matrix, and record that scoped plan before editing
-   production code.
-4. Implement only that ticket, retaining its audit probe as a permanent
-   regression or replacing it with an equivalent durable test.  Run its
-   focused and component validation as it changes, then record the exact final
-   build, sanitizer, validation-script, and network-gate status in both
-   `plan.md` and this handoff.
+3. Ticket #1767 is complete; preserve its permanent regression and retained
+   audit evidence. No remediation ticket is active.
+4. Before further production changes, choose exactly one bounded design-first
+   collection ticket. The next candidates are SR-AUD-357 / CCF-019
+   (`LinkedListNode` lifetime) and SR-AUD-358 / CCF-020 (a typed or
+   length-aware `ICollection::CopyTo` boundary). Record its public
+   compatibility decision and validation matrix before implementation.

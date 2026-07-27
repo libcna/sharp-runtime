@@ -9,11 +9,17 @@
 
 ## Assessment
 
-The local `IEnumerator<T>::Current()` implementation was traced as part of SR-AUD-356.  It indexes its backing storage without validating the before-start or exhausted cursor, matching the sanitizer-confirmed List pattern. The public declaration, its immediate implementation path, and focused call sites were reviewed.  No separate evidence-backed finding is assigned to this file beyond the related findings recorded in their owning reports.
+At audit time, the local `IEnumerator<T>::Current()` implementation was traced as part of SR-AUD-356.  It indexed its backing storage without validating the before-start or exhausted cursor, matching the sanitizer-confirmed List pattern. The public declaration, its immediate implementation path, and focused call sites were reviewed.  No separate evidence-backed finding is assigned to this file beyond the related findings recorded in their owning reports.
 
 ## Missing assertions and diagnostics
 
 - Keep invalid-input, lifecycle, ownership, and native-boundary diagnostics covered by focused tests as this surface evolves.
+
+## Remediation
+
+Ticket #1767 now applies the shared lifecycle guard before List storage access.
+The permanent family regression and direct ASan/UBSan replacement probe pass;
+SR-AUD-356 is marked `remediated` with its original evidence retained.
 
 ## Final assessment
 

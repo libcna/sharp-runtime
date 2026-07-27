@@ -7,7 +7,23 @@
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
 - Completed per-file reports: 1,748 (100.0% of eligible scope; 1,699/1,699 runtime-module files).
-- Confirmed findings: 364 (ninety-one high, two hundred sixty-two medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
+- Findings confirmed at audit closure: 364 (ninety-one high, two hundred
+  sixty-two medium, eleven low). The post-audit index now has 362 open
+  `confirmed` findings and 2 `remediated` findings. Open risks: 2
+  documented-adaptation questions.
+
+## Post-audit remediation checkpoint
+
+Ticket #1767 remediated SR-AUD-356 and SR-AUD-364 / CCF-018 on 2026-07-27.
+Permanent lifecycle/mutation regressions pass 13/13, Collections.Core passes
+1,435/1,435, and the direct ASan/UBSan replacement probe reports zero
+failures. The required network-permitted `scripts/local_ci_check.sh build`
+closure gate now passes 12,694/12,694 tests across 37 executables with zero
+warnings/errors, including all formerly sandbox-blocked HTTP/socket cases.
+Module boundaries remain 41/90; catalogue, database, and diff checks pass.
+Doxygen remains below its ceiling at 1,941/1,942. LeakSanitizer initialization
+remains environment-limited by the sandbox's `ptrace` policy, while the same
+probe is clean with ASan and UBSan active.
 
 ## Initial validation evidence
 
@@ -19,8 +35,9 @@ warning-free build. It could not complete in this sandbox: all six local-server
 reproduced the identical zero-millisecond failure. `NEXT.md` already documents
 that HTTP, socket, and ping tests need local-network permission, so this is
 recorded as an environment-limited validation result, not a source regression
-or a reason to weaken/skip the tests. A network-permitted environment must run
-the full gate before a remediation batch can be closed.
+or a reason to weaken/skip the tests. A network-permitted environment was
+required before a remediation batch could close and ticket #1767 subsequently
+passed that gate, as recorded above.
 
 ## Immediate sequence
 

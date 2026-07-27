@@ -42,20 +42,33 @@ class Stack {
         const Stack<T>* stack_;
         intcs version_;
         intcs index_;
+        System::Collections::detail::EnumeratorState state_;
     public:
         explicit Enumerator(const Stack<T>* stack)
             : stack_(stack), version_(stack->version_), index_(static_cast<intcs>(stack->stack_.size())) {}
         bool MoveNext() override {
-            if (version_ != stack_->version_)
-                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
-            return --index_ >= 0;
+            System::Collections::detail::requireUnmodified(version_ == stack_->version_);
+            if (state_.isAfterLast()) return false;
+
+            if (index_ > 0) {
+                --index_;
+                state_.setCurrent();
+                return true;
+            }
+
+            index_ = -1;
+            state_.setAfterLast();
+            return false;
         }
         void Reset() override {
-            if (version_ != stack_->version_)
-                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            System::Collections::detail::requireUnmodified(version_ == stack_->version_);
             index_ = static_cast<intcs>(stack_->stack_.size());
+            state_.Reset();
         }
-        [[nodiscard]] const T& Current() const override { return stack_->stack_[static_cast<size_t>(index_)]; }
+        [[nodiscard]] const T& Current() const override {
+            state_.requireCurrent();
+            return stack_->stack_[static_cast<size_t>(index_)];
+        }
     };
 
 public:

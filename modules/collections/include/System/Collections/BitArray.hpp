@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <cstdint>
 #include <vector>
 #include <stdexcept>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -21,6 +22,7 @@ namespace System::Collections {
  */
 class BitArray {
     std::vector<bool> bits_;
+    std::uint32_t version_ = 0;
 
     void requireSameLength(const BitArray& other) const {
         if (bits_.size() != other.bits_.size())
@@ -113,6 +115,7 @@ public:
     void setLengthProperty(intcs length) {
         if (length < 0) throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
         bits_.resize(static_cast<size_t>(length), false);
+        ++version_;
     }
 
     /**
@@ -161,14 +164,21 @@ public:
      * C++ counterpart of .NET BitArray.Set(int, bool).
      * @throws System::ArgumentOutOfRangeException if @p index is negative or >= Length.
      */
-    void Set(intcs index, bool value)         { checkIndex(index); bits_[static_cast<size_t>(index)] = value; }
+    void Set(intcs index, bool value) {
+        checkIndex(index);
+        bits_[static_cast<size_t>(index)] = value;
+        ++version_;
+    }
 
     /**
      * @brief Sets all bits in the BitArray to the specified value.
      *
      * C++ counterpart of .NET BitArray.SetAll(bool).
      */
-    void SetAll(bool value)                   { std::fill(bits_.begin(), bits_.end(), value); }
+    void SetAll(bool value) {
+        std::fill(bits_.begin(), bits_.end(), value);
+        ++version_;
+    }
 
     /**
      * @brief Returns the value of the bit at index @p i.
@@ -191,6 +201,7 @@ public:
     BitArray& And(const BitArray& other) {
         requireSameLength(other);
         for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] && other.bits_[i];
+        ++version_;
         return *this;
     }
 
@@ -203,6 +214,7 @@ public:
     BitArray& Or(const BitArray& other) {
         requireSameLength(other);
         for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] || other.bits_[i];
+        ++version_;
         return *this;
     }
 
@@ -215,6 +227,7 @@ public:
     BitArray& Xor(const BitArray& other) {
         requireSameLength(other);
         for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] != other.bits_[i];
+        ++version_;
         return *this;
     }
 
@@ -225,6 +238,7 @@ public:
      */
     BitArray& Not() {
         for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = !bits_[i];
+        ++version_;
         return *this;
     }
 
@@ -240,6 +254,7 @@ public:
         intcs len = static_cast<intcs>(bits_.size());
         for (intcs i = len - 1; i >= 0; --i)
             bits_[static_cast<size_t>(i)] = (i >= count) ? static_cast<bool>(bits_[static_cast<size_t>(i - count)]) : false;
+        ++version_;
         return *this;
     }
 
@@ -255,6 +270,7 @@ public:
         intcs len = static_cast<intcs>(bits_.size());
         for (intcs i = 0; i < len; ++i)
             bits_[static_cast<size_t>(i)] = (i + count < len) ? static_cast<bool>(bits_[static_cast<size_t>(i + count)]) : false;
+        ++version_;
         return *this;
     }
 
@@ -334,28 +350,49 @@ public:
      */
     class Enumerator : public IEnumerator {
         const BitArray* arr_;
-        int             index_;
-        mutable bool    current_;
+        std::uint32_t version_;
+        intcs index_ = -1;
+        mutable bool current_ = false;
+        detail::EnumeratorState state_;
     public:
-        explicit Enumerator(const BitArray* arr) : arr_(arr), index_(-1), current_(false) {}
+        /** @brief Captures the source array and its current mutation version. */
+        explicit Enumerator(const BitArray* arr) : arr_(arr), version_(arr->version_) {}
         bool MoveNext() override {
-            int len = arr_->getLengthProperty();
-            if (index_ + 1 < len) {
-                ++index_;
+            detail::requireUnmodified(version_ == arr_->version_);
+            if (state_.isAfterLast()) return false;
+
+            const intcs len = arr_->getLengthProperty();
+            const intcs next = index_ + 1;
+            if (next < len) {
+                index_ = next;
                 current_ = arr_->Get(index_);
+                state_.setCurrent();
                 return true;
             }
+
+            index_ = len;
+            state_.setAfterLast();
             return false;
         }
-        void Reset() override { index_ = -1; current_ = false; }
+        void Reset() override {
+            detail::requireUnmodified(version_ == arr_->version_);
+            index_ = -1;
+            current_ = false;
+            state_.Reset();
+        }
         /** @brief Returns pointer to an internal bool holding the current bit value. */
-        void* getCurrentProperty() const override { return &current_; }
+        void* getCurrentProperty() const override {
+            state_.requireCurrent();
+            return &current_;
+        }
     };
 
     /**
      * @brief Returns a heap-allocated Enumerator; caller takes ownership.
      *
-     * C++ counterpart of .NET BitArray.GetEnumerator().
+     * C++ counterpart of .NET BitArray.GetEnumerator(). The enumerator rejects
+     * Current before start/after end and fails fast from MoveNext/Reset after
+     * this BitArray is mutated.
      */
     [[nodiscard]] IEnumerator* GetEnumerator() { return new Enumerator(this); }
 

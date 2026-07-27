@@ -25,6 +25,10 @@ public:
      *
      * C++ counterpart of .NET IEnumerator<T>.Current.
      * @return A const reference to the current element.
+     * @throws System::InvalidOperationException if iteration has not started
+     *         or has already finished. Unlike managed IEnumerator<T>, this
+     *         C++ adaptation cannot safely return a default value through a
+     *         reference when no current element exists.
      */
     [[nodiscard]] virtual const T& Current() const = 0;
 

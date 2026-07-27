@@ -42,19 +42,33 @@ class Queue {
         const Queue<T>* queue_;
         intcs version_;
         intcs index_ = -1;
+        System::Collections::detail::EnumeratorState state_;
     public:
         explicit Enumerator(const Queue<T>* queue) : queue_(queue), version_(queue->version_) {}
         bool MoveNext() override {
-            if (version_ != queue_->version_)
-                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
-            return ++index_ < static_cast<intcs>(queue_->queue_.size());
+            System::Collections::detail::requireUnmodified(version_ == queue_->version_);
+            if (state_.isAfterLast()) return false;
+
+            const intcs next = index_ + 1;
+            if (next < static_cast<intcs>(queue_->queue_.size())) {
+                index_ = next;
+                state_.setCurrent();
+                return true;
+            }
+
+            index_ = static_cast<intcs>(queue_->queue_.size());
+            state_.setAfterLast();
+            return false;
         }
         void Reset() override {
-            if (version_ != queue_->version_)
-                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            System::Collections::detail::requireUnmodified(version_ == queue_->version_);
             index_ = -1;
+            state_.Reset();
         }
-        [[nodiscard]] const T& Current() const override { return queue_->queue_[static_cast<size_t>(index_)]; }
+        [[nodiscard]] const T& Current() const override {
+            state_.requireCurrent();
+            return queue_->queue_[static_cast<size_t>(index_)];
+        }
     };
 
 public:

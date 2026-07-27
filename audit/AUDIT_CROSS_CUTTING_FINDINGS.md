@@ -389,6 +389,14 @@ independently returns a stale cache and lacks mutation/version detection. A
 repair needs one lifecycle policy and tests across each storage category, not
 only a List bounds check. See SR-AUD-356, SR-AUD-364, and:
 
+**Remediation status (ticket #1767, 2026-07-27): REMEDIATED.** A shared
+`EnumeratorState` now rejects before-start and after-end `Current` access
+before native storage is touched across all ten implementations. `BitArray`
+also records a version and rejects `MoveNext`/`Reset` after each mutating API.
+The permanent 13-test regression suite, full 1,435-test Collections.Core
+target, direct ASan/UBSan probe, and network-permitted 12,694-test repository
+gate all pass. The original evidence remains above and in the per-file reports.
+
 - `modules/collections/include/System/Collections/Generic/IEnumerator.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/List.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/Queue.hpp.audit.md`;

@@ -44,19 +44,31 @@ class SortedList {
         const SortedList<TKey, TValue>* list_;
         intcs version_;
         intcs index_ = -1;
+        System::Collections::detail::EnumeratorState state_;
     public:
         explicit Enumerator(const SortedList<TKey, TValue>* list) : list_(list), version_(list->version_) {}
         bool MoveNext() override {
-            if (version_ != list_->version_)
-                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
-            return ++index_ < static_cast<intcs>(list_->map_.size());
+            System::Collections::detail::requireUnmodified(version_ == list_->version_);
+            if (state_.isAfterLast()) return false;
+
+            const intcs next = index_ + 1;
+            if (next < static_cast<intcs>(list_->map_.size())) {
+                index_ = next;
+                state_.setCurrent();
+                return true;
+            }
+
+            index_ = static_cast<intcs>(list_->map_.size());
+            state_.setAfterLast();
+            return false;
         }
         void Reset() override {
-            if (version_ != list_->version_)
-                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            System::Collections::detail::requireUnmodified(version_ == list_->version_);
             index_ = -1;
+            state_.Reset();
         }
         [[nodiscard]] const TValue& Current() const override {
+            state_.requireCurrent();
             auto it = list_->map_.begin();
             std::advance(it, index_);
             return it->second;

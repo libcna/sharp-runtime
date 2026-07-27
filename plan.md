@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-27 — 41 physical components, 90 direct production
-dependency edges, a clean native build, 12,681 passing tests across 37
+dependency edges, a clean native build, 12,694 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
 is recorded as audit finding `SR-AUD-001`.*
@@ -34,7 +34,7 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 12,681 passing across 36 component binaries plus one integration
+- Tests: 12,694 passing across 36 component binaries plus one integration
   binary.
 - Component graph: 41 physical modules and 90 direct production edges.
 - Boundary validator: no cycles, duplicate public include paths, orphan
@@ -48,18 +48,18 @@ was never created. Neither file should be linked as current documentation.
   compatibility build, and a pinned Ubuntu 24.04 Doxygen-warning-baseline job
   in `.github/workflows/components.yml`. The missing direct
   `Collections.Blocking` consumer is `SR-AUD-001`.
-- Doxygen 1.9.8: 1,942 warnings. `scripts/check_doxygen_warnings.sh` enforces
-  that ceiling; lower counts are accepted and a Doxygen upgrade requires a
-  deliberate re-baseline.
+- Doxygen 1.9.8: 1,941 current warnings against a 1,942-warning ceiling.
+  `scripts/check_doxygen_warnings.sh` enforces that ceiling; lower counts are
+  accepted and a Doxygen upgrade requires a deliberate re-baseline.
 
 ### Local planning database
 
-The 2026-07-25 local snapshot contains:
+The 2026-07-27 local snapshot contains:
 
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,766 rows: 1,765 `done` and P1 audit ticket #1766 `doing`; no `todo`, `blocked`, or `needs_user` rows |
+| `ticket` | 1,767 rows, all `done`, including audit ticket #1766 and first post-audit remediation ticket #1767; no `todo`, `doing`, `blocked`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -167,6 +167,12 @@ assertion without an explicit architecture decision.
 - Established the Doxygen warning baseline under ticket #1765: Doxygen 1.9.8
   emits 1,942 warnings. The dedicated check permits incremental reductions,
   rejects regressions, and avoids a mass comment-only rewrite.
+- Remediated SR-AUD-356 and SR-AUD-364 / CCF-018 under ticket #1767. A shared
+  lifecycle state protects `Current` across ten collection enumerators;
+  BitArray additionally detects every mutation. Thirteen permanent regressions,
+  the direct ASan/UBSan probe, 1,435 Collections.Core tests, and the
+  network-permitted 12,694-test repository gate pass; Doxygen remains below
+  its ceiling at 1,941/1,942.
 - Added consumer-driven coverage across core, collections, IO, networking,
   threading/tasks, text/JSON, XML, numerics, globalization, and cryptographic
   hashing/random APIs.
@@ -227,7 +233,7 @@ The first consumer-driven ports after modularization added:
 - XML schema exception types.
 
 The verified test baseline grew from 12,494 at the modularization checkpoint
-to 12,681.
+to 12,694.
 
 ## Completed repository audit
 
@@ -239,7 +245,8 @@ that directory. The audit was deliberately not a repair stream: confirmed
 defects, missing assertions, weak diagnostics, and parity gaps become
 evidence-backed follow-up tickets only after the manifest is reconciled.
 The 2026-07-27 audit closure has all 1,748 of 1,748 mirrored reports complete
-and three hundred sixty-four confirmed findings; `audit/AUDIT_FINAL_REPORT.md`
+and three hundred sixty-four findings confirmed at closure;
+`audit/AUDIT_FINAL_REPORT.md`
 and `audit/AUDIT_PROGRESS.md` are the authoritative handoff. The final
 142-file Collections shard passed 1,422/1,422 and adds SR-AUD-356 through
 SR-AUD-364 for unsafe enumerator lifecycle, LinkedListNode lifetime, raw CopyTo
@@ -252,9 +259,13 @@ approved, bounded tickets.
 
 ## Candidate roadmap
 
-The audit is complete and no production remediation is active. Create or
-reopen a repair `ticket` row with acceptance criteria and a validation command
-before changing code.
+The audit is complete and ticket #1767 has remediated SR-AUD-356 and
+SR-AUD-364 / CCF-018. The findings index therefore retains 364 original
+findings while recording 362 as open `confirmed` and two as `remediated`.
+No repair ticket is active. The next bounded decision is the design-first
+collection safety work: SR-AUD-357 (`LinkedListNode` lifetime / CCF-019) or
+SR-AUD-358 (typed or length-aware `ICollection::CopyTo` / CCF-020). Open only
+one after its compatibility boundary is explicit.
 
 ### P2 — Consumer-driven API breadth
 

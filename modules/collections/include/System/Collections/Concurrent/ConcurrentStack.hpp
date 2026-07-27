@@ -33,11 +33,31 @@ class ConcurrentStack : public IProducerConsumerCollection<T> {
     class SnapshotEnumerator : public System::Collections::Generic::IEnumerator<T> {
         std::vector<T> items_; // top-to-bottom order
         intcs index_ = -1;
+        System::Collections::detail::EnumeratorState state_;
     public:
         explicit SnapshotEnumerator(std::vector<T> items) : items_(std::move(items)) {}
-        bool MoveNext() override { return ++index_ < static_cast<intcs>(items_.size()); }
-        void Reset() override { index_ = -1; }
-        [[nodiscard]] const T& Current() const override { return items_[static_cast<size_t>(index_)]; }
+        bool MoveNext() override {
+            if (state_.isAfterLast()) return false;
+
+            const intcs next = index_ + 1;
+            if (next < static_cast<intcs>(items_.size())) {
+                index_ = next;
+                state_.setCurrent();
+                return true;
+            }
+
+            index_ = static_cast<intcs>(items_.size());
+            state_.setAfterLast();
+            return false;
+        }
+        void Reset() override {
+            index_ = -1;
+            state_.Reset();
+        }
+        [[nodiscard]] const T& Current() const override {
+            state_.requireCurrent();
+            return items_[static_cast<size_t>(index_)];
+        }
     };
 
 public:

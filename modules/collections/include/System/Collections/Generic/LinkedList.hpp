@@ -138,23 +138,36 @@ class LinkedList {
     class Enumerator : public IEnumerator<T> {
         const LinkedList<T>* list_;
         intcs version_;
-        typename std::list<T>::iterator cur_, end_;
+        typename std::list<T>::iterator begin_, cur_, end_;
         bool started_ = false;
+        System::Collections::detail::EnumeratorState state_;
     public:
         Enumerator(const LinkedList<T>* list, typename std::list<T>::iterator b, typename std::list<T>::iterator e)
-            : list_(list), version_(list->version_), cur_(b), end_(e) {}
+            : list_(list), version_(list->version_), begin_(b), cur_(b), end_(e) {}
         bool MoveNext() override {
-            if (version_ != list_->version_)
-                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
-            if (!started_) { started_ = true; } else { ++cur_; }
-            return cur_ != end_;
+            System::Collections::detail::requireUnmodified(version_ == list_->version_);
+            if (state_.isAfterLast()) return false;
+
+            if (!started_) started_ = true;
+            else if (cur_ != end_) ++cur_;
+
+            if (cur_ != end_) {
+                state_.setCurrent();
+                return true;
+            }
+            state_.setAfterLast();
+            return false;
         }
         void Reset() override {
-            if (version_ != list_->version_)
-                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            System::Collections::detail::requireUnmodified(version_ == list_->version_);
+            cur_ = begin_;
             started_ = false;
+            state_.Reset();
         }
-        const T& Current() const override { return *cur_; }
+        const T& Current() const override {
+            state_.requireCurrent();
+            return *cur_;
+        }
     };
 
     /** Validates that @p node is non-null and belongs to this list. C++ counterpart of .NET LinkedList<T>.ValidateNode. */
