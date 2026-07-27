@@ -44,27 +44,47 @@ namespace detail {
  * rather than `index + count > length` so that a large @p index cannot make the
  * arithmetic overflow and silently pass, matching .NET's own Array.Copy guard.
  *
+ * A destination with a null pointer and a zero length is a valid empty
+ * destination -- `ObjectSpan` has no distinct managed-null-array state, so
+ * `ObjectSpan{nullptr, 0}` and a default-constructed empty `std::vector<std::any>`
+ * (whose `data()` is typically null) both describe "no storage, no elements",
+ * not ".NET null". Only a null pointer paired with a *positive* length is
+ * rejected as malformed: no valid destination can claim elements it has no
+ * storage for. Ticket #1774 corrects the stricter rule ticket #1771 shipped,
+ * which rejected every null-data destination outright (see
+ * docs/ICollectionCopyToDesign.md section 22).
+ *
+ * Checked in this exact order, so the diagnosis is deterministic when more than
+ * one condition holds at once:
+ * 1. negative index;
+ * 2. index past the destination end;
+ * 3. null data paired with a positive length;
+ * 4. insufficient remaining capacity.
+ *
  * @param data   First element of the destination storage.
  * @param length Number of elements the destination can hold.
  * @param index  Zero-based destination index at which copying would begin.
  * @param count  Number of elements that would be written.
- * @throws System::ArgumentNullException       if @p data is null. A destination
- *         with no storage at all is rejected even when @p count is zero, so a
- *         null destination is always a diagnosed error rather than a silent
- *         no-op (note that a default-constructed empty std::vector may itself
- *         have a null data() and is therefore rejected).
  * @throws System::ArgumentOutOfRangeException if @p index is negative.
  * @throws System::ArgumentException           if @p index is past the end of the
  *         destination, or the destination cannot hold @p count elements from
  *         @p index onwards.
+ * @throws System::ArgumentNullException       if @p data is null while
+ *         @p length is positive -- a destination that claims elements it has no
+ *         storage for. A null @p data with a @p length of zero is a valid empty
+ *         destination and is never rejected on that basis.
  */
 inline void requireValidCopyDestination(const void* data, intcs length,
                                         intcs index, intcs count) {
-    if (data == nullptr)
-        throw System::ArgumentNullException("destination");
     if (index < 0)
         throw System::ArgumentOutOfRangeException("index", "Non-negative number required.");
-    if (index > length || length - index < count)
+    if (index > length)
+        throw System::ArgumentException(
+            "Destination array is not long enough to copy all the items in the "
+            "collection. Check array index and length.", "destination");
+    if (data == nullptr && length > 0)
+        throw System::ArgumentNullException("destination");
+    if (length - index < count)
         throw System::ArgumentException(
             "Destination array is not long enough to copy all the items in the "
             "collection. Check array index and length.", "destination");
@@ -126,12 +146,19 @@ public:
      * destination is never resized, nothing is constructed in place, and no
      * element is written if validation fails.
      *
-     * @param destination Length-aware view over constructed std::any elements.
+     * @param destination Length-aware view over constructed std::any elements. A
+     *        zero-length destination (including one with a null pointer, such as
+     *        the default-constructed `ObjectSpan()`) is valid when
+     *        getCountProperty() is also zero.
      * @param index       Zero-based index at which copying begins.
-     * @throws System::ArgumentNullException       if @p destination has no storage.
      * @throws System::ArgumentOutOfRangeException if @p index is negative.
-     * @throws System::ArgumentException           if @p destination cannot hold
-     *         getCountProperty() elements starting at @p index.
+     * @throws System::ArgumentException           if @p index is past the end of
+     *         @p destination, or @p destination cannot hold getCountProperty()
+     *         elements starting at @p index -- including a non-empty collection
+     *         copied into a zero-length destination.
+     * @throws System::ArgumentNullException       if @p destination has a null
+     *         pointer and a positive length: a destination that claims elements
+     *         it has no storage for.
      */
     void CopyTo(ObjectSpan destination, intcs index) {
         detail::requireValidCopyDestination(destination.getPointer(),

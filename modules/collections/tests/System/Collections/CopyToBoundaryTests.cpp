@@ -11,6 +11,13 @@
 // choosing, so the suite is parameterised over *every* implementation in the
 // repository rather than testing one collection. Every case that used to be
 // undefined behaviour is now an assertion about a specific exception type.
+//
+// Ticket #1774 corrects a follow-on defect in #1771's validation rule: a
+// zero-length destination (including a null-pointer ObjectSpan and a
+// default-constructed empty std::vector<std::any>) is a valid empty
+// destination and must not be rejected as null. Only a null pointer paired
+// with a positive length is malformed. See docs/ICollectionCopyToDesign.md
+// section 22 for the corrected rule and exact validation order.
 #include <gtest/gtest.h>
 
 #include <any>
@@ -84,6 +91,10 @@ class ProbeCollection : public ICollection {
     std::vector<int> data_;
 
 public:
+    // Counts copyToCore invocations so a test can prove that a validation
+    // failure never dispatches to the implementation hook (ticket #1774).
+    mutable int copyToCoreCallCount = 0;
+
     explicit ProbeCollection(std::vector<int> d) : data_(std::move(d)) {}
 
     [[nodiscard]] intcs getCountProperty() const override {
@@ -94,6 +105,7 @@ public:
 
 protected:
     void copyToCore(ObjectSpan destination, intcs index) override {
+        ++copyToCoreCallCount;
         for (std::size_t i = 0; i < data_.size(); ++i)
             destination[index + static_cast<intcs>(i)] = std::any(data_[i]);
     }
@@ -208,17 +220,81 @@ INSTANTIATE_TEST_SUITE_P(AllNonGenericCollections, CopyToBoundaryTest,
 // Destination validation, uniform across every implementation
 // ---------------------------------------------------------------------------
 
-TEST_P(CopyToBoundaryTest, NullDestinationThrowsArgumentNullException) {
+// Ticket #1774 correction: ObjectSpan() (equivalently ObjectSpan{nullptr, 0})
+// has no storage AND no elements, so it is a valid empty destination -- it is
+// no longer conflated with a genuinely null destination. Only a *non-empty*
+// collection copied into it fails, and it fails on capacity, not nullness.
+TEST_P(CopyToBoundaryTest, NonEmptyCollectionIntoNullObjectSpanThrowsArgumentException) {
     withCollection(GetParam(), 3, [](ICollection& c) {
-        EXPECT_EQ(classify([&] { c.CopyTo(ObjectSpan(), 0); }), Thrown::Null);
+        EXPECT_EQ(classify([&] { c.CopyTo(ObjectSpan(), 0); }), Thrown::Argument);
     });
 }
 
-TEST_P(CopyToBoundaryTest, NullDestinationThrowsEvenWhenCollectionIsEmpty) {
+TEST_P(CopyToBoundaryTest, EmptyCollectionIntoNullObjectSpanSucceeds) {
     withCollection(GetParam(), 0, [](ICollection& c) {
         ASSERT_EQ(c.getCountProperty(), 0);
-        EXPECT_EQ(classify([&] { c.CopyTo(ObjectSpan(), 0); }), Thrown::Null);
+        EXPECT_NO_THROW(c.CopyTo(ObjectSpan(), 0));
     });
+}
+
+TEST_P(CopyToBoundaryTest, EmptyCollectionIntoDefaultConstructedEmptyVectorSucceeds) {
+    withCollection(GetParam(), 0, [](ICollection& c) {
+        std::vector<std::any> destination;  // default-constructed; data() is typically null
+        EXPECT_NO_THROW(c.CopyTo(destination, 0));
+        EXPECT_TRUE(destination.empty());
+    });
+}
+
+TEST_P(CopyToBoundaryTest, EmptyCopyAgreesAcrossSpanAndVectorOverloads) {
+    withCollection(GetParam(), 0, [](ICollection& c) {
+        std::vector<std::any> viaVector;
+        EXPECT_NO_THROW(c.CopyTo(viaVector, 0));
+        EXPECT_NO_THROW(c.CopyTo(ObjectSpan(), 0));
+        EXPECT_NO_THROW(c.CopyTo(ObjectSpan(viaVector), 0));
+    });
+}
+
+// A null pointer paired with a *positive* length is still malformed -- it
+// claims elements it has no storage for -- and is rejected regardless of
+// whether the source collection is empty or would otherwise fit.
+TEST_P(CopyToBoundaryTest, MalformedNullDataWithPositiveLengthThrowsArgumentNullException) {
+    withCollection(GetParam(), 0, [](ICollection& c) {
+        EXPECT_EQ(classify([&] { c.CopyTo(ObjectSpan(nullptr, 5), 0); }), Thrown::Null);
+    });
+    withCollection(GetParam(), 3, [](ICollection& c) {
+        EXPECT_EQ(classify([&] { c.CopyTo(ObjectSpan(nullptr, 5), 0); }), Thrown::Null);
+    });
+}
+
+TEST_P(CopyToBoundaryTest, NegativeIndexWithZeroLengthDestinationThrowsArgumentOutOfRangeException) {
+    withCollection(GetParam(), 0, [](ICollection& c) {
+        EXPECT_EQ(classify([&] { c.CopyTo(ObjectSpan(), -1); }), Thrown::OutOfRange);
+    });
+    withCollection(GetParam(), 3, [](ICollection& c) {
+        EXPECT_EQ(classify([&] { c.CopyTo(ObjectSpan(), -1); }), Thrown::OutOfRange);
+    });
+}
+
+TEST_P(CopyToBoundaryTest, IndexPastZeroLengthDestinationThrowsArgumentException) {
+    withCollection(GetParam(), 0, [](ICollection& c) {
+        EXPECT_EQ(classify([&] { c.CopyTo(ObjectSpan(), 1); }), Thrown::Argument);
+    });
+}
+
+// The zero-length-is-valid rule does not depend on whether the destination
+// happens to be backed by real storage -- {nullptr, 0} and a zero-length span
+// over a live buffer must be indistinguishable to the validator.
+TEST_P(CopyToBoundaryTest, ZeroLengthDestinationBehavesTheSameRegardlessOfPointerNullness) {
+    std::any storage[1];
+    withCollection(GetParam(), 0, [&](ICollection& c) {
+        EXPECT_NO_THROW(c.CopyTo(ObjectSpan(storage, 0), 0));
+        EXPECT_NO_THROW(c.CopyTo(ObjectSpan(), 0));
+    });
+    withCollection(GetParam(), 1, [&](ICollection& c) {
+        EXPECT_EQ(classify([&] { c.CopyTo(ObjectSpan(storage, 0), 0); }), Thrown::Argument);
+        EXPECT_EQ(classify([&] { c.CopyTo(ObjectSpan(), 0); }), Thrown::Argument);
+    });
+    EXPECT_FALSE(storage[0].has_value());
 }
 
 TEST_P(CopyToBoundaryTest, NegativeIndexThrowsArgumentOutOfRangeException) {
@@ -514,6 +590,31 @@ TEST(CopyToBoundaryInterfaces, BaseValidationRunsBeforeDerivedCopyToCore) {
         EXPECT_EQ(std::any_cast<std::string>(slot), "untouched");
 }
 
+// Direct proof -- via ProbeCollection's call counter, not just an absence of
+// side effects -- that every validation failure class short-circuits before
+// copyToCore, including the ticket #1774 additions (malformed null-with-length
+// and non-empty-into-zero-length). A successful copy is checked last to prove
+// the counter does increment when validation actually passes.
+TEST(CopyToBoundaryInterfaces, ValidationFailureNeverReachesCopyToCore) {
+    ProbeCollection empty({});
+    EXPECT_EQ(classify([&] { empty.CopyTo(ObjectSpan(nullptr, 5), 0); }), Thrown::Null);
+    EXPECT_EQ(empty.copyToCoreCallCount, 0);
+    EXPECT_EQ(classify([&] { empty.CopyTo(ObjectSpan(), -1); }), Thrown::OutOfRange);
+    EXPECT_EQ(empty.copyToCoreCallCount, 0);
+    EXPECT_EQ(classify([&] { empty.CopyTo(ObjectSpan(), 1); }), Thrown::Argument);
+    EXPECT_EQ(empty.copyToCoreCallCount, 0);
+
+    ProbeCollection nonEmpty({1, 2, 3});
+    EXPECT_EQ(classify([&] { nonEmpty.CopyTo(ObjectSpan(), 0); }), Thrown::Argument);
+    EXPECT_EQ(nonEmpty.copyToCoreCallCount, 0);
+    EXPECT_EQ(classify([&] { nonEmpty.CopyTo(ObjectSpan(nullptr, 5), 0); }), Thrown::Null);
+    EXPECT_EQ(nonEmpty.copyToCoreCallCount, 0);
+
+    std::vector<std::any> destination(3);
+    EXPECT_NO_THROW(nonEmpty.CopyTo(destination, 0));
+    EXPECT_EQ(nonEmpty.copyToCoreCallCount, 1);
+}
+
 // ---------------------------------------------------------------------------
 // Typed concrete overloads
 // ---------------------------------------------------------------------------
@@ -529,8 +630,10 @@ TEST(CopyToBoundaryTypedOverloads, TypedOverloadsRejectTheSameInvalidInputs) {
     EXPECT_EQ(classify([&] { queue.CopyTo(destination, 3); }), Thrown::Argument);
     EXPECT_EQ(classify([&] { queue.CopyTo(destination, SharpRuntime::INTCS_MAX); }),
               Thrown::Argument);
+    // Ticket #1774: a zero-length destination is capacity-insufficient for a
+    // non-empty source, not "null" -- both fail, but with different exceptions.
     std::vector<void*> empty;
-    EXPECT_EQ(classify([&] { queue.CopyTo(empty, 0); }), Thrown::Null);
+    EXPECT_EQ(classify([&] { queue.CopyTo(empty, 0); }), Thrown::Argument);
     for (void* slot : destination) EXPECT_EQ(slot, nullptr);
 
     Hashtable table;
@@ -543,13 +646,24 @@ TEST(CopyToBoundaryTypedOverloads, TypedOverloadsRejectTheSameInvalidInputs) {
     ListDictionaryInternal dictionary;
     dictionary.Add(&gSlots[0], &gSlots[1]);
     std::vector<DictionaryEntry> tooSmall(0);
-    EXPECT_EQ(classify([&] { dictionary.CopyTo(tooSmall, 0); }), Thrown::Null);
+    EXPECT_EQ(classify([&] { dictionary.CopyTo(tooSmall, 0); }), Thrown::Argument);
 
     Stack stack;
     stack.Push(&gSlots[0]);
     std::vector<void*> stackDestination(1);
     EXPECT_EQ(classify([&] { stack.CopyTo(stackDestination, 1); }), Thrown::Argument);
     EXPECT_EQ(stackDestination[0], nullptr);
+
+    // An empty source into an empty typed destination succeeds -- the same
+    // zero-length-is-valid rule applies to the typed overloads, since they
+    // share detail::requireValidCopyDestination with the interface-level ones.
+    Queue emptyQueue;
+    std::vector<void*> emptyQueueDestination;
+    EXPECT_NO_THROW(emptyQueue.CopyTo(emptyQueueDestination, 0));
+
+    Hashtable emptyTable;
+    std::vector<DictionaryEntry> emptyTableDestination;
+    EXPECT_NO_THROW(emptyTable.CopyTo(emptyTableDestination, 0));
 }
 
 // `using ICollection::CopyTo;` regression: a derived class that declares its own
@@ -746,6 +860,21 @@ TEST(CopyToBoundaryLifetime, LargeCopyIntoExactFitDestinationIsClean) {
     std::vector<std::any> oneShort(static_cast<std::size_t>(kCount) - 1);
     EXPECT_EQ(classify([&] { list.CopyTo(oneShort, 0); }), Thrown::Argument);
     for (const std::any& slot : oneShort) EXPECT_FALSE(slot.has_value());
+}
+
+// An empty-to-empty copy touches no storage at all, so this mainly proves the
+// source and the destination -- including a null-pointer ObjectSpan, which
+// owns nothing to begin with -- destruct cleanly with nothing leaked.
+TEST(CopyToBoundaryLifetime, EmptyCopyLeavesNoInstancesAndDestructsCleanly) {
+    ASSERT_EQ(LifetimeProbe::liveInstances, 0);
+    {
+        std::vector<std::any> destination;  // default-constructed, empty
+        ArrayList list;                     // empty; no LifetimeProbe added
+        ASSERT_NO_THROW(list.CopyTo(destination, 0));
+        ASSERT_NO_THROW(list.CopyTo(ObjectSpan(), 0));
+        EXPECT_TRUE(destination.empty());
+    }
+    EXPECT_EQ(LifetimeProbe::liveInstances, 0);
 }
 
 }  // namespace

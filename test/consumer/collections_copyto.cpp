@@ -2,8 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 //
 // Standalone public-header consumer fixture for the non-generic ICollection copy
-// boundary (ticket #1771, SR-AUD-358 / CCF-020). It compiles against only the
-// public Collections.Core surface, so it fails if the boundary starts to require
+// boundary (ticket #1771, SR-AUD-358 / CCF-020; corrected by ticket #1774 for
+// zero-length destinations). It compiles against only the public
+// Collections.Core surface, so it fails if the boundary starts to require
 // a private header, another component, or a non-public helper -- and it is the
 // executable form of the migration guidance in docs/Migration-ICollectionCopyTo.md.
 #include <any>
@@ -114,15 +115,23 @@ bool copiesDictionaryViews() {
 }
 
 // Invalid destinations are diagnosed by exception, never by a native write.
+// A zero-length destination -- including a null-pointer ObjectSpan -- is a
+// valid *empty* destination (ticket #1774); only a non-empty source rejects
+// it, and only on capacity, while a null pointer paired with a positive length
+// stays a distinct, always-malformed error.
 bool rejectsInvalidDestinations() {
     ArrayList list;
     list.Add(std::any(1));
     list.Add(std::any(2));
     ICollection& collection = list;
 
-    bool nullRejected = false;
+    bool zeroLengthRejected = false;
     try { collection.CopyTo(ObjectSpan(), 0); }
-    catch (const System::ArgumentNullException&) { nullRejected = true; }
+    catch (const System::ArgumentException&) { zeroLengthRejected = true; }
+
+    bool malformedNullRejected = false;
+    try { collection.CopyTo(ObjectSpan(nullptr, 5), 0); }
+    catch (const System::ArgumentNullException&) { malformedNullRejected = true; }
 
     std::vector<std::any> destination(2);
     bool negativeRejected = false;
@@ -134,7 +143,19 @@ bool rejectsInvalidDestinations() {
     catch (const System::ArgumentException&) { capacityRejected = true; }
 
     const bool untouched = !destination[0].has_value() && !destination[1].has_value();
-    return nullRejected && negativeRejected && capacityRejected && untouched;
+
+    ArrayList empty;
+    bool emptyToEmptySucceeded = true;
+    try {
+        std::vector<std::any> emptyDestination;
+        empty.CopyTo(emptyDestination, 0);
+        empty.CopyTo(ObjectSpan(), 0);
+    } catch (...) {
+        emptyToEmptySucceeded = false;
+    }
+
+    return zeroLengthRejected && malformedNullRejected && negativeRejected
+        && capacityRejected && untouched && emptyToEmptySucceeded;
 }
 
 } // namespace
