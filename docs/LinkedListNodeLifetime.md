@@ -390,6 +390,13 @@ scripts/local_ci_check.sh build                                    # 12,743/12,7
 scripts/check_doxygen_warnings.sh                                  # 1,941/1,942
 ```
 
-The probe and the consumer fixture are kept: the probe is the audit's original
-memory-safety reproduction and the fixture is the only check that the node
-representation stays inside the public `Collections.Core` surface.
+The consumer fixture is tracked. The probe is **not**: `build-probe-linkednode/`
+matches the `build*` ignore rule, following the same convention as ticket
+#1767's probe, so it exists only in the working checkout that produced this
+evidence. That is acceptable because the permanent
+`LinkedListNodeLifetimeTests` suite now provides equivalent coverage of every
+state the probe exercises, as the audit handoff rule requires. The probe is
+reproducible from the scenarios listed in section 7.3 plus these later
+additions: 100 attach/detach cycles across two lists, list copy/move with a
+retained handle, a 200,000-node teardown, and middle-node relinking — each
+asserting the retained value and owner reported by the handle afterwards.

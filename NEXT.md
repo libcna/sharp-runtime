@@ -116,8 +116,9 @@ members stay open by design. Closure evidence:
   attachment, first/middle/last/single-node cases, list and handle copy/move,
   iteration, and the exact exception types and messages;
 - `SharpRuntimeTests_Collections_Core` 1,484/1,484;
-- the retained `build-probe-linkednode` ASan/UBSan/LeakSanitizer probe:
-  `failures=0`, no diagnostic, including a 200,000-node teardown;
+- the local `build-probe-linkednode` ASan/UBSan/LeakSanitizer reproduction of
+  the audit's use-after-free: `failures=0`, no diagnostic, including a
+  200,000-node teardown;
 - `test/consumer/collections_linked_list.cpp` compiled `-Werror` against only
   `SharpRuntime::Collections.Core` and run successfully;
 - network-permitted `scripts/local_ci_check.sh build`: 12,743/12,743 tests
@@ -1537,9 +1538,11 @@ HTTP, socket, and ping tests require permission for local network operations.
    audit evidence.
 4. The LinkedListNode lifetime contract is recorded in
    `docs/LinkedListNodeLifetime.md` and implemented. Do not redesign it, do not
-   reopen SR-AUD-357, and keep `LinkedListNodeLifetimeTests.cpp`,
-   `test/consumer/collections_linked_list.cpp`, and the
-   `build-probe-linkednode` ASan/UBSan reproduction in place.
+   reopen SR-AUD-357, and keep `LinkedListNodeLifetimeTests.cpp` and
+   `test/consumer/collections_linked_list.cpp` in place. Those 49 permanent
+   regressions are the durable replacement for the ASan/UBSan probe; the probe
+   itself lived in the gitignored `build-probe-linkednode/` directory and is
+   reproducible from section 9 of the design record, not from a tracked file.
 5. **Next recommended ticket, documented but not started:** a separate
    SR-AUD-358 / CCF-020 typed-or-length-aware `ICollection::CopyTo` design
    ticket (proposed #1770, `REMED-COLL-COPYTO-DESIGN`, P0, size S). It must
