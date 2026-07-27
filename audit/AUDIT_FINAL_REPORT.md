@@ -217,13 +217,65 @@ Boundary validation is unchanged at 41 modules and 90 edges; validator-test,
 catalogue, database, selective-component, and diff checks pass, and Doxygen
 1.9.8 remains at exactly 1,942 warnings, at the ceiling and unchanged.
 
-Two separate pre-existing defects found while implementing #1775 are recorded
-as inactive tickets rather than folded into it, and are **not** new audit
-findings — SR-AUD-001 through SR-AUD-364 stay frozen at their closure numbering:
-ticket #1776 (`System::ArgumentNullException(paramName)` emits its
-`(Parameter 'x')` suffix twice, because its own `makeMsg()` appends it and the
+Two separate pre-existing defects found while implementing #1775 were recorded
+as inactive tickets rather than folded into it: ticket #1776
+(`System::ArgumentNullException(paramName)` emits its `(Parameter 'x')` suffix
+twice, because its own `makeMsg()` appends it and the
 `ArgumentException(message, paramName)` base appends it again) and ticket #1777
 (four typed `CopyTo` doc-comments still describe ticket #1771's superseded
-null-destination rule). #1775's assertions deliberately check exception type,
+null-destination rule). #1775's assertions deliberately checked exception type,
 parameter name, and leading message text rather than an exact string, so they
-stay correct once #1776 lands.
+stayed correct once #1776 landed.
+
+**Correction:** the paragraph above, and #1776's own opening notes, described
+#1776 as **not** a new audit finding, on the premise that SR-AUD-001 through
+SR-AUD-364 were frozen at closure with nothing covering this defect. That
+premise was wrong: SR-AUD-089 (a null-`const char*` crash in the same
+constructors) and SR-AUD-090 (the duplicate suffix itself) already existed as
+`confirmed` findings inside that frozen range, filed against this exact file
+during the original audit. This correction is recorded here rather than
+silently rewritten into the paragraph above, per this repository's practice of
+preserving historical narrative; see the ticket #1776 entry below for the
+remediation this produced.
+
+Ticket #1776 completed a fifth bounded batch on 2026-07-27 on local branch
+`feature/remediation-argument-null-message` and remediates SR-AUD-089 and
+SR-AUD-090; the findings index now records **357 open findings and seven
+`remediated`**. The original audit evidence in
+`audit/modules/core/include/System/ArgumentNullException.hpp.audit.md` remains
+in place. Root cause: `ArgumentNullException(paramName)`'s private `makeMsg()`
+helper composed `"Value cannot be null. (Parameter 'x')"` and passed that
+already-suffixed text to the `ArgumentException(message, paramName)` base
+constructor, whose own `appendParamName()` appended the identical suffix a
+second time; because `makeMsg()` concatenated the raw C-string before the base
+constructor's null guard could run, a null `paramName` also reached
+`std::char_traits<char>::length(nullptr)` first (SR-AUD-089). The fix passes
+the raw, unsuffixed default message straight to
+`ArgumentException(message, paramName)`, exactly matching .NET's own
+`ArgumentNullException(paramName) : base(SR.ArgumentNull_Generic, paramName)`,
+so the base constructor is the single site that both appends the suffix once
+and null-guards the C-string overload. `getParamNameProperty()`, HResult
+(`E_POINTER`), the `(paramName, message)` and `(message, innerException)`
+overloads, and sibling `ArgumentException`/`ArgumentOutOfRangeException`
+behavior are unchanged; no public signature, virtual member, or inheritance
+changed, so this is neither a source nor an ABI break.
+
+Closure evidence is 26 permanent regressions across `ArgumentNullExceptionTests.cpp`
+(20, covering every constructor overload's exact message, single-suffix
+occurrence counts, empty/punctuated parameter names, copy/move, catch-through
+`ArgumentNullException&`/`ArgumentException&`/`System::Exception&`, and a
+direct null-`const char*` non-crash regression for SR-AUD-089),
+`ArgumentExceptionTests.cpp` (3), and `ArgumentOutOfRangeExceptionTests.cpp`
+(3) pinning that those sibling types were never affected; the two pre-existing
+exact-message workarounds this defect forced now assert the single-suffix
+message directly (`DictionaryKeyAndViewContractTests.cpp`'s
+`expectNullKeyRejected` from #1775, `LinkedListNodeLifetimeTests.cpp`'s
+`ExpectArgumentNullMessage` from #1769); `SharpRuntimeTests_Core_Base`
+4,972/4,972 and `SharpRuntimeTests_Collections_Core` 1,732/1,732; the
+`Core.Base` standalone public-header consumer fixture extended to construct,
+throw, and catch an `ArgumentNullException` through `System::Exception`,
+compiling and running under `-Werror`; and a network-permitted
+`scripts/local_ci_check.sh build` run. This is a pure message-composition fix
+with no allocation, ownership, or string-lifetime change, so a dedicated
+sanitizer campaign was not run beyond the existing focused-suite coverage.
+Ticket #1777 remains the only inactive follow-up.

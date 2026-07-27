@@ -58,3 +58,60 @@ correct, but logs and user diagnostics are observably malformed.
 The normal non-null path passes, but one public raw-pointer constructor is
 ASan-confirmed unsafe and its ordinary message has a duplicate marker.  No
 source or test was modified during this audit.
+
+## Post-audit remediation for SR-AUD-089 and SR-AUD-090 (ticket #1776, 2026-07-27): REMEDIATED
+
+The audit evidence above is retained unchanged. Ticket #1776
+(`REMED-CORE-ARGNULL-MESSAGE`, P2, size XS) closed both findings on branch
+`feature/remediation-argument-null-message`.
+
+This ticket was opened during ticket #1775 and its own notes described the
+duplicate-suffix defect as a fresh, post-audit discovery with no covering
+`SR-AUD-*` identifier. That description was inaccurate: SR-AUD-089 and
+SR-AUD-090, recorded above, already covered exactly this file and exactly
+this defect pair (the null-pointer crash and the doubled marker) as
+`confirmed` findings within the frozen SR-AUD-001..364 range. This report
+records the correction rather than silently rewriting the ticket's history;
+`NEXT.md`, `plan.md`, and `audit/AUDIT_FINAL_REPORT.md` carry the same
+correction.
+
+Root cause: `ArgumentNullException(paramName)`'s private `makeMsg()` helper
+concatenated the raw `const char*`/`std::string` parameter name into an
+already-composed `"Value cannot be null. (Parameter 'x')"` string and passed
+that composed text to the `ArgumentException(message, paramName)` base
+constructor, whose own `appendParamName()` appended the identical suffix a
+second time -- and, because `makeMsg()` performed unchecked C-string
+concatenation before the base constructor's own null guard could run, a null
+`paramName` reached `std::char_traits<char>::length(nullptr)` first.
+
+Repair: the paramName-only constructors now pass the raw, unsuffixed default
+message straight to `ArgumentException(message, paramName)`, exactly matching
+.NET's own `ArgumentNullException(string? paramName) : base(SR.ArgumentNull_Generic,
+paramName)`. This makes the base constructor the single site that both
+appends the parameter suffix (once) and null-guards the C-string overload,
+which resolves SR-AUD-090 directly and resolves SR-AUD-089 as a natural
+consequence of removing the unsafe local concatenation, not as a separate
+change. `getParamNameProperty()`, HResult (`E_POINTER`), the
+`(paramName, message)` and `(message, innerException)` overloads, and sibling
+`ArgumentException`/`ArgumentOutOfRangeException` behavior are all unchanged;
+no public signature, virtual member, or inheritance changed.
+
+Closure evidence: 20 new permanent regressions in `ArgumentNullExceptionTests.cpp`
+(exact message per constructor overload, single-occurrence suffix counts, empty
+and punctuated parameter names, copy/move, catch-through `ArgumentNullException&`/
+`ArgumentException&`/`System::Exception&`, and a direct null-`const char*`
+non-crash regression for SR-AUD-089), plus 3 new regressions each in
+`ArgumentExceptionTests.cpp` and `ArgumentOutOfRangeExceptionTests.cpp` pinning
+that those sibling types were never affected; `SharpRuntimeTests_Core_Base`
+4,972/4,972 and `SharpRuntimeTests_Collections_Core` 1,732/1,732; the two
+pre-existing exact-message workarounds this defect forced
+(`DictionaryKeyAndViewContractTests.cpp`'s `expectNullKeyRejected` from ticket
+#1775, `LinkedListNodeLifetimeTests.cpp`'s `ExpectArgumentNullMessage` from
+ticket #1769) now assert the single-suffix message directly; the `Core.Base`
+standalone public-header consumer fixture (`test/consumer/core_base.cpp`)
+extended to construct, throw, and catch an `ArgumentNullException` through
+`System::Exception` and compiles/runs under `-Werror`; and a
+`scripts/local_ci_check.sh build` full-repository gate. This is a pure message-
+composition fix with no allocation, ownership, or string-lifetime change, so a
+dedicated sanitizer campaign was not run beyond the existing focused-suite
+coverage.

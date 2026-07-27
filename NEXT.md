@@ -3,35 +3,50 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-27. Branch: `feature/remediation-coll-hashtable-views`.
+*Last verified: 2026-07-27. Branch: `feature/remediation-argument-null-message`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 12,991 tests across 37 executables. The repository-wide,
+dependency edges, and 13,017 tests across 37 executables. The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766). Remediation
 tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design),
 #1769 (LinkedListNode lifetime implementation), #1770 (raw `ICollection::CopyTo`
-design), #1771 (raw `ICollection::CopyTo` implementation), and #1774 (raw
-`ICollection::CopyTo` zero-length-destination correction) are complete; the
+design), #1771 (raw `ICollection::CopyTo` implementation), #1774 (raw
+`ICollection::CopyTo` zero-length-destination correction), #1775
+(`Hashtable` `IDictionary` key/view contracts), and #1776
+(`ArgumentNullException` duplicate parameter suffix) are complete; the
 node contract is recorded in
 [`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md) and the copy
 boundary in [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md)
 (see its section 22 for the #1774 correction), with consumer guidance in
 [`docs/Migration-ICollectionCopyTo.md`](docs/Migration-ICollectionCopyTo.md).
-Ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`, P1, size M) is also complete: it
-restored the `Hashtable` `IDictionary` key and view contracts for SR-AUD-363,
-which is now `remediated`. **No ticket is active.** Newly recorded inactive
-follow-ups are #1776 (`ArgumentNullException` doubles its parameter suffix) and
-#1777 (four typed `CopyTo` doc-comments cite ticket #1771's superseded rule);
-neither is a new audit identifier. #1771 removed the pure virtual
-`CopyTo(void*, intcs)` from
+Ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`, P1, size M) restored the
+`Hashtable` `IDictionary` key and view contracts for SR-AUD-363, which is now
+`remediated`. Ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`, P2, size XS) then
+corrected `ArgumentNullException(paramName)` so its `(Parameter 'x')` suffix is
+appended exactly once instead of twice. **No ticket is active.** The remaining
+inactive follow-up is #1777 (four typed `CopyTo` doc-comments cite ticket
+#1771's superseded rule); it is not a new audit identifier. #1771 removed the
+pure virtual `CopyTo(void*, intcs)` from
 `System::Collections::ICollection` under explicit user approval, so this is a
 source- and ABI-breaking release for downstream consumers, which must rebuild.
 #1774 then corrected #1771's validation rule so that a null-pointer destination
 with a zero length (e.g. `ObjectSpan{nullptr, 0}` or a default-constructed empty
 `std::vector<std::any>`) is a valid empty destination; only a null pointer
 paired with a positive length is still rejected. This is a behavioral
-relaxation, not a further source or ABI break.*
+relaxation, not a further source or ABI break.
+
+**Correction (ticket #1776, 2026-07-27):** the #1775-era notes below and in
+`plan.md`/`audit/AUDIT_FINAL_REPORT.md` describing ticket #1776 as a fresh,
+post-audit discovery with no covering `SR-AUD-*` identifier were inaccurate.
+`ArgumentNullException(paramName)`'s duplicate parameter suffix and its
+null-`const char*` crash were already recorded as `confirmed` findings
+SR-AUD-090 and SR-AUD-089 respectively, within the frozen SR-AUD-001..364
+range, before ticket #1775 opened #1776. Ticket #1776's fix resolves both;
+they are now `remediated` in `audit/AUDIT_FINDINGS_INDEX.md` and
+`audit/modules/core/include/System/ArgumentNullException.hpp.audit.md`. This
+note is left in place rather than silently correcting the original text below,
+per this repository's practice of preserving historical audit narrative.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -401,7 +416,70 @@ new `SR-AUD-*` identifiers, since the audit numbering is frozen at 364:
   `Queue` (:73), `Stack` (:73), and `ListDictionaryInternal` (:165) still say
   `@throws ArgumentNullException if destination has no storage`, which ticket
   #1774 superseded. Documentation only; it does **not** reopen SR-AUD-358 or
-  CCF-020.
+  CCF-020. Remains inactive.
+
+### Completed ArgumentNullException message remediation: ticket #1776
+
+**`P2: fix duplicated ArgumentNullException parameter suffix`**
+(`REMED-CORE-ARGNULL-MESSAGE`, size XS) is **done**, opened and closed
+2026-07-27 on local branch `feature/remediation-argument-null-message`.
+
+Root cause: `ArgumentNullException(paramName)`'s private `makeMsg()` helper
+composed `"Value cannot be null. (Parameter 'x')"` and passed that
+already-suffixed text to the `ArgumentException(message, paramName)` base
+constructor, whose own `appendParamName()` appended the identical suffix a
+second time, producing e.g.
+`"Value cannot be null. (Parameter 'destination') (Parameter 'destination')"`.
+Because `makeMsg()` concatenated the raw C-string before the base
+constructor's null guard could run, a null `paramName` also reached
+`std::char_traits<char>::length(nullptr)` first — this is audit finding
+SR-AUD-089, filed alongside SR-AUD-090 (the duplicate suffix itself) against
+the same file during the original audit. See the correction note above:
+#1776 was inaccurately recorded as covering no audit finding when it opened.
+
+Fix: the paramName-only constructors now pass the raw, unsuffixed default
+message straight through, exactly matching .NET's own
+`ArgumentNullException(paramName) : base(SR.ArgumentNull_Generic, paramName)`.
+The base constructor is now the single site that both appends the suffix
+(once) and null-guards the C-string overload, which resolves SR-AUD-090
+directly and resolves SR-AUD-089 as a natural consequence, not a separate
+change. `getParamNameProperty()`, HResult (`E_POINTER`), the
+`(paramName, message)` and `(message, innerException)` overloads, and sibling
+`ArgumentException`/`ArgumentOutOfRangeException` are all unchanged and
+regression-tested as such. No public signature, virtual member, or
+inheritance changed, so this is neither a source nor an ABI break.
+
+Evidence:
+
+- 26 new permanent regressions: 20 in `ArgumentNullExceptionTests.cpp`
+  (exact message per constructor overload, single-occurrence suffix counts,
+  empty and punctuated parameter names, copy/move, catch-through
+  `ArgumentNullException&`/`ArgumentException&`/`System::Exception&`, and a
+  direct null-`const char*` non-crash regression for SR-AUD-089), 3 in
+  `ArgumentExceptionTests.cpp`, and 3 in `ArgumentOutOfRangeExceptionTests.cpp`
+  pinning that those sibling types were never affected;
+- the two pre-existing exact-message workarounds this defect forced now
+  assert the single-suffix message directly:
+  `DictionaryKeyAndViewContractTests.cpp`'s `expectNullKeyRejected` (from
+  #1775) and `LinkedListNodeLifetimeTests.cpp`'s `ExpectArgumentNullMessage`
+  (from #1769);
+- `SharpRuntimeTests_Core_Base` 4,972/4,972 and
+  `SharpRuntimeTests_Collections_Core` 1,732/1,732;
+- the `Core.Base` standalone public-header consumer fixture
+  (`test/consumer/core_base.cpp`) extended to construct, throw, and catch an
+  `ArgumentNullException` through `System::Exception`, verifying the parameter
+  name and single-suffix message, compiling and running under `-Werror`;
+- network-permitted `scripts/local_ci_check.sh build`: 13,017/13,017 tests
+  across 37 executables (was 12,991), zero warnings/errors;
+- boundaries 41 modules/90 edges, validator tests 7/7, catalogue current,
+  database consistent, the ten-job selective matrix green, `git diff --check`
+  clean, and Doxygen 1.9.8 at exactly 1,942/1,942 — unchanged, at the ceiling.
+
+This is a pure message-composition fix with no allocation, ownership, or
+string-lifetime change, so a dedicated sanitizer campaign was not run beyond
+the existing focused-suite coverage.
+
+No repair ticket is active. Ticket #1777 remains the only inactive follow-up.
 
 ### Nominal 500-hour first remediation programme
 
@@ -415,7 +493,7 @@ documentation, and normal focused/component validation:
 | Planning truth and ticket setup | Synchronize baselines/phase/branch policy, repair twelve broken anchors, identify the two open questions, add severity/effort rules, and seed the bounded queue | 20 |
 | LinkedListNode lifetime | Design plus compatible implementation for SR-AUD-357 / CCF-019 | 40 |
 | Raw ICollection output boundary | ADR, consumer inventory, compile fixtures, and implementation for SR-AUD-358 / CCF-020. **Delivered in full**: design ticket #1770 plus implementation ticket #1771, which landed the user-approved source/ABI break | 20 |
-| Eight immediate public-input crash tickets | SR-AUD-089, SR-AUD-097, SR-AUD-132, SR-AUD-236, SR-AUD-242, SR-AUD-257, SR-AUD-338, and SR-AUD-341 | 80 |
+| Eight immediate public-input crash tickets | SR-AUD-089 (**delivered**, ticket #1776), SR-AUD-097, SR-AUD-132, SR-AUD-236, SR-AUD-242, SR-AUD-257, SR-AUD-338, and SR-AUD-341 | 80 |
 | Seven bounds/copy safety tickets | SR-AUD-041, SR-AUD-043, SR-AUD-044, SR-AUD-047, SR-AUD-049, SR-AUD-051, SR-AUD-054, SR-AUD-067, SR-AUD-071 through SR-AUD-073, SR-AUD-078, and SR-AUD-084, grouped only by demonstrated shared contract | 90 |
 | Six defined-arithmetic tickets | SR-AUD-008, SR-AUD-019, SR-AUD-020, SR-AUD-025 through SR-AUD-027, SR-AUD-057, SR-AUD-060, SR-AUD-131, and SR-AUD-135 | 70 |
 | Eight ownership/use-after-free tickets | SR-AUD-187, SR-AUD-221, SR-AUD-230, SR-AUD-237, SR-AUD-245, SR-AUD-247, SR-AUD-263, and SR-AUD-310 | 90 |

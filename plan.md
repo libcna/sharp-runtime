@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-27 — 41 physical components, 90 direct production
-dependency edges, a clean native build, 12,991 passing tests across 37
+dependency edges, a clean native build, 13,017 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
 is recorded as audit finding `SR-AUD-001`.*
@@ -385,13 +385,37 @@ regressions parameterised over both non-generic `IDictionary` implementations,
 clean under ASan + UBSan + LeakSanitizer; Collections.Core 1,732/1,732; a
 `-Werror` standalone consumer fixture; and a 12,991/12,991 full gate.
 
-Two separate pre-existing defects found during #1775 are recorded as inactive
+Two separate pre-existing defects found during #1775 were recorded as inactive
 tickets rather than folded in: #1776 (`System::ArgumentNullException(paramName)`
 emits its `(Parameter 'x')` suffix twice) and #1777 (four typed `CopyTo`
 doc-comments still describe ticket #1771's superseded null-destination rule).
-Neither is a new audit identifier — SR-AUD-001..364 stays frozen.
 
-No repair ticket is active.
+**Correction:** the sentence above and #1776's own opening notes described
+neither as a new audit identifier under the frozen SR-AUD-001..364 numbering.
+That was inaccurate for #1776: SR-AUD-089 (the null-`const char*` crash in the
+same constructors) and SR-AUD-090 (the duplicate suffix itself) already
+existed as `confirmed` findings within that frozen range. Ticket #1776
+(`REMED-CORE-ARGNULL-MESSAGE`, P2, size XS), opened and closed 2026-07-27 on
+local branch `feature/remediation-argument-null-message`, corrected
+`ArgumentNullException(paramName)` to pass its raw default message straight to
+the `ArgumentException(message, paramName)` base constructor — matching
+.NET's own `ArgumentNullException(paramName) : base(SR.ArgumentNull_Generic,
+paramName)` — so the `(Parameter 'x')` suffix is appended exactly once, and,
+as a side effect of removing the unsafe local `makeMsg()` concatenation, a
+null `paramName` no longer null-dereferences. `ArgumentException` and
+`ArgumentOutOfRangeException` were unaffected and remain regression-tested as
+such. SR-AUD-089 and SR-AUD-090 are now `remediated` in
+`audit/AUDIT_FINDINGS_INDEX.md`. Evidence: 26 new permanent regressions across
+`ArgumentNullExceptionTests.cpp`, `ArgumentExceptionTests.cpp`, and
+`ArgumentOutOfRangeExceptionTests.cpp`; the two pre-existing exact-message
+workarounds this defect forced (`DictionaryKeyAndViewContractTests.cpp` from
+#1775, `LinkedListNodeLifetimeTests.cpp` from #1769) now assert the
+single-suffix message directly; the `Core.Base` standalone consumer fixture
+extended to cover throw/catch through `System::Exception`; and a full
+`scripts/local_ci_check.sh build` gate. No public signature, virtual member,
+or inheritance changed, so this is neither a source nor an ABI break.
+
+Ticket #1777 remains inactive. No repair ticket is active.
 
 ### P2 — Consumer-driven API breadth
 

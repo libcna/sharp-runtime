@@ -8,10 +8,10 @@
 - Eligible files: 1,748.  Excluded tracked files: 33.
 - Completed per-file reports: 1,748 (100.0% of eligible scope; 1,699/1,699 runtime-module files).
 - Findings confirmed at audit closure: 364 (ninety-one high, two hundred
-  sixty-two medium, eleven low). The post-audit index now has 359 open
-  `confirmed` findings (eighty-eight high, two hundred sixty medium, eleven
-  low) and 5 `remediated` findings (SR-AUD-356, SR-AUD-357, SR-AUD-358,
-  SR-AUD-363, SR-AUD-364). Open risks: 2
+  sixty-two medium, eleven low). The post-audit index now has 357 open
+  `confirmed` findings (eighty-seven high, two hundred sixty medium, ten
+  low) and 7 `remediated` findings (SR-AUD-089, SR-AUD-090, SR-AUD-356,
+  SR-AUD-357, SR-AUD-358, SR-AUD-363, SR-AUD-364). Open risks: 2
   documented-adaptation questions.
 
 ## Post-audit remediation checkpoint
@@ -102,10 +102,27 @@ executables with zero warnings/errors. Module boundaries remain 41/90;
 validator-test, catalogue, database, selective-component, and diff checks
 pass, and Doxygen stays at exactly 1,942/1,942.
 
-Two separate pre-existing defects surfaced while implementing #1775 are
-recorded as inactive tickets #1776 and #1777 rather than as new audit
-identifiers: the frozen SR-AUD-001..364 numbering is not extended for
-post-audit discoveries.
+Two separate pre-existing defects surfaced while implementing #1775 were
+recorded as inactive tickets #1776 and #1777. #1777 is a genuine post-audit
+documentation-only discovery with no covering `SR-AUD-*` identifier. #1776 was
+described the same way at the time, but that was inaccurate: SR-AUD-089 and
+SR-AUD-090, already `confirmed` within the frozen SR-AUD-001..364 numbering,
+covered this exact defect pair. Ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`,
+P2, size XS) remediated both on 2026-07-27 on local branch
+`feature/remediation-argument-null-message`: `ArgumentNullException(paramName)`
+now passes its raw default message straight to the
+`ArgumentException(message, paramName)` base constructor instead of
+precomposing the suffix itself, so the `(Parameter 'x')` marker is appended
+exactly once (SR-AUD-090) and, as a side effect of removing the unsafe local
+concatenation, a null `paramName` no longer null-dereferences (SR-AUD-089).
+Permanent regressions pass 26/26 new cases across `ArgumentNullExceptionTests.cpp`,
+`ArgumentExceptionTests.cpp`, and `ArgumentOutOfRangeExceptionTests.cpp`;
+`SharpRuntimeTests_Core_Base` 4,972/4,972 and
+`SharpRuntimeTests_Collections_Core` 1,732/1,732; the `Core.Base` standalone
+public-header consumer fixture extended to cover throw/catch through
+`System::Exception` compiles and runs under `-Werror`. No public signature,
+virtual member, or inheritance changed, so this is neither a source nor an ABI
+break. Findings index: 357 open `confirmed`, 7 `remediated`.
 
 ## Initial validation evidence
 
