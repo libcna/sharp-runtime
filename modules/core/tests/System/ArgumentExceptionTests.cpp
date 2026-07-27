@@ -75,3 +75,27 @@ TEST(ArgumentExceptionTests, ThrowIfNullOrEmpty_ParamNameInException) {
         EXPECT_EQ(e.getParamNameProperty(), "myArg");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Regression coverage for ticket #1776 (REMED-CORE-ARGNULL-MESSAGE): plain
+// ArgumentException's own (message, paramName) constructors were never
+// affected by the ArgumentNullException duplicate-suffix defect -- they
+// append the suffix exactly once already -- but pin the exact text here so a
+// future change to the shared appendParamName() helper cannot regress this
+// sibling type silently.
+// ---------------------------------------------------------------------------
+
+TEST(ArgumentExceptionTests, MessageAndParamName_CharPtr_ExactMessage_SingleSuffix) {
+    ArgumentException ex("invalid value", "myParam");
+    EXPECT_STREQ(ex.what(), "invalid value (Parameter 'myParam')");
+}
+
+TEST(ArgumentExceptionTests, MessageAndParamName_String_ExactMessage_SingleSuffix) {
+    ArgumentException ex(std::string("invalid value"), std::string("myParam"));
+    EXPECT_STREQ(ex.what(), "invalid value (Parameter 'myParam')");
+}
+
+TEST(ArgumentExceptionTests, MessageAndParamName_EmptyParamName_NoSuffix) {
+    ArgumentException ex("invalid value", "");
+    EXPECT_STREQ(ex.what(), "invalid value");
+}

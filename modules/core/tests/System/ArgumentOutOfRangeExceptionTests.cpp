@@ -263,3 +263,29 @@ TEST(ArgumentOutOfRangeExceptionTests, ThrowIfNegative_ExceptionCarriesActualVal
         EXPECT_EQ(ex.getActualValueProperty(), "-5");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Regression coverage for ticket #1776 (REMED-CORE-ARGNULL-MESSAGE):
+// ArgumentOutOfRangeException's paramName constructors were never affected by
+// the ArgumentNullException duplicate-suffix defect -- they already pass the
+// raw default message through to the base (message, paramName) constructor,
+// same as this ticket's fix -- but pin the exact text so a future change to
+// the shared appendParamName() helper cannot regress this sibling silently.
+// ---------------------------------------------------------------------------
+
+TEST(ArgumentOutOfRangeExceptionTests, CharPtrCtor_ExactMessage_SingleSuffix) {
+    ArgumentOutOfRangeException ex("tooLarge");
+    EXPECT_STREQ(ex.what(),
+        "Specified argument was out of the range of valid values. (Parameter 'tooLarge')");
+}
+
+TEST(ArgumentOutOfRangeExceptionTests, StringCtor_ExactMessage_SingleSuffix) {
+    ArgumentOutOfRangeException ex(std::string("outOfBounds"));
+    EXPECT_STREQ(ex.what(),
+        "Specified argument was out of the range of valid values. (Parameter 'outOfBounds')");
+}
+
+TEST(ArgumentOutOfRangeExceptionTests, ParamNameAndMessageCtor_ExactMessage_SingleSuffix) {
+    ArgumentOutOfRangeException ex("index", "must be non-negative");
+    EXPECT_STREQ(ex.what(), "must be non-negative (Parameter 'index')");
+}

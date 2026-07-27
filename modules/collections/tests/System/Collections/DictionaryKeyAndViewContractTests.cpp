@@ -378,20 +378,20 @@ TEST_P(DictionaryViewContract, ViewDeletedBeforeItsOwnerIsClean) {
 // Hashtable null-key contract
 // ---------------------------------------------------------------------------
 
-// The exact message is deliberately not asserted:
-// System::ArgumentNullException(paramName) currently emits its
-// "(Parameter 'key')" suffix twice, a separate pre-existing Core.Base defect
-// recorded as inactive ticket #1776 that also affects the CopyTo boundary's
-// ArgumentNullException("destination"). These tests assert the observable
-// contract that ticket #1775 owns -- the exception type, the named parameter,
-// and .NET's null message text -- so they stay correct once #1776 lands.
+// Ticket #1776 (REMED-CORE-ARGNULL-MESSAGE) corrected
+// System::ArgumentNullException(paramName) so it emits its "(Parameter 'key')"
+// suffix exactly once instead of twice; this suite previously asserted only
+// the exception type, the named parameter, and the leading null message text
+// to stay correct across that pre-existing Core.Base defect (which also
+// affected the CopyTo boundary's ArgumentNullException("destination")), and
+// now asserts the exact, single-suffix message that ticket #1776 restored.
 void expectNullKeyRejected(const std::function<void()>& call) {
     try {
         call();
         ADD_FAILURE() << "a null key must be rejected";
     } catch (const System::ArgumentNullException& e) {
         EXPECT_EQ(e.getParamNameProperty(), "key");
-        EXPECT_EQ(std::string(e.what()).rfind("Value cannot be null.", 0), 0u);
+        EXPECT_STREQ(e.what(), "Value cannot be null. (Parameter 'key')");
     } catch (const std::exception& e) {
         ADD_FAILURE() << "expected System::ArgumentNullException, got: " << e.what();
     }

@@ -46,11 +46,12 @@ namespace
             action();
             ADD_FAILURE() << "Expected System::ArgumentNullException";
         } catch (const System::ArgumentNullException& exception) {
-            // The doubled "(Parameter 'node')" marker is ArgumentNullException's own
-            // repository-wide behaviour, recorded as audit finding SR-AUD-090 and
-            // deliberately outside this ticket. Asserting the message actually observed
-            // keeps this suite honest instead of encoding a message it does not produce.
-            EXPECT_STREQ(exception.what(), "Value cannot be null. (Parameter 'node') (Parameter 'node')");
+            // Ticket #1776 (REMED-CORE-ARGNULL-MESSAGE / SR-AUD-090) corrected
+            // ArgumentNullException(paramName) so the "(Parameter 'node')" marker is
+            // appended exactly once instead of twice; this suite previously encoded the
+            // pre-fix doubled marker as expected, honest behaviour, but now asserts the
+            // single-marker message ticket #1776 restored.
+            EXPECT_STREQ(exception.what(), "Value cannot be null. (Parameter 'node')");
         } catch (...) {
             ADD_FAILURE() << "Expected System::ArgumentNullException";
         }
