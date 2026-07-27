@@ -3,19 +3,20 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-27. Branch: `feature/remediation-copyto-docs`.
+*Last verified: 2026-07-27. Branch: `feature/remediation-coll-concurrentdict-addorupdate`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 13,017 tests across 37 executables. The repository-wide,
+dependency edges, and 13,021 tests across 37 executables. The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766). Remediation
 tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design),
 #1769 (LinkedListNode lifetime implementation), #1770 (raw `ICollection::CopyTo`
 design), #1771 (raw `ICollection::CopyTo` implementation), #1774 (raw
 `ICollection::CopyTo` zero-length-destination correction), #1775
 (`Hashtable` `IDictionary` key/view contracts), #1776
-(`ArgumentNullException` duplicate parameter suffix), and #1777 (typed
-`CopyTo` doc-comment sync) are complete; the
+(`ArgumentNullException` duplicate parameter suffix), #1777 (typed
+`CopyTo` doc-comment sync), and #1778 (`ConcurrentDictionary::AddOrUpdate`
+compare-and-retry) are complete; the
 node contract is recorded in
 [`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md) and the copy
 boundary in [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md)
@@ -29,6 +30,10 @@ appended exactly once instead of twice. Ticket #1777
 (`REMED-COLL-COPYTO-DOC-SYNC`, P3, size XS) then corrected the four typed
 `CopyTo` doc-comments that still cited ticket #1771's superseded
 null-destination rule so they state the rule ticket #1774 corrected instead.
+Ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`, P2, size S) then made
+`ConcurrentDictionary::AddOrUpdate` retry against the observed value instead
+of unconditionally overwriting a concurrent intervening write, remediating
+SR-AUD-360.
 **No ticket is active.** #1771 removed the
 pure virtual `CopyTo(void*, intcs)` from
 `System::Collections::ICollection` under explicit user approval, so this is a
@@ -529,6 +534,98 @@ Evidence:
 - boundaries 41 modules/90 edges, validator tests 7/7, catalogue current,
   database consistent, the ten-job selective matrix green, `git diff --check`
   clean, and Doxygen 1.9.8 at exactly 1,942/1,942 — unchanged, at the ceiling.
+
+### Completed ConcurrentDictionary AddOrUpdate remediation: ticket #1778
+
+**`P2: Retry ConcurrentDictionary AddOrUpdate against the observed value
+instead of losing concurrent updates`** (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`,
+SR-AUD-360, size S) is **done**, opened and closed 2026-07-27 on local branch
+`feature/remediation-coll-concurrentdict-addorupdate`.
+
+Selected from the "Recommended dependency order" step 1 remaining bullet
+(SR-AUD-359 through SR-AUD-362, since SR-AUD-363 closed under #1775). NEXT.md
+itself flags SR-AUD-359 (`ReadOnlyDictionary::Empty`) and SR-AUD-361
+(`SortedSet::GetViewBetween`) as possibly needing a public-surface design
+decision, so per the Approval boundary they were set aside without a design
+ticket rather than selected. Between the two remaining signature-compatible
+candidates, SR-AUD-362 (`FrozenDictionary::Create` duplicate keys) was checked
+against the current .NET reference
+(`/rv/tmp/runtime/src/libraries/System.Collections.Immutable/src/System/Collections/Frozen/FrozenDictionary.cs`)
+before selection: its own doc-comment states last-value-wins is the
+*intended* `Create`/`ToFrozenDictionary` behavior, explicitly contrasted with
+`Enumerable.ToDictionary`'s throw-on-duplicate behavior, and
+`GetExistingFrozenOrNewDictionary`/`CreateFromDictionary` deliberately use the
+indexer instead of `Add` to realize exactly that. sharp-runtime's current
+`FrozenDictionary::Create` already matches this. SR-AUD-362's premise
+therefore does not hold against the actual .NET source; it was left
+untouched and not reopened as a second ticket — see
+`audit/AUDIT_FINAL_REPORT.md`'s planning-accuracy note for the full
+correction record.
+
+SR-AUD-360 was independently confirmed as a real defect against
+`/rv/tmp/runtime/src/libraries/System.Private.CoreLib/src/System/Collections/Concurrent/ConcurrentDictionary.cs`
+(`AddOrUpdate` and `TryUpdateInternal`): real .NET gates the commit on
+`EqualityComparer<TValue>.Default.Equals` against the previously observed
+value and retries (re-observes, re-invokes the factory) on a mismatch.
+`ConcurrentDictionary::AddOrUpdate`'s own doc-comment already documented the
+unconditional-overwrite behavior as a deliberate simplification, but
+`TryUpdate` on the same class already requires `TValue::operator==`, so
+extending that requirement to `AddOrUpdate` is consistent with existing
+project convention, not a new constraint category. No public signature
+changed and no virtual member was added or removed, so this is neither a
+source nor an ABI break; it proceeded without additional user approval under
+the repository's compatible-bug-fix rule.
+
+Fix: both `AddOrUpdate` overloads now loop — after computing the new value
+outside the lock (the factory is still never invoked with the internal mutex
+held, preserving the documented reentrancy/deadlock-avoidance guarantee), the
+commit re-acquires the lock, re-reads the entry, and writes only if it still
+equals the previously observed value; otherwise the whole operation retries
+against the newly observed state. A key absent at the initial observation
+that is concurrently added by another thread falls through to the update
+branch on retry rather than double-adding.
+
+Pre-fix reproduction (gitignored
+`build-probe-concurrentdict/probe1_lost_update.cpp`, ASan+UBSan and
+separately ThreadSanitizer): a coordinated two-thread repro blocks the update
+factory after it observes `0`, writes `10` through the indexer while the
+factory is blocked, then releases it. Pre-fix: `add-or-update-result final=1`
+(5/5 runs), matching the finding's own `add-or-update-result=1 final=1`
+reproduction exactly. Post-fix: `final=11` (20/20 runs under ASan+UBSan; 5/5
+under TSan), clean, no sanitizer diagnostic. A second stress probe
+(`build-probe-concurrentdict/probe2_stress.cpp`, 16 threads x 2,000
+`AddOrUpdate` calls on one shared key) is clean under TSan with no data race
+and the exact expected total (32,000).
+
+Closure evidence:
+
+- 4 new permanent regressions in `ConcurrentDictionaryTests.cpp`: deterministic
+  coordinated intervening-write repros for both overloads (matching the
+  pre-fix probe's shape), a key-added-concurrently retry case, and an
+  8-thread/500-iteration-per-thread contention stress case asserting the
+  final counter reflects every increment;
+- `ConcurrentDictionaryTest` suite (26/26) passing consistently across five
+  repeated runs;
+- `SharpRuntimeTests_Collections_Core` 1,736/1,736 (was 1,732);
+- network-permitted `scripts/local_ci_check.sh build`: 13,021/13,021 tests
+  across 37 executables (was 13,017), zero warnings/errors, six local-server
+  `Net.Http` cases passing;
+- boundaries 41 modules/90 edges, validator tests 7/7, catalogue current,
+  database consistent, the ten-job selective matrix green, `git diff --check`
+  clean;
+- a dedicated public-header consumer fixture was not added: no public
+  signature or type surface changed, and the header already compiles as part
+  of the regular `Collections.Core` build/test target, so a new standalone
+  fixture would not exercise anything the existing build does not already
+  cover;
+- Doxygen: measured independently at exactly 1,944 warnings both with and
+  without this ticket's diff applied (confirmed via `git stash`), i.e. this
+  ticket adds **zero** new warnings. This is 2 warnings above the "1,942"
+  ceiling recorded elsewhere in this document and in `CLAUDE.md`; that drift
+  predates this ticket (it is present on a clean pre-ticket tree) and is not
+  attributable to this change. Not investigated or corrected here — flagged
+  for a future documentation-integrity ticket, consistent with this session's
+  one-active-ticket rule and the transparency requirement not to conceal it.
 
 No repair ticket is active.
 

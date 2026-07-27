@@ -8,8 +8,9 @@ under `audit/<source-path>.audit.md`; the 1,699 runtime-module files are also
 fully covered. No production source or test was changed during this phase.
 
 At audit closure, the findings index recorded 364 confirmed issues. It now
-retains all 364 entries while marking 359 `confirmed` and five `remediated`
-(SR-AUD-356, SR-AUD-357, SR-AUD-358, SR-AUD-363, and SR-AUD-364):
+retains all 364 entries while marking 356 `confirmed` and eight `remediated`
+(SR-AUD-089, SR-AUD-090, SR-AUD-356, SR-AUD-357, SR-AUD-358, SR-AUD-360,
+SR-AUD-363, and SR-AUD-364):
 
 | Severity | Count |
 |---|---:|
@@ -278,4 +279,100 @@ compiling and running under `-Werror`; and a network-permitted
 `scripts/local_ci_check.sh build` run. This is a pure message-composition fix
 with no allocation, ownership, or string-lifetime change, so a dedicated
 sanitizer campaign was not run beyond the existing focused-suite coverage.
-Ticket #1777 remains the only inactive follow-up.
+Ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`, P3, size XS) subsequently closed on
+2026-07-27 on local branch `feature/remediation-copyto-docs`: it corrected the
+four typed `CopyTo` doc-comments that still cited ticket #1771's superseded
+null-destination rule so they state the rule ticket #1774 corrected instead.
+Documentation only; SR-AUD-358 and CCF-020 remain `remediated` and were not
+reopened. It is not a new `SR-AUD-*` identifier and does not change the
+counts above.
+
+Ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`, P2, size S) completed a
+sixth bounded batch on 2026-07-27 on local branch
+`feature/remediation-coll-concurrentdict-addorupdate` and remediates
+SR-AUD-360; the findings index now records **356 open findings and eight
+`remediated`**. The original audit evidence in
+`audit/modules/collections/include/System/Collections/Concurrent/ConcurrentDictionary.hpp.audit.md`
+remains in place. `ConcurrentDictionary::AddOrUpdate` (both the addValue-constant
+and addFactory overloads) snapshotted the existing value, invoked the update
+factory outside the lock, then unconditionally overwrote the entry with the
+factory's result regardless of whether another thread had mutated or removed
+the entry in the meantime -- silently discarding the intervening write. Real
+.NET's `TryUpdateInternal` instead gates the commit on
+`EqualityComparer<TValue>.Default.Equals(currentValue, observedValue)` and, on
+a mismatch, retries the whole operation: re-observes the current value and
+re-invokes the factory against it. sharp-runtime's existing doc-comment on
+this method already recorded the deviation as a deliberate simplification
+("this port's ConcurrentDictionary doesn't assume TValue equality-
+comparability"), but `TryUpdate` on the same class already requires
+`operator==`, so extending that same requirement to `AddOrUpdate` closes the
+gap without introducing a new constraint category to the type.
+
+Both overloads now loop: after computing the new value outside the lock (the
+factory is still never invoked with the internal mutex held, preserving the
+existing no-lock-across-user-code reentrancy/deadlock-avoidance guarantee
+documented on `GetOrAdd`), the commit re-acquires the lock, re-reads the
+entry, and writes only if it still equals the previously observed value;
+otherwise the operation retries against the newly observed state. A key
+absent at the initial observation that is concurrently added by another
+thread falls through to the update branch on retry rather than double-adding.
+No public signature changed and no virtual member was added or removed, so
+this is neither a source nor an ABI break, and it proceeded without additional
+user approval under the repository's compatible-bug-fix rule.
+
+Pre-fix reproduction (gitignored
+`build-probe-concurrentdict/probe1_lost_update.cpp`, compiled directly with
+`-fsanitize=address,undefined` and separately with `-fsanitize=thread`)
+deterministically reproduced the finding's own `add-or-update-result=1
+final=1` symptom across 5/5 runs: a coordinated second thread writes `10`
+through the indexer while the update factory is blocked after observing `0`;
+the pre-fix implementation discarded that write and produced `final=1`.
+Post-fix, the same probe produced the correct `final=11` across 20/20 ASan+UBSan
+runs and 5/5 ThreadSanitizer runs, with no sanitizer diagnostic. A second
+stress probe (`build-probe-concurrentdict/probe2_stress.cpp`, 16 threads each
+issuing 2,000 `AddOrUpdate` calls against one shared key) passed cleanly under
+ThreadSanitizer with no data race and the exact expected total (32,000),
+confirming the retry loop introduces no new synchronization defect.
+
+Closure evidence is 4 new permanent regressions in
+`ConcurrentDictionaryTests.cpp`: a deterministic coordinated intervening-write
+repro for each `AddOrUpdate` overload (matching the pre-fix probe's shape), a
+key-added-concurrently retry case, and an 8-thread/500-iteration-per-thread
+contention stress case asserting the final counter reflects every increment.
+The full `ConcurrentDictionaryTest` suite (26/26) passed consistently across
+five repeated runs; `SharpRuntimeTests_Collections_Core` grew from 1,732/1,732
+to 1,736/1,736; and a network-permitted `scripts/local_ci_check.sh build` run
+passed 13,021/13,021 tests across 37 executables with zero build
+warnings/errors (was 13,017), including the six local-server `Net.Http` cases.
+Boundary validation is unchanged at 41 modules and 90 edges; validator-test,
+catalogue, database, selective-component, and diff checks pass. A dedicated
+public-header consumer fixture was not added: no public signature or type
+surface changed, and the header already compiles as part of the regular
+`Collections.Core` build and test target, so a new standalone fixture would
+not exercise anything the existing build does not already cover.
+
+**Planning-accuracy note (2026-07-27, discovered while selecting ticket
+#1778):** SR-AUD-362 (`FrozenDictionary::Create` "silently overwrites
+duplicate keys") was reviewed against the current .NET reference
+(`/rv/tmp/runtime/src/libraries/System.Collections.Immutable/src/System/Collections/Frozen/FrozenDictionary.cs`)
+while choosing between it and SR-AUD-360 as the next signature-compatible
+candidate. .NET's own doc-comment on `FrozenDictionary.Create` and
+`ToFrozenDictionary` states that last-value-wins is the *intended* behavior,
+explicitly contrasted with `Enumerable.ToDictionary`'s throw-on-duplicate
+behavior ("If the same key appears multiple times in the input, the latter
+one in the sequence takes precedence. This differs from
+`Enumerable.ToDictionary`, with which multiple duplicate keys will result in
+an exception."), and `GetExistingFrozenOrNewDictionary`/`CreateFromDictionary`
+deliberately use the indexer rather than `Add` "to avoid throwing and to
+overwrite existing entries such that last one wins." sharp-runtime's current
+`FrozenDictionary::Create` already implements exactly this. SR-AUD-362's
+premise -- that .NET's factory "rejects duplicate keys" -- does not hold
+against the actual .NET source. This finding was left untouched: not
+selected, not reopened as a new ticket (the active-ticket-queue rule permits
+only one ticket per session), and its `confirmed` status in the index was not
+changed, since correcting it is a documentation-only action distinct from
+this ticket's SR-AUD-360 remediation. It is recorded here for future
+correction rather than silently acted on.
+
+Ticket #1778 remains the only new inactive-follow-up-free closure; no separate
+defect was discovered during its implementation.

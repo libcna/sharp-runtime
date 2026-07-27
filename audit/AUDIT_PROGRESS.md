@@ -8,10 +8,10 @@
 - Eligible files: 1,748.  Excluded tracked files: 33.
 - Completed per-file reports: 1,748 (100.0% of eligible scope; 1,699/1,699 runtime-module files).
 - Findings confirmed at audit closure: 364 (ninety-one high, two hundred
-  sixty-two medium, eleven low). The post-audit index now has 357 open
-  `confirmed` findings (eighty-seven high, two hundred sixty medium, ten
-  low) and 7 `remediated` findings (SR-AUD-089, SR-AUD-090, SR-AUD-356,
-  SR-AUD-357, SR-AUD-358, SR-AUD-363, SR-AUD-364). Open risks: 2
+  sixty-two medium, eleven low). The post-audit index now has 356 open
+  `confirmed` findings (eighty-seven high, two hundred fifty-nine medium, ten
+  low) and 8 `remediated` findings (SR-AUD-089, SR-AUD-090, SR-AUD-356,
+  SR-AUD-357, SR-AUD-358, SR-AUD-360, SR-AUD-363, SR-AUD-364). Open risks: 2
   documented-adaptation questions.
 
 ## Post-audit remediation checkpoint
@@ -123,6 +123,36 @@ public-header consumer fixture extended to cover throw/catch through
 `System::Exception` compiles and runs under `-Werror`. No public signature,
 virtual member, or inheritance changed, so this is neither a source nor an ABI
 break. Findings index: 357 open `confirmed`, 7 `remediated`.
+
+Ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`, P2, size S) remediated
+SR-AUD-360 on 2026-07-27 on local branch
+`feature/remediation-coll-concurrentdict-addorupdate`; the findings index now
+records **356 open findings and eight `remediated`**. `ConcurrentDictionary`'s
+two `AddOrUpdate` overloads unconditionally overwrote the entry with the
+update factory's result even when another thread had mutated or removed it
+between the observed read and the write-back, silently discarding the
+intervening write. Real .NET's `TryUpdateInternal` instead gates the commit
+on `EqualityComparer<TValue>.Default.Equals` against the previously observed
+value and retries (re-observes, re-invokes the factory) on a mismatch. Both
+overloads now loop the same way, still without holding the internal mutex
+across either factory call, preserving the existing reentrancy/deadlock-
+avoidance guarantee. This requires `TValue::operator==`, the same requirement
+`TryUpdate` on this class already carries; no public signature changed and no
+virtual member was added or removed, so this is neither a source nor an ABI
+break. Pre-fix reproduction (gitignored
+`build-probe-concurrentdict/probe1_lost_update.cpp`) deterministically
+reproduced the finding's own `add-or-update-result=1 final=1` symptom (5/5
+runs); post-fix, the same probe and a 16-thread/32,000-operation stress probe
+both pass cleanly under ASan+UBSan+ThreadSanitizer. Closure evidence: 4 new
+permanent regressions in `ConcurrentDictionaryTests.cpp`;
+`SharpRuntimeTests_Collections_Core` 1,736/1,736 (was 1,732); network-permitted
+`scripts/local_ci_check.sh build` 13,021/13,021 across 37 executables, zero
+warnings/errors (was 13,017); boundaries unchanged at 41 modules/90 edges;
+validator tests 7/7; catalogue current; database consistent; `git diff --check`
+clean. Doxygen was independently found already at 1,944 warnings before this
+ticket's changes (not the 1,942 figure recorded elsewhere in this document);
+this ticket adds zero new warnings, so it did not introduce that drift --
+see the ticket's planning notes for the measurement.
 
 ## Initial validation evidence
 

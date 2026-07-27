@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,777 rows: 1,775 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), and ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`) — one `wontfix` (#1772, obsoleted by #1771), and one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep); no `todo`, `doing`, or `needs_user` rows |
+| `ticket` | 1,778 rows: 1,776 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), and ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`) — one `wontfix` (#1772, obsoleted by #1771), and one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep); no `todo`, `doing`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -436,6 +436,41 @@ remains `blocked`. Evidence: the 225 focused `CopyTo` tests and the full
 successfully; a full `scripts/local_ci_check.sh build` gate passed
 13,017/13,017 tests across 37 executables with zero warnings/errors; and
 Doxygen 1.9.8 stayed at exactly 1,942/1,942 — unchanged, at the ceiling.
+
+Ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`, P2, size S), opened and
+closed 2026-07-27 on local branch
+`feature/remediation-coll-concurrentdict-addorupdate`, then remediated
+SR-AUD-360: `ConcurrentDictionary::AddOrUpdate` (both overloads) snapshotted
+the existing value, ran the update factory outside the lock, then
+unconditionally overwrote the entry with the factory's result even if another
+thread had mutated or removed the entry meanwhile, silently discarding the
+intervening write. Real .NET's `TryUpdateInternal` gates the commit on
+`EqualityComparer<TValue>.Default.Equals` against the previously observed
+value and retries (re-observes, re-invokes the factory) on a mismatch. Both
+overloads now loop the same way, still never holding the internal mutex
+across either factory call, and require `TValue::operator==` — the same
+requirement `TryUpdate` on this class already carries. No public signature
+changed and no virtual member was added or removed, so this is neither a
+source nor an ABI break. Selected over the only other signature-compatible
+candidate, SR-AUD-362 (`FrozenDictionary::Create` duplicate keys), after
+checking SR-AUD-362 against the current .NET `FrozenDictionary.cs` source and
+finding its premise does not hold: .NET's own doc-comment states
+last-value-wins is the intended `Create`/`ToFrozenDictionary` behavior,
+contrasted explicitly with `Enumerable.ToDictionary`'s throw-on-duplicate
+behavior, and sharp-runtime's current implementation already matches it.
+SR-AUD-362 was left untouched, not selected, and not reopened as a second
+ticket; see `audit/AUDIT_FINAL_REPORT.md`'s planning-accuracy note.
+SR-AUD-359 (`ReadOnlyDictionary::Empty`) and SR-AUD-361
+(`SortedSet::GetViewBetween`) were set aside per NEXT.md's own note that they
+may need a public-surface design decision. Evidence: a deterministic
+coordinated-thread pre-fix reproduction (gitignored
+`build-probe-concurrentdict/probe1_lost_update.cpp`) matching the finding's
+own `add-or-update-result=1 final=1` symptom, clean post-fix under
+ASan+UBSan+ThreadSanitizer plus a 16-thread/32,000-operation TSan stress
+probe; 4 new permanent regressions in `ConcurrentDictionaryTests.cpp`;
+`Collections.Core` 1,736/1,736 (was 1,732); and a full
+`scripts/local_ci_check.sh build` gate of 13,021/13,021 tests across 37
+executables with zero warnings/errors (was 13,017).
 
 No repair ticket is active.
 
