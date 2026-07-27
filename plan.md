@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-27 — 41 physical components, 90 direct production
-dependency edges, a clean native build, 12,921 passing tests across 37
+dependency edges, a clean native build, 12,991 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
 is recorded as audit finding `SR-AUD-001`.*
@@ -36,7 +36,7 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 12,921 passing across 36 component binaries plus one integration
+- Tests: 12,991 passing across 36 component binaries plus one integration
   binary.
 - Component graph: 41 physical modules and 90 direct production edges.
 - Boundary validator: no cycles, duplicate public include paths, orphan
@@ -292,7 +292,7 @@ The first consumer-driven ports after modularization added:
 - XML schema exception types.
 
 The verified test baseline grew from 12,494 at the modularization checkpoint
-to 12,921, most recently through the post-audit remediation regressions.
+to 12,991, most recently through the post-audit remediation regressions.
 
 ## Completed repository audit
 
@@ -319,9 +319,10 @@ approved, bounded tickets.
 ## Candidate roadmap
 
 The audit is complete. Ticket #1767 remediated SR-AUD-356 and SR-AUD-364 /
-CCF-018, tickets #1768/#1769 remediated SR-AUD-357 / CCF-019, and tickets
-#1770/#1771 remediated SR-AUD-358 / CCF-020. The findings index therefore
-retains 364 original findings while recording 360 as open `confirmed` and four
+CCF-018, tickets #1768/#1769 remediated SR-AUD-357 / CCF-019, tickets
+#1770/#1771 remediated SR-AUD-358 / CCF-020, and ticket #1775 remediated
+SR-AUD-363. The findings index therefore
+retains 364 original findings while recording 359 as open `confirmed` and five
 as `remediated`. Post-audit remediation is the active priority; optional P2
 breadth stays behind confirmed safety defects.
 
@@ -365,6 +366,31 @@ the destination's length is positive; a non-empty collection copied into a
 zero-length destination still fails, but on capacity, not nullness. SR-AUD-358
 remains `remediated` — this did not reopen it. See
 [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md) section 22.
+
+Ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`, P1, size M), opened and closed
+2026-07-27 on local branch `feature/remediation-coll-hashtable-views`, then
+remediated SR-AUD-363, taking the index to 359 open `confirmed` findings and
+five `remediated`. `Hashtable::getKeysProperty()`/`getValuesProperty()`
+returned `nullptr` although `IDictionary` documents each as returning an
+`ICollection` over the keys/values, so a contract-following consumer
+null-dereferenced (ASan-confirmed SEGV) while the sibling
+`ListDictionaryInternal` answered identical caller code correctly; and the
+raw-key entry points stringified a null key as the address text `"0"`, which
+also aliased the ordinary string key `"0"`. Both properties now return a live,
+caller-owned `MemberCollection` reusing the #1771/#1774 copy boundary, and
+`toKey()` is the single validating conversion site every raw-key path passes
+through. No public signature changed and no virtual member was added or
+removed, so this is neither a source nor an ABI break. Evidence: 70 permanent
+regressions parameterised over both non-generic `IDictionary` implementations,
+clean under ASan + UBSan + LeakSanitizer; Collections.Core 1,732/1,732; a
+`-Werror` standalone consumer fixture; and a 12,991/12,991 full gate.
+
+Two separate pre-existing defects found during #1775 are recorded as inactive
+tickets rather than folded in: #1776 (`System::ArgumentNullException(paramName)`
+emits its `(Parameter 'x')` suffix twice) and #1777 (four typed `CopyTo`
+doc-comments still describe ticket #1771's superseded null-destination rule).
+Neither is a new audit identifier — SR-AUD-001..364 stays frozen.
+
 No repair ticket is active.
 
 ### P2 — Consumer-driven API breadth

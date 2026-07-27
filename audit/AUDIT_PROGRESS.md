@@ -8,9 +8,10 @@
 - Eligible files: 1,748.  Excluded tracked files: 33.
 - Completed per-file reports: 1,748 (100.0% of eligible scope; 1,699/1,699 runtime-module files).
 - Findings confirmed at audit closure: 364 (ninety-one high, two hundred
-  sixty-two medium, eleven low). The post-audit index now has 360 open
-  `confirmed` findings (eighty-eight high, two hundred sixty-one medium, eleven
-  low) and 4 `remediated` findings. Open risks: 2
+  sixty-two medium, eleven low). The post-audit index now has 359 open
+  `confirmed` findings (eighty-eight high, two hundred sixty medium, eleven
+  low) and 5 `remediated` findings (SR-AUD-356, SR-AUD-357, SR-AUD-358,
+  SR-AUD-363, SR-AUD-364). Open risks: 2
   documented-adaptation questions.
 
 ## Post-audit remediation checkpoint
@@ -72,6 +73,39 @@ unchanged from before the ticket, because the README link to the new migration
 document adds one instance of the pre-existing unresolved-markdown-link warning
 shared by every README documentation link, offsetting one removed from
 `ICollection.hpp`.
+
+Ticket #1775 then remediated SR-AUD-363 (Hashtable `IDictionary` key and view
+contracts) on 2026-07-27. It belongs to no `CCF-*` group. Two facts beyond the
+original evidence were established by direct probe first: a consumer that
+follows the `IDictionary` documentation and uses the promised view without a
+null check is an ASan-confirmed SEGV plus a UBSan `member access within null
+pointer of type 'struct ICollection'`, while the sibling
+`ListDictionaryInternal` answers the identical caller code correctly — making
+this an interface defect with divergent implementations rather than a
+Hashtable-local omission; and the stringified null key `"0"` aliases the
+ordinary string key `"0"`, while a third entry point, `Remove(const char*)`,
+terminated on `std::string`'s null construction with a `std::logic_error`
+invisible to code catching `System::Exception&`. Both view properties now
+return a live, caller-owned `MemberCollection` delegating `Count`, `SyncRoot`,
+`IsSynchronized`, `GetEnumerator`, and `copyToCore` to the owning table and
+reusing the #1771/#1774 copy boundary unchanged; `toKey()` became the single
+validating conversion site every raw-key path passes through. No public
+signature changed and no virtual member was added or removed, so this is
+neither a source nor an ABI break. Permanent regressions pass 70/70 —
+parameterised over both non-generic `IDictionary` implementations — and 70/70
+again under ASan + UBSan + LeakSanitizer with no diagnostic and no leak; the
+33-assertion replacement probe reports `failures=0`; Collections.Core passes
+1,732/1,732; the standalone `Collections.Core` public-header consumer fixture
+compiles with `-Werror` and runs successfully; and the network-permitted
+`scripts/local_ci_check.sh build` gate passes 12,991/12,991 tests across 37
+executables with zero warnings/errors. Module boundaries remain 41/90;
+validator-test, catalogue, database, selective-component, and diff checks
+pass, and Doxygen stays at exactly 1,942/1,942.
+
+Two separate pre-existing defects surfaced while implementing #1775 are
+recorded as inactive tickets #1776 and #1777 rather than as new audit
+identifiers: the frozen SR-AUD-001..364 numbering is not extended for
+post-audit discoveries.
 
 ## Initial validation evidence
 

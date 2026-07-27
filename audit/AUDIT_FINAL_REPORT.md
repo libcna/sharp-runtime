@@ -8,7 +8,8 @@ under `audit/<source-path>.audit.md`; the 1,699 runtime-module files are also
 fully covered. No production source or test was changed during this phase.
 
 At audit closure, the findings index recorded 364 confirmed issues. It now
-retains all 364 entries while marking 360 `confirmed` and four `remediated`:
+retains all 364 entries while marking 359 `confirmed` and five `remediated`
+(SR-AUD-356, SR-AUD-357, SR-AUD-358, SR-AUD-363, and SR-AUD-364):
 
 | Severity | Count |
 |---|---:|
@@ -167,3 +168,62 @@ and CCF-020 remain `remediated` — this did not reopen either finding. Evidence
 standalone probe `build-probe-copyto/probe10_empty_span_correction.cpp` passes
 under ASan + UBSan + LeakSanitizer with zero diagnostics and zero leaks.
 Recorded in section 22 of `docs/ICollectionCopyToDesign.md`.
+
+Ticket #1775 completed the fourth bounded batch on 2026-07-27 and remediates
+SR-AUD-363; the findings index now records **359 open findings and five
+`remediated`**. The original audit evidence remains in place. `Hashtable`
+violated two public `IDictionary` contracts: `getKeysProperty()` and
+`getValuesProperty()` returned `nullptr` although the interface documents each
+as returning an `ICollection` over the keys/values, and the raw-key entry
+points stringified a null key as the address text `"0"`.
+
+Two facts beyond the original evidence were established by direct probe before
+the repair. First, the null view is an ASan-confirmed SEGV plus a UBSan
+`member access within null pointer of type 'struct ICollection'` for a consumer
+that follows the interface documentation, while the sibling
+`ListDictionaryInternal` answers the *identical* caller code correctly — so
+this is an interface defect with divergent implementations, not a
+Hashtable-local omission. Second, the stringified null key aliases the ordinary
+string key `"0"` accepted by the `Add(const std::string&, const std::any&)`
+overload, and a third null-key entry point, `Remove(const char*)`, terminated
+on `std::string`'s null construction with a `std::logic_error` invisible to
+code catching `System::Exception&`.
+
+Both properties now return a live, caller-owned `MemberCollection` whose
+`Count`, `SyncRoot`, `IsSynchronized`, `GetEnumerator`, and `copyToCore`
+delegate to the owning table, following the
+`ListDictionaryInternal::MemberCollection` precedent and matching .NET's
+`KeyCollection`/`ValueCollection`; the views reuse the #1771/#1774 copy
+boundary unchanged. `toKey()` is now the single validating conversion site
+every raw-key path passes through, so no entry point can skip the null check
+and no non-null address stringifies to `"0"`. `IDictionary`'s own `@return`
+documentation was corrected from "lifetime managed by the concrete dictionary",
+which neither implementation nor any caller did, to the implemented rule:
+non-null, live, and caller-owned. No public signature changed and no virtual
+member was added or removed, so unlike #1771 this is neither a source nor an
+ABI break.
+
+Closure evidence is 70 permanent regressions in
+`DictionaryKeyAndViewContractTests.cpp` whose view cases are parameterised over
+both non-generic `IDictionary` implementations (also 70/70 under ASan + UBSan +
+LeakSanitizer with no diagnostic and no leak), a 33-assertion replacement probe
+reporting `failures=0` on the previously fatal scenarios plus liveness,
+non-trivial values, a 20,000-entry table and destruction order,
+1,732/1,732 Collections.Core tests, a standalone `Collections.Core`
+public-header consumer fixture compiled with `-Werror` and executed
+successfully, and a network-permitted `scripts/local_ci_check.sh build` run of
+12,991/12,991 tests across 37 executables with zero build warnings/errors.
+Boundary validation is unchanged at 41 modules and 90 edges; validator-test,
+catalogue, database, selective-component, and diff checks pass, and Doxygen
+1.9.8 remains at exactly 1,942 warnings, at the ceiling and unchanged.
+
+Two separate pre-existing defects found while implementing #1775 are recorded
+as inactive tickets rather than folded into it, and are **not** new audit
+findings — SR-AUD-001 through SR-AUD-364 stay frozen at their closure numbering:
+ticket #1776 (`System::ArgumentNullException(paramName)` emits its
+`(Parameter 'x')` suffix twice, because its own `makeMsg()` appends it and the
+`ArgumentException(message, paramName)` base appends it again) and ticket #1777
+(four typed `CopyTo` doc-comments still describe ticket #1771's superseded
+null-destination rule). #1775's assertions deliberately check exception type,
+parameter name, and leading message text rather than an exact string, so they
+stay correct once #1776 lands.

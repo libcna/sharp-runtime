@@ -3,10 +3,11 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-27. Branch: `feature/remediation-coll-copyto`. The P0
+*Last verified: 2026-07-27. Branch: `feature/remediation-coll-hashtable-views`.
+The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 12,921 tests across 37 executables. The repository-wide,
+dependency edges, and 12,991 tests across 37 executables. The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766). Remediation
 tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design),
 #1769 (LinkedListNode lifetime implementation), #1770 (raw `ICollection::CopyTo`
@@ -17,7 +18,13 @@ node contract is recorded in
 boundary in [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md)
 (see its section 22 for the #1774 correction), with consumer guidance in
 [`docs/Migration-ICollectionCopyTo.md`](docs/Migration-ICollectionCopyTo.md).
-No ticket is active. #1771 removed the pure virtual `CopyTo(void*, intcs)` from
+Ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`, P1, size M) is also complete: it
+restored the `Hashtable` `IDictionary` key and view contracts for SR-AUD-363,
+which is now `remediated`. **No ticket is active.** Newly recorded inactive
+follow-ups are #1776 (`ArgumentNullException` doubles its parameter suffix) and
+#1777 (four typed `CopyTo` doc-comments cite ticket #1771's superseded rule);
+neither is a new audit identifier. #1771 removed the pure virtual
+`CopyTo(void*, intcs)` from
 `System::Collections::ICollection` under explicit user approval, so this is a
 source- and ABI-breaking release for downstream consumers, which must rebuild.
 #1774 then corrected #1771's validation rule so that a null-pointer destination
@@ -290,6 +297,111 @@ catalogue current, database consistent, the ten-job selective matrix green,
 unchanged from the #1771 ceiling, since the one new markdown link this ticket
 added to `README.md` was written without link syntax specifically to avoid
 adding a second instance of the pre-existing unresolved-markdown-link warning.
+
+### Completed Hashtable key/view remediation: ticket #1775
+
+**`P1: Restore the Hashtable IDictionary key and view contracts`**
+(`REMED-COLL-HASHTABLE-VIEWS`, SR-AUD-363, size M) is **done**, opened and
+closed 2026-07-27 on local branch `feature/remediation-coll-hashtable-views`.
+
+It was selected from the "Recommended dependency order" below, whose step 1 now
+has exactly one remaining bullet — SR-AUD-359 through SR-AUD-363 — because the
+enumerator lifecycle (#1767), node lifetime (#1768/#1769), and raw-output
+(#1770/#1771/#1774) contracts are all stable. All five of those findings are
+`medium`, so the tie was broken on the documented rule of preferring a coherent
+interface/ownership defect: SR-AUD-363 is the last non-generic `IDictionary`
+contract hole, and it reuses the very `ICollection` copy boundary #1771 built.
+
+Bounded scope — the two defects the finding records, and nothing else:
+
+1. `Hashtable::getKeysProperty()` / `getValuesProperty()` return `nullptr`
+   although `IDictionary` documents each as returning an `ICollection` over the
+   dictionary's keys/values. The sibling `ListDictionaryInternal` in the same
+   component already returns a real `MemberCollection`, so identical
+   `IDictionary*` caller code is safe against one implementation and fatal
+   against the other.
+2. The raw-key entry points stringify a null key as the address text `"0"`, so
+   `Add(nullptr, value)`, `setItem`, `getItem`, `Contains`, and `Remove` accept
+   a null key instead of throwing `ArgumentNullException`, and that stringified
+   null key aliases the ordinary string key `"0"` accepted by the
+   `Add(std::string, std::any)` overload.
+
+Explicitly excluded: SR-AUD-359 (`ReadOnlyDictionary::Empty`), SR-AUD-360
+(`ConcurrentDictionary::AddOrUpdate`), SR-AUD-361 (`SortedSet::GetViewBetween`),
+SR-AUD-362 (`FrozenDictionary::Create` duplicates), and every remediated
+finding. No public signature changed and no virtual member was added or removed,
+so unlike #1771 this is **not** a source- or ABI-breaking change; ticket #1773
+stayed blocked and untouched.
+
+Three facts beyond the audit summary were established by direct probe before
+any change (`build-probe-hashtable/probe1_current_boundary.cpp`, gitignored):
+
+- the null view is not merely a missing feature — a consumer that follows the
+  `IDictionary` documentation is an ASan-confirmed SEGV plus a UBSan
+  `member access within null pointer of type 'struct ICollection'`, while
+  `ListDictionaryInternal` answers the *identical* caller code correctly;
+- the stringified null key `"0"` aliases the ordinary string key `"0"`: after
+  `Add(nullptr, v)`, `ContainsKey("0")` is true and `Add("0", …)` is rejected
+  as a duplicate of an entry the caller never added;
+- a third null-key entry point exists — `Remove(const char*)` reached
+  `std::string`'s null construction and terminated with a `std::logic_error`
+  invisible to code catching `System::Exception&`.
+
+Selected repair: both view properties return a live, **caller-owned**
+`MemberCollection` whose `Count`, `SyncRoot`, `IsSynchronized`,
+`GetEnumerator`, and `copyToCore` delegate to the owning table — the
+`ListDictionaryInternal::MemberCollection` precedent already in this component,
+and the closest available match to .NET's `KeyCollection`/`ValueCollection`.
+.NET can hand back a *cached* view because the GC owns it; this port has no GC,
+so a returned reference type is caller-owned exactly as `GetEnumerator()` is
+throughout the port. The views reuse the #1771/#1774 copy boundary unchanged.
+`toKey()` became the single validating conversion site every raw-key path
+passes through, so no entry point can skip the null check — the same
+structurally-unskippable shape `detail::requireValidCopyDestination` gave the
+copy boundary. `IDictionary`'s own `@return` documentation, which claimed the
+concrete dictionary manages the view lifetime (something neither implementation
+nor any caller did), now states the implemented rule.
+
+Closure evidence:
+
+- 70 permanent regressions in `DictionaryKeyAndViewContractTests.cpp`; because
+  the root cause is an *interface* defect, the view cases are parameterised
+  over both non-generic `IDictionary` implementations, so neither can regress
+  to a null or snapshot view;
+- the same 70 tests pass under ASan + UBSan + LeakSanitizer with no diagnostic
+  and no leak (leak detection verified active by a deliberate-leak self-test);
+- the replacement probe `build-probe-hashtable/probe2_fixed_boundary.cpp` runs
+  the previously fatal scenarios plus liveness, non-trivial values, a
+  20,000-entry table, and destruction order with `failures=0`;
+- `SharpRuntimeTests_Collections_Core` 1,732/1,732 (was 1,662);
+- `test/consumer/collections_dictionary_views.cpp` compiles `-Werror` against
+  only `SharpRuntime::Collections.Core` and runs successfully;
+- network-permitted `scripts/local_ci_check.sh build`: 12,991/12,991 tests
+  across 37 executables (was 12,921), zero warnings/errors, with the six
+  local-server `Net.Http` cases passing;
+- boundaries 41 modules/90 edges, validator tests 7/7, catalogue current,
+  database consistent, the ten-job selective matrix green, `git diff --check`
+  clean, and Doxygen 1.9.8 at exactly 1,942/1,942 — unchanged, at the ceiling.
+
+Two separate **pre-existing** defects found while implementing this are
+recorded as inactive tickets rather than folded in, and are deliberately *not*
+new `SR-AUD-*` identifiers, since the audit numbering is frozen at 364:
+
+- **#1776** (`REMED-CORE-ARGNULL-MESSAGE`, P2, XS) —
+  `System::ArgumentNullException(paramName)` emits its `(Parameter 'x')` suffix
+  **twice**: its own `makeMsg()` appends it and the
+  `ArgumentException(message, paramName)` base appends it again. Every
+  `ArgumentNullException(paramName)` call site inherits the doubled text,
+  including the copy boundary's `ArgumentNullException("destination")`. #1775's
+  assertions therefore check the exception type, `getParamNameProperty()`, and
+  the leading `"Value cannot be null."` text rather than an exact string, so
+  they stay correct once #1776 lands.
+- **#1777** (`REMED-COLL-COPYTO-DOC-SYNC`, P3, XS) — the typed
+  `CopyTo(std::vector<T>&, intcs)` doc-comments on `Hashtable` (:87),
+  `Queue` (:73), `Stack` (:73), and `ListDictionaryInternal` (:165) still say
+  `@throws ArgumentNullException if destination has no storage`, which ticket
+  #1774 superseded. Documentation only; it does **not** reopen SR-AUD-358 or
+  CCF-020.
 
 ### Nominal 500-hour first remediation programme
 
@@ -1610,6 +1722,18 @@ one reproduction changes shape.
    - Then take SR-AUD-359 through SR-AUD-363 as small semantic/concurrency
      tickets after the lifetime and raw-output decisions have a stable
      contract.  They are not substitutes for the three safety boundaries.
+     SR-AUD-363 is **done** (ticket #1775, the Hashtable `IDictionary` key and
+     view contracts).  The four that remain are SR-AUD-359
+     (`ReadOnlyDictionary::Empty` is an assignable process-static singleton),
+     SR-AUD-360 (`ConcurrentDictionary::AddOrUpdate` overwrites an intervening
+     write instead of retrying), SR-AUD-361 (`SortedSet::GetViewBetween`
+     returns a detached snapshot rather than a live write-through view), and
+     SR-AUD-362 (`FrozenDictionary::Create` accepts duplicate keys
+     last-value-wins).  Note that SR-AUD-359 and SR-AUD-361 are the two whose
+     natural repairs may need a public-surface decision — changing `Empty()`'s
+     returned reference, and making a range view write through — so each may
+     warrant a design-first ticket the way SR-AUD-357 and SR-AUD-358 did.
+     SR-AUD-360 and SR-AUD-362 look implementable without any signature change.
 
 2. **Take self-contained ASan/UBSan-backed public-input failures next.**
    SR-AUD-338 and SR-AUD-341 (null text-stream and `MemoryStream`
@@ -1713,9 +1837,10 @@ HTTP, socket, and ping tests require permission for local network operations.
 2. Inspect `git status --short --branch`, `audit/AUDIT_PROGRESS.md`, and the
    selected finding's mirrored reports and current implementation/tests.  Do
    not search for a new audit shard: the 1,748-file audit is complete.
-3. Tickets #1767, #1768, #1769, #1770, #1771, and #1774 are complete and no
-   ticket is active; preserve their permanent regressions, the two recorded
-   designs, and the retained audit evidence.
+3. Tickets #1767, #1768, #1769, #1770, #1771, #1774, and #1775 are complete and
+   no ticket is active; preserve their permanent regressions, the two recorded
+   designs, and the retained audit evidence. Inactive follow-up tickets #1776
+   and #1777 are recorded but not started.
 4. The LinkedListNode lifetime contract is recorded in
    `docs/LinkedListNodeLifetime.md` and implemented. Do not redesign it, do not
    reopen SR-AUD-357, and keep `LinkedListNodeLifetimeTests.cpp` and
@@ -1743,11 +1868,15 @@ HTTP, socket, and ping tests require permission for local network operations.
    durable replacement for the probes, which live in the gitignored
    `build-probe-copyto/` directory and are reproducible from sections 17 and 21
    of the design record. Cleanup ticket #1772 is `wontfix` (its work happened
-   inside #1771). The only open follow-up is inactive ticket #1773
-   (`REMED-COLL-COPYTO-DOWNSTREAM`, P2, size S): sweep CNA and mobile-eggbert
-   for `CopyTo` calls and rebuild them against the new vtable, per
-   `docs/Migration-ICollectionCopyTo.md` §9. Neither repository is in this
-   checkout, so do not guess at their usage or modify them from here.
+   inside #1771). The only open follow-up is ticket #1773
+   (`REMED-COLL-COPYTO-DOWNSTREAM`, P2, size S), which stays **blocked**:
+   deferred until CNA and mobile-eggbert intentionally upgrade to a
+   sharp-runtime revision containing the `ICollection` `CopyTo` ABI change.
+   No downstream usage or compatibility claim has been made yet. It would
+   sweep those repositories for `CopyTo` calls and rebuild them against the new
+   vtable, per `docs/Migration-ICollectionCopyTo.md` §9. Neither repository is
+   in this checkout, so do not guess at their usage, inspect them, or modify
+   them from here.
 7. Follow-up ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`, P1, size XS) is
    **done**. It corrected `detail::requireValidCopyDestination` so a null
    pointer is rejected only when paired with a *positive* length — a
