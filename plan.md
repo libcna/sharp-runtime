@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,769 rows, all `done`, including audit ticket #1766 and post-audit remediation tickets #1767, #1768, and #1769; no `todo`, `doing`, `blocked`, or `needs_user` rows |
+| `ticket` | 1,772 rows: 1,770 `done` — including audit ticket #1766 and post-audit tickets #1767, #1768, #1769, and #1770 — plus two deliberately inactive `blocked` rows, #1771 and #1772, awaiting approval of the `ICollection::CopyTo` public-API break; no `todo`, `doing`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -188,6 +188,18 @@ assertion without an explicit architecture decision.
   consumer fixture, 1,484 Collections.Core tests, and the network-permitted
   12,743-test repository gate pass; Doxygen stays at 1,941/1,942. The contract
   is recorded in [`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md).
+- Completed the SR-AUD-358 / CCF-020 raw-`CopyTo` design under ticket #1770, a
+  design-only ticket that changed no production or test source. The selected
+  contract — a length-aware, statically typed `System::Span<std::any>`
+  destination behind a non-virtual `ICollection`, so capacity and element type
+  are validated exactly once before any implementation writes — is recorded in
+  [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md). Seven
+  repository-local probes back it, including a clean ASan/UBSan/LeakSanitizer
+  `-Werror` prototype and a re-verification that the current boundary still
+  produces three sanitizer aborts plus one silent, LeakSanitizer-only
+  element-type corruption. SR-AUD-358 stays `confirmed`; implementation is
+  inactive ticket #1771, gated on explicit approval of the narrow public-API
+  break.
 - Added consumer-driven coverage across core, collections, IO, networking,
   threading/tasks, text/JSON, XML, numerics, globalization, and cryptographic
   hashing/random APIs.
@@ -288,11 +300,22 @@ Implementation ticket #1769 (`REMED-COLL-LINKED-NODE`) completed it, so the
 index now records 361 open `confirmed` findings and three `remediated`. No
 repair ticket is active.
 
-The next bounded decision is SR-AUD-358 / CCF-020: a design-first, typed or
-length-aware `ICollection::CopyTo` boundary. It must inventory the ArrayList,
-Queue, Stack, Hashtable, and ListDictionaryInternal callers and make its
-compatibility boundary explicit before any production change; it must not be
-combined with a concrete-collection symptom patch.
+Design ticket #1770 then answered SR-AUD-358 / CCF-020. It inventoried all six
+`ICollection` implementations, the three test call sites, and the zero
+production callers of the raw boundary; compared them with the current .NET
+`ICollection.CopyTo(Array, int)` sources; and selected a length-aware, statically
+typed `System::Span<std::any>` destination behind a non-virtual `ICollection`,
+recorded in [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md).
+No production change was made, so SR-AUD-358 stays `confirmed` and the index
+still records 361 open findings and three `remediated`.
+
+The next bounded decision is therefore whether to approve the narrow
+public-API break that the design requires — removing the pure virtual
+`CopyTo(void*, intcs)` from `System::Collections::ICollection`, which
+`plan.md`'s "Requires explicit user direction" list covers. Implementation
+ticket #1771 (`REMED-COLL-COPYTO`, P0, size M) and cleanup ticket #1772
+(`REMED-COLL-COPYTO-CLEANUP`, P2, size XS) are proposed and inactive until that
+approval. Neither may be combined with a concrete-collection symptom patch.
 
 ### P2 — Consumer-driven API breadth
 

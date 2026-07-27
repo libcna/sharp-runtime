@@ -448,6 +448,26 @@ ASan-confirmed. This is a shared interface-design fault rather than five
 independent bounds omissions. A safe repair needs a typed/length-aware adapter
 or a deliberately constrained API migration. See SR-AUD-358 and:
 
+**Design status (ticket #1770, 2026-07-27): DESIGN-COMPLETE — NOT REMEDIATED.**
+SR-AUD-358 remains `confirmed`; the original evidence above and in the per-file
+reports is retained unchanged. Design-only ticket #1770 recorded the selected
+contract in `docs/ICollectionCopyToDesign.md` and established two facts beyond
+the original evidence, by direct probe against the current headers: the six
+implementations disagree on the destination element type (`std::any*`, `void**`,
+`DictionaryEntry*` — sizes 16/8/32), so no `ICollection*` caller can allocate a
+correct destination; and an element-type mismatch through the interface produces
+no crash at all, only a LeakSanitizer-confirmed 32-byte leak from
+`Hashtable::CopyTo`. Both confirm this is one interface-design fault, not five
+bounds omissions. Selected: a length-aware, statically typed `Span<std::any>`
+destination behind a non-virtual interface, so validation runs exactly once in
+`ICollection` before any implementation writes; `CopyTo(void*, intcs)` leaves
+the virtual interface and is retained briefly as a deprecated, never-writing
+shim. .NET's rank, non-zero-lower-bound, and element-type-mismatch diagnostics
+are intentionally unsupported because they require a runtime `Array` object and
+a working `System::Type`, both permanently out of scope. Implementation is
+proposed as inactive ticket #1771 and is gated on explicit user approval of the
+narrow public-API break.
+
 - `modules/collections/include/System/Collections/ICollection.hpp.audit.md`;
 - `modules/collections/include/System/Collections/ArrayList.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Queue.hpp.audit.md`;

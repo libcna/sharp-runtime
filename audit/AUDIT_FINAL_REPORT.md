@@ -100,3 +100,22 @@ catalogue, database, selective-component, and diff checks pass, and Doxygen
 1.9.8 remains at 1,941 warnings with no new warning from the touched headers.
 The JsonNode (SR-AUD-327) and XML LINQ (SR-AUD-333) members of CCF-019 remain
 open by design.
+
+Design ticket #1770 completed the third bounded batch on 2026-07-27 and made no
+production change. SR-AUD-358 / CCF-020 is **design-complete but still
+`confirmed`**: the findings index therefore still records 361 open findings and
+three `remediated`. The selected contract is recorded in
+`docs/ICollectionCopyToDesign.md` — a length-aware, statically typed
+`System::Span<std::any>` destination behind a non-virtual `ICollection`, so the
+destination's capacity and element type are validated exactly once before any
+implementation writes, with `CopyTo(void*, intcs)` leaving the virtual interface
+and remaining briefly as a deprecated, never-writing shim. Seven repository-local
+compile/sanitizer probes back the design: virtual templates are ill-formed;
+removal cannot silently misbind; the full prototype is clean under
+ASan/UBSan/LeakSanitizer with `-Werror`; derived-class name hiding requires
+`using ICollection::CopyTo;`; the current boundary still reproduces three
+sanitizer aborts plus one silent LeakSanitizer-only element-type corruption; the
+affected public headers compile standalone against `Collections.Core` +
+`Core.Base`; and a retained deprecated overload is a compile error under the
+repository's own `-Werror` policy. Implementation is proposed as inactive ticket
+#1771, gated on explicit user approval of the narrow public-API break.
