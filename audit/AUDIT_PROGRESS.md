@@ -8,8 +8,9 @@
 - Eligible files: 1,748.  Excluded tracked files: 33.
 - Completed per-file reports: 1,748 (100.0% of eligible scope; 1,699/1,699 runtime-module files).
 - Findings confirmed at audit closure: 364 (ninety-one high, two hundred
-  sixty-two medium, eleven low). The post-audit index now has 362 open
-  `confirmed` findings and 2 `remediated` findings. Open risks: 2
+  sixty-two medium, eleven low). The post-audit index now has 361 open
+  `confirmed` findings (eighty-nine high, two hundred sixty-one medium, eleven
+  low) and 3 `remediated` findings. Open risks: 2
   documented-adaptation questions.
 
 ## Post-audit remediation checkpoint
@@ -24,6 +25,23 @@ Module boundaries remain 41/90; catalogue, database, and diff checks pass.
 Doxygen remains below its ceiling at 1,941/1,942. LeakSanitizer initialization
 remains environment-limited by the sandbox's `ptrace` policy, while the same
 probe is clean with ASan and UBSan active.
+
+Design ticket #1768 and implementation ticket #1769 then remediated SR-AUD-357
+(CCF-019, LinkedListNode lifetime) on 2026-07-27. The selected contract is
+recorded in `docs/LinkedListNodeLifetime.md`: independently allocated,
+reference-counted nodes with an explicit null/detached/attached state, so
+`Remove`, `Clear`, and destruction of the owning `LinkedList<T>` detach the node
+and retain its value instead of leaving a dangling `std::list` iterator.
+Permanent regressions pass 49/49, Collections.Core passes 1,484/1,484, the
+standalone `Collections.Core` public-header consumer fixture compiles with
+`-Werror`, and the direct ASan/UBSan probe that produced the original
+heap-use-after-free reports `failures=0` — with LeakSanitizer enabled and
+clean in this run. The network-permitted `scripts/local_ci_check.sh build`
+gate passes 12,743/12,743 tests across 37 executables with zero
+warnings/errors. Module boundaries remain 41/90; validator-test, catalogue,
+database, selective-component, and diff checks pass, and Doxygen stays at
+1,941/1,942 with no new warning from the touched headers. CCF-019's JsonNode
+(SR-AUD-327) and XML LINQ (SR-AUD-333) members remain open by design.
 
 ## Initial validation evidence
 

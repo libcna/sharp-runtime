@@ -348,3 +348,48 @@ break. Implementation proceeds as ticket #1769
 (`REMED-COLL-LINKED-NODE`, size L). Out of scope for both tickets: SR-AUD-358 /
 CCF-020 (`ICollection::CopyTo`), and the JsonNode and XML LINQ members of
 CCF-019, which need their own compatibility review.
+
+## 9. Implementation closure (ticket #1769, 2026-07-27)
+
+The design above was implemented as specified; nothing in sections 3–7 was
+revised during implementation. SR-AUD-357 is `remediated`.
+
+Reproduction commands, all run from the repository root:
+
+```bash
+# Focused component target
+cmake --build build --target SharpRuntimeTests_Collections_Core --parallel 4
+build/SharpRuntimeTests_Collections_Core --gtest_color=no          # 1,484/1,484
+
+# Retained SR-AUD-357 sanitizer reproduction (ASan + UBSan + LeakSanitizer)
+g++ -std=c++23 -g -O0 -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -Imodules/collections/include -Imodules/core/include \
+    -o build-probe-linkednode/probe_sr_aud_357 \
+    build-probe-linkednode/probe_sr_aud_357.cpp \
+    modules/core/src/System/{Exception,ArgumentException,ArgumentNullException,\
+ArgumentOutOfRangeException,InvalidOperationException,SystemException,\
+NullReferenceException}.cpp
+build-probe-linkednode/probe_sr_aud_357                            # failures=0
+
+# Standalone public-header consumer fixture (-Wall -Wextra -Wpedantic -Werror)
+cmake -S test/consumer -B build-consumer-linkedlist \
+  -DSHARP_RUNTIME_SOURCE_DIR="$PWD" -DFIXTURE_COMPONENT=Collections.Core \
+  -DFIXTURE_SOURCE="$PWD/test/consumer/collections_linked_list.cpp" \
+  -DFIXTURE_COMPILE_ONLY=ON -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache
+cmake --build build-consumer-linkedlist --parallel 4
+
+# Repository gates
+python3 scripts/validate_module_boundaries.py --root .
+python3 test/validate_module_boundaries_test.py
+python3 scripts/generate_component_catalog.py --check
+python3 scripts/db_consistency_check.py --db plan.sqlite3
+scripts/check_selective_components.sh
+git diff --check
+scripts/local_ci_check.sh build                                    # 12,743/12,743
+scripts/check_doxygen_warnings.sh                                  # 1,941/1,942
+```
+
+The probe and the consumer fixture are kept: the probe is the audit's original
+memory-safety reproduction and the fixture is the only check that the node
+representation stays inside the public `Collections.Core` surface.

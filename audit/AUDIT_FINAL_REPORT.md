@@ -8,7 +8,7 @@ under `audit/<source-path>.audit.md`; the 1,699 runtime-module files are also
 fully covered. No production source or test was changed during this phase.
 
 At audit closure, the findings index recorded 364 confirmed issues. It now
-retains all 364 entries while marking 362 `confirmed` and two `remediated`:
+retains all 364 entries while marking 361 `confirmed` and three `remediated`:
 
 | Severity | Count |
 |---|---:|
@@ -79,3 +79,24 @@ catalogue, database consistency, and diff checks pass. Doxygen 1.9.8 reports
 not initialize under the sandbox's `ptrace` policy, so its probe was rerun
 with leak detection disabled while AddressSanitizer and UndefinedBehaviorSanitizer
 remained active.
+
+Design ticket #1768 and implementation ticket #1769 completed the second
+bounded batch on 2026-07-27. SR-AUD-357 is marked `remediated` and CCF-019 is
+partially remediated; the original audit evidence remains in place.
+`LinkedListNode<T>` now refers to an independently allocated, reference-counted
+node with an explicit null/detached/attached state, so removal, `Clear`, and
+destruction of the owning `LinkedList<T>` detach the node and retain its value
+instead of leaving a dangling `std::list` iterator. The selected contract is
+recorded in `docs/LinkedListNodeLifetime.md`.
+
+Closure evidence is 49 permanent regressions in
+`LinkedListNodeLifetimeTests.cpp`, 1,484/1,484 Collections.Core tests, a
+standalone `Collections.Core` public-header consumer fixture compiled with
+`-Werror`, a direct ASan/UBSan/LeakSanitizer probe reporting `failures=0` with
+no diagnostic, and a network-permitted `scripts/local_ci_check.sh build` run of
+12,743/12,743 tests across 37 executables with zero build warnings/errors.
+Boundary validation is unchanged at 41 modules and 90 edges; validator-test,
+catalogue, database, selective-component, and diff checks pass, and Doxygen
+1.9.8 remains at 1,941 warnings with no new warning from the touched headers.
+The JsonNode (SR-AUD-327) and XML LINQ (SR-AUD-333) members of CCF-019 remain
+open by design.

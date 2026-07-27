@@ -6,11 +6,12 @@
 *Last verified: 2026-07-27. Branch: `feature/remediation-coll-linked-node`. The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 12,694 tests across 37 executables. The repository-wide,
-evidence-only audit is complete under `audit/` (local ticket #1766); its
-first bounded remediation ticket #1767 is complete and design ticket #1768 has
-recorded the LinkedListNode lifetime contract in
-[`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md).*
+dependency edges, and 12,743 tests across 37 executables. The repository-wide,
+evidence-only audit is complete under `audit/` (local ticket #1766). Remediation
+tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design), and
+#1769 (LinkedListNode lifetime implementation) are complete; the node contract is
+recorded in [`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md).
+No ticket is active.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -28,8 +29,8 @@ handoff text below.
 
 - The configured native build completed successfully with no compiler
   diagnostics.
-- The build currently exposes 12,694 GoogleTest cases across 37 executables.
-  `SharpRuntimeTests_Collections_Core` passed 1,435/1,435.
+- The build currently exposes 12,743 GoogleTest cases across 37 executables.
+  `SharpRuntimeTests_Collections_Core` passed 1,484/1,484 after ticket #1769.
 - Database consistency, component-boundary validation (41 physical modules,
   90 production dependency edges), generated-catalogue freshness, and
   `git diff --check` passed.
@@ -37,12 +38,11 @@ handoff text below.
   such as `audit/.github/` are included. The findings index contains every
   identifier from SR-AUD-001 through SR-AUD-364 exactly once, with no duplicate
   or missing identifier, and every referenced report path exists.
-- The open inventory is 362 findings: 90 high, 261 medium, and 11 low.
-  SR-AUD-356 and SR-AUD-364 are the two remediated findings.
-- The full 12,694-test suite was not rerun during this read-only planning
-  review because local socket cases require network permission. Ticket #1767's
-  recorded network-permitted 12,694/12,694 run remains the latest complete
-  repository gate.
+- The open inventory is 361 findings: 89 high, 261 medium, and 11 low.
+  SR-AUD-356, SR-AUD-357, and SR-AUD-364 are the three remediated findings.
+- Ticket #1769's network-permitted `scripts/local_ci_check.sh build` run is the
+  latest complete repository gate: 12,743/12,743 tests across 37 executables,
+  including the six local-server `Net.Http` cases, with zero warnings/errors.
 - The worktree was clean after the checks. No ticket or production change was
   created by the planning review.
 
@@ -54,9 +54,9 @@ These are planning-integrity tasks, not newly classified runtime findings:
    `doing` ticket from which an autonomous session can resume.~~ Repaired:
    design ticket #1768 and implementation ticket #1769 now carry the active
    remediation queue.
-2. `CLAUDE.md` and `README.md` still state the old 12,681-test floor although
-   the current measured floor is 12,694. Leaving the lower number would permit
-   an undocumented thirteen-test regression.
+2. ~~`CLAUDE.md` and `README.md` still state the old 12,681-test floor although
+   the current measured floor is 12,694.~~ Repaired under ticket #1769, which
+   raised the measured floor to 12,743 and synchronized both documents.
 3. `CLAUDE.md` says that only `feature/work` may be pushed, while the completed
    audit/remediation workflow uses dedicated `feature/audit` and
    `feature/remediation-*` branches. Clarify whether bounded branches are
@@ -81,7 +81,7 @@ These are planning-integrity tasks, not newly classified runtime findings:
    planning dimensions rather than treating every same-severity finding as
    interchangeable.
 
-### Completed design ticket #1768
+### Completed LinkedListNode remediation: tickets #1768 and #1769
 
 **`P0: Define LinkedListNode detached lifetime contract`**
 (`REMED-COLL-LINKED-NODE-DESIGN`, SR-AUD-357 / CCF-019, estimated 8 hours,
@@ -105,11 +105,29 @@ with the exact .NET message. `begin()`/`end()` migrate to a bidirectional
 invalidation contract. No public member is removed or renamed, so this is not a
 broad public API break.
 
-The design is compatible, so implementation proceeds as ticket #1769
-(`REMED-COLL-LINKED-NODE`, size L, nominal 24-32 hours).
+The design was compatible, so ticket #1769 (`REMED-COLL-LINKED-NODE`, size L)
+implemented it and is complete. `SR-AUD-357` is now `remediated` and CCF-019 is
+partially remediated; its JsonNode (SR-AUD-327) and XML LINQ (SR-AUD-333)
+members stay open by design. Closure evidence:
 
-Only after the LinkedListNode decision is stable, open a separate design
-ticket for SR-AUD-358 / CCF-020. `ICollection::CopyTo(void*, int)` has no
+- 49 permanent regressions in `LinkedListNodeLifetimeTests.cpp` covering the
+  null/detached/attached matrix, copied handles, removal through either handle,
+  `Clear`, owner destruction, reattachment, duplicate and cross-list
+  attachment, first/middle/last/single-node cases, list and handle copy/move,
+  iteration, and the exact exception types and messages;
+- `SharpRuntimeTests_Collections_Core` 1,484/1,484;
+- the retained `build-probe-linkednode` ASan/UBSan/LeakSanitizer probe:
+  `failures=0`, no diagnostic, including a 200,000-node teardown;
+- `test/consumer/collections_linked_list.cpp` compiled `-Werror` against only
+  `SharpRuntime::Collections.Core` and run successfully;
+- network-permitted `scripts/local_ci_check.sh build`: 12,743/12,743 tests
+  across 37 executables, zero warnings/errors;
+- boundaries 41 modules/90 edges, validator tests 7/7, catalogue current,
+  database consistent, `git diff --check` clean, Doxygen 1,941/1,942 with no
+  new warning from the touched headers.
+
+The next recommended ticket is documented but **not** started: open a separate
+design ticket for SR-AUD-358 / CCF-020. `ICollection::CopyTo(void*, int)` has no
 destination type or length and therefore cannot validate nullability,
 capacity, rank, or element compatibility. That ticket must inventory all
 ArrayList, Queue, Stack, Hashtable, and ListDictionaryInternal callers and
@@ -161,8 +179,9 @@ presented as complete remediation of all 362 open findings.
   CCF-018 with one guarded lifecycle state across ten collection enumerators
   and BitArray mutation invalidation. Design ticket #1768 then recorded the
   SR-AUD-357 / CCF-019 LinkedListNode lifetime contract in
-  `docs/LinkedListNodeLifetime.md`, leaving implementation ticket #1769 as the
-  active work. SR-AUD-358 remains separate design-first work.
+  `docs/LinkedListNodeLifetime.md`, and implementation ticket #1769 completed it
+  on `feature/remediation-coll-linked-node`. SR-AUD-358 remains separate
+  design-first work; no repair ticket is active.
 - Initial audit validation passed boundary validation, catalogue freshness, and
   a zero-warning native build. It could not complete the full suite in this
   sandbox because the six local-server `Net.Http` cases fail immediately with
@@ -174,8 +193,8 @@ presented as complete remediation of all 362 open findings.
   `gmake -C build -j4`; plan-database consistency, module-boundary validation
   (41 physical modules, 90 production edges), and `git diff --check` passed.
 - All 1,748 audit reports are complete and confirmed three hundred sixty-four
-  findings at audit closure. The index now records 362 open `confirmed`
-  findings and two `remediated` findings. The final
+  findings at audit closure. The index now records 361 open `confirmed`
+  findings and three `remediated` findings. The final
   142-file `Collections` shard passed 1,422/1,422 focused tests and adds SR-AUD-356 through
   SR-AUD-364: invalid enumerator Current paths can reach ASan-confirmed out-of-bounds reads;
   retained LinkedListNode handles use freed storage; raw ICollection CopyTo can ASan-crash;
@@ -1163,8 +1182,9 @@ presented as complete remediation of all 362 open findings.
   ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows,
-1,767 completed tickets including closed audit ticket #1766 and remediation
-ticket #1767; no ticket is active. Ticket #1737 records the completed P0 split, tickets
+1,769 completed tickets including closed audit ticket #1766 and remediation
+tickets #1767, #1768, and #1769; no ticket is active. Ticket #1737 records the
+completed P0 split, tickets
 #1738/#1739 the MemoryStream and generic-continuation repairs, ticket #1740 the
 XML whitespace repair, #1741 the completed cross-build revalidation and
 `WebProxy` portability fix, #1742 focused sanitizer evidence, and #1743 the
@@ -1348,6 +1368,26 @@ could not initialize under the sandbox's
 LinkedListNode ownership (SR-AUD-357) and the raw ICollection CopyTo redesign
 (SR-AUD-358).
 
+### Completed second remediation batch
+
+Design ticket #1768 and implementation ticket #1769 remediated SR-AUD-357
+(CCF-019). `LinkedListNode<T>` now refers to an independently allocated,
+reference-counted node with an explicit null/detached/attached state, so
+`Remove`, `Clear`, removal through another copied handle, and destruction of the
+owning `LinkedList<T>` detach the node and retain its value instead of leaving a
+dangling `std::list` iterator. The repair also added the .NET existing-node
+insertion overloads, the detached-node constructor, the `Value` setter, the
+`List` accessor, node identity comparison, defined list copy/move semantics, and
+a bidirectional `LinkedList<T>::iterator` replacing the exposed `std::list`
+iterator. Ticket #1767's enumerator lifecycle guard is unchanged. Its 49
+permanent regressions, 1,484/1,484 Collections.Core target, clean direct
+ASan/UBSan/LeakSanitizer probe, `-Werror` standalone Collections.Core consumer
+fixture, warning-free build, 41-module/90-edge boundary check,
+validator-test/catalogue/database/selective/diff controls, and
+network-permitted 12,743/12,743 full gate all pass; Doxygen stays at
+1,941/1,942. The scope excludes the raw ICollection CopyTo redesign
+(SR-AUD-358) and the JsonNode/XML LINQ members of CCF-019.
+
 ### Opening a remediation ticket
 
 Every repair ticket should name its owning `SR-AUD-*` finding(s), link the
@@ -1492,17 +1532,19 @@ HTTP, socket, and ping tests require permission for local network operations.
 2. Inspect `git status --short --branch`, `audit/AUDIT_PROGRESS.md`, and the
    selected finding's mirrored reports and current implementation/tests.  Do
    not search for a new audit shard: the 1,748-file audit is complete.
-3. Tickets #1767 and #1768 are complete; preserve their permanent regressions,
-   the recorded design, and the retained audit evidence.
-4. The LinkedListNode lifetime design is recorded in
-   `docs/LinkedListNodeLifetime.md`; do not redesign it. Implementation ticket
-   #1769, `P0: Implement safe LinkedListNode detached lifetime`
-   (`REMED-COLL-LINKED-NODE`, SR-AUD-357 / CCF-019, size L), is the active
-   work.
-5. Close #1769 through the focused Collections target, the retained
-   `build-probe-linkednode` ASan/UBSan reproduction, the standalone
-   `test/consumer/collections_linked_list.cpp` fixture, and the standard
-   repository controls.
-7. Only then open the separate SR-AUD-358 / CCF-020 typed-or-length-aware
-   `ICollection::CopyTo` design ticket. Do not combine it with LinkedListNode
-   or a concrete-collection symptom patch.
+3. Tickets #1767, #1768, and #1769 are complete and no ticket is active;
+   preserve their permanent regressions, the recorded design, and the retained
+   audit evidence.
+4. The LinkedListNode lifetime contract is recorded in
+   `docs/LinkedListNodeLifetime.md` and implemented. Do not redesign it, do not
+   reopen SR-AUD-357, and keep `LinkedListNodeLifetimeTests.cpp`,
+   `test/consumer/collections_linked_list.cpp`, and the
+   `build-probe-linkednode` ASan/UBSan reproduction in place.
+5. **Next recommended ticket, documented but not started:** a separate
+   SR-AUD-358 / CCF-020 typed-or-length-aware `ICollection::CopyTo` design
+   ticket (proposed #1770, `REMED-COLL-COPYTO-DESIGN`, P0, size S). It must
+   inventory the ArrayList, Queue, Stack, Hashtable, and
+   ListDictionaryInternal callers and produce a compatible typed or
+   length-aware migration plan before any production change. Do not combine it
+   with LinkedListNode work or a concrete-collection symptom patch, and do not
+   silently break the public virtual interface.

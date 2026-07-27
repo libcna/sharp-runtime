@@ -1,16 +1,18 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-27 — 41 physical components, 90 direct production
-dependency edges, a clean native build, 12,694 passing tests across 37
+dependency edges, a clean native build, 12,743 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
 is recorded as audit finding `SR-AUD-001`.*
 
-Sharp Runtime is in a consumer-driven expansion phase. The original type
-classification and stabilization queues are complete, and the full native
-build/test and selective-isolation baselines are healthy. Work now proceeds
-from bounded consumer requirements, confirmed parity gaps, and newly measured
-validation findings.
+Sharp Runtime is in the post-audit remediation phase. The original type
+classification, stabilization, and modularization queues are complete, and the
+full native build/test and selective-isolation baselines are healthy. Work now
+proceeds from the evidence-backed `audit/` inventory in bounded, independently
+validated repair tickets. Consumer-driven API breadth remains legitimate later
+work but must stay behind confirmed crash, lifetime, and public-contract
+findings.
 
 ## Sources of truth
 
@@ -34,7 +36,7 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 12,694 passing across 36 component binaries plus one integration
+- Tests: 12,743 passing across 36 component binaries plus one integration
   binary.
 - Component graph: 41 physical modules and 90 direct production edges.
 - Boundary validator: no cycles, duplicate public include paths, orphan
@@ -59,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,767 rows, all `done`, including audit ticket #1766 and first post-audit remediation ticket #1767; no `todo`, `doing`, `blocked`, or `needs_user` rows |
+| `ticket` | 1,769 rows, all `done`, including audit ticket #1766 and post-audit remediation tickets #1767, #1768, and #1769; no `todo`, `doing`, `blocked`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -173,6 +175,19 @@ assertion without an explicit architecture decision.
   the direct ASan/UBSan probe, 1,435 Collections.Core tests, and the
   network-permitted 12,694-test repository gate pass; Doxygen remains below
   its ceiling at 1,941/1,942.
+- Remediated SR-AUD-357 / CCF-019 under design ticket #1768 and implementation
+  ticket #1769. `LinkedListNode<T>` now refers to an independently allocated,
+  reference-counted node with an explicit null/detached/attached state, so
+  removal, `Clear`, and destruction of the owning `LinkedList<T>` detach the
+  node and retain its value instead of leaving a dangling `std::list` iterator.
+  The repair also added the .NET existing-node insertion overloads, the
+  detached-node constructor, `Value` setter, `List` accessor, node identity
+  comparison, defined list copy/move semantics, and a bidirectional
+  `LinkedList<T>::iterator`. Forty-nine permanent regressions, a clean
+  ASan/UBSan/LeakSanitizer probe, a `-Werror` standalone `Collections.Core`
+  consumer fixture, 1,484 Collections.Core tests, and the network-permitted
+  12,743-test repository gate pass; Doxygen stays at 1,941/1,942. The contract
+  is recorded in [`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md).
 - Added consumer-driven coverage across core, collections, IO, networking,
   threading/tasks, text/JSON, XML, numerics, globalization, and cryptographic
   hashing/random APIs.
@@ -233,7 +248,7 @@ The first consumer-driven ports after modularization added:
 - XML schema exception types.
 
 The verified test baseline grew from 12,494 at the modularization checkpoint
-to 12,694.
+to 12,743, most recently through the post-audit remediation regressions.
 
 ## Completed repository audit
 
@@ -259,19 +274,25 @@ approved, bounded tickets.
 
 ## Candidate roadmap
 
-The audit is complete and ticket #1767 has remediated SR-AUD-356 and
-SR-AUD-364 / CCF-018. The findings index therefore retains 364 original
-findings while recording 362 as open `confirmed` and two as `remediated`.
-Post-audit remediation is the active priority; optional P2 breadth stays
-behind confirmed safety defects.
+The audit is complete. Ticket #1767 remediated SR-AUD-356 and SR-AUD-364 /
+CCF-018, and tickets #1768/#1769 remediated SR-AUD-357 / CCF-019. The findings
+index therefore retains 364 original findings while recording 361 as open
+`confirmed` and three as `remediated`. Post-audit remediation is the active
+priority; optional P2 breadth stays behind confirmed safety defects.
 
 Design ticket #1768 selected the SR-AUD-357 / CCF-019 `LinkedListNode`
 lifetime contract — independently allocated, reference-counted nodes with an
 explicit null/detached/attached state model — and recorded it in
 [`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md).
-Implementation ticket #1769 (`REMED-COLL-LINKED-NODE`) is the active work.
-SR-AUD-358 (typed or length-aware `ICollection::CopyTo` / CCF-020) remains the
-next design-first item and must not be combined with it.
+Implementation ticket #1769 (`REMED-COLL-LINKED-NODE`) completed it, so the
+index now records 361 open `confirmed` findings and three `remediated`. No
+repair ticket is active.
+
+The next bounded decision is SR-AUD-358 / CCF-020: a design-first, typed or
+length-aware `ICollection::CopyTo` boundary. It must inventory the ArrayList,
+Queue, Stack, Hashtable, and ListDictionaryInternal callers and make its
+compatibility boundary explicit before any production change; it must not be
+combined with a concrete-collection symptom patch.
 
 ### P2 — Consumer-driven API breadth
 

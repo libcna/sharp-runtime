@@ -421,6 +421,19 @@ when the handle is publicly storable. Repair requires an explicit lifetime or
 detachment policy and tests that retain handles across owner destruction and
 structural removal. See SR-AUD-327, SR-AUD-333, SR-AUD-357, and:
 
+**Remediation status (tickets #1768/#1769, 2026-07-27): PARTIAL —
+LinkedListNode only.** SR-AUD-357 is remediated. `LinkedListNode<T>` now refers
+to an independently allocated, reference-counted node with an explicit
+null/detached/attached state; removal, `Clear`, and owner destruction detach the
+node and retain its value instead of leaving a dangling iterator, and the
+contract is recorded in `docs/LinkedListNodeLifetime.md`. Evidence: 49 permanent
+regressions, a clean direct ASan/UBSan probe, 1,484/1,484 Collections.Core, and
+the network-permitted 12,743-test repository gate. This was deliberately **not**
+generalised into a shared lifetime abstraction: SR-AUD-327 (JsonNode) and
+SR-AUD-333 (XML LINQ `XObject`) have different public surfaces and remain
+`confirmed`, each needing its own compatibility review before repair. The
+original evidence above and in the per-file reports is retained.
+
 - `modules/text-json/include/System/Text/Json/Nodes/JsonNode.hpp.audit.md`;
 - `modules/xml-linq/include/System/Xml/Linq/XObject.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/LinkedList.hpp.audit.md`.
