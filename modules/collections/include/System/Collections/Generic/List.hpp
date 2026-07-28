@@ -31,15 +31,29 @@ using SharpRuntime::intcs;
  * @note GetEnumerator()'s Enumerator detects structural modification (Add/Remove/Clear/Insert/
  * etc.) during iteration via a version counter, matching .NET's InvalidOperationException
  * fail-fast contract (see ArrayList's Enumerator in this codebase for the same established
- * pattern). One narrow, documented gap remains: real .NET's index-assignment setter
- * (`list[i] = value`) also bumps `_version`, but this port's `operator[]` returns a plain `T&`
- * for C++ ergonomics -- there is no hook point to intercept a subsequent `list[i] = value;`
- * assignment through that reference, so value-only index writes do NOT trigger fail-fast
- * detection here. Widening `operator[]` into a proxy-object return (as done for Dictionary's
- * indexer to fix a different bug, ticket 1712) would be a much larger, riskier change to the
- * single most call-site-heavy method in this codebase; deferred rather than rushed. Directly
- * using begin()/end() STL iterators still follows plain std::vector<T> invalidation rules, not
- * .NET's version-checked contract -- only the GetEnumerator()-returned Enumerator is fail-fast.
+ * pattern). Only the GetEnumerator()-returned Enumerator is fail-fast.
+ *
+ * @warning **Three public routes mutate this list without advancing that counter**, so a
+ * write through any of them is invisible to an outstanding enumerator. Ticket #1790
+ * inventoried and reproduced all three; the design record with the .NET comparison and the
+ * selected correction is `docs/ListIndexerVersioningDesign.md`, and implementation is
+ * ticket #1791.
+ *  1. **`operator[]` (non-const)** returns a plain `T&` for C++ ergonomics, so nothing can
+ *     intercept a later `list[i] = value;` through that reference. Real .NET's index setter
+ *     bumps `_version` unconditionally (`List.cs:162`), so this port diverges: a value-only
+ *     index write does NOT trigger fail-fast detection here.
+ *  2. **`ToVector()` (non-const)** hands out the whole backing `std::vector<T>&`, so a caller
+ *     can `push_back`, `erase`, `resize`, or `clear` through it. That is a *structural*
+ *     mutation the guard never sees -- strictly wider than route 1, which can only replace an
+ *     existing element.
+ *  3. **`begin()`/`end()` (non-const)** yield raw `std::vector<T>` iterators and follow plain
+ *     std::vector invalidation rules, not .NET's version-checked contract.
+ *
+ * Routes 2 and 3 are deliberate STL-interop extensions with no .NET counterpart; real .NET
+ * keeps an equivalent untracked hatch (`CollectionsMarshal.AsSpan`) but quarantines it in an
+ * explicitly unsafe class. A reference obtained from any of the three dangles as soon as the
+ * backing vector reallocates; retaining one across a mutation is undefined behaviour,
+ * reproduced under AddressSanitizer for ticket #1790.
  *
  * @tparam T The type of elements in the list.
  */
