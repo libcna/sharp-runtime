@@ -93,16 +93,35 @@ real, irreversible flash wear, not just wasted time. Every avoided full rebuild 
 write endurance spent. **Reuse an existing build directory whenever it is usable** — a full
 reconfigure/rebuild is the exception that must be justified, never the default.
 
-10. Reuse the persistent build directories (`build`, `build-asan*`, `build-ubsan*`,
-    `build-tsan*`, `build-probe-*`, `cmake-build-*`) instead of creating new ones.
-11. Prefer incremental builds. Do not clean, delete, or reconfigure a build tree unless it is
+10. **There is a FIXED, CLOSED set of build directory names. Never invent another one, and
+    never suffix one with a ticket number, a date, a branch, or a topic.** The complete list:
+
+    | Directory | Purpose |
+    |---|---|
+    | `build/` | the default build and the repository gate |
+    | `build-modular/` | the modular/selective component build |
+    | `build-asan/`, `build-ubsan/`, `build-tsan/` | sanitizer trees |
+    | `build-probe/` | **every** ticket's throwaway probes, ABI experiments, shims and sweeps |
+    | `build-consumer/` | **every** ticket's standalone consumer fixture |
+    | `build-tmp/` | repository-local `TMPDIR` for `mktemp`-based scripts |
+    | `cmake-build-debug/` | the IDE tree |
+
+    Directories like `build-probe-1794/`, `build-consumer-1785/`, `build-asan-sortedset/`
+    are the mistake this rule exists to stop: measured on 2026-07-28, twenty-one such
+    one-shot directories held **441 MB** and guaranteed that nothing in them was ever reused.
+    A ticket separates its own work by **file name prefix inside the shared directory**
+    (`build-probe/1797_probe1_escapes.cpp`), never by a new directory.
+11. **Delete a ticket's probe artefacts once its evidence is transcribed into the design
+    record.** The design document is the durable evidence; the binaries are not. Sanitizer
+    probe binaries reach hundreds of megabytes each.
+12. Prefer incremental builds. Do not clean, delete, or reconfigure a build tree unless it is
     genuinely broken or the configuration genuinely changed; document any such build and why.
-12. Retain `ccache` wherever it is already configured, and do not retrofit it where doing so
+13. Retain `ccache` wherever it is already configured, and do not retrofit it where doing so
     would force an unnecessary full recompilation.
-13. **Never create a build tree under `/tmp`, `/var/tmp`, or `/dev/shm`**, including the
+14. **Never create a build tree under `/tmp`, `/var/tmp`, or `/dev/shm`**, including the
     per-session scratchpad. Redirect `mktemp`-based scripts through a repository-local
     `TMPDIR` (this repository uses `build-tmp/`).
-14. Remove large disposable binaries once their results are recorded, and never delete a build
+15. Remove large disposable binaries once their results are recorded, and never delete a build
     directory another session may still be using.
 
 ---
