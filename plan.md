@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,787 rows: 1,783 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), and ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`) — one `wontfix` (#1772, obsoleted by #1771), one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep), and two deliberately inactive `todo` rows (#1785 `REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened by #1784; #1787 `REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`, opened by #1786); no `doing` or `needs_user` rows |
+| `ticket` | 1,790 rows: 1,784 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) — one `wontfix` (#1772, obsoleted by #1771), three deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval), and two deliberately inactive `todo` rows (#1785 `REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened by #1784; #1790 `REMED-COLL-LIST-INDEXER-VERSION`, opened by #1787); no `doing` or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -815,17 +815,92 @@ unchanged at **1,937**/1,942; all ten selective components plus
 `docs/SortedSetVersioningDesign.md`, with a pointer from
 `docs/SortedSetLiveViewDesign.md` section 32.
 
-One further **inactive** ticket was opened and not begun, again with no
+One further ticket was opened by #1786 and not begun, again with no
 `SR-AUD-*` identifier: **#1787**
-(`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`, P3, M), covering the fourteen
-other collections that carry the identical `intcs version_` counter. #1786's
+(`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`, P3, M), covering the other
+collections that carry the identical `intcs version_` counter. #1786's
 stored acceptance criteria asked for a repository-wide implementation; the
 instruction governing that working session scoped #1786 to `SortedSet<T>` and
 required the remainder to become a separate inactive ticket. The divergence is
 recorded in the design document rather than silently absorbed, and the full
-inventory the criteria asked for is delivered there.
+inventory the criteria asked for is delivered there. **#1787 is now done — see
+below.**
 
-No repair ticket is active.
+### Completed repository-wide mutation-counter sweep: ticket #1787
+
+Ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`, P3, size M) is
+**done**, closed 2026-07-28 on local branch
+`feature/remediation-coll-version-counter-sweep`, with no new `SR-AUD-*`
+identifier and no audit finding reopened. The full record is
+[`docs/CollectionVersionCounterSweep.md`](docs/CollectionVersionCounterSweep.md).
+
+It corrected #1786's inventory in three ways rather than inheriting it. The
+count is **sixteen** counter-carrying types, not fifteen: `BitArray` was
+missed, and it is also the one whose counter was already `std::uint32_t` rather
+than `intcs`, so it never had the signed-overflow undefined behaviour. And a
+**third defect class** was found that appears in neither ticket's description
+and is more serious than either recorded one: the implicitly declared copy/move
+assignment operator transplanted the *source's* counter into the destination, so
+an enumerator outstanding over the destination survived having every element it
+could refer to destroyed. It needs **no overflow at all** — the counters merely
+have to match — and six of the fourteen affected types reproduced as
+AddressSanitizer `heap-use-after-free` or `heap-buffer-overflow` rather than as
+wrong answers. `LinkedList<T>` was immune, because ticket #1769 had already
+given it a bumping `operator=`.
+
+Pre-fix evidence, all against the committed headers before anything changed
+(gitignored `build-probe-collversion/`, one probe source built against both
+revisions): **14** UBSan signed-overflow reports, one per collection; **15**
+iterator/enumerator ABA reproductions at the 2^32 alias distance; **8**
+assignment-alias reproductions; **6** ASan memory errors.
+
+The repair replaces each bare integer with the new
+`System::Collections::detail::BasicMutationCounter`, whose increment is unsigned
+and whose **assignment advances the destination instead of taking the source's
+value**, while copy construction still inherits it (matching .NET's
+`ArrayList.Clone`/`Hashtable.Clone`). Thirteen collections took the 64-bit
+`MutationCounter`; `LinkedList<T>` and `BitArray` took the 32-bit
+`NarrowMutationCounter` because widening them grows a public object — measured,
+arithmetically unavoidable in any member order — so both keep a documented,
+test-pinned 2^32 residual and both have a **blocked** ticket stating the exact
+approval required.
+
+Closure evidence: **336** new permanent regressions in
+`CollectionVersionCounterTests.cpp`, whose near-boundary cases reach every
+counter through **one** test-only friend seam
+(`SharpRuntime::Testing::CollectionVersionAccess<T>`) generalising #1786's;
+`SharpRuntimeTests_Collections_Core` **2,177/2,177** (was 1,841) with no
+existing assertion edited; `scripts/local_ci_check.sh build` at **13,463 tests
+across 37 executables** (was 13,127), zero warnings and errors, after which the
+13,127 floor in `README.md` and `CLAUDE.md` was raised; UBSan and ASan clean
+post-fix on every probe mode; ASan+UBSan+LSan **349/349** with LSan verified
+active twice over — it caught a real 24-byte leak in this ticket's own first
+draft test; ThreadSanitizer **0 races** in three real modes with the self-test
+still reporting 2; every `sizeof`, `alignof`, and counter offset unchanged, with
+**0 symbols removed or renamed** and 10 new weak inline definitions for the new
+counter class; a new positive consumer fixture compiling `-Werror` and exiting 0
+and a new negative one correctly rejecting the test seam as an incomplete type;
+41 modules/90 edges; validator tests 7/7; catalogue current; database
+consistent; `git diff --check` clean; Doxygen 1.9.8 at **1,938**/1,942 — one
+warning more than the pre-ticket 1,937, attributable entirely to the single new
+`README.md` markdown link into `docs/`, which `Doxyfile` does not scan (the six
+existing README links into `docs/` each cost the same, and the ceiling is
+unchanged); all ten selective components plus `Collections.Core` in isolation;
+performance within run-to-run noise on every benchmarked path.
+
+Three tickets were opened and deliberately not begun: **#1788**
+(`REMED-COLL-LINKEDLIST-VERSION-WIDEN`, P3, S, **blocked**) needs approval for
+`sizeof(LinkedList<T>)` 40 → 48; **#1789**
+(`REMED-COLL-BITARRAY-VERSION-WIDEN`, P3, XS, **blocked**) needs approval for
+`sizeof(BitArray::Enumerator)` 32 → 40; and **#1790**
+(`REMED-COLL-LIST-INDEXER-VERSION`, P3, L, `todo`) records the separate,
+pre-existing, non-versioning divergence that `List<T>::operator[]` returns a
+plain `T&` and so cannot bump the counter the way .NET's index setter does.
+#1788 and #1789 are deliberately **not** one ticket: they share the symptom and
+nothing else, and a user might reasonably approve one and not the other.
+
+Tickets #1785 and #1773 remain untouched and inactive. No repair ticket is
+active.
 
 SR-AUD-362 (`FrozenDictionary::Create` duplicate keys) was reconciled
 conservatively alongside #1779, per that finding's own instruction to inspect

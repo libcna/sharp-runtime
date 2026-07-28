@@ -123,6 +123,28 @@ membership list is unchanged. #1786's analysis is in
 `docs/SortedSetVersioningDesign.md`, and the fourteen collections still carrying
 the pattern are inactive ticket #1787.
 
+**Follow-up (ticket #1787, 2026-07-28):** the sweep is now **done** and the
+non-membership decision above is confirmed rather than revisited, but two facts
+recorded here need correcting. There were **sixteen** counter-carrying types, not
+fifteen — `BitArray` was missed by #1786's inventory, and it is also the one
+whose counter was already `std::uint32_t`, so it never had the signed-overflow
+UB at all. And the sweep found a **third** defect that CCF-004's framing does not
+reach either, for a different reason than the counter's width does: the
+implicitly declared copy/move assignment operator transplanted the *source's*
+counter into the destination, leaving an enumerator apparently valid over storage
+the assignment had already destroyed — six AddressSanitizer
+`heap-use-after-free`/`heap-buffer-overflow` reproductions, needing **no
+arithmetic overflow at all**. That is a special-member-function defect, not a
+defined-arithmetic one, which is a further independent reason these instances are
+not CCF-004 members: no amount of checked arithmetic at a boundary would have
+found or fixed it. The repair is
+`System::Collections::detail::BasicMutationCounter`, whose assignment advances
+the destination rather than taking the source's value; the full record is
+`docs/CollectionVersionCounterSweep.md`. Thirteen types were fully repaired;
+`LinkedList<T>` and `BitArray` keep a 32-bit counter and a documented 2^32
+residual, tracked by blocked tickets #1788 and #1789. **This cause's membership
+list is still unchanged.**
+
 ## CCF-005 — high-value conversion APIs need explicit boundary and special-value validation
 
 The audited primitive wrappers, Decimal, and `Convert` share a recurring testing shape:

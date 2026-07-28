@@ -7,7 +7,7 @@ collector, or the complete .NET platform.
 
 The repository currently builds as 41 independently selectable CMake
 components. The verified Linux baseline on 2026-07-28 is a warning-free build
-with **13,127 passing tests across 37 test executables**.
+with **13,463 passing tests across 37 test executables**.
 
 ## What is included
 
@@ -181,7 +181,7 @@ Other platform evidence is narrower:
 
 | Platform/toolchain | Verified scope |
 |---|---|
-| Linux/GCC | Current full component build and all 13,127 tests. |
+| Linux/GCC | Current full component build and all 13,463 tests. |
 | Windows/MinGW | MinGW-w64 GCC 14-win32/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. GoogleTest was not cross-built and repository CI remains Ubuntu-only. |
 | Emscripten | Emscripten 5.0.7/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. Tests were not cross-built or run, and some runtime APIs deliberately throw `PlatformNotSupportedException`. |
 | macOS/Apple Clang | Real downstream Xcode 15.4 builds drove portability fixes on 2026-07-20; this repository has no macOS job or recorded full standalone test baseline. |
@@ -207,6 +207,54 @@ Individual APIs can also document smaller, explicit deviations where C++ has
 no safe or useful equivalent.
 
 ## Breaking changes
+
+### 2026-07-28 — assigning a collection now invalidates its outstanding enumerators
+
+Fifteen collections carry a private mutation counter that their fail-fast
+enumerators snapshot: `List<T>`, `HashSet<T>`, `Dictionary<K,V>`,
+`SortedDictionary<K,V>`, `SortedList<K,V>`, `OrderedDictionary<K,V>`,
+`LinkedList<T>`, `Queue<T>`, `Stack<T>`, `ArrayList`, `Hashtable`,
+`ListDictionaryInternal`, the non-generic `Queue` and `Stack`, and `BitArray`.
+Fourteen of them used the implicitly declared copy/move assignment operator,
+which copied the **source's** counter into the destination — so an enumerator
+outstanding over the destination saw no change even though the assignment had
+just destroyed every element it could refer to. For the node-based containers
+that was a confirmed use-after-free, not merely a wrong answer.
+
+Assignment now advances the destination's own counter instead:
+
+```cpp
+Dictionary<int, int> a; a.Add(1, 1);
+Dictionary<int, int> b; b.Add(7, 7);
+
+auto it = a.begin();
+a = b;                 // every element `it` referred to is destroyed here
+// Before — `it` often compared "unmodified" and read freed memory.
+// After  — *it throws InvalidOperationException, as the contract always intended.
+```
+
+Self-assignment (`c = c`) also advances the counter on those fourteen, which is
+deliberate: member-wise self-assignment of the backing `std::unordered_map` or
+`std::unordered_set` may reallocate the nodes an outstanding iterator points at.
+`LinkedList<T>` already declared its own guarded assignment operators and keeps
+its existing behaviour — self-assignment there changes nothing and invalidates
+nothing.
+
+Only source **behaviour** changes, and only for a program that keeps enumerating
+a collection after that collection was wholesale replaced — which is precisely
+what the fail-fast contract says must throw. No signature, return type,
+`const` qualification, `sizeof`, `alignof`, or mangled symbol changes, and **no
+consumer rebuild is required on this revision's account**. The same change
+replaced every counter's signed 32-bit representation with an unsigned one
+(64-bit for thirteen of the fifteen), removing fourteen instances of
+signed-integer overflow; that part is invisible to any conforming program.
+
+Two documented residuals remain, both blocked on an explicit object-size
+approval: `LinkedList<T>` and `BitArray` keep a 32-bit counter, so a stale
+enumerator over either can still be revalidated after 2^32 effective mutations
+on one instance. The full record — inventory, reproductions, .NET comparison,
+layout measurements, and the two blocked designs — is in
+[docs/CollectionVersionCounterSweep.md](docs/CollectionVersionCounterSweep.md).
 
 ### 2026-07-28 — `System::Collections::Generic::SortedSet<T>::GetViewBetween`
 

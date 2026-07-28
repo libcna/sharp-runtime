@@ -65,3 +65,33 @@ its cursor type moved from a native `std::list` iterator to a node pointer.
 ## Final assessment
 
 AUDITED. The confirmed finding(s) above have reproducible evidence and a focused remediation target.
+
+## Post-remediation follow-up: ticket #1787 (2026-07-28)
+
+Ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`, P3, size M) repaired
+the mutation counter this file's fail-fast enumerator snapshots. It carries **no
+`SR-AUD-*` identifier** — the numbering is frozen at 364 and the pattern was
+found during remediation, by ticket #1786's own inventory — and it reopens no
+finding here. The original evidence above is retained unchanged.
+
+The counter is now `System::Collections::detail::NarrowMutationCounter` — still 32 bits,
+deliberately. `LinkedList<T>`'s members are exactly packed on LP64 with **zero**
+padding, so an 8-byte counter grows `sizeof(LinkedList<T>)` from 40 to 48 in any
+member order. That needs an explicit approval this repository has not been given, so
+**blocked ticket #1788** holds it. What the narrow counter did fix here is the
+signed-overflow undefined behaviour (UBSan-confirmed pre-fix at `LinkedList.hpp:367`);
+the assignment defect never applied, because ticket #1769 had already given this class
+a bumping `operator=`. The residual 2^32 snapshot-reuse horizon is documented and
+pinned by a permanent test, so a future approved widening must flip that assertion
+deliberately.
+
+Repository-wide, three defect classes were reproduced against the committed
+pre-fix headers before anything changed
+(gitignored `build-probe-collversion/probe2_defects.cpp`): fourteen UBSan
+signed-integer-overflow reports at `++version_`, fifteen 2^32
+snapshot-reuse (ABA) reproductions, and — recorded in neither #1786's nor
+#1787's description — an assignment defect that transplanted the *source's*
+counter into the destination and needed no overflow at all, with six
+AddressSanitizer `heap-use-after-free`/`heap-buffer-overflow` reproductions. The
+full record, including the .NET comparison and the per-type layout measurements,
+is `docs/CollectionVersionCounterSweep.md`.

@@ -9,7 +9,7 @@
 ## Non-negotiable rules
 
 1. **Zero errors, zero warnings** before any commit. `cmake --build build --parallel 4` must be clean.
-2. **No test-count regression.** `scripts/run_component_tests.sh build` must show no failures. The verified baseline is 13,127 tests across 36 component executables and one integration executable; this floor should be raised as new tests are added and lowered only with an explicit, documented reason.
+2. **No test-count regression.** `scripts/run_component_tests.sh build` must show no failures. The verified baseline is 13,463 tests across 36 component executables and one integration executable; this floor should be raised as new tests are added and lowered only with an explicit, documented reason.
 3. **Push only to `feature/work`.** Never push to `develop` or `master`, and never create tags, without explicit per-action user approval.
 4. **SPDX header on every project source/header** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution. Vendored sources retain their upstream headers; Markdown uses an HTML SPDX comment where one is present.
 5. **Property naming:** always `getXxxProperty()` / `setXxxProperty()`. Exception: indexers
@@ -252,6 +252,17 @@ Every `.hpp` and `.cpp` file starts with:
   isolation fixture.
 - **Vendored libs:** GoogleTest, nlohmann/json, tinyxml2, miniz, all under `vendor/`. Never commit binaries. Files under `vendor/` are third-party source unmodified from upstream and are exempt from this project's SPDX-header, doc-comment, and `getXxxProperty()`/namespace-syntax naming rules — those rules apply only to module `include/`, `src/`, and `tests/` trees.
 - **Templates:** deferred `inline` definitions after forward declarations to resolve circular includes.
+- **Collection mutation counters:** a collection with a fail-fast enumerator must hold its
+  counter as `System::Collections::detail::MutationCounter` and its enumerator must snapshot
+  `detail::MutationVersion` (`System/Collections/detail/MutationCounter.hpp`). Never a bare
+  `intcs` — `++` on a signed counter is undefined behaviour at `INTCS_MAX`, and the
+  implicitly declared assignment operator would transplant the *source's* counter into the
+  destination, leaving an enumerator apparently valid over storage the assignment destroyed.
+  Both defects existed in fourteen collections and are recorded with reproductions in
+  `docs/CollectionVersionCounterSweep.md`. `detail::NarrowMutationCounter` is for the two
+  types (`LinkedList<T>`, `BitArray`) whose measured layout has no room for eight bytes;
+  do not use it for anything new. `SortedSet<T>` keeps its own `ulongcs` counter inside the
+  shared `State` its live views co-own (ticket #1786) — do not migrate it.
 
 ---
 

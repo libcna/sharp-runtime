@@ -2095,3 +2095,112 @@ absorbed, and the full inventory the criteria asked for is delivered there.
 
 Ticket #1785 remains `todo` and untouched — this ticket changed no exception
 behaviour whatsoever — and ticket #1773 remains `blocked` and untouched.
+
+## Post-remediation repository-wide mutation-counter sweep: ticket #1787 (2026-07-28)
+
+Ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`, P3, size M) is
+**done**, closed on local branch
+`feature/remediation-coll-version-counter-sweep`. It carries **no new
+`SR-AUD-*` identifier** — the audit numbering stays frozen at 364 and this
+pattern was found during remediation, by ticket #1786's own required inventory,
+not during the audit. It reopens no finding: SR-AUD-361 stays `remediated`, and
+it is **not** a member of CCF-004 for the reasons already appended to that cause
+(the counter is a private implementation detail, not a public .NET-shaped
+arithmetic boundary, and its real defect is snapshot reuse rather than a wrong
+result). The full record is `docs/CollectionVersionCounterSweep.md`.
+
+**It corrected #1786's inventory in three ways.** There are **sixteen**
+counter-carrying types in `modules/collections/include/`, not fifteen: `BitArray`
+was missed, and it is also the one type whose counter was already
+`std::uint32_t` rather than `intcs` — which is exactly why it never had the
+signed-overflow undefined behaviour, confirmed by its producing no UBSan report
+where all fourteen others did. #1786's assertion that "all fifteen declare it
+`intcs`" was wrong on both counts. And #1786's claim that its defects 3 and 4
+(a stale cached `Count`, a colliding `-1` sentinel) are specific to
+`SortedSet<T>` is now **confirmed with per-type evidence** rather than repeated.
+
+**A third defect class was found that appears in neither ticket's description
+and is the most serious of the three.** The implicitly declared copy/move
+assignment operator transplanted the *source's* counter into the destination, so
+an enumerator outstanding over the destination saw no change even though the
+assignment had just destroyed every element it could refer to. It needs **no
+overflow at all**: the two counters merely have to be equal, which two
+collections that have taken the same number of effective mutations routinely
+are. Six of the fourteen affected types reproduced as AddressSanitizer
+`heap-use-after-free` or `heap-buffer-overflow` — `HashSet<T>`,
+`Dictionary<K,V>`, `SortedDictionary<K,V>`, `OrderedDictionary<K,V>`,
+`Hashtable`, and `ListDictionaryInternal` — rather than merely as wrong answers.
+`LinkedList<T>` was immune, because ticket #1769 had already given it a bumping
+`operator=`, and `SortedSet<T>` is immune because its `Iterator` co-owns the
+shared `State` through a `shared_ptr`, so an assignment cannot free the state it
+observes.
+
+Pre-fix evidence, all taken against the *committed* headers before anything
+changed (gitignored `build-probe-collversion/`, one probe source built against
+both header revisions, counters positioned with `-fno-access-control` rather
+than by performing billions of mutations): **14** UBSan signed-integer-overflow
+reports, one per collection; **15** iterator/enumerator ABA reproductions at the
+2^32 alias distance; **8** assignment-alias reproductions; **6** ASan memory
+errors.
+
+The repair replaces each bare integer field with the new
+`System::Collections::detail::BasicMutationCounter`, whose increment is unsigned
+— defined for every representable prior value — and whose **assignment advances
+the destination instead of taking the source's value**, while copy construction
+still inherits it, matching .NET's `ArrayList.Clone` and `Hashtable.Clone`.
+Thirteen collections took the 64-bit `MutationCounter`; `LinkedList<T>` and
+`BitArray` took the 32-bit `NarrowMutationCounter`, because widening them grows
+a public object (`sizeof(LinkedList<int>)` 40 → 48,
+`sizeof(BitArray::Enumerator)` 32 → 40) and both are exactly packed with zero
+spare bytes at the counter's position, arithmetically unavoidable in any member
+order. Both still lose the undefined behaviour and the assignment transplant,
+and both keep a documented, test-pinned 2^32 snapshot-reuse residual.
+
+Closure evidence: **336** permanent regressions in
+`modules/collections/tests/System/Collections/CollectionVersionCounterTests.cpp`
+reaching every counter through **one** test-only friend seam
+(`SharpRuntime::Testing::CollectionVersionAccess<T>`, generalising #1786's
+per-type seam and proven inaccessible to a consumer by a negative compile
+fixture); no existing assertion edited and all 1,841 pre-existing
+Collections.Core tests still passing; `SharpRuntimeTests_Collections_Core`
+**2,177/2,177** (was 1,841); `scripts/local_ci_check.sh build` at **13,463 tests
+across 37 executables** (was 13,127) with zero warnings and errors and no test
+disabled or filtered; UBSan and ASan **0 diagnostics** post-fix on every probe
+mode; ASan+UBSan+LSan **349/349** with LSan verified active twice over — it
+caught a real 24-byte leak in this ticket's own first-draft test;
+ThreadSanitizer **0 races** in three real modes with the deliberate-race
+self-test still reporting 2, and **no concurrent-mutation safety claimed**;
+every `sizeof`, `alignof`, and counter offset unchanged with **0 symbols removed
+or renamed** and 10 new weak inline definitions for the new counter class; both
+new consumer fixtures behaving as intended; 41 modules/90 edges; validator tests
+7/7; catalogue current; database consistent; `git diff --check` clean; Doxygen
+1.9.8 at **1,938**/1,942 — one warning more than the pre-ticket 1,937, diffed
+line by line and attributable entirely to the single new `README.md` markdown
+link into `docs/`, which `Doxyfile` does not scan, exactly as the six existing
+such links already are; all ten selective components plus `Collections.Core` in
+isolation; performance within run-to-run noise on every benchmarked path.
+
+Because no public signature, mangled symbol, or object layout changed, this
+revision needs **no consumer rebuild on its own account**. It does change
+observable *behaviour* for one shape — enumerating a collection after that
+collection was wholesale assigned now throws instead of reading destroyed
+storage — which is recorded in `README.md`'s breaking-changes section.
+
+Three tickets were opened and deliberately not begun, none with an `SR-AUD-*`
+identifier: **#1788** (`REMED-COLL-LINKEDLIST-VERSION-WIDEN`, P3, S,
+**blocked**) pending explicit approval that `sizeof(LinkedList<T>)` may grow
+40 → 48 on LP64; **#1789** (`REMED-COLL-BITARRAY-VERSION-WIDEN`, P3, XS,
+**blocked**) pending explicit approval that `sizeof(BitArray::Enumerator)` may
+grow 32 → 40; and **#1790** (`REMED-COLL-LIST-INDEXER-VERSION`, P3, L, `todo`)
+recording the separate, pre-existing, non-versioning divergence that
+`List<T>::operator[]` returns a plain `T&` and so cannot bump the counter the way
+.NET's index setter does. #1788 and #1789 are deliberately two tickets rather
+than one: they share the symptom and nothing else, one grows a container and the
+other a public enumerator, and a user might reasonably approve one and not the
+other.
+
+Ticket #1785 remains `todo` and untouched — this ticket changed no exception
+behaviour whatsoever — and ticket #1773 remains `blocked` and untouched. CNA and
+mobile-eggbert were not inspected, searched, configured, built, or modified. No
+compilation used more than four parallel jobs, and no push, merge, rebase, tag,
+or publication occurred.

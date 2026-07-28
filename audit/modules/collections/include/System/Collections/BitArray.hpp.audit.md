@@ -30,3 +30,33 @@ ASan/UBSan probe, and network-permitted 12,694-test gate pass.
 
 AUDITED. SR-AUD-364 was confirmed with reproducible evidence and is now
 REMEDIATED; the original evidence is retained above.
+
+## Post-remediation follow-up: ticket #1787 (2026-07-28)
+
+Ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`, P3, size M) repaired
+the mutation counter this file's fail-fast enumerator snapshots. It carries **no
+`SR-AUD-*` identifier** — the numbering is frozen at 364 and the pattern was
+found during remediation, by ticket #1786's own inventory — and it reopens no
+finding here. The original evidence above is retained unchanged.
+
+The counter is now `System::Collections::detail::NarrowMutationCounter` — still 32 bits,
+deliberately. `BitArray` was **missing from ticket #1786's inventory** altogether, and
+it is also the one collection whose counter was already `std::uint32_t` rather than
+`intcs`, so it never had the signed-overflow undefined behaviour the other fourteen
+did. It did have the assignment defect, which is fixed. Closing the remaining 2^32
+snapshot-reuse horizon needs the **public** `Enumerator`'s snapshot widened too, and
+that grows `sizeof(BitArray::Enumerator)` from 32 to 40 bytes — nine bytes are needed
+after an 8-byte snapshot where eight are available, in any member order. Widening only
+the container would be *wrong* rather than partial, since the snapshot would become a
+truncation of the counter. **Blocked ticket #1789** holds both, pending approval.
+
+Repository-wide, three defect classes were reproduced against the committed
+pre-fix headers before anything changed
+(gitignored `build-probe-collversion/probe2_defects.cpp`): fourteen UBSan
+signed-integer-overflow reports at `++version_`, fifteen 2^32
+snapshot-reuse (ABA) reproductions, and — recorded in neither #1786's nor
+#1787's description — an assignment defect that transplanted the *source's*
+counter into the destination and needed no overflow at all, with six
+AddressSanitizer `heap-use-after-free`/`heap-buffer-overflow` reproductions. The
+full record, including the .NET comparison and the per-type layout measurements,
+is `docs/CollectionVersionCounterSweep.md`.
