@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,794 rows: 1,788 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`), implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`), and design ticket #1785 (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened inactive by #1784 and closed by adopting .NET's nested-view validation order) — one `wontfix` (#1772, obsoleted by #1771), five deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval; #1791 `REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, opened by #1790 and awaiting the four-part approval in `docs/ListIndexerVersioningDesign.md` section 28; #1794 `REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, opened by #1793 and awaiting its own two-part approval for a second public source break plus a second silent ABI break on `IDictionaryEnumerator`); no `todo`, `doing`, or `needs_user` rows |
+| `ticket` | 1,794 rows: 1,788 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`), implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`), and design ticket #1785 (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened inactive by #1784 and closed by adopting .NET's nested-view validation order) — one `wontfix` (#1772, obsoleted by #1771), five deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval; #1791 `REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, opened by #1790 and awaiting the four-part approval in `docs/ListIndexerVersioningDesign.md` section 28; #1794 `REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, opened by #1793, designed by #1795, and awaiting the four-item approval in `docs/IDictionaryEnumeratorKeyValueSafetyDesign.md` section 33 for a public source break, two `ListDictionaryInternal` behaviour changes, and a silent ABI break reaching through two independent mechanisms), and design ticket #1795 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY-DESIGN`, opened because #1794 is an implementation row and was deliberately not reused); no `todo`, `doing`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -1198,6 +1198,91 @@ against the current .NET reference. The repository's index status vocabulary
 supports only `confirmed`/`remediated`, so it stays `confirmed` rather than
 being assigned an invented status — but it must not be read as an active,
 un-investigated defect, and it is not counted as `remediated`.
+
+No repair ticket is active.
+
+### Completed IDictionaryEnumerator key/value design: ticket #1795
+
+Design ticket #1795 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY-DESIGN`, P3, size M,
+category `design`) was completed on local branch
+`feature/remediation-coll-idictenumerator-keyvalue-design` on 2026-07-28, with
+**no production or test-source change**. Durable record:
+[`docs/IDictionaryEnumeratorKeyValueSafetyDesign.md`](docs/IDictionaryEnumeratorKeyValueSafetyDesign.md).
+
+**Ticket #1794 was not reused.** Its row is an *implementation* row — it migrates
+the accessors and is blocked on approval to do so, not on a decision about what
+to do. Converting it into a completed design ticket to reuse the number would
+have recorded implementation work as done when none was. It stays `blocked`, and
+#1795 is the design.
+
+Selected: **Entry-canonical owning accessors with a mandatory `MoveNext`-time
+snapshot.** `getEntryProperty()` stays `DictionaryEntry` by value and becomes
+canonical; `getKeyProperty()`/`getValueProperty()` return an owning `std::any`
+by value equal by construction to that entry's members; `getCurrentProperty()`
+keeps #1793's signature and boxes the `DictionaryEntry` on **both**
+implementations, matching .NET's `Current => Entry`; and every implementation
+must answer every accessor from state the enumerator owns.
+
+**The return-type change alone is not the fix.** Neither accessor
+version-checks, so both dereference a container iterator a mutation may have
+invalidated. On `ListDictionaryInternal` that makes even `getEntryProperty()` and
+the already-migrated `getCurrentProperty()` AddressSanitizer
+`heap-use-after-free` after `Clear()` or destruction. .NET's own
+`HashtableEnumerator` snapshots `_currentKey`/`_currentValue` at `MoveNext` and
+never reads `_buckets` from an accessor; the design adopts that.
+
+Three premises in #1794's own description are contradicted by measurement and
+corrected in the design record. The most important: *"there is no write path
+through them"* is **false for `Hashtable`** — `getValueProperty()` returns a
+pointer to the live map's non-`const` `std::any`, so `const_cast` + assignment is
+well-formed, defined C++ that rewrites dictionary storage with the mutation
+counter unmoved and a second enumerator silent; and `getKeyProperty()` reaches
+the `const std::string` key, producing at 64 entries an entry `Count` still
+reports that **no lookup can return by either its old or its new key**.
+
+Two previously unrecorded `ListDictionaryInternal` parity defects were found and
+decided: its `getCurrentProperty()` boxes the key where .NET is
+`Current => Entry`, and it disagrees with itself about `const` on a value.
+
+Measured: 10 unique call sites across 628 translation units (0 compile
+failures); a fully migrated three-header shim breaks **1 of 628** at 1 line and
+**2 of 2,252** permanent tests, both being the two parity defects above; 20
+pre-fix defects with **8 ASan `heap-use-after-free`** reports, 0 UBSan
+diagnostics on the corruption, and three fatal scenarios that complete *silently*
+under UBSan alone; 42 post-fix assertions clean under ASan+UBSan+LSan; the
+mangled name **byte-identical** and the vtable slot unchanged at `0x30` while
+`this` moves `%rdi` → `%rsi`; a stale caller and new implementation **link with
+zero diagnostics** then SEGV with a UBSan invalid-vptr report; a **second**
+stale-object vector — `ListDictionaryInternal::NodeEnumerator` 40 → 72 bytes with
+an `inline` `GetEnumerator()`, reproduced as ASan `heap-use-after-free` — noting
+`NodeEnumerator` is a **private nested class**, so this is not a public layout
+change; allocations 0 → 1/2 for a `Hashtable` key and **0 → 0** for
+`ListDictionaryInternal`, with `Entry` and `Current` unchanged.
+
+Seven alternatives were evaluated with a compatibility matrix. Alternative F
+(enumerator-owned copies behind an unchanged `const void*`) was **measured** —
+0 of 628 translation units break, no calling-convention change — and rejected as
+the selected design because it leaves type safety and implementation divergence
+entirely open and reintroduces the enumerator/collection desynchronisation
+#1793 removed. It is the documented fallback if the approval is declined and
+must never be called a remediation.
+
+**#1794 stays `blocked`**, now depending on #1795, with a rewritten four-item
+approval: a public source break to `IDictionaryEnumerator`; two observable
+`ListDictionaryInternal` behaviour changes; acknowledgement of a silent ABI break
+through **two** independent mechanisms requiring a full consumer rebuild; and
+item 2 separately declinable. #1793's, #1771's, #1780's and #1783's approvals do
+not carry over. Recommended order: **#1794 before #1791**; the two migrations
+must not be merged.
+
+Validation: boundaries 41 modules / 90 edges, validator tests 7/7, catalogue
+current, database consistent, `git diff --check` clean, Doxygen 1.9.8 at
+**1,939/1,942** unchanged, and `scripts/local_ci_check.sh build`
+**13,538/13,538 across 37 executables** with zero warnings/errors —
+all unchanged, as expected for a design-only ticket. No new `SR-AUD-*`
+identifier; **SR-AUD-356 stays `remediated`** and CCF-018 is not reopened. The
+defect is **not** marked remediated. Tickets #1773, #1788, #1789, #1791, and
+#1794 remain `blocked` and untouched.
 
 No repair ticket is active.
 

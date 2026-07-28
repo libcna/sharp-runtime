@@ -92,3 +92,34 @@ counter into the destination and needed no overflow at all, with six
 AddressSanitizer `heap-use-after-free`/`heap-buffer-overflow` reproductions. The
 full record, including the .NET comparison and the per-type layout measurements,
 is `docs/CollectionVersionCounterSweep.md`.
+
+## Post-audit note — design ticket #1795 (2026-07-28)
+
+**No `SR-AUD-*` identifier**: the numbering is frozen at 364 and this was found
+during remediation. Design ticket #1795 measured `Hashtable::Enumerator`'s two
+`const void*` accessors and found a **write path into live dictionary storage**
+that ticket #1794's own description asserted did not exist:
+
+- `getValueProperty()` returns `&it_->second`, a pointer to the live
+  `std::unordered_map`'s `mapped_type`, which is a **non-`const` `std::any`**.
+  `const_cast` + assignment through it is not undefined behaviour — it is
+  well-formed, defined C++ that rewrites the stored value, leaves the mutation
+  counter unmoved, and is invisible to a second, independent enumerator. The
+  rewritten value is then returned by `Hashtable::at()`.
+- `getKeyProperty()` returns `&it_->first`, a `const std::string` inside the map.
+  The write there *is* undefined behaviour, and at 64 entries it produces an
+  entry that `getCountProperty()` still counts and that **no lookup can return
+  by either its old or its new key**.
+- Neither accessor performs the fail-fast version check `MoveNext()` and
+  `Reset()` perform, so calling either again after a `Remove` or `Clear`
+  dereferences an invalidated iterator — AddressSanitizer `heap-use-after-free`.
+  `getEntryProperty()` and `getCurrentProperty()` are unaffected because they
+  read the enumerator's own `current_` cache; that asymmetry is itself the
+  design's evidence for making the cache mandatory.
+
+Two **pre-existing, separate** write escapes on this class are recorded but were
+**not** in scope: `operator[](const std::string&)` returns a non-`const`
+`std::any&` and `getItem()` returns `const_cast<std::any*>(&it->second)`; both
+bypass the mutation counter and both are already documented in the header as
+narrow gaps. Implementation is ticket #1794, `blocked`. Full record:
+`docs/IDictionaryEnumeratorKeyValueSafetyDesign.md`.

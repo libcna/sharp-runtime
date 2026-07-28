@@ -2264,6 +2264,158 @@ tag, or publication occurred. No compilation used more than four jobs.
 
 No repair ticket is active.
 
+### Completed IDictionaryEnumerator key/value design: ticket #1795
+
+**`P3: Design a safe IDictionaryEnumerator Key/Value contract`**
+(`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY-DESIGN`, P3, size M, design-only) is
+**done**, opened and closed 2026-07-28 on local branch
+`feature/remediation-coll-idictenumerator-keyvalue-design`. It made **no
+production or test-source change**. Durable record:
+[`docs/IDictionaryEnumeratorKeyValueSafetyDesign.md`](docs/IDictionaryEnumeratorKeyValueSafetyDesign.md).
+
+**Ticket #1794 was deliberately not reused.** Its database row is an
+*implementation* row — title "Migrate `IDictionaryEnumerator`'s `const void*`
+key/value accessors off live storage", blocked on approval to *perform* the
+change rather than on a decision about what the change is. Converting it into a
+"completed design ticket" to reuse the number would have recorded implementation
+work as done when none was. #1794 therefore **stays `blocked`**, and #1795 was
+opened as the next available number and completed as the design.
+
+**Selected design: Entry-canonical owning accessors with a mandatory
+`MoveNext`-time snapshot.** `getEntryProperty()` keeps returning
+`DictionaryEntry` by value and becomes the canonical representation;
+`getKeyProperty()` and `getValueProperty()` return an owning `std::any` **by
+value**, equal by construction to that entry's `Key` and `Value`;
+`getCurrentProperty()` keeps #1793's signature and boxes the `DictionaryEntry` on
+**both** implementations, matching .NET's `Current => Entry`; and every
+implementation must be able to answer every accessor from state the enumerator
+itself owns.
+
+**The return-type change alone is not the fix** — the single most important
+correction this design makes to the shape #1794 assumed. Neither accessor
+version-checks, so both dereference a container iterator that a mutation may
+have invalidated; on `ListDictionaryInternal` that makes even
+`getEntryProperty()` and the already-migrated `getCurrentProperty()`
+AddressSanitizer `heap-use-after-free` after `Clear()` or destruction. The
+snapshot, not the box, is what closes the lifetime class. .NET's own
+`HashtableEnumerator` caches `_currentKey`/`_currentValue` at `MoveNext` and
+never touches `_buckets` from an accessor; the design adopts exactly that.
+
+**Three premises written into ticket #1794's own description are contradicted by
+measurement and are corrected in the design record rather than worked around:**
+
+1. *"They are ALREADY const-correct … there is no write path through them."*
+   **False for `Hashtable`.** `getValueProperty()` returns a pointer to the live
+   `std::unordered_map`'s `mapped_type`, a **non-`const` `std::any`**;
+   `const_cast` + assignment through it is well-formed, fully defined C++ that
+   rewrites live dictionary storage, leaves the mutation counter unmoved, and is
+   invisible to a second enumerator. `getKeyProperty()` reaches the `const
+   std::string` key, where the write is undefined behaviour and produces an entry
+   that `Count` still reports but **no lookup can return by either its old or its
+   new key** (reproduced at 64 entries).
+2. *"The obvious selected shape is the same one #1793 landed."* Half right —
+   `std::any` by value is selected, but it is necessary and not sufficient.
+3. *"`getEntryProperty()` already returns `DictionaryEntry` BY VALUE, so the
+   by-value answer is already the convention."* True of the signature, misleading
+   about safety: on `ListDictionaryInternal` that by-value entry is *built* from
+   a dangling `std::list` iterator.
+
+**Two previously unrecorded `ListDictionaryInternal` parity defects** were found
+and decided in the design, because the ticket must settle the
+`Entry`/`Current` relationship: its `getCurrentProperty()` boxes the **key**
+where .NET is `public object Current => Entry;`, and it disagrees with itself
+about `const` on a value (`DictionaryEntry::Value` is `void*`, the value view's
+`Current` is `const void*`, `copyToCore` writes `void*`). Both are named
+explicitly in the approval and both are separable from it.
+
+Measured, not estimated:
+
+- **Inventory:** exactly **two** production implementations
+  (`Hashtable::Enumerator`, `ListDictionaryInternal::NodeEnumerator`, both
+  private nested), two adapter enumerators, and — unlike #1792's finding for
+  `IEnumerator` — **zero** hand-written test-local implementers.
+- **Call sites:** a 628-translation-unit `[[deprecated]]`-tagged sweep, four
+  parallel jobs, 0 compile failures: **10 unique sites** (3 `Entry`, 5 `Key`,
+  3 `Value`), 3 library-internal, 7 in tests, 0 in any other module.
+- **Source break:** a fully migrated three-header shim, compiled standalone
+  `-Werror` clean, breaks **1 of 628** translation units at **1 line**.
+- **Runtime break:** all 66 `SharpRuntimeTests_Collections_Core` objects
+  recompiled against that shim and relinked — **2,250 of 2,252 pass**; the two
+  failures are exactly the two parity defects above.
+- **Pre-fix evidence:** 20 defects across six modes, **8 AddressSanitizer
+  `heap-use-after-free` reports**, 0 UBSan diagnostics on the corruption itself,
+  three fatal scenarios that complete *silently* under UBSan alone, a
+  stack-buffer-overflow from one function called through the interface against
+  the *other* implementation, and 0 LeakSanitizer leaks with detection proved
+  active by a 284-byte deliberate-leak self-test.
+- **Post-fix evidence:** 42 assertions, 0 failures, 0 ASan/UBSan/LSan
+  diagnostics.
+- **ABI:** the mangled name is **byte-identical** for `const void*`, `std::any`
+  and `const DictionaryEntry&`; the vtable slot is unchanged at `0x30`; but
+  `this` moves `%rdi` → `%rsi` with a hidden `sret` in `%rdi`. A stale caller and
+  a new implementation **link with zero diagnostics**, then SEGV — UBSan reports
+  an invalid vptr and a bogus `System::InvalidOperationException` raised out of
+  garbage memory.
+- **A second, independent stale-object vector** this design has and #1793 did
+  not: `ListDictionaryInternal::NodeEnumerator` grows **40 → 72** bytes while
+  `GetEnumerator()` stays `inline` in the public header, so a stale consumer's
+  own object file allocates the old size. Reproduced: links clean, then ASan
+  `heap-use-after-free`. `NodeEnumerator` is a **private nested class**, so this
+  is *not* a public object-layout change in the sense of #1788's, #1789's, or
+  #1791 Phase 2's approvals; it is part of the mandatory-rebuild item.
+- **Allocation:** `Hashtable` key 0 → **1** (SSO) / **2** (heap key) — libstdc++'s
+  `std::any` small-buffer optimisation admits only types that *fit in a `void*`*,
+  so even a short `std::string` allocates; `Hashtable` `int` value 0 → **0**;
+  **`ListDictionaryInternal` key and value 0 → 0**; `Entry` and `Current`
+  unchanged. Time per read (200,000 iterations, `asm volatile` barrier):
+  1.5 → 16.3 ns worst case, 1.2 → 5.2 ns for a small value, ~1.3 → ~6.4 ns for
+  `ListDictionaryInternal`.
+- **Alternatives:** seven evaluated with a compatibility matrix. Alternative F
+  (enumerator-owned copies behind an unchanged `const void*`) was measured rather
+  than dismissed — **0 of 628** translation units break and there is no
+  calling-convention change — and is rejected as the *selected* design because it
+  leaves type safety and implementation divergence entirely open and introduces
+  an enumerator/collection desynchronisation this repository deliberately removed
+  in #1793. It is retained as the documented fallback if the approval is
+  declined, and must never be described as a remediation.
+
+**#1794 stays `blocked`**, now depending on #1795, with its acceptance criteria
+and its exact four-item approval rewritten from the design record: (1) a public
+source break to `IDictionaryEnumerator`; (2) two observable `ListDictionaryInternal`
+behaviour changes; (3) acknowledgement of a silent ABI break through **two**
+independent mechanisms requiring a full consumer rebuild; (4) item 2 is
+separately declinable. #1793's approval does **not** carry over, and neither do
+#1771's, #1780's or #1783's. Recommended order: **#1794 before #1791** — #1794's
+break is loud at the call site and its layout change is invisible to consumers,
+whereas #1791 Phase 2 grows a public object and silently changes what `list[i]`
+means. The two migrations must not be merged.
+
+Two **pre-existing** `Hashtable` write escapes outside this interface are
+recorded in the design's risk register rather than absorbed: the non-`const`
+`operator[](const std::string&)` and `getItem()`'s
+`const_cast<std::any*>(&it->second)` return both bypass the mutation counter, and
+both are already documented in `Hashtable.hpp` as narrow gaps.
+
+Closure evidence: all probes retained under the gitignored
+`build-probe-idictenum/`; boundaries 41 modules / 90 edges; validator tests 7/7;
+catalogue current; database consistent; `git diff --check` clean; Doxygen 1.9.8
+at **1,939/1,942**, unchanged (no `README.md` link was added, and `docs/` is
+outside `Doxyfile`'s `INPUT`); `scripts/local_ci_check.sh build`
+**13,538/13,538 tests across 37 executables**, zero warnings/errors, with
+`SharpRuntimeTests_Collections_Core` at 2,252 — all unchanged, as expected for a
+design-only ticket. `scripts/check_selective_components.sh` was not run because
+no public header or component metadata changed; it is required when #1794
+Phase 2 lands. No new `SR-AUD-*` identifier: the audit numbering is frozen at 364
+and this was found during remediation; **SR-AUD-356 stays `remediated` and
+CCF-018 is not reopened**. The defect is **not** marked remediated.
+
+Tickets #1788, #1789, #1791, and #1794 remain `blocked` and untouched. Ticket
+#1773 remains `blocked` and untouched. CNA and mobile-eggbert were not
+inspected, searched, configured, built, or modified. No push, merge, rebase,
+tag, or publication occurred. No compilation used more than four jobs.
+
+No repair ticket is active.
+
 ### Nominal 500-hour first remediation programme
 
 The 500-hour figure is credible for a first risk-reduction tranche, not for

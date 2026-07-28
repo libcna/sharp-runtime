@@ -476,6 +476,33 @@ same interface family remain deliberately open and are recorded there: the typed
 key/value accessors, the latter opened as ticket #1794
 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, `blocked`, not begun).
 
+**Second post-remediation follow-up (design ticket #1795, 2026-07-28), no new
+`SR-AUD-*` identifier.** #1794 is an *implementation* row and was deliberately
+**not** reused as a design ticket; design ticket **#1795**
+(`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY-DESIGN`) answers it instead, with no
+production or test-source change, and #1794 stays `blocked`. Two facts from that
+design belong to *this* cross-cutting finding, because they are about a
+lifecycle check being absent before native storage access — exactly CCF-018's
+subject — on an interface CCF-018 did not cover:
+
+- **Neither `IDictionaryEnumerator` accessor performs a fail-fast version
+  check**, so both dereference a container iterator that a mutation may have
+  invalidated. On `ListDictionaryInternal`, which caches nothing, that reaches
+  `getEntryProperty()` and even the already-migrated, `std::any`-returning
+  `getCurrentProperty()`: eight AddressSanitizer `heap-use-after-free` reports
+  were reproduced, three of them on accessors whose return type is *already* an
+  owning value. A return-type change alone therefore does not close the lifetime
+  class; the design requires a `MoveNext`-time snapshot into enumerator-owned
+  storage, which is what .NET's `HashtableEnumerator` does.
+- **`Hashtable`'s `getValueProperty()` does have a write path**, contradicting
+  ticket #1794's own premise: it returns a pointer to the live map's non-`const`
+  `std::any`, so `const_cast` + assignment is well-formed, defined C++ that
+  rewrites dictionary storage with the mutation counter unmoved.
+
+**CCF-018 and SR-AUD-356 stay `remediated` and are not reopened**: #1767's
+lifecycle contract is unchanged and every one of its regressions still passes.
+See `docs/IDictionaryEnumeratorKeyValueSafetyDesign.md`.
+
 - `modules/collections/include/System/Collections/Generic/IEnumerator.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/List.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/Queue.hpp.audit.md`;

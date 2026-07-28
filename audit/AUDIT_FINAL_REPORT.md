@@ -1328,3 +1328,141 @@ Tickets #1788, #1789, #1791, and #1794 remain `blocked` and untouched; #1773
 remains `blocked` and untouched. CNA and mobile-eggbert were not inspected,
 searched, configured, built, or modified. No compilation used more than four
 parallel jobs, and no push, merge, rebase, tag, or publication occurred.
+
+## Post-audit design batch — ticket #1795, `IDictionaryEnumerator` key/value safety (2026-07-28)
+
+Design ticket **#1795** (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY-DESIGN`, P3,
+size M, category `design`) is **done**, on local branch
+`feature/remediation-coll-idictenumerator-keyvalue-design`, with **no production
+or test-source change**. Durable record:
+`docs/IDictionaryEnumeratorKeyValueSafetyDesign.md`.
+
+**No new `SR-AUD-*` identifier.** The audit numbering stays frozen at 364;
+**SR-AUD-356 stays `remediated`** and **CCF-018 is not reopened**. This was found
+during remediation, not during the audit, and the design closes nothing yet.
+
+**Ticket #1794 was deliberately not reused.** Its database row is an
+*implementation* row — it migrates the accessors and is blocked on approval to
+*perform* that migration, not on a decision about what the migration is.
+Recording it as a completed design ticket to reuse the number would have logged
+implementation work as done when none was performed. #1794 stays `blocked`;
+#1795 was opened as the next available number and completed as the design.
+
+Selected: **Entry-canonical owning accessors with a mandatory `MoveNext`-time
+snapshot.** `getEntryProperty()` stays `DictionaryEntry` by value and becomes the
+canonical representation; `getKeyProperty()` and `getValueProperty()` return an
+owning `std::any` **by value**, equal by construction to that entry's members;
+`getCurrentProperty()` keeps #1793's signature and boxes the `DictionaryEntry` on
+**both** implementations, matching .NET's `public object Current => Entry;`; and
+every implementation must be able to answer every accessor from state the
+enumerator itself owns.
+
+**The return-type change alone is not the fix**, which is the design's principal
+correction to the shape #1794 assumed. Neither accessor performs a fail-fast
+version check, so both dereference a container iterator that a mutation may have
+invalidated. On `ListDictionaryInternal` — which caches nothing — that makes even
+`getEntryProperty()` and the already-migrated `getCurrentProperty()`
+AddressSanitizer `heap-use-after-free` after `Clear()` or destruction. .NET's own
+`HashtableEnumerator` snapshots `_currentKey`/`_currentValue` at `MoveNext` and
+never reads `_buckets` from an accessor; the design adopts exactly that, and
+`Hashtable::Enumerator` already half-implements it.
+
+**Three premises written into ticket #1794's own description are contradicted by
+measurement** and are corrected in the design record rather than worked around:
+
+1. *"They are ALREADY const-correct … there is no write path through them."*
+   **False for `Hashtable`.** `getValueProperty()` returns a pointer to the live
+   `std::unordered_map`'s `mapped_type`, a **non-`const` `std::any`**;
+   `const_cast` + assignment through it is well-formed, fully defined C++ that
+   rewrites live dictionary storage, leaves the mutation counter unmoved, and is
+   invisible to a second enumerator. `getKeyProperty()` reaches the `const
+   std::string` key, where the write is undefined behaviour and, at 64 entries,
+   produces an entry that `Count` still reports but that **no lookup can return
+   by either its old or its new key**. Both classes A and B therefore apply to
+   `Hashtable`; both genuinely do *not* apply to `ListDictionaryInternal`, whose
+   accessors hand back the caller's own pointers and whose keys are compared by
+   address.
+2. *"The obvious selected shape is the same one #1793 landed."* Half right —
+   `std::any` by value is selected, but it is necessary and not sufficient.
+3. *"`getEntryProperty()` already returns `DictionaryEntry` BY VALUE, so the
+   by-value answer is already the convention on this very interface."* True of
+   the signature and misleading about safety: on `ListDictionaryInternal` that
+   by-value entry is built from a dangling `std::list` iterator.
+
+**Two previously unrecorded `ListDictionaryInternal` parity defects** were found
+while measuring and are decided in the design, because the ticket must settle the
+`Entry`/`Current` relationship: its `getCurrentProperty()` boxes the **key**
+where .NET is `Current => Entry`, and it disagrees with itself about `const` on a
+value (`DictionaryEntry::Value` is `void*`, the value view's `Current` is
+`const void*`, `MemberCollection::copyToCore` writes `void*`). Both are named
+explicitly in the approval, and item 2 of the approval is separately declinable.
+
+Measured rather than estimated:
+
+- **Inventory:** exactly **two** production implementations, both private nested
+  classes; two adapter enumerators; and — unlike #1792's finding for
+  `IEnumerator` — **zero** hand-written test-local implementers anywhere in this
+  repository.
+- **Call sites:** a 628-translation-unit `[[deprecated]]`-tagged sweep at four
+  parallel jobs with 0 compile failures — **10 unique sites** (3 `Entry`,
+  5 `Key`, 3 `Value`), 3 library-internal, 7 in tests, 0 outside
+  `Collections.Core`.
+- **Source break:** a fully migrated three-header shim, compiling standalone
+  `-Werror` clean, breaks **1 of 628** translation units at **1 line**.
+- **Runtime break:** all 66 `SharpRuntimeTests_Collections_Core` objects
+  recompiled against that shim and relinked — **2,250 of 2,252 pass**, the two
+  failures being exactly the two parity defects above.
+- **Pre-fix evidence:** 20 defects across six modes; **8 AddressSanitizer
+  `heap-use-after-free` reports**; **0** UBSan diagnostics on the corruption
+  itself; three fatal scenarios that complete *silently* under UBSan alone and
+  print a plausible wrong answer; a stack-buffer-overflow from one function
+  called through the interface against the *other* implementation; 0
+  LeakSanitizer leaks with detection proved active by a 284-byte deliberate-leak
+  self-test.
+- **Post-fix evidence:** 42 assertions, 0 failures, 0 ASan/UBSan/LSan
+  diagnostics.
+- **ABI:** the mangled name is **byte-identical** for `const void*`, `std::any`
+  and `const DictionaryEntry&`; the vtable slot is unchanged at `0x30`; `this`
+  moves `%rdi` → `%rsi` with a hidden `sret` in `%rdi`. A stale caller and a new
+  implementation **link with zero diagnostics**, then SEGV — UBSan reporting an
+  invalid vptr and a bogus `System::InvalidOperationException` raised out of
+  garbage memory.
+- **A second, independent stale-object vector** that #1793 did not have:
+  `ListDictionaryInternal::NodeEnumerator` grows **40 → 72** bytes while
+  `GetEnumerator()` stays `inline` in the public header, so a stale consumer's
+  own object file allocates the old size for the new object. Reproduced: links
+  clean, then ASan `heap-use-after-free`. `NodeEnumerator` is a **private nested
+  class**, so this is *not* a public object-layout change in the sense of
+  #1788's, #1789's, or #1791 Phase 2's approvals.
+- **Allocation:** `Hashtable` key 0 → **1** (SSO) / **2** (heap key), because
+  libstdc++'s `std::any` small-buffer optimisation admits only types that fit in
+  a `void*`; `Hashtable` `int` value 0 → **0**; **`ListDictionaryInternal` key
+  and value 0 → 0**; `Entry` and `Current` unchanged.
+- **Alternatives:** seven evaluated with a compatibility matrix. Alternative F
+  (enumerator-owned copies behind an unchanged `const void*`) was **measured**,
+  not dismissed — **0 of 628** translation units break and there is no
+  calling-convention change — and is rejected as the selected design because it
+  leaves type safety and implementation divergence entirely open and reintroduces
+  the enumerator/collection desynchronisation #1793 removed. It is retained as
+  the documented fallback if the approval is declined, and must never be
+  described as a remediation.
+
+Two **pre-existing** `Hashtable` write escapes outside this interface are
+recorded in the design's risk register rather than absorbed: the non-`const`
+`operator[](const std::string&)` and `getItem()`'s
+`const_cast<std::any*>(&it->second)` return both bypass the mutation counter, and
+both are already documented in `Hashtable.hpp` as narrow gaps.
+
+Validation, all unchanged as expected for a design-only ticket: 41 modules /
+90 edges; validator tests 7/7; catalogue current; database consistent;
+`git diff --check` clean; Doxygen 1.9.8 at **1,939**/1,942;
+`scripts/local_ci_check.sh build` **13,538 tests across 37 executables** with
+zero warnings and zero errors, `SharpRuntimeTests_Collections_Core` at 2,252.
+`scripts/check_selective_components.sh` was not run because no public header or
+component metadata changed; it is required when #1794 Phase 2 lands. Every probe
+is retained under the gitignored `build-probe-idictenum/`.
+
+Tickets #1788, #1789, #1791, and #1794 remain `blocked` and untouched; #1773
+remains `blocked` and untouched. CNA and mobile-eggbert were not inspected,
+searched, configured, built, or modified. No compilation used more than four
+parallel jobs, and no push, merge, rebase, tag, or publication occurred.

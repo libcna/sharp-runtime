@@ -42,3 +42,35 @@ counter into the destination and needed no overflow at all, with six
 AddressSanitizer `heap-use-after-free`/`heap-buffer-overflow` reproductions. The
 full record, including the .NET comparison and the per-type layout measurements,
 is `docs/CollectionVersionCounterSweep.md`.
+
+## Post-audit note — design ticket #1795 (2026-07-28)
+
+**No `SR-AUD-*` identifier**: the numbering is frozen at 364 and this was found
+during remediation. Design ticket #1795 measured
+`ListDictionaryInternal::NodeEnumerator` and found the opposite profile from
+`Hashtable::Enumerator` under the same interface:
+
+- `getKeyProperty()` and `getValueProperty()` return **the caller's own
+  pointers**, never dictionary storage. Writing through them after a
+  `const_cast` hits the caller's object, cannot corrupt the dictionary, and does
+  not affect lookup, because this dictionary compares keys by **address**. The
+  const-correctness and version-bypass classes therefore genuinely do **not**
+  apply here — which is why "`const void*` is unsafe" is the wrong summary of
+  this interface.
+- The lifetime class applies **more** broadly here than on `Hashtable`. The
+  enumerator caches nothing, so **all four** accessors — including
+  `getEntryProperty()` and the `std::any`-returning `getCurrentProperty()` that
+  ticket #1793 already migrated — dereference the `std::list` iterator on every
+  call, with no version check. After `Clear()` or the dictionary's destruction
+  each is an AddressSanitizer `heap-use-after-free`. .NET is safe here only
+  because its `current` is a GC-rooted strong reference to the node.
+- Two parity defects: `getCurrentProperty()` boxes the **key**, where .NET is
+  `public object Current => Entry;`; and the `const` on a value is spelled three
+  different ways — `DictionaryEntry::Value` is `void*`, the value view's
+  `Current` is `const void*`, and `MemberCollection::copyToCore` writes `void*`.
+
+The selected fix adds a `DictionaryEntry current_` snapshot filled in
+`MoveNext()`, which grows this private nested class from 40 to 72 bytes and, via
+the `inline` `GetEnumerator()`, is a measured stale-object hazard for any
+consumer that is not fully rebuilt. Implementation is ticket #1794, `blocked`.
+Full record: `docs/IDictionaryEnumeratorKeyValueSafetyDesign.md`.
