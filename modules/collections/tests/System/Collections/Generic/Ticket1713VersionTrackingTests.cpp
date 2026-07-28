@@ -106,8 +106,12 @@ TEST(SortedSetVersionTrackingTests, Enumeration_ClearDuringIteration_Throws) {
 }
 
 TEST(SortedSetVersionTrackingTests, GetViewBetween_StillWorks_AfterVersioningChange) {
-    // GetViewBetween's internal snapshot copy uses raw std::set iteration on `data_`, not the
-    // versioned public Iterator -- confirm it's unaffected by the version-tracking addition.
+    // GetViewBetween positions the returned view with std::set::lower_bound/upper_bound rather
+    // than the versioned public Iterator -- confirm it's unaffected by the version-tracking
+    // addition. (Corrected by ticket #1783: this comment previously described an internal
+    // snapshot copy, which is what the member did before it was made a live bounded view. The
+    // assertions below are unchanged and still hold; the live-view contract itself is covered
+    // by SortedSetLiveViewTests.)
     SortedSet<int> s;
     s.Add(1); s.Add(2); s.Add(3); s.Add(4);
     auto view = s.GetViewBetween(2, 3);
