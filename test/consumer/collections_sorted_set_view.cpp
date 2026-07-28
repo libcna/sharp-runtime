@@ -122,6 +122,60 @@ bool explicitSnapshotIsDetached() {
     return true;
 }
 
+// Count answers correctly after every kind of mutation, through the parent and through the
+// view, and through a second handle onto the same state (ticket #1784). A consumer sees Count
+// as an ordinary intcs; the lazy per-view cache behind it -- made atomic by #1784 to remove a
+// ThreadSanitizer-confirmed data race between concurrent const reads -- stays invisible here,
+// which is the point of this check.
+bool countTracksParentAndViewMutations() {
+    SortedSet<int> set{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    SortedSet<int> view = set.GetViewBetween(3, 7);
+    SortedSet<int> secondHandle = view;
+
+    static_assert(std::is_same_v<decltype(view.getCountProperty()), SharpRuntime::intcs>,
+                  "Count must reach a consumer as a plain intcs value");
+
+    if (set.getCountProperty() != 10 || view.getCountProperty() != 5) return false;
+    if (secondHandle.getCountProperty() != 5) return false;
+
+    // Repeated reads are stable and change nothing observable.
+    for (int i = 0; i < 100; ++i)
+        if (view.getCountProperty() != 5) return false;
+    if (set.getCountProperty() != 10) return false;
+
+    // Parent mutation, inside and outside the view's range.
+    if (!set.Remove(5) || view.getCountProperty() != 4) return false;
+    if (!set.Remove(9) || view.getCountProperty() != 4) return false;
+    if (set.getCountProperty() != 8) return false;
+    if (!set.Add(5) || view.getCountProperty() != 5) return false;
+
+    // View mutation, seen by the parent and by the other handle.
+    if (!view.Remove(4)) return false;
+    if (view.getCountProperty() != 4 || set.getCountProperty() != 8) return false;
+    if (secondHandle.getCountProperty() != 4) return false;
+    if (!view.Add(4) || view.getCountProperty() != 5) return false;
+
+    // Clear on the view empties exactly the range.
+    view.Clear();
+    if (view.getCountProperty() != 0 || !view.getIsEmptyProperty()) return false;
+    if (secondHandle.getCountProperty() != 0) return false;
+    if (set.getCountProperty() != 4) return false;   // 1, 2, 8, 10
+
+    // Assignment rebinds a warm handle without carrying its old count over.
+    SortedSet<int> fresh{20, 21, 22};
+    view = fresh.GetViewBetween(20, 21);
+    if (!view.getIsViewProperty() || view.getCountProperty() != 2) return false;
+    view = fresh;
+    if (view.getIsViewProperty() || view.getCountProperty() != 3) return false;
+
+    // An empty view and a one-element view.
+    SortedSet<int> gap{1, 100};
+    if (gap.GetViewBetween(2, 99).getCountProperty() != 0) return false;
+    if (gap.GetViewBetween(50, 200).getCountProperty() != 1) return false;
+
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -129,5 +183,6 @@ int main() {
         && viewEnforcesItsBounds()
         && viewOutlivesItsOrigin()
         && nestedViewNarrowsOnly()
-        && explicitSnapshotIsDetached() ? 0 : 1;
+        && explicitSnapshotIsDetached()
+        && countTracksParentAndViewMutations() ? 0 : 1;
 }
