@@ -2745,3 +2745,102 @@ Tickets #1788, #1789, #1791, and #1794 remain `blocked` and untouched; #1773
 remains `blocked` and untouched. CNA and mobile-eggbert were not inspected,
 searched, configured, built, or modified. No compilation used more than four
 parallel jobs, and no push, merge, rebase, tag, or publication occurred.
+
+
+---
+
+## Completed IDictionaryEnumerator key/value safety implementation: ticket #1794
+
+Implementation ticket **#1794** (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, P3,
+size M, category `defect`) is **done**, on local branch
+`feature/remediation-coll-idictenumerator-keyvalue-safety`, landing the
+architecture #1795 selected. Durable record:
+`docs/IDictionaryEnumeratorKeyValueSafetyDesign.md` §37.
+
+**No new `SR-AUD-*` identifier.** The audit numbering stays frozen at 364.
+**SR-AUD-356 and CCF-018 are recorded as remediated by this ticket** — this is
+the closure of a post-remediation follow-up on an interface CCF-018 did not
+originally cover, not a reopening; #1767's lifecycle contract is unchanged and
+every one of its regressions still passes.
+
+The user granted the design's §33 approval **in full**: the public source break,
+both `ListDictionaryInternal` parity corrections, and the silent ABI break.
+`getKeyProperty()` and `getValueProperty()` now return an **owning `std::any` by
+value**, and — the half that actually closes the lifetime class — **both
+implementations snapshot the entry into enumerator-owned storage during a
+successful `MoveNext()`, so no accessor on either implementation dereferences a
+container iterator.** The snapshot rule is written into the header as an
+invariant of the *interface*.
+
+**Four corrections and extensions to #1795's own record**, recorded in design
+§37.1 rather than absorbed:
+
+1. §8.2's prose said "eight" ASan `heap-use-after-free` reports where **its own
+   table listed nine**; re-measurement before any source change confirmed
+   **nine** of sixteen scenarios. Nine is the figure now used everywhere.
+2. §24 never measured `MoveNext()`. The mandatory snapshot costs
+   `ListDictionaryInternal::MoveNext()` **2.8 → 23.9 ns per position** (~8.5×),
+   because it now builds a `DictionaryEntry` where it previously only advanced an
+   iterator; `Hashtable::MoveNext()` is unchanged, having always snapshotted. A
+   walk that never reads an accessor now pays for a snapshot it does not use, and
+   that is not optimisable away without reintroducing the accessor-time container
+   read the nine reports came from.
+3. §12.3 predicted 2,250/2,252 against a shim; with both predicted assertions
+   updated the real figure is **2,252/2,252**, and **2,316/2,316** with the new
+   suite.
+4. §22's ABI numbers were measured on a synthetic stand-in and were
+   **re-measured on the real interface**, where every prediction held and
+   `getValueProperty()`'s vtable slot `0x38` was confirmed alongside
+   `getKeyProperty()`'s `0x30`.
+
+Pre-fix evidence was reconfirmed **before** any production change and retained
+under the gitignored `build-probe-1794/`: `defects=20` identical to §8.1,
+including the `Hashtable` value write being well-formed defined C++ that rewrote
+live storage with the counter unmoved, and the 64-entry key corruption leaving an
+entry `Count` still reported and no lookup could return by either name; nine ASan
+`heap-use-after-free`; silent wrong reads with `diagnostic-from-any-tool=0`; and
+the cross-implementation stack-buffer-overflow.
+
+Post-fix: 42 assertions on the real headers with **0 failures and 0
+ASan/UBSan/LSan diagnostics and 0 leaks**; the new suite under ASan+UBSan+LSan at
+78 tests clean, leak detection proved active by the 284-byte self-test; UBSan
+alone at 0 runtime errors; the pre-fix `const void*` caller source **no longer
+compiles**, and `const_cast` cannot turn a `std::any` into a pointer, so no
+compatibility path is even expressible. **TSan was not run and the precondition
+was verified rather than assumed**: no `mutable` member exists in either
+enumerator, every accessor is `const`, and every write to `current_` is inside
+the non-`const` `MoveNext()`/`Reset()`.
+
+Both silent-ABI mechanisms were reproduced end to end on the real headers: an
+old caller linked against a new implementation **links with zero diagnostics**
+then SEGVs, with UBSan reporting an invalid vptr and a bogus
+`System::InvalidOperationException` raised out of garbage; and
+`NodeEnumerator` 40 → 72 behind an `inline` `GetEnumerator()` links clean then
+ASan `heap-use-after-free`. `NodeEnumerator` is a **private nested** class, so
+this is not a public layout change; exactly one line of §23's table moved.
+
+Validation: **+64 permanent tests**; the three pinned assertions **updated, not
+deleted**; positive consumer fixture clean under `-Wall -Wextra -Wpedantic
+-Werror` and passing; negative fixture rejected at **every** marked site;
+boundaries 41 modules / 90 edges; validator tests 7/7; catalogue current;
+database consistent; `git diff --check` clean;
+`scripts/check_selective_components.sh` run with a repository-local `TMPDIR`
+because a public header changed; Doxygen 1.9.8 at **1,940**/1,942, the single new
+warning identified as the unresolvable `\ref` for the new `README.md` link into
+`docs/`. **The full gate ran from a dedicated clean `build-abi-1794` tree at
+13,602 tests across 37 executables**, zero warnings/errors, with
+`SharpRuntimeTests_Collections_Core` at **2,316**.
+
+Left open and explicitly not claimed: `MoveNext()`/`Reset()` after the collection
+is destroyed remain undefined; the two **pre-existing** `Hashtable` write escapes
+outside this interface now have their own inactive ticket **#1796**
+(`REMED-COLL-HASHTABLE-WRITE-ESCAPES`, P3, `blocked`) instead of only a risk
+note; and `ListDictionaryInternal`'s key view still boxes `const void*` while its
+`copyToCore` normalises the key to `void*`, an asymmetry predating #1794 and
+outside the approval.
+
+Tickets #1788, #1789, #1791, and #1796 remain `blocked` and untouched; #1773
+remains `blocked` and untouched. #1793 was not reopened. CNA and mobile-eggbert
+were not inspected, searched, configured, built, or modified. No compilation used
+more than four parallel jobs, and no push, merge, rebase, tag, or publication
+occurred.

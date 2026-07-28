@@ -2414,6 +2414,138 @@ Tickets #1788, #1789, #1791, and #1794 remain `blocked` and untouched. Ticket
 inspected, searched, configured, built, or modified. No push, merge, rebase,
 tag, or publication occurred. No compilation used more than four jobs.
 
+### Completed IDictionaryEnumerator key/value safety implementation: ticket #1794
+
+Ticket #1794 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, P3, size M, category
+`defect`) is **done**, on local branch
+`feature/remediation-coll-idictenumerator-keyvalue-safety`, implementing the
+architecture ticket #1795 selected. The user granted the §33 approval **in
+full** — items 1, 2a, 2b and 3.
+
+`System::Collections::IDictionaryEnumerator::getKeyProperty()` and
+`getValueProperty()` now return an **owning `std::any` by value** instead of a
+`const void*`, equal by construction to `getEntryProperty()`'s members; and —
+the half that actually closes the lifetime class — **both implementations now
+snapshot the entry into enumerator-owned storage during a successful
+`MoveNext()`, and no accessor dereferences a container iterator.**
+`Hashtable::Enumerator` already had the snapshot and needed only two bodies;
+`ListDictionaryInternal::NodeEnumerator` gained a `DictionaryEntry current_`,
+one `MoveNext()` line, a `Reset()` line, and four rewritten bodies. Both member
+views forward the boxed accessors. `getEntryProperty()` and
+`getCurrentProperty()` keep their signatures.
+
+**Why the return type alone was not the fix.** Neither accessor version-checks,
+so an accessor called after a mutation dereferenced an invalidated container
+iterator. Re-measured before any source changed: **nine** AddressSanitizer
+`heap-use-after-free` reports across sixteen scenarios, three of which needed no
+caller misuse at all, and on `ListDictionaryInternal` — which cached nothing —
+that reached **all four** accessors including the already-owning
+`getCurrentProperty()` #1793 had migrated. The `Hashtable` write paths were
+reconfirmed identically at `defects=20`: `const_cast` through the value accessor
+was **well-formed, fully defined C++** that rewrote live dictionary storage with
+the counter unmoved, and the key path left, at 64 entries, an entry `Count`
+still reported and no lookup could return by either name.
+
+**Two `ListDictionaryInternal` parity corrections landed** (approval item 2):
+`getCurrentProperty()` boxes the `DictionaryEntry` rather than the key, matching
+.NET's `public object Current => Entry;`; and the value view's element changed
+from `const void*` to `void*`, agreeing with `DictionaryEntry::Value` and
+`copyToCore` where it previously agreed with neither. Exactly the two predicted
+permanent tests changed, with exactly the predicted diagnostics; both were
+**updated, not deleted**, along with `ListDictionaryInternalTests.cpp:96`.
+
+**Four corrections and extensions to #1795's own record**, written into
+`docs/IDictionaryEnumeratorKeyValueSafetyDesign.md` §37.1 rather than quietly
+absorbed: (1) §8.2's prose said "eight" ASan reports where its own table listed
+**nine**, and nine is what re-measurement found; (2) §24 never measured
+`MoveNext()`, and the mandatory snapshot makes
+`ListDictionaryInternal::MoveNext()` **2.8 → 23.9 ns per position** (~8.5×)
+because it now builds a `DictionaryEntry` where it previously only advanced an
+iterator — `Hashtable::MoveNext()` is unchanged at 46.0 → 40.9 ns, having always
+snapshotted; (3) §12.3 predicted 2,250/2,252 against a shim, and with both
+assertions updated the real figure is **2,252/2,252**; (4) §22's ABI numbers were
+measured on a synthetic stand-in and were **re-measured on the real interface**,
+where every prediction held and `getValueProperty()`'s slot `0x38` was confirmed
+too.
+
+**The ABI break is silent, through two independent mechanisms, and both were
+reproduced end to end on the real headers.** Mangled names byte-identical, vtable
+slots unchanged at `0x30`/`0x38`, but `this` moves `%rdi` → `%rsi` behind a
+hidden `sret`: an old caller linked against a new implementation **links with
+zero diagnostics**, then SEGVs, with UBSan reporting an invalid vptr and a bogus
+`System::InvalidOperationException` raised out of garbage that a consumer
+catching `System::Exception&` would log as "enumeration not started" and carry
+on. Separately, `ListDictionaryInternal::NodeEnumerator` grows **40 → 72 bytes**
+while `GetEnumerator()` stays `inline`, so a stale consumer allocates 40 for a
+72-byte object: links clean, then ASan `heap-use-after-free`. `NodeEnumerator` is
+a **private nested class**, so this is not a *public* layout change in #1788's,
+#1789's or #1791 Phase 2's sense. Every other `sizeof`/`alignof` is unchanged.
+**A full consumer rebuild is mandatory and the toolchain will not diagnose
+skipping it** — README.md carries the entry.
+
+Cost, stated plainly: 0 → 1 allocation per `Hashtable` SSO-string key read
+(2 for a heap key or a large value), 0 → 0 for `Hashtable` `int` values and for
+`ListDictionaryInternal` entirely; `Entry` and `Current` unchanged at 1 and 2;
+worst case 2.4 → 15.6 ns per read, plus the `MoveNext()` cost above. No
+`const_cast` compatibility path remains **and none is expressible** — `const_cast`
+cannot turn a `std::any` into a pointer.
+
+Migration inventory re-measured and confirmed: 2 production implementations,
+2 adapters, **0** hand-written test-local implementers, 3 library-internal call
+sites (all three simplify), 7 test call sites, and a compile break at **1 of 628**
+translation units at **1** site.
+
+Closure evidence: new permanent suite
+`modules/collections/tests/System/Collections/DictionaryEnumeratorKeyValueSafetyTests.cpp`
+(**+64 tests**, parameterised over both implementations wherever the assertion is
+about the interface); post-fix behaviour probe on the real headers at **42
+assertions, 0 failures, 0 ASan/UBSan/LSan diagnostics, 0 leaks**; the new suite
+under ASan+UBSan+LSan at **78 tests, 0 diagnostics, 0 leaks**, with leak
+detection proved active by the 284-byte self-test; UBSan alone at 0 runtime
+errors; **TSan not run and the precondition verified rather than assumed** — no
+`mutable` member exists, every accessor is `const`, and every write to `current_`
+is inside the non-`const` `MoveNext()`/`Reset()`; the pre-fix `const void*`
+caller source **no longer compiles** (13 errors); positive consumer fixture
+`test/consumer/collections_dictionary_enumerator.cpp` clean under
+`-Wall -Wextra -Wpedantic -Werror` and passing; negative fixture
+`test/consumer/collections_dictionary_enumerator_negative.cpp` rejected at
+**every** marked site (16 errors, 7 distinct diagnostics);
+`scripts/check_selective_components.sh` run with a repository-local `TMPDIR`
+because a public header changed; boundaries 41 modules / 90 edges; validator
+tests 7/7; catalogue current; database consistent; `git diff --check` clean;
+Doxygen 1.9.8 at **1,940/1,942** — one above the 1,939 canonical, and the single
+new warning was identified rather than accepted: it is the unresolvable `\ref`
+for the new `README.md` link into `docs/`, which is outside `Doxyfile`'s `INPUT`,
+the same warning the existing #1793 link already pays.
+
+**The full gate was run from a dedicated clean `build-abi-1794` tree**,
+configured from scratch against the new headers with ccache, at **13,602 tests
+across 37 executables, zero warnings, zero errors** — up from the 13,538 floor by
+exactly the 64 new tests, with `SharpRuntimeTests_Collections_Core` at **2,316**
+(was 2,252). No test-count reduction, and no network-dependent test disabled.
+
+**Not closed, and not claimed:** `MoveNext()`/`Reset()` after the collection is
+destroyed remain undefined; the two **pre-existing** `Hashtable` write escapes
+outside this interface — `operator[](const std::string&)` and `getItem()`'s
+`const_cast<std::any*>(&it->second)` — stay open and are now carried by new
+**inactive ticket #1796** (`REMED-COLL-HASHTABLE-WRITE-ESCAPES`, P3, `blocked`,
+needing its own design and its own approval) rather than existing only as a risk
+note; and `ListDictionaryInternal`'s key view still boxes `const void*` while its
+`copyToCore` normalises the key to `void*`, an asymmetry that predates #1794 and
+was outside the approval.
+
+No new `SR-AUD-*` identifier: the audit numbering is frozen at 364 and this was
+found during remediation. **SR-AUD-356 and CCF-018 are recorded as remediated by
+this ticket.**
+
+Tickets #1788, #1789, and #1791 remain `blocked` and untouched; #1773 remains
+`blocked` and untouched; #1796 is newly opened `blocked` and deliberately not
+begun; #1790, #1792, #1793 and #1795 remain `done`. #1793 was not reopened, and
+neither `IEnumerator::getCurrentProperty()`'s signature nor
+`Generic::IEnumerator<T>::Current()` changed. CNA and mobile-eggbert were not
+inspected, searched, configured, built, or modified. No push, merge, rebase, tag,
+or publication occurred. No compilation used more than four jobs.
+
 No repair ticket is active.
 
 ### Nominal 500-hour first remediation programme

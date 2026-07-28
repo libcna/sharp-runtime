@@ -208,6 +208,143 @@ no safe or useful equivalent.
 
 ## Breaking changes
 
+### 2026-07-28 — `System::Collections::IDictionaryEnumerator`'s `Key` and `Value` return `std::any`
+
+**This one requires a full rebuild of every consumer, and the linker will not
+tell you if you skip it — through *two* independent mechanisms. Read the ABI
+paragraph below before upgrading.**
+
+`getKeyProperty()` and `getValueProperty()` used to return `const void*`. They
+were const-qualified, which made them look safe, and they were not:
+
+- `Hashtable::Enumerator::getValueProperty()` returned a pointer to the live
+  `std::unordered_map`'s `mapped_type`, which is a **non-`const` `std::any`**.
+  `const_cast` plus assignment through it was not a trick and not undefined
+  behaviour — it was well-formed, fully defined C++ that **rewrote live
+  dictionary storage**, left the mutation counter unmoved, and was invisible to
+  a second, outstanding enumerator.
+- The key path reached the `const std::string` map key, where the same write
+  *is* undefined behaviour. At 64 entries it left an entry that `Count` still
+  reported and that **no lookup could return by either its old or its new key**.
+- Neither accessor version-checks, so an accessor called after a mutation
+  dereferenced an invalidated container iterator. On `ListDictionaryInternal`,
+  which cached nothing, that reached **all four** accessors — including
+  `getEntryProperty()` and the already-owning `getCurrentProperty()`. Nine
+  AddressSanitizer `heap-use-after-free` reports, three of which needed no
+  caller misuse at all.
+
+Both now return an **owning `std::any` by value**, the direct C++ counterpart of
+.NET's `object Key` / `object? Value`. `getEntryProperty()` is unchanged and is
+now the canonical representation: `Key` and `Value` are exactly that entry's
+members, and `getCurrentProperty()` is exactly that entry, boxed.
+
+```cpp
+// Before
+const void* raw = e->getKeyProperty();
+const std::string& key = *static_cast<const std::string*>(raw);
+*const_cast<std::any*>(                                   // ... and this rewrote
+    static_cast<const std::any*>(e->getValueProperty())) = v;   // the dictionary
+
+// After
+std::any boxedKey = e->getKeyProperty();
+const std::string& key = std::any_cast<const std::string&>(boxedKey);
+// There is no replacement for the write, and that is the point: use the
+// dictionary's own mutating API (setItem, Add) so the mutation counter advances
+// and outstanding enumerators fail fast.
+```
+
+Migration, by shape:
+
+| Was | Becomes |
+|---|---|
+| `const std::string* k = static_cast<const std::string*>(e->getKeyProperty());` | `auto k = std::any_cast<std::string>(e->getKeyProperty());` |
+| `const std::any* v = static_cast<const std::any*>(e->getValueProperty());` | `std::any v = e->getValueProperty();` — already the payload, not a nested box |
+| `const void* k = e->getKeyProperty();` *(`ListDictionaryInternal`)* | `auto k = std::any_cast<const void*>(e->getKeyProperty());` |
+| `void* v = const_cast<void*>(e->getValueProperty());` | `auto v = std::any_cast<void*>(e->getValueProperty());` |
+| `if (e->getKeyProperty() != nullptr)` | `std::any_cast<const void*>(e->getKeyProperty()) != nullptr` |
+| any write through a `const_cast` of either result | no replacement — see above. `const_cast` cannot turn a `std::any` into a pointer, so there is no "just add a cast" path |
+| implementing `IDictionaryEnumerator` by hand | change both return types, **and** snapshot the entry in `MoveNext()` — see below |
+| reading all three of `Entry`, `Key`, `Value` | read `getEntryProperty()` once; three accessors cost three copies |
+
+**Two `ListDictionaryInternal` behaviour changes**, both .NET parity corrections:
+
+- `getCurrentProperty()` now boxes the `DictionaryEntry` instead of the key
+  alone, matching .NET's `public object Current => Entry;` and what
+  `Hashtable::Enumerator` already did. `getCurrentProperty()`'s signature and
+  ownership contract are unchanged; one implementation's *payload* became
+  correct.
+- The **value view**'s element changes from `const void*` to `void*`, agreeing
+  with `DictionaryEntry::Value` and `copyToCore`, where it previously agreed
+  with neither. The **key** view is unchanged at `const void*`.
+
+Three further consequences:
+
+- **The returned box is yours.** Nothing invalidates it — not `MoveNext()`, not
+  `Reset()`, not mutating the dictionary, not `Clear()`, not destroying the
+  enumerator, not destroying the dictionary. Writing to it cannot reach the
+  dictionary, and reading it never advances any mutation counter. If the boxed
+  value is itself a handle (`ListDictionaryInternal`'s `void*`, or a
+  `std::shared_ptr<X>` value in a `Hashtable`), the box owns the *handle*, not
+  the pointee: mutating the pointee is still not mutating the dictionary, and
+  replacing the handle inside the box replaces no entry. These are pointer
+  semantics, not a deep copy.
+- **The boxed type differs between implementations, and is now discoverable.**
+  `Hashtable` boxes `std::string` keys and the stored value's own payload
+  (never a `std::any` nested inside another `std::any`);
+  `ListDictionaryInternal` boxes `const void*` keys and `void*` values. Code
+  written generically must branch on `std::any::type()` or use
+  `getEntryProperty()`. That was always true; it was previously undiagnosable,
+  and a same-width wrong cast through the old `const void*` was silently wrong
+  against one implementation and an AddressSanitizer stack-buffer-overflow
+  against the other. A wrong `std::any_cast` now throws `std::bad_any_cast`.
+- **The accessors deliberately did *not* gain a version check.** .NET's do not
+  either. The `MoveNext()`-time snapshot makes a post-mutation read *safe*
+  rather than turning a read .NET permits into an exception. `MoveNext()` and
+  `Reset()` keep their fail-fast check unchanged. Calling `MoveNext()` or
+  `Reset()` after the dictionary itself is destroyed remains undefined; this
+  change does not close that, and does not claim to.
+
+**Implementing the interface by hand: the return types are only half of it.**
+After `MoveNext()` returns `true`, an implementation must be able to answer
+every accessor from state the enumerator itself *owns*. Reading container
+storage inside an accessor is a defect even with the right signature, because no
+accessor performs the fail-fast version check. .NET's own `HashtableEnumerator`
+snapshots the key and value into enumerator fields at `MoveNext()` time and
+reads `_buckets` from no accessor.
+
+**ABI — a full consumer rebuild is mandatory, for two independent reasons.**
+First, under the Itanium C++ ABI a non-template function's return type is **not**
+part of its mangled name, so `_ZNK…14getKeyPropertyEv` and
+`_ZNK…16getValuePropertyEv` are byte-identical before and after and both keep
+their vtable slots (offsets `0x30` and `0x38`, re-measured on the real headers).
+The calling convention is *not* the same: `std::any` is returned through a hidden
+sret buffer, so `this` moves from `%rdi` to `%rsi`. A translation unit compiled
+against the old header and linked against a library built with the new one
+**links with zero diagnostics and then corrupts memory** — reproduced as a SEGV,
+with UndefinedBehaviorSanitizer reporting an invalid vptr and a bogus
+`System::InvalidOperationException` raised out of garbage, which a consumer
+catching `System::Exception&` would log as "enumeration not started" and carry
+on. Second, `ListDictionaryInternal::NodeEnumerator` grows **40 → 72 bytes** to
+hold its snapshot while `GetEnumerator()` stays `inline` in the public header, so
+a stale consumer's own object file allocates the old size for the new object —
+reproduced as links-clean-then-AddressSanitizer-`heap-use-after-free`. No tool in
+the toolchain detects either at link time. Rebuild everything.
+
+`NodeEnumerator` is a **private nested class**, so no consumer can name,
+allocate, embed, or derive from it: this is not a *public* object-layout change.
+`sizeof`/`alignof` of `IDictionaryEnumerator`, `DictionaryEntry`, `Hashtable`,
+`Hashtable::Enumerator`, and `ListDictionaryInternal` are all unchanged. The cost
+is one allocation class on the type-erased read: 0 for `ListDictionaryInternal`
+keys and values and for a small `Hashtable` value, 1 for a short `Hashtable`
+string key and a `std::shared_ptr` value, 2 for a heap `std::string` key or
+value; `Entry` and `Current` are unchanged. Measured worst case 2.4 → 15.6 ns per
+read. `ListDictionaryInternal::MoveNext()` also became more expensive (2.8 →
+23.9 ns per position) because it now builds the snapshot it previously did not
+have; `Hashtable::MoveNext()` is unchanged, having always snapshotted. The full
+record — inventory, reproductions, alternatives analysis, .NET comparison, ABI
+and layout measurements — is in
+[docs/IDictionaryEnumeratorKeyValueSafetyDesign.md](docs/IDictionaryEnumeratorKeyValueSafetyDesign.md).
+
 ### 2026-07-28 — `System::Collections::IEnumerator::getCurrentProperty()` returns `std::any`
 
 **This one requires a full rebuild of every consumer, and the linker will not
@@ -296,8 +433,8 @@ class on the type-erased read only — 0 for `int`, a raw pointer, and an alread
 boxed `int`; 1 for a small `std::string` and a `std::shared_ptr`; 2 for a large
 `std::string` and a `DictionaryEntry`. The typed `Current()` path is unchanged
 and still allocation-free. `IDictionaryEnumerator`'s `getKeyProperty()` and
-`getValueProperty()` deliberately still return `const void*` and are a separate,
-recorded follow-on. The full record — inventory, reproductions, alternatives
+`getValueProperty()` were deliberately left at `const void*` here and migrated
+separately, by the entry above. The full record — inventory, reproductions, alternatives
 analysis, .NET comparison, and ABI measurements — is in
 [docs/IEnumeratorCurrentSafetyDesign.md](docs/IEnumeratorCurrentSafetyDesign.md).
 

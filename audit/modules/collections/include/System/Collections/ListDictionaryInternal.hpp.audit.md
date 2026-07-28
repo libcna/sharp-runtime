@@ -74,3 +74,34 @@ The selected fix adds a `DictionaryEntry current_` snapshot filled in
 the `inline` `GetEnumerator()`, is a measured stale-object hazard for any
 consumer that is not fully rebuilt. Implementation is ticket #1794, `blocked`.
 Full record: `docs/IDictionaryEnumeratorKeyValueSafetyDesign.md`.
+
+
+### Remediated by ticket #1794 (2026-07-28)
+
+`NodeEnumerator` gained the `DictionaryEntry current_` snapshot, filled by
+`MoveNext()` only after the version check passes and only when positioned, and
+cleared by `Reset()`. **All four accessors now read only the snapshot**, so none
+of them dereferences the `std::list` iterator — closing the three
+use-after-frees that reached `getEntryProperty()` and the already-owning
+`getCurrentProperty()` and that no return-type change could have closed.
+
+Both parity defects were corrected, under explicit approval:
+`getCurrentProperty()` boxes the `DictionaryEntry`, matching .NET's
+`public object Current => Entry;`; and the value view boxes `void*`, agreeing
+with `DictionaryEntry::Value` and `copyToCore` where it previously agreed with
+neither. `ListDictionaryInternalTest.Values_ReflectsContents` and
+`EnumeratorCurrentSafety.ListDictionaryInternalPreservesTheConstOnItsBoxedKey`
+were **updated, not deleted** — the latter still asserts that the caller's
+`const` survives, now on the entry's Key, on `getKeyProperty()`, and on the key
+view.
+
+Confirmed costs: this private nested class grows **40 → 72 bytes**, re-measured,
+and the stale-object hazard through the `inline` `GetEnumerator()` was reproduced
+as ASan `heap-use-after-free`. `MoveNext()` also became more expensive — **2.8 →
+23.9 ns per position** — because it now builds the snapshot; that number was not
+in the design record and is added by §37.1. `sizeof(ListDictionaryInternal)` is
+unchanged at 40.
+
+Still asymmetric, predating this ticket and outside its approval: the key view
+boxes `const void*` while `copyToCore` normalises the key to `void*`. Full
+record: `docs/IDictionaryEnumeratorKeyValueSafetyDesign.md` §37.

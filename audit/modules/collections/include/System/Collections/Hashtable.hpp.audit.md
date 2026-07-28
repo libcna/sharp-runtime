@@ -123,3 +123,27 @@ Two **pre-existing, separate** write escapes on this class are recorded but were
 bypass the mutation counter and both are already documented in the header as
 narrow gaps. Implementation is ticket #1794, `blocked`. Full record:
 `docs/IDictionaryEnumeratorKeyValueSafetyDesign.md`.
+
+
+### Remediated by ticket #1794 (2026-07-28)
+
+`Enumerator::getKeyProperty()` and `getValueProperty()` now answer from the
+existing `current_` snapshot and return an owning `std::any` by value; the two
+`&it_->first`/`&it_->second` dereferences were the last container reads inside an
+accessor on this class and are gone. `MemberEnumerator::getCurrentProperty()`
+loses its `static_cast` pair and forwards the boxed accessors directly; the key
+view still boxes `std::string` and the value view still boxes the stored value's
+own payload, never a nested `std::any`. `sizeof(Hashtable)` and
+`sizeof(Hashtable::Enumerator)` are unchanged at 72.
+
+The write paths recorded above were reconfirmed against the pre-fix headers
+before anything changed (`defects=20`, including the 64-entry key corruption) and
+are now inexpressible: `const_cast` cannot convert a `std::any` to a pointer.
+
+**The two pre-existing write escapes on this class remain open and were
+deliberately out of scope**, but no longer live only in a design risk register:
+`operator[](const std::string&)` and `getItem()`'s
+`const_cast<std::any*>(&it->second)` are now carried by inactive ticket **#1796**
+(`REMED-COLL-HASHTABLE-WRITE-ESCAPES`, P3, `blocked`), which needs its own design
+and its own approval before it may begin. Full record:
+`docs/IDictionaryEnumeratorKeyValueSafetyDesign.md` §37.

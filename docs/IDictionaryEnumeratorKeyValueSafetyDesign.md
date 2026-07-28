@@ -1721,3 +1721,149 @@ into `build/`, and caps itself at four concurrent compiler processes.
   `SR-AUD-*` identifier** was created — the audit numbering is frozen at 364 and
   this was found during remediation.
 - The defect is **not** marked remediated. This ticket is design-complete only.
+
+---
+
+## 37. Implementation complete — ticket #1794, 2026-07-28
+
+Everything above §36 is the design record as written under #1795 and is left
+**unamended**: the unsafe accessors existed, and the sections that measured them
+stay in the past tense they were written in. This section records what #1794
+actually did, and — importantly — the four places where implementation
+measurement **corrected or extended** the design.
+
+Local branch `feature/remediation-coll-idictenumerator-keyvalue-safety`, built on
+`feature/remediation-coll-idictenumerator-keyvalue-design`. The approval of §33
+was granted in full: items 1, 2 (both 2a and 2b) and 3.
+
+### 37.1 Corrections to this record
+
+Stated first, because a design record that is quietly wrong is worse than one
+that is loudly incomplete.
+
+1. **§8.2 says "Eight AddressSanitizer `heap-use-after-free` reports"; its own
+   table lists nine, and re-measurement confirms nine.** Every one of the nine
+   scenarios marked ASan in that table reproduced (`build-probe-1794/prefix_asan_*.log`,
+   `9` of 16 scenarios reporting), and the seven marked *survives*/*safe*
+   reproduced as clean. The table was right and the prose sentence undercounted
+   it by one. The correct figure is **nine**, and it is the figure the permanent
+   suite, the header comment, and README.md use.
+2. **§24 never measured `MoveNext()`.** It measured accessor cost only, and
+   therefore did not record the one place where the mandatory snapshot makes
+   something *slower* rather than faster:
+   `ListDictionaryInternal::MoveNext()` goes **2.8 → 23.9 ns per position**
+   (~8.5×), because it now builds a `DictionaryEntry` — two `std::any` boxes —
+   at every position where it previously only advanced a `std::list` iterator.
+   `Hashtable::MoveNext()` is **46.0 → 40.9 ns**, i.e. unchanged within noise,
+   because it always snapshotted. Measured with the same probe compiled against
+   the pre-fix and post-fix headers (`build-probe-1794/movenext_{before,after}.log`).
+   This is the honest cost of §13 rule 4: a walk that calls `MoveNext()` without
+   reading any accessor now pays for a snapshot it does not use. It is not
+   optimisable away without reintroducing the accessor-time container read that
+   §8.2's last three reports came from.
+3. **§12.3 predicted 2,250 of 2,252 passing against the shim, with two
+   assertions to update.** Both updates landed, so the real figure after
+   migration is **2,252 of 2,252**, and after the new suite **2,316 of 2,316**.
+   The two predicted failures were exactly the two predicted tests, with exactly
+   the predicted diagnostics.
+4. **§22.1–§22.3 measured the ABI on a synthetic stand-in interface.** #1794
+   re-measured all three properties on the **real**
+   `System::Collections::IDictionaryEnumerator`, compiling one probe against the
+   pre-fix headers (recovered with `git show`, not a shim) and the post-fix
+   headers. Every prediction held, and the vtable measurement gained a second
+   data point the synthetic probe did not have: `getValueProperty()`'s slot is
+   `0x38` and is likewise unchanged.
+
+### 37.2 What was implemented
+
+| File | Change |
+|---|---|
+| `System/Collections/IDictionaryEnumerator.hpp` | both return types `const void*` → `std::any`; §14's documentation, plus §13 rule 4's snapshot invariant and §19 rule 4's deliberate absence of a version check, replacing the old `@warning` |
+| `System/Collections/Hashtable.hpp` | `Enumerator::getKeyProperty()`/`getValueProperty()` answer from the existing `current_` snapshot; the last two container dereferences inside an accessor on this class are deleted; `MemberEnumerator::getCurrentProperty()` loses its `static_cast` pair |
+| `System/Collections/ListDictionaryInternal.hpp` | `NodeEnumerator` gains a `DictionaryEntry current_`; `MoveNext()` refreshes it **after** the version check and only when positioned; `Reset()` clears it; all four accessors read only the snapshot; `getCurrentProperty()` boxes the entry (§16.1); `MemberCollection::Enumerator::getCurrentProperty()` forwards the boxed accessor, so the value view boxes `void*` (§16.2) |
+
+No `.cpp` body changed: both implementations are header-only private nested
+classes. No public class gained, lost, or renamed a member.
+
+### 37.3 Migration inventory, re-measured
+
+§12.1's inventory was re-run against the changed interface and is confirmed
+exactly: **2** production implementations, **2** adapters, **0** hand-written
+test-local implementers, **3** library-internal call sites (`Hashtable.hpp:499`
+and `:500`, `ListDictionaryInternal.hpp:136` — all three now simplify to a
+direct forward), and **7** test call sites. The compile break landed at
+**1 of 628** translation units at **1** site, exactly as §12.2 measured:
+`ListDictionaryInternalTests.cpp:96`, `no match for 'operator!='`.
+
+**No `const_cast`-based compatibility path remains, and none is possible**:
+`const_cast` cannot convert a `std::any` to a pointer, so the write path is
+inexpressible rather than merely discouraged. Two `const_cast`s remain in the
+two headers and neither is on this interface — `Hashtable.hpp:123` is
+`getItem()`'s pre-existing write escape (§30 risk 6, now ticketed as **#1796**),
+and `ListDictionaryInternal.hpp:205` is `copyToCore`'s pre-existing key
+normalisation.
+
+### 37.4 The snapshot architecture, as landed
+
+```cpp
+bool MoveNext() override {
+    if (version_ != d_->version_) throw System::InvalidOperationException(…);  // fail fast FIRST
+    …advance it_…
+    valid_ = (it_ != d_->list_.end());
+    if (valid_) current_ = DictionaryEntry(it_->key, it_->value);   // publish only when positioned
+    else        current_ = DictionaryEntry();
+    return valid_;
+}
+```
+
+The ten properties §13/§17/§20 require all hold, and are pinned by the permanent
+suite: no accessor dereferences a container iterator; the snapshot is owned
+independently of collection storage; it survives reallocation, `Clear()` and
+destruction; nothing borrowed escapes; the refresh happens only after successful
+version validation; a failed or throwing `MoveNext()` publishes nothing;
+`Reset()` clears both the positioned state and the snapshot; repeated access at
+one position returns equivalent independent copies; and version checking stays
+exactly at `MoveNext()`/`Reset()`.
+
+### 37.5 Validation
+
+| Check | Result |
+|---|---|
+| Pre-fix write paths reconfirmed before any source change | `defects=20`, identical to §8.1 |
+| Pre-fix lifetime reproductions | **9** ASan `heap-use-after-free` of 16 scenarios (§37.1 correction 1) |
+| Pre-fix type confusion | silent wrong reads with `diagnostic-from-any-tool=0`; cross-implementation stack-buffer-overflow — all reproduced |
+| Post-fix behaviour, real headers, ASan+UBSan+LSan | **42 assertions, 0 failures, 0 diagnostics, 0 leaks** |
+| Post-fix behaviour, UBSan alone | 0 runtime errors |
+| LeakSanitizer proved active | 284-byte deliberate-leak self-test |
+| New permanent suite under ASan+UBSan+LSan | 78 tests, 0 failures, 0 diagnostics, 0 leaks |
+| TSan | **not run**, and the precondition was verified rather than assumed: no `mutable` member exists in either enumerator, every accessor is `const`, and every write to `current_` is inside the non-`const` `MoveNext()`/`Reset()` |
+| Old `const void*` caller source | **no longer compiles** — 13 errors, `cannot convert 'std::any' to 'const void*'` |
+| Mangled names, real headers | **byte-identical** before and after, both accessors |
+| Vtable slots, real headers | **unchanged** — `0x30` (Key), `0x38` (Value) |
+| Calling convention, real headers | **changed** — `this` `%rdi` → `%rsi`, hidden `sret` in `%rdi` |
+| Stale-object probe, calling convention | links with **0** diagnostics → SEGV; UBSan: invalid vptr + a bogus `System::InvalidOperationException` out of garbage |
+| Stale-object probe, layout | old half allocates 40, new half expects 72, links with **0** diagnostics → ASan `heap-use-after-free` in `NodeEnumerator::getEntryProperty()` |
+| `sizeof`/`alignof` | one line differs from §23's table, as predicted: `NodeEnumerator` **40 → 72**; everything else unchanged |
+| Positive consumer fixture | compiles `-Wall -Wextra -Wpedantic -Werror` clean, runs OK |
+| Negative consumer fixture | rejected at **every** marked site; 16 errors, 7 distinct diagnostics |
+
+### 37.6 Residual, stated rather than buried
+
+- **`MoveNext()`/`Reset()` after the collection is destroyed remain undefined.**
+  §20 and §30 risk 4 said so; #1794 did not close it and does not claim to. The
+  *accessors* became safe.
+- **The two pre-existing `Hashtable` write escapes stay open** —
+  `operator[](const std::string&)` and `getItem()`'s
+  `const_cast<std::any*>(&it->second)` — both outside this interface, both
+  already documented in the header, now carried by inactive ticket **#1796**
+  rather than left only as a §30 risk-6 note. No new `SR-AUD-*` identifier.
+- **The `ListDictionaryInternal` key view still boxes `const void*` while its
+  `copyToCore` still normalises the key to `void*`.** §16.2 decided only the
+  *value* spelling; the key asymmetry predates #1794, is deliberate and
+  documented in the header, and was outside the approval. Recorded here so it is
+  not mistaken for closed.
+- **The boxed key/value type still differs between implementations** (§30 risk
+  7). Now discoverable via `std::any::type()` and diagnosed via
+  `std::bad_any_cast` rather than silently reinterpreted.
+- **CNA and mobile-eggbert remain unmeasured** (§30 risk 3). They were not
+  inspected, searched, built, or modified. #1773 stays blocked.

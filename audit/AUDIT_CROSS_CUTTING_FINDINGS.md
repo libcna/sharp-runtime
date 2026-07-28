@@ -503,6 +503,34 @@ subject — on an interface CCF-018 did not cover:
 lifecycle contract is unchanged and every one of its regressions still passes.
 See `docs/IDictionaryEnumeratorKeyValueSafetyDesign.md`.
 
+**Closed by implementation ticket #1794 on 2026-07-28**, under an explicit user
+approval covering the public source break, the two `ListDictionaryInternal`
+parity corrections, and a silent ABI break through two independent mechanisms.
+Both accessors now return an owning `std::any` by value **and** — the half that
+actually closes the lifecycle class this finding is about — **both
+implementations snapshot the entry into enumerator-owned storage during a
+successful `MoveNext()`, so no accessor on either implementation dereferences a
+container iterator.** The snapshot rule is written into
+`IDictionaryEnumerator.hpp` as an invariant of the *interface*, not as an
+implementation detail: an implementation that reads its container inside an
+accessor is wrong even when its signatures are right.
+
+One correction to the paragraph above, made by re-measurement before any source
+changed and recorded rather than silently adopted: **the figure is nine
+AddressSanitizer `heap-use-after-free` reports, not eight.** The design record's
+§8.2 table listed nine and its prose sentence said eight; nine of sixteen
+scenarios reproduced, and nine is the figure now used by the header, the
+permanent suite, and `README.md`.
+
+**CCF-018 and SR-AUD-356 remain `remediated`** — this is the closure of a
+post-remediation follow-up on an interface CCF-018 did not originally cover, not
+a reopening. Still open and explicitly not claimed: `MoveNext()`/`Reset()` after
+the collection itself is destroyed remain undefined, which is the port-wide
+borrowing convention rather than an enumerator-lifecycle gap. New permanent
+suite: `DictionaryEnumeratorKeyValueSafetyTests.cpp` (+64 tests, parameterised
+over both implementations). See `docs/IDictionaryEnumeratorKeyValueSafetyDesign.md`
+§37.
+
 - `modules/collections/include/System/Collections/Generic/IEnumerator.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/List.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/Queue.hpp.audit.md`;

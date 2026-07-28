@@ -59,3 +59,27 @@ four-item approval. Full record, including all probes and the ABI measurements:
 `docs/IDictionaryEnumeratorKeyValueSafetyDesign.md`.
 
 SR-AUD-356 stays `remediated` and CCF-018 is not reopened.
+
+
+### Remediated by ticket #1794 (2026-07-28)
+
+Landed under the design's four-item approval, granted in full. Both accessors now
+return an owning `std::any` by value, and **both implementations answer every
+accessor from a `DictionaryEntry` snapshot taken during a successful
+`MoveNext()`** — the snapshot rule is written into this header as an invariant of
+the *interface*, so a future implementation that reads its container inside an
+accessor is wrong even with correct signatures.
+
+One correction to the note above, made by re-measuring before any source changed:
+the figure is **nine** AddressSanitizer `heap-use-after-free` reports, not eight.
+The design record's §8.2 table listed nine and only its prose said eight.
+
+The accessors deliberately did **not** gain a version check — .NET's do not
+either, and the snapshot makes the resulting stale read safe rather than turning
+a read .NET permits into an exception. `MoveNext()`/`Reset()` after the
+collection is destroyed remain undefined and are not claimed closed.
+
+Permanent suite: `DictionaryEnumeratorKeyValueSafetyTests.cpp` (+64 tests,
+parameterised over both implementations). SR-AUD-356 and CCF-018 are recorded as
+remediated by this ticket. Full record:
+`docs/IDictionaryEnumeratorKeyValueSafetyDesign.md` §37.
