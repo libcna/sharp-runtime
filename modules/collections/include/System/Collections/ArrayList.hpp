@@ -12,6 +12,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections {
 
@@ -68,7 +69,13 @@ class ArrayList : public IList {
     // call if the list was mutated since the enumerator was created -- .NET's fail-fast
     // enumeration contract. Not bumped by non-mutating operations (BinarySearch, IndexOf,
     // Contains, ToArray, Clone, etc.) or by TrimToSize() (capacity-only, matching .NET).
-    intcs version_ = 0;
+    System::Collections::detail::MutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<ArrayList>;
 
 public:
     // -----------------------------------------------------------------------
@@ -721,7 +728,7 @@ private:
      */
     class Enumerator : public IEnumerator {
         const ArrayList* list_;
-        intcs version_;
+        System::Collections::detail::MutationVersion version_;
         intcs start_;
         intcs end_;     // exclusive
         intcs index_;   // one before start_ / past-end after MoveNext() returns false

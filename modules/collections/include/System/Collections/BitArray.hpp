@@ -9,6 +9,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/IEnumerator.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections {
 
@@ -22,7 +23,13 @@ namespace System::Collections {
  */
 class BitArray {
     std::vector<bool> bits_;
-    std::uint32_t version_ = 0;
+    System::Collections::detail::NarrowMutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<BitArray>;
 
     void requireSameLength(const BitArray& other) const {
         if (bits_.size() != other.bits_.size())
@@ -350,7 +357,7 @@ public:
      */
     class Enumerator : public IEnumerator {
         const BitArray* arr_;
-        std::uint32_t version_;
+        System::Collections::detail::NarrowMutationVersion version_;
         intcs index_ = -1;
         mutable bool current_ = false;
         detail::EnumeratorState state_;

@@ -10,6 +10,7 @@
 #include "System/InvalidOperationException.hpp"
 #include "System/Collections/ICollection.hpp"
 #include "System/Collections/IEnumerator.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections {
 
@@ -191,7 +192,13 @@ protected:
 
 private:
     std::deque<void*> s_;
-    intcs version_ = 0;
+    System::Collections::detail::MutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<System::Collections::Stack>;
 
     /**
      * @brief Enumerates the elements of a Stack from top to bottom.
@@ -201,7 +208,7 @@ private:
      */
     class Enumerator : public IEnumerator {
         const Stack* s_;
-        intcs version_;
+        System::Collections::detail::MutationVersion version_;
         intcs index_;   // index from the top (0 == top element); -1 before start / after end
         bool started_ = false;
 

@@ -10,6 +10,7 @@
 #include "System/InvalidOperationException.hpp"
 #include "System/Collections/ICollection.hpp"
 #include "System/Collections/IEnumerator.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections {
 
@@ -202,7 +203,13 @@ protected:
 
 private:
     std::deque<void*> q_;
-    intcs version_ = 0;
+    System::Collections::detail::MutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<System::Collections::Queue>;
 
     /**
      * @brief Enumerates the elements of a Queue in FIFO order.
@@ -212,7 +219,7 @@ private:
      */
     class Enumerator : public IEnumerator {
         const Queue* q_;
-        intcs version_;
+        System::Collections::detail::MutationVersion version_;
         intcs index_;   // -1 before start / after end; otherwise index of current element
         bool started_ = false;
 

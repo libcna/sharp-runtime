@@ -15,6 +15,7 @@
 #include "System/InvalidOperationException.hpp"
 #include "System/Collections/Generic/IList.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyCollection.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections::Generic {
 
@@ -46,12 +47,18 @@ template<typename T>
 class List : public IList<T> {
     private:
         std::vector<T> items_;
-        intcs version_ = 0;
+        System::Collections::detail::MutationCounter version_;
+
+        /**
+         * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+         * production) letting a regression position the mutation counter near a boundary.
+         */
+        friend struct SharpRuntime::Testing::CollectionVersionAccess<List<T>>;
 
         class Enumerator : public IEnumerator<T>
         {
             const List<T>* list_;
-            intcs version_;
+            System::Collections::detail::MutationVersion version_;
             intcs index_ = -1;
             System::Collections::detail::EnumeratorState state_;
         public:

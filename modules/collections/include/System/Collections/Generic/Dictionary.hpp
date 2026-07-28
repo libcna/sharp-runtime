@@ -12,6 +12,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections::Generic {
 
@@ -49,12 +50,18 @@ using SharpRuntime::intcs;
 template<typename TKey, typename TValue>
 class Dictionary {
     std::unordered_map<TKey, TValue> map_;
-    intcs version_ = 0;
+    System::Collections::detail::MutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<Dictionary<TKey, TValue>>;
 
     template<typename InnerIt>
     class VersionCheckedIterator {
         const Dictionary* owner_;
-        intcs version_;
+        System::Collections::detail::MutationVersion version_;
         InnerIt it_;
     public:
         VersionCheckedIterator(const Dictionary* owner, InnerIt it)

@@ -16,6 +16,7 @@
 #include "System/Collections/IDictionaryEnumerator.hpp"
 #include "System/Collections/IEnumerator.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections {
 
@@ -332,7 +333,13 @@ protected:
 
 private:
     std::unordered_map<std::string, std::any> _map;
-    intcs version_ = 0;
+    System::Collections::detail::MutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<Hashtable>;
 
     /**
      * @brief Single validating conversion site for every raw `const void*` key.
@@ -367,7 +374,7 @@ private:
      */
     class Enumerator : public IDictionaryEnumerator {
         const Hashtable* ht_;
-        intcs version_;
+        System::Collections::detail::MutationVersion version_;
         std::unordered_map<std::string, std::any>::const_iterator it_;
         bool started_ = false;
         bool valid_ = false;

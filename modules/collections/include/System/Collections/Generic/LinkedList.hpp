@@ -15,6 +15,7 @@
 #include "System/Collections/Generic/IEnumerator.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/NullReferenceException.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections::Generic {
 
@@ -328,7 +329,13 @@ class LinkedList {
     node_ptr head_;
     std::weak_ptr<data_t> tail_;
     intcs count_ = 0;
-    intcs version_ = 0;
+    System::Collections::detail::NarrowMutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<LinkedList<T>>;
 
     template<typename, bool> friend class detail::LinkedListIterator;
 
@@ -436,7 +443,7 @@ class LinkedList {
 
     class Enumerator : public IEnumerator<T> {
         const LinkedList<T>* list_;
-        intcs version_;
+        System::Collections::detail::NarrowMutationVersion version_;
         data_t* cur_ = nullptr;
         bool started_ = false;
         System::Collections::detail::EnumeratorState state_;

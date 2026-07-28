@@ -10,6 +10,7 @@
 #include "System/Collections/Generic/KeyValuePair.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections::Generic {
 
@@ -31,7 +32,13 @@ using SharpRuntime::intcs;
 template<typename TKey, typename TValue>
 class SortedDictionary {
     std::map<TKey, TValue> map_;
-    intcs version_ = 0;
+    System::Collections::detail::MutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<SortedDictionary<TKey, TValue>>;
 
 public:
     /**
@@ -43,7 +50,7 @@ public:
     class Iterator {
         typename std::map<TKey, TValue>::const_iterator it_;
         const SortedDictionary* owner_;
-        intcs version_;
+        System::Collections::detail::MutationVersion version_;
 
         void checkVersion() const {
             if (version_ != owner_->version_)

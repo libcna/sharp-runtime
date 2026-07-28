@@ -8,6 +8,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections::Generic {
 
@@ -39,12 +40,18 @@ using SharpRuntime::intcs;
 template<typename T>
 class HashSet {
     std::unordered_set<T> set_;
-    intcs version_ = 0;
+    System::Collections::detail::MutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<HashSet<T>>;
 
     template<typename InnerIt>
     class VersionCheckedIterator {
         const HashSet* owner_;
-        intcs version_;
+        System::Collections::detail::MutationVersion version_;
         InnerIt it_;
     public:
         VersionCheckedIterator(const HashSet* owner, InnerIt it)

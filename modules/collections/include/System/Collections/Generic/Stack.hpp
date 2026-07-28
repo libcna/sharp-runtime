@@ -9,6 +9,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Collections/Generic/IEnumerator.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections::Generic {
 
@@ -35,12 +36,18 @@ using SharpRuntime::intcs;
 template<typename T>
 class Stack {
     std::deque<T> stack_;
-    intcs version_ = 0;
+    System::Collections::detail::MutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<Stack<T>>;
 
     class Enumerator : public IEnumerator<T>
     {
         const Stack<T>* stack_;
-        intcs version_;
+        System::Collections::detail::MutationVersion version_;
         intcs index_;
         System::Collections::detail::EnumeratorState state_;
     public:

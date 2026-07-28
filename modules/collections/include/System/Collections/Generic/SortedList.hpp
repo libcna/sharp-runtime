@@ -11,6 +11,7 @@
 #include "System/Collections/Generic/IEnumerator.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections::Generic {
 
@@ -38,11 +39,17 @@ using SharpRuntime::intcs;
 template<typename TKey, typename TValue>
 class SortedList {
     std::map<TKey, TValue> map_;
-    intcs version_ = 0;
+    System::Collections::detail::MutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<SortedList<TKey, TValue>>;
 
     class Enumerator : public IEnumerator<TValue> {
         const SortedList<TKey, TValue>* list_;
-        intcs version_;
+        System::Collections::detail::MutationVersion version_;
         intcs index_ = -1;
         System::Collections::detail::EnumeratorState state_;
     public:

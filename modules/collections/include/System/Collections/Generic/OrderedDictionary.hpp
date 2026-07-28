@@ -12,6 +12,7 @@
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "System/Collections/Generic/KeyValuePair.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections::Generic {
 
@@ -38,7 +39,13 @@ template<typename TKey, typename TValue>
 class OrderedDictionary {
     std::vector<std::pair<TKey, TValue>>       entries_;
     std::unordered_map<TKey, std::size_t>      keyIndex_;
-    intcs version_ = 0;
+    System::Collections::detail::MutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<OrderedDictionary<TKey, TValue>>;
 
     // Builds the replacement index in a local temporary and swaps it in only after every
     // insertion succeeds (audit finding A-05, 2026-07-14) -- previously cleared keyIndex_
@@ -70,7 +77,7 @@ public:
     class Iterator {
         typename std::vector<std::pair<TKey, TValue>>::const_iterator it_;
         const OrderedDictionary* owner_;
-        intcs version_;
+        System::Collections::detail::MutationVersion version_;
         std::size_t index_;
 
         void checkVersion() const {

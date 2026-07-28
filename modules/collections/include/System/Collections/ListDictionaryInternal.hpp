@@ -11,6 +11,7 @@
 #include "System/InvalidOperationException.hpp"
 #include "System/Collections/IDictionary.hpp"
 #include "System/Collections/IDictionaryEnumerator.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections {
 
@@ -37,13 +38,19 @@ class ListDictionaryInternal : public IDictionary {
         void*       value;
     };
     std::list<Node> list_;
-    intcs version_ = 0;
+    System::Collections::detail::MutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<ListDictionaryInternal>;
 
     // Shared forward enumerator over list_'s Nodes; getEntryProperty()/getKeyProperty()/
     // getValueProperty() expose the current entry, matching IDictionaryEnumerator.
     class NodeEnumerator : public IDictionaryEnumerator {
         const ListDictionaryInternal* d_;
-        intcs version_;
+        System::Collections::detail::MutationVersion version_;
         std::list<Node>::const_iterator it_;
         bool started_ = false;
         bool valid_   = false;
