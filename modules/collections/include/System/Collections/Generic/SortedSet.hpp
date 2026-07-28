@@ -15,6 +15,26 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 
+namespace SharpRuntime::Testing {
+
+/**
+ * @brief Test-only access seam for System::Collections::Generic::SortedSet<T>'s shared mutation
+ *        counter. Declared here, **never defined in production code**.
+ *
+ * The counter's near-exhaustion behaviour cannot be reached through the public API without
+ * billions of real mutations, so ticket #1786's permanent regressions position it directly
+ * through an explicit specialization of this template supplied by the test translation unit.
+ * The template grants *access* and defines no behaviour: nothing in this library, and nothing a
+ * consumer links against, can observe or call it, and befriending it changes no object layout,
+ * no public signature, and no mangled symbol.
+ *
+ * @tparam T The SortedSet element type whose state is being reached.
+ */
+template<typename T>
+struct SortedSetVersionAccess;
+
+} // namespace SharpRuntime::Testing
+
 namespace System::Collections::Generic {
 
 using SharpRuntime::intcs;
@@ -53,6 +73,18 @@ using SharpRuntime::intcs;
  * counter per shared state, so a mutation made through an owning set invalidates the
  * enumerators of every view over it and vice versa -- again matching .NET, whose enumerator
  * compares against the single `_underlying.version`.
+ *
+ * @par Mutation counter
+ * That counter is a 64-bit unsigned value incremented once per *effective* mutation -- an Add
+ * that inserted, a Remove that erased, a Clear that emptied something. A rejected duplicate or
+ * an absent removal changes nothing and bumps nothing, so it cannot break an in-flight
+ * enumeration. Every consumer compares it for equality only, which makes its width a
+ * correctness property rather than a detail: it was `int32_t` until ticket #1786, where
+ * `++version` at `INTCS_MAX` was signed-integer overflow (undefined behaviour, reproduced under
+ * UBSan) and a wrapped counter silently revalidated stale iterators and stale cached Counts.
+ * Widening it to 64 bits makes every increment defined for every representable prior value and
+ * puts a repeat 2^64 mutations away, which no program can reach. sizeof(SortedSet<T>) and
+ * sizeof(Iterator) are unchanged. See docs/SortedSetVersioningDesign.md.
  *
  * @par Thread safety
  * No synchronization is provided, matching .NET (`ICollection.IsSynchronized => false`).
@@ -101,7 +133,19 @@ class SortedSet {
      */
     struct State {
         std::set<T> data;
-        intcs version = 0;
+        /**
+         * Shared mutation counter driving fail-fast enumeration and the per-view Count cache.
+         *
+         * **64-bit unsigned, deliberately** (ticket #1786). It was `intcs` -- `int32_t` -- until
+         * that ticket, which made `++version` at `INTCS_MAX` signed-integer overflow and
+         * therefore undefined behaviour; UBSan reported
+         * `signed integer overflow: 2147483647 + 1 cannot be represented in type 'int'` inside
+         * `Add`. Unsigned arithmetic is modulo 2^n by definition, so the increment below is
+         * always well-defined for every representable prior value, and 2^64 effective mutations
+         * on one state -- over 580 years at one mutation per nanosecond -- is the point at which
+         * the sequence could repeat at all. See docs/SortedSetVersioningDesign.md.
+         */
+        SharpRuntime::ulongcs version = 0;
     };
 
     std::shared_ptr<State> state_;
@@ -109,9 +153,41 @@ class SortedSet {
     // full set has neither bound; GetViewBetween always activates both.
     std::optional<T> lower_;
     std::optional<T> upper_;
-    // Version value meaning "this view has never computed its Count". The shared version
-    // counter starts at 0 and only increments, so it never legitimately holds this value.
-    static constexpr intcs kCountNotCached = -1;
+    // The Count cache tag is 32 bits wide, because widening it is the one thing that would
+    // change this type's published object layout (ticket #1784 measured every alternative:
+    // sizeof(SortedSet<int>) must stay 40 and sizeof(SortedSet<std::string>) 104, and the two
+    // cache fields occupy exactly the last eight bytes of both). The shared counter above is
+    // 64 bits, so the two cannot simply be compared: a truncated tag repeats every 2^32
+    // mutations, and equality against a repeated tag hands back a count computed for a
+    // different state (ticket #1786 reproduced exactly that).
+    //
+    // The tag is therefore **the counter plus one, taken in 64-bit arithmetic and stored only
+    // when it still fits 32 bits**, and the comparison widens the tag back to 64 bits rather
+    // than narrowing the counter. That one bias makes the single equality test exact for every
+    // counter value, with no range check on the read path:
+    //
+    //   * never filled  -- the tag is 0, and `version + 1` is never 0, so it cannot match;
+    //   * filled at V   -- the tag is V + 1, so it matches only while the counter is exactly V;
+    //   * past the tag's reach -- `version + 1` exceeds every 32-bit tag, so nothing matches and
+    //     the cache is also no longer written. A view's Count is then recomputed on every call:
+    //     slower, never wrong. Reaching that point takes 2^32 - 1 effective mutations.
+    //
+    // The bias is what removes the alternative's cost: a horizon *branch* on the read path
+    // measured +1 ns on every Count call, including an owning set's, because it enlarged the
+    // inlined body. See docs/SortedSetVersioningDesign.md.
+    static constexpr SharpRuntime::ulongcs kMaxCacheableVersion =
+        static_cast<SharpRuntime::ulongcs>(SharpRuntime::UINTCS_MAX) - 1u;
+    // Tag value meaning "this view has never computed its Count". Unlike the pre-#1786 `-1`,
+    // which a wrapped counter reached after 2^32 - 1 mutations and which then made a cold cache
+    // read as warm, no counter value can produce this tag: `version + 1` is zero only if the
+    // counter has itself wrapped at ULONGCS_MAX, which is the documented exhaustion point.
+    static constexpr SharpRuntime::uintcs kCountNotCached = 0u;
+
+    /** @brief The cache tag identifying @p version exactly, or 0 when it is out of the tag's reach. */
+    [[nodiscard]] static constexpr SharpRuntime::uintcs countCacheTag(
+        SharpRuntime::ulongcs version) noexcept {
+        return static_cast<SharpRuntime::uintcs>(version + 1u);
+    }
 
     // .NET TreeSubSet's lazy `count`/`_countVersion` pair: a view's Count is recomputed only
     // once per version of the shared state.
@@ -122,16 +198,21 @@ class SortedSet {
     // behaviour (ticket #1784). getCountProperty() documents the publication protocol these
     // two fields obey; do not weaken their memory orders independently of each other.
     mutable std::atomic<intcs> cachedCount_{0};
-    mutable std::atomic<intcs> cachedCountVersion_{kCountNotCached};
+    mutable std::atomic<SharpRuntime::uintcs> cachedCountVersion_{kCountNotCached};
 
     // Ticket #1784 chose same-width atomics specifically so ticket #1783's published object
     // layout survives byte for byte -- sizeof(SortedSet<int>) == 40,
-    // sizeof(SortedSet<std::string>) == 104. Fail loudly rather than silently re-breaking the
+    // sizeof(SortedSet<std::string>) == 104 -- and ticket #1786 kept both fields exactly as
+    // wide when it widened the shared counter. Fail loudly rather than silently re-breaking the
     // layout if a platform ever pads its atomics.
     static_assert(sizeof(std::atomic<intcs>) == sizeof(intcs),
                   "the atomic Count cache must not change SortedSet<T>'s object layout");
     static_assert(alignof(std::atomic<intcs>) == alignof(intcs),
                   "the atomic Count cache must not change SortedSet<T>'s alignment");
+    static_assert(sizeof(std::atomic<SharpRuntime::uintcs>) == sizeof(intcs),
+                  "the Count cache tag must stay exactly as wide as the field it replaced");
+    static_assert(alignof(std::atomic<SharpRuntime::uintcs>) == alignof(intcs),
+                  "the Count cache tag must stay exactly as aligned as the field it replaced");
 
     using SetIterator = typename std::set<T>::const_iterator;
 
@@ -183,9 +264,31 @@ class SortedSet {
         cachedCountVersion_.store(kCountNotCached, std::memory_order_release);
     }
 
+    /**
+     * @brief Records one structural modification of the shared state.
+     *
+     * The single version-transition point of this class: `Add`, `Remove`, and `Clear` call it,
+     * and only when they actually changed the set, so a rejected duplicate or an absent removal
+     * leaves an in-flight enumeration alone.
+     *
+     * The counter is `SharpRuntime::ulongcs`, so this increment is **defined for every
+     * representable prior value** -- unsigned arithmetic is modulo 2^64. It is deliberately not
+     * checked, not saturating, and cannot throw: at `ULONGCS_MAX` it would wrap to 0, which
+     * needs 2^64 effective mutations on one state and is therefore not reachable by any program
+     * (over 580 years of uninterrupted mutation at one per nanosecond). Ticket #1786's design
+     * (docs/SortedSetVersioningDesign.md) records why a checked or saturating increment was
+     * evaluated and rejected: both put a branch on every mutation, and a saturating counter
+     * would silently stop invalidating snapshots, which is worse than the state it guards.
+     */
+    void bumpVersion() noexcept { ++state_->version; }
+
     /** @brief Private view constructor: a bounded handle onto already-owned shared state. */
     SortedSet(std::shared_ptr<State> state, std::optional<T> lower, std::optional<T> upper)
         : state_(std::move(state)), lower_(std::move(lower)), upper_(std::move(upper)) {}
+
+    // Test-only access seam for ticket #1786's near-exhaustion regressions. Grants access only;
+    // the template is declared above this class and defined solely by the test translation unit.
+    friend struct SharpRuntime::Testing::SortedSetVersionAccess<T>;
 
 public:
     /**
@@ -202,7 +305,11 @@ public:
         std::shared_ptr<const State> state_;
         SetIterator it_;
         SetIterator end_;
-        intcs version_ = 0;
+        // Same 64-bit width as State::version, so this snapshot is compared against the shared
+        // counter without truncation and can only be revalidated by 2^64 further mutations
+        // (ticket #1786). The widening is free: it fills tail padding this class already had,
+        // so sizeof(Iterator) stays 40 on the published 64-bit baseline.
+        SharpRuntime::ulongcs version_ = 0;
 
         void checkVersion() const {
             if (version_ != state_->version)
@@ -364,16 +471,33 @@ public:
      * version, so duplicate publication is harmless -- the protocol exists to order the pair,
      * not to arbitrate between conflicting results. This member allocates nothing.
      *
+     * @par Counter reach
+     * The cache tag is 32 bits and the shared counter is 64 (ticket #1786), so the tag can only
+     * identify a counter value **exactly** while the counter is within its reach. It is stored
+     * biased by one and compared widened, which makes the single equality test above exact for
+     * every counter value without a range check: a never-filled cache cannot match, and a tag
+     * filled at version V matches only while the counter is exactly V. Once the shared state has
+     * taken more than `kMaxCacheableVersion` effective mutations -- 2^32 - 1 of them -- no tag
+     * can match, the cache stops being written, and a view's Count becomes an O(k) recomputation
+     * on every call. That is the deliberate trade: comparing a truncated tag would silently
+     * return a count computed 2^32 mutations ago, and a slower answer is always preferable to a
+     * wrong one. An owning full set is unaffected -- it never uses the cache and stays O(1).
+     *
      * @return The number of elements.
      */
     [[nodiscard]] intcs getCountProperty() const {
         if (!getIsViewProperty()) return static_cast<intcs>(state_->data.size());
-        const intcs currentVersion = state_->version;
-        if (cachedCountVersion_.load(std::memory_order_acquire) == currentVersion)
+        const SharpRuntime::ulongcs currentVersion = state_->version;
+        // Widening the tag rather than narrowing the counter is what makes this exact; see the
+        // cache fields' declaration for why the tag is the counter plus one.
+        if (static_cast<SharpRuntime::ulongcs>(
+                cachedCountVersion_.load(std::memory_order_acquire)) == currentVersion + 1u)
             return cachedCount_.load(std::memory_order_relaxed);
         const auto computed = static_cast<intcs>(std::distance(rangeBegin(), rangeEnd()));
-        cachedCount_.store(computed, std::memory_order_relaxed);
-        cachedCountVersion_.store(currentVersion, std::memory_order_release);
+        if (currentVersion <= kMaxCacheableVersion) {
+            cachedCount_.store(computed, std::memory_order_relaxed);
+            cachedCountVersion_.store(countCacheTag(currentVersion), std::memory_order_release);
+        }
         return computed;
     }
 
@@ -422,7 +546,7 @@ public:
         if (getIsViewProperty() && !IsWithinRange(item))
             throw System::ArgumentOutOfRangeException("item");
         const bool added = state_->data.insert(item).second;
-        if (added) ++state_->version;
+        if (added) bumpVersion();
         return added;
     }
 
@@ -438,7 +562,7 @@ public:
     bool Remove(const T& item) {
         if (getIsViewProperty() && !IsWithinRange(item)) return false;
         const bool removed = state_->data.erase(item) > 0;
-        if (removed) ++state_->version;
+        if (removed) bumpVersion();
         return removed;
     }
 
@@ -464,14 +588,14 @@ public:
      */
     void Clear() {
         if (!getIsViewProperty()) {
-            if (!state_->data.empty()) { state_->data.clear(); ++state_->version; }
+            if (!state_->data.empty()) { state_->data.clear(); bumpVersion(); }
             return;
         }
         const auto b = rangeBegin();
         const auto e = rangeEnd();
         if (b == e) return;
         state_->data.erase(b, e);
-        ++state_->version;
+        bumpVersion();
     }
 
     /**
