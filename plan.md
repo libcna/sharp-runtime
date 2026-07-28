@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,786 rows: 1,782 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), and ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`) — one `wontfix` (#1772, obsoleted by #1771), one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep), and two deliberately inactive `todo` rows opened by #1784 and not begun (#1785 `REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, #1786 `REMED-COLL-VERSION-COUNTER-OVERFLOW`); no `doing` or `needs_user` rows |
+| `ticket` | 1,787 rows: 1,783 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), and ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`) — one `wontfix` (#1772, obsoleted by #1771), one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep), and two deliberately inactive `todo` rows (#1785 `REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened by #1784; #1787 `REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`, opened by #1786); no `doing` or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -766,6 +766,64 @@ counter, which is incremented without bound and compared only for equality by
 both the Count cache and `Iterator::checkVersion`. Both properties predate #1783
 — they arrived with ticket 1713 — and #1784 changed only memory ordering, not
 the values, the type, or the equality test.
+
+Ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`, P3, size S), opened
+inactive by #1784, was then completed on local branch
+`feature/remediation-coll-sortedset-version-overflow`. It carries **no new
+`SR-AUD-*` identifier**, does not reopen SR-AUD-361, and is not a regression
+from #1783 or #1784. Opened as an assessment; the assessment found a fully
+compatible repair, so it was implemented in the same ticket. Four defects were
+reproduced against the real production header before anything changed, using a
+single probe source built against both the committed pre-fix header and the
+working tree and positioning the counter with `-fno-access-control` rather than
+performing billions of mutations: `++state_->version` at `INTCS_MAX` is
+signed-integer overflow, reported by UBSan as
+`signed integer overflow: 2147483647 + 1 cannot be represented in type 'int'`
+inside `Add`; a counter wrapped 2^32 mutations on silently revalidates a stale
+`Iterator`; the same wrap silently revalidates a stale cached view `Count`; and
+— a fourth defect the ticket's own description did not list, and the worst of
+them — the `-1` `kCountNotCached` sentinel is itself a reachable counter value,
+so a view that had **never** computed its Count read its cache as warm and
+answered 0. .NET's own `SortedSet` has defects two, three, and four as
+*defined-but-wrong* behaviour, since the CLR defines signed overflow as wrapping
+where C++ makes it undefined; matching .NET's integer width would therefore not
+have made the C++ code correct, and this port deliberately exceeds it. The
+shared counter and the `Iterator` snapshot are now `SharpRuntime::ulongcs`,
+which is free because the counter is not a member of `SortedSet<T>` and
+`Iterator` already had four bytes of tail padding; the Count cache's 32-bit tag
+cannot be widened without breaking the approved layout, so it is stored biased
+by one and compared widened, which identifies a counter value exactly, cannot be
+produced by a never-filled cache, and stops the cache being written once the
+counter outgrows it. A first implementation used an explicit horizon branch and
+measurably cost +1 ns on every `Count` call, including an owning full set's; two
+variant headers isolated the branch as the cause and the biased tag removed it.
+Closure evidence: 29 new permanent regressions in
+`SortedSetVersionOverflowTests.cpp`, whose near-boundary cases reach the counter
+through a test-only friend seam rather than a production hook;
+`SharpRuntimeTests_Collections_Core` 1,841/1,841 (was 1,812) with no assertion
+edited; `scripts/local_ci_check.sh build` at **13,127 tests across 37
+executables** (was 13,098), zero warnings and errors, after which the 13,098
+floor in `README.md` and `CLAUDE.md` was raised; UBSan clean post-fix;
+ASan+UBSan+LSan 105/105 with LSan verified active; ThreadSanitizer clean across
+#1783's, #1784's, and a new six-mode probe covering the recompute path, with
+both self-tests still reporting races; `sizeof`, `alignof`, all traits, the
+mangled `GetViewBetween` symbol, and **every member offset** unchanged; both
+consumer fixtures behaving as before; 41 modules/90 edges; validator tests 7/7;
+catalogue current; database consistent; `git diff --check` clean; Doxygen 1.9.8
+unchanged at **1,937**/1,942; all ten selective components plus
+`Collections.Core` in isolation. The contract is recorded in
+`docs/SortedSetVersioningDesign.md`, with a pointer from
+`docs/SortedSetLiveViewDesign.md` section 32.
+
+One further **inactive** ticket was opened and not begun, again with no
+`SR-AUD-*` identifier: **#1787**
+(`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`, P3, M), covering the fourteen
+other collections that carry the identical `intcs version_` counter. #1786's
+stored acceptance criteria asked for a repository-wide implementation; the
+instruction governing that working session scoped #1786 to `SortedSet<T>` and
+required the remainder to become a separate inactive ticket. The divergence is
+recorded in the design document rather than silently absorbed, and the full
+inventory the criteria asked for is delivered there.
 
 No repair ticket is active.
 

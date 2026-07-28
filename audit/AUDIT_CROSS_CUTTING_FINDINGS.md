@@ -106,6 +106,23 @@ SR-AUD-062, SR-AUD-084, and:
 - `modules/buffers/include/System/Buffers/Text/Utf8Parser.hpp.audit.md`.
 - `modules/buffers/tests/System/Buffers/Utf8ParserTests.cpp.audit.md`.
 
+**Related, but deliberately not a member (ticket #1786, 2026-07-28):** the
+collection mutation counters ticket 1713 introduced share this cause's shape —
+an unbounded `++` on a signed `intcs` that is UB once it reaches `INTCS_MAX`,
+which ticket #1786 reproduced under UBSan for `SortedSet<T>` — but they are
+**not** counted as CCF-004 instances and no `SR-AUD-*` identifier is issued for
+them. Two reasons. The arithmetic here is not at a *public boundary*: the
+counter is a private implementation detail with no .NET-shaped operation
+exposing it, so nothing in CCF-004's "public .NET-shaped operation that needs
+well-defined or checked arithmetic" framing applies. And the repair is not
+CCF-004's repair: those instances need checked or explicitly wrapping arithmetic
+at a boundary a caller can observe, whereas the counter needed a **wider** type,
+because its real defect is snapshot reuse (ABA) rather than a wrong result at
+the boundary — widening fixes both, checking would fix only one. This cause's
+membership list is unchanged. #1786's analysis is in
+`docs/SortedSetVersioningDesign.md`, and the fourteen collections still carrying
+the pattern are inactive ticket #1787.
+
 ## CCF-005 — high-value conversion APIs need explicit boundary and special-value validation
 
 The audited primitive wrappers, Decimal, and `Convert` share a recurring testing shape:

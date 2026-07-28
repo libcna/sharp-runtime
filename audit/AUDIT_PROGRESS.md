@@ -1975,3 +1975,123 @@ ticket **#1786** (`REMED-COLL-VERSION-COUNTER-OVERFLOW`, P3). Both predate
 Ticket #1773 remains `blocked` and untouched. CNA and mobile-eggbert were not
 inspected, searched, configured, built, or modified. No push, merge, rebase,
 tag, or publication occurred.
+
+---
+
+## Post-remediation mutation-counter repair: ticket #1786 (2026-07-28)
+
+*The original audit evidence and the #1782/#1783/#1784 notes above are preserved
+verbatim and unaltered. **SR-AUD-361 stays `remediated`.** This ticket repairs a
+defect that **predates** that finding's remediation — the counter, its type, and
+its increment all arrived with ticket 1713 — so it does not reopen the live-view
+finding, does not change the findings-index counts (354 open, ten `remediated`),
+and carries **no new `SR-AUD-*` identifier**; the audit numbering stays frozen
+at 364.*
+
+Ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`, P3, size S) was opened
+inactive by #1784's required overflow analysis and has now been completed on
+local branch `feature/remediation-coll-sortedset-version-overflow`. It was
+opened as an assessment; the assessment established that a fully
+source-, symbol-, and layout-compatible repair exists, so it was implemented in
+the same ticket. The contract is recorded in
+`docs/SortedSetVersioningDesign.md`, with a pointer from
+`docs/SortedSetLiveViewDesign.md` section 32.
+
+`SortedSet<T>::State::version` was a `SharpRuntime::intcs` — `int32_t` — that
+started at 0, was only ever incremented, and was compared for **equality alone**
+by both `Iterator::checkVersion` and the per-view Count cache. Four defects
+follow, all reproduced against the real production header before anything
+changed, with a single probe source built against both the committed pre-fix
+header and the working tree and positioning the counter through GCC's
+`-fno-access-control` rather than by performing billions of mutations
+(`build-probe-sortedset/probe12_version_overflow.cpp`, logs
+`probe12_prefix_*.log` / `probe12_postfix_*.log`, defects observed 4 → 0):
+
+1. `++state_->version` at `INTCS_MAX` is **signed-integer overflow**, undefined
+   behaviour in C++. UBSan: `SortedSet.hpp:425:20: runtime error: signed integer
+   overflow: 2147483647 + 1 cannot be represented in type 'int'` inside
+   `SortedSet<int>::Add`.
+2. A counter wrapped 2^32 mutations on returns to a value an outstanding
+   `Iterator` captured, and the guard **silently accepts the stale iterator** —
+   which then enumerates a container that changed under it, since
+   `std::set::insert` does not invalidate iterators.
+3. The same wrap **silently revalidates a stale cached view `Count`**: the probe
+   answered 4 where the range held 3. Deterministically constructible, because
+   `Add`+`Remove` is two increments.
+4. **Not in the ticket's description, and the most serious of the four:**
+   `kCountNotCached` was `-1`, a value the counter itself reaches after 2^32 − 1
+   effective mutations, so a view that had **never** computed its Count read its
+   cache as warm and answered 0 where the range held 5. Unlike defects 2 and 3
+   this needs no prior observation. The header's own claim that the counter
+   "never legitimately holds this value" was false, not merely optimistic.
+
+.NET's own `SortedSet<T>` carries defects 2, 3, and 4 as *defined-but-wrong*
+behaviour: its counter is `int`, incremented unchecked, compared for equality
+only, and `TreeSubSet` initialises `version = -1; _countVersion = -1;` — the
+same sentinel with the same latent collision. Because the CLR defines signed
+overflow as wrapping where C++ makes it undefined, matching .NET's integer width
+would **not** have made the C++ code correct, and this port deliberately exceeds
+the reference here.
+
+Repair: the shared counter and the `Iterator` snapshot become
+`SharpRuntime::ulongcs` (64-bit unsigned), so every increment is defined for
+every representable prior value and a repeat needs 2^64 effective mutations —
+over 580 years of uninterrupted mutation. The widening is free: the counter is
+not a member of `SortedSet<T>`, and `Iterator` already carried four bytes of
+tail padding. The Count cache's 32-bit tag **cannot** be widened — measured
+member offsets show `sizeof(SortedSet<int>)` 40 and
+`sizeof(SortedSet<std::string>)` 104 have no spare byte, and an exact count
+needs 31 of the 64 bits available — so it is instead stored **biased by one and
+compared widened**, which identifies a counter value exactly, cannot be produced
+by a never-filled cache, and stops the cache being written once the counter
+outgrows it, at which point a view's `Count` becomes an O(k) recomputation:
+slower, never wrong. Six alternatives were evaluated with reasons, including
+State renewal, which cannot preserve #1783's live-view graph because rebinding
+only the owning set would split it. A first implementation used an explicit
+horizon *branch* and measurably cost +1 ns on every `Count` call, including an
+owning full set's; two variant headers isolated the branch as the sole cause and
+the biased tag removed it.
+
+Closure gates: 29 new permanent regressions in
+`SortedSetVersionOverflowTests.cpp`, whose near-boundary cases reach the counter
+through a portable test-only friend seam declared and befriended in the header
+and defined only in that test file, never a production hook;
+`SharpRuntimeTests_Collections_Core` **1,841/1,841** (was 1,812, with all 47
+`SortedSetLiveViewTests`, all 29 `SortedSetCountCacheTests`, and all 41
+pre-existing SortedSet cases passing and no assertion edited);
+`scripts/local_ci_check.sh build` at **13,127 tests across 37 executables** (was
+13,098) with zero warnings and zero errors, after which the 13,098 floor in
+`README.md` and `CLAUDE.md` was raised; UBSan clean post-fix across all six
+probe modes; ASan+UBSan+LeakSanitizer 105/105 over all three permanent SortedSet
+suites with LSan verified active by a deliberate-leak self-test;
+ThreadSanitizer clean across #1783's probe, #1784's ten-mode probe, and a new
+six-mode probe covering the recompute-past-the-tag path, with both self-tests
+still reporting races so the zeroes are evidence, and with no mode ever mutating
+concurrently; `sizeof` 40/104/40, `alignof` 8, all four value-semantics traits,
+and the mangled `GetViewBetween` symbol byte-identical to #1784's stored probe
+output, plus a dedicated probe confirming **every member offset** of
+`SortedSet<T>` and `Iterator` is unchanged; both consumer fixtures behaving as
+before; boundaries 41 modules / 90 edges; validator tests 7/7; catalogue
+current; database consistent; `git diff --check` clean; Doxygen **unchanged at
+1,937** against the 1,942 ceiling; all ten selective components plus
+`Collections.Core` in isolation. Performance is within run-to-run noise on every
+benchmarked operation, with warm view `Count` slightly faster and no allocation
+added anywhere.
+
+Because no public signature, mangled symbol, or object layout changed, this
+revision needs **no consumer rebuild on its own account** and required **no new
+user approval**.
+
+One further **inactive** ticket was opened and not begun, with no `SR-AUD-*`
+identifier: **#1787** (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`, P3, M).
+Fourteen other collections carry the identical `intcs version_` counter,
+incremented without bound and compared for equality only, so defects 1 and 2
+apply to all of them; defects 3 and 4 are specific to `SortedSet<T>`'s Count
+cache. #1786's stored acceptance criteria asked for a repository-wide
+implementation, and the instruction governing that working session scoped #1786
+to `SortedSet<T>` and required the remainder to become a separate inactive
+ticket; the divergence is recorded in the design document rather than silently
+absorbed, and the full inventory the criteria asked for is delivered there.
+
+Ticket #1785 remains `todo` and untouched — this ticket changed no exception
+behaviour whatsoever — and ticket #1773 remains `blocked` and untouched.

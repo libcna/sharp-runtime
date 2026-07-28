@@ -1971,3 +1971,50 @@ is invisible to an uninstrumented run — so a revert must be validated by
 re-running `build-probe-sortedset/probe10_tsan_count_race.cpp` under
 ThreadSanitizer, not by CTest alone. Alternative B′ (§31.3) is the drop-in
 replacement if the two-atomic protocol is ever judged too subtle.
+
+---
+
+## 32. Follow-up: the mutation counter itself (ticket #1786, 2026-07-28)
+
+*Added by ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`, P3, size S) on
+local branch `feature/remediation-coll-sortedset-version-overflow`. Sections
+1–31 are preserved unaltered. This is a **pointer, not a restatement**: the
+whole analysis lives in its own document, because it is about the counter's
+arithmetic rather than about the live-view contract this file records.*
+
+§31.6 above analysed `State::version`'s type and overflow at #1784's request,
+concluded correctly that #1784 "does not change this risk in either direction",
+and deferred the counter itself to inactive ticket #1786. That ticket has now
+been completed, and its record is
+[`docs/SortedSetVersioningDesign.md`](SortedSetVersioningDesign.md).
+
+What changed, in one paragraph: `State::version` and `Iterator::version_` became
+`SharpRuntime::ulongcs` (64-bit unsigned), so the increment is defined for every
+representable prior value and a repeat needs 2^64 mutations rather than 2^32.
+The Count cache's tag stayed 32 bits — widening it is the one change that would
+break the object layout §31.3 fixed — and is instead stored **biased by one and
+compared widened**, which identifies a counter value exactly, cannot be produced
+by a never-filled cache, and stops the cache being written once the counter
+outgrows it.
+
+Two corrections to §31.6, recorded here rather than edited into it:
+
+1. §31.6 lists **three** consequences. There is a **fourth**, found while
+   tracing the code for #1786 and the most serious of them: `kCountNotCached`
+   was `-1`, which the counter itself reaches after 2^32 − 1 effective
+   mutations, so a view that had **never** computed its Count read its cache as
+   warm and answered `0`. Unlike the ABA cases it needs no prior observation.
+2. §31.6 calls the third consequence "the same assumption the #1783 code made",
+   which is accurate, but the sentence it refers to in `SortedSet.hpp` — "the
+   shared version counter starts at 0 and only increments, so it never
+   legitimately holds this value" — was **false**, not merely optimistic. It is
+   now true by construction: no counter value can produce the sentinel.
+
+What is unchanged and was deliberately not touched: `GetViewBetween`'s
+semantics, shared `State` ownership, inclusive bounds, nested-view narrowing,
+the shared single-counter invalidation rule of §17, the copy/move/assignment
+behaviour of §13 and §14, and #1784's release/acquire Count-cache publication
+protocol, which §9.2 of the new document reproduces verbatim. `sizeof`,
+`alignof`, every member offset, and the mangled `GetViewBetween` symbol are
+byte-identical to #1784's measurements. SR-AUD-361 stays `remediated` and was
+not reopened; **#1785 stays inactive** and no exception ordering changed.
