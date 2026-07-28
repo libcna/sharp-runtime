@@ -22,6 +22,79 @@
 9. **No merge to master or tags** without explicit per-action user approval.
 10. **No broad header refactor** — naming conventions touch 449+ files and would break CNA.
 11. **Copy doc-comments from .NET source** — when porting a type, if the `.NET` source (`/rv/tmp/runtime/src/libraries/`) has XML doc comments and the sharp-runtime header has none, copy them as Doxygen `/** */` comments where the meaning translates cleanly to C++.
+12. **At most four parallel compilation jobs.** See "Build-resource policy" below. This is
+    binding on every build, rebuild, sanitizer build, probe, fixture, and test script in this
+    repository, permanently and for all future work.
+
+---
+
+## Build-resource policy
+
+This section is **permanent and binding for all work in this repository**, by any
+contributor and by any future Claude Code session, on every ticket — not only the ticket
+that introduced it. It has two halves: a **CPU ceiling** and the pre-existing **SSD-saving**
+rules. Both must be obeyed together.
+
+### CPU ceiling — four jobs, always
+
+1. **Every** compilation, link, build, rebuild, sanitizer build, consumer fixture, compile
+   probe, dependency build, CMake configure step that compiles, and test script that performs
+   compilation internally **may use at most four parallel jobs / four CPU cores.**
+2. Use commands equivalent to:
+
+   ```bash
+   cmake --build <dir> --parallel 4
+   ninja -C <dir> -j4
+   make -C <dir> -j4
+   ctest --test-dir <dir> -j4
+   ```
+
+   or any **lower** value.
+3. **Never** use unrestricted or automatically detected parallelism. All of the following are
+   forbidden:
+   - a bare `ninja` invocation, which defaults to every CPU plus two;
+   - `-j` with no number, which is unbounded;
+   - `--parallel` with no explicit maximum, which uses all detected cores;
+   - `$(nproc)`, `nproc`, `sysctl -n hw.ncpu`, `getconf _NPROCESSORS_ONLN`, or any equivalent
+     core-count substitution;
+   - `std::thread::hardware_concurrency()` — or any runtime core count — used to choose a
+     build-job count;
+   - `CMAKE_BUILD_PARALLEL_LEVEL`, `MAKEFLAGS`, `NINJA_STATUS`-adjacent environment variables,
+     or CI defaults left to expand to all cores;
+   - any script that defaults to "all available cores" when no job count is supplied.
+4. **When a repository script compiles internally**, pass whatever argument or environment
+   variable constrains it to four jobs (for example `CMAKE_BUILD_PARALLEL_LEVEL=4`,
+   `MAKEFLAGS=-j4`, or the script's own job-count parameter), and record in the ticket that
+   the constraint was applied.
+5. **If a build script cannot currently be limited to four jobs, fix the script first**, or
+   use a bounded alternative (a direct `cmake --build … --parallel 4` on the same targets).
+   Do not run the unbounded script "just this once".
+6. **The four-job limit applies even when the machine has more CPU cores.** Core count is not
+   a licence to raise it.
+7. **Fewer than four jobs is always allowed** and is preferred whenever a target is
+   memory-heavy (sanitizer or template-heavy translation units): drop to `-j2` or `-j1` rather
+   than risking swap or an OOM kill.
+8. **Exceeding four jobs requires new explicit user approval**, per action. A previous
+   approval never carries over to another command, another ticket, or another session.
+9. **Every final ticket report must list:**
+   - every build directory used;
+   - the maximum parallel job count actually used;
+   - any script that required special handling (an argument, an environment variable, or a
+     bounded substitute) to enforce the limit.
+
+### SSD-saving rules — unchanged and still binding
+
+10. Reuse the persistent build directories (`build`, `build-asan*`, `build-ubsan*`,
+    `build-tsan*`, `build-probe-*`, `cmake-build-*`) instead of creating new ones.
+11. Prefer incremental builds. Do not clean, delete, or reconfigure a build tree unless it is
+    genuinely broken or the configuration genuinely changed; document any such build and why.
+12. Retain `ccache` wherever it is already configured, and do not retrofit it where doing so
+    would force an unnecessary full recompilation.
+13. **Never create a build tree under `/tmp`, `/var/tmp`, or `/dev/shm`**, including the
+    per-session scratchpad. Redirect `mktemp`-based scripts through a repository-local
+    `TMPDIR` (this repository uses `build-tmp/`).
+14. Remove large disposable binaries once their results are recorded, and never delete a build
+    directory another session may still be using.
 
 ---
 
