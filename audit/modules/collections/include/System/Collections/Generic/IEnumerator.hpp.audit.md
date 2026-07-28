@@ -99,3 +99,60 @@ compile-against-a-shim method #1790 used, because `getCurrentProperty()` is a
 public virtual and a grep would understate it — as one did for `IList<T>`'s
 implementers during #1790. Context:
 `docs/ListIndexerVersioningDesign.md` sections 4.1 (route 6), 5.2, and 27.3.
+
+## Design ticket #1792 closed: design-complete (2026-07-28)
+
+The defect recorded in the section above was designed under ticket **#1792**
+(`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`, P3, size M), which is now **done as
+a design ticket**. It carries **no `SR-AUD-*` identifier** and **reopens no
+finding**: SR-AUD-356 stays `remediated`, because this defect is about what the
+accessor *returns* and that finding is about the before-start/after-end lifecycle
+guard, every #1767 regression of which still passes unmodified. **Nothing in this
+file was changed.** The original evidence above is retained unchanged. The
+durable record is `docs/IEnumeratorCurrentSafetyDesign.md`.
+
+**Selected architecture:** the non-generic
+`System::Collections::IEnumerator::getCurrentProperty()` returns **`std::any` by
+value** — the direct C++ counterpart of .NET's `object IEnumerator.Current`,
+which returns a value, boxes value types, and hands out no pointer. The typed
+`Current()` in this file stays `const T&`, and the bridge below it converts
+rather than aliases:
+
+```cpp
+std::any getCurrentProperty() const override {
+    if constexpr (std::is_copy_constructible_v<T>) {
+        return std::any(Current());
+    } else {
+        throw System::NotSupportedException(
+            "The element type cannot be boxed; use the typed Current() accessor.");
+    }
+}
+```
+
+The `NotSupportedException` path is .NET's own documented answer for an element
+type that cannot be boxed (`Generic/IEnumerator.cs`, the `ref struct` note).
+
+**Four corrections to the note above**, all against this record's convenience:
+
+1. **"reaches every collection in the repository" is wrong.**
+   `Dictionary<K,V>`, `HashSet<T>`, `SortedSet<T>`, and `SortedDictionary<K,V>`
+   implement no `IEnumerator` at all — they expose STL-style version-checked
+   iterators, and none of them appears anywhere in the measured sweep. The reach
+   is thirteen generic implementations plus eight non-generic ones, plus two
+   hand-written test-local implementers.
+2. **This file's `const_cast` is not the only one.** Four more live outside it —
+   `ArrayList.hpp:755`, `Hashtable.hpp:475`, and `ListDictionaryInternal.hpp:77`
+   and `:116` — so repairing only this bridge would leave every one of them.
+3. **It is six defect classes, not one**, and they are not closed by the same
+   measure. `const void*` closes const-correctness alone: the probe performs the
+   one-line `const_cast` a consumer writes, and the write lands.
+4. **The ABI is the dangerous half.** `void*`, `const void*`, and `std::any` all
+   produce the byte-identical mangled name, while `this` moves from `%rdi` to
+   `%rsi` under `std::any`'s sret return — a partially rebuilt consumer links
+   with no diagnostic and corrupts memory.
+
+Implementation is ticket **#1793**
+(`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`, P2, size L), opened
+**blocked** on the three-part approval in design section 33 and deliberately not
+begun. Permanent regressions covering today's behaviour are in
+`modules/collections/tests/System/Collections/EnumeratorCurrentSafetyTests.cpp`.

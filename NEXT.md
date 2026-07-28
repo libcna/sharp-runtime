@@ -1849,6 +1849,154 @@ and untouched. CNA and mobile-eggbert were not inspected, searched, configured,
 built, or modified. No push, merge, rebase, tag, or publication occurred. No
 compilation used more than four jobs.
 
+**Ticket #1792 is now done — see the next section.**
+
+### Completed enumerator Current safety design: ticket #1792
+
+Ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`, P3, size M, category
+`defect`) is **done as a design ticket**, closed 2026-07-28 on local branch
+`feature/remediation-coll-ienumerator-current-design`. It carries **no
+`SR-AUD-*` identifier** — the numbering stays frozen at 364. It **changed no
+production behaviour, no public signature, no object layout, and no exception**;
+it edits no production source at all. The durable record is
+[`docs/IEnumeratorCurrentSafetyDesign.md`](docs/IEnumeratorCurrentSafetyDesign.md).
+
+**The answer to the ticket's own question: the divergence is remediable and is
+*not* recorded as deliberate.** `System::Collections::IEnumerator::getCurrentProperty()`
+returns `void*`, and the generic bridge fills it with
+`const_cast<T*>(&Current())`, so a consumer holding nothing but the public
+non-generic interface obtains a writable, untyped, unbounded-lifetime pointer
+into the live storage of the collection it is walking — including collections
+whose own members refuse to be mutated. The selected architecture is
+**Alternative B: the non-generic accessor returns `std::any` by value**, the
+direct C++ counterpart of .NET's `object IEnumerator.Current`, which returns a
+value, boxes value types, and hands out no pointer at all. The typed
+`Generic::IEnumerator<T>::Current()` is **unchanged** at `const T&`.
+
+**`const void*` was measured and rejected as a fix.** It closes const-correctness
+and nothing else: the probe performs the one-line `const_cast` a determined
+consumer writes, and the write lands. So does the richer read-only descriptor
+candidate. Only the two candidates that stop returning an address into live
+storage — a boxed value, or an enumerator-owned copy — actually close the write
+path.
+
+**Four of the ticket's own premises were corrected rather than inherited.**
+
+1. **The defect does not reach "every collection in the repository."** The
+   ticket description, this file's #1790 section, and the per-file audit note all
+   said it does. `Dictionary<K,V>`, `HashSet<T>`, `SortedSet<T>`, and
+   `SortedDictionary<K,V>` implement **no `IEnumerator` at all** — they expose
+   STL-style version-checked iterators. The measured reach is **thirteen**
+   generic enumerator implementations plus **eight** non-generic ones, plus two
+   hand-written test-local implementers.
+2. **The bridge's `const_cast` is neither the only one nor the worst.**
+   **Four** further `const_cast`s live outside it — `ArrayList`,
+   `Hashtable`'s member view, and `ListDictionaryInternal` twice — so repairing
+   only the bridge would leave every one of them. One of them publishes a
+   writable pointer to a **live `std::unordered_map` key**.
+3. **It is not one defect but six**, with different scopes and different fixes:
+   const-correctness, mutation/version bypass, type safety, lifetime, ownership
+   ambiguity, and generic/non-generic inconsistency. `const void*` closes one of
+   the six; a descriptor closes two; an enumerator-owned copy closes four;
+   `std::any` closes all six.
+4. **The most dangerous property is the ABI, not the source break.** Under the
+   Itanium C++ ABI a non-template function's return type is not part of its
+   mangled name: `void*`, `const void*`, and `std::any` all produce the
+   byte-identical symbol, while the calling convention differs — `this` moves
+   from `%rdi` to `%rsi` under `std::any`'s sret return. **A partially rebuilt
+   consumer links with no diagnostic and then corrupts memory.** No candidate
+   avoids this, so it is a requirement on the release rather than an argument
+   between alternatives.
+
+Evidence, all repository-local and gitignored under `build-probe-ienumerator/`:
+a six-mode reproduction probe recording that a write through the `void*` changed
+live storage with the mutation counter at rest and the fail-fast guard silent for
+`List`, `Queue`, `Stack`, `LinkedList`, `SortedList`, and
+`ObjectModel::Collection` (which has **no counter at all**), while `Add()`
+correctly invalidates; a `ReadOnlyCollection<T>` whose non-const indexer throws
+`NotSupportedException` and whose enumerator nonetheless mutated both the wrapper
+and the caller's shared backing vector; a `Hashtable` key view whose write
+rewrote a live hash-map key in place so that, with 64 entries, the entry became
+unreachable by **both** its old and its new key while `Count` still reported it;
+**four AddressSanitizer `heap-use-after-free` reports** for pointers retained
+across reallocation, `Clear()`, the collection's destruction, and the
+enumerator's destruction, plus two non-faulting stale-aliasing shapes across
+`MoveNext()` and `Reset()`; 0 UBSan diagnostics on every mode and 0 LSan leaks;
+a bounded, sanitizer-controlled type-erasure probe showing a same-width wrong
+cast is silently wrong with no diagnostic; a five-candidate side-by-side
+allocation and layout measurement; disassembly of the calling-convention change;
+and a 626-translation-unit deprecation sweep measuring **28** non-generic, **4**
+bridge, and **27** typed call sites (0 compile failures). Three fully migrated
+header shims recompiled against the whole repository break **6**, **7**, and
+**6** translation units at **12**, **14**, and **12** distinct sites — and **zero
+library sources under any of them**, so the design's proposed bodies are
+compile-validated rather than sketched.
+
+Closure evidence: **17 new permanent regressions** in
+`modules/collections/tests/System/Collections/EnumeratorCurrentSafetyTests.cpp`,
+deliberately split into a `Contract` suite (8 cases that must survive #1793
+unchanged) and a `Divergence` suite (9 cases, each asserting today's behaviour
+with .NET's named in a comment, carrying `static_assert`s that #1793 physically
+cannot land without editing); `SharpRuntimeTests_Collections_Core`
+**2,208/2,208** (was 2,191), no existing assertion edited;
+`scripts/local_ci_check.sh build` at **13,494 tests across 37 executables** (was
+13,477), zero warnings, zero errors; module boundaries unchanged at 41 modules /
+90 edges; validator tests 7/7; catalogue current; database consistent;
+`git diff --check` clean; all ten selective components plus every consumer
+fixture passing; Doxygen 1.9.8 at **1,938**/1,942 — unchanged, since `docs/` is
+not scanned and tests are excluded.
+
+Build directories used, all repository-local and gitignored, all at **at most
+four compilation jobs**: the existing `build` tree (incremental,
+`--parallel 4`), the new `build-probe-ienumerator` (probes, the ABI object
+files, four generated shims, and the two sweep scripts, whose parallelism is a
+hard-coded constant 4 with no `nproc` or hardware-concurrency call anywhere), and
+`build-tmp` as the repository-local `TMPDIR`.
+`scripts/check_selective_components.sh` and `scripts/local_ci_check.sh` both use
+`mktemp` internally and were run with `TMPDIR` redirected into `build-tmp`; both
+already cap their own builds at `--parallel 4`. No build tree was created under
+`/tmp`, `/var/tmp`, or `/dev/shm`, and no existing build tree was cleaned or
+recreated.
+
+**One ticket was opened and deliberately not begun.** **#1793**
+(`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`, P2, L) is **blocked**. It has
+two phases: **Phase 1 needs no approval** (write the ownership, lifetime, and
+validity rules into both headers and correct the misleading "cast to the
+appropriate type" comment — which does not close the defect), and **Phase 2 is
+blocked** pending the exact three-part approval in design section 33 — a public
+source break to `System::Collections::IEnumerator`, a public source break to
+`Generic::IEnumerator<T>` adding a `NotSupportedException` path for element types
+that cannot be copied, and acknowledgement of the **silent ABI break** requiring
+a full consumer rebuild. There is **no object-layout change**, so this approval
+is narrower than #1788's, #1789's, or #1791 Phase 2's in that respect and wider
+in the ABI one. The approvals granted for #1771, #1780, and #1783 explicitly do
+**not** carry over.
+
+**#1793 should be implemented before #1791**, and the two must not be merged.
+They are independent defects on disjoint surfaces — #1791 changes
+`IList<T>::operator[]`, #1793 changes `IEnumerator::getCurrentProperty()`, and
+neither repairs the other. #1793 goes first because it needs no object-layout
+change while #1791 Phase 2 grows `ObjectModel::Collection<T>` from 32 to 40
+bytes, and because #1793's break is loud everywhere it is a read and impossible
+where it is a write, while #1791's silently changes what `list[i]` *means* in
+expressions that still compile.
+
+Two residual limitations are stated rather than buried. **The typed
+`Current()` reference hazard is not closed** — `&Current()` retained across a
+mutation is still a reproduced use-after-free; closing it would need a by-value
+`Current()`, which makes move-only `T` uninstantiable. And
+**`IDictionaryEnumerator::getKeyProperty()`/`getValueProperty()` keep returning
+`const void*` into live storage**; they are already const-correct, so the
+const-correctness class does not apply, but the type-safety, lifetime, and
+ownership classes do. Both are recorded in design sections 30 and 15 as
+deliberate exclusions with the reasoning attached.
+
+Ticket #1785 remains `todo` and untouched. Tickets #1788 and #1789 remain
+`blocked` and untouched. Ticket #1791 remains `blocked` and untouched; no indexer
+changed. Ticket #1773 remains `blocked` and untouched. CNA and mobile-eggbert
+were not inspected, searched, configured, built, or modified. No push, merge,
+rebase, tag, or publication occurred. No compilation used more than four jobs.
+
 No repair ticket is active.
 
 ### Nominal 500-hour first remediation programme

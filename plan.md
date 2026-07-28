@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,792 rows: 1,785 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) and design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`) — one `wontfix` (#1772, obsoleted by #1771), four deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval; #1791 `REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, opened by #1790 and awaiting the four-part approval in `docs/ListIndexerVersioningDesign.md` section 28), and two deliberately inactive `todo` rows (#1785 `REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened by #1784; #1792 `REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`, opened by #1790); no `doing` or `needs_user` rows |
+| `ticket` | 1,793 rows: 1,786 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), and design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`) — one `wontfix` (#1772, obsoleted by #1771), five deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval; #1791 `REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, opened by #1790 and awaiting the four-part approval in `docs/ListIndexerVersioningDesign.md` section 28; #1793 `REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`, opened by #1792 and awaiting the three-part approval in `docs/IEnumeratorCurrentSafetyDesign.md` section 33), and one deliberately inactive `todo` row (#1785 `REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened by #1784); no `doing` or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -974,9 +974,84 @@ discovered defect**: `Generic::IEnumerator<T>::getCurrentProperty()` does
 on a public interface, so a write through it mutates a collection mid-walk with
 the counter at rest. It affects **every** collection, not `List<T>`, which is
 why it is its own ticket and not absorbed. No new `SR-AUD-*` identifier.
+**Correction (ticket #1792, 2026-07-28): the "every collection" claim in the
+sentence above is wrong** — `Dictionary`, `HashSet`, `SortedSet`, and
+`SortedDictionary` implement no `IEnumerator` at all. See the next section.
 
-Tickets #1785, #1788, #1789, and #1773 remain untouched and inactive. No repair
-ticket is active.
+Tickets #1785, #1788, #1789, and #1773 remain untouched and inactive.
+**Ticket #1792 is now done — see the next section.**
+
+### Completed enumerator Current safety design: ticket #1792
+
+Design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`, P3, size M,
+category `defect`), opened inactive by #1790, was completed on local branch
+`feature/remediation-coll-ienumerator-current-design`. It carries **no
+`SR-AUD-*` identifier** and reopens no finding. It **changed no production
+behaviour, no public signature, no object layout, and no exception** — it edits
+no production source at all. The record is
+[`docs/IEnumeratorCurrentSafetyDesign.md`](docs/IEnumeratorCurrentSafetyDesign.md).
+
+Opened as "remove the `const_cast` or document the divergence as deliberate", it
+answers the first: the divergence is remediable and is **not** recorded as
+permanent. The selected architecture is **`std::any` returned by value from the
+non-generic accessor** — the direct C++ counterpart of .NET's `object
+IEnumerator.Current`, which returns a value, boxes value types, and hands out no
+pointer. `Generic::IEnumerator<T>::Current()` stays `const T&`.
+
+It corrected four of its own premises rather than inheriting them. **The defect
+does not reach every collection**: the four hash- and tree-backed generic
+collections expose STL-style iterators and no `IEnumerator`, so the measured
+reach is thirteen generic plus eight non-generic implementations plus two
+hand-written test-local ones. **The bridge's `const_cast` is not the only one**:
+four more live outside it, one of which publishes a writable pointer to a live
+`std::unordered_map` key. **It is six distinct defect classes, not one**, closed
+by different measures — and `const void*` was *measured* to close only the first
+of them, because a one-line `const_cast` restores the write. **The most dangerous
+property is the ABI**: `void*`, `const void*`, and `std::any` all produce the
+byte-identical mangled name while `this` moves from `%rdi` to `%rsi`, so a
+partially rebuilt consumer links with no diagnostic and corrupts memory.
+
+Evidence: four ASan `heap-use-after-free` reports plus two non-faulting
+stale-aliasing shapes; a `ReadOnlyCollection<T>` mutated through its own
+enumerator, reaching the caller's shared backing vector; a `Hashtable` entry made
+unreachable by both its old and its new key while `Count` still reported it; 0
+UBSan diagnostics and 0 LSan leaks; a five-candidate allocation and layout
+comparison; calling-convention disassembly; a 626-translation-unit deprecation
+sweep measuring 28 non-generic, 4 bridge, and 27 typed call sites with 0 compile
+failures; and three fully migrated header shims breaking 6, 7, and 6 translation
+units at 12, 14, and 12 sites with **zero library sources broken under any of
+them**, so the proposed bodies are compile-validated.
+
+Closure evidence: **17 new permanent regressions** in
+`EnumeratorCurrentSafetyTests.cpp`, split into a `Contract` suite (8 cases that
+must survive #1793) and a `Divergence` suite (9 cases carrying `static_assert`s
+#1793 cannot land without editing); `SharpRuntimeTests_Collections_Core`
+**2,208/2,208** (was 2,191) with no existing assertion edited;
+`scripts/local_ci_check.sh build` at **13,494 tests across 37 executables** (was
+13,477), zero warnings and errors; 41 modules/90 edges; validator tests 7/7;
+catalogue current; database consistent; `git diff --check` clean; all ten
+selective components passing; Doxygen 1.9.8 unchanged at **1,938**/1,942.
+
+One ticket was opened and deliberately not begun: **#1793**
+(`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`, P2, L, **blocked**), in two
+phases. Phase 1 (write the ownership/lifetime/validity rules into both headers)
+needs **no** approval and does not close the defect. Phase 2 needs the exact
+three-part approval in design section 33 — public source breaks to
+`System::Collections::IEnumerator` and to `Generic::IEnumerator<T>`, and
+acknowledgement of the silent ABI break requiring a full consumer rebuild. There
+is **no** object-layout change. The #1771, #1780, and #1783 approvals do **not**
+carry over. **#1793 should land before #1791**, and the two must not be merged:
+they are independent defects on disjoint surfaces and neither repairs the other.
+
+Two residual limitations are recorded rather than buried: the typed `Current()`
+reference hazard is **not** closed (closing it needs a by-value `Current()`,
+which makes move-only `T` uninstantiable), and
+`IDictionaryEnumerator::getKeyProperty()`/`getValueProperty()` keep returning
+`const void*` into live storage, which is a separate follow-on rather than a
+widening of this approval.
+
+Tickets #1785, #1788, #1789, #1791, and #1773 remain untouched and inactive. No
+repair ticket is active.
 
 SR-AUD-362 (`FrozenDictionary::Create` duplicate keys) was reconciled
 conservatively alongside #1779, per that finding's own instruction to inspect
