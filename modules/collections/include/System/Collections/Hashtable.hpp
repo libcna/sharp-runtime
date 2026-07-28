@@ -418,14 +418,33 @@ private:
             return current_;
         }
 
-        [[nodiscard]] const void* getKeyProperty() const override {
+        /**
+         * @brief Returns a copy of the current entry's key, boxed as std::any(std::string).
+         *
+         * Answered from the MoveNext()-time snapshot, never from the map: before
+         * ticket #1794 this returned `&it_->first`, an address into live
+         * std::unordered_map storage that a caller could const_cast and rewrite,
+         * leaving -- measured at 64 entries -- an entry Count still reported and
+         * no lookup could return by either its old or its new key.
+         */
+        [[nodiscard]] std::any getKeyProperty() const override {
             ensureCurrent();
-            return &it_->first;
+            return current_.getKeyProperty();
         }
 
-        [[nodiscard]] const void* getValueProperty() const override {
+        /**
+         * @brief Returns a copy of the current entry's value, boxed.
+         *
+         * The box holds the stored value's own payload, **not** a std::any
+         * wrapping the map's std::any. Answered from the MoveNext()-time
+         * snapshot: before ticket #1794 this returned `&it_->second`, and because
+         * the map's mapped_type is a NON-const std::any, const_cast plus
+         * assignment through it was well-formed, fully defined C++ that rewrote
+         * live dictionary storage with the mutation counter unmoved.
+         */
+        [[nodiscard]] std::any getValueProperty() const override {
             ensureCurrent();
-            return &it_->second;
+            return current_.getValueProperty();
         }
 
     private:
@@ -489,15 +508,16 @@ private:
              * Before ticket #1793 this const_cast'd the inner accessor's
              * `const void*` and published a writable pointer into a live
              * std::unordered_map key, through which a caller could rewrite the
-             * key in place and break the container's invariant.
+             * key in place and break the container's invariant. Ticket #1794
+             * removed the type-erased address itself: the inner accessors now
+             * return the owning box directly, so the static_cast pair this body
+             * used to need is gone and the element shapes are unchanged.
              *
              * @throws System::InvalidOperationException before the first MoveNext,
              *         after the last element, or if the table was modified.
              */
             [[nodiscard]] std::any getCurrentProperty() const override {
-                if (keys_)
-                    return std::any(*static_cast<const std::string*>(inner_->getKeyProperty()));
-                return *static_cast<const std::any*>(inner_->getValueProperty());
+                return keys_ ? inner_->getKeyProperty() : inner_->getValueProperty();
             }
         };
 

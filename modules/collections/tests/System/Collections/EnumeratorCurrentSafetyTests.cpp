@@ -946,6 +946,12 @@ TEST(EnumeratorCurrentSafety, BitArrayBoxesTheBitAndCannotDesynchroniseTheEnumer
 // ListDictionaryInternal's two enumerators const_cast'd the CALLER's own
 // `const void*` key. The box preserves the const, so recovering it yields a
 // `const void*` and there is no write path at all.
+//
+// Ticket #1794 moved where the const is observed without weakening the claim.
+// Current now boxes the DictionaryEntry, matching .NET's `Current => Entry` and
+// this repository's own Hashtable::Enumerator; the key's const is asserted on
+// the entry's Key member, on getKeyProperty(), and on the key VIEW, which are
+// the three places it can still be seen.
 TEST(EnumeratorCurrentSafety, ListDictionaryInternalPreservesTheConstOnItsBoxedKey) {
     System::Collections::ListDictionaryInternal dictionary;
     const int key = 1;
@@ -954,20 +960,35 @@ TEST(EnumeratorCurrentSafety, ListDictionaryInternalPreservesTheConstOnItsBoxedK
 
     Owning<System::Collections::IDictionaryEnumerator> entries(dictionary.GetEnumerator());
     ASSERT_TRUE(entries->MoveNext());
-    std::any boxedKey = entries->getCurrentProperty();
+
+    // Current IS Entry now, on this implementation as on Hashtable's.
+    std::any boxedCurrent = entries->getCurrentProperty();
+    EXPECT_EQ(boxedCurrent.type(), typeid(System::Collections::DictionaryEntry));
+    const std::any& entryKey =
+        std::any_cast<const System::Collections::DictionaryEntry&>(boxedCurrent).getKeyProperty();
+    EXPECT_EQ(entryKey.type(), typeid(const void*));
+    EXPECT_EQ(std::any_cast<const void*>(entryKey), &key);
+    EXPECT_EQ(std::any_cast<void*>(&entryKey), nullptr);   // no non-const view exists
+
+    std::any boxedKey = entries->getKeyProperty();
     EXPECT_EQ(boxedKey.type(), typeid(const void*));
     EXPECT_EQ(std::any_cast<const void*>(boxedKey), &key);
-    EXPECT_EQ(std::any_cast<void*>(&boxedKey), nullptr);   // no non-const view exists
+    EXPECT_EQ(std::any_cast<void*>(&boxedKey), nullptr);   // still no non-const view
 
     std::unique_ptr<System::Collections::ICollection> keys(dictionary.getKeysProperty());
     Owning<System::Collections::IEnumerator> keyWalk(keys->GetEnumerator());
     ASSERT_TRUE(keyWalk->MoveNext());
-    EXPECT_EQ(std::any_cast<const void*>(keyWalk->getCurrentProperty()), &key);
+    std::any viewKey = keyWalk->getCurrentProperty();
+    EXPECT_EQ(viewKey.type(), typeid(const void*));
+    EXPECT_EQ(std::any_cast<const void*>(viewKey), &key);
+    EXPECT_EQ(std::any_cast<void*>(&viewKey), nullptr);    // and none through the view
 
+    // The VALUE view, by contrast, boxes `void*` -- the type the dictionary
+    // stores and DictionaryEntry::Value has always held (ticket #1794).
     std::unique_ptr<System::Collections::ICollection> values(dictionary.getValuesProperty());
     Owning<System::Collections::IEnumerator> valueWalk(values->GetEnumerator());
     ASSERT_TRUE(valueWalk->MoveNext());
-    EXPECT_EQ(std::any_cast<const void*>(valueWalk->getCurrentProperty()), &value);
+    EXPECT_EQ(std::any_cast<void*>(valueWalk->getCurrentProperty()), &value);
 
     EXPECT_EQ(dictionary.getCountProperty(), 1);
     EXPECT_TRUE(dictionary.Contains(&key));

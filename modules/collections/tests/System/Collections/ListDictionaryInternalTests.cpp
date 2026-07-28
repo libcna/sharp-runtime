@@ -93,7 +93,9 @@ TEST(ListDictionaryInternalTest, GetEnumerator_IteratesAllEntries) {
     int count = 0;
     while (e->MoveNext()) {
         ++count;
-        EXPECT_NE(e->getKeyProperty(), nullptr);
+        // Since ticket #1794 the key accessor returns an owning
+        // std::any(const void*) rather than a raw address into the entry.
+        EXPECT_NE(std::any_cast<const void*>(e->getKeyProperty()), nullptr);
     }
     EXPECT_EQ(count, 2);
     delete e;
@@ -141,7 +143,10 @@ TEST(ListDictionaryInternalTest, Values_ReflectsContents) {
 
     IEnumerator* e = values->GetEnumerator();
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(std::any_cast<const void*>(e->getCurrentProperty()), &v);
+    // Ticket #1794: the value view boxes `void*`, the type the dictionary
+    // actually stores, agreeing with DictionaryEntry::Value and copyToCore. It
+    // previously boxed `const void*` and agreed with neither.
+    EXPECT_EQ(std::any_cast<void*>(e->getCurrentProperty()), &v);
     delete e;
     delete values;
 }

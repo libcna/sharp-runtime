@@ -54,6 +54,19 @@ class ListDictionaryInternal : public IDictionary {
         std::list<Node>::const_iterator it_;
         bool started_ = false;
         bool valid_   = false;
+        /**
+         * Snapshot of the entry `it_` names, refreshed by a successful MoveNext()
+         * and read by all four accessors, so that none of them dereferences `it_`.
+         * Added by ticket #1794: this class previously rebuilt every accessor's
+         * answer from `it_` on each call, which made all four -- including the
+         * already-owning getEntryProperty() and getCurrentProperty() -- an
+         * AddressSanitizer heap-use-after-free once a mutation, Clear(), or the
+         * dictionary's destruction had invalidated the iterator. .NET's own
+         * NodeEnumerator holds a strong reference to the node instead, a
+         * guarantee a C++ port with no GC cannot inherit; copying is the
+         * equivalent. Costs +32 bytes on a PRIVATE nested class (40 -> 72).
+         */
+        DictionaryEntry current_;
 
     public:
         explicit NodeEnumerator(const ListDictionaryInternal* d)
@@ -64,6 +77,11 @@ class ListDictionaryInternal : public IDictionary {
             if (!started_) { it_ = d_->list_.begin(); started_ = true; }
             else if (valid_) { ++it_; }
             valid_ = (it_ != d_->list_.end());
+            // Refresh the snapshot only after the version check has passed and
+            // only when positioned; a MoveNext() that returns false or throws
+            // publishes nothing and leaves the accessors to requireValid().
+            if (valid_) current_ = DictionaryEntry(it_->key, it_->value);
+            else        current_ = DictionaryEntry();
             return valid_;
         }
 
@@ -72,35 +90,57 @@ class ListDictionaryInternal : public IDictionary {
             started_ = false;
             valid_ = false;
             it_ = d_->list_.begin();
+            current_ = DictionaryEntry();
+        }
+
+        /**
+         * @brief Returns a copy of the current entry, boxed as std::any(DictionaryEntry).
+         *
+         * Recover it with std::any_cast<DictionaryEntry>. Ticket #1794 corrected
+         * the payload: this boxed the KEY alone, where .NET's NodeEnumerator is
+         * `public object Current => Entry;` and this repository's own
+         * Hashtable::Enumerator already boxed the DictionaryEntry. The two
+         * implementations of one interface therefore disagreed about what Current
+         * meant. The signature and ownership contract ticket #1793 set are
+         * unchanged.
+         */
+        [[nodiscard]] std::any getCurrentProperty() const override {
+            requireValid();
+            return std::any(current_);
+        }
+
+        /** @brief Returns a copy of the MoveNext()-time entry snapshot. */
+        [[nodiscard]] DictionaryEntry getEntryProperty() const override {
+            requireValid();
+            return current_;
         }
 
         /**
          * @brief Returns the current entry's key, boxed as std::any(const void*).
          *
          * The `const` survives the boxing, so recover it with
-         * std::any_cast<const void*>. Before ticket #1793 this const_cast'd the
-         * key, publishing a writable pointer to an object the *caller* owns and
-         * declared const -- undefined behaviour if that object really is
-         * const-qualified, and a change of the dictionary's key identity in
-         * every case.
+         * std::any_cast<const void*>. The box owns the pointer, not the pointee:
+         * the pointee is the caller's own object, which the caller already had.
+         * Before ticket #1793 this const_cast'd the key, publishing a writable
+         * pointer to an object the *caller* owns and declared const.
          */
-        [[nodiscard]] std::any getCurrentProperty() const override {
-            return std::any(getKeyProperty());
+        [[nodiscard]] std::any getKeyProperty() const override {
+            requireValid();
+            return current_.getKeyProperty();
         }
 
-        [[nodiscard]] DictionaryEntry getEntryProperty() const override {
+        /**
+         * @brief Returns the current entry's value, boxed as std::any(void*).
+         *
+         * Recover it with std::any_cast<void*>. `void*` rather than `const void*`
+         * is what this dictionary genuinely stores -- Add(const void*, void*) and
+         * getItem() both say so -- and it is what DictionaryEntry::Value has
+         * always held; ticket #1794 made the value view agree with both, where it
+         * previously agreed with neither.
+         */
+        [[nodiscard]] std::any getValueProperty() const override {
             requireValid();
-            return DictionaryEntry(it_->key, it_->value);
-        }
-
-        [[nodiscard]] const void* getKeyProperty() const override {
-            requireValid();
-            return it_->key;
-        }
-
-        [[nodiscard]] const void* getValueProperty() const override {
-            requireValid();
-            return it_->value;
+            return current_.getValueProperty();
         }
 
     private:
@@ -124,16 +164,17 @@ class ListDictionaryInternal : public IDictionary {
             bool MoveNext() override { return inner_->MoveNext(); }
             void Reset() override { inner_->Reset(); }
             /**
-             * @brief Returns the current key or value, boxed as std::any(const void*).
+             * @brief Returns the current key or value, boxed by the inner accessor.
              *
-             * Recover it with std::any_cast<const void*>. Note that copyToCore
-             * below normalises both members to `void*` instead; the enumerator
-             * deliberately preserves the `const` the IDictionaryEnumerator
-             * accessors carry, rather than casting it away as it did before
-             * ticket #1793.
+             * The key view boxes `const void*`, preserving the `const` the caller
+             * declared; recover it with std::any_cast<const void*>. The value view
+             * boxes `void*` -- recovered with std::any_cast<void*> -- which since
+             * ticket #1794 agrees with both DictionaryEntry::Value and copyToCore
+             * below, where it previously agreed with neither and was the only one
+             * of the three spellings to add a `const` the dictionary never stored.
              */
             [[nodiscard]] std::any getCurrentProperty() const override {
-                return std::any(keys_ ? inner_->getKeyProperty() : inner_->getValueProperty());
+                return keys_ ? inner_->getKeyProperty() : inner_->getValueProperty();
             }
         };
 
