@@ -454,6 +454,28 @@ The permanent 13-test regression suite, full 1,435-test Collections.Core
 target, direct ASan/UBSan probe, and network-permitted 12,694-test repository
 gate all pass. The original evidence remains above and in the per-file reports.
 
+**Post-remediation follow-up (tickets #1792 and #1793, 2026-07-28), no new
+`SR-AUD-*` identifier.** Ticket #1790's mutable-access inventory found a second,
+distinct defect on the same interface: `Current` was guarded against invalid
+*states* by #1767, but what a *valid* `Current` handed back through the
+non-generic accessor was a mutable `void*` aliasing live collection storage,
+filled by `const_cast<T*>(&Current())`. Design ticket #1792 measured it as six
+distinct defect classes reaching thirteen generic and eight non-generic
+implementations plus two hand-written test-local ones, with four further
+`const_cast`s outside the bridge, four ASan `heap-use-after-free` reports, and a
+`std::unordered_map` key rewritten in place. Implementation ticket #1793 then
+changed the accessor to return an owning `std::any` by value, the counterpart of
+.NET's `object IEnumerator.Current`, under an explicit three-part user approval
+covering a public source break on both interfaces and a **silent ABI break**
+requiring a full consumer rebuild. `Generic::IEnumerator<T>::Current()` is
+unchanged at `const T&`, and this finding's own lifecycle contract is unchanged
+— every #1767 regression still passes unmodified. **CCF-018 and SR-AUD-356 stay
+`remediated`.** See `docs/IEnumeratorCurrentSafetyDesign.md`. Two hazards on the
+same interface family remain deliberately open and are recorded there: the typed
+`Current()` reference window, and `IDictionaryEnumerator`'s `const void*`
+key/value accessors, the latter opened as ticket #1794
+(`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, `blocked`, not begun).
+
 - `modules/collections/include/System/Collections/Generic/IEnumerator.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/List.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/Queue.hpp.audit.md`;

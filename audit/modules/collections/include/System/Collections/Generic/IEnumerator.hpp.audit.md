@@ -156,3 +156,58 @@ Implementation is ticket **#1793**
 **blocked** on the three-part approval in design section 33 and deliberately not
 begun. Permanent regressions covering today's behaviour are in
 `modules/collections/tests/System/Collections/EnumeratorCurrentSafetyTests.cpp`.
+
+## Implementation ticket #1793 closed: implemented (2026-07-28)
+
+The design above landed under ticket **#1793**
+(`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`, P2, size L), on local branch
+`feature/remediation-coll-ienumerator-current-safety`, after the user granted
+design section 33's three-part approval explicitly and scoped to that ticket.
+**No new `SR-AUD-*` identifier; SR-AUD-356 stays `remediated`.** The evidence in
+every section above is retained unchanged.
+
+**This file changed.** `Current()` is unchanged at `const T&`, with its validity
+window written into the doc-comment for the first time. The bridge below it is
+now:
+
+```cpp
+[[nodiscard]] std::any getCurrentProperty() const override {
+    if constexpr (std::is_copy_constructible_v<T>) {
+        return std::any(Current());
+    } else {
+        (void)Current();
+        throw System::NotSupportedException(
+            "The element type cannot be boxed; use the typed Current() accessor.");
+    }
+}
+```
+
+**The `(void)Current();` is a correction to the design's own sketch**, which
+threw directly. `if constexpr` discards the whole else-branch's alternative, so
+without that call the only use of `Current()` disappears and a before-start or
+after-end read on a move-only `T` reported `NotSupportedException` where the
+pre-#1793 bridge reported `InvalidOperationException` — silently converting an
+existing exception path, which design section 18's ordering rule forbids. Caught
+by `EnumeratorCurrentSafety.MoveOnlyStateMachineStillPrecedesTheBoxingRefusal`,
+not by review.
+
+Two further implementation findings are recorded in
+`docs/IEnumeratorCurrentSafetyDesign.md` section 34.3:
+`Generic::List<std::any>` cannot be instantiated at all, because `std::any` is
+not equality-comparable and `List<T>`'s `Contains`/`IndexOf` need `operator==`;
+and `std::any(Current())` for `T = std::any` selects `std::any`'s **copy**
+constructor rather than its value-forwarding one, so the box is never nested.
+
+The nine `EnumeratorCurrentDivergence` cases were **flipped, not deleted**, and
+`SharpRuntimeTests_Collections_Core` went 2,208 → **2,229**. A clean full
+rebuild against the changed virtual ABI passes **13,515 tests across 37
+executables**. Object layout is `diff`-identical to the stored baseline; the
+mangled name is byte-identical and the vtable slot unchanged at offset `0x20`;
+an isolated stale-object probe **linked with zero diagnostics** and then took a
+SEGV, which is why README.md states that a full consumer rebuild is mandatory.
+
+The typed `Current()` reference hazard is **not** closed and is not claimed to
+be: `&Current()` retained across a mutation is still a reproduced
+use-after-free. Closing it would need a by-value `Current()`, which makes a
+move-only `T` uninstantiable. The header now states the window and the
+limitation.

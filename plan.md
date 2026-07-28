@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,793 rows: 1,786 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), and design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`) — one `wontfix` (#1772, obsoleted by #1771), five deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval; #1791 `REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, opened by #1790 and awaiting the four-part approval in `docs/ListIndexerVersioningDesign.md` section 28; #1793 `REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`, opened by #1792 and awaiting the three-part approval in `docs/IEnumeratorCurrentSafetyDesign.md` section 33), and one deliberately inactive `todo` row (#1785 `REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened by #1784); no `doing` or `needs_user` rows |
+| `ticket` | 1,794 rows: 1,787 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`), and implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`) — one `wontfix` (#1772, obsoleted by #1771), five deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval; #1791 `REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, opened by #1790 and awaiting the four-part approval in `docs/ListIndexerVersioningDesign.md` section 28; #1794 `REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, opened by #1793 and awaiting its own two-part approval for a second public source break plus a second silent ABI break on `IDictionaryEnumerator`), and one deliberately inactive `todo` row (#1785 `REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened by #1784); no `doing` or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -1032,8 +1032,9 @@ must survive #1793) and a `Divergence` suite (9 cases carrying `static_assert`s
 catalogue current; database consistent; `git diff --check` clean; all ten
 selective components passing; Doxygen 1.9.8 unchanged at **1,938**/1,942.
 
-One ticket was opened and deliberately not begun: **#1793**
-(`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`, P2, L, **blocked**), in two
+One ticket was opened and deliberately not begun — **#1793**
+(`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`, P2, L), which is now
+**done**; see the next section. As opened it was **blocked**, in two
 phases. Phase 1 (write the ownership/lifetime/validity rules into both headers)
 needs **no** approval and does not close the defect. Phase 2 needs the exact
 three-part approval in design section 33 — public source breaks to
@@ -1049,6 +1050,81 @@ which makes move-only `T` uninstantiable), and
 `IDictionaryEnumerator::getKeyProperty()`/`getValueProperty()` keep returning
 `const void*` into live storage, which is a separate follow-on rather than a
 widening of this approval.
+
+Tickets #1785, #1788, #1789, #1791, and #1773 remain untouched and inactive.
+
+### Completed enumerator Current safety implementation: ticket #1793
+
+Implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`,
+P2, size L, category `defect`), opened blocked by #1792, was completed on local
+branch `feature/remediation-coll-ienumerator-current-safety` after the user
+granted design section 33's three-part approval explicitly and scoped to it. It
+carries **no `SR-AUD-*` identifier** and reopens no finding; SR-AUD-356 stays
+`remediated` from ticket #1767. Both phases landed together. The record is
+[`docs/IEnumeratorCurrentSafetyDesign.md`](docs/IEnumeratorCurrentSafetyDesign.md)
+section 34, appended below #1792's design record rather than rewriting it.
+
+`System::Collections::IEnumerator::getCurrentProperty()` now returns an owning
+`std::any` **by value** instead of a mutable `void*`.
+`Generic::IEnumerator<T>::Current()` is unchanged at `const T&`; its inherited
+bridge boxes a copy and throws `System::NotSupportedException` for an element
+type that cannot be copied, matching .NET's documented `ref struct` answer. All
+four `const_cast`s outside the bridge are gone and both `mutable` members are
+ordinary again. Eight production non-generic overrides, the bridge, two
+test-local implementers, and the three in-library call sites migrated; **zero
+library sources broke**, exactly as the design's shim sweep predicted.
+
+The defect was reconfirmed before any production edit, with the output preserved
+under `build-probe-ienumerator/prefix1793/`: 15 defects across six modes, four
+ASan `heap-use-after-free` reports, a `ReadOnlyCollection<T>` mutated through
+its own enumerator into the caller's shared vector, a `Hashtable` entry made
+unreachable by both its old and its new key while `Count` still reported it, and
+a same-width wrong cast silently wrong with no sanitizer diagnostic.
+
+Four corrections to the design's section 14 sketch are recorded in section 34.3,
+two of them caught only by running the new suite: the `if constexpr`
+else-branch had to call `Current()` and discard it, or a move-only `T` would
+have reported `NotSupportedException` where the pre-#1793 bridge reported
+`InvalidOperationException`; `Generic::List<std::any>` cannot be instantiated at
+all, because `std::any` is not equality-comparable; `std::any(Current())` for
+`T = std::any` selects the copy constructor, so the box is never nested; and the
+non-generic `Stack`/`Queue` `ICollection` constructors gained a
+`std::bad_any_cast` path.
+
+Closure evidence: the nine `Divergence` cases were **flipped, not deleted** —
+renamed `EnumeratorCurrentSafety`, each asserting the opposite outcome through
+the same accessor, with the `static_assert`s now pinning `std::any` so a revert
+cannot land silently; `SharpRuntimeTests_Collections_Core` **2,229/2,229** (was
+2,208); a **clean full rebuild** in a dedicated `build-abi-1793` tree at
+**13,515 tests across 37 executables** (was 13,494), zero warnings and errors;
+ASan+UBSan clean on all six migrated lifetime shapes; 0 LSan leaks with
+LeakSanitizer proved active by a deliberate-leak self-test; TSan deliberately
+not run, with the reason stated; object layout `diff`-identical to the stored
+baseline; the mangled name byte-identical and the vtable slot unchanged at
+offset `0x20`; a stale-object probe in which an old caller and a new
+implementation **linked with zero diagnostics** and then took a SEGV; a positive
+consumer fixture passing under `-Werror` and a negative fixture rejected at all
+six marked sites; 41 modules/90 edges; validator tests 7/7; catalogue current;
+database consistent; `git diff --check` clean; Doxygen 1.9.8 at **1,939**/1,942
+— one above the canonical 1,938, because `Doxyfile` does not scan `docs/` and the
+new `README.md` link into it resolves as an unresolved `\ref`, exactly as its two
+neighbouring entries already do (design record section 34.8).
+
+Allocation was measured rather than assumed: 0 for `int`, a raw pointer, and an
+already boxed `int`; **1** for a small SSO `std::string` and a
+`std::shared_ptr`; 2 for a 64-char `std::string` and a `DictionaryEntry`. The
+middle row corrects design section 22, which predicted 0 for any type at most
+one pointer wide — libstdc++'s `std::any` small-buffer optimisation admits only
+types that *fit in* a `void*`. A full consumer rebuild is mandatory and the
+linker will not say so; README.md carries that warning with the migration table.
+
+Three residual limitations stand, unchanged from the design's risk register: the
+typed `Current()` reference hazard is **not** closed (its validity window is now
+in the header, together with the statement that #1793 did not close it);
+`IDictionaryEnumerator`'s `const void*` accessors are untouched, with a warning
+now on that interface and a ticket of their own — **#1794**
+(`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, P3, size M, `blocked`, not begun); and CNA's and
+mobile-eggbert's usage remains unmeasured, with #1773 still `blocked`.
 
 Tickets #1785, #1788, #1789, #1791, and #1773 remain untouched and inactive. No
 repair ticket is active.

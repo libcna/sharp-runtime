@@ -1528,3 +1528,208 @@ or `SortedSet::GetViewBetween` (#1783) — is **not** approval for any of the
 above. None of them carries over.
 
 If Phase 2 is declined, follow §29.
+
+---
+
+## 34. Implementation complete — ticket #1793
+
+*Added 2026-07-28 on local branch
+`feature/remediation-coll-ienumerator-current-safety`, after §33's three-part
+approval was granted explicitly and scoped to #1793. Everything above this
+section is the design record as #1792 wrote it and is **unchanged**: the unsafe
+pointer, its reproductions, and the alternatives analysis stay on the record
+exactly as measured. This section records what was built, and the four places
+where the built thing differs from what §14 sketched.*
+
+### 34.1 What landed
+
+Both phases, together. The approval covered Phase 2, and Phase 1's
+documentation was written into the same headers rather than split across two
+commits that would have contradicted each other.
+
+| Surface | Before | After |
+|---|---|---|
+| `System::Collections::IEnumerator::getCurrentProperty()` | `[[nodiscard]] virtual void* … const = 0` | `[[nodiscard]] virtual std::any … const = 0` |
+| `Generic::IEnumerator<T>::Current()` | `[[nodiscard]] virtual const T& … const = 0` | **unchanged** |
+| `Generic::IEnumerator<T>::getCurrentProperty()` | `return const_cast<T*>(&Current());` | `if constexpr (copyable) return std::any(Current()); else { (void)Current(); throw NotSupportedException(…); }` |
+
+All **four** `const_cast`s outside the bridge are gone, and both `mutable`
+members (`Hashtable::Enumerator::current_`, `BitArray::Enumerator::current_`)
+are ordinary members again.
+
+### 34.2 Every implementation migrated
+
+Eight production non-generic overrides, the one bridge (covering thirteen
+production generic implementations plus every hand-written one), two
+test-local implementers, and the three in-library call sites — the counts §5
+and §12.1 measured, confirmed exact by compilation:
+
+| # | Implementation | Now returns |
+|---|---|---|
+| 1 | `Generic::IEnumerator<T>` bridge | `std::any(Current())`, or throws for non-copyable `T` |
+| 2 | `ArrayList::Enumerator` | a copy of the element's own `std::any` — **not** nested |
+| 3 | `Hashtable::Enumerator` | `std::any(DictionaryEntry)` |
+| 4 | `Hashtable::…::MemberEnumerator` | keys: `std::any(std::string)`; values: a copy of the element's `std::any` — **not** nested |
+| 5 | `BitArray::Enumerator` | `std::any(bool)` |
+| 6 | `Collections::Stack::Enumerator` | `std::any(void*)` — the element *is* the pointer |
+| 7 | `Collections::Queue::Enumerator` | `std::any(void*)` |
+| 8 | `ListDictionaryInternal::NodeEnumerator` | `std::any(const void*)` — the `const` survives |
+| 9 | `ListDictionaryInternal::…::Enumerator` | `std::any(const void*)` |
+| 10 | test-local `IntVectorEnumerator` | `std::any(int)` |
+| 11 | test-local `VecEnumerator` | **nothing to migrate** — it implements `IEnumerator<T>` and inherits the bridge |
+
+In-library call sites: `ArrayList.hpp:108` stores the box directly (the element
+type *is* `std::any`); `Stack.hpp:47` and `Queue.hpp:47` unbox with
+`std::any_cast<void*>`.
+
+### 34.3 Four corrections to §14's sketch
+
+Recorded because the sketch was compile-validated but not *run*-validated, and
+two of these were caught only by the permanent suite.
+
+1. **The `if constexpr` else-branch had to call `Current()` and discard it.**
+   §14.2's sketch throws `NotSupportedException` directly. That discards the
+   only use of `Current()`, so for a move-only `T` a **before-start or after-end
+   read reported `NotSupportedException` where the pre-#1793 bridge reported
+   `InvalidOperationException`** — silently converting an existing exception
+   path, which §18's ordering rule ("the state-machine check runs first")
+   forbids. The implemented bridge calls `(void)Current();` first. Caught by
+   `EnumeratorCurrentSafety.MoveOnlyStateMachineStillPrecedesTheBoxingRefusal`.
+2. **`Generic::List<std::any>` cannot be instantiated at all**, so the
+   nested-box case could not be tested through it as planned: `std::any` is not
+   equality-comparable and `List<T>`'s `Contains`/`IndexOf` need `operator==`.
+   The permanent suite uses a hand-written `IEnumerator<std::any>` implementer,
+   which exercises the same bridge.
+3. **`std::any(Current())` for `T = std::any` selects `std::any`'s COPY
+   constructor**, not its value-forwarding one — that constructor is constrained
+   with `!is_same_v<decay_t<ValueType>, any>`. So the result is a copy of the
+   element's box, never a nested box. §14.3 assumed this for `ArrayList` without
+   stating the mechanism; it is now pinned by three explicit tests
+   (`ArrayListElementTypeIsNoLongerRewritable`,
+   `HashtableValueViewReturnsTheElementBoxNotANestedOne`,
+   `StdAnyElementIsCopiedNotNested`).
+4. **`Stack(ICollection&)` and `Queue(ICollection&)` gained a throwing path.**
+   They now `std::any_cast<void*>` each element, so a source collection that
+   does not enumerate `void*` elements raises `std::bad_any_cast` where the old
+   code silently stored a pointer into that source's live storage. No caller in
+   this repository constructs either from an `ICollection`, so nothing
+   regresses; it is documented on both constructors.
+
+### 34.4 Measured results
+
+| Gate | Result |
+|---|---|
+| Pre-fix reproduction, re-run before any production edit | 15 defects across `probe1`'s six modes; 4 ASan `heap-use-after-free`; 2 type-erasure defects; 0 invariants failed in every mode |
+| `Collections.Core` | 2,208 → **2,229** tests, all passing |
+| Full repository, clean rebuild | **13,515** tests across 37 executables |
+| Library sources broken by the migration | **0 of 626**, as §12.2 predicted |
+| ASan + UBSan, six migrated lifetime shapes | 0 reports, 0 runtime errors |
+| LSan | 0 leaks; proved active by a self-test that leaks 289 bytes and exits non-zero |
+| TSan | **not run, deliberately** — this change adds no atomic, no `mutable` cache and no hidden `const` write; it *removes* two `mutable` members. Concurrent-mutation tests here would substantiate nothing #1784's and #1787's probes have not covered. |
+| Object layout | **identical**, `diff`-clean against §3's stored baseline |
+| Mangled name | `_ZNK…18getCurrentPropertyEv` — byte-identical, confirmed on the real repository objects |
+| Vtable slot | offset `0x20`, unchanged; no other slot renumbered |
+| Calling convention | `this` `%rdi` → `%rsi`, sret buffer in `%rdi` — confirmed by `objdump` |
+| Stale-object probe | old caller + new implementation **linked with zero diagnostics**; the mismatched call then took a SEGV with UBSan reporting an invalid vptr |
+| Negative consumer fixture | rejected at all **6** marked sites |
+| Positive consumer fixture | compiles under `-Wall -Wextra -Wpedantic -Werror` and exits 0 |
+| Module graph | 41 modules / 90 edges, unchanged |
+| Doxygen | **1,939** warnings, ceiling 1,942 — one more than the canonical 1,938, and the reason is structural (§34.8) |
+
+### 34.5 Allocation and cost, measured rather than assumed
+
+Counted with a replaced global `operator new`, measuring the full round trip
+(construct **and** destroy the box):
+
+| Element type | Allocations per type-erased read |
+|---|---:|
+| `int` | **0** |
+| raw pointer (`int*`) | **0** |
+| `ArrayList` element already holding `int` | **0** |
+| `std::string`, SSO (4 chars) | **1** |
+| `std::shared_ptr<int>` | **1** |
+| `std::string`, 64 chars | **2** |
+| `ArrayList` element holding a 64-char `std::string` | **2** |
+| `DictionaryEntry` | **2** |
+
+§22 predicted 0 for "every type ≤ one pointer, nothrow-move-constructible" and
+2 for `std::string`. The middle row is the correction: a *small* `std::string`
+and a `std::shared_ptr` still cost **1**, because libstdc++'s `std::any` small-
+buffer optimisation admits only types that fit in a `void*`, and both are larger
+than that regardless of their contents.
+
+A non-trivial element costs exactly **1 copy and 1 destroy** per read, with the
+live count balanced at 0.
+
+Wall-clock, `-O2`, one `asm volatile` barrier per iteration so the
+loop-invariant call is not hoisted (the mistake #1786 §13.1 recorded):
+
+| Element type | typed `Current()` | boxed | ratio |
+|---|---:|---:|---:|
+| `int` | 1.96 ns | 4.76 ns | 2.4× |
+| `std::string` (SSO) | 2.22 ns | 13.74 ns | 6.2× |
+| `std::string` (64) | 2.21 ns | 18.78 ns | 8.5× |
+| `std::shared_ptr<int>` | 0.55 ns | 11.60 ns | 21.1× |
+
+These are **not** a regression threshold and no gate enforces them. The typed
+path is unchanged and allocation-free; the type-erased path is the slow path by
+construction; and .NET pays a heap box per read for a value type too.
+
+### 34.6 The suite was flipped, not deleted
+
+All nine `EnumeratorCurrentDivergence` cases still exist, renamed to
+`EnumeratorCurrentSafety`, each asserting the opposite outcome on the same
+collection through the same accessor, with a `WAS …` comment naming the case it
+replaced. The `static_assert`s remain load-bearing in the other direction: they
+now pin `std::any`, so a revert to `void*` cannot land silently either. The
+eight `EnumeratorCurrentContract` cases are untouched, as they were designed to
+be. Twenty-one further cases cover ownership, lifetime, the move-only type,
+type safety, nested boxing, the mutation counter, and every remaining
+non-generic implementation family.
+
+### 34.7 What is still open
+
+- **Risk 1 stands.** The typed `Current()` reference hazard is **not** closed,
+  by design (§13.1). `&Current()` retained across a mutation is still a
+  use-after-free. Its validity window is now written into the header for the
+  first time, and the header says explicitly that #1793 did not close it.
+- **Risk 4 stands, and now has a ticket.** `IDictionaryEnumerator::getKeyProperty()`
+  and `getValueProperty()` still return `const void*` into live storage. They are
+  const-correct, so classes A and B do **not** apply — no *write* path exists —
+  but classes C, D and E remain open on that sibling interface. A warning now
+  sits on the interface itself, pointing here. Opened as ticket **#1794**
+  (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, P3, size M), **blocked** and
+  deliberately not begun: it is a second public source break on a second
+  interface and, by the same Itanium ABI property §21.2 measured, a second
+  **silent** one, so it needs its own two-part approval. #1793's does not carry
+  over. Note what #1793 already removed: the two member-view enumerators that
+  `const_cast`'d these accessors' results and republished them as a mutable
+  `void*` both copy out now, so what remains is the direct-call surface only.
+- **Risk 3 stands.** CNA's and mobile-eggbert's usage remains unmeasured; both
+  were not inspected, searched, built, or modified, by instruction. Ticket
+  #1773 remains blocked. Both repositories stay on an older revision until they
+  deliberately upgrade — and when they do, §21.2 and README's ABI paragraph are
+  the mandatory reading.
+- **Risk 2 is now realised rather than hypothetical.** §21.2's silent ABI break
+  is reproduced end to end in §34.4's stale-object probe. The only mitigation
+  is the mandatory full rebuild, which README now states.
+
+### 34.8 The Doxygen count moved by one, and why
+
+The canonical count went **1,938 → 1,939**, against a ceiling of 1,942. It is
+not a new documentation defect and no header caused it.
+
+`Doxyfile`'s `INPUT` covers `modules/` and `README.md`; it does **not** cover
+`docs/`. Doxygen resolves every Markdown link in a scanned file as a `\ref`, so
+**each link from `README.md` to a file under `docs/` emits exactly one
+`unable to resolve reference` warning** — 57 such warnings already exist, one per
+link, including the ones the two sibling Breaking-changes entries make to
+`docs/CollectionVersionCounterSweep.md` and `docs/SortedSetLiveViewDesign.md`.
+This ticket's `README.md` entry links to this file, so the total moves by one.
+
+The link was kept rather than downgraded to plain text, because the two entries
+either side of it link to their design records and a reader following the ABI
+warning needs to reach the measurements. Ticket #1781 established the 1,942
+ceiling above the measured count precisely so that structural, already-explained
+warnings like this one do not force a choice between a useful cross-reference and
+a static number. Recorded here so the next ticket does not re-derive it.

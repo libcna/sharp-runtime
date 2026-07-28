@@ -1958,8 +1958,9 @@ already cap their own builds at `--parallel 4`. No build tree was created under
 `/tmp`, `/var/tmp`, or `/dev/shm`, and no existing build tree was cleaned or
 recreated.
 
-**One ticket was opened and deliberately not begun.** **#1793**
-(`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`, P2, L) is **blocked**. It has
+**One ticket was opened and deliberately not begun** — **#1793**
+(`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`, P2, L), which is now
+**done**; see the section after next. As opened by #1792 it was **blocked**. It has
 two phases: **Phase 1 needs no approval** (write the ownership, lifetime, and
 validity rules into both headers and correct the misleading "cast to the
 appropriate type" comment — which does not close the defect), and **Phase 2 is
@@ -1996,6 +1997,163 @@ Ticket #1785 remains `todo` and untouched. Tickets #1788 and #1789 remain
 changed. Ticket #1773 remains `blocked` and untouched. CNA and mobile-eggbert
 were not inspected, searched, configured, built, or modified. No push, merge,
 rebase, tag, or publication occurred. No compilation used more than four jobs.
+
+**Ticket #1793 is now done — see the next section.**
+
+### Completed enumerator Current safety implementation: ticket #1793
+
+Ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`, P2, size L,
+category `defect`) is **done**, closed 2026-07-28 on local branch
+`feature/remediation-coll-ienumerator-current-safety`. It carries **no
+`SR-AUD-*` identifier** — the numbering stays frozen at 364, and SR-AUD-356
+remains `remediated` from ticket #1767 rather than being reopened. The user
+granted design section 33's three-part approval explicitly and scoped to this
+ticket; the approvals for #1771, #1780, and #1783 did not carry over, and this
+one does not carry to #1791, #1788, or #1789. Both phases landed together,
+because Phase 1's documentation would have contradicted the headers if it had
+landed separately. The durable record is
+[`docs/IEnumeratorCurrentSafetyDesign.md`](docs/IEnumeratorCurrentSafetyDesign.md)
+section 34; everything above that section is #1792's design record, unchanged —
+the unsafe pointer and its reproductions stay on the record exactly as measured.
+
+**What changed.** `System::Collections::IEnumerator::getCurrentProperty()`
+returns an **owning `std::any` by value** instead of a mutable `void*`, the
+direct C++ counterpart of .NET's `object IEnumerator.Current`.
+`Generic::IEnumerator<T>::Current()` is **unchanged** at `const T&`; its
+inherited bridge is now `std::any(Current())`, throwing
+`System::NotSupportedException` for an element type that cannot be copied —
+.NET's own documented answer for a `ref struct` element type. All **four**
+`const_cast`s outside the bridge are gone, and both `mutable` members
+(`Hashtable::Enumerator::current_`, `BitArray::Enumerator::current_`) are
+ordinary members again. Eight production non-generic overrides, the one bridge
+covering thirteen production generic implementations, two hand-written
+test-local implementers, and the three in-library call sites migrated — the
+exact counts #1792 measured, confirmed by compilation. **Zero library sources
+broke**, as the design's shim sweep predicted.
+
+**The defect was reconfirmed before any production edit.** The #1792 probes were
+re-run and their output preserved under
+`build-probe-ienumerator/prefix1793/`: 15 defects across six modes, including a
+`List<int>` element rewritten with the mutation counter at rest and the
+fail-fast guard silent, a `ReadOnlyCollection<T>` mutated through its own
+enumerator into the caller's shared backing vector, a `Hashtable` key rewritten
+in place so that with 64 entries the entry was unreachable by **both** its old
+and its new key while `Count` still reported it, **four AddressSanitizer
+`heap-use-after-free` reports**, and a same-width wrong cast that was silently
+wrong with no diagnostic from any sanitizer.
+
+**Four corrections to the design's section 14 sketch**, all recorded in
+section 34.3 and two of them caught only by running the new suite:
+
+1. **The `if constexpr` else-branch had to call `Current()` and discard it.**
+   The sketch throws directly, which discards the only use of `Current()` — so
+   for a move-only `T` a before-start or after-end read reported
+   `NotSupportedException` where the pre-#1793 bridge reported
+   `InvalidOperationException`, silently converting an existing exception path.
+   The implemented bridge runs the state machine first, as design section 18's
+   ordering rule requires.
+2. **`Generic::List<std::any>` cannot be instantiated at all** — `std::any` is
+   not equality-comparable and `List<T>`'s `Contains`/`IndexOf` need
+   `operator==` — so the nested-box case is tested through a hand-written
+   `IEnumerator<std::any>` implementer instead.
+3. **`std::any(Current())` for `T = std::any` selects `std::any`'s copy
+   constructor**, not its value-forwarding one, so the result is a copy of the
+   element's box and never a nested box. Now pinned by three explicit tests.
+4. **`Stack(ICollection&)` and `Queue(ICollection&)` gained a throwing path**:
+   they `std::any_cast<void*>` each element, so a source that does not enumerate
+   `void*` elements now raises `std::bad_any_cast` where the old code silently
+   stored a pointer into that source's live storage. No caller in this
+   repository constructs either from an `ICollection`.
+
+**The Divergence suite was flipped, not deleted.** All nine cases still exist,
+renamed `EnumeratorCurrentSafety`, each asserting the opposite outcome on the
+same collection through the same accessor with a `WAS …` comment naming what it
+replaced. The `static_assert`s stay load-bearing in the other direction: they
+now pin `std::any`, so a revert to `void*` cannot land silently either. The
+eight `Contract` cases are untouched. Twenty-one further cases cover ownership,
+lifetime across `MoveNext`/`Reset`/reallocation/`Clear`/both destructions, the
+move-only type, `std::bad_any_cast`, nested boxing, `shared_ptr` and raw-pointer
+handle semantics, the mutation counter, and every remaining non-generic
+implementation family.
+
+Closure evidence, all repository-local: `SharpRuntimeTests_Collections_Core`
+**2,229/2,229** (was 2,208); a **clean full rebuild** in a dedicated
+`build-abi-1793` tree at **13,515 tests across 37 executables** (was 13,494),
+zero warnings, zero errors; ASan+UBSan clean on all six migrated lifetime
+shapes, where four were `heap-use-after-free` before; **0 LSan leaks, with
+LeakSanitizer proved active by a self-test that leaks 289 bytes and exits
+non-zero**; TSan deliberately not run, because this change adds no atomic, no
+`mutable` cache and no hidden `const` write and in fact *removes* two `mutable`
+members; object layout `diff`-identical against the stored baseline; the
+mangled name `_ZNK…18getCurrentPropertyEv` byte-identical and the vtable slot
+unchanged at offset `0x20`, confirmed on the real repository objects; a
+**stale-object probe in which an old caller and a new implementation linked with
+zero diagnostics** and the mismatched call then took a SEGV with UBSan reporting
+an invalid vptr; a positive consumer fixture compiling under
+`-Wall -Wextra -Wpedantic -Werror` and exiting 0; a negative fixture rejected at
+all **6** marked sites; module boundaries unchanged at 41 modules / 90 edges;
+validator tests 7/7; catalogue current; database consistent;
+`git diff --check` clean; Doxygen 1.9.8 at **1,939**/1,942 — one more than the
+canonical 1,938, because `Doxyfile`'s `INPUT` does not cover `docs/` and every
+`README.md` link into it resolves as an unresolved `\ref`; this ticket's
+Breaking-changes entry adds exactly one such link, as its two neighbours already
+do. Explained in design record section 34.8.
+
+**Allocation, measured rather than assumed** (full round trip, replaced global
+`operator new`): 0 for `int`, a raw pointer, and an already boxed `int`; **1**
+for a small SSO `std::string` and a `std::shared_ptr`; 2 for a 64-char
+`std::string` and a `DictionaryEntry`. The middle row corrects design section
+22, which predicted 0 for "every type ≤ one pointer": libstdc++'s `std::any`
+small-buffer optimisation admits only types that *fit in* a `void*`, and both
+are larger than that regardless of their contents. A non-trivial element costs
+exactly 1 copy and 1 destroy per read, live count balanced at 0. The typed
+`Current()` path is unchanged and allocation-free; wall-clock ratios of the
+boxed path against it, with an `asm volatile` barrier per iteration, are 2.4×
+for `int` and 8.5× for a 64-char `std::string`. **No gate enforces those
+ratios**, and they are not a regression threshold.
+
+**A full consumer rebuild is mandatory and the linker will not say so.** The
+symbol is byte-identical before and after and the calling convention is not, so
+a partially rebuilt consumer links silently and corrupts memory. README.md
+carries the behaviour-change entry, the migration table, and that warning.
+
+Three residual limitations are stated rather than buried, all unchanged from
+the design's risk register. **The typed `Current()` reference hazard is not
+closed** — `&Current()` retained across a mutation is still a reproduced
+use-after-free; closing it needs a by-value `Current()`, which makes move-only
+`T` uninstantiable. Its validity window is now written into the header for the
+first time, together with the statement that #1793 did not close it.
+**`IDictionaryEnumerator::getKeyProperty()`/`getValueProperty()` keep returning
+`const void*` into live storage**; they are const-correct, so no write path
+exists through them, but the type-safety, lifetime, and ownership-ambiguity
+classes remain open there. A warning now sits on that interface pointing at the
+design record, and it is opened as ticket **#1794**
+(`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, P3, size M), **blocked** and
+deliberately not begun — it is a second public source break plus a second silent
+ABI break, needing its own two-part approval that #1793's does not supply.
+**CNA's and mobile-eggbert's
+usage remains unmeasured**; both were not inspected, searched, configured,
+built, or modified, and ticket #1773 remains `blocked`.
+
+Build directories used, all repository-local, gitignored, and at **at most four
+compilation jobs**: the existing `build` tree (incremental, `--parallel 4`,
+development only), the new dedicated `build-abi-1793` tree (**clean full
+rebuild**, `--parallel 4`, the ABI gate), `build-probe-ienumerator` (the
+re-run pre-fix probes, the new post-fix probe, and the stale-object ABI probe —
+single-translation-unit compiles, one process each), `build-consumer-1793-neg`
+(the negative fixture, `--parallel 4`, required to fail), and `build-tmp` as the
+repository-local `TMPDIR`. `scripts/check_selective_components.sh` and
+`scripts/check_doxygen_warnings.sh` use `mktemp` internally and were run with
+`TMPDIR` redirected into `build-tmp`; the former already caps its own builds at
+`--parallel 4`. No build tree was created under `/tmp`, `/var/tmp`, or
+`/dev/shm`.
+
+Ticket #1785 remains `todo` and untouched. Tickets #1788 and #1789 remain
+`blocked` and untouched. Ticket #1791 remains `blocked` and untouched; no
+indexer changed. Ticket #1773 remains `blocked` and untouched. CNA and
+mobile-eggbert were not inspected, searched, configured, built, or modified. No
+push, merge, rebase, tag, or publication occurred. No compilation used more than
+four jobs.
 
 No repair ticket is active.
 

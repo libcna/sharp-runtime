@@ -2378,8 +2378,9 @@ modules / 90 edges; validator tests 7/7; catalogue current; database consistent;
 `git diff --check` clean; all ten selective components and every consumer fixture
 passing; Doxygen 1.9.8 unchanged at **1,938**/1,942.
 
-**One ticket was opened and deliberately not begun.** **#1793**
-(`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`, P2, L, **blocked**), in two
+**One ticket was opened and deliberately not begun** — **#1793**
+(`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`, P2, L), which is now
+**done**; see the batch below. As opened by #1792 it was **blocked**, in two
 phases: Phase 1 (write the ownership, lifetime, and validity rules into both
 headers) needs **no** approval and does not close the defect; Phase 2 needs the
 exact three-part approval in design section 33 — public source breaks to
@@ -2396,6 +2397,111 @@ reference hazard is **not** closed, and
 `IDictionaryEnumerator::getKeyProperty()`/`getValueProperty()` keep returning
 `const void*` into live storage — a separate follow-on rather than a widening of
 this approval.
+
+Ticket #1785 remains `todo` and untouched; #1788, #1789, and #1791 remain
+`blocked` and untouched; #1773 remains `blocked` and untouched. CNA and
+mobile-eggbert were not inspected, searched, configured, built, or modified. No
+compilation used more than four parallel jobs, and no push, merge, rebase, tag,
+or publication occurred.
+
+## Post-audit remediation batch — ticket #1793, safe enumerator `Current` contract (2026-07-28)
+
+Implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`,
+P2, size L, category `defect`), opened blocked by design ticket #1792, is
+**done** on local branch
+`feature/remediation-coll-ienumerator-current-safety`. It carries **no new
+`SR-AUD-*` identifier** — the numbering stays frozen at 364 — and it **reopens
+no finding**. **SR-AUD-356 stays `remediated`**, unchanged: that finding is
+about enumerators dereferencing invalid `Current` *states*, which ticket #1767
+closed and which every one of its regressions still proves; #1793 is about what
+a *valid* `Current` hands back, which is a different defect found during
+remediation rather than during the audit.
+
+The user granted design section 33's three-part approval explicitly and scoped
+to this ticket — a public source break to `System::Collections::IEnumerator`, a
+public source break to `Generic::IEnumerator<T>` adding a
+`NotSupportedException` path for element types that cannot be copied, and
+acknowledgement of a **silent ABI break** requiring a full consumer rebuild. It
+does not carry to #1791, #1788, or #1789.
+
+**What changed.** `getCurrentProperty()` returns an owning `std::any` **by
+value** instead of a mutable `void*`, the direct C++ counterpart of .NET's
+`object IEnumerator.Current`. `Generic::IEnumerator<T>::Current()` is unchanged
+at `const T&`. All **four** `const_cast`s outside the bridge are gone and both
+`mutable` members are ordinary members again. Eight production non-generic
+overrides, the one bridge covering thirteen production generic implementations,
+two hand-written test-local implementers, and the three in-library call sites
+migrated. **Zero library sources broke**, exactly as the design's shim sweep
+predicted.
+
+**The defect was reconfirmed before any production edit**, with output preserved
+under `build-probe-ienumerator/prefix1793/`: 15 defects across six modes, four
+ASan `heap-use-after-free` reports, a `ReadOnlyCollection<T>` mutated through
+its own enumerator into the caller's shared backing vector, a `Hashtable` entry
+made unreachable by **both** its old and its new key while `Count` still
+reported it, and a same-width wrong cast silently wrong with no diagnostic from
+any sanitizer.
+
+**Four corrections to the design's section 14 sketch**, recorded in section
+34.3, two of them caught only by running the new suite: the `if constexpr`
+else-branch had to call `Current()` and discard it, or a move-only `T` would
+have reported `NotSupportedException` where the pre-#1793 bridge reported
+`InvalidOperationException`, silently converting an existing exception path;
+`Generic::List<std::any>` cannot be instantiated at all, because `std::any` is
+not equality-comparable and `List<T>`'s `Contains`/`IndexOf` need `operator==`;
+`std::any(Current())` for `T = std::any` selects `std::any`'s copy constructor,
+so the box is never nested; and the non-generic `Stack`/`Queue` `ICollection`
+constructors gained a `std::bad_any_cast` path where the old code silently
+stored a pointer into the source's live storage.
+
+Closure evidence: the nine `EnumeratorCurrentDivergence` cases were **flipped,
+not deleted** — renamed `EnumeratorCurrentSafety`, each asserting the opposite
+outcome on the same collection through the same accessor, with the
+`static_assert`s now pinning `std::any` so a revert cannot land silently either;
+twenty-one further cases added; `SharpRuntimeTests_Collections_Core`
+**2,229/2,229** (was 2,208); a **clean full rebuild** in a dedicated
+`build-abi-1793` tree at **13,515 tests across 37 executables** (was 13,494),
+zero warnings and zero errors; ASan+UBSan clean on all six migrated lifetime
+shapes, four of which were `heap-use-after-free` before; **0 LSan leaks**, with
+LeakSanitizer proved active by a self-test that leaks 289 bytes and exits
+non-zero; **TSan deliberately not run**, because this change adds no atomic, no
+`mutable` cache, and no hidden `const` write and in fact removes two `mutable`
+members; object layout `diff`-identical against the stored baseline; the mangled
+name `_ZNK…18getCurrentPropertyEv` byte-identical and the vtable slot unchanged
+at offset `0x20`, confirmed on the real repository objects; a **stale-object
+probe in which an old caller and a new implementation linked with zero
+diagnostics** and the mismatched call then took a SEGV with UBSan reporting an
+invalid vptr; a positive consumer fixture compiling under
+`-Wall -Wextra -Wpedantic -Werror` and exiting 0; a negative fixture rejected at
+all **6** marked sites; 41 modules / 90 edges; validator tests 7/7; catalogue
+current; database consistent; `git diff --check` clean; Doxygen 1.9.8 at
+**1,939**/1,942 — one above the canonical 1,938, because `Doxyfile`'s `INPUT`
+does not cover `docs/` and every `README.md` link into it resolves as an
+unresolved `\ref`; this ticket's Breaking-changes entry adds exactly one such
+link, as its two neighbours already do (design record section 34.8).
+
+Allocation was measured rather than assumed: 0 for `int`, a raw pointer, and an
+already boxed `int`; **1** for a small SSO `std::string` and a
+`std::shared_ptr`; 2 for a 64-char `std::string` and a `DictionaryEntry`. That
+middle row corrects design section 22's prediction of 0 for any type at most one
+pointer wide — libstdc++'s `std::any` small-buffer optimisation admits only
+types that *fit in* a `void*`. A non-trivial element costs exactly 1 copy and 1
+destroy per read, live count balanced at 0.
+
+Three residual limitations stand, unchanged from the design's risk register and
+stated rather than buried. **The typed `Current()` reference hazard is not
+closed** — `&Current()` retained across a mutation is still a reproduced
+use-after-free; its validity window is now written into the header for the first
+time, together with the explicit statement that #1793 did not close it.
+**`IDictionaryEnumerator::getKeyProperty()`/`getValueProperty()` keep returning
+`const void*` into live storage**; they are const-correct, so no write path
+exists through them, but the type-safety, lifetime, and ownership-ambiguity
+classes remain open there. A warning now sits on that interface pointing at the
+design record, and it is opened as ticket **#1794**
+(`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, P3, size M), **blocked** and
+deliberately not begun: a second public source break plus a second silent ABI
+break, needing its own two-part approval that #1793's does not supply.
+**CNA's and mobile-eggbert's usage remains unmeasured.**
 
 Ticket #1785 remains `todo` and untouched; #1788, #1789, and #1791 remain
 `blocked` and untouched; #1773 remains `blocked` and untouched. CNA and

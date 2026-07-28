@@ -208,6 +208,99 @@ no safe or useful equivalent.
 
 ## Breaking changes
 
+### 2026-07-28 — `System::Collections::IEnumerator::getCurrentProperty()` returns `std::any`
+
+**This one requires a full rebuild of every consumer, and the linker will not
+tell you if you skip it. Read the ABI paragraph below before upgrading.**
+
+The non-generic enumerator accessor used to return a mutable `void*`. The
+generic bridge filled it with `const_cast<T*>(&Current())`, so a consumer
+holding nothing but the public non-generic interface could obtain a **writable,
+untyped, unbounded-lifetime pointer into the live storage of the collection it
+was walking** — including collections whose own members refuse to be mutated.
+Writing through it changed the element while the owning collection's mutation
+counter stayed at rest, so every outstanding enumerator remained valid and
+silently observed the new value.
+
+It now returns an **owning `std::any` by value**, the direct C++ counterpart of
+.NET's `object IEnumerator.Current`, which returns a value, boxes value types,
+and hands out no pointer at all. The typed
+`Generic::IEnumerator<T>::Current()` is **unchanged** at `const T&`.
+
+```cpp
+// Before
+void* raw = e->getCurrentProperty();
+int   value = *static_cast<int*>(raw);
+*static_cast<int*>(raw) = 5;              // ... and this reached the collection
+
+// After
+std::any boxed = e->getCurrentProperty();
+int      value = std::any_cast<int>(boxed);
+// There is no replacement for the write, and that is the point: use the
+// collection's own setter (setItem, operator[], Insert) so the mutation
+// counter advances and outstanding enumerators fail fast.
+```
+
+Migration, by shape:
+
+| Was | Becomes |
+|---|---|
+| `T* p = static_cast<T*>(e->getCurrentProperty());` | `T v = std::any_cast<T>(e->getCurrentProperty());` |
+| `*static_cast<T*>(e->getCurrentProperty())` | `std::any_cast<T>(e->getCurrentProperty())` |
+| `if (e->getCurrentProperty() == nullptr)` | `if (!e->getCurrentProperty().has_value())` |
+| `void* raw = …` on the non-generic `Stack`/`Queue`, whose element **is** a `void*` | `std::any_cast<void*>(e->getCurrentProperty())` |
+| `std::any_cast<int>(*static_cast<std::any*>(…))` on an already-boxed element | `std::any_cast<int>(e->getCurrentProperty())` — one unwrapping disappears |
+| `*static_cast<T*>(e->getCurrentProperty()) = v;` (a **write**) | no replacement — see above |
+| keeping the pointer past `MoveNext()` | keep the `std::any`; it owns its value and never dangles |
+| implementing `IEnumerator` by hand | change the return type; `return std::any(value);` |
+| implementing `IEnumerator<T>` by hand | **nothing** — the boxing bridge is inherited |
+
+Three further consequences:
+
+- **The returned box is yours.** Nothing invalidates it — not `MoveNext()`, not
+  `Reset()`, not mutating the collection, not destroying the enumerator, not
+  destroying the collection. Writing to it cannot reach the collection, and
+  reading it never advances any mutation counter. If the element type has shared
+  reference semantics of its own (`std::shared_ptr<X>`), the box copies the
+  *handle*, so mutating the pointee is still not mutating the collection —
+  exactly .NET's reference-type behaviour.
+- **A wrong cast is now diagnosed.** `std::any_cast<T>` throws
+  `std::bad_any_cast` — a `std::` exception, not a `System::` one, consistent
+  with how this port already exposes `std::any` — instead of silently
+  reinterpreting bytes, which a same-width `static_cast` through the old `void*`
+  did with no diagnostic from any sanitizer.
+- **A non-copyable element type loses this path only.** If `T` is not
+  copy-constructible it cannot be boxed, so `getCurrentProperty()` throws
+  `System::NotSupportedException("The element type cannot be boxed; use the
+  typed Current() accessor.")`. This mirrors .NET's own documented answer for a
+  `ref struct` element type. `Current()`, `MoveNext()`, and `Reset()` all keep
+  working, and the position check still runs first, so a before-start or
+  after-end read still reports `InvalidOperationException`.
+
+**ABI — a full consumer rebuild is mandatory.** Under the Itanium C++ ABI a
+non-template function's return type is **not** part of its mangled name, so the
+symbol `_ZNK…18getCurrentPropertyEv` is byte-identical before and after, the
+vtable is identically named, and the accessor stays in the same vtable slot
+(offset `0x20`). The calling convention is *not* the same: `std::any` is
+returned through a hidden sret buffer, so `this` moves from `%rdi` to `%rsi`.
+A translation unit compiled against the old header and linked against a library
+built with the new one **links with zero diagnostics and then corrupts memory**;
+that was reproduced in an isolated probe, where the mismatched call took a SEGV
+with UndefinedBehaviorSanitizer reporting an invalid vptr. No tool in the
+toolchain detects this at link time. Rebuild everything.
+
+There is **no object-layout change**: `sizeof`/`alignof` of `IEnumerator`,
+`Generic::IEnumerator<T>`, and every affected collection are identical before
+and after, re-measured against the stored baseline. The cost is one allocation
+class on the type-erased read only — 0 for `int`, a raw pointer, and an already
+boxed `int`; 1 for a small `std::string` and a `std::shared_ptr`; 2 for a large
+`std::string` and a `DictionaryEntry`. The typed `Current()` path is unchanged
+and still allocation-free. `IDictionaryEnumerator`'s `getKeyProperty()` and
+`getValueProperty()` deliberately still return `const void*` and are a separate,
+recorded follow-on. The full record — inventory, reproductions, alternatives
+analysis, .NET comparison, and ABI measurements — is in
+[docs/IEnumeratorCurrentSafetyDesign.md](docs/IEnumeratorCurrentSafetyDesign.md).
+
 ### 2026-07-28 — assigning a collection now invalidates its outstanding enumerators
 
 Fifteen collections carry a private mutation counter that their fail-fast

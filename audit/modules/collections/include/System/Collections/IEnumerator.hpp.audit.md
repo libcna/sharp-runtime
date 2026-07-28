@@ -96,3 +96,55 @@ Implementation is ticket **#1793**
 in `docs/IEnumeratorCurrentSafetyDesign.md` section 33, and includes
 acknowledgement of a **silent ABI break**: the mangled name is byte-identical
 before and after, and the calling convention is not.
+
+## Implementation ticket #1793 closed: implemented (2026-07-28)
+
+The design above landed under ticket **#1793**
+(`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`, P2, size L), on local branch
+`feature/remediation-coll-ienumerator-current-safety`, after the user granted
+design section 33's three-part approval explicitly and scoped to that ticket.
+**No new `SR-AUD-*` identifier; SR-AUD-356 stays `remediated`.** The evidence in
+every section above is retained unchanged — the unsafe pointer, its four
+AddressSanitizer `heap-use-after-free` reports, and the broken
+`std::unordered_map` invariant stay on the record exactly as measured.
+
+**This file changed.** The declaration is now:
+
+```cpp
+[[nodiscard]] virtual std::any getCurrentProperty() const = 0;
+```
+
+The doc-comment that promised *"Pointer to the current element; cast to the
+appropriate type"* — the whole of the previous type contract, silent on
+lifetime, mutability, and ownership — is replaced by the ownership and lifetime
+rules the design's section 7 table showed could not be written for the old
+signature: the returned box is the caller's, nothing invalidates it, writing to
+it cannot reach the collection, and reading it advances no mutation counter. The
+`getCurrentProperty()` naming collision with
+`Generic::IAsyncEnumerator<T>` is recorded on the class as known and deliberate
+so it is not "fixed" by accident.
+
+Eight production non-generic overrides migrated with it — `ArrayList`,
+`Hashtable` and its member view, `BitArray`, the non-generic `Stack` and
+`Queue`, and `ListDictionaryInternal` twice — deleting all **four** `const_cast`s
+outside the bridge and both `mutable` members. The three in-library call sites
+(`ArrayList.hpp:108`, `Stack.hpp:47`, `Queue.hpp:47`) migrated with them; the
+latter two gained a documented `std::bad_any_cast` path, where the old code
+silently stored a pointer into the source collection's live storage.
+
+The six lifetime shapes reproduced above were re-run in their migrated form
+under ASan+UBSan: **0 reports**, where four were `heap-use-after-free`. LSan
+reports 0 leaks and was proved active by a deliberate-leak self-test. A negative
+consumer fixture writing the exact pre-fix source is rejected at all six marked
+sites, and a positive fixture compiles under `-Wall -Wextra -Wpedantic -Werror`
+and exits 0.
+
+`IDictionaryEnumerator::getKeyProperty()`/`getValueProperty()` were **not**
+changed and still return `const void*` into live storage. They are const-correct,
+so no write path exists through them, but the type-safety, lifetime and
+ownership-ambiguity classes remain open on that sibling interface. A warning now
+sits on `IDictionaryEnumerator` itself pointing at
+`docs/IEnumeratorCurrentSafetyDesign.md` sections 15 and 30 risk 4, and
+migrating them is opened as ticket **#1794**
+(`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, P3, size M, `blocked`, not begun): a
+second public break on a second interface, needing its own approval.
