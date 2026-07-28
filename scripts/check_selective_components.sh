@@ -54,7 +54,7 @@ expect_consumer_failure() {
     local build_log="$MATRIX_ROOT/negative-$fixture_name.log"
 
     configure_consumer "$build_dir" "$component" "$source_name"
-    if cmake --build "$build_dir" --parallel 4 >"$build_log" 2>&1; then
+    if cmake --build "$build_dir" --parallel 3 >"$build_log" 2>&1; then
         echo "FAIL: forbidden consumer fixture $fixture_name compiled" >&2
         exit 1
     fi
@@ -84,7 +84,7 @@ check_component() {
         -DCMAKE_PROJECT_INCLUDE="$REPO_ROOT/test/consumer/InjectFixture.cmake" \
         -DCMAKE_BUILD_TYPE=Debug \
         >/dev/null
-    cmake --build "$build_dir" --parallel 4 >/dev/null
+    cmake --build "$build_dir" --parallel 3 >/dev/null
 
     if find "$build_dir" -maxdepth 1 -type f -perm -111 \
             -name 'SharpRuntimeTests_*' -print -quit | grep -q .; then

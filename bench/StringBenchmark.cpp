@@ -11,7 +11,7 @@
 // itself, only to this benchmark's own translation unit, so an unoptimized library build makes
 // cross-run/cross-change comparisons meaningless):
 //   cmake -S . -B build-bench -DSHARP_RUNTIME_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release
-//   cmake --build build-bench --target SharpRuntimeBench --parallel 4
+//   cmake --build build-bench --target SharpRuntimeBench --parallel 3
 //   ./build-bench/SharpRuntimeBench
 #include <chrono>
 #include <cstdio>

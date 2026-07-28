@@ -45,7 +45,7 @@ git submodule update --init --recursive
 cmake -S . -B build \
   -DSHARP_RUNTIME_COMPONENTS=All \
   -DSHARP_RUNTIME_BUILD_TESTS=ON
-cmake --build build --target SharpRuntimeTests --parallel 4
+cmake --build build --target SharpRuntimeTests --parallel 3
 scripts/run_component_tests.sh build
 ```
 
@@ -63,7 +63,7 @@ For a library-only build:
 cmake -S . -B build-no-tests \
   -DSHARP_RUNTIME_COMPONENTS=All \
   -DSHARP_RUNTIME_BUILD_TESTS=OFF
-cmake --build build-no-tests --parallel 4
+cmake --build build-no-tests --parallel 3
 ```
 
 The complete local validation gate performs boundary checks, a warning-free
@@ -134,7 +134,7 @@ plus explicitly declared test-only dependencies:
 cmake -S . -B build-json-tests \
   -DSHARP_RUNTIME_COMPONENTS=Text.Json \
   -DSHARP_RUNTIME_BUILD_TESTS=ON
-cmake --build build-json-tests --target SharpRuntimeTests --parallel 4
+cmake --build build-json-tests --target SharpRuntimeTests --parallel 3
 scripts/run_component_tests.sh build-json-tests
 ```
 

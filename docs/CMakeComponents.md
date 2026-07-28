@@ -48,7 +48,7 @@ configuration, pass a semicolon-separated list:
 cmake -S . -B build-components \
   -DSHARP_RUNTIME_BUILD_TESTS=OFF \
   '-DSHARP_RUNTIME_COMPONENTS=IO;IO.Hashing'
-cmake --build build-components --parallel 4
+cmake --build build-components --parallel 3
 ```
 
 An unset or empty list selects `All` in a standalone repository build.
@@ -109,7 +109,7 @@ component's tests plus explicitly declared test-only production dependencies:
 cmake -S . -B build-json-tests \
   -DSHARP_RUNTIME_COMPONENTS=Text.Json \
   -DSHARP_RUNTIME_BUILD_TESTS=ON
-cmake --build build-json-tests --target SharpRuntimeTests --parallel 4
+cmake --build build-json-tests --target SharpRuntimeTests --parallel 3
 scripts/run_component_tests.sh build-json-tests
 ```
 
@@ -122,7 +122,7 @@ For the repository-wide suite:
 cmake -S . -B build \
   -DSHARP_RUNTIME_COMPONENTS=All \
   -DSHARP_RUNTIME_BUILD_TESTS=ON
-cmake --build build --target SharpRuntimeTests --parallel 4
+cmake --build build --target SharpRuntimeTests --parallel 3
 scripts/run_component_tests.sh build
 ```
 

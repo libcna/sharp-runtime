@@ -22,7 +22,7 @@ echo "==> Building (checking for zero warnings/errors)"
 BUILD_LOG="$(mktemp)"
 trap 'rm -f "$BUILD_LOG"' EXIT
 
-if ! cmake --build "$BUILD_DIR" --parallel 4 > "$BUILD_LOG" 2>&1; then
+if ! cmake --build "$BUILD_DIR" --parallel 3 > "$BUILD_LOG" 2>&1; then
     echo "FAIL: build failed" >&2
     tail -60 "$BUILD_LOG" >&2
     exit 1
