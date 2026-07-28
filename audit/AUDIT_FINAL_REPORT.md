@@ -1565,3 +1565,131 @@ remains `blocked` and untouched. #1793 was not reopened. CNA and mobile-eggbert
 were not inspected, searched, configured, built, or modified. No compilation used
 more than four parallel jobs, and no push, merge, rebase, tag, or publication
 occurred.
+
+
+## Post-audit design batch — ticket #1797, `Hashtable` value-access safety (2026-07-28)
+
+Design ticket **#1797** (`REMED-COLL-HASHTABLE-VALUE-ACCESS-DESIGN`, P3, size M,
+`design`) is **done**. **No `SR-AUD-*` identifier**: the numbering is frozen at
+364 and every defect below was found during remediation. No production or test
+source changed. Durable record:
+`docs/HashtableValueAccessSafetyDesign.md`.
+
+**Ticket #1796 was deliberately not reused.** Its row is an *implementation*
+row — it closes the escapes and is blocked on approval to perform that change,
+not on a decision about what it is — so recording it as a completed design would
+log implementation work as done when none was performed. #1796 **stays
+`blocked`**, now depending on #1797, with its acceptance criteria and an exact
+four-item approval rewritten from the design. Same #1795 → #1794 handling one
+ticket earlier.
+
+**Four premises written into ticket #1796's own description are corrected by
+measurement**, each against the record's own convenience:
+
+1. **There are four mutable/aliasing escape routes on `Hashtable`, not two.**
+   #1796 names `operator[](const std::string&)` and `getItem()`. It misses
+   `at()`, which returns a `const std::any&` **into live map storage** — a
+   `const_cast` through it is well-formed, fully defined C++ that rewrote the
+   stored value with the counter unmoved, and the reference is one of the nine
+   ASan reports. It also misses `setItem`/`Add`'s non-`const` `void*` value
+   parameter, an input-side type hole.
+2. **Rehash does *not* dangle a retained alias.** `std::unordered_map` is
+   node-based; the address of a stored value was **unchanged across 8,000
+   insertions**. The hazard is `Remove`, `Clear`, copy assignment, move
+   assignment and destruction: **nine AddressSanitizer `heap-use-after-free`
+   reports across fourteen scenarios**, with **0** LSan leaks and detection
+   proved active by a 317-byte deliberate-leak self-test. Claiming rehash dangles
+   would have been wrong.
+3. **The most severe defect is one #1796 never mentions.** `operator[]` on an
+   *absent* key performs a **structural insert** — `std::unordered_map`'s own
+   rule — without touching the counter, so a bare *read* changes `Count`.
+   Measured at 4,008 entries, an outstanding enumerator then visited **2,045
+   distinct keys**, reached only **6 of its 8** pre-mutation seed keys, threw
+   nothing, and produced **no report from ASan, UBSan or LSan**. All sixteen
+   reproduced defects are silent under UBSan alone (`0` runtime errors).
+4. **The sibling implementation of the same interface has its own, previously
+   unrecorded defects.** `ListDictionaryInternal::setItem`'s *replace* branch
+   returns before `++version_` — .NET's does `version++` first, unconditionally —
+   and both its `getItem` and `setItem` accept a **null key**, `setItem` storing
+   it, where .NET throws and where this port's `Hashtable` has thrown since
+   #1775. The two `IDictionary` implementations therefore disagree on null keys,
+   which is an interface defect rather than a type-local omission — the same
+   shape SR-AUD-363 had. Filed as **new inactive ticket #1798**
+   (`REMED-COLL-LISTDICTINTERNAL-PARITY`, P3, `blocked`), not absorbed.
+
+**Selected architecture: owning reads, tracked writes, and no public alias into
+storage** — the shape #1793 and #1794 landed on this component's enumerator
+accessors, completed across the value-access surface. `getItem` returns
+`std::any` by value; `operator[]` returns a non-copyable
+`Hashtable::ValueReference` proxy whose read conversion returns `std::any` **by
+value** and whose assignment advances the counter on insert, replace **and equal
+replace** (matching `Hashtable.Insert`, which calls `UpdateVersion()` on both
+branches and never compares the old value); a new `const` `operator[]` returns by
+value; `at()` returns by value and throws `KeyNotFoundException` instead of
+`std::out_of_range`, which a `catch (System::Exception&)` could not see.
+
+**Two proxy properties are load-bearing rather than stylistic, and both were
+found by measurement, one during validation of the design itself:** `std::any`'s
+template converting constructor `any(T&&)` is constrained only on
+`is_copy_constructible_v`, so with a **copyable** proxy `std::any b = h[k];`
+prefers that constructor over the proxy's own conversion operator, silently
+boxing the *proxy* and throwing `std::bad_any_cast` **at run time with nothing
+wrong at compile time**; and a conversion returning `const std::any&` makes
+`const std::any& r = h[k];` trip GCC 14's `-Wdangling-reference`, a false
+positive that is nevertheless a hard error because every module here compiles
+with `-Werror`.
+
+**Measured:** 629 translation units swept; **12 call sites**, every one in the
+test suite, with `operator[]` at **0** sites and no library source calling any of
+them; **3** further sites in `test/consumer/`, counted by hand because those
+fixtures are outside `compile_commands.json`; Phase 2 breaks **3 units / 5
+sites**, all in the test suite — **fewer** than migrating `getItem` alone (6
+units), because the sibling implementer is migrated in the same change and the
+`conflicting return type` errors never occur; `at()` → by value breaks **0**; the mangled name is
+**byte-identical** and the vtable slot unchanged at **`0x38`** while `this` moves
+`%rdi → %rsi` behind a hidden `sret`, reproduced end to end as a stale caller
+that **links with zero diagnostics and then SEGVs** with 14 UBSan
+misaligned-address diagnostics naming the caller's *key* pointer used as `this`;
+`sizeof(Hashtable)` **unchanged at 72** and `sizeof(ListDictionaryInternal)` at
+40, so this is **not** an object-layout break in #1788/#1789/#1791's sense;
+reads cost **0 allocations for an `int` payload**, 1 for an SSO `std::string`, 2
+for a large one, at 1.2 → 5.4/15.7/27.7 ns.
+
+**The obvious tidy-up is rejected on evidence.** Migrating `setItem`/`Add`'s
+raw-key value parameter to `const std::any&` makes `Add("literal", v)` store the
+entry under the **stringified address of the literal** — the standard
+`const char*` → `const void*` conversion beats the user-defined
+`const char*` → `std::string` one — and it compiles clean under
+`-Wall -Wextra -Wpedantic -Werror`. Recorded with its measurement so the
+implementation ticket does not repeat it.
+
+**Alternative A′ (`getItem` → `const std::any*`) is the documented fallback if
+the approval is declined**, measured as **byte-identical machine code** to
+today's `void*`: same symbol, same slot, `this` still in `%rdi`. It leaves the
+alias-lifetime class **entirely open** — three of the nine ASan reports stay
+reachable — and **must never be recorded as a remediation**. A shared generic
+proxy with #1791 is **explicitly rejected** on four measured incompatibilities
+(locator, copyability, read conversion, element type); recommended order is
+**#1796 before #1791**, and the migrations must not be merged.
+
+**The defect is NOT marked remediated.** Validation, all unchanged as expected
+for a design-only ticket: 41 modules / 90 edges; validator tests 7/7; catalogue
+current; database consistent; `git diff --check` clean; Doxygen 1.9.8 at
+**1,940** of the 1,942 ceiling; `scripts/local_ci_check.sh build` at **13,602
+tests across 37 executables**. `check_selective_components.sh` not run — no
+public header or component metadata changed; required when #1796 Phase 2 lands.
+Build directories: `build/` (reused, `--parallel 3`) and the **shared**
+`build-probe/` (one compiler process per probe; `MAX_JOBS = 3` in the two Python
+sweeps). **No compilation exceeded three jobs** — the ceiling was lowered from
+four to three during this ticket at the user's instruction, and
+`scripts/local_ci_check.sh` and `scripts/check_selective_components.sh` were
+corrected from their hard-coded `--parallel 4` in the same change. The
+per-ticket build-directory habit ended here too: `CLAUDE.md` rule 10 is now a
+closed table of directory names, and nineteen stale one-shot directories
+(421 MB) were deleted with the user's approval.
+
+Tickets #1773, #1788, #1789, #1791 and #1796 remain `blocked` and untouched;
+#1798 is newly opened `blocked` and deliberately not begun; #1790, #1792, #1793,
+#1794 and #1795 remain `done`, and neither #1793 nor #1794 was reopened. CNA and
+mobile-eggbert were not inspected, searched, configured, built, or modified. No
+push, merge, rebase, tag, or publication occurred.

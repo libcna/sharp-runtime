@@ -147,3 +147,77 @@ deliberately out of scope**, but no longer live only in a design risk register:
 (`REMED-COLL-HASHTABLE-WRITE-ESCAPES`, P3, `blocked`), which needs its own design
 and its own approval before it may begin. Full record:
 `docs/IDictionaryEnumeratorKeyValueSafetyDesign.md` §37.
+
+## Post-audit note — design ticket #1797 (2026-07-28)
+
+**No `SR-AUD-*` identifier**: the numbering is frozen at 364 and this was found
+during remediation. Design ticket **#1797**
+(`REMED-COLL-HASHTABLE-VALUE-ACCESS-DESIGN`, P3, size M, `design`, **done**)
+completed the design for ticket #1796. **#1796 stays `blocked`.** No production
+or test source changed. Durable record:
+`docs/HashtableValueAccessSafetyDesign.md`.
+
+**The two escapes #1796 names are real, and they are not the whole inventory.**
+The design found **four** mutable or aliasing routes on this file:
+
+| Route | Escapes | Bumps? | Dangles? | Named by #1796? |
+|---|---|---|---|---|
+| `void* getItem(const void*) const` (:119) | value storage, writable, type-erased | never | yes | yes |
+| `std::any& operator[](const std::string&)` (:285) | value storage, writable, typed | never, **and inserts on a bare read** | yes | yes |
+| `const std::any& at(const std::string&) const` (:291) | value storage, `const` alias | never | yes | **no** |
+| `setItem`/`Add` raw-key `void*` **value** (:135, :220) | reads caller storage through a non-`const` `void*` | always | n/a | **no** |
+
+Rows 6–12 of the design's §4 inventory — `getKeys`, `getValues`, `CopyTo`,
+`copyToCore`, both member views, and every `Enumerator`/`MemberEnumerator`
+accessor — are **already safe**, the last of those having been made so by
+tickets #1793 and #1794.
+
+Sixteen defects were reproduced against the **committed** headers before any
+change (`build-probe/1797_probe1_escapes.log`), and **all sixteen are silent
+under UndefinedBehaviorSanitizer alone**. Three findings matter beyond the
+ticket's own description:
+
+- **`at()` is a third write escape.** The referent is a non-`const` `std::any`
+  inside a non-`const` `Hashtable`, so `const_cast<std::any&>(h.at("k")) = v` is
+  **not** undefined behaviour — it is well-formed, fully defined C++ that rewrote
+  live dictionary storage with `version_` unmoved. It is the same mechanism
+  design #1795 found on the pre-#1794 enumerator accessor, on a member nobody had
+  looked at. A `const Hashtable&` can therefore rewrite every value in the table
+  through two `const` members.
+- **Rehash does not dangle; erasure and assignment do.** `std::unordered_map` is
+  node-based, and the address of a stored value was **unchanged across 8,000
+  insertions**. The measured hazard is `Remove`, `Clear`, copy assignment, move
+  assignment and destruction — **nine AddressSanitizer `heap-use-after-free`
+  reports across fourteen scenarios**, 0 LSan leaks with detection proved active
+  by a 317-byte self-test. Copy and move assignment are the non-obvious two:
+  #1787 correctly advances the *destination's* counter, but a retained
+  `std::any&` is not an enumerator and nothing checks it.
+- **The worst case produces no diagnostic at all.** `operator[]` on an absent key
+  inserts structurally without bumping, so an outstanding enumerator's version
+  check passes and it walks a rehashed bucket array. At 4,008 entries it visited
+  **2,045 distinct keys**, reached **6 of its 8** pre-mutation seed keys, threw
+  nothing, and ASan, UBSan and LSan all reported nothing. Memory-safe and wrong.
+
+**Correctly-behaving controls, recorded so the taxonomy is not overstated:**
+`setItem` bumps on insert, replace **and equal replace**, which is exactly what
+.NET's `Hashtable.Insert` does; both raw-key paths reject a null key; mutating
+the object a stored pointer refers to correctly does *not* bump; and every value
+path stores exactly what it is given, never flattening a nested `std::any`.
+
+Selected: `getItem` → `std::any` by value; `operator[]` → a **non-copyable**
+`ValueReference` proxy whose read conversion returns `std::any` **by value**,
+plus a new `const` by-value overload; `at()` → by value throwing
+`KeyNotFoundException`. `setItem`/`Add`'s raw-key `void*` value parameters stay
+**deliberately**: migrating them to `const std::any&` makes `Add("literal", v)`
+store the entry under the stringified *address* of the literal, with no
+diagnostic under `-Werror`.
+
+`sizeof(Hashtable)` is **unchanged at 72** under every candidate — this is not an
+object-layout break. The virtual `getItem` change is a **silent ABI break**:
+byte-identical mangled name, vtable slot unchanged at `0x38`, `this` moving
+`%rdi → %rsi` behind a hidden `sret`, reproduced as a stale caller that links
+with zero diagnostics and then SEGVs.
+
+Implementation is **#1796**, `blocked` on the four-item approval in design §32.
+`ListDictionaryInternal`'s own two defects, found while establishing whether the
+two `IDictionary` implementations agree, are **new inactive ticket #1798**.

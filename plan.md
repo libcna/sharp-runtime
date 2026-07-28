@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,796 rows: 1,790 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`), implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`), and design ticket #1785 (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened inactive by #1784 and closed by adopting .NET's nested-view validation order), design ticket #1795 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY-DESIGN`, opened because #1794 is an implementation row and was deliberately not reused), and implementation ticket #1794 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, which landed #1795's design under the full four-item approval: owning `std::any` Key/Value, a mandatory `MoveNext`-time snapshot on both implementations, two `ListDictionaryInternal` parity corrections, and an acknowledged silent ABI break through two independent mechanisms) — one `wontfix` (#1772, obsoleted by #1771), five deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval; #1791 `REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, opened by #1790 and awaiting the four-part approval in `docs/ListIndexerVersioningDesign.md` section 28; and #1796 `REMED-COLL-HASHTABLE-WRITE-ESCAPES`, opened by #1794 so the two pre-existing `Hashtable` write escapes it deliberately did not fix are tracked rather than only noted in a risk register, and itself awaiting its own design and its own approval); no `todo`, `doing`, or `needs_user` rows |
+| `ticket` | 1,798 rows: 1,791 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`), implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`), and design ticket #1785 (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened inactive by #1784 and closed by adopting .NET's nested-view validation order), design ticket #1795 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY-DESIGN`, opened because #1794 is an implementation row and was deliberately not reused), and implementation ticket #1794 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, which landed #1795's design under the full four-item approval: owning `std::any` Key/Value, a mandatory `MoveNext`-time snapshot on both implementations, two `ListDictionaryInternal` parity corrections, and an acknowledged silent ABI break through two independent mechanisms) — one `wontfix` (#1772, obsoleted by #1771), five deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval; #1791 `REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, opened by #1790 and awaiting the four-part approval in `docs/ListIndexerVersioningDesign.md` section 28; #1796 `REMED-COLL-HASHTABLE-WRITE-ESCAPES`, opened by #1794 so the two pre-existing `Hashtable` write escapes it deliberately did not fix are tracked rather than only noted in a risk register, whose design is now complete as #1797 and which awaits only the four-item approval in `docs/HashtableValueAccessSafetyDesign.md` section 32; and #1798 `REMED-COLL-LISTDICTINTERNAL-PARITY`, opened by #1797 carrying the two previously unrecorded `ListDictionaryInternal` defects it found while establishing whether the two `IDictionary` implementations agree — a `setItem` replace branch that returns before `++version_` where .NET bumps unconditionally, and a null key that is accepted and stored where .NET and this port's `Hashtable` both throw); design ticket #1797 (`REMED-COLL-HASHTABLE-VALUE-ACCESS-DESIGN`, opened because #1796 is an implementation row and was deliberately not reused) is `done`; no `todo`, `doing`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -1347,6 +1347,99 @@ executables**, zero warnings/errors, `SharpRuntimeTests_Collections_Core` at
 own inactive ticket **#1796** (`REMED-COLL-HASHTABLE-WRITE-ESCAPES`, P3,
 `blocked`) instead of only a risk note. Tickets #1773, #1788, #1789, #1791 and
 #1796 remain `blocked` and untouched.
+
+### Completed Hashtable value-access design: ticket #1797
+
+Design ticket #1797 (`REMED-COLL-HASHTABLE-VALUE-ACCESS-DESIGN`, P3, size M,
+`design`) is **done**. No production or test source changed. Durable record:
+[`docs/HashtableValueAccessSafetyDesign.md`](docs/HashtableValueAccessSafetyDesign.md).
+
+**Ticket #1796 was not reused.** Its row is an *implementation* row — it closes
+the escapes and is blocked on approval to perform that change, not on a decision
+about what it is — so recording it as a completed design would log implementation
+work as done when none was performed. #1796 **stays `blocked`**, now depending on
+#1797, with acceptance criteria and an exact four-item approval rewritten from
+the design. This is the same #1795 → #1794 handling one ticket earlier.
+
+**Four of #1796's own premises are corrected by measurement**, each against this
+record's convenience:
+
+1. **Four escape routes, not two.** #1796 names `operator[]` and `getItem()`. It
+   misses `at()`, which returns a `const std::any&` **into live map storage**
+   where `const_cast` + assignment is well-formed, fully defined C++ that rewrote
+   the stored value with the counter unmoved; and it misses `setItem`/`Add`'s
+   non-`const` `void*` value parameter, a type hole on the input side.
+2. **Rehash does *not* dangle a retained alias.** `std::unordered_map` is
+   node-based, and the address of a stored value was **unchanged across 8,000
+   insertions**. The hazard is `Remove`, `Clear`, copy assignment, move
+   assignment and destruction — **nine ASan `heap-use-after-free` reports across
+   fourteen scenarios**, 0 LSan leaks with detection proved active by a 317-byte
+   self-test.
+3. **The worst defect is one #1796 never mentions.** `operator[]` on an *absent*
+   key performs a **structural insert** without bumping, so a bare read changes
+   `Count`. Measured at 4,008 entries, an outstanding enumerator then visited
+   **2,045 distinct keys**, reached **6 of its 8** pre-mutation seed keys, threw
+   nothing, and produced **no report from ASan, UBSan or LSan**. All sixteen
+   reproduced defects are silent under UBSan alone.
+4. **The sibling `IDictionary` implementation has its own defects.**
+   `ListDictionaryInternal::setItem`'s *replace* branch returns before
+   `++version_` where .NET does `version++` first unconditionally, and it accepts
+   and **stores a null key** where .NET and this port's `Hashtable` both throw.
+   Filed as **new inactive ticket #1798** (`REMED-COLL-LISTDICTINTERNAL-PARITY`,
+   P3, `blocked`), not absorbed.
+
+**Selected: owning reads, tracked writes, no public alias into storage.**
+`getItem` → `std::any` by value; `operator[]` → a non-copyable
+`Hashtable::ValueReference` proxy whose read conversion returns `std::any` **by
+value**, plus a new `const` by-value overload; `at()` → by value throwing
+`KeyNotFoundException` instead of `std::out_of_range`. Two proxy details are
+load-bearing rather than stylistic, and both were found by measurement:
+`std::any`'s template converting constructor outranks a *copyable* proxy's own
+conversion operator, so `std::any b = h[k];` silently boxes the **proxy** and
+throws `std::bad_any_cast` at run time with nothing wrong at compile time; and a
+conversion returning `const std::any&` makes `const std::any& r = h[k];` trip
+GCC 14's `-Wdangling-reference`, which every module here compiles with `-Werror`.
+
+**Measured:** 12 call sites across 629 translation units, all in tests, with
+`operator[]` at **0** sites; **3** units / 5 sites broken by Phase 2, all in the
+test suite — fewer than migrating `getItem` alone (6 units), because the sibling
+implementer is migrated in the same change; `at()` → by value breaks **0**;
+mangled name **byte-identical** and vtable slot unchanged at `0x38` while `this`
+moves `%rdi → %rsi` behind a hidden `sret`, reproduced as a stale caller that
+**links with zero diagnostics then SEGVs** with 14 UBSan misaligned-address
+reports; `sizeof(Hashtable)` **unchanged at 72** — this is *not* a layout break
+in #1788/#1789/#1791's sense; reads cost **0 allocations for an `int`**, 1 for an
+SSO string, 2 for a large one, 1.2 → 5.4/15.7/27.7 ns.
+
+**The obvious tidy-up is rejected on evidence**: migrating `setItem`/`Add`'s
+raw-key value parameter to `const std::any&` makes `Add("literal", v)` store the
+entry under the **stringified address of the literal**, because the standard
+`const char*` → `const void*` conversion beats the user-defined
+`const char*` → `std::string` one — and it compiles clean under `-Werror`.
+
+**Alternative A′ (`const std::any*`) is the documented fallback**, measured as
+**byte-identical machine code** to today. It leaves the alias-lifetime class
+entirely open and must never be recorded as a remediation. A shared proxy with
+#1791 is explicitly rejected on four measured incompatibilities; recommended
+order is **#1796 before #1791**, and the migrations must not be merged.
+
+Validation, all unchanged as expected for a design-only ticket: 41 modules / 90
+edges, validator tests 7/7, catalogue current, database consistent,
+`git diff --check` clean, Doxygen 1.9.8 at **1,940** of the 1,942 ceiling,
+`scripts/local_ci_check.sh build` at **13,602 tests across 37 executables**.
+`check_selective_components.sh` not run (no public header or component metadata
+changed); required when #1796 Phase 2 lands. Build directories: `build/`
+(reused, `--parallel 3`) and the **shared** `build-probe/` (one compiler process
+per probe; `MAX_JOBS = 3` in the two Python sweeps). **No compilation exceeded
+three jobs** — the ceiling was lowered from four to three during this ticket at
+the user's instruction, and `scripts/local_ci_check.sh` and
+`scripts/check_selective_components.sh` were corrected from their hard-coded
+`--parallel 4` in the same change.
+
+Tickets #1773, #1788, #1789, #1791 and #1796 remain `blocked` and untouched;
+#1798 is newly opened `blocked` and deliberately not begun; #1790, #1792, #1793,
+#1794 and #1795 remain `done`. #1793 and #1794 were not reopened. CNA and
+mobile-eggbert were not inspected, searched, configured, built, or modified.
 
 No repair ticket is active.
 
