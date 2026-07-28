@@ -777,23 +777,43 @@ public:
      * live view is a mutable path into the object it was taken from; a `const` set cannot
      * produce one.
      *
+     * @par Validation order (ticket #1785)
+     * The three checks run in .NET's order, which is observable whenever a nested request is
+     * *both* widening and inverted: **lower widening, then upper widening, then the
+     * lower-versus-upper relationship.** `TreeSubSet.GetViewBetween` tests
+     * `Comparer.Compare(_min, lowerValue) > 0` and then `Comparer.Compare(_max, upperValue) < 0`
+     * against its own bounds, and only afterwards delegates to `_underlying.GetViewBetween`,
+     * which is where the `SortedSet_LowerValueGreaterThanUpperValue` check lives. So
+     * `view[3,7].GetViewBetween(2, 1)` is an `ArgumentOutOfRangeException("lowerValue")`, not an
+     * inverted-range `ArgumentException`. Ticket #1783 shipped the opposite order under design
+     * #1782's "validate the argument pair before validating it against object state" rule;
+     * #1785 replaced that rule with exact .NET parity. An owning full set has no active bounds,
+     * so both widening checks are skipped and its behaviour is unchanged. See
+     * docs/SortedSetLiveViewDesign.md section 33.
+     *
      * @param lower The minimum value (inclusive).
      * @param upper The maximum value (inclusive).
      * @return A live SortedSet<T> handle bounded by [@p lower, @p upper].
-     * @throws System::ArgumentException if @p lower orders after @p upper.
      * @throws System::ArgumentOutOfRangeException with parameter name `lowerValue` or
      *         `upperValue` if this object is already a view and the requested bound would
-     *         widen it.
+     *         widen it. Checked **before** the inverted-range test, so it wins when a request
+     *         is both widening and inverted.
+     * @throws System::ArgumentException if @p lower orders after @p upper and neither bound
+     *         widens this object.
      */
     [[nodiscard]] SortedSet<T> GetViewBetween(const T& lower, const T& upper) {
         const auto cmp = comparer();
-        if (cmp(upper, lower))
-            throw System::ArgumentException("Must be less than or equal to upperValue.", "lowerValue");
-        // A nested view may only narrow, never widen -- .NET TreeSubSet::GetViewBetween.
+        // A nested view may only narrow, never widen, and .NET checks that FIRST --
+        // TreeSubSet.cs:344-351, before delegating to the underlying set.
         if (lower_.has_value() && cmp(lower, *lower_))
             throw System::ArgumentOutOfRangeException("lowerValue");
         if (upper_.has_value() && cmp(*upper_, upper))
             throw System::ArgumentOutOfRangeException("upperValue");
+        // The delegated-to check: SortedSet.cs:1510, reached only once both bounds are
+        // narrowing-or-equal. On an owning set neither bound is active, so this is the only
+        // check that can fire, exactly as in .NET.
+        if (cmp(upper, lower))
+            throw System::ArgumentException("Must be less than or equal to upperValue.", "lowerValue");
         // Flattened onto the root state: nesting depth is always 1.
         return SortedSet<T>(state_, std::optional<T>(lower), std::optional<T>(upper));
     }

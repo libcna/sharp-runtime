@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/SortedSet.hpp"
 
@@ -101,6 +102,70 @@ bool nestedViewNarrowsOnly() {
     return threw;
 }
 
+// Ticket #1785: a consumer must be able to tell the two nested-view rejections apart through
+// the public exception surface alone, in .NET's order -- widening is checked against the
+// current view bounds BEFORE the lower-versus-upper relationship, so a request that is both
+// widening and inverted is an ArgumentOutOfRangeException naming the widened bound, not an
+// inverted-range ArgumentException. ArgumentOutOfRangeException derives from
+// ArgumentException, so each case is classified by catching the derived type first.
+bool nestedViewExceptionPrecedence() {
+    enum class Kind { Ok, OutOfRange, InvalidRange };
+    struct Result {
+        Kind kind;
+        std::string paramName;
+    };
+
+    SortedSet<int> set{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    SortedSet<int> view = set.GetViewBetween(3, 7);
+
+    const auto classify = [&view](int lower, int upper) -> Result {
+        try {
+            SortedSet<int> nested = view.GetViewBetween(lower, upper);
+            return Result{Kind::Ok, std::to_string(nested.getCountProperty())};
+        } catch (const System::ArgumentOutOfRangeException& ex) {
+            return Result{Kind::OutOfRange, ex.getParamNameProperty()};
+        } catch (const System::ArgumentException& ex) {
+            return Result{Kind::InvalidRange, ex.getParamNameProperty()};
+        }
+    };
+
+    // A valid nested view.
+    const Result ok = classify(4, 6);
+    if (ok.kind != Kind::Ok || ok.paramName != "3") return false;
+
+    // Lower-widening and upper-widening failures.
+    const Result lowerWidens = classify(2, 6);
+    if (lowerWidens.kind != Kind::OutOfRange || lowerWidens.paramName != "lowerValue") return false;
+    const Result upperWidens = classify(4, 9);
+    if (upperWidens.kind != Kind::OutOfRange || upperWidens.paramName != "upperValue") return false;
+
+    // An inverted range strictly inside the view still gets the ordinary invalid-range error.
+    const Result inverted = classify(6, 4);
+    if (inverted.kind != Kind::InvalidRange || inverted.paramName != "lowerValue") return false;
+
+    // Combined widening-plus-inversion: the new precedence, on both bounds.
+    const Result invertedLowWidens = classify(2, 1);
+    if (invertedLowWidens.kind != Kind::OutOfRange ||
+        invertedLowWidens.paramName != "lowerValue") return false;
+    const Result invertedHighWidens = classify(12, 9);
+    if (invertedHighWidens.kind != Kind::OutOfRange ||
+        invertedHighWidens.paramName != "upperValue") return false;
+
+    // A top-level call is unaffected: an owning set activates neither bound.
+    try {
+        (void)set.GetViewBetween(7, 3);
+        return false;
+    } catch (const System::ArgumentOutOfRangeException&) {
+        return false;                                 // must NOT be the out-of-range flavour
+    } catch (const System::ArgumentException& ex) {
+        if (ex.getParamNameProperty() != "lowerValue") return false;
+    }
+
+    // None of the failures disturbed the set or the view.
+    return set.ToVector() == std::vector<int>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+        && view.getCountProperty() == 5;
+}
+
 // ToSortedSet() is the supported way to materialize an independent range.
 bool explicitSnapshotIsDetached() {
     SortedSet<int> set{1, 2, 3, 4, 5};
@@ -183,6 +248,7 @@ int main() {
         && viewEnforcesItsBounds()
         && viewOutlivesItsOrigin()
         && nestedViewNarrowsOnly()
+        && nestedViewExceptionPrecedence()
         && explicitSnapshotIsDetached()
         && countTracksParentAndViewMutations() ? 0 : 1;
 }
