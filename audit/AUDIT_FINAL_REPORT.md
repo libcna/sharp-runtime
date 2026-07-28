@@ -1229,3 +1229,102 @@ Ticket #1785 remains `todo` and untouched; #1788, #1789, and #1791 remain
 mobile-eggbert were not inspected, searched, configured, built, or modified. No
 compilation used more than four parallel jobs, and no push, merge, rebase, tag,
 or publication occurred.
+
+---
+
+## Post-remediation parity correction — ticket #1785, SortedSet nested-view exception ordering (2026-07-28)
+
+Ticket **#1785** (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, P3, size XS,
+category `design`) is **done**, closed 2026-07-28 on local branch
+`feature/remediation-coll-sortedset-nested-order`. It carries **no `SR-AUD-*`
+identifier** — the numbering stays frozen at 364, and this was found during
+remediation rather than during the audit — and it does **not reopen
+SR-AUD-361**, which stays `remediated` from ticket #1783. It is the fourth
+post-remediation follow-up inside that finding's surface, after #1784 (Count
+cache race), #1786 (mutation counter), and #1787 (repository-wide counter
+sweep). The user explicitly approved acceptance branch **(b)** of the ticket's
+stored criteria — adopt .NET's ordering — scoped to #1785 alone.
+
+**The question the ticket existed to settle.** Design §30.4 of
+`docs/SortedSetLiveViewDesign.md` recorded, honestly and at implementation time,
+that §15's claim of matching `SortedSet.cs:1510` / `TreeSubSet.cs:344` was
+false: .NET checks nested **widening first** and only then delegates to the
+ordinary invalid-range check, whereas #1783 shipped the reverse under §15's rule
+that an argument pair should be validated for mutual consistency before being
+validated against object state. Both orders throw; neither loses data or
+corrupts state; the difference is visible only in the exception *type* and
+*parameter* of a nested call that is simultaneously widening and inverted. That
+made it a semantic decision, not a defect — hence a `design` ticket at P3.
+
+**The .NET control flow, re-read from source rather than taken from the earlier
+report.** `SortedSet.TreeSubSet.cs:342-353` throws
+`ArgumentOutOfRangeException(nameof(lowerValue))` when
+`_lBoundActive && Comparer.Compare(_min, lowerValue) > 0`, then
+`ArgumentOutOfRangeException(nameof(upperValue))` when
+`_uBoundActive && Comparer.Compare(_max, upperValue) < 0`, and only then returns
+`(TreeSubSet)_underlying.GetViewBetween(lowerValue, upperValue)`.
+`SortedSet.cs:1508-1515` is where the
+`SR.SortedSet_LowerValueGreaterThanUpperValue` `ArgumentException` lives. Three
+consequences: the widening tests are in the caller and therefore unconditionally
+first; the lower bound precedes the upper; and `_underlying` is the **root** set,
+which is why a nested view flattens to depth 1 instead of chaining.
+
+**What shipped.** One `if` moved inside one existing inline body. The port now
+checks lower widening, then upper widening, then `cmp(upper, lower)`. An owning
+full set activates neither bound (`std::optional` standing in for
+`_lBoundActive`/`_uBoundActive`), so it still reaches only the base check and its
+behaviour is bit-for-bit unchanged. Ordering still routes exclusively through
+`state_->data.key_comp()`; no `operator>`, `operator<=`, `operator>=`, or
+natural-order comparison was introduced.
+
+**Measured both ways.** `build-probe-sortedset/probe18_nested_exception_order.cpp`
+printed outcome, exception type, parameter name, exact message, and a
+state-and-version-unchanged check for the whole matrix, before the edit
+(`probe18_prefix.log`) and after it (`probe18_postfix.log`). **Exactly 7 of 32
+outcome rows changed**, all doubly-invalid nested calls; every success, every
+widening-only failure, every inverted-only failure, and every top-level call is
+byte-identical. Widening both ends *while* inverted is arithmetically
+unreachable — a view's bounds satisfy `!cmp(*upper_, *lower_)`, so widening both
+gives `lower < *lower_ <= *upper_ < upper` — and that is proved by an exhaustive
+grid rather than asserted in prose.
+
+**Compatibility, verified.** No public signature, return type, `const`
+qualification, `[[nodiscard]]`, mangled symbol, vtable (the type has no virtual
+members), `sizeof`, `alignof`, or member offset changed. Ownership, live
+write-through, bounds inclusivity, nested flattening, the Count cache and its
+release/acquire publication protocol, the mutation counter, iterator
+invalidation, the thread-safety contract, and the O(1)-in-element-copies
+allocation behaviour are all untouched; a rejected call still allocates nothing
+and bumps no version. Every in-repository `GetViewBetween` caller was reviewed —
+six test files under `modules/collections/tests/System/Collections/Generic/` and
+both `test/consumer/collections_sorted_set_view*.cpp` fixtures, with no
+production `src/` caller anywhere — and **none** asserted a doubly-invalid
+nested call, so none relied on the old precedence.
+
+Closure evidence: `SortedSetNestedViewOrderTests.cpp` with **23** permanent
+cases, including an exhaustive `(lower, upper)` grid over `[-2, 12]²` compared
+against .NET's decision procedure transcribed independently as an oracle, exact
+message and HResult pins for all three exception shapes, a descending custom
+comparer, an `operator<`-only element type, `std::string`, nesting to depth
+three, and the no-op guarantees after 1,500 consecutive failed constructions;
+`SharpRuntimeTests_Collections_Core` **2,252/2,252** (was 2,229);
+`scripts/local_ci_check.sh build` at **13,538 tests across 37 executables** (was
+13,515), zero warnings and zero errors; ASan+UBSan+LSan over four SortedSet
+suites at **128 tests, 0 diagnostics, 0 leaks**, with LeakSanitizer proved
+active by a deliberate-leak self-test reporting 4,112 leaked bytes; TSan
+deliberately **not** run, because this ticket adds no shared mutable state, no
+`const` write, and no new field, leaving #1784's TSan campaign as the governing
+evidence; the SortedSet consumer fixture extended with a nested-precedence case
+and compiling under `-Wall -Wextra -Wpedantic -Werror`, exiting 0; 41 modules /
+90 edges; validator tests 7/7; catalogue current; database consistent;
+`git diff --check` clean; Doxygen 1.9.8 **unchanged at 1,939**/1,942; all ten
+selective components plus `Collections.Core collections_sorted_set_view.cpp` in
+isolation. The disposable `build-abi-1793` tree was removed after confirming it
+is repository-local, gitignored, holds only build output, and that its results
+are already durably recorded — **1.46 GiB reclaimed**, with both of its evidence
+logs kept.
+
+Tickets #1788, #1789, #1791, and #1794 remain `blocked` and untouched; #1773
+remains `blocked` and untouched. CNA and mobile-eggbert were not inspected,
+searched, configured, built, or modified. No compilation used more than four
+parallel jobs, and no push, merge, rebase, tag, or publication occurred.

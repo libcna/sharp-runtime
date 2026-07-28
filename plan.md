@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,794 rows: 1,787 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`), and implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`) — one `wontfix` (#1772, obsoleted by #1771), five deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval; #1791 `REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, opened by #1790 and awaiting the four-part approval in `docs/ListIndexerVersioningDesign.md` section 28; #1794 `REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, opened by #1793 and awaiting its own two-part approval for a second public source break plus a second silent ABI break on `IDictionaryEnumerator`), and one deliberately inactive `todo` row (#1785 `REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened by #1784); no `doing` or `needs_user` rows |
+| `ticket` | 1,794 rows: 1,788 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`), implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`), and design ticket #1785 (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened inactive by #1784 and closed by adopting .NET's nested-view validation order) — one `wontfix` (#1772, obsoleted by #1771), five deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval; #1791 `REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, opened by #1790 and awaiting the four-part approval in `docs/ListIndexerVersioningDesign.md` section 28; #1794 `REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, opened by #1793 and awaiting its own two-part approval for a second public source break plus a second silent ABI break on `IDictionaryEnumerator`); no `todo`, `doing`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -1127,6 +1127,66 @@ now on that interface and a ticket of their own — **#1794**
 mobile-eggbert's usage remains unmeasured, with #1773 still `blocked`.
 
 Tickets #1785, #1788, #1789, #1791, and #1773 remain untouched and inactive. No
+repair ticket is active.
+
+### Completed SortedSet nested-view exception ordering: ticket #1785
+
+Ticket #1785 (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, P3, size XS,
+category `design`) is **done**, closed 2026-07-28 on local branch
+`feature/remediation-coll-sortedset-nested-order` after the user explicitly
+approved acceptance branch **(b)** — adopt .NET's ordering — scoped to this
+ticket alone. It carries **no `SR-AUD-*` identifier** (numbering frozen at 364)
+and reopens nothing; SR-AUD-361 stays `remediated`. The record is
+[`docs/SortedSetLiveViewDesign.md`](docs/SortedSetLiveViewDesign.md) section 33,
+appended below sections 1–32 rather than rewriting them; §15's original ordering
+rule is preserved verbatim under two supersession markers pointing at §33.
+
+`SortedSet<T>::GetViewBetween` now validates in .NET's order — lower widening,
+then upper widening, then the lower-versus-upper relationship — where #1782
+selected and #1783 shipped the reverse. Exactly one `if` moved.
+`SortedSet.TreeSubSet.cs:342-353` performs both widening tests against its own
+bounds and only then delegates to `SortedSet.cs:1508-1515`, which owns the
+`SR.SortedSet_LowerValueGreaterThanUpperValue` check; the widening tests are
+therefore unconditionally first, the lower bound precedes the upper, and
+`_underlying` is the root set, which is why nesting flattens to depth 1.
+
+A probe printed the whole matrix before and after
+(`build-probe-sortedset/probe18_{prefix,postfix}.log`): **exactly 7 of 32 outcome
+rows changed**, every one a nested call that is *simultaneously* widening and
+inverted. `view[3,7]` asked for `(2, 1)` is now
+`ArgumentOutOfRangeException("lowerValue")` and `(12, 9)` is now
+`ArgumentOutOfRangeException("upperValue")`, both formerly
+`ArgumentException("Must be less than or equal to upperValue.", "lowerValue")`.
+Every success, every widening-only failure, every inverted-only failure, and
+every **top-level** call is byte-identical: an owning set activates neither
+bound. Widening *both* ends while inverted is arithmetically unreachable and is
+proved so by an exhaustive grid rather than asserted.
+
+Nothing else moved: no public signature, return type, `const` qualification,
+mangled symbol, vtable, `sizeof`, `alignof`, or member offset; ownership, live
+write-through, bounds inclusivity, nested flattening, Count caching, iterator
+invalidation, the thread-safety contract, and the allocation behaviour are all
+unchanged, and a rejected call still bumps no version. Every in-repository
+caller was reviewed — six test files and two consumer fixtures, no production
+`src/` caller — and none asserted a doubly-invalid nested call.
+
+Closure evidence: `SortedSetNestedViewOrderTests.cpp` adds **23** permanent
+cases, including an exhaustive `(lower, upper)` grid checked against .NET's
+decision procedure transcribed as an independent oracle;
+`SharpRuntimeTests_Collections_Core` **2,252/2,252** (was 2,229);
+`scripts/local_ci_check.sh build` at **13,538 tests across 37 executables** (was
+13,515), zero warnings and errors; ASan+UBSan+LSan over four SortedSet suites at
+**128 tests, 0 diagnostics, 0 leaks**, with LeakSanitizer proved active by a
+deliberate-leak self-test; TSan deliberately not run, with the reason stated;
+the SortedSet consumer fixture extended and passing under `-Werror`; 41
+modules/90 edges; validator tests 7/7; catalogue current; database consistent;
+`git diff --check` clean; Doxygen 1.9.8 **unchanged at 1,939**/1,942; all ten
+selective components plus `Collections.Core collections_sorted_set_view.cpp` in
+isolation. The disposable `build-abi-1793` tree from #1793 was removed after
+confirming its results are already recorded here — **1.46 GiB reclaimed** — with
+its two evidence logs kept.
+
+Tickets #1788, #1789, #1791, #1794, and #1773 remain untouched and inactive. No
 repair ticket is active.
 
 SR-AUD-362 (`FrozenDictionary::Create` duplicate keys) was reconciled

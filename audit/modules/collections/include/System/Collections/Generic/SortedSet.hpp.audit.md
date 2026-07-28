@@ -352,3 +352,68 @@ absorbed, and the full inventory the criteria asked for is delivered there.
 
 Ticket #1785 remains `todo` and untouched — this ticket changed no exception
 behaviour whatsoever — and ticket #1773 remains `blocked` and untouched.
+
+## Post-remediation parity correction: ticket #1785 (2026-07-28)
+
+Ticket **#1785** (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, P3, size XS,
+category `design`) is **done**, closed on local branch
+`feature/remediation-coll-sortedset-nested-order`. It is the fourth
+post-remediation follow-up inside this file's surface, after #1784, #1786, and
+#1787. It carries **no `SR-AUD-*` identifier** — the numbering is frozen at 364
+and this was found during remediation, not during the audit — and **SR-AUD-361
+stays `remediated`** and is not reopened.
+
+The ticket settled a question #1783 deliberately left open. Design §30.4
+recorded at implementation time that §15's claim of matching
+`SortedSet.cs:1510` / `TreeSubSet.cs:344` was false: .NET checks nested
+**widening first**, then delegates to the invalid-range check, whereas #1783
+shipped the reverse under §15's own rule. Both orders throw and neither loses
+data, so the divergence is observable only in the exception *type* and
+*parameter* of a nested call that is simultaneously widening and inverted —
+a semantic decision rather than a defect. The user explicitly approved
+acceptance branch **(b)**: adopt .NET's ordering.
+
+`GetViewBetween` now checks lower widening, then upper widening, then
+`cmp(upper, lower)`. Exactly one `if` moved. An owning full set activates
+neither bound, so it still reaches only the base check and its behaviour is
+unchanged; ordering still routes exclusively through `state_->data.key_comp()`.
+
+Measured before and after with
+`build-probe-sortedset/probe18_nested_exception_order.cpp`: **exactly 7 of 32
+outcome rows changed**, all doubly-invalid nested calls — for example
+`view[3,7].GetViewBetween(2, 1)` is now
+`ArgumentOutOfRangeException("lowerValue")` and `(12, 9)` is now
+`ArgumentOutOfRangeException("upperValue")`, both formerly
+`ArgumentException("Must be less than or equal to upperValue.", "lowerValue")`.
+Every success, every widening-only failure, every inverted-only failure, and
+every top-level call is byte-identical. Widening both ends *while* inverted is
+arithmetically unreachable and is proved so by an exhaustive grid.
+
+No public signature, return type, `const` qualification, mangled symbol, vtable,
+`sizeof`, `alignof`, or member offset changed; ownership, live write-through,
+bounds inclusivity, nested flattening, the Count cache and its publication
+protocol, the mutation counter, iterator invalidation, the thread-safety
+contract, and the allocation behaviour are untouched, and a rejected call still
+bumps no version. Every in-repository `GetViewBetween` caller was reviewed — six
+test files plus both consumer fixtures, with no production `src/` caller — and
+none asserted a doubly-invalid nested call.
+
+Closure evidence: `SortedSetNestedViewOrderTests.cpp` with **23** permanent
+cases, including an exhaustive `(lower, upper)` grid checked against .NET's
+decision procedure transcribed as an independent oracle, exact message and
+HResult pins for all three exception shapes, a descending custom comparer, an
+`operator<`-only element type, `std::string`, nesting to depth three, and the
+no-op guarantees after 1,500 consecutive failed constructions;
+`SharpRuntimeTests_Collections_Core` **2,252/2,252** (was 2,229);
+`scripts/local_ci_check.sh build` at **13,538 tests across 37 executables** (was
+13,515), zero warnings and errors; ASan+UBSan+LSan over four SortedSet suites at
+**128 tests, 0 diagnostics, 0 leaks**, with LeakSanitizer proved active by a
+deliberate-leak self-test; TSan deliberately not run, since nothing shared,
+`mutable`, or `const`-written was added; the extended SortedSet consumer fixture
+passing under `-Wall -Wextra -Wpedantic -Werror`; 41 modules / 90 edges;
+validator tests 7/7; catalogue current; database consistent; `git diff --check`
+clean; Doxygen 1.9.8 **unchanged at 1,939**/1,942; all ten selective components
+plus `Collections.Core` in isolation.
+
+Tickets #1788, #1789, #1791, and #1794 remain `blocked` and untouched, and
+ticket #1773 remains `blocked` and untouched.

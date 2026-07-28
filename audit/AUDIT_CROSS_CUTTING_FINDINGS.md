@@ -550,6 +550,13 @@ where it previously produced a silently wrong one with no diagnostic at all,
 `remediated`; it was never a CCF-019 member and still is not counted as one, so
 this cause's membership list is unchanged.
 
+**Unaffected by ticket #1785 (2026-07-28).** The nested-view exception-ordering
+parity correction changes only which exception a `GetViewBetween` call that is
+simultaneously widening and inverted selects. It moves one `if` inside one
+inline body and touches no owner pointer, no `shared_ptr`, no lifetime rule, and
+no member of `SortedSet<T>` or `Iterator`. This cause's membership list, the
+closure above, and SR-AUD-361's `remediated` status are all unchanged by it.
+
 ## CCF-020 — raw polymorphic output parameters erase the validation information public contracts require
 
 The legacy non-generic ICollection interface accepts `void*` plus a starting

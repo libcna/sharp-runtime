@@ -1387,6 +1387,9 @@ carrying a new `SR-AUD-*` identifier:
   design #1782 intentionally validates the argument pair before validating it
   against object state. Changing that is a semantic decision, not a bug fix.
   #1784 was explicitly scoped not to touch it.
+  *(Now **done**, closed 2026-07-28 under explicit user approval of acceptance
+  branch (b) — .NET's order. See "Completed SortedSet nested-view exception
+  ordering" below. The paragraph above is left as #1784 wrote it.)*
 - **#1786** (`REMED-COLL-VERSION-COUNTER-OVERFLOW`, P3, S) — `State::version` is
   `int32_t`, incremented without bound, and compared only for **equality** by
   both the Count cache and `Iterator::checkVersion`. After `INT32_MAX` mutations
@@ -2154,6 +2157,110 @@ indexer changed. Ticket #1773 remains `blocked` and untouched. CNA and
 mobile-eggbert were not inspected, searched, configured, built, or modified. No
 push, merge, rebase, tag, or publication occurred. No compilation used more than
 four jobs.
+
+No repair ticket is active.
+
+### Completed SortedSet nested-view exception ordering: ticket #1785
+
+Ticket #1785 (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, P3, size XS,
+category `design`) is **done**, closed 2026-07-28 on local branch
+`feature/remediation-coll-sortedset-nested-order`. It carries **no `SR-AUD-*`
+identifier** — the numbering stays frozen at 364 — and it does **not** reopen
+SR-AUD-361, which stays `remediated`. The user explicitly approved acceptance
+branch **(b)**: adopt .NET's ordering. That approval was scoped to #1785 alone
+and does not carry to #1788, #1789, #1791, or #1794. The durable record is
+[`docs/SortedSetLiveViewDesign.md`](docs/SortedSetLiveViewDesign.md) section 33;
+sections 1–32 are unchanged apart from two supersession markers inside §15 that
+point at §33.
+
+**What changed: one `if` moved.** `SortedSet<T>::GetViewBetween` now validates
+in .NET's order — lower widening, then upper widening, then the
+lower-versus-upper relationship — instead of the order design #1782 selected and
+#1783 shipped. Nothing else in the body changed.
+
+**The .NET control flow, read from source rather than from #1783's report.**
+`SortedSet.TreeSubSet.cs:342-353` tests `Comparer.Compare(_min, lowerValue) > 0`
+and then `Comparer.Compare(_max, upperValue) < 0` against *its own* bounds, and
+only then delegates to `_underlying.GetViewBetween`, which is
+`SortedSet.cs:1508-1515` — the sole home of the
+`SR.SortedSet_LowerValueGreaterThanUpperValue` check. So the widening tests are
+in the caller and are unconditionally first; the lower bound precedes the upper;
+and `_underlying` is the **root** set, which is why nesting flattens to depth 1
+and the delegated call never re-enters the override.
+
+**Observable difference, measured on both sides.**
+`build-probe-sortedset/probe18_nested_exception_order.cpp` printed the full
+matrix before and after the edit (`probe18_prefix.log`, `probe18_postfix.log`).
+**Exactly 7 of 32 outcome rows changed**, all of them nested calls that are
+*simultaneously* widening and inverted — for example `view[3,7]` asked for
+`(2, 1)` is now `ArgumentOutOfRangeException("lowerValue")` where it was
+`ArgumentException("Must be less than or equal to upperValue.", "lowerValue")`,
+and `view[3,7]` asked for `(12, 9)` is now
+`ArgumentOutOfRangeException("upperValue")`. Every success, every widening-only
+failure, every inverted-only failure, and **every top-level (owning-set) call**
+is byte-identical before and after: an owning set activates neither bound, so it
+still reaches only the base check.
+
+One combination is **arithmetically unreachable** and is proved so rather than
+asserted: a view's bounds satisfy `!cmp(*upper_, *lower_)`, so widening both ends
+gives `lower < *lower_ <= *upper_ < upper`, which cannot also be inverted.
+
+**Compatibility.** No public signature, return type, `const` qualification,
+mangled symbol, vtable (there are no virtual members), `sizeof`, `alignof`, or
+member offset changed; ownership, live write-through, bounds inclusivity, nested
+flattening, Count caching, iterator invalidation, the thread-safety contract,
+and the O(1)-in-element-copies allocation behaviour are all untouched. A
+rejected call still allocates nothing and bumps no version. This is an
+observable semantic correction **only** for a nested request that is both
+widening and inverted; consumers need ordinary recompilation of the changed
+header and nothing more. Every in-repository `GetViewBetween` caller was
+reviewed — six test files plus the two consumer fixtures, and no production
+`src/` caller exists — and **none** asserted a doubly-invalid nested call, so
+none relied on the old precedence.
+
+**Tests.** `SortedSetNestedViewOrderTests.cpp` adds **23** permanent cases: the
+complete matrix with exact exception type, parameter name, full message text,
+and HResult; an exhaustive `(lower, upper)` grid over `[-2, 12]²` checked against
+.NET's decision procedure transcribed independently as an oracle; the
+unreachability proof; a descending custom comparer, an `operator<`-only element
+type, and `std::string`; nesting to depth three; and the no-op guarantees —
+nothing mutated, no version bumped, every view still fully usable after 1,500
+consecutive failed constructions. `SortedSetLiveViewTests.cpp`'s 47 live-view
+regressions are deliberately not duplicated.
+
+Closure evidence, all repository-local: `SharpRuntimeTests_Collections_Core`
+**2,252/2,252** (was 2,229); `scripts/local_ci_check.sh build` at **13,538 tests
+across 37 executables** (was 13,515), zero warnings, zero errors;
+ASan+UBSan+LSan over four SortedSet suites, **128 tests, 0 diagnostics, 0
+leaks**, with LeakSanitizer proved active by a self-test reporting 4,112 leaked
+bytes; TSan deliberately **not** run, because this change adds no shared mutable
+state, no `const` write, and no new field — #1784's TSan campaign remains the
+governing evidence; the SortedSet consumer fixture extended with a nested
+precedence case and compiling under `-Wall -Wextra -Wpedantic -Werror`, exiting
+0; module boundaries unchanged at 41 modules / 90 edges; validator tests 7/7;
+catalogue current; database consistent; `git diff --check` clean; Doxygen 1.9.8
+**unchanged at 1,939**/1,942; all ten selective components plus `Collections.Core
+collections_sorted_set_view.cpp` in isolation.
+
+Build directories used, all repository-local, gitignored, and at **at most four
+compilation jobs**: the existing `build` tree (incremental, `--parallel 4`),
+`build-probe-sortedset` (extended with `probe18` — a single-translation-unit
+compile, one process), `build-asan-sortedset` (extended with `build_1785.sh` and
+a re-run LSan self-test — single compiles), the new `build-consumer-1785`
+(`--parallel 4`), and `build-tmp` as the repository-local `TMPDIR`.
+`scripts/check_selective_components.sh` and `scripts/check_doxygen_warnings.sh`
+use `mktemp` internally and were run with `TMPDIR` redirected into `build-tmp`;
+the former already caps its own builds at `--parallel 4`. No build tree was
+created under `/tmp`, `/var/tmp`, or `/dev/shm`. **`build-abi-1793` was removed**
+after confirming it is repository-local, gitignored, held only build output, and
+that its #1793 results are already recorded here and in `plan.md` — **1.46 GiB
+reclaimed**; its two evidence logs (`build-abi-1793.log`,
+`build-abi-1793-configure.log`) were kept.
+
+Tickets #1788, #1789, #1791, and #1794 remain `blocked` and untouched. Ticket
+#1773 remains `blocked` and untouched. CNA and mobile-eggbert were not
+inspected, searched, configured, built, or modified. No push, merge, rebase,
+tag, or publication occurred. No compilation used more than four jobs.
 
 No repair ticket is active.
 

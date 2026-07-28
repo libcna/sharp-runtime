@@ -851,7 +851,7 @@ Ordering is always `state_->data.key_comp()` — never `operator<` or
 | `GetViewBetween` on a **view** | `cmp(lower, *lower_)` (widens the lower bound) | `ArgumentOutOfRangeException("lowerValue")` |
 | `GetViewBetween` on a **view** | `cmp(*upper_, upper)` (widens the upper bound) | `ArgumentOutOfRangeException("upperValue")` |
 | `GetViewBetween` | valid, including `lower == upper` and a range disjoint from the contents | a live view; a disjoint range is a valid **empty** view that still enforces its bounds |
-| Checking order | invalid-range check **before** the widening checks, and both before any allocation | matches `SortedSet.cs:1510` / `TreeSubSet.cs:344` |
+| ~~Checking order~~ | ~~invalid-range check **before** the widening checks, and both before any allocation~~ | ~~matches `SortedSet.cs:1510` / `TreeSubSet.cs:344`~~ — **SUPERSEDED by ticket #1785, §33.** The claim of a match was wrong (§30.4 measured it), and #1785 replaced the order rather than the claim: the widening checks now run **first**, then the invalid-range check. Still nothing is observed or allocated before the first check. |
 | `IsWithinRange(item)` | `lower_` active and `cmp(item, *lower_)` → false; `upper_` active and `cmp(*upper_, item)` → false; else true | inclusive both ends, `TreeSubSet.cs:112-122` |
 | `Add(item)` on a **view** | `!IsWithinRange(item)` | `ArgumentOutOfRangeException("item")`, nothing written |
 | `Add(item)` on a **view** | in range, absent | inserts into the shared state, bumps the version, returns `true` |
@@ -868,6 +868,14 @@ Ordering is always `state_->data.key_comp()` — never `operator<` or
 Exception **ordering** on `GetViewBetween`: invalid range first, then lower
 widening, then upper widening. No state is observed or allocated before the
 first check.
+
+> **Superseded by ticket #1785 (§33).** The order above is what #1782 selected
+> and #1783 shipped; it is preserved here as the historical record. The order in
+> force since #1785 is **lower widening, then upper widening, then invalid
+> range** — .NET's. Only a nested call that is *simultaneously* widening and
+> inverted can tell the two apart; every other row of this table is unchanged.
+> The "no state observed or allocated before the first check" property still
+> holds.
 
 ---
 
@@ -2018,3 +2026,285 @@ protocol, which §9.2 of the new document reproduces verbatim. `sizeof`,
 `alignof`, every member offset, and the mangled `GetViewBetween` symbol are
 byte-identical to #1784's measurements. SR-AUD-361 stays `remediated` and was
 not reopened; **#1785 stays inactive** and no exception ordering changed.
+
+---
+
+## 33. Nested-view exception ordering, corrected to .NET (ticket #1785, 2026-07-28)
+
+*Added by ticket #1785 (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, P3, size
+XS, category `design`) on local branch
+`feature/remediation-coll-sortedset-nested-order`. Sections 1–32 are preserved
+unaltered except for two explicit supersession markers inside §15, which point
+here. This section records a **decision that reverses §15's**, taken under
+explicit user approval; it does not rewrite the earlier design as though it had
+always matched .NET.*
+
+### 33.1 What the ticket had to decide
+
+§30.4 measured, during #1783's implementation, that §15's claim — checking the
+invalid range **before** the nested-widening bounds "matches `SortedSet.cs:1510`
+/ `TreeSubSet.cs:344`" — is false. #1783 nevertheless shipped §15's order, on
+§15's stated rule that an argument pair should be validated for mutual
+consistency before being validated against object state, and recorded the
+divergence honestly rather than silently correcting it.
+
+That left a genuine choice, which is why #1785 was opened as a `design` ticket
+and not as a bug: **exact .NET parity, or the design's own rule.** Both orders
+throw, neither loses data, and neither corrupts state, so the divergence is
+observable only in the exception *type* and *parameter* of a doubly-invalid
+nested call. The user explicitly approved adopting .NET's order, which is
+acceptance-criteria branch (b) of the ticket. This is a parity correction, not a
+reopening of SR-AUD-361, which stays `remediated`; no new `SR-AUD-*` identifier
+was created, the audit numbering staying frozen at 364.
+
+### 33.2 The actual .NET control flow, read from source
+
+Two methods are involved, and the order only becomes visible when both run.
+
+`SortedSet.TreeSubSet.cs:342-353` — the method a **view** dispatches to:
+
+```csharp
+public override SortedSet<T> GetViewBetween(T? lowerValue, T? upperValue)
+{
+    if (_lBoundActive && Comparer.Compare(_min, lowerValue) > 0)
+    {
+        throw new ArgumentOutOfRangeException(nameof(lowerValue));
+    }
+    if (_uBoundActive && Comparer.Compare(_max, upperValue) < 0)
+    {
+        throw new ArgumentOutOfRangeException(nameof(upperValue));
+    }
+    return (TreeSubSet)_underlying.GetViewBetween(lowerValue, upperValue);
+}
+```
+
+`SortedSet.cs:1508-1515` — the method it then delegates to, and the only one an
+**owning set** ever runs:
+
+```csharp
+public virtual SortedSet<T> GetViewBetween(T? lowerValue, T? upperValue)
+{
+    if (Comparer.Compare(lowerValue, upperValue) > 0)
+    {
+        throw new ArgumentException(SR.SortedSet_LowerValueGreaterThanUpperValue, nameof(lowerValue));
+    }
+    return new TreeSubSet(this, lowerValue, upperValue, true, true);
+}
+```
+
+Three facts follow, and all three are load-bearing:
+
+1. **The widening checks come first**, because they are in the *caller*. The
+   inverted-range check is unreachable until both bounds are
+   narrowing-or-equal.
+2. **The lower bound is checked before the upper bound**, so a request that
+   widens both selects `lowerValue`. #1783 already matched this.
+3. **`_underlying` is the root set, not the parent view** — `TreeSubSet`'s
+   constructor stores the set it was created from, and a view is always created
+   from the root — so nesting flattens to depth 1 and the delegated call runs
+   the *base* method, never `TreeSubSet`'s override recursively. #1783 already
+   matched this too; it is the reason this port's nested view is a bounded
+   handle on the same `State` rather than a chain.
+
+`SR.SortedSet_LowerValueGreaterThanUpperValue` is `"Must be less than or equal
+to upperValue."` (`System.Collections/src/Resources/Strings.resx:138-140`),
+which is the message #1783 already used verbatim.
+
+### 33.3 Final validation order, as implemented
+
+```cpp
+[[nodiscard]] SortedSet<T> GetViewBetween(const T& lower, const T& upper) {
+    const auto cmp = comparer();
+    if (lower_.has_value() && cmp(lower, *lower_))
+        throw System::ArgumentOutOfRangeException("lowerValue");
+    if (upper_.has_value() && cmp(*upper_, upper))
+        throw System::ArgumentOutOfRangeException("upperValue");
+    if (cmp(upper, lower))
+        throw System::ArgumentException("Must be less than or equal to upperValue.", "lowerValue");
+    return SortedSet<T>(state_, std::optional<T>(lower), std::optional<T>(upper));
+}
+```
+
+The change is the **movement of one `if`**, nothing else. `lower_`/`upper_`
+being `std::optional` is this port's spelling of `_lBoundActive`/`_uBoundActive`,
+so an owning full set skips both widening checks and reaches exactly the base
+method's single check — .NET's behaviour for an owning set, and unchanged from
+#1783. Ordering is decided by `state_->data.key_comp()` only; no
+`operator>`, `operator<=`, `operator>=`, or natural-order comparison was
+introduced, so §15's element-type contract is intact.
+
+### 33.4 Pre-fix reproduction and the measured difference
+
+`build-probe-sortedset/probe18_nested_exception_order.cpp` prints the whole
+matrix — outcome, exception type, parameter name, exact message, and a check
+that a failed call left the shared state and the shared version untouched. It
+was run against the working tree before the edit
+(`probe18_prefix.log`) and after it (`probe18_postfix.log`). It is a single
+translation unit built through the existing `build-probe-sortedset/build.sh`, so
+no job count is involved.
+
+Diffing the two logs, **exactly 7 of the 32 outcome rows change**, and every one
+of them is a doubly-invalid nested call:
+
+| Probe case | Pre-fix (#1783) | Post-fix (#1785) |
+|---|---|---|
+| 7 — `view[3,7].GetViewBetween(2, 1)` | `ArgumentException` / `lowerValue` | `ArgumentOutOfRangeException` / `lowerValue` |
+| 8 — `view[3,7].GetViewBetween(12, 9)` | `ArgumentException` / `lowerValue` | `ArgumentOutOfRangeException` / **`upperValue`** |
+| 16d — `inner[4,6].GetViewBetween(3, 2)` | `ArgumentException` / `lowerValue` | `ArgumentOutOfRangeException` / `lowerValue` |
+| 14e — `Descending view[7,3].GetViewBetween(9, 11)` | `ArgumentException` / `lowerValue` | `ArgumentOutOfRangeException` / `lowerValue` |
+| 14f — `Descending view[7,3].GetViewBetween(0, 1)` | `ArgumentException` / `lowerValue` | `ArgumentOutOfRangeException` / **`upperValue`** |
+| 15e — `LessOnly view[3,7].GetViewBetween(2, 1)` | `ArgumentException` / `lowerValue` | `ArgumentOutOfRangeException` / `lowerValue` |
+| 15f — `LessOnly view[3,7].GetViewBetween(12, 9)` | `ArgumentException` / `lowerValue` | `ArgumentOutOfRangeException` / **`upperValue`** |
+
+Every other row — every success, every widening-only failure, every
+inverted-only failure, every top-level call, and every
+`state-unchanged=yes version-stable=yes` line — is byte-identical before and
+after. The permanent suite additionally covers the eighth shape the probe does
+not print, an upper-widening inversion at nesting depth two
+(`inner[4,6].GetViewBetween(9, 7)` → `ArgumentOutOfRangeException("upperValue")`).
+
+### 33.5 The complete precedence matrix
+
+`P` = `{1..10}`, `V` = `P.GetViewBetween(3, 7)`, `N` = `V.GetViewBetween(4, 6)`.
+"Widens lower" means `cmp(lower, *lower_)`; "widens upper" means
+`cmp(*upper_, upper)`; "inverted" means `cmp(upper, lower)`.
+
+| # | Case | Example | Widens lower | Widens upper | Inverted | Result |
+|---|---|---|---|---|---|---|
+| 1 | narrower | `V(4,6)` | no | no | no | live view, `Count == 3` |
+| 2 | identical bounds | `V(3,7)` | no | no | no | live view, `Count == 5` |
+| 3 | lower widens | `V(2,6)` | **yes** | no | no | `ArgumentOutOfRangeException("lowerValue")` |
+| 4 | upper widens | `V(4,9)` | no | **yes** | no | `ArgumentOutOfRangeException("upperValue")` |
+| 5 | both widen | `V(2,9)` | **yes** | **yes** | no | `ArgumentOutOfRangeException("lowerValue")` — lower is checked first |
+| 6 | inverted, strictly inside | `V(6,4)` | no | no | **yes** | `ArgumentException("Must be less than or equal to upperValue.", "lowerValue")` |
+| 7 | inverted **and** lower widens | `V(2,1)` | **yes** | no | **yes** | `ArgumentOutOfRangeException("lowerValue")` — **changed by #1785** |
+| 8 | inverted **and** upper widens | `V(12,9)` | no | **yes** | **yes** | `ArgumentOutOfRangeException("upperValue")` — **changed by #1785** |
+| 9 | inverted, both bounds outside the range but non-widening | `V(9,2)` | no | no | **yes** | `ArgumentException(…, "lowerValue")` |
+| — | inverted **and** both widen | — | **yes** | **yes** | **yes** | **arithmetically unreachable**, see below |
+| 10 | equal bounds | `V(5,5)` | no | no | no | live one-element view |
+| 11 | empty result | `V(5,5)` over a set without 5 | no | no | no | live **empty** view that still enforces `[5,5]` |
+| 12 | one-element result | `V(4,4)` | no | no | no | live view, `Count == 1` |
+| 13 | natural ascending ordering | rows 1–12 with `T = int` | | | | as above |
+| 14 | custom comparer (`std::less` sorts descending) | `view[7,3]` | | | | identical precedence, decided in comparer order |
+| 15 | `operator<`-only element type | `LessOnly` | | | | identical precedence |
+| 16 | nested view of a nested view | `N(3,6)`, `N(5,7)`, `N(3,2)`, `N(9,7)`, `N(6,5)` | | | | validated against `N`'s bounds `[4,6]`, not `V`'s |
+
+Row "inverted and both widen" is empty because it **cannot occur**. A view's
+bounds always satisfy `!cmp(*upper_, *lower_)` — construction rejects anything
+else — so widening both ends gives `lower < *lower_ <= *upper_ < upper`, which
+is ordered, not inverted. `SortedSetNestedViewOrderTests` proves this
+exhaustively over a grid rather than asserting it in prose.
+
+### 33.6 Exception identity, pinned exactly
+
+Both messages are fully determined by .NET's own resources and by this
+repository's `ArgumentException` composition (which appends the `(Parameter
+'x')` suffix exactly once since ticket #1776), so the tests pin the **complete**
+text rather than a prefix. Nothing here is intentionally unstable, so no
+"prefix-only" exemption is claimed.
+
+| Selected by | C++ type | `getParamNameProperty()` | `what()` | HResult |
+|---|---|---|---|---|
+| lower widening | `System::ArgumentOutOfRangeException` | `lowerValue` | `Specified argument was out of the range of valid values. (Parameter 'lowerValue')` | `0x80131502` (`COR_E_ARGUMENTOUTOFRANGE`) |
+| upper widening | `System::ArgumentOutOfRangeException` | `upperValue` | `Specified argument was out of the range of valid values. (Parameter 'upperValue')` | `0x80131502` |
+| inverted range | `System::ArgumentException` | `lowerValue` | `Must be less than or equal to upperValue. (Parameter 'lowerValue')` | `0x80070057` (`COR_E_ARGUMENT`) |
+
+`ArgumentOutOfRangeException` derives from `ArgumentException`, so a caller that
+already caught the base type keeps catching every case; only a caller that
+discriminates between the two, or reads `getParamNameProperty()`, can observe
+the change at all. Every test and the consumer fixture catch the derived type
+first so the two are never conflated.
+
+### 33.7 Compatibility
+
+| Layer | Verdict |
+|---|---|
+| Public signatures | **unchanged** — one statement moved inside one existing inline body |
+| Return type, `const` qualification, `[[nodiscard]]` | **unchanged** |
+| Mangled symbols | **unchanged** — no declaration was touched |
+| `sizeof` / `alignof` / member offsets | **unchanged** — no member added, removed, reordered, or retyped |
+| Vtable / virtual ABI | **unchanged** — `SortedSet<T>` has no virtual members |
+| `Iterator` layout | **unchanged** |
+| Ownership model, live-view semantics, write-through | **unchanged** |
+| Count caching | **unchanged** |
+| Iterator/enumerator invalidation | **unchanged** — a rejected call bumps no version, as before |
+| Thread-safety contract | **unchanged** |
+| Allocation behaviour | **unchanged** — still O(1) in element copies; a rejected call allocates nothing |
+| Semantics | **changed, deliberately and narrowly** — the exception *type* and *parameter* of a nested call that is simultaneously widening and inverted |
+| Consumer rebuild | ordinary recompilation of the changed header only; no ABI break, so no relink-only hazard |
+
+**In-repository callers.** Every `GetViewBetween` call site in this repository
+was reviewed: `modules/collections/tests/System/Collections/Generic/`
+(`SortedSetLiveViewTests.cpp`, `SortedSetCountCacheTests.cpp`,
+`SortedSetVersionOverflowTests.cpp`, `LinkedListSortedSetTests.cpp`,
+`SortedStackTests.cpp`, `Ticket1713VersionTrackingTests.cpp`), and
+`test/consumer/collections_sorted_set_view{,_negative}.cpp`. **None** asserted a
+doubly-invalid nested call, so none relied on the old precedence and none needed
+changing; the three assertions that come closest —
+`SortedSetLiveViewTests.cpp:849`, `:892`, and `:894` — are widening-only or
+inverted-only and are unaffected. No production (`src/`) code calls
+`GetViewBetween` at all. Downstream repositories were **not** inspected, per this
+ticket's scope; CNA and mobile-eggbert remain on an older revision and are
+tracked by blocked ticket #1773.
+
+### 33.8 Permanent tests
+
+`modules/collections/tests/System/Collections/Generic/SortedSetNestedViewOrderTests.cpp`
+adds **23** tests: the full §33.5 matrix with exact type, parameter, message,
+and HResult; an exhaustive `(lower, upper)` grid over `[-2, 12]²` compared
+against .NET's decision procedure transcribed independently as an oracle; the
+unreachability proof for "inverted and both widen"; the custom-comparer,
+`operator<`-only, and `std::string` element types; nesting to depth three; and
+the no-op guarantees (nothing mutated, no version bumped, every view still fully
+usable after 1,500 consecutive failed constructions). `SortedSetLiveViewTests.cpp`'s
+47 live-view regressions are deliberately **not** duplicated; only the
+nested-view behaviour that had to survive this reordering is re-asserted.
+
+### 33.9 Verification
+
+| Gate | Result |
+|---|---|
+| `cmake --build build --parallel 4` | 0 warnings, 0 errors |
+| `SharpRuntimeTests_Collections_Core` | **2,252** passed (was 2,229; +23) |
+| `scripts/local_ci_check.sh build` | **13,538** tests across **37** executables (was 13,515) |
+| `scripts/validate_module_boundaries.py --root .` | 41 modules, 90 edges |
+| `test/validate_module_boundaries_test.py` | 7 tests OK |
+| `scripts/generate_component_catalog.py --check` | catalogue current |
+| `scripts/db_consistency_check.py --db plan.sqlite3` | no consistency problems |
+| `scripts/check_selective_components.sh` | passed, including `Collections.Core collections_sorted_set_view.cpp` in isolation |
+| `scripts/check_doxygen_warnings.sh` | 1,939 warnings (ceiling 1,942) |
+| Consumer fixture, `-Wall -Wextra -Wpedantic -Werror` | compiles clean, exits 0 |
+| ASan + UBSan + LSan, four SortedSet suites | 128 tests, **0** diagnostics, **0** leaks |
+| `git diff --check` | clean |
+
+**Sanitizers.** `build-asan-sortedset/build_1785.sh` builds
+`SortedSetCountCacheTests`, `SortedSetLiveViewTests`, the new
+`SortedSetNestedViewOrderTests`, and `SortedSetVersionOverflowTests` against a
+locally built ASan/UBSan GoogleTest — the same bounded configuration #1784 and
+#1786 used, extended by one file, and still not a whole-repository sanitizer
+tree. Every exception path, including 1,500 consecutive failed nested
+constructions, ran with zero AddressSanitizer, UndefinedBehaviorSanitizer, and
+LeakSanitizer findings. The configuration was proved live rather than inert by
+re-running the deliberate-leak self-test
+(`build-asan-sortedset/lsan_selftest_1785.log`: `4112 byte(s) leaked in 102
+allocation(s)`). **ThreadSanitizer was deliberately not run**: this ticket adds
+no shared mutable state, no `const` write, and no new field — it moves one `if`
+inside an existing body — so #1784's TSan campaign remains the governing
+evidence, and §19's contract is unchanged.
+
+### 33.10 What this ticket deliberately did not touch
+
+`GetViewBetween`'s signature and `const`ness; top-level (owning-set) behaviour;
+the shared `State` ownership model; live write-through; bounds inclusivity;
+nested-view flattening; the Count cache and its publication protocol; the
+mutation counter and iterator invalidation; the thread-safety contract; and
+SR-AUD-361, which stays `remediated`. Tickets #1788, #1789, #1791, and #1794
+remain `blocked`, and #1773 remains `blocked` and out of repository scope.
+
+### 33.11 Rollback
+
+Move the `cmp(upper, lower)` check back above the two `has_value()` checks in
+`SortedSet.hpp` and delete `SortedSetNestedViewOrderTests.cpp`. Nothing else
+depends on the order: no signature, symbol, layout, or allocation changed, so a
+revert is a one-hunk header edit plus one test file, and the floors return to
+2,229 / 13,515.
