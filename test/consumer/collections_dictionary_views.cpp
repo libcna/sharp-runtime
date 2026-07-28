@@ -78,7 +78,9 @@ bool viewsEnumerate() {
     std::unique_ptr<IEnumerator> walk(keys->GetEnumerator());
     intcs visited = 0;
     while (walk->MoveNext()) {
-        if (walk->getCurrentProperty() == nullptr) return false;
+        // Since ticket #1793 the accessor returns an owning std::any, so an
+        // empty box -- not a null pointer -- is what an absent element looks like.
+        if (!walk->getCurrentProperty().has_value()) return false;
         ++visited;
     }
     return visited == 2;

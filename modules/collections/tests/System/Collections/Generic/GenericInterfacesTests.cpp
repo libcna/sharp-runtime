@@ -7,6 +7,7 @@
 #include "System/Collections/Generic/IDictionary.hpp"
 #include "System/Collections/Generic/IEnumerable.hpp"
 #include "System/Collections/Generic/IEnumerator.hpp"
+#include <any>
 #include <vector>
 #include <unordered_map>
 
@@ -106,12 +107,16 @@ TEST(GenericIEnumeratorTest, ResetRestarts) {
     EXPECT_EQ(e.Current(), 10);
 }
 
-TEST(GenericIEnumeratorTest, GetCurrentVoidPtr) {
+// The inherited type-erased bridge. Since ticket #1793 a hand-written
+// IEnumerator<T> implementer needs no migration at all here -- the bridge is
+// inherited, and it now boxes a COPY instead of publishing &Current().
+TEST(GenericIEnumeratorTest, GetCurrentBoxesACopy) {
     std::vector<int> data{42};
     VecEnumerator e(data);
     e.MoveNext();
-    void* p = e.getCurrentProperty();
-    EXPECT_EQ(*static_cast<int*>(p), 42);
+    std::any boxed = e.getCurrentProperty();
+    EXPECT_EQ(std::any_cast<int>(boxed), 42);
+    EXPECT_EQ(boxed.type(), typeid(int));
 }
 
 // ---- IEnumerable tests ----

@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+
+#include <any>
 #include "System/Collections/Queue.hpp"
 #include "System/Collections/Stack.hpp"
 #include "System/Collections/IStructuralEquatable.hpp"
@@ -90,11 +92,11 @@ TEST(QueueTest, GetEnumerator_IteratesInFIFOOrder) {
 
     IEnumerator* e = q.GetEnumerator();
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(e->getCurrentProperty(), &a);
+    EXPECT_EQ(std::any_cast<void*>(e->getCurrentProperty()), &a);
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(e->getCurrentProperty(), &b);
+    EXPECT_EQ(std::any_cast<void*>(e->getCurrentProperty()), &b);
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(e->getCurrentProperty(), &c);
+    EXPECT_EQ(std::any_cast<void*>(e->getCurrentProperty()), &c);
     EXPECT_FALSE(e->MoveNext());
     delete e;
 }
@@ -203,11 +205,11 @@ TEST(StackTest, GetEnumerator_IteratesTopToBottom) {
 
     IEnumerator* e = s.GetEnumerator();
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(e->getCurrentProperty(), &c);
+    EXPECT_EQ(std::any_cast<void*>(e->getCurrentProperty()), &c);
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(e->getCurrentProperty(), &b);
+    EXPECT_EQ(std::any_cast<void*>(e->getCurrentProperty()), &b);
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(e->getCurrentProperty(), &a);
+    EXPECT_EQ(std::any_cast<void*>(e->getCurrentProperty()), &a);
     EXPECT_FALSE(e->MoveNext());
     delete e;
 }

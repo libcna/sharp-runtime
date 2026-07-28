@@ -230,7 +230,7 @@ TEST_P(DictionaryViewContract, ViewEnumeratorIsNeverNullAndVisitsEveryElement) {
     ASSERT_NE(walk, nullptr);
     int visited = 0;
     while (walk->MoveNext()) {
-        EXPECT_NE(walk->getCurrentProperty(), nullptr);
+        EXPECT_TRUE(walk->getCurrentProperty().has_value());
         ++visited;
     }
     EXPECT_EQ(visited, 3);
@@ -565,12 +565,12 @@ TEST(HashtableViews, ViewEnumeratorCurrentIsTheKeyOrTheValue) {
     std::unique_ptr<ICollection> keys(table.getKeysProperty());
     std::unique_ptr<IEnumerator> keyWalk(keys->GetEnumerator());
     ASSERT_TRUE(keyWalk->MoveNext());
-    EXPECT_EQ(*static_cast<std::string*>(keyWalk->getCurrentProperty()), "solo");
+    EXPECT_EQ(std::any_cast<std::string>(keyWalk->getCurrentProperty()), "solo");
 
     std::unique_ptr<ICollection> values(table.getValuesProperty());
     std::unique_ptr<IEnumerator> valueWalk(values->GetEnumerator());
     ASSERT_TRUE(valueWalk->MoveNext());
-    EXPECT_EQ(std::any_cast<int>(*static_cast<std::any*>(valueWalk->getCurrentProperty())), 42);
+    EXPECT_EQ(std::any_cast<int>(valueWalk->getCurrentProperty()), 42);
 }
 
 TEST(HashtableViews, AViewTracksTheTableItWasTakenFromNotACopy) {

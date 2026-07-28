@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <any>
 #include <cstdint>
 #include <vector>
 #include <stdexcept>
@@ -353,13 +354,17 @@ public:
     /**
      * @brief Enumerates over each bool value in the BitArray.
      *
-     * getCurrentProperty() returns a void* pointing to an internal bool; cast to bool* to read.
+     * getCurrentProperty() returns std::any holding a copy of the current bit;
+     * recover it with std::any_cast<bool>.
      */
     class Enumerator : public IEnumerator {
         const BitArray* arr_;
         System::Collections::detail::NarrowMutationVersion version_;
         intcs index_ = -1;
-        mutable bool current_ = false;
+        // Not `mutable`: since ticket #1793 getCurrentProperty() returns a copy
+        // rather than a pointer, so a const member function no longer needs a
+        // non-const view of this cache.
+        bool current_ = false;
         detail::EnumeratorState state_;
     public:
         /** @brief Captures the source array and its current mutation version. */
@@ -387,10 +392,16 @@ public:
             current_ = false;
             state_.Reset();
         }
-        /** @brief Returns pointer to an internal bool holding the current bit value. */
-        void* getCurrentProperty() const override {
+        /**
+         * @brief Returns the current bit value, boxed; recover with std::any_cast<bool>.
+         *
+         * Modifying the copy no longer desynchronises the enumerator from the
+         * array it is walking, which the pre-#1793 pointer to the `mutable`
+         * cache permitted.
+         */
+        [[nodiscard]] std::any getCurrentProperty() const override {
             state_.requireCurrent();
-            return &current_;
+            return std::any(current_);
         }
     };
 

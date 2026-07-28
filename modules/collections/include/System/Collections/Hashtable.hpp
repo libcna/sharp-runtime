@@ -378,7 +378,10 @@ private:
         std::unordered_map<std::string, std::any>::const_iterator it_;
         bool started_ = false;
         bool valid_ = false;
-        mutable DictionaryEntry current_;
+        // Not `mutable`: since ticket #1793 getCurrentProperty() returns a copy
+        // rather than a pointer, so a const member function no longer needs a
+        // non-const view of this cache.
+        DictionaryEntry current_;
 
     public:
         explicit Enumerator(const Hashtable* ht) : ht_(ht), version_(ht->version_), it_(ht->_map.begin()) {}
@@ -398,9 +401,16 @@ private:
             valid_ = false;
         }
 
-        [[nodiscard]] void* getCurrentProperty() const override {
+        /**
+         * @brief Returns a copy of the current entry, boxed as std::any(DictionaryEntry).
+         *
+         * Recover it with std::any_cast<DictionaryEntry>. Modifying the copy
+         * cannot reach the table, and no longer desynchronises the enumerator
+         * from it either -- the pre-#1793 pointer to the `mutable` cache did both.
+         */
+        [[nodiscard]] std::any getCurrentProperty() const override {
             ensureCurrent();
-            return &current_;
+            return std::any(current_);
         }
 
         [[nodiscard]] DictionaryEntry getEntryProperty() const override {
@@ -468,13 +478,26 @@ private:
             void Reset() override { inner_->Reset(); }
 
             /**
-             * @brief Returns the current key (as std::string*) or value (as std::any*).
+             * @brief Returns a copy of the current key or value, boxed.
+             *
+             * The key view boxes a copy of the key string, recovered with
+             * std::any_cast<std::string>. The value view returns a copy of the
+             * element's own std::any -- **not** a std::any wrapping a std::any --
+             * so a caller recovers the stored value with one std::any_cast, the
+             * same shape ArrayList::Enumerator uses.
+             *
+             * Before ticket #1793 this const_cast'd the inner accessor's
+             * `const void*` and published a writable pointer into a live
+             * std::unordered_map key, through which a caller could rewrite the
+             * key in place and break the container's invariant.
+             *
              * @throws System::InvalidOperationException before the first MoveNext,
              *         after the last element, or if the table was modified.
              */
-            [[nodiscard]] void* getCurrentProperty() const override {
-                return const_cast<void*>(keys_ ? inner_->getKeyProperty()
-                                               : inner_->getValueProperty());
+            [[nodiscard]] std::any getCurrentProperty() const override {
+                if (keys_)
+                    return std::any(*static_cast<const std::string*>(inner_->getKeyProperty()));
+                return *static_cast<const std::any*>(inner_->getValueProperty());
             }
         };
 

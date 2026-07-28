@@ -74,8 +74,18 @@ class ListDictionaryInternal : public IDictionary {
             it_ = d_->list_.begin();
         }
 
-        [[nodiscard]] void* getCurrentProperty() const override {
-            return const_cast<void*>(getKeyProperty());
+        /**
+         * @brief Returns the current entry's key, boxed as std::any(const void*).
+         *
+         * The `const` survives the boxing, so recover it with
+         * std::any_cast<const void*>. Before ticket #1793 this const_cast'd the
+         * key, publishing a writable pointer to an object the *caller* owns and
+         * declared const -- undefined behaviour if that object really is
+         * const-qualified, and a change of the dictionary's key identity in
+         * every case.
+         */
+        [[nodiscard]] std::any getCurrentProperty() const override {
+            return std::any(getKeyProperty());
         }
 
         [[nodiscard]] DictionaryEntry getEntryProperty() const override {
@@ -113,8 +123,17 @@ class ListDictionaryInternal : public IDictionary {
             ~Enumerator() override { delete inner_; }
             bool MoveNext() override { return inner_->MoveNext(); }
             void Reset() override { inner_->Reset(); }
-            [[nodiscard]] void* getCurrentProperty() const override {
-                return const_cast<void*>(keys_ ? inner_->getKeyProperty() : inner_->getValueProperty());
+            /**
+             * @brief Returns the current key or value, boxed as std::any(const void*).
+             *
+             * Recover it with std::any_cast<const void*>. Note that copyToCore
+             * below normalises both members to `void*` instead; the enumerator
+             * deliberately preserves the `const` the IDictionaryEnumerator
+             * accessors carry, rather than casting it away as it did before
+             * ticket #1793.
+             */
+            [[nodiscard]] std::any getCurrentProperty() const override {
+                return std::any(keys_ ? inner_->getKeyProperty() : inner_->getValueProperty());
             }
         };
 

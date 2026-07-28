@@ -18,6 +18,11 @@ using namespace System::Collections;
 // Minimal IEnumerator over a vector<int>
 // -----------------------------------------------------------------------
 
+// Hand-written implementer, kept in ordinary consumer style on purpose: it is
+// the repository's own evidence that downstream code implements this interface
+// by hand and must therefore migrate with it. Ticket #1793 changed the return
+// from `void*` to an owning std::any; the const_cast that laundered a
+// `const int&` into a writable pointer is gone.
 class IntVectorEnumerator : public IEnumerator {
     const std::vector<int>& data_;
     int index_ = -1;
@@ -25,8 +30,8 @@ public:
     explicit IntVectorEnumerator(const std::vector<int>& d) : data_(d) {}
     bool MoveNext() override { return ++index_ < static_cast<int>(data_.size()); }
     void Reset()    override { index_ = -1; }
-    void* getCurrentProperty() const override {
-        return const_cast<int*>(&data_[static_cast<size_t>(index_)]);
+    [[nodiscard]] std::any getCurrentProperty() const override {
+        return std::any(data_[static_cast<size_t>(index_)]);
     }
 };
 
@@ -67,11 +72,11 @@ TEST(IEnumeratorTest, MoveNextAndCurrent) {
     std::vector<int> data = {10, 20, 30};
     IntVectorEnumerator e(data);
     EXPECT_TRUE(e.MoveNext());
-    EXPECT_EQ(*static_cast<int*>(e.getCurrentProperty()), 10);
+    EXPECT_EQ(std::any_cast<int>(e.getCurrentProperty()), 10);
     EXPECT_TRUE(e.MoveNext());
-    EXPECT_EQ(*static_cast<int*>(e.getCurrentProperty()), 20);
+    EXPECT_EQ(std::any_cast<int>(e.getCurrentProperty()), 20);
     EXPECT_TRUE(e.MoveNext());
-    EXPECT_EQ(*static_cast<int*>(e.getCurrentProperty()), 30);
+    EXPECT_EQ(std::any_cast<int>(e.getCurrentProperty()), 30);
     EXPECT_FALSE(e.MoveNext());
 }
 
@@ -81,7 +86,7 @@ TEST(IEnumeratorTest, Reset) {
     e.MoveNext();
     e.Reset();
     EXPECT_TRUE(e.MoveNext());
-    EXPECT_EQ(*static_cast<int*>(e.getCurrentProperty()), 1);
+    EXPECT_EQ(std::any_cast<int>(e.getCurrentProperty()), 1);
 }
 
 TEST(IEnumeratorTest, EmptyCollection) {

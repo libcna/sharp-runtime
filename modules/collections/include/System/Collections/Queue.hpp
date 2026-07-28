@@ -39,12 +39,16 @@ public:
      * @brief Constructs a Queue populated with all elements from @p col.
      *
      * C++ counterpart of .NET Queue(ICollection col).
-     * Each element is the raw void* returned by IEnumerator::getCurrentProperty().
+     * This collection's element type is `void*`, so each element is unboxed from
+     * the std::any IEnumerator::getCurrentProperty() returns.
      * @param col Source collection.
+     * @throws std::bad_any_cast if @p col does not enumerate `void*` elements.
+     *         Before ticket #1793 a source of any other element type silently
+     *         yielded a pointer into that source's live storage instead.
      */
     explicit Queue(ICollection& col) {
         IEnumerator* e = col.GetEnumerator();
-        if (e) { while (e->MoveNext()) q_.push_back(e->getCurrentProperty()); delete e; }
+        if (e) { while (e->MoveNext()) q_.push_back(std::any_cast<void*>(e->getCurrentProperty())); delete e; }
     }
 
     // -----------------------------------------------------------------------
@@ -240,10 +244,17 @@ private:
             started_ = false;
         }
 
-        [[nodiscard]] void* getCurrentProperty() const override {
+        /**
+         * @brief Returns the current element, boxed; recover with std::any_cast<void*>.
+         *
+         * This collection's element type *is* `void*`, so the box holds the
+         * stored pointer by value. Nothing here aliased collection storage
+         * before ticket #1793 either; only the spelling of the return changes.
+         */
+        [[nodiscard]] std::any getCurrentProperty() const override {
             if (!started_ || index_ < 0)
                 throw System::InvalidOperationException("Enumeration has either not started or has already finished.");
-            return q_->q_[static_cast<size_t>(index_)];
+            return std::any(q_->q_[static_cast<size_t>(index_)]);
         }
     };
 };

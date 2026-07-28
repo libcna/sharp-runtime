@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 
+#include <any>
 #include <memory>
 #include <vector>
 
@@ -49,7 +50,7 @@ namespace
 
         ASSERT_TRUE(enumerator->MoveNext());
         EXPECT_EQ(enumerator->Current(), expected);
-        EXPECT_EQ(*static_cast<T*>(enumerator->getCurrentProperty()), expected);
+        EXPECT_EQ(std::any_cast<T>(enumerator->getCurrentProperty()), expected);
 
         EXPECT_FALSE(enumerator->MoveNext());
         EXPECT_FALSE(enumerator->MoveNext());
@@ -176,7 +177,7 @@ TEST(EnumeratorLifecycleTest, BitArray)
         [&] { (void)enumerator->getCurrentProperty(); },
         "Enumeration has not started. Call MoveNext.");
     ASSERT_TRUE(enumerator->MoveNext());
-    EXPECT_TRUE(*static_cast<bool*>(enumerator->getCurrentProperty()));
+    EXPECT_TRUE(std::any_cast<bool>(enumerator->getCurrentProperty()));
     EXPECT_FALSE(enumerator->MoveNext());
     EXPECT_FALSE(enumerator->MoveNext());
     ExpectInvalidOperationMessage(
@@ -188,7 +189,7 @@ TEST(EnumeratorLifecycleTest, BitArray)
         [&] { (void)enumerator->getCurrentProperty(); },
         "Enumeration has not started. Call MoveNext.");
     ASSERT_TRUE(enumerator->MoveNext());
-    EXPECT_TRUE(*static_cast<bool*>(enumerator->getCurrentProperty()));
+    EXPECT_TRUE(std::any_cast<bool>(enumerator->getCurrentProperty()));
 }
 
 TEST(EnumeratorLifecycleTest, EveryBitArrayMutationInvalidatesEnumerator)

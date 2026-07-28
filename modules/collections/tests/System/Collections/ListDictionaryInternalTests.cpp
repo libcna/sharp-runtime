@@ -120,7 +120,9 @@ TEST(ListDictionaryInternalTest, Keys_ReflectsCountAndContents) {
     IEnumerator* e = keys->GetEnumerator();
     int count = 0;
     while (e->MoveNext()) {
-        void* k = e->getCurrentProperty();
+        // Since ticket #1793 the key view boxes the entry's `const void*`
+        // key by value; the `const` survives the boxing.
+        const void* k = std::any_cast<const void*>(e->getCurrentProperty());
         EXPECT_TRUE(k == &k1 || k == &k2);
         ++count;
     }
@@ -139,7 +141,7 @@ TEST(ListDictionaryInternalTest, Values_ReflectsContents) {
 
     IEnumerator* e = values->GetEnumerator();
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(e->getCurrentProperty(), &v);
+    EXPECT_EQ(std::any_cast<const void*>(e->getCurrentProperty()), &v);
     delete e;
     delete values;
 }

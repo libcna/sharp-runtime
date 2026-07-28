@@ -99,7 +99,11 @@ public:
      * @brief Constructs an ArrayList by copying all elements from @p c via GetEnumerator().
      *
      * C++ counterpart of .NET ArrayList(ICollection).
-     * Each element is stored as void* (the raw pointer returned by IEnumerator::getCurrentProperty()).
+     * Each element is the boxed copy IEnumerator::getCurrentProperty() returns,
+     * stored directly: the element type of an ArrayList *is* std::any, so the
+     * source enumerator's box becomes this list's element with no unwrapping and
+     * no nesting. Before ticket #1793 this stored the raw `void*` the accessor
+     * returned, which aliased the source collection's live storage.
      */
     explicit ArrayList(ICollection& c) {
         IEnumerator* e = c.GetEnumerator();
@@ -752,10 +756,19 @@ private:
             started_ = false;
         }
 
-        [[nodiscard]] void* getCurrentProperty() const override {
+        /**
+         * @brief Returns a copy of the current element's box.
+         *
+         * The element already *is* a std::any, so the whole migration from the
+         * pre-#1793 `const_cast<std::any*>(&…)` is that a copy is returned
+         * rather than a pointer to live storage. The result is NOT a nested
+         * std::any: it is a copy of the element's own box, so a caller recovers
+         * the element with one std::any_cast, not two.
+         */
+        [[nodiscard]] std::any getCurrentProperty() const override {
             if (!started_ || index_ < start_ || index_ >= end_)
                 throw System::InvalidOperationException("Enumeration has either not started or has already finished.");
-            return const_cast<std::any*>(&list_->_items[static_cast<size_t>(index_)]);
+            return list_->_items[static_cast<size_t>(index_)];
         }
     };
 };

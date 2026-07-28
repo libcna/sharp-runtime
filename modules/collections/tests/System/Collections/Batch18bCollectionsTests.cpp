@@ -48,7 +48,7 @@ TEST(BitArrayGapFill, GetEnumerator_IteratesAllBits) {
     ASSERT_NE(e, nullptr);
     std::vector<bool> got;
     while (e->MoveNext()) {
-        bool v = *static_cast<bool*>(e->getCurrentProperty());
+        bool v = std::any_cast<bool>(e->getCurrentProperty());
         got.push_back(v);
     }
     delete e;
@@ -457,7 +457,7 @@ TEST(ArrayListGapFill, GetEnumerator_IteratesAllElementsInOrder) {
     ASSERT_NE(e, nullptr);
     std::vector<int> seen;
     while (e->MoveNext())
-        seen.push_back(std::any_cast<int>(*static_cast<std::any*>(e->getCurrentProperty())));
+        seen.push_back(std::any_cast<int>(e->getCurrentProperty()));
     EXPECT_EQ(seen, (std::vector<int>{10, 20, 30}));
     EXPECT_FALSE(e->MoveNext());
 }
@@ -494,7 +494,7 @@ TEST(ArrayListGapFill, GetEnumerator_Reset_AllowsReiteration) {
     e->MoveNext();
     e->Reset();
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(std::any_cast<int>(*static_cast<std::any*>(e->getCurrentProperty())), 1);
+    EXPECT_EQ(std::any_cast<int>(e->getCurrentProperty()), 1);
 }
 
 // Regression test: real .NET's ArrayList enumerator is fail-fast -- a structural
@@ -521,7 +521,7 @@ TEST(ArrayListGapFill, GetEnumerator_TwoArgOverload_IteratesOnlyTheRequestedRang
     ASSERT_NE(e, nullptr);
     std::vector<int> seen;
     while (e->MoveNext())
-        seen.push_back(std::any_cast<int>(*static_cast<std::any*>(e->getCurrentProperty())));
+        seen.push_back(std::any_cast<int>(e->getCurrentProperty()));
     EXPECT_EQ(seen, (std::vector<int>{2, 3}));
 }
 
