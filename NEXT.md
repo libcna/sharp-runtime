@@ -3,11 +3,11 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-27. Branch: `feature/remediation-coll-sortedset-view-design`.
+*Last verified: 2026-07-28. Branch: `feature/remediation-coll-sortedset-live-view`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 13,022 tests across 37 executables. The repository-wide,
+dependency edges, and 13,069 tests across 37 executables. The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766). Remediation
 tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design),
 #1769 (LinkedListNode lifetime implementation), #1770 (raw `ICollection::CopyTo`
@@ -19,7 +19,8 @@ design), #1771 (raw `ICollection::CopyTo` implementation), #1774 (raw
 compare-and-retry), #1779 (`ReadOnlyDictionary::Empty` const-reference
 design), #1780 (`ReadOnlyDictionary::Empty` const-reference
 implementation), #1781 (Doxygen 1,942-vs-1,944 count reconciliation), and
-#1782 (`SortedSet::GetViewBetween` live-view design) are
+#1782 (`SortedSet::GetViewBetween` live-view design), and #1783
+(`SortedSet::GetViewBetween` live-view implementation) are
 complete; the
 node contract is recorded in
 [`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md), the copy
@@ -59,11 +60,14 @@ live write-through `TreeSubSet` — selecting a shared reference-counted `State`
 plus optional bounds so one `SortedSet<T>` is either an owning set or a live
 bounded view, recorded in
 [`docs/SortedSetLiveViewDesign.md`](docs/SortedSetLiveViewDesign.md).
-SR-AUD-361 stays `confirmed (design-complete)`, not `remediated`;
+The user then explicitly approved all three consequences, and
 implementation ticket **#1783** (`REMED-COLL-SORTEDSET-LIVE-VIEW`, P2, size L)
-is **`blocked`** pending explicit approval of the `const` removal on
-`GetViewBetween`, the snapshot-to-live-view semantic change, and the measured
-`SortedSet<T>` object-layout change.
+landed the design on 2026-07-28, so **SR-AUD-361 is now `remediated`**:
+`GetViewBetween` returns a live, inclusive-bounds-enforcing, bidirectionally
+write-through handle onto the same tree, and the four adjacent defects #1782
+measured inside that surface are closed with it. See the "Completed SortedSet
+live-view implementation" section below for the exact source, semantic, symbol,
+and layout consequences.
 **No ticket is active.** #1771 removed the
 pure virtual `CopyTo(void*, intcs)` from
 `System::Collections::ICollection` under explicit user approval, so this is a
@@ -1085,6 +1089,150 @@ Closure evidence:
 
 Ticket #1773 remains `blocked` and untouched. CNA and mobile-eggbert were not
 inspected or modified. No push, merge, rebase, tag, or publication occurred.
+
+No repair ticket is active.
+
+### Completed SortedSet live-view implementation: ticket #1783
+
+**`P2: Implement live SortedSet GetViewBetween views`**
+(`REMED-COLL-SORTEDSET-LIVE-VIEW`, SR-AUD-361, size L) is **done**, opened and
+closed 2026-07-28 on local branch `feature/remediation-coll-sortedset-live-view`.
+The user granted the exact approval ticket #1782 required, scoped to this ticket
+only, so **SR-AUD-361 is now `remediated`** and the index counts move to
+**354 open / 10 remediated**. The paragraph above, recording #1782's
+design-complete state, is left in place rather than rewritten.
+
+**The approved public change.**
+
+```cpp
+// before
+[[nodiscard]] SortedSet<T> GetViewBetween(const T& lower, const T& upper) const;
+// after
+[[nodiscard]] SortedSet<T> GetViewBetween(const T& lower, const T& upper);
+```
+
+Same return type, same parameters, `const` removed. What changed underneath is
+larger: the result is a **live bounded handle** onto the same tree instead of a
+detached snapshot.
+
+**Final internal representation** — exactly design section 11:
+`std::shared_ptr<State>` where `State` owns `std::set<T> data` and
+`intcs version`; `std::optional<T> lower_`/`upper_` (absent = bound inactive);
+`mutable intcs cachedCount_`/`cachedCountVersion_` for a view's lazy Count.
+`Iterator` holds `std::shared_ptr<const State>`, its position, the range end,
+and a version snapshot. One public type is either an **owning full set** (no
+bounds) or a **bounded view**; `getIsViewProperty()` tells them apart.
+
+**Behavior now matching .NET's `TreeSubSet`:** bidirectional write-through;
+inclusive bounds enforced for the whole life of the view (out-of-range `Add`
+throws `ArgumentOutOfRangeException("item")` and writes nothing, out-of-range
+`Remove` returns `false`, out-of-range `Contains` returns `false`); `Clear` on a
+view removes exactly its range; nested views may only narrow
+(`ArgumentOutOfRangeException("lowerValue"/"upperValue")`) and are flattened onto
+the root state; the invalid-range `ArgumentException` carries .NET's exact
+message `Must be less than or equal to upperValue. (Parameter 'lowerValue')`;
+`Count` on a view is version-cached; `Min`/`Max` are range-scoped and return
+`T{}` when empty; one shared version counter makes a mutation anywhere invalidate
+every handle's outstanding enumerators; and set algebra is bounds-enforcing,
+write-through, and guards the new shared-state self-aliasing hazard by comparing
+shared state rather than object identity.
+
+**Ownership rules.** Copying preserves the object's role: an owning set
+deep-clones into independent state, a view copies its handle and bounds.
+Assignment rebinds the assigned handle and never mutates state another handle
+observes, so views and iterators onto the abandoned state keep it alive and keep
+observing its pre-assignment contents. Move leaves the source a valid, empty
+owning set. `ToSortedSet()` is the additive way to materialize an independent
+range — the C++ spelling of .NET's `new SortedSet<T>(view)`.
+
+**Four adjacent defects closed with it**, no new `SR-AUD-*` identifiers (the
+numbering stays frozen at 364): ordering comes from `std::set::key_comp()` by
+value, so an `operator<`-only element type instantiates `GetViewBetween` (probe 3
+with `-DSORTEDSET_PROBE_INSTANTIATE_VIEW` now compiles `-Werror` and runs, where
+it previously failed with two `no match for 'operator>'` errors); bounds are
+enforced after construction; nested widening throws; and assignment can no longer
+defeat the version guard — probe 2's `copy-assign` yields the correct
+pre-assignment element instead of a silently wrong one, and its `move-assign`
+**ASan `heap-use-after-free`** and `outlive` **ASan `stack-use-after-scope`** are
+both gone.
+
+**Compatibility, measured not assumed.**
+
+| Layer | Effect |
+|---|---|
+| Public source | Only `const` callers break, as a compile error naming the non-`const` member. All three in-repository call sites use non-`const` sets, re-verified after implementation: **no in-repository source break**, no existing assertion changed. |
+| Semantic | Intentionally broken — the silent one. Mutating the result now mutates the source; copying it copies the handle. `ToSortedSet()` is the documented replacement. |
+| Binary symbol | `_ZNK6System11Collections7Generic9SortedSetIiE14GetViewBetweenERKiS5_` → `_ZN6System11Collections7Generic9SortedSetIiE14GetViewBetweenERKiS5_`, confirmed with `nm`. |
+| Object layout | `sizeof(SortedSet<int>)` 56 → **40**, `sizeof(SortedSet<std::string>)` 56 → **104**, `sizeof(Iterator)` 24 → **40**; `alignof` 8, `is_polymorphic` 0, `is_trivially_copyable` 0, `is_nothrow_move_constructible` 1, `is_copy_assignable` 1 all preserved. Every design prediction matched exactly. |
+| Practical | Every consumer must be **fully rebuilt** when it adopts this revision; mixing object files across it is an ODR violation with no diagnostic. |
+
+**Two limitations recorded rather than hidden** (design-record section 30). For a
+nested call that is simultaneously inverted *and* widening, this port follows the
+design's ordering rule (invalid range first) where .NET's override structure
+checks widening first — both throw, but with different exception types; the
+design's own claim that its order "matches" .NET is corrected there. And a
+ThreadSanitizer probe found that concurrent `getCountProperty()` on **one** view
+object races on the lazy Count cache that mirrors .NET's
+`TreeSubSet._countVersion`. That is documented in the header, not synchronized:
+`SortedSet<T>` claims no thread safety and this ticket adds none. Concurrent
+read-only access through **distinct** handles over one shared state, including
+concurrent handle creation and destruction, is race-free.
+
+Closure evidence:
+
+- 47 permanent regressions in
+  `modules/collections/tests/System/Collections/Generic/SortedSetLiveViewTests.cpp`,
+  including an `operator<`-only element type, a custom (descending) ordering, a
+  copy-counting element type proving `GetViewBetween` copies no elements, and a
+  100,000-element scale case; the three pre-existing `GetViewBetween` tests and
+  all 41 mutable-`SortedSet` cases pass **unchanged**, with only the stale
+  snapshot comment at `Ticket1713VersionTrackingTests.cpp:109` corrected;
+- `test/consumer/collections_sorted_set_view.cpp` compiles `-Wall -Wextra
+  -Wpedantic -Werror` against only `Collections.Core` (compile-only and linked)
+  and exits 0; `test/consumer/collections_sorted_set_view_negative.cpp` is
+  correctly **rejected** with `passing 'const …SortedSet<int>' as 'this'
+  argument discards qualifiers`;
+- ASan+UBSan+LeakSanitizer over the whole new suite (47/47, no diagnostic, no
+  leak) and over a post-fix behavior probe (82 assertions, `failures=0`), with
+  LSan verified active by a deliberate-leak self-test (232 bytes in 5
+  allocations reported); ThreadSanitizer run in three modes with TSan itself
+  verified active;
+- `scripts/local_ci_check.sh build`: **13,069 tests across 37 executables**, up
+  from 13,022, zero build warnings and zero errors;
+  `SharpRuntimeTests_Collections_Core` 1,783/1,783 (was 1,736);
+- `python3 scripts/validate_module_boundaries.py --root .` at 41 modules/90
+  edges with no new dependency edge, `python3
+  test/validate_module_boundaries_test.py` 7/7, `python3
+  scripts/generate_component_catalog.py --check`, `python3
+  scripts/db_consistency_check.py --db plan.sqlite3`, and `git diff --check` all
+  pass;
+- `scripts/check_doxygen_warnings.sh` at **1,937**/1,942 — five below the
+  ceiling: documenting the previously undocumented `Iterator` members removed
+  six warnings, and the new `README.md` link to `docs/SortedSetLiveViewDesign.md`
+  added one, since `Doxyfile`'s `INPUT` is `modules README.md` and therefore
+  cannot resolve a reference into `docs/` (the same warning the four
+  pre-existing `docs/` links already produce). The 1,942 ceiling is deliberately
+  left in place;
+- `scripts/check_selective_components.sh` **was** run this time, with a
+  repository-local `TMPDIR`, because a public header changed: all ten components
+  pass.
+
+Build directories used, all repository-local and gitignored: the existing
+`build` tree (incremental, `--parallel 4`), `build-probe-sortedset` (#1782's
+probe tree, extended with the post-fix probes), `build-asan-sortedset` (new,
+ASan+UBSan build of the new suite only — deliberately not a whole-repository
+sanitizer tree), `build-consumer-sortedsetview`,
+`build-consumer-sortedsetview-run`, `build-consumer-sortedsetview-neg`, and
+`build-tmp` as the repository-local `TMPDIR`. No build tree was created under
+`/tmp`, `/var/tmp`, or `/dev/shm`, and no existing build tree was cleaned or
+recreated.
+
+Ticket #1773 remains `blocked` and untouched — it covers the out-of-repository
+`ICollection::CopyTo` sweep only, and a downstream sweep for this change is a
+separate future item that was not created. CNA and mobile-eggbert were not
+inspected, searched, configured, built, or modified; both intentionally remain
+on an older sharp-runtime revision. No push, merge, rebase, tag, or publication
+occurred.
 
 No repair ticket is active.
 

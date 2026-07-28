@@ -1395,3 +1395,188 @@ The prototype found one real design defect during development that the
 implementation must avoid: `std::set::key_comp()` returns **by value**, so
 binding it to a `const` reference is `-Wreturn-local-addr` (a reference to a
 temporary). Recorded inline in §11.
+
+---
+
+## 30. Implementation-complete record (ticket #1783, 2026-07-28)
+
+*Added by implementation ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`, P2,
+size L) on local branch `feature/remediation-coll-sortedset-live-view`.
+Sections 1–29 above are the design record of ticket #1782 and are preserved
+unaltered, including the pre-fix measurements; nothing in them is rewritten to
+read as though the defect never existed. This section records what was actually
+built, where it matched the design, and the two places where it deliberately or
+necessarily did not.*
+
+### 30.1 Approval and status
+
+The user granted the exact approval §28 required — the `const` removal, the
+snapshot-to-live-view semantic change, and the object-layout change — scoped to
+ticket #1783 only. SR-AUD-361 moves from `confirmed (design-complete)` to
+`remediated`. Ticket #1773 remains `blocked` and untouched; CNA and
+mobile-eggbert were not inspected, searched, configured, built, or modified.
+
+### 30.2 What shipped
+
+`modules/collections/include/System/Collections/Generic/SortedSet.hpp` was
+rewritten to §11's declarations. The final public signature is
+
+```cpp
+[[nodiscard]] SortedSet<T> GetViewBetween(const T& lower, const T& upper);
+```
+
+and the final representation is exactly §11's: `std::shared_ptr<State>` (the
+`State` owning `std::set<T> data` and `intcs version`), `std::optional<T>
+lower_`/`upper_`, and the `mutable intcs cachedCount_`/`cachedCountVersion_`
+pair. `Iterator` holds `std::shared_ptr<const State>`, the current position, the
+range end, and a version snapshot. The five special members, `getIsViewProperty`,
+`IsWithinRange`, `ToSortedSet`, the range primitives, the bounds and exception
+matrix of §15, the propagation matrix of §16, the enumeration rules of §17, and
+the set-operation rules of §18 all landed as specified.
+
+The nine phases of §20 were implemented as one header rewrite rather than nine
+commits, because phases 1–3 alone leave `GetViewBetween` materializing a set
+from state it no longer owns — an intermediate that builds but has no
+independent value. The phase *gates* were still honoured in order: the 41
+pre-existing `SortedSetTests.*` / `GenSortedSetTest.*` /
+`SortedSetVersionTrackingTests.*` cases, including the three `GetViewBetween`
+tests, passed unchanged on the first build of the new header, and the complete
+`SharpRuntimeTests_Collections_Core` executable passed 1,736/1,736 before the
+new suite was added.
+
+### 30.3 Three deviations from §11's sketch, all deliberate
+
+1. **Bound equality uses comparer equivalence, not `operator==`.** The
+   prototype's shared-state self-aliasing guard compared bounds with
+   `other.lower_ == lower_`, which instantiates `std::optional<T>::operator==`
+   and therefore requires `T::operator==` — reintroducing exactly the class of
+   defect §4.6.1 records. The shipped code routes bound equality through a
+   private `sameBoundsAs`, which uses `!cmp(a,b) && !cmp(b,a)` on the container's
+   own predicate, so the element contract stays "whatever `std::set<T>` orders
+   with" for every member, not just for the ones the prototype exercised.
+2. **`Iterator::operator++` stops at the range end.** §11 gives `Iterator` an
+   `end_` member that the prototype stored but never read. Rather than carry a
+   write-only field, `operator++` now clamps at `end_`, turning an increment past
+   the end from undefined behavior into a no-op. This changes no defined
+   behavior: `operator==`/`operator!=` still compare positions only, so
+   range-`for` termination is untouched.
+3. **`IsSubsetOf`, `IsSupersetOf`, `IsProperSubsetOf`, `IsProperSupersetOf`, and
+   `Overlaps` were implemented from §18.2 rather than from the prototype**, which
+   omitted them. They now walk `[rangeBegin, rangeEnd)` on both sides and route
+   membership through the range-aware `Contains`.
+
+### 30.4 One divergence from .NET this design introduces, now measured
+
+§15's exception-ordering row claims that checking the invalid range **before**
+the nested-widening bounds "matches `SortedSet.cs:1510` / `TreeSubSet.cs:344`".
+Re-reading both sources during implementation shows that is **not** what .NET
+does on a view: `TreeSubSet.GetViewBetween` checks widening first and only then
+delegates to `_underlying.GetViewBetween`, which performs the invalid-range
+check. The two orders are observable only when a nested call is *both* inverted
+*and* widening — e.g. `view[3,7].GetViewBetween(2, 1)`, where .NET throws
+`ArgumentOutOfRangeException("lowerValue")` and this port throws
+`ArgumentException("Must be less than or equal to upperValue.", "lowerValue")`.
+The shipped code follows the **design's** order, since #1783's brief is to
+implement §11/§15 rather than to redesign them, and validating an argument pair
+for mutual consistency before validating it against object state is the more
+defensible rule. Recorded here as an intentional, bounded deviation rather than
+silently corrected in §15.
+
+### 30.5 A newly found concurrency consequence
+
+Design §19 says a set and its views are one collection for concurrency purposes
+and that "nothing stronger is claimed". Implementation adds one fact §19 did not
+anticipate and that did not exist before this revision: a **view**'s
+`getCountProperty()` is `const` but fills the per-object lazy Count cache, so two
+threads calling it on the *same view object* race on that cache even though
+every call is `const`. The pre-#1783 header's `const` members wrote nothing, so
+this is a genuine change.
+
+Measured with ThreadSanitizer (`build-probe-sortedset/probe9_tsan_readonly.cpp`,
+three modes, all with TSan confirmed active by a deliberate-race self-test):
+
+| Mode | Result |
+|---|---|
+| `known-race` (self-test) | **2** data races — TSan is active, not silently inert |
+| `distinct-handles` — 8 threads reading through their own handles onto one shared state, creating and destroying 400 view handles | **0** data races; §19's control-block claim holds |
+| `shared-view-count` — 8 threads calling `getCountProperty()` on one view object | **1** data race: `Read of size 4 … Previous write of size 4 … in getCountProperty() const` |
+
+This is **not** a defect against the type's contract — `SortedSet<T>` claims no
+thread safety, and .NET's `TreeSubSet` caches `count`/`_countVersion` from its
+own `Count` getter in exactly the same way. It is documented in the header's
+thread-safety paragraph, and no thread-safety guarantee is added. Making the
+cache atomic was considered and rejected: it would claim a guarantee the type
+does not offer, for one member only, while element reads stayed unsynchronized.
+
+### 30.6 Delivered compatibility, measured
+
+`build-probe-sortedset/probe8_postfix_layout_symbols.cpp` re-measures the
+shipped type (probe 5 no longer compiles: its production call site takes a view
+from a `const` set, which is the approved break). Every §25.3 prediction is
+confirmed exactly:
+
+| Measurement | §25.3 predicted | Shipped |
+|---|---:|---:|
+| `sizeof(SortedSet<int>)` | 40 | **40** |
+| `sizeof(SortedSet<std::string>)` | 104 | **104** |
+| `sizeof(SortedSet<int>::Iterator)` | 40 | **40** |
+| `alignof` | 8 | **8** |
+| `is_polymorphic` | 0 | **0** |
+| `is_trivially_copyable` | 0 | **0** |
+| `is_nothrow_move_constructible` | 1 | **1** |
+| `is_copy_assignable` | 1 | **1** |
+
+The mangled name changed as §25.2 predicted:
+
+```
+W _ZNK6System11Collections7Generic9SortedSetIiE14GetViewBetweenERKiS5_   (before)
+W _ZN6System11Collections7Generic9SortedSetIiE14GetViewBetweenERKiS5_    (after)
+```
+
+**One accepted cost of the `noexcept` move operations.** §11 specifies
+`noexcept` move construction and move assignment, and §13 specifies that the
+moved-from object is a valid, empty **owning** set. Meeting both means allocating
+a fresh `State` for the source inside a `noexcept` function, so an allocation
+failure there terminates rather than propagating. This is deliberate: the
+alternative — a null `state_` in a moved-from object — would put a liveness check
+on every member of the class, and the allocation is one small control block.
+`is_nothrow_move_constructible` stays 1 as §25.3 requires.
+
+### 30.7 Verification
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 4` | 0 errors, 0 warnings |
+| `SharpRuntimeTests_Collections_Core` | 1,783 passed (1,736 before, +47 new) |
+| 41 pre-existing SortedSet cases | pass **unchanged**, no assertion edited |
+| `scripts/local_ci_check.sh build` | **13,069** tests across 37 executables (floor 13,022) |
+| `scripts/validate_module_boundaries.py --root .` | 41 modules / 90 edges — no new edge |
+| `test/validate_module_boundaries_test.py` | 7 tests OK |
+| `scripts/generate_component_catalog.py --check` | catalogue current |
+| `scripts/db_consistency_check.py --db plan.sqlite3` | no problems |
+| `git diff --check` | clean |
+| `scripts/check_doxygen_warnings.sh` | **1,937** warnings (ceiling 1,942): -6 from documenting the `Iterator` members, +1 from `README.md`'s new link into `docs/`, which `Doxyfile`'s `INPUT` does not scan |
+| `scripts/check_selective_components.sh` (repo-local `TMPDIR`) | all 10 components pass |
+| Positive consumer fixture, compile-only `-Werror` and linked | compiles, exits 0 |
+| Negative consumer fixture (`const` caller) | **rejected**, as designed |
+| `probe3_comparer_requirement -DSORTEDSET_PROBE_INSTANTIATE_VIEW` | now compiles `-Werror` and runs (§4.6.1 closed) |
+| `probe6_public_header_standalone` | still compiles standalone `-Werror`, exits 0 |
+| `probe7_postfix_behavior` under ASan+UBSan+LSan | exit 0, `failures=0`, 82 assertions, no diagnostic, no leak |
+| `probe2_iterator_lifetime` `copy-assign` | value **1** (the pre-assignment element), was a silently wrong 60 |
+| `probe2_iterator_lifetime` `move-assign` | exit 0, no report — was **ASan `heap-use-after-free`** |
+| `probe2_iterator_lifetime` `outlive` | exit 0, no report — was **ASan `stack-use-after-scope`** |
+| Full permanent suite under ASan+UBSan+LSan | 47/47 pass, no diagnostic, no leak |
+| LeakSanitizer activity | confirmed by deliberate-leak self-test (232 bytes in 5 allocations reported) |
+
+`probe1_current_behavior` is deliberately **not** re-run to green: it asserts the
+pre-fix contract and now aborts on its first `view.Add(99)`, because that call
+correctly throws. It is preserved as #1782's evidence;
+`probe7_postfix_behavior.cpp` is its post-fix counterpart.
+
+### 30.8 Rollback
+
+Unchanged from §21's rollback strategy, and now concrete: `git revert` of the
+implementation commit restores the previous header exactly. Reverting only the
+live-view behavior while keeping the safer representation (fallback E′) is still
+possible but is no longer a single revert, since the change landed as one
+rewrite.

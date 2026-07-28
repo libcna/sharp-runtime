@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-07-27 — 41 physical components, 90 direct production
-dependency edges, a clean native build, 13,022 passing tests across 37
+*Last verified: 2026-07-28 — 41 physical components, 90 direct production
+dependency edges, a clean native build, 13,069 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
 is recorded as audit finding `SR-AUD-001`.*
@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,783 rows: 1,780 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), and ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`) — one `wontfix` (#1772, obsoleted by #1771) and two deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1783, `REMED-COLL-SORTEDSET-LIVE-VIEW`, gated on explicit approval of the `GetViewBetween` `const` removal, semantic change, and layout change); no `todo`, `doing`, or `needs_user` rows |
+| `ticket` | 1,783 rows: 1,781 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), and ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`) — one `wontfix` (#1772, obsoleted by #1771) and one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep); no `todo`, `doing`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -650,6 +650,49 @@ and #1779/#1780 needed. There is no in-repository source break: all three
 snapshot property. If approval is refused, the recorded fallback keeps snapshot
 semantics while fixing the four adjacent defects; it needs no approval and
 closes none of SR-AUD-361. Ticket #1773 remains `blocked` and untouched.
+
+Implementation ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`, P2, size L),
+opened and closed 2026-07-28 on local branch
+`feature/remediation-coll-sortedset-live-view`, then landed that design after
+the user granted the exact approval, scoped to this ticket. **SR-AUD-361 is now
+`remediated`**, so the index records 354 open and ten `remediated`.
+`GetViewBetween` keeps its return type and parameters, loses its `const`
+qualifier, and returns a live bounded handle onto the same tree: inclusive
+bounds enforced for the life of the view, out-of-range `Add` throwing
+`ArgumentOutOfRangeException("item")`, out-of-range `Remove` returning `false`,
+range-scoped `Clear`, narrowing-only nested views flattened onto the root state,
+.NET's exact invalid-range message, a version-cached view `Count`, range-scoped
+`Min`/`Max`, one shared version counter invalidating every handle's enumerators
+in both directions, and bounds-enforcing write-through set algebra whose
+self-aliasing guard now compares shared state rather than object identity.
+Copying preserves the object's role, assignment rebinds without disturbing other
+handles, and the additive `ToSortedSet()` materializes an independent range —
+the documented replacement for the old snapshot behavior. The four adjacent
+defects are closed with it, still without new `SR-AUD-*` identifiers.
+
+Measured compatibility matched every #1782 prediction exactly:
+`sizeof(SortedSet<int>)` 56 → 40, `sizeof(SortedSet<std::string>)` 56 → 104,
+`sizeof(Iterator)` 24 → 40, traits preserved, and the mangled name changing
+`_ZNK…` → `_ZN…`. Two limitations are recorded in design-record section 30
+rather than hidden: a bounded exception-ordering divergence from .NET for a
+nested call that is simultaneously inverted and widening, and a
+ThreadSanitizer-measured race when concurrent threads call `getCountProperty()`
+on *one* view object — documented in the header, not synchronized, since
+`SortedSet<T>` claims no thread safety and this ticket adds none.
+
+Closure evidence: 47 new permanent regressions plus a positive standalone
+consumer fixture (`-Werror`, `Collections.Core` only, exits 0) and a negative
+`const`-caller fixture (correctly rejected); the three pre-existing
+`GetViewBetween` tests and all 41 mutable-`SortedSet` tests passing unchanged;
+`SharpRuntimeTests_Collections_Core` 1,783/1,783; `scripts/local_ci_check.sh
+build` at **13,069 tests across 37 executables**, up from 13,022, with zero
+build warnings and zero errors; 41 modules/90 edges with no new dependency edge;
+validator tests 7/7; catalogue current; database consistent; `git diff --check`
+clean; Doxygen 1.9.8 at **1,937**/1,942; all ten selective components passing
+with a repository-local `TMPDIR` (run this time, because a public header
+changed); and a clean ASan+UBSan+LeakSanitizer campaign with LSan verified
+active. Ticket #1773 stays `blocked`; CNA and mobile-eggbert were not inspected
+or modified.
 
 No repair ticket is active.
 

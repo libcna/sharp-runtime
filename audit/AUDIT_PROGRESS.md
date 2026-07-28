@@ -1847,3 +1847,41 @@ metadata/attribute source inventory.
 - **SR-AUD-067 (high):** raw-pointer `Buffer::BlockCopy` does not reject
   negative offset/count metadata; negative count casts to `size_t` and reaches
   ASan-confirmed unbounded `memmove` rather than an argument exception.
+
+Implementation ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`, P2, size L) then
+closed SR-AUD-361 on 2026-07-28 on local branch
+`feature/remediation-coll-sortedset-live-view`, landing exactly the architecture
+#1782 selected after the user granted the approval design section 28 required.
+**SR-AUD-361 moves to `remediated`**, so the counts become **354 open and ten
+`remediated`**. `SortedSet<T>` now holds `std::shared_ptr<State>` plus optional
+bounds, and `GetViewBetween` -- still returning `SortedSet<T>` by value, now
+without its `const` qualifier -- returns a live, inclusive-bounds-enforcing,
+bidirectionally write-through handle onto the same tree. The finding's own
+symptom is inverted where it was measured: `source-add-visible-in-view=1` and
+`view-add-visible-in-source=1`, against the original evidence's 0 in both
+directions. The four adjacent defects #1782 measured are closed with it, with no
+new `SR-AUD-*` identifiers: probe 3's `operator<`-only element type now compiles
+`-Werror` and runs; bounds are enforced after construction; nested views may only
+narrow; and probe 2's `move-assign` **ASan `heap-use-after-free`** and `outlive`
+**ASan `stack-use-after-scope`** are both gone, with `copy-assign` now yielding
+the correct pre-assignment element instead of a silently wrong one.
+
+Evidence: 47 new permanent regressions plus two standalone consumer fixtures
+(positive `-Werror` against `Collections.Core` only, exits 0; negative `const`
+caller correctly rejected); `SharpRuntimeTests_Collections_Core` 1,783/1,783 with
+all 41 pre-existing SortedSet cases passing and no assertion edited;
+`scripts/local_ci_check.sh build` at **13,069 tests across 37 executables**, up
+from 13,022, with zero build warnings and zero errors; boundaries unchanged at 41
+modules/90 edges with no new dependency edge; validator tests 7/7; catalogue
+current; database consistent; `git diff --check` clean; Doxygen 1.9.8 at
+**1,937** warnings against the 1,942 ceiling; all ten selective components
+passing with a repository-local `TMPDIR` (run this time, because a public header
+did change); the whole new suite clean under ASan+UBSan+LeakSanitizer with LSan
+verified active by a deliberate-leak self-test; and a post-fix behavior probe
+with 82 assertions and `failures=0`. Two limitations are recorded in design
+section 30 rather than hidden: a bounded exception-ordering divergence from .NET
+for a nested call that is simultaneously inverted and widening, and a
+ThreadSanitizer-measured data race when concurrent threads call
+`getCountProperty()` on *one* view object -- documented, not synchronized, since
+the type claims no thread safety. Ticket #1773 remains `blocked`; CNA and
+mobile-eggbert were not inspected or modified.

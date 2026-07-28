@@ -458,6 +458,19 @@ wrong dereference and move-assignment is an ASan-confirmed
 `heap-use-after-free`. It is folded into ticket #1783's scope, which replaces
 that raw owner pointer with a `shared_ptr<const State>`.
 
+**Closed (ticket #1783, 2026-07-28).** That instance is now repaired.
+`SortedSet<T>::Iterator` holds `std::shared_ptr<const State>` instead of a raw
+`const SortedSet*`, and copy assignment rebinds the handle instead of
+overwriting the version counter, so the state an iterator enumerates cannot be
+freed or silently swapped underneath it. Re-running the same probe against the
+shipped header: `copy-assign` now yields the correct pre-assignment element
+where it previously produced a silently wrong one with no diagnostic at all,
+`move-assign` exits 0 with no report where it was an ASan
+`heap-use-after-free`, and `outlive` exits 0 where it was an ASan
+`stack-use-after-scope` inside `checkVersion()` itself. SR-AUD-361 is
+`remediated`; it was never a CCF-019 member and still is not counted as one, so
+this cause's membership list is unchanged.
+
 ## CCF-020 — raw polymorphic output parameters erase the validation information public contracts require
 
 The legacy non-generic ICollection interface accepts `void*` plus a starting

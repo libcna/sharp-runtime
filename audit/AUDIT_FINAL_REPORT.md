@@ -8,9 +8,9 @@ under `audit/<source-path>.audit.md`; the 1,699 runtime-module files are also
 fully covered. No production source or test was changed during this phase.
 
 At audit closure, the findings index recorded 364 confirmed issues. It now
-retains all 364 entries while marking 355 `confirmed` and nine `remediated`
+retains all 364 entries while marking 354 `confirmed` and ten `remediated`
 (SR-AUD-089, SR-AUD-090, SR-AUD-356, SR-AUD-357, SR-AUD-358, SR-AUD-359,
-SR-AUD-360, SR-AUD-363, and SR-AUD-364):
+SR-AUD-360, SR-AUD-361, SR-AUD-363, and SR-AUD-364):
 
 | Severity | Count |
 |---|---:|
@@ -535,3 +535,74 @@ only `docs/*.md` and `audit/*.md`, which Doxygen does not scan. The full
 unchanged from ticket #1780. `scripts/check_selective_components.sh` was not
 run: no public header and no component metadata changed, which is the condition
 that requires it.
+
+## Tenth remediation batch — SR-AUD-361 closed by ticket #1783 (2026-07-28)
+
+Implementation ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`, P2, size L)
+completed a tenth bounded batch on 2026-07-28 on local branch
+`feature/remediation-coll-sortedset-live-view`, landing the architecture ticket
+#1782 selected. **SR-AUD-361 moves from `confirmed (design-complete)` to
+`remediated`**; the findings index now records **354 open findings and ten
+`remediated`**. The original audit evidence in
+`audit/modules/collections/include/System/Collections/Generic/SortedSet.hpp.audit.md`
+and the whole #1782 design record are preserved unaltered; a clearly separated
+remediation note is appended to each.
+
+The user granted the exact approval design section 28 required, scoped to this
+ticket: removing the `const` qualifier from
+`SortedSet<T>::GetViewBetween(const T&, const T&)`, the semantic change from a
+detached snapshot to a live bidirectionally write-through bounded view, and the
+`SortedSet<T>` object-layout change that requires every consumer to be rebuilt.
+
+`SortedSet<T>` now holds `std::shared_ptr<State>` plus `std::optional<T>` lower
+and upper bounds, so one public type is either an owning full set or a bounded
+live view; `GetViewBetween` still returns `SortedSet<T>` by value, but the
+returned object is a handle onto the same tree. The finding's own symptom is
+inverted where it was measured: the post-fix probe reports
+`source-add-visible-in-view=1` and `view-add-visible-in-source=1`, against the
+original evidence's 0 in both directions.
+
+The four adjacent defects the #1782 batch measured are closed with it, without
+new `SR-AUD-*` identifiers — the numbering stays frozen at 364. Ordering is now
+taken from `std::set::key_comp()`, so probe 3's `operator<`-only element type
+compiles `-Werror` and runs where it previously failed with two `no match for
+'operator>'` errors; bounds are enforced after construction; nested views may
+only narrow; and assignment rebinds the handle rather than overwriting the
+version counter, so probe 2's `copy-assign` silently wrong dereference now
+yields the correct pre-assignment element and its `move-assign`
+**ASan-confirmed `heap-use-after-free`** and `outlive` **ASan
+`stack-use-after-scope`** both exit 0 with no diagnostic.
+
+Two limitations are recorded rather than hidden, both in design-record section
+30. For a nested call that is simultaneously inverted and widening, this port
+follows the design's ordering rule (invalid range first) where .NET's override
+structure checks widening first — an observable but bounded divergence, since
+both throw. And a ThreadSanitizer probe found that concurrent
+`getCountProperty()` on *one* view object races on the lazy Count cache
+mirroring .NET's `TreeSubSet._countVersion`; that is documented in the header
+instead of synchronized, because `SortedSet<T>` claims no thread safety and this
+ticket adds none. Concurrent read-only access through *distinct* handles over
+one shared state, including concurrent handle creation and destruction, is
+race-free (0 TSan reports over 8 threads and 400 handles, with TSan confirmed
+active by a deliberate-race self-test).
+
+Closure evidence for #1783: 47 new permanent regressions in
+`modules/collections/tests/System/Collections/Generic/SortedSetLiveViewTests.cpp`
+plus two standalone consumer fixtures (positive, `-Werror`, `Collections.Core`
+only, exits 0; negative, a `const` caller, correctly rejected);
+`SharpRuntimeTests_Collections_Core` 1,783/1,783 with all 41 pre-existing
+SortedSet cases passing and no assertion edited; the full
+`scripts/local_ci_check.sh build` gate at **13,069 tests across 37 executables**
+with zero build warnings and zero errors, up from 13,022; module boundaries
+unchanged at 41 modules / 90 edges with no new dependency edge; validator tests
+7/7; catalogue current; database consistent; `git diff --check` clean; Doxygen
+1.9.8 at **1,937** warnings against the 1,942 ceiling; all ten selective
+components passing with a repository-local `TMPDIR`; the whole new suite clean
+under ASan+UBSan+LeakSanitizer with LSan verified active by a deliberate-leak
+self-test; and a post-fix behavior probe with 82 assertions and `failures=0`.
+
+Ticket #1773 (the out-of-repository CNA / mobile-eggbert `ICollection::CopyTo`
+sweep) remains `blocked` and untouched. Neither downstream repository was
+inspected, searched, configured, built, or modified; both intentionally remain
+on an older sharp-runtime revision and must perform a full rebuild and a
+`GetViewBetween` call-site audit whenever they choose to upgrade.

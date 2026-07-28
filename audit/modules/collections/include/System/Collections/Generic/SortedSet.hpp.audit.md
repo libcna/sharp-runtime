@@ -83,3 +83,75 @@ Implementation is proposed as separate ticket **#1783**
 explicit user approval of the `const` removal on `GetViewBetween`, the semantic
 snapshot-to-live-view change, and the `SortedSet<T>` object-layout change — the
 same approval category tickets #1770/#1771 and #1779/#1780 required.
+
+---
+
+## Remediation note (ticket #1783, 2026-07-28)
+
+*The original evidence above, and the design-complete note of ticket #1782, are
+preserved verbatim and unaltered. SR-AUD-361 moves from `confirmed
+(design-complete)` to **`remediated`**: the production header changed under this
+ticket.*
+
+Implementation ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`, P2, size L)
+landed the architecture #1782 selected, on local branch
+`feature/remediation-coll-sortedset-live-view`, after the user granted the exact
+approval design section 28 required — removing the `const` qualifier from
+`GetViewBetween`, the snapshot-to-live-view semantic change, and the
+`SortedSet<T>` object-layout change.
+
+`SortedSet<T>` now holds `std::shared_ptr<State>` (the `State` owning the
+`std::set<T>` and the single version counter) plus `std::optional<T>` lower and
+upper bounds, so one public type is either an owning full set or a bounded live
+view. `GetViewBetween` still returns `SortedSet<T>` by value, but the returned
+object is a handle onto the same tree, not a copy of its elements.
+
+The finding's own symptom is inverted where it was measured: the post-fix probe
+reports `source-add-visible-in-view=1`, `source-remove-visible-in-view=1`,
+`view-add-visible-in-source=1`, and `view-remove-visible-in-source=1`, where the
+original evidence recorded 0 in both directions. The two "missing assertions and
+diagnostics" items are closed as well: bidirectional write-through, live
+updates, and out-of-range view mutation are covered by 47 permanent regressions
+in `modules/collections/tests/System/Collections/Generic/SortedSetLiveViewTests.cpp`,
+and `getIsViewProperty()` plus `IsWithinRange()` are the view-bound diagnostics
+the note asked for.
+
+The four adjacent defects recorded in the #1782 note are fixed as a consequence
+of the design rather than as separate work:
+
+1. ordering is taken from `std::set::key_comp()` by value, so an element type
+   with `operator<` alone now instantiates `GetViewBetween` — probe 3 with
+   `-DSORTEDSET_PROBE_INSTANTIATE_VIEW`, which previously failed with two
+   `no match for 'operator>'` errors, now compiles `-Werror` and runs;
+2. bounds are enforced for the whole life of the view;
+3. a nested `GetViewBetween` may only narrow, throwing
+   `ArgumentOutOfRangeException("lowerValue"/"upperValue")` on a widening bound;
+4. assignment rebinds the handle instead of overwriting the version counter, and
+   iterators hold their own strong reference to the state they enumerate — the
+   pre-fix `copy-assign` silently wrong dereference now yields the correct
+   pre-assignment element, and the `move-assign` **ASan-confirmed
+   `heap-use-after-free`** and the `outlive` **ASan `stack-use-after-scope`** are
+   both gone, exit 0 with no diagnostic.
+
+The invalid-range message now matches .NET exactly: `Must be less than or equal
+to upperValue. (Parameter 'lowerValue')`.
+
+Two things this remediation deliberately did **not** do, both recorded in
+`docs/SortedSetLiveViewDesign.md` section 30: it follows the design's
+exception-*ordering* rule for a nested call that is simultaneously inverted and
+widening, which differs from .NET's incidental order; and it does not add thread
+safety — a ThreadSanitizer probe found that concurrent `getCountProperty()` on
+*one* view object races on the lazy Count cache that mirrors .NET's
+`TreeSubSet._countVersion`, which is documented in the header rather than
+synchronized, since the type claims no thread-safety guarantee.
+
+Closure gates: `SharpRuntimeTests_Collections_Core` 1,783/1,783 (was 1,736, all
+41 pre-existing SortedSet cases passing with no assertion edited);
+`scripts/local_ci_check.sh build` 13,069 tests across 37 executables with zero
+warnings and zero errors; 41 modules / 90 edges with no new dependency edge;
+validator tests, catalogue check, database consistency, and `git diff --check`
+all clean; Doxygen 1,937 warnings against the 1,942 ceiling; all ten selective
+components pass with a repository-local `TMPDIR`; the positive standalone
+consumer fixture compiles `-Werror` against only `Collections.Core` and exits 0;
+and the negative fixture proving a `const` caller no longer compiles is
+correctly rejected.

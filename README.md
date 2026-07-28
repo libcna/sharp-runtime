@@ -6,8 +6,8 @@ ports, especially CNA, without attempting to implement a CLR, JIT, garbage
 collector, or the complete .NET platform.
 
 The repository currently builds as 41 independently selectable CMake
-components. The verified Linux baseline on 2026-07-27 is a warning-free build
-with **13,022 passing tests across 37 test executables**.
+components. The verified Linux baseline on 2026-07-28 is a warning-free build
+with **13,069 passing tests across 37 test executables**.
 
 ## What is included
 
@@ -181,7 +181,7 @@ Other platform evidence is narrower:
 
 | Platform/toolchain | Verified scope |
 |---|---|
-| Linux/GCC | Current full component build and all 13,022 tests. |
+| Linux/GCC | Current full component build and all 13,069 tests. |
 | Windows/MinGW | MinGW-w64 GCC 14-win32/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. GoogleTest was not cross-built and repository CI remains Ubuntu-only. |
 | Emscripten | Emscripten 5.0.7/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. Tests were not cross-built or run, and some runtime APIs deliberately throw `PlatformNotSupportedException`. |
 | macOS/Apple Clang | Real downstream Xcode 15.4 builds drove portability fixes on 2026-07-20; this repository has no macOS job or recorded full standalone test baseline. |
@@ -207,6 +207,64 @@ Individual APIs can also document smaller, explicit deviations where C++ has
 no safe or useful equivalent.
 
 ## Breaking changes
+
+### 2026-07-28 — `System::Collections::Generic::SortedSet<T>::GetViewBetween`
+
+`GetViewBetween` used to return an independent snapshot copy and was `const`. It
+now returns a **live, bounded, bidirectionally write-through view** over the same
+underlying tree, matching .NET's `TreeSubSet`, and it is **no longer `const`**.
+
+```cpp
+SortedSet<int> set{1, 2, 3, 4, 5};
+
+// Before — the result was detached; the source never changed.
+// After  — the result is a live handle; in-range mutations write through.
+SortedSet<int> view = set.GetViewBetween(2, 4);
+view.Add(3);          // now also visible in `set`
+view.Remove(2);       // now also removed from `set`
+view.Clear();         // now removes exactly [2, 4] from `set`
+view.Add(99);         // now throws ArgumentOutOfRangeException("item")
+
+// To keep the old detached behavior deliberately:
+SortedSet<int> snapshot = set.GetViewBetween(2, 4).ToSortedSet();
+
+// A const set can no longer produce a view — take a non-const reference, or
+// copy the set first. Never const_cast: the qualifier is what documents that no
+// mutable path into the set exists.
+const SortedSet<int>& frozen = set;
+// frozen.GetViewBetween(2, 4);        // compile error since this revision
+SortedSet<int> ownCopy = set;          // copying a full set is still a deep clone
+SortedSet<int> ownView = ownCopy.GetViewBetween(2, 4);
+```
+
+Three separate compatibility layers change, and returning the same public type
+does **not** mean there is no impact:
+
+- **Source** — only `const` callers break, as a compile error naming the
+  non-`const` member. Every non-`const` call still compiles.
+- **Semantics** — the silent one. Code that mutated the result expecting the
+  source to be unaffected compiles unchanged and now behaves differently. Audit
+  every call site for a snapshot assumption; `ToSortedSet()` is the replacement.
+  Copying the result copies the *handle*, not the elements.
+- **Binary** — the mangled name changes (`_ZNK…` → `_ZN…`, since the Itanium ABI
+  encodes the implicit object parameter's `const`), and the object layout changes
+  (`sizeof(SortedSet<int>)` 56 → 40, `sizeof(SortedSet<std::string>)` 56 → 104,
+  `sizeof(SortedSet<int>::Iterator)` 24 → 40). Object files compiled against the
+  old header are layout-incompatible with new ones, with no diagnostic, so **all
+  C++ consumers must be fully rebuilt** when they adopt this revision.
+
+Enumerating a view now fail-fasts with `InvalidOperationException` when the
+source is mutated, and vice versa — one version counter is shared by a set and
+all of its views, matching .NET. A view keeps the underlying elements alive, so
+it stays valid after the set it came from is destroyed, copied, moved, or
+reassigned.
+
+The full contract, the alternatives considered, and the measured before/after
+evidence are in
+[docs/SortedSetLiveViewDesign.md](docs/SortedSetLiveViewDesign.md).
+Downstream consumers such as CNA and mobile-eggbert are outside this repository
+and have not been checked; they remain on an older revision and must perform a
+full rebuild and a `GetViewBetween` call-site audit when they upgrade.
 
 ### 2026-07-27 — `System::Collections::ICollection::CopyTo`
 
