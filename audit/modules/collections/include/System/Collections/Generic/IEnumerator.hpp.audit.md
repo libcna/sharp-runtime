@@ -57,3 +57,45 @@ counter into the destination and needed no overflow at all, with six
 AddressSanitizer `heap-use-after-free`/`heap-buffer-overflow` reproductions. The
 full record, including the .NET comparison and the per-type layout measurements,
 is `docs/CollectionVersionCounterSweep.md`.
+
+
+## Newly discovered defect: ticket #1792 (2026-07-28)
+
+Found by design ticket #1790's mutable-access inventory and **deliberately not
+absorbed into it**, because it belongs to `IEnumerator<T>` and therefore reaches
+**every** collection in the repository, not `List<T>`. It carries **no
+`SR-AUD-*` identifier** — the numbering is frozen at 364 and this was found
+during remediation, not during the audit — and it reopens no finding here. The
+original evidence above is retained unchanged. **Nothing was changed in this
+file**; ticket #1792 is `todo` and inactive.
+
+```cpp
+void* getCurrentProperty() const override {
+    return const_cast<T*>(&Current());
+}
+```
+
+`Current()` returns `const T&` precisely so that an enumerator cannot be used to
+mutate what it is walking. This bridge to the non-generic
+`System::Collections::IEnumerator` casts that constness away and publishes a
+`void*` to the live element on a **public** interface.
+
+Reproduced in the gitignored `build-probe-listindexer/probe1_escape-routes.log`,
+with the owning collection's private counter read directly:
+
+```
+enum void* write counter 0 -> 0  value=88  fail-fast=0
+```
+
+The write landed in the collection, the mutation counter never moved, and the
+outstanding enumerator's fail-fast guard stayed silent — so a consumer holding
+only the non-generic interface can mutate a collection mid-enumeration,
+untracked, for any collection whose enumerator derives from
+`Generic::IEnumerator<T>`.
+
+Ticket **#1792** (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`, P3, size M) records
+it. Its first required step is a repository-wide call-site inventory by the same
+compile-against-a-shim method #1790 used, because `getCurrentProperty()` is a
+public virtual and a grep would understate it — as one did for `IList<T>`'s
+implementers during #1790. Context:
+`docs/ListIndexerVersioningDesign.md` sections 4.1 (route 6), 5.2, and 27.3.

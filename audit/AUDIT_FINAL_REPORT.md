@@ -925,3 +925,98 @@ behaviour whatsoever — and ticket #1773 remains `blocked` and untouched. CNA a
 mobile-eggbert were not inspected, searched, configured, built, or modified. No
 compilation used more than four parallel jobs, and no push, merge, rebase, tag,
 or publication occurred.
+
+
+## Post-audit design batch — ticket #1790, `List<T>` indexer versioning (2026-07-28)
+
+Design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`, P3, size L, category
+`parity`) is **done as a design ticket**, on local branch
+`feature/remediation-coll-list-indexer-design`. It carries **no `SR-AUD-*`
+identifier and reopens none** — the audit numbering stays frozen at 364, the
+findings index is unchanged, and every earlier finding keeps its status
+(SR-AUD-361 stays `remediated`). It changed **no production behaviour, no public
+signature, no object layout, and no exception**; the single production edit is a
+doc-comment correction in `List.hpp`. The durable record is
+`docs/ListIndexerVersioningDesign.md`.
+
+The finding under investigation was recorded by ticket #1787 as Category D — a
+divergence deliberately *not* absorbed into that ticket's counter-arithmetic
+scope. Its answer is **no fully source-compatible correction exists**: a plain
+`T&` returned by `operator[]` cannot be intercepted, because C++ provides no
+mechanism by which a collection learns of a write through a reference it
+previously handed out. Acceptance-criteria route (a) — declare the divergence
+permanent — was **rejected**, because the same `T&` is a *reproduced
+use-after-free* (four AddressSanitizer heap-use-after-free reports: across a
+reallocating `Add()` on both read and write, across `Clear()`, and across move
+assignment), not merely a fail-fast divergence. Route (b), a tracked proxy
+return, is selected and handed to implementation ticket #1791.
+
+**Three of the originating ticket's own premises were corrected rather than
+inherited**, each against this record's convenience:
+
+1. `List<T>::operator[]` is **not** the widest untracked route. The non-const
+   `ToVector()` hands out the whole backing `std::vector<T>&`, permitting
+   `push_back`/`erase`/`clear` — a **structural** mutation the fail-fast guard
+   never sees, strictly wider than the indexer. Reproduced, and previously
+   undocumented anywhere in the repository.
+2. The claim that `operator[]` is "the single most call-site-heavy method in
+   this repository" is **wrong for this repository**. Measured across **all 625
+   translation units** by compiling against a `[[deprecated]]`-tagged shim, it
+   has **61 call sites, all in two test files**, and **no library source
+   includes `List.hpp` at all**. The CNA/mobile-eggbert burden remains real,
+   unmeasured, and out of scope by instruction.
+3. `IList<T>` has **four** implementers, not one — `List<T>`,
+   `ObjectModel::Collection<T>`, `ObjectModel::ReadOnlyCollection<T>`, and a
+   hand-written one in the test suite. Three were missed by grep (they spell it
+   `public Generic::IList<T>`) and were found only by compiling the repository
+   against the candidate header.
+
+Evidence is repository-local and gitignored under `build-probe-listindexer/`: a
+five-mode reproduction probe, four AddressSanitizer reports, 0 UBSan
+diagnostics on every non-lifetime mode, a 24-case expression matrix, and four
+generated header shims each compiled against the whole repository at
+`-fsyntax-only`. Measured source break: the selected refined proxy breaks **1
+site in 1 of 625 translation units**, against **8 sites in 3 units** for the
+rejected value/setter alternative. Those figures are close and the decision is
+explicitly **not** based on them — it is based on the value alternative deleting
+`list[i] = v`, the exact spelling C# uses, from the API. Layout measured:
+`sizeof(List<T>)` **40 → 40** unchanged, `sizeof(ObjectModel::Collection<T>)`
+**32 → 40**.
+
+Closure evidence: 14 new permanent regressions in
+`ListIndexerVersionTests.cpp`, split into a `Contract` suite (must survive
+#1791) and a `Divergence` suite whose `static_assert`s #1791 cannot land without
+editing; `SharpRuntimeTests_Collections_Core` **2,191/2,191** (was 2,177) with
+no existing assertion edited; `scripts/local_ci_check.sh build` at **13,477
+tests across 37 executables** (was 13,463) with zero warnings and errors; 41
+modules / 90 edges; validator tests 7/7; catalogue current; database consistent;
+`git diff --check` clean; Doxygen 1.9.8 unchanged at **1,938**/1,942.
+
+**Two tickets were opened and deliberately not begun, neither with an
+`SR-AUD-*` identifier.** **#1791**
+(`REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, P2, L, **blocked**) carries the
+implementation in two phases: Phase 1 (tracked `getItem`/`setItem`, a pure
+addition) needs no approval but does not close the defect; Phase 2 is blocked
+pending the exact four-part approval in design section 28 — public source breaks
+to `List<T>::operator[]` and to the `IList<T>` interface (affecting every
+implementer, including hand-written consumer ones), an object-layout change to
+`ObjectModel::Collection<T>` requiring a full consumer rebuild, and
+acknowledgement that CNA's and mobile-eggbert's usage is unmeasured. The
+approvals granted for #1771, #1780, and #1783 do **not** carry over. The
+unavoidable cost is recorded rather than buried: `list[i].member` and
+`list[i].method()` stop compiling for value-type elements, because `operator.`
+cannot be overloaded.
+
+**#1792** (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`, P3, M, `todo`) records a
+**newly discovered defect** found by #1790's inventory and deliberately not
+absorbed into it: `Generic::IEnumerator<T>::getCurrentProperty()` does
+`return const_cast<T*>(&Current());`, publishing a mutable `void*` to the live
+element on a public interface, so a write through it mutates a collection
+mid-enumeration with the counter at rest and the guard silent. It affects
+**every** collection in the repository, not `List<T>`.
+
+Tickets #1785 remains `todo` and untouched; #1788 and #1789 remain `blocked` and
+untouched, and no counter was widened; #1773 remains `blocked` and untouched.
+CNA and mobile-eggbert were not inspected, searched, configured, built, or
+modified. No compilation used more than four parallel jobs, and no push, merge,
+rebase, tag, or publication occurred.

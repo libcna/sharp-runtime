@@ -1724,6 +1724,131 @@ Ticket #1773 remains `blocked` and untouched. CNA and mobile-eggbert were not
 inspected, searched, configured, built, or modified. No push, merge, rebase,
 tag, or publication occurred. No compilation used more than four jobs.
 
+**Ticket #1790 is now design-complete — see the next section.**
+
+### Completed List<T> indexer versioning design: ticket #1790
+
+Ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`, P3, size L, category `parity`)
+is **done as a design ticket**, closed 2026-07-28 on local branch
+`feature/remediation-coll-list-indexer-design`. It carries **no `SR-AUD-*`
+identifier** — the numbering stays frozen at 364. It **changed no production
+behaviour, no public signature, no object layout, and no exception**; the one
+production edit is a doc-comment correction in `List.hpp`. The durable record is
+`docs/ListIndexerVersioningDesign.md`.
+
+**The answer to the ticket's own question: no fully source-compatible correction
+exists.** A plain `T&` cannot be intercepted — once the caller holds it, no C++
+mechanism notifies the collection of a write through it. Every closing
+alternative changes what the non-const indexer returns, which is a public source
+break. Acceptance-criteria route (a) — record the divergence as permanent — was
+rejected because the same `T&` is a *reproduced use-after-free*, not merely a
+fail-fast divergence.
+
+The selected architecture is a tracked proxy,
+`System::Collections::detail::ElementReference<T>`, returned by the non-const
+indexer: it reads as `const T&`, intercepts every write, and advances the
+counter. It is chosen because it is the only alternative that closes the write
+path while keeping **`list[i] = v`**, the exact spelling C# uses, compiling.
+
+**Three of the ticket's own premises were corrected rather than inherited.**
+
+1. **The indexer is not the widest hole.** The non-const `ToVector()` hands out
+   the whole backing `std::vector<T>&`, so a caller can `push_back`, `erase`, or
+   `clear` through it — a **structural** mutation the fail-fast guard never
+   sees, strictly wider than the indexer, which can only replace an element.
+   Reproduced (`Count` went to 0 with an enumerator outstanding and the guard
+   silent) and previously undocumented anywhere.
+2. **The migration premise was wrong for this repository.** The ticket recorded
+   `operator[]` as "the single most call-site-heavy method in this repository".
+   Measured across **all 625 translation units** by compiling against a
+   `[[deprecated]]`-tagged shim, the non-const indexer has **61 call sites, all
+   in two test files**, and **no library source in the repository includes
+   `List.hpp` at all**. The CNA/mobile-eggbert burden is real, unmeasured, and
+   out of scope — it is explicitly *not* claimed to be small.
+3. **`IList<T>` has four implementers, not one:** `List<T>`,
+   `ObjectModel::Collection<T>`, `ObjectModel::ReadOnlyCollection<T>`, and a
+   hand-written one in the test suite — the last being direct evidence that
+   consumer code implements the interface by hand. A grep for `public IList<`
+   finds only the first; the other three spell it `public Generic::IList<T>`.
+   They were found by compiling the repository against the candidate header, not
+   by searching. `Collection<T>` **has no mutation counter at all**, which is why
+   Phase 2 carries a second object-size consequence.
+
+Evidence, all repository-local and gitignored under `build-probe-listindexer/`:
+a five-mode reproduction probe recording that a native iterator, a fail-fast
+enumerator, an equal-value write, and a write through `IList<T>&` all leave the
+counter at rest while `Add()` correctly invalidates; **four AddressSanitizer
+heap-use-after-free reports** for references retained across reallocation (read
+and write), across `Clear()`, and across move assignment; 0 UBSan diagnostics on
+every non-lifetime mode; a 24-case expression matrix compiled per candidate; and
+four generated header shims compiled against the whole repository at
+`-fsyntax-only`. Measured source break: the **refined proxy breaks 1 site in 1
+of 625 translation units** (the hand-written implementer — migration, not
+call-site breakage), against **8 sites in 3 units** for the rejected
+value/setter alternative, of which only 2 are genuine call-site breaks. Those
+figures are close, and the decision is explicitly *not* made on them: it is made
+because the value alternative deletes `list[i] = v` from the API. Layout
+measured: `sizeof(List<T>)` **40 → 40** unchanged, `sizeof(Collection<T>)`
+**32 → 40**, and the proxy is a 16-byte prvalue.
+
+Closure evidence: **14 new permanent regressions** in
+`modules/collections/tests/System/Collections/Generic/ListIndexerVersionTests.cpp`,
+deliberately split into a `Contract` suite (8 cases that must survive #1791
+unchanged) and a `Divergence` suite (6 cases, each asserting today's behaviour
+with .NET's named in a comment, carrying `static_assert`s that #1791 physically
+cannot land without editing); `SharpRuntimeTests_Collections_Core`
+**2,191/2,191** (was 2,177), no existing assertion edited;
+`scripts/local_ci_check.sh build` at **13,477 tests across 37 executables** (was
+13,463), zero warnings, zero errors; module boundaries unchanged at 41 modules /
+90 edges; validator tests 7/7; catalogue current; database consistent;
+`git diff --check` clean; Doxygen 1.9.8 at **1,938**/1,942 — unchanged, since
+`docs/` is not scanned, tests are excluded, and the `List.hpp` comment edit
+introduced no new warning.
+
+Build directories used, all repository-local and gitignored, all at **at most
+four compilation jobs**: the existing `build` tree (incremental,
+`--parallel 4`; re-configured once with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`,
+which changes no compile flag and forced no recompilation), the new
+`build-probe-listindexer` (probes, four generated shims, and the two sweep
+scripts, whose parallelism is a hard-coded constant 4 with no `nproc` or
+hardware-concurrency call anywhere), and `build-tmp` as the repository-local
+`TMPDIR`. `scripts/check_selective_components.sh` and
+`scripts/local_ci_check.sh` both use `mktemp` internally and were run with
+`TMPDIR` redirected into `build-tmp`; both already cap their own builds at
+`--parallel 4`. No build tree was created under `/tmp`, `/var/tmp`, or
+`/dev/shm`, and no existing build tree was cleaned or recreated.
+
+**Two tickets were opened and deliberately not begun.** **#1791**
+(`REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, P2, L) is **blocked**. It has two
+phases: **Phase 1 needs no approval** (add tracked `getItem`/`setItem` to
+`List<T>` — a pure addition that gives callers a correct path but does not close
+the defect), and **Phase 2 is blocked** pending the exact four-part approval in
+design section 28 — a public source break to `List<T>::operator[]`, a public
+source break to the `IList<T>` interface affecting every implementer including
+hand-written consumer ones, an object-layout change to `Collection<T>`
+(`sizeof` 32 → 40, full consumer rebuild), and acknowledgement that CNA's and
+mobile-eggbert's usage is unmeasured. The approvals granted for #1771, #1780,
+and #1783 explicitly do **not** carry over. The unavoidable cost, stated rather
+than buried: `list[i].member` and `list[i].method()` stop compiling for
+value-type elements, because `operator.` cannot be overloaded.
+
+**#1792** (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`, P3, M) is inactive `todo`
+and records a **newly discovered, previously unrecorded defect** found by
+#1790's inventory and deliberately not absorbed into it:
+`Generic::IEnumerator<T>::getCurrentProperty()` does
+`return const_cast<T*>(&Current());`, publishing a mutable `void*` to the live
+element on a public interface. `Current()` returns `const T&` precisely so an
+enumerator cannot mutate what it walks. Reproduced: the write landed, the
+counter never moved, and the guard stayed silent. It affects **every** collection
+in the repository, not `List<T>`, which is why it is its own ticket. No new
+`SR-AUD-*` identifier.
+
+Ticket #1785 remains `todo` and untouched. Tickets #1788 and #1789 remain
+`blocked` and untouched; no counter was widened. Ticket #1773 remains `blocked`
+and untouched. CNA and mobile-eggbert were not inspected, searched, configured,
+built, or modified. No push, merge, rebase, tag, or publication occurred. No
+compilation used more than four jobs.
+
 No repair ticket is active.
 
 ### Nominal 500-hour first remediation programme

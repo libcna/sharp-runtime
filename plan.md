@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,790 rows: 1,784 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) — one `wontfix` (#1772, obsoleted by #1771), three deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval), and two deliberately inactive `todo` rows (#1785 `REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened by #1784; #1790 `REMED-COLL-LIST-INDEXER-VERSION`, opened by #1787); no `doing` or `needs_user` rows |
+| `ticket` | 1,792 rows: 1,785 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) and design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`) — one `wontfix` (#1772, obsoleted by #1771), four deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval; #1791 `REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, opened by #1790 and awaiting the four-part approval in `docs/ListIndexerVersioningDesign.md` section 28), and two deliberately inactive `todo` rows (#1785 `REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened by #1784; #1792 `REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`, opened by #1790); no `doing` or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -899,8 +899,84 @@ plain `T&` and so cannot bump the counter the way .NET's index setter does.
 #1788 and #1789 are deliberately **not** one ticket: they share the symptom and
 nothing else, and a user might reasonably approve one and not the other.
 
-Tickets #1785 and #1773 remain untouched and inactive. No repair ticket is
-active.
+Tickets #1785 and #1773 remain untouched and inactive. **Ticket #1790 is now
+design-complete — see the next section.**
+
+### Completed List<T> indexer versioning design: ticket #1790
+
+Ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`, P3, size L, category `parity`)
+is **done as a design ticket**, closed 2026-07-28 on local branch
+`feature/remediation-coll-list-indexer-design`, with **no `SR-AUD-*`
+identifier** — the numbering stays frozen at 364. It changed no production
+behaviour, signature, layout, or exception; the single production edit is a
+doc-comment correction in `List.hpp`. The durable record is
+`docs/ListIndexerVersioningDesign.md`.
+
+It answers the ticket's own question with a **no**: there is no fully
+source-compatible correction. A plain `T&` cannot be intercepted, because C++
+provides no mechanism by which a collection learns of a write through a
+reference it previously returned. Acceptance-criteria route (a) — declare the
+divergence permanent — was rejected, because the same `T&` is a **reproduced
+use-after-free** (four AddressSanitizer heap-use-after-free reports: across a
+reallocating `Add()` on both read and write, across `Clear()`, and across move
+assignment), not merely a fail-fast divergence. The selected architecture is a
+tracked proxy, `System::Collections::detail::ElementReference<T>`, chosen
+because it is the only alternative that closes the write path while keeping
+`list[i] = v` — the exact spelling C# uses — compiling.
+
+Three of the ticket's own premises were corrected rather than inherited. The
+indexer is **not** the widest hole: the non-const `ToVector()` hands out the
+whole backing `std::vector<T>&`, permitting `push_back`/`clear` — a *structural*
+mutation the guard never sees, previously undocumented anywhere. The migration
+premise was wrong for this repository: measured across **all 625 translation
+units** by compiling against a `[[deprecated]]`-tagged shim, the non-const
+indexer has **61 call sites, all in two test files**, and **no library source
+includes `List.hpp` at all** — while the CNA/mobile-eggbert burden stays real,
+unmeasured, and out of scope. And `IList<T>` has **four** implementers, not one
+(`List<T>`, `ObjectModel::Collection<T>`, `ObjectModel::ReadOnlyCollection<T>`,
+and a hand-written one in the test suite), found by compiling against the
+candidate header rather than by grepping — a `grep` for `public IList<` finds
+only the first.
+
+Measured source break, from four generated shims compiled against the whole
+repository at `-fsyntax-only`: the refined proxy breaks **1 site in 1 of 625
+translation units** — the hand-written implementer, i.e. migration — against
+**8 sites in 3 units** for the rejected value/setter alternative, of which only
+2 are genuine call-site breaks. The two figures are close and the decision is
+explicitly **not** made on them; it is made because the value alternative
+deletes `list[i] = v` from the API. Layout measured: `sizeof(List<T>)`
+**40 → 40** unchanged, `sizeof(ObjectModel::Collection<T>)` **32 → 40**, proxy
+16 bytes. The unavoidable cost, stated rather than buried: `list[i].member` and
+`list[i].method()` stop compiling for value-type elements, because `operator.`
+cannot be overloaded.
+
+Closure evidence: **14 new permanent regressions** in
+`ListIndexerVersionTests.cpp`, split into a `Contract` suite (must survive
+#1791) and a `Divergence` suite (each case asserting today's behaviour with
+.NET's named alongside, carrying `static_assert`s #1791 cannot land without
+editing); `SharpRuntimeTests_Collections_Core` **2,191/2,191** (was 2,177) with
+no existing assertion edited; `scripts/local_ci_check.sh build` at **13,477
+tests across 37 executables** (was 13,463), zero warnings and errors; 41
+modules/90 edges; validator tests 7/7; catalogue current; database consistent;
+`git diff --check` clean; Doxygen 1.9.8 unchanged at **1,938**/1,942.
+
+Two tickets were opened and deliberately not begun. **#1791**
+(`REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, P2, L, **blocked**) carries the
+implementation in two phases: Phase 1 (tracked `getItem`/`setItem`, a pure
+addition) needs **no** approval but does not close the defect; Phase 2 needs the
+exact four-part approval in design section 28 — public source breaks to
+`List<T>::operator[]` and to the `IList<T>` interface, an object-layout change
+to `Collection<T>`, and acknowledgement that CNA's usage is unmeasured. The
+#1771, #1780, and #1783 approvals do **not** carry over. **#1792**
+(`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`, P3, M, `todo`) records a **newly
+discovered defect**: `Generic::IEnumerator<T>::getCurrentProperty()` does
+`const_cast<T*>(&Current())` and publishes a mutable `void*` to the live element
+on a public interface, so a write through it mutates a collection mid-walk with
+the counter at rest. It affects **every** collection, not `List<T>`, which is
+why it is its own ticket and not absorbed. No new `SR-AUD-*` identifier.
+
+Tickets #1785, #1788, #1789, and #1773 remain untouched and inactive. No repair
+ticket is active.
 
 SR-AUD-362 (`FrozenDictionary::Create` duplicate keys) was reconciled
 conservatively alongside #1779, per that finding's own instruction to inspect
