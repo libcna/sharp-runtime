@@ -84,6 +84,12 @@ rules. Both must be obeyed together.
 
 ### SSD-saving rules — unchanged and still binding
 
+**Why this matters:** repeated from-scratch builds wrote **3.5 TB to this SSD in five days**
+(measured 2026-07-28), on top of the earlier ~270 GB / two-day scratchpad measurement. That is
+real, irreversible flash wear, not just wasted time. Every avoided full rebuild is avoided
+write endurance spent. **Reuse an existing build directory whenever it is usable** — a full
+reconfigure/rebuild is the exception that must be justified, never the default.
+
 10. Reuse the persistent build directories (`build`, `build-asan*`, `build-ubsan*`,
     `build-tsan*`, `build-probe-*`, `cmake-build-*`) instead of creating new ones.
 11. Prefer incremental builds. Do not clean, delete, or reconfigure a build tree unless it is
