@@ -3,11 +3,11 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-28. Branch: `feature/remediation-coll-sortedset-live-view`.
+*Last verified: 2026-07-28. Branch: `feature/remediation-coll-sortedset-count-race`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 13,069 tests across 37 executables. The repository-wide,
+dependency edges, and 13,098 tests across 37 executables. The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766). Remediation
 tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design),
 #1769 (LinkedListNode lifetime implementation), #1770 (raw `ICollection::CopyTo`
@@ -68,6 +68,16 @@ write-through handle onto the same tree, and the four adjacent defects #1782
 measured inside that surface are closed with it. See the "Completed SortedSet
 live-view implementation" section below for the exact source, semantic, symbol,
 and layout consequences.
+Follow-up ticket **#1784** (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`, P1, size S)
+then removed the one defect #1783 introduced and honestly reported against
+itself: its lazy per-view Count cache lived in two plain `mutable intcs` fields
+written by the `const` `getCountProperty()`, so concurrent read-only Count on a
+single view object was a ThreadSanitizer-confirmed C++ data race. The fields are
+now atomic with a release/acquire publication protocol, restoring the pre-#1783
+property that concurrent readers do not race, with object layout, symbols,
+public signatures, and every Count value unchanged. **SR-AUD-361 stays
+`remediated`** and #1784 carries no `SR-AUD-*` identifier; see "Completed
+SortedSet Count-cache race correction" below.
 **No ticket is active.** #1771 removed the
 pure virtual `CopyTo(void*, intcs)` from
 `System::Collections::ICollection` under explicit user approval, so this is a
@@ -1233,6 +1243,146 @@ separate future item that was not created. CNA and mobile-eggbert were not
 inspected, searched, configured, built, or modified; both intentionally remain
 on an older sharp-runtime revision. No push, merge, rebase, tag, or publication
 occurred.
+
+No repair ticket is active.
+
+### Completed SortedSet Count-cache race correction: ticket #1784
+
+**`P1: Eliminate SortedSet live-view Count cache data race`**
+(`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`, size S) is **done**, opened and closed
+2026-07-28 on local branch `feature/remediation-coll-sortedset-count-race`.
+
+This is a **post-audit defect found by ticket #1783's own ThreadSanitizer
+probe**, not an audit finding: it carries **no new `SR-AUD-*` identifier**,
+since the numbering is frozen at 364. **SR-AUD-361 stays `remediated`** — this
+corrects a defect introduced by that finding's remediation and does not reopen
+it. The paragraph above recording #1783's completion is left in place, including
+its own honest report that the race existed.
+
+Root cause: #1783 gave a bounded view the lazy Count cache .NET's `TreeSubSet`
+keeps (`count`/`_countVersion`), held in two plain `mutable intcs` fields that
+the **`const`** `getCountProperty()` wrote. Two threads reading Count through
+one unchanged view object performed conflicting non-atomic accesses — a C++
+data race and undefined behaviour, even though both calls are observationally
+read-only. #1783 classified this as acceptable because "`SortedSet<T>` claims no
+thread safety"; **that classification was wrong and is reversed here**. A data
+race is UB, not an unhelpful result; the operation is `const` and warns nobody
+at the call site; and it is a *regression*, since the pre-#1783 header's `const`
+members wrote nothing. The .NET comparison does not carry over either: a racing
+`int` write in the CLR is defined and merely stale, and .NET documents that its
+collections *do* support multiple concurrent readers.
+
+Pre-fix reproduction, gitignored `build-probe-sortedset/probe10_tsan_count_race.cpp`,
+ten modes under `-fsanitize=thread`, none of which ever mutates concurrently:
+`known-race` self-test **2 races** (TSan is active), `same-view-count`
+**1 race**, `readonly-enumeration` **1**, `nested-views` **2**,
+`overlapping-views` **2**; and clean pre-fix already for `copied-handles-count`,
+`independent-sets`, `fullset-count`, `sequential-count`, `view-churn`.
+`fullset-count` being clean pins the defect as view-specific, since the
+owning-set path returns `state_->data.size()` and never touches the cache. The
+diagnostic is `Read of size 4 … SortedSet.hpp:315` against
+`Previous write of size 4 … SortedSet.hpp:317`, both inside
+`getCountProperty() const`.
+
+Five alternatives were **measured**, not argued
+(`build-probe-sortedset/probe11_cache_alternatives.cpp` reproduces the real
+member sequence and varies only the cache): removing the cache gives
+`sizeof(SortedSet<int>)` 40 → **32**, a `std::mutex` **80**, a
+`std::shared_mutex` **96**, a published `shared_ptr` snapshot **48** — all
+breaking #1783's approved layout — while same-width atomics stay at exactly
+**40**/**104**. A cache moved into the shared `State` was rejected structurally:
+views have arbitrary overlapping bounds, so one shared count cache would need an
+unbounded keyed map, new allocation, and a new element-type requirement.
+
+Selected: **two `std::atomic<intcs>` fields with a release/acquire publication
+protocol** — count stored first (`relaxed`), version stored last (`release`),
+version loaded first (`acquire`). A reader that observes the new version
+therefore also observes the matching count, so the pair can never be read torn;
+two relaxed atomics would *not* have sufficed. With no concurrent mutation every
+racing thread computes the same value for the same version, so duplicate
+publication is harmless and no compare-exchange, retry, or lock is needed.
+`state_->version` deliberately stays plain. Two `static_assert`s pin
+`sizeof`/`alignof` so a platform that pads its atomics fails to compile rather
+than silently re-breaking the ABI.
+
+**The contract, now stated exactly in the header**, in two unequal halves:
+concurrent **mutation** is unsupported and undefined, and a set plus every view
+over it are one collection for that purpose — *no new promise of concurrent
+mutation safety is introduced*; concurrent **read-only** access is race-free,
+because no `const` member writes an unsynchronized field. The second half is
+what .NET documents for its own collections and what this header had before
+#1783. The type is still **not thread-safe**; it is merely free of *internal*
+races when read.
+
+**Compatibility: nothing changed.** `sizeof(SortedSet<int>)` **40**,
+`sizeof(SortedSet<std::string>)` **104**, `sizeof(Iterator)` **40**, `alignof`
+8, and all four value-semantics traits are byte-identical to #1783's stored
+probe output; the mangled `GetViewBetween` symbol is unchanged. No public
+signature, no semantic change, no consumer rebuild needed on this revision's
+account, and no new user approval was required. Count stays O(1) for an owning
+set and O(k) once per version for a view; the added cost is one acquire load and
+one release store, both plain `mov` on x86-64, with no allocation.
+
+Closure evidence:
+
+- 29 permanent regressions in
+  `modules/collections/tests/System/Collections/Generic/SortedSetCountCacheTests.cpp`
+  covering the functional Count matrix, the cache-sensitive properties, and
+  source/layout compatibility (the exact pointer-to-member type of fourteen
+  public members; the published sizes behind a 64-bit guard rather than an
+  unconditional `static_assert`, since this repository keeps no permanent
+  architecture-specific `sizeof` assertions);
+- post-fix ThreadSanitizer: **0 reports in all nine real modes**, with the
+  self-test still reporting 2, and #1783's own unmodified `probe9`
+  `shared-view-count` going **1 race → 0**;
+- ASan + UBSan + LeakSanitizer over both permanent suites: **76/76**, no
+  diagnostic, no leak, with LSan verified active by a deliberate-leak self-test
+  (4,112 bytes in 102 allocations reported);
+- `SharpRuntimeTests_Collections_Core` **1,812/1,812** (was 1,783);
+- `scripts/local_ci_check.sh build`: **13,098 tests across 37 executables**
+  (was 13,069), zero build warnings and zero errors. `README.md` and `CLAUDE.md`
+  were raised from the 13,069 floor to 13,098 only after this gate measured it;
+- `scripts/check_selective_components.sh` full ten-component matrix passes, and
+  `Collections.Core collections_sorted_set_view.cpp` additionally passes in
+  isolation (1,812 tests); the extended positive consumer fixture compiles
+  `-Wall -Wextra -Wpedantic -Werror` and exits 0, and the negative fixture is
+  still correctly rejected;
+- boundaries 41 modules/90 edges, validator tests 7/7, catalogue current,
+  database consistent, `git diff --check` clean;
+- `scripts/check_doxygen_warnings.sh` at **1,937**/1,942 — unchanged from the
+  pre-ticket count, five below the ceiling.
+
+Build directories used, all repository-local and gitignored: the existing
+`build` tree (incremental, `--parallel 4`), `build-probe-sortedset` (extended
+with `probe10`/`probe11` and a TSan build helper), `build-asan-sortedset`
+(extended with `build_1784.sh` and an LSan self-test), `build-consumer-1784`,
+and `build-tmp` as the repository-local `TMPDIR`. No build tree was created
+under `/tmp`, `/var/tmp`, or `/dev/shm`, and no existing build tree was cleaned
+or recreated.
+
+Two **inactive** tickets were opened and deliberately not begun, neither
+carrying a new `SR-AUD-*` identifier:
+
+- **#1785** (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, P3, XS) — the
+  nested-view exception-ordering divergence #1783 recorded in design section
+  30.4. A nested call that is simultaneously inverted *and* widening throws
+  `ArgumentException` here and `ArgumentOutOfRangeException` in .NET, because
+  design #1782 intentionally validates the argument pair before validating it
+  against object state. Changing that is a semantic decision, not a bug fix.
+  #1784 was explicitly scoped not to touch it.
+- **#1786** (`REMED-COLL-VERSION-COUNTER-OVERFLOW`, P3, S) — `State::version` is
+  `int32_t`, incremented without bound, and compared only for **equality** by
+  both the Count cache and `Iterator::checkVersion`. After `INT32_MAX` mutations
+  the increment is signed overflow (UB in C++, defined wrapping in .NET), and a
+  wrap to a previously observed value would silently accept a stale cache or
+  iterator. Both properties **predate #1783** (they arrived with ticket 1713)
+  and #1784 changed only the memory ordering, not the values, the type, or the
+  equality test. Likely repository-wide across every collection ticket 1713
+  touched, so the assessment must precede any change.
+
+Ticket #1773 remains `blocked` and untouched. CNA and mobile-eggbert were not
+inspected, searched, configured, built, or modified. No push, merge, rebase,
+tag, or publication occurred.
 
 No repair ticket is active.
 

@@ -606,3 +606,93 @@ sweep) remains `blocked` and untouched. Neither downstream repository was
 inspected, searched, configured, built, or modified; both intentionally remain
 on an older sharp-runtime revision and must perform a full rebuild and a
 `GetViewBetween` call-site audit whenever they choose to upgrade.
+
+## Post-remediation race correction: ticket #1784 (2026-07-28)
+
+*The #1783 record above is preserved unaltered, including its own report that
+the Count-cache race existed and was left unsynchronized. **SR-AUD-361 stays
+`remediated`**, the index counts stay at 354 open / ten `remediated`, and this
+ticket carries **no new `SR-AUD-*` identifier** — the numbering stays frozen at
+364. It corrects a defect introduced by that finding's remediation.*
+
+Ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`, P1, size S), opened and
+closed on local branch `feature/remediation-coll-sortedset-count-race`, reverses
+#1783's judgement that the Count-cache race was acceptable "since
+`SortedSet<T>` claims no thread safety". Three reasons: a C++ data race is
+**undefined behaviour**, not a stale-value nuisance; `getCountProperty()` is
+`const` and gives a caller no signal that reading Count performs a write; and it
+was a **regression**, because the pre-#1783 header's `const` members wrote
+nothing. The .NET parallel #1783 relied on does not transfer — a racing `int`
+write is defined in the CLR, and .NET documents that its collections support
+multiple concurrent **readers** as long as none mutates, which is precisely the
+half of the contract #1783 broke.
+
+Reproduced before any production change with a ten-mode ThreadSanitizer probe
+(`build-probe-sortedset/probe10_tsan_count_race.cpp`) that never mutates
+concurrently, so no report can originate from the unsupported case. Pre-fix:
+`same-view-count` **1 race**, `readonly-enumeration` **1**, `nested-views`
+**2**, `overlapping-views` **2**, with the `known-race` self-test reporting 2 to
+prove TSan active, and `fullset-count`, `copied-handles-count`,
+`independent-sets`, `sequential-count`, and `view-churn` already clean.
+`fullset-count` being clean pins the defect as **view-specific**: the owning-set
+path returns `state_->data.size()` and never touches the cache. Diagnostic:
+`Read of size 4 … SortedSet.hpp:315` against
+`Previous write of size 4 … SortedSet.hpp:317`, both in `getCountProperty() const`.
+
+Five alternatives were **measured**
+(`build-probe-sortedset/probe11_cache_alternatives.cpp`): removing the cache
+gives `sizeof(SortedSet<int>)` 40 → 32, a `std::mutex` 80, a `std::shared_mutex`
+96, a published `shared_ptr` snapshot 48 — all breaking the layout #1783 had
+approved — while same-width atomics stay at exactly 40 (104 for the
+`std::string` specialization). A cache moved into the shared `State` was
+rejected structurally: arbitrary overlapping view bounds would need an unbounded
+keyed map, new allocation, and a new element-type requirement. Selected: two
+`std::atomic<intcs>` fields with a **release/acquire publication protocol** —
+count stored first (`relaxed`), version stored last (`release`), version loaded
+first (`acquire`) — so the (count, version) pair can never be read torn. Two
+relaxed atomics would not have sufficed. `state_->version` deliberately stays
+plain, and two `static_assert`s make a padded-atomic platform a compile error
+rather than a silent ABI break.
+
+The header now states the contract as two unequal halves: concurrent
+**mutation** remains unsupported and undefined, with a set and every view over
+it one collection for that purpose and **no new promise of mutation safety**;
+concurrent **read-only** access is race-free, because no `const` member writes
+an unsynchronized field. The type is still not thread-safe — it is merely free
+of *internal* races when read.
+
+Post-fix: **0 ThreadSanitizer reports in all nine real modes**, self-test still
+reporting 2, and #1783's own unmodified `probe9` `shared-view-count` going
+**1 race → 0**. `sizeof(SortedSet<int>)` 40, `sizeof(SortedSet<std::string>)`
+104, `sizeof(Iterator)` 40, `alignof` 8, all four value-semantics traits, and
+the mangled `GetViewBetween` symbol are **byte-identical** to #1783's stored
+probe output, so this revision needs no consumer rebuild of its own account and
+required no new user approval.
+
+Evidence: 29 new permanent regressions in
+`modules/collections/tests/System/Collections/Generic/SortedSetCountCacheTests.cpp`;
+`SharpRuntimeTests_Collections_Core` **1,812/1,812** (was 1,783, with all 47
+`SortedSetLiveViewTests` and all 41 pre-existing SortedSet cases passing and no
+assertion edited); `scripts/local_ci_check.sh build` at **13,098 tests across 37
+executables** (was 13,069) with zero build warnings and zero errors, after which
+the recorded floor in `README.md` and `CLAUDE.md` was raised; ASan+UBSan+LSan
+**76/76** with LSan verified active by a deliberate-leak self-test (4,112 bytes
+in 102 allocations); boundaries 41 modules / 90 edges; validator tests 7/7;
+catalogue current; database consistent; `git diff --check` clean; Doxygen 1.9.8
+**unchanged at 1,937** against the 1,942 ceiling; all ten selective components
+plus `Collections.Core` in isolation; the extended positive consumer fixture
+compiling `-Wall -Wextra -Wpedantic -Werror` and exiting 0, with the negative
+`const`-caller fixture still correctly rejected.
+
+The **exception-ordering** divergence recorded in the #1783 material above is
+deliberately untouched and is now inactive ticket **#1785**
+(`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, P3), not begun. A separate
+pre-existing issue found during #1784's required overflow analysis —
+`State::version` is `int32_t`, incremented without bound, and compared only for
+**equality** by both the Count cache and `Iterator::checkVersion` — is inactive
+ticket **#1786** (`REMED-COLL-VERSION-COUNTER-OVERFLOW`, P3). Both predate
+#1783; neither receives a new `SR-AUD-*` identifier.
+
+Ticket #1773 remains `blocked` and untouched. CNA and mobile-eggbert were not
+inspected, searched, configured, built, or modified. No push, merge, rebase,
+tag, or publication occurred.

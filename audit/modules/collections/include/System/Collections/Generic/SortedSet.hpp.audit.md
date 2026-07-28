@@ -155,3 +155,80 @@ components pass with a repository-local `TMPDIR`; the positive standalone
 consumer fixture compiles `-Werror` against only `Collections.Core` and exits 0;
 and the negative fixture proving a `const` caller no longer compiles is
 correctly rejected.
+
+---
+
+## Post-remediation race correction (ticket #1784, 2026-07-28)
+
+*The original audit evidence and the #1782/#1783 notes above are preserved
+verbatim and unaltered, including the paragraph immediately above that records
+the Count-cache race as a deliberate non-goal of #1783. **SR-AUD-361 stays
+`remediated`.** This ticket corrects a defect introduced by that finding's own
+remediation; it does not reopen the live-view finding, does not change the
+findings-index counts (354 open, ten `remediated`), and carries **no new
+`SR-AUD-*` identifier** — the audit numbering stays frozen at 364.*
+
+Ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`, P1, size S) reverses the
+second of the two "deliberately did not do" items above. #1783 held the lazy
+per-view Count cache in two plain `mutable intcs` fields written by the `const`
+`getCountProperty()`, and classified the resulting race as acceptable because
+the type claims no thread safety. That classification was wrong on three counts:
+a C++ data race is undefined behaviour rather than a stale-value nuisance; the
+member is `const` and gives a caller no signal that reading Count is a write;
+and it was a **regression**, since the pre-#1783 header's `const` members wrote
+nothing at all. The .NET parallel does not hold either — a racing `int` write is
+defined in the CLR, and .NET documents that its collections support multiple
+concurrent readers as long as none mutates.
+
+Reproduced before any change, with a ten-mode ThreadSanitizer probe
+(`build-probe-sortedset/probe10_tsan_count_race.cpp`) that never mutates
+concurrently, so no report can come from the unsupported case. Pre-fix:
+`same-view-count` 1 race, `readonly-enumeration` 1, `nested-views` 2,
+`overlapping-views` 2, with the `known-race` self-test reporting 2 to prove TSan
+active, and `fullset-count`, `copied-handles-count`, `independent-sets`,
+`sequential-count`, and `view-churn` already clean. `fullset-count` being clean
+pins the defect as **view-specific**: the owning-set path returns
+`state_->data.size()` and never touches the cache. The diagnostic was
+`Read of size 4 … SortedSet.hpp:315` against
+`Previous write of size 4 … SortedSet.hpp:317`, both inside
+`getCountProperty() const`.
+
+Repair: the two cache fields become `std::atomic<intcs>` with a release/acquire
+publication protocol (count stored first `relaxed`, version stored last
+`release`, version loaded first `acquire`), so the pair can never be read torn.
+This was the only candidate that preserves #1783's approved object layout —
+measured, the alternatives give `sizeof(SortedSet<int>)` 32 (no cache), 80
+(`std::mutex`), 96 (`std::shared_mutex`), and 48 (published `shared_ptr`
+snapshot), against 40 for same-width atomics. `state_->version` stays plain, and
+**no promise of concurrent mutation safety is added**; the header now states the
+contract as two unequal halves, unsupported concurrent mutation and race-free
+concurrent read-only access.
+
+Post-fix: 0 ThreadSanitizer reports in all nine real modes with the self-test
+still reporting 2, and #1783's own unmodified `probe9` `shared-view-count` going
+from 1 race to 0. `sizeof(SortedSet<int>)` 40, `sizeof(SortedSet<std::string>)`
+104, `sizeof(Iterator)` 40, `alignof` 8, all four value-semantics traits, and
+the mangled `GetViewBetween` symbol are byte-identical to #1783's stored probe
+output, so this revision needs no consumer rebuild of its own and required no
+new user approval.
+
+Closure gates: 29 new permanent regressions in `SortedSetCountCacheTests.cpp`;
+`SharpRuntimeTests_Collections_Core` 1,812/1,812 (was 1,783, with all 47
+`SortedSetLiveViewTests` and all 41 pre-existing SortedSet cases passing and no
+assertion edited); `scripts/local_ci_check.sh build` 13,098 tests across 37
+executables with zero warnings and zero errors; ASan+UBSan+LeakSanitizer 76/76
+with LSan verified active by a deliberate-leak self-test; 41 modules / 90 edges;
+validator tests, catalogue check, database consistency, and `git diff --check`
+all clean; Doxygen unchanged at 1,937 against the 1,942 ceiling; all ten
+selective components plus `Collections.Core` in isolation; the extended positive
+consumer fixture compiling `-Werror` and exiting 0, with the negative fixture
+still correctly rejected.
+
+The **exception-ordering** divergence recorded above is deliberately untouched
+by #1784 and is now tracked as inactive ticket **#1785**
+(`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, P3), not begun. A separate
+pre-existing issue found during #1784's required overflow analysis — `State::version`
+is `int32_t`, incremented without bound, and compared only for equality by both
+the Count cache and `Iterator::checkVersion` — is tracked as inactive ticket
+**#1786** (`REMED-COLL-VERSION-COUNTER-OVERFLOW`, P3). Both predate #1783;
+neither receives a new `SR-AUD-*` identifier.

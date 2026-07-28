@@ -1580,3 +1580,394 @@ implementation commit restores the previous header exactly. Reverting only the
 live-view behavior while keeping the safer representation (fallback E′) is still
 possible but is no longer a single revert, since the change landed as one
 rewrite.
+
+---
+
+## 31. Post-implementation race correction (ticket #1784, 2026-07-28)
+
+*Added by ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`, P1, size S) on
+local branch `feature/remediation-coll-sortedset-count-race`. Sections 1–30 are
+the design record of ticket #1782 and the implementation record of ticket
+#1783 and are preserved unaltered — including §30.5, which is where this defect
+was first measured and reported. Nothing below rewrites history to read as
+though the lazy cache was never implemented: the cache is still there, still
+lazy, still per-view, and still mirrors .NET's `TreeSubSet.count`/`_countVersion`.
+Only the way its two fields are written changed.*
+
+*This ticket does **not** reopen SR-AUD-361, which stays `remediated`. It
+corrects a defect introduced by that finding's own remediation.*
+
+### 31.1 The defect
+
+§30.5 recorded, as a newly found consequence rather than a defect, that a
+view's `getCountProperty()` is `const` but fills the per-object lazy Count
+cache, so two threads calling it on the same view object race. #1783 classified
+that as acceptable because "`SortedSet<T>` claims no thread safety".
+
+That classification was wrong, and this ticket reverses it. The reasoning has
+three steps:
+
+1. A C++ data race is **undefined behaviour**, not merely an unhelpful result.
+   Two conflicting non-atomic accesses to the same scalar with no
+   happens-before edge make the whole program ill-formed, no diagnostic
+   required — the compiler may assume it cannot happen and optimize
+   accordingly. "The type promises nothing" does not downgrade UB into a
+   documented limitation.
+2. The operation is **observationally read-only**. `getCountProperty()` is
+   `const`, takes no lock, returns a number, and changes nothing a caller can
+   see. Nothing in its signature or documentation warns that calling it is a
+   write. Every other `const` member of this class is genuinely read-only, so
+   the hazard is invisible at the call site.
+3. It is a **regression**, not an inherited limitation. The pre-#1783 header's
+   `const` members wrote nothing at all, so concurrent read-only use of one
+   `SortedSet<T>` object was race-free before this remediation and stopped
+   being race-free because of it. §30.5 says exactly this and then declines to
+   act on it.
+
+The .NET comparison #1783 relied on does not carry over either. .NET's
+`TreeSubSet` really does cache `count`/`_countVersion` from its `Count` getter
+(`SortedSet.TreeSubSet.cs`, `VersionCheckImpl`), but in the CLR a torn or
+racing `int` write is not undefined behaviour — `int` writes are atomic by
+specification, so the worst case there is a stale-but-valid number. The C++
+port inherits the design and not that guarantee. Moreover, .NET documents the
+opposite of what #1783 assumed for its collections: multiple concurrent
+**readers** are supported as long as nobody writes. #1783's cache broke that
+half of the contract while claiming to match .NET.
+
+### 31.2 Pre-fix reproduction
+
+Repository-local, gitignored probe
+`build-probe-sortedset/probe10_tsan_count_race.cpp`, built by
+`build-probe-sortedset/build_tsan.sh` with
+`-std=c++23 -Wall -Wextra -Wpedantic -g -O1 -fsanitize=thread`. Every mode is
+read-only once its worker threads start; concurrent **mutation** is never
+exercised, because it is unsupported before and after this ticket and a report
+produced by it would say nothing about this defect.
+
+| Mode | What it does | Pre-fix | Post-fix |
+|---|---|---:|---:|
+| `known-race` | TSan self-test: unsynchronized `int` increment | **2 races** | **2 races** |
+| `same-view-count` | 8 threads, `getCountProperty()` on **one** view object, no mutation | **1 race** | **0** |
+| `readonly-enumeration` | Count + `Contains` + iteration + `Min`/`Max` + `ToVector` on one view object | **1 race** | **0** |
+| `nested-views` | Count on a nested view object and on its parent view | **2 races** | **0** |
+| `overlapping-views` | Count on two overlapping view objects over one state | **2 races** | **0** |
+| `copied-handles-count` | each thread owns a distinct copied view handle | 0 | **0** |
+| `independent-sets` | each thread owns an independent full-set copy | 0 | **0** |
+| `fullset-count` | 8 threads, Count on one **owning full set** object | 0 | **0** |
+| `sequential-count` | the identical call sequence, single-threaded | 0 | **0** |
+| `view-churn` | repeated view creation and destruction, no mutation | 0 | **0** |
+
+The self-test reporting 2 races in **both** columns is what makes the zeroes
+evidence: ThreadSanitizer is instrumenting the post-fix binary, not silently
+inert. Every mode also asserts its exact expected Count on every observation
+(`inconsistent-observations=0` throughout, before and after).
+
+`fullset-count` being clean pre-fix pins the defect precisely: the owning-set
+path returns `state_->data.size()` and never touches the cache, so only the
+**view** path was affected. #1783's own probe,
+`build-probe-sortedset/probe9_tsan_readonly.cpp`, was re-run unmodified against
+the corrected header for direct before/after continuity: its `shared-view-count`
+mode goes from **1 race to 0**, with `known-race` still reporting 2.
+
+The exact pre-fix diagnostic
+(`build-probe-sortedset/probe10_prefix_same-view-count.log`):
+
+```
+WARNING: ThreadSanitizer: data race (pid=515048)
+  Read of size 4 at 0x7ffdaeef08f4 by thread T2:
+    #0 System::Collections::Generic::SortedSet<int>::getCountProperty() const
+       modules/collections/include/System/Collections/Generic/SortedSet.hpp:315
+  Previous write of size 4 at 0x7ffdaeef08f4 by thread T1:
+    #0 System::Collections::Generic::SortedSet<int>::getCountProperty() const
+       modules/collections/include/System/Collections/Generic/SortedSet.hpp:317
+```
+
+Line 315 is `if (cachedCountVersion_ != state_->version)`; line 317 is
+`cachedCountVersion_ = state_->version`. The racing object is the view's own
+cache pair, exactly as §30.5 described.
+
+### 31.3 Alternatives evaluated
+
+All five were measured, not argued. `build-probe-sortedset/probe11_cache_alternatives.cpp`
+reproduces `SortedSet<T>`'s exact member sequence and varies only the cache
+representation, so `sizeof`/`alignof` of each shape is what a consumer's object
+layout would actually see:
+
+| Alternative | `SortedSet<int>` | `SortedSet<std::string>` | Layout vs #1783 |
+|---|---:|---:|---|
+| **current (#1783)**, two plain `intcs` | 40 | 104 | — (the racing baseline) |
+| **A** remove the cache | 32 | 96 | ❌ **broken** |
+| **B** two same-width atomics ***(SELECTED)*** | **40** | **104** | ✅ **preserved** |
+| **B′** one packed 64-bit atomic | 40 | 104 | ✅ preserved |
+| **C** `std::mutex` per view | 80 | 144 | ❌ broken (+100%) |
+| **C′** `std::shared_mutex` per view | 96 | 160 | ❌ broken (+140%) |
+| **E** immutable snapshot via `shared_ptr` | 48 | 112 | ❌ broken |
+
+**Alternative A — remove the cache.** Eliminates the race by construction and
+is the simplest possible code. Rejected on two independent grounds. It breaks
+the object layout the user approved under #1783 (40 → 32, 104 → 96), and
+keeping the now-dead fields to hold the layout would leave two unread private
+members — a `-Wunused-private-field` warning under Clang, against a repository
+rule of zero warnings, and precisely the "misleading active-cache" residue this
+ticket was told not to leave behind. It also makes every view `Count` an O(k)
+walk of the k in-range elements with no amortization, so a `Count` in a loop
+over a large view becomes quadratic, and `getIsEmptyProperty()` — which routes
+through `Count` — degrades from amortized O(1) to O(k). .NET keeps the cache
+for exactly this reason.
+
+**Alternative B — atomic cache fields (selected).** `std::atomic<intcs>` is
+4 bytes with 4-byte alignment on every supported toolchain (measured:
+`sizeof=4 alignof=4 is_always_lock_free=1`), so it occupies the same storage
+as the plain field it replaces and the object layout is preserved byte for
+byte. The concern the brief raised — *can a pair of independent atomics
+publish a consistent version/count pair?* — is real, and the answer is yes
+**only** with an ordered publication protocol, which §31.4 specifies. Two
+relaxed atomics would not be enough: a reader could observe the new version
+before the matching count store became visible and return the previous count.
+ABA and version wrap are unchanged by this alternative and are analysed
+separately in §31.6. Copy, move, and assignment are unaffected because the
+class already declares all five special members explicitly and never
+copy-constructs the cache; the atomics are reset, not copied. This does **not**
+make the collection thread-safe and is not intended to: it removes an internal
+write from a read path, restoring the pre-#1783 property that concurrent
+readers do not race.
+
+**Alternative B′ — one packed 64-bit atomic.** Equally layout-preserving
+(measured 40/104, because a single 8-byte-aligned member and two 4-byte
+members occupy the same tail slot in an 8-aligned object) and it makes pair
+consistency structural rather than protocol-dependent — a single atomic can
+never be read torn, so §31.4's ordering argument would be unnecessary. Rejected
+narrowly, on reviewability: it replaces two fields whose names map one-to-one
+onto .NET's `count` and `_countVersion` with one bit-packed integer plus
+shift/mask accessors, losing the direct correspondence to the reference
+implementation for a correctness margin the release/acquire protocol already
+provides. Recorded here as a viable fallback if the protocol ever proves
+fragile in review.
+
+**Alternative C — synchronized per-view cache.** A `std::mutex` doubles the
+object (40 → 80) and a `std::shared_mutex` more than doubles it (40 → 96),
+both breaking the approved layout. Worse, both make the class
+non-copy-assignable and non-move-constructible unless the special members are
+rewritten to skip the lock, and locking inside a `const` getter would advertise
+a synchronization guarantee that the surrounding class — whose element reads,
+`Add`, and `Remove` remain entirely unlocked — does not honour. Callers would
+reasonably infer more safety than exists. Rejected.
+
+**Alternative D — cache in the shared `State`.** Structurally wrong for this
+type. The cache is keyed by *range*, and arbitrary views over one state have
+arbitrary, overlapping, nested bounds, so a single shared count cache would
+thrash between views and answer the wrong range unless it were keyed. Keying it
+means an unbounded map from bounds-pair to count living in `State`, growing
+without limit as views are created, needing its own synchronization for the
+same reason the per-view field did, and requiring `T` to be hashable or
+further ordered. That is a large amount of new machinery, new allocation on the
+`Count` path, and a new element-type requirement, to solve a problem two
+atomics solve for free. Rejected; no keyed cache is justified by any measured
+evidence here.
+
+**Alternative E — immutable published snapshot.** Publishing a
+`shared_ptr<const CountSnapshot>` gives structural pair consistency like B′,
+but grows the object (40 → 48, measured) and allocates a fresh control block
+plus snapshot on **every** recomputation — that is, once per version per view,
+which for the alternating mutate/read pattern is once per mutation. It
+therefore violates the brief's "no new allocation on the Count path" constraint
+without buying anything B′ does not already give for free. Rejected.
+
+### 31.4 Selected solution and its publication protocol
+
+The two cache fields become same-width atomics, and the class documents a
+two-step protocol that the writer and the reader must obey together:
+
+```cpp
+static constexpr intcs kCountNotCached = -1;
+mutable std::atomic<intcs> cachedCount_{0};
+mutable std::atomic<intcs> cachedCountVersion_{kCountNotCached};
+
+[[nodiscard]] intcs getCountProperty() const {
+    if (!getIsViewProperty()) return static_cast<intcs>(state_->data.size());
+    const intcs currentVersion = state_->version;
+    if (cachedCountVersion_.load(std::memory_order_acquire) == currentVersion)
+        return cachedCount_.load(std::memory_order_relaxed);
+    const auto computed = static_cast<intcs>(std::distance(rangeBegin(), rangeEnd()));
+    cachedCount_.store(computed, std::memory_order_relaxed);
+    cachedCountVersion_.store(currentVersion, std::memory_order_release);
+    return computed;
+}
+```
+
+The version is the **publishing** field: it is written last, with `release`,
+and read first, with `acquire`. A reader that observes the new version
+therefore also observes the count store that happened before the release, so
+the (count, version) pair can never be read torn. The count's own accesses are
+`relaxed` because the version's ordering already sequences them.
+
+Why duplicate publication is harmless: within the supported model no thread is
+mutating during a concurrent read window, so `state_->version` is fixed and
+every racing thread computes the **same** count for it. Two threads may both
+recompute and both store, but they store identical values. The protocol exists
+to order the pair, not to arbitrate between conflicting results, so no
+compare-exchange, no retry loop, and no lock is needed.
+
+`state_->version` itself deliberately stays a plain `intcs`. Making it atomic
+would be pure cost — nothing writes it during a legal concurrent read window —
+and would falsely suggest that concurrent mutation had become defined.
+
+The three assignment paths that must not inherit a value computed for state the
+handle no longer refers to (move construction, copy assignment, move
+assignment) route through one new private helper, `invalidateCountCache()`,
+which follows the same ordering rule: count first, version last with `release`.
+
+Two `static_assert`s in the header pin the layout claim rather than trusting
+it, so a platform that ever pads its atomics fails to compile instead of
+silently re-breaking the ABI:
+
+```cpp
+static_assert(sizeof(std::atomic<intcs>) == sizeof(intcs));
+static_assert(alignof(std::atomic<intcs>) == alignof(intcs));
+```
+
+Lock-freedom is *not* `static_assert`ed. It is measured
+(`std::atomic<intcs>::is_always_lock_free == 1` on this toolchain) and
+documented, but a hypothetical platform with a locked 32-bit atomic would still
+be **correct** — merely slower — and would allocate nothing, so failing the
+build there would cost portability for no correctness gain.
+
+### 31.5 The concurrency contract, stated exactly
+
+This is now written in `SortedSet.hpp`'s class doc-comment and is the
+authoritative statement. It has two deliberately unequal halves:
+
+- **Concurrent mutation is unsupported and undefined.** If any thread mutates,
+  no other thread may touch the collection at all. An owning set and every view
+  derived from it are **one collection** for this purpose, so mutating through
+  a view while reading through the parent is exactly as undefined as mutating a
+  single set while reading it. `state_->data` and `state_->version` are
+  non-atomic and deliberately stay that way. **No new promise of concurrent
+  mutation safety is introduced by this ticket**, and none is planned.
+- **Concurrent read-only access is race-free.** No `const` member of the class
+  writes to an unsynchronized field, so any number of threads may call
+  `getCountProperty()`, `Contains()`, `getMinProperty()`, `getMaxProperty()`,
+  `ToVector()`, the read-only set predicates, or iterate — on the *same* object
+  or on distinct handles over the same shared state — for as long as nobody
+  mutates. This is the guarantee .NET documents for its own collections, it is
+  the property the pre-#1783 header had, and restoring it is the entire content
+  of this ticket.
+
+Reference-count updates on the shared state remain atomic, so copying and
+destroying handles on different threads cannot corrupt the control block —
+§19's claim, unchanged and re-verified by the `view-churn` mode.
+
+The type is therefore still **not thread-safe**. It is merely free of
+*internal* races when read, which is a strictly weaker and much more ordinary
+guarantee.
+
+### 31.6 Version type and overflow analysis
+
+Requested explicitly, and bounded deliberately.
+
+`intcs` is `int32_t` (`SharpRuntimeHelper.hpp:50`). `State::version` starts at
+0 and is only ever incremented, by `++state_->version`, from `Add`, `Remove`,
+and `Clear` when they actually change the set. Three consequences:
+
+1. **Signed overflow.** After `INT32_MAX` effective mutations, `++version` is
+   signed-integer overflow — undefined behaviour in C++, where the same
+   `version++` in .NET wraps in a defined way. This is **pre-existing**: the
+   counter, its type, and its increment all predate #1783 (they arrived with
+   ticket 1713's fail-fast enumerator work) and this ticket changes none of
+   them.
+2. **Equality is the only comparison, so uniqueness matters.** Both the Count
+   cache (`cachedCountVersion_ == currentVersion`) and the `Iterator` guard
+   (`version_ != state_->version`) test equality alone. If the counter ever
+   wrapped to a previously observed value, a stale cache or a stale iterator
+   would be silently accepted as current. Reaching that needs 2^32 mutations on
+   one state between the two observations.
+3. **The sentinel.** `kCountNotCached` is `-1`, which the counter cannot hold
+   without first overflowing; the same assumption the #1783 code made.
+
+The chosen fix **does not change this risk in either direction**. It reads and
+writes the identical values with the identical equality test; only the memory
+ordering of the accesses changed. Widening or redesigning the counter would be
+a general version-counter change touching `Iterator`, every mutator, and the
+enumerator contract — explicitly out of this ticket's scope. It is recorded as
+inactive ticket **#1786** (`REMED-COLL-VERSION-COUNTER-OVERFLOW`, P3), with no
+new `SR-AUD-*` identifier, and was not begun.
+
+### 31.7 Compatibility, measured
+
+Re-measured with `build-probe-sortedset/probe8_postfix_layout_symbols.cpp`, the
+same probe #1783 used, and `diff`ed against #1783's stored output:
+
+| Measurement | #1783 | #1784 |
+|---|---:|---:|
+| `sizeof(SortedSet<int>)` | 40 | **40** |
+| `sizeof(SortedSet<std::string>)` | 104 | **104** |
+| `sizeof(SortedSet<int>::Iterator)` | 40 | **40** |
+| `alignof` (both) | 8 | **8** |
+| `is_polymorphic` | 0 | **0** |
+| `is_trivially_copyable` | 0 | **0** |
+| `is_nothrow_move_constructible` | 1 | **1** |
+| `is_copy_assignable` | 1 | **1** |
+
+The two log files are byte-identical. The mangled `GetViewBetween` symbol is
+unchanged as well —
+`_ZN6System11Collections7Generic9SortedSetIiE14GetViewBetweenERKiS5_`, matching
+#1783's recorded symbol exactly.
+
+- **Public source compatibility: unaffected.** No signature, return type,
+  parameter, or `const` qualification changed. The permanent suite asserts the
+  exact pointer-to-member type of fourteen public members, so a change is a
+  compile error rather than a silent break.
+- **Object layout / ABI: unaffected.** Identical `sizeof`, `alignof`, traits,
+  and symbols. Unlike #1783, this revision needs **no** consumer rebuild on its
+  own account, and it required no new user approval.
+- **Semantic: unaffected.** Every Count value, propagation path, exception, and
+  iterator-invalidation result is unchanged; the 47 `SortedSetLiveViewTests`
+  cases and all 41 pre-existing SortedSet cases pass with no assertion edited.
+- **Performance: unchanged in complexity, negligible in constant.** Count stays
+  O(1) for an owning set and O(k) once per version for a view, amortized O(1)
+  across repeated reads. The added cost is one acquire load on the hit path and
+  one release store on the miss path; on x86-64 both compile to plain `mov`
+  instructions, since the architecture provides acquire/release ordering for
+  aligned loads and stores without a fence. No allocation is added anywhere.
+- **One new include**, `<atomic>` — a standard header, no new module or
+  component dependency. Boundaries stay at 41 modules / 90 edges.
+
+### 31.8 Verification
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 4` | 0 errors, 0 warnings |
+| `SharpRuntimeTests_Collections_Core` | **1,812** passed (1,783 before, +29 new) |
+| 47 `SortedSetLiveViewTests` + 41 pre-existing SortedSet cases | pass **unchanged**, no assertion edited |
+| ThreadSanitizer, 10 modes | **0 reports** in all nine real modes; self-test still reports 2 |
+| #1783's own `probe9` `shared-view-count`, unmodified | **1 race → 0** |
+| ASan + UBSan + LeakSanitizer over both permanent suites | 76/76 pass, no diagnostic, no leak |
+| LeakSanitizer activity | confirmed by deliberate-leak self-test (4,112 bytes in 102 allocations reported, exit 1) |
+| ABI/layout probe vs #1783 baseline | **byte-identical**, symbols unchanged |
+| Consumer fixture `collections_sorted_set_view.cpp`, `-Wall -Wextra -Wpedantic -Werror` | compiles, exits 0 |
+| Negative fixture (`const` caller) | still correctly **rejected** |
+| `check_selective_components.sh Collections.Core collections_sorted_set_view.cpp` | isolated check passed, 1,812 tests |
+| `check_selective_components.sh` (full 10-component matrix) | all 10 pass |
+
+### 31.9 What this ticket deliberately did not touch
+
+- **SR-AUD-361 stays `remediated`.** This corrects a post-remediation defect;
+  it does not reopen the live-view finding.
+- **The §30.4 nested-view exception-ordering divergence from .NET is
+  unchanged.** It is a deliberate semantic decision from #1782's design and
+  needs its own decision before any change. Recorded as inactive ticket
+  **#1785**; not begun.
+- **`GetViewBetween` semantics, shared `State` ownership, inclusive bounds,
+  nested-view narrowing, shared mutation versioning, and #1783's
+  copy/move/assignment behaviour** are all preserved exactly.
+- **No general thread safety was added**, no mutation path was synchronized,
+  and no other collection was touched.
+
+### 31.10 Rollback
+
+Reverting the single implementation commit restores #1783's plain-`intcs` cache
+and, with it, the data race. The permanent suite would still pass — a data race
+is invisible to an uninstrumented run — so a revert must be validated by
+re-running `build-probe-sortedset/probe10_tsan_count_race.cpp` under
+ThreadSanitizer, not by CTest alone. Alternative B′ (§31.3) is the drop-in
+replacement if the two-atomic protocol is ever judged too subtle.

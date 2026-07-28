@@ -198,6 +198,24 @@ singleton leaves the other independently unsafe.  See SR-AUD-010 and:
 - `modules/core/src/System/Guid.cpp.audit.md`;
 - `modules/core/tests/System/GuidTests.cpp.audit.md`.
 
+**Related, but deliberately not a member (ticket #1784, 2026-07-28):** the
+`SortedSet<T>` live-view Count-cache race that ticket #1783 introduced and
+ticket #1784 removed is **not** a CCF-009 instance and must not be counted as
+one. It shares this cause's *symptom* — a TSan-confirmed unsynchronized write
+reached through an API that does not look like a mutation — but not its cause.
+CCF-009 is about **process-wide singleton** state that every caller shares
+whether they know it or not, so no caller can opt out and a repair must
+introduce a real ownership boundary. #1784's defect was **per-object** state on
+a caller-owned instance, so the ordinary "do not share an object across threads
+without synchronizing" rule already covered mutation; what was wrong was that a
+`const`, observationally read-only member wrote at all. It carries no
+`SR-AUD-*` identifier (the numbering is frozen at 364), was fixed by making the
+two cache fields atomic with a release/acquire publication protocol rather than
+by adding a synchronization boundary, and adds **no** thread-safety guarantee.
+This cause's membership list is unchanged. See
+`docs/SortedSetLiveViewDesign.md` §31 and
+`audit/modules/collections/include/System/Collections/Generic/SortedSet.hpp.audit.md`.
+
 ## CCF-010 — raw C++ ordering is not the .NET comparison contract for floating values
 
 `MemoryExtensions` and `Array` both choose raw `<` and `==` for their default

@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,783 rows: 1,781 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), and ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`) — one `wontfix` (#1772, obsoleted by #1771) and one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep); no `todo`, `doing`, or `needs_user` rows |
+| `ticket` | 1,786 rows: 1,782 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), and ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`) — one `wontfix` (#1772, obsoleted by #1771), one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep), and two deliberately inactive `todo` rows opened by #1784 and not begun (#1785 `REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, #1786 `REMED-COLL-VERSION-COUNTER-OVERFLOW`); no `doing` or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -693,6 +693,79 @@ with a repository-local `TMPDIR` (run this time, because a public header
 changed); and a clean ASan+UBSan+LeakSanitizer campaign with LSan verified
 active. Ticket #1773 stays `blocked`; CNA and mobile-eggbert were not inspected
 or modified.
+
+Ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`, P1, size S), opened and
+closed 2026-07-28 on local branch `feature/remediation-coll-sortedset-count-race`,
+then removed the second of those two limitations. It is a **post-audit defect
+with no `SR-AUD-*` identifier** (the numbering stays frozen at 364), and
+**SR-AUD-361 stays `remediated`** — this corrects a defect introduced by that
+finding's remediation rather than reopening it, so the index counts are
+unchanged at 354 open and ten `remediated`.
+
+#1783's judgement that the race was acceptable "since `SortedSet<T>` claims no
+thread safety" is reversed here on three grounds: a C++ data race is undefined
+behavior rather than a merely unhelpful result; `getCountProperty()` is `const`
+and warns nobody at the call site that calling it is a write; and it was a
+*regression*, because the pre-#1783 header's `const` members wrote nothing. The
+.NET comparison does not transfer either — a racing `int` write is defined in
+the CLR, and .NET documents that its collections support multiple concurrent
+readers.
+
+Five repair alternatives were **measured** rather than argued
+(`build-probe-sortedset/probe11_cache_alternatives.cpp`): removing the cache
+gives `sizeof(SortedSet<int>)` 40 → 32, a `std::mutex` 80, a `std::shared_mutex`
+96, and a published `shared_ptr` snapshot 48 — every one breaking the layout
+#1783 had approved — while same-width atomics stay at exactly 40 and 104. A
+cache relocated into the shared `State` was rejected structurally, since
+arbitrary overlapping view bounds would require an unbounded keyed map, new
+allocation, and a new element-type requirement. Selected: two
+`std::atomic<intcs>` fields with a release/acquire publication protocol — count
+stored first (`relaxed`), version stored last (`release`), version loaded first
+(`acquire`) — so the (count, version) pair can never be read torn. Two relaxed
+atomics would not have sufficed. `state_->version` deliberately stays plain, and
+two `static_assert`s make a padded-atomic platform a compile error rather than a
+silent ABI break.
+
+The header now states the contract in two unequal halves: concurrent **mutation**
+stays unsupported and undefined, with a set and every view over it one collection
+for that purpose and **no new promise of mutation safety**; concurrent
+**read-only** access is race-free, because no `const` member writes an
+unsynchronized field. The type is still not thread-safe — it is merely free of
+*internal* races when read.
+
+Compatibility is unchanged in every layer: `sizeof(SortedSet<int>)` 40,
+`sizeof(SortedSet<std::string>)` 104, `sizeof(Iterator)` 40, `alignof` 8, all
+four value-semantics traits, and the mangled `GetViewBetween` symbol are
+byte-identical to #1783's stored probe output, so no consumer rebuild is needed
+on this revision's account and no new user approval was required. Count keeps its
+complexity — O(1) for an owning set, O(k) once per version for a view — and
+allocates nothing.
+
+Closure evidence: 29 new permanent regressions in `SortedSetCountCacheTests.cpp`
+(functional Count matrix, cache-sensitive properties, and the exact
+pointer-to-member type of fourteen public members, with the published sizes
+behind a 64-bit guard rather than an unconditional `static_assert`); post-fix
+ThreadSanitizer clean in all nine real modes with the self-test still reporting
+2, and #1783's own unmodified probe going 1 race → 0; ASan+UBSan+LSan 76/76 with
+LSan verified active by a deliberate-leak self-test;
+`SharpRuntimeTests_Collections_Core` 1,812/1,812 (was 1,783);
+`scripts/local_ci_check.sh build` at **13,098 tests across 37 executables** (was
+13,069), zero warnings and errors, after which the 13,069 floor in `README.md`
+and `CLAUDE.md` was raised; all ten selective components passing plus
+`Collections.Core` in isolation; the extended positive consumer fixture
+compiling `-Werror` and exiting 0 with the negative fixture still rejected;
+41 modules/90 edges; validator tests 7/7; catalogue current; database
+consistent; `git diff --check` clean; Doxygen 1.9.8 unchanged at **1,937**/1,942.
+
+Two **inactive** tickets were opened and not begun, neither with a new
+`SR-AUD-*` identifier: **#1785** (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`,
+P3, XS) for the nested-view exception-ordering divergence #1783 recorded, which
+needs a semantic decision rather than a bug fix; and **#1786**
+(`REMED-COLL-VERSION-COUNTER-OVERFLOW`, P3, S) for the `int32_t` mutation-version
+counter, which is incremented without bound and compared only for equality by
+both the Count cache and `Iterator::checkVersion`. Both properties predate #1783
+— they arrived with ticket 1713 — and #1784 changed only memory ordering, not
+the values, the type, or the equality test.
 
 No repair ticket is active.
 
