@@ -496,8 +496,12 @@ TEST(HashtableNullKey, NonNullRawKeysStillWork) {
     EXPECT_EQ(table.getCountProperty(), 2);
     EXPECT_TRUE(table.Contains(&firstAnchor));
     EXPECT_TRUE(table.Contains(&secondAnchor));
-    ASSERT_NE(table.getItem(&firstAnchor), nullptr);
-    EXPECT_EQ(std::any_cast<int>(*static_cast<std::any*>(table.getItem(&firstAnchor))), 10);
+    // Ticket #1796: getItem() returns an owning std::any by value. A present key is
+    // now tested with has_value() rather than against nullptr, and the value is
+    // recovered with one std::any_cast instead of a static_cast through a raw pointer
+    // into live map storage.
+    ASSERT_TRUE(table.getItem(&firstAnchor).has_value());
+    EXPECT_EQ(std::any_cast<int>(table.getItem(&firstAnchor)), 10);
 
     table.Remove(static_cast<const void*>(&firstAnchor));
     EXPECT_FALSE(table.Contains(&firstAnchor));

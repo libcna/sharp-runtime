@@ -524,7 +524,8 @@ TEST(DictionaryEnumeratorKeyIntegrity, ListDictionaryInternalKeyBoxIsAHandleNotA
     EXPECT_EQ(dictionary.getCountProperty(), 1);
     EXPECT_TRUE(dictionary.Contains(&key));
     EXPECT_FALSE(dictionary.Contains(&otherKey));
-    EXPECT_EQ(dictionary.getItem(&key), static_cast<void*>(&value));
+    // Ticket #1796: getItem() returns an owning std::any boxing the stored void*.
+    EXPECT_EQ(std::any_cast<void*>(dictionary.getItem(&key)), static_cast<void*>(&value));
 }
 
 // ===========================================================================

@@ -31,13 +31,18 @@ TEST(ListDictionaryInternalTest, GetItemFound) {
     ListDictionaryInternal d;
     int k = 42, v = 99;
     d.Add(&k, &v);
-    EXPECT_EQ(d.getItem(&k), &v);
+    // Ticket #1796: getItem() returns an owning std::any boxing the stored void*,
+    // not the raw pointer itself. The boxed pointer is still the caller's own -- this
+    // implementation stores no value data of its own -- so only the spelling changed.
+    EXPECT_EQ(std::any_cast<void*>(d.getItem(&k)), &v);
 }
 
 TEST(ListDictionaryInternalTest, GetItemNotFound) {
     ListDictionaryInternal d;
     int k = 1;
-    EXPECT_EQ(d.getItem(&k), nullptr);
+    // Ticket #1796: an absent key reads as an EMPTY std::any where it used to read as
+    // nullptr, matching .NET's indexer getter returning null.
+    EXPECT_FALSE(d.getItem(&k).has_value());
 }
 
 TEST(ListDictionaryInternalTest, SetItemUpdatesExisting) {
@@ -45,7 +50,7 @@ TEST(ListDictionaryInternalTest, SetItemUpdatesExisting) {
     int k = 1, v1 = 10, v2 = 20;
     d.Add(&k, &v1);
     d.setItem(&k, &v2);
-    EXPECT_EQ(d.getItem(&k), &v2);
+    EXPECT_EQ(std::any_cast<void*>(d.getItem(&k)), &v2);
     EXPECT_EQ(d.getCountProperty(), 1);
 }
 
@@ -53,7 +58,7 @@ TEST(ListDictionaryInternalTest, SetItemAddsNew) {
     ListDictionaryInternal d;
     int k = 7, v = 77;
     d.setItem(&k, &v);
-    EXPECT_EQ(d.getItem(&k), &v);
+    EXPECT_EQ(std::any_cast<void*>(d.getItem(&k)), &v);
     EXPECT_EQ(d.getCountProperty(), 1);
 }
 

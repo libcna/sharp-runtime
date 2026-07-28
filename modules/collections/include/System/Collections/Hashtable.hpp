@@ -15,6 +15,7 @@
 #include "System/Collections/IDictionary.hpp"
 #include "System/Collections/IDictionaryEnumerator.hpp"
 #include "System/Collections/IEnumerator.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/detail/MutationCounter.hpp"
 
@@ -111,29 +112,76 @@ public:
      * @brief Gets the value associated with the specified key.
      *
      * C++ counterpart of .NET Hashtable indexer getter (this[object key]), which
-     * begins with ArgumentNullException.ThrowIfNull(key).
+     * begins with ArgumentNullException.ThrowIfNull(key) and then returns the value
+     * object itself -- never a handle to the table's slot.
+     *
      * @param key Raw key to look up.
-     * @return Pointer to the stored value, or nullptr if the key is absent.
+     * @return An **owning copy** of the stored value, or an empty std::any if the key
+     *         is absent. The copy is valid independently of this table: it survives
+     *         Remove(), Clear(), copy assignment, move assignment and the table's
+     *         destruction. "Absent" and "present but empty" both read as an empty
+     *         std::any, exactly as .NET's getter returns `null` for both; use
+     *         Contains()/ContainsKey() to tell them apart, or at() to throw.
      * @throws System::ArgumentNullException if @p key is null.
+     *
+     * @note This getter is pure: it never inserts and never advances the fail-fast
+     *       mutation counter, so an outstanding enumerator stays valid across it.
+     * @note Ticket #1796 changed the return type from `void*`. The old signature
+     *       returned `const_cast<std::any*>(&it->second)` -- a writable pointer into
+     *       live map storage handed out of a const member function -- through which a
+     *       caller holding only a `const Hashtable&` or a `const IDictionary&` could
+     *       rewrite a stored value with the counter unmoved, and which became a
+     *       heap-use-after-free once the entry was erased, cleared, assigned over or
+     *       destroyed.
      */
-    [[nodiscard]] void* getItem(const void* key) const override {
-        auto k = toKey(key);
-        auto it = _map.find(k);
-        if (it == _map.end()) return nullptr;
-        return const_cast<std::any*>(&it->second);
+    [[nodiscard]] std::any getItem(const void* key) const override {
+        return lookupCopy(toKey(key));
     }
 
     /**
      * @brief Sets the value associated with the specified key.
      *
      * C++ counterpart of .NET Hashtable indexer setter (this[object key] = value),
-     * which reaches Insert and its ArgumentNullException.ThrowIfNull(key).
+     * which reaches Insert and its ArgumentNullException.ThrowIfNull(key). Advances
+     * the fail-fast mutation counter on the insert branch **and** on the replace
+     * branch, including an equal-value replacement, because .NET's Insert calls
+     * UpdateVersion() on both and never compares the old value.
+     *
      * @param key   Raw key to set.
      * @param value Value to associate with @p key; null stores an empty std::any.
      * @throws System::ArgumentNullException if @p key is null.
+     *
+     * @note The value parameter deliberately keeps its raw `void*` type; see
+     *       IDictionary::setItem and design section 13.4 for the measured
+     *       data-corruption reason. setItem(const std::string&, const std::any&) is
+     *       the typed, safe route.
+     * @note The key is validated, and the value copied, before the map is touched, so
+     *       a throwing write leaves both the contents and the counter unchanged.
      */
     void setItem(const void* key, void* value) override {
-        _map[toKey(key)] = value ? *static_cast<std::any*>(value) : std::any{};
+        std::string k = toKey(key);
+        std::any copy = value ? *static_cast<std::any*>(value) : std::any{};
+        _map[k] = std::move(copy);
+        ++version_;
+    }
+
+    /**
+     * @brief Typed, tracked setter for a string key -- the safe insert-or-replace route.
+     *
+     * Added by ticket #1796 as the canonical way to write a value without touching the
+     * type-erased raw-key surface. Inserts when @p key is absent and replaces when it
+     * is present, advancing the fail-fast mutation counter in both cases (and on an
+     * equal-value replacement), matching .NET Hashtable.Insert.
+     *
+     * @param key   String key to set.
+     * @param value Value to associate with @p key.
+     *
+     * @note The value is copied before the map is touched, so a throwing write leaves
+     *       both the contents and the counter unchanged.
+     */
+    void setItem(const std::string& key, const std::any& value) {
+        std::any copy = value;
+        _map[key] = std::move(copy);
         ++version_;
     }
 
@@ -216,21 +264,31 @@ public:
      * @param value Value to associate with @p key; null stores an empty std::any.
      * @throws System::ArgumentNullException if @p key is null.
      * @throws System::ArgumentException     if the key already exists.
+     *
+     * @note Unlike the indexer setter, Add() rejects an existing key rather than
+     *       replacing its value -- the .NET distinction between Add and
+     *       `this[key] = value`, preserved exactly. A rejected or otherwise throwing
+     *       Add leaves both the contents and the mutation counter unchanged.
      */
     void Add(const void* key, void* value) override {
         std::string k = toKey(key);
         if (_map.count(k)) throw System::ArgumentException("Item has already been added. Key in dictionary: '" + k + "'");
-        _map[k] = value ? *static_cast<std::any*>(value) : std::any{};
+        std::any copy = value ? *static_cast<std::any*>(value) : std::any{};
+        _map.emplace(std::move(k), std::move(copy));
         ++version_;
     }
 
     /**
      * @brief Adds a string key with a typed value.
      * @throws System::ArgumentException if the key already exists.
+     *
+     * @note Same Add-versus-indexer-setter distinction and same all-or-nothing
+     *       guarantee as the raw-key overload above.
      */
     void Add(const std::string& key, const std::any& value) {
         if (_map.count(key)) throw System::ArgumentException("Item has already been added. Key in dictionary: '" + key + "'");
-        _map[key] = value;
+        std::any copy = value;
+        _map.emplace(key, std::move(copy));
         ++version_;
     }
 
@@ -273,22 +331,187 @@ public:
     }
 
     /**
-     * @brief Returns a reference to the value for the given string key, inserting a default if absent.
+     * @brief The result of indexing a non-const Hashtable: an owning read, a tracked write.
      *
-     * @note Unlike setItem()/the .NET indexer setter, an insertion or assignment made through
-     * the reference this returns does not bump the fail-fast version counter (there is no way
-     * to intercept a plain C++ reference assignment or std::unordered_map's own key-insertion) —
-     * the same documented, narrow gap as ArrayList::operator[] (see ArrayList.hpp). Prefer
-     * setItem()/Add() when fail-fast enumeration correctness matters.
-     * @param key String key.
+     * Returned by `operator[](const std::string&)` so that the C# spelling
+     * `table[key] = value;` keeps compiling while becoming a *tracked* mutation. The
+     * proxy stores the **key**, not a pointer to an element, so it is unaffected by
+     * rehashing and remains meaningful even when the key is absent; and it never
+     * hands out an alias into the table, so nothing a caller can hold survives into
+     * freed storage.
+     *
+     * Ticket #1796 introduced it to close four defects that the previous
+     * `std::any&` return had at once: an assignment through the reference did not
+     * advance the fail-fast mutation counter; a bare *read* of an absent key
+     * structurally inserted an entry (std::unordered_map::operator[]'s own rule),
+     * changing Count while leaving outstanding enumerators apparently valid and
+     * silently mis-enumerating -- measured at 4,008 entries as a walk over 2,045
+     * distinct keys reaching only 6 of its 8 seed keys, throwing nothing and
+     * producing no sanitizer report at all; and the reference dangled after
+     * Remove()/Clear()/copy assignment/move assignment/destruction.
+     *
+     * @note A proxy borrows its table and must not outlive it, the same rule every
+     *       enumerator and view in this port already carries. It is normally a
+     *       temporary within one full-expression.
      */
-    std::any& operator[](const std::string& key) { return _map[key]; }
+    class ValueReference {
+        Hashtable* owner_;
+        std::string key_;
+
+    public:
+        /**
+         * @brief Binds a proxy to a table and a key; the proxy borrows the table.
+         * @param owner Table to read and write through; never null.
+         * @param key   Key to read and write, copied into the proxy.
+         */
+        ValueReference(Hashtable* owner, std::string key)
+            : owner_(owner), key_(std::move(key)) {}
+
+        /**
+         * @brief Deleted, and this is load-bearing rather than stylistic.
+         *
+         * std::any has a template converting constructor `any(T&&)` constrained only
+         * on `is_copy_constructible_v<decay_t<T>>`. With a **copyable** proxy,
+         * `std::any b = table[key];` prefers that constructor -- an identity
+         * conversion of the argument -- over this class's own `operator std::any()`,
+         * so `b` silently holds a ValueReference and the next std::any_cast throws
+         * std::bad_any_cast **at run time with nothing wrong at compile time**.
+         * Deleting the copy constructor removes the proxy from that constructor's
+         * overload set, so the conversion operator is chosen and `b` holds the value.
+         * Guaranteed copy elision still lets operator[] return the proxy by value.
+         *
+         * Deleting it also implicitly deletes the move constructor and the copy
+         * assignment operator, so a proxy cannot be stored in a container, returned
+         * from a function, or copied into a longer-lived variable.
+         */
+        ValueReference(const ValueReference&) = delete;
+
+        /**
+         * @brief Reads an owning copy of the value; an absent key yields an empty std::any.
+         *
+         * Deliberately returns **by value**, not `const std::any&`: a conversion
+         * returning a reference trips GCC 14's -Wdangling-reference on the ordinary
+         * `const std::any& r = table[key];` spelling, which every module here builds
+         * with -Werror. The by-value conversion compiles every read spelling and
+         * rejects exactly the four aliasing ones.
+         *
+         * Never inserts and never advances the mutation counter.
+         */
+        operator std::any() const { return owner_->lookupCopy(key_); }
+
+        /** @brief Named form of the read conversion; returns an owning copy. */
+        [[nodiscard]] std::any getValueProperty() const { return owner_->lookupCopy(key_); }
+
+        /**
+         * @brief Returns true if the key is present, distinguishing absent from empty.
+         *
+         * A read of an absent key and a read of a key stored with an empty std::any
+         * both yield an empty std::any, matching .NET's getter returning `null` for
+         * both. This is the discriminator, alongside ContainsKey().
+         */
+        [[nodiscard]] bool hasValueProperty() const { return owner_->ContainsKey(key_); }
+
+        /**
+         * @brief Inserts or replaces the value, advancing the mutation counter.
+         *
+         * Advances the counter on the insert branch, on the replace branch, **and on
+         * an equal-value replacement**, because .NET's Hashtable.Insert calls
+         * UpdateVersion() on both branches and never compares the old value. That is
+         * deliberately the opposite of Generic::Dictionary's rule in this same
+         * component, and both match their own .NET reference.
+         *
+         * The value is copied before the map is touched, so a throwing write leaves
+         * both the contents and the counter unchanged.
+         *
+         * @param value Value to store under this proxy's key.
+         * @return A reference to this proxy.
+         */
+        ValueReference& operator=(const std::any& value) {
+            std::any copy = value;
+            owner_->_map[key_] = std::move(copy);
+            ++owner_->version_;
+            return *this;
+        }
+
+        /**
+         * @brief Writes another proxy's value THROUGH to this one's element, and bumps.
+         *
+         * `a[k1] = b[k2];` copies the value, exactly as it reads. This overload exists
+         * because the copy assignment operator is implicitly deleted by the deleted
+         * copy constructor, so without it a proxy-to-proxy assignment would not
+         * compile at all.
+         *
+         * @param other Proxy to read the value from.
+         * @return A reference to this proxy.
+         */
+        ValueReference& operator=(ValueReference&& other) {
+            return *this = other.getValueProperty();
+        }
+    };
 
     /**
-     * @brief Returns a const reference to the value for the given string key.
-     * @throws std::out_of_range if the key is absent.
+     * @brief Returns a tracked proxy for the given string key; a read never inserts.
+     *
+     * C++ counterpart of .NET's `Hashtable this[object key]` on a mutable table.
+     * `table[key] = value;` performs one tracked insert-or-replace that advances the
+     * fail-fast mutation counter; `std::any v = table[key];` reads an owning copy and
+     * changes nothing -- neither Count, nor the counter, nor the validity of an
+     * outstanding enumerator.
+     *
+     * @param key String key.
+     * @return A ValueReference proxy; see that class for the ownership and lifetime
+     *         contract, and for why it is deliberately non-copyable.
+     *
+     * @note Before ticket #1796 this returned `std::any&` straight out of
+     *       `_map[key]`, so a bare read of an absent key inserted one and no write
+     *       through the reference was tracked. `std::any& r = table[key];` and
+     *       `&table[key]` no longer compile, by design;
+     *       `const std::any& r = table[key];` still compiles and now binds a
+     *       lifetime-extended **snapshot** rather than a live view.
      */
-    const std::any& at(const std::string& key) const { return _map.at(key); }
+    [[nodiscard]] ValueReference operator[](const std::string& key) {
+        return ValueReference(this, key);
+    }
+
+    /**
+     * @brief Reads an owning copy of the value for the given string key on a const table.
+     *
+     * Added by ticket #1796 so that indexing a `const Hashtable&` is possible at all,
+     * and so that it cannot possibly yield a write path. An absent key reads as an
+     * empty std::any, matching .NET's getter and the non-const proxy's read; it never
+     * inserts and never advances the mutation counter.
+     *
+     * @param key String key.
+     * @return An owning copy of the stored value, or an empty std::any if absent.
+     */
+    [[nodiscard]] std::any operator[](const std::string& key) const { return lookupCopy(key); }
+
+    /**
+     * @brief Returns an owning copy of the value for the given string key, or throws.
+     *
+     * The throwing read, next to the empty-yielding reads on the indexer and
+     * getItem().
+     *
+     * @param key String key.
+     * @return An owning copy of the stored value, valid independently of this table.
+     * @throws System::Collections::Generic::KeyNotFoundException if @p key is absent.
+     *
+     * @note Ticket #1796 changed both halves of this member. It returned
+     *       `const std::any&` bound to live map storage, so
+     *       `const_cast<std::any&>(table.at(k)) = v;` was well-formed, fully defined
+     *       C++ that rewrote the dictionary with the counter unmoved, and the
+     *       reference dangled once the table was cleared or destroyed; a by-value
+     *       return is a prvalue, so that const_cast no longer compiles. And it threw
+     *       `std::out_of_range`, which `catch (const System::Exception&)` cannot see,
+     *       where it now throws the port's own KeyNotFoundException.
+     */
+    [[nodiscard]] std::any at(const std::string& key) const {
+        auto it = _map.find(key);
+        if (it == _map.end())
+            throw System::Collections::Generic::KeyNotFoundException(
+                "The given key '" + key + "' was not present in the dictionary.");
+        return it->second;
+    }
 
     /** @brief Returns a vector of all string keys in the table. */
     std::vector<std::string> getKeys() const {
@@ -332,6 +555,23 @@ protected:
     }
 
 private:
+    /**
+     * @brief The single lookup site behind every by-value read.
+     *
+     * getItem(), the const operator[] and ValueReference's read conversion all route
+     * through this one function, so there is exactly one place where a Hashtable read
+     * decides what an absent key means -- an empty std::any, matching .NET's getter
+     * returning null. It is const, copies, and touches neither _map's contents nor
+     * version_.
+     *
+     * @param key Already-converted string key.
+     * @return An owning copy of the stored value, or an empty std::any if absent.
+     */
+    [[nodiscard]] std::any lookupCopy(const std::string& key) const {
+        auto it = _map.find(key);
+        return it == _map.end() ? std::any{} : it->second;
+    }
+
     std::unordered_map<std::string, std::any> _map;
     System::Collections::detail::MutationCounter version_;
 

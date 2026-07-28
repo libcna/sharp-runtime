@@ -245,16 +245,31 @@ public:
     }
 
     /**
-     * @brief Gets the value associated with the specified key, or nullptr if not found.
+     * @brief Gets the value associated with the specified key, or an empty std::any.
      *
      * C++ counterpart of .NET ListDictionaryInternal indexer getter.
+     *
      * @param key Pointer used as the key (compared by address).
+     * @return An owning std::any boxing the stored `void*`, recovered with
+     *         std::any_cast&lt;void*&gt;, or an empty std::any if the key is absent.
+     *
+     * @note Ticket #1796 migrated this member mechanically, because
+     *       IDictionary::getItem's return type changed and a pure virtual forces
+     *       every implementation. **The semantics are deliberately unchanged**: the
+     *       box holds the caller's own pointer, exactly as the raw `void*` return
+     *       did, and this dictionary stores no value data of its own to alias. Only
+     *       the return type moved.
+     * @note This implementation's remaining divergences from .NET and from
+     *       Hashtable -- setItem() skipping the version bump on the replace branch,
+     *       and both accessors accepting a null key where .NET and Hashtable throw --
+     *       are **not** fixed here. They are ticket #1798, deliberately kept separate
+     *       so that #1796's approval is not stretched to cover them.
      */
-    [[nodiscard]] void* getItem(const void* key) const override {
+    [[nodiscard]] std::any getItem(const void* key) const override {
         for (const auto& n : list_) {
-            if (n.key == key) return n.value;
+            if (n.key == key) return std::any(n.value);
         }
-        return nullptr;
+        return std::any{};
     }
 
     /**
