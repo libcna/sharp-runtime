@@ -3,11 +3,14 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-28. Branch: `feature/remediation-coll-sortedset-count-race`.
+*Last verified: 2026-07-28. Branch: `feature/remediation-coll-hashtable-value-access`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 13,127 tests across 37 executables. The repository-wide,
+dependency edges, and 13,657 tests across 37 executables (the 13,127 figure this
+line carried until ticket #1796 was a stale relic: each remediation ticket's own
+section below states the count it measured, and the current floor is the 13,657
+verified by #1796 from a from-scratch tree). The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766). Remediation
 tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design),
 #1769 (LinkedListNode lifetime implementation), #1770 (raw `ICollection::CopyTo`
@@ -2638,6 +2641,113 @@ Tickets #1773, #1788, #1789, #1791 and #1796 remain `blocked` and untouched;
 #1798 is newly opened `blocked` and deliberately not begun; #1790, #1792, #1793,
 #1794 and #1795 remain `done`. #1793 and #1794 were not reopened. CNA and
 mobile-eggbert were not inspected, searched, configured, built, or modified.
+
+No repair ticket is active.
+
+### Completed Hashtable value-access remediation: ticket #1796
+
+Implementation ticket #1796 (`REMED-COLL-HASHTABLE-WRITE-ESCAPES`, P3, size M,
+category `defect`, area Collections) is **done** on branch
+`feature/remediation-coll-hashtable-value-access`, implementing exactly the
+architecture design ticket #1797 selected. The user granted the §32 approval
+**in this ticket's own instruction, per action**, for all four items: the public
+source break, the one silent semantic change, the silent ABI break requiring a
+full consumer rebuild, and the changed exception type on `at()`.
+
+**All four escape routes are closed** — the two #1796 was named after and the two
+#1797 found:
+
+| Member | Was | Now |
+|---|---|---|
+| `IDictionary::getItem(const void*) const` | `void*` into live storage | **`std::any` by value** |
+| `Hashtable::operator[](const std::string&)` | `std::any&`, **inserted on a bare read** | **`ValueReference` proxy** |
+| `Hashtable::operator[](const std::string&) const` | did not exist | **`std::any` by value** |
+| `Hashtable::at(const std::string&) const` | `const std::any&`, `std::out_of_range` | **`std::any` by value, `KeyNotFoundException`** |
+| `Hashtable::setItem(const std::string&, const std::any&)` | did not exist | **new typed tracked setter** |
+| `ListDictionaryInternal::getItem` | `void*` | **`std::any`**, boxing the same caller pointer — mechanical, nothing else changed |
+| `setItem`/`Add` raw-key `void*` *value* parameter | — | **unchanged, deliberately** |
+
+The proxy is **non-copyable**, which is load-bearing: `std::any`'s converting
+constructor `any(T&&)` is constrained only on `is_copy_constructible_v`, so a
+copyable proxy would make `std::any b = h[k];` box the *proxy* and throw
+`std::bad_any_cast` at run time with nothing wrong at compile time. Its read
+conversion returns `std::any` **by value** for a second measured reason: a
+`const std::any&` conversion trips GCC 14's `-Wdangling-reference`, and every
+module here builds with `-Werror`.
+
+**Two corrections to #1797's own record**, both against this record's
+convenience. The Phase 2 source break is **3 translation units and seven source
+lines, not five** — #1797's "5 sites" counted distinct compiler *diagnostics*,
+and `ListDictionaryInternalTests.cpp`'s three `int*`-shaped `getItem` comparisons
+share one GoogleTest template instantiation, so two of them never produced a
+diagnostic of their own and still had to be edited. And **zero `test/consumer/`
+fixtures needed migration, not three**: all five pre-existing `Collections.Core`
+fixtures compile and run unmodified. Everything else in #1797 reproduced exactly
+— 16 defects, 0 UBSan errors, 9 ASan `heap-use-after-free` of 14 scenarios,
+`sizeof` 72 and 40, and the 2,045-of-4,008 / 6-of-8-seeds enumeration walk.
+
+**Post-fix**: the nine `heap-use-after-free` reports are **0**; UBSan **0**; LSan
+**0** with detection proved active by a 318-byte/2-allocation self-test. Rerun in
+#1797's exact experiment shape — 8 seed keys, one outstanding enumerator, 4,000
+missing-key reads through `operator[]` — `Count` goes **8 → 8** where it went
+**8 → 4,008**, and the enumerator walks **8 of 8** distinct keys with 0
+duplicates where it walked **2,045** and reached **6 of 8** seeds.
+
+**The ABI break was reproduced end to end against the real production
+declarations**, with the old headers extracted from git rather than approximated:
+mangled name **byte-identical**, vtable slot **unchanged at `0x38`**, no symbol
+added or removed, `this` moving `%rdi → %rsi` behind a hidden `sret`. A stale
+caller **links with `exit=0` and then segfaults with `exit=139`**, preceded by 14
+UBSan misaligned-address diagnostics naming the caller's key pointer used as
+`this`. `sizeof(Hashtable)` is **unchanged at 72** and
+`sizeof(ListDictionaryInternal)` at **40** — this is *not* an object-layout
+break; `ValueReference` is 40 bytes and is never stored by the collection.
+`README.md` carries the mandatory-full-rebuild breaking-change entry.
+
+Permanent coverage: `HashtableValueAccessSafetyTests.cpp`, **55 tests**,
+parameterised over both `IDictionary` implementations wherever the assertion is
+about the interface, and clean under ASan + UBSan + LSan. Consumer fixtures
+`collections_hashtable_value_access.cpp` (compiled **and run** against
+`Collections.Core` alone under `-Wall -Wextra -Wpedantic -Werror`) and
+`..._negative.cpp` (**11 of 11** marked alias spellings rejected, verified
+per-site by `build-probe/1796_check_negative.py`, not merely by the file failing
+to compile).
+
+Validation: `scripts/local_ci_check.sh build` at **13,657 tests across 37
+executables** from a tree reconfigured from scratch and rebuilt with
+`--clean-first` for the silent ABI break — **626 translation units recompiled, 37
+executables relinked, zero object files predating the fresh configuration**.
+`SharpRuntimeTests_Collections_Core` at **2,371** (was 2,316; +55, exactly the
+new suite). 41 modules / 90 edges, validator tests 7/7, catalogue current,
+database consistent, `git diff --check` clean, Doxygen 1.9.8 at **1,940** of the
+1,942 ceiling (unchanged), and `check_selective_components.sh` **run in full**
+with a repository-local `TMPDIR` because public headers changed.
+
+**No new build directory was created**: `CLAUDE.md` rule 10 closes the name set,
+so the mandatory clean build reconfigured `build/` itself
+(`cmake --fresh` + `--clean-first`) rather than adding a `build-abi-1796/`.
+Directories used: `build/`, the shared `build-probe/` (`1796_` file prefix),
+`build-consumer/`, and `build-tmp/` as `TMPDIR`. **No compilation exceeded three
+jobs.**
+
+**Still open and not claimed closed**: `setItem`/`Add`'s raw-key `void*` *value*
+parameter (deliberate, §13.4); accessor use after the *collection* is destroyed;
+a `ValueReference` outliving its table (the port-wide borrow rule, documented but
+not enforced); `const std::any& r = h[k];` compiling as a snapshot (the one
+silent meaning change, documented in `README.md` with the instruction not to
+write it). A **pre-existing, unrelated** finding was observed and recorded rather
+than fixed: `CollectionVersionAccess<Hashtable>` is explicitly specialised with
+*different* bodies in two translation units of one binary (`SR1787_SEAM_BODY` vs
+`SR1794_SEAM_BODY`), which is IFNDR; it predates this ticket, is benign in
+practice, and the new suite deliberately spells its specialisation identically to
+the `SR1794` one so as not to make it worse.
+
+Tickets #1773, #1788, #1789, #1791 and #1798 remain `blocked` and untouched;
+**#1791 was not implemented and no shared List/Hashtable proxy was introduced**;
+#1790, #1792, #1793, #1794, #1795 and #1797 remain `done`; #1793, #1794 and #1797
+were not reopened. CNA and mobile-eggbert were not inspected, searched,
+configured, built, or modified, so the source-break figures are *this repository
+only*.
 
 No repair ticket is active.
 

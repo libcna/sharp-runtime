@@ -531,6 +531,34 @@ suite: `DictionaryEnumeratorKeyValueSafetyTests.cpp` (+64 tests, parameterised
 over both implementations). See `docs/IDictionaryEnumeratorKeyValueSafetyDesign.md`
 §37.
 
+**Follow-on closure by ticket #1796 on 2026-07-28 — the same class, on the
+*value-access* surface #1794 deliberately left open.** #1794's own record named
+two remaining `Hashtable` escapes at
+`docs/IDictionaryEnumeratorKeyValueSafetyDesign.md` §30 risk 6 and §37.6 so they
+would not be mistaken for closed; design ticket #1797 then found that there were
+**four**, not two, and implementation ticket #1796 closed all four under an
+explicit four-item user approval. `IDictionary::getItem` returns an owning
+`std::any` by value on both implementations; `Hashtable::operator[]` returns a
+**non-copyable `ValueReference` proxy** so `table[key] = value` is a tracked
+insert-or-replace and a bare read of an absent key no longer *structurally
+inserts*; a new `const` `operator[]` and a by-value `at()` (throwing
+`KeyNotFoundException` rather than the `catch (const System::Exception&)`-invisible
+`std::out_of_range`) complete the surface. **The nine `heap-use-after-free`
+reports on this surface are now zero**, and the worst case — which produced no
+sanitizer report at all — is closed by measurement: in #1797's exact experiment,
+`Count` goes **8 → 8** where it went **8 → 4,008**, and an outstanding enumerator
+walks **8 of 8** distinct keys where it walked **2,045** of 4,008 and reached
+only 6 of its 8 seeds. This is a **silent ABI break** — byte-identical mangled
+name, vtable slot unchanged at `0x38`, `this` moving `%rdi → %rsi` behind a
+hidden `sret`, with a stale caller linking at `exit=0` and then segfaulting at
+`exit=139` — so **every consumer must be fully rebuilt**. `sizeof` is unchanged
+(72 / 40), so it is not a layout break. New permanent suite:
+`HashtableValueAccessSafetyTests.cpp` (+55 tests). Still not claimed closed:
+`setItem`/`Add`'s raw-key `void*` *value* parameter, and accessor use after the
+collection itself is destroyed. `ListDictionaryInternal`'s own two defects are
+untouched and remain ticket **#1798**. See
+`docs/HashtableValueAccessSafetyDesign.md` §34.
+
 - `modules/collections/include/System/Collections/Generic/IEnumerator.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/List.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/Queue.hpp.audit.md`;

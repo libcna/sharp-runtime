@@ -221,3 +221,75 @@ with zero diagnostics and then SEGVs.
 Implementation is **#1796**, `blocked` on the four-item approval in design §32.
 `ListDictionaryInternal`'s own two defects, found while establishing whether the
 two `IDictionary` implementations agree, are **new inactive ticket #1798**.
+
+---
+
+## Remediated by ticket #1796 (2026-07-28)
+
+**All four escape routes are closed.** `REMED-COLL-HASHTABLE-WRITE-ESCAPES`
+implemented design ticket #1797 exactly, on the user's explicit four-item
+approval (source break, silent semantic change, silent ABI break, changed
+exception type). Durable record: `docs/HashtableValueAccessSafetyDesign.md`
+§34–§37.
+
+| Route | Was | Now |
+|---|---|---|
+| `getItem(const void*) const` | `void*` into live storage | **`std::any` by value** |
+| `operator[](const std::string&)` | `std::any&`, inserted on a bare read | **`ValueReference` proxy** — tracked write, owning read, no insert on read |
+| `operator[](const std::string&) const` | did not exist | **`std::any` by value** |
+| `at(const std::string&) const` | `const std::any&`, `std::out_of_range` | **`std::any` by value, `KeyNotFoundException`** |
+| `setItem(const std::string&, const std::any&)` | did not exist | **new typed tracked setter** |
+| `setItem`/`Add` raw-key `void*` *value* parameter | — | **unchanged, deliberately** (design §13.4) |
+
+Measured before and after on the committed headers, one session apart:
+
+| Measurement | Pre-fix | Post-fix |
+|---|---|---|
+| Defects reproduced by `1797_probe1_escapes` | **16** | route removed — the probe no longer compiles |
+| UBSan runtime errors over those 16 | **0** (all silent) | n/a |
+| ASan `heap-use-after-free` / 14 lifetime scenarios | **9** | **0** |
+| LSan leaks (detection proved active) | 0, self-test 317 B / 2 allocs | **0**, self-test 318 B / 2 allocs |
+| Enumeration integrity — 8 seeds, one outstanding enumerator, then **4,000 missing-key reads through `operator[]`** (the identical experiment, rerun) | Count **8 → 4,008**, walked **2,045** distinct, **6/8** seeds, threw 0, no sanitizer report | Count **8 → 8**, walked **8** distinct (0 duplicates), **8/8** seeds, threw 0 |
+| The same, at 4,008 pre-seeded entries and 64 missing-key reads | — | Count **4,008 → 4,008**, walked **4,008** distinct, **8/8** seeds |
+| `sizeof(Hashtable)` / `alignof` | 72 / 8 | **72 / 8 — unchanged** |
+| `sizeof(ListDictionaryInternal)` / `alignof` | 40 / 8 | **40 / 8 — unchanged** |
+| `Hashtable::ValueReference` | did not exist | **40 / 8**, never stored by the collection |
+
+**The ABI break is real and was reproduced end to end against the real
+production declarations, not a shim.** The caller symbol
+`_Z11callGetItemRN6System11Collections11IDictionaryEPKv` is **byte-identical**
+before and after; the vtable slot is **unchanged at `*0x38(%rax)`**; no symbol is
+added or removed. The calling convention is not the same — pre-fix `this` in
+`%rdi` with the result in `%rax` and a tail-call `jmp`; post-fix `%rdi` is the
+hidden `sret` pointer, `this` moves to `%rsi`, and a real `call` is emitted. A
+caller object compiled against the old header **links against the new
+implementation with zero diagnostics (`exit=0`) and then segfaults
+(`exit=139`)**, with 14 UBSan diagnostics first, beginning `member access within
+misaligned address … for type 'const struct Hashtable'`. `callSetItem`, the
+unchanged control, is byte-identical machine code at slot `*0x40(%rax)`.
+**Every consumer must be fully rebuilt**, and the linker cannot enforce it.
+
+Permanent coverage:
+`modules/collections/tests/System/Collections/HashtableValueAccessSafetyTests.cpp`,
+**55 tests**, parameterised over both `IDictionary` implementations wherever the
+assertion is about the interface; the whole file passes under ASan + UBSan + LSan
+with zero findings. Consumer fixtures
+`test/consumer/collections_hashtable_value_access.cpp` (compiled and **run**
+against `Collections.Core` alone under `-Wall -Wextra -Wpedantic -Werror`) and
+`..._negative.cpp` (**11 of 11** marked alias spellings rejected, verified by
+`build-probe/1796_check_negative.py` rather than by the file merely failing to
+compile).
+
+**Still open, and not claimed closed by this ticket:**
+
+- `setItem`/`Add`'s raw-key `void*` *value* parameter remains type-erased
+  (design §13.4, with the `Add("literal", v)` address-key corruption that is the
+  reason it was not "tidied up").
+- Using any accessor after the *collection* itself is destroyed remains
+  undefined; that is the port-wide borrow convention, unchanged.
+- `ListDictionaryInternal`'s own two defects — `setItem` skipping the version
+  bump on the replace branch, and both accessors accepting a null key — are
+  **untouched** and remain ticket **#1798**. Its `getItem` was migrated
+  mechanically (the same caller pointer, now boxed) and nothing else about it
+  changed. `HashtableValueAccessSafetyTests.cpp` pins the null-key divergence as
+  a deliberate recorded state so #1798 has a test to flip.

@@ -208,6 +208,143 @@ no safe or useful equivalent.
 
 ## Breaking changes
 
+### 2026-07-28 — `System::Collections::Hashtable`'s value accessors return owning values
+
+**This one requires a full rebuild of every consumer, and the linker will not
+tell you if you skip it. Read the ABI paragraph below before upgrading.**
+
+`Hashtable` had **four** routes by which a caller could obtain, or write
+through, something that aliased live value storage:
+
+- `void* getItem(const void*) const` — on the `IDictionary` interface, `const`,
+  and it returned `const_cast<std::any*>(&it->second)`: a **writable pointer
+  into the live `std::unordered_map`, handed out of a read accessor**. A caller
+  holding even a `const IDictionary&` — the most restrictive reference the
+  interface offered — could rewrite a stored value with the fail-fast mutation
+  counter unmoved.
+- `std::any& operator[](const std::string&)` — a mutable reference into storage,
+  and, because it forwarded to `std::unordered_map::operator[]`, **a bare *read*
+  of an absent key structurally inserted an entry**. That is the worst of the
+  four and it produces no crash: at 4,008 entries an outstanding enumerator saw
+  an unmoved counter, walked a rehashed bucket array, visited **2,045 distinct
+  keys, reached only 6 of its 8 seed keys, threw nothing, and produced no
+  AddressSanitizer, UndefinedBehaviorSanitizer or LeakSanitizer report at all**.
+  Memory-safe and silently wrong.
+- `const std::any& at(const std::string&) const` — a `const` alias to a
+  **non-`const`** `std::any`, so `const_cast<std::any&>(h.at(k)) = v;` was not a
+  trick and not undefined behaviour: it was well-formed, fully defined C++ that
+  rewrote the dictionary with the counter unmoved. It also threw
+  `std::out_of_range`, which `catch (const System::Exception&)` cannot see.
+- Retained aliases from all three dangled after `Remove`, `Clear`, copy
+  assignment, move assignment and destruction — **nine AddressSanitizer
+  `heap-use-after-free` reports across fourteen scenarios**. (Rehash does *not*
+  dangle: `std::unordered_map` is node-based, measured across 8,000 insertions.)
+
+The new surface is **owning reads, tracked writes, and no public alias into
+storage**:
+
+| Member | Was | Now |
+|---|---|---|
+| `IDictionary::getItem(const void*) const` | `void*` into live storage | **`std::any` by value** |
+| `Hashtable::operator[](const std::string&)` | `std::any&`, inserted on read | **`Hashtable::ValueReference` proxy** |
+| `Hashtable::operator[](const std::string&) const` | *did not exist* | **`std::any` by value** |
+| `Hashtable::at(const std::string&) const` | `const std::any&`, `std::out_of_range` | **`std::any` by value, `KeyNotFoundException`** |
+| `Hashtable::setItem(const std::string&, const std::any&)` | *did not exist* | **new typed tracked setter** |
+| `setItem`/`Add` raw-key `void*` *value* parameter | — | **unchanged, deliberately** (see below) |
+
+```cpp
+// Before                                   // After
+std::any& r = table[key]; r = value;        table[key] = value;   // one tracked write
+void* raw = table.getItem(key);             std::any v = table.getItem(key);
+const std::any& v = table.at(key);          std::any v = table.at(key);
+const_cast<std::any&>(table.at(key)) = v;   // no replacement — that is the point
+```
+
+Migration, by shape:
+
+| Was | Becomes |
+|---|---|
+| `*static_cast<std::any*>(d.getItem(k))` | `d.getItem(k)` |
+| `d.getItem(k) != nullptr` | `d.getItem(k).has_value()` — or `d.Contains(k)` |
+| `std::any& r = table[key]; r = value;` | `table[key] = value;` |
+| `auto& r = table.at(k);` | `auto r = table.at(k);` |
+| `catch (const std::out_of_range&)` around `at` | `catch (const System::Collections::Generic::KeyNotFoundException&)` |
+| `&table[key]`, `std::any_cast<T&>(table[key])` | no replacement — use the mutating API so the counter advances |
+| implementing `IDictionary` by hand | change `getItem`'s return type; `void*` is **not** a covariant return for `std::any`, so it cannot compile lazily |
+
+**A caller that only reads and never aliases needs no source change at all.**
+
+Behaviour changes to know about:
+
+- **A read no longer inserts.** `table[missing]` yields an empty `std::any` and
+  leaves `Count`, the mutation counter, both views and every outstanding
+  enumerator untouched. This matches .NET, whose getter returns `null` and
+  inserts nothing.
+- **An absent key and a present-but-empty value both read as an empty
+  `std::any`** — again .NET parity, which is why .NET also has `ContainsKey`.
+  Use `ContainsKey()`/`Contains()`, or the proxy's `hasValueProperty()`, to tell
+  them apart; `at()` is the throwing read.
+- **Every write through the indexer advances the counter, including an
+  equal-value replacement**, because .NET's `Hashtable.Insert` calls
+  `UpdateVersion()` on both branches and never compares the old value. This is
+  deliberately the *opposite* of `Generic::Dictionary`'s rule in this same
+  component, and both match their own .NET reference.
+- **`const std::any& r = table[key];` keeps compiling and changes meaning
+  silently.** It now binds a lifetime-extended **temporary** — a snapshot, not a
+  live view. It is memory-safe, and it is the *only* silent meaning change here;
+  every other one is a compile error. **Do not write it**; write
+  `std::any r = table[key];`.
+- **Returned values are snapshots.** They survive `Remove`, `Clear`, assignment
+  and the table's destruction. For a pointer-valued entry the copy owns the
+  *pointer*, not the pointee: mutating the pointee is still not a dictionary
+  mutation and still does not bump, while replacing the stored pointer is one
+  and now does.
+- **`setItem`/`Add`'s raw-key `void*` *value* parameter is deliberately
+  unchanged.** Migrating it to `const std::any&` makes the raw-address overload
+  viable for `Add("literal", v)`; the standard `const char*` → `const void*`
+  conversion then beats the user-defined `const char*` → `std::string` one, and
+  the entry silently lands under the **stringified address of the literal** —
+  measured, and clean under `-Wall -Wextra -Wpedantic -Werror`. Use the typed
+  `setItem(const std::string&, const std::any&)` instead.
+
+**The proxy is non-copyable, and that is load-bearing rather than stylistic.**
+`std::any`'s template converting constructor `any(T&&)` is constrained only on
+`is_copy_constructible_v<decay_t<T>>`, so with a *copyable* proxy
+`std::any b = table[key];` would prefer that constructor over the proxy's own
+conversion operator: `b` would silently hold a `ValueReference`, and the next
+`std::any_cast` would throw `std::bad_any_cast` **at run time with nothing wrong
+at compile time**. Its read conversion returns `std::any` **by value** for a
+second measured reason: a conversion returning `const std::any&` trips GCC 14's
+`-Wdangling-reference` on the ordinary read spelling, and every module here
+builds with `-Werror`.
+
+**ABI — a full consumer rebuild is mandatory.** Under the Itanium C++ ABI a
+non-template function's return type is **not** part of its mangled name, so the
+caller symbol for `IDictionary::getItem` is **byte-identical** before and after,
+and its vtable slot is unchanged at `0x38` — both re-measured on the real
+production headers. The calling convention is *not* the same: `std::any` is
+neither trivially copyable nor trivially destructible, so it is returned through
+a hidden `sret` pointer and `this` moves from `%rdi` to `%rsi`. A translation
+unit compiled against the old header and linked against a library built with the
+new one **links with zero diagnostics (`exit=0`) and then segfaults
+(`exit=139`)**, with UndefinedBehaviorSanitizer emitting 14 diagnostics first,
+beginning `member access within misaligned address … for type 'const struct
+Hashtable'` — the callee using the caller's *key* pointer as `this`. The linker
+cannot enforce this rebuild; only this note can.
+
+`sizeof(Hashtable)` is **unchanged at 72** and `sizeof(ListDictionaryInternal)`
+at **40**, so this is not an object-layout break. `Hashtable::ValueReference` is
+40 bytes and is never stored by the collection.
+
+`ListDictionaryInternal::getItem` was migrated **mechanically** — it still boxes
+the caller's own pointer, recovered with `std::any_cast<void*>`. Its other
+divergences (its `setItem` skips the version bump on the replace branch, and
+both its accessors accept a null key where .NET and `Hashtable` throw) are
+**not** fixed here and remain open as a separate ticket.
+
+Full design record, measurements and rejected alternatives:
+`docs/HashtableValueAccessSafetyDesign.md`.
+
 ### 2026-07-28 — `System::Collections::IDictionaryEnumerator`'s `Key` and `Value` return `std::any`
 
 **This one requires a full rebuild of every consumer, and the linker will not

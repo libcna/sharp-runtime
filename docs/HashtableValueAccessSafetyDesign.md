@@ -1333,3 +1333,237 @@ rule 10 is now a closed table of directory names, this ticket's probes live in
 the **shared** `build-probe/` under a `1797_` file prefix rather than a
 `build-probe-1797/` of their own, and nineteen stale one-shot directories (421 MB)
 were deleted with the user's approval.
+
+---
+
+## 34. Implementation complete — ticket #1796 (2026-07-28)
+
+*Branch `feature/remediation-coll-hashtable-value-access`. Implemented on the
+user's explicit approval of all four §32 items. The design above is **not**
+retro-edited: §1–§33 record what was measured before any production change, and
+the corrections this section makes to it are stated as corrections.*
+
+### 34.1 What landed
+
+Both phases, in one change, exactly as §14 specifies. No declaration was
+improvised and none was dropped.
+
+| Member | Before | After |
+|---|---|---|
+| `IDictionary::getItem(const void*) const` | `void*` | **`std::any` by value** |
+| `Hashtable::getItem(const void*) const` | `void*` into live storage | **`std::any` by value**, via `lookupCopy` |
+| `Hashtable::operator[](const std::string&)` | `std::any&`, inserted on read | **`ValueReference`** |
+| `Hashtable::operator[](const std::string&) const` | did not exist | **`std::any` by value** |
+| `Hashtable::at(const std::string&) const` | `const std::any&`, `std::out_of_range` | **`std::any` by value, `KeyNotFoundException`** |
+| `Hashtable::setItem(const std::string&, const std::any&)` | did not exist | **new typed tracked setter** |
+| `ListDictionaryInternal::getItem(const void*) const` | `void*` | **`std::any` by value**, boxing the same caller pointer |
+| `setItem`/`Add` raw-key `void*` *value* parameter | — | **unchanged** (§13.4) |
+
+`ValueReference` is exactly §14.1's shape: non-copy-constructible (which also
+implicitly deletes its move constructor and copy assignment), a by-value
+`operator std::any()`, `getValueProperty()`, `hasValueProperty()`, and the two
+assignment operators. It holds a `Hashtable*` and a `std::string` key — **never**
+a pointer to an element — and is 40 bytes.
+
+**One body-level strengthening beyond the sketch, no signature change.** §15
+rule 4 requires that a throwing write advance nothing. `_map[key] = value;`
+inserts a default-constructed node *before* the payload copy, so a throwing copy
+would leave a partial mutation. Every tracked setter therefore copies first and
+then move-assigns into the map (`std::any::operator=(any&&)` is `noexcept`, and
+`unordered_map::operator[]`/`emplace` give the strong guarantee), so
+`ValueReference::operator=`, both `setItem` overloads and both `Add` overloads
+are genuinely all-or-nothing.
+
+### 34.2 Corrections to this record's own measurements
+
+**Two, and both are against this record's convenience.**
+
+1. **The Phase 2 source break is 3 translation units and *seven* sites, not
+   five.** §11.2's "3 TU / 5 sites" was right about the units — measured again
+   after the change, exactly three failed: `DictionaryEnumeratorKeyValueSafetyTests.cpp`,
+   `DictionaryKeyAndViewContractTests.cpp` and `ListDictionaryInternalTests.cpp`.
+   The site count was a count of **distinct compiler diagnostics**, not of source
+   lines. `ListDictionaryInternalTests.cpp` has **four** `getItem` call sites
+   (`:34`, `:40`, `:48`, `:56`), and three of them (`:34`, `:48`, `:56`) compare
+   against an `int*`, so GoogleTest instantiates one template for all three and
+   GCC emits **one** diagnostic, at the first. The two that never got their own
+   diagnostic still had to be edited. Corrected figure: **3 of 630 translation
+   units, 7 source lines.**
+2. **Zero `test/consumer/` fixtures needed migration, not three.** §11.1 counted
+   three consumer sites by hand and §20 recorded them as "needing migration".
+   All three compile and run **unchanged**: `collections_dictionary_views.cpp`
+   `:98` calls the unaltered `setItem(const void*, void*)`, `:100` is
+   `(void)table.getItem(nullptr)` which is valid for any return type, and
+   `collections_dictionary_enumerator.cpp` `:131` is
+   `std::any_cast<int>(table.at(k))`, identical for a value return. Verified by
+   running all five pre-existing `Collections.Core` fixtures through
+   `scripts/check_selective_components.sh` without editing one line of them.
+
+Everything else in §1–§33 reproduced exactly. `1797_probe1_escapes` still
+reported **16** defects and **0** UBSan runtime errors against the committed
+headers; the fourteen lifetime scenarios still produced **9** ASan
+`heap-use-after-free`; LSan still reported **0** leaks with a **317-byte /
+2-allocation** self-test proving detection active; `sizeof(Hashtable)` was **72**
+and `sizeof(ListDictionaryInternal)` **40**; and the enumeration-integrity walk
+was still **2,045** distinct keys and **6 of 8** seeds at 4,008 entries.
+
+### 34.3 Post-fix measurements
+
+| Measurement | Pre-fix | Post-fix |
+|---|---|---|
+| ASan `heap-use-after-free` across the 14 lifetime scenarios | **9** | **0** |
+| UBSan runtime errors, same scenarios | 0 | **0** |
+| LSan leaks (detection proved active by a deliberate-leak self-test) | 0 / 317 B, 2 allocs | **0** / 318 B, 2 allocs |
+| Enumeration integrity — 8 seeds, 4,000 missing-key reads through `operator[]` | Count **8 → 4,008**, walked **2,045** distinct, **6/8** seeds | Count **8 → 8**, walked **8** distinct, 0 duplicates, **8/8** seeds |
+| Same at 4,008 pre-seeded entries, 64 missing-key reads | — | Count **4,008 → 4,008**, walked **4,008**, **8/8** seeds |
+| `sizeof(Hashtable)` / `alignof` | 72 / 8 | **72 / 8** |
+| `sizeof(ListDictionaryInternal)` / `alignof` | 40 / 8 | **40 / 8** |
+| `Hashtable::ValueReference` | — | **40 / 8**, `Hashtable*` 8 + `std::string` 32 |
+| Alias spellings rejected by the negative fixture | 0 of 11 | **11 of 11** |
+
+The permanent suite (55 tests) and the positive consumer fixture both run clean
+under **ASan + UBSan + LSan** with zero findings.
+
+**TSan is not required, and the precondition was verified rather than assumed**
+(§26): `Hashtable.hpp` declares no `mutable` member, contains no `const_cast` in
+code (the remaining occurrences are doc-comment text describing the *removed*
+defect), and holds no atomic, cache, static or `thread_local` state. Every read
+accessor is `const` and every write to `_map`/`version_` is inside a non-`const`
+member. **This ticket does not make `Hashtable` thread-safe and does not claim
+to.**
+
+### 34.4 ABI, re-measured on the real production declarations
+
+Not a shim — `build-probe/1796_abi_caller_post.cpp` is
+`build-probe/1797_abi_caller_real.cpp` with only the return type migrated.
+
+| | Pre-fix | Post-fix |
+|---|---|---|
+| Caller mangled name | `_Z11callGetItemRN6System11Collections11IDictionaryEPKv` | **byte-identical** |
+| Vtable slot | `*0x38(%rax)` | **unchanged** |
+| `this` | `%rdi` | **`%rsi`** |
+| Result | `%rax`, tail-call `jmp` | **hidden `sret` in `%rdi`**, real `call` |
+| Symbols added / removed | — | **none** |
+| `callSetItem` (unchanged control) | `*0x40(%rax)` | **byte-identical machine code** |
+
+**Stale-object probe, reproduced end to end** with the *committed* old headers
+extracted from git rather than a hand-written approximation: a caller TU compiled
+against the old `void*` interface **links against the new implementation with
+zero diagnostics (`exit=0`)** and then **segfaults (`exit=139`)**. Under UBSan it
+emits **14** diagnostics first, beginning `member access within misaligned
+address 0x7ffd… for type 'const struct Hashtable', which requires 8 byte
+alignment` — the callee reading the caller's *key* pointer as `this`.
+**A full consumer rebuild is mandatory and the linker cannot enforce it.**
+
+### 34.5 Allocation and performance, post-fix
+
+`-O2 -DNDEBUG`, `asm volatile` barrier, 200,000 iterations
+(`build-probe/1796_cost.log`; pre-fix baseline re-measured on the same machine in
+the same session, `build-probe/1796_prefix_probe6_cost.log`).
+
+| Operation | allocs | ns/op |
+|---|---|---|
+| `at()` → `std::any`, `int` payload | **0** | 8.6 |
+| `at()` → `std::any`, SSO `std::string` | **1** | 16.9 |
+| `at()` → `std::any`, 200-char `std::string` | **2** | 24.4 |
+| `at()` → `std::any`, nested `std::any` | 1 | 17.9 |
+| `at()` → `std::any`, `shared_ptr` | 1 | 16.2 |
+| `operator[]` read (proxy conversion), `int` | **0** | 5.3 |
+| `const operator[]` read, `int` | **0** | 4.1 |
+| `operator[]` **missing-key** read | **0** | 6.9 |
+| `getItem(raw key)` → `std::any`, `int` | **0** | 16.7 |
+| proxy construction alone, SSO key | **0** | 0.7 |
+| proxy construction alone, 64-char heap key | **1** | 9.3 |
+| proxy write (tracked), SSO key | **0** | 15.4 |
+| proxy write (tracked), 64-char heap key | **1** | 30.3 |
+| typed `setItem(string, any)` (tracked) | **0** | 14.9 |
+| raw-key `setItem(const void*, void*)` (tracked) | **0** | 32.3 |
+
+The allocation profile is exactly §23's: **0 for an `int` payload, 1 for an SSO
+string, 2 for a large one**, because libstdc++'s `std::any` stores a payload
+inline only if it fits in a `void*` and is nothrow-move-constructible. A proxy
+allocates only when the **key** exceeds `std::string`'s SSO buffer. The tracked
+proxy write is *faster* than today's raw-key `setItem` (15.4 ns vs 32.3 ns)
+because it skips the raw-key stringification. **No live alias was reintroduced
+for performance.**
+
+### 34.6 Validation performed
+
+| Check | Result |
+|---|---|
+| `scripts/local_ci_check.sh build` (from the clean tree) | **13,657 tests across 37 executables**, 0 warnings, 0 errors |
+| `SharpRuntimeTests_Collections_Core` | **2,371** (was 2,316; +55) |
+| `scripts/validate_module_boundaries.py --root .` | OK — **41 physical modules, 90 dependency edges** |
+| `test/validate_module_boundaries_test.py` | **7/7** |
+| `scripts/generate_component_catalog.py --check` | catalogue current |
+| `scripts/db_consistency_check.py --db plan.sqlite3` | no consistency problems |
+| `scripts/check_selective_components.sh` (full matrix) | **passed**, repository-local `TMPDIR`, ≤3 jobs |
+| `scripts/check_selective_components.sh Collections.Core collections_hashtable_value_access.cpp` | fixture compiled **and run**: `OK` |
+| Five pre-existing `Collections.Core` consumer fixtures | all pass **unmodified** |
+| `build-probe/1796_check_negative.py` | **11/11** marked alias spellings rejected |
+| `scripts/check_doxygen_warnings.sh` | Doxygen 1.9.8, **1,940** warnings (ceiling 1,942) — unchanged |
+| `git diff --check` | clean |
+| `scripts/__pycache__` | absent; every Python tool run with `PYTHONDONTWRITEBYTECODE=1` |
+
+### 34.7 Build directories and parallelism
+
+| Directory | Use | Max jobs |
+|---|---|---|
+| `build/` | **reconfigured from scratch** (`cmake --fresh`) and rebuilt with `--clean-first` for the silent ABI break; the repository gate | **3** |
+| `build-probe/` | every probe, sweep, ABI and layout experiment, prefixed `1796_` | 1 compiler process per probe |
+| `build-consumer/` | the negative fixture's compile log | 1 |
+| `build-tmp/` | repository-local `TMPDIR` for the `mktemp`-based scripts | n/a |
+
+**No compilation exceeded three jobs.** `CLAUDE.md`'s ceiling was lowered from
+four to three on 2026-07-28 (commit `1bcb1c4d`), before this ticket began; the
+three-job form was used throughout even where the instruction that authorised
+this work said "four or lower".
+
+**No new build directory was created.** `CLAUDE.md` rule 10 closes the set of
+directory names, so the mandatory clean build was performed by reconfiguring
+`build/` itself from scratch — `cmake --fresh` followed by
+`cmake --build build --parallel 3 --clean-first` — rather than by adding a
+`build-abi-1796/`. **626 translation units were compiled from scratch, 37
+executables linked, and zero object files on disk predate the fresh
+configuration**, so the clean-rebuild guarantee is the same one a new directory
+would have given.
+
+### 34.8 What is still open, and is not claimed closed
+
+1. `setItem`/`Add`'s raw-key `void*` **value** parameter remains type-erased
+   (§13.4). A pointer to something that is not a `std::any` still compiles and is
+   still undefined behaviour with no diagnostic from any tool. The typed
+   `setItem(const std::string&, const std::any&)` is the safe route; the raw-key
+   overload was deliberately not "tidied up", for the measured
+   `Add("literal", v)` address-key corruption.
+2. Using any accessor after the **collection** is destroyed remains undefined
+   (§16 rule 7). Unchanged port-wide borrow convention.
+3. A `ValueReference` outliving its table dereferences a dangling owner pointer.
+   That is the same borrow rule as every enumerator and view here, it is
+   documented on the class, and it is **not** enforced. The proxy is normally a
+   temporary within one full-expression.
+4. `const std::any& r = table[key];` still compiles and is now a snapshot. It is
+   memory-safe; it is the one silent meaning change, and it is documented in
+   `README.md` with the instruction not to write it.
+5. `ListDictionaryInternal`'s two defects (**#1798**) are untouched.
+6. **A newly observed, pre-existing, unrelated finding, recorded rather than
+   fixed:** `CollectionVersionAccess<Hashtable>` and
+   `CollectionVersionAccess<ListDictionaryInternal>` are explicitly specialised in
+   **two** translation units of the same binary with **different** bodies —
+   `CollectionVersionCounterTests.cpp` (via `SR1787_SEAM_BODY`, which has
+   `positionVersion`) and `DictionaryEnumeratorKeyValueSafetyTests.cpp` (via
+   `SR1794_SEAM_BODY`, which does not). Differing token sequences for one
+   explicit specialisation is IFNDR. It is benign in practice (both are
+   header-only static functions that inline away), it predates this ticket, and
+   this ticket did **not** make it worse: the new suite spells its specialisation
+   token-for-token identically to `SR1794_SEAM_BODY`. Not fixed here — it is
+   outside #1796's approval.
+
+### 34.9 Relationship to #1791 and #1798, unchanged
+
+**#1791 is not implemented and no shared List/Hashtable proxy was introduced**
+(§24). The four measured incompatibilities stand. The recommended order —
+**#1796 before #1791** — was followed, and #1791 remains `blocked`. **#1798
+remains `blocked` and unbegun.** Ticket **#1773** remains `blocked`; **CNA and
+mobile-eggbert were not inspected, searched, configured, built or modified**, so
+the source-break figures in this record remain *this repository only*.
