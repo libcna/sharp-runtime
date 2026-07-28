@@ -1043,12 +1043,13 @@ TEST(CollectionVersionCounterSpecifics, HashtableKeyAndValueViewsInheritTheTable
     NG::Hashtable t;
     t.Add(std::string("a"), std::any(1));
     t.Add(std::string("b"), std::any(2));
-    auto* keys = t.getKeysProperty();
+    auto* keys = t.getKeysProperty();   // caller owns the view, as ticket #1775 defined
     auto* e = keys->GetEnumerator();
     EXPECT_TRUE(e->MoveNext());
     t.Add(std::string("c"), std::any(3));
     EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
     delete e;
+    delete keys;
 }
 
 // =====================================================================================
