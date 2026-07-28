@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <atomic>
 #include <initializer_list>
 #include <iterator>
 #include <memory>
@@ -54,20 +55,33 @@ using SharpRuntime::intcs;
  * compares against the single `_underlying.version`.
  *
  * @par Thread safety
- * None, matching .NET (`ICollection.IsSynchronized => false`). An owning set and every view
- * derived from it are **one collection** for concurrency purposes: concurrent access to a set
- * and one of its views is exactly as unsafe as concurrent access to a single set. Only
- * reference-count updates on the shared state are atomic, so copying or destroying handles on
- * different threads cannot corrupt the control block; nothing stronger is claimed.
+ * No synchronization is provided, matching .NET (`ICollection.IsSynchronized => false`).
+ * The contract has exactly two halves, and they are deliberately not the same:
  *
- * One consequence is worth stating explicitly because it is not obvious from the signatures:
- * a **view**'s getCountProperty() is `const` but not free of data races, because it fills the
- * lazy per-object Count cache that mirrors .NET's `TreeSubSet._countVersion`. Two threads
- * calling it on the *same view object* race on that cache (measured with ThreadSanitizer:
- * "data race ... Read of size 4 ... Previous write of size 4 ... in getCountProperty() const").
- * Concurrent read-only use of *distinct* handles over the same state -- including creating and
- * destroying view handles -- is race-free. Give each thread its own handle, or synchronize
- * externally.
+ * - **Concurrent mutation is unsupported.** If any thread mutates, no other thread may touch
+ *   the collection at all. An owning set and every view derived from it are **one collection**
+ *   for this purpose, so mutating through a view while reading through the parent (or through
+ *   another view) is exactly as undefined as mutating a single set while reading it. This
+ *   class adds no locking to make that safe, and none is planned.
+ * - **Concurrent read-only access is race-free.** No `const` member of this class writes to an
+ *   unsynchronized field, so any number of threads may call getCountProperty(), Contains(),
+ *   getMinProperty(), getMaxProperty(), ToVector(), the read-only set predicates, or iterate,
+ *   concurrently -- on the *same* object or on distinct handles over the same shared state --
+ *   for as long as nobody mutates. This is the guarantee .NET documents for its own
+ *   collections ("can support multiple readers concurrently, as long as the collection is not
+ *   modified"), and it is the reason the lazy Count cache below is atomic rather than plain.
+ *
+ * Reference-count updates on the shared state are atomic, so copying or destroying handles on
+ * different threads cannot corrupt the control block. Nothing beyond the two points above is
+ * claimed: this type is not thread-safe, it is merely free of *internal* races when read.
+ *
+ * @note Ticket #1783 briefly broke the read-only half. It introduced a per-view lazy Count
+ * cache held in two plain `mutable intcs` fields that the `const` getCountProperty() wrote, so
+ * two threads reading Count through one view object executed conflicting non-atomic accesses
+ * -- a genuine C++ data race, reported by ThreadSanitizer as "Read of size 4 ... Previous
+ * write of size 4 ... in getCountProperty() const". Ticket #1784 repaired that by making the
+ * two cache fields atomic with a release/acquire publication protocol. The cache, its cost,
+ * and the object layout are otherwise unchanged.
  *
  * @tparam T The type of elements in the set. Only the ordering used by std::set<T> -- by
  *           default `std::less<T>`, hence `operator<` -- is required; no member of this class
@@ -95,10 +109,29 @@ class SortedSet {
     // full set has neither bound; GetViewBetween always activates both.
     std::optional<T> lower_;
     std::optional<T> upper_;
+    // Version value meaning "this view has never computed its Count". The shared version
+    // counter starts at 0 and only increments, so it never legitimately holds this value.
+    static constexpr intcs kCountNotCached = -1;
+
     // .NET TreeSubSet's lazy `count`/`_countVersion` pair: a view's Count is recomputed only
     // once per version of the shared state.
-    mutable intcs cachedCount_ = -1;
-    mutable intcs cachedCountVersion_ = -1;
+    //
+    // Atomic, not plain, because getCountProperty() is `const` yet fills them: two threads
+    // reading Count through the same view object would otherwise perform conflicting
+    // non-atomic accesses and make an observationally read-only operation undefined
+    // behaviour (ticket #1784). getCountProperty() documents the publication protocol these
+    // two fields obey; do not weaken their memory orders independently of each other.
+    mutable std::atomic<intcs> cachedCount_{0};
+    mutable std::atomic<intcs> cachedCountVersion_{kCountNotCached};
+
+    // Ticket #1784 chose same-width atomics specifically so ticket #1783's published object
+    // layout survives byte for byte -- sizeof(SortedSet<int>) == 40,
+    // sizeof(SortedSet<std::string>) == 104. Fail loudly rather than silently re-breaking the
+    // layout if a platform ever pads its atomics.
+    static_assert(sizeof(std::atomic<intcs>) == sizeof(intcs),
+                  "the atomic Count cache must not change SortedSet<T>'s object layout");
+    static_assert(alignof(std::atomic<intcs>) == alignof(intcs),
+                  "the atomic Count cache must not change SortedSet<T>'s alignment");
 
     using SetIterator = typename std::set<T>::const_iterator;
 
@@ -135,6 +168,19 @@ class SortedSet {
     /** @brief True when @p other is a handle onto the same state with the same bounds. */
     [[nodiscard]] bool aliasesSameRangeAs(const SortedSet<T>& other) const {
         return other.state_ == state_ && sameBoundsAs(other);
+    }
+
+    /**
+     * @brief Marks this handle's lazy Count cache as holding nothing.
+     *
+     * Called by every operation that rebinds the handle -- move construction, copy assignment,
+     * move assignment -- so an assigned-to or moved-from object can never answer Count from a
+     * value computed for state it no longer refers to. The stores follow getCountProperty()'s
+     * protocol: the version is the publishing field, so it is written last, with `release`.
+     */
+    void invalidateCountCache() noexcept {
+        cachedCount_.store(0, std::memory_order_relaxed);
+        cachedCountVersion_.store(kCountNotCached, std::memory_order_release);
     }
 
     /** @brief Private view constructor: a bounded handle onto already-owned shared state. */
@@ -226,8 +272,7 @@ public:
         other.state_ = std::make_shared<State>();
         other.lower_.reset();
         other.upper_.reset();
-        other.cachedCount_ = -1;
-        other.cachedCountVersion_ = -1;
+        other.invalidateCountCache();
     }
 
     /**
@@ -246,8 +291,7 @@ public:
         state_ = std::move(tmp.state_);
         lower_ = std::move(tmp.lower_);
         upper_ = std::move(tmp.upper_);
-        cachedCount_ = -1;
-        cachedCountVersion_ = -1;
+        invalidateCountCache();
         return *this;
     }
 
@@ -261,13 +305,11 @@ public:
         state_ = std::move(other.state_);
         lower_ = std::move(other.lower_);
         upper_ = std::move(other.upper_);
-        cachedCount_ = -1;
-        cachedCountVersion_ = -1;
+        invalidateCountCache();
         other.state_ = std::make_shared<State>();
         other.lower_.reset();
         other.upper_.reset();
-        other.cachedCount_ = -1;
-        other.cachedCountVersion_ = -1;
+        other.invalidateCountCache();
         return *this;
     }
 
@@ -306,17 +348,33 @@ public:
      * @brief Gets the number of elements in the SortedSet, or in a view's range.
      *
      * C++ counterpart of .NET SortedSet<T>.Count. O(1) for an owning full set. For a view the
-     * in-range count is computed once per version of the shared state and then cached,
-     * mirroring .NET TreeSubSet's `count`/`_countVersion` pair.
+     * in-range count is an O(k) walk of the k in-range elements, computed once per version of
+     * the shared state and then cached, mirroring .NET TreeSubSet's `count`/`_countVersion`
+     * pair. Any mutation anywhere in the shared state bumps that version, so a cached value
+     * can never be returned as current after a completed mutation.
+     *
+     * @par Concurrency
+     * Safe to call concurrently from any number of threads, on one object or on several
+     * handles, provided no thread is mutating (see the class-level thread-safety contract).
+     * The cache is published with a two-step protocol rather than written plainly, which is
+     * what makes that true (ticket #1784): the count is stored first, then the version is
+     * stored with `release`. A reader that observes the new version with `acquire` therefore
+     * also observes the matching count, so the (count, version) pair can never be read torn.
+     * With no concurrent mutation every racing thread computes the *same* value for the same
+     * version, so duplicate publication is harmless -- the protocol exists to order the pair,
+     * not to arbitrate between conflicting results. This member allocates nothing.
+     *
      * @return The number of elements.
      */
     [[nodiscard]] intcs getCountProperty() const {
         if (!getIsViewProperty()) return static_cast<intcs>(state_->data.size());
-        if (cachedCountVersion_ != state_->version) {
-            cachedCount_ = static_cast<intcs>(std::distance(rangeBegin(), rangeEnd()));
-            cachedCountVersion_ = state_->version;
-        }
-        return cachedCount_;
+        const intcs currentVersion = state_->version;
+        if (cachedCountVersion_.load(std::memory_order_acquire) == currentVersion)
+            return cachedCount_.load(std::memory_order_relaxed);
+        const auto computed = static_cast<intcs>(std::distance(rangeBegin(), rangeEnd()));
+        cachedCount_.store(computed, std::memory_order_relaxed);
+        cachedCountVersion_.store(currentVersion, std::memory_order_release);
+        return computed;
     }
 
     /**
