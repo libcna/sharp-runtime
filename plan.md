@@ -36,7 +36,7 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 14,060 passing across 36 component binaries plus one integration
+- Tests: 14,070 passing across 36 component binaries plus one integration
   binary, verified by ticket #1817 (SR-AUD-079, the canonical final-quantum
   rule) through the full repository gate, raised from the 14,002 verified by
   ticket #1816 (SR-AUD-078 / CCF-013, the in-place Base64
@@ -3812,3 +3812,43 @@ or exported symbol changed. `TextWriter`'s two overloads are `inline` in a publi
 header, so an unrebuilt consumer keeps the old inlined body — a stale-inline
 consideration, not an ABI break, and benign here because the old body only ever failed
 on the input the new one handles.
+
+### Completed StreamReader direction validation: ticket #1808
+
+**`P2: StreamReader does not validate CanRead on the base stream`**
+(`REMED-IO-TEXT-WRAPPER-STREAM-DIRECTION`, P2, size S) is complete **for the reader
+half**. No `SR-AUD-*` identifier; `SR-AUD-337` stays `confirmed`, `SR-AUD-338` stays
+`remediated`, numbering frozen at 364.
+
+`StreamReader(Stream*, bool)` now rejects a stream that exists but declares itself
+unreadable, with `ArgumentException("Stream was not readable.")` — message only, no
+`paramName` — after the null check. That is `StreamReader.cs:145-148` /
+`Argument_StreamNotReadable` exactly, and byte-identical to `BinaryReader.cpp:25`,
+which already did it.
+
+**The defect is SR-AUD-338's laundering one level further out.** Measured on a
+`FileStream(path, FileMode::Append)` (`FileAccess::Write` only, so `CanRead` is
+false): `Read()` returned `-1` and `ReadToEnd()` returned `""`, so a stream that can
+never be read was indistinguishable from an empty document
+(`build-probe/1823_prefix_defects.log` cases 6 and 7).
+
+**Rescoped to one half, with the reason measured rather than assumed.** #1808 was
+opened covering both directions and required an inventory first, so that "the check
+cannot reject a stream that is in fact usable". The inventory (#1823,
+`docs/TextWrapperInputContractPlan.md` §5) found the two directions have **opposite**
+compatibility, from one line — `Stream::getCanWriteProperty()` defaults to `false`
+and `getCanReadProperty()` to `true`, where .NET makes both abstract. A `CanRead`
+guard rejects only self-declared-unreadable streams; a `CanWrite` guard would also
+reject every custom stream that implements `Write()` and never overrode the property,
+one of which writes `"hello"` successfully today. The writer half is therefore blocked
+ticket **#1824**, awaiting the approval a mandatory downstream migration needs.
+
+Closure evidence: 10 permanent regressions, `SharpRuntimeTests_IO` **572/572** (was
+562), clean under ASan + UBSan + LSan (`build-asan/1808_io_asan.log`). Repository
+gate: 0 warnings, 0 errors, **14,070 tests across 37 executables**. No public
+signature, virtual, vtable, layout or symbol changed.
+
+Two further defects exposed by the same measurement are their own tickets rather than
+folded in: **#1825** (`FileStream::Write` silently discards data written to a
+read-only handle) and **#1826** (`MemoryStream::getCanReadProperty()` ignores
+`isOpen_`).

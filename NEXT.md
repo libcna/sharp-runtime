@@ -7,10 +7,11 @@
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production
-dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,060 tests across 37 executables (the 13,127 figure this
+dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,070 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 14,060
-verified by #1809, raised from the 14,046
+section below states the count it measured, and the current floor is the 14,070
+verified by #1808, raised from the 14,060
+verified by #1809, the 14,046
 verified by #1821, the 14,041
 verified by #1822, the 14,033
 verified by #1820, the 14,025
@@ -7025,3 +7026,31 @@ overload; the base guard alone is bypassed by virtual dispatch, including throug
 `SharpRuntimeTests_Console` **127/127** (was 123), both clean under ASan + UBSan +
 LSan. Repository gate **14,060 tests across 37 executables**, 0 warnings, 0 errors.
 No public signature, virtual, vtable, layout or symbol changed.
+
+## Completed StreamReader direction validation: ticket #1808 (2026-07-29)
+
+`REMED-IO-TEXT-WRAPPER-STREAM-DIRECTION`, P2, size S — **reader half only**. No
+`SR-AUD-*` identifier; `SR-AUD-337` stays `confirmed`, `SR-AUD-338` stays
+`remediated`.
+
+`StreamReader(Stream*, bool)` rejects a stream whose `getCanReadProperty()` is false
+with `ArgumentException("Stream was not readable.")`, no `paramName`, after the null
+check — `StreamReader.cs:145-148` exactly, and byte-identical to `BinaryReader.cpp:25`.
+
+The defect was SR-AUD-338's laundering one level out: a `FileStream(path,
+FileMode::Append)` answered `-1` and `""`, indistinguishable from an empty document.
+
+**Why only one half.** `Stream::getCanWriteProperty()` defaults to **`false`** and
+`getCanReadProperty()` to **`true`**, where .NET makes both abstract. So a `CanRead`
+guard rejects only streams that positively declare themselves unreadable, but a
+`CanWrite` guard would also reject every custom stream that implements `Write()` and
+never overrode the property — one such stream writes `"hello"` successfully today.
+The writer half is blocked ticket **#1824**.
+
+10 permanent regressions. `SharpRuntimeTests_IO` **572/572** (was 562), clean under
+ASan + UBSan + LSan. Repository gate **14,070 tests across 37 executables**, 0
+warnings, 0 errors. No public signature, virtual, vtable, layout or symbol changed.
+
+New tickets from this measurement: **#1825** (P1 — `FileStream::Write` silently
+discards data written to a read-only handle) and **#1826** (P3, inactive —
+`MemoryStream::getCanReadProperty()` ignores `isOpen_`).
