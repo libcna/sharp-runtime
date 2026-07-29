@@ -375,6 +375,32 @@ SR-AUD-078 and:
 - `modules/buffers/include/System/Buffers/Text/Base64Url.hpp.audit.md`;
 - `modules/buffers/tests/System/Buffers/Base64UrlTests.cpp.audit.md`.
 
+**REMEDIATED (ticket #1816, 2026-07-29).** This cause is closed. Its single
+member finding, SR-AUD-078, is `remediated`, and the repair covered **both**
+headers as this cause required, in one ticket, with tests on both. The trailing
+one/two-byte pack is now encoded **before** the backwards loop over the full
+3-byte packs — .NET's own order in the `Base64Helper/Base64EncoderHelper.cs`
+helper that its `Base64` and `Base64Url` in-place encoders share.
+
+The scope was larger than "4/5-byte source lengths". A 0..24 length sweep for
+both types, comparing each in-place result against the same type's own
+out-of-place encoder, was wrong in **28 of 50 cases** before the fix and **0 of
+50** after: every length with both a full pack and a remainder (4, 5, 7, 8, 10,
+11, 13, 14, 16, 17, 19, 20, 22, 23), all of them returning success. A sentinel
+byte immediately past the encoded output was never touched in either direction,
+so this was silent corruption *inside* the declared output rather than an
+overrun — which is why no sanitizer had ever flagged it.
+
+The cause's demand to "test every full-group-plus-remainder boundary" is met by
+8 permanent regressions, four per header, including that sweep. The pre-existing
+tests covered `dataLength` 2 and 3 only — precisely the two shapes that cannot
+exhibit the defect.
+
+The four adjacent findings in the same two headers — SR-AUD-079, SR-AUD-080,
+SR-AUD-081, SR-AUD-082 — are **not** members of this cause, were **not** closed
+by #1816, and stay `confirmed`. They are scoped, ordered and split into tickets
+#1817 through #1820 by `docs/Base64FamilyPlan.md` (ticket #1815, design-only).
+
 ## CCF-014 — false Try-style calls must not leak stale output into the next control path
 
 `SequenceReader::TryRead` / `TryPeek` and every implemented

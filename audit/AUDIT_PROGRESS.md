@@ -4749,3 +4749,102 @@ left exactly as found.
 Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
 `1814_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new build
 directory was created** and **no compilation exceeded three jobs**.
+
+### Completed Base64 family plan and in-place write order: tickets #1815 and #1816
+
+With the eight immediate public-input crash findings closed, the roadmap's item 3
+applies: cross-cutting causes get a **scoped family plan** first, not a
+file-by-file sweep. **CCF-013** was taken first because it is the smallest
+coherent cause and the only one of the five that is a *correctness* defect rather
+than a parity difference — the current output is simply wrong.
+
+**Ticket #1815** (`REMED-BUFFERS-BASE64-FAMILY-PLAN`, P2, size S, design-only) is
+**done** and recorded in
+[`docs/Base64FamilyPlan.md`](docs/Base64FamilyPlan.md). No production source
+changed under it. It establishes, from evidence rather than memory:
+
+- CCF-013 has exactly **one** member finding, SR-AUD-078, spanning **two** public
+  headers, and the cause explicitly requires one repair covering both;
+- four adjacent `confirmed` findings — SR-AUD-079, SR-AUD-080, SR-AUD-081,
+  SR-AUD-082 — live in the *same two headers* and share the same shape, but are
+  **not** CCF-013 members and are not renamed into it;
+- the pre-existing in-place encode tests covered `dataLength` **2 and 3 only**,
+  which are precisely the two shapes that *cannot* exhibit the defect (length 3
+  has no remainder, length 2 has no full pack) — that is why the suite was green;
+- #1817, #1818 and #1819 all edit the same final-quantum branch of one
+  `decodeCore` and are therefore **sequenced**, while #1820 touches the Base64Url
+  decode table instead and is deliberately **unordered** against them;
+- **none** of the six tickets needs the public-signature/layout approval category,
+  though #1817 and #1818 do narrow the accepted input set, which each must state
+  in its own record.
+
+**Ticket #1816** (`REMED-BUFFERS-BASE64-INPLACE-ORDER`, P1, size S) is **done**
+and **SR-AUD-078 is now `remediated`**, which **closes CCF-013**. **No new
+`SR-AUD-*` identifier**; the numbering stays frozen at 364, and the index now
+records **18 remediated** and **346 confirmed** of 364.
+
+`Base64::EncodeToUtf8InPlace` and `Base64Url::TryEncodeToUtf8InPlace` both encoded
+the full 3-byte packs backwards and only then read the trailing one/two-byte
+remainder. Encoding pack `i` reads source `3i..3i+2` and writes output
+`4i..4i+3`, and `4i >= 3i`, so a pack can only overwrite source bytes belonging to
+packs *after* it — which makes a last-to-first walk correct for every full pack
+but **not** for the remainder, which is the last pack of all and was handled after
+the loop. The remainder is now encoded **first**. That is .NET's own order:
+`Base64Helper/Base64EncoderHelper.cs`'s shared
+`EncodeToUtf8InPlace<TBase64Encoder>` encodes the leftover pack before its
+backwards loop, under the comment *"encode last pack to avoid conditional in the
+main loop"*.
+
+**Measured before any production change** (`build-probe/1816_prefix_defects.cpp`,
+logs `1816_prefix_defects.log` and `1816_postfix_defects.log`) — every
+`dataLength` from 0 to 24, both types, each in-place result compared against *the
+same type's own out-of-place encoder*, with a sentinel byte immediately past the
+encoded output:
+
+| | Pre-fix | Post-fix |
+|---|---|---|
+| Cases wrong | **28 of 50** | **0 of 50** |
+| Lengths affected, per type | 4, 5, 7, 8, 10, 11, 13, 14, 16, 17, 19, 20, 22, 23 | none |
+| Status returned | `Done` / `true` in **all** 50 | unchanged |
+| Sentinel past the output | never touched | never touched |
+
+**The scope was larger than the finding's "4/5-byte source lengths"** — it is
+every length with both a full pack and a remainder, which the finding's own text
+does say and the sweep makes concrete. **The sentinel result is the other half of
+the story**: this was silent corruption *inside* the declared output, never an
+overrun, which is why no sanitizer had ever flagged it and why only a
+differential sweep could find it.
+
+**Tests: +8 permanent regressions**, four per header — the audit's own 4-byte
+reproduction (`'A','B','C',0` → `QUJDAA==` / `QUJDAA`, not `QUJDRA==` /
+`QUJDRA`), the 5-byte case, a **7-byte** case proving the defect was never limited
+to 4 and 5, and the 0..24 sweep asserting equality with the out-of-place encoder
+and an untouched sentinel at every length.
+
+**Validation.** `SharpRuntimeTests_Buffers` **473/473** (was 465), and the same
+473 under **ASan + UBSan + LSan with zero reports**
+(`build-asan/1816_buffers_asan.log`). Repository gate: **0 warnings, 0 errors**,
+**14,002 tests across 37 executables** (was 13,994). Module graph **41 / 91**;
+catalogue current; database consistent; the ten-component selective matrix
+passed; Doxygen **1,941** of the 1,942 ceiling, unchanged; `git diff --check`
+clean.
+
+**Source and ABI consequences: none.** Both functions are `static` members of
+header-only classes; no signature, layout or exported symbol changed.
+**Behavioural note for consumers: any output previously produced in place for a
+length with both a full pack and a remainder was wrong and is now correct**, so a
+consumer that stored or transmitted such output stored corrupted data. No
+in-repository caller uses these APIs outside their tests.
+
+**Left open on purpose.** SR-AUD-079, SR-AUD-080, SR-AUD-081 and SR-AUD-082 stay
+`confirmed` and are tickets **#1817–#1820**, ordered by the plan. #1815 also
+opened **#1821** for a defect found while planning and not folded in: .NET's
+helper short-circuits an empty buffer to `Done` *before* its length check, while
+this port returns `DestinationTooSmall`/`false` for an empty buffer with a
+positive `dataLength` (`build-probe/1815_empty_buffer_probe.log`). #1821 is framed
+as a **decision**, not a foregone fix — reporting `Done` for a request to encode
+five bytes into a zero-byte buffer is arguably the worse contract.
+
+Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
+`1815_`/`1816_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new
+build directory was created** and **no compilation exceeded three jobs**.

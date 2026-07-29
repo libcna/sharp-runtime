@@ -128,3 +128,77 @@ The ordinary direct cases are green, but the in-place remainder overwrite is a
 confirmed data-corruption defect and the shared decoder has three confirmed
 streaming/canonical-validation divergences.  No production or test source was
 modified during this audit.
+
+## Post-audit remediation for SR-AUD-078 / CCF-013 (ticket #1816, 2026-07-29): REMEDIATED
+
+The audit evidence above is retained unchanged. **SR-AUD-079, SR-AUD-080 and SR-AUD-081 in this file are
+untouched and stay `confirmed`** — ticket #1816 repaired the in-place write order
+only. The plan that scopes the rest of this cluster is
+[`docs/Base64FamilyPlan.md`](../../../../../../../docs/Base64FamilyPlan.md)
+(ticket #1815, design-only).
+
+Ticket #1816 (`REMED-BUFFERS-BASE64-INPLACE-ORDER`, P1, size S) encodes the
+trailing one/two-byte pack **before** the backwards loop over the full 3-byte
+packs, in **both** `Base64::EncodeToUtf8InPlace` and
+`Base64Url::TryEncodeToUtf8InPlace` — the two sites CCF-013 requires one repair to
+cover. This is .NET's own order: `Base64Helper/Base64EncoderHelper.cs`'s
+`EncodeToUtf8InPlace<TBase64Encoder>`, which its `Base64` and `Base64Url` in-place
+encoders share, encodes the leftover pack first under the comment *"encode last
+pack to avoid conditional in the main loop"*.
+
+**The ordering argument, once.** Encoding pack `i` reads source `3i..3i+2` and
+writes output `4i..4i+3`; since `4i >= 3i`, a pack can only overwrite source bytes
+belonging to packs *after* it, so a last-to-first walk protects every full pack.
+But the remainder is the last pack of all, and it was handled *after* the loop, so
+the loop had already written over it.
+
+**Measured before any production change** (`build-probe/1816_prefix_defects.cpp`,
+logs `1816_prefix_defects.log` and `1816_postfix_defects.log`): a sweep of every
+`dataLength` from 0 to 24 for both types, each in-place result compared against
+*the same type's own out-of-place encoder*, with a sentinel byte immediately past
+the encoded output.
+
+| | Pre-fix | Post-fix |
+|---|---|---|
+| Cases wrong | **28 of 50** | **0 of 50** |
+| Lengths affected, per type | 4, 5, 7, 8, 10, 11, 13, 14, 16, 17, 19, 20, 22, 23 — every length with both a full pack and a remainder | none |
+| Status returned | `Done` / `true` in **all** 50 | unchanged |
+| Sentinel past the output | never touched | never touched |
+
+The finding named lengths 4 and 5 (`ABC\0` → `QUJDRA==` / `QUJDRA` instead of
+`QUJDAA==` / `QUJDAA`); its own text adds that the dependency exists for every
+full-triple-plus-remainder length, and the sweep is what makes that concrete. The
+sentinel result matters too: this was silent corruption **inside** the declared
+output, never an overrun, which is why no sanitizer had ever flagged it.
+
+**Why the direct suite was green.** Before this ticket the in-place encoders were
+tested at `dataLength` 3 (`Base64Test.EncodeToUtf8InPlace_RoundTrip`,
+`Base64UrlTest.TryEncodeToUtf8InPlace_RoundTrip`) and 2
+(`Base64Test.TryEncodeToUtf8InPlace_Success`), plus two short-destination cases.
+Those are exactly the two shapes that **cannot** exhibit the defect — length 3 has
+no remainder, length 2 has no full pack. Nothing covered a length with both.
+
+Closure evidence: **8 new permanent regressions**, four per header — the audit's
+own 4-byte reproduction, the 5-byte case, a 7-byte case proving the defect was
+never limited to 4 and 5, and a 0..24 sweep that asserts equality with the
+out-of-place encoder and an untouched sentinel at every length.
+`SharpRuntimeTests_Buffers` is **473/473** (was 465), and the same 473 under
+AddressSanitizer + UndefinedBehaviorSanitizer + LeakSanitizer with **zero
+reports** (`build-asan/1816_buffers_asan.log`). Repository gate: 0 warnings, 0
+errors, **14,002 tests across 37 executables** (was 13,994).
+
+Source and ABI consequences: none. Both are `static` members of header-only
+classes; no signature, layout or exported symbol changed. **Behavioural note for
+consumers: any encoded output previously produced in place for a length with both
+a full pack and a remainder was wrong and is now correct**, so a consumer that
+stored or transmitted such output has stored corrupted data. No in-repository
+caller uses these APIs outside their tests.
+
+**One separate defect was found while planning and deliberately not folded in.**
+.NET's helper short-circuits `if (buffer.IsEmpty) { bytesWritten = 0; return
+OperationStatus.Done; }` *before* its destination-length check; this port has no
+such short-circuit, so an empty buffer with a positive `dataLength` returns
+`DestinationTooSmall`/`false` where .NET returns `Done`/`true`
+(`build-probe/1815_empty_buffer_probe.log`). It carries **no `SR-AUD-*`
+identifier** and is inactive ticket **#1821**, framed as a decision rather than a
+foregone fix.
