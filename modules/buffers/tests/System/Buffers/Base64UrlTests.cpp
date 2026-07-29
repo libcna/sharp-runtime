@@ -442,3 +442,227 @@ TEST(Base64UrlTest, Decode_AcceptsEveryEncodedLength_AfterCanonicalRule) {
         for (int i = 0; i < n; ++i) EXPECT_EQ(out[static_cast<size_t>(i)], data[static_cast<size_t>(i)]);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Ticket #1820 / SR-AUD-082: Base64Url accepts optional final '=' / '%' padding.
+//
+// Base64Url emits no padding, but .NET's decoder and validator both ACCEPT it on a
+// final block: Base64UrlDecoderByte.IsValidPadding is
+// `padChar is EncodingPad or UrlEncodingPad` and Base64UrlByteValidatable.IsEncodingPad
+// is the same test. The grammar is Base64UrlByteValidatable.ValidateAndDecodeLength:
+// with `remainder` symbols in the trailing incomplete quantum and `padCount` final
+// padding characters, padding is valid only when remainder != 0 and
+// remainder + padCount <= 4, with at most two pads; remainder 1 is never valid.
+//
+// Every vector below is taken from a named current-.NET test:
+// Base64UrlValidationUnitTests.ValidateWithPaddingReturnsCorrectCountBytes/Chars,
+// .SmallSizeBytes/Chars, and Base64UrlDecoderUnitTests.DecodingInvalidBytesPadding.
+// Measured: build-probe/1820_defects.cpp, logs 1820_prefix_defects.log (18 of 62
+// lines differed) and 1820_postfix_defects.log (0 of 62).
+// ---------------------------------------------------------------------------
+
+namespace {
+// Decodes with both overloads and asserts they agree, then returns the UTF-8 result.
+struct UrlDecodeResult { OperationStatus status; int consumed; int written; std::vector<uint8_t> bytes; };
+
+UrlDecodeResult DecodeBothUrlOverloads(const std::string& text, bool isFinalBlock, int dstLen) {
+    const auto len = static_cast<int>(text.size());
+    std::vector<uint8_t> out(static_cast<size_t>(dstLen) + 1, 0xCC);
+    int consumed = -1, written = -1;
+    const OperationStatus s = Base64Url::DecodeFromUtf8(
+        ReadOnlySpan<uint8_t>(reinterpret_cast<const uint8_t*>(text.data()), len),
+        Span<uint8_t>(out.data(), dstLen), consumed, written, isFinalBlock);
+
+    std::vector<uint8_t> out2(static_cast<size_t>(dstLen) + 1, 0xCC);
+    int consumed2 = -1, written2 = -1;
+    const OperationStatus s2 = Base64Url::DecodeFromChars(
+        ReadOnlySpan<char>(text.data(), len),
+        Span<uint8_t>(out2.data(), dstLen), consumed2, written2, isFinalBlock);
+
+    EXPECT_EQ(s, s2) << text;
+    EXPECT_EQ(consumed, consumed2) << text;
+    EXPECT_EQ(written, written2) << text;
+    if (written > 0) { EXPECT_EQ(out, out2) << text; }
+
+    out.resize(static_cast<size_t>(written < 0 ? 0 : written));
+    return {s, consumed, written, out};
+}
+} // namespace
+
+// .NET ValidateWithPaddingReturnsCorrectCountBytes/Chars: all sixteen vectors, whose
+// Chars variant additionally asserts DecodeFromChars returns Done with the same count.
+TEST(Base64UrlTest, OptionalFinalPadding_DecodesAndValidates) {
+    struct { const char* text; int decoded; const char* expected; } cases[] = {
+        {"YQ==",  1, "a"},   {"YWI=",  2, "ab"},  {"YWJj",  3, "abc"},
+        {" YWI=", 2, "ab"},  {"Y WI=", 2, "ab"},  {"YW I=", 2, "ab"},
+        {"YWI =", 2, "ab"},  {"YWI= ", 2, "ab"},
+        {" YQ==", 1, "a"},   {"Y Q==", 1, "a"},   {"YQ ==", 1, "a"},
+        {"YQ= =", 1, "a"},   {"YQ== ", 1, "a"},
+        {"YQ%%",  1, "a"},   {"YWI%",  2, "ab"},  {"YQ% ",  1, "a"},
+    };
+    for (const auto& c : cases) {
+        const std::string text(c.text);
+        const auto r = DecodeBothUrlOverloads(text, true, 16);
+        EXPECT_EQ(r.status, OperationStatus::Done) << c.text;
+        EXPECT_EQ(r.consumed, static_cast<int>(text.size())) << c.text;
+        EXPECT_EQ(r.written, c.decoded) << c.text;
+        EXPECT_EQ(std::string(r.bytes.begin(), r.bytes.end()), std::string(c.expected)) << c.text;
+
+        // The validator must agree exactly -- stricter is as bad as more permissive here,
+        // because it declares a decodable input unusable.
+        int decodedLength = -1;
+        EXPECT_TRUE(Base64Url::IsValid(ReadOnlySpan<uint8_t>(
+            reinterpret_cast<const uint8_t*>(text.data()), static_cast<int>(text.size())),
+            decodedLength)) << c.text;
+        EXPECT_EQ(decodedLength, c.decoded) << c.text;
+        int decodedLengthChars = -1;
+        EXPECT_TRUE(Base64Url::IsValid(
+            ReadOnlySpan<char>(text.data(), static_cast<int>(text.size())), decodedLengthChars)) << c.text;
+        EXPECT_EQ(decodedLengthChars, c.decoded) << c.text;
+    }
+}
+
+// .NET DecodingInvalidBytesPadding: padding is only valid at the very end. The exact
+// consumed/written of each rejection is asserted there too.
+TEST(Base64UrlTest, Padding_OnlyAtTheVeryEnd_IsAccepted) {
+    for (int j = 0; j < 7; ++j) {
+        std::string text = "2222PPPP";
+        text[static_cast<size_t>(j)] = '=';
+        const auto r = DecodeBothUrlOverloads(text, true, 16);
+        EXPECT_EQ(r.status, OperationStatus::InvalidData) << text;
+        EXPECT_EQ(r.consumed, j < 4 ? 0 : 4) << text;
+        EXPECT_EQ(r.written, j < 4 ? 0 : 3) << text;
+        EXPECT_FALSE(Base64Url::IsValid(ReadOnlySpan<uint8_t>(
+            reinterpret_cast<const uint8_t*>(text.data()), 8))) << text;
+    }
+    // Valid padding preceded by invalid data is still invalid, and reports only the
+    // complete quantum that did decode.
+    for (const char* text : {"2222P*==", "2222P**="}) {
+        const auto r = DecodeBothUrlOverloads(std::string(text), true, 16);
+        EXPECT_EQ(r.status, OperationStatus::InvalidData) << text;
+        EXPECT_EQ(r.consumed, 4) << text;
+        EXPECT_EQ(r.written, 3) << text;
+    }
+}
+
+// .NET DecodingInvalidBytesPadding, the two inputs it declares VALID -- one with '='
+// and one with the URL-escaped '%' -- for isFinalBlock both true and false.
+TEST(Base64UrlTest, Padding_IsInvalidWhileIsFinalBlockIsFalse) {
+    struct { const char* text; int finalWritten; } cases[] = { {"2222PA==", 4}, {"2222PPM%", 5} };
+    for (const auto& c : cases) {
+        const auto ok = DecodeBothUrlOverloads(std::string(c.text), true, 16);
+        EXPECT_EQ(ok.status, OperationStatus::Done) << c.text;
+        EXPECT_EQ(ok.consumed, 8) << c.text;
+        EXPECT_EQ(ok.written, c.finalWritten) << c.text;
+
+        const auto no = DecodeBothUrlOverloads(std::string(c.text), false, 16);
+        EXPECT_EQ(no.status, OperationStatus::InvalidData) << c.text;
+        EXPECT_EQ(no.consumed, 4) << c.text;
+        EXPECT_EQ(no.written, 3) << c.text;
+    }
+}
+
+// The grammar's boundaries, derived from ValidateAndDecodeLength. These are the shapes
+// that must NOT become acceptable now that padding is understood at all.
+TEST(Base64UrlTest, MalformedPadding_IsRejectedByDecoderAndValidator) {
+    for (const char* text : {
+            "YWJj=",   // a complete quantum admits no padding (remainder 0)
+            "Y=", "Y==",   // remainder 1 is never decodable
+            "YWI==",   // remainder 3 + two pads exceeds four
+            "YQ===",   // more than two padding characters
+            "==", "%", "=",  // padding with nothing to pad
+            "YR==",    // noncanonical final bits, padded (ticket #1817's rule still applies)
+            "YWJ=",
+            "YQ==YQ",  // data after padding
+            "YQ=Y",    // one pad then a symbol
+        }) {
+        const std::string s(text);
+        const auto r = DecodeBothUrlOverloads(s, true, 16);
+        EXPECT_EQ(r.status, OperationStatus::InvalidData) << text;
+        int decodedLength = -1;
+        EXPECT_FALSE(Base64Url::IsValid(ReadOnlySpan<uint8_t>(
+            reinterpret_cast<const uint8_t*>(s.data()), static_cast<int>(s.size())), decodedLength)) << text;
+        EXPECT_EQ(decodedLength, 0) << text;
+    }
+}
+
+// The two spellings are interchangeable per character, since .NET tests each character
+// with `value == EncodingPad || value == UrlEncodingPad` rather than fixing one spelling.
+TEST(Base64UrlTest, PaddingSpellings_MayBeMixed) {
+    for (const char* text : {"YQ=%", "YQ%="}) {
+        const auto r = DecodeBothUrlOverloads(std::string(text), true, 16);
+        EXPECT_EQ(r.status, OperationStatus::Done) << text;
+        EXPECT_EQ(r.written, 1) << text;
+        EXPECT_EQ(r.bytes[0], 'a') << text;
+        EXPECT_TRUE(Base64Url::IsValid(ReadOnlySpan<uint8_t>(
+            reinterpret_cast<const uint8_t*>(text), 4))) << text;
+    }
+}
+
+// Unpadded input of every remainder size must decode exactly as before: this ticket
+// only ADDS accepted input.
+TEST(Base64UrlTest, UnpaddedInput_IsUnchangedByTheNewPaddingRule) {
+    struct { const char* text; OperationStatus status; int consumed; int written; } cases[] = {
+        {"",         OperationStatus::Done,        0, 0},
+        {"YQ",       OperationStatus::Done,        2, 1},
+        {"YWI",      OperationStatus::Done,        3, 2},
+        {"Y",        OperationStatus::InvalidData, 0, 0},
+        {"YWJj",     OperationStatus::Done,        4, 3},
+        {"2222PPM",  OperationStatus::Done,        7, 5},
+        {"2222PPPP", OperationStatus::Done,        8, 6},
+    };
+    for (const auto& c : cases) {
+        const auto r = DecodeBothUrlOverloads(std::string(c.text), true, 16);
+        EXPECT_EQ(r.status, c.status) << c.text;
+        EXPECT_EQ(r.consumed, c.consumed) << c.text;
+        EXPECT_EQ(r.written, c.written) << c.text;
+    }
+    // Every length this repository's own encoder produces still round-trips, and the
+    // encoder still emits no padding.
+    for (int n = 0; n <= 24; ++n) {
+        std::vector<uint8_t> data;
+        for (int i = 0; i < n; ++i) data.push_back(static_cast<uint8_t>((i * 53 + 7) & 0xFF));
+        const std::string encoded = Base64Url::EncodeToString(data);
+        EXPECT_EQ(encoded.find('='), std::string::npos) << "length " << n;
+        EXPECT_EQ(encoded.find('%'), std::string::npos) << "length " << n;
+        const auto r = DecodeBothUrlOverloads(encoded, true, 64);
+        ASSERT_EQ(r.status, OperationStatus::Done) << "length " << n;
+        ASSERT_EQ(r.written, n) << "length " << n;
+        EXPECT_EQ(r.bytes, data) << "length " << n;
+    }
+}
+
+// The in-place decoder shares decodeCore, so it inherits padding -- and padding shrinks
+// the output, so the read cursor still leads the write cursor throughout.
+TEST(Base64UrlTest, DecodeFromUtf8InPlace_AcceptsOptionalPadding) {
+    struct { const char* text; const char* expected; } cases[] = {
+        {"YQ==", "a"}, {"YWI=", "ab"}, {"YQ%%", "a"}, {"YWI%", "ab"}, {"YWJj", "abc"},
+        {"2222PA==", "\xDB\x6D\xB6\x3C"},
+    };
+    for (const auto& c : cases) {
+        const std::string encoded(c.text);
+        std::vector<uint8_t> buffer(encoded.begin(), encoded.end());
+        const int written = Base64Url::DecodeFromUtf8InPlace(
+            Span<uint8_t>(buffer.data(), static_cast<int>(buffer.size())));
+        const std::string expected(c.expected);
+        ASSERT_EQ(written, static_cast<int>(expected.size())) << c.text;
+        for (int i = 0; i < written; ++i)
+            EXPECT_EQ(buffer[static_cast<size_t>(i)],
+                      static_cast<uint8_t>(expected[static_cast<size_t>(i)])) << c.text;
+    }
+    std::vector<uint8_t> bad = {'Y', 'W', 'I', '=', '='};  // remainder 3 + two pads
+    EXPECT_THROW(Base64Url::DecodeFromUtf8InPlace(Span<uint8_t>(bad.data(), 5)), FormatException);
+}
+
+// A destination too small must still be reported as such rather than swallowed by the
+// padding branch, and a padded quantum's size check is the unpadded one.
+TEST(Base64UrlTest, PaddedInput_StillReportsDestinationTooSmall) {
+    const char* text = "2222PA==";
+    ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(text), 8);
+    std::vector<uint8_t> out(4, 0xCC);
+    int consumed = -1, written = -1;
+    EXPECT_EQ(Base64Url::DecodeFromUtf8(src, Span<uint8_t>(out.data(), 3), consumed, written, true),
+              OperationStatus::DestinationTooSmall);
+    EXPECT_EQ(written, 3);
+    EXPECT_EQ(out[3], 0xCC);
+}

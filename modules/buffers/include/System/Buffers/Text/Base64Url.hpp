@@ -22,7 +22,11 @@ using SharpRuntime::intcs;
  * @brief Converts between binary data and URL-safe base64url encoded text.
  *
  * C++ counterpart of .NET System.Buffers.Text.Base64Url (introduced .NET 9).
- * Uses the RFC 4648 §5 alphabet ('+' -> '-', '/' -> '_') without padding.
+ * Uses the RFC 4648 §5 alphabet ('+' -> '-', '/' -> '_').
+ * Encoding never emits padding. Decoding and validation, like .NET's, ACCEPT optional
+ * final padding in either the standard '=' spelling or the URL-escaped '%' one, when it
+ * is well formed: at most two padding characters, only after an incomplete trailing
+ * quantum of two or three symbols, and only when symbols + padding does not exceed four.
  * Any amount of ASCII whitespace (' ', '\\t', '\\r', '\\n') is allowed anywhere
  * in decode/validate input, matching .NET's Base64Url behavior.
  */
@@ -55,8 +59,27 @@ class Base64Url {
         return c == ' ' || c == '\t' || c == '\r' || c == '\n';
     }
 
-    // Shared decode core (no padding: trailing remainder of 2 or 3 symbols decodes
-    // partially; remainder of 1 symbol is never valid).
+    /**
+     * Base64url emits no padding, but .NET's decoder and validator both ACCEPT optional
+     * final padding, in the standard `'='` spelling and in the URL-escaped `'%'` one:
+     * `Base64UrlDecoderByte.IsValidPadding` is `padChar is EncodingPad or UrlEncodingPad`
+     * and `Base64UrlByteValidatable.IsEncodingPad` is the same test. Like .NET, this is a
+     * test on the raw character and NOT an entry in kDecTable — the table stays the pure
+     * sextet alphabet, so a padding character can never be mistaken for a value
+     * (ticket #1820 / SR-AUD-082).
+     */
+    static bool isPadding(uint8_t c) noexcept {
+        return c == '=' || c == '%';
+    }
+
+    // Shared decode core. Padding is OPTIONAL: a trailing remainder of 2 or 3 symbols
+    // decodes partially with or without it, and a remainder of 1 symbol is never valid.
+    // The grammar for the padded form is Base64UrlByteValidatable.ValidateAndDecodeLength:
+    // with `remainder` symbols in the trailing incomplete quantum and `padCount` final
+    // padding characters, padding is valid only when remainder != 0 and
+    // remainder + padCount <= 4, with at most two padding characters. So two symbols admit
+    // one OR two pads, three symbols admit exactly one, and a complete four-symbol quantum
+    // admits none.
     template<typename CharT>
     static OperationStatus decodeCore(const CharT* src, intcs srcLen, uint8_t* dst, intcs dstLen,
                                        intcs& consumed, intcs& written, bool isFinalBlock) {
@@ -68,6 +91,27 @@ class Base64Url {
         while (si < srcLen) {
             uint8_t ch = static_cast<uint8_t>(src[si]);
             if (isWhitespace(ch)) { ++si; continue; }
+            if (isPadding(ch)) {
+                // Padding terminates the content, so it is only ever meaningful in a final
+                // block -- the same rule Base64 gained under ticket #1818, and the same one
+                // .NET applies here (its DecodingInvalidBytesPadding asserts InvalidData for
+                // "2222PA==" with isFinalBlock false, reporting only the complete quantum
+                // before it).
+                if (!isFinalBlock) return OperationStatus::InvalidData;
+                // remainder 0 (a complete quantum, or nothing at all) and remainder 1 (never
+                // decodable) cannot be padded.
+                if (valCount < 2) return OperationStatus::InvalidData;
+                int padCount = 0;
+                for (; si < srcLen; ++si) {
+                    uint8_t p = static_cast<uint8_t>(src[si]);
+                    if (isWhitespace(p)) continue;          // "YQ= =" and "YQ== " are valid
+                    if (!isPadding(p)) return OperationStatus::InvalidData;
+                    if (padCount == 2) return OperationStatus::InvalidData;  // at most two
+                    ++padCount;
+                }
+                if (valCount + padCount > 4) return OperationStatus::InvalidData;
+                break;  // si == srcLen; the trailing quantum is decoded below, unpadded-style
+            }
             int8_t v = kDecTable[ch];
             if (v < 0) return OperationStatus::InvalidData;
             vals[valCount++] = v;
@@ -113,9 +157,13 @@ class Base64Url {
     }
 
     // Must agree with decodeCore on every rule, including the canonical final-bit rule
-    // (ticket #1817 / SR-AUD-079): a validator more permissive than the decoder tells the
-    // caller an input is safe to decode when it is not. That is why the trailing sextet
-    // values are retained here and not only counted.
+    // (ticket #1817 / SR-AUD-079) and the optional-padding grammar (ticket #1820 /
+    // SR-AUD-082): a validator more permissive than the decoder tells the caller an input
+    // is safe to decode when it is not, and a validator STRICTER than the decoder tells it
+    // a decodable input is unusable. That is why the trailing sextet values are retained
+    // here and not only counted, and why the padding branch below is the same branch.
+    // IsValid has no isFinalBlock parameter, so it is the final-block decoder's validator
+    // and accepts padding unconditionally.
     template<typename CharT>
     static bool validateCore(const CharT* src, intcs srcLen, intcs& decodedLength) {
         decodedLength = 0;
@@ -126,6 +174,19 @@ class Base64Url {
         while (si < srcLen) {
             uint8_t ch = static_cast<uint8_t>(src[si]);
             if (isWhitespace(ch)) { ++si; continue; }
+            if (isPadding(ch)) {
+                if (valCount < 2) return false;
+                int padCount = 0;
+                for (; si < srcLen; ++si) {
+                    uint8_t p = static_cast<uint8_t>(src[si]);
+                    if (isWhitespace(p)) continue;
+                    if (!isPadding(p)) return false;
+                    if (padCount == 2) return false;
+                    ++padCount;
+                }
+                if (valCount + padCount > 4) return false;
+                break;
+            }
             int8_t v = kDecTable[ch];
             if (v < 0) return false;
             vals[valCount++] = v;
@@ -403,7 +464,12 @@ public:
      * C++ counterpart of .NET Base64Url.DecodeFromUtf8(ReadOnlySpan, Span, out int, out int, bool).
      * As padding is optional, @p utf8 need not be a multiple of 4 in length even when
      * @p isFinalBlock is true: a remainder of 3 decodes to 2 bytes, a remainder of 2
-     * decodes to 1 byte, and a remainder of 1 is InvalidData.
+     * decodes to 1 byte, and a remainder of 1 is InvalidData. Optional final padding is
+     * ACCEPTED in either the '=' or the '%' spelling when @p isFinalBlock is true, and is
+     * InvalidData when it is false (ticket #1820 / SR-AUD-082; ticket #1818 for the flag).
+     * Well formed means at most two padding characters, only after a remainder of 2 or 3,
+     * and only when remainder + padding does not exceed 4 -- so `YQ==`, `YQ%`, `YWI=` and
+     * `YQ= =` are valid while `YWJj=`, `YWI==`, `Y=` and `YQ===` are not.
      */
     static OperationStatus DecodeFromUtf8(
         System::ReadOnlySpan<uint8_t> utf8,
@@ -540,8 +606,10 @@ public:
     // -----------------------------------------------------------------------
 
     /**
-     * @brief Returns true if @p base64UrlText is valid base64url (no padding expected).
-     * C++ counterpart of .NET Base64Url.IsValid(ReadOnlySpan&lt;byte&gt;).
+     * @brief Returns true if @p base64UrlText is valid base64url, with or without padding.
+     * C++ counterpart of .NET Base64Url.IsValid(ReadOnlySpan&lt;byte&gt;). Having no
+     * isFinalBlock parameter, this is the final-block decoder's validator and therefore
+     * accepts the same optional final '=' / '%' padding that decoding accepts.
      */
     [[nodiscard]] static bool IsValid(System::ReadOnlySpan<uint8_t> base64UrlText) {
         intcs decodedLength = 0;
