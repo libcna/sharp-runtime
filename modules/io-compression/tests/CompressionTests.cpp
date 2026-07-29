@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 #include "System/IO/Compression/GZipStream.hpp"
 #include "System/IO/Compression/DeflateStream.hpp"
+#include "System/IO/Compression/ZLibStream.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/IO/InvalidDataException.hpp"
 #include "System/IO/MemoryStream.hpp"
 #include "System/NotSupportedException.hpp"
@@ -247,4 +249,103 @@ TEST(DeflateStream, GZipCannotDecompressRawDeflate) {
     GZipStream gz(&src, CompressionMode::Decompress, true);
     std::vector<bytecs> out(1024);
     EXPECT_THROW(gz.Read(out.data(), 0, static_cast<intcs>(out.size())), System::IO::InvalidDataException);
+}
+
+// ---------------------------------------------------------------------------
+// Null inner stream — ticket #1811 / SR-AUD-257
+//
+// All three compression streams took a raw Stream* and none validated it, so a
+// null inner stream constructed successfully and crashed at first use: a
+// sufficiently large incompressible Write in Compress mode reached inner_->Write
+// and a Read in Decompress mode reached inner_->Read, six ASan-confirmed SEGVs
+// on address 0x0, two per type. A small compressible write does not reproduce
+// it -- zlib absorbs it into the 64 KiB deflate buffer and never touches the
+// inner stream -- which is why the finding specifies a large incompressible
+// payload and why validating at construction, rather than at the first write, is
+// what actually closes the hole.
+// ---------------------------------------------------------------------------
+
+TEST(CompressionNullStream, DeflateStreamCompressRejectsNull) {
+    EXPECT_THROW(DeflateStream(nullptr, CompressionMode::Compress, true),
+                 System::ArgumentNullException);
+}
+
+TEST(CompressionNullStream, DeflateStreamDecompressRejectsNull) {
+    EXPECT_THROW(DeflateStream(nullptr, CompressionMode::Decompress, true),
+                 System::ArgumentNullException);
+}
+
+TEST(CompressionNullStream, GZipStreamCompressRejectsNull) {
+    EXPECT_THROW(GZipStream(nullptr, CompressionMode::Compress, true),
+                 System::ArgumentNullException);
+}
+
+TEST(CompressionNullStream, GZipStreamDecompressRejectsNull) {
+    EXPECT_THROW(GZipStream(nullptr, CompressionMode::Decompress, true),
+                 System::ArgumentNullException);
+}
+
+TEST(CompressionNullStream, ZLibStreamCompressRejectsNull) {
+    EXPECT_THROW(ZLibStream(nullptr, CompressionMode::Compress, true),
+                 System::ArgumentNullException);
+}
+
+TEST(CompressionNullStream, ZLibStreamDecompressRejectsNull) {
+    EXPECT_THROW(ZLibStream(nullptr, CompressionMode::Decompress, true),
+                 System::ArgumentNullException);
+}
+
+TEST(CompressionNullStream, OwningConstructionRejectsNull) {
+    // leaveOpen=false is the default and the more dangerous shape: it is the one
+    // whose destructor and Close() also touch the inner stream.
+    EXPECT_THROW(DeflateStream(nullptr, CompressionMode::Compress, false),
+                 System::ArgumentNullException);
+    EXPECT_THROW(GZipStream(nullptr, CompressionMode::Compress, false),
+                 System::ArgumentNullException);
+    EXPECT_THROW(ZLibStream(nullptr, CompressionMode::Compress, false),
+                 System::ArgumentNullException);
+}
+
+TEST(CompressionNullStream, NullStreamNamesTheParameter) {
+    try {
+        DeflateStream ds(nullptr, CompressionMode::Compress, true);
+        FAIL() << "expected ArgumentNullException";
+    } catch (const System::ArgumentNullException& e) {
+        EXPECT_NE(std::string(e.what()).find("stream"), std::string::npos)
+            << "message was: " << e.what();
+    }
+}
+
+TEST(CompressionNullStream, LargeIncompressibleRoundtripStillWorks) {
+    // The payload shape that used to crash: large enough and random enough that
+    // deflate must flush through to the inner stream repeatedly. This is the
+    // regression that would fail if the check were ever placed after zlib
+    // initialisation and the flush path regressed with it.
+    std::vector<bytecs> input(256 * 1024);
+    uint32_t x = 0x12345678u;
+    for (auto& b : input) {
+        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+        b = static_cast<bytecs>(x);
+    }
+
+    MemoryStream compressed;
+    {
+        DeflateStream ds(&compressed, CompressionMode::Compress, true);
+        ds.Write(input.data(), 0, static_cast<intcs>(input.size()));
+        ds.Close();
+    }
+    EXPECT_GT(compressed.getLengthProperty(), 0);
+
+    auto bytes = compressed.ToArray();
+    MemoryStream src(bytes.data(), static_cast<intcs>(bytes.size()));
+    DeflateStream ds(&src, CompressionMode::Decompress, true);
+    std::vector<bytecs> out(input.size());
+    intcs total = 0;
+    while (total < static_cast<intcs>(out.size())) {
+        const intcs n = ds.Read(out.data(), total, static_cast<intcs>(out.size()) - total);
+        if (n == 0) break;
+        total += n;
+    }
+    EXPECT_EQ(total, static_cast<intcs>(input.size()));
+    EXPECT_EQ(out, input);
 }

@@ -33,6 +33,28 @@ GZipStream::GZipStream(Stream* stream, CompressionMode mode, bool leaveOpen)
     : inner_(stream), mode_(mode), leaveOpen_(leaveOpen),
       state_(std::make_unique<ZlibGZipState>())
 {
+
+    // Verified against DeflateStream.cs/GZipStream.cs/ZLibStream.cs, whose every
+    // Stream-taking constructor opens with ArgumentNullException.ThrowIfNull(stream).
+    // All three of these ports stored the pointer unvalidated, so a null inner stream
+    // constructed successfully and then crashed at first use: a sufficiently large
+    // incompressible Write in Compress mode reached inner_->Write, and a Read in
+    // Decompress mode reached inner_->Read, each an AddressSanitizer SEGV on address
+    // 0x0 -- six cases, two per type, in build-probe/1811_prefix_defects.log (ticket
+    // #1811 / SR-AUD-257). A small compressible write does NOT reproduce it: zlib
+    // absorbs it into the 64 KiB deflate buffer and never touches the inner stream,
+    // which is why the finding specifies a large incompressible payload.
+    //
+    // Checked FIRST, ahead of the zlib initialisation below: deflateInit2/inflateInit2
+    // allocate state that only deflateEnd/inflateEnd release, and throwing after them
+    // would leak it. state_ is a unique_ptr, so it unwinds correctly on its own.
+    //
+    // NOTE for future readers: the `inner_` null tests in Close() are NOT made
+    // unreachable by this check and must stay. Close() itself assigns
+    // `inner_ = nullptr` after closing a non-leaveOpen inner stream, so a null inner_
+    // is a real post-close state here -- unlike StreamReader's, which ticket #1806
+    // removed precisely because nothing there could ever null the member again.
+    if (stream == nullptr) throw System::ArgumentNullException("stream");
     if (mode_ == CompressionMode::Decompress) {
         if (inflateInit2(&state_->zs, 16 + MAX_WBITS) != Z_OK)
             throw System::IO::IOException("GZipStream: inflateInit2 failed");

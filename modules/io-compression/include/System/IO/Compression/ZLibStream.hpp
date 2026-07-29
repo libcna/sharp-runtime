@@ -30,10 +30,16 @@ namespace System::IO::Compression {
         /**
          * @brief Constructs a ZLibStream wrapping @p stream.
          *
-         * @param stream    The underlying stream for compressed data.
+         * A null @p stream is rejected here rather than carried, matching .NET,
+         * whose every Stream-taking constructor of this type begins with
+         * `ArgumentNullException.ThrowIfNull(stream)`. It is checked before zlib
+         * is initialised, so a rejected call allocates no compressor state.
+         *
+         * @param stream    The underlying stream for compressed data. Must not be null.
          * @param mode      @c CompressionMode::Compress or @c ::Decompress.
          * @param leaveOpen When @c true the inner stream is not closed on destruction.
          *
+         * @throws System::ArgumentNullException if @p stream is null.
          * @throws System::IO::IOException if zlib initialisation fails.
          */
         ZLibStream(Stream* stream, CompressionMode mode, bool leaveOpen = false);
