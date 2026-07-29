@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/StreamReader.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/IO/FileStream.hpp"
 #include "System/IO/FileMode.hpp"
@@ -27,10 +28,34 @@ namespace System::IO
     // and nothing else ever writes the member -- so the null tests that used to guard
     // Peek(), Read(), Close() and the destructor are gone rather than left behind as
     // unreachable code implying a state that can no longer exist.
+    // The second check is ticket #1808, and it is the SAME laundering defect one level
+    // further out. Verified against StreamReader.cs:145-148, whose constructor follows its
+    // null check with "if (!stream.CanRead) throw new ArgumentException(
+    // SR.Argument_StreamNotReadable);" -- message only, no paramName, which is why this one
+    // has none either. A stream that declares itself unreadable can only ever answer -1 and
+    // "", so before this check a StreamReader over, say, FileStream(path, FileMode::Append)
+    // reported an empty document rather than an unusable stream (ticket #1823's measurement,
+    // build-probe/1823_prefix_defects.log cases 6 and 7). The sibling BinaryReader in this
+    // same module already threw exactly this exception with exactly this message for exactly
+    // this input; the two now agree.
+    //
+    // Order matters and is .NET's: null first. Testing getCanReadProperty() before the null
+    // check would dereference the pointer that the null check exists to reject.
+    //
+    // Only the READER half is here. The matching StreamWriter guard is ticket #1824 and is
+    // BLOCKED on explicit approval, because System::IO::Stream::getCanWriteProperty()
+    // defaults to false where .NET's Stream.CanWrite is abstract: a custom stream that
+    // implements Write() without overriding the property reports CanWrite=false and yet
+    // works today (case 8 writes "hello" successfully), so the writer guard would reject
+    // streams that are in fact usable. getCanReadProperty() defaults to TRUE, so this check
+    // rejects only streams that positively declare themselves unreadable, which is why it
+    // needed no approval. The full analysis is docs/TextWrapperInputContractPlan.md §5.
     StreamReader::StreamReader(Stream* stream, bool leaveOpen)
         : stream_(stream), leaveOpen_(leaveOpen), ownsStream_(false)
     {
         if (stream == nullptr) throw System::ArgumentNullException("stream");
+        if (!stream->getCanReadProperty())
+            throw System::ArgumentException("Stream was not readable.");
     }
 
     StreamReader::StreamReader(const std::string& path)

@@ -1328,6 +1328,174 @@ TEST(StreamWriterReaderTests, StreamWriter_FailedConstructionLeavesTheStreamAlon
 }
 
 // ===========================================================================
+// Ticket #1808 -- StreamReader rejects a stream that declares itself unreadable
+// ===========================================================================
+//
+// This is SR-AUD-338's laundering defect one level further out. A stream whose
+// getCanReadProperty() is false can only ever answer -1 and "", which are
+// exactly what an empty document answers, so before this guard a StreamReader
+// over a write-only FileStream reported an empty document rather than an
+// unusable stream (build-probe/1823_prefix_defects.log cases 6 and 7).
+//
+// Only the READER half landed. The matching StreamWriter guard is ticket #1824
+// and is blocked on approval: Stream::getCanWriteProperty() defaults to FALSE
+// where .NET's Stream.CanWrite is abstract, so a custom stream that implements
+// Write() without overriding the property works today and would be rejected.
+// getCanReadProperty() defaults to TRUE, so this guard rejects only streams
+// that positively declare themselves unreadable -- which is exactly what
+// UnreadableTestStream below asserts, and why this half needed no approval.
+// docs/TextWrapperInputContractPlan.md §5.
+
+namespace {
+    // A stream that says it cannot be read. Nothing else about it matters: the
+    // guard must fire on the declaration alone.
+    class UnreadableTestStream final : public System::IO::Stream {
+    public:
+        intcs Read(SharpRuntime::bytecs*, intcs, intcs) override { return 0; }
+        void Close() override {}
+        [[nodiscard]] intcs getLengthProperty() const override { return 0; }
+        [[nodiscard]] bool getCanReadProperty() const override { return false; }
+    };
+
+    // A stream that reads but never mentions getCanReadProperty(), inheriting
+    // the base default of true. This is the compatibility case: it works today
+    // and must keep working. The equivalent shape for the WRITE direction is
+    // what blocks #1824, because that default is false.
+    class UndeclaredReadableTestStream final : public System::IO::Stream {
+        std::string data_;
+        std::size_t pos_ = 0;
+    public:
+        explicit UndeclaredReadableTestStream(std::string d) : data_(std::move(d)) {}
+        intcs Read(SharpRuntime::bytecs* buffer, intcs offset, intcs count) override {
+            intcs n = 0;
+            while (n < count && pos_ < data_.size())
+                buffer[offset + n++] = static_cast<SharpRuntime::bytecs>(data_[pos_++]);
+            return n;
+        }
+        void Close() override {}
+        [[nodiscard]] intcs getLengthProperty() const override {
+            return static_cast<intcs>(data_.size());
+        }
+    };
+} // namespace
+
+TEST(StreamWriterReaderTests, StreamReader_UnreadableStream_ThrowsArgumentException) {
+    UnreadableTestStream s;
+    ASSERT_FALSE(s.getCanReadProperty());
+    EXPECT_THROW(StreamReader sr(&s, true), System::ArgumentException);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_UnreadableStream_UsesTheDotNetMessage) {
+    UnreadableTestStream s;
+    try {
+        StreamReader sr(&s, true);
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        // Argument_StreamNotReadable, verbatim.
+        EXPECT_EQ(std::string(e.what()), "Stream was not readable.");
+    }
+}
+
+TEST(StreamWriterReaderTests, StreamReader_UnreadableStream_HasNoParameterSuffix) {
+    // .NET constructs this one with the message only, so there must be no
+    // "(Parameter 'stream')" tail. SR-AUD-090's duplicate-suffix defect makes
+    // this worth pinning rather than assuming.
+    UnreadableTestStream s;
+    try {
+        StreamReader sr(&s, true);
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(std::string(e.what()).find("Parameter '"), std::string::npos)
+            << "message was: " << e.what();
+    }
+}
+
+TEST(StreamWriterReaderTests, StreamReader_NullBeatsUnreadable) {
+    // Order is .NET's and must stay that way: a null stream reports
+    // ArgumentNullException, not ArgumentException. Testing CanRead first would
+    // dereference the pointer the null check exists to reject.
+    EXPECT_THROW(StreamReader sr(nullptr, true), System::ArgumentNullException);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_UndeclaredReadableStreamStillWorks) {
+    // The compatibility case. This stream reports CanRead only because the base
+    // class default says true; it never overrode the property. Rejecting it
+    // would be the break that blocks #1824's write-direction twin.
+    UndeclaredReadableTestStream s("hi");
+    ASSERT_TRUE(s.getCanReadProperty());
+    StreamReader sr(&s, true);
+    EXPECT_EQ(sr.ReadToEnd(), "hi");
+}
+
+TEST(StreamWriterReaderTests, StreamReader_WriteOnlyFileStream_ThrowsArgumentException) {
+    // The concrete case that produced the silent empty document: a FileStream
+    // opened FileMode::Append has FileAccess::Write only, so CanRead is false.
+    std::string p = tf("sr_write_only.txt");
+    File::WriteAllText(p, "seed");
+    {
+        FileStream fs(p, FileMode::Append);
+        ASSERT_FALSE(fs.getCanReadProperty());
+        EXPECT_THROW(StreamReader sr(&fs, true), System::ArgumentException);
+    }
+    File::Delete(p);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_ReadableFileStreamStillConstructs) {
+    // The valid path, both leaveOpen modes, so the guard cannot have been
+    // written with its test inverted.
+    std::string p = tf("sr_readable.txt");
+    File::WriteAllText(p, "abc");
+    {
+        FileStream fs(p, FileMode::Open, FileAccess::Read);
+        StreamReader sr(&fs, true);
+        EXPECT_EQ(sr.ReadToEnd(), "abc");
+    }
+    {
+        FileStream fs(p, FileMode::Open, FileAccess::Read);
+        StreamReader sr(&fs, false);
+        EXPECT_EQ(sr.ReadToEnd(), "abc");
+    }
+    File::Delete(p);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_PathCtorStillConstructsAfterGuardAdded) {
+    // The path constructor builds its own FileStream(Open, Read) and must keep
+    // passing the new check.
+    std::string p = tf("sr_path_guard.txt");
+    File::WriteAllText(p, "from path");
+    {
+        StreamReader sr(p);
+        EXPECT_EQ(sr.ReadToEnd(), "from path");
+    }
+    File::Delete(p);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_RejectedConstructionLeavesTheStreamAlone) {
+    // Throwing from the constructor body means ~StreamReader() never runs, so
+    // the rejected call cannot close or delete anything -- the same property
+    // #1806 pinned for the null case, restated for the unreadable case.
+    UnreadableTestStream bad;
+    MemoryStream ms;
+    EXPECT_THROW(StreamReader sr(&bad, false), System::ArgumentException);
+    StreamReader good(&ms, true);
+    EXPECT_EQ(good.ReadToEnd(), "");
+}
+
+TEST(StreamWriterReaderTests, StreamReaderAndBinaryReaderRejectUnreadableIdentically) {
+    // The cross-type assertion that would fail first if the two diverged again.
+    UnreadableTestStream a;
+    UnreadableTestStream b;
+    std::string first;
+    std::string second;
+    try { StreamReader sr(&a, true); FAIL() << "expected ArgumentException"; }
+    catch (const System::ArgumentException& e) { first = e.what(); }
+    try { BinaryReader br(&b, true); FAIL() << "expected ArgumentException"; }
+    catch (const System::ArgumentException& e) { second = e.what(); }
+    EXPECT_EQ(first, second);
+    EXPECT_EQ(first, "Stream was not readable.");
+}
+
+// ===========================================================================
 // Ticket #1809 -- the null const char* contract across the TextWriter family
 // ===========================================================================
 //

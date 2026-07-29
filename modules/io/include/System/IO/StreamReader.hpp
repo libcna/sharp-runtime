@@ -37,9 +37,19 @@ namespace System::IO
          * all. This matches .NET's own constructors and the sibling
          * BinaryReader in this module.
          *
-         * @param stream Stream to read from. Must not be null.
+         * A @p stream that exists but declares itself unreadable is rejected
+         * for the same reason: it can only ever answer -1 and "", which are
+         * indistinguishable from an empty document. Verified against
+         * StreamReader.cs:145-148, which follows its null check with
+         * `if (!stream.CanRead) throw new ArgumentException(
+         * SR.Argument_StreamNotReadable);` -- message only, no parameter name.
+         *
+         * @param stream Stream to read from. Must not be null and must report
+         *        getCanReadProperty() == true.
          * @param leaveOpen If false (the default), the stream is closed when this StreamReader is destroyed.
          * @throws System::ArgumentNullException if @p stream is null.
+         * @throws System::ArgumentException if @p stream reports
+         *         getCanReadProperty() == false.
          */
         explicit StreamReader(Stream* stream, bool leaveOpen = false);
 
