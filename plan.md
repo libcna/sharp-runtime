@@ -3016,3 +3016,34 @@ binaries were deleted once their logs were transcribed.
 modified**, and **#1773 remains `blocked`**. #1804 remains `blocked`; #1808 and
 #1809 remain `todo` and unbegun. No previously `done` ticket and no finding was
 reopened.
+
+## Session summary — 2026-07-29, five public-input crash remediations
+
+Tickets **#1805, #1806, #1807, #1810 and #1811** are `done`, each remediating a
+high-severity public-input crash finding: SR-AUD-341, SR-AUD-338, SR-AUD-097,
+SR-AUD-132 and SR-AUD-257 respectively. Two new inactive `todo` tickets, **#1808**
+and **#1809**, were opened from defects found during #1806 and were not folded
+into it. The audit identifier range stays **frozen at 364**; the findings index
+now records **15 remediated and 349 confirmed** of 364, up from 10 and 354.
+
+The ticket queue was **empty** when the session began — every row `done` except
+the correctly `blocked` #1773 and #1804. The backlog lives in
+`audit/AUDIT_FINDINGS_INDEX.md`, and each ticket was created by converting the
+next item from `NEXT.md`'s recommended dependency order, which is how every
+remediation ticket since #1767 has begun.
+
+In **all five**, the defect proved larger than the finding described: five
+`StreamWriter` dereferences rather than one, three `AggregateException` crash
+paths plus two silent hand-offs to the caller, a `Read` half of SR-AUD-257 that
+was never named, a `std::length_error` leak alongside SR-AUD-341's null read, and
+a `size_t` capacity wrap alongside SR-AUD-132's zero-page write. Every extra
+defect is disclosed in the owning audit report rather than absorbed silently.
+
+Baselines after the session: **13,979 tests across 37 executables** (from 13,923),
+0 warnings, 0 errors, 41 modules / 90 edges, Doxygen **1,941** of the 1,942
+ceiling unchanged throughout, negative consumer fixtures 9 / 66 with every site
+rejected, version-seam ODR 2 seams / 18 specialisations.
+
+Full detail — per-ticket measurements, scope boundaries, environment notes and
+the recommended next ticket — is in `NEXT.md`'s "CONTEXT-REFRESH handoff" section
+and in the per-ticket sections above.

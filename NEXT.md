@@ -5893,3 +5893,138 @@ binaries were deleted once their logs were transcribed.
 modified**, and **#1773 remains `blocked`**. #1804 remains `blocked`; #1808 and
 #1809 remain `todo` and unbegun. No previously `done` ticket and no finding was
 reopened.
+
+## CONTEXT-REFRESH handoff — 2026-07-29, session closing after five tickets
+
+This session completed **five** remediation tickets — **#1805, #1806, #1807,
+#1810, #1811** — all five remediating high-severity public-input crash findings,
+and opened **two** new inactive tickets, **#1808** and **#1809**. It is stopping
+under stop condition 1 (five to ten tickets completed, a context refresh now
+prudent), not because work ran out.
+
+### The queue was empty, and that is not the same as no work remaining
+
+At the start of this session `plan.sqlite3` held **no ready ticket**: every row
+was `done` except #1773 and #1804, both `blocked` and both correctly so. The
+remediation backlog is not in the ticket table — it is in
+`audit/AUDIT_FINDINGS_INDEX.md`, and converting the next item from the
+"Recommended dependency order" section of this document into a ticket is how
+every remediation ticket since #1767 has begun. **A future session that finds an
+empty queue should do the same rather than conclude the work is finished.**
+
+### Completed this session
+
+| Ticket | Finding | What it repaired |
+|---|---|---|
+| **#1805** | SR-AUD-341 | `MemoryStream` raw-buffer constructor copied before validating: ASan SEGV on `(nullptr, 1)`, plus a `std::length_error` leak on a negative size |
+| **#1806** | SR-AUD-338 | `StreamReader`/`StreamWriter` null base stream: **five** writer dereferences, not the one named, including a fatal destructor on the default `leaveOpen=false`; the reader's silent end-of-stream |
+| **#1807** | SR-AUD-097 | `AggregateException` null inner `exception_ptr`: **three** crash paths plus two that handed the null to the caller |
+| **#1810** | SR-AUD-132 | `TryWriteInterpolatedStringHandler` null destination — a **write** to the zero page — plus the null literal, a `size_t` capacity wrap, and two zero-length null-pointer uses |
+| **#1811** | SR-AUD-257 | `DeflateStream`/`GZipStream`/`ZLibStream` null inner stream: six SEGVs, two per type, the `Read` half not named by the finding |
+
+Each has its own section above with the full pre-fix/post-fix measurement.
+
+**In every one of the five, the defect was larger than the finding described.**
+That is the single most useful pattern to carry forward: reproduce every public
+entry point of the affected type, one process per case, before writing the fix.
+The probes are `build-probe/18{05,06,07,10,11}_prefix_defects.cpp` and their
+paired `_prefix_`/`_postfix_` logs; each is a template a future ticket can copy.
+
+### Exact current baselines
+
+| Measure | Value |
+|---|---|
+| Repository tests | **13,979** across 37 executables (was 13,923 at session start) |
+| Build | 0 warnings, 0 errors |
+| Module graph | 41 physical modules, 90 production dependency edges |
+| Doxygen | **1,941** of the 1,942 ceiling — unchanged all session |
+| Negative consumer fixtures | 9 fixtures, 66 sites, every site rejected; 75 compiler invocations, peak 3 jobs |
+| Version-seam ODR | 2 seams, 18 specialisation definitions; 12/12 self-test |
+| Audit findings | **15 remediated, 349 confirmed** of 364 (was 10 / 354) |
+| Component suites touched | `IO` 552 (was 527), `Core_Base` 4,994 (was 4,972), `IO_Compression` 31 (was 22) |
+
+The audit identifier range stays **frozen at 364**. No new `SR-AUD-*` was
+created, and no finding was reopened.
+
+### Recommended next ready ticket
+
+Take **SR-AUD-242** (`ZipArchive` null stream: Read/Update dereference it and
+Read exits SIGSEGV, while Create silently accepts it and loses output). It is the
+sixth of the eight immediate public-input crash tickets, it is adjacent to
+#1811's component, and `build-asan/` already has the `IO`-side targets built. Then
+**SR-AUD-236** (`HttpContentJsonExtensions`, an empty `shared_ptr` reaching an
+ASan-confirmed null dereference), which completes that group of eight.
+
+After those eight, the roadmap's item 3 applies: the cross-cutting families
+(CCF-004, CCF-005, CCF-009, CCF-013, CCF-019) need a **scoped family plan** and
+must not be taken one file at a time.
+
+### Ready queue
+
+| Ticket | Priority | Status | Note |
+|---|---|---|---|
+| **#1808** | P2 | `todo` | `StreamReader`/`StreamWriter` do not validate `CanRead`/`CanWrite`. **Inventory first** — its check can reject calls that work today. |
+| **#1809** | P2 | `todo` | A null `const char*` is undefined behaviour across the whole `TextWriter` `Write` family. **Read .NET first**: `TextWriter.Write(string?)` treats null as a *no-op*, so a throwing guard would diverge from .NET. This is a contract decision, not a guard. |
+
+Both were opened by #1806 from defects found while working, and neither was
+folded into it. Neither carries an `SR-AUD-*` identifier; the audit did not
+record them, which is stated plainly rather than backfilled.
+
+### Blocked, unchanged
+
+- **#1773** — **remains `blocked`**. CNA and mobile-eggbert were not inspected,
+  searched, configured, built, or modified at any point in this session.
+- **#1804** — remains `blocked` and untouched.
+
+### Findings deliberately left open next to work that was done
+
+Each of these shares a file with a ticket completed this session and was kept out
+of it on purpose, so that one ticket carries one contract:
+
+- **SR-AUD-337** — `leaveOpen` disposal in the text wrappers (#1806's files).
+- **SR-AUD-098**, **SR-AUD-099** — `AggregateException` causal diagnostics and the
+  empty `Handle` predicate (#1807's file). SR-AUD-099 belongs to **CCF-011**.
+- **SR-AUD-133** — `AppendFormatted` discards its format string (#1810's file).
+- **SR-AUD-258** — invalid `CompressionMode` and post-close operations (#1811's
+  files).
+
+### One correction worth carrying forward
+
+#1806 removed `StreamReader`'s `stream_ == nullptr` guards as unreachable once the
+constructor validates. #1811 kept the visually identical `inner_` guards in the
+compression streams' `Close()`, because `Close()` **itself** assigns
+`inner_ = nullptr`, so a null member is a real post-close state there. Do not
+apply either conclusion to the other by pattern-matching; check whether anything
+can null the member after construction.
+
+### Environment notes
+
+- **LeakSanitizer works** in this sandbox when run as part of ASan, proved by a
+  bounded self-test (`build-probe/1805_lsan_selftest.cpp`, reported as a
+  4,096-byte definite leak). Earlier records that LSan "could not initialize"
+  refer to running it **standalone**; that is not contradicted here. A first
+  version of the self-test leaked from a pointer still live on the stack, which
+  LSan correctly classifies as *still reachable* and does not report — it proved
+  nothing and was replaced rather than believed.
+- The six local-server `Net.Http` cases were **network-permitted** in every gate
+  run this session and passed.
+- `scripts/check_selective_components.sh`, `scripts/check_doxygen_warnings.sh`,
+  `scripts/check_negative_consumer_fixtures.py` and `scripts/local_ci_check.sh`
+  all use `mktemp`; run them with `TMPDIR="$PWD/build-tmp"` so they honour the
+  no-`/tmp`-builds rule.
+- `build-asan/` now has `SharpRuntimeTests_IO`, `SharpRuntimeTests_Core_Base` and
+  `SharpRuntimeTests_IO_Compression` built; it is ~1.3 GB. Reuse it.
+
+### Build directories and parallelism
+
+Used: `build/` (gate), `build-asan/` (sanitizer runs), `build-probe/` (every
+ticket's probes and logs, each prefixed with its own ticket number),
+`build-tmp/` (repository-local `TMPDIR`). **No new build directory was created**;
+every probe binary was deleted once its log was transcribed. **No compilation
+exceeded three aggregate jobs at any point**, in any command or script.
+
+### Git
+
+Ten commits on five per-ticket branches, each a `fix(...)` commit paired with a
+`docs: close ticket #NNNN` commit. **No push, merge, rebase, tag, or package
+publication occurred**, and no historical ticket commit was amended.
