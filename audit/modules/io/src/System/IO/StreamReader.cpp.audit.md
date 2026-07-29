@@ -24,3 +24,22 @@ The raw-pointer constructors perform no null validation.  A direct ASan/UBSan pr
 ## Final assessment
 
 AUDITED. The confirmed finding(s) above have reproducible evidence and a focused remediation target.
+
+## Post-audit remediation for SR-AUD-338 (ticket #1806, 2026-07-29): REMEDIATED
+
+The audit evidence above is retained unchanged, and **SR-AUD-337 is untouched and
+stays `confirmed`** — this ticket repaired the null base stream only, not the
+`leaveOpen` disposal contract that shares these two files.
+
+`StreamReader(Stream*, bool)` now throws `ArgumentNullException("stream")`, and
+the `stream_ == nullptr` tests in `Peek()`, `Read()`, `Close()` and the destructor
+are **removed**, because the constructor check makes `stream_` a non-null
+invariant for the lifetime of every `StreamReader` and unreachable guards would
+imply a state that can no longer exist. This report's own paired probe result —
+`reader-null-read=-1` — was the defect: `-1` and `""` are exactly what an empty
+document returns, so a missing stream was indistinguishable from empty content.
+
+The full thirteen-case pre-fix/post-fix measurement, including the five distinct
+`StreamWriter` dereferences of which the finding named one, is in the paired
+`StreamWriter.cpp` report under the same heading, with logs
+`build-probe/1806_prefix_defects.log` and `build-probe/1806_postfix_defects.log`.

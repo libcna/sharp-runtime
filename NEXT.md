@@ -3,16 +3,17 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-29. Branch: `feature/remediation-io-memorystream-null-buffer`.
+*Last verified: 2026-07-29. Branch: `feature/remediation-io-text-wrapper-null-stream`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 13,937 tests across 37 executables (the 13,127 figure this
+dependency edges, and 13,948 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 13,937
-verified by #1805 — the first remediation ticket outside `Collections`, whose
-change is confined to one `.cpp` body and one header doc-comment, so an
-incremental gate was correct there — raised from the 13,923
+section below states the count it measured, and the current floor is the 13,948
+verified by #1806, raised from the 13,937 verified by #1805 — the first two
+remediation tickets outside `Collections`, whose changes are confined to `.cpp`
+bodies and header doc-comments, so an incremental gate was correct for both —
+and before them from the 13,923
 verified by #1789 — whose BitArray::Enumerator object-layout change, like #1788's
 LinkedList<T> one, made a fresh clean-first rebuild mandatory rather than merely
 prudent — from #1788's 13,880, from #1791's
@@ -5513,3 +5514,109 @@ compilation exceeded three jobs.**
 **CNA and mobile-eggbert were not inspected, searched, configured, built or
 modified**, and **#1773 remains `blocked`**. #1804 remains `blocked` and
 untouched. No previously `done` ticket was reopened and no finding was reopened.
+
+### Completed text-wrapper null-stream validation: ticket #1806
+
+Ticket #1806 (`REMED-IO-TEXT-WRAPPER-NULL-STREAM`, P1, size S, `remediation`,
+area *IO*) is **done** and **SR-AUD-338 is now `remediated`**. It is the second
+of the two self-contained ASan/UBSan-backed public-input repairs NEXT.md's
+recommended dependency order names, taken directly after #1805. **No new
+`SR-AUD-*` identifier**; the numbering stays frozen at 364, and the index now
+records **12 remediated** and **352 confirmed** of 364.
+
+**The finding named one dereference. There were five.** Measured before any
+production change, one process per case so a crash could not hide another
+(`build-probe/1806_prefix_defects.cpp`, logs `1806_prefix_defects.log` and
+`1806_postfix_defects.log`). Pre-fix, on a null base stream:
+
+| Call | Pre-fix | Post-fix |
+|---|---|---|
+| `StreamReader` `Read` / `Peek` | `-1` | `ArgumentNullException` at construction |
+| `StreamReader` `ReadLine` / `ReadToEnd` | `""` | same |
+| `StreamWriter::Write(std::string)` | UBSan *member access within null pointer of type `struct Stream`*, ASan **SEGV on 0x0** | same |
+| `StreamWriter::Write(const char*)` | same | same |
+| `StreamWriter::Flush()` | same | same |
+| `StreamWriter::Close()`, `leaveOpen=false` | same | same |
+| `~StreamWriter()`, `leaveOpen=false` | same | same |
+| `BinaryReader(nullptr)` / `BinaryWriter(nullptr)` | `ArgumentNullException` **already** | unchanged |
+
+The destructor case is the sharpest and is **not** in the finding text: with the
+**default** `leaveOpen = false`, merely constructing a `StreamWriter` over a null
+stream and letting it leave scope was fatal, because the destructor closed a
+stream it did not have. No call on the object was required.
+
+**The reader's half is not a crash, and its guards were removed rather than
+kept.** `Read()`/`Peek()` returning `-1` and `ReadLine()`/`ReadToEnd()` returning
+`""` are exactly what an **empty document** returns, so a programming error was
+silently laundered into ordinary, plausible data — a caller could not tell "there
+was no stream" from "there was nothing in it". Both constructors now throw
+`ArgumentNullException("stream")`, matching .NET, whose every `Stream`-taking
+constructor of both types opens with `ArgumentNullException.ThrowIfNull(stream)`,
+and matching the sibling `BinaryReader`/`BinaryWriter` **in the same module**,
+whose already-correct behaviour the audit called out as making the divergence
+especially hazardous. With that check in place `stream_` is non-null for the
+lifetime of every `StreamReader` — the only other constructor assigns a freshly
+allocated `FileStream`, and nothing else writes the member — so the
+`stream_ == nullptr` tests in `Peek()`, `Read()`, `Close()` and the destructor are
+**gone**, rather than left behind as unreachable code implying a state that can no
+longer exist.
+
+**Tests: +11 permanent regressions** in `IOStreamTests.cpp` — reader null, reader
+null with `leaveOpen=true`, the reader's parameter name, the same three for the
+writer, a cross-type assertion that all four `Stream*`-wrapping types in this
+module now answer the identical input identically, the reader's ordinary read
+paths re-pinned after its guards were removed, the empty-stream `-1`/`""` meanings
+re-pinned so they keep their one remaining legitimate sense, the writer's ordinary
+write path, and a check that a rejected construction leaves a neighbouring live
+stream untouched — throwing from the constructor body means `~StreamWriter()`
+never runs, so the failure cannot close or delete anything.
+
+**Validation.** `SharpRuntimeTests_IO` **552/552** (was 541), and the same 552
+under **ASan + UBSan + LSan with zero reports** (`build-asan/1806_io_asan.log`);
+LeakSanitizer's activity was established by #1805's self-test earlier in this same
+session. Repository gate `scripts/local_ci_check.sh build`: **0 warnings, 0
+errors**, **13,948 tests across 37 executables** (was 13,937), including the six
+local-server `Net.Http` cases. Module graph **41 / 90**; catalogue current;
+database consistent; seam ODR **2 / 18** plus 12/12; negative consumer fixtures
+**9 / 66** plus 37/37; the ten-component selective matrix passed with its 3
+forbidden fixtures rejected; Doxygen **1,941** of the 1,942 ceiling, unchanged;
+`git diff --check` clean.
+
+**Source and ABI consequences: none.** No public signature, object layout, vtable
+or exported symbol changed. One behavioural note belongs in a consumer's release
+notes: code that constructed either wrapper over a null stream and relied on the
+reader's silent end-of-stream now receives `ArgumentNullException` at
+construction. No in-repository caller did so, and no test asserted the old
+behaviour.
+
+**Explicitly not done here.** **SR-AUD-337** — the `leaveOpen` disposal contract,
+which shares these two exact files — is untouched and stays `confirmed`. Rolling
+it in would have merged two unrelated contracts into one ticket.
+
+**Two separable defects were found while doing this work and are recorded as
+inactive `todo` tickets rather than folded in or concealed:**
+
+- **#1809** (P2) — `TextWriter::Write(const char*)` forms `std::string(value)` and
+  `StreamWriter::Write(const char*)` calls `std::strlen(value)`; both are
+  undefined for a null pointer, and the same shape reaches `WriteLine(const char*)`
+  and every `TextWriter` subclass. It is kept separate because the answer is a
+  contract decision, not a guard: .NET's `TextWriter.Write(string?)` treats null as
+  a **no-op**, so a throwing guard would diverge from .NET while a silent one would
+  match it. The audit did not record this; that is stated plainly rather than
+  backfilled into a finding.
+- **#1808** (P2) — neither wrapper validates `CanRead`/`CanWrite`, where
+  `StreamReader.cs:147` and `StreamWriter.cs:103` throw
+  `ArgumentException(SR.Argument_StreamNotReadable / _StreamNotWritable)`. Kept
+  separate because rejecting a stream that exists but is *unsuitable* is a
+  different contract from rejecting one that does not exist, and because it can
+  reject calls that work today — its acceptance criteria require an inventory
+  before any implementation.
+
+Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
+`1806_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new build
+directory was created** and **no compilation exceeded three jobs**. The ticket's
+probe binaries were deleted once their logs were transcribed.
+
+**CNA and mobile-eggbert were not inspected, searched, configured, built or
+modified**, and **#1773 remains `blocked`**. #1804 remains `blocked` and
+untouched. No previously `done` ticket and no finding was reopened.
