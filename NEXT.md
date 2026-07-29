@@ -2749,6 +2749,140 @@ were not reopened. CNA and mobile-eggbert were not inspected, searched,
 configured, built, or modified, so the source-break figures are *this repository
 only*.
 
+### Completed ListDictionaryInternal setter design: ticket #1799
+
+Design ticket #1799 (`REMED-COLL-LISTDICT-SETITEM-DESIGN`, P3, size M,
+`design`) is **done**. No production or test source changed. Durable record:
+[`docs/ListDictionaryInternalSetterDesign.md`](docs/ListDictionaryInternalSetterDesign.md).
+
+**Ticket #1798 was not reused.** Its row is an *implementation* row — it performs
+the corrections and is blocked on approval to do so, not on a decision about what
+they are — so recording it as a completed design would log implementation work as
+done when none was performed. #1798 **stays `blocked`**, now depending on #1799,
+with its acceptance criteria and an exact three-item approval rewritten from the
+design. Same #1795 → #1794 and #1797 → #1796 handling one and two tickets
+earlier.
+
+**Selected:** a private `ValidatedKey` boundary that every raw-key operation must
+construct before the single `findNode()` locator will look at storage —
+structurally unskippable, unlike `Hashtable`'s `toKey()` convention — plus one
+upsert path in `setItem` that bumps on insert, on replace **and** on an
+equal-value replace with the bump placed *after* the mutation (a **strong**
+exception guarantee .NET's bump-first shape cannot offer), plus deletion of the
+one `const_cast` that made the key view's `CopyTo` disagree with every other key
+surface. **No signature, return type, parameter type or data member changes.**
+
+**Four of #1798's own premises are corrected by measurement**, each against this
+record's convenience:
+
+1. **Six defects, not two.** #1798 names the `setItem` replace bypass and the
+   accepted null key. It misses that the **key view's `CopyTo` launders away the
+   caller's `const`** — `MemberCollection::copyToCore` boxes
+   `const_cast<void*>(n.key)` where all four other key surfaces box
+   `const void*`, so `std::any_cast<const void*>` on a `CopyTo` slot throws
+   `std::bad_any_cast`, and a write through the `void*` it *does* hand out was
+   reproduced as an **AddressSanitizer SEGV on read-only storage** — and misses
+   that `Add`-on-duplicate and `Remove`-of-an-absent-key both diverge from .NET
+   in the **opposite** direction from the setter.
+2. **"Match .NET's unconditional `version++`" is the wrong instruction.** .NET
+   `ListDictionaryInternal` bumps first and unconditionally, before it even
+   searches, so a throwing `Add` and a no-op `Remove` both invalidate every
+   outstanding enumerator; **.NET's own `Hashtable` does neither**, and .NET's
+   two implementations disagree on three of ten version rows. Copying the former
+   literally would introduce two new false-positive
+   `InvalidOperationException`s and would contradict a currently *passing*
+   assertion (`CollectionVersionCounterTests.cpp`'s `ListDictionaryAdapter` sets
+   `kHasNoOpMutation = true` for an absent-key `Remove`). The selected rule is
+   **advance on effective mutation**, which matches .NET on every row where
+   .NET's two implementations agree and takes the `Hashtable` rule where they
+   disagree.
+3. **The null-key rationale is not SR-AUD-363's.** On `Hashtable`, `nullptr`
+   stringified to `"0"` and *aliased* the ordinary string key `"0"`. Here keys
+   are compared by raw address and **no valid object has the null address**, so
+   a stored null key aliases nothing — measured. The defect is purely that the
+   **two implementations of one interface disagree**, on all five raw-key entry
+   points.
+4. **The stale-object hazard does not crash the way #1794's and #1796's did.**
+   No signature changes and every affected body is `inline` in a header, so an
+   unrebuilt consumer **silently keeps the defect** — and the outcome is
+   **link-order and optimisation-level dependent**: at `-O0` with the stale
+   object first on the link line, a correctly *rebuilt* translation unit
+   silently reverted to the old bodies, and `-flto -Wodr` diagnoses nothing.
+
+**Measured, against the committed headers unless stated:** the ten-row version
+table across the port's two `IDictionary` implementations and both .NET
+references, showing **three** divergences on `ListDictionaryInternal` (replace,
+equal replace, and — in the other direction — throwing `Add` and absent `Remove`)
+and **one previously unrecorded divergence on `Hashtable`**; **four** enumerator
+kinds silently valid after a value replacement — the dictionary enumerator, the
+key view, the value view and the same through an `IDictionary&` — one of which
+**enumerated the post-mutation value**, with **0 ASan and 0 UBSan reports**; six
+null-key rows on which the two implementations disagree, with a null key proved
+**not** to alias any real key and "absent" still distinguishable from "present
+with a null value"; the key view boxing `const void*` on `Current` and `void*` on
+`CopyTo`, with `std::bad_any_cast` on one and an **ASan SEGV on a write to
+`.rodata`** through the other, while the same object reached through `Current`
+cannot be written at all; LeakSanitizer **proved active** by a 350-byte
+deliberate-leak self-test with **0 leaks** in every real scenario; **53 of 53**
+`ListDictionaryInternal` mangled names byte-identical, the **19-entry vtable
+identical** with `getItem` at offset 72 and `setItem` at 80, and `sizeof`
+unchanged at **40 / 72 / 24 / 24** with `ValidatedKey` at 8 bytes emitting **no
+symbol at all** at `-O2`; the stale-object probe at `-O0`, `-O2` and
+`-flto -Wodr`; **0 added allocations** with `setItem` replace moving 1.30–1.66 ns
+to 1.53–1.60 ns; and the selected design passing **33/33** contract assertions on
+a compile-validated shim.
+
+**Rejected on evidence, not argument:** literal .NET `ListDictionaryInternal`
+parity; a `const std::any&` key parameter (a public source *and* ABI break on
+`IDictionary` and both implementations that collides with the measured
+`Add("literal", v)` address-key corruption of #1797 §13.4 while fixing no
+versioning defect); scattered null checks at five entry points; split
+insert/replace helpers (two places for the version rule to drift apart — the
+exact mechanism of the present defect); normalising every key surface to `void*`
+(would reintroduce the `const`-laundering #1793 removed, on four more surfaces);
+comparing old and new values to skip an equal-value bump; **a shared proxy or
+shared upsert abstraction with #1791 or #1796** (this type hands out no alias and
+needs no proxy at all); and a **negative consumer fixture**, because nothing in
+this design fails at compile time so one could not fail — stated explicitly so it
+is not mistaken for an omission.
+
+**Approval #1798 needs, exactly three items, per action** (design §36), none of
+which carries over from #1771, #1780, #1783, #1793, #1794 or #1796: (1) a null
+key becomes `ArgumentNullException("key")` on five entry points that currently
+succeed; (2) a value replacement — including an equal-value one — advances the
+counter, turning a currently-silent enumeration into
+`InvalidOperationException`, and includes the two deliberate deviations from .NET
+in §15; (3) the key view's `CopyTo` boxes `const void*`, so `any_cast<void*>`
+keeps compiling and starts throwing at run time — 3 assertion lines in 2 files,
+separately declinable. Plus a required acknowledgement: **a full consumer rebuild
+is mandatory.**
+
+**Validation (all unchanged, as expected for a design-only ticket):** 41 modules
+/ 90 edges, validator tests 7/7, catalogue current, database consistent,
+`git diff --check` clean, Doxygen 1.9.8 at **1,940** of the 1,942 ceiling,
+`scripts/local_ci_check.sh build` at **13,657 tests across 37 executables** with
+zero warnings and zero errors, `Collections_Core` at **2,371**.
+`check_selective_components.sh` **not run** (no public header or component
+metadata changed); required when #1798 lands. Build directories: `build/` (reused
+incrementally, `--parallel 3`), the **shared** `build-probe/` (one compiler
+process per probe, `1799_` file prefix), and `build-tmp/` as `TMPDIR`. **No new
+build directory was created and no compilation exceeded three jobs.**
+
+**Three inactive follow-up tickets were opened and deliberately not begun:**
+#1800 (`REMED-COLL-VERSION-SEAM-ODR`) for the pre-existing
+`CollectionVersionAccess` IFNDR that #1796 reported and no ticket recorded;
+#1801 (`REMED-TOOLING-NEGATIVE-FIXTURE-CI`) for the negative-fixture per-site
+checker that exists only under the gitignored `build-probe/`; and #1802
+(`REMED-COLL-HASHTABLE-REMOVE-VERSION`) for the `Hashtable` absent-key `Remove`
+over-bump this ticket measured.
+
+No new `SR-AUD-*` identifier: the audit numbering is frozen at 364 and all six
+defects were found during remediation. **The defect is not marked remediated.**
+Tickets #1773, #1788, #1789, #1791 and #1798 remain `blocked` and untouched;
+#1790, #1792, #1793, #1794, #1795, #1796 and #1797 remain `done` and none was
+reopened. CNA and mobile-eggbert were not inspected, searched, configured, built,
+or modified. No push, merge, rebase, tag, or publication occurred.
+
 No repair ticket is active.
 
 ### Nominal 500-hour first remediation programme
@@ -4280,3 +4414,35 @@ HTTP, socket, and ping tests require permission for local network operations.
    `build-probe-copyto/probe10_empty_span_correction.cpp` in place: they are
    the durable evidence for the corrected rule, recorded in section 22 of
    `docs/ICollectionCopyToDesign.md`. SR-AUD-358 remains `remediated`.
+9. Design ticket #1799 (`REMED-COLL-LISTDICT-SETITEM-DESIGN`, P3, size M) is
+   **done** and is the current end of the collections thread. It made **no
+   production change**; the durable record is
+   `docs/ListDictionaryInternalSetterDesign.md`. Do not redesign it and do not
+   re-derive the inventory: the complete `ListDictionaryInternal` surface, the
+   six defect classes, the pre-fix reproductions, the `.NET` comparison against
+   **both** `ListDictionaryInternal.cs` and `Hashtable.cs` (which disagree on
+   three of ten version rules, so "match .NET" is not by itself a
+   specification), seven alternatives with a compatibility matrix, the exact
+   proposed declarations, and the measured ABI/symbol/vtable/layout/stale-object
+   evidence are all already there. Its probes live in the gitignored shared
+   `build-probe/` under a `1799_` file prefix and are reproducible from §6, §8,
+   §21, §22 and §24, not from a tracked file. Implementation ticket #1798
+   (`REMED-COLL-LISTDICTINTERNAL-PARITY`) stays **`blocked`**: it needs the
+   **three explicit approvals of §36** — a null key becoming
+   `ArgumentNullException` on five entry points, a value replacement (including
+   an equal-value one) invalidating outstanding enumerators, and the key view's
+   `CopyTo` boxing `const void*` so `any_cast<void*>` keeps compiling and starts
+   throwing — and none of them carries over from #1771, #1780, #1783, #1793,
+   #1794 or #1796. Do not implement it without them, do not land it partially,
+   and do not record any partial outcome as a remediation. **Do not build a
+   shared proxy or shared upsert abstraction with #1791 or #1796**: this type
+   hands out no alias and needs no proxy, and #1797 §24 already rejected a
+   shared proxy on four measured incompatibilities; the recommended order is
+   **#1798 before #1791** and the migrations must not be merged. Three further
+   rows were opened **inactive** by #1799 and must not be begun without
+   scheduling: #1800 (`REMED-COLL-VERSION-SEAM-ODR`, the pre-existing test-only
+   `CollectionVersionAccess` ODR violation #1796 reported), #1801
+   (`REMED-TOOLING-NEGATIVE-FIXTURE-CI`, the per-site negative-fixture checker
+   that exists only under gitignored `build-probe/`), and #1802
+   (`REMED-COLL-HASHTABLE-REMOVE-VERSION`, the `Hashtable::Remove` over-bump on
+   an absent key that #1799 measured on the sibling implementation).

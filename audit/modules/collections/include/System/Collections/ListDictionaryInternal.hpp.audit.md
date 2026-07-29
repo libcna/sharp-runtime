@@ -105,3 +105,60 @@ unchanged at 40.
 Still asymmetric, predating this ticket and outside its approval: the key view
 boxes `const void*` while `copyToCore` normalises the key to `void*`. Full
 record: `docs/IDictionaryEnumeratorKeyValueSafetyDesign.md` §37.
+
+## Post-audit note — design ticket #1799 (2026-07-29)
+
+**No `SR-AUD-*` identifier**: the numbering is frozen at 364 and every defect
+below was found during remediation. Design ticket #1799
+(`REMED-COLL-LISTDICT-SETITEM-DESIGN`, P3, size M, `done`) made **no production
+change**. Durable record: `docs/ListDictionaryInternalSetterDesign.md`.
+Implementation is ticket #1798, which stays `blocked`.
+
+#1798 was opened by #1797 naming **two** defects. Measured against the committed
+headers, there are **six**, and two of #1798's stated facts are wrong:
+
+- **`setItem`'s replace branch returns before `++version_`** — confirmed
+  (version `3 → 3` while the stored value changed). Four outstanding enumerator
+  kinds then walked to the end without throwing — the dictionary enumerator, the
+  key view, the value view and the same through an `IDictionary&` — and the
+  **value view enumerated the post-mutation value**, with **0 AddressSanitizer
+  and 0 UndefinedBehaviorSanitizer reports**.
+- **All five raw-key entry points accept `nullptr`** — confirmed, and a null key
+  is stored, found, enumerated, copied out and removed. But the rationale
+  #1798 borrows from SR-AUD-363 does **not** transfer: keys here are compared by
+  raw address, no valid object has the null address, and a null key was measured
+  **not** to alias any real key. The defect is that the **two `IDictionary`
+  implementations disagree**, not that anything collides.
+- **Not in #1798, and the only one with a hard failure:**
+  `MemberCollection::copyToCore` boxes `const_cast<void*>(n.key)` for the key
+  view, where the enumerator's `Key`, `DictionaryEntry::Key`, the key view's
+  `Current` and the typed `CopyTo` all box `const void*`. One view, two element
+  types: `std::any_cast<const void*>` on a `CopyTo` slot throws
+  `std::bad_any_cast`, and writing through the `void*` it hands out for a key
+  the caller declared `const` was reproduced as an **AddressSanitizer `SEGV` on
+  a write to read-only storage**. Reaching the same object through `Current`
+  cannot do this. This is the residual asymmetry
+  `docs/IDictionaryEnumeratorKeyValueSafetyDesign.md` §37 recorded as outside
+  #1794's approval.
+- **Not in #1798:** `Add` on a duplicate key and `Remove` of an absent key both
+  diverge from .NET `ListDictionaryInternal` in the **opposite** direction from
+  the setter — .NET bumps `version++` first and unconditionally, so both
+  invalidate every enumerator there and neither does here. **.NET's own
+  `Hashtable` does neither**, so "match .NET" is not by itself a specification;
+  the design selects *advance on effective mutation* and records the two
+  deviations explicitly.
+
+The selected fix adds a private `ValidatedKey` boundary and a single
+`findNode()` locator, making null validation **structurally unskippable** rather
+than conventional, and places the version bump **after** the mutation for a
+strong exception guarantee. **No signature, return type, parameter type or data
+member changes**: 53 of 53 mangled names byte-identical, the 19-entry vtable
+identical, `sizeof(ListDictionaryInternal)` unchanged at **40** and every nested
+type unchanged. The stale-object hazard is therefore **silent** rather than
+crashing — and link-order dependent: at `-O0` with a stale object first on the
+link line, a correctly *rebuilt* translation unit reverted to the defective
+bodies, and `-flto -Wodr` diagnosed nothing.
+
+Implementation needs **three explicit approvals** (design §36) and is not
+begun. A separate inactive ticket #1802 carries the `Hashtable::Remove`
+absent-key over-bump this design measured on the sibling implementation.
