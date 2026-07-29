@@ -46,16 +46,27 @@
 // to flip the assertion deliberately. Every measured sizeof, alignof, and counter offset was
 // unchanged (build-probe-collversion/probe1_*_layout.log).
 //
-// TICKET #1788 PERFORMED EXACTLY THAT FLIP, FOR LinkedList<T> ONLY. The user approved the
-// object growth, LinkedListAdapter::kNarrowCounter went true -> false, and every
-// kNarrowCounter branch below therefore now takes the WIDE-family path for it: the counter is
-// asserted 64-bit, and NoStaleSnapshotBecomesValidAcrossTheOld2Pow32Distance asserts a stale
-// snapshot IS rejected instead of asserting that it is accepted. Measured:
-// sizeof(LinkedList<int>) 40 -> 48, sizeof(Enumerator) UNCHANGED at 40 (the wider snapshot
-// landed in padding it already had), zero LinkedList symbols added, removed or renamed. The
-// dedicated suite is Generic/LinkedListVersionWideningTests.cpp; the record is
-// docs/CollectionVersionCounterSweep.md section 8.1. BitArray is untouched -- ticket #1789
-// remains blocked on its own, separate approval, so it is the one narrow adapter left here.
+// TICKET #1788 PERFORMED EXACTLY THAT FLIP, FOR LinkedList<T>. The user approved the object
+// growth, LinkedListAdapter::kNarrowCounter went true -> false, and every kNarrowCounter
+// branch below therefore takes the WIDE-family path for it: the counter is asserted 64-bit,
+// and NoStaleSnapshotBecomesValidAcrossTheOld2Pow32Distance asserts a stale snapshot IS
+// rejected instead of asserting that it is accepted. Measured: sizeof(LinkedList<int>)
+// 40 -> 48, sizeof(Enumerator) UNCHANGED at 40 (the wider snapshot landed in padding it
+// already had), zero LinkedList symbols added, removed or renamed. The dedicated suite is
+// Generic/LinkedListVersionWideningTests.cpp; the record is
+// docs/CollectionVersionCounterSweep.md section 19.
+//
+// TICKET #1789 PERFORMED THE SAME FLIP FOR BitArray, under its own separate approval, and it
+// was the LAST one. BitArrayAdapter::kNarrowCounter went true -> false, so **no adapter in
+// this file is narrow any more** and every kNarrowCounter branch below is now unreachable --
+// deliberately kept, so that a future collection whose layout genuinely forbids eight bytes
+// has somewhere to go, and so that the history stays readable. Measured:
+// sizeof(BitArray::Enumerator) 32 -> 40 (nine bytes were needed after an eight-byte snapshot
+// where eight were available, in any member order), sizeof(BitArray) UNCHANGED at 48 (the
+// wider counter landed in tail padding the container already had), zero BitArray symbols
+// added, removed or renamed. The dedicated suite is BitArrayVersionWideningTests.cpp; the
+// record is docs/CollectionVersionCounterSweep.md section 20. NO collection in this
+// repository retains a 2^32 enumerator-snapshot ABA horizon; every one is 2^64.
 //
 // Reaching a boundary through the public API would need billions of real mutations, so the
 // near-boundary cases position the counter through the test-only access seam
@@ -355,7 +366,8 @@ struct LinkedListAdapter {
 
 struct BitArrayAdapter {
     using Collection = NG::BitArray;
-    static constexpr bool kNarrowCounter = true;   // see MutationCounter.hpp / sweep doc §8
+    // Flipped true -> false by ticket #1789 (sweep doc §20), the last narrow adapter here.
+    static constexpr bool kNarrowCounter = false;
     static constexpr bool kSelfAssignmentIsNoOp = false;
     static constexpr bool kHasNoOpMutation = false;
     static constexpr bool kHasClear = false;       // BitArray has no Clear()
@@ -448,9 +460,10 @@ TYPED_TEST(CollectionVersionCounter, TheCounterIsUnsigned) {
 TYPED_TEST(CollectionVersionCounter, TheCounterHasTheWidthItsLayoutPermits) {
     using Value = typename Seam<typename TypeParam::Collection>::value_type;
     if constexpr (TypeParam::kNarrowCounter) {
-        // BitArray keeps 32 bits because widening its PUBLIC nested Enumerator grows a public
-        // object; ticket #1789 holds the approval request. LinkedList<T> was here too until
-        // #1788 was approved and flipped its adapter flag.
+        // Unreachable since ticket #1789: no adapter here is narrow any more. LinkedList<T>
+        // left this branch when #1788 was approved and BitArray when #1789 was, each in
+        // exchange for a measured, approved public object-size change. Kept so a future
+        // collection whose layout genuinely forbids eight bytes has a documented home.
         EXPECT_EQ(sizeof(Value), sizeof(uintcs));
     } else {
         EXPECT_EQ(sizeof(Value), sizeof(ulongcs));
@@ -502,12 +515,14 @@ TYPED_TEST(CollectionVersionCounter, NoStaleSnapshotBecomesValidAcrossTheOld2Pow
     TypeParam::mutate(c);
 
     if constexpr (TypeParam::kNarrowCounter) {
-        // Documented, approval-blocked residual: a 32-bit counter genuinely does return to
-        // the snapshot after 2^32 effective mutations, and the guard genuinely stops firing.
-        // Pinned here so that widening BitArray -- which needs approval for a public
-        // object-size change -- has to flip this assertion on purpose rather than by
-        // accident. LinkedList<T> reached the `else` branch below when ticket #1788 was
-        // approved and did exactly that. See docs/CollectionVersionCounterSweep.md §8.
+        // Unreachable since ticket #1789, and retained as the statement of what a narrow
+        // counter costs: a 32-bit counter genuinely does return to the snapshot after 2^32
+        // effective mutations, and the guard genuinely stops firing. It was pinned here so
+        // that widening a narrow type -- each of which needed approval for a public
+        // object-size change -- had to flip this assertion on purpose rather than by
+        // accident. LinkedList<T> reached the `else` branch when ticket #1788 was approved
+        // and BitArray when #1789 was. See docs/CollectionVersionCounterSweep.md §8, §19,
+        // §20.
         //
         // The distance is spelled `snapshot + 2^32` and NOT simply `snapshot`, even though a
         // 32-bit cast makes the two identical. #1788's mutation check measured why that
@@ -515,7 +530,8 @@ TYPED_TEST(CollectionVersionCounter, NoStaleSnapshotBecomesValidAcrossTheOld2Pow
         // therefore pins nothing about the residual it claims to describe -- flipping the
         // adapter flag left it passing either way, and only
         // TheCounterHasTheWidthItsLayoutPermits actually failed. Written this way, the
-        // narrowing is what makes the guard silent, which is the claim.
+        // narrowing is what makes the guard silent, which is the claim -- and it is what made
+        // #1789's flip load-bearing rather than cosmetic.
         positionVersion(c, static_cast<Value>(snapshot + kOldAliasStep));
         EXPECT_EQ(static_cast<ulongcs>(versionOf(c)), snapshot)
             << TypeParam::name() << "'s 32-bit counter must truncate one full lap back onto "
@@ -1082,6 +1098,13 @@ TEST(CollectionVersionCounterCompatibility, PublishedObjectSizesAreUnchanged) {
     // ticket's inventory that did NOT stay unchanged, so asserting it under a test named
     // "AreUnchanged" would be false. Its new size is pinned in
     // Generic/LinkedListVersionWideningTests.cpp, TheObjectGrewToFortyEightBytesOnLp64.
+    //
+    // NG::BitArray, by contrast, STAYS here at 48. Ticket #1789 widened its counter from four
+    // bytes to eight and the growth landed entirely in the four bytes of tail padding the
+    // container already had, so sizeof and alignof are genuinely unchanged and this assertion
+    // is genuinely still true -- re-measured, not assumed (sweep doc §20.5). What #1789 DID
+    // grow is sizeof(BitArray::Enumerator), 32 -> 40, which is why that figure is absent from
+    // PublishedIteratorSizesAreUnchanged below.
     if constexpr (sizeof(void*) == 8) {
         EXPECT_EQ(sizeof(G::List<int>), 40u);
         EXPECT_EQ(sizeof(G::HashSet<int>), 64u);
@@ -1105,6 +1128,10 @@ TEST(CollectionVersionCounterCompatibility, PublishedObjectSizesAreUnchanged) {
 }
 
 TEST(CollectionVersionCounterCompatibility, PublishedIteratorSizesAreUnchanged) {
+    // NG::BitArray::Enumerator is deliberately ABSENT. It was 32 bytes when ticket #1787
+    // measured this inventory and ticket #1789 grew it to 40 under explicit user approval, so
+    // asserting it under a test named "AreUnchanged" would be false. Its new size is pinned
+    // in BitArrayVersionWideningTests.cpp, ThePublicEnumeratorGrewToFortyBytesOnLp64.
     if constexpr (sizeof(void*) == 8) {
         EXPECT_EQ(sizeof(G::HashSet<int>::iterator), 24u);
         EXPECT_EQ(sizeof(G::HashSet<int>::const_iterator), 24u);

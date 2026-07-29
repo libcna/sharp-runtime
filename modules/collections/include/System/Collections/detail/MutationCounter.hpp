@@ -198,23 +198,23 @@ namespace System::Collections
         using MutationVersion = MutationCounter::value_type;
 
         /**
-         * @brief A 32-bit mutation counter, for the one remaining class whose measured
-         *        object layout has no room for eight bytes.
+         * @brief A 32-bit mutation counter. **No collection uses this any more.**
          *
-         * `BitArray::Enumerator`'s snapshot shares its tail with three further members, and
-         * widening it grows a **public** nested class (`sizeof(BitArray::Enumerator)`
-         * 32 → 40), which needs explicit user approval this repository has not been given.
-         * `BitArray` therefore keeps a 32-bit counter, which still removes the
-         * signed-overflow undefined behaviour and the assignment transplant, but leaves the
-         * 2^32 snapshot-reuse horizon open -- tracked by blocked ticket #1789 and recorded
-         * in `docs/CollectionVersionCounterSweep.md` §8.2.
+         * It exists as the historical record of ticket #1787's two layout-blocked types and
+         * as the counter template's second instantiation for the tests that pin its
+         * behaviour; nothing in `modules/collections/include/` names it.
          *
-         * `LinkedList<T>` used this alias too until ticket **#1788**, whose approved
-         * widening grew `sizeof(LinkedList<T>)` from 40 to 48 on LP64 and moved it to
-         * `MutationCounter`. Its snapshot moved with it, in the same change: widening a
-         * container's counter without widening the snapshot that compares against it would
-         * make the comparison a silent truncation and leave the alias in place while the
-         * code claimed otherwise.
+         * `LinkedList<T>` carried it until ticket **#1788**, whose approved widening grew
+         * `sizeof(LinkedList<T>)` from 40 to 48 on LP64. `BitArray` carried it until ticket
+         * **#1789**, whose approved widening grew `sizeof(BitArray::Enumerator)` from 32 to
+         * 40 on LP64 while `sizeof(BitArray)` stayed 48. In **both** cases the enumerator's
+         * snapshot moved in the same change: widening a container's counter without widening
+         * the snapshot that compares against it would make the comparison a silent
+         * truncation, leaving the 2^32 alias in place while the code claimed otherwise. That
+         * failure mode is recorded in `docs/CollectionVersionCounterSweep.md` §8.2 and §20.
+         *
+         * With `BitArray` widened, **no collection in this repository retains a 2^32
+         * enumerator-snapshot ABA horizon.** Every one is 2^64.
          *
          * Do not use this alias for a new collection. Use MutationCounter.
          */

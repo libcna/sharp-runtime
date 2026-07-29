@@ -21,10 +21,47 @@ namespace System::Collections {
  *
  * C++ counterpart of .NET System.Collections.BitArray.
  * Backed by std::vector<bool>.
+ *
+ * @par Mutation versioning and the fail-fast enumerator
+ * Every *effective* mutation -- `Set`, `SetAll`, `Not`, `And`, `Or`, `Xor`,
+ * `LeftShift`, `RightShift`, the `Length` setter, and whole-object assignment --
+ * advances a private 64-bit unsigned mutation counter that `GetEnumerator()`'s
+ * enumerator snapshots at construction and compares for **equality** before
+ * touching storage. A mutation underneath an outstanding enumerator is therefore
+ * reported as `System::InvalidOperationException` rather than read as valid
+ * memory. Operations that throw (an out-of-range index, a negative length or
+ * shift count, a length-mismatched bitwise operand) advance nothing; read-only
+ * operations advance nothing.
+ *
+ * The counter and the snapshot were **32-bit** until ticket **#1789**, which
+ * widened both to `detail::MutationCounter` / `detail::MutationVersion` under
+ * explicit user approval. The pair moved together, deliberately: widening the
+ * container alone would make the guard a silent truncation and leave the 2^32
+ * alias in place while the code claimed otherwise. The measured cost is
+ * `sizeof(BitArray::Enumerator)` **32 -> 40** on LP64; `sizeof(BitArray)` stays
+ * **48**, because the wider counter landed in tail padding the container already
+ * had. **Every consumer must be fully recompiled**, and no linker or sanitizer
+ * diagnostic announces a stale object file. The remaining horizon is 2^64
+ * effective mutations of one instance -- a bound, not an impossibility. See
+ * `docs/CollectionVersionCounterSweep.md` section 20.
+ *
+ * @note No thread-safety guarantee follows from any of this. The counter is a
+ *       plain non-atomic field; concurrent mutation is unsupported.
+ *
+ * @note `begin()`/`end()` return raw `std::vector<bool>` iterators and are
+ *       **not** version-checked. Only the `GetEnumerator()` enumerator is
+ *       fail-fast.
  */
 class BitArray {
     std::vector<bool> bits_;
-    System::Collections::detail::NarrowMutationCounter version_;
+    /**
+     * 64-bit since ticket #1789. Never a bare integer: `++` on a signed counter
+     * is undefined behaviour at its maximum, and the implicitly declared
+     * assignment operator would transplant the *source's* counter into the
+     * destination, leaving an enumerator apparently valid over storage the
+     * assignment destroyed (`docs/CollectionVersionCounterSweep.md` section 4).
+     */
+    System::Collections::detail::MutationCounter version_;
 
     /**
      * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
@@ -356,10 +393,24 @@ public:
      *
      * getCurrentProperty() returns std::any holding a copy of the current bit;
      * recover it with std::any_cast<bool>.
+     *
+     * @par Layout, and why it changed
+     * This is a **public** nested class, so a consumer can name and store one --
+     * although every use in this repository hands it out as an `IEnumerator*`
+     * from `GetEnumerator()`. Ticket **#1789** widened its version snapshot from
+     * 32 to 64 bits so that it matches the counter it compares against, which
+     * grew `sizeof(Enumerator)` from **32 to 40** bytes on LP64. There is no
+     * member order that avoids it: nine bytes are needed after an eight-byte
+     * snapshot where eight were available. Every consumer must be recompiled.
      */
     class Enumerator : public IEnumerator {
         const BitArray* arr_;
-        System::Collections::detail::NarrowMutationVersion version_;
+        /**
+         * Exactly as wide as the counter it is compared against. A narrower
+         * snapshot would make the guard a silent truncation, which is the 2^32
+         * alias ticket #1789 closed.
+         */
+        System::Collections::detail::MutationVersion version_;
         intcs index_ = -1;
         // Not `mutable`: since ticket #1793 getCurrentProperty() returns a copy
         // rather than a pointer, so a const member function no longer needs a
