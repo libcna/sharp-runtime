@@ -294,7 +294,23 @@ public:
 
     /**
      * @brief Removes all key/value pairs from the table.
-     * C++ counterpart of .NET Hashtable.Clear().
+     *
+     * C++ counterpart of .NET Hashtable.Clear(). Advances the fail-fast mutation
+     * counter **unconditionally**, including on an already-empty table.
+     *
+     * @note This is a deliberate, decided deviation from .NET Hashtable, recorded
+     *       by ticket #1802 rather than left implicit. .NET's Clear() early-returns
+     *       without bumping when `_count == 0 && _occupancy == 0` (Hashtable.cs:426).
+     *       `_occupancy` counts buckets whose collision bit was ever set, and
+     *       std::unordered_map exposes no analogue, so the obvious `if (_map.empty())
+     *       return;` would **not** reproduce .NET's rule -- it would skip the bump on
+     *       an emptied-but-previously-colliding table where .NET still bumps. The
+     *       port therefore keeps the unconditional bump, which errs in the safe
+     *       direction: a spurious bump can only invalidate an enumerator that had
+     *       nothing to read anyway, whereas a missed bump is the memory-unsafe error.
+     *       .NET's own ListDictionaryInternal.Clear() also bumps unconditionally, so
+     *       this matches one of .NET's two IDictionary implementations exactly.
+     *       Remove() is the opposite case and **is** corrected: see below.
      */
     void Clear() override { _map.clear(); ++version_; }
 
@@ -306,14 +322,19 @@ public:
      * error, matching .NET.
      * @param key Raw key to remove.
      * @throws System::ArgumentNullException if @p key is null.
+     *
+     * @note Advances the fail-fast mutation counter **only when an entry was
+     *       actually erased**; see removeKey() for the rule and its history.
      */
-    void Remove(const void* key) override { _map.erase(toKey(key)); ++version_; }
+    void Remove(const void* key) override { removeKey(toKey(key)); }
 
     /**
      * @brief Removes the entry with the specified string key.
      * @param key String key to remove.
+     *
+     * @note Same effective-mutation versioning rule as the raw-key overload.
      */
-    void Remove(const std::string& key) { _map.erase(key); ++version_; }
+    void Remove(const std::string& key) { removeKey(key); }
 
     /**
      * @brief Removes the entry with the specified C-string key.
@@ -323,11 +344,13 @@ public:
      *         the argument reached std::string's null construction, which
      *         terminates with a std::logic_error that code catching
      *         System::Exception& cannot see (audit finding SR-AUD-363).
+     *
+     * @note Same effective-mutation versioning rule as the raw-key overload; the
+     *       rejected null key throws before anything is erased or counted.
      */
     void Remove(const char* key) {
         if (key == nullptr) throw System::ArgumentNullException("key");
-        _map.erase(key);
-        ++version_;
+        removeKey(key);
     }
 
     /**
@@ -570,6 +593,49 @@ private:
     [[nodiscard]] std::any lookupCopy(const std::string& key) const {
         auto it = _map.find(key);
         return it == _map.end() ? std::any{} : it->second;
+    }
+
+    /**
+     * @brief The single erase site behind all three Remove() overloads.
+     *
+     * All three route through here, so there is exactly one place where a
+     * Hashtable removal decides whether it was an *effective* mutation -- the same
+     * "decide once, structurally unskippable" shape lookupCopy() gives the reads
+     * and toKey() gives the raw-key conversion.
+     *
+     * **The rule: advance the fail-fast mutation counter only when an entry was
+     * actually erased.** std::unordered_map::erase(const key_type&) already
+     * performs the lookup and returns how many elements it removed (0 or 1), so
+     * the effective/no-op distinction costs no extra lookup, no extra key
+     * conversion and no allocation -- the count that decides it is the value the
+     * erase call already computed and previously discarded.
+     *
+     * This matches .NET Hashtable.Remove, which calls UpdateVersion() *inside* the
+     * branch that found and cleared a bucket and leaves `_version` untouched when
+     * the key is absent (Hashtable.cs:968-1005). It also matches the rule
+     * `detail::MutationCounter` has always documented -- "bumped on each
+     * **effective** structural mutation" -- and the rule
+     * docs/ListDictionaryInternalSetterDesign.md section 9.3 selected for the whole
+     * IDictionary interface, which ticket #1798 applied to the sibling
+     * ListDictionaryInternal. With ticket #1802 both of this port's IDictionary
+     * implementations agree on every version row.
+     *
+     * @note Before ticket #1802 each overload was `_map.erase(k); ++version_;` --
+     *       the counter advanced whether or not the key was present, so a Remove
+     *       that changed nothing threw InvalidOperationException out of every
+     *       outstanding IDictionaryEnumerator, key-view enumerator and value-view
+     *       enumerator. That is a **false positive**: memory-safe, but the exact
+     *       opposite error from ticket #1798's, and the reason the two
+     *       implementations disagreed on one of ten version rows.
+     * @note The bump is after the erase, never before, so a throwing key
+     *       conversion or a throwing erase leaves both the contents and the
+     *       counter untouched -- a strong exception guarantee that .NET's own
+     *       bump-first ListDictionaryInternal shape cannot offer.
+     *
+     * @param key Already-converted, already-validated string key.
+     */
+    void removeKey(const std::string& key) {
+        if (_map.erase(key) != 0) ++version_;
     }
 
     std::unordered_map<std::string, std::any> _map;

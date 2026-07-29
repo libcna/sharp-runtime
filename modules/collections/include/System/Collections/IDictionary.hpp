@@ -151,7 +151,22 @@ public:
     /**
      * @brief Removes the element with the specified key.
      *
-     * C++ counterpart of .NET IDictionary.Remove(object).
+     * C++ counterpart of .NET IDictionary.Remove(object). Removing a key that is
+     * not present is not an error, matching .NET.
+     *
+     * An implementation must advance its fail-fast mutation counter **only when an
+     * entry was actually erased**: a Remove of an absent key changes nothing, so it
+     * must leave every outstanding enumerator valid, and a key rejected for being
+     * null must not mutate or invalidate anything either. That is the
+     * "advance on effective mutation" rule
+     * docs/ListDictionaryInternalSetterDesign.md section 9.3 selects for this interface,
+     * applied to ListDictionaryInternal by ticket #1798 and to Hashtable by ticket
+     * #1802; both implementations now answer identically. .NET's own two
+     * implementations disagree here -- Hashtable.Remove bumps only inside the found
+     * branch, ListDictionaryInternal.Remove bumps first and unconditionally -- so
+     * the Hashtable rule is the one taken, because the alternative manufactures a
+     * false-positive InvalidOperationException out of a call that changed nothing.
+     *
      * @param key The key of the element to remove. Never null.
      */
     virtual void Remove(const void* key) = 0;

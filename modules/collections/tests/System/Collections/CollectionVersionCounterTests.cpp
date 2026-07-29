@@ -320,7 +320,12 @@ struct HashtableAdapter {
     using Collection = NG::Hashtable;
     static constexpr bool kNarrowCounter = false;
     static constexpr bool kSelfAssignmentIsNoOp = false;
-    static constexpr bool kHasNoOpMutation = false;
+    // Ticket #1802: Remove of an absent key is a no-op and must move nothing.
+    // Before it, all three Remove overloads were `_map.erase(k); ++version_;` and
+    // this flag was false because the collection had no operation that could be
+    // asked to change nothing -- not because Remove was correct. Matches
+    // ListDictionaryAdapter, which ticket #1798 brought to the same rule.
+    static constexpr bool kHasNoOpMutation = true;   // Remove of an absent key
     static constexpr bool kHasClear = true;
     static const char* name() { return "Hashtable"; }
     static Collection make() {
@@ -336,7 +341,7 @@ struct HashtableAdapter {
         static int n = 100;
         c.Add("k" + std::to_string(n++), std::any(1));
     }
-    static void noOpMutate(Collection&) {}
+    static void noOpMutate(Collection& c) { c.Remove(std::string("never-added")); }
     static void clear(Collection& c) { c.Clear(); }
     static AnyEnumerator enumerate(Collection& c) { return AnyEnumerator(c.GetEnumerator()); }
 };
