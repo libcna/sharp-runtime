@@ -3679,3 +3679,33 @@ buffer's four outcomes pinned unchanged. `SharpRuntimeTests_Buffers` **517/517**
 across 37 executables** (was 14,041). Module graph **41 / 91**.
 
 **Source and ABI consequences: none.**
+
+### Autonomous batch handoff, 2026-07-29 (Base64 family closure)
+
+Five tickets completed on `feature/remediation-batch-base64-followup`: **#1818**
+(SR-AUD-080, non-final padding), **#1819** (SR-AUD-081, **false positive**), **#1820**
+(SR-AUD-082, optional Base64Url padding), **#1822** (the non-`Done` decode cursor, no
+`SR-AUD-*`), and **#1821** (the empty-buffer in-place encode decision, no `SR-AUD-*`).
+
+The Base64 family plan ([`docs/Base64FamilyPlan.md`](docs/Base64FamilyPlan.md), ticket
+#1815) is **fully executed** and `Base64.hpp`/`Base64Url.hpp` carry no `confirmed`
+`SR-AUD-*` finding.
+
+Baselines at batch end: **14,046 tests across 37 executables**, 0 warnings, 0 errors;
+findings index **21 remediated / 343 confirmed of 364**; module graph **41 / 91**;
+Doxygen **1,941** of the 1,942 ceiling; **9 negative fixtures / 66 sites**; **2 version
+seams / 18 specialisations**; selective-component matrix passed.
+
+Four incorrect premises were corrected by appending, never by rewriting: SR-AUD-080
+understated its surface, SR-AUD-081's premise is inverted, SR-AUD-082 predicted the
+wrong repair and asked for a message change that would have been a divergence, and this
+repository's own family plan was wrong in its §2 and §5.
+
+Ready queue: **#1808**, **#1809** (same two headers — plan them together) and **#1813**,
+all compatible and needing no approval. Blocked: **#1773** (CNA / mobile-eggbert
+migration, untouched) and **#1804**. Next recommended family after those: **CCF-004**,
+which needs a #1815-quality plan first.
+
+Full detail, including build directories, the three-job parallelism record and the
+`build-asan`/`build-probe` disk accounting, is in `NEXT.md` under
+"Autonomous batch handoff, 2026-07-29 (Base64 family closure)".

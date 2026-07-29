@@ -120,7 +120,10 @@ member offset are unchanged, so no consumer rebuild is needed on its account and
 no approval was required; the contract is recorded in
 [`docs/SortedSetVersioningDesign.md`](docs/SortedSetVersioningDesign.md). See
 "Completed SortedSet mutation-counter repair" below.
-**No ticket is active.** #1771 removed the
+**No ticket is active.** The 2026-07-29 Base64 batch (#1818, #1819, #1820, #1821,
+#1822) is complete and the whole Base64 family is closed — see "Autonomous batch
+handoff, 2026-07-29 (Base64 family closure)" at the end of this file for the queue,
+baselines and next recommended family. #1771 removed the
 pure virtual `CopyTo(void*, intcs)` from
 `System::Collections::ICollection` under explicit user approval, so this is a
 source- and ABI-breaking release for downstream consumers, which must rebuild.
@@ -6806,3 +6809,146 @@ buffer's four outcomes pinned unchanged. `SharpRuntimeTests_Buffers` **517/517**
 across 37 executables** (was 14,041). Module graph **41 / 91**.
 
 **Source and ABI consequences: none.**
+
+---
+
+## Autonomous batch handoff, 2026-07-29 (Base64 family closure)
+
+Branch `feature/remediation-batch-base64-followup`, ten commits, nothing pushed.
+
+### Tickets completed in this batch
+
+| Ticket | Finding | Classification | Outcome |
+|---|---|---|---|
+| **#1818** | SR-AUD-080 | compatible implementation (narrowing) | `'='` is `InvalidData` while `isFinalBlock` is false, in `Base64::decodeCore` |
+| **#1819** | SR-AUD-081 | **false positive** | the finding's premise is inverted; .NET counts the trailing whitespace too |
+| **#1820** | SR-AUD-082 | compatible implementation (widening) | Base64Url accepts optional final `'='` / `'%'` padding, decode **and** validate |
+| **#1822** | — (no `SR-AUD-*`) | compatible implementation | the cursor on a non-`Done` return is .NET's, both types |
+| **#1821** | — (no `SR-AUD-*`) | decision, taken | an empty in-place encode buffer short-circuits to `Done` / `true` |
+
+The Base64 family plan ([`docs/Base64FamilyPlan.md`](docs/Base64FamilyPlan.md),
+ticket #1815) is **fully executed**: §9 records the family status, §10 #1822 and §11
+#1821. `Base64.hpp` and `Base64Url.hpp` have **no `confirmed` `SR-AUD-*` finding
+left**, and CCF-013 stays closed.
+
+### Understated or incorrect finding premises corrected in this batch
+
+Four, all recorded by appending rather than by rewriting the original text:
+
+1. **SR-AUD-080 understated its surface.** It named `DecodeFromUtf8("QQ==", …, false)`;
+   six of the seven non-final shapes probed were wrong.
+2. **SR-AUD-081 is a false positive with an inverted premise.** It cited .NET's test
+   base as requiring trailing whitespace *not* to be consumed; that test base is named
+   `BasicDecodingWithExtraWhitespaceShouldBeCountedInConsumedBytes_MemberData` and
+   requires the opposite. 27 of 27 replayed .NET vectors already matched. It stays
+   `confirmed` only because the index vocabulary has no false-positive value — the
+   SR-AUD-362 precedent — and carries a Correction note.
+3. **SR-AUD-082 predicted the wrong repair.** It expected the Base64Url decode *table*
+   to change; .NET recognises padding by a test on the raw character, leaving `'='` and
+   `'%'` unmapped, and copying that is the more faithful port. Its ticket also asked for
+   `invalidDataMessage()` to be reworded, which would have been a **divergence** — .NET's
+   `Base64Url` throws `SR.Format_BadBase64Char`, verbatim the string already used.
+4. **This repository's own family plan was wrong twice.** §2 repeated SR-AUD-081's
+   inverted premise unchecked, and §5 listed four empty-buffer divergences where there
+   are eight — it probed only non-negative `dataLength` and so missed that an empty
+   buffer with a negative or over-large one **threw** where .NET returns `Done`. Both are
+   recorded in §8, §9 and §11 rather than edited away.
+
+### Exact current baselines (all re-measured 2026-07-29 at batch end)
+
+| | |
+|---|---|
+| Repository tests | **14,046** across 37 executables (14,014 at batch start) |
+| `SharpRuntimeTests_Buffers` | **517** (485 at batch start) |
+| Build warnings / errors | **0 / 0** |
+| Audit findings | **364** total, **21 remediated**, **343 confirmed** (19/345 at batch start) |
+| Module graph | **41 modules / 91 edges**, unchanged |
+| Component catalogue | current |
+| Canonical Doxygen | **1,941** warnings, ceiling 1,942, unchanged |
+| Negative fixtures | **9 fixtures / 66 sites**, unchanged |
+| Version seams | **2 seams / 18 specialisations**, unchanged |
+| Selective-component matrix | passed |
+
+Sanitizers: `SharpRuntimeTests_Buffers` clean under **ASan + UBSan + LSan** after every
+one of the four implementation tickets (`build-asan/1818_…`, `1820_…`, `1821_…`,
+`1822_buffers_asan.log`), as is each ticket's probe (`build-probe/*_asan.log`).
+Sanitizer activation was proven for #1818 by the runtime's own `ASAN_OPTIONS=help=1`
+dump and by 28 `__asan`/`__ubsan` symbols in the binary. TSan was not run: nothing in
+this batch touches shared mutable state.
+
+### New tickets opened in this batch
+
+**#1822** (`REMED-BUFFERS-BASE64-INVALIDDATA-CURSOR`) — opened inactive by #1818 with
+two traced instances, upgraded by #1819 to four .NET-test-pinned ones and to P2, then
+implemented. **Now `done`.** No `SR-AUD-*` identifier; numbering stays frozen at 364.
+
+No other ticket was created. No `SR-AUD-*` identifier was issued.
+
+### Remaining ready queue
+
+| Ticket | Priority | Title |
+|---|---|---|
+| **#1808** | P2 | `StreamReader`/`StreamWriter` do not validate `CanRead`/`CanWrite` on the base stream |
+| **#1809** | P2 | a null `const char*` is undefined behaviour across the `TextWriter` `Write` family |
+| **#1813** | P2 | `ZipArchive` silently accepts an out-of-range `ZipArchiveMode` value |
+
+All three are compatible repairs needing no new approval. **#1808 and #1809 are the
+same two headers** (`StreamReader`/`StreamWriter` and the `TextWriter` family) and
+should be planned together rather than taken one at a time — #1808 is already scoped as
+an inventory ticket, which is the natural place to decide #1809's contract as well.
+
+### Blocked, needing explicit user approval
+
+- **#1773** (P2) — migrate CNA and mobile-eggbert to the new `ICollection::CopyTo`
+  boundary. **Still blocked**, and deliberately untouched: those repositories were not
+  inspected, searched, configured, built, tested or modified in this batch.
+- **#1804** (P3) — `check_version_seam_odr.py` exits 0 when a test-only seam *leaves*
+  discovery. Blocked on a decision about how strict the checker should be.
+
+No ticket in this batch required a new approval: no public signature, virtual, return
+convention, object layout, iterator layout or mandatory-downstream-migration change was
+made. #1818 and #1817-style narrowings change only which inputs are accepted.
+
+### Next recommended family
+
+After #1808/#1809/#1813, the next coherent cross-cutting family is **CCF-004**
+(*native-width and fixed-width boundaries must not rely on signed C++ overflow*): nine
+`SR-AUD-*` members — SR-AUD-008, 019, 025, 049, 057, 060, 062, 084 and their file
+reports — spanning `TimeSpan`, `Int128`, `IntPtr`, `ReadOnlyMemory`, `Index`/`Range`,
+`DateOnly`, `Tuple` and `Utf8Parser`. It needs a #1815-quality plan **first**: the
+members share a cause but not a repair, several are UBSan-reproducible, and its own
+non-membership boundary has already been contested three times (tickets #1786, #1787,
+#1788/#1789). CCF-005, CCF-009 and CCF-019 remain the alternatives.
+
+**What this batch would recommend carrying into that plan**: read the current .NET
+source *and its tests* before accepting any finding's account of .NET. Every incorrect
+premise listed above was found that way, and two of them were in this repository's own
+planning documents rather than in the audit.
+
+### Build directories, parallelism and disk
+
+Used: `build/` (gate), `build-asan/`, `build-probe/` (all files prefixed `1818_`,
+`1819_`, `1820_`, `1821_`, `1822_`), `build-tmp/` (repository-local `TMPDIR` for every
+`mktemp`-based script). **No new build directory was created.**
+
+**Maximum aggregate compilation parallelism: three jobs**, never exceeded. Every
+`cmake --build` used `--parallel 3`; every probe was a single-translation-unit compile
+(one process); `scripts/check_negative_consumer_fixtures.py` reported its own
+`peak 3 job(s)`; `scripts/check_selective_components.sh` and
+`scripts/local_ci_check.sh` were run with `TMPDIR="$PWD/build-tmp"` and use `--parallel 3`
+internally. No `nproc`, no bare `-j`, no bare `--parallel`.
+
+`build-asan/` was **3,413 MB at batch start and 3,413 MB at batch end** — only
+`SharpRuntimeTests_Buffers` was rebuilt into it, incrementally, four times. It was not
+deleted. `build-probe/` went from 22.3 MB to **10.3 MB**: nine disposable probe
+binaries (`*_defects`, `*_defects_asan`) were removed after their results were
+transcribed, reclaiming **12.1 MB**. Every probe **source and log is retained** —
+`1818_defects.cpp`/`1818_prefix_defects.log`/`1818_postfix_defects.log`/`1818_asan.log`
+and the same set for 1819, 1820, 1821 and 1822 — and each binary is reproducible from
+its source with the one-line compile recorded in the file's header comment.
+
+### Git
+
+Ten local commits on `feature/remediation-batch-base64-followup`. **No push, no merge,
+no rebase, no tag, no package publication, no remote reference altered.** No historical
+ticket commit was amended.
