@@ -314,8 +314,19 @@ Every `.hpp` and `.cpp` file starts with:
   (`docs/CollectionVersionTestSeamDesign.md`, ticket #1800).
   `scripts/check_version_seam_odr.py` enforces this and runs in
   `scripts/local_ci_check.sh`; never define a seam in `modules/*/include` or `modules/*/src`,
-  because that would make it reachable from a consumer and break
-  `test/consumer/collections_mutation_version_negative.cpp`.
+  because that would make it reachable from a consumer and break the consumer-side fixture
+  that pins it — `test/consumer/collections_mutation_version_negative.cpp` for
+  `CollectionVersionAccess` (2 sites, #1787/#1801) and
+  `test/consumer/collections_sorted_set_version_negative.cpp` for `SortedSetVersionAccess`
+  (15 sites, #1803). **Every seam needs both checks**: measured on 2026-07-29, giving a
+  seam's *primary template* a body in a public header makes it stop being discovered as a
+  seam, so `check_version_seam_odr.py` exits 0 and only the consumer fixture fails
+  (`docs/NegativeConsumerFixtureValidation.md` §18.4). A seam added by a future ticket must
+  therefore gain a `test/consumer/*_negative.cpp` site too, not only a single definition
+  site. Note also what neither check can express: a consumer that reopens
+  `namespace SharpRuntime::Testing` and writes its own explicit specialisation **does** get
+  the access the friend declaration grants, for both seams; that is well-formed ISO C++, is
+  unsupported, and is recorded in §18.5 rather than assumed away.
 - **Negative consumer fixtures:** a `test/consumer/*_negative.cpp` proves that a spelling a
   ticket outlawed is **rejected by the compiler**. It must carry a
   `// NEGATIVE-FIXTURE: component=<Component>` directive, an

@@ -915,3 +915,59 @@ nothing at all, not even `Add()`. Its plain indexer still does not run the virtu
 `SetItem` hook, because the proxy holds a slot and a counter rather than a
 collection and so cannot make a virtual call; `setItem` is the hook-running path.
 That gap was **narrowed, not closed**, and is documented at the declaration.
+
+---
+
+## Post-audit remediation note — ticket #1803, a test-only seam needs both halves of its proof (2026-07-29)
+
+Ticket #1801's note above records one coverage asymmetry as open: "`SortedSetVersionAccess`
+has no consumer-side fixture, which is inactive ticket #1803". It has one now —
+`test/consumer/collections_sorted_set_version_negative.cpp`, 15 sites, every site
+rejected — and closing it produced a cross-cutting rule that applies to **every**
+test-only access seam this repository will ever add, not only to the two it has.
+
+**A seam's guarantee has two independent halves, and one checker cannot see both.**
+Ticket #1800 checks *definition ownership* by reading the repository's own source
+text: exactly one file may define a given `(seam, template-argument list)`, and no
+`modules/*/include` or `modules/*/src` file may define one at all. A negative
+consumer fixture checks *consumer reachability* by compiling: an ordinary consumer,
+given only the component's declared public include surface, must be unable to name
+a complete seam type or reach the state it exists to reach.
+
+Both checkers were run against **identical** mirror repositories, so the division is
+a measurement and not an argument (`build-probe/1803_gap_probe.py`):
+
+| Mutation applied to a copy of `SortedSet.hpp` | `check_version_seam_odr.py` | the consumer fixture |
+|---|---|---|
+| none | OK, 2 seams, 18 definitions | OK, 15/15 rejected |
+| the seam's **primary template** given a body | **OK, exit 0** — silently 1 seam | **FAIL**, 5 sites named |
+| an explicit **specialisation** defined | FAIL, rule 1 | FAIL, 5 sites named |
+| `SortedSet<T>::state_` made **public** | **OK, exit 0** | **FAIL**, 1 site named |
+
+Row two is the sharp one: #1800's checker *discovers* a seam as a class template
+declared and **not defined** in a production header, so giving the primary template
+a body makes the seam stop being a seam, rule 1 never fires, and the run exits 0
+with its seam count quietly dropping from 2 to 1. Its vacuity guard fires only at
+**zero** seams. Row four is the other half — private state becoming public is
+entirely outside that checker's remit. **Neither result is a defect in the
+repository today**, and #1800 was not reopened; the pair of checks is complete
+where each alone is not. Strengthening the vacuity guard so that a seam *leaving*
+discovery is reported is inactive ticket **#1804**.
+
+**A second, permanent limitation is recorded rather than closed.** A consumer that
+reopens `namespace SharpRuntime::Testing` and writes its own explicit specialisation
+of either seam *does* obtain the access the friend declaration grants; it compiles
+clean under `-Wall -Wextra -Wpedantic -Werror` against the public headers alone, for
+`SortedSetVersionAccess<int>` and for `CollectionVersionAccess<List<int>>` alike.
+That is well-formed ISO C++ — a `friend class X;` is open to whoever writes `X` —
+so it cannot be expressed as a compile-rejection site, and no seam design in C++
+avoids it. It is unsupported, and any future claim that a seam is "unreachable"
+must be read as *"no ordinary consumer expression reaches it"*, never as
+*"no consumer can construct access to it"*.
+
+The rule for a future ticket adding a seam: give it **one definition file and one
+`test/consumer/*_negative.cpp` site set**. `CLAUDE.md`'s architecture invariant now
+says so; the evidence is `docs/NegativeConsumerFixtureValidation.md` §18 and
+`docs/CollectionVersionTestSeamDesign.md` §14.
+
+- `scripts/check_version_seam_odr.py.audit.md`, `scripts/local_ci_check.sh.audit.md`.

@@ -714,6 +714,45 @@ acceptable rather than a dangerous hook:
   `#define private public` in a permanent test file — which is ill-formed and, as
   §4 records, does not even work on this class.
 
+### 10.1 The consumer-side guard — added by ticket #1803, 2026-07-29
+
+*Appended after this document's ticket closed. Everything above is #1786's own
+record and is unedited; nothing about the seam, the counter, the layout or the
+live views changed.*
+
+The four properties above were **argued** when #1786 closed, and proved only for
+the repository's own build. Ticket #1800 later pinned the "defined in exactly
+one translation unit" half by checking the repository's source text; ticket
+#1803 pinned the "a consumer cannot reach it" half by **compilation**, which is
+the only way that claim can be checked at all.
+
+`test/consumer/collections_sorted_set_version_negative.cpp` compiles fifteen
+outlawed spellings, one per translation unit, against the declared
+`Collections.Core` public include surface, under
+`-Wall -Wextra -Wpedantic -Werror`, and requires each to be rejected for its own
+declared reason. Five sites pin that the seam is an **incomplete type** to a
+consumer — `version`, `positionVersion` and `cachedTag` calls, an object
+definition, and the `::Set` member type. Nine pin that the state it reaches has
+no second route: `state_`, the nested `State` type, `bumpVersion()`,
+`cachedCount_`, `cachedCountVersion_`, `countCacheTag()`,
+`kMaxCacheableVersion`, `kCountNotCached`, and `Iterator::version_` are each
+rejected with `is private within this context`. One pins that the defining
+translation unit is not reachable through any public include path.
+`scripts/check_negative_consumer_fixtures.py` runs it from
+`scripts/local_ci_check.sh`; ten temporary header mutations, each shadowed in a
+mirror tree and never committed, prove every site load-bearing.
+
+One limitation, measured rather than assumed: a consumer that reopens
+`namespace SharpRuntime::Testing` and writes its **own** explicit specialisation
+of `SortedSetVersionAccess<int>` does obtain the access the friend declaration
+grants, and compiles clean. That is well-formed ISO C++ — no C++ mechanism stops
+a third party defining a class a header befriends by name — it is equally true
+of `CollectionVersionAccess`, and it is therefore not expressible as a
+compile-rejection site. It is unsupported, and it does not weaken the first
+bullet above: production still defines nothing, so nothing this library or a
+consumer *links against* can observe or call the seam. Full record:
+`docs/NegativeConsumerFixtureValidation.md` §18, in particular §18.5.
+
 ---
 
 ## 11. Compatibility, measured

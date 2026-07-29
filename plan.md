@@ -70,7 +70,7 @@ The 2026-07-29 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,803 rows: 1,800 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`), implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`), and design ticket #1785 (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened inactive by #1784 and closed by adopting .NET's nested-view validation order), design ticket #1795 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY-DESIGN`, opened because #1794 is an implementation row and was deliberately not reused), and implementation ticket #1794 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, which landed #1795's design under the full four-item approval: owning `std::any` Key/Value, a mandatory `MoveNext`-time snapshot on both implementations, two `ListDictionaryInternal` parity corrections, and an acknowledged silent ABI break through two independent mechanisms) — one `wontfix` (#1772, obsoleted by #1771), two deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; and #1803 `REMED-TOOLING-SORTEDSET-SEAM-NEGATIVE-FIXTURE`, opened inactive by #1801 for the one seam — `SortedSetVersionAccess` — whose *consumer-side* unreachability has no negative fixture, nothing being known to be wrong with it; **this clause said "five" and still listed #1791 and #1788 as blocked until ticket #1788 corrected it: #1791 was closed earlier the same day and #1788 closed itself, so two of the five were already stale when written**; implementation ticket #1788 (`REMED-COLL-LINKEDLIST-VERSION-WIDEN`) is now `done`, having widened `LinkedList<T>`'s mutation counter and its enumerator's snapshot to 64 bits under the explicit approval that `sizeof(LinkedList<T>)` may grow 40 → 48 on LP64, with a measured silent binary break and a mandatory full consumer rebuild; implementation ticket #1789 (`REMED-COLL-BITARRAY-VERSION-WIDEN`) is likewise now `done`, having done the same for `BitArray` under its own separate approval that `sizeof(BitArray::Enumerator)` may grow 32 → 40 on LP64 while `sizeof(BitArray)` stayed 48, so **no collection retains a 2^32 enumerator-snapshot ABA horizon and `detail::NarrowMutationCounter` has no user left** — this clause listed #1789 among the inactive `blocked` rows and said "three" until #1789 itself corrected it to two, the count being taken from the database on each edit; **all three rows #1799 opened inactive are now closed**: #1802 `REMED-COLL-HASHTABLE-REMOVE-VERSION`, #1800 `REMED-COLL-VERSION-SEAM-ODR` and #1801 `REMED-TOOLING-NEGATIVE-FIXTURE-CI`, see below; **this line said "eight" while listing seven until #1802 corrected it, and the count is taken from the database on each edit**); design ticket #1797 (`REMED-COLL-HASHTABLE-VALUE-ACCESS-DESIGN`, opened because #1796 is an implementation row and was deliberately not reused), design ticket #1799 (`REMED-COLL-LISTDICT-SETITEM-DESIGN`, opened for the same reason against #1798 and closed 2026-07-29 with no production change), implementation ticket #1798 (`REMED-COLL-LISTDICTINTERNAL-PARITY`, which landed #1799's design under the full three-item approval: a private `ValidatedKey` making null-key rejection structurally unskippable across all five raw-key entry points, one `setItem` upsert whose bump follows the mutation and covers replacement and equal-value replacement, deletion of the `const_cast` that made the key view's `CopyTo` publish a writable pointer to a caller's `const` object, two deliberate deviations from .NET's bump-first shape on a throwing `Add` and an absent `Remove`, and an acknowledged **silent** stale-object hazard requiring a full consumer rebuild), and implementation ticket #1796 (`REMED-COLL-HASHTABLE-WRITE-ESCAPES`, which landed #1797's design under the full four-item approval: owning `std::any` from `getItem`/`at`/the `const` indexer, a non-copyable `ValueReference` proxy making `table[key] = value` a tracked insert-or-replace and a bare read no longer insert, `KeyNotFoundException` in place of `std::out_of_range`, and an acknowledged silent ABI break requiring a full consumer rebuild) are both `done`, as is tooling ticket #1801 (`REMED-TOOLING-NEGATIVE-FIXTURE-CI`, which made all **seven** — not six — negative consumer fixtures compile per site from `scripts/local_ci_check.sh`, 37 sites, after reproducing the whole-file false pass and proving the checker against a 7/7 mutation campaign; no production source, signature, symbol or layout changed); no `todo`, `doing`, or `needs_user` rows |
+| `ticket` | 1,804 rows: 1,801 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`), implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`), and design ticket #1785 (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened inactive by #1784 and closed by adopting .NET's nested-view validation order), design ticket #1795 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY-DESIGN`, opened because #1794 is an implementation row and was deliberately not reused), and implementation ticket #1794 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, which landed #1795's design under the full four-item approval: owning `std::any` Key/Value, a mandatory `MoveNext`-time snapshot on both implementations, two `ListDictionaryInternal` parity corrections, and an acknowledged silent ABI break through two independent mechanisms) — one `wontfix` (#1772, obsoleted by #1771), two deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; and, since 2026-07-29, #1804 `REMED-TOOLING-SEAM-DISCOVERY-VACUITY`, opened inactive by #1803 because `scripts/check_version_seam_odr.py` exits 0 when a seam *leaves* its discovery rule — measured, covered by the two consumer fixtures, and not a defect today. **This clause previously named #1803 `REMED-TOOLING-SORTEDSET-SEAM-NEGATIVE-FIXTURE` as the second inactive row, for the one seam — `SortedSetVersionAccess` — whose *consumer-side* unreachability had no negative fixture; #1803 is now `done`, having added `test/consumer/collections_sorted_set_version_negative.cpp` (15 sites, 9 fixtures / 66 sites in total) with no production change, and the count is taken from the database on each edit**; **this clause said "five" and still listed #1791 and #1788 as blocked until ticket #1788 corrected it: #1791 was closed earlier the same day and #1788 closed itself, so two of the five were already stale when written**; implementation ticket #1788 (`REMED-COLL-LINKEDLIST-VERSION-WIDEN`) is now `done`, having widened `LinkedList<T>`'s mutation counter and its enumerator's snapshot to 64 bits under the explicit approval that `sizeof(LinkedList<T>)` may grow 40 → 48 on LP64, with a measured silent binary break and a mandatory full consumer rebuild; implementation ticket #1789 (`REMED-COLL-BITARRAY-VERSION-WIDEN`) is likewise now `done`, having done the same for `BitArray` under its own separate approval that `sizeof(BitArray::Enumerator)` may grow 32 → 40 on LP64 while `sizeof(BitArray)` stayed 48, so **no collection retains a 2^32 enumerator-snapshot ABA horizon and `detail::NarrowMutationCounter` has no user left** — this clause listed #1789 among the inactive `blocked` rows and said "three" until #1789 itself corrected it to two, the count being taken from the database on each edit; **all three rows #1799 opened inactive are now closed**: #1802 `REMED-COLL-HASHTABLE-REMOVE-VERSION`, #1800 `REMED-COLL-VERSION-SEAM-ODR` and #1801 `REMED-TOOLING-NEGATIVE-FIXTURE-CI`, see below; **this line said "eight" while listing seven until #1802 corrected it, and the count is taken from the database on each edit**); design ticket #1797 (`REMED-COLL-HASHTABLE-VALUE-ACCESS-DESIGN`, opened because #1796 is an implementation row and was deliberately not reused), design ticket #1799 (`REMED-COLL-LISTDICT-SETITEM-DESIGN`, opened for the same reason against #1798 and closed 2026-07-29 with no production change), implementation ticket #1798 (`REMED-COLL-LISTDICTINTERNAL-PARITY`, which landed #1799's design under the full three-item approval: a private `ValidatedKey` making null-key rejection structurally unskippable across all five raw-key entry points, one `setItem` upsert whose bump follows the mutation and covers replacement and equal-value replacement, deletion of the `const_cast` that made the key view's `CopyTo` publish a writable pointer to a caller's `const` object, two deliberate deviations from .NET's bump-first shape on a throwing `Add` and an absent `Remove`, and an acknowledged **silent** stale-object hazard requiring a full consumer rebuild), and implementation ticket #1796 (`REMED-COLL-HASHTABLE-WRITE-ESCAPES`, which landed #1797's design under the full four-item approval: owning `std::any` from `getItem`/`at`/the `const` indexer, a non-copyable `ValueReference` proxy making `table[key] = value` a tracked insert-or-replace and a bare read no longer insert, `KeyNotFoundException` in place of `std::out_of_range`, and an acknowledged silent ABI break requiring a full consumer rebuild) are both `done`, as is tooling ticket #1801 (`REMED-TOOLING-NEGATIVE-FIXTURE-CI`, which made all **seven** — not six — negative consumer fixtures compile per site from `scripts/local_ci_check.sh`, 37 sites, after reproducing the whole-file false pass and proving the checker against a 7/7 mutation campaign; no production source, signature, symbol or layout changed); no `todo`, `doing`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -2379,3 +2379,129 @@ record and as the second instantiation the counter tests pin).
 **CNA and mobile-eggbert were not inspected, searched, configured, built or
 modified**, no claim is made about whether they use `BitArray`, and **#1773
 remains `blocked`**. #1803 remains `blocked` and untouched.
+
+### Completed SortedSet seam consumer guard: ticket #1803
+
+Ticket #1803 (`REMED-TOOLING-SORTEDSET-SEAM-NEGATIVE-FIXTURE`, P3, size XS,
+`tooling`, area *Developer experience*) is **done**. Durable record:
+[`docs/NegativeConsumerFixtureValidation.md`](docs/NegativeConsumerFixtureValidation.md)
+**§18**, appended below #1801's §§1-17, which are preserved unedited — in
+particular §16.4 item 4, which is this ticket's own charge sheet and still reads
+"`SortedSetVersionAccess` has no consumer-side fixture". **No new `SR-AUD-*`
+identifier**; the numbering stays frozen at 364.
+
+**This is test/tooling work only.** No production source, signature, symbol,
+object layout, vtable, exception contract or collection semantic changed; not one
+file under any `modules/*/include` or `modules/*/src` was touched, and CMake
+metadata, the component graph and every include directory are unchanged. #1800
+and #1801 stay `done` and neither was reopened; `scripts/check_version_seam_odr.py`,
+`scripts/check_negative_consumer_fixtures.py`,
+`modules/collections/tests/support/CollectionVersionSeam.hpp` and
+`test/consumer/CMakeLists.txt` are unmodified.
+
+**What was missing.** `SharpRuntime::Testing::SortedSetVersionAccess<T>` is
+declared, never defined, and befriended by `SortedSet<T>`, so #1786's regressions
+can position the shared 64-bit counter and read #1784's atomic Count cache. #1800
+pinned that it has exactly one definition site — a test translation unit,
+`SortedSetVersionOverflowTests.cpp` — by reading source text. What no tracked job
+did was **compile a consumer that tries to use it**. `CollectionVersionAccess` had
+that half, from `test/consumer/collections_mutation_version_negative.cpp`;
+`SortedSetVersionAccess` did not. Nothing was broken: this was a coverage
+asymmetry, and it stayed one.
+
+**The intended restriction, now written down and pinned:** an ordinary consumer —
+compiling against a component's declared public include surface, with no flag that
+disables access control, including nothing under `modules/*/tests`, and not
+authoring a specialisation in a namespace it does not own — can neither name a
+*complete* `SortedSetVersionAccess<T>` nor reach, by any other route, the state
+that seam exists to reach.
+
+**Inventory first, fixture second.** `build-probe/1803_threat_probe.py` compiled
+**29** candidate consumer expressions, one per translation unit, against the
+resolved `Collections.Core` surface. Three are accepted and 26 rejected. Two of
+the three acceptances are intended and are deliberately **not** sites — naming the
+incomplete type, and declaring a pointer to it, obtain nothing, which is what a
+forward declaration is for. The third is §18.5 below.
+
+**`test/consumer/collections_sorted_set_version_negative.cpp`, 15 sites**, not the
+two the ticket's row estimated: five prove the seam is an **incomplete type**
+(`version`, `positionVersion`, `cachedTag`, an object definition, the `::Set`
+member type), nine prove there is no second route to the same storage (`state_`,
+the nested `State`, `bumpVersion()`, `cachedCount_`, `cachedCountVersion_`,
+`countCacheTag()`, `kMaxCacheableVersion`, `kCountNotCached`, and
+`Iterator::version_` — each `is private within this context`), and one proves the
+defining translation unit is not reachable through any public include path. A
+sibling fixture rather than two more sites in #1787's file, so `--list` output,
+blame and diagnostics stay attributable to one ticket each. **One correction to
+the row itself**: its acceptance criteria asks for
+`SortedSetVersionAccess<SortedSet<int>>`; the seam is parameterised by the
+**element** type, so the contract spelling is `SortedSetVersionAccess<int>`. The
+row's spelling is also rejected and was measured, but pinning it would have pinned
+a misspelling.
+
+**Two measurements are disclosed rather than filed under noise.**
+
+1. **#1800's checker exits 0 on a real seam exposure.** Both checkers were run
+   against identical mirror repositories (`build-probe/1803_gap_probe.py`). Give
+   the seam's **primary template** a body in `SortedSet.hpp` and
+   `check_version_seam_odr.py` says `OK`, silently reporting 1 seam and 17
+   definitions instead of 2 and 18 — because its discovery rule is "declared and
+   **not defined**", so a defined seam stops being a seam and rule 1 never fires;
+   its vacuity guard fires only at **zero** seams. Making `SortedSet<T>::state_`
+   public likewise exits 0. #1803's fixture fails on both, naming five sites and
+   one site respectively. Nothing is wrong in the repository today and #1800 is
+   **not reopened** — the two checks are complementary by design, which is the
+   measurement rather than the argument. Strengthening the vacuity guard is
+   inactive ticket **#1804** (`REMED-TOOLING-SEAM-DISCOVERY-VACUITY`, `blocked`).
+2. **One restriction cannot be expressed, and it is not SortedSet's.** A consumer
+   that reopens `namespace SharpRuntime::Testing` and writes its own explicit
+   specialisation *does* obtain the access the friend declaration grants, and
+   compiles clean under `-Werror` against the public headers alone — for
+   `SortedSetVersionAccess<int>` and, measured identically, for
+   `CollectionVersionAccess<List<int>>`. That is well-formed ISO C++; a
+   `friend class X;` is open to whoever writes `X`, and no seam design in C++
+   avoids it. It is unsupported and is recorded in §18.5 instead of being assumed
+   away. `SortedSet.hpp`'s own doc-comment — nothing a consumer *links against*
+   can observe or call the seam — remains literally true.
+
+**Load-bearing, proved.** `build-probe/1803_mutation_campaign.py` applies **ten**
+temporary header mutations, each shadowed in a mirror root whose modules are
+per-file symlinks, and requires the tracked checker to fail naming **exactly** the
+expected site set. **10/10 caught, 0 failures**, covering all fifteen sites; the
+unmutated mirror exits 0. No tracked file was modified at any point. Two earlier
+campaign runs failed because the mutation itself broke the header, and the checker
+correctly reported a **baseline** failure rather than a site result — rule 7 doing
+its job on the campaign is the best available evidence that "the build broke"
+cannot be mistaken for "the seam was exposed".
+
+Validation, incremental by CLAUDE.md rule 12 (no `modules/` file, no
+`CMakeLists.txt` and no component metadata changed, so no object in `build/` can
+be stale and a clean-first rebuild would have written a full tree of objects to
+re-derive an unchanged answer): `scripts/local_ci_check.sh build` **passed**, 0
+warnings, 0 errors, and it **executes the new fixture automatically** — its
+negative-fixture phase now reads *9 fixtures, 66 sites, every site rejected*, 75
+compiler invocations, peak 3 jobs. Full repository **13,923 tests across 37
+executables**, unchanged; `Collections.Core` **2,637**, unchanged; negative
+consumer fixtures **9 / 66, every site rejected** (was 8 / 51) plus **37/37**
+self-test, unchanged because the checker itself was not modified; version-seam ODR
+**2 seams / 18 specialisations** plus **12/12** self-test; module graph **41 /
+90**; component catalogue current; database consistency clean; the full
+ten-component selective matrix passed with its 3 forbidden fixtures rejected;
+Doxygen **1,941** of the 1,942 ceiling, unchanged; `git diff --check` clean.
+
+**Sanitizers are not applicable and none was built** — the deliverable is one
+compile-only fixture and documentation, with no production code, no new runtime
+code, no new allocation, no new thread and no new CTest case; ASan, UBSan, LSan
+and TSan cannot observe a compile-rejection contract, and #1784's and #1786's
+existing `SortedSet` sanitizer coverage stands unre-measured. **No compilation
+exceeded three jobs**, in any script, including inside the tracked checker, which
+refuses a higher request. Build directories used: `build/` (gate), `build-probe/`
+(this ticket's probes, mirrors and logs, all `1803_` prefixed), `build-tmp/`
+(repository-local `TMPDIR`); **no new build directory was created**. The stale
+`EXCLUDE_FROM_ALL` `build/SharpRuntimeTests` binary was neither executed, trusted,
+nor deleted.
+
+**CNA and mobile-eggbert were not inspected, searched, configured, built or
+modified**, and **#1773 remains `blocked`**. #1788, #1789, #1790, #1791 and
+#1792–#1802 all remain `done` and none was reopened. The one new inactive row is
+**#1804**.

@@ -733,6 +733,7 @@ that adds a tracked negative fixture.*
 |---|---|---|---|---|
 | 2026-07-29 | **#1801** | — (the convention and the checker itself) | — | **7 fixtures / 37 sites** |
 | 2026-07-29 | **#1791** | `collections_list_indexer_negative.cpp` (`Collections.Core`) | **14** | **8 fixtures / 51 sites** |
+| 2026-07-29 | **#1803** | `collections_sorted_set_version_negative.cpp` (`Collections.Core`) | **15** | **9 fixtures / 66 sites** |
 
 ### 17.1 #1791's fourteen sites
 
@@ -782,3 +783,384 @@ compile rejection.
 | Wall clock, `--jobs 3` | 12.5 s | **≈ 16 s** |
 | Peak concurrent compiler processes | 3, measured | **3, measured** |
 | Self-test | 37/37, 2.1 s | **37/37, 2.2 s** — unchanged, the checker itself did not change |
+
+---
+
+## 18. Ticket #1803 — the SortedSet version seam's consumer-side guard
+
+*Ticket #1803 (`REMED-TOOLING-SORTEDSET-SEAM-NEGATIVE-FIXTURE`), P3, size XS,
+category `tooling`, area *Developer experience*. Branch
+`feature/remediation-sortedset-seam-negative-fixture`, 2026-07-29. Opened
+INACTIVE and BLOCKED by #1801 on the same day; activated and closed here.*
+
+§16.4 item 4 above is this ticket's own charge sheet and is preserved unedited:
+
+> **`SortedSetVersionAccess` has no consumer-side fixture.** #1800 covers both
+> seams' *ownership*; only `CollectionVersionAccess` has a fixture proving it is
+> unreachable from a consumer.
+
+It now has one. **No production source, signature, symbol, layout, vtable,
+exception contract or collection semantic is touched** — the whole change is one
+new file under `test/consumer/`, this record, and planning text. No `SR-AUD-*`
+identifier: the audit numbering is frozen at 364.
+
+The ticket's row predicted "two guarded sites in an existing fixture". The
+inventory of §18.2 found **fifteen** distinct supported restrictions worth
+pinning and a clearer home for them, so a dedicated fixture carries all fifteen.
+That is a correction to the row's own estimate, recorded rather than hidden.
+
+### 18.1 What the seam is, and what the intended restriction is
+
+`SharpRuntime::Testing::SortedSetVersionAccess<T>` is declared — and never
+defined — by `modules/collections/include/System/Collections/Generic/SortedSet.hpp`
+(lines 33-34), and befriended by `SortedSet<T>` (line 291). It exists so
+ticket #1786's permanent regressions can position the shared 64-bit mutation
+counter at the 2^32 Count-cache horizon and the 2^64 wrap without performing
+that many real mutations, and so #1784's atomic Count-cache pair can be read
+directly. Its single definition is
+`modules/collections/tests/System/Collections/Generic/SortedSetVersionOverflowTests.cpp`
+lines 62-88 — a **test translation unit**, not a header, which is why it has no
+entry in `modules/collections/tests/support/CollectionVersionSeam.hpp` and why
+`scripts/check_version_seam_odr.py` counts it as one of its 18 specialisation
+definitions rather than as a seam header.
+
+**The intended restriction, stated exactly:**
+
+> An ordinary consumer — one that compiles against a component's declared public
+> include surface, with no compiler flag that disables access control, without
+> including anything under `modules/*/tests`, and without authoring a
+> specialisation of a namespace it does not own — can neither name a *complete*
+> `SortedSetVersionAccess<T>` nor reach, by any other route, the `SortedSet<T>`
+> state that seam exists to reach.
+
+Both halves matter. The first alone would be satisfied by an undefined seam
+sitting next to public state; the second alone would be satisfied by private
+state next to a defined seam. Sites 2-6 pin the first half, sites 7-15 the
+second, and site 1 pins that the defining translation unit is not on the
+include path.
+
+### 18.2 Complete exposure inventory, measured
+
+`build-probe/1803_threat_probe.py` compiles **29** candidate consumer
+expressions, one per translation unit, against the resolved `Collections.Core`
+consumer include surface (`modules/collections/include`, `modules/core/include`)
+with the same flags the tracked checker uses. Log:
+`build-probe/1803_threat_probe.log`, `g++ (Debian 14.2.0-19) 14.2.0`.
+
+| # | Attempt by an ordinary consumer | Verdict | GCC 14.2.0 says |
+|---|---|---|---|
+| 1 | `using Seam = …SortedSetVersionAccess<int>;` | **ACCEPTED** | — (naming an incomplete declared type is legal and harmless) |
+| 2 | `…SortedSetVersionAccess<int>* p = nullptr;` | **ACCEPTED** | — (same) |
+| 3 | `…SortedSetVersionAccess<int> a;` | rejected | `aggregate '…' has incomplete type and cannot be defined` |
+| 4 | `sizeof(…SortedSetVersionAccess<int>)` | rejected | `invalid application of 'sizeof' to incomplete type` |
+| 5 | `…::version(set)` | rejected | `incomplete type '…' used in nested name specifier` |
+| 6 | `…::positionVersion(set, 1)` | rejected | same |
+| 7 | `…::cachedTag(set)` | rejected | same |
+| 8 | `…::cachedCount(set)` | rejected | same |
+| 9 | `…::maxCacheableVersion()` | rejected | same |
+| 10 | `…::tagFor(0)` | rejected | same |
+| 11 | `typename …SortedSetVersionAccess<int>::Set*` | rejected | `invalid use of incomplete type 'struct …'` |
+| 12 | `…SortedSetVersionAccess<SortedSet<int>>::version(set)` | rejected | `incomplete type '…<System::…::SortedSet<int> >' used in nested name specifier` |
+| 13 | unqualified `version(set)` — ADL | rejected | `'version' was not declared in this scope` |
+| 14 | `using namespace SharpRuntime::Testing;` then `SortedSetVersionAccess<int>::version(set)` | rejected | `incomplete type … used in nested name specifier` |
+| 15 | `set.state_` | rejected | `'…SortedSet<int>::state_' is private within this context` |
+| 16 | `SortedSet<int>::State*` | rejected | `'struct …SortedSet<int>::State' is private within this context` |
+| 17 | `set.cachedCount_.load()` | rejected | `'std::atomic<int> …cachedCount_' is private within this context` |
+| 18 | `set.cachedCountVersion_.load()` | rejected | `'std::atomic<unsigned int> …cachedCountVersion_' is private within this context` |
+| 19 | `SortedSet<int>::kMaxCacheableVersion` | rejected | `'constexpr const SharpRuntime::ulongcs …' is private within this context` |
+| 20 | `SortedSet<int>::kCountNotCached` | rejected | `'constexpr const SharpRuntime::uintcs …' is private within this context` |
+| 21 | `SortedSet<int>::countCacheTag(0)` | rejected | `'static constexpr … countCacheTag(…)' is private within this context` |
+| 22 | `set.bumpVersion()` | rejected | `'void …bumpVersion() [with T = int]' is private within this context` |
+| 23 | `iterator.version_` | rejected | `'SharpRuntime::ulongcs …Iterator::version_' is private within this context` |
+| 24 | a consumer-authored explicit specialisation of the seam | **ACCEPTED** | — see §18.5 |
+| 25 | `#include "CollectionVersionSeam.hpp"` | rejected | `fatal error: … No such file or directory` |
+| 26 | `#include "support/CollectionVersionSeam.hpp"` | rejected | same |
+| 27 | `#include "System/Collections/Generic/SortedSetVersionSeam.hpp"` | rejected | same |
+| 28 | `#include "tests/support/CollectionVersionSeam.hpp"` | rejected | same |
+| 29 | *(control)* `#include "System/Collections/Generic/SortedSet.hpp"` | accepted | the declaration, and nothing more |
+
+Rows 1 and 2 are **intended** and are deliberately not fixture sites: naming an
+incomplete type, or declaring a pointer to it, obtains nothing and is exactly
+what a forward declaration is for. Row 24 is the one genuine limitation and is
+§18.5. Everything else is a restriction, and every restriction is now pinned.
+
+### 18.3 The seam family, side by side
+
+| | `CollectionVersionAccess<TOwner>` | `SortedSetVersionAccess<T>` |
+|---|---|---|
+| Declared in | `modules/collections/include/System/Collections/detail/MutationCounter.hpp` | `modules/collections/include/System/Collections/Generic/SortedSet.hpp` |
+| Namespace | `SharpRuntime::Testing` | `SharpRuntime::Testing` |
+| Defined in | `modules/collections/tests/support/CollectionVersionSeam.hpp` (one header, 17 specialisations) | `modules/collections/tests/System/Collections/Generic/SortedSetVersionOverflowTests.cpp` (one translation unit, 1 definition) |
+| Befriended by | `detail::BasicMutationCounter` + 15 collections | `SortedSet<T>` only |
+| Capabilities | `version`, `positionVersion`, `read`, `write` | `version`, `positionVersion`, `cachedTag`, `cachedCount`, `maxCacheableVersion`, `notCached`, `tagFor` |
+| Reachable through a public include path | no | no |
+| Installed / exported | **nothing in this repository is installed** — there is no `install()` or `export()` call anywhere; a component's consumer surface is exactly its `$<BUILD_INTERFACE:modules/<m>/include>` | same |
+| Available in a selective component build | no — `modules/*/tests` is never added to any target's include directories | same |
+| Test-only compile definitions / seam macros leaked to a consumer | none — `SHARP_RUNTIME_COLLECTION_VERSION_SEAM` is `#undef`ed by its own header | none — the seam has no macro |
+| #1800 ownership check | yes | yes |
+| Consumer-side negative fixture | `collections_mutation_version_negative.cpp`, 2 sites, since #1801 | **`collections_sorted_set_version_negative.cpp`, 15 sites, since #1803** |
+
+**Why only one of them had a fixture.** Not a decision — an accident of order.
+`collections_mutation_version_negative.cpp` was written by #1787, whose subject
+*was* the counter seam it had just introduced across fourteen collections.
+#1786 introduced `SortedSetVersionAccess` a ticket earlier, as one detail of a
+counter-widening ticket whose consumer fixture (`collections_sorted_set_view.cpp`,
+positive) was about live views. #1800 then pinned both seams' ownership and
+noted the asymmetry (§12 item 4, "now covered but was never broken"); #1801
+inventoried it as a gap and, under an explicit instruction not to widen its own
+claim set, opened this ticket rather than absorbing it.
+
+### 18.4 What #1800's checker does and does not catch — measured, not argued
+
+`build-probe/1803_gap_probe.py` runs **both** tracked checkers against the
+**same** four mirror repositories, so the division of responsibility is a
+measurement. Log: `build-probe/1803_gap_probe.log`.
+
+| Mirror | `check_version_seam_odr.py` (#1800) | `check_negative_consumer_fixtures.py` (#1803's fixture) |
+|---|---|---|
+| unmutated | **OK**, 2 seams, 18 definitions | **OK**, 15/15 rejected |
+| the seam's **primary template** given a definition in `SortedSet.hpp` | **OK, exit 0** — silently 1 seam, 17 definitions | **FAIL**, 5 sites named |
+| an explicit **specialisation** defined in `SortedSet.hpp` | **FAIL** — rule 1, names the file and the seam | **FAIL**, 5 sites named |
+| `SortedSet<T>::state_` made public | **OK, exit 0** | **FAIL**, 1 site named |
+
+Row two is the important one, and it is a **newly measured limitation of
+#1800's checker**, disclosed here rather than left implicit. That checker
+*discovers* seams as "a class template declared and **not defined** inside
+`namespace SharpRuntime::Testing` in a `modules/*/include` header". Give the
+primary template a body in that header and it stops being a seam by
+construction: rule 1 never fires, the run exits 0, and the only visible trace is
+the seam count dropping from 2 to 1 in a success line nobody diffs. Its vacuity
+guard fires only when **zero** seams are found, so one of two disappearing is
+not reported.
+
+Nothing is broken today and #1800 is **not reopened**: its rules concern
+*definition ownership in the repository's own text*, and it never claimed to
+detect a seam that leaves discovery. The hole is *covered* — by this ticket's
+fixture, which fails loudly on exactly that mutation, which is precisely the
+complementarity both tickets describe. Strengthening the vacuity guard is a
+separate, precise, one-rule change and is recorded as inactive ticket **#1804**
+rather than smuggled in here.
+
+Row four is the other half of the argument for this fixture existing: making
+private state public is entirely outside #1800's remit and is caught only by
+compilation.
+
+### 18.5 The one restriction that cannot be expressed, and why
+
+**A consumer that writes its own explicit specialisation of the seam obtains the
+access the friend declaration grants.** Measured, not suspected
+(`build-probe/1803_probe_consumer_authored_specialisation.cpp`):
+
+```cpp
+namespace SharpRuntime::Testing {
+template<> struct SortedSetVersionAccess<int> {
+    static SharpRuntime::ulongcs version(const SortedSet<int>& set) { return set.state_->version; }
+    static void positionVersion(SortedSet<int>& set, SharpRuntime::ulongcs v) { set.state_->version = v; }
+};
+}
+```
+
+compiles clean under `-Wall -Wextra -Wpedantic -Werror` against the public
+include surface alone. So does the identical trick against
+`CollectionVersionAccess<List<int>>`
+(`build-probe/1803_probe_collectionversionaccess_specialisation.cpp`), which is
+the point: **this is a property of friendship, not a SortedSet-specific hole.**
+
+It cannot be made a negative site, because it is not an error. It is
+well-formed ISO C++, and no C++ mechanism prevents a third party from defining a
+class that a header befriends by name — a `friend class X;` is open to whoever
+writes `X`. The alternatives were considered and are all worse: an
+anonymous-namespace seam is a *different* class the friend declaration does not
+befriend (`docs/CollectionVersionTestSeamDesign.md` §3 item 8, already rejected
+on those grounds); a friend *function* has the same property; and removing the
+friendship deletes #1786's entire near-boundary matrix.
+
+What the restriction therefore is, precisely: the seam is not *handed* to a
+consumer, and no ordinary consumer expression reaches it. A consumer that
+deliberately reopens a namespace it does not own, to specialise a template a
+public header documents as "test-only … never defined in production code", has
+written the C++ equivalent of reflecting into a private field. It is
+unsupported, it is outside every guarantee this repository makes, and it is now
+written down instead of being quietly assumed away. `SortedSet.hpp`'s own
+doc-comment — "nothing in this library, and nothing a consumer *links against*,
+can observe or call it" — remains literally true and is not weakened by this.
+
+### 18.6 The fixture
+
+`test/consumer/collections_sorted_set_version_negative.cpp`, component
+`Collections.Core`, **15 sites**, baseline clean.
+
+| # | Marker | What it proves is rejected | Matched fragment (GCC 14.2.0) |
+|---|---|---|---|
+| 1 | `seam-definition-not-on-include-path` | `#include "System/Collections/Generic/SortedSetVersionOverflowTests.cpp"` — the defining TU's `include/`-rooted shadow path | `No such file or directory` |
+| 2 | `seam-version-read-incomplete` | `SortedSetVersionAccess<int>::version(set)` | `incomplete type` |
+| 3 | `seam-version-position-incomplete` | `…::positionVersion(set, 1)` | `incomplete type` |
+| 4 | `seam-count-cache-read-incomplete` | `…::cachedTag(view)` | `incomplete type` |
+| 5 | `seam-object-incomplete` | defining an object of the seam type | `has incomplete type and cannot be defined` |
+| 6 | `seam-nested-type-incomplete` | naming the seam's `::Set` member type | `invalid use of incomplete type` |
+| 7 | `state-handle-private` | `set.state_` | `is private within this context` |
+| 8 | `state-type-private` | `SortedSet<int>::State` | `is private within this context` |
+| 9 | `bump-version-private` | `set.bumpVersion()` | `is private within this context` |
+| 10 | `cached-count-field-private` | `view.cachedCount_` | `is private within this context` |
+| 11 | `cached-count-tag-field-private` | `view.cachedCountVersion_` | `is private within this context` |
+| 12 | `count-cache-tag-function-private` | `SortedSet<int>::countCacheTag(0)` | `is private within this context` |
+| 13 | `max-cacheable-version-private` | `SortedSet<int>::kMaxCacheableVersion` | `is private within this context` |
+| 14 | `count-not-cached-private` | `SortedSet<int>::kCountNotCached` | `is private within this context` |
+| 15 | `iterator-version-snapshot-private` | `iterator.version_` — the enumerator's own snapshot | `is private within this context` |
+
+Fragment lists are ordered alternatives, as §6 prescribes: the first is the
+GCC 14 wording measured here, and each site carries a Clang-shaped fallback
+(`named in nested name specifier`, `is a private member of`, `file not found`).
+**Those fallbacks are reasoned, not measured** — the repository's verified
+baseline is Linux/GCC and no Clang run is claimed, exactly as §16.4 item 1
+already states for the earlier fixtures.
+
+Three sites carry an `#else` branch documenting the supported alternative in
+compilable form: site 2 holds an iterator and lets the fail-fast contract report
+modification, site 4 calls `getCountProperty()` (the public surface the cache
+exists to serve), and site 9 calls `Add`, the only thing that legitimately
+advances the counter. The other twelve have no public replacement, which is the
+claim, so they have no `#else`; every local is `(void)`-guarded at its
+declaration so the all-sites-off baseline is warning-free.
+
+**Placement.** A dedicated fixture, not two more sites in
+`collections_mutation_version_negative.cpp`. Both options were evaluated as the
+ticket's acceptance criteria offers both. The existing file is #1787's, its
+header comment is entirely about `CollectionVersionAccess` and `List<int>`, and
+its component-level claim is about the *counter* seam; appending fifteen
+SortedSet sites would have put two tickets' contracts and two seams' evidence in
+one file with one ownership line. A sibling file — the spelling the acceptance
+criteria names — keeps `--list` output, blame, and diagnostics attributable to
+one ticket each, at a cost of one extra baseline compile (0.3 s).
+
+**One correction to the ticket's own text.** Its acceptance criteria asks for
+sites over `SharpRuntime::Testing::SortedSetVersionAccess<SortedSet<int>>`. The
+seam is parameterised by the **element** type, not the set type: the correct
+spelling is `SortedSetVersionAccess<int>`, which is what
+`SortedSetVersionOverflowTests.cpp` uses (`using Access = …<int>;`) and what the
+fixture pins. The row's spelling is *also* rejected — row 12 of §18.2 measures
+it — but it would have pinned a misspelling rather than the contract, so it is
+not a site.
+
+### 18.7 Mutation campaign — the fixture is load-bearing
+
+`build-probe/1803_mutation_campaign.py`, log
+`build-probe/1803_mutation_campaign.log`. Each mutation shadows **one** path in
+a mirror root whose `cmake/`, `vendor/` and every module file are symlinks to
+the real tree, runs the tracked checker with `--root`, and requires it to fail
+naming **exactly** the expected site set — no more and no fewer. No tracked file
+is modified at any point.
+
+```
+CAUGHT  seam defined in the public header (all members)          5 sites, exactly the seam family
+CAUGHT  the defining TU copied under modules/collections/include 1 site  [seam-definition-not-on-include-path]
+CAUGHT  SortedSet<T>::state_ made public                         1 site  [state-handle-private]
+CAUGHT  SortedSet<T>::bumpVersion() made public                  1 site  [bump-version-private]
+CAUGHT  SortedSet<T>::kMaxCacheableVersion made public           1 site  [max-cacheable-version-private]
+CAUGHT  SortedSet<T>::Iterator::version_ made public             1 site  [iterator-version-snapshot-private]
+CAUGHT  the nested SortedSet<T>::State type made public          1 site  [state-type-private]
+CAUGHT  SortedSet<T>::countCacheTag() made public                1 site  [count-cache-tag-function-private]
+CAUGHT  SortedSet<T>::kCountNotCached made public                1 site  [count-not-cached-private]
+CAUGHT  both Count-cache fields made public                      2 sites [cached-count-field-private,
+                                                                          cached-count-tag-field-private]
+OK      unmutated mirror exit=0: 1 fixture, 15 sites, every site rejected
+
+10 mutation(s) attempted, 0 failure(s)
+```
+
+Ten mutations cover **all fifteen** sites; the exact-set requirement is what
+proves a still-failing sibling site cannot mask the one that started compiling,
+and that the mutation did not accidentally break something else.
+
+**Two campaign runs failed before this one, and the reason is worth keeping.**
+The first two mutations were written as naive line edits — inserting `private:`
+after the *first* physical line of a multi-line declaration, and defining the
+seam before `SortedSet` had been declared at all. Both produced a header that is
+not valid C++, so the mirror's **baseline** failed, and the checker correctly
+reported "the fixture does not compile with every site disabled, so no site
+result can be attributed to its own source" instead of reporting the site. Rule
+7 of §5 doing its job on the campaign itself is the strongest evidence available
+that a mutation which merely breaks the build cannot be mistaken for a mutation
+that exposed the seam.
+
+### 18.8 Production impact — none
+
+| Surface | Change |
+|---|---|
+| Production headers and sources | **none** — not one file under any `modules/*/include` or `modules/*/src` was touched |
+| Public signatures, vtables, object layout, mangled symbols | none |
+| `SortedSet<T>` layout, live-view behaviour, version-counter semantics | none |
+| Collection behaviour of any kind | none |
+| CMake metadata, component graph, include directories | none |
+| Consumer source or binary compatibility | none |
+| Consumer rebuild requirement | none |
+
+`git diff --stat` for this ticket touches `test/consumer/` (one new file),
+`docs/`, `audit/`, `CLAUDE.md`, `NEXT.md`, `plan.md` and `plan.sqlite3`. The
+`build/` tree needed no reconfigure for the fixture itself: `test/consumer/*.cpp`
+is referenced by explicit file name from `scripts/check_selective_components.sh`
+and is not globbed into any target, and the tracked checker compiles
+`-fsyntax-only` with include directories derived from CMake *metadata text*, so
+it needs no configured build tree at all.
+
+### 18.9 Validation
+
+| Check | Command | Result |
+|---|---|---|
+| The new fixture alone | `check_negative_consumer_fixtures.py --fixture collections_sorted_set_version_negative.cpp --verbose` | **15/15 rejected**, baseline clean, 16 invocations, peak 3, 4.2 s |
+| All negative fixtures | `scripts/check_negative_consumer_fixtures.py` | **9 fixtures, 66 sites, every site rejected**, 75 invocations, peak 3, 20.4 s |
+| Checker self-tests | `test/check_negative_consumer_fixtures_test.py` | **37/37**, 2.1 s — unchanged, the checker itself was not modified |
+| Mutation campaign | `build-probe/1803_mutation_campaign.py` | **10/10 caught, 0 failures** |
+| Checker-responsibility probe | `build-probe/1803_gap_probe.py` | §18.4 |
+| Threat-model probe | `build-probe/1803_threat_probe.py` | §18.2, 29 expressions |
+| Seam ODR | `scripts/check_version_seam_odr.py` | OK, **2 seams, 18 specialisation definitions** |
+| Seam checker self-tests | `test/check_version_seam_odr_test.py` | **12/12** |
+| Module boundaries | `scripts/validate_module_boundaries.py --root .` | **41 modules / 90 edges** |
+| Validator self-tests | `test/validate_module_boundaries_test.py` | 7/7 |
+| Component catalogue | `scripts/generate_component_catalog.py --check` | current |
+| Database consistency | `scripts/db_consistency_check.py --db plan.sqlite3` | no problems |
+
+The build, full test gate, selective matrix, Doxygen and whitespace results are
+in §18.11.
+
+### 18.10 Sanitizers
+
+**Not applicable, and none was built.** The deliverable is one compile-only
+fixture and documentation: no production code, no new runtime code, no new
+allocation, no new thread, and no new CTest case. ASan, UBSan, LSan and TSan
+cannot observe a compile-rejection contract, and #1784's and #1786's existing
+`SortedSet` sanitizer coverage is untouched and is not re-measured here.
+Building a sanitizer variant for this ticket would consume hundreds of megabytes
+to prove nothing.
+
+### 18.11 Cost, build accounting and results
+
+| Measure | after #1791 | after #1803 |
+|---|---|---|
+| Fixtures / sites | 8 / 51 | **9 / 66** |
+| Compiler invocations per run | 59 | **75** (9 baselines + 66 sites) |
+| Wall clock, `--jobs 3` | ≈ 16 s | **20.4 s** |
+| Peak concurrent compiler processes | 3, measured | **3, measured** |
+| Self-test | 37/37, 2.2 s | **37/37, 2.1 s** — unchanged |
+
+| Directory | Purpose | Max parallelism |
+|---|---|---|
+| `build/` | incremental reconfigure, build and full test gate via `scripts/local_ci_check.sh build` | **3** |
+| `build-probe/` | this ticket's threat probe, gap probe, mutation campaign, mirror roots and logs, all `1803_` prefixed | **3** inside the checker; 1 for the raw probe compiles |
+| `build-tmp/` | repository-local `TMPDIR` for every `mktemp`-based script | — |
+| `build-consumer/` | untouched | — |
+
+**No new build directory was created** — CLAUDE.md rule 10's name set is closed
+and this ticket separates its work by the `1803_` file-name prefix inside the
+shared `build-probe/`. **No compilation exceeded three jobs**, including inside
+the tracked checker, which refuses a higher request.
+
+**Why the build was validated incrementally rather than from scratch.**
+CLAUDE.md rule 12 says not to clean, delete or reconfigure a build tree unless it
+is genuinely broken or the configuration genuinely changed. Neither happened: no
+file under `modules/`, no `CMakeLists.txt`, and no component metadata changed, so
+no object file in `build/` can be stale with respect to this ticket. A
+clean-first rebuild would have written a full tree's worth of objects to the SSD
+to re-derive an unchanged answer, which is the exact cost the rule exists to
+avoid. `scripts/local_ci_check.sh build` was run in full, and it reconfigures and
+rebuilds incrementally before running the whole gate.

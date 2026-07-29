@@ -706,3 +706,69 @@ started from, and the canonical seam body is the richer of the two that existed.
 Revert the two commits. The five suites regain their local bodies and the
 repository regains the IFNDR; nothing else moves, because nothing else was
 touched.
+
+---
+
+## 14. Addendum — ticket #1803, the consumer-side half of §12 item 4
+
+*Appended 2026-07-29 by ticket #1803 (`REMED-TOOLING-SORTEDSET-SEAM-NEGATIVE-FIXTURE`).
+Everything above this line is #1800's own record and is preserved unedited.
+#1800 stays `done`; it was not reopened, and neither
+`scripts/check_version_seam_odr.py` nor `modules/collections/tests/support/CollectionVersionSeam.hpp`
+was modified.*
+
+§12 item 4 says `SortedSetVersionAccess` "is now covered but was never broken",
+and §8's checker has counted its single definition site since #1800 closed. What
+#1800 did **not** provide for it — and deliberately did not claim to — is the
+consumer-side proof that `test/consumer/collections_mutation_version_negative.cpp`
+gives `CollectionVersionAccess`. #1801 recorded that asymmetry
+(`docs/NegativeConsumerFixtureValidation.md` §16.4 item 4) and opened #1803 for
+it. #1803 added `test/consumer/collections_sorted_set_version_negative.cpp`,
+**15 sites**, all rejected; the full record is
+`docs/NegativeConsumerFixtureValidation.md` §18.
+
+Two measurements from that ticket belong here, because they concern this
+document's checker rather than its fixture.
+
+**1. §8's discovery rule has a blind spot, and #1803's fixture is what covers
+it.** The checker discovers a seam as "a class template declared and **not
+defined** inside `namespace SharpRuntime::Testing` in a `modules/*/include`
+header". Give the *primary template* a body in `SortedSet.hpp` and it stops
+matching that description: rule 1 — "no seam specialisation may be defined in
+`modules/*/include`" — never fires, because there is no longer a seam to apply it
+to. Measured on identical mirror repositories
+(`build-probe/1803_gap_probe.py`, log `build-probe/1803_gap_probe.log`):
+
+| Mirror | `check_version_seam_odr.py` | #1803's consumer fixture |
+|---|---|---|
+| unmutated | OK, 2 seams, 18 definitions | OK, 15/15 rejected |
+| **primary template defined in `SortedSet.hpp`** | **OK, exit 0** — silently 1 seam, 17 definitions | **FAIL**, 5 sites named |
+| explicit *specialisation* defined in `SortedSet.hpp` | FAIL, rule 1 | FAIL, 5 sites named |
+| `SortedSet<T>::state_` made public | OK, exit 0 | FAIL, 1 site named |
+
+§8.3's vacuity case — "a repository with no declared seam → reported" — fires
+only when **zero** seams are found, so one of two disappearing passes silently.
+Nothing is wrong in the repository today, and the two checks together are
+complete: this is the strongest available statement of why §8.5's
+"they solve different failure classes" is a design property and not a
+convenience. Strengthening the guard so that a seam *leaving* discovery is
+reported is a separate one-rule change, opened as inactive ticket **#1804** and
+deliberately not made here.
+
+**2. §3 item 8 has a consumer-facing corollary, now measured.** That item
+rejects an anonymous-namespace seam because "a class in a per-TU anonymous
+namespace is a *different* class that those declarations do not befriend". The
+same reasoning read the other way says that **any** class spelled
+`SharpRuntime::Testing::CollectionVersionAccess<X>` *is* befriended, including
+one a consumer writes. #1803 compiled it:
+`build-probe/1803_probe_collectionversionaccess_specialisation.cpp` defines
+`CollectionVersionAccess<List<int>>` in a consumer translation unit, reads
+`list.version_`, and compiles clean under `-Wall -Wextra -Wpedantic -Werror`
+against the public include surface alone. The identical trick works on
+`SortedSetVersionAccess<int>`. This is a property of C++ friendship, not of
+either seam, it is well-formed and therefore cannot be expressed as a
+compile-negative site, and it is unsupported: it is written down in
+`docs/NegativeConsumerFixtureValidation.md` §18.5 rather than assumed away. §6.3's
+capability table describes what the seam *hands* a consumer — nothing — and that
+statement stands; it was never a claim about what a consumer can construct for
+itself.
