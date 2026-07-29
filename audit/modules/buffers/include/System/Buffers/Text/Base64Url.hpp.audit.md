@@ -155,3 +155,67 @@ such short-circuit, so an empty buffer with a positive `dataLength` returns
 (`build-probe/1815_empty_buffer_probe.log`). It carries **no `SR-AUD-*`
 identifier** and is inactive ticket **#1821**, framed as a decision rather than a
 foregone fix.
+
+## Post-audit remediation for SR-AUD-079 (ticket #1817, 2026-07-29): REMEDIATED
+
+The audit evidence above is retained unchanged. **SR-AUD-082 in this file, ticket #1820, stay `confirmed`.**
+
+Ticket #1817 (`REMED-BUFFERS-BASE64-CANONICAL-FINAL-BITS`, P2, size S) requires the
+unused low bits of the final quantum to be zero, in **both** headers and in **both**
+`decodeCore` and `validateCore`:
+
+- a quantum carrying **one** byte (`XX==` padded, `XX` unpadded) uses only the top
+  two bits of the second sextet, so its **low four bits** must be zero;
+- a quantum carrying **two** bytes (`XXX=` padded, `XXX` unpadded) uses only the
+  top four bits of the third sextet, so its **low two bits** must be zero.
+
+.NET enforces exactly this: `Base64Helper/Base64DecoderHelper.cs` tests those bits
+and `Base64ValidatorHelper.cs` applies the equivalent check before declaring a
+sequence valid, as does `Base64UrlValidator.cs` for the unpadded form.
+
+Measured before and after (`build-probe/1817_defects.cpp`, logs
+`1817_prefix_defects.log` — built against the pre-fix headers — and
+`1817_postfix_defects.log`), sixteen cases over both types, each recording the
+decode status, `bytesWritten`, `IsValid`, and whether decoder and validator agree:
+
+| Input | Type | Pre-fix | Post-fix |
+|---|---|---|---|
+| `AB==` | Base64 | `Done`, 1 byte, `IsValid` **true** | `InvalidData`, 0 bytes, `IsValid` false |
+| `AAB=` | Base64 | `Done`, 2 bytes, `IsValid` **true** | `InvalidData`, 0 bytes, `IsValid` false |
+| `AB` | Base64Url | `Done`, 1 byte, `IsValid` **true** | `InvalidData`, 0 bytes, `IsValid` false |
+| `AAB` | Base64Url | `Done`, 2 bytes, `IsValid` **true** | `InvalidData`, 0 bytes, `IsValid` false |
+| the 12 canonical spellings, both types | — | accepted | **unchanged** |
+
+**The decoder and the validator agreed both before and after, and that is the
+point.** A validator more permissive than its own decoder would be the worse
+outcome — it tells a caller an input is safe to decode when it is not — so
+`validateCore` had to gain the same rule in the same change. Base64Url's
+`validateCore` only *counted* symbols and never kept their values; it now retains
+the trailing sextets so it can apply the rule at all.
+
+**Placement.** The canonical check runs **before** the destination-size check.
+Whether an input is canonical is a property of the input alone and must not depend
+on how much room the caller happened to provide; canonical input is unaffected
+either way, so no existing `DestinationTooSmall` outcome changes.
+
+**This narrows the accepted input set**, in the direction of .NET parity: input
+that used to decode successfully is now `InvalidData`. A consumer that produced
+noncanonical Base64 elsewhere and relied on this decoder accepting it will now see
+a failure — which is the intent, since the previous behaviour silently discarded
+bits the encoder never sets. Every one of the 104 pre-existing `Base64*` tests
+still passes unmodified, so nothing in this repository depended on the old
+acceptance.
+
+Closure evidence: **12 new permanent regressions**, six per header — the
+noncanonical one- and two-byte quanta rejected by the decoder, `IsValid` and its
+`decodedLength` overload agreeing with the decoder, the `char` overloads inheriting
+the rule through the shared core, six canonical spellings still decoding to the
+same bytes, and a 0..24 round trip proving that everything this repository's own
+encoder produces is still accepted. `SharpRuntimeTests_Buffers` is **485/485** (was
+473), and the same 485 under AddressSanitizer + UndefinedBehaviorSanitizer +
+LeakSanitizer with **zero reports** (`build-asan/1817_buffers_asan.log`).
+Repository gate: 0 warnings, 0 errors, **14,014 tests across 37 executables** (was
+14,002).
+
+Source and ABI consequences: none. No signature, layout or exported symbol changed;
+only the accepted input set did.

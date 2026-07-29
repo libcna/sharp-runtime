@@ -42,7 +42,7 @@ differs from .NET). Correctness goes first.
 | Finding | Family | Sites | What is wrong today | .NET reference |
 |---|---|---|---|---|
 | **SR-AUD-078** | **CCF-013** | `Base64::EncodeToUtf8InPlace`, `Base64Url::TryEncodeToUtf8InPlace` | Full 3-byte packs are encoded before the trailing remainder is read, so the first full pack's fourth output byte overwrites it. Returns success. | `Base64Helper/Base64EncoderHelper.cs`, `EncodeToUtf8InPlace<TBase64Encoder>` — encodes the leftover pack **before** the backwards loop |
-| SR-AUD-079 | — | both headers' `decodeCore` and `validateCore` | The unused low 2 bits (one `=`) / low 4 bits (two `=`) of the final quantum are never required to be zero, so `AB==`, `AAB=`, `AB`, `AAB` decode and validate | `Base64Helper/Base64DecoderHelper.cs`, `Base64ValidatorHelper.cs` |
+| SR-AUD-079 *(remediated, #1817)* | — | both headers' `decodeCore` and `validateCore` | The unused low 2 bits (one `=`) / low 4 bits (two `=`) of the final quantum are never required to be zero, so `AB==`, `AAB=`, `AB`, `AAB` decode and validate | `Base64Helper/Base64DecoderHelper.cs`, `Base64ValidatorHelper.cs` |
 | SR-AUD-080 | — | `Base64::decodeCore` | A padded quantum decodes to `Done` even when `isFinalBlock == false` | `Base64DecoderHelper.cs`, `skipLastChunk = isFinalBlock ? 4 : 0` |
 | SR-AUD-081 | — | `Base64::decodeCore` | After a padded quantum, trailing whitespace is added to `bytesConsumed`; .NET leaves it for the enclosing parser | current .NET Base64 decoder test base |
 | SR-AUD-082 | — | `Base64Url::decodeCore` and its table | `=` and `%` map to `-1`, so valid optional final padding is rejected | `Base64UrlDecoderByte.IsValidPadding` |
@@ -97,7 +97,7 @@ that concrete.
 |---|---|---|---|---|
 | **#1815** | this plan | — | design-only | **done** |
 | **#1816** | **SR-AUD-078 / CCF-013** — in-place write order, **both** headers | #1815 | compatible: fixes wrong output, no signature/ABI change | **done** |
-| **#1817** | SR-AUD-079 — canonical final-bit validation, both headers, decode **and** validate | #1815 | **narrowing**: input accepted today becomes `InvalidData` | `todo` |
+| **#1817** | SR-AUD-079 — canonical final-bit validation, both headers, decode **and** validate | #1815 | **narrowing**: input accepted today becomes `InvalidData` | **done** |
 | **#1818** | SR-AUD-080 — padding is invalid while `isFinalBlock == false` | #1815, and should follow #1817 (same `decodeCore` final-quantum branch) | **narrowing** | `todo` |
 | **#1819** | SR-AUD-081 — trailing whitespace after a padded quantum is not consumed | #1815, and should follow #1818 (same cursor code) | changes `bytesConsumed` only | `todo` |
 | **#1820** | SR-AUD-082 — accept optional final `=`/`%` in Base64Url decode/validate | #1815; independent of #1817–#1819 | **widening**: only adds accepted input | `todo` |
@@ -107,6 +107,13 @@ final-quantum branch of one `decodeCore`. Taken in parallel they would conflict
 line-for-line and each would have to re-derive the same padding state machine.
 Taken in this order, each starts from a `decodeCore` whose final-quantum handling
 is already one step closer to `Base64DecoderHelper.cs`.
+
+**#1817 landed on 2026-07-29** and is recorded in both Base64 audit reports. Two
+things it settled that #1818 and #1819 inherit: the validator must change in the
+**same** ticket as the decoder (a validator more permissive than its own decoder
+tells a caller an input is safe to decode when it is not), and Base64Url's
+`validateCore` now retains the trailing sextet values rather than only counting
+symbols, which is the machinery a later ticket needs too.
 
 **#1820 is deliberately unordered against them.** It touches the Base64Url
 decode *table* and the early `-1` rejection, not the final-quantum branch, and it

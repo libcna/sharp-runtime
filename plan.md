@@ -36,9 +36,11 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 14,002 passing across 36 component binaries plus one integration
-  binary, verified by ticket #1816 (SR-AUD-078 / CCF-013, the in-place Base64
-  encoders' write order) through the full repository gate, raised from the
+- Tests: 14,014 passing across 36 component binaries plus one integration
+  binary, verified by ticket #1817 (SR-AUD-079, the canonical final-quantum
+  rule) through the full repository gate, raised from the 14,002 verified by
+  ticket #1816 (SR-AUD-078 / CCF-013, the in-place Base64
+  encoders' write order), itself raised from the
   13,994 verified by ticket #1814 (SR-AUD-236,
   `HttpContentJsonExtensions`'s null content), itself raised from the 13,987
   verified by ticket #1812 (SR-AUD-242, `ZipArchive`'s null stream), itself
@@ -3314,3 +3316,73 @@ five bytes into a zero-byte buffer is arguably the worse contract.
 Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
 `1815_`/`1816_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new
 build directory was created** and **no compilation exceeded three jobs**.
+
+### Completed Base64 canonical final-quantum rule: ticket #1817
+
+Ticket #1817 (`REMED-BUFFERS-BASE64-CANONICAL-FINAL-BITS`, P2, size S,
+`remediation`, area *Buffers*) is **done** and **SR-AUD-079 is now `remediated`**.
+It is the second ticket of the Base64 family plan
+([`docs/Base64FamilyPlan.md`](docs/Base64FamilyPlan.md), ticket #1815) and the
+first of its three sequenced `decodeCore` tickets. **No new `SR-AUD-*`
+identifier**; the numbering stays frozen at 364, and the index now records
+**19 remediated** and **345 confirmed** of 364.
+
+Neither header required the unused low bits of the final quantum to be zero:
+
+- a quantum carrying **one** byte (`XX==` padded, `XX` unpadded) uses only the top
+  two bits of the second sextet, so its **low four bits** must be zero;
+- a quantum carrying **two** bytes (`XXX=` padded, `XXX` unpadded) uses only the
+  top four bits of the third sextet, so its **low two bits** must be zero.
+
+Measured before and after (`build-probe/1817_defects.cpp`, with the pre-fix log
+built against stashed headers so the two runs use the same source):
+
+| Input | Type | Pre-fix | Post-fix |
+|---|---|---|---|
+| `AB==` | Base64 | `Done`, 1 byte, `IsValid` **true** | `InvalidData`, 0 bytes, `IsValid` false |
+| `AAB=` | Base64 | `Done`, 2 bytes, `IsValid` **true** | `InvalidData`, 0 bytes, `IsValid` false |
+| `AB` | Base64Url | `Done`, 1 byte, `IsValid` **true** | `InvalidData`, 0 bytes, `IsValid` false |
+| `AAB` | Base64Url | `Done`, 2 bytes, `IsValid` **true** | `InvalidData`, 0 bytes, `IsValid` false |
+| 12 canonical spellings, both types | — | accepted | **unchanged** |
+
+**The validator had to change in the same ticket, not a later one.** Decoder and
+validator agreed before and after; a validator more permissive than its own decoder
+is the worse outcome, because it tells a caller an input is safe to decode when it
+is not. Base64Url's `validateCore` only *counted* symbols and never kept their
+values, so it now retains the trailing sextets in order to apply the rule at all.
+
+**The canonical check runs before the destination-size check**, deliberately:
+canonicity is a property of the input alone and must not depend on how much room
+the caller provided. Canonical input is unaffected either way, so no existing
+`DestinationTooSmall` outcome changes.
+
+**This narrows the accepted input set**, in the direction of .NET parity. Input
+that used to decode successfully is now `InvalidData`. All 104 pre-existing
+`Base64*` tests still pass unmodified, so nothing in this repository relied on the
+old acceptance.
+
+**Tests: +12 permanent regressions**, six per header — the noncanonical one- and
+two-byte quanta rejected by the decoder, `IsValid` and its `decodedLength` overload
+agreeing with the decoder, the `char` overloads inheriting the rule through the
+shared core, six canonical spellings still decoding to the same bytes, and a 0..24
+round trip proving everything this repository's own encoder produces is still
+accepted.
+
+**Validation.** `SharpRuntimeTests_Buffers` **485/485** (was 473), and the same 485
+under **ASan + UBSan + LSan with zero reports**
+(`build-asan/1817_buffers_asan.log`). Repository gate: **0 warnings, 0 errors**,
+**14,014 tests across 37 executables** (was 14,002). Module graph **41 / 91**;
+catalogue current; database consistent; the ten-component selective matrix passed;
+Doxygen **1,941** of the 1,942 ceiling, unchanged; `git diff --check` clean.
+
+**Source and ABI consequences: none.** No signature, layout or exported symbol
+changed; only the accepted input set did.
+
+**Still open in this family**, in the plan's order: **#1818** (SR-AUD-080, padding
+accepted while `isFinalBlock` is false), **#1819** (SR-AUD-081, trailing whitespace
+wrongly consumed), **#1820** (SR-AUD-082, Base64Url rejects optional final
+padding), and **#1821** (the empty-buffer status divergence, no `SR-AUD-*`).
+
+Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
+`1817_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new build
+directory was created** and **no compilation exceeded three jobs**.
