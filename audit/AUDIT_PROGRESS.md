@@ -4416,3 +4416,98 @@ The probe binaries were deleted once their logs were transcribed.
 modified**, and **#1773 remains `blocked`**. #1804 remains `blocked`; #1808 and
 #1809, opened by #1806, remain `todo` and unbegun. No previously `done` ticket and
 no finding was reopened.
+
+### Completed interpolated-handler pointer validation: ticket #1810
+
+Ticket #1810 (`REMED-CORE-INTERPOLATED-HANDLER-NULL-DEST`, P1, size S,
+`remediation`, area *Core*) is **done** and **SR-AUD-132 is now `remediated`** —
+the fourth of NEXT.md's eight immediate public-input crash tickets. **No new
+`SR-AUD-*` identifier**; the numbering stays frozen at 364, and the index now
+records **14 remediated** and **350 confirmed** of 364.
+
+**This one is a write.** `TryWriteInterpolatedStringHandler(nullptr, 1)` passed
+the capacity check in `appendRaw` — `1 >= 1` — and reached
+`std::memcpy(dest_ + pos_, ...)`, an AddressSanitizer-confirmed **write to the
+zero page**, with UBSan reporting *null pointer passed as argument 1, which is
+declared to never be null*. That is the most severe shape among the remaining
+public-input findings, which is why it was taken ahead of them. Measured before
+any production change, one process per case
+(`build-probe/1810_prefix_defects.cpp`, logs `1810_prefix_defects.log` and
+`1810_postfix_defects.log`):
+
+| Input | Pre-fix | Post-fix |
+|---|---|---|
+| `handler(nullptr, 1).AppendLiteral("x")`, both constructors | **ASan SEGV on 0x0** in `memcpy`, exit 1 | `ArgumentNullException` *(Parameter 'destination')* |
+| `AppendLiteral((const char*)nullptr)` | **ASan SEGV** in `strlen`, exit 1 | `ArgumentNullException` *(Parameter 'value')* |
+| `handler(nullptr, 0).AppendLiteral("x")` | refused, `success=0` | **byte-identical** |
+| fill the buffer then append one more | refused, `written=8 success=0` | **byte-identical** |
+| ordinary use | `written=4 success=1 string='x=42'` | **byte-identical** |
+
+**What .NET gets for free, this port must check.** The .NET counterpart takes a
+`Span<char>`, which cannot represent a nonempty null destination at all, so there
+is no .NET validation to copy — the check restores by validation what the .NET
+type gets from its parameter type. A null paired with a capacity of **zero** stays
+valid, per the rule tickets #1774 and #1805 settled for the same pointer/length
+shape; the probe shows it already behaved correctly.
+
+**The null-literal policy is decided here, not inherited.** The finding's closing
+sentence asked for exactly that. In .NET the handler is compiler-generated and
+`AppendLiteral` receives only literal text, so no .NET behaviour applies.
+`AppendLiteral(const char*)` throws rather than treating null as empty: the
+`std::string` overload cannot be null — `""` is already how an empty literal is
+spelled — and the `bool` result already means "did it fit", so succeeding silently
+would give that result a second meaning and hide the caller's bug. One regression
+asserts `""` and `nullptr` behave differently, so a later change cannot quietly
+collapse them.
+
+**Two further defects in the same members are closed by the same change**, both
+taken from the audit report's own "Other missing assertions" list rather than
+found anew:
+
+- the capacity test was `pos_ + len > destLen_`, a `size_t` sum that can **wrap**
+  and let an oversized append pass the very check meant to stop it. It is now
+  `len > destLen_ - pos_`, which cannot wrap because `pos_ <= destLen_` is an
+  invariant of the class;
+- `std::memcpy` is undefined for a null pointer even at zero length, and so is
+  `std::string(nullptr, 0)` in `getString()`. Both are reachable — `dest_` is null
+  for a zero-capacity handler and `data` is null for an empty `std::string` — so
+  `appendRaw` returns early at `len == 0` and `getString()` guards the null.
+
+**Tests: +12 permanent regressions** in
+`TryWriteInterpolatedStringHandlerTests.cpp`, including one that pins the
+four-argument constructor's `shouldAppend` out-parameter as deliberately
+**unwritten** on rejection: an exception reports a destination that does not
+exist, where `shouldAppend = false` reports one that exists and is too small, and
+conflating them would make the failure indistinguishable from an ordinary
+short-buffer result.
+
+**Validation.** `SharpRuntimeTests_Core_Base` **4,994/4,994** (was 4,982), and the
+same 4,994 under **ASan + UBSan + LSan with zero reports**
+(`build-asan/1810_core_base_asan.log`). Repository gate: **0 warnings, 0 errors**,
+**13,970 tests across 37 executables** (was 13,958). Module graph **41 / 90**;
+catalogue current; database consistent; the ten-component selective matrix passed;
+Doxygen **1,941** of the 1,942 ceiling, unchanged; `git diff --check` clean.
+
+**Source and ABI consequences: none.** Header-only, one new private static helper;
+no public signature, object layout, vtable or exported symbol changed. Neither
+rejected input had any in-repository caller.
+
+**Explicitly not done here.** **SR-AUD-133** — `AppendFormatted` discards its
+format string and substitutes hardcoded C++ spellings, so `true` renders as `1`,
+`255` with `"X2"` as `255`, and `3.14` as `3.140000` — shares this file and stays
+`confirmed`. It asks for format/provider-aware formatting *or* an explicit
+renaming of the surface to a documented primitive formatter, which is a design
+decision about what this type is, not a safety repair. The report's observation
+that the class is an ordinary C++ object rather than a compiler-generated
+`ref struct`, with nothing preventing it from being copied or escaping, belongs
+with it.
+
+Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
+`1810_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new build
+directory was created** and **no compilation exceeded three jobs**. The probe
+binaries were deleted once their logs were transcribed.
+
+**CNA and mobile-eggbert were not inspected, searched, configured, built or
+modified**, and **#1773 remains `blocked`**. #1804 remains `blocked`; #1808 and
+#1809 remain `todo` and unbegun. No previously `done` ticket and no finding was
+reopened.
