@@ -7,9 +7,10 @@
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production
-dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,091 tests across 37 executables (the 13,127 figure this
+dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,098 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 14,091
+section below states the count it measured, and the current floor is the 14,098
+verified by #1826, raised from the 14,091
 verified by #1813, raised from the 14,077
 verified by #1825, raised from the 14,070
 verified by #1808, raised from the 14,060
@@ -7164,3 +7165,57 @@ and may deserve one design covering the `Stream.hpp` default itself.
 **857/857** (was 843), clean under ASan + UBSan + LSan, 0 reports. Repository gate **14,091
 tests across 37 executables**, 0 warnings, 0 errors, `local_ci_check.sh` passed. No public
 signature, virtual, vtable, object layout or mangled symbol changed.
+
+## Completed MemoryStream disposed-CanRead fix: ticket #1826 (2026-07-29)
+
+`REMED-IO-MEMORYSTREAM-CANREAD-DISPOSED`, P3, size XS. No `SR-AUD-*` identifier;
+numbering stays frozen at **364**.
+
+`MemoryStream` did not override `getCanReadProperty()` at all, so it inherited
+`Stream`'s base default of `true` and kept claiming to be readable after `Close()`.
+It now returns `isOpen_`, matching `MemoryStream.cs:99`.
+
+**`getCanWriteProperty()` is deliberately left returning `writable_`**, matching
+`MemoryStream.cs:103`. The resulting asymmetry — a closed writable `MemoryStream` still
+reports `CanWrite == true` while `CanRead` and `CanSeek` report false — is **.NET's own**,
+not this port's, and is now documented in the header *and* pinned by a test citing both
+.NET line numbers, so it cannot later be "tidied up" into a divergence.
+
+**The interaction the ticket predicted, confirmed.** Before: a `StreamReader` over a
+**closed** `MemoryStream` was accepted at construction and threw `ObjectDisposedException`
+only on the first read (`build-probe/1826_prefix_defects.log` case 5). After: it throws
+`ArgumentException("Stream was not readable.")` from the constructor — where .NET reports
+it. Ticket #1808 added that guard precisely to reject an unreadable stream up front, and
+this property had been lying to it.
+
+**Inventory result** (the ticket's notes demanded one). Of the nine `Stream` subclasses in
+this repository, `MemoryStream` was the **only** one that overrode `CanWrite` and `CanSeek`
+but not `CanRead`, and so the only one silently inheriting the base default.
+`BufferedStream` folds `closed_` in *and* delegates to its inner stream;
+`UnmanagedMemoryStream` folds `isOpen_` in; `NetworkStream` folds `fd_ >= 0` in;
+`FileStream` folds neither, which its `is_open()` checks make unobservable through
+`Read`/`Write` after #1825.
+
+**But the inventory found a real separate defect → new inactive ticket #1828.** The three
+zlib wrappers (`GZipStream`, `DeflateStream`, `ZLibStream`) answer `CanRead`/`CanWrite`
+from `mode_` alone, where `DeflateStream.cs:171-195` folds in **both** the disposed state
+(`_stream == null`) and the **inner stream's** capability. Cases 7–9 show all three
+reporting stale capabilities after `Close()`.
+
+Case 10 is worth stating precisely: **#1826 did not cause that defect, it made it
+measurable.** The prefix log reads `CanRead=1 inner-CanRead=1` — accidentally consistent,
+because the closed inner `MemoryStream` was lying too. The postfix log reads
+`CanRead=1 inner-CanRead=0`: an outright contradiction between a wrapper and the stream it
+wraps. #1828 is opened `blocked` because its two halves differ in compatibility — folding
+in disposal is a pure narrowing, but delegating to the inner stream runs into
+`Stream.hpp:62`'s default-`false` `getCanWriteProperty()` again.
+
+**Three tickets now share that one root cause** — #1824 (`StreamWriter`), #1827
+(`ZipArchive` capabilities) and #1828 (zlib wrappers) — and each notes that one design
+covering `Stream.hpp:62` itself would be better than four per-type guards.
+
+7 permanent regressions. `MemoryStreamTests` **64/64**, `SharpRuntimeTests_IO` **586/586**
+(was 579), clean under ASan + UBSan + LSan, 0 reports. Repository gate **14,098 tests
+across 37 executables**, 0 warnings, 0 errors, `local_ci_check.sh` passed. No member added,
+so object layout is unchanged; `getCanReadProperty()` was already virtual in `Stream`, so
+the vtable gains no slot.

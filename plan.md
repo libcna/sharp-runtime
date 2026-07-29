@@ -3968,3 +3968,40 @@ Closure evidence: 14 permanent regressions, `ZipArchiveTests` **42/42**,
 `build-asan/1813_integration_asan.log`). Repository gate: 0 warnings, 0 errors, **14,091
 tests across 37 executables**; `scripts/local_ci_check.sh build` passed. No public
 signature, virtual, vtable, object layout or mangled symbol changed.
+
+### Completed MemoryStream disposed-CanRead fix: ticket #1826
+
+**`P3: MemoryStream::getCanReadProperty() ignores the disposed state`**
+(`REMED-IO-MEMORYSTREAM-CANREAD-DISPOSED`, P3, size XS) is complete. **No `SR-AUD-*`
+identifier**; numbering stays frozen at 364.
+
+`MemoryStream` did not override `getCanReadProperty()` at all, inheriting `Stream`'s base
+default of `true`, so it kept claiming to be readable after `Close()`. It now returns
+`isOpen_` (`MemoryStream.cs:99`). `getCanWriteProperty()` is deliberately left returning
+`writable_` (`MemoryStream.cs:103`); the resulting asymmetry is **.NET's own** and is
+documented in the header and pinned by a test citing both line numbers, so it cannot later
+be normalised into a divergence.
+
+**The predicted interaction, confirmed.** A `StreamReader` over a closed `MemoryStream` was
+accepted at construction and failed only on first read (`prefix` case 5); it now throws
+`ArgumentException("Stream was not readable.")` from the constructor, where .NET reports it.
+Ticket #1808's guard existed for exactly this and the property had been defeating it.
+
+**Inventory result.** Of nine `Stream` subclasses, `MemoryStream` was the only one
+overriding `CanWrite`/`CanSeek` but not `CanRead`. `BufferedStream` folds `closed_` in and
+delegates to its inner stream; `UnmanagedMemoryStream` folds `isOpen_` in; `NetworkStream`
+folds `fd_ >= 0` in; `FileStream` folds neither, unobservably after #1825.
+
+**Separate defect found → inactive ticket #1828.** The three zlib wrappers answer
+`CanRead`/`CanWrite` from `mode_` alone where `DeflateStream.cs:171-195` folds in both the
+disposed state and the inner stream's capability (cases 7–9). Case 10 records that #1826
+made this **visible** rather than causing it: `CanRead=1 inner-CanRead=1` before (accidentally
+consistent), `CanRead=1 inner-CanRead=0` after (a contradiction). #1828 is blocked because
+its delegation half meets `Stream.hpp:62`'s default-`false` `getCanWriteProperty()` — the
+root cause it now shares with #1824 and #1827.
+
+Closure evidence: 7 permanent regressions, `MemoryStreamTests` 64/64,
+`SharpRuntimeTests_IO` **586/586** (was 579), clean under ASan + UBSan + LSan with 0 reports.
+Repository gate: 0 warnings, 0 errors, **14,098 tests across 37 executables**;
+`scripts/local_ci_check.sh build` passed. No member added, layout unchanged, no vtable slot
+added.

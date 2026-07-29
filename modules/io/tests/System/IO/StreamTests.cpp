@@ -12,6 +12,7 @@
 #include "System/IO/SeekOrigin.hpp"
 #include "System/IO/StringReader.hpp"
 #include "System/IO/StringWriter.hpp"
+#include "System/IO/StreamReader.hpp"
 #include "System/IO/UnmanagedMemoryStream.hpp"
 #include "System/IO/UnmanagedMemoryAccessor.hpp"
 #include "System/IO/FileAccess.hpp"
@@ -24,6 +25,7 @@
 
 using System::IO::MemoryStream;
 using System::IO::SeekOrigin;
+using System::IO::StreamReader;
 using System::IO::StringReader;
 using System::IO::StringWriter;
 using System::IO::UnmanagedMemoryStream;
@@ -559,6 +561,83 @@ TEST(MemoryStreamTests, Close_ThenReadWriteSeekLengthPosition_ThrowsObjectDispos
     EXPECT_THROW(ms.setPositionProperty(0), System::ObjectDisposedException);
     EXPECT_THROW(ms.SetLength(10), System::ObjectDisposedException);
     EXPECT_FALSE(ms.getCanSeekProperty());
+    // Ticket #1826: CanRead must agree with the operations above, and did not.
+    EXPECT_FALSE(ms.getCanReadProperty());
+}
+
+// ===========================================================================
+// Ticket #1826 -- MemoryStream::getCanReadProperty() folds in the disposed state
+// ===========================================================================
+//
+// MemoryStream did not override getCanReadProperty() at all, so it inherited
+// Stream's base default of `true` and kept claiming to be readable after Close().
+// Measured before the fix in build-probe/1826_prefix_defects.log:
+//
+//   case 2  closed  CanRead=1 CanWrite=1 CanSeek=0   -- CanRead disagreed with Read()
+//   case 4  the same on a read-only MemoryStream
+//   case 5  a StreamReader over a CLOSED MemoryStream was ACCEPTED at construction
+//           and threw ObjectDisposedException only on the first read
+//
+// Case 5 is the one that matters: ticket #1808 added a CanRead guard to the
+// StreamReader constructor precisely so an unreadable stream is rejected up front,
+// and this property was lying to it. .NET is MemoryStream.cs:99, `CanRead => _isOpen`.
+
+TEST(MemoryStreamTests, CanRead_IsTrueWhileOpen) {
+    MemoryStream ms;
+    EXPECT_TRUE(ms.getCanReadProperty());
+}
+
+TEST(MemoryStreamTests, CanRead_IsFalseAfterClose) {
+    MemoryStream ms;
+    ms.Close();
+    EXPECT_FALSE(ms.getCanReadProperty());
+}
+
+// A read-only MemoryStream is readable while open and unreadable once closed: the
+// writable_ flag and the isOpen_ flag are independent.
+TEST(MemoryStreamTests, CanRead_ReadOnlyBuffer_TracksOpenStateNotWritability) {
+    const uint8_t seed[5] = {'h', 'e', 'l', 'l', 'o'};
+    MemoryStream ms(seed, 5, false);
+    EXPECT_TRUE(ms.getCanReadProperty());
+    EXPECT_FALSE(ms.getCanWriteProperty());
+    ms.Close();
+    EXPECT_FALSE(ms.getCanReadProperty());
+}
+
+// CanWrite deliberately does NOT fold in the disposed state. This asymmetry is .NET's
+// own -- MemoryStream.cs:103 is `=> _writable` while :99 and :101 are `=> _isOpen` --
+// so it is pinned as intended behaviour rather than left to look like an oversight.
+TEST(MemoryStreamTests, CanWrite_DeliberatelyIgnoresTheDisposedState) {
+    MemoryStream ms;
+    ASSERT_TRUE(ms.getCanWriteProperty());
+    ms.Close();
+    EXPECT_TRUE(ms.getCanWriteProperty()) << "MemoryStream.cs:103 is `=> _writable`, not `=> _isOpen`";
+}
+
+// CanSeek was already correct; pinned alongside so the three cannot drift apart silently.
+TEST(MemoryStreamTests, CanSeek_IsFalseAfterClose) {
+    MemoryStream ms;
+    ASSERT_TRUE(ms.getCanSeekProperty());
+    ms.Close();
+    EXPECT_FALSE(ms.getCanSeekProperty());
+}
+
+// The interaction that gives this P3 ticket its teeth: with CanRead corrected, ticket
+// #1808's StreamReader guard now fires at CONSTRUCTION for a closed MemoryStream, which
+// is where .NET reports it, instead of surfacing as ObjectDisposedException on first read.
+TEST(MemoryStreamTests, CanRead_ClosedStream_IsRejectedByTheStreamReaderConstructor) {
+    const uint8_t seed[5] = {'h', 'e', 'l', 'l', 'o'};
+    MemoryStream ms(seed, 5, false);
+    ms.Close();
+    EXPECT_THROW(StreamReader r(&ms, false), System::ArgumentException);
+}
+
+// The control: an open MemoryStream is still accepted and still reads.
+TEST(MemoryStreamTests, CanRead_OpenStream_IsStillAcceptedByStreamReader) {
+    const uint8_t seed[5] = {'h', 'e', 'l', 'l', 'o'};
+    MemoryStream ms(seed, 5, false);
+    StreamReader r(&ms, false);
+    EXPECT_EQ(r.ReadToEnd(), "hello");
 }
 
 TEST(MemoryStreamTests, Close_ThenGetBufferAndToArray_StillWork) {

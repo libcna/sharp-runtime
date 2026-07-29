@@ -84,8 +84,36 @@ namespace System::IO
 
         /** Returns the length of the in-memory buffer in bytes. */
         [[nodiscard]] intcs getLengthProperty()   const override;
-        /** Returns true if the stream was created as writable. */
+
+        /**
+         * @brief Returns true if the stream was created as writable.
+         *
+         * @note Deliberately does **not** fold in the disposed state, so a closed writable
+         *       MemoryStream still reports true. That looks inconsistent beside
+         *       getCanReadProperty() and getCanSeekProperty() below, and it is — but the
+         *       inconsistency is .NET's own, not this port's: `MemoryStream.cs:103` is
+         *       `public override bool CanWrite => _writable;` while `:99` and `:101` are both
+         *       `=> _isOpen`. Ticket #1826 documented the asymmetry rather than silently
+         *       normalising it, because matching .NET matters more than internal symmetry.
+         */
         [[nodiscard]] bool  getCanWriteProperty() const override { return writable_; }
+
+        /**
+         * @brief Returns true if this stream can be read -- false once closed.
+         *
+         * Matches `MemoryStream.cs:99`, `public override bool CanRead => _isOpen;`.
+         *
+         * Before ticket #1826 this override did not exist, so MemoryStream inherited
+         * Stream::getCanReadProperty()'s base default of `true` and kept claiming to be
+         * readable after Close(). Two things followed, both measured in
+         * build-probe/1826_prefix_defects.log: a caller that tested CanRead to decide whether
+         * to read a disposed stream was told yes and then got ObjectDisposedException from
+         * Read() (cases 2, 4); and a StreamReader over a closed MemoryStream was **accepted at
+         * construction** and failed only on the first read (case 5), where .NET rejects it up
+         * front with ArgumentException("Stream was not readable.") — which is exactly the
+         * guard ticket #1808 added, defeated by this property lying to it.
+         */
+        [[nodiscard]] bool  getCanReadProperty()  const override { return isOpen_; }
 
         /**
          * @brief Returns the current read/write position within the buffer.
@@ -102,8 +130,9 @@ namespace System::IO
         /**
          * @brief Returns true if this stream can seek -- false once closed.
          *
-         * Matches real .NET's MemoryStream.CanSeek (`=> _isOpen`), which returns false rather
-         * than throwing once the stream is disposed.
+         * Matches real .NET's MemoryStream.CanSeek (`MemoryStream.cs:101`, `=> _isOpen`), which
+         * returns false rather than throwing once the stream is disposed. This one was already
+         * correct before ticket #1826; getCanReadProperty() above was the one that was not.
          */
         [[nodiscard]] bool getCanSeekProperty() const override { return isOpen_; }
 
