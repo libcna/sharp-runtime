@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -178,6 +180,133 @@ TEST(MemoryStreamTests, ReadLessThanRequested) {
     EXPECT_EQ(n, 2);
     EXPECT_EQ(dst[0], 5u);
     EXPECT_EQ(dst[1], 6u);
+}
+
+// ---------------------------------------------------------------------------
+// MemoryStream — raw-buffer constructor argument validation
+//
+// Ticket #1805 / SR-AUD-341. Before that ticket the constructor ran the
+// std::vector range copy in its member-initializer list, ahead of any check,
+// so (nullptr, 1) read through a null pointer -- an ASan-confirmed SEGV and a
+// UBSan-confirmed "load of null pointer" -- and a negative size formed
+// `buffer + size` and then built a vector from a reversed range, escaping as a
+// raw std::length_error rather than a .NET argument diagnostic.
+// ---------------------------------------------------------------------------
+
+TEST(MemoryStreamTests, BufferCtorNullBufferWithPositiveSizeThrowsArgumentNullException) {
+    // The exact audited input. It must now be an argument diagnostic, not a read
+    // through address zero.
+    EXPECT_THROW(MemoryStream(nullptr, 1), System::ArgumentNullException);
+}
+
+TEST(MemoryStreamTests, BufferCtorNullBufferWithLargeSizeThrowsArgumentNullException) {
+    EXPECT_THROW(MemoryStream(nullptr, 4096), System::ArgumentNullException);
+}
+
+TEST(MemoryStreamTests, BufferCtorNullBufferNamesTheParameter) {
+    try {
+        MemoryStream ms(nullptr, 1);
+        FAIL() << "expected ArgumentNullException";
+    } catch (const System::ArgumentNullException& e) {
+        // #1776 made the (Parameter 'x') marker appear exactly once; this pins the
+        // parameter name itself, which is what a caller reads to find the bug.
+        EXPECT_NE(std::string(e.what()).find("buffer"), std::string::npos)
+            << "message was: " << e.what();
+    }
+}
+
+TEST(MemoryStreamTests, BufferCtorNullBufferPrecedesNegativeSize) {
+    // .NET checks ArgumentNullException.ThrowIfNull(buffer) before the count, so a
+    // call that is wrong in both ways reports the null first.
+    EXPECT_THROW(MemoryStream(nullptr, -1), System::ArgumentNullException);
+}
+
+TEST(MemoryStreamTests, BufferCtorNullBufferWithZeroSizeIsAValidEmptySource) {
+    // Deliberately accepted: a pointer/length pair spells an empty range as
+    // (nullptr, 0), and this input already produced a correct empty stream before
+    // #1805. Rejecting it would be a regression, not a repair -- see the comment on
+    // validatedBufferCopy in MemoryStream.cpp and ticket #1774's identical rule for
+    // ICollection::CopyTo.
+    MemoryStream ms(nullptr, 0);
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+    EXPECT_TRUE(ms.getCanWriteProperty());
+}
+
+TEST(MemoryStreamTests, BufferCtorNullBufferWithZeroSizeStaysUsable) {
+    MemoryStream ms(nullptr, 0);
+    uint8_t payload[] = {1, 2};
+    ms.Write(payload, 0, 2);
+    EXPECT_EQ(ms.getLengthProperty(), 2);
+    EXPECT_EQ(ms.ToArray()[1], 2u);
+}
+
+TEST(MemoryStreamTests, BufferCtorEmptyVectorDataConstructsEmptyStream) {
+    // std::vector<T>::data() on an empty vector is permitted to return null, and on
+    // this toolchain it does. This is the shape BinaryData::ToStream() uses, so it is
+    // the in-repository caller that makes the rule above load-bearing.
+    std::vector<uint8_t> empty;
+    MemoryStream ms(empty.data(), static_cast<int>(empty.size()), false);
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+    EXPECT_FALSE(ms.getCanWriteProperty());
+}
+
+TEST(MemoryStreamTests, BufferCtorNegativeSizeThrowsArgumentOutOfRangeException) {
+    uint8_t src[] = {1, 2, 3};
+    EXPECT_THROW(MemoryStream(src, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(MemoryStreamTests, BufferCtorNegativeSizeDoesNotLeakAStandardLibraryException) {
+    // Before #1805 this escaped as std::length_error("cannot create std::vector
+    // larger than max_size()"). ArgumentOutOfRangeException does not derive from
+    // std::length_error, so catching the latter first proves the leak is gone.
+    uint8_t src[] = {1, 2, 3};
+    try {
+        MemoryStream ms(src, -1);
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const std::length_error& e) {
+        FAIL() << "std::length_error escaped a public .NET-shaped API: " << e.what();
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_NE(std::string(e.what()).find("size"), std::string::npos)
+            << "message was: " << e.what();
+    }
+}
+
+TEST(MemoryStreamTests, BufferCtorMostNegativeSizeThrowsArgumentOutOfRangeException) {
+    // The extreme of the same input class; `buffer + INT_MIN` was out-of-bounds
+    // pointer arithmetic, undefined before the range copy could even begin.
+    uint8_t src[] = {1, 2, 3};
+    EXPECT_THROW(MemoryStream(src, std::numeric_limits<int32_t>::min()),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(MemoryStreamTests, BufferCtorZeroSizeDoesNotReadTheSource) {
+    uint8_t src[] = {9, 9, 9};
+    MemoryStream ms(src, 0);
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+}
+
+TEST(MemoryStreamTests, BufferCtorValidArgumentsStillCopyAfterValidationAdded) {
+    // The normal path must be untouched by the new checks.
+    uint8_t src[] = {1, 2, 3, 4, 5};
+    MemoryStream ms(src, 5, false);
+    EXPECT_EQ(ms.getLengthProperty(), 5);
+    EXPECT_FALSE(ms.getCanWriteProperty());
+    EXPECT_EQ(ms.GetBuffer()[0], 1u);
+    EXPECT_EQ(ms.GetBuffer()[4], 5u);
+}
+
+TEST(MemoryStreamTests, BufferCtorCopyIsIndependentOfTheSource) {
+    // The audit recorded the absent source-lifetime/copy assertion alongside the
+    // absent null and negative-size ones: this constructor copies, so mutating or
+    // destroying the source afterwards must not be observable.
+    std::vector<uint8_t> src{1, 2, 3};
+    MemoryStream ms(src.data(), 3);
+    src[0] = 99;
+    src.clear();
+    src.shrink_to_fit();
+    EXPECT_EQ(ms.getLengthProperty(), 3);
+    EXPECT_EQ(ms.GetBuffer()[0], 1u);
+    EXPECT_EQ(ms.GetBuffer()[2], 3u);
 }
 
 // ---------------------------------------------------------------------------

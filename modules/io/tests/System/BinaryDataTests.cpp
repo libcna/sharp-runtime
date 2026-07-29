@@ -94,6 +94,16 @@ TEST(BinaryDataTests, ToStream_CorrectBytes) {
     EXPECT_EQ(buf[4], static_cast<uint8_t>('o'));
 }
 
+TEST(BinaryDataTests, ToStream_EmptyContentStillProducesAnEmptyStream) {
+    // Ticket #1805 / SR-AUD-341: ToStream() forwards bytes_.data(), which is
+    // permitted to be null for empty content and is null on this toolchain. The
+    // MemoryStream raw-buffer constructor therefore has to accept a null pointer
+    // paired with a zero size; this is the in-repository caller that proves it.
+    auto ms = BinaryData::Empty().ToStream();
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+    EXPECT_FALSE(ms.getCanWriteProperty());
+}
+
 TEST(BinaryDataTests, ToStream_RemainsReadOnly) {
     auto bd = BinaryData::FromString("hello");
     auto ms = bd.ToStream();

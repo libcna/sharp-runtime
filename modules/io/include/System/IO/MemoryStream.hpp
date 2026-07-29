@@ -43,9 +43,19 @@ namespace System::IO
          * constructor. Callers that explicitly need a read-only stream can
          * pass false for @p writable.
          *
+         * Arguments are validated before the source is read, so an invalid
+         * call reports the .NET argument diagnostic instead of dereferencing
+         * the caller's pointer. A null @p buffer is accepted only when
+         * @p size is zero, which is this port's spelling of an empty source
+         * range; .NET's `byte[]` parameter has no equivalent spelling and so
+         * rejects null outright.
+         *
          * @param buffer Pointer to the source bytes.
          * @param size Number of bytes to copy.
          * @param writable Whether writing to the copied buffer is allowed.
+         * @throws System::ArgumentNullException if @p buffer is null and
+         *         @p size is not zero.
+         * @throws System::ArgumentOutOfRangeException if @p size is negative.
          */
         MemoryStream(const bytecs* buffer, intcs size, bool writable = true);
 

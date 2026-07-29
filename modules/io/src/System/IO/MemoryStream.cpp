@@ -8,14 +8,57 @@
 #include "System/NotSupportedException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include <algorithm>
+#include <vector>
 
 namespace System::IO
 {
+    namespace
+    {
+        // Validates the raw-buffer constructor's arguments and produces the copy.
+        //
+        // Verified against MemoryStream.cs's MemoryStream(byte[] buffer, ...): real .NET
+        // throws ArgumentNullException for a null buffer and ArgumentOutOfRangeException
+        // for a negative count, and it does so BEFORE touching the source. This port
+        // previously ran the std::vector range constructor first, so `buffer + size`
+        // and the range copy happened ahead of any check at all:
+        //   * (nullptr, 1) read through a null pointer -- an ASan-confirmed SEGV and a
+        //     UBSan-confirmed "load of null pointer" (ticket #1805 / SR-AUD-341);
+        //   * a negative size formed `buffer + size` (out-of-bounds pointer arithmetic,
+        //     itself undefined) and then constructed a vector from a reversed range,
+        //     which surfaced as a raw std::length_error, "cannot create std::vector
+        //     larger than max_size()" -- a standard-library exception leaking through a
+        //     public API whose whole purpose is to mirror .NET's argument diagnostics.
+        //
+        // A null pointer paired with a size of zero is deliberately NOT rejected. .NET's
+        // parameter is a byte[] object, which has no "null but empty" spelling, but this
+        // port's parameter is a pointer/length pair, where (nullptr, 0) is the ordinary
+        // way to denote an empty range: `std::vector<bytecs>().data()` is permitted to
+        // return null, and BinaryData::ToStream() reaches this constructor exactly that
+        // way for empty content. That input is well defined today and produces a correct
+        // empty stream, so rejecting it would be a regression rather than a repair. This
+        // matches the rule ticket #1774 settled for the same pointer/length shape on
+        // ICollection::CopyTo -- only a null pointer paired with a NONZERO size is an
+        // error. UnmanagedMemoryStream diverges from both, rejecting null unconditionally,
+        // because it RETAINS the caller's pointer and .NET's own UnmanagedMemoryStream
+        // rejects it unconditionally too.
+        std::vector<bytecs> validatedBufferCopy(const bytecs* buffer, intcs size)
+        {
+            // Null takes precedence over a bad size, matching .NET's own ordering, in
+            // which ArgumentNullException.ThrowIfNull(buffer) precedes the count check.
+            if (buffer == nullptr && size != 0)
+                throw System::ArgumentNullException("buffer");
+            if (size < 0)
+                throw System::ArgumentOutOfRangeException("size", "Non-negative number required.");
+            if (size == 0) return {};
+            return std::vector<bytecs>(buffer, buffer + size);
+        }
+    }
+
     MemoryStream::MemoryStream()
         : position_(0), writable_(true) {}
 
     MemoryStream::MemoryStream(const bytecs* buffer, intcs size, bool writable)
-        : data_(buffer, buffer + size), position_(0), writable_(writable) {}
+        : data_(validatedBufferCopy(buffer, size)), position_(0), writable_(writable) {}
 
     void MemoryStream::ensureNotClosed() const
     {
