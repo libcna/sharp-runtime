@@ -4005,3 +4005,37 @@ Closure evidence: 7 permanent regressions, `MemoryStreamTests` 64/64,
 Repository gate: 0 warnings, 0 errors, **14,098 tests across 37 executables**;
 `scripts/local_ci_check.sh build` passed. No member added, layout unchanged, no vtable slot
 added.
+
+### Completed CCF-004 family plan: ticket #1829
+
+**`P1: plan the CCF-004 defined-arithmetic family before implementing any of its eight
+findings`** (`REMED-CORE-CCF004-PLAN`, P1, size M, design-only) is recorded in
+[`docs/DefinedArithmeticBoundaryPlan.md`](docs/DefinedArithmeticBoundaryPlan.md). No
+production source changed under it. **No `SR-AUD-*` identifier**; all eight members keep
+status `confirmed` and numbering stays frozen at 364.
+
+All eight members were re-reproduced under UBSan on 2026-07-29 rather than taken from the
+audit's wording (`build-probe/1829_ccf004_survey.cpp`, 16 cases, one process each,
+`-fno-sanitize-recover`). Every one still reproduces.
+
+**Three survey findings that change the work:**
+
+1. **The members split three ways** — 6 defined-wrap sites whose current result is
+   already the intended value and whose repair changes nothing observable; 1
+   validate-first ordering fix; and 2 that produce a **wrong answer** today
+   (`TimeSpan::TryParse` returns `parsed=1` with `ticks=-7695280436664713216` for a
+   positive input, and the `DateOnly` arithmetic). Only the last two need a compatibility
+   argument, and it is the one already accepted for #1817/#1818/#1825.
+2. **SR-AUD-060 is seven sites, not four** — the overflow cascades into `jdnToDate` at
+   `DateOnly.cpp:35/37/39`, so cases 8 and 9 each report four UB operations.
+3. **A methodology trap** — the first survey run called SR-AUD-049, SR-AUD-060 and
+   SR-AUD-008 already fixed, which is false: a probe linked against `build/` cannot see
+   any `.cpp`-side site, and `-O1` constant-folds an inlined header overflow so it emits
+   no check. Link against `build-asan/` at `-O0`.
+
+**No new shared infrastructure is needed.** .NET's idiom (`DateOnly.cs:73-81`, `:121-132`)
+already exists correctly at `ReadOnlyMemory.hpp:120-131`; each remaining application is a
+local one-line change, and a proposed `SafeArithmetic` helper should be rejected.
+
+Implementation split: **#1830–#1837**, all `todo`, all compatible, none requiring
+approval. #1836 and #1837 should not be taken first.

@@ -170,6 +170,44 @@ and `detail::NarrowMutationCounter` has no user left. The membership list of thi
 cause is still unchanged; the record is
 `docs/CollectionVersionCounterSweep.md` §20.
 
+**Update, 2026-07-29 (ticket #1829, no `SR-AUD-*` identifier).** This cause now has
+a family plan, [`docs/DefinedArithmeticBoundaryPlan.md`](../docs/DefinedArithmeticBoundaryPlan.md),
+written before any member was implemented, and all eight members were
+**re-reproduced under UBSan on that date** rather than taken from this document's
+wording (`build-probe/1829_ccf004_survey.cpp`, one process per case,
+`-fno-sanitize-recover` so a UB case aborts). Every one still reproduces. The
+membership list is unchanged. Three things the survey established are recorded
+here because they change what a future implementer must do:
+
+1. **The members are not interchangeable, and split three ways.** Most are
+   *defined-wrap* cases whose current result is already the intended value and
+   whose repair changes no observable behaviour at all; one
+   (`ReadOnlyMemory::Slice(start)`) needs only its existing check moved ahead of
+   the arithmetic; and two — `TimeSpan::TryParse` and the `DateOnly` arithmetic —
+   currently produce a **wrong answer** and must start failing. Only those two need
+   a compatibility argument. Treating the cause as one repair, which its
+   single-sentence framing above invites, would be wrong.
+2. **SR-AUD-060 is larger than this document and its own report record.** Four
+   `DateOnly.cpp` sites were named (65, 76, 81, 92); the overflow **cascades** into
+   `jdnToDate`, which overflows three more times per call at `DateOnly.cpp:35`,
+   `:37` and `:39`. Cases 8 and 9 each report **four** UB operations. The real site
+   count is **seven**, and guarding only the four named entry points while
+   `jdnToDate` stays reachable with a wrapped argument is not remediation. See the
+   plan's §2.1.
+3. **These findings cannot be reproduced by the obvious probe, which is a trap
+   worth naming.** A probe built with `-fsanitize=undefined` but linked against
+   `build/` instruments only the header-only members and is blind to everything in
+   a `.cpp`, because `build/` is not a sanitizer tree; and at `-O1` GCC
+   constant-folds an inlined header overflow and emits no check at all. The first
+   run of this survey therefore reported SR-AUD-049, SR-AUD-060 and SR-AUD-008 as
+   already fixed, which is false. Link against `build-asan/` and compile at `-O0`.
+   The plan's §3 carries the exact recipe. **Absence of a UBSan report is not
+   evidence of absence of UB for any member of this cause.**
+
+Nothing above changes any finding's identifier or status: all eight remain
+`confirmed`, and the audit numbering stays frozen at 364. The implementation split
+is tickets #1830–#1837.
+
 ## CCF-005 — high-value conversion APIs need explicit boundary and special-value validation
 
 The audited primitive wrappers, Decimal, and `Convert` share a recurring testing shape:

@@ -7219,3 +7219,61 @@ covering `Stream.hpp:62` itself would be better than four per-type guards.
 across 37 executables**, 0 warnings, 0 errors, `local_ci_check.sh` passed. No member added,
 so object layout is unchanged; `getCanReadProperty()` was already virtual in `Stream`, so
 the vtable gains no slot.
+
+## Completed CCF-004 family plan: ticket #1829 (2026-07-29)
+
+`REMED-CORE-CCF004-PLAN`, P1, size M, **design-only**. No production source changed.
+Recorded in
+[`docs/DefinedArithmeticBoundaryPlan.md`](docs/DefinedArithmeticBoundaryPlan.md). No
+`SR-AUD-*` identifier; all eight members keep status `confirmed` and numbering stays
+frozen at **364**.
+
+CCF-004 (native-width and fixed-width boundaries must not rely on signed C++ overflow)
+had eight confirmed high-severity findings across six files and no plan. All eight were
+**re-reproduced under UBSan on 2026-07-29**, one process per case with
+`-fno-sanitize-recover` so a UB case aborts (`build-probe/1829_ccf004_survey.cpp`, 16
+cases). Every one still reproduces; the membership list is unchanged.
+
+**The survey found three things that change what an implementer must do.**
+
+**1. The members are not interchangeable — they split three ways.** The cause's
+one-sentence framing invites treating it as one repair, which would be wrong:
+
+| Class | Members | Repair | Observable change |
+|---|---|---|---|
+| A — defined wrap | SR-AUD-019, -025, -057, -062, -084, and SR-AUD-008's `Subtract` half | redo the arithmetic in the unsigned counterpart type | **none** |
+| B — validate first | SR-AUD-049 | move the existing check ahead of the arithmetic | **none** — same exception, message, `paramName` |
+| C — wrong answer today | SR-AUD-060, and SR-AUD-008's `TryParse` half | add the missing range check | **yes** |
+
+Only class C needs a compatibility argument, and it is the one the batch already
+accepted for #1817, #1818 and #1825: the rejected inputs never worked.
+`TimeSpan::TryParse("2147483647.00:00:00")` returns `parsed=1` with
+`ticks=-7695280436664713216` — a negative duration from a positive input.
+
+**2. SR-AUD-060 is seven sites, not the four the audit named.** The overflow
+**cascades**: a wrapped day number flows into `jdnToDate`, which overflows three more
+times per call at `DateOnly.cpp:35`, `:37` and `:39`. Cases 8 and 9 each report **four**
+UB operations. Guarding only the four named entry points while `jdnToDate` stays
+reachable with a wrapped argument is not remediation.
+
+**3. A methodology trap, named because this ticket fell into it.** The first survey run
+reported SR-AUD-049, SR-AUD-060 and SR-AUD-008 as already fixed. That was false, for two
+independent reasons: a probe linked against `build/` is **blind to every `.cpp`-side
+site**, because `build/` is not a sanitizer tree and only header-only members get
+instrumented; and at `-O1` GCC **constant-folds** an inlined header overflow and emits no
+check, which is exactly what hid SR-AUD-049. Link against `build-asan/` and compile at
+`-O0`. **Absence of a UBSan report is not evidence of absence of UB for any member of
+this cause.**
+
+**No new shared infrastructure is needed, and a proposal for some should be rejected.**
+.NET's own idiom — unsigned compare, then unsigned arithmetic (`DateOnly.cs:73-81` and
+`:121-132`) — already exists correctly in this repository at
+`ReadOnlyMemory.hpp:120-131`, fixed under ticket 265. Each of the seven remaining
+applications is local to one function.
+
+**Implementation split: #1830–#1837, all eight `todo`, none requiring approval.**
+#1830 `Index`/`Range`, #1831 `Tuple` hash, #1832 `IntPtr`, #1833
+`ReadOnlyMemory::Slice`, #1834 `Int128` `MinValue`, #1835 `Utf8Parser` `Int64` min,
+#1836 `TimeSpan` (both classes, must not be one edit), #1837 `DateOnly` (all seven
+sites). There are no hard dependencies; the order is by risk. **#1836 and #1837 should
+not be taken first**, being the two that need a behaviour-change argument.
