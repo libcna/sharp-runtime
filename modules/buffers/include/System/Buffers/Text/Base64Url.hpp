@@ -355,9 +355,19 @@ public:
      * Encodes the trailing one/two-byte pack first and then walks the full 3-byte packs
      * from the last to the first, so a (larger) encoded pack never overwrites a source
      * byte that has not been read yet.
+     * An empty @p buffer returns true with @p bytesWritten 0 regardless of @p dataLength,
+     * and without validating it — .NET's own short-circuit, adopted deliberately under
+     * ticket #1821.
+     * @throws ArgumentOutOfRangeException if @p buffer is non-empty and @p dataLength is
+     *         negative or exceeds 1610612733.
      */
     static bool TryEncodeToUtf8InPlace(System::Span<uint8_t> buffer, intcs dataLength, intcs& bytesWritten) {
         bytesWritten = 0;
+        // An empty buffer succeeds, whatever dataLength claims, and BEFORE dataLength is
+        // validated. .NET's Base64Helper.EncodeToUtf8InPlace is one helper shared by both
+        // in-place encoders and opens with exactly this branch, so Base64 and Base64Url must
+        // agree here. See Base64::EncodeToUtf8InPlace for the reasoning (ticket #1821).
+        if (buffer.getLengthProperty() == 0) return true;
         intcs encodedLen = GetEncodedLength(dataLength);
         if (encodedLen > buffer.getLengthProperty()) return false;
 

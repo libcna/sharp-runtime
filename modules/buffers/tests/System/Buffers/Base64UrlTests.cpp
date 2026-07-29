@@ -708,3 +708,41 @@ TEST(Base64UrlTest, DestinationTooSmallCursor_SkipsWhitespaceBeforeTheFailingQua
     EXPECT_EQ(text[static_cast<size_t>(r.consumed)], 'P');
     EXPECT_EQ(r.written, 3);
 }
+
+// ---------------------------------------------------------------------------
+// Ticket #1821: .NET's Base64Helper.EncodeToUtf8InPlace is ONE helper shared by both
+// in-place encoders, so Base64Url short-circuits an empty buffer exactly as Base64
+// does -- to true, with bytesWritten 0, before dataLength is even validated.
+// See Base64Tests.cpp for the reasoning; measured in build-probe/1821_defects.cpp.
+// ---------------------------------------------------------------------------
+
+TEST(Base64UrlTest, TryEncodeToUtf8InPlace_EmptyBuffer_SucceedsWhateverDataLengthClaims) {
+    for (int dataLength : {0, 1, 2, 3, 5, 1610612733, -1, 1610612734}) {
+        std::vector<uint8_t> storage(1, 0xCC);
+        Span<uint8_t> empty(storage.data(), 0);
+        int written = -1;
+        EXPECT_TRUE(Base64Url::TryEncodeToUtf8InPlace(empty, dataLength, written)) << dataLength;
+        EXPECT_EQ(written, 0) << dataLength;
+        EXPECT_EQ(storage[0], 0xCC) << dataLength;
+    }
+}
+
+TEST(Base64UrlTest, TryEncodeToUtf8InPlace_NonEmptyBuffer_IsUnchanged) {
+    {
+        std::vector<uint8_t> buffer = {'A', 'B', 'C', 0};
+        int written = -1;
+        EXPECT_TRUE(Base64Url::TryEncodeToUtf8InPlace(Span<uint8_t>(buffer.data(), 4), 3, written));
+        EXPECT_EQ(written, 4);
+        EXPECT_EQ(std::string(buffer.begin(), buffer.end()), "QUJD");
+    }
+    {
+        std::vector<uint8_t> buffer(4, 0);
+        int written = -1;
+        EXPECT_FALSE(Base64Url::TryEncodeToUtf8InPlace(Span<uint8_t>(buffer.data(), 4), 6, written));
+        EXPECT_EQ(written, 0);
+        EXPECT_TRUE(Base64Url::TryEncodeToUtf8InPlace(Span<uint8_t>(buffer.data(), 4), 0, written));
+        EXPECT_EQ(written, 0);
+        EXPECT_THROW(Base64Url::TryEncodeToUtf8InPlace(Span<uint8_t>(buffer.data(), 4), -1, written),
+                     System::ArgumentOutOfRangeException);
+    }
+}

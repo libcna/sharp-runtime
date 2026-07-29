@@ -884,3 +884,83 @@ TEST(Base64Test, PaddingFollowedByData_ReportsWhatWasActuallyWritten) {
         EXPECT_LE(written, consumed) << c.text;
     }
 }
+
+// ---------------------------------------------------------------------------
+// Ticket #1821: an empty buffer short-circuits the in-place encoder to Done.
+//
+// .NET's Base64Helper.EncodeToUtf8InPlace -- the one helper its Base64 and Base64Url
+// in-place encoders share -- opens with
+//     if (buffer.IsEmpty) { bytesWritten = 0; return OperationStatus.Done; }
+// BEFORE GetMaxEncodedLength(dataLength) and before the destination-size check. This
+// port had no such branch, so an empty buffer with a positive dataLength returned
+// DestinationTooSmall and one with a negative or over-large dataLength THREW, where
+// .NET returns Done in every case.
+//
+// Adopted deliberately: `buffer` IS the source, so a caller cannot act on
+// DestinationTooSmall by supplying a larger destination -- that status names a remedy
+// that does not exist -- and an exception where .NET succeeds is a harder divergence
+// for ported code than a wrong status. Measured: build-probe/1821_defects.cpp, logs
+// 1821_prefix_defects.log (8 of 20 shapes differed) and 1821_postfix_defects.log (0).
+// ---------------------------------------------------------------------------
+
+TEST(Base64Test, EncodeToUtf8InPlace_EmptyBuffer_IsDoneWhateverDataLengthClaims) {
+    for (int dataLength : {0, 1, 2, 3, 5, 1610612733}) {
+        std::vector<uint8_t> storage(1, 0xCC);
+        Span<uint8_t> empty(storage.data(), 0);
+        int written = -1;
+        EXPECT_EQ(Base64::EncodeToUtf8InPlace(empty, dataLength, written), OperationStatus::Done)
+            << dataLength;
+        EXPECT_EQ(written, 0) << dataLength;
+        EXPECT_EQ(storage[0], 0xCC) << dataLength;   // nothing was written past the span
+        int written2 = -1;
+        EXPECT_TRUE(Base64::TryEncodeToUtf8InPlace(empty, dataLength, written2)) << dataLength;
+        EXPECT_EQ(written2, 0) << dataLength;
+    }
+}
+
+// The short-circuit runs BEFORE dataLength is validated, which is the part of .NET's
+// ordering that turns a thrown exception into a success.
+TEST(Base64Test, EncodeToUtf8InPlace_EmptyBuffer_DoesNotValidateDataLength) {
+    for (int dataLength : {-1, -1000, 1610612734}) {
+        std::vector<uint8_t> storage(1, 0xCC);
+        Span<uint8_t> empty(storage.data(), 0);
+        int written = -1;
+        EXPECT_EQ(Base64::EncodeToUtf8InPlace(empty, dataLength, written), OperationStatus::Done)
+            << dataLength;
+        EXPECT_EQ(written, 0) << dataLength;
+    }
+}
+
+// A NON-empty buffer keeps every previous outcome, validation included.
+TEST(Base64Test, EncodeToUtf8InPlace_NonEmptyBuffer_IsUnchanged) {
+    {
+        std::vector<uint8_t> buffer = {'A', 'B', 'C', 0};
+        int written = -1;
+        EXPECT_EQ(Base64::EncodeToUtf8InPlace(Span<uint8_t>(buffer.data(), 4), 3, written),
+                  OperationStatus::Done);
+        EXPECT_EQ(written, 4);
+        EXPECT_EQ(std::string(buffer.begin(), buffer.end()), "QUJD");
+    }
+    {
+        std::vector<uint8_t> buffer(4, 0);
+        int written = -1;
+        EXPECT_EQ(Base64::EncodeToUtf8InPlace(Span<uint8_t>(buffer.data(), 4), 6, written),
+                  OperationStatus::DestinationTooSmall);
+        EXPECT_EQ(written, 0);
+    }
+    {
+        std::vector<uint8_t> buffer(4, 0);
+        int written = -1;
+        EXPECT_EQ(Base64::EncodeToUtf8InPlace(Span<uint8_t>(buffer.data(), 4), 0, written),
+                  OperationStatus::Done);
+        EXPECT_EQ(written, 0);
+    }
+    {
+        std::vector<uint8_t> buffer(4, 0);
+        int written = -1;
+        EXPECT_THROW(Base64::EncodeToUtf8InPlace(Span<uint8_t>(buffer.data(), 4), -1, written),
+                     System::ArgumentOutOfRangeException);
+        EXPECT_THROW(Base64::EncodeToUtf8InPlace(Span<uint8_t>(buffer.data(), 4), 1610612734, written),
+                     System::ArgumentOutOfRangeException);
+    }
+}

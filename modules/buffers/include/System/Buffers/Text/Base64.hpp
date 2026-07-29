@@ -381,10 +381,28 @@ public:
      * Encodes the trailing one/two-byte pack first and then walks the full 3-byte packs
      * from the last to the first, so a (larger) 4-byte encoded pack never overwrites a
      * source byte that has not been read yet.
+     * An empty @p buffer returns Done with @p bytesWritten 0 regardless of @p dataLength,
+     * and without validating it — .NET's own short-circuit, adopted deliberately under
+     * ticket #1821.
      * @return OperationStatus::Done or DestinationTooSmall (never NeedMoreData/InvalidData).
+     * @throws ArgumentOutOfRangeException if @p buffer is non-empty and @p dataLength is
+     *         negative or exceeds 1610612733.
      */
     static OperationStatus EncodeToUtf8InPlace(System::Span<uint8_t> buffer, intcs dataLength, intcs& bytesWritten) {
         bytesWritten = 0;
+        // An empty buffer is Done, whatever dataLength claims -- and BEFORE dataLength is
+        // validated or the destination is sized. This is verbatim .NET's first statement in
+        // Base64Helper.EncodeToUtf8InPlace, the one helper its Base64 and Base64Url in-place
+        // encoders share (ticket #1821). It looks wrong in isolation: reporting success for
+        // "encode five bytes into a zero-byte buffer" tells the caller nothing. But there is
+        // no useful answer for that request either way, because buffer IS the source: a
+        // caller cannot act on DestinationTooSmall by supplying a larger destination, so
+        // that status names a remedy that does not exist. Parity therefore decides it. The
+        // ordering matters as much as the branch: without it an empty buffer with a negative
+        // or over-large dataLength THREW where .NET returns Done, which is a harder
+        // divergence for ported code than a wrong status
+        // (build-probe/1821_prefix_defects.log records all eight shapes).
+        if (buffer.getLengthProperty() == 0) return OperationStatus::Done;
         intcs encodedLen = GetEncodedLength(dataLength);
         if (encodedLen > buffer.getLengthProperty()) return OperationStatus::DestinationTooSmall;
 
