@@ -6,8 +6,11 @@ ports, especially CNA, without attempting to implement a CLR, JIT, garbage
 collector, or the complete .NET platform.
 
 The repository currently builds as 41 independently selectable CMake
-components. The verified Linux baseline on 2026-07-28 is a warning-free build
-with **13,538 passing tests across 37 test executables**.
+components. The verified Linux baseline on 2026-07-29 is a warning-free build
+with **13,840 passing tests across 37 test executables**, measured from a fresh
+configuration and a clean-first rebuild. (This figure had been stale at 13,538
+for several remediation tickets; ticket #1802 corrected it to 13,790 and ticket
+#1791 raised it to the current value.)
 
 ## What is included
 
@@ -215,6 +218,70 @@ Individual APIs can also document smaller, explicit deviations where C++ has
 no safe or useful equivalent.
 
 ## Breaking changes
+
+### 2026-07-29 — the non-const `List<T>`/`IList<T>` indexer returns a tracked proxy, and the mutable `List<T>::ToVector()` is gone
+
+**This is a source-breaking change, an interface change for every `IList<T>`
+implementer, and an object-layout change to `ObjectModel::Collection<T>`. A full
+rebuild of every consumer is mandatory, and the linker will not tell you if you
+skip it — the mangled name of `operator[]` did not change even though its return
+type did. A consumer that skips the rebuild does not crash; it silently loses
+mutation tracking.** This was measured, not assumed: a stale object file linked
+against a rebuilt program with no diagnostic at `-O0` and `-O2`, in both link
+orders, read correct values, and quietly failed to invalidate an outstanding
+enumerator. See `docs/ListIndexerVersioningDesign.md` §29.
+
+Real .NET's `List<T>` index setter advances `_version` unconditionally
+(`List.cs:161-162`), so `list[i] = value` fails an in-progress enumeration fast.
+This port's `operator[]` returned a plain `T&`, and no C++ mechanism can notify a
+container of a write through a reference it already handed out — so an indexed
+write was invisible to the fail-fast guard, and a retained reference was a
+reproduced use-after-free. The non-const indexer now returns
+`System::Collections::detail::ElementReference<T>`: it reads as `const T&` and
+routes every write back through the mutation counter.
+
+What changed:
+
+| Declaration | Before | After |
+|---|---|---|
+| `List<T>::operator[](intcs)` | `T&` | `detail::ElementReference<T>` |
+| `IList<T>::operator[](intcs)` | `virtual T&` | `virtual detail::ElementReference<T>` |
+| `IList<T>::getItem` / `setItem` | — | **new pure virtuals** |
+| `List<T>::ToVector()` (non-const) | `std::vector<T>&` | **removed** |
+| `sizeof(ObjectModel::Collection<T>)` | 32 | **40** (LP64) |
+| `sizeof(List<T>)`, `sizeof(ReadOnlyCollection<T>)` | 40, 24 | unchanged |
+| `operator[] const`, `ToVector() const`, `begin()`, `end()` | — | unchanged |
+
+`Collection<T>` also gained a fail-fast enumerator. It previously version-checked
+nothing at all — not even `Add()` — because it had no counter to check.
+
+Migration:
+
+| Was | Becomes |
+|---|---|
+| `list[i] = v;` | **unchanged** — this is the spelling the design exists to keep |
+| `int x = list[i];` `const T& r = list[i];` | **unchanged** — reads are unaffected |
+| `EXPECT_EQ(list[i], "abc")` | **unchanged** — the proxy has its own `operator==` |
+| `T& r = list[i];` / `auto& r = list[i];` then `r = v;` | `list[i] = v;` or `list.setItem(i, v);` |
+| `&list[i]` | `&*(list.begin() + i)` — explicitly opting into the unsafe surface |
+| `list[i].member = v;` | `T c = list.getItem(i); c.member = v; list.setItem(i, c);` |
+| `list[i].constMethod();` | `list.getItem(i).constMethod();` or `list[i]->constMethod()` |
+| `std::swap(list[i], list[j]);` | `T t = list.getItem(i); list.setItem(i, list.getItem(j)); list.setItem(j, t);` |
+| `f(list[i])` where `f` takes `T&` | `T c = list.getItem(i); f(c); list.setItem(i, c);` |
+| `list.ToVector().push_back(v);` | `list.Add(v);` |
+| `std::vector<T>& v = list.ToVector();` | `const std::vector<T>& v = list.ToVector();` or `std::vector<T> v = list.ToArray();` |
+| `int* p = list.ToVector().data();` | `const int* p = list.ToVector().data();` |
+| implementing `IList<T>` by hand | change the non-const `operator[]` return type, add `getItem`/`setItem`, and hold a `detail::MutationCounter` to hand the proxy |
+
+`list[i].member` and `list[i].method()` are the unavoidable cost: `operator.`
+cannot be overloaded in C++. C# rejects the same expression for a value-type
+element (CS1612), so ported C# is not affected — only C++-idiomatic code is.
+
+Two escapes remain, deliberately and documented rather than silently:
+`begin()`/`end()` still yield a mutable `T&` whose writes are untracked (the
+STL-interop surface, mirroring .NET's own `CollectionsMarshal.AsSpan` hatch), and
+a *retained* proxy still aliases a slot across a structural mutation. Both are
+pinned by permanent tests so they cannot be mistaken for closed.
 
 ### 2026-07-29 — `System::Collections::Hashtable::Remove` no longer invalidates enumerators for a key that was not there
 

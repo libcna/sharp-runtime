@@ -839,3 +839,54 @@ recorded rather than closed:** `SortedSetVersionAccess` has no consumer-side
 fixture, which is inactive ticket #1803; nothing is known to be wrong with it.
 
 - `scripts/local_ci_check.sh.audit.md`.
+
+---
+
+## Cross-cutting: untracked mutable aliases into collection storage — ticket #1791
+
+This is the same cross-cutting shape as the enumerator `Current` work (#1793,
+#1794), the `Hashtable` value-access work (#1796) and the `LinkedListNode` and
+`ReadOnlyDictionary::Empty` repairs (#1769, #1780): **a public accessor handed
+out a raw reference or pointer into live storage, so a caller could mutate behind
+the collection's back and could retain the alias past the mutation that freed
+it.**
+
+Ticket #1791 closed the `List<T>` / `IList<T>` instance of it. The non-const
+indexer returned a plain `T&`, and no C++ mechanism can notify a container of a
+write through a reference it already handed out — so an indexed write was
+invisible to the fail-fast guard (where .NET's `List.cs:161-162` advances
+`_version` unconditionally), and a retained reference reproduced as
+heap-use-after-free in eight distinct shapes. It now returns a tracked
+`detail::ElementReference<T>` proxy that reads as `const T&`, publishes no `T*` or
+`T&`, and advances the counter on every write. The mutable `ToVector()`, which
+handed out the whole backing container and so permitted *structural* mutation the
+guard never saw, was removed outright.
+
+**Two limits of that closure are recorded rather than closed**, and they are the
+cross-cutting lesson worth carrying forward:
+
+1. **A proxy closes the ordinary surface, not every surface.** `begin()`/`end()`
+   still yield a mutable `T&` for STL interop, deliberately, mirroring .NET's own
+   `CollectionsMarshal.AsSpan` hatch. Any future claim that a collection has "no
+   untracked write path" should be read as "no *ordinary* untracked write path"
+   unless the STL-interop surface was also constrained.
+2. **A proxy is still an alias if you keep it.** `auto r = list[0];` retained
+   across a reallocation is a use-after-free exactly as the old `T&` was. The
+   proxy removes the *ordinary* way to retain one; it does not make retention
+   safe.
+
+**A third item is cross-cutting and applies to every one of these tickets.**
+Changing what an accessor *returns* does not change its mangled name, because a
+return type is not part of a C++ mangled name. #1791 measured the consequence:
+a stale object file linked against a rebuilt program **with no diagnostic of any
+kind**, at `-O0` and `-O2`, in both link orders; it did not crash; it read
+correct values; and it *silently reverted to the untracked behaviour*. Every
+ticket in this family therefore carries a mandatory-full-rebuild note, and none
+of them may rely on the linker to enforce it.
+
+`ObjectModel::Collection<T>` gained a mutation counter (`sizeof` 32 → 40, approved
+in advance) and, with it, a fail-fast enumerator — it previously version-checked
+nothing at all, not even `Add()`. Its plain indexer still does not run the virtual
+`SetItem` hook, because the proxy holds a slot and a counter rather than a
+collection and so cannot make a virtual call; `setItem` is the hook-running path.
+That gap was **narrowed, not closed**, and is documented at the declaration.

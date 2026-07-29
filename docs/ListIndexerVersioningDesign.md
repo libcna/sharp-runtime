@@ -1170,3 +1170,462 @@ If Phase 2 is declined, the correct outcome is not silence: `List.hpp` should
 record the divergence as *permanent by decision* with a pointer to this section,
 and #1791 should be closed `wontfix` with the reason attached, exactly as #1772
 was.
+
+---
+
+# Implementation-complete record — ticket #1791
+
+*Everything above this line is ticket #1790's design record, written before any
+production code changed, and is preserved unedited. Everything below is ticket
+**#1791** (`REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, P2, size L, category
+`defect`, area `Collections`), recorded 2026-07-29 on local branch
+`feature/remediation-coll-list-indexer-version`. No `SR-AUD-*` identifier was
+issued; the audit numbering stays frozen at 364.*
+
+**Phase 2 was approved.** The user granted the exact four-part approval of §28
+verbatim, scoped to #1791 only. Both phases are implemented.
+
+---
+
+## 29. What was measured before anything changed
+
+`build-probe/1791_probe1_prefix.cpp`, built against the committed pre-#1791
+headers with `-fno-access-control` so the probe could read the private counter
+and state what it did. **12 defects observed, 0 invariants failed**
+(`build-probe/1791_prefix_behaviour.log`). Every #1790 figure reproduced:
+
+| Reconfirmed | Result |
+|---|---|
+| different-value `list[0] = 99` | counter 0 → 0, native iterator still usable, enumerator fail-fast **0** |
+| equal-value `list[0] = 10` | counter 0 → 0, fail-fast **0** |
+| control `Add()` | counter 0 → 1, fail-fast **1** — the guard itself works |
+| `ToVector()[i] = v` | counter 0 → 0 |
+| `push_back` **and** `clear` through `ToVector()` | Count 3 → 4 → 0, counter 0 → 0, fail-fast **0** |
+| `std::vector<int>&` binding to the backing container | obtainable |
+| `*begin() = v` | counter 0 → 0 |
+| `IList<int>&` index write | counter 0 → 0 |
+| `Collection<int>` index write **and `Add()`** | fail-fast **0** for both — it had no counter at all |
+| `ReadOnlyCollection<int>` non-const indexer | already threw `NotSupportedException` |
+| hand-written `IList<int>` | compiled with `int& operator[](intcs)` |
+| layout | `sizeof(List<int>)` 40, `Collection<int>` **32**, `ReadOnlyCollection<int>` 24 |
+
+UBSan on the same probe: **exit 0, 0 runtime errors**, as §5.6 predicted.
+
+**One #1790 figure needed no correction but one premise did:** the repository now
+has **631** translation units in `build/compile_commands.json`, not the 625 §6.1
+measured — six were added by tickets #1792-#1802 between the two records.
+
+Retained references, one shape per process, ASan+UBSan
+(`build-probe/1791_prefix_asan_*.log`). #1790 §5.3 reported four shapes; this
+ticket ran **nine** and found **eight** reproduce:
+
+| Shape | Diagnostic |
+|---|---|
+| `realloc-read` | heap-use-after-free, READ of size 4 |
+| `realloc-write` | heap-use-after-free, **WRITE** of size 4 |
+| `insert` | heap-use-after-free, READ of size 4 |
+| `remove` | heap-use-after-free, READ of size 1 |
+| `clear` | heap-use-after-free, READ of size 1 |
+| `move-assign` | heap-use-after-free, READ of size 8 |
+| `destroy` | heap-use-after-free, READ of size 8 |
+| `tovector` | heap-use-after-free, READ of size 4 |
+| **`copy-assign`** | **no report** — see below |
+
+**`copy-assign` is an honest negative and is recorded as one.** `a = b` where both
+hold a 64-character `std::string` reuses the destination's existing heap buffer
+rather than freeing it, so the retained reference still points into a live
+allocation. The lifetime rules were still violated; no sanitizer here detects it.
+That is the same class of qualification #1790 §5.3 attached to `clear`.
+
+LSan was proved active by a bounded deliberate leak
+(`1791_prefix_asan_lsan-selftest.log`: `ERROR: LeakSanitizer: detected memory
+leaks`), not assumed.
+
+---
+
+## 30. What was implemented
+
+### 30.1 New file
+
+`modules/collections/include/System/Collections/detail/ElementReference.hpp` —
+the proxy of §13.1, implemented as declared.
+
+### 30.2 Final signatures
+
+```cpp
+// IList<T>
+[[nodiscard]] virtual const T& operator[](intcs index) const = 0;              // unchanged
+virtual System::Collections::detail::ElementReference<T>
+        operator[](intcs index) = 0;                                          // CHANGED
+[[nodiscard]] virtual const T& getItem(intcs index) const = 0;                 // NEW
+virtual void setItem(intcs index, const T& value) = 0;                         // NEW
+
+// List<T>
+[[nodiscard]] const T& operator[](intcs index) const override;                 // unchanged
+System::Collections::detail::ElementReference<T> operator[](intcs) override;   // CHANGED
+[[nodiscard]] const T& getItem(intcs index) const override;                    // NEW
+void setItem(intcs index, const T& value) override;                            // NEW
+[[nodiscard]] const std::vector<T>& ToVector() const;                          // unchanged
+//            std::vector<T>& ToVector();                                      // REMOVED
+
+// ObjectModel::Collection<T>   -- identical shape; setItem dispatches through SetItem
+// ObjectModel::ReadOnlyCollection<T> -- identical shape; operator[] and setItem throw
+```
+
+### 30.3 Three recorded corrections to the design
+
+The design was implemented as written except for three points, each recorded here
+rather than folded silently into §13.
+
+**Correction 1 — the mutable `ToVector()` was removed, not merely re-documented.**
+§12.1 and §17 kept `std::vector<T>& ToVector()` as part of an "explicitly unsafe
+surface" whose signature would not change. The approval granted to #1791 is more
+specific and stronger: *"No ordinary public API may return a mutable
+`std::vector<T>&` into `List<T>` storage after this ticket"*, and *"no stale
+vector reference into backing storage remains publicly obtainable"*. Those two
+sentences cannot both hold while the overload exists under any name, so the
+overload was deleted with **no public replacement**. `ToVector() const` is
+unchanged; `ToArray()` returns an owning copy. This also invalidates two lines of
+the design's own §15.4 and §21: `list.ToVector()[i]` is no longer a route to a
+mutable `T&`, and the migration for `&list[i]` is now `&*(list.begin() + i)`.
+
+**Correction 2 — `begin()`/`end()` were kept, and that is stated as a residual
+rather than as closure.** The approval also asked for every ordinary public
+mutable-storage escape to be closed. §12.1, §14.5, §15.4 and §23 risk 2 keep
+`begin()`/`end()` deliberately, Alternative F was adopted for exactly those two
+routes, and the approval's own text lists them only under *"inventory all other
+mutable escapes again after implementation"*. They are therefore kept, documented
+at each declaration, and pinned by
+`ListIndexerVersionDivergence.StlInteropEscapesStillDoNotInvalidate`. **This
+ticket does not claim the last untracked write path is closed — it claims the
+last *ordinary* one is.**
+
+**Correction 3 — a constrained forwarding `operator=` was added.** §13.1 declares
+only `operator=(const T&)`, `operator=(T&&)` and `operator=(const
+ElementReference&)`. With only those, `stringList[i] = "abc"` must materialise a
+temporary `std::string` to reach `operator=(const T&)`, which costs **one heap
+allocation per write**: measured 1.83 ns/op and **0** allocations before the
+ticket against 6.47 ns/op and **2,000,000** allocations over 2,000,000 iterations
+after it. A `template <typename U> operator=(U&&)`, constrained away from both
+`ElementReference` and `T` so it can displace neither exact overload, forwards to
+the element's own assignment and restores the old cost (2.27 ns/op, **0**
+allocations). It is the same treatment §13.1 already specifies for every compound
+assignment, and it preserves every safety property: the write still runs through
+`tracked()`, still advances the counter exactly once, and still publishes no
+alias. Pinned by
+`ListIndexerProxyLanguage.AssigningAConvertibleValueMaterialisesNoTemporary`.
+
+### 30.4 One deliberate strengthening over .NET
+
+If `T`'s own assignment throws part-way through a tracked write, the element is
+left in an unspecified state. The counter is therefore advanced on the **throwing
+path as well**, through an RAII `Advance` guard, so an outstanding enumerator
+fails fast rather than reading a half-written element as unchanged. .NET cannot
+reach this case. Bounds are still validated *before* a proxy is constructed, so a
+rejected index advances nothing — the two failure modes are distinct and both are
+pinned (`ListIndexerVersioning.AThrowingElementAssignmentStillInvalidates`,
+`ListIndexerVersioning.AnOutOfRangeWriteAdvancesNothing`).
+
+### 30.5 `setItem` cannot drift from the indexer
+
+`List<T>::setItem` is implemented by assigning through the very proxy
+`operator[]` hands out, so `list.setItem(i, v)` and `list[i] = v` are the same
+write with the same single counter advance by construction rather than by
+convention.
+
+---
+
+## 31. The four implementers, as migrated
+
+| Implementer | Non-const `operator[]` | `getItem` | `setItem` | Counter | Layout |
+|---|---|---|---|---|---|
+| `Generic::List<T>` | `ElementReference<T>` | `const T&` | tracked, via the proxy | had one | **40 → 40** |
+| `ObjectModel::Collection<T>` | `ElementReference<T>` | `const T&` | tracked, **through the virtual `SetItem` hook** | **gained one** | **32 → 40** |
+| `ObjectModel::ReadOnlyCollection<T>` | `ElementReference<T>`, always throws `NotSupportedException` | `const T&` | throws `NotSupportedException` | none needed | **24 → 24** |
+| `IntList` (test-local, hand-written) | `ElementReference<int>` | `const int&` | tracked, via the proxy | **gained one** | n/a |
+
+`ReadOnlyCollection<T>` is the case the approval warned about — *"Do not
+implement tracking by adding a counter to a type whose design instead requires an
+explicit unsupported mutation path."* It gained no counter; both mutation paths
+throw, and no proxy is ever constructed because the call throws first.
+
+**`Collection<T>` gained a fail-fast enumerator as a consequence.** Before
+#1791 it version-checked nothing — its enumerator held a bare
+`const std::vector<T>&` — so mutating during enumeration silently read
+reallocated storage, and even `Add()` did not fail fast. A counter with no reader
+would have made the layout growth pointless. It now behaves as `List<T>` does,
+which is also what .NET does: .NET's `Collection<T>.GetEnumerator()` delegates to
+the wrapped `IList<T>`'s enumerator, normally `List<T>`'s fail-fast one.
+
+**`Collection<T>::operator[]` still does not run the `SetItem` hook.** The proxy
+holds a slot and a counter, not a collection, so it cannot make a virtual call.
+#1791 **narrowed** this pre-existing gap rather than closing it: the assignment is
+now tracked, where before it was both untracked and hook-skipping, and
+`setItem(index, value)` is the path that does run the hook. Stated in
+`Collection.hpp` at the declaration and pinned by
+`ListIndexerImplementers.CollectionSetItemRunsTheOverridableHook`.
+
+---
+
+## 32. Complete mutable-access inventory, before and after
+
+| # | Route | Before | After |
+|---|---|---|---|
+| 1 | `T& List<T>::operator[](intcs)` | mutable `T&`, untracked | **tracked proxy**; no `T&` obtainable |
+| 2 | `virtual T& IList<T>::operator[](intcs)` | mutable `T&`, untracked | **tracked proxy** |
+| 3 | `std::vector<T>& List<T>::ToVector()` | whole container, **structural** mutation | **removed** |
+| 4 | `auto List<T>::begin()` | mutable `T&`, untracked | **unchanged — documented residual** |
+| 5 | `auto List<T>::end()` | pairs with 4 | **unchanged — documented residual** |
+| 6 | `IEnumerator<T>::getCurrentProperty()` | mutable `void*` | closed by ticket #1793, before this ticket |
+| 7 | `const T& operator[](intcs) const` | read-only | unchanged |
+| 8 | `ToVector() const`, `begin() const`, `end() const` | read-only | unchanged |
+| 9 | `Collection<T>::operator[]` | mutable `T&`, untracked | **tracked proxy** |
+| 10 | `Collection<T>::begin()`/`end()` | mutable `T&`, untracked | **unchanged — documented residual** |
+| 11 | `ReadOnlyCollection<T>::operator[]` non-const | threw | throws; return type changed only |
+| 12 | a **retained** `ElementReference<T>` | n/a | **new, documented residual** — see §34 |
+
+Re-checked and still **absent** from `List<T>`: `data()`, `at()`, `front()`,
+`back()`, any `Span`/`ReadOnlySpan` accessor, `AsSpan`, any `ref`-returning
+member, any public conversion operator to `std::vector<T>`, any public reference
+typedef, and any friend exposing storage. `AsReadOnly()` still returns a snapshot
+copy. `GetEnumerator()`'s `Current()` still returns `const T&`.
+
+---
+
+## 33. Measured layout, ABI and stale-object behaviour
+
+`build-probe/1791_probe3_layout.cpp`, compiled once against the pre-#1791 headers
+reconstructed from commit `001ad9cd` and once against the migrated ones
+(`build-probe/1791_layout.log`), LP64/GCC 14/libstdc++:
+
+| Measurement | Before | After |
+|---|---|---|
+| `sizeof(List<int>)`, `sizeof(List<std::string>)` | 40 | **40** |
+| `sizeof(Collection<int>)`, `sizeof(Collection<std::string>)` | 32 | **40** |
+| `sizeof(ReadOnlyCollection<int>)`, `<std::string>` | 24 | **24** |
+| `alignof` of all three | 8 | **8** |
+| `is_polymorphic`, copy/move constructible and assignable | all true | **all true** |
+| `decltype(list[0])` — size / is_reference | 4 / **1** | **16 / 0** |
+| `decltype(constList[0])` — is_reference | 1 | **1** |
+| `decltype(list.ToVector())` — is_const | **0** | **1** |
+| non-null vtable entries of an `IList<int>` implementer | 14 | **16** (+`getItem`, +`setItem`) |
+| `sizeof(ElementReference<T>)` / `alignof` | n/a | **16 / 8**, two pointers |
+
+Symbols, from a fully instantiated translation unit
+(`build-probe/1791_abi.log`): **4 removed, 18 added.** Removed:
+`List<int>::ToVector()` and the three `Collection<int>::Enumerator` constructors
+taking `const std::vector<int>&`. Added: `getItem`/`setItem` for all three library
+implementers, the `Collection<int>::Enumerator` constructor taking
+`const Collection<int>*`, and the `ElementReference<int>` members.
+
+**The silent part, and it is the most important line in this section.** The
+mangled name of the non-const indexer is **byte-identical** before and after —
+`_ZN6System11Collections7Generic4ListIiEixEi` in both columns — because a return
+type is not part of a C++ mangled name. Its return convention did change: the
+16-byte proxy is returned in `%rax:%rdx`, and its first member is `slot_`, which
+is *exactly* the pointer the old `T&` return placed in `%rax`.
+
+The consequence was measured rather than reasoned about
+(`build-probe/1791_stale_object.log`). A "stale" object file compiled against the
+old headers was linked with a freshly compiled one, at `-O0` and `-O2`, in **both
+link orders** — four configurations:
+
+- the link succeeded in all four, with **no diagnostic of any kind**;
+- the program did **not** crash in any of them;
+- reads through both halves returned **correct values**, because of the register
+  coincidence above;
+- the fresh half's `list[0] = 55` **still failed fast** (tracking intact);
+- the stale half's `list[0] = 99` wrote the value and **did not fail fast** —
+  *the defect this ticket closed, silently restored for that translation unit.*
+
+That is why the full rebuild is mandatory and why `README.md` says the linker
+will not warn you.
+
+---
+
+## 34. Post-fix sanitizer results
+
+`build-probe/1791_probe2_postfix.cpp` under ASan+UBSan+LSan, one shape per
+process. The three shapes that began `T& r = list[i]` **no longer compile at
+all**, which is proved by `test/consumer/collections_list_indexer_negative.cpp`
+rather than here, because a probe cannot contain source that does not compile.
+
+| Mode | Result |
+|---|---|
+| `indexer-write-after-realloc` | **clean** |
+| `setitem-after-clear` | **clean** |
+| `read-after-destroy` | **clean** |
+| `collection-tracked-write` | **clean** |
+| `enumerator-ownership` (delete after a fail-fast throw) | **clean** |
+| migrated writes, temporary-proxy-conversion lifetime, ownership balance | **clean**, `checks-failed=0` |
+| **`proxy-retained-across-realloc`** | **heap-use-after-free, WRITE of size 4** — residual, see below |
+| **`begin-retained-across-realloc`** | **heap-use-after-free, READ of size 4** — residual, see below |
+| `lsan-selftest` | `ERROR: LeakSanitizer: detected memory leaks` — LSan proved active |
+
+Ownership was exactly balanced (`live=0`), `shared_ptr` use counts did not drift
+through proxy reads, and a replacement released the previous element's owner.
+
+The whole `Collections.Core` suite under ASan+UBSan+LSan with
+`detect_odr_violation=2`: **2,554 tests passed, zero sanitizer reports, zero
+UBSan runtime errors.**
+
+**TSan was not run, and the reason is the same one §19 gave.** This design adds
+no atomic, no `mutable` cache and no hidden `const` write; the counter is a plain
+non-atomic field before and after, written from the same sites plus the proxy's.
+`List<T>` claims no thread safety and this ticket adds none.
+
+**The two residual hazards, stated plainly.** A *retained* proxy
+(`auto r = list[0];` kept across an `Add()`) still aliases a slot that
+reallocation invalidates — exactly as the old `T&` did, legal C++, documented in
+`ElementReference`'s class comment and by §15.1. And `*list.begin()` still yields
+a mutable `T&` whose writes bypass the counter. Neither is claimed to be closed.
+
+---
+
+## 35. Source migration, measured against the current repository
+
+The whole repository was compiled against the migrated headers, `-k`, three jobs.
+
+| | Predicted by #1790 §10.3 | Measured by #1791 |
+|---|---|---|
+| Translation units that stopped compiling | 1 of 625 | **1 of 631** |
+| Distinct broken sites | 1 | **1** (plus its 5 knock-on `abstract type` diagnostics) |
+| Which one | the hand-written `IntList` | **the hand-written `IntList`** |
+
+`ReadOnlyInterfacesTests.cpp:45` — `conflicting return type specified for
+'virtual int& IntList::operator[](int)'`. **Every one of the 61 measured indexer
+call sites still compiled**, including both indexer writes, and so did all 3
+`begin()`, 3 `end()` and 1 `ToVector()` sites — the last of those was a read.
+
+Classified, the affected sites are: ordinary reads **61** (unchanged);
+assignments **2** (unchanged — this is the point of the design); `T&`/`auto&`
+bindings **0**; member access **0**; address-taking **0**; `ToVector()` mutation
+**0** (the single site was a read); interface implementations **1** (migrated);
+production library sources **0** — `List.hpp` is still included by zero library
+sources. Files migrated: `ReadOnlyInterfacesTests.cpp` (the implementer) and
+`ListIndexerVersionTests.cpp` (#1790's own divergence suite, flipped).
+
+---
+
+## 36. Tests, fixtures and validation
+
+`ListIndexerVersionTests.cpp` — #1790's suite — was **flipped, not deleted**,
+including its `static_assert`s, so the file's git history is the record of the
+behaviour change. Three divergence cases now assert `EXPECT_THROW`; the
+`begin()`/`end()` case deliberately did not flip and says so; the `ToVector()`
+case flipped by removal.
+
+`ListIndexerProxyTests.cpp` (new, 50 cases) covers indexer basics across index
+positions, list shapes and element types (`int`, `std::string`, a counted
+non-trivial type, `shared_ptr`, a throwing-assignment type, a struct); the exact
+versioning rules; the proxy's C++ behaviour (`auto`, `const auto`,
+`decltype(auto)`, conversion, compound assignment, `++`/`--`, comparison,
+self-assignment, proxy-to-proxy, forwarding assignment); the `ToVector()`
+closure; and **all four** implementers.
+
+| Validation | Result |
+|---|---|
+| `Collections.Core` | **2,554** (was 2,504; **+50**) |
+| Full repository | **13,840 across 37 executables** (was 13,790; **+50**) |
+| Negative consumer fixtures | **8 fixtures, 51 sites, every site rejected** (was 7 / 37; this ticket adds 1 fixture and 14 sites) |
+| Negative-fixture self-test | 37/37 |
+| Version-seam ODR checker | 2 seams, **18** specialisations (was 17 — `Collection<T>` added, once, in the one authoritative file) |
+| Version-seam self-test | 12/12 |
+| Module boundaries | 41 modules, 90 edges — unchanged |
+| Component catalogue | current |
+| Database consistency | no problems |
+| Selective components | all ten pass, plus `Collections.Core` with the new positive fixture |
+| Positive consumer fixture | `collections_list_indexer: all checks passed` |
+| Doxygen | **1,940** warnings (ceiling 1,942) — unchanged |
+| `git diff --check` | clean |
+| Full local CI gate | passed from the freshly rebuilt tree |
+
+Fresh rebuild: `cmake --fresh -S . -B build` then
+`cmake --build build --clean-first --parallel 3`. **633 objects, 0 predating the
+fresh-configure marker; 37 of 38 executables relinked; 0 static libraries
+predating it; 0 warnings, 0 errors.** The one executable not relinked is
+`build/SharpRuntimeTests` (84,887,440 bytes, built 2026-07-24), which is
+`EXCLUDE_FROM_ALL` and is not matched by `run_component_tests.sh`'s
+`SharpRuntimeTests_*` / `SharpRuntimeIntegrationTests` patterns, so it is not part
+of the gate. It is a stale binary built from pre-#1791 headers and was
+**deliberately not deleted**.
+
+---
+
+## 37. Performance and allocation
+
+`build-probe/1791_probe5_perf.cpp`, `-O2`, 2,000,000 iterations per row, one
+`asm volatile` barrier per iteration (without it GCC hoists the call out and the
+benchmark measures nothing — the mistake #1786 §13.1 recorded and §22 warned
+about), with a counting global `operator new`. `build-probe/1791_perf.log`.
+
+| Operation | Before | After |
+|---|---|---|
+| indexed primitive read | 0.397 ns/op, 0 alloc | **0.397 ns/op, 0 alloc** |
+| indexed `std::string` read (by `const&`) | 0.397 ns/op, 0 alloc | **0.397 ns/op, 0 alloc** |
+| iteration (range-for over 1024 elements) | 217.9 ns/op, 0 alloc | **214.5 ns/op, 0 alloc** |
+| `ToVector()` read path | 0.199 ns/op, 0 alloc | **0.398 ns/op, 0 alloc** |
+| `list[i] = v` (primitive) | 0.399 ns/op, 0 alloc | **0.448 ns/op, 0 alloc** |
+| equal-value assignment | 0.397 ns/op, 0 alloc | **0.395 ns/op, 0 alloc** |
+| `list[i] = "…"` (`std::string`) | 1.953 ns/op, 0 alloc | **2.265 ns/op, 0 alloc** |
+| `getItem` | n/a | 0.413 ns/op, 0 alloc |
+| `setItem` | n/a | 0.465 ns/op, 0 alloc |
+| copy-modify-set (struct member) | n/a | 0.485 ns/op, 0 alloc |
+| proxy construction with no write | n/a | 0.413 ns/op, 0 alloc |
+| `points[i].x = v` in place | 0.413 ns/op | **no longer expressible** |
+| `T& r = list[i]` | 0.413 ns/op | **no longer expressible** |
+
+**Nothing allocates.** The proxy is two pointers built in registers and consumed
+within its full-expression. Every difference above is at or near this
+measurement's noise floor (repeat runs moved individual rows by up to 0.2 ns/op),
+so the honest summary is that the cost is **not measurable at this resolution**,
+not that it is provably zero. The one genuine regression found —
+one heap allocation per `stringList[i] = "literal"` — was eliminated by §30.3's
+correction 3 rather than accepted.
+
+**The real cost is not runtime.** It is that reference-based in-place access
+(`points[i].x = v`) is gone, and its replacement, copy-modify-set, copies the
+element twice. For a 8-byte `Point` that measured 0.485 ns/op; for a large struct
+it will not be free, and no measurement here claims otherwise.
+
+---
+
+## 38. Risks and residual limitations, after implementation
+
+| # | Risk | Status |
+|---|---|---|
+| 1 | `list[i].member` / `list[i].method()` stop compiling | **Realised, unavoidable, accepted.** `operator.` cannot be overloaded. Migration in §21 and `README.md`. |
+| 2 | `begin()`/`end()` still bypass the counter | **Open by design**, documented at each declaration, pinned by a permanent test. Not claimed closed. |
+| 3 | A **retained** proxy aliases a slot across a structural mutation | **Open by design**, documented in `ElementReference`'s class comment, reproduced as a heap-use-after-free in §34. |
+| 4 | CNA and mobile-eggbert usage unmeasured | **Still unmeasured.** Not inspected, searched, configured, built or modified. Ticket #1773 remains `blocked`. |
+| 5 | A stale object file links silently and loses tracking | **Realised and measured** (§33). Mitigated only by the mandatory full rebuild; there is no linker diagnostic to rely on. |
+| 6 | `Collection<T>` grew 32 → 40 bytes | **Realised**, approved, measured. |
+| 7 | `Collection<T>::operator[]` still skips the `SetItem` hook | **Narrowed, not closed** (§31). `setItem` is the hook-running path. |
+| 8 | `Collection<T>`'s enumerator became fail-fast | **Behaviour change**, in .NET's direction; broke no existing test. |
+| 9 | Uninstantiated templates invisible to the sweep | Unchanged from §10.4. |
+
+---
+
+## 39. Files changed by #1791
+
+| File | Change |
+|---|---|
+| `modules/collections/include/System/Collections/detail/ElementReference.hpp` | **new** — the tracked proxy |
+| `modules/collections/include/System/Collections/Generic/IList.hpp` | proxy return type; `getItem`/`setItem` pure virtuals |
+| `modules/collections/include/System/Collections/Generic/List.hpp` | proxy indexer; `getItem`/`setItem`; mutable `ToVector()` removed; class comment rewritten around the two surfaces |
+| `modules/collections/include/System/Collections/ObjectModel/Collection.hpp` | mutation counter; fail-fast enumerator; proxy indexer; `getItem`/`setItem`; hooks advance the counter |
+| `modules/collections/include/System/Collections/ObjectModel/ReadOnlyCollection.hpp` | proxy return type; `getItem`; throwing `setItem` |
+| `modules/collections/tests/support/CollectionVersionSeam.hpp` | `Collection<T>` added, once, through the canonical macro |
+| `modules/collections/tests/System/Collections/Generic/ListIndexerVersionTests.cpp` | #1790's divergence suite flipped, `static_assert`s included |
+| `modules/collections/tests/System/Collections/Generic/ListIndexerProxyTests.cpp` | **new** — 50 permanent cases |
+| `modules/collections/tests/System/Collections/Generic/ReadOnlyInterfacesTests.cpp` | the hand-written `IntList` migrated |
+| `test/consumer/collections_list_indexer.cpp` | **new** — positive fixture |
+| `test/consumer/collections_list_indexer_negative.cpp` | **new** — 14 negative sites |
+| `README.md`, `CLAUDE.md` | breaking-change entry, migration table, rebuild guidance, test floor 13,790 → 13,840 (README's stale 13,538 corrected) |
+| `docs/ListIndexerVersioningDesign.md` | this record, appended below #1790's, which is unedited |
+| `docs/NegativeConsumerFixtureValidation.md` | inventory 7 / 37 → 8 / 51 |
+| `plan.sqlite3`, `NEXT.md`, `plan.md`, `audit/*` | reconciliation; **no new `SR-AUD-*`**, numbering stays frozen at 364 |
+
+Probe sources and evidence logs are retained under the gitignored `build-probe/`
+with the `1791_` prefix; the disposable probe binaries were deleted after their
+results were transcribed here.

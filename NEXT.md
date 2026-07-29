@@ -3,17 +3,18 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-29. Branch: `feature/remediation-test-version-access-odr`.
+*Last verified: 2026-07-29. Branch: `feature/remediation-coll-list-indexer-version`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 13,790 tests across 37 executables (the 13,127 figure this
+dependency edges, and 13,840 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 13,790
-verified by #1802 and re-measured by #1800, each from a fully fresh configuration
-and clean-first rebuild, raised from #1798's 13,723 and #1796's 13,657 — #1800
-moved test code without adding or removing a case, so the floor is unchanged
-rather than stale). The repository-wide,
+section below states the count it measured, and the current floor is the 13,840
+verified by #1791, raised from #1802's 13,790 — itself re-measured by #1800 —
+and before that from #1798's 13,723 and #1796's 13,657, each from a fully fresh
+configuration and clean-first rebuild; #1800 moved test code without adding or
+removing a case, so the floor was unchanged rather than stale at that point).
+The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766). Remediation
 tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design),
 #1769 (LinkedListNode lifetime implementation), #1770 (raw `ICollection::CopyTo`
@@ -4955,5 +4956,86 @@ HTTP, socket, and ping tests require permission for local network operations.
    current status. #1801 opened one further inactive row, **#1803**
    (`REMED-TOOLING-SORTEDSET-SEAM-NEGATIVE-FIXTURE`, `blocked`): the
    `SortedSetVersionAccess` seam has no consumer-side negative fixture proving it
-   is unreachable, nothing being known to be wrong with it. The complete inactive
-   set is therefore **#1773, #1788, #1789, #1791 and #1803**.
+   is unreachable, nothing being known to be wrong with it. **#1791 is now
+   `done`** (2026-07-29), so the complete inactive set is **#1773, #1788, #1789
+   and #1803**.
+
+### Completed tracked List indexer mutation: ticket #1791
+
+Ticket #1791 (`REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, P2, size L, `defect`,
+area `Collections`) implemented the architecture design ticket #1790 selected,
+after the user granted the **exact four-part approval written verbatim in
+[`docs/ListIndexerVersioningDesign.md`](docs/ListIndexerVersioningDesign.md) §28**,
+scoped to #1791 only: a public source break to `List<T>::operator[]`, a public
+source break to the `IList<T>` interface affecting every implementer including
+hand-written consumer ones, an object-layout change to
+`ObjectModel::Collection<T>`, and acknowledgement that CNA and mobile-eggbert
+usage is unmeasured. The implementation record is **§§29-39** of that document,
+appended below #1790's, which is preserved unedited. **No new `SR-AUD-*`
+identifier**; the numbering stays frozen at 364.
+
+The non-const indexer of `IList<T>`, `List<T>`, `ObjectModel::Collection<T>` and
+`ObjectModel::ReadOnlyCollection<T>` now returns
+`System::Collections::detail::ElementReference<T>` — a 16-byte prvalue proxy of
+two pointers that reads as `const T&` and routes every write back through the
+mutation counter — and `getItem`/`setItem` were added as pure virtuals on
+`IList<T>` and implemented by all four implementers, including the hand-written
+`IntList` in `ReadOnlyInterfacesTests.cpp`. **`list[i] = v`, the exact spelling
+C# uses, still compiles**, and now invalidates outstanding enumerators exactly as
+.NET's `List.cs:161-162` does, including for an equal-value write.
+
+**Three corrections to the design are recorded in §30.3 rather than folded in
+silently.** (1) The mutable `List<T>::ToVector()` was **removed with no public
+replacement**, not merely re-documented as §12.1/§17 proposed, because the
+approval forbids any ordinary public API returning a mutable `std::vector<T>&`
+and forbids a publicly obtainable stale vector reference; that also supersedes
+the design's own `&list.ToVector()[i]` migration, which is now
+`&*(list.begin() + i)`. (2) `begin()`/`end()` were **kept** as the documented
+STL-interop residual, so **this ticket does not claim the last untracked write
+path is closed — only the last ordinary one**. (3) A constrained forwarding
+`operator=(U&&)` was added after measuring **one heap allocation per
+`stringList[i] = "literal"` write** with only the `T`-typed overloads
+(6.47 ns/op and 2,000,000 allocations against 1.83 ns/op and none before the
+ticket; 2.27 ns/op and none after the correction).
+
+Measured, not assumed: `sizeof(List<T>)` **40 → 40**, `sizeof(Collection<T>)`
+**32 → 40**, `sizeof(ReadOnlyCollection<T>)` **24 → 24**, `IList<T>` vtable
+**14 → 16** slots, **4 symbols removed and 18 added**, and the source break was
+**1 site in 1 of 631 translation units** — the hand-written implementer, exactly
+what #1790 predicted against its then-current 625. All 61 measured indexer call
+sites still compile.
+
+**Three residual hazards are stated rather than concealed.** `begin()`/`end()`
+still yield an untracked mutable `T&`; a *retained* proxy still aliases a slot
+across reallocation (both reproduced as heap-use-after-free under ASan); and a
+**stale object file links with no diagnostic at all** — at `-O0` and `-O2`, in
+both link orders — does not crash, reads correct values, and *silently loses
+mutation tracking*, because `operator[]` keeps its mangled name while its return
+convention changes and the proxy's first member lands in the register the old
+`T&` used. That is why the full consumer rebuild is mandatory and why `README.md`
+says the linker will not warn you.
+
+`Collection<T>` additionally gained a **fail-fast enumerator** — it
+version-checked nothing before, not even `Add()`, because it had no counter — and
+its `setItem` dispatches through the virtual `SetItem` hook, though the plain
+indexer still cannot, which #1791 narrowed rather than closed.
+
+Validation, from `cmake --fresh` plus a clean-first rebuild at **three jobs**
+(633 objects, **0** predating the fresh-configure marker, 37 of 38 executables
+relinked, 0 warnings, 0 errors — the one exception is the `EXCLUDE_FROM_ALL`
+`build/SharpRuntimeTests`, a stale 85 MB historical binary outside the gate,
+deliberately not deleted): `Collections.Core` **2,554** (was 2,504); full
+repository **13,840 across 37 executables** (was 13,790); negative consumer
+fixtures **8 / 51, every site rejected** (was 7 / 37) plus 37/37 self-test;
+version-seam ODR **2 seams / 18 specialisations** (was 17 — `Collection<T>` added
+once, in the one authoritative file, per #1800's rule) plus 12/12 self-test;
+module graph **41 / 90** unchanged; Doxygen **1,940** of the 1,942 ceiling; the
+full ten-component selective matrix and the new `Collections.Core` positive
+fixture passed; ASan/UBSan/LSan `Collections.Core` **2,554 with zero reports**,
+LSan proved active by a bounded self-test; `git diff --check` clean; the local CI
+gate passed. **TSan was not run**, for the reason design §19 gave: no atomic, no
+`mutable` cache, no hidden `const` write, and `List<T>` claims no thread safety.
+
+**CNA and mobile-eggbert were not inspected, searched, configured, built or
+modified**, and their usage remains unmeasured; **#1773 remains `blocked`**.
+#1788, #1789 and #1803 are untouched and remain `blocked`.

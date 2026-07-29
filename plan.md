@@ -36,13 +36,13 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 13,790 passing across 36 component binaries plus one integration
-  binary, verified by ticket #1802 and re-measured by ticket #1800, each from a
-  fully fresh configuration and a clean-first rebuild. #1800 moved test code
-  between files without adding or removing a case, so the figure is unchanged
-  rather than stale. (The 12,991 figure this line once carried was a stale
-  relic; each remediation ticket's own section below states the count it
-  measured.)
+- Tests: 13,840 passing across 36 component binaries plus one integration
+  binary, verified by ticket #1791 from a fully fresh configuration and a
+  clean-first rebuild, raised from the 13,790 verified by ticket #1802 and
+  re-measured by ticket #1800. #1800 moved test code between files without
+  adding or removing a case, so the figure was unchanged rather than stale at
+  that point. (The 12,991 figure this line once carried was a stale relic; each
+  remediation ticket's own section below states the count it measured.)
 - Component graph: 41 physical modules and 90 direct production edges.
 - Boundary validator: no cycles, duplicate public include paths, orphan
   files, unresolved includes, undeclared edges, stale edges, or visibility
@@ -2107,3 +2107,66 @@ remain `done`, and none of them was reopened. CNA and mobile-eggbert were not
 inspected, searched, configured, built, or modified, so the source-break figures
 here are *this repository only*. No push, merge, rebase, tag, or publication
 occurred.
+
+## Completed tracked List indexer mutation: ticket #1791
+
+Ticket #1791 (`REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, P2, size L, `defect`,
+area `Collections`) implemented the architecture design ticket #1790 selected,
+under the **exact four-part approval written verbatim in
+`docs/ListIndexerVersioningDesign.md` §28**, granted by the user and scoped to
+#1791 only. The implementation record is §§29-39 of that document, appended below
+#1790's, which is preserved unedited. No new `SR-AUD-*` identifier was issued.
+
+Real .NET's `List<T>` index setter advances `_version` unconditionally, so
+`list[i] = value` fails an in-progress enumeration fast; this port's `operator[]`
+returned a plain `T&`, which no C++ mechanism can intercept, so an indexed write
+was invisible to the fail-fast guard and a retained reference was a reproduced
+use-after-free. The non-const indexer of `IList<T>`, `List<T>`,
+`ObjectModel::Collection<T>` and `ObjectModel::ReadOnlyCollection<T>` now returns
+`System::Collections::detail::ElementReference<T>`, a 16-byte prvalue proxy that
+reads as `const T&` and routes every write through the mutation counter;
+`getItem`/`setItem` were added as pure virtuals on `IList<T>` and implemented by
+all four implementers. `list[i] = v` still compiles and now invalidates.
+
+Three corrections to the design are recorded in §30.3: the mutable
+`List<T>::ToVector()` was **removed with no public replacement** rather than
+merely re-documented, because the approval forbids any ordinary public API
+returning a mutable `std::vector<T>&`; `begin()`/`end()` were **kept** as the
+documented STL-interop residual, so **the ticket claims the last *ordinary*
+untracked write path is closed, not the last one**; and a constrained forwarding
+`operator=(U&&)` was added after measuring one heap allocation per
+`stringList[i] = "literal"` write with only the `T`-typed overloads.
+
+Measured: `sizeof(List<T>)` **40 → 40**, `sizeof(Collection<T>)` **32 → 40**,
+`sizeof(ReadOnlyCollection<T>)` **24 → 24**, `IList<T>` vtable **14 → 16** slots,
+4 symbols removed and 18 added, source break **1 site in 1 of 631 translation
+units** (the hand-written implementer, as #1790 predicted against 625), all 61
+measured indexer call sites still compiling. Runtime cost is at the measurement
+noise floor and nothing allocates; the real cost is that reference-based in-place
+member access is gone and copy-modify-set copies the element twice.
+
+Three residual hazards are stated rather than concealed: `begin()`/`end()` still
+yield an untracked mutable `T&`; a *retained* proxy still aliases a slot across
+reallocation; and **a stale object file links with no diagnostic, does not crash,
+reads correct values, and silently loses mutation tracking**, measured at `-O0`
+and `-O2` in both link orders — which is why the full consumer rebuild is
+mandatory. `Collection<T>` also gained a fail-fast enumerator, having
+version-checked nothing before, not even `Add()`.
+
+Validation from a fresh configure plus clean-first rebuild at **three jobs** (633
+objects, 0 predating the marker, 37 of 38 executables relinked, 0 warnings, 0
+errors): `Collections.Core` **2,554**, full repository **13,840 across 37
+executables**, negative consumer fixtures **8 / 51** all rejected plus 37/37
+self-test, version-seam ODR **2 seams / 18 specialisations** plus 12/12
+self-test, module graph **41 / 90**, Doxygen **1,940** of the 1,942 ceiling, the
+full ten-component selective matrix and the new positive fixture passed,
+ASan/UBSan/LSan `Collections.Core` 2,554 with zero reports and LSan proved active,
+`git diff --check` clean, local CI gate passed. TSan was not run, for the reason
+design §19 gave.
+
+Tickets #1773, #1788, #1789 and #1803 remain `blocked` and untouched; **no shared
+List/Hashtable proxy was introduced**, so #1797 §24's four measured
+incompatibilities stand. #1790 and #1792–#1802 remain `done` and none was
+reopened. CNA and mobile-eggbert were not inspected, searched, configured, built,
+or modified, so the source-break figures here are *this repository only*. No
+push, merge, rebase, tag, or publication occurred.

@@ -25,3 +25,25 @@ evidence retained.
 ## Final assessment
 
 AUDITED. No separate evidence-backed finding is assigned to this file.
+
+### Follow-up: ticket #1791 changed the non-const indexer's return type (2026-07-29)
+
+Under the four-part approval of `docs/ListIndexerVersioningDesign.md` §28, the
+non-const `operator[]` now returns
+`System::Collections::detail::ElementReference<T>` so that this class still
+overrides `Generic::IList<T>::operator[]`. **No proxy is ever constructed** — the
+call throws `System::NotSupportedException("Collection is read-only.")` before it
+could be — and `getItem(intcs) const` / a throwing `setItem(intcs, const T&)` were
+added.
+
+**This type gained no mutation counter**, deliberately: its design requires an
+explicit unsupported mutation path, not tracking. `sizeof(ReadOnlyCollection<int>)`
+and `sizeof(ReadOnlyCollection<std::string>)` are **unchanged at 24** on LP64,
+measured.
+
+The read-only guarantee is now also a *compile-time* one for aliasing:
+`int& r = readOnly[0];` no longer type-checks, so a caller cannot hold a mutable
+alias into a read-only wrapper's storage without ever calling the throwing
+accessor. Pinned by the `readonly-mutable-alias` site of
+`test/consumer/collections_list_indexer_negative.cpp` and by
+`ListIndexerImplementers.ReadOnlyCollectionReadsButRefusesEveryWrite`.

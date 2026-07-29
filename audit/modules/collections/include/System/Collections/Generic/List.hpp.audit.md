@@ -101,3 +101,35 @@ divergence that must be flipped
 A separate, newly discovered defect in `Generic/IEnumerator.hpp` — a
 `const_cast` publishing a mutable `void*` to the live element, affecting every
 collection — is filed as ticket **#1792** and is deliberately not absorbed here.
+
+### Follow-up: ticket #1791 implemented the selected architecture (2026-07-29)
+
+The four-part approval of `docs/ListIndexerVersioningDesign.md` §28 was granted
+verbatim, scoped to #1791, and both phases landed. The original evidence above is
+retained unchanged; this note records the outcome.
+
+`T& operator[](intcs)` became
+`System::Collections::detail::ElementReference<T> operator[](intcs)`, and
+`getItem(intcs) const` / `setItem(intcs, const T&)` were added. An indexed write —
+including an equal-value one — now advances the mutation counter exactly once and
+fails an in-progress enumeration fast, matching `List.cs:161-162`. `list[i] = v`
+still compiles; `T& r = list[i]`, `auto& r = list[i]`, `&list[i]`,
+`std::swap(list[i], list[j])`, passing to a `T&` parameter, and member access on a
+value-type element do not, which is the hole closing.
+
+**The mutable `ToVector()` was removed** with no public replacement, correcting
+the design's §12.1/§17 proposal to merely re-document it: the approval forbids any
+ordinary public API returning a mutable `std::vector<T>&`. `ToVector() const` is
+unchanged and `ToArray()` returns an owning copy.
+
+**`begin()`/`end()` were kept**, deliberately, as the documented STL-interop
+surface. This file's finding is therefore **remediated for the ordinary surface
+only**, and that wording is exact: `*list.begin() = v` remains an untracked write,
+pinned by `ListIndexerVersionDivergence.StlInteropEscapesStillDoNotInvalidate`.
+
+`sizeof(List<T>)` is unchanged at 40 (LP64); the counter's offset, the enumerator,
+every `const` overload, every exception type/paramName/message, and every existing
+increment site are unchanged. #1790's fourteen regressions were **flipped, not
+deleted**, including their `static_assert`s, and `ListIndexerProxyTests.cpp` adds
+50 more. `test/consumer/collections_list_indexer_negative.cpp` proves each
+outlawed spelling is rejected by the compiler, across 14 tracked sites.

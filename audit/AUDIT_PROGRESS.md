@@ -3756,9 +3756,70 @@ than absorbed here. No repository-wide compiler-diagnostic normalisation was
 performed and none is claimed. No new `SR-AUD-*` identifier — the numbering stays
 frozen at 364 and the gap was found during remediation, by #1796.
 
-Tickets #1773, #1788, #1789 and #1791 remain `blocked` and untouched, and #1803
-joins them; #1790, #1792–#1800 and #1802 remain `done` and none was reopened. CNA
-and mobile-eggbert were not inspected, searched, configured, built, or modified.
-No push, merge, rebase, tag, or publication occurred.
+Tickets #1773, #1788, #1789 and #1803 remain `blocked` and untouched; #1790 and
+#1792–#1802 remain `done` and none was reopened. **Ticket #1791 is now `done`**
+(2026-07-29) — see the section appended below. CNA and mobile-eggbert were not
+inspected, searched, configured, built, or modified. No push, merge, rebase, tag,
+or publication occurred.
 
 - `scripts/local_ci_check.sh.audit.md`.
+
+---
+
+## Remediation batch: ticket #1791 — tracked `List<T>` indexer mutation
+
+Ticket **#1791** (`REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, P2, size L,
+`defect`, area `Collections`) implemented the architecture design ticket #1790
+selected, under the **exact four-part approval written verbatim in
+`docs/ListIndexerVersioningDesign.md` §28**, granted by the user and scoped to
+#1791 only. The implementation record is §§29-39 of that document.
+
+**No new `SR-AUD-*` identifier was issued and no finding was reopened.** The
+audit numbering stays frozen at **364**, and `AUDIT_FINDINGS_INDEX.md` is
+unchanged. This defect was found during remediation by #1790, not by the audit,
+and is recorded under #1787's Category D classification
+(`docs/CollectionVersionCounterSweep.md` §17).
+
+The non-const indexer of `IList<T>`, `List<T>`, `ObjectModel::Collection<T>` and
+`ObjectModel::ReadOnlyCollection<T>` now returns
+`System::Collections::detail::ElementReference<T>`, a 16-byte prvalue proxy that
+reads as `const T&` and routes every write through the mutation counter;
+`getItem`/`setItem` were added as pure virtuals on `IList<T>` and implemented by
+all four implementers, including the hand-written one in the test suite. The
+mutable `List<T>::ToVector()` was removed with no public replacement.
+
+**Transparency items, none of which is closed by this ticket.**
+`begin()`/`end()` still yield an untracked mutable `T&`, so the ticket claims the
+last *ordinary* untracked write path is closed rather than the last one; a
+*retained* proxy still aliases a slot across reallocation; and a **stale object
+file links with no diagnostic, does not crash, reads correct values, and silently
+loses mutation tracking**, measured at `-O0` and `-O2` in both link orders,
+because `operator[]` keeps its mangled name while its return convention changes.
+`Collection<T>::operator[]` still does not run the virtual `SetItem` hook, which
+#1791 narrowed rather than closed.
+
+Measured layout and ABI: `sizeof(List<T>)` **40 → 40**, `sizeof(Collection<T>)`
+**32 → 40**, `sizeof(ReadOnlyCollection<T>)` **24 → 24**, `IList<T>` vtable
+**14 → 16** slots, 4 symbols removed and 18 added. Source break: **1 site in 1 of
+631 translation units**.
+
+Validation from a fresh configure plus a clean-first rebuild at **three jobs**
+(633 objects, 0 predating the marker, 37 of 38 executables relinked — the
+exception being the `EXCLUDE_FROM_ALL` stale historical `build/SharpRuntimeTests`,
+which is outside the gate and was deliberately not deleted — 0 warnings, 0
+errors): `Collections.Core` **2,554** (was 2,504); full repository **13,840
+across 37 executables** (was 13,790); negative consumer fixtures **8 / 51**, every
+site rejected (was 7 / 37), plus 37/37 self-test; version-seam ODR **2 seams / 18
+specialisations** (was 17) plus 12/12 self-test; module graph **41 / 90**
+unchanged; Doxygen **1,940** of the 1,942 ceiling; the full ten-component
+selective matrix and a new `Collections.Core` positive consumer fixture passed;
+ASan/UBSan/LSan `Collections.Core` **2,554 with zero reports**, LSan proved active
+by a bounded self-test; `git diff --check` clean; local CI gate passed. **TSan was
+not run**, for the reason design §19 gave.
+
+Tickets #1773, #1788, #1789 and #1803 remain `blocked` and untouched; #1790 and
+#1792–#1802 remain `done` and none was reopened. **No shared List/Hashtable proxy
+abstraction was introduced**, so #1797 §24's four measured incompatibilities
+stand. CNA and mobile-eggbert were not inspected, searched, configured, built, or
+modified, so every source-break figure here is *this repository only*. No push,
+merge, rebase, tag, or publication occurred.

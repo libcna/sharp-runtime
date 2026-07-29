@@ -719,3 +719,66 @@ itself at `--parallel 3` internally.
    doubles, `--fixture` filtering exists for development, and the natural next
    step would be to compile the seven baselines once rather than per fixture —
    which is already the case — and nothing more.
+
+---
+
+## 17. Inventory changes after ticket #1801
+
+*Everything above this line is ticket #1801's own record and is preserved
+unedited; its figures describe the repository on 2026-07-29 at that ticket's
+closure. This section is the running inventory, appended by each later ticket
+that adds a tracked negative fixture.*
+
+| Date | Ticket | Fixture added | Sites | Running total |
+|---|---|---|---|---|
+| 2026-07-29 | **#1801** | — (the convention and the checker itself) | — | **7 fixtures / 37 sites** |
+| 2026-07-29 | **#1791** | `collections_list_indexer_negative.cpp` (`Collections.Core`) | **14** | **8 fixtures / 51 sites** |
+
+### 17.1 #1791's fourteen sites
+
+`REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT` made the non-const `List<T>` /
+`IList<T>` indexer return a tracked proxy and removed the mutable
+`List<T>::ToVector()`. The fixture proves each outlawed spelling is now rejected
+by the compiler rather than merely discouraged in a doc-comment.
+
+| # | Marker | What it proves is rejected |
+|---|---|---|
+| 1 | `unmigrated-indexer-override` | a hand-written `IList<T>` still returning `int&` |
+| 2 | `indexer-bind-mutable-ref` | `int& r = list[0];` |
+| 3 | `indexer-bind-auto-ref` | `auto& r = list[0];` |
+| 4 | `indexer-address-of` | `&list[2]` |
+| 5 | `indexer-std-addressof` | `std::addressof(list[2])` |
+| 6 | `indexer-bind-to-parameter` | passing `list[0]` to a `T&` parameter |
+| 7 | `indexer-swap` | `std::swap(list[0], list[1])` |
+| 8 | `indexer-member-write` | `points[0].x = 42;` — the C# CS1612 case |
+| 9 | `indexer-member-call` | `points[1].sum()` |
+| 10 | `const-proxy-write` | writing through a `const` copy of the proxy |
+| 11 | `tovector-structural-mutation` | `list.ToVector().push_back(4)` |
+| 12 | `tovector-bind-mutable-ref` | `std::vector<int>& v = list.ToVector();` |
+| 13 | `tovector-mutable-data` | `int* d = list.ToVector().data();` |
+| 14 | `readonly-mutable-alias` | `int& r = readOnlyCollection[0];` |
+
+Three markers needed their expected fragment corrected against what GCC actually
+emits, which is exactly the failure mode the per-site checker exists to surface:
+sites 2, 6 and 14 are rejected at the **const-qualification** step (`binding
+reference of type 'int&' to 'const int' discards qualifiers`,
+`invalid user-defined conversion`) rather than for want of any conversion, because
+the proxy converts to `const T&` and never to `T&`. Guessing `cannot bind
+non-const lvalue reference` would have been wrong, and a whole-file check would
+have hidden it.
+
+Two spellings deliberately still compile and are therefore **not** marked:
+`auto r = list[0];` (copying the proxy copies the alias, like copying a pointer)
+and `*list.begin() = v;` (the explicitly unsafe STL-interop surface). Both are
+documented residual hazards, pinned by permanent runtime tests rather than by
+compile rejection.
+
+### 17.2 Cost after #1791
+
+| Measure | #1801 | #1791 |
+|---|---|---|
+| Fixtures / sites | 7 / 37 | **8 / 51** |
+| Compiler invocations per run | 44 | **59** (8 baselines + 51 sites) |
+| Wall clock, `--jobs 3` | 12.5 s | **≈ 16 s** |
+| Peak concurrent compiler processes | 3, measured | **3, measured** |
+| Self-test | 37/37, 2.1 s | **37/37, 2.2 s** — unchanged, the checker itself did not change |
