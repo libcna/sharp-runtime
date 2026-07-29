@@ -177,6 +177,9 @@ Whether to adopt .NET's short-circuit is a genuine question — reporting `Done`
 for a request to encode five bytes into a zero-byte buffer is arguably the worse
 contract — so #1821 is a decision, not a foregone fix.
 
+**Decided on 2026-07-29 in favour of adopting it — see §11, which also corrects this
+table: there are eight diverging shapes, not four.**
+
 ---
 
 ## 6. What this plan does not cover
@@ -286,11 +289,11 @@ confirmed** of 364.
 **What remains from this family are two decisions, not defects**, neither carrying an
 `SR-AUD-*` identifier:
 
-- **#1821** — the in-place encoders reject an empty buffer with a positive
-  `dataLength` that .NET short-circuits to `Done` (§5). Adopting .NET's contract means
-  reporting success for a request to encode five bytes into a zero-byte buffer.
+- ~~**#1821** — the in-place encoders reject an empty buffer with a positive
+  `dataLength` that .NET short-circuits to `Done`~~ — **decided and landed on
+  2026-07-29, see §11.**
 - ~~**#1822** — the cursor reported alongside a non-`Done` status~~ — **landed on
-  2026-07-29, see §10**, so #1821 is the only decision from this family still open.
+  2026-07-29, see §10.** Both decisions from this family have now been taken.
 
 **What this plan got wrong, recorded rather than edited away.** §2 repeated
 SR-AUD-081's inverted premise unchecked (see §8). §4's table predicted that #1820
@@ -336,3 +339,46 @@ permanent regressions pin the deviation, including the invariant
 (`build-probe/1822_defects.cpp`). Re-running #1819's 27 vectors and #1820's 62 against
 the new rule gives 0 differences each, so no previously verified cursor moved. No
 status and no decoded byte changed anywhere, and every `Done` cursor is untouched.
+
+---
+
+## 11. The empty-buffer decision, made (ticket #1821)
+
+§5 opened #1821 as a decision and listed four diverging shapes. **There are eight**,
+and the four §5 missed are the more consequential ones
+(`build-probe/1821_defects.cpp`, logs `1821_prefix_defects.log` and
+`1821_postfix_defects.log`):
+
+| buffer | `dataLength` | Before | .NET / after |
+|---|---|---|---|
+| empty | 0 | `Done`, 0 | unchanged |
+| empty | 1, 5 | `DestinationTooSmall` / `false` | `Done` / `true`, 0 |
+| empty | −1, −1000 | **throws `ArgumentOutOfRangeException`** | `Done` / `true`, 0 |
+| empty | 1610612734 | **throws `ArgumentOutOfRangeException`** | `Done` / `true`, 0 |
+
+§5 saw only the status half because it probed only non-negative lengths. The other
+half exists because .NET's short-circuit runs **before**
+`encoder.GetMaxEncodedLength(dataLength)`, which is the call that validates the
+length.
+
+**Decided: adopt .NET's short-circuit, ordering included.** The argument §5 raised
+against it stands — reporting `Done` for "encode five bytes into a zero-byte buffer"
+tells the caller nothing. It was outweighed by three points:
+
+1. `buffer` **is** the source. A caller cannot act on `DestinationTooSmall` by
+   supplying a larger destination, so that status names a remedy that does not exist.
+   It is a *different* answer, not a more informative one.
+2. The input is self-contradictory — it claims `dataLength` bytes of raw data live at
+   the start of a zero-length buffer. There is no *correct* answer to give, only a
+   *portable* one, and portability is what this library is for.
+3. The ordering matters as much as the branch. An exception where the reference
+   implementation returns success is a harder divergence for ported code than a wrong
+   status, and that is what the port did for a negative or over-large `dataLength`.
+
+A non-empty buffer is untouched, validation included, pinned by new tests on both
+types. Five permanent regressions; 20 of 20 probe shapes now match .NET.
+
+**The family is now closed.** #1815 (plan), #1816, #1817, #1818, #1820 (remediations),
+#1819 (false positive), #1822 and #1821 (decisions, both taken). No ticket from this
+family remains open, and `Base64.hpp` and `Base64Url.hpp` have no `confirmed`
+`SR-AUD-*` finding left.

@@ -5180,3 +5180,56 @@ warnings, 0 errors, 14,041 tests across 37 executables** (was 14,033). Module gr
 
 **No status and no decoded byte changes for any input; every `Done` cursor is
 unchanged. Source and ABI consequences: none.**
+
+### Completed in-place encoder empty-buffer decision: ticket #1821
+
+Ticket **#1821** (`REMED-BUFFERS-BASE64-EMPTY-BUFFER-STATUS`, P3, size XS, area
+*Buffers*) is **done**, and with it the entire Base64 family. It carries **no
+`SR-AUD-*` identifier** by design; the index counts are unchanged at **21 remediated /
+343 confirmed** of 364.
+
+.NET's `Base64Helper.EncodeToUtf8InPlace` — the **one** helper its `Base64` and
+`Base64Url` in-place encoders share — opens with
+`if (buffer.IsEmpty) { bytesWritten = 0; return OperationStatus.Done; }` **before**
+`GetMaxEncodedLength(dataLength)` and before the destination-size check. This port had
+no such branch.
+
+**Ticket #1815 recorded four diverging shapes; there are eight**, and the four it
+missed are the more consequential ones (`build-probe/1821_defects.cpp`, logs
+`1821_prefix_defects.log` and `1821_postfix_defects.log`):
+
+| buffer | `dataLength` | Before | .NET / after |
+|---|---|---|---|
+| empty | 0 | `Done`, 0 | unchanged |
+| empty | 1, 5 | `DestinationTooSmall` / `false` | `Done` / `true`, 0 |
+| empty | −1, −1000 | **throws `ArgumentOutOfRangeException`** | `Done` / `true`, 0 |
+| empty | 1610612734 | **throws `ArgumentOutOfRangeException`** | `Done` / `true`, 0 |
+
+**The decision, and the reasoning against it.** #1815 framed this as a genuine
+question: reporting `Done` for a request to encode five bytes into a zero-byte buffer
+is arguably the worse contract. It was decided in favour of .NET's behaviour because
+(1) `buffer` **is** the source, so a caller cannot act on `DestinationTooSmall` by
+supplying a larger destination — that status names a remedy that does not exist, so it
+is a different answer, not a more informative one; (2) the input is
+self-contradictory, claiming `dataLength` bytes of raw data at the start of a
+zero-length buffer, so there is no *correct* answer to give, only a *portable* one; and
+(3) the **ordering** matters as much as the branch — without it, an empty buffer with a
+negative or over-large `dataLength` **threw** where .NET returns `Done`, and an
+exception where the reference implementation succeeds is a harder divergence for ported
+code than a wrong status. That half of the divergence had not been recorded before this
+ticket measured it.
+
+**A non-empty buffer is untouched**: correct encodes, `DestinationTooSmall`,
+`dataLength` 0, and the `ArgumentOutOfRangeException` on a negative or over-large
+`dataLength` all behave exactly as before.
+
+**Tests: +5 permanent regressions** across both types — the empty buffer succeeding for
+six `dataLength` values with the byte past the span untouched, the short-circuit
+running before validation for three invalid `dataLength` values, and the non-empty
+buffer's four outcomes pinned unchanged. `SharpRuntimeTests_Buffers` **517/517** (was
+512), and the same 517 under **ASan + UBSan + LSan with zero reports**
+(`build-asan/1821_buffers_asan.log`); the probe is clean under the same three
+(`build-probe/1821_asan.log`). Repository gate: **0 warnings, 0 errors, 14,046 tests
+across 37 executables** (was 14,041). Module graph **41 / 91**.
+
+**Source and ABI consequences: none.**
