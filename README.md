@@ -7,13 +7,13 @@ collector, or the complete .NET platform.
 
 The repository currently builds as 41 independently selectable CMake
 components. The verified Linux baseline on 2026-07-29 is a warning-free build
-with **13,979 passing tests across 37 test executables**. (This figure had been
+with **13,987 passing tests across 37 test executables**. (This figure had been
 stale at 13,538 for several remediation tickets; ticket #1802 corrected it to
 13,790, ticket #1791 raised it to 13,840, ticket #1788 to 13,880, ticket #1789
 to 13,923 — those last two measured from a fresh configuration and a
 clean-first rebuild, which their object-layout changes made mandatory — ticket
 #1805 to 13,937, ticket #1806 to 13,948, ticket #1807 to 13,958, ticket #1810
-to 13,970, and ticket #1811 to the current value.)
+to 13,970, ticket #1811 to 13,979, and ticket #1812 to the current value.)
 
 ## What is included
 

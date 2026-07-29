@@ -4591,3 +4591,83 @@ binaries were deleted once their logs were transcribed.
 modified**, and **#1773 remains `blocked`**. #1804 remains `blocked`; #1808 and
 #1809 remain `todo` and unbegun. No previously `done` ticket and no finding was
 reopened.
+
+### Completed ZipArchive null-stream validation: ticket #1812
+
+Ticket #1812 (`REMED-IO-ZIP-NULL-STREAM`, P1, size S, `remediation`, area *IO*)
+is **done** and **SR-AUD-242 is now `remediated`** — the sixth of NEXT.md's eight
+immediate public-input crash tickets. **No new `SR-AUD-*` identifier**; the
+numbering stays frozen at 364, and the index now records **16 remediated** and
+**348 confirmed** of 364.
+
+`ZipArchive`'s public `Stream*` constructor stored the pointer with no null
+check. Measured before any production change, one process per case
+(`build-probe/1812_prefix_defects.cpp`, logs `1812_prefix_defects.log` and
+`1812_postfix_defects.log`):
+
+| Case | Input | Pre-fix | Post-fix |
+|---|---|---|---|
+| 1 | `ZipArchive(nullptr, Read)` | **ASan SEGV on 0x0**, exit 1 | `ArgumentNullException` |
+| 2 | `ZipArchive(nullptr, Update)` | **ASan SEGV on 0x0**, exit 1 | same |
+| 3 | `ZipArchive(nullptr, Create)` | constructed | same |
+| 4 | `ZipArchive(nullptr, Create)` + `CreateEntry` + write + `Dispose()` | completed — **and delivered nothing** | same |
+| 5 | `ZipArchive(nullptr, Create)` destruction alone | completed | same |
+| 6 | `ZipArchive(nullptr, (ZipArchiveMode)42)` | constructed | rejected on the null, before the mode |
+| 7 | the valid Create path over a real `MemoryStream` | `length=146` | **byte-identical** |
+| 8 | the valid Read path over case 7's archive | `entries=1 name=payload.txt length=5` | **byte-identical** |
+
+**The two halves of this finding are not symmetric, and that asymmetry is the
+argument for an unconditional guard.** Read and Update dereference the pointer
+inside the constructor itself, so they fail loudly and immediately. Create never
+crashes: it stores the null pointer and then every call the caller makes
+succeeds — `CreateEntry`, the entry write stream, `Dispose()`. The finalized
+archive lands in `state_->memBuf`, and `Dispose()`'s write-back is gated on
+`state_->stream != nullptr`, so the archive is discarded in silence. Case 4 wrote
+a complete one-entry archive and delivered it nowhere, with no diagnostic of any
+kind. Silent data loss is the worse of the two failure modes, so the check covers
+every mode rather than only the ones that segfault.
+
+The check sits **first**, before any state is populated: nothing opens a reader
+and nothing fills a buffer on the rejected path, and `state_` is a `shared_ptr`
+that unwinds on its own. This matches .NET, whose `Stream`-taking `ZipArchive`
+constructors all funnel into `ZipArchive(Stream, ZipArchiveMode, bool,
+Encoding?)` and open with `ArgumentNullException.ThrowIfNull(stream)`.
+
+**The path-based constructor overload is deliberately unchanged** and a
+regression pins that: an unopenable path still raises
+`System::IO::InvalidDataException` from the reader, not the new guard.
+
+**One separate defect was found and deliberately not folded in.** Probe case 9 —
+added *after* the fix, because a null stream no longer reaches the mode at all —
+constructs `ZipArchive(&realStream, (ZipArchiveMode)42)` successfully, where
+.NET's `ValidateMode` throws `ArgumentOutOfRangeException(nameof(mode))`. It is a
+different public contract, carries **no `SR-AUD-*` identifier** (the audit
+recorded invalid mode values only as a missing-test note, never as a finding),
+and is now inactive ticket **#1813**, which is explicitly told to inventory the
+sibling enum surfaces — including SR-AUD-258's `CompressionMode` half and
+`ZipFile::Open`'s own `ZipArchiveMode` parameter — before writing a guard.
+
+**Tests: +8 permanent regressions** in the ZIP integration fixture
+(`tests/integration/System/IO/Compression/CompressionTests.cpp`) — all three
+modes, the defaulted-mode overload, the parameter name, repeatability of the
+rejected construction, an unaffected valid Create/Read round-trip, and the
+path-based overload.
+
+**Validation.** The ZIP fixture is **44/44** (was 36), and the same 44 under
+**ASan + UBSan + LSan with zero reports** (`build-asan/1812_zip_asan.log`, which
+required building `SharpRuntimeIntegrationTests` in `build-asan/` for the first
+time, at three jobs). Repository gate: **0 warnings, 0 errors**, **13,987 tests
+across 37 executables** (was 13,979). Module graph **41 / 90**; catalogue
+current; database consistent; the ten-component selective matrix passed,
+including the `IO.Compression.Zip` fixture that builds this component in
+isolation; Doxygen **1,941** of the 1,942 ceiling, unchanged; `git diff --check`
+clean.
+
+**Source and ABI consequences: none.** No public signature, object layout, vtable
+or exported symbol changed. Behavioural note: constructing a `ZipArchive` over a
+null stream now throws instead of crashing (Read/Update) or silently discarding
+output (Create). No in-repository caller did so.
+
+Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
+`1812_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new build
+directory was created** and **no compilation exceeded three jobs**.
