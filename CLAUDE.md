@@ -9,7 +9,7 @@
 ## Non-negotiable rules
 
 1. **Zero errors, zero warnings** before any commit. `cmake --build build --parallel 3` must be clean.
-2. **No test-count regression.** `scripts/run_component_tests.sh build` must show no failures. The verified baseline is 13,880 tests across 36 component executables and one integration executable, measured by ticket #1788 on 2026-07-29 from a fresh configuration and a clean-first rebuild (it read 13,840 after #1791 earlier the same day, 13,790 after #1802, and 13,538 before that, having fallen behind several remediation tickets that each added permanent regressions); this floor should be raised as new tests are added and lowered only with an explicit, documented reason.
+2. **No test-count regression.** `scripts/run_component_tests.sh build` must show no failures. The verified baseline is 13,923 tests across 36 component executables and one integration executable, measured by ticket #1789 on 2026-07-29 from a fresh configuration and a clean-first rebuild (it read 13,880 after #1788 earlier the same day, 13,840 after #1791, 13,790 after #1802, and 13,538 before that, having fallen behind several remediation tickets that each added permanent regressions); this floor should be raised as new tests are added and lowered only with an explicit, documented reason.
 3. **Push only to `feature/work`.** Never push to `develop` or `master`, and never create tags, without explicit per-action user approval.
 4. **SPDX header on every project source/header** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution. Vendored sources retain their upstream headers; Markdown uses an HTML SPDX comment where one is present.
 5. **Property naming:** always `getXxxProperty()` / `setXxxProperty()`. Exception: indexers
@@ -287,10 +287,17 @@ Every `.hpp` and `.cpp` file starts with:
   implicitly declared assignment operator would transplant the *source's* counter into the
   destination, leaving an enumerator apparently valid over storage the assignment destroyed.
   Both defects existed in fourteen collections and are recorded with reproductions in
-  `docs/CollectionVersionCounterSweep.md`. `detail::NarrowMutationCounter` is for the two
-  types (`LinkedList<T>`, `BitArray`) whose measured layout has no room for eight bytes;
-  do not use it for anything new. `SortedSet<T>` keeps its own `ulongcs` counter inside the
-  shared `State` its live views co-own (ticket #1786) — do not migrate it.
+  `docs/CollectionVersionCounterSweep.md`. **`detail::NarrowMutationCounter` has no user
+  left and must not gain one.** It was the 32-bit counter for the two types whose measured
+  layout had no room for eight bytes; ticket #1788 moved `LinkedList<T>` off it (growing
+  `sizeof(LinkedList<T>)` 40 → 48) and ticket #1789 moved `BitArray` off it (growing
+  `sizeof(BitArray::Enumerator)` 32 → 40), each under its own explicit user approval, so
+  **no collection retains a 2^32 enumerator-snapshot ABA horizon**. The alias survives only
+  as history and as the second instantiation the counter tests pin. `SortedSet<T>` keeps its
+  own `ulongcs` counter inside the shared `State` its live views co-own (ticket #1786) — do
+  not migrate it. When a collection's counter is widened, its enumerator's snapshot must be
+  widened in the **same** change: a narrow snapshot compared against a wide counter is a
+  silent truncation that leaves the alias in place while the code claims otherwise.
 - **Test-only access seams:** a class template that a production header declares inside
   `namespace SharpRuntime::Testing` and never defines
   (`CollectionVersionAccess`, `SortedSetVersionAccess`) may be **defined in exactly one

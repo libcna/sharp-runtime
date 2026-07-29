@@ -7,10 +7,11 @@ collector, or the complete .NET platform.
 
 The repository currently builds as 41 independently selectable CMake
 components. The verified Linux baseline on 2026-07-29 is a warning-free build
-with **13,880 passing tests across 37 test executables**, measured from a fresh
+with **13,923 passing tests across 37 test executables**, measured from a fresh
 configuration and a clean-first rebuild. (This figure had been stale at 13,538
 for several remediation tickets; ticket #1802 corrected it to 13,790, ticket
-#1791 raised it to 13,840, and ticket #1788 raised it to the current value.)
+#1791 raised it to 13,840, ticket #1788 to 13,880, and ticket #1789 to the
+current value.)
 
 ## What is included
 
@@ -219,6 +220,81 @@ no safe or useful equivalent.
 
 ## Breaking changes
 
+### 2026-07-29 — `sizeof(System::Collections::BitArray::Enumerator)` grew from 32 to 40 bytes
+
+**This is a binary-compatibility change only. No source changes, and a full
+rebuild of every consumer is mandatory — the linker will not tell you if you
+skip it, because not one mangled name changed.**
+
+`BitArray`'s private mutation counter — the number its fail-fast
+`GetEnumerator()` enumerator snapshots and compares — was 32 bits, and so was the
+snapshot. After 2^32 effective mutations on one instance the counter returned to
+a value an outstanding enumerator had captured and the equality guard silently
+accepted that stale enumerator. Unlike `LinkedList<T>`'s, the consequence is a
+**wrong answer rather than a use-after-free**: `BitArray::Enumerator` holds an
+index that is bounds-checked against the current length on every step. It was
+still a silent breach of the fail-fast contract, reachable in roughly **43
+seconds** of hot mutation at ~10^8 mutations per second.
+
+The counter and the enumerator's snapshot are now both 64-bit unsigned, so the
+horizon is 2^64 — over 580 years of uninterrupted mutation of one instance. That
+is a bound, not an impossibility, and it is not guarded by a per-mutation branch.
+With this change **no collection in this library retains a 2^32 horizon.**
+
+Every member of `BitArray` and `BitArray::Enumerator` keeps its exact signature,
+return type and `const` qualification, so **ordinary source code needs no change
+at all**:
+
+```cpp
+BitArray bits(64);                        // unchanged
+bits.Set(3, true);
+bits.SetAll(false);
+bits.Not().And(other);
+for (bool v : bits) { /* ... */ }
+auto* e = bits.GetEnumerator();           // still IEnumerator*
+```
+
+What changed, measured on LP64:
+
+| | Before | After |
+|---|---:|---:|
+| `sizeof(BitArray::Enumerator)` | 32 | **40** |
+| `alignof(BitArray::Enumerator)` | 8 | 8 |
+| `sizeof(BitArray)` | 48 | 48 |
+| `alignof(BitArray)` | 8 | 8 |
+| mangled symbols added, removed or renamed | — | **0** |
+
+`sizeof(BitArray)` is unchanged because the counter grew into the four bytes of
+tail padding the container already had. The **enumerator** could not absorb it:
+its members were exactly packed — vptr (8) + array pointer (8) + snapshot (4) +
+index (4) + cached bit (1) + state (4) = 32 — and nine bytes are needed after an
+eight-byte snapshot where eight were available, in any member order.
+
+`BitArray::Enumerator` is a **public nested class**, so a consumer may name one,
+store one by value, or embed one in its own type. Every use inside this
+repository hands it out as an `IEnumerator*` from `GetEnumerator()`, but yours
+need not.
+
+**Why you must rebuild everything.** A translation unit compiled against the old
+header believes the enumerator is 32 bytes; one compiled against the new header
+believes 40. Mixing them is an ODR violation, and it was reproduced in an
+isolated probe: **both link orders link with zero diagnostics** — no error, no
+warning, nothing. What follows depends on optimisation level and link order.
+Embedding a `BitArray::Enumerator` by value in your own type silently corrupts
+the member that follows it (a sentinel went from `0xFEEDFACECAFEBEED` to
+`0xFEEDFACE00000002`) with **no AddressSanitizer report at all**, because the
+corrupted bytes are inside the same allocation. At `-O2` an enumerator allocated
+by old code and driven by new code reported **zero elements for a non-empty
+array** — a silently wrong answer with no diagnostic — and under AddressSanitizer
+the same case is a `new-delete-type-mismatch` ("allocated 32 bytes, deallocated
+40") or an uncaught `ArgumentOutOfRangeException` abort. At `-O0` one link order
+corrupts the neighbouring member and the other appears to work. Rebuild
+everything.
+
+The full record — reproductions, layout and symbol measurements, the
+stale-object probe, alternatives, and performance — is section 20 of
+`docs/CollectionVersionCounterSweep.md`, linked from the entry below.
+
 ### 2026-07-29 — `sizeof(System::Collections::Generic::LinkedList<T>)` grew from 40 to 48 bytes
 
 **This is a binary-compatibility change only. No source changes, and a full
@@ -279,11 +355,10 @@ corrupted bytes are inside the same allocation; and mutation invalidation is
 the old object file first, everything appears to work. Which of those you get
 depends on link order. Rebuild everything.
 
-`BitArray` deliberately keeps its 32-bit counter and its 2^32 residual: closing
-it grows the **public** `BitArray::Enumerator` from 32 to 40 bytes, a separate
-decision awaiting its own approval. The full record — reproductions, layout and
-symbol measurements, the stale-object probe, alternatives, and performance — is
-in
+`BitArray` kept its 32-bit counter and its 2^32 residual when this entry was
+written; **that was closed the same day under its own separate approval — see the
+entry above it.** The full record — reproductions, layout and symbol
+measurements, the stale-object probe, alternatives, and performance — is in
 [docs/CollectionVersionCounterSweep.md](docs/CollectionVersionCounterSweep.md).
 
 ### 2026-07-29 — the non-const `List<T>`/`IList<T>` indexer returns a tracked proxy, and the mutable `List<T>::ToVector()` is gone
@@ -930,12 +1005,13 @@ signed-integer overflow; that part is invisible to any conforming program.
 Two documented residuals remained at the time, both blocked on an explicit
 object-size approval: `LinkedList<T>` and `BitArray` kept a 32-bit counter, so a
 stale enumerator over either could still be revalidated after 2^32 effective
-mutations on one instance. **`LinkedList<T>`'s was closed on 2026-07-29 — see
-the entry at the top of this section, which is where the mandatory rebuild comes
-from. `BitArray`'s is unchanged**, because closing it grows the public
-`BitArray::Enumerator` from 32 to 40 bytes and that is a separate decision
-awaiting its own approval. The full record — inventory, reproductions, .NET
-comparison, layout measurements, and both designs — is in
+mutations on one instance. **Both were closed on 2026-07-29, under two separate
+approvals, and both are entries at the top of this section — that is where the
+mandatory rebuild comes from.** `LinkedList<T>`'s cost `sizeof(LinkedList<T>)`
+40 → 48; `BitArray`'s cost `sizeof(BitArray::Enumerator)` 32 → 40. No collection
+in this library retains a 2^32 horizon; every one is 2^64. The full record —
+inventory, reproductions, .NET comparison, layout measurements, and both designs
+— is in
 [docs/CollectionVersionCounterSweep.md](docs/CollectionVersionCounterSweep.md).
 
 ### 2026-07-28 — `System::Collections::Generic::SortedSet<T>::GetViewBetween`

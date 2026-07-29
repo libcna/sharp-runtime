@@ -157,6 +157,19 @@ bytes, which is ticket #1789's separate approval and remains `blocked`. The
 membership list of this cause is still unchanged; the record is
 `docs/CollectionVersionCounterSweep.md` §19.
 
+**Update, 2026-07-29 (ticket #1789, no `SR-AUD-*` identifier).** The residual is
+now **fully closed**. The user granted the second, separate object-size approval,
+and `BitArray`'s counter and its **public** `Enumerator`'s snapshot are now both
+64-bit: `sizeof(BitArray::Enumerator)` grew 32 → 40 on LP64 while
+`sizeof(BitArray)` stayed 48 (the counter landed in tail padding it already had)
+and **no mangled name changed**. The pre-fix 2^32 revalidation was reproduced
+first (`guard-fired=0` for `MoveNext`, for `Reset`, and at seven laps,
+`defects-observed=3`) and reads `defects-observed=0` after. **No collection in
+this repository retains a 2^32 enumerator-snapshot horizon; every one is 2^64**,
+and `detail::NarrowMutationCounter` has no user left. The membership list of this
+cause is still unchanged; the record is
+`docs/CollectionVersionCounterSweep.md` §20.
+
 ## CCF-005 — high-value conversion APIs need explicit boundary and special-value validation
 
 The audited primitive wrappers, Decimal, and `Convert` share a recurring testing shape:

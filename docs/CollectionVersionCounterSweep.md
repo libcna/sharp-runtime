@@ -23,8 +23,16 @@ and untouched. The counter, its type, and its increment all arrived with ticket
 > landed* is preserved unedited and is still accurate as history — this document
 > deliberately does **not** pretend `LinkedList<T>` was always 64-bit. The
 > implementation record, with re-measured layout, symbols, a stale-object probe and
-> performance, is **§19**. `BitArray` is unchanged and ticket #1789 remains blocked
-> on its own separate approval.
+> performance, is **§19**.
+>
+> **Follow-up landed — ticket #1789, 2026-07-29.** The **other** residual is now
+> closed too. `BitArray` carries the 64-bit `MutationCounter` and its **public**
+> nested `Enumerator` the 64-bit `MutationVersion`; `sizeof(BitArray::Enumerator)`
+> grew **32 → 40** on LP64 under the explicit user approval §8.2 asked for, and
+> `sizeof(BitArray)` stayed **48**. The implementation record is **§20**. With it,
+> **no collection in this repository retains a 2^32 enumerator-snapshot ABA
+> horizon** — every one is 2^64, and `detail::NarrowMutationCounter` has no user
+> left. §§1–17 are again preserved unedited as the record of the day #1787 landed.
 
 ---
 
@@ -588,7 +596,13 @@ implemented; each has a blocked ticket stating the exact approval required.
   suite and in `docs/LinkedListNodeLifetime.md`, and re-run
   `build-probe-collversion/probe1` and `probe2 iterator-aba`.
 
-### 8.2 `BitArray` — ticket #1789
+### 8.2 `BitArray` — ticket #1789 — **APPROVED AND CLOSED, 2026-07-29**
+
+> The approval this section asks for was granted and the change landed. Everything
+> below is #1787's original analysis, preserved unedited because its predictions
+> are what #1789 was measured against — and every one of them held exactly,
+> including `sizeof(Enumerator)` 32 → 40 and `sizeof(BitArray)` staying 48. The
+> implementation record is **§20**.
 
 - **Affected public types:** `System::Collections::BitArray` and its **public**
   nested `Enumerator`.
@@ -1030,7 +1044,7 @@ a 64-bit compare cost the same as 32-bit ones on x86-64.
 
 | # | Risk | Severity | Position |
 |---|---|---|---|
-| 1 | `LinkedList<T>` and `BitArray` keep a 2^32 ABA horizon | **Medium** | **Real and not eliminated.** Reachable in tens of seconds of hot mutation. Closing it needs a public object-size change and therefore user approval; blocked tickets #1788 and #1789 state exactly what is required. Pinned by a test so the residual cannot be forgotten or accidentally "fixed" without updating the record. **Half closed 2026-07-29 (§19): #1788 was approved and `LinkedList<T>` is now 64-bit. `BitArray` alone still carries this risk, unchanged, tracked by #1789.** |
+| 1 | `LinkedList<T>` and `BitArray` keep a 2^32 ABA horizon | **Medium** | **Real and not eliminated.** Reachable in tens of seconds of hot mutation. Closing it needs a public object-size change and therefore user approval; blocked tickets #1788 and #1789 state exactly what is required. Pinned by a test so the residual cannot be forgotten or accidentally "fixed" without updating the record. **Fully closed 2026-07-29 under two separate approvals: #1788 widened `LinkedList<T>` (§19) and #1789 widened `BitArray` (§20). No collection in this repository retains a 2^32 horizon.** |
 | 2 | The thirteen wide types keep a 2^64 ABA horizon | Negligible | Over 580 years of uninterrupted mutation of one instance (§11). Guarding it would cost a branch on every mutation (§7 C/F). Stated, not hidden. |
 | 3 | Self-assignment now invalidates enumerators on fourteen collections | Low | Deliberate and argued (§6.2): member-wise self-assignment of the backing container may reallocate. `LinkedList<T>` keeps its no-op behaviour. Both are pinned by tests. .NET has no analogue. |
 | 4 | Assignment now throws where it previously continued silently | Low | Only for a program that keeps enumerating a collection after that collection was wholesale replaced — which was a use-after-free for six of the fourteen. No well-defined program changes behaviour (§6, point 7). All 1,841 pre-existing Collections.Core tests pass unmodified. |
@@ -1038,7 +1052,7 @@ a 64-bit compare cost the same as 32-bit ones on x86-64.
 | 6 | The test seam is a new name in a public header | Low | §13.2. Grants access only; never defined in production, proven by a negative consumer fixture; no layout, signature, or symbol effect, all measured. |
 | 7 | The counter's width now differs from .NET's `int` on thirteen types | Low | Deliberate and argued (§5.1). Nothing observable to a conforming program differs. |
 | 8 | `probe1`–`probe5` depend on `-fno-access-control`, a GCC/Clang extension | Low | Probes only, never the permanent suite, which uses the portable friend seam. |
-| 9 | `BitArray`'s container could absorb a wider counter but its enumerator cannot | Low | Widening only the container would leave a truncated snapshot comparison and a *silent* 2^32 alias, which is worse than the honest one. Deliberately not done; #1789 covers both together. |
+| 9 | `BitArray`'s container could absorb a wider counter but its enumerator cannot | Low | Widening only the container would leave a truncated snapshot comparison and a *silent* 2^32 alias, which is worse than the honest one. Deliberately not done; #1789 covers both together. **Closed 2026-07-29 (§20): #1789 widened both in one change, exactly as this row required, and `ASnapshotSharingOnlyItsLowThirtyTwoBitsIsStillRejected` pins the truncation shut.** |
 
 ---
 
@@ -1047,7 +1061,7 @@ a 64-bit compare cost the same as 32-bit ones on x86-64.
 | Ticket | Key | Status | Scope |
 |---|---|---|---|
 | **#1788** | `REMED-COLL-LINKEDLIST-VERSION-WIDEN` | **done** 2026-07-29 | Widened `LinkedList<T>`'s counter *and its enumerator's snapshot* to 64 bits; approval granted, `sizeof(LinkedList<T>)` 40 → 48 on LP64 as predicted (§8.1, implementation §19) |
-| **#1789** | `REMED-COLL-BITARRAY-VERSION-WIDEN` | **blocked** (approval) | Widen `BitArray`'s counter and its public `Enumerator`'s snapshot to 64 bits, accepting `sizeof(BitArray::Enumerator)` 32 → 40 on LP64 (§8.2) |
+| **#1789** | `REMED-COLL-BITARRAY-VERSION-WIDEN` | **done** 2026-07-29 | Widened `BitArray`'s counter *and its public `Enumerator`'s snapshot* to 64 bits; approval granted, `sizeof(BitArray::Enumerator)` 32 → 40 and `sizeof(BitArray)` unchanged at 48 on LP64 as predicted (§8.2, implementation §20) |
 | **#1790** | `REMED-COLL-LIST-INDEXER-VERSION` | **todo**, inactive | Category D, non-versioning: `List<T>::operator[]` returns a plain `T&`, so `list[i] = value` cannot bump the counter, unlike .NET's index setter. Documented in `List.hpp`'s own class comment since ticket 1713 and **not** introduced or worsened here. Closing it means a proxy-object return on the most call-site-heavy method in the repository. Recorded so it is tracked rather than only commented. |
 | #1785 | `REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER` | **todo**, untouched | Unchanged by this ticket; no exception ordering was altered |
 | #1773 | `REMED-COLL-COPYTO-DOWNSTREAM` | **blocked**, untouched | Out-of-repository; CNA and mobile-eggbert were not inspected |
@@ -1567,7 +1581,7 @@ place, as #1791 left it, but it should be deleted rather than trusted.
 | 1 | The ABA horizon is now 2^64, **not infinity** | Over 580 years of uninterrupted mutation of one instance at an implausibly generous 10^9/s. It is modular arithmetic and `TheHorizonIsNowTwoToTheSixtyFourNotTwoToTheThirtyTwo` asserts the wrap explicitly rather than pretending it cannot happen. Guarding it would cost a branch on every mutation (§7 C/F). |
 | 2 | `sizeof(LinkedList<T>)` grew 20% for an empty list | Approved, measured (§19.5, §19.9), and unavoidable — §7 H is arithmetically impossible here. |
 | 3 | **A stale object file links silently and can corrupt memory** | §19.8. No linker, sanitizer or LTO diagnostic. The mandatory full rebuild is the only mitigation, and `README.md` says so in those terms. |
-| 4 | `BitArray` keeps its 2^32 horizon | Untouched by design; ticket #1789 remains `blocked` on its own separate approval (§8.2, §8.3). |
+| 4 | `BitArray` keeps its 2^32 horizon | Untouched by design; ticket #1789 remains `blocked` on its own separate approval (§8.2, §8.3). **Closed later the same day by #1789 — §20.** |
 | 5 | `begin()`/`end()` are still not version-checked | Pre-existing, documented, deliberate, and pinned by `ThePublicStlIteratorsStillCarryNoSnapshot`. `LinkedListNode<T>` remains the lifetime-safe handle. |
 | 6 | `Clear()` on an already-empty list still bumps unconditionally | Pre-existing contract, deliberately not revisited — this ticket changed a width. Now pinned so the next reader sees it is a decision. |
 | 7 | No thread-safety guarantee | The counter is non-atomic before and after. TSan not run, with reasons (§19.12). |
@@ -1583,3 +1597,545 @@ property. Validate a revert by re-running
 `build-probe/1788_probe2_defects.cpp` against both headers and confirming it
 reports `defects-observed=3` again, and by a **fresh clean-first rebuild**, since
 the layout moves back.
+
+---
+
+## 20. Ticket #1789 implementation record — `BitArray` widened to 64 bits
+
+*Recorded 2026-07-29 on local branch
+`feature/remediation-coll-bitarray-version-widen`. Ticket **#1789**, key
+`REMED-COLL-BITARRAY-VERSION-WIDEN`, priority **P3**, size **XS**, category
+`defect`, area `Collections`. **No new `SR-AUD-*` identifier** — the audit
+numbering stays frozen at 364 and this was found during remediation, by #1787's
+own §8.2. Sections 1–19 above are #1787's and #1788's records and are preserved
+unedited; this section is additive.*
+
+### 20.1 The approval that was applied
+
+The user granted, scoped to #1789 only, explicit approval to: widen the
+`BitArray` mutation version from 32 bits to the 64-bit unsigned
+`MutationCounter`; widen every `BitArray::Enumerator` snapshot that compares
+against it; accept the measured `sizeof(BitArray::Enumerator)` **32 → 40**;
+accept any directly resulting `BitArray` object-layout change proven necessary;
+accept the resulting public template/type ABI and layout break; require a
+complete rebuild of every consumer adopting this revision; and replace the 2^32
+stale-enumerator ABA horizon with the 64-bit contract.
+
+The approval explicitly did **not** extend to #1803, any new `BitArray` public
+API, any unrelated `BitArray` semantic change, any further collection layout
+change, any downstream CNA/mobile-eggbert migration, or general thread safety.
+None of those was performed.
+
+### 20.2 Old and new representation, and every site
+
+| | Before #1789 | After #1789 |
+|---|---|---|
+| `BitArray::version_` | `detail::NarrowMutationCounter` (`BasicMutationCounter<uintcs>`, 32-bit) | `detail::MutationCounter` (`BasicMutationCounter<ulongcs>`, 64-bit) |
+| `BitArray::Enumerator::version_` | `detail::NarrowMutationVersion` (`uintcs`) | `detail::MutationVersion` (`ulongcs`) |
+
+Both moved together, deliberately. Widening the container alone would have made
+the comparison a silent truncation and left the 2^32 alias in place while the
+code claimed otherwise — the exact failure mode §8.2 identified and refused, and
+the one `ASnapshotSharingOnlyItsLowThirtyTwoBitsIsStillRejected` now pins shut.
+
+**Nine increment sites**, all unchanged in spelling (`++version_`) and all still
+one instruction:
+
+| Site | `BitArray.hpp` member | Note |
+|---|---|---|
+| 1 | `setLengthProperty` | after the negative-length check and the resize |
+| 2 | `Set` | after the bounds check; bumps even for an equal-value write |
+| 3 | `SetAll` | unconditional |
+| 4 | `And` | after `requireSameLength` |
+| 5 | `Or` | after `requireSameLength` |
+| 6 | `Xor` | after `requireSameLength` |
+| 7 | `Not` | unconditional |
+| 8 | `LeftShift` | after the negative-count check; bumps for `count == 0` too |
+| 9 | `RightShift` | after the negative-count check; bumps for `count == 0` too |
+
+Plus the **implicitly declared** copy and move assignment operators, which reach
+`BasicMutationCounter::operator=` and advance the destination by one. `BitArray`
+declares no assignment operator of its own, so — unlike `LinkedList<T>` and its
+#1769 guard — self-assignment advances too. There is **no `Clear()`, no `Add`,
+and no non-const indexer**: `operator[]` is `const`-only, so `Set` is the sole
+indexed write path and there is no `setItem` to track.
+
+**Three read/compare sites**, all unchanged, all `==` only — nothing anywhere
+compares the counter with `<`, `>` or subtraction, so no guard depends on
+monotonicity across a wrap:
+
+| Site | Expression |
+|---|---|
+| 1 | `Enumerator::Enumerator` — `version_(arr->version_)`, the snapshot |
+| 2 | `Enumerator::MoveNext` — `requireUnmodified(version_ == arr_->version_)` |
+| 3 | `Enumerator::Reset` — the same guard |
+
+The production diff is two field declarations plus comments. Every increment and
+every guard is spelled exactly as it was.
+
+### 20.3 The pre-fix reproduction, taken before anything changed
+
+`build-probe/1789_probe2_defects.cpp` — one source run against both headers, with
+the pre-fix header extracted by `git show` into
+`build-probe/1789_prefix-include/`. The counter is positioned with GCC's
+`-fno-access-control`, which suppresses access checking and nothing else; no
+macro is defined over a library header and no declaration is edited. No mode
+performs more than a few dozen real mutations.
+
+`build-probe/1789_prefix_defects.log`, the load-bearing lines verbatim:
+
+```
+counter-value-type-bytes=4
+counter-max=4294967295
+enumerator-snapshot-bytes=4
+BitArray Set     snapshot=2 counter-2^32-later=2 truncated-onto-snapshot=1 guard-fired=0
+BitArray Reset() guard-fired=0
+BitArray 7x2^32  snapshot=2 counter=2 low-words-match=1 guard-fired=0
+defects-observed=3
+```
+
+`build-probe/1789_postfix_defects.log`, same source, same modes:
+
+```
+counter-value-type-bytes=8
+counter-max=18446744073709551615
+enumerator-snapshot-bytes=8
+BitArray Set     snapshot=2 counter-2^32-later=4294967298 truncated-onto-snapshot=0 guard-fired=1
+BitArray Reset() guard-fired=1
+BitArray 7x2^32  snapshot=2 counter=30064771074 low-words-match=1 guard-fired=1
+defects-observed=0
+```
+
+The complete diff of the two logs is: the counter's width, those three
+`guard-fired` outcomes, and one sentinel probe reaching a larger maximum.
+**Every delta line and every `pre-horizon` line is byte-identical**, which is the
+evidence that the mutation semantics did not move.
+
+The distance is spelled `snapshot + 2^32` and never simply `snapshot`, and the
+probe asserts `truncated-onto-snapshot` separately — because an assertion written
+the second way holds for a counter of any width and pins nothing, which is the
+weakness §19.11 found in #1787's own narrow branch. The third line is the
+strongest form: at seven laps the low 32 bits still match (`low-words-match=1` on
+**both** sides) and only the widened counter rejects it.
+
+**No signed-overflow UB remained to fix, and none existed to begin with.**
+`BitArray` is the one collection whose counter was already unsigned
+(`std::uint32_t` before #1787, diverging from .NET's signed `int` at
+`BitArray.cs:44`). The pre-fix probe under UBSan
+(`1789_prefix_defects_ubsan.log`) reports **0 runtime errors** and exits 0;
+post-fix is likewise 0.
+
+Also reconfirmed pre-fix and unchanged post-fix: assignment already advanced the
+destination's counter (`copy-assign before=2 after=3`), including with a matching
+source counter and including self-assignment; no sentinel exists (six counter
+positions including the maximum each enumerate the exact bit count and report the
+exact `PopCount`); and there is no `Count` cache keyed on the counter —
+`getLengthProperty()` derives from `bits_.size()` on every call.
+
+### 20.4 The mutation-version delta matrix
+
+Measured pre-fix and post-fix; **identical on both sides**. Pinned permanently by
+`BitArrayVersionWideningTests.cpp`, not only by the probe.
+
+| Operation | Δ version |
+|---|---:|
+| `Set(i, true)` on a `false` bit | +1 |
+| `Set(i, false)` on a `true` bit | +1 |
+| `Set(i, v)` where the bit **already holds `v`** | **+1** (unconditional — the pre-existing contract, matching .NET `BitArray.cs:341`) |
+| `SetAll(true)`, `SetAll(false)` | +1 |
+| `Not()` | +1 |
+| `And`, `Or`, `Xor` with a same-length operand | +1 |
+| `And(*this)` / `Or(*this)` — no bit changes | **+1** |
+| `LeftShift(n)`, `RightShift(n)` for `n > 0` | +1 |
+| `LeftShift(0)`, `RightShift(0)` — no bit changes | **+1** (matching .NET's `count <= 0` early return, `BitArray.cs:521`, `:584`) |
+| `setLengthProperty` grow / shrink / shrink-to-zero | +1 |
+| `setLengthProperty(currentLength)` — no change | **+1** (matching .NET `BitArray.cs:665`) |
+| copy assignment `a = b` | +1 |
+| move assignment `a = std::move(b)` | +1 |
+| self copy assignment `a = a` | **+1** — no `if (this != &other)` guard; §6.2 |
+| self move assignment `a = std::move(a)` | **+1**, and the backing `std::vector<bool>` is left valid but unspecified (libstdc++ empties it) — pre-existing standard-library behaviour, recorded rather than hidden |
+| `Set` with an index `>= Length` or `< 0` (throws) | 0 |
+| `setLengthProperty(-1)` (throws) | 0 |
+| `LeftShift(-1)`, `RightShift(-1)` (throws) | 0 |
+| `And`/`Or`/`Xor` with a different length (throws) | 0 |
+| `Get`, `operator[]`, `getLengthProperty`, `getCountProperty` | 0 |
+| `getIsReadOnlyProperty`, `getIsSynchronizedProperty`, `getSyncRootProperty` | 0 |
+| `PopCount`, `HasAllSet`, `HasAnySet` | 0 |
+| both `CopyTo` overloads, `Clone`, range-`for`, a full enumerator walk | 0 |
+
+Copy **construction** inherits the source's counter (matching .NET's `Clone`
+semantics for the counter field); `Clone()` does **not**, because it goes through
+`BitArray(const std::vector<bool>&)` and default-constructs the counter at zero.
+Both are pre-existing and both are now pinned.
+
+The rows marked "no bit changes" are the pre-existing contract and #1789
+deliberately did not revisit the mutation/no-op policy: this ticket changed a
+width, nothing else. They are pinned by
+`AMutationThatChangesNoBitStillAdvancesTheCounter`, which also asserts that the
+bit pattern really was unchanged, so the case is the one being claimed.
+
+### 20.5 Object layout — re-measured, not assumed
+
+`build-probe/1789_probe1_layout.cpp`, one source run against both headers
+(`1789_prefix_layout.log` → `1789_postfix_layout.log`), LP64, GCC 14.2,
+libstdc++. Offsets are computed from a live object, because
+`BitArray::Enumerator` is polymorphic and therefore not standard-layout.
+
+| | pre | post |
+|---|---|---|
+| `sizeof(BitArray)` | 48 | **48** |
+| `alignof(BitArray)` | 8 | **8** |
+| `BitArray::bits_` offset (`vector<bool>`, 40) | 0 | **0** |
+| `BitArray::version_` offset (width) | 40 (4) | **40 (8)** |
+| `BitArray` tail padding | 4 | **0** |
+| `sizeof(BitArray::Enumerator)` | 32 | **40** |
+| `alignof(BitArray::Enumerator)` | 8 | **8** |
+| `Enumerator` vptr offset | 0 | **0** |
+| `Enumerator::arr_` offset (8) | 8 | **8** |
+| `Enumerator::version_` offset (width) | 16 (4) | **16 (8)** |
+| `Enumerator::index_` offset (`intcs`, 4) | 20 | **24** |
+| `Enumerator::current_` offset (`bool`, 1) | 24 | **28** |
+| `Enumerator::state_` offset (`EnumeratorState`, 4) | 28 | **32** |
+| counter class `sizeof`/`alignof` | 4 / 4 | **8 / 8** |
+
+Two things the table is worth reading carefully for:
+
+1. **The container was free.** `version_` is the last member and sat at offset 40
+   with four bytes of tail padding after it; the wider counter consumed exactly
+   that. `bits_` keeps offset 0 and nothing moved. `sizeof(BitArray)` is 48
+   before and after, which is why `PublishedObjectSizesAreUnchanged` still
+   asserts 48 and is still telling the truth.
+2. **The enumerator was not.** Its snapshot at offset 16 was immediately followed
+   by `index_`; the three members after the snapshot need 4 + 1 + 4 = 9 bytes and
+   only 8 were available, in any member order. Every member after the snapshot
+   moved by 8. §8.2 predicted `sizeof` 32 → 40 and the prediction held exactly.
+
+Type traits are unchanged: `BitArray` remains copy-constructible,
+copy-assignable, move-constructible, nothrow-move-constructible,
+non-polymorphic, non-trivially-copyable and standard-layout;
+`BitArray::Enumerator` remains polymorphic, derived from `IEnumerator`,
+copy-constructible and non-standard-layout. The vptr is still one 8-byte slot at
+offset 0, and the vtable still holds the same four entries (destructor pair plus
+`MoveNext`, `Reset`, `getCurrentProperty`). The calling convention of every
+member is unchanged — no parameter or return type moved between register and
+memory classes, because none of them changed at all.
+
+### 20.6 Emitted symbols — zero `BitArray` symbols changed
+
+`build-probe/1789_probe4_symbols.cpp` touches every public member of `BitArray`
+and of its public nested `Enumerator`, directly and through `IEnumerator*`;
+`nm --defined-only` is then diffed between the two header revisions.
+**727 symbols on both sides.**
+
+- **`BitArray`-named symbols: 64 pre, 64 post, and the sorted name lists are
+  byte-identical** — 0 added, 0 removed, 0 renamed. No mangled name encodes a
+  private field's width, which is precisely why this ABI break is silent.
+- The only delta anywhere is 7 removed / 7 added, and all fourteen are the
+  counter class's own weak inline members swapping instantiation:
+  `BasicMutationCounter<unsigned int>`'s constructor (three aliases),
+  both assignment operators, `operator++` and the conversion operator give way to
+  `BasicMutationCounter<unsigned long>`'s.
+
+```
+- _ZN6System11Collections6detail20BasicMutationCounterIjEaSEOS3_
+- _ZN6System11Collections6detail20BasicMutationCounterIjEaSERKS3_
+- _ZN6System11Collections6detail20BasicMutationCounterIjEC1Ev
+- _ZN6System11Collections6detail20BasicMutationCounterIjEC2Ev
+- _ZN6System11Collections6detail20BasicMutationCounterIjEC5Ev
+- _ZN6System11Collections6detail20BasicMutationCounterIjEppEv
+- _ZNK6System11Collections6detail20BasicMutationCounterIjEcvjEv
++ _ZN6System11Collections6detail20BasicMutationCounterImEaSEOS3_   (and the six mirrors)
+```
+
+`BitArray` was the **last** production user of the `<unsigned int>`
+instantiation, so after this ticket nothing in `modules/collections/include/`
+emits it; only `CollectionVersionCounterTests.cpp`, which pins
+`NarrowMutationCounter`'s behaviour, still names it.
+
+### 20.7 Source compatibility — unaffected
+
+No public signature, return type, parameter, or `const` qualification changed on
+`BitArray` or `BitArray::Enumerator`. `getLengthProperty()`,
+`getCountProperty()` and `PopCount()` still return a plain `intcs` by value;
+`GetEnumerator()` still returns `IEnumerator*`; `And`/`Or`/`Xor`/`Not`/both
+shifts still return `BitArray&`; `getCurrentProperty()` still returns an owning
+`std::any`; `operator[]` is still `const`-only and still returns `bool` by value.
+No new overload ambiguity: no overload set changed at all. No exception type,
+message, or ordering changed.
+
+In-repository caller impact: **every existing call site compiles unchanged, with
+no edit anywhere.** The consumers are `BitArrayTests.cpp` (21 cases),
+`Batch18CollectionsTests.cpp` and `Batch18bCollectionsTests.cpp` (the shift,
+`PopCount`, `Clone`, enumerator and property gap-fills),
+`CollectionsRemainingTests.cpp`, `EnumeratorCurrentSafetyTests.cpp` (#1793),
+`EnumeratorLifecycleTests.cpp` (#1767), `CollectionVersionCounterTests.cpp`,
+`modules/collections/tests/support/CollectionVersionSeam.hpp`, and the
+`collections_mutation_version.cpp` consumer fixture. There is no production
+consumer of `BitArray` inside this repository. The only test edits made were the
+deliberate assertion changes listed in §20.10.
+
+### 20.8 The stale-object probe — what the break actually looks like
+
+This is the half that matters, because "requires a rebuild" is worth nothing
+unless someone measured what skipping it does.
+`build-probe/1789_stale_old_caller.cpp` is compiled against the **pre-fix**
+header (`Enumerator` 32 bytes) and `1789_stale_main.cpp` against the current one
+(40), and the two objects are linked into one program in **both orders**, at
+`-O0` and `-O2`, with and without ASan+UBSan. Everything crossing the boundary is
+`extern "C"` over `void*`, so the halves agree on the calling convention and
+disagree only about the layout.
+
+**The linker says nothing.** All eight link commands exit 0 with **empty**
+diagnostic logs — no error, no warning. The two halves genuinely disagree:
+`old-half-sizeof-Enumerator=32` against `new-half-sizeof-Enumerator=40`, while
+`sizeof(BitArray)` reads 48 on both.
+
+| Mode | `-O0`, link order A (new object first) | `-O0`, link order B (old first) | `-O2`, both orders |
+|---|---|---|---|
+| consumer struct **embedding** an `Enumerator` by value | sentinel **corrupted** `0xFEEDFACECAFEBEED` → `0xFEEDFACE00000002`, `intact=0`, and **no ASan report at all** | sentinel intact, appears healthy | corrupted in **both** orders |
+| enumerator **heap-allocated by old code**, driven by new code | walks 8 of 8 bits | walks 8 of 8 bits | **reports 0 elements for an 8-bit array** — a silently wrong answer, no diagnostic |
+| the same under ASan+UBSan, `-O2` | `new-delete-type-mismatch`: "size of the allocated type: 32 bytes; size of the deallocated type: 40 bytes" | order B/embedded **aborts** on an uncaught `ArgumentOutOfRangeException` from a bad index | — |
+| mutation invalidation across the mismatch | `guard-fired=1` | `guard-fired=1` | `guard-fired=1` |
+
+Four properties make this the worst kind of break, and all four are measured
+rather than asserted:
+
+1. **No diagnostic at link time, in any of the eight configurations.** Not from
+   `ld`. This is the same class of miss #1800 measured for `-flto -Wodr`, ASan
+   `detect_odr_violation=2` and UBSan.
+2. **The embedded case corrupts a neighbouring member with no sanitizer report**,
+   because the corrupted bytes are inside the same allocation — ASan cannot see
+   it. That is silent memory corruption in a program that looks healthy. The
+   corrupting value, `0x00000002`, is `EnumeratorState::Position::AfterLast`
+   written at the new offset 32.
+3. **At `-O2` a stale enumerator silently reports an empty array.** The old half
+   inlines its own `GetEnumerator()` and constructs at the old offsets; the new
+   half's inlined `MoveNext` reads `index_` and `state_` at the new ones and
+   concludes immediately. Nothing throws and nothing is diagnosed.
+4. **At `-O0` one of the two link orders appears to work.** A consumer who
+   forgets to rebuild and happens to get link order B observes nothing wrong
+   until the link line changes.
+
+Notably, **the fail-fast guard itself keeps firing in every configuration**, so a
+consumer cannot use "my enumerators still throw when I mutate" as evidence that
+it rebuilt correctly.
+
+The transcripts are `build-probe/1789_stale_O0.log`, `1789_stale_O2.log`,
+`1789_stale_O0_asan.log` and `1789_stale_O2_asan.log`; the empty link logs are
+`1789_stale_link{A,B}_*.log`.
+
+**CNA and mobile-eggbert remain unmeasured.** They were not inspected, searched,
+configured, built or modified, no claim is made about whether they use
+`BitArray`, and ticket #1773 remains `blocked`.
+
+### 20.9 Performance and allocation
+
+`build-probe/1789_probe5_perf.cpp`, one source at `-O2 -DNDEBUG` against both
+headers, with an `asm volatile` compiler barrier per iteration and replaced
+global `operator new`/`delete` counting allocations. Seven **interleaved** paired
+runs, median reported (`1789_perf_summary_paired.log`), then seven more as a
+repeat (`1789_perf_summary_repeat.log`).
+
+| Operation | pre (ns/op) | post (ns/op) | Δ | allocs pre | allocs post |
+|---|---:|---:|---:|---:|---:|
+| bit read `Get(i)` | 0.608 | 0.598 | −0.010 | 0 | 0 |
+| bit write `Set(i, v)` | 1.056 | 1.043 | −0.013 | 0 | 0 |
+| `SetAll` (1024 bits) | 2.025 | 1.994 | −0.031 | 0 | 0 |
+| `Not` (1024 bits) | 1208.925 | 1212.403 | +3.478 | 0 | 0 |
+| `And` (1024 bits) | 1026.737 | 1029.338 | +2.601 | 0 | 0 |
+| `Or` (1024 bits) | 994.056 | 999.585 | +5.529 | 0 | 0 |
+| `Xor` (1024 bits) | 1498.556 | 1500.262 | +1.706 | 0 | 0 |
+| enumerator create + delete | 5.924 | 5.901 | −0.023 | 200000 | 200000 |
+| enumerator create + 64 × `MoveNext` | 111.333 | 112.878 | +1.545 | 3125 | 3125 |
+| copy construction (1024 bits) | 9.359 | 9.254 | −0.105 | 25000 | 25000 |
+| copy assignment (1024 bits) | 2.491 | 2.264 | −0.227 | 0 | 0 |
+| move assignment (1024 bits) | 25.567 | 25.133 | −0.434 | 50000 | 50000 |
+| `LeftShift(1)` (1024 bits) | 1122.957 | 1127.227 | +4.270 | 0 | 0 |
+| **`RightShift(1)` (1024 bits)** | **1038.547** | **1127.020** | **+88.473** | 0 | 0 |
+| `setLengthProperty` toggle | 3.937 | 3.941 | +0.004 | 1 | 1 |
+
+**Verdict: no measurable cost from the widening, and one row that needed
+explaining rather than waving through.** Every row but one straddles zero, and
+the **allocation counts are identical in every row** — the widening adds no
+allocation on any path, which was requirement 10 of §6.
+
+`RightShift(1)` is the exception, and it is *not* noise: fourteen paired runs give
+pre 1028–1063 and post 1114–1142, two non-overlapping ranges. It is also **not
+the counter**, and that was established rather than assumed:
+
+1. `BitArray::RightShift`'s own generated code is **instruction-for-instruction
+   identical** on both sides — 130 lines of `objdump` output each, byte-identical.
+   The only codegen difference anywhere in the header is inside
+   `BasicMutationCounter::operator++`, where `mov (%rax),%eax` / `mov %edx,(%rax)`
+   become `mov (%rax),%rax` / `mov %rdx,(%rax)`, one byte longer each.
+2. Recompiling **both** sides with `-falign-loops=32 -falign-functions=64` inverts
+   the sign completely: `RightShift(1)` becomes pre 1306.607 / post 1109.200, the
+   post side now 197 ns *faster* (`1789_perf_summary_aligned.log`). A difference
+   that a pure alignment flag can move by 200 ns in either direction is a
+   code-layout artefact of this particular `-O2` binary, not a property of the
+   counter.
+
+That is disclosed here in full rather than reported as "within noise", because
+the first measurement genuinely reproduced and a reader who re-ran the probe
+would have found it.
+
+Memory cost, stated plainly rather than buried: **0 bytes per `BitArray` object**
+(48 → 48; the counter grew into padding) and **+8 bytes per outstanding
+enumerator** (32 → 40). An enumerator is a short-lived, singly-allocated object,
+so the practical cost is 8 bytes per live iteration. Cache consequence: none
+measurable — `BitArray` occupies the same 48 bytes and the enumerator still fits
+comfortably inside one 64-byte line.
+
+### 20.10 Permanent tests
+
+A new focused suite,
+`modules/collections/tests/System/Collections/BitArrayVersionWideningTests.cpp`,
+**43 cases**, all near-boundary positioning done through the one authoritative
+seam from #1800 (`modules/collections/tests/support/CollectionVersionSeam.hpp`,
+which already carried a `BitArray` specialisation) — **no new explicit
+specialisation body was written**, as CLAUDE.md requires. No test performs more
+than a few hundred real mutations; the whole suite runs in 20 ms.
+
+| Required coverage | Where |
+|---|---|
+| The counter is unsigned, 64-bit; the snapshot is exactly as wide | `TheCounterIsUnsignedAndSixtyFourBits`, `TheEnumeratorSnapshotIsExactlyAsWideAsTheCounter` |
+| The approved object growth | `ThePublicEnumeratorGrewToFortyBytesOnLp64` (Enumerator 40 / align 8, `BitArray` still 48 / align 8) |
+| No counter leaks through a public surface; traits unchanged | `NoCounterOrCounterTypeLeaksThroughAPublicSurface`, `ValueSemanticsTraitsAreUnchanged` |
+| **No stale snapshot revalidated across the old 2^32 distance** | `NoStaleEnumeratorIsRevalidatedAcrossTheOld2Pow32Distance` (multiples 1, 2, 7, 1000), `ResetAlsoFailsFastAcrossTheOld2Pow32Distance` |
+| **No low-32-bit ABA** — the truncation a container-only widening would have left | `ASnapshotSharingOnlyItsLowThirtyTwoBitsIsStillRejected`, which asserts the low words match, that the high words differ, *and* that the guard still fires |
+| The horizon is 2^64, stated as a bound not an impossibility | `TheHorizonIsNowTwoToTheSixtyFourNotTwoToTheThirtyTwo` |
+| The step that used to wrap | `TheStepThatUsedToWrapNowJustAdvances` (UINT32_MAX → 2^32, explicitly *not* 0) |
+| Every named boundary position | `MutationAtEachNamedBoundaryValueMovesForwardExactly` — 0, 1, 2^31−2, 2^31−1, 2^31, 2^32−2, **2^32−1**, **2^32**, 2^32+5, 2^64−2 |
+| Enumerator taken before, at, and after the transition | `AnEnumeratorTakenBeforeTheTransitionIsInvalidatedByIt`, `MutationPastTheOldBoundaryStaysExactAndKeepsInvalidating` (25 interleaved steps) |
+| Every mutation family, at the boundary | `EveryMutationFamilyInvalidatesAcrossTheOldBoundary` — 11 members including both assignments |
+| Exhaustion is defined | `ExhaustionWrapsToZeroWithoutUndefinedBehaviour` |
+| No sentinel | `NoCounterValueIsReservedAsASentinel` (6 positions incl. the maximum) |
+| The full delta matrix (§20.4) | `EveryEffectiveMutationAdvancesTheCounterByExactlyOne`, `AMutationThatChangesNoBitStillAdvancesTheCounter`, `EveryRejectedOrReadOnlyOperationAdvancesNothing`, `ARejectedMutationLeavesAnOutstandingEnumeratorValid` |
+| Assignment, copy, move at the boundary | `CopyAssignmentAdvancesTheDestinationAcrossTheBoundary`, `MoveAssignmentAdvancesTheDestinationAcrossTheBoundary`, `AssignmentWithAMatchingSourceCounterStillInvalidates`, `SelfAssignmentAdvancesAsThisCollectionDocuments`, `SelfMoveAssignmentAdvancesAndIsMemorySafe`, `AssignmentDoesNotDisturbTheSourcesOwnEnumerators`, `MoveConstructionInheritsTheCounterAndTransfersTheBits` |
+| **A copied array is independent**; `Clone` starts fresh | `AnIndependentCopyDoesNotInvalidateTheOriginalsEnumerator`, `CloneStartsAFreshCounterAtZero` |
+| Ordinary sizes: empty, one bit, word boundaries, multi-word | `AnEmptyBitArrayEnumeratesToCompletionAndStaysExact`, `AMutationOnAnEmptyBitArrayInvalidatesItsEnumerator`, `ASingleBitBehavesAtTheBoundary`, `WordBoundarySizesEnumerateExactlyAtTheBoundary` (7/8/31/32/33/63/64/65/127/128/129) |
+| Value patterns and a large bounded array | `EveryValuePatternSurvivesTheBoundary` (all-false, all-true, alternating, sparse), `ALargeBoundedBitArrayEnumeratesExactlyAcrossTheWrap` (100,000 bits, counter positioned to wrap mid-loop) |
+| `CopyTo`, both overloads | `CopyToBothOverloadsStayExactAtTheBoundary` |
+| The #1767 state machine and the #1793 owning `Current` | `TheEnumeratorStateMachineIsUnchangedAtTheBoundary`, `TheBoxedCurrentIsAnOwningCopyAtTheBoundary` |
+| Interface enumeration and the directly named public `Enumerator` | `EnumerationThroughTheIEnumeratorInterfaceIsUnchanged`, `TheDirectlyNamedPublicEnumeratorBehavesLikeTheInterfaceOne`, `TwoEnumeratorsOverOneArrayAreIndependentUntilAMutation` |
+| Reading never invalidates; `begin()`/`end()` still carry no snapshot | `ReadingWithoutMutatingNeverInvalidatesAtTheBoundary`, `ThePublicStlIteratorsStillCarryNoSnapshot` |
+
+**Deliberate assertion changes** — these are the ones a reviewer should look at,
+and there are exactly four:
+
+1. `BitArrayAdapter::kNarrowCounter` in `CollectionVersionCounterTests.cpp`
+   flipped `true` → `false`. That is the flip #1787 designed the flag for. It was
+   **mutation-checked**: putting it back to `true` and rebuilding fails **two**
+   tests — `TheCounterHasTheWidthItsLayoutPermits` *and*
+   `NoStaleSnapshotBecomesValidAcrossTheOld2Pow32Distance`
+   (`build-probe/1789_mutation_check.log`). Only the first would have failed
+   before #1788 strengthened the narrow branch (§19.11), so that correction is
+   what made this flip load-bearing rather than cosmetic.
+2. `sizeof(NG::BitArray) == 48` **stays** in `PublishedObjectSizesAreUnchanged`,
+   because it genuinely did not change — re-measured, not assumed. A comment there
+   now says why, and points at where the figure that *did* change lives.
+   `sizeof(BitArray::Enumerator)` was never in `PublishedIteratorSizesAreUnchanged`;
+   a comment now records that it is deliberately absent and pinned in the new
+   suite instead.
+3. Comments in `CollectionVersionCounterTests.cpp` and `MutationCounter.hpp` were
+   updated so none of them still describes `BitArray` as narrow, and
+   `NarrowMutationCounter`'s doc-comment now states plainly that **no collection
+   uses it any more**.
+4. `BitArray.hpp` gained a class-level and an `Enumerator`-level documentation
+   block stating the versioning contract, the layout change, the mandatory
+   rebuild, the remaining 2^64 horizon, and the absence of any thread-safety
+   guarantee.
+
+`test/consumer/collections_bitarray_version.cpp` is a new **tracked** consumer
+fixture, compiled against only the public `Collections.Core` surface with
+`-Wall -Wextra -Wpedantic -Werror` and **run**, exercising ordinary construction
+through all four constructors, every mutating member, every argument rejection,
+the fail-fast contract across nine mutation families, copy/`Clone`/assignment
+independence, all iteration forms, the #1767 lifecycle guard, the #1793 owning
+`Current`, the directly named public `Enumerator`, and the 40-byte enumerator a
+consumer can observe. It deliberately does **not** reach the counter: no public
+accessor exists and this ticket added none.
+
+### 20.11 Sanitizers
+
+| Check | Result |
+|---|---|
+| ASan + UBSan + LSan over `SharpRuntimeTests_Collections_Core` | **2,637/2,637 pass, zero reports**, exit 0 (`build-asan/1789_collections_core_asan.log`), run with `detect_leaks=1:detect_odr_violation=2` |
+| UBSan, `1789_probe2_defects`, pre-fix | **0 runtime errors** — `BitArray` never had signed-overflow UB |
+| UBSan, `1789_probe2_defects`, post-fix | **0 runtime errors** |
+| ASan+UBSan+LSan `1789_probe3_sanitizers`, `boundary-mutation` | `failures=0`, no diagnostic — ten lengths from 0 to 1023, each crossing UINT32_MAX and then the 2^64 wrap |
+| … `enumerator-invalidation` | `failures=0` — 11 mutation families with the enumerator mid-walk, including a `setLengthProperty` that **shrinks** under it |
+| … `copy-move-assign` (incl. self-copy and self-move) | `failures=0`, no diagnostic |
+| … `retained-current` (64 owning `std::any` boxes outliving the array) | `failures=0`, no diagnostic |
+| … `large-bitarray` (**200,000 bits**, counter positioned to wrap mid-loop) | `failures=0`, no diagnostic |
+| **LeakSanitizer proved active** | the bounded self-test leaks deliberately and reports **96 bytes in 3 allocations**, exit 1 — including a "Direct leak of **40** byte(s) in 1 object(s)", which is the enumerator at its new size |
+| ASan, stale-object probe | `new-delete-type-mismatch` (32 allocated / 40 deallocated) and an abort, reproduced as designed (§20.8) |
+
+Each probe mode runs as its own process so no abort can hide another.
+
+**TSan was not run, and that is a decision rather than an omission.** This ticket
+adds no atomic, widens none, introduces no `mutable` cache and no hidden `const`
+write; the counter is a plain non-atomic field of a different width, read and
+written at the same three sites. TSan has nothing new to find. **No thread-safety
+guarantee follows from this ticket** — concurrent mutation of a `BitArray` is
+unsupported before and after, exactly as #1787 §14.3 states, and
+`getIsSynchronizedProperty()` still returns `false`.
+
+### 20.12 Gates
+
+Everything below ran from a **fresh configuration plus a clean-first rebuild**,
+which the enumerator-layout change makes mandatory: any object file left over
+from before the change would disagree about `sizeof(BitArray::Enumerator)` and be
+an ODR violation inside the test binaries themselves.
+
+| Gate | Result |
+|---|---|
+| `cmake --fresh -S . -B build` then `cmake --build build --clean-first --parallel 3` | see §20.12 table in the ticket report |
+| `scripts/run_component_tests.sh build` | **13,923** tests across **37** executables (13,880 before; +43, exactly the new suite) |
+| `SharpRuntimeTests_Collections_Core` | **2,637** (2,594 before) |
+| `scripts/validate_module_boundaries.py --root .` | 41 physical modules / 90 dependency edges — unchanged, no new edge |
+| `test/validate_module_boundaries_test.py` | 7/7 |
+| `scripts/generate_component_catalog.py --check` | catalogue current |
+| `scripts/db_consistency_check.py --db plan.sqlite3` | no problems |
+| `scripts/check_version_seam_odr.py` | 2 seams / **18** specialisation definitions — unchanged, no seam added |
+| `test/check_version_seam_odr_test.py` | 12/12 |
+| `scripts/check_negative_consumer_fixtures.py` | **8 fixtures / 51 sites, every site rejected** — unchanged; no negative fixture was added, and none was needed because no public signature changed |
+| `test/check_negative_consumer_fixtures_test.py` | 37/37 |
+| `scripts/check_selective_components.sh` | all ten components pass |
+| `check_selective_components.sh Collections.Core collections_bitarray_version.cpp` | passes in isolation, fixture exits 0 |
+| `scripts/check_doxygen_warnings.sh` | **1,941** of the 1,942 ceiling — **unchanged** |
+| `git diff --check` | clean |
+
+The Doxygen count is deliberately **unchanged at 1,941**. `Doxyfile` scans the
+module include trees and `README.md` only, not `docs/`, so every markdown link
+from `README.md` into `docs/` costs one unresolvable `\ref` warning — including a
+second link to an already-linked document, which is how #1788 spent its +1. This
+ticket's new `README.md` entry therefore refers to this document as an inline
+code span rather than a markdown link, and reuses the existing link in the #1788
+entry directly below it. That is a deliberate choice to stay off the ceiling, and
+it is disclosed here rather than presented as a free lunch.
+
+### 20.13 Residual limitations, stated not hidden
+
+| # | Residual | Position |
+|---|---|---|
+| 1 | The ABA horizon is now 2^64, **not infinity** | Over 580 years of uninterrupted mutation of one instance at an implausibly generous 10^9/s. It is modular arithmetic and `TheHorizonIsNowTwoToTheSixtyFourNotTwoToTheThirtyTwo` asserts the wrap explicitly rather than pretending it cannot happen. Guarding it would cost a branch on every mutation (§7 C/F). |
+| 2 | `sizeof(BitArray::Enumerator)` grew 25%, 32 → 40 | Approved, measured (§20.5, §20.9), and unavoidable — §7 H is arithmetically impossible here: nine bytes are needed after the snapshot and eight are available, in any member order. |
+| 3 | **A stale object file links silently and can corrupt memory or silently report an empty array** | §20.8. No linker diagnostic in any of eight configurations; no ASan report for the embedded case; a wrong answer rather than a crash at `-O2`. The mandatory full rebuild is the only mitigation, and `README.md` says so in those terms. |
+| 4 | `Set`, both zero-count shifts, `And(*this)` and a same-length `setLengthProperty` still bump although no bit changes | Pre-existing contract, matching .NET, deliberately not revisited — this ticket changed a width. Now pinned by `AMutationThatChangesNoBitStillAdvancesTheCounter` so the next reader sees it is a decision. |
+| 5 | Self **move** assignment leaves the backing `std::vector<bool>` valid but unspecified | Pre-existing standard-library behaviour, not introduced or fixable here. Recorded and pinned as memory-safe by `SelfMoveAssignmentAdvancesAndIsMemorySafe` rather than left unstated. |
+| 6 | `begin()`/`end()` are still not version-checked | Pre-existing, documented, deliberate, and pinned by `ThePublicStlIteratorsStillCarryNoSnapshot`. |
+| 7 | No thread-safety guarantee | The counter is non-atomic before and after. TSan not run, with reasons (§20.11). `getIsSynchronizedProperty()` still returns `false`. |
+| 8 | The `RightShift(1)` benchmark row moved by ~8% | Attributed to `-O2` code alignment, not to the counter, and demonstrated by inverting the sign with an alignment flag (§20.9). Disclosed rather than filed under "noise". |
+| 9 | `detail::NarrowMutationCounter` now has no user | Kept as the historical record and as the counter template's second instantiation for the tests that pin its behaviour; its doc-comment says plainly that no collection uses it and that none should. Removing it was outside this ticket's scope. |
+| 10 | CNA and mobile-eggbert are **unmeasured** | Not inspected, searched, configured, built or modified. #1773 stays `blocked`. |
+
+### 20.14 Rollback
+
+`git revert` of the implementation commit restores the 32-bit counter and, with
+it, the 2^32 ABA horizon. A revert must also flip `BitArrayAdapter::kNarrowCounter`
+back to `true` and remove or invert the new suite — otherwise the permanent tests
+fail, which is the intended safety property. Validate a revert by re-running
+`build-probe/1789_probe2_defects.cpp` against both headers and confirming it
+reports `defects-observed=3` again, and by a **fresh clean-first rebuild**, since
+the enumerator layout moves back.

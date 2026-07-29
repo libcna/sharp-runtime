@@ -39,7 +39,7 @@ the mutation counter this file's fail-fast enumerator snapshots. It carries **no
 found during remediation, by ticket #1786's own inventory — and it reopens no
 finding here. The original evidence above is retained unchanged.
 
-The counter is now `System::Collections::detail::NarrowMutationCounter` — still 32 bits,
+The counter became `System::Collections::detail::NarrowMutationCounter` — still 32 bits,
 deliberately. `BitArray` was **missing from ticket #1786's inventory** altogether, and
 it is also the one collection whose counter was already `std::uint32_t` rather than
 `intcs`, so it never had the signed-overflow undefined behaviour the other fourteen
@@ -49,6 +49,50 @@ that grows `sizeof(BitArray::Enumerator)` from 32 to 40 bytes — nine bytes are
 after an 8-byte snapshot where eight are available, in any member order. Widening only
 the container would be *wrong* rather than partial, since the snapshot would become a
 truncation of the counter. **Blocked ticket #1789** holds both, pending approval.
+
+## Post-remediation follow-up: ticket #1789 (2026-07-29)
+
+Ticket #1789 (`REMED-COLL-BITARRAY-VERSION-WIDEN`, P3, size XS) received that
+approval and closed the residual the previous paragraph describes. It carries **no
+`SR-AUD-*` identifier** — the numbering stays frozen at 364 — and it **reopens no
+finding**: SR-AUD-364 stays `remediated`, ticket #1767's enumerator lifecycle guard
+and ticket #1793's owning `Current` are untouched, and every one of the 21
+`BitArrayTests.cpp` cases plus the `Batch18`/`Batch18b` gap-fills passes unmodified.
+
+`BitArray::version_` moved from `NarrowMutationCounter` to the 64-bit
+`detail::MutationCounter`, and `BitArray::Enumerator::version_` from
+`NarrowMutationVersion` to `MutationVersion`, **in one change** — the truncation
+hazard above is exactly why they could not be separated. The nine increment sites
+(`Set`, `SetAll`, `Not`, `And`, `Or`, `Xor`, `LeftShift`, `RightShift`,
+`setLengthProperty`) and the three read/compare sites are unchanged in spelling; the
+production diff is two field declarations plus documentation.
+
+Reproduced before any production change (`build-probe/1789_prefix_defects.log`):
+positioning the counter 2^32 forward truncated it back onto an outstanding
+enumerator's snapshot and the guard stopped firing — `guard-fired=0` for `MoveNext`,
+for `Reset`, and at seven laps — `defects-observed=3`. The identical source post-fix
+reads `defects-observed=0`, and the whole diff of the two logs is the counter width,
+those three outcomes, and one sentinel probe reaching a larger maximum; **every
+mutation-delta line is byte-identical**. UBSan reported **0** runtime errors on both
+sides, confirming the pre-existing unsigned representation had already ruled out the
+undefined behaviour.
+
+Measured: `sizeof(BitArray::Enumerator)` **32 → 40** (`arr_` keeps offset 8; the
+snapshot at 16 widens and `index_`/`current_`/`state_` each move by 8);
+`sizeof(BitArray)` **unchanged at 48**, because the wider counter landed in the four
+bytes of tail padding the container already had; `alignof` 8 on both; **0 `BitArray`
+symbols added, removed or renamed** (64 on each side, byte-identical name lists). No
+public signature, return type, or `const` qualification changed, and every
+in-repository caller compiles unmodified.
+
+The break is therefore **binary-only and silent**. `Enumerator` is a public nested
+class, so a consumer may store one by value; an object file compiled against the old
+header links against a new one with **no diagnostic in any of eight tested
+configurations**, and then either corrupts the member following an embedded
+enumerator with **no AddressSanitizer report at all** (the bytes are inside the same
+allocation), or — at `-O2` — reports **zero elements for a non-empty array**. A
+complete consumer rebuild is mandatory. Full record:
+`docs/CollectionVersionCounterSweep.md` §20.
 
 Repository-wide, three defect classes were reproduced against the committed
 pre-fix headers before anything changed

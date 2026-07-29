@@ -3883,3 +3883,85 @@ keeps its 2^32 residual by design**, since closing it grows the *public*
 inspected, searched, configured, built, or modified, and no claim is made about
 whether they use `LinkedList<T>`. No push, merge, rebase, tag, or publication
 occurred. The full record is `docs/CollectionVersionCounterSweep.md` §19.
+
+### Post-remediation follow-up: ticket #1789 — BitArray mutation-counter widening
+
+Ticket **#1789** (`REMED-COLL-BITARRAY-VERSION-WIDEN`, P3, size XS, `defect`,
+area `Collections`) closed the **second and last** of the two approval-blocked
+residuals ticket #1787 recorded. **No new `SR-AUD-*` identifier** — the numbering
+stays frozen at 364, and **no audit finding is reopened**: SR-AUD-364 stays
+`remediated`, ticket #1767's enumerator lifecycle guard and ticket #1793's owning
+`Current` are untouched, and every `BitArrayTests.cpp` case passes unmodified.
+
+`BitArray`'s mutation counter and its **public** nested `Enumerator`'s snapshot
+both moved from 32 to 64 bits, under the explicit user approval that
+`sizeof(BitArray::Enumerator)` may grow **32 → 40** on LP64 with a consequent full
+consumer rebuild. Both together, deliberately: widening the container alone would
+have made the guard's comparison a silent truncation and left the 2^32 alias in
+place while the code claimed otherwise. The 2^32 revalidation was reproduced
+against the committed pre-fix header first —
+`build-probe/1789_prefix_defects.log`, `guard-fired=0` for `MoveNext`, for
+`Reset()`, and at seven laps of 2^32, `defects-observed=3` — and the identical
+source post-fix reads `defects-observed=0`. Unlike `LinkedList<T>`'s, the
+consequence is a **wrong answer rather than a use-after-free**:
+`BitArray::Enumerator` holds an index bounds-checked against the current length on
+every step. At ~10^8 mutations/second the horizon was about 43 seconds.
+
+`BitArray` never had the signed-overflow undefined behaviour: its counter was
+already `std::uint32_t` before #1787, diverging from .NET's signed `int`
+(`BitArray.cs:44`). UBSan reports **0** runtime errors on both sides of this
+change, confirming that this ticket closed only the remaining *logical* ABA
+horizon.
+
+Measured: `sizeof(BitArray::Enumerator)` 32 → **40** (`arr_` keeps offset 8, the
+snapshot at 16 widens, and `index_`/`current_`/`state_` each move by 8 — nine
+bytes were needed after an eight-byte snapshot where eight were available, in any
+member order); `sizeof(BitArray)` **unchanged at 48**, because the wider counter
+landed in the four bytes of tail padding the container already had; `alignof` 8
+on both; and **0 `BitArray` symbols added, removed or renamed** (64 on each side,
+byte-identical name lists). No public signature changed; every in-repository
+caller compiles unmodified. The break is therefore **binary-only and silent**: a
+stale object file links with **no diagnostic in any of eight tested
+configurations**, and then either corrupts the member following an embedded
+`Enumerator` with **no AddressSanitizer report at all** (the bytes are inside the
+same allocation), or — at `-O2` — silently reports **zero elements for a
+non-empty array**. Under ASan the same case surfaces as a
+`new-delete-type-mismatch` ("allocated 32 bytes, deallocated 40"). The fail-fast
+guard keeps firing in every configuration, so a consumer cannot use it as
+evidence that it rebuilt.
+
+The required adapter flip was **mutation-checked**: putting
+`BitArrayAdapter::kNarrowCounter` back to `true` fails **two** tests, including
+the residual assertion that #1788 §19.11 strengthened precisely so this flip
+would be load-bearing rather than cosmetic.
+
+One measurement is disclosed rather than filed under noise: the `RightShift(1)`
+benchmark row moved +88 ns/op (~8%) and reproduced across fourteen paired runs.
+It is **not** the counter — `BitArray::RightShift`'s generated code is
+instruction-for-instruction identical on both sides, and recompiling both sides
+with `-falign-loops=32 -falign-functions=64` inverts the sign, making the post
+side 197 ns *faster*. It is `-O2` code alignment.
+
+Validation from a fresh configure plus a clean-first rebuild at **three jobs**
+(635 objects, 0 predating the marker, 37 of 38 executables relinked, 0 warnings,
+0 errors): `Collections.Core` **2,637** (was 2,594); full repository **13,923
+across 37 executables** (was 13,880); negative fixtures **8 / 51** all rejected
+plus 37/37 self-test, none added and none needed since no public signature
+changed; version-seam ODR **2 seams / 18 specialisations** plus 12/12 self-test,
+none added; module graph **41 / 90** unchanged; Doxygen **1,941** of the 1,942
+ceiling, **unchanged**; the full ten-component selective matrix and a new tracked
+`Collections.Core` consumer fixture passed; ASan/UBSan/LSan `Collections.Core`
+**2,637 with zero reports**, LSan proved active by a bounded self-test, and a
+200,000-bit boundary-positioned walk clean; `git diff --check` clean; local CI
+gate passed. **TSan was not run**: no atomic, no `mutable` cache, no hidden
+`const` write, and no thread-safety claim is made for `BitArray` before or after
+— `getIsSynchronizedProperty()` still returns `false`.
+
+Tickets #1773 and #1803 remain `blocked` and untouched. #1788 stays `done`;
+#1790, #1791 and #1792–#1802 remain `done` and none was reopened. **With #1789,
+no collection in this repository retains a 2^32 enumerator-snapshot ABA horizon**
+— every one is 2^64, and `detail::NarrowMutationCounter` has no user left. CNA and
+mobile-eggbert were not inspected, searched, configured, built, or modified, and
+no claim is made about whether they use `BitArray`. No push, merge, rebase, tag,
+or publication occurred. The full record is
+`docs/CollectionVersionCounterSweep.md` §20.
