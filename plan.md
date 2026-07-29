@@ -1,6 +1,6 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-07-28 — 41 physical components, 90 direct production
+*Last verified: 2026-07-29 — 41 physical components, 91 direct production
 dependency edges, a clean native build, 13,069 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
@@ -36,9 +36,11 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 13,987 passing across 36 component binaries plus one integration
-  binary, verified by ticket #1812 (SR-AUD-242, `ZipArchive`'s null stream)
-  through the full repository gate, raised from the 13,979
+- Tests: 13,994 passing across 36 component binaries plus one integration
+  binary, verified by ticket #1814 (SR-AUD-236, `HttpContentJsonExtensions`'s
+  null content) through the full repository gate, raised from the 13,987
+  verified by ticket #1812 (SR-AUD-242, `ZipArchive`'s null stream), itself
+  raised from the 13,979
   verified by ticket #1811 (SR-AUD-257, the compression streams' null
   inner stream), itself raised from the 13,970
   verified by ticket #1810 (SR-AUD-132, the interpolated-string
@@ -60,7 +62,11 @@ was never created. Neither file should be linked as current documentation.
   adding or removing a case, so the figure was unchanged rather than stale at
   that point. (The 12,991 figure this line once carried was a stale relic; each
   remediation ticket's own section below states the count it measured.)
-- Component graph: 41 physical modules and 90 direct production edges.
+- Component graph: 41 physical modules and 91 direct production edges. The
+  ninety-first was added by ticket #1814: `Net.Http.Json` now declares the
+  `Core.Base` public dependency its header needs to throw
+  `ArgumentNullException`, an edge it previously took only transitively through
+  `Net.Http`.
 - Boundary validator: no cycles, duplicate public include paths, orphan
   files, unresolved includes, undeclared edges, stale edges, or visibility
   mismatches.
@@ -3128,4 +3134,82 @@ output (Create). No in-repository caller did so.
 
 Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
 `1812_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new build
+directory was created** and **no compilation exceeded three jobs**.
+
+### Completed HttpContent JSON null-content validation: ticket #1814
+
+Ticket #1814 (`REMED-NET-HTTP-JSON-NULL-CONTENT`, P1, size S, `remediation`,
+area *Net*) is **done** and **SR-AUD-236 is now `remediated`** — the seventh of
+NEXT.md's eight immediate public-input crash tickets. **No new `SR-AUD-*`
+identifier**; the numbering stays frozen at 364, and the index now records
+**17 remediated** and **347 confirmed** of 364.
+
+`HttpContentJsonExtensions::ReadFromJson` dereferenced its
+`std::shared_ptr<HttpContent>` with no validity check, and `ReadFromJsonAsync`
+delegated to it from inside the task body. Measured before any production change,
+one process per case (`build-probe/1814_prefix_defects.cpp`, logs
+`1814_prefix_defects.log` and `1814_postfix_defects.log`):
+
+| Case | Input | Pre-fix | Post-fix |
+|---|---|---|---|
+| 1 | `ReadFromJson(empty)` | UBSan *member access within null pointer* at `HttpContentJsonExtensions.hpp:32`, then **ASan SEGV on 0x0** | `ArgumentNullException` |
+| 2 | `ReadFromJsonAsync(empty)` then `getResultProperty()` | same pair, on worker thread **T1** | same, thrown by the call itself |
+| 3 | `ReadFromJsonAsync(empty)` and **never awaited** | same pair, on worker thread **T1** — the process still died | same |
+| 4 | the valid synchronous path | `answer=42` | **byte-identical** |
+| 5 | the valid asynchronous path | `answer=7` | **byte-identical** |
+
+**Case 3 is why the async guard sits before the task, not inside it.** The finding
+describes `ReadFromJsonAsync` as turning null input into "a deferred task crash".
+Measured, it is worse than deferred: the dereference happened on the `std::async`
+worker thread, so a caller that started the task and walked away still lost the
+whole process to a SEGV on thread T1. A guard placed only inside `ReadFromJson`
+would have converted that into an exception stored on a task the caller never
+observes — quieter, still wrong.
+
+.NET prevents exactly this by code layout, and this port now copies it: the public
+`ReadFromJsonAsync` overloads in `HttpContentJsonExtensions.cs` are **not** `async`
+methods. Each runs `ArgumentNullException.ThrowIfNull(content)` and only then calls
+the separate `ReadFromJsonAsyncCore`, so a null argument throws at the call site. A
+named regression pins that placement, not just the exception type.
+
+**One component-metadata consequence — the first in this remediation series.**
+`Net.Http.Json` is an `INTERFACE` (header-only) component, so the guard lives in a
+public header, which must include `System/ArgumentNullException.hpp`.
+`Net.Http.Json` previously reached `Core.Base` only transitively through
+`Net.Http`, and the boundary validator correctly rejected the undeclared public
+edge. `modules/net-http-json/CMakeLists.txt` now declares `Core.Base` in
+`PUBLIC_DEPENDENCIES` and `docs/ComponentCatalog.md` was regenerated. **The
+production graph moves from 90 to 91 direct edges**; the module count is unchanged
+at 41. No consumer include path, target name or link line changes as a result, and
+the ten-component selective matrix still passes.
+
+**Tests: +7 permanent regressions** in `HttpContentJsonExtensionsTests.cpp` — both
+entry points rejected, the parameter name on both, the synchronous-throw placement
+of the async guard, repeatability, content whose body is the JSON literal `null`
+(an empty `shared_ptr` and a document that parses to null are different things and
+must stay different), and empty content still reaching the parser rather than
+being absorbed by the new guard.
+
+**Validation.** `SharpRuntimeTests_Net_Http_Json` **15/15** (was 8), and the same
+15 under **ASan + UBSan + LSan with zero reports**
+(`build-asan/1814_net_http_json_asan.log`). Repository gate: **0 warnings, 0
+errors**, **13,994 tests across 37 executables** (was 13,987). Module graph **41 /
+91**; catalogue regenerated and current; database consistent; the ten-component
+selective matrix passed; Doxygen **1,941** of the 1,942 ceiling, unchanged;
+`git diff --check` clean.
+
+**Source and ABI consequences: none.** No public signature, object layout, vtable
+or exported symbol changed. Behavioural note: passing an empty `shared_ptr` to
+either method now throws instead of crashing the process. No in-repository caller
+did so.
+
+**Deliberately out of scope.** `HttpClientJsonExtensions`'s
+`GetFromJsonAsync`/`DeleteFromJsonAsync` do guard their response content, but map a
+null content body to the JSON literal `"null"`
+(`content ? content->ReadAsString() : "null"`) rather than to a diagnostic. That is
+a different contract on a different type, carries no `SR-AUD-*` identifier, and was
+left exactly as found.
+
+Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
+`1814_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new build
 directory was created** and **no compilation exceeded three jobs**.

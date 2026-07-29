@@ -7,13 +7,14 @@ collector, or the complete .NET platform.
 
 The repository currently builds as 41 independently selectable CMake
 components. The verified Linux baseline on 2026-07-29 is a warning-free build
-with **13,987 passing tests across 37 test executables**. (This figure had been
+with **13,994 passing tests across 37 test executables**. (This figure had been
 stale at 13,538 for several remediation tickets; ticket #1802 corrected it to
 13,790, ticket #1791 raised it to 13,840, ticket #1788 to 13,880, ticket #1789
 to 13,923 — those last two measured from a fresh configuration and a
 clean-first rebuild, which their object-layout changes made mandatory — ticket
 #1805 to 13,937, ticket #1806 to 13,948, ticket #1807 to 13,958, ticket #1810
-to 13,970, ticket #1811 to 13,979, and ticket #1812 to the current value.)
+to 13,970, ticket #1811 to 13,979, ticket #1812 to 13,987, and ticket #1814 to the
+current value.)
 
 ## What is included
 
@@ -182,7 +183,7 @@ The component graph is enforced rather than documented only:
 - `.github/workflows/components.yml` runs the selective matrix and the full
   compatibility build on Ubuntu for pushes and pull requests.
 
-At the current baseline the graph has **41 physical modules and 90 direct
+At the current baseline the graph has **41 physical modules and 91 direct
 production dependency edges**, with no allow-listed exception. The boundary
 validator, the complete ten-job selective matrix, and the full build/test gate
 pass. The Text.Json negative assertion confirms that the target does not
