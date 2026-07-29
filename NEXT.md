@@ -3,14 +3,15 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-29. Branch: `feature/remediation-batch-1812`.
+*Last verified: 2026-07-29. Branch: `feature/remediation-batch-base64-followup`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production
-dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,014 tests across 37 executables (the 13,127 figure this
+dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,021 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 14,014
-verified by #1817, raised from the 14,002
+section below states the count it measured, and the current floor is the 14,021
+verified by #1818, raised from the 14,014
+verified by #1817, the 14,002
 verified by #1816, the 13,994
 verified by #1814, the 13,987
 verified by #1812, the 13,979
@@ -6532,3 +6533,35 @@ Ten commits on one batch branch, `feature/remediation-batch-1812`, each ticket a
 `fix(...)` commit paired with a `docs: close ticket #NNNN` commit (#1815 and
 #1816 share one docs commit). **No push, merge, rebase, tag, or package
 publication occurred**, and no historical ticket commit was amended.
+
+### Completed Base64 non-final padding rule: ticket #1818
+
+Ticket **#1818** (`REMED-BUFFERS-BASE64-NONFINAL-PADDING`, P2, size S, area
+*Buffers*) is **done** and **SR-AUD-080 is `remediated`** — the third ticket of the
+Base64 family plan ([`docs/Base64FamilyPlan.md`](docs/Base64FamilyPlan.md), ticket
+#1815) and the second of its three sequenced `decodeCore` tickets. No new
+`SR-AUD-*` identifier; numbering stays frozen at 364, and the index now records
+**20 remediated** and **344 confirmed** of 364.
+
+`Base64::decodeCore` consulted `isFinalBlock` only *after* an incomplete unpadded
+group, so a **complete padded** group decoded to `Done` regardless of the flag: a
+chunked caller was told a terminal quantum was ordinary intermediate data. Current
+.NET rejects padding in a non-final call along two independent paths —
+`Base64DecoderHelper.DecodeFrom`'s `skipLastChunk = isFinalBlock ? 4 : 0` makes the
+padding-aware tail unreachable, and `DecodeWithWhiteSpaceBlockwise` forces its
+per-block `localIsFinalBlock` back to false — so the repair is one rule: with the
+flag clear, `'='` is `InvalidData`, checked at the **first** padding character.
+
+**The finding understated its surface**: it named one input, and six of the seven
+non-final shapes probed were wrong (`build-probe/1818_defects.cpp`). **Two residual
+divergences in the cursor reported alongside `InvalidData`** are inactive ticket
+**#1822**, with no `SR-AUD-*` identifier; neither changes a status or a decoded
+byte, and one of the two predates this ticket.
+
+Every `isFinalBlock == true` outcome is byte-for-byte unchanged, `IsValid` is
+untouched (having no `isFinalBlock` parameter, it *is* the final-block decoder's
+validator), and unpadded incomplete quanta keep `NeedMoreData`. **+7 permanent
+regressions**; `SharpRuntimeTests_Buffers` **492/492** (was 485), the same 492 clean
+under **ASan + UBSan + LSan** (`build-asan/1818_buffers_asan.log`); repository gate
+**0 warnings, 0 errors, 14,021 tests across 37 executables** (was 14,014). **Source
+and ABI consequences: none.**

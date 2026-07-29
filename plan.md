@@ -36,7 +36,7 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 14,014 passing across 36 component binaries plus one integration
+- Tests: 14,021 passing across 36 component binaries plus one integration
   binary, verified by ticket #1817 (SR-AUD-079, the canonical final-quantum
   rule) through the full repository gate, raised from the 14,002 verified by
   ticket #1816 (SR-AUD-078 / CCF-013, the in-place Base64
@@ -3385,4 +3385,60 @@ padding), and **#1821** (the empty-buffer status divergence, no `SR-AUD-*`).
 
 Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
 `1817_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new build
+directory was created** and **no compilation exceeded three jobs**.
+
+### Completed Base64 non-final padding rule: ticket #1818
+
+Ticket #1818 (`REMED-BUFFERS-BASE64-NONFINAL-PADDING`, P2, size S, area
+*Buffers*) is **done** and **SR-AUD-080 is `remediated`**. It is the third ticket
+of the Base64 family plan ([`docs/Base64FamilyPlan.md`](docs/Base64FamilyPlan.md),
+ticket #1815) and the second of its three sequenced `decodeCore` tickets. **No new
+`SR-AUD-*` identifier**; numbering stays frozen at 364, and the index now records
+**20 remediated** and **344 confirmed** of 364.
+
+`Base64::decodeCore` consulted `isFinalBlock` only *after* an incomplete unpadded
+group, so a **complete padded** group decoded to `Done` regardless of the flag —
+telling a chunked caller that a terminal quantum was ordinary intermediate data.
+
+Current .NET rejects padding in a non-final call along two independent paths:
+`Base64DecoderHelper.DecodeFrom` sets `skipLastChunk = isFinalBlock ? 4 : 0`, so
+with the flag clear the whole source runs through the four-element loop where `'='`
+is unmapped and the padding-aware tail is unreachable; and
+`DecodeWithWhiteSpaceBlockwise` forces its per-block `localIsFinalBlock` back to
+false whenever the caller's flag is false. The repair is that one rule, applied at
+the **first** padding character — which is what keeps `bytesConsumed`/`bytesWritten`
+on the last completed quantum boundary and stops a too-small destination from
+masking the rejection.
+
+**The finding understated its surface.** It named one input; six of the seven
+non-final shapes probed were wrong (`build-probe/1818_defects.cpp`, logs
+`1818_prefix_defects.log` / `1818_postfix_defects.log`): the bare padded quantum, a
+padded quantum after a complete one, the single-`=` spelling, padding in a
+non-terminal position, and padding split by whitespace.
+
+**Two residual divergences are recorded, not fixed** — both in the cursor reported
+*alongside* `InvalidData`, neither changing a status or a decoded byte. They are
+inactive ticket **#1822**, with no `SR-AUD-*` identifier.
+
+**This narrows the accepted input set.** Every `isFinalBlock == true` outcome is
+byte-for-byte unchanged, `IsValid` is unaffected (it has no `isFinalBlock`
+parameter and *is* the final-block decoder's validator), and unpadded incomplete
+quanta keep `NeedMoreData`.
+
+**Tests: +7 permanent regressions.** `SharpRuntimeTests_Buffers` **492/492** (was
+485), and the same 492 under **ASan + UBSan + LSan with zero reports**
+(`build-asan/1818_buffers_asan.log`). Repository gate: **0 warnings, 0 errors**,
+**14,021 tests across 37 executables** (was 14,014). Module graph **41 / 91**;
+catalogue current; database consistent; the ten-component selective matrix passed;
+Doxygen **1,941** of the 1,942 ceiling, unchanged; `git diff --check` clean.
+
+**Source and ABI consequences: none.**
+
+**Still open in this family**, in the plan's order: **#1819** (SR-AUD-081, trailing
+whitespace wrongly consumed), **#1820** (SR-AUD-082, Base64Url rejects optional
+final padding), **#1821** (the empty-buffer status divergence) and **#1822** (the
+`InvalidData` cursor), the last two with no `SR-AUD-*`.
+
+Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
+`1818_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new build
 directory was created** and **no compilation exceeded three jobs**.

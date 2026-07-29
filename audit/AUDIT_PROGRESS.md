@@ -4918,3 +4918,81 @@ padding), and **#1821** (the empty-buffer status divergence, no `SR-AUD-*`).
 Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
 `1817_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new build
 directory was created** and **no compilation exceeded three jobs**.
+
+### Completed Base64 non-final padding rule: ticket #1818
+
+Ticket #1818 (`REMED-BUFFERS-BASE64-NONFINAL-PADDING`, P2, size S, area Buffers)
+is the **third** ticket of the Base64 family plan
+([`docs/Base64FamilyPlan.md`](../docs/Base64FamilyPlan.md), ticket #1815) and the
+second of its three sequenced `decodeCore` tickets. It remediates **SR-AUD-080**,
+which is now `remediated` in `audit/AUDIT_FINDINGS_INDEX.md` and in the owning
+report `audit/modules/buffers/include/System/Buffers/Text/Base64.hpp.audit.md`.
+
+**The defect.** `Base64::decodeCore` consulted `isFinalBlock` only *after* an
+incomplete unpadded group. A **complete padded** group was decoded and returned
+`Done` regardless of the flag, so a chunked caller was told a terminal quantum was
+ordinary intermediate data.
+
+**Why .NET disagrees, from two independent paths.**
+`Base64Helper/Base64DecoderHelper.cs`'s `DecodeFrom` sets
+`int skipLastChunk = isFinalBlock ? 4 : 0`; with the flag clear, `maxSrcLength`
+covers the whole source, every character goes through the four-element loop where
+`'='` is unmapped (`-1`), and the tail block that understands padding is
+unreachable — that file's own comment says *"if isFinalBlock is false, we will
+never reach this point"*. The whitespace-tolerant path reaches the same verdict:
+`DecodeWithWhiteSpaceBlockwise` computes a per-block `localIsFinalBlock` and then
+forces it back to false whenever the caller's `isFinalBlock` is false.
+
+**The fix** is therefore one rule, not a new state machine: with `isFinalBlock`
+false, `'='` is `InvalidData`. It fires at the **first** padding character, before
+the quantum completes and before any destination arithmetic — which is what keeps
+`bytesConsumed`/`bytesWritten` on the last completed quantum boundary, and what
+stops a too-small destination from masking the rejection.
+
+**The finding understated the surface.** It named
+`DecodeFromUtf8("QQ==", …, false)`. Measured over seven non-final shapes on both
+overloads (`build-probe/1818_defects.cpp`, logs `1818_prefix_defects.log` and
+`1818_postfix_defects.log`), **six** were wrong: the bare padded quantum, a padded
+quantum after a complete one, the single-`=` spelling, padding in a non-terminal
+position, and padding split by whitespace. Only the unpadded control was already
+right.
+
+**Two residual divergences are recorded, not fixed.** Both are in the cursor
+reported *alongside* `InvalidData`: `QUJD QQ==` differs by the one whitespace byte
+.NET's `InvalidDataFallback` skips before re-entering the decoder, and the
+pre-existing `QQ==QUJD` with `isFinalBlock == true` differs because
+`DecodeWithWhiteSpaceBlockwise` reverts its block counters to `0,0` when
+non-whitespace follows the padding. Neither changes a status or a decoded byte.
+They are inactive ticket **#1822**, with no `SR-AUD-*` identifier — the numbering
+stays frozen at 364.
+
+**This narrows the accepted input set**, like #1817 and in the same direction.
+Every `isFinalBlock == true` outcome is byte-for-byte unchanged, and so is
+`IsValid`: it has no `isFinalBlock` parameter and *is* the final-block decoder's
+validator, so decoder/validator agreement is preserved without touching
+`validateCore`. Unpadded incomplete quanta keep `NeedMoreData`. All 104
+pre-existing `Base64*` tests pass unmodified.
+
+**Tests: +7 permanent regressions** — padded rejection with the exact cursor on
+five shapes, the `char` overload inheriting it through the shared core, every
+`isFinalBlock == true` outcome pinned unchanged, unpadded quanta still
+`NeedMoreData`, the rejection beating a zero-length destination, `IsValid`
+unaffected, and a two-chunk stream proving the flag still does its job.
+
+**Validation.** `SharpRuntimeTests_Buffers` **492/492** (was 485), and the same 492
+under **ASan + UBSan + LSan with zero reports**
+(`build-asan/1818_buffers_asan.log`); the probe is clean under the same three
+(`build-probe/1818_asan.log`, sanitizer activation proven by the runtime's own
+`ASAN_OPTIONS=help=1` dump). Repository gate: **0 warnings, 0 errors**, **14,021
+tests across 37 executables** (was 14,014).
+
+**Source and ABI consequences: none.** No signature, virtual, return convention,
+object layout or exported symbol changed; only the accepted input set did.
+
+**Still open in this family**, in the plan's order: **#1819** (SR-AUD-081, trailing
+whitespace wrongly consumed), **#1820** (SR-AUD-082, Base64Url rejects optional
+final padding), and **#1821** (the empty-buffer status divergence, no `SR-AUD-*`).
+
+Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
+`1818_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new build
+directory was created** and **no compilation exceeded three jobs**.

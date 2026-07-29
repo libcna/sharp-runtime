@@ -98,7 +98,7 @@ that concrete.
 | **#1815** | this plan | — | design-only | **done** |
 | **#1816** | **SR-AUD-078 / CCF-013** — in-place write order, **both** headers | #1815 | compatible: fixes wrong output, no signature/ABI change | **done** |
 | **#1817** | SR-AUD-079 — canonical final-bit validation, both headers, decode **and** validate | #1815 | **narrowing**: input accepted today becomes `InvalidData` | **done** |
-| **#1818** | SR-AUD-080 — padding is invalid while `isFinalBlock == false` | #1815, and should follow #1817 (same `decodeCore` final-quantum branch) | **narrowing** | `todo` |
+| **#1818** | SR-AUD-080 — padding is invalid while `isFinalBlock == false` | #1815, and should follow #1817 (same `decodeCore` final-quantum branch) | **narrowing** | **done** |
 | **#1819** | SR-AUD-081 — trailing whitespace after a padded quantum is not consumed | #1815, and should follow #1818 (same cursor code) | changes `bytesConsumed` only | `todo` |
 | **#1820** | SR-AUD-082 — accept optional final `=`/`%` in Base64Url decode/validate | #1815; independent of #1817–#1819 | **widening**: only adds accepted input | `todo` |
 
@@ -107,6 +107,17 @@ final-quantum branch of one `decodeCore`. Taken in parallel they would conflict
 line-for-line and each would have to re-derive the same padding state machine.
 Taken in this order, each starts from a `decodeCore` whose final-quantum handling
 is already one step closer to `Base64DecoderHelper.cs`.
+
+**#1818 landed on 2026-07-29**, after #1817 and in the order this table sets. It
+turned out not to need the final-quantum branch at all: current .NET rejects
+padding in a non-final call *before* any padding handling runs
+(`skipLastChunk = isFinalBlock ? 4 : 0` in `Base64DecoderHelper.DecodeFrom`, and
+`DecodeWithWhiteSpaceBlockwise` forcing its per-block `localIsFinalBlock` back to
+false), so the repair is one rule — with `isFinalBlock` false, `'='` is invalid —
+placed at the first padding character. The finding named one input; six of the
+seven non-final shapes probed were wrong. Two residual cursor divergences on
+`InvalidData` returns are inactive ticket **#1822**. `IsValid` needed no change:
+having no `isFinalBlock` parameter, it *is* the final-block decoder's validator.
 
 **#1817 landed on 2026-07-29** and is recorded in both Base64 audit reports. Two
 things it settled that #1818 and #1819 inherit: the validator must change in the
@@ -169,3 +180,29 @@ contract — so #1821 is a decision, not a foregone fix.
 - The decoders' `char` overloads share `decodeCore` with the UTF-8 ones, so
   #1817–#1820 each inherit both surfaces automatically; that is a property to
   **test**, not a separate ticket.
+
+---
+
+## 7. A second separate defect found while implementing #1818, not folded in
+
+On an `InvalidData` return, `Base64::decodeCore` reports the cursor of the last
+quantum it had already accepted. Current .NET sometimes reports a different one,
+because it reaches `InvalidData` through a two-stage fallback rather than a single
+pass. Two instances measured under #1818
+(`build-probe/1818_defects.cpp`, log `1818_postfix_defects.log`):
+
+| Input | `isFinalBlock` | This port | .NET | Why .NET differs |
+|---|---|---|---|---|
+| `QUJD QQ==` | false | `InvalidData`, 4, 3 | `InvalidData`, **5**, 3 | `InvalidDataFallback` skips the failed remainder's leading whitespace and adds it to `bytesConsumed` before re-entering the decoder |
+| `QQ==QUJD` | true | `InvalidData`, 4, 1 | `InvalidData`, **0, 0** | `DecodeWithWhiteSpaceBlockwise` *reverts* its block counters when non-whitespace follows the padding |
+
+The second instance predates #1818 entirely. Neither changes a returned status or
+a decoded byte: the divergence is confined to the two out-parameters on a failed
+decode, which .NET documents as a slicing aid rather than a contract.
+
+This carries **no `SR-AUD-*` identifier** (the numbering stays frozen at 364) and
+is tracked as inactive ticket **#1822** rather than widening #1818. Like #1821 it
+is a decision, not a foregone fix: matching .NET exactly means reproducing its
+two-stage structure — a fast path that fails, a whitespace-skipping re-entry, then
+a block-wise decoder that can revert its own counters — which is a substantially
+larger rewrite of `decodeCore` than the parity it buys.

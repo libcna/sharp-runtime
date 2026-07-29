@@ -266,3 +266,83 @@ Repository gate: 0 warnings, 0 errors, **14,014 tests across 37 executables** (w
 
 Source and ABI consequences: none. No signature, layout or exported symbol changed;
 only the accepted input set did.
+
+## Post-audit remediation for SR-AUD-080 (ticket #1818, 2026-07-29): REMEDIATED
+
+The audit evidence above is retained unchanged. **SR-AUD-081 in this file, ticket
+#1819, stays `confirmed` at the time of this note.**
+
+Ticket #1818 (`REMED-BUFFERS-BASE64-NONFINAL-PADDING`, P2, size S) makes `'='`
+`InvalidData` whenever `isFinalBlock` is false, in `Base64::decodeCore` — which both
+the UTF-8 and the `char` overload share, so both inherit the rule.
+
+**Why this is .NET's rule, from two independent paths.**
+`Base64Helper/Base64DecoderHelper.cs`'s `DecodeFrom` sets
+`int skipLastChunk = isFinalBlock ? 4 : 0`, so with the flag clear `maxSrcLength`
+covers the *whole* source and every character — padding included — goes through the
+four-element loop, where `'='` is unmapped (`-1`) and the call returns
+`InvalidData`; the tail block that actually understands padding is unreachable, as
+that file's own comment says (*"if isFinalBlock is false, we will never reach this
+point"*). The whitespace-tolerant path agrees: `DecodeWithWhiteSpaceBlockwise`
+computes a per-block `localIsFinalBlock` and then executes
+`if (localIsFinalBlock && !isFinalBlock) localIsFinalBlock = false;`, so no block of
+a non-final call is ever decoded as a final one.
+
+**Placement.** The check fires at the **first** padding character, before the
+quantum is completed and before any destination arithmetic. That is what leaves
+`bytesConsumed`/`bytesWritten` on the last completed quantum boundary — where .NET
+leaves them too — and it also means a destination too small to hold the quantum
+cannot mask the rejection.
+
+**Measured before and after** (`build-probe/1818_defects.cpp`, logs
+`1818_prefix_defects.log` and `1818_postfix_defects.log`), each input run through
+**both** the UTF-8 and the `char` overload, which agreed on every case:
+
+| Input (`isFinalBlock == false`) | Pre-fix | Post-fix | Current .NET |
+|---|---|---|---|
+| `QQ==` | `Done`, 4 consumed, 1 written | `InvalidData`, 0, 0 | `InvalidData`, 0, 0 |
+| `QUJDQQ==` | `Done`, 8, 4 | `InvalidData`, 4, 3 | `InvalidData`, 4, 3 |
+| `QUJDQUI=` | `Done`, 8, 5 | `InvalidData`, 4, 3 | `InvalidData`, 4, 3 |
+| `QQ==QUJD` | `InvalidData`, 4, 1 | `InvalidData`, 0, 0 | `InvalidData`, 0, 0 |
+| `QQ =  = ` | `Done`, 8, 1 | `InvalidData`, 0, 0 | `InvalidData`, 0, 0 |
+| `QUJD QQ==` | `Done`, 9, 4 | `InvalidData`, 4, 3 | `InvalidData`, **5**, 3 |
+| `QUJD` (no padding) | `Done`, 4, 3 | unchanged | `Done`, 4, 3 |
+
+**The finding understated the surface.** It named `DecodeFromUtf8("QQ==", …, false)`
+and the bare padded quantum. The sweep shows the divergence also covered a padded
+quantum *after* a complete one, the single-`=` spelling, padding in a non-terminal
+position, and padding split by whitespace — six of the seven non-final shapes
+probed, not one.
+
+**Two residual divergences, both in the cursor reported alongside `InvalidData`,
+are recorded rather than fixed.** `QUJD QQ==` differs by the one whitespace byte
+.NET's `InvalidDataFallback` skips before re-entering the decoder, and the
+pre-existing `QQ==QUJD` with `isFinalBlock == true` differs because
+`DecodeWithWhiteSpaceBlockwise` *reverts* its block counters to `0,0` when
+non-whitespace follows the padding, while this port reports the quantum it had
+already accepted. Both are the same class — what `bytesConsumed`/`bytesWritten`
+mean on a failed decode — neither changes a status or a decoded byte, and both are
+inactive ticket **#1822** with no `SR-AUD-*` identifier (numbering stays frozen at
+364).
+
+**This narrows the accepted input set**, like #1817 and in the same direction:
+padded text that used to decode with `isFinalBlock == false` is now `InvalidData`.
+Every `isFinalBlock == true` outcome is byte-for-byte unchanged, and so is
+`IsValid` — it has no `isFinalBlock` parameter and *is* the final-block decoder's
+validator, so decoder/validator agreement is preserved without touching
+`validateCore`. Unpadded incomplete quanta keep `NeedMoreData`: the ticket narrows
+padding only, never the streaming contract the flag exists for. All 104 pre-existing
+`Base64*` tests still pass unmodified.
+
+Closure evidence: **7 new permanent regressions** — padded rejection with the exact
+cursor on five shapes, the `char` overload inheriting it, every `isFinalBlock == true`
+outcome pinned unchanged, unpadded quanta still `NeedMoreData`, the rejection
+beating a zero-length destination, `IsValid` unaffected, and a two-chunk stream
+proving the flag still does its job. `SharpRuntimeTests_Buffers` is **492/492** (was
+485), and the same 492 under AddressSanitizer + UndefinedBehaviorSanitizer +
+LeakSanitizer with **zero reports** (`build-asan/1818_buffers_asan.log`); the probe
+itself is clean under the same three (`build-probe/1818_asan.log`). Repository gate:
+0 warnings, 0 errors, **14,021 tests across 37 executables** (was 14,014).
+
+Source and ABI consequences: none. No signature, virtual, return convention, object
+layout or exported symbol changed; only the accepted input set did.
