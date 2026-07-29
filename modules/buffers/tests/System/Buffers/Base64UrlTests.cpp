@@ -164,6 +164,73 @@ TEST(Base64UrlTest, TryEncodeToUtf8InPlace_TooSmall_ReturnsFalse) {
     EXPECT_FALSE(Base64Url::TryEncodeToUtf8InPlace(span, 3, written));
 }
 
+// ===========================================================================
+// In-place encode write order (ticket #1816 / SR-AUD-078 / CCF-013)
+// ===========================================================================
+//
+// The same defect as Base64::EncodeToUtf8InPlace, in the same shape: the full
+// 3-byte packs were written before the trailing remainder was read, so the first
+// full pack's fourth output byte overwrote it. SR-AUD-078 spans both headers,
+// which is why CCF-013 requires the repair and its tests to cover both.
+
+// The audit's exact reproduction: 'A','B','C',0 must encode the zero byte, not 'D'.
+TEST(Base64UrlTest, TryEncodeToUtf8InPlace_FourBytes_DoesNotOverwriteTrailingByte) {
+    uint8_t buf[16] = {'A','B','C', 0};
+    Span<uint8_t> span(buf, 6);
+    int written = 0;
+    EXPECT_TRUE(Base64Url::TryEncodeToUtf8InPlace(span, 4, written));
+    EXPECT_EQ(written, 6);
+    EXPECT_EQ(std::string(reinterpret_cast<char*>(buf), 6), "QUJDAA");
+}
+
+TEST(Base64UrlTest, TryEncodeToUtf8InPlace_FiveBytes_DoesNotOverwriteTrailingBytes) {
+    uint8_t buf[16] = {'A','B','C', 0, 'E'};
+    Span<uint8_t> span(buf, 7);
+    int written = 0;
+    EXPECT_TRUE(Base64Url::TryEncodeToUtf8InPlace(span, 5, written));
+    EXPECT_EQ(written, 7);
+    EXPECT_EQ(std::string(reinterpret_cast<char*>(buf), 7), "QUJDAEU");
+}
+
+TEST(Base64UrlTest, TryEncodeToUtf8InPlace_SevenBytes_DoesNotOverwriteTrailingByte) {
+    uint8_t buf[16] = {'A','B','C', 0, 'E','F', 0};
+    Span<uint8_t> span(buf, 10);
+    int written = 0;
+    EXPECT_TRUE(Base64Url::TryEncodeToUtf8InPlace(span, 7, written));
+    EXPECT_EQ(written, 10);
+    EXPECT_EQ(std::string(reinterpret_cast<char*>(buf), 10), "QUJDAEVGAA");
+}
+
+TEST(Base64UrlTest, TryEncodeToUtf8InPlace_MatchesOutOfPlaceEncoderForEveryLength) {
+    for (int n = 0; n <= 24; ++n) {
+        std::vector<uint8_t> data;
+        for (int i = 0; i < n; ++i)
+            data.push_back(static_cast<uint8_t>((i % 4 == 3) ? 0 : ('A' + (i % 26))));
+
+        const int encodedLen = Base64Url::GetEncodedLength(n);
+        std::vector<uint8_t> reference(static_cast<size_t>(encodedLen) + 4, 0);
+        int consumed = 0, refWritten = 0;
+        ASSERT_EQ(Base64Url::EncodeToUtf8(
+                      ReadOnlySpan<uint8_t>(data.data(), n),
+                      Span<uint8_t>(reference.data(), static_cast<int>(reference.size())),
+                      consumed, refWritten, true),
+                  OperationStatus::Done) << "length " << n;
+        const std::string want(reinterpret_cast<const char*>(reference.data()),
+                               static_cast<size_t>(refWritten));
+
+        std::vector<uint8_t> buf(static_cast<size_t>(encodedLen) + 4, 0xEE);
+        for (int i = 0; i < n; ++i) buf[static_cast<size_t>(i)] = data[static_cast<size_t>(i)];
+        int written = 0;
+        ASSERT_TRUE(Base64Url::TryEncodeToUtf8InPlace(Span<uint8_t>(buf.data(), encodedLen), n, written))
+            << "length " << n;
+        EXPECT_EQ(written, encodedLen) << "length " << n;
+        EXPECT_EQ(std::string(reinterpret_cast<char*>(buf.data()), static_cast<size_t>(written)), want)
+            << "length " << n;
+        EXPECT_EQ(buf[static_cast<size_t>(encodedLen)], 0xEE)
+            << "in-place encode wrote past the encoded length at " << n;
+    }
+}
+
 TEST(Base64UrlTest, DecodeFromUtf8_TwoArg_ReturnsBytesWritten) {
     std::string b64url = "SGk";
     ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(b64url.data()), static_cast<int>(b64url.size()));

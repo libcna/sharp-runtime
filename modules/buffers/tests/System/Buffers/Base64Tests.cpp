@@ -234,6 +234,78 @@ TEST(Base64Test, TryEncodeToUtf8InPlace_Success) {
     EXPECT_EQ(std::string(reinterpret_cast<char*>(buf), written), "TWE=");
 }
 
+// ===========================================================================
+// In-place encode write order (ticket #1816 / SR-AUD-078 / CCF-013)
+// ===========================================================================
+//
+// The encoder wrote the full 3-byte packs before reading the trailing remainder,
+// so the first full pack's fourth output byte overwrote the unread remainder.
+// The suite used to cover only dataLength 2 and 3 -- the two lengths that have no
+// full pack AND a remainder together -- so every affected length was untested.
+// The remainder is now encoded first; these cases pin the boundary.
+
+// The audit's exact reproduction: 'A','B','C',0 must encode the zero byte, not 'D'.
+TEST(Base64Test, EncodeToUtf8InPlace_FourBytes_DoesNotOverwriteTrailingByte) {
+    uint8_t buf[16] = {'A','B','C', 0};
+    Span<uint8_t> span(buf, 8);
+    int written = 0;
+    EXPECT_EQ(Base64::EncodeToUtf8InPlace(span, 4, written), OperationStatus::Done);
+    EXPECT_EQ(written, 8);
+    EXPECT_EQ(std::string(reinterpret_cast<char*>(buf), 8), "QUJDAA==");
+}
+
+TEST(Base64Test, EncodeToUtf8InPlace_FiveBytes_DoesNotOverwriteTrailingBytes) {
+    uint8_t buf[16] = {'A','B','C', 0, 'E'};
+    Span<uint8_t> span(buf, 8);
+    int written = 0;
+    EXPECT_EQ(Base64::EncodeToUtf8InPlace(span, 5, written), OperationStatus::Done);
+    EXPECT_EQ(written, 8);
+    EXPECT_EQ(std::string(reinterpret_cast<char*>(buf), 8), "QUJDAEU=");
+}
+
+// Two full packs plus a remainder: the defect was never limited to lengths 4 and 5.
+TEST(Base64Test, EncodeToUtf8InPlace_SevenBytes_DoesNotOverwriteTrailingByte) {
+    uint8_t buf[16] = {'A','B','C', 0, 'E','F', 0};
+    Span<uint8_t> span(buf, 12);
+    int written = 0;
+    EXPECT_EQ(Base64::EncodeToUtf8InPlace(span, 7, written), OperationStatus::Done);
+    EXPECT_EQ(written, 12);
+    EXPECT_EQ(std::string(reinterpret_cast<char*>(buf), 12), "QUJDAEVGAA==");
+}
+
+// Every length 0..24 must agree with this type's own out-of-place encoder, and the
+// byte just past the encoded output must be untouched. Before the fix this failed
+// for all 14 lengths that have both a full pack and a remainder.
+TEST(Base64Test, EncodeToUtf8InPlace_MatchesOutOfPlaceEncoderForEveryLength) {
+    for (int n = 0; n <= 24; ++n) {
+        std::vector<uint8_t> data;
+        for (int i = 0; i < n; ++i)
+            data.push_back(static_cast<uint8_t>((i % 4 == 3) ? 0 : ('A' + (i % 26))));
+
+        const int encodedLen = Base64::GetEncodedLength(n);
+        std::vector<uint8_t> reference(static_cast<size_t>(encodedLen) + 4, 0);
+        int consumed = 0, refWritten = 0;
+        ASSERT_EQ(Base64::EncodeToUtf8(
+                      ReadOnlySpan<uint8_t>(data.data(), n),
+                      Span<uint8_t>(reference.data(), static_cast<int>(reference.size())),
+                      consumed, refWritten, true),
+                  OperationStatus::Done) << "length " << n;
+        const std::string want(reinterpret_cast<const char*>(reference.data()),
+                               static_cast<size_t>(refWritten));
+
+        std::vector<uint8_t> buf(static_cast<size_t>(encodedLen) + 4, 0xEE);
+        for (int i = 0; i < n; ++i) buf[static_cast<size_t>(i)] = data[static_cast<size_t>(i)];
+        int written = 0;
+        ASSERT_EQ(Base64::EncodeToUtf8InPlace(Span<uint8_t>(buf.data(), encodedLen), n, written),
+                  OperationStatus::Done) << "length " << n;
+        EXPECT_EQ(written, encodedLen) << "length " << n;
+        EXPECT_EQ(std::string(reinterpret_cast<char*>(buf.data()), static_cast<size_t>(written)), want)
+            << "length " << n;
+        EXPECT_EQ(buf[static_cast<size_t>(encodedLen)], 0xEE)
+            << "in-place encode wrote past the encoded length at " << n;
+    }
+}
+
 TEST(Base64Test, DecodeFromUtf8_TwoArg_ReturnsBytesWritten) {
     std::string b64 = "SGk=";
     ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(b64.data()), static_cast<int>(b64.size()));

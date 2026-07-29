@@ -256,8 +256,9 @@ public:
      * @brief Attempts to encode @p dataLength bytes at the start of @p buffer, in place, as base64url text.
      *
      * C++ counterpart of .NET Base64Url.TryEncodeToUtf8InPlace(Span, int, out int).
-     * Processes 3-byte source groups from the last to the first so the (larger) encoded
-     * groups never overwrite not-yet-read source bytes.
+     * Encodes the trailing one/two-byte pack first and then walks the full 3-byte packs
+     * from the last to the first, so a (larger) encoded pack never overwrites a source
+     * byte that has not been read yet.
      */
     static bool TryEncodeToUtf8InPlace(System::Span<uint8_t> buffer, intcs dataLength, intcs& bytesWritten) {
         bytesWritten = 0;
@@ -268,15 +269,22 @@ public:
         intcs fullGroups = dataLength / 3;
         intcs remainder  = dataLength % 3;
 
-        for (intcs i = fullGroups - 1; i >= 0; --i) {
-            intcs srcOff = i * 3, dstOff = i * 4;
-            uint32_t b = (uint32_t(buf[srcOff]) << 16) | (uint32_t(buf[srcOff+1]) << 8) | buf[srcOff+2];
-            buf[dstOff]   = static_cast<uint8_t>(kEncTable[(b >> 18) & 0x3F]);
-            buf[dstOff+1] = static_cast<uint8_t>(kEncTable[(b >> 12) & 0x3F]);
-            buf[dstOff+2] = static_cast<uint8_t>(kEncTable[(b >>  6) & 0x3F]);
-            buf[dstOff+3] = static_cast<uint8_t>(kEncTable[(b      ) & 0x3F]);
-        }
-
+        // Identical ordering argument to Base64::EncodeToUtf8InPlace, and the same defect
+        // was present here: SR-AUD-078 spans both headers, which is why CCF-013 requires
+        // one repair covering both rather than only the padded variant. The trailing pack
+        // is the LAST pack and must be encoded FIRST; the full packs then run backwards.
+        // Before this change, 'A','B','C',0 encoded as QUJDRA instead of QUJDAA and still
+        // returned true, and a 0..24 sweep against this type's own out-of-place encoder
+        // was wrong for all 14 lengths that have both a full pack and a remainder
+        // (ticket #1816, build-probe/1816_prefix_defects.log).
+        //
+        // The unpadded remainder here writes only 2 or 3 output bytes rather than 4, but
+        // that does not change the argument: the write still starts at 4*fullGroups,
+        // which is at or after every source byte the full packs still need.
+        //
+        // .NET's Base64EncoderHelper.cs shares one EncodeToUtf8InPlace between Base64 and
+        // Base64Url and encodes the leftover pack before its backwards loop, under the
+        // comment "encode last pack to avoid conditional in the main loop".
         intcs dstOff = fullGroups * 4;
         if (remainder == 1) {
             uint8_t b0 = buf[fullGroups * 3];
@@ -290,6 +298,16 @@ public:
             buf[dstOff+1] = static_cast<uint8_t>(kEncTable[(b >> 12) & 0x3F]);
             buf[dstOff+2] = static_cast<uint8_t>(kEncTable[(b >>  6) & 0x3F]);
         }
+
+        for (intcs i = fullGroups - 1; i >= 0; --i) {
+            intcs srcOff = i * 3, dstOffFull = i * 4;
+            uint32_t b = (uint32_t(buf[srcOff]) << 16) | (uint32_t(buf[srcOff+1]) << 8) | buf[srcOff+2];
+            buf[dstOffFull]   = static_cast<uint8_t>(kEncTable[(b >> 18) & 0x3F]);
+            buf[dstOffFull+1] = static_cast<uint8_t>(kEncTable[(b >> 12) & 0x3F]);
+            buf[dstOffFull+2] = static_cast<uint8_t>(kEncTable[(b >>  6) & 0x3F]);
+            buf[dstOffFull+3] = static_cast<uint8_t>(kEncTable[(b      ) & 0x3F]);
+        }
+
         bytesWritten = encodedLen;
         return true;
     }

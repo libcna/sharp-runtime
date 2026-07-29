@@ -316,8 +316,9 @@ public:
      * @brief Encodes @p dataLength bytes at the start of @p buffer, in place, as base64 text.
      *
      * C++ counterpart of .NET Base64.EncodeToUtf8InPlace(Span, int, out int).
-     * Processes 3-byte source groups from the last to the first so the (larger) 4-byte
-     * encoded groups never overwrite not-yet-read source bytes.
+     * Encodes the trailing one/two-byte pack first and then walks the full 3-byte packs
+     * from the last to the first, so a (larger) 4-byte encoded pack never overwrites a
+     * source byte that has not been read yet.
      * @return OperationStatus::Done or DestinationTooSmall (never NeedMoreData/InvalidData).
      */
     static OperationStatus EncodeToUtf8InPlace(System::Span<uint8_t> buffer, intcs dataLength, intcs& bytesWritten) {
@@ -329,15 +330,22 @@ public:
         intcs fullGroups = dataLength / 3;
         intcs remainder  = dataLength % 3;
 
-        for (intcs i = fullGroups - 1; i >= 0; --i) {
-            intcs srcOff = i * 3, dstOff = i * 4;
-            uint32_t b = (uint32_t(buf[srcOff]) << 16) | (uint32_t(buf[srcOff+1]) << 8) | buf[srcOff+2];
-            buf[dstOff]   = static_cast<uint8_t>(kEncTable[(b >> 18) & 0x3F]);
-            buf[dstOff+1] = static_cast<uint8_t>(kEncTable[(b >> 12) & 0x3F]);
-            buf[dstOff+2] = static_cast<uint8_t>(kEncTable[(b >>  6) & 0x3F]);
-            buf[dstOff+3] = static_cast<uint8_t>(kEncTable[(b      ) & 0x3F]);
-        }
-
+        // The trailing remainder is the LAST pack, so it must be encoded FIRST -- this
+        // ordering is the whole correctness argument and must not be "tidied" back into
+        // source order. Encoding pack i writes at 4i..4i+3 and reads at 3i..3i+2, and
+        // 4i >= 3i, so a pack can only clobber source bytes belonging to packs after it.
+        // Walking the full packs backwards therefore protects every pack except the
+        // remainder, which sits after all of them. Previously the remainder was read
+        // after the loop, so the first full pack's fourth output byte had already
+        // overwritten it: 'A','B','C',0 encoded as QUJDRA== instead of QUJDAA== and
+        // still returned Done. That is wrong for EVERY length with both a full pack and
+        // a remainder, not only 4 and 5 -- a 0..24 sweep against this type's own
+        // out-of-place encoder produced 14 wrong lengths per type, 28 in total
+        // (ticket #1816 / SR-AUD-078 / CCF-013, build-probe/1816_prefix_defects.log).
+        //
+        // .NET does the same thing for the same reason: Base64EncoderHelper.cs's
+        // EncodeToUtf8InPlace encodes the leftover pack before its backwards loop, under
+        // the comment "encode last pack to avoid conditional in the main loop".
         intcs dstOff = fullGroups * 4;
         if (remainder == 1) {
             uint8_t b0 = buf[fullGroups * 3];
@@ -353,6 +361,16 @@ public:
             buf[dstOff+2] = static_cast<uint8_t>(kEncTable[(b >>  6) & 0x3F]);
             buf[dstOff+3] = '=';
         }
+
+        for (intcs i = fullGroups - 1; i >= 0; --i) {
+            intcs srcOff = i * 3, dstOffFull = i * 4;
+            uint32_t b = (uint32_t(buf[srcOff]) << 16) | (uint32_t(buf[srcOff+1]) << 8) | buf[srcOff+2];
+            buf[dstOffFull]   = static_cast<uint8_t>(kEncTable[(b >> 18) & 0x3F]);
+            buf[dstOffFull+1] = static_cast<uint8_t>(kEncTable[(b >> 12) & 0x3F]);
+            buf[dstOffFull+2] = static_cast<uint8_t>(kEncTable[(b >>  6) & 0x3F]);
+            buf[dstOffFull+3] = static_cast<uint8_t>(kEncTable[(b      ) & 0x3F]);
+        }
+
         bytesWritten = encodedLen;
         return OperationStatus::Done;
     }
