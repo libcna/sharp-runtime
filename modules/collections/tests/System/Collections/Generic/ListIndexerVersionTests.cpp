@@ -34,6 +34,7 @@
 
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/List.hpp"
+#include "System/Collections/detail/ElementReference.hpp"
 #include "System/InvalidOperationException.hpp"
 
 using System::Collections::Generic::IEnumerator;
@@ -188,40 +189,52 @@ TEST(ListIndexerVersionContract, IndexWritesAreVisibleAndDoNotChangeCount) {
 }
 
 // ---------------------------------------------------------------------------
-// Divergence -- ticket #1791 must deliberately flip each of these.
+// Divergence -- FLIPPED by ticket #1791.
+//
+// Every case below was written by #1790 as an assertion about the divergence
+// this port had from .NET, with EXPECT_NO_THROW where .NET throws, so that the
+// implementation ticket could not land silently. #1791 flipped each one rather
+// than deleting it, so the git history of this file is the record of the
+// behaviour change. The suite name is kept for that traceability.
+//
+// Two cases did NOT flip, and say so explicitly: the STL-interop begin()/end()
+// escape, which is a deliberate documented residual, and the ToVector() case,
+// whose mutable overload #1791 removed outright rather than tracked.
 // ---------------------------------------------------------------------------
 
-TEST(ListIndexerVersionDivergence, IndexWriteDoesNotYetInvalidateAnEnumerator) {
-    // .NET: List.cs:155-163 bumps _version in the setter, so this throws.
-    // Here: operator[] returns a plain T&, nothing intercepts the assignment.
-    // #1791 must change EXPECT_NO_THROW to EXPECT_THROW.
+TEST(ListIndexerVersionDivergence, IndexWriteNowInvalidatesAnEnumerator) {
+    // FLIPPED by #1791. .NET: List.cs:155-163 bumps _version in the setter, so
+    // this throws; before #1791 operator[] returned a plain T& that nothing
+    // could intercept, and it did not.
     List<int> list(std::vector<int>{10, 20, 30});
     ScopedEnumerator<int> e(list);
     ASSERT_TRUE(e->MoveNext());
 
     list[0] = 99;
 
-    EXPECT_NO_THROW((void)e->MoveNext())
-        << "ticket #1790: a value-only index write is invisible to the fail-fast guard";
+    EXPECT_THROW((void)e->MoveNext(), System::InvalidOperationException)
+        << "ticket #1791: a value-only index write must fail an in-progress enumeration fast";
     EXPECT_EQ(list[0], 99);
 }
 
-TEST(ListIndexerVersionDivergence, EqualValueIndexWriteDoesNotYetInvalidate) {
-    // .NET bumps _version unconditionally -- it does NOT compare the old value.
-    // Recorded separately because #1791 must decide this case explicitly.
+TEST(ListIndexerVersionDivergence, EqualValueIndexWriteNowInvalidates) {
+    // FLIPPED by #1791. .NET bumps _version unconditionally -- it does NOT
+    // compare the old value (List.cs:161-162), so an equal-value write
+    // invalidates exactly like a changing one.
     List<int> list(std::vector<int>{10, 20, 30});
     ScopedEnumerator<int> e(list);
     ASSERT_TRUE(e->MoveNext());
 
     list[1] = 20;  // same value
 
-    EXPECT_NO_THROW((void)e->MoveNext())
-        << "ticket #1790: .NET bumps even when the value is unchanged";
+    EXPECT_THROW((void)e->MoveNext(), System::InvalidOperationException)
+        << "ticket #1791: .NET bumps even when the value is unchanged";
+    EXPECT_EQ(list[1], 20);
 }
 
-TEST(ListIndexerVersionDivergence, IndexWriteThroughTheInterfaceDoesNotYetInvalidate) {
-    // The same hole is reachable through IList<T>&, whose operator[] is also
-    // declared to return a plain T&. #1791's scope therefore includes the
+TEST(ListIndexerVersionDivergence, IndexWriteThroughTheInterfaceNowInvalidates) {
+    // FLIPPED by #1791. The same hole was reachable through IList<T>&, whose
+    // operator[] also returned a plain T&; #1791's scope therefore included the
     // interface, not only List<T>.
     List<int> list(std::vector<int>{10, 20, 30});
     IList<int>& asInterface = list;
@@ -230,57 +243,79 @@ TEST(ListIndexerVersionDivergence, IndexWriteThroughTheInterfaceDoesNotYetInvali
 
     asInterface[2] = 77;
 
-    EXPECT_NO_THROW((void)e->MoveNext())
-        << "ticket #1790: IList<T>::operator[] returns T& as well";
+    EXPECT_THROW((void)e->MoveNext(), System::InvalidOperationException)
+        << "ticket #1791: IList<T>::operator[] returns the tracked proxy too";
     EXPECT_EQ(list[2], 77);
 }
 
-TEST(ListIndexerVersionDivergence, StlInteropEscapesDoNotYetInvalidate) {
-    // begin()/end() are documented STL-interop extensions that follow
-    // std::vector rules, not .NET's. Pinned so #1791 records a decision about
-    // them rather than overlooking them.
+TEST(ListIndexerVersionDivergence, StlInteropEscapesStillDoNotInvalidate) {
+    // NOT flipped, deliberately. begin()/end() are documented STL-interop
+    // extensions with no .NET counterpart that follow std::vector rules, not
+    // .NET's version-checked contract. #1791 kept them, because constraining
+    // them would break the interop List<T> exists to provide -- .NET keeps an
+    // equivalent untracked hatch (CollectionsMarshal.AsSpan) for the same
+    // reason. This is THE remaining ordinary route to a mutable T& into the
+    // storage, and it is pinned here so it cannot be forgotten or quietly
+    // claimed as closed.
     List<int> list(std::vector<int>{1, 2, 3});
     ScopedEnumerator<int> e(list);
     ASSERT_TRUE(e->MoveNext());
 
     *list.begin() = 55;
 
-    EXPECT_NO_THROW((void)e->MoveNext());
+    EXPECT_NO_THROW((void)e->MoveNext())
+        << "ticket #1791: the STL-interop surface remains deliberately untracked";
     EXPECT_EQ(list[0], 55);
 }
 
-TEST(ListIndexerVersionDivergence, ToVectorPermitsUntrackedStructuralMutation) {
-    // Discovered while investigating #1790 and NOT previously documented: the
-    // non-const ToVector() hands out the whole backing container, so a caller
-    // can push_back/clear through it. That is a STRUCTURAL mutation the
-    // fail-fast guard never sees -- strictly wider than the indexer hole, which
-    // can only replace an existing element.
+TEST(ListIndexerVersionDivergence, ToVectorNoLongerPermitsStructuralMutation) {
+    // FLIPPED by #1791, by REMOVAL rather than by tracking. #1790 discovered
+    // that the non-const ToVector() handed out the whole backing container, so
+    // a caller could push_back/clear through it -- a STRUCTURAL mutation the
+    // fail-fast guard never saw, strictly wider than the indexer hole. #1791
+    // deleted that overload; only the const one remains, and the compile-time
+    // proof is the static_assert below plus
+    // test/consumer/collections_list_indexer_negative.cpp.
+    static_assert(std::is_same_v<decltype(std::declval<List<int>&>().ToVector()),
+                                 const std::vector<int>&>,
+                  "ticket #1791: ToVector() must return const std::vector<T>& on a "
+                  "non-const List<T> too -- the mutable overload is gone");
+
     List<int> list(std::vector<int>{1, 2, 3});
     ScopedEnumerator<int> e(list);
     ASSERT_TRUE(e->MoveNext());
 
-    list.ToVector().push_back(4);
+    // Reading through it is still supported and still invalidates nothing.
+    EXPECT_EQ(list.ToVector().size(), 3u);
+    EXPECT_NO_THROW((void)e->MoveNext());
 
-    EXPECT_NO_THROW((void)e->MoveNext())
-        << "ticket #1790: a structural mutation through ToVector() is untracked";
+    // Structural mutation now requires a tracked List<T> method, which does
+    // invalidate.
+    list.Add(4);
+    EXPECT_THROW((void)e->MoveNext(), System::InvalidOperationException);
     EXPECT_EQ(list.getCountProperty(), 4);
 }
 
-TEST(ListIndexerVersionDivergence, TheIndexerStillHandsOutAPlainMutableReference) {
-    // The exact shape of the defect, pinned as a type-level fact so #1791
-    // cannot land without this assertion being updated.
-    static_assert(std::is_same_v<decltype(std::declval<List<int>&>()[0]), int&>,
-                  "ticket #1790: non-const List<T>::operator[] still returns a plain T&");
-    static_assert(std::is_same_v<decltype(std::declval<List<int>&>().ToVector()),
-                                 std::vector<int>&>,
-                  "ticket #1790: non-const ToVector() still returns the backing container");
+TEST(ListIndexerVersionDivergence, TheIndexerNoLongerHandsOutAPlainMutableReference) {
+    // FLIPPED by #1791. The exact shape of the defect, pinned as a type-level
+    // fact so the change could not land without this assertion being updated.
+    static_assert(
+        std::is_same_v<decltype(std::declval<List<int>&>()[0]),
+                       System::Collections::detail::ElementReference<int>>,
+        "ticket #1791: non-const List<T>::operator[] must return the tracked proxy");
+    static_assert(!std::is_reference_v<decltype(std::declval<List<int>&>()[0])>,
+                  "ticket #1791: the tracked indexer must yield a prvalue, not a reference");
+    static_assert(std::is_same_v<decltype(std::declval<const List<int>&>()[0]), const int&>,
+                  "ticket #1791: the const indexer is unchanged");
 
-    // ...and that reference outlives nothing: it is invalidated by any
-    // reallocation, exactly as std::vector's rules say. Retaining one across a
-    // mutation is undefined behaviour, reproduced under AddressSanitizer in
-    // build-probe-listindexer/probe1_asan_*.log. Nothing is retained here.
+    // The proxy is two pointers and never outlives its full-expression.
+    static_assert(sizeof(System::Collections::detail::ElementReference<int>) == 2 * sizeof(void*),
+                  "ticket #1791: the proxy is a slot pointer plus a counter pointer");
+
+    // A retained plain T& into the storage is no longer obtainable here -- that
+    // is what removes the four reproduced use-after-free shapes of #1790 §5.3
+    // from the ordinary surface. Writing still works, and is now tracked.
     List<int> list(std::vector<int>{1, 2, 3});
-    int& slot = list[1];
-    slot = 42;
+    list[1] = 42;
     EXPECT_EQ(list[1], 42);
 }

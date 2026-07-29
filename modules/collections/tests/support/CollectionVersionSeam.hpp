@@ -68,6 +68,7 @@
 #include "System/Collections/Generic/SortedDictionary.hpp"
 #include "System/Collections/Generic/SortedList.hpp"
 #include "System/Collections/Generic/Stack.hpp"
+#include "System/Collections/ObjectModel/Collection.hpp"
 
 namespace SharpRuntime::Testing {
 
@@ -169,6 +170,12 @@ struct CollectionVersionAccess<System::Collections::Stack> {
 template <>
 struct CollectionVersionAccess<System::Collections::BitArray> {
     SHARP_RUNTIME_COLLECTION_VERSION_SEAM(System::Collections::BitArray)
+};
+// Added by ticket #1791, which gave ObjectModel::Collection<T> the mutation counter it
+// previously lacked so that its tracked indexer has something to advance.
+template <typename T>
+struct CollectionVersionAccess<System::Collections::ObjectModel::Collection<T>> {
+    SHARP_RUNTIME_COLLECTION_VERSION_SEAM(System::Collections::ObjectModel::Collection<T>)
 };
 
 #undef SHARP_RUNTIME_COLLECTION_VERSION_SEAM
