@@ -3,17 +3,18 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-29. Branch: `feature/remediation-core-interpolated-handler-null-dest`.
+*Last verified: 2026-07-29. Branch: `feature/remediation-io-compression-null-inner-stream`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 13,970 tests across 37 executables (the 13,127 figure this
+dependency edges, and 13,979 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 13,970
-verified by #1810, raised from the 13,958 verified by #1807, the 13,948 verified
-by #1806 and the 13,937 verified by #1805 — the first four remediation tickets
-outside `Collections`, whose changes are confined to `.cpp` bodies, inline header
-bodies and header doc-comments, so an incremental gate was correct for all four —
+section below states the count it measured, and the current floor is the 13,979
+verified by #1811, raised from the 13,970 verified by #1810, the 13,958 verified
+by #1807, the 13,948 verified by #1806 and the 13,937 verified by #1805 — the
+first five remediation tickets outside `Collections`, whose changes are confined
+to `.cpp` bodies, inline header bodies and header doc-comments, so an incremental
+gate was correct for all five —
 and before them from the 13,923
 verified by #1789 — whose BitArray::Enumerator object-layout change, like #1788's
 LinkedList<T> one, made a fresh clean-first rebuild mandatory rather than merely
@@ -5805,6 +5806,86 @@ with it.
 
 Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
 `1810_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new build
+directory was created** and **no compilation exceeded three jobs**. The probe
+binaries were deleted once their logs were transcribed.
+
+**CNA and mobile-eggbert were not inspected, searched, configured, built or
+modified**, and **#1773 remains `blocked`**. #1804 remains `blocked`; #1808 and
+#1809 remain `todo` and unbegun. No previously `done` ticket and no finding was
+reopened.
+
+### Completed compression-stream null-inner validation: ticket #1811
+
+Ticket #1811 (`REMED-IO-COMPRESSION-NULL-INNER-STREAM`, P1, size S,
+`remediation`, area *IO*) is **done** and **SR-AUD-257 is now `remediated`** —
+the fifth of NEXT.md's eight immediate public-input crash tickets. **No new
+`SR-AUD-*` identifier**; the numbering stays frozen at 364, and the index now
+records **15 remediated** and **349 confirmed** of 364.
+
+`DeflateStream`, `GZipStream` and `ZLibStream` all take a raw `Stream*` and none
+validated it. Measured before any production change, one process per case, across
+all three types symmetrically rather than only the one the finding named
+(`build-probe/1811_prefix_defects.cpp`, logs `1811_prefix_defects.log` and
+`1811_postfix_defects.log`):
+
+| Cases | Input | Pre-fix | Post-fix |
+|---|---|---|---|
+| 1–3 | `T(nullptr, Compress, true)` then a 256 KiB incompressible `Write` | **ASan SEGV on 0x0**, all three types | `ArgumentNullException` at construction |
+| 4–6 | `T(nullptr, Decompress, true)` then `Read` | **ASan SEGV on 0x0**, all three types | same |
+| 7–12 | `T(nullptr, Compress, false)` then `Close()`, and destruction alone | completed | same |
+| 13 | the valid path over a real `MemoryStream` | `length=6` | **byte-identical** |
+
+The finding named `Write`. The `Decompress`-mode `Read` path crashes identically
+and is the second half of the same defect; it is recorded rather than absorbed.
+
+**The payload shape is why the check belongs at construction.** A small
+compressible write does not reproduce this at all — zlib absorbs it into the
+64 KiB deflate buffer and never touches the inner stream. That is what the
+finding's phrase "a sufficiently large incompressible Write" is about, and it is
+the argument against fixing this on the write path: a write-path guard would
+still leave a constructed object whose inner stream does not exist. The check
+also sits **before** `deflateInit2`/`inflateInit2`, which allocate state only
+`deflateEnd`/`inflateEnd` release, so a rejected construction allocates no
+compressor state.
+
+**Cases 7–12 did not crash, and the reason is recorded so it is not "tidied
+away" later.** `Close()` tests `if (produced > 0 && inner_)` and
+`if (!leaveOpen_ && inner_)`. Those look exactly like the guards ticket #1806
+removed from `StreamReader` as unreachable — but here they are **reachable**:
+`Close()` itself assigns `inner_ = nullptr` after closing a non-`leaveOpen` inner
+stream, so a null `inner_` is a genuine post-close state in these three classes.
+They stay, and a comment in each constructor plus a note on the ticket row says
+why. Two tickets in the same session reached opposite conclusions about
+identical-looking code, for a concrete reason, and that is worth writing down.
+
+**Tests: +9 permanent regressions** in `CompressionTests.cpp` — both compression
+modes rejected for each of the three types, the owning (`leaveOpen = false`) shape
+whose destructor and `Close()` also touch the inner stream, the parameter name,
+and a large incompressible round-trip that exercises the exact flush path the
+crash came from.
+
+**Validation.** `SharpRuntimeTests_IO_Compression` **31/31** (was 22), and the
+same 31 under **ASan + UBSan + LSan with zero reports**
+(`build-asan/1811_io_compression_asan.log`). Repository gate: **0 warnings, 0
+errors**, **13,979 tests across 37 executables** (was 13,970). Module graph
+**41 / 90**; catalogue current; database consistent; the ten-component selective
+matrix passed, including the `IO.Compression` and `IO.Compression.Zip` consumer
+fixtures that build this component in isolation; Doxygen **1,941** of the 1,942
+ceiling, unchanged; `git diff --check` clean.
+
+**Source and ABI consequences: none.** No public signature, object layout, vtable
+or exported symbol changed. Behavioural note: constructing any of the three over a
+null stream now throws instead of deferring a crash to first use. No
+in-repository caller did so.
+
+**Explicitly not done here.** **SR-AUD-258** — invalid `CompressionMode` values
+silently accepted (a native `(CompressionMode)42` constructs, creates a deflater,
+and reports both `CanRead` and `CanWrite` false, where .NET throws
+`ArgumentException`), and post-`Close` operations returning silently — shares
+these files and stays `confirmed`.
+
+Build directories used: `build/` (gate), `build-asan/`, `build-probe/` (all
+`1811_` prefixed), `build-tmp/` (repository-local `TMPDIR`); **no new build
 directory was created** and **no compilation exceeded three jobs**. The probe
 binaries were deleted once their logs were transcribed.
 
