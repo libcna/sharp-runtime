@@ -664,3 +664,82 @@ TEST(Base64Test, DecodeFromUtf8_TwoChunkStream_PaddingOnlyInTheFinalChunk) {
     EXPECT_EQ(written2, 1);
     EXPECT_EQ(out[0], 'A'); EXPECT_EQ(out[1], 'B'); EXPECT_EQ(out[2], 'C'); EXPECT_EQ(out[3], 'A');
 }
+
+// ---------------------------------------------------------------------------
+// Ticket #1819 / SR-AUD-081: NOT a defect -- these tests pin the .NET-verified
+// behaviour so the finding's premise cannot be re-applied by mistake.
+//
+// SR-AUD-081 claims that whitespace following a padded quantum must be left in the
+// input for the enclosing parser, citing "the current .NET Base64 test base". That
+// test base says the opposite. Its member data is literally named
+// BasicDecodingWithExtraWhitespaceShouldBeCountedInConsumedBytes_MemberData and
+// yields { "AQ==" + whitespace(i), 4 + i, 1 }; a second test,
+// DecodingWithWhiteSpaceSplitFinalQuantumAndIsFinalBlockFalse, decodes "AQ\r\nQ=\r\n"
+// and asserts bytesConsumed == the whole input length. Measured against this port:
+// build-probe/1819_defects.cpp, log build-probe/1819_defects.log -- 27 of 27
+// whitespace-consumption vectors already match current .NET.
+// ---------------------------------------------------------------------------
+
+TEST(Base64Test, DecodeFromUtf8_TrailingWhitespaceAfterPadding_IsConsumed) {
+    // .NET's own vector shape: "AQ==" plus i whitespace characters, expecting 4 + i.
+    const std::string whitespace = " \n\t\r";
+    for (int i = 0; i <= 4; ++i) {
+        const std::string text = "AQ==" + whitespace.substr(0, static_cast<size_t>(i));
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(text.data()),
+                                  static_cast<int>(text.size()));
+        std::vector<uint8_t> out(16, 0xCC);
+        Span<uint8_t> dst(out.data(), 16);
+        int consumed = -1, written = -1;
+        EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, true), OperationStatus::Done) << i;
+        EXPECT_EQ(consumed, 4 + i) << i;
+        EXPECT_EQ(written, 1) << i;
+        EXPECT_EQ(out[0], 0x01) << i;
+    }
+}
+
+// The other half of the same .NET member data: four repeats of one whitespace
+// placement, expecting the whole input consumed and 12 bytes written.
+TEST(Base64Test, DecodeFromUtf8_WhitespacePlacements_ConsumeTheWholeInput) {
+    for (const char* piece : {"MTIz", "M TIz", "MT Iz", "MTI z", "MTIz ", "M    TI   z", "M T I Z "}) {
+        const std::string one(piece);
+        const std::string text = one + one + one + one;
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(text.data()),
+                                  static_cast<int>(text.size()));
+        std::vector<uint8_t> out(16, 0xCC);
+        Span<uint8_t> dst(out.data(), 16);
+        int consumed = -1, written = -1;
+        EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, true), OperationStatus::Done) << piece;
+        EXPECT_EQ(consumed, static_cast<int>(text.size())) << piece;
+        EXPECT_EQ(written, 12) << piece;
+    }
+}
+
+// .NET DecodingWithWhiteSpaceSplitFinalQuantumAndIsFinalBlockFalse, the isFinalBlock
+// == true half: a final quantum split by whitespace, with or without whitespace after
+// the padding, consumes the entire input.
+TEST(Base64Test, DecodeFromUtf8_WhitespaceSplitFinalQuantum_ConsumesTheWholeInput) {
+    for (const char* text : {"AQ\r\nQ=", "AQ\r\nQ=\r\n", "AQ Q=", "AQ\tQ="}) {
+        const auto len = static_cast<int>(std::string(text).size());
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(text), len);
+        std::vector<uint8_t> out(16, 0xCC);
+        Span<uint8_t> dst(out.data(), 16);
+        int consumed = -1, written = -1;
+        EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, true), OperationStatus::Done) << text;
+        EXPECT_EQ(consumed, len) << text;
+        EXPECT_EQ(written, 2) << text;
+        EXPECT_EQ(out[0], 0x01) << text;
+        EXPECT_EQ(out[1], 0x04) << text;
+    }
+}
+
+// The char overload shares decodeCore, so the cursor rule is one rule, not two.
+TEST(Base64Test, DecodeFromChars_TrailingWhitespaceAfterPadding_IsConsumed) {
+    const char* text = "QQ== \n";
+    ReadOnlySpan<char> src(text, 6);
+    std::vector<uint8_t> out(16, 0xCC);
+    Span<uint8_t> dst(out.data(), 16);
+    int consumed = -1, written = -1;
+    EXPECT_EQ(Base64::DecodeFromChars(src, dst, consumed, written, true), OperationStatus::Done);
+    EXPECT_EQ(consumed, 6);
+    EXPECT_EQ(written, 1);
+}
