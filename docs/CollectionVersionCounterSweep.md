@@ -323,6 +323,21 @@ Two honest qualifications:
 `LinkedList`, and `ListDictionaryInternal` bump nothing, before and after. That
 is ticket 1713's contract and this ticket preserves it exactly.
 
+> **Follow-up (ticket #1802, 2026-07-29) — `Hashtable` joins that list.** It is
+> absent above, and the reason was *not* that its `Remove` was correct: all three
+> `Hashtable::Remove` overloads were `_map.erase(key); ++version_;`, so the
+> collection had **no** operation that could be asked to change nothing, and
+> `CollectionVersionCounterTests.cpp`'s `HashtableAdapter` therefore carried
+> `kHasNoOpMutation = false`. #1802 made `Remove` advance the counter only when an
+> entry was actually erased, matching .NET `Hashtable.Remove` (`Hashtable.cs:999`,
+> `UpdateVersion()` inside the found branch) and the "advance on effective
+> mutation" rule this document's §6 already stated. The adapter now carries
+> `kHasNoOpMutation = true` with an absent-key `Remove` as its no-op mutation,
+> matching `ListDictionaryAdapter`. Nothing in this ticket's own evidence changes;
+> `Clear()` keeps its unconditional bump on both non-generic dictionaries, as a
+> decided deviation from .NET `Hashtable` recorded in
+> `docs/HashtableValueAccessSafetyDesign.md` §35.4.
+
 ---
 
 ## 5. .NET comparison

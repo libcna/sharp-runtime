@@ -3343,3 +3343,138 @@ closing it is what would make the two implementations agree on all ten version
 rows.
 
 - `modules/collections/include/System/Collections/ListDictionaryInternal.hpp.audit.md`.
+
+## Post-audit remediation batch — ticket #1802, `Hashtable::Remove`'s absent-key over-bump closed (2026-07-29)
+
+Implementation ticket #1802 (`REMED-COLL-HASHTABLE-REMOVE-VERSION`, P3, size S,
+`defect`) is **done**, under the explicit per-action user approval its row
+required and which no earlier approval carried. Durable record:
+`docs/HashtableValueAccessSafetyDesign.md` §35, a clearly separated follow-up
+section; #1796 and #1799 remain `done` and neither is reopened.
+
+**No new `SR-AUD-*` identifier**: the audit numbering is frozen at 364 and the
+defect was found during remediation, by design ticket #1799's probe rather than
+by the audit. **SR-AUD-363, CCF-018 and SR-AUD-356 are not reopened** and no
+finding's status changed.
+
+**The defect.** All three `System::Collections::Hashtable::Remove` overloads —
+`const void*`, `const std::string&` and `const char*` — were
+`_map.erase(key); ++version_;`, so the fail-fast mutation counter advanced
+**whether or not the key was present**. Reproduced again against the committed
+headers before a line was edited (`build-probe/1802_probe1_remove.cpp`, log
+`build-probe/1802_prefix.log`): **24 defects over 43 checks**, and **0 over the
+same 43** after the repair.
+
+- Removing an absent key moved the counter `3 → 4`, so **four** outstanding
+  enumerator kinds threw `InvalidOperationException` after an operation that
+  changed nothing: the `IDictionaryEnumerator`, the key view, the value view, and
+  the same reached through an `IDictionary&`.
+- A full walk after one absent `Remove` yielded **0 of 3** entries; `Reset()`
+  threw too; the same absent key removed five times moved the counter by **five**;
+  at 20,000 entries the counter moved and the enumerator died for a `Remove` that
+  removed nothing.
+- `Count` and contents were correct on **every** measured row. This is a **false
+  positive**, memory-safe and wrong — and it is the *opposite* direction of error
+  from #1798's on the sibling implementation, which missed a mutation that really
+  happened.
+
+**.NET comparison, read from the current source.** `Hashtable.Remove` calls
+`UpdateVersion()` at `Hashtable.cs:999`, **inside** the branch that matched a
+bucket; the absent case falls out of the collision walk at `:1004` having touched
+neither `_count` nor `_version`. .NET `ListDictionaryInternal.Remove` does
+`version++` first and unconditionally (`:181`). .NET's own two `IDictionary`
+implementations therefore disagree, which is why the rule had to be *chosen*
+rather than copied; the rule taken is .NET `Hashtable`'s, **advance on effective
+mutation**, which `detail/MutationCounter.hpp` already documented and
+`docs/ListDictionaryInternalSetterDesign.md` §9.3 selected for the interface. It
+was **not** derived from `ListDictionaryInternal`, whose bump-first shape #1799
+deliberately rejected. **With #1798 and #1802 both closed, the port's two
+`IDictionary` implementations agree on all ten version rows of that design's
+§6.1.**
+
+**Repair.** One new private `removeKey(const std::string&)` helper —
+`if (_map.erase(key) != 0) ++version_;` — that all three overloads route through,
+the same "decide once, structurally unskippable" shape `lookupCopy()` gives the
+reads and `toKey()` gives the raw-key conversion.
+`std::unordered_map::erase(const key_type&)` **already returns the number of
+elements removed**, so the effective/no-op distinction costs **no second lookup,
+no `Contains` pre-check, no second key conversion, no allocation and no lock** —
+the deciding value was already being computed and discarded. The bump follows the
+erase, so a throwing key conversion leaves contents and counter untouched: a
+**strong** exception guarantee. `toKey()` is unchanged and remains the single
+validating conversion site; the null-key contract from #1775, re-asserted by
+#1796, is untouched and re-pinned including its message text.
+
+**`Clear()` is a decided deviation and was deliberately not changed.** It still
+bumps unconditionally, including on an already-empty table, where .NET
+`Hashtable.Clear` early-returns at `:426`. .NET's guard is
+`_count == 0 && _occupancy == 0`, and `_occupancy` — buckets whose collision bit
+was ever set — has **no `std::unordered_map` analogue**, so `if (_map.empty())
+return;` would skip the bump where .NET still bumps and trade one divergence for
+a subtler one. It also errs in the memory-safe direction, and matches .NET
+`ListDictionaryInternal.Clear` and the port's own sibling. Now an assertion on
+both implementations, not a comment.
+
+**Not an ABI break — measured, not asserted.** `sizeof(Hashtable)` **unchanged at
+72**, `sizeof(Hashtable::ValueReference)` unchanged at 40, the **19-entry vtable
+byte-identical** with `Remove` still at slot `0x70` and `Clear`/`Add`/`setItem`/
+`getItem` at `0x68`/`0x60`/`0x40`/`0x38`, `this` still in `%rdi` with **no
+`sret`**, the **undefined-symbol list identical**, and
+`callClear`/`callAdd`/`callSetItem` byte-identical machine code. One file-local
+libstdc++ optimiser clone disappears; one weak COMDAT `removeKey` appears;
+nothing a stale caller could need is removed. **A full consumer rebuild is
+nevertheless mandatory and silent if skipped** — every affected body is `inline`
+in a header, so a stale object links with **zero diagnostics** and keeps the old
+false positive, link-order dependently at `-O0` and per-translation-unit at
+`-O2`, with `-flto -Wodr` diagnosing nothing. Unlike #1794's and #1796's breaks
+the failure mode is silence, never a crash.
+
+**Permanent coverage:** `HashtableRemoveVersioningTests.cpp`, **+67 tests**,
+whose enumerator matrix is parameterised over four enumerator families
+(`IDictionaryEnumerator`, the key-view and value-view `MemberEnumerator`
+adaptations, and the dictionary enumerator through an `IDictionary&`) and whose
+interface cases are parameterised over **both** non-generic implementations.
+`CollectionVersionCounterTests.cpp`'s `HashtableAdapter` gains
+`kHasNoOpMutation = true` with an absent-key `Remove` as its no-op mutation,
+matching `ListDictionaryAdapter`. New `-Werror` `Collections.Core` consumer
+fixture `test/consumer/collections_hashtable_remove.cpp`, compiled **and run**.
+
+**Interaction with #1800 and #1801, recorded and not fixed.** The new suite adds
+a **fourth** `CollectionVersionAccess` specialisation, spelled **token-for-token**
+as the three existing `SR1794_SEAM_BODY` ones; identical specialisations across
+translation units are well-formed, and the IFNDR is the **divergence** with
+`CollectionVersionCounterTests.cpp`'s `SR1787_SEAM_BODY`. The count of *distinct*
+bodies is still **two**. #1800 is not introduced, widened or fixed here. **No
+negative fixture was added** — nothing in this ticket changes at compile time, so
+one would have nothing to fail on — so **#1801 is untouched**, and the new
+*positive* fixture, while `-Werror`-compiled and run, is invoked by
+`scripts/check_selective_components.sh Collections.Core
+collections_hashtable_remove.cpp`, which is **not** in that script's default
+matrix and is **not** run by any tracked CI job.
+
+**Validation:** a fresh `cmake --fresh` configuration and clean-first rebuild
+(**632 objects, 0 predating the configure**, all 36 test executables relinked, 0
+warnings, 0 errors), then **13,790 tests across 37 executables** from that
+rebuilt tree — the floor rises from 13,723 — with `Collections_Core` at **2,504**
+(was 2,437, **+67**). A later comment-only edit (two doc-comments changed from `§9.3` to `section 9.3` so the two headers stay pure ASCII) triggered one incremental build that recompiled **11 translation units and relinked 1 executable** — the **complete** dependent set, since exactly eleven `.d` files in the tree name `Hashtable.hpp` or `IDictionary.hpp` — leaving **0** objects predating the fresh configuration; the gate below ran from that tree. ASan + UBSan + LSan clean across the whole
+`Collections.Core` suite, a focused scenario probe, and **both** consumer
+fixtures, with LeakSanitizer **proved active** by a 350-byte self-test reported
+as 383 bytes in 2 allocations. TSan not applicable: no atomic, no hidden `const`
+write, no cache and no new concurrency claim; `Hashtable` remains not
+thread-safe. 41 modules / 90 edges, validator 7/7, catalogue current, database
+consistent, `git diff --check` clean, Doxygen **1,940** of the 1,942 ceiling,
+full selective-component matrix passing. Allocation counts identical on every
+`Remove` path; the single measured slowdown is on the throwing null-key path and
+is shown by instruction-level disassembly and by a bare-throw control to be
+code-layout, not added work. Every compilation used at most **three** jobs.
+
+**Still not claimed closed:** the raw-key `void*` *value* parameter on
+`setItem`/`Add`; accessor or enumerator use after the collection is destroyed; a
+`ValueReference` outliving its table; `const std::any& r = table[key];` compiling
+as a snapshot; #1800's seam divergence; #1801's untracked negative fixtures; the
+deliberate `Clear()`-on-empty deviation, decided rather than closed; and the
+blast radius in CNA and mobile-eggbert, **unmeasured by instruction** (#1773
+stays `blocked`; neither repository was inspected).
+`ListDictionaryInternal` was **not** modified.
+
+- `modules/collections/include/System/Collections/Hashtable.hpp.audit.md`.

@@ -580,6 +580,36 @@ would have manufactured two new false-positive `InvalidOperationException`s.
 CCF-018 and the findings above are **not reopened**. See
 `docs/ListDictionaryInternalSetterDesign.md` §37.
 
+**Follow-up (ticket #1802, 2026-07-29): the last divergent row is closed, on the
+`Hashtable` side this time.** All three `Hashtable::Remove` overloads were
+`_map.erase(key); ++version_;`, so the mutation counter advanced whether or not
+the key was present — reproduced at **24 defects over 43 checks** against the
+committed headers (`build-probe/1802_prefix.log`). Removing an absent key moved
+the counter and then threw `InvalidOperationException` out of **every**
+outstanding enumerator kind, after an operation that changed nothing; a full walk
+after one absent `Remove` yielded **0 of 3** entries. That is a **false
+positive** — `Count` and contents were correct on every row — and it is the
+*opposite* direction of error from #1798's, which missed a real mutation. .NET
+`Hashtable.Remove` calls `UpdateVersion()` only inside the branch that found and
+cleared a bucket (`Hashtable.cs:999`). All three overloads now route through one
+private `removeKey()` helper that bumps only when
+`std::unordered_map::erase` reports a removal — the value the erase call already
+computed and previously discarded, so **no second lookup, no `Contains`
+pre-check, no second key conversion, no allocation and no lock** were added. With
+#1798 and #1802 both closed, the port's two `IDictionary` implementations agree on
+**all ten** version rows of `docs/ListDictionaryInternalSetterDesign.md` §6.1.
+`Clear()` keeps its unconditional bump on both, as a decided deviation from .NET
+`Hashtable`'s `_occupancy`-guarded early return — `_occupancy` has no
+`std::unordered_map` analogue, so the obvious `if (empty) return;` would not
+reproduce .NET's rule, and the unconditional bump errs in the memory-safe
+direction. No signature, vtable slot, calling convention or object size changed
+(`sizeof(Hashtable)` unchanged at 72, 19-entry vtable byte-identical), but every
+affected body is `inline` in a header, so a **full consumer rebuild is mandatory
+and silent if skipped**. CCF-018, SR-AUD-356 and SR-AUD-363 are **not reopened**;
+no new `SR-AUD-*` identifier was created, the numbering staying frozen at 364. New
+permanent suite: `HashtableRemoveVersioningTests.cpp` (+67 tests). See
+`docs/HashtableValueAccessSafetyDesign.md` §35.
+
 - `modules/collections/include/System/Collections/Generic/IEnumerator.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/List.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/Queue.hpp.audit.md`;

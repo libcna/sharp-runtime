@@ -3,15 +3,15 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-29. Branch: `feature/remediation-coll-listdictionary-setitem`.
+*Last verified: 2026-07-29. Branch: `feature/remediation-coll-hashtable-remove-version`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 13,723 tests across 37 executables (the 13,127 figure this
+dependency edges, and 13,790 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 13,723
-verified by #1798 from a fully fresh configuration and clean-first rebuild,
-raised from #1796's 13,657). The repository-wide,
+section below states the count it measured, and the current floor is the 13,790
+verified by #1802 from a fully fresh configuration and clean-first rebuild,
+raised from #1798's 13,723 and #1796's 13,657). The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766). Remediation
 tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design),
 #1769 (LinkedListNode lifetime implementation), #1770 (raw `ICollection::CopyTo`
@@ -3026,6 +3026,147 @@ what would make the two implementations agree on all ten version rows. Tickets
 none was reopened. CNA and mobile-eggbert were not inspected, searched,
 configured, built, or modified. No push, merge, rebase, tag, or publication
 occurred.
+
+No repair ticket is active.
+
+### Completed Hashtable Remove versioning remediation: ticket #1802
+
+Implementation ticket #1802 (`REMED-COLL-HASHTABLE-REMOVE-VERSION`, P3, size S,
+`defect`) is **done**, under the explicit per-action user approval its row
+required. Durable record: `docs/HashtableValueAccessSafetyDesign.md` §35. #1796
+and #1799 remain `done` and neither is reopened.
+
+**All three `System::Collections::Hashtable::Remove` overloads advanced the
+fail-fast mutation counter whether or not the key was present**, and the defect
+was reproduced again against the committed headers before a line was edited:
+**24 defects over 43 checks** (`build-probe/1802_prefix.log`), **0 over the same
+43** afterwards.
+
+1. **`_map.erase(key); ++version_;` on all three overloads** — `const void*`,
+   `const std::string&` and `const char*`. Removing an absent key moved the
+   counter `3 → 4`, so an outstanding enumerator threw
+   `InvalidOperationException` after an operation that changed nothing:
+   **four** enumerator kinds died — the `IDictionaryEnumerator`, the key view,
+   the value view, and the same reached through an `IDictionary&` — a full walk
+   after one absent `Remove` yielded **0 of 3** entries, and `Reset()` threw too.
+   The same absent key removed five times moved the counter by **five**. At
+   20,000 entries the counter moved and the enumerator died for a `Remove` that
+   removed nothing.
+2. **This is a FALSE POSITIVE and the exact opposite of #1798's defect.** `Count`
+   and contents were correct on every measured row; nothing was corrupted and no
+   memory was misused. #1798's was the memory-unsafe direction — a real mutation
+   the counter missed. Both are now closed.
+3. **Repair:** one new private `removeKey(const std::string&)` helper —
+   `if (_map.erase(key) != 0) ++version_;` — that all three overloads route
+   through, the same "decide once, structurally unskippable" shape `lookupCopy()`
+   gives the reads and `toKey()` gives the raw-key conversion.
+   `std::unordered_map::erase(const key_type&)` **already returns the number of
+   elements removed**, so the correction adds **no second lookup, no `Contains`
+   pre-check, no second key conversion, no allocation and no lock** — the
+   deciding value was already being computed and thrown away. The bump is after
+   the erase, giving a **strong** exception guarantee.
+
+**.NET comparison, read from the current source rather than recalled.**
+`Hashtable.Remove` calls `UpdateVersion()` at `Hashtable.cs:999`, **inside** the
+branch that matched a bucket; the absent case falls out of the collision walk at
+`:1004` having touched neither `_count` nor `_version`. .NET
+`ListDictionaryInternal.Remove` does `version++` first and unconditionally
+(`:181`), so .NET's own two `IDictionary` implementations genuinely disagree —
+which is why the rule had to be *chosen*. The rule taken is the `Hashtable` one,
+**advance on effective mutation**, which `MutationCounter.hpp` already documented
+and which `docs/ListDictionaryInternalSetterDesign.md` §9.3 selected for the
+whole interface. It was **not** derived from `ListDictionaryInternal`, whose
+bump-first shape #1799 deliberately rejected. **With #1798 and #1802 both closed
+the two implementations now agree on all ten version rows of that design's §6.1.**
+
+**`Clear()` is a DECIDED deviation and was deliberately not changed.** It still
+bumps unconditionally, including on an already-empty table, where .NET
+`Hashtable.Clear` early-returns at `:426`. Three reasons, weighed rather than
+asserted: .NET's guard is `_count == 0 && _occupancy == 0` and `_occupancy` — a
+count of buckets whose collision bit was ever set — has **no
+`std::unordered_map` analogue**, so the obvious `if (_map.empty()) return;` would
+skip the bump where .NET still bumps and trade one divergence for a subtler one;
+a spurious bump can only invalidate an enumerator that had nothing to read, where
+a *missed* bump is the memory-unsafe error; and .NET `ListDictionaryInternal.Clear`
+bumps unconditionally too, as does the port's own sibling since #1798. It is now
+an assertion in the permanent suite and the consumer fixture, on **both**
+implementations, rather than a comment.
+
+**Not an ABI break — a silent one, which is different and is stated as such.**
+Measured on the real headers: `sizeof(Hashtable)` **unchanged at 72**, the
+**19-entry vtable byte-identical** with `Remove` still at slot `0x70`, `this`
+still in `%rdi` with **no `sret`**, the **undefined-symbol list identical**, and
+`callClear`/`callAdd`/`callSetItem` byte-identical machine code. One file-local
+libstdc++ optimiser clone disappears and one weak COMDAT `removeKey` appears;
+nothing a stale caller could need is removed. **A full consumer rebuild is
+nevertheless mandatory and silent if skipped** — every affected body is `inline`
+in a header, so a stale object links with **zero diagnostics** and keeps the old
+false positive: link-order dependent at `-O0` (a stale object first drags
+correctly rebuilt translation units back with it) and per-translation-unit at
+`-O2`, with `-flto -Wodr` diagnosing nothing. Unlike #1794's and #1796's breaks
+the failure mode is silence, never a crash.
+
+**One honest performance anomaly, reported rather than smoothed.** Allocation
+counts are **identical** pre and post on every `Remove` path. The two hot rows
+are noise-dominated and faster in two of three runs each. The **null-key
+rejection** row measured consistently ~13 % slower across **seven** alternating
+runs (552–567 ns pre, 627–642 ns post). It is not added work, and that is
+measured twice rather than argued: `Hashtable::Remove(const void*)` is
+**instruction-for-instruction identical** from its prologue through the `call` to
+`toKey` — the only path a null key executes, because `toKey` throws before
+`removeKey` is reachable — and a control timing a bare `throw`/`catch` of the
+same exception type shows **no systematic shift**. It is a whole-binary code- and
+unwind-layout effect on a path that costs ~0.6 µs because it throws.
+
+**Interaction with inactive ticket #1800, recorded and not fixed:** the new suite
+adds a **fourth** `CollectionVersionAccess` specialisation, spelled
+**token-for-token** as the three existing `SR1794_SEAM_BODY` ones. Identical
+specialisations across translation units are well-formed; the IFNDR is the
+**divergence** with `CollectionVersionCounterTests.cpp`'s `SR1787_SEAM_BODY`. The
+count of distinct bodies is still **two**. Not introduced, not widened, not
+fixed here, and **#1802 does not claim to close it**. **No negative fixture was
+added** — nothing here changes at compile time, so one would have nothing to fail
+on — so **#1801 is untouched**; the new *positive* fixture is compiled `-Werror`
+**and run**, but by `scripts/check_selective_components.sh Collections.Core
+collections_hashtable_remove.cpp`, which is **not** in that script's default
+matrix and is **not** executed by any tracked CI job.
+
+**Validation:** a **fresh `cmake --fresh` configuration and clean-first
+rebuild** of `build/` — **632 objects, 0 predating the configure**, all 36 test
+executables relinked, 0 warnings, 0 errors — then **13,790 tests across 37
+executables** from that rebuilt tree (floor was 13,723), `Collections_Core`
+**2,504** (was 2,437, **+67**). A later comment-only edit (two doc-comments changed from `§9.3` to `section 9.3` so the two headers stay pure ASCII) triggered one incremental build that recompiled **11 translation units and relinked 1 executable** — the **complete** dependent set, since exactly eleven `.d` files in the tree name `Hashtable.hpp` or `IDictionary.hpp` — leaving **0** objects predating the fresh configuration; the gate below ran from that tree. ASan + UBSan + LSan clean on the entire
+`Collections.Core` suite, on a focused scenario probe, and on **both**
+`Collections.Core` consumer fixtures, with LeakSanitizer **proved active** by a
+350-byte self-test reported as 383 bytes in 2 allocations. 41 modules / 90 edges,
+validator 7/7, catalogue current, database consistent, `git diff --check` clean,
+Doxygen **1,940** of the 1,942 ceiling, full `check_selective_components.sh`
+matrix passing.
+
+**Build directories:** `build/` (fresh configure + clean-first, `--parallel 3`),
+`build-asan/` (`--parallel 3`, `ccache`), the shared `build-probe/` and
+`build-consumer/` under a `1802_` file prefix, and `build-tmp/` as `TMPDIR`. **No
+build-directory name outside the closed set was invented and no compilation
+exceeded three jobs.** `check_selective_components.sh` needed `TMPDIR` redirected
+into `build-tmp/` so its `mktemp -d` matrix root stayed out of `/tmp`. Three
+unreferenced 2026-07-24 archives left over from an older configuration
+(`libSHARP_RUNTIME.a`, `libtinyxml2.a`, `libminiz.a`, **47 MB**) had no target
+directory in the current configuration and were removed.
+
+**Not claimed closed:** the raw-key `void*` *value* parameter on `setItem`/`Add`;
+accessor or enumerator use after the collection is destroyed; a `ValueReference`
+outliving its table; `const std::any& r = table[key];` compiling as a snapshot;
+#1800's seam divergence; #1801's untracked negative fixtures; the deliberate
+`Clear()`-on-empty deviation, which is decided rather than closed; and the real
+blast radius in CNA and mobile-eggbert, **unmeasured by instruction**.
+
+No new `SR-AUD-*` identifier: the audit numbering is frozen at 364 and the defect
+was found during remediation, by design ticket #1799's probe.
+`ListDictionaryInternal` was **not** modified. Tickets #1800 and #1801 remain
+`blocked` and unbegun; #1773, #1788, #1789 and #1791 remain `blocked` and
+untouched; #1790 and #1792–#1799 remain `done` and none was reopened. CNA and
+mobile-eggbert were not inspected, searched, configured, built, or modified. No
+push, merge, rebase, tag, or publication occurred.
 
 No repair ticket is active.
 

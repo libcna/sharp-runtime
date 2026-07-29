@@ -208,6 +208,71 @@ no safe or useful equivalent.
 
 ## Breaking changes
 
+### 2026-07-29 — `System::Collections::Hashtable::Remove` no longer invalidates enumerators for a key that was not there
+
+**This one requires a full rebuild of every consumer, and the linker will not
+tell you if you skip it — and like the entry below, a consumer that skips it does
+not crash. It silently keeps the old behaviour.**
+
+Nothing's signature changed. One behaviour did, and it is a *removal* of a
+spurious exception.
+
+All three `Remove` overloads — `Remove(const void*)`, `Remove(const std::string&)`
+and `Remove(const char*)` — were `_map.erase(key); ++version_;`, so the fail-fast
+mutation counter advanced whether or not the key was present. Removing a key that
+was not in the table changed nothing, and then threw
+`InvalidOperationException` out of **every** outstanding enumerator: the
+`IDictionaryEnumerator`, the `Keys` view, the `Values` view, and the same reached
+through an `IDictionary&`. A full walk after one absent `Remove` yielded **0 of 3**
+entries; `Reset()` threw too. `Count` and the contents were correct throughout —
+this was a false positive in the counter, not corruption.
+
+`Remove` now advances the counter **only when an entry was actually erased**:
+
+| Operation | Advances the counter? |
+|---|---|
+| `Remove` of a present key | yes — outstanding enumerators still fail fast |
+| `Remove` of an absent key | **no** — outstanding enumerators stay valid |
+| `Remove` of the same key twice | yes, then no |
+| `Remove` rejected for a null key | no |
+| `Clear`, even on an empty table | **yes, unconditionally** — see below |
+
+This matches .NET `Hashtable.Remove`, which calls `UpdateVersion()` only inside
+the branch that found and cleared a bucket. It also completes the rule the entry
+below introduced on the other `IDictionary` implementation: **advance on
+effective mutation**. Both of this port's non-generic dictionaries now answer
+identically on every version row.
+
+**What you may need to change.** Code that *relied* on an absent `Remove`
+invalidating an enumerator — which would have been relying on a bug — no longer
+gets the exception. Code that removes keys mid-enumeration and re-acquires the
+enumerator on `InvalidOperationException` keeps working; it simply re-acquires
+less often. Nothing that was correct before becomes incorrect.
+
+**`Clear()` is deliberately unchanged, and deliberately unlike .NET.** It bumps
+unconditionally, including on an already-empty table, where .NET
+`Hashtable.Clear` early-returns. .NET's guard is `_count == 0 && _occupancy == 0`,
+and `_occupancy` — a count of buckets whose collision bit was ever set — has no
+`std::unordered_map` analogue, so the obvious `if (empty) return;` would *not*
+reproduce .NET's rule. The unconditional bump also errs safely: it can only
+invalidate an enumerator that had nothing to read. .NET
+`ListDictionaryInternal.Clear` bumps unconditionally too.
+
+**Rebuild — mandatory, and silent if skipped.** No signature, return type,
+parameter type, vtable slot, calling convention, object size or mangled name
+changed: the 19-entry vtable is byte-identical with `Remove` still at slot
+`0x70`, `this` stays in `%rdi` with no hidden `sret`, the undefined-symbol list
+is identical, and `sizeof(System::Collections::Hashtable)` is unchanged at **72**.
+That is what makes it dangerous. Every affected body is `inline` in a header, so
+a stale object file links with **zero diagnostics** and silently keeps the old
+false positive — link-order dependent at `-O0` (a stale object first on the link
+line drags correctly rebuilt translation units back with it) and per-translation-
+unit at `-O2`. `-flto -Wodr` diagnoses nothing, because only an inline function
+*body* differs. The linker cannot enforce this rebuild; only this note can.
+
+Full record, measurements and rejected alternatives:
+`docs/HashtableValueAccessSafetyDesign.md` §35.
+
 ### 2026-07-29 — `System::Collections::ListDictionaryInternal` rejects null keys and versions every effective mutation
 
 **This one requires a full rebuild of every consumer, and the linker will not
