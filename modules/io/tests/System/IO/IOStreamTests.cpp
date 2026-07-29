@@ -2082,6 +2082,130 @@ TEST(FileStreamTests, CreateMode_WriteOnly_CanReadIsFalse) {
     File::Delete(p);
 }
 
+// ===========================================================================
+// Ticket #1825 -- FileStream validates its access flags, not just its open state
+// ===========================================================================
+//
+// Read/Write/WriteByte inspected only file_.is_open(), never canRead_/canWrite_.
+// An std::fstream opened without std::ios::out accepts write(), sets badbit and
+// returns, so a write to a read-only handle was DROPPED and the caller was told
+// nothing -- silent data loss, not a late diagnostic. Measured before the fix in
+// build-probe/1825_prefix_defects.log: case 1 writes "XXXX" and the file still
+// reads "seed"; case 2 is the same loss through WriteByte; case 3 reads a
+// write-only handle and gets n=0, indistinguishable from end-of-file; case 4
+// found that WriteByte had no is_open() check either, which the ticket text had
+// said it did.
+//
+// .NET checks the closed state FIRST and the access flags SECOND
+// (Strategies/OSFileStreamStrategy.cs:208-217 and 232-241); that order is pinned
+// below because it is observable.
+
+TEST(FileStreamTests, Write_OnReadOnlyHandle_ThrowsNotSupported) {
+    std::string p = tf("fstream_1825_ro_write.txt");
+    File::WriteAllText(p, "seed");
+    {
+        FileStream fs(p, FileMode::Open, FileAccess::Read);
+        const uint8_t payload[4] = {'X', 'X', 'X', 'X'};
+        EXPECT_THROW(fs.Write(payload, 0, 4), System::NotSupportedException);
+    }
+    // The data never reached the file before either -- the difference is that the
+    // caller is now told.
+    EXPECT_EQ(File::ReadAllText(p), "seed");
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Write_OnReadOnlyHandle_UsesTheDotNetMessage) {
+    std::string p = tf("fstream_1825_ro_msg.txt");
+    File::WriteAllText(p, "seed");
+    {
+        FileStream fs(p, FileMode::Open, FileAccess::Read);
+        const uint8_t payload[1] = {'X'};
+        try {
+            fs.Write(payload, 0, 1);
+            FAIL() << "expected NotSupportedException";
+        } catch (const System::NotSupportedException& e) {
+            // NotSupported_UnwritableStream, verbatim.
+            EXPECT_EQ(std::string(e.what()), "Stream does not support writing.");
+        }
+    }
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, WriteByte_OnReadOnlyHandle_ThrowsNotSupported) {
+    std::string p = tf("fstream_1825_ro_writebyte.txt");
+    File::WriteAllText(p, "seed");
+    {
+        FileStream fs(p, FileMode::Open, FileAccess::Read);
+        EXPECT_THROW(fs.WriteByte('X'), System::NotSupportedException);
+    }
+    EXPECT_EQ(File::ReadAllText(p), "seed");
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Read_OnWriteOnlyHandle_ThrowsNotSupported) {
+    std::string p = tf("fstream_1825_wo_read.txt");
+    File::WriteAllText(p, "seed");
+    {
+        FileStream fs(p, FileMode::Append);
+        ASSERT_FALSE(fs.getCanReadProperty());
+        uint8_t buf[4] = {};
+        try {
+            (void)fs.Read(buf, 0, 4);
+            FAIL() << "expected NotSupportedException";
+        } catch (const System::NotSupportedException& e) {
+            // NotSupported_UnreadableStream, verbatim.
+            EXPECT_EQ(std::string(e.what()), "Stream does not support reading.");
+        }
+    }
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, WriteByte_AfterClose_ThrowsObjectDisposed) {
+    // WriteByte previously had no validation whatsoever, so this was accepted in
+    // silence while the Write() sibling next to it already threw.
+    std::string p = tf("fstream_1825_closed_byte.txt");
+    File::WriteAllText(p, "seed");
+    FileStream fs(p, FileMode::Open, FileAccess::ReadWrite);
+    fs.Close();
+    EXPECT_THROW(fs.WriteByte('X'), System::ObjectDisposedException);
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, ClosedBeatsUnwritable) {
+    // Validation order, pinned because it is observable: .NET tests the handle's
+    // closed state before the access flags, so a stream that is both must report
+    // ObjectDisposedException and not NotSupportedException.
+    std::string p = tf("fstream_1825_closed_ro.txt");
+    File::WriteAllText(p, "seed");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    fs.Close();
+    const uint8_t payload[1] = {'X'};
+    EXPECT_THROW(fs.Write(payload, 0, 1), System::ObjectDisposedException);
+    EXPECT_THROW(fs.WriteByte('X'), System::ObjectDisposedException);
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, ValidReadAndWritePathsUnchangedByAccessValidation) {
+    // The guard must not be inverted. Write, WriteByte and Read all still work on
+    // handles that permit them.
+    std::string p = tf("fstream_1825_valid.txt");
+    {
+        FileStream fs(p, FileMode::Create);
+        const uint8_t payload[4] = {'a', 'b', 'c', 'd'};
+        EXPECT_NO_THROW(fs.Write(payload, 0, 4));
+        EXPECT_NO_THROW(fs.WriteByte('e'));
+        EXPECT_NO_THROW(fs.Flush());
+    }
+    EXPECT_EQ(File::ReadAllText(p), "abcde");
+    {
+        FileStream fs(p, FileMode::Open, FileAccess::Read);
+        uint8_t buf[5] = {};
+        EXPECT_EQ(fs.Read(buf, 0, 5), 5);
+        EXPECT_EQ(std::string(reinterpret_cast<const char*>(buf), 5), "abcde");
+    }
+    File::Delete(p);
+}
+
 TEST(FileStreamTests, CreateNew_ExistingFile_ThrowsIOException) {
     std::string p = tf("fstream_createnew_exists.bin");
     File::WriteAllText(p, "x");

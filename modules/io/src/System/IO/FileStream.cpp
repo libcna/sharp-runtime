@@ -124,10 +124,27 @@ namespace System::IO
 
     FileStream::~FileStream() { Close(); }
 
+    // The canRead_/canWrite_ tests in Read(), Write() and WriteByte() are ticket #1825.
+    // Verified against Strategies/OSFileStreamStrategy.cs:208-217 and 232-241, whose
+    // synchronous Read and Write both check the handle's closed state FIRST and the access
+    // flags SECOND, throwing NotSupportedException(SR.NotSupported_UnreadableStream /
+    // _UnwritableStream). That order is preserved here and pinned by a test: a stream that is
+    // both closed and unwritable must report ObjectDisposedException, not NotSupportedException.
+    //
+    // Without them the failure was silent, not late. An std::fstream opened without
+    // std::ios::out accepts file_.write(), sets badbit and returns; nothing inspected either
+    // the flag or the stream state, so the bytes were dropped and the caller was told nothing.
+    // Measured in build-probe/1825_prefix_defects.log: case 1 writes "XXXX" through a
+    // FileAccess::Read handle and the file still reads "seed"; case 2 is the same loss through
+    // WriteByte; case 3 reads a FileMode::Append handle and gets n=0, indistinguishable from
+    // end-of-file. MemoryStream and UnmanagedMemoryStream in this module already threw exactly
+    // these messages for exactly this condition; FileStream was the last stream that did not.
     intcs FileStream::Read(bytecs buffer[], intcs offset, intcs count)
     {
         if (!file_.is_open())
             throw System::ObjectDisposedException("Cannot access a closed file.");
+        if (!canRead_)
+            throw System::NotSupportedException("Stream does not support reading.");
         if (buffer == nullptr)
             throw System::ArgumentNullException("buffer");
         if (offset < 0)
@@ -143,6 +160,8 @@ namespace System::IO
     {
         if (!file_.is_open())
             throw System::ObjectDisposedException("Cannot access a closed file.");
+        if (!canWrite_)
+            throw System::NotSupportedException("Stream does not support writing.");
         if (buffer == nullptr)
             throw System::ArgumentNullException("buffer");
         if (offset < 0)
@@ -154,8 +173,19 @@ namespace System::IO
                     static_cast<std::streamsize>(count));
     }
 
+    // WriteByte had NO validation at all -- not even the is_open() test its Write() sibling
+    // already had -- so writing a byte to a closed FileStream was accepted in silence
+    // (build-probe/1825_prefix_defects.log case 4). Ticket #1825's own description said all
+    // three operations "check only file_.is_open()"; for this one that was too generous, and
+    // the correction is recorded rather than quietly absorbed. .NET has no such gap because
+    // OSFileStreamStrategy.cs:226-227 defines WriteByte as Write(ReadOnlySpan<byte>), so it
+    // inherits both checks; this now matches by performing both in the same order.
     void FileStream::WriteByte(bytecs value)
     {
+        if (!file_.is_open())
+            throw System::ObjectDisposedException("Cannot access a closed file.");
+        if (!canWrite_)
+            throw System::NotSupportedException("Stream does not support writing.");
         file_.put(static_cast<char>(value));
     }
 

@@ -3852,3 +3852,51 @@ Two further defects exposed by the same measurement are their own tickets rather
 folded in: **#1825** (`FileStream::Write` silently discards data written to a
 read-only handle) and **#1826** (`MemoryStream::getCanReadProperty()` ignores
 `isOpen_`).
+
+### Completed FileStream access-flag validation: ticket #1825
+
+**`P1: FileStream::Write silently discards data written to a read-only handle`**
+(`REMED-IO-FILESTREAM-ACCESS-FLAGS`, P1, size S) is complete. It carries **no
+`SR-AUD-*` identifier**; the audit did not record this defect, which is stated plainly
+rather than backfilled, and the numbering stays frozen at 364.
+
+`FileStream::Read`, `Write` and `WriteByte` inspected only `file_.is_open()`, never
+`canRead_`/`canWrite_`. This was **data loss, not a late diagnostic**: an
+`std::fstream` opened without `std::ios::out` accepts `write()`, sets `badbit` and
+returns, and nothing inspected either the flag or the stream state, so the bytes were
+dropped with no diagnostic anywhere. All three operations now test the flag **after**
+the existing `is_open()` check and **before** the buffer/offset/count validation,
+throwing `NotSupportedException` with .NET's `NotSupported_UnreadableStream` /
+`_UnwritableStream` messages — the order and the wording of
+`Strategies/OSFileStreamStrategy.cs:208-217` and `232-241`, and the same messages
+`MemoryStream` and `UnmanagedMemoryStream` already threw for the same condition.
+`FileStream` was the last stream in the module that did not.
+
+**A fourth premise corrected, this one in #1825's own text.** The ticket said all three
+operations "check only `file_.is_open()`". For `WriteByte` that was too generous: it had
+**no validation at all**, so writing a byte to a *closed* `FileStream` was accepted in
+silence while the `Write()` sibling beside it already threw
+(`build-probe/1825_prefix_defects.log` case 4, a case the ticket did not predict). .NET
+has no such gap because `OSFileStreamStrategy.cs:226-227` defines `WriteByte` in terms
+of `Write(ReadOnlySpan<byte>)` and inherits both checks.
+
+| Case | Before | After |
+|---|---|---|
+| `Write` on `FileAccess::Read` | accepted; file still `"seed"` | `NotSupportedException` |
+| `WriteByte` on `FileAccess::Read` | accepted; file still `"seed"` | `NotSupportedException` |
+| `Read` on `FileMode::Append` | `n=0`, indistinguishable from EOF | `NotSupportedException` |
+| `WriteByte` after `Close()` | **accepted in silence** | `ObjectDisposedException` |
+| `Write`/`Read` after `Close()` | `ObjectDisposedException` | unchanged |
+| the valid read, write and `WriteByte` paths | correct | unchanged, byte-identical |
+| closed **and** unwritable | `ObjectDisposedException` | unchanged — pinned by a test |
+
+**Compatible narrowing, needing no approval.** Every newly rejected input already
+failed: a write to a read-only handle never reached the file, and a read of a write-only
+handle always returned 0. The only change is that the caller is now told.
+
+Closure evidence: 7 permanent regressions, `SharpRuntimeTests_IO` **579/579** (was
+572), clean under ASan + UBSan + LSan with activation proven rather than assumed
+(`build-probe/1825_postfix_defects.log`, `build-asan/1825_io_asan.log`). Repository
+gate: 0 warnings, 0 errors, **14,077 tests across 37 executables**;
+`scripts/local_ci_check.sh build` passed. No public signature, virtual, vtable, object
+layout or mangled symbol changed.

@@ -52,11 +52,39 @@ namespace System::IO
         /** Destroys the FileStream and closes the file. */
         ~FileStream() override;
 
-        /** Reads up to count bytes into buffer starting at offset; returns bytes actually read. */
+        /**
+         * @brief Reads up to count bytes into buffer starting at offset; returns bytes actually read.
+         *
+         * Validated in .NET's order (Strategies/OSFileStreamStrategy.cs:208-217): the
+         * closed state first, the access flags second, so a stream that is both closed
+         * and unreadable reports ObjectDisposedException.
+         *
+         * @throws System::ObjectDisposedException if the file has been closed.
+         * @throws System::NotSupportedException if this stream was not opened with read access.
+         * @throws System::ArgumentNullException if @p buffer is null.
+         * @throws System::ArgumentOutOfRangeException if @p offset or @p count is negative.
+         */
         intcs Read(bytecs buffer[], intcs offset, intcs count) override;
-        /** Writes count bytes from buffer starting at offset into the file. */
+        /**
+         * @brief Writes count bytes from buffer starting at offset into the file.
+         *
+         * Validated in .NET's order (Strategies/OSFileStreamStrategy.cs:232-241): the
+         * closed state first, the access flags second. Without the access check the
+         * underlying std::fstream accepted the call, set badbit and dropped the bytes,
+         * so a write to a read-only handle was lost in silence.
+         *
+         * @throws System::ObjectDisposedException if the file has been closed.
+         * @throws System::NotSupportedException if this stream was not opened with write access.
+         * @throws System::ArgumentNullException if @p buffer is null.
+         * @throws System::ArgumentOutOfRangeException if @p offset or @p count is negative.
+         */
         void  Write(const bytecs buffer[], intcs offset, intcs count) override;
-        /** Writes a single byte to the file. */
+        /**
+         * @brief Writes a single byte to the file.
+         *
+         * @throws System::ObjectDisposedException if the file has been closed.
+         * @throws System::NotSupportedException if this stream was not opened with write access.
+         */
         void  WriteByte(bytecs value) override;
         /** Closes the file stream. */
         void  Close() override;

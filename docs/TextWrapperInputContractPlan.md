@@ -643,14 +643,29 @@ behaviour is already pinned, so any new failure in its run belongs to it.
 
 ## 15. Status
 
-| Ticket | Status at the close of #1823 |
-|---|---|
-| #1823 | done (this document) |
-| #1809 | ready — compatible, no approval |
-| #1808 | ready — compatible, no approval, rescoped per §9.1 |
-| #1824 | **blocked** on the approval in §13.2 |
-| #1825 | ready — compatible, no approval |
-| #1826 | inactive — newly discovered, no `SR-AUD-*` identifier |
+| Ticket | Status at the close of #1823 | Status now |
+|---|---|---|
+| #1823 | done (this document) | done |
+| #1809 | ready — compatible, no approval | **done** — §6.2 landed unchanged |
+| #1808 | ready — compatible, no approval, rescoped per §9.1 | **done** — §6.1 landed unchanged |
+| #1824 | **blocked** on the approval in §13.2 | **still blocked** — §13.2 approval not given |
+| #1825 | ready — compatible, no approval | **done** — §6.4/§7.2 landed unchanged |
+| #1826 | inactive — newly discovered, no `SR-AUD-*` identifier | ready — see §15.1 |
 
 No `SR-AUD-*` identifier was issued by this ticket. The audit numbering stays frozen
 at 364, and `SR-AUD-337` and `SR-AUD-338` keep the statuses they had before it.
+
+### 15.1 One correction found while implementing #1825
+
+§6.4 and §7.2 described `WriteByte` as sharing `Write`'s `is_open()` check, following
+#1825's own description. It does not: before #1825 `WriteByte` had **no validation at
+all**, so a byte written to a *closed* `FileStream` was accepted in silence
+(`build-probe/1825_prefix_defects.log` case 4 — a case this document did not predict).
+The selected contract is unchanged, because §7.2 step 1 already required the
+`is_open()` check to precede the access check; the correction is that for `WriteByte`
+step 1 was **added** rather than merely reordered against. .NET has no equivalent gap:
+`OSFileStreamStrategy.cs:226-227` defines `WriteByte` in terms of
+`Write(ReadOnlySpan<byte>)`, so it inherits both checks.
+
+This is recorded by appending, not by rewriting §6.4, so that what the design believed
+and what the implementation measured stay separately readable.

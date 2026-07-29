@@ -7,9 +7,10 @@
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production
-dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,070 tests across 37 executables (the 13,127 figure this
+dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,077 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 14,070
+section below states the count it measured, and the current floor is the 14,077
+verified by #1825, raised from the 14,070
 verified by #1808, raised from the 14,060
 verified by #1809, the 14,046
 verified by #1821, the 14,041
@@ -7054,3 +7055,56 @@ warnings, 0 errors. No public signature, virtual, vtable, layout or symbol chang
 New tickets from this measurement: **#1825** (P1 — `FileStream::Write` silently
 discards data written to a read-only handle) and **#1826** (P3, inactive —
 `MemoryStream::getCanReadProperty()` ignores `isOpen_`).
+
+## Completed FileStream access-flag validation: ticket #1825 (2026-07-29)
+
+`REMED-IO-FILESTREAM-ACCESS-FLAGS`, P1, size S. No `SR-AUD-*` identifier — the audit
+never recorded this defect, which is stated plainly rather than backfilled, and the
+numbering stays frozen at **364**.
+
+`FileStream::Read`, `Write` and `WriteByte` inspected only `file_.is_open()`, never
+`canRead_`/`canWrite_`. This was **silent data loss, not a late diagnostic**: an
+`std::fstream` opened without `std::ios::out` accepts `write()`, sets `badbit` and
+returns, and nothing inspected either the flag or the stream state, so the bytes were
+dropped and the caller was told nothing. All three now test the flag **after** the
+existing `is_open()` check and **before** the buffer/offset/count validation, throwing
+`NotSupportedException("Stream does not support reading." / "Stream does not support
+writing.")` — `Strategies/OSFileStreamStrategy.cs:208-217` and `232-241` exactly,
+and the same messages `MemoryStream` and `UnmanagedMemoryStream` in this module
+already threw for the same condition. `FileStream` was the last stream that did not.
+
+**Correction to the ticket's own description.** #1825 said all three operations
+"check only `file_.is_open()`". For `WriteByte` that was too generous: it had **no
+validation at all**, so writing a byte to a *closed* `FileStream` was accepted in
+silence while the `Write()` sibling beside it already threw
+(`build-probe/1825_prefix_defects.log` case 4). .NET has no such gap because
+`OSFileStreamStrategy.cs:226-227` defines `WriteByte` in terms of
+`Write(ReadOnlySpan<byte>)` and so inherits both checks. Recorded here rather than
+quietly absorbed.
+
+Before → after, `build-probe/1825_prefix_defects.log` vs `1825_postfix_defects.log`,
+all ten cases under ASan + UBSan + LSan:
+
+| Case | Before | After |
+|---|---|---|
+| 1 — `Write` on `FileAccess::Read` | accepted; file still `"seed"` | `NotSupportedException` |
+| 2 — `WriteByte` on `FileAccess::Read` | accepted; file still `"seed"` | `NotSupportedException` |
+| 3 — `Read` on `FileMode::Append` | `n=0`, indistinguishable from EOF | `NotSupportedException` |
+| 4 — `WriteByte` after `Close()` | **accepted in silence** | `ObjectDisposedException` |
+| 5, 6 — `Write`/`Read` after `Close()` | `ObjectDisposedException` | unchanged |
+| 7, 8, 9 — the valid write, read and `WriteByte` paths | correct | unchanged, byte-identical |
+| 10 — closed **and** unwritable | `ObjectDisposedException` | unchanged — order pinned by a test |
+
+Ordering is pinned because it is observable: a stream that is both closed and
+unwritable must report `ObjectDisposedException`, not `NotSupportedException`.
+
+**Compatible narrowing, no approval required.** Every rejected input already failed —
+a write to a read-only handle never reached the file and a read of a write-only handle
+always returned 0. The only change is that the caller is now told.
+
+7 permanent regressions. `SharpRuntimeTests_IO` **579/579** (was 572), clean under
+ASan + UBSan + LSan with activation proven (39 `__asan` and 14 `__ubsan` symbols in
+the binary, plus the `ASAN_OPTIONS=help=1` `detect_leaks` banner). Repository gate
+**14,077 tests across 37 executables**, 0 warnings, 0 errors, `local_ci_check.sh`
+passed. No public signature, virtual, vtable, object layout or mangled symbol
+changed; no consumer rebuild required on its account.
