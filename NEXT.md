@@ -6814,7 +6814,8 @@ across 37 executables** (was 14,041). Module graph **41 / 91**.
 
 ## Autonomous batch handoff, 2026-07-29 (Base64 family closure)
 
-Branch `feature/remediation-batch-base64-followup`, ten commits, nothing pushed.
+Branch `feature/remediation-batch-base64-followup`, eleven commits (ten ticket
+commits plus this handoff), nothing pushed.
 
 ### Tickets completed in this batch
 
@@ -6949,6 +6950,7 @@ its source with the one-line compile recorded in the file's header comment.
 
 ### Git
 
-Ten local commits on `feature/remediation-batch-base64-followup`. **No push, no merge,
+Eleven local commits on `feature/remediation-batch-base64-followup` — five fix/test
+commits, five per-ticket documentation commits, and this handoff. **No push, no merge,
 no rebase, no tag, no package publication, no remote reference altered.** No historical
 ticket commit was amended.
