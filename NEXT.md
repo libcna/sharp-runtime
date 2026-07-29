@@ -7,10 +7,11 @@
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production
-dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,021 tests across 37 executables (the 13,127 figure this
+dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,025 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 14,021
-verified by #1818, raised from the 14,014
+section below states the count it measured, and the current floor is the 14,025
+verified by #1819, raised from the 14,021
+verified by #1818, the 14,014
 verified by #1817, the 14,002
 verified by #1816, the 13,994
 verified by #1814, the 13,987
@@ -6565,3 +6566,56 @@ regressions**; `SharpRuntimeTests_Buffers` **492/492** (was 485), the same 492 c
 under **ASan + UBSan + LSan** (`build-asan/1818_buffers_asan.log`); repository gate
 **0 warnings, 0 errors, 14,021 tests across 37 executables** (was 14,014). **Source
 and ABI consequences: none.**
+
+### SR-AUD-081 is a false positive: ticket #1819
+
+Ticket **#1819** (`REMED-BUFFERS-BASE64-PADDED-WHITESPACE-CURSOR`, P2, size XS,
+area *Buffers*) is **done, classified FALSE POSITIVE**. **No production source
+changed.** It is the fourth ticket of the Base64 family plan
+([`docs/Base64FamilyPlan.md`](docs/Base64FamilyPlan.md), ticket #1815); see that
+plan's new §8.
+
+**The finding's premise is inverted.** SR-AUD-081 states that *"the current .NET
+Base64 test base specifies that whitespace after end/padding is not included in
+consumed bytes"*. That test base specifies the opposite, in three places: its member
+data is named `BasicDecodingWithExtraWhitespaceShouldBeCountedInConsumedBytes_MemberData`
+and yields `{ "AQ==" + whitespace(i), 4 + i, 1 }`; its second half yields
+`{ s+s+s+s, s.Length * 4, 12 }` for seven whitespace placements including a trailing
+one; and `DecodingWithWhiteSpaceSplitFinalQuantumAndIsFinalBlockFalse` asserts
+`bytesConsumed == base64Data.Length` for `"AQ\r\nQ=\r\n"`, whitespace after the
+padding included.
+
+For the finding's own `"QQ== \n"`, .NET reports **6** consumed — exactly what this
+port reports. Traced through `Base64DecoderHelper.DecodeFrom`: `SrcLength` rounds the
+source to 4, the `if (srcLength != source.Length)` guard sends the call to
+`InvalidDataExit`, and `InvalidDataFallback` then finds the remainder to be all
+whitespace, executes `bytesConsumed += source.Length` and returns `Done`.
+
+**Measured**: `build-probe/1819_defects.cpp` (log `build-probe/1819_defects.log`)
+replays .NET's own vectors with .NET's own expected values on both the UTF-8 and the
+`char` overload. **27 of 27 whitespace-consumption vectors match.** The same run
+independently re-confirmed ticket #1818 against .NET's *own* tests
+(`"AAA="` → `InvalidData`, 0, 0; `"AAAA"` → `Done`, 4, 3; `"AQ\r\nQ="` →
+`InvalidData`, 0, 0) — a stronger check than the traced expectations #1818 closed on.
+
+**SR-AUD-081 stays `confirmed`** because the findings-index vocabulary has no
+false-positive value — the same treatment SR-AUD-362 received under #1779 — and now
+carries a Correction note in the index row and in the owning report. It must not be
+read as an open defect. The index counts are unchanged at **20 remediated / 344
+confirmed of 364**.
+
+**Tests: +4 permanent regressions** pinning the .NET-verified behaviour so the
+inverted premise cannot be re-applied later in good faith — the `"AQ==" + i` shape,
+the seven whitespace placements repeated four times, the whitespace-split final
+quantum with and without trailing whitespace, and the `char` overload.
+`SharpRuntimeTests_Buffers` **496/496** (was 492); repository gate **0 warnings, 0
+errors, 14,025 tests across 37 executables** (was 14,021).
+
+**What the run *did* find** is ticket **#1822**, upgraded from two traced instances
+to four **.NET-test-pinned** ones, from P3 to **P2**, and from `InvalidData` only to
+`DestinationTooSmall` as well: on a non-`Done` return .NET advances `bytesConsumed`
+past whitespace to the first non-whitespace character at or after the last completed
+quantum boundary, and this port stops at the boundary. One case sits outside that
+rule and needs its own decision — `"QQ==QUJD"` with `isFinalBlock` true, where
+`DecodeWithWhiteSpaceBlockwise` reverts its counters to `0,0`. No `SR-AUD-*`
+identifier; numbering stays frozen at 364.

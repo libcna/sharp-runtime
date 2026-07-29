@@ -44,7 +44,7 @@ differs from .NET). Correctness goes first.
 | **SR-AUD-078** | **CCF-013** | `Base64::EncodeToUtf8InPlace`, `Base64Url::TryEncodeToUtf8InPlace` | Full 3-byte packs are encoded before the trailing remainder is read, so the first full pack's fourth output byte overwrites it. Returns success. | `Base64Helper/Base64EncoderHelper.cs`, `EncodeToUtf8InPlace<TBase64Encoder>` — encodes the leftover pack **before** the backwards loop |
 | SR-AUD-079 *(remediated, #1817)* | — | both headers' `decodeCore` and `validateCore` | The unused low 2 bits (one `=`) / low 4 bits (two `=`) of the final quantum are never required to be zero, so `AB==`, `AAB=`, `AB`, `AAB` decode and validate | `Base64Helper/Base64DecoderHelper.cs`, `Base64ValidatorHelper.cs` |
 | SR-AUD-080 | — | `Base64::decodeCore` | A padded quantum decodes to `Done` even when `isFinalBlock == false` | `Base64DecoderHelper.cs`, `skipLastChunk = isFinalBlock ? 4 : 0` |
-| SR-AUD-081 | — | `Base64::decodeCore` | After a padded quantum, trailing whitespace is added to `bytesConsumed`; .NET leaves it for the enclosing parser | current .NET Base64 decoder test base |
+| SR-AUD-081 *(false positive, #1819)* | — | `Base64::decodeCore` | ~~After a padded quantum, trailing whitespace is added to `bytesConsumed`; .NET leaves it for the enclosing parser~~ — **inverted**: .NET counts it too | current .NET Base64 decoder test base — which says the opposite (see §8) |
 | SR-AUD-082 | — | `Base64Url::decodeCore` and its table | `=` and `%` map to `-1`, so valid optional final padding is rejected | `Base64UrlDecoderByte.IsValidPadding` |
 
 **Current direct test coverage of the in-place encoders, measured 2026-07-29**
@@ -99,7 +99,7 @@ that concrete.
 | **#1816** | **SR-AUD-078 / CCF-013** — in-place write order, **both** headers | #1815 | compatible: fixes wrong output, no signature/ABI change | **done** |
 | **#1817** | SR-AUD-079 — canonical final-bit validation, both headers, decode **and** validate | #1815 | **narrowing**: input accepted today becomes `InvalidData` | **done** |
 | **#1818** | SR-AUD-080 — padding is invalid while `isFinalBlock == false` | #1815, and should follow #1817 (same `decodeCore` final-quantum branch) | **narrowing** | **done** |
-| **#1819** | SR-AUD-081 — trailing whitespace after a padded quantum is not consumed | #1815, and should follow #1818 (same cursor code) | changes `bytesConsumed` only | `todo` |
+| **#1819** | SR-AUD-081 — trailing whitespace after a padded quantum is not consumed | #1815, and should follow #1818 (same cursor code) | changes `bytesConsumed` only | **done — FALSE POSITIVE** |
 | **#1820** | SR-AUD-082 — accept optional final `=`/`%` in Base64Url decode/validate | #1815; independent of #1817–#1819 | **widening**: only adds accepted input | `todo` |
 
 **Why #1817–#1819 are ordered rather than parallel.** All three edit the same
@@ -206,3 +206,53 @@ is a decision, not a foregone fix: matching .NET exactly means reproducing its
 two-stage structure — a fast path that fails, a whitespace-skipping re-entry, then
 a block-wise decoder that can revert its own counters — which is a substantially
 larger rewrite of `decodeCore` than the parity it buys.
+
+---
+
+## 8. SR-AUD-081 is a false positive (ticket #1819)
+
+This plan's §2 repeated SR-AUD-081's premise — *"After a padded quantum, trailing
+whitespace is added to `bytesConsumed`; .NET leaves it for the enclosing parser"* —
+and cited "current .NET Base64 decoder test base" as the reference. **The premise is
+inverted, and this plan carried it forward without checking.** That is recorded here
+rather than by editing §2 into silence.
+
+The test base says the opposite in three places:
+
+- its member data is named
+  `BasicDecodingWithExtraWhitespaceShouldBeCountedInConsumedBytes_MemberData` and
+  yields `{ "AQ==" + whitespace(i), 4 + i, 1 }`;
+- the same member data's second half yields `{ s+s+s+s, s.Length * 4, 12 }` for
+  seven whitespace placements, one of them (`"MTIz "`) trailing;
+- `DecodingWithWhiteSpaceSplitFinalQuantumAndIsFinalBlockFalse` asserts
+  `bytesConsumed == base64Data.Length` for `"AQ\r\nQ=\r\n"`, and
+  `DecodingWithEmbeddedWhiteSpaceIntoSmallDestination_TrailingWhiteSpacesAreConsumed`
+  states it in its name.
+
+For the finding's own `"QQ== \n"`, .NET reports **6** consumed, like this port:
+`SrcLength` rounds the source to 4, `DecodeFrom` then fails
+`if (srcLength != source.Length)` into `InvalidDataExit`, and `InvalidDataFallback`
+finds the remainder to be all whitespace, adds `source.Length` and returns `Done`.
+
+**Measured**: `build-probe/1819_defects.cpp` (log `1819_defects.log`) replays .NET's
+own vectors with .NET's own expected values on both overloads. **27 of 27
+whitespace-consumption vectors match.** No production source changed; four permanent
+regressions now pin the behaviour.
+
+The same run independently re-confirmed #1818 against .NET's own tests
+(`"AAA="` → `InvalidData`, 0, 0; `"AAAA"` → `Done`, 4, 3; `"AQ\r\nQ="` →
+`InvalidData`, 0, 0), which is a stronger check than the traced expectations #1818
+was closed on.
+
+**What it did find** is §7's ticket **#1822**, upgraded from two traced instances to
+four .NET-test-pinned ones and from `InvalidData` only to `DestinationTooSmall` as
+well. The rule .NET follows is uniform — *on a non-`Done` return the cursor advances
+past whitespace to the first non-whitespace character at or after the last completed
+quantum boundary* — with exactly one case outside it, `"QQ==QUJD"` with
+`isFinalBlock` true, where `DecodeWithWhiteSpaceBlockwise` reverts its counters to
+`0,0`. #1822 is now **P2**.
+
+**Revised family status**: five tickets, of which #1815, #1816, #1817 and #1818 are
+repairs or plans that landed, #1819 is a false positive, and #1820 remains. The
+neighbours are therefore three parity repairs and one non-defect, not four parity
+repairs.

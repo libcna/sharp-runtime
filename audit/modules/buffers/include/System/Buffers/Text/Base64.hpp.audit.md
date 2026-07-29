@@ -346,3 +346,70 @@ itself is clean under the same three (`build-probe/1818_asan.log`). Repository g
 
 Source and ABI consequences: none. No signature, virtual, return convention, object
 layout or exported symbol changed; only the accepted input set did.
+
+## Correction to SR-AUD-081 (ticket #1819, 2026-07-29): FALSE POSITIVE
+
+The audit evidence above is retained unchanged and is **not** rewritten. This is an
+appended correction, and SR-AUD-081 keeps its `confirmed` status **only** because
+this repository's findings-index vocabulary has no false-positive value — the same
+treatment SR-AUD-362 received under ticket #1779. It must not be read as an open,
+un-investigated defect.
+
+**The finding's premise is inverted.** SR-AUD-081 states that *"the current .NET
+Base64 test base specifies that whitespace after end/padding is not included in
+consumed bytes"*. That test base
+(`src/libraries/System.Memory/tests/Base64/Base64TestBase.cs`) specifies the
+opposite, in three independent places:
+
+- its member data is named
+  `BasicDecodingWithExtraWhitespaceShouldBeCountedInConsumedBytes_MemberData` and
+  yields `{ "AQ==" + whitespace(i), 4 + i, 1 }` for `i` in 0..4 — the trailing
+  whitespace **is** expected in `bytesConsumed`;
+- the same member data's second half yields `{ s+s+s+s, s.Length * 4, 12 }` for
+  seven whitespace placements, one of which (`"MTIz "`) is trailing;
+- `Base64DecoderUnitTests.DecodingWithWhiteSpaceSplitFinalQuantumAndIsFinalBlockFalse`
+  decodes `"AQ\r\nQ=\r\n"` with `isFinalBlock` true and asserts
+  `bytesConsumed == base64Data.Length`, i.e. the two whitespace bytes **after the
+  padding** are consumed; and
+  `DecodingWithEmbeddedWhiteSpaceIntoSmallDestination_TrailingWhiteSpacesAreConsumed`
+  says it in its own name.
+
+**Why .NET behaves that way**, traced through `Base64Helper/Base64DecoderHelper.cs`
+for the finding's own `"QQ== \n"` example: `SrcLength` rounds the source down to
+`4`, so `DecodeFrom` decodes the quantum and then fails the
+`if (srcLength != source.Length)` guard and falls into `InvalidDataExit`. Because
+`ignoreWhiteSpace` is true, `InvalidDataFallback` runs, finds the remainder to be
+entirely whitespace, executes `bytesConsumed += source.Length` and returns `Done`.
+.NET therefore reports **6** consumed — exactly what this port reports.
+
+**Measured** (`build-probe/1819_defects.cpp`, log `build-probe/1819_defects.log`):
+.NET's own vectors, with .NET's own expected values, replayed against this port on
+both the UTF-8 and the `char` overload, which agreed on every line.
+**27 of 27 whitespace-consumption vectors match**, including the finding's example
+and the three `isFinalBlock == false` vectors that independently re-confirm ticket
+#1818's repair (`"AAA="` → `InvalidData`, 0, 0; `"AAAA"` → `Done`, 4, 3;
+`"AQ\r\nQ="` → `InvalidData`, 0, 0).
+
+**No production source changed.** The behaviour is now pinned by **4 new permanent
+regressions** so the inverted premise cannot be re-applied later in good faith:
+the `"AQ==" + i` shape, the seven whitespace placements repeated four times, the
+whitespace-split final quantum with and without trailing whitespace, and the `char`
+overload. `SharpRuntimeTests_Buffers` **496/496** (was 492); repository gate
+**14,025 tests across 37 executables**.
+
+**What the same run *did* find** is a different divergence, which is not
+SR-AUD-081's and is not folded in: the cursor reported alongside a **non-`Done`**
+status. Four vectors differ, all in the same direction — .NET counts the whitespace
+between the last completed quantum and the offending symbol, and this port stops at
+the quantum boundary:
+
+| Input | Flag / destination | This port | Current .NET | .NET test that pins it |
+|---|---|---|---|---|
+| `AQIDBAUG AQ\r\nQ=` | `isFinalBlock` false | `InvalidData`, 8, 6 | `InvalidData`, **9**, 6 | `DecodingWithValidDataBeforeWhiteSpaceSplitFinalQuantum` |
+| `AQID BAUG AQ\r\nQ=` | `isFinalBlock` false | `InvalidData`, 9, 6 | `InvalidData`, **10**, 6 | same |
+| `AQIDBAUG\r\nAQID AQ\r\nQ=` | `isFinalBlock` false | `InvalidData`, 14, 9 | `InvalidData`, **15**, 9 | same |
+| `        8J+N        i    f    C    f        jYk=` | 6-byte destination | `DestinationTooSmall`, 36, 6 | `DestinationTooSmall`, **44**, 6 | `DecodingWithEmbeddedWhiteSpaceIntoSmallDestination_TrailingWhiteSpacesAreConsumed` |
+
+That is ticket **#1822** (opened by #1818), which this run upgrades from two traced
+instances to four **.NET-test-pinned** ones, and from `DestinationTooSmall` being
+out of view to being in it. No `SR-AUD-*` identifier; numbering stays frozen at 364.
