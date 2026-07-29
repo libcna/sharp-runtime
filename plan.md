@@ -36,7 +36,7 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 14,046 passing across 36 component binaries plus one integration
+- Tests: 14,060 passing across 36 component binaries plus one integration
   binary, verified by ticket #1817 (SR-AUD-079, the canonical final-quantum
   rule) through the full repository gate, raised from the 14,002 verified by
   ticket #1816 (SR-AUD-078 / CCF-013, the in-place Base64
@@ -3764,3 +3764,51 @@ opened inactive for `MemoryStream::getCanReadProperty()` ignoring `isOpen_`.
 The family also has **no asynchronous path at all** — `grep -rn "Async"` over all six
 text-wrapper headers returns nothing — no synchronized wrapper, no null writer, and no
 adapters beyond the four subclasses, all of which is stated in §1.1 rather than assumed.
+
+### Completed null `const char*` text contract: ticket #1809
+
+**`P2: a null const char* is undefined behaviour across the TextWriter Write family`**
+(`REMED-IO-TEXTWRITER-NULL-CSTRING`, P2, size S) is complete. It carries **no
+`SR-AUD-*` identifier**; the audit did not record it, which is stated plainly rather
+than backfilled, and the numbering stays frozen at 364.
+
+Design ticket #1823 decided the contract for the whole family first, because #1809 was
+a contract decision and not a guard. Its measurement found **three** structurally
+different current failures where the ticket named two, and the unnamed one is the worst:
+
+| Surface | Before | After |
+|---|---|---|
+| `TextWriter`/`StringWriter` `Write`/`WriteLine(const char*)` | libstdc++ `std::logic_error` — a `std::` exception, not a `System::` one, so `catch (const System::Exception&)` missed it | no-op / line terminator only |
+| `StreamWriter::Write`/`WriteLine(const char*)` | AddressSanitizer **SEGV on `0x0`** inside `strlen` | no-op / line terminator only |
+| `Console::Write`/`WriteLine(const char*)` | `badbit` on `std::cout` set **permanently**, silently disabling every later console write in the process | no-op / line terminator only, `std::cout` still `good()` |
+
+**The contract is .NET's own rule for a null *string*.** These `const char*` overloads
+have no .NET counterpart — they exist only so a string literal binds to the string
+overload instead of `Write(bool)` (`TextWriter.hpp:30-37`) — so they take the behaviour
+.NET gives the thing they spell: `TextWriter.cs:277-283` makes `Write(string?)` a
+no-op, `TextWriter.cs:502-509` makes `WriteLine(string?)` write only the line
+terminator, and neither ever throws. A guard that threw `ArgumentNullException` would
+have been a divergence, exactly as the ticket's own description warned.
+
+`StreamWriter` needed its own test: it is the one override of the base overload in this
+repository, so fixing only `TextWriter` would have left the crash reachable by virtual
+dispatch — including through `TextWriter::WriteLine(const char*)`, which forwards to
+the virtual `Write`.
+
+Closure evidence: **14 permanent regressions** (10 in `IOStreamTests.cpp`, 4 in
+`Batch10ConsoleTests.cpp`) covering null, empty and ordinary input on each of the five
+surfaces, the terminator-only `WriteLine` rule, a cross-type assertion that
+`StringWriter` and `StreamWriter` answer null identically, an inertness check that a
+null write between two ordinary writes leaves them contiguous, and three `Console`
+cases asserting `std::cout.good()` afterwards — the sticky-`badbit` regression stated
+directly. `SharpRuntimeTests_IO` **562/562** (was 552), `SharpRuntimeTests_Console`
+**127/127** (was 123), both clean under ASan + UBSan + LSan
+(`build-asan/1809_io_asan.log`, `build-asan/1809_console_asan.log`; activation proven
+in `build-asan/1809_asan_activation.log`). Repository gate: 0 warnings, 0 errors,
+**14,060 tests across 37 executables**.
+
+Source and ABI consequences: none. No public signature, virtual, vtable, object layout
+or exported symbol changed. `TextWriter`'s two overloads are `inline` in a public
+header, so an unrebuilt consumer keeps the old inlined body — a stale-inline
+consideration, not an ABI break, and benign here because the old body only ever failed
+on the input the new one handles.

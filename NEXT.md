@@ -7,10 +7,11 @@
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production
-dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,046 tests across 37 executables (the 13,127 figure this
+dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,060 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 14,046
-verified by #1821, raised from the 14,041
+section below states the count it measured, and the current floor is the 14,060
+verified by #1809, raised from the 14,046
+verified by #1821, the 14,041
 verified by #1822, the 14,033
 verified by #1820, the 14,025
 verified by #1819, the 14,021
@@ -6997,3 +6998,30 @@ LSan (`build-probe/1823_prefix_defects.cpp`, log `build-probe/1823_prefix_defect
 | **#1826** | inactive | `MemoryStream::getCanReadProperty()` ignores `isOpen_` |
 
 `SR-AUD-337` (no disposed flag on either wrapper) stays `confirmed` and untouched.
+
+## Completed null `const char*` text contract: ticket #1809 (2026-07-29)
+
+`REMED-IO-TEXTWRITER-NULL-CSTRING`, P2, size S. No `SR-AUD-*` identifier; numbering
+stays frozen at 364. Contract selected by design ticket #1823
+([`docs/TextWrapperInputContractPlan.md`](docs/TextWrapperInputContractPlan.md) §6.2).
+
+A null `const char*` now behaves exactly as a null **string** behaves in .NET:
+`Write` writes nothing, `WriteLine` writes only the line terminator, nothing throws
+(`TextWriter.cs:277-283`, `502-509`). Applied to `TextWriter::Write/WriteLine(const
+char*)`, `StreamWriter::Write(const char*)` and `System::Console::Write/WriteLine(const
+char*)`.
+
+`StreamWriter` needed its own guard because it is the one override of the base
+overload; the base guard alone is bypassed by virtual dispatch, including through
+`TextWriter::WriteLine`.
+
+| | Before | After |
+|---|---|---|
+| `TextWriter` / `StringWriter` | `std::logic_error` (a `std::` exception, not a `System::` one) | no-op / terminator only |
+| `StreamWriter` | ASan **SEGV on `0x0`** in `strlen` | no-op / terminator only |
+| `Console` | `std::cout` `badbit` set **permanently** — every later console write silently produced nothing | no-op / terminator only, `std::cout` still `good()` |
+
+14 permanent regressions. `SharpRuntimeTests_IO` **562/562** (was 552),
+`SharpRuntimeTests_Console` **127/127** (was 123), both clean under ASan + UBSan +
+LSan. Repository gate **14,060 tests across 37 executables**, 0 warnings, 0 errors.
+No public signature, virtual, vtable, layout or symbol changed.

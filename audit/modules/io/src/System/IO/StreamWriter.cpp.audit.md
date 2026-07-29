@@ -113,3 +113,52 @@ recorded as inactive tickets rather than folded in:
 
 Neither carries a new `SR-AUD-*` identifier; the audit numbering stays frozen
 at 364.
+
+## Follow-up #1809 closed (2026-07-29): the null `const char*` contract
+
+The two separable defects recorded above under #1806 are no longer both open.
+**#1809 is complete.** `SR-AUD-337` and `SR-AUD-338` are unaffected: 337 stays
+`confirmed`, 338 stays `remediated`, and no new `SR-AUD-*` identifier was issued —
+the numbering stays frozen at 364.
+
+Design ticket **#1823** decided the contract for the whole family first
+(`docs/TextWrapperInputContractPlan.md`), because #1809 was a contract decision
+rather than a guard. The measurement it did found **three** structurally different
+current failures where the ticket named two, and the unnamed one is the worst
+(`build-probe/1823_prefix_defects.log`, cases 20–27):
+
+| Surface | Before | After |
+|---|---|---|
+| `TextWriter::Write/WriteLine(const char*)` on `StringWriter` | libstdc++ `std::logic_error` — a `std::` exception, not a `System::` one, so `catch (const System::Exception&)` missed it | no-op / line terminator only |
+| `StreamWriter::Write/WriteLine(const char*)` | AddressSanitizer **SEGV on `0x0`** inside `strlen` | no-op / line terminator only |
+| `Console::Write/WriteLine(const char*)` | `badbit` set on `std::cout` **permanently**, silently disabling every later console write in the process | no-op / line terminator only, `std::cout` still `good()` |
+
+The contract is .NET's own rule for a null **string**, since these `const char*`
+overloads have no .NET counterpart and exist only so a string literal binds to the
+string overload instead of `Write(bool)`: `TextWriter.cs:277-283` makes
+`Write(string?)` a no-op, `TextWriter.cs:502-509` makes `WriteLine(string?)` write
+only the line terminator, and neither ever throws. `StreamWriter` needed its own
+test because it is the one override of the base overload — the base guard alone is
+bypassed by virtual dispatch, including through `TextWriter::WriteLine`.
+
+Closure evidence: 14 permanent regressions (10 in `IOStreamTests.cpp`, 4 in
+`Batch10ConsoleTests.cpp`) covering null, empty and ordinary input on each of the
+five surfaces, the terminator-only `WriteLine` rule, a cross-type assertion that
+`StringWriter` and `StreamWriter` answer null identically, an inertness check that a
+null write between two ordinary writes leaves them contiguous, and three `Console`
+cases asserting `std::cout.good()` afterwards. `SharpRuntimeTests_IO` **562/562**
+(was 552) and `SharpRuntimeTests_Console` **127/127** (was 123), both clean under
+AddressSanitizer + UndefinedBehaviorSanitizer + LeakSanitizer
+(`build-asan/1809_io_asan.log`, `build-asan/1809_console_asan.log`; activation
+proven in `build-asan/1809_asan_activation.log` by the runtime's own
+`ASAN_OPTIONS=help=1` banner and 53 `__asan`/`__ubsan` symbols). Repository gate:
+0 warnings, 0 errors, **14,060 tests across 37 executables** (was 14,046).
+
+Source and ABI consequences: none. No public signature, virtual, vtable, object
+layout or exported symbol changed. `TextWriter`'s two overloads are `inline` in a
+public header, so a consumer that does not rebuild keeps the old inlined body —
+a stale-inline consideration, not an ABI break, and benign in this direction
+because the old body only ever failed on the input the new one handles.
+
+The other follow-up, **#1808**, is still open and was rescoped by #1823 to the
+`StreamReader` half; its `StreamWriter` half is blocked ticket **#1824**.
