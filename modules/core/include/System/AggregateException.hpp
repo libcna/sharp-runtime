@@ -8,6 +8,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/Exception.hpp"
 
 namespace System {
@@ -21,7 +23,63 @@ namespace System {
 class AggregateException : public Exception {
     std::vector<std::exception_ptr> innerExceptions_;
 
+    /**
+     * @brief Rejects a null entry in a collection of inner exceptions.
+     *
+     * Verified against AggregateException.cs, whose private
+     * `AggregateException(string?, Exception[], bool)` core constructor loops over the
+     * array and throws `ArgumentException(SR.AggregateException_ctor_InnerExceptionNull)`
+     * -- "An element of innerExceptions was null." -- for any null element. Every public
+     * collection-taking constructor funnels through it, so the check is unconditional in
+     * .NET and is unconditional here.
+     *
+     * This port previously accepted a null `std::exception_ptr` and stored it.
+     * `std::rethrow_exception` has undefined behaviour for a null argument, and three
+     * members call it, so a single accepted null armed three separate crashes --
+     * `buildMessage` from the collection constructors, `collectLeaves` from `Flatten()`,
+     * and `GetBaseException()` -- each an AddressSanitizer SEGV inside
+     * `std::rethrow_exception` itself, on the trap address 0xffffffffffffff80 rather than
+     * a plain null, which is what a null `exception_ptr` decodes to. Two further members
+     * did not crash and were arguably worse: `Handle()` passed the null straight to the
+     * caller's predicate, and `Unwrap()` returned it, so the crash surfaced in consumer
+     * code with no trace of where the null entered. All five are recorded per case in
+     * build-probe/1807_prefix_defects.log (ticket #1807 / SR-AUD-097).
+     */
+    static void requireNoNullElements(const std::vector<std::exception_ptr>& exs) {
+        for (const auto& ep : exs) {
+            if (ep == nullptr)
+                throw System::ArgumentException("An element of innerExceptions was null.");
+        }
+    }
+
+    /** @brief Returns @p exs after rejecting any null entry; see requireNoNullElements(). */
+    static std::vector<std::exception_ptr> validatedInner(std::vector<std::exception_ptr> exs) {
+        requireNoNullElements(exs);
+        return exs;
+    }
+
+    /**
+     * @brief Returns @p ep after rejecting a null single inner exception.
+     *
+     * Verified against AggregateException.cs line 59, `AggregateException(string? message,
+     * Exception innerException)`, which opens with
+     * `ArgumentNullException.ThrowIfNull(innerException)`. A missing single argument is an
+     * `ArgumentNullException`, whereas a null *inside* a collection is an
+     * `ArgumentException` naming the collection; this port reproduces that split rather
+     * than collapsing both onto one type.
+     */
+    static std::exception_ptr requireNonNullInner(std::exception_ptr ep) {
+        if (ep == nullptr) throw System::ArgumentNullException("innerException");
+        return ep;
+    }
+
     static std::string buildMessage(const std::vector<std::exception_ptr>& exs) {
+        // Ahead of the loop below, because that loop is the first of the three
+        // std::rethrow_exception call sites a null entry would reach. A base-class
+        // initializer is sequenced before every member initializer, so validating here
+        // also protects innerExceptions_ in the constructors that build their message
+        // from the same vector.
+        requireNoNullElements(exs);
         if (exs.empty()) return "One or more errors occurred.";
         std::string m = "One or more errors occurred. (";
         bool first = true;
@@ -48,22 +106,41 @@ public:
     /** @brief Initializes a new instance with the specified error message. */
     explicit AggregateException(const std::string& message) : Exception(message) {}
 
-    /** @brief Initializes a new instance with a collection of inner exceptions. */
+    /**
+     * @brief Initializes a new instance with a collection of inner exceptions.
+     * @throws System::ArgumentException if any entry is a null `std::exception_ptr`.
+     */
     explicit AggregateException(std::vector<std::exception_ptr> innerExceptions)
         : Exception(buildMessage(innerExceptions)),
           innerExceptions_(std::move(innerExceptions)) {}
 
-    /** @brief Initializes a new instance with an initializer list of inner exceptions. */
+    /**
+     * @brief Initializes a new instance with an initializer list of inner exceptions.
+     * @throws System::ArgumentException if any entry is a null `std::exception_ptr`.
+     */
     AggregateException(std::initializer_list<std::exception_ptr> innerExceptions)
         : AggregateException(std::vector<std::exception_ptr>(innerExceptions)) {}
 
-    /** @brief Initializes a new instance with a message and a collection of inner exceptions. */
+    /**
+     * @brief Initializes a new instance with a message and a collection of inner exceptions.
+     * @throws System::ArgumentException if any entry is a null `std::exception_ptr`.
+     */
     AggregateException(const std::string& message, std::vector<std::exception_ptr> innerExceptions)
-        : Exception(message), innerExceptions_(std::move(innerExceptions)) {}
+        : Exception(message), innerExceptions_(validatedInner(std::move(innerExceptions))) {}
 
-    /** @brief Initializes a new instance with a message and a single inner exception. */
+    /**
+     * @brief Initializes a new instance with a message and a single inner exception.
+     *
+     * Matches .NET's `AggregateException(string?, Exception)`, which opens with
+     * `ArgumentNullException.ThrowIfNull(innerException)` -- a single missing inner
+     * exception is a null *argument*, where a null inside a collection is a malformed
+     * collection, so the two report different exception types exactly as .NET does.
+     *
+     * @throws System::ArgumentNullException if @p innerException is null.
+     */
     AggregateException(const std::string& message, std::exception_ptr innerException)
-        : Exception(message), innerExceptions_({innerException}) {}
+        : Exception(message),
+          innerExceptions_({requireNonNullInner(std::move(innerException))}) {}
 
     /**
      * @brief Gets the read-only collection of inner exceptions that caused this aggregate exception.

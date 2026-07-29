@@ -8,9 +8,12 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <string>
+#include <vector>
 #include "System/Exception.hpp"
 #include "System/AccessViolationException.hpp"
 #include "System/AggregateException.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/AppDomainUnloadedException.hpp"
 #include "System/ApplicationException.hpp"
 #include "System/ArrayTypeMismatchException.hpp"
@@ -276,6 +279,122 @@ TEST(AggregateExceptionTests, GetBaseException_MultipleInner_ReturnsSelf) {
     System::AggregateException ex({ep1, ep2});
     auto base = ex.GetBaseException();
     EXPECT_NE(base, ep1);
+}
+
+// ---------------------------------------------------------------------------
+// AggregateException — null inner exceptions (ticket #1807 / SR-AUD-097)
+//
+// std::rethrow_exception is undefined for a null argument, and three members
+// call it, so one accepted null armed three crashes -- buildMessage from the
+// collection constructors, collectLeaves from Flatten(), and GetBaseException()
+// -- each an ASan SEGV inside std::rethrow_exception itself. Handle() and
+// Unwrap() did not crash and were arguably worse: they handed the null to the
+// caller, so the crash surfaced in consumer code with no trace of where the
+// null entered. .NET rejects both shapes at construction, with two different
+// exception types, which these tests pin.
+// ---------------------------------------------------------------------------
+
+TEST(AggregateExceptionTests, NullInnerInVector_ThrowsArgumentException) {
+    EXPECT_THROW(System::AggregateException(std::vector<std::exception_ptr>{nullptr}),
+                 System::ArgumentException);
+}
+
+TEST(AggregateExceptionTests, NullInnerInInitializerList_ThrowsArgumentException) {
+    EXPECT_THROW(System::AggregateException({std::exception_ptr()}),
+                 System::ArgumentException);
+}
+
+TEST(AggregateExceptionTests, NullInnerAfterValidEntry_ThrowsArgumentException) {
+    // The check is a full scan, not a look at the first entry.
+    auto ok = std::make_exception_ptr(std::runtime_error("first"));
+    EXPECT_THROW(System::AggregateException(std::vector<std::exception_ptr>{ok, nullptr}),
+                 System::ArgumentException);
+}
+
+TEST(AggregateExceptionTests, NullInnerInVector_UsesTheDotNetMessage) {
+    try {
+        System::AggregateException ex(std::vector<std::exception_ptr>{nullptr});
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        // AggregateException.cs -> SR.AggregateException_ctor_InnerExceptionNull.
+        EXPECT_NE(std::string(e.what()).find("An element of innerExceptions was null."),
+                  std::string::npos)
+            << "message was: " << e.what();
+    }
+}
+
+TEST(AggregateExceptionTests, NullInnerWithMessageAndVector_ThrowsArgumentException) {
+    // This constructor never built a message from the vector, so it stored the
+    // null silently and deferred the crash to Flatten/GetBaseException/the caller.
+    EXPECT_THROW(System::AggregateException("outer", std::vector<std::exception_ptr>{nullptr}),
+                 System::ArgumentException);
+}
+
+TEST(AggregateExceptionTests, NullSingleInner_ThrowsArgumentNullException) {
+    // .NET splits these two: a missing single argument is ArgumentNullException,
+    // a null inside a collection is ArgumentException naming the collection.
+    EXPECT_THROW(System::AggregateException("outer", std::exception_ptr()),
+                 System::ArgumentNullException);
+}
+
+TEST(AggregateExceptionTests, NullSingleInner_NamesTheParameter) {
+    try {
+        System::AggregateException ex("outer", std::exception_ptr());
+        FAIL() << "expected ArgumentNullException";
+    } catch (const System::ArgumentNullException& e) {
+        EXPECT_NE(std::string(e.what()).find("innerException"), std::string::npos)
+            << "message was: " << e.what();
+    }
+}
+
+TEST(AggregateExceptionTests, NullSingleInner_IsNotMerelyAnArgumentException) {
+    // Pins the type split rather than accepting the base type: ArgumentNullException
+    // derives from ArgumentException, so catching the base alone would pass even if
+    // the two constructors were collapsed onto one exception type.
+    try {
+        System::AggregateException ex("outer", std::exception_ptr());
+        FAIL() << "expected ArgumentNullException";
+    } catch (const System::ArgumentNullException&) {
+        SUCCEED();
+    }
+    try {
+        System::AggregateException ex(std::vector<std::exception_ptr>{nullptr});
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentNullException&) {
+        FAIL() << "a null collection ELEMENT must be ArgumentException, not ArgumentNullException";
+    } catch (const System::ArgumentException&) {
+        SUCCEED();
+    }
+}
+
+TEST(AggregateExceptionTests, NoConstructedAggregateCanHoldANullInner) {
+    // The reachability argument in one assertion: every stored inner is non-null,
+    // so the three std::rethrow_exception call sites cannot be reached with a null.
+    auto ep1 = std::make_exception_ptr(std::runtime_error("a"));
+    auto ep2 = std::make_exception_ptr(std::runtime_error("b"));
+    const System::AggregateException flat({ep1, ep2});
+    const System::AggregateException nested({std::make_exception_ptr(flat), ep1});
+    for (const auto& source : {flat, nested, flat.Flatten(), nested.Flatten()}) {
+        for (const auto& ep : source.getInnerExceptionsProperty()) {
+            EXPECT_NE(ep, nullptr);
+        }
+    }
+}
+
+TEST(AggregateExceptionTests, ValidInnerExceptionsStillWorkAfterValidationAdded) {
+    // The normal paths must be untouched by the new checks.
+    auto ep1 = std::make_exception_ptr(std::runtime_error("boom"));
+    System::AggregateException fromVector(std::vector<std::exception_ptr>{ep1});
+    EXPECT_EQ(fromVector.getInnerExceptionCountProperty(), 1u);
+    EXPECT_NE(std::string(fromVector.what()).find("boom"), std::string::npos);
+
+    System::AggregateException withMessage("outer", ep1);
+    EXPECT_EQ(withMessage.getInnerExceptionCountProperty(), 1u);
+    EXPECT_EQ(std::string(withMessage.what()), "outer");
+
+    System::AggregateException empty(std::vector<std::exception_ptr>{});
+    EXPECT_EQ(empty.getInnerExceptionCountProperty(), 0u);
+    EXPECT_EQ(std::string(empty.what()), "One or more errors occurred.");
 }
 
 // ===========================================================================
