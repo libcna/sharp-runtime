@@ -102,8 +102,16 @@ namespace System::IO::Compression {
          * truncates to the new size first; a non-seekable stream can only be appended to, which
          * is only correct for a fresh Create-mode stream with nothing already written to it.
          *
-         * @param stream     Source or destination stream. Not owned/closed by this ZipArchive.
+         * A null @p stream is rejected here rather than carried, matching .NET, whose every
+         * Stream-taking `ZipArchive` constructor performs
+         * `ArgumentNullException.ThrowIfNull(stream)`. The check applies to every mode: Read
+         * and Update dereferenced it immediately, and Create accepted it and then had nowhere
+         * to deliver the finalized archive on Dispose().
+         *
+         * @param stream     Source or destination stream. Must not be null. Not owned/closed
+         *                   by this ZipArchive.
          * @param mode       Read, Create, or Update.
+         * @throws System::ArgumentNullException if @p stream is null.
          * @throws System::IO::InvalidDataException or System::IO::IOException on initialisation failure.
          */
         ZipArchive(System::IO::Stream* stream, ZipArchiveMode mode = ZipArchiveMode::Read);

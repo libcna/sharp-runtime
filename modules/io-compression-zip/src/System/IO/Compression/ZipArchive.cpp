@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Compression/ZipArchive.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IO/IOException.hpp"
 #include "System/IO/InvalidDataException.hpp"
@@ -310,6 +311,25 @@ static void flushWriter(ZipArchiveState& st) {
 ZipArchive::ZipArchive(System::IO::Stream* stream, ZipArchiveMode mode)
     : state_(std::make_shared<ZipArchiveState>())
 {
+    // Verified against ZipArchive.cs, whose every Stream-taking constructor funnels into the
+    // (stream, mode, leaveOpen, entryNameEncoding) overload and opens with
+    // ArgumentNullException.ThrowIfNull(stream). This port stored the pointer unvalidated, and
+    // the two halves of the resulting defect are not symmetric (ticket #1812 / SR-AUD-242,
+    // build-probe/1812_prefix_defects.log, one process per case):
+    //
+    //   * Read and Update reach the `stream->Read` loop below immediately, an AddressSanitizer
+    //     SEGV on address 0x0 during construction itself -- cases 1 and 2.
+    //   * Create does NOT crash. It stores the null pointer, and every subsequent call the
+    //     caller makes succeeds: CreateEntry, the entry write stream, and Dispose(). The
+    //     finalized archive lands in state_->memBuf and Dispose()'s write-back is gated on
+    //     `state_->stream != nullptr`, so the archive is silently discarded and the caller is
+    //     told nothing -- case 4, which wrote a complete one-entry archive and delivered it
+    //     nowhere. Silent data loss is the worse of the two failure modes, which is why the
+    //     check is unconditional rather than restricted to the modes that crash.
+    //
+    // Checked FIRST, before any state is populated: no reader is opened and no buffer is
+    // filled on the rejected path, and state_ is a shared_ptr that unwinds on its own.
+    if (stream == nullptr) throw System::ArgumentNullException("stream");
     state_->mode = mode;
     if (mode == ZipArchiveMode::Read || mode == ZipArchiveMode::Update) {
         // Read full stream into memory buffer

@@ -21,6 +21,7 @@
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/File.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/IO/InvalidDataException.hpp"
 #include "System/IO/Path.hpp"
 #include <filesystem>
 #include "System/IO/Compression/ZLibCompressionStrategy.hpp"
@@ -927,6 +928,86 @@ TEST(ZipArchiveTests, Destructor_StreamWriteThrows_DoesNotTerminateProcess) {
         // z destructed here -- Dispose() throws internally but must not escape.
     }
     SUCCEED();
+}
+
+// ===========================================================================
+// ZipArchive — null Stream* (ticket #1812 / SR-AUD-242)
+// ===========================================================================
+//
+// The Stream* constructor stored the pointer with no null check. Read and Update
+// dereferenced it during construction (AddressSanitizer SEGV on 0x0); Create
+// accepted it and then silently discarded the finalized archive on Dispose(),
+// because the write-back is gated on a non-null stream. All three modes now throw
+// ArgumentNullException("stream"), matching .NET's
+// ArgumentNullException.ThrowIfNull(stream) at ZipArchive constructor entry.
+
+TEST(ZipArchiveTests, NullStream_ReadMode_ThrowsArgumentNull) {
+    EXPECT_THROW(ZipArchive z(static_cast<System::IO::Stream*>(nullptr), ZipArchiveMode::Read),
+                 System::ArgumentNullException);
+}
+
+TEST(ZipArchiveTests, NullStream_UpdateMode_ThrowsArgumentNull) {
+    EXPECT_THROW(ZipArchive z(static_cast<System::IO::Stream*>(nullptr), ZipArchiveMode::Update),
+                 System::ArgumentNullException);
+}
+
+// Create never crashed; it lost the caller's data instead. This is the case that
+// documents why the guard is unconditional rather than restricted to the crashing modes.
+TEST(ZipArchiveTests, NullStream_CreateMode_ThrowsArgumentNull) {
+    EXPECT_THROW(ZipArchive z(static_cast<System::IO::Stream*>(nullptr), ZipArchiveMode::Create),
+                 System::ArgumentNullException);
+}
+
+// The default mode argument is Read; the defaulted overload must be rejected too.
+TEST(ZipArchiveTests, NullStream_DefaultMode_ThrowsArgumentNull) {
+    EXPECT_THROW(ZipArchive z(static_cast<System::IO::Stream*>(nullptr)),
+                 System::ArgumentNullException);
+}
+
+TEST(ZipArchiveTests, NullStream_NamesTheStreamParameter) {
+    try {
+        ZipArchive z(static_cast<System::IO::Stream*>(nullptr), ZipArchiveMode::Create);
+        FAIL() << "expected ArgumentNullException";
+    } catch (const System::ArgumentNullException& e) {
+        EXPECT_NE(std::string(e.what()).find("stream"), std::string::npos);
+    }
+}
+
+// Rejecting construction must not leave anything half-built: no reader is opened and
+// no buffer is filled, so a rejected construction is repeatable and leaks nothing.
+TEST(ZipArchiveTests, NullStream_RejectedConstructionIsRepeatable) {
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_THROW(ZipArchive z(static_cast<System::IO::Stream*>(nullptr), ZipArchiveMode::Read),
+                     System::ArgumentNullException);
+    }
+}
+
+// The valid paths the guard sits in front of must be byte-identical. A Create-mode
+// archive over a real stream still round-trips through the same stream.
+TEST(ZipArchiveTests, NullStreamGuard_DoesNotAffectValidCreateRoundTrip) {
+    MemoryStream sink;
+    {
+        ZipArchive z(&sink, ZipArchiveMode::Create);
+        auto e = z.CreateEntry("payload.txt");
+        std::unique_ptr<System::IO::Stream> s(e.Open());
+        s->Write(reinterpret_cast<const uint8_t*>("hello"), 0, 5);
+        z.Dispose();
+    }
+    ASSERT_GT(sink.getLengthProperty(), 0);
+    sink.setPositionProperty(0);
+    ZipArchive r(&sink, ZipArchiveMode::Read);
+    auto entries = r.getEntriesProperty();
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries[0].getFullNameProperty(), "payload.txt");
+    EXPECT_EQ(entries[0].getLengthProperty(), 5LL);
+}
+
+// The path-based constructor is a different overload and is deliberately unchanged by
+// this ticket: an unopenable path still produces InvalidDataException from the reader,
+// not the new null-stream ArgumentNullException.
+TEST(ZipArchiveTests, NullStreamGuard_DoesNotAffectPathConstructor) {
+    const std::string missing = std::string("sharp_rt_1812_no_such_archive.zip");
+    EXPECT_THROW(ZipArchive z(missing, ZipArchiveMode::Read), System::IO::InvalidDataException);
 }
 
 // ===========================================================================
