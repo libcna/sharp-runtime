@@ -2,15 +2,35 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/StreamReader.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/IO/FileStream.hpp"
 #include "System/IO/FileMode.hpp"
 #include "System/IO/FileAccess.hpp"
 
 namespace System::IO
 {
+    // Verified against StreamReader.cs, whose every Stream-taking constructor opens with
+    // ArgumentNullException.ThrowIfNull(stream): a null base stream is rejected at
+    // construction, not carried. This port stored it unvalidated and then defended against
+    // it at each use, so StreamReader did not crash the way its StreamWriter counterpart
+    // did -- it reported end-of-stream instead. That is worse than a crash in one specific
+    // way: Read() and Peek() returned -1, ReadLine() and ReadToEnd() returned "", and a
+    // caller could not distinguish "there was no stream" from "the document was empty",
+    // so a programming error was silently laundered into ordinary, plausible data
+    // (build-probe/1806_prefix_defects.log cases 1-4, ticket #1806 / SR-AUD-338). The
+    // sibling BinaryReader in this same module already threw ArgumentNullException("stream")
+    // for the identical input; the parameter name here matches it and .NET's own
+    // nameof(stream).
+    //
+    // With this check in place stream_ is non-null for the whole lifetime of every
+    // StreamReader -- the only other constructor assigns a freshly allocated FileStream,
+    // and nothing else ever writes the member -- so the null tests that used to guard
+    // Peek(), Read(), Close() and the destructor are gone rather than left behind as
+    // unreachable code implying a state that can no longer exist.
     StreamReader::StreamReader(Stream* stream, bool leaveOpen)
         : stream_(stream), leaveOpen_(leaveOpen), ownsStream_(false)
     {
+        if (stream == nullptr) throw System::ArgumentNullException("stream");
     }
 
     StreamReader::StreamReader(const std::string& path)
@@ -21,14 +41,13 @@ namespace System::IO
 
     StreamReader::~StreamReader()
     {
-        if (!leaveOpen_ && stream_) stream_->Close();
+        if (!leaveOpen_) stream_->Close();
         if (ownsStream_) delete stream_;
     }
 
     intcs StreamReader::Peek()
     {
         if (hasPeeked_) return static_cast<intcs>(peeked_);
-        if (stream_ == nullptr) return -1;
 
         bytecs b;
         const intcs n = stream_->Read(&b, 0, 1);
@@ -46,7 +65,6 @@ namespace System::IO
             hasPeeked_ = false;
             return static_cast<intcs>(peeked_);
         }
-        if (stream_ == nullptr) return -1;
 
         bytecs b;
         const intcs n = stream_->Read(&b, 0, 1);
@@ -96,6 +114,6 @@ namespace System::IO
         // type's own destructor (above), which already got this right. This method previously
         // closed the stream unconditionally, defeating leaveOpen's entire purpose for any
         // caller that called Close() explicitly instead of only relying on the destructor.
-        if (!leaveOpen_ && stream_) stream_->Close();
+        if (!leaveOpen_) stream_->Close();
     }
 }

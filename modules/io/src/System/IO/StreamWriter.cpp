@@ -2,14 +2,31 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/StreamWriter.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/IO/FileStream.hpp"
 
 #include <cstring>
 
 namespace System::IO {
 
+    // Verified against StreamWriter.cs, whose every Stream-taking constructor opens with
+    // ArgumentNullException.ThrowIfNull(stream): a null base stream is rejected at
+    // construction, not carried. This port stored it unvalidated, which made FIVE separate
+    // null dereferences reachable from public API -- Write(string), Write(const char*),
+    // Flush(), Close() when leaveOpen is false, and ~StreamWriter() when leaveOpen is
+    // false. The last of those is the sharpest: with the default leaveOpen=false, merely
+    // constructing a StreamWriter over a null stream and letting it leave scope was fatal,
+    // with no call on the object at all. All five are recorded with per-case AddressSanitizer
+    // and UndefinedBehaviorSanitizer output in build-probe/1806_prefix_defects.log (ticket
+    // #1806 / SR-AUD-338). The sibling BinaryWriter in this same module already threw
+    // ArgumentNullException("stream") for the identical input, which is the inconsistency
+    // the audit called especially hazardous; the parameter name here matches it and .NET's
+    // own nameof(stream).
     StreamWriter::StreamWriter(Stream* stream, bool leaveOpen)
-        : stream_(stream), leaveOpen_(leaveOpen), ownsStream_(false) {}
+        : stream_(stream), leaveOpen_(leaveOpen), ownsStream_(false)
+    {
+        if (stream == nullptr) throw System::ArgumentNullException("stream");
+    }
 
     StreamWriter::StreamWriter(const std::string& path)
         : stream_(new FileStream(path, FileMode::Create)), leaveOpen_(false), ownsStream_(true) {}

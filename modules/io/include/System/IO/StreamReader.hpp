@@ -31,8 +31,15 @@ namespace System::IO
     public:
         /**
          * @brief Initializes a StreamReader for the specified stream.
-         * @param stream Stream to read from.
+         *
+         * A null @p stream is rejected here rather than carried, so no read
+         * can report an empty document when there was in fact no stream at
+         * all. This matches .NET's own constructors and the sibling
+         * BinaryReader in this module.
+         *
+         * @param stream Stream to read from. Must not be null.
          * @param leaveOpen If false (the default), the stream is closed when this StreamReader is destroyed.
+         * @throws System::ArgumentNullException if @p stream is null.
          */
         explicit StreamReader(Stream* stream, bool leaveOpen = false);
 

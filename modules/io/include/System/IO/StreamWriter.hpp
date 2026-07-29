@@ -28,7 +28,19 @@ namespace System::IO {
         void WriteRaw(const char* data, size_t len);
 
     public:
-        /** Constructs a StreamWriter wrapping the given stream. */
+        /**
+         * @brief Constructs a StreamWriter wrapping the given stream.
+         *
+         * A null @p stream is rejected here rather than carried. With the
+         * default `leaveOpen = false` it was previously fatal merely to
+         * construct such a writer and let it leave scope, because the
+         * destructor closed the stream it did not have. This matches .NET's
+         * own constructors and the sibling BinaryWriter in this module.
+         *
+         * @param stream Stream to write to. Must not be null.
+         * @param leaveOpen If false (the default), the stream is closed when this StreamWriter is destroyed.
+         * @throws System::ArgumentNullException if @p stream is null.
+         */
         explicit StreamWriter(Stream* stream, bool leaveOpen = false);
         /** Constructs a StreamWriter that writes to a new or truncated file at path. */
         explicit StreamWriter(const std::string& path);

@@ -1214,6 +1214,117 @@ TEST(BinaryReaderWriterTests, Write7BitEncodedInt_RoundTrip) {
 // StreamWriter + StreamReader
 // ===========================================================================
 
+// ---------------------------------------------------------------------------
+// Null base stream — ticket #1806 / SR-AUD-338.
+//
+// Before that ticket neither text wrapper validated its Stream*. StreamWriter
+// carried the null into five reachable dereferences -- Write(string),
+// Write(const char*), Flush(), Close() with leaveOpen=false, and the destructor
+// with leaveOpen=false, each an ASan SEGV on address 0x0 and a UBSan "member
+// access within null pointer of type 'struct Stream'". StreamReader instead
+// defended at each use and reported end-of-stream, so a caller could not tell
+// "there was no stream" from "the document was empty". The sibling
+// BinaryReader/BinaryWriter already rejected the same input, which is the
+// inconsistency the audit called especially hazardous; these tests pin that all
+// four types now agree.
+// ---------------------------------------------------------------------------
+
+TEST(StreamWriterReaderTests, StreamReader_NullStream_ThrowsArgumentNullException) {
+    EXPECT_THROW(StreamReader sr(nullptr), System::ArgumentNullException);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_NullStream_LeaveOpenTrue_ThrowsArgumentNullException) {
+    // leaveOpen must not buy an exemption: the reader is unusable either way.
+    EXPECT_THROW(StreamReader sr(nullptr, true), System::ArgumentNullException);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_NullStream_NamesTheParameter) {
+    try {
+        StreamReader sr(nullptr);
+        FAIL() << "expected ArgumentNullException";
+    } catch (const System::ArgumentNullException& e) {
+        EXPECT_NE(std::string(e.what()).find("stream"), std::string::npos)
+            << "message was: " << e.what();
+    }
+}
+
+TEST(StreamWriterReaderTests, StreamWriter_NullStream_ThrowsArgumentNullException) {
+    // With the default leaveOpen=false this construction was previously fatal on
+    // its own: ~StreamWriter() closed the stream it did not have, with no call on
+    // the object at all.
+    EXPECT_THROW(StreamWriter sw(nullptr), System::ArgumentNullException);
+}
+
+TEST(StreamWriterReaderTests, StreamWriter_NullStream_LeaveOpenTrue_ThrowsArgumentNullException) {
+    EXPECT_THROW(StreamWriter sw(nullptr, true), System::ArgumentNullException);
+}
+
+TEST(StreamWriterReaderTests, StreamWriter_NullStream_NamesTheParameter) {
+    try {
+        StreamWriter sw(nullptr);
+        FAIL() << "expected ArgumentNullException";
+    } catch (const System::ArgumentNullException& e) {
+        EXPECT_NE(std::string(e.what()).find("stream"), std::string::npos)
+            << "message was: " << e.what();
+    }
+}
+
+TEST(StreamWriterReaderTests, TextWrappersRejectNullLikeTheirBinarySiblings) {
+    // The four types in this module that wrap a Stream* now answer the same input
+    // the same way. This is the assertion that would fail first if a future change
+    // reintroduced the divergence.
+    EXPECT_THROW(BinaryReader br(nullptr), System::ArgumentNullException);
+    EXPECT_THROW(BinaryWriter bw(nullptr), System::ArgumentNullException);
+    EXPECT_THROW(StreamReader sr(nullptr), System::ArgumentNullException);
+    EXPECT_THROW(StreamWriter sw(nullptr), System::ArgumentNullException);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_ValidStreamStillReadsAfterValidationAdded) {
+    // The reader's null tests were removed along with the state they guarded, so
+    // the ordinary read paths are re-pinned here: they must be unaffected.
+    uint8_t src[] = {'a', 'b', '\n', 'c'};
+    MemoryStream ms(src, 4);
+    StreamReader sr(&ms, true);
+    EXPECT_EQ(sr.Peek(), static_cast<int32_t>('a'));
+    EXPECT_EQ(sr.Read(), static_cast<int32_t>('a'));
+    EXPECT_EQ(sr.ReadLine(), "b");
+    EXPECT_EQ(sr.ReadToEnd(), "c");
+    EXPECT_EQ(sr.Read(), -1);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_EmptyStreamStillReportsEndOfStream) {
+    // -1 and "" keep their one legitimate meaning. Previously they had two, and a
+    // caller could not tell which had happened.
+    MemoryStream ms;
+    StreamReader sr(&ms, true);
+    EXPECT_EQ(sr.Peek(), -1);
+    EXPECT_EQ(sr.Read(), -1);
+    EXPECT_EQ(sr.ReadLine(), "");
+    EXPECT_EQ(sr.ReadToEnd(), "");
+}
+
+TEST(StreamWriterReaderTests, StreamWriter_ValidStreamStillWritesAfterValidationAdded) {
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    sw.Write(std::string("ok"));
+    sw.Write("!");
+    sw.Flush();
+    EXPECT_EQ(ms.getLengthProperty(), 3);
+    EXPECT_EQ(ms.ToArray()[2], static_cast<uint8_t>('!'));
+}
+
+TEST(StreamWriterReaderTests, StreamWriter_FailedConstructionLeavesTheStreamAlone) {
+    // Throwing from the constructor body means ~StreamWriter() never runs, so the
+    // rejected call cannot close or delete anything. A live, usable stream next to
+    // it proves the failure was inert.
+    MemoryStream ms;
+    EXPECT_THROW(StreamWriter sw(nullptr), System::ArgumentNullException);
+    StreamWriter good(&ms, true);
+    good.Write(std::string("still fine"));
+    good.Flush();
+    EXPECT_EQ(ms.getLengthProperty(), 10);
+}
+
 TEST(StreamWriterReaderTests, WriteString_ReadToEnd_Roundtrip) {
     MemoryStream ms;
     StreamWriter sw(&ms, true);
