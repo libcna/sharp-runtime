@@ -6227,6 +6227,11 @@ directory was created** and **no compilation exceeded three jobs**.
 
 ## CONTEXT-REFRESH handoff — 2026-07-29, session closing after five tickets
 
+> **Superseded by the handoff at the end of this file** (2026-07-29, second
+> autonomous batch, tickets #1812–#1817). The baselines in this section were
+> correct when written and are left unedited as history; do not resume from them.
+
+
 This session completed **five** remediation tickets — **#1805, #1806, #1807,
 #1810, #1811** — all five remediating high-severity public-input crash findings,
 and opened **two** new inactive tickets, **#1808** and **#1809**. It is stopping
@@ -6358,4 +6363,172 @@ exceeded three aggregate jobs at any point**, in any command or script.
 
 Ten commits on five per-ticket branches, each a `fix(...)` commit paired with a
 `docs: close ticket #NNNN` commit. **No push, merge, rebase, tag, or package
+publication occurred**, and no historical ticket commit was amended.
+
+---
+
+## CONTEXT-REFRESH handoff — 2026-07-29, second autonomous batch (#1812–#1817)
+
+**This is the current handoff. Resume from here.** It supersedes the
+"session closing after five tickets" section above.
+
+This batch completed **five** tickets — **#1812, #1814, #1815, #1816, #1817** —
+and opened **six** new inactive tickets — **#1813, #1818, #1819, #1820, #1821**
+(and #1817, which it then completed). It is stopping under stop condition 1 (five
+to ten tickets completed, a context refresh now prudent), not because work ran
+out.
+
+### Completed this batch
+
+| Ticket | Finding | What it repaired |
+|---|---|---|
+| **#1812** | SR-AUD-242 | `ZipArchive` null stream. Read/Update were an ASan SEGV on 0x0 during construction; **Create never crashed — it lost the caller's entire archive in silence**, because `Dispose()`'s write-back is gated on a non-null stream. |
+| **#1814** | SR-AUD-236 | `HttpContentJsonExtensions` null content. Not merely "a deferred task crash": the dereference ran on the `std::async` worker thread, so a caller that started the task and **never awaited it** still lost the process. |
+| **#1815** | — | Design-only. The scoped family plan for the Base64/Base64Url cluster, [`docs/Base64FamilyPlan.md`](docs/Base64FamilyPlan.md). |
+| **#1816** | SR-AUD-078 | **CCF-013 is closed.** Both in-place Base64 encoders wrote full packs before reading the trailing remainder. Wrong for **28 of 50** swept cases, not the two lengths the finding named. |
+| **#1817** | SR-AUD-079 | The final quantum's unused low bits were never required to be zero, in either header, in **both** decoder and validator. |
+
+**The eight immediate public-input crash findings are now all `remediated`**:
+SR-AUD-089, 097, 132, 236, 242, 257, 338, 341. That group is finished.
+
+### Exact current baselines
+
+| Measure | Value |
+|---|---|
+| Repository tests | **14,014** across 37 executables (13,979 at batch start) |
+| Build | 0 warnings, 0 errors |
+| Module graph | 41 physical modules, **91** production dependency edges (**was 90** — see below) |
+| Doxygen | **1,941** of the 1,942 ceiling — unchanged all batch |
+| Negative consumer fixtures | 9 fixtures, 66 sites, every site rejected; 75 compiler invocations, peak 3 jobs |
+| Version-seam ODR | 2 seams, 18 specialisation definitions; 12/12 self-test |
+| Audit findings | **19 remediated, 345 confirmed** of 364 (was 15 / 349) |
+| Component suites touched | `Buffers` **485** (was 465), `Net.Http.Json` **15** (was 8), integration **843** (was 835) |
+
+The audit identifier range stays **frozen at 364**. No new `SR-AUD-*` was created,
+and no finding was reopened.
+
+### The one structural change: 90 → 91 dependency edges
+
+Ticket #1814's guard lives in a **public header** of `Net.Http.Json`, which is an
+`INTERFACE` component, so the header must include
+`System/ArgumentNullException.hpp`. `Net.Http.Json` previously reached `Core.Base`
+only *transitively* through `Net.Http`; the boundary validator correctly rejected
+the undeclared public edge. `modules/net-http-json/CMakeLists.txt` now declares
+`Core.Base` in `PUBLIC_DEPENDENCIES` and `docs/ComponentCatalog.md` was
+regenerated.
+
+**A future ticket that adds a guard to a header-only component's public header
+will hit the same wall.** The fix is the declaration plus a catalogue
+regeneration, and the current-baseline figure must then be updated in `plan.md`,
+`NEXT.md`, `README.md` and `docs/CMakeComponents.md` — the per-ticket sections
+that say 41/90 are historical measurements and are correctly left alone.
+
+### Recommended next ticket
+
+Take **#1818** (SR-AUD-080 — a padded quantum decodes to `Done` while
+`isFinalBlock == false`). It is the next in
+[`docs/Base64FamilyPlan.md`](docs/Base64FamilyPlan.md)'s explicit order, it starts
+from a `decodeCore` that #1817 already moved one step toward
+`Base64DecoderHelper.cs`, and the plan records what #1817 settled that it
+inherits. Then **#1819**, then **#1820** (which is deliberately unordered against
+the other three and could be taken at any point).
+
+After the Base64 family, the roadmap's item 3 still has four unplanned
+cross-cutting causes: **CCF-004** (defined arithmetic at native/fixed-width
+boundaries), **CCF-005** (conversion special values and range validation),
+**CCF-009** (process-wide PRNG concurrency), and the open members of **CCF-019**.
+Each needs its own scoped family plan first, on the model of #1815 — that pattern
+worked and is worth repeating.
+
+### Ready queue
+
+| Ticket | Priority | Status | Note |
+|---|---|---|---|
+| **#1818** | P2 | `todo` | SR-AUD-080. **Next.** Follows #1817 in the plan's order. Narrowing. |
+| **#1819** | P2 | `todo` | SR-AUD-081. Follows #1818 — same cursor code. Changes `bytesConsumed` only. |
+| **#1820** | P2 | `todo` | SR-AUD-082. Independent of #1817–#1819. **Widening** — only adds accepted input. |
+| **#1813** | P2 | `todo` | `ZipArchive` accepts an out-of-range `ZipArchiveMode`. **Inventory first**: sibling of SR-AUD-258's `CompressionMode` half; consider one shared enum-validation ticket. |
+| **#1808** | P2 | `todo` | `StreamReader`/`StreamWriter` do not validate `CanRead`/`CanWrite`. **Inventory first** — its check can reject calls that work today. |
+| **#1809** | P2 | `todo` | Null `const char*` across the `TextWriter` `Write` family. **Read .NET first**: `TextWriter.Write(string?)` treats null as a *no-op*, so a throwing guard would diverge. A contract decision, not a guard. |
+| **#1821** | P3 | `todo` | The in-place encoders reject an empty buffer .NET short-circuits to `Done`. **A decision, not a foregone fix** — `Done` for "encode five bytes into zero bytes" is arguably the worse contract. |
+
+#1813 and #1821 carry **no `SR-AUD-*` identifier**; the audit did not record them,
+which is stated plainly rather than backfilled.
+
+### Blocked, unchanged
+
+- **#1773** — **remains `blocked`**. CNA and mobile-eggbert were not inspected,
+  searched, configured, built, or modified at any point in this batch.
+- **#1804** — remains `blocked` and untouched.
+
+### Nothing in this batch needed approval
+
+No public signature, virtual, return convention, object layout or iterator layout
+changed in any of the five tickets. Two commits carry a `!` marker, and both are
+**behavioural**, not structural:
+
+- **#1816** — output previously produced in place at a length with both a full
+  pack and a remainder was **wrong** and is now correct. A consumer that stored or
+  transmitted such output stored corrupted data.
+- **#1817** — the accepted input set is **narrowed**: noncanonical final quanta
+  that used to decode now return `InvalidData`, in the direction of .NET parity.
+
+### Findings deliberately left open next to work that was done
+
+- **SR-AUD-080**, **SR-AUD-081**, **SR-AUD-082** — share the two Base64 headers
+  with #1816 and #1817; scoped as #1818–#1820 rather than absorbed.
+- **SR-AUD-258** — invalid `CompressionMode` and post-close operations; still
+  `confirmed`, and now has a sibling in #1813.
+- The `modules/buffers` findings outside these two headers — SR-AUD-075/085
+  (**CCF-014**, stale Try-output), SR-AUD-076, SR-AUD-077, SR-AUD-083,
+  SR-AUD-084, SR-AUD-086, SR-AUD-087 — are a different cause and need their own
+  plan.
+
+### Three things worth carrying forward
+
+1. **The defect is usually larger than the finding text.** #1812's Create-mode
+   half never crashed and lost data silently; #1814's async half killed the
+   process from a worker thread even when the task was abandoned; #1816 was wrong
+   at 14 lengths per type, not two. Reproduce **every** public entry point before
+   writing the fix. The probes are `build-probe/18{12,14,16,17}_*defects.cpp`.
+2. **A differential sweep finds what a sanitizer cannot.** #1816 was silent
+   corruption *inside* the declared output — the sentinel byte past the output was
+   never touched, so ASan and UBSan had nothing to say. Comparing an in-place API
+   against the same type's own out-of-place API over a length sweep is what found
+   it, and that shape is reusable.
+3. **A validator must change in the same ticket as its decoder.** #1817's
+   `validateCore` work was not optional politeness: a validator more permissive
+   than its own decoder tells a caller an input is safe to decode when it is not.
+
+### Environment notes
+
+- `scripts/check_selective_components.sh` takes **longer than 10 minutes** here.
+  Run it detached, or expect a foreground timeout; it passed on every invocation
+  this batch.
+- `scripts/check_selective_components.sh`, `scripts/check_doxygen_warnings.sh`,
+  `scripts/check_negative_consumer_fixtures.py` and `scripts/local_ci_check.sh`
+  all use `mktemp`; run them with `TMPDIR="$PWD/build-tmp"` so they honour the
+  no-`/tmp`-builds rule.
+- `build-asan/` now additionally has `SharpRuntimeIntegrationTests`,
+  `SharpRuntimeTests_Net_Http_Json` and `SharpRuntimeTests_Buffers` built. Reuse
+  it; it is the expensive tree.
+- Measuring a **pre-fix** state for a header-only component is easy and was used
+  by #1817: `git stash push -- modules/<m>/include`, build and run the probe,
+  `git stash pop`. Both logs then come from one probe source file.
+- The six local-server `Net.Http` cases were **network-permitted** in every gate
+  run this batch and passed.
+
+### Build directories and parallelism
+
+Used: `build/` (gate), `build-asan/` (sanitizer runs), `build-probe/` (every
+ticket's probes and logs, each prefixed with its own ticket number), `build-tmp/`
+(repository-local `TMPDIR`). **No new build directory was created**; every probe
+binary was deleted once its log was transcribed. **No compilation exceeded three
+aggregate jobs at any point**, in any command or script.
+
+### Git
+
+Ten commits on one batch branch, `feature/remediation-batch-1812`, each ticket a
+`fix(...)` commit paired with a `docs: close ticket #NNNN` commit (#1815 and
+#1816 share one docs commit). **No push, merge, rebase, tag, or package
 publication occurred**, and no historical ticket commit was amended.
