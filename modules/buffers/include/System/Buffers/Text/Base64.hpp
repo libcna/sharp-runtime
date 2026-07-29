@@ -92,11 +92,23 @@ class Base64 {
                     dst[di++] = static_cast<uint8_t>(val >> 8);
                     dst[di++] = static_cast<uint8_t>(val);
                 } else if (padCount == 1) {
+                    // A single '=' means the quantum carries two bytes, so only the top four
+                    // bits of the third sextet are used and its low two bits MUST be zero.
+                    // Without this, `AAB=` decoded to Done and IsValid agreed, where .NET
+                    // rejects it -- Base64DecoderHelper.cs tests exactly these bits (ticket
+                    // #1817 / SR-AUD-079). Checked before the destination check on purpose:
+                    // whether the input is canonical is a property of the input alone and
+                    // must not depend on how much room the caller happened to provide.
+                    if ((vals[2] & 0x03) != 0) return OperationStatus::InvalidData;
                     if (dstLen - di < 2) return OperationStatus::DestinationTooSmall;
                     uint32_t val = (uint32_t(vals[0])<<18)|(uint32_t(vals[1])<<12)|(uint32_t(vals[2])<<6);
                     dst[di++] = static_cast<uint8_t>(val >> 16);
                     dst[di++] = static_cast<uint8_t>(val >> 8);
                 } else { // padCount == 2
+                    // Two '=' means the quantum carries one byte, so only the top two bits of
+                    // the second sextet are used and its low four bits MUST be zero. `AB==`
+                    // used to decode to Done. Same ordering rationale as above.
+                    if ((vals[1] & 0x0F) != 0) return OperationStatus::InvalidData;
                     if (dstLen - di < 1) return OperationStatus::DestinationTooSmall;
                     uint32_t val = (uint32_t(vals[0])<<18)|(uint32_t(vals[1])<<12);
                     dst[di++] = static_cast<uint8_t>(val >> 16);
@@ -123,10 +135,15 @@ class Base64 {
     }
 
     // Shared validate core: same grammar as decodeCore but only counts decoded bytes.
+    // It must agree with decodeCore on every rule, including the canonical final-bit rule
+    // (ticket #1817 / SR-AUD-079); a validator that is more permissive than the decoder is
+    // worse than no validator, because it tells the caller an input is safe to decode when
+    // it is not. That is why the sextet values are retained here and not only counted.
     template<typename CharT>
     static bool validateCore(const CharT* src, intcs srcLen, intcs& decodedLength) {
         decodedLength = 0;
         intcs si = 0, di = 0;
+        int8_t vals[4] = {0, 0, 0, 0};
         int valCount = 0, padCount = 0;
 
         while (si < srcLen) {
@@ -138,12 +155,16 @@ class Base64 {
             if (v == -2) {
                 if (valCount < 2) return false;
                 ++padCount;
+                vals[valCount] = 0;
             } else {
                 if (padCount > 0) return false;
+                vals[valCount] = v;
             }
             ++valCount;
 
             if (valCount == 4) {
+                if (padCount == 1 && (vals[2] & 0x03) != 0) return false;
+                if (padCount == 2 && (vals[1] & 0x0F) != 0) return false;
                 di += (padCount == 0) ? 3 : (padCount == 1 ? 2 : 1);
                 if (padCount > 0) {
                     for (intcs r = si; r < srcLen; ++r) {

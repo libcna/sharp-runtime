@@ -430,3 +430,95 @@ TEST(Base64Test, GetMaxEncodedLength_AboveMaximum_Throws) {
 TEST(Base64Test, GetMaxDecodedLength_Negative_Throws) {
     EXPECT_THROW(Base64::GetMaxDecodedFromUtf8Length(-1), System::ArgumentOutOfRangeException);
 }
+
+// ===========================================================================
+// Canonical final quantum (ticket #1817 / SR-AUD-079)
+// ===========================================================================
+//
+// The decoder derived the final one/two bytes from the leading sextets but never
+// required the unused low bits to be zero: the low 4 bits of the second sextet
+// before "==", the low 2 bits of the third before "=". validateCore repeated the
+// omission, so IsValid agreed with the bad decode instead of screening it.
+// .NET's Base64DecoderHelper.cs and Base64ValidatorHelper.cs both test those bits.
+//
+// This narrows the accepted input set: "AB==" and "AAB=" used to decode to Done.
+
+TEST(Base64Test, Decode_NoncanonicalTwoPad_IsInvalid) {
+    std::string b64 = "AB==";                    // 'B' == sextet 1: low nibble nonzero
+    ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(b64.data()), 4);
+    std::vector<uint8_t> out(8);
+    Span<uint8_t> dst(out.data(), 8);
+    int consumed = 0, written = 0;
+    EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, true), OperationStatus::InvalidData);
+    EXPECT_EQ(written, 0);
+}
+
+TEST(Base64Test, Decode_NoncanonicalOnePad_IsInvalid) {
+    std::string b64 = "AAB=";                    // low two bits of the third sextet nonzero
+    ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(b64.data()), 4);
+    std::vector<uint8_t> out(8);
+    Span<uint8_t> dst(out.data(), 8);
+    int consumed = 0, written = 0;
+    EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, true), OperationStatus::InvalidData);
+    EXPECT_EQ(written, 0);
+}
+
+// The validator must not be more permissive than its own decoder: that combination
+// tells a caller an input is safe to decode when it is not.
+TEST(Base64Test, IsValid_AgreesWithDecoderOnNoncanonicalFinalQuantum) {
+    for (const char* text : {"AB==", "AAB="}) {
+        const auto len = static_cast<int>(std::string(text).size());
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(text), len);
+        EXPECT_FALSE(Base64::IsValid(src)) << text;
+        int decodedLength = -1;
+        EXPECT_FALSE(Base64::IsValid(src, decodedLength)) << text;
+    }
+}
+
+// The char overloads share decodeCore/validateCore, so they inherit the rule.
+TEST(Base64Test, DecodeFromChars_NoncanonicalFinalQuantum_IsInvalid) {
+    const char* b64 = "AB==";
+    ReadOnlySpan<char> src(b64, 4);
+    std::vector<uint8_t> out(8);
+    Span<uint8_t> dst(out.data(), 8);
+    int consumed = 0, written = 0;
+    EXPECT_EQ(Base64::DecodeFromChars(src, dst, consumed, written, true), OperationStatus::InvalidData);
+    EXPECT_FALSE(Base64::IsValid(ReadOnlySpan<char>(b64, 4)));
+}
+
+// Canonical spellings of the same payload lengths must be untouched.
+TEST(Base64Test, Decode_CanonicalFinalQuantum_StillDecodes) {
+    struct { const char* text; int expectedBytes; } cases[] = {
+        {"AA==", 1}, {"AAA=", 2}, {"QQ==", 1}, {"SGk=", 2}, {"SGVsbG8=", 5}, {"TWFu", 3},
+    };
+    for (const auto& c : cases) {
+        const auto len = static_cast<int>(std::string(c.text).size());
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(c.text), len);
+        std::vector<uint8_t> out(16);
+        Span<uint8_t> dst(out.data(), 16);
+        int consumed = 0, written = 0;
+        EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, true), OperationStatus::Done) << c.text;
+        EXPECT_EQ(written, c.expectedBytes) << c.text;
+        EXPECT_TRUE(Base64::IsValid(src)) << c.text;
+    }
+}
+
+// Everything this repository's own encoder produces must stay decodable: an encoder
+// never emits nonzero unused bits, so the new rule must not touch a round trip.
+TEST(Base64Test, Decode_AcceptsEveryEncodedLength_AfterCanonicalRule) {
+    for (int n = 0; n <= 24; ++n) {
+        std::vector<uint8_t> data;
+        for (int i = 0; i < n; ++i) data.push_back(static_cast<uint8_t>((i * 37 + 11) & 0xFF));
+        const std::string encoded = Base64::EncodeToString(data);
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(encoded.data()),
+                                  static_cast<int>(encoded.size()));
+        EXPECT_TRUE(Base64::IsValid(src)) << "length " << n;
+        std::vector<uint8_t> out(64);
+        Span<uint8_t> dst(out.data(), 64);
+        int consumed = 0, written = 0;
+        ASSERT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, true), OperationStatus::Done)
+            << "length " << n;
+        ASSERT_EQ(written, n) << "length " << n;
+        for (int i = 0; i < n; ++i) EXPECT_EQ(out[static_cast<size_t>(i)], data[static_cast<size_t>(i)]);
+    }
+}

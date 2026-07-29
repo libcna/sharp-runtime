@@ -88,10 +88,20 @@ class Base64Url {
             if (!isFinalBlock) return OperationStatus::NeedMoreData;
             if (valCount == 1) return OperationStatus::InvalidData;
             if (valCount == 2) {
+                // Two symbols carry one byte, so only the top two bits of the second sextet
+                // are used and its low four bits MUST be zero. Without this, `AB` decoded to
+                // Done and IsValid agreed, where .NET's Base64UrlValidator rejects it. This
+                // is the unpadded instance of the same canonical boundary the padded sibling
+                // has (ticket #1817 / SR-AUD-079, extended). Checked before the destination
+                // check on purpose: canonicity is a property of the input alone.
+                if ((vals[1] & 0x0F) != 0) return OperationStatus::InvalidData;
                 if (dstLen - di < 1) return OperationStatus::DestinationTooSmall;
                 uint32_t val = (uint32_t(vals[0])<<18)|(uint32_t(vals[1])<<12);
                 dst[di++] = static_cast<uint8_t>(val >> 16);
             } else { // valCount == 3
+                // Three symbols carry two bytes: only the top four bits of the third sextet
+                // are used, so its low two bits MUST be zero. `AAB` used to decode to Done.
+                if ((vals[2] & 0x03) != 0) return OperationStatus::InvalidData;
                 if (dstLen - di < 2) return OperationStatus::DestinationTooSmall;
                 uint32_t val = (uint32_t(vals[0])<<18)|(uint32_t(vals[1])<<12)|(uint32_t(vals[2])<<6);
                 dst[di++] = static_cast<uint8_t>(val >> 16);
@@ -102,20 +112,29 @@ class Base64Url {
         return OperationStatus::Done;
     }
 
+    // Must agree with decodeCore on every rule, including the canonical final-bit rule
+    // (ticket #1817 / SR-AUD-079): a validator more permissive than the decoder tells the
+    // caller an input is safe to decode when it is not. That is why the trailing sextet
+    // values are retained here and not only counted.
     template<typename CharT>
     static bool validateCore(const CharT* src, intcs srcLen, intcs& decodedLength) {
         decodedLength = 0;
         intcs si = 0, di = 0;
+        int8_t vals[4] = {0, 0, 0, 0};
         int valCount = 0;
 
         while (si < srcLen) {
             uint8_t ch = static_cast<uint8_t>(src[si]);
             if (isWhitespace(ch)) { ++si; continue; }
-            if (kDecTable[ch] < 0) return false;
-            ++valCount; ++si;
+            int8_t v = kDecTable[ch];
+            if (v < 0) return false;
+            vals[valCount++] = v;
+            ++si;
             if (valCount == 4) { di += 3; valCount = 0; }
         }
         if (valCount == 1) return false;
+        if (valCount == 2 && (vals[1] & 0x0F) != 0) return false;
+        if (valCount == 3 && (vals[2] & 0x03) != 0) return false;
         di += (valCount == 2) ? 1 : (valCount == 3 ? 2 : 0);
         decodedLength = di;
         return true;

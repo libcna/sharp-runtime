@@ -358,3 +358,87 @@ TEST(Base64UrlTest, GetEncodedLength_AboveMaximum_Throws) {
     EXPECT_THROW(Base64Url::GetEncodedLength(1610612734), System::ArgumentOutOfRangeException);
     EXPECT_NO_THROW(Base64Url::GetEncodedLength(1610612733));
 }
+
+// ===========================================================================
+// Canonical final quantum (ticket #1817 / SR-AUD-079, extended)
+// ===========================================================================
+//
+// The unpadded instance of the same boundary the padded sibling has: a two-symbol
+// tail carries one byte, so the low 4 bits of the second sextet must be zero, and
+// a three-symbol tail carries two bytes, so the low 2 bits of the third must be.
+// Neither decodeCore nor validateCore required it, so "AB" and "AAB" decoded to
+// Done and IsValid agreed.
+
+TEST(Base64UrlTest, Decode_NoncanonicalTwoSymbolTail_IsInvalid) {
+    const char* text = "AB";
+    ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(text), 2);
+    std::vector<uint8_t> out(8);
+    Span<uint8_t> dst(out.data(), 8);
+    int consumed = 0, written = 0;
+    EXPECT_EQ(Base64Url::DecodeFromUtf8(src, dst, consumed, written, true), OperationStatus::InvalidData);
+    EXPECT_EQ(written, 0);
+}
+
+TEST(Base64UrlTest, Decode_NoncanonicalThreeSymbolTail_IsInvalid) {
+    const char* text = "AAB";
+    ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(text), 3);
+    std::vector<uint8_t> out(8);
+    Span<uint8_t> dst(out.data(), 8);
+    int consumed = 0, written = 0;
+    EXPECT_EQ(Base64Url::DecodeFromUtf8(src, dst, consumed, written, true), OperationStatus::InvalidData);
+    EXPECT_EQ(written, 0);
+}
+
+TEST(Base64UrlTest, IsValid_AgreesWithDecoderOnNoncanonicalFinalQuantum) {
+    for (const char* text : {"AB", "AAB"}) {
+        const auto len = static_cast<int>(std::string(text).size());
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(text), len);
+        EXPECT_FALSE(Base64Url::IsValid(src)) << text;
+        int decodedLength = -1;
+        EXPECT_FALSE(Base64Url::IsValid(src, decodedLength)) << text;
+    }
+}
+
+TEST(Base64UrlTest, DecodeFromChars_NoncanonicalFinalQuantum_IsInvalid) {
+    const char* text = "AB";
+    ReadOnlySpan<char> src(text, 2);
+    std::vector<uint8_t> out(8);
+    Span<uint8_t> dst(out.data(), 8);
+    int consumed = 0, written = 0;
+    EXPECT_EQ(Base64Url::DecodeFromChars(src, dst, consumed, written, true), OperationStatus::InvalidData);
+    EXPECT_FALSE(Base64Url::IsValid(ReadOnlySpan<char>(text, 2)));
+}
+
+TEST(Base64UrlTest, Decode_CanonicalFinalQuantum_StillDecodes) {
+    struct { const char* text; int expectedBytes; } cases[] = {
+        {"AA", 1}, {"AAA", 2}, {"QQ", 1}, {"SGk", 2}, {"SGVsbG8", 5}, {"TWFu", 3},
+    };
+    for (const auto& c : cases) {
+        const auto len = static_cast<int>(std::string(c.text).size());
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(c.text), len);
+        std::vector<uint8_t> out(16);
+        Span<uint8_t> dst(out.data(), 16);
+        int consumed = 0, written = 0;
+        EXPECT_EQ(Base64Url::DecodeFromUtf8(src, dst, consumed, written, true), OperationStatus::Done) << c.text;
+        EXPECT_EQ(written, c.expectedBytes) << c.text;
+        EXPECT_TRUE(Base64Url::IsValid(src)) << c.text;
+    }
+}
+
+TEST(Base64UrlTest, Decode_AcceptsEveryEncodedLength_AfterCanonicalRule) {
+    for (int n = 0; n <= 24; ++n) {
+        std::vector<uint8_t> data;
+        for (int i = 0; i < n; ++i) data.push_back(static_cast<uint8_t>((i * 37 + 11) & 0xFF));
+        const std::string encoded = Base64Url::EncodeToString(data);
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(encoded.data()),
+                                  static_cast<int>(encoded.size()));
+        EXPECT_TRUE(Base64Url::IsValid(src)) << "length " << n;
+        std::vector<uint8_t> out(64);
+        Span<uint8_t> dst(out.data(), 64);
+        int consumed = 0, written = 0;
+        ASSERT_EQ(Base64Url::DecodeFromUtf8(src, dst, consumed, written, true), OperationStatus::Done)
+            << "length " << n;
+        ASSERT_EQ(written, n) << "length " << n;
+        for (int i = 0; i < n; ++i) EXPECT_EQ(out[static_cast<size_t>(i)], data[static_cast<size_t>(i)]);
+    }
+}
