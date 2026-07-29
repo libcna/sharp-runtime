@@ -4039,3 +4039,33 @@ local one-line change, and a proposed `SafeArithmetic` helper should be rejected
 
 Implementation split: **#1830–#1837**, all `todo`, all compatible, none requiring
 approval. #1836 and #1837 should not be taken first.
+
+
+### Autonomous batch handoff, 2026-07-29 (text/IO remediation and the CCF-004 family plan)
+
+Six tickets on `feature/remediation-batch-text-io-ccf004`: **#1825** (FileStream access
+flags), **#1813** (ZipArchive mode range), **#1826** (MemoryStream disposed CanRead),
+**#1829** (CCF-004 family plan, design-only), **#1830** (Index/Range defined arithmetic,
+**SR-AUD-057 remediated**) and **#1832** (IntPtr defined wrap, **SR-AUD-025 remediated**).
+
+Baselines, all verified rather than carried forward: repository gate **14,113 tests across
+37 executables**, 0 warnings; audit **23 remediated / 341 confirmed / 364**; module graph
+41 / 91; canonical Doxygen **1,941** against the 1,942 ceiling; negative fixtures 9 / 66;
+version seams 2 / 18.
+
+Five premises were corrected by measurement, including two in the batch's own documents:
+SR-AUD-060 is seven sites not four, SR-AUD-057 is two sites not one, and #1829's own first
+survey run wrongly reported three of eight members as already fixed. The two methodology
+rules that follow — link probes against `build-asan/` at `-O0`, and enumerate sites with
+the *recovering* sanitizer build — are recorded in
+`docs/DefinedArithmeticBoundaryPlan.md` §3 and §12.
+
+Ready queue: **#1831**, **#1833**, **#1834**, **#1835** (all compatible, no approval), then
+the two class C tickets **#1836** and **#1837** last. Blocked: **#1773** (untouched),
+**#1804**, and **#1824** / **#1827** / **#1828**, which share one root cause —
+`Stream.hpp:62`'s default-`false` `getCanWriteProperty()` — and are better served by one
+design covering that line than by four per-type guards.
+
+Full detail, including build directories, the three-job parallelism record and the
+`build-probe` disk accounting, is in `NEXT.md` under "CONTEXT-REFRESH handoff — 2026-07-29,
+text/IO + CCF-004 batch".

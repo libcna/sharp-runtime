@@ -7316,3 +7316,129 @@ sites are where this matters most.**
 ASan + UBSan + LSan, 0 reports. Repository gate **14,106 tests across 37 executables**, 0
 warnings, 0 errors, `local_ci_check.sh` passed. No public signature, virtual, vtable,
 object layout or mangled symbol changed; `GetOffset` remains `noexcept`.
+
+## CONTEXT-REFRESH handoff — 2026-07-29, text/IO + CCF-004 batch (#1825, #1813, #1826, #1829, #1830, #1832)
+
+Branch `feature/remediation-batch-text-io-ccf004`. **Nothing pushed, merged, rebased or
+tagged.** CNA and mobile-eggbert were **not inspected or modified**; **#1773 remains
+`blocked`**. No compilation exceeded **three** aggregate jobs.
+
+### Tickets completed (six)
+
+| Ticket | Key | Finding | Outcome |
+|---|---|---|---|
+| **#1825** | `REMED-IO-FILESTREAM-ACCESS-FLAGS` | none (no `SR-AUD-*`) | `FileStream::Read`/`Write`/`WriteByte` now test `canRead_`/`canWrite_`; **silent data loss** removed |
+| **#1813** | `REMED-IO-ZIP-INVALID-MODE` | none | out-of-range `ZipArchiveMode` rejected at both constructors |
+| **#1826** | `REMED-IO-MEMORYSTREAM-CANREAD-DISPOSED` | none | `MemoryStream::getCanReadProperty()` folds in `isOpen_` |
+| **#1829** | `REMED-CORE-CCF004-PLAN` | CCF-004 (design) | `docs/DefinedArithmeticBoundaryPlan.md`; eight members re-measured |
+| **#1830** | `REMED-CORE-INDEX-DEFINED-OFFSET` | **SR-AUD-057 → `remediated`** | `Index::GetOffset` **and** `Range::GetOffsetAndLength` use defined arithmetic |
+| **#1832** | `REMED-CORE-INTPTR-DEFINED-WRAP` | **SR-AUD-025 → `remediated`** | `IntPtr::Add`/`Subtract` compute in `uintptr_t` |
+
+### Current baselines — all verified this batch, not carried forward
+
+| Baseline | Value |
+|---|---|
+| repository gate | **14,113 tests across 37 executables**, 0 warnings, 0 errors |
+| audit | **23 remediated / 341 confirmed / 364 total** |
+| module graph | 41 modules / 91 edges |
+| canonical Doxygen | **1,941** warnings (ceiling 1,942) |
+| negative fixtures | 9 fixtures / 66 sites, every site rejected |
+| version seams | 2 seams / 18 specialisations |
+| `SharpRuntimeTests_IO` | 586 · `Core_Base` 5009 · `IntegrationTests` 857 |
+
+**The handoff this batch inherited was stale on two counts, corrected by measurement:**
+audit totals read **21 remediated / 343 confirmed** at batch start, not the 19/345 stated;
+and the batch branch already carried five commits (#1809, #1808 and the #1823 plan), with
+#1825's implementation **uncommitted in the working tree**. Always count the index rows
+and read `git status` rather than trusting the previous prose.
+
+### Premises corrected (five, all by measurement)
+
+1. **#1825's own text** said all three `FileStream` operations check `file_.is_open()`.
+   `WriteByte` had **no validation at all** — a byte written to a closed stream was
+   accepted in silence.
+2. **#1813's own text** called an invalid-mode archive one that "writes nothing back",
+   which reads as inert. It accepts a **complete archive** through `CreateEntry` + write +
+   `Dispose` and delivers **0 bytes**.
+3. **SR-AUD-060 is seven sites, not four** — the `DateOnly` overflow cascades into
+   `jdnToDate` at `DateOnly.cpp:35/37/39`.
+4. **SR-AUD-057 is two sites, not one** — `Range.hpp:99` has its own overflow; the audit
+   *and* this batch's own plan called `Range` a mere consumer.
+5. **#1829's first survey run reported three of eight members already fixed.** False: a
+   probe linked against `build/` cannot see any `.cpp`-side site, and `-O1` constant-folds
+   an inlined header overflow.
+
+### Two methodology rules this batch learned the hard way
+
+Both are in `docs/DefinedArithmeticBoundaryPlan.md` §3 and §12, and both apply to every
+remaining CCF-004 ticket:
+
+- **Link probes against `build-asan/`, at `-O0`.** `build/` is not a sanitizer tree, so
+  `.cpp`-side UB is invisible; `-O1` folds header-inline UB away. Absence of a UBSan report
+  is **not** evidence of absence of UB.
+- **Enumerate a finding's sites with the *recovering* build; use `-fno-sanitize-recover`
+  only to prove a site is gone.** Aborting at the first diagnostic hid `Range.hpp:99`
+  behind `Index.hpp:61`. #1837's seven `DateOnly` sites are where this matters most.
+
+### Newly created tickets (eleven)
+
+- **Ready, compatible, no approval:** **#1831** (`Tuple` hash), **#1833**
+  (`ReadOnlyMemory::Slice`), **#1834** (`Int128` `MinValue`), **#1835** (`Utf8Parser`
+  `Int64` min), **#1836** (`TimeSpan`, both classes), **#1837** (`DateOnly`, seven sites).
+- **Blocked, needing approval:** **#1827** (`ZipArchive` stream capabilities), **#1828**
+  (three zlib wrappers' stale `CanRead`/`CanWrite`).
+- Plus **#1829/#1830/#1832** now `done`.
+
+### Blocked on approval — three tickets, one shared root cause
+
+**#1824** (`StreamWriter`), **#1827** (`ZipArchive` capabilities) and **#1828** (zlib
+wrappers) are all blocked by **one line**: `System::IO::Stream::getCanWriteProperty()`
+**defaults to `false`** (`Stream.hpp:62`) where .NET's `Stream.CanWrite` is abstract. Any
+`CanWrite` guard therefore rejects every custom stream that implements `Write()` without
+overriding the property — streams that work today. **The exact approval needed** is stated
+in `docs/TextWrapperInputContractPlan.md` §13.2.
+
+**Recommendation:** rather than four per-type guards, the next design should consider
+`Stream.hpp:62` **itself** — making the capability properties abstract, or splitting them
+by direction as #1808/#1824 split the text wrappers. All three tickets say so.
+
+### Remaining ready queue, in recommended order
+
+1. **#1831** `Tuple` hash — XS, class A, mechanical; the last trivial one.
+2. **#1833** `ReadOnlyMemory::Slice` — S, class B; **must inventory** `Memory<T>`,
+   `Span<T>`, `ReadOnlySpan<T>` for the same one-argument shape.
+3. **#1834** `Int128` / **#1835** `Utf8Parser` — S each, class A.
+4. **#1836** `TimeSpan` / **#1837** `DateOnly` — M each, the two **class C** tickets that
+   change observable behaviour. Take these **last**; each must restate the
+   compatible-narrowing argument itself.
+
+**Next recommended family after CCF-004:** CCF-005 or CCF-003, both of which touch
+`Int128.hpp` and `IntPtr.hpp` with *different* causes — do not let a CCF-004 ticket drift
+into them.
+
+### Build directories and disk
+
+| Directory | Start | End |
+|---|---|---|
+| `build/` | 714 M | 715 M |
+| `build-asan/` | 3.4 G | 3.4 G (**reused**, never recreated) |
+| `build-probe/` | 15 M | **15 M** (peaked at 43 M; 28 M reclaimed) |
+| `build-consumer/` | 12 K | 12 K |
+| `build-tmp/` | 201 M | 201 M |
+| `build-modular/` | 777 M | 777 M |
+| `cmake-build-debug/` | 88 M | 88 M |
+
+**28 MB reclaimed** by deleting eleven probe **binaries** after their evidence was
+transcribed; every probe `.cpp` and every `.log` is retained. No build tree was cleaned,
+recreated or created under `/tmp`; `TMPDIR` was `build-tmp/` throughout. ccache stayed
+enabled.
+
+### Limitations
+
+- `scripts/check_version_seam_odr.py` is executable but `test/check_version_seam_odr_test.py`
+  is **not** — it must be run as `python3 test/check_version_seam_odr_test.py`. Not fixed
+  here (unrelated cleanup); worth a one-line ticket.
+- The `build-asan/` core archive is **pre-#1830/#1832** for `.cpp` code; both fixes are
+  header-only, so probe TUs picked them up directly. A future `.cpp`-side CCF-004 ticket
+  (#1836, #1837) **must rebuild `build-asan` first** or its post-fix probe will link stale
+  object code and appear to fail.
