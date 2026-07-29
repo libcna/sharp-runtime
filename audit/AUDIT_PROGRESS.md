@@ -5279,3 +5279,41 @@ absent after (`build-probe/1830_postfix.log`). Repository gate: **0 warnings, 0 
 
 **Source and ABI consequences: none.** No signature, virtual, vtable, object layout or
 mangled symbol changed; `GetOffset` remains `noexcept`.
+
+---
+
+Ticket **#1832** (`REMED-CORE-INTPTR-DEFINED-WRAP`, P1, size XS, category `remediation`,
+area *Core*) is **done** and **SR-AUD-025 is now `remediated`** — the second CCF-004
+member. The index counts move to **23 remediated** and **341 confirmed** of 364.
+
+`IntPtr::Add` evaluated `pointer.value + offset` in `intptr_t` and `Subtract` the mirror,
+so both native boundary cases were signed-overflow UB. .NET exposes these as
+`pointer + offset` / `pointer - offset` for `nint` under ordinary **unchecked** C#
+arithmetic, whose modulo-native-width wrap is *defined*. Both now compute in `uintptr_t`.
+CCF-004 **class A**.
+
+Site enumeration used the **recovering** build first, per the amendment ticket #1830 added
+as `docs/DefinedArithmeticBoundaryPlan.md` §12, and confirmed exactly **two** sites
+(`IntPtr.hpp:105` and `:114`); the `friend operator+` / `operator-` forms forward to the
+named methods rather than duplicating the arithmetic, and are pinned independently so a
+refactor that stops forwarding cannot silently reintroduce the overflow.
+
+**One implementation subtlety is recorded because getting it wrong would have been a
+regression, not a neutral difference.** The offset needs a **two-step** cast,
+`intcs → intptr_t → uintptr_t`. `intcs` is 32-bit and `uintptr_t` is 64-bit on LP64, so a
+**negative** offset must be sign-extended *before* widening; casting straight to
+`uintptr_t` zero-extends it and turns `Add(p, -1)` into an addition of 4294967295. That
+would be a wrong answer, not merely a differently-arrived-at one, and it is pinned by
+dedicated negative-offset tests in both methods and both operator forms.
+
+**No observable change**, proven: `MaxValue + 1 == MinValue` and `MinValue - 1 == MaxValue`
+are the values measured *before* the repair (`build-probe/1829_ccf004_survey.log` cases 3
+and 4, UB present, vs `build-probe/1832_postfix.log`, UB absent and values byte-identical).
+
+**Tests: +9 permanent regressions** — both boundaries, negative offsets in both methods,
+ordinary offsets, the operator forms independently, and the extreme `intcs` offsets in
+both directions. `SharpRuntimeTests_Core_Base` **5009/5009**, clean under **ASan + UBSan +
+LSan with zero reports** (`build-asan/1832_core_asan.log`). Repository gate: **0 warnings,
+0 errors, 14,113 tests across 37 executables** (was 14,106). Module graph **41 / 91**.
+
+**Source and ABI consequences: none.**

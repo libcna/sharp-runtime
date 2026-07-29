@@ -7,9 +7,10 @@
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production
-dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,106 tests across 37 executables (the 13,127 figure this
+dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,113 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 14,106
+section below states the count it measured, and the current floor is the 14,113
+verified by #1832, raised from the 14,106
 verified by #1830, raised from the 14,098
 verified by #1826, raised from the 14,091
 verified by #1813, raised from the 14,077

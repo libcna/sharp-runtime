@@ -105,3 +105,77 @@ TEST(IntPtrTests2, Ctor_FromInt) {
     EXPECT_FALSE(p.IsZero());
     EXPECT_EQ(static_cast<intptr_t>(p), 42);
 }
+
+// ===========================================================================
+// Ticket #1832 -- CCF-004 / SR-AUD-025: defined native-width wrap in IntPtr
+// ===========================================================================
+//
+// IntPtr::Add evaluated `pointer.value + offset` in intptr_t and Subtract the
+// mirror, so the two native boundary cases were signed-overflow UB. Measured in
+// build-probe/1829_ccf004_survey.log:
+//
+//   case 3  IntPtr.hpp:105: signed integer overflow: 9223372036854775807 + 1
+//   case 4  IntPtr.hpp:114: signed integer overflow: -9223372036854775808 - 1
+//
+// .NET exposes these as `pointer + offset` / `pointer - offset` for nint under
+// ordinary UNCHECKED C# arithmetic, whose modulo-native-width wrap is DEFINED.
+// Both now compute in uintptr_t. This is CCF-004 class A -- no observable change --
+// so the values asserted below are the ones measured BEFORE the repair.
+
+TEST(IntPtrTests2, Add_AtMaxValue_WrapsToMinValue) {
+    const auto r = System::IntPtr::Add(System::IntPtr::MaxValue, 1);
+    EXPECT_EQ(r.ToInt64(), System::IntPtr::MinValue.ToInt64());
+}
+
+TEST(IntPtrTests2, Subtract_AtMinValue_WrapsToMaxValue) {
+    const auto r = System::IntPtr::Subtract(System::IntPtr::MinValue, 1);
+    EXPECT_EQ(r.ToInt64(), System::IntPtr::MaxValue.ToInt64());
+}
+
+// A NEGATIVE offset is the case the two-step cast in the implementation exists for.
+// intcs is 32-bit and uintptr_t is 64-bit on LP64, so the offset must be
+// sign-extended to intptr_t before widening; converting straight to uintptr_t would
+// zero-extend and turn Add(p, -1) into an addition of 4294967295 -- a wrong answer,
+// not merely a differently-arrived-at one.
+TEST(IntPtrTests2, Add_NegativeOffset_SubtractsRatherThanZeroExtending) {
+    const System::IntPtr p(1000);
+    EXPECT_EQ(System::IntPtr::Add(p, -1).ToInt64(), 999);
+    EXPECT_EQ(System::IntPtr::Add(p, -1000).ToInt64(), 0);
+    EXPECT_EQ(System::IntPtr::Add(p, -2000).ToInt64(), -1000);
+}
+
+TEST(IntPtrTests2, Subtract_NegativeOffset_AddsRatherThanZeroExtending) {
+    const System::IntPtr p(1000);
+    EXPECT_EQ(System::IntPtr::Subtract(p, -1).ToInt64(), 1001);
+    EXPECT_EQ(System::IntPtr::Subtract(p, -2000).ToInt64(), 3000);
+}
+
+TEST(IntPtrTests2, AddAndSubtract_OrdinaryPositiveOffsets) {
+    const System::IntPtr p(100);
+    EXPECT_EQ(System::IntPtr::Add(p, 0).ToInt64(), 100);
+    EXPECT_EQ(System::IntPtr::Add(p, 23).ToInt64(), 123);
+    EXPECT_EQ(System::IntPtr::Subtract(p, 0).ToInt64(), 100);
+    EXPECT_EQ(System::IntPtr::Subtract(p, 40).ToInt64(), 60);
+}
+
+// The friend operator+ / operator- forms forward to the two methods above, so they
+// are covered transitively. Pinned independently so a refactor that stops
+// forwarding cannot silently reintroduce a signed overflow on this path.
+TEST(IntPtrTests2, OperatorForms_MatchTheNamedMethodsAtTheBoundaries) {
+    EXPECT_EQ((System::IntPtr::MaxValue + 1).ToInt64(), System::IntPtr::MinValue.ToInt64());
+    EXPECT_EQ((System::IntPtr::MinValue - 1).ToInt64(), System::IntPtr::MaxValue.ToInt64());
+    const System::IntPtr p(500);
+    EXPECT_EQ((p + -1).ToInt64(), 499);
+    EXPECT_EQ((p - -1).ToInt64(), 501);
+    EXPECT_EQ((p + 7).ToInt64(), 507);
+    EXPECT_EQ((p - 7).ToInt64(), 493);
+}
+
+// The extreme offset in both directions, so the widening is exercised at its limits.
+TEST(IntPtrTests2, AddAndSubtract_ExtremeOffsets) {
+    const System::IntPtr zero = System::IntPtr::Zero;
+    EXPECT_EQ(System::IntPtr::Add(zero, 2147483647).ToInt64(), 2147483647LL);
+    EXPECT_EQ(System::IntPtr::Add(zero, -2147483647 - 1).ToInt64(), -2147483648LL);
+    EXPECT_EQ(System::IntPtr::Subtract(zero, 2147483647).ToInt64(), -2147483647LL);
+    EXPECT_EQ(System::IntPtr::Subtract(zero, -2147483647 - 1).ToInt64(), 2147483648LL);
+}

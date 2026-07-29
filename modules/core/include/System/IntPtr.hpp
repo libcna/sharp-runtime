@@ -100,18 +100,42 @@ namespace System
          * @brief Adds an offset to the value of a pointer.
          *
          * C++ counterpart of .NET IntPtr.Add(nint, int) / operator+(nint, int).
+         *
+         * The addition is performed in `uintptr_t` and converted back (ticket #1832,
+         * CCF-004 class A). .NET exposes this as `pointer + offset` for `nint` under
+         * ordinary **unchecked** C# arithmetic, whose modulo-native-width wrap is
+         * *defined*; the signed C++ form was not. `Add(MaxValue, 1)` was UBSan-confirmed
+         * undefined behaviour at this line (`build-probe/1829_ccf004_survey.log` case 3,
+         * `signed integer overflow: 9223372036854775807 + 1`). The value is unchanged —
+         * `MaxValue + 1 == MinValue` before and after, pinned by a test.
          */
         [[nodiscard]] static IntPtr Add(const IntPtr& pointer, intcs offset) {
-            return IntPtr(static_cast<intptr_t>(pointer.value + offset));
+            return IntPtr(static_cast<intptr_t>(static_cast<uintptr_t>(pointer.value)
+                                                + static_cast<uintptr_t>(
+                                                      static_cast<intptr_t>(offset))));
         }
 
         /**
          * @brief Subtracts an offset from the value of a pointer.
          *
          * C++ counterpart of .NET IntPtr.Subtract(nint, int) / operator-(nint, int).
+         *
+         * The subtraction is performed in `uintptr_t` and converted back, for the same
+         * reason as Add above (ticket #1832, CCF-004 class A). `Subtract(MinValue, 1)` was
+         * UBSan-confirmed undefined behaviour at this line (case 4,
+         * `signed integer overflow: -9223372036854775808 - 1`). The value is unchanged —
+         * `MinValue - 1 == MaxValue` before and after.
+         *
+         * Note the two-step cast on @p offset in both methods: `intcs` is 32-bit and
+         * `uintptr_t` is 64-bit on LP64, so a **negative** offset must be sign-extended to
+         * `intptr_t` *first*. Converting straight to `uintptr_t` would zero-extend it and
+         * turn `Add(p, -1)` into an addition of 4294967295 — a wrong answer, not merely a
+         * differently-arrived-at one. Pinned by the negative-offset tests.
          */
         [[nodiscard]] static IntPtr Subtract(const IntPtr& pointer, intcs offset) {
-            return IntPtr(static_cast<intptr_t>(pointer.value - offset));
+            return IntPtr(static_cast<intptr_t>(static_cast<uintptr_t>(pointer.value)
+                                                - static_cast<uintptr_t>(
+                                                      static_cast<intptr_t>(offset))));
         }
 
         /** @brief Adds an offset to the value of a pointer. C++ counterpart of .NET IntPtr operator+(nint, int). */
