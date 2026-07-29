@@ -219,3 +219,88 @@ Repository gate: 0 warnings, 0 errors, **14,014 tests across 37 executables** (w
 
 Source and ABI consequences: none. No signature, layout or exported symbol changed;
 only the accepted input set did.
+
+## Post-audit remediation for SR-AUD-082 (ticket #1820, 2026-07-29): REMEDIATED
+
+The audit evidence above is retained unchanged. This closes the last `confirmed`
+finding in this file.
+
+Ticket #1820 (`REMED-BUFFERS-BASE64URL-OPTIONAL-PADDING`, P2, size S) makes
+`Base64Url` accept optional final padding, in both the standard `'='` spelling and
+the URL-escaped `'%'` one, in `decodeCore` **and** `validateCore` — which the UTF-8
+and `char` overloads and the in-place decoder all share, so all of them inherit it.
+Encoding is untouched and still emits no padding.
+
+**What .NET does.** `Base64UrlDecoderByte.IsValidPadding` is
+`padChar is EncodingPad or UrlEncodingPad`, and `Base64UrlByteValidatable.IsEncodingPad`
+is the same test. Neither consults the decoding map: padding is recognised by a test
+on the **raw character**, and `'='`/`'%'` stay unmapped. This port now does the same,
+so kDecTable remains the pure sextet alphabet and a padding character can never be
+mistaken for a value. The finding predicted a table change; the table did not need to
+change, and not changing it is the more faithful port.
+
+**The grammar** is `Base64UrlByteValidatable.ValidateAndDecodeLength`: with
+`remainder` symbols in the trailing incomplete quantum and `padCount` final padding
+characters, padding is valid only when `remainder != 0` and
+`remainder + padCount <= 4`, with at most two pads; `remainder == 1` is never
+decodable. Two symbols therefore admit **one or two** pads, three symbols admit
+**exactly one**, and a complete four-symbol quantum admits **none**. Whitespace may
+appear before, between and after the padding. Padding is additionally `InvalidData`
+when `isFinalBlock` is false — the rule `Base64` gained under ticket #1818, and the
+one .NET's own `DecodingInvalidBytesPadding` asserts here.
+
+**Measured against 62 vectors, every one taken from a named current-.NET test rather
+than traced** (`build-probe/1820_defects.cpp`, logs `1820_prefix_defects.log` and
+`1820_postfix_defects.log`), each run through the UTF-8 overload, the `char`
+overload, `IsValid` and `IsValid(out decodedLength)`:
+
+| | Pre-fix | Post-fix |
+|---|---|---|
+| Lines differing from current .NET | **18 of 62** | **0 of 62** |
+| Overloads disagreeing | 0 | 0 |
+| Decoder/validator disagreeing on acceptance | 0 | 0 |
+
+The source tests are
+`Base64UrlValidationUnitTests.ValidateWithPaddingReturnsCorrectCountBytes/Chars`
+(sixteen `(input, decodedLength)` vectors, whose `Chars` variant additionally asserts
+`DecodeFromChars` returns `Done` with the same count),
+`Base64UrlValidationUnitTests.SmallSizeBytes/Chars`,
+`Base64UrlDecoderUnitTests.DecodingInvalidBytesPadding` (which pins the exact
+`bytesConsumed`/`bytesWritten` of each rejection, for `isFinalBlock` both true and
+false), and
+`Base64UrlDecoderUnitTests.BasicDecodingWithFinalBlockTrueInputWithoutPaddingOrInvalidData`.
+
+All 18 pre-fix differences were **rejections that should have been acceptances** —
+fifteen of the sixteen padded validation vectors, the two padded decoder inputs .NET
+declares valid (`2222PA==` and `2222PPM%`), and a mixed `'='`/`'%'` spelling.
+**Nothing .NET rejects was accepted before this change, and nothing is accepted now**:
+padding before the last quantum, more than two pads, a pad after a complete quantum,
+a pad after a one-symbol remainder, three symbols plus two pads, data after padding
+and noncanonical final bits under padding are all still `InvalidData`, with the exact
+cursor .NET reports.
+
+**This is a widening change**: it only adds accepted input, which is why the family
+plan deliberately left it unordered against the narrowing tickets #1817–#1819.
+Unpadded input of every remainder size decodes exactly as before, the encoder still
+emits no padding, and a 0..24 round trip confirms both.
+
+**One correction to the ticket's own note.** #1820 was opened suggesting that
+`invalidDataMessage()` be reworded, since it mentions ordinary Base64 and padding
+count despite a Base64Url surface. That would be a **divergence**: .NET's `Base64Url`
+throws `FormatException` with `SR.Format_BadBase64Char`, which is verbatim the string
+this port already uses. The message is left alone.
+
+Closure evidence: **8 new permanent regressions** — the sixteen padded vectors
+decoding and validating to the same counts, padding accepted only at the very end
+with .NET's exact rejection cursors, padding rejected while `isFinalBlock` is false,
+twelve malformed-padding shapes rejected by decoder and validator alike, the two pad
+spellings mixed, unpadded input plus a 0..24 round trip proving nothing narrowed, the
+in-place decoder inheriting padding, and `DestinationTooSmall` still reported through
+the padding branch. `SharpRuntimeTests_Buffers` is **504/504** (was 496), and the same
+504 under AddressSanitizer + UndefinedBehaviorSanitizer + LeakSanitizer with **zero
+reports** (`build-asan/1820_buffers_asan.log`); the probe is clean under the same
+three (`build-probe/1820_asan.log`). Repository gate: 0 warnings, 0 errors,
+**14,033 tests across 37 executables** (was 14,025).
+
+Source and ABI consequences: none. No signature, virtual, return convention, object
+layout or exported symbol changed; only the accepted input set did.

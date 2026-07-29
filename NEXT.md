@@ -7,10 +7,11 @@
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production
-dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,025 tests across 37 executables (the 13,127 figure this
+dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,033 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 14,025
-verified by #1819, raised from the 14,021
+section below states the count it measured, and the current floor is the 14,033
+verified by #1820, raised from the 14,025
+verified by #1819, the 14,021
 verified by #1818, the 14,014
 verified by #1817, the 14,002
 verified by #1816, the 13,994
@@ -6619,3 +6620,70 @@ quantum boundary, and this port stops at the boundary. One case sits outside tha
 rule and needs its own decision — `"QQ==QUJD"` with `isFinalBlock` true, where
 `DecodeWithWhiteSpaceBlockwise` reverts its counters to `0,0`. No `SR-AUD-*`
 identifier; numbering stays frozen at 364.
+
+### Completed Base64Url optional-padding acceptance: ticket #1820
+
+Ticket **#1820** (`REMED-BUFFERS-BASE64URL-OPTIONAL-PADDING`, P2, size S, area
+*Buffers*) is **done** and **SR-AUD-082 is now `remediated`** — the last `confirmed`
+finding in `Base64Url.hpp`, and the fifth and final repair ticket of the Base64 family
+plan ([`docs/Base64FamilyPlan.md`](docs/Base64FamilyPlan.md), ticket #1815). No new
+`SR-AUD-*` identifier; numbering stays frozen at 364, and the index now records
+**21 remediated** and **343 confirmed** of 364.
+
+Base64Url's decode table mapped `'='` and `'%'` to `-1` and `decodeCore` rejected
+either immediately, so `IsValid` rejected them too and `YQ==` / `YQ%%` were
+unreadable. Base64Url omits padding on **output**, and this port still does — but
+.NET's decoder and validator deliberately **accept** it:
+`Base64UrlDecoderByte.IsValidPadding` is `padChar is EncodingPad or UrlEncodingPad`
+and `Base64UrlByteValidatable.IsEncodingPad` is the same test. The port's header
+documented only how it encodes and never claimed a stricter decode adaptation.
+
+**The finding predicted a table change; the table did not need one.** Like .NET,
+padding is now recognised by a test on the **raw character**, so kDecTable stays the
+pure sextet alphabet and a padding character can never be mistaken for a value. Not
+changing the table is the more faithful port.
+
+**The grammar** is `Base64UrlByteValidatable.ValidateAndDecodeLength`: with
+`remainder` symbols in the trailing incomplete quantum and `padCount` final pads,
+padding is valid only when `remainder != 0` and `remainder + padCount <= 4`, at most
+two pads, `remainder == 1` never decodable. Two symbols admit one **or** two pads,
+three symbols admit exactly one, a complete quantum admits none; whitespace may sit
+before, between and after the pads. Padding is also `InvalidData` when `isFinalBlock`
+is false — #1818's rule, which .NET's own `DecodingInvalidBytesPadding` asserts here.
+`validateCore` gained the same branch in the same change: a validator **stricter**
+than its own decoder is as harmful as a more permissive one, because it declares a
+decodable input unusable.
+
+**Measured against 62 vectors, every one taken from a named current-.NET test rather
+than traced** (`build-probe/1820_defects.cpp`, logs `1820_prefix_defects.log` and
+`1820_postfix_defects.log`): **18 of 62 differed before, 0 of 62 after**, with the two
+overloads and the two validators agreeing on every line throughout. All 18 were
+rejections that should have been acceptances. **Nothing .NET rejects was accepted
+before this change, and nothing is now** — padding before the last quantum, more than
+two pads, a pad after a complete quantum or a one-symbol remainder, three symbols plus
+two pads, data after padding, and noncanonical final bits under padding are all still
+`InvalidData`, with the exact cursor .NET reports.
+
+**This is a widening change**: it only adds accepted input, which is why the family
+plan deliberately left it unordered against the narrowing tickets #1817–#1819.
+Unpadded input of every remainder size decodes exactly as before and the encoder still
+emits no padding, both confirmed by a 0..24 round trip.
+
+**One correction to the ticket's own note**: it suggested rewording
+`invalidDataMessage()` because it mentions padding despite a Base64Url surface. That
+would be a **divergence** — .NET's `Base64Url` throws `FormatException` with
+`SR.Format_BadBase64Char`, verbatim the string this port already uses. The message is
+left alone.
+
+**Tests: +8 permanent regressions.** `SharpRuntimeTests_Buffers` **504/504** (was
+496), and the same 504 under **ASan + UBSan + LSan with zero reports**
+(`build-asan/1820_buffers_asan.log`); the probe is clean under the same three
+(`build-probe/1820_asan.log`). Repository gate: **0 warnings, 0 errors, 14,033 tests
+across 37 executables** (was 14,025). Module graph **41 / 91**.
+
+**Source and ABI consequences: none.**
+
+**The Base64 family is now closed except for two decisions**: **#1821** (the
+empty-buffer status divergence in the in-place encoders) and **#1822** (the cursor
+reported alongside a non-`Done` status), neither of which carries an `SR-AUD-*`
+identifier.

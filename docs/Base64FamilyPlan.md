@@ -100,7 +100,7 @@ that concrete.
 | **#1817** | SR-AUD-079 — canonical final-bit validation, both headers, decode **and** validate | #1815 | **narrowing**: input accepted today becomes `InvalidData` | **done** |
 | **#1818** | SR-AUD-080 — padding is invalid while `isFinalBlock == false` | #1815, and should follow #1817 (same `decodeCore` final-quantum branch) | **narrowing** | **done** |
 | **#1819** | SR-AUD-081 — trailing whitespace after a padded quantum is not consumed | #1815, and should follow #1818 (same cursor code) | changes `bytesConsumed` only | **done — FALSE POSITIVE** |
-| **#1820** | SR-AUD-082 — accept optional final `=`/`%` in Base64Url decode/validate | #1815; independent of #1817–#1819 | **widening**: only adds accepted input | `todo` |
+| **#1820** | SR-AUD-082 — accept optional final `=`/`%` in Base64Url decode/validate | #1815; independent of #1817–#1819 | **widening**: only adds accepted input | **done** |
 
 **Why #1817–#1819 are ordered rather than parallel.** All three edit the same
 final-quantum branch of one `decodeCore`. Taken in parallel they would conflict
@@ -125,6 +125,15 @@ things it settled that #1818 and #1819 inherit: the validator must change in the
 tells a caller an input is safe to decode when it is not), and Base64Url's
 `validateCore` now retains the trailing sextet values rather than only counting
 symbols, which is the machinery a later ticket needs too.
+
+**#1820 landed on 2026-07-29** and closed the last `confirmed` finding in
+`Base64Url.hpp`. Two things it settled that this plan had assumed wrongly: the
+decode *table* did not need to change — .NET recognises padding by a test on the raw
+character, leaving `'='`/`'%'` unmapped, and copying that keeps the table a pure
+sextet alphabet — and `invalidDataMessage()` did not need rewording, because .NET's
+own `Base64Url` throws `SR.Format_BadBase64Char`, verbatim the string this port
+already used. Its 62 vectors were all taken from named current-.NET tests:
+**18 differed before, 0 after.**
 
 **#1820 is deliberately unordered against them.** It touches the Base64Url
 decode *table* and the early `-1` rejection, not the final-quantum branch, and it
@@ -256,3 +265,38 @@ quantum boundary* — with exactly one case outside it, `"QQ==QUJD"` with
 repairs or plans that landed, #1819 is a false positive, and #1820 remains. The
 neighbours are therefore three parity repairs and one non-defect, not four parity
 repairs.
+
+---
+
+## 9. Family status after #1820 (2026-07-29)
+
+| Ticket | Finding | Outcome |
+|---|---|---|
+| #1815 | — | plan (this document) |
+| #1816 | SR-AUD-078 / CCF-013 | **remediated** — in-place write order, both headers |
+| #1817 | SR-AUD-079 | **remediated** — canonical final bits, both headers, decode and validate |
+| #1818 | SR-AUD-080 | **remediated** — `'='` is `InvalidData` while `isFinalBlock` is false |
+| #1819 | SR-AUD-081 | **false positive** — .NET counts the trailing whitespace too (§8) |
+| #1820 | SR-AUD-082 | **remediated** — optional final `'='`/`'%'` accepted, decode and validate |
+
+`CCF-013` is closed and every `SR-AUD-*` finding in `Base64.hpp` and `Base64Url.hpp`
+is either `remediated` or corrected. The findings index records **21 remediated / 343
+confirmed** of 364.
+
+**What remains from this family are two decisions, not defects**, neither carrying an
+`SR-AUD-*` identifier:
+
+- **#1821** — the in-place encoders reject an empty buffer with a positive
+  `dataLength` that .NET short-circuits to `Done` (§5). Adopting .NET's contract means
+  reporting success for a request to encode five bytes into a zero-byte buffer.
+- **#1822** — the cursor reported alongside a non-`Done` status (§7, upgraded by §8 to
+  four .NET-test-pinned instances and to P2). The rule is uniform except for one case
+  where `DecodeWithWhiteSpaceBlockwise` reverts its own counters.
+
+**What this plan got wrong, recorded rather than edited away.** §2 repeated
+SR-AUD-081's inverted premise unchecked (see §8). §4's table predicted that #1820
+would change the Base64Url decode *table*; it did not, and should not have. Both are
+the same failure mode: taking a finding's account of .NET at face value instead of
+reading the current .NET source and its tests first. Every ticket in this family from
+#1818 onward read the .NET tests before writing code, and that is what produced the
+§7 and §8 discoveries.
