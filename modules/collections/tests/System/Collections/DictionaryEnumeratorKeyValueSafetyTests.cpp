@@ -89,32 +89,13 @@ using System::Collections::ListDictionaryInternal;
 // rather than an inference from a second enumerator's silence -- and the
 // pre-#1794 defect was precisely that the counter did not move while live
 // storage changed.
+//
+// This file spelled its own copy (SR1794_SEAM_BODY) until ticket #1800; that
+// copy differed from CollectionVersionCounterTests.cpp's, and both were linked
+// into one program. The single definition now lives in
+// ../../support/CollectionVersionSeam.hpp.
 // ---------------------------------------------------------------------------
-namespace SharpRuntime::Testing {
-
-template<typename V>
-struct CollectionVersionAccess<System::Collections::detail::BasicMutationCounter<V>> {
-    using Counter = System::Collections::detail::BasicMutationCounter<V>;
-    static V read(const Counter& c) { return c.getValueProperty(); }
-};
-
-#define SR1794_SEAM_BODY(...)                                                              \
-    using Coll = __VA_ARGS__;                                                              \
-    using Counter = std::remove_cvref_t<decltype(std::declval<Coll&>().version_)>;         \
-    using Seam = CollectionVersionAccess<Counter>;                                         \
-    using value_type = typename Counter::value_type;                                       \
-    static value_type version(const Coll& c) { return Seam::read(c.version_); }
-
-template<>
-struct CollectionVersionAccess<System::Collections::Hashtable> {
-    SR1794_SEAM_BODY(System::Collections::Hashtable)
-};
-template<>
-struct CollectionVersionAccess<System::Collections::ListDictionaryInternal> {
-    SR1794_SEAM_BODY(System::Collections::ListDictionaryInternal)
-};
-
-} // namespace SharpRuntime::Testing
+#include "../../support/CollectionVersionSeam.hpp"
 
 namespace {
 

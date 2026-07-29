@@ -49,9 +49,13 @@
 // Reaching a boundary through the public API would need billions of real mutations, so the
 // near-boundary cases position the counter through the test-only access seam
 // SharpRuntime::Testing::CollectionVersionAccess<T>, which detail/MutationCounter.hpp
-// declares and every affected class befriends, and which is DEFINED ONLY HERE. It grants
-// access and no behaviour; nothing in the library or in a consumer can reach it. No test
-// below performs more than a few dozen real mutations.
+// declares and every affected class befriends. It grants access and no behaviour; nothing
+// in the library or in a consumer can reach it. No test below performs more than a few
+// dozen real mutations.
+//
+// This file spelled its own copy of the seam (SR1787_SEAM_BODY) until ticket #1800, and
+// four later suites spelled a second, DIFFERENT copy; the one definition now lives in
+// ../../support/CollectionVersionSeam.hpp and this file merely includes it.
 #include <gtest/gtest.h>
 
 #include <any>
@@ -82,103 +86,14 @@
 #include "System/Collections/Generic/Stack.hpp"
 #include "System/InvalidOperationException.hpp"
 
+#include "../../support/CollectionVersionSeam.hpp"
+
 using SharpRuntime::intcs;
 using SharpRuntime::uintcs;
 using SharpRuntime::ulongcs;
 
 namespace NG = System::Collections;
 namespace G = System::Collections::Generic;
-
-// =====================================================================================
-// The test-only access seam. Defined in exactly one translation unit, this one.
-// =====================================================================================
-namespace SharpRuntime::Testing {
-
-/**
- * The counter-level seam: the only place that touches BasicMutationCounter::value_.
- * Every collection-level specialisation below delegates to it.
- */
-template<typename V>
-struct CollectionVersionAccess<System::Collections::detail::BasicMutationCounter<V>> {
-    using Counter = System::Collections::detail::BasicMutationCounter<V>;
-    static V read(const Counter& c) { return c.getValueProperty(); }
-    static void write(Counter& c, V v) { c.value_ = v; }
-};
-
-// Each collection-level specialisation is a friend of exactly one collection and reaches
-// its private version_ field, then defers to the counter-level seam above.
-#define SR1787_SEAM_BODY(...)                                                              \
-    using Coll = __VA_ARGS__;                                                              \
-    using Counter = std::remove_cvref_t<decltype(std::declval<Coll&>().version_)>;         \
-    using Seam = CollectionVersionAccess<Counter>;                                         \
-    using value_type = typename Counter::value_type;                                       \
-    static value_type version(const Coll& c) { return Seam::read(c.version_); }            \
-    static void positionVersion(Coll& c, value_type v) { Seam::write(c.version_, v); }
-
-template<typename T>
-struct CollectionVersionAccess<System::Collections::Generic::List<T>> {
-    SR1787_SEAM_BODY(System::Collections::Generic::List<T>)
-};
-template<typename T>
-struct CollectionVersionAccess<System::Collections::Generic::HashSet<T>> {
-    SR1787_SEAM_BODY(System::Collections::Generic::HashSet<T>)
-};
-template<typename K, typename V>
-struct CollectionVersionAccess<System::Collections::Generic::Dictionary<K, V>> {
-    SR1787_SEAM_BODY(System::Collections::Generic::Dictionary<K, V>)
-};
-template<typename K, typename V>
-struct CollectionVersionAccess<System::Collections::Generic::SortedDictionary<K, V>> {
-    SR1787_SEAM_BODY(System::Collections::Generic::SortedDictionary<K, V>)
-};
-template<typename K, typename V>
-struct CollectionVersionAccess<System::Collections::Generic::SortedList<K, V>> {
-    SR1787_SEAM_BODY(System::Collections::Generic::SortedList<K, V>)
-};
-template<typename K, typename V>
-struct CollectionVersionAccess<System::Collections::Generic::OrderedDictionary<K, V>> {
-    SR1787_SEAM_BODY(System::Collections::Generic::OrderedDictionary<K, V>)
-};
-template<typename T>
-struct CollectionVersionAccess<System::Collections::Generic::LinkedList<T>> {
-    SR1787_SEAM_BODY(System::Collections::Generic::LinkedList<T>)
-};
-template<typename T>
-struct CollectionVersionAccess<System::Collections::Generic::Queue<T>> {
-    SR1787_SEAM_BODY(System::Collections::Generic::Queue<T>)
-};
-template<typename T>
-struct CollectionVersionAccess<System::Collections::Generic::Stack<T>> {
-    SR1787_SEAM_BODY(System::Collections::Generic::Stack<T>)
-};
-template<>
-struct CollectionVersionAccess<System::Collections::ArrayList> {
-    SR1787_SEAM_BODY(System::Collections::ArrayList)
-};
-template<>
-struct CollectionVersionAccess<System::Collections::Hashtable> {
-    SR1787_SEAM_BODY(System::Collections::Hashtable)
-};
-template<>
-struct CollectionVersionAccess<System::Collections::ListDictionaryInternal> {
-    SR1787_SEAM_BODY(System::Collections::ListDictionaryInternal)
-};
-template<>
-struct CollectionVersionAccess<System::Collections::Queue> {
-    SR1787_SEAM_BODY(System::Collections::Queue)
-};
-template<>
-struct CollectionVersionAccess<System::Collections::Stack> {
-    SR1787_SEAM_BODY(System::Collections::Stack)
-};
-template<>
-struct CollectionVersionAccess<System::Collections::BitArray> {
-    SR1787_SEAM_BODY(System::Collections::BitArray)
-};
-
-#undef SR1787_SEAM_BODY
-
-}  // namespace SharpRuntime::Testing
 
 namespace {
 

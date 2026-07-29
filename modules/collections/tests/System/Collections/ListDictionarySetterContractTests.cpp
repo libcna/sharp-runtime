@@ -85,39 +85,12 @@ using System::Collections::ListDictionaryInternal;
 // key moves nothing" be assertions rather than inferences from an enumerator's
 // silence -- and "exactly once" is not observable through fail-fast alone.
 //
-// Spelled token-for-token as DictionaryEnumeratorKeyValueSafetyTests.cpp and
-// HashtableValueAccessSafetyTests.cpp spell it, deliberately: these
-// specialisations share a binary, so a divergent definition of the same
-// explicit specialisation would be an ODR violation. That divergence already
-// exists between those two files and CollectionVersionCounterTests.cpp, which
-// adds a positionVersion member; it is PRE-EXISTING, is tracked as inactive
-// ticket #1800, is NOT introduced or widened here, and is NOT fixed here.
+// This file spelled its own copy (SR1794_SEAM_BODY) until ticket #1800; that copy
+// differed from CollectionVersionCounterTests.cpp's, and both were linked into one
+// program. The single definition now lives in
+// ../../support/CollectionVersionSeam.hpp.
 // ---------------------------------------------------------------------------
-namespace SharpRuntime::Testing {
-
-template<typename V>
-struct CollectionVersionAccess<System::Collections::detail::BasicMutationCounter<V>> {
-    using Counter = System::Collections::detail::BasicMutationCounter<V>;
-    static V read(const Counter& c) { return c.getValueProperty(); }
-};
-
-#define SR1794_SEAM_BODY(...)                                                              \
-    using Coll = __VA_ARGS__;                                                              \
-    using Counter = std::remove_cvref_t<decltype(std::declval<Coll&>().version_)>;         \
-    using Seam = CollectionVersionAccess<Counter>;                                         \
-    using value_type = typename Counter::value_type;                                       \
-    static value_type version(const Coll& c) { return Seam::read(c.version_); }
-
-template<>
-struct CollectionVersionAccess<System::Collections::Hashtable> {
-    SR1794_SEAM_BODY(System::Collections::Hashtable)
-};
-template<>
-struct CollectionVersionAccess<System::Collections::ListDictionaryInternal> {
-    SR1794_SEAM_BODY(System::Collections::ListDictionaryInternal)
-};
-
-} // namespace SharpRuntime::Testing
+#include "../../support/CollectionVersionSeam.hpp"
 
 namespace {
 

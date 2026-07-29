@@ -15,6 +15,10 @@ python3 scripts/validate_module_boundaries.py
 python3 test/validate_module_boundaries_test.py
 python3 scripts/generate_component_catalog.py --check
 
+echo "==> Validating test-only access seams (ticket #1800)"
+python3 scripts/check_version_seam_odr.py
+python3 test/check_version_seam_odr_test.py
+
 echo "==> Configuring ($BUILD_DIR)"
 cmake -S . -B "$BUILD_DIR" >/dev/null
 
