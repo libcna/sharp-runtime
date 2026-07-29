@@ -6954,3 +6954,46 @@ Eleven local commits on `feature/remediation-batch-base64-followup` — five fix
 commits, five per-ticket documentation commits, and this handoff. **No push, no merge,
 no rebase, no tag, no package publication, no remote reference altered.** No historical
 ticket commit was amended.
+
+## Text-wrapper input contract plan: ticket #1823 (2026-07-29)
+
+Design-only. [`docs/TextWrapperInputContractPlan.md`](docs/TextWrapperInputContractPlan.md).
+No production source changed. No `SR-AUD-*` identifier issued; numbering stays frozen at
+364.
+
+Tickets **#1808** and **#1809** were opened inactive by #1806 against the same headers,
+with an explicit instruction to inventory before implementing. #1823 is that inventory,
+measured before any production change with one process per case under ASan + UBSan +
+LSan (`build-probe/1823_prefix_defects.cpp`, log `build-probe/1823_prefix_defects.log`,
+26 cases).
+
+### What the measurement changed
+
+| | Ticket said | Measured |
+|---|---|---|
+| #1808 writer | fails late with `NotSupportedException`, "or not at all if nothing is ever written" | for `FileStream` it fails **never, even when data is written** — the write is silently discarded and the file is unchanged (cases 5, 15, 16) |
+| #1808 | one contract for both directions | opposite compatibility: `Stream::getCanWriteProperty()` **defaults to `false`**, so a `CanWrite` guard rejects custom streams that work today (case 8 writes `"hello"`), while a `CanRead` guard (base default `true`) rejects only self-declared-unreadable streams |
+| #1809 | `std::string(nullptr)` and `strlen(nullptr)` | **three** distinct failures, and the worst was unnamed: `Console::Write(nullptr)` sets `badbit` on `std::cout` permanently, silently disabling all later console output (cases 26, 27) |
+
+### Selected contracts
+
+- **Null `const char*`** follows .NET's null-**string** rule: `Write` no-op, `WriteLine`
+  line terminator only, never an exception (`TextWriter.cs:277-283`, `502-509`), applied
+  to `TextWriter`, `StreamWriter` and `System::Console`. Fully compatible — every
+  current behaviour for null is undefined behaviour.
+- **`StreamReader`** rejects `!getCanReadProperty()` with
+  `ArgumentException("Stream was not readable.")`, no `paramName`, after the null check
+  — byte-identical to `BinaryReader.cpp:25` and `StreamReader.cs:147`.
+
+### Tickets
+
+| Ticket | Status | Note |
+|---|---|---|
+| **#1823** | done | this plan |
+| **#1809** | ready | compatible, no approval |
+| **#1808** | ready | **rescoped** to the reader half; reason recorded in §9.1 |
+| **#1824** | **blocked** | `StreamWriter` `CanWrite` guard — needs explicit approval, §13.2 |
+| **#1825** | ready | `FileStream::Read`/`Write`/`WriteByte` access flags; **P1**, silent data loss |
+| **#1826** | inactive | `MemoryStream::getCanReadProperty()` ignores `isOpen_` |
+
+`SR-AUD-337` (no disposed flag on either wrapper) stays `confirmed` and untouched.

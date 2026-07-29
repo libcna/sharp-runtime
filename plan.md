@@ -3709,3 +3709,58 @@ which needs a #1815-quality plan first.
 Full detail, including build directories, the three-job parallelism record and the
 `build-asan`/`build-probe` disk accounting, is in `NEXT.md` under
 "Autonomous batch handoff, 2026-07-29 (Base64 family closure)".
+
+### Completed text-wrapper input contract plan: ticket #1823
+
+**`P2: scope the text-wrapper input contract before implementing #1808 or #1809`**
+(`REMED-IO-TEXT-WRAPPER-CONTRACT-PLAN`, P2, size M, design-only) is recorded in
+[`docs/TextWrapperInputContractPlan.md`](docs/TextWrapperInputContractPlan.md). No
+production source changed under it. It carries **no `SR-AUD-*` identifier**; the audit
+numbering stays frozen at 364, and `SR-AUD-337`/`SR-AUD-338` keep the statuses they had.
+
+Tickets #1808 and #1809 name the same headers and were opened inactive by #1806 with an
+explicit instruction to inventory before implementing. This ticket did that inventory
+and measured every affected path *before* any production change, with one process per
+case under ASan + UBSan + LSan (`build-probe/1823_prefix_defects.cpp`, log
+`build-probe/1823_prefix_defects.log`).
+
+**Three of the four premises in the two tickets were understated, and are corrected by
+appending rather than by rewriting:**
+
+1. **#1808 said the writer failure "surfaces later as a `NotSupportedException` from
+   the first `Write`, or not at all if nothing is ever written."** For `FileStream` it
+   surfaces **never, even when data is written**: a `StreamWriter` over a
+   `FileAccess::Read` `FileStream` accepts `Write` and `Flush` with no exception, and
+   the file is unchanged afterwards (cases 5, 15). `FileStream::Write` checks neither
+   `canWrite_` nor the stream state, so `std::fstream::write` sets `badbit` and the
+   bytes are dropped in silence. That is data loss, not a late diagnostic, and it is
+   now ticket **#1825**.
+2. **#1808 assumed one contract for both directions.** The two halves have opposite
+   compatibility, and the cause is one line: `Stream::getCanWriteProperty()` **defaults
+   to `false`** where .NET's `Stream.CanWrite` is abstract. A `CanRead` guard rejects
+   only streams that positively declare themselves unreadable; a `CanWrite` guard also
+   rejects every custom stream that implements `Write()` and never overrode the
+   property — case 8 writes `"hello"` successfully through exactly such a stream today.
+   #1808 is therefore rescoped to the reader half and the writer half becomes blocked
+   ticket **#1824**.
+3. **#1809 listed two failure modes; there are three, and it named the mildest two.**
+   `Console::Write(nullptr)` sets `badbit` on `std::cout` **permanently**, so every
+   subsequent console write in the process silently produces nothing (cases 26, 27) —
+   no crash, no exception, no message. `StreamWriter` gives an ASan `SEGV` in `strlen`
+   (cases 22, 23) and `TextWriter`/`StringWriter` a libstdc++ `std::logic_error` (cases
+   20, 21, 24, 25), which is also the wrong hierarchy: `std::`, not `System::`.
+
+**Selected contracts.** Null `const char*` follows .NET's null-**string** rule exactly —
+`Write` is a no-op, `WriteLine` writes only the line terminator, nothing ever throws
+(`TextWriter.cs:277-283`, `502-509`) — across `TextWriter`, `StreamWriter` and
+`System::Console`. `StreamReader` rejects `!getCanReadProperty()` with
+`ArgumentException("Stream was not readable.")`, byte-identical to `BinaryReader.cpp:25`
+and to `StreamReader.cs:147`, after the null check and before member initialisation.
+
+**Ticket split**: #1809 (compatible) → #1808 (compatible, reader half) → #1825
+(compatible, `FileStream` access flags) → #1824 (**blocked on approval**) with #1826
+opened inactive for `MemoryStream::getCanReadProperty()` ignoring `isOpen_`.
+
+The family also has **no asynchronous path at all** — `grep -rn "Async"` over all six
+text-wrapper headers returns nothing — no synchronized wrapper, no null writer, and no
+adapters beyond the four subclasses, all of which is stated in §1.1 rather than assumed.
