@@ -522,3 +522,145 @@ TEST(Base64Test, Decode_AcceptsEveryEncodedLength_AfterCanonicalRule) {
         for (int i = 0; i < n; ++i) EXPECT_EQ(out[static_cast<size_t>(i)], data[static_cast<size_t>(i)]);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Ticket #1818 / SR-AUD-080: '=' is invalid while isFinalBlock is false.
+//
+// decodeCore used to consult isFinalBlock only after an INCOMPLETE unpadded group,
+// so a COMPLETE padded group decoded to Done regardless of the flag and a chunked
+// caller was told a terminal quantum was ordinary intermediate data. .NET never
+// reaches its padding handler with the flag clear (Base64DecoderHelper's
+// `skipLastChunk = isFinalBlock ? 4 : 0`, and DecodeWithWhiteSpaceBlockwise forcing
+// its per-block localIsFinalBlock back to false), so '=' is simply an unmapped
+// character there. Measured: build-probe/1818_prefix_defects.log (before) and
+// build-probe/1818_postfix_defects.log (after).
+// ---------------------------------------------------------------------------
+
+TEST(Base64Test, DecodeFromUtf8_PaddedQuantum_NotFinalBlock_IsInvalidData) {
+    struct { const char* text; int expectedConsumed; int expectedWritten; } cases[] = {
+        {"QQ==",      0, 0},  // two '=' -- the finding's own example
+        {"QUJDQQ==",  4, 3},  // a padded quantum after a complete one: the prefix stays decoded
+        {"QUJDQUI=",  4, 3},  // a single '='
+        {"QQ==QUJD",  0, 0},  // padding in a non-terminal position
+        {"QQ =  = ",  0, 0},  // padding split by whitespace
+    };
+    for (const auto& c : cases) {
+        const auto len = static_cast<int>(std::string(c.text).size());
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(c.text), len);
+        std::vector<uint8_t> out(16, 0xCC);
+        Span<uint8_t> dst(out.data(), 16);
+        int consumed = -1, written = -1;
+        EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, false),
+                  OperationStatus::InvalidData) << c.text;
+        EXPECT_EQ(consumed, c.expectedConsumed) << c.text;
+        EXPECT_EQ(written, c.expectedWritten) << c.text;
+    }
+}
+
+// The char overload shares decodeCore, so it inherits the rule rather than needing its own.
+TEST(Base64Test, DecodeFromChars_PaddedQuantum_NotFinalBlock_IsInvalidData) {
+    for (const char* text : {"QQ==", "QUJDQQ==", "QUJDQUI=", "QQ==QUJD", "QQ =  = "}) {
+        const auto len = static_cast<int>(std::string(text).size());
+        ReadOnlySpan<char> src(text, len);
+        std::vector<uint8_t> out(16, 0xCC);
+        Span<uint8_t> dst(out.data(), 16);
+        int consumed = -1, written = -1;
+        EXPECT_EQ(Base64::DecodeFromChars(src, dst, consumed, written, false),
+                  OperationStatus::InvalidData) << text;
+    }
+}
+
+// The narrowing must be confined to isFinalBlock == false: every one of those inputs
+// keeps exactly the status, cursor and payload it had before the ticket when the flag
+// is set. "QQ==QUJD" is InvalidData either way -- non-whitespace after padding.
+TEST(Base64Test, DecodeFromUtf8_PaddedQuantum_FinalBlock_Unchanged) {
+    struct { const char* text; OperationStatus status; int consumed; int written; const char* bytes; } cases[] = {
+        {"QQ==",     OperationStatus::Done,        4, 1, "A"},
+        {"QUJDQQ==", OperationStatus::Done,        8, 4, "ABCA"},
+        {"QUJDQUI=", OperationStatus::Done,        8, 5, "ABCAB"},
+        {"QQ==QUJD", OperationStatus::InvalidData, 4, 1, "A"},
+        {"QQ =  = ", OperationStatus::Done,        8, 1, "A"},
+        {"QUJD QQ==",OperationStatus::Done,        9, 4, "ABCA"},
+    };
+    for (const auto& c : cases) {
+        const auto len = static_cast<int>(std::string(c.text).size());
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(c.text), len);
+        std::vector<uint8_t> out(16, 0xCC);
+        Span<uint8_t> dst(out.data(), 16);
+        int consumed = -1, written = -1;
+        EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, true), c.status) << c.text;
+        EXPECT_EQ(consumed, c.consumed) << c.text;
+        EXPECT_EQ(written, c.written) << c.text;
+        const std::string expected(c.bytes);
+        for (int i = 0; i < written; ++i)
+            EXPECT_EQ(out[static_cast<size_t>(i)], static_cast<uint8_t>(expected[static_cast<size_t>(i)])) << c.text;
+    }
+}
+
+// An unpadded incomplete quantum with the flag clear must still be NeedMoreData: the
+// ticket narrows padding only, never the streaming contract the flag exists for.
+TEST(Base64Test, DecodeFromUtf8_UnpaddedIncompleteQuantum_NotFinalBlock_StillNeedsMoreData) {
+    struct { const char* text; OperationStatus status; int consumed; int written; } cases[] = {
+        {"Q",        OperationStatus::NeedMoreData, 0, 0},
+        {"QQ",       OperationStatus::NeedMoreData, 0, 0},
+        {"QQQ",      OperationStatus::NeedMoreData, 0, 0},
+        {"QUJDQQ",   OperationStatus::NeedMoreData, 4, 3},
+        {"QUJD",     OperationStatus::Done,         4, 3},
+        {"",         OperationStatus::Done,         0, 0},
+    };
+    for (const auto& c : cases) {
+        const auto len = static_cast<int>(std::string(c.text).size());
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(c.text), len);
+        std::vector<uint8_t> out(16, 0xCC);
+        Span<uint8_t> dst(out.data(), 16);
+        int consumed = -1, written = -1;
+        EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, false), c.status) << c.text;
+        EXPECT_EQ(consumed, c.consumed) << c.text;
+        EXPECT_EQ(written, c.written) << c.text;
+    }
+}
+
+// A destination too small to hold even the first quantum must not let the padding
+// rejection be skipped: the flag is checked at the '=', before any size arithmetic.
+TEST(Base64Test, DecodeFromUtf8_PaddedQuantum_NotFinalBlock_BeatsDestinationTooSmall) {
+    const char* text = "QQ==";
+    ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(text), 4);
+    std::vector<uint8_t> out(1, 0xCC);
+    Span<uint8_t> dst(out.data(), 0);
+    int consumed = -1, written = -1;
+    EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, false), OperationStatus::InvalidData);
+    EXPECT_EQ(out[0], 0xCC);
+}
+
+// IsValid has no isFinalBlock parameter, so it is the isFinalBlock == true decoder's
+// validator and must be unaffected by this ticket.
+TEST(Base64Test, IsValid_UnaffectedByNonFinalPaddingRule) {
+    for (const char* text : {"QQ==", "QUJDQQ==", "QUJDQUI=", "QQ =  = "}) {
+        const auto len = static_cast<int>(std::string(text).size());
+        EXPECT_TRUE(Base64::IsValid(ReadOnlySpan<uint8_t>(
+            reinterpret_cast<const uint8_t*>(text), len))) << text;
+    }
+    EXPECT_FALSE(Base64::IsValid(ReadOnlySpan<uint8_t>(
+        reinterpret_cast<const uint8_t*>("QQ==QUJD"), 8)));
+}
+
+// A two-chunk stream is the shape the flag exists for: the non-final chunk must not
+// carry padding, and the final chunk decodes normally.
+TEST(Base64Test, DecodeFromUtf8_TwoChunkStream_PaddingOnlyInTheFinalChunk) {
+    std::vector<uint8_t> out(16, 0xCC);
+    Span<uint8_t> dst(out.data(), 16);
+    int consumed = -1, written = -1;
+
+    ReadOnlySpan<uint8_t> chunk1(reinterpret_cast<const uint8_t*>("QUJD"), 4);
+    EXPECT_EQ(Base64::DecodeFromUtf8(chunk1, dst, consumed, written, false), OperationStatus::Done);
+    EXPECT_EQ(consumed, 4);
+    EXPECT_EQ(written, 3);
+
+    Span<uint8_t> rest(out.data() + written, 16 - written);
+    ReadOnlySpan<uint8_t> chunk2(reinterpret_cast<const uint8_t*>("QQ=="), 4);
+    int consumed2 = -1, written2 = -1;
+    EXPECT_EQ(Base64::DecodeFromUtf8(chunk2, rest, consumed2, written2, true), OperationStatus::Done);
+    EXPECT_EQ(consumed2, 4);
+    EXPECT_EQ(written2, 1);
+    EXPECT_EQ(out[0], 'A'); EXPECT_EQ(out[1], 'B'); EXPECT_EQ(out[2], 'C'); EXPECT_EQ(out[3], 'A');
+}

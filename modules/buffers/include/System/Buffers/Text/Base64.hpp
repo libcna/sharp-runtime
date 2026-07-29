@@ -75,6 +75,20 @@ class Base64 {
             ++si;
             if (v == -1) return OperationStatus::InvalidData;
             if (v == -2) {
+                // '=' terminates the base64 content, so it can only ever be meaningful in
+                // a FINAL block. .NET never reaches its padding handler otherwise:
+                // Base64DecoderHelper.DecodeFrom sets `skipLastChunk = isFinalBlock ? 4 : 0`,
+                // so with the flag clear the whole source runs through the four-element loop
+                // where '=' is just an unmapped character, and the whitespace fallback
+                // (DecodeWithWhiteSpaceBlockwise) forces its per-block localIsFinalBlock back
+                // to false for the same reason. Without this, a chunked caller was told a
+                // terminal quantum was ordinary intermediate data: DecodeFromUtf8("QQ==", ...,
+                // false) returned Done with 4 consumed and 'A' written (ticket #1818 /
+                // SR-AUD-080, build-probe/1818_prefix_defects.log). Rejecting at the FIRST
+                // '=' rather than at the end of its quantum is what keeps bytesConsumed and
+                // bytesWritten on the last completed quantum boundary, which is where .NET
+                // leaves them too.
+                if (!isFinalBlock) return OperationStatus::InvalidData;
                 if (valCount < 2) return OperationStatus::InvalidData;
                 ++padCount;
                 vals[valCount] = 0;
@@ -480,7 +494,11 @@ public:
      * @param bytesConsumed   Set to number of input bytes consumed.
      * @param bytesWritten    Set to number of decoded bytes written.
      * @param isFinalBlock    If true, trailing padding '=' is expected/allowed and an incomplete
-     *                        trailing group is InvalidData rather than NeedMoreData.
+     *                        trailing group is InvalidData rather than NeedMoreData. If false,
+     *                        a '=' anywhere in @p utf8 is InvalidData — padding terminates the
+     *                        content, so it cannot appear in a block that is not the last one
+     *                        (ticket #1818 / SR-AUD-080; .NET's Base64DecoderHelper routes a
+     *                        non-final call around final-padding handling entirely).
      * @return OperationStatus.
      */
     static OperationStatus DecodeFromUtf8(
@@ -563,6 +581,8 @@ public:
     /**
      * @brief Decodes base64 ASCII chars to binary bytes.
      * C++ counterpart of .NET Base64.DecodeFromChars(ReadOnlySpan&lt;char&gt;, Span&lt;byte&gt;, out int, out int, bool).
+     * Shares decodeCore with the UTF-8 overload, so @p isFinalBlock has exactly the same
+     * meaning here, including that a '=' with @p isFinalBlock false is InvalidData.
      */
     static OperationStatus DecodeFromChars(
         System::ReadOnlySpan<char> source,
