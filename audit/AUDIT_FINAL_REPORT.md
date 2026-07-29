@@ -2812,3 +2812,126 @@ nor deleted.
 modified**, and **#1773 remains `blocked`**. #1788, #1789, #1790, #1791 and
 #1792–#1802 all remain `done` and none was reopened. The one new inactive row is
 **#1804**.
+
+### Completed MemoryStream raw-buffer validation: ticket #1805
+
+Ticket #1805 (`REMED-IO-MEMORYSTREAM-NULL-BUFFER`, P1, size S, `remediation`,
+area *IO*) is **done** and **SR-AUD-341 is now `remediated`**. It is the first
+ticket of the post-audit remediation phase to leave `Collections`: NEXT.md's
+recommended dependency order names it, with SR-AUD-338, as one of the two
+self-contained ASan/UBSan-backed public-input repairs to take after the
+collection safety contracts were settled. **No new `SR-AUD-*` identifier** — the
+audit numbering stays frozen at 364; the index now records **11 remediated** and
+**353 confirmed** of 364.
+
+**Selection note.** The ticket queue in `plan.sqlite3` was **empty** at the start
+of this ticket: every row was `done` except #1773 and #1804, both `blocked` and
+both correctly so. The remediation backlog is not empty, though — it lives in
+`audit/AUDIT_FINDINGS_INDEX.md`, and converting the next roadmap item into a
+ticket is how every remediation ticket since #1767 has begun. #1805 was created
+that way, not discovered.
+
+**What was wrong.** `MemoryStream(const bytecs* buffer, intcs size, bool writable)`
+initialized `data_(buffer, buffer + size)` in its member-initializer list, so the
+copy ran ahead of every check. Reproduced before any production change, one
+process per input so a crash in one case could not hide another
+(`build-probe/1805_prefix_defects.cpp`, log `build-probe/1805_prefix_defects.log`):
+
+| Input | Pre-fix | Post-fix |
+|---|---|---|
+| `(nullptr, 1)` | UBSan *load of null pointer of type `const unsigned char`*, then **ASan SEGV on address 0x0**, exit 1 | `ArgumentNullException` — *Value cannot be null. (Parameter 'buffer')* |
+| `(nullptr, 0)` | constructed, `length=0` | **byte-identical** |
+| `(data, -1)` | `std::length_error` — *cannot create std::vector larger than max_size()* | `ArgumentOutOfRangeException` — *Non-negative number required. (Parameter 'size')* |
+| `(data, 3)` | constructed, `length=3` | **byte-identical** |
+
+**A second defect in the same constructor is disclosed rather than filed under
+noise.** The finding text named only the null dereference. A negative `size` was
+also unvalidated, and it did not merely produce a wrong answer: it formed
+`buffer + size` — out-of-bounds pointer arithmetic, undefined in its own right —
+and then constructed a vector from a reversed range, which escaped as a raw
+`std::length_error`. A standard-library exception was crossing a public API whose
+entire purpose is to mirror .NET's argument diagnostics. The same change closes
+it, and a permanent test catches `std::length_error` *first* so the assertion
+fails if it ever comes back.
+
+**The repair.** `data_` is now initialized from a file-local
+`validatedBufferCopy(buffer, size)` that validates and then copies, so nothing
+invalid reaches pointer arithmetic or the vector range constructor. Null takes
+precedence over a bad size, matching .NET's own ordering, in which
+`ArgumentNullException.ThrowIfNull(buffer)` precedes the count check — so
+`(nullptr, -1)` reports the null. An anonymous-namespace helper in the `.cpp` was
+chosen over a member function so that **no header, signature, object layout,
+vtable or exported symbol changed**; the sibling `UnmanagedMemoryStream.cpp` in
+the same module already validates that way.
+
+**One input is deliberately still accepted, and that decision is load-bearing.** A
+null pointer paired with a size of **zero** remains valid. This port's parameter
+is a pointer/length pair, not .NET's `byte[]` object: `(nullptr, 0)` is the
+ordinary spelling of an empty range, `std::vector<bytecs>().data()` is permitted
+to return null and does on this toolchain, and `BinaryData::ToStream()` reaches
+this constructor exactly that way for empty content. The pre-fix probe's case 2
+shows the input was already well defined and already produced a correct empty
+stream, so rejecting it would have been a **regression, not a repair** — which is
+precisely the correction ticket #1774 had to make after #1771 over-rejected the
+same shape on `ICollection::CopyTo`. `UnmanagedMemoryStream` diverges from both
+and rejects null unconditionally, because it *retains* the caller's pointer and
+.NET's own `UnmanagedMemoryStream` rejects it unconditionally too; that
+divergence is now stated in the header doc-comment rather than left to be
+inferred.
+
+**Tests: +14 permanent regressions.** Thirteen in
+`modules/io/tests/System/IO/StreamTests.cpp` — null/positive (the audited input),
+null/large, the parameter name in the message, null-before-negative precedence,
+null/zero, null/zero still writable afterwards, `std::vector::data()` on an empty
+vector, negative, the explicit no-`std::length_error` assertion, `INT32_MIN`, zero
+size with a non-null source, the unchanged valid path, and the source-lifetime/copy
+independence the audit report itself listed as missing. One in
+`modules/io/tests/System/BinaryDataTests.cpp` pinning `BinaryData::Empty().ToStream()`,
+the in-repository caller that makes the accepted `(nullptr, 0)` rule load-bearing:
+delete the rule and that test fails.
+
+**Validation.** `SharpRuntimeTests_IO` **541/541** (was 527), and the same 541
+under **AddressSanitizer + UndefinedBehaviorSanitizer + LeakSanitizer with zero
+reports** (`build-asan/1805_io_asan.log`). LeakSanitizer was **proved active**
+rather than assumed: `build-probe/1805_lsan_selftest.cpp` is reported as a
+4,096-byte definite leak. The first version of that self-test leaked from a
+pointer still live on the stack at exit, which LSan correctly classifies as *still
+reachable* and does not report — it proved nothing, and was replaced rather than
+believed. Repository gate `scripts/local_ci_check.sh build`: **0 warnings, 0
+errors**, **13,937 tests across 37 executables** (was 13,923), including the six
+local-server `Net.Http` cases, which were network-permitted in this run. Module
+graph **41 / 90**; catalogue current; database consistent; version-seam ODR
+**2 seams / 18 specialisations** plus 12/12 self-test; negative consumer fixtures
+**9 / 66, every site rejected** plus 37/37 self-test; the ten-component selective
+matrix passed with its 3 forbidden fixtures rejected; Doxygen **1,941** of the
+1,942 ceiling, **unchanged** — the header gained two `@throws` lines, which
+Doxygen resolves; `git diff --check` clean.
+
+**No consumer fixture was added**, deliberately. The existing ones exist for
+contracts a consumer can only be *shown* through the public headers — ABI shape,
+seam reachability, compile rejection. This ticket changes no signature and outlaws
+no spelling; the GoogleTest suite exercises the identical public constructor, and
+a fixture would have rebuilt the whole `IO` component to re-assert it.
+
+**Source and ABI consequences: none.** No public signature, object layout, vtable,
+inheritance or exported symbol changed, so **no consumer rebuild is required on
+this ticket's account**. One behavioural note belongs in a consumer's release
+notes: a caller that was catching `std::length_error` to detect a negative size no
+longer catches it. That spelling was an accident of the vector range constructor,
+never a contract, and no in-repository caller relied on it.
+
+**Not closed by this ticket, and said so in the audit report:** the second bullet
+of that report's "Missing assertions and diagnostics" — the absent near-limit
+capacity/position diagnostic — needs a multi-gigabyte allocation to exercise and
+is not part of SR-AUD-341's crash contract.
+
+Build directories used: `build/` (gate), `build-asan/` (the pre-existing
+sanitizer tree, which gained the `SharpRuntimeTests_IO` target it did not have),
+`build-probe/` (this ticket's probes and logs, all `1805_` prefixed),
+`build-tmp/` (repository-local `TMPDIR` for the `mktemp`-based gate, Doxygen and
+selective-matrix scripts); **no new build directory was created**. **No
+compilation exceeded three jobs.**
+
+**CNA and mobile-eggbert were not inspected, searched, configured, built or
+modified**, and **#1773 remains `blocked`**. #1804 remains `blocked` and
+untouched. No previously `done` ticket was reopened and no finding was reopened.
