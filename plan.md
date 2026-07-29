@@ -3900,3 +3900,71 @@ Closure evidence: 7 permanent regressions, `SharpRuntimeTests_IO` **579/579** (w
 gate: 0 warnings, 0 errors, **14,077 tests across 37 executables**;
 `scripts/local_ci_check.sh build` passed. No public signature, virtual, vtable, object
 layout or mangled symbol changed.
+
+### Completed ZipArchive mode-range validation: ticket #1813
+
+**`P2: ZipArchive silently accepts an out-of-range ZipArchiveMode value`**
+(`REMED-IO-ZIP-INVALID-MODE`, P2, size S) is complete. It carries **no `SR-AUD-*`
+identifier**; the audit recorded invalid mode values only as a missing-test note in
+`ZipArchive.hpp.audit.md`'s "Other missing assertions" section, never as a finding, and
+the numbering stays frozen at 364.
+
+Both constructors tested the mode only with `== Read` / `== Create` / `== Update`, so a
+value outside the enumerator set took none of the branches and produced a **zombie
+archive**: no reader opened, no stream retained, no entries reported, nothing written
+back. `validateZipArchiveMode()` now rejects any such value with
+`ArgumentOutOfRangeException("mode")` — `ZipArchive.cs:979`'s
+`default: throw new ArgumentOutOfRangeException(nameof(mode))`, verbatim.
+
+**The severity is worse than the ticket said.** #1813 described an archive that "reports
+no entries and writes nothing back", which reads as inert. It is not:
+`build-probe/1813_prefix_defects.log` **case 9** builds a complete one-entry archive over
+a perfectly good `MemoryStream` — `CreateEntry("lost.txt")`, `"DATA"` written to the entry
+stream, `Dispose()` — with every step accepted, and the stream receives **0 bytes**. That
+is the same silent-data-loss shape ticket #1812 removed from the null-stream path, reached
+here with a valid stream. **Case 14** shows why `CreateEntry` does not catch it: that
+method rejects only `mode == Read`.
+
+**This defect is invisible to a sanitizer, which is worth recording.** `enum class
+ZipArchiveMode` has the implicit fixed underlying type `int`, so holding 42, −1, `INT_MAX`
+or `INT_MIN` in it is well-formed C++ with a well-defined value, not undefined behaviour.
+UBSan reported nothing for cases 1–5 (measured, not assumed). Only an explicit range check
+finds this class of defect — a useful counterexample to the batch's default sanitizer
+strategy.
+
+| Case | Before | After |
+|---|---|---|
+| 1–5 — stream ctor with 42, 3, −1, `INT_MAX`, `INT_MIN` | all construct successfully | `ArgumentOutOfRangeException("mode")` |
+| 6 — **path** ctor with 42 | constructs successfully | same |
+| 7 — `ZipFile::Open(path, 42)` | constructs successfully | same, inherited |
+| 8 — `nullptr` **and** mode 42 | `ArgumentNullException("stream")` | unchanged — order pinned |
+| 9 — mode 42 + `CreateEntry` + write + `Dispose` | **accepted; 0 bytes delivered** | cannot start |
+| 10, 11, 12 — the valid Create, Read and Update paths | 146 bytes, 1 entry, 2 entries | unchanged, byte-identical |
+| 13, 14 — destructor and observable state on mode 42 | zombie archive survives | cannot be constructed |
+
+**Inventory result for the acceptance criterion.** `ZipFile::Open` is a bare forwarder to
+the path constructor (`ZipFile.cpp:17`), so it is fixed **transitively** rather than
+needing its own guard — and that is pinned by its own test, so a future refactor that
+stops forwarding cannot silently lose the check. Validation order is .NET's in both
+overloads: after the null-stream check for the `Stream*` ctor (`ZipArchive.cs:135`), and
+before the path is stored or the file system touched for the path ctor
+(`ZipFile.Create.cs:473-479`, which rejects the range before opening its `FileStream`).
+
+**Explicitly excluded, and now blocked ticket #1827.** `ValidateMode` has a second half
+(`ZipArchive.cs:962-975`) that rejects a stream whose *capabilities* contradict the mode.
+This port validates none of it, and the guard cannot be added compatibly for the same
+one-line reason that blocks #1824: `System::IO::Stream::getCanWriteProperty()` **defaults
+to `false`** (`Stream.hpp:62`) where .NET's `Stream.CanWrite` is abstract, so a Create-mode
+capability guard would reject every custom stream that implements `Write()` without
+overriding the property. #1827 is opened `blocked`, with a note that it and #1824 share a
+root cause and may deserve one design covering the `Stream.hpp` default itself.
+
+**Compatible narrowing, needing no approval.** Every newly rejected input already
+produced an unusable archive; no in-range value changed behaviour.
+
+Closure evidence: 14 permanent regressions, `ZipArchiveTests` **42/42**,
+`SharpRuntimeIntegrationTests` **857/857** (was 843), clean under ASan + UBSan + LSan with
+0 reports (`build-probe/1813_postfix_defects.log`,
+`build-asan/1813_integration_asan.log`). Repository gate: 0 warnings, 0 errors, **14,091
+tests across 37 executables**; `scripts/local_ci_check.sh build` passed. No public
+signature, virtual, vtable, object layout or mangled symbol changed.

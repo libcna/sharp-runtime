@@ -36,8 +36,10 @@
 #include "System/IO/MemoryStream.hpp"
 #include <miniz/miniz.h>
 #include <vector>
+#include <climits>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 
 using System::NotImplementedException;
 using System::Buffers::OperationStatus;
@@ -1008,6 +1010,182 @@ TEST(ZipArchiveTests, NullStreamGuard_DoesNotAffectValidCreateRoundTrip) {
 TEST(ZipArchiveTests, NullStreamGuard_DoesNotAffectPathConstructor) {
     const std::string missing = std::string("sharp_rt_1812_no_such_archive.zip");
     EXPECT_THROW(ZipArchive z(missing, ZipArchiveMode::Read), System::IO::InvalidDataException);
+}
+
+// ===========================================================================
+// ZipArchive — out-of-range ZipArchiveMode (ticket #1813)
+// ===========================================================================
+//
+// Both constructors tested the mode only with `== Read` / `== Create` / `== Update`,
+// so a value outside the enumerator set took none of the branches and produced a
+// zombie archive. Measured before the fix in build-probe/1813_prefix_defects.log:
+//
+//   cases 1-5   42, 3, -1, INT_MAX and INT_MIN all construct successfully
+//   case 6      the path-taking constructor accepts 42 as well
+//   case 7      ZipFile::Open inherits it, being a forwarder
+//   case 9      SILENT DATA LOSS: CreateEntry + write + Dispose all accepted over a
+//               real MemoryStream, and the stream receives 0 bytes
+//   case 14     CreateEntry does not catch it -- that method rejects only mode == Read
+//
+// The defect is invisible to a sanitizer: ZipArchiveMode's implicit underlying type
+// is int, so holding 42 in it is well-defined C++ and UBSan reports nothing.
+//
+// .NET rejects the range in ZipArchive.cs's ValidateMode default arm with
+// ArgumentOutOfRangeException(nameof(mode)), reached AFTER
+// ArgumentNullException.ThrowIfNull(stream) (ZipArchive.cs:135). Both facts are pinned.
+
+TEST(ZipArchiveTests, StreamCtor_ModeAboveRange_ThrowsArgumentOutOfRange) {
+    MemoryStream ms;
+    EXPECT_THROW(ZipArchive z(&ms, static_cast<ZipArchiveMode>(42)),
+                 System::ArgumentOutOfRangeException);
+}
+
+// One past the last enumerator: the boundary a `<= Update` style check would get wrong.
+TEST(ZipArchiveTests, StreamCtor_ModeOnePastUpdate_ThrowsArgumentOutOfRange) {
+    MemoryStream ms;
+    EXPECT_THROW(ZipArchive z(&ms, static_cast<ZipArchiveMode>(3)),
+                 System::ArgumentOutOfRangeException);
+}
+
+// One before the first enumerator.
+TEST(ZipArchiveTests, StreamCtor_ModeBelowRange_ThrowsArgumentOutOfRange) {
+    MemoryStream ms;
+    EXPECT_THROW(ZipArchive z(&ms, static_cast<ZipArchiveMode>(-1)),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(ZipArchiveTests, StreamCtor_ModeIntMax_ThrowsArgumentOutOfRange) {
+    MemoryStream ms;
+    EXPECT_THROW(ZipArchive z(&ms, static_cast<ZipArchiveMode>(INT_MAX)),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(ZipArchiveTests, StreamCtor_ModeIntMin_ThrowsArgumentOutOfRange) {
+    MemoryStream ms;
+    EXPECT_THROW(ZipArchive z(&ms, static_cast<ZipArchiveMode>(INT_MIN)),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(ZipArchiveTests, InvalidMode_NamesTheModeParameter) {
+    MemoryStream ms;
+    try {
+        ZipArchive z(&ms, static_cast<ZipArchiveMode>(42));
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        const std::string what(e.what());
+        // ArgumentOutOfRangeException(nameof(mode)): .NET's default range message plus the
+        // (Parameter 'mode') suffix, and nothing else.
+        EXPECT_NE(what.find("Specified argument was out of the range of valid values."),
+                  std::string::npos);
+        EXPECT_NE(what.find("mode"), std::string::npos);
+    }
+}
+
+TEST(ZipArchiveTests, PathCtor_ModeAboveRange_ThrowsArgumentOutOfRange) {
+    // The path is deliberately one that does not exist: the range check must fire before
+    // the file system is touched, so this is ArgumentOutOfRangeException and not the
+    // InvalidDataException an unopenable path otherwise produces.
+    EXPECT_THROW(ZipArchive z(std::string("sharp_rt_1813_never_created.zip"),
+                              static_cast<ZipArchiveMode>(42)),
+                 System::ArgumentOutOfRangeException);
+}
+
+// ZipFile::Open is a bare forwarder to the path constructor, so it inherits the guard.
+// Pinned separately so a future refactor that stops forwarding cannot silently lose it.
+TEST(ZipArchiveTests, ZipFileOpen_ModeAboveRange_ThrowsArgumentOutOfRange) {
+    EXPECT_THROW(System::IO::Compression::ZipFile::Open(
+                     std::string("sharp_rt_1813_never_created.zip"),
+                     static_cast<ZipArchiveMode>(42)),
+                 System::ArgumentOutOfRangeException);
+}
+
+// Validation order, pinned because it is observable and because it already held before the
+// guard was added: the null-stream check comes first, matching ZipArchive.cs:135.
+TEST(ZipArchiveTests, NullStreamBeatsInvalidMode) {
+    EXPECT_THROW(ZipArchive z(static_cast<System::IO::Stream*>(nullptr),
+                              static_cast<ZipArchiveMode>(42)),
+                 System::ArgumentNullException);
+}
+
+// The severity of the defect: before the guard this sequence was accepted end to end and
+// delivered nothing. Now it cannot start.
+TEST(ZipArchiveTests, InvalidMode_CannotSilentlyDiscardAnArchive) {
+    MemoryStream sink;
+    EXPECT_THROW(ZipArchive z(&sink, static_cast<ZipArchiveMode>(42)),
+                 System::ArgumentOutOfRangeException);
+    // No partial archive state: nothing was written to the stream the rejected archive
+    // would have owned.
+    EXPECT_EQ(sink.getLengthProperty(), 0);
+}
+
+// A rejected construction must leave nothing half-built, and must be repeatable.
+TEST(ZipArchiveTests, InvalidMode_RejectedConstructionIsRepeatable) {
+    MemoryStream ms;
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_THROW(ZipArchive z(&ms, static_cast<ZipArchiveMode>(42)),
+                     System::ArgumentOutOfRangeException);
+    }
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+}
+
+// Every valid mode keeps its exact current behaviour, through one full round trip.
+TEST(ZipArchiveTests, InvalidModeGuard_LeavesAllThreeValidModesUnchanged) {
+    MemoryStream sink;
+    {
+        ZipArchive z(&sink, ZipArchiveMode::Create);
+        auto e = z.CreateEntry("payload.txt");
+        std::unique_ptr<System::IO::Stream> s(e.Open());
+        s->Write(reinterpret_cast<const uint8_t*>("hello"), 0, 5);
+        z.Dispose();
+    }
+    ASSERT_GT(sink.getLengthProperty(), 0);
+
+    sink.setPositionProperty(0);
+    {
+        ZipArchive u(&sink, ZipArchiveMode::Update);
+        auto e = u.CreateEntry("added.txt");
+        std::unique_ptr<System::IO::Stream> s(e.Open());
+        s->Write(reinterpret_cast<const uint8_t*>("more"), 0, 4);
+        u.Dispose();
+    }
+
+    sink.setPositionProperty(0);
+    ZipArchive r(&sink, ZipArchiveMode::Read);
+    EXPECT_EQ(r.getEntriesProperty().size(), 2u);
+}
+
+// The defaulted mode argument must still be accepted -- the guard must not be inverted.
+TEST(ZipArchiveTests, InvalidModeGuard_DefaultedModeStillConstructs) {
+    MemoryStream sink;
+    {
+        ZipArchive z(&sink, ZipArchiveMode::Create);
+        auto e = z.CreateEntry("f.txt");
+        std::unique_ptr<System::IO::Stream> s(e.Open());
+        s->Write(reinterpret_cast<const uint8_t*>("x"), 0, 1);
+        z.Dispose();
+    }
+    sink.setPositionProperty(0);
+    EXPECT_NO_THROW({
+        ZipArchive r(&sink);  // default mode == Read
+        EXPECT_EQ(r.getEntriesProperty().size(), 1u);
+    });
+}
+
+// Destructor safety: a rejected construction never runs ~ZipArchive (the throw leaves the
+// constructor body), so it can neither flush nor terminate. Proven by outliving the scope.
+TEST(ZipArchiveTests, InvalidMode_RejectionRunsNoDestructor) {
+    MemoryStream ms;
+    for (int i = 0; i < 2; ++i) {
+        try {
+            ZipArchive z(&ms, static_cast<ZipArchiveMode>(7));
+            FAIL() << "expected ArgumentOutOfRangeException";
+        } catch (const System::ArgumentOutOfRangeException&) {
+            // Nothing to flush and nothing to close: no reader was opened and no stream
+            // retained, so the stream is untouched and usable afterwards.
+        }
+    }
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+    SUCCEED();
 }
 
 // ===========================================================================

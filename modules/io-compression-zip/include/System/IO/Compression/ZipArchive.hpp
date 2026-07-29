@@ -110,8 +110,14 @@ namespace System::IO::Compression {
          *
          * @param stream     Source or destination stream. Must not be null. Not owned/closed
          *                   by this ZipArchive.
-         * @param mode       Read, Create, or Update.
-         * @throws System::ArgumentNullException if @p stream is null.
+         * @param mode       Read, Create, or Update. Any other value is rejected.
+         * @throws System::ArgumentNullException if @p stream is null. Checked before @p mode,
+         *         matching ZipArchive.cs:135, so a null stream passed with an invalid mode
+         *         reports this and not ArgumentOutOfRangeException.
+         * @throws System::ArgumentOutOfRangeException naming @c mode if @p mode is not one of
+         *         the three ZipArchiveMode enumerators — ZipArchive.cs's ValidateMode
+         *         @c default arm. Stream capabilities are deliberately not validated; see
+         *         ZipArchive.cpp's note at validateZipArchiveMode.
          * @throws System::IO::InvalidDataException or System::IO::IOException on initialisation failure.
          */
         ZipArchive(System::IO::Stream* stream, ZipArchiveMode mode = ZipArchiveMode::Read);
@@ -120,7 +126,12 @@ namespace System::IO::Compression {
          * @brief Opens or creates a zip archive at @p archivePath.
          *
          * @param archivePath  File-system path.
-         * @param mode         Read, Create, or Update.
+         * @param mode         Read, Create, or Update. Any other value is rejected.
+         * @throws System::ArgumentOutOfRangeException naming @c mode if @p mode is not one of
+         *         the three ZipArchiveMode enumerators. Checked before @p archivePath is
+         *         stored and before the file system is touched, as .NET's
+         *         ZipFile.Create.cs:473-479 rejects the range before opening the FileStream.
+         *         ZipFile::Open forwards to this constructor and so inherits the check.
          * @throws System::IO::InvalidDataException or System::IO::IOException on initialisation failure.
          */
         ZipArchive(const std::string& archivePath, ZipArchiveMode mode = ZipArchiveMode::Read);

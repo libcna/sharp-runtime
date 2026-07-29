@@ -7,9 +7,10 @@
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production
-dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,077 tests across 37 executables (the 13,127 figure this
+dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,091 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 14,077
+section below states the count it measured, and the current floor is the 14,091
+verified by #1813, raised from the 14,077
 verified by #1825, raised from the 14,070
 verified by #1808, raised from the 14,060
 verified by #1809, the 14,046
@@ -7108,3 +7109,58 @@ the binary, plus the `ASAN_OPTIONS=help=1` `detect_leaks` banner). Repository ga
 **14,077 tests across 37 executables**, 0 warnings, 0 errors, `local_ci_check.sh`
 passed. No public signature, virtual, vtable, object layout or mangled symbol
 changed; no consumer rebuild required on its account.
+
+## Completed ZipArchive mode-range validation: ticket #1813 (2026-07-29)
+
+`REMED-IO-ZIP-INVALID-MODE`, P2, size S. No `SR-AUD-*` identifier — the audit recorded
+invalid mode values only as a missing-test note in `ZipArchive.hpp.audit.md`'s "Other
+missing assertions" section, never as a finding, and the numbering stays frozen at
+**364**.
+
+Both `ZipArchive` constructors tested the mode only with `== Read` / `== Create` /
+`== Update`, so a value outside the enumerator set took none of the branches and produced
+a **zombie archive**. `validateZipArchiveMode()` now rejects it with
+`ArgumentOutOfRangeException("mode")` — `ZipArchive.cs:979` verbatim.
+
+**The severity is worse than the ticket said.** #1813 described an archive that "reports no
+entries and writes nothing back", which reads as inert. `build-probe/1813_prefix_defects.log`
+**case 9** builds a complete one-entry archive over a perfectly good `MemoryStream` —
+`CreateEntry`, `"DATA"` written to the entry stream, `Dispose()` — every step accepted, and
+the stream receives **0 bytes**. That is the silent-data-loss shape #1812 removed from the
+null-stream path, reached with a valid stream. **Case 14**: `CreateEntry` does not catch it
+because it rejects only `mode == Read`.
+
+**A sanitizer cannot find this, and that is worth recording.** `enum class ZipArchiveMode`
+has the implicit underlying type `int`, so holding 42, −1, `INT_MAX` or `INT_MIN` in it is
+well-formed C++ with a well-defined value — not undefined behaviour. UBSan reported nothing
+for cases 1–5 (measured). Only an explicit range check finds this class of defect.
+
+| Case | Before | After |
+|---|---|---|
+| 1–5 — stream ctor, 42 / 3 / −1 / `INT_MAX` / `INT_MIN` | all construct | `ArgumentOutOfRangeException("mode")` |
+| 6 — path ctor, 42 | constructs | same |
+| 7 — `ZipFile::Open(path, 42)` | constructs | same, inherited |
+| 8 — `nullptr` **and** 42 | `ArgumentNullException("stream")` | unchanged — order pinned |
+| 9 — 42 + `CreateEntry` + write + `Dispose` | **accepted; 0 bytes delivered** | cannot start |
+| 10–12 — valid Create, Read, Update | 146 bytes, 1 entry, 2 entries | unchanged, byte-identical |
+| 13, 14 — destructor and observable state | zombie archive survives | cannot be constructed |
+
+**Inventory result** (the acceptance criterion required it): `ZipFile::Open` is a bare
+forwarder to the path constructor (`ZipFile.cpp:17`) and is fixed **transitively**, pinned
+by its own test so a refactor that stops forwarding cannot lose the check. Order is .NET's
+in both overloads — after the null check for `Stream*` (`ZipArchive.cs:135`), and before the
+path is stored or the file system touched for the path overload
+(`ZipFile.Create.cs:473-479`).
+
+**Explicitly excluded → new blocked ticket #1827.** `ValidateMode`'s second half
+(`ZipArchive.cs:962-975`) rejects a stream whose *capabilities* contradict the mode. It
+cannot be added compatibly for the one-line reason that also blocks **#1824**:
+`Stream::getCanWriteProperty()` **defaults to `false`** (`Stream.hpp:62`) where .NET's is
+abstract, so a Create-mode capability guard rejects every custom stream that implements
+`Write()` without overriding the property. #1827 notes that it and #1824 share a root cause
+and may deserve one design covering the `Stream.hpp` default itself.
+
+14 permanent regressions. `ZipArchiveTests` **42/42**, `SharpRuntimeIntegrationTests`
+**857/857** (was 843), clean under ASan + UBSan + LSan, 0 reports. Repository gate **14,091
+tests across 37 executables**, 0 warnings, 0 errors, `local_ci_check.sh` passed. No public
+signature, virtual, vtable, object layout or mangled symbol changed.

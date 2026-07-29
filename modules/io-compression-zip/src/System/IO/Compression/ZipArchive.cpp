@@ -308,6 +308,50 @@ static void flushWriter(ZipArchiveState& st) {
 // ZipArchive constructors / destructor
 // ---------------------------------------------------------------------------
 
+// Ticket #1813. ZipArchiveMode was tested only with `== Read` / `== Create` / `== Update`,
+// so a value outside the enumerator set took none of the branches and produced a zombie
+// archive: no reader opened, no stream retained, no entries reported, nothing written back.
+// This is NOT merely a missing diagnostic -- build-probe/1813_prefix_defects.log case 9
+// builds a complete one-entry archive over a perfectly good MemoryStream through
+// CreateEntry(), writes "DATA" to the entry stream and calls Dispose(), all accepted, and
+// the stream receives 0 bytes. It is the same silent-data-loss shape ticket #1812 removed
+// from the null-stream path, reached here with a valid stream. Case 14 shows why
+// CreateEntry() does not catch it: that method rejects only `mode == Read`.
+//
+// Note for anyone reaching for a sanitizer: this defect is invisible to one.
+// `enum class ZipArchiveMode` has the implicit fixed underlying type `int`, so holding 42,
+// -1, INT_MAX or INT_MIN in it is well-formed C++ with a well-defined value, not undefined
+// behaviour. UBSan reports nothing for cases 1-5 (measured). Only an explicit range check
+// finds this.
+//
+// Current .NET validates the range in ZipArchive.cs's ValidateMode, whose switch ends in
+//   default: throw new ArgumentOutOfRangeException(nameof(mode));
+// reached from the Stream-taking constructor at ZipArchive.cs:135 -- i.e. AFTER
+// ArgumentNullException.ThrowIfNull(stream). That order is preserved below and pinned by a
+// test: a null stream passed with an invalid mode must still report ArgumentNullException,
+// which is also what this port already did before the guard (case 8).
+//
+// DELIBERATELY NOT ADDED HERE: the stream-capability half of ValidateMode
+// (ZipArchive.cs:962-975, which throws ArgumentException for a Create-mode stream that
+// cannot write, a Read-mode stream that cannot read, or an Update-mode stream that cannot
+// read/write/seek). System::IO::Stream::getCanWriteProperty() DEFAULTS TO FALSE
+// (Stream.hpp:62) where .NET's Stream.CanWrite is abstract, so every custom stream that
+// implements Write() without overriding the property would be rejected at construction
+// despite working today -- the identical blocked-on-approval shape as ticket #1824. That
+// half is inactive ticket #1827, not this ticket.
+static void validateZipArchiveMode(ZipArchiveMode mode)
+{
+    switch (mode) {
+    case ZipArchiveMode::Read:
+    case ZipArchiveMode::Create:
+    case ZipArchiveMode::Update:
+        return;
+    default:
+        // ZipArchive.cs:979, verbatim: ArgumentOutOfRangeException(nameof(mode)).
+        throw System::ArgumentOutOfRangeException("mode");
+    }
+}
+
 ZipArchive::ZipArchive(System::IO::Stream* stream, ZipArchiveMode mode)
     : state_(std::make_shared<ZipArchiveState>())
 {
@@ -330,6 +374,9 @@ ZipArchive::ZipArchive(System::IO::Stream* stream, ZipArchiveMode mode)
     // Checked FIRST, before any state is populated: no reader is opened and no buffer is
     // filled on the rejected path, and state_ is a shared_ptr that unwinds on its own.
     if (stream == nullptr) throw System::ArgumentNullException("stream");
+    // Ticket #1813, after the null check exactly as ZipArchive.cs:135 orders it, and before
+    // state_->mode is assigned -- so a rejected mode leaves no mode recorded at all.
+    validateZipArchiveMode(mode);
     state_->mode = mode;
     if (mode == ZipArchiveMode::Read || mode == ZipArchiveMode::Update) {
         // Read full stream into memory buffer
@@ -358,6 +405,18 @@ ZipArchive::ZipArchive(System::IO::Stream* stream, ZipArchiveMode mode)
 ZipArchive::ZipArchive(const std::string& archivePath, ZipArchiveMode mode)
     : state_(std::make_shared<ZipArchiveState>())
 {
+    // Ticket #1813. The path-taking overload accepted an out-of-range mode too
+    // (build-probe/1813_prefix_defects.log case 6), and so did ZipFile::Open, which is
+    // nothing but a forwarder to this constructor (ZipFile.cpp:17) -- case 7. Fixing it here
+    // therefore fixes ZipFile::Open transitively rather than needing a second guard, which is
+    // pinned by its own test so a future refactor that stops forwarding cannot lose the check.
+    //
+    // Checked FIRST, before archivePath is stored and before openReader() touches the file
+    // system. .NET reaches the same conclusion by a different route: ZipFile.Open's
+    // GetFileStreamForOpen (ZipFile.Create.cs:473-479) maps the mode to a FileMode/FileAccess
+    // pair with a `_ => throw new ArgumentOutOfRangeException(nameof(mode))` arm, so the range
+    // is rejected before the FileStream is ever opened.
+    validateZipArchiveMode(mode);
     state_->mode     = mode;
     state_->filePath = archivePath;
     if (mode == ZipArchiveMode::Read || mode == ZipArchiveMode::Update)
