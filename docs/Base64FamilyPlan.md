@@ -116,7 +116,7 @@ padding in a non-final call *before* any padding handling runs
 false), so the repair is one rule — with `isFinalBlock` false, `'='` is invalid —
 placed at the first padding character. The finding named one input; six of the
 seven non-final shapes probed were wrong. Two residual cursor divergences on
-`InvalidData` returns are inactive ticket **#1822**. `IsValid` needed no change:
+`InvalidData` returns are ticket **#1822** (§10). `IsValid` needed no change:
 having no `isFinalBlock` parameter, it *is* the final-block decoder's validator.
 
 **#1817 landed on 2026-07-29** and is recorded in both Base64 audit reports. Two
@@ -259,7 +259,7 @@ well. The rule .NET follows is uniform — *on a non-`Done` return the cursor ad
 past whitespace to the first non-whitespace character at or after the last completed
 quantum boundary* — with exactly one case outside it, `"QQ==QUJD"` with
 `isFinalBlock` true, where `DecodeWithWhiteSpaceBlockwise` reverts its counters to
-`0,0`. #1822 is now **P2**.
+`0,0`. #1822 is now **P2**, and it landed the same day — see §10.
 
 **Revised family status**: five tickets, of which #1815, #1816, #1817 and #1818 are
 repairs or plans that landed, #1819 is a false positive, and #1820 remains. The
@@ -289,9 +289,8 @@ confirmed** of 364.
 - **#1821** — the in-place encoders reject an empty buffer with a positive
   `dataLength` that .NET short-circuits to `Done` (§5). Adopting .NET's contract means
   reporting success for a request to encode five bytes into a zero-byte buffer.
-- **#1822** — the cursor reported alongside a non-`Done` status (§7, upgraded by §8 to
-  four .NET-test-pinned instances and to P2). The rule is uniform except for one case
-  where `DecodeWithWhiteSpaceBlockwise` reverts its own counters.
+- ~~**#1822** — the cursor reported alongside a non-`Done` status~~ — **landed on
+  2026-07-29, see §10**, so #1821 is the only decision from this family still open.
 
 **What this plan got wrong, recorded rather than edited away.** §2 repeated
 SR-AUD-081's inverted premise unchecked (see §8). §4's table predicted that #1820
@@ -300,3 +299,40 @@ the same failure mode: taking a finding's account of .NET at face value instead 
 reading the current .NET source and its tests first. Every ticket in this family from
 #1818 onward read the .NET tests before writing code, and that is what produced the
 §7 and §8 discoveries.
+
+---
+
+## 10. The non-`Done` cursor is aligned, with one deliberate deviation (ticket #1822)
+
+§7 opened #1822 as a decision. §8 turned it into a repair by finding that **four** of
+its instances are pinned by named current-.NET tests rather than by tracing, and that
+one of the four is a `DestinationTooSmall` return — so it was never an
+`InvalidData`-only question. It landed on 2026-07-29.
+
+**The rule**, now implemented in both `decodeCore`s: on an `InvalidData` or
+`DestinationTooSmall` return, `bytesConsumed` is the first **non-whitespace** character
+at or after the last completed quantum's boundary. That is where .NET's
+`InvalidDataFallback` leaves it, having skipped the failing region's leading whitespace
+and added it to the count before re-entering the decoder. Base64Url gets the same rule
+because .NET's `DecodeFrom`/`InvalidDataFallback` is **one generic helper** shared by
+both decoders.
+
+**`NeedMoreData` is excluded.** .NET returns it from `NeedMoreDataExit`, which the
+fallback never runs for, so its cursor stays on the quantum boundary. `"QUJD QQ"` with
+`isFinalBlock` false is **4**, not 5. Applying the rule there would have introduced a
+new divergence while fixing an old one — which is exactly the failure mode §9 records
+this plan already committed twice.
+
+**The deviation, decided explicitly.** `DecodeWithWhiteSpaceBlockwise` *reverts* its
+block counters when non-whitespace follows a block's padding, so .NET reports `0,0`
+for `"QQ==QUJD"` **while having already written the byte into the caller's
+destination**. This port keeps reporting what it actually wrote. That behaviour is
+pinned by none of .NET's own tests, and reporting fewer bytes written than were
+physically written is the worse contract for a caller that inspects the buffer. Two
+permanent regressions pin the deviation, including the invariant
+`bytesWritten <= bytesConsumed`.
+
+**Measured**: 41 vectors across both types, **9 wrong before, 0 after**
+(`build-probe/1822_defects.cpp`). Re-running #1819's 27 vectors and #1820's 62 against
+the new rule gives 0 differences each, so no previously verified cursor moved. No
+status and no decoded byte changed anywhere, and every `Done` cursor is untouched.

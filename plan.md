@@ -36,7 +36,7 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 14,033 passing across 36 component binaries plus one integration
+- Tests: 14,041 passing across 36 component binaries plus one integration
   binary, verified by ticket #1817 (SR-AUD-079, the canonical final-quantum
   rule) through the full repository gate, raised from the 14,002 verified by
   ticket #1816 (SR-AUD-078 / CCF-013, the in-place Base64
@@ -3562,3 +3562,67 @@ across 37 executables** (was 14,025). Module graph **41 / 91**.
 empty-buffer status divergence in the in-place encoders) and **#1822** (the cursor
 reported alongside a non-`Done` status), neither of which carries an `SR-AUD-*`
 identifier.
+
+### Completed non-Done decode cursor alignment: ticket #1822
+
+Ticket **#1822** (`REMED-BUFFERS-BASE64-INVALIDDATA-CURSOR`, P2, size S, area
+*Buffers*) is **done**. It carries **no `SR-AUD-*` identifier** by design — the audit
+numbering stays frozen at 364 and the index counts are unchanged at **21 remediated /
+343 confirmed**. It was opened inactive by #1818 with two *traced* instances and
+upgraded by #1819 to four **.NET-test-pinned** ones, from P3 to P2, and from
+`InvalidData` alone to `DestinationTooSmall` as well.
+
+**The defect.** On a non-`Done` return both `decodeCore`s reported the boundary of the
+last **completed** quantum. Current .NET reports the first **non-whitespace** character
+at or after that boundary, because it reaches its `InvalidData` and
+`DestinationTooSmall` exits through `InvalidDataFallback`, which skips the failing
+region's leading whitespace and adds it to `bytesConsumed` before re-entering the
+decoder.
+
+**Pinned by .NET's own tests**, not by tracing:
+`DecodingWithValidDataBeforeWhiteSpaceSplitFinalQuantum` asserts `bytesConsumed` of
+**9, 10 and 15** and then that slicing the input at that cursor leaves exactly
+`"AQ\r\nQ="`; `DecodingWithEmbeddedWhiteSpaceIntoSmallDestination_TrailingWhiteSpacesAreConsumed`
+asserts `input[consumed] == 'j'` — index **44** of a 48-byte input with a 6-byte
+destination — which is what makes this a rule about *every* non-`Done` status rather
+than about `InvalidData`.
+
+**The fix** is one `failCursor` per header, updated whenever a non-whitespace character
+is read with no quantum pending, applied through a small `fail()` helper at every
+`InvalidData`/`DestinationTooSmall` return. Base64Url gets it too, because .NET's
+`DecodeFrom` and `InvalidDataFallback` are **one generic helper** shared by both
+decoders.
+
+**`NeedMoreData` is deliberately excluded.** .NET returns it from `NeedMoreDataExit`,
+which the fallback never runs for, so its cursor stays on the quantum boundary —
+`"QUJD QQ"` with `isFinalBlock` false is **4**, not 5. Applying the rule there would
+have introduced a new divergence while fixing an old one.
+
+**Measured** over 41 vectors across both types (`build-probe/1822_defects.cpp`, logs
+`1822_prefix_defects.log` and `1822_postfix_defects.log`): **9 differed before, 0
+after**, with the two overloads agreeing on every line. Re-running #1819's and #1820's
+probes against the new rule gives **0 of 27** and **0 of 62** differences, so no
+previously verified cursor moved.
+
+**One case is a deliberate deviation**, decided explicitly as the ticket required.
+.NET's `DecodeWithWhiteSpaceBlockwise` *reverts* its block counters when non-whitespace
+follows a block's padding, reporting `0,0` for `"QQ==QUJD"` while having already
+written the byte into the caller's destination. This port keeps reporting what it
+actually wrote. The .NET behaviour is pinned by none of its own tests, and reporting
+fewer bytes written than were physically written is the worse contract for a caller
+that inspects the buffer. Two vectors pin the deviation so that it stays deliberate,
+including the invariant `bytesWritten <= bytesConsumed`.
+
+**Tests: +8 permanent regressions** — the three `DecodingWithValidDataBefore…` cursors
+plus the remainder-slice assertion, the `DestinationTooSmall` cursor with its decoded
+bytes and its untouched sentinel, five failing shapes on both overloads, three
+`NeedMoreData` shapes keeping the boundary, and the deviation, for Base64; and the
+`InvalidData`, `NeedMoreData` and `DestinationTooSmall` cursors for Base64Url.
+`SharpRuntimeTests_Buffers` **512/512** (was 504), and the same 512 under **ASan +
+UBSan + LSan with zero reports** (`build-asan/1822_buffers_asan.log`); the probe is
+clean under the same three (`build-probe/1822_asan.log`). Repository gate: **0
+warnings, 0 errors, 14,041 tests across 37 executables** (was 14,033). Module graph
+**41 / 91**.
+
+**No status and no decoded byte changes for any input; every `Done` cursor is
+unchanged. Source and ABI consequences: none.**
