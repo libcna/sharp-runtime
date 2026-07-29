@@ -5233,3 +5233,49 @@ buffer's four outcomes pinned unchanged. `SharpRuntimeTests_Buffers` **517/517**
 across 37 executables** (was 14,041). Module graph **41 / 91**.
 
 **Source and ABI consequences: none.**
+
+---
+
+Ticket **#1830** (`REMED-CORE-INDEX-DEFINED-OFFSET`, P1, size XS, category
+`remediation`, area *Core*) is **done** and **SR-AUD-057 is now `remediated`** — the
+first CCF-004 member repaired, under the family plan
+`docs/DefinedArithmeticBoundaryPlan.md` written by design ticket #1829. The index counts
+move to **22 remediated** and **342 confirmed** of 364.
+
+`Index::GetOffset` evaluated `length - value_` in signed `intcs`, so
+`Index::FromEnd(INTCS_MAX).GetOffset(INTCS_MIN)` was UBSan-confirmed undefined
+behaviour. It is CCF-004 **class A** — .NET's `Index.cs` deliberately skips validation
+for performance, and C# gives that decision meaning because its default integer
+arithmetic has *defined* two's-complement wrap, which a C++ port cannot inherit by
+executing signed overflow. The subtraction now happens in `SharpRuntime::uintcs`, and
+`GetOffset` remains `noexcept` (pinned by a `static_assert` inside a test).
+
+**The finding's site count was wrong, and is corrected here rather than backfilled.**
+SR-AUD-057's own text and the family plan's §2 both described
+`Range::GetOffsetAndLength` as merely *consuming* `Index`'s operation. It has a
+**second, independent** overflow at `Range.hpp:99`: for a maximal from-end range over an
+`INTCS_MIN` length the unsigned bounds checks **pass**, and the following `end - start`
+is undefined behaviour (`signed integer overflow: -2147483648 - 1`). SR-AUD-057 has
+**two** sites, and both are fixed — the finding is `remediated` on that basis, not on the
+one site the audit named.
+
+**Why the survey missed it is itself worth recording**, because it applies to every
+remaining CCF-004 ticket: the family plan's own §3 reproduction recipe uses
+`-fno-sanitize-recover`, which **aborts at the first diagnostic**, so `Index.hpp:61`'s
+report hid `Range.hpp:99`'s in the same process. The plan now carries a §12 amendment —
+enumerate a finding's sites with the *recovering* build and collect every diagnostic; use
+the aborting build only to prove a site is gone. SR-AUD-060's seven `DateOnly` sites
+(ticket #1837) are where this matters most.
+
+**No observable change**, proven rather than asserted: the pinned values (`offset == 1`,
+`length == 2147483647`, `FromEnd(MAX).GetOffset(0) == -2147483647`) are the ones measured
+*before* the repair, which is what makes the class A claim verifiable.
+
+**Tests: +10 permanent regressions.** `SharpRuntimeTests_Core_Base` **5002/5002**, clean
+under **ASan + UBSan + LSan with zero reports** (`build-asan/1830_core_asan.log`); the
+probe shows the two diagnostics present before (`build-probe/1829_ccf004_survey.log`) and
+absent after (`build-probe/1830_postfix.log`). Repository gate: **0 warnings, 0 errors,
+14,106 tests across 37 executables** (was 14,098). Module graph **41 / 91**.
+
+**Source and ABI consequences: none.** No signature, virtual, vtable, object layout or
+mangled symbol changed; `GetOffset` remains `noexcept`.
