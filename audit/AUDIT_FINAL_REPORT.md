@@ -1946,3 +1946,121 @@ Tickets #1773, #1788, #1789, #1791 and #1798 remain `blocked` and untouched;
 #1790, #1792, #1793, #1794, #1795, #1796 and #1797 remain `done` and none was
 reopened. CNA and mobile-eggbert were not inspected, searched, configured, built,
 or modified. No push, merge, rebase, tag, or publication occurred.
+
+## Post-audit remediation batch — ticket #1798, `ListDictionaryInternal` setter, null-key and key-representation defects closed (2026-07-29)
+
+Implementation ticket #1798 (`REMED-COLL-LISTDICTINTERNAL-PARITY`, P3, size M,
+`defect`) is **done**, landing design ticket #1799's record
+(`docs/ListDictionaryInternalSetterDesign.md`, whose §37 is the implementation
+record) under the **three** explicit per-action approvals §36 required plus the
+§36.4 acknowledgement. **No new `SR-AUD-*` identifier**: the audit numbering is
+frozen at 364 and all six defects were found during remediation. #1799 remains
+`done` and was not reopened.
+
+**Six defects on the second production implementer of `IDictionary`, each
+reproduced again against the committed headers before a line was edited.**
+
+`setItem`'s replace branch returned before `++version_` (version `3 → 3` while
+the stored value changed), so **four** outstanding enumerator kinds walked to the
+end after a replacement with **no diagnostic from the type system, from
+AddressSanitizer, or from UndefinedBehaviorSanitizer** — the dictionary
+enumerator, the key view, the value view, and the same reached through an
+`IDictionary&` — and the **value view enumerated the post-mutation value**. An
+equal-value replacement did not bump either. All five raw-key entry points
+accepted `nullptr`, and `setItem` **stored** it: a null key could be found,
+enumerated, copied out and removed like any other, and — unlike SR-AUD-363's
+`Hashtable` case — it **aliased nothing**, because keys here are compared by raw
+address and no valid object has the null address. The defect was therefore an
+*interface* one: the two implementations of one interface disagreed on every
+null-key row, so no polymorphic consumer could rely on either answer. And
+`MemberCollection::copyToCore` boxed `const_cast<void*>(n.key)` where all four
+other key surfaces box `const void*`: one view, two incompatible element types,
+with `std::any_cast<const void*>` on a `CopyTo` slot throwing
+`std::bad_any_cast` and a write through the writable pointer **the library, not
+the caller, manufactured** for an object the caller had declared `const`
+reproduced as an **AddressSanitizer SEGV on read-only storage**.
+
+**The fix is structural, not conventional.** A private `ValidatedKey` throws
+`ArgumentNullException("key")` on `nullptr`, and the single `findNode()` locator
+accepts nothing else, so no method can reach `list_` without validating — the
+whole reason the design rejected a `Hashtable`-style `toKey()` helper, whose
+weakness was that a future entry point could simply forget to call it. A new
+negative fixture **compiles that claim**: 6 of 6 sites rejected. `setItem` is one
+upsert with the bump **after** the mutation, giving a **strong** exception
+guarantee .NET's bump-first shape cannot offer, and the key view's `const_cast`
+is deleted.
+
+**Two deviations from .NET are deliberate and are now asserted as contract**: a
+throwing duplicate `Add` and a `Remove` of an absent key do **not** bump. .NET
+`ListDictionaryInternal` bumps first and unconditionally on both; copying that
+would have manufactured two new false-positive `InvalidOperationException`s out
+of calls that changed nothing and would have contradicted a currently *passing*
+assertion. **.NET's own `Hashtable` does neither**, so "match .NET" was never a
+specification here — .NET's two implementations disagree on three of ten version
+rows. The rule taken is **advance on effective mutation**, which
+`MutationCounter.hpp` already documented.
+
+**Four of the design's own figures are corrected by measurement** (§37.1), each
+against this record's convenience: §11's "0 existing assertions change" for the
+null-key row was **one** — and #1796 had planted it deliberately as "a test to
+flip", so it was **flipped, not deleted**; §22 **understated** the stale-object
+hazard, which re-measurement shows is link-order dependent at **both** `-O0` and
+`-O2`, with a stale object first on the link line making a correctly *rebuilt*
+translation unit revert; §21.1's symbol count was 10 lines rather than 7, none of
+them a `ListDictionaryInternal` symbol; and §24's "+0.2 ns" is **not resolvable
+above noise**, while its load-bearing "0 allocations added" holds exactly.
+
+**A fifth deviation, from §28, is stated so it is not mistaken for scope creep.**
+§28 proposed **no** negative fixture and was right *about the representation
+change*, which fails at run time and is pinned in the permanent suite and the
+positive fixture. It did not consider the design's **other** compile-time claim —
+unskippability — which is what a negative fixture can actually prove. **CI
+coverage of that fixture, exactly:** its per-site checker lives under the
+**gitignored** `build-probe/`, so the committed file is compiled by **no tracked
+CI job**. That is pre-existing inactive ticket **#1801**, applies equally to the
+three earlier negative fixtures, and is **neither widened nor closed** here. Both
+*positive* fixtures are compiled `-Werror` **and run** by
+`check_selective_components.sh Collections.Core`.
+
+**Interaction with inactive ticket #1800, recorded and not fixed:** the new suite
+adds a **third** `CollectionVersionAccess` specialisation, spelled
+**token-for-token** as the two existing `SR1794_SEAM_BODY` ones. Identical
+specialisations across translation units are well-formed; the IFNDR is the
+**divergence** with `CollectionVersionCounterTests.cpp`'s `SR1787_SEAM_BODY`,
+which is pre-existing and is **not introduced, not widened and not fixed** here.
+**#1798 does not claim to close #1800.**
+
+**No signature, return type, parameter type, vtable slot, calling convention or
+object size changed** — re-measured on the real headers, not the shim: 53 of 53
+mangled names byte-identical, the 19-entry vtable identical, `this` still in
+`%rdi` with no `sret`, `sizeof` unchanged at 40 / 72 / 24 / 24, and
+`ValidatedKey`/`findNode` emitting no symbol at `-O2`. **That is exactly what
+makes the rebuild hazard dangerous**: every affected body is `inline` in a
+header, so a stale object links with **zero diagnostics** and then **silently
+keeps the defect** rather than crashing as #1794's and #1796's breaks did.
+`-flto -Wodr` diagnoses nothing. `README.md` carries the entry.
+
+**Validation:** a fresh `cmake --fresh` configuration and clean-first rebuild
+(631 objects, **0** predating the configure, all 36 test executables relinked,
+0 warnings, 0 errors), then **13,723 tests across 37 executables** from that
+rebuilt tree — the floor rises from 13,657 — with `Collections_Core` at **2,437**
+(was 2,371, **+66**). ASan + UBSan + LSan clean across the whole
+`Collections.Core` suite and both consumer fixtures, LeakSanitizer **proved
+active** by a 350-byte self-test, and the §8.3 SEGV now **unreachable**. The
+design's own 33-assertion contract probe, re-pointed from the shim to the
+production header: **33/33**. 41 modules / 90 edges, validator 7/7, catalogue
+current, database consistent, `git diff --check` clean, Doxygen **1,940** of the
+1,942 ceiling, full selective-component matrix passing. Every compilation used
+at most **three** jobs.
+
+**Still not claimed closed:** address-based key comparison; `MoveNext`/`Reset`
+after the collection is destroyed; a view or enumerator outliving its dictionary;
+the silent stale-object hazard; `ValidatedKey` being unskippable within the class
+but not across the codebase; the cosmetic duplicate-`Add` message divergence; and
+the blast radius in CNA and mobile-eggbert, **unmeasured by instruction**
+(#1773 stays `blocked`; neither repository was inspected). `Hashtable` was **not**
+modified — its absent-key `Remove` over-bump stays inactive ticket **#1802**, and
+closing it is what would make the two implementations agree on all ten version
+rows.
+
+- `modules/collections/include/System/Collections/ListDictionaryInternal.hpp.audit.md`.

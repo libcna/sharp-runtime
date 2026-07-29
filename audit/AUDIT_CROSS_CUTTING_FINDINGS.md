@@ -559,6 +559,27 @@ collection itself is destroyed. `ListDictionaryInternal`'s own two defects are
 untouched and remain ticket **#1798**. See
 `docs/HashtableValueAccessSafetyDesign.md` §34.
 
+**Follow-up (ticket #1798, 2026-07-29): the `ListDictionaryInternal` half is now
+closed too, and there were SIX defects rather than the two named above.** Design
+ticket #1799 measured, beyond the `setItem` replace-version bypass and the
+accepted null key: the key view's `CopyTo` laundering away the caller's `const`
+(**an AddressSanitizer SEGV on a write to read-only storage**, through a
+writable pointer the library manufactured with `const_cast`); a throwing
+duplicate `Add` and a `Remove` of an absent key diverging from .NET
+`ListDictionaryInternal` in the *opposite* direction from the setter; and a
+previously unrecorded over-bump on the *sibling* implementation,
+`Hashtable::Remove` of an absent key, now inactive ticket **#1802** and
+**deliberately not begun** — `Hashtable` was not modified by #1798. Validation is
+now **structurally unskippable** (a private `ValidatedKey` that the single
+locator is the only consumer of, rather than a `toKey()`-style convention), the
+counter advances on **effective mutation only**, and every key surface boxes
+`const void*`. Two deviations from .NET are deliberate and documented: a throwing
+`Add` and an absent `Remove` do **not** invalidate enumerators, matching .NET
+`Hashtable` rather than .NET `ListDictionaryInternal`, whose bump-first shape
+would have manufactured two new false-positive `InvalidOperationException`s.
+CCF-018 and the findings above are **not reopened**. See
+`docs/ListDictionaryInternalSetterDesign.md` §37.
+
 - `modules/collections/include/System/Collections/Generic/IEnumerator.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/List.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/Queue.hpp.audit.md`;

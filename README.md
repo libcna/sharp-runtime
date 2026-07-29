@@ -208,6 +208,108 @@ no safe or useful equivalent.
 
 ## Breaking changes
 
+### 2026-07-29 — `System::Collections::ListDictionaryInternal` rejects null keys and versions every effective mutation
+
+**This one requires a full rebuild of every consumer, and the linker will not
+tell you if you skip it — and unlike the three entries below, a consumer that
+skips it does not crash. It silently keeps the old, defective behaviour. Read
+the rebuild paragraph before upgrading.**
+
+Nothing's signature changed. Three behaviours did.
+
+**1. A null key now throws.** `getItem`, `setItem`, `Add`, `Contains` and
+`Remove` all throw `System::ArgumentNullException` with parameter name `"key"`
+before they look at storage. Previously all five accepted `nullptr`, and
+`setItem`/`Add` **stored** it: a null key could be found, enumerated, copied out
+and removed like any other. .NET begins each of the five with
+`ArgumentNullException.ThrowIfNull(key)`, and this port's `Hashtable` has
+rejected null since 2026-07-27, so the two implementations of one `IDictionary`
+disagreed on every null-key row and no polymorphic consumer could predict which
+answer it would get. Nothing legitimate is lost: keys here are compared by raw
+address, no valid object has the null address, and a stored null key was
+measured **not** to alias any real key. If you passed `nullptr` deliberately,
+choose a real sentinel address.
+
+Validation is now structural rather than conventional: a private `ValidatedKey`
+is the only type the single internal locator accepts, and the only way to obtain
+one is to pass the null check, so a future entry point cannot reach storage
+without validating.
+
+**2. Replacing a value invalidates outstanding enumerators.** `setItem` on a key
+that is already present advances the fail-fast mutation counter, **including for
+an equal-value replacement** — the value is never compared, because equality of
+a `void*` is address equality and .NET compares neither. Previously the replace
+branch returned before the counter moved, so four enumerator kinds walked to the
+end after a replacement with no diagnostic at all: the dictionary's
+`IDictionaryEnumerator`, the key view, the value view, and the same reached
+through an `IDictionary&`. The value view — the surface whose entire content is
+the thing that was replaced — **enumerated the post-mutation value**, and
+AddressSanitizer and UndefinedBehaviorSanitizer both reported nothing. Code that
+replaced a value mid-enumeration and kept going was reading post-mutation data
+silently; it must now re-acquire the enumerator, as it already had to across an
+insert.
+
+**Deliberately NOT copied from .NET.** .NET `ListDictionaryInternal` does
+`version++` **first and unconditionally**, before it even searches, so a
+duplicate-key `Add` that throws and a `Remove` of an absent key both invalidate
+every outstanding enumerator there. This port does neither, because that would
+manufacture two new false-positive `InvalidOperationException`s out of calls that
+changed nothing — and .NET's own `Hashtable` does neither either, so "match .NET"
+is not a specification here. The rule is **advance on effective mutation**:
+
+| Operation | Advances the counter? |
+|---|---|
+| `setItem` insert, replace, **and equal-value replace** | yes |
+| `Add` of a new key | yes |
+| `Add` of a duplicate (throws) | **no** — deliberate deviation from .NET |
+| `Remove` of a present key | yes |
+| `Remove` of an absent key | **no** — deliberate deviation from .NET |
+| Any call rejected for a null key | **no** |
+| `getItem` / `Contains` / `Count` / views | never |
+| `Clear`, even on an empty dictionary | **yes, unconditionally** — matches .NET |
+| copy, move and self assignment | yes, on the destination's own counter |
+
+**3. The key view's `CopyTo` boxes `const void*`, not `void*`.** This is the
+only change here that keeps compiling and changes meaning at run time.
+
+```cpp
+// Before                                        // After
+std::any_cast<void*>(copiedKeys[0])              std::any_cast<const void*>(copiedKeys[0])
+```
+
+The old spelling still compiles and now throws `std::bad_any_cast`.
+`MemberCollection::copyToCore` used to `const_cast<void*>` the key, so a single
+view had **two incompatible element types** — its `Current` boxed `const void*`
+while its `CopyTo` boxed `void*`, and `std::any_cast<const void*>` on a `CopyTo`
+slot threw. Worse, the library, not the caller, manufactured a writable pointer
+to an object the caller had declared `const`: writing through it was reproduced
+as an **AddressSanitizer SEGV on a write to read-only storage**. One rule now
+holds on every surface: a key is recovered with `std::any_cast<const void*>`, a
+value with `std::any_cast<void*>`, and an entry with
+`std::any_cast<DictionaryEntry>`. Value surfaces are unchanged.
+
+Everything else is unchanged: `getItem` on an absent key still yields an empty
+`std::any` and stays distinguishable from a key present with a null value;
+`Count`, both views' liveness and ownership, enumerator ownership, and every
+`CopyTo` validation rule are untouched.
+
+**Rebuild — mandatory, and silent if skipped.** No signature, return type,
+parameter type, vtable slot, calling convention or object size changed: 53 of 53
+mangled names are byte-identical, the 19-entry vtable is identical, `this` stays
+in `%rdi` with no hidden `sret`, and `sizeof(ListDictionaryInternal)` is
+unchanged at **40**. That is precisely what makes this dangerous. Every affected
+body is `inline` in a header, so a stale object file links with **zero
+diagnostics** and then silently keeps the old behaviour — no crash, no warning,
+no sanitizer report. The outcome is also **link-order dependent at both `-O0`
+and `-O2`**: with a stale object first on the link line, a correctly *rebuilt*
+translation unit reverts to the defective bodies. `-flto -Wodr` diagnoses
+nothing, because every declaration and the class layout are identical and only
+inline function *bodies* differ. The linker cannot enforce this rebuild; only
+this note can.
+
+Full design record, measurements, rejected alternatives and the implementation
+record: `docs/ListDictionaryInternalSetterDesign.md`.
+
 ### 2026-07-28 — `System::Collections::Hashtable`'s value accessors return owning values
 
 **This one requires a full rebuild of every consumer, and the linker will not
@@ -340,7 +442,9 @@ at **40**, so this is not an object-layout break. `Hashtable::ValueReference` is
 the caller's own pointer, recovered with `std::any_cast<void*>`. Its other
 divergences (its `setItem` skips the version bump on the replace branch, and
 both its accessors accept a null key where .NET and `Hashtable` throw) are
-**not** fixed here and remain open as a separate ticket.
+**not** fixed here and remain open as a separate ticket. *(Those were closed the
+following day; see the 2026-07-29 entry above, which also corrects the count —
+there were six divergences, not two.)*
 
 Full design record, measurements and rejected alternatives:
 `docs/HashtableValueAccessSafetyDesign.md`.

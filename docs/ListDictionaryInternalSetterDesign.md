@@ -1366,3 +1366,226 @@ design and can be declined independently of §36.1 and §36.2.
 diagnostics and silently keeps the old behaviour, and at `-O0` with the stale
 object first on the link line it silently reimposes the old behaviour on
 *rebuilt* translation units. `-flto -Wodr` does not diagnose it (§22).
+
+---
+
+## 37. Implementation record — ticket #1798 (2026-07-29)
+
+Ticket **#1798** (`REMED-COLL-LISTDICTINTERNAL-PARITY`, P3, size M, category
+`defect`, area Collections) is **`done`**. The three approvals of §36 were
+granted explicitly and per action, together with the §36.4 acknowledgement. This
+section records what was actually built and measured; **§1–§36 are preserved
+unchanged, including the four figures §37.1 corrects.** The defects were real,
+were reproduced again before anything was edited, and are not written out of the
+record.
+
+### 37.1 Four corrections this implementation makes to the design's own figures
+
+Recorded here rather than by editing §1–§36, so the design's predictions stay
+auditable against what happened.
+
+1. **§11 said "0 existing assertions change" for the null-key row. It was one.**
+   `HashtableValueAccessSafetyTests.cpp`'s
+   `HashtableValueAccessExceptions.ListDictionaryInternalStillAcceptsANullKeyAndThatIsTicket1798`
+   asserted that this type *accepted and stored* a null key. Ticket #1796 wrote
+   it deliberately — its own comment says "so #1798 has a test to flip" — so the
+   assertion existed precisely to be flipped, and §11's sweep missed it. It was
+   **flipped, not deleted**, and renamed
+   `ListDictionaryInternalNowRejectsANullKeyAsTicket1798Required`. The corrected
+   source-break figure is **4 assertion lines in 3 files**, not 3 in 2.
+2. **§22's stale-object table understated the hazard at `-O2`.** It recorded
+   `-O2 | either order | stale 0/0, rebuilt 1/1`. Re-run against the real
+   headers, `-O2` is **also link-order dependent**: with the stale object first
+   on the link line the *rebuilt* translation unit reverts to the defective
+   bodies too (`0/0, 0/0`), exactly as `-O0` does. The bad link order is
+   therefore dangerous at **both** optimisation levels, not only at `-O0`.
+   `-flto -Wodr` still diagnoses nothing. This makes the mandatory-rebuild
+   warning stronger, not weaker.
+3. **§21.1's "7 new symbols" is 10 lines as measured**, of which two are local
+   string constants (`.LC0`, `.LC4`) and one is
+   `std::__detail::_List_node_base::_M_unhook` — pulled in because `Remove` now
+   calls `std::list::erase` instead of `remove_if`. The substantive claim is
+   unchanged and re-verified: **none of them is a `ListDictionaryInternal`
+   symbol**, and the 53 `ListDictionaryInternal` mangled names are byte-identical.
+4. **§24's "+0.2 ns per replace" is not resolvable above noise** on the
+   production header. Three runs each: `setItem` replace 1.78–2.01 ns committed
+   versus 1.82–2.13 ns fixed, with the fixed build faster in two of three runs.
+   The load-bearing half of §24 holds exactly: **zero allocations added on every
+   path**.
+
+A fifth, smaller divergence from §28 is recorded in §37.6.
+
+### 37.2 What was built
+
+Exactly §14, with no redesign:
+
+| Element | Result |
+|---|---|
+| `ValidatedKey` | private, 8 bytes, `explicit`, throws `System::ArgumentNullException("key")` on `nullptr`; appears in no public signature and emits **no symbol at `-O2`** |
+| `findNode(ValidatedKey)` | `const` and non-`const` overloads; **the only two places in the class that compare a key against `list_`** — verified by sweep |
+| `setItem` | one upsert: validate → locate → replace-and-bump **or** `push_back`-and-bump, bump **after** the mutation |
+| `Add` | validate → reject duplicate **before** any mutation → `push_back` → bump |
+| `Remove` | validate → locate → `erase(it)` (not `remove_if`) → bump only if it erased |
+| `getItem` / `Contains` | validate → locate → never bump |
+| `Clear` | **unchanged**, unconditional bump, matching .NET |
+| `MemberCollection::copyToCore` | `const_cast<void*>` deleted; keys box `const void*`, and the superseded rationale comment at the old :194–201 is rewritten rather than left standing |
+| Signatures / return types / parameter types / data members | **none changed** |
+
+The class doc-comment now states both contracts (null-key rejection and the
+effective-mutation rule) and names this record; `IDictionary.hpp` gained a
+single interface-level statement of the null-key contract, which is now true of
+**both** implementers — the correction §31 said would be needed if approval were
+*declined* is instead resolved by the contract becoming honoured.
+
+### 37.3 Pre-fix reproduction, re-run before any edit
+
+Every §6 and §8 row reproduced against the committed headers
+(`build-probe/1798_pre_probe1.log`, `1798_pre_sanitizers.log`): `setItem`
+replace `3 → 3` with the stored value changed; equal replace `3 → 3`; all four
+enumerator kinds "NO THROW" with the value view observing the new value; all six
+null-key rows accepted, stored, found, enumerated, copied out and removed, with
+the null key proved **not** to alias any real key; the key view boxing `Pv` on
+`CopyTo` against `PKv` on `Current` with `std::bad_any_cast` measured; and the
+**AddressSanitizer SEGV on a WRITE** to `.rodata` through the `CopyTo` slot,
+with LeakSanitizer proved active by the same 350-byte self-test.
+
+### 37.4 Post-fix contract
+
+The design's own 33-assertion contract probe, re-pointed from the shim at
+`build-probe/1799_selected/` to the **production** header: **33 passed, 0
+failed**, `sizeof` 40 (`build-probe/1798_post_contract.log`).
+
+Final matrix, as implemented:
+
+| Operation | Null key | Absent key | Present key | Bumps? | Enumerator |
+|---|---|---|---|---|---|
+| `getItem` | throws | empty `std::any` | `std::any(void*)` | never | unaffected |
+| `setItem` | throws | inserts | replaces | **insert, replace, equal replace** | invalidates |
+| `Add` | throws | inserts | `ArgumentException` | **success only** | invalidates on success; **unaffected by the throw** |
+| `Contains` | throws | `false` | `true` | never | unaffected |
+| `Remove` | throws | no-op | erases one node | **success only** | invalidates on success; **unaffected by the no-op** |
+| `Clear` | n/a | n/a | n/a | **unconditional** | invalidates |
+| copy / move / self assignment | n/a | n/a | n/a | destination's own counter (#1787) | invalidates |
+| mutating a value's pointee | n/a | n/a | n/a | never | unaffected |
+
+`ArgumentNullException`: parameter `"key"`, message
+`Value cannot be null. (Parameter 'key')`, HResult `0x80004003` — asserted
+exactly, on both implementations.
+
+Every key surface boxes `const void*` and every value surface boxes `void*`,
+asserted by `type()` across all five key surfaces and all five value surfaces.
+The superseded `std::any_cast<void*>` on a key slot still **compiles** and now
+throws `std::bad_any_cast` — the one silent source-compatible meaning change,
+pinned by its own test so the README migration note has evidence behind it.
+
+### 37.5 ABI and layout, re-measured on the real headers
+
+| Measurement | Result |
+|---|---|
+| `ListDictionaryInternal` mangled names | **53 / 53 byte-identical**, `diff` empty |
+| Vtable | **19 entries, identical**; `getItem` 72, `setItem` 80, `Contains` 104, `Add` 112, `Clear` 120, `Remove` 128 |
+| Calling convention | unchanged — `this` stays in `%rdi`, key in `%rsi`; the new body begins `test %rsi,%rsi`. **No `sret`, no register move** — the material difference from #1794 and #1796 |
+| `sizeof` / `alignof` | `ListDictionaryInternal` **40/8**, `NodeEnumerator` 72, `MemberCollection` 24, `MemberCollection::Enumerator` 24, `Node` 16 — all unchanged |
+| New private types | `ValidatedKey` at 8 bytes appears; `Remove`'s old `remove_if` closure type at 8 bytes disappears. Neither is a data member, and no pre-existing type moved |
+| Stale-object probe | see §37.1 item 2 — **worse than recorded**, and mandatory-rebuild guidance strengthened accordingly |
+
+### 37.6 Deviation from §28 — a negative fixture *was* added
+
+§28 proposed **no** negative fixture, on the grounds that nothing in this design
+fails at compile time and a compile-rejection fixture "would be theatre". That
+reasoning is **correct and unchanged for the representation change**: the
+`std::any_cast<void*>` meaning change is a run-time `std::bad_any_cast` and is
+pinned in the permanent suite and the positive fixture, not in a negative one.
+
+But §28 did not consider the *other* compile-time claim this design makes.
+§13.2 and §14.1 assert that validation is **structurally unskippable**, and that
+this is what distinguishes the selected shape from rejected alternative A (a
+`toKey()`-style helper, which "is a convention; a future sixth entry point that
+forgets the call compiles and silently reopens the defect"). That distinction is
+only real if the compiler enforces it. `test/consumer/collections_dictionary_setter_negative.cpp`
+asserts it: **6 of 6 marked sites rejected** — `ValidatedKey` cannot be
+constructed, cannot be constructed from `nullptr`, cannot be named in a
+declaration; neither `findNode` overload can be called; `Node` cannot be named.
+Without it, the difference between the selected design and the rejected one is a
+comment.
+
+**CI coverage of that fixture, stated exactly**: its per-site checker is
+`build-probe/1798_check_negative.py`, which lives under the **gitignored**
+`build-probe/`, so the committed fixture is **not compiled by any tracked CI
+job**. That is pre-existing inactive ticket **#1801** and applies equally to the
+three earlier negative fixtures (`collections_enumerator_current_negative.cpp`,
+`collections_dictionary_enumerator_negative.cpp`,
+`collections_hashtable_value_access_negative.cpp`). #1798 **neither widens nor
+closes** that gap. By contrast both *positive* fixtures — `collections_dictionary_views.cpp`
+and `collections_copyto.cpp` — are compiled `-Wall -Wextra -Wpedantic -Werror`
+and **run** by `scripts/check_selective_components.sh Collections.Core`.
+
+### 37.7 Interaction with ticket #1800, recorded and not fixed
+
+The new suite needs the mutation-counter seam, so it adds a **third** explicit
+specialisation of `SharpRuntime::Testing::CollectionVersionAccess<Hashtable>`
+and `<ListDictionaryInternal>`, spelled **token-for-token** as
+`DictionaryEnumeratorKeyValueSafetyTests.cpp` and
+`HashtableValueAccessSafetyTests.cpp` spell it (`SR1794_SEAM_BODY`). Identical
+specialisations in several translation units are well-formed; the IFNDR is the
+**divergence** with `CollectionVersionCounterTests.cpp`'s `SR1787_SEAM_BODY`,
+which adds a `positionVersion` member. That divergence is **pre-existing**, is
+inactive ticket **#1800**, is **not introduced, not widened and not fixed** by
+this ticket, and **#1798 does not claim to close it.**
+
+### 37.8 Validation performed
+
+| Check | Result |
+|---|---|
+| Fresh configure + clean-first rebuild of `build/` | `cmake --fresh` then `--clean-first --parallel 3`; **631 objects, 0 predating the configure**, all 36 test executables relinked, **0 warnings, 0 errors** |
+| `scripts/run_component_tests.sh build` | **13,723 tests across 37 executables**, from the freshly rebuilt tree (floor was 13,657) |
+| `SharpRuntimeTests_Collections_Core` | **2,437 passed** (was 2,371; **+66**) |
+| ASan + UBSan + LSan, full `Collections.Core` suite | 2,437 passed, **0 sanitizer reports, 0 leaks**; LSan proved active by a 350-byte self-test in the same session |
+| ASan + UBSan + LSan, both positive consumer fixtures | exit 0, **0 reports** |
+| Post-fix scenario probe | all six scenarios assert the *new* behaviour; the §8.3 SEGV is **unreachable** because the cast that yielded the writable pointer throws first |
+| Negative fixture checker | **6 / 6** marked sites rejected |
+| `scripts/check_selective_components.sh` (full matrix) | passed; 3 forbidden fixtures rejected |
+| `scripts/check_selective_components.sh Collections.Core` × both positive fixtures | compiled `-Werror` **and run**, 2,437 tests each |
+| `scripts/validate_module_boundaries.py --root .` | OK — **41 modules, 90 edges** |
+| `test/validate_module_boundaries_test.py` | **7/7** |
+| `scripts/generate_component_catalog.py --check` | catalogue current |
+| `scripts/db_consistency_check.py --db plan.sqlite3` | no consistency problems |
+| `scripts/check_doxygen_warnings.sh` | Doxygen 1.9.8, **1,940** warnings, ceiling 1,942 — unchanged |
+| `git diff --check` | clean |
+
+### 37.9 Build directories and parallelism
+
+| Directory | Use |
+|---|---|
+| `build/` | the gate; **freshly configured and clean-first rebuilt**, `--parallel 3` |
+| `build-asan/` | **new**, from the closed CLAUDE.md set; ASan+UBSan tree, `--parallel 3`, `ccache` enabled |
+| `build-probe/` | **shared**; this ticket's artefacts under a `1798_` file prefix, one compiler process per probe |
+| `build-consumer/` | **shared**; consumer fixture binaries and the negative-fixture log |
+| `build-tmp/` | repository-local `TMPDIR` for `scripts/check_selective_components.sh`'s `mktemp -d` |
+
+**No new build-directory name outside the closed set was invented, and no
+compilation anywhere exceeded three jobs.** `check_selective_components.sh`
+already hard-codes `--parallel 3`; it required `TMPDIR` redirection into
+`build-tmp/` so its `mktemp -d` matrix root did not land under `/tmp`.
+`build-asan/` required `-Wno-maybe-uninitialized`: at `-O1` GCC 14 raises a
+false positive inside `<bits/std_function.h>` for `std::regex`'s internal state
+in a Text.RegularExpressions translation unit, unrelated to this ticket, and
+every module builds `-Werror`.
+
+### 37.10 Residual limitations, unchanged and not claimed closed
+
+§32's list stands in full: key comparison stays address-based; `MoveNext`/`Reset`
+after the collection is destroyed remains undefined; a view or enumerator
+outliving its dictionary remains an unenforced borrow rule; the stale-object
+hazard is silent and undiagnosable by the toolchain, including under LTO;
+`ValidatedKey` is unskippable **within the class**, not across the codebase — a
+caller can still pass any address of any type; and the real blast radius in CNA
+and mobile-eggbert is **unmeasured by instruction** (ticket #1773 stays
+`blocked`; neither repository was inspected, searched, configured, built or
+modified).
+
+The cosmetic divergence of §9.5 — the duplicate-`Add` message omitting the key
+text .NET's `Argument_AddingDuplicate__` carries — is **still open and still not
+required**. `Hashtable::Remove`'s absent-key over-bump remains inactive ticket
+**#1802**; `Hashtable` was not modified, and closing #1802 is what would make
+the two implementations agree on all ten version rows of §6.1.

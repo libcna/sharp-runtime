@@ -3,14 +3,15 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-28. Branch: `feature/remediation-coll-hashtable-value-access`.
+*Last verified: 2026-07-29. Branch: `feature/remediation-coll-listdictionary-setitem`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 13,657 tests across 37 executables (the 13,127 figure this
+dependency edges, and 13,723 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 13,657
-verified by #1796 from a from-scratch tree). The repository-wide,
+section below states the count it measured, and the current floor is the 13,723
+verified by #1798 from a fully fresh configuration and clean-first rebuild,
+raised from #1796's 13,657). The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766). Remediation
 tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design),
 #1769 (LinkedListNode lifetime implementation), #1770 (raw `ICollection::CopyTo`
@@ -2882,6 +2883,149 @@ Tickets #1773, #1788, #1789, #1791 and #1798 remain `blocked` and untouched;
 #1790, #1792, #1793, #1794, #1795, #1796 and #1797 remain `done` and none was
 reopened. CNA and mobile-eggbert were not inspected, searched, configured, built,
 or modified. No push, merge, rebase, tag, or publication occurred.
+
+No repair ticket is active.
+
+### Completed ListDictionaryInternal setter remediation: ticket #1798
+
+Implementation ticket #1798 (`REMED-COLL-LISTDICTINTERNAL-PARITY`, P3, size M,
+`defect`) is **done**, under the three explicit per-action approvals design
+ticket #1799 required. Durable record:
+`docs/ListDictionaryInternalSetterDesign.md` §37. #1799 remains `done` and is
+not reopened.
+
+**Six measured defects on `System::Collections::ListDictionaryInternal` — the
+second production implementer of `IDictionary` — are closed**, and every one was
+reproduced again against the committed headers before a line was edited:
+
+1. **`setItem`'s replace branch returned before `++version_`** (version `3 → 3`
+   while the stored value changed), so **four** outstanding enumerator kinds
+   walked to the end after a replacement with no diagnostic — the dictionary
+   enumerator, the key view, the value view, and the same through an
+   `IDictionary&` — and the **value view enumerated the post-mutation value**,
+   with **0 ASan and 0 UBSan reports**. `setItem` is now one upsert: validate,
+   locate, then replace-and-bump or insert-and-bump, with the bump **after** the
+   mutation succeeds — a **strong** exception guarantee .NET's bump-first shape
+   cannot offer. An **equal-value replacement bumps too**; the value is never
+   compared, because equality of a `void*` is address equality and .NET compares
+   neither.
+2. **All five raw-key entry points accepted `nullptr`** and `setItem` **stored**
+   it. A private **`ValidatedKey`** now throws
+   `ArgumentNullException("key")` — message
+   `Value cannot be null. (Parameter 'key')`, HResult `0x80004003` — and the
+   single `findNode()` locator accepts **nothing else**, so validation is
+   **structurally unskippable** rather than conventional. That is the whole
+   reason the design chose it over a `Hashtable`-style `toKey()` helper, and a
+   new negative fixture now **compiles that claim**: 6 of 6 sites rejected.
+3. **The key view's `CopyTo` laundered away the caller's `const`** —
+   `const_cast<void*>(n.key)` where all four other key surfaces box
+   `const void*`, so one view had two incompatible element types and writing
+   through the writable pointer the library manufactured for a key the caller
+   declared `const` was an **AddressSanitizer SEGV on read-only storage**. The
+   `const_cast` is deleted and its superseded rationale comment rewritten.
+
+**Two deliberate deviations from .NET `ListDictionaryInternal`, approved and now
+asserted as contract**: a throwing duplicate `Add` and a `Remove` of an absent
+key do **not** bump. .NET bumps first and unconditionally on both, which would
+manufacture two new false-positive `InvalidOperationException`s out of calls that
+changed nothing and would contradict a currently *passing* assertion
+(`CollectionVersionCounterTests.cpp`'s `kHasNoOpMutation = true`). **.NET's own
+`Hashtable` does neither**, so "match .NET" was never a specification here. The
+rule taken is **advance on effective mutation**, which `MutationCounter.hpp`
+already documented and which both of this port's `IDictionary` implementations
+now follow. `Clear` keeps its unconditional bump, matching .NET.
+
+**Four of the design's own figures are corrected by measurement** (§37.1), each
+against this record's convenience:
+
+1. §11 said **0 existing assertions change** for the null-key row. It was
+   **one** — and ticket #1796 had put it there deliberately, its comment saying
+   "so #1798 has a test to flip". It was **flipped, not deleted**. Corrected
+   source break: **4 assertion lines in 3 files**, not 3 in 2.
+2. §22's stale-object table **understated the hazard at `-O2`**. Re-run on the
+   real headers, `-O2` is **also link-order dependent**: with a stale object
+   first on the link line the *rebuilt* translation unit reverts to the
+   defective bodies too. The bad link order is dangerous at **both**
+   optimisation levels, not only `-O0`. `-flto -Wodr` still diagnoses nothing.
+3. §21.1's "7 new symbols" measured as 10 lines, two of them local string
+   constants and one `_M_unhook` (from `erase` replacing `remove_if`). The
+   substantive claim is unchanged: **none is a `ListDictionaryInternal` symbol**.
+4. §24's **+0.2 ns per replace is not resolvable above noise** on the production
+   header (1.78–2.01 ns before, 1.82–2.13 ns after, faster in two of three
+   runs). Its load-bearing half holds exactly: **0 allocations added**.
+
+**Deviation from design §28, stated so it is not mistaken for scope creep:** §28
+proposed **no** negative fixture, correctly, *for the representation change* —
+that one fails at run time, not compile time, and is pinned in the permanent
+suite and the positive fixture instead. But §28 did not consider the design's
+**other** compile-time claim, that validation is structurally unskippable.
+`test/consumer/collections_dictionary_setter_negative.cpp` asserts it, because
+without it the difference between the selected design and rejected alternative A
+is a comment. **CI coverage, exactly:** its per-site checker lives under the
+**gitignored** `build-probe/`, so the committed fixture is compiled by **no
+tracked CI job** — pre-existing inactive ticket #1801, which applies equally to
+the three earlier negative fixtures and which #1798 **neither widens nor
+closes**. Both *positive* fixtures are compiled `-Werror` **and run** by
+`check_selective_components.sh Collections.Core`.
+
+**Interaction with inactive ticket #1800, recorded and not fixed:** the new
+suite adds a **third** `CollectionVersionAccess` specialisation, spelled
+**token-for-token** as the two existing `SR1794_SEAM_BODY` ones. Identical
+specialisations across translation units are well-formed; the IFNDR is the
+**divergence** with `CollectionVersionCounterTests.cpp`'s `SR1787_SEAM_BODY`.
+That is pre-existing, is **not introduced, not widened and not fixed** here, and
+**#1798 does not claim to close it.**
+
+**No signature, return type, parameter type or data member changed** — measured
+on the real headers, not the shim: **53 of 53** mangled names byte-identical,
+the **19-entry vtable identical** with `getItem` at 72 and `setItem` at 80,
+`this` still in `%rdi` with **no `sret`**, `sizeof` unchanged at **40 / 72 / 24
+/ 24**, and `ValidatedKey`/`findNode` emitting **no symbol at all** at `-O2`.
+**A full consumer rebuild is nevertheless mandatory**, and README.md says so:
+every affected body is `inline` in a header, so a stale object links with **zero
+diagnostics** and then **silently keeps the defect** — no crash, unlike #1794's
+and #1796's breaks.
+
+**Validation:** a **fresh `cmake --fresh` configuration and clean-first
+rebuild** of `build/` — **631 objects, 0 predating the configure**, all 36 test
+executables relinked, 0 warnings, 0 errors — then **13,723 tests across 37
+executables** from that rebuilt tree (floor was 13,657), `Collections_Core`
+**2,437** (was 2,371, **+66**). ASan + UBSan + LSan clean on the entire
+`Collections.Core` suite and on both consumer fixtures, with LeakSanitizer
+**proved active** by a 350-byte self-test; the §8.3 SEGV is now **unreachable**
+because the cast that yielded the writable pointer throws first. The design's own
+33-assertion contract probe re-pointed from the shim to the **production** header:
+**33/33**. 41 modules / 90 edges, validator 7/7, catalogue current, database
+consistent, `git diff --check` clean, Doxygen **1,940** of the 1,942 ceiling,
+full `check_selective_components.sh` matrix passing.
+
+**Build directories:** `build/` (fresh configure + clean-first, `--parallel 3`),
+the **new** `build-asan/` from the closed CLAUDE.md set (`--parallel 3`,
+`ccache`), the **shared** `build-probe/` and `build-consumer/` under a `1798_`
+file prefix, and `build-tmp/` as `TMPDIR`. **No build-directory name outside the
+closed set was invented and no compilation exceeded three jobs.**
+`check_selective_components.sh` needed `TMPDIR` redirected into `build-tmp/` so
+its `mktemp -d` matrix root stayed out of `/tmp`; `build-asan/` needed
+`-Wno-maybe-uninitialized` for a GCC 14 `-O1` false positive inside
+`<bits/std_function.h>` in a Text.RegularExpressions translation unit, unrelated
+to this ticket.
+
+**Not claimed closed:** address-based key comparison; `MoveNext`/`Reset` after
+the collection is destroyed; a view or enumerator outliving its dictionary; the
+silent stale-object hazard; `ValidatedKey` being unskippable within the class
+but not across the codebase; the cosmetic duplicate-`Add` message divergence
+(§9.5, still not required); and the real blast radius in CNA and mobile-eggbert,
+**unmeasured by instruction**.
+
+No new `SR-AUD-*` identifier: the audit numbering is frozen at 364 and all six
+defects were found during remediation. `Hashtable` was **not** modified — its
+absent-key `Remove` over-bump stays inactive ticket #1802, and closing it is
+what would make the two implementations agree on all ten version rows. Tickets
+#1800, #1801 and #1802 remain `blocked` and unbegun; #1773, #1788, #1789 and
+#1791 remain `blocked` and untouched; #1790 and #1792–#1799 remain `done` and
+none was reopened. CNA and mobile-eggbert were not inspected, searched,
+configured, built, or modified. No push, merge, rebase, tag, or publication
+occurred.
 
 No repair ticket is active.
 
