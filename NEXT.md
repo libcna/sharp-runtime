@@ -7,11 +7,13 @@
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 13,840 tests across 37 executables (the 13,127 figure this
+dependency edges, and 13,880 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 13,840
-verified by #1791, raised from #1802's 13,790 — itself re-measured by #1800 —
-and before that from #1798's 13,723 and #1796's 13,657, each from a fully fresh
+section below states the count it measured, and the current floor is the 13,880
+verified by #1788 — whose LinkedList<T> object-layout change made a fresh
+clean-first rebuild mandatory rather than merely prudent — raised from #1791's
+13,840, from #1802's 13,790 — itself re-measured by #1800 — and before that from
+#1798's 13,723 and #1796's 13,657, each from a fully fresh
 configuration and clean-first rebuild; #1800 moved test code without adding or
 removing a case, so the floor was unchanged rather than stale at that point).
 The repository-wide,
@@ -5039,3 +5041,95 @@ gate passed. **TSan was not run**, for the reason design §19 gave: no atomic, n
 **CNA and mobile-eggbert were not inspected, searched, configured, built or
 modified**, and their usage remains unmeasured; **#1773 remains `blocked`**.
 #1788, #1789 and #1803 are untouched and remain `blocked`.
+
+### Completed LinkedList mutation-counter widening: ticket #1788
+
+Ticket #1788 (`REMED-COLL-LINKEDLIST-VERSION-WIDEN`, P3, size S, `defect`, area
+`Collections`) closed the first of the two residuals ticket #1787 had to leave
+open, after the user granted the **exact object-size approval**
+[`docs/CollectionVersionCounterSweep.md`](docs/CollectionVersionCounterSweep.md)
+§8.1 asked for, scoped to #1788 only. The implementation record is **§19** of
+that document; §§1–18 are #1787's and are preserved unedited, so the record does
+not pretend `LinkedList<T>` was always 64-bit. **No new `SR-AUD-*` identifier**;
+the numbering stays frozen at 364.
+
+`LinkedList<T>::version_` moved from the 32-bit
+`detail::NarrowMutationCounter` to the 64-bit `detail::MutationCounter`, and
+`LinkedList<T>::Enumerator::version_` from `NarrowMutationVersion` to
+`MutationVersion` **in the same change**. Both together, deliberately: widening
+the container alone would turn the guard's comparison into a silent truncation
+and leave the 2^32 alias in place while the code claimed otherwise — the failure
+mode §8.2 identifies for `BitArray` and refuses. Seven increment sites and three
+read/compare sites are unchanged in spelling; the production diff is two field
+declarations plus comments.
+
+**The defect was reproduced before any production change.** Pre-fix,
+`build-probe/1788_prefix_defects.log` shows `guard-fired=0` for
+`LinkedList<int>`, `LinkedList<std::string>` and `Reset()` once the counter is
+positioned 2^32 forward — `defects-observed=3`. The identical source post-fix
+reads `guard-fired=1` and `defects-observed=0`, and the entire diff of the two
+logs is the counter width, those three outcomes, and one sentinel probe reaching
+a larger maximum; **every mutation-delta line is byte-identical**. UBSan reported
+**0** runtime errors on both sides, confirming #1787 had already removed the
+signed-overflow UB and that this ticket closed only the remaining *logical* ABA
+horizon. The consequence mattered because `Enumerator` holds a raw `data_t*` into
+`shared_ptr`-owned node storage, so a false positive is a potential
+use-after-free, and at ~10^8 mutations/second 2^32 is about **43 seconds**.
+
+Measured, not estimated: `sizeof(LinkedList<T>)` **40 → 48** for every `T`,
+`alignof` unchanged at 8, `head_`/`tail_`/`count_` offsets unchanged;
+`sizeof(Enumerator)` **unchanged at 40** — its wider snapshot landed in padding
+it already had, exactly as §8.1 predicted, with every other member keeping its
+offset; `sizeof(LinkedListNode<T>)`, both STL iterators and
+`LinkedListNodeData<T>` unchanged; **0 `LinkedList` symbols added, removed or
+renamed** (796 on each side, byte-identical name lists). No public signature
+changed and every in-repository caller compiles unmodified.
+
+**The break is binary-only and silent, and that was measured.** An object file
+compiled against the old header links with a new one producing **no diagnostic in
+either link order**; then, depending on which won the COMDAT race, it either
+takes an ASan heap-buffer-overflow and a SEGV, or silently corrupts the member
+following a `LinkedList<T>` embedded by value **with no sanitizer report at all**
+(the bytes are inside the same allocation), or silently loses mutation
+invalidation — while the other link order looks entirely healthy. A complete
+consumer rebuild is mandatory and `README.md` now says so in those terms.
+
+**One honest correction to #1787's own record.** Mutation-testing the required
+adapter flip revealed that #1787's narrow-branch residual assertion positioned
+the counter at `snapshot` rather than `snapshot + 2^32`. Identical for a 32-bit
+field, but true for any width — so it pinned nothing about the residual its
+comment described, and flipping the flag left it passing. It now spells the full
+distance and asserts the truncation itself, making it load-bearing for `BitArray`
+and for #1789.
+
+New permanent suite `LinkedListVersionWideningTests.cpp` (**+40** cases, all
+boundary positioning through #1800's one authoritative seam, no new
+specialisation body) and a new tracked consumer fixture
+`test/consumer/collections_linked_list_version.cpp`, compiled with
+`-Wall -Wextra -Wpedantic -Werror` and run. All 49 `LinkedListNodeLifetimeTests`
+cases from #1769 pass **unmodified**.
+
+Validation from `cmake --fresh` plus a clean-first rebuild at **three jobs** (634
+objects, **0** predating the fresh-configure marker, 37 of 38 executables
+relinked, 0 warnings, 0 errors — the exception being the `EXCLUDE_FROM_ALL`
+`build/SharpRuntimeTests`, an 85 MB historical binary outside the gate that is
+now definitively stale and should be deleted rather than trusted):
+`Collections.Core` **2,594** (was 2,554); full repository **13,880 across 37
+executables** (was 13,840); negative consumer fixtures **8 / 51, every site
+rejected** plus 37/37 self-test, none added; version-seam ODR **2 seams / 18
+specialisations** plus 12/12 self-test, none added; module graph **41 / 90**
+unchanged; Doxygen **1,941** of the 1,942 ceiling, the single new warning
+attributed to the one new `README.md` link into `docs/`; the full ten-component
+selective matrix and the new fixture passed; ASan/UBSan/LSan `Collections.Core`
+**2,594 with zero reports**, LSan proved active by a bounded self-test, and a
+200,000-node boundary-positioned teardown clean; `git diff --check` clean; the
+local CI gate passed. **TSan was not run** — no atomic, no `mutable` cache, no
+hidden `const` write, and no thread-safety claim is made for `LinkedList<T>`
+before or after.
+
+**CNA and mobile-eggbert were not inspected, searched, configured, built or
+modified**, no claim is made about whether they use `LinkedList<T>`, and **#1773
+remains `blocked`**. #1789 remains `blocked` — `BitArray` keeps its 2^32
+residual deliberately, because closing it grows the **public**
+`BitArray::Enumerator` from 32 to 40 bytes and that is a separate approval — and
+#1803 remains `blocked` and untouched.

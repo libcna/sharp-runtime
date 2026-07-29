@@ -141,9 +141,21 @@ found or fixed it. The repair is
 `System::Collections::detail::BasicMutationCounter`, whose assignment advances
 the destination rather than taking the source's value; the full record is
 `docs/CollectionVersionCounterSweep.md`. Thirteen types were fully repaired;
-`LinkedList<T>` and `BitArray` keep a 32-bit counter and a documented 2^32
+`LinkedList<T>` and `BitArray` kept a 32-bit counter and a documented 2^32
 residual, tracked by blocked tickets #1788 and #1789. **This cause's membership
 list is still unchanged.**
+
+**Update, 2026-07-29 (ticket #1788, no `SR-AUD-*` identifier).** `LinkedList<T>`'s
+half of that residual is **closed**. The user granted the explicit object-size
+approval, and both its counter and its `Enumerator`'s snapshot are now 64-bit, so
+`sizeof(LinkedList<T>)` grew 40 → 48 on LP64 while `sizeof(Enumerator)` stayed 40
+and **no mangled name changed**. The pre-fix 2^32 revalidation was reproduced
+first (`guard-fired=0` three times, `defects-observed=3`) and reads
+`defects-observed=0` after. **`BitArray` alone still carries this residual**,
+deliberately: closing it grows the *public* `BitArray::Enumerator` from 32 to 40
+bytes, which is ticket #1789's separate approval and remains `blocked`. The
+membership list of this cause is still unchanged; the record is
+`docs/CollectionVersionCounterSweep.md` §19.
 
 ## CCF-005 — high-value conversion APIs need explicit boundary and special-value validation
 

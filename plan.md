@@ -36,9 +36,11 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 13,840 passing across 36 component binaries plus one integration
-  binary, verified by ticket #1791 from a fully fresh configuration and a
-  clean-first rebuild, raised from the 13,790 verified by ticket #1802 and
+- Tests: 13,880 passing across 36 component binaries plus one integration
+  binary, verified by ticket #1788 from a fully fresh configuration and a
+  clean-first rebuild -- which the LinkedList<T> object-layout change made
+  mandatory rather than merely prudent -- raised from the 13,840 verified by
+  ticket #1791, itself raised from the 13,790 verified by ticket #1802 and
   re-measured by ticket #1800. #1800 moved test code between files without
   adding or removing a case, so the figure was unchanged rather than stale at
   that point. (The 12,991 figure this line once carried was a stale relic; each
@@ -55,7 +57,7 @@ was never created. Neither file should be linked as current documentation.
   compatibility build, and a pinned Ubuntu 24.04 Doxygen-warning-baseline job
   in `.github/workflows/components.yml`. The missing direct
   `Collections.Blocking` consumer is `SR-AUD-001`.
-- Doxygen 1.9.8: 1,940 current warnings against a 1,942-warning ceiling.
+- Doxygen 1.9.8: 1,941 current warnings against a 1,942-warning ceiling.
   `scripts/check_doxygen_warnings.sh` enforces that ceiling; lower counts are
   accepted and a Doxygen upgrade requires a deliberate re-baseline.
 
@@ -66,7 +68,7 @@ The 2026-07-29 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,803 rows: 1,797 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`), implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`), and design ticket #1785 (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened inactive by #1784 and closed by adopting .NET's nested-view validation order), design ticket #1795 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY-DESIGN`, opened because #1794 is an implementation row and was deliberately not reused), and implementation ticket #1794 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, which landed #1795's design under the full four-item approval: owning `std::any` Key/Value, a mandatory `MoveNext`-time snapshot on both implementations, two `ListDictionaryInternal` parity corrections, and an acknowledged silent ABI break through two independent mechanisms) — one `wontfix` (#1772, obsoleted by #1771), five deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval; #1791 `REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, opened by #1790 and awaiting the four-part approval in `docs/ListIndexerVersioningDesign.md` section 28; and #1803 `REMED-TOOLING-SORTEDSET-SEAM-NEGATIVE-FIXTURE`, opened inactive by #1801 for the one seam — `SortedSetVersionAccess` — whose *consumer-side* unreachability has no negative fixture, nothing being known to be wrong with it; **all three rows #1799 opened inactive are now closed**: #1802 `REMED-COLL-HASHTABLE-REMOVE-VERSION`, #1800 `REMED-COLL-VERSION-SEAM-ODR` and #1801 `REMED-TOOLING-NEGATIVE-FIXTURE-CI`, see below; **this line said "eight" while listing seven until #1802 corrected it, and the count is taken from the database on each edit**); design ticket #1797 (`REMED-COLL-HASHTABLE-VALUE-ACCESS-DESIGN`, opened because #1796 is an implementation row and was deliberately not reused), design ticket #1799 (`REMED-COLL-LISTDICT-SETITEM-DESIGN`, opened for the same reason against #1798 and closed 2026-07-29 with no production change), implementation ticket #1798 (`REMED-COLL-LISTDICTINTERNAL-PARITY`, which landed #1799's design under the full three-item approval: a private `ValidatedKey` making null-key rejection structurally unskippable across all five raw-key entry points, one `setItem` upsert whose bump follows the mutation and covers replacement and equal-value replacement, deletion of the `const_cast` that made the key view's `CopyTo` publish a writable pointer to a caller's `const` object, two deliberate deviations from .NET's bump-first shape on a throwing `Add` and an absent `Remove`, and an acknowledged **silent** stale-object hazard requiring a full consumer rebuild), and implementation ticket #1796 (`REMED-COLL-HASHTABLE-WRITE-ESCAPES`, which landed #1797's design under the full four-item approval: owning `std::any` from `getItem`/`at`/the `const` indexer, a non-copyable `ValueReference` proxy making `table[key] = value` a tracked insert-or-replace and a bare read no longer insert, `KeyNotFoundException` in place of `std::out_of_range`, and an acknowledged silent ABI break requiring a full consumer rebuild) are both `done`, as is tooling ticket #1801 (`REMED-TOOLING-NEGATIVE-FIXTURE-CI`, which made all **seven** — not six — negative consumer fixtures compile per site from `scripts/local_ci_check.sh`, 37 sites, after reproducing the whole-file false pass and proving the checker against a 7/7 mutation campaign; no production source, signature, symbol or layout changed); no `todo`, `doing`, or `needs_user` rows |
+| `ticket` | 1,803 rows: 1,799 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`), implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`), and design ticket #1785 (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened inactive by #1784 and closed by adopting .NET's nested-view validation order), design ticket #1795 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY-DESIGN`, opened because #1794 is an implementation row and was deliberately not reused), and implementation ticket #1794 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, which landed #1795's design under the full four-item approval: owning `std::any` Key/Value, a mandatory `MoveNext`-time snapshot on both implementations, two `ListDictionaryInternal` parity corrections, and an acknowledged silent ABI break through two independent mechanisms) — one `wontfix` (#1772, obsoleted by #1771), three deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, opened by #1787 and still awaiting an explicit approval that `sizeof(BitArray::Enumerator)` may grow 32 → 40; and #1803 `REMED-TOOLING-SORTEDSET-SEAM-NEGATIVE-FIXTURE`, opened inactive by #1801 for the one seam — `SortedSetVersionAccess` — whose *consumer-side* unreachability has no negative fixture, nothing being known to be wrong with it; **this clause said "five" and still listed #1791 and #1788 as blocked until ticket #1788 corrected it: #1791 was closed earlier the same day and #1788 closed itself, so two of the five were already stale when written**; implementation ticket #1788 (`REMED-COLL-LINKEDLIST-VERSION-WIDEN`) is now `done`, having widened `LinkedList<T>`'s mutation counter and its enumerator's snapshot to 64 bits under the explicit approval that `sizeof(LinkedList<T>)` may grow 40 → 48 on LP64, with a measured silent binary break and a mandatory full consumer rebuild; **all three rows #1799 opened inactive are now closed**: #1802 `REMED-COLL-HASHTABLE-REMOVE-VERSION`, #1800 `REMED-COLL-VERSION-SEAM-ODR` and #1801 `REMED-TOOLING-NEGATIVE-FIXTURE-CI`, see below; **this line said "eight" while listing seven until #1802 corrected it, and the count is taken from the database on each edit**); design ticket #1797 (`REMED-COLL-HASHTABLE-VALUE-ACCESS-DESIGN`, opened because #1796 is an implementation row and was deliberately not reused), design ticket #1799 (`REMED-COLL-LISTDICT-SETITEM-DESIGN`, opened for the same reason against #1798 and closed 2026-07-29 with no production change), implementation ticket #1798 (`REMED-COLL-LISTDICTINTERNAL-PARITY`, which landed #1799's design under the full three-item approval: a private `ValidatedKey` making null-key rejection structurally unskippable across all five raw-key entry points, one `setItem` upsert whose bump follows the mutation and covers replacement and equal-value replacement, deletion of the `const_cast` that made the key view's `CopyTo` publish a writable pointer to a caller's `const` object, two deliberate deviations from .NET's bump-first shape on a throwing `Add` and an absent `Remove`, and an acknowledged **silent** stale-object hazard requiring a full consumer rebuild), and implementation ticket #1796 (`REMED-COLL-HASHTABLE-WRITE-ESCAPES`, which landed #1797's design under the full four-item approval: owning `std::any` from `getItem`/`at`/the `const` indexer, a non-copyable `ValueReference` proxy making `table[key] = value` a tracked insert-or-replace and a bare read no longer insert, `KeyNotFoundException` in place of `std::out_of_range`, and an acknowledged silent ABI break requiring a full consumer rebuild) are both `done`, as is tooling ticket #1801 (`REMED-TOOLING-NEGATIVE-FIXTURE-CI`, which made all **seven** — not six — negative consumer fixtures compile per site from `scripts/local_ci_check.sh`, 37 sites, after reproducing the whole-file false pass and proving the checker against a 7/7 mutation campaign; no production source, signature, symbol or layout changed); no `todo`, `doing`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -2170,3 +2172,85 @@ incompatibilities stand. #1790 and #1792–#1802 remain `done` and none was
 reopened. CNA and mobile-eggbert were not inspected, searched, configured, built,
 or modified, so the source-break figures here are *this repository only*. No
 push, merge, rebase, tag, or publication occurred.
+
+### Completed LinkedList mutation-counter widening: ticket #1788
+
+Ticket **#1788** (`REMED-COLL-LINKEDLIST-VERSION-WIDEN`, P3, size S, `defect`,
+area `Collections`) widened `System::Collections::Generic::LinkedList<T>`'s
+private mutation counter — and, in the same change, its `Enumerator`'s snapshot —
+from 32 to 64 bits. It was opened `blocked` by ticket #1787 and began only after
+the user granted the exact approval `docs/CollectionVersionCounterSweep.md` §8.1
+had asked for. **No new `SR-AUD-*` identifier**; the numbering stays frozen at
+364. The implementation record is **§19** of that document, appended below
+#1787's, which is preserved unedited.
+
+**The defect, reproduced before anything changed.** #1787 removed the
+signed-overflow undefined behaviour from every counter but could not widen this
+one without growing a public object, so it left a 2^32 enumerator-snapshot ABA:
+after 2^32 effective mutations the counter returned to a value an outstanding
+`Enumerator` had captured and the equality guard silently accepted it. Because
+that enumerator holds a raw `data_t*` into `shared_ptr`-owned node storage, the
+consequence was a potential **use-after-free**, not merely a wrong answer, and at
+~10^8 mutations/second the horizon was about **43 seconds** of hot mutation.
+`build-probe/1788_prefix_defects.log` reads `guard-fired=0` three times
+(`LinkedList<int>`, `LinkedList<std::string>`, and `Reset()`),
+`defects-observed=3`; the identical source post-fix reads `guard-fired=1` and
+`defects-observed=0`. UBSan reported **0** runtime errors on **both** sides,
+confirming #1787 had already closed the UB and that this ticket closed only the
+remaining logical horizon.
+
+**Measured, not assumed.** `sizeof(LinkedList<T>)` **40 → 48** for every `T`,
+`alignof` unchanged at 8, `head_`/`tail_`/`count_` offsets unchanged;
+`sizeof(Enumerator)` **unchanged at 40**, because its wider snapshot landed in
+padding it already had, with every other enumerator member keeping its offset;
+`sizeof(LinkedListNode<T>)`, both iterators and `LinkedListNodeData<T>`
+unchanged; and **0 `LinkedList` symbols added, removed or renamed** — 796 on both
+sides with byte-identical name lists. The only symbol delta anywhere is five
+weak inline members of the counter class swapping from the `unsigned int`
+instantiation to the `unsigned long` one.
+
+**The break is binary-only and silent, which was reproduced rather than
+asserted.** No public signature, return type, parameter or `const` qualification
+changed, and every in-repository call site compiles unmodified. But an object
+file compiled against the old header links with a new one **with zero
+diagnostics in both link orders** — and then, depending on which won the COMDAT
+race, either takes an AddressSanitizer heap-buffer-overflow and a SEGV, or
+silently corrupts the member following an embedded `LinkedList<T>` **with no
+sanitizer report at all**, or silently loses mutation invalidation
+(`guard-fired=0`); in the other order everything appears to work. A complete
+consumer rebuild is therefore mandatory, and `README.md` says the linker will not
+warn you.
+
+**A weakness in #1787's own pin was found and fixed, not concealed.** Flipping
+`LinkedListAdapter::kNarrowCounter` back to `true` as a mutation check failed
+only *one* test. #1787's narrow branch positioned the counter at
+`static_cast<Value>(snapshot)` rather than at `snapshot + 2^32` — identical for a
+32-bit field, but true for a counter of any width, so it pinned nothing about the
+residual its comment described. It now spells the full distance and asserts the
+truncation itself, which makes it load-bearing for `BitArray` and for #1789.
+
+Validation from a fresh configure plus a clean-first rebuild at **three jobs**
+(634 objects — 630 C++, 4 C — **0 predating the fresh-configure marker**, 37 of
+38 executables relinked, 0 warnings, 0 errors; the exception is the
+`EXCLUDE_FROM_ALL` `build/SharpRuntimeTests`, an 85 MB historical binary outside
+the gate that is now definitively stale): `Collections.Core` **2,594** (was
+2,554), full repository **13,880 across 37 executables** (was 13,840), negative
+consumer fixtures **8 / 51** all rejected plus 37/37 self-test (none added),
+version-seam ODR **2 seams / 18 specialisations** plus 12/12 self-test (none
+added — the new suite includes the one authoritative seam file), module graph
+**41 / 90** unchanged, Doxygen **1,941** of the 1,942 ceiling with the single new
+warning attributed to the one new `README.md` link into `docs/`, the full
+ten-component selective matrix plus the new `Collections.Core` fixture passed,
+ASan/UBSan/LSan `Collections.Core` **2,594 with zero reports** and LSan proved
+active by a bounded self-test (336 bytes in 7 allocations, exit 1), a 200,000-node
+teardown at the boundary clean under ASan, `git diff --check` clean, local CI gate
+passed. **TSan was not run**: no atomic, no `mutable` cache, no hidden `const`
+write, and `LinkedList<T>` claims no thread safety before or after.
+
+Tickets #1773, #1789 and #1803 remain `blocked` and untouched — in particular
+`BitArray` keeps its 2^32 residual, deliberately, because closing it grows the
+**public** `BitArray::Enumerator` and that is #1789's separate approval. #1790,
+#1791 and #1792–#1802 remain `done` and none was reopened. CNA and
+mobile-eggbert were not inspected, searched, configured, built or modified, and
+no claim is made about whether they use `LinkedList<T>`. No push, merge, rebase,
+tag, or publication occurred.

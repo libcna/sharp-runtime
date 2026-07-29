@@ -15,6 +15,19 @@ and untouched. The counter, its type, and its increment all arrived with ticket
 
 ---
 
+> **Follow-up landed — ticket #1788, 2026-07-29.** One of the two approval-blocked
+> residuals below is **closed**. `LinkedList<T>` now carries the 64-bit
+> `MutationCounter`, its enumerator the 64-bit `MutationVersion`, and
+> `sizeof(LinkedList<T>)` grew **40 → 48** on LP64 under the explicit user approval
+> §8.1 asked for. Everything §§1–17 record about the *state on the day #1787
+> landed* is preserved unedited and is still accurate as history — this document
+> deliberately does **not** pretend `LinkedList<T>` was always 64-bit. The
+> implementation record, with re-measured layout, symbols, a stale-object probe and
+> performance, is **§19**. `BitArray` is unchanged and ticket #1789 remains blocked
+> on its own separate approval.
+
+---
+
 ## 1. Executive summary
 
 Every mutation counter in `modules/collections/include/` now uses the new
@@ -529,7 +542,14 @@ Both are **fully repaired for defects 1 and 3** and both retain **defect 2**,
 because closing it means growing a public object. Neither breaking change is
 implemented; each has a blocked ticket stating the exact approval required.
 
-### 8.1 `LinkedList<T>` — ticket #1788
+### 8.1 `LinkedList<T>` — ticket #1788 — **APPROVED AND CLOSED, 2026-07-29**
+
+> The approval this section asks for was granted and the change landed. Everything
+> below is #1787's original analysis, preserved unedited because its predictions
+> are what #1788 was measured against — and every one of them held exactly, including
+> `sizeof` 40 → 48 and `sizeof(Enumerator)` staying 40. The implementation record
+> is **§19**.
+
 
 - **Affected public type:** `System::Collections::Generic::LinkedList<T>` and
   its private `Enumerator`.
@@ -1010,7 +1030,7 @@ a 64-bit compare cost the same as 32-bit ones on x86-64.
 
 | # | Risk | Severity | Position |
 |---|---|---|---|
-| 1 | `LinkedList<T>` and `BitArray` keep a 2^32 ABA horizon | **Medium** | **Real and not eliminated.** Reachable in tens of seconds of hot mutation. Closing it needs a public object-size change and therefore user approval; blocked tickets #1788 and #1789 state exactly what is required. Pinned by a test so the residual cannot be forgotten or accidentally "fixed" without updating the record. |
+| 1 | `LinkedList<T>` and `BitArray` keep a 2^32 ABA horizon | **Medium** | **Real and not eliminated.** Reachable in tens of seconds of hot mutation. Closing it needs a public object-size change and therefore user approval; blocked tickets #1788 and #1789 state exactly what is required. Pinned by a test so the residual cannot be forgotten or accidentally "fixed" without updating the record. **Half closed 2026-07-29 (§19): #1788 was approved and `LinkedList<T>` is now 64-bit. `BitArray` alone still carries this risk, unchanged, tracked by #1789.** |
 | 2 | The thirteen wide types keep a 2^64 ABA horizon | Negligible | Over 580 years of uninterrupted mutation of one instance (§11). Guarding it would cost a branch on every mutation (§7 C/F). Stated, not hidden. |
 | 3 | Self-assignment now invalidates enumerators on fourteen collections | Low | Deliberate and argued (§6.2): member-wise self-assignment of the backing container may reallocate. `LinkedList<T>` keeps its no-op behaviour. Both are pinned by tests. .NET has no analogue. |
 | 4 | Assignment now throws where it previously continued silently | Low | Only for a program that keeps enumerating a collection after that collection was wholesale replaced — which was a use-after-free for six of the fourteen. No well-defined program changes behaviour (§6, point 7). All 1,841 pre-existing Collections.Core tests pass unmodified. |
@@ -1026,7 +1046,7 @@ a 64-bit compare cost the same as 32-bit ones on x86-64.
 
 | Ticket | Key | Status | Scope |
 |---|---|---|---|
-| **#1788** | `REMED-COLL-LINKEDLIST-VERSION-WIDEN` | **blocked** (approval) | Widen `LinkedList<T>`'s counter to 64 bits, accepting `sizeof(LinkedList<T>)` 40 → 48 on LP64 (§8.1) |
+| **#1788** | `REMED-COLL-LINKEDLIST-VERSION-WIDEN` | **done** 2026-07-29 | Widened `LinkedList<T>`'s counter *and its enumerator's snapshot* to 64 bits; approval granted, `sizeof(LinkedList<T>)` 40 → 48 on LP64 as predicted (§8.1, implementation §19) |
 | **#1789** | `REMED-COLL-BITARRAY-VERSION-WIDEN` | **blocked** (approval) | Widen `BitArray`'s counter and its public `Enumerator`'s snapshot to 64 bits, accepting `sizeof(BitArray::Enumerator)` 32 → 40 on LP64 (§8.2) |
 | **#1790** | `REMED-COLL-LIST-INDEXER-VERSION` | **todo**, inactive | Category D, non-versioning: `List<T>::operator[]` returns a plain `T&`, so `list[i] = value` cannot bump the counter, unlike .NET's index setter. Documented in `List.hpp`'s own class comment since ticket 1713 and **not** introduced or worsened here. Closing it means a proxy-object return on the most call-site-heavy method in the repository. Recorded so it is tracked rather than only commented. |
 | #1785 | `REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER` | **todo**, untouched | Unchanged by this ticket; no exception ordering was altered |
@@ -1091,3 +1111,475 @@ with them, all three defect classes. A revert must be validated by re-running
 both headers, not by CTest alone — the permanent suite's near-boundary cases
 position the counter through the seam and would observe the old behaviour as
 correct if the seam's expectations were reverted with it.
+
+---
+
+## 19. Ticket #1788 implementation record — `LinkedList<T>` widened to 64 bits
+
+*Recorded 2026-07-29 on local branch
+`feature/remediation-coll-linkedlist-version-widen`. Ticket **#1788**, key
+`REMED-COLL-LINKEDLIST-VERSION-WIDEN`, priority **P3**, size **S**, category
+`defect`, area `Collections`. **No new `SR-AUD-*` identifier** — the audit
+numbering stays frozen at 364 and this was found during remediation, by #1787's
+own §8.1. Sections 1–18 above are #1787's record and are preserved unedited;
+this section is additive.*
+
+### 19.1 The approval that was applied
+
+The user granted, scoped to #1788 only, explicit approval to: widen the counter
+to 64-bit unsigned; widen every iterator/enumerator snapshot that compares
+against it; accept the measured `sizeof(LinkedList<int>)` **40 → 48**; accept any
+corresponding enumerator layout change; accept the resulting public template
+ABI/layout break; require a complete rebuild of every consumer adopting this
+revision; and accept the removal of the pinned 2^32 ABA behaviour in favour of
+the 64-bit contract.
+
+The approval explicitly did **not** extend to #1789, #1803, any
+`LinkedListNode` lifetime redesign, any unrelated `LinkedList` API change, any
+downstream CNA/mobile-eggbert migration, or any additional public source or ABI
+break. None of those was performed.
+
+### 19.2 Old and new representation, and every site
+
+| | Before #1788 | After #1788 |
+|---|---|---|
+| `LinkedList<T>::version_` | `detail::NarrowMutationCounter` (`BasicMutationCounter<uintcs>`, 32-bit) | `detail::MutationCounter` (`BasicMutationCounter<ulongcs>`, 64-bit) |
+| `LinkedList<T>::Enumerator::version_` | `detail::NarrowMutationVersion` (`uintcs`) | `detail::MutationVersion` (`ulongcs`) |
+
+Both moved together, deliberately. Widening the container alone would make the
+comparison a silent truncation and leave the 2^32 alias in place while the code
+claimed otherwise — the failure mode §8.2 identifies for `BitArray` and refuses.
+
+**Seven increment sites**, all unchanged in spelling (`++version_`) and all still
+one instruction:
+
+| Site | `LinkedList.hpp` member | Reached from |
+|---|---|---|
+| 1 | `insertLast` | `AddFirst`/`AddLast` (both overloads), `insertAfter` at the tail, `copyNodesFrom` |
+| 2 | `insertBefore` | `AddFirst`/`AddBefore` (both overloads), `insertAfter` in the middle |
+| 3 | `unlink` | `Remove(T)`, `Remove(node)`, `RemoveFirst`, `RemoveLast` |
+| 4 | `adoptNodesFrom` — `++other.version_` | move construction and move assignment, invalidating the **emptied source** |
+| 5 | `operator=(const LinkedList&)` | copy assignment, after `detachAll()` |
+| 6 | `operator=(LinkedList&&)` | move assignment, after `detachAll()` |
+| 7 | `Clear()` | `Clear()`, unconditionally |
+
+**Three read/compare sites**, all unchanged, all `==` only — nothing anywhere
+compares the counter with `<`, `>` or subtraction, so no guard depends on
+monotonicity across a wrap:
+
+| Site | Expression |
+|---|---|
+| 1 | `Enumerator::Enumerator` — `version_(list->version_)`, the snapshot |
+| 2 | `Enumerator::MoveNext` — `requireUnmodified(version_ == list_->version_)` |
+| 3 | `Enumerator::Reset` — the same guard |
+
+The production diff is two field declarations plus comments. Every increment and
+every guard is spelled exactly as it was.
+
+### 19.3 The pre-fix reproduction, taken before anything changed
+
+`build-probe/1788_probe2_defects.cpp` — one source run against both headers, with
+the pre-fix header extracted by `git show` into
+`build-probe/1788_prefix-include/`. The counter is positioned with GCC's
+`-fno-access-control`, which suppresses access checking and nothing else; no
+macro is defined over a library header and no declaration is edited. No mode
+performs more than a few dozen real mutations.
+
+`build-probe/1788_prefix_defects.log`, verbatim:
+
+```
+counter-value-type-bytes=4
+counter-max=4294967295
+enumerator-snapshot-bytes=4
+LinkedList<int>          snapshot=3 counter-2^32-later=3 guard-fired=0
+LinkedList<std::string>  snapshot=2 counter-2^32-later=2 guard-fired=0
+LinkedList<int> Reset()   guard-fired=0
+defects-observed=3
+```
+
+`build-probe/1788_postfix_defects.log`, same source, same modes:
+
+```
+counter-value-type-bytes=8
+counter-max=18446744073709551615
+enumerator-snapshot-bytes=8
+LinkedList<int>          snapshot=3 counter-2^32-later=4294967299 guard-fired=1
+LinkedList<std::string>  snapshot=2 counter-2^32-later=4294967298 guard-fired=1
+LinkedList<int> Reset()   guard-fired=1
+defects-observed=0
+```
+
+The complete diff of the two logs is: the counter's width, those three
+`guard-fired` outcomes, and one sentinel probe reaching a larger maximum.
+**Every delta line is byte-identical**, which is the evidence that the mutation
+semantics did not move.
+
+**No signed-overflow UB remained to fix.** The pre-fix probe under UBSan
+(`1788_prefix_defects_ubsan.log`) reports **0 runtime errors** and exits 0 —
+#1787 had already removed that, and #1788 closes only the residual *logical* ABA
+horizon. Post-fix UBSan is likewise 0.
+
+Also reconfirmed pre-fix, and unchanged post-fix: `LinkedList<T>`'s guarded
+`operator=` from #1769 already bumped on copy and move assignment and already
+short-circuited self-assignment (`self-copy-assign before=3 after=3`); no
+sentinel exists (six counter positions including the maximum each enumerate the
+exact element count); and there is no `Count` cache keyed on the counter.
+
+### 19.4 The mutation-version delta matrix
+
+Measured pre-fix and post-fix; **identical on both sides**. Pinned permanently by
+`LinkedListVersionWideningTests.cpp`, not only by the probe.
+
+| Operation | Δ version |
+|---|---:|
+| `AddFirst(value)`, `AddFirst(node)` | +1 |
+| `AddLast(value)`, `AddLast(node)` | +1 |
+| `AddBefore(node, value)`, `AddBefore(node, newNode)` | +1 |
+| `AddAfter(node, value)`, `AddAfter(node, newNode)`, `AddAfter` at the tail | +1 |
+| `Remove(value)` that finds a match | +1 |
+| `Remove(node)`, `RemoveFirst()`, `RemoveLast()` | +1 |
+| `Clear()` on a non-empty list | +1 |
+| `Clear()` on an **already empty** list | **+1** (unconditional — the pre-existing contract, deliberately unchanged) |
+| detach then reattach one node | +2 |
+| copy assignment `a = b` | +1 for the explicit bump, **+1 per node copied** |
+| move assignment `a = std::move(b)` | +1 on the destination, **+1 on the emptied source** |
+| self copy assignment `a = a` | **0** — #1769's `if (this != &other)` guard |
+| self move assignment | **0** |
+| `Remove(value)` that finds nothing | 0 |
+| cross-list `Remove`/`AddBefore`/`AddAfter` (throws) | 0 |
+| duplicate attachment of an attached node (throws) | 0 |
+| null node handle (throws `ArgumentNullException`) | 0 |
+| `RemoveFirst`/`RemoveLast` on an empty list (throws) | 0 |
+| `Contains`, `Find`, `FindLast`, `CopyTo`, `getCountProperty`, range-`for` | 0 |
+| `node.setValueProperty(v)` — a value write, not a structural change | 0 |
+
+The last row is the pre-existing documented contract and #1788 deliberately did
+not revisit the mutation/no-op policy: this ticket changed a width, nothing else.
+
+### 19.5 Object layout — re-measured, not assumed
+
+`build-probe/1788_probe1_layout.cpp`, one source run against both headers
+(`1788_prefix_layout.log` → `1788_postfix_layout.log`), LP64, GCC 14.2,
+libstdc++. Offsets are computed from a live object, because `LinkedList<T>` is
+not standard-layout in the `offsetof` sense for every `T`.
+
+| | pre | post |
+|---|---|---|
+| `sizeof(LinkedList<int>)` / `<std::string>` / `<double>` | 40 | **48** |
+| `alignof(LinkedList<T>)` | 8 | **8** |
+| `head_` offset (`shared_ptr`, 16) | 0 | **0** |
+| `tail_` offset (`weak_ptr`, 16) | 16 | **16** |
+| `count_` offset (`intcs`, 4) | 32 | **32** |
+| `version_` offset (width) | 36 (4) | **40 (8)** |
+| `sizeof(LinkedList<T>::Enumerator)` | 40 | **40** |
+| `Enumerator::version_` offset (width) | 16 (4) | **16 (8)** |
+| `Enumerator` `list_` / `cur_` / `started_` / `state_` offsets | 8 / 24 / 32 / 36 | **8 / 24 / 32 / 36** |
+| `sizeof(LinkedListNode<T>)` | 16 | **16** |
+| `sizeof(iterator)` / `sizeof(const_iterator)` | 16 / 16 | **16 / 16** |
+| `sizeof(detail::LinkedListNodeData<int>)` / `<std::string>` | 48 / 72 | **48 / 72** |
+
+Two things the table is worth reading carefully for:
+
+1. **Only the container grew.** Every member *before* `version_` keeps its
+   offset, and `version_` is last, so nothing after it moved — there is nothing
+   after it. `count_` stays at 32 and the four bytes at 36–39 became alignment
+   padding.
+2. **The enumerator was free.** Its snapshot at offset 16 was followed by four
+   bytes of padding before `cur_` at 24; the wider snapshot consumed exactly
+   that. `sizeof(Enumerator)` is 40 before and after and **every other member
+   keeps its offset**. §8.1 predicted this and the prediction held.
+
+Type traits are unchanged: `LinkedList<T>` remains copy-constructible,
+copy-assignable, move-constructible, nothrow-move-constructible, non-polymorphic,
+non-trivially-copyable and standard-layout, for `int` and for `std::string`.
+
+### 19.6 Emitted symbols — zero `LinkedList` symbols changed
+
+`build-probe/1788_probe4_symbols.cpp` explicitly instantiates `LinkedList<T>`,
+`LinkedListNode<T>` and both iterator specialisations for three element types and
+touches every public member; `nm --defined-only` is then diffed between the two
+header revisions. **1,321 symbols on both sides.**
+
+- **`LinkedList`-named symbols: 796 pre, 796 post, and the sorted name lists are
+  byte-identical** — 0 added, 0 removed, 0 renamed. No mangled name encodes a
+  private field's width, which is precisely why this ABI break is silent.
+- The only delta anywhere is 5 removed / 5 added, and all ten are the counter
+  class's own weak inline members swapping instantiation:
+  `BasicMutationCounter<unsigned int>`'s constructor (three aliases),
+  `operator++` and conversion operator give way to
+  `BasicMutationCounter<unsigned long>`'s. In this probe the `<unsigned int>`
+  instantiation disappears entirely because the probe does not include
+  `BitArray`; in the real library `BitArray` still emits it.
+
+### 19.7 Source compatibility — unaffected
+
+No public signature, return type, parameter, or `const` qualification changed on
+`LinkedList<T>`, `LinkedListNode<T>`, or either iterator.
+`getCountProperty()` still returns a plain `intcs` by value; `GetEnumerator()`
+still returns `IEnumerator<T>*`; `AddLast(const T&)` still returns
+`LinkedListNode<T>`; `Remove(const T&)` still returns `bool`. No new overload
+ambiguity: no overload set changed at all. `operator bool`, node equality, and
+the `operator T()` conversion are untouched.
+
+In-repository caller impact: **every existing call site compiles unchanged, with
+no edit anywhere.** The consumers are
+`LinkedListNodeLifetimeTests.cpp` (49 cases), `LinkedListSortedSetTests.cpp`
+(30 LinkedList cases), `ListTests.cpp` (10 `GenLinkedList*` cases),
+`EnumeratorLifecycleTests.cpp` (#1767's case),
+`CollectionVersionCounterTests.cpp`, `Ticket1713VersionTrackingTests.cpp`, and
+the `collections_linked_list.cpp` consumer fixture. There is no production
+consumer of `LinkedList<T>` inside this repository. The only test edits made were
+deliberate assertion changes, listed in §19.10.
+
+### 19.8 The stale-object probe — what the break actually looks like
+
+This is the half that matters, because "requires a rebuild" is worth nothing
+unless someone measured what skipping it does.
+`build-probe/1788_stale_old_caller.cpp` is compiled against the **pre-fix**
+header (40 bytes) and `1788_stale_main.cpp` against the **current** one (48), and
+the two objects are linked into one program in **both orders**.
+
+**The linker says nothing.** Both link commands exit 0 with empty logs
+(`1788_stale_linkA.log`, `1788_stale_linkB.log`) — no error, no warning. The two
+halves genuinely disagree: `old-half-sizeof-LinkedList=40`,
+`new-half-sizeof-LinkedList=48`, and for a consumer type embedding one by value,
+`old-half-sentinel-offset=40` against `new-half-sentinel-offset=48`.
+
+What then happens depends entirely on which object file won the COMDAT race:
+
+| Mode | Link order A (new object first) | Link order B (old object first) |
+|---|---|---|
+| heap-allocated list made by old code, used by new code | **SEGV**; under ASan a **heap-buffer-overflow**, READ of size 8, "0 bytes after 40-byte region", in `BasicMutationCounter<unsigned long>::operator++()` | runs, correct counts, no diagnostic |
+| `LinkedList<T>` embedded by value in a consumer struct | sentinel **corrupted**, `intact=0`, and **no ASan report at all** | sentinel intact |
+| mutation invalidation across the mismatch | **`guard-fired=0`** — fail-fast silently lost | `guard-fired=1` |
+
+Three properties make this the worst kind of break, and all three are measured
+rather than asserted:
+
+1. **No diagnostic at link time, in either order.** Not from `ld`, and this is
+   the same class of miss `#1800` measured for `-flto -Wodr`, ASan
+   `detect_odr_violation=2` and UBSan.
+2. **The embedded case corrupts a neighbouring member with no sanitizer report**,
+   because the corrupted bytes are inside the same allocation — ASan cannot see
+   it. That is silent memory corruption in a program that looks healthy.
+3. **In one of the two link orders everything appears to work.** A consumer who
+   forgets to rebuild and happens to get link order B will observe nothing wrong
+   until the link line changes.
+
+The ASan transcript is `build-probe/1788_stale_asan_heap.log`; the full run in
+both orders is `build-probe/1788_stale_object.log`.
+
+**CNA and mobile-eggbert remain unmeasured.** They were not inspected, searched,
+configured, built or modified, no claim is made about whether they use
+`LinkedList<T>`, and ticket #1773 remains `blocked`.
+
+### 19.9 Performance and allocation
+
+`build-probe/1788_probe5_perf.cpp`, one source at `-O2 -DNDEBUG` against both
+headers, with an `asm volatile` compiler barrier per iteration and replaced
+global `operator new`/`delete` counting allocations.
+
+The first pass — seven runs of one binary then seven of the other — showed
+**every** row several percent faster post-fix, which is not a credible result for
+a 32-to-64-bit increment and is the signature of machine drift. It was therefore
+re-measured with the two binaries **interleaved**, seven paired runs, median
+reported (`1788_perf_summary_paired.log`). Both logs are retained; the
+interleaved one is the honest measurement.
+
+| Operation | pre (ns/op) | post (ns/op) | Δ | allocs pre | allocs post |
+|---|---:|---:|---:|---:|---:|
+| `AddLast`+`RemoveLast` pair | 48.971 | 50.467 | +1.496 | 200000 | 200000 |
+| `AddFirst`+`RemoveFirst` pair | 40.229 | 39.060 | −1.169 | 200000 | 200000 |
+| `Remove(value)` at the head | 43.801 | 43.836 | +0.035 | 200000 | 200000 |
+| iteration, per element | 0.490 | 0.493 | +0.003 | 0 | 0 |
+| iterator creation (`begin`/`end`) | 0.224 | 0.230 | +0.006 | 0 | 0 |
+| enumerator create + 64 × `MoveNext` | 76.051 | 76.176 | +0.125 | 12500 | 12500 |
+| node detach + reattach | 32.164 | 32.818 | +0.654 | 0 | 0 |
+| copy construction, 64 nodes | 1378.692 | 1410.506 | +31.814 | 800000 | 800000 |
+| move construction, 64 nodes | 1529.939 | 1533.569 | +3.630 | 800000 | 800000 |
+| copy assignment, 64 nodes | 1442.930 | 1426.480 | −16.450 | 800000 | 800000 |
+| mutation across the old boundary | 50.131 | 48.832 | −1.299 | 200000 | 200000 |
+| `AddLast`+`RemoveLast`, `std::string` | 45.731 | 45.330 | −0.401 | 200000 | 200000 |
+
+**Verdict: no measurable cost.** The deltas straddle zero, and every one of them
+is far below the ~30–50 ns node allocation that dominates each mutation; a 64-bit
+increment and a 64-bit compare cost the same as 32-bit ones on x86-64. Crucially
+the **allocation counts are identical in every row** — the widening adds no
+allocation on any path, which was requirement 10 of §6.
+
+Memory cost, stated plainly rather than buried: **+8 bytes per `LinkedList<T>`
+object** (40 → 48, a 20% increase for an empty list) and **0 bytes per node**,
+per enumerator, per node handle and per iterator. A list of *n* nodes costs
+48 + 48*n* bytes for `T = int` where it previously cost 40 + 48*n*, so the
+relative cost falls away immediately: it is 20% for an empty list, 4% at ten
+nodes, and 0.4% at a hundred. Cache consequence: `LinkedList<int>` no longer fits
+in a single 64-byte cache line together with an adjacent object at a 16-byte
+offset, but the type was already 40 bytes of pointers and every traversal
+immediately chases a `shared_ptr` to a separately allocated node, so the working
+set is dominated by node locality, not by the header.
+
+### 19.10 Permanent tests
+
+A new focused suite,
+`modules/collections/tests/System/Collections/Generic/LinkedListVersionWideningTests.cpp`,
+**40 cases**, all near-boundary positioning done through the one authoritative
+seam from #1800 (`modules/collections/tests/support/CollectionVersionSeam.hpp`) —
+**no new explicit specialisation body was written**, as CLAUDE.md requires. No
+test performs more than a few dozen real mutations; the whole suite runs in 7 ms.
+
+| Required coverage | Where |
+|---|---|
+| The counter is unsigned, 64-bit, for every element type | `TheCounterIsUnsignedAndSixtyFourBits`, `TheCounterIsWideForEveryElementType` |
+| The approved object growth | `TheObjectGrewToFortyEightBytesOnLp64` (48, `alignof` 8, node handle and both iterators still 16) |
+| No counter leaks through a public surface; traits unchanged | `NoCounterOrCounterTypeLeaksThroughAPublicSurface`, `ValueSemanticsTraitsAreUnchanged` |
+| **No stale snapshot revalidated across the old 2^32 distance** | `NoStaleEnumeratorIsRevalidatedAcrossTheOld2Pow32Distance` (multiples 1, 2, 7, 1000), `ResetAlsoFailsFastAcrossTheOld2Pow32Distance` |
+| **No low-32-bit ABA** — the truncation a container-only widening would have left | `ASnapshotSharingOnlyItsLowThirtyTwoBitsIsStillRejected`, which asserts the low 32 bits match *and* the guard still fires |
+| The horizon is 2^64, stated as a bound not an impossibility | `TheHorizonIsNowTwoToTheSixtyFourNotTwoToTheThirtyTwo` |
+| Every named boundary position | `MutationAtEachNamedBoundaryValueMovesForwardExactly` — 0, 1, 2^31−2, 2^31−1, 2^31, 2^32−2, **2^32−1**, **2^32**, 2^32+5, 2^64−2 |
+| The step that used to wrap | `TheStepThatUsedToWrapNowJustAdvances` (UINT32_MAX → 2^32, explicitly *not* 0) |
+| Enumerator taken before, at, and after the transition | `AnEnumeratorTakenBeforeTheTransitionIsInvalidatedByIt`, `MutationPastTheOldBoundaryStaysExactAndKeepsInvalidating` (25 interleaved steps) |
+| Exhaustion is defined | `ExhaustionWrapsToZeroWithoutUndefinedBehaviour` |
+| No sentinel | `NoCounterValueIsReservedAsASentinel` (6 positions incl. the maximum) |
+| The full delta matrix (§19.4) | `EveryEffectiveMutationAdvancesTheCounterByExactlyOne`, `EveryRejectedOrReadOnlyOperationAdvancesNothing`, `AThrowingRemoveOnAnEmptyListAdvancesNothing`, `ClearOnAnAlreadyEmptyListStillAdvancesUnconditionally`, `DetachAndReattachIsTwoEffectiveMutations` |
+| Assignment, copy, move at the boundary | `CopyAssignmentAdvancesTheDestinationAcrossTheBoundary`, `MoveAssignmentAdvancesTheDestinationAcrossTheBoundary`, `AssignmentWithAMatchingSourceCounterStillInvalidates`, `SelfAssignmentIsStillANoOp`, `SelfMoveAssignmentIsStillANoOp`, `AssignmentDoesNotDisturbTheSourcesOwnEnumerators`, `MoveConstructionFollowsTheEstablishedOwnershipContract` |
+| **A copied list is independent** | `AnIndependentCopyDoesNotInvalidateTheOriginalsEnumerator` |
+| Node lifetime (#1768/#1769) at the boundary | `RemovalThroughACopiedHandleInvalidatesIterationAtTheBoundary`, `ReattachmentInvalidatesIterationAtTheBoundary`, `ClearAtTheBoundaryDetachesEveryRetainedHandle`, `OwnerDestructionWithRetainedNodesIsStillSafeAtTheBoundary`, `ADetachedNodeCanRejoinAnotherListAtTheBoundary`, `DuplicateAttachmentAndCrossListInsertionAreStillRejected`, `ALargeTeardownAtTheBoundaryFreesEveryNode` |
+| Element types | `int` throughout; `StringsInvalidateAcrossTheOldBoundary`; `ANonTriviallyCopyableElementTypeBehavesIdentically` (live-instance counted); `AMoveOnlyElementTypeReachesTheSameContract` (through the existing-node overloads) |
+| The public STL iterators are still **not** version-checked | `ThePublicStlIteratorsStillCarryNoSnapshot` |
+
+**Deliberate assertion changes** — these are the ones a reviewer should look at,
+and there are exactly four:
+
+1. `LinkedListAdapter::kNarrowCounter` in `CollectionVersionCounterTests.cpp`
+   flipped `true` → `false`. That is the flip #1787 designed the flag for: it
+   automatically converts the pinned 2^32-residual assertion into the wide-family
+   no-revalidation assertion, and converts
+   `TheCounterHasTheWidthItsLayoutPermits` from asserting 4 bytes to 8.
+2. `sizeof(G::LinkedList<int>) == 40` was **removed** from
+   `PublishedObjectSizesAreUnchanged` rather than edited to 48, because that
+   figure did *not* stay unchanged and a test with that name must not claim it
+   did. A comment there points at the new home, and 48 is asserted in the new
+   suite's `TheObjectGrewToFortyEightBytesOnLp64`.
+3. The narrow branch of `NoStaleSnapshotBecomesValidAcrossTheOld2Pow32Distance`
+   was **strengthened** — see §19.11.
+4. Comments in `CollectionVersionCounterTests.cpp`, `MutationCounter.hpp` and
+   `LinkedList.hpp` were updated so none of them still describes
+   `LinkedList<T>` as narrow.
+
+`test/consumer/collections_linked_list_version.cpp` is a new **tracked** consumer
+fixture, compiled against only the public `Collections.Core` surface with
+`-Wall -Wextra -Wpedantic -Werror` and **run**, exercising ordinary construction,
+every mutating member, the fail-fast contract, node lifetime, all four iteration
+forms, and the 48-byte size a consumer can observe. It deliberately does **not**
+reach the counter: no public accessor exists and this ticket added none. The
+pre-existing `test/consumer/collections_linked_list.cpp` (#1769) is unchanged and
+still compiles.
+
+### 19.11 A weakness in #1787's own pin, found by mutation-testing this ticket
+
+The flip in §19.10 item 1 was verified by putting the flag back to `true` and
+rebuilding, to check the assertion was load-bearing rather than vacuous. Only
+**one** test failed — `TheCounterHasTheWidthItsLayoutPermits`.
+`NoStaleSnapshotBecomesValidAcrossTheOld2Pow32Distance` passed either way.
+
+The reason is a real, if harmless, weakness in #1787's narrow branch: it
+positioned the counter at `static_cast<Value>(snapshot)` and expected no throw.
+For a 32-bit counter that is the same value as `snapshot + 2^32`, so the
+assertion was *correct* — but it holds for a counter of **any** width, so it
+pinned nothing about the residual its comment described. The comment claimed more
+than the code checked.
+
+It is now written as `static_cast<Value>(snapshot + kOldAliasStep)` with an added
+`EXPECT_EQ` asserting that the narrowing genuinely lands back on the snapshot.
+That makes the truncation itself the thing under test, so the assertion is
+load-bearing for `BitArray` and would fail if #1789 widened it without flipping
+the flag. Recorded here rather than quietly fixed, because it means #1787's §13
+matrix row *"The two documented residuals"* was, for that one test, weaker than
+stated.
+
+### 19.12 Sanitizers
+
+| Check | Result |
+|---|---|
+| ASan + UBSan + LSan over `SharpRuntimeTests_Collections_Core` | **2,594/2,594 pass, zero reports**, exit 0 (`build-asan/1788_collections_core_asan.log`), run with `detect_leaks=1:detect_odr_violation=2` |
+| UBSan, `1788_probe2_defects`, pre-fix | **0 runtime errors** — #1787 had already removed the signed overflow |
+| UBSan, `1788_probe2_defects`, post-fix | **0 runtime errors** |
+| ASan+UBSan+LSan `1788_probe3_sanitizers`, `boundary-mutation` | `failures=0`, no diagnostic |
+| … `owner-destruction` (retained node, counter at the maximum, wrap to zero) | `failures=0`, no diagnostic |
+| … `detach-reattach` (100 cycles across two lists, crossing the boundary) | `failures=0`, no diagnostic |
+| … `copy-move-assign` (incl. self-assignment) | `failures=0`, no diagnostic |
+| … `large-teardown` (**200,000 nodes**, counter positioned to wrap mid-loop, owning values) | `failures=0`, no diagnostic |
+| **LeakSanitizer proved active** | the bounded self-test leaks deliberately and reports **336 bytes in 7 allocations**, exit 1 — so the zeros above are evidence, not a silent no-op |
+| ASan, stale-object probe | **heap-buffer-overflow** reproduced as designed (§19.8) |
+
+Each probe mode runs as its own process so no abort can hide another.
+
+**TSan was not run, and that is a decision rather than an omission.** This ticket
+adds no atomic, widens none, introduces no `mutable` cache and no hidden `const`
+write; the counter is a plain non-atomic field of a different width, read and
+written at the same three sites. TSan has nothing new to find. **No thread-safety
+guarantee follows from this ticket** — concurrent mutation of a `LinkedList<T>`
+is unsupported before and after, exactly as #1787 §14.3 states.
+
+### 19.13 Gates
+
+Everything below ran from a **fresh configuration plus a clean-first rebuild**,
+which the object-layout change makes mandatory: any object file left over from
+before the change would disagree about `sizeof(LinkedList<T>)` and be an ODR
+violation inside the test binaries themselves.
+
+| Gate | Result |
+|---|---|
+| `cmake --fresh -S . -B build` then `cmake --build build --clean-first --parallel 3` | **0 errors, 0 warnings**; 634 objects (630 C++, 4 C), **0 of them predating the fresh-configure marker**, 37 of 38 executables relinked |
+| `scripts/run_component_tests.sh build` | **13,880** tests across **37** executables (13,840 before; +40, exactly the new suite) |
+| `SharpRuntimeTests_Collections_Core` | **2,594** (2,554 before) |
+| `scripts/validate_module_boundaries.py --root .` | 41 physical modules / 90 dependency edges — unchanged, no new edge |
+| `test/validate_module_boundaries_test.py` | 7/7 |
+| `scripts/generate_component_catalog.py --check` | catalogue current |
+| `scripts/db_consistency_check.py --db plan.sqlite3` | no problems |
+| `scripts/check_version_seam_odr.py` | 2 seams / **18** specialisation definitions — unchanged, no seam added |
+| `test/check_version_seam_odr_test.py` | 12/12 |
+| `scripts/check_negative_consumer_fixtures.py` | **8 fixtures / 51 sites, every site rejected**, 59 compiler invocations, **peak 3 jobs** — unchanged; no negative fixture was added |
+| `test/check_negative_consumer_fixtures_test.py` | 37/37 |
+| `scripts/check_selective_components.sh` | all ten components pass |
+| `check_selective_components.sh Collections.Core collections_linked_list_version.cpp` | passes in isolation, fixture exits 0, 2,594 tests |
+| `scripts/check_doxygen_warnings.sh` | **1,941** of the 1,942 ceiling |
+| `git diff --check` | clean |
+
+The one **+1 Doxygen warning** (1,940 → 1,941) is fully attributed rather than
+waved through: `Doxyfile` scans the module include trees and `README.md` only,
+not `docs/`, so every markdown link from `README.md` into `docs/` produces one
+unresolvable `\ref` warning — *including a second link to a document already
+linked*. The new breaking-change entry adds `README.md:287` pointing at this
+document, alongside the pre-existing `README.md:935` from #1787's entry. That is
+the entire delta.
+
+The 37th of 38 executables not relinked is `build/SharpRuntimeTests`, an
+`EXCLUDE_FROM_ALL` 85 MB historical binary dated 2026-07-24 that the gate does
+not match (it globs `SharpRuntimeTests_*`). **It is now definitively stale**: it
+contains `LinkedList<T>` code compiled against the 40-byte header. It is left in
+place, as #1791 left it, but it should be deleted rather than trusted.
+
+### 19.14 Residual limitations, stated not hidden
+
+| # | Residual | Position |
+|---|---|---|
+| 1 | The ABA horizon is now 2^64, **not infinity** | Over 580 years of uninterrupted mutation of one instance at an implausibly generous 10^9/s. It is modular arithmetic and `TheHorizonIsNowTwoToTheSixtyFourNotTwoToTheThirtyTwo` asserts the wrap explicitly rather than pretending it cannot happen. Guarding it would cost a branch on every mutation (§7 C/F). |
+| 2 | `sizeof(LinkedList<T>)` grew 20% for an empty list | Approved, measured (§19.5, §19.9), and unavoidable — §7 H is arithmetically impossible here. |
+| 3 | **A stale object file links silently and can corrupt memory** | §19.8. No linker, sanitizer or LTO diagnostic. The mandatory full rebuild is the only mitigation, and `README.md` says so in those terms. |
+| 4 | `BitArray` keeps its 2^32 horizon | Untouched by design; ticket #1789 remains `blocked` on its own separate approval (§8.2, §8.3). |
+| 5 | `begin()`/`end()` are still not version-checked | Pre-existing, documented, deliberate, and pinned by `ThePublicStlIteratorsStillCarryNoSnapshot`. `LinkedListNode<T>` remains the lifetime-safe handle. |
+| 6 | `Clear()` on an already-empty list still bumps unconditionally | Pre-existing contract, deliberately not revisited — this ticket changed a width. Now pinned so the next reader sees it is a decision. |
+| 7 | No thread-safety guarantee | The counter is non-atomic before and after. TSan not run, with reasons (§19.12). |
+| 8 | CNA and mobile-eggbert are **unmeasured** | Not inspected, searched, configured, built or modified. #1773 stays `blocked`. |
+
+### 19.15 Rollback
+
+`git revert` of the implementation commit restores the 32-bit counter and, with
+it, the 2^32 ABA horizon. A revert must also flip
+`LinkedListAdapter::kNarrowCounter` back to `true` and remove or invert the new
+suite — otherwise the permanent tests fail, which is the intended safety
+property. Validate a revert by re-running
+`build-probe/1788_probe2_defects.cpp` against both headers and confirming it
+reports `defects-observed=3` again, and by a **fresh clean-first rebuild**, since
+the layout moves back.

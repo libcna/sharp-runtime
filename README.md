@@ -7,10 +7,10 @@ collector, or the complete .NET platform.
 
 The repository currently builds as 41 independently selectable CMake
 components. The verified Linux baseline on 2026-07-29 is a warning-free build
-with **13,840 passing tests across 37 test executables**, measured from a fresh
+with **13,880 passing tests across 37 test executables**, measured from a fresh
 configuration and a clean-first rebuild. (This figure had been stale at 13,538
-for several remediation tickets; ticket #1802 corrected it to 13,790 and ticket
-#1791 raised it to the current value.)
+for several remediation tickets; ticket #1802 corrected it to 13,790, ticket
+#1791 raised it to 13,840, and ticket #1788 raised it to the current value.)
 
 ## What is included
 
@@ -218,6 +218,73 @@ Individual APIs can also document smaller, explicit deviations where C++ has
 no safe or useful equivalent.
 
 ## Breaking changes
+
+### 2026-07-29 — `sizeof(System::Collections::Generic::LinkedList<T>)` grew from 40 to 48 bytes
+
+**This is a binary-compatibility change only. No source changes, and a full
+rebuild of every consumer is mandatory — the linker will not tell you if you
+skip it, because not one mangled name changed.**
+
+`LinkedList<T>`'s private mutation counter — the number its fail-fast
+`GetEnumerator()` enumerator snapshots and compares — was 32 bits. After 2^32
+effective mutations on one instance it returned to a value an outstanding
+enumerator had captured, the equality guard silently accepted that stale
+enumerator, and because the enumerator holds a raw pointer into node storage that
+may since have been freed, the consequence was a potential **use-after-free**
+rather than merely a wrong answer. At roughly 10^8 mutations per second the
+horizon was about **43 seconds** of hot mutation.
+
+The counter and the enumerator's snapshot are now both 64-bit unsigned, so the
+horizon is 2^64 — over 580 years of uninterrupted mutation of one instance. That
+is a bound, not an impossibility, and it is not guarded by a per-mutation branch.
+
+Every member of `LinkedList<T>` and `LinkedListNode<T>` keeps its exact
+signature, return type and `const` qualification, so **ordinary source code needs
+no change at all**:
+
+```cpp
+LinkedList<int> list;                     // unchanged
+LinkedListNode<int> node = list.AddLast(1);
+list.AddAfter(node, 2);
+for (int v : list) { /* ... */ }
+auto* e = list.GetEnumerator();           // still IEnumerator<int>*
+```
+
+What changed, measured on LP64:
+
+| | Before | After |
+|---|---:|---:|
+| `sizeof(LinkedList<T>)`, every `T` | 40 | **48** |
+| `alignof(LinkedList<T>)` | 8 | 8 |
+| `sizeof(LinkedList<T>::Enumerator)` | 40 | 40 |
+| `sizeof(LinkedListNode<T>)`, `iterator`, `const_iterator` | 16 | 16 |
+| mangled symbols added, removed or renamed | — | **0** |
+
+`sizeof` grew because the members were exactly packed — `shared_ptr` (16) +
+`weak_ptr` (16) + `int` count (4) + counter (4) = 40 with **no padding at all**,
+so an 8-byte counter makes it 48 in any member order. The enumerator's snapshot
+widened for free, into padding it already had.
+
+**Why you must rebuild everything.** A translation unit compiled against the old
+header believes the object is 40 bytes; one compiled against the new header
+believes 48. Mixing them is an ODR violation, and it was reproduced in an
+isolated probe: **both link orders link with zero diagnostics** — no error, no
+warning, nothing from `-flto -Wodr` — and then behave completely differently.
+With the new object file first, allocating a list in old code and using it from
+new code is an AddressSanitizer **heap-buffer-overflow** and a **SEGV**;
+embedding a `LinkedList<T>` by value in your own type silently corrupts the
+member that follows it, with **no sanitizer report at all**, because the
+corrupted bytes are inside the same allocation; and mutation invalidation is
+**silently lost**, so a stale enumerator walks freed nodes without throwing. With
+the old object file first, everything appears to work. Which of those you get
+depends on link order. Rebuild everything.
+
+`BitArray` deliberately keeps its 32-bit counter and its 2^32 residual: closing
+it grows the **public** `BitArray::Enumerator` from 32 to 40 bytes, a separate
+decision awaiting its own approval. The full record — reproductions, layout and
+symbol measurements, the stale-object probe, alternatives, and performance — is
+in
+[docs/CollectionVersionCounterSweep.md](docs/CollectionVersionCounterSweep.md).
 
 ### 2026-07-29 — the non-const `List<T>`/`IList<T>` indexer returns a tracked proxy, and the mutable `List<T>::ToVector()` is gone
 
@@ -860,11 +927,15 @@ replaced every counter's signed 32-bit representation with an unsigned one
 (64-bit for thirteen of the fifteen), removing fourteen instances of
 signed-integer overflow; that part is invisible to any conforming program.
 
-Two documented residuals remain, both blocked on an explicit object-size
-approval: `LinkedList<T>` and `BitArray` keep a 32-bit counter, so a stale
-enumerator over either can still be revalidated after 2^32 effective mutations
-on one instance. The full record — inventory, reproductions, .NET comparison,
-layout measurements, and the two blocked designs — is in
+Two documented residuals remained at the time, both blocked on an explicit
+object-size approval: `LinkedList<T>` and `BitArray` kept a 32-bit counter, so a
+stale enumerator over either could still be revalidated after 2^32 effective
+mutations on one instance. **`LinkedList<T>`'s was closed on 2026-07-29 — see
+the entry at the top of this section, which is where the mandatory rebuild comes
+from. `BitArray`'s is unchanged**, because closing it grows the public
+`BitArray::Enumerator` from 32 to 40 bytes and that is a separate decision
+awaiting its own approval. The full record — inventory, reproductions, .NET
+comparison, layout measurements, and both designs — is in
 [docs/CollectionVersionCounterSweep.md](docs/CollectionVersionCounterSweep.md).
 
 ### 2026-07-28 — `System::Collections::Generic::SortedSet<T>::GetViewBetween`

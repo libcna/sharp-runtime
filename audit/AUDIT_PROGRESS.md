@@ -3823,3 +3823,63 @@ abstraction was introduced**, so #1797 §24's four measured incompatibilities
 stand. CNA and mobile-eggbert were not inspected, searched, configured, built, or
 modified, so every source-break figure here is *this repository only*. No push,
 merge, rebase, tag, or publication occurred.
+
+### Post-remediation follow-up: ticket #1788 — LinkedList mutation-counter widening
+
+Ticket **#1788** (`REMED-COLL-LINKEDLIST-VERSION-WIDEN`, P3, size S, `defect`,
+area `Collections`) closed the first of the two approval-blocked residuals ticket
+#1787 recorded. **No new `SR-AUD-*` identifier** — the numbering stays frozen at
+364, and **no audit finding is reopened**: SR-AUD-356 and SR-AUD-357 stay
+`remediated` and every #1767 and #1769 regression passes unmodified.
+
+`LinkedList<T>`'s mutation counter and its `Enumerator`'s snapshot both moved
+from 32 to 64 bits, under the explicit user approval that
+`sizeof(LinkedList<T>)` may grow **40 → 48** on LP64 with a consequent full
+consumer rebuild. Both together, deliberately: widening the container alone would
+have made the guard's comparison a silent truncation. The 2^32 revalidation was
+reproduced against the committed pre-fix header first —
+`build-probe/1788_prefix_defects.log`, `guard-fired=0` for `LinkedList<int>`,
+`LinkedList<std::string>` and `Reset()`, `defects-observed=3` — and the identical
+source post-fix reads `defects-observed=0`. It mattered because `Enumerator`
+holds a raw `data_t*` into `shared_ptr`-owned node storage, making a false
+positive a potential use-after-free; at ~10^8 mutations/second the horizon was
+about 43 seconds.
+
+Measured: `sizeof(LinkedList<T>)` 40 → **48**, `alignof` unchanged,
+`head_`/`tail_`/`count_` offsets unchanged, `sizeof(Enumerator)` **unchanged at
+40** (the wider snapshot landed in existing padding), node handle and both STL
+iterators unchanged at 16, and **0 `LinkedList` symbols added, removed or
+renamed**. No public signature changed; every in-repository caller compiles
+unmodified. The break is therefore **binary-only and silent**: a stale object file
+links with **no diagnostic in either link order** and then either takes an ASan
+heap-buffer-overflow and a SEGV, silently corrupts the member following an
+embedded `LinkedList<T>` with **no sanitizer report at all**, or silently loses
+mutation invalidation — while the other link order appears healthy.
+
+Mutation-testing the required adapter flip also found, and corrected, a genuine
+weakness in #1787's own pin: its narrow-branch assertion positioned the counter
+at `snapshot` rather than `snapshot + 2^32`, which is true for a counter of any
+width and therefore pinned nothing about the residual its comment described.
+
+Validation from a fresh configure plus a clean-first rebuild at **three jobs**
+(634 objects, 0 predating the marker, 37 of 38 executables relinked, 0 warnings,
+0 errors): `Collections.Core` **2,594** (was 2,554); full repository **13,880
+across 37 executables** (was 13,840); negative fixtures **8 / 51** all rejected
+plus 37/37 self-test, none added; version-seam ODR **2 seams / 18
+specialisations** plus 12/12 self-test, none added; module graph **41 / 90**
+unchanged; Doxygen **1,941** of the 1,942 ceiling, the one new warning attributed
+to the single new `README.md` link into `docs/`; the full ten-component selective
+matrix and a new tracked `Collections.Core` consumer fixture passed;
+ASan/UBSan/LSan `Collections.Core` **2,594 with zero reports**, LSan proved active
+by a bounded self-test, and a 200,000-node boundary-positioned teardown clean;
+`git diff --check` clean; local CI gate passed. **TSan was not run**: no atomic,
+no `mutable` cache, no hidden `const` write, and no thread-safety claim is made
+for `LinkedList<T>` before or after.
+
+Tickets #1773, #1789 and #1803 remain `blocked` and untouched — **`BitArray`
+keeps its 2^32 residual by design**, since closing it grows the *public*
+`BitArray::Enumerator` and that is #1789's separate approval. #1790, #1791 and
+#1792–#1802 remain `done` and none was reopened. CNA and mobile-eggbert were not
+inspected, searched, configured, built, or modified, and no claim is made about
+whether they use `LinkedList<T>`. No push, merge, rebase, tag, or publication
+occurred. The full record is `docs/CollectionVersionCounterSweep.md` §19.

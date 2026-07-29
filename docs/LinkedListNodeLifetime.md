@@ -400,3 +400,79 @@ reproducible from the scenarios listed in section 7.3 plus these later
 additions: 100 attach/detach cycles across two lists, list copy/move with a
 retained handle, a 200,000-node teardown, and middle-node relinking — each
 asserting the retained value and owner reported by the handle afterwards.
+
+## 10. Versioning follow-up (ticket #1788, 2026-07-29)
+
+*Separated deliberately: this section records a change to the **mutation
+counter's width**, which is adjacent to the node lifetime contract but is not part
+of it. Sections 1–9 are #1768's design and #1769's closure and are preserved
+unedited — in particular §3's "the existing `intcs` version counter" describes
+what the type held **on 2026-07-27** and is history, not a current statement.*
+
+### 10.1 What changed, and what did not
+
+Ticket **#1788** (`REMED-COLL-LINKEDLIST-VERSION-WIDEN`) widened
+`LinkedList<T>`'s private mutation counter and its `Enumerator`'s snapshot from
+32 to 64 bits, under explicit user approval for the object-layout consequence.
+The counter's *type* has changed twice since §3 was written: `intcs` →
+`detail::NarrowMutationCounter` (ticket #1787, which removed the signed-overflow
+undefined behaviour) → `detail::MutationCounter` (this ticket, which removed the
+2^32 enumerator-snapshot ABA). It is now:
+
+```cpp
+node_ptr              head_;      // 16 @ 0
+std::weak_ptr<data_t> tail_;      // 16 @ 16
+intcs                 count_;     //  4 @ 32
+detail::MutationCounter version_; //  8 @ 40   <- was 4 @ 36
+```
+
+**Nothing in the node lifetime contract moved.** Every statement in §§4.1–4.9
+still holds exactly, and was re-verified at the boundary rather than assumed:
+
+| §4 claim | Re-verified by |
+|---|---|
+| Three handle states; a detached node keeps its value | `OwnerDestructionWithRetainedNodesIsStillSafeAtTheBoundary` |
+| Removal through *another* copied handle detaches both | `RemovalThroughACopiedHandleInvalidatesIterationAtTheBoundary` |
+| `Clear()` detaches every retained handle | `ClearAtTheBoundaryDetachesEveryRetainedHandle` |
+| Owner destruction leaves handles detached, no use-after-free | as above, plus ASan `owner-destruction` mode, 0 diagnostics |
+| Reattachment of a detached node, to the same or another list | `ADetachedNodeCanRejoinAnotherListAtTheBoundary`, plus 100 attach/detach cycles across two lists under ASan |
+| Duplicate attachment and cross-list operations rejected | `DuplicateAttachmentAndCrossListInsertionAreStillRejected` |
+| Teardown is **iterative**, so a long list cannot recurse | ASan `large-teardown` mode: 200,000 owning-value nodes, counter positioned to wrap mid-loop, 0 diagnostics, survivor intact |
+| Copy deep-copies; move repoints every node's owner | `MoveConstructionFollowsTheEstablishedOwnershipContract`, `AnIndependentCopyDoesNotInvalidateTheOriginalsEnumerator` |
+| §4.9 — #1767's enumerator lifecycle guard | unchanged; every #1767 regression passes unmodified |
+
+All 49 `LinkedListNodeLifetimeTests` cases pass **unmodified**; not one assertion
+in that suite was edited.
+
+### 10.2 The measured layout consequence
+
+| | before #1788 | after |
+|---|---:|---:|
+| `sizeof(LinkedList<T>)`, every `T`, LP64 | 40 | **48** |
+| `alignof(LinkedList<T>)` | 8 | 8 |
+| `sizeof(LinkedList<T>::Enumerator)` | 40 | **40** |
+| `sizeof(LinkedListNode<T>)` | 16 | **16** |
+| `sizeof(iterator)` / `sizeof(const_iterator)` | 16 | **16** |
+| `sizeof(detail::LinkedListNodeData<int>)` | 48 | **48** |
+| mangled symbols added, removed or renamed | — | **0** |
+
+The container grew because its members were exactly packed with no padding; the
+enumerator's snapshot widened into padding it already had, so it did not. **The
+node representation this document is about — `LinkedListNodeData<T>`, the handle,
+and the iterators — is byte-for-byte unchanged.**
+
+### 10.3 Compatibility
+
+§5's table is unaffected: no public member of either type changed signature,
+return type, parameter list or `const` qualification, so every consumer's source
+compiles unchanged. The break is **binary only**, and it is silent — mixing a
+translation unit compiled against the old header with one compiled against the
+new one links with **no diagnostic in either link order** and then either
+crashes, silently corrupts a neighbouring member, or silently loses mutation
+invalidation, depending on which object file won the COMDAT race. Every consumer
+adopting this revision must be rebuilt completely. The reproduction is in
+`docs/CollectionVersionCounterSweep.md` §19.8.
+
+CNA and mobile-eggbert were **not** inspected, searched, configured, built or
+modified, and no claim is made about their use of `LinkedList<T>`; ticket #1773
+remains `blocked`.
