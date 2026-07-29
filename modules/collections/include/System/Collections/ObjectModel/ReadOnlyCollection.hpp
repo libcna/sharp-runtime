@@ -137,10 +137,44 @@ public:
 
     /**
      * @brief Throws because the collection is read-only.
+     *
+     * The declared return type changed to the tracked proxy with ticket #1791 so that this
+     * class still overrides `Generic::IList<T>::operator[]`; no proxy is ever constructed,
+     * because the call throws before it could be. No mutable alias into the backing storage
+     * escapes through this class by any route.
+     *
      * @throws System::NotSupportedException always.
      */
-    T& operator[](intcs index) override {
+    System::Collections::detail::ElementReference<T> operator[](intcs index) override {
         (void)index;
+        throw System::NotSupportedException("Collection is read-only.");
+    }
+
+    /**
+     * @brief Gets the element at the specified index.
+     *
+     * C++ counterpart of .NET ReadOnlyCollection<T>.Item[int]'s getter. Reading is the one
+     * thing this collection does support.
+     * @param index The zero-based index.
+     * @return A const reference to the element.
+     * @throws System::ArgumentOutOfRangeException if index is out of range.
+     */
+    [[nodiscard]] const T& getItem(intcs index) const override {
+        if (index < 0 || index >= static_cast<intcs>(items_->size()))
+            throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
+        return (*items_)[static_cast<size_t>(index)];
+    }
+
+    /**
+     * @brief Throws because the collection is read-only.
+     *
+     * Matches .NET, whose `ReadOnlyCollection<T>`'s explicit `IList<T>.this[int]` setter
+     * throws `NotSupportedException` unconditionally, without validating the index first.
+     * @throws System::NotSupportedException always.
+     */
+    void setItem(intcs index, const T& value) override {
+        (void)index;
+        (void)value;
         throw System::NotSupportedException("Collection is read-only.");
     }
 

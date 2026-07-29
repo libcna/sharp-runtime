@@ -23,8 +23,16 @@ public:
 };
 
 // ---- IList<int> concrete ----
+//
+// A hand-written implementer of the public interface, in ordinary consumer style. It is the
+// fourth of the four IList<T> implementers ticket #1790 found by compiling, and the direct
+// evidence that downstream code implements this interface by hand. Ticket #1791 migrated it:
+// the non-const indexer returns the tracked proxy, getItem/setItem are implemented, and the
+// class gained a MutationCounter to hand the proxy -- which is exactly the mechanical
+// migration an out-of-repository implementer has to perform.
 class IntList : public IList<int> {
     std::vector<int> data_;
+    System::Collections::detail::MutationCounter version_;
 public:
     IEnumerator<int>* GetEnumerator() override { return nullptr; }
     int  getCountProperty()       const override { return static_cast<int>(data_.size()); }
@@ -42,7 +50,14 @@ public:
         return false;
     }
     const int& operator[](int i) const override { return data_[static_cast<std::size_t>(i)]; }
-    int&       operator[](int i)       override { return data_[static_cast<std::size_t>(i)]; }
+    System::Collections::detail::ElementReference<int> operator[](int i) override {
+        return {&data_[static_cast<std::size_t>(i)], &version_};
+    }
+    const int& getItem(int i) const override { return data_[static_cast<std::size_t>(i)]; }
+    void setItem(int i, const int& value) override {
+        System::Collections::detail::ElementReference<int>{
+            &data_[static_cast<std::size_t>(i)], &version_} = value;
+    }
     int IndexOf(const int& item) const override {
         for (int i = 0; i < static_cast<int>(data_.size()); ++i)
             if (data_[static_cast<std::size_t>(i)] == item) return i;

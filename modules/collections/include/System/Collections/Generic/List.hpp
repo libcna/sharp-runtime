@@ -15,6 +15,7 @@
 #include "System/InvalidOperationException.hpp"
 #include "System/Collections/Generic/IList.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyCollection.hpp"
+#include "System/Collections/detail/ElementReference.hpp"
 #include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections::Generic {
@@ -28,32 +29,46 @@ using SharpRuntime::intcs;
  * Backed by std::vector<T>; provides O(1) amortized Add, O(1) indexed access,
  * and full IList<T> compliance.
  *
- * @note GetEnumerator()'s Enumerator detects structural modification (Add/Remove/Clear/Insert/
- * etc.) during iteration via a version counter, matching .NET's InvalidOperationException
- * fail-fast contract (see ArrayList's Enumerator in this codebase for the same established
- * pattern). Only the GetEnumerator()-returned Enumerator is fail-fast.
+ * @note GetEnumerator()'s Enumerator detects modification (Add/Remove/Clear/Insert/etc., and
+ * since ticket #1791 an indexed replacement too) during iteration via a version counter,
+ * matching .NET's InvalidOperationException fail-fast contract (see ArrayList's Enumerator in
+ * this codebase for the same established pattern). Only the GetEnumerator()-returned
+ * Enumerator is fail-fast.
  *
- * @warning **Three public routes mutate this list without advancing that counter**, so a
- * write through any of them is invisible to an outstanding enumerator. Ticket #1790
- * inventoried and reproduced all three; the design record with the .NET comparison and the
- * selected correction is `docs/ListIndexerVersioningDesign.md`, and implementation is
- * ticket #1791.
- *  1. **`operator[]` (non-const)** returns a plain `T&` for C++ ergonomics, so nothing can
- *     intercept a later `list[i] = value;` through that reference. Real .NET's index setter
- *     bumps `_version` unconditionally (`List.cs:162`), so this port diverges: a value-only
- *     index write does NOT trigger fail-fast detection here.
- *  2. **`ToVector()` (non-const)** hands out the whole backing `std::vector<T>&`, so a caller
- *     can `push_back`, `erase`, `resize`, or `clear` through it. That is a *structural*
- *     mutation the guard never sees -- strictly wider than route 1, which can only replace an
- *     existing element.
- *  3. **`begin()`/`end()` (non-const)** yield raw `std::vector<T>` iterators and follow plain
- *     std::vector invalidation rules, not .NET's version-checked contract.
+ * This class has **two clearly separated surfaces**, mirroring the split .NET itself draws
+ * between `List<T>.this[int]` and `CollectionsMarshal.AsSpan`. Ticket #1790 inventoried and
+ * reproduced every route; ticket #1791 implemented the split. The design record, with the
+ * .NET comparison, the measured alternatives and the migration table, is
+ * `docs/ListIndexerVersioningDesign.md`.
  *
- * Routes 2 and 3 are deliberate STL-interop extensions with no .NET counterpart; real .NET
- * keeps an equivalent untracked hatch (`CollectionsMarshal.AsSpan`) but quarantines it in an
- * explicitly unsafe class. A reference obtained from any of the three dangles as soon as the
- * backing vector reallocates; retaining one across a mutation is undefined behaviour,
- * reproduced under AddressSanitizer for ticket #1790.
+ * **The tracked surface** -- `operator[]`, `getItem()`, `setItem()`. Every write advances the
+ * mutation counter and every outstanding enumerator fails fast, matching .NET. This is the
+ * surface ported code should use. The non-const `operator[]` returns a tracked
+ * `System::Collections::detail::ElementReference<T>` proxy rather than a plain `T&`, because
+ * a plain reference offers no interception point for a later assignment. As a consequence
+ * `T& r = list[i]`, `auto& r = list[i]`, `&list[i]`, `std::swap(list[i], list[j])`, passing
+ * `list[i]` to a `T&` parameter, and member access on a value-type element
+ * (`list[i].member`, `list[i].method()`) no longer compile. That is the hole closing: each of
+ * those shapes was a reproduced use-after-free waiting to happen.
+ *
+ * @warning **The explicitly unsafe surface** -- `begin()` and `end()` (non-const). These
+ * yield raw `std::vector<T>` iterators for STL interop, follow plain `std::vector`
+ * invalidation rules rather than .NET's version-checked contract, and are the one remaining
+ * ordinary way to obtain a mutable `T&` into this list's storage. **A write through them is
+ * invisible to an outstanding enumerator**, and a reference obtained from them dangles as
+ * soon as the backing vector reallocates; retaining one across a mutation is undefined
+ * behaviour, reproduced under AddressSanitizer for tickets #1790 and #1791. They are
+ * deliberate extensions with no .NET counterpart, kept because constraining them would break
+ * the `std::vector` interop this class exists to provide -- and real .NET keeps an equivalent
+ * untracked hatch (`CollectionsMarshal.AsSpan`), documented as unsafe, for the same reason.
+ * Use the tracked surface unless you specifically need STL interop.
+ *
+ * @note The **mutable** `ToVector()` was removed by ticket #1791. It returned the whole
+ * backing `std::vector<T>&`, so a caller could `push_back`, `erase`, `resize` or `clear`
+ * through it -- a *structural* mutation the fail-fast guard never saw, strictly wider than
+ * the indexer hole. `ToVector() const` is unchanged and remains the supported read path;
+ * `ToArray()` returns an owning copy. Structural mutation now requires a tracked `List<T>`
+ * method.
  *
  * @tparam T The type of elements in the list.
  */
@@ -159,10 +174,70 @@ class List : public IList<T> {
             return items_[static_cast<std::size_t>(index)];
         }
 
-        T& operator[](intcs index) override
+        /**
+         * @brief Returns a tracked reference proxy for the element at @p index.
+         *
+         * C++ counterpart of .NET List<T>.this[int]. Reading through the returned proxy
+         * advances nothing; every write through it (`list[i] = v`, a compound assignment,
+         * `++`/`--`) advances the mutation counter exactly once, so an outstanding
+         * `GetEnumerator()` enumerator fails fast -- matching .NET, whose index setter does
+         * `_version++` unconditionally (`List.cs:161-162`).
+         *
+         * The proxy is a prvalue valid only for the full-expression that creates it, and it
+         * never publishes a mutable `T*` or `T&` into the backing storage. See the class
+         * comment for the source-level consequences and
+         * `System::Collections::detail::ElementReference` for the full contract.
+         *
+         * @param index The zero-based index of the element to get or set.
+         * @return A tracked reference proxy for the element.
+         * @throws System::ArgumentOutOfRangeException if @p index is outside [0, Count).
+         *         Validated before the proxy exists, so a throw advances no counter.
+         */
+        System::Collections::detail::ElementReference<T> operator[](intcs index) override
+        {
+            requireIndexInRange(index);
+            return {&items_[static_cast<std::size_t>(index)], &version_};
+        }
+
+        /**
+         * @brief Gets the element at @p index without mutating anything.
+         *
+         * C++ counterpart of .NET List<T>.this[int]'s getter, spelled as an explicit
+         * accessor. Advances no mutation counter and never invalidates an enumerator.
+         *
+         * @param index The zero-based index of the element to get.
+         * @return A const reference to the element. It follows `std::vector` invalidation
+         *         rules: valid until the next reallocating or erasing operation.
+         * @throws System::ArgumentOutOfRangeException if @p index is outside [0, Count).
+         */
+        [[nodiscard]] const T& getItem(intcs index) const override
         {
             requireIndexInRange(index);
             return items_[static_cast<std::size_t>(index)];
+        }
+
+        /**
+         * @brief Replaces the element at @p index and advances the mutation counter.
+         *
+         * C++ counterpart of .NET List<T>.this[int]'s setter, spelled as an explicit
+         * accessor. Bounds are validated **before** anything is written, matching
+         * `List.cs:155-163`, so a rejected index leaves every element and the counter
+         * untouched. An equal-value replacement still advances the counter, because .NET
+         * never compares the old value.
+         *
+         * Implemented by assigning through the very proxy `operator[]` hands out, so
+         * `list.setItem(i, v)` and `list[i] = v` are guaranteed to be the same write with the
+         * same single counter advance -- they cannot drift apart.
+         *
+         * @param index The zero-based index of the element to replace.
+         * @param value The new value.
+         * @throws System::ArgumentOutOfRangeException if @p index is outside [0, Count).
+         */
+        void setItem(intcs index, const T& value) override
+        {
+            requireIndexInRange(index);
+            System::Collections::detail::ElementReference<T>{
+                &items_[static_cast<std::size_t>(index)], &version_} = value;
         }
 
         [[nodiscard]] intcs IndexOf(const T& item) const override
@@ -237,18 +312,43 @@ class List : public IList<T> {
         }
 
         /**
-         * @brief Returns the underlying std::vector for STL interop.
+         * @brief Returns the underlying std::vector for STL interop, for reading.
          *
-         * Not part of the .NET API; provided for direct interop with std::vector<T>.
-         * @return A const reference to the internal storage.
+         * Not part of the .NET API; provided for direct interop with std::vector<T>. The
+         * elements are contiguous, so this is also the supported way to reach a
+         * `const T*` (`list.ToVector().data()`).
+         *
+         * @warning Ticket #1791 **removed the mutable overload.** It returned the whole
+         * backing container, so a caller could `push_back`, `erase`, `resize` or `clear`
+         * through it -- a structural mutation that no enumerator could detect, reproduced
+         * with an outstanding enumerator left apparently valid over emptied storage. There is
+         * deliberately no replacement that returns mutable storage: structural mutation goes
+         * through `Add`/`Insert`/`Remove`/`RemoveAt`/`Clear`/`AddRange`/`InsertRange`/
+         * `RemoveRange`/`RemoveAll`, and element replacement goes through `setItem` or the
+         * tracked indexer. `ToArray()` returns an owning copy if a detached, freely mutable
+         * `std::vector<T>` is what is wanted.
+         *
+         * @return A const reference to the internal storage. It follows `std::vector`
+         *         invalidation rules; do not retain it across a mutation.
          */
         [[nodiscard]] const std::vector<T>& ToVector() const { return items_; }
-        /** @brief Returns the underlying std::vector for STL interop (mutable). */
-        [[nodiscard]] std::vector<T>& ToVector() { return items_; }
 
-        /** @brief STL-interop mutable begin iterator (not part of the .NET API). */
+        /**
+         * @brief STL-interop mutable begin iterator (not part of the .NET API).
+         *
+         * @warning Part of the **explicitly unsafe surface** described in the class comment:
+         * dereferencing yields a mutable `T&`, a write through it advances no mutation
+         * counter, and an outstanding enumerator will not see it. Kept because constraining
+         * it would break the `std::vector` interop this class exists to provide; .NET keeps
+         * an equivalent untracked hatch in `CollectionsMarshal.AsSpan` for the same reason
+         * and documents it as unsafe. Prefer the tracked indexer.
+         */
         auto begin() { return items_.begin(); }
-        /** @brief STL-interop mutable end iterator (not part of the .NET API). */
+        /**
+         * @brief STL-interop mutable end iterator (not part of the .NET API).
+         *
+         * @warning Pairs with `begin()`; see its warning.
+         */
         auto end()   { return items_.end(); }
         /** @brief STL-interop const begin iterator (not part of the .NET API). */
         [[nodiscard]] auto begin() const { return items_.cbegin(); }

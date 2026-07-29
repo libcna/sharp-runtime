@@ -9,6 +9,8 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/IList.hpp"
+#include "System/Collections/detail/ElementReference.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
 
 namespace System::Collections::ObjectModel {
 
@@ -21,38 +23,54 @@ using SharpRuntime::intcs;
  * Backed by std::vector<T>; exposes virtual hook methods (InsertItem, RemoveItem,
  * ClearItems, SetItem) that derived classes can override to intercept changes.
  *
+ * @note **Ticket #1791 gave this type a mutation counter**, which it previously did not
+ * have, so that its tracked indexer can invalidate an outstanding enumerator on an indexed
+ * write. Two consequences, both measured and recorded in
+ * `docs/ListIndexerVersioningDesign.md`:
+ *  - `sizeof(Collection<T>)` grew from 32 to 40 bytes on LP64, so every consumer must be
+ *    rebuilt.
+ *  - `GetEnumerator()`'s enumerator is now **fail-fast**. Before #1791 it version-checked
+ *    nothing at all -- not even `Add()` -- because there was no counter to check, so
+ *    mutating during enumeration silently read reallocated storage. It now throws
+ *    `System::InvalidOperationException` exactly as `Generic::List<T>`'s does, which is also
+ *    what .NET does: .NET's `Collection<T>.GetEnumerator()` delegates to the wrapped
+ *    `IList<T>`'s enumerator, normally `List<T>`'s fail-fast one.
+ *
  * @tparam T The type of elements in the collection.
  */
 template<typename T>
 class Collection : public Generic::IList<T> {
 private:
     class Enumerator : public Generic::IEnumerator<T> {
-        const std::vector<T>& items_;
+        const Collection<T>* owner_;
+        System::Collections::detail::MutationVersion version_;
         intcs index_ = -1;
         System::Collections::detail::EnumeratorState state_;
     public:
-        explicit Enumerator(const std::vector<T>& items) : items_(items) {}
+        explicit Enumerator(const Collection<T>* owner) : owner_(owner), version_(owner->version_) {}
         bool MoveNext() override {
+            System::Collections::detail::requireUnmodified(version_ == owner_->version_);
             if (state_.isAfterLast()) return false;
 
             const intcs next = index_ + 1;
-            if (next < static_cast<intcs>(items_.size())) {
+            if (next < static_cast<intcs>(owner_->items_.size())) {
                 index_ = next;
                 state_.setCurrent();
                 return true;
             }
 
-            index_ = static_cast<intcs>(items_.size());
+            index_ = static_cast<intcs>(owner_->items_.size());
             state_.setAfterLast();
             return false;
         }
         void Reset() override {
+            System::Collections::detail::requireUnmodified(version_ == owner_->version_);
             index_ = -1;
             state_.Reset();
         }
         [[nodiscard]] const T& Current() const override {
             state_.requireCurrent();
-            return items_[static_cast<size_t>(index_)];
+            return owner_->items_[static_cast<size_t>(index_)];
         }
     };
 
@@ -60,6 +78,19 @@ private:
         if (index < 0 || index >= static_cast<intcs>(items_.size()))
             throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
     }
+
+    /**
+     * Counts effective mutations so an outstanding enumerator can fail fast, and so the
+     * tracked indexer has something to advance. Added by ticket #1791; see the class note.
+     */
+    System::Collections::detail::MutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in production,
+     * defined for every collection in exactly one test header -- ticket #1800) letting a
+     * regression observe the counter or position it near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<Collection<T>>;
 
 protected:
     /** @brief The underlying storage for collection items. */
@@ -77,6 +108,7 @@ protected:
         if (index < 0 || index > static_cast<intcs>(items_.size()))
             throw System::ArgumentOutOfRangeException("index", "Index must be within the bounds of the List.");
         items_.insert(items_.begin() + index, item);
+        ++version_;
     }
 
     /**
@@ -89,6 +121,7 @@ protected:
     virtual void RemoveItem(intcs index) {
         requireIndexInRange(index);
         items_.erase(items_.begin() + index);
+        ++version_;
     }
 
     /**
@@ -98,6 +131,7 @@ protected:
      */
     virtual void ClearItems() {
         items_.clear();
+        ++version_;
     }
 
     /**
@@ -110,7 +144,8 @@ protected:
      */
     virtual void SetItem(intcs index, const T& item) {
         requireIndexInRange(index);
-        items_[static_cast<size_t>(index)] = item;
+        System::Collections::detail::ElementReference<T>{
+            &items_[static_cast<size_t>(index)], &version_} = item;
     }
 
 public:
@@ -217,30 +252,58 @@ public:
     }
 
     /**
-     * @brief Returns a reference to the element at the specified index.
+     * @brief Returns a tracked reference proxy for the element at the specified index.
      *
-     * C++ counterpart of .NET Collection<T>.Item[int] setter.
-     * @note .NET's indexer setter (`this[index] = value`) dispatches through the virtual
-     *       `SetItem(index, value)` hook, so a derived class overriding `SetItem` (e.g. to keep
-     *       an auxiliary index in sync, as `KeyedCollection<TKey,TItem>` does) sees every
-     *       assignment. A C++ reference has no equivalent interception point: code that writes
-     *       `collection[index] = value` assigns directly into the backing storage and never
-     *       calls `SetItem`, silently skipping that hook. This is an inherent C++-reference-vs-
-     *       C#-property gap, not a bug to fix locally -- documented rather than "solved" with an
-     *       assignment-intercepting proxy type, which would be a much larger, riskier API change
-     *       (affecting every existing caller of this operator) than a single audit ticket
-     *       warrants. Callers of a `SetItem`-overriding derived class that need the hook to run
-     *       must call a dedicated mutator instead of the plain indexer (e.g.
-     *       `KeyedCollection::SetItem` isn't public, but `Remove`+`Add`/`Insert` do run the
-     *       hooks).
+     * C++ counterpart of .NET Collection<T>.Item[int] setter. Since ticket #1791 a write
+     * through the returned proxy advances this collection's mutation counter, so an
+     * outstanding enumerator fails fast.
+     *
+     * @note **The `SetItem` hook is still not run by this operator.** .NET's indexer setter
+     *       dispatches through the virtual `SetItem(index, value)` hook, so a derived class
+     *       overriding it (to keep an auxiliary index in sync, as
+     *       `KeyedCollection<TKey,TItem>` does) sees every assignment. The tracked proxy
+     *       intercepts the *write* -- which is what mutation tracking needs -- but it holds a
+     *       slot and a counter, not a collection, so it cannot make a virtual call. Ticket
+     *       #1791 narrowed this gap rather than closing it: the assignment is now tracked,
+     *       where before it was both untracked and hook-skipping. **Use `setItem(index,
+     *       value)`, which does dispatch through the `SetItem` hook**, whenever a
+     *       `SetItem`-overriding derived class must see the assignment.
      * @param index The zero-based index.
-     * @return A reference to the element.
+     * @return A tracked reference proxy for the element.
      * @throws System::ArgumentOutOfRangeException if index is out of range.
      */
-    T& operator[](intcs index) override {
+    System::Collections::detail::ElementReference<T> operator[](intcs index) override {
+        requireIndexInRange(index);
+        return {&items_[static_cast<size_t>(index)], &version_};
+    }
+
+    /**
+     * @brief Gets the element at the specified index without mutating anything.
+     *
+     * C++ counterpart of .NET Collection<T>.Item[int]'s getter. Advances no mutation counter.
+     * @param index The zero-based index.
+     * @return A const reference to the element.
+     * @throws System::ArgumentOutOfRangeException if index is out of range.
+     */
+    [[nodiscard]] const T& getItem(intcs index) const override {
         requireIndexInRange(index);
         return items_[static_cast<size_t>(index)];
     }
+
+    /**
+     * @brief Replaces the element at the specified index, through the `SetItem` hook.
+     *
+     * C++ counterpart of .NET Collection<T>.Item[int]'s setter, including its dispatch
+     * through the virtual `SetItem(index, value)` hook -- so a derived class that overrides
+     * `SetItem` sees this assignment, which is exactly what the plain indexer cannot offer.
+     * The default `SetItem` validates the index before writing and advances the mutation
+     * counter exactly once.
+     *
+     * @param index The zero-based index of the element to replace.
+     * @param value The new value.
+     * @throws System::ArgumentOutOfRangeException if index is out of range.
+     */
+    void setItem(intcs index, const T& value) override { SetItem(index, value); }
 
     /**
      * @brief Returns the zero-based index of the first occurrence of @p item, or -1 if not found.
@@ -279,10 +342,16 @@ public:
      * @return A heap-allocated IEnumerator<T>; caller takes ownership.
      */
     Generic::IEnumerator<T>* GetEnumerator() override {
-        return new Enumerator(items_);
+        return new Enumerator(this);
     }
 
-    /** @brief Returns an iterator to the beginning of the collection (STL interop). */
+    /**
+     * @brief Returns an iterator to the beginning of the collection (STL interop).
+     *
+     * @warning Dereferencing yields a mutable `T&`; a write through it advances no mutation
+     * counter and no outstanding enumerator will see it. Prefer the tracked indexer or
+     * `setItem`.
+     */
     auto begin()       { return items_.begin(); }
     /** @brief Returns an iterator past the end of the collection (STL interop). */
     auto end()         { return items_.end(); }
