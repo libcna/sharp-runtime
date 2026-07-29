@@ -19,6 +19,15 @@ echo "==> Validating test-only access seams (ticket #1800)"
 python3 scripts/check_version_seam_odr.py
 python3 test/check_version_seam_odr_test.py
 
+# Per-site validation of the committed negative consumer fixtures (ticket
+# #1801). It runs here, before anything is configured, because it needs only the
+# tracked sources and the CMake component metadata -- and because a broken
+# compile-rejection contract should be reported in seconds rather than after a
+# full build. Its own compiles are capped at three parallel jobs internally.
+echo "==> Validating negative consumer fixtures (ticket #1801)"
+python3 scripts/check_negative_consumer_fixtures.py
+python3 test/check_negative_consumer_fixtures_test.py
+
 echo "==> Configuring ($BUILD_DIR)"
 cmake -S . -B "$BUILD_DIR" >/dev/null
 

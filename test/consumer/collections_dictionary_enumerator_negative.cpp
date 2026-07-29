@@ -5,24 +5,18 @@
 // (REMED-COLL-IDICTENUM-KEYVALUE-SAFETY), design record
 // docs/IDictionaryEnumeratorKeyValueSafetyDesign.md section 28.
 //
-// This file must NEVER compile successfully. It is the fixture that makes the
-// ticket verifiable: it writes the exact pre-#1794 consumer source that
-// obtained a type-erased address into live dictionary storage and wrote through
-// it, and proves the compiler now rejects that source rather than the hazard
-// merely being discouraged in a doc-comment.
+// It writes the exact pre-#1794 consumer source that obtained a type-erased
+// address into live dictionary storage and wrote through it, and proves the
+// compiler now rejects that source rather than the hazard merely being
+// discouraged in a doc-comment.
 //
-// It is deliberately excluded from every normal build target -- following the
-// collections_enumerator_current_negative.cpp precedent -- and is compiled on
-// purpose by this ticket's validation step, which asserts that EVERY marked site
-// below produces a diagnostic.
-//
-// Expected diagnostics (GCC 14), one per marked line:
-//   error: cannot convert 'std::any' to 'const void*' in initialization
-//   error: invalid 'static_cast' from type 'std::any' to type 'const std::string*'
-//   error: invalid 'static_cast' from type 'std::any' to type 'const std::any*'
-//   error: invalid 'const_cast' from type 'std::any' to type 'void*'
-//   error: conflicting return type specified for
-//       'virtual const void* HandWrittenDictionaryEnumerator::getKeyProperty() const'
+// Every `#if SHARP_RUNTIME_NEGATIVE_SITE == N` block below must be REJECTED by
+// the compiler, and the `#else` branch of each guard is the migrated spelling
+// that must still compile. With no site selected the whole file compiles
+// cleanly, which is what lets ticket #1801's tracked checker,
+// scripts/check_negative_consumer_fixtures.py, attribute every diagnostic to
+// the one enabled site; the record is
+// docs/NegativeConsumerFixtureValidation.md.
 //
 // Note what is NOT available as an escape hatch: `const_cast` cannot turn a
 // std::any into a pointer, so there is no "just add a cast" migration. That is
@@ -38,6 +32,8 @@
 //   now:  there is no replacement, and that is the point. Use the dictionary's
 //         own mutating API (setItem, Add) so the mutation counter advances and
 //         outstanding enumerators fail fast.
+//
+// NEGATIVE-FIXTURE: component=Collections.Core
 #include <any>
 #include <memory>
 #include <string>
@@ -46,6 +42,10 @@
 #include "System/Collections/Hashtable.hpp"
 #include "System/Collections/IDictionaryEnumerator.hpp"
 #include "System/Collections/ListDictionaryInternal.hpp"
+
+#ifndef SHARP_RUNTIME_NEGATIVE_SITE
+#define SHARP_RUNTIME_NEGATIVE_SITE 0
+#endif
 
 namespace Coll = System::Collections;
 
@@ -66,11 +66,21 @@ public:
         return Coll::DictionaryEntry(key_, value_);
     }
 
-    // must fail: conflicting return type for the override
+#if SHARP_RUNTIME_NEGATIVE_SITE == 1
+    // NEGATIVE(unmigrated-key-override): conflicting return type specified for
+    //     | invalid covariant return type
     [[nodiscard]] const void* getKeyProperty() const override { return &key_; }
+#else
+    [[nodiscard]] std::any getKeyProperty() const override { return std::any(key_); }
+#endif
 
-    // must fail: conflicting return type for the override
+#if SHARP_RUNTIME_NEGATIVE_SITE == 2
+    // NEGATIVE(unmigrated-value-override): conflicting return type specified for
+    //     | invalid covariant return type
     [[nodiscard]] const void* getValueProperty() const override { return &value_; }
+#else
+    [[nodiscard]] std::any getValueProperty() const override { return value_; }
+#endif
 };
 
 void oldHashtableReadPath()
@@ -80,19 +90,31 @@ void oldHashtableReadPath()
     std::unique_ptr<Coll::IDictionaryEnumerator> e(table.GetEnumerator());
     (void)e->MoveNext();
 
-    // must fail: no conversion from std::any to const void*
+#if SHARP_RUNTIME_NEGATIVE_SITE == 3
+    // NEGATIVE(hashtable-raw-key): cannot convert 'std::any' to 'const void*'
+    //     | invalid conversion from 'std::any'
     const void* rawKey = e->getKeyProperty();
     (void)rawKey;
+#endif
 
-    // must fail: no static_cast from std::any to a pointer
+#if SHARP_RUNTIME_NEGATIVE_SITE == 4
+    // NEGATIVE(hashtable-key-static-cast): invalid 'static_cast' from type 'std::any'
+    //     | invalid static_cast from type 'std::any'
     const std::string* typedKey =
         static_cast<const std::string*>(e->getKeyProperty());
     (void)typedKey;
+#else
+    const std::string typedKey = std::any_cast<std::string>(e->getKeyProperty());
+    (void)typedKey;
+#endif
 
-    // must fail: no static_cast from std::any to a pointer
+#if SHARP_RUNTIME_NEGATIVE_SITE == 5
+    // NEGATIVE(hashtable-value-static-cast): invalid 'static_cast' from type 'std::any'
+    //     | invalid static_cast from type 'std::any'
     const std::any* typedValue =
         static_cast<const std::any*>(e->getValueProperty());
     (void)typedValue;
+#endif
 }
 
 void oldHashtableWritePath()
@@ -102,17 +124,27 @@ void oldHashtableWritePath()
     std::unique_ptr<Coll::IDictionaryEnumerator> e(table.GetEnumerator());
     (void)e->MoveNext();
 
-    // must fail: this was WELL-FORMED, FULLY DEFINED C++ before #1794 -- the
-    // map's mapped_type is a non-const std::any -- and it rewrote live
-    // dictionary storage with the mutation counter unmoved and a second
-    // enumerator none the wiser.
+#if SHARP_RUNTIME_NEGATIVE_SITE == 6
+    // NEGATIVE(hashtable-value-write-through): invalid 'static_cast' from type 'std::any'
+    //     | invalid static_cast from type 'std::any'
+    //
+    // This was WELL-FORMED, FULLY DEFINED C++ before #1794 -- the map's
+    // mapped_type is a non-const std::any -- and it rewrote live dictionary
+    // storage with the mutation counter unmoved and a second enumerator none
+    // the wiser.
     *const_cast<std::any*>(static_cast<const std::any*>(e->getValueProperty())) =
         std::any(std::string("rewritten through the enumerator"));
+#endif
 
-    // must fail: the key write, which was undefined behaviour and which at 64
-    // entries left an entry Count still reported and no lookup could return.
+#if SHARP_RUNTIME_NEGATIVE_SITE == 7
+    // NEGATIVE(hashtable-key-write-through): invalid 'static_cast' from type 'std::any'
+    //     | invalid static_cast from type 'std::any'
+    //
+    // The key write, which was undefined behaviour and which at 64 entries left
+    // an entry Count still reported and no lookup could return.
     *const_cast<std::string*>(static_cast<const std::string*>(e->getKeyProperty())) =
         "CORRUPTED";
+#endif
 }
 
 void oldListDictionaryPath()
@@ -124,17 +156,26 @@ void oldListDictionaryPath()
     std::unique_ptr<Coll::IDictionaryEnumerator> e(dictionary.GetEnumerator());
     (void)e->MoveNext();
 
-    // must fail: no conversion from std::any to const void*
+#if SHARP_RUNTIME_NEGATIVE_SITE == 8
+    // NEGATIVE(listdictionary-raw-key): cannot convert 'std::any' to 'const void*'
+    //     | invalid conversion from 'std::any'
     const void* rawKey = e->getKeyProperty();
     (void)rawKey;
+#endif
 
-    // must fail: no const_cast from std::any to void*
+#if SHARP_RUNTIME_NEGATIVE_SITE == 9
+    // NEGATIVE(listdictionary-value-const-cast): invalid 'const_cast' from type 'std::any'
+    //     | invalid const_cast from type 'std::any'
     void* rawValue = const_cast<void*>(e->getValueProperty());
     (void)rawValue;
+#endif
 
-    // must fail: no operator== between std::any and std::nullptr_t
+#if SHARP_RUNTIME_NEGATIVE_SITE == 10
+    // NEGATIVE(listdictionary-compare-nullptr): no match for 'operator!='
+    //     | no match for 'operator=='
     const bool present = (e->getKeyProperty() != nullptr);
     (void)present;
+#endif
 }
 
 int main()

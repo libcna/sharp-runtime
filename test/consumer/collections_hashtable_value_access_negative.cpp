@@ -5,32 +5,20 @@
 // (REMED-COLL-HASHTABLE-WRITE-ESCAPES), design record
 // docs/HashtableValueAccessSafetyDesign.md sections 25 and 27.
 //
-// This file must NEVER compile successfully. It is the fixture that makes the
-// ticket verifiable: it writes the exact pre-#1796 consumer source that obtained
-// a mutable or aliasing handle into live Hashtable value storage, and proves the
-// compiler now REJECTS that source rather than the hazard merely being
-// discouraged in a doc-comment.
+// It writes the exact pre-#1796 consumer source that obtained a mutable or
+// aliasing handle into live Hashtable value storage, and proves the compiler now
+// REJECTS that source rather than the hazard merely being discouraged in a
+// doc-comment.
 //
-// It is deliberately excluded from every normal build target -- following the
-// collections_enumerator_current_negative.cpp and
-// collections_dictionary_enumerator_negative.cpp precedent -- and is compiled on
-// purpose by this ticket's validation step, which asserts that EVERY marked site
-// below produces a diagnostic.
-//
-// Expected diagnostics (GCC 14), one per marked line:
-//   error: cannot bind non-const lvalue reference of type 'std::any&' to an
-//          rvalue of type 'std::any'                       (x3: operator[], at, param)
-//   error: taking address of rvalue
-//   error: static assertion failed: Template argument must be constructible
-//          from an rvalue                                  (any_cast<T&> on a prvalue)
-//   error: invalid 'const_cast' of an rvalue of type 'std::any' to type 'std::any&'
-//   error: invalid 'static_cast' from type 'std::any' to type 'std::any*'
-//   error: cannot convert 'std::any' to 'void*' in initialization
-//   error: use of deleted function
-//          'System::Collections::Hashtable::ValueReference::ValueReference(
-//              const System::Collections::Hashtable::ValueReference&)'
-//   error: conflicting return type specified for
-//          'virtual void* UnmigratedDictionary::getItem(const void*) const'
+// Every `#if SHARP_RUNTIME_NEGATIVE_SITE == N` block below must be REJECTED by
+// the compiler, and the `#else` branch of each guard is the migrated spelling
+// that must still compile. With no site selected the whole file compiles
+// cleanly, which is what lets ticket #1801's tracked checker,
+// scripts/check_negative_consumer_fixtures.py, attribute every diagnostic to
+// the one enabled site; the record is
+// docs/NegativeConsumerFixtureValidation.md. Until #1801 the per-site checker
+// for this file lived only in the gitignored build-probe/1796_check_negative.py
+// and no tracked job ran it.
 //
 // Note what is NOT available as an escape hatch. The by-value returns are
 // PRVALUES, so `const_cast` cannot recover an lvalue from them and there is no
@@ -42,7 +30,7 @@
 // `const std::any& r = table[key];`. It binds a lifetime-extended TEMPORARY, so
 // it is memory-safe, but its meaning changed silently from a live view to a
 // snapshot. That is the single silent semantic change in this ticket, approved
-// as item 2 of design section 32, and it is therefore NOT listed here.
+// as item 2 of design section 32, and it is therefore NOT marked here.
 //
 // Migration for a caller that hits one of these -- see design section 20:
 //   was:  std::any& r = table[key]; r = value;
@@ -59,6 +47,8 @@
 //   now:  there is no replacement, and that is the point. Use the dictionary's
 //         own mutating API (the indexer setter, setItem, Add) so that the
 //         mutation counter advances and outstanding enumerators fail fast.
+//
+// NEGATIVE-FIXTURE: component=Collections.Core
 #include <any>
 #include <string>
 
@@ -66,6 +56,10 @@
 #include "System/Collections/ICollection.hpp"
 #include "System/Collections/IDictionary.hpp"
 #include "System/Collections/IDictionaryEnumerator.hpp"
+
+#ifndef SHARP_RUNTIME_NEGATIVE_SITE
+#define SHARP_RUNTIME_NEGATIVE_SITE 0
+#endif
 
 namespace Coll = System::Collections;
 
@@ -76,11 +70,19 @@ class UnmigratedDictionary : public Coll::IDictionary {
     int value_ = 1;
 
 public:
-    // must fail: conflicting return type specified for the override
+#if SHARP_RUNTIME_NEGATIVE_SITE == 1
+    // NEGATIVE(unmigrated-getitem-override): conflicting return type specified for
+    //     | invalid covariant return type
     [[nodiscard]] void* getItem(const void*) const override
     {
         return const_cast<int*>(&value_);
     }
+#else
+    [[nodiscard]] std::any getItem(const void*) const override
+    {
+        return std::any(value_);
+    }
+#endif
 
     void setItem(const void*, void*) override {}
     [[nodiscard]] Coll::ICollection* getKeysProperty() const override { return nullptr; }
@@ -107,20 +109,35 @@ void oldIndexerAliasPath()
     Coll::Hashtable table;
     table.Add(std::string("alpha"), std::any(1));
 
-    // must fail: cannot bind std::any& to the proxy's by-value read
+#if SHARP_RUNTIME_NEGATIVE_SITE == 2
+    // NEGATIVE(indexer-alias-bind): cannot bind non-const lvalue reference of type 'std::any&'
+    //     | cannot bind non-const lvalue reference
     std::any& mutableAlias = table["alpha"];
     mutableAlias = std::any(99);
+#else
+    // One tracked insert-or-replace, which is what the alias was reaching for.
+    table["alpha"] = std::any(99);
+#endif
 
-    // must fail: taking the address of an rvalue
+#if SHARP_RUNTIME_NEGATIVE_SITE == 3
+    // NEGATIVE(indexer-address-of): taking address of rvalue
+    //     | cannot take the address of an rvalue
     std::any* slotAddress = &table["alpha"];
     (void)slotAddress;
+#endif
 
-    // must fail: any_cast to a reference requires an lvalue operand
+#if SHARP_RUNTIME_NEGATIVE_SITE == 4
+    // NEGATIVE(indexer-any-cast-reference): must be constructible from an rvalue
+    //     | static assertion failed
     std::string& inPlace = std::any_cast<std::string&>(table["alpha"]);
     (void)inPlace;
+#endif
 
-    // must fail: the proxy's read is a prvalue, so it binds no std::any& parameter
+#if SHARP_RUNTIME_NEGATIVE_SITE == 5
+    // NEGATIVE(indexer-bind-to-parameter): cannot bind non-const lvalue reference of type 'std::any&'
+    //     | cannot bind non-const lvalue reference
     writeThrough(table["alpha"]);
+#endif
 }
 
 void oldProxyCopyPath()
@@ -132,12 +149,19 @@ void oldProxyCopyPath()
     // elision constructs it in place, so no copy constructor is needed.
     Coll::Hashtable::ValueReference proxy = table["alpha"];
 
-    // must fail: the proxy is non-copyable ON PURPOSE. A copyable proxy makes
+#if SHARP_RUNTIME_NEGATIVE_SITE == 6
+    // NEGATIVE(proxy-copy): use of deleted function
+    //     | is private within this context
+    //
+    // The proxy is non-copyable ON PURPOSE. A copyable proxy makes
     // `std::any b = table[k];` prefer std::any's converting constructor over the
     // proxy's own conversion operator, so `b` would silently hold a
     // ValueReference and the next any_cast would throw at RUN TIME.
     Coll::Hashtable::ValueReference copied = proxy;
     (void)copied;
+#endif
+
+    (void)static_cast<std::any>(proxy);
 }
 
 void oldAtAliasPath()
@@ -145,12 +169,22 @@ void oldAtAliasPath()
     Coll::Hashtable table;
     table.Add(std::string("alpha"), std::any(1));
 
-    // must fail: at() yields a prvalue, so const_cast cannot recover an lvalue
+#if SHARP_RUNTIME_NEGATIVE_SITE == 7
+    // NEGATIVE(at-const-cast): invalid 'const_cast' of an rvalue of type 'std::any'
+    //     | invalid const_cast
     const_cast<std::any&>(table.at("alpha")) = std::any(1234);
+#endif
 
-    // must fail: cannot bind a non-const lvalue reference to at()'s prvalue
+#if SHARP_RUNTIME_NEGATIVE_SITE == 8
+    // NEGATIVE(at-alias-bind): cannot bind non-const lvalue reference of type 'std::any&'
+    //     | cannot bind non-const lvalue reference
     std::any& liveView = table.at("alpha");
     (void)liveView;
+#else
+    // An owning snapshot, which is all at() ever safely gave.
+    const std::any snapshot = table.at("alpha");
+    (void)snapshot;
+#endif
 }
 
 void oldGetItemPointerPath()
@@ -160,17 +194,29 @@ void oldGetItemPointerPath()
     std::any value = std::any(1);
     table.Add(static_cast<const void*>(&anchor), &value);
 
-    // must fail: getItem no longer returns a pointer at all
+#if SHARP_RUNTIME_NEGATIVE_SITE == 9
+    // NEGATIVE(getitem-raw-pointer): cannot convert 'std::any' to 'void*'
+    //     | invalid conversion from 'std::any'
     void* raw = table.getItem(&anchor);
     (void)raw;
+#else
+    const std::any stored = table.getItem(&anchor);
+    (void)stored;
+#endif
 
-    // must fail: no static_cast from std::any to std::any*
+#if SHARP_RUNTIME_NEGATIVE_SITE == 10
+    // NEGATIVE(getitem-static-cast): invalid 'static_cast' from type 'std::any'
+    //     | invalid static_cast from type 'std::any'
     std::any* typed = static_cast<std::any*>(table.getItem(&anchor));
     (void)typed;
+#endif
 
-    // must fail: no comparison between std::any and std::nullptr_t
+#if SHARP_RUNTIME_NEGATIVE_SITE == 11
+    // NEGATIVE(getitem-compare-nullptr): no match for 'operator!='
+    //     | no match for 'operator=='
     const bool present = (table.getItem(&anchor) != nullptr);
     (void)present;
+#endif
 }
 
 int main()

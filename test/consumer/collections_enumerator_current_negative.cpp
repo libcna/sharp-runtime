@@ -5,23 +5,18 @@
 // (REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT), design record
 // docs/IEnumeratorCurrentSafetyDesign.md section 26.
 //
-// This file must NEVER compile successfully. It is the fixture that makes the
-// ticket verifiable: it writes the exact pre-#1793 consumer source that
-// obtained a writable pointer into live collection storage through the
-// non-generic enumerator interface, and proves the compiler now rejects it
-// rather than the change merely being discouraged in a doc-comment.
+// It writes the exact pre-#1793 consumer source that obtained a writable
+// pointer into live collection storage through the non-generic enumerator
+// interface, and proves the compiler now rejects it rather than the change
+// merely being discouraged in a doc-comment.
 //
-// It is deliberately excluded from every normal build target, following the
-// collections_mutation_version_negative.cpp / collections_sorted_set_view_negative.cpp
-// precedent, and is compiled on purpose by the ticket's validation step.
-//
-// Expected diagnostics (GCC 14), one per marked line:
-//   error: invalid 'static_cast' from type 'std::any' to type 'int*'
-//   error: invalid 'static_cast' from type 'std::any' to type 'void*'
-//   error: invalid conversion from 'std::any' to 'void*'
-//   error: no match for 'operator==' (operand types are 'std::any' and ...)
-//   error: conflicting return type specified for 'virtual void*
-//       HandWrittenEnumerator::getCurrentProperty() const'
+// Every `#if SHARP_RUNTIME_NEGATIVE_SITE == N` block below must be REJECTED by
+// the compiler, and the `#else` branch of each guard is the migrated spelling
+// that must still compile. With no site selected the whole file compiles
+// cleanly, which is what lets ticket #1801's tracked checker,
+// scripts/check_negative_consumer_fixtures.py, attribute every diagnostic to
+// the one enabled site; the record is
+// docs/NegativeConsumerFixtureValidation.md.
 //
 // Migration for a caller that hits one of these -- see design section 23:
 //   was:  T* p = static_cast<T*>(e->getCurrentProperty());
@@ -31,6 +26,8 @@
 //   now:  there is no replacement, and that is the point. Use the collection's
 //         own setter (setItem, operator[], Insert) so the mutation counter
 //         advances and outstanding enumerators fail fast.
+//
+// NEGATIVE-FIXTURE: component=Collections.Core
 #include <any>
 #include <memory>
 #include <vector>
@@ -38,6 +35,10 @@
 #include "System/Collections/Generic/IEnumerator.hpp"
 #include "System/Collections/Generic/List.hpp"
 #include "System/Collections/IEnumerator.hpp"
+
+#ifndef SHARP_RUNTIME_NEGATIVE_SITE
+#define SHARP_RUNTIME_NEGATIVE_SITE 0
+#endif
 
 namespace Coll = System::Collections;
 namespace G = System::Collections::Generic;
@@ -55,10 +56,17 @@ public:
     bool MoveNext() override { return ++index_ < static_cast<int>(data_.size()); }
     void Reset() override { index_ = -1; }
 
-    // must fail: conflicting return type for the override
+#if SHARP_RUNTIME_NEGATIVE_SITE == 1
+    // NEGATIVE(unmigrated-override): conflicting return type specified for
+    //     | invalid covariant return type
     void* getCurrentProperty() const override {
         return const_cast<int*>(&data_[static_cast<std::size_t>(index_)]);
     }
+#else
+    [[nodiscard]] std::any getCurrentProperty() const override {
+        return std::any(data_[static_cast<std::size_t>(index_)]);
+    }
+#endif
 };
 
 int main() {
@@ -67,25 +75,44 @@ int main() {
     std::unique_ptr<Coll::IEnumerator> walk(list.GetEnumerator());
     (void)walk->MoveNext();
 
-    // must fail: the accessor no longer returns a pointer to cast from.
-    // This is the ticket's own reproduction, verbatim.
+#if SHARP_RUNTIME_NEGATIVE_SITE == 2
+    // NEGATIVE(nongeneric-write-through): invalid 'static_cast' from type 'std::any'
+    //     | invalid static_cast from type 'std::any'
     *static_cast<int*>(walk->getCurrentProperty()) = 5;
+#else
+    // The ticket's own reproduction, verbatim, in its migrated form: a read of
+    // an owning snapshot, with no write path at all.
+    (void)std::any_cast<int>(walk->getCurrentProperty());
+#endif
 
-    // must fail: the same through the typed interface's inherited bridge.
     std::unique_ptr<G::IEnumerator<int>> typed(list.GetEnumerator());
     (void)typed->MoveNext();
-    *static_cast<int*>(typed->getCurrentProperty()) = 6;
 
-    // must fail: retaining the result as a raw pointer at all.
+#if SHARP_RUNTIME_NEGATIVE_SITE == 3
+    // NEGATIVE(typed-bridge-write-through): invalid 'static_cast' from type 'std::any'
+    //     | invalid static_cast from type 'std::any'
+    *static_cast<int*>(typed->getCurrentProperty()) = 6;
+#endif
+
+#if SHARP_RUNTIME_NEGATIVE_SITE == 4
+    // NEGATIVE(retain-raw-pointer): cannot convert 'std::any' to 'void*'
+    //     | invalid conversion from 'std::any'
     void* retained = walk->getCurrentProperty();
     (void)retained;
+#endif
 
-    // must fail: comparing the result to a pointer.
+#if SHARP_RUNTIME_NEGATIVE_SITE == 5
+    // NEGATIVE(compare-to-nullptr): no match for 'operator=='
+    //     | no match for 'operator!='
     if (walk->getCurrentProperty() == nullptr) return 1;
+#endif
 
-    // must fail: the wrong-type reinterpretation the void* used to permit.
+#if SHARP_RUNTIME_NEGATIVE_SITE == 6
+    // NEGATIVE(wrong-type-reinterpretation): invalid 'static_cast' from type 'std::any'
+    //     | invalid static_cast from type 'std::any'
     const float wrong = *static_cast<float*>(walk->getCurrentProperty());
     (void)wrong;
+#endif
 
     return 0;
 }
