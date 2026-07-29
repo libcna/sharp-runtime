@@ -198,17 +198,23 @@ namespace System::Collections
         using MutationVersion = MutationCounter::value_type;
 
         /**
-         * @brief A 32-bit mutation counter, for the two classes whose measured object
-         *        layout has no room for eight bytes.
+         * @brief A 32-bit mutation counter, for the one remaining class whose measured
+         *        object layout has no room for eight bytes.
          *
-         * `LinkedList<T>`'s counter shares its last eight bytes with `count_`, and
-         * `BitArray::Enumerator`'s snapshot shares its tail with three further members;
-         * widening either grows a public object (`sizeof(LinkedList<int>)` 40 → 48,
-         * `sizeof(BitArray::Enumerator)` 32 → 40), which needs explicit user approval this
-         * repository has not been given. They therefore keep a 32-bit counter, which still
-         * removes the signed-overflow undefined behaviour and the assignment transplant,
-         * but leaves the 2^32 snapshot-reuse horizon open -- tracked by the blocked
-         * follow-up tickets recorded in `docs/CollectionVersionCounterSweep.md` §8.
+         * `BitArray::Enumerator`'s snapshot shares its tail with three further members, and
+         * widening it grows a **public** nested class (`sizeof(BitArray::Enumerator)`
+         * 32 → 40), which needs explicit user approval this repository has not been given.
+         * `BitArray` therefore keeps a 32-bit counter, which still removes the
+         * signed-overflow undefined behaviour and the assignment transplant, but leaves the
+         * 2^32 snapshot-reuse horizon open -- tracked by blocked ticket #1789 and recorded
+         * in `docs/CollectionVersionCounterSweep.md` §8.2.
+         *
+         * `LinkedList<T>` used this alias too until ticket **#1788**, whose approved
+         * widening grew `sizeof(LinkedList<T>)` from 40 to 48 on LP64 and moved it to
+         * `MutationCounter`. Its snapshot moved with it, in the same change: widening a
+         * container's counter without widening the snapshot that compares against it would
+         * make the comparison a silent truncation and leave the alias in place while the
+         * code claimed otherwise.
          *
          * Do not use this alias for a new collection. Use MutationCounter.
          */

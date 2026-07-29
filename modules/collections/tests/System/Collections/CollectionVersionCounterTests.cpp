@@ -39,12 +39,23 @@
 // System::Collections::detail::BasicMutationCounter, whose increment is unsigned (defined
 // for every representable prior value) and whose ASSIGNMENT advances the destination
 // instead of taking the source's value. Thirteen collections use the 64-bit
-// MutationCounter. LinkedList<T> and BitArray keep the 32-bit NarrowMutationCounter because
+// MutationCounter. LinkedList<T> and BitArray kept the 32-bit NarrowMutationCounter because
 // widening them would grow a public object (sizeof(LinkedList<int>) 40 -> 48,
-// sizeof(BitArray::Enumerator) 32 -> 40), which needs user approval this repository has not
-// been given; their residual 2^32 alias is pinned below so a future approved widening has
-// to flip the assertion deliberately. Every measured sizeof, alignof, and counter offset is
+// sizeof(BitArray::Enumerator) 32 -> 40), which needed user approval this repository had not
+// been given; their residual 2^32 alias was pinned below so a future approved widening had
+// to flip the assertion deliberately. Every measured sizeof, alignof, and counter offset was
 // unchanged (build-probe-collversion/probe1_*_layout.log).
+//
+// TICKET #1788 PERFORMED EXACTLY THAT FLIP, FOR LinkedList<T> ONLY. The user approved the
+// object growth, LinkedListAdapter::kNarrowCounter went true -> false, and every
+// kNarrowCounter branch below therefore now takes the WIDE-family path for it: the counter is
+// asserted 64-bit, and NoStaleSnapshotBecomesValidAcrossTheOld2Pow32Distance asserts a stale
+// snapshot IS rejected instead of asserting that it is accepted. Measured:
+// sizeof(LinkedList<int>) 40 -> 48, sizeof(Enumerator) UNCHANGED at 40 (the wider snapshot
+// landed in padding it already had), zero LinkedList symbols added, removed or renamed. The
+// dedicated suite is Generic/LinkedListVersionWideningTests.cpp; the record is
+// docs/CollectionVersionCounterSweep.md section 8.1. BitArray is untouched -- ticket #1789
+// remains blocked on its own, separate approval, so it is the one narrow adapter left here.
 //
 // Reaching a boundary through the public API would need billions of real mutations, so the
 // near-boundary cases position the counter through the test-only access seam
@@ -319,7 +330,10 @@ struct NonGenericStackAdapter {
 
 struct LinkedListAdapter {
     using Collection = G::LinkedList<int>;
-    static constexpr bool kNarrowCounter = true;   // see MutationCounter.hpp / sweep doc §8
+    // Ticket #1788 widened this to 64 bits under explicit approval for sizeof(LinkedList<int>)
+    // 40 -> 48. Flipping this flag is what converts every pinned 32-bit residual assertion
+    // below into the wide-family assertion -- deliberately, which is the point of the flag.
+    static constexpr bool kNarrowCounter = false;
     static constexpr bool kHasNoOpMutation = true;
     static constexpr bool kHasClear = true;
     // LinkedList<T> declares its own copy/move assignment (ticket #1769) and guards it with
@@ -434,8 +448,9 @@ TYPED_TEST(CollectionVersionCounter, TheCounterIsUnsigned) {
 TYPED_TEST(CollectionVersionCounter, TheCounterHasTheWidthItsLayoutPermits) {
     using Value = typename Seam<typename TypeParam::Collection>::value_type;
     if constexpr (TypeParam::kNarrowCounter) {
-        // LinkedList<T> and BitArray keep 32 bits because widening grows a public object.
-        // A future approved widening must change this assertion deliberately.
+        // BitArray keeps 32 bits because widening its PUBLIC nested Enumerator grows a public
+        // object; ticket #1789 holds the approval request. LinkedList<T> was here too until
+        // #1788 was approved and flipped its adapter flag.
         EXPECT_EQ(sizeof(Value), sizeof(uintcs));
     } else {
         EXPECT_EQ(sizeof(Value), sizeof(ulongcs));
@@ -489,10 +504,22 @@ TYPED_TEST(CollectionVersionCounter, NoStaleSnapshotBecomesValidAcrossTheOld2Pow
     if constexpr (TypeParam::kNarrowCounter) {
         // Documented, approval-blocked residual: a 32-bit counter genuinely does return to
         // the snapshot after 2^32 effective mutations, and the guard genuinely stops firing.
-        // Pinned here so that widening LinkedList<T>/BitArray -- which needs approval for a
-        // public object-size change -- has to flip this assertion on purpose rather than by
-        // accident. See docs/CollectionVersionCounterSweep.md §8.
-        positionVersion(c, static_cast<Value>(snapshot));
+        // Pinned here so that widening BitArray -- which needs approval for a public
+        // object-size change -- has to flip this assertion on purpose rather than by
+        // accident. LinkedList<T> reached the `else` branch below when ticket #1788 was
+        // approved and did exactly that. See docs/CollectionVersionCounterSweep.md §8.
+        //
+        // The distance is spelled `snapshot + 2^32` and NOT simply `snapshot`, even though a
+        // 32-bit cast makes the two identical. #1788's mutation check measured why that
+        // matters: written as `snapshot`, this assertion holds for a counter of ANY width and
+        // therefore pins nothing about the residual it claims to describe -- flipping the
+        // adapter flag left it passing either way, and only
+        // TheCounterHasTheWidthItsLayoutPermits actually failed. Written this way, the
+        // narrowing is what makes the guard silent, which is the claim.
+        positionVersion(c, static_cast<Value>(snapshot + kOldAliasStep));
+        EXPECT_EQ(static_cast<ulongcs>(versionOf(c)), snapshot)
+            << TypeParam::name() << "'s 32-bit counter must truncate one full lap back onto "
+                                    "the snapshot; that IS the residual";
         EXPECT_NO_THROW(e.MoveNext())
             << TypeParam::name() << " still carries the 32-bit alias by design";
     } else {
@@ -929,7 +956,8 @@ TEST(CollectionVersionCounterSpecifics, DictionaryIndexerInsertBumpsButOverwrite
 TEST(CollectionVersionCounterSpecifics, LinkedListAssignmentAlreadyBumpedAndStillDoes) {
     // LinkedList<T> is the one collection that already declared its own copy/move
     // assignment (ticket #1769) and already bumped, so it never had defect 3. Pinned so a
-    // future refactor cannot silently drop the bump.
+    // future refactor cannot silently drop the bump. Ticket #1788 widened the counter this
+    // reads and changed nothing about the bump itself.
     G::LinkedList<int> a;
     a.AddLast(1);
     a.AddLast(2);
@@ -1048,6 +1076,12 @@ TEST(CollectionVersionCounterCompatibility, ValueSemanticsTraitsAreUnchanged) {
 TEST(CollectionVersionCounterCompatibility, PublishedObjectSizesAreUnchanged) {
     // The published figures are LP64. The repository's rule against permanent
     // architecture-specific sizeof assertions is respected by the guard.
+    //
+    // G::LinkedList<int> is deliberately ABSENT from this list. It was 40 here until ticket
+    // #1788, which grew it to 48 under explicit user approval -- the one figure in this
+    // ticket's inventory that did NOT stay unchanged, so asserting it under a test named
+    // "AreUnchanged" would be false. Its new size is pinned in
+    // Generic/LinkedListVersionWideningTests.cpp, TheObjectGrewToFortyEightBytesOnLp64.
     if constexpr (sizeof(void*) == 8) {
         EXPECT_EQ(sizeof(G::List<int>), 40u);
         EXPECT_EQ(sizeof(G::HashSet<int>), 64u);
@@ -1055,7 +1089,6 @@ TEST(CollectionVersionCounterCompatibility, PublishedObjectSizesAreUnchanged) {
         EXPECT_EQ(sizeof(G::SortedDictionary<int, int>), 56u);
         EXPECT_EQ(sizeof(G::SortedList<int, int>), 56u);
         EXPECT_EQ(sizeof(G::OrderedDictionary<int, int>), 88u);
-        EXPECT_EQ(sizeof(G::LinkedList<int>), 40u);
         EXPECT_EQ(sizeof(G::Queue<int>), 88u);
         EXPECT_EQ(sizeof(G::Stack<int>), 88u);
         EXPECT_EQ(sizeof(NG::ArrayList), 40u);

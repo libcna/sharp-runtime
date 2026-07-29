@@ -301,14 +301,26 @@ public:
  * the node leaves the list.
  *
  * @note GetEnumerator()'s Enumerator detects structural modification (AddFirst/AddLast/
- * AddBefore/AddAfter/Remove/RemoveFirst/RemoveLast/Clear) during iteration via a version
- * counter, matching .NET's InvalidOperationException fail-fast contract (see List<T>/ArrayList's
+ * AddBefore/AddAfter/Remove/RemoveFirst/RemoveLast/Clear, plus whole-list assignment) during
+ * iteration via a version counter, matching .NET's InvalidOperationException fail-fast contract
+ * (see List<T>/ArrayList's
  * Enumerator in this codebase for the same established pattern), and rejects Current outside a
  * valid enumeration position. Directly using begin()/end() STL iterators still follows plain
  * std::list-style invalidation rules, not .NET's version-checked contract (erasing a node only
  * invalidates that node's own iterator; other iterators remain valid) -- only the
  * GetEnumerator()-returned Enumerator is fail-fast, and only LinkedListNode<T> keeps its node
  * alive after removal or after the list itself is destroyed.
+ *
+ * @note Versioning width (ticket #1788). The counter and the enumerator's snapshot are both
+ * 64-bit unsigned (`System::Collections::detail::MutationCounter` / `MutationVersion`), so the
+ * counter repeats a value only after 2^64 effective mutations -- over 580 years of
+ * uninterrupted mutation of one instance at an implausibly generous 10^9 mutations per second.
+ * Until #1788 both were 32-bit and the horizon was 2^32, reachable in roughly 43 seconds of
+ * hot mutation, after which a stale Enumerator was silently accepted. The arithmetic is
+ * unsigned and therefore defined at every representable value, including the maximum, where it
+ * wraps to zero. This is a residual bound, not an impossibility, and it is deliberately not
+ * guarded by a branch on every mutation. **No thread-safety guarantee follows from any of
+ * this:** the counter is a plain non-atomic field and concurrent mutation is unsupported.
  *
  * @note Lifetime contract: removing a node, clearing the list, or destroying the list detaches
  * the affected nodes.  A detached node keeps its value, reports no owning list, and returns null
@@ -329,7 +341,15 @@ class LinkedList {
     node_ptr head_;
     std::weak_ptr<data_t> tail_;
     intcs count_ = 0;
-    System::Collections::detail::NarrowMutationCounter version_;
+    // 64-bit since ticket #1788. It was `NarrowMutationCounter` (32-bit) from #1787 until
+    // then, because widening it grows this object -- the members are exactly packed on LP64
+    // and there is no padding to widen into, so `sizeof(LinkedList<T>)` went 40 -> 48. That
+    // is a public object-layout change, and it was made only under explicit user approval.
+    // What it buys: the enumerator's snapshot could previously return to a live counter value
+    // after 2^32 effective mutations -- about 43 seconds of hot mutation -- after which the
+    // equality guard below silently accepted a stale Enumerator holding a raw data_t* into
+    // node storage that may have been freed. See docs/CollectionVersionCounterSweep.md §8.1.
+    System::Collections::detail::MutationCounter version_;
 
     /**
      * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
@@ -443,7 +463,12 @@ class LinkedList {
 
     class Enumerator : public IEnumerator<T> {
         const LinkedList<T>* list_;
-        System::Collections::detail::NarrowMutationVersion version_;
+        // Must stay exactly as wide as LinkedList<T>::version_. A narrower snapshot would
+        // silently truncate the comparison below and leave the 2^32 alias in place while the
+        // code claimed otherwise -- widening the container alone would be wrong, not partial.
+        // This one is free: the 8 bytes land in the padding that already followed a 4-byte
+        // snapshot, so sizeof(Enumerator) is 40 before and after ticket #1788.
+        System::Collections::detail::MutationVersion version_;
         data_t* cur_ = nullptr;
         bool started_ = false;
         System::Collections::detail::EnumeratorState state_;
