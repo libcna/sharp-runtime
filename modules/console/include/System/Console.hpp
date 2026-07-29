@@ -56,8 +56,19 @@ namespace System {
 
         /** @brief Writes the specified string to the standard output stream. */
         static void Write(const std::string& value) { std::cout << value; }
-        /** @brief Writes the specified C-string to the standard output stream. */
-        static void Write(const char* value)         { std::cout << value; }
+        /**
+         * @brief Writes the specified C-string to the standard output stream.
+         *
+         * A null @p value writes nothing and returns normally. Console.Write(string?)
+         * delegates to Out, a TextWriter, whose Write(string? value) is a no-op for null
+         * (TextWriter.cs:277-283) and never throws. Without this test `std::cout << value`
+         * sets badbit on std::cout **permanently**, so every subsequent Console write in
+         * the process silently produces nothing -- no crash, no exception, no message
+         * (ticket #1809, build-probe/1823_prefix_defects.log case 26).
+         *
+         * @param value Null-terminated string to write, or null to write nothing.
+         */
+        static void Write(const char* value)         { if (value != nullptr) std::cout << value; }
         /** @brief Writes the specified character to the standard output stream. */
         static void Write(char value)                { std::cout << value; }
         /** @brief Writes the specified integer to the standard output stream. */
@@ -120,8 +131,17 @@ namespace System {
         static void WriteLine()                      { std::cout << NewLine; }
         /** @brief Writes the specified string followed by a line terminator. */
         static void WriteLine(const std::string& v)  { std::cout << v << NewLine; }
-        /** @brief Writes the specified C-string followed by a line terminator. */
-        static void WriteLine(const char* v)         { std::cout << v << NewLine; }
+        /**
+         * @brief Writes the specified C-string followed by a line terminator.
+         *
+         * A null @p v writes the line terminator and nothing else, matching
+         * TextWriter.cs:502-509, whose WriteLine(string? value) writes the value only when
+         * it is non-null but writes the line terminator unconditionally. @see Write(const char*)
+         * for why null is a no-op rather than an exception (ticket #1809, case 27).
+         *
+         * @param v Null-terminated string to write, or null to write only the line terminator.
+         */
+        static void WriteLine(const char* v)         { if (v != nullptr) { std::cout << v; } std::cout << NewLine; }
         /** @brief Writes the specified character followed by a line terminator. */
         static void WriteLine(char v)                { std::cout << v << NewLine; }
         /** @brief Writes the specified integer followed by a line terminator. */

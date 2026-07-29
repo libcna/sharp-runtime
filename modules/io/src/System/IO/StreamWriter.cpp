@@ -42,7 +42,19 @@ namespace System::IO {
     }
 
     void StreamWriter::Write(const std::string& value) { WriteRaw(value.data(), value.size()); }
-    void StreamWriter::Write(const char* value)         { WriteRaw(value, std::strlen(value)); }
+
+    // A null value writes nothing, matching TextWriter::Write(const char*) and, through it,
+    // .NET's TextWriter.cs:277-283 rule for a null string. This is the one override of that
+    // overload in this repository, so it needs its own test: without it the base class guard
+    // is bypassed by virtual dispatch and std::strlen is called on a null pointer, which
+    // AddressSanitizer reports as a SEGV on 0x0 inside strlen (ticket #1809,
+    // build-probe/1823_prefix_defects.log cases 22 and 23 -- case 23 arrives here through
+    // TextWriter::WriteLine(const char*), which is why fixing only the base class would have
+    // left the crash reachable).
+    void StreamWriter::Write(const char* value) {
+        if (value == nullptr) return;
+        WriteRaw(value, std::strlen(value));
+    }
 
     void StreamWriter::Flush() { stream_->Flush(); }
 

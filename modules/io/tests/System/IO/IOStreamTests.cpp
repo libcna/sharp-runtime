@@ -31,6 +31,8 @@
 #include "System/IO/BinaryWriter.hpp"
 #include "System/IO/StreamReader.hpp"
 #include "System/IO/StreamWriter.hpp"
+#include "System/IO/StringWriter.hpp"
+#include "System/IO/TextWriter.hpp"
 #include "System/IO/BufferedStream.hpp"
 #include "System/IO/FileStream.hpp"
 #include "System/IO/MemoryStream.hpp"
@@ -1323,6 +1325,163 @@ TEST(StreamWriterReaderTests, StreamWriter_FailedConstructionLeavesTheStreamAlon
     good.Write(std::string("still fine"));
     good.Flush();
     EXPECT_EQ(ms.getLengthProperty(), 10);
+}
+
+// ===========================================================================
+// Ticket #1809 -- the null const char* contract across the TextWriter family
+// ===========================================================================
+//
+// Before this ticket the same input produced three structurally different
+// failures across one family, measured under ASan + UBSan + LSan in
+// build-probe/1823_prefix_defects.log:
+//
+//   TextWriter / StringWriter   std::logic_error from std::string(nullptr)
+//                               -- and a std:: exception, not a System:: one,
+//                               so catch (const System::Exception&) missed it
+//   StreamWriter                AddressSanitizer SEGV on 0x0 inside strlen
+//   System::Console             std::cout badbit set PERMANENTLY, silently
+//                               disabling all later console output
+//
+// The contract is .NET's own rule for a null STRING, since this port's
+// const char* overloads have no .NET counterpart and exist only as a spelling
+// of "a string" (TextWriter.hpp:30-37): Write is a no-op, WriteLine writes
+// only the line terminator, and nothing ever throws --
+// TextWriter.cs:277-283 and TextWriter.cs:502-509. A guard that threw
+// ArgumentNullException would have been a divergence, not a repair.
+
+namespace {
+    // The line terminator TextWriter appends, spelled the same way TextWriter
+    // spells it, so these tests assert the contract and not the platform.
+    const std::string kTextWriterNewLine =
+#ifdef _WIN32
+        "\r\n";
+#else
+        "\n";
+#endif
+} // namespace
+
+TEST(TextWriterNullCStringTests, TextWriterRef_Write_Null_WritesNothing) {
+    System::IO::StringWriter sw;
+    System::IO::TextWriter& tw = sw;
+    const char* value = nullptr;
+    EXPECT_NO_THROW(tw.Write(value));
+    EXPECT_EQ(sw.ToString(), "");
+}
+
+TEST(TextWriterNullCStringTests, TextWriterRef_WriteLine_Null_WritesOnlyTheTerminator) {
+    System::IO::StringWriter sw;
+    System::IO::TextWriter& tw = sw;
+    const char* value = nullptr;
+    EXPECT_NO_THROW(tw.WriteLine(value));
+    EXPECT_EQ(sw.ToString(), kTextWriterNewLine);
+}
+
+TEST(TextWriterNullCStringTests, StringWriter_Write_Null_WritesNothing) {
+    // Static dispatch, not through a TextWriter&: the same answer, because the
+    // guard is in the base overload that StringWriter does not override.
+    System::IO::StringWriter sw;
+    const char* value = nullptr;
+    EXPECT_NO_THROW(sw.Write(value));
+    EXPECT_EQ(sw.ToString(), "");
+}
+
+TEST(TextWriterNullCStringTests, StringWriter_WriteLine_Null_WritesOnlyTheTerminator) {
+    System::IO::StringWriter sw;
+    const char* value = nullptr;
+    EXPECT_NO_THROW(sw.WriteLine(value));
+    EXPECT_EQ(sw.ToString(), kTextWriterNewLine);
+}
+
+TEST(TextWriterNullCStringTests, StreamWriter_Write_Null_WritesNothing) {
+    // This was the AddressSanitizer SEGV: StreamWriter overrides
+    // Write(const char*) and called std::strlen on the null pointer, so the base
+    // class guard alone would have been bypassed by virtual dispatch.
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    const char* value = nullptr;
+    EXPECT_NO_THROW(sw.Write(value));
+    sw.Flush();
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+}
+
+TEST(TextWriterNullCStringTests, StreamWriter_WriteLine_Null_WritesOnlyTheTerminator) {
+    // TextWriter::WriteLine(const char*) forwards to the virtual Write(const char*),
+    // so this reached StreamWriter's override and crashed there too.
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    const char* value = nullptr;
+    EXPECT_NO_THROW(sw.WriteLine(value));
+    sw.Flush();
+    const auto bytes = ms.ToArray();
+    EXPECT_EQ(std::string(bytes.begin(), bytes.end()), kTextWriterNewLine);
+}
+
+TEST(TextWriterNullCStringTests, StreamWriterAndStringWriterAnswerNullIdentically) {
+    // The cross-type assertion that would fail first if a future subclass
+    // reintroduced the divergence.
+    const char* value = nullptr;
+
+    System::IO::StringWriter strw;
+    strw.Write(value);
+    strw.WriteLine(value);
+
+    MemoryStream ms;
+    StreamWriter strmw(&ms, true);
+    strmw.Write(value);
+    strmw.WriteLine(value);
+    strmw.Flush();
+
+    const auto bytes = ms.ToArray();
+    EXPECT_EQ(strw.ToString(), std::string(bytes.begin(), bytes.end()));
+    EXPECT_EQ(strw.ToString(), kTextWriterNewLine);
+}
+
+TEST(TextWriterNullCStringTests, NullWriteBetweenTwoOrdinaryWritesIsInert) {
+    // A no-op must be a no-op: the two ordinary writes stay contiguous, with no
+    // stray terminator and no gap where the null argument was.
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    const char* value = nullptr;
+    sw.Write("ab");
+    sw.Write(value);
+    sw.Write("cd");
+    sw.Flush();
+    const auto bytes = ms.ToArray();
+    EXPECT_EQ(std::string(bytes.begin(), bytes.end()), "abcd");
+}
+
+TEST(TextWriterNullCStringTests, EmptyCStringIsUnchangedOnEverySurface) {
+    // The empty-string control. "" and nullptr now produce the same output, but
+    // for different reasons, and "" must keep behaving exactly as it did before.
+    System::IO::StringWriter strw;
+    strw.Write("");
+    EXPECT_EQ(strw.ToString(), "");
+    strw.WriteLine("");
+    EXPECT_EQ(strw.ToString(), kTextWriterNewLine);
+
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    sw.Write("");
+    sw.Flush();
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+}
+
+TEST(TextWriterNullCStringTests, OrdinaryCStringIsUnchangedOnEverySurface) {
+    // Non-null input must be untouched by the guard. This is the assertion that
+    // catches a guard written with the test inverted.
+    System::IO::StringWriter strw;
+    strw.Write("abc");
+    EXPECT_EQ(strw.ToString(), "abc");
+    strw.WriteLine("de");
+    EXPECT_EQ(strw.ToString(), "abcde" + kTextWriterNewLine);
+
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    sw.Write("abc");
+    sw.WriteLine("de");
+    sw.Flush();
+    const auto bytes = ms.ToArray();
+    EXPECT_EQ(std::string(bytes.begin(), bytes.end()), "abcde" + kTextWriterNewLine);
 }
 
 TEST(StreamWriterReaderTests, WriteString_ReadToEnd_Roundtrip) {

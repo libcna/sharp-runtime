@@ -2,7 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <iostream>
 #include <sstream>
+#include <streambuf>
+#include <string>
 #include <vector>
 #include "System/Console.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -254,4 +257,93 @@ TEST(ConsoleBeepTests, Beep_DoesNotThrow) {
 
 TEST(ConsoleBeepTests, Beep_WithFreqDuration_DoesNotThrow) {
     EXPECT_NO_THROW(Console::Beep(800, 200));
+}
+
+// ===========================================================================
+// Ticket #1809 -- the null const char* contract on the Console writers
+// ===========================================================================
+//
+// System::Console is not a TextWriter subclass, but Console.Write(string?) in
+// .NET delegates to Out, which IS one, so it inherits TextWriter.cs:277-283's
+// no-op rule for a null string and TextWriter.cs:502-509's terminator-only rule
+// for WriteLine. This port's const char* overloads previously wrote the null
+// pointer straight into std::cout.
+//
+// That was the worst of the family's three failure modes and the one #1809's
+// description did not name: libstdc++'s operator<<(ostream&, const char*) sets
+// badbit on a null pointer, and badbit is STICKY, so a single null argument
+// silently disabled every later Console write in the process -- no crash, no
+// exception, no message (build-probe/1823_prefix_defects.log cases 26 and 27).
+//
+// Output is redirected into a local buffer so the assertions can read it and so
+// the suite's own stdout stays clean.
+
+namespace {
+    // RAII redirect of std::cout into a std::ostringstream, restoring the real
+    // buffer even if an assertion throws.
+    class CoutCapture {
+        std::ostringstream sink_;
+        std::streambuf* saved_;
+    public:
+        CoutCapture() : saved_(std::cout.rdbuf(sink_.rdbuf())) {}
+        ~CoutCapture() { std::cout.rdbuf(saved_); }
+        [[nodiscard]] std::string str() const { return sink_.str(); }
+    };
+} // namespace
+
+TEST(ConsoleNullCStringTests, Write_Null_WritesNothingAndLeavesCoutGood) {
+    const char* value = nullptr;
+    std::string captured;
+    {
+        CoutCapture capture;
+        Console::Write(value);
+        captured = capture.str();
+    }
+    EXPECT_EQ(captured, "");
+    // The assertion that actually matters: the stream is still usable. Before
+    // this ticket badbit was set here and never cleared.
+    EXPECT_TRUE(std::cout.good());
+    EXPECT_FALSE(std::cout.bad());
+}
+
+TEST(ConsoleNullCStringTests, WriteLine_Null_WritesOnlyTheTerminator) {
+    const char* value = nullptr;
+    std::string captured;
+    {
+        CoutCapture capture;
+        Console::WriteLine(value);
+        captured = capture.str();
+    }
+    EXPECT_EQ(captured, Console::NewLine);
+    EXPECT_TRUE(std::cout.good());
+    EXPECT_FALSE(std::cout.bad());
+}
+
+TEST(ConsoleNullCStringTests, WriteAfterNullWriteStillProducesOutput) {
+    // The sticky-badbit regression stated directly: a null argument must not
+    // disable the writes that follow it.
+    const char* value = nullptr;
+    std::string captured;
+    {
+        CoutCapture capture;
+        Console::Write("before");
+        Console::Write(value);
+        Console::Write("after");
+        captured = capture.str();
+    }
+    EXPECT_EQ(captured, "beforeafter");
+    EXPECT_TRUE(std::cout.good());
+}
+
+TEST(ConsoleNullCStringTests, EmptyAndOrdinaryCStringsAreUnchanged) {
+    std::string captured;
+    {
+        CoutCapture capture;
+        Console::Write("");
+        Console::Write("abc");
+        Console::WriteLine("");
+        captured = capture.str();
+    }
+    EXPECT_EQ(captured, "abc" + Console::NewLine);
+    EXPECT_TRUE(std::cout.good());
 }

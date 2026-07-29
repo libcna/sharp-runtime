@@ -55,7 +55,15 @@ namespace System::IO {
 
         /** Writes a string to the stream. */
         void Write(const std::string& value) override;
-        /** Writes a null-terminated character array to the stream. */
+        /**
+         * @brief Writes a null-terminated character array to the stream.
+         *
+         * A null @p value writes nothing and returns normally, matching
+         * TextWriter::Write(const char*) and .NET's own treatment of a null string
+         * (TextWriter.cs:277-283). @see TextWriter::Write(const char*)
+         *
+         * @param value Null-terminated string to write, or null to write nothing.
+         */
         void Write(const char* value) override;
 
         /** Flushes any buffered data to the underlying stream. */
