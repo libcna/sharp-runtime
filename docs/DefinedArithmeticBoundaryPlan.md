@@ -377,3 +377,31 @@ carry the compatibility argument or stop and ask. Do not silently reclassify.
 
 All eight findings keep status `confirmed`. No `SR-AUD-*` identifier was issued;
 numbering stays frozen at **364**.
+
+---
+
+## 12. Correction found while implementing #1830 (2026-07-29)
+
+§2 lists `Index.hpp:61` twice for SR-AUD-057 — once reached directly (case 6) and once
+"via `Range.hpp:93`" (case 7) — and §4.1 lists one transformation for the finding. Both
+are wrong in the same way: they describe `Range::GetOffsetAndLength` as merely
+**consuming** `Index`'s operation. It has a **second, independent** overflow of its own.
+
+For a maximal from-end range over an `INTCS_MIN` length, the unsigned bounds checks at
+`Range.hpp:95-98` **pass**, and the `end - start` that follows is undefined behaviour:
+
+```
+modules/core/include/System/Range.hpp:99:33: runtime error: signed integer overflow:
+                                            -2147483648 - 1 cannot be represented in type 'int'
+```
+
+It is emitted in the same process as `Index.hpp:61`'s. The survey's first pass did not
+show it because `-fno-sanitize-recover` aborts at the *first* diagnostic — so §3's own
+recommended flag hid a site. **When enumerating the sites of a finding, run the recovering
+build too and collect every diagnostic; use the aborting build only to prove a site is
+gone.** That amendment applies to every remaining ticket in this family, and #1837's seven
+`DateOnly` sites are the case where it matters most.
+
+SR-AUD-057's site count is therefore **two**, not one, and both are now fixed under #1830
+with the resolved values unchanged. This is recorded by appending, so that what the plan
+believed and what the implementation measured stay separately readable.

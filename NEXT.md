@@ -7,9 +7,10 @@
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production
-dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,098 tests across 37 executables (the 13,127 figure this
+dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,106 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 14,098
+section below states the count it measured, and the current floor is the 14,106
+verified by #1830, raised from the 14,098
 verified by #1826, raised from the 14,091
 verified by #1813, raised from the 14,077
 verified by #1825, raised from the 14,070
@@ -7277,3 +7278,40 @@ applications is local to one function.
 #1836 `TimeSpan` (both classes, must not be one edit), #1837 `DateOnly` (all seven
 sites). There are no hard dependencies; the order is by risk. **#1836 and #1837 should
 not be taken first**, being the two that need a behaviour-change argument.
+
+## Completed Index/Range defined arithmetic: ticket #1830 (2026-07-29)
+
+`REMED-CORE-INDEX-DEFINED-OFFSET`, P1, size XS. **CCF-004 class A**, first member of the
+family implemented. **SR-AUD-057 is now `remediated`** — both its sites.
+
+`Index::GetOffset` evaluated `length - value_` in signed `intcs`, so
+`Index::FromEnd(INTCS_MAX).GetOffset(INTCS_MIN)` was UBSan-confirmed undefined behaviour.
+`Index.cs` deliberately skips validation here for performance, and C# gives that decision
+meaning because its default integer arithmetic has **defined** two's-complement wrap; a
+C++ port cannot inherit the decision by executing signed overflow. The subtraction is now
+performed in `SharpRuntime::uintcs`. `GetOffset` stays `noexcept`, pinned by a
+`static_assert` inside a test.
+
+**A second UB site was found while implementing, and the plan itself had missed it.**
+`Range::GetOffsetAndLength` is not merely a consumer of `Index`'s operation — it has its
+own overflow at `Range.hpp:99`:
+`signed integer overflow: -2147483648 - 1 cannot be represented in type 'int'`. For a
+maximal from-end range over an `INTCS_MIN` length the unsigned bounds checks **pass**, and
+the following `end - start` is UB. Both SR-AUD-057's text and
+`docs/DefinedArithmeticBoundaryPlan.md` §2 described `Range` as only consuming.
+
+**Why the survey missed it, which matters for the rest of the family.** The plan's own §3
+recipe uses `-fno-sanitize-recover`, which **aborts at the first diagnostic** — so
+`Index.hpp:61`'s report hid `Range.hpp:99`'s in the same process. The plan now carries a
+§12 amendment: enumerate a finding's sites with the *recovering* build and collect every
+diagnostic; use the aborting build only to prove a site is gone. **#1837's seven `DateOnly`
+sites are where this matters most.**
+
+**No observable change, proven rather than asserted.** The pinned values — `offset == 1`,
+`length == 2147483647`, `FromEnd(MAX).GetOffset(0) == -2147483647` — are the ones measured
+*before* the fix, so the class A claim is verifiable.
+
+10 permanent regressions. `SharpRuntimeTests_Core_Base` **5002/5002**, clean under
+ASan + UBSan + LSan, 0 reports. Repository gate **14,106 tests across 37 executables**, 0
+warnings, 0 errors, `local_ci_check.sh` passed. No public signature, virtual, vtable,
+object layout or mangled symbol changed; `GetOffset` remains `noexcept`.

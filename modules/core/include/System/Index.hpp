@@ -54,11 +54,24 @@ namespace System {
          * .NET, this does not validate @p length or the returned offset against negative
          * values or against @p length — callers that misuse the result will get an
          * out-of-range failure from whatever consumes the offset, same as .NET.
+         *
+         * The from-end subtraction is performed in `SharpRuntime::uintcs` and converted
+         * back (ticket #1830, CCF-004 class A). `Index.cs` deliberately skips validation
+         * here, and C# gives that decision meaning because its default integer arithmetic
+         * has **defined** two's-complement wrap. A C++ port cannot inherit the decision by
+         * executing signed overflow: `Index::FromEnd(INTCS_MAX).GetOffset(INTCS_MIN)` was
+         * UBSan-confirmed undefined behaviour at this line
+         * (`build-probe/1829_ccf004_survey.log` case 6). The value is unchanged — the wrap
+         * this now performs explicitly is the one the platform happened to produce before,
+         * and a test pins it.
+         *
          * @param length The length of the collection that the Index will be used with.
          * @return The zero-based offset into the collection (unvalidated).
          */
         [[nodiscard]] intcs GetOffset(intcs length) const noexcept {
-            return fromEnd_ ? length - value_ : value_;
+            return fromEnd_ ? static_cast<intcs>(static_cast<SharpRuntime::uintcs>(length)
+                                                 - static_cast<SharpRuntime::uintcs>(value_))
+                            : value_;
         }
 
         /**

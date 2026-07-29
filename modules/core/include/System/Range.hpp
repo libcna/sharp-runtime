@@ -85,6 +85,16 @@ namespace System {
          * method does validate: it throws if the resolved end index exceeds @p length or if the
          * resolved start index exceeds the resolved end index (matching .NET's unsigned-compare
          * checks, which also reject negative offsets).
+         * The resolved-length subtraction is performed in `SharpRuntime::uintcs` and
+         * converted back (ticket #1830, CCF-004 class A). This site is **its own** defect,
+         * not merely one inherited from `Index::GetOffset`: the unsigned checks above pass
+         * for a maximal from-end range over an `INTCS_MIN` length, and the `end - start`
+         * that follows was then UBSan-confirmed undefined behaviour at this line
+         * (`signed integer overflow: -2147483648 - 1`, measured alongside `Index.hpp`'s
+         * report in the same process). Neither the audit's SR-AUD-057 text nor
+         * `docs/DefinedArithmeticBoundaryPlan.md` §2 listed it; both described `Range` as
+         * only *consuming* `Index`'s operation. The resolved values are unchanged.
+         *
          * @param length Total number of elements in the collection.
          * @return Resolved OffsetAndLength value.
          * @throws System::ArgumentOutOfRangeException if the resolved range falls outside [0, length].
@@ -96,7 +106,9 @@ namespace System {
                 static_cast<unsigned>(start) > static_cast<unsigned>(end)) {
                 throw System::ArgumentOutOfRangeException("length");
             }
-            return { start, end - start };
+            return { start, static_cast<SharpRuntime::intcs>(
+                                static_cast<SharpRuntime::uintcs>(end)
+                                - static_cast<SharpRuntime::uintcs>(start)) };
         }
 
         /**

@@ -105,3 +105,49 @@ TEST(RangeTest, GetOffsetAndLength_NegativeStart_Throws) {
     Range r(Index::FromEnd(20), Index::FromStart(5));
     EXPECT_THROW(r.GetOffsetAndLength(10), System::ArgumentOutOfRangeException);
 }
+
+// ===========================================================================
+// Ticket #1830 -- CCF-004 / SR-AUD-057: Range's OWN defined-arithmetic site
+// ===========================================================================
+//
+// This is not the same defect as Index::GetOffset's, and that distinction is the
+// point of these tests. SR-AUD-057 and docs/DefinedArithmeticBoundaryPlan.md §2
+// both described Range as merely CONSUMING Index's operation. It has a second,
+// independent overflow of its own: for a maximal from-end range over an
+// INTCS_MIN length the unsigned bounds checks PASS, and the `end - start` that
+// follows was UBSan-confirmed undefined behaviour --
+//
+//   Range.hpp:99: runtime error: signed integer overflow:
+//                 -2147483648 - 1 cannot be represented in type 'int'
+//
+// -- reported in the same process as Index.hpp:61's, which is why the survey's
+// first pass, aborting at the first diagnostic, did not show it. Both subtractions
+// are now performed in SharpRuntime::uintcs, and the resolved values are unchanged.
+
+TEST(RangeTest, GetOffsetAndLength_ExtremeFromEndOverNegativeLength_DefinedWrap) {
+    // The audited input. Both values are the ones measured before the repair.
+    Range r(Index::FromEnd(2147483647), Index::FromEnd(0));
+    const auto ol = r.GetOffsetAndLength(-2147483648);
+    EXPECT_EQ(ol.Offset, 1);
+    EXPECT_EQ(ol.Length, 2147483647);
+}
+
+// Every ordinary resolution must be untouched.
+TEST(RangeTest, GetOffsetAndLength_OrdinaryRangesUnchangedByDefinedArithmetic) {
+    EXPECT_EQ(Range(Index::FromStart(2), Index::FromStart(7)).GetOffsetAndLength(10).Offset, 2);
+    EXPECT_EQ(Range(Index::FromStart(2), Index::FromStart(7)).GetOffsetAndLength(10).Length, 5);
+    EXPECT_EQ(Range(Index::FromStart(0), Index::FromEnd(0)).GetOffsetAndLength(10).Offset, 0);
+    EXPECT_EQ(Range(Index::FromStart(0), Index::FromEnd(0)).GetOffsetAndLength(10).Length, 10);
+    // An empty range at each end stays empty.
+    EXPECT_EQ(Range(Index::FromStart(10), Index::FromStart(10)).GetOffsetAndLength(10).Length, 0);
+    EXPECT_EQ(Range(Index::FromStart(0), Index::FromStart(0)).GetOffsetAndLength(10).Length, 0);
+}
+
+// The existing rejections must still reject: the repair is arithmetic-only and
+// must not have widened what GetOffsetAndLength accepts.
+TEST(RangeTest, GetOffsetAndLength_StillRejectsWhatItRejectedBefore) {
+    EXPECT_THROW(Range(Index::FromStart(2), Index::FromStart(20)).GetOffsetAndLength(10),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Range(Index::FromEnd(20), Index::FromStart(5)).GetOffsetAndLength(10),
+                 System::ArgumentOutOfRangeException);
+}
