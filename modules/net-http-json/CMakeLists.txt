@@ -5,6 +5,6 @@ sharp_runtime_register_module(
     NAME Net.Http.Json
     TARGET sharp_runtime_net_http_json
     TYPE INTERFACE
-    PUBLIC_DEPENDENCIES Net.Http Text.Json Threading.Tasks
+    PUBLIC_DEPENDENCIES Core.Base Net.Http Text.Json Threading.Tasks
     TEST_DEPENDENCIES Net.Sockets
 )
