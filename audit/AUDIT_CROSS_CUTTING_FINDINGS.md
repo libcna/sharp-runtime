@@ -801,3 +801,41 @@ architecture invariants. **This is one seam family; no broad repository-wide ODR
 sweep was performed and none is claimed.**
 
 - `scripts/local_ci_check.sh.audit.md`.
+
+## Post-audit remediation note — ticket #1801, negative consumer fixtures (2026-07-29)
+
+A **negative consumer fixture** — a `test/consumer/*_negative.cpp` whose purpose
+is to prove that a spelling a remediation ticket outlawed is *rejected by the
+compiler* — must be validated **per marked site**, never by observing that the
+whole file failed to compile. Seven such fixtures existed, asserting 36 marked
+claims between them, and **no tracked job compiled any of them**: the per-site
+logic existed for two of the seven, under the gitignored `build-probe/`, and the
+only tracked mention of any fixture anywhere in the build or CI surface was a
+docstring.
+
+Measured consequence, reproduced before anything was built: a copy of
+`collections_hashtable_value_access_negative.cpp` with **one** of its eleven
+marked sites made legal still failed at nine other lines, so a whole-file "the
+compiler returned non-zero" check reported **PASS** while one of the eleven claims
+had silently become false. The retained gitignored per-site checker caught it
+(10 of 11, exit 1). Nothing tracked did. **A non-zero compiler exit status may
+therefore not be treated as evidence that a compile-rejection contract holds** in
+this repository — one broken line hides every other line.
+
+`scripts/check_negative_consumer_fixtures.py` now enforces the rule in
+`scripts/local_ci_check.sh`. Each fixture declares its component and wraps each
+negative site in a numbered `#if SHARP_RUNTIME_NEGATIVE_SITE == N` guard carrying
+its own expected-diagnostic fragments; the checker compiles the all-sites-off
+baseline — which must be **diagnostic-free** — plus each site separately, and
+requires every diagnostic located in the fixture to fall inside the enabled guard.
+It discovers fixtures rather than hard-coding them and derives include directories
+from the repository's own CMake component metadata, so a fixture added by a future
+ticket in any component is covered without editing it. Seven fixtures, **37**
+sites, all rejected; a 7/7 temporary mutation campaign proves each site is named
+when it stops failing. The full analysis, the five compared marker conventions and
+the evidence are in `docs/NegativeConsumerFixtureValidation.md`, and the rule is
+stated in `CLAUDE.md`'s architecture invariants. **One coverage asymmetry is
+recorded rather than closed:** `SortedSetVersionAccess` has no consumer-side
+fixture, which is inactive ticket #1803; nothing is known to be wrong with it.
+
+- `scripts/local_ci_check.sh.audit.md`.

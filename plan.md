@@ -61,12 +61,12 @@ was never created. Neither file should be linked as current documentation.
 
 ### Local planning database
 
-The 2026-07-27 local snapshot contains:
+The 2026-07-29 local snapshot contains:
 
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,802 rows: 1,796 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`), implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`), and design ticket #1785 (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened inactive by #1784 and closed by adopting .NET's nested-view validation order), design ticket #1795 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY-DESIGN`, opened because #1794 is an implementation row and was deliberately not reused), and implementation ticket #1794 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, which landed #1795's design under the full four-item approval: owning `std::any` Key/Value, a mandatory `MoveNext`-time snapshot on both implementations, two `ListDictionaryInternal` parity corrections, and an acknowledged silent ABI break through two independent mechanisms) — one `wontfix` (#1772, obsoleted by #1771), five deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval; #1791 `REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, opened by #1790 and awaiting the four-part approval in `docs/ListIndexerVersioningDesign.md` section 28; and #1801 `REMED-TOOLING-NEGATIVE-FIXTURE-CI`, the last of the three rows #1799 opened inactive, for the negative-fixture per-site checker that lives only under the gitignored `build-probe/` — its two siblings #1802 `REMED-COLL-HASHTABLE-REMOVE-VERSION` and #1800 `REMED-COLL-VERSION-SEAM-ODR` are both **closed**, see below, and #1800's own checker deliberately does not close #1801's scope; **this line said "eight" while listing seven until #1802 corrected it, and the count is taken from the database on each edit**); design ticket #1797 (`REMED-COLL-HASHTABLE-VALUE-ACCESS-DESIGN`, opened because #1796 is an implementation row and was deliberately not reused), design ticket #1799 (`REMED-COLL-LISTDICT-SETITEM-DESIGN`, opened for the same reason against #1798 and closed 2026-07-29 with no production change), implementation ticket #1798 (`REMED-COLL-LISTDICTINTERNAL-PARITY`, which landed #1799's design under the full three-item approval: a private `ValidatedKey` making null-key rejection structurally unskippable across all five raw-key entry points, one `setItem` upsert whose bump follows the mutation and covers replacement and equal-value replacement, deletion of the `const_cast` that made the key view's `CopyTo` publish a writable pointer to a caller's `const` object, two deliberate deviations from .NET's bump-first shape on a throwing `Add` and an absent `Remove`, and an acknowledged **silent** stale-object hazard requiring a full consumer rebuild), and implementation ticket #1796 (`REMED-COLL-HASHTABLE-WRITE-ESCAPES`, which landed #1797's design under the full four-item approval: owning `std::any` from `getItem`/`at`/the `const` indexer, a non-copyable `ValueReference` proxy making `table[key] = value` a tracked insert-or-replace and a bare read no longer insert, `KeyNotFoundException` in place of `std::out_of_range`, and an acknowledged silent ABI break requiring a full consumer rebuild) are both `done`; no `todo`, `doing`, or `needs_user` rows |
+| `ticket` | 1,803 rows: 1,797 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`), ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`), ticket #1783 (`REMED-COLL-SORTEDSET-LIVE-VIEW`), ticket #1784 (`REMED-COLL-SORTEDSET-VIEW-COUNT-RACE`), ticket #1786 (`REMED-COLL-VERSION-COUNTER-OVERFLOW`), and ticket #1787 (`REMED-COLL-VERSION-COUNTER-OVERFLOW-SWEEP`) design ticket #1790 (`REMED-COLL-LIST-INDEXER-VERSION`), design ticket #1792 (`REMED-COLL-ENUMERATOR-CURRENT-CONSTCAST`), implementation ticket #1793 (`REMED-COLL-IENUMERATOR-CURRENT-SAFETY-IMPLEMENT`), and design ticket #1785 (`REMED-COLL-SORTEDSET-NESTED-EXCEPTION-ORDER`, opened inactive by #1784 and closed by adopting .NET's nested-view validation order), design ticket #1795 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY-DESIGN`, opened because #1794 is an implementation row and was deliberately not reused), and implementation ticket #1794 (`REMED-COLL-IDICTENUM-KEYVALUE-SAFETY`, which landed #1795's design under the full four-item approval: owning `std::any` Key/Value, a mandatory `MoveNext`-time snapshot on both implementations, two `ListDictionaryInternal` parity corrections, and an acknowledged silent ABI break through two independent mechanisms) — one `wontfix` (#1772, obsoleted by #1771), five deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep; #1788 `REMED-COLL-LINKEDLIST-VERSION-WIDEN` and #1789 `REMED-COLL-BITARRAY-VERSION-WIDEN`, both opened by #1787 and both awaiting an explicit object-size approval; #1791 `REMED-COLL-LIST-INDEXER-VERSION-IMPLEMENT`, opened by #1790 and awaiting the four-part approval in `docs/ListIndexerVersioningDesign.md` section 28; and #1803 `REMED-TOOLING-SORTEDSET-SEAM-NEGATIVE-FIXTURE`, opened inactive by #1801 for the one seam — `SortedSetVersionAccess` — whose *consumer-side* unreachability has no negative fixture, nothing being known to be wrong with it; **all three rows #1799 opened inactive are now closed**: #1802 `REMED-COLL-HASHTABLE-REMOVE-VERSION`, #1800 `REMED-COLL-VERSION-SEAM-ODR` and #1801 `REMED-TOOLING-NEGATIVE-FIXTURE-CI`, see below; **this line said "eight" while listing seven until #1802 corrected it, and the count is taken from the database on each edit**); design ticket #1797 (`REMED-COLL-HASHTABLE-VALUE-ACCESS-DESIGN`, opened because #1796 is an implementation row and was deliberately not reused), design ticket #1799 (`REMED-COLL-LISTDICT-SETITEM-DESIGN`, opened for the same reason against #1798 and closed 2026-07-29 with no production change), implementation ticket #1798 (`REMED-COLL-LISTDICTINTERNAL-PARITY`, which landed #1799's design under the full three-item approval: a private `ValidatedKey` making null-key rejection structurally unskippable across all five raw-key entry points, one `setItem` upsert whose bump follows the mutation and covers replacement and equal-value replacement, deletion of the `const_cast` that made the key view's `CopyTo` publish a writable pointer to a caller's `const` object, two deliberate deviations from .NET's bump-first shape on a throwing `Add` and an absent `Remove`, and an acknowledged **silent** stale-object hazard requiring a full consumer rebuild), and implementation ticket #1796 (`REMED-COLL-HASHTABLE-WRITE-ESCAPES`, which landed #1797's design under the full four-item approval: owning `std::any` from `getItem`/`at`/the `const` indexer, a non-copyable `ValueReference` proxy making `table[key] = value` a tracked insert-or-replace and a bare read no longer insert, `KeyNotFoundException` in place of `std::out_of_range`, and an acknowledged silent ABI break requiring a full consumer rebuild) are both `done`, as is tooling ticket #1801 (`REMED-TOOLING-NEGATIVE-FIXTURE-CI`, which made all **seven** — not six — negative consumer fixtures compile per site from `scripts/local_ci_check.sh`, 37 sites, after reproducing the whole-file false pass and proving the checker against a 7/7 mutation campaign; no production source, signature, symbol or layout changed); no `todo`, `doing`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -1861,7 +1861,73 @@ and #1800's checker compiles nothing and shares none of that infrastructure.
 #1773, #1788, #1789 and #1791 remain `blocked` and untouched; #1790, #1792–#1799
 and #1802 remain `done` and none was reopened. CNA and mobile-eggbert were not
 inspected, searched, configured, built, or modified. No push, merge, rebase,
-tag, or publication occurred.
+tag, or publication occurred. (**#1801 closed the same day, immediately after
+#1800**, and the verified count was **seven** fixtures rather than six — see the
+next section; this paragraph is left as #1800's own accurate record.)
+
+### Completed negative-fixture CI remediation: ticket #1801
+
+Ticket #1801 (`REMED-TOOLING-NEGATIVE-FIXTURE-CI`, P3, size S, `tooling`, area
+*Developer experience*) is **done**. Durable record:
+[`docs/NegativeConsumerFixtureValidation.md`](docs/NegativeConsumerFixtureValidation.md).
+It is infrastructure only: **no production source, signature, symbol, layout,
+vtable, exception contract or collection semantic changed**, and nothing under
+`modules/*/include` or `modules/*/src` was touched.
+
+Seven committed `test/consumer/*_negative.cpp` files existed to prove that
+outlawed spellings are rejected by the compiler, and **no tracked job compiled
+any of them**; per-site logic existed for two of the seven, under the gitignored
+`build-probe/`. The independently verified inventory is **7 fixtures / 37
+sites**, not the six the ticket row named — the row predates
+`collections_dictionary_setter_negative.cpp` (#1798) — and three fixtures had no
+per-site checker at all, while
+`collections_object_model_readonlydictionary_negative.cpp` named a
+`scripts/check_readonlydict_empty_negative.sh` that has never existed in any
+commit.
+
+The false pass was reproduced before anything was built: a temporary copy of the
+Hashtable fixture with one marked site made legal still failed at nine other
+lines, so a whole-file check reported PASS while one of eleven claims had become
+false; the retained gitignored checker caught it at 10/11 and nothing tracked
+did.
+
+The selected convention is a numbered preprocessor guard per site
+(`#if SHARP_RUNTIME_NEGATIVE_SITE == N`) with an inline `// NEGATIVE(<id>):
+<fragment>` marker and `//     | <alternative>` continuations, chosen over
+runner-generated variants, an external manifest, one file per expression, and
+Clang `-verify` comments. The tracked file is compiled as-is with a `-D`, so
+nothing is generated; the all-sites-off baseline must compile with **zero
+diagnostics**, which is both the soundness argument for per-site attribution and
+the reason no CMake change was needed.
+
+`scripts/check_negative_consumer_fixtures.py` compiles 44 translation units
+(7 baselines + 37 sites) with `-std=c++23 -Wall -Wextra -Wpedantic -Werror
+-fsyntax-only`, include directories derived from the repository's own CMake
+component metadata, `LC_ALL=C` for deterministic diagnostic wording, and a hard
+three-job ceiling that refuses a higher request. It runs from
+`scripts/local_ci_check.sh` before the configure step.
+`test/check_negative_consumer_fixtures_test.py` is 37 cases in 2.1 s, including
+the permanent regression proof on a real tracked fixture, and
+`build-probe/1801_mutation_campaign.py` is 7/7 with exactly one problem reported
+per mutated fixture.
+
+Validated from a fresh configure and clean-first rebuild at three jobs: **7
+fixtures / 37 sites / 37 rejected** in 12.5 s at peak 3 jobs, checker fixtures
+37/37, mutation campaign 7/7, zero warnings and errors (346 s, 632 objects none
+predating the configure), **13,790 tests across 37 executables**,
+`Collections.Core` **2,504**, the full ten-component selective matrix with its
+three forbidden fixtures still rejected, 41 modules / 90 edges, validator 7/7,
+seam checker 12/12, catalogue current, database consistent, `git diff --check`
+clean, Doxygen 1.9.8 at **1,940** of the 1,942 ceiling. Sanitizers are not
+applicable to a Python checker and compile-only validation, and none was built.
+
+No new `SR-AUD-*` identifier. One residual gap is recorded rather than absorbed:
+`SortedSetVersionAccess` has no consumer-side fixture, which is new inactive
+ticket **#1803** (`REMED-TOOLING-SORTEDSET-SEAM-NEGATIVE-FIXTURE`, `blocked`,
+not begun). #1773, #1788, #1789 and #1791 remain `blocked` and untouched; #1790,
+#1792–#1800 and #1802 remain `done` and none was reopened. CNA and
+mobile-eggbert were not inspected, searched, configured, built, or modified. No
+push, merge, rebase, tag, or publication occurred.
 
 No repair ticket is active.
 

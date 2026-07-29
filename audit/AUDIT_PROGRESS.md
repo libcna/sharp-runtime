@@ -3616,3 +3616,149 @@ were not inspected, searched, configured, built, or modified. No push, merge,
 rebase, tag, or publication occurred.
 
 - `scripts/local_ci_check.sh.audit.md`.
+
+## Post-audit remediation batch — ticket #1801, negative consumer fixtures validated per site (2026-07-29)
+
+Ticket #1801 (`REMED-TOOLING-NEGATIVE-FIXTURE-CI`, P3, size S, `tooling`, area
+*Developer experience*) is **done**. Durable record:
+`docs/NegativeConsumerFixtureValidation.md`. This closes the gap #1796 reported,
+#1799 confirmed had no ticket of its own, and #1798, #1802 and #1800 each carried
+forward without widening; the "still not claimed closed" disclosures in their
+closure sections above are the historical record of a known gap carried honestly
+and are **not** retro-edited. #1796, #1797, #1798, #1799, #1800 and #1802 remain
+`done` and none is reopened.
+
+This is **infrastructure only**. No production source, signature, symbol, object
+layout, vtable, exception contract or collection semantic changed; nothing under
+any `modules/*/include` or `modules/*/src` was touched, and
+`test/consumer/CMakeLists.txt`, `test/consumer/InjectFixture.cmake` and every
+module's CMake metadata are unchanged.
+
+**What was wrong.** Seven committed `test/consumer/*_negative.cpp` files existed
+to prove that spellings earlier tickets outlawed are rejected by the compiler,
+and **no tracked job compiled any of them**. The per-site checking logic existed
+for two of the seven (`build-probe/1796_check_negative.py`,
+`build-probe/1798_check_negative.py`), under the gitignored `build-probe/`. The
+only tracked mention of any of the seven anywhere in the build or CI surface —
+`scripts/local_ci_check.sh`, `scripts/run_component_tests.sh`,
+`scripts/check_selective_components.sh`, every `CMakeLists.txt`,
+`.github/workflows/components.yml` — was a **docstring**.
+
+**Four inventory corrections, all against the ticket's own row.**
+
+1. **Seven fixtures, not six.** The row predates
+   `test/consumer/collections_dictionary_setter_negative.cpp`, added by #1798.
+2. **Three of the seven had no per-site checker at all**, not merely an untracked
+   one: `collections_mutation_version_negative.cpp` (#1787),
+   `collections_object_model_readonlydictionary_negative.cpp` (#1780) and
+   `collections_sorted_set_view_negative.cpp` (#1783).
+3. **`scripts/check_readonlydict_empty_negative.sh` has never existed in any
+   commit.** The #1780 fixture named it as the thing that compiled it. Corrected
+   in the fixture.
+4. **36 marked sites, now 37.** `collections_mutation_version_negative.cpp`'s one
+   marked statement pair was two independent claims sharing a local variable;
+   splitting them made both independently compilable.
+
+**The false pass was reproduced, not assumed** (§3 of the record). A copy of the
+Hashtable fixture with its first marked site turned into the one spelling the
+fixture's own header says still compiles still failed at **nine** other lines, so
+a whole-file check reported PASS while one of eleven claims had become false. The
+retained gitignored per-site checker caught it at 10 of 11, exit 1. All mutation
+work happened in `build-probe/1801_gap/`; no tracked file was edited to produce
+it.
+
+**What was built.**
+
+- `scripts/check_negative_consumer_fixtures.py` — the tracked checker. It
+  compiles 44 translation units per run (7 all-sites-off baselines + 37 sites)
+  with `-std=c++23 -Wall -Wextra -Wpedantic -Werror -fsyntax-only`, include
+  directories **derived** from the repository's own CMake component metadata
+  rather than duplicated, `LC_ALL=C` and `-fdiagnostics-color=never` for
+  deterministic diagnostic wording, and a hard `MAXIMUM_JOBS = 3` that **refuses**
+  a higher request instead of clamping it. `-Werror` is not weakened anywhere.
+  No CPU-count detection appears in it.
+- `test/check_negative_consumer_fixtures_test.py` — 37 cases in 2.1 s, each
+  building a miniature repository on disk and compiling it for real, including the
+  permanent regression proof against a real tracked fixture.
+- The seven fixtures, migrated from `// must fail:` comments to numbered
+  `#if SHARP_RUNTIME_NEGATIVE_SITE == N` guards with inline
+  `// NEGATIVE(<id>): <fragment>` markers and `//     | <alternative>`
+  continuations. Five conventions were compared in §4 of the record; the
+  guard-plus-inline-marker form won because the tracked file is compiled **as-is**
+  with a `-D`, so nothing is generated, nothing needs cleaning up, and every
+  diagnostic names a real tracked line.
+
+**The load-bearing invariant is the clean baseline.** With no site selected a
+fixture must compile with **zero** diagnostics. Enabling a guard can only *add*
+uses of the surrounding scaffolding, never remove one, so any diagnostic in a
+single-site variant is caused by that site; and the checker additionally requires
+every diagnostic located in the fixture — `error:` or `required from here` — to
+fall inside the enabled guard, so a site that fails because unrelated source broke
+is reported as a failure rather than counted as a pass. The same property makes
+each fixture honest C++ that an IDE does not present as broken, which is why **no
+CMake change was needed at all**, and it lets each guard's `#else` branch document
+the migration in compilable form.
+
+**Integration point:** `scripts/local_ci_check.sh`, immediately after #1800's
+seam block and **before** `cmake -S . -B build`, which is also the `full` job of
+`.github/workflows/components.yml`. Adding it to
+`scripts/check_selective_components.sh` or a dedicated CTest target was considered
+and rejected with reasons in §9 of the record. The three `forbidden_*.cpp`
+component-isolation fixtures stay in the selective script, where the selective
+configure step their claim depends on exists; they were already executed by
+canonical validation and were never part of this gap.
+
+**Temporary mutation campaign: 7/7.** For each fixture,
+`build-probe/1801_mutation_campaign.py` makes one marked site legal against a
+mirror root whose `cmake/`, `modules/` and `vendor/` are symlinks to the real tree,
+and requires the checker to fail naming exactly that site. Every round reported
+**exactly one** problem, which is what proves the 36 still-invalid siblings neither
+mask the legal site nor report falsely. No tracked file was mutated and none was
+committed.
+
+**Validation**, from a fresh configure (`cmake --fresh`) and a `--clean-first`
+rebuild at three jobs: **7 fixtures / 37 sites / 37 rejected**, 44 invocations,
+peak 3 jobs, 12.5 s; checker fixtures **37/37**; **0 warnings, 0 errors** in 346 s
+with **632** objects and none predating the configure marker; **13,790 tests
+across 37 executables**; `Collections.Core` **2,504**; the full ten-component
+selective matrix passed with its three forbidden fixtures still rejected; **41
+modules / 90 edges**; boundary-validator fixtures 7/7; seam ODR OK with **12/12**
+fixtures; component catalogue current; database consistent; Doxygen 1.9.8 at
+**1,940** of the 1,942 ceiling; `git diff --check` clean.
+
+**Sanitizers are not applicable and none was built.** The deliverable is a Python
+checker plus compile-only fixture validation: no new runtime code, no new thread,
+no new allocation, and ASan/UBSan/LSan/TSan cannot observe a compile-rejection
+contract. Module CMake metadata is unchanged, so normal test compilation is
+unaffected and the existing `Collections.Core` sanitizer coverage from #1796,
+#1798 and #1800 stands without being re-measured.
+
+**Build-resource accounting.** `build/` for the fresh configure, clean-first
+rebuild and full gate; `build-probe/` for the gap reproduction, the mutation
+campaign and the superseded-checker note, all under a `1801_` file prefix;
+`build-consumer/` read only, for the retained #1796/#1798 logs; `build-tmp/` as
+the repository-local `TMPDIR` and as the self-test's deterministic temporary root.
+**No new build directory was created and no compilation exceeded three jobs**,
+including inside the new checker, which refuses a higher request.
+`scripts/check_selective_components.sh` still needs the repository-local `TMPDIR`
+because it calls `mktemp -d`.
+
+**Still not claimed closed:** every fragment was measured against
+`g++ (Debian 14.2.0-19) 14.2.0` only — the Clang fallback alternatives and
+`-ferror-limit=0` are reasoned, not measured, consistent with the repository's
+Linux/GCC verified baseline. `-fsyntax-only` does not link, so a claim that can
+only fail at link time cannot be expressed in this framework; none of the seven
+makes such a claim. `SortedSetVersionAccess` has no consumer-side fixture proving
+it is unreachable — a coverage asymmetry with nothing known to be wrong, recorded
+as new inactive ticket **#1803**
+(`REMED-TOOLING-SORTEDSET-SEAM-NEGATIVE-FIXTURE`, `blocked`, not begun) rather
+than absorbed here. No repository-wide compiler-diagnostic normalisation was
+performed and none is claimed. No new `SR-AUD-*` identifier — the numbering stays
+frozen at 364 and the gap was found during remediation, by #1796.
+
+Tickets #1773, #1788, #1789 and #1791 remain `blocked` and untouched, and #1803
+joins them; #1790, #1792–#1800 and #1802 remain `done` and none was reopened. CNA
+and mobile-eggbert were not inspected, searched, configured, built, or modified.
+No push, merge, rebase, tag, or publication occurred.
+
+- `scripts/local_ci_check.sh.audit.md`.

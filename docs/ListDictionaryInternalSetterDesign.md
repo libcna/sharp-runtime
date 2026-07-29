@@ -1520,6 +1520,16 @@ closes** that gap. By contrast both *positive* fixtures — `collections_diction
 and `collections_copyto.cpp` — are compiled `-Wall -Wextra -Wpedantic -Werror`
 and **run** by `scripts/check_selective_components.sh Collections.Core`.
 
+> **Reconciled by ticket #1801 on 2026-07-29.** The paragraph above is preserved
+> as the accurate record of what was true when #1798 closed. #1801 has since
+> closed the gap: `build-probe/1798_check_negative.py` was replaced by the tracked
+> `scripts/check_negative_consumer_fixtures.py`, which
+> `scripts/local_ci_check.sh` runs before it configures anything, and this
+> fixture was migrated to numbered `#if SHARP_RUNTIME_NEGATIVE_SITE == N` guards.
+> Its **6 of 6** sites are unchanged in substance and are now compiled
+> individually by every gate run. See
+> `docs/NegativeConsumerFixtureValidation.md`.
+
 ### 37.7 Interaction with ticket #1800, recorded and not fixed
 
 The new suite needs the mutation-counter seam, so it adds a **third** explicit

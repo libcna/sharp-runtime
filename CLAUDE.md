@@ -309,6 +309,23 @@ Every `.hpp` and `.cpp` file starts with:
   `scripts/local_ci_check.sh`; never define a seam in `modules/*/include` or `modules/*/src`,
   because that would make it reachable from a consumer and break
   `test/consumer/collections_mutation_version_negative.cpp`.
+- **Negative consumer fixtures:** a `test/consumer/*_negative.cpp` proves that a spelling a
+  ticket outlawed is **rejected by the compiler**. It must carry a
+  `// NEGATIVE-FIXTURE: component=<Component>` directive, an
+  `#ifndef SHARP_RUNTIME_NEGATIVE_SITE / #define … 0 / #endif` prelude, and one
+  `#if SHARP_RUNTIME_NEGATIVE_SITE == N` guard per negative site, each holding exactly one
+  `// NEGATIVE(<kebab-id>): <expected diagnostic fragment>` marker (further alternatives on
+  following `//     | <fragment>` lines). Site numbers must be `1..N`; the `#else` branch is
+  where the migrated spelling goes. **With no site selected the file must compile with zero
+  diagnostics** — that clean baseline is what lets a per-site verdict be attributed to its own
+  source, so add `(void)x;` wherever disabling a site orphans a local.
+  `scripts/check_negative_consumer_fixtures.py` compiles the baseline plus each site
+  separately (`-fsyntax-only`, `-Wall -Wextra -Wpedantic -Werror`, at most three jobs, include
+  directories derived from the CMake component metadata) and runs in
+  `scripts/local_ci_check.sh`. Never assert only that a whole fixture fails to compile: one
+  broken line hides every other line, and a whole-file check reported a **false pass** while
+  one of eleven claims had silently become legal again
+  (`docs/NegativeConsumerFixtureValidation.md`, ticket #1801).
 
 ---
 

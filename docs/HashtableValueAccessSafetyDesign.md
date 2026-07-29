@@ -1500,7 +1500,7 @@ for performance.**
 | `scripts/check_selective_components.sh` (full matrix) | **passed**, repository-local `TMPDIR`, ≤3 jobs |
 | `scripts/check_selective_components.sh Collections.Core collections_hashtable_value_access.cpp` | fixture compiled **and run**: `OK` |
 | Five pre-existing `Collections.Core` consumer fixtures | all pass **unmodified** |
-| `build-probe/1796_check_negative.py` | **11/11** marked alias spellings rejected |
+| `build-probe/1796_check_negative.py` | **11/11** marked alias spellings rejected — superseded by the tracked `scripts/check_negative_consumer_fixtures.py` in ticket #1801, which reports the same 11/11 per site; do not run the old script, see `build-probe/1801_superseded_checkers.md` |
 | `scripts/check_doxygen_warnings.sh` | Doxygen 1.9.8, **1,940** warnings (ceiling 1,942) — unchanged |
 | `git diff --check` | clean |
 | `scripts/__pycache__` | absent; every Python tool run with `PYTHONDONTWRITEBYTECODE=1` |
@@ -1884,6 +1884,17 @@ tracked CI job**. The **positive** fixture added here *is* compiled `-Werror`
 collections_hashtable_remove.cpp`, which is not part of the script's default
 matrix and must be invoked with those two arguments — stated plainly so "the
 fixture is in CI" is not inferred.
+
+> **Reconciled by ticket #1801 on 2026-07-29.** The paragraph above is preserved
+> as the accurate record of what was true when #1802 closed. #1801 has since
+> closed that gap for all **seven** negative fixtures — the four this section
+> counted plus `collections_mutation_version_negative.cpp`,
+> `collections_object_model_readonlydictionary_negative.cpp` and
+> `collections_sorted_set_view_negative.cpp`, which had no per-site checker at
+> all. `scripts/check_negative_consumer_fixtures.py` compiles all 37 sites
+> individually and runs from `scripts/local_ci_check.sh`. This section's own
+> claim — that #1802 adds no negative fixture — is unchanged and still correct.
+> See `docs/NegativeConsumerFixtureValidation.md`.
 
 ### 35.11 Fresh-rebuild and validation evidence
 

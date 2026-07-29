@@ -3274,6 +3274,118 @@ knows nothing about `// must fail:` markers. #1773, #1788, #1789 and #1791 remai
 `blocked` and untouched; #1790 and #1792–#1799 and #1802 remain `done` and none
 was reopened. CNA and mobile-eggbert were not inspected, searched, configured,
 built, or modified. No push, merge, rebase, tag, or publication occurred.
+(**#1801 was closed the same day, immediately after #1800**, and the count was
+**seven** fixtures, not six — see the next section; the sentence above is left as
+#1800's own accurate record of the moment it closed.)
+
+### Completed negative-fixture CI remediation: ticket #1801
+
+Ticket #1801 (`REMED-TOOLING-NEGATIVE-FIXTURE-CI`, P3, size S, `tooling`, area
+*Developer experience*) is **done**. Durable record:
+[`docs/NegativeConsumerFixtureValidation.md`](docs/NegativeConsumerFixtureValidation.md).
+**No production source, signature, symbol, layout, vtable, exception contract or
+collection semantic changed** — nothing under any `modules/*/include` or
+`modules/*/src` was touched. #1796, #1797, #1798, #1799, #1800 and #1802 remain
+`done` and none was reopened.
+
+**Seven committed `test/consumer/*_negative.cpp` files existed to prove that
+outlawed source spellings are rejected by the compiler, and no tracked job
+compiled any of them.** The per-site checking logic existed for two of the seven,
+under the gitignored `build-probe/`; the only tracked mention of any fixture
+anywhere in the build or CI surface was a docstring in
+`scripts/check_version_seam_odr.py`.
+
+1. **The inventory is seven fixtures and 37 sites, not six fixtures.** The
+   ticket row predates `collections_dictionary_setter_negative.cpp` (#1798).
+   Three of the seven — `collections_mutation_version_negative.cpp`,
+   `collections_object_model_readonlydictionary_negative.cpp`,
+   `collections_sorted_set_view_negative.cpp` — had **no per-site checker at
+   all**, and the readonly-dictionary fixture named a
+   `scripts/check_readonlydict_empty_negative.sh` that **has never existed in any
+   commit**.
+2. **The false pass was reproduced, not assumed.** A temporary copy of the
+   Hashtable fixture with its first marked site made legal still failed at nine
+   other lines, so "the compiler returned non-zero" was satisfied while one of
+   eleven claims had silently become false. The retained gitignored per-site
+   checker caught it (10/11, exit 1); nothing tracked did.
+3. **The convention is a numbered preprocessor guard per site**
+   (`#if SHARP_RUNTIME_NEGATIVE_SITE == N`) with an inline
+   `// NEGATIVE(<id>): <fragment>` marker and `//     | <alternative>`
+   continuations. The tracked file is compiled as-is with a `-D`, so nothing is
+   generated and every diagnostic names a real tracked line. Four other
+   conventions — runner-generated variants, an external manifest, one file per
+   expression, Clang `-verify` comments — were compared and rejected in §4 of the
+   record.
+4. **The all-sites-off baseline must compile with zero diagnostics.** That is the
+   soundness argument, not a nicety: enabling a guard can only *add* uses of the
+   surrounding scaffolding, so any diagnostic in a single-site variant is caused
+   by that site. It also makes each fixture honest C++ that an IDE does not flag,
+   which is why **no CMake change was needed** — `test/consumer/CMakeLists.txt` is
+   untouched.
+5. **`scripts/check_negative_consumer_fixtures.py`** compiles 44 translation
+   units (7 baselines + 37 sites) with `-std=c++23 -Wall -Wextra -Wpedantic
+   -Werror -fsyntax-only`, include directories **derived** from the repository's
+   own CMake component metadata rather than duplicated, `LC_ALL=C` for
+   deterministic wording, and a hard `MAXIMUM_JOBS = 3` that **refuses** a higher
+   request instead of clamping. **7 fixtures, 37 sites, 37/37 rejected, 12.5 s,
+   peak 3 jobs, zero bytes of temporary disk.**
+6. **`test/check_negative_consumer_fixtures_test.py`, 37 cases, 2.1 s**, each
+   building a miniature repository and compiling it for real — including a site
+   that unexpectedly compiles, an error outside the region, a stale marker, a
+   duplicate id, a stale fragment, a four-line statement whose only error lands on
+   its *second* physical line, a `define=`, a transitive public include, a path
+   with a space, `--jobs 4` refused, a 1 ms timeout, and an empty fixture set
+   failing rather than passing vacuously.
+7. **The mutation campaign is 7/7.** `build-probe/1801_mutation_campaign.py`
+   makes one marked site legal per fixture against a symlinked mirror root and
+   requires the checker to fail naming exactly that site; every round reported
+   **exactly one** problem, which is what proves the 36 still-invalid siblings
+   neither mask it nor report falsely. No tracked file was mutated.
+8. **The two superseded checkers are inoperative, not merely redundant.**
+   `build-probe/1796_check_negative.py` and `1798_check_negative.py` compile their
+   fixture with no `-D`, which is now the clean baseline, so each prints
+   `FAIL: the negative fixture COMPILED`; and because a migrated fixture has zero
+   `// must fail:` markers their final comparison would otherwise have become
+   `0 == 0`, i.e. a **vacuous pass**. They are retained as historical probe
+   sources with `build-probe/1801_superseded_checkers.md` warning against running
+   them; the tracked checker refuses the vacuous case explicitly.
+
+Integration point: `scripts/local_ci_check.sh`, immediately after #1800's seam
+block and **before** `cmake -S . -B build`, because the checker needs only tracked
+sources and CMake metadata text. That is also the `full` job of
+`.github/workflows/components.yml`. Adding it to
+`scripts/check_selective_components.sh` or a CTest target was considered and
+rejected with reasons in §9 of the record; the three `forbidden_*.cpp`
+component-isolation fixtures stay in the selective script, where the configure
+step they depend on exists, and they were already executed by canonical
+validation.
+
+Validation from a fresh configure and a clean-first rebuild: **0 warnings, 0
+errors** (346 s, 632 objects, none predating the configure); **13,790 tests across
+37 executables**; `Collections.Core` **2,504**; full selective matrix passed with
+its 3 forbidden fixtures still rejected; **41 modules / 90 edges**; seam ODR OK
+with 12/12 fixtures; catalogue current; database consistent; Doxygen **1,940** of
+the 1,942 ceiling; `git diff --check` clean.
+
+**Sanitizers are not applicable and none was built**: the deliverable is a Python
+checker plus compile-only fixture validation, with no new runtime code, thread or
+allocation, and ASan/UBSan/LSan/TSan cannot observe a compile-rejection contract.
+Module CMake metadata is unchanged, so existing `Collections.Core` sanitizer
+coverage stands without re-measurement.
+
+Keep `scripts/check_negative_consumer_fixtures.py`,
+`test/check_negative_consumer_fixtures_test.py` and the seven migrated fixtures in
+place. Never assert only that a whole negative fixture fails to compile.
+
+No new `SR-AUD-*` identifier: the audit numbering is frozen at 364 and the gap was
+found during remediation, by #1796. One residual gap is recorded rather than
+absorbed: `SortedSetVersionAccess` has no consumer-side fixture proving it is
+unreachable, which is new inactive ticket **#1803**
+(`REMED-TOOLING-SORTEDSET-SEAM-NEGATIVE-FIXTURE`, `blocked`, not begun). #1773,
+#1788, #1789 and #1791 remain `blocked` and untouched; #1790 and #1792–#1800 and
+#1802 remain `done` and none was reopened. CNA and mobile-eggbert were not
+inspected, searched, configured, built, or modified. No push, merge, rebase, tag,
+or publication occurred.
 
 No repair ticket is active.
 
@@ -4838,3 +4950,10 @@ HTTP, socket, and ping tests require permission for local network operations.
    that exists only under gitignored `build-probe/`), and #1802
    (`REMED-COLL-HASHTABLE-REMOVE-VERSION`, the `Hashtable::Remove` over-bump on
    an absent key that #1799 measured on the sibling implementation).
+   **All three are now `done`** — #1802, then #1800, then #1801, all on
+   2026-07-29 — so the sentence above describes how they were opened, not their
+   current status. #1801 opened one further inactive row, **#1803**
+   (`REMED-TOOLING-SORTEDSET-SEAM-NEGATIVE-FIXTURE`, `blocked`): the
+   `SortedSetVersionAccess` seam has no consumer-side negative fixture proving it
+   is unreachable, nothing being known to be wrong with it. The complete inactive
+   set is therefore **#1773, #1788, #1789, #1791 and #1803**.

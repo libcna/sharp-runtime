@@ -165,6 +165,14 @@ The component graph is enforced rather than documented only:
 - `scripts/generate_component_catalog.py --check` rejects catalogue drift.
 - `scripts/check_selective_components.sh` defines ten isolated positive
   consumers and negative leakage fixtures.
+- `scripts/check_negative_consumer_fixtures.py` compiles every negative consumer
+  fixture in `test/consumer/` **once per marked site** and requires each site to
+  be rejected for its own declared reason. A fixture marks each site with
+  `#if SHARP_RUNTIME_NEGATIVE_SITE == N` and a `// NEGATIVE(id): <expected
+  diagnostic>` comment, and must compile cleanly with no site selected;
+  `docs/NegativeConsumerFixtureValidation.md` is the full contract and
+  `test/check_negative_consumer_fixtures_test.py` carries the checker's own
+  fixtures.
 - `.github/workflows/components.yml` runs the selective matrix and the full
   compatibility build on Ubuntu for pushes and pull requests.
 
