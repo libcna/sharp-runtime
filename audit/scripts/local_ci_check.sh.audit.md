@@ -31,3 +31,29 @@ could preflight local-network availability, but must not weaken the real tests.
 ## Final assessment
 
 Correct strict gate.  A network-permitted final run remains required.
+
+## Post-audit remediation note — ticket #1800 (2026-07-29)
+
+The gate gained a fourth pre-build validation step, run before anything is
+configured so a violation is reported in about a second rather than after a full
+build:
+
+```bash
+echo "==> Validating test-only access seams (ticket #1800)"
+python3 scripts/check_version_seam_odr.py
+python3 test/check_version_seam_odr_test.py
+```
+
+`scripts/check_version_seam_odr.py` fails if a class template that a production
+header declares and never defines inside `namespace SharpRuntime::Testing` — a
+test-only access seam — is defined in more than one file, is defined
+inconsistently, is defined in a production tree, or is written through two
+different macros in one file. Five test translation units of one program had been
+defining `CollectionVersionAccess` themselves in two divergent families, which is
+ill-formed with no diagnostic required; §4 of
+`docs/CollectionVersionTestSeamDesign.md` measures the consequence. The checker
+needs no configured build and uses only the standard library, so it does not
+weaken this script's fail-fast property or lengthen its critical path
+measurably. `test/check_version_seam_odr_test.py` carries 12 fixtures for the
+checker itself, in the same shape as the boundary validator's fixtures. The
+assessment above is otherwise unchanged, including the local-network prerequisite.

@@ -3,15 +3,17 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-29. Branch: `feature/remediation-coll-hashtable-remove-version`.
+*Last verified: 2026-07-29. Branch: `feature/remediation-test-version-access-odr`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
 dependency edges, and 13,790 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
 section below states the count it measured, and the current floor is the 13,790
-verified by #1802 from a fully fresh configuration and clean-first rebuild,
-raised from #1798's 13,723 and #1796's 13,657). The repository-wide,
+verified by #1802 and re-measured by #1800, each from a fully fresh configuration
+and clean-first rebuild, raised from #1798's 13,723 and #1796's 13,657 — #1800
+moved test code without adding or removing a case, so the floor is unchanged
+rather than stale). The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766). Remediation
 tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design),
 #1769 (LinkedListNode lifetime implementation), #1770 (raw `ICollection::CopyTo`
@@ -3167,6 +3169,111 @@ was found during remediation, by design ticket #1799's probe.
 untouched; #1790 and #1792–#1799 remain `done` and none was reopened. CNA and
 mobile-eggbert were not inspected, searched, configured, built, or modified. No
 push, merge, rebase, tag, or publication occurred.
+
+No repair ticket is active.
+
+### Completed test-seam ODR remediation: ticket #1800
+
+Ticket #1800 (`REMED-COLL-VERSION-SEAM-ODR`, P3, size S, `defect`) is **done**.
+Durable record: [`docs/CollectionVersionTestSeamDesign.md`](docs/CollectionVersionTestSeamDesign.md).
+**No production source, signature, symbol or object layout changed** — not one
+file under any `modules/*/include` was touched. #1787, #1794, #1796, #1798 and
+#1802 remain `done` and none was reopened.
+
+**Five translation units of the one `SharpRuntimeTests_Collections_Core` program
+each defined `SharpRuntime::Testing::CollectionVersionAccess` themselves, in two
+divergent families**, so three specialisations had two token-different
+definitions in one program — a one-definition-rule violation that is ill-formed
+with **no diagnostic required**.
+
+1. **The inventory found three divergences, not two.** #1800's row named
+   `<Hashtable>` and `<ListDictionaryInternal>`. The **partial** specialisation
+   `<detail::BasicMutationCounter<V>>` diverged too — `SR1787`'s carries `read`
+   *and* `write`, `SR1794`'s carries `read` alone — and it is the one both
+   collection-level bodies delegate to. It was taken by preprocessing each unit
+   with the build's own flags and hashing token sequences
+   (`build-probe/1800_inventory.py`), not by grep.
+2. **"Benign in practice" was true only of the configuration in use.** With the
+   two real bodies and one injected one-token edit
+   (`build-probe/1800_odr_{a,b,main}.cpp`): at `-O0` — what this repository
+   builds — **swapping two object files on the link line changed the answer a
+   unit that had spelled the correct body itself received** (7 against 1007); at
+   `-O1` and `-O2` each unit inlines its own body and the two **disagree inside
+   one process**. `ld`, `-flto -Wodr -Wlto-type-mismatch`, ASan with
+   `ASAN_OPTIONS=detect_odr_violation=2`, and UBSan each reported **nothing**.
+   Do not treat `-Wodr` or a sanitizer as an ODR check; that is measured, in
+   `build-probe/1800_{repro,lto,san,opt}.log`.
+3. **Repair:** one authoritative header,
+   `modules/collections/tests/support/CollectionVersionSeam.hpp`, defining the
+   counter-level seam and all fifteen collections through one
+   `SHARP_RUNTIME_COLLECTION_VERSION_SEAM` macro. The five suites lost their
+   local blocks and gained one relative `#include`. A relative include was chosen
+   over a CMake include path **deliberately**: it cannot be misconfigured, so it
+   reaches the full build, the isolated `Collections.Core` selective build, the
+   sanitizer tree and any future fixture with the same spelling and no target
+   property. The **richer** body became canonical, so nothing #1787's
+   near-boundary matrix needs was traded away — the three surviving token hashes
+   are the `SR1787` hashes unchanged.
+4. **Two lines of defence, both proved.** A suite that includes the header and
+   then writes its own body no longer links quietly: it is a hard
+   `error: redefinition` (`build-probe/1800_redefinition_probe.cpp`). For the
+   case the compiler cannot see — a suite that writes a body and does *not*
+   include the header — `scripts/check_version_seam_odr.py` fails the gate. It
+   **discovers** seams rather than hard-coding them (any class template declared
+   and not defined in `namespace SharpRuntime::Testing` in a production header;
+   two are found, `CollectionVersionAccess` and #1786's `SortedSetVersionAccess`)
+   and enforces four rules: never defined in a production tree; exactly one
+   defining file per specialisation; token-identical definitions; one seam macro
+   per file. Run against the committed **pre-fix** sources it reports all six
+   problems and exits 1; against an injected hypothetical future suite it exits
+   1; against the repository it exits 0.
+   `test/check_version_seam_odr_test.py` has **12** fixtures for the checker
+   itself, and `scripts/local_ci_check.sh` runs both before configuring anything.
+5. **Rule 2 is deliberately stricter than ISO C++.** Two token-identical
+   definitions in two files of two different executables are legal; the
+   repository forbids them anyway, because the `CONFIGURE_DEPENDS` glob decides
+   a file's executable membership by its directory, so "two files, currently
+   identical" is one move away from the defect this ticket closed.
+6. **The one cost, reported rather than smoothed over:** the authoritative header
+   includes all fifteen collection headers, so four suites that previously
+   included two now include fifteen — **+0.38 to +0.42 s each**, about +31 % of
+   their front-end time, **+1.6 s** against a 336 s clean-first rebuild.
+   Splitting the header would recover it and the checker would still pass; it was
+   not done, because two headers means deciding which one a new collection
+   belongs in, and that decision is what produced two bodies in the first place.
+
+Validation, from a fresh configuration (`cmake --fresh`) and a clean-first
+rebuild at three jobs: **13,790 tests across 37 executables**, `Collections.Core`
+**2,504**, zero warnings, zero errors; 632 objects rebuilt and 37 executables
+relinked with none predating the fresh configure; every seam COMDAT byte-identical
+across the five objects and one address per symbol in the executable; the
+post-fix link-order probe agreeing at `-O0`, `-O1` and `-O2` in both orders;
+ASan/UBSan/LSan `Collections.Core` 2,504 with no diagnostic; the full selective
+matrix plus an explicit isolated `Collections.Core` selective build (2,504);
+41 modules / 90 edges; validator 7/7; seam checker 12/12; catalogue current;
+database consistent; `git diff --check` clean; Doxygen 1.9.8 at **1,940** of the
+1,942 ceiling.
+
+**TSan is not relevant here and was not run**: the change relocates test-only
+class definitions and introduces no thread, no shared mutable state and no
+atomic; the only atomics in reach belong to `SortedSet`'s Count cache, which
+#1784 and #1786 already covered.
+
+Keep `modules/collections/tests/support/CollectionVersionSeam.hpp`,
+`scripts/check_version_seam_odr.py` and `test/check_version_seam_odr_test.py` in
+place, and do not reintroduce a per-suite seam body. Probes live in the shared
+gitignored `build-probe/` under a `1800_` file prefix and are reproducible from
+sections 2, 4, 8 and 10 of the design record, not from a tracked file.
+
+No new `SR-AUD-*` identifier: the audit numbering is frozen at 364 and the defect
+was found during remediation, by #1796. **#1801 remains `blocked` and is not
+closed**: it asks for a tracked per-site checker for the six negative consumer
+fixtures, generalising the still-untracked `build-probe/1796_check_negative.py`,
+and #1800's checker shares none of that infrastructure — it compiles nothing and
+knows nothing about `// must fail:` markers. #1773, #1788, #1789 and #1791 remain
+`blocked` and untouched; #1790 and #1792–#1799 and #1802 remain `done` and none
+was reopened. CNA and mobile-eggbert were not inspected, searched, configured,
+built, or modified. No push, merge, rebase, tag, or publication occurred.
 
 No repair ticket is active.
 

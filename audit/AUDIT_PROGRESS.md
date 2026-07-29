@@ -3478,3 +3478,141 @@ stays `blocked`; neither repository was inspected).
 `ListDictionaryInternal` was **not** modified.
 
 - `modules/collections/include/System/Collections/Hashtable.hpp.audit.md`.
+
+## Post-audit remediation batch — ticket #1800, the test-seam ODR violation closed (2026-07-29)
+
+Ticket #1800 (`REMED-COLL-VERSION-SEAM-ODR`, P3, size S, `defect`) is **done**.
+Durable record: `docs/CollectionVersionTestSeamDesign.md`. This closes the
+finding #1796 **observed and recorded rather than fixed**, and that #1798 and
+#1802 each carried forward without widening. #1787, #1794, #1796, #1798 and #1802
+remain `done` and none is reopened; the disclosures in their closure sections
+above are the historical record of a known defect carried honestly and are **not**
+rewritten.
+
+**No production source, signature, symbol, vtable or object layout changed.** Not
+one file under any `modules/*/include` or `modules/*/src` was touched. No
+consumer rebuild is required or implied.
+
+**The defect.** `SharpRuntime::Testing::CollectionVersionAccess<TOwner>` is
+declared by `System/Collections/detail/MutationCounter.hpp`, befriended by
+fifteen collections and by `detail::BasicMutationCounter`, and never defined in
+production — which is what makes
+`test/consumer/collections_mutation_version_negative.cpp` fail to compile, as it
+must. **Five** translation units of the single `SharpRuntimeTests_Collections_Core`
+program each supplied their own definition, in two families: `SR1787_SEAM_BODY`
+(`version` + `positionVersion`) and `SR1794_SEAM_BODY` (`version` alone). Two
+definitions of one class with different member sets violate [basic.def.odr]/12
+and are ill-formed with **no diagnostic required**.
+
+**Three divergences, not the two the row named.** The inventory was taken by
+preprocessing each unit with the build's own flags — so every macro is expanded
+before anything is compared — and hashing token sequences
+(`build-probe/1800_inventory.py`). Besides `<Hashtable>` and
+`<ListDictionaryInternal>`, the **partial** specialisation
+`<detail::BasicMutationCounter<V>>` diverged as well (`read` + `write` against
+`read` alone), and it is the one both collection-level bodies delegate to. It had
+been recorded nowhere.
+
+**"Benign in practice" held only for the configuration in use, and that is
+measured.** With the two real bodies and one marked one-token edit
+(`build-probe/1800_odr_{a,b,main}.cpp`, real headers, real
+`libsharp_runtime_core.a`):
+
+| Optimisation | Link order | TU A reads | TU B reads | Linker said |
+|---|---|---:|---:|---|
+| `-O0` (what this repository builds) | A then B | **7** | 7 | nothing, exit 0 |
+| `-O0` | B then A | **1007** | 1007 | nothing, exit 0 |
+| `-O1`, `-O2` | either | 7 | 1007 | nothing, exit 0 |
+
+Swapping two object files on the link line changed the answer received by a unit
+that had itself spelled the correct body. At `-O1` and above each unit inlines
+its own body and the two disagree **inside one process**, so a future Release
+configuration would have turned a link-order coin flip into a wrong answer with
+no source change. `ld`, `-flto -Wodr -Wlto-type-mismatch`, ASan with
+`ASAN_OPTIONS=detect_odr_violation=2`, and UBSan each reported **nothing**:
+GCC's `-Wodr` compares layout and data members, and neither body has a data
+member. **Neither `-Wodr` nor a sanitizer is an ODR check**, and that is now a
+measurement in this repository rather than a claim.
+
+**The repair.** One authoritative header,
+`modules/collections/tests/support/CollectionVersionSeam.hpp`, defines the
+counter-level seam and all fifteen collections through one
+`SHARP_RUNTIME_COLLECTION_VERSION_SEAM` macro that is `#undef`ed at the end so it
+cannot leak. The five suites lost their local blocks and gained one relative
+`#include`. A relative include was chosen over a CMake include directory
+deliberately: the preprocessor resolves it against the including file, so the
+header reaches the full build, the isolated `Collections.Core` selective build,
+the sanitizer tree and any future fixture with one spelling and no target
+property that could be forgotten in one of them. The **richer** body became
+canonical, so no test capability was traded away — the three surviving token
+hashes are the `SR1787` hashes unchanged.
+
+**Two lines of defence, both proved.** A suite that includes the header and then
+writes its own body is now a hard `error: redefinition`
+(`build-probe/1800_redefinition_probe.cpp`). For the one case a compiler cannot
+see — a suite that writes a body and does not include the header —
+`scripts/check_version_seam_odr.py` fails the gate. It **discovers** seams rather
+than hard-coding them (any class template declared and not defined inside
+`namespace SharpRuntime::Testing` in a production header; two are found, this one
+and #1786's `SortedSetVersionAccess`, which was never broken and is now pinned)
+and enforces four rules: never defined in a production tree; exactly one defining
+file per specialisation; token-identical definitions; one seam macro per file.
+Rule 2 is **deliberately stricter than ISO C++** — two identical definitions in
+two executables are legal, but the `CONFIGURE_DEPENDS` glob decides executable
+membership by directory, so "two files, currently identical" is one file move
+from the defect. Run against the committed **pre-fix** sources the checker
+reports all six problems and exits 1; against an injected hypothetical future
+suite it exits 1; against the repository it exits 0.
+`test/check_version_seam_odr_test.py` carries **12** fixtures for the checker
+itself, and `scripts/local_ci_check.sh` — the repository gate and the `full`
+GitHub Actions job — runs both before configuring anything.
+
+**Validation**, from `cmake --fresh` and a clean-first rebuild at three jobs
+(336 s): **632 objects rebuilt, 0 predating the configure, all 37 test
+executables relinked**, 0 warnings, 0 errors; **13,790 tests across 37
+executables**, `Collections_Core` **2,504** — both unchanged, because this ticket
+moved test code without adding or removing a case. Every seam COMDAT is
+byte-identical across the five objects and each symbol has one address in the
+executable. The post-fix link-order probe agrees at `-O0`, `-O1` and `-O2` in
+both orders. ASan + UBSan + LSan across the whole `Collections.Core` suite:
+2,504 passed, **zero diagnostics**. TSan **not applicable and not run**: the
+change relocates test-only class definitions and introduces no thread, no shared
+mutable state and no atomic; the only atomics in reach are `SortedSet`'s Count
+cache, already covered by #1784 and #1786. Full ten-component selective matrix
+passing, plus an explicit isolated `Collections.Core` selective build
+(`scripts/check_selective_components.sh Collections.Core
+collections_mutation_version.cpp`, 2,504 passed) which is **not** in the default
+matrix and **not** run by any tracked CI job. 41 modules / 90 edges, validator
+7/7, seam checker 12/12, catalogue current, database consistent,
+`git diff --check` clean, Doxygen 1.9.8 at **1,940** of the 1,942 ceiling. Build
+directories: `build/`, `build-asan/`, the shared `build-probe/` under a `1800_`
+file prefix, and `build-tmp/` as `TMPDIR`. **No new build directory was created
+and every compilation used at most three jobs.**
+
+**The one cost, reported rather than smoothed over:** the authoritative header
+includes all fifteen collection headers, because a full specialisation needs a
+complete type. Four suites that previously included two now include fifteen —
+**+0.38 to +0.42 s each, about +31 %** of their front-end time, **+1.6 s** total
+against a 336 s clean-first rebuild. Splitting the header along the
+generic/non-generic line would recover most of it and the checker would still
+pass. It was not done: two headers means a maintainer decides which one to
+include and which one a new collection belongs in, and that decision is exactly
+what produced two bodies in the first place.
+
+**Still not claimed closed:** **#1801 remains `blocked` and is explicitly not
+closed** — it asks for a tracked, CI-run *per-site* checker for the six negative
+consumer fixtures in `test/consumer/`, generalising
+`build-probe/1796_check_negative.py`, which is still untracked; #1800's checker
+compiles nothing, knows nothing about `// must fail:` markers, and shares none of
+that infrastructure, so `test/consumer/*_negative.cpp` are still proved only by
+"the fixture did not compile". No broad repository-wide ODR remediation was
+performed and none is claimed: this is one seam family. No new `SR-AUD-*`
+identifier — the numbering stays frozen at 364 and the defect was found during
+remediation, by #1796.
+
+Tickets #1773, #1788, #1789 and #1791 remain `blocked` and untouched; #1790,
+#1792–#1799 and #1802 remain `done` and none was reopened. CNA and mobile-eggbert
+were not inspected, searched, configured, built, or modified. No push, merge,
+rebase, tag, or publication occurred.
+
+- `scripts/local_ci_check.sh.audit.md`.

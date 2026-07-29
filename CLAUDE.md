@@ -291,6 +291,24 @@ Every `.hpp` and `.cpp` file starts with:
   types (`LinkedList<T>`, `BitArray`) whose measured layout has no room for eight bytes;
   do not use it for anything new. `SortedSet<T>` keeps its own `ulongcs` counter inside the
   shared `State` its live views co-own (ticket #1786) — do not migrate it.
+- **Test-only access seams:** a class template that a production header declares inside
+  `namespace SharpRuntime::Testing` and never defines
+  (`CollectionVersionAccess`, `SortedSetVersionAccess`) may be **defined in exactly one
+  file**, and every suite that needs it must include that file. For the collection mutation
+  counters that file is
+  `modules/collections/tests/support/CollectionVersionSeam.hpp`; add a new collection there,
+  once, through its `SHARP_RUNTIME_COLLECTION_VERSION_SEAM` macro. Never write
+  `template<> struct CollectionVersionAccess<…> { … }` in a test translation unit. Five
+  suites did, in two divergent families, and two token-different definitions of one class in
+  one program is a one-definition-rule violation that is **ill-formed with no diagnostic
+  required**: measured on 2026-07-29, swapping two object files on the link line changed the
+  answer a correctly written suite got, and `ld`, `-flto -Wodr`, ASan with
+  `detect_odr_violation=2` and UBSan all said nothing
+  (`docs/CollectionVersionTestSeamDesign.md`, ticket #1800).
+  `scripts/check_version_seam_odr.py` enforces this and runs in
+  `scripts/local_ci_check.sh`; never define a seam in `modules/*/include` or `modules/*/src`,
+  because that would make it reachable from a consumer and break
+  `test/consumer/collections_mutation_version_negative.cpp`.
 
 ---
 

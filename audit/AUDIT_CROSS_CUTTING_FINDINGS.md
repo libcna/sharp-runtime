@@ -769,3 +769,35 @@ leaks. Recorded in section 22 of `docs/ICollectionCopyToDesign.md`.
 - `modules/collections/include/System/Collections/Stack.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Hashtable.hpp.audit.md`;
 - `modules/collections/include/System/Collections/ListDictionaryInternal.hpp.audit.md`.
+
+## Post-audit remediation note — ticket #1800, test-only access seams (2026-07-29)
+
+Not a new cross-cutting finding and **no new `SR-AUD-*` identifier**: the
+numbering stays frozen at 364 and this was found during remediation, by #1796.
+Recorded here because the rule it establishes applies to every module, not only
+`Collections`.
+
+A **test-only access seam** — a class template that a production header declares
+inside `namespace SharpRuntime::Testing` and never defines, so a consumer cannot
+name a complete type — must be **defined in exactly one file**, and every suite
+that needs it must include that file. Five translation units of one program had
+been defining `SharpRuntime::Testing::CollectionVersionAccess` themselves in two
+divergent families, giving three specialisations two token-different definitions
+in one program: a one-definition-rule violation, ill-formed with **no diagnostic
+required**. Measured consequence: at `-O0` the link order decided which body the
+whole program executed (7 against 1007, from a unit that had spelled the correct
+body itself); at `-O1` and above the two units disagreed inside one process. `ld`,
+`-flto -Wodr`, ASan with `detect_odr_violation=2`, and UBSan all reported
+nothing, so **neither `-Wodr` nor a sanitizer may be treated as an ODR check** in
+this repository.
+
+`scripts/check_version_seam_odr.py` now enforces the rule in
+`scripts/local_ci_check.sh`. It discovers seams rather than hard-coding them, so
+a seam added by a future ticket in any module is covered without editing it; both
+existing seams — `CollectionVersionAccess` and #1786's `SortedSetVersionAccess` —
+are single-sited and pinned. The full analysis, alternatives and evidence are in
+`docs/CollectionVersionTestSeamDesign.md`, and the rule is stated in `CLAUDE.md`'s
+architecture invariants. **This is one seam family; no broad repository-wide ODR
+sweep was performed and none is claimed.**
+
+- `scripts/local_ci_check.sh.audit.md`.

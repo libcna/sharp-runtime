@@ -885,10 +885,9 @@ namespace SharpRuntime::Testing { template <typename TOwner> struct CollectionVe
 
 which `detail/MutationCounter.hpp` **declares**, which `BasicMutationCounter`
 befriends for **all** specialisations (`template <typename> friend struct …`) so
-that one seam serves every collection, which each of the fifteen collections
-befriends for **its own** specialisation only, and which is **defined in exactly
-one translation unit** — the test file. Properties that make this acceptable
-rather than a dangerous hook:
+that one seam serves every collection, and which each of the fifteen collections
+befriends for **its own** specialisation only. Properties that make this
+acceptable rather than a dangerous hook:
 
 - It grants *access* and defines *no behaviour*. Production code cannot call it,
   because nothing defines it in production — demonstrated, not asserted, by the
@@ -899,6 +898,34 @@ rather than a dangerous hook:
   use, so it works on every toolchain this repository builds for.
 - It is one seam name for fifteen classes, rather than fifteen names. #1786 set
   the precedent with `SortedSetVersionAccess<T>`; this generalises it.
+
+### 13.2.1 Where the definition lives — corrected by ticket #1800
+
+This section originally said the seam is "**defined in exactly one translation
+unit** — the test file", and that was true on the day #1787 landed. It stopped
+being true almost immediately. #1794 wrote a **second, different** body — one
+without `positionVersion`, and a counter-level partial specialisation without
+`write` — and #1796, #1798 and #1802 each copied that second body into a further
+suite. By 2026-07-29 **five** translation units of the one
+`SharpRuntimeTests_Collections_Core` program defined three of these
+specialisations, with **two token-different bodies each**. Two definitions of one
+class with different member sets violate [basic.def.odr]/12 and are ill-formed,
+no diagnostic required.
+
+Ticket **#1800** closed it. The definition now lives in exactly one **file** —
+`modules/collections/tests/support/CollectionVersionSeam.hpp` — which all five
+suites include, so the token sequence is identical by construction rather than by
+discipline. The canonical body is the **richer** one, this ticket's: `version()`
+plus `positionVersion()`, and `read()` plus `write()` at the counter level, so
+nothing §13's matrix needs was traded away.
+`scripts/check_version_seam_odr.py` now fails the repository gate if a second
+file defines the same specialisation, if two definitions of one specialisation
+differ, if a seam is defined in a production tree, or if one file writes seam
+bodies through two macros. The reproduction, the C++ analysis, the alternatives
+and the measured evidence are in `docs/CollectionVersionTestSeamDesign.md`; the
+short version is that at `-O0` the link order decided which body the whole
+program executed, at `-O1` the two units disagreed with each other, and `ld`,
+`-flto -Wodr`, ASan with `detect_odr_violation=2` and UBSan all reported nothing.
 
 ---
 
