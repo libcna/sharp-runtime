@@ -3041,3 +3041,99 @@ probe binaries were deleted once their logs were transcribed.
 **CNA and mobile-eggbert were not inspected, searched, configured, built or
 modified**, and **#1773 remains `blocked`**. #1804 remains `blocked` and
 untouched. No previously `done` ticket and no finding was reopened.
+
+### Completed AggregateException null-inner validation: ticket #1807
+
+Ticket #1807 (`REMED-CORE-AGGREGATEEXCEPTION-NULL-INNER`, P1, size S,
+`remediation`, area *Core*) is **done** and **SR-AUD-097 is now `remediated`** —
+the third of NEXT.md's eight immediate public-input crash tickets to land, after
+SR-AUD-089 (#1776), SR-AUD-341 (#1805) and SR-AUD-338 (#1806). **No new
+`SR-AUD-*` identifier**; the numbering stays frozen at 364, and the index now
+records **13 remediated** and **351 confirmed** of 364.
+
+**The finding named one crash path. There were three, and two silent ones.**
+`std::rethrow_exception` is undefined for a null argument and three members call
+it, so a single accepted null armed all three at once. Measured before any
+production change, one process per case
+(`build-probe/1807_prefix_defects.cpp`, logs `1807_prefix_defects.log` and
+`1807_postfix_defects.log`):
+
+| Input / call | Pre-fix | Post-fix |
+|---|---|---|
+| `AggregateException(vector{null})`, `{null}`, `{valid, null}` | **ASan SEGV** in `std::rethrow_exception`, address `0xffffffffffffff80` | `ArgumentException` — *An element of innerExceptions was null.* |
+| `AggregateException("m", vector{null})` then `Flatten()` | same SEGV via `collectLeaves` | rejected at construction |
+| …then `GetBaseException()` | same SEGV | rejected at construction |
+| …then `Handle(always-true)` | **completed**, `predicate-saw-null=1` | rejected at construction |
+| `AggregateException("m", exception_ptr())` then `Unwrap()` | **completed**, `unwrapped-null=1` | `ArgumentNullException` — *(Parameter 'innerException')* |
+| the two valid constructions | `One or more errors occurred. (boom)`, `count=1 message='outer'` | **byte-identical** |
+
+The two `completed` rows are the ones worth naming. They did **not** crash: the
+message-plus-collection and message-plus-single constructors never built a
+message from their inner exceptions, so they stored the null quietly, and then
+`Handle()` handed it to the caller's predicate and `Unwrap()` returned it. The
+crash happened afterwards, in consumer code, at a `std::rethrow_exception` the
+consumer wrote, with nothing left to indicate where the null had entered.
+
+The trap address is `0xffffffffffffff80`, not `0x0` — that is what a null
+`std::exception_ptr` decodes to inside libstdc++ — and it is written down so a
+future reader matching this signature is not sent looking for an ordinary null
+dereference.
+
+**The two exception types are deliberately different, and a test pins them
+apart.** .NET's private `AggregateException(string?, Exception[], bool)` core
+constructor, through which every public collection overload funnels, throws
+`ArgumentException(SR.AggregateException_ctor_InnerExceptionNull)` for a null
+**element**, while `AggregateException.cs:59` opens
+`AggregateException(string?, Exception)` with
+`ArgumentNullException.ThrowIfNull(innerException)` for a null **argument**. Since
+`ArgumentNullException` derives from `ArgumentException`, a test catching only the
+base type would still pass if the two were collapsed onto one type, so one
+regression asserts the collection case is **not** caught as
+`ArgumentNullException`.
+
+**Tests: +10 permanent regressions** in `ExceptionRemainingTests.cpp` — null in a
+vector, null in an initializer list, null after a valid entry, the exact .NET
+message text, null through the message-plus-vector constructor, null through the
+message-plus-single constructor, its parameter name, the type split, an assertion
+that no constructed aggregate (flat, nested, or either flattened) can hold a null
+inner, and the unchanged valid paths including the empty-collection default
+message.
+
+**Validation.** `SharpRuntimeTests_Core_Base` **4,982/4,982** (was 4,972), and the
+same 4,982 under **ASan + UBSan + LSan with zero reports**
+(`build-asan/1807_core_base_asan.log`). Repository gate
+`scripts/local_ci_check.sh build`: **0 warnings, 0 errors**, **13,958 tests across
+37 executables** (was 13,948), including the six local-server `Net.Http` cases.
+Module graph **41 / 90**; catalogue current; database consistent; seam ODR
+**2 / 18** plus 12/12; negative consumer fixtures **9 / 66** plus 37/37; the
+ten-component selective matrix passed with its 3 forbidden fixtures rejected;
+Doxygen **1,941** of the 1,942 ceiling, unchanged; `git diff --check` clean.
+
+**Source and ABI consequences: none.** `AggregateException` is header-only and
+gains two private static helpers; no public signature, object layout, vtable or
+exported symbol changed. Behavioural note: code that constructed an aggregate over
+a null `std::exception_ptr` now receives an argument exception at construction
+instead of crashing later. No in-repository caller did so —
+`CancellationTokenSource` and `Parallel`, the only two producers, both push
+`std::current_exception()` from inside a `catch (...)`, where it is never null.
+
+**Explicitly not done here.** **SR-AUD-098** (causal diagnostics and flatten
+ordering) and **SR-AUD-099** (`Handle` accepts an empty predicate) share this file
+and stay `confirmed`. SR-AUD-099 belongs to **CCF-011**, which the remediation
+roadmap requires be taken as a scoped family rather than one file at a time, and
+SR-AUD-098 is a different contract entirely. The audit report's remaining
+missing-assertion list — first-inner identity, custom-message aggregation, `Handle`
+message and order preservation, predicate exceptions, nested/direct leaf order,
+the `GetBaseException` value-API adaptation, and the HResult assertion — belongs
+to those two findings and is not claimed as closed.
+
+Build directories used: `build/` (gate), `build-asan/` (which gained the
+`SharpRuntimeTests_Core_Base` target it did not have; 5m23s at three jobs),
+`build-probe/` (all `1807_` prefixed), `build-tmp/` (repository-local `TMPDIR`);
+**no new build directory was created** and **no compilation exceeded three jobs**.
+The probe binaries were deleted once their logs were transcribed.
+
+**CNA and mobile-eggbert were not inspected, searched, configured, built or
+modified**, and **#1773 remains `blocked`**. #1804 remains `blocked`; #1808 and
+#1809, opened by #1806, remain `todo` and unbegun. No previously `done` ticket and
+no finding was reopened.
