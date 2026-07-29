@@ -375,7 +375,17 @@ TEST_P(DictionaryViewContract, ViewDeletedBeforeItsOwnerIsClean) {
 }
 
 // ---------------------------------------------------------------------------
-// Hashtable null-key contract
+// Non-generic IDictionary null-key contract, over EVERY implementation
+//
+// Ticket #1775 established rejection on Hashtable; ticket #1798 established it
+// on ListDictionaryInternal, which until then accepted and STORED a null key on
+// all five raw-key entry points. Because that made the two implementations of
+// one interface disagree -- so no polymorphic IDictionary consumer could rely on
+// the contract at all -- these five cases are GENERALISED over both
+// implementations rather than duplicated per type: every one of them is spelled
+// through the IDictionary& base reference, which is the surface the contract
+// belongs to. The Hashtable-only cases that follow cover the overloads and the
+// stringified-key aliasing that exist on that implementation alone.
 // ---------------------------------------------------------------------------
 
 // Ticket #1776 (REMED-CORE-ARGNULL-MESSAGE) corrected
@@ -397,69 +407,108 @@ void expectNullKeyRejected(const std::function<void()>& call) {
     }
 }
 
-TEST(HashtableNullKey, AddRejectsANullRawKey) {
-    Hashtable table;
+class DictionaryNullKey : public ::testing::TestWithParam<Implementation> {
+protected:
+    void SetUp() override { harness_ = makeHarness(GetParam()); }
+
+    IDictionary& dictionary() { return harness_->dictionary(); }
+    void addEntries(int count) { harness_->addEntries(count); }
+
+private:
+    std::unique_ptr<DictionaryHarness> harness_;
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    AllNonGenericDictionaries, DictionaryNullKey,
+    ::testing::Values(Implementation::Hashtable, Implementation::ListDictionaryInternal),
+    [](const ::testing::TestParamInfo<Implementation>& info) {
+        return info.param == Implementation::Hashtable ? "Hashtable" : "ListDictionaryInternal";
+    });
+
+TEST_P(DictionaryNullKey, AddRejectsANullRawKey) {
     std::any value = std::any(1);
-    expectNullKeyRejected([&] { table.Add(static_cast<const void*>(nullptr), &value); });
+    expectNullKeyRejected([&] { dictionary().Add(static_cast<const void*>(nullptr), &value); });
 }
 
-TEST(HashtableNullKey, SetItemRejectsANullRawKey) {
-    Hashtable table;
+TEST_P(DictionaryNullKey, SetItemRejectsANullRawKey) {
     std::any value = std::any(1);
-    expectNullKeyRejected([&] { table.setItem(nullptr, &value); });
+    expectNullKeyRejected([&] { dictionary().setItem(nullptr, &value); });
 }
 
-TEST(HashtableNullKey, GetItemRejectsANullRawKey) {
-    Hashtable table;
-    expectNullKeyRejected([&] { (void)table.getItem(nullptr); });
+TEST_P(DictionaryNullKey, GetItemRejectsANullRawKey) {
+    expectNullKeyRejected([&] { (void)dictionary().getItem(nullptr); });
 }
 
-TEST(HashtableNullKey, ContainsRejectsANullRawKey) {
-    Hashtable table;
-    expectNullKeyRejected([&] { (void)table.Contains(nullptr); });
+TEST_P(DictionaryNullKey, ContainsRejectsANullRawKey) {
+    expectNullKeyRejected([&] { (void)dictionary().Contains(nullptr); });
 }
 
-TEST(HashtableNullKey, RemoveRejectsANullRawKey) {
-    Hashtable table;
-    expectNullKeyRejected([&] { table.Remove(static_cast<const void*>(nullptr)); });
+TEST_P(DictionaryNullKey, RemoveRejectsANullRawKey) {
+    expectNullKeyRejected([&] { dictionary().Remove(static_cast<const void*>(nullptr)); });
 }
 
-// Before ticket #1775 this reached std::string's null construction and
-// terminated with a std::logic_error that code catching System::Exception&
-// cannot see.
-TEST(HashtableNullKey, RemoveRejectsANullCStringKey) {
-    Hashtable table;
-    expectNullKeyRejected([&] { table.Remove(static_cast<const char*>(nullptr)); });
-}
-
-TEST(HashtableNullKey, ARejectedNullKeyLeavesTheTableUnmodified) {
-    Hashtable table;
-    table.Add(std::string("present"), std::any(1));
+TEST_P(DictionaryNullKey, ARejectedNullKeyLeavesTheDictionaryUnmodified) {
+    addEntries(1);
     std::any value = std::any(2);
 
-    EXPECT_THROW(table.Add(static_cast<const void*>(nullptr), &value), System::ArgumentNullException);
-    EXPECT_THROW(table.setItem(nullptr, &value), System::ArgumentNullException);
-    EXPECT_THROW(table.Remove(static_cast<const void*>(nullptr)), System::ArgumentNullException);
+    EXPECT_THROW(dictionary().Add(static_cast<const void*>(nullptr), &value),
+                 System::ArgumentNullException);
+    EXPECT_THROW(dictionary().setItem(nullptr, &value), System::ArgumentNullException);
+    EXPECT_THROW(dictionary().Remove(static_cast<const void*>(nullptr)),
+                 System::ArgumentNullException);
+    EXPECT_THROW((void)dictionary().getItem(nullptr), System::ArgumentNullException);
+    EXPECT_THROW((void)dictionary().Contains(nullptr), System::ArgumentNullException);
 
-    EXPECT_EQ(table.getCountProperty(), 1);
-    EXPECT_TRUE(table.ContainsKey("present"));
+    EXPECT_EQ(dictionary().getCountProperty(), 1)
+        << "no rejected call may insert, replace or erase anything";
 }
 
 // A rejected call must not bump the fail-fast version counter, or an in-flight
 // enumeration would be invalidated by an operation that changed nothing.
-TEST(HashtableNullKey, ARejectedNullKeyDoesNotInvalidateAnInFlightEnumeration) {
-    Hashtable table;
-    table.Add(std::string("a"), std::any(1));
-    table.Add(std::string("b"), std::any(2));
+TEST_P(DictionaryNullKey, ARejectedNullKeyDoesNotInvalidateAnInFlightEnumeration) {
+    addEntries(2);
 
-    std::unique_ptr<IDictionaryEnumerator> walk(table.GetEnumerator());
+    std::unique_ptr<IDictionaryEnumerator> walk(dictionary().GetEnumerator());
     ASSERT_TRUE(walk->MoveNext());
 
     std::any value = std::any(3);
-    EXPECT_THROW(table.Add(static_cast<const void*>(nullptr), &value), System::ArgumentNullException);
+    EXPECT_THROW(dictionary().Add(static_cast<const void*>(nullptr), &value),
+                 System::ArgumentNullException);
+    EXPECT_THROW(dictionary().setItem(nullptr, &value), System::ArgumentNullException);
+    EXPECT_THROW(dictionary().Remove(static_cast<const void*>(nullptr)),
+                 System::ArgumentNullException);
 
     EXPECT_NO_THROW((void)walk->MoveNext())
         << "a rejected argument must not count as a structural modification";
+}
+
+// A null key must not be storable, findable, enumerable or copyable out. Before
+// ticket #1798, ListDictionaryInternal stored one and every one of those
+// succeeded; Hashtable had the same shape before #1775, where the stringified
+// null additionally aliased the ordinary string key "0".
+TEST_P(DictionaryNullKey, ANullKeyNeverBecomesAnEntry) {
+    std::any value = std::any(1);
+    EXPECT_THROW(dictionary().Add(static_cast<const void*>(nullptr), &value),
+                 System::ArgumentNullException);
+    EXPECT_THROW(dictionary().setItem(nullptr, &value), System::ArgumentNullException);
+
+    EXPECT_EQ(dictionary().getCountProperty(), 0);
+
+    std::unique_ptr<IDictionaryEnumerator> walk(dictionary().GetEnumerator());
+    EXPECT_FALSE(walk->MoveNext()) << "nothing was stored, so nothing can be enumerated";
+
+    std::vector<std::any> destination;
+    EXPECT_NO_THROW(dictionary().CopyTo(destination, 0))
+        << "an empty dictionary copies into an empty destination (ticket #1774)";
+}
+
+// Before ticket #1775 this reached std::string's null construction and
+// terminated with a std::logic_error that code catching System::Exception&
+// cannot see. The overload is Hashtable's alone, so this case is not
+// parameterised.
+TEST(HashtableNullKey, RemoveRejectsANullCStringKey) {
+    Hashtable table;
+    expectNullKeyRejected([&] { table.Remove(static_cast<const char*>(nullptr)); });
 }
 
 // The stringified null key was the address text "0", which collides with the

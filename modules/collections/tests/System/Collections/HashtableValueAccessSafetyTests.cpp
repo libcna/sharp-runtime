@@ -754,16 +754,22 @@ TEST(HashtableValueAccessExceptions, EveryHashtableRawKeyEntryPointRejectsANullK
     EXPECT_EQ(t.getCountProperty(), 0) << "and none of them inserted anything";
 }
 
-TEST(HashtableValueAccessExceptions, ListDictionaryInternalStillAcceptsANullKeyAndThatIsTicket1798) {
-    // NOT a #1796 assertion and NOT fixed here. Pinned so that the divergence
-    // between the two IDictionary implementations is a recorded, deliberate state
-    // rather than an unnoticed one, and so #1798 has a test to flip.
+// FLIPPED BY TICKET #1798, not deleted. Under #1796 this test pinned the
+// opposite assertion -- that ListDictionaryInternal accepted and STORED a null
+// key where .NET and Hashtable throw -- so that the divergence between the two
+// IDictionary implementations was a recorded, deliberate state rather than an
+// unnoticed one, and explicitly so that #1798 would have a test to flip. #1798
+// flipped it. Design #1799 section 11 predicted that ZERO existing assertions
+// would change for the null-key row; this test is the one it missed, and the
+// figure is corrected to ONE in the implementation record.
+TEST(HashtableValueAccessExceptions, ListDictionaryInternalNowRejectsANullKeyAsTicket1798Required) {
     ListDictionaryInternal d;
     int value = 1;
-    EXPECT_NO_THROW((void)d.getItem(nullptr));
-    EXPECT_NO_THROW(d.setItem(nullptr, &value));
-    EXPECT_EQ(d.getCountProperty(), 1)
-        << "ListDictionaryInternal stores a null key where .NET and Hashtable throw (#1798)";
+    EXPECT_THROW((void)d.getItem(nullptr), System::ArgumentNullException);
+    EXPECT_THROW(d.setItem(nullptr, &value), System::ArgumentNullException);
+    EXPECT_EQ(d.getCountProperty(), 0)
+        << "the two IDictionary implementations now agree: a null key is rejected, "
+           "never stored (#1798)";
 }
 
 // ===========================================================================

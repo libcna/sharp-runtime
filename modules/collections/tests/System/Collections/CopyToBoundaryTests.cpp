@@ -522,7 +522,17 @@ TEST(CopyToBoundaryValues, ListDictionaryInternalBoxesDictionaryEntriesThroughBo
     EXPECT_EQ(std::any_cast<void*>(typed[1].getValueProperty()), &gSlots[3]);
 }
 
-TEST(CopyToBoundaryValues, DictionaryViewsBoxKeysAndValuesIdentically) {
+// UPDATED BY TICKET #1798, not deleted, together with its name and this comment.
+// It previously asserted that BOTH views box `void*` -- "keys and values
+// identically" -- which was the superseded rule: the key view's copyToCore
+// const_cast'd the key to void* while the key view's own Current, the
+// enumerator's Key, DictionaryEntry::Key and the typed CopyTo all boxed
+// `const void*`. One view therefore had two incompatible element types, and a
+// write through the writable pointer CopyTo manufactured for a key the caller
+// declared const was an AddressSanitizer SEGV on read-only storage. The rule now
+// is uniform per SURFACE KIND, not per view: a key is recovered with
+// std::any_cast<const void*>, a value with std::any_cast<void*>, everywhere.
+TEST(CopyToBoundaryValues, DictionaryViewsBoxKeysAsConstVoidAndValuesAsVoid) {
     ListDictionaryInternal dictionary;
     dictionary.Add(&gSlots[0], &gSlots[1]);
     dictionary.Add(&gSlots[2], &gSlots[3]);
@@ -537,10 +547,14 @@ TEST(CopyToBoundaryValues, DictionaryViewsBoxKeysAndValuesIdentically) {
     ASSERT_NO_THROW(keys->CopyTo(copiedKeys, 0));
     ASSERT_NO_THROW(values->CopyTo(copiedValues, 0));
 
-    EXPECT_EQ(std::any_cast<void*>(copiedKeys[0]), &gSlots[0]);
-    EXPECT_EQ(std::any_cast<void*>(copiedKeys[1]), &gSlots[2]);
+    EXPECT_EQ(std::any_cast<const void*>(copiedKeys[0]), &gSlots[0]);
+    EXPECT_EQ(std::any_cast<const void*>(copiedKeys[1]), &gSlots[2]);
     EXPECT_EQ(std::any_cast<void*>(copiedValues[0]), &gSlots[1]);
     EXPECT_EQ(std::any_cast<void*>(copiedValues[1]), &gSlots[3]);
+
+    // The old spelling still COMPILES and now throws at run time -- the one
+    // silent source-compatible meaning change in ticket #1798.
+    EXPECT_THROW((void)std::any_cast<void*>(copiedKeys[0]), std::bad_any_cast);
 }
 
 // ---------------------------------------------------------------------------

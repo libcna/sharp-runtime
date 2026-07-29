@@ -107,7 +107,12 @@ bool copiesDictionaryViews() {
     std::vector<std::any> copiedValues(static_cast<std::size_t>(values->getCountProperty()));
     keys->CopyTo(copiedKeys, 0);
     values->CopyTo(copiedValues, 0);
-    const bool ok = std::any_cast<void*>(copiedKeys[0]) == &gSlots[0]
+    // Ticket #1798: the key view's CopyTo boxes `const void*`, agreeing with its
+    // own Current, with the enumerator's Key, with DictionaryEntry::Key and with
+    // the typed CopyTo. It previously boxed a const_cast'd `void*` -- the only key
+    // surface that disagreed -- so `std::any_cast<void*>` here still COMPILES and
+    // now throws std::bad_any_cast at run time.
+    const bool ok = std::any_cast<const void*>(copiedKeys[0]) == &gSlots[0]
                  && std::any_cast<void*>(copiedValues[1]) == &gSlots[3];
     delete keys;
     delete values;

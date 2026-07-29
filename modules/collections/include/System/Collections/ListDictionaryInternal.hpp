@@ -8,6 +8,7 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Collections/IDictionary.hpp"
 #include "System/Collections/IDictionaryEnumerator.hpp"
@@ -31,6 +32,24 @@ using SharpRuntime::intcs;
  * `Equals` on an arbitrary key without knowing its concrete type (same root cause as
  * System::Collections::Comparer and System::Collections::StructuralComparisons). Callers
  * needing value-based key comparison should use a generic, typed dictionary instead.
+ *
+ * @note **A null key is rejected on every raw-key entry point** --
+ * getItem/setItem/Add/Contains/Remove all throw System::ArgumentNullException("key")
+ * before they look at storage, matching .NET's `ArgumentNullException.ThrowIfNull(key)`
+ * and the sibling System::Collections::Hashtable. Validation is structural, not
+ * conventional: the private locator accepts only a ValidatedKey, and the only way to
+ * obtain one is to pass the null check.
+ *
+ * @note **The mutation counter advances on each effective mutation and on nothing
+ * else** -- on an insert, on a replacement (including an equal-value replacement),
+ * and on a successful Remove, but not on a duplicate Add that throws, not on a Remove
+ * of an absent key, and never on a rejected null key. Clear is the single deliberate
+ * exception and bumps unconditionally, matching .NET. This port therefore does **not**
+ * copy .NET ListDictionaryInternal's unconditional bump-first shape, which would
+ * invalidate outstanding enumerators after operations that changed nothing; the rule
+ * followed here is .NET Hashtable's, and it is the rule both of this port's
+ * IDictionary implementations use. Full record and measurements:
+ * `docs/ListDictionaryInternalSetterDesign.md` (design #1799, implementation #1798).
  */
 class ListDictionaryInternal : public IDictionary {
     struct Node {
@@ -39,6 +58,46 @@ class ListDictionaryInternal : public IDictionary {
     };
     std::list<Node> list_;
     System::Collections::detail::MutationCounter version_;
+
+    /**
+     * @brief A key that has passed the null check -- the only type the locator accepts.
+     *
+     * Constructing one is the single place a raw `const void*` key is validated,
+     * and the private locator accepts nothing else, so a future public key-taking
+     * method physically cannot reach `list_` without validating first. That is
+     * stronger than Hashtable's `toKey()`, which is a convention every entry point
+     * must remember to follow, and stronger than five scattered `if (key == nullptr)`
+     * checks, where a sixth entry point silently reopens the defect (ticket #1798,
+     * `docs/ListDictionaryInternalSetterDesign.md` sections 14.1 and 33).
+     *
+     * It costs no allocation and no stringification: unlike Hashtable's `toKey()`,
+     * which builds a std::string per raw-key call, this is one null compare and one
+     * pointer copy, and it emits no symbol at all at -O2.
+     */
+    class ValidatedKey {
+        const void* key_;
+
+    public:
+        /** @throws System::ArgumentNullException if @p key is null. */
+        explicit ValidatedKey(const void* key) : key_(key) {
+            if (key == nullptr) throw System::ArgumentNullException("key");
+        }
+        /** @brief The validated, non-null key pointer. */
+        [[nodiscard]] const void* getValueProperty() const noexcept { return key_; }
+    };
+
+    /** @brief The single lookup path; compares by address, as the class warning states. */
+    [[nodiscard]] std::list<Node>::const_iterator findNode(ValidatedKey key) const {
+        for (auto it = list_.begin(); it != list_.end(); ++it)
+            if (it->key == key.getValueProperty()) return it;
+        return list_.end();
+    }
+    /** @brief Non-const overload of the single lookup path. */
+    [[nodiscard]] std::list<Node>::iterator findNode(ValidatedKey key) {
+        for (auto it = list_.begin(); it != list_.end(); ++it)
+            if (it->key == key.getValueProperty()) return it;
+        return list_.end();
+    }
 
     /**
      * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
@@ -172,6 +231,9 @@ class ListDictionaryInternal : public IDictionary {
              * ticket #1794 agrees with both DictionaryEntry::Value and copyToCore
              * below, where it previously agreed with neither and was the only one
              * of the three spellings to add a `const` the dictionary never stored.
+             * Since ticket #1798 copyToCore agrees on the KEY as well, so this view
+             * no longer boxes two incompatible element types depending on whether a
+             * caller enumerated it or copied out of it.
              */
             [[nodiscard]] std::any getCurrentProperty() const override {
                 return keys_ ? inner_->getKeyProperty() : inner_->getValueProperty();
@@ -191,18 +253,30 @@ class ListDictionaryInternal : public IDictionary {
         }
 
     protected:
-        // Boxes each key or value as std::any(void*) into the destination that
-        // ICollection::CopyTo already validated. Keys are normalised from
-        // const void* to void* so that a caller of either view retrieves every
-        // slot the same way, with std::any_cast<void*>. The view is private and
-        // only ever escapes as an ICollection*, so it needs no typed overload of
-        // its own -- getCountProperty() plus the fixed std::any element type is
-        // now enough for a getKeysProperty()/getValuesProperty() consumer to
-        // allocate a correct destination, which the raw void* boundary never was.
+        // Boxes each key as std::any(const void*) and each value as std::any(void*)
+        // into the destination that ICollection::CopyTo already validated, so a key
+        // is recovered with std::any_cast<const void*> and a value with
+        // std::any_cast<void*> -- the same spelling as this view's own Current, as
+        // the enumerator's Key/Value, as DictionaryEntry, and as the typed CopyTo.
+        //
+        // Ticket #1798 deleted a const_cast<void*> here. The rationale it carried --
+        // normalise keys to void* "so that a caller of either view retrieves every
+        // slot the same way" -- was wrong on its own terms: it bought uniformity
+        // BETWEEN the key and value views at the cost of uniformity WITHIN the key
+        // view, whose enumerator has boxed const void* since ticket #1793. Writing
+        // through the writable pointer this manufactured for a key the caller had
+        // declared const was reproduced as an AddressSanitizer SEGV on a write to
+        // read-only storage (docs/ListDictionaryInternalSetterDesign.md section 8.3);
+        // the library, not the caller, had removed the guarantee.
+        //
+        // The view is private and only ever escapes as an ICollection*, so it needs
+        // no typed overload of its own -- getCountProperty() plus the fixed std::any
+        // element type is enough for a getKeysProperty()/getValuesProperty() consumer
+        // to allocate a correct destination, which the raw void* boundary never was.
         void copyToCore(ObjectSpan destination, intcs index) override {
             intcs i = index;
             for (const auto& n : d_->list_)
-                destination[i++] = std::any(keys_ ? const_cast<void*>(n.key) : n.value);
+                destination[i++] = keys_ ? std::any(n.key) : std::any(n.value);
         }
     };
 
@@ -249,9 +323,10 @@ public:
      *
      * C++ counterpart of .NET ListDictionaryInternal indexer getter.
      *
-     * @param key Pointer used as the key (compared by address).
+     * @param key Pointer used as the key (compared by address). Never null.
      * @return An owning std::any boxing the stored `void*`, recovered with
      *         std::any_cast&lt;void*&gt;, or an empty std::any if the key is absent.
+     * @throws System::ArgumentNullException if @p key is null.
      *
      * @note Ticket #1796 migrated this member mechanically, because
      *       IDictionary::getItem's return type changed and a pure virtual forces
@@ -259,32 +334,53 @@ public:
      *       box holds the caller's own pointer, exactly as the raw `void*` return
      *       did, and this dictionary stores no value data of its own to alias. Only
      *       the return type moved.
-     * @note This implementation's remaining divergences from .NET and from
-     *       Hashtable -- setItem() skipping the version bump on the replace branch,
-     *       and both accessors accepting a null key where .NET and Hashtable throw --
-     *       are **not** fixed here. They are ticket #1798, deliberately kept separate
-     *       so that #1796's approval is not stretched to cover them.
+     * @note An absent key and a key present with a null *value* stay distinguishable
+     *       here, unlike Hashtable: the first reads as an empty std::any, the second
+     *       as a std::any holding a null `void*`.
+     * @note Ticket #1798 added the null-key rejection. Reading never advances the
+     *       mutation counter, so an outstanding enumerator is unaffected by this call
+     *       whether or not the key is present, and a rejected null key leaves Count,
+     *       the counter and every entry untouched.
      */
     [[nodiscard]] std::any getItem(const void* key) const override {
-        for (const auto& n : list_) {
-            if (n.key == key) return std::any(n.value);
-        }
-        return std::any{};
+        const auto it = findNode(ValidatedKey(key));
+        return it == list_.end() ? std::any{} : std::any(it->value);
     }
 
     /**
      * @brief Sets the value for the key, adding a new entry if the key is not present.
      *
-     * C++ counterpart of .NET ListDictionaryInternal indexer setter.
-     * @param key   Pointer used as the key (compared by address).
+     * C++ counterpart of .NET ListDictionaryInternal indexer setter. One upsert path:
+     * validate, locate, then replace-and-bump or insert-and-bump.
+     *
+     * @param key   Pointer used as the key (compared by address). Never null.
      * @param value Value to associate with the key.
+     * @throws System::ArgumentNullException if @p key is null -- thrown before the
+     *         lookup, so nothing is mutated and the counter does not move.
+     *
+     * @note **A replacement advances the mutation counter, including an equal-value
+     *       replacement**, so an outstanding enumerator fails fast afterwards. Before
+     *       ticket #1798 the replace branch returned before `++version_`, and four
+     *       enumerator kinds -- this dictionary's IDictionaryEnumerator, the key view,
+     *       the value view, and the same reached through an `IDictionary&` -- walked to
+     *       the end after a replacement with no diagnostic; the value view enumerated
+     *       the post-mutation value. The value is never compared: equality of a `void*`
+     *       is address equality, and .NET compares neither.
+     * @note The bump is placed **after** the mutation, which .NET's bump-first indexer
+     *       setter cannot do. A failed insertion (a throwing `std::list::push_back`)
+     *       therefore leaves the dictionary and the counter exactly as they were --
+     *       a strong exception guarantee.
      */
     void setItem(const void* key, void* value) override {
-        for (auto& n : list_) {
-            if (n.key == key) { n.value = value; return; }
+        const ValidatedKey k(key);              // 1. validate, before any mutation
+        const auto it = findNode(k);            // 2. locate
+        if (it != list_.end()) {                // 3a. REPLACE -- bumps, incl. equal value
+            it->value = value;
+            ++version_;
+            return;
         }
-        list_.push_back({key, value});
-        ++version_;
+        list_.push_back({k.getValueProperty(), value});  // 3b. INSERT -- may throw
+        ++version_;                                      // 4. bump only after success
     }
 
     /**
@@ -307,33 +403,52 @@ public:
      * @brief Determines whether the dictionary contains an element with the specified key.
      *
      * C++ counterpart of .NET IDictionary.Contains(object).
-     * @param key Pointer used as the key (compared by address).
+     * @param key Pointer used as the key (compared by address). Never null.
+     * @throws System::ArgumentNullException if @p key is null.
+     * @note Never advances the mutation counter, so an outstanding enumerator is
+     *       unaffected -- including by a rejected null key.
      */
     [[nodiscard]] bool Contains(const void* key) const override {
-        for (const auto& n : list_) {
-            if (n.key == key) return true;
-        }
-        return false;
+        return findNode(ValidatedKey(key)) != list_.end();
     }
 
     /**
      * @brief Adds an element with the specified key and value to the dictionary.
      *
      * C++ counterpart of .NET IDictionary.Add(object, object?).
-     * @throws System::ArgumentException if the key already exists, matching .NET.
+     * @param key   Pointer used as the key (compared by address). Never null.
+     * @param value Value to associate with the key.
+     * @throws System::ArgumentNullException if @p key is null.
+     * @throws System::ArgumentException     if the key already exists, matching .NET.
+     *
+     * @note **A duplicate key is rejected before any mutation and does not advance
+     *       the counter**, so an outstanding enumerator stays valid across a failed
+     *       Add. This is a deliberate deviation from .NET ListDictionaryInternal,
+     *       which does `version++` first and unconditionally and therefore
+     *       invalidates every enumerator on a call that changed nothing; .NET's own
+     *       Hashtable does not, and this port follows the Hashtable rule --
+     *       "advance on effective mutation" -- on both implementations of this
+     *       interface (docs/ListDictionaryInternalSetterDesign.md sections 9.3, 15).
+     * @note Add stays distinct from setItem: setItem replaces, Add rejects.
      */
     void Add(const void* key, void* value) override {
-        for (const auto& n : list_) {
-            if (n.key == key) throw System::ArgumentException("Item has already been added.");
-        }
-        list_.push_back({key, value});
-        ++version_;
+        const ValidatedKey k(key);
+        if (findNode(k) != list_.end())
+            throw System::ArgumentException("Item has already been added.");
+        list_.push_back({k.getValueProperty(), value});
+        ++version_;   // never reached by the throwing path: no partial mutation
     }
 
     /**
      * @brief Removes all elements from the dictionary.
      *
-     * C++ counterpart of .NET IDictionary.Clear().
+     * C++ counterpart of .NET IDictionary.Clear(), including its **unconditional**
+     * version bump: clearing an already-empty dictionary still advances the counter
+     * and still invalidates an outstanding enumerator. This is the one carve-out
+     * from the "no bump for a no-op" rule, kept because .NET
+     * ListDictionaryInternal.Clear() does exactly this and because it is the
+     * existing behaviour of this port. (.NET Hashtable.Clear early-returns instead;
+     * the two .NET implementations disagree on this row.)
      */
     void Clear() override { list_.clear(); ++version_; }
 
@@ -341,12 +456,22 @@ public:
      * @brief Removes the element with the specified key from the dictionary.
      *
      * C++ counterpart of .NET IDictionary.Remove(object).
-     * @param key Pointer used as the key (compared by address).
+     * @param key Pointer used as the key (compared by address). Never null.
+     * @throws System::ArgumentNullException if @p key is null.
+     *
+     * @note **Removing an absent key changes nothing and does not advance the
+     *       counter**, so an outstanding enumerator stays valid. Second deliberate
+     *       deviation from .NET ListDictionaryInternal's bump-first shape, on the
+     *       same "advance on effective mutation" rule as Add above.
+     * @note Erases the single located node rather than scanning with remove_if:
+     *       Add rejects duplicates and setItem replaces, so at most one node can
+     *       match, and unlinking one node is .NET's shape.
      */
     void Remove(const void* key) override {
-        size_t before = list_.size();
-        list_.remove_if([key](const Node& n){ return n.key == key; });
-        if (list_.size() != before) ++version_;
+        const auto it = findNode(ValidatedKey(key));
+        if (it == list_.end()) return;   // absent: no mutation, no bump
+        list_.erase(it);
+        ++version_;
     }
 
     /**

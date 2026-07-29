@@ -19,6 +19,30 @@ public:
     /** @brief Virtual destructor for safe polymorphic destruction. */
     virtual ~IDictionary() = default;
 
+    // ------------------------------------------------------------------
+    // Contract shared by every raw-key member below -- getItem, setItem,
+    // Contains, Add and Remove.
+    //
+    // A NULL KEY IS REJECTED. Each of the five throws
+    // System::ArgumentNullException with parameter name "key" BEFORE it looks
+    // at storage, so a rejected call inserts nothing, finds nothing, erases
+    // nothing, leaves Count unchanged, and does not advance the fail-fast
+    // mutation counter -- an outstanding enumerator stays valid across it.
+    // This matches .NET, which begins each corresponding member with
+    // `ArgumentNullException.ThrowIfNull(key)`.
+    //
+    // Until ticket #1798 this was only HALF true, which is worse than either
+    // answer: Hashtable rejected null on all five entry points (ticket #1775)
+    // while ListDictionaryInternal accepted one and STORED it, so a
+    // polymorphic consumer holding an IDictionary& could not predict whether
+    // Add(nullptr, v) threw or inserted. Both implementations now agree, and
+    // the parameterised suite in DictionaryKeyAndViewContractTests.cpp asserts
+    // the contract against every implementation rather than against one type.
+    //
+    // A third implementer must honour this too; nothing structural enforces it
+    // across the interface, so the parameterised suite is the mitigation.
+    // ------------------------------------------------------------------
+
     /**
      * @brief Gets the element with the specified key (getter).
      *
@@ -26,7 +50,7 @@ public:
      * getter is pure: it returns an independent handle to the value object, never a
      * handle to the dictionary's slot, and never mutates the dictionary.
      *
-     * @param key The key of the element to get.
+     * @param key The key of the element to get. Never null.
      * @return An **owning** std::any holding a copy of the stored value, or an empty
      *         std::any if the key is absent. Test with `has_value()`, or use
      *         Contains() when "absent" must be distinguished from "present but
@@ -56,7 +80,7 @@ public:
      * An implementation must advance its fail-fast mutation counter on both the
      * insert and the replace branch, matching .NET Hashtable.Insert.
      *
-     * @param key   The key of the element to set.
+     * @param key   The key of the element to set. Never null.
      * @param value The value to associate with the key.
      *
      * @note The value parameter deliberately keeps its raw `void*` type (ticket
@@ -104,7 +128,7 @@ public:
      * @brief Returns true if the dictionary contains an element with the specified key.
      *
      * C++ counterpart of .NET IDictionary.Contains(object).
-     * @param key The key to locate.
+     * @param key The key to locate. Never null.
      */
     [[nodiscard]] virtual bool Contains(const void* key) const = 0;
 
@@ -112,7 +136,7 @@ public:
      * @brief Adds an element with the given key and value to the dictionary.
      *
      * C++ counterpart of .NET IDictionary.Add(object, object?).
-     * @param key   The key of the element to add.
+     * @param key   The key of the element to add. Never null.
      * @param value The value of the element to add.
      */
     virtual void Add(const void* key, void* value) = 0;
@@ -128,7 +152,7 @@ public:
      * @brief Removes the element with the specified key.
      *
      * C++ counterpart of .NET IDictionary.Remove(object).
-     * @param key The key of the element to remove.
+     * @param key The key of the element to remove. Never null.
      */
     virtual void Remove(const void* key) = 0;
 
