@@ -68,12 +68,30 @@ class Base64 {
         int8_t vals[4] = {0, 0, 0, 0};
         int valCount = 0, padCount = 0;
 
+        // Where a FAILED decode reports its cursor. .NET reaches its InvalidData and
+        // DestinationTooSmall exits through InvalidDataFallback, which skips the leading
+        // whitespace of the failing region and adds it to bytesConsumed before re-entering
+        // the decoder -- so its cursor is the first NON-whitespace character at or after the
+        // last completed quantum's boundary, not the boundary itself. Its own tests pin
+        // that: DecodingWithValidDataBeforeWhiteSpaceSplitFinalQuantum asserts 9, 10 and 15,
+        // and DecodingWithEmbeddedWhiteSpaceIntoSmallDestination_TrailingWhiteSpacesAreConsumed
+        // asserts input[consumed] == 'j' on a DestinationTooSmall return, so it is not an
+        // InvalidData-only rule (ticket #1822, build-probe/1822_prefix_defects.log).
+        // NeedMoreData is deliberately excluded: .NET returns it from NeedMoreDataExit, which
+        // the fallback never runs for, so its cursor stays on the quantum boundary.
+        intcs failCursor = 0;
+        const auto fail = [&](OperationStatus status) {
+            consumed = failCursor;
+            return status;
+        };
+
         while (si < srcLen) {
             uint8_t ch = static_cast<uint8_t>(src[si]);
             if (isWhitespace(ch)) { ++si; continue; }
+            if (valCount == 0) failCursor = si;   // first symbol of the pending quantum
             int8_t v = kDecTable[ch];
             ++si;
-            if (v == -1) return OperationStatus::InvalidData;
+            if (v == -1) return fail(OperationStatus::InvalidData);
             if (v == -2) {
                 // '=' terminates the base64 content, so it can only ever be meaningful in
                 // a FINAL block. .NET never reaches its padding handler otherwise:
@@ -88,19 +106,19 @@ class Base64 {
                 // '=' rather than at the end of its quantum is what keeps bytesConsumed and
                 // bytesWritten on the last completed quantum boundary, which is where .NET
                 // leaves them too.
-                if (!isFinalBlock) return OperationStatus::InvalidData;
-                if (valCount < 2) return OperationStatus::InvalidData;
+                if (!isFinalBlock) return fail(OperationStatus::InvalidData);
+                if (valCount < 2) return fail(OperationStatus::InvalidData);
                 ++padCount;
                 vals[valCount] = 0;
             } else {
-                if (padCount > 0) return OperationStatus::InvalidData;
+                if (padCount > 0) return fail(OperationStatus::InvalidData);
                 vals[valCount] = v;
             }
             ++valCount;
 
             if (valCount == 4) {
                 if (padCount == 0) {
-                    if (dstLen - di < 3) return OperationStatus::DestinationTooSmall;
+                    if (dstLen - di < 3) return fail(OperationStatus::DestinationTooSmall);
                     uint32_t val = (uint32_t(vals[0])<<18)|(uint32_t(vals[1])<<12)|(uint32_t(vals[2])<<6)|uint32_t(vals[3]);
                     dst[di++] = static_cast<uint8_t>(val >> 16);
                     dst[di++] = static_cast<uint8_t>(val >> 8);
@@ -113,8 +131,8 @@ class Base64 {
                     // #1817 / SR-AUD-079). Checked before the destination check on purpose:
                     // whether the input is canonical is a property of the input alone and
                     // must not depend on how much room the caller happened to provide.
-                    if ((vals[2] & 0x03) != 0) return OperationStatus::InvalidData;
-                    if (dstLen - di < 2) return OperationStatus::DestinationTooSmall;
+                    if ((vals[2] & 0x03) != 0) return fail(OperationStatus::InvalidData);
+                    if (dstLen - di < 2) return fail(OperationStatus::DestinationTooSmall);
                     uint32_t val = (uint32_t(vals[0])<<18)|(uint32_t(vals[1])<<12)|(uint32_t(vals[2])<<6);
                     dst[di++] = static_cast<uint8_t>(val >> 16);
                     dst[di++] = static_cast<uint8_t>(val >> 8);
@@ -122,8 +140,8 @@ class Base64 {
                     // Two '=' means the quantum carries one byte, so only the top two bits of
                     // the second sextet are used and its low four bits MUST be zero. `AB==`
                     // used to decode to Done. Same ordering rationale as above.
-                    if ((vals[1] & 0x0F) != 0) return OperationStatus::InvalidData;
-                    if (dstLen - di < 1) return OperationStatus::DestinationTooSmall;
+                    if ((vals[1] & 0x0F) != 0) return fail(OperationStatus::InvalidData);
+                    if (dstLen - di < 1) return fail(OperationStatus::DestinationTooSmall);
                     uint32_t val = (uint32_t(vals[0])<<18)|(uint32_t(vals[1])<<12);
                     dst[di++] = static_cast<uint8_t>(val >> 16);
                 }
@@ -131,6 +149,14 @@ class Base64 {
 
                 if (padCount > 0) {
                     // Padding terminates the base64 content; only trailing whitespace may follow.
+                    // This return deliberately does NOT use fail(): the quantum has already been
+                    // committed to consumed/written just above, and reporting the failCursor here
+                    // would claim fewer bytes consumed than bytes written. .NET reports 0,0 for
+                    // "QQ==QUJD" because DecodeWithWhiteSpaceBlockwise REVERTS its block counters
+                    // when non-whitespace follows the padding -- while still having written the
+                    // byte into the caller's destination. That behaviour is not pinned by any .NET
+                    // test and reports less than was actually written, so it is a documented
+                    // deviation rather than something to reproduce (ticket #1822).
                     for (intcs r = si; r < srcLen; ++r) {
                         if (!isWhitespace(static_cast<uint8_t>(src[r]))) return OperationStatus::InvalidData;
                     }
@@ -142,7 +168,8 @@ class Base64 {
         }
 
         if (valCount > 0) {
-            return isFinalBlock ? OperationStatus::InvalidData : OperationStatus::NeedMoreData;
+            // NeedMoreData keeps the quantum boundary; InvalidData takes the failCursor.
+            return isFinalBlock ? fail(OperationStatus::InvalidData) : OperationStatus::NeedMoreData;
         }
         consumed = si; written = di;
         return OperationStatus::Done;

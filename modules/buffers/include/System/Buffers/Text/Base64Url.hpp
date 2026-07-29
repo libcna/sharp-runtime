@@ -88,37 +88,53 @@ class Base64Url {
         int8_t vals[4] = {0, 0, 0, 0};
         int valCount = 0;
 
+        // Where a FAILED decode reports its cursor -- the first NON-whitespace character at
+        // or after the last completed quantum's boundary, not the boundary itself. .NET
+        // reaches its InvalidData and DestinationTooSmall exits through the same generic
+        // InvalidDataFallback that Base64 uses, which skips the failing region's leading
+        // whitespace and adds it to bytesConsumed before re-entering the decoder. See the
+        // longer note in Base64.hpp's decodeCore for the .NET tests that pin it; ticket
+        // #1822 applies the rule to both types because the .NET helper is one helper.
+        // NeedMoreData is deliberately excluded: it comes from NeedMoreDataExit, which the
+        // fallback never runs for, so its cursor stays on the quantum boundary.
+        intcs failCursor = 0;
+        const auto fail = [&](OperationStatus status) {
+            consumed = failCursor;
+            return status;
+        };
+
         while (si < srcLen) {
             uint8_t ch = static_cast<uint8_t>(src[si]);
             if (isWhitespace(ch)) { ++si; continue; }
+            if (valCount == 0) failCursor = si;   // first character of the pending quantum
             if (isPadding(ch)) {
                 // Padding terminates the content, so it is only ever meaningful in a final
                 // block -- the same rule Base64 gained under ticket #1818, and the same one
                 // .NET applies here (its DecodingInvalidBytesPadding asserts InvalidData for
                 // "2222PA==" with isFinalBlock false, reporting only the complete quantum
                 // before it).
-                if (!isFinalBlock) return OperationStatus::InvalidData;
+                if (!isFinalBlock) return fail(OperationStatus::InvalidData);
                 // remainder 0 (a complete quantum, or nothing at all) and remainder 1 (never
                 // decodable) cannot be padded.
-                if (valCount < 2) return OperationStatus::InvalidData;
+                if (valCount < 2) return fail(OperationStatus::InvalidData);
                 int padCount = 0;
                 for (; si < srcLen; ++si) {
                     uint8_t p = static_cast<uint8_t>(src[si]);
                     if (isWhitespace(p)) continue;          // "YQ= =" and "YQ== " are valid
-                    if (!isPadding(p)) return OperationStatus::InvalidData;
-                    if (padCount == 2) return OperationStatus::InvalidData;  // at most two
+                    if (!isPadding(p)) return fail(OperationStatus::InvalidData);
+                    if (padCount == 2) return fail(OperationStatus::InvalidData);  // at most two
                     ++padCount;
                 }
-                if (valCount + padCount > 4) return OperationStatus::InvalidData;
+                if (valCount + padCount > 4) return fail(OperationStatus::InvalidData);
                 break;  // si == srcLen; the trailing quantum is decoded below, unpadded-style
             }
             int8_t v = kDecTable[ch];
-            if (v < 0) return OperationStatus::InvalidData;
+            if (v < 0) return fail(OperationStatus::InvalidData);
             vals[valCount++] = v;
             ++si;
 
             if (valCount == 4) {
-                if (dstLen - di < 3) return OperationStatus::DestinationTooSmall;
+                if (dstLen - di < 3) return fail(OperationStatus::DestinationTooSmall);
                 uint32_t val = (uint32_t(vals[0])<<18)|(uint32_t(vals[1])<<12)|(uint32_t(vals[2])<<6)|uint32_t(vals[3]);
                 dst[di++] = static_cast<uint8_t>(val >> 16);
                 dst[di++] = static_cast<uint8_t>(val >> 8);
@@ -130,7 +146,7 @@ class Base64Url {
 
         if (valCount > 0) {
             if (!isFinalBlock) return OperationStatus::NeedMoreData;
-            if (valCount == 1) return OperationStatus::InvalidData;
+            if (valCount == 1) return fail(OperationStatus::InvalidData);
             if (valCount == 2) {
                 // Two symbols carry one byte, so only the top two bits of the second sextet
                 // are used and its low four bits MUST be zero. Without this, `AB` decoded to
@@ -138,15 +154,15 @@ class Base64Url {
                 // is the unpadded instance of the same canonical boundary the padded sibling
                 // has (ticket #1817 / SR-AUD-079, extended). Checked before the destination
                 // check on purpose: canonicity is a property of the input alone.
-                if ((vals[1] & 0x0F) != 0) return OperationStatus::InvalidData;
-                if (dstLen - di < 1) return OperationStatus::DestinationTooSmall;
+                if ((vals[1] & 0x0F) != 0) return fail(OperationStatus::InvalidData);
+                if (dstLen - di < 1) return fail(OperationStatus::DestinationTooSmall);
                 uint32_t val = (uint32_t(vals[0])<<18)|(uint32_t(vals[1])<<12);
                 dst[di++] = static_cast<uint8_t>(val >> 16);
             } else { // valCount == 3
                 // Three symbols carry two bytes: only the top four bits of the third sextet
                 // are used, so its low two bits MUST be zero. `AAB` used to decode to Done.
-                if ((vals[2] & 0x03) != 0) return OperationStatus::InvalidData;
-                if (dstLen - di < 2) return OperationStatus::DestinationTooSmall;
+                if ((vals[2] & 0x03) != 0) return fail(OperationStatus::InvalidData);
+                if (dstLen - di < 2) return fail(OperationStatus::DestinationTooSmall);
                 uint32_t val = (uint32_t(vals[0])<<18)|(uint32_t(vals[1])<<12)|(uint32_t(vals[2])<<6);
                 dst[di++] = static_cast<uint8_t>(val >> 16);
                 dst[di++] = static_cast<uint8_t>(val >> 8);

@@ -743,3 +743,144 @@ TEST(Base64Test, DecodeFromChars_TrailingWhitespaceAfterPadding_IsConsumed) {
     EXPECT_EQ(consumed, 6);
     EXPECT_EQ(written, 1);
 }
+
+// ---------------------------------------------------------------------------
+// Ticket #1822: the cursor reported alongside a NON-Done status.
+//
+// .NET reaches its InvalidData and DestinationTooSmall exits through
+// InvalidDataFallback, which skips the failing region's leading whitespace and adds it
+// to bytesConsumed before re-entering the decoder. Its cursor is therefore the first
+// NON-whitespace character at or after the last completed quantum's boundary, not the
+// boundary itself. NeedMoreData comes from NeedMoreDataExit, which the fallback never
+// runs for, so it keeps the boundary.
+//
+// Measured: build-probe/1822_defects.cpp, logs 1822_prefix_defects.log (9 of 41 lines
+// differed) and 1822_postfix_defects.log (0 of 41).
+// ---------------------------------------------------------------------------
+
+// .NET DecodingWithValidDataBeforeWhiteSpaceSplitFinalQuantum asserts these three
+// bytesConsumed values, and then that slicing the input at the cursor leaves exactly
+// the final quantum "AQ\r\nQ=".
+TEST(Base64Test, InvalidDataCursor_SkipsWhitespaceBeforeTheFailingQuantum) {
+    struct { const char* text; int consumed; int written; } cases[] = {
+        {"AQIDBAUG AQ\r\nQ=",        9, 6},
+        {"AQID BAUG AQ\r\nQ=",      10, 6},
+        {"AQIDBAUG\r\nAQID AQ\r\nQ=", 15, 9},
+    };
+    for (const auto& c : cases) {
+        const std::string text(c.text);
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(text.data()),
+                                  static_cast<int>(text.size()));
+        std::vector<uint8_t> out(100, 0xCC);
+        Span<uint8_t> dst(out.data(), 100);
+        int consumed = -1, written = -1;
+        EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, false),
+                  OperationStatus::InvalidData) << c.text;
+        EXPECT_EQ(consumed, c.consumed) << c.text;
+        EXPECT_EQ(written, c.written) << c.text;
+        // The remainder after the cursor is exactly the whitespace-split final quantum.
+        EXPECT_EQ(text.substr(static_cast<size_t>(consumed)), std::string("AQ\r\nQ=")) << c.text;
+    }
+}
+
+// .NET DecodingWithEmbeddedWhiteSpaceIntoSmallDestination_TrailingWhiteSpacesAreConsumed
+// asserts input[consumed] == 'j' -- so the rule is not InvalidData-only, it also governs
+// DestinationTooSmall.
+TEST(Base64Test, DestinationTooSmallCursor_SkipsWhitespaceBeforeTheFailingQuantum) {
+    const std::string text = "        8J+N        i    f    C    f        jYk=";
+    ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(text.data()),
+                              static_cast<int>(text.size()));
+    std::vector<uint8_t> out(7, 0xCC);
+    Span<uint8_t> dst(out.data(), 6);
+    int consumed = -1, written = -1;
+    EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, true),
+              OperationStatus::DestinationTooSmall);
+    EXPECT_EQ(consumed, 44);
+    EXPECT_EQ(text[static_cast<size_t>(consumed)], 'j');
+    EXPECT_EQ(written, 6);
+    const std::vector<uint8_t> expected = {240, 159, 141, 137, 240, 159};
+    for (int i = 0; i < 6; ++i) EXPECT_EQ(out[static_cast<size_t>(i)], expected[static_cast<size_t>(i)]) << i;
+    EXPECT_EQ(out[6], 0xCC);
+}
+
+// The same rule for the other failure shapes, on both overloads.
+TEST(Base64Test, InvalidDataCursor_AppliesToEveryFailingShape) {
+    struct { const char* text; bool isFinalBlock; int consumed; int written; } cases[] = {
+        {"QUJD QQ==", false, 5, 3},  // whitespace, then padding while the flag is clear
+        {"QUJD *",    true,  5, 3},  // whitespace, then an invalid character
+        {"QUJD QQ",   true,  5, 3},  // whitespace, then a short final quantum
+        {"QQ==",      false, 0, 0},  // no whitespace: unchanged
+        {"QUJDQQ==",  false, 4, 3},
+    };
+    for (const auto& c : cases) {
+        const std::string text(c.text);
+        const auto len = static_cast<int>(text.size());
+        std::vector<uint8_t> out(64, 0xCC);
+        Span<uint8_t> dst(out.data(), 64);
+        int consumed = -1, written = -1;
+        EXPECT_EQ(Base64::DecodeFromUtf8(
+                      ReadOnlySpan<uint8_t>(reinterpret_cast<const uint8_t*>(text.data()), len),
+                      dst, consumed, written, c.isFinalBlock),
+                  OperationStatus::InvalidData) << c.text;
+        EXPECT_EQ(consumed, c.consumed) << c.text;
+        EXPECT_EQ(written, c.written) << c.text;
+
+        std::vector<uint8_t> out2(64, 0xCC);
+        Span<uint8_t> dst2(out2.data(), 64);
+        int consumed2 = -1, written2 = -1;
+        EXPECT_EQ(Base64::DecodeFromChars(ReadOnlySpan<char>(text.data(), len),
+                                          dst2, consumed2, written2, c.isFinalBlock),
+                  OperationStatus::InvalidData) << c.text;
+        EXPECT_EQ(consumed2, c.consumed) << c.text;
+        EXPECT_EQ(written2, c.written) << c.text;
+    }
+}
+
+// NeedMoreData is excluded on purpose: .NET returns it from an exit its whitespace
+// fallback never runs for, so its cursor stays on the completed quantum's boundary.
+TEST(Base64Test, NeedMoreDataCursor_KeepsTheQuantumBoundary) {
+    struct { const char* text; int consumed; int written; } cases[] = {
+        {"QUJD QQ", 4, 3},
+        {"QUJDQQ",  4, 3},
+        {"QQ",      0, 0},
+    };
+    for (const auto& c : cases) {
+        const std::string text(c.text);
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(text.data()),
+                                  static_cast<int>(text.size()));
+        std::vector<uint8_t> out(64, 0xCC);
+        Span<uint8_t> dst(out.data(), 64);
+        int consumed = -1, written = -1;
+        EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, false),
+                  OperationStatus::NeedMoreData) << c.text;
+        EXPECT_EQ(consumed, c.consumed) << c.text;
+        EXPECT_EQ(written, c.written) << c.text;
+    }
+}
+
+// DELIBERATE DEVIATION, pinned so it stays deliberate. .NET's
+// DecodeWithWhiteSpaceBlockwise REVERTS its block counters when non-whitespace follows
+// the padding, so it reports 0,0 for "QQ==QUJD" while having already written the byte
+// into the caller's destination. This port reports what it actually wrote. The .NET
+// behaviour is not pinned by any of its own tests and reports less than was written.
+TEST(Base64Test, PaddingFollowedByData_ReportsWhatWasActuallyWritten) {
+    struct { const char* text; int consumed; int written; } cases[] = {
+        {"QQ==QUJD",    4, 1},   // .NET would report 0, 0
+        {"QUJD QQ== X", 9, 4},   // .NET would report 5, 3
+    };
+    for (const auto& c : cases) {
+        const std::string text(c.text);
+        ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(text.data()),
+                                  static_cast<int>(text.size()));
+        std::vector<uint8_t> out(64, 0xCC);
+        Span<uint8_t> dst(out.data(), 64);
+        int consumed = -1, written = -1;
+        EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, true),
+                  OperationStatus::InvalidData) << c.text;
+        EXPECT_EQ(consumed, c.consumed) << c.text;
+        EXPECT_EQ(written, c.written) << c.text;
+        // Whatever it reports, the reported prefix must really be in the destination.
+        EXPECT_EQ(out[0], 'A') << c.text;
+        EXPECT_LE(written, consumed) << c.text;
+    }
+}

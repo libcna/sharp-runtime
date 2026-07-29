@@ -666,3 +666,45 @@ TEST(Base64UrlTest, PaddedInput_StillReportsDestinationTooSmall) {
     EXPECT_EQ(written, 3);
     EXPECT_EQ(out[3], 0xCC);
 }
+
+// ---------------------------------------------------------------------------
+// Ticket #1822: Base64Url shares .NET's decoder helper, so it shares the rule that the
+// cursor on a NON-Done return is the first non-whitespace character at or after the
+// last completed quantum's boundary. NeedMoreData keeps the boundary.
+// Measured: build-probe/1822_defects.cpp.
+// ---------------------------------------------------------------------------
+
+TEST(Base64UrlTest, InvalidDataCursor_SkipsWhitespaceBeforeTheFailingQuantum) {
+    struct { const char* text; bool isFinalBlock; int consumed; int written; } cases[] = {
+        {"2222 PA==", false, 5, 3},   // whitespace, then padding while the flag is clear
+        {"2222 *",    true,  5, 3},   // whitespace, then an invalid character
+        {"2222 Y",    true,  5, 3},   // whitespace, then a one-symbol remainder
+        {"2222PA==",  false, 4, 3},   // no whitespace: unchanged
+        {"2222=PPP",  true,  4, 3},
+    };
+    for (const auto& c : cases) {
+        const std::string text(c.text);
+        const auto r = DecodeBothUrlOverloads(text, c.isFinalBlock, 64);
+        EXPECT_EQ(r.status, OperationStatus::InvalidData) << c.text;
+        EXPECT_EQ(r.consumed, c.consumed) << c.text;
+        EXPECT_EQ(r.written, c.written) << c.text;
+    }
+}
+
+TEST(Base64UrlTest, NeedMoreDataCursor_KeepsTheQuantumBoundary) {
+    for (const char* text : {"2222 PA", "2222PA", "2222 P"}) {
+        const auto r = DecodeBothUrlOverloads(std::string(text), false, 64);
+        EXPECT_EQ(r.status, OperationStatus::NeedMoreData) << text;
+        EXPECT_EQ(r.consumed, 4) << text;
+        EXPECT_EQ(r.written, 3) << text;
+    }
+}
+
+TEST(Base64UrlTest, DestinationTooSmallCursor_SkipsWhitespaceBeforeTheFailingQuantum) {
+    const std::string text = "2222 PPPP";
+    const auto r = DecodeBothUrlOverloads(text, true, 3);
+    EXPECT_EQ(r.status, OperationStatus::DestinationTooSmall);
+    EXPECT_EQ(r.consumed, 5);
+    EXPECT_EQ(text[static_cast<size_t>(r.consumed)], 'P');
+    EXPECT_EQ(r.written, 3);
+}
