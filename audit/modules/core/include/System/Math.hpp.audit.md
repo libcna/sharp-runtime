@@ -30,6 +30,13 @@ unqualified native result or silently reinterpret an invalid public enum.
   `math_round_invalid=2` for `Round(1.9, static_cast<MidpointRounding>(99))`.
   .NET throws `ArgumentException` for an invalid enum value:
   <https://source.dot.net/System.Private.CoreLib/src/runtime/src/libraries/System.Private.CoreLib/src/System/Math.cs.html>.
+  **Remediated (#1855, 2026-07-30):** `Round(double, MidpointRounding)`'s
+  `switch` default now throws `System::ArgumentException(paramName "mode")`
+  instead of `roundToEvenImpl`, matching
+  `ThrowHelper.ThrowArgumentException_InvalidEnumValue`. The
+  `Round(double, int, MidpointRounding)` overload validates the mode through
+  the funnel for magnitudes `< 1e16` (matching .NET's own Math.cs, which does
+  not validate the mode for larger magnitudes). **Closes CCF-008.**
 
 ## Required post-audit verification
 

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
@@ -536,7 +537,10 @@ namespace System
             return (std::fmod(floorVal, 2.0) == 0.0) ? floorVal : floorVal + 1.0;
         }
 
-        /** @brief Rounds @p value to the nearest integer using the specified rounding convention. */
+        /**
+         * @brief Rounds @p value to the nearest integer using the specified rounding convention.
+         * @throws System::ArgumentException if @p mode is not a defined MidpointRounding value.
+         */
         [[nodiscard]] static double Round(double value, MidpointRounding mode) {
             switch (mode) {
                 case MidpointRounding::ToEven:             return roundToEvenImpl(value);
@@ -544,7 +548,15 @@ namespace System
                 case MidpointRounding::ToZero:             return std::trunc(value);
                 case MidpointRounding::ToNegativeInfinity: return std::floor(value);
                 case MidpointRounding::ToPositiveInfinity: return std::ceil(value);
-                default:                                   return roundToEvenImpl(value);
+                // Matches .NET Math.Round(double, MidpointRounding): the switch default throws
+                // ArgumentException for an out-of-range enum value (ThrowHelper's
+                // Argument_InvalidEnumValue: "The value '{0}' is not valid for this usage of the
+                // type {1}." with {1} == "MidpointRounding"), rather than silently rounding.
+                default:
+                    throw System::ArgumentException(
+                        "The value '" + std::to_string(static_cast<int>(mode))
+                            + "' is not valid for this usage of the type MidpointRounding.",
+                        "mode");
             }
         }
 

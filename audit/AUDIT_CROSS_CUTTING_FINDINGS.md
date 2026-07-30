@@ -284,6 +284,22 @@ and:
 - `modules/core/include/System/MathF.hpp.audit.md`;
 - `modules/core/tests/System/MathFTests.cpp.audit.md`.
 
+**Remediated — ticket #1855 (2026-07-30), CCF-005 Decimal slice.** CCF-008 is
+**closed**. SR-AUD-036 was its only member (Decimal + Math + MathF, no fourth
+type). All three `Round(…, MidpointRounding)` funnels now reject an out-of-range
+enum value with `System::ArgumentException(paramName "mode")`, message
+`The value '{n}' is not valid for this usage of the type MidpointRounding.`
+(mirroring .NET's `SR.Argument_InvalidEnumValue`). Decimal validates the mode
+unconditionally before its scale-vs-decimals early-out (matching
+`Decimal.Round(ref, int, MidpointRounding)`); Math/MathF replace the `switch`
+default's silent ties-to-even with the throw (matching
+`ThrowHelper.ThrowArgumentException_InvalidEnumValue`). Every named mode 0-4
+still returns its exact value; +9 add-only tests. Per .NET parity, the
+`Round(value, digits, mode)` overloads validate the mode *only through the
+funnel*, so a magnitude at/above the round limit (Math ≥ 1e16, MathF ≥ 1e8)
+returns unchanged without validating the mode — a faithful match to .NET's own
+Math.cs/MathF.cs, not a gap.
+
 ## CCF-009 — process-wide mutable PRNG state has no concurrency boundary
 
 `Random::Shared` returns one mutable subtractive generator, while

@@ -3,7 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <cmath>
+#include "System/ArgumentException.hpp"
 #include "System/MathF.hpp"
+#include "System/MidpointRounding.hpp"
 
 using System::MathF;
 
@@ -31,6 +33,38 @@ TEST(MathFTest, Round) {
     EXPECT_FLOAT_EQ(MathF::Round(1.5f), 2.0f);
     EXPECT_FLOAT_EQ(MathF::Round(2.5f), 2.0f);
     EXPECT_FLOAT_EQ(MathF::Round(1.456f, 2), 1.46f);
+}
+
+// SR-AUD-036 / CCF-008 (ticket #1855): an out-of-range MidpointRounding must throw
+// System::ArgumentException(paramName "mode"), matching .NET MathF.Round's switch default
+// (ThrowHelper.ThrowArgumentException_InvalidEnumValue), rather than silently rounding to even.
+TEST(MathFTest, Round_InvalidMidpointRounding_Throws) {
+    EXPECT_THROW(MathF::Round(1.9f, static_cast<System::MidpointRounding>(99)),
+                 System::ArgumentException);
+    EXPECT_THROW(MathF::Round(1.9f, static_cast<System::MidpointRounding>(-1)),
+                 System::ArgumentException);
+    EXPECT_THROW(MathF::Round(1.9f, static_cast<System::MidpointRounding>(5)),
+                 System::ArgumentException);
+    // Digits overload funnels through Round(x, mode) for in-range magnitudes.
+    EXPECT_THROW(MathF::Round(1.456f, 2, static_cast<System::MidpointRounding>(99)),
+                 System::ArgumentException);
+}
+
+TEST(MathFTest, Round_InvalidMidpointRounding_ParamNameIsMode) {
+    try {
+        MathF::Round(1.9f, static_cast<System::MidpointRounding>(99));
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "mode");
+    }
+}
+
+TEST(MathFTest, Round_EveryNamedMode_StillReturnsExactValue) {
+    EXPECT_FLOAT_EQ(MathF::Round(2.5f, System::MidpointRounding::ToEven), 2.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(2.5f, System::MidpointRounding::AwayFromZero), 3.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(2.9f, System::MidpointRounding::ToZero), 2.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(2.9f, System::MidpointRounding::ToNegativeInfinity), 2.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(2.1f, System::MidpointRounding::ToPositiveInfinity), 3.0f);
 }
 
 TEST(MathFTest, Sqrt) {

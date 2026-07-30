@@ -8,7 +8,9 @@
 #include <numbers>
 #include <stdexcept>
 
+#include "System/ArgumentException.hpp"
 #include "System/Math.hpp"
+#include "System/MidpointRounding.hpp"
 
 using System::Math;
 
@@ -670,6 +672,38 @@ TEST(MathTests, Round_MidpointRounding_AwayFromZero) {
 
 TEST(MathTests, Round_Digits_MidpointRounding) {
     EXPECT_NEAR(Math::Round(1.455, 2, System::MidpointRounding::AwayFromZero), 1.46, 1e-9);
+}
+
+// SR-AUD-036 / CCF-008 (ticket #1855): an out-of-range MidpointRounding must throw
+// System::ArgumentException(paramName "mode"), matching .NET Math.Round's switch default
+// (ThrowHelper.ThrowArgumentException_InvalidEnumValue), rather than silently rounding to even.
+TEST(MathTests, Round_InvalidMidpointRounding_Throws) {
+    EXPECT_THROW(Math::Round(1.9, static_cast<System::MidpointRounding>(99)),
+                 System::ArgumentException);
+    EXPECT_THROW(Math::Round(1.9, static_cast<System::MidpointRounding>(-1)),
+                 System::ArgumentException);
+    EXPECT_THROW(Math::Round(1.9, static_cast<System::MidpointRounding>(5)),
+                 System::ArgumentException);
+    // Digits overload funnels through Round(value, mode) for in-range magnitudes.
+    EXPECT_THROW(Math::Round(1.455, 2, static_cast<System::MidpointRounding>(99)),
+                 System::ArgumentException);
+}
+
+TEST(MathTests, Round_InvalidMidpointRounding_ParamNameIsMode) {
+    try {
+        Math::Round(1.9, static_cast<System::MidpointRounding>(99));
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "mode");
+    }
+}
+
+TEST(MathTests, Round_EveryNamedMode_StillReturnsExactValue) {
+    EXPECT_DOUBLE_EQ(Math::Round(2.5, System::MidpointRounding::ToEven), 2.0);
+    EXPECT_DOUBLE_EQ(Math::Round(2.5, System::MidpointRounding::AwayFromZero), 3.0);
+    EXPECT_DOUBLE_EQ(Math::Round(2.9, System::MidpointRounding::ToZero), 2.0);
+    EXPECT_DOUBLE_EQ(Math::Round(2.9, System::MidpointRounding::ToNegativeInfinity), 2.0);
+    EXPECT_DOUBLE_EQ(Math::Round(2.1, System::MidpointRounding::ToPositiveInfinity), 3.0);
 }
 
 TEST(MathTests, ReciprocalSqrtEstimate_Four) {

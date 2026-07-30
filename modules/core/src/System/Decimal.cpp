@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Decimal.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
@@ -466,6 +467,16 @@ Decimal Decimal::Ceiling(const Decimal& d) {
 Decimal Decimal::Round(const Decimal& d, intcs decimals, MidpointRounding mode) {
     if (decimals < 0 || decimals > 28)
         throw System::ArgumentOutOfRangeException("decimals", "decimals must be in range 0-28.");
+    // Reject an out-of-range MidpointRounding before any early-out, matching .NET's
+    // Decimal.Round(ref, int, MidpointRounding), which validates `mode` unconditionally
+    // via `(uint)mode > (uint)MidpointRounding.ToPositiveInfinity` (Decimal.cs). The message
+    // mirrors SR.Argument_InvalidEnumValue: "The value '{0}' is not valid for this usage of
+    // the type {1}." with {1} == nameof(MidpointRounding).
+    if (static_cast<uint32_t>(mode) > static_cast<uint32_t>(MidpointRounding::ToPositiveInfinity))
+        throw System::ArgumentException(
+            "The value '" + std::to_string(static_cast<int>(mode))
+                + "' is not valid for this usage of the type MidpointRounding.",
+            "mode");
     if (d.scale_ <= uint8_t(decimals)) return d;
 
     int dropCount = int(d.scale_) - decimals;

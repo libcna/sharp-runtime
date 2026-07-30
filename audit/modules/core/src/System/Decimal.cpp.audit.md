@@ -35,6 +35,11 @@ zero.
   `ArgumentException`.  .NET requires that exception for an invalid
   `MidpointRounding` value:
   <https://learn.microsoft.com/en-us/dotnet/api/system.math.round?view=net-10.0>.
+  **Remediated (#1855, 2026-07-30):** `Decimal::Round(d, decimals, mode)` now
+  rejects `(uint)mode > (uint)MidpointRounding::ToPositiveInfinity` with
+  `System::ArgumentException(paramName "mode")` before the scale-vs-decimals
+  early-out (so even a no-op round validates), matching
+  `Decimal.Round(ref, int, MidpointRounding)`. **Closes CCF-008.**
 - **SR-AUD-038:** both `Decimal(lo, mid, hi, isNegative, scale)` and
   `TryParse` condition the sign on a nonzero mantissa.  The probe constructs
   raw negative zero and obtains `negative_zero_flags=0`; .NET exposes a

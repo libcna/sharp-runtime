@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Decimal.hpp"
 #include "System/MidpointRounding.hpp"
@@ -192,6 +193,42 @@ TEST(DecimalTests2, Round_MultiDecimalPlace) {
     EXPECT_EQ(Decimal::Round(Decimal::Parse("3.14159"), 2), Decimal::Parse("3.14"));
     EXPECT_EQ(Decimal::Round(Decimal::Parse("3.145"), 2), Decimal::Parse("3.14")); // tie -> even
     EXPECT_EQ(Decimal::Round(Decimal::Parse("3.155"), 2), Decimal::Parse("3.16")); // tie -> even
+}
+
+// SR-AUD-036 / CCF-008 (ticket #1855): an out-of-range MidpointRounding must throw
+// System::ArgumentException(paramName "mode"), matching .NET Decimal.Round's
+// `(uint)mode > (uint)MidpointRounding.ToPositiveInfinity` guard, rather than silently
+// truncating. Decimal::Round funnels every overload through Round(d, decimals, mode), and the
+// guard sits before the scale<=decimals early-out so even a no-op round validates the mode.
+TEST(DecimalTests2, Round_InvalidMidpointRounding_Throws) {
+    EXPECT_THROW(Decimal::Round(Decimal::Parse("1.9"), static_cast<MidpointRounding>(99)),
+                 System::ArgumentException);
+    EXPECT_THROW(Decimal::Round(Decimal::Parse("1.9"), static_cast<MidpointRounding>(-1)),
+                 System::ArgumentException);
+    EXPECT_THROW(Decimal::Round(Decimal::Parse("1.9"), static_cast<MidpointRounding>(5)),
+                 System::ArgumentException);
+    EXPECT_THROW(Decimal::Round(Decimal::Parse("1.9"), 0, static_cast<MidpointRounding>(99)),
+                 System::ArgumentException);
+    // Validated even when no rounding is required (scale already <= decimals).
+    EXPECT_THROW(Decimal::Round(Decimal(5), 0, static_cast<MidpointRounding>(99)),
+                 System::ArgumentException);
+}
+
+TEST(DecimalTests2, Round_InvalidMidpointRounding_ParamNameIsMode) {
+    try {
+        Decimal::Round(Decimal::Parse("1.9"), static_cast<MidpointRounding>(99));
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "mode");
+    }
+}
+
+TEST(DecimalTests2, Round_EveryNamedMode_StillReturnsExactValue) {
+    EXPECT_EQ(Decimal::Round(Decimal::Parse("2.5"), 0, MidpointRounding::ToEven), Decimal(2));
+    EXPECT_EQ(Decimal::Round(Decimal::Parse("2.5"), 0, MidpointRounding::AwayFromZero), Decimal(3));
+    EXPECT_EQ(Decimal::Round(Decimal::Parse("2.9"), 0, MidpointRounding::ToZero), Decimal(2));
+    EXPECT_EQ(Decimal::Round(Decimal::Parse("2.1"), 0, MidpointRounding::ToNegativeInfinity), Decimal(2));
+    EXPECT_EQ(Decimal::Round(Decimal::Parse("2.1"), 0, MidpointRounding::ToPositiveInfinity), Decimal(3));
 }
 
 // ---------------------------------------------------------------------------

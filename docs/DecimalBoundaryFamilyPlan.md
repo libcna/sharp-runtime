@@ -247,4 +247,16 @@ completion criterion.
 
 ## 12. Implementation status
 
-Appended as tickets land.
+**CCF5D-1 — SR-AUD-036 — DONE (#1855, 2026-07-30).** All three
+`Round(…, MidpointRounding)` funnels reject an out-of-range enum value with
+`System::ArgumentException(paramName "mode")`, message
+`The value '{n}' is not valid for this usage of the type MidpointRounding.`
+Decimal (`Decimal.cpp`) validates `(uint)mode > (uint)ToPositiveInfinity` before
+the scale-vs-decimals early-out; Math/MathF (`Math.hpp`/`MathF.hpp`) throw from
+the `switch` default. **CCF-008 closed** (SR-AUD-036 was its sole member). Every
+named mode 0-4 still returns its exact value. +9 add-only tests (3 per type:
+invalid throws, paramName is `mode`, every named mode exact). Premise confirmed
+against .NET: the `Round(value, digits, mode)` overloads validate the mode *only
+through the funnel*, so Math ≥ 1e16 / MathF ≥ 1e8 magnitudes return unchanged
+without validating the mode — this faithfully matches .NET's Math.cs/MathF.cs and
+is intentional, not a gap; Decimal validates unconditionally.

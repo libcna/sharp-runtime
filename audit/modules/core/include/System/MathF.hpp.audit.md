@@ -27,6 +27,11 @@ rounding mode.
   through the switch default instead of `ArgumentException`.  The .NET MathF
   implementation throws for that default case:
   <https://source.dot.net/System.Private.CoreLib/src/libraries/System.Private.CoreLib/src/System/MathF.cs.html>.
+  **Remediated (#1855, 2026-07-30):** `Round(float, MidpointRounding)`'s
+  `switch` default now throws `System::ArgumentException(paramName "mode")`
+  instead of `std::nearbyintf`. The `Round(float, int, MidpointRounding)`
+  overload validates the mode through the funnel for magnitudes `< 1e8`
+  (matching .NET's own MathF.cs). **Closes CCF-008.**
 - **SR-AUD-040:** `Round(float)` and `Round(float, MidpointRounding::ToEven)`
   call `std::nearbyintf`, which observes the ambient C++ `fesetround` mode.
   With `FE_UPWARD`, the probe returns `3` for `2.5f` in both overloads instead

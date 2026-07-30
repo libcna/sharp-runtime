@@ -4,6 +4,7 @@
 #pragma once
 #include <cmath>
 #include <limits>
+#include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -223,6 +224,7 @@ namespace System {
          * @brief Rounds @p x to an integer using the specified rounding convention.
          * @param x    Value to round.
          * @param mode Rounding convention.
+         * @throws System::ArgumentException if @p mode is not a defined MidpointRounding value.
          */
         static float Round(float x, MidpointRounding mode) {
             switch (mode) {
@@ -231,7 +233,15 @@ namespace System {
                 case MidpointRounding::ToZero:             return std::truncf(x);
                 case MidpointRounding::ToNegativeInfinity: return std::floorf(x);
                 case MidpointRounding::ToPositiveInfinity: return std::ceilf(x);
-                default:                                   return std::nearbyintf(x);
+                // Matches .NET MathF.Round(float, MidpointRounding): the switch default throws
+                // ArgumentException for an out-of-range enum value (ThrowHelper's
+                // Argument_InvalidEnumValue: "The value '{0}' is not valid for this usage of the
+                // type {1}." with {1} == "MidpointRounding"), rather than silently rounding.
+                default:
+                    throw System::ArgumentException(
+                        "The value '" + std::to_string(static_cast<int>(mode))
+                            + "' is not valid for this usage of the type MidpointRounding.",
+                        "mode");
             }
         }
 
