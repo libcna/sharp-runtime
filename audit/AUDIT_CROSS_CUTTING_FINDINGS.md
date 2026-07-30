@@ -545,6 +545,86 @@ is insufficient. See SR-AUD-075, SR-AUD-085, and:
 - `modules/buffers/include/System/Buffers/Text/Utf8Parser.hpp.audit.md`;
 - `modules/buffers/tests/System/Buffers/Utf8ParserTests.cpp.audit.md`.
 
+**Remediated — tickets #1871/#1872 (2026-07-30). CCF-014 is CLOSED.** Both
+members are `remediated`: SR-AUD-075 (`SequenceReader<T>`) and SR-AUD-085
+(`Utf8Parser`). The original evidence above and in the per-file reports is
+retained unchanged.
+
+Design-only ticket #1871 recorded the family plan in
+`docs/TryOutputFailureContractPlan.md` and named the cause this record left
+implicit: a C# `out T` parameter is **definitely assigned on every returning
+path** by the compiler, so the reference's `value = default` lines are mandatory
+rather than defensive. Porting `out T` to a C++ `T&` dropped the guarantee and,
+with it, the assignment — while the `bytesConsumed = 0` half was kept, which is
+why a *checked* failure still looked like a stale success. Ticket #1872 landed
+the repair across **11 public entries** — the two `SequenceReader` members and
+all nine `Utf8Parser` overloads, not the two examples named above — with
+`Utf8Parser`'s ten failure exits routed through one shared private
+`fail(value, bytesConsumed)` so the two halves can never again be normalised
+independently.
+
+The record's requirement that "a repair needs a consistent default-output
+boundary across false returns, plus tests that prepopulate the output" is met
+exactly: every new test prepopulates each output with a sentinel no correct
+result can produce (value 42 / 99 / `true` / `"stale"`, counter 7).
+
+Four things are established beyond the original evidence, all measured
+(`build-probe/1871_prefix.log` before, `build-probe/1872_postfix_asan.log`
+after):
+
+- **The defect is grammar-independent.** The `X` and `N` grammars leave the same
+  stale value as the default decimal path, and so does a failure *after* a
+  successful core parse — a width-range rejection such as `"256"` into `uint8_t`.
+  A repair that reset the output only when the core parse failed would have
+  missed every one of those.
+- **`bytesConsumed` was never wrong, and no partial value was ever published.**
+  Every non-throwing failure already set the cursor to 0, and the parser core
+  accumulates into locals, copying to the output only after the range check. Of
+  the recurring Try-output failure classes, only "output left unchanged where the
+  reference writes a default" applies here.
+- **The `FormatException` path is parity, not a defect.** Both outputs are left
+  unwritten — and .NET does the same deliberately, calling `Unsafe.SkipInit` on
+  both before throwing (`ParserHelpers.cs:59-70`). Normalising them would be a
+  divergence; a permanent test pins that a caller sentinel survives the throw.
+- **The wrapper already compensated for the core.**
+  `SequenceReaderExtensions::TryReadLittleEndian` assigns `value = 0` on false
+  and reaches `SequenceReader::TryRead` through a helper that *also* assigns
+  `T{}`, so two layers implemented the contract the layer between them did not.
+  With `BinaryPrimitives::TryRead*`, `Utf8Formatter::TryFormat`,
+  `StandardFormat::TryParse`, `ReadOnlySequence::TryGet` and
+  `SequenceReader::TryReadTo`, **six** same-module surfaces already had it. This
+  was a localised omission, not a module-wide design choice, and all six are now
+  pinned by tests so they cannot silently regress.
+
+**Deliberately not broadened.** The repository has roughly 240 other `Try*`
+methods. The audit produced no evidence that any of them shares this defect, and
+a measured spot-check of the five closest structural siblings found all five
+already correct. No `SR-AUD-*` identifier was issued for anything outside the two
+findings, and the numbering stays frozen at 364.
+
+Source, ABI, layout and `noexcept` consequences: **none**, with one requirement
+recorded rather than assumed away — `value = T{}` needs `T` to be
+value-initialisable, which `SequenceReader<T>::TryRead`/`TryPeek` did not
+previously require. That is strictly *weaker* than the reference's own
+`where T : unmanaged` constraint, and a permanent test instantiates
+`SequenceReader<std::string>` to show it. Otherwise no signature, `noexcept`
+specification, virtual function, vtable slot or data member changed; `Utf8Parser`
+has no data members at all.
+
+Evidence: 13 permanent add-only regressions (`SequenceReader` 7, `Utf8Parser` 6);
+`SharpRuntimeTests_Buffers` 536/536; whole-repository build clean with zero
+errors and zero warnings. **Mutation-checked**, which is what the record's
+"checking only false and zero consumed is insufficient" warning demands: reverting
+`Utf8Parser::fail`'s value write fails five permanent tests and reverting
+`SequenceReader::TryRead`'s fails three. The direct probe
+`build-probe/1871_try_output_probe.cpp` was compiled **with**
+`-fsanitize=address,undefined` — both files are header-only, so instrumenting the
+probe recompiles the changed code and no stale archive is involved — and exits 0
+with zero AddressSanitizer, UndefinedBehaviorSanitizer and LeakSanitizer reports,
+including the 20- and 23-digit overflow inputs that drive the accumulator and the
+raw `const uint8_t*` walk to their limits. TSan is recorded as **not applicable**:
+no shared mutable state, atomic, lock or cache is introduced or touched.
+
 ## CCF-015 — UTF-8 public text cannot use C-locale byte whitespace classification
 
 `MemoryExtensions` trim and `ArgumentException::ThrowIfNullOrWhiteSpace`

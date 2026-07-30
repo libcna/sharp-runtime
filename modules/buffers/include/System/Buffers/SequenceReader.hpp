@@ -71,11 +71,24 @@ namespace System::Buffers {
 
         /**
          * @brief Tries to read the next element from the sequence.
-         * @param value Receives the next element if successful.
+         *
+         * On failure @p value is set to a value-initialized @c T, matching .NET's
+         * `value = default` (`SequenceReader.cs:192-198`). A C# `out` parameter is
+         * definitely assigned on every returning path by the compiler; a C++ reference
+         * carries no such rule, so this port used to leave the caller's storage
+         * untouched, making a checked failure indistinguishable from a stale success
+         * for any caller that reuses the output -- exactly the loop shape this API
+         * exists for. Ticket #1872 / SR-AUD-075 / CCF-014; see
+         * docs/TryOutputFailureContractPlan.md.
+         *
+         * The reader's position is not modified by a failing call.
+         *
+         * @param value Receives the next element if successful, or a value-initialized
+         *              @c T if the reader is at the end of the sequence.
          * @return true if an element was read; false if at end of sequence.
          */
         bool TryRead(T& value) {
-            if (getEndProperty()) return false;
+            if (getEndProperty()) { value = T{}; return false; }
             value = segment_[consumed_];
             ++consumed_;
             return true;
@@ -151,11 +164,18 @@ namespace System::Buffers {
 
         /**
          * @brief Peeks at the next element without consuming it.
-         * @param value Receives the next element if successful.
+         *
+         * On failure @p value is set to a value-initialized @c T, matching .NET's
+         * `value = default` (`SequenceReader.cs:114-126`). See TryRead() for why the
+         * assignment is required rather than optional (ticket #1872 / SR-AUD-075 /
+         * CCF-014, docs/TryOutputFailureContractPlan.md).
+         *
+         * @param value Receives the next element if successful, or a value-initialized
+         *              @c T if the reader is at the end of the sequence.
          * @return true if an element is available; false if at end.
          */
         [[nodiscard]] bool TryPeek(T& value) const {
-            if (getEndProperty()) return false;
+            if (getEndProperty()) { value = T{}; return false; }
             value = segment_[consumed_];
             return true;
         }

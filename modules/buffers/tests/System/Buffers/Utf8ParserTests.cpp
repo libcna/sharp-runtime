@@ -319,3 +319,118 @@ TEST(Utf8ParserDefinedArithmeticTests, UnsignedAndHexPathsAreUntouched) {
         EXPECT_EQ(n, 16);
     }
 }
+
+// ---------------------------------------------------------------------------
+// SR-AUD-085 / CCF-014 — a false TryParse must not leak stale output
+//
+// Every case prepopulates BOTH outputs with sentinels no correct result can produce
+// (value 42 / true, bytesConsumed 7), so a surviving sentinel means the output was
+// not normalised. .NET writes both at one labelled FalseExit per parser
+// (Utf8Parser.Boolean.cs:52-54, Utf8Parser.Integer.*.cs), because a C# `out`
+// parameter is definitely assigned on every returning path. The invalid-format path
+// is the deliberate exception: .NET calls Unsafe.SkipInit on both and throws, so
+// neither output is written there either.
+// See docs/TryOutputFailureContractPlan.md.
+// ---------------------------------------------------------------------------
+
+TEST(Utf8ParserTest, FailedBoolParse_WritesDefaultOverCallerSentinels) {
+    {
+        bool v = true; int n = 7;
+        EXPECT_FALSE(Utf8Parser::TryParse(span("no"), v, n));
+        EXPECT_FALSE(v);
+        EXPECT_EQ(n, 0);
+    }
+    {
+        bool v = true; int n = 7;
+        EXPECT_FALSE(Utf8Parser::TryParse(span(""), v, n));
+        EXPECT_FALSE(v);
+        EXPECT_EQ(n, 0);
+    }
+    {
+        // "fals" is a prefix of a valid token but too short — still an ordinary failure.
+        bool v = true; int n = 7;
+        EXPECT_FALSE(Utf8Parser::TryParse(span("fals"), v, n));
+        EXPECT_FALSE(v);
+        EXPECT_EQ(n, 0);
+    }
+}
+
+TEST(Utf8ParserTest, FailedIntegerParse_NotADigit_WritesDefaultOverCallerSentinels) {
+    { uint8_t  v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("abc"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { int8_t   v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("abc"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { uint16_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("abc"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { int16_t  v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("abc"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { uint32_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("abc"), v, n)); EXPECT_EQ(v, 0u); EXPECT_EQ(n, 0); }
+    { int32_t  v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("abc"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { uint64_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("abc"), v, n)); EXPECT_EQ(v, 0u); EXPECT_EQ(n, 0); }
+    { int64_t  v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("abc"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+}
+
+TEST(Utf8ParserTest, FailedIntegerParse_EmptySource_WritesDefaultOverCallerSentinels) {
+    { uint8_t  v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span(""), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { int32_t  v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span(""), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { uint64_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span(""), v, n)); EXPECT_EQ(v, 0u); EXPECT_EQ(n, 0); }
+    { int64_t  v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span(""), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+}
+
+TEST(Utf8ParserTest, FailedIntegerParse_OverflowAfterSuccessfulCore_WritesDefault) {
+    // The core parse SUCCEEDS here and only the target-width check rejects the result,
+    // so a repair that reset the output only when the core failed would miss every case
+    // below. Each literal is the smallest that overflows its type.
+    { uint8_t  v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("256"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { int8_t   v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("128"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { int8_t   v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("-129"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { uint16_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("65536"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { int16_t  v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("32768"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { int16_t  v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("-32769"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { uint32_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("4294967296"), v, n)); EXPECT_EQ(v, 0u); EXPECT_EQ(n, 0); }
+    { int32_t  v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("2147483648"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { int32_t  v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("-2147483649"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    // 64-bit widths overflow inside the accumulator instead.
+    { uint64_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("18446744073709551616"), v, n)); EXPECT_EQ(v, 0u); EXPECT_EQ(n, 0); }
+    { int64_t  v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("9223372036854775808"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { int64_t  v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("-9223372036854775809"), v, n)); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    // A negative literal into an unsigned type: rejected by the grammar, not the width.
+    { uint32_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("-1"), v, n)); EXPECT_EQ(v, 0u); EXPECT_EQ(n, 0); }
+}
+
+TEST(Utf8ParserTest, FailedParse_EveryFormatGrammar_WritesDefault) {
+    // The defect is grammar-independent: D/G/R, X and N all reach a failure exit.
+    { int32_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("abc"), v, n, 'D')); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { int32_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("abc"), v, n, 'G')); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { int32_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("abc"), v, n, 'R')); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { int32_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("zz"), v, n, 'X')); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { uint8_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("1FF"), v, n, 'X')); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { int32_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("1.5"), v, n, 'N')); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+    { int32_t v = 42; int n = 7; EXPECT_FALSE(Utf8Parser::TryParse(span("x,1"), v, n, 'N')); EXPECT_EQ(v, 0); EXPECT_EQ(n, 0); }
+}
+
+TEST(Utf8ParserTest, InvalidFormatSpecifier_ThrowsAndWritesNeitherOutput) {
+    // .NET's ParserHelpers.TryParseThrowFormatException calls Unsafe.SkipInit on BOTH
+    // outputs before throwing, precisely so neither is written. Normalising them here
+    // would be a divergence, not a repair.
+    {
+        int32_t v = 42; int n = 7;
+        EXPECT_THROW(Utf8Parser::TryParse(span("42"), v, n, 'Q'), FormatException);
+        EXPECT_EQ(v, 42);
+        EXPECT_EQ(n, 7);
+    }
+    {
+        bool v = true; int n = 7;
+        EXPECT_THROW(Utf8Parser::TryParse(span("true"), v, n, 'Q'), FormatException);
+        EXPECT_TRUE(v);
+        EXPECT_EQ(n, 7);
+    }
+}
+
+TEST(Utf8ParserTest, SuccessfulParse_StillWritesBothOutputsAndConsumesOnlyTheToken) {
+    // Guards against a repair that normalised too eagerly.
+    { bool     v = false; int n = 7; EXPECT_TRUE(Utf8Parser::TryParse(span("Truexyz"), v, n)); EXPECT_TRUE(v);  EXPECT_EQ(n, 4); }
+    { bool     v = true;  int n = 7; EXPECT_TRUE(Utf8Parser::TryParse(span("falsexyz"), v, n)); EXPECT_FALSE(v); EXPECT_EQ(n, 5); }
+    { uint8_t  v = 0; int n = 7; EXPECT_TRUE(Utf8Parser::TryParse(span("255abc"), v, n)); EXPECT_EQ(v, 255); EXPECT_EQ(n, 3); }
+    { int8_t   v = 0; int n = 7; EXPECT_TRUE(Utf8Parser::TryParse(span("-128abc"), v, n)); EXPECT_EQ(v, -128); EXPECT_EQ(n, 4); }
+    { int32_t  v = 0; int n = 7; EXPECT_TRUE(Utf8Parser::TryParse(span("2147483647!"), v, n)); EXPECT_EQ(v, INT32_MAX); EXPECT_EQ(n, 10); }
+    { int64_t  v = 0; int n = 7; EXPECT_TRUE(Utf8Parser::TryParse(span("-9223372036854775808"), v, n)); EXPECT_EQ(v, INT64_MIN); EXPECT_EQ(n, 20); }
+    { uint32_t v = 0; int n = 7; EXPECT_TRUE(Utf8Parser::TryParse(span("ff"), v, n, 'X')); EXPECT_EQ(v, 255u); EXPECT_EQ(n, 2); }
+    { int32_t  v = 0; int n = 7; EXPECT_TRUE(Utf8Parser::TryParse(span("1,234"), v, n, 'N')); EXPECT_EQ(v, 1234); EXPECT_EQ(n, 5); }
+}

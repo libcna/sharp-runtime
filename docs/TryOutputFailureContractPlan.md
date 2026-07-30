@@ -464,7 +464,11 @@ CCF-014 is **closed** when all of the following hold:
 
 | Finding | Ticket | Status |
 |---|---|---|
-| SR-AUD-075 | #1872 | `confirmed` |
-| SR-AUD-085 | #1872 | `confirmed` |
+| SR-AUD-075 | #1872 | **`remediated`** (2026-07-30) |
+| SR-AUD-085 | #1872 | **`remediated`** (2026-07-30) |
 
-*(Updated by the implementation ticket as it lands.)*
+**CCF-014 is CLOSED (2026-07-30).** Both findings are `remediated` and every
+completion criterion in §17 is met. The post-fix probe run
+(`build-probe/1872_postfix_asan.log`) shows **no surviving sentinel** on any of
+the 19 non-throwing failure cases, and the two throwing cases still report
+`value=42 counter=7` — the parity §4.2 requires.

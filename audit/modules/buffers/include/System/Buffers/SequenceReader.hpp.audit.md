@@ -63,3 +63,73 @@ document a deliberately different contract.
 Single-segment happy paths pass, but false read/peek operations violate the
 source output contract and can leak stale caller state. No source or test was
 modified during this audit.
+
+---
+
+## SR-AUD-075 — REMEDIATED (ticket #1872, 2026-07-30, CCF-014)
+
+The original evidence above is retained unchanged.
+
+`SequenceReader<T>::TryRead(T&)` and `TryPeek(T&)` now assign `value = T{}` on
+their end-of-sequence branch, matching .NET's `value = default`
+(`SequenceReader.cs:192-198` and `:114-126`). The reader's position is unchanged
+by a failing call, before and after.
+
+**Root cause, stated once for the family.** A C# `out T` parameter is *definitely
+assigned on every returning path* — the reference's `value = default` lines are
+what the compiler requires, not defensive style. Porting `out T` to a C++ `T&`
+dropped that guarantee, and with it the assignment. The finding's own remark that
+"C++ references cannot obtain the exact C# `out` language guarantee
+automatically, so the public implementation must assign `T{}` before returning
+false" is exactly right and is what was implemented.
+
+**Measured before** (`build-probe/1871_prefix.log`, caller sentinels 42 / 99 /
+`"stale"`): `seqreader.tryread.atend value=42`,
+`seqreader.tryread.exhausted value=42`, `seqreader.trypeek.atend value=99`,
+`seqreader.tryread.string value=stale`. **Measured after**
+(`build-probe/1872_postfix_asan.log`): all four report the default, and
+`seqreader.tryread.exhausted` still reports `counter=1`, so a failed read does
+not rewind.
+
+**Two facts established beyond the original evidence.**
+
+1. **`TryReadTo` was already correct** and is not part of this finding: it clears
+   `result` at entry *and* on the not-found path and restores `consumed_`,
+   matching `SequenceReader.Search.cs:33-43`. It is now pinned by a permanent
+   test so it cannot silently regress.
+2. **The wrapper already compensated for the core.**
+   `SequenceReaderExtensions::TryReadLittleEndian` assigns `value = 0` on false
+   and reaches `SequenceReader::TryRead` through `detail::tryReadBytes`, which
+   *also* assigns `value = T{}` — two layers implemented the contract that the
+   layer between them did not. Together with `BinaryPrimitives::TryRead*`,
+   `Utf8Formatter::TryFormat`, `StandardFormat::TryParse` and
+   `ReadOnlySequence::TryGet`, five same-module surfaces already had it, which is
+   why this is recorded as a localised omission rather than a module-wide design
+   choice.
+
+**One requirement recorded rather than assumed away.** `value = T{}` requires `T`
+to be value-initialisable, which these two members did not previously require.
+This is **not** a narrowing of the reference contract: .NET declares
+`SequenceReader<T> where T : unmanaged`, and every `unmanaged` type has a
+`default`, so value-initialisability is strictly weaker. Member functions of a
+class template instantiate only when used, so any instantiation that does not
+call `TryRead`/`TryPeek` is unaffected. A permanent test instantiates
+`SequenceReader<std::string>` — far outside `unmanaged` — to demonstrate the
+requirement is genuinely weak.
+
+Closure evidence: 7 new permanent regressions in `Batch6BuffersTests.cpp`
+(at-end and post-exhaustion `TryRead`; at-end and post-exhaustion `TryPeek` with
+the position asserted in both; a non-trivial `std::string` element; the
+already-correct `TryReadTo`; and one test pinning three sibling surfaces).
+`SequenceReaderTests` + `Utf8ParserTest` 52/52, `SharpRuntimeTests_Buffers`
+536/536, whole-repository build clean with zero errors and zero warnings.
+**Mutation-checked:** reverting `TryRead`'s assignment to the pre-#1872 body
+fails three permanent tests. The direct probe compiled **with**
+`-fsanitize=address,undefined` — this is a header-only template, so instrumenting
+the probe recompiles the changed code and no stale archive is involved — exits 0
+with zero AddressSanitizer, UndefinedBehaviorSanitizer and LeakSanitizer reports.
+
+Source, ABI and layout consequences: none beyond the recorded `T` requirement. No
+signature, `noexcept` specification, virtual function or data member changed.
+
+The plan for this family is `docs/TryOutputFailureContractPlan.md` (ticket #1871).

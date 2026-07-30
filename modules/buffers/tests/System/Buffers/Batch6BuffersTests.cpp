@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <cstdint>
+#include <string>
 #include <vector>
 #include "System/SequencePosition.hpp"
 #include "System/Buffers/IBufferWriter.hpp"
@@ -10,6 +11,7 @@
 #include "System/Buffers/MemoryPool.hpp"
 #include "System/Buffers/ReadOnlySequence.hpp"
 #include "System/Buffers/SequenceReader.hpp"
+#include "System/Buffers/SequenceReaderExtensions.hpp"
 #include "System/Buffers/Binary/BinaryPrimitives.hpp"
 
 using System::SequencePosition;
@@ -511,4 +513,115 @@ TEST(BinaryPrimitivesTests, WriteInt64BigEndian_SpanTooSmall_Throws) {
     uint8_t buf[4] = {};
     auto span = System::Span<uint8_t>(buf, 4);
     EXPECT_THROW(BinaryPrimitives::WriteInt64BigEndian(span, 0LL), System::ArgumentOutOfRangeException);
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-075 / CCF-014 — a false TryRead/TryPeek must not leak stale output
+//
+// Every case below prepopulates the output with a sentinel no correct result can
+// produce, so "sentinel survived" == "output not normalised". .NET assigns
+// value = default on both false branches (SequenceReader.cs:114-126, :192-198);
+// a C# `out` parameter is definitely assigned on every returning path, a C++
+// reference is not, and this port had dropped the assignment.
+// See docs/TryOutputFailureContractPlan.md.
+// ---------------------------------------------------------------------------
+
+TEST(SequenceReaderTests, TryRead_AtEnd_WritesDefaultOverCallerSentinel) {
+    ReadOnlySequence<uint8_t> seq(static_cast<const uint8_t*>(nullptr), 0);
+    SequenceReader<uint8_t> reader(seq);
+    uint8_t v = 42;
+    EXPECT_FALSE(reader.TryRead(v));
+    EXPECT_EQ(v, 0);
+}
+
+TEST(SequenceReaderTests, TryRead_AfterExhaustion_WritesDefaultAndKeepsPosition) {
+    uint8_t data[] = {7};
+    ReadOnlySequence<uint8_t> seq(data, 1);
+    SequenceReader<uint8_t> reader(seq);
+    uint8_t v = 0;
+    ASSERT_TRUE(reader.TryRead(v));
+    EXPECT_EQ(v, 7);
+    v = 42;                                   // caller reuses the storage
+    EXPECT_FALSE(reader.TryRead(v));
+    EXPECT_EQ(v, 0);
+    EXPECT_EQ(reader.getConsumedProperty(), 1LL);   // a failed read must not rewind
+    EXPECT_EQ(reader.getRemainingProperty(), 0LL);
+}
+
+TEST(SequenceReaderTests, TryPeek_AtEnd_WritesDefaultOverCallerSentinel) {
+    ReadOnlySequence<uint8_t> seq(static_cast<const uint8_t*>(nullptr), 0);
+    SequenceReader<uint8_t> reader(seq);
+    uint8_t v = 99;
+    EXPECT_FALSE(reader.TryPeek(v));
+    EXPECT_EQ(v, 0);
+    EXPECT_EQ(reader.getConsumedProperty(), 0LL);
+}
+
+TEST(SequenceReaderTests, TryPeek_AfterExhaustion_WritesDefaultAndDoesNotConsume) {
+    uint8_t data[] = {7};
+    ReadOnlySequence<uint8_t> seq(data, 1);
+    SequenceReader<uint8_t> reader(seq);
+    uint8_t v = 0;
+    ASSERT_TRUE(reader.TryPeek(v));
+    EXPECT_EQ(v, 7);
+    EXPECT_EQ(reader.getConsumedProperty(), 0LL);   // peek never consumes
+    ASSERT_TRUE(reader.TryRead(v));
+    v = 99;
+    EXPECT_FALSE(reader.TryPeek(v));
+    EXPECT_EQ(v, 0);
+    EXPECT_EQ(reader.getConsumedProperty(), 1LL);
+}
+
+TEST(SequenceReaderTests, TryRead_NonTrivialElement_WritesDefaultOverStaleObject) {
+    // .NET constrains SequenceReader<T> to `unmanaged`; this port does not, so the
+    // value-initialisation the contract needs is exercised on a type far outside it.
+    std::vector<std::string> empty;
+    ReadOnlySequence<std::string> seq(empty);
+    SequenceReader<std::string> reader(seq);
+    std::string s = "stale";
+    EXPECT_FALSE(reader.TryRead(s));
+    EXPECT_TRUE(s.empty());
+    std::string p = "stale";
+    EXPECT_FALSE(reader.TryPeek(p));
+    EXPECT_TRUE(p.empty());
+}
+
+TEST(SequenceReaderTests, TryReadTo_DelimiterAbsent_ClearsResultAndRestoresPosition) {
+    // Already correct before #1872; pinned so a future edit cannot regress it.
+    std::vector<int> data{1, 2, 3};
+    ReadOnlySequence<int> seq(data);
+    SequenceReader<int> reader(seq);
+    std::vector<int> out{42, 42};
+    EXPECT_FALSE(reader.TryReadTo(out, 9));
+    EXPECT_TRUE(out.empty());
+    EXPECT_EQ(reader.getConsumedProperty(), 0LL);
+}
+
+TEST(SequenceReaderTests, StructuralSiblings_KeepTheirFailureOutputContract) {
+    // The five same-module Try-style surfaces that already implemented the contract
+    // before #1872. Pinned together so the module stays uniform.
+    {
+        std::vector<uint8_t> two{1, 2};
+        ReadOnlySequence<uint8_t> seq(two);
+        SequenceReader<uint8_t> reader(seq);
+        int32_t v = 42;
+        EXPECT_FALSE(System::Buffers::SequenceReaderExtensions::TryReadLittleEndian(reader, v));
+        EXPECT_EQ(v, 0);
+        EXPECT_EQ(reader.getConsumedProperty(), 0LL);
+    }
+    {
+        uint8_t buf[2] = {1, 2};
+        int32_t v = 42;
+        EXPECT_FALSE(BinaryPrimitives::TryReadInt32LittleEndian(
+            System::ReadOnlySpan<uint8_t>(buf, 2), v));
+        EXPECT_EQ(v, 0);
+    }
+    {
+        std::vector<int> data{1, 2};
+        ReadOnlySequence<int> seq(data);
+        SequencePosition pos = seq.getEndProperty();
+        System::ReadOnlyMemory<int> mem(nullptr, 0);
+        EXPECT_FALSE(seq.TryGet(pos, mem));
+        EXPECT_EQ(mem.getLengthProperty(), 0);
+    }
 }

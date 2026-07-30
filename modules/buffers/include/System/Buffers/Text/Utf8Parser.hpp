@@ -19,8 +19,14 @@ using SharpRuntime::intcs;
  *
  * C++ counterpart of .NET System.Buffers.Text.Utf8Parser.
  * All methods are static TryParse overloads that read from a ReadOnlySpan&lt;byte&gt;
- * and return true on success or false if the input is not syntactically valid
- * (in which case bytesConsumed is set to 0, matching .NET's documented contract).
+ * and return true on success or false if the input is not syntactically valid or
+ * overflows the target type. On such a failure BOTH outputs are written: bytesConsumed
+ * is set to 0 and value is set to a value-initialized T, matching .NET's documented
+ * contract and its own `FalseExit: bytesConsumed = default; value = default;` blocks.
+ * The one exception is an invalid @p standardFormat, which throws FormatException and
+ * writes NEITHER output -- .NET does the same deliberately, bypassing C#'s
+ * definite-assignment rule with `Unsafe.SkipInit` before throwing (ParserHelpers.cs).
+ * See docs/TryOutputFailureContractPlan.md (ticket #1872 / SR-AUD-085 / CCF-014).
  *
  * Covers bool and all integer types (byte/sbyte/short/ushort/int/uint/long/ulong)
  * with the 'G' (default), 'D', 'N', and 'X' format specifiers. .NET's Guid,
@@ -44,11 +50,12 @@ public:
      * of 'G'/'l'/default was requested — the format is validated but treated identically,
      * matching .NET's documented behavior.
      * @param source        UTF-8 input.
-     * @param value         Receives the parsed value.
+     * @param value         Receives the parsed value on success, or false on failure.
      * @param bytesConsumed Receives the number of bytes consumed on success, or 0 on failure.
      * @param standardFormat Format character ('G', 'l', or '\0' for default).
      * @return true on success; false if input is not a valid boolean.
-     * @throws FormatException if @p standardFormat is not '\0', 'G', or 'l'.
+     * @throws FormatException if @p standardFormat is not '\0', 'G', or 'l'. Neither
+     *         output is written on this path, matching .NET.
      */
     static bool TryParse(System::ReadOnlySpan<uint8_t> source, bool& value, intcs& bytesConsumed,
                          char standardFormat = '\0') {
@@ -71,7 +78,7 @@ public:
         if (len >= 5 && iequal(p, "false", 5)) {
             value = false; bytesConsumed = 5; return true;
         }
-        return false;
+        return fail(value, bytesConsumed);
     }
 
     // -----------------------------------------------------------------------
@@ -87,7 +94,7 @@ public:
                          char standardFormat = '\0') {
         int64_t sv = 0; uint64_t uv = 0; intcs n = 0;
         if (!tryParseIntegerCore(source, standardFormat, 1, false, sv, uv, n) || uv > 0xFFu) {
-            bytesConsumed = 0; return false;
+            return fail(value, bytesConsumed);
         }
         value = static_cast<uint8_t>(uv); bytesConsumed = n; return true;
     }
@@ -101,7 +108,7 @@ public:
                          char standardFormat = '\0') {
         int64_t sv = 0; uint64_t uv = 0; intcs n = 0;
         if (!tryParseIntegerCore(source, standardFormat, 1, true, sv, uv, n) || sv < -128 || sv > 127) {
-            bytesConsumed = 0; return false;
+            return fail(value, bytesConsumed);
         }
         value = static_cast<int8_t>(sv); bytesConsumed = n; return true;
     }
@@ -115,7 +122,7 @@ public:
                          char standardFormat = '\0') {
         int64_t sv = 0; uint64_t uv = 0; intcs n = 0;
         if (!tryParseIntegerCore(source, standardFormat, 2, false, sv, uv, n) || uv > 0xFFFFu) {
-            bytesConsumed = 0; return false;
+            return fail(value, bytesConsumed);
         }
         value = static_cast<uint16_t>(uv); bytesConsumed = n; return true;
     }
@@ -129,7 +136,7 @@ public:
                          char standardFormat = '\0') {
         int64_t sv = 0; uint64_t uv = 0; intcs n = 0;
         if (!tryParseIntegerCore(source, standardFormat, 2, true, sv, uv, n) || sv < -32768 || sv > 32767) {
-            bytesConsumed = 0; return false;
+            return fail(value, bytesConsumed);
         }
         value = static_cast<int16_t>(sv); bytesConsumed = n; return true;
     }
@@ -143,7 +150,7 @@ public:
                          char standardFormat = '\0') {
         int64_t sv = 0; uint64_t uv = 0; intcs n = 0;
         if (!tryParseIntegerCore(source, standardFormat, 4, false, sv, uv, n) || uv > 0xFFFFFFFFu) {
-            bytesConsumed = 0; return false;
+            return fail(value, bytesConsumed);
         }
         value = static_cast<uint32_t>(uv); bytesConsumed = n; return true;
     }
@@ -157,7 +164,7 @@ public:
                          char standardFormat = '\0') {
         int64_t sv = 0; uint64_t uv = 0; intcs n = 0;
         if (!tryParseIntegerCore(source, standardFormat, 4, true, sv, uv, n) || sv < INT32_MIN || sv > INT32_MAX) {
-            bytesConsumed = 0; return false;
+            return fail(value, bytesConsumed);
         }
         value = static_cast<int32_t>(sv); bytesConsumed = n; return true;
     }
@@ -171,7 +178,7 @@ public:
                          char standardFormat = '\0') {
         int64_t sv = 0; uint64_t uv = 0; intcs n = 0;
         if (!tryParseIntegerCore(source, standardFormat, 8, false, sv, uv, n)) {
-            bytesConsumed = 0; return false;
+            return fail(value, bytesConsumed);
         }
         value = uv; bytesConsumed = n; return true;
     }
@@ -185,12 +192,40 @@ public:
                          char standardFormat = '\0') {
         int64_t sv = 0; uint64_t uv = 0; intcs n = 0;
         if (!tryParseIntegerCore(source, standardFormat, 8, true, sv, uv, n)) {
-            bytesConsumed = 0; return false;
+            return fail(value, bytesConsumed);
         }
         value = sv; bytesConsumed = n; return true;
     }
 
 private:
+    /**
+     * @brief Normalizes both outputs for a non-throwing failure and returns false.
+     *
+     * Single failure boundary for every TryParse overload above. .NET writes both
+     * outputs at one labelled `FalseExit:` per parser -- `bytesConsumed = default;
+     * value = default;` (Utf8Parser.Integer.Signed.D.cs:79-83 and its siblings,
+     * Utf8Parser.Boolean.cs:52-54) -- because C#'s definite-assignment rule makes the
+     * assignment mandatory for an `out` parameter. Porting `out T` to a C++ `T&` lost
+     * that guarantee, and the port kept only the bytesConsumed half, so a checked
+     * failure left the caller's own previous value in place and was indistinguishable
+     * from a stale success. Routing every exit through here makes it structurally
+     * impossible to normalize one output without the other, which is how the two
+     * halves diverged in the first place.
+     *
+     * Deliberately NOT used on the FormatException path: .NET leaves both outputs
+     * unwritten there (`ParserHelpers.TryParseThrowFormatException` calls
+     * `Unsafe.SkipInit` on both before throwing), and a permanent test pins that a
+     * caller sentinel survives the throw.
+     *
+     * Ticket #1872 / SR-AUD-085 / CCF-014; see docs/TryOutputFailureContractPlan.md.
+     */
+    template<typename T>
+    static bool fail(T& value, intcs& bytesConsumed) {
+        value = T{};
+        bytesConsumed = 0;
+        return false;
+    }
+
     static bool tryParseUInt(System::ReadOnlySpan<uint8_t> src, uint64_t& out, intcs& n) {
         intcs len = src.getLengthProperty();
         const uint8_t* p = src.getPointer();
