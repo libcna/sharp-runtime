@@ -52,6 +52,42 @@ above the maximum and for an otherwise valid maximum boundary; add
 overflow tests under UBSan.  Repair must check range before multiplication and
 before subtraction, or use an explicitly defined unsigned strategy.
 
+---
+
+**REMEDIATED 2026-07-30 (ticket #1836, CCF-004).** The text above is retained exactly as the
+audit wrote it. Four corrections belong beside it, all by measurement
+(`build-probe/1836_prefix.log`, `build-probe/1836_postfix.log`, one process per case against an
+instrumented `build-asan` tree; recorded in full as
+`docs/DefinedArithmeticBoundaryPlan.md` section 17):
+
+1. **The parse half is four undefined columns, not one.** As well as `days * TicksPerDay`
+   (`:454:53`), the same statement overflowed at `:454:16` and `:457:22` (two of the five-term
+   accumulations) and at `:459:29` (`ticks = -ticks`, negating the int64 minimum). A repair
+   aimed only at the day product would have left three live.
+2. **A fifth undefined operation, from the C library.** `std::sscanf`'s `%d` conversion of a
+   value the target cannot represent is undefined (C17 7.21.6.2p10) and was measured wrapping:
+   `"2147483648.00:00:00"` reached the tick arithmetic as `-2147483648` and
+   `"99999999999999999999.00:00:00"` as `-1`, the latter parsing *successfully* as minus one
+   day. Components are now read as `long long` behind an eighteen-digit run limit.
+3. **Two further silent wrong answers that UBSan reports nothing for.** `"--5.00:00:00"` was
+   accepted and returned the **positive** five-day duration (the two sign inversions cancel;
+   nothing overflows), and `"-10675199.02:48:05.4775809"` returned the **positive** `MaxValue`.
+   A diagnostic list is not a defect list.
+4. **`Parse` did not throw either.** The audit's suggested outcome
+   ("`FormatException`/overflow from `Parse`") describes what `Parse` *should* have done; it
+   was measured **returning** the wrapped duration. It now raises `OverflowException` with
+   .NET's `SR.Overflow_TimeSpanElementTooLarge` text for an out-of-range component, and keeps
+   `FormatException` for a malformed string.
+
+`Subtract` was exactly as described and is class A: the sign-bit guard already produced the
+correct `OverflowException`, so only the undefined subtraction was replaced (unsigned, converted
+back), and every value and message is byte-identical. `Add`, `Negate()` and `operator-()` were
+inventoried at the same time and validate before computing — they were never defective.
+
+Public doors, all pinned by tests: `Subtract`, `operator-(TimeSpan)`, `TryParse`, `Parse`, and
+`System::Xml::XmlConvert::ToTimeSpan` in another module. `TimeSpan.hpp` is unchanged; the shared
+parse core has internal linkage.
+
 ## Positive findings
 
 Trailing-garbage parsing and NaN handling have direct regressions, and the

@@ -480,3 +480,181 @@ TEST(TimeSpanTests, OperatorDivide_NaN_ThrowsArgumentException) {
     TimeSpan ts(1, 0, 0);
     EXPECT_THROW(ts / std::numeric_limits<double>::quiet_NaN(), ArgumentException);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Ticket #1836 (SR-AUD-008, CCF-004) -- defined arithmetic in Subtract and in the parse core.
+//
+// docs/DefinedArithmeticBoundaryPlan.md classes this finding as class A (Subtract) plus class C
+// (TryParse/Parse). The class A assertions pin the values observed BEFORE the repair, so
+// "no observable change" is proven rather than assumed; the class C assertions pin the inputs
+// that used to succeed with a wrapped duration and must now be rejected.
+// Evidence: build-probe/1836_prefix.log vs build-probe/1836_postfix.log.
+// ---------------------------------------------------------------------------------------------
+
+// --- class A: Subtract keeps every value, exception type and message -------------------------
+
+TEST(TimeSpanTests, Subtract_MinValueMinusOne_ThrowsOverflow_1836) {
+    // Reported "signed integer overflow: -9223372036854775808 - 1" at TimeSpan.cpp:263 before
+    // the repair, and then threw the correct exception anyway. The exception is what must not
+    // change; the undefined subtraction is what had to go.
+    try {
+        (void)TimeSpan::MinValue.Subtract(TimeSpan(static_cast<longcs>(1)));
+        FAIL() << "Expected OverflowException";
+    } catch (const System::OverflowException& e) {
+        EXPECT_EQ(e.getMessageProperty(), "TimeSpan overflowed because the duration is too long.");
+    }
+}
+
+TEST(TimeSpanTests, Subtract_MaxValueMinusNegativeOne_ThrowsOverflow_1836) {
+    try {
+        (void)TimeSpan::MaxValue.Subtract(TimeSpan(static_cast<longcs>(-1)));
+        FAIL() << "Expected OverflowException";
+    } catch (const System::OverflowException& e) {
+        EXPECT_EQ(e.getMessageProperty(), "TimeSpan overflowed because the duration is too long.");
+    }
+}
+
+TEST(TimeSpanTests, OperatorMinus_IsTheSecondDoorOntoSubtract_1836) {
+    // operator-(TimeSpan) forwards to Subtract, so it reached the same undefined subtraction.
+    EXPECT_THROW(TimeSpan::MinValue - TimeSpan(static_cast<longcs>(1)), System::OverflowException);
+    EXPECT_THROW(TimeSpan::MaxValue - TimeSpan(static_cast<longcs>(-1)), System::OverflowException);
+}
+
+TEST(TimeSpanTests, Subtract_OrdinaryAndBoundaryValuesUnchanged_1836) {
+    EXPECT_EQ(TimeSpan(5, 0, 0).Subtract(TimeSpan(2, 30, 0)).getTicksProperty(), 90000000000LL);
+    EXPECT_EQ(TimeSpan::MaxValue.Subtract(TimeSpan::MaxValue).getTicksProperty(), 0);
+    EXPECT_EQ(TimeSpan::MinValue.Subtract(TimeSpan::MinValue).getTicksProperty(), 0);
+    // The widest legal spread: the guard must not be inverted into rejecting this.
+    EXPECT_EQ(TimeSpan(static_cast<longcs>(0)).Subtract(TimeSpan::MaxValue).getTicksProperty(),
+              -9223372036854775807LL);
+    EXPECT_EQ(TimeSpan::MaxValue.Subtract(TimeSpan(static_cast<longcs>(1))).getTicksProperty(),
+              9223372036854775806LL);
+    EXPECT_EQ(TimeSpan::MinValue.Subtract(TimeSpan(static_cast<longcs>(-1))).getTicksProperty(),
+              -9223372036854775807LL);
+}
+
+TEST(TimeSpanTests, Add_ValidatesBeforeAdding_AndIsNotAffected_1836) {
+    // Add() is the structurally similar sibling and was measured CLEAN -- it checks before
+    // adding. Recorded so that a later reader can see the count that did not move.
+    EXPECT_THROW(TimeSpan::MinValue.Add(TimeSpan(static_cast<longcs>(-1))), System::OverflowException);
+    EXPECT_THROW(TimeSpan::MaxValue.Add(TimeSpan(static_cast<longcs>(1))), System::OverflowException);
+    EXPECT_EQ(TimeSpan::MaxValue.Add(TimeSpan(static_cast<longcs>(-1))).getTicksProperty(),
+              9223372036854775806LL);
+}
+
+// --- class C: the parse core rejects what used to wrap ---------------------------------------
+
+TEST(TimeSpanTests, TryParse_DayCountBeyondTimeSpanRange_ReturnsFalse_1836) {
+    // The audited input. Before the repair this returned TRUE with ticks
+    // -7695280436664713216 -- a negative duration from a positive input.
+    TimeSpan ts(static_cast<longcs>(4242));
+    EXPECT_FALSE(TimeSpan::TryParse("2147483647.00:00:00", ts));
+    // No partial state: a failed TryParse leaves the caller's value alone.
+    EXPECT_EQ(ts.getTicksProperty(), 4242);
+}
+
+TEST(TimeSpanTests, Parse_DayCountBeyondTimeSpanRange_ThrowsOverflow_1836) {
+    // Parse did not throw either before the repair; it RETURNED the wrapped duration.
+    try {
+        (void)TimeSpan::Parse("2147483647.00:00:00");
+        FAIL() << "Expected OverflowException";
+    } catch (const System::OverflowException& e) {
+        EXPECT_EQ(e.getMessageProperty(),
+                  "The TimeSpan string '2147483647.00:00:00' could not be parsed because at "
+                  "least one of the numeric components is out of range or contains too many "
+                  "digits.");
+    }
+}
+
+TEST(TimeSpanTests, TryParse_LargestDayCountThatMustStillSucceed_1836) {
+    // Measured before the repair, so this is the value the fix had to preserve, not derive.
+    TimeSpan ts;
+    EXPECT_TRUE(TimeSpan::TryParse("10675199.02:48:05", ts));
+    EXPECT_EQ(ts.getTicksProperty(), 9223372036850000000LL);
+    // One day past the same limit is the smallest day count that must fail.
+    EXPECT_FALSE(TimeSpan::TryParse("10675200.00:00:00", ts));
+    EXPECT_THROW(TimeSpan::Parse("10675200.00:00:00"), System::OverflowException);
+}
+
+TEST(TimeSpanTests, TryParse_BothDomainEndpointStrings_1836) {
+    TimeSpan ts;
+    // TimeSpan::MaxValue's canonical string.
+    EXPECT_TRUE(TimeSpan::TryParse("10675199.02:48:05.4775807", ts));
+    EXPECT_EQ(ts.getTicksProperty(), SharpRuntime::LONGCS_MAX);
+    EXPECT_EQ(ts, TimeSpan::MaxValue);
+    // TimeSpan::MinValue's canonical string. .NET accepts exactly one more magnitude in the
+    // negative direction than in the positive one, and this is it -- before the repair the
+    // right answer came out of two undefined operations.
+    EXPECT_TRUE(TimeSpan::TryParse("-10675199.02:48:05.4775808", ts));
+    EXPECT_EQ(ts.getTicksProperty(), SharpRuntime::LONGCS_MIN);
+    EXPECT_EQ(ts, TimeSpan::MinValue);
+}
+
+TEST(TimeSpanTests, TryParse_OneTickPastEachEndpoint_ReturnsFalse_1836) {
+    TimeSpan ts;
+    EXPECT_FALSE(TimeSpan::TryParse("10675199.02:48:05.4775808", ts));
+    // Before the repair this NEGATIVE input returned the POSITIVE TimeSpan::MaxValue.
+    EXPECT_FALSE(TimeSpan::TryParse("-10675199.02:48:05.4775809", ts));
+    EXPECT_THROW(TimeSpan::Parse("-10675199.02:48:05.4775809"), System::OverflowException);
+}
+
+TEST(TimeSpanTests, TryParse_OneSecondPastTheLimit_ReturnsFalse_1836) {
+    // The overflow is in the accumulation rather than in the day product, which is a separate
+    // undefined column of the same expression (TimeSpan.cpp:457 before the repair).
+    TimeSpan ts;
+    EXPECT_FALSE(TimeSpan::TryParse("10675199.02:48:06", ts));
+    EXPECT_THROW(TimeSpan::Parse("10675199.02:48:06"), System::OverflowException);
+}
+
+TEST(TimeSpanTests, TryParse_DoublyNegatedDayCount_ReturnsFalse_1836) {
+    // "--5.00:00:00" used to parse to the POSITIVE five-day duration. Real .NET rejects a
+    // second sign character as a malformed string, not as an overflow, so Parse raises
+    // FormatException here and OverflowException for an out-of-range component.
+    TimeSpan ts;
+    EXPECT_FALSE(TimeSpan::TryParse("--5.00:00:00", ts));
+    EXPECT_THROW(TimeSpan::Parse("--5.00:00:00"), System::FormatException);
+}
+
+TEST(TimeSpanTests, TryParse_ComponentWiderThanIntcs_ReturnsFalse_1836) {
+    // std::sscanf's %d conversion of a value the target cannot represent is undefined
+    // (C17 7.21.6.2p10) and was measured wrapping: "2147483648.00:00:00" reached the tick
+    // arithmetic as -2147483648, and twenty digits reached it as -1.
+    TimeSpan ts;
+    EXPECT_FALSE(TimeSpan::TryParse("2147483648.00:00:00", ts));
+    EXPECT_FALSE(TimeSpan::TryParse("99999999999999999999.00:00:00", ts));
+    EXPECT_THROW(TimeSpan::Parse("2147483648.00:00:00"), System::OverflowException);
+    EXPECT_THROW(TimeSpan::Parse("99999999999999999999.00:00:00"), System::OverflowException);
+}
+
+TEST(TimeSpanTests, TryParse_EveryOrdinaryVectorUnchanged_1836) {
+    TimeSpan ts;
+    EXPECT_TRUE(TimeSpan::TryParse("1.02:03:04", ts));
+    EXPECT_EQ(ts.getTicksProperty(), 937840000000LL);
+    EXPECT_TRUE(TimeSpan::TryParse("12:34:56", ts));
+    EXPECT_EQ(ts.getTicksProperty(), 452960000000LL);
+    EXPECT_TRUE(TimeSpan::TryParse("-1.02:03:04.5", ts));
+    EXPECT_EQ(ts.getTicksProperty(), -937845000000LL);
+    EXPECT_TRUE(TimeSpan::TryParse("00:00:00", ts));
+    EXPECT_EQ(ts.getTicksProperty(), 0);
+    EXPECT_TRUE(TimeSpan::TryParse("-00:00:01", ts));
+    EXPECT_EQ(ts.getTicksProperty(), -10000000LL);
+    EXPECT_TRUE(TimeSpan::TryParse("0.00:00:00.0000001", ts));
+    EXPECT_EQ(ts.getTicksProperty(), 1);
+    EXPECT_TRUE(TimeSpan::TryParse("23:59:59.9999999", ts));
+    EXPECT_EQ(ts.getTicksProperty(), 863999999999LL);
+}
+
+TEST(TimeSpanTests, Parse_MalformedInputsKeepFormatException_1836) {
+    // Splitting Parse's failure into two exception types must not reclassify any input that
+    // was already being rejected: an out-of-range hour or minute stays a FormatException here,
+    // exactly as before, even though real .NET calls it an overflow.
+    TimeSpan ts;
+    EXPECT_FALSE(TimeSpan::TryParse("1.24:00:00", ts));
+    EXPECT_FALSE(TimeSpan::TryParse("1.00:60:00", ts));
+    EXPECT_FALSE(TimeSpan::TryParse("12:34:56garbage", ts));
+    EXPECT_FALSE(TimeSpan::TryParse("", ts));
+    EXPECT_THROW(TimeSpan::Parse("1.24:00:00"), System::FormatException);
+    EXPECT_THROW(TimeSpan::Parse("1.00:60:00"), System::FormatException);
+    EXPECT_THROW(TimeSpan::Parse("12:34:56 "), System::FormatException);
+    EXPECT_THROW(TimeSpan::Parse(""), System::FormatException);
+}

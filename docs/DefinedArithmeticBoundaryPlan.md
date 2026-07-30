@@ -592,3 +592,128 @@ inputs 16.1 and 16.4 describe are undefined behaviour producing demonstrably wro
 is the compatible-narrowing argument §4.3 already states and which each ticket must restate for
 itself. What changed is that the argument is now larger: it must cover `Parse` as well as
 `TryParse`, and `AddYears`'s identity-result as well as the rejections.
+
+---
+
+## 17. What #1836 measured, and four corrections to §2 case 15 (2026-07-30)
+
+#1836 is the family's only member in **two** classes, and both halves are now implemented.
+Evidence: `build-probe/1836_timespan_surface.cpp`, `build-probe/1836_prefix.log` and
+`build-probe/1836_postfix.log`, nineteen cases, **one process per case**, recovering build for
+enumeration and `-fno-sanitize-recover=undefined` afterwards to prove each site gone, linked
+against a `build-asan` tree whose `TimeSpan.cpp.o` and `libsharp_runtime_core.a` were both
+verified newer than the source before **and** after the edit.
+
+### 17.1 The class A half was exactly as §4.1 predicted
+
+`TimeSpan::Subtract`'s single expression became an unsigned subtraction converted back, and
+`.NET`'s `operator -(TimeSpan, TimeSpan)` (`TimeSpan.cs:877-879`) is the specification: the wrap
+is intended and the sign-bit test that follows is the real guard. **Three** public doors reach
+that line, not the one §2 lists — `Subtract`, `operator-(TimeSpan)`, and `Subtract` reached
+through `operator-` — and all three now produce the same `OverflowException` with the same
+message, with no diagnostic. `TimeSpan::Add`, `Negate()` and `operator-()` were inventoried at
+the same time and are **clear**: each validates before it computes. A count that does not move
+is recorded as deliberately as one that does (§14.2).
+
+### 17.2 The `TryParse` half is FOUR undefined columns, not one
+
+§2 case 15 names `TimeSpan.cpp:454`, and the finding was written as one multiplication. Running
+the *recovering* build one input at a time shows the same statement is undefined at **four
+distinct columns**, reached by different inputs:
+
+| Column measured before the repair | Input that reaches it |
+|---|---|
+| `:454:53` — `days * TicksPerDay` | `"2147483647.00:00:00"` (the audited input) |
+| `:454:16` — the accumulation of the five terms | `"-10675199.02:48:05.4775808"` |
+| `:457:22` — a second accumulation in the same chain | `"10675199.02:48:06"` |
+| `:459:29` — `ticks = -ticks`, negating the int64 minimum | `"-10675199.02:48:05.4775808"` |
+
+A repair aimed only at the day product would have left three live. This is an addition to
+SR-AUD-008's surface, recorded by appending; the finding keeps its identifier.
+
+### 17.3 A fifth undefined operation in the same function, from the C library
+
+`std::sscanf`'s behaviour when a `%d` conversion produces a value the target object cannot
+represent is **undefined** (C17 7.21.6.2p10), and it was measured wrapping silently:
+`"2147483648.00:00:00"` reached the tick arithmetic as `-2147483648`, and
+`"99999999999999999999.00:00:00"` as `-1` — the latter parsing *successfully* as minus one day.
+The repair reads each component as `long long` and pre-rejects any decimal run longer than
+eighteen digits, which makes every conversion representable and therefore defined; .NET
+classifies both inputs as overflow ("contains too many digits") and so does this port now.
+This is a **different cause** from CCF-004's signed arithmetic and is fixed here only because
+it is in the same expression's operand chain; it is not a licence to sweep `sscanf` use
+elsewhere.
+
+### 17.4 A third silent wrong answer, and it has no undefined behaviour at all
+
+§2.2 said `TryParse` was the only silent-wrong-answer member; §16.4 corrected that to two by
+adding `DateOnly::AddYears`. There is a **third**, and it is the one the plan's method could
+not have found, because **UBSan reports nothing for it**: `"--5.00:00:00"` was accepted and
+returned the **positive** five-day duration. The leading `-` is consumed as the sign, `sscanf`
+then reads `-5` as the day count, and the final `if (negative) ticks = -ticks` cancels the two.
+Nothing overflows. The repair rejects a negative day count as a **malformed string**
+(`FormatException`), which is how .NET classifies a second sign character — its tokenizer never
+produces a signed component. `"-10675199.02:48:05.4775809"`, one tick past `MinValue`, is a
+fourth: it returned the **positive** `MaxValue`.
+
+**Method correction that generalises:** a UBSan sweep enumerates *undefined* operations, not
+*wrong answers*. Two of this member's four wrong answers are invisible to it. Enumerate the
+inputs a corrected implementation must reject, then check each one, rather than trusting the
+diagnostic list to be the defect list.
+
+### 17.5 The negative direction accepts one more magnitude than the positive one
+
+`"-10675199.02:48:05.4775808"` — `TimeSpan::MinValue`'s canonical string — must keep parsing,
+and before the repair the *right* answer came out of **two** undefined operations. .NET's
+asymmetry is deliberate: `TryTimeToTicks` rejects a wrapped-negative result only `if (positive)`
+(`TimeSpanParse.cs:612-618`) and `ProcessTerminal_*` then rejects the negated value only
+`if (ticks > 0)` (`:816-822`), so exactly one magnitude — 2^63 — survives both tests. The port
+now states that as one explicit bound per sign. Both endpoint strings are pinned by tests.
+
+### 17.6 The class C compatibility argument, restated for this ticket
+
+Four inputs change from success to failure:
+
+| Input | Before | After |
+|---|---|---|
+| `"2147483647.00:00:00"` | `true`, ticks `-7695280436664713216` | `false` / `OverflowException` |
+| `"10675200.00:00:00"` | `true`, ticks `-9223371273709551616` | `false` / `OverflowException` |
+| `"--5.00:00:00"` | `true`, **+5 days** | `false` / `FormatException` |
+| `"-10675199.02:48:05.4775809"` | `true`, **+`MaxValue`** | `false` / `OverflowException` |
+
+Every one is a value wrong by any definition — a negative duration from a positive input, a
+positive one from a negative input, or a sign silently cancelled. Three of the four are produced
+by undefined behaviour and so are not guaranteed between two builds of this repository; the
+fourth (`"--5.00:00:00"`) is not undefined but is unambiguously not what the string says, and
+.NET rejects it. **The rejected inputs never worked**, which is the argument the batch accepted
+for #1817, #1818 and #1825 and which §4.3 states for this class. No new approval is required.
+
+`Parse` is a **behaviour change on the throwing entry point too**, as §16.1 warned: it used to
+*return* the wrapped value rather than raise anything.
+
+### 17.7 What deliberately did NOT change
+
+- **No already-rejected input was reclassified.** Splitting `Parse`'s failure into
+  `FormatException` and `OverflowException` covers only the newly rejected inputs plus the
+  digit-run and day-range cases. An out-of-range hour or minute (`"1.24:00:00"`) stays a
+  `FormatException`, even though real .NET calls it an overflow — changing that would be an
+  exception-type change on a path with no defect, which this ticket does not authorise. It is
+  worth a separate ticket, and none was opened because no evidence of harm exists.
+- **`TimeSpan.hpp` is unchanged.** The shared parse core is a `static` function with internal
+  linkage in `TimeSpan.cpp`, so no declaration, member, signature, symbol or layout changes,
+  and §8's table still holds.
+- **The accepted format grammar is unchanged.** `sscanf` still decides the *structure*, so every
+  quirk of what is accepted stays as it was; only the component widths and range checks changed.
+
+### 17.8 The public surface, inventoried
+
+`Parse` and `TryParse` are the only entry points in `TimeSpan` itself. One further public door
+exists **in another module**: `System::Xml::XmlConvert::ToTimeSpan` forwards straight to
+`TimeSpan::Parse`, so it too returned a wrapped duration and now surfaces the
+`OverflowException`. It is pinned by a test in `modules/xml`. Its separately documented gap —
+that it parses .NET's native colon format rather than the XML Schema `duration` lexical form —
+is untouched.
+
+SR-AUD-008's site count is therefore **six** (one in `Subtract`, four undefined columns and one
+undefined `sscanf` conversion in the parse core), against the two §2 records, and its public-door
+count is **five** (`Subtract`, `operator-`, `TryParse`, `Parse`, `XmlConvert::ToTimeSpan`).

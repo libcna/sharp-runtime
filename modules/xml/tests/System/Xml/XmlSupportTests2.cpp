@@ -7,6 +7,8 @@
 #include <limits>
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
+#include "System/TimeSpan.hpp"
 #include "System/Xml/IHasXmlNode.hpp"
 #include "System/Xml/IXmlLineInfo.hpp"
 #include "System/Xml/IXmlNamespaceResolver.hpp"
@@ -277,4 +279,26 @@ TEST(XmlNodeChangedEventArgsTests, StoresConstructorArguments) {
     EXPECT_EQ(args.getActionProperty(), XmlNodeChangedAction::Change);
     EXPECT_EQ(args.getOldValueProperty(), "old");
     EXPECT_EQ(args.getNewValueProperty(), "new");
+}
+
+// ===========================================================================
+// XmlConvert::ToTimeSpan -- the third public door onto TimeSpan's parse core
+// ===========================================================================
+//
+// Ticket #1836 (SR-AUD-008, CCF-004 class C). docs/DefinedArithmeticBoundaryPlan.md section 15
+// requires enumerating every public door onto a repaired site, including the ones in other
+// modules. XmlConvert::ToTimeSpan forwards straight to System::TimeSpan::Parse, so before the
+// repair it returned a wrapped negative duration for a large positive day count. It now
+// surfaces the same OverflowException the underlying parser raises.
+//
+// This does not narrow the separately documented gap that this method parses .NET's native
+// colon-separated TimeSpan format rather than the XML Schema `duration` lexical form.
+
+TEST(XmlConvertTests, ToTimeSpan_ValidNativeFormat_1836) {
+    const System::TimeSpan ts = XmlConvert::ToTimeSpan("1.02:03:04");
+    EXPECT_EQ(ts.getTicksProperty(), 937840000000LL);
+}
+
+TEST(XmlConvertTests, ToTimeSpan_DayCountBeyondRange_ThrowsOverflow_1836) {
+    EXPECT_THROW(XmlConvert::ToTimeSpan("2147483647.00:00:00"), System::OverflowException);
 }

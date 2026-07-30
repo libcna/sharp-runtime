@@ -7889,3 +7889,50 @@ enabled.
 - `docs/StreamCapabilityContractDesign.md` inventories the **repository only**. Downstream
   consumers were not inspected, per the batch boundary, so §6.2's approval must be judged on
   external-stream risk that this document deliberately does not estimate.
+
+## Completed TimeSpan defined arithmetic: ticket #1836 (2026-07-30)
+
+`REMED-CORE-TIMESPAN-DEFINED-TICKS`, P1, size M. **CCF-004 class A + class C**, seventh member
+of the family and the only one spanning two classes. **SR-AUD-008 is now `remediated`**; index
+counts move to **28 remediated / 336 confirmed of 364**.
+
+**Class A — `TimeSpan::Subtract` (no observable change).** `ticks_internal -
+ts.ticks_internal` at `TimeSpan.cpp:263` was signed-overflow UB at three public doors
+(`MinValue.Subtract(1)`, `MaxValue.Subtract(-1)`, `MinValue - 1`), then threw the correct
+`OverflowException` anyway. Real .NET computes `operator -(TimeSpan, TimeSpan)` unchecked
+(`TimeSpan.cs:877-879`) and *then* tests the sign bits, so the subtraction now runs in `ulongcs`
+and converts back. Every value, exception type and message is byte-identical.
+
+**Class C — the shared parse core (behaviour change on already-broken inputs).** `TryParse`
+overflowed the tick accumulation at **four** columns of one statement (`:454:53`, `:454:16`,
+`:457:22`, `:459:29`) reached by different inputs, plus a **fifth** undefined operation from
+`std::sscanf`'s `%d` conversion (C17 7.21.6.2p10), measured wrapping `"2147483648.00:00:00"` to
+`-2147483648` and twenty digits to `-1`. Components now read as `long long` behind an
+18-digit-run limit; the magnitude accumulates in `ulongcs` with one range check per sign. The
+negative direction admits one more magnitude than the positive (2^63, `MinValue`) — .NET's
+deliberate asymmetry (`TimeSpanParse.cs:612-618`, `:816-822`).
+
+**Method correction that generalises (§17.4):** a UBSan sweep enumerates *undefined operations*,
+not *wrong answers*. Two of this member's four wrong answers are invisible to UBSan —
+`"--5.00:00:00"` returned **+5 days** (sign inversions cancel, nothing overflows) and
+`"-10675199.02:48:05.4775809"` returned **+MaxValue**. Both now rejected: the doubly-signed
+string as `FormatException` (a second sign is malformed, not overflow), the other as
+`OverflowException`. **`Parse` changes on the throwing entry point too** — it used to *return*
+the wrapped value and now raises `OverflowException` with .NET's `SR.Overflow_TimeSpanElement
+TooLarge` text. Compatibility argument is §17.6: the four inputs that go success→failure never
+produced a correct value, so no new approval (plan §9).
+
+**Corrected premises:** SR-AUD-008's site count is **six** (one in `Subtract`, four undefined
+columns and one `sscanf` conversion in the parse core), not the two §2 records; its public-door
+count is **five** — `Subtract`, `operator-`, `TryParse`, `Parse`, and the cross-module
+`System::Xml::XmlConvert::ToTimeSpan`. All pinned by tests.
+
+**Class A verified by measurement.** `build-probe/1836_prefix.log` vs `1836_postfix.log`,
+19 cases, one process per case, against a `build-asan` tree proven newer than the source before
+and after; recovering build enumerated the sites, `-fno-sanitize-recover=undefined` returned
+exit 0 for every case afterwards. ASan+UBSan+LSan clean (`build-probe/1836_asan_ubsan_lsan.log`).
+
+**+17 permanent regressions** (15 `TimeSpanTests.cpp`, 2 `XmlSupportTests2.cpp`). Repository gate
+**14,162 tests across 37 executables** (was 14,145), 0 warnings, 0 errors. Module graph
+**41 / 91**. **No public signature, virtual, vtable, object layout or mangled symbol changed** —
+`TimeSpan.hpp` untouched; the parse core is a file-local `static` function.

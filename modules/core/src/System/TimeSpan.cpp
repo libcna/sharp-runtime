@@ -260,7 +260,18 @@ namespace System {
     }
 
     TimeSpan TimeSpan::Subtract(const TimeSpan &ts) const {
-        const longcs result = ticks_internal - ts.ticks_internal;
+        // CCF-004 class A (SR-AUD-008, ticket #1836): defined wrap, no observable change.
+        // Real .NET's `TimeSpan.operator -(TimeSpan, TimeSpan)` (TimeSpan.cs:877-879) computes
+        // `long result = t1._ticks - t2._ticks;` in an unchecked context and *then* tests the
+        // sign bits -- the wrap is intended and the sign-bit test below is the real guard. The
+        // same expression in signed C++ is undefined behaviour, measured at three public doors
+        // (Subtract, operator-, and Subtract via operator-) in build-probe/1836_prefix.log
+        // cases 1-3. Doing the subtraction in the unsigned counterpart type and converting
+        // back reproduces C#'s two's-complement wrap with defined semantics; every returned
+        // value, and the OverflowException's type and message, are unchanged.
+        const longcs result = static_cast<longcs>(
+            static_cast<SharpRuntime::ulongcs>(ticks_internal) -
+            static_cast<SharpRuntime::ulongcs>(ts.ticks_internal));
 
         constexpr int signShift = sizeof(longcs) * 8 - 1;
 
@@ -400,8 +411,53 @@ namespace System {
         return result;
     }
 
-    bool TimeSpan::TryParse(const std::string& s, TimeSpan& result) {
-        if (s.empty()) return false;
+    namespace {
+
+        /**
+         * @brief Outcome of the shared TimeSpan parse core.
+         *
+         * CCF-004 class C (SR-AUD-008, ticket #1836). Real .NET distinguishes a malformed
+         * TimeSpan string (`FormatException`) from one whose numeric components cannot be
+         * represented (`OverflowException`, raised by `TimeSpanParse.SetOverflowFailure`,
+         * TimeSpanParse.cs:547-554). TryParse maps both to `false`; Parse needs to tell them
+         * apart, so the parse body reports which it was. A file-local helper is used rather
+         * than a new private member so that no declaration in TimeSpan.hpp changes.
+         */
+        enum class TimeSpanParseOutcome { Ok, BadFormat, Overflow };
+
+        // Field limit copied from .NET's System/Globalization/TimeSpanParse.cs:59
+        // (`private const int MaxDays = 10675199;`). .NET range-checks every component
+        // *before* multiplying it up into ticks; this port did not, which is SR-AUD-008.
+        constexpr long long kParseMaxDays = 10675199;
+
+        // A run of at most 18 decimal digits always fits in `long long` (10^18 - 1 is below
+        // LONGCS_MAX), so rejecting longer runs up front makes every %lld conversion below
+        // in-range and therefore defined. std::sscanf's behaviour when a converted value is
+        // not representable in the target object is undefined (C17 7.21.6.2p10), and it was
+        // measured wrapping silently: "2147483648.00:00:00" reached the tick arithmetic as
+        // -2147483648 and "99999999999999999999.00:00:00" as -1
+        // (build-probe/1836_prefix.log cases 18 and 19). .NET reports the same inputs as
+        // overflow ("contains too many digits").
+        constexpr int kParseMaxDigitRun = 18;
+
+        bool hasOverlongDigitRun(const std::string& s) {
+            int run = 0;
+            for (const char ch : s) {
+                if (ch >= '0' && ch <= '9') {
+                    if (++run > kParseMaxDigitRun) return true;
+                } else {
+                    run = 0;
+                }
+            }
+            return false;
+        }
+
+    } // namespace
+
+    // Internal linkage: TimeSpan.hpp is unchanged by this repair.
+    static TimeSpanParseOutcome parseTimeSpanCore(const std::string& s, TimeSpan& result) {
+        if (s.empty()) return TimeSpanParseOutcome::BadFormat;
+        if (hasOverlongDigitRun(s)) return TimeSpanParseOutcome::Overflow;
         const char* p = s.c_str();
         bool negative = (*p == '-');
         if (negative) ++p;
@@ -414,17 +470,31 @@ namespace System {
             ++pScan;
         }
 
-        int days = 0, hours = 0, minutes = 0, seconds = 0;
+        // `long long` rather than `int`, so that a component wider than intcs is a value this
+        // function can range-check instead of an undefined sscanf conversion. The digit-run
+        // pre-check above guarantees every conversion is representable.
+        long long days = 0, hours = 0, minutes = 0, seconds = 0;
         int matched = 0;
         if (hasDot) {
-            matched = std::sscanf(p, "%d.%d:%d:%d", &days, &hours, &minutes, &seconds);
-            if (matched != 4) return false;
+            matched = std::sscanf(p, "%lld.%lld:%lld:%lld", &days, &hours, &minutes, &seconds);
+            if (matched != 4) return TimeSpanParseOutcome::BadFormat;
         } else {
-            matched = std::sscanf(p, "%d:%d:%d", &hours, &minutes, &seconds);
-            if (matched != 3) return false;
+            matched = std::sscanf(p, "%lld:%lld:%lld", &hours, &minutes, &seconds);
+            if (matched != 3) return TimeSpanParseOutcome::BadFormat;
         }
         if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59)
-            return false;
+            return TimeSpanParseOutcome::BadFormat;
+        // A negative day count can only come from a second sign character, as in
+        // "--5.00:00:00": the leading '-' is consumed above and sscanf then reads "-5". That
+        // input used to be accepted and to yield the *positive* five-day duration
+        // (build-probe/1836_prefix.log case 17). Real .NET rejects it as a malformed string,
+        // not as an overflow, because its tokenizer never produces a signed component.
+        if (days < 0) return TimeSpanParseOutcome::BadFormat;
+        // .NET's TimeSpanParse.TryTimeToTicks (TimeSpanParse.cs:595-601) rejects
+        // `days._num > MaxDays` before any multiplication. Without this check
+        // `days * TicksPerDay` overflows int64 for every day count above 10,675,199 --
+        // the audited defect, which returned a *negative* duration for a positive input.
+        if (days > kParseMaxDays) return TimeSpanParseOutcome::Overflow;
 
         // Find position after the seconds digits to look for fractional part
         const char* afterSec = p;
@@ -449,23 +519,64 @@ namespace System {
         // was consumed -- e.g. "12:34:56garbage" previously parsed successfully as 12:34:56,
         // silently discarding "garbage" instead of being rejected like real .NET's
         // TimeSpan.Parse (a FormatException) would. Reject any unconsumed trailing content.
-        if (*afterSec != '\0') return false;
+        if (*afterSec != '\0') return TimeSpanParseOutcome::BadFormat;
 
-        longcs ticks = static_cast<longcs>(days)    * TicksPerDay
-                     + static_cast<longcs>(hours)   * TicksPerHour
-                     + static_cast<longcs>(minutes) * TicksPerMinute
-                     + static_cast<longcs>(seconds) * TicksPerSecond
-                     + subsecTicks;
-        if (negative) ticks = -ticks;
-        result = TimeSpan(ticks);
-        return true;
+        // CCF-004 class C. The magnitude is accumulated in the unsigned counterpart type, as
+        // .NET does the equivalent unchecked (TimeSpanParse.cs:606-618), so no step here is
+        // undefined. With the field ranges enforced above the largest possible magnitude is
+        //   10675199*864000000000 + 23*36000000000 + 59*600000000 + 59*10000000 + 9999999
+        //   == 9,223,372,799,999,999,999
+        // which is far below 2^64, so the unsigned accumulation cannot wrap either. Before
+        // this check the four terms overflowed int64 at four distinct columns --
+        // TimeSpan.cpp:454:53 (the day product), :454:16 and :457:22 (two of the sums) and
+        // :459:29 (the negation of the int64 minimum) -- all measured in
+        // build-probe/1836_prefix.log.
+        using SharpRuntime::ulongcs;
+        const ulongcs magnitude = static_cast<ulongcs>(days)    * static_cast<ulongcs>(TimeSpan::TicksPerDay)
+                                + static_cast<ulongcs>(hours)   * static_cast<ulongcs>(TimeSpan::TicksPerHour)
+                                + static_cast<ulongcs>(minutes) * static_cast<ulongcs>(TimeSpan::TicksPerMinute)
+                                + static_cast<ulongcs>(seconds) * static_cast<ulongcs>(TimeSpan::TicksPerSecond)
+                                + static_cast<ulongcs>(subsecTicks);
+
+        // .NET accepts one more magnitude in the negative direction than in the positive one,
+        // and that asymmetry is deliberate rather than incidental: TryTimeToTicks rejects a
+        // wrapped-negative result only `if (positive)`, and ProcessTerminal_* then rejects the
+        // negated value only `if (ticks > 0)` (TimeSpanParse.cs:612-618, :816-822). The single
+        // magnitude that survives both tests is 2^63, i.e. TimeSpan::MinValue -- which is why
+        // "-10675199.02:48:05.4775808" is the canonical MinValue string and must keep parsing.
+        constexpr ulongcs kMaxPositiveMagnitude = static_cast<ulongcs>(SharpRuntime::LONGCS_MAX);
+        if (negative) {
+            if (magnitude > kMaxPositiveMagnitude + 1u) return TimeSpanParseOutcome::Overflow;
+            // Two's-complement negation in the unsigned domain; the conversion back is
+            // well-defined since C++20 for every value this can produce.
+            result = TimeSpan(static_cast<longcs>(static_cast<ulongcs>(0) - magnitude));
+        } else {
+            if (magnitude > kMaxPositiveMagnitude) return TimeSpanParseOutcome::Overflow;
+            result = TimeSpan(static_cast<longcs>(magnitude));
+        }
+        return TimeSpanParseOutcome::Ok;
+    }
+
+    bool TimeSpan::TryParse(const std::string& s, TimeSpan& result) {
+        return parseTimeSpanCore(s, result) == TimeSpanParseOutcome::Ok;
     }
 
     TimeSpan TimeSpan::Parse(const std::string& s) {
         TimeSpan result;
-        if (!TryParse(s, result))
-            throw FormatException("String was not recognized as a valid TimeSpan: " + s);
-        return result;
+        switch (parseTimeSpanCore(s, result)) {
+            case TimeSpanParseOutcome::Ok:
+                return result;
+            case TimeSpanParseOutcome::Overflow:
+                // Real .NET's TimeSpanParse.SetOverflowFailure (TimeSpanParse.cs:547-554)
+                // raises OverflowException with SR.Overflow_TimeSpanElementTooLarge, whose
+                // text is reproduced here verbatim with the input substituted.
+                throw OverflowException("The TimeSpan string '" + s + "' could not be parsed "
+                                        "because at least one of the numeric components is out "
+                                        "of range or contains too many digits.");
+            case TimeSpanParseOutcome::BadFormat:
+                break;
+        }
+        throw FormatException("String was not recognized as a valid TimeSpan: " + s);
     }
 
     TimeSpan TimeSpan::operator-() const {

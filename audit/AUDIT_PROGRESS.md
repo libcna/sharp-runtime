@@ -5616,3 +5616,60 @@ default is, that it is a deviation, and what omitting it declares.
 warnings against the 1,942 ceiling, unchanged. Module graph **41 / 91**.
 
 **Source and ABI consequences: none whatsoever.**
+
+Ticket **#1836** (`REMED-CORE-TIMESPAN-DEFINED-TICKS`, P1, size M, category `remediation`,
+area *Core*) is **done** and **SR-AUD-008 is now `remediated`** — the seventh CCF-004 member
+repaired and the family's only member spanning **two** classes. The index counts move to
+**28 remediated** and **336 confirmed** of 364.
+
+The finding has two halves, in different classes, and each was fixed as its own kind of
+change. **Class A** was `TimeSpan::Subtract`'s single expression `ticks_internal -
+ts.ticks_internal`, undefined at `TimeSpan.cpp:263` for `MinValue.Subtract(1)`,
+`MaxValue.Subtract(-1)` and `MinValue - 1` (three public doors, not one). Real .NET computes
+`operator -(TimeSpan, TimeSpan)` unchecked (`TimeSpan.cs:877-879`) and *then* tests the sign
+bits — the wrap is intended and the sign-bit test is the real guard — so the subtraction now
+runs in `ulongcs` and converts back, and every returned value, exception type and message is
+byte-identical. **Class C** was the shared parse core: `TryParse` overflowed the tick
+accumulation at **four** distinct columns of the same statement (`:454:53` day product,
+`:454:16` and `:457:22` two accumulations, `:459:29` the int64-minimum negation) reached by
+different inputs, plus a **fifth** undefined operation from the C library — `std::sscanf`'s
+`%d` conversion of a value the target cannot represent (C17 7.21.6.2p10), measured wrapping
+`"2147483648.00:00:00"` to `-2147483648` and twenty digits to `-1`. Components are now read as
+`long long` behind an eighteen-digit run limit and the magnitude is accumulated in `ulongcs`
+with one range check per sign; the negative direction admits exactly one more magnitude (2^63,
+`MinValue`) than the positive, which is .NET's deliberate asymmetry
+(`TimeSpanParse.cs:612-618`, `:816-822`).
+
+**A method correction that generalises (recorded as `DefinedArithmeticBoundaryPlan.md`
+§17.4).** A UBSan sweep enumerates *undefined operations*, not *wrong answers*. Two of this
+member's four wrong answers are invisible to UBSan: `"--5.00:00:00"` returned the **positive**
+five-day duration (two sign inversions cancelling, nothing overflowing) and
+`"-10675199.02:48:05.4775809"` returned the **positive** `MaxValue`. Both are now rejected —
+the doubly-signed string as a `FormatException` (a second sign character is malformed, not
+overflow, in .NET's tokenizer), the out-of-range one as `OverflowException`.
+
+**Parse is a behaviour change on the throwing entry point too**, as §16.1 warned: it used to
+*return* the wrapped value, and now raises `OverflowException` with .NET's
+`SR.Overflow_TimeSpanElementTooLarge` text for an out-of-range component while keeping
+`FormatException` for a malformed string. The class C compatibility argument (§17.6) is the
+one the batch accepted for #1817/#1818/#1825: the four inputs that change from success to
+failure never produced a correct value, three by undefined behaviour, so no new approval is
+required (plan §9). SR-AUD-008's site count is corrected to **six** and its public-door count
+to **five** — `Subtract`, `operator-`, `TryParse`, `Parse`, and `System::Xml::XmlConvert::
+ToTimeSpan` in another module, all pinned by tests.
+
+**CCF-004 class A verified by measurement.** `build-probe/1836_prefix.log` and
+`build-probe/1836_postfix.log`, nineteen cases, **one process per case**, against a
+`build-asan` tree whose `TimeSpan.cpp.o` and `libsharp_runtime_core.a` were proven newer than
+the source both before and after the edit; the recovering build enumerated the sites and the
+`-fno-sanitize-recover=undefined` build then returned exit 0 for every case, proving each
+gone. ASan + UBSan + LSan clean (`build-probe/1836_asan_ubsan_lsan.log`).
+
+**Tests: +17 permanent regressions** (15 in `TimeSpanTests.cpp`, 2 in the XML module's
+`XmlSupportTests2.cpp` for the cross-module door). Repository gate: **0 warnings, 0 errors,
+14,162 tests across 37 executables** (was 14,145). Module graph **41 / 91**. Canonical
+Doxygen unchanged.
+
+**Source and ABI consequences: none.** `TimeSpan.hpp` is unchanged; the shared parse core is
+a `static` file-local function with internal linkage, so no declaration, member, signature,
+symbol or object layout changed.
