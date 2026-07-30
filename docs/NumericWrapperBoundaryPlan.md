@@ -318,3 +318,26 @@ to the batch close.
 
 **Consequences:** no object layout, vtable, return-convention, or mangled-symbol
 change; source-compatible for every ordinary call. `SR-AUD-022 → remediated`.
+
+### 15.2 #1844 — SR-AUD-024 — IsPositive(0) — **DONE**
+
+**Surface re-inventoried.** Every `IsPositive` in the numeric namespace was
+checked, not only the two the finding names:
+
+| `IsPositive` | Pre-fix | .NET | Action |
+|---|---|---|---|
+| `SByte`, `Int16` | `value > 0` | `value >= 0` | **fixed** → `>= 0` |
+| `Int32`, `Int64` | `value >= 0` | `value >= 0` | unchanged (already correct) |
+| `Byte`, `UInt16`, `UInt32`, `UInt64`, `Int128`, `UInt128` | *no `IsPositive`* | — | none (out of scope) |
+| `Decimal` (`!negative_`), `Single`/`Double` (`!signbit && !isnan`) | — | matches | unchanged (float/decimal slice, correct) |
+
+So the defect is exactly `SByte` and `Int16`; the fix is the two-character
+`>` → `>=` change the finding predicted, with **no** broadening into other
+generic-math predicates (no evidence justified it).
+
+**Fix + tests.** Both now `return value >= 0`, doc-comment updated to "zero or
+positive". The two suites that pinned the wrong result
+(`SByteTests.IsPositive_False`, `Int16NewTests.IsPositive_False`) were corrected
+to assert `IsPositive(0) == true` and each gained a negative/`MinValue`/`MaxValue`
+vector. Net **+2** test cases (two wrong ones replaced by four). Both stay
+`noexcept`; no signature/layout/symbol change. `SR-AUD-024 → remediated`.

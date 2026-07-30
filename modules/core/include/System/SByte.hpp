@@ -252,8 +252,9 @@ namespace System {
         /** @brief Returns true if @p value is negative. C++ counterpart of .NET SByte.IsNegative(sbyte). */
         [[nodiscard]] static bool IsNegative(sbytecs value) noexcept { return value < 0; }
 
-        /** @brief Returns true if @p value is positive (> 0). C++ counterpart of .NET SByte.IsPositive(sbyte). */
-        [[nodiscard]] static bool IsPositive(sbytecs value) noexcept { return value > 0; }
+        /** @brief Returns true if @p value is zero or positive. C++ counterpart of .NET SByte.IsPositive(sbyte)
+         *  (INumberBase&lt;sbyte&gt;.IsPositive, `value >= 0`; zero is positive). */
+        [[nodiscard]] static bool IsPositive(sbytecs value) noexcept { return value >= 0; }
 
         /**
          * @brief Returns the base-10 logarithm of @p value, truncated to sbyte.

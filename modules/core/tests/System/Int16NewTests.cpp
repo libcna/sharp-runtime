@@ -46,7 +46,14 @@ TEST(Int16NewTests, CopySign_MinValue_NegativeSign_ReturnsMinValue) {
 TEST(Int16NewTests, IsNegative_True)  { EXPECT_TRUE(Int16::IsNegative(-1)); }
 TEST(Int16NewTests, IsNegative_False) { EXPECT_FALSE(Int16::IsNegative(0)); }
 TEST(Int16NewTests, IsPositive_True)  { EXPECT_TRUE(Int16::IsPositive(1)); }
-TEST(Int16NewTests, IsPositive_False) { EXPECT_FALSE(Int16::IsPositive(0)); }
+// SR-AUD-024 (#1844): .NET INumberBase<short>.IsPositive is `value >= 0`, so zero
+// is positive. The prior test pinned the wrong `IsPositive(0) == false`; corrected.
+TEST(Int16NewTests, IsPositive_ZeroIsPositive) { EXPECT_TRUE(Int16::IsPositive(0)); }
+TEST(Int16NewTests, IsPositive_Negative) {
+    EXPECT_FALSE(Int16::IsPositive(-1));
+    EXPECT_FALSE(Int16::IsPositive(Int16::MinValue));
+    EXPECT_TRUE(Int16::IsPositive(Int16::MaxValue));
+}
 
 TEST(Int16NewTests, MaxMagnitude_Larger)  { EXPECT_EQ(Int16::MaxMagnitude(-10, 5), -10); }
 TEST(Int16NewTests, MinMagnitude_Smaller) { EXPECT_EQ(Int16::MinMagnitude(-10, 5), 5); }

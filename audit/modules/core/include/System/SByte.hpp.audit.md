@@ -32,6 +32,20 @@ Use `>= 0` in both signed wrappers and replace the zero assertions in both
 owning suites with `EXPECT_TRUE`. Add an adjacent negative vector so the
 positive/negative partition remains explicit.
 
+### Remediated — ticket #1844 (2026-07-30)
+
+Done. `SByte::IsPositive` and `Int16::IsPositive` now return `value >= 0`
+(previously `value > 0`), matching `INumberBase<T>.IsPositive` in the .NET
+reference (`SByte.cs:742`, `Int16.cs:763`) and the sibling `Int32`/`Int64`
+wrappers, which already used `>= 0`. The two suites that pinned the wrong
+`IsPositive(0) == false` (`SByteTests.cpp`, `Int16NewTests.cpp`) were corrected
+to `EXPECT_TRUE` and each gained explicit negative (`-1`), `MinValue`, and
+`MaxValue` vectors. Inventory confirmed the defect was limited to these two
+types: `Byte`/`UInt16`/`UInt32`/`UInt64`/`Int128`/`UInt128` expose no
+`IsPositive`, and the `Decimal`/`Single`/`Double` predicates are the separate
+float/decimal slice (correct as written). Both wrappers stay `noexcept`; no
+signature, layout, or symbol change.
+
 ## Finding references
 
 - **SR-AUD-021:** `ToString(sbyte{5}, "Q")` returns `"5"` rather than

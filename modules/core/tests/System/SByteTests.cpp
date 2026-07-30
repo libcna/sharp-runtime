@@ -63,7 +63,14 @@ TEST(SByteTest, CopySign_MinValue_NegativeSign_ReturnsMinValue) {
 TEST(SByteTest, IsNegative_True)  { EXPECT_TRUE(SByte::IsNegative(sbytecs(-1))); }
 TEST(SByteTest, IsNegative_False) { EXPECT_FALSE(SByte::IsNegative(sbytecs(0))); }
 TEST(SByteTest, IsPositive_True)  { EXPECT_TRUE(SByte::IsPositive(sbytecs(1))); }
-TEST(SByteTest, IsPositive_False) { EXPECT_FALSE(SByte::IsPositive(sbytecs(0))); }
+// SR-AUD-024 (#1844): .NET INumberBase<sbyte>.IsPositive is `value >= 0`, so zero
+// is positive. The prior test pinned the wrong `IsPositive(0) == false`; corrected.
+TEST(SByteTest, IsPositive_ZeroIsPositive) { EXPECT_TRUE(SByte::IsPositive(sbytecs(0))); }
+TEST(SByteTest, IsPositive_Negative) {
+    EXPECT_FALSE(SByte::IsPositive(sbytecs(-1)));
+    EXPECT_FALSE(SByte::IsPositive(SByte::MinValue));
+    EXPECT_TRUE(SByte::IsPositive(SByte::MaxValue));
+}
 
 TEST(SByteTest, Log10_One)     { EXPECT_EQ(SByte::Log10(sbytecs(1)), sbytecs(0)); }
 TEST(SByteTest, Log10_Ten)     { EXPECT_EQ(SByte::Log10(sbytecs(10)), sbytecs(1)); }
