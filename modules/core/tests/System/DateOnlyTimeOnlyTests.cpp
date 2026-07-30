@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 
+#include <limits>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateOnly.hpp"
 #include "System/DateTime.hpp"
@@ -350,4 +351,136 @@ TEST(TimeOnlyTests, ToStringFormat_12Hour) {
 TEST(TimeOnlyTests, ToStringFormat_WithMilliseconds) {
     TimeOnly t(12, 0, 0, 123);
     EXPECT_EQ(t.ToString("HH:mm:ss'.'fff"), "12:00:00.123");
+}
+
+// ===========================================================================
+// DateOnly — CCF-004 class C defined arithmetic (SR-AUD-060, ticket #1837)
+// ===========================================================================
+//
+// docs/DefinedArithmeticBoundaryPlan.md classes SR-AUD-060 as class C: seven signed-overflow
+// sites across four public entry points (FromDayNumber :65, AddDays :76, AddMonths :81,
+// AddYears :92) plus a three-multiplication cascade in jdnToDate (:35/:37/:39) reached when a
+// wrapped or wildly out-of-range value flows into it. The repair uses defined arithmetic and
+// range-checks each entry point *before* computing, so jdnToDate is only ever reached with an
+// in-range day number. Two of the rejected inputs were silent WRONG ANSWERS rather than UB.
+// Evidence: build-probe/1837_dateonly_surface.cpp, build-probe/1837_prefix.log vs _postfix.log.
+//
+// The pre-repair values pinned below were measured (case 9 of the surface probe), so
+// "every valid result is unchanged" is proven rather than assumed.
+
+// --- valid results must be byte-identical to before the repair ------------------------------
+
+TEST(DateOnlyTests, DefinedArith_ValidResultsUnchanged_1837) {
+    EXPECT_EQ(DateOnly::MaxValue.getDayNumberProperty(), 3652058); // the domain's upper bound
+    EXPECT_EQ(DateOnly::MinValue.getDayNumberProperty(), 0);
+    EXPECT_EQ(DateOnly::FromDayNumber(0), DateOnly(1, 1, 1));
+    EXPECT_EQ(DateOnly::FromDayNumber(3652058), DateOnly(9999, 12, 31));
+    EXPECT_EQ(DateOnly(2024, 1, 30).AddDays(3), DateOnly(2024, 2, 2));
+    EXPECT_EQ(DateOnly(2024, 3, 1).AddDays(-1), DateOnly(2024, 2, 29)); // 2024 leap
+    EXPECT_EQ(DateOnly(2024, 1, 31).AddMonths(1), DateOnly(2024, 2, 29)); // day clamped
+    EXPECT_EQ(DateOnly(2024, 3, 15).AddMonths(-2), DateOnly(2024, 1, 15));
+    EXPECT_EQ(DateOnly(2020, 2, 29).AddYears(1), DateOnly(2021, 2, 28)); // 29 Feb -> 28 Feb
+    // The widest legal spans in both directions -- the guards must not reject these.
+    EXPECT_EQ(DateOnly::MinValue.AddDays(3652058), DateOnly(9999, 12, 31));
+    EXPECT_EQ(DateOnly::MaxValue.AddDays(-3652058), DateOnly(1, 1, 1));
+    EXPECT_EQ(DateOnly::MinValue.AddDays(0), DateOnly::MinValue);
+    EXPECT_EQ(DateOnly::MaxValue.AddDays(0), DateOnly::MaxValue);
+}
+
+// --- FromDayNumber: one unsigned compare rejects both directions ----------------------------
+
+TEST(DateOnlyTests, FromDayNumber_OutOfRange_ThrowsArgumentOutOfRange_1837) {
+    // Before the repair, FromDayNumber(INTCS_MAX) overflowed :65 and FromDayNumber(INTCS_MIN)
+    // drove jdnToDate's :35/:37/:39 cascade; both happened to end in a "year" exception after
+    // undefined behaviour. They now throw a clean "dayNumber" exception with no UB.
+    try {
+        (void)DateOnly::FromDayNumber(std::numeric_limits<System::intcs>::max());
+        FAIL() << "Expected ArgumentOutOfRangeException";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "dayNumber");
+    }
+    EXPECT_THROW(DateOnly::FromDayNumber(std::numeric_limits<System::intcs>::min()),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateOnly::FromDayNumber(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateOnly::FromDayNumber(3652059), System::ArgumentOutOfRangeException); // max+1
+}
+
+TEST(DateOnlyTests, FromDayNumber_BoundaryValuesSucceed_1837) {
+    EXPECT_EQ(DateOnly::FromDayNumber(0), DateOnly::MinValue);
+    EXPECT_EQ(DateOnly::FromDayNumber(3652058), DateOnly::MaxValue);
+}
+
+// --- AddDays: defined unsigned wrap + single compare ----------------------------------------
+
+TEST(DateOnlyTests, AddDays_OutOfRange_ThrowsArgumentOutOfRange_1837) {
+    // MaxValue.AddDays(INTCS_MAX) overflowed :76 and cascaded; MinValue.AddDays(INTCS_MIN)
+    // drove the cascade directly. paramName is "value", matching .NET DateOnly.AddDays.
+    try {
+        (void)DateOnly::MaxValue.AddDays(1);
+        FAIL() << "Expected ArgumentOutOfRangeException";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "value");
+    }
+    EXPECT_THROW(DateOnly::MinValue.AddDays(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateOnly::MaxValue.AddDays(std::numeric_limits<System::intcs>::max()),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateOnly::MinValue.AddDays(std::numeric_limits<System::intcs>::min()),
+                 System::ArgumentOutOfRangeException);
+}
+
+// --- AddMonths: bounded (no loop), rejects the input bound and the result -------------------
+
+TEST(DateOnlyTests, AddMonths_DeltaBeyondBound_ThrowsMonths_1837) {
+    // |value| > 120000 is rejected before any arithmetic -- this both removed the :81 overflow
+    // (AddMonths(INTCS_MAX)) and bounded the normalisation that used to loop ~179M times
+    // (AddMonths(INTCS_MIN)). Neither INTCS_MAX nor INTCS_MIN is a hang now.
+    try {
+        (void)DateOnly(1, 1, 1).AddMonths(std::numeric_limits<System::intcs>::max());
+        FAIL() << "Expected ArgumentOutOfRangeException";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "months");
+    }
+    EXPECT_THROW(DateOnly(1, 1, 1).AddMonths(std::numeric_limits<System::intcs>::min()),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateOnly(1, 1, 1).AddMonths(120001), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateOnlyTests, AddMonths_InBoundButUnrepresentableResult_ThrowsMonths_1837) {
+    // A delta inside +/-120000 whose result leaves [0001,9999] is rejected with "months".
+    EXPECT_THROW(DateOnly(9999, 12, 1).AddMonths(1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateOnly(1, 1, 1).AddMonths(-1), System::ArgumentOutOfRangeException);
+    // A delta inside the bound whose result stays valid still works.
+    EXPECT_EQ(DateOnly(1, 1, 1).AddMonths(119987), DateOnly(9999, 12, 1));
+}
+
+// --- AddYears: the silent wrong answer, and the "value" paramName ---------------------------
+
+TEST(DateOnlyTests, AddYears_MinValue_NoLongerSilentlyReturnsSameDate_1837) {
+    // THE regression: DateOnly(1,1,1).AddYears(INTCS_MIN) computed INTCS_MIN*12 == -6*2^32,
+    // which wrapped to ZERO and returned 0001-01-01 unchanged -- asking for a date 2.1 billion
+    // years earlier and getting the same date back with no error. It must now throw.
+    try {
+        (void)DateOnly(1, 1, 1).AddYears(std::numeric_limits<System::intcs>::min());
+        FAIL() << "Expected ArgumentOutOfRangeException (was silently 0001-01-01)";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "value");
+    }
+    EXPECT_THROW(DateOnly(1, 1, 1).AddYears(std::numeric_limits<System::intcs>::max()),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(DateOnlyTests, AddYears_BoundAndResultRejections_1837) {
+    // |value| > 10000 rejected by the input bound; an in-bound value whose year leaves the
+    // domain rejected by the resulting-year check. Both name "value".
+    EXPECT_THROW(DateOnly(5000, 6, 15).AddYears(10001), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateOnly(5000, 6, 15).AddYears(-10001), System::ArgumentOutOfRangeException);
+    try {
+        (void)DateOnly(9999, 6, 15).AddYears(1); // year 10000, in bound, unrepresentable
+        FAIL() << "Expected ArgumentOutOfRangeException";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "value");
+    }
+    // The widest in-domain year spans still work.
+    EXPECT_EQ(DateOnly(1, 6, 15).AddYears(9998), DateOnly(9999, 6, 15));
+    EXPECT_EQ(DateOnly(9999, 6, 15).AddYears(-9998), DateOnly(1, 6, 15));
 }

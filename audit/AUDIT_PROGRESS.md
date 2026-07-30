@@ -5673,3 +5673,50 @@ Doxygen unchanged.
 **Source and ABI consequences: none.** `TimeSpan.hpp` is unchanged; the shared parse core is
 a `static` file-local function with internal linkage, so no declaration, member, signature,
 symbol or object layout changed.
+
+Ticket **#1837** (`REMED-CORE-DATEONLY-DEFINED-ARITH`, P1, size M, category `remediation`,
+area *Core*) is **done** and **SR-AUD-060 is now `remediated`** — the eighth and final CCF-004
+member, which **closes the family**. The index counts move to **29 remediated** and **335
+confirmed** of 364.
+
+The finding's seven signed-overflow sites are all removed: `:65` (`FromDayNumber`) and `:76`
+(`AddDays`) by adding in the **unsigned** day-number domain and rejecting with one unsigned
+compare *before* `jdnToDate` is reached, which makes the `:35`/`:37`/`:39` multiplication cascade
+inside `jdnToDate` **unreachable with an out-of-range argument** rather than needing three more
+guards; `:81` (`AddMonths`) and `:92` (`AddYears`) by bounding the delta (+/-120000 and +/-10000)
+before any arithmetic. The port stores `year_`/`month_`/`day_`, not .NET's `uint _dayNumber`, so
+.NET's idiom was translated rather than copied: `FromDayNumber`/`AddDays` take the unsigned-compare
+idiom (`DateOnly.cs:73-81`, `:121-132`), `AddMonths`/`AddYears` take `DateTime.AddMonths`/`AddYears`'s
+bounds-then-divide idiom (`DateTime.cs:960-977`, `:1020-1032`) which this repository's own
+`DateTime::AddMonths` already implements. `kMaxDayNumber` was **measured** at 3652058.
+
+**Two silent wrong answers, not just UB (16.4).** `DateOnly(1,1,1).AddYears(INTCS_MIN)` computed
+`INTCS_MIN*12 == -6*2^32`, which wrapped to **zero** and returned `0001-01-01` unchanged — a date
+2.1 billion years earlier asked for and the same date returned with no error. It now throws.
+**A ~179-million-iteration loop (16.5)** in `AddMonths(INTCS_MIN)` (`month_ + n` did not overflow,
+`1 + INT_MIN` fits, but the `while (m < 1)` normalisation ran to completion the slow way) is
+removed: the two `while` loops are replaced by .NET's single division
+`q = (m > 0) ? (m-1)/12 : m/12-1`, so no path iterates unboundedly.
+
+**The paramName decision (design §18.5).** Every current rejection named `year` with
+`"DateTime: date component out of range (Parameter 'year')"`, leaked from the `DateTime`
+constructor. This ticket adopts **.NET's per-method paramNames** — `dayNumber`, `value`, `months`,
+`value` — because parity is the mission, the inherited `year` was not a deliberate `DateOnly`
+contract, and the exception **type** is unchanged. One documented consequence: a moderately
+out-of-range input whose arithmetic never overflowed (e.g. `AddMonths(200000)`) used to throw
+`year` and now throws `months`/`value` — a paramName change on a non-UB rejection path, authorised
+by the acceptance criterion's "stated, justified paramName choice" and §4.3, changing no input
+from success to failure and no exception type. No in-repository test pinned the old string.
+
+**Verified by measurement.** `build-probe/1837_prefix.log` vs `build-probe/1837_postfix.log`,
+one process per case, `build-asan` proven newer than source before and after; the recovering build
+enumerated all seven sites and the `-fno-sanitize-recover=undefined` build returned exit 0 for
+every case afterwards. Every valid date, day number and Add* result is byte-identical (case 9),
+including both domain endpoints and the widest legal day spans.
+
+**Tests: +8 permanent regressions** in `DateOnlyTimeOnlyTests.cpp`. Repository gate: **0 warnings,
+0 errors, 14,170 tests across 37 executables** (was 14,162). Module graph **41 / 91**. Canonical
+Doxygen unchanged.
+
+**Source and ABI consequences: none.** `DateOnly.hpp` is unchanged; `kMaxDayNumber` is a
+file-local `static constexpr` and every change is inside a function body.

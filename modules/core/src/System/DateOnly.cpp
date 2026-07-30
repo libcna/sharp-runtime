@@ -6,6 +6,7 @@
 #include "System/DateTime.hpp"
 #include "System/TimeOnly.hpp"
 #include "System/FormatException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include <algorithm>
 #include <cstdio>
 
@@ -46,6 +47,13 @@ static void jdnToDate(int jdn, int& y, int& m, int& d) {
 // JDN of 0001-01-01 (DateOnly epoch)
 static constexpr int JDN_EPOCH = 1721426;
 
+// Largest valid day number, i.e. DateOnly::MaxValue.getDayNumberProperty(). Equal to
+// .NET's `MaxDayNumber = DateTime.DaysTo10000 - 1` (DateOnly.cs:30, DateTime.cs:75),
+// measured 3652058 for 9999-12-31 in this port too (build-probe/1837_dateonly_surface
+// case 9). The valid domain is the closed range [0, kMaxDayNumber]; one unsigned
+// compare against it rejects negative and overlarge day numbers together.
+static constexpr SharpRuntime::intcs kMaxDayNumber = 3652058;
+
 DayOfWeek DateOnly::getDayOfWeekProperty() const {
     // JDN % 7: 0=Monday … 6=Sunday → map to .NET Sunday=0
     int jdn = dateToJDN(year_, month_, day_);
@@ -61,8 +69,19 @@ intcs DateOnly::getDayNumberProperty() const {
 }
 
 DateOnly DateOnly::FromDayNumber(intcs dayNumber) {
+    // CCF-004 class C (SR-AUD-060, ticket #1837). Mirror .NET DateOnly.FromDayNumber
+    // (DateOnly.cs:73-81): one unsigned compare rejects a negative and an overlarge day
+    // number together, *before* the conversion, so jdnToDate below can never receive an
+    // out-of-range argument. Before this, `dayNumber + JDN_EPOCH` overflowed at
+    // DateOnly.cpp:65 for INTCS_MAX; for INTCS_MIN it did not overflow there but drove the
+    // :35/:37/:39 multiplication cascade inside jdnToDate with a wildly out-of-range value
+    // (build-probe/1837_dateonly_surface cases 1 and 2). This is the class C rejection: the
+    // inputs it now rejects previously produced undefined behaviour, not a usable date.
+    if (static_cast<SharpRuntime::uintcs>(dayNumber) > static_cast<SharpRuntime::uintcs>(kMaxDayNumber))
+        throw ArgumentOutOfRangeException("dayNumber",
+            "Day number must be between 0 and DateOnly.MaxValue.DayNumber.");
     int y, m, d;
-    jdnToDate(dayNumber + JDN_EPOCH, y, m, d);
+    jdnToDate(static_cast<int>(dayNumber) + JDN_EPOCH, y, m, d);
     return DateOnly(y, m, d);
 }
 
@@ -72,24 +91,68 @@ intcs DateOnly::CompareTo(const DateOnly& other) const {
 }
 
 DateOnly DateOnly::AddDays(intcs n) const {
+    // CCF-004 class C (SR-AUD-060, ticket #1837). Mirror .NET DateOnly.AddDays
+    // (DateOnly.cs:121-132): add in the unsigned domain (a defined wrap) and reject with a
+    // single unsigned compare, which catches the overflowed and the merely out-of-range
+    // result alike. Before this, `dateToJDN(...) + n` overflowed signed int at
+    // DateOnly.cpp:76 (INTCS_MAX), and when it wrapped it drove jdnToDate's :35/:37/:39
+    // cascade (build-probe/1837_dateonly_surface cases 3 and 4). The guard keeps jdnToDate's
+    // argument in [JDN_EPOCH, JDN_EPOCH + kMaxDayNumber], where it cannot overflow. Adding
+    // in the day-number domain (rather than the JDN domain) is exactly what .NET does, and
+    // yields the identical result for every value that used to succeed.
+    const intcs dayNumber = getDayNumberProperty();          // always in [0, kMaxDayNumber]
+    const intcs newDayNumber = static_cast<intcs>(
+        static_cast<SharpRuntime::uintcs>(dayNumber) + static_cast<SharpRuntime::uintcs>(n));
+    if (static_cast<SharpRuntime::uintcs>(newDayNumber) > static_cast<SharpRuntime::uintcs>(kMaxDayNumber))
+        throw ArgumentOutOfRangeException("value", "Value to add was out of range.");
     int y, m, d;
-    jdnToDate(dateToJDN(year_, month_, day_) + n, y, m, d);
+    jdnToDate(static_cast<int>(newDayNumber) + JDN_EPOCH, y, m, d);
     return DateOnly(y, m, d);
 }
 
 DateOnly DateOnly::AddMonths(intcs n) const {
-    int y = year_, m = month_ + n, d = day_;
-    while (m > 12) { m -= 12; ++y; }
-    while (m < 1)  { m += 12; --y; }
+    // CCF-004 class C (SR-AUD-060, ticket #1837). .NET routes DateOnly.AddMonths through
+    // DateTime.AddMonths (DateOnly.cs:139), and this port's DateTime::AddMonths
+    // (DateTime.cpp:183-201) already mirrors DateTime.cs:960-977: bound the delta to
+    // +/-120000 *before* any arithmetic, then normalise with one division. That bound does
+    // two jobs here -- it makes `month_ + n` unable to overflow (it did at DateOnly.cpp:81
+    // for AddMonths(INTCS_MAX)) and it replaces the old `while (m < 1) { m += 12; --y; }`
+    // loop, which ran about 179 million times for AddMonths(INTCS_MIN) before returning
+    // (docs/DefinedArithmeticBoundaryPlan.md 16.5). paramName "months" matches
+    // DateTime::AddMonths, the sibling this delegates its contract to.
+    if (n < -120000 || n > 120000)
+        throw ArgumentOutOfRangeException("months", "DateTime: months out of range");
+    int m = month_ + static_cast<int>(n);                 // |n| <= 120000 => defined
+    const int q = (m > 0) ? (m - 1) / 12 : m / 12 - 1;    // branchless normalisation
+    const int y = year_ + q;
+    m -= q * 12;
+    if (y < 1 || y > 9999)
+        throw ArgumentOutOfRangeException("months", "DateTime: resulting year out of range");
     static const int dpm[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
-    bool leap = (y % 4 == 0) && (y % 100 != 0 || y % 400 == 0);
-    int maxDay = (m == 2 && leap) ? 29 : dpm[m];
+    const bool leap = (y % 4 == 0) && (y % 100 != 0 || y % 400 == 0);
+    const int maxDay = (m == 2 && leap) ? 29 : dpm[m];
+    int d = day_;
     if (d > maxDay) d = maxDay;
     return DateOnly(y, m, d);
 }
 
 DateOnly DateOnly::AddYears(intcs n) const {
-    return AddMonths(n * 12);
+    // CCF-004 class C (SR-AUD-060, ticket #1837). Mirror .NET DateTime.AddYears
+    // (DateTime.cs:1020-1032): bound the delta to +/-10000 -- which makes `n * 12` unable to
+    // overflow (it did at DateOnly.cpp:92) -- then reject an unrepresentable resulting year,
+    // both naming "value". The pre-repair code was `AddMonths(n * 12)` with no bound: for
+    // AddYears(INTCS_MIN), `n * 12` is exactly -6*2^32, which wrapped to ZERO and made
+    // AddYears silently return this date unchanged -- a wrong answer, not merely UB, and the
+    // second silent-wrong-answer member of CCF-004 (docs/DefinedArithmeticBoundaryPlan.md
+    // 16.4). The resulting-year check here carries paramName "value" so an out-of-range
+    // AddYears reports "value" rather than the "months" its AddMonths delegate would report,
+    // matching .NET DateTime.AddYears's ThrowDateArithmetic(0).
+    if (n < -10000 || n > 10000)
+        throw ArgumentOutOfRangeException("value", "DateTime: years out of range");
+    const int resultingYear = year_ + static_cast<int>(n);  // in [-9999, 19999] => defined
+    if (resultingYear < 1 || resultingYear > 9999)
+        throw ArgumentOutOfRangeException("value", "DateTime: resulting year out of range");
+    return AddMonths(n * 12);                               // n in [-10000,10000] => defined
 }
 
 DateOnly DateOnly::FromDateTime(const DateTime& dt) {

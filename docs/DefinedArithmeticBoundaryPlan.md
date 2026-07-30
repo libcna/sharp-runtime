@@ -717,3 +717,89 @@ is untouched.
 SR-AUD-008's site count is therefore **six** (one in `Subtract`, four undefined columns and one
 undefined `sscanf` conversion in the parse core), against the two §2 records, and its public-door
 count is **five** (`Subtract`, `operator-`, `TryParse`, `Parse`, `XmlConvert::ToTimeSpan`).
+
+---
+
+## 18. What #1837 measured, and the paramName decision (2026-07-30)
+
+#1837 is the family's **last** member and its second class C. All seven sites §2.1 predicted
+are confirmed and gone, and the two additions §16 could only reproduce are now fixed. Evidence:
+`build-probe/1837_dateonly_surface.cpp`, `build-probe/1837_prefix.log` and
+`build-probe/1837_postfix.log`, ten cases, **one process per case**, against a `build-asan` tree
+whose `DateOnly.cpp.o` and `libsharp_runtime_core.a` were verified newer than the source both
+before (07:45) and after (relinked 07:50 the same session) the edit — recovering for enumeration,
+`-fno-sanitize-recover=undefined` afterwards, every case exit 0.
+
+### 18.1 The representation gap that shapes the whole repair
+
+.NET `DateOnly` stores a `uint _dayNumber` and does its arithmetic on it. **This port stores
+`year_`/`month_`/`day_`** and converts through Julian day numbers (`dateToJDN`/`jdnToDate`). So
+.NET's idiom could not be copied byte-for-byte: it had to be *translated*. `FromDayNumber` and
+`AddDays` are genuine day-number operations and take the unsigned-compare idiom directly;
+`AddMonths` and `AddYears` are month/year operations and take .NET's `DateTime.AddMonths`/`AddYears`
+bounds-then-divide idiom, which this repository's own `DateTime::AddMonths`
+(`DateTime.cpp:183-201`) already implements. `kMaxDayNumber` was **measured** at 3652058, equal to
+.NET's `DateTime.DaysTo10000 - 1`, not assumed.
+
+### 18.2 The seven sites, all gone, and the cascade proven unreachable
+
+`:65` (`FromDayNumber`) and `:76` (`AddDays`) are removed by adding in the *unsigned* domain and
+rejecting with a single unsigned compare **before** `jdnToDate` is reached, so `:35`/`:37`/`:39`
+can no longer see an out-of-range argument — the cascade is unreachable by construction, not by a
+per-site guard. `:81` (`AddMonths`) and `:92` (`AddYears`) are removed by bounding the delta before
+the arithmetic. §16.3's finding — that `FromDayNumber(INTCS_MIN)` reaches the cascade **without**
+an entry-point overflow — is why an entry-point-only overflow guard would have been insufficient;
+the day-number range check is what closes it.
+
+### 18.3 The bounded-loop requirement (16.5) is met by removing the loop
+
+`AddMonths`'s two `while` loops (~179 million iterations for `AddMonths(INTCS_MIN)`) are replaced by
+.NET's single division `q = (m > 0) ? (m - 1)/12 : m/12 - 1`. There is no loop left to bound.
+
+### 18.4 The two silent wrong answers (16.4), now rejected
+
+`AddYears(INTCS_MIN)` returned `0001-01-01` unchanged (the `*12` wrapped to zero); it now throws.
+`AddMonths(INTCS_MIN)` was not a wrong answer — it eventually threw — but was the unbounded loop.
+Both are covered by the class C compatibility argument (§4.3, §9): the rejected inputs never
+produced a usable value, three of the four via undefined behaviour and the fourth via a silent
+wrap, so no new approval is required.
+
+### 18.5 The paramName decision, stated and justified
+
+§4.3 left this to the ticket, and §16.6 measured the before-string: **every** current rejection
+named `year` with `"DateTime: date component out of range (Parameter 'year')"`, because it came
+from the `DateTime` constructor rather than from `DateOnly`. The decision taken is to adopt
+**.NET's per-method paramNames** — `dayNumber` (`FromDayNumber`), `value` (`AddDays`, `AddYears`),
+`months` (`AddMonths`) — for three reasons: (1) maximum practical parity is the project mission
+and .NET names the actual parameter; (2) the inherited `year` was a *leaked implementation detail*
+of the delegated-to `DateTime` constructor, not a deliberate `DateOnly` contract; (3) the exception
+**type** — `ArgumentOutOfRangeException` — is unchanged, so only the `paramName` string and the
+message text differ, and only on inputs that are rejected either way. Messages follow the sibling
+`DateTime::AddMonths`/`AddYears` (`"DateTime: months out of range"`, `"DateTime: resulting year out
+of range"`, `"DateTime: years out of range"`) for consistency within this repository, and .NET's
+`SR.ArgumentOutOfRange_DayNumber`/`_AddValue` verbatim for the two day-number doors that have no
+`DateTime` sibling.
+
+**One deliberate, documented consequence.** A *moderately* out-of-range input — one whose result
+leaves `[0001,9999]` but whose arithmetic never overflowed (e.g. `AddMonths(200000)`,
+`AddYears(50000)`) — used to throw `year` via the `DateTime` constructor and now throws `months`
+or `value`. That is a `paramName`/message change on a **non-UB rejection path**. It is authorised
+by this ticket's acceptance criterion ("a stated, justified paramName choice") and by §4.3, it
+changes no input from success to failure, and it changes no exception **type**. No in-repository
+test pinned the old `year` string for such an input (the only Add* tests covered small valid
+deltas), so nothing regressed.
+
+### 18.6 One residual .NET divergence, recorded not fixed
+
+.NET's `DateOnly.AddYears` reports `value` for an unrepresentable **result** too, via
+`DateTime.AddYears`'s `ThrowDateArithmetic(0)`. This port's `AddYears` reproduces that by
+range-checking the resulting year itself with paramName `value` before delegating the day-clamp to
+`AddMonths`. `AddMonths`'s own result check still reports `months`, matching .NET's
+`DateOnly.AddMonths`. No divergence remains between the two.
+
+### 18.7 Public surface and family closure
+
+`DateOnly.hpp` is unchanged — no declaration, member, signature, symbol or object layout changed;
+`kMaxDayNumber` is a file-local `static constexpr`. Public doors: `FromDayNumber`, `AddDays`,
+`AddMonths`, `AddYears`, all pinned by tests. SR-AUD-060 is `remediated`. **With #1836 and #1837
+done, every one of CCF-004's eight members is remediated and the family is closed.**

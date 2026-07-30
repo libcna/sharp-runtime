@@ -7936,3 +7936,44 @@ exit 0 for every case afterwards. ASan+UBSan+LSan clean (`build-probe/1836_asan_
 **14,162 tests across 37 executables** (was 14,145), 0 warnings, 0 errors. Module graph
 **41 / 91**. **No public signature, virtual, vtable, object layout or mangled symbol changed** —
 `TimeSpan.hpp` untouched; the parse core is a file-local `static` function.
+
+## Completed DateOnly defined arithmetic — CCF-004 CLOSED: ticket #1837 (2026-07-30)
+
+`REMED-CORE-DATEONLY-DEFINED-ARITH`, P1, size M. **CCF-004 class C**, the **eighth and final**
+family member — **CCF-004 is now closed**. **SR-AUD-060 is now `remediated`**; index counts move
+to **29 remediated / 335 confirmed of 364**.
+
+**Seven sites, all gone.** `:65` (`FromDayNumber`) and `:76` (`AddDays`) removed by adding in the
+**unsigned** day-number domain and rejecting with one unsigned compare *before* `jdnToDate`, which
+makes the `:35`/`:37`/`:39` cascade inside `jdnToDate` unreachable with an out-of-range argument
+(§16.3: `FromDayNumber(INTCS_MIN)` reaches the cascade *without* an entry-point overflow, so an
+entry-point-only guard was insufficient). `:81` (`AddMonths`) and `:92` (`AddYears`) removed by
+bounding the delta (+/-120000, +/-10000) before any arithmetic.
+
+**Representation gap.** The port stores `year_`/`month_`/`day_` (not .NET's `uint _dayNumber`), so
+.NET's idiom was translated: `FromDayNumber`/`AddDays` take the unsigned-compare idiom directly;
+`AddMonths`/`AddYears` take `DateTime.AddMonths`/`AddYears`'s bounds-then-divide idiom, which this
+repo's `DateTime::AddMonths` already implements. `kMaxDayNumber` **measured** 3652058.
+
+**Two silent wrong answers (16.4/16.5), now fixed.** `AddYears(INTCS_MIN)` returned `0001-01-01`
+unchanged (`*12` wrapped to zero) — now throws. `AddMonths(INTCS_MIN)` ran a **~179M-iteration**
+normalisation loop — the two `while` loops are replaced by .NET's single division
+`q=(m>0)?(m-1)/12:m/12-1`, so no path iterates unboundedly.
+
+**paramName decision (design §18.5):** adopt .NET's per-method names — `dayNumber`, `value`,
+`months`, `value` — replacing the leaked `DateTime`-constructor `year`. Justified: parity is the
+mission; `year` was not a deliberate `DateOnly` contract; exception **type** unchanged. One
+documented consequence — a moderately out-of-range, non-overflowing input (e.g. `AddMonths(200000)`)
+that used to throw `year` now throws `months`/`value`; authorised by the acceptance criterion and
+§4.3, changes no success→failure and no exception type, and no test pinned the old string.
+
+**Verified by measurement.** `build-probe/1837_prefix.log` vs `1837_postfix.log`, one process per
+case, `build-asan` proven newer than source before and after; recovering build enumerated all
+seven sites, `-fno-sanitize-recover=undefined` returned exit 0 for every case afterwards. Every
+valid date/day-number/Add* result byte-identical (case 9), including both endpoints and the widest
+legal day spans.
+
+**+8 permanent regressions** in `DateOnlyTimeOnlyTests.cpp`. Repository gate **14,170 tests across
+37 executables** (was 14,162), 0 warnings, 0 errors. Module graph **41 / 91**. **No public
+signature, virtual, vtable, object layout or mangled symbol changed** — `DateOnly.hpp` untouched;
+`kMaxDayNumber` is a file-local `static constexpr`.
