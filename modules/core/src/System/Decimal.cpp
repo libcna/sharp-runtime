@@ -158,7 +158,12 @@ Decimal::Decimal(intcs lo, intcs mid, intcs hi, bool isNegative, bytecs scale) {
         throw System::ArgumentOutOfRangeException("scale", "Decimal scale must be in range 0-28.");
     mantissa_ = (u128(uint32_t(hi)) << 64) | (u128(uint32_t(mid)) << 32) | u128(uint32_t(lo));
     scale_    = scale;
-    negative_ = isNegative && mantissa_ != 0;
+    // SR-AUD-038 (#1856): set the sign bit UNCONDITIONALLY, matching .NET's
+    // Decimal(int,int,int,bool,byte) which does `if (isNegative) _flags |= SignMask;`
+    // with no mantissa check. A negative zero (mantissa 0, isNegative true) is a distinct
+    // representation observable through GetBits/IsNegative, even though it compares and
+    // hashes equal to positive zero (see operator== / GetHashCode).
+    negative_ = isNegative;
 }
 
 // ---------------------------------------------------------------------------
@@ -315,7 +320,11 @@ bool Decimal::TryParse(const std::string& s, Decimal& result) {
         } else { return false; }
     }
     if (!seenDigit) return false;
-    result = Decimal(mantissa, scale, neg && mantissa != 0);
+    // SR-AUD-038 (#1856): preserve the parsed sign even for a zero magnitude, so
+    // Parse("-0") yields a negative zero, matching .NET's decimal parser (its
+    // NumberBufferKind.Decimal path does NOT clear IsNegative for a zero value, unlike
+    // the Integer path). -0 still compares and hashes equal to +0.
+    result = Decimal(mantissa, scale, neg);
     return true;
 }
 

@@ -260,3 +260,18 @@ against .NET: the `Round(value, digits, mode)` overloads validate the mode *only
 through the funnel*, so Math ≥ 1e16 / MathF ≥ 1e8 magnitudes return unchanged
 without validating the mode — this faithfully matches .NET's Math.cs/MathF.cs and
 is intentional, not a gap; Decimal validates unconditionally.
+
+**CCF5D-2 — SR-AUD-038 core — DONE (#1856, 2026-07-30).** The raw ctor
+(`Decimal.cpp`: `negative_ = isNegative`), `CopySign` (`Decimal.hpp`:
+`sign.negative_`), and `TryParse` (`Decimal.cpp`: `Decimal(mantissa, scale,
+neg)`) all now preserve the sign of a zero magnitude, so `Decimal(0,0,0,true,0)`,
+`CopySign(0m,-1m)` and `Parse("-0")` are negative zeros observable through
+`GetBits().flags==0x80000000` / `IsNegative()==true`. As §3.4 predicted, the
+equality/hash ripple needed no change — `operator==` already returns true when
+both mantissas are zero regardless of sign, and `GetHashCode` already computes
+`neg = negative_ && m != 0`, so `−0m == 0m` stays true and both hash equal.
+Positive `Decimal::Zero` still reports `flags==0`. +6 add-only tests. The
+`Parse("-0")` contract was chosen as **.NET parity (−0)**, confirmed against the
+reference `NumberBufferKind.Decimal` path which does not clear `IsNegative` for a
+zero value. `normalize()`/unary-`−` negative-zero *production* stays out of scope
+(the deferred broader decision in §4/§6).

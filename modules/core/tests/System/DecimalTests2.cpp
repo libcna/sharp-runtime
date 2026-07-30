@@ -80,6 +80,85 @@ TEST(DecimalTests2, GetBits_ScaleAndSignEncoded) {
 }
 
 // ---------------------------------------------------------------------------
+// SR-AUD-038 (#1856): negative zero is a distinct, observable representation.
+// The raw ctor, CopySign, and the parser preserve the sign of a zero magnitude
+// (matching .NET's Decimal(int,int,int,bool,byte)/CopySign/parser), yet -0 still
+// compares and hashes equal to +0.
+// ---------------------------------------------------------------------------
+
+TEST(DecimalTests2, RawCtor_NegativeZero_SignObservable) {
+    Decimal negZero(0, 0, 0, /*isNegative=*/true, 0);
+    intcs lo, mid, hi, flags;
+    Decimal::GetBits(negZero, lo, mid, hi, flags);
+    EXPECT_EQ(lo, 0);
+    EXPECT_EQ(mid, 0);
+    EXPECT_EQ(hi, 0);
+    EXPECT_EQ(uint32_t(flags), 0x80000000u);   // sign bit set, scale 0
+    EXPECT_TRUE(negZero.getIsNegativeProperty());
+    EXPECT_TRUE(Decimal::IsNegative(negZero));
+    EXPECT_FALSE(Decimal::IsPositive(negZero));
+}
+
+TEST(DecimalTests2, RawCtor_NegativeZero_WithScale) {
+    Decimal negZero(0, 0, 0, /*isNegative=*/true, 4);
+    intcs lo, mid, hi, flags;
+    Decimal::GetBits(negZero, lo, mid, hi, flags);
+    EXPECT_EQ(uint32_t(flags), 0x80000000u | (4u << 16));  // sign + scale 4
+    EXPECT_TRUE(negZero.getIsNegativeProperty());
+}
+
+TEST(DecimalTests2, PositiveZero_HasNoSignBit) {
+    intcs lo, mid, hi, flags;
+    Decimal::GetBits(Decimal::Zero, lo, mid, hi, flags);
+    EXPECT_EQ(uint32_t(flags), 0u);
+    EXPECT_FALSE(Decimal::Zero.getIsNegativeProperty());
+    // Default-constructed and explicitly-built positive zero both stay unsigned.
+    EXPECT_FALSE(Decimal(0, 0, 0, false, 0).getIsNegativeProperty());
+}
+
+TEST(DecimalTests2, CopySign_ProducesNegativeZero) {
+    Decimal r = Decimal::CopySign(Decimal(0), Decimal(-1));
+    EXPECT_TRUE(r.getIsNegativeProperty());
+    EXPECT_TRUE(Decimal::IsNegative(r));
+    intcs lo, mid, hi, flags;
+    Decimal::GetBits(r, lo, mid, hi, flags);
+    EXPECT_EQ(uint32_t(flags) & 0x80000000u, 0x80000000u);
+    // CopySign(0, +1) stays positive zero.
+    Decimal p = Decimal::CopySign(Decimal(0), Decimal(1));
+    EXPECT_FALSE(p.getIsNegativeProperty());
+}
+
+TEST(DecimalTests2, NegativeZero_ComparesAndHashesEqualToPositiveZero) {
+    Decimal negZero(0, 0, 0, true, 0);
+    Decimal posZero(0, 0, 0, false, 0);
+    EXPECT_TRUE(negZero == posZero);
+    EXPECT_TRUE(posZero == negZero);
+    EXPECT_FALSE(negZero < posZero);
+    EXPECT_FALSE(posZero < negZero);
+    EXPECT_EQ(negZero.CompareTo(posZero), 0);
+    EXPECT_EQ(negZero.GetHashCode(), posZero.GetHashCode());
+    EXPECT_EQ(negZero.GetHashCode(), Decimal::Zero.GetHashCode());
+}
+
+TEST(DecimalTests2, Parse_NegativeZero_PreservesSign) {
+    // .NET's decimal parser produces a negative zero for "-0" (the Decimal-kind
+    // buffer does not clear IsNegative for a zero value).
+    Decimal d = Decimal::Parse("-0");
+    EXPECT_TRUE(d.getIsNegativeProperty());
+    intcs lo, mid, hi, flags;
+    Decimal::GetBits(d, lo, mid, hi, flags);
+    EXPECT_EQ(uint32_t(flags) & 0x80000000u, 0x80000000u);
+    EXPECT_TRUE(d == Decimal::Zero);   // still equal to +0
+
+    Decimal d2 = Decimal::Parse("-0.00");
+    EXPECT_TRUE(d2.getIsNegativeProperty());
+
+    // A plain "0" and "+0" remain positive zero.
+    EXPECT_FALSE(Decimal::Parse("0").getIsNegativeProperty());
+    EXPECT_FALSE(Decimal::Parse("+0").getIsNegativeProperty());
+}
+
+// ---------------------------------------------------------------------------
 // Static To* overloads (mirroring .NET's static method surface)
 // ---------------------------------------------------------------------------
 

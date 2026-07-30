@@ -37,6 +37,10 @@ rounds to the nearest four-decimal currency unit.
   .NET documents bit 31 as a sign bit and explicitly states that its decimal
   representation distinguishes positive and negative zero:
   <https://learn.microsoft.com/en-us/dotnet/api/system.decimal.getbits?view=net-10.0>.
+  **Remediated (#1856, 2026-07-30):** `CopySign` now copies the sign
+  unconditionally (`sign.negative_`), so `CopySign(0m, -1m)` is a negative zero
+  observable via `GetBits`/`IsNegative`. Paired with the raw-ctor and parser
+  fixes in `Decimal.cpp`. `−0m == 0m` and hash equality were already correct.
 
 ## Required post-audit verification
 

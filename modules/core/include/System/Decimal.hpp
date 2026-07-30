@@ -637,7 +637,10 @@ public:
      */
     static Decimal CopySign(const Decimal& value, const Decimal& sign)
     {
-        return Decimal(value.mantissa_, value.scale_, sign.negative_ && value.mantissa_ != 0);
+        // SR-AUD-038 (#1856): copy the sign UNCONDITIONALLY, matching .NET's
+        // CopySign which does `(value._flags & ~SignMask) | (sign._flags & SignMask)`
+        // with no zero-magnitude special case, so CopySign(0m, -1m) is a negative zero.
+        return Decimal(value.mantissa_, value.scale_, sign.negative_);
     }
 
     /**

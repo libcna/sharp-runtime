@@ -45,6 +45,12 @@ zero.
   raw negative zero and obtains `negative_zero_flags=0`; .NET exposes a
   distinct sign bit for negative zero through `GetBits`:
   <https://learn.microsoft.com/en-us/dotnet/api/system.decimal.getbits?view=net-10.0>.
+  **Remediated (#1856, 2026-07-30):** the raw ctor now sets `negative_ =
+  isNegative` unconditionally and `TryParse` builds `Decimal(mantissa, scale,
+  neg)` (so `Parse("-0")` → −0), matching .NET's raw ctor and its
+  `NumberBufferKind.Decimal` parser path. Equality/hash stay sign-agnostic for
+  zero, so `−0m == 0m` and both hash equal. `normalize()`/unary-`−` production
+  of negative zeros is deliberately out of scope (deferred broader decision).
 
 ## Required post-audit verification
 
