@@ -117,3 +117,74 @@ deliberate vector-runtime adaptation and test the exact value.
 Ordinary vector operations have good range coverage, but public copying,
 default float ordering, callable diagnostics, and `MaxLength` parity contain
 confirmed gaps.  No production code was modified during this audit.
+
+---
+
+## SR-AUD-052 — REMEDIATED (ticket #1869, 2026-07-30, CCF-011)
+
+The original evidence above is retained unchanged. **Only SR-AUD-052 is closed by
+this ticket.** SR-AUD-044, SR-AUD-046, SR-AUD-051 and SR-AUD-053 in this same
+report remain `confirmed`; none of them is touched.
+
+All seventeen delegate-taking overloads — `Sort` ×2, `BinarySearch` ×2,
+`ConvertAll`, `Exists`, `Find`, `FindLast`, `FindAll`, `FindIndex` ×3,
+`FindLastIndex` ×3, `ForEach`, `TrueForAll` — now call one shared private
+`requireCallable(callable, paramName)` before any element is examined, throwing
+`System::ArgumentNullException` with the parameter's own .NET name.
+
+**Parameter renames, deliberate.** The twelve `Predicate<T>`-shaped parameters
+were named `predicate`; .NET names them `match`, and the name is carried in the
+observable message (`Value cannot be null. (Parameter 'match')`). They are
+renamed to `match` in signature and doc-comment so the two agree. In C++ a
+function-parameter name contributes nothing to the interface — no designated
+arguments, no mangling — so this is source-compatible and ABI-neutral.
+`comparison`, `converter` and `action` already matched .NET and are unchanged.
+
+**Validation order reproduces .NET's asymmetry.** `Array.FindIndex` validates
+`startIndex`, then `count`, then `match` (`Array.cs:1599-1622`);
+`Array.FindLastIndex` validates `match` first and `startIndex`/`count` second
+(`Array.cs:1671-1706`). The port now does the same, in both directions, and two
+permanent tests pin it.
+
+**Correction to the finding's premise (measured 2026-07-30).** The finding says
+an empty `std::function` "throws `std::bad_function_call` only if iteration
+reaches it; on an empty vector, `Exists` returns false without any error". That
+understates the silent set: `Sort(oneElement, {})` and
+`BinarySearch(oneElement, …, {})` were **also** silent, because `std::sort` and
+the search loop never compare below two elements and an empty array never enters
+the loop (`array.sort.comparison.one=no-throw`,
+`array.binarysearch.emptyarray=no-throw`, `build-probe/1866_prefix.log`).
+Additionally, `Array::FindLastIndex` reported its *range* error before the
+callable, where .NET reports the callable first; correcting that is inseparable
+from adding the check at all, so it is folded in here and receives **no** new
+`SR-AUD-*` identifier (the numbering stays frozen at 364). The historical text
+above is left as written, per this repository's practice.
+
+**One observable behaviour change, deliberate.** A call that used to return an
+ordinary result — an empty (or one-element, for the sort/search entries) array
+with an empty callable — now throws. This is .NET's documented behaviour for the
+identical call, and the call was already wrong; `TrueForAll(empty, {})` in
+particular used to return the vacuous `true` and hide the invalid argument
+entirely. Recorded as B1 in `docs/EmptyCallableBoundaryPlan.md` §9.
+
+Closure evidence: 13 new permanent regressions in `ArrayTests.cpp` (every
+overload for empty and non-empty input; the exact `paramName` for all four names;
+no partial mutation by a rejected `Sort`; both validation orders; `TrueForAll`'s
+lost vacuous-true fast path together with proof that a real predicate still gets
+it; catchability as `System::Exception`; and a regression pass asserting every
+overload still produces its pre-existing result with a real callable).
+`ArrayTests` 93/93, `SharpRuntimeTests_Core_Base` 5,293/5,293, whole-repository
+build clean with zero errors and zero warnings. The direct probe
+`build-probe/1866_empty_callable_probe.cpp`, compiled **with**
+`-fsanitize=address,undefined` so this header-only template change is itself
+instrumented, exits 0 with zero AddressSanitizer, UndefinedBehaviorSanitizer and
+LeakSanitizer reports (`build-probe/1869_postfix_asan.log`); all 26 `array.*`
+cases report `ArgumentNullException` with the expected parameter name and the two
+ordering cases report the expected exception type.
+
+Source, ABI and layout consequences: none. `Array` is a static-only class
+(`Array() = delete`) with no data members; every entry is a function template, so
+no mangled symbol exists to change. No `noexcept` specification, virtual function
+or default argument changed.
+
+The plan for this family is `docs/EmptyCallableBoundaryPlan.md` (ticket #1866).

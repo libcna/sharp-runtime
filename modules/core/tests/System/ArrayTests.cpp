@@ -2,8 +2,13 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <functional>
+#include <string>
 #include <vector>
+#include "System/ArgumentNullException.hpp"
 #include "System/Array.hpp"
+#include "System/Exception.hpp"
 
 using System::Array;
 using SharpRuntime::intcs;
@@ -489,4 +494,174 @@ TEST(ArrayTests, LastIndexOf_OnEmptyArray_ReturnsNegativeOneWithoutThrowing) {
 TEST(ArrayTests, LastIndexOf_FourArg_CountPastStart_Throws) {
     std::vector<int> v = {1, 2, 3};
     EXPECT_THROW(Array::LastIndexOf(v, 1, 1, 5), System::ArgumentOutOfRangeException);
+}
+
+// ---------------------------------------------------------------------------
+// Empty std::function delegate arguments (#1869 / SR-AUD-052 / CCF-011)
+//
+// Every delegate-taking overload used to invoke its callable directly, so an empty
+// std::function raised std::bad_function_call only if iteration reached it: an empty array
+// returned an ordinary result, and Sort/BinarySearch did so for a one-element array too,
+// because std::sort and the search loop never compare. std::bad_function_call does not
+// derive from System::Exception, so ported `catch (const Exception&)` code cannot see it.
+// .NET checks the delegate at the public boundary and throws ArgumentNullException naming
+// the parameter -- `match`, `comparison`, `converter`, `action`.
+// See docs/EmptyCallableBoundaryPlan.md.
+// ---------------------------------------------------------------------------
+
+namespace {
+    using IntPred   = std::function<bool(const int&)>;
+    using IntAction = std::function<void(const int&)>;
+    using IntCmp    = std::function<int(const int&, const int&)>;
+    using IntConv   = std::function<int(const int&)>;
+
+    // Asserts that `expr` throws ArgumentNullException whose message names `param`.
+    void expectParamName(const std::function<void()>& call, const char* param) {
+        try {
+            call();
+            FAIL() << "expected ArgumentNullException naming '" << param << "'";
+        } catch (const System::ArgumentNullException& e) {
+            EXPECT_EQ(std::string(e.what()),
+                      std::string("Value cannot be null. (Parameter '") + param + "')");
+        }
+    }
+} // namespace
+
+TEST(ArrayTests, EmptyComparison_Sort_Throws_RegardlessOfLength) {
+    std::vector<int> empty;
+    std::vector<int> one{1};
+    std::vector<int> two{2, 1};
+    EXPECT_THROW(Array::Sort<int>(empty, IntCmp{}), System::ArgumentNullException);
+    EXPECT_THROW(Array::Sort<int>(one, IntCmp{}), System::ArgumentNullException);
+    EXPECT_THROW(Array::Sort<int>(two, IntCmp{}), System::ArgumentNullException);
+    // no partial mutation
+    EXPECT_EQ(two[0], 2);
+    EXPECT_EQ(two[1], 1);
+}
+
+TEST(ArrayTests, EmptyComparison_Sort_ParamNameIsComparison) {
+    std::vector<int> v{2, 1};
+    expectParamName([&] { Array::Sort<int>(v, IntCmp{}); }, "comparison");
+}
+
+TEST(ArrayTests, EmptyComparison_SortRange_ThrowsAfterRangeCheck) {
+    std::vector<int> v{2, 1};
+    EXPECT_THROW(Array::Sort<int>(v, 0, 2, IntCmp{}), System::ArgumentNullException);
+    // an invalid range is still reported first
+    EXPECT_THROW(Array::Sort<int>(v, 5, 1, IntCmp{}), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayTests, EmptyComparison_BinarySearch_Throws_RegardlessOfLength) {
+    const std::vector<int> empty;
+    const std::vector<int> one{7};
+    EXPECT_THROW((void)Array::BinarySearch<int>(empty, 7, IntCmp{}), System::ArgumentNullException);
+    EXPECT_THROW((void)Array::BinarySearch<int>(one, 7, IntCmp{}), System::ArgumentNullException);
+    EXPECT_THROW((void)Array::BinarySearch<int>(one, 0, 1, 7, IntCmp{}), System::ArgumentNullException);
+}
+
+TEST(ArrayTests, EmptyConverter_ConvertAll_Throws_EvenForEmptyArray) {
+    const std::vector<int> empty;
+    const std::vector<int> one{1};
+    EXPECT_THROW((void)(Array::ConvertAll<int, int>(empty, IntConv{})), System::ArgumentNullException);
+    EXPECT_THROW((void)(Array::ConvertAll<int, int>(one, IntConv{})), System::ArgumentNullException);
+    expectParamName([&] { (void)Array::ConvertAll<int, int>(one, IntConv{}); }, "converter");
+}
+
+TEST(ArrayTests, EmptyAction_ForEach_Throws_EvenForEmptyArray) {
+    const std::vector<int> empty;
+    const std::vector<int> one{1};
+    EXPECT_THROW(Array::ForEach<int>(empty, IntAction{}), System::ArgumentNullException);
+    EXPECT_THROW(Array::ForEach<int>(one, IntAction{}), System::ArgumentNullException);
+    expectParamName([&] { Array::ForEach<int>(one, IntAction{}); }, "action");
+}
+
+TEST(ArrayTests, EmptyMatch_EveryPredicateOverload_Throws_EvenForEmptyArray) {
+    const std::vector<int> empty;
+    const std::vector<int> one{1};
+    for (const std::vector<int>* v : {&empty, &one}) {
+        EXPECT_THROW((void)Array::Exists<int>(*v, IntPred{}), System::ArgumentNullException);
+        EXPECT_THROW((void)Array::Find<int>(*v, IntPred{}), System::ArgumentNullException);
+        EXPECT_THROW((void)Array::FindLast<int>(*v, IntPred{}), System::ArgumentNullException);
+        EXPECT_THROW((void)Array::FindAll<int>(*v, IntPred{}), System::ArgumentNullException);
+        EXPECT_THROW((void)Array::FindIndex<int>(*v, IntPred{}), System::ArgumentNullException);
+        EXPECT_THROW((void)Array::FindIndex<int>(*v, 0, IntPred{}), System::ArgumentNullException);
+        EXPECT_THROW((void)Array::FindLastIndex<int>(*v, IntPred{}), System::ArgumentNullException);
+        EXPECT_THROW((void)Array::TrueForAll<int>(*v, IntPred{}), System::ArgumentNullException);
+    }
+    EXPECT_THROW((void)Array::FindIndex<int>(one, 0, 1, IntPred{}), System::ArgumentNullException);
+    EXPECT_THROW((void)Array::FindLastIndex<int>(one, 0, IntPred{}), System::ArgumentNullException);
+    EXPECT_THROW((void)Array::FindLastIndex<int>(one, 0, 1, IntPred{}), System::ArgumentNullException);
+}
+
+TEST(ArrayTests, EmptyMatch_ParamNameIsMatch) {
+    const std::vector<int> one{1};
+    expectParamName([&] { (void)Array::Exists<int>(one, IntPred{}); }, "match");
+    expectParamName([&] { (void)Array::Find<int>(one, IntPred{}); }, "match");
+    expectParamName([&] { (void)Array::TrueForAll<int>(one, IntPred{}); }, "match");
+    expectParamName([&] { (void)Array::FindLastIndex<int>(one, IntPred{}); }, "match");
+}
+
+TEST(ArrayTests, EmptyMatch_TrueForAllOnEmptyArray_NoLongerReturnsVacuousTrue) {
+    // The vacuous-true fast path used to hide the invalid argument entirely.
+    const std::vector<int> empty;
+    EXPECT_THROW((void)Array::TrueForAll<int>(empty, IntPred{}), System::ArgumentNullException);
+    // ...but a real predicate still gets the vacuous true.
+    EXPECT_TRUE(Array::TrueForAll<int>(empty, IntPred{[](const int&) { return false; }}));
+}
+
+TEST(ArrayTests, EmptyMatch_FindIndexValidatesRangeBeforeMatch) {
+    // Array.cs:1599-1622 validates startIndex, then count, then match.
+    const std::vector<int> one{1};
+    EXPECT_THROW((void)Array::FindIndex<int>(one, 5, 1, IntPred{}),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)Array::FindIndex<int>(one, 5, IntPred{}),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayTests, EmptyMatch_FindLastIndexValidatesMatchBeforeRange) {
+    // Array.cs:1671-1706 validates match FIRST, then startIndex/count -- the opposite
+    // order from FindIndex. The asymmetry is real .NET behaviour, reproduced deliberately.
+    const std::vector<int> one{1};
+    EXPECT_THROW((void)Array::FindLastIndex<int>(one, 5, 1, IntPred{}),
+                 System::ArgumentNullException);
+    EXPECT_THROW((void)Array::FindLastIndex<int>(one, 5, IntPred{}),
+                 System::ArgumentNullException);
+    // with a real predicate the range error still surfaces
+    IntPred any = [](const int&) { return true; };
+    EXPECT_THROW((void)Array::FindLastIndex<int>(one, 5, 1, any),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayTests, EmptyCallable_IsCatchableAsSystemException) {
+    const std::vector<int> one{1};
+    bool caught = false;
+    try {
+        (void)Array::Exists<int>(one, IntPred{});
+    } catch (const System::Exception&) {
+        caught = true;
+    }
+    EXPECT_TRUE(caught);
+}
+
+TEST(ArrayTests, NonEmptyCallables_StillBehaveAsBefore) {
+    std::vector<int> v{3, 1, 2};
+    IntCmp asc = [](const int& a, const int& b) { return a < b ? -1 : (a > b ? 1 : 0); };
+    Array::Sort<int>(v, asc);
+    EXPECT_EQ(v, (std::vector<int>{1, 2, 3}));
+    EXPECT_EQ(Array::BinarySearch<int>(v, 2, asc), 1);
+
+    IntPred even = [](const int& x) { return x % 2 == 0; };
+    EXPECT_TRUE(Array::Exists<int>(v, even));
+    EXPECT_EQ(Array::Find<int>(v, even), 2);
+    EXPECT_EQ(Array::FindIndex<int>(v, even), 1);
+    EXPECT_EQ(Array::FindLastIndex<int>(v, even), 1);
+    EXPECT_EQ(Array::FindAll<int>(v, even), (std::vector<int>{2}));
+    EXPECT_FALSE(Array::TrueForAll<int>(v, even));
+
+    intcs sum = 0;
+    Array::ForEach<int>(v, IntAction{[&](const int& x) { sum += x; }});
+    EXPECT_EQ(sum, 6);
+
+    EXPECT_EQ((Array::ConvertAll<int, int>(v, IntConv{[](const int& x) { return x * 2; }})),
+              (std::vector<int>{2, 4, 6}));
 }

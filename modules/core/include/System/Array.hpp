@@ -11,6 +11,7 @@
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System {
@@ -45,9 +46,11 @@ namespace System {
         /**
          * @brief Sorts all elements of @p array using @p comparison.
          * @param comparison Function returning negative/zero/positive for a&lt;b / a==b / a&gt;b.
+         * @throws System::ArgumentNullException if @p comparison is an empty std::function.
          */
         template<typename T>
         static void Sort(std::vector<T>& array, std::function<int(const T&, const T&)> comparison) {
+            requireCallable(comparison, "comparison");
             std::sort(array.begin(), array.end(), [&](const T& a, const T& b) {
                 return comparison(a, b) < 0;
             });
@@ -69,11 +72,14 @@ namespace System {
          * @param comparison Function returning negative/zero/positive for a&lt;b / a==b / a&gt;b.
          * @throws System::ArgumentOutOfRangeException if @p index or @p length is negative.
          * @throws System::ArgumentException if [@p index, @p index+@p length) is out of bounds.
+         * @throws System::ArgumentNullException if @p comparison is an empty std::function
+         *         (checked after the range, matching the sibling range overloads).
          */
         template<typename T>
         static void Sort(std::vector<T>& array, intcs index, intcs length,
                          std::function<int(const T&, const T&)> comparison) {
             requireValidRange(static_cast<intcs>(array.size()), index, length);
+            requireCallable(comparison, "comparison");
             std::sort(array.begin() + index, array.begin() + index + length,
                       [&](const T& a, const T& b) { return comparison(a, b) < 0; });
         }
@@ -259,10 +265,12 @@ namespace System {
          * @brief Searches a sorted @p array for @p value using a custom comparer.
          * @param comparison Returns negative/zero/positive for less/equal/greater.
          * @return Zero-based index if found; bitwise complement of the insertion point otherwise.
+         * @throws System::ArgumentNullException if @p comparison is an empty std::function.
          */
         template<typename T>
         static intcs BinarySearch(const std::vector<T>& array, const T& value,
                                    std::function<int(const T&, const T&)> comparison) {
+            requireCallable(comparison, "comparison");
             intcs lo = 0, hi = static_cast<intcs>(array.size()) - 1;
             while (lo <= hi) {
                 intcs mid = lo + (hi - lo) / 2;
@@ -282,12 +290,15 @@ namespace System {
          * @return Zero-based index if found; bitwise complement of the insertion point otherwise.
          * @throws System::ArgumentOutOfRangeException if @p index or @p length is negative.
          * @throws System::ArgumentException if [@p index, @p index+@p length) is out of bounds.
+         * @throws System::ArgumentNullException if @p comparison is an empty std::function
+         *         (checked after the range, matching the sibling range overloads).
          */
         template<typename T>
         static intcs BinarySearch(const std::vector<T>& array, intcs index, intcs length,
                                    const T& value,
                                    std::function<int(const T&, const T&)> comparison) {
             requireValidRange(static_cast<intcs>(array.size()), index, length);
+            requireCallable(comparison, "comparison");
             intcs lo = index, hi = index + length - 1;
             while (lo <= hi) {
                 intcs mid = lo + (hi - lo) / 2;
@@ -320,145 +331,199 @@ namespace System {
         template<typename T>
         [[nodiscard]] static std::vector<T> Empty() { return {}; }
 
-        /** @brief Converts every element using @p converter and returns the results as a new vector. */
+        /**
+         * @brief Converts every element using @p converter and returns the results as a new vector.
+         * @throws System::ArgumentNullException if @p converter is an empty std::function.
+         */
         template<typename T, typename TOutput>
         [[nodiscard]] static std::vector<TOutput> ConvertAll(
                 const std::vector<T>& array,
                 std::function<TOutput(const T&)> converter) {
+            requireCallable(converter, "converter");
             std::vector<TOutput> result;
             result.reserve(array.size());
             for (const auto& item : array) result.push_back(converter(item));
             return result;
         }
 
-        /** @brief Returns true if any element of @p array satisfies @p predicate. */
+        /**
+         * @brief Returns true if any element of @p array satisfies @p match.
+         * @throws System::ArgumentNullException if @p match is an empty std::function.
+         */
         template<typename T>
-        [[nodiscard]] static bool Exists(const std::vector<T>& array, std::function<bool(const T&)> predicate) {
+        [[nodiscard]] static bool Exists(const std::vector<T>& array, std::function<bool(const T&)> match) {
+            requireCallable(match, "match");
             for (const auto& item : array)
-                if (predicate(item)) return true;
+                if (match(item)) return true;
             return false;
         }
 
-        /** @brief Returns the first element satisfying @p predicate, or default T{} if none found. */
+        /**
+         * @brief Returns the first element satisfying @p match, or default T{} if none found.
+         * @throws System::ArgumentNullException if @p match is an empty std::function.
+         */
         template<typename T>
-        [[nodiscard]] static T Find(const std::vector<T>& array, std::function<bool(const T&)> predicate) {
+        [[nodiscard]] static T Find(const std::vector<T>& array, std::function<bool(const T&)> match) {
+            requireCallable(match, "match");
             for (const auto& item : array)
-                if (predicate(item)) return item;
+                if (match(item)) return item;
             return T{};
         }
 
-        /** @brief Returns the last element satisfying @p predicate, or default T{} if none found. */
+        /**
+         * @brief Returns the last element satisfying @p match, or default T{} if none found.
+         * @throws System::ArgumentNullException if @p match is an empty std::function.
+         */
         template<typename T>
-        [[nodiscard]] static T FindLast(const std::vector<T>& array, std::function<bool(const T&)> predicate) {
+        [[nodiscard]] static T FindLast(const std::vector<T>& array, std::function<bool(const T&)> match) {
+            requireCallable(match, "match");
             for (intcs i = static_cast<intcs>(array.size()) - 1; i >= 0; --i)
-                if (predicate(array[static_cast<size_t>(i)])) return array[static_cast<size_t>(i)];
+                if (match(array[static_cast<size_t>(i)])) return array[static_cast<size_t>(i)];
             return T{};
         }
 
-        /** @brief Returns a new vector of all elements satisfying @p predicate. */
+        /**
+         * @brief Returns a new vector of all elements satisfying @p match.
+         * @throws System::ArgumentNullException if @p match is an empty std::function.
+         */
         template<typename T>
         [[nodiscard]] static std::vector<T> FindAll(
                 const std::vector<T>& array,
-                std::function<bool(const T&)> predicate) {
+                std::function<bool(const T&)> match) {
+            requireCallable(match, "match");
             std::vector<T> result;
             for (const auto& item : array)
-                if (predicate(item)) result.push_back(item);
+                if (match(item)) result.push_back(item);
             return result;
         }
 
-        /** @brief Returns the index of the first element satisfying @p predicate, or -1 if none. */
+        /**
+         * @brief Returns the index of the first element satisfying @p match, or -1 if none.
+         * @throws System::ArgumentNullException if @p match is an empty std::function.
+         */
         template<typename T>
         [[nodiscard]] static intcs FindIndex(
                 const std::vector<T>& array,
-                std::function<bool(const T&)> predicate) {
+                std::function<bool(const T&)> match) {
+            requireCallable(match, "match");
             for (intcs i = 0; i < static_cast<intcs>(array.size()); ++i)
-                if (predicate(array[static_cast<size_t>(i)])) return i;
+                if (match(array[static_cast<size_t>(i)])) return i;
             return -1;
         }
 
         /**
-         * @brief Searches [@p startIndex, end) for the first element satisfying @p predicate.
+         * @brief Searches [@p startIndex, end) for the first element satisfying @p match.
          * @throws System::ArgumentOutOfRangeException if @p startIndex is negative or greater than the array's size.
+         * @throws System::ArgumentNullException if @p match is an empty std::function. Checked
+         *         **after** the range, matching .NET's Array.FindIndex (Array.cs:1589-1622),
+         *         which delegates to the three-argument overload and validates startIndex and
+         *         count before match. Array.FindLastIndex deliberately does the opposite.
          */
         template<typename T>
         [[nodiscard]] static intcs FindIndex(
                 const std::vector<T>& array, intcs startIndex,
-                std::function<bool(const T&)> predicate) {
+                std::function<bool(const T&)> match) {
             requireValidStartIndex(static_cast<intcs>(array.size()), startIndex);
+            requireCallable(match, "match");
             for (intcs i = startIndex; i < static_cast<intcs>(array.size()); ++i)
-                if (predicate(array[static_cast<size_t>(i)])) return i;
+                if (match(array[static_cast<size_t>(i)])) return i;
             return -1;
         }
 
         /**
-         * @brief Searches [@p startIndex, @p startIndex+@p count) for the first element satisfying @p predicate.
+         * @brief Searches [@p startIndex, @p startIndex+@p count) for the first element satisfying @p match.
          * @throws System::ArgumentOutOfRangeException if @p startIndex or @p count is negative,
          *         @p startIndex exceeds the array's size, or the range extends past the end.
+         * @throws System::ArgumentNullException if @p match is an empty std::function. Checked
+         *         **after** the range, exactly like Array.cs:1599-1622.
          */
         template<typename T>
         [[nodiscard]] static intcs FindIndex(
                 const std::vector<T>& array, intcs startIndex, intcs count,
-                std::function<bool(const T&)> predicate) {
+                std::function<bool(const T&)> match) {
             requireValidRange(static_cast<intcs>(array.size()), startIndex, count);
+            requireCallable(match, "match");
             intcs end = startIndex + count;
             for (intcs i = startIndex; i < end; ++i)
-                if (predicate(array[static_cast<size_t>(i)])) return i;
-            return -1;
-        }
-
-        /** @brief Returns the index of the last element satisfying @p predicate, or -1 if none. */
-        template<typename T>
-        [[nodiscard]] static intcs FindLastIndex(
-                const std::vector<T>& array,
-                std::function<bool(const T&)> predicate) {
-            for (intcs i = static_cast<intcs>(array.size()) - 1; i >= 0; --i)
-                if (predicate(array[static_cast<size_t>(i)])) return i;
+                if (match(array[static_cast<size_t>(i)])) return i;
             return -1;
         }
 
         /**
-         * @brief Searches backward from @p startIndex for the last element satisfying @p predicate.
+         * @brief Returns the index of the last element satisfying @p match, or -1 if none.
+         * @throws System::ArgumentNullException if @p match is an empty std::function.
+         */
+        template<typename T>
+        [[nodiscard]] static intcs FindLastIndex(
+                const std::vector<T>& array,
+                std::function<bool(const T&)> match) {
+            requireCallable(match, "match");
+            for (intcs i = static_cast<intcs>(array.size()) - 1; i >= 0; --i)
+                if (match(array[static_cast<size_t>(i)])) return i;
+            return -1;
+        }
+
+        /**
+         * @brief Searches backward from @p startIndex for the last element satisfying @p match.
+         * @throws System::ArgumentNullException if @p match is an empty std::function. Checked
+         *         **before** the range, matching .NET's Array.FindLastIndex
+         *         (Array.cs:1671-1706), which validates match first and startIndex/count
+         *         second -- the opposite order from Array.FindIndex. The asymmetry is real
+         *         reference behaviour and is reproduced deliberately.
          * @throws System::ArgumentOutOfRangeException if @p startIndex is out of range (see
          *         requireValidBackwardRange's doc-comment for the empty-array special case).
          */
         template<typename T>
         [[nodiscard]] static intcs FindLastIndex(
                 const std::vector<T>& array, intcs startIndex,
-                std::function<bool(const T&)> predicate) {
+                std::function<bool(const T&)> match) {
+            requireCallable(match, "match");
             intcs size = static_cast<intcs>(array.size());
             requireValidBackwardRange(size, startIndex, size == 0 ? 0 : startIndex + 1);
             for (intcs i = startIndex; i >= 0; --i)
-                if (predicate(array[static_cast<size_t>(i)])) return i;
+                if (match(array[static_cast<size_t>(i)])) return i;
             return -1;
         }
 
         /**
-         * @brief Searches backward in [@p startIndex-@p count+1, @p startIndex] for an element satisfying @p predicate.
+         * @brief Searches backward in [@p startIndex-@p count+1, @p startIndex] for an element satisfying @p match.
+         * @throws System::ArgumentNullException if @p match is an empty std::function. Checked
+         *         **before** the range, exactly like Array.cs:1671-1706.
          * @throws System::ArgumentOutOfRangeException if @p startIndex or @p count is out of
          *         range (see requireValidBackwardRange's doc-comment for the empty-array special case).
          */
         template<typename T>
         [[nodiscard]] static intcs FindLastIndex(
                 const std::vector<T>& array, intcs startIndex, intcs count,
-                std::function<bool(const T&)> predicate) {
+                std::function<bool(const T&)> match) {
+            requireCallable(match, "match");
             requireValidBackwardRange(static_cast<intcs>(array.size()), startIndex, count);
             intcs endIdx = startIndex - count + 1;
             for (intcs i = startIndex; i >= endIdx && i >= 0; --i)
-                if (predicate(array[static_cast<size_t>(i)])) return i;
+                if (match(array[static_cast<size_t>(i)])) return i;
             return -1;
         }
 
-        /** @brief Applies @p action to every element of @p array. */
+        /**
+         * @brief Applies @p action to every element of @p array.
+         * @throws System::ArgumentNullException if @p action is an empty std::function.
+         */
         template<typename T>
         static void ForEach(const std::vector<T>& array, std::function<void(const T&)> action) {
+            requireCallable(action, "action");
             for (const auto& item : array) action(item);
         }
 
-        /** @brief Returns true if all elements satisfy @p predicate (vacuously true for empty arrays). */
+        /**
+         * @brief Returns true if all elements satisfy @p match (vacuously true for empty arrays).
+         * @throws System::ArgumentNullException if @p match is an empty std::function -- including
+         *         for an empty array, which used to return true without examining the callable.
+         */
         template<typename T>
-        [[nodiscard]] static bool TrueForAll(const std::vector<T>& array, std::function<bool(const T&)> predicate) {
+        [[nodiscard]] static bool TrueForAll(const std::vector<T>& array, std::function<bool(const T&)> match) {
+            requireCallable(match, "match");
             for (const auto& item : array)
-                if (!predicate(item)) return false;
+                if (!match(item)) return false;
             return true;
         }
 
@@ -510,6 +575,24 @@ namespace System {
         }
 
     private:
+        // Rejects an *empty* std::function delegate argument at the public boundary, before
+        // any element is examined. Every delegate-taking overload above used to invoke its
+        // callable directly, so an empty one raised std::bad_function_call only if iteration
+        // reached it: an empty array returned an ordinary result, and Sort/BinarySearch did
+        // so for a one-element array too, because std::sort and the search loop never compare.
+        // std::bad_function_call does not derive from System::Exception, so ported
+        // `catch (const Exception&)` code cannot see it. .NET checks the delegate at the
+        // public boundary and throws ArgumentNullException with the parameter's own name --
+        // `match` for Predicate<T>, `comparison` for Comparison<T>, `converter` for
+        // Converter<,>, `action` for Action<T> -- which is why the twelve predicate
+        // parameters above are spelled `match`, not `predicate`: the name is carried in the
+        // observable message. Ticket #1869 / SR-AUD-052 / CCF-011; see
+        // docs/EmptyCallableBoundaryPlan.md.
+        template<typename Fn>
+        static void requireCallable(const Fn& callable, const char* paramName) {
+            if (!callable) throw System::ArgumentNullException(paramName);
+        }
+
         // Every index/count-taking method above previously did zero validation before raw
         // std::vector iterator/index arithmetic -- a negative index in particular cast to
         // size_t (e.g. via `array[static_cast<size_t>(i)]` with i==-1) becomes a huge positive

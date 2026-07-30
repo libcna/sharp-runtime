@@ -480,7 +480,7 @@ its per-file audit report and this document's §18 status table.
 
 | Finding | Ticket | Status |
 |---|---|---|
-| SR-AUD-052 | #1869 | `confirmed` |
+| SR-AUD-052 | #1869 | **`remediated`** (2026-07-30) |
 | SR-AUD-058 | #1868 | **`remediated`** (2026-07-30) |
 | SR-AUD-065 | #1867 | **`remediated`** (2026-07-30) |
 | SR-AUD-099 | #1867 | **`remediated`** (2026-07-30) |
