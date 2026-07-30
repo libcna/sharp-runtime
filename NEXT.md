@@ -3,7 +3,11 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-30. Branch: `feature/remediation-batch-ccf004-stream-capabilities`.
+*Last verified: 2026-07-30. Branch: `feature/remediation-batch-1804-namespace-review`
+(previously `feature/remediation-batch-ccf004-stream-capabilities`). The test floor is
+now **14,199** (was 14,196): ticket #1804 closed a seam-checker gap, ticket #1843 fixed
+UInt128 shift UB (+3 tests), and a numeric-wrapper namespace review opened tickets
+#1844–#1848 — see "Autonomous batch handoff, 2026-07-30" immediately below.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production
@@ -163,6 +167,137 @@ per this repository's practice of preserving historical audit narrative.*
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
+
+## Autonomous batch handoff, 2026-07-30 (ticket #1804 + numeric-wrapper namespace review)
+
+Branch `feature/remediation-batch-1804-namespace-review`, three commits:
+`6e37051b` (#1804), `bad67e5e` (#1843), `21ff5a57` (namespace plan). Nothing
+pushed, merged, rebased, or tagged.
+
+### #1804 — seam-checker discovery gap — DONE
+
+`scripts/check_version_seam_odr.py` discovered a test-only access seam as *"a
+class template declared and **not defined** inside `namespace
+SharpRuntime::Testing` in a `modules/*/include` header"*. Giving a seam's
+**primary template** a body made it stop matching that description: rule 1 never
+fired, the run exited 0, and the seam count fell 2→1 silently (the vacuity guard
+fires only at zero). Reproduced by `build-probe/1804_gap_probe.py` (before: OK
+exit 0, 1 seam; after fix: FAIL exit 1, 2 seams). Fix: discovery now also
+surfaces a **defined** primary class template (a `template<…>` head), so the seam
+re-enters the inventory and the existing production-tree rule rejects it.
+Non-hard-coded (neither seam name used) and template-only (a non-template
+`SharpRuntime::Testing` helper is not rejected), so the wontfix trigger did not
+apply. Self-tests **12 → 15**; mutation campaign on the real `MutationCounter.hpp`
+confirmed reject-then-restore. Durable record
+[`docs/CollectionVersionTestSeamDesign.md`](docs/CollectionVersionTestSeamDesign.md)
+§15; `CLAUDE.md` seam invariant updated. No production code, no new `SR-AUD-*`.
+
+### Namespace reviewed — numeric primitive-wrapper boundary family (CCF-003)
+
+Selected per the handoff recommendation ("Next recommended family after CCF-004:
+CCF-005 or CCF-003"). CCF-003 is the tightest, most dependency-ready slice
+(`Core.Base`, no downstream migration). Durable plan:
+[`docs/NumericWrapperBoundaryPlan.md`](docs/NumericWrapperBoundaryPlan.md) — file
+and public-surface inventory, five findings **re-verified against current source
+and .NET**, cross-cutting overlap with CCF-005/006/007/008, shared root causes,
+class-A/B/C classification, approval matrix (nothing crosses the boundary),
+test/sanitizer matrices, recommended ticket order, explicit exclusions.
+
+**Findings classified (measured, not trusted):**
+- **SR-AUD-019** — already `remediated` (CCF-004 #1834). No CCF-003 work.
+- **SR-AUD-020** — `remediated` **this batch** (#1843, below).
+- **SR-AUD-021** — confirmed; scope-corrected: the integer wrappers already
+  guard the width `std::stoi` via `FormatException`, so the "`std::stoi` leak"
+  clause belongs to `Single`/`Double` (CCF-006), not here. → #1847.
+- **SR-AUD-022** — confirmed; the eight fixed-width `Clamp` overloads reach
+  `std::clamp(min>max)` **UB**, `UInt128`/`Decimal`/`MathF` return a bound. → #1846 (P1).
+- **SR-AUD-023** — confirmed; six integral `ToString("B")` fall through to
+  decimal. → #1845.
+- **SR-AUD-024** — confirmed; `SByte`/`Int16` `IsPositive(0)` is false vs .NET
+  `>= 0` (`Int64` already correct). → #1844.
+No false premises; one scope correction (021). No new `SR-AUD-*` identifier.
+
+### #1843 — UInt128 shift UB — DONE (implemented this batch)
+
+Class-A defined-arithmetic fix. `UInt128::operator<<`/`>>` forwarded an
+out-of-range count to the native `unsigned __int128` shift — UB for a count ≥128
+or negative, reproduced under UBSan `-fno-sanitize-recover`
+(`UInt128.hpp:95:73: shift exponent 128 is too large`). Now masks with `& 127`,
+matching .NET (`shiftAmount &= 0x7F`) and the sibling `Int128`. Post-fix UBSan
+probe clean, out-of-range results equal .NET `& 0x7F`, in-range byte-identical
+(`build-probe/1843_uint128_shift_*.log`). +3 regressions in `UInt128Tests.cpp`.
+`AUDIT_FINDINGS_INDEX` SR-AUD-020 → `remediated`. No ABI/layout/signature change.
+
+### Tickets created (all `todo`, ready)
+
+| Ticket | Finding | Pri | Size | Class | Note |
+|---|---|---|---|---|---|
+| #1844 | SR-AUD-024 | P2 | XS | C | `IsPositive` `>= 0`; stays `noexcept` |
+| #1845 | SR-AUD-023 | P2 | S | C | binary `ToString("B")`; land before #1847 |
+| #1846 | SR-AUD-022 | **P1** | M | C | `Clamp` `min>max` throw; **live `std::clamp` UB**; removes `noexcept` on Clamp |
+| #1847 | SR-AUD-021 | P2 | M | C | unknown-format `FormatException`; after #1845 |
+| #1848 | (discovered) | P3 | XS | — | `test/check_version_seam_odr_test.py` exec bit |
+
+All four CCF-003 tickets are implementation-ready with in-ticket compatibility
+arguments (CCF-004 precedent); none needs a design ticket or new user approval.
+Recommended order: **#1846 (UB) → #1844 → #1845 → #1847**.
+
+### Exact baselines (verified this batch)
+
+- Repository: **14,199 tests / 37 executables** (`local_ci_check.sh build` green,
+  0 warnings/0 errors).
+- Audit: **30 remediated / 334 confirmed / 364 total** (was 29/335/364).
+- Module graph: **41 modules / 91 edges** (unchanged; catalogue current).
+- Version seams: **2 seams / 18 specialisations** (checker unchanged verdict;
+  self-tests 15).
+- Negative fixtures: **9 fixtures / 66 sites** (all rejected; unchanged).
+- Canonical Doxygen: **1,941 / 1,942 ceiling** (see limitations — re-verify).
+
+### Blocked approvals / remaining queue
+
+- **#1773** — CNA/mobile-eggbert `ICollection::CopyTo` migration — **remains
+  blocked** (downstream, deliberately not touched).
+- **#1846, #1844, #1845, #1847** — ready CCF-003 implementation queue.
+- **#1848** — trivial discovered defect.
+- No ticket left `doing`. Working tree clean at handoff.
+
+### Next recommended namespace/family
+
+Finish **CCF-003** (#1846 first — it carries the live `std::clamp` UB). Then the
+adjacent **CCF-005** memory-safety slice (`Convert`/`BitConverter`/`Span`/`HashCode`
+— SR-AUD-026, 027, 041, 043, 047, several high-severity) is the highest-value
+next review; `docs/NumericWrapperBoundaryPlan.md` §5/§13 records the boundary so
+it is not re-planned from scratch.
+
+### Build directories and disk
+
+| Directory | Start | End |
+|---|---|---|
+| `build/` | 717 M | ~720 M (incremental, reused) |
+| `build-asan/` | 3.5 G | 3.5 G (not rebuilt this batch) |
+| `build-probe/` | 30 M | ~30 M (probe sources + logs retained) |
+| `build-consumer/` | 12 K | 12 K |
+| `build-modular/` | 777 M | 777 M |
+| `build-tmp/` | 201 M | 201 M (selective-check matrix root, auto-cleaned by trap) |
+| `cmake-build-debug/` | 88 M | 88 M |
+
+No build tree created under `/tmp`/`/var/tmp`/`/dev/shm`. Max aggregate
+compilation parallelism **3** (`--parallel 3`/`-j3`) throughout; UBSan probes
+were single-TU. ccache stayed enabled.
+
+### Known limitations / scripts needing special handling
+
+- `scripts/check_selective_components.sh` uses `mktemp -d`; run it with an
+  **absolute** `TMPDIR` (`TMPDIR="$PWD/build-tmp"`), not relative — a relative
+  value does not resolve from the per-component build subdir, so gmake falls back
+  to `/tmp` for compiler scratch (`.s` intermediates only; the build tree itself
+  still lands under `build-tmp/`). This batch's run used the relative form and
+  produced that benign noise; the verdict was still a pass.
+- `test/check_version_seam_odr_test.py` still lacks the executable bit
+  (#1848) — run via `python3`.
+- Doxygen re-run this batch: **1,941 / 1,942** (`scripts/check_doxygen_warnings.sh`,
+  Doxygen 1.9.8) — the added `@brief`/notes on the two UInt128 operators added no
+  warning. Its `mktemp` needs an absolute `TMPDIR` too.
 
 ## Planning audit and 500-hour remediation tranche
 

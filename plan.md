@@ -1,10 +1,11 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-07-29 — 41 physical components, 91 direct production
-dependency edges, a clean native build, 13,069 passing tests across 37
+*Last verified: 2026-07-30 — 41 physical components, 91 direct production
+dependency edges, a clean native build, 14,199 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
-is recorded as audit finding `SR-AUD-001`.*
+is recorded as audit finding `SR-AUD-001`. Post-audit tally: 30 findings
+remediated, 334 confirmed, of 364 total.*
 
 Sharp Runtime is in the post-audit remediation phase. The original type
 classification, stabilization, and modularization queues are complete, and the
@@ -36,8 +37,12 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 14,070 passing across 36 component binaries plus one integration
-  binary, verified by ticket #1817 (SR-AUD-079, the canonical final-quantum
+- Tests: 14,199 passing across 36 component binaries plus one integration
+  binary, verified 2026-07-30 by the numeric-wrapper namespace-review batch
+  (#1804 closed a seam-checker discovery gap; #1843 fixed UInt128 shift UB,
+  +3 tests), raised from the 14,196 the CCF-004 / Stream-capability batch
+  verified (#1836/#1837/#1842/#1838/#1824/#1828/#1827), itself raised from the
+  14,070 verified by ticket #1817 (SR-AUD-079, the canonical final-quantum
   rule) through the full repository gate, raised from the 14,002 verified by
   ticket #1816 (SR-AUD-078 / CCF-013, the in-place Base64
   encoders' write order), itself raised from the
