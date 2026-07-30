@@ -3,11 +3,13 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-30. Branch: `feature/remediation-batch-1804-namespace-review`
-(previously `feature/remediation-batch-ccf004-stream-capabilities`). The test floor is
-now **14,199** (was 14,196): ticket #1804 closed a seam-checker gap, ticket #1843 fixed
-UInt128 shift UB (+3 tests), and a numeric-wrapper namespace review opened tickets
-#1844–#1848 — see "Autonomous batch handoff, 2026-07-30" immediately below.
+*Last verified: 2026-07-30. Branch: `feature/remediation-batch-ccf003-ccf005-plan`
+(previously `feature/remediation-batch-1804-namespace-review`). The test floor is
+now **14,233** (was 14,199): the CCF-003 numeric-wrapper family closed (#1846/#1844/
+#1845/#1847, +31), tooling #1848 landed, and the first CCF-005 memory-safety fix
+#1850 landed (+3) — see "Autonomous batch handoff, 2026-07-30 (CCF-003 close + CCF-005
+plan)" immediately below. The earlier same-day batch (below that) raised the floor
+14,196 → 14,199 via #1804/#1843 and opened #1844–#1848.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production
@@ -167,6 +169,142 @@ per this repository's practice of preserving historical audit narrative.*
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
+
+## Autonomous batch handoff, 2026-07-30 (CCF-003 close + CCF-005 plan)
+
+Branch `feature/remediation-batch-ccf003-ccf005-plan`, **eight commits**
+(`0340be7f`→`1db4e414`). Nothing pushed, merged, rebased, or tagged. #1773 remains
+`blocked` (downstream, untouched). CNA and mobile-eggbert were not inspected or
+modified. No compilation exceeded three parallel jobs.
+
+### Completed tickets
+
+| Ticket | Finding | Class | What landed | Tests |
+|---|---|---|---|---|
+| **#1846** | SR-AUD-022 | C | 11 numeric `Clamp` overloads throw `ArgumentException` on `min>max` instead of reaching `std::clamp` `[alg.clamp]` UB | +12 |
+| **#1844** | SR-AUD-024 | C | `SByte`/`Int16` `IsPositive` → `value >= 0` (zero is positive) | +2 |
+| **#1845** | SR-AUD-023 | C | integral binary `ToString("B"/"b")` for 7 types | +7 |
+| **#1847** | SR-AUD-021 | C | unknown format specifier → `FormatException` for all 10 integer wrappers (integer slice) | +10 |
+| **#1848** | — | — | exec bit on `test/check_version_seam_odr_test.py` | 0 |
+| **#1850** | SR-AUD-047 | C | static `MemoryExtensions::CopyTo` throws before overflowing a short destination (ASan-confirmed write) | +3 |
+
+Plus two planning commits: the CCF-003 closure (`docs/NumericWrapperBoundaryPlan.md`
+§14.1/§15) and the CCF-005 family plan (`docs/ConversionBoundaryFamilyPlan.md`).
+
+### CCF-003 — CLOSED
+
+All five members `remediated` (019 was already closed under CCF-004): 020 (#1843,
+prior batch), 021 (#1847, integer slice), 022 (#1846), 023 (#1845), 024 (#1844).
+Reproductions, .NET-matched fixes, permanent invalid-domain tests, and the full gate
+are recorded in `docs/NumericWrapperBoundaryPlan.md` §14.1/§15.
+
+### CCF-005 — PLANNED, one fix landed
+
+`docs/ConversionBoundaryFamilyPlan.md` is the durable, #1815/Base64-quality plan for
+the memory-safety slice (SR-AUD-026/027/041/043/047, three ASan-confirmed OOB). Every
+finding was re-verified against current source and the .NET reference by four parallel
+read-only agents; **all five still reproduce**. Tickets **#1850–#1854** opened,
+dependency-ordered (memory-corruption first). **#1850 done**; the rest are the next
+queue.
+
+### Corrected premises (recorded transparently)
+
+- **#1845:** SR-AUD-023 listed 6 types but **Int128 also lacked** binary `ToString`
+  — surface extended to 7, identifier kept (SR-AUD-060 precedent).
+- **#1847:** the 128-bit types had **no explicit `G/g` branch** (relied on the
+  fallthrough — turning it into a throw broke `ToString("G")`, caught by an existing
+  regression on the first build; fixed) and an **unguarded width `std::stoi`** (now
+  wrapped). Also: .NET supports `N/C/E/F/P/R` for integers; this port implements only
+  `X/D/G/B` and now **throws** for the rest — a documented deviation (loud > silent-wrong).
+- **#1847:** the **Single/Double `std::stoi` float slice** of SR-AUD-021 was **not**
+  folded in — split to new inactive ticket **#1849** under CCF-006, explicitly **not**
+  falsely closed.
+- **CCF-005 plan:** SR-AUD-027 spans two files (not one); SR-AUD-041's fix belongs in
+  the vector overloads (with a `ToBoolean` quirk); SR-AUD-043 needs **no** layout
+  change (.NET keeps the span length signed and validates at construction); SR-AUD-047
+  co-locates the separate **SR-AUD-044** overlap hazard (kept out).
+
+### New tickets
+
+| # | Pri | Status | What |
+|---|---|---|---|
+| #1849 | P2 | `todo` | Single/Double `ToString` precision `std::stoi` leak (SR-AUD-021 float slice, **CCF-006**) — inactive, no new SR-AUD id |
+| #1850 | P1 | **done** | MemoryExtensions CopyTo (SR-AUD-047, CCF5-A) |
+| #1851 | P1 | `todo` | BitConverter 14 vector decoders bounds (SR-AUD-041, CCF5-B) |
+| #1852 | P1 | `todo` | Span/ReadOnlySpan/Memory/ArraySegment ctor negative-length (SR-AUD-043a, CCF5-C) |
+| #1853 | P2 | `todo` | Convert integral wrap + float NaN (SR-AUD-026/027, CCF5-D) |
+| #1854 | P2 | **`needs_user`** | ReadOnlyMemory `noexcept`/`constexpr` ctors + `HashCode::AddBytes` (SR-AUD-043b, CCF5-E) |
+
+### Blocked approvals
+
+- **#1773** — CNA/mobile-eggbert `ICollection::CopyTo` migration — remains `blocked`.
+- **#1854** — `needs_user`: dropping `noexcept`/`constexpr` on `ReadOnlyMemory`'s ctors
+  and `HashCode::AddBytes` to throw on a negative length is an exception-specification
+  change outside the compatible-narrowing envelope. It is **defense-in-depth only** —
+  #1852 (043a) closes the reachable exploit by rejecting negative-length span
+  construction. Alternative that avoids approval: clamp to empty (diverges from .NET's
+  throw). Depends on #1852.
+
+### Exact baselines (verified this batch, full `local_ci_check.sh build` green)
+
+- Repository: **14,233 tests / 37 executables**, 0 warnings / 0 errors.
+- Audit: **35 remediated / 329 confirmed / 364 total** (was 30/334): +4 CCF-003
+  (021/022/023/024) + 1 CCF-005 (047).
+- Module graph: **41 modules / 91 edges** (unchanged; catalogue current).
+- Canonical Doxygen: **1,941 / 1,942 ceiling**.
+- Version seams: **2 seams / 18 specialisations**; self-tests **15**.
+- Negative fixtures: **9 fixtures / 66 sites** (all rejected).
+- Selective components: pass. `git diff --check`: clean.
+
+### Remaining queue / next recommended work
+
+1. **#1851 (SR-AUD-041)** — BitConverter vector-decoder bounds (P1, ASan read). Turnkey
+   from the plan §3/§9/§16; the `ToBoolean` quirk is the only subtlety.
+2. **#1852 (SR-AUD-043a)** — Span/ReadOnlySpan/Memory/ArraySegment ctor negative-length
+   (P1, ASan read). Keep `intcs length_`, add a construction check — no layout change.
+3. **#1853 (SR-AUD-026/027)** — Convert integral wrap + float NaN (P2, value-only, needs
+   `<cmath>`). `ToChar` uses `[0,255]` (1-byte `char`), not .NET's 65535.
+4. **#1854 (SR-AUD-043b)** — after #1852, take the `noexcept` decision with the user.
+5. Then the CCF-005 **Decimal slice** (SR-AUD-035/036/038) and **CCF-006** (#1849 float
+   format), each a separate review.
+
+### Sanitizer freshness
+
+- **#1846**: the `std::clamp` inverted-interval UB is a **library precondition**
+  (`[alg.clamp]`), not language UB, so `-fsanitize=undefined` does not trap it. It was
+  reproduced with `-D_GLIBCXX_ASSERTIONS` on the real bodies, one process per type
+  (`build-probe/1846_clamp_{prefix,postfix}.log`). No `build-asan` rebuild was needed.
+- **#1850**: ASan reproduced the heap-buffer-overflow **write** by linking a probe
+  against the **existing** `build-asan/libsharp_runtime_core.a` (an all-ASan link;
+  `build-asan` was **not** rebuilt) — pre-fix `WRITE of size 8` at
+  `MemoryExtensions.hpp:427`, post-fix clean throw
+  (`build-probe/1850_copyto_{prefix,postfix}.log`).
+- **#1844/#1845/#1847**: pure value/format/throw changes, no sanitizer required.
+- For the remaining CCF-005 tickets (#1851/#1852) refresh only the touched objects in
+  `build-asan` before drawing an ASan conclusion; do not recreate `build-asan`.
+
+### Build directories and disk
+
+| Directory | Start | End |
+|---|---|---|
+| `build/` | 717 M | 718 M (incremental, reused) |
+| `build-asan/` | 3.5 G | 3.5 G (**not** rebuilt; only its core archive was linked) |
+| `build-probe/` | 31 M | 30 M (probe binaries removed; sources + logs retained) |
+| `build-consumer/` | 12 K | 12 K |
+| `build-modular/` | 777 M | 777 M |
+| `build-tmp/` | 201 M | 8.1 M (selective-check/mktemp root, trap-cleaned) |
+| `cmake-build-debug/` | 88 M | 88 M |
+
+No build tree created under `/tmp`/`/var/tmp`/`/dev/shm`. Max aggregate parallelism
+**3** throughout; probes were single-TU. ccache stayed enabled.
+
+### Known limitations / scripts needing special handling
+
+- `scripts/check_selective_components.sh` and `scripts/check_doxygen_warnings.sh` use
+  `mktemp`; run with an **absolute** `TMPDIR="$PWD/build-tmp"`.
+- `test/check_version_seam_odr_test.py` now has the executable bit (#1848).
+- Retained probe evidence: `build-probe/1846_clamp_*.{cpp,log}`,
+  `build-probe/1850_copyto_*.{cpp,log}` (binaries removed).
 
 ## Autonomous batch handoff, 2026-07-30 (ticket #1804 + numeric-wrapper namespace review)
 

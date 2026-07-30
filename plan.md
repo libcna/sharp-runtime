@@ -4154,3 +4154,49 @@ design ticket.
 Full detail, including build-directory sizes, the three-job parallelism record and the
 `build-probe` accounting, is in `NEXT.md` under "CONTEXT-REFRESH handoff — 2026-07-30, CCF-004
 closure + Stream capability family".
+
+### Autonomous batch handoff, 2026-07-30 (CCF-003 close + CCF-005 plan)
+
+Branch `feature/remediation-batch-ccf003-ccf005-plan`, **eight commits**. Follows the
+same-day `feature/remediation-batch-1804-namespace-review` batch (#1804 seam-checker
+gap, #1843 UInt128 shift UB, and the numeric-wrapper namespace review that opened
+#1844–#1848), which raised the gate 14,196 → 14,199.
+
+**CCF-003 (numeric primitive-wrapper boundary) is CLOSED.** Four implementation
+tickets landed: **#1846** (SR-AUD-022 — 11 `Clamp` overloads throw `ArgumentException`
+on `min>max` instead of reaching `std::clamp` `[alg.clamp]` library UB, reproduced via
+`-D_GLIBCXX_ASSERTIONS`), **#1844** (SR-AUD-024 — `SByte`/`Int16` `IsPositive` → `>=0`),
+**#1845** (SR-AUD-023 — integral binary `ToString("B"/"b")`, +Int128 premise fix),
+**#1847** (SR-AUD-021 integer slice — unknown format → `FormatException`, +128-bit `G/g`
+and width-`std::stoi` premise fixes). Plus tooling **#1848** (exec bit). All five
+CCF-003 findings (020–024) are now `remediated`; 019 was already closed under CCF-004.
+Durable record: `docs/NumericWrapperBoundaryPlan.md` §14.1/§15.
+
+**CCF-005 (conversion/memory-safety) is PLANNED and one fix landed.**
+`docs/ConversionBoundaryFamilyPlan.md` is the #1815/Base64-quality plan for the
+memory-safety slice (SR-AUD-026/027/041/043/047, three ASan-confirmed OOB), verified
+against current source by four parallel read-only agents. Tickets **#1850–#1854**
+opened, dependency-ordered. **#1850** (SR-AUD-047 — static `MemoryExtensions::CopyTo`
+throws before overflowing a short destination; ASan-confirmed heap write) is done. The
+rest are the queue; **#1854** is `needs_user` (dropping `noexcept`/`constexpr` on
+`ReadOnlyMemory` ctors + `HashCode::AddBytes` — defense-in-depth after #1852).
+
+Gate **14,233 tests across 37 executables** (0 warnings, 0 errors), up from 14,199.
+Audit index **35 remediated / 329 confirmed of 364** (+4 CCF-003, +1 CCF-005). Module
+graph **41 / 91**, canonical Doxygen **1,941 / 1,942**, negative fixtures **9 / 66**,
+version seams **2 / 18** (self-tests 15) — all unchanged.
+
+Premises corrected by measurement: **Int128 also lacked** binary `ToString` (SR-AUD-023
+surface extended to 7 types); the **128-bit types had no explicit `G/g` branch** and an
+**unguarded width `std::stoi`** (SR-AUD-021); the **Single/Double `std::stoi` float
+slice** of SR-AUD-021 was split to new inactive ticket **#1849** (CCF-006), not falsely
+closed; and in CCF-005, SR-AUD-027 spans two files, SR-AUD-043 needs **no** layout
+change (.NET keeps the span length signed), and SR-AUD-044 (`std::copy` overlap) was
+kept out of #1850. Nothing pushed/merged/tagged; CNA/mobile-eggbert untouched; #1773
+stays `blocked`.
+
+Ready queue: **#1851** (SR-AUD-041 BitConverter bounds), **#1852** (SR-AUD-043a Span
+ctors), **#1853** (SR-AUD-026/027 Convert) — all P1/P2 compatible; then **#1854**
+(needs_user) and the CCF-005 Decimal slice / CCF-006. Full detail, build-directory
+sizes, three-job parallelism record and probe accounting: `NEXT.md` under "Autonomous
+batch handoff, 2026-07-30 (CCF-003 close + CCF-005 plan)".
