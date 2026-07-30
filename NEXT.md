@@ -3,13 +3,19 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-30. Branch: `feature/remediation-batch-ccf003-ccf005-plan`
-(previously `feature/remediation-batch-1804-namespace-review`). The test floor is
-now **14,233** (was 14,199): the CCF-003 numeric-wrapper family closed (#1846/#1844/
-#1845/#1847, +31), tooling #1848 landed, and the first CCF-005 memory-safety fix
-#1850 landed (+3) — see "Autonomous batch handoff, 2026-07-30 (CCF-003 close + CCF-005
-plan)" immediately below. The earlier same-day batch (below that) raised the floor
-14,196 → 14,199 via #1804/#1843 and opened #1844–#1848.
+*Last verified: 2026-07-30. Branch: `feature/remediation-batch-ccf005-convert-decimal`
+(previously `feature/remediation-batch-ccf003-ccf005-plan`). The test floor is
+now **14,344** (was 14,233): the CCF-005 conversion/memory-safety slice closed the
+four autonomous findings — #1851 (SR-AUD-041 BitConverter bounds, +46), #1852
+(SR-AUD-043a Span/view ctor length, +12), #1853 (SR-AUD-026/027 Convert
+narrowing + float→int NaN, +41) — and the CCF-006 float-format slice #1849
+(SR-AUD-021 float ToString, +12), total +111. The CCF-005 Decimal slice was
+planned (`docs/DecimalBoundaryFamilyPlan.md`) and opened as ready tickets
+#1855/#1856/#1857. #1854 (SR-AUD-043b) stays `needs_user`. See "Autonomous batch
+handoff, 2026-07-30 (CCF-005 convert/memory-safety + CCF-006 + Decimal plan)"
+immediately below. The prior batch left the floor at 14,233 via the CCF-003 close
+(#1846/#1844/#1845/#1847, +31), tooling #1848, and CCF-005's first fix #1850 (+3);
+the one before that raised 14,196 → 14,199 via #1804/#1843.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production
@@ -169,6 +175,111 @@ per this repository's practice of preserving historical audit narrative.*
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
+
+## Autonomous batch handoff, 2026-07-30 (CCF-005 convert/memory-safety + CCF-006 + Decimal plan)
+
+Branch `feature/remediation-batch-ccf005-convert-decimal` (off
+`feature/remediation-batch-ccf003-ccf005-plan`). Five commits: four
+implementation, one design plan (plus this handoff). **Nothing pushed, merged,
+rebased, or tagged.** CNA and mobile-eggbert were not inspected or modified;
+#1773 remains blocked.
+
+### Completed (committed)
+
+| Ticket | Finding | Fix | Sanitizer evidence | Tests |
+|---|---|---|---|---|
+| **#1851** | SR-AUD-041 (CCF5-B) → **remediated** | All 14 `BitConverter` typed vector decoders route through a shared `validateDecodeRange(size, i, width)` before any read: `ArgumentOutOfRangeException("startIndex")` on negative/over-large index, `ArgumentException(value)` on insufficient width; `ToBoolean` throws only AOORE (width-1 quirk). Raw-pointer overloads stay documented-precondition. | ASan pre-fix `heap-buffer-overflow READ` at `BitConverter.hpp:126` (both before-buffer and past-buffer); clean post-fix | +46 |
+| **#1852** | SR-AUD-043a (CCF5-C) → **remediated** | `Span`/`ReadOnlySpan` ptr ctors throw AOORE on negative length; the four vector ctors (`Span`/`ReadOnlySpan`/`Memory`/`ArraySegment`) route `size()` through new `System::detail::checkedSpanLength` (throws on `>INT32_MAX`). `intcs length_` field unchanged (no layout/ABI change). Closes the reachable `HashCode::AddBytes` exploit. | ASan pre-fix `heap-buffer-overflow READ` at `HashCode.hpp:76`; clean construction-time throw post-fix | +12 |
+| **#1853** | SR-AUD-026 + SR-AUD-027 (CCF5-D) → **both remediated** | Six `Convert` integral overloads (`ToChar(int)`/`ToByte(long)`/`ToUInt32`/`ToUInt64` int+long) range-check → `OverflowException` (`ToChar` uses `[0,255]` for this 1-byte-char port). Four float→int converters (`ToInt32`/`ToInt64`/`ToUInt32`/`ToUInt64(double)`) reject NaN/±Inf via `!std::isfinite` before the cast. | **UBSan `float-cast-overflow`** pre-fix `Convert.hpp:390` (NaN→uint UB); clean post-fix. **Premise corrected:** the cast is genuine UB per `[conv.fpint]`, not "implementation-defined"; GCC needs `-fsanitize=float-cast-overflow` explicitly | +41 |
+| **#1849** | SR-AUD-021 float slice (CCF-006) → **remediated** (both slices now closed) | `Single::ToString`/`Double::ToString(value, format)` wrap the precision `std::stoi` in try/catch → `FormatException("Format specifier was invalid.")` and reject an unrecognised specifier loudly (was silent round-trip), following the #1847 integer contract. `F/E/G/R/N` stay valid. | none (value/exception contract) | +12 |
+
+**Batch total +111** over the 14,233 floor → **14,344 across 37 executables**,
+verified through the full repository gate.
+
+### Design-first deliverable
+
+- **`docs/DecimalBoundaryFamilyPlan.md`** — the CCF-005 Decimal slice plan
+  (SR-AUD-035 parser, SR-AUD-036 `MidpointRounding` == CCF-008, SR-AUD-038
+  negative zero), each re-verified 2026-07-30 against current source and .NET,
+  with full surface inventory, premise corrections, dependency order, and the
+  impl-vs-approval boundary. Opened three ready tickets:
+  - **#1855 / CCF5D-1** — SR-AUD-036 `MidpointRounding` (Decimal+Math+MathF);
+    one canonical range-check per funnel overload throwing `ArgumentException`;
+    **closes CCF-008**. **Compatible / autonomous — ready to implement next.**
+  - **#1856 / CCF5D-2** — SR-AUD-038 negative-zero core (raw ctor + `CopySign`
+    + parser `"-0"`); equality/hash ripples already handled; compatible.
+  - **#1857 / CCF5D-3** — SR-AUD-035 parser; rounding + whitespace are
+    compatible, but the **`,`-as-group-separator silent value change** (`Parse("1,5")`
+    1.5→15) and the **`FormatException`→`OverflowException` exception-type change**
+    are semantic decisions needing sign-off; needs an internal status helper.
+
+### Corrected premises (transparent)
+
+1. **SR-AUD-027 NaN→int cast is UB, not "implementation-defined"** (plan §15
+   said no sanitizer / not UB). It is `float-cast-overflow` UB per `[conv.fpint]`;
+   reproduced under UBSan. Corrected in `ConversionBoundaryFamilyPlan.md` §19.4
+   and both Convert audit reports.
+2. **SR-AUD-035 sub-defect 2** (overflow taxonomy) needs an internal status
+   channel — `TryParse`'s single `bool` can't carry it (recorded in the Decimal
+   plan §3).
+3. **SR-AUD-035 sub-defect 1** hides a silent value change (`,` decimal→group).
+4. **SR-AUD-036 == the whole of CCF-008** (no fourth type); fixing all three
+   closes CCF-008.
+5. **SR-AUD-038 equality/hash ripple is already handled** (`operator==` treats
+   `-0==+0`; `GetHashCode` sign-agnostic for zero) — so the fix touches only what
+   `GetBits`/`IsNegative` report.
+
+### Exact baselines (verified this batch)
+
+- Tests: **14,344** across 37 executables (36 component + 1 integration).
+- Module graph: **41 modules / 91 edges** (unchanged).
+- Canonical Doxygen: **1,941** warnings (ceiling 1,942).
+- Negative fixtures: **9 fixtures / 66 sites**. Version seams: **2 seams / 18
+  specialisations**; seam-checker self-tests **15**. All unchanged (untouched).
+- `scripts/local_ci_check.sh build` green; `db_consistency_check` OK;
+  `git diff --check` clean; `check_selective_components.sh` passed.
+
+### #1854 (SR-AUD-043b) — remains `needs_user`, NOT started
+
+Dropping `noexcept`/`constexpr` on `ReadOnlyMemory`'s three ctors
+(`ReadOnlyMemory.hpp:49/58/67`) and `HashCode::AddBytes(const
+ReadOnlySpan<uint8_t>&) noexcept` (`HashCode.hpp:92`) is an exception-spec change
+(mangled name unchanged, but observable to callers relying on the specifier).
+**Now pure defense-in-depth** — #1852 closed the reachable path, so a
+negative-length span can no longer reach `AddBytes`. Approval needed to choose:
+(a) drop `noexcept`/`constexpr` and throw `ArgumentOutOfRangeException` (full .NET
+parity — recommended), or (b) keep `noexcept` and clamp negative/oversized to
+empty. No approval is granted in the standing prompt for (a).
+
+### Remaining ready queue (next batch)
+
+1. **#1855** (SR-AUD-036 / CCF-008) — compatible, autonomous, closes a whole
+   cross-cutting family. **Best next pickup.**
+2. **#1856** (SR-AUD-038 core) — compatible, autonomous.
+3. **#1857** (SR-AUD-035 parser) — land the compatible sub-defects; the
+   comma-semantic + exception-type pieces need a decision.
+4. **#1854** (SR-AUD-043b) — approval-gated (see above).
+5. **CCF-007** — float value-fidelity (the `N` group separators, `E` exponent
+   digits, `G9`/`G17`) surfaced while closing CCF-006; not yet ticketed.
+
+### Sanitizer freshness
+
+All three sanitizer repros compiled the changed **header** directly into a fresh
+one-TU probe (pre-fix via `git stash push -- <header>`, post-fix restored), so
+`build-asan/` did **not** need rebuilding — it only supplied unrelated out-of-line
+symbols (exceptions/Int128/HashCode bodies my changes never touched). This
+matches the #1850 precedent. Probe sources + logs retained under `build-probe/`
+(`1851_*`, `1852_*`, `1853_*`); throwaway binaries removed.
+
+### Build-directory sizes (final)
+
+`build` 720M · `build-asan` 3.5G (unchanged — not rebuilt) · `build-probe` 30M ·
+`build-consumer` 12K · `build-modular` 777M · `build-tmp` 8.1M. Max aggregate
+compilation parallelism this batch: **3 jobs** (`--parallel 3` / one-job probes).
+`check_selective_components.sh` and the negative-fixture checks were run with
+`TMPDIR=$PWD/build-tmp` to honour the no-`/tmp`-builds rule.
+
+---
 
 ## Autonomous batch handoff, 2026-07-30 (CCF-003 close + CCF-005 plan)
 

@@ -37,10 +37,15 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 14,199 passing across 36 component binaries plus one integration
-  binary, verified 2026-07-30 by the numeric-wrapper namespace-review batch
-  (#1804 closed a seam-checker discovery gap; #1843 fixed UInt128 shift UB,
-  +3 tests), raised from the 14,196 the CCF-004 / Stream-capability batch
+- Tests: **14,344** passing across 36 component binaries plus one integration
+  binary, verified 2026-07-30 by the CCF-005 conversion/memory-safety +
+  CCF-006 float-format batch on branch
+  `feature/remediation-batch-ccf005-convert-decimal` (#1851 SR-AUD-041 +46,
+  #1852 SR-AUD-043a +12, #1853 SR-AUD-026/027 +41, #1849 SR-AUD-021 float slice
+  +12 — total +111 over the 14,233 floor the CCF-003-close/CCF-005-plan batch
+  left), itself raised from the 14,199 the numeric-wrapper namespace-review batch
+  verified (#1804 closed a seam-checker discovery gap; #1843 fixed UInt128 shift
+  UB, +3 tests), raised from the 14,196 the CCF-004 / Stream-capability batch
   verified (#1836/#1837/#1842/#1838/#1824/#1828/#1827), itself raised from the
   14,070 verified by ticket #1817 (SR-AUD-079, the canonical final-quantum
   rule) through the full repository gate, raised from the 14,002 verified by
