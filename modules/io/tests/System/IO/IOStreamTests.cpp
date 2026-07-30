@@ -1337,14 +1337,14 @@ TEST(StreamWriterReaderTests, StreamWriter_FailedConstructionLeavesTheStreamAlon
 // over a write-only FileStream reported an empty document rather than an
 // unusable stream (build-probe/1823_prefix_defects.log cases 6 and 7).
 //
-// Only the READER half landed. The matching StreamWriter guard is ticket #1824
-// and is blocked on approval: Stream::getCanWriteProperty() defaults to FALSE
-// where .NET's Stream.CanWrite is abstract, so a custom stream that implements
-// Write() without overriding the property works today and would be rejected.
-// getCanReadProperty() defaults to TRUE, so this guard rejects only streams
-// that positively declare themselves unreadable -- which is exactly what
-// UnreadableTestStream below asserts, and why this half needed no approval.
-// docs/TextWrapperInputContractPlan.md §5.
+// Only the READER half landed under #1808. The matching StreamWriter guard is ticket #1824,
+// which was blocked on the shared Stream-capability approval and is now DONE: the user
+// approved the decision in docs/StreamCapabilityContractDesign.md §6.2 -- .NET's rule that a
+// Stream which does not override getCanWriteProperty() is unwritable. Because that default is
+// FALSE (where getCanReadProperty()'s is TRUE), the write-direction guard rejects an
+// undeclared-writable stream -- UndeclaredWritableTestStream below -- which the read-direction
+// guard's UndeclaredReadableTestStream deliberately does not. Both directions are now
+// enforced. docs/TextWrapperInputContractPlan.md §5, StreamCapabilityContractDesign.md §6.2.
 
 namespace {
     // A stream that says it cannot be read. Nothing else about it matters: the
@@ -1360,7 +1360,8 @@ namespace {
     // A stream that reads but never mentions getCanReadProperty(), inheriting
     // the base default of true. This is the compatibility case: it works today
     // and must keep working. The equivalent shape for the WRITE direction is
-    // what blocks #1824, because that default is false.
+    // UndeclaredWritableTestStream below, which #1824 now rejects because that
+    // default is false.
     class UndeclaredReadableTestStream final : public System::IO::Stream {
         std::string data_;
         std::size_t pos_ = 0;
@@ -1376,6 +1377,28 @@ namespace {
         [[nodiscard]] intcs getLengthProperty() const override {
             return static_cast<intcs>(data_.size());
         }
+    };
+
+    // Ticket #1824 doubles. The write-direction twin of UndeclaredReadableTestStream: it
+    // implements Write() but never overrides getCanWriteProperty(), so it inherits the base
+    // default of FALSE. This is the exact shape the §6.2 approval accepts will start being
+    // rejected -- the one-line fix is to add the override, as DeclaredWritableTestStream shows.
+    class UndeclaredWritableTestStream final : public System::IO::Stream {
+    public:
+        intcs Read(SharpRuntime::bytecs*, intcs, intcs) override { return 0; }
+        void Write(const SharpRuntime::bytecs*, intcs, intcs) override {}
+        void Close() override {}
+        [[nodiscard]] intcs getLengthProperty() const override { return 0; }
+    };
+
+    // The same stream with the one-line fix the §6.2 rejection diagnostic asks for.
+    class DeclaredWritableTestStream final : public System::IO::Stream {
+    public:
+        intcs Read(SharpRuntime::bytecs*, intcs, intcs) override { return 0; }
+        void Write(const SharpRuntime::bytecs*, intcs, intcs) override {}
+        void Close() override {}
+        [[nodiscard]] intcs getLengthProperty() const override { return 0; }
+        [[nodiscard]] bool getCanWriteProperty() const override { return true; }
     };
 } // namespace
 
@@ -1493,6 +1516,99 @@ TEST(StreamWriterReaderTests, StreamReaderAndBinaryReaderRejectUnreadableIdentic
     catch (const System::ArgumentException& e) { second = e.what(); }
     EXPECT_EQ(first, second);
     EXPECT_EQ(first, "Stream was not readable.");
+}
+
+// ===========================================================================
+// Ticket #1824 -- StreamWriter rejects a stream that is not writable
+// ===========================================================================
+//
+// The write-direction twin of #1808, unblocked by the docs/StreamCapabilityContractDesign.md
+// §6.2 approval. Because getCanWriteProperty() defaults to FALSE, this guard rejects an
+// undeclared-writable custom stream, unlike the read-direction guard whose default is TRUE.
+
+TEST(StreamWriterReaderTests, StreamWriter_UndeclaredWritableStream_ThrowsArgumentException) {
+    UndeclaredWritableTestStream s;
+    ASSERT_FALSE(s.getCanWriteProperty());  // the base default
+    EXPECT_THROW(StreamWriter sw(&s, true), System::ArgumentException);
+}
+
+TEST(StreamWriterReaderTests, StreamWriter_UnwritableStream_UsesTheDotNetMessage) {
+    UndeclaredWritableTestStream s;
+    try {
+        StreamWriter sw(&s, true);
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        // Argument_StreamNotWritable, verbatim -- identical to BinaryWriter's.
+        EXPECT_EQ(std::string(e.what()), "Stream was not writable.");
+    }
+}
+
+TEST(StreamWriterReaderTests, StreamWriter_UnwritableStream_HasNoParameterSuffix) {
+    // .NET's Argument_StreamNotWritable is message-only, so no "(Parameter 'stream')" tail.
+    UndeclaredWritableTestStream s;
+    try {
+        StreamWriter sw(&s, true);
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(std::string(e.what()).find("Parameter '"), std::string::npos)
+            << "message was: " << e.what();
+    }
+}
+
+TEST(StreamWriterReaderTests, StreamWriter_NullBeatsUnwritable) {
+    // Order is .NET's: a null stream reports ArgumentNullException, not the writability
+    // ArgumentException. Testing CanWrite first would dereference the null the check rejects.
+    EXPECT_THROW(StreamWriter sw(nullptr, true), System::ArgumentNullException);
+}
+
+TEST(StreamWriterReaderTests, StreamWriter_DeclaredWritableStream_Accepted) {
+    // The one-line migration the §6.2 diagnostic names: overriding getCanWriteProperty()
+    // to return true makes the same stream acceptable again, in both leaveOpen modes.
+    DeclaredWritableTestStream a;
+    ASSERT_TRUE(a.getCanWriteProperty());
+    { StreamWriter sw(&a, true);  sw.Write(std::string("x")); sw.Flush(); }
+    DeclaredWritableTestStream b;
+    { StreamWriter sw(&b, false); sw.Write(std::string("y")); sw.Flush(); }
+    SUCCEED();
+}
+
+TEST(StreamWriterReaderTests, StreamWriter_WritableStreamsStillConstruct_1824) {
+    // The real production streams every in-repository call site uses are writable and keep
+    // working -- MemoryStream and a read-write FileStream, both leaveOpen modes.
+    { MemoryStream ms; StreamWriter sw(&ms, true); sw.Write(std::string("ok")); sw.Flush();
+      EXPECT_EQ(ms.getLengthProperty(), 2); }
+    std::string p = tf("sw_writable_fs.txt");
+    { FileStream fs(p, FileMode::Create, FileAccess::ReadWrite); StreamWriter sw(&fs, true);
+      sw.Write(std::string("z")); sw.Flush(); }
+    File::Delete(p);
+}
+
+TEST(StreamWriterReaderTests, StreamWriter_ClosedFileStream_Rejected_1824) {
+    // With #1842 folding is_open() into FileStream::getCanWriteProperty(), a closed FileStream
+    // now reports CanWrite == false and is rejected at construction rather than passing the
+    // guard and failing at first write.
+    std::string p = tf("sw_closed_fs.txt");
+    File::WriteAllText(p, "seed");
+    FileStream fs(p, FileMode::Open, FileAccess::ReadWrite);
+    fs.Close();
+    ASSERT_FALSE(fs.getCanWriteProperty());
+    EXPECT_THROW(StreamWriter sw(&fs, true), System::ArgumentException);
+    File::Delete(p);
+}
+
+TEST(StreamWriterReaderTests, StreamWriterAndBinaryWriterRejectUnwritableIdentically) {
+    // The cross-type assertion #1824's acceptance requires: the two writer wrappers answer
+    // the identical unwritable input identically, mirroring the reader pair above.
+    UndeclaredWritableTestStream a;
+    UndeclaredWritableTestStream b;
+    std::string first;
+    std::string second;
+    try { StreamWriter sw(&a, true); FAIL() << "expected ArgumentException"; }
+    catch (const System::ArgumentException& e) { first = e.what(); }
+    try { BinaryWriter bw(&b, true); FAIL() << "expected ArgumentException"; }
+    catch (const System::ArgumentException& e) { second = e.what(); }
+    EXPECT_EQ(first, second);
+    EXPECT_EQ(first, "Stream was not writable.");
 }
 
 // ===========================================================================

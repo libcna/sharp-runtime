@@ -5767,3 +5767,33 @@ exit 0 after. `System/ValueTuple.hpp`'s `vtHashCombine` was re-confirmed clear (
 **+2 permanent regressions** in `SecuritySupportTests.cpp`. Repository gate: **0 warnings,
 0 errors, 14,177 tests across 37 executables**. Module graph **41 / 91**. **Source and ABI
 consequences: none** -- one inline header body, header-only, no member or signature change.
+
+Ticket **#1824** (`REMED-IO-STREAMWRITER-DIRECTION`, P2, size S, category `remediation`, area
+*IO*) is **done**. **No SR-AUD-\* identifier**; numbering stays frozen at 364, counts stay
+**29 remediated / 335 confirmed**. It was **blocked** pending the shared Stream-capability
+approval; the user granted the decision in `docs/StreamCapabilityContractDesign.md` §6.2 and it
+is now implemented.
+
+`StreamWriter(Stream*)` validated only the null stream, while the sibling `BinaryWriter` already
+rejected an unwritable stream -- the repository was inconsistent between siblings (§3.1). The
+constructor now throws `ArgumentException("Stream was not writable.")` (no `(Parameter …)` suffix,
+matching .NET's message-only `Argument_StreamNotWritable`) after the null check and before use,
+per §6.2's verbatim declaration and `StreamWriter.cs:135-146`. The null check runs first, so a
+null stream still reports `ArgumentNullException`. Because `getCanWriteProperty()` defaults to
+**false** (where `getCanReadProperty()`'s is true), this rejects an *undeclared-writable* custom
+stream -- the write-direction twin of #1808's read guard -- which is exactly the semantic the §6.2
+approval covers; the one-line fix for such a stream is to override the property.
+
+Measured compatible under #1839: every in-repository `StreamWriter(Stream*)` site wraps a
+`MemoryStream` or `FileStream`, both of which override the property, so **nothing in the
+repository is rejected**. With #1842, a closed `FileStream` now also reports `CanWrite == false`
+and is rejected at construction rather than passing the guard and failing at first write.
+
+**+8 permanent regressions** in `IOStreamTests.cpp` (undeclared-writable rejected; the exact
+message; no `(Parameter …)` suffix; null-before-unwritable order; the one-line-fixed stream
+accepted in both `leaveOpen` modes; production writable streams still construct; the closed
+FileStream rejected; the `StreamWriter`/`BinaryWriter` cross-type identity). Two new test doubles,
+`UndeclaredWritableTestStream` and `DeclaredWritableTestStream`. `SharpRuntimeTests_IO` **599/599**.
+Repository gate: **0 warnings, 0 errors, 14,185 tests across 37 executables**. Module graph
+**41 / 91**. **Source and ABI consequences: none** -- one added guard in a `.cpp` body, no
+signature, member, vtable, layout or symbol change.

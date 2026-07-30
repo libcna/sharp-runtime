@@ -8013,3 +8013,24 @@ high-bit vector 1237484447 — measured before (`build-probe/1831_ssl_alpn_hash.
 
 **+2 regressions** in `SecuritySupportTests.cpp`. Gate **14,177 across 37 executables**, 0
 warnings/errors. **No member/signature/vtable/layout/symbol change** — one inline header body.
+
+## Completed StreamWriter CanWrite guard: ticket #1824 (2026-07-30)
+
+`REMED-IO-STREAMWRITER-DIRECTION`, P2, size S. **No SR-AUD-\***; audit frozen at 364. Was blocked;
+**unblocked by the user's approval of `docs/StreamCapabilityContractDesign.md` §6.2** (.NET's rule
+that a Stream not overriding `getCanWriteProperty()` is unwritable).
+
+`StreamWriter(Stream*)` validated only null while the sibling `BinaryWriter` rejected unwritable —
+an inconsistency (§3.1). It now throws `ArgumentException("Stream was not writable.")` (no
+`(Parameter …)` suffix) after the null check, per §6.2 verbatim / `StreamWriter.cs:135-146`.
+Because `CanWrite`'s default is **false**, this rejects an undeclared-writable custom stream (the
+write-direction twin of #1808's read guard); the one-line fix is to override the property.
+Measured compatible (#1839): every in-repo `StreamWriter(Stream*)` wraps MemoryStream/FileStream,
+both of which override it — **nothing in-repo is rejected**. With #1842 a closed FileStream now
+also reports CanWrite false and is rejected at construction.
+
+**+8 regressions** in `IOStreamTests.cpp` (undeclared-writable rejected; exact message; no
+`(Parameter …)`; null-before-unwritable; one-line-fixed stream accepted both leaveOpen modes;
+production streams still construct; closed FileStream rejected; StreamWriter/BinaryWriter identity)
+plus two doubles. IO suite 599/599. Gate **14,185 across 37 executables**, clean. **No
+signature/member/vtable/layout/symbol change** — one guard in a `.cpp` body.

@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/StreamWriter.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/IO/FileStream.hpp"
 
@@ -22,10 +23,27 @@ namespace System::IO {
     // ArgumentNullException("stream") for the identical input, which is the inconsistency
     // the audit called especially hazardous; the parameter name here matches it and .NET's
     // own nameof(stream).
+    // Ticket #1824 (REMED-IO-STREAMWRITER-DIRECTION, no SR-AUD-*): the CanWrite guard below
+    // was blocked pending the shared Stream-capability approval, which was granted for the
+    // decision recorded in docs/StreamCapabilityContractDesign.md section 6.2 -- .NET's rule
+    // that a Stream which does not override getCanWriteProperty() is unwritable. StreamWriter.cs
+    // opens every Stream-taking constructor with ArgumentNullException.ThrowIfNull(stream)
+    // followed by `if (!stream.CanWrite) throw new ArgumentException(SR.Argument_StreamNotWritable)`
+    // (StreamWriter.cs:135-146). The null check must run first: a null stream reports
+    // ArgumentNullException, not the writability message. The message has NO (Parameter ...)
+    // suffix because .NET's Argument_StreamNotWritable is a message-only ArgumentException with
+    // no paramName -- the sibling BinaryWriter (BinaryWriter.cpp:17-19) already throws the
+    // identical "Stream was not writable." for the identical input, and #1824 removes the
+    // inconsistency that StreamWriter accepted what BinaryWriter rejected. Measured under #1839:
+    // every in-repository StreamWriter(Stream*) site wraps a MemoryStream or FileStream, both of
+    // which override the property, so this rejects no in-repository stream; a closed FileStream
+    // is now correctly rejected too, since #1842 folds is_open() into its CanWrite.
     StreamWriter::StreamWriter(Stream* stream, bool leaveOpen)
         : stream_(stream), leaveOpen_(leaveOpen), ownsStream_(false)
     {
         if (stream == nullptr) throw System::ArgumentNullException("stream");
+        if (!stream->getCanWriteProperty())
+            throw System::ArgumentException("Stream was not writable.");
     }
 
     StreamWriter::StreamWriter(const std::string& path)
