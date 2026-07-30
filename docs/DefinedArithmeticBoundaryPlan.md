@@ -447,6 +447,18 @@ identifier was issued; numbering stays frozen at 364.** `System/ValueTuple.hpp` 
 inventoried at the same time and is **clear** — `detail::vtHashCombine` already
 accumulates in `size_t`.
 
+> **DONE 2026-07-30 (ticket #1838).** Implemented as a class A change: the accumulation now
+> runs in `SharpRuntime::uintcs` with a single conversion to `intcs` at the end, exactly as
+> #1831 did for `tupleHashCombine`. The hash of every input is **byte-identical** —
+> `"h2"` 3418, `"http/1.1"` -869919367, `"h2c-15"` -238047472, `"spdy/3.1"` -1691431011,
+> the empty protocol 0, a 65-byte id 609988858, a high-bit byte vector 1237484447 — measured
+> before (retained `build-probe/1831_ssl_alpn_hash.log`, and `build-probe/1838_extra`) and
+> after. UBSan at `-O0` linked against `build-asan` showed `SslApplicationProtocol.hpp:72`'s
+> diagnostic for `"spdy/3.1"` present before and, under `-fno-sanitize-recover=undefined`,
+> exit 0 after. `SslApplicationProtocol.hpp` gains no member and no signature change; the body
+> is inline and header-only. Audit numbering stays frozen at 364 (no status changes, this was
+> never an audit finding). Two permanent regressions in `SecuritySupportTests.cpp`.
+
 ### 13.4 Live family status, as of the close of #1831
 
 §11's table is a snapshot frozen at the close of #1829 and is deliberately left as written.

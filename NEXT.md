@@ -7996,3 +7996,20 @@ folds the closed state into **both** directions.
 property/#1825-operation agreement after close; open-file no-change). `SharpRuntimeTests_IO` clean
 under **ASan+UBSan+LSan, 0 reports** on the disposal path. Gate **14,175 across 37 executables**,
 0 warnings/errors. **No signature/vtable/layout/symbol change** — two inline header bodies.
+
+## Completed SslApplicationProtocol hash: ticket #1838 (2026-07-30)
+
+`REMED-NET-SECURITY-ALPN-DEFINED-HASH`, P2, size XS. **CCF-004 class A**, side-finding of #1831's
+inventory. **No SR-AUD-\* identifier**, audit frozen at 364 (29 remediated / 335 confirmed).
+
+`SslApplicationProtocol::GetHashCode()` (`SslApplicationProtocol.hpp:72`) ran the same signed djb2
+step `((h << 5) + h) ^ byte` as SR-AUD-062's `tupleHashCombine`, overflowing signed `intcs` for
+reachable ALPN ids (`"spdy/3.1"`: `729647660 + 1873888640`). Fixed as #1831 was: accumulate in
+`uintcs`, one conversion to `intcs` at the end. Hash byte-identical for every input — h2 3418,
+http/1.1 -869919367, h2c-15 -238047472, spdy/3.1 -1691431011, empty 0, a 65-byte id 609988858, a
+high-bit vector 1237484447 — measured before (`build-probe/1831_ssl_alpn_hash.log`) and after
+(`build-probe/1838_prefix_postfix.log`). UBSan showed `:72` present before and exit 0 after under
+`-fno-sanitize-recover=undefined`. `ValueTuple.hpp`'s `vtHashCombine` re-confirmed clear.
+
+**+2 regressions** in `SecuritySupportTests.cpp`. Gate **14,177 across 37 executables**, 0
+warnings/errors. **No member/signature/vtable/layout/symbol change** — one inline header body.

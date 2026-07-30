@@ -5744,3 +5744,26 @@ no-change case). `SharpRuntimeTests_IO` clean under **ASan + UBSan + LSan, 0 rep
 disposal path. Repository gate: **0 warnings, 0 errors, 14,175 tests across 37 executables**.
 Module graph **41 / 91**. **Source and ABI consequences: none** -- two inline header bodies, no
 signature, member, vtable, layout or symbol change.
+
+Ticket **#1838** (`REMED-NET-SECURITY-ALPN-DEFINED-HASH`, P2, size XS, category `remediation`,
+area *Net.Security*) is **done**. **No SR-AUD-\* identifier and no audit status change**: it is a
+side-finding discovered while inventorying SR-AUD-062's structurally equivalent sites under #1831
+(different module, different file, never named by the audit), so numbering stays frozen at 364 and
+counts stay **29 remediated / 335 confirmed**.
+
+`SslApplicationProtocol::GetHashCode()` (`SslApplicationProtocol.hpp:72`) ran the same signed djb2
+step `hash = ((hash << 5) + hash) ^ byte` that SR-AUD-062's `tupleHashCombine` did, in signed
+`intcs`, and overflowed for reachable ALPN ids -- `"spdy/3.1"` reported `signed integer overflow:
+729647660 + 1873888640`. Fixed exactly as #1831: accumulate the shift, addition and xor in
+`uintcs`, one conversion to `intcs` at the end. **CCF-004 class A, verified by measurement.** The
+hash of every input is byte-identical -- `"h2"` 3418, `"http/1.1"` -869919367, `"h2c-15"`
+-238047472, `"spdy/3.1"` -1691431011, empty 0, a 65-byte id 609988858, a high-bit byte vector
+1237484447 -- measured before (retained `build-probe/1831_ssl_alpn_hash.log`) and after
+(`build-probe/1838_prefix_postfix.log`). UBSan at `-O0` linked against `build-asan` showed the
+`:72` diagnostic for `"spdy/3.1"` present before and, under `-fno-sanitize-recover=undefined`,
+exit 0 after. `System/ValueTuple.hpp`'s `vtHashCombine` was re-confirmed clear (accumulates in
+`size_t`).
+
+**+2 permanent regressions** in `SecuritySupportTests.cpp`. Repository gate: **0 warnings,
+0 errors, 14,177 tests across 37 executables**. Module graph **41 / 91**. **Source and ABI
+consequences: none** -- one inline header body, header-only, no member or signature change.

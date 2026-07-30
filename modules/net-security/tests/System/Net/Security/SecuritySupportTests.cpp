@@ -77,6 +77,44 @@ TEST(SslApplicationProtocolTests, GetHashCode_MatchesForEqualProtocols) {
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
+// Ticket #1838 (CCF-004 class A; sibling of SR-AUD-062's #1831, not a member). GetHashCode()'s
+// djb2 step `((h << 5) + h) ^ byte` overflowed signed intcs for reachable ALPN ids; it now
+// accumulates in uintcs and converts once. The hash of every input is byte-identical -- the
+// values below were MEASURED before the change (build-probe/1831_ssl_alpn_hash.log for the four
+// ALPN ids, build-probe/1838_extra for the empty/long/high-bit cases), so this pins "no
+// observable change" rather than assuming it. UBSan confirms SslApplicationProtocol.hpp:72's
+// diagnostic present before and absent after for "spdy/3.1" (build-probe/1838_ssl_alpn_hash_*).
+TEST(SslApplicationProtocolTests, GetHashCode_ValuesUnchanged_1838) {
+    // Empty protocol: the default-constructed value has no bytes, so the loop never runs.
+    EXPECT_EQ(SslApplicationProtocol().GetHashCode(), 0);
+    // Short ASCII ids.
+    EXPECT_EQ(SslApplicationProtocol("h2").GetHashCode(), 3418);
+    EXPECT_EQ(SslApplicationProtocol("http/1.1").GetHashCode(), -869919367);
+    EXPECT_EQ(SslApplicationProtocol("h2c-15").GetHashCode(), -238047472);
+    // "spdy/3.1" is the id whose signed accumulation overflowed at :72 before the repair.
+    EXPECT_EQ(SslApplicationProtocol("spdy/3.1").GetHashCode(), -1691431011);
+    // A long id (65 bytes, still <= 255).
+    EXPECT_EQ(SslApplicationProtocol(
+                  "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz0123456789xyz")
+                  .GetHashCode(), 609988858);
+    // High-bit bytes are accepted by the constructor and must hash without UB.
+    const std::vector<SharpRuntime::bytecs> highBit{
+        static_cast<SharpRuntime::bytecs>(0xFF), static_cast<SharpRuntime::bytecs>(0x80),
+        static_cast<SharpRuntime::bytecs>(0x01), static_cast<SharpRuntime::bytecs>(0xFE),
+        static_cast<SharpRuntime::bytecs>(0x7F), static_cast<SharpRuntime::bytecs>(0xC0)};
+    EXPECT_EQ(SslApplicationProtocol(highBit).GetHashCode(), 1237484447);
+}
+
+TEST(SslApplicationProtocolTests, GetHashCode_EqualValuesHashEqually_HighBit_1838) {
+    // Equality/hash consistency holds for the high-bit path too, not only ASCII.
+    const std::vector<SharpRuntime::bytecs> bytes{
+        static_cast<SharpRuntime::bytecs>(0xFF), static_cast<SharpRuntime::bytecs>(0x00),
+        static_cast<SharpRuntime::bytecs>(0xAB)};
+    SslApplicationProtocol a(bytes), b(bytes);
+    EXPECT_TRUE(a == b);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
 TEST(SslApplicationProtocolTests, ToString_InvalidUtf8_FallsBackToHexDump) {
     std::vector<SharpRuntime::bytecs> bytes{
         static_cast<SharpRuntime::bytecs>(0xFF), static_cast<SharpRuntime::bytecs>(0x00),

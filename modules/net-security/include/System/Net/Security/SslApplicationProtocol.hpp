@@ -67,11 +67,22 @@ namespace System::Net::Security {
         bool operator!=(const SslApplicationProtocol& o) const { return !Equals(o); }
 
         [[nodiscard]] SharpRuntime::intcs GetHashCode() const {
-            SharpRuntime::intcs hash = 0;
+            // CCF-004 class A (ticket #1838). This is the same signed djb2-style step
+            // `hash = ((hash << 5) + hash) ^ byte` that SR-AUD-062's tupleHashCombine ran and
+            // that #1831 fixed; it is NOT a member of SR-AUD-062 (different module, different
+            // file, never named by the audit -- audit numbering stays frozen at 364). It
+            // overflowed signed intcs for reachable ALPN ids: "spdy/3.1" reported
+            // `signed integer overflow: 729647660 + 1873888640` at this line
+            // (build-probe/1831_ssl_alpn_hash.log). Accumulating the shift, addition and xor in
+            // SharpRuntime::uintcs and converting once at the end reproduces the identical
+            // two's-complement value with defined semantics -- .NET accumulates hashes in
+            // unchecked arithmetic, so the wrap is intended, not a bug. No observable hash
+            // changes; the values in the tests are those measured before this edit.
+            SharpRuntime::uintcs hash = 0;
             for (auto b : protocol_) {
-                hash = ((hash << 5) + hash) ^ static_cast<SharpRuntime::intcs>(b);
+                hash = ((hash << 5) + hash) ^ static_cast<SharpRuntime::uintcs>(b);
             }
-            return hash;
+            return static_cast<SharpRuntime::intcs>(hash);
         }
 
         /** @return The protocol name decoded as UTF-8, or a hex dump if it isn't valid UTF-8. */
