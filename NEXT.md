@@ -3,10 +3,19 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-30. Branch: `feature/remediation-batch-empty-callable`
-(previously `feature/remediation-batch-floating-fidelity`). The test floor is
-now **14,444** (was 14,396): the **CCF-011 empty-callable batch closed the whole
-family** — design ticket #1866 (`docs/EmptyCallableBoundaryPlan.md`) plus four
+*Last verified: 2026-07-30. Branch: `feature/remediation-batch-ccf014-ccf016`
+(previously `feature/remediation-batch-empty-callable`). The test floor is now
+**14,476** (was 14,444): this batch **closed two whole families** — CCF-014 via
+design ticket #1871 (`docs/TryOutputFailureContractPlan.md`) and implementation
+#1872 (SR-AUD-075 `SequenceReader` + SR-AUD-085 `Utf8Parser`, +14), and CCF-016
+via design ticket #1873 (`docs/DerivedExceptionHResultPlan.md`) and
+implementation #1874 (SR-AUD-093/094/095/096/100, eleven exception types, 40
+constructors, +18) — total +32. Post-audit tally: **56 remediated, 307
+confirmed, of 364**. **CCF-014 and CCF-016 are both CLOSED.** New this batch:
+**#1875**, opened **inactive** for the measured 45-type HResult population
+outside `modules/core/include/System/` (no `SR-AUD-*` identifier). The previous
+batch left the floor at 14,444 / 49-remediated: the **CCF-011 empty-callable
+batch closed that whole family** — design ticket #1866 (`docs/EmptyCallableBoundaryPlan.md`) plus four
 implementations, #1867 (SR-AUD-065 `Lazy<T>` + SR-AUD-099
 `AggregateException::Handle`, +14), #1868 (SR-AUD-058 `Progress<T>` +
 SR-AUD-121 `EventHandler`, +13), #1869 (SR-AUD-052 `Array`, +13) and #1870
@@ -23,10 +32,10 @@ IsPow2, +2). **New ticket this batch:** #1865 (SR-AUD-033 parse thousands +
 overflow-to-Infinity tail, `needs_user`, split from #1864 like #1857→#1858).
 Still `needs_user`: #1858 (Decimal comma + overflow taxonomy), #1862 (SR-AUD-029
 Round `noexcept`), #1863 (SR-AUD-033 format output), #1854 (SR-AUD-043b noexcept);
-#1773 stays blocked, and **no ticket is `todo`** — every open row is
-`blocked`/`needs_user`. See "Autonomous batch handoff, 2026-07-30 (CCF-011
-empty-callable family, CLOSED)" immediately below for this batch's queue,
-baselines and next recommended family; the CCF-007 section follows it. The prior
+#1773 stays blocked, and the only `todo` row is the **inactive** #1875. See
+"Autonomous batch handoff, 2026-07-30 (CCF-014 + CCF-016, both CLOSED)"
+immediately below for this batch's queue, baselines and next recommended family;
+the CCF-011 and CCF-007 sections follow it. The prior
 batch reached 14,344 via #1851/#1852/#1853/#1849; the one before that left the
 floor at 14,233 via the CCF-003 close
 (#1846/#1844/#1845/#1847, +31), tooling #1848, and CCF-005's first fix #1850 (+3);
@@ -190,6 +199,200 @@ per this repository's practice of preserving historical audit narrative.*
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
+
+## Autonomous batch handoff, 2026-07-30 (CCF-014 + CCF-016, both CLOSED)
+
+Branch `feature/remediation-batch-ccf014-ccf016` (off
+`feature/remediation-batch-empty-callable`). Five commits: two family plans, two
+implementations, plus this handoff. **Nothing pushed, merged, rebased, or
+tagged.** CNA and mobile-eggbert were not inspected or modified; #1773 remains
+blocked. Maximum aggregate compilation parallelism was **3 jobs** throughout;
+`check_selective_components.sh` and `check_doxygen_warnings.sh` were run with
+`TMPDIR="$PWD/build-tmp"` (absolute) to honour the no-`/tmp`-builds rule.
+**Signing preflight** (`gpg --batch --pinentry-mode error --clearsign`) exited 0
+without a prompt before any repository work, and every commit is signed.
+
+### Completed (committed)
+
+| Ticket | Findings | Fix | Sanitizer | Tests |
+|---|---|---|---|---|
+| **#1871** | — (design) | `docs/TryOutputFailureContractPlan.md`, 18 sections. Current behaviour of both CCF-014 findings measured by `build-probe/1871_try_output_probe.cpp` (26 cases) with caller sentinels; reference read from `SequenceReader.cs`, `SequenceReader.Search.cs`, `Utf8Parser.*.cs`, `ParserHelpers.cs`. | n/a | 0 |
+| **#1872** | SR-AUD-075, SR-AUD-085 → **remediated**, **closes CCF-014** | `SequenceReader<T>::TryRead`/`TryPeek` assign `T{}` on the end-of-sequence branch (position untouched); `Utf8Parser` gained one shared private `fail(value, bytesConsumed)` used by all **ten** failure exits of its **nine** overloads. `FormatException` path deliberately unchanged. | ASan+UBSan+LSan clean, probe instrumented | **+14** |
+| **#1873** | — (design) | `docs/DerivedExceptionHResultPlan.md`, 13 sections. All values measured by `build-probe/1873_hresult_probe.cpp` (44 checks + controls); required values from `HResults.cs` and each type's own `.cs`. | n/a | 0 |
+| **#1874** | SR-AUD-093/094/095/096/100 → **remediated**, **closes CCF-016** | All **40** public constructors of **11** types assign their documented HResult (38 previously-wrong results → `wrong=0`). | not applicable, recorded with reasons | **+18** |
+
+**Batch total +32** over the 14,444 floor → **14,476 across 37 executables**,
+verified through the full component gate.
+
+**Count correction:** #1872's commit message says "+13 add-only tests
+(SequenceReader 7, Utf8Parser 6)". The measured delta is **14** — `Utf8ParserTests`
+gained 7, not 6. The commit is not amended (historical commits are never
+rewritten here); the corrected figure stands in the ticket notes, the audit
+records and this file. Arithmetic: 14,444 + 14 + 18 = 14,476. ✔
+
+### New ticket created this batch and left INACTIVE
+
+- **#1875** (P3, `todo`, **inactive — do not start without confirming it is still
+  wanted**) — audit the **45 of 59** exception types *outside*
+  `modules/core/include/System/` that carry no explicit HResult (`Threading`,
+  `Net`, `IO`, `Text.Json`, `Xml`, `Security.Cryptography`, …). Measured
+  population, **not** confirmed defects: `System::AggregateException` sat in the
+  identical shape and is **correct**, because .NET's `AggregateException.cs`
+  assigns no HResult either. Each type must be checked against its own reference
+  first. **No `SR-AUD-*` identifier issued** — numbering stays frozen at 364.
+
+### Premises corrected (measured 2026-07-30, historical text preserved)
+
+**CCF-014**
+
+1. **The family is 11 public entries, not the two the record names** — 2 in
+   `SequenceReader` and all 9 `Utf8Parser` overloads.
+2. **The defect is grammar-independent** — the `X` and `N` grammars leak the same
+   stale value as the default decimal path.
+3. **Failure *after* a successful core parse is equally stale** (a width-range
+   rejection such as `"256"` into `uint8_t`). A repair that reset the output only
+   when the core parse failed would have missed every width.
+4. **`bytesConsumed` was always correct and no partial value was ever published**,
+   so of the ten recurring Try-output failure classes only "output left unchanged"
+   applies here.
+5. **The `FormatException` path leaves both outputs unwritten — and .NET does the
+   same deliberately** (`ParserHelpers.cs` `Unsafe.SkipInit`). Parity, not a
+   defect; a permanent test pins that a caller sentinel survives the throw.
+6. **The wrapper already compensated for the core**: `SequenceReaderExtensions`
+   assigns `value = 0` on false and reaches `SequenceReader::TryRead` through a
+   helper that also assigns `T{}`. Six same-module surfaces already had the
+   contract; all six are now pinned by tests.
+
+**CCF-016**
+
+7. **Five findings cover ELEVEN types, not five** (SR-AUD-094 alone spans five),
+   and the port has more constructors than the reference in two places.
+8. **SR-AUD-100's message claim is a FALSE POSITIVE.** The port's
+   `Duplicate objects in argument.` is byte-identical to
+   `SR.Arg_DuplicateWaitObjectException` (`Strings.resx:319-321`). No message
+   change was made; a test pins the text verbatim. The finding is `remediated` on
+   its real (HResult) half with the Correction appended, per the
+   SR-AUD-081/SR-AUD-362 convention.
+9. **`AggregateException` is not a twelfth member** — .NET assigns no HResult
+   there either; pinned as a control in both the probe and the suite.
+
+### Recorded requirement (not an approval trigger)
+
+`SequenceReader<T>::TryRead`/`TryPeek` now require `T` to be value-initialisable.
+That is strictly *weaker* than the reference's own `where T : unmanaged`
+constraint, and a permanent test instantiates `SequenceReader<std::string>` to
+show it. Member functions of a class template instantiate only when used, so any
+instantiation that does not call these two is unaffected.
+
+### Baselines (verified this batch)
+
+- Full component gate: **14,476 tests across 37 executables**, no failures.
+- Audit: **56 remediated, 307 confirmed, of 364** (seven findings moved
+  `confirmed → remediated`; one row is the split `043a remediated; 043b open`).
+- **CCF-014 and CCF-016 are both CLOSED** — closure paragraphs in
+  `audit/AUDIT_CROSS_CUTTING_FINDINGS.md`.
+- Module graph: **41 physical modules, 91 dependency edges** (unchanged).
+- Negative fixtures: **9 fixtures, 66 sites**, every site rejected (unchanged).
+- Version seams: **2 seams, 18 specialisations** (unchanged).
+- Canonical Doxygen: **1,941 warnings** (ceiling 1,942) — unchanged.
+- `validate_module_boundaries.py` (+ unit test), `generate_component_catalog.py
+  --check`, `db_consistency_check.py`, both seam checks, both negative-fixture
+  checks, `git diff --check`, `check_selective_components.sh` and
+  `local_ci_check.sh build` all pass.
+
+### Sanitizer freshness
+
+- **CCF-014 (#1872):** both files are header-only, so
+  `build-probe/1871_try_output_probe.cpp` was compiled **with**
+  `-fsanitize=address,undefined` — that recompiles the changed inline code with
+  instrumentation, so no stale archive is involved and `build-asan` needed no
+  rebuild (untouched this batch). Exit 0, zero ASan/UBSan/LeakSanitizer reports,
+  including the 20- and 23-digit overflow inputs that drive the parser
+  accumulator and the raw `const uint8_t*` walk to their limits. TSan recorded as
+  **not applicable**.
+- **CCF-016 (#1874):** sanitizers recorded as **not applicable** with reasons —
+  one integer store per constructor body; no allocation, ownership transfer,
+  pointer arithmetic, lifetime change, shared state or new member. No sanitizer
+  target needed refreshing.
+
+**Mutation checks (both implementations).** Reverting `Utf8Parser::fail`'s value
+write fails 5 permanent tests; reverting `SequenceReader::TryRead`'s fails 3;
+deleting one of `DllNotFoundException`'s three HResult assignments fails 2. An
+assertion set that is never mutation-checked is how
+`ParseInvalidNotDigit_BytesConsumedIsZero` came to initialise its value to 99 and
+then assert only the cursor.
+
+### Build-directory sizes (start → end of batch)
+
+| Dir | Start | End |
+|---|---|---|
+| `build` | 723M | 724M (incremental, ccache) |
+| `build-asan` | 3.5G | 3.5G (untouched this batch) |
+| `build-probe` | 31M | ~32M (2 probe sources + 5 logs retained; binaries removed) |
+| `build-consumer` | 12K | 12K |
+| `build-tmp` | 8.1M | 8.1M (selective-check mktemp matrix cleaned by the script) |
+| `build-modular` | 777M | 777M (untouched) |
+
+`build-probe/build.sh` (shared, gitignored) gained three additive entries this
+batch — `modules/buffers/include` on the include path and
+`FormatException.cpp`/`OverflowException.cpp`/`InvalidCastException.cpp` as
+support sources — so buffers and exception probes link. Additive only; no
+existing probe is affected.
+
+### Approval-gated, unchanged (do NOT start without explicit per-action approval)
+
+- **#1862** SR-AUD-029 — `Round(x,digits)` `noexcept` decision. `FloatingValueFidelityPlan.md` §19.1.
+- **#1863** SR-AUD-033 format — observable `ToString` text change. §19.2.
+- **#1865** SR-AUD-033 parse tail — thousands + overflow→Infinity. §19.4.
+- **#1858** SR-AUD-035 tail — Decimal comma + overflow taxonomy. §19.4.
+- **#1854** SR-AUD-043b — `ReadOnlyMemory`/`HashCode::AddBytes` drop-`noexcept`. §19.3.
+- **#1773** — CNA/mobile-eggbert migration; blocked until they upgrade.
+
+All five decision records in `docs/FloatingValueFidelityPlan.md` §19 are
+unchanged by this batch.
+
+### Remaining compatible queue
+
+Only **#1875**, which is deliberately inactive. Every other open ticket is
+`blocked` or `needs_user`.
+
+### Recommended next work
+
+1. **#1875**, if wanted — the 45-type HResult audit. Bounded, mechanical, and
+   already carries its measured evidence; the honest framing is "check each
+   against the reference", not "fix 45 wrong values".
+2. Otherwise start another compatible family from the audit index, plan first.
+   Strongest remaining candidates, by coherence and safety impact:
+   - **CCF-002** (SR-AUD-006/007/009) — `DateTime`/`DateTimeOffset`/`TimeOnly`
+     component and parse validation. Check first whether the parse-grammar half
+     is approval-gated (accepted textual grammar) and split it if so, exactly as
+     #1857→#1858 and #1864→#1865 were split.
+   - **CCF-012** (SR-AUD-015) — `String::Format` / `FormattableString` brace
+     grammar. Two surfaces, one shared parsed-token model; note that changing
+     accepted grammar is an approval trigger, so this is likely design-first.
+   - **CCF-017** (SR-AUD-114) — the `Attribute` base's identity fallback. Small
+     membership, but it changes value semantics for every unoverridden attribute.
+   - **CCF-019 remainder** (SR-AUD-327 JsonNode, SR-AUD-333 XML LINQ `XObject`) —
+     genuine ASan-confirmed use-after-free, the highest-severity remaining
+     family, but each needs its own compatibility review and is likely
+     design-first with an approval-gated implementation, exactly as
+     `LinkedListNode` was.
+
+### Known limitations / notes
+
+- `CLAUDE.md`'s non-negotiable rule 2 still cites the historical **14,113**
+  figure from #1832. No recent batch has refreshed it; NEXT.md is the live
+  baseline and each ticket's section states the count it measured. Left unchanged
+  deliberately rather than churning a rules document.
+- Test-side audit reports were **not** given remediation notes, per the
+  established convention — the notes live on the owning header report.
+- The 45-type population behind #1875 is measured but unverified against the
+  reference. Nothing in this batch asserts any of them is wrong.
+- `SequenceReader` still lacks .NET's `TryPeek(long offset, out T)` overload;
+  adding it is new API surface, not a failure-contract repair, and is recorded as
+  a deliberate exclusion in `TryOutputFailureContractPlan.md` §16.
+
+---
 
 ## Autonomous batch handoff, 2026-07-30 (CCF-011 empty-callable family, CLOSED)
 

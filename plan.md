@@ -42,8 +42,12 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: **14,444** passing across 36 component binaries plus one integration
-  binary, verified 2026-07-30 by the CCF-011 empty-callable batch on branch
+- Tests: **14,476** passing across 36 component binaries plus one integration
+  binary, verified 2026-07-30 by the CCF-014 + CCF-016 batch on branch
+  `feature/remediation-batch-ccf014-ccf016` (design #1871 and #1873; #1872
+  SR-AUD-075 + SR-AUD-085 +14, #1874 SR-AUD-093/094/095/096/100 +18 — total +32
+  over the 14,444 floor, closing **two** cross-cutting causes), itself raised
+  from the 14,444 verified by the CCF-011 empty-callable batch on branch
   `feature/remediation-batch-empty-callable` (design #1866; #1867 SR-AUD-065 +
   SR-AUD-099 +14, #1868 SR-AUD-058 + SR-AUD-121 +13, #1869 SR-AUD-052 +13,
   #1870 SR-AUD-134 +8 — total +48 over the 14,396 floor the CCF-007 Pi-trig +
@@ -4277,3 +4281,69 @@ findings), CCF-016 (derived HResults, 5 findings, mechanical) and CCF-002
 (date/time validation). Full detail, build-directory sizes, three-job parallelism
 record and probe accounting: `NEXT.md` under "Autonomous batch handoff,
 2026-07-30 (CCF-011 empty-callable family, CLOSED)".
+
+## Session summary — 2026-07-30, CCF-014 and CCF-016 both closed
+
+Branch `feature/remediation-batch-ccf014-ccf016`, off
+`feature/remediation-batch-empty-callable`. The ready queue was empty, so the
+batch took the two families NEXT.md recommended, planning each before touching
+code. **Both are now CLOSED.**
+
+**CCF-014 — Try-style failure output.** Design ticket **#1871** wrote
+`docs/TryOutputFailureContractPlan.md` (18 sections) from a 26-case probe that
+prepopulates every output with a caller sentinel. Implementation **#1872**
+remediated SR-AUD-075 and SR-AUD-085 across **11 public entries** — not the two
+the cross-cutting record names: `SequenceReader<T>::TryRead`/`TryPeek` assign
+`T{}` on their end-of-sequence branch, and all nine `Utf8Parser::TryParse`
+overloads route their ten failure exits through one shared private
+`fail(value, bytesConsumed)`. +14 tests.
+
+The cause was a language guarantee lost in translation: a C# `out T` parameter is
+definitely assigned on every returning path, so the reference's `value = default`
+lines are mandatory. Porting `out T` to a C++ `T&` dropped the guarantee while
+keeping the `bytesConsumed = 0` half, which is exactly why a *checked* failure
+still looked like a stale success.
+
+**CCF-016 — derived exception HResults.** Design ticket **#1873** wrote
+`docs/DerivedExceptionHResultPlan.md` (13 sections). Implementation **#1874**
+remediated SR-AUD-093/094/095/096/100 across **11 types and 40 constructors** —
+38 wrong results before, `wrong=0` after. The cause was structural: `Exception`
+initialises `hResult_` and `SystemException`'s body overwrites it, so a type
+written as a pure forwarding constructor inherits whatever its nearest base last
+wrote. +18 tests.
+
+Gate **14,476 tests across 37 executables** (0 warnings, 0 errors), up from
+14,444. Audit index **56 remediated / 307 confirmed of 364** (+7). Module graph
+**41 / 91**, canonical Doxygen **1,941 / 1,942**, negative fixtures **9 / 66**,
+version seams **2 / 18** — all unchanged.
+
+Premises corrected by measurement, historical audit text preserved: CCF-014's
+defect is **grammar-independent** and also strikes **after a successful core
+parse**, `bytesConsumed` was never wrong, and the `FormatException` path's
+unwritten outputs are **parity with .NET's deliberate `Unsafe.SkipInit`**, not a
+defect; CCF-016's five findings cover **eleven** types, `AggregateException` is
+**correctly** inheriting `COR_E_EXCEPTION` because .NET assigns none either, and
+**SR-AUD-100's message claim is a false positive** — the port's text is
+byte-identical to `SR.Arg_DuplicateWaitObjectException`, so no message change was
+made and a test pins it verbatim.
+
+Both implementations are **mutation-checked**: reverting `Utf8Parser::fail`'s
+value write fails 5 tests, `SequenceReader::TryRead`'s fails 3, and deleting one
+`DllNotFoundException` HResult assignment fails 2.
+
+New ticket **#1875** is open and **inactive**: a sweep found 45 of 59 exception
+types outside `modules/core/include/System/` with no explicit HResult. None is a
+confirmed defect — `AggregateException` proves inheriting can be right — so it
+carries the measured evidence, no `SR-AUD-*` identifier, and an explicit
+"confirm before starting".
+
+Nothing pushed/merged/rebased/tagged; CNA and mobile-eggbert untouched; #1773
+stays `blocked`; #1854/#1858/#1862/#1863/#1865 remain `needs_user` with their
+`docs/FloatingValueFidelityPlan.md` §19 decision records unchanged.
+
+Ready queue: **only the inactive #1875**. Recommended next families are CCF-002
+(date/time validation), CCF-012 (composite-format grammar), CCF-017 (Attribute
+identity) and the CCF-019 remainder (JsonNode / XObject use-after-free, likely
+design-first). Full detail, build-directory sizes, three-job parallelism record
+and probe accounting: `NEXT.md` under "Autonomous batch handoff, 2026-07-30
+(CCF-014 + CCF-016, both CLOSED)".

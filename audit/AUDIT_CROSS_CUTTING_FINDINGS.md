@@ -611,7 +611,7 @@ previously require. That is strictly *weaker* than the reference's own
 specification, virtual function, vtable slot or data member changed; `Utf8Parser`
 has no data members at all.
 
-Evidence: 13 permanent add-only regressions (`SequenceReader` 7, `Utf8Parser` 6);
+Evidence: 14 permanent add-only regressions (`SequenceReader` 7, `Utf8Parser` 7);
 `SharpRuntimeTests_Buffers` 536/536; whole-repository build clean with zero
 errors and zero warnings. **Mutation-checked**, which is what the record's
 "checking only false and zero consumed is insufficient" warning demands: reverting

@@ -144,7 +144,7 @@ The class doc-comment previously stated only the `bytesConsumed = 0` half of the
 contract and was silent about `value`; it now states both halves and the throwing
 exception.
 
-Closure evidence: 6 new permanent regressions in `Utf8ParserTests.cpp` (failed
+Closure evidence: 7 new permanent regressions in `Utf8ParserTests.cpp` (failed
 `bool` parse including a valid-token prefix; not-a-digit across all eight integer
 widths; empty source; overflow-after-successful-core across every width in both
 directions plus a negative literal into an unsigned type; all four format
