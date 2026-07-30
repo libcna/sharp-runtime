@@ -4,6 +4,7 @@
 #include "System/String.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
+#include "System/OutOfMemoryException.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,7 +14,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iomanip>
+#include <new>
 #include <sstream>
+#include <stdexcept>
 
 namespace System
 {
@@ -86,80 +89,141 @@ namespace System
     }
 
     // --- Format helpers (file-internal) ---
+    //
+    // Ticket #1882 (SR-AUD-015, CCF-012) replaced a sequential text-replacement engine with the
+    // single-pass parse below. The previous engine produced its output by repeatedly mutating a
+    // buffer that already held substituted argument text, which is the single root cause of four
+    // measured defects (docs/CompositeFormatBoundaryPlan.md sections 5 and 8):
+    //
+    //   * it did not terminate. replaceArg reset its scan cursor to 0 after every substitution,
+    //     so it re-read text it had just inserted; Format("{0}", "{0}") looped forever. This
+    //     needed no malformed format string -- Format("{0}", userText) hung whenever userText
+    //     contained "{0}".
+    //   * it re-read an argument's literal text as format syntax, so a later argument overwrote
+    //     an earlier one: Format("{0}{1}", "{1}", "X") returned "XX" instead of "{1}X", and
+    //     Format("{0}{1}", "{1}", "{0}") threw FormatException on input .NET formats fine.
+    //   * extractSpec returned the FIRST occurrence's specifier for every occurrence of an
+    //     index, so Format("{0:X}/{0:D3}", 255) returned "FF/FF" instead of "FF/255".
+    //   * validation ran after substitution (FinalizeFormat), so it could only classify what
+    //     survived and reported an index error for an unclosed item.
+    //
+    // The parse below walks the format string exactly once and appends to a separate output, the
+    // property that makes .NET's own AppendFormatHelper immune to all four by construction
+    // (System.Private.CoreLib/src/System/Text/ValueStringBuilder.AppendFormat.cs).
+    //
+    // The ACCEPTED GRAMMAR IS DELIBERATELY UNCHANGED: "{{"/"}}" are still not escapes, a stray
+    // "}" is still literal text, and "{N,width}" still parses but does not pad. Adopting .NET's
+    // grammar changes what currently-succeeding calls return and is gated on explicit user
+    // approval as ticket #1884 (plan section 20).
     namespace {
-        // Extract the spec from the first occurrence of {N:spec} in fmt (returns "" if none).
-        std::string extractSpec(const std::string& fmt, int n) {
-            std::string tok = "{" + std::to_string(n);
-            size_t pos = fmt.find(tok);
-            if (pos == std::string::npos) return "";
-            size_t after = pos + tok.size();
-            if (after >= fmt.size() || fmt[after] != ':') return "";
-            size_t end = fmt.find('}', after);
-            return end == std::string::npos ? "" : fmt.substr(after + 1, end - after - 1);
+        // Every Format overload's arguments, type-erased just enough to be indexed by a parsed
+        // format item. `text` points at the caller's own std::string parameter, which outlives
+        // the call; nothing here owns or copies it.
+        struct FormatArg {
+            enum class Kind { Int, Long, Double, Text };
+            Kind                 kind = Kind::Int;
+            SharpRuntime::intcs  i    = 0;
+            SharpRuntime::longcs l    = 0;
+            double               d    = 0.0;
+            const std::string*   text = nullptr;
+        };
+
+        FormatArg argOf(SharpRuntime::intcs v)   { FormatArg a; a.kind = FormatArg::Kind::Int;    a.i = v; return a; }
+        FormatArg argOf(SharpRuntime::longcs v)  { FormatArg a; a.kind = FormatArg::Kind::Long;   a.l = v; return a; }
+        FormatArg argOf(double v)                { FormatArg a; a.kind = FormatArg::Kind::Double; a.d = v; return a; }
+        FormatArg argOf(const std::string& v)    { FormatArg a; a.kind = FormatArg::Kind::Text;   a.text = &v; return a; }
+
+        // Largest specifier number accepted. This is .NET's own bound: ParseFormatSpecifier
+        // (Common/src/System/Number.Formatting.Common.cs:93-105) throws
+        // FormatException(SR.Argument_BadFormatSpecifier) as soon as the accumulator would reach
+        // 100'000'000, so the accepted range is 0..99'999'999.
+        constexpr long long kSpecNumberLimit = 100'000'000LL;
+
+        enum class SpecNumberKind { Absent, Value, TooLarge };
+
+        struct SpecNumber {
+            SpecNumberKind kind  = SpecNumberKind::Absent;
+            long long      value = 0;
+        };
+
+        // Parses the numeric tail of a format specifier ("3" in "D3", "-2" in "F-2").
+        //
+        // This deliberately reproduces std::stoi's PREFIX semantics -- optional sign, digits,
+        // trailing junk ignored -- because that is what the previous implementation did and every
+        // currently-succeeding specifier must keep its exact result. What it does not reproduce
+        // is std::stoi's failure modes, which were the defect: std::stoi THREW std::out_of_range
+        // or std::invalid_argument straight out of a System-shaped public API for inputs such as
+        // "{0:D99999999999}" and "{0:DX}", and the std::abs() applied to its result was
+        // UBSan-confirmed undefined behaviour for "{0:D-2147483648}" (negation of INT_MIN).
+        SpecNumber parseSpecNumber(const std::string& spec) {
+            if (spec.size() <= 1) return {};
+            std::size_t i = 1;
+            bool negative = false;
+            if (spec[i] == '+' || spec[i] == '-') { negative = (spec[i] == '-'); ++i; }
+            if (i >= spec.size() || !std::isdigit(static_cast<unsigned char>(spec[i]))) return {};
+            long long n = 0;
+            for (; i < spec.size() && std::isdigit(static_cast<unsigned char>(spec[i])); ++i) {
+                // The bound is checked BEFORE the multiply, exactly as the reference does, so the
+                // accepted range is the reference's own 0..999'999'999 rather than a stricter one
+                // this port would be inventing without authority.
+                if (n >= kSpecNumberLimit) return {SpecNumberKind::TooLarge, 0};
+                n = n * 10 + (spec[i] - '0');
+            }
+            return {SpecNumberKind::Value, negative ? -n : n};
         }
 
-        // Replace every {N} or {N:spec} occurrence in result with value.
-        std::string replaceArg(const std::string& fmt, int n, const std::string& value) {
-            std::string result = fmt;
-            std::string tok = "{" + std::to_string(n);
-            size_t searchFrom = 0;
-            while (true) {
-                size_t pos = result.find(tok, searchFrom);
-                if (pos == std::string::npos) break;
-                size_t afterTok = pos + tok.size();
-                // tok is a bare digit prefix (e.g. "{1" for n=1) -- if another digit follows,
-                // this is actually a longer index like "{10}", not a real match for n. A naive
-                // find() would otherwise silently consume "{10}" while replacing arg 1, which
-                // both corrupts the output and hides the very out-of-range-index condition
-                // FinalizeFormat below is meant to catch.
-                if (afterTok < result.size() && std::isdigit(static_cast<unsigned char>(result[afterTok]))) {
-                    searchFrom = pos + 1;
-                    continue;
-                }
-                size_t end = result.find('}', pos);
-                if (end == std::string::npos) break;
-                result.replace(pos, end - pos + 1, value);
-                searchFrom = 0;
-            }
-            return result;
-        }
-
-        // After all known argument substitutions have run, any remaining "{<digits>" token means
-        // the format string referenced an argument index beyond what was supplied to this Format
-        // overload -- matches real .NET's String.Format, which throws FormatException for this
-        // rather than silently leaving the placeholder unreplaced in the output. A "{" not
-        // followed by a digit (or with no matching "}") is likewise rejected as a malformed
-        // format string. Verified: this port previously had no validation at all here.
-        std::string FinalizeFormat(const std::string& result) {
-            for (size_t i = 0; i < result.size(); ++i) {
-                if (result[i] != '{') continue;
-                if (i + 1 < result.size() && std::isdigit(static_cast<unsigned char>(result[i + 1]))) {
-                    throw System::FormatException(
-                        "Index (zero based) must be greater than or equal to zero and less than the size of the argument list.");
-                }
-                throw System::FormatException("Input string was not in a correct format.");
-            }
-            return result;
+        [[noreturn]] void throwBadFormatSpecifier() {
+            // .NET: SR.Argument_BadFormatSpecifier, raised as a FormatException by
+            // ThrowHelper.ThrowFormatException_BadFormatSpecifier().
+            throw System::FormatException("Format specifier was invalid.");
         }
 
         // Format integer with .NET-style specifier (X/x=hex, D=decimal padded, else plain).
         std::string fmtInt(SharpRuntime::intcs value, const std::string& spec) {
             if (spec.empty()) return std::to_string(value);
-            char sc = spec[0];
-            int width = spec.size() > 1 ? std::abs(std::stoi(spec.substr(1))) : 0;
+            const char sc = spec[0];
+            const SpecNumber num = parseSpecNumber(spec);
+            if (num.kind == SpecNumberKind::TooLarge) throwBadFormatSpecifier();
+            // The magnitude, as the previous std::abs() intended. The bound above makes the
+            // negation exact for every accepted value, so INT_MIN can no longer be reached.
+            const long long width = num.kind == SpecNumberKind::Value
+                                        ? (num.value < 0 ? -num.value : num.value)
+                                        : 0;
             if (sc == 'X' || sc == 'x') {
-                std::ostringstream oss;
-                oss.imbue(std::locale::classic());
-                if (sc == 'X') oss << std::uppercase;
-                oss << std::hex;
-                if (width > 0) oss << std::setw(width) << std::setfill('0');
-                oss << static_cast<unsigned int>(value);
-                return oss.str();
+                try {
+                    std::ostringstream oss;
+                    oss.imbue(std::locale::classic());
+                    if (sc == 'X') oss << std::uppercase;
+                    oss << std::hex;
+                    if (width > 0) oss << std::setw(static_cast<std::streamsize>(width)) << std::setfill('0');
+                    oss << static_cast<unsigned int>(value);
+                    return oss.str();
+                } catch (const std::bad_alloc&) {
+                    throw System::OutOfMemoryException();
+                } catch (const std::length_error&) {
+                    throw System::OutOfMemoryException();
+                }
             }
             if (sc == 'D' || sc == 'd') {
-                bool neg = value < 0;
+                const bool neg = value < 0;
                 std::string s = std::to_string(neg ? -static_cast<long long>(value) : static_cast<long long>(value));
-                while (static_cast<int>(s.size()) < width) s = "0" + s;
+                // One allocation. The previous "s = \"0\" + s" loop copied the whole string once
+                // per padding character, so Format("{0:D999999999}", 7) was ~10^18 byte copies --
+                // a second, independent way this function failed to terminate.
+                //
+                // A width the reference accepts can still be large enough that the allocation
+                // fails. .NET raises OutOfMemoryException there; letting std::bad_alloc or
+                // std::length_error escape would reintroduce exactly the defect this ticket
+                // removes -- a non-System exception leaving a System-shaped public API.
+                if (static_cast<long long>(s.size()) < width) {
+                    try {
+                        s.insert(s.begin(), static_cast<std::size_t>(width - static_cast<long long>(s.size())), '0');
+                    } catch (const std::bad_alloc&) {
+                        throw System::OutOfMemoryException();
+                    } catch (const std::length_error&) {
+                        throw System::OutOfMemoryException();
+                    }
+                }
                 return neg ? "-" + s : s;
             }
             return std::to_string(value);
@@ -172,67 +236,162 @@ namespace System
                 auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
                 return ec == std::errc{} ? std::string(buf.data(), ptr) : std::to_string(value);
             }
-            char sc = spec[0];
-            int prec = spec.size() > 1 ? std::stoi(spec.substr(1)) : 2;
-            std::ostringstream oss;
-            oss.imbue(std::locale::classic());
-            if (sc == 'F' || sc == 'f') {
-                oss << std::fixed << std::setprecision(prec) << value;
-            } else if (sc == 'G' || sc == 'g') {
-                oss << std::defaultfloat << std::setprecision(prec > 0 ? prec : 6) << value;
-            } else if (sc == 'E' || sc == 'e') {
-                if (sc == 'E') oss << std::uppercase;
-                oss << std::scientific << std::setprecision(prec) << value;
-            } else {
-                oss << value;
+            const char sc = spec[0];
+            const SpecNumber num = parseSpecNumber(spec);
+            if (num.kind == SpecNumberKind::TooLarge) throwBadFormatSpecifier();
+            // Absent numeric tail keeps the previous default of 2, and a negative value is passed
+            // through unchanged, so every specifier that formatted successfully before still
+            // produces the identical text.
+            const int prec = num.kind == SpecNumberKind::Value ? static_cast<int>(num.value) : 2;
+            try {
+                std::ostringstream oss;
+                oss.imbue(std::locale::classic());
+                if (sc == 'F' || sc == 'f') {
+                    oss << std::fixed << std::setprecision(prec) << value;
+                } else if (sc == 'G' || sc == 'g') {
+                    oss << std::defaultfloat << std::setprecision(prec > 0 ? prec : 6) << value;
+                } else if (sc == 'E' || sc == 'e') {
+                    if (sc == 'E') oss << std::uppercase;
+                    oss << std::scientific << std::setprecision(prec) << value;
+                } else {
+                    oss << value;
+                }
+                return oss.str();
+            } catch (const std::bad_alloc&) {
+                throw System::OutOfMemoryException();
+            } catch (const std::length_error&) {
+                throw System::OutOfMemoryException();
             }
-            return oss.str();
+        }
+
+        std::string renderArg(const FormatArg& arg, const std::string& spec) {
+            switch (arg.kind) {
+                case FormatArg::Kind::Int:    return fmtInt(arg.i, spec);
+                case FormatArg::Kind::Double: return fmtDouble(arg.d, spec);
+                case FormatArg::Kind::Long:   return std::to_string(arg.l);
+                case FormatArg::Kind::Text:   return *arg.text;
+            }
+            return {};
+        }
+
+        // Upper bound on a parsed item index. .NET uses the same 1'000'000 limit
+        // (AppendFormat.cs's IndexLimit); anything at or beyond it cannot address an argument of
+        // any Format overload and is reported as an out-of-range index rather than being
+        // accumulated into an overflowing int.
+        constexpr long long kIndexLimit = 1'000'000LL;
+
+        [[noreturn]] void throwIndexOutOfRange() {
+            throw System::FormatException(
+                "Index (zero based) must be greater than or equal to zero and less than the size of the argument list.");
+        }
+
+        [[noreturn]] void throwInvalidFormatString() {
+            throw System::FormatException("Input string was not in a correct format.");
+        }
+
+        // One left-to-right pass over @p format. Argument text is appended to @p out and is never
+        // re-examined, so an argument containing its own placeholder terminates and is emitted
+        // verbatim.
+        std::string formatCore(const std::string& format, const FormatArg* args, std::size_t argCount) {
+            std::string out;
+            out.reserve(format.size() + 16 * argCount);
+            const std::size_t n = format.size();
+            std::size_t i = 0;
+            while (i < n) {
+                if (format[i] != '{') { out.push_back(format[i++]); continue; }
+
+                // Item index: at least one ASCII digit must follow the opening brace.
+                std::size_t j = i + 1;
+                if (j >= n || !std::isdigit(static_cast<unsigned char>(format[j]))) throwInvalidFormatString();
+                long long index = 0;
+                bool indexTooLarge = false;
+                for (; j < n && std::isdigit(static_cast<unsigned char>(format[j])); ++j) {
+                    if (index >= kIndexLimit) indexTooLarge = true;
+                    else index = index * 10 + (format[j] - '0');
+                }
+
+                // Optional alignment component. It is consumed so that "{0,6}" keeps resolving
+                // exactly as it did before, and deliberately NOT applied -- padding to the
+                // alignment width changes successful output and belongs to ticket #1884.
+                if (j < n && format[j] == ',') {
+                    std::size_t k = j + 1;
+                    if (k < n && format[k] == '-') ++k;
+                    if (k < n && std::isdigit(static_cast<unsigned char>(format[k]))) {
+                        while (k < n && std::isdigit(static_cast<unsigned char>(format[k]))) ++k;
+                        j = k;
+                    }
+                }
+
+                // Optional format specifier, terminated by the first closing brace -- the same
+                // rule the replaced extractSpec used, so a brace inside a specifier resolves
+                // identically.
+                std::string spec;
+                if (j < n && format[j] == ':') {
+                    const std::size_t close = format.find('}', j + 1);
+                    if (close == std::string::npos) throwInvalidFormatString();
+                    spec = format.substr(j + 1, close - (j + 1));
+                    j = close;
+                }
+
+                if (j >= n || format[j] != '}') throwInvalidFormatString();
+
+                // Index range is checked before the argument is touched, so a malformed item can
+                // never be reported after part of its substitution was published.
+                if (indexTooLarge || index >= static_cast<long long>(argCount)) throwIndexOutOfRange();
+
+                out += renderArg(args[static_cast<std::size_t>(index)], spec);
+                i = j + 1;
+            }
+            return out;
         }
     }
 
     std::string String::Format(const std::string& format, SharpRuntime::intcs arg0)
     {
-        return FinalizeFormat(replaceArg(format, 0, fmtInt(arg0, extractSpec(format, 0))));
+        const FormatArg args[] = {argOf(arg0)};
+        return formatCore(format, args, 1);
     }
 
     std::string String::Format(const std::string& format, double arg0)
     {
-        return FinalizeFormat(replaceArg(format, 0, fmtDouble(arg0, extractSpec(format, 0))));
+        const FormatArg args[] = {argOf(arg0)};
+        return formatCore(format, args, 1);
     }
 
     std::string String::Format(const std::string& format, const std::string& arg0)
     {
-        return FinalizeFormat(replaceArg(format, 0, arg0));
+        const FormatArg args[] = {argOf(arg0)};
+        return formatCore(format, args, 1);
     }
 
     std::string String::Format(const std::string& format, SharpRuntime::intcs arg0, SharpRuntime::intcs arg1)
     {
-        std::string r = replaceArg(format,  0, fmtInt(arg0, extractSpec(format, 0)));
-        return FinalizeFormat(replaceArg(r, 1, fmtInt(arg1, extractSpec(format, 1))));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1)};
+        return formatCore(format, args, 2);
     }
 
     std::string String::Format(const std::string& format, SharpRuntime::intcs arg0, const std::string& arg1)
     {
-        std::string r = replaceArg(format, 0, fmtInt(arg0, extractSpec(format, 0)));
-        return FinalizeFormat(replaceArg(r, 1, arg1));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1)};
+        return formatCore(format, args, 2);
     }
 
     std::string String::Format(const std::string& format, const std::string& arg0, SharpRuntime::intcs arg1)
     {
-        std::string r = replaceArg(format, 0, arg0);
-        return FinalizeFormat(replaceArg(r, 1, fmtInt(arg1, extractSpec(format, 1))));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1)};
+        return formatCore(format, args, 2);
     }
 
     std::string String::Format(const std::string& format, const std::string& arg0, const std::string& arg1)
     {
-        std::string r = replaceArg(format, 0, arg0);
-        return FinalizeFormat(replaceArg(r, 1, arg1));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1)};
+        return formatCore(format, args, 2);
     }
 
     std::string String::Format(const std::string& format, double arg0, double arg1)
     {
-        std::string r = replaceArg(format, 0, fmtDouble(arg0, extractSpec(format, 0)));
-        return FinalizeFormat(replaceArg(r, 1, fmtDouble(arg1, extractSpec(format, 1))));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1)};
+        return formatCore(format, args, 2);
     }
     std::string String::Format(const std::string& format, bool arg0)
     {
@@ -536,16 +695,14 @@ namespace System
 
     std::string String::Format(const std::string& format, SharpRuntime::intcs arg0, SharpRuntime::intcs arg1, SharpRuntime::intcs arg2)
     {
-        std::string r = replaceArg(format, 0, fmtInt(arg0, extractSpec(format, 0)));
-        r = replaceArg(r, 1, fmtInt(arg1, extractSpec(format, 1)));
-        return FinalizeFormat(replaceArg(r, 2, fmtInt(arg2, extractSpec(format, 2))));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1), argOf(arg2)};
+        return formatCore(format, args, 3);
     }
 
     std::string String::Format(const std::string& format, const std::string& arg0, const std::string& arg1, const std::string& arg2)
     {
-        std::string r = replaceArg(format, 0, arg0);
-        r = replaceArg(r, 1, arg1);
-        return FinalizeFormat(replaceArg(r, 2, arg2));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1), argOf(arg2)};
+        return formatCore(format, args, 3);
     }
 
     std::string String::Format(const std::string& format, SharpRuntime::longcs arg0)
@@ -555,26 +712,26 @@ namespace System
 
     std::string String::Format(const std::string& format, double arg0, const std::string& arg1)
     {
-        std::string r = replaceArg(format, 0, fmtDouble(arg0, extractSpec(format, 0)));
-        return FinalizeFormat(replaceArg(r, 1, arg1));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1)};
+        return formatCore(format, args, 2);
     }
 
     std::string String::Format(const std::string& format, const std::string& arg0, double arg1)
     {
-        std::string r = replaceArg(format, 0, arg0);
-        return FinalizeFormat(replaceArg(r, 1, fmtDouble(arg1, extractSpec(format, 1))));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1)};
+        return formatCore(format, args, 2);
     }
 
     std::string String::Format(const std::string& format, SharpRuntime::longcs arg0, SharpRuntime::intcs arg1)
     {
-        std::string r = replaceArg(format, 0, std::to_string(arg0));
-        return FinalizeFormat(replaceArg(r, 1, fmtInt(arg1, extractSpec(format, 1))));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1)};
+        return formatCore(format, args, 2);
     }
 
     std::string String::Format(const std::string& format, SharpRuntime::intcs arg0, SharpRuntime::longcs arg1)
     {
-        std::string r = replaceArg(format, 0, fmtInt(arg0, extractSpec(format, 0)));
-        return FinalizeFormat(replaceArg(r, 1, std::to_string(arg1)));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1)};
+        return formatCore(format, args, 2);
     }
 
     bool String::StartsWith(const std::string& value, char ch)
@@ -692,14 +849,14 @@ namespace System
 
     std::string String::Format(const std::string& format, SharpRuntime::intcs arg0, double arg1)
     {
-        std::string r = replaceArg(format, 0, fmtInt(arg0, extractSpec(format, 0)));
-        return FinalizeFormat(replaceArg(r, 1, fmtDouble(arg1, extractSpec(format, 1))));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1)};
+        return formatCore(format, args, 2);
     }
 
     std::string String::Format(const std::string& format, double arg0, SharpRuntime::intcs arg1)
     {
-        std::string r = replaceArg(format, 0, fmtDouble(arg0, extractSpec(format, 0)));
-        return FinalizeFormat(replaceArg(r, 1, fmtInt(arg1, extractSpec(format, 1))));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1)};
+        return formatCore(format, args, 2);
     }
 
     const std::string String::Empty{};
@@ -711,18 +868,16 @@ namespace System
 
     std::string String::Format(const std::string& format, SharpRuntime::longcs arg0, SharpRuntime::longcs arg1)
     {
-        std::string r = replaceArg(format, 0, std::to_string(arg0));
-        return FinalizeFormat(replaceArg(r, 1, std::to_string(arg1)));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1)};
+        return formatCore(format, args, 2);
     }
 
     std::string String::Format(const std::string& format,
                                const std::string& arg0, const std::string& arg1,
                                const std::string& arg2, const std::string& arg3)
     {
-        std::string r = replaceArg(format, 0, arg0);
-        r = replaceArg(r, 1, arg1);
-        r = replaceArg(r, 2, arg2);
-        return FinalizeFormat(replaceArg(r, 3, arg3));
+        const FormatArg args[] = {argOf(arg0), argOf(arg1), argOf(arg2), argOf(arg3)};
+        return formatCore(format, args, 4);
     }
 
     std::string String::ToUpperInvariant(const std::string& value)

@@ -890,3 +890,243 @@ TEST(StringNormalizationExtensionsTests, Normalize_FormKC_ReturnsInput) {
 TEST(StringNormalizationExtensionsTests, Normalize_EmptyString) {
     EXPECT_EQ(System::StringNormalizationExtensions::Normalize(""), "");
 }
+
+// ---------------------------------------------------------------------------
+// Composite-format boundary — ticket #1882 (SR-AUD-015, CCF-012)
+//
+// String::Format used to build its output by repeatedly mutating a buffer that
+// already held substituted argument text. Every test below pins one consequence
+// of replacing that with a single left-to-right parse of the format string.
+// Design record: docs/CompositeFormatBoundaryPlan.md.
+//
+// The accepted grammar is deliberately UNCHANGED by this ticket: the
+// "PinsCurrentGrammar" group asserts today's behaviour precisely so that ticket
+// #1884 (which adopts .NET's grammar and needs explicit user approval) cannot
+// land silently.
+// ---------------------------------------------------------------------------
+#include "System/OutOfMemoryException.hpp"
+
+// --- Termination: an argument containing its own placeholder used to hang ---
+
+TEST(StringFormatBoundaryTests, SelfReferentialArgument_Terminates) {
+    // Previously an infinite loop: replaceArg reset its scan cursor to 0 after
+    // substituting, so it re-read the text it had just inserted.
+    EXPECT_EQ(String::Format("{0}", std::string("{0}")), "{0}");
+}
+
+TEST(StringFormatBoundaryTests, SelfReferentialArgument_Embedded_Terminates) {
+    EXPECT_EQ(String::Format("[{0}]", std::string("x{0}y")), "[x{0}y]");
+}
+
+TEST(StringFormatBoundaryTests, ArgumentIsTheWholeFormat_Terminates) {
+    EXPECT_EQ(String::Format("{0}", std::string("{0}{0}{0}")), "{0}{0}{0}");
+}
+
+TEST(StringFormatBoundaryTests, MutuallyReferentialArguments_Terminate) {
+    // Both arguments name the other's index. This used to rewrite the buffer into
+    // "{0}{0}" and then throw FormatException for an index the call never used.
+    EXPECT_EQ(String::Format("{0}{1}", std::string("{1}"), std::string("{0}")), "{1}{0}");
+}
+
+// --- Argument isolation: inserted text is never re-read as format syntax ---
+
+TEST(StringFormatBoundaryTests, ArgumentTextIsNotReinterpretedAsFormatItem) {
+    // Was "XX": the second pass found the "{1}" that the first pass had inserted.
+    EXPECT_EQ(String::Format("{0}{1}", std::string("{1}"), std::string("X")), "{1}X");
+}
+
+TEST(StringFormatBoundaryTests, ArgumentTextIsNotReinterpreted_Separated) {
+    EXPECT_EQ(String::Format("{0}|{1}", std::string("{1}"), std::string("Y")), "{1}|Y");
+}
+
+TEST(StringFormatBoundaryTests, ArgumentContainingBracesIsEmittedVerbatim) {
+    EXPECT_EQ(String::Format("<{0}>", std::string("{{a}}")), "<{{a}}>");
+    EXPECT_EQ(String::Format("<{0}>", std::string("}{")), "<}{>");
+}
+
+TEST(StringFormatBoundaryTests, ArgumentContainingSpecifierSyntaxIsEmittedVerbatim) {
+    EXPECT_EQ(String::Format("{0}", std::string("{0:X4}")), "{0:X4}");
+    EXPECT_EQ(String::Format("{0}", std::string("{0,6}")), "{0,6}");
+}
+
+// --- Each occurrence of an index gets its own specifier ---
+
+TEST(StringFormatBoundaryTests, RepeatedIndexUsesItsOwnSpecifier) {
+    // Was "FF/FF": extractSpec returned the first occurrence's specifier for both.
+    EXPECT_EQ(String::Format("{0:X}/{0:D3}", 255), "FF/255");
+}
+
+TEST(StringFormatBoundaryTests, RepeatedIndexUsesItsOwnSpecifier_Reversed) {
+    EXPECT_EQ(String::Format("{0:D3}/{0:X}", 255), "255/FF");
+}
+
+// --- Specifier numeric tail: no std:: exception, no undefined behaviour ---
+
+TEST(StringFormatBoundaryTests, OversizedIntegerSpecifierThrowsFormatException) {
+    // Was std::out_of_range escaping from std::stoi.
+    EXPECT_THROW(String::Format("{0:D99999999999}", 42), System::FormatException);
+}
+
+TEST(StringFormatBoundaryTests, OversizedDoubleSpecifierThrowsFormatException) {
+    EXPECT_THROW(String::Format("{0:F99999999999}", 1.5), System::FormatException);
+}
+
+TEST(StringFormatBoundaryTests, OversizedSpecifierMessageMatchesReference) {
+    try {
+        (void)String::Format("{0:D99999999999}", 42);
+        FAIL() << "expected FormatException";
+    } catch (const System::FormatException& e) {
+        // .NET: SR.Argument_BadFormatSpecifier.
+        EXPECT_EQ(e.getMessageProperty(), "Format specifier was invalid.");
+    }
+}
+
+TEST(StringFormatBoundaryTests, SpecifierBoundIsTheReferenceBound) {
+    // ParseFormatSpecifier rejects as soon as the accumulator would reach 100'000'000,
+    // so a ten-digit tail is rejected and a nine-digit one is not a parse error.
+    EXPECT_THROW(String::Format("{0:D1000000000}", 7), System::FormatException);
+    EXPECT_THROW(String::Format("{0:D2147483648}", 7), System::FormatException);
+}
+
+TEST(StringFormatBoundaryTests, NonNumericSpecifierTailDoesNotThrowStdException) {
+    // Was std::invalid_argument escaping from std::stoi. This port does not implement
+    // custom numeric format strings, so the value is emitted with no specifier applied.
+    EXPECT_EQ(String::Format("{0:DX}", 42), "42");
+    EXPECT_EQ(String::Format("{0:FX}", 1.5), "1.50");
+}
+
+TEST(StringFormatBoundaryTests, IntMinSpecifierTailIsRejectedNotUndefined) {
+    // std::abs(std::stoi("-2147483648")) was UBSan-confirmed undefined behaviour:
+    // "negation of -2147483648 cannot be represented in type 'int'".
+    EXPECT_THROW(String::Format("{0:D-2147483648}", 42), System::FormatException);
+    EXPECT_THROW(String::Format("{0:X-2147483648}", 42), System::FormatException);
+}
+
+TEST(StringFormatBoundaryTests, NegativeSpecifierTailKeepsItsMagnitude) {
+    // The replaced code applied std::abs() to the parsed value; that behaviour is kept
+    // for every magnitude the reference bound accepts.
+    EXPECT_EQ(String::Format("{0:D3}", 7), "007");
+    EXPECT_EQ(String::Format("{0:D-3}", 7), "007");
+}
+
+TEST(StringFormatBoundaryTests, LargeButAcceptedPadIsLinearNotQuadratic) {
+    // The replaced padding loop prepended one character per iteration, copying the whole
+    // string each time. A 50-character pad is trivial now; the point is that it is a
+    // single construction, and that the width parse no longer reaches std::stoi.
+    EXPECT_EQ(String::Format("{0:D50}", 7).size(), 50u);
+    EXPECT_EQ(String::Format("{0:D50}", 7).substr(49), "7");
+}
+
+// --- Preserved successful behaviour (the section 9.3 invariant) ---
+
+TEST(StringFormatBoundaryTests, PreservedSuccess_Specifiers) {
+    EXPECT_EQ(String::Format("{0}", 42), "42");
+    EXPECT_EQ(String::Format("{0:X}", 255), "FF");
+    EXPECT_EQ(String::Format("{0:x}", 255), "ff");
+    EXPECT_EQ(String::Format("{0:X4}", 255), "00FF");
+    EXPECT_EQ(String::Format("{0:D3}", 7), "007");
+    EXPECT_EQ(String::Format("{0:D3}", -7), "-007");
+    EXPECT_EQ(String::Format("{0:F2}", 3.14159), "3.14");
+    EXPECT_EQ(String::Format("{0:F0}", 3.7), "4");
+    EXPECT_EQ(String::Format("{0}", 1.5), "1.5");
+}
+
+TEST(StringFormatBoundaryTests, PreservedSuccess_MultiArgumentShapes) {
+    EXPECT_EQ(String::Format("{1}{0}{1}", std::string("A"), std::string("B")), "BAB");
+    EXPECT_EQ(String::Format("{0:D2}:{1:D2}", 3, 5), "03:05");
+    EXPECT_EQ(String::Format("HP: {0}/{1}", 80, std::string("100")), "HP: 80/100");
+    EXPECT_EQ(String::Format("{0} {1} {2}", std::string("a"), std::string("b"), std::string("c")),
+              "a b c");
+    EXPECT_EQ(String::Format("{0}{1}{2}{3}", std::string("w"), std::string("x"),
+                             std::string("y"), std::string("z")),
+              "wxyz");
+    EXPECT_EQ(String::Format("{0}", true), "True");
+    EXPECT_EQ(String::Format("{0}", 'Z'), "Z");
+    EXPECT_EQ(String::Format("{0}", static_cast<SharpRuntime::longcs>(1234567890123LL)),
+              "1234567890123");
+}
+
+TEST(StringFormatBoundaryTests, PreservedSuccess_MultiDigitIndex) {
+    EXPECT_EQ(String::Format("{0}{1}", std::string("a"), std::string("b")), "ab");
+    // A two-digit index is out of range for every overload, and must be reported as
+    // such rather than silently matched by the single-digit token.
+    EXPECT_THROW(String::Format("{10}", std::string("a")), System::FormatException);
+}
+
+TEST(StringFormatBoundaryTests, PreservedFailure_Types) {
+    EXPECT_THROW(String::Format("{5}", 42), System::FormatException);
+    EXPECT_THROW(String::Format("{0} {2}", 1, 2), System::FormatException);
+    EXPECT_THROW(String::Format("value={0", 42), System::FormatException);
+    EXPECT_THROW(String::Format("{abc}", 42), System::FormatException);
+    EXPECT_THROW(String::Format("{1} and {10}", std::string("a"), std::string("b")),
+                 System::FormatException);
+    EXPECT_NO_THROW(String::Format("{0} and {1}", std::string("a"), std::string("b")));
+}
+
+TEST(StringFormatBoundaryTests, UnclosedItemReportsAMalformedFormatNotABadIndex) {
+    // The replaced FinalizeFormat classified purely on "is the next character a digit",
+    // so an unclosed item was reported as an out-of-range index. The type is unchanged.
+    try {
+        (void)String::Format("value={0", 42);
+        FAIL() << "expected FormatException";
+    } catch (const System::FormatException& e) {
+        EXPECT_EQ(e.getMessageProperty(), "Input string was not in a correct format.");
+    }
+}
+
+TEST(StringFormatBoundaryTests, OutOfRangeIndexKeepsTheReferenceMessage) {
+    try {
+        (void)String::Format("{5}", 42);
+        FAIL() << "expected FormatException";
+    } catch (const System::FormatException& e) {
+        EXPECT_EQ(e.getMessageProperty(),
+                  "Index (zero based) must be greater than or equal to zero and less than "
+                  "the size of the argument list.");
+    }
+}
+
+// --- Grammar rows pinned as CURRENT behaviour (ticket #1884 changes these) ---
+
+TEST(StringFormatBoundaryTests, PinsCurrentGrammar_BracesAreNotEscapes) {
+    // .NET returns "{0}", "{}" and "{42}" for these. Adopting that grammar is #1884.
+    EXPECT_THROW(String::Format("{{0}}", 42), System::FormatException);
+    EXPECT_THROW(String::Format("{{}}", 42), System::FormatException);
+    EXPECT_THROW(String::Format("{{{0}}}", 42), System::FormatException);
+    EXPECT_EQ(String::Format("a}}b", 42), "a}}b");
+}
+
+TEST(StringFormatBoundaryTests, PinsCurrentGrammar_StrayClosingBraceIsLiteral) {
+    // .NET throws FormatException for an unescaped closing brace. #1884.
+    EXPECT_EQ(String::Format("value}", 42), "value}");
+    EXPECT_EQ(String::Format("a}b{0}", 42), "a}b42");
+}
+
+TEST(StringFormatBoundaryTests, PinsCurrentGrammar_AlignmentParsesButDoesNotPad) {
+    // .NET pads to the alignment width. #1884.
+    EXPECT_EQ(String::Format("{0,6}|", 42), "42|");
+    EXPECT_EQ(String::Format("{0,-6}|", 42), "42|");
+    EXPECT_EQ(String::Format("{0,6:D3}|", 42), "042|");
+}
+
+// --- Empty and minimal inputs ---
+
+TEST(StringFormatBoundaryTests, EmptyAndItemFreeFormats) {
+    EXPECT_EQ(String::Format("", 42), "");
+    EXPECT_EQ(String::Format("abc", 42), "abc");
+    EXPECT_EQ(String::Format("{0}", std::string("")), "");
+}
+
+TEST(StringFormatBoundaryTests, LoneBracesAtBufferEdges) {
+    EXPECT_THROW(String::Format("{", 42), System::FormatException);
+    EXPECT_EQ(String::Format("}", 42), "}");
+    EXPECT_THROW(String::Format("{0:", 42), System::FormatException);
+    EXPECT_THROW(String::Format("{0,", 42), System::FormatException);
+}
+
+TEST(StringFormatBoundaryTests, ItemAtTheVeryEndOfALargeFormat) {
+    std::string big(100000, 'a');
+    big += "{0}";
+    const std::string r = String::Format(big, std::string("tail"));
+    EXPECT_EQ(r.size(), 100004u);
+    EXPECT_EQ(r.substr(100000), "tail");
+}

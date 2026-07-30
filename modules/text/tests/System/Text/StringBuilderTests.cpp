@@ -5,6 +5,7 @@
 
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
 #include "System/Text/StringBuilder.hpp"
 
 using System::Text::StringBuilder;
@@ -569,4 +570,35 @@ TEST(StringBuilderTests, EnsureCapacity_DoesNotTruncate) {
     StringBuilder sb("hello");
     sb.EnsureCapacity(1000);
     EXPECT_EQ(sb.ToString(), "hello");
+}
+
+// ---------------------------------------------------------------------------
+// AppendFormat inherits String::Format's composite-format boundary — #1882
+// (SR-AUD-015, CCF-012). AppendFormat forwards to String::Format, so it carried
+// every defect of the replaced replacement engine and is pinned here so a future
+// change to either side cannot regress the wrapper silently.
+// Design record: docs/CompositeFormatBoundaryPlan.md.
+// ---------------------------------------------------------------------------
+
+TEST(StringBuilderTests, AppendFormat_SelfReferentialArgument_Terminates) {
+    System::Text::StringBuilder sb;
+    sb.AppendFormat("{0}", std::string("{0}"));
+    EXPECT_EQ(sb.ToString(), "{0}");
+}
+
+TEST(StringBuilderTests, AppendFormat_ArgumentTextIsNotReinterpreted) {
+    System::Text::StringBuilder sb;
+    sb.AppendFormat("{0}{1}", std::string("{1}"), std::string("X"));
+    EXPECT_EQ(sb.ToString(), "{1}X");
+}
+
+TEST(StringBuilderTests, AppendFormat_RepeatedIndexUsesItsOwnSpecifier) {
+    System::Text::StringBuilder sb;
+    sb.AppendFormat("{0:X}/{0:D3}", 255);
+    EXPECT_EQ(sb.ToString(), "FF/255");
+}
+
+TEST(StringBuilderTests, AppendFormat_OversizedSpecifierThrowsFormatException) {
+    System::Text::StringBuilder sb;
+    EXPECT_THROW(sb.AppendFormat("{0:D99999999999}", 42), System::FormatException);
 }
