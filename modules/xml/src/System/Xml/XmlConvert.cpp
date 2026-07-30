@@ -258,11 +258,12 @@ namespace System::Xml {
     }
     SharpRuntime::charcs XmlConvert::ToChar(const std::string& s) { return System::Char::Parse(s); }
     // Verified against XmlConvert.cs's ToDecimal(string), which passes NumberStyles.
-    // AllowLeadingWhite | AllowTrailingWhite to decimal.Parse. System::Decimal::TryParse
-    // tolerates NO whitespace at all (any non-digit/dot/comma/sign character anywhere fails
-    // immediately), so XML decimal content with surrounding whitespace -- common from document
-    // formatting/indentation -- previously threw FormatException; same bug class as
-    // ToSingle/ToDouble below.
+    // AllowLeadingWhite | AllowTrailingWhite to decimal.Parse. XML decimal content with
+    // surrounding whitespace -- common from document formatting/indentation -- previously
+    // threw FormatException; same bug class as ToSingle/ToDouble below. (As of ticket #1857
+    // System::Decimal::TryParse itself now also skips leading/trailing whitespace, but this
+    // explicit TrimXmlWhitespace is retained: it also governs the INF/-INF token check and
+    // keeps XmlConvert independent of the exact whitespace set Decimal happens to accept.)
     System::Decimal XmlConvert::ToDecimal(const std::string& s) { return System::Decimal::Parse(TrimXmlWhitespace(s)); }
     SharpRuntime::sbytecs XmlConvert::ToSByte(const std::string& s) { return System::SByte::Parse(s); }
     SharpRuntime::shortcs XmlConvert::ToInt16(const std::string& s) { return System::Int16::Parse(s); }

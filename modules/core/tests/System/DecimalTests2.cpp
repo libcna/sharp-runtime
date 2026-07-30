@@ -6,6 +6,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Decimal.hpp"
+#include "System/FormatException.hpp"
 #include "System/MidpointRounding.hpp"
 #include "System/OverflowException.hpp"
 
@@ -156,6 +157,71 @@ TEST(DecimalTests2, Parse_NegativeZero_PreservesSign) {
     // A plain "0" and "+0" remain positive zero.
     EXPECT_FALSE(Decimal::Parse("0").getIsNegativeProperty());
     EXPECT_FALSE(Decimal::Parse("+0").getIsNegativeProperty());
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-035 (#1857): parser — compatible sub-defects landed.
+//   * leading/trailing whitespace is now skipped (pure widening);
+//   * excess fractional precision beyond scale 28 is rounded half-to-even
+//     instead of being silently discarded.
+// The comma-as-group-separator value change and the FormatException ->
+// OverflowException exception-type change stay BLOCKED on approval (#1858);
+// the two documentation tests below pin the CURRENT (pre-#1858) behaviour.
+// ---------------------------------------------------------------------------
+
+TEST(DecimalTests2, Parse_SkipsLeadingAndTrailingWhitespace) {
+    EXPECT_EQ(Decimal::Parse(" 3.14 "), Decimal::Parse("3.14"));
+    EXPECT_EQ(Decimal::Parse("\t42\n"), Decimal(42));
+    EXPECT_EQ(Decimal::Parse("  -7  "), Decimal(-7));
+    Decimal d;
+    EXPECT_TRUE(Decimal::TryParse("\r\n 100 \t", d));
+    EXPECT_EQ(d, Decimal(100));
+    // All-whitespace / empty still fail.
+    EXPECT_FALSE(Decimal::TryParse("   ", d));
+    EXPECT_FALSE(Decimal::TryParse("", d));
+    // Interior whitespace is still rejected (only leading/trailing is allowed).
+    EXPECT_FALSE(Decimal::TryParse("1 2", d));
+}
+
+TEST(DecimalTests2, Parse_RoundsExcessFractionalPrecisionHalfToEven) {
+    // Build fractional strings with exact digit counts (scale caps at 28, so the 29th
+    // fractional digit is the first dropped one and drives the rounding).
+    const std::string z27(27, '0');
+    const std::string z28(28, '0');
+    // The audit's exact case: 6e-29 must round up to 1e-28, not truncate to 0.
+    EXPECT_EQ(Decimal::Parse("0." + z28 + "6"), Decimal::Parse("0." + z27 + "1"));
+    EXPECT_EQ(Decimal::Parse("0." + z28 + "6").getScaleProperty(), 28);
+    // A dropped digit < 5 rounds down to zero.
+    EXPECT_EQ(Decimal::Parse("0." + z28 + "4"), Decimal::Zero);
+    // Tie (dropped 5, empty tail): retained mantissa ...2 is even -> stays ...2.
+    EXPECT_EQ(Decimal::Parse("0." + z27 + "25"), Decimal::Parse("0." + z27 + "2"));
+    // Tie (dropped 5, empty tail): retained mantissa ...3 is odd -> rounds to even ...4.
+    EXPECT_EQ(Decimal::Parse("0." + z27 + "35"), Decimal::Parse("0." + z27 + "4"));
+    // A nonzero tail after the dropped 5 always rounds up, even from an even mantissa.
+    EXPECT_EQ(Decimal::Parse("0." + z27 + "251"), Decimal::Parse("0." + z27 + "3"));
+    // A long in-range integer part with trailing excess precision still rounds.
+    EXPECT_EQ(Decimal::Parse("1." + z27 + "55"), Decimal::Parse("1." + z27 + "6"));
+}
+
+// DOCUMENTATION (pre-#1858): ',' is still interpreted as a decimal point, NOT a .NET
+// group separator. #1858 (approval-blocked) would make Parse("1,5") == 15 instead.
+TEST(DecimalTests2, Parse_CommaIsStillDecimalPoint_PendingApproval) {
+    EXPECT_EQ(Decimal::Parse("1,5"), Decimal::Parse("1.5"));
+    // Two separators are rejected, so ".NET grouped" input like "1,234.5" still fails.
+    Decimal d;
+    EXPECT_FALSE(Decimal::TryParse("1,234.5", d));
+}
+
+// DOCUMENTATION (pre-#1858): a value past decimal's range is still reported as a
+// FormatException, not .NET's OverflowException. #1858 (approval-blocked) would
+// narrow the overflow case to OverflowException via an internal status channel.
+TEST(DecimalTests2, Parse_OverflowStillFormatException_PendingApproval) {
+    EXPECT_THROW(Decimal::Parse("79228162514264337593543950336"),
+                 System::FormatException);
+    Decimal d;
+    EXPECT_FALSE(Decimal::TryParse("79228162514264337593543950336", d));
+    // A well-formed in-range boundary still parses.
+    EXPECT_EQ(Decimal::Parse("79228162514264337593543950335"), Decimal::MaxValue);
 }
 
 // ---------------------------------------------------------------------------

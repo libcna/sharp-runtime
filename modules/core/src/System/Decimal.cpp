@@ -8,6 +8,7 @@
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 namespace System {
@@ -293,33 +294,71 @@ void Decimal::GetBits(const Decimal& d, intcs& lo, intcs& mid, intcs& hi, intcs&
 // ---------------------------------------------------------------------------
 
 bool Decimal::TryParse(const std::string& s, Decimal& result) {
-    if (s.empty()) return false;
-    size_t i = 0;
+    // SR-AUD-035 (#1857): skip leading/trailing whitespace, matching .NET's default
+    // NumberStyles.Number (AllowLeadingWhite | AllowTrailingWhite). This is a pure
+    // widening -- inputs that used to be rejected are now accepted; no previously
+    // accepted input changes value. NOTE (deferred to #1858, approval-blocked): ',' is
+    // still treated here as a decimal point, NOT a .NET group separator; converting it
+    // to a group separator would silently change the value of Parse("1,5") (1.5 -> 15).
+    size_t begin = 0, end = s.size();
+    while (begin < end && std::isspace(static_cast<unsigned char>(s[begin]))) ++begin;
+    while (end > begin && std::isspace(static_cast<unsigned char>(s[end - 1]))) --end;
+    if (begin >= end) return false;
+
+    size_t i = begin;
     bool neg = false;
     if (s[i] == '-') { neg = true; ++i; }
     else if (s[i] == '+') { ++i; }
 
-    u128    mantissa = 0;
-    uint8_t scale    = 0;
-    bool    seenDot  = false, seenDigit = false;
+    u128    mantissa   = 0;
+    uint8_t scale      = 0;
+    bool    seenDot    = false, seenDigit = false;
+    int     roundDigit = -1;     // first fractional digit dropped past scale 28 (-1 = none)
+    bool    nonZeroTail = false; // any nonzero dropped digit after the first
 
-    for (; i < s.size(); ++i) {
+    for (; i < end; ++i) {
         char c = s[i];
         if (c == '.' || c == ',') {
             if (seenDot) return false;
             seenDot = true;
         } else if (c >= '0' && c <= '9') {
             seenDigit = true;
-            if (seenDot) {
-                if (scale >= 28) continue; // extra precision silently dropped
-                ++scale;
+            if (seenDot && scale >= 28) {
+                // SR-AUD-035 (#1857): excess fractional precision beyond scale 28 is
+                // recorded for round-half-to-even below instead of being silently
+                // discarded (which used to turn 0.0...06 into 0 rather than 1e-28).
+                int d = c - '0';
+                if (roundDigit < 0) roundDigit = d;
+                else if (d != 0)    nonZeroTail = true;
+                continue;
             }
+            if (seenDot) ++scale;
             if (mantissa > MAX_MANTISSA / 10) return false;
             mantissa = mantissa * 10 + uint8_t(c - '0');
             if (mantissa > MAX_MANTISSA) return false;
         } else { return false; }
     }
     if (!seenDigit) return false;
+
+    // Round-half-to-even (banker's) rounding of the dropped fractional precision, matching
+    // .NET's NumberToDecimal. A first-dropped digit > 5 always rounds up; == 5 rounds up
+    // only if a nonzero tail follows or the retained mantissa is odd (tie -> even).
+    bool roundUp = false;
+    if (roundDigit >= 0) {
+        if (roundDigit > 5)      roundUp = true;
+        else if (roundDigit < 5) roundUp = false;
+        else                     roundUp = nonZeroTail || (uint64_t(mantissa) & 1u) != 0u;
+    }
+    if (roundUp) {
+        ++mantissa;
+        if (mantissa > MAX_MANTISSA) {
+            // Rounding carried past the 96-bit mantissa; drop one scale digit, rounding
+            // the reduction (mirrors .NET's e++ carry path). Only reachable at scale 28.
+            mantissa = (mantissa + 5) / 10;
+            if (scale > 0) --scale;
+        }
+    }
+
     // SR-AUD-038 (#1856): preserve the parsed sign even for a zero magnitude, so
     // Parse("-0") yields a negative zero, matching .NET's decimal parser (its
     // NumberBufferKind.Decimal path does NOT clear IsNegative for a zero value, unlike

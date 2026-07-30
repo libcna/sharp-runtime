@@ -275,3 +275,22 @@ Positive `Decimal::Zero` still reports `flags==0`. +6 add-only tests. The
 reference `NumberBufferKind.Decimal` path which does not clear `IsNegative` for a
 zero value. `normalize()`/unary-`−` negative-zero *production* stays out of scope
 (the deferred broader decision in §4/§6).
+
+**CCF5D-3 — SR-AUD-035 — PARTIAL (#1857 landed, #1858 blocks the rest,
+2026-07-30).** `TryParse` (`Decimal.cpp`) now lands the two clearly-compatible
+sub-defects: (a) it skips leading/trailing whitespace (`std::isspace`, a pure
+widening — no previously accepted input changes value), and (b) it rounds excess
+fractional precision beyond scale 28 round-half-to-even instead of discarding it,
+so `0.0…06` → `1e-28` (with a defensive scale-drop guarding the rare rounding
+carry past the 96-bit mantissa). +4 add-only tests, two of which
+(`Parse_CommaIsStillDecimalPoint_PendingApproval`,
+`Parse_OverflowStillFormatException_PendingApproval`) pin the *current* behaviour
+of the two approval-sensitive pieces. Those two pieces — **comma-as-group-
+separator** (silently changes `Parse("1,5")` 1.5→15; §3 premise 2) and the
+**`FormatException`→`OverflowException` overflow taxonomy** (needs the internal
+status channel; §3 premise 1) — are split out to **blocked ticket #1858
+(`needs_user`)**; each is an observable semantic change requiring an explicit
+decision (adopt full .NET `NumberStyles.Number` semantics vs. keep the current
+comma/overflow behaviour as an accepted deviation). SR-AUD-035 stays `confirmed`
+until #1858 lands. The comma fix was **not** applied silently, per the batch
+directive.

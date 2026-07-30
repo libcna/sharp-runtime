@@ -30,6 +30,15 @@ zero.
   and decimal point, distinguishes format from overflow, and specifies
   nearest rounding of excess fractional precision:
   <https://learn.microsoft.com/en-us/dotnet/api/system.decimal.parse?view=net-10.0>.
+  **Partially remediated (#1857, 2026-07-30):** `TryParse` now (a) skips
+  leading/trailing whitespace (`std::isspace`), a pure widening, and (b) rounds
+  excess fractional precision beyond scale 28 half-to-even instead of
+  discarding it, so `0.0…06` → `1e-28` (with a defensive scale-drop on the rare
+  rounding carry past the 96-bit mantissa). **Still open (approval-blocked as
+  #1858):** `','` remains a decimal point rather than a .NET group separator
+  (changing it silently alters `Parse("1,5")`), and range overflow still throws
+  `FormatException` rather than `OverflowException` (needs an internal status
+  channel). SR-AUD-035 stays `confirmed` until #1858 lands.
 - **SR-AUD-036:** `Round(d, decimals, static_cast<MidpointRounding>(99))`
   reaches the switch default and returns `1` for `1.9` rather than throwing
   `ArgumentException`.  .NET requires that exception for an invalid
