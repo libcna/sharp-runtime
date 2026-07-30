@@ -5986,3 +5986,29 @@ tracked in `NEXT.md`, `plan.md`, and `AUDIT_FINDINGS_INDEX.md`; this file's
 per-batch log resumes here.) Full component gate **14,396/14,396** across 37
 executables; Doxygen 1,941/1,942; module graph 41/91; seams 2/18; negative
 fixtures 9/66 — all green.
+
+
+**CCF-019 design batch (#1885, 2026-07-30) — design-only, nothing remediated.**
+SR-AUD-327 (`JsonNode`) and SR-AUD-333 (`XObject`) were reproduced against the
+shipped bodies and planned; **no production file changed**. 47 cases, one forked
+process each under a watchdog, three builds from one source (ASan+UBSan,
+recoverable ASan, no sanitizer), every production translation unit compiled from
+source into the probe so no archive could be stale: **29 ASan
+`heap-use-after-free` accesses**, **3 `stack-overflow`s**, **57 reads / 0 writes**
+under recoverable ASan, and **12** further cases wrong with no diagnostic at all.
+Six premises corrected by measurement (surface is 76 public entries across 27
+headers and 13 bodies, not nine files and two accessors; SR-AUD-333 aborts the
+process through a **virtual** call on freed storage at eight entry points with no
+sanitizer). Selected contract: **the owner detaches what it owns in its own
+destructor** — `docs/OwnedTreeLifetimeContractPlan.md` — at zero layout, zero
+vtable, zero allocation and zero per-access cost; the strong-parent-link
+alternative that matches .NET exactly was rejected on a LeakSanitizer-confirmed
+leak (2 constructed, 0 destroyed), and the `weak_ptr` alternative on the
+repository's own 77 automatic-storage containers. **Audit tally unchanged: 57
+remediated / 306 confirmed / 364 total**, two of the 306 now carrying the
+`confirmed (design-complete)` qualifier; numbering stays frozen at 364 and **no
+new SR-AUD-\* identifier** was issued. Implementation is #1886–#1894, all
+`needs_user` or `blocked` pending six explicit approvals. Baselines carried
+forward unchanged (nothing was rebuilt): 14,568 tests / 37 executables, module
+graph 41/91, Doxygen 1,941/1,942, seams 2/18, negative fixtures 9/66. CNA and
+mobile-eggbert were not inspected; #1773 stays `blocked`.

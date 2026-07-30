@@ -3960,3 +3960,54 @@ buffer's four outcomes pinned unchanged. `SharpRuntimeTests_Buffers` **517/517**
 across 37 executables** (was 14,041). Module graph **41 / 91**.
 
 **Source and ABI consequences: none.**
+
+
+---
+
+## CCF-019 design batch, 2026-07-30 (ticket #1885) — DESIGN-COMPLETE, NOTHING REMEDIATED
+
+Design-only ticket **#1885** planned the two remaining CCF-019 members,
+**SR-AUD-327** (`System::Text::Json::Nodes::JsonNode`) and **SR-AUD-333**
+(`System::Xml::Linq::XObject`), and made **no production change**. Both remain
+`confirmed`; the findings index now carries the `confirmed (design-complete)`
+qualifier its own header defines, which is not a separate status — the tally is
+unchanged at **57 remediated / 306 confirmed / 364 total**, two of the 306 being
+design-complete. **No new `SR-AUD-*` identifier was issued**; numbering stays
+frozen at 364.
+
+Both findings were reproduced against the shipped bodies before any design was
+written: 47 cases, one `fork()`ed process each under a 5-second watchdog, in
+three builds from one source — `-fsanitize=address,undefined`,
+`-fsanitize-recover=address`, and no sanitizer — with every production
+translation unit compiled **from source into the probe** by a single `g++`
+invocation, so no archive could be stale. Measured: **29 ASan
+`heap-use-after-free` accesses** (8 JsonNode, 21 XObject) and **3 ASan
+`stack-overflow`s**; under recoverable ASan the whole matrix produces **57
+reads-after-free and zero writes**; **twelve** further cases give a wrong answer
+with **no diagnostic in any build**, two of them only visible without a sanitizer
+because ASan's quarantine hides allocator reuse.
+
+Six premises were corrected by measurement and appended to the owning reports and
+to `AUDIT_CROSS_CUTTING_FINDINGS.md` without altering their historical text. The
+largest: the surface is **76 public entries across 27 headers and 13 bodies**,
+not the nine files and two accessors the cross-cutting record names; and
+SR-AUD-333's severity is understated, because `XObject::getParentProperty`
+dispatches a **virtual call** through the freed parent, so eight public entry
+points abort the process with `pure virtual method called` **even with no
+sanitizer present**.
+
+The selected contract is recorded in `docs/OwnedTreeLifetimeContractPlan.md`:
+**the owner detaches what it owns, in its own destructor** — the same contract
+#1769 shipped for `LinkedListNode<T>` under this cause. It closes 27 of the 29
+use-after-free accesses at **zero bytes of object layout, zero vtable slots, zero
+allocations and zero per-access cost**. Every representation-changing candidate
+was rejected with measured evidence: a strong (GC-like) parent link, the only one
+that reproduces .NET's contract exactly, **leaks by construction** (2
+constructed, 0 destroyed, 272 bytes in 3 allocations, LeakSanitizer-confirmed);
+and a `weak_ptr` parent link would make children of the repository's own **77
+automatic-storage containers** silently report no parent.
+
+Implementation is proposed as **#1886–#1894**, every one `needs_user` or
+`blocked` pending six explicit approvals (§31 of the plan). **CNA and
+mobile-eggbert were not inspected, searched, built or modified**, and #1773
+remains `blocked`.

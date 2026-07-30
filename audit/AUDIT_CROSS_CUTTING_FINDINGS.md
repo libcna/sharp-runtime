@@ -1180,6 +1180,71 @@ original evidence above and in the per-file reports is retained.
 - `modules/xml-linq/include/System/Xml/Linq/XObject.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/LinkedList.hpp.audit.md`.
 
+**Design status of the two remaining members (ticket #1885, 2026-07-30):
+DESIGN-COMPLETE — NEITHER IS REMEDIATED.** SR-AUD-327 and SR-AUD-333 both remain
+`confirmed`; the original evidence above and in the per-file reports is retained
+unchanged, and **no new `SR-AUD-*` identifier was issued** (numbering stays frozen
+at 364). Design-only ticket #1885 reproduced both against the shipped bodies,
+one process per case under a watchdog, in three builds from one source
+(`-fsanitize=address,undefined`, `-fsanitize-recover=address`, and no sanitizer),
+with every production translation unit compiled **from source into the probe** so
+no archive could be stale. The selected contract is recorded in
+`docs/OwnedTreeLifetimeContractPlan.md`.
+
+It established six facts beyond the original evidence.
+
+1. **The surface is 76 public entries across 27 headers and 13 bodies**, not the
+   nine files and two accessors this section names — 41 in `Text.Json`'s node
+   family and 35 in `Xml.Linq`.
+2. **SR-AUD-333's severity is understated.** `XObject::getParentProperty`
+   dispatches a **virtual call** through the freed parent, so **eight** public
+   entry points abort the process (`pure virtual method called`, SIGABRT) with no
+   sanitizer present at all. Measured totals: 29 ASan `heap-use-after-free`
+   accesses (8 JsonNode, 21 XObject) and 3 ASan `stack-overflow`s.
+3. **All 57 faulting accesses are READS.** Under `-fsanitize-recover=address`
+   with `halt_on_error=0` the whole matrix produces 57 reads-after-free and
+   **zero** writes: the mutating paths (`XNode::Remove`, `ReplaceWith`,
+   `XContainer::InsertNodeAt`, `XElement::RemoveAttribute`) enter a non-`const`
+   member on freed storage but their searches do not match, so they return before
+   their `erase`/`insert`. This record therefore claims a read-after-free on a
+   mutating path, not heap corruption.
+4. **Twelve cases give a wrong answer with no diagnostic in any build**, including
+   two allocator-reuse shapes a sanitizer's quarantine hides: a freed `JsonArray`
+   slot refilled by a `JsonObject` at the identical address, after which the
+   retained child reports the wrong `GetValueKind`; and a freed `XElement` slot
+   refilled by another element, after which the retained text node reports the
+   squatter's name.
+5. **The two members are structurally asymmetric in a way this section's "the
+   implementations differ" understates.** `XObject` deletes copy, move and both
+   assignments hierarchy-wide; `JsonNode` deletes none of them, so
+   `JsonArray copy = *orig;` compiles, shares the children, and leaves them
+   reporting the **original** as their parent — and a slicing `operator=` rewrites
+   `parent_` on a node still stored in a container. Insertion also differs
+   deliberately and in opposite directions: JsonNode **rejects** an
+   already-parented node (matching .NET), Xml.Linq **moves** it (an authorised
+   documented deviation from .NET's clone).
+6. **Three stack-overflow shapes exist that no CCF-019 text mentions**, all
+   reachable from public API and one from **untrusted input**: a 20,000-deep
+   `JsonArray` nest and a 20,000-deep `XElement` nest each crash on *release*
+   (recursive `shared_ptr` teardown), and `JsonNode::Parse` of 20,000 nested
+   arrays crashes during parsing. `XDocument::Parse` is the counter-example
+   inside the family — tinyxml2 already rejects deep nesting. The
+   ancestor/cycle guards are additionally quadratic in depth.
+
+**Selected repair, both members: the owner detaches what it owns, in its own
+destructor** — the same contract #1769 shipped for `LinkedListNode<T>` under this
+cause. It closes 27 of the 29 use-after-free accesses at **zero bytes of object
+layout, zero vtable slots, zero allocations and zero per-access cost**. Every
+representation-changing candidate was rejected with measured evidence, including
+the only one that reproduces .NET's contract exactly — a strong parent link —
+which leaks by construction (2 constructed, **0 destroyed**, 272 bytes in 3
+allocations, LeakSanitizer-confirmed), and the `weak_ptr` candidate, which would
+make children of the repository's own 77 automatic-storage containers silently
+report **no parent**. Implementation is proposed as #1886–#1894, every one
+`needs_user` or `blocked` pending the six explicit approvals in
+`docs/OwnedTreeLifetimeContractPlan.md` §31. **CNA and mobile-eggbert were not
+inspected**, and #1773 stays `blocked`.
+
 **Related, but deliberately not a member (ticket #1782, 2026-07-27):**
 SR-AUD-361 (`SortedSet<T>::GetViewBetween`) is **not** a CCF-019 instance and
 must not be counted as one. Its returned object is a fully detached snapshot
