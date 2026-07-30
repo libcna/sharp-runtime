@@ -64,6 +64,55 @@ struct CollectionVersionAccess<System::Collections::Widget> {
 }
 """
 
+# Ticket #1804: the seam's PRIMARY TEMPLATE carries a body in the production
+# header, so the forward-declaration shape discovery keys on no longer matches.
+SEAM_PRIMARY_DEFINED = """\
+#pragma once
+namespace SharpRuntime::Testing
+{
+    template <typename TOwner>
+    struct CollectionVersionAccess {
+        static int version(const TOwner& w) { return w.version_; }
+    };
+}
+namespace System::Collections
+{
+    class Widget
+    {
+        int version_ = 0;
+        template <typename> friend struct SharpRuntime::Testing::CollectionVersionAccess;
+    };
+}
+"""
+
+# A second, correctly forward-declared seam in its own production header.
+SECOND_SEAM_DECLARATION = """\
+#pragma once
+namespace SharpRuntime::Testing
+{
+    template <typename T>
+    struct SortedSetVersionAccess;
+}
+namespace System::Collections::Generic
+{
+    template <typename T>
+    class SortedSet
+    {
+        unsigned long version_ = 0;
+        friend struct SharpRuntime::Testing::SortedSetVersionAccess<T>;
+    };
+}
+"""
+
+# A legitimate NON-template helper living in SharpRuntime::Testing. The #1804
+# rule targets class templates, so this must not be mistaken for a seam.
+NON_TEMPLATE_HELPER = """\
+namespace SharpRuntime::Testing
+{
+    struct DiagnosticTag { int marker = 0; };
+}
+"""
+
 
 class FixtureRepository:
     def __init__(self, root: Path) -> None:
@@ -199,6 +248,65 @@ class VersionSeamCheckerTests(unittest.TestCase):
             any("in a production tree" in problem for problem in report.problems),
             report.problems,
         )
+
+    def test_a_defined_primary_template_in_a_production_header_is_rejected(self) -> None:
+        """Ticket #1804: a seam whose primary template carries a body in a
+        production header must be REJECTED, not silently dropped from discovery.
+        This is the exact false pass #1803 measured and #1804 was opened for."""
+        self.fixture.declare_seam(SEAM_PRIMARY_DEFINED)
+        report = self.check()
+        self.assertFalse(report.ok)
+        # The seam did NOT leave discovery -- it is still counted, so the
+        # success-line seam count cannot silently drop.
+        self.assertIn("CollectionVersionAccess", report.seams)
+        # ... and it is reported, naming the primary template and the tree.
+        self.assertTrue(
+            any(
+                "primary template" in problem
+                and "CollectionVersionAccess" in problem
+                and "in a production tree" in problem
+                for problem in report.problems
+            ),
+            report.problems,
+        )
+
+    def test_a_seam_leaving_discovery_among_two_is_still_counted(self) -> None:
+        """The full #1804 shape: one of TWO seams gains a primary-template body.
+        The seam count must not silently fall from two to one, and the run must
+        fail -- the vacuity guard alone (which fires only at zero seams) would
+        let this pass."""
+        self.fixture.declare_seam(SEAM_PRIMARY_DEFINED)
+        self.fixture.write(
+            "modules/collections/include/System/Collections/Generic/SortedSet.hpp",
+            SECOND_SEAM_DECLARATION,
+        )
+        report = self.check()
+        self.assertFalse(report.ok)
+        self.assertEqual(
+            sorted(report.seams),
+            ["CollectionVersionAccess", "SortedSetVersionAccess"],
+        )
+        self.assertTrue(
+            any(
+                "primary template" in problem and "CollectionVersionAccess" in problem
+                for problem in report.problems
+            ),
+            report.problems,
+        )
+
+    def test_a_non_template_helper_in_testing_is_not_a_seam(self) -> None:
+        """The #1804 rule targets class TEMPLATES: a non-template helper defined
+        in SharpRuntime::Testing is not mistaken for a seam and is not rejected,
+        so a legitimate helper is never a false positive."""
+        self.fixture.declare_seam(SEAM_DECLARATION + NON_TEMPLATE_HELPER)
+        self.fixture.write(
+            "modules/collections/tests/support/Seam.hpp",
+            "#pragma once\n" + RICH_BODY,
+        )
+        report = self.check()
+        self.assertTrue(report.ok, report.problems)
+        self.assertNotIn("DiagnosticTag", report.seams)
+        self.assertIn("CollectionVersionAccess", report.seams)
 
     def test_two_seam_macros_in_one_file_are_rejected(self) -> None:
         self.fixture.declare_seam(

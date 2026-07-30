@@ -29,10 +29,13 @@ reads source text directly and needs no configured build.
 
 Rules enforced:
 
-1. No seam specialisation may be defined in a production tree
-   (``modules/*/include`` or ``modules/*/src``). That is what keeps the seam
+1. No seam definition may live in a production tree
+   (``modules/*/include`` or ``modules/*/src``) -- neither an explicit
+   specialisation nor the primary template itself. That is what keeps the seam
    unreachable from a consumer, as
-   ``test/consumer/collections_mutation_version_negative.cpp`` proves.
+   ``test/consumer/collections_mutation_version_negative.cpp`` proves. A defined
+   primary template is caught because discovery surfaces it as a seam rather
+   than letting it drop out of the inventory silently (ticket #1804).
 2. Each ``(seam, template-argument list)`` pair may be defined in exactly ONE
    file. Suites share it by including that file.
 3. All definitions of one pair must be token-for-token identical. Rule 2 makes
@@ -166,9 +169,49 @@ def _matching(tokens: list[str], start: int, opener: str, closer: str) -> int:
     return -1
 
 
+def _reverse_matching(tokens: list[str], start: int, opener: str, closer: str) -> int:
+    """Index of the token opening the group that closes at *start*, scanning
+    backwards, or -1."""
+    depth = 0
+    for index in range(start, -1, -1):
+        if tokens[index] == closer:
+            depth += 1
+        elif tokens[index] == opener:
+            depth -= 1
+            if depth == 0:
+                return index
+    return -1
+
+
+def _is_class_template_head(tokens: list[str], struct_index: int) -> bool:
+    """True if the ``struct``/``class`` token at *struct_index* heads a class
+    template, i.e. it is immediately preceded by the ``>`` that closes a
+    ``template < ... >`` clause."""
+    if struct_index < 1 or tokens[struct_index - 1] != ">":
+        return False
+    opener = _reverse_matching(tokens, struct_index - 1, "<", ">")
+    return opener > 0 and tokens[opener - 1] == "template"
+
+
 def find_declared_seams(text: str) -> set[str]:
-    """Names a production header declares, and does not define, inside
-    ``namespace SharpRuntime::Testing``."""
+    """Names a production header presents as a test-only access seam inside
+    ``namespace SharpRuntime::Testing``.
+
+    A seam's *correct* shape is a forward-declared class template
+    (``template <typename T> struct Access;``). Discovery keys on that shape.
+
+    Ticket #1804: a name whose **primary template is DEFINED** here
+    (``template <typename T> struct Access { ... };``) is also surfaced, so it
+    does not silently vanish from the seam inventory. Once surfaced, rule 1
+    rejects it as a seam defined in a production tree -- because a defined
+    primary template is a complete type a consumer can name, which is exactly
+    what a seam must never be. Without this, giving a seam's primary template a
+    body would drop it from discovery and the run would exit 0 with the seam
+    count silently falling by one; the vacuity guard only fires at *zero* seams.
+
+    A non-template helper defined here (``struct Helper { ... };``) is left
+    alone -- the rule targets class *templates* only, so a legitimate
+    ``SharpRuntime::Testing`` helper is never rejected."""
     declared: set[str] = set()
     stripped = strip_comments_and_literals(text)
     if not SEAM_NAMESPACE_RE.search(stripped):
@@ -192,7 +235,15 @@ def find_declared_seams(text: str) -> set[str]:
         for position, token in enumerate(body):
             if token != "struct" and token != "class":
                 continue
-            if position + 2 < len(body) and body[position + 2] == ";":
+            if position + 2 >= len(body):
+                continue
+            following = body[position + 2]
+            if following == ";":
+                # Forward declaration -- the correct shape for a seam.
+                declared.add(body[position + 1])
+            elif following == "{" and _is_class_template_head(body, position):
+                # A DEFINED primary class template. Surface it so rule 1 rejects
+                # it instead of the seam silently leaving discovery (#1804).
                 declared.add(body[position + 1])
     return declared
 
@@ -301,11 +352,19 @@ def check_repository(root: Path) -> SeamReport:
             and parts[0] == "modules"
             and parts[2] in PRODUCTION_SECTIONS
         ):
-            report.problems.append(
-                f"{definition.path} defines test-only seam "
-                f"'{definition.seam}<{definition.arguments}>' in a production tree; "
-                "a defined seam is reachable from a consumer"
-            )
+            if definition.arguments:
+                report.problems.append(
+                    f"{definition.path} defines test-only seam "
+                    f"'{definition.seam}<{definition.arguments}>' in a production "
+                    "tree; a defined seam is reachable from a consumer"
+                )
+            else:
+                report.problems.append(
+                    f"{definition.path} defines the primary template of test-only "
+                    f"seam '{definition.seam}' in a production tree; a defined "
+                    "primary template is reachable from a consumer and would "
+                    "otherwise leave seam discovery silently (ticket #1804)"
+                )
 
     # Rules 2 and 3: one defining file, one token body.
     by_key: dict[tuple[str, str], list[SeamDefinition]] = {}

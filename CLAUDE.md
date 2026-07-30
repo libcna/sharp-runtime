@@ -318,12 +318,16 @@ Every `.hpp` and `.cpp` file starts with:
   that pins it — `test/consumer/collections_mutation_version_negative.cpp` for
   `CollectionVersionAccess` (2 sites, #1787/#1801) and
   `test/consumer/collections_sorted_set_version_negative.cpp` for `SortedSetVersionAccess`
-  (15 sites, #1803). **Every seam needs both checks**: measured on 2026-07-29, giving a
-  seam's *primary template* a body in a public header makes it stop being discovered as a
-  seam, so `check_version_seam_odr.py` exits 0 and only the consumer fixture fails
-  (`docs/NegativeConsumerFixtureValidation.md` §18.4). A seam added by a future ticket must
-  therefore gain a `test/consumer/*_negative.cpp` site too, not only a single definition
-  site. Note also what neither check can express: a consumer that reopens
+  (15 sites, #1803). **Every seam needs both checks** — they catch different mutations.
+  Ticket #1804 (2026-07-30) closed one earlier gap in the seam checker: giving a seam's
+  *primary template* a body in a public header used to make it stop being discovered as a
+  seam, so `check_version_seam_odr.py` exited 0 while one of two seams silently vanished; the
+  checker now surfaces a defined primary and rejects it as a seam defined in a production tree
+  (`docs/CollectionVersionTestSeamDesign.md` §15). The consumer fixture is still required for
+  a mutation the checker cannot see — making a collection's private counter public — which is
+  caught only by compilation (`docs/NegativeConsumerFixtureValidation.md` §18.4 row four). A
+  seam added by a future ticket must therefore gain a `test/consumer/*_negative.cpp` site too,
+  not only a single definition site. Note also what neither check can express: a consumer that reopens
   `namespace SharpRuntime::Testing` and writes its own explicit specialisation **does** get
   the access the friend declaration grants, for both seams; that is well-formed ISO C++, is
   unsupported, and is recorded in §18.5 rather than assumed away.

@@ -772,3 +772,101 @@ compile-negative site, and it is unsupported: it is written down in
 capability table describes what the seam *hands* a consumer — nothing — and that
 statement stands; it was never a claim about what a consumer can construct for
 itself.
+
+## 15. Addendum — ticket #1804, closing §14's discovery blind spot
+
+*Appended 2026-07-30 by ticket #1804 (`REMED-TOOLING-SEAM-DISCOVERY-VACUITY`).
+Everything above this line — including #1800's own §1–§13 and #1803's §14 — is
+preserved unedited. #1800 stays `done` and was not reopened; #1804 changes only
+`scripts/check_version_seam_odr.py` and `test/check_version_seam_odr_test.py`,
+touches no production code, and changes no seam count in the real repository
+(still `2 seam(s), 18 specialisation definition(s)`).*
+
+§14 measured a defence-in-depth gap and deliberately left it open: the checker
+discovered a seam as *"a class template declared and **not defined** inside
+`namespace SharpRuntime::Testing` in a `modules/*/include` header"*, so giving a
+seam's **primary template** a body in that header made it stop matching the
+description. Rule 1 never fired (there was no longer a seam to apply it to), the
+run exited 0, and the only trace was the success-line seam count falling from 2
+to 1. §8.3's vacuity guard fires only at **zero** seams, so one of two seams
+disappearing passed silently. Nothing was ever broken in the tree — both
+consumer-side negative fixtures already catch the mutation — but the gap was
+opened as inactive #1804 so it would not be rediscovered.
+
+### 15.1 Reproduction, measured
+
+`build-probe/1804_gap_probe.py` (log `build-probe/1804_gap_probe.log`) drives the
+**unmodified** checker against two-seam mirror repositories built from
+real-style seam sources. Baseline: `OK, 2 seams`. Mutation — give
+`CollectionVersionAccess`'s primary template a body in `MutationCounter.hpp`:
+**`OK, exit 0`**, silently `1 seam`, `0` definitions. That is the exact false
+pass §14's table row two named, reproduced in isolation.
+
+### 15.2 The fix — one discovery rule, no hard-coded names
+
+Discovery is extended to surface a name whose **primary class template is
+defined** in that namespace, alongside the forward-declared shape it already
+keys on. The extension is deliberately narrow:
+
+* it fires only for a **class template** — the `struct`/`class` must be preceded
+  by a `template < … >` head (`_is_class_template_head`), so a legitimate
+  non-template `SharpRuntime::Testing` helper is never mistaken for a seam;
+* it fires only for a **primary** definition (the name immediately followed by
+  `{`), never for an explicit specialisation (`Name<args> {`), which rule 1
+  already handled;
+* it hard-codes **neither** seam name, preserving the discovery property #1800
+  chose.
+
+Once a defined primary is surfaced, the seam re-enters the inventory (so the
+count cannot silently drop) and the **existing** rule 1 rejects it — a defined
+primary template is a complete type a consumer can name, which is precisely what
+rule 1 exists to forbid. The diagnostic is specialised for this case: *"…defines
+the primary template of test-only seam 'CollectionVersionAccess' in a production
+tree; a defined primary template is reachable from a consumer and would
+otherwise leave seam discovery silently (ticket #1804)"*.
+
+Against the fixed checker the mutation now **FAILs, exit 1**, with both seams
+still counted (`build-probe/1804_gap_probe_afterfix.log`); the real repository is
+unchanged at `OK, 2 seams, 18 definitions`.
+
+### 15.3 Why not a friend-based rediscovery, and why not the vacuity guard
+
+Two alternatives were weighed. **Widening the vacuity guard** to "fewer seams
+than last time" needs a committed baseline count, which is exactly the
+success-line number nobody diffs, and it cannot name *which* seam left — it is a
+count, not a diagnosis. **Rediscovering seams through their `friend`
+declarations** (which survive a body) is a larger change to a checker owned by a
+closed ticket and would blur the definition-ownership remit #1800 scoped for
+itself; it is recorded here as viable-but-out-of-scope, not adopted. The chosen
+rule is the smallest one that makes the disappearing seam *reappear in the
+inventory* so the machinery already present rejects it.
+
+### 15.4 Tests and mutation campaign
+
+`test/check_version_seam_odr_test.py` grows from 12 cases to **15**; the
+original 12 pass unchanged. The three added cases:
+
+* a single seam whose primary template is defined in a production header →
+  **rejected**, and the seam is still in `report.seams` (it did not leave
+  discovery);
+* the full §14 shape — one of **two** seams gains a primary-template body → the
+  count stays two and the run fails (the vacuity guard alone would have passed
+  it);
+* a non-template helper defined in `SharpRuntime::Testing` → **accepted**, and
+  not counted as a seam (proving the template-only narrowing does not reject a
+  legitimate helper — the condition §14 and #1804's acceptance criteria named as
+  the wontfix trigger, shown here to be expressible).
+
+The mutation campaign (`build-probe/1804_mutation_test.log`) injected
+`struct CollectionVersionAccess { … };` into the real `MutationCounter.hpp`: the
+checker failed, exit 1, naming `CollectionVersionAccess` and the file;
+`git checkout` restored the header; the checker returned to `OK, 2 seams, 18
+definitions`. No intentionally broken fixture is committed.
+
+### 15.5 Scope and status
+
+`done`. This is checker unsoundness for one construction, corrected without
+production, ABI, layout, or semantic impact, and without a new SR-AUD identifier
+(audit numbering stays frozen at 364). It does **not** broaden the checker into a
+general repository ODR analyser — its remit remains the two named seams'
+definition ownership, now including their primary templates.
