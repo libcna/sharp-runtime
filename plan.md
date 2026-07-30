@@ -4445,3 +4445,123 @@ components. Recommended next work is the #1879 decision, then CCF-012
 remainder. Full detail, build-directory sizes, three-job parallelism record and
 probe accounting: `NEXT.md` under "Autonomous batch handoff, 2026-07-30
 (CCF-002, PARTIALLY REMEDIATED)".
+
+---
+
+## Autonomous remediation batch, 2026-07-30 — CCF-012 composite formatting (#1881, #1882, #1883, #1884)
+
+Branch `feature/remediation-batch-ccf012-composite-format`, off
+`feature/remediation-batch-ccf002-datetime-validation`. The ready queue held
+only the deliberately inactive #1875 and #1880, so the batch's first work unit
+was the family choice itself — and it was made by **measurement, not by title
+or finding count**. **CCF-012 is now PARTIALLY REMEDIATED — not closed**, and
+the plan said so in its own completion criteria in advance rather than after
+the fact.
+
+**The comparison, run before anything was chosen.** One probe
+(`build-probe/1881_family_compare_probe.cpp`, plus `1881_extra_probe.cpp`)
+reproduced **both** CCF-012 and CCF-017 against the shipped headers in one
+process tree, every case forked under a 3-second watchdog so a hanging case
+could not hide the ones after it. The full table is section 0 of
+`docs/CompositeFormatBoundaryPlan.md`. CCF-012 and CCF-017 are both one
+`medium` finding in `Core.Base`; what separated them is that CCF-012's measured
+severity is **non-termination + UB + silent corruption + an escaped `std::`
+exception** across 23 public entries and 22 wrappers, while CCF-017 is a
+value-semantics divergence with nothing for a sanitizer to find.
+
+**CCF-017 was deferred, not closed, downgraded or reclassified.** SR-AUD-114
+stays `confirmed` and reproduces exactly as filed. Its demanded repair — .NET's
+same-type **fieldwise** `Equals`/`GetHashCode` — requires runtime reflection,
+which CLAUDE.md lists as a permanent out-of-scope deviation, so no C++
+base-class policy can implement it; and the only shapes that *are*
+implementable (per-type overrides) are the ones the finding explicitly rejects.
+Everything left of it is approval-gated: making `Attribute` abstract is a public
+source break, and the green `AttributeTests` fixture deliberately pins
+`Attribute a, b` as unequal. **CCF-019 was considered and not taken** — none of
+its gate conditions holds, and both of its open members need public
+ownership-model changes this batch may not infer permission for.
+
+**Design first.** Ticket **#1881** wrote
+`docs/CompositeFormatBoundaryPlan.md` (20 sections plus the comparison in §0).
+It inventoried **22** `String::Format` overloads sharing three helpers, **4**
+`FormattableString` entries, and **22** `StringBuilder::AppendFormat` /
+`Console::Write`/`WriteLine` wrappers that inherit every defect — where the
+cross-cutting record names "the String path" and "the FormattableString path"
+and no wrapper at all.
+
+**The line between compatible and gated** was drawn where #1857→#1858,
+#1864→#1865 and #1878→#1879 drew it: repairing behaviour that is undefined,
+non-terminating, a leaked foreign exception or a silently wrong value is
+compatible; changing the accepted **textual grammar**, or what a
+currently-succeeding call returns, is approval-gated.
+
+**#1882 — SR-AUD-015's String half, remediated (+34).** `String::Format`
+produced its output by repeatedly mutating a buffer that already held
+substituted argument text. That one property produced four defect classes the
+audit never named. `replaceArg` reset its scan cursor to 0 after every
+substitution, so it re-read what it had just inserted: `Format("{0}", "{0}")`
+**never returned**, and this needed no malformed format string —
+`Format("{0}", userText)` hung whenever `userText` contained `{0}`, a
+public-input denial of service in the library's most-called formatting entry.
+`fmtInt`'s padding loop prepended one character at a time, so
+`Format("{0:D999999999}", 7)` was a **second, unrelated** non-termination
+(~10^18 byte copies). `std::abs(std::stoi(...))` on `INT_MIN` was
+UBSan-confirmed undefined behaviour at `String.cpp:149`. And `std::out_of_range`
+and `std::invalid_argument` **escaped a System-shaped public API**, while
+`extractSpec` gave every occurrence of an index the *first* occurrence's
+specifier (`"{0:X}/{0:D3}"` → `"FF/FF"`). The repair replaces all three helpers
+with one `formatCore` that walks the format string **once** and appends to a
+separate output — .NET's own `AppendFormatHelper` shape — and gives
+`fmtInt`/`fmtDouble` a bounded, non-throwing specifier parse that keeps
+`std::stoi`'s prefix semantics (so `"{0:D-3}"` still yields `"007"`) while
+adopting the reference's own digit bound.
+
+**#1883 — SR-AUD-015's FormattableString half, remediated (+20).** The same
+cause in a different shape: one full find/replace sweep over the *result* per
+argument index, so text inserted for an earlier index was re-read while a later
+one was substituted. Exactly **one row of its eight-case matrix** changed —
+`FS("{0}", {"{1}", "second"})` now returns `"{1}"` instead of `"second"` — and
+the other seven are byte-identical. The per-file report's attribution of the
+escaped-brace result to brace handling was corrected: there was no escape
+handling at all, and the real mechanism was the **outer** loop, which is why an
+argument naming its *own* index was already safe while one naming a later index
+was not.
+
+**#1884 — created `needs_user`, not implemented.** This finding's own headline
+claims are the gated remainder: `{{`/`}}` escaping, rejecting a malformed
+closing brace, alignment padding, and `FormattableString`'s missing-index
+`FormatException`. All four change what currently-succeeding calls return or
+whether they throw, across **46 public entries**. Fourteen exact before/after
+rows and the precise approval wording are in the plan's §20. Four
+`PinsCurrentGrammar_*` tests in each suite assert today's behaviour so #1884
+cannot land silently.
+
+**No new `SR-AUD-*` identifier was issued**; numbering stays frozen at **364**.
+All four newly measured classes were found while remediating an existing finding
+in the files that finding owns, so they are folded into SR-AUD-015's record by
+appending, following the SR-AUD-081 / SR-AUD-362 convention.
+
+**Evidence.** 54 permanent add-only regressions (30 `StringFormatBoundaryTests`,
+20 `FormattableStringBoundaryTests`, 4 `StringBuilderTests`); every pre-existing
+test passes unmodified. Repository **14,568 tests across 37 executables**, from
+14,514. Clean build, zero warnings; `scripts/local_ci_check.sh build` passed.
+**Mutation-checked four ways**, each rebuilt and re-executed. UBSan silent at
+`String.cpp:149` afterwards, with the probe compiled *together with*
+`String.cpp` so the changed code is instrumented directly. ASan + UBSan + LSan
+over 3,675 `String::Format` cases and the full `FormattableString` matrix, every
+format string and operand built at run time so constant folding cannot suppress
+a diagnostic: zero diagnostics, zero leaks, **0 escaped** non-`System`
+exceptions. TSan recorded **not applicable**. Source, ABI, `noexcept` and layout
+consequences: **none** in either ticket.
+
+Ready queue: **empty** — every open ticket is `blocked`, `needs_user`, or
+deliberately inactive. #1773 stays `blocked` and no downstream repository was
+inspected; #1875 and #1880 were left inactive and untouched;
+#1854/#1858/#1862/#1863/#1865/#1879 remain `needs_user` with their decision
+records unchanged. Recommended next work is a **design-only** CCF-019 ticket
+(SR-AUD-327 `JsonNode`, SR-AUD-333 `XObject` — ASan-confirmed use-after-free,
+needing an ownership design and an explicit approval before any production
+change), or a design-only CCF-017 ticket recording its permanent-deviation
+argument. Full detail, build-directory sizes, three-job parallelism record and
+probe accounting: `NEXT.md` under "Autonomous batch handoff, 2026-07-30
+(CCF-012, PARTIALLY REMEDIATED)".
