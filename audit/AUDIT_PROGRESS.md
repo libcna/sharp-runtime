@@ -5824,3 +5824,43 @@ still reports false over a live capable inner (the #1841 guard wins). **Net +3 r
 gate: **0 warnings, 0 errors, 14,188 tests across 37 executables**. Module graph **41 / 91**.
 **Source and ABI consequences: none** -- three `.cpp` body edits (one conjunct and one null
 guard each), no signature, member, vtable, layout or symbol change.
+
+Ticket **#1827** (`REMED-IO-ZIP-MODE-CAPABILITIES`, P2, size S, category `remediation`, area
+*IO*) is **done**, which **completes the Stream-capability family (#1824, #1827, #1828) the §6.2
+approval unblocked.** **No SR-AUD-\* identifier**; numbering stays frozen at 364, counts stay
+**29 remediated / 335 confirmed**.
+
+`ZipArchive(Stream*)` validated the null stream and (since #1813) the mode range, but not the
+stream's capabilities against the mode. `validateZipArchiveCapabilities()` now runs after both,
+matching .NET's ValidateModeCapabilities (`ZipArchive.cs:962-975`) with messages verbatim from
+`System.IO.Compression`'s `Strings.resx`: `Create` needs `CanWrite` ("Cannot use create mode on a
+non-writable stream."), `Read` needs `CanRead` ("Cannot use read mode on a non-readable stream."),
+`Update` needs all three ("Update mode requires a stream with read, write, and seek
+capabilities."). The `CanWrite` direction is covered by the §6.2 approval; the two decisions the
+design left to this ticket were taken as:
+
+- **`Update` requires `CanSeek`** (the design's "harshest clause", since `CanSeek` defaults
+  false). Adopted, matching .NET: `Update` reads the central directory and rewrites it in place,
+  and this port's prior best-effort *append*-to-a-non-seekable-Update-stream path (`Dispose()`
+  line ~520) would have corrupted the archive. Measured compatible under #1839 -- no in-repository
+  `Update` caller wraps a stream lacking a capability.
+- **A `Read`-mode UNSEEKABLE stream is buffered, not rejected.** Only `CanRead` is required for
+  `Read`. This port already reads the whole input into `memBuf` at construction and never seeks
+  the caller's stream while reading, so an unseekable readable stream is genuinely supported --
+  matching .NET's `isReadModeAndUnseekable` buffering -- not merely un-rejected. Rejecting it
+  "is not an option" (design §6.2), and it isn't.
+
+The one in-repository migration the #1839 whole-gate experiment surfaced was applied:
+`ThrowingWriteStream` (`tests/integration/…/CompressionTests.cpp`) gained
+`getCanWriteProperty() -> true`, declaring truthfully that it *does* implement `Write()` (it just
+throws to simulate an I/O failure) rather than to bypass the guard; its two original
+Dispose/Destructor assertions still hold.
+
+**+8 permanent regressions** in the integration `CompressionTests.cpp` (Create/Read/Update
+rejections with exact messages; the Read-mode unseekable tolerance proved by a real round trip;
+null-before-mode-before-capability order; the fully-capable valid path across all three modes;
+capability-rejection runs no destructor). `SharpRuntimeIntegrationTests` **864/864**, and the
+#1827 subset is clean under **ASan + UBSan + LSan, 0 reports** on the rejection/disposal path.
+Repository gate: **0 warnings, 0 errors, 14,197 tests across 37 executables**. Module graph
+**41 / 91**. **Source and ABI consequences: none** -- one added file-local validator plus one
+call in a `.cpp` body, no signature, member, vtable, layout or symbol change.

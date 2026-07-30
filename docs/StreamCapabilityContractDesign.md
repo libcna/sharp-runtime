@@ -570,3 +570,32 @@ document instead of asking three times.
 
 No `SR-AUD-*` identifier was issued. Audit numbering stays frozen at **364** and no finding
 changed status under this ticket.
+
+---
+
+## 13. Implementation status (updated 2026-07-30, after the §6.2 approval)
+
+The table in §12 is the frozen snapshot at the close of #1839. The whole plan is now
+**implemented**; the user granted the single §6.2 approval and every ticket is done:
+
+| Ticket | Layer | Final status |
+|---|---|---|
+| #1840 | 1(a) doc | **done** — `Stream.hpp` documents the three defaults |
+| #1841 | 1(b) zlib closed-state | **done** — `state_->initialized` guard, no new member |
+| #1842 | independent | **done** — `FileStream` `CanRead`/`CanWrite` fold in `is_open()` (prerequisite) |
+| #1824 | 2 `StreamWriter` | **done** — `CanWrite` guard, "Stream was not writable." |
+| #1828 | 2 zlib delegation | **done** — `CanRead`/`CanWrite` conjoin the inner stream, `inner_ == nullptr` guard |
+| #1827 | 2 `ZipArchive` | **done** — per-mode capability guard; Update requires seek; Read-mode unseekable buffered |
+
+The §6.2 approval was used exactly as scoped: the `CanWrite` rejection direction across
+`StreamWriter`, `ZipArchive` `Create`/`Update`, and the zlib delegated `CanWrite`. The two
+decisions §6.2 left to #1827 were taken in #1827: `Update` requires `CanSeek` (adopted, matching
+.NET, measured compatible), and a `Read`-mode unseekable stream is **buffered, not rejected** (the
+port already buffers the whole input at construction). The one measured in-repository migration --
+`ThrowingWriteStream` gaining `getCanWriteProperty() -> true` -- was applied, declaring the double's
+real behaviour rather than bypassing the guard.
+
+**Layer 3 (pure virtual) remains deliberately not implemented** (§6.3): no fourth capability-guard
+ticket has appeared, so the per-ticket approvals still cost less than the one-time interface break,
+and `StreamTests.DefaultCanSeekIsFalse`'s subject is preserved. No `SR-AUD-*` identifier issued for
+any of these; audit numbering stays frozen at **364**.

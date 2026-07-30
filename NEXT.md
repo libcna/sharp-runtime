@@ -8053,3 +8053,29 @@ and replaced by four `ZlibInnerDelegationTests` (unreadable/non-writable inner a
 wrappers; capable inner still reports the mode; closed wrapper still false over a live capable
 inner). Net **+3 regressions**. IO_Compression 40/40. Gate **14,188 across 37 executables**,
 clean. **No signature/member/vtable/layout/symbol change** — three `.cpp` body edits.
+
+## Completed ZipArchive capability validation — Stream family CLOSED: ticket #1827 (2026-07-30)
+
+`REMED-IO-ZIP-MODE-CAPABILITIES`, P2, size S. **No SR-AUD-\***; audit frozen at 364. Completes the
+**Stream-capability family (#1824/#1827/#1828)** the §6.2 approval unblocked.
+
+`validateZipArchiveCapabilities()` runs after the null check and #1813's mode-range check,
+matching .NET's `ValidateModeCapabilities` (`ZipArchive.cs:962-975`), messages verbatim from
+`System.IO.Compression` Strings.resx: Create→CanWrite, Read→CanRead, Update→all three. The two
+in-ticket decisions the design left open:
+- **Update requires CanSeek** (harshest clause, CanSeek default false): adopted, matching .NET;
+  Update rewrites the central directory in place, and the port's prior append-to-non-seekable path
+  would corrupt the archive. Measured compatible (#1839).
+- **Read-mode unseekable is buffered, not rejected**: only CanRead required; the port already
+  reads the whole input into `memBuf` at construction (matching .NET's `isReadModeAndUnseekable`),
+  so it's genuinely supported, proven by a real round trip through an unseekable readable stream.
+
+`ThrowingWriteStream` (the one in-repo migration the #1839 experiment surfaced) gained
+`getCanWriteProperty() -> true` — declaring truthfully that it implements Write() (it throws to
+simulate I/O failure), not to bypass the guard; its two Dispose/Destructor assertions still hold.
+
+**+8 regressions** in integration `CompressionTests.cpp` (per-mode rejections + exact messages;
+Read-mode unseekable tolerance via round trip; null→mode→capability order; fully-capable valid
+path; capability-rejection runs no destructor). IntegrationTests **864/864**; #1827 subset clean
+under **ASan+UBSan+LSan, 0 reports**. Gate **14,197 across 37 executables**, clean. **No
+signature/member/vtable/layout/symbol change** — one file-local validator + one call.

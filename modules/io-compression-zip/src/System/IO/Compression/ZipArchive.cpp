@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Compression/ZipArchive.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IO/IOException.hpp"
@@ -331,14 +332,12 @@ static void flushWriter(ZipArchiveState& st) {
 // test: a null stream passed with an invalid mode must still report ArgumentNullException,
 // which is also what this port already did before the guard (case 8).
 //
-// DELIBERATELY NOT ADDED HERE: the stream-capability half of ValidateMode
-// (ZipArchive.cs:962-975, which throws ArgumentException for a Create-mode stream that
-// cannot write, a Read-mode stream that cannot read, or an Update-mode stream that cannot
-// read/write/seek). System::IO::Stream::getCanWriteProperty() DEFAULTS TO FALSE
-// (Stream.hpp:62) where .NET's Stream.CanWrite is abstract, so every custom stream that
-// implements Write() without overriding the property would be rejected at construction
-// despite working today -- the identical blocked-on-approval shape as ticket #1824. That
-// half is inactive ticket #1827, not this ticket.
+// The stream-capability half of ValidateMode (ZipArchive.cs:962-975) is ticket #1827, added
+// as validateZipArchiveCapabilities() below. It was blocked because
+// System::IO::Stream::getCanWriteProperty() DEFAULTS TO FALSE (Stream.hpp:62) where .NET's
+// Stream.CanWrite is abstract; the user approved the shared decision in
+// docs/StreamCapabilityContractDesign.md section 6.2, which unblocked it together with #1824
+// and #1828.
 static void validateZipArchiveMode(ZipArchiveMode mode)
 {
     switch (mode) {
@@ -349,6 +348,50 @@ static void validateZipArchiveMode(ZipArchiveMode mode)
     default:
         // ZipArchive.cs:979, verbatim: ArgumentOutOfRangeException(nameof(mode)).
         throw System::ArgumentOutOfRangeException("mode");
+    }
+}
+
+// Ticket #1827 (REMED-IO-ZIP-MODE-CAPABILITIES, no SR-AUD-*). The stream-capability half of
+// .NET's ValidateModeCapabilities (ZipArchive.cs:962-975), with messages verbatim from
+// System.IO.Compression's Strings.resx. Runs AFTER the null check and #1813's mode-range check,
+// matching .NET's order (ThrowIfNull, then the range switch, then this). Covered by the §6.2
+// approval for the CanWrite direction; the Update CanSeek clause and the Read-mode-unseekable
+// tolerance are this ticket's own decisions, taken as follows:
+//
+//   * Update requires read AND write AND seek. .NET requires all three (ZipArchive.cs:970-974)
+//     because Update reads the existing central directory and rewrites it in place. CanSeek
+//     defaults to false, so this is the design's "harshest clause": a custom Update-mode stream
+//     must override getCanSeekProperty() too, not only getCanWriteProperty(). Measured
+//     compatible against the whole gate under #1839 -- no in-repository Update-mode caller wraps
+//     a stream lacking any capability. Adopting it matches .NET and is more correct than this
+//     port's prior best-effort append-to-a-non-seekable-Update-stream path (Dispose() line ~520),
+//     which would have corrupted the archive by appending rather than overwriting.
+//
+//   * A Read-mode UNSEEKABLE stream is NOT rejected -- only CanRead is required. .NET sets
+//     isReadModeAndUnseekable and buffers (ZipArchive.cs:968-971); this port ALREADY buffers the
+//     entire input into memBuf at construction (see the Stream* constructor's read loop) and
+//     never seeks the caller's stream while reading, so an unseekable readable stream is
+//     genuinely supported here, not merely un-rejected. That is why the Read case checks CanRead
+//     alone and breaks.
+static void validateZipArchiveCapabilities(System::IO::Stream* stream, ZipArchiveMode mode)
+{
+    switch (mode) {
+    case ZipArchiveMode::Create:
+        if (!stream->getCanWriteProperty())
+            throw System::ArgumentException("Cannot use create mode on a non-writable stream.");
+        break;
+    case ZipArchiveMode::Read:
+        if (!stream->getCanReadProperty())
+            throw System::ArgumentException("Cannot use read mode on a non-readable stream.");
+        break;   // an unseekable Read-mode stream is buffered, not rejected -- see above
+    case ZipArchiveMode::Update:
+        if (!stream->getCanReadProperty() || !stream->getCanWriteProperty()
+            || !stream->getCanSeekProperty())
+            throw System::ArgumentException(
+                "Update mode requires a stream with read, write, and seek capabilities.");
+        break;
+    default:
+        break;   // unreachable: validateZipArchiveMode() rejected the out-of-range value first
     }
 }
 
@@ -377,6 +420,9 @@ ZipArchive::ZipArchive(System::IO::Stream* stream, ZipArchiveMode mode)
     // Ticket #1813, after the null check exactly as ZipArchive.cs:135 orders it, and before
     // state_->mode is assigned -- so a rejected mode leaves no mode recorded at all.
     validateZipArchiveMode(mode);
+    // Ticket #1827, after the mode-range check and before any state is populated or the stream
+    // is touched, so a rejected stream leaves the archive as untouched as a rejected mode does.
+    validateZipArchiveCapabilities(stream, mode);
     state_->mode = mode;
     if (mode == ZipArchiveMode::Read || mode == ZipArchiveMode::Update) {
         // Read full stream into memory buffer

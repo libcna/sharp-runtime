@@ -5,6 +5,7 @@
 #include <algorithm>
 #include "System/NotImplementedException.hpp"
 #include "System/ObjectDisposedException.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Buffers/OperationStatus.hpp"
@@ -79,6 +80,14 @@ public:
     }
     void Close() override {}
     [[nodiscard]] System::IO::intcs getLengthProperty() const override { return 0; }
+    // Ticket #1827: this stream IS writable -- it implements Write() -- it just throws to
+    // simulate an I/O failure mid-flush. It previously omitted getCanWriteProperty() and so
+    // inherited the base default of false, which the new ZipArchive(Create) capability guard
+    // correctly rejected (docs/StreamCapabilityContractDesign.md §4: this is the one in-repository
+    // migration the whole-gate experiment surfaced). Declaring the capability truthfully -- not
+    // to bypass the guard -- lets the two Dispose/Destructor tests keep testing a *write* that
+    // throws rather than a *construction* that is refused.
+    [[nodiscard]] bool getCanWriteProperty() const override { return true; }
 };
 } // namespace
 using System::IO::Stream;
@@ -1185,6 +1194,176 @@ TEST(ZipArchiveTests, InvalidMode_RejectionRunsNoDestructor) {
         }
     }
     EXPECT_EQ(ms.getLengthProperty(), 0);
+    SUCCEED();
+}
+
+// ===========================================================================
+// Ticket #1827 -- ZipArchive validates stream capabilities against the mode
+// ===========================================================================
+//
+// The stream-capability half of .NET's ValidateModeCapabilities (ZipArchive.cs:962-975),
+// unblocked by the docs/StreamCapabilityContractDesign.md §6.2 approval and added after the null
+// check and #1813's mode-range check. Messages verbatim from System.IO.Compression's Strings.resx.
+// Decisions this ticket made (design §6.2): Update requires read+write+seek (the harshest clause,
+// since CanSeek defaults false); a Read-mode UNSEEKABLE stream is buffered, not rejected (this
+// port already reads the whole input into memBuf at construction).
+
+namespace {
+    // Readable (base default true), not writable (base default false). Rejected by Create.
+    class ZipReadableUnwritableStream final : public System::IO::Stream {
+    public:
+        System::IO::intcs Read(System::IO::bytecs*, System::IO::intcs, System::IO::intcs) override { return 0; }
+        void Close() override {}
+        [[nodiscard]] System::IO::intcs getLengthProperty() const override { return 0; }
+    };
+
+    // Positively unreadable. Rejected by Read and Update.
+    class ZipUnreadableStream final : public System::IO::Stream {
+    public:
+        System::IO::intcs Read(System::IO::bytecs*, System::IO::intcs, System::IO::intcs) override { return 0; }
+        void Write(const System::IO::bytecs*, System::IO::intcs, System::IO::intcs) override {}
+        void Close() override {}
+        [[nodiscard]] System::IO::intcs getLengthProperty() const override { return 0; }
+        [[nodiscard]] bool getCanReadProperty() const override { return false; }
+        [[nodiscard]] bool getCanWriteProperty() const override { return true; }
+    };
+
+    // Readable and writable but NOT seekable (CanSeek inherits false). Serves and collects bytes
+    // sequentially. Accepted by Read (unseekable read is buffered), rejected by Update (no seek).
+    class ZipUnseekableRWStream final : public System::IO::Stream {
+        std::vector<System::IO::bytecs> buf_;
+        std::size_t pos_ = 0;
+    public:
+        explicit ZipUnseekableRWStream(std::vector<System::IO::bytecs> b = {}) : buf_(std::move(b)) {}
+        System::IO::intcs Read(System::IO::bytecs* p, System::IO::intcs off, System::IO::intcs n) override {
+            System::IO::intcs k = 0;
+            while (k < n && pos_ < buf_.size()) p[off + k++] = buf_[pos_++];
+            return k;
+        }
+        void Write(const System::IO::bytecs* p, System::IO::intcs off, System::IO::intcs n) override {
+            buf_.insert(buf_.end(), p + off, p + off + n);
+        }
+        void Close() override {}
+        [[nodiscard]] System::IO::intcs getLengthProperty() const override {
+            return static_cast<System::IO::intcs>(buf_.size());
+        }
+        [[nodiscard]] bool getCanReadProperty() const override { return true; }
+        [[nodiscard]] bool getCanWriteProperty() const override { return true; }
+        // getCanSeekProperty() inherits the base default of false.
+    };
+}
+
+TEST(ZipArchiveTests, CreateMode_NonWritableStream_ThrowsArgumentException_1827) {
+    ZipReadableUnwritableStream s;
+    ASSERT_FALSE(s.getCanWriteProperty());
+    try {
+        ZipArchive z(&s, ZipArchiveMode::Create);
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(std::string(e.what()), "Cannot use create mode on a non-writable stream.");
+    }
+}
+
+TEST(ZipArchiveTests, ReadMode_NonReadableStream_ThrowsArgumentException_1827) {
+    ZipUnreadableStream s;
+    ASSERT_FALSE(s.getCanReadProperty());
+    try {
+        ZipArchive z(&s, ZipArchiveMode::Read);
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(std::string(e.what()), "Cannot use read mode on a non-readable stream.");
+    }
+}
+
+TEST(ZipArchiveTests, UpdateMode_MissingSeek_ThrowsArgumentException_1827) {
+    // The harshest clause: read+write present, seek absent (the base default). .NET requires
+    // all three for Update because it rewrites the central directory in place.
+    ZipUnseekableRWStream s;
+    ASSERT_TRUE(s.getCanReadProperty());
+    ASSERT_TRUE(s.getCanWriteProperty());
+    ASSERT_FALSE(s.getCanSeekProperty());
+    try {
+        ZipArchive z(&s, ZipArchiveMode::Update);
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(std::string(e.what()),
+                  "Update mode requires a stream with read, write, and seek capabilities.");
+    }
+}
+
+TEST(ZipArchiveTests, UpdateMode_NonReadableStream_ThrowsArgumentException_1827) {
+    ZipUnreadableStream s;  // write yes, read no, seek no
+    EXPECT_THROW(ZipArchive z(&s, ZipArchiveMode::Update), System::ArgumentException);
+}
+
+TEST(ZipArchiveTests, ReadMode_UnseekableReadableStream_IsBufferedNotRejected_1827) {
+    // .NET buffers an unseekable Read-mode stream (isReadModeAndUnseekable); this port already
+    // reads the whole input into memBuf at construction, so a readable-but-unseekable stream is
+    // genuinely supported. Build a valid archive, then read it back through an unseekable stream.
+    std::vector<uint8_t> bytes;
+    {
+        MemoryStream sink;
+        {
+            ZipArchive z(&sink, ZipArchiveMode::Create);
+            auto e = z.CreateEntry("only.txt");
+            std::unique_ptr<System::IO::Stream> s(e.Open());
+            s->Write(reinterpret_cast<const uint8_t*>("hi"), 0, 2);
+            z.Dispose();
+        }
+        bytes = sink.ToArray();
+    }
+    ASSERT_FALSE(bytes.empty());
+    ZipUnseekableRWStream src(bytes);
+    ASSERT_FALSE(src.getCanSeekProperty());
+    // Must NOT throw the capability ArgumentException -- CanRead alone is required for Read mode.
+    ZipArchive r(&src, ZipArchiveMode::Read);
+    EXPECT_EQ(r.getEntriesProperty().size(), 1u);
+}
+
+TEST(ZipArchiveTests, Capability_NullBeatsInvalidMode_BeatsIncapableStream_1827) {
+    // Validation order: null first, then #1813's mode-range, then #1827's capability. A null
+    // stream with an invalid mode reports ArgumentNullException (not the mode or capability
+    // error); an incapable stream with a valid mode reports the capability ArgumentException.
+    EXPECT_THROW(ZipArchive z(static_cast<System::IO::Stream*>(nullptr),
+                              static_cast<ZipArchiveMode>(42)),
+                 System::ArgumentNullException);
+    ZipReadableUnwritableStream cap;
+    EXPECT_THROW(ZipArchive z(&cap, static_cast<ZipArchiveMode>(42)),
+                 System::ArgumentOutOfRangeException);   // mode-range runs before capability
+    EXPECT_THROW(ZipArchive z(&cap, ZipArchiveMode::Create), System::ArgumentException);
+}
+
+TEST(ZipArchiveTests, CapabilityGuard_LeavesFullyCapableStreamUnchanged_1827) {
+    // The valid path for all three modes over a fully-capable MemoryStream, through a round trip.
+    MemoryStream sink;
+    { ZipArchive z(&sink, ZipArchiveMode::Create);
+      auto e = z.CreateEntry("p.txt");
+      std::unique_ptr<System::IO::Stream> s(e.Open());
+      s->Write(reinterpret_cast<const uint8_t*>("data"), 0, 4);
+      z.Dispose(); }
+    ASSERT_GT(sink.getLengthProperty(), 0);
+    sink.setPositionProperty(0);
+    { ZipArchive u(&sink, ZipArchiveMode::Update);
+      EXPECT_EQ(u.getEntriesProperty().size(), 1u);
+      u.Dispose(); }
+    sink.setPositionProperty(0);
+    ZipArchive r(&sink, ZipArchiveMode::Read);
+    EXPECT_EQ(r.getEntriesProperty().size(), 1u);
+}
+
+TEST(ZipArchiveTests, CapabilityRejection_RunsNoDestructor_1827) {
+    // The capability guard throws before state_->mode is set and before any reader is opened or
+    // buffer filled, so ~ZipArchive never runs on the rejected object -- it can neither flush nor
+    // terminate. Proven by outliving the scope with the stream still usable afterwards.
+    ZipReadableUnwritableStream s;
+    for (int i = 0; i < 2; ++i) {
+        try {
+            ZipArchive z(&s, ZipArchiveMode::Create);
+            FAIL() << "expected ArgumentException";
+        } catch (const System::ArgumentException&) {
+            // nothing retained, nothing to unwind
+        }
+    }
     SUCCEED();
 }
 
