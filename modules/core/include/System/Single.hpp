@@ -7,10 +7,12 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include <cstdint>
 #include <iomanip>
 #include <limits>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 #include "SharpRuntime/PortableFromChars.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -362,14 +364,184 @@ public:
     /** @brief Returns the angle (in radians) whose tangent is @p y/@p x. C++ counterpart of .NET Single.Atan2(float,float). */
     [[nodiscard]] static float Atan2(float y, float x) noexcept { return std::atan2(y, x); }
 
-    /** @brief Returns the sine of @p x * Pi. C++ counterpart of .NET Single.SinPi(float). */
-    [[nodiscard]] static float SinPi(float x) noexcept { return std::sin(x * Pi); }
+    /**
+     * @brief Returns the sine of @p x * Pi. C++ counterpart of .NET Single.SinPi(float).
+     *
+     * Ported from the .NET `Single.SinPi` implementation (based on `sinpif` from
+     * amd/aocl-libm-ose). Reduces the argument by its integral turn so exact
+     * turn boundaries are honoured: integer turns return a signed zero
+     * (`SinPi(k) == k>=0 ? +0 : -0` sign-carried through `x * 0.0f`), half turns
+     * return `±1`, and non-finite inputs return NaN — rather than a naive
+     * `std::sin(x * Pi)` that leaks tiny nonzero residues at those boundaries.
+     */
+    [[nodiscard]] static float SinPi(float x) noexcept {
+        float result;
 
-    /** @brief Returns the cosine of @p x * Pi. C++ counterpart of .NET Single.CosPi(float). */
-    [[nodiscard]] static float CosPi(float x) noexcept { return std::cos(x * Pi); }
+        if (IsFinite(x)) {
+            float ax = Abs(x);
 
-    /** @brief Returns the tangent of @p x * Pi. C++ counterpart of .NET Single.TanPi(float). */
-    [[nodiscard]] static float TanPi(float x) noexcept { return std::tan(x * Pi); }
+            if (ax < 8'388'608.0f) {                // |x| < 2^23
+                if (ax > 0.25f) {
+                    int integral = static_cast<int>(ax);
+
+                    float fractional = ax - static_cast<float>(integral);
+                    float sign = ((x > 0.0f) ? +1.0f : -1.0f) * (((integral & 1) != 0) ? -1.0f : +1.0f);
+
+                    if (fractional <= 0.25f) {
+                        if (fractional != 0.00f) {
+                            result = sign * SinForIntervalPiBy4(fractional * Pi);
+                        } else {
+                            result = x * 0.0f;
+                        }
+                    } else if (fractional <= 0.50f) {
+                        if (fractional != 0.50f) {
+                            result = sign * CosForIntervalPiBy4((0.5f - fractional) * Pi);
+                        } else {
+                            result = sign;
+                        }
+                    } else if (fractional <= 0.75f) {
+                        result = sign * CosForIntervalPiBy4((fractional - 0.5f) * Pi);
+                    } else {
+                        result = sign * SinForIntervalPiBy4((1.0f - fractional) * Pi);
+                    }
+                } else if (ax >= 7.8125E-3f) {       // |x| >= 2^-7
+                    result = SinForIntervalPiBy4(x * Pi);
+                } else if (ax >= 1.22070313E-4f) {   // |x| >= 2^-13
+                    float value = x * Pi;
+                    result = value - (value * value * value * (1.0f / 6.0f));
+                } else {
+                    result = x * Pi;
+                }
+            } else {
+                // x is an integer
+                result = x * 0.0f;
+            }
+        } else {
+            result = NaN;
+        }
+
+        return result;
+    }
+
+    /**
+     * @brief Returns the cosine of @p x * Pi. C++ counterpart of .NET Single.CosPi(float).
+     *
+     * Ported from the .NET `Single.CosPi` implementation (based on `cospif` from
+     * amd/aocl-libm-ose). Honours exact turn boundaries: `CosPi(k+0.5) == +0`,
+     * `CosPi(k) == ±1` by parity of @p k, and non-finite inputs return NaN.
+     */
+    [[nodiscard]] static float CosPi(float x) noexcept {
+        float result;
+
+        if (IsFinite(x)) {
+            float ax = Abs(x);
+
+            if (ax < 8'388'608.0f) {                // |x| < 2^23
+                if (ax > 0.25f) {
+                    int integral = static_cast<int>(ax);
+
+                    float fractional = ax - static_cast<float>(integral);
+                    float sign = ((integral & 1) != 0) ? -1.0f : +1.0f;
+
+                    if (fractional <= 0.25f) {
+                        if (fractional != 0.00f) {
+                            result = sign * CosForIntervalPiBy4(fractional * Pi);
+                        } else {
+                            result = sign;
+                        }
+                    } else if (fractional <= 0.50f) {
+                        if (fractional != 0.50f) {
+                            result = sign * SinForIntervalPiBy4((0.5f - fractional) * Pi);
+                        } else {
+                            result = 0.0f;
+                        }
+                    } else if (fractional <= 0.75f) {
+                        result = -sign * SinForIntervalPiBy4((fractional - 0.5f) * Pi);
+                    } else {
+                        result = -sign * CosForIntervalPiBy4((1.0f - fractional) * Pi);
+                    }
+                } else if (ax >= 7.8125E-3f) {       // |x| >= 2^-7
+                    result = CosForIntervalPiBy4(x * Pi);
+                } else if (ax >= 1.22070313E-4f) {   // |x| >= 2^-13
+                    float value = x * Pi;
+                    result = 1.0f - (value * value * 0.5f);
+                } else {
+                    result = 1.0f;
+                }
+            } else if (ax < 16'777'216.0f) {        // |x| < 2^24
+                // x is an integer
+                std::uint32_t bits = std::bit_cast<std::uint32_t>(ax);
+                result = ((bits & 1u) != 0) ? -1.0f : +1.0f;
+            } else {
+                // x is an even integer
+                result = 1.0f;
+            }
+        } else {
+            result = NaN;
+        }
+
+        return result;
+    }
+
+    /**
+     * @brief Returns the tangent of @p x * Pi. C++ counterpart of .NET Single.TanPi(float).
+     *
+     * Ported from the .NET `Single.TanPi` implementation (based on `tanpif` from
+     * amd/aocl-libm-ose). Honours exact turn boundaries: integer turns return a
+     * sign-carried zero (`TanPi(k)` is `-0` for odd positive @p k, `+0` for even),
+     * half turns return `±Infinity`, and non-finite inputs return NaN.
+     */
+    [[nodiscard]] static float TanPi(float x) noexcept {
+        float result;
+
+        if (IsFinite(x)) {
+            float ax = Abs(x);
+            float sign = (x > 0.0f) ? +1.0f : -1.0f;
+
+            if (ax < 8'388'608.0f) {                // |x| < 2^23
+                if (ax > 0.25f) {
+                    int integral = static_cast<int>(ax);
+                    float fractional = ax - static_cast<float>(integral);
+
+                    if (fractional <= 0.25f) {
+                        if (fractional != 0.00f) {
+                            result = sign * TanForIntervalPiBy4(fractional * Pi, /*isReciprocal:*/ false);
+                        } else {
+                            result = sign * (((integral & 1) != 0) ? -0.0f : +0.0f);
+                        }
+                    } else if (fractional <= 0.50f) {
+                        if (fractional != 0.50f) {
+                            result = -sign * TanForIntervalPiBy4((0.5f - fractional) * Pi, /*isReciprocal:*/ true);
+                        } else {
+                            result = +sign * (((integral & 1) != 0) ? NegativeInfinity : PositiveInfinity);
+                        }
+                    } else if (fractional <= 0.75f) {
+                        result = +sign * TanForIntervalPiBy4((fractional - 0.5f) * Pi, /*isReciprocal:*/ true);
+                    } else {
+                        result = -sign * TanForIntervalPiBy4((1.0f - fractional) * Pi, /*isReciprocal:*/ false);
+                    }
+                } else if (ax >= 7.8125E-3f) {       // |x| >= 2^-7
+                    result = TanForIntervalPiBy4(x * Pi, /*isReciprocal:*/ false);
+                } else if (ax >= 1.22070313E-4f) {   // |x| >= 2^-13
+                    float value = x * Pi;
+                    result = value + (value * value * value * (1.0f / 3.0f));
+                } else {
+                    result = x * Pi;
+                }
+            } else if (ax < 16'777'216.0f) {        // |x| < 2^24
+                // x is an integer
+                std::uint32_t bits = std::bit_cast<std::uint32_t>(ax);
+                result = sign * (((bits & 1u) != 0) ? -0.0f : +0.0f);
+            } else {
+                // x is an even integer
+                result = sign * 0.0f;
+            }
+        } else {
+            result = NaN;
+        }
+
+        return result;
+    }
 
     /** @brief Returns the arccosine of @p x divided by Pi. C++ counterpart of .NET Single.AcosPi(float). */
     [[nodiscard]] static float AcosPi(float x) noexcept { return std::acos(x) / Pi; }
@@ -400,10 +572,168 @@ public:
     /**
      * @brief Computes sine and cosine of @p x * Pi simultaneously.
      * C++ counterpart of .NET Single.SinCosPi(float).
+     *
+     * Ported from the .NET `Single.SinCosPi` implementation (based on `sinpif`
+     * and `cospif` from amd/aocl-libm-ose). Both fields honour the same exact
+     * turn boundaries as SinPi/CosPi.
      */
     [[nodiscard]] static SinCosPiResult SinCosPi(float x) noexcept {
-        return { std::sin(x * Pi), std::cos(x * Pi) };
+        float sinPi;
+        float cosPi;
+
+        if (IsFinite(x)) {
+            float ax = Abs(x);
+
+            if (ax < 8'388'608.0f) {                // |x| < 2^23
+                if (ax > 0.25f) {
+                    int integral = static_cast<int>(ax);
+
+                    float fractional = ax - static_cast<float>(integral);
+                    float sign = ((integral & 1) != 0) ? -1.0f : +1.0f;
+
+                    float sinSign = ((x > 0.0f) ? +1.0f : -1.0f) * sign;
+                    float cosSign = sign;
+
+                    if (fractional <= 0.25f) {
+                        if (fractional != 0.00f) {
+                            float value = fractional * Pi;
+
+                            sinPi = sinSign * SinForIntervalPiBy4(value);
+                            cosPi = cosSign * CosForIntervalPiBy4(value);
+                        } else {
+                            sinPi = x * 0.0f;
+                            cosPi = cosSign;
+                        }
+                    } else if (fractional <= 0.50f) {
+                        if (fractional != 0.50f) {
+                            float value = (0.5f - fractional) * Pi;
+
+                            sinPi = sinSign * CosForIntervalPiBy4(value);
+                            cosPi = cosSign * SinForIntervalPiBy4(value);
+                        } else {
+                            sinPi = sinSign;
+                            cosPi = 0.0f;
+                        }
+                    } else if (fractional <= 0.75f) {
+                        float value = (fractional - 0.5f) * Pi;
+
+                        sinPi = +sinSign * CosForIntervalPiBy4(value);
+                        cosPi = -cosSign * SinForIntervalPiBy4(value);
+                    } else {
+                        float value = (1.0f - fractional) * Pi;
+
+                        sinPi = +sinSign * SinForIntervalPiBy4(value);
+                        cosPi = -cosSign * CosForIntervalPiBy4(value);
+                    }
+                } else if (ax >= 7.8125E-3f) {       // |x| >= 2^-7
+                    float value = x * Pi;
+
+                    sinPi = SinForIntervalPiBy4(value);
+                    cosPi = CosForIntervalPiBy4(value);
+                } else if (ax >= 1.22070313E-4f) {   // |x| >= 2^-13
+                    float value = x * Pi;
+                    float valueSq = value * value;
+
+                    sinPi = value - (valueSq * value * (1.0f / 6.0f));
+                    cosPi = 1.0f - (valueSq * 0.5f);
+                } else {
+                    sinPi = x * Pi;
+                    cosPi = 1.0f;
+                }
+            } else if (ax < 16'777'216.0f) {        // |x| < 2^24
+                // x is an integer
+                sinPi = x * 0.0f;
+
+                std::uint32_t bits = std::bit_cast<std::uint32_t>(ax);
+                cosPi = ((bits & 1u) != 0) ? -1.0f : +1.0f;
+            } else {
+                // x is an even integer
+                sinPi = x * 0.0f;
+                cosPi = 1.0f;
+            }
+        } else {
+            sinPi = NaN;
+            cosPi = NaN;
+        }
+
+        return { sinPi, cosPi };
     }
+
+private:
+    // -------------------------------------------------------------------------
+    // Pi-scaled trigonometric kernels (ported from .NET Single, based on
+    // amd/aocl-libm-ose, BSD 3-Clause). Each evaluates the named function over
+    // the reduced interval [0, Pi/4]; the public SinPi/CosPi/TanPi/SinCosPi
+    // methods above dispatch to them after the integral/fractional reduction.
+    // -------------------------------------------------------------------------
+
+    /** @brief Minimax cosine on [0, Pi/4]. */
+    [[nodiscard]] static float CosForIntervalPiBy4(float x) noexcept {
+        // Minimax approximation of (f(xx) - 1 + (xx / 2)) / (xx * xx) where
+        // xx = x*x, expanding cos(x) in even powers of x.
+        const double C1 = +0.41666666666666665390037E-1;    // approx: +1 / 4!
+        const double C2 = -0.13888888888887398280412E-2;    // approx: -1 / 6!
+        const double C3 = +0.248015872987670414957399E-4;   // approx: +1 / 8!
+        const double C4 = -0.275573172723441909470836E-6;   // approx: -1 / 10!
+
+        double xx = x * x;
+        double result = C4;
+
+        result = (result * xx) + C3;
+        result = (result * xx) + C2;
+        result = (result * xx) + C1;
+
+        result *= xx * xx;
+        result += 1.0 - (0.5 * xx);
+
+        return static_cast<float>(result);
+    }
+
+    /** @brief Minimax sine on [0, Pi/4]. */
+    [[nodiscard]] static float SinForIntervalPiBy4(float x) noexcept {
+        // Minimax approximation of (f(xx) - 1) / xx where xx = x*x, expanding
+        // sin(x) = x * (1 - xx/3! + xx^2/5! - ...) in even powers of x.
+        const double C1 = -0.166666666666666646259241729;       // approx: -1 / 3!
+        const double C2 = +0.833333333333095043065222816E-2;    // approx: +1 / 5!
+        const double C3 = -0.19841269836761125688538679E-3;     // approx: -1 / 7!
+        const double C4 = +0.275573161037288022676895908448E-5; // approx: +1 / 9!
+
+        double xx = x * x;
+        double result = C4;
+
+        result = (result * xx) + C3;
+        result = (result * xx) + C2;
+        result = (result * xx) + C1;
+
+        result *= x * xx;
+        result += x;
+
+        return static_cast<float>(result);
+    }
+
+    /** @brief Remez [1, 2] tangent (or its negated reciprocal) on [0, Pi/4]. */
+    [[nodiscard]] static float TanForIntervalPiBy4(float x, bool isReciprocal) noexcept {
+        double xx = x * x;
+
+        double denominator = +0.1844239256901656082986661E-1;
+        denominator = -0.51396505478854532132342E+0 + (denominator * xx);
+        denominator = +0.115588821434688393452299E+1 + (denominator * xx);
+
+        double numerator = -0.172032480471481694693109E-1;
+        numerator = 0.385296071263995406715129E+0 + (numerator * xx);
+
+        double result = x * xx;
+        result *= numerator / denominator;
+        result += x;
+
+        if (isReciprocal) {
+            result = -1.0 / result;
+        }
+
+        return static_cast<float>(result);
+    }
+
+public:
 
     // -------------------------------------------------------------------------
     // Hyperbolic
@@ -531,7 +861,7 @@ public:
     }
 
 private:
-    static bool equalsIgnoreCaseAscii(const std::string& s, const char* token) noexcept {
+    static bool equalsIgnoreCaseAscii(std::string_view s, const char* token) noexcept {
         size_t n = std::char_traits<char>::length(token);
         if (s.size() != n) return false;
         for (size_t i = 0; i < n; ++i) {
@@ -539,6 +869,13 @@ private:
                 return false;
         }
         return true;
+    }
+
+    // .NET's default NumberStyles.Float allows leading/trailing whitespace via
+    // AllowLeadingWhite | AllowTrailingWhite. The set is ASCII whitespace here
+    // (space, tab, LF, VT, FF, CR); interior whitespace is never allowed.
+    static bool isAsciiWhitespace(char c) noexcept {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
     }
 
     // Verified against Number.Parsing.cs's TryParseFloat (same finding as System::Double,
@@ -552,15 +889,23 @@ private:
     // "INF", or "nan(123)" were silently ACCEPTED here even though real .NET's float.Parse
     // throws FormatException for all of them.
     static bool tryParseCore(const std::string& s, float& result) noexcept {
-        if (equalsIgnoreCaseAscii(s, "NaN") || equalsIgnoreCaseAscii(s, "+NaN") || equalsIgnoreCaseAscii(s, "-NaN")) {
+        // Trim leading/trailing ASCII whitespace before parsing (SR-AUD-033
+        // whitespace slice, ticket #1864): .NET's default float parse accepts
+        // " 1.5 " and " NaN " but never interior whitespace or an
+        // empty/all-whitespace string, all of which this trimmed view preserves.
+        std::string_view sv{s};
+        while (!sv.empty() && isAsciiWhitespace(sv.front())) sv.remove_prefix(1);
+        while (!sv.empty() && isAsciiWhitespace(sv.back())) sv.remove_suffix(1);
+
+        if (equalsIgnoreCaseAscii(sv, "NaN") || equalsIgnoreCaseAscii(sv, "+NaN") || equalsIgnoreCaseAscii(sv, "-NaN")) {
             result = std::numeric_limits<float>::quiet_NaN();
             return true;
         }
-        if (equalsIgnoreCaseAscii(s, "Infinity") || equalsIgnoreCaseAscii(s, "+Infinity")) {
+        if (equalsIgnoreCaseAscii(sv, "Infinity") || equalsIgnoreCaseAscii(sv, "+Infinity")) {
             result = std::numeric_limits<float>::infinity();
             return true;
         }
-        if (equalsIgnoreCaseAscii(s, "-Infinity")) {
+        if (equalsIgnoreCaseAscii(sv, "-Infinity")) {
             result = -std::numeric_limits<float>::infinity();
             return true;
         }
@@ -568,8 +913,8 @@ private:
         // the floating-point std::from_chars overload entirely below a 13.3+ deployment target
         // (see PortableFromChars.hpp's own header comment) -- this stays correct either way
         // without forcing a higher minimum runtime macOS version.
-        auto [ptr, ec] = SharpRuntime::FromCharsFloat(s.data(), s.data() + s.size(), result);
-        if (ec != std::errc{} || ptr != s.data() + s.size() || !std::isfinite(result)) {
+        auto [ptr, ec] = SharpRuntime::FromCharsFloat(sv.data(), sv.data() + sv.size(), result);
+        if (ec != std::errc{} || ptr != sv.data() + sv.size() || !std::isfinite(result)) {
             result = 0.0f;
             return false;
         }

@@ -113,6 +113,107 @@ TEST(SingleTest, SinCos)               {
     EXPECT_NEAR(r.Cos, 1.0f, 0.001f);
 }
 
+// ---------------------------------------------------------------------------
+// Pi-scaled trig turn-boundary fidelity (SR-AUD-032, CCF-007, ticket #1861).
+// The naive std::sin(x*Pi)/std::cos(x*Pi)/std::tan(x*Pi) implementation leaked
+// tiny nonzero residues (and the wrong sign of zero) at integer and
+// half-integer turns; the .NET-shaped reduction returns exact, sign-correct
+// results there. Runtime (volatile) operands defeat constant folding.
+// ---------------------------------------------------------------------------
+
+TEST(SingleTest, SinPi_IntegerTurns_SignedZero) {
+    volatile float one = 1.0f, mone = -1.0f, two = 2.0f, mzero = -0.0f;
+    EXPECT_EQ(Single::SinPi(one), 0.0f);
+    EXPECT_FALSE(std::signbit(Single::SinPi(one)));    // SinPi(+1) == +0
+    EXPECT_EQ(Single::SinPi(mone), 0.0f);
+    EXPECT_TRUE(std::signbit(Single::SinPi(mone)));     // SinPi(-1) == -0
+    EXPECT_FALSE(std::signbit(Single::SinPi(two)));     // SinPi(+2) == +0
+    EXPECT_TRUE(std::signbit(Single::SinPi(mzero)));    // SinPi(-0) == -0
+}
+
+TEST(SingleTest, SinPi_HalfTurns_ExactUnit) {
+    volatile float half = 0.5f, threehalf = 1.5f, fivehalf = 2.5f;
+    EXPECT_EQ(Single::SinPi(half), 1.0f);
+    EXPECT_EQ(Single::SinPi(threehalf), -1.0f);
+    EXPECT_EQ(Single::SinPi(fivehalf), 1.0f);
+}
+
+TEST(SingleTest, CosPi_HalfTurns_ExactZero) {
+    volatile float half = 0.5f, threehalf = 1.5f;
+    EXPECT_EQ(Single::CosPi(half), 0.0f);
+    EXPECT_FALSE(std::signbit(Single::CosPi(half)));    // CosPi(0.5) == +0
+    EXPECT_EQ(Single::CosPi(threehalf), 0.0f);
+}
+
+TEST(SingleTest, CosPi_IntegerTurns_ExactUnit) {
+    volatile float one = 1.0f, two = 2.0f, three = 3.0f;
+    EXPECT_EQ(Single::CosPi(one), -1.0f);
+    EXPECT_EQ(Single::CosPi(two), 1.0f);
+    EXPECT_EQ(Single::CosPi(three), -1.0f);
+}
+
+TEST(SingleTest, TanPi_IntegerTurns_SignedZero) {
+    // .NET convention: TanPi(k) carries sign(x) * (odd(k) ? -0 : +0).
+    volatile float one = 1.0f, mone = -1.0f, two = 2.0f;
+    EXPECT_EQ(Single::TanPi(one), 0.0f);
+    EXPECT_TRUE(std::signbit(Single::TanPi(one)));      // TanPi(+1) == -0
+    EXPECT_EQ(Single::TanPi(mone), 0.0f);
+    EXPECT_FALSE(std::signbit(Single::TanPi(mone)));    // TanPi(-1) == +0
+    EXPECT_FALSE(std::signbit(Single::TanPi(two)));     // TanPi(+2) == +0
+}
+
+TEST(SingleTest, TanPi_HalfTurns_SignedInfinity) {
+    volatile float half = 0.5f, threehalf = 1.5f;
+    EXPECT_TRUE(Single::IsPositiveInfinity(Single::TanPi(half)));
+    EXPECT_TRUE(Single::IsNegativeInfinity(Single::TanPi(threehalf)));
+}
+
+TEST(SingleTest, PiTrig_NonFinite_ReturnsNaN) {
+    EXPECT_TRUE(std::isnan(Single::SinPi(Single::NaN)));
+    EXPECT_TRUE(std::isnan(Single::CosPi(Single::NaN)));
+    EXPECT_TRUE(std::isnan(Single::TanPi(Single::NaN)));
+    EXPECT_TRUE(std::isnan(Single::SinPi(Single::PositiveInfinity)));
+    EXPECT_TRUE(std::isnan(Single::CosPi(Single::NegativeInfinity)));
+    EXPECT_TRUE(std::isnan(Single::TanPi(Single::PositiveInfinity)));
+    auto sc = Single::SinCosPi(Single::PositiveInfinity);
+    EXPECT_TRUE(std::isnan(sc.SinPi));
+    EXPECT_TRUE(std::isnan(sc.CosPi));
+}
+
+TEST(SingleTest, PiTrig_OrdinaryValues_MatchLibm) {
+    volatile float q = 0.25f;
+    EXPECT_NEAR(Single::SinPi(q), std::sin(static_cast<float>(M_PI) * 0.25f), 1e-6f);
+    EXPECT_NEAR(Single::CosPi(q), std::cos(static_cast<float>(M_PI) * 0.25f), 1e-6f);
+    EXPECT_NEAR(Single::TanPi(q), 1.0f, 1e-6f);
+    for (float f = 0.05f; f < 3.0f; f += 0.17f) {
+        volatile float vf = f;
+        EXPECT_NEAR(Single::SinPi(vf), std::sin(static_cast<float>(M_PI) * f), 1e-5f) << "SinPi @ " << f;
+        EXPECT_NEAR(Single::CosPi(vf), std::cos(static_cast<float>(M_PI) * f), 1e-5f) << "CosPi @ " << f;
+    }
+}
+
+TEST(SingleTest, SinCosPi_TurnBoundaries_MatchScalar) {
+    volatile float one = 1.0f, half = 0.5f;
+    auto a = Single::SinCosPi(one);
+    EXPECT_EQ(a.SinPi, 0.0f);
+    EXPECT_FALSE(std::signbit(a.SinPi));
+    EXPECT_EQ(a.CosPi, -1.0f);
+    auto b = Single::SinCosPi(half);
+    EXPECT_EQ(b.SinPi, 1.0f);
+    EXPECT_EQ(b.CosPi, 0.0f);
+}
+
+TEST(SingleTest, PiTrig_LargeIntegers_BeyondMantissa) {
+    // |x| in [2^23, 2^24): every value is an integer; raw-bit parity decides Cos.
+    // |x| >= 2^24: x is necessarily an even integer.
+    volatile float oddMid = 8388609.0f;   // 2^23 + 1, an odd integer < 2^24
+    volatile float evenBig = 33554432.0f; // 2^25, an even integer >= 2^24
+    EXPECT_EQ(Single::SinPi(oddMid), 0.0f);
+    EXPECT_EQ(Single::CosPi(oddMid), -1.0f);   // odd -> -1
+    EXPECT_EQ(Single::SinPi(evenBig), 0.0f);
+    EXPECT_EQ(Single::CosPi(evenBig), 1.0f);   // even integer -> +1
+}
+
 // Angle conversion
 TEST(SingleTest, DegreesToRadians)      { EXPECT_NEAR(Single::DegreesToRadians(180.0f), Single::Pi, 0.001f); }
 TEST(SingleTest, RadiansToDegrees)      { EXPECT_NEAR(Single::RadiansToDegrees(Single::Pi), 180.0f, 0.01f); }
@@ -193,6 +294,40 @@ TEST(SingleTest, TryParse_CaseInsensitiveCanonicalSpellings_ReturnsTrue) {
 TEST(SingleTest, Parse_AbbreviatedInfinitySpelling_Throws) {
     EXPECT_THROW(Single::Parse("inf"), System::FormatException);
     EXPECT_THROW(Single::Parse("nan(123)"), System::FormatException);
+}
+
+// SR-AUD-033 whitespace slice (#1864, CCF-007): .NET's default NumberStyles.Float
+// permits leading/trailing whitespace (AllowLeadingWhite | AllowTrailingWhite),
+// but never interior whitespace or an empty/all-whitespace string.
+TEST(SingleTest, Parse_LeadingTrailingWhitespace_Accepted) {
+    EXPECT_NEAR(Single::Parse(" 1.5 "), 1.5f, 0.0f);
+    EXPECT_NEAR(Single::Parse("\t3.14\n"), 3.14f, 0.001f);
+    EXPECT_NEAR(Single::Parse("  -2.5"), -2.5f, 0.0f);
+    EXPECT_NEAR(Single::Parse("42\r\n"), 42.0f, 0.0f);
+}
+
+TEST(SingleTest, Parse_WhitespaceAroundSpecialTokens_Accepted) {
+    EXPECT_TRUE(std::isnan(Single::Parse("  NaN  ")));
+    EXPECT_TRUE(std::isinf(Single::Parse(" Infinity ")) && Single::Parse(" Infinity ") > 0);
+    float r = 0;
+    EXPECT_TRUE(Single::TryParse("\t-Infinity\t", r));
+    EXPECT_TRUE(std::isinf(r) && r < 0);
+}
+
+TEST(SingleTest, Parse_InteriorWhitespace_StillRejected) {
+    float r = 0;
+    EXPECT_FALSE(Single::TryParse("1 5", r));
+    EXPECT_FALSE(Single::TryParse("1. 5", r));
+    EXPECT_FALSE(Single::TryParse("N aN", r));
+    EXPECT_THROW(Single::Parse("1 5"), System::FormatException);
+}
+
+TEST(SingleTest, Parse_EmptyOrAllWhitespace_StillRejected) {
+    float r = 0;
+    EXPECT_FALSE(Single::TryParse("", r));
+    EXPECT_FALSE(Single::TryParse("   ", r));
+    EXPECT_FALSE(Single::TryParse("\t\n", r));
+    EXPECT_THROW(Single::Parse("   "), System::FormatException);
 }
 TEST(SingleTest, ToString_Normal)       { EXPECT_EQ(Single::ToString(Single::NaN), "NaN"); }
 TEST(SingleTest, ToString_Format_F2)    { EXPECT_EQ(Single::ToString(3.14159f, "F2"), "3.14"); }

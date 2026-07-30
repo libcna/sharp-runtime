@@ -96,6 +96,109 @@ TEST(DoubleTests2, SinCosPi_MatchesIndividual) {
 }
 
 // ---------------------------------------------------------------------------
+// Pi-scaled trig turn-boundary fidelity (SR-AUD-032, CCF-007, ticket #1861).
+// The naive std::sin(x*Pi)/std::cos(x*Pi)/std::tan(x*Pi) implementation leaked
+// tiny nonzero residues (and the wrong sign of zero) at integer and
+// half-integer turns; the .NET-shaped reduction returns exact, sign-correct
+// results there. Runtime (volatile) operands defeat constant folding.
+// ---------------------------------------------------------------------------
+
+TEST(DoubleTests2, SinPi_IntegerTurns_SignedZero) {
+    volatile double one = 1.0, mone = -1.0, two = 2.0, mzero = -0.0;
+    EXPECT_EQ(Double::SinPi(one), 0.0);
+    EXPECT_FALSE(std::signbit(Double::SinPi(one)));   // SinPi(+1) == +0
+    EXPECT_EQ(Double::SinPi(mone), 0.0);
+    EXPECT_TRUE(std::signbit(Double::SinPi(mone)));    // SinPi(-1) == -0
+    EXPECT_FALSE(std::signbit(Double::SinPi(two)));    // SinPi(+2) == +0
+    EXPECT_TRUE(std::signbit(Double::SinPi(mzero)));   // SinPi(-0) == -0
+}
+
+TEST(DoubleTests2, SinPi_HalfTurns_ExactUnit) {
+    volatile double half = 0.5, threehalf = 1.5, fivehalf = 2.5;
+    EXPECT_EQ(Double::SinPi(half), 1.0);
+    EXPECT_EQ(Double::SinPi(threehalf), -1.0);
+    EXPECT_EQ(Double::SinPi(fivehalf), 1.0);
+}
+
+TEST(DoubleTests2, CosPi_HalfTurns_ExactZero) {
+    volatile double half = 0.5, threehalf = 1.5;
+    EXPECT_EQ(Double::CosPi(half), 0.0);
+    EXPECT_FALSE(std::signbit(Double::CosPi(half)));   // CosPi(0.5) == +0
+    EXPECT_EQ(Double::CosPi(threehalf), 0.0);
+}
+
+TEST(DoubleTests2, CosPi_IntegerTurns_ExactUnit) {
+    volatile double one = 1.0, two = 2.0, three = 3.0;
+    EXPECT_EQ(Double::CosPi(one), -1.0);
+    EXPECT_EQ(Double::CosPi(two), 1.0);
+    EXPECT_EQ(Double::CosPi(three), -1.0);
+}
+
+TEST(DoubleTests2, TanPi_IntegerTurns_SignedZero) {
+    // .NET convention: TanPi(k) carries sign(x) * (odd(k) ? -0 : +0).
+    volatile double one = 1.0, mone = -1.0, two = 2.0;
+    EXPECT_EQ(Double::TanPi(one), 0.0);
+    EXPECT_TRUE(std::signbit(Double::TanPi(one)));     // TanPi(+1) == -0
+    EXPECT_EQ(Double::TanPi(mone), 0.0);
+    EXPECT_FALSE(std::signbit(Double::TanPi(mone)));   // TanPi(-1) == +0
+    EXPECT_FALSE(std::signbit(Double::TanPi(two)));    // TanPi(+2) == +0
+}
+
+TEST(DoubleTests2, TanPi_HalfTurns_SignedInfinity) {
+    volatile double half = 0.5, threehalf = 1.5;
+    EXPECT_TRUE(Double::IsPositiveInfinity(Double::TanPi(half)));
+    EXPECT_TRUE(Double::IsNegativeInfinity(Double::TanPi(threehalf)));
+}
+
+TEST(DoubleTests2, PiTrig_NonFinite_ReturnsNaN) {
+    EXPECT_TRUE(std::isnan(Double::SinPi(Double::NaN)));
+    EXPECT_TRUE(std::isnan(Double::CosPi(Double::NaN)));
+    EXPECT_TRUE(std::isnan(Double::TanPi(Double::NaN)));
+    EXPECT_TRUE(std::isnan(Double::SinPi(Double::PositiveInfinity)));
+    EXPECT_TRUE(std::isnan(Double::CosPi(Double::NegativeInfinity)));
+    EXPECT_TRUE(std::isnan(Double::TanPi(Double::PositiveInfinity)));
+    auto sc = Double::SinCosPi(Double::PositiveInfinity);
+    EXPECT_TRUE(std::isnan(sc.SinPi));
+    EXPECT_TRUE(std::isnan(sc.CosPi));
+}
+
+TEST(DoubleTests2, PiTrig_OrdinaryValues_MatchLibm) {
+    // Quarter turn and a spread of ordinary fractions stay within double ULPs
+    // of the libm reference (property check, not a brittle digit string).
+    volatile double q = 0.25;
+    EXPECT_NEAR(Double::SinPi(q), std::sin(M_PI * 0.25), 1e-12);
+    EXPECT_NEAR(Double::CosPi(q), std::cos(M_PI * 0.25), 1e-12);
+    EXPECT_NEAR(Double::TanPi(q), 1.0, 1e-12);
+    for (double f = 0.05; f < 3.0; f += 0.17) {
+        volatile double vf = f;
+        EXPECT_NEAR(Double::SinPi(vf), std::sin(M_PI * f), 1e-9) << "SinPi @ " << f;
+        EXPECT_NEAR(Double::CosPi(vf), std::cos(M_PI * f), 1e-9) << "CosPi @ " << f;
+    }
+}
+
+TEST(DoubleTests2, SinCosPi_TurnBoundaries_MatchScalar) {
+    volatile double one = 1.0, half = 0.5;
+    auto a = Double::SinCosPi(one);
+    EXPECT_EQ(a.SinPi, 0.0);
+    EXPECT_FALSE(std::signbit(a.SinPi));
+    EXPECT_EQ(a.CosPi, -1.0);
+    auto b = Double::SinCosPi(half);
+    EXPECT_EQ(b.SinPi, 1.0);
+    EXPECT_EQ(b.CosPi, 0.0);
+}
+
+TEST(DoubleTests2, PiTrig_LargeIntegers_BeyondMantissa) {
+    // |x| in [2^52, 2^53): every value is an integer; the raw-bit parity decides
+    // Cos. |x| >= 2^53: x is necessarily an even integer.
+    volatile double oddMid = 4503599627370497.0;   // 2^52 + 1, an odd integer < 2^53
+    volatile double evenBig = 18014398509481984.0; // 2^54, an even integer >= 2^53
+    EXPECT_EQ(Double::SinPi(oddMid), 0.0);
+    EXPECT_EQ(Double::CosPi(oddMid), -1.0);        // odd -> -1
+    EXPECT_EQ(Double::SinPi(evenBig), 0.0);
+    EXPECT_EQ(Double::CosPi(evenBig), 1.0);        // even integer -> +1
+}
+
+// ---------------------------------------------------------------------------
 // Hyperbolic
 // ---------------------------------------------------------------------------
 

@@ -130,6 +130,20 @@ Use a Pi-scaled reduction algorithm (or an equivalently specified helper) for
 all four methods.  Add bit-sign-aware zero assertions for `SinPi(1)`,
 `SinPi(-1)`, `TanPi(1)`, `CosPi(0.5)`, and both fields of `SinCosPi(1)`.
 
+**Remediated (#1861, 2026-07-30, CCF-007):** `Single::SinPi`, `CosPi`, `TanPi`,
+and `SinCosPi` (and their `Double` counterparts) were rewritten from
+`std::sin(x*Pi)` etc. to the .NET integral/fractional-turn reduction, ported
+verbatim from `sinpif`/`cospif`/`tanpif` (amd/aocl-libm-ose) including the
+interval kernels `SinForIntervalPiBy4`/`CosForIntervalPiBy4`/
+`TanForIntervalPiBy4`. Integer turns now yield a sign-carried zero, half turns
+exact `±1`/`0`/`±Infinity`, non-finite inputs `NaN`; ordinary values stay within
+libm ULPs. `noexcept`/`[[nodiscard]]`/signatures/layout unchanged (header-only).
+20 add-only tests; UBSan + ASan + `float-cast-overflow` clean on
+`build-probe/1861_pitrig_probe.cpp`. **Premise correction:** the finding's
+requested assertion `TanPi(1)` was expected `+0` in the CCF-007 plan §12, but the
+reference returns `sign * (odd ? -0.0 : +0.0)`, so `TanPi(+1)==-0` and
+`TanPi(-1)==+0`; the tests assert the measured .NET values.
+
 ## SR-AUD-033 — medium — public `Single` parsing and standard formatting implement a C++ subset rather than .NET defaults
 
 `tryParseCore` sends ordinary input to `from_chars` and rejects all non-finite

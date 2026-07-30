@@ -44,6 +44,14 @@ facilities do not implement the default .NET grammar or format layout.
   `cospi_half=6.12323399573676604e-17`, and
   `tanpi_1=-1.22464679914735321e-16` rather than the exact Pi-scaled boundary
   results. `SinCosPi(1)` likewise produces a nonzero sine.
+  **Remediated (#1861, 2026-07-30, CCF-007):** `Double::SinPi`/`CosPi`/`TanPi`/
+  `SinCosPi` (and the `Single` counterparts) were rewritten to the .NET
+  integral/fractional-turn reduction (amd/aocl-libm-ose kernels, `xTail`
+  parameter retained and called with `0.0`), so integer turns yield a
+  sign-carried zero, half turns exact `±1`/`0`/`±Infinity`, non-finite inputs
+  `NaN`, and ordinary values stay within libm ULPs. `noexcept`/signatures/layout
+  unchanged. See `Single.hpp.audit.md` §SR-AUD-032, including the `TanPi(±1)`
+  signed-zero premise correction.
 - **SR-AUD-033:** the probe rejects valid default inputs with outer whitespace,
   thousands grouping, and finite overflow (`" 1.5 "`, `"1,234.5"`,
   `"1e999"`), and emits `N2` as `1234.50` and `E2` as `1.25E+00` rather than

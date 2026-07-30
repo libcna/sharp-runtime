@@ -207,7 +207,8 @@ approval/observability weight.
 | **#1861** (CCF7-3) | `Single`/`Double` `SinPi`,`CosPi`,`TanPi`,`SinCosPi`: port .NET's integral/fractional reduction; exact signed-zero at integer turns, `±1` at half turns (Sin), exact `0` at half turns (Cos), `±Inf` at half turns (Tan). Bit/sign-aware tests. | ready (medium), next batch |
 | **#1862** (CCF7-4) | `Single`/`Double` `Round(x,digits)`: reject `digits` outside 0–6 / 0–15 with `ArgumentOutOfRangeException("digits", …)`. **Requires dropping `noexcept`** (option A, full parity) or clamping (option B). | **needs_user** (approval) |
 | **#1863** (CCF7-5) | `Single`/`Double` `ToString(value,format)`: `"E"/"e"` → sign + ≥3 exponent digits; `"N"/"n"` → group-separated + 2 decimals; `"G"/"G9"/"G17"/"R"` → shortest-round-trip / round-trip widths. Observable output change; design-first. | **needs_user** (observable output) |
-| **#1864** (CCF7-6) | `Single`/`Double` parse: **compatible** — skip leading/trailing whitespace. **Blocked** — accept `,` thousands (shares #1858) and return `±Infinity` on magnitude overflow instead of failing (throw→value). Split like #1857→#1858 when worked. | todo (whitespace) + blocked tail |
+| **#1864** (CCF7-6) | `Single`/`Double` parse: **compatible** — skip leading/trailing whitespace. | **done** — whitespace slice landed (trim a `std::string_view` in `tryParseCore`; interior/empty still fail; +8 tests) |
+| **#1865** (CCF7-6 tail) | `Single`/`Double` parse: **blocked** — accept `,` thousands (shares #1858's comma decision) and return `±Infinity` on magnitude overflow instead of failing (throw→value). Split from #1864, mirroring #1857→#1858. | **needs_user** (approval) |
 
 ---
 
@@ -217,7 +218,19 @@ approval/observability weight.
 |---|---|
 | #1859 | `ILogB(±0)==INT_MIN`; `ILogB(+Inf)==ILogB(-Inf)==INT_MAX`; `ILogB(NaN)==INT_MAX`; `ILogB(smallest subnormal)` == the IEEE exponent; `ILogB(8)==3` still holds — for Single, Double, and Math |
 | #1860 | `IsPow2(Epsilon)==true`, `IsPow2(2·Epsilon)==true`, a two-bit subnormal `==false`, a normal pow2 `==true`, `1.5f/1.5 ==false`, `0/-x/NaN/Inf ==false` — Single + Double |
-| #1861 | `std::signbit`-aware: `SinPi(1)==+0`, `SinPi(-1)==-0`, `SinPi(0.5)==1`, `CosPi(0.5)==0`, `TanPi(1)==+0`, `TanPi(0.5)==+Inf`, both `SinCosPi(1)` fields — Single + Double |
+| #1861 | `std::signbit`-aware: `SinPi(1)==+0`, `SinPi(-1)==-0`, `SinPi(0.5)==1`, `CosPi(0.5)==0`, `TanPi(1)==-0` (see correction below), `TanPi(-1)==+0`, `TanPi(0.5)==+Inf`, both `SinCosPi(1)` fields — Single + Double |
+
+> **Correction (ticket #1861, 2026-07-30).** The row above and the ticket
+> acceptance text originally read `TanPi(1)==+0`. That was a design-from-summary
+> error: the actual .NET `Single.TanPi`/`Double.TanPi` return
+> `sign * (int.IsOddInteger(integral) ? -0.0 : +0.0)` at integer turns
+> (`Single.cs:2125`, `Double.cs:2209`). For `x==+1` the integral part `1` is odd
+> and `sign==+1`, so the result is **`-0.0`**, not `+0.0`; `TanPi(-1)` is `+0.0`.
+> The implemented tests assert the measured .NET values (`TanPi(+1)==-0`,
+> `TanPi(-1)==+0`), verified with a runtime-operand probe
+> (`build-probe/1861_pitrig_probe.cpp`). Historical text is preserved; this note
+> records the actual reference behaviour per the repository's premise-correction
+> practice.
 | #1862 | `Round(x,-1)`/`Round(x,7f)`/`Round(x,16d)` throw `ArgumentOutOfRangeException("digits")` with the exact per-type message; `Round(x,0)`/`Round(x,6f)`/`Round(x,15d)` valid |
 | #1863 | exact `E2=="1.25E+000"`, `N2=="1,234.50"`, `G9`/`G17` round-trip; `R` unchanged |
 | #1864 | `Parse(" 1.5 ")==1.5`; (blocked) `Parse("1,234.5")==1234.5`, `Parse("1e999")==+Inf` |
@@ -292,4 +305,38 @@ decision recorded on their blocked tickets before landing; the compatible pieces
 
 **CCF7-2 — SR-AUD-030 — DONE (#1860, 2026-07-30).** See #1860.
 
-CCF7-3/#1861, CCF7-4/#1862, CCF7-5/#1863, CCF7-6/#1864 remain open per §11.
+**CCF7-3 — SR-AUD-032 — DONE (#1861, 2026-07-30).** `Single`/`Double`
+`SinPi`/`CosPi`/`TanPi`/`SinCosPi` were rewritten from the naive
+`std::sin(x*Pi)` forms to the .NET integral/fractional-turn reduction (based on
+`sinpi(f)`/`cospi(f)`/`tanpi(f)` from amd/aocl-libm-ose, ported verbatim
+including the interval kernels `SinForIntervalPiBy4`/`CosForIntervalPiBy4`/
+`TanForIntervalPiBy4`; the Double kernels keep the `xTail` parameter of the
+reference and are always called with `0.0`). Integer turns now return a
+sign-carried zero, half turns return exact `±1`/`0`/`±Infinity`, non-finite
+inputs return `NaN`, and ordinary fractional values stay within a small ULP
+tolerance of libm. `noexcept`, `[[nodiscard]]`, public signatures, and object
+layout are unchanged (both types are header-only). 24 add-only tests (10 Single
++ 14 Double, of which 4 pre-existed); UBSan + ASan + `float-cast-overflow` clean
+on `build-probe/1861_pitrig_probe.cpp`. **Premise corrected:** the §12 vector
+`TanPi(1)==+0` was wrong; the reference (and this implementation) return `-0.0`
+— see the Correction note in §12.
+
+**CCF7-6 (whitespace slice) — SR-AUD-033 parse — DONE (#1864, 2026-07-30).**
+`Single`/`Double` `tryParseCore` now trims leading/trailing ASCII whitespace
+(space, tab, LF, VT, FF, CR) via a non-allocating `std::string_view` before the
+NaN/Infinity token checks and `FromCharsFloat`, so `Parse(" 1.5 ")`, `" NaN "`,
+`"\t-Infinity\t"` succeed while interior whitespace and an empty/all-whitespace
+string still fail. `equalsIgnoreCaseAscii` was widened to take `std::string_view`;
+`noexcept`/signatures/layout unchanged. +8 add-only tests (4 Single + 4 Double).
+The approval-gated tail (accept `,` thousands + overflow→`±Infinity`) was split to
+**needs_user #1865** (mirroring #1857→#1858); SR-AUD-033 stays `confirmed`
+(partial) until both #1863 format and #1865 parse-tail land.
+
+CCF7-4/#1862 (Round `noexcept`) and CCF7-5/#1863 (format output) remain
+approval-blocked, per §11.
+
+**CCF-007 family status:** SR-AUD-030, SR-AUD-031, SR-AUD-032 remediated; the
+compatible parse-whitespace slice of SR-AUD-033 landing this batch (#1864);
+SR-AUD-029 (#1862), the SR-AUD-033 format slice (#1863), and the SR-AUD-033
+thousands+overflow parse tail all remain approval-gated. The family closes only
+when all five findings are `remediated` (§17).

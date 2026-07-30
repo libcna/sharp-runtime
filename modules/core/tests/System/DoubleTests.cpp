@@ -385,6 +385,41 @@ TEST(DoubleTests, Parse_AbbreviatedInfinitySpelling_Throws) {
     EXPECT_THROW(Double::Parse("nan(123)"), System::FormatException);
 }
 
+// SR-AUD-033 whitespace slice (#1864, CCF-007): .NET's default NumberStyles.Float
+// permits leading/trailing whitespace (AllowLeadingWhite | AllowTrailingWhite),
+// but never interior whitespace or an empty/all-whitespace string.
+TEST(DoubleTests, Parse_LeadingTrailingWhitespace_Accepted) {
+    EXPECT_EQ(Double::Parse(" 1.5 "), 1.5);
+    EXPECT_NEAR(Double::Parse("\t3.14\n"), 3.14, 1e-12);
+    EXPECT_EQ(Double::Parse("  -2.5"), -2.5);
+    EXPECT_EQ(Double::Parse("42\r\n"), 42.0);
+}
+
+TEST(DoubleTests, Parse_WhitespaceAroundSpecialTokens_Accepted) {
+    EXPECT_TRUE(std::isnan(Double::Parse("  NaN  ")));
+    double r = 0;
+    EXPECT_TRUE(Double::TryParse(" Infinity ", r));
+    EXPECT_TRUE(std::isinf(r) && r > 0);
+    EXPECT_TRUE(Double::TryParse("\t-Infinity\t", r));
+    EXPECT_TRUE(std::isinf(r) && r < 0);
+}
+
+TEST(DoubleTests, Parse_InteriorWhitespace_StillRejected) {
+    double r = 0;
+    EXPECT_FALSE(Double::TryParse("1 5", r));
+    EXPECT_FALSE(Double::TryParse("1. 5", r));
+    EXPECT_FALSE(Double::TryParse("N aN", r));
+    EXPECT_THROW(Double::Parse("1 5"), System::FormatException);
+}
+
+TEST(DoubleTests, Parse_EmptyOrAllWhitespace_StillRejected) {
+    double r = 0;
+    EXPECT_FALSE(Double::TryParse("", r));
+    EXPECT_FALSE(Double::TryParse("   ", r));
+    EXPECT_FALSE(Double::TryParse("\t\n", r));
+    EXPECT_THROW(Double::Parse("   "), System::FormatException);
+}
+
 // ---------------------------------------------------------------------------
 // ToString
 // ---------------------------------------------------------------------------
