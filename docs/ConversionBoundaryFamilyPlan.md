@@ -320,7 +320,7 @@ assertion is weakened** (none pins the buggy behaviour).
 | SR-AUD-041 | **ASan** | reproduce the OOB read pre-fix (`ToInt32(vec,-1)` and short vec) in the real body, clean post-fix |
 | SR-AUD-043a | **ASan** | reproduce the negative-length OOB (`ReadOnlySpan<uint8_t>(oneByte,-1)` → `HashCode::AddBytes`) pre-fix, clean post-fix |
 | SR-AUD-047 | **ASan** | reproduce the 2→1 heap-buffer-overflow **write** pre-fix, clean post-fix |
-| SR-AUD-026, 027 | none required | pure value/throw changes, no memory or arithmetic-UB component (NaN→int is implementation-defined, not UB) |
+| SR-AUD-026, 027 | none required for 026; **UBSan for 027** (see §19.4 correction) | 026 is pure value/throw (integer narrowing is well-defined). **027 was wrongly called "implementation-defined, not UB": the NaN→int `static_cast` is genuine UB per `[conv.fpint]` and UBSan `float-cast-overflow` reproduces it** |
 | SR-AUD-043b | ASan (regression) | confirm the defense-in-depth path is clean; primary exploit already closed by 043a |
 
 Reuse `build-asan/` (already `-fsanitize=address,undefined`) or a one-TU probe
@@ -470,3 +470,42 @@ exception-spec change (§13). Now that 043a closes the reachable path, 043b is
 pure defense-in-depth; it remains `needs_user` pending the drop-`noexcept`
 (option a) vs clamp-to-empty (option b) decision. Remaining CCF-005 memory-safety
 queue: #1853 (026/027), #1854 (043b, `needs_user`).
+
+### 19.4 CCF5-D / #1853 — SR-AUD-026 + SR-AUD-027 — Convert boundary guards — **DONE (2026-07-30)**
+
+**SR-AUD-026 (six integral overloads, `Convert.hpp`).** `ToChar(intcs)`,
+`ToByte(longcs)`, `ToUInt32(intcs)`, `ToUInt32(longcs)`, `ToUInt64(intcs)`,
+`ToUInt64(longcs)` now range-check and throw `OverflowException` before the cast,
+matching their already-guarded sibling overloads. Per §9 `ToChar(intcs)` uses
+`[0, 255]` (this port backs `char` with a 1-byte type, matching `ToChar(longcs)`,
+not .NET's `[0, 65535]`). Value-only; integer narrowing is well-defined in C++20
+so there is no UB here.
+
+**SR-AUD-027 (four float→int converters, two files).** `ToInt32(double)` and
+`ToInt64(double)` (`Convert.cpp`), and inline `ToUInt32(double)` /
+`ToUInt64(double)` (`Convert.hpp`), now reject NaN and ±Inf with
+`OverflowException` via a `!std::isfinite` guard before `Math::Round`/the cast
+(per §4#1 this finding spans **two** files, not one).
+
+**Premise correction (supersedes §15's original "no sanitizer / not UB" line).**
+The CCF-005 plan first classified the NaN→int cast as "implementation-defined,
+not UB." That is wrong: a floating-to-integer conversion whose truncated value is
+not representable in the destination type is **undefined behavior** per
+`[conv.fpint]`, and NaN is never representable. GCC's `-fsanitize=undefined` does
+**not** enable `float-cast-overflow` (unlike Clang), so it must be requested
+explicitly. With it, UBSan reproduced the pre-fix UB on the real inline body:
+`Convert.hpp:390: runtime error: nan is outside the range of representable values
+of type 'unsigned int'` in `Convert::ToUInt32(double)`
+(`build-probe/1853_convert_nan_prefix.log`); post-fix the `isfinite` guard throws
+before the cast, UBSan clean (`build-probe/1853_convert_nan_postfix.log`). ASan
+finds nothing here (no memory error) — correct, the defect is arithmetic-UB, not
+a bounds error. `ToInt32/ToInt64(double)` share the identical structure and fix;
+the value tests cover all four plus the delegating `ToByte(double)`.
+
++41 tests (`SharpRuntimeTests_Core_Base` 5148 → 5189): every SR-AUD-026 overload
+throws out of range and returns its exact in-range value; every SR-AUD-027
+converter throws for NaN/+Inf/−Inf and converts a finite value exactly. No
+`noexcept`/signature/layout change. `SR-AUD-026 → remediated`,
+`SR-AUD-027 → remediated`. **CCF-005 memory-safety + value slice complete except
+043b (#1854, `needs_user`).** The Decimal slice (035/036/038) is a separate
+review (§17). Remaining CCF-005: #1854 (043b) only.

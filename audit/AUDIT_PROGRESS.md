@@ -1726,8 +1726,20 @@ metadata/attribute source inventory.
   `MaxValue + 1` and `MinValue - 1` instead of defined unchecked wrap.
 - **SR-AUD-026 (high):** several direct Convert integral overloads silently
   wrap negative/out-of-range input instead of throwing `OverflowException`.
+  **Remediated — ticket #1853 (2026-07-30):** `ToChar(int)`, `ToByte(long)`,
+  `ToUInt32(int)`, `ToUInt32(long)`, `ToUInt64(int)`, `ToUInt64(long)` now
+  range-check and throw `OverflowException` (`ToChar` uses `[0,255]` for this
+  1-byte-char port). Value-only, no UB; +26 tests.
 - **SR-AUD-027 (high):** Convert's direct floating-to-integer paths allow NaN
   to bypass comparisons and return spurious platform values rather than throw.
+  **Remediated — ticket #1853 (2026-07-30):** `ToInt32/ToInt64(double)`
+  (`Convert.cpp`) and `ToUInt32/ToUInt64(double)` (inline `Convert.hpp`) now
+  reject NaN and ±Inf with `OverflowException` via a `!std::isfinite` guard
+  before the cast. **Premise corrected:** the NaN→int `static_cast` is genuine
+  UB per `[conv.fpint]`, not merely implementation-defined — UBSan
+  `float-cast-overflow` reproduced `nan is outside the range of representable
+  values of type 'unsigned int'` at `Convert.hpp:390` pre-fix, clean post-fix.
+  +15 tests.
 - **SR-AUD-028 (medium):** Convert Base64 decoding accepts malformed padding
   and rejects whitespace that the .NET contract permits.
 - **SR-AUD-029 (medium):** Single and Double `Round(value, digits)` accept

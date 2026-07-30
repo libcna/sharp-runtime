@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <cstdlib>
 #include <cerrno>
+#include <cmath>
 #include <array>
 #include <charconv>
 #include <climits>
@@ -67,6 +68,10 @@ namespace System {
         // Real .NET's Convert.ToInt32(double) rounds to the nearest integer, ties to even,
         // matching Math.Round's default -- it previously truncated toward zero instead (e.g.
         // ToInt32(2.9) returned 2, not 3), a confirmed post-stabilization-audit finding.
+        // NaN passes neither range comparison below and would cast to INT_MIN, so it is
+        // rejected here (with +/-Inf) before Math::Round -- .NET reaches OverflowException
+        // for all three (SR-AUD-027).
+        if (!std::isfinite(value)) throw OverflowException();
         double rounded = Math::Round(value);
         if (rounded > INT_MAX || rounded < INT_MIN) throw OverflowException();
         return static_cast<intcs>(rounded);
@@ -98,6 +103,10 @@ namespace System {
         // representable as a double -- the nearest representable double to LLONG_MAX is 2^63
         // itself, so comparing against a cast LLONG_MAX would incorrectly accept some
         // just-out-of-range inputs.
+        // NaN passes neither bound and would cast to LLONG_MIN, so reject it (and +/-Inf)
+        // explicitly before Math::Round -- .NET reaches OverflowException for all three
+        // (SR-AUD-027).
+        if (!std::isfinite(value)) throw OverflowException();
         double rounded = Math::Round(value);
         if (rounded < -9223372036854775808.0 || rounded >= 9223372036854775808.0)
             throw OverflowException();

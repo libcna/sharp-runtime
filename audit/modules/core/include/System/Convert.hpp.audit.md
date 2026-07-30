@@ -52,3 +52,26 @@ raw string-literal overload coverage.
 
 The broad declared surface contains multiple carefully repaired paths, but the
 unchecked inline set is a high-impact public data-conversion defect.
+
+### Remediated — ticket #1853 (2026-07-30)
+
+**SR-AUD-026** (six integral overloads): `ToChar(intcs)`, `ToByte(longcs)`,
+`ToUInt32(intcs)`, `ToUInt32(longcs)`, `ToUInt64(intcs)`, `ToUInt64(longcs)` now
+range-check and throw `OverflowException` before the cast, joining the sibling
+overloads that already guarded. `ToChar(intcs)` uses `[0, 255]` — this port backs
+`char` with a 1-byte type, so it matches the `ToChar(longcs)` sibling, not .NET's
+`[0, 65535]`. Value-only change (integer narrowing is well-defined in C++20, no
+UB); every in-range value is unchanged.
+
+**SR-AUD-027** (the two inline `double` converters here): `ToUInt32(double)` and
+`ToUInt64(double)` now reject NaN and ±Inf with `OverflowException` via a
+`!std::isfinite` guard before `Math::Round`/the cast. (The other two,
+`ToInt32/ToInt64(double)`, are in `Convert.cpp` — see its report.) **Premise
+correction:** the CCF-005 plan called the NaN→int cast "implementation-defined,
+not UB"; it is in fact genuine undefined behavior per `[conv.fpint]` (a
+float→integer conversion whose value is not representable in the destination is
+UB, and NaN never is). UBSan's `float-cast-overflow` reproduced
+`nan is outside the range of representable values of type 'unsigned int'` at
+`Convert.hpp:390` pre-fix (`build-probe/1853_convert_nan_prefix.log`) and was
+clean post-fix (`…_postfix.log`). +41 tests total across 026/027. No
+`noexcept`/signature/layout change. `docs/ConversionBoundaryFamilyPlan.md` §19.4.

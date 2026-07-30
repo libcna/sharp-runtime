@@ -60,3 +60,21 @@ and add valid-whitespace plus leading/middle/excess-padding failure vectors.
 
 The repaired normal paths are well explained, but two reachable validation gaps
 still produce silent wrong values or malformed decoded data.
+
+### Remediated (SR-AUD-027) — ticket #1853 (2026-07-30)
+
+`Convert::ToInt32(double)` (L66) and `Convert::ToInt64(double)` (L91) now reject
+NaN and ±Inf with `OverflowException` via a `!std::isfinite` guard before
+`Math::Round` and the cast. Previously NaN passed both range comparisons
+(`rounded > INT_MAX || rounded < INT_MIN` are both false for NaN) and reached
+`static_cast<intcs>(NaN)`, which returned `INT_MIN`. **Premise correction:** that
+cast is genuine undefined behavior per `[conv.fpint]`, not merely
+implementation-defined as the CCF-005 plan first stated — a float→integer
+conversion whose value is not representable in the destination is UB. UBSan
+`float-cast-overflow` reproduces it (demonstrated on the structurally identical
+inline `ToUInt32(double)` at `Convert.hpp:390`,
+`build-probe/1853_convert_nan_prefix.log`); post-fix throws before the cast,
+UBSan clean. The inline `ToUInt32/ToUInt64(double)` counterparts are fixed the
+same way in `Convert.hpp`. +15 tests across the four converters plus the
+delegating `ToByte(double)`. SR-AUD-028 (Base64) is separate and stays open.
+`docs/ConversionBoundaryFamilyPlan.md` §19.4.

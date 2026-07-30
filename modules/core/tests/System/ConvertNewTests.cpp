@@ -2,6 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <cmath>
+#include <climits>
+#include <limits>
 #include "System/Convert.hpp"
 #include "System/OverflowException.hpp"
 #include "System/FormatException.hpp"
@@ -280,3 +283,91 @@ TEST(ConvertTests, ToInt32_FromDouble_ExactAuditReproValues) {
     EXPECT_EQ(Convert::ToInt32(2.9), 3);
     EXPECT_EQ(Convert::ToInt32(3.5), 4);
 }
+
+// ===========================================================================
+// SR-AUD-026 (#1853): integral overloads that static_cast with no range guard
+// now throw OverflowException on an out-of-range value (the sibling overloads
+// for the same target types already guarded). Every in-range value still
+// returns its exact result. ToChar uses [0,255] because this port backs char
+// with a 1-byte type (matching the ToChar(longcs) sibling), not .NET's [0,65535].
+// ===========================================================================
+
+// --- ToChar(intcs) ---
+TEST(ConvertTests, ToChar_FromInt_Negative_Throws)  { EXPECT_THROW(Convert::ToChar(intcs(-1)), System::OverflowException); }
+TEST(ConvertTests, ToChar_FromInt_Over255_Throws)   { EXPECT_THROW(Convert::ToChar(intcs(256)), System::OverflowException); }
+TEST(ConvertTests, ToChar_FromInt_Zero_Valid)       { EXPECT_EQ(Convert::ToChar(intcs(0)), '\0'); }
+TEST(ConvertTests, ToChar_FromInt_Letter_Valid)     { EXPECT_EQ(Convert::ToChar(intcs(65)), 'A'); }
+TEST(ConvertTests, ToChar_FromInt_Max255_Valid)     { EXPECT_EQ(Convert::ToChar(intcs(255)), static_cast<char>(255)); }
+
+// --- ToByte(longcs) ---
+TEST(ConvertTests, ToByte_FromLong_Over255_Throws)  { EXPECT_THROW(Convert::ToByte(longcs(256)), System::OverflowException); }
+TEST(ConvertTests, ToByte_FromLong_Negative_Throws) { EXPECT_THROW(Convert::ToByte(longcs(-1)), System::OverflowException); }
+TEST(ConvertTests, ToByte_FromLong_Zero_Valid)      { EXPECT_EQ(Convert::ToByte(longcs(0)), bytecs(0)); }
+TEST(ConvertTests, ToByte_FromLong_Mid_Valid)       { EXPECT_EQ(Convert::ToByte(longcs(200)), bytecs(200)); }
+TEST(ConvertTests, ToByte_FromLong_Max255_Valid)    { EXPECT_EQ(Convert::ToByte(longcs(255)), bytecs(255)); }
+
+// --- ToUInt32(intcs) ---
+TEST(ConvertTests, ToUInt32_FromInt_Negative_Throws) { EXPECT_THROW(Convert::ToUInt32(intcs(-1)), System::OverflowException); }
+TEST(ConvertTests, ToUInt32_FromInt_Zero_Valid)      { EXPECT_EQ(Convert::ToUInt32(intcs(0)), 0u); }
+TEST(ConvertTests, ToUInt32_FromInt_Max_Valid)       { EXPECT_EQ(Convert::ToUInt32(intcs(INT_MAX)), static_cast<uint32_t>(INT_MAX)); }
+
+// --- ToUInt32(longcs) ---
+TEST(ConvertTests, ToUInt32_FromLong_Negative_Throws) { EXPECT_THROW(Convert::ToUInt32(longcs(-1)), System::OverflowException); }
+TEST(ConvertTests, ToUInt32_FromLong_Oversized_Throws) {
+    EXPECT_THROW(Convert::ToUInt32(longcs(4294967296LL)), System::OverflowException);  // 2^32, one past UInt32.Max
+}
+TEST(ConvertTests, ToUInt32_FromLong_Max_Valid)       { EXPECT_EQ(Convert::ToUInt32(longcs(4294967295LL)), 4294967295u); }
+TEST(ConvertTests, ToUInt32_FromLong_Mid_Valid)       { EXPECT_EQ(Convert::ToUInt32(longcs(42)), 42u); }
+
+// --- ToUInt64(intcs) ---
+TEST(ConvertTests, ToUInt64_FromInt_Negative_Throws) { EXPECT_THROW(Convert::ToUInt64(intcs(-1)), System::OverflowException); }
+TEST(ConvertTests, ToUInt64_FromInt_Zero_Valid)      { EXPECT_EQ(Convert::ToUInt64(intcs(0)), 0ull); }
+TEST(ConvertTests, ToUInt64_FromInt_Max_Valid)       { EXPECT_EQ(Convert::ToUInt64(intcs(INT_MAX)), static_cast<uint64_t>(INT_MAX)); }
+
+// --- ToUInt64(longcs) ---
+TEST(ConvertTests, ToUInt64_FromLong_Negative_Throws) { EXPECT_THROW(Convert::ToUInt64(longcs(-1)), System::OverflowException); }
+TEST(ConvertTests, ToUInt64_FromLong_Zero_Valid)      { EXPECT_EQ(Convert::ToUInt64(longcs(0)), 0ull); }
+TEST(ConvertTests, ToUInt64_FromLong_Max_Valid)       { EXPECT_EQ(Convert::ToUInt64(longcs(LLONG_MAX)), static_cast<uint64_t>(LLONG_MAX)); }
+
+// ===========================================================================
+// SR-AUD-027 (#1853): the four float->int converters used `value < min || value
+// > max`, which NaN passes, then cast to a spurious integer. They now reject
+// NaN and +/-Inf with OverflowException before the cast, matching .NET. Every
+// finite in-range value still converts exactly.
+// ===========================================================================
+
+namespace {
+    constexpr double kNaN     = std::numeric_limits<double>::quiet_NaN();
+    constexpr double kPosInf  = std::numeric_limits<double>::infinity();
+    constexpr double kNegInf  = -std::numeric_limits<double>::infinity();
+}
+
+// --- ToInt32(double) ---
+TEST(ConvertTests, ToInt32_FromNaN_Throws)     { EXPECT_THROW(Convert::ToInt32(kNaN), System::OverflowException); }
+TEST(ConvertTests, ToInt32_FromPosInf_Throws)  { EXPECT_THROW(Convert::ToInt32(kPosInf), System::OverflowException); }
+TEST(ConvertTests, ToInt32_FromNegInf_Throws)  { EXPECT_THROW(Convert::ToInt32(kNegInf), System::OverflowException); }
+TEST(ConvertTests, ToInt32_FromFinite_Valid)   { EXPECT_EQ(Convert::ToInt32(2.9), 3); }
+
+// --- ToInt64(double) ---
+TEST(ConvertTests, ToInt64_FromNaN_Throws)     { EXPECT_THROW(Convert::ToInt64(kNaN), System::OverflowException); }
+TEST(ConvertTests, ToInt64_FromPosInf_Throws)  { EXPECT_THROW(Convert::ToInt64(kPosInf), System::OverflowException); }
+TEST(ConvertTests, ToInt64_FromNegInf_Throws)  { EXPECT_THROW(Convert::ToInt64(kNegInf), System::OverflowException); }
+TEST(ConvertTests, ToInt64_FromFinite_Valid)   { EXPECT_EQ(Convert::ToInt64(2.5), 2); }  // ties to even
+
+// --- ToUInt32(double) ---
+TEST(ConvertTests, ToUInt32_FromNaN_Throws)    { EXPECT_THROW(Convert::ToUInt32(kNaN), System::OverflowException); }
+TEST(ConvertTests, ToUInt32_FromPosInf_Throws) { EXPECT_THROW(Convert::ToUInt32(kPosInf), System::OverflowException); }
+TEST(ConvertTests, ToUInt32_FromNegInf_Throws) { EXPECT_THROW(Convert::ToUInt32(kNegInf), System::OverflowException); }
+TEST(ConvertTests, ToUInt32_FromFinite_Valid)  { EXPECT_EQ(Convert::ToUInt32(5.0), 5u); }
+
+// --- ToUInt64(double) ---
+TEST(ConvertTests, ToUInt64_FromNaN_Throws)    { EXPECT_THROW(Convert::ToUInt64(kNaN), System::OverflowException); }
+TEST(ConvertTests, ToUInt64_FromPosInf_Throws) { EXPECT_THROW(Convert::ToUInt64(kPosInf), System::OverflowException); }
+TEST(ConvertTests, ToUInt64_FromNegInf_Throws) { EXPECT_THROW(Convert::ToUInt64(kNegInf), System::OverflowException); }
+TEST(ConvertTests, ToUInt64_FromFinite_Valid)  { EXPECT_EQ(Convert::ToUInt64(5.0), 5ull); }
+
+// The delegating float->smaller-integer converters inherit the NaN rejection
+// (ToByte(double) -> ToByte(ToInt32(double))), so a NaN can no longer produce a
+// spurious byte.
+TEST(ConvertTests, ToByte_FromNaN_Throws)      { EXPECT_THROW(Convert::ToByte(kNaN), System::OverflowException); }
+TEST(ConvertTests, ToByte_FromPosInf_Throws)   { EXPECT_THROW(Convert::ToByte(kPosInf), System::OverflowException); }

@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -87,8 +88,17 @@ namespace System {
          * @brief Converts a 32-bit integer to char.
          *
          * C++ counterpart of .NET Convert.ToChar(int).
+         * @throws OverflowException if the value is outside the char range [0, 255].
          */
-        [[nodiscard]] static char ToChar(intcs value)  { return static_cast<char>(value); }
+        [[nodiscard]] static char ToChar(intcs value)
+        {
+            // This port backs char with a 1-byte type, so the valid range is [0, 255]
+            // (matching the ToChar(longcs) sibling), not .NET's [0, 65535]. Without this
+            // guard ToChar(-1) silently returned 255 and ToChar(256) wrapped to 0.
+            if (value < 0 || value > 255)
+                throw OverflowException("Value is out of char range.");
+            return static_cast<char>(value);
+        }
         /**
          * @brief Converts a 64-bit integer to char.
          *
@@ -148,8 +158,19 @@ namespace System {
                 throw OverflowException("Value is out of Byte range.");
             return static_cast<bytecs>(value);
         }
-        /** @brief Converts a 64-bit integer to byte. */
-        [[nodiscard]] static bytecs ToByte(longcs value)   { return static_cast<bytecs>(value); }
+        /**
+         * @brief Converts a 64-bit integer to byte.
+         *
+         * @throws OverflowException if out of range [0, 255].
+         */
+        [[nodiscard]] static bytecs ToByte(longcs value)
+        {
+            // Without this guard ToByte(256L) silently returned 0 and ToByte(-1L) returned
+            // 255, unlike the ToByte(intcs)/ToByte(shortcs) siblings which already guard.
+            if (value < 0 || value > 255)
+                throw OverflowException("Value is out of Byte range.");
+            return static_cast<bytecs>(value);
+        }
         /** @brief Converts a Boolean to byte (true → 1, false → 0). */
         [[nodiscard]] static bytecs ToByte(bool value)     { return value ? bytecs(1) : bytecs(0); }
         /**
@@ -369,10 +390,27 @@ namespace System {
         // ToUInt32
         // ===================================================================
 
-        /** @brief Converts a 32-bit integer to unsigned 32-bit integer. */
-        [[nodiscard]] static uint32_t ToUInt32(intcs value)   { return static_cast<uint32_t>(value); }
-        /** @brief Converts a 64-bit integer to unsigned 32-bit integer. */
-        [[nodiscard]] static uint32_t ToUInt32(longcs value)  { return static_cast<uint32_t>(value); }
+        /**
+         * @brief Converts a 32-bit integer to unsigned 32-bit integer.
+         * @throws OverflowException if @p value is negative.
+         */
+        [[nodiscard]] static uint32_t ToUInt32(intcs value)
+        {
+            // Without this guard ToUInt32(-1) silently returned 4294967295.
+            if (value < 0)
+                throw OverflowException("Value is out of UInt32 range.");
+            return static_cast<uint32_t>(value);
+        }
+        /**
+         * @brief Converts a 64-bit integer to unsigned 32-bit integer.
+         * @throws OverflowException if @p value is negative or exceeds UInt32.MaxValue.
+         */
+        [[nodiscard]] static uint32_t ToUInt32(longcs value)
+        {
+            if (value < 0 || value > static_cast<longcs>(std::numeric_limits<uint32_t>::max()))
+                throw OverflowException("Value is out of UInt32 range.");
+            return static_cast<uint32_t>(value);
+        }
         /** @brief Converts a byte to unsigned 32-bit integer. */
         [[nodiscard]] static uint32_t ToUInt32(bytecs value)  { return static_cast<uint32_t>(value); }
         /** @brief Converts a Boolean to unsigned 32-bit integer (true → 1, false → 0). */
@@ -384,6 +422,12 @@ namespace System {
          */
         [[nodiscard]] static uint32_t ToUInt32(double value)
         {
+            // NaN passes neither `< 0` nor `> max`, so it must be rejected explicitly before
+            // the cast (which would otherwise silently yield 0); +/-Inf is caught by the range
+            // check but is rejected here too for clarity. .NET reaches OverflowException for
+            // all three.
+            if (!std::isfinite(value))
+                throw OverflowException("Value is out of UInt32 range.");
             double rounded = Math::Round(value);
             if (rounded < 0.0 || rounded > static_cast<double>(std::numeric_limits<uint32_t>::max()))
                 throw OverflowException("Value is out of UInt32 range.");
@@ -402,10 +446,27 @@ namespace System {
         // ToUInt64
         // ===================================================================
 
-        /** @brief Converts a 32-bit integer to unsigned 64-bit integer. */
-        [[nodiscard]] static uint64_t ToUInt64(intcs value)   { return static_cast<uint64_t>(value); }
-        /** @brief Converts a 64-bit integer to unsigned 64-bit integer. */
-        [[nodiscard]] static uint64_t ToUInt64(longcs value)  { return static_cast<uint64_t>(value); }
+        /**
+         * @brief Converts a 32-bit integer to unsigned 64-bit integer.
+         * @throws OverflowException if @p value is negative.
+         */
+        [[nodiscard]] static uint64_t ToUInt64(intcs value)
+        {
+            // Without this guard ToUInt64(-1) silently returned 18446744073709551615.
+            if (value < 0)
+                throw OverflowException("Value is out of UInt64 range.");
+            return static_cast<uint64_t>(value);
+        }
+        /**
+         * @brief Converts a 64-bit integer to unsigned 64-bit integer.
+         * @throws OverflowException if @p value is negative.
+         */
+        [[nodiscard]] static uint64_t ToUInt64(longcs value)
+        {
+            if (value < 0)
+                throw OverflowException("Value is out of UInt64 range.");
+            return static_cast<uint64_t>(value);
+        }
         /** @brief Converts a byte to unsigned 64-bit integer. */
         [[nodiscard]] static uint64_t ToUInt64(bytecs value)  { return static_cast<uint64_t>(value); }
         /** @brief Converts a Boolean to unsigned 64-bit integer (true → 1, false → 0). */
@@ -424,6 +485,10 @@ namespace System {
          */
         [[nodiscard]] static uint64_t ToUInt64(double value)
         {
+            // NaN passes neither bound and would otherwise cast to a spurious 2^63; reject it
+            // (and +/-Inf) explicitly before the cast. .NET reaches OverflowException for all three.
+            if (!std::isfinite(value))
+                throw OverflowException("Value is out of UInt64 range.");
             double rounded = Math::Round(value);
             if (rounded < 0.0 || rounded >= 18446744073709551616.0)
                 throw OverflowException("Value is out of UInt64 range.");
