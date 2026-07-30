@@ -42,8 +42,15 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: **14,344** passing across 36 component binaries plus one integration
-  binary, verified 2026-07-30 by the CCF-005 conversion/memory-safety +
+- Tests: **14,444** passing across 36 component binaries plus one integration
+  binary, verified 2026-07-30 by the CCF-011 empty-callable batch on branch
+  `feature/remediation-batch-empty-callable` (design #1866; #1867 SR-AUD-065 +
+  SR-AUD-099 +14, #1868 SR-AUD-058 + SR-AUD-121 +13, #1869 SR-AUD-052 +13,
+  #1870 SR-AUD-134 +8 — total +48 over the 14,396 floor the CCF-007 Pi-trig +
+  parse-whitespace batch left, which itself reached 14,396 via #1861 +20 and
+  #1864 +8 over the 14,368 the CCF-005 Decimal slice verified via #1855 +9,
+  #1856 +6, #1857 +4, #1859 +3 and #1860 +2 over 14,344), itself raised from
+  the 14,344 verified by the CCF-005 conversion/memory-safety +
   CCF-006 float-format batch on branch
   `feature/remediation-batch-ccf005-convert-decimal` (#1851 SR-AUD-041 +46,
   #1852 SR-AUD-043a +12, #1853 SR-AUD-026/027 +41, #1849 SR-AUD-021 float slice
@@ -4210,3 +4217,63 @@ ctors), **#1853** (SR-AUD-026/027 Convert) — all P1/P2 compatible; then **#185
 (needs_user) and the CCF-005 Decimal slice / CCF-006. Full detail, build-directory
 sizes, three-job parallelism record and probe accounting: `NEXT.md` under "Autonomous
 batch handoff, 2026-07-30 (CCF-003 close + CCF-005 plan)".
+
+## Session summary — 2026-07-30, CCF-011 empty-callable family closed
+
+Branch `feature/remediation-batch-empty-callable`, off
+`feature/remediation-batch-floating-fidelity`. CCF-007 had no remaining
+*compatible* ready work and `plan.sqlite3` held **no `todo` ticket at all**, so
+the batch selected a new family from the audit index: **CCF-011 — "empty
+`std::function` values cross public boundaries without an explicit policy"**.
+Design ticket **#1866** wrote `docs/EmptyCallableBoundaryPlan.md` (18 sections,
+every current-behaviour claim measured by a 60-case probe, every .NET claim cited
+to a file and line under `/rv/tmp/runtime`), then four implementation tickets
+landed it. **CCF-011 is CLOSED**: all six findings are `remediated`.
+
+- **#1867** — SR-AUD-065 + SR-AUD-099. `Lazy<T>`'s three factory constructors
+  throw `ArgumentNullException("valueFactory")` for an empty factory;
+  `AggregateException::Handle` throws `ArgumentNullException("predicate")` before
+  its loop. +14 tests.
+- **#1868** — SR-AUD-058 + SR-AUD-121. `Progress<T>::addProgressChangedHandler`
+  and `EventHandler::Add`/`operator+=` treat an empty handler as a **no-op**,
+  before the replay hook, matching C# `event += null`; `OnReport`/`Raise` skip
+  untruthy handlers. +13 tests.
+- **#1869** — SR-AUD-052. All 17 `Array` delegate overloads reject an empty
+  callable with .NET's own `paramName`, in .NET's own per-overload order; the 12
+  `Predicate<T>` parameters renamed `predicate` → `match`. +13 tests.
+- **#1870** — SR-AUD-134. All 11 `Linq` callback overloads reject before the
+  sequence is examined. +8 tests.
+
+Gate **14,444 tests across 37 executables** (0 warnings, 0 errors), up from
+14,396. Audit index **49 remediated / 315 confirmed of 364** (+6). Module graph
+**41 / 91**, canonical Doxygen **1,941 / 1,942**, negative fixtures **9 / 66**,
+version seams **2 / 18** — all unchanged, as this family adds none.
+
+Premises corrected by measurement, historical audit text preserved: the silent
+region was **size**-dependent, not emptiness-dependent (`Sort`, `BinarySearch`,
+`OrderBy`, `OrderByDescending` were silent for a *one-element* input too, because
+`std::sort`/`std::stable_sort` never compare below two); `Linq::First(empty, {})`
+**masked** the argument error with `InvalidOperationException`;
+`AggregateException::Handle` was silent with **no** inner exception;
+`EventHandler`'s failure happened **inside `Add`**, not at `Raise`, whenever a
+replay hook was set; and `Array::FindLastIndex` validated its range before the
+callable where .NET does the opposite — folded into #1869, **no new SR-AUD
+identifier** (numbering stays frozen at 364).
+
+Two observable changes are recorded rather than assumed away and neither is
+approval-gated: a previously silent normal result now throws (B1), and
+`EventHandler::Size()` no longer counts a subscription that could never have been
+invoked (B2). No signature, `noexcept`, vtable, layout, grammar, formatted output
+or numerical behaviour changed anywhere in the family.
+
+Nothing pushed/merged/rebased/tagged; CNA and mobile-eggbert untouched; #1773
+stays `blocked`; #1854/#1858/#1862/#1863/#1865 remain `needs_user` with their
+`docs/FloatingValueFidelityPlan.md` §19 decision records unchanged.
+
+Ready queue: **empty** — every open ticket is `blocked` or `needs_user`. The next
+batch should either obtain the §19 decisions or plan another compatible family;
+the strongest candidates are CCF-014 (`TryRead`/`TryParse` stale output, 2
+findings), CCF-016 (derived HResults, 5 findings, mechanical) and CCF-002
+(date/time validation). Full detail, build-directory sizes, three-job parallelism
+record and probe accounting: `NEXT.md` under "Autonomous batch handoff,
+2026-07-30 (CCF-011 empty-callable family, CLOSED)".

@@ -3,13 +3,19 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-30. Branch: `feature/remediation-batch-floating-fidelity`
-(previously `feature/remediation-batch-decimal-ccf007`). The test floor is
-now **14,396** (was 14,368): the CCF-007 floating value-fidelity batch landed
-#1861 (SR-AUD-032 Pi-trig turn boundaries, +20) and the #1864 whitespace slice
-(SR-AUD-033 parse leading/trailing whitespace, +8), total +28. Post-audit tally:
-**43 remediated, 321 confirmed, of 364** (SR-AUD-032 moved `confirmed →
-remediated`). The prior batch left it at 14,368 / 42-remediated via the CCF-005
+*Last verified: 2026-07-30. Branch: `feature/remediation-batch-empty-callable`
+(previously `feature/remediation-batch-floating-fidelity`). The test floor is
+now **14,444** (was 14,396): the **CCF-011 empty-callable batch closed the whole
+family** — design ticket #1866 (`docs/EmptyCallableBoundaryPlan.md`) plus four
+implementations, #1867 (SR-AUD-065 `Lazy<T>` + SR-AUD-099
+`AggregateException::Handle`, +14), #1868 (SR-AUD-058 `Progress<T>` +
+SR-AUD-121 `EventHandler`, +13), #1869 (SR-AUD-052 `Array`, +13) and #1870
+(SR-AUD-134 `Linq`, +8), total +48. Post-audit tally: **49 remediated, 315
+confirmed, of 364** (six findings moved `confirmed → remediated`; one row is the
+split `043a remediated; 043b open`). **CCF-011 is CLOSED.** The batch before it
+left the floor at 14,396 / 43-remediated via the CCF-007 slice
+#1861 (SR-AUD-032 Pi-trig turn boundaries, +20) and #1864 (SR-AUD-033 parse
+leading/trailing whitespace, +8). The prior batch left it at 14,368 / 42-remediated via the CCF-005
 Decimal slice (#1855 SR-AUD-036 `MidpointRounding`, **closed CCF-008**, +9; #1856
 SR-AUD-038 negative zero, +6; #1857 SR-AUD-035 compatible portion, +4) and the two
 compatible CCF-007 fixes #1859 (SR-AUD-031 ILogB, +3) and #1860 (SR-AUD-030
@@ -17,8 +23,10 @@ IsPow2, +2). **New ticket this batch:** #1865 (SR-AUD-033 parse thousands +
 overflow-to-Infinity tail, `needs_user`, split from #1864 like #1857→#1858).
 Still `needs_user`: #1858 (Decimal comma + overflow taxonomy), #1862 (SR-AUD-029
 Round `noexcept`), #1863 (SR-AUD-033 format output), #1854 (SR-AUD-043b noexcept);
-#1773 stays blocked. See "Autonomous batch handoff, 2026-07-30 (CCF-007 Pi-trig +
-parse whitespace)" immediately below. The prior
+#1773 stays blocked, and **no ticket is `todo`** — every open row is
+`blocked`/`needs_user`. See "Autonomous batch handoff, 2026-07-30 (CCF-011
+empty-callable family, CLOSED)" immediately below for this batch's queue,
+baselines and next recommended family; the CCF-007 section follows it. The prior
 batch reached 14,344 via #1851/#1852/#1853/#1849; the one before that left the
 floor at 14,233 via the CCF-003 close
 (#1846/#1844/#1845/#1847, +31), tooling #1848, and CCF-005's first fix #1850 (+3);
@@ -182,6 +190,183 @@ per this repository's practice of preserving historical audit narrative.*
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
+
+## Autonomous batch handoff, 2026-07-30 (CCF-011 empty-callable family, CLOSED)
+
+Branch `feature/remediation-batch-empty-callable` (off
+`feature/remediation-batch-floating-fidelity`). Six commits: one family plan,
+four implementations, plus this handoff. **Nothing pushed, merged, rebased, or
+tagged.** CNA and mobile-eggbert were not inspected or modified; #1773 remains
+blocked. Maximum aggregate compilation parallelism was **3 jobs** throughout
+(`cmake --build … --parallel 3`, single-process probe compiles);
+`check_selective_components.sh` was run with `TMPDIR="$PWD/build-tmp"`
+(absolute) to honour the no-`/tmp`-builds rule.
+
+### Why this family
+
+CCF-007 had no remaining *compatible* ready work (its four open members are all
+approval-gated), and `plan.sqlite3` held **no `todo` ticket at all** — every open
+row was `blocked`/`needs_user`. **CCF-011 — "empty `std::function` values cross
+public boundaries without an explicit policy"** was selected from the audit
+index: six `confirmed` findings, one module, a single shared root cause, a
+public-input-crash character (an uncatchable `std::bad_function_call` escaping a
+.NET-shaped API), and a repair that reaches no approval boundary.
+
+### Completed (committed)
+
+| Ticket | Finding | Fix | Sanitizer | Tests |
+|---|---|---|---|---|
+| **#1866** | — (design) | `docs/EmptyCallableBoundaryPlan.md`, 18 sections, to the `FloatingValueFidelityPlan.md`/`Base64FamilyPlan.md` bar. Every current-behaviour claim measured by `build-probe/1866_empty_callable_probe.cpp` (60 cases); every .NET claim cites a file/line under `/rv/tmp/runtime`. No production change, no finding remediated. | n/a | 0 |
+| **#1867** | SR-AUD-065, SR-AUD-099 → **remediated** | `Lazy<T>`'s three factory constructors call a new private `requireFactory()` and throw `ArgumentNullException("valueFactory")` (`Lazy.cs:301`); the four non-factory constructors are unaffected. `AggregateException::Handle` throws `ArgumentNullException("predicate")` before the loop. | ASan+UBSan+LSan clean, probe instrumented | +14 |
+| **#1868** | SR-AUD-058, SR-AUD-121 → **remediated** | `Progress<T>::addProgressChangedHandler` and `EventHandler::Add`/`operator+=` treat an empty handler as a **no-op** (nothing stored, replay hook not invoked, `Size()`/`Empty()` unchanged), matching C# `event += null`; `OnReport`/`Raise` skip untruthy handlers. `Add` still consumes a token so a later `Remove` cannot unsubscribe the next real handler. | ASan+UBSan+LSan clean incl. re-entrant add/remove/`Clear` inside `Raise` | +13 |
+| **#1869** | SR-AUD-052 → **remediated** | All 17 `Array` delegate overloads call one shared private `requireCallable()` before any element is examined, throwing `ArgumentNullException` with .NET's parameter name. The 12 `Predicate<T>` parameters renamed `predicate` → `match`. Validation order reproduces .NET's `FindIndex` (range-first) vs `FindLastIndex` (callable-first) asymmetry. | ASan+UBSan+LSan clean | +13 |
+| **#1870** | SR-AUD-134 → **remediated**, **closes CCF-011** | All 11 `Linq` callback overloads call `detail::requireCallable` before the sequence, so `First(empty,{})` reports the argument error instead of `InvalidOperationException` and `OrderBy` rejects below the two-element sort threshold. | ASan+UBSan+LSan clean | +8 |
+
+**Batch total +48** over the 14,396 floor → **14,444 across 37 executables**, verified through the full component gate.
+
+### Premises corrected (measured 2026-07-30, historical text preserved)
+
+1. **The silent region is size-dependent, not emptiness-dependent.**
+   `Array::Sort`, `Array::BinarySearch`, `Linq::OrderBy` and
+   `Linq::OrderByDescending` also returned an ordinary result for a
+   **one-element** input, because `std::sort`/`std::stable_sort` never invoke
+   the comparator below two elements. SR-AUD-052 and SR-AUD-134 both state only
+   the empty-input case.
+2. **`Linq::First(empty, {})` masked the argument error** with
+   `InvalidOperationException`. .NET validates `predicate` first
+   (`First.cs:110`), so the repair is a validation-*order* change there.
+3. **`AggregateException::Handle` was silent with no inner exception**
+   (`aggregate.handle.noinner=no-throw`); SR-AUD-099 records only the
+   `bad_function_call` path.
+4. **`EventHandler`'s failure happened inside `Add`, not at `Raise`**, whenever a
+   replay hook was set — which is what makes the empty check's position *before*
+   the hook binding rather than incidental.
+5. **`Array::FindLastIndex` validated its range before the callable**, where .NET
+   validates the callable first (`Array.cs:1671-1706`). Inseparable from adding
+   the check at all, so folded into #1869; **no new SR-AUD identifier** (numbering
+   stays frozen at 364).
+
+### Deliberate observable changes (recorded, not approval-gated)
+
+- **B1** — a call that previously returned an ordinary result for an empty (or
+  one-element) input with an empty callable now throws. .NET throws for the
+  identical call and the call was already wrong. `Array::TrueForAll(empty,{})`
+  and `Linq::All(empty,{})` lose their vacuous `true`; a real predicate still
+  gets it.
+- **B2** — `EventHandler::Size()` no longer counts an empty subscription.
+
+Neither reaches an approval trigger: no signature, `noexcept`, vtable, layout,
+grammar, formatted output or numerical behaviour changed. The `Array` parameter
+renames are source-compatible and ABI-neutral (a C++ parameter name is not part
+of the interface). Full matrix in `docs/EmptyCallableBoundaryPlan.md` §9/§10.
+
+### Baselines (verified this batch)
+
+- Full component gate: **14,444 tests across 37 executables**, no failures.
+- Audit: **49 remediated, 315 confirmed, of 364** (SR-AUD-052/058/065/099/121/134
+  → remediated; one row is the split `043a remediated; 043b open`).
+- **CCF-011 is CLOSED** — its closure paragraph is in
+  `audit/AUDIT_CROSS_CUTTING_FINDINGS.md`.
+- Module graph: **41 physical modules, 91 dependency edges** (unchanged).
+- Negative fixtures: **9 fixtures, 66 sites**, every site rejected (unchanged).
+- Version seams: **2 seams, 18 specialisations** (unchanged).
+- Canonical Doxygen: **1,941 warnings** (ceiling 1,942).
+- `db_consistency_check.py`, `validate_module_boundaries.py` (+ its unit test),
+  `generate_component_catalog.py --check`, both seam checks, both
+  negative-fixture checks, `git diff --check`,
+  `check_selective_components.sh`, and `local_ci_check.sh build` all pass.
+
+### Sanitizer freshness
+
+All six headers are header-only or inline, so the probe
+`build-probe/1866_empty_callable_probe.cpp` was compiled **with**
+`-fsanitize=address,undefined` at each step — that recompiles the changed inline
+code with instrumentation, so there is **no stale-archive risk** and `build-asan`
+needed no rebuild (it was not touched this batch). Runs are
+`build-probe/1867_postfix_asan.log`, `1868_postfix_asan.log`,
+`1869_postfix_asan.log`, `1870_postfix_asan.log`; all exit 0 with zero
+AddressSanitizer, UndefinedBehaviorSanitizer and LeakSanitizer reports, including
+a 2,000-iteration leak-stress loop over heap-owning callables and handlers that
+add/remove/`Clear()` their own list from inside `Raise`/`Report`. TSan is
+recorded as **not applicable** (no shared mutable state, atomic, cache or lock is
+touched) rather than skipped silently — see `EmptyCallableBoundaryPlan.md` §13.
+
+**Final probe verdict:** across all 60 cases **no `std::bad_function_call`
+remains anywhere in the family**; the only eight `no-throw` outcomes left are the
+deliberate event-subscription no-ops.
+
+### Build-directory sizes (start → end of batch)
+
+| Dir | Start | End |
+|---|---|---|
+| `build` | 722M | 723M (incremental, ccache) |
+| `build-asan` | 3.5G | 3.5G (untouched this batch) |
+| `build-probe` | 30M | 31M (probe source + 4 logs retained; binaries removed) |
+| `build-consumer` | 12K | 12K |
+| `build-tmp` | 8.1M | 8.1M (selective-check mktemp matrix cleaned by the script) |
+| `build-modular` | 777M | 777M (untouched) |
+
+No new build directories; `build` reused incrementally with `ccache`.
+
+### Approval-gated, unchanged (do NOT start without explicit per-action approval)
+
+- **#1862** SR-AUD-029 (CCF7-4) — `Round(x,digits)` needs `noexcept` dropped (A)
+  or clamp (B). Decision record `FloatingValueFidelityPlan.md` §19.1.
+- **#1863** SR-AUD-033 format (CCF7-5) — observable `ToString` text change. §19.2.
+- **#1865** SR-AUD-033 parse tail (CCF7-6) — thousands + overflow→Infinity. §19.4.
+- **#1858** SR-AUD-035 tail — Decimal comma + overflow taxonomy. §19.4.
+- **#1854** SR-AUD-043b — `ReadOnlyMemory`/`HashCode::AddBytes` drop-`noexcept`.
+  Sibling of #1862; decide together. §19.3.
+- **#1773** — CNA/mobile-eggbert migration; blocked until they upgrade.
+
+All five decision records in `docs/FloatingValueFidelityPlan.md` §19 are
+unchanged by this batch.
+
+### Recommended next work
+
+`plan.sqlite3` again holds **no `todo` ticket**: every open row is
+`blocked`/`needs_user`. The next autonomous batch should either (a) obtain the
+§19 decisions and land the gated set, or (b) start another coherent compatible
+family from the audit index, building the family plan first. Reading the
+cross-cutting index, the strongest remaining compatible candidates are:
+
+1. **CCF-014** (SR-AUD-075, SR-AUD-085) — `SequenceReader::TryRead`/`TryPeek`
+   and every `Utf8Parser::TryParse` leave the caller's `out` value untouched on
+   a false return, where .NET assigns the default. Two findings, one module
+   (`buffers`), silent-corruption character, no signature change expected.
+   **Smallest coherent next family.**
+2. **CCF-016** (SR-AUD-093–096, SR-AUD-100) — eleven exception classes inherit
+   the base HResult instead of assigning their own. Five findings, mechanical,
+   very low risk; each is a one-line constructor change plus assertions.
+3. **CCF-002** (SR-AUD-006/007/009) — `DateTime`/`DateTimeOffset`/`TimeOnly`
+   component and parse validation. Larger; check first whether the parse-grammar
+   half is approval-gated (accepted textual grammar) before starting.
+4. **CCF-019 remainder** (SR-AUD-327 JsonNode, SR-AUD-333 XML LINQ `XObject`) —
+   genuine ASan-confirmed use-after-free, the highest-severity remaining family,
+   but each needs its own compatibility review and is likely **design-first**
+   with an approval-gated implementation, exactly as `LinkedListNode` was.
+
+### Known limitations / notes
+
+- `CLAUDE.md`'s non-negotiable rule 2 still cites the historical **14,113**
+  figure measured by #1832. That sentence has not been refreshed by any recent
+  batch; NEXT.md is the live baseline, and each ticket's own section states the
+  count it measured. Left unchanged deliberately rather than churning a rules
+  document.
+- The per-file **test-side** audit reports (`LinqTests.cpp.audit.md`,
+  `EventHandlerTests.cpp.audit.md`, `ProgressTests.cpp.audit.md`) were **not**
+  given remediation notes. No previous ticket has ever added one to a test-side
+  report; the notes live on the owning header report, per the established
+  convention.
+- **Concurrency observation (not acted on):** a separate, unrelated session was
+  compiling in the sibling `cnaaudit` checkout during this batch. That is outside
+  this repository's boundary; it was neither inspected nor modified, and this
+  batch's own compilation never exceeded 3 parallel jobs.
+- `SR-AUD-046` (raw `<`/`==` floating comparison in `Array`/`Linq`, CCF-010) is
+  in the same two files this batch edited and is deliberately untouched.
+  SR-AUD-044/051/053 in `Array.hpp.audit.md` likewise remain `confirmed`.
+
+---
 
 ## Autonomous batch handoff, 2026-07-30 (CCF-007 Pi-trig + parse whitespace)
 
