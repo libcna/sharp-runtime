@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <stdexcept>
+#include <string>
 
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -278,4 +279,118 @@ TEST(DateTimeOffsetTests2, GetHashCode_EqualForSameUtcInstant) {
     DateTimeOffset a(2020, 1, 1, 12, 0, 0, TimeSpan::FromHours(2));
     DateTimeOffset b(2020, 1, 1, 10, 0, 0, TimeSpan::Zero);
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+// ---------------------------------------------------------------------------
+// CCF-002 classes A and B (SR-AUD-006, ticket #1877).
+//
+// Class A: both component constructors delegated to DateTime's, so they shared
+// its missing time-component validation. Class B: they also validated the offset
+// LAST, because the clock DateTime was produced in a mem-initialiser. Real .NET
+// evaluates ValidateOffset(offset) FIRST (DateTimeOffset.cs), so the reference
+// order is offset-shape -> offset-range -> date -> time -> millisecond ->
+// UTC-range.
+// ---------------------------------------------------------------------------
+
+TEST(DateTimeOffsetTests2, Ccf002_InvalidTimeComponentsAreRejected) {
+    const TimeSpan utc = TimeSpan::Zero;
+    EXPECT_THROW(DateTimeOffset(2024, 1, 1, 24, 0, 0, utc),       ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTimeOffset(2024, 1, 1, 0, 60, 0, utc),       ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTimeOffset(2024, 1, 1, 0, 0, 60, utc),       ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTimeOffset(2024, 1, 1, 0, 0, 0, 1000, utc),  ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTimeOffset(2024, 1, 1, -1, 0, 0, utc),       ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTimeOffset(2024, 1, 1, 0, 0, 0, -1, utc),    ArgumentOutOfRangeException);
+    // Previously succeeded as 2024-01-02 01:00 +02:00.
+    EXPECT_THROW(DateTimeOffset(2024, 1, 1, 25, 0, 0, TimeSpan::FromHours(2)),
+                 ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeOffsetTests2, Ccf002_ExtremeIntegerHourIsRejectedInsteadOfOverflowing) {
+    EXPECT_THROW(DateTimeOffset(2024, 1, 1, 2000000000, 0, 0, TimeSpan::Zero),
+                 ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTimeOffset(2024, 1, 1, SharpRuntime::INTCS_MIN, 0, 0, 0, TimeSpan::Zero),
+                 ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeOffsetTests2, Ccf002_OffsetIsValidatedBeforeTheClockDateTime) {
+    // Both of these threw the offset error before the repair too -- but only because
+    // hour 24 was silently accepted. Validating the offset first is what keeps them
+    // reporting the offset rather than the hour, and it is what the reference does.
+    try {
+        (void)DateTimeOffset(2024, 1, 1, 24, 0, 0, TimeSpan::FromHours(15));
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "offset");
+    }
+
+    try {
+        (void)DateTimeOffset(2024, 1, 1, 24, 0, 0, TimeSpan(90LL));
+        FAIL() << "expected ArgumentException";
+    } catch (const ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "offset");
+    }
+
+    // The one case whose reported parameter moved: 'year' before, 'offset' after.
+    // ArgumentOutOfRangeException in both, and 'offset' is what .NET reports.
+    try {
+        (void)DateTimeOffset(2024, 13, 1, 0, 0, 0, TimeSpan::FromHours(15));
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "offset");
+    }
+}
+
+TEST(DateTimeOffsetTests2, Ccf002_WithAValidOffsetTheDateStillWinsOverTheTime) {
+    try {
+        (void)DateTimeOffset(2024, 13, 1, 24, 0, 0, TimeSpan::Zero);
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "year");
+    }
+}
+
+TEST(DateTimeOffsetTests2, Ccf002_UtcRangeGuardStillRunsLast) {
+    // Every component and the offset are individually valid; only the UTC instant
+    // the offset produces is unrepresentable.
+    try {
+        (void)DateTimeOffset(9999, 12, 31, 23, 59, 59, 999, TimeSpan::FromHours(-14));
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "offset");
+        EXPECT_NE(e.getMessageProperty().find("UTC time represented"), std::string::npos);
+    }
+}
+
+TEST(DateTimeOffsetTests2, Ccf002_TickConstructorValidatesTheOffsetFirst) {
+    try {
+        (void)DateTimeOffset(-1LL, TimeSpan::FromHours(15));
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "offset");
+    }
+    // A bad tick count with a good offset still reports 'ticks'.
+    try {
+        (void)DateTimeOffset(-1LL, TimeSpan::Zero);
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "ticks");
+    }
+}
+
+TEST(DateTimeOffsetTests2, Ccf002_ValidComponentsAreUnchanged) {
+    const DateTimeOffset v(2024, 6, 15, 10, 30, 0, 999, TimeSpan::FromHours(2));
+    EXPECT_EQ(v.getTicksProperty(), 638540442009990000LL);
+    EXPECT_EQ(v.getTotalOffsetMinutesProperty(), 120);
+    EXPECT_NO_THROW(DateTimeOffset(1, 1, 1, 0, 0, 0, 0, TimeSpan::Zero));
+    EXPECT_NO_THROW(DateTimeOffset(9999, 12, 31, 23, 59, 59, 999, TimeSpan::Zero));
+    EXPECT_NO_THROW(DateTimeOffset(2024, 2, 29, 23, 59, 59, 999, TimeSpan::FromHours(14)));
+    EXPECT_NO_THROW(DateTimeOffset(2024, 2, 29, 23, 59, 59, 999, TimeSpan::FromHours(-14)));
+}
+
+TEST(DateTimeOffsetTests2, Ccf002_ParserRejectsOutOfRangeClockComponents) {
+    DateTimeOffset out;
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T25:00:00+02:00", out));
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:60:00+02:00", out));
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T23:59:59+02:00", out));
+    EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 120);
 }

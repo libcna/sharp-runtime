@@ -5,7 +5,10 @@
 
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
+#include "System/FormatException.hpp"
 #include "System/TimeSpan.hpp"
+
+#include <string>
 
 using System::DateTime;
 using System::TimeSpan;
@@ -636,4 +639,206 @@ TEST(DateTimeTests, OperatorMinus_DateTime) {
     DateTime b(kUnixEpochTicks);
     TimeSpan diff = a - b;
     EXPECT_EQ(diff.getTicksProperty(), kTicksPerDay);
+}
+
+// ---------------------------------------------------------------------------
+// CCF-002 class A (SR-AUD-006, ticket #1877) -- component-constructor range
+// validation.
+//
+// Before this repair `dateToTicks` validated year/month/day and then multiplied
+// hour/minute/second/millisecond straight into the tick sum. Every case below
+// SUCCEEDED with a normalized (or out-of-invariant, or undefined-behaviour)
+// value; each one is now rejected. Exception identity is asserted verbatim
+// because it is copied from real .NET (ThrowHelper.cs:234-236 and
+// DateTime.cs:207) and is byte-identical to TimeOnly's, which already had it.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+    // Returns the message/paramName pair a caller can actually observe, so an
+    // assertion cannot pass merely because *some* ArgumentOutOfRangeException
+    // escaped.
+    struct Aoore {
+        std::string paramName;
+        std::string message;
+        long long   hresult = 0;
+        bool        thrown  = false;
+    };
+
+    template <typename Fn>
+    Aoore captureAoore(Fn&& fn) {
+        Aoore captured;
+        try {
+            fn();
+        } catch (const System::ArgumentOutOfRangeException& e) {
+            captured.paramName = e.getParamNameProperty();
+            captured.message   = e.getMessageProperty();
+            captured.hresult   = e.getHResultProperty();
+            captured.thrown    = true;
+        }
+        return captured;
+    }
+
+    constexpr const char* kBadHms =
+        "Hour, Minute, and Second parameters describe an un-representable DateTime.";
+    constexpr const char* kBadMs =
+        "Valid values are between 0 and 999, inclusive. (Parameter 'millisecond')";
+
+} // namespace
+
+TEST(DateTimeTests, Ccf002_HourAboveMaximumIsRejected) {
+    EXPECT_THROW(DateTime(2024, 1, 1, 24, 0, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(2024, 1, 1, 24, 0, 0, 0), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, Ccf002_MinuteAboveMaximumIsRejected) {
+    EXPECT_THROW(DateTime(2024, 1, 1, 0, 60, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(2024, 1, 1, 0, 60, 0, 0), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, Ccf002_SecondAboveMaximumIsRejected) {
+    EXPECT_THROW(DateTime(2024, 1, 1, 0, 0, 60), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(2024, 1, 1, 0, 0, 60, 0), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, Ccf002_MillisecondAboveMaximumIsRejected) {
+    EXPECT_THROW(DateTime(2024, 1, 1, 0, 0, 0, 1000), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, Ccf002_NegativeTimeComponentsAreRejected) {
+    // Previously these produced a value in the PREVIOUS YEAR: DateTime(2024,1,1,-1,0,0)
+    // returned 2023-12-31 23:00:00.
+    EXPECT_THROW(DateTime(2024, 1, 1, -1, 0, 0),    System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(2024, 1, 1, 0, -1, 0),    System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(2024, 1, 1, 0, 0, -1),    System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(2024, 1, 1, 0, 0, 0, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, Ccf002_ExtremeIntegerHourIsRejectedInsteadOfOverflowing) {
+    // `hour * TicksPerHour` overflowed int64 for |hour| > 256204778 -- real UB,
+    // confirmed by UBSan at DateTime.cpp's multiplication, which then returned a
+    // DateTime with a NEGATIVE tick count.
+    EXPECT_THROW(DateTime(2024, 1, 1,  2000000000, 0, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(2024, 1, 1, -2000000000, 0, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(2024, 1, 1,  256204779,  0, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(2024, 1, 1, SharpRuntime::INTCS_MAX,   0, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(2024, 1, 1, SharpRuntime::INTCS_MIN,   0, 0), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, Ccf002_ExtremeIntegerMinuteSecondMillisecondAreRejected) {
+    EXPECT_THROW(DateTime(2024, 1, 1, 0, SharpRuntime::INTCS_MAX, 0),    System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(2024, 1, 1, 0, SharpRuntime::INTCS_MIN, 0),    System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(2024, 1, 1, 0, 0, SharpRuntime::INTCS_MAX),    System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(2024, 1, 1, 0, 0, 0, SharpRuntime::INTCS_MAX), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(2024, 1, 1, 0, 0, 0, SharpRuntime::INTCS_MIN), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, Ccf002_UpperTickInvariantCannotBeBreached) {
+    // DateTime(9999,12,31,24,0,0) used to store MaxTicks + 1 = 3155378976000000000,
+    // bypassing DateTime(longcs)'s own range check because the component
+    // constructors initialise ticks_ directly.
+    EXPECT_THROW(DateTime(9999, 12, 31, 24, 0, 0),          System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(9999, 12, 31, 23, 59, 59, 1000),  System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, Ccf002_LowerTickInvariantCannotBeBreached) {
+    EXPECT_THROW(DateTime(1, 1, 1, -1, 0, 0),   System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime(1, 1, 1, 0, 0, 0, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, Ccf002_MinimumAndMaximumValidValuesStillConstruct) {
+    EXPECT_EQ(DateTime(1, 1, 1, 0, 0, 0, 0).getTicksProperty(), 0LL);
+    EXPECT_EQ(DateTime(9999, 12, 31, 23, 59, 59, 999).getTicksProperty(),
+              3155378975999990000LL);
+    // Every constructed value stays inside the documented invariant.
+    EXPECT_LE(DateTime(9999, 12, 31, 23, 59, 59, 999).getTicksProperty(), DateTime::MaxTicks);
+    EXPECT_GE(DateTime(1, 1, 1, 0, 0, 0, 0).getTicksProperty(), 0LL);
+}
+
+TEST(DateTimeTests, Ccf002_EndOfDayAndMidnightBoundariesStillConstruct) {
+    EXPECT_EQ(DateTime(2024, 6, 15, 0, 0, 0, 0).getTicksProperty() % kTicksPerDay, 0LL);
+    EXPECT_EQ(DateTime(2024, 6, 15, 23, 59, 59, 999).getTicksProperty() % kTicksPerDay,
+              23LL * kTicksPerHour + 59LL * kTicksPerMinute + 59LL * kTicksPerSecond
+                  + 999LL * 10000LL);
+}
+
+TEST(DateTimeTests, Ccf002_LeapDayAndMonthLengthsUnchanged) {
+    EXPECT_NO_THROW(DateTime(2024, 2, 29, 23, 59, 59, 999)); // leap year
+    EXPECT_THROW(DateTime(2023, 2, 29), System::ArgumentOutOfRangeException); // non-leap Feb 29
+    EXPECT_THROW(DateTime(2024, 4, 31), System::ArgumentOutOfRangeException); // 30-day month
+    EXPECT_NO_THROW(DateTime(2024, 1, 31, 23, 59, 59, 999));
+    EXPECT_NO_THROW(DateTime(1900, 2, 28)); // century non-leap
+    EXPECT_THROW(DateTime(1900, 2, 29), System::ArgumentOutOfRangeException);
+    EXPECT_NO_THROW(DateTime(2000, 2, 29)); // 400-year leap
+}
+
+TEST(DateTimeTests, Ccf002_ValidationOrderIsDateThenTimeThenMillisecond) {
+    // .NET: DateToTicks runs before TimeToTicks, which runs before the millisecond
+    // check. A caller passing several invalid components must see the FIRST one.
+    const Aoore dateWins = captureAoore([] { (void)DateTime(2024, 13, 1, 24, 0, 0); });
+    ASSERT_TRUE(dateWins.thrown);
+    EXPECT_EQ(dateWins.paramName, "year");
+
+    const Aoore yearWins = captureAoore([] { (void)DateTime(0, 1, 1, 24, 0, 0); });
+    ASSERT_TRUE(yearWins.thrown);
+    EXPECT_EQ(yearWins.paramName, "year");
+
+    const Aoore timeWins = captureAoore([] { (void)DateTime(2024, 1, 1, 24, 60, 60, 1000); });
+    ASSERT_TRUE(timeWins.thrown);
+    EXPECT_EQ(timeWins.paramName, "");
+    EXPECT_EQ(timeWins.message, kBadHms);
+}
+
+TEST(DateTimeTests, Ccf002_ExceptionIdentityMatchesTheReference) {
+    const Aoore hour = captureAoore([] { (void)DateTime(2024, 1, 1, 24, 0, 0); });
+    ASSERT_TRUE(hour.thrown);
+    EXPECT_EQ(hour.paramName, "");
+    EXPECT_EQ(hour.message, kBadHms);
+    EXPECT_EQ(hour.hresult, static_cast<long long>(static_cast<SharpRuntime::intcs>(0x80131502)));
+
+    const Aoore ms = captureAoore([] { (void)DateTime(2024, 1, 1, 0, 0, 0, 1000); });
+    ASSERT_TRUE(ms.thrown);
+    EXPECT_EQ(ms.paramName, "millisecond");
+    EXPECT_EQ(ms.message, kBadMs);
+    EXPECT_EQ(ms.hresult, static_cast<long long>(static_cast<SharpRuntime::intcs>(0x80131502)));
+}
+
+TEST(DateTimeTests, Ccf002_SixAndSevenArgumentOverloadsRejectIdentically) {
+    for (int hour : {24, -1, 100000}) {
+        EXPECT_THROW(DateTime(2024, 1, 1, hour, 0, 0),    System::ArgumentOutOfRangeException);
+        EXPECT_THROW(DateTime(2024, 1, 1, hour, 0, 0, 0), System::ArgumentOutOfRangeException);
+    }
+}
+
+TEST(DateTimeTests, Ccf002_ThrowingConstructionPublishesNoState) {
+    DateTime sentinel(kUnixEpochTicks);
+    EXPECT_THROW(sentinel = DateTime(2024, 1, 1, 24, 0, 0), System::ArgumentOutOfRangeException);
+    EXPECT_EQ(sentinel.getTicksProperty(), kUnixEpochTicks);
+}
+
+// The parse consequence of the constructor repair. This is NOT a grammar change:
+// P1 already funnelled every parsed component through the seven-argument
+// constructor inside try/catch, so an out-of-range component value now reports
+// failure instead of a normalized instant. "2024-06-15 2000000000:00:00"
+// previously returned TRUE with a negative tick count after signed overflow.
+TEST(DateTimeTests, Ccf002_ParserRejectsOutOfRangeComponentValues) {
+    DateTime out;
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 25:00:00", out));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 24:00:00", out));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 10:99:00", out));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 10:20:99", out));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 2000000000:00:00", out));
+    EXPECT_THROW((void)DateTime::Parse("2024-06-15 25:00:00"), System::FormatException);
+}
+
+TEST(DateTimeTests, Ccf002_ParserStillAcceptsEveryValidShape) {
+    DateTime out;
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15", out));
+    EXPECT_EQ(out.getTicksProperty(), DateTime(2024, 6, 15).getTicksProperty());
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15 23:59:59", out));
+    EXPECT_EQ(out.getTicksProperty(), DateTime(2024, 6, 15, 23, 59, 59).getTicksProperty());
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15T10:20:30.123", out));
+    EXPECT_EQ(out.getTicksProperty(), DateTime(2024, 6, 15, 10, 20, 30, 123).getTicksProperty());
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15T00:00:00", out));
+    EXPECT_EQ(out.getTicksProperty(), DateTime(2024, 6, 15).getTicksProperty());
 }

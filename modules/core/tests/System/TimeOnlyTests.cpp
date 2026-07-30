@@ -425,3 +425,74 @@ TEST(TimeOnlyTests, TryParse_WithMs_True) {
     EXPECT_TRUE(TimeOnly::TryParse("01:02:03.456", t));
     EXPECT_EQ(t.getMillisecondProperty(), 456);
 }
+
+// ---------------------------------------------------------------------------
+// CCF-002 (ticket #1877). TimeOnly is the family's counter-example: its
+// constructors ALREADY carry exactly the rule DateTime was missing, with .NET's
+// verbatim message and paramName. These cases pin that, because DateTime's
+// repair now copies these strings and a silent drift would make the two types
+// disagree about the same error.
+//
+// Its parser's grammar defects (SR-AUD-009) are deliberately NOT repaired here;
+// the currently-accepted spellings are pinned as *current* behaviour so ticket
+// #1879 cannot change them without a failing test making it visible.
+// ---------------------------------------------------------------------------
+
+TEST(TimeOnlyTests, Ccf002_ConstructorExceptionIdentityIsTheReferenceText) {
+    try {
+        (void)TimeOnly(24, 0, 0);
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "");
+        EXPECT_EQ(e.getMessageProperty(),
+                  "Hour, Minute, and Second parameters describe an un-representable DateTime.");
+    }
+
+    try {
+        (void)TimeOnly(0, 0, 0, 1000);
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "millisecond");
+        EXPECT_EQ(e.getMessageProperty(),
+                  "Valid values are between 0 and 999, inclusive. (Parameter 'millisecond')");
+    }
+
+    EXPECT_THROW(TimeOnly(0, 60, 0),  ArgumentOutOfRangeException);
+    EXPECT_THROW(TimeOnly(0, 0, 60),  ArgumentOutOfRangeException);
+    EXPECT_THROW(TimeOnly(-1, 0, 0),  ArgumentOutOfRangeException);
+    EXPECT_THROW(TimeOnly(0, -1, 0),  ArgumentOutOfRangeException);
+    EXPECT_THROW(TimeOnly(0, 0, -1),  ArgumentOutOfRangeException);
+    EXPECT_THROW(TimeOnly(0, 0, 0, -1), ArgumentOutOfRangeException);
+}
+
+TEST(TimeOnlyTests, Ccf002_ParserAlreadyRejectsOutOfRangeComponents) {
+    TimeOnly t(7, 7, 7, 7);
+    EXPECT_FALSE(TimeOnly::TryParse("24:00:00", t));
+    EXPECT_FALSE(TimeOnly::TryParse("10:60:00", t));
+    EXPECT_FALSE(TimeOnly::TryParse("10:20:60", t));
+    EXPECT_FALSE(TimeOnly::TryParse("-1:00:00", t));
+    EXPECT_FALSE(TimeOnly::TryParse("10:20", t));
+    EXPECT_FALSE(TimeOnly::TryParse("", t));
+    EXPECT_FALSE(TimeOnly::TryParse("99999999999999:00:00", t));
+}
+
+TEST(TimeOnlyTests, Ccf002_FractionalScalingIsCorrectAndPinned) {
+    TimeOnly t;
+    ASSERT_TRUE(TimeOnly::TryParse("10:20:30.1", t));
+    EXPECT_EQ(t.getMillisecondProperty(), 100);
+    ASSERT_TRUE(TimeOnly::TryParse("10:20:30.12", t));
+    EXPECT_EQ(t.getMillisecondProperty(), 120);
+    ASSERT_TRUE(TimeOnly::TryParse("10:20:30.123", t));
+    EXPECT_EQ(t.getMillisecondProperty(), 123);
+}
+
+TEST(TimeOnlyTests, Ccf002_CurrentlyAcceptedMalformedGrammarIsPinnedUnchanged) {
+    // SR-AUD-009 is NOT repaired by ticket #1877. Every input here is accepted
+    // today and must stay accepted until ticket #1879 obtains explicit approval
+    // for the accepted-grammar change; then these expectations flip together.
+    TimeOnly t;
+    EXPECT_TRUE(TimeOnly::TryParse("10:20:30.abc", t));
+    EXPECT_TRUE(TimeOnly::TryParse("10:20:30junk", t));
+    EXPECT_TRUE(TimeOnly::TryParse("10:20:30.", t));
+    EXPECT_TRUE(TimeOnly::TryParse("10:20:30.1234", t));
+}

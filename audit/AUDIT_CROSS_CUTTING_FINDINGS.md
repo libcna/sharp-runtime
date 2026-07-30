@@ -36,6 +36,100 @@ relevant negative assertions.  See SR-AUD-006, SR-AUD-007, SR-AUD-009, and:
 - `modules/core/src/System/TimeOnly.cpp.audit.md`;
 - `modules/core/tests/System/TimeOnlyTests.cpp.audit.md`.
 
+**PARTIALLY REMEDIATED (tickets #1876/#1877/#1878, 2026-07-30). Not closed.**
+The family plan is `docs/DateTimeValidationBoundaryPlan.md` (19 sections, ticket
+#1876), built on 84 measured probe cases plus five one-shape-per-process UBSan
+runs. **SR-AUD-006 is `remediated`; SR-AUD-007 is split — `007a remediated`
+(offset minutes), `007b open` (grammar) — and SR-AUD-009 stays `confirmed`.**
+The plan draws its line exactly where #1857 -> #1858 and #1864 -> #1865 drew
+theirs: a change to the accepted **range of component values** is compatible; a
+change to the accepted **textual grammar** is approval-gated.
+
+**Membership is larger than the record above states, and one member is outside
+it.** The constructor half is **five** public constructors (three `DateTime`,
+two `DateTimeOffset`) reached through **six** wrappers that add no validation of
+their own, including `Globalization::Calendar::ToDateTime` — which .NET also
+leaves unvalidated, so it inherits the repair with no `modules/globalization`
+edit. The parser half is **eight** entries across four types, because
+**SR-AUD-061** (`DateOnly::TryParse` accepts trailing text) is the same
+`std::sscanf`-prefix omission in the same module and is planned with
+SR-AUD-007/009 even though this record does not list it.
+
+**The record understates the family's severity: it contains reachable undefined
+behaviour.** `hour * TicksPerHour` in `DateTime::dateToTicks` is
+`(long long)hour * 36000000000`, computed before any check of `hour`, and
+overflows `int64` for `|hour| > 256204778`. UBSan confirmed it from a plain
+constructor call — which then **returned** a `DateTime` with a negative tick
+count — and, more seriously, from a public string parse:
+`DateTime::TryParse("2024-06-15 2000000000:00:00", out)` returned **`true`** with
+`ticks = -1148436230838206464`. `TryParse`'s `catch (...)` cannot help, because
+undefined behaviour is not an exception. `hour` is the only operand that can
+overflow. The same constructors also published objects outside `DateTime`'s own
+documented `[0, MaxTicks]` invariant: `DateTime(9999,12,31,24,0,0)` stored
+`MaxTicks + 1` and `DateTime(1,1,1,-1,0,0)` stored a negative tick count, because
+the component constructors initialise `ticks_` directly and never reach
+`DateTime(longcs)`'s range check.
+
+**A second, independent cause the record does not name: validation order.**
+.NET evaluates `ValidateOffset(offset)` **before** constructing the clock
+`DateTime` in every `DateTimeOffset` component and tick constructor. This port
+validated it last — not by choice, but because the clock value was produced in a
+mem-initialiser, which cannot sequence a free-standing check before a member's
+construction. That had to be corrected in the *same* change as the component
+validation: with the hour check added and the order left alone,
+`DateTimeOffset(2024,1,1,24,0,0,+15h)` would have started reporting the hour
+instead of the offset. Reordering keeps it, and the whole-minutes case, exactly
+as they were.
+
+**The repair is one helper, not a sweep.** Every SR-AUD-006 symptom — silent
+normalisation, the invariant breach, the UB, the `DateTimeOffset` inheritance and
+the parser's acceptance of out-of-range component values — is a single omission
+in `DateTime::dateToTicks`, observed from a different entry point.
+`TimeOnly::validateHms`, 45 lines away, already carried the missing rule with
+.NET's verbatim message and `paramName`; the repair copies it. `TimeOnly` is a
+**counter-example inside the family**, not a member of its constructor half: its
+constructors and its parser's component checks were already correct, and are now
+pinned by tests.
+
+**Premises corrected (measured 2026-07-30, historical text preserved).**
+
+- **The "Required post-audit verification" paragraphs of all four reports are
+  wrong about .NET in one respect.** Each asks for an assertion that a failed
+  `TryParse` does **not** overwrite its output argument. .NET does the opposite:
+  `DateTimeParse.cs:2470` assigns `DateTime.MinValue` before returning `false`.
+  The port's preservation is a divergence, and that assertion would have pinned it
+  as the contract. Recorded, pinned as *current* behaviour only, and carried to
+  **inactive ticket #1880** with no `SR-AUD-*` identifier issued.
+- **The port's year/month/day exception identity already deviates from .NET and
+  is not part of SR-AUD-006.** .NET throws `paramName = null` with
+  `Year, Month, and Day parameters describe an un-representable DateTime.`; the
+  port throws `paramName = "year"`/`"day"` with its own messages. Pre-existing,
+  observable, deliberately excluded.
+- **SR-AUD-007's `+02:75` reproduction understates its class.** `+02:60`,
+  `+02:99`, `-02:75` and `+02:-30` all reproduce; the last silently *subtracts*
+  thirty minutes from the hour field, yielding `+01:30`.
+- **SR-AUD-009's fractional scan is not generally wrong.** `"10:20:30.1"`
+  correctly yields `.100`. Only the residual-character and bare-dot halves are
+  defects, and both are grammar.
+- **`ISOWeek`, `TimeSpan` and `Calendar`'s own guards are not defective.**
+  Compared line-by-line against `ISOWeek.cs` (including its deliberate
+  `dayOfWeek == 7` acceptance) and `TimeSpan.cs`, which accepts `TimeSpan(25,0,0)`
+  by design.
+
+**Deliberately not broadened.** The `TimeZoneInfo` family
+(SR-AUD-224…SR-AUD-230), the abstract-`Calendar` shape finding (SR-AUD-281),
+`XmlConvert`'s duration grammar (SR-AUD-354) and the `Stopwatch`/`TimeProvider`
+elapsed-time arithmetic (SR-AUD-131) are all date/time code and **none** shares
+this cause. No `SR-AUD-*` identifier was issued for anything; the numbering stays
+frozen at 364.
+
+**What remains before CCF-002 can be closed:** ticket **#1879** (`needs_user`) —
+the accepted-grammar change covering SR-AUD-007b, SR-AUD-009 and SR-AUD-061,
+recorded with its exact before/after string table — and inactive ticket **#1880**
+(`TryParse` failure-output normalisation). Until both are answered this family is
+`PARTIALLY REMEDIATED`, and "three of five classes done" must not be read as
+closure.
+
 ## CCF-003 — numeric wrappers diverge from safe boundary and formatting behavior used by nearby numeric code
 
 The 128-bit wrappers correctly document their GCC/Clang dependency, but their

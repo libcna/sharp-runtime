@@ -43,8 +43,11 @@ namespace {
         return static_cast<longcs>(offset_secs) * TimeSpan::TicksPerSecond;
     }
 
-    // C++ counterpart of .NET DateTimeOffset's private ValidateOffset/ValidateDate helpers.
-    void validateOffsetAndRange(const DateTime& clockDateTime, const TimeSpan& offset) {
+    // C++ counterpart of .NET DateTimeOffset's private ValidateOffset helper
+    // (DateTimeOffset.cs): the offset must be a whole number of minutes and lie within
+    // +/-14 hours. Split out of the former combined validateOffsetAndRange by ticket #1877
+    // (CCF-002 class B) so it can run BEFORE the clock DateTime is built -- see clockOf().
+    void validateOffset(const TimeSpan& offset) {
         constexpr longcs maxOffsetMinutes = 14 * 60;
 
         if (offset.getTicksProperty() % TimeSpan::TicksPerMinute != 0) {
@@ -55,12 +58,49 @@ namespace {
         if (offsetMinutes < -maxOffsetMinutes || offsetMinutes > maxOffsetMinutes) {
             throw ArgumentOutOfRangeException("offset", "Offset must be within plus or minus 14 hours.");
         }
+    }
 
+    // C++ counterpart of .NET DateTimeOffset's private ValidateDate helper: the UTC instant
+    // the offset produces must itself be representable. Runs last, after both the offset and
+    // the clock DateTime are known good, exactly as in the reference.
+    void validateUtcRange(const DateTime& clockDateTime, const TimeSpan& offset) {
         const longcs utcTicks = clockDateTime.getTicksProperty() - offset.getTicksProperty();
         if (utcTicks < 0 || utcTicks > DateTime::MaxTicks) {
             throw ArgumentOutOfRangeException("offset",
                 "The UTC time represented when the offset is applied must be between year 0 and 10,000.");
         }
+    }
+
+    void validateOffsetAndRange(const DateTime& clockDateTime, const TimeSpan& offset) {
+        validateOffset(offset);
+        validateUtcRange(clockDateTime, offset);
+    }
+
+    // CCF-002 class B (ticket #1877). Real .NET builds a DateTimeOffset from components as
+    // `_offsetMinutes = ValidateOffset(offset); _dateTime = ValidateDate(new DateTime(...),
+    // offset);` and from ticks as `this(ValidateOffset(offset), ValidateDate(new
+    // DateTime(ticks), offset))` -- in both, C#'s left-to-right evaluation puts the OFFSET
+    // check first. This port validated it last, not by choice but because the clock DateTime
+    // was produced in a mem-initialiser, which cannot sequence a free-standing check before a
+    // member's construction. Folding the check into the factory that yields the member
+    // restores the reference order.
+    //
+    // Why this had to land WITH the DateTime component validation and not after it: before
+    // that change, DateTimeOffset(2024,1,1,24,0,0,+15h) and (...,90 ticks) reached the offset
+    // check only because hour 24 was silently accepted, and reported the offset error. Adding
+    // the hour check alone would have moved them to an hour error; reordering keeps both
+    // exactly as they were, and as .NET has them. The one case that does move is
+    // (2024,13,1,0,0,0,+15h): 'year' before, 'offset' after -- ArgumentOutOfRangeException in
+    // both, and 'offset' is what the reference reports.
+    DateTime clockOf(const TimeSpan& offset, intcs year, intcs month, intcs day,
+                     intcs hour, intcs minute, intcs second, intcs millisecond) {
+        validateOffset(offset);
+        return DateTime(year, month, day, hour, minute, second, millisecond);
+    }
+
+    DateTime clockOf(const TimeSpan& offset, longcs ticks) {
+        validateOffset(offset);
+        return DateTime(ticks);
     }
 
 } // namespace
@@ -79,17 +119,17 @@ namespace System {
         : DateTimeOffset(dateTime, TimeSpan::Zero) {}
 
     DateTimeOffset::DateTimeOffset(longcs ticks, const TimeSpan& offset)
-        : DateTimeOffset(DateTime(ticks), offset) {}
+        : DateTimeOffset(clockOf(offset, ticks), offset) {}
 
     DateTimeOffset::DateTimeOffset(intcs year, intcs month, intcs day,
                                    intcs hour, intcs minute, intcs second,
                                    const TimeSpan& offset)
-        : DateTimeOffset(DateTime(year, month, day, hour, minute, second), offset) {}
+        : DateTimeOffset(clockOf(offset, year, month, day, hour, minute, second, 0), offset) {}
 
     DateTimeOffset::DateTimeOffset(intcs year, intcs month, intcs day,
                                    intcs hour, intcs minute, intcs second, intcs millisecond,
                                    const TimeSpan& offset)
-        : DateTimeOffset(DateTime(year, month, day, hour, minute, second, millisecond), offset) {}
+        : DateTimeOffset(clockOf(offset, year, month, day, hour, minute, second, millisecond), offset) {}
 
     // Build these from self-contained temporaries (constexpr tick constants + freshly-constructed
     // TimeSpan/DateTime) rather than the cross-TU globals DateTime::MinValue / TimeSpan::Zero. Those

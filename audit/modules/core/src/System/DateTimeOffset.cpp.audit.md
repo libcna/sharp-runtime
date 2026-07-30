@@ -67,3 +67,75 @@ universal formats correctly convert to UTC before emitting their UTC marker.
 Construction and conversion are mostly well defended, but parser strictness
 and inherited DateTime validation leave confirmed contract failures
 (SR-AUD-006 and SR-AUD-007).
+
+---
+
+## SR-AUD-006 — REMEDIATED (ticket #1877, 2026-07-30, CCF-002)
+
+The original evidence above is retained unchanged. Both component constructors
+reproduced the inherited defect exactly as described
+(`build-probe/1876_current_behaviour.log` cases 021–024, 026) and are fixed by
+`DateTime::dateToTicks`'s new component validation with no change to their own
+argument handling — see this file's sibling report for the repair itself.
+
+The boundary case the finding asks for is now correct at the right layer:
+`DateTimeOffset(9999,12,31,24,0,0,+00:00)` previously threw
+`ArgumentOutOfRangeException("offset", "The UTC time represented when the offset
+is applied must be between year 0 and 10,000.")` — the right *type* for the wrong
+*reason*, caught only accidentally by the UTC-range guard and blaming a parameter
+the caller had got right. It now throws the hour/minute/second exception.
+
+**Second, independent defect fixed by the same ticket: validation ORDER
+(CCF-002 class B).** Real .NET builds a `DateTimeOffset` from components as
+
+```csharp
+_offsetMinutes = ValidateOffset(offset);
+_dateTime = ValidateDate(new DateTime(year, month, day, hour, minute, second), offset);
+```
+
+and from ticks as `this(ValidateOffset(offset), ValidateDate(new DateTime(ticks),
+offset))`. C#'s left-to-right evaluation puts the **offset** check first in both.
+This port validated it last — not by choice, but because the clock `DateTime` was
+produced in a mem-initialiser, which cannot sequence a free-standing check before
+a member's construction. The former combined `validateOffsetAndRange` is now split
+into `validateOffset` (whole minutes, ±14 h) and `validateUtcRange`, and the three
+constructors obtain their clock value from a `clockOf` factory that runs
+`validateOffset` first.
+
+| Call | Was | Now | Reference |
+|---|---|---|---|
+| `(2024,1,1,24,0,0, +15h)` | AOORE `offset` (only because hour 24 was accepted) | AOORE `offset` — **unchanged** | `ValidateOffset` first |
+| `(2024,1,1,24,0,0, 90 ticks)` | `ArgumentException` `offset` | `ArgumentException` `offset` — **unchanged** | `ValidateOffset` first |
+| `(2024,13,1,0,0,0, +15h)` | AOORE **`year`** | AOORE **`offset`** | `ValidateOffset` first |
+| `(2024,13,1,24,0,0, +00:00)` | AOORE `year` | AOORE `year` — unchanged | date before time |
+| `(9999,12,31,23,59,59,999, −14h)` | AOORE `offset` UTC message | unchanged | `ValidateDate` last |
+| `(−1 ticks, +15h)` | AOORE `ticks` | AOORE `offset` | `ValidateOffset` first |
+
+Row three and row six are the only observable moves, and both are
+`ArgumentOutOfRangeException` before and after. Doing the reorder in the **same**
+change as the component validation is what keeps rows one and two unchanged: with
+the hour check added and the order left alone, they would have started reporting
+the hour instead of the offset.
+
+**Extension of the finding's premise (measured).** The report says the offset
+range check "cannot repair a clock time that was already accepted incorrectly".
+Correct, and the converse also held and is not recorded: with the order inverted,
+an invalid *date* masked an invalid *offset*, so a caller who got both wrong was
+told about the one .NET does not report.
+
+SR-AUD-007 remains **confirmed** and is split by
+`docs/DateTimeValidationBoundaryPlan.md` §8: its impossible-offset-minute half is
+compatible (ticket #1878) and its grammar half is approval-gated (ticket #1879).
+
+Compatibility: **none** beyond the observable exception identity in the two rows
+above. No public signature, `noexcept` specification, virtual function, vtable
+slot, data member, `sizeof`, `alignof` or member offset changed.
+
+Closure evidence: 8 new permanent regressions in `DateTimeOffsetTests2`
+(`Ccf002_*`), covering component rejection in both overloads, extreme integer
+hours, offset-before-clock ordering for all three constructors, date-before-time
+ordering, the UTC-range guard still running last, and every valid endpoint.
+Full component gate **14,508 tests across 37 executables**.
+**Mutation-checked:** restoring the pre-repair ordering fails
+`Ccf002_OffsetIsValidatedBeforeTheClockDateTime` and
+`Ccf002_TickConstructorValidatesTheOffsetFirst`.

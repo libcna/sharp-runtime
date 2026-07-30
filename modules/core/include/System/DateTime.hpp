@@ -74,7 +74,10 @@ namespace System {
          * @param minute       Minute (0–59). Default 0.
          * @param second       Second (0–59). Default 0.
          * @param millisecond  Millisecond (0–999). Default 0.
-         * @throws std::out_of_range if any component is out of the valid range.
+         * @throws System::ArgumentOutOfRangeException if any component is out of the valid
+         *         range. Components are checked in .NET's order — year/month/day first, then
+         *         hour/minute/second, then millisecond — and every check happens before any
+         *         arithmetic, so the returned tick count is always within [0, MaxTicks].
          */
         static longcs dateToTicks(int year, int month, int day,
                                    int hour = 0, int minute = 0,
@@ -114,7 +117,9 @@ namespace System {
          * @param hour    Hour (0–23).
          * @param minute  Minute (0–59).
          * @param second  Second (0–59).
-         * @throws std::out_of_range if any component is out of range.
+         * @throws System::ArgumentOutOfRangeException if any component is out of range. An
+         *         out-of-range hour, minute or second is rejected, never normalized into a
+         *         neighbouring instant.
          */
         DateTime(intcs year, intcs month, intcs day, intcs hour, intcs minute, intcs second);
 
@@ -128,7 +133,9 @@ namespace System {
          * @param minute       Minute (0–59).
          * @param second       Second (0–59).
          * @param millisecond  Millisecond (0–999).
-         * @throws std::out_of_range if any component is out of range.
+         * @throws System::ArgumentOutOfRangeException if any component is out of range. An
+         *         out-of-range hour, minute, second or millisecond is rejected, never
+         *         normalized into a neighbouring instant.
          */
         DateTime(intcs year, intcs month, intcs day,
                  intcs hour, intcs minute, intcs second, intcs millisecond);

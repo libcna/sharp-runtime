@@ -65,9 +65,14 @@ namespace System {
          * C++ counterpart of .NET DateTimeOffset(long, TimeSpan).
          * @param ticks  Clock time expressed in 100-nanosecond ticks since the .NET epoch.
          * @param offset The time's offset from UTC.
+         *
+         * @p offset is validated before @p ticks, matching the reference's argument
+         * evaluation order.
+         *
          * @throws System::ArgumentException if @p offset is not a whole number of minutes.
-         * @throws System::ArgumentOutOfRangeException if @p offset is outside ±14 hours,
-         *         or if the resulting UTC time is outside DateTime's representable range.
+         * @throws System::ArgumentOutOfRangeException if @p offset is outside ±14 hours, if
+         *         @p ticks is outside DateTime's representable range, or if the resulting UTC
+         *         time is outside DateTime's representable range.
          */
         DateTimeOffset(longcs ticks, const TimeSpan& offset);
 
@@ -75,9 +80,15 @@ namespace System {
          * @brief Initializes a new instance from date, time, and offset components.
          *
          * C++ counterpart of .NET DateTimeOffset(int, int, int, int, int, int, TimeSpan).
+         *
+         * Arguments are validated in the reference's order: @p offset's shape and range
+         * first, then the date components, then the time components, then the resulting UTC
+         * instant.
+         *
          * @throws System::ArgumentException if @p offset is not a whole number of minutes.
-         * @throws System::ArgumentOutOfRangeException if @p offset is outside ±14 hours,
-         *         or if the resulting UTC time is outside DateTime's representable range.
+         * @throws System::ArgumentOutOfRangeException if @p offset is outside ±14 hours, if
+         *         any date or time component is out of range, or if the resulting UTC time is
+         *         outside DateTime's representable range.
          */
         DateTimeOffset(intcs year, intcs month, intcs day,
                        intcs hour, intcs minute, intcs second,
@@ -87,9 +98,15 @@ namespace System {
          * @brief Initializes a new instance from date, time, millisecond, and offset components.
          *
          * C++ counterpart of .NET DateTimeOffset(int, int, int, int, int, int, int, TimeSpan).
+         *
+         * Arguments are validated in the reference's order: @p offset's shape and range
+         * first, then the date components, then the time components, then @p millisecond,
+         * then the resulting UTC instant.
+         *
          * @throws System::ArgumentException if @p offset is not a whole number of minutes.
-         * @throws System::ArgumentOutOfRangeException if @p offset is outside ±14 hours,
-         *         or if the resulting UTC time is outside DateTime's representable range.
+         * @throws System::ArgumentOutOfRangeException if @p offset is outside ±14 hours, if
+         *         any date or time component is out of range, or if the resulting UTC time is
+         *         outside DateTime's representable range.
          */
         DateTimeOffset(intcs year, intcs month, intcs day,
                        intcs hour, intcs minute, intcs second, intcs millisecond,

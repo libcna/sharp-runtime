@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
+#include "System/Globalization/GregorianCalendar.hpp"
 #include "System/Globalization/KoreanCalendar.hpp"
 #include "System/Globalization/JapaneseCalendar.hpp"
 #include "System/Globalization/HijriCalendar.hpp"
@@ -262,4 +263,32 @@ TEST(UmAlQuraCalendarTests, AddYears_LargeValue_ThrowsInsteadOfOverflowing) {
     DateTime start(2024, 6, 15);
     EXPECT_THROW(cal.AddYears(start, 200000000), System::ArgumentOutOfRangeException);
     EXPECT_THROW(cal.AddYears(start, -200000000), System::ArgumentOutOfRangeException);
+}
+
+// ---------------------------------------------------------------------------
+// CCF-002 (SR-AUD-006, ticket #1877). Calendar::ToDateTime forwards straight to
+// DateTime's seven-argument constructor and performs no validation of its own --
+// in this port and in real .NET alike. It therefore inherited the missing
+// time-component validation, and it inherits the repair with no edit in
+// modules/globalization. These cases prove the wrapper path, not just the
+// direct one.
+// ---------------------------------------------------------------------------
+
+TEST(CalendarTests, Ccf002_ToDateTimeRejectsInvalidTimeComponents) {
+    GregorianCalendar cal;
+    EXPECT_THROW(cal.ToDateTime(2024, 1, 1, 24, 0, 0, 0),   System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.ToDateTime(2024, 1, 1, 0, 60, 0, 0),   System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.ToDateTime(2024, 1, 1, 0, 0, 60, 0),   System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.ToDateTime(2024, 1, 1, 0, 0, 0, 1000), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.ToDateTime(2024, 1, 1, -1, 0, 0, 0),   System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.ToDateTime(2024, 1, 1, 2000000000, 0, 0, 0),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(CalendarTests, Ccf002_ToDateTimeStillAcceptsEveryValidComponentSet) {
+    GregorianCalendar cal;
+    EXPECT_EQ(cal.ToDateTime(2024, 6, 15, 10, 30, 45, 123).getTicksProperty(),
+              System::DateTime(2024, 6, 15, 10, 30, 45, 123).getTicksProperty());
+    EXPECT_NO_THROW(cal.ToDateTime(1, 1, 1, 0, 0, 0, 0));
+    EXPECT_NO_THROW(cal.ToDateTime(9999, 12, 31, 23, 59, 59, 999));
 }

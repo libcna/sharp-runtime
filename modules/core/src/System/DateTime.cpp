@@ -56,6 +56,43 @@ namespace System {
         if (day > d[month] - d[month - 1])
             throw System::ArgumentOutOfRangeException("day", "DateTime: day out of range for given month");
 
+        // CCF-002 class A (SR-AUD-006, ticket #1877). Everything below this point is
+        // arithmetic, so every remaining component must be range-checked FIRST. Before this,
+        // the four time components were multiplied into the tick sum with no check at all,
+        // which had three separate consequences, all measured (build-probe/
+        // 1876_current_behaviour.log, 1876_ubsan_prefix.log):
+        //
+        //   1. Silent normalisation. DateTime(2024,1,1,24,0,0) returned 2024-01-02, and
+        //      DateTime(2024,1,1,-1,0,0) returned 2023-12-31 23:00 -- a different *year*.
+        //   2. A breach of this class's own documented [0, MaxTicks] invariant.
+        //      DateTime(9999,12,31,24,0,0) stored MaxTicks + 1 and DateTime(1,1,1,-1,0,0)
+        //      stored a negative tick count; the component constructors initialise ticks_
+        //      directly, so DateTime(longcs)'s range check never saw them.
+        //   3. Undefined behaviour. `hour * TicksPerHour` is `(long long)hour * 36000000000`,
+        //      which overflows int64 for |hour| > 256204778 -- UBSan-confirmed at this file's
+        //      multiplication below, both from a plain constructor call and from
+        //      DateTime::TryParse("2024-06-15 2000000000:00:00"), which returned *true* with
+        //      a negative tick count. TryParse's catch(...) cannot help: UB is not an
+        //      exception. `hour` is the only operand that can overflow; INTCS_MAX times
+        //      TicksPerMinute/Second/Millisecond all stay well inside int64.
+        //
+        // The rule, the unsigned single-compare idiom (which rejects a negative component by
+        // the same test), the messages and the paramNames all mirror real .NET's
+        // DateTime.TimeToTicks (DateTime.cs:1111-1133) plus ThrowHelper.cs:234-236 and
+        // DateTime.cs:207 -- and they are byte-identical to TimeOnly::validateHms next door,
+        // which already had this contract. Validating first is also what makes a post-hoc
+        // MaxTicks check unnecessary: with day/hour/minute/second/millisecond all in range the
+        // sum cannot exceed MaxTicks, exactly as .NET asserts at DateTime.cs:1129.
+        if (static_cast<SharpRuntime::uintcs>(hour) >= 24 ||
+            static_cast<SharpRuntime::uintcs>(minute) >= 60 ||
+            static_cast<SharpRuntime::uintcs>(second) >= 60)
+            throw System::ArgumentOutOfRangeException("",
+                "Hour, Minute, and Second parameters describe an un-representable DateTime.");
+
+        if (static_cast<SharpRuntime::uintcs>(millisecond) >= 1000)
+            throw System::ArgumentOutOfRangeException("millisecond",
+                "Valid values are between 0 and 999, inclusive.");
+
         const int y = year - 1;
         const longcs days = static_cast<longcs>(y) * 365
                           + y / 4 - y / 100 + y / 400
