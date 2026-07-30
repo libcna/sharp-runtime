@@ -7977,3 +7977,22 @@ legal day spans.
 37 executables** (was 14,162), 0 warnings, 0 errors. Module graph **41 / 91**. **No public
 signature, virtual, vtable, object layout or mangled symbol changed** — `DateOnly.hpp` untouched;
 `kMaxDayNumber` is a file-local `static constexpr`.
+
+## Completed FileStream closed-capability fix: ticket #1842 (2026-07-30)
+
+`REMED-IO-FILESTREAM-CLOSED-CAPABILITIES`, P3, size XS. **No SR-AUD-\* identifier**, audit frozen
+at 364 (29 remediated / 335 confirmed). Prerequisite for the Stream wrapper guards
+(#1824/#1827/#1828): a closed FileStream must not pass a reader/writer constructor guard.
+
+`getCanReadProperty()`/`getCanWriteProperty()` returned the bare `canRead_`/`canWrite_` access
+flags, never reset by `Close()`, so a closed FileStream still claimed the capability — the
+stale-capability shape #1826 fixed in MemoryStream, while `getCanSeekProperty()` here already
+folded in `file_.is_open()`. Both now return `canX_ && file_.is_open()`, matching real .NET's
+`OSFileStreamStrategy.cs:73-75` (`!IsClosed && (_access & …)`), reached through `FileStream.cs:386-389`.
+Unlike MemoryStream (whose `.NET CanWrite => _writable` stays true after close), .NET FileStream
+folds the closed state into **both** directions.
+
+**+5 regressions** in `IOStreamTests.cpp` (read-only/write-only/read-write before+after Close;
+property/#1825-operation agreement after close; open-file no-change). `SharpRuntimeTests_IO` clean
+under **ASan+UBSan+LSan, 0 reports** on the disposal path. Gate **14,175 across 37 executables**,
+0 warnings/errors. **No signature/vtable/layout/symbol change** — two inline header bodies.

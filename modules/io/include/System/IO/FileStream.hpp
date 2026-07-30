@@ -93,10 +93,30 @@ namespace System::IO
 
         /** Returns the length of the file in bytes. */
         [[nodiscard]] intcs getLengthProperty() const override;
-        /** Returns true if the stream was opened with write access. */
-        [[nodiscard]] bool  getCanWriteProperty() const override { return canWrite_; }
-        /** Returns true if the stream was opened with read access. */
-        [[nodiscard]] bool  getCanReadProperty()  const override { return canRead_; }
+        /**
+         * @brief Returns true if the stream is open with write access -- false once closed.
+         *
+         * Folds in file_.is_open() as well as the requested access, matching real .NET's
+         * `OSFileStreamStrategy.CanWrite => !_fileHandle.IsClosed && (_access & FileAccess.Write)
+         * != 0` (Strategies/OSFileStreamStrategy.cs:75), reached through FileStream.CanWrite
+         * (FileStream.cs:389). Ticket #1842: before this, the override returned the bare
+         * canWrite_, which reflects the access mode requested at construction and is never reset
+         * by Close(), so a closed writable FileStream still claimed CanWrite == true -- the same
+         * stale-capability shape #1826 fixed in MemoryStream. getCanSeekProperty() already folded
+         * the open state in; getCanReadProperty()/getCanWriteProperty() did not. Unlike
+         * MemoryStream (whose .NET CanWrite is `=> _writable` and stays true after close, #1826),
+         * .NET FileStream folds the closed state into BOTH directions, so both do here.
+         */
+        [[nodiscard]] bool  getCanWriteProperty() const override { return canWrite_ && file_.is_open(); }
+        /**
+         * @brief Returns true if the stream is open with read access -- false once closed.
+         *
+         * Folds in file_.is_open(), matching `OSFileStreamStrategy.CanRead => !_fileHandle.IsClosed
+         * && (_access & FileAccess.Read) != 0` (Strategies/OSFileStreamStrategy.cs:73). See
+         * getCanWriteProperty() above for the ticket #1842 rationale; the two are symmetric for
+         * FileStream, matching .NET.
+         */
+        [[nodiscard]] bool  getCanReadProperty()  const override { return canRead_ && file_.is_open(); }
         /** Returns true if the underlying file is open. */
         [[nodiscard]] bool  IsOpen() const;
 

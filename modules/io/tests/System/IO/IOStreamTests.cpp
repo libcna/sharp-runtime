@@ -2286,6 +2286,85 @@ TEST(FileStreamTests, CanSeek_TrueWhileOpen) {
     File::Delete(p);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Ticket #1842 (no SR-AUD-*, sibling of #1826) -- FileStream CanRead/CanWrite must fold in the
+// open state, matching .NET OSFileStreamStrategy.CanRead/CanWrite
+// (Strategies/OSFileStreamStrategy.cs:73-75): `!_fileHandle.IsClosed && (_access & …) != 0`.
+// Before the fix the two properties returned the bare access flags requested at construction,
+// so a closed FileStream still claimed the capability -- the stale-capability shape #1826 fixed
+// in MemoryStream. getCanSeekProperty() already folded the open state in.
+// ---------------------------------------------------------------------------------------------
+
+TEST(FileStreamTests, Capabilities_ReadOnly_OpenThenClosed_1842) {
+    std::string p = tf("fstream_cap_ro.bin");
+    File::WriteAllText(p, "abc");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    EXPECT_TRUE(fs.getCanReadProperty());
+    EXPECT_FALSE(fs.getCanWriteProperty());
+    EXPECT_TRUE(fs.getCanSeekProperty());
+    fs.Close();
+    EXPECT_FALSE(fs.getCanReadProperty());   // was stale-true before #1842
+    EXPECT_FALSE(fs.getCanWriteProperty());
+    EXPECT_FALSE(fs.getCanSeekProperty());
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Capabilities_WriteOnly_OpenThenClosed_1842) {
+    std::string p = tf("fstream_cap_wo.bin");
+    FileStream fs(p, FileMode::Create, FileAccess::Write);
+    EXPECT_FALSE(fs.getCanReadProperty());
+    EXPECT_TRUE(fs.getCanWriteProperty());
+    EXPECT_TRUE(fs.getCanSeekProperty());
+    fs.Close();
+    EXPECT_FALSE(fs.getCanReadProperty());
+    EXPECT_FALSE(fs.getCanWriteProperty());  // was stale-true before #1842
+    EXPECT_FALSE(fs.getCanSeekProperty());
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Capabilities_ReadWrite_OpenThenClosed_1842) {
+    std::string p = tf("fstream_cap_rw.bin");
+    FileStream fs(p, FileMode::Create, FileAccess::ReadWrite);
+    EXPECT_TRUE(fs.getCanReadProperty());
+    EXPECT_TRUE(fs.getCanWriteProperty());
+    EXPECT_TRUE(fs.getCanSeekProperty());
+    fs.Close();
+    EXPECT_FALSE(fs.getCanReadProperty());
+    EXPECT_FALSE(fs.getCanWriteProperty());
+    EXPECT_FALSE(fs.getCanSeekProperty());
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Capabilities_AgreeWithOperations_AfterClose_1842) {
+    // The property and the #1825 per-operation guard must agree: a closed writable FileStream
+    // reports CanWrite == false AND Write() throws, rather than the property saying yes and the
+    // operation throwing anyway.
+    std::string p = tf("fstream_cap_ops.bin");
+    File::WriteAllText(p, "abcde");
+    FileStream fs(p, FileMode::Open, FileAccess::ReadWrite);
+    EXPECT_TRUE(fs.getCanWriteProperty());
+    EXPECT_TRUE(fs.getCanReadProperty());
+    fs.Close();
+    EXPECT_FALSE(fs.getCanWriteProperty());
+    EXPECT_FALSE(fs.getCanReadProperty());
+    uint8_t buf[1] = {0x42};
+    EXPECT_THROW(fs.Write(buf, 0, 1), System::ObjectDisposedException);
+    EXPECT_THROW(fs.Read(buf, 0, 1), System::ObjectDisposedException);
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Capabilities_OpenFileUnaffected_1842) {
+    // No behaviour change for an open FileStream -- the fold-in only changes the closed state.
+    std::string p = tf("fstream_cap_open_unaffected.bin");
+    FileStream fs(p, FileMode::Create, FileAccess::ReadWrite);
+    EXPECT_TRUE(fs.getCanReadProperty());
+    EXPECT_TRUE(fs.getCanWriteProperty());
+    EXPECT_TRUE(fs.getCanSeekProperty());
+    EXPECT_TRUE(fs.IsOpen());
+    fs.Close();
+    File::Delete(p);
+}
+
 TEST(FileStreamTests, Position_ReflectsReadProgress) {
     std::string p = tf("fstream_position_read.bin");
     File::WriteAllText(p, "abcde");
