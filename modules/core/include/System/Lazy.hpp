@@ -11,6 +11,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include "System/ArgumentNullException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Threading/LazyThreadSafetyMode.hpp"
 
@@ -64,6 +65,19 @@ namespace System {
         // the same thread is undefined behavior). Must run *before* dispatching into
         // std::call_once / the lock, since the deadlock happens at that layer, not
         // inside the factory call itself.
+        // Rejects an *empty* std::function factory at construction, the way .NET rejects a
+        // null Func<T> (`Lazy.cs`: `ArgumentNullException.ThrowIfNull(valueFactory)`).
+        // The `requires` clauses on the three factory constructors only check that the
+        // callable *type* is invocable; std::function<T()> satisfies that in its empty
+        // state too, so an empty one used to be stored and then invoked by initValue(),
+        // raising std::bad_function_call at the first Value() -- a native exception that
+        // does not derive from System::Exception, so ported `catch (const Exception&)`
+        // code cannot see it, arbitrarily far from the constructor that was at fault.
+        // Ticket #1867 / SR-AUD-065 / CCF-011; see docs/EmptyCallableBoundaryPlan.md.
+        void requireFactory() const {
+            if (!factory_) throw ArgumentNullException("valueFactory");
+        }
+
         void checkNotReentrant() const {
             if (creatingThreadId_.load(std::memory_order_acquire) == std::this_thread::get_id()) {
                 throw InvalidOperationException("ValueFactory attempted to access the Value property of this instance.");
@@ -117,13 +131,15 @@ namespace System {
          *
          * C++ counterpart of .NET Lazy<T>(Func<T> valueFactory).
          * @param valueFactory Callable that produces the value on first access.
+         * @throws ArgumentNullException if @p valueFactory is an empty std::function,
+         *         matching .NET's null-Func rejection at the constructor boundary.
          */
         template<typename F>
             requires (std::is_invocable_r_v<T, std::decay_t<F>>
                    && !std::is_same_v<std::decay_t<F>, bool>)
         explicit Lazy(F&& valueFactory)
             : factory_(std::forward<F>(valueFactory)),
-              mode_(LazyThreadSafetyMode::ExecutionAndPublication) {}
+              mode_(LazyThreadSafetyMode::ExecutionAndPublication) { requireFactory(); }
 
         /**
          * @brief Initializes a Lazy<T> using the default constructor T().
@@ -151,6 +167,8 @@ namespace System {
          * C++ counterpart of .NET Lazy<T>(Func<T>, bool isThreadSafe).
          * @param valueFactory Callable that produces the value on first access.
          * @param isThreadSafe If true: ExecutionAndPublication mode; if false: None mode.
+         * @throws ArgumentNullException if @p valueFactory is an empty std::function,
+         *         matching .NET's null-Func rejection at the constructor boundary.
          */
         template<typename F>
             requires (std::is_invocable_r_v<T, std::decay_t<F>>
@@ -158,7 +176,7 @@ namespace System {
         Lazy(F&& valueFactory, bool isThreadSafe)
             : factory_(std::forward<F>(valueFactory)),
               mode_(isThreadSafe ? LazyThreadSafetyMode::ExecutionAndPublication
-                                 : LazyThreadSafetyMode::None) {}
+                                 : LazyThreadSafetyMode::None) { requireFactory(); }
 
         /**
          * @brief Initializes a Lazy<T> with the specified factory and thread-safety mode.
@@ -166,12 +184,14 @@ namespace System {
          * C++ counterpart of .NET Lazy<T>(Func<T>, LazyThreadSafetyMode).
          * @param valueFactory Callable that produces the value on first access.
          * @param mode         The thread-safety mode to use.
+         * @throws ArgumentNullException if @p valueFactory is an empty std::function,
+         *         matching .NET's null-Func rejection at the constructor boundary.
          */
         template<typename F>
             requires (std::is_invocable_r_v<T, std::decay_t<F>>
                    && !std::is_same_v<std::decay_t<F>, bool>)
         Lazy(F&& valueFactory, LazyThreadSafetyMode mode)
-            : factory_(std::forward<F>(valueFactory)), mode_(mode) {}
+            : factory_(std::forward<F>(valueFactory)), mode_(mode) { requireFactory(); }
 
         // Lazy is not copyable or movable (std::once_flag constraint).
         Lazy(const Lazy&)            = delete;

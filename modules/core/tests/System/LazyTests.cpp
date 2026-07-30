@@ -2,7 +2,11 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <functional>
 #include <stdexcept>
+#include <string>
+#include "System/ArgumentNullException.hpp"
+#include "System/Exception.hpp"
 #include "System/Lazy.hpp"
 
 using System::Lazy;
@@ -156,4 +160,89 @@ TEST(LazyTests, ToString_ForwardsToValueToString_ForTypesThatHaveIt) {
     Lazy<Widget> lz([] { return Widget{}; });
     lz.getValueProperty();
     EXPECT_EQ(lz.ToString(), "a-widget");
+}
+
+// --- Empty std::function factory rejected at construction (#1867 / SR-AUD-065 / CCF-011) ---
+//
+// The three factory constructors used to accept an empty std::function<T()>, store it and
+// raise the native std::bad_function_call from the first getValueProperty() -- outside the
+// System::Exception hierarchy, so ported `catch (const Exception&)` code could not see it.
+// .NET rejects a null Func<T> in the constructor (`Lazy.cs`:
+// `ArgumentNullException.ThrowIfNull(valueFactory)`). See docs/EmptyCallableBoundaryPlan.md.
+
+TEST(LazyTests, EmptyFactory_ThrowsArgumentNullExceptionAtConstruction) {
+    EXPECT_THROW(Lazy<int>{std::function<int()>{}}, System::ArgumentNullException);
+}
+
+TEST(LazyTests, EmptyFactory_WithIsThreadSafeFlag_ThrowsAtConstruction) {
+    EXPECT_THROW((Lazy<int>{std::function<int()>{}, true}), System::ArgumentNullException);
+    EXPECT_THROW((Lazy<int>{std::function<int()>{}, false}), System::ArgumentNullException);
+}
+
+TEST(LazyTests, EmptyFactory_WithMode_ThrowsAtConstruction) {
+    EXPECT_THROW((Lazy<int>{std::function<int()>{}, LazyThreadSafetyMode::None}),
+                 System::ArgumentNullException);
+    EXPECT_THROW((Lazy<int>{std::function<int()>{}, LazyThreadSafetyMode::PublicationOnly}),
+                 System::ArgumentNullException);
+    EXPECT_THROW((Lazy<int>{std::function<int()>{}, LazyThreadSafetyMode::ExecutionAndPublication}),
+                 System::ArgumentNullException);
+}
+
+TEST(LazyTests, EmptyFactory_ParamNameIsValueFactory) {
+    try {
+        Lazy<int> lz{std::function<int()>{}};
+        FAIL() << "expected ArgumentNullException";
+    } catch (const System::ArgumentNullException& e) {
+        EXPECT_STREQ(e.what(), "Value cannot be null. (Parameter 'valueFactory')");
+    }
+}
+
+TEST(LazyTests, EmptyFactory_IsCatchableAsSystemException) {
+    // std::bad_function_call was not: this is the whole point of the repair.
+    bool caught = false;
+    try {
+        Lazy<int> lz{std::function<int()>{}};
+    } catch (const System::Exception&) {
+        caught = true;
+    }
+    EXPECT_TRUE(caught);
+}
+
+TEST(LazyTests, EmptyFactory_NeverReachesBadFunctionCall) {
+    EXPECT_NO_THROW({
+        try {
+            Lazy<int> lz{std::function<int()>{}};
+        } catch (const System::ArgumentNullException&) {
+            // expected; a std::bad_function_call would escape this handler and fail the test
+        }
+    });
+}
+
+TEST(LazyTests, NonEmptyStdFunctionFactory_StillWorks) {
+    std::function<int()> factory = [] { return 41; };
+    Lazy<int> lz{factory};
+    EXPECT_FALSE(lz.getIsValueCreatedProperty());
+    EXPECT_EQ(lz.getValueProperty(), 41);
+    EXPECT_TRUE(lz.getIsValueCreatedProperty());
+}
+
+TEST(LazyTests, NonFactoryConstructors_UnaffectedByTheEmptyCheck) {
+    // These synthesise their own factory, which is never empty.
+    EXPECT_NO_THROW({ Lazy<int> a; (void)a.getValueProperty(); });
+    EXPECT_NO_THROW({ Lazy<int> b(5); (void)b.getValueProperty(); });
+    EXPECT_NO_THROW({ Lazy<int> c(true); (void)c.getValueProperty(); });
+    EXPECT_NO_THROW({ Lazy<int> d(LazyThreadSafetyMode::None); (void)d.getValueProperty(); });
+}
+
+TEST(LazyTests, EmptyFactory_ThrowingConstructorLeavesNothingBehind) {
+    // A constructor that throws destroys the members it already built; repeat it enough
+    // times that a leaked std::function target would be visible to LeakSanitizer.
+    for (int i = 0; i < 1000; ++i) {
+        try {
+            Lazy<std::string> lz{std::function<std::string()>{}};
+            FAIL() << "expected ArgumentNullException";
+        } catch (const System::ArgumentNullException&) {
+        }
+    }
+    SUCCEED();
 }

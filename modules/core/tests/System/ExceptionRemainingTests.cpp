@@ -7,6 +7,7 @@
 // TypeInitializationException, CultureNotFoundException.
 #include <gtest/gtest.h>
 #include <cmath>
+#include <functional>
 #include <string>
 #include <vector>
 #include "System/Exception.hpp"
@@ -240,6 +241,54 @@ TEST(AggregateExceptionTests, Handle_SomeUnhandled_Rethrows) {
     EXPECT_THROW(ex.Handle([](std::exception_ptr) { return false; }),
                  System::AggregateException);
 }
+// --- Empty predicate rejected before the loop (#1867 / SR-AUD-099 / CCF-011) ---
+//
+// Handle used to pass an unvalidated std::function to predicate(ep), raising the native
+// std::bad_function_call at the first inner exception -- and to accept the same wrong call
+// silently when the aggregate had no inner exception at all. .NET runs
+// ArgumentNullException.ThrowIfNull(predicate) before the loop, so both cases throw.
+// See docs/EmptyCallableBoundaryPlan.md.
+TEST(AggregateExceptionTests, Handle_EmptyPredicate_ThrowsArgumentNullException) {
+    auto ep = std::make_exception_ptr(std::runtime_error("boom"));
+    System::AggregateException ex({ep});
+    EXPECT_THROW(ex.Handle(std::function<bool(std::exception_ptr)>{}),
+                 System::ArgumentNullException);
+}
+TEST(AggregateExceptionTests, Handle_EmptyPredicate_NoInnerExceptions_StillThrows) {
+    System::AggregateException ex;
+    EXPECT_EQ(ex.getInnerExceptionCountProperty(), 0u);
+    EXPECT_THROW(ex.Handle(std::function<bool(std::exception_ptr)>{}),
+                 System::ArgumentNullException);
+}
+TEST(AggregateExceptionTests, Handle_EmptyPredicate_ParamNameIsPredicate) {
+    System::AggregateException ex;
+    try {
+        ex.Handle(std::function<bool(std::exception_ptr)>{});
+        FAIL() << "expected ArgumentNullException";
+    } catch (const System::ArgumentNullException& e) {
+        EXPECT_STREQ(e.what(), "Value cannot be null. (Parameter 'predicate')");
+    }
+}
+TEST(AggregateExceptionTests, Handle_EmptyPredicate_IsCatchableAsSystemException) {
+    auto ep = std::make_exception_ptr(std::runtime_error("boom"));
+    System::AggregateException ex({ep});
+    bool caught = false;
+    try {
+        ex.Handle(std::function<bool(std::exception_ptr)>{});
+    } catch (const System::Exception&) {
+        caught = true;
+    }
+    EXPECT_TRUE(caught);
+}
+TEST(AggregateExceptionTests, Handle_NonEmptyStdFunction_StillBehavesAsBefore) {
+    auto ep = std::make_exception_ptr(std::runtime_error("handled"));
+    System::AggregateException ex({ep});
+    std::function<bool(std::exception_ptr)> all = [](std::exception_ptr) { return true; };
+    std::function<bool(std::exception_ptr)> none = [](std::exception_ptr) { return false; };
+    EXPECT_NO_THROW(ex.Handle(all));
+    EXPECT_THROW(ex.Handle(none), System::AggregateException);
+}
+
 TEST(AggregateExceptionTests, Flatten_NestedAggregate_FlattensToLeaves) {
     auto ep1 = std::make_exception_ptr(std::runtime_error("leaf1"));
     auto ep2 = std::make_exception_ptr(std::runtime_error("leaf2"));

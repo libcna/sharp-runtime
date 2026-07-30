@@ -115,3 +115,50 @@ custom-message aggregation, `Handle` message/order preservation, predicate
 exceptions, empty predicates, nested/direct leaf order, the `GetBaseException`
 value-API adaptation, and the HResult assertion all belong to SR-AUD-098 and
 SR-AUD-099, which remain open.
+
+---
+
+## SR-AUD-099 — REMEDIATED (ticket #1867, 2026-07-30, CCF-011)
+
+The original evidence above is retained unchanged.
+
+`AggregateException::Handle` now rejects an empty `std::function` predicate with
+`System::ArgumentNullException("predicate")` **before** the loop, matching
+`AggregateException.Handle`'s own `ArgumentNullException.ThrowIfNull(predicate)`
+in the current local reference. The message is byte-identical to .NET's:
+`Value cannot be null. (Parameter 'predicate')`.
+
+**Correction to the finding's premise (measured 2026-07-30).** The finding
+describes only the `std::bad_function_call` path — "an empty predicate therefore
+raises native `std::bad_function_call` only after aggregate construction and
+first traversal". Measured, that is true only when the aggregate *has* an inner
+exception. An aggregate with **no** inner exceptions accepted the same empty
+predicate and returned normally (`aggregate.handle.noinner=no-throw` in
+`build-probe/1866_prefix.log`), so the identical wrong call was fatal or
+invisible depending on the aggregate's contents. .NET's check runs before the
+loop and therefore throws in both cases; the repair does too. The historical text
+above is left as written, per this repository's practice.
+
+Closure evidence: 5 new permanent regressions in `ExceptionRemainingTests.cpp`
+(empty predicate with an inner exception; empty predicate with **no** inner
+exception; the exact `paramName` in the message; catchability as
+`System::Exception`, which `std::bad_function_call` never had; and an assertion
+that a non-empty `std::function` predicate still handles and still rethrows
+exactly as before). `LazyTests` + `AggregateExceptionTests` 75/75. The direct
+probe `build-probe/1866_empty_callable_probe.cpp`, compiled **with**
+`-fsanitize=address,undefined` so this header-only change is itself instrumented,
+exits 0 with zero AddressSanitizer, UndefinedBehaviorSanitizer and LeakSanitizer
+reports, including a 2,000-iteration stress loop that constructs and rejects
+heap-owning predicates.
+
+Source, ABI and layout consequences: none. `Handle` keeps its signature, its
+`const` qualification and its (absent) `noexcept` specification; no data member,
+virtual function or exported symbol changed. No in-repository caller passes an
+empty predicate.
+
+The plan for this family is `docs/EmptyCallableBoundaryPlan.md` (ticket #1866).
+SR-AUD-098 and the remaining items listed at the end of the #1807 note —
+first-inner identity, custom-message aggregation, `Handle` message/order
+preservation, predicate exceptions, nested/direct leaf order, the
+`GetBaseException` value-API adaptation and the HResult assertion — are **not**
+closed by this ticket.

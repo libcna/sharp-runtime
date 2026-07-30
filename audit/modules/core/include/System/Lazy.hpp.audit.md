@@ -83,3 +83,53 @@ the stated behavior.
 The ordinary state machine is well tested, but public configuration/factory
 validation and PublicationOnly recursion diverge from the local .NET contract.
 No source or test was modified during this audit.
+
+---
+
+## SR-AUD-065 — REMEDIATED (ticket #1867, 2026-07-30, CCF-011)
+
+The original evidence above is retained unchanged.
+
+`Lazy<T>`'s three factory constructors — `Lazy(F&&)`, `Lazy(F&&, bool)` and
+`Lazy(F&&, LazyThreadSafetyMode)` — now call a new private `requireFactory()`
+from their constructor bodies, which throws
+`System::ArgumentNullException("valueFactory")` when the callable stored in
+`factory_` is an empty `std::function`. That is .NET's rule, read from
+`/rv/tmp/runtime/src/libraries/System.Private.CoreLib/src/System/Lazy.cs:301`
+(`ArgumentNullException.ThrowIfNull(valueFactory)`), and the message is
+byte-identical to .NET's: `Value cannot be null. (Parameter 'valueFactory')`.
+
+The finding's premise is confirmed exactly as written. Measured before the fix
+(`build-probe/1866_prefix.log`): `lazy.ctor.factory=no-throw`,
+`lazy.value.factory=bad_function_call`, and the same for the `bool` and
+`LazyThreadSafetyMode` overloads. Measured after
+(`build-probe/1867_postfix_asan.log`): all four report
+`ArgumentNullException:Value cannot be null. (Parameter 'valueFactory')`.
+
+The four **non**-factory constructors — `Lazy()`, `Lazy(T)`, `Lazy(bool)`,
+`Lazy(LazyThreadSafetyMode)` — synthesise their own `[]{ return T{}; }` and are
+deliberately unaffected; a permanent test pins that.
+
+Closure evidence: 9 new permanent regressions in `LazyTests.cpp` (each of the
+three factory forms, every `LazyThreadSafetyMode` value, the exact `paramName`
+in the message, catchability as `System::Exception` — which `std::bad_function_call`
+never had — non-emptiness of a real `std::function` factory, the unaffected
+non-factory constructors, and a 1,000-iteration throwing-construction loop that
+would expose a leaked factory target). `LazyTests` + `AggregateExceptionTests`
+75/75. The direct probe `build-probe/1866_empty_callable_probe.cpp`, compiled
+**with** `-fsanitize=address,undefined` so the header-only change is itself
+instrumented, exits 0 with zero AddressSanitizer, UndefinedBehaviorSanitizer and
+LeakSanitizer reports, including a 2,000-iteration stress loop over heap-owning
+`std::function` targets.
+
+Source, ABI and layout consequences: none. No signature, template parameter,
+`noexcept` specification, virtual function or data member changed; the check is a
+constructor-body statement. `Lazy<T>` remains non-copyable and non-movable. The
+one observable change is that a call that used to construct successfully and then
+fail at the first `Value()` with an uncatchable native exception now fails at the
+constructor with the documented .NET one.
+
+The plan for this family is `docs/EmptyCallableBoundaryPlan.md` (ticket #1866).
+The report's remaining open items — PublicationOnly recursion, `getModeProperty`'s
+debug-view adaptation, `ToString`'s narrow fallback and the move-only/
+non-default-constructible `T` coverage gaps — are **not** closed by this ticket.

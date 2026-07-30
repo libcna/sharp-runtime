@@ -482,8 +482,8 @@ its per-file audit report and this document's §18 status table.
 |---|---|---|
 | SR-AUD-052 | #1869 | `confirmed` |
 | SR-AUD-058 | #1868 | `confirmed` |
-| SR-AUD-065 | #1867 | `confirmed` |
-| SR-AUD-099 | #1867 | `confirmed` |
+| SR-AUD-065 | #1867 | **`remediated`** (2026-07-30) |
+| SR-AUD-099 | #1867 | **`remediated`** (2026-07-30) |
 | SR-AUD-121 | #1868 | `confirmed` |
 | SR-AUD-134 | #1870 | `confirmed` |
 

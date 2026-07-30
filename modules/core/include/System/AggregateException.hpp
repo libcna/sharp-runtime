@@ -202,9 +202,21 @@ public:
      * @brief Invokes a handler on each inner exception; rethrows unhandled ones as a new AggregateException.
      *
      * C++ counterpart of .NET AggregateException.Handle(Func&lt;Exception,bool&gt;).
+     *
+     * The empty-predicate check is unconditional and runs before the loop, exactly like
+     * .NET's `ArgumentNullException.ThrowIfNull(predicate)` at the top of
+     * `AggregateException.Handle`. Without it an empty std::function used to reach
+     * `predicate(ep)` and raise `std::bad_function_call` -- a native exception outside the
+     * System::Exception hierarchy -- at the first inner exception, and to be accepted
+     * silently when there was no inner exception at all, so the same wrong call was fatal
+     * or invisible depending on the aggregate's contents. Ticket #1867 / SR-AUD-099 /
+     * CCF-011; see docs/EmptyCallableBoundaryPlan.md.
+     *
      * @param predicate Handler returning true if the exception is handled.
+     * @throws ArgumentNullException if @p predicate is an empty std::function.
      */
     void Handle(std::function<bool(std::exception_ptr)> predicate) const {
+        if (!predicate) throw ArgumentNullException("predicate");
         std::vector<std::exception_ptr> unhandled;
         for (auto& ep : innerExceptions_) {
             if (!predicate(ep)) unhandled.push_back(ep);
