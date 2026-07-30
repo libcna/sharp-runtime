@@ -42,8 +42,11 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: **14,476** passing across 36 component binaries plus one integration
-  binary, verified 2026-07-30 by the CCF-014 + CCF-016 batch on branch
+- Tests: **14,514** passing across 36 component binaries plus one integration
+  binary, verified 2026-07-30 by the CCF-002 batch on branch
+  `feature/remediation-batch-ccf002-datetime-validation` (design #1876; #1877
+  SR-AUD-006 +32, #1878 SR-AUD-007a +6 — total +38), raised from the 14,476
+  verified by the CCF-014 + CCF-016 batch on branch
   `feature/remediation-batch-ccf014-ccf016` (design #1871 and #1873; #1872
   SR-AUD-075 + SR-AUD-085 +14, #1874 SR-AUD-093/094/095/096/100 +18 — total +32
   over the 14,444 floor, closing **two** cross-cutting causes), itself raised
@@ -4347,3 +4350,98 @@ identity) and the CCF-019 remainder (JsonNode / XObject use-after-free, likely
 design-first). Full detail, build-directory sizes, three-job parallelism record
 and probe accounting: `NEXT.md` under "Autonomous batch handoff, 2026-07-30
 (CCF-014 + CCF-016, both CLOSED)".
+
+## Session summary — 2026-07-30, CCF-002 partially remediated
+
+Branch `feature/remediation-batch-ccf002-datetime-validation`, off
+`feature/remediation-batch-ccf014-ccf016`. The ready queue held only the
+deliberately inactive #1875, so the batch took the family NEXT.md recommended
+first, planning it before touching code. **CCF-002 is now PARTIALLY REMEDIATED
+— not closed**, and the plan says so in its own completion criteria rather than
+letting "three of five classes done" read as closure.
+
+**Design first.** Ticket **#1876** wrote
+`docs/DateTimeValidationBoundaryPlan.md` (20 sections) from
+`build-probe/1876_datetime_validation_probe.cpp`: 84 non-sanitised cases plus
+five one-shape-per-process UBSan runs. It inventoried **five** component
+constructors, **six** wrappers that add no validation of their own, and
+**eight** parse entries across **four** types — where the cross-cutting record
+names three findings and six files. It also pulled in SR-AUD-061
+(`DateOnly::TryParse`), which is the same `std::sscanf`-prefix omission in the
+same module and is not listed under CCF-002.
+
+**The line between compatible and gated** was drawn exactly where #1857→#1858
+and #1864→#1865 drew it: a change to the accepted **range of component values**
+is compatible; a change to the accepted **textual grammar** is approval-gated.
+
+**#1877 — SR-AUD-006, remediated (+32).** `DateTime::dateToTicks` validated
+year/month/day and then multiplied hour/minute/second/millisecond straight into
+the tick sum. That single omission produced silent normalisation
+(`DateTime(2024,1,1,-1,0,0)` returned a date in the *previous year*), a breach
+of the class's own documented `[0, MaxTicks]` invariant
+(`DateTime(9999,12,31,24,0,0)` stored `MaxTicks + 1`), and — not in the audit
+record — **undefined behaviour**: `hour * TicksPerHour` overflows `int64` for
+`|hour| > 256204778`, UBSan-confirmed from a plain constructor *and* from
+`DateTime::TryParse("2024-06-15 2000000000:00:00")`, which returned **`true`**
+with a negative tick count. The repair validates all four components before any
+arithmetic, in .NET's order, using the messages and `paramName`s that
+`TimeOnly::validateHms` — 45 lines away — already carried. `DateTimeOffset`'s
+offset-first validation order was restored in the same commit, because adding
+the hour check alone would have moved two doubly-invalid cases off the exception
+.NET reports.
+
+**#1878 — SR-AUD-007a, remediated (+6).** One unchecked `sscanf` line carried
+three defects: an impossible minute field absorbed into the `TimeSpan` before the
+±14 h guard could see it (`"+02:75"` meant +03:15), a negative field inverting
+the sign the caller wrote (`"+-05:00"` meant *minus* five hours), and a large
+hour field making **`TryParse` itself throw** `OverflowException` from outside
+its own `try`/`catch` — the very block whose comment states the method must never
+throw. One bounds-before-arithmetic guard closes all three. No new `SR-AUD-*`
+identifier was issued for the throwing defect: it is inseparable from the repair,
+and numbering stays frozen at 364. SR-AUD-007 is now the split row
+`007a remediated / 007b open`.
+
+Gate **14,514 tests across 37 executables** (0 warnings, 0 errors), up from
+14,476. Audit index **57 remediated / 306 confirmed of 364**. Module graph
+**41 / 91**, canonical Doxygen **1,941 / 1,942**, negative fixtures **9 / 66**,
+version seams **2 / 18** — all unchanged.
+
+Premises corrected by measurement, historical audit text preserved: the
+"Required post-audit verification" text of **all four** CCF-002 reports asks for
+an assertion that a failed `TryParse` does **not** overwrite its output —
+.NET does the opposite (`DateTimeParse.cs:2470` assigns `MinValue`), so
+implementing those paragraphs literally would have pinned a divergence as the
+contract; SR-AUD-006 understates its own severity by omitting the UB; the port's
+year/month/day exception identity already deviates from .NET and is deliberately
+excluded; `DateTimeOffset` validated the offset last only because a
+mem-initialiser cannot sequence a check before a member's construction;
+SR-AUD-009's fractional scan is **not** generally wrong (`"10:20:30.1"` correctly
+yields `.100`); and `TimeOnly` is a **counter-example inside the family**, not a
+member of its constructor half.
+
+Both implementations are **mutation-checked** with four mutations: deleting the
+hour/minute/second check fails 15 permanent tests, the millisecond check 7,
+restoring the pre-repair `DateTimeOffset` ordering 2, and deleting the
+offset-field guard 3. Mutation 3 initially failed to *build*
+(`-Werror=unused-function`), which would have silently re-run the previous
+binary; it was redone before its result was believed.
+
+New tickets **#1879** (`needs_user` — the parser accepted-grammar change, with
+fifteen exact before/after rows in the plan §20.1) and **#1880** (`todo`,
+inactive — `TryParse` failure-output normalisation, no `SR-AUD-*` identifier,
+deliberately inactive rather than `needs_user` because choosing needs its own
+probe of same-repository `Try*` conventions).
+
+Nothing pushed/merged/rebased/tagged; CNA and mobile-eggbert untouched; #1773
+stays `blocked`; #1875 was left inactive and untouched;
+#1854/#1858/#1862/#1863/#1865 remain `needs_user` with their
+`docs/FloatingValueFidelityPlan.md` §19 decision records unchanged.
+
+Ready queue: **empty** — every open ticket is `blocked`, `needs_user`, or
+deliberately inactive. There is no compatible CCF-002 work left: SR-AUD-009 and
+SR-AUD-061 are pure grammar, and both parsers already range-check their
+components. Recommended next work is the #1879 decision, then CCF-012
+(composite-format grammar), CCF-017 (Attribute identity) or the CCF-019
+remainder. Full detail, build-directory sizes, three-job parallelism record and
+probe accounting: `NEXT.md` under "Autonomous batch handoff, 2026-07-30
+(CCF-002, PARTIALLY REMEDIATED)".
