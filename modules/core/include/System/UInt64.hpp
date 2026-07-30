@@ -181,7 +181,9 @@ namespace System {
                 while (static_cast<int>(s.size()) < width) s = "0" + s;
                 return s;
             }
-            return ToString(value);
+            // SR-AUD-021 (#1847): an unknown specifier is a FormatException in .NET,
+            // not a silent decimal fallback.
+            throw System::FormatException("Format specifier was invalid.");
         }
 
         /** @brief Compares two UInt64 values. Returns negative, zero, or positive. */

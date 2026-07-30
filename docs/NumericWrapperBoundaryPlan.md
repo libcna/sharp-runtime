@@ -373,3 +373,48 @@ signed `MinValue`/`-1` two's-complement forms, and a width-padded `Bn`. All
 computed against the .NET reference semantics and green.
 `SharpRuntimeTests_Core_Base` 5070 → **5077**. No layout/symbol change; new
 output value only. `SR-AUD-023 → remediated`.
+
+### 15.4 #1847 — SR-AUD-021 — unknown format specifier — **DONE (integer slice)**
+
+**Integer slice fixed for all ten wrappers.** `ToString(v, fmt)` for `Byte`,
+`SByte`, `Int16`, `UInt16`, `Int32`, `UInt32`, `Int64`, `UInt64`, `Int128`,
+`UInt128` now throws `System::FormatException("Format specifier was invalid.")`
+for any specifier outside `{X,x,D,d,G,g,B,b}`, instead of the silent decimal
+fallthrough. The message matches .NET's `SR.Format_BadFormatSpecifier` (=
+"Format specifier was invalid.") and the repo's existing malformed-width message.
+
+**Two premise corrections surfaced during implementation:**
+
+1. **The 128-bit types had no explicit `G`/`g` branch** — `Int128`/`UInt128`
+   reached General only via the decimal fallthrough, so turning the fallthrough
+   into a throw broke `ToString("G")` (caught by the existing
+   `Int128DefinedArithmeticTests.EveryFormatPathThatDelegatesToToStringIsUnchanged`
+   regression, which failed on the first build). Fixed by adding an explicit
+   `if (type=='G'||type=='g') return ToString();` to both before the throw. The
+   eight smaller wrappers already had the branch.
+2. **The 128-bit width `std::stoi` was unguarded.** The plan §3 said the integer
+   wrappers already funnel the width parse through `FormatException` — true for
+   the eight small ones, but `Int128`/`UInt128` parsed the precision with a bare
+   `std::stoi`. Both are now wrapped, so `"Bx"` throws `FormatException` rather
+   than leaking `std::invalid_argument`.
+
+**Float slice deliberately NOT done.** `Single::ToString` (`Single.hpp:607`) and
+`Double::ToString` (`Double.hpp:690`) still parse precision with an unguarded
+`std::stoi` — the CCF-006 slice of SR-AUD-021 (§4/§13). It is real (verified:
+`Single::ToString(1.0f,"Fx")` throws `std::invalid_argument`) and is now tracked
+by **new inactive ticket #1849** so it is not lost. The SR-AUD-021 index row is
+marked `remediated` for the integer slice with the float slice explicitly called
+out as open — a reader must not read it as covering `Single`/`Double`.
+
+**Deviation recorded.** .NET *does* support `N/C/E/F/P/R` for integers
+(`(5).ToString("N")` → `"5.00"`); sharp-runtime implements only `X/D/G/B`, so
+these now **throw** rather than format. This is a deliberate, documented
+deviation — a loud `FormatException` is preferable to the previous silently-wrong
+decimal, per the project's "never silently return a wrong value" rule. Revisit
+if a consumer needs the wider format set.
+
+**Tests.** +10 `ToString_UnknownFormat_Throws` cases (one per integer wrapper):
+`"Q"` throws, `"G"` still works; the 128-bit pair also assert `"Bx"` throws and
+`"G"` returns `"5"`. `SharpRuntimeTests_Core_Base` 5077 → **5087**. No
+layout/symbol change. `SR-AUD-021 → remediated (integer slice)`; float slice →
+#1849/CCF-006.

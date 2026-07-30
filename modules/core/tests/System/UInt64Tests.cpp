@@ -34,6 +34,11 @@ TEST(UInt64Test, ToString_Binary) {
     EXPECT_EQ(UInt64::ToString(18446744073709551615ULL, std::string("B")), std::string(64, '1'));
     EXPECT_EQ(UInt64::ToString(5ULL,  std::string("B64")), std::string(61, '0') + "101");
 }
+// SR-AUD-021 (#1847): an unknown specifier throws FormatException (was silent decimal).
+TEST(UInt64Test, ToString_UnknownFormat_Throws) {
+    EXPECT_THROW(UInt64::ToString(5ULL, std::string("Q")), System::FormatException);
+    EXPECT_NO_THROW(UInt64::ToString(5ULL, std::string("G")));
+}
 
 TEST(UInt64Test, ParseBasic) {
     EXPECT_EQ(UInt64::Parse("12345"), 12345ULL);

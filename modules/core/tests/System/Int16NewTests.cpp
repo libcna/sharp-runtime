@@ -88,6 +88,11 @@ TEST(Int16NewTests, ToString_Binary) {
     EXPECT_EQ(Int16::ToString(Int16::MaxValue, std::string("B")), std::string(15, '1'));
     EXPECT_EQ(Int16::ToString(5, std::string("B16")), "0000000000000101");
 }
+// SR-AUD-021 (#1847): an unknown specifier throws FormatException (was silent decimal).
+TEST(Int16NewTests, ToString_UnknownFormat_Throws) {
+    EXPECT_THROW(Int16::ToString(5, std::string("Q")), System::FormatException);
+    EXPECT_NO_THROW(Int16::ToString(5, std::string("G")));
+}
 
 TEST(Int16NewTests, Max_ReturnsLarger)  { EXPECT_EQ(Int16::Max(3, 7), 7); }
 TEST(Int16NewTests, Min_ReturnsSmaller) { EXPECT_EQ(Int16::Min(3, 7), 3); }

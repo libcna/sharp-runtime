@@ -38,6 +38,11 @@ TEST(SByteNewTests, ToString_Binary) {
     EXPECT_EQ(SByte::ToString(SByte::MaxValue, std::string("B")), "1111111");
     EXPECT_EQ(SByte::ToString(sbytecs(5),  std::string("B8")), "00000101");
 }
+// SR-AUD-021 (#1847): an unknown specifier throws FormatException (was silent decimal).
+TEST(SByteNewTests, ToString_UnknownFormat_Throws) {
+    EXPECT_THROW(SByte::ToString(sbytecs(5), std::string("Q")), System::FormatException);
+    EXPECT_NO_THROW(SByte::ToString(sbytecs(5), std::string("G")));
+}
 
 TEST(SByteNewTests, Max_ReturnsLarger)  { EXPECT_EQ(SByte::Max(sbytecs(3), sbytecs(7)), sbytecs(7)); }
 TEST(SByteNewTests, Min_ReturnsSmaller) { EXPECT_EQ(SByte::Min(sbytecs(3), sbytecs(7)), sbytecs(3)); }

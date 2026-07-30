@@ -60,6 +60,11 @@ TEST(UInt32NewTests, ToString_Binary) {
     EXPECT_EQ(UInt32::ToString(4294967295u, std::string("B")), std::string(32, '1'));
     EXPECT_EQ(UInt32::ToString(5u,  std::string("B32")), std::string(29, '0') + "101");
 }
+// SR-AUD-021 (#1847): an unknown specifier throws FormatException (was silent decimal).
+TEST(UInt32NewTests, ToString_UnknownFormat_Throws) {
+    EXPECT_THROW(UInt32::ToString(5u, std::string("Q")), System::FormatException);
+    EXPECT_NO_THROW(UInt32::ToString(5u, std::string("G")));
+}
 
 TEST(UInt32NewTests, Max_ReturnsLarger) { EXPECT_EQ(UInt32::Max(3u,7u), 7u); }
 TEST(UInt32NewTests, Min_ReturnsSmaller) { EXPECT_EQ(UInt32::Min(3u,7u), 3u); }

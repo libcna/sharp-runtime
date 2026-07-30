@@ -171,7 +171,16 @@ namespace System {
         [[nodiscard]] std::string ToString(const std::string& format) const {
             if (format.empty()) return ToString();
             char type = format[0];
-            int width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
+            int width = 0;
+            if (format.size() > 1) {
+                // SR-AUD-021 (#1847): a malformed precision is a FormatException,
+                // not a leaked std::invalid_argument.
+                try {
+                    width = std::stoi(format.substr(1));
+                } catch (const std::exception&) {
+                    throw System::FormatException("Format specifier was invalid.");
+                }
+            }
             if (type == 'X' || type == 'x') {
                 auto uv = static_cast<unsigned __int128>(value_);
                 std::string s;
@@ -198,6 +207,7 @@ namespace System {
                 }
                 return s;
             }
+            if (type == 'G' || type == 'g') return ToString();
             if (type == 'B' || type == 'b') {
                 // .NET formats the raw two's-complement bits at the natural 128-bit width.
                 unsigned __int128 uv = static_cast<unsigned __int128>(value_);
@@ -208,7 +218,9 @@ namespace System {
                 while (static_cast<int>(s.size()) < width) s = "0" + s;
                 return s;
             }
-            return ToString();
+            // SR-AUD-021 (#1847): an unknown specifier is a FormatException in .NET,
+            // not a silent decimal fallback.
+            throw System::FormatException("Format specifier was invalid.");
         }
 
         /**

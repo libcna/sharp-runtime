@@ -207,7 +207,9 @@ namespace System {
                 while (static_cast<int>(bits.size()) < width) bits = "0" + bits;
                 return bits;
             }
-            return std::to_string(value);
+            // SR-AUD-021 (#1847): an unknown specifier is a FormatException in .NET,
+            // not a silent decimal fallback.
+            throw System::FormatException("Format specifier was invalid.");
         }
 
         /**

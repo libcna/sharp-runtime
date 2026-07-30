@@ -275,6 +275,15 @@ TEST(Int128Tests, ToString_Binary) {
     EXPECT_EQ(Int128::MaxValue().ToString(std::string("B")), std::string(127, '1'));
     EXPECT_EQ(Int128(static_cast<__int128>(5)).ToString(std::string("B128")), std::string(125, '0') + "101");
 }
+// SR-AUD-021 (#1847): unknown/malformed format throws FormatException (was silent decimal /
+// leaked std::invalid_argument); the G/g branch is explicit so General still works.
+TEST(Int128Tests, ToString_UnknownFormat_Throws) {
+    using System::Int128;
+    EXPECT_THROW(Int128(static_cast<__int128>(5)).ToString(std::string("Q")), System::FormatException);
+    EXPECT_THROW(Int128(static_cast<__int128>(5)).ToString(std::string("Bx")), System::FormatException);
+    EXPECT_NO_THROW(Int128(static_cast<__int128>(5)).ToString(std::string("G")));
+    EXPECT_EQ(Int128(static_cast<__int128>(5)).ToString(std::string("G")), "5");
+}
 
 TEST(Int128DefinedArithmeticTests, MalformedInputIsStillRejected) {
     System::Int128 v;

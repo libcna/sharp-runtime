@@ -111,6 +111,11 @@ TEST(UInt16Test, ToString_Binary) {
     EXPECT_EQ(UInt16::ToString(UInt16::MaxValue, std::string("B")), std::string(16, '1'));
     EXPECT_EQ(UInt16::ToString(5,  std::string("B16")), "0000000000000101");
 }
+// SR-AUD-021 (#1847): an unknown specifier throws FormatException (was silent decimal).
+TEST(UInt16Test, ToString_UnknownFormat_Throws) {
+    EXPECT_THROW(UInt16::ToString(5, std::string("Q")), System::FormatException);
+    EXPECT_NO_THROW(UInt16::ToString(5, std::string("G")));
+}
 
 TEST(UInt16Test, IsEvenInteger) {
     EXPECT_TRUE(UInt16::IsEvenInteger(4u));

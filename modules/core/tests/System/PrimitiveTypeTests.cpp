@@ -158,6 +158,11 @@ TEST(Int32Tests, ToString_D_Negative)    { EXPECT_EQ(Int32::ToString(-5, std::st
 TEST(Int32Tests, ToString_G)             { EXPECT_EQ(Int32::ToString(99, std::string("G")), "99"); }
 TEST(Int32Tests, ToString_B_Basic)       { EXPECT_EQ(Int32::ToString(5, std::string("B")), "101"); }
 TEST(Int32Tests, ToString_B_Padded)      { EXPECT_EQ(Int32::ToString(5, std::string("B8")), "00000101"); }
+// SR-AUD-021 (#1847): an unknown specifier throws FormatException (was silent decimal).
+TEST(Int32Tests, ToString_UnknownFormat_Throws) {
+    EXPECT_THROW(Int32::ToString(5, std::string("Q")), System::FormatException);
+    EXPECT_NO_THROW(Int32::ToString(5, std::string("G")));
+}
 TEST(Int32Tests, ToString_MalformedWidth_ThrowsFormatException) {
     // std::stoi's raw std::invalid_argument/out_of_range must not escape as-is.
     EXPECT_THROW(Int32::ToString(5, std::string("Xz")), System::FormatException);
@@ -279,3 +284,8 @@ TEST(Int64Tests, ToString_MalformedWidth_ThrowsFormatException) {
 TEST(Int64Tests, ToString_B_Basic)  { EXPECT_EQ(Int64::ToString(5LL, std::string("B")), "101"); }
 TEST(Int64Tests, ToString_B_Padded) { EXPECT_EQ(Int64::ToString(5LL, std::string("B8")), "00000101"); }
 TEST(Int64Tests, ToString_B_Zero)   { EXPECT_EQ(Int64::ToString(0LL, std::string("B")), "0"); }
+// SR-AUD-021 (#1847): an unknown specifier throws FormatException (was silent decimal).
+TEST(Int64Tests, ToString_UnknownFormat_Throws) {
+    EXPECT_THROW(Int64::ToString(5LL, std::string("Q")), System::FormatException);
+    EXPECT_NO_THROW(Int64::ToString(5LL, std::string("G")));
+}

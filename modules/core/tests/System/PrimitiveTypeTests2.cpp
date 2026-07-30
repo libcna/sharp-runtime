@@ -647,6 +647,11 @@ TEST(ByteTests, ToString_D_Padded)      { EXPECT_EQ(Byte::ToString(7,   std::str
 TEST(ByteTests, ToString_G)             { EXPECT_EQ(Byte::ToString(99,  std::string("G")), "99"); }
 TEST(ByteTests, ToString_B_Basic)       { EXPECT_EQ(Byte::ToString(5,   std::string("B")), "101"); }
 TEST(ByteTests, ToString_B_Padded)      { EXPECT_EQ(Byte::ToString(5,   std::string("B8")), "00000101"); }
+// SR-AUD-021 (#1847): an unknown specifier throws FormatException (was silent decimal).
+TEST(ByteTests, ToString_UnknownFormat_Throws) {
+    EXPECT_THROW(Byte::ToString(5, std::string("Q")), System::FormatException);
+    EXPECT_NO_THROW(Byte::ToString(5, std::string("G")));
+}
 
 // ---------------------------------------------------------------------------
 // Int16::ToString(format)
