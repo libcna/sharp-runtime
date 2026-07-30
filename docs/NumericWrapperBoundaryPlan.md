@@ -256,6 +256,40 @@ reference, a permanent invalid-domain test, the applicable sanitizer clean, and
 Doxygen inside 1,942. At authoring time **1 of 5 is done** (020, #1843); the
 remaining four are ticketed #1844–#1847 and ready.
 
+### 14.1 CCF-003 CLOSED — 2026-07-30
+
+All five members are now `remediated`:
+
+| Finding | Ticket | Reproduction | Sanitizer |
+|---|---|---|---|
+| SR-AUD-019 | #1834 (CCF-004) | — | — (prior batch) |
+| SR-AUD-020 | #1843 | UBSan shift-exponent abort → clean | UBSan (prior batch) |
+| SR-AUD-021 | #1847 | unknown-format throw; premise fixes | none (throw-only) — **integer slice only; float slice → #1849/CCF-006** |
+| SR-AUD-022 | #1846 | `_GLIBCXX_ASSERTIONS` `[alg.clamp]` abort → clean throw | library-precondition (not language UB) |
+| SR-AUD-023 | #1845 | .NET binary vectors | none (value-only) |
+| SR-AUD-024 | #1844 | .NET `>= 0` parity | none (value-only) |
+
+**Sanitizer note.** The only member with a UB component this batch was SR-AUD-022,
+and its UB is a **library** precondition violation (`[alg.clamp]` p2), which
+`-fsanitize=undefined` does **not** trap — so no `build-asan`/`build-ubsan`
+rebuild was warranted. It was reproduced correctly with `-D_GLIBCXX_ASSERTIONS`
+driving the real production bodies (one process per type), pre-fix SIGABRT and
+post-fix clean throw. The other three members (021/023/024) are pure
+throw/format/value changes with no memory or arithmetic-UB component, so ordinary
+GoogleTest is the complete verification (plan §11).
+
+**Full gate at close:** `scripts/local_ci_check.sh build` green — **14,230 tests
+across 37 executables**, 0 warnings/0 errors (was 14,199; +31: #1846 +12, #1844
++2, #1845 +7, #1847 +10). Module graph **41/91** unchanged. Doxygen **1,941/1,942**.
+Version seams **2/18**, self-tests **15**. Negative fixtures **9/66**. Selective
+components green.
+
+**No confirmed CCF-003 finding remains.** The residual `Single`/`Double`
+`std::stoi` precision leak is the **CCF-006** slice of SR-AUD-021, not a CCF-003
+member — tracked by inactive ticket #1849 and **not** falsely closed. CCF-005,
+006, 007, 008 findings inventoried by this plan (§5/§13) remain `confirmed`; none
+was closed here.
+
 ---
 
 ## 15. Implementation complete (batch `feature/remediation-batch-ccf003-ccf005-plan`, 2026-07-30)
