@@ -674,6 +674,82 @@ SR-AUD-100, and:
 - `modules/core/include/System/ContextMarshalException.hpp.audit.md`;
 - `modules/core/include/System/DuplicateWaitObjectException.hpp.audit.md`.
 
+**Remediated — tickets #1873/#1874 (2026-07-30). CCF-016 is CLOSED.** All five
+members are `remediated`: SR-AUD-093, SR-AUD-094, SR-AUD-095, SR-AUD-096 and
+SR-AUD-100. The original evidence above and in the per-file reports is retained
+unchanged.
+
+Design-only ticket #1873 recorded the family plan in
+`docs/DerivedExceptionHResultPlan.md`; ticket #1874 landed the repair. This cause
+asked for "a repeatable constructor-audit and assertion gap" to be closed by
+checking "every .NET-shaped exception against its own HResult on every public
+overload", and that is exactly the shape of the work: **11 types, 40 public
+constructors, 38 wrong results** before, `wrong=0` after
+(`build-probe/1873_prefix.log` → `build-probe/1874_postfix.log`).
+
+The root cause is structural rather than eleven independent oversights.
+`Exception` initialises `hResult_` to `COR_E_EXCEPTION` and `SystemException`'s
+constructor body overwrites it with `COR_E_SYSTEM`; because a C++ base
+constructor runs *before* the derived body, a type written as a pure forwarding
+constructor — `: SystemException(message) {}` — silently inherits whatever its
+nearest base last wrote. The inherited value was never a decision; it was the
+absence of one. The same property is what makes the repair safe: a statement in
+the derived body always runs last, so no base can overwrite it.
+
+Three things are established beyond the original evidence, all measured:
+
+- **Five findings cover eleven types, not five.** SR-AUD-094 alone spans five,
+  and the port has more constructors than the reference in two places
+  (`ArrayTypeMismatchException` adds a `const char*` overload,
+  `BadImageFormatException` adds `(message, fileName, inner)`). All of them are
+  covered.
+- **SR-AUD-100's message claim is a false positive.** The port's default text
+  `Duplicate objects in argument.` is **byte-identical** to
+  `SR.Arg_DuplicateWaitObjectException`
+  (`System.Private.CoreLib/src/Resources/Strings.resx:319-321`). Only the HResult
+  half of that finding was real; no message change was made, and a permanent test
+  now pins the text verbatim so a future reader acting on the finding's wording
+  cannot introduce a divergence. The finding is marked `remediated` on its real
+  half with the Correction appended, following the SR-AUD-081 / SR-AUD-362
+  convention rather than editing the historical text.
+- **`AggregateException` is not a twelfth member.** A sweep of all 50
+  `modules/core/include/System/*Exception.hpp` headers found exactly twelve with
+  no `setHResultProperty` anywhere — the eleven plus `AggregateException`. But
+  .NET's `AggregateException.cs` assigns **no** HResult either, so inheriting
+  `COR_E_EXCEPTION` is correct parity. It is pinned as a control in both the probe
+  and the permanent suite, and deliberately excluded.
+
+**A larger population exists and was deliberately not absorbed.** The same sweep
+found **45 of 59** exception types *outside* `modules/core/include/System/`
+(`Threading`, `Net`, `IO`, `Text.Json`, `Xml`, `Security.Cryptography`, …) with no
+explicit HResult in either header or source. `AggregateException` proves that
+inheriting can be correct, so none of the 45 is a defect until it has been checked
+against its own reference source. That is a **newly discovered population found
+during remediation**, not a CCF-016 finding: **no `SR-AUD-*` identifier was
+issued** (numbering stays frozen at 364), and it is recorded with its full
+measured type list as inactive ticket **#1875**.
+
+Compatibility: **observable value change only**. No signature, `noexcept`
+specification, virtual function, vtable slot, calling convention or data member
+changed; every affected type remains an empty derived class and the assignment is
+a constructor body statement. Correcting a wrong constant to its documented
+reference value is required by this project's own porting checklist (CLAUDE.md
+item 5), so it is remediation under a standing rule rather than a discretionary
+behaviour change — and the identical shape was already shipped here by
+`InvalidCastException` and `InsufficientExecutionStackException`.
+
+Evidence: 18 permanent add-only regressions in `ExceptionRemainingTests.cpp`
+(`DerivedExceptionHResultTests`) — one exact-hexadecimal assertion per public
+constructor of all eleven types, plus custom-message and parameter-name
+preservation, catch-through-base-reference, copy and copy-assign preservation, the
+unchanged base codes and the `AggregateException` control.
+`SharpRuntimeTests_Core_Base` 5,319/5,319; whole-repository build clean with zero
+errors and zero warnings. **Mutation-checked:** deleting one of
+`DllNotFoundException`'s three assignments fails two permanent tests. Sanitizers
+are recorded as **not applicable** — one integer store per constructor body, no
+allocation, ownership transfer, pointer arithmetic, lifetime change, shared state
+or new member — rather than skipped silently.
+
 ## CCF-017 — the Attribute base's identity fallback changes every unoverridden attribute's value semantics
 
 Current .NET makes `Attribute` abstract and supplies same-type fieldwise

@@ -21,7 +21,9 @@ namespace System {
          * C++ counterpart of .NET ArrayTypeMismatchException().
          */
         ArrayTypeMismatchException()
-            : SystemException("Attempted to access an element as a type incompatible with the array.") {}
+            : SystemException("Attempted to access an element as a type incompatible with the array.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131503)); // COR_E_ARRAYTYPEMISMATCH
+        }
 
         /**
          * @brief Initializes a new instance with the specified error message.
@@ -30,7 +32,9 @@ namespace System {
          * @param message A string that describes the error.
          */
         explicit ArrayTypeMismatchException(const std::string& message)
-            : SystemException(message) {}
+            : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131503)); // COR_E_ARRAYTYPEMISMATCH
+        }
 
         /**
          * @brief Initializes a new instance with the specified error message.
@@ -38,7 +42,9 @@ namespace System {
          * @param message A string that describes the error.
          */
         explicit ArrayTypeMismatchException(const char* message)
-            : SystemException(message) {}
+            : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131503)); // COR_E_ARRAYTYPEMISMATCH
+        }
 
         /**
          * @brief Initializes a new instance with the specified message and
@@ -49,7 +55,9 @@ namespace System {
          * @param inner   The exception that is the cause of this exception.
          */
         ArrayTypeMismatchException(const std::string& message, std::exception_ptr inner)
-            : SystemException(message, std::move(inner)) {}
+            : SystemException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131503)); // COR_E_ARRAYTYPEMISMATCH
+        }
     };
 
 } // namespace System

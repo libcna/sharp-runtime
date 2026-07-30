@@ -13,12 +13,18 @@ namespace System {
     class CannotUnloadAppDomainException : public SystemException {
     public:
         /** @brief Initializes a new instance with the default message. */
-        CannotUnloadAppDomainException() : SystemException("Attempt to unload the AppDomain failed.") {}
+        CannotUnloadAppDomainException() : SystemException("Attempt to unload the AppDomain failed.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131015)); // COR_E_CANNOTUNLOADAPPDOMAIN
+        }
         /** @brief Initializes a new instance with the specified error message. */
-        explicit CannotUnloadAppDomainException(const std::string& message) : SystemException(message) {}
+        explicit CannotUnloadAppDomainException(const std::string& message) : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131015)); // COR_E_CANNOTUNLOADAPPDOMAIN
+        }
         /** @brief Initializes a new instance with the specified message and inner exception. */
         CannotUnloadAppDomainException(const std::string& message, std::exception_ptr inner)
-            : SystemException(message, std::move(inner)) {}
+            : SystemException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131015)); // COR_E_CANNOTUNLOADAPPDOMAIN
+        }
     };
 
 } // namespace System

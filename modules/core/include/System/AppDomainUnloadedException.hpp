@@ -14,12 +14,18 @@ namespace System {
     class AppDomainUnloadedException : public SystemException {
     public:
         /** @brief Initializes a new instance with the default message. */
-        AppDomainUnloadedException() : SystemException("Attempted to access an unloaded AppDomain.") {}
+        AppDomainUnloadedException() : SystemException("Attempted to access an unloaded AppDomain.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131014)); // COR_E_APPDOMAINUNLOADED
+        }
         /** @brief Initializes a new instance with the specified error message. */
-        explicit AppDomainUnloadedException(const std::string& message) : SystemException(message) {}
+        explicit AppDomainUnloadedException(const std::string& message) : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131014)); // COR_E_APPDOMAINUNLOADED
+        }
         /** @brief Initializes a new instance with the specified message and inner exception. */
         AppDomainUnloadedException(const std::string& message, std::exception_ptr inner)
-            : SystemException(message, std::move(inner)) {}
+            : SystemException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131014)); // COR_E_APPDOMAINUNLOADED
+        }
     };
 
 } // namespace System

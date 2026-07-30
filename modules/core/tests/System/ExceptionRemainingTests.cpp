@@ -20,6 +20,7 @@
 #include "System/ArrayTypeMismatchException.hpp"
 #include "System/BadImageFormatException.hpp"
 #include "System/CannotUnloadAppDomainException.hpp"
+#include "System/ContextMarshalException.hpp"
 #include "System/DataMisalignedException.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/DllNotFoundException.hpp"
@@ -557,4 +558,205 @@ TEST(MemberAccessExceptionTests, InnerExceptionPtr_Stored) {
     auto inner = std::make_exception_ptr(std::runtime_error("cause"));
     System::MemberAccessException ex("no access", inner);
     EXPECT_EQ(std::string(ex.what()), "no access");
+}
+
+// ---------------------------------------------------------------------------
+// CCF-016 — every derived exception reports its own documented HResult
+//
+// SR-AUD-093/094/095/096/100. Eleven types were written as pure forwarding
+// constructors, so none called setHResultProperty and every instance reported
+// whatever its nearest base last wrote: COR_E_SYSTEM (0x80131501), COR_E_EXCEPTION
+// (0x80131500), COR_E_TYPELOAD (0x80131522) or COR_E_ARGUMENT (0x80070057).
+// Values below are read from Common/src/System/HResults.cs; one assertion per
+// public constructor, because that is where the value is decided.
+// See docs/DerivedExceptionHResultPlan.md (tickets #1873/#1874).
+// ---------------------------------------------------------------------------
+
+namespace {
+    constexpr SharpRuntime::intcs kCorEException           = static_cast<SharpRuntime::intcs>(0x80131500);
+    constexpr SharpRuntime::intcs kCorESystem              = static_cast<SharpRuntime::intcs>(0x80131501);
+    constexpr SharpRuntime::intcs kCorETypeLoad            = static_cast<SharpRuntime::intcs>(0x80131522);
+    constexpr SharpRuntime::intcs kCorEArgument            = static_cast<SharpRuntime::intcs>(0x80070057);
+
+    constexpr SharpRuntime::intcs kCorEArrayTypeMismatch   = static_cast<SharpRuntime::intcs>(0x80131503);
+    constexpr SharpRuntime::intcs kCorEApplication         = static_cast<SharpRuntime::intcs>(0x80131600);
+    constexpr SharpRuntime::intcs kCorEAppDomainUnloaded   = static_cast<SharpRuntime::intcs>(0x80131014);
+    constexpr SharpRuntime::intcs kCorEBadImageFormat      = static_cast<SharpRuntime::intcs>(0x8007000B);
+    constexpr SharpRuntime::intcs kCorECannotUnloadAppDomain = static_cast<SharpRuntime::intcs>(0x80131015);
+    constexpr SharpRuntime::intcs kCorEDataMisaligned      = static_cast<SharpRuntime::intcs>(0x80131541);
+    constexpr SharpRuntime::intcs kCorEDllNotFound         = static_cast<SharpRuntime::intcs>(0x80131524);
+    constexpr SharpRuntime::intcs kCorEEntryPointNotFound  = static_cast<SharpRuntime::intcs>(0x80131523);
+    constexpr SharpRuntime::intcs kEPointer                = static_cast<SharpRuntime::intcs>(0x80004003);
+    constexpr SharpRuntime::intcs kCorEContextMarshal      = static_cast<SharpRuntime::intcs>(0x80131504);
+    constexpr SharpRuntime::intcs kCorEDuplicateWaitObject = static_cast<SharpRuntime::intcs>(0x80131529);
+
+    std::exception_ptr hresultInner() {
+        return std::make_exception_ptr(std::runtime_error("inner"));
+    }
+} // namespace
+
+TEST(DerivedExceptionHResultTests, ArrayTypeMismatchException_EveryCtor) {
+    EXPECT_EQ(System::ArrayTypeMismatchException().getHResultProperty(), kCorEArrayTypeMismatch);
+    EXPECT_EQ(System::ArrayTypeMismatchException(std::string("m")).getHResultProperty(), kCorEArrayTypeMismatch);
+    EXPECT_EQ(System::ArrayTypeMismatchException("m").getHResultProperty(), kCorEArrayTypeMismatch);
+    EXPECT_EQ(System::ArrayTypeMismatchException(std::string("m"), hresultInner()).getHResultProperty(),
+              kCorEArrayTypeMismatch);
+}
+
+TEST(DerivedExceptionHResultTests, ApplicationException_EveryCtor) {
+    EXPECT_EQ(System::ApplicationException().getHResultProperty(), kCorEApplication);
+    EXPECT_EQ(System::ApplicationException(std::string("m")).getHResultProperty(), kCorEApplication);
+    EXPECT_EQ(System::ApplicationException(std::string("m"), hresultInner()).getHResultProperty(), kCorEApplication);
+}
+
+TEST(DerivedExceptionHResultTests, AppDomainUnloadedException_EveryCtor) {
+    EXPECT_EQ(System::AppDomainUnloadedException().getHResultProperty(), kCorEAppDomainUnloaded);
+    EXPECT_EQ(System::AppDomainUnloadedException(std::string("m")).getHResultProperty(), kCorEAppDomainUnloaded);
+    EXPECT_EQ(System::AppDomainUnloadedException(std::string("m"), hresultInner()).getHResultProperty(),
+              kCorEAppDomainUnloaded);
+}
+
+TEST(DerivedExceptionHResultTests, BadImageFormatException_EveryCtor) {
+    EXPECT_EQ(System::BadImageFormatException().getHResultProperty(), kCorEBadImageFormat);
+    EXPECT_EQ(System::BadImageFormatException(std::string("m")).getHResultProperty(), kCorEBadImageFormat);
+    EXPECT_EQ(System::BadImageFormatException(std::string("m"), hresultInner()).getHResultProperty(),
+              kCorEBadImageFormat);
+    EXPECT_EQ(System::BadImageFormatException(std::string("m"), std::string("f.dll")).getHResultProperty(),
+              kCorEBadImageFormat);
+    EXPECT_EQ(System::BadImageFormatException(std::string("m"), std::string("f.dll"), hresultInner()).getHResultProperty(),
+              kCorEBadImageFormat);
+}
+
+TEST(DerivedExceptionHResultTests, CannotUnloadAppDomainException_EveryCtor) {
+    EXPECT_EQ(System::CannotUnloadAppDomainException().getHResultProperty(), kCorECannotUnloadAppDomain);
+    EXPECT_EQ(System::CannotUnloadAppDomainException(std::string("m")).getHResultProperty(), kCorECannotUnloadAppDomain);
+    EXPECT_EQ(System::CannotUnloadAppDomainException(std::string("m"), hresultInner()).getHResultProperty(),
+              kCorECannotUnloadAppDomain);
+}
+
+TEST(DerivedExceptionHResultTests, DataMisalignedException_EveryCtor) {
+    EXPECT_EQ(System::DataMisalignedException().getHResultProperty(), kCorEDataMisaligned);
+    EXPECT_EQ(System::DataMisalignedException(std::string("m")).getHResultProperty(), kCorEDataMisaligned);
+    EXPECT_EQ(System::DataMisalignedException(std::string("m"), hresultInner()).getHResultProperty(),
+              kCorEDataMisaligned);
+}
+
+TEST(DerivedExceptionHResultTests, DllNotFoundException_EveryCtor) {
+    EXPECT_EQ(System::DllNotFoundException().getHResultProperty(), kCorEDllNotFound);
+    EXPECT_EQ(System::DllNotFoundException(std::string("m")).getHResultProperty(), kCorEDllNotFound);
+    EXPECT_EQ(System::DllNotFoundException(std::string("m"), hresultInner()).getHResultProperty(), kCorEDllNotFound);
+}
+
+TEST(DerivedExceptionHResultTests, EntryPointNotFoundException_EveryCtor) {
+    EXPECT_EQ(System::EntryPointNotFoundException().getHResultProperty(), kCorEEntryPointNotFound);
+    EXPECT_EQ(System::EntryPointNotFoundException(std::string("m")).getHResultProperty(), kCorEEntryPointNotFound);
+    EXPECT_EQ(System::EntryPointNotFoundException(std::string("m"), hresultInner()).getHResultProperty(),
+              kCorEEntryPointNotFound);
+}
+
+TEST(DerivedExceptionHResultTests, AccessViolationException_EveryCtor) {
+    EXPECT_EQ(System::AccessViolationException().getHResultProperty(), kEPointer);
+    EXPECT_EQ(System::AccessViolationException(std::string("m")).getHResultProperty(), kEPointer);
+    EXPECT_EQ(System::AccessViolationException(std::string("m"), hresultInner()).getHResultProperty(), kEPointer);
+}
+
+TEST(DerivedExceptionHResultTests, DuplicateWaitObjectException_EveryCtor) {
+    EXPECT_EQ(System::DuplicateWaitObjectException().getHResultProperty(), kCorEDuplicateWaitObject);
+    EXPECT_EQ(System::DuplicateWaitObjectException(std::string("p")).getHResultProperty(), kCorEDuplicateWaitObject);
+    EXPECT_EQ(System::DuplicateWaitObjectException(std::string("p"), std::string("m")).getHResultProperty(),
+              kCorEDuplicateWaitObject);
+    EXPECT_EQ(System::DuplicateWaitObjectException(std::string("m"), hresultInner()).getHResultProperty(),
+              kCorEDuplicateWaitObject);
+}
+
+TEST(DerivedExceptionHResultTests, DuplicateWaitObjectException_DefaultMessageMatchesReferenceVerbatim) {
+    // SR-AUD-100 additionally claimed the default text diverges from .NET. It does not:
+    // SR.Arg_DuplicateWaitObjectException is "Duplicate objects in argument."
+    // (System.Private.CoreLib/src/Resources/Strings.resx:319-321), byte-identical to the
+    // port's. That half of the finding is a false positive; the text is deliberately
+    // unchanged and pinned here so a future "fix" cannot silently diverge from .NET.
+    EXPECT_STREQ(System::DuplicateWaitObjectException().what(), "Duplicate objects in argument.");
+}
+
+TEST(DerivedExceptionHResultTests, DuplicateWaitObjectException_ParamNameAndMessagePreserved) {
+    System::DuplicateWaitObjectException byParam(std::string("waitHandles"));
+    const std::string w = byParam.what();
+    EXPECT_NE(w.find("Duplicate objects in argument."), std::string::npos);
+    EXPECT_NE(w.find("(Parameter 'waitHandles')"), std::string::npos);
+    // exactly once -- guards the #1776 duplicate-suffix regression
+    EXPECT_EQ(w.find("(Parameter 'waitHandles')"), w.rfind("(Parameter 'waitHandles')"));
+
+    System::DuplicateWaitObjectException withMessage(std::string("waitHandles"), std::string("custom text"));
+    const std::string w2 = withMessage.what();
+    EXPECT_NE(w2.find("custom text"), std::string::npos);
+    EXPECT_NE(w2.find("(Parameter 'waitHandles')"), std::string::npos);
+}
+
+TEST(DerivedExceptionHResultTests, CustomMessagesArePreservedAlongsideTheHResult) {
+    EXPECT_NE(std::string(System::ApplicationException(std::string("boom")).what()).find("boom"), std::string::npos);
+    EXPECT_NE(std::string(System::DllNotFoundException(std::string("boom")).what()).find("boom"), std::string::npos);
+    EXPECT_NE(std::string(System::AccessViolationException(std::string("boom")).what()).find("boom"), std::string::npos);
+    EXPECT_NE(std::string(System::BadImageFormatException(std::string("boom")).what()).find("boom"), std::string::npos);
+}
+
+TEST(DerivedExceptionHResultTests, HResultSurvivesCatchThroughBaseReference) {
+    try {
+        throw System::DllNotFoundException();
+    } catch (const System::TypeLoadException& e) {
+        EXPECT_EQ(e.getHResultProperty(), kCorEDllNotFound);
+    }
+    try {
+        throw System::AccessViolationException();
+    } catch (const System::SystemException& e) {
+        EXPECT_EQ(e.getHResultProperty(), kEPointer);
+    }
+    try {
+        throw System::DuplicateWaitObjectException();
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getHResultProperty(), kCorEDuplicateWaitObject);
+    }
+    try {
+        throw System::ApplicationException();
+    } catch (const System::Exception& e) {
+        EXPECT_EQ(e.getHResultProperty(), kCorEApplication);
+    }
+}
+
+TEST(DerivedExceptionHResultTests, HResultSurvivesCopyAndAssignment) {
+    System::DataMisalignedException original(std::string("m"));
+    System::DataMisalignedException copy(original);
+    EXPECT_EQ(copy.getHResultProperty(), kCorEDataMisaligned);
+    System::DataMisalignedException assigned(std::string("other"));
+    assigned = original;
+    EXPECT_EQ(assigned.getHResultProperty(), kCorEDataMisaligned);
+}
+
+TEST(DerivedExceptionHResultTests, BaseTypesKeepTheirOwnCodes) {
+    // The derived corrections must not leak upward.
+    EXPECT_EQ(System::Exception("m").getHResultProperty(), kCorEException);
+    EXPECT_EQ(System::SystemException("m").getHResultProperty(), kCorESystem);
+    EXPECT_EQ(System::TypeLoadException("m").getHResultProperty(), kCorETypeLoad);
+    EXPECT_EQ(System::ArgumentException("m").getHResultProperty(), kCorEArgument);
+}
+
+TEST(DerivedExceptionHResultTests, AggregateExceptionDeliberatelyInheritsCorEException) {
+    // Same "no setHResultProperty anywhere" shape as the eleven, but CORRECT: .NET's
+    // AggregateException.cs assigns no HResult either, so inheriting COR_E_EXCEPTION is
+    // parity. Pinned so a future sweep does not "fix" it into a divergence.
+    EXPECT_EQ(System::AggregateException().getHResultProperty(), kCorEException);
+    auto ep = std::make_exception_ptr(std::runtime_error("x"));
+    EXPECT_EQ(System::AggregateException({ep}).getHResultProperty(), kCorEException);
+}
+
+TEST(DerivedExceptionHResultTests, ContextMarshalException_EveryCtor) {
+    EXPECT_EQ(System::ContextMarshalException().getHResultProperty(), kCorEContextMarshal);
+    EXPECT_EQ(System::ContextMarshalException("m").getHResultProperty(), kCorEContextMarshal);
+    EXPECT_EQ(System::ContextMarshalException(std::string("m")).getHResultProperty(), kCorEContextMarshal);
+    EXPECT_EQ(System::ContextMarshalException(std::string("m"), hresultInner()).getHResultProperty(),
+              kCorEContextMarshal);
+    try {
+        throw System::ContextMarshalException();
+    } catch (const System::SystemException& e) {
+        EXPECT_EQ(e.getHResultProperty(), kCorEContextMarshal);
+    }
 }

@@ -318,10 +318,13 @@ refreshing. This is recorded as a deliberate judgement, not an omission.
 
 | Finding | Ticket | Status |
 |---|---|---|
-| SR-AUD-093 | #1874 | `confirmed` |
-| SR-AUD-094 | #1874 | `confirmed` |
-| SR-AUD-095 | #1874 | `confirmed` |
-| SR-AUD-096 | #1874 | `confirmed` |
-| SR-AUD-100 | #1874 | `confirmed` |
+| SR-AUD-093 | #1874 | **`remediated`** (2026-07-30) |
+| SR-AUD-094 | #1874 | **`remediated`** (2026-07-30) |
+| SR-AUD-095 | #1874 | **`remediated`** (2026-07-30) |
+| SR-AUD-096 | #1874 | **`remediated`** (2026-07-30) |
+| SR-AUD-100 | #1874 | **`remediated`** (2026-07-30) |
 
-*(Updated by the implementation ticket as it lands.)*
+**CCF-016 is CLOSED (2026-07-30).** All five findings are `remediated` and every
+completion criterion in §12 is met. `build-probe/1873_hresult_probe.cpp` reports
+`wrong=0` after #1874, with the three base values and all three controls still
+`OK`. Ticket #1875 remains open and inactive for the 45-type population in §6.4.

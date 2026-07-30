@@ -15,12 +15,18 @@ namespace System {
     class DllNotFoundException : public TypeLoadException {
     public:
         /** @brief Initializes a new instance with the default DLL-not-found message. */
-        DllNotFoundException() : TypeLoadException("Dll was not found.") {}
+        DllNotFoundException() : TypeLoadException("Dll was not found.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131524)); // COR_E_DLLNOTFOUND
+        }
         /** @brief Initializes a new instance with the specified error message. */
-        explicit DllNotFoundException(const std::string& message) : TypeLoadException(message) {}
+        explicit DllNotFoundException(const std::string& message) : TypeLoadException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131524)); // COR_E_DLLNOTFOUND
+        }
         /** @brief Initializes a new instance with the specified message and inner exception. */
         DllNotFoundException(const std::string& message, std::exception_ptr inner)
-            : TypeLoadException(message, std::move(inner)) {}
+            : TypeLoadException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131524)); // COR_E_DLLNOTFOUND
+        }
     };
 
 } // namespace System

@@ -14,12 +14,18 @@ namespace System {
     class AccessViolationException : public SystemException {
     public:
         /** @brief Initializes a new instance with the default access-violation message. */
-        AccessViolationException() : SystemException("Attempted to read or write protected memory. This is often an indication that other memory is corrupt.") {}
+        AccessViolationException() : SystemException("Attempted to read or write protected memory. This is often an indication that other memory is corrupt.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80004003)); // E_POINTER
+        }
         /** @brief Initializes a new instance with the specified error message. */
-        explicit AccessViolationException(const std::string& message) : SystemException(message) {}
+        explicit AccessViolationException(const std::string& message) : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80004003)); // E_POINTER
+        }
         /** @brief Initializes a new instance with the specified message and inner exception. */
         AccessViolationException(const std::string& message, std::exception_ptr inner)
-            : SystemException(message, std::move(inner)) {}
+            : SystemException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80004003)); // E_POINTER
+        }
     };
 
 } // namespace System

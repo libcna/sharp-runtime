@@ -15,7 +15,9 @@ namespace System {
     class DuplicateWaitObjectException : public ArgumentException {
     public:
         /** @brief Initializes a new instance with the default duplicate-object message. */
-        DuplicateWaitObjectException() : ArgumentException("Duplicate objects in argument.") {}
+        DuplicateWaitObjectException() : ArgumentException("Duplicate objects in argument.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131529)); // COR_E_DUPLICATEWAITOBJECT
+        }
 
         /**
          * @brief Initializes a new instance with the name of the offending parameter.
@@ -23,7 +25,9 @@ namespace System {
          * C++ counterpart of .NET DuplicateWaitObjectException(string parameterName).
          */
         explicit DuplicateWaitObjectException(const std::string& parameterName)
-            : ArgumentException("Duplicate objects in argument.", parameterName) {}
+            : ArgumentException("Duplicate objects in argument.", parameterName) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131529)); // COR_E_DUPLICATEWAITOBJECT
+        }
 
         /**
          * @brief Initializes a new instance with the parameter name and a custom message.
@@ -31,7 +35,9 @@ namespace System {
          * C++ counterpart of .NET DuplicateWaitObjectException(string, string).
          */
         DuplicateWaitObjectException(const std::string& parameterName, const std::string& message)
-            : ArgumentException(message, parameterName) {}
+            : ArgumentException(message, parameterName) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131529)); // COR_E_DUPLICATEWAITOBJECT
+        }
 
         /**
          * @brief Initializes a new instance with a message and an inner exception.
@@ -39,7 +45,9 @@ namespace System {
          * C++ counterpart of .NET DuplicateWaitObjectException(string, Exception).
          */
         DuplicateWaitObjectException(const std::string& message, std::exception_ptr innerException)
-            : ArgumentException(message, std::move(innerException)) {}
+            : ArgumentException(message, std::move(innerException)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131529)); // COR_E_DUPLICATEWAITOBJECT
+        }
     };
 
 } // namespace System

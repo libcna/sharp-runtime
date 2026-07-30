@@ -14,12 +14,18 @@ namespace System {
     class ApplicationException : public Exception {
     public:
         /** @brief Initializes a new instance with the default application error message. */
-        ApplicationException() : Exception("Error in the application.") {}
+        ApplicationException() : Exception("Error in the application.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131600)); // COR_E_APPLICATION
+        }
         /** @brief Initializes a new instance with the specified error message. */
-        explicit ApplicationException(const std::string& message) : Exception(message) {}
+        explicit ApplicationException(const std::string& message) : Exception(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131600)); // COR_E_APPLICATION
+        }
         /** @brief Initializes a new instance with the specified message and inner exception. */
         ApplicationException(const std::string& message, std::exception_ptr inner)
-            : Exception(message, std::move(inner)) {}
+            : Exception(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131600)); // COR_E_APPLICATION
+        }
     };
 
 } // namespace System

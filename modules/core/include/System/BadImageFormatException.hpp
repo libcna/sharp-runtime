@@ -22,7 +22,9 @@ public:
      * C++ counterpart of .NET BadImageFormatException().
      */
     BadImageFormatException()
-        : SystemException("Format of the executable (.exe) or library (.dll) is invalid.") {}
+        : SystemException("Format of the executable (.exe) or library (.dll) is invalid.") {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x8007000B)); // COR_E_BADIMAGEFORMAT
+    }
 
     /**
      * @brief Initializes a new instance with the specified message.
@@ -31,7 +33,9 @@ public:
      * @param message The error message.
      */
     explicit BadImageFormatException(const std::string& message)
-        : SystemException(message) {}
+        : SystemException(message) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x8007000B)); // COR_E_BADIMAGEFORMAT
+    }
 
     /**
      * @brief Initializes a new instance with a message and an inner exception.
@@ -41,7 +45,9 @@ public:
      * @param inner   The exception that is the cause of this exception.
      */
     BadImageFormatException(const std::string& message, std::exception_ptr inner)
-        : SystemException(message, std::move(inner)) {}
+        : SystemException(message, std::move(inner)) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x8007000B)); // COR_E_BADIMAGEFORMAT
+    }
 
     /**
      * @brief Initializes a new instance with a message and a file name.
@@ -51,7 +57,9 @@ public:
      * @param fileName The name of the file with the invalid image.
      */
     BadImageFormatException(const std::string& message, const std::string& fileName)
-        : SystemException(message), fileName_(fileName) {}
+        : SystemException(message), fileName_(fileName) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x8007000B)); // COR_E_BADIMAGEFORMAT
+    }
 
     /**
      * @brief Initializes a new instance with a message, file name, and inner exception.
@@ -63,7 +71,9 @@ public:
      */
     BadImageFormatException(const std::string& message, const std::string& fileName,
                             std::exception_ptr inner)
-        : SystemException(message, std::move(inner)), fileName_(fileName) {}
+        : SystemException(message, std::move(inner)), fileName_(fileName) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x8007000B)); // COR_E_BADIMAGEFORMAT
+    }
 
     /**
      * @brief Gets the name of the file that caused this exception.

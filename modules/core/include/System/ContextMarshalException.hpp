@@ -22,7 +22,9 @@ namespace System {
          * C++ counterpart of .NET ContextMarshalException().
          */
         ContextMarshalException()
-            : SystemException("Attempted to marshal an object across a context boundary.") {}
+            : SystemException("Attempted to marshal an object across a context boundary.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131504)); // COR_E_CONTEXTMARSHAL
+        }
 
         /**
          * @brief Initializes a new instance with the specified error message.
@@ -31,7 +33,9 @@ namespace System {
          * @param message A description of the error.
          */
         explicit ContextMarshalException(const char* message)
-            : SystemException(message) {}
+            : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131504)); // COR_E_CONTEXTMARSHAL
+        }
 
         /**
          * @brief Initializes a new instance with the specified error message.
@@ -40,7 +44,9 @@ namespace System {
          * @param message A description of the error.
          */
         explicit ContextMarshalException(const std::string& message)
-            : SystemException(message) {}
+            : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131504)); // COR_E_CONTEXTMARSHAL
+        }
 
         /**
          * @brief Initializes a new instance with a specified error message and a
@@ -51,7 +57,9 @@ namespace System {
          * @param innerException The exception that is the cause of this exception.
          */
         ContextMarshalException(const std::string& message, std::exception_ptr innerException)
-            : SystemException(message, std::move(innerException)) {}
+            : SystemException(message, std::move(innerException)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131504)); // COR_E_CONTEXTMARSHAL
+        }
     };
 
 } // namespace System
