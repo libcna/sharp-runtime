@@ -5865,3 +5865,43 @@ Repository gate: **0 warnings, 0 errors, 14,196 tests across 37 executables** (v
 `scripts/run_component_tests.sh build` run). Module graph **41 / 91**. **Source and ABI
 consequences: none** -- one added file-local validator plus one call in a `.cpp` body, no
 signature, member, vtable, layout or symbol change.
+
+## Post-audit remediation checkpoint — namespace review + SR-AUD-020 (2026-07-30)
+
+Batch `feature/remediation-batch-1804-namespace-review`. Two units.
+
+**Tooling ticket #1804** (`REMED-TOOLING-SEAM-DISCOVERY-VACUITY`, P3, `done`) closed the
+defence-in-depth gap #1803 measured: `scripts/check_version_seam_odr.py` discovered a seam as a
+class template *declared and not defined* in `namespace SharpRuntime::Testing`, so giving a
+seam's **primary template** a body made it leave discovery, the run exited 0, and the seam count
+fell from 2 to 1 silently. Discovery now also surfaces a **defined** primary class template there
+(a `template<…>` head), so the seam re-enters the inventory and rule 1 rejects it. Non-hard-coded
+and template-only, so a legitimate non-template `SharpRuntime::Testing` helper is not rejected —
+the wontfix trigger did not apply. Self-tests 12→15; reproduction `build-probe/1804_gap_probe.py`;
+mutation campaign on the real `MutationCounter.hpp` confirmed reject-then-restore. Durable record
+`docs/CollectionVersionTestSeamDesign.md` §15; `CLAUDE.md` seam invariant updated. **No SR-AUD-\*
+identifier**; no production code touched.
+
+**The namespace review** selected the **numeric primitive-wrapper boundary family (CCF-003)** —
+the handoff's recommended next family — and produced `docs/NumericWrapperBoundaryPlan.md`: file
+and public-surface inventory, the five findings re-verified against current source and .NET,
+cross-cutting overlap with CCF-005/006/007/008, the shared root causes, the class-A/B/C
+classification, an approval matrix (nothing crosses the boundary), test/sanitizer matrices, and a
+recommended ticket order. Tickets **#1844 (SR-AUD-024)**, **#1845 (SR-AUD-023)**, **#1846
+(SR-AUD-022, P1 — live `std::clamp` UB)**, **#1847 (SR-AUD-021)** opened `todo` and ready; the
+discovered-defect **#1848** (test exec bit) opened `todo`.
+
+**Implementation ticket #1843** (`REMED-CORE-UINT128-SHIFT-MASK`, P1, `done`) remediated
+**SR-AUD-020**, a **class-A** fix. `UInt128::operator<<`/`operator>>` forwarded an out-of-range
+count to the native `unsigned __int128` shift — UB for a count of 128+ or a negative count,
+reproduced under UBSan `-fno-sanitize-recover` (`UInt128.hpp:95:73: shift exponent 128 is too
+large`). They now mask the count with `& 127`, matching .NET (`UInt128.cs:2051/2087`,
+`shiftAmount &= 0x7F`) and the sibling `Int128`. Post-fix UBSan probe clean, out-of-range results
+equal .NET's `& 0x7F`, in-range results byte-identical (`build-probe/1843_uint128_shift_*.log`).
+**+3 permanent regressions** in `UInt128Tests.cpp`; `SharpRuntimeTests_Core_Base` **5056/5056**.
+**Source and ABI consequences: none** — two inline operator bodies, no signature, member, vtable,
+layout or symbol change.
+
+**Audit tally: 30 remediated / 334 confirmed / 364 total** (SR-AUD-020 moved `confirmed →
+remediated`; `AUDIT_FINDINGS_INDEX.md` updated). Numbering stays frozen at 364; **no new SR-AUD-\*
+identifier** was issued by this batch.
