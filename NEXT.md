@@ -7682,3 +7682,37 @@ deviation. Both are stated so a future reader does not go looking.
 **No layer changes a vtable slot, slot order, object layout or return convention.** Layer 2's
 cost is purely semantic; Layer 3's is purely source. Neither is an ABI break — the earlier
 tickets' phrase "vtable-breaking" applies to none of Layers 1–2.
+
+## Completed zlib closed-state capabilities: ticket #1841 (2026-07-30)
+
+`REMED-IO-COMPRESSION-CLOSED-CAPABILITIES`, P3, size S. **Layer 1(b)** of
+[`docs/StreamCapabilityContractDesign.md`](docs/StreamCapabilityContractDesign.md), split out
+of blocked **#1828**. **No `SR-AUD-*` identifier and no finding status change** — the index
+stays at 27 remediated / 337 confirmed of 364.
+
+`DeflateStream`, `GZipStream` and `ZLibStream` returned their **mode alone**, so a **closed**
+wrapper still claimed its capability. .NET's `DeflateStream.cs:171-195` returns `false` whenever
+`_stream == null`, *before* consulting the mode. This port gives each of the three its **own
+copy** of the bodies rather than delegating as .NET's do — which is why it is three edits and
+why the tests cover all three.
+
+**Measured on the full twelve-combination matrix**, three wrappers × two modes × before/after
+`Close()`, for **both** `leaveOpen` values (`build-probe/1841_prefix.log` vs `…_postfix.log`).
+Before: all twelve kept the capability. After: all twelve report `false`, with open-state
+answers and the valid compress-and-close cycle unchanged.
+
+**No new member, no layout change, no approval** — `state_->initialized` already exists and is
+cleared in `Close()` **unconditionally and before** the flush loop that can throw. `inner_` is
+the *wrong* signal: it is nulled only when `leaveOpen == false`, so a `leaveOpen == true`
+wrapper keeps a live `inner_` and would still look open. That is why both `leaveOpen` values are
+asserted. The assumption that this half needed a disposed *flag* — and therefore a layout
+approval like `SR-AUD-337`'s — was wrong.
+
+**The delegation half is pinned as still absent**: a test asserts today's `CanRead == true` for
+a wrapper over a closed inner stream, with a message telling a future reader to invert it when
+#1828 lands. The split lives in the test suite, not only in a document.
+
+6 permanent regressions. `SharpRuntimeTests_IO_Compression` **37/37**, clean under
+ASan + UBSan + LSan, 0 reports. Repository gate **14,145 tests across 37 executables**, 0
+warnings, 0 errors. No public signature, virtual, vtable, object layout or mangled symbol
+changed.

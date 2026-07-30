@@ -349,3 +349,111 @@ TEST(CompressionNullStream, LargeIncompressibleRoundtripStillWorks) {
     EXPECT_EQ(total, static_cast<intcs>(input.size()));
     EXPECT_EQ(out, input);
 }
+
+// ---------------------------------------------------------------------------
+// Closed-state capabilities (ticket #1841)
+//
+// All three wrappers used to return their MODE alone from getCanReadProperty() and
+// getCanWriteProperty(), so a closed wrapper still claimed the capability. Real .NET's
+// DeflateStream.cs:171-195 returns false whenever `_stream == null`, BEFORE consulting the
+// mode, and GZipStream/ZLibStream delegate to a DeflateStream so they inherit exactly that.
+//
+// This is Layer 1(b) of docs/StreamCapabilityContractDesign.md: it corrects a stream lying
+// about ITSELF, needs no new member and no object-layout change (`state_->initialized`
+// already exists), and was measured compatible against the whole gate before it shipped.
+//
+// The full twelve-combination matrix is asserted -- three wrappers x two modes x
+// before/after Close() -- for BOTH `leaveOpen` values, because `leaveOpen` decides whether
+// `inner_` is nulled and the answer must not depend on that. Twelve, not four, because
+// measuring only one wrapper would not have shown that GZipStream and ZLibStream have their
+// own copies of these bodies rather than delegating as .NET's do.
+//
+// NOT asserted here, deliberately: .NET also conjoins the INNER stream's matching
+// capability. That delegation is blocked ticket #1828 -- it consults another object's
+// possibly-defaulted declaration, and System::IO::Stream::getCanWriteProperty() defaults to
+// false. The current behaviour is pinned below so the split stays visible.
+// ---------------------------------------------------------------------------
+
+namespace {
+    template <typename Wrapper>
+    void expectCapabilitiesFalseAfterClose(CompressionMode mode, bool expectReadWhileOpen,
+                                           bool leaveOpen, const char* label) {
+        MemoryStream inner;
+        Wrapper w(&inner, mode, leaveOpen);
+        EXPECT_EQ(w.getCanReadProperty(), expectReadWhileOpen) << label << " (open, read)";
+        EXPECT_EQ(w.getCanWriteProperty(), !expectReadWhileOpen) << label << " (open, write)";
+        w.Close();
+        EXPECT_FALSE(w.getCanReadProperty()) << label << " (closed, read)";
+        EXPECT_FALSE(w.getCanWriteProperty()) << label << " (closed, write)";
+    }
+}
+
+TEST(ZlibClosedCapabilityTests, DeflateStreamReportsNoCapabilityAfterClose) {
+    for (bool leaveOpen : {false, true}) {
+        expectCapabilitiesFalseAfterClose<DeflateStream>(
+            CompressionMode::Decompress, true, leaveOpen, "DeflateStream/Decompress");
+        expectCapabilitiesFalseAfterClose<DeflateStream>(
+            CompressionMode::Compress, false, leaveOpen, "DeflateStream/Compress");
+    }
+}
+
+TEST(ZlibClosedCapabilityTests, GZipStreamReportsNoCapabilityAfterClose) {
+    for (bool leaveOpen : {false, true}) {
+        expectCapabilitiesFalseAfterClose<GZipStream>(
+            CompressionMode::Decompress, true, leaveOpen, "GZipStream/Decompress");
+        expectCapabilitiesFalseAfterClose<GZipStream>(
+            CompressionMode::Compress, false, leaveOpen, "GZipStream/Compress");
+    }
+}
+
+TEST(ZlibClosedCapabilityTests, ZLibStreamReportsNoCapabilityAfterClose) {
+    for (bool leaveOpen : {false, true}) {
+        expectCapabilitiesFalseAfterClose<ZLibStream>(
+            CompressionMode::Decompress, true, leaveOpen, "ZLibStream/Decompress");
+        expectCapabilitiesFalseAfterClose<ZLibStream>(
+            CompressionMode::Compress, false, leaveOpen, "ZLibStream/Compress");
+    }
+}
+
+TEST(ZlibClosedCapabilityTests, ASecondCloseKeepsReportingNoCapability) {
+    // The destructor calls Close() unconditionally, so the double-Close path is not
+    // hypothetical; `state_->initialized` must stay false rather than being re-read from a
+    // half-torn-down state.
+    MemoryStream inner;
+    DeflateStream ds(&inner, CompressionMode::Compress, true);
+    ds.Close();
+    ds.Close();
+    EXPECT_FALSE(ds.getCanWriteProperty());
+    EXPECT_FALSE(ds.getCanReadProperty());
+}
+
+TEST(ZlibClosedCapabilityTests, TheValidCompressPathIsUnchanged) {
+    // The guard must not make an OPEN wrapper look closed: a real compress-and-close cycle
+    // still reports CanWrite while open and still produces output.
+    MemoryStream inner;
+    const std::string text = "hello hello hello hello hello";
+    const auto payload = toBytes(text);
+    {
+        DeflateStream ds(&inner, CompressionMode::Compress, /*leaveOpen=*/true);
+        EXPECT_TRUE(ds.getCanWriteProperty());
+        EXPECT_FALSE(ds.getCanReadProperty());
+        ds.Write(payload.data(), 0, static_cast<intcs>(payload.size()));
+        ds.Close();
+        EXPECT_FALSE(ds.getCanWriteProperty());
+    }
+    EXPECT_GT(inner.getLengthProperty(), 0);
+    EXPECT_LT(inner.getLengthProperty(), static_cast<intcs>(payload.size()));
+}
+
+TEST(ZlibClosedCapabilityTests, InnerStreamDelegationIsStillAbsent) {
+    // Pins blocked ticket #1828's remaining half. .NET returns
+    // `_mode == Decompress && _stream.CanRead`, so this SHOULD be false; today it is true,
+    // because delegating would consult a possibly-defaulted declaration on another object.
+    // When #1828 lands this assertion inverts, deliberately and visibly.
+    MemoryStream inner;
+    inner.Close();
+    ASSERT_FALSE(inner.getCanReadProperty());
+    GZipStream gz(&inner, CompressionMode::Decompress, /*leaveOpen=*/true);
+    EXPECT_TRUE(gz.getCanReadProperty())
+        << "if this now fails, ticket #1828's delegation half has landed -- invert it";
+}

@@ -74,8 +74,35 @@ GZipStream::~GZipStream() { try { Close(); } catch (...) {} }
 // Property accessors
 // ---------------------------------------------------------------------------
 
-bool GZipStream::getCanReadProperty()  const { return mode_ == CompressionMode::Decompress; }
-bool GZipStream::getCanWriteProperty() const { return mode_ == CompressionMode::Compress;   }
+// Ticket #1841 (docs/StreamCapabilityContractDesign.md Layer 1(b)). These used to return the
+// mode alone, so a CLOSED wrapper still claimed its mode's capability -- measured on all twelve
+// wrapper x mode x before/after-Close combinations, for both leaveOpen values
+// (build-probe/1841_prefix.log). Real .NET's DeflateStream.cs:171-195 returns false whenever
+// `_stream == null`, BEFORE consulting the mode, and GZipStream/ZLibStream delegate to a
+// DeflateStream so they inherit exactly that.
+//
+// `state_->initialized` is the closed signal, not `inner_`: Close() clears `initialized`
+// unconditionally (before the flush loop that can throw, see Close()), whereas it nulls `inner_`
+// only when leaveOpen is false -- so a leaveOpen=true wrapper keeps a live `inner_` after Close()
+// and would otherwise still look open. Both are tested because `inner_` is genuinely null in the
+// non-leaveOpen case and a null dereference in the delegation half would be the next defect.
+// This needs NO new member and NO object-layout change; that is why this half of #1828 needed no
+// approval and could ship ahead of the rest.
+//
+// DELIBERATELY NOT ADDED HERE: .NET also conjoins the inner stream's matching capability
+// (`_mode == CompressionMode.Decompress && _stream.CanRead`). That DELEGATION consults another
+// object's possibly-defaulted declaration -- System::IO::Stream::getCanWriteProperty() defaults
+// to false -- so it is covered by the single approval in StreamCapabilityContractDesign.md
+// section 6.2 and remains blocked ticket #1828. Today a wrapper over an unreadable inner stream
+// still reports CanRead == true (build-probe/1841_prefix.log, last line).
+bool GZipStream::getCanReadProperty()  const {
+    if (!state_ || !state_->initialized) return false;
+    return mode_ == CompressionMode::Decompress;
+}
+bool GZipStream::getCanWriteProperty() const {
+    if (!state_ || !state_->initialized) return false;
+    return mode_ == CompressionMode::Compress;
+}
 
 SharpRuntime::intcs GZipStream::getLengthProperty() const {
     throw System::NotSupportedException("This operation is not supported.");

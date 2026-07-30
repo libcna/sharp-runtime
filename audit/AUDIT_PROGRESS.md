@@ -5532,3 +5532,52 @@ errors, 14,139 tests across 37 executables** (was 14,134). Module graph **41 / 9
 
 **Source and ABI consequences: none.** No signature, virtual, vtable, object layout or
 mangled symbol changed; both changed functions are private static helpers.
+
+---
+
+Ticket **#1841** (`REMED-IO-COMPRESSION-CLOSED-CAPABILITIES`, P3, size S, category
+`remediation`, area *IO.Compression*) is **done**. It carries **no `SR-AUD-*` identifier** and
+**changes no finding's status** — audit numbering stays frozen at **364**, and the index still
+reads **27 remediated / 337 confirmed**. It is Layer 1(b) of
+`docs/StreamCapabilityContractDesign.md`, split out of blocked ticket **#1828**.
+
+`DeflateStream`, `GZipStream` and `ZLibStream` returned their **mode alone** from
+`getCanReadProperty()` and `getCanWriteProperty()`, so a **closed** wrapper still claimed the
+capability. Real .NET's `DeflateStream.cs:171-195` returns `false` whenever
+`_stream == null`, *before* consulting the mode; `GZipStream`/`ZLibStream` delegate to a
+`DeflateStream` and inherit that, whereas this port gives each of the three its **own copy** of
+the bodies — which is why the fix is three edits and why the tests cover all three rather than
+one.
+
+**Measured on the full twelve-combination matrix before and after** — three wrappers × two
+modes × before/after `Close()` — for **both** `leaveOpen` values
+(`build-probe/1841_prefix.log`, `build-probe/1841_postfix.log`). Before: every wrapper kept its
+capability across `Close()` in all twelve. After: every one reports `false`, and the open-state
+answers and the valid compress-and-close cycle are byte-identical.
+
+**No new member and no object-layout change, which is why this half needed no approval.**
+`state_->initialized` already exists, is set at the end of the constructor, and is cleared in
+`Close()` **unconditionally and before** the flush loop that can throw
+(`DeflateStream.cpp:200`). `inner_` is the wrong signal: `Close()` nulls it only when
+`leaveOpen` is `false`, so a `leaveOpen == true` wrapper keeps a live `inner_` after `Close()`
+and would still look open. Both `leaveOpen` values are asserted for exactly that reason. The
+assumption that this half needed a disposed **flag** — and therefore a layout approval, like
+`SR-AUD-337` — was wrong, and #1839 measured it wrong before this ticket started.
+
+**The delegation half is deliberately still absent and is now pinned as such.** .NET also
+conjoins the inner stream's matching capability. That consults another object's
+possibly-defaulted declaration, so it is covered by the single approval in
+`StreamCapabilityContractDesign.md` §6.2 and remains blocked **#1828**. A test asserts today's
+`CanRead == true` for a wrapper over a closed inner stream, with a message telling a future
+reader to invert it when #1828 lands — so the split is visible in the test suite, not only in a
+document.
+
+**Tests: +6 permanent regressions.** `SharpRuntimeTests_IO_Compression` **37/37**, clean under
+**ASan + UBSan + LSan with zero reports** (`build-asan/1841_io_compression_asan.log`), with the
+ASan `CompressionTests.cpp.o`, `libsharp_runtime_io.a` and `libsharp_runtime_io_compression.a`
+all proven rebuilt first. Repository gate: **0 warnings, 0 errors, 14,145 tests across 37
+executables** (was 14,139). Module graph **41 / 91**.
+
+**Source and ABI consequences: none.** No signature, virtual, vtable, object layout or mangled
+symbol changed. The observable change is confined to what a **closed** wrapper reports, which
+is the wrong answer being corrected.
