@@ -4,10 +4,13 @@
 #pragma once
 #include <array>
 #include <bit>
+#include <cstddef>
 #include <cstring>
 #include <string>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Half.hpp"
 #include "System/Int128.hpp"
 #include "System/UInt128.hpp"
@@ -146,35 +149,45 @@ namespace System {
         // -----------------------------------------------------------------------
         // To* — vector overloads
         // -----------------------------------------------------------------------
+        //
+        // Unlike the raw-pointer overloads above (documented-precondition APIs with
+        // no length to check), the vector overloads hold v.size(), so they validate
+        // @p startIndex and the value width before forwarding to the raw read --
+        // matching .NET BitConverter's byte[] decoders, which throw
+        // ArgumentOutOfRangeException(startIndex) when (uint)startIndex >= (uint)Length
+        // and ArgumentException(value) when startIndex > Length - sizeof(T), before
+        // any byte is read (SR-AUD-041). Without this, ToInt32(vec4,-1) read before
+        // the buffer and ToInt32(vec3,0) read past its end -- an ASan-confirmed heap
+        // out-of-bounds read.
 
         /** @brief Returns a Boolean converted from the byte at a specified position in a byte vector. */
-        [[nodiscard]] static bool     ToBoolean(const std::vector<bytecs>& v, intcs i) { return ToBoolean(v.data(), i); }
+        [[nodiscard]] static bool     ToBoolean(const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 1);  return ToBoolean(v.data(), i); }
         /** @brief Returns a Unicode character converted from two bytes in a byte vector. */
-        [[nodiscard]] static charcs   ToChar   (const std::vector<bytecs>& v, intcs i) { return ToChar   (v.data(), i); }
+        [[nodiscard]] static charcs   ToChar   (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 2);  return ToChar   (v.data(), i); }
         /** @brief Returns a 16-bit signed integer converted from two bytes in a byte vector. */
-        [[nodiscard]] static shortcs  ToInt16  (const std::vector<bytecs>& v, intcs i) { return ToInt16  (v.data(), i); }
+        [[nodiscard]] static shortcs  ToInt16  (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 2);  return ToInt16  (v.data(), i); }
         /** @brief Returns a 16-bit unsigned integer converted from two bytes in a byte vector. */
-        [[nodiscard]] static ushortcs ToUInt16 (const std::vector<bytecs>& v, intcs i) { return ToUInt16 (v.data(), i); }
+        [[nodiscard]] static ushortcs ToUInt16 (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 2);  return ToUInt16 (v.data(), i); }
         /** @brief Returns a 32-bit signed integer converted from four bytes in a byte vector. */
-        [[nodiscard]] static intcs    ToInt32  (const std::vector<bytecs>& v, intcs i) { return ToInt32  (v.data(), i); }
+        [[nodiscard]] static intcs    ToInt32  (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 4);  return ToInt32  (v.data(), i); }
         /** @brief Returns a 32-bit unsigned integer converted from four bytes in a byte vector. */
-        [[nodiscard]] static uintcs   ToUInt32 (const std::vector<bytecs>& v, intcs i) { return ToUInt32 (v.data(), i); }
+        [[nodiscard]] static uintcs   ToUInt32 (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 4);  return ToUInt32 (v.data(), i); }
         /** @brief Returns a 64-bit signed integer converted from eight bytes in a byte vector. */
-        [[nodiscard]] static longcs   ToInt64  (const std::vector<bytecs>& v, intcs i) { return ToInt64  (v.data(), i); }
+        [[nodiscard]] static longcs   ToInt64  (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 8);  return ToInt64  (v.data(), i); }
         /** @brief Returns a 64-bit unsigned integer converted from eight bytes in a byte vector. */
-        [[nodiscard]] static ulongcs  ToUInt64 (const std::vector<bytecs>& v, intcs i) { return ToUInt64 (v.data(), i); }
+        [[nodiscard]] static ulongcs  ToUInt64 (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 8);  return ToUInt64 (v.data(), i); }
         /** @brief Returns a single-precision float converted from four bytes in a byte vector. */
-        [[nodiscard]] static SharpRuntime::Single ToSingle (const std::vector<bytecs>& v, intcs i) { return ToSingle (v.data(), i); }
+        [[nodiscard]] static SharpRuntime::Single ToSingle (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 4);  return ToSingle (v.data(), i); }
         /** @brief Returns a double-precision float converted from eight bytes in a byte vector. */
-        [[nodiscard]] static double   ToDouble (const std::vector<bytecs>& v, intcs i) { return ToDouble (v.data(), i); }
+        [[nodiscard]] static double   ToDouble (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 8);  return ToDouble (v.data(), i); }
         /** @brief Returns a half-precision float converted from two bytes in a byte vector. */
-        [[nodiscard]] static Half     ToHalf   (const std::vector<bytecs>& v, intcs i) { return ToHalf   (v.data(), i); }
+        [[nodiscard]] static Half     ToHalf   (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 2);  return ToHalf   (v.data(), i); }
         /** @brief Returns a BFloat16 value converted from two bytes in a byte vector. */
-        [[nodiscard]] static BFloat16 ToBFloat16(const std::vector<bytecs>& v, intcs i) { return ToBFloat16(v.data(), i); }
+        [[nodiscard]] static BFloat16 ToBFloat16(const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 2);  return ToBFloat16(v.data(), i); }
         /** @brief Returns a 128-bit signed integer converted from sixteen bytes in a byte vector. */
-        [[nodiscard]] static Int128   ToInt128  (const std::vector<bytecs>& v, intcs i) { return ToInt128  (v.data(), i); }
+        [[nodiscard]] static Int128   ToInt128  (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 16); return ToInt128  (v.data(), i); }
         /** @brief Returns a 128-bit unsigned integer converted from sixteen bytes in a byte vector. */
-        [[nodiscard]] static UInt128  ToUInt128 (const std::vector<bytecs>& v, intcs i) { return ToUInt128 (v.data(), i); }
+        [[nodiscard]] static UInt128  ToUInt128 (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 16); return ToUInt128 (v.data(), i); }
 
         // -----------------------------------------------------------------------
         // Bit-reinterpretation methods
@@ -254,6 +267,29 @@ namespace System {
          * C++ counterpart of .NET BitConverter.ToString(byte[]).
          */
         [[nodiscard]] static std::string ToString(const std::vector<bytecs>& value);
+
+    private:
+        /**
+         * @brief Validates @p startIndex and value @p width for a typed vector decoder.
+         *
+         * Mirrors .NET BitConverter's byte[] decoders: the first check is the unsigned
+         * comparison @c (uint)startIndex >= (uint)size, which rejects both a negative and
+         * an over-large index with ArgumentOutOfRangeException(startIndex); the second
+         * rejects a valid start with insufficient remaining bytes
+         * (@c startIndex > size - width) with ArgumentException(value). For @p width 1
+         * (ToBoolean) the ArgumentException branch is provably unreachable -- an index that
+         * passes the first check satisfies @c i <= size - 1 -- so ToBoolean throws only
+         * ArgumentOutOfRangeException, exactly as .NET's ToBoolean does.
+         */
+        static void validateDecodeRange(std::size_t size, intcs i, intcs width) {
+            const intcs isize = static_cast<intcs>(size);
+            if (i < 0 || i >= isize)
+                throw System::ArgumentOutOfRangeException("startIndex");
+            if (i > isize - width)
+                throw System::ArgumentException(
+                    "The array starting from the specified index is not long enough to read a value of the specified type.",
+                    "value");
+        }
     };
 
 } // namespace System

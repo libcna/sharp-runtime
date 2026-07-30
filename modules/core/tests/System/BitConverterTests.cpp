@@ -447,3 +447,248 @@ TEST(BitConverterTests, ToUInt128_VectorOverload) {
     std::vector<bytecs> v(arr.begin(), arr.end());
     EXPECT_EQ(BitConverter::ToUInt128(v, 0), val);
 }
+
+// ---------------------------------------------------------------------------
+// SR-AUD-041 (#1851): typed vector decoders validate startIndex and value width
+// before reading, matching .NET BitConverter's byte[] decoders. Before this fix
+// every decoder forwarded v.data()+i to a raw memcpy with an attacker-controlled
+// signed i and NO bounds check -> heap out-of-bounds read (ASan-confirmed:
+// ToInt32(vec4,-1) read before the buffer; ToInt32(vec3,0) read past its end).
+//
+// Per decoder we assert: (a) a negative startIndex throws ArgumentOutOfRangeException;
+// (b) startIndex == size (one past the last valid index) throws
+// ArgumentOutOfRangeException; (c) startIndex beyond size throws
+// ArgumentOutOfRangeException; (d) a valid startIndex with fewer than sizeof(T)
+// bytes remaining throws ArgumentException (the ToBoolean quirk: width 1 never
+// hits this branch, so it throws ArgumentOutOfRangeException only); (e) the
+// exact-fit index-0 read still returns the round-trip value unchanged.
+// ---------------------------------------------------------------------------
+
+// --- ToBoolean (width 1: ArgumentOutOfRangeException only, never ArgumentException) ---
+TEST(BitConverterTests, ToBoolean_Vector_NegativeStartIndex_ThrowsAOORE) {
+    std::vector<bytecs> v{1};
+    EXPECT_THROW(BitConverter::ToBoolean(v, -1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToBoolean_Vector_StartIndexEqualsSize_ThrowsAOORE) {
+    std::vector<bytecs> v{1};
+    EXPECT_THROW(BitConverter::ToBoolean(v, 1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToBoolean_Vector_EmptyAtZero_ThrowsAOORE) {
+    std::vector<bytecs> v;
+    EXPECT_THROW(BitConverter::ToBoolean(v, 0), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToBoolean_Vector_LastValidIndex_Reads) {
+    std::vector<bytecs> v{0, 7};
+    EXPECT_TRUE(BitConverter::ToBoolean(v, 1));
+}
+
+// --- ToChar (width 2) ---
+TEST(BitConverterTests, ToChar_Vector_NegativeStartIndex_ThrowsAOORE) {
+    std::vector<bytecs> v{1, 2};
+    EXPECT_THROW(BitConverter::ToChar(v, -1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToChar_Vector_StartIndexEqualsSize_ThrowsAOORE) {
+    std::vector<bytecs> v{1, 2};
+    EXPECT_THROW(BitConverter::ToChar(v, 2), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToChar_Vector_InsufficientWidth_ThrowsArgumentException) {
+    std::vector<bytecs> v{1, 2};  // valid index 1, but only 1 byte remains for a 2-byte read
+    EXPECT_THROW(BitConverter::ToChar(v, 1), System::ArgumentException);
+}
+TEST(BitConverterTests, ToChar_Vector_ExactFit_RoundTrips) {
+    auto arr = BitConverter::GetBytes(static_cast<charcs>(u'Z'));
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToChar(v, 0), static_cast<charcs>(u'Z'));
+}
+
+// --- ToInt16 (width 2) ---
+TEST(BitConverterTests, ToInt16_Vector_NegativeStartIndex_ThrowsAOORE) {
+    std::vector<bytecs> v{1, 2};
+    EXPECT_THROW(BitConverter::ToInt16(v, -1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToInt16_Vector_InsufficientWidth_ThrowsArgumentException) {
+    std::vector<bytecs> v{1, 2};
+    EXPECT_THROW(BitConverter::ToInt16(v, 1), System::ArgumentException);
+}
+TEST(BitConverterTests, ToInt16_Vector_ExactFit_RoundTrips) {
+    auto arr = BitConverter::GetBytes(static_cast<SharpRuntime::shortcs>(-1234));
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToInt16(v, 0), static_cast<SharpRuntime::shortcs>(-1234));
+}
+
+// --- ToUInt16 (width 2) ---
+TEST(BitConverterTests, ToUInt16_Vector_NegativeStartIndex_ThrowsAOORE) {
+    std::vector<bytecs> v{1, 2};
+    EXPECT_THROW(BitConverter::ToUInt16(v, -1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToUInt16_Vector_InsufficientWidth_ThrowsArgumentException) {
+    std::vector<bytecs> v{1, 2};
+    EXPECT_THROW(BitConverter::ToUInt16(v, 1), System::ArgumentException);
+}
+TEST(BitConverterTests, ToUInt16_Vector_ExactFit_RoundTrips) {
+    auto arr = BitConverter::GetBytes(static_cast<ushortcs>(0xBEEF));
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToUInt16(v, 0), static_cast<ushortcs>(0xBEEF));
+}
+
+// --- ToInt32 (width 4): the audit's canonical ASan repro ---
+TEST(BitConverterTests, ToInt32_Vector_NegativeStartIndex_ThrowsAOORE) {
+    std::vector<bytecs> v{1, 2, 3, 4};
+    EXPECT_THROW(BitConverter::ToInt32(v, -1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToInt32_Vector_StartIndexEqualsSize_ThrowsAOORE) {
+    std::vector<bytecs> v{1, 2, 3, 4};
+    EXPECT_THROW(BitConverter::ToInt32(v, 4), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToInt32_Vector_ShortVectorAtZero_ThrowsArgumentException) {
+    std::vector<bytecs> v{1, 2, 3};  // 3 bytes: index 0 valid, but a 4-byte read overruns
+    EXPECT_THROW(BitConverter::ToInt32(v, 0), System::ArgumentException);
+}
+TEST(BitConverterTests, ToInt32_Vector_InsufficientWidth_ThrowsArgumentException) {
+    std::vector<bytecs> v{1, 2, 3, 4};
+    EXPECT_THROW(BitConverter::ToInt32(v, 1), System::ArgumentException);
+}
+TEST(BitConverterTests, ToInt32_Vector_ExactFit_RoundTrips) {
+    auto arr = BitConverter::GetBytes(static_cast<SharpRuntime::intcs>(-559038737));
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToInt32(v, 0), static_cast<SharpRuntime::intcs>(-559038737));
+}
+
+// --- ToUInt32 (width 4) ---
+TEST(BitConverterTests, ToUInt32_Vector_NegativeStartIndex_ThrowsAOORE) {
+    std::vector<bytecs> v{1, 2, 3, 4};
+    EXPECT_THROW(BitConverter::ToUInt32(v, -1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToUInt32_Vector_InsufficientWidth_ThrowsArgumentException) {
+    std::vector<bytecs> v{1, 2, 3, 4};
+    EXPECT_THROW(BitConverter::ToUInt32(v, 2), System::ArgumentException);
+}
+TEST(BitConverterTests, ToUInt32_Vector_ExactFit_RoundTrips) {
+    auto arr = BitConverter::GetBytes(static_cast<uintcs>(0xDEADBEEF));
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToUInt32(v, 0), static_cast<uintcs>(0xDEADBEEF));
+}
+
+// --- ToInt64 (width 8) ---
+TEST(BitConverterTests, ToInt64_Vector_NegativeStartIndex_ThrowsAOORE) {
+    std::vector<bytecs> v(8, 0);
+    EXPECT_THROW(BitConverter::ToInt64(v, -1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToInt64_Vector_ShortVectorAtZero_ThrowsArgumentException) {
+    std::vector<bytecs> v(7, 0);  // 7 bytes < 8
+    EXPECT_THROW(BitConverter::ToInt64(v, 0), System::ArgumentException);
+}
+TEST(BitConverterTests, ToInt64_Vector_ExactFit_RoundTrips) {
+    auto arr = BitConverter::GetBytes(static_cast<SharpRuntime::longcs>(-1));
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToInt64(v, 0), static_cast<SharpRuntime::longcs>(-1));
+}
+
+// --- ToUInt64 (width 8) ---
+TEST(BitConverterTests, ToUInt64_Vector_NegativeStartIndex_ThrowsAOORE) {
+    std::vector<bytecs> v(8, 0);
+    EXPECT_THROW(BitConverter::ToUInt64(v, -1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToUInt64_Vector_InsufficientWidth_ThrowsArgumentException) {
+    std::vector<bytecs> v(8, 0);
+    EXPECT_THROW(BitConverter::ToUInt64(v, 1), System::ArgumentException);
+}
+TEST(BitConverterTests, ToUInt64_Vector_ExactFit_RoundTrips) {
+    auto arr = BitConverter::GetBytes(static_cast<ulongcs>(0xCAFEBABEDEADBEEFull));
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToUInt64(v, 0), static_cast<ulongcs>(0xCAFEBABEDEADBEEFull));
+}
+
+// --- ToSingle (width 4) ---
+TEST(BitConverterTests, ToSingle_Vector_NegativeStartIndex_ThrowsAOORE) {
+    std::vector<bytecs> v(4, 0);
+    EXPECT_THROW(BitConverter::ToSingle(v, -1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToSingle_Vector_InsufficientWidth_ThrowsArgumentException) {
+    std::vector<bytecs> v(4, 0);
+    EXPECT_THROW(BitConverter::ToSingle(v, 1), System::ArgumentException);
+}
+TEST(BitConverterTests, ToSingle_Vector_ExactFit_RoundTrips) {
+    auto arr = BitConverter::GetBytes(3.14159f);
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToSingle(v, 0), 3.14159f);
+}
+
+// --- ToDouble (width 8) ---
+TEST(BitConverterTests, ToDouble_Vector_NegativeStartIndex_ThrowsAOORE) {
+    std::vector<bytecs> v(8, 0);
+    EXPECT_THROW(BitConverter::ToDouble(v, -1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToDouble_Vector_ShortVectorAtZero_ThrowsArgumentException) {
+    std::vector<bytecs> v(7, 0);
+    EXPECT_THROW(BitConverter::ToDouble(v, 0), System::ArgumentException);
+}
+TEST(BitConverterTests, ToDouble_Vector_ExactFit_RoundTrips) {
+    auto arr = BitConverter::GetBytes(2.718281828459045);
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToDouble(v, 0), 2.718281828459045);
+}
+
+// --- ToHalf (width 2) ---
+TEST(BitConverterTests, ToHalf_Vector_NegativeStartIndex_ThrowsAOORE) {
+    std::vector<bytecs> v(2, 0);
+    EXPECT_THROW(BitConverter::ToHalf(v, -1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToHalf_Vector_InsufficientWidth_ThrowsArgumentException) {
+    std::vector<bytecs> v(2, 0);
+    EXPECT_THROW(BitConverter::ToHalf(v, 1), System::ArgumentException);
+}
+TEST(BitConverterTests, ToHalf_Vector_ExactFit_RoundTrips) {
+    System::Half h{0x3E00u};  // 1.5 in half-precision
+    auto arr = BitConverter::GetBytes(h);
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToHalf(v, 0).bits, h.bits);
+}
+
+// --- ToBFloat16 (width 2) ---
+TEST(BitConverterTests, ToBFloat16_Vector_NegativeStartIndex_ThrowsAOORE) {
+    std::vector<bytecs> v(2, 0);
+    EXPECT_THROW(BitConverter::ToBFloat16(v, -1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToBFloat16_Vector_InsufficientWidth_ThrowsArgumentException) {
+    std::vector<bytecs> v(2, 0);
+    EXPECT_THROW(BitConverter::ToBFloat16(v, 1), System::ArgumentException);
+}
+TEST(BitConverterTests, ToBFloat16_Vector_ExactFit_RoundTrips) {
+    System::Numerics::BFloat16 bf(static_cast<uint16_t>(0x3F80));  // 1.0
+    auto arr = BitConverter::GetBytes(bf);
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToBFloat16(v, 0).getBitsProperty(), bf.getBitsProperty());
+}
+
+// --- ToInt128 (width 16) ---
+TEST(BitConverterTests, ToInt128_Vector_NegativeStartIndex_ThrowsAOORE) {
+    std::vector<bytecs> v(16, 0);
+    EXPECT_THROW(BitConverter::ToInt128(v, -1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToInt128_Vector_ShortVectorAtZero_ThrowsArgumentException) {
+    std::vector<bytecs> v(15, 0);
+    EXPECT_THROW(BitConverter::ToInt128(v, 0), System::ArgumentException);
+}
+TEST(BitConverterTests, ToInt128_Vector_ExactFit_RoundTrips) {
+    System::Int128 val(static_cast<__int128>(-42));
+    auto arr = BitConverter::GetBytes(val);
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToInt128(v, 0), val);
+}
+
+// --- ToUInt128 (width 16) ---
+TEST(BitConverterTests, ToUInt128_Vector_NegativeStartIndex_ThrowsAOORE) {
+    std::vector<bytecs> v(16, 0);
+    EXPECT_THROW(BitConverter::ToUInt128(v, -1), System::ArgumentOutOfRangeException);
+}
+TEST(BitConverterTests, ToUInt128_Vector_InsufficientWidth_ThrowsArgumentException) {
+    std::vector<bytecs> v(16, 0);
+    EXPECT_THROW(BitConverter::ToUInt128(v, 1), System::ArgumentException);
+}
+TEST(BitConverterTests, ToUInt128_Vector_ExactFit_RoundTrips) {
+    System::UInt128 val(static_cast<unsigned __int128>(123456789));
+    auto arr = BitConverter::GetBytes(val);
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToUInt128(v, 0), val);
+}

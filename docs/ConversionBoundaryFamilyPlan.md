@@ -401,3 +401,34 @@ throw, `build-probe/1850_copyto_postfix.log`). +3 tests
 change. `SR-AUD-047 → remediated`. **SR-AUD-044 (overlap) stays open** — out of
 scope. Remaining CCF-005 memory-safety queue: #1851 (041), #1852 (043a), #1853
 (026/027), #1854 (043b, `needs_user`).
+
+### 19.2 CCF5-B / #1851 — SR-AUD-041 — BitConverter vector decoders — **DONE (2026-07-30)**
+
+All 14 typed vector decoders
+(`To{Boolean,Char,Int16,UInt16,Int32,UInt32,Int64,UInt64,Single,Double,Half,BFloat16,Int128,UInt128}(const std::vector<bytecs>&, intcs)`)
+now call a shared private `validateDecodeRange(v.size(), i, width)` **before**
+forwarding to the length-less raw-pointer read. It reproduces .NET
+BitConverter's `byte[]` decoders exactly: `(uint)startIndex >= (uint)size`
+throws `ArgumentOutOfRangeException("startIndex")` (one unsigned compare catching
+both a negative and an over-large index), then `startIndex > size - width` throws
+`ArgumentException("The array starting from the specified index is not long
+enough to read a value of the specified type.", "value")` (the
+`Arg_ByteArrayTooSmallForValue` string). Per plan premise-corrections §4#2/§4#3:
+the fix lives in the **vector** overloads (they hold `v.size()`); the raw-pointer
+overloads stay documented-precondition; and `ToBoolean` (width 1) throws only
+`ArgumentOutOfRangeException` — its `ArgumentException` branch is provably
+unreachable once the index passes the first check. The `memcpy`-into-a-local read
+is kept, so the alignment/aliasing safety noted in §8 is preserved.
+
+ASan reproduced the OOB in the real (inline, header-only) decoders, one fault
+shape per process (ASan aborts on first error): pre-fix `heap-buffer-overflow
+READ of size 4` at `BitConverter.hpp:126 in ToInt32` for both `ToInt32(vec4,-1)`
+(read before the buffer, `build-probe/1851_bitconverter_prefix_neg.log`) and
+`ToInt32(vec3,0)` (read past the buffer,
+`build-probe/1851_bitconverter_prefix_short.log`); post-fix both throw the
+correct exception with ASan clean (`…_postfix_neg.log`, `…_postfix_short.log`).
++46 tests (`SharpRuntimeTests_Core_Base` 5090 → 5136): per decoder a negative
+index, an index == size, an insufficient-width case, and an exact-fit index-0
+round-trip, plus the `ToBoolean` width-1 quirk. Not `noexcept`; no
+signature/layout change. `SR-AUD-041 → remediated`. Remaining CCF-005
+memory-safety queue: #1852 (043a), #1853 (026/027), #1854 (043b, `needs_user`).

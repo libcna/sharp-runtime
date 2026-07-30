@@ -52,3 +52,37 @@ nonnegative index where possible.
 The normal byte conversions work, but a broad public malformed-input surface
 has sanitizer-confirmed memory-safety failures.  No implementation was
 modified during this audit.
+
+### Remediated — ticket #1851 (2026-07-30)
+
+Done. All 14 typed vector decoders
+(`To{Boolean,Char,Int16,UInt16,Int32,UInt32,Int64,UInt64,Single,Double,Half,BFloat16,Int128,UInt128}(const std::vector<bytecs>&, intcs)`)
+now call a shared private `validateDecodeRange(size, startIndex, width)` before
+forwarding to the raw-pointer read. It mirrors .NET BitConverter's `byte[]`
+decoders exactly: the unsigned comparison `(uint)startIndex >= (uint)size`
+rejects a negative or over-large index with
+`ArgumentOutOfRangeException("startIndex")`, then `startIndex > size - width`
+rejects insufficient remaining bytes with
+`ArgumentException("The array starting from the specified index is not long
+enough to read a value of the specified type.", "value")` (the exact
+`Arg_ByteArrayTooSmallForValue` string). For `ToBoolean` (width 1) the
+`ArgumentException` branch is provably unreachable, so it throws only
+`ArgumentOutOfRangeException`, matching .NET's `ToBoolean(byte[], int)`. The
+raw-pointer overloads stay documented-precondition APIs (the plan's premise
+correction #2). The `memcpy`-into-a-local read is retained, so the fix stays
+alignment- and aliasing-safe.
+
+Reproduced under ASan driving the real (inline, header-only) decoders, one fault
+shape per process: pre-fix `heap-buffer-overflow READ of size 4` at
+`BitConverter.hpp:126 in ToInt32` for both `ToInt32(vec4,-1)` (read one byte
+before the buffer, `build-probe/1851_bitconverter_prefix_neg.log`) and
+`ToInt32(vec3,0)` (read past the buffer,
+`build-probe/1851_bitconverter_prefix_short.log`); post-fix both throw the
+correct exception before any read with ASan clean
+(`build-probe/1851_bitconverter_postfix_neg.log`,
+`build-probe/1851_bitconverter_postfix_short.log`). +46 tests
+(`SharpRuntimeTests_Core_Base` 5090 → 5136): per decoder a negative index, an
+index == size, an insufficient-width case, and an exact-fit index-0 round-trip,
+plus the `ToBoolean` width-1 quirk. No `noexcept`/signature/layout change (none of
+these decoders was ever `noexcept`). `docs/ConversionBoundaryFamilyPlan.md`
+§19.2.

@@ -1764,7 +1764,13 @@ metadata/attribute source inventory.
   `2`, unlike the sibling Math guard.
 - **SR-AUD-041 (high):** BitConverter typed vector `To*` decoders have no
   index/remaining-width checks; ASan confirms both negative-index underflow
-  and short-vector overflow reads through `ToInt32`.
+  and short-vector overflow reads through `ToInt32`. **Remediated — ticket
+  #1851 (2026-07-30):** all 14 decoders now validate via a shared
+  `validateDecodeRange` (`ArgumentOutOfRangeException("startIndex")` on
+  negative/over-large index, `ArgumentException(value)` on insufficient width,
+  before any read; `ToBoolean` throws only `ArgumentOutOfRangeException`). ASan
+  reproduced the pre-fix `heap-buffer-overflow READ` at `BitConverter.hpp:126`
+  and confirmed a clean throw post-fix; +46 tests.
 - **SR-AUD-042 (medium):** `TotalOrderIeee754Comparer<float>`, `<double>`,
   and `<Half>` implement only ordering and cannot bind to the local
   `IEqualityComparer<T>` interface, omitting .NET's total-order equality and
