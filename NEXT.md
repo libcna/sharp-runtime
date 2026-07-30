@@ -7611,3 +7611,74 @@ ASan + UBSan + LSan, 0 reports (`build-asan/1835_buffers_asan.log`). Repository 
 **14,139 tests across 37 executables**, 0 warnings, 0 errors. Audit index **27 remediated /
 337 confirmed of 364**. No public signature, virtual, vtable, object layout or mangled symbol
 changed — both changed functions are private static helpers.
+
+## Stream capability contract design: ticket #1839 (2026-07-30)
+
+`DESIGN-IO-STREAM-CAPABILITY-CONTRACT`, P2, size M, **design-only** — no production source
+changed. [`docs/StreamCapabilityContractDesign.md`](docs/StreamCapabilityContractDesign.md).
+No `SR-AUD-*` identifier; numbering stays frozen at **364**. It **supersedes**
+`docs/TextWrapperInputContractPlan.md` §13.2 as the place the Stream-capability approval is
+stated, leaving §13.2 as written.
+
+**The family premise was wrong, and correcting it changed the design.** All three blocked
+tickets say the problem is `getCanWriteProperty()`'s `false` default. That is a third of it.
+`Stream.hpp` gives the three capabilities **three different, undocumented defaults** — write
+`false` (line 62), read **`true`** (line 65), seek `false` (line 79) — where .NET has all
+three **abstract** (`Stream.cs:29-31`). The two failure directions are **opposite**: the
+write default makes a guard **over-reject** a working stream; the read default makes a guard
+**under-reject**. That is why #1808's `CanRead` guard shipped without approval and #1824's
+`CanWrite` guard cannot — they are not the same change mirrored.
+
+**Every one of the nine production `Stream` implementations already overrides both `CanRead`
+and `CanWrite`.** Not one relies on either default. Making those two pure virtual would cost
+**zero** production edits; only `CanSeek` has production users of its default (five, all of
+which genuinely cannot seek). The obstacle is entirely outside production code — which
+reverses the assumption the three tickets were written under.
+
+**The migration cost was measured, not estimated.** All three candidate guards were applied
+at once and the whole gate was run (`build-probe/1839_capability_experiment.patch`,
+`build-probe/1839_experiment_full.log`; tree reverted and rebuilt clean afterwards). **Exactly
+two tests of 14,139 fail** — `ZipArchiveTests.Dispose_StreamWriteThrows_Propagates` and
+`.Destructor_StreamWriteThrows_DoesNotTerminateProcess`, both over `ThrowingWriteStream`,
+which overrides `Write()` and not the property. `StreamWriter`'s guard breaks **nothing**;
+the zlib change breaks **nothing**. Total in-repository migration for all three tickets:
+**one line in one test double.**
+
+**Selected: a two-layer contract.**
+- **Layer 1, no approval:** **#1840** document the three defaults in `Stream.hpp` itself
+  (the whole family exists because a stream author could not know); **#1841** the three zlib
+  wrappers return `false` when closed — and that needs **no new member and no layout change**,
+  because `state_->initialized` already exists, is set at the end of the constructor and
+  cleared in `Close()`. #1828's supposedly approval-needing first half is compatible.
+- **Layer 2, ONE approval stated once in §6.2**, which unblocks **#1824**, **#1827** and
+  **#1828**'s delegation half **together**, with the exact declarations written out.
+- **Layer 3, pure virtual: recorded, deliberately not proposed** — it needs a strictly larger
+  approval and it deletes `StreamTests.DefaultCanSeekIsFalse`'s subject. Revisit only if a
+  fourth capability-guard ticket appears.
+
+Options rejected with reasons: change the defaults (weakens two guards that already work),
+validate the concrete stream type (can never recognise a correct third-party stream),
+constructor-time probe (**unsound** — has side effects on the wire and cannot probe the read
+direction without consuming a byte), additive traits (over-engineering, on the same reasoning
+that rejected a `SafeArithmetic` helper). **First-operation validation** is kept as the
+documented compatible fallback, and this repository already does it twice
+(`UnmanagedMemoryStream`, and `FileStream` since #1825).
+
+**Two decisions left explicitly to #1827:** `Update` mode also requires `CanSeek`, whose
+default is `false` and which five production streams rely on — the harshest clause in the
+design; and a `Read`-mode **unseekable** stream must **not** be rejected, because
+`ZipArchive.cs:968-971` sets `isReadModeAndUnseekable` and buffers.
+
+**Recorded absences:** there are **no async paths** to consider — this port's `Stream` has no
+`*Async` members at all — and **no `CryptoStream`**, symmetric cryptography being a permanent
+deviation. Both are stated so a future reader does not go looking.
+
+**Newly discovered, spun out as #1842:** `FileStream::getCanReadProperty()`/
+`getCanWriteProperty()` return the raw access flags and do **not** fold in `is_open()`, while
+`getCanSeekProperty()` on the next line does — the same defect #1826 fixed in
+`MemoryStream`, in a different type. It matters to Layer 2: a **closed** `FileStream` would
+**pass** the new `CanWrite` guard and then fail at first write.
+
+**No layer changes a vtable slot, slot order, object layout or return convention.** Layer 2's
+cost is purely semantic; Layer 3's is purely source. Neither is an ABI break — the earlier
+tickets' phrase "vtable-breaking" applies to none of Layers 1–2.
