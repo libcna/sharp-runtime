@@ -7575,3 +7575,39 @@ ASan + UBSan + LSan, 0 reports (`build-asan/1834_core_asan.log`; the ASan
 core archive is now current as of #1834). Repository gate **14,134 tests across 37
 executables**, 0 warnings, 0 errors. Audit index **26 remediated / 338 confirmed of 364**.
 No public signature, virtual, vtable, object layout or mangled symbol changed.
+
+## Completed Utf8Parser signed-minimum negation: ticket #1835 (2026-07-30)
+
+`REMED-BUFFERS-UTF8PARSER-INT64-MIN`, P1, size S. **CCF-004 class A**, sixth member of the
+family implemented. **SR-AUD-084 is now `remediated`.**
+
+`tryParseInt` (`Utf8Parser.hpp:224`) and the grouped `N` branch of `tryParseIntegerCore`
+(`:357`) both deliberately admit a negative magnitude of `INT64_MAX + 1` — exactly
+`INT64_MIN`'s magnitude — then converted it to a signed `int64_t` and negated it. Both
+reported `negation of -9223372036854775808 cannot be represented in type 'long int'`. Both
+now negate in the unsigned domain.
+
+**Class A, measured.** Twenty-nine probes, prefix and postfix **identical**; `parsed`,
+`value` **and** `bytesConsumed` all asserted. Both diagnostics gone under
+`-fno-sanitize-recover=undefined`.
+
+**The Int32/Int16/SByte question is answered, and the answer is neither "same treatment" nor
+"excluded".** Those widths have **no negation of their own** — there are exactly two sites —
+but they are **not unaffected**: `tryParseIntegerCore`'s magnitude limit is `INT64_MAX + 1`
+regardless of `byteWidth`, and the type-width check is applied by the **caller afterwards**.
+So `TryParse("-9223372036854775808", int32_t&, …)` executed the undefined negation and only
+*then* returned false — likewise `int16_t`, `int8_t`, and the grouped format. **Four more
+public overloads reached the same UB than the audit's Int64-only framing states**, all fixed
+by the same two edits and all now pinned. The finding keeps its identifier and its site count
+of two; the reachability is recorded as an addition.
+
+`X`/`x` never negated (it sign-extends a bit pattern) and the unsigned overloads have no
+negative branch; both are asserted unchanged so the edit cannot have leaked across the
+branch. The audit's note that **no direct test covered either minimum input** was accurate —
+these five suites are the first.
+
+5 permanent regressions. `SharpRuntimeTests_Buffers` **522/522**, clean under
+ASan + UBSan + LSan, 0 reports (`build-asan/1835_buffers_asan.log`). Repository gate
+**14,139 tests across 37 executables**, 0 warnings, 0 errors. Audit index **27 remediated /
+337 confirmed of 364**. No public signature, virtual, vtable, object layout or mangled symbol
+changed — both changed functions are private static helpers.

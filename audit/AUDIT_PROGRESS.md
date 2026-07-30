@@ -5485,3 +5485,50 @@ Module graph **41 / 91**.
 
 **Source and ABI consequences: none.** No signature, virtual, vtable, object layout or
 mangled symbol changed.
+
+---
+
+Ticket **#1835** (`REMED-BUFFERS-UTF8PARSER-INT64-MIN`, P1, size S, category `remediation`,
+area *Buffers*) is **done** and **SR-AUD-084 is now `remediated`** — the sixth CCF-004
+member repaired under `docs/DefinedArithmeticBoundaryPlan.md`. The index counts move to
+**27 remediated** and **337 confirmed** of 364.
+
+`tryParseInt` (`Utf8Parser.hpp:224`) and the grouped `N` branch of `tryParseIntegerCore`
+(`:357`) both deliberately admit a negative magnitude of `INT64_MAX + 1` — exactly
+`INT64_MIN`'s magnitude — and then converted it to a signed `int64_t` and negated it. Both
+reported `negation of -9223372036854775808 cannot be represented in type 'long int'`. Both
+now negate in the unsigned domain and convert once.
+
+**CCF-004 class A, verified by measurement.** `build-probe/1835_prefix_values.log` and the
+values section of `build-probe/1835_postfix.log` are **identical** across twenty-nine
+probes, covering both audited inputs, every signed width at its own minimum, one past each
+end in both directions, `"-0"`, ordinary values, both formats, and the untouched unsigned
+and hex paths. `parsed`, `value` **and** `bytesConsumed` are asserted, not only the value.
+Both diagnostics present before, zero after under `-fno-sanitize-recover=undefined`.
+
+**The ticket's question about Int32/Int16/SByte is answered, and the answer is neither
+"same treatment" nor "excluded".** Those widths have **no negation of their own** — there
+are exactly two sites — but they are **not** unaffected, because
+`tryParseIntegerCore`'s magnitude limit is `INT64_MAX + 1` regardless of `byteWidth` and the
+type-width check is applied by the **caller afterwards**. So
+`TryParse("-9223372036854775808", int32_t&, …)` executed the undefined negation and only
+*then* returned false, and the same holds for `int16_t`, `int8_t` and the grouped format
+(`build-probe/1835_prefix_ub.log`, cases 3–6). The audit's Int64-only framing understates
+the reachability: **four more public overloads reached the same UB**, all fixed by the same
+two edits, and all now pinned by tests. This is recorded as an addition; the finding keeps
+its identifier and its site count of two.
+
+The `X`/`x` hexadecimal path never negated — it sign-extends a bit pattern — and the
+unsigned overloads have no negative branch at all. Both are asserted unchanged so the edit
+cannot have leaked across the branch.
+
+**The audit's note that "no direct test covers either minimum input" was accurate**; the
+five new suites are the first direct coverage of both.
+
+**Tests: +5 permanent regressions.** `SharpRuntimeTests_Buffers` **522/522**, clean under
+**ASan + UBSan + LSan with zero reports** (`build-asan/1835_buffers_asan.log`), with the
+ASan `Utf8ParserTests.cpp.o` proven recompiled first. Repository gate: **0 warnings, 0
+errors, 14,139 tests across 37 executables** (was 14,134). Module graph **41 / 91**.
+
+**Source and ABI consequences: none.** No signature, virtual, vtable, object layout or
+mangled symbol changed; both changed functions are private static helpers.

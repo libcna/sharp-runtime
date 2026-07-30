@@ -500,3 +500,31 @@ is now pinned rather than aligned with the `"start"` used elsewhere.
 wholly compile-time `3 - INT_MIN` and emits no check, so the audited case passes silently.
 `-O0` plus `volatile` operands is what makes the probe independent of the optimisation
 level; do not relax either.
+
+---
+
+## 15. Reachability corrections from #1834 and #1835 (2026-07-30)
+
+§2 lists each finding by the site that reports, which is the right way to enumerate a
+*repair*. It is **not** the right way to enumerate a **public surface**, and both of these
+tickets found more public doors onto the same site than §2 names. Neither needed extra work;
+both needed extra tests, because a reader cannot otherwise tell whether the other doors were
+considered.
+
+| Finding | §2's entry points | Public doors actually measured onto the same site |
+|---|---|---|
+| SR-AUD-019 | `TryParse`, `ToString()` | plus `Parse` (onto `:234`) and `ToString("D")`, `ToString("d")`, `ToString("G")`, `ToString("D40")`, `ToString("D45")` (all onto `:143`) |
+| SR-AUD-084 | `TryParse(int64_t)` default and `N` | plus `TryParse(int32_t)`, `TryParse(int16_t)`, `TryParse(int8_t)` and their `N` forms — each executes the undefined negation and **then** fails the caller's width check |
+
+The SR-AUD-084 case is the sharper one. `tryParseIntegerCore`'s magnitude limit is
+`INT64_MAX + 1` **regardless of `byteWidth`**, and the type-width check is applied by the
+**caller afterwards**. A narrow-width parse of the int64 minimum string therefore reaches
+the UB on its way to returning `false`. Nothing about the failing return value protects it.
+
+**Rule for the remaining tickets:** after fixing a site, enumerate every public overload
+that can reach it — including the ones that ultimately **fail** — and pin them. #1837's
+`jdnToDate` cascade (§2.1) is the same shape seen from the other direction: one entry point,
+several downstream sites.
+
+Both findings' site counts stand at what §2 records (two each). Only the reachability is
+corrected, by appending.

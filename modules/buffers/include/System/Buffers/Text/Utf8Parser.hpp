@@ -221,7 +221,17 @@ private:
         if (!tryParseUInt(rest, v, digits)) return false;
         if (neg) {
             if (v > static_cast<uint64_t>(INT64_MAX) + 1) return false;
-            out = -static_cast<int64_t>(v);
+            // CCF-004 class A (defined wrap): `v` is the unsigned magnitude and the check
+            // above deliberately admits INT64_MAX+1, i.e. exactly INT64_MIN's magnitude.
+            // Converting that to a signed int64_t FIRST and then negating it is undefined
+            // behaviour -- "-9223372036854775808" reported
+            // `negation of -9223372036854775808 cannot be represented in type 'long int'`
+            // (SR-AUD-084). Negating in the unsigned domain is always defined and produces
+            // the same bit pattern, so the parsed value and bytesConsumed are unchanged.
+            // Not only the int64_t overload reaches this: every narrower signed width shares
+            // this site through tryParseIntegerCore, whose magnitude limit is INT64_MAX+1
+            // regardless of byteWidth, with the width check applied by the caller afterwards.
+            out = static_cast<int64_t>(-v);
         } else {
             if (v > static_cast<uint64_t>(INT64_MAX)) return false;
             out = static_cast<int64_t>(v);
@@ -354,7 +364,12 @@ private:
                 if (isSigned) {
                     if (neg) {
                         if (magnitude > static_cast<uint64_t>(INT64_MAX) + 1) return false;
-                        signedOut = -static_cast<int64_t>(magnitude);
+                        // CCF-004 class A, identical to tryParseInt's site above and for the
+                        // same reason: "-9,223,372,036,854,775,808" reported
+                        // `negation of -9223372036854775808 cannot be represented in type
+                        // 'long int'` (SR-AUD-084's second site). Negate in the unsigned
+                        // domain; the parsed value and bytesConsumed are unchanged.
+                        signedOut = static_cast<int64_t>(-magnitude);
                     } else {
                         if (magnitude > static_cast<uint64_t>(INT64_MAX)) return false;
                         signedOut = static_cast<int64_t>(magnitude);
