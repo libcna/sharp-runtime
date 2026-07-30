@@ -172,3 +172,29 @@ TEST(SingleTest, Parse_AbbreviatedInfinitySpelling_Throws) {
 }
 TEST(SingleTest, ToString_Normal)       { EXPECT_EQ(Single::ToString(Single::NaN), "NaN"); }
 TEST(SingleTest, ToString_Format_F2)    { EXPECT_EQ(Single::ToString(3.14159f, "F2"), "3.14"); }
+
+// SR-AUD-021 float slice (#1849 / CCF-006): a malformed precision no longer leaks a
+// std::stoi exception, and an unrecognised specifier is rejected loudly instead of
+// silently round-tripping. Matches the integer wrappers (#1847) and .NET.
+TEST(SingleTest, ToString_MalformedPrecision_ThrowsFormatException) {
+    EXPECT_THROW(Single::ToString(1.0f, "Fx"), System::FormatException);
+}
+TEST(SingleTest, ToString_OversizedPrecision_ThrowsFormatException) {
+    EXPECT_THROW(Single::ToString(1.0f, "F99999999999"), System::FormatException);
+}
+TEST(SingleTest, ToString_UnknownSpecifier_ThrowsFormatException) {
+    EXPECT_THROW(Single::ToString(1.0f, "Q"), System::FormatException);
+}
+TEST(SingleTest, ToString_UnknownSpecifierWithDigits_ThrowsFormatException) {
+    EXPECT_THROW(Single::ToString(1.0f, "Z2"), System::FormatException);
+}
+TEST(SingleTest, ToString_CurrencySpecifier_ThrowsFormatException) {
+    EXPECT_THROW(Single::ToString(1.0f, "C2"), System::FormatException);  // C is unimplemented here
+}
+TEST(SingleTest, ToString_ValidSpecifiers_StillWork) {
+    EXPECT_EQ(Single::ToString(3.14159f, "F2"), "3.14");
+    EXPECT_FALSE(Single::ToString(1000.0f, "E3").empty());
+    EXPECT_FALSE(Single::ToString(3.14159f, "G").empty());
+    EXPECT_EQ(Single::ToString(2.5f, "R"), Single::ToString(2.5f));
+    EXPECT_FALSE(Single::ToString(1.5f, "N2").empty());
+}

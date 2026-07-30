@@ -194,3 +194,20 @@ The ordinary float paths are well covered, but missing edge assertions conceal
 six contract deviations in generic math, special-value classification,
 Pi-scaled numerical functions, and text conversion.  No implementation was
 modified during this audit.
+
+### Remediated (SR-AUD-021 float slice) — ticket #1849 (2026-07-30)
+
+`Single::ToString(float, const std::string&)` (Single.hpp:602) now guards the
+precision parse: the `std::stoi(format.substr(1))` is wrapped in
+`try/catch (const std::exception&)` that throws
+`System::FormatException("Format specifier was invalid.")`, so `ToString(1.0f,
+"Fx")` no longer leaks `std::invalid_argument` and an oversized precision no
+longer leaks `std::out_of_range`. The former silent `return ToString(value);`
+fallback for an unrecognised specifier is replaced by the same
+`FormatException`, so `C`/`P`/`D`/`X`/`B`/`Q`/etc. are rejected loudly rather than
+returning a silently wrong value — matching the integer wrappers (#1847) and
+.NET's `Format_BadFormatSpecifier`. `F/E/G/R/N` (and lowercase) stay valid; the
+overload is not `noexcept` so no exception-spec changed. +6 tests. This closes the
+CCF-006 float slice of SR-AUD-021. The `N`-branch's missing group separators and
+the `E` two-vs-three exponent-digit divergence are value-fidelity gaps tracked
+under CCF-007, not this leak. `docs/NumericWrapperBoundaryPlan.md` §15.5.

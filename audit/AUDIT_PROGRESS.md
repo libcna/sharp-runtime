@@ -1712,7 +1712,12 @@ metadata/attribute source inventory.
   shifts without .NET's modulo-128 mask, reaching sanitizer-confirmed UB.
 - **SR-AUD-021 (medium):** audited 8/16/32/64/128-bit formatters silently
   accept unknown formats; 128-bit variants additionally leak `std::stoi`
-  rather than raising `System::FormatException`.
+  rather than raising `System::FormatException`. **Integer slice remediated
+  #1847; float slice remediated #1849 (2026-07-30):** `Single`/`Double`
+  `ToString(value, format)` now wrap the precision `std::stoi` in try/catch →
+  `FormatException("Format specifier was invalid.")` and reject an unrecognised
+  specifier loudly (was a silent round-trip). Both slices closed; CCF-006 closes
+  with #1849. `N`/`E`/`G` value-fidelity gaps deferred to CCF-007.
 - **SR-AUD-022 (medium):** Byte, SByte, Int16, UInt16, Int32, UInt32, Int64,
   UInt64, UInt128, and Decimal do not reject inverted Clamp bounds; 8/16/32/64-bit
   paths reach invalid `std::clamp` use while UInt128/Decimal select a bound.

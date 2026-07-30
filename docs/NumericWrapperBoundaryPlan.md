@@ -452,3 +452,36 @@ if a consumer needs the wider format set.
 `"G"` returns `"5"`. `SharpRuntimeTests_Core_Base` 5077 → **5087**. No
 layout/symbol change. `SR-AUD-021 → remediated (integer slice)`; float slice →
 #1849/CCF-006.
+
+### 15.5 #1849 — SR-AUD-021 float slice / CCF-006 — unknown/malformed float format — **DONE (2026-07-30)**
+
+The CCF-006 float-format-normalisation slice. `Single::ToString(float, const
+std::string&)` (`Single.hpp:602`) and `Double::ToString(double, const
+std::string&)` (`Double.hpp:685`) parsed the precision with an unguarded
+`std::stoi(format.substr(1))`, so a malformed precision leaked
+`std::invalid_argument`/`std::out_of_range` (verified: `Single::ToString(1.0f,
+"Fx")` threw `std::invalid_argument`), and an unrecognised specifier fell through
+to a silent `return ToString(value);`.
+
+Both now follow the **identical CCF-006 contract the integer wrappers adopted in
+#1847** (§15.4): the `std::stoi` is wrapped in
+`try/catch (const std::exception&)` → `System::FormatException("Format specifier
+was invalid.")` (= .NET `SR.Format_BadFormatSpecifier`), and the silent fallback
+is replaced by the same throw. `F/E/G/R/N` (and lowercase) stay valid; every other
+letter — including the .NET-valid-for-float `C`/`P` this port does not implement —
+is rejected loudly rather than returning a silently wrong value. Neither overload
+is `noexcept`, so no exception-spec/symbol change; `FormatException.hpp` was
+already included. Compatible narrowing, autonomous (the CCF-003 integer
+precedent). +12 tests (`SharpRuntimeTests_Core_Base` 5189 → **5201**): per type a
+malformed precision, an oversized precision, an unknown specifier, an unknown
+specifier with digits, an unimplemented-but-.NET-valid specifier (`C`/`P`), and a
+still-valid `F/E/G/R/N` battery. `SR-AUD-021 → remediated` (both slices now
+closed).
+
+**CCF-006 closes with this ticket** — its only members were the ten integer
+wrappers (closed by #1847) and `Single`/`Double` (closed here). **Deferred to
+CCF-007** (value-fidelity, not the format-validation leak): the `N` branch emits
+no thousands separators (currently identical to `F`), `E` emits two exponent
+digits where .NET emits three, and `G` does not apply the `G9`/`G17` round-trip
+precision. Those are formatting-correctness items, out of scope for the CCF-006
+exception-contract fix.

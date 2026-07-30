@@ -604,7 +604,18 @@ public:
         if (std::isnan(value)) return "NaN";
         if (std::isinf(value)) return value > 0 ? "Infinity" : "-Infinity";
         char type = format[0];
-        int prec = format.size() > 1 ? std::stoi(format.substr(1)) : -1;
+        // SR-AUD-021 float slice (#1849 / CCF-006): guard the precision parse so a malformed
+        // precision (e.g. "Fx", or an oversized width) surfaces as System::FormatException
+        // rather than leaking std::invalid_argument/std::out_of_range, matching the integer
+        // wrappers (#1847) and .NET's Format_BadFormatSpecifier.
+        int prec = -1;
+        if (format.size() > 1) {
+            try {
+                prec = std::stoi(format.substr(1));
+            } catch (const std::exception&) {
+                throw System::FormatException("Format specifier was invalid.");
+            }
+        }
         std::ostringstream oss;
         oss.imbue(std::locale::classic());
         if (type == 'F' || type == 'f') {
@@ -626,7 +637,11 @@ public:
             oss << std::fixed << std::setprecision(prec >= 0 ? prec : 2) << value;
             return oss.str();
         }
-        return ToString(value);
+        // SR-AUD-021 float slice (#1849 / CCF-006): an unrecognised specifier is a
+        // FormatException in .NET, not a silent round-trip fallback (matching #1847 for the
+        // integer wrappers). Only F/E/G/R/N (and lowercase) are implemented here; C/P/D/X/B and
+        // any other letter are rejected loudly rather than returning a silently wrong value.
+        throw System::FormatException("Format specifier was invalid.");
     }
 };
 

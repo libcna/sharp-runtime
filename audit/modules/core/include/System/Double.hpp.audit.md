@@ -67,3 +67,16 @@ dedicated Pi-scaled reduction:
 The basic double wrapper is functional, but the same public edge contracts
 already confirmed for numeric formatting/conversion and generic floating math
 need coordinated repair. No implementation was modified during this audit.
+
+### Remediated (SR-AUD-021 float slice) — ticket #1849 (2026-07-30)
+
+`Double::ToString(double, const std::string&)` (Double.hpp:685) receives the same
+fix as `Single`: the precision `std::stoi` is wrapped in
+`try/catch → System::FormatException("Format specifier was invalid.")` (so
+`ToString(1.0, "Fz")` no longer leaks `std::invalid_argument` and an oversized
+precision no longer leaks `std::out_of_range`), and the silent
+`return ToString(value);` fallback is replaced by the same `FormatException` so
+an unrecognised specifier is rejected loudly. `F/E/G/R/N` stay valid; not
+`noexcept`. +6 tests. Closes the CCF-006 float slice of SR-AUD-021. The `N`
+group-separator and `E` exponent-digit fidelity gaps are the separate CCF-007
+review. `docs/NumericWrapperBoundaryPlan.md` §15.5.

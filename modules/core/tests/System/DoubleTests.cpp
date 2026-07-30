@@ -407,3 +407,29 @@ TEST(DoubleTests, ToString_FormatR) {
     double v = 1.5;
     EXPECT_EQ(Double::ToString(v, "R"), Double::ToString(v));
 }
+
+// SR-AUD-021 float slice (#1849 / CCF-006): a malformed precision no longer leaks a
+// std::stoi exception, and an unrecognised specifier is rejected loudly instead of
+// silently round-tripping. Matches the integer wrappers (#1847) and .NET.
+TEST(DoubleTests, ToString_MalformedPrecision_ThrowsFormatException) {
+    EXPECT_THROW(Double::ToString(1.0, "Fz"), System::FormatException);
+}
+TEST(DoubleTests, ToString_OversizedPrecision_ThrowsFormatException) {
+    EXPECT_THROW(Double::ToString(1.0, "F99999999999"), System::FormatException);
+}
+TEST(DoubleTests, ToString_UnknownSpecifier_ThrowsFormatException) {
+    EXPECT_THROW(Double::ToString(1.0, "Q"), System::FormatException);
+}
+TEST(DoubleTests, ToString_UnknownSpecifierWithDigits_ThrowsFormatException) {
+    EXPECT_THROW(Double::ToString(1.0, "Z2"), System::FormatException);
+}
+TEST(DoubleTests, ToString_PercentSpecifier_ThrowsFormatException) {
+    EXPECT_THROW(Double::ToString(1.0, "P2"), System::FormatException);  // P is unimplemented here
+}
+TEST(DoubleTests, ToString_ValidSpecifiers_StillWork) {
+    EXPECT_EQ(Double::ToString(3.14159, "F2"), "3.14");
+    EXPECT_FALSE(Double::ToString(1000.0, "E2").empty());
+    EXPECT_FALSE(Double::ToString(3.14159, "G").empty());
+    EXPECT_EQ(Double::ToString(1.5, "R"), Double::ToString(1.5));
+    EXPECT_FALSE(Double::ToString(1.5, "N2").empty());
+}
