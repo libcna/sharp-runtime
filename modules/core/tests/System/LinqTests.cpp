@@ -2,8 +2,11 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <functional>
 #include <string>
 #include <vector>
+#include "System/ArgumentNullException.hpp"
+#include "System/Exception.hpp"
 #include "System/Linq.hpp"
 #include "System/InvalidOperationException.hpp"
 
@@ -300,4 +303,117 @@ TEST(LinqTests, Contains_Found) {
 
 TEST(LinqTests, Contains_NotFound) {
     EXPECT_FALSE(Contains<int>({1, 2, 3}, 9));
+}
+
+// ---------------------------------------------------------------------------
+// Empty std::function callbacks (#1870 / SR-AUD-134 / CCF-011)
+//
+// Every callback overload stored its callable as a std::function and never validated it,
+// so failure was data-dependent: an empty sequence returned an ordinary result,
+// OrderBy/OrderByDescending did so for a one-element sequence too (std::stable_sort never
+// compares below two), First(empty, {}) reported InvalidOperationException instead of the
+// argument error, and anything larger reached the native std::bad_function_call -- which
+// does not derive from System::Exception. .NET rejects a null delegate at the argument
+// boundary before examining the sequence. See docs/EmptyCallableBoundaryPlan.md.
+// ---------------------------------------------------------------------------
+
+namespace {
+    using LinqPred = std::function<bool(const int&)>;
+    using LinqSel  = std::function<int(const int&)>;
+
+    const std::vector<int> kLinqEmpty{};
+    const std::vector<int> kLinqOne{7};
+    const std::vector<int> kLinqTwo{7, 3};
+
+    void expectLinqParamName(const std::function<void()>& call, const char* param) {
+        try {
+            call();
+            FAIL() << "expected ArgumentNullException naming '" << param << "'";
+        } catch (const System::ArgumentNullException& e) {
+            EXPECT_EQ(std::string(e.what()),
+                      std::string("Value cannot be null. (Parameter '") + param + "')");
+        }
+    }
+} // namespace
+
+TEST(LinqTests, EmptyPredicate_EveryOverload_ThrowsRegardlessOfLength) {
+    for (const std::vector<int>* v : {&kLinqEmpty, &kLinqOne, &kLinqTwo}) {
+        EXPECT_THROW((void)Where<int>(*v, LinqPred{}), System::ArgumentNullException);
+        EXPECT_THROW((void)FirstOrDefault<int>(*v, LinqPred{}), System::ArgumentNullException);
+        EXPECT_THROW((void)First<int>(*v, LinqPred{}), System::ArgumentNullException);
+        EXPECT_THROW((void)LastOrDefault<int>(*v, LinqPred{}), System::ArgumentNullException);
+        EXPECT_THROW((void)Any<int>(*v, LinqPred{}), System::ArgumentNullException);
+        EXPECT_THROW((void)All<int>(*v, LinqPred{}), System::ArgumentNullException);
+        EXPECT_THROW((void)Count<int>(*v, LinqPred{}), System::ArgumentNullException);
+    }
+}
+
+TEST(LinqTests, EmptySelector_EveryOverload_ThrowsRegardlessOfLength) {
+    for (const std::vector<int>* v : {&kLinqEmpty, &kLinqOne, &kLinqTwo}) {
+        EXPECT_THROW((void)(Select<int, int>(*v, LinqSel{})), System::ArgumentNullException);
+        EXPECT_THROW((void)(Sum<int, int>(*v, LinqSel{})), System::ArgumentNullException);
+    }
+}
+
+TEST(LinqTests, EmptyKeySelector_OrderBy_ThrowsBelowTwoElementsToo) {
+    // std::stable_sort never invokes the comparator below two elements, so these used to
+    // succeed silently with an empty key selector.
+    for (const std::vector<int>* v : {&kLinqEmpty, &kLinqOne, &kLinqTwo}) {
+        EXPECT_THROW((void)(OrderBy<int, int>(*v, LinqSel{})), System::ArgumentNullException);
+        EXPECT_THROW((void)(OrderByDescending<int, int>(*v, LinqSel{})),
+                     System::ArgumentNullException);
+    }
+}
+
+TEST(LinqTests, EmptyCallback_ParamNamesMatchDotNet) {
+    expectLinqParamName([&] { (void)Where<int>(kLinqOne, LinqPred{}); }, "predicate");
+    expectLinqParamName([&] { (void)Any<int>(kLinqOne, LinqPred{}); }, "predicate");
+    expectLinqParamName([&] { (void)Count<int>(kLinqOne, LinqPred{}); }, "predicate");
+    expectLinqParamName([&] { (void)Select<int, int>(kLinqOne, LinqSel{}); }, "selector");
+    expectLinqParamName([&] { (void)Sum<int, int>(kLinqOne, LinqSel{}); }, "selector");
+    expectLinqParamName([&] { (void)OrderBy<int, int>(kLinqOne, LinqSel{}); }, "keySelector");
+    expectLinqParamName([&] { (void)OrderByDescending<int, int>(kLinqOne, LinqSel{}); },
+                        "keySelector");
+}
+
+TEST(LinqTests, EmptyPredicate_First_ArgumentErrorPrecedesSequenceError) {
+    // Before the repair the empty sequence reported InvalidOperationException, hiding the
+    // invalid argument. .NET validates predicate first (First.cs:110).
+    EXPECT_THROW((void)First<int>(kLinqEmpty, LinqPred{}), System::ArgumentNullException);
+    // A real predicate still gets the sequence error.
+    EXPECT_THROW((void)First<int>(kLinqEmpty, LinqPred{[](const int&) { return true; }}),
+                 System::InvalidOperationException);
+}
+
+TEST(LinqTests, EmptyPredicate_All_NoLongerReturnsVacuousTrue) {
+    EXPECT_THROW((void)All<int>(kLinqEmpty, LinqPred{}), System::ArgumentNullException);
+    EXPECT_TRUE(All<int>(kLinqEmpty, LinqPred{[](const int&) { return false; }}));
+}
+
+TEST(LinqTests, EmptyCallback_IsCatchableAsSystemException) {
+    bool caught = false;
+    try {
+        (void)Any<int>(kLinqOne, LinqPred{});
+    } catch (const System::Exception&) {
+        caught = true;
+    }
+    EXPECT_TRUE(caught);
+}
+
+TEST(LinqTests, NonEmptyCallbacks_StillBehaveAsBefore) {
+    const std::vector<int> v{5, 1, 4, 2};
+    LinqPred even = [](const int& x) { return x % 2 == 0; };
+    LinqSel  dbl  = [](const int& x) { return x * 2; };
+
+    EXPECT_EQ(Where<int>(v, even), (std::vector<int>{4, 2}));
+    EXPECT_EQ((Select<int, int>(v, dbl)), (std::vector<int>{10, 2, 8, 4}));
+    EXPECT_EQ(FirstOrDefault<int>(v, even), 4);
+    EXPECT_EQ(First<int>(v, even), 4);
+    EXPECT_EQ(LastOrDefault<int>(v, even), 2);
+    EXPECT_TRUE(Any<int>(v, even));
+    EXPECT_FALSE(All<int>(v, even));
+    EXPECT_EQ(Count<int>(v, even), 2);
+    EXPECT_EQ((Sum<int, int>(v, dbl)), 24);
+    EXPECT_EQ((OrderBy<int, int>(v, dbl)), (std::vector<int>{1, 2, 4, 5}));
+    EXPECT_EQ((OrderByDescending<int, int>(v, dbl)), (std::vector<int>{5, 4, 2, 1}));
 }

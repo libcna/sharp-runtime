@@ -69,3 +69,72 @@ The ordinary vector algorithms are coherent for small integral pure callbacks,
 but callback validation, signed Sum safety, and default floating semantics have
 confirmed SR-AUD-134/135 and SR-AUD-046 gaps. No source or test was modified
 during this audit.
+
+---
+
+## SR-AUD-134 — REMEDIATED (ticket #1870, 2026-07-30, CCF-011)
+
+The original evidence above is retained unchanged. **Only SR-AUD-134 is closed by
+this ticket**; the other findings in this report — including SR-AUD-046's raw
+`<`/`==` floating comparison, which this ticket deliberately does not touch —
+remain `confirmed`.
+
+All eleven callback overloads — `Where`, `Select`, `FirstOrDefault(predicate)`,
+`First(predicate)`, `LastOrDefault(predicate)`, `Any(predicate)`,
+`All(predicate)`, `Count(predicate)`, `Sum(selector)`, `OrderBy` and
+`OrderByDescending` — now call one shared `detail::requireCallable` **before the
+sequence is examined**, throwing `System::ArgumentNullException` with .NET's own
+parameter name (`predicate`, `selector`, `keySelector`).
+
+**Correction to the finding's premise (measured 2026-07-30).** Two refinements;
+the finding's shape is confirmed, its boundaries were narrower than reality.
+
+1. The finding says an empty callable "return[s] normal results on an empty
+   vector" and throws "only when an item is reached". Measured,
+   `OrderBy`/`OrderByDescending` also returned a normal result for a
+   **one-element** vector (`linq.orderby=no-throw`,
+   `linq.orderby.two=bad_function_call`, `build-probe/1866_prefix.log`), because
+   `std::stable_sort` never invokes the comparator below two elements. The
+   silent region was one element wider than stated for the ordering operators.
+2. `First(empty, {})` did **not** return a normal result: it threw
+   `System::InvalidOperationException("Sequence contains no matching element.")`,
+   so the sequence error *masked* the argument error. .NET validates `predicate`
+   before the sequence (`First.cs:110`), so the repair is a validation-*order*
+   change there, not only an added check. A permanent test pins that the argument
+   error now wins and that a real predicate still gets the sequence error.
+
+The historical text above is left as written, per this repository's practice.
+
+**Eager validation is exact, not an approximation.** .NET's `OrderBy` is lazily
+enumerated, but its `keySelector` null check runs in `OrderedIterator`'s
+constructor (`OrderedEnumerable.cs:80-82`) before any element is touched. These
+operators are eager throughout, so checking at entry matches the reference
+rather than merely approximating it.
+
+**One observable behaviour change, deliberate.** A previously silent normal
+result now throws — including `All(empty, {})`, whose vacuous `true` used to hide
+the invalid argument entirely. A real predicate still gets the vacuous `true`,
+and a test pins that. Recorded as B1 in `docs/EmptyCallableBoundaryPlan.md` §9.
+
+Closure evidence: 8 new permanent regressions in `LinqTests.cpp` (every predicate
+overload and every selector overload at length 0, 1 and 2; both ordering
+operators below the two-element sort threshold; all three `paramName` values;
+`First`'s argument-before-sequence order together with proof that a real
+predicate still reaches the sequence error; `All`'s lost vacuous-true fast path;
+catchability as `System::Exception`; and a regression pass asserting all eleven
+operators still produce their pre-existing results with real callbacks).
+`LinqTests` 53/53, `SharpRuntimeTests_Core_Base` 5,301/5,301, whole-repository
+build clean with zero errors and zero warnings. The direct probe
+`build-probe/1866_empty_callable_probe.cpp`, compiled **with**
+`-fsanitize=address,undefined` so this header-only template change is itself
+instrumented, exits 0 with zero AddressSanitizer, UndefinedBehaviorSanitizer and
+LeakSanitizer reports (`build-probe/1870_postfix_asan.log`); across all 60 cases
+**no** `bad_function_call` remains anywhere in the family, and the only
+`no-throw` outcomes left are the eight deliberate event-subscription no-ops.
+
+Source, ABI and layout consequences: none. Every operator is a free function
+template, so no mangled symbol exists to change; no signature, `noexcept`
+specification or default argument changed. The new `System::Linq::detail`
+namespace holds one `inline` function template and no state.
+
+The plan for this family is `docs/EmptyCallableBoundaryPlan.md` (ticket #1866).

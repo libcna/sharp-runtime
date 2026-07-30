@@ -485,6 +485,11 @@ its per-file audit report and this document's §18 status table.
 | SR-AUD-065 | #1867 | **`remediated`** (2026-07-30) |
 | SR-AUD-099 | #1867 | **`remediated`** (2026-07-30) |
 | SR-AUD-121 | #1868 | **`remediated`** (2026-07-30) |
-| SR-AUD-134 | #1870 | `confirmed` |
+| SR-AUD-134 | #1870 | **`remediated`** (2026-07-30) |
 
-*(Updated by each implementation ticket as it lands.)*
+**CCF-011 is CLOSED (2026-07-30).** All six findings are `remediated`; every
+completion criterion in §16 is met. The post-fix probe run
+(`build-probe/1870_postfix_asan.log`) shows **zero** `bad_function_call` outcomes
+across all 60 cases and no silent `no-throw` for any rejecting entry; the only
+eight `no-throw` results left are the deliberate event-subscription no-ops
+(`progress.add*`, `eventhandler.add*`, and the two re-entrancy cases).

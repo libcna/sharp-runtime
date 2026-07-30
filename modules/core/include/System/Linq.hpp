@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/InvalidOperationException.hpp"
 
 namespace System::Linq {
@@ -32,22 +33,60 @@ namespace System::Linq {
      * @note Status: PARTIAL
      */
 
-    /** @brief Returns elements that satisfy @p predicate. */
+    namespace detail {
+
+        /**
+         * @brief Rejects an empty callback at the public boundary, before the sequence.
+         *
+         * Every operator below stored its callable as a `std::function` and never validated
+         * it, so an empty one made failure *data-dependent*: an empty sequence returned an
+         * ordinary result, `OrderBy`/`OrderByDescending` did so for a one-element sequence
+         * too (`std::stable_sort` never compares below two), and anything larger reached
+         * `std::bad_function_call` -- a native exception outside the System::Exception
+         * hierarchy, which ported `catch (const Exception&)` code cannot see. Current .NET
+         * rejects a null delegate at the argument boundary before examining the sequence, and
+         * does so eagerly even for the deferred operators: `OrderBy`'s `keySelector` check
+         * lives in `OrderedIterator`'s constructor (`OrderedEnumerable.cs:80-82`), which runs
+         * before any element is touched. These operators are eager throughout, so an eager
+         * check is an exact match rather than an approximation.
+         *
+         * Ticket #1870 / SR-AUD-134 / CCF-011; see docs/EmptyCallableBoundaryPlan.md.
+         *
+         * @param callable  The callback to validate.
+         * @param paramName The .NET parameter name to carry in the message.
+         * @throws System::ArgumentNullException if @p callable is empty.
+         */
+        template<typename Fn>
+        inline void requireCallable(const Fn& callable, const char* paramName) {
+            if (!callable) throw System::ArgumentNullException(paramName);
+        }
+
+    } // namespace detail
+
+    /**
+     * @brief Returns elements that satisfy @p predicate.
+     * @throws System::ArgumentNullException if @p predicate is an empty std::function.
+     */
     template<typename T>
     std::vector<T> Where(const std::vector<T>& source,
                          std::function<bool(const T&)> predicate)
     {
+        detail::requireCallable(predicate, "predicate");
         std::vector<T> result;
         for (const auto& item : source)
             if (predicate(item)) result.push_back(item);
         return result;
     }
 
-    /** @brief Projects each element using @p selector. */
+    /**
+     * @brief Projects each element using @p selector.
+     * @throws System::ArgumentNullException if @p selector is an empty std::function.
+     */
     template<typename T, typename R>
     std::vector<R> Select(const std::vector<T>& source,
                           std::function<R(const T&)> selector)
     {
+        detail::requireCallable(selector, "selector");
         std::vector<R> result;
         result.reserve(source.size());
         for (const auto& item : source)
@@ -55,11 +94,15 @@ namespace System::Linq {
         return result;
     }
 
-    /** @brief Returns the first element matching @p predicate, or default T{} if none. */
+    /**
+     * @brief Returns the first element matching @p predicate, or default T{} if none.
+     * @throws System::ArgumentNullException if @p predicate is an empty std::function.
+     */
     template<typename T>
     T FirstOrDefault(const std::vector<T>& source,
                      std::function<bool(const T&)> predicate)
     {
+        detail::requireCallable(predicate, "predicate");
         for (const auto& item : source)
             if (predicate(item)) return item;
         return T{};
@@ -72,11 +115,19 @@ namespace System::Linq {
         return source.empty() ? T{} : source.front();
     }
 
-    /** @brief Returns the first element matching @p predicate; throws if none found. */
+    /**
+     * @brief Returns the first element matching @p predicate; throws if none found.
+     * @throws System::ArgumentNullException if @p predicate is an empty std::function. The
+     *         argument error is raised **before** the sequence is examined, so an empty
+     *         sequence reports it rather than the InvalidOperationException below --
+     *         matching .NET's First(source, predicate) (First.cs:110).
+     * @throws System::InvalidOperationException if no element matches.
+     */
     template<typename T>
     T First(const std::vector<T>& source,
             std::function<bool(const T&)> predicate)
     {
+        detail::requireCallable(predicate, "predicate");
         for (const auto& item : source)
             if (predicate(item)) return item;
         throw System::InvalidOperationException("Sequence contains no matching element.");
@@ -90,11 +141,15 @@ namespace System::Linq {
         return source.front();
     }
 
-    /** @brief Returns the last element matching @p predicate, or default T{} if none. */
+    /**
+     * @brief Returns the last element matching @p predicate, or default T{} if none.
+     * @throws System::ArgumentNullException if @p predicate is an empty std::function.
+     */
     template<typename T>
     T LastOrDefault(const std::vector<T>& source,
                     std::function<bool(const T&)> predicate)
     {
+        detail::requireCallable(predicate, "predicate");
         T result{};
         bool found = false;
         for (const auto& item : source)
@@ -110,11 +165,15 @@ namespace System::Linq {
         return source.empty() ? T{} : source.back();
     }
 
-    /** @brief Returns true if any element satisfies @p predicate. */
+    /**
+     * @brief Returns true if any element satisfies @p predicate.
+     * @throws System::ArgumentNullException if @p predicate is an empty std::function.
+     */
     template<typename T>
     bool Any(const std::vector<T>& source,
              std::function<bool(const T&)> predicate)
     {
+        detail::requireCallable(predicate, "predicate");
         for (const auto& item : source)
             if (predicate(item)) return true;
         return false;
@@ -124,21 +183,30 @@ namespace System::Linq {
     template<typename T>
     bool Any(const std::vector<T>& source) { return !source.empty(); }
 
-    /** @brief Returns true if all elements satisfy @p predicate (true for empty sequences). */
+    /**
+     * @brief Returns true if all elements satisfy @p predicate (true for empty sequences).
+     * @throws System::ArgumentNullException if @p predicate is an empty std::function --
+     *         including for an empty sequence, which used to return true without examining it.
+     */
     template<typename T>
     bool All(const std::vector<T>& source,
              std::function<bool(const T&)> predicate)
     {
+        detail::requireCallable(predicate, "predicate");
         for (const auto& item : source)
             if (!predicate(item)) return false;
         return true;
     }
 
-    /** @brief Returns the number of elements satisfying @p predicate. */
+    /**
+     * @brief Returns the number of elements satisfying @p predicate.
+     * @throws System::ArgumentNullException if @p predicate is an empty std::function.
+     */
     template<typename T>
     intcs Count(const std::vector<T>& source,
                 std::function<bool(const T&)> predicate)
     {
+        detail::requireCallable(predicate, "predicate");
         intcs n = 0;
         for (const auto& item : source)
             if (predicate(item)) ++n;
@@ -165,10 +233,14 @@ namespace System::Linq {
         return result;
     }
 
-    /** @brief Returns the sum of a projected value (requires operator+). */
+    /**
+     * @brief Returns the sum of a projected value (requires operator+).
+     * @throws System::ArgumentNullException if @p selector is an empty std::function.
+     */
     template<typename T, typename R>
     R Sum(const std::vector<T>& source, std::function<R(const T&)> selector)
     {
+        detail::requireCallable(selector, "selector");
         R result{};
         for (const auto& item : source) result = result + selector(item);
         return result;
@@ -199,11 +271,18 @@ namespace System::Linq {
      * (OrderBy.cs's ImplicitlyStableOrderedIterator exists specifically to preserve this
      * guarantee). std::sort gives no such guarantee (introsort-based implementations may
      * reorder equal-key elements arbitrarily); std::stable_sort is required to match.
+     *
+     * @throws System::ArgumentNullException if @p keySelector is an empty std::function.
+     *         Checked before the sort, so a sequence of fewer than two elements -- which
+     *         std::stable_sort never compares, and which therefore used to succeed with an
+     *         empty key selector -- reports the argument error too. .NET checks eagerly in
+     *         OrderedIterator's constructor (OrderedEnumerable.cs:80-82).
      */
     template<typename T, typename Key>
     std::vector<T> OrderBy(const std::vector<T>& source,
                            std::function<Key(const T&)> keySelector)
     {
+        detail::requireCallable(keySelector, "keySelector");
         std::vector<T> result = source;
         std::stable_sort(result.begin(), result.end(),
                   [&](const T& a, const T& b) { return keySelector(a) < keySelector(b); });
@@ -215,11 +294,15 @@ namespace System::Linq {
      *
      * C++ counterpart of .NET Enumerable.OrderByDescending. Same stable-sort requirement as
      * OrderBy above -- see its comment for the rationale.
+     *
+     * @throws System::ArgumentNullException if @p keySelector is an empty std::function,
+     *         on the same terms as OrderBy above.
      */
     template<typename T, typename Key>
     std::vector<T> OrderByDescending(const std::vector<T>& source,
                                      std::function<Key(const T&)> keySelector)
     {
+        detail::requireCallable(keySelector, "keySelector");
         std::vector<T> result = source;
         std::stable_sort(result.begin(), result.end(),
                   [&](const T& a, const T& b) { return keySelector(a) > keySelector(b); });

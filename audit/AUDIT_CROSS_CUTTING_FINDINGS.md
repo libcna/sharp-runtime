@@ -396,6 +396,80 @@ SR-AUD-099, SR-AUD-121, SR-AUD-134, and:
 - `modules/core/include/System/Linq.hpp.audit.md`.
 - `modules/core/tests/System/LinqTests.cpp.audit.md`.
 
+**Remediated — tickets #1866/#1867/#1868/#1869/#1870 (2026-07-30). CCF-011 is
+CLOSED.** All six members are `remediated`: SR-AUD-052 (`Array`), SR-AUD-058
+(`Progress<T>`), SR-AUD-065 (`Lazy<T>`), SR-AUD-099
+(`AggregateException::Handle`), SR-AUD-121 (`EventHandler<TEventArgs>`),
+SR-AUD-134 (`Linq`). The original evidence above and in the per-file reports is
+retained unchanged.
+
+Design-only ticket #1866 recorded the family plan in
+`docs/EmptyCallableBoundaryPlan.md` and established the single policy this cause
+asked for, which the prose above had already identified in outline: decide
+emptiness **at the public boundary, before any element of the input is examined**,
+and choose by API shape rather than per type. A delegate *argument* to an ordinary
+method is rejected with `System::ArgumentNullException` carrying .NET's own
+parameter name (`match`, `comparison`, `converter`, `action`, `predicate`,
+`selector`, `keySelector`, `valueFactory`); an *event subscription* is a no-op,
+because C# `event += null` is `Delegate.Combine(d, null) == d`; an event *raise*
+skips untruthy handlers. Thirty-six public entries across six types now implement
+it, and where .NET validates other arguments first the port reproduces that order
+— including `Array.FindIndex`'s range-before-callable and
+`Array.FindLastIndex`'s callable-before-range asymmetry, which is real reference
+behaviour rather than an oversight.
+
+The prose above is confirmed on its central claim — the failures were "different
+.NET-compatible outcomes" needing one policy, not one blanket rule — and is
+corrected on the *extent* of the silent region in three places, each measured
+rather than inferred (`build-probe/1866_prefix.log`, 60 cases):
+
+- The silence was **size**-dependent, not merely emptiness-dependent.
+  `Array::Sort`, `Array::BinarySearch`, `Linq::OrderBy` and
+  `Linq::OrderByDescending` were also silent for a **one-element** input, because
+  `std::sort`/`std::stable_sort` never invoke the comparator below two elements.
+- `Linq::First(empty, {})` did not return a normal result: it threw
+  `InvalidOperationException`, so the *sequence* error masked the *argument*
+  error. The repair is a validation-order change there, not only an added check.
+- `AggregateException::Handle` was silent for an aggregate with **no** inner
+  exception, and `EventHandler::Add` failed **inside `Add` itself** — not at
+  `Raise` — whenever a replay hook was set, which is what makes the empty check's
+  position before the hook binding.
+
+Two observable consequences are recorded rather than assumed away: a call that
+previously returned an ordinary result for an empty or one-element input now
+throws (the call was already wrong, and .NET throws for the identical call), and
+`EventHandler::Size()` no longer counts a subscription that could never have been
+invoked.
+
+Source, ABI, layout and `noexcept` consequences: **none**. Not one of the
+thirty-six entries was `noexcept`; every `Array` and `Linq` entry is a function
+template with no mangled symbol to change; no data member, virtual function or
+vtable slot was added, removed, reordered or retyped in any of the six types. The
+twelve `Array` `Predicate<T>` parameters were renamed `predicate` → `match` so
+the signature, the doc-comment and the observable message agree — in C++ a
+parameter name is not part of the interface.
+
+Evidence: 48 permanent add-only regressions (Array 13, Linq 8, Lazy 9,
+EventHandler 8, Progress 5, AggregateException 5);
+`SharpRuntimeTests_Core_Base` 5,301/5,301, from 5,253 before the batch;
+whole-repository build clean with zero errors and zero warnings. The direct probe
+`build-probe/1866_empty_callable_probe.cpp` was compiled **with**
+`-fsanitize=address,undefined` at each step — every one of these headers is
+header-only or inline, so instrumenting the probe recompiles the changed code and
+there is no stale-archive risk — and exits 0 with zero AddressSanitizer,
+UndefinedBehaviorSanitizer and LeakSanitizer reports, including a 2,000-iteration
+leak-stress loop over heap-owning callables and handlers that add, remove and
+`Clear()` their own list from inside `Raise`/`Report`. Across all 60 cases **no**
+`std::bad_function_call` remains; the only eight `no-throw` outcomes left are the
+deliberate event-subscription no-ops.
+
+Deliberately **not** members, and not closed by this work: `EventHandler::SetReplayHook`'s
+empty value, which is the documented "clear the hook" spelling;
+`Progress<T>`'s constructor handler, which already threw correctly;
+`Lazy<T>`'s four non-factory constructors, which synthesise a factory that is
+never empty; and CCF-010's separate question of *what* a comparison callable
+computes (SR-AUD-046), which this work never touches.
+
 ## CCF-012 — hand-written composite-format replacement is not a format parser
 
 `String::Format` and `FormattableString::ToString` independently reconstruct a
