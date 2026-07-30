@@ -509,3 +509,19 @@ converter throws for NaN/+Inf/−Inf and converts a finite value exactly. No
 `SR-AUD-027 → remediated`. **CCF-005 memory-safety + value slice complete except
 043b (#1854, `needs_user`).** The Decimal slice (035/036/038) is a separate
 review (§17). Remaining CCF-005: #1854 (043b) only.
+
+### 19.5 #1854 (043b) cross-family reconciliation with CCF-007 #1862 (2026-07-30)
+
+Recorded during the CCF-007 ticket-planning pass. **#1854 (SR-AUD-043b) and
+CCF-007 #1862 (SR-AUD-029, `Single`/`Double` `Round(x,digits)` validation) are
+the same decision shape but independent findings** — different types, no shared
+code, neither a duplicate nor a prerequisite of the other. Both are blocked for
+the identical reason: an invalid-argument check is impossible without dropping a
+`noexcept`/`constexpr` qualifier, and each offers the same option pair —
+**(A)** drop the qualifier and throw `ArgumentOutOfRangeException` (full .NET
+parity) vs **(B)** keep it and clamp/degrade (compatible). Both are header-only
+with **no ABI-symbol break** (a non-template function's mangled name does not
+encode `noexcept`); the impact is the source-level `noexcept` trait only.
+**They should be decided together** so one convention is adopted across the
+codebase rather than split A/B. See `docs/FloatingValueFidelityPlan.md` §19.1/§19.3.
+#1854 stays `needs_user`; no new ticket was created by this reconciliation.

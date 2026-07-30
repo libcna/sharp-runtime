@@ -294,3 +294,11 @@ decision (adopt full .NET `NumberStyles.Number` semantics vs. keep the current
 comma/overflow behaviour as an accepted deviation). SR-AUD-035 stays `confirmed`
 until #1858 lands. The comma fix was **not** applied silently, per the batch
 directive.
+
+**Comma-decision sibling (2026-07-30):** the float parser thousands tail
+**#1865** (`Single`/`Double`, CCF-007 SR-AUD-033, `docs/FloatingValueFidelityPlan.md`
+§19.4) hinges on the same invariant-culture `,`-as-group-separator choice as
+#1858. They differ in blast radius — for Decimal, `Parse("1,5")` is *already*
+accepted as `1.5m` and would silently become `15m`; for `Single`/`Double`, `,` is
+today *rejected*, so adoption is a rejected→accepted widening with no existing
+value change. Both are `needs_user` and must be resolved consistently.

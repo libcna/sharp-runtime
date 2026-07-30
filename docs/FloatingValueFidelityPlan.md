@@ -338,5 +338,132 @@ approval-blocked, per §11.
 **CCF-007 family status:** SR-AUD-030, SR-AUD-031, SR-AUD-032 remediated; the
 compatible parse-whitespace slice of SR-AUD-033 landing this batch (#1864);
 SR-AUD-029 (#1862), the SR-AUD-033 format slice (#1863), and the SR-AUD-033
-thousands+overflow parse tail all remain approval-gated. The family closes only
-when all five findings are `remediated` (§17).
+thousands+overflow parse tail (#1865) all remain approval-gated. The family closes
+only when all five findings are `remediated` (§17).
+
+---
+
+## 19. Approval decision records (refined 2026-07-30, ticket-planning pass)
+
+These are the durable, reference-exact decision records for the three CCF-007
+approval-gated tickets, plus the reconciliation with the sibling noexcept finding
+#1854. **No implementation is authorised by this section**; each requires the
+explicit per-action user decision named below.
+
+### 19.1 CCF7-4 / #1862 — `Round(x,digits)` precision validation (SR-AUD-029)
+
+**Current state (measured):** `Single::Round(float x, intcs digits) noexcept`
+(`Single.hpp:246`) and `Double::Round(double x, intcs digits) noexcept`
+(`Double.hpp:291`) — both `[[nodiscard]] static`, header-only inline, computing
+`pow(10,digits)` with **no** range check. Probe: `Round(1.2345f,-1)=0`,
+`Round(1.2345f,7)=1.234500051`, `Round(1.2345f,100)=NaN`.
+
+**.NET reference (exact):** `Single.Round(x,d)`→`MathF.Round(x,d)`→
+`MathF.Round(x,d,ToEven)`; `Double.Round(v,d)`→`Math.Round(v,d,ToEven)`. The
+3-arg funnel validates first: `if ((uint)digits > maxRoundingDigits) Throw…` with
+`maxRoundingDigits = 6` (MathF) / `15` (Math) (`MathF.cs:389/415`,
+`Math.cs:1366/1407`). Because the guard casts to `uint`, **negative** digits also
+throw. The exception is `ArgumentOutOfRangeException`, `paramName = "digits"`,
+messages (`Strings.resx:1928/1931`, `ThrowHelper.cs:246/252`):
+- float: `"Rounding digits must be between 0 and 6, inclusive."`
+- double: `"Rounding digits must be between 0 and 15, inclusive."`
+`ArgumentOutOfRangeException.HResult` is `COR_E_ARGUMENTOUTOFRANGE` (0x80131502)
+in .NET; sharp-runtime's `ArgumentOutOfRangeException(paramName, message)` ctor
+(`ArgumentOutOfRangeException.hpp:57`) is the vehicle (it does not currently model
+that HResult — record but do not block on it).
+
+**Options:**
+- **(A) Full parity — drop `noexcept`, throw.** Reject `digits<0 || digits>6/15`
+  with `ArgumentOutOfRangeException("digits", <per-type message>)` **before** the
+  `pow`. Distinct 0–6 (float) / 0–15 (double) limits retained.
+- **(B) Compatible — keep `noexcept`, clamp.** Clamp `digits` to `[0,6]`/`[0,15]`
+  and round at the limit. No exception; changes the *result* for out-of-range
+  digits (spurious value/NaN → clamped value) but not the exception spec.
+
+**Why (A) is approval-gated:** removing `noexcept` from a public method is an
+exception-spec change outside the compatible-narrowing envelope. **ABI:** for a
+non-template static member function the mangled symbol does **not** encode
+`noexcept`, and both types are header-only, so there is **no exported-symbol/ABI
+break**; the impact is *source-level* — `noexcept(Single::Round(x,d))` flips
+`true→false`, and any `&Round` taken as a `noexcept`-typed function pointer stops
+compiling. No object-layout or parameter-list change under either option.
+
+**SR-AUD-040 boundary (do not conflate):** `Round(x)`/`Round(x,digits)` use
+`std::nearbyint`, which honours the *ambient FP rounding mode* — a separate defect
+class (the one fixed for `MathF::Round(ToEven)` by #1723), **not** SR-AUD-029 and
+**not** in CCF-007. It should be its own finding/ticket family; #1862 must not
+absorb it.
+
+**Test matrix (add-only, when approved):** `Round(x,-1)`, `Round(x,7)` (float) /
+`Round(x,16)` (double), `Round(x,100)` → option (A): throw
+`ArgumentOutOfRangeException` with `paramName=="digits"` and the exact per-type
+message; option (B): equal the clamped-at-limit value. `Round(x,0)`,
+`Round(x,6)` (float) / `Round(x,15)` (double) remain valid and unchanged.
+
+### 19.2 CCF7-5 / #1863 — `ToString(value,format)` output (SR-AUD-033 format)
+
+**Current vs .NET (exact before/after), invariant culture:**
+
+| Spec | Current sharp-runtime | .NET target |
+|---|---|---|
+| `E2` of `1.25` | `"1.25E+00"` (libstdc++ 2-digit exp) | `"1.25E+000"` (sign + ≥3 exp digits) |
+| `N2` of `1234.5` | `"1234.50"` (no grouping) | `"1,234.50"` (group size 3 + 2 decimals) |
+| `G9`(float)/`G17`(double) | `ostringstream setprecision` (not guaranteed shortest/round-trip) | exact round-trip width |
+| default / `R` / `G`(no prec) | `to_chars` shortest round-trip ✓ | shortest round-trip ✓ (already matches — must not regress) |
+
+**Backend decision (required):** the current `E`/`N`/`G<n>` path is
+`std::ostringstream` + `std::fixed`/`std::scientific`/`setprecision`, which
+**cannot** emit a 3-digit exponent (libstdc++ emits 2), insert `N` group
+separators, or guarantee shortest-`G` without post-processing. Landing parity
+requires either (i) post-processing the stream output (pad the exponent to ≥3
+digits; insert `,` every 3 integer digits) or (ii) a custom digit formatter. The
+`to_chars` fast path for default/`R`/shortest-`G` **must be preserved**.
+
+**Why approval-gated:** this changes existing **observable `ToString` text**.
+**Compatibility impact:** any serialized text, golden files, or downstream string
+comparisons that captured the current `"1.25E+00"`/`"1234.50"` forms would change
+(`E` gains an exponent digit; `N` gains separators). **ABI:** none (inline body,
+no signature change). `Half` inherits the fix automatically (its `ToString`
+delegates to `Single`).
+
+**Test matrix (add-only, when approved):** exact `E2=="1.25E+000"`,
+`N2=="1,234.50"`; `Parse(ToString(x,"G17"))==x` over a spread of finite doubles
+and `G9` for floats; `R`/default text unchanged (regression guard on the
+`to_chars` path).
+
+### 19.3 #1854 (SR-AUD-043b) reconciliation with #1862
+
+**#1854 is NOT a duplicate of, nor a prerequisite of, #1862.** They are
+**independent findings on different types** — #1854 covers `ReadOnlyMemory<T>`
+constructors and `HashCode::AddBytes` (negative-length rejection); #1862 covers
+`Single`/`Double` `Round(x,digits)`. Neither's code touches the other's.
+
+They **do** share one decision shape: *"an invalid-argument check is blocked by a
+`noexcept`/`constexpr` qualifier — drop it to throw
+`ArgumentOutOfRangeException` (full parity, option A) or keep it and clamp/degrade
+(compatible, option B)."* Both are gated for the **same** reason (exception-spec
+change), and both are header-only with **no ABI-symbol break** (only the
+`noexcept` source-trait changes). They should be **decided together** so the
+project adopts one convention rather than splitting A/B across siblings.
+
+**Contrast — why #1855 (CCF-008) landed autonomously:** the already-remediated
+`Decimal`/`Math`/`MathF` `Round(…,mode)` overloads were **not** `noexcept`
+(verified 2026-07-30: `MathF.hpp:229`, `Math.hpp`, `Decimal.hpp:545` carry no
+`noexcept`), so validating an invalid `MidpointRounding` by throwing needed no
+exception-spec change and was inside the autonomous envelope. The distinguishing
+factor for #1854 and #1862 is precisely the `noexcept` qualifier that must be
+**removed**. No new ticket is created by this reconciliation; #1854 stays
+`needs_user`, #1862 stays `needs_user`, cross-referenced here and in
+`docs/ConversionBoundaryFamilyPlan.md`.
+
+### 19.4 #1858 / #1865 comma decision (shared)
+
+The Decimal parser comma tail (**#1858**, `docs/DecimalBoundaryFamilyPlan.md`
+§3/§7/§12) and the float parser thousands tail (**#1865**, §19-adjacent, plan
+§9/§11) both hinge on the same choice: adopt invariant-culture `,`-as-group
+semantics or keep the current behaviour as an accepted deviation. **They differ
+in blast radius:** for Decimal, `Parse("1,5")` today returns `1.5m` and would
+become `15m` — a *silent value change* of an already-accepted input; for
+`Single`/`Double`, `,` is today *rejected* (`Parse("1,234.5")` fails), so adoption
+is a rejected→accepted widening with **no** existing accepted value changing. Both
+must be resolved consistently; neither is authorised here.
