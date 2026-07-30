@@ -4,9 +4,29 @@
 # NEXT.md
 
 *Last verified: 2026-07-30. Branch:
-`feature/remediation-batch-ccf012-composite-format` (previously
-`feature/remediation-batch-ccf002-datetime-validation`). The test floor is now
-**14,568** (was 14,514): this batch compared **CCF-012** against **CCF-017** on
+`feature/design-ccf019-owned-tree-lifetimes` (previously
+`feature/remediation-batch-ccf012-composite-format`). The test floor is
+**unchanged at 14,568** — this batch was **DESIGN-ONLY** and changed **no
+production file**. Design ticket **#1885** planned **CCF-019**, the owned-tree
+lifetime family: **SR-AUD-327** (`JsonNode`) and **SR-AUD-333** (`XObject`).
+Both were reproduced against the shipped bodies before any design was written —
+47 cases, one forked process each under a watchdog, three builds from one source
+— giving **29 ASan `heap-use-after-free` accesses**, **3 `stack-overflow`s**,
+**57 reads / 0 writes** under recoverable ASan, and **12** further cases wrong
+with **no diagnostic in any build**. `docs/OwnedTreeLifetimeContractPlan.md` (32
+sections) records the selected contract — **the owner detaches what it owns, in
+its own destructor**, at zero layout, zero vtable, zero allocation and zero
+per-access cost — and every rejected alternative with measured evidence,
+including the only one that matches .NET exactly (a strong parent link), which
+**leaks**. Post-audit tally **unchanged**: **57 remediated, 306 confirmed, of
+364** — two of the 306 now carry the `confirmed (design-complete)` qualifier the
+index header already defines. Nine new tickets, **#1886–#1894**, every one
+`needs_user` or `blocked` pending **six explicit approvals** (§31 of the plan).
+**No CCF-019 production repair was made and none is approved.** See "Autonomous
+design batch handoff, 2026-07-30 (CCF-019, DESIGN-COMPLETE)" immediately below.
+Previously, on `feature/remediation-batch-ccf012-composite-format`: the test
+floor rose to
+**14,568** (was 14,514): that batch compared **CCF-012** against **CCF-017** on
 measured evidence, selected **CCF-012 — composite formatting**, and left it
 **PARTIALLY REMEDIATED**. Design ticket **#1881** wrote
 `docs/CompositeFormatBoundaryPlan.md` (20 sections plus the durable family
@@ -235,6 +255,297 @@ per this repository's practice of preserving historical audit narrative.*
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
+
+## Autonomous design batch handoff, 2026-07-30 (CCF-019, DESIGN-COMPLETE)
+
+Branch `feature/design-ccf019-owned-tree-lifetimes`, off
+`feature/remediation-batch-ccf012-composite-format`. Two signed commits (#1885
+design + audit corrections, and this handoff). **This batch changed no
+production file**, by explicit instruction: the user has **not** approved a
+CCF-019 implementation.
+
+### Reproduction results — the first work unit
+
+Both findings were reproduced **before** any design was written, against the
+shipped bodies, using only public API (no `-fno-access-control`, no header edit,
+no macro over a library header).
+
+**Freshness, and why it is stronger than a build tree.** One `g++` invocation
+compiles the probe **together with 60 production translation units** — the whole
+of `modules/text-json/src/.../JsonNode.cpp`, the whole of `modules/xml-linq/src`,
+and the `Xml` DOM they link against — with the same sanitizer flags. **No
+prebuilt archive is linked at all**, so a stale or non-instrumented object is
+structurally impossible. `build-probe/1885_env_freshness.log` holds the exact
+command line, toolchain versions, source/binary timestamps, and a deliberate-leak
+self-test proving LeakSanitizer was active.
+
+**Harness.** 47 cases, each in its own `fork()`ed child under `alarm(5)`, so one
+crash cannot hide later cases, one hang cannot stall the survey, and one
+allocator-reuse pattern cannot mask another. **Three builds from one source**:
+`asan` (`-fsanitize=address,undefined`), `asanr`
+(`-fsanitize-recover=address`, `halt_on_error=0` — counts *every* faulting
+access, not just the first), and `none` (no sanitizer — the *silent* shapes that
+ASan's quarantine hides).
+
+| | JsonNode (SR-AUD-327) | XObject (SR-AUD-333) |
+|---|---|---|
+| Cases | 21 | 26 |
+| ASan `heap-use-after-free` | **8** | **21** |
+| ASan `stack-overflow` | 2 | 1 |
+| Faulting accesses under `asanr` | 8 | 49 |
+| **Writes**-after-free | **0** | **0** |
+| Silent wrong-value cases | 6 | 6 |
+| Public entries reaching a UAF | 4 | **14** |
+
+**Headline, SR-AUD-327 (J01).** `arr->Add(v); child = (*arr)[0];` then the array
+dies; `child->getRootProperty()` → `heap-use-after-free`, `READ of size 8` at
+`0x506000000030`, 16 bytes into the 64-byte `make_shared<JsonArray>` region,
+freed by `~shared_ptr<JsonArray>`, faulting frame
+`JsonNode::getRootProperty()`, exit status 1, no timeout. **Without a sanitizer
+it does not crash** — it returns a plausible freed address.
+
+**Headline, SR-AUD-333 (X01).** `el->Add(t);` then the element dies;
+`t->getParentProperty()` → `heap-use-after-free`, `READ of size 8` at
+`0x50d000000050`, faulting frame `XObject::getParentProperty() const` at
+`XObject.cpp:12`. **Without a sanitizer: `pure virtual method called`,
+`terminate`, SIGABRT** — because that accessor dispatches a **virtual call**
+through the freed parent.
+
+**Silent shapes, measured separately.** Two allocator-reuse cases are invisible
+under ASan and decisive without it: a freed `JsonArray` slot refilled by a
+`JsonObject` at the **identical address**, after which the retained child reports
+kind `Object` where its real parent was an `Array`; and a freed `XElement` slot
+refilled by another element, after which the retained text node reports the
+squatter's name, `"squatter"`.
+
+### Premises corrected — nine, all by measurement
+
+Historical audit text preserved; corrections appended to the two owning per-file
+reports, the cross-cutting record, `AUDIT_FINAL_REPORT.md` and
+`AUDIT_PROGRESS.md`. **No new `SR-AUD-*` identifier**; numbering frozen at
+**364**.
+
+1. **The surface is 76 public entries across 27 headers and 13 bodies** (41 +
+   35), not the nine files and two accessors the cross-cutting record names.
+2. **SR-AUD-333's severity is understated**: eight public entry points **abort
+   the process** with no sanitizer present, via a virtual call on freed storage.
+3. **The families are structurally asymmetric.** `XObject` deletes copy, move and
+   both assignments; **`JsonNode` deletes none** — `JsonArray copy = *orig;`
+   compiles, shares the children, and leaves them reporting the **original** as
+   their parent; a slicing `operator=` rewrites `parent_` on a node still stored
+   in a container.
+4. **Insertion diverges from .NET in opposite directions**: JsonNode **rejects**
+   an already-parented node (matching .NET); Xml.Linq **moves** it where .NET
+   **clones** (`XContainer.cs:512`) — an authorised documented deviation.
+5. **A retained child of a destroyed parent is permanently unusable**, not merely
+   unsafe to read: `AssignParent` throws `The node already has a parent.` forever.
+6. **`JsonObject::SetItem`'s exception path leaves the object inconsistent** —
+   the stored value is detached and stays stored, after which a **second**
+   container accepts it. `JsonArray::SetItem`, 40 lines away, is correct.
+7. **`XNode::ReplaceWith` destroys data on its exception path** — it removes
+   `this` before inserting, so a rejected replacement loses the node. Measured
+   `<a/>` where `<a>victim</a>` was expected.
+8. **Three stack-overflow shapes exist that no CCF-019 text mentions**, one from
+   **untrusted input**: `JsonNode::Parse` of 20,000 nested arrays, and 20,000-deep
+   programmatic `JsonArray`/`XElement` nests that crash on *release*. The guards
+   are quadratic (100,000 times out in both). `XDocument::Parse` is the
+   counter-example — tinyxml2 already rejects deep nesting.
+9. **`getAttributesProperty()`'s reference is not invalidated by reallocation** —
+   it refers to the vector *object*. Only the element's destruction invalidates
+   it. A repair aimed at reallocation would fix nothing.
+
+### Selected design — both families
+
+> **The owner detaches what it owns, in its own destructor.**
+
+`~JsonArray`/`~JsonObject` call `DetachParent()` on every child;
+`~XContainer` detaches every child and `~XElement` every attribute (clearing its
+`next_` too). This is the contract **#1769 already shipped for
+`LinkedListNode<T>`** under this same cross-cutting cause. Recursion is
+**structural, not written**: releasing the child vector runs each child
+container's own destructor.
+
+Cost, **measured**: `sizeof` unchanged for all 11 public types (`JsonNode` 24,
+`JsonArray`/`JsonObject` 48, `JsonValue` 40, `XObject`/`XNode` 16, `XContainer`
+40, `XElement` 128, `XAttribute` 120, `XText` 48, `XDocument` 56); **zero**
+vtable slots added; **zero** allocations; **zero** per-access cost; no signature,
+`noexcept` or namespace change. Consumers recompile (inline header change) but
+edit nothing.
+
+It closes **27 of the 29** measured use-after-free accesses. The two it does not
+are borrowed *views*, not parent links, and get their own approval (#1892).
+
+### Rejected alternatives — all with measured evidence
+
+| Candidate | `sizeof` base/container | Verdict |
+|---|---|---|
+| `weak_ptr` + `enable_shared_from_this` | **48 / 72** | **Rejected.** `weak_from_this()` on an automatic-storage container is **expired**, so children of the repository's own **77 stack-allocated node instances** would silently report *no parent* — a new wrong answer traded for the old one. Plus an atomic CAS on every parent read. |
+| `weak_ptr` without `shared_from_this` | 32 / 56 | **Rejected — not implementable.** `Add(node)` has only `this`. |
+| separate liveness token | 40 / 80 | Rejected. Dominated by the tombstone cell, itself dominated by the selection. |
+| intrusive refcount | 32 / 56 | Rejected. Does not address the finding; changes 30+ public return types. |
+| shared implementation state | 16 / 40 | Rejected. Relocates the cycle rather than removing it. |
+| tombstone link cell | 32 / 72 | **Works** (measured correct for automatic storage) but +8/+24 bytes and one allocation per container for an *identical* observable contract. **Kept as the recorded fallback.** |
+| **strong parent link** (matches .NET exactly) | 32 / 56 | **Rejected — leaks by construction.** `constructed=2 destroyed=0`, `272 byte(s) leaked in 3 allocation(s)`, LeakSanitizer-confirmed after clobbering the stack. |
+| whole-tree arena + aliasing `shared_ptr` | 48 / 24 | Rejected. Over-retains vs .NET, and makes every current construction spelling illegal. |
+
+**.NET's exact contract is unreachable in C++ with `shared_ptr` ownership** — it
+needs a strong child→parent reference, which cycles with the existing strong
+parent→child one. The design says so and proves it, rather than implying parity.
+
+### Cycle and destructor proof
+
+The selected design **adds no ownership edge at all**; it only clears an existing
+non-owning one earlier. Every candidate cycle the family could have —
+child↔parent, attribute↔element, node↔document, iterator↔container,
+source↔handler, wrapper↔implementation — is enumerated in §16 and is broken both
+before and after. Eight destruction sequences are measured in
+`build-probe/1885_design_asan.log`: whole-tree teardown, retained child, retained
+**grandchild** (the cascade), detached child, reparent, mid-insertion throw,
+mid-replacement throw, and deep-chain teardown. The last is a **negative result**
+recorded as one: teardown recurses one frame per level, in the shipped code and
+under the selection alike, and crashes at 20,000 — which is why #1893 exists.
+
+### Blocked implementation tickets
+
+| # | P | Status | Scope | Depends on | Approval |
+|---|---|---|---|---|---|
+| #1886 | P1 | **needs_user** | `~JsonArray`/`~JsonObject` detach children — **the core JsonNode repair** | #1885 | §31 item 1 |
+| #1887 | P2 | **needs_user** | `JsonObject::SetItem` assign-before-detach | #1886 | §31 item 2 |
+| #1888 | P2 | **needs_user** | `= delete` JsonNode copy/move; `DetachParent` non-public — **source break** | #1886 | §31 item 3 |
+| #1889 | P2 | **needs_user** | version-guarded enumerators — **layout change 48→56, module graph 91→92** | #1886 | §31 item 4 |
+| #1890 | P1 | **needs_user** | `~XContainer`/`~XElement` detach children and attributes — **the core XObject repair** | #1885 | §31 item 1 |
+| #1891 | P2 | **needs_user** | `ReplaceWith` validate-before-remove; `InsertNodeAt` adopt-last | #1890 | §31 item 2 |
+| #1892 | P2 | **needs_user** | borrowed-view surface (`getAttributesProperty`, `Ancestors`, `setNextAttributeProperty`) — **source break** | #1890 | §31 item 5 |
+| #1893 | P2 | **needs_user** | deep-parse and deep-teardown bounds — **accepted-input change** | #1886, #1890 | §31 item 6 |
+| #1894 | P2 | blocked | negative consumer fixtures + permanent sanitizer closure | all of the above | none of its own |
+
+### Exact approval requested
+
+Verbatim in `docs/OwnedTreeLifetimeContractPlan.md` §31. Six independent items;
+**item 1 is the one to answer first**:
+
+> Approve adding a destructor to `JsonArray`, `JsonObject`, `XContainer` and
+> `XElement` whose only effect is to clear each owned child's parent link (and,
+> for `XElement`, each attribute's parent and `next_` link) before that storage
+> is released.
+
+- **Representation**: nothing changes. `parent_` stays raw; children stay
+  `vector<shared_ptr>`.
+- **Object layout**: **none of the 11 public types changes size.**
+- **Virtual interfaces / vtables**: **unchanged** — the destructors are already
+  virtual through the base.
+- **Copying**: unchanged by item 1 (item 3 deletes it separately). Side effect:
+  declaring the destructors suppresses `JsonArray`/`JsonObject`'s implicit
+  **move**, so `JsonArray a = std::move(b);` becomes a copy.
+- **Raw pointers → shared/weak/intrusive**: **none.**
+- **Do retained detached objects become usable**: **yes** — today they can never
+  be re-attached; afterwards they can, exactly as a removed node can.
+- **Insertion**: unchanged — JsonNode still rejects, Xml.Linq still moves.
+- **Consumer migration**: **no source edit**, recompile only. One run-time
+  change: `getParentProperty()` returns `nullptr` instead of a dangling pointer
+  after the parent dies.
+- **Overhead**: zero bytes, zero allocations, zero per-access cost.
+- **One approval or two**: **one covers both findings** for item 1 — same rule,
+  same risk; splitting would leave one family knowingly reachable to a UAF.
+  Items 3, 4 and 5 are genuine breaks and each need their **own** approval; item
+  6 changes accepted input and needs its own, like #1879/#1884.
+
+### Exact baselines (carried forward, nothing rebuilt)
+
+| Baseline | Value | How verified |
+|---|---|---|
+| Repository tests | **14,568 / 37 executables** | unchanged — no production or test file was touched |
+| Module graph | **41 modules / 91 edges** | `validate_module_boundaries.py` re-run, OK |
+| Canonical Doxygen | **1,941 (ceiling 1,942)** | not re-run and not needed: `Doxyfile` `INPUT = modules README.md`, and this batch touched neither |
+| Negative fixtures | **9 fixtures / 66 sites** | `check_negative_consumer_fixtures.py` re-run, OK (75 compiler invocations, peak **3** jobs) |
+| Version seams | **2 seams / 18 specialisations** | `check_version_seam_odr.py` re-run, OK |
+| Audit tally | **57 remediated / 306 confirmed / 364** | unchanged; 2 of the 306 now `confirmed (design-complete)` |
+
+### Validators run
+
+`validate_module_boundaries.py --root .` (41/91), `validate_module_boundaries_test.py`
+(7), `generate_component_catalog.py --check`, `db_consistency_check.py --db plan.sqlite3`,
+`check_version_seam_odr.py` (2/18), `check_version_seam_odr_test.py` (15),
+`check_negative_consumer_fixtures.py` (9/66), `check_negative_consumer_fixtures_test.py`
+(37), `git diff --check` — **all green**. Every one ran with
+`PYTHONDONTWRITEBYTECODE=1`; `TMPDIR` was redirected to `build-tmp/`.
+`local_ci_check.sh` and `check_selective_components.sh` were **not** run: no
+source, test, CMake or tooling file changed, so neither has anything to validate
+that the checks above do not.
+
+### Retained evidence
+
+Sources and logs kept in `build-probe/` (gitignored); **large binaries deleted**,
+reclaiming **69 MB**:
+
+`1885_build.sh`, `1885_ccf019_lifetime_probe.cpp` (the 47-case reproducer),
+`1885_design_probe.cpp` (the eight destruction proofs),
+`1885_layout_probe.cpp` (candidate `sizeof` and `weak_from_this` feasibility),
+`1885_cycle_leak_probe.cpp` (the strong-parent-link leak),
+`1885_lsan_selftest.cpp`; logs `1885_prefix_none.log`, `1885_prefix_asan.log`,
+`1885_prefix_asanr.log`, `1885_design_asan.log`, `1885_layout.log`,
+`1885_cycle_leak.log`, `1885_lsan_selftest.log`, `1885_env_freshness.log`, and
+the three compile logs.
+
+### Build directories and disk
+
+| Directory | Start | End |
+|---|---|---|
+| `build` | 726 MB | 726 MB (untouched) |
+| `build-asan` | 3.5 GB | 3.5 GB (untouched — the single-TU probe is cheaper and gives a stronger freshness guarantee) |
+| `build-probe` | 31 MB | **32 MB** (peaked at 101 MB; 69 MB reclaimed) |
+| `build-modular` | 777 MB | 777 MB (untouched) |
+| `build-consumer` | 12 KB | 12 KB |
+| `build-tmp` | 8.1 MB | 8.1 MB |
+| `cmake-build-debug` | 88 MB | 88 MB (untouched) |
+
+**Maximum aggregate compilation parallelism: 3 jobs, never exceeded.** Every
+probe build is a **single** `g++` process (one job).
+`check_negative_consumer_fixtures.py` reports its own peak of **3**.
+`CMAKE_BUILD_PARALLEL_LEVEL=3` was exported; no `nproc`, no bare `-j`, no bare
+`--parallel`, no unrestricted Ninja.
+
+### Recommended first implementation ticket after approval
+
+**#1886 and #1890 together** — they are independent of each other, share approval
+item 1, and are the only two that remove use-after-free. **#1888 should land with
+or immediately after #1886**, because #1886 alone silently turns
+`JsonArray a = std::move(b);` into a copy and #1888 makes it a compile error
+instead.
+
+### Known limitations
+
+- **CCF-019 is not remediated and must not be reported as remediated.**
+  SR-AUD-327 and SR-AUD-333 are `confirmed`; the qualifier is `design-complete`,
+  which the index header defines as *still counted as confirmed*.
+- **The selected design diverges from .NET**, and says so: a retained child of a
+  destroyed parent reports **no parent**, where .NET keeps the parent alive.
+  §13.4 argues that divergence is unobservable in any program with a .NET
+  analogue, because .NET cannot reach that state at all — but it is a divergence,
+  not parity.
+- **"My parent died" is deliberately indistinguishable from "I was removed."**
+  Distinguishing them needs the tombstone cell (+8/+24 bytes), recorded as the
+  fallback in §12.
+- **No consumer-held raw pointer is made safe.** A `JsonNode*`/`XElement*` a
+  consumer stored from `getParentProperty()` before the parent died still
+  dangles. Fixing that needs the return type to change, which needs
+  `shared_ptr`-owned parents, which the 77 automatic-storage sites reject.
+- **Zero writes-after-free were observed**, even with `-fsanitize-recover=address`
+  and `halt_on_error=0`. The mutating paths *enter* a non-`const` member on freed
+  storage but return before their `erase`/`insert`. The design claims a
+  read-after-free on a mutating path, **not heap corruption**.
+- **UBSan reported nothing** across the whole matrix. GCC has no
+  `-fsanitize=vptr`, so UBSan is a regression guard here, not a detector —
+  recorded so silence is not mistaken for coverage. **TSan is not applicable**
+  (no atomic, lock, cache or shared mutable state in either family) and is
+  recorded rather than skipped.
+- `scripts/__pycache__/*.pyc` remain tracked in git; every Python command ran
+  with `PYTHONDONTWRITEBYTECODE=1` and none were staged.
+- **CNA and mobile-eggbert were not inspected, searched, built or modified**, and
+  no downstream usage was investigated. **#1773 stays `blocked`.**
+- **CCF-017 remains deferred**, not closed or downgraded; #1875 and #1880 remain
+  inactive and untouched; #1879, #1884, #1854, #1858, #1862, #1863 and #1865
+  remain `needs_user` with their decision records unchanged.
 
 ## Autonomous batch handoff, 2026-07-30 (CCF-012, PARTIALLY REMEDIATED)
 

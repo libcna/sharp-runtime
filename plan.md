@@ -4565,3 +4565,97 @@ change), or a design-only CCF-017 ticket recording its permanent-deviation
 argument. Full detail, build-directory sizes, three-job parallelism record and
 probe accounting: `NEXT.md` under "Autonomous batch handoff, 2026-07-30
 (CCF-012, PARTIALLY REMEDIATED)".
+
+---
+
+## Autonomous design batch, 2026-07-30 — CCF-019 owned-tree lifetimes (#1885, #1886–#1894)
+
+Branch `feature/design-ccf019-owned-tree-lifetimes`, off
+`feature/remediation-batch-ccf012-composite-format`. **DESIGN-ONLY by explicit
+instruction: no production file was changed and no CCF-019 implementation is
+approved.** CCF-019 is **DESIGN-COMPLETE, NOT REMEDIATED**, and must not be
+reported otherwise.
+
+**Reproduced before anything was designed.** 47 cases against the shipped
+bodies, one `fork()`ed process each under a 5-second watchdog, in **three builds
+from one source**: `-fsanitize=address,undefined`, `-fsanitize-recover=address`
+(`halt_on_error=0`, so every faulting access is counted rather than the first),
+and no sanitizer (the *silent* shapes ASan's quarantine hides). Freshness is
+structural, not asserted: **one** `g++` invocation compiles the probe together
+with **60 production translation units** — all of `Text.Json`'s node body, all of
+`Xml.Linq`, and the `Xml` DOM they link against — so **no prebuilt archive is
+linked** and a stale or non-instrumented object is impossible.
+
+Measured: **29 ASan `heap-use-after-free` accesses** (8 `JsonNode`, 21
+`XObject`), **3 ASan `stack-overflow`s**, **57 reads-after-free and zero writes**
+under recoverable ASan, and **12** further cases that give a wrong answer with
+**no diagnostic in any build**. Two of those twelve are only visible without a
+sanitizer: a freed `JsonArray` slot refilled by a `JsonObject` at the identical
+address (the retained child then reports the wrong `GetValueKind`), and a freed
+`XElement` slot refilled by another element (the retained text node then reports
+the squatter's name).
+
+**Nine premises corrected by measurement**, historical audit text preserved and
+corrections appended to both owning per-file reports,
+`AUDIT_CROSS_CUTTING_FINDINGS.md`, `AUDIT_FINAL_REPORT.md` and
+`AUDIT_PROGRESS.md`. The largest: the surface is **76 public entries across 27
+headers and 13 bodies**, not the nine files and two accessors the cross-cutting
+record names; **SR-AUD-333's severity is understated** because
+`XObject::getParentProperty` dispatches a **virtual call** through the freed
+parent, so eight public entry points abort the process (`pure virtual method
+called`) **with no sanitizer present**; the two members are **structurally
+asymmetric** (`XObject` deletes copy/move, `JsonNode` does not, so
+`JsonArray copy = *orig;` compiles and shares children that still report the
+original as their parent); `JsonObject::SetItem` and `XNode::ReplaceWith` both
+corrupt or **lose** data on their exception paths; and **three stack-overflow
+shapes** exist that no CCF-019 text mentions, one reachable from **untrusted
+JSON**. **No new `SR-AUD-*` identifier was issued**; numbering stays frozen at
+**364**.
+
+**Selected contract, both families: the owner detaches what it owns, in its own
+destructor** — the contract #1769 already shipped for `LinkedListNode<T>` under
+this same cause. `docs/OwnedTreeLifetimeContractPlan.md` (32 sections) records
+it, the complete strong/weak ownership graph, the cycle analysis, eight measured
+destruction proofs, and every rejected alternative. Cost, measured: **`sizeof`
+unchanged for all 11 public types, zero vtable slots, zero allocations, zero
+per-access cost, no signature change**; consumers recompile but edit nothing. It
+closes **27 of the 29** use-after-free accesses.
+
+**Every representation-changing candidate was rejected with evidence, not
+preference.** A **strong parent link** — the only shape that reproduces .NET's
+contract exactly — **leaks by construction**: 2 constructed, **0 destroyed**, 272
+bytes in 3 allocations, LeakSanitizer-confirmed. A **`weak_ptr` parent link**
+would make children of the repository's own **77 automatic-storage containers**
+silently report *no parent*, because `weak_from_this()` on a stack object is
+expired. The tombstone-cell candidate works but costs +8/+24 bytes and an
+allocation per container for an identical observable contract, and is kept as the
+recorded fallback. **.NET's exact lifetime contract is unreachable in C++ with
+`shared_ptr` ownership**, and the plan proves that rather than implying parity.
+
+**Nine tickets created, every one gated.** #1886 (JsonNode core), #1887
+(JsonNode exception path), #1888 (JsonNode value semantics — **source break**),
+#1889 (enumerator lifetime — **the only layout change**, 48→56, module graph
+91→92), #1890 (XObject core), #1891 (XNode exception path), #1892 (Xml.Linq
+borrowed views — **source break**), #1893 (deep-parse/teardown bounds —
+**accepted-input change**), all `needs_user`; #1894 (negative fixtures +
+sanitizer closure) `blocked`. Six independent approval items are worded verbatim
+in the plan's §31; **item 1 covers both core repairs with one approval**.
+
+Baselines carried forward unchanged because nothing was rebuilt: **14,568 tests /
+37 executables**, module graph **41/91**, Doxygen **1,941/1,942** (not re-run and
+not needed — `Doxyfile` `INPUT = modules README.md` and this batch touched
+neither), negative fixtures **9/66**, version seams **2/18**. Audit tally
+**unchanged at 57 remediated / 306 confirmed / 364**, two of the 306 now carrying
+the `confirmed (design-complete)` qualifier the index header already defines.
+
+Nothing pushed/merged/rebased/tagged; **CNA and mobile-eggbert were not
+inspected, searched, built or modified**; **#1773 stays `blocked`**; CCF-017
+remains deferred; #1875 and #1880 remain inactive and untouched;
+#1854/#1858/#1862/#1863/#1865/#1879/#1884 remain `needs_user` with their decision
+records unchanged.
+
+**Ready queue: empty.** Every open ticket is `blocked`, `needs_user`, or
+deliberately inactive. The next work is the **#1886/#1890 approval decision**
+(plan §31 item 1), not another family. Full detail, build-directory sizes,
+three-job parallelism record and probe accounting: `NEXT.md` under "Autonomous
+design batch handoff, 2026-07-30 (CCF-019, DESIGN-COMPLETE)".
