@@ -3,17 +3,22 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-30. Branch: `feature/remediation-batch-ccf005-convert-decimal`
-(previously `feature/remediation-batch-ccf003-ccf005-plan`). The test floor is
-now **14,344** (was 14,233): the CCF-005 conversion/memory-safety slice closed the
-four autonomous findings — #1851 (SR-AUD-041 BitConverter bounds, +46), #1852
-(SR-AUD-043a Span/view ctor length, +12), #1853 (SR-AUD-026/027 Convert
-narrowing + float→int NaN, +41) — and the CCF-006 float-format slice #1849
-(SR-AUD-021 float ToString, +12), total +111. The CCF-005 Decimal slice was
-planned (`docs/DecimalBoundaryFamilyPlan.md`) and opened as ready tickets
-#1855/#1856/#1857. #1854 (SR-AUD-043b) stays `needs_user`. See "Autonomous batch
-handoff, 2026-07-30 (CCF-005 convert/memory-safety + CCF-006 + Decimal plan)"
-immediately below. The prior batch left the floor at 14,233 via the CCF-003 close
+*Last verified: 2026-07-30. Branch: `feature/remediation-batch-decimal-ccf007`
+(previously `feature/remediation-batch-ccf005-convert-decimal`). The test floor is
+now **14,368** (was 14,344): the CCF-005 Decimal slice landed #1855 (SR-AUD-036
+MidpointRounding, **closes CCF-008**, +9), #1856 (SR-AUD-038 negative zero, +6),
+#1857 (SR-AUD-035 parser compatible portion: whitespace + excess-precision
+rounding, +4), and the two compatible CCF-007 fixes #1859 (SR-AUD-031 ILogB
+non-finite sentinels, +3) and #1860 (SR-AUD-030 IsPow2 subnormals, +2), total
++24. Post-audit tally: **42 remediated, 322 confirmed, of 364**. The CCF-007
+floating value-fidelity family was planned (`docs/FloatingValueFidelityPlan.md`)
+and opened as tickets #1859–#1864. New blocked tickets: #1858 (SR-AUD-035 comma
++ overflow-taxonomy, `needs_user`), #1862 (SR-AUD-029 Round `noexcept`,
+`needs_user`), #1863 (SR-AUD-033 format output, `needs_user`). #1854 (SR-AUD-043b)
+stays `needs_user`; #1773 stays blocked. See "Autonomous batch handoff,
+2026-07-30 (CCF-005 Decimal slice + CCF-007 plan)" immediately below. The prior
+batch reached 14,344 via #1851/#1852/#1853/#1849; the one before that left the
+floor at 14,233 via the CCF-003 close
 (#1846/#1844/#1845/#1847, +31), tooling #1848, and CCF-005's first fix #1850 (+3);
 the one before that raised 14,196 → 14,199 via #1804/#1843.
 The P0
@@ -175,6 +180,123 @@ per this repository's practice of preserving historical audit narrative.*
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
+
+## Autonomous batch handoff, 2026-07-30 (CCF-005 Decimal slice + CCF-007 plan)
+
+Branch `feature/remediation-batch-decimal-ccf007` (off
+`feature/remediation-batch-ccf005-convert-decimal`). Seven commits: five
+implementation/plan, plus this handoff. **Nothing pushed, merged, rebased, or
+tagged.** CNA and mobile-eggbert were not inspected or modified; #1773 remains
+blocked. Maximum aggregate compilation parallelism was **3 jobs** throughout
+(`cmake --build … --parallel 3`); `check_selective_components.sh` and
+`check_doxygen_warnings.sh` were run with `TMPDIR=./build-tmp` to honour the
+no-`/tmp`-builds rule.
+
+### Completed (committed)
+
+| Ticket | Finding | Fix | Sanitizer | Tests |
+|---|---|---|---|---|
+| **#1855** | SR-AUD-036 → **remediated**, **closes CCF-008** | `Decimal::Round`, `Math::Round`, `MathF::Round` reject an out-of-range `MidpointRounding` with `ArgumentException(paramName "mode")`, message `The value '{n}' is not valid for this usage of the type MidpointRounding.`; Decimal validates `(uint)mode > ToPositiveInfinity` before its early-out, Math/MathF throw from the `switch` default. Per .NET parity the digits overloads validate the mode only through the funnel (Math ≥1e16 / MathF ≥1e8 magnitudes return unchanged). | n/a (value/exception) | +9 |
+| **#1856** | SR-AUD-038 → **remediated** | Decimal raw ctor (`negative_ = isNegative`), `CopySign` (`sign.negative_`), and `TryParse` (`Decimal(mantissa, scale, neg)`) preserve the sign on a zero magnitude, so `Decimal(0,0,0,true,0)`, `CopySign(0m,-1m)`, `Parse("-0")` are observable negative zeros via `GetBits`/`IsNegative`. `−0m==0m` and hash equality already held (no ripple). `normalize()`/unary-`−` production stays out of scope. | n/a | +6 |
+| **#1857** | SR-AUD-035 → **partial** (stays `confirmed`) | Decimal `TryParse` skips leading/trailing whitespace (pure widening) and rounds excess fractional precision beyond scale 28 half-to-even (`0.0…06`→`1e-28`) instead of discarding it. The comma-as-group-separator value change and `FormatException`→`OverflowException` taxonomy were **not** applied — split to blocked **#1858**. `XmlConvert::ToDecimal`'s stale "tolerates no whitespace" comment corrected. | ASan+UBSan clean (build-asan Core_Base) | +4 |
+| **#1859** | SR-AUD-031 → **remediated** | `Single::ILogB`, `Double::ILogB`, `Math::ILogB` classify zero→`INT_MIN`, NaN/±Inf→`INT_MAX` before the finite `std::ilogb`, matching the already-fixed `MathF::ILogB`. `noexcept` unchanged. | ASan+UBSan clean | +3 |
+| **#1860** | SR-AUD-030 → **remediated** | `Single::IsPow2`, `Double::IsPow2` add a subnormal branch (biased exponent 0 ⇒ `popcount(trailingSignificand)==1`); `IsPow2(Epsilon)` is now true. | ASan+UBSan clean | +2 |
+
+**Batch total +24** over the 14,344 floor → **14,368 across 37 executables**,
+verified through the full component gate.
+
+### Design deliverable
+
+`docs/FloatingValueFidelityPlan.md` — the durable CCF-007 family plan (17
+sections), authored from the current .NET reference (not memory). Covers
+SR-AUD-029/030/031/032/033 on Single/Double (+Math/Half where the code recurs).
+`docs/DecimalBoundaryFamilyPlan.md` §12 updated with the #1855/#1856/#1857 status.
+
+### Incorrect premises corrected (measured 2026-07-30)
+
+1. **Single/Double expose NO `MidpointRounding` `Round` overload and NO
+   `TryFormat`/`ToString(format,provider)`** — only `Half` has those; `Half` has
+   no `Round`/`IsPow2`/`ILogB`/Pi-trig. So #1855 correctly touched only
+   Decimal/Math/MathF, and any CCF-007 `TryFormat` work is Half-only.
+2. **SR-AUD-031 also lives in `Math::ILogB`** (`Math.hpp:467`), still a raw
+   `std::ilogb` forward — `MathF::ILogB` was already fixed; #1859 covered
+   Single+Double+Math to match.
+3. **SR-AUD-035 sub-defect split:** whitespace + excess-precision rounding are
+   compatible and landed; the comma-as-group-separator change is a *silent value
+   change* for `Parse("1,5")` (1.5→15) and the overflow taxonomy is an
+   exception-type change — both correctly gated on approval (#1858), not applied.
+4. **`Decimal::Round(x)`/Single/Double `Round(x[,digits])` use `std::nearbyint`**
+   (ambient-rounding-mode sensitive, SR-AUD-040 class) — noted as adjacent, not
+   a CCF-007 finding, not folded in.
+5. `Double::TryParse` is not `noexcept` though its `tryParseCore` is — a free
+   tightening, noted only.
+
+### Blocked / approval-gated (do NOT start without explicit per-action approval)
+
+- **#1854** SR-AUD-043b — `ReadOnlyMemory`/`HashCode::AddBytes` drop-`noexcept`
+  vs clamp. `needs_user`.
+- **#1858** SR-AUD-035 tail — comma-as-group-separator (value change) +
+  `FormatException`→`OverflowException` taxonomy (needs an internal status
+  channel). `needs_user`. Two `DecimalTests2.Parse_*_PendingApproval` tests pin
+  the current pre-#1858 behaviour and must be updated when it lands.
+- **#1862** SR-AUD-029 (CCF7-4) — Single/Double `Round(x,digits)` validation
+  requires dropping `noexcept` (option A) or clamping (option B). `needs_user`.
+- **#1863** SR-AUD-033 format (CCF7-5) — `E` 3-digit exponent, `N` grouping,
+  `G`/`G9`/`G17` round-trip; observable `ToString` output change + a
+  format-backend decision. `needs_user`.
+- **#1773** — CNA/mobile-eggbert migration; blocked until they upgrade.
+
+### New tickets created this batch
+
+`#1858` (blocked), and the six CCF-007 tickets `#1859`–`#1864`:
+`#1859`/`#1860` done; `#1861` (Pi-trig, todo, ready, medium); `#1862`/`#1863`
+`needs_user`; `#1864` (parse, todo, mixed — whitespace compatible, thousands +
+overflow-to-Infinity blocked, sharing #1858's comma decision).
+
+### Remaining queue / next recommended work
+
+1. **#1861 (CCF7-3, SR-AUD-032)** — Single/Double Pi-scaled trig exact turn
+   boundaries. Compatible, ready, medium (port .NET's integral/fractional
+   reduction with quarter-turn kernels; signbit-aware tests). **Best next
+   autonomous ticket.**
+2. **#1864 (CCF7-6) whitespace slice** — Single/Double parse leading/trailing
+   whitespace (compatible widening); split the thousands + overflow-to-Infinity
+   tail to a new blocked ticket.
+3. Then the approval-gated set (#1858/#1862/#1863/#1854) once decisions land.
+   CCF-007 closes when SR-AUD-029/032/033 are all remediated.
+
+### Sanitizer freshness
+
+`build-asan` (ASan+UBSan, `-fsanitize=address,undefined`) was **rebuilt this
+batch** for `SharpRuntimeTests_Core_Base` after the Decimal and Single/Double/Math
+header/source changes, so the changed code is instrumented (not a stale archive).
+Touched suites ran clean under `halt_on_error=1`. Per `FloatingValueFidelityPlan.md`
+§14 these are value/exception defects (no OOB, no signed overflow, no
+float-cast-overflow), so ASan+UBSan is sufficient; `float-cast-overflow` is not
+implicated. #1861 (Pi-trig, casts `(long)ax`) should add a UBSan run when worked.
+
+### Build-directory sizes (start → end of batch)
+
+| Dir | Start | End |
+|---|---|---|
+| `build` | 720M | ~721M |
+| `build-asan` | 3.5G | 3.5G (reused, incremental) |
+| `build-probe` | 30M | 30M (untouched) |
+| `build-consumer` | 12K | 12K |
+| `build-tmp` | 8.1M | ~8M |
+
+No new build directories were created; `build`/`build-asan` were reused
+incrementally with `ccache`. No probe binaries were produced this batch.
+
+### Known limitations / notes
+
+- The Decimal `Parse("1,5")` comma semantics and float-parse thousands are the
+  **same** invariant-culture `,`-as-group-separator decision (#1858 ↔ #1864);
+  resolve them together.
+- `Decimal` is 32 bytes (vs .NET's 16) — an unrelated ABI deviation noted in
+  `DecimalBoundaryFamilyPlan.md` §1, out of scope.
+
+---
 
 ## Autonomous batch handoff, 2026-07-30 (CCF-005 convert/memory-safety + CCF-006 + Decimal plan)
 

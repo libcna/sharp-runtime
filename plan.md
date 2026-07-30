@@ -1,11 +1,14 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-30 — 41 physical components, 91 direct production
-dependency edges, a clean native build, 14,199 passing tests across 37
+dependency edges, a clean native build, 14,368 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
-is recorded as audit finding `SR-AUD-001`. Post-audit tally: 30 findings
-remediated, 334 confirmed, of 364 total.*
+is recorded as audit finding `SR-AUD-001`. Post-audit tally: 42 findings
+remediated, 322 confirmed, of 364 total (CCF-008 closed by #1855; CCF-005
+Decimal slice #1855/#1856/#1857 + the two compatible CCF-007 fixes
+#1859/#1860 landed 2026-07-30; the CCF-007 family is planned in
+`docs/FloatingValueFidelityPlan.md`).*
 
 Sharp Runtime is in the post-audit remediation phase. The original type
 classification, stabilization, and modularization queues are complete, and the
