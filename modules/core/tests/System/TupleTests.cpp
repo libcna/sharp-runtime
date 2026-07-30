@@ -252,3 +252,81 @@ TEST(TupleCompareTests, Tuple3_LexicographicOrdering) {
     EXPECT_LT(a.CompareTo(b), 0);
     EXPECT_EQ(a.CompareTo(a), 0);
 }
+
+// ---------------------------------------------------------------------------
+// CCF-004 / SR-AUD-062 — tupleHashCombine defined arithmetic (ticket #1831)
+//
+// `detail::tupleHashCombine` used to evaluate `((h1 << 5) + h1) ^ h2` in signed
+// `intcs`. The addition is undefined behaviour whenever it is not representable, and
+// `detail::tupleHash` masks element hashes to the low 31 bits, so ANY element hash of
+// 2^26 or more reaches it — the audited input was `Tuple2<intcs,intcs>(0x03ffffff, 0)`.
+// The helper now evaluates the whole expression in `uintcs`.
+//
+// This is CCF-004 class A: the repair must not change ANY value. Every literal below
+// is the value measured before the change (build-probe/1831_prefix_values.log), so a
+// future edit that alters the algorithm — rather than only its arithmetic domain —
+// fails here instead of silently rehashing every tuple in every consumer.
+// ---------------------------------------------------------------------------
+
+TEST(TupleHashDefinedArithmeticTests, CombineIsUnchangedForTheAuditedOverflowInput) {
+    // 0x03ffffff << 5 == 0x7fffffe0; + 0x03ffffff overflowed intcs before the fix.
+    EXPECT_EQ(System::detail::tupleHashCombine(0x03ffffff, 0), -2080374817);
+    Tuple2<SharpRuntime::intcs, SharpRuntime::intcs> t(0x03ffffff, 0);
+    EXPECT_EQ(t.GetHashCode(), -2080374817);
+}
+
+TEST(TupleHashDefinedArithmeticTests, CombineIsUnchangedAtBothSignedExtremes) {
+    // Largest operand detail::tupleHash can produce (its mask is 0x7fffffff).
+    EXPECT_EQ(System::detail::tupleHashCombine(SharpRuntime::INTCS_MAX, 0), 2147483615);
+    // Negative h1 is reachable through Tuple8's unmasked Rest.GetHashCode().
+    EXPECT_EQ(System::detail::tupleHashCombine(SharpRuntime::INTCS_MIN, -1), 2147483647);
+    EXPECT_EQ(System::detail::tupleHashCombine(-2000000000, 0), -1575490560);
+    // Ordinary, non-extreme operands.
+    EXPECT_EQ(System::detail::tupleHashCombine(1, 2), 35);
+    EXPECT_EQ(System::detail::tupleHashCombine(0, 0), 0);
+}
+
+TEST(TupleHashDefinedArithmeticTests, EveryArityKeepsTheHashValueItHadBeforeTheFix) {
+    EXPECT_EQ((System::Tuple1<SharpRuntime::intcs>(7).GetHashCode()), 7);
+    EXPECT_EQ((Tuple2<SharpRuntime::intcs, SharpRuntime::intcs>(1, 2).GetHashCode()), 35);
+    EXPECT_EQ((Tuple2<SharpRuntime::intcs, SharpRuntime::intcs>(
+                   SharpRuntime::INTCS_MAX, SharpRuntime::INTCS_MAX).GetHashCode()), 32);
+    EXPECT_EQ(System::Tuple::Create(1, 2, 3).GetHashCode(), 1152);
+    EXPECT_EQ(System::Tuple::Create(1, 2, 3, 4).GetHashCode(), 1252);
+    EXPECT_EQ(System::Tuple::Create(1, 2, 3, 4, 5).GetHashCode(), 41313);
+    EXPECT_EQ(System::Tuple::Create(1, 2, 3, 4, 5, 6).GetHashCode(), 41415);
+    EXPECT_EQ(System::Tuple::Create(1, 2, 3, 4, 5, 6, 7).GetHashCode(), 46176);
+    EXPECT_EQ(System::Tuple::Create(1, 2, 3, 4, 5, 6, 7, 8).GetHashCode(), 46216);
+}
+
+TEST(TupleHashDefinedArithmeticTests, OverflowingElementHashPropagatesUnchangedThroughEveryArity) {
+    // The outer combine overflows on the INNER result even when the later items are 0,
+    // so this covers the cascade the single-value case above cannot.
+    EXPECT_EQ(System::Tuple::Create(0x03ffffff, 0, 0).GetHashCode(), 67107775);
+    EXPECT_EQ(System::Tuple::Create(0x03ffffff, 0, 0, 0, 0, 0, 0,
+                                    SharpRuntime::INTCS_MAX).GetHashCode(), -67072928);
+}
+
+TEST(TupleHashDefinedArithmeticTests, EqualTuplesStillHashEquallyAcrossOverflowingInputs) {
+    // The property that actually matters to a consumer, asserted for the overflowing
+    // inputs specifically and for a non-integer element type whose std::hash value is
+    // platform-dependent and therefore deliberately not pinned above.
+    Tuple2<SharpRuntime::intcs, SharpRuntime::intcs> a(0x03ffffff, 0), b(0x03ffffff, 0);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+    EXPECT_NE(a.GetHashCode(), (Tuple2<SharpRuntime::intcs, SharpRuntime::intcs>(
+                                    0x03fffffe, 0).GetHashCode()));
+
+    Tuple2<std::string, std::string> s1("alpha", "beta"), s2("alpha", "beta");
+    EXPECT_EQ(s1.GetHashCode(), s2.GetHashCode());
+
+    auto big1 = System::Tuple::Create(0x7fffffff, 0x7ffffffe, 0x7ffffffd, 0x7ffffffc);
+    auto big2 = System::Tuple::Create(0x7fffffff, 0x7ffffffe, 0x7ffffffd, 0x7ffffffc);
+    EXPECT_EQ(big1.GetHashCode(), big2.GetHashCode());
+}
+
+TEST(TupleHashDefinedArithmeticTests, HelperRemainsNoexcept) {
+    // Plan section 8: the class A repair must not introduce a throw. `noexcept` is part
+    // of the public shape a consumer may already rely on.
+    static_assert(noexcept(System::detail::tupleHashCombine(0, 0)));
+    SUCCEED();
+}

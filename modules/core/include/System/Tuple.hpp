@@ -18,9 +18,29 @@ namespace System {
 // ---------------------------------------------------------------------------
 
 namespace detail {
+    /**
+     * @brief Combines two element hash codes, mirroring .NET's Tuple.CombineHashCodes.
+     *
+     * CCF-004 class A (defined wrap): real .NET's `Tuple.CombineHashCodes` is
+     * `((h1 << 5) + h1) ^ h2` evaluated in C#'s *unchecked* default context, where a
+     * non-representable `int` sum is a defined two's-complement wrap. Written directly
+     * in signed C++ the addition is undefined behaviour instead, and it is reachable:
+     * `detail::tupleHash` masks to the low 31 bits, so any element hash of 2^26 or more
+     * makes `(h1 << 5) + h1` exceed `INTCS_MAX`
+     * (`Tuple2<intcs,intcs>(0x03ffffff, 0)` was the audited input for SR-AUD-062).
+     *
+     * The whole expression is therefore evaluated in `uintcs` with a single conversion
+     * back at the end. The shift, the addition and the xor all keep the exact bit
+     * pattern the signed form produced on this platform, so every `GetHashCode()` value
+     * across Tuple1..Tuple8 is unchanged -- that is asserted, not assumed, in
+     * `TupleTests.cpp`. Do not "clean up" these casts: they are the defined-arithmetic
+     * contract, not redundant conversions.
+     */
     inline intcs tupleHashCombine(intcs h1, intcs h2) noexcept
     {
-        return ((h1 << 5) + h1) ^ h2;
+        const SharpRuntime::uintcs u1 = static_cast<SharpRuntime::uintcs>(h1);
+        const SharpRuntime::uintcs u2 = static_cast<SharpRuntime::uintcs>(h2);
+        return static_cast<intcs>(((u1 << 5) + u1) ^ u2);
     }
     /**
      * Masks to the low 31 bits before narrowing std::hash<T>'s platform-dependent

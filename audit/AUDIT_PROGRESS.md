@@ -5317,3 +5317,62 @@ LSan with zero reports** (`build-asan/1832_core_asan.log`). Repository gate: **0
 0 errors, 14,113 tests across 37 executables** (was 14,106). Module graph **41 / 91**.
 
 **Source and ABI consequences: none.**
+
+---
+
+Ticket **#1831** (`REMED-CORE-TUPLE-DEFINED-HASH`, P1, size XS, category `remediation`,
+area *Core*) is **done** and **SR-AUD-062 is now `remediated`** — the third CCF-004 member
+repaired under `docs/DefinedArithmeticBoundaryPlan.md`. The index counts move to
+**24 remediated** and **340 confirmed** of 364.
+
+`System::detail::tupleHashCombine` evaluated `((h1 << 5) + h1) ^ h2` in signed `intcs`.
+The C++20 shift is defined; the addition is undefined behaviour when it is not
+representable, and it is **reachable through ordinary public API** — `detail::tupleHash`
+masks element hashes to the low 31 bits, so any element hash of 2^26 or more triggers it.
+The audited input `Tuple2<intcs,intcs>(0x03ffffff, 0)` is what an `intcs` element of that
+value produces directly. The whole expression is now evaluated in `SharpRuntime::uintcs`
+with one conversion back, and the site carries the plan's §4 comment convention naming the
+class and citing .NET's *unchecked* `Tuple.CombineHashCodes`.
+
+This is CCF-004 **class A**, so the repair had to change **no value at all**, and that was
+verified by measurement rather than argued: `build-probe/1831_prefix_values.log` and
+`build-probe/1831_postfix.log` are byte-identical for sixteen probes covering Tuple1
+through Tuple8, the audited overflowing input, both signed extremes and a `std::string`
+element. Every literal in the new tests is a **pre-fix** measured value.
+
+**Five reachable shapes were enumerated, and only three of them overflow.** With the
+recovering build and **one process per shape** — the §12 amendment, which matters here
+because all five shapes overflow the *same line* and UBSan deduplicates by source
+location, so a single process reports the first and stays silent for the rest — cases 1
+(`Tuple2(0x03ffffff,0)`), 3 (`Tuple3`, where the *outer* combine overflows on the inner
+result even though items 2 and 3 are zero) and 4 (`Tuple8`, whose last operand is the
+**unmasked** `Rest.GetHashCode()`) each report `Tuple.hpp:23:27: runtime error: signed
+integer overflow: 67108863 + 2147483616`. Cases 2 (`combine(INTCS_MAX, 0)`) and 5
+(`combine(-2000000000, 0)`) do **not** overflow, so the finding's reachable surface is
+narrower than "any large operand" and wider than the one input the audit named. All five
+are silent after the fix under `-fno-sanitize-recover=undefined`, which makes a surviving
+site an abort rather than a line in a log.
+
+**A second, structurally identical site was found outside the finding and was NOT folded
+in.** `System::Net::Security::SslApplicationProtocol::GetHashCode()`
+(`SslApplicationProtocol.hpp:72`) runs the same signed djb2 step over the ALPN protocol-id
+bytes. `SslApplicationProtocol("spdy/3.1")` — a real registered protocol id — reports
+`signed integer overflow: 729647660 + 1873888640` (`build-probe/1831_ssl_alpn_hash.log`).
+It is a different file in a different module and was never named by the audit, so it is
+separable: it became **inactive ticket #1838**, **no new `SR-AUD-*` identifier was issued**
+and audit numbering stays frozen at **364**. Whether a given name overflows is
+input-specific rather than a function of length — `"http/1.1"` is the same length, returns
+a negative hash and does *not* report — so #1838's repair must be unconditional. The same
+inventory **cleared** `System/ValueTuple.hpp`: its `detail::vtHashCombine` already
+accumulates in `size_t` and is unaffected.
+
+**Tests: +6 permanent regressions.** `SharpRuntimeTests_Core_Base` **5015/5015**, clean
+under **ASan + UBSan + LSan with zero reports** (`build-asan/1831_core_asan.log`); the
+ASan `TupleTests.cpp.o` was **proven recompiled** against the new header before the run,
+because the previous handoff recorded the tree's core objects as pre-#1830. Repository
+gate: **0 warnings, 0 errors, 14,119 tests across 37 executables** (was 14,113). Module
+graph **41 / 91**.
+
+**Source and ABI consequences: none.** No signature, virtual, vtable, object layout or
+mangled symbol changed. `tupleHashCombine` remains `noexcept`, pinned by a `static_assert`
+inside a test, as plan §8 requires.

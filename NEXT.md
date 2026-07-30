@@ -7442,3 +7442,54 @@ enabled.
   header-only, so probe TUs picked them up directly. A future `.cpp`-side CCF-004 ticket
   (#1836, #1837) **must rebuild `build-asan` first** or its post-fix probe will link stale
   object code and appear to fail.
+
+## Completed tupleHashCombine defined arithmetic: ticket #1831 (2026-07-30)
+
+`REMED-CORE-TUPLE-DEFINED-HASH`, P1, size XS. **CCF-004 class A**, third member of the
+family implemented. **SR-AUD-062 is now `remediated`.**
+
+`System::detail::tupleHashCombine` evaluated `((h1 << 5) + h1) ^ h2` in signed `intcs`.
+The C++20 shift is defined; the addition is undefined behaviour when not representable, and
+it is reachable through ordinary public API — `detail::tupleHash` masks element hashes to
+the low 31 bits, so **any** element hash of 2^26 or more triggers it. .NET's
+`Tuple.CombineHashCodes` is the same expression in C#'s *unchecked* default context, where
+the wrap is defined. The whole expression is now evaluated in `SharpRuntime::uintcs` with
+one conversion back, and the site carries the plan's §4 class-A comment convention.
+
+**Class A verified by measurement, not argued.** `build-probe/1831_prefix_values.log` and
+`build-probe/1831_postfix.log` are byte-identical across sixteen probes — Tuple1 through
+Tuple8, the audited overflowing input, both signed extremes, a `std::string` element. Every
+literal in the six new tests is a **pre-fix measured** value, so a future edit that changes
+the algorithm rather than only its arithmetic domain fails here.
+
+**The finding's reachable surface was narrower and wider than the audit's one input.** Of
+five enumerated shapes, **three** overflow: the audited `Tuple2(0x03ffffff,0)`; `Tuple3`,
+where the **outer** combine overflows on the inner result although items 2 and 3 are zero;
+and `Tuple8`, whose last operand is the **unmasked** `Rest.GetHashCode()`.
+`combine(INTCS_MAX, 0)` and `combine(-2000000000, 0)` do **not** — `INTCS_MAX << 5` is
+`-32`, which then adds back inside range. "Largest operand" is not the worst case for a
+shift-then-add step.
+
+**A new methodology trap, recorded as plan §13.2.** §12 already says to enumerate with the
+*recovering* build. That is necessary and **not sufficient**: UBSan deduplicates by source
+location, and all five shapes overflow the *same* line, so in one recovering process case 1
+reports and cases 3 and 4 are silent — reading exactly like "already fixed". **One process
+per shape**, even when the shapes share a line.
+
+**One structurally identical site found outside the finding, NOT folded in.**
+`SslApplicationProtocol::GetHashCode()` (`SslApplicationProtocol.hpp:72`) runs the same
+signed djb2 step over ALPN bytes; `"spdy/3.1"` reports `signed integer overflow: 729647660
++ 1873888640` (`build-probe/1831_ssl_alpn_hash.log`). Different file, different module,
+never named by the audit → **inactive ticket #1838**, **no new `SR-AUD-*`**, numbering
+frozen at **364**. Note that `"http/1.1"` is the same length, returns a negative hash and
+does **not** report, so #1838's repair must be unconditional rather than input-gated.
+`System/ValueTuple.hpp` was inventoried at the same time and is **clear** — its
+`vtHashCombine` already accumulates in `size_t`.
+
+6 permanent regressions. `SharpRuntimeTests_Core_Base` **5015/5015**, clean under
+ASan + UBSan + LSan, 0 reports (`build-asan/1831_core_asan.log`), with the ASan
+`TupleTests.cpp.o` **proven recompiled** first because the previous handoff recorded the
+tree's core objects as pre-#1830. Repository gate **14,119 tests across 37 executables**,
+0 warnings, 0 errors. Audit index **24 remediated / 340 confirmed of 364**. No public
+signature, virtual, vtable, object layout or mangled symbol changed; `tupleHashCombine`
+remains `noexcept`, pinned by a `static_assert` in a test.

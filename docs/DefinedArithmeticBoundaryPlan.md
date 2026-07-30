@@ -405,3 +405,63 @@ gone.** That amendment applies to every remaining ticket in this family, and #18
 SR-AUD-057's site count is therefore **two**, not one, and both are now fixed under #1830
 with the resolved values unchanged. This is recorded by appending, so that what the plan
 believed and what the implementation measured stay separately readable.
+
+---
+
+## 13. Corrections found while implementing #1831 (2026-07-30)
+
+Two, both by measurement, both generalising to the rest of the family.
+
+**13.1 — a finding's reachable surface can be narrower *and* wider than one input.**
+§2 lists SR-AUD-062 as one case (`Tuple2<intcs,intcs>(0x03ffffff, 0)`). Enumerating five
+reachable shapes of the same helper shows three overflow and **two do not**:
+
+| Shape | Overflows? |
+|---|---|
+| `Tuple2(0x03ffffff, 0)` — the audited input | yes |
+| `tupleHashCombine(INTCS_MAX, 0)` | **no** — `INTCS_MAX << 5` is `-32`, and `-32 + INTCS_MAX` fits |
+| `Tuple3(0x03ffffff, 0, 0)` — the **outer** combine, on the inner result | yes |
+| `Tuple8(…, INTCS_MAX)` — last operand is the **unmasked** `Rest.GetHashCode()` | yes |
+| `tupleHashCombine(-2000000000, 0)` | **no** — the shifted value lands back inside range |
+
+So "the largest operand" is *not* the worst case for a shift-then-add step, and a repair
+justified only by the audited input would not have shown that the *outer* combine of a
+higher arity overflows on the inner result with all later items zero. Enumerate shapes;
+do not extrapolate from one.
+
+**13.2 — §12's amendment needs one process per shape, not merely a recovering build.**
+§12 says to enumerate with the recovering build. That is necessary and not sufficient:
+UBSan **deduplicates diagnostics by source location**, and all five shapes above overflow
+the *same* line. In one recovering process, case 1 reports and cases 3 and 4 are silent —
+which reads exactly like "already fixed". Run **one process per shape** even when the
+shapes share a line, and use `-fno-sanitize-recover=undefined` only afterwards, to prove
+each shape is gone.
+
+**13.3 — one structurally identical site exists outside CCF-004, and stays outside.**
+`System::Net::Security::SslApplicationProtocol::GetHashCode()`
+(`SslApplicationProtocol.hpp:72`) runs the same signed `((h << 5) + h) ^ byte` step over
+ALPN protocol-id bytes; `"spdy/3.1"` reports `signed integer overflow: 729647660 +
+1873888640`. It is a different file in a different module and the audit never named it, so
+it is **inactive ticket #1838** rather than a widening of SR-AUD-062. **No `SR-AUD-*`
+identifier was issued; numbering stays frozen at 364.** `System/ValueTuple.hpp` was
+inventoried at the same time and is **clear** — `detail::vtHashCombine` already
+accumulates in `size_t`.
+
+### 13.4 Live family status, as of the close of #1831
+
+§11's table is a snapshot frozen at the close of #1829 and is deliberately left as written.
+The current state is:
+
+| Ticket | Finding | Status |
+|---|---|---|
+| #1830 `Index`/`Range` | SR-AUD-057 | **done** — finding `remediated`, two sites (§12) |
+| #1831 `tupleHashCombine` | SR-AUD-062 | **done** — finding `remediated`, three of five shapes overflowed (§13.1) |
+| #1832 `IntPtr` | SR-AUD-025 | **done** — finding `remediated` |
+| #1833 `ReadOnlyMemory::Slice` | SR-AUD-049 | ready — class B |
+| #1834 `Int128` `MinValue` | SR-AUD-019 | ready — class A |
+| #1835 `Utf8Parser` `Int64` min | SR-AUD-084 | ready — class A |
+| #1836 `TimeSpan` | SR-AUD-008 | ready — class A + C |
+| #1837 `DateOnly` | SR-AUD-060 | ready — class C, seven sites (§2.1) |
+
+Audit numbering remains frozen at **364**; the index reads **24 remediated / 340
+confirmed** after #1831.
