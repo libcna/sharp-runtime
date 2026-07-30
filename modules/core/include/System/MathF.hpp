@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ArithmeticException.hpp"
 #include "System/MidpointRounding.hpp"
@@ -152,8 +153,10 @@ namespace System {
          * @param v   Value to clamp.
          * @param min Inclusive lower bound.
          * @param max Inclusive upper bound.
+         * @throws System::ArgumentException if @p min is greater than @p max.
          */
         static float Clamp(float v, float min, float max) {
+            if (min > max) throw System::ArgumentException("min cannot be greater than max.");
             return v < min ? min : (v > max ? max : v);
         }
 

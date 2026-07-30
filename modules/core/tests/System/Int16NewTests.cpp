@@ -66,6 +66,11 @@ TEST(Int16NewTests, Parse_TrailingGarbage_ThrowsFormatException) {
 TEST(Int16NewTests, Clamp_Within) { EXPECT_EQ(Int16::Clamp(5, 0, 10), 5); }
 TEST(Int16NewTests, Clamp_Below)  { EXPECT_EQ(Int16::Clamp(-5, 0, 10), 0); }
 TEST(Int16NewTests, Clamp_Above)  { EXPECT_EQ(Int16::Clamp(20, 0, 10), 10); }
+// SR-AUD-022 (#1846): an inverted interval must throw, not reach std::clamp UB.
+TEST(Int16NewTests, Clamp_MinGreaterThanMax_Throws) {
+    EXPECT_THROW(Int16::Clamp(5, 10, 1), System::ArgumentException);
+    EXPECT_EQ(Int16::Clamp(5, 7, 7), 7);
+}
 
 TEST(Int16NewTests, Max_ReturnsLarger)  { EXPECT_EQ(Int16::Max(3, 7), 7); }
 TEST(Int16NewTests, Min_ReturnsSmaller) { EXPECT_EQ(Int16::Min(3, 7), 3); }

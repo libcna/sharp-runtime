@@ -16,6 +16,17 @@ TEST(UInt64Test, MinValue) {
     EXPECT_EQ(UInt64::MinValue, 0ULL);
 }
 
+TEST(UInt64Test, Clamp) {
+    EXPECT_EQ(UInt64::Clamp(150ULL, 100ULL, 200ULL), 150ULL);
+    EXPECT_EQ(UInt64::Clamp(50ULL,  100ULL, 200ULL), 100ULL);
+    EXPECT_EQ(UInt64::Clamp(250ULL, 100ULL, 200ULL), 200ULL);
+}
+// SR-AUD-022 (#1846): an inverted interval must throw, not reach std::clamp UB.
+TEST(UInt64Test, Clamp_MinGreaterThanMax_Throws) {
+    EXPECT_THROW(UInt64::Clamp(5ULL, 10ULL, 1ULL), System::ArgumentException);
+    EXPECT_EQ(UInt64::Clamp(5ULL, 7ULL, 7ULL), 7ULL); // equal bound is valid
+}
+
 TEST(UInt64Test, ParseBasic) {
     EXPECT_EQ(UInt64::Parse("12345"), 12345ULL);
 }

@@ -123,6 +123,11 @@ TEST(ByteTests, Clamp_BelowMin) {
 TEST(ByteTests, Clamp_AboveMax) {
     EXPECT_EQ(Byte::Clamp(bytecs(20), bytecs(0), bytecs(10)), bytecs(10));
 }
+// SR-AUD-022 (#1846): an inverted interval must throw, not reach std::clamp UB.
+TEST(ByteTests, Clamp_MinGreaterThanMax_Throws) {
+    EXPECT_THROW(Byte::Clamp(bytecs(5), bytecs(10), bytecs(1)), System::ArgumentException);
+    EXPECT_EQ(Byte::Clamp(bytecs(5), bytecs(7), bytecs(7)), bytecs(7)); // equal bound is valid
+}
 
 TEST(ByteTests, Max_ReturnsLarger) {
     EXPECT_EQ(Byte::Max(bytecs(3), bytecs(7)), bytecs(7));

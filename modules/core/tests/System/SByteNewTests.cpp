@@ -23,6 +23,11 @@ TEST(SByteNewTests, GetHashCode_NegativeValue) { EXPECT_EQ(SByte::GetHashCode(sb
 TEST(SByteNewTests, Clamp_Within)  { EXPECT_EQ(SByte::Clamp(sbytecs(5), sbytecs(0), sbytecs(10)), sbytecs(5)); }
 TEST(SByteNewTests, Clamp_Below)   { EXPECT_EQ(SByte::Clamp(sbytecs(-5),sbytecs(0), sbytecs(10)), sbytecs(0)); }
 TEST(SByteNewTests, Clamp_Above)   { EXPECT_EQ(SByte::Clamp(sbytecs(20),sbytecs(0), sbytecs(10)), sbytecs(10)); }
+// SR-AUD-022 (#1846): an inverted interval must throw, not reach std::clamp UB.
+TEST(SByteNewTests, Clamp_MinGreaterThanMax_Throws) {
+    EXPECT_THROW(SByte::Clamp(sbytecs(5), sbytecs(10), sbytecs(1)), System::ArgumentException);
+    EXPECT_EQ(SByte::Clamp(sbytecs(5), sbytecs(7), sbytecs(7)), sbytecs(7));
+}
 
 TEST(SByteNewTests, Max_ReturnsLarger)  { EXPECT_EQ(SByte::Max(sbytecs(3), sbytecs(7)), sbytecs(7)); }
 TEST(SByteNewTests, Min_ReturnsSmaller) { EXPECT_EQ(SByte::Min(sbytecs(3), sbytecs(7)), sbytecs(3)); }

@@ -215,6 +215,11 @@ TEST(Int32Tests, CopySign_MinValuePositiveSign_ThrowsOverflowException) {
 TEST(Int32Tests, Clamp_InRange)    { EXPECT_EQ(Int32::Clamp(5, 1, 10), 5); }
 TEST(Int32Tests, Clamp_BelowMin)   { EXPECT_EQ(Int32::Clamp(-5, 1, 10), 1); }
 TEST(Int32Tests, Clamp_AboveMax)   { EXPECT_EQ(Int32::Clamp(15, 1, 10), 10); }
+// SR-AUD-022 (#1846): an inverted interval must throw, not reach std::clamp UB.
+TEST(Int32Tests, Clamp_MinGreaterThanMax_Throws) {
+    EXPECT_THROW(Int32::Clamp(5, 10, 1), System::ArgumentException);
+    EXPECT_EQ(Int32::Clamp(5, 7, 7), 7);
+}
 TEST(Int32Tests, Max_ReturnsLarger) { EXPECT_EQ(Int32::Max(3, 7), 7); }
 TEST(Int32Tests, Min_ReturnsSmaller) { EXPECT_EQ(Int32::Min(3, 7), 3); }
 TEST(Int32Tests, Sign_Positive) { EXPECT_EQ(Int32::Sign(42), 1); }

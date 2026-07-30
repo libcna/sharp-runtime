@@ -47,6 +47,11 @@ TEST(UInt32NewTests, GetHashCode_SameValue_SameHash) {
 TEST(UInt32NewTests, Clamp_Within) { EXPECT_EQ(UInt32::Clamp(5u,0u,10u), 5u); }
 TEST(UInt32NewTests, Clamp_Below) { EXPECT_EQ(UInt32::Clamp(0u,3u,10u), 3u); }
 TEST(UInt32NewTests, Clamp_Above) { EXPECT_EQ(UInt32::Clamp(20u,0u,10u), 10u); }
+// SR-AUD-022 (#1846): an inverted interval must throw, not reach std::clamp UB.
+TEST(UInt32NewTests, Clamp_MinGreaterThanMax_Throws) {
+    EXPECT_THROW(UInt32::Clamp(5u, 10u, 1u), System::ArgumentException);
+    EXPECT_EQ(UInt32::Clamp(5u, 7u, 7u), 7u);
+}
 
 TEST(UInt32NewTests, Max_ReturnsLarger) { EXPECT_EQ(UInt32::Max(3u,7u), 7u); }
 TEST(UInt32NewTests, Min_ReturnsSmaller) { EXPECT_EQ(UInt32::Min(3u,7u), 3u); }

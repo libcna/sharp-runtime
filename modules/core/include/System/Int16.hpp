@@ -13,6 +13,7 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
@@ -252,9 +253,11 @@ public:
         return ax <= ay ? x : y;
     }
 
-    /** @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET Int16.Clamp(short,short,short). */
-    [[nodiscard]] static SharpRuntime::shortcs Clamp(SharpRuntime::shortcs value, SharpRuntime::shortcs min, SharpRuntime::shortcs max) noexcept {
-        return std::clamp(value, min, max);
+    /** @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET Int16.Clamp(short,short,short).
+     *  @throws System::ArgumentException if @p min is greater than @p max. */
+    [[nodiscard]] static SharpRuntime::shortcs Clamp(SharpRuntime::shortcs value, SharpRuntime::shortcs min, SharpRuntime::shortcs max) {
+        if (min > max) throw System::ArgumentException("min cannot be greater than max.");
+        return value < min ? min : (value > max ? max : value);
     }
 
     /** @brief Returns the larger of @p x and @p y. C++ counterpart of .NET Int16.Max(short,short). */

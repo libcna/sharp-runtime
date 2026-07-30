@@ -12,6 +12,7 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/Globalization/NumberStyles.hpp"
@@ -198,11 +199,13 @@ namespace System {
             return std::min(x, y);
         }
 
-        /** @brief Clamps value to the inclusive range [min, max]. */
+        /** @brief Clamps value to the inclusive range [min, max].
+         *  @throws System::ArgumentException if @p min is greater than @p max. */
         static SharpRuntime::ulongcs Clamp(SharpRuntime::ulongcs value,
                                            SharpRuntime::ulongcs min,
                                            SharpRuntime::ulongcs max) {
-            return std::clamp(value, min, max);
+            if (min > max) throw System::ArgumentException("min cannot be greater than max.");
+            return value < min ? min : (value > max ? max : value);
         }
 
         /** @brief Returns 0 if value is zero; 1 otherwise. */

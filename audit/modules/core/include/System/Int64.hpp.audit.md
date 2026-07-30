@@ -43,6 +43,36 @@ affected wrapper; remove `noexcept` where necessary.  Add an exact invalid-range
 test for signed and unsigned 64/128-bit `Clamp`, then rerun it under UBSan for
 the `std::clamp` callers.
 
+### Remediated — ticket #1846 (2026-07-30)
+
+Done. All eleven defective `Clamp` overloads — the eight fixed-width integer
+wrappers (`Byte`, `SByte`, `Int16`, `UInt16`, `Int32`, `UInt32`, `Int64`,
+`UInt64`) plus the manual-comparison trio (`UInt128`, `Decimal`, `MathF`) — now
+validate `min > max` first and throw
+`System::ArgumentException("min cannot be greater than max.")`, matching the
+message the pre-existing correct implementations (`Int128`, `Single`, `Double`,
+and every `Math::Clamp` overload) already used. The fixed-width types no longer
+call `std::clamp` at all; each uses the guarded manual form
+`value < min ? min : (value > max ? max : value)`, so the `[alg.clamp]`
+precondition can no longer be violated. `noexcept` was removed from the eight
+fixed-width overloads that carried it (`UInt16`/`UInt64` were already
+non-`noexcept`).
+
+The `std::clamp` inverted-interval UB is a **library precondition violation**
+(`[alg.clamp]` p2: *comp(hi, lo) is false* is required), not a language-level
+trap, so a bare `-fsanitize=undefined` does not catch it. It was reproduced by
+arming libstdc++'s `__glibcxx_assert(!(__hi < __lo))` with `-D_GLIBCXX_ASSERTIONS`
+and driving the real production `Clamp` bodies with runtime operands, one process
+per type: all eight aborted (SIGABRT) on
+`stl_algo.h:3626 … Assertion '!(__hi < __lo)' failed` pre-fix
+(`build-probe/1846_clamp_prefix.log`), and all eleven throw `ArgumentException`
+cleanly post-fix (`build-probe/1846_clamp_postfix.log`). The `Math::Clamp`
+family, `Int128`, `Single`, and `Double` were already correct and unchanged.
+Permanent per-type inverted-interval-throw and equal-bound tests added across
+the twelve numeric test suites. No object layout, vtable, or Itanium mangled
+symbol changed (top-level `noexcept` is not part of an ordinary function's
+mangled name).
+
 ## Finding reference
 
 **SR-AUD-021:** `ToString(5, "Q")` returns `"5"` rather than rejecting an

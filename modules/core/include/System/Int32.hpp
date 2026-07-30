@@ -14,6 +14,7 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
@@ -326,12 +327,14 @@ public:
      * @brief Clamps @p value to the inclusive range [@p min, @p max].
      *
      * C++ counterpart of .NET Int32.Clamp(int, int, int).
+     * @throws System::ArgumentException if @p min is greater than @p max.
      */
     [[nodiscard]] static SharpRuntime::intcs Clamp(
             SharpRuntime::intcs value,
             SharpRuntime::intcs min,
-            SharpRuntime::intcs max) noexcept {
-        return std::clamp(value, min, max);
+            SharpRuntime::intcs max) {
+        if (min > max) throw System::ArgumentException("min cannot be greater than max.");
+        return value < min ? min : (value > max ? max : value);
     }
 
     /**

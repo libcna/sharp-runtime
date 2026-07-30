@@ -12,6 +12,7 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/Globalization/NumberStyles.hpp"
@@ -218,9 +219,11 @@ namespace System {
         /** @brief Returns a hash code for @p value. C++ counterpart of .NET UInt32.GetHashCode(). */
         [[nodiscard]] static intcs GetHashCode(uintcs value) noexcept { return static_cast<intcs>(value); }
 
-        /** @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET UInt32.Clamp(uint,uint,uint). */
-        [[nodiscard]] static uintcs Clamp(uintcs value, uintcs min, uintcs max) noexcept {
-            return std::clamp(value, min, max);
+        /** @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET UInt32.Clamp(uint,uint,uint).
+         *  @throws System::ArgumentException if @p min is greater than @p max. */
+        [[nodiscard]] static uintcs Clamp(uintcs value, uintcs min, uintcs max) {
+            if (min > max) throw System::ArgumentException("min cannot be greater than max.");
+            return value < min ? min : (value > max ? max : value);
         }
 
         /** @brief Returns the larger of @p x and @p y. C++ counterpart of .NET UInt32.Max(uint,uint). */

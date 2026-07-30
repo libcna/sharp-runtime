@@ -98,6 +98,11 @@ TEST(UInt16Test, Clamp) {
     EXPECT_EQ(UInt16::Clamp(50u,  100u, 200u), 100u);
     EXPECT_EQ(UInt16::Clamp(250u, 100u, 200u), 200u);
 }
+// SR-AUD-022 (#1846): an inverted interval must throw, not reach std::clamp UB.
+TEST(UInt16Test, Clamp_MinGreaterThanMax_Throws) {
+    EXPECT_THROW(UInt16::Clamp(5u, 10u, 1u), System::ArgumentException);
+    EXPECT_EQ(UInt16::Clamp(5u, 7u, 7u), 7u); // equal bound is valid
+}
 
 TEST(UInt16Test, IsEvenInteger) {
     EXPECT_TRUE(UInt16::IsEvenInteger(4u));

@@ -114,6 +114,11 @@ TEST(MathFTest, Clamp) {
     EXPECT_FLOAT_EQ(MathF::Clamp(-1.0f, 0.0f, 3.0f), 0.0f);
     EXPECT_FLOAT_EQ(MathF::Clamp(2.0f, 0.0f, 3.0f), 2.0f);
 }
+// SR-AUD-022 (#1846): an inverted interval must throw (was silently returning a bound).
+TEST(MathFTest, Clamp_MinGreaterThanMax_Throws) {
+    EXPECT_THROW(MathF::Clamp(5.0f, 10.0f, 0.0f), System::ArgumentException);
+    EXPECT_FLOAT_EQ(MathF::Clamp(5.0f, 7.0f, 7.0f), 7.0f);
+}
 
 TEST(MathFTest, Sign) {
     EXPECT_EQ(MathF::Sign(-5.0f), -1);

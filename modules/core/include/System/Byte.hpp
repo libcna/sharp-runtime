@@ -13,6 +13,7 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/Globalization/NumberStyles.hpp"
@@ -89,9 +90,11 @@ namespace System {
          * @brief Clamps @p value to the inclusive range [@p min, @p max].
          *
          * C++ counterpart of .NET Byte.Clamp(byte, byte, byte).
+         * @throws System::ArgumentException if @p min is greater than @p max.
          */
-        [[nodiscard]] static bytecs Clamp(bytecs value, bytecs min, bytecs max) noexcept {
-            return std::clamp(value, min, max);
+        [[nodiscard]] static bytecs Clamp(bytecs value, bytecs min, bytecs max) {
+            if (min > max) throw System::ArgumentException("min cannot be greater than max.");
+            return value < min ? min : (value > max ? max : value);
         }
 
         /**

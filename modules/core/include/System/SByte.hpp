@@ -13,6 +13,7 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
@@ -208,9 +209,11 @@ namespace System {
         /** @brief Returns a hash code for @p value. C++ counterpart of .NET SByte.GetHashCode(). */
         [[nodiscard]] static SharpRuntime::intcs GetHashCode(sbytecs value) noexcept { return static_cast<SharpRuntime::intcs>(value); }
 
-        /** @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET SByte.Clamp(sbyte,sbyte,sbyte). */
-        [[nodiscard]] static sbytecs Clamp(sbytecs value, sbytecs min, sbytecs max) noexcept {
-            return std::clamp(value, min, max);
+        /** @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET SByte.Clamp(sbyte,sbyte,sbyte).
+         *  @throws System::ArgumentException if @p min is greater than @p max. */
+        [[nodiscard]] static sbytecs Clamp(sbytecs value, sbytecs min, sbytecs max) {
+            if (min > max) throw System::ArgumentException("min cannot be greater than max.");
+            return value < min ? min : (value > max ? max : value);
         }
 
         /** @brief Returns the larger of @p x and @p y. C++ counterpart of .NET SByte.Max(sbyte,sbyte). */

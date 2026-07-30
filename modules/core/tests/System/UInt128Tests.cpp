@@ -169,6 +169,12 @@ TEST(UInt128Test, Clamp) {
     EXPECT_TRUE(UInt128::Clamp(UInt128(0, 50), lo, hi) == UInt128(0, 50));
     EXPECT_TRUE(UInt128::Clamp(UInt128(0, 200), lo, hi) == hi);
 }
+// SR-AUD-022 (#1846): an inverted interval must throw (was silently returning a bound).
+TEST(UInt128Test, Clamp_MinGreaterThanMax_Throws) {
+    EXPECT_THROW(UInt128::Clamp(UInt128(0, 5), UInt128(0, 10), UInt128(0, 1)),
+                 System::ArgumentException);
+    EXPECT_TRUE(UInt128::Clamp(UInt128(0, 5), UInt128(0, 7), UInt128(0, 7)) == UInt128(0, 7));
+}
 
 TEST(UInt128Test, Sign) {
     EXPECT_EQ(UInt128::Sign(UInt128(0, 0)), 0);

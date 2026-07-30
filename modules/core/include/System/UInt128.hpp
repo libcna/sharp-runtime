@@ -8,6 +8,7 @@
 #include <string>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
@@ -250,8 +251,10 @@ namespace System {
         /** @brief Returns the smaller of @p x and @p y. C++ counterpart of .NET UInt128.Min(UInt128,UInt128). */
         [[nodiscard]] static UInt128 Min(const UInt128& x, const UInt128& y) { return (x <= y) ? x : y; }
 
-        /** @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET UInt128.Clamp(UInt128,UInt128,UInt128). */
+        /** @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET UInt128.Clamp(UInt128,UInt128,UInt128).
+         *  @throws System::ArgumentException if @p min is greater than @p max. */
         [[nodiscard]] static UInt128 Clamp(const UInt128& value, const UInt128& min, const UInt128& max) {
+            if (min > max) throw System::ArgumentException("min cannot be greater than max.");
             return value < min ? min : (value > max ? max : value);
         }
 

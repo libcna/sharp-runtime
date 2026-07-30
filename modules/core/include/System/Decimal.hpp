@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "System/ArgumentException.hpp"
 #include "System/MidpointRounding.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
@@ -607,9 +608,11 @@ public:
      * @param value Value to clamp.
      * @param min   Minimum bound.
      * @param max   Maximum bound.
+     * @throws System::ArgumentException if @p min is greater than @p max.
      */
     static Decimal Clamp(const Decimal& value, const Decimal& min, const Decimal& max)
     {
+        if (min > max) throw System::ArgumentException("min cannot be greater than max.");
         if (value < min) return min;
         if (value > max) return max;
         return value;

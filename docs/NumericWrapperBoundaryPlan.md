@@ -255,3 +255,66 @@ reference, a permanent invalid-domain test, the applicable sanitizer clean, and
 `scripts/local_ci_check.sh build` green with no test-count regression and
 Doxygen inside 1,942. At authoring time **1 of 5 is done** (020, #1843); the
 remaining four are ticketed #1844–#1847 and ready.
+
+---
+
+## 15. Implementation complete (batch `feature/remediation-batch-ccf003-ccf005-plan`, 2026-07-30)
+
+This section records what the follow-on batch implemented against the plan
+above, and every premise it re-measured. Entries are appended as each ticket
+lands.
+
+### 15.1 #1846 — SR-AUD-022 — Clamp inverted interval — **DONE**
+
+**Surface re-inventoried before fixing** (do not trust the §1 count blind). The
+complete `Clamp` surface in the numeric namespace is **wider** than the eleven
+files SR-AUD-022 lists, but the extra surface was **already correct**:
+
+| Clamp overload | Pre-fix state | Action |
+|---|---|---|
+| `Byte`, `SByte`, `Int16`, `UInt16`, `Int32`, `UInt32`, `Int64`, `UInt64` | `std::clamp(value,min,max)`; `noexcept` except `UInt16`/`UInt64` | **fixed** — guarded manual form, `noexcept` removed |
+| `UInt128`, `Decimal`, `MathF` | manual compare, returns a bound, no guard | **fixed** — added `min > max` guard |
+| `Int128`, `Single`, `Double` | already guard `min > max` → `ArgumentException` | unchanged (correct) |
+| `Math::Clamp` (10 overloads: `int`/`double`/`long` in `Math.cpp`; `short`/`sbyte`/`byte`/`uint`/`ulong`/`ushort`/`float` inline in `Math.hpp`) | **all already** guard `min > max` → `ArgumentException` | unchanged (correct) — *not* part of the defect, though the task asked they be checked |
+
+So the defective set is exactly the eleven SR-AUD-022 files; `Math`/`Int128`/
+`Single`/`Double` are a **negative result** (checked, already correct), recorded
+here so a later batch does not re-open them.
+
+**Reproduction — corrected characterisation of the "UB".** `std::clamp(v, lo, hi)`
+with `hi < lo` is a **library precondition violation** (`[alg.clamp]` p2), *not*
+a language-level trap, so a bare `-fsanitize=undefined` does **not** flag it (a
+point the §11 sanitizer matrix left implicit). It was reproduced instead by
+arming libstdc++'s `__glibcxx_assert(!(__hi < __lo))` with `-D_GLIBCXX_ASSERTIONS`
+and driving the **real production `Clamp` bodies** with runtime (`volatile`)
+operands, one process per type. Pre-fix: all eight fixed-width types abort
+(SIGABRT) at `stl_algo.h:3626 … Assertion '!(__hi < __lo)' failed` with the
+matching `[with _Tp = …]`; the manual trio silently returns the wrong bound `5`
+for `Clamp(3, 5, 1)` (`build-probe/1846_clamp_prefix.log`). Post-fix: all eleven
+throw `ArgumentException` cleanly (`build-probe/1846_clamp_postfix.log`).
+
+**Fix.** Every fixed-width overload drops `std::clamp` for the guarded manual
+form `if (min > max) throw System::ArgumentException("min cannot be greater than max."); return value < min ? min : (value > max ? max : value);`
+— identical to what `Int128`/`Single`/`Double`/`Math` already do, so the whole
+`Clamp` family now shares **one** message and contract. `noexcept` was removed
+from the eight fixed-width overloads (top-level `noexcept` is not part of the
+Itanium mangled name, so no symbol changed). `#include "System/ArgumentException.hpp"`
+added to all eleven headers.
+
+**Message choice (deliberate).** .NET's actual text is
+`SR.Argument_MinMaxValue` = `'{0}' cannot be greater than {1}.` (formatted with
+the two values, no `paramName`). This batch used the repository's existing
+simplified `"min cannot be greater than max."` for **internal consistency** with
+the ten already-correct `Clamp` overloads, rather than fragment the family with
+a second message format. The exception **type** (`ArgumentException`, no
+`paramName`) and the **validation order** (`min > max` checked first, before any
+comparison) match .NET exactly.
+
+**Tests.** +12 permanent GoogleTest cases: a `Clamp_MinGreaterThanMax_Throws`
+per type (11) asserting the throw *and* an equal-bound (`min == max`) valid case,
+plus a new ordinary `UInt64Test.Clamp` (that overload had **no** test at all
+before). `SharpRuntimeTests_Core_Base` 5056 → **5068**. Repository gate deferred
+to the batch close.
+
+**Consequences:** no object layout, vtable, return-convention, or mangled-symbol
+change; source-compatible for every ordinary call. `SR-AUD-022 → remediated`.

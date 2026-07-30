@@ -228,6 +228,11 @@ TEST(DecimalTests, Clamp_Fractions) {
                              Decimal::Parse("0.9")),
               Decimal::Parse("0.1"));
 }
+// SR-AUD-022 (#1846): an inverted interval must throw (was silently returning a bound).
+TEST(DecimalTests, Clamp_MinGreaterThanMax_Throws) {
+    EXPECT_THROW(Decimal::Clamp(Decimal(5), Decimal(10), Decimal(1)), System::ArgumentException);
+    EXPECT_EQ(Decimal::Clamp(Decimal(5), Decimal(7), Decimal(7)), Decimal(7));
+}
 
 // ---------------------------------------------------------------------------
 // ToUInt32 / ToUInt64
