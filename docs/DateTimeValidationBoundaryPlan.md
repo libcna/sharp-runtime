@@ -729,6 +729,30 @@ divergence.
 **16.6 — the `TimeZoneInfo`, `Calendar`-shape, `XmlConvert` and
 `Stopwatch`/`TimeProvider` findings.** Different causes; §1.
 
+**16.7 — surfaces inspected for this family and found already correct.** Listed
+so a later batch does not re-derive them, and so "complete inventory" is a
+statement of work done rather than a claim:
+
+| Surface | Checked | Verdict |
+|---|---|---|
+| `DateTimeOffset::FromUnixTimeSeconds` / `FromUnixTimeMilliseconds` | range-checked against the exact `min`/`max` before the multiplication, with .NET's `Valid values are between {0} and {1}, inclusive.` message | correct |
+| `DateTimeOffset::ToUnixTimeSeconds` / `ToUnixTimeMilliseconds` | pure division of an already-valid tick count | correct |
+| `DateTime::AddDays` / `AddHours` / `AddMinutes` / `AddSeconds` / `AddMilliseconds` / `AddTicks` / `Add` / `Subtract` | bounded-before-multiply or unsigned-wrap-then-compare, with the reasoning recorded in-place | correct — repaired under CCF-004 |
+| `DateTime::AddMonths` / `AddYears`, `DateOnly::AddMonths` / `AddYears` / `AddDays` / `FromDayNumber` | ±120000 / ±10000 bounds before any arithmetic | correct — repaired under CCF-004 (SR-AUD-060) |
+| `DateTime::IsLeapYear` / `DaysInMonth` | explicit year and month guards | correct |
+| `Globalization::ISOWeek::ToDateTime` / `ToDateOnly` / `GetWeeksInYear` / `GetYearStart` | line-by-line against `ISOWeek.cs`, including its deliberate `dayOfWeek == 7` acceptance | correct |
+| `Globalization::Calendar::AddMonths` / `AddYears` / `AddWeeks` / `ToFourDigitYear` | bounds before multiply; `ToFourDigitYear` rejects a negative year | correct |
+| `TimeSpan`'s component constructors | .NET accepts `TimeSpan(25,0,0)` by design; the overflow arithmetic is CCF-004 work already done | correct — no range exists to enforce |
+| `TimeOnly`'s four component constructors and its tick constructor | already carry the exact rule, message and `paramName` `DateTime` was missing | correct — the family's counter-example |
+| `DateOnly`'s component constructor | delegates to `DateTime(year, month, day)`, matching `DateOnly.cs` | correct |
+| `XmlConvert`'s date/time conversions | SR-AUD-354 is a *duration-grammar* finding on `TimeSpan`, with no shared cause | out of family |
+| `Stopwatch` / `TimeProvider::GetElapsedTime` | SR-AUD-131, a CCF-004-class subtraction | out of family |
+| `TimeZoneInfo` / `TimeZone` | SR-AUD-224…230, timezone *semantics* | out of family |
+
+**No `DateTimeKind`-taking entry point exists in this port**, so .NET's
+`(uint)kind > (uint)DateTimeKind.Local` guard — the "invalid enum accepted"
+class the family template asks about — has nothing here to audit.
+
 ---
 
 ## 17. Performance considerations
@@ -773,3 +797,130 @@ closed.** This document states that plainly so a later batch does not read
 | **#1878** | CCF2-C | implementation | `DateTimeOffset::TryParse` offset-minute range |
 | **#1879** | CCF2-D | `needs_user` | parser full-consumption / fabricated-midnight grammar across P1–P8 |
 | **#1880** | CCF2-E | `todo`, **inactive** | `TryParse` failure-output normalisation for the four date/time parsers |
+
+**Status after this batch (2026-07-30).** #1876, #1877 and #1878 are `done`;
+SR-AUD-006 is `remediated`, SR-AUD-007 is split `007a remediated / 007b open`,
+and SR-AUD-009 and SR-AUD-061 remain `confirmed`. By §18's criteria CCF-002 is
+**PARTIALLY REMEDIATED**, not closed: items 1–7 hold, item 8's two tickets
+(#1879 `needs_user`, #1880 inactive) are open, and their decision records are
+§20.1 and §20.2.
+
+---
+
+## 20. Approval decision records
+
+Written 2026-07-30 after #1877 and #1878 landed, so every "current state" line
+below describes the tree **as it is now**, not as it was before this batch.
+Neither record authorises any change: both wait for an explicit per-action
+decision, exactly as `docs/FloatingValueFidelityPlan.md` §19 does for
+#1854/#1858/#1862/#1863/#1865.
+
+### 20.1 CCF2-D / #1879 — parser accepted-grammar strictness (SR-AUD-007b, SR-AUD-009, SR-AUD-061)
+
+**Current state (measured, post-#1877/#1878).** Four parsers verify separator
+*positions*, run one `std::sscanf` prefix conversion, and never assert that the
+conversion consumed the whole string. `DateTime::TryParse` additionally
+substitutes zeros for all three time fields when its `%d:%d:%d` conversion yields
+fewer than three (`DateTime.cpp:357-358`), which is how a malformed time becomes
+midnight.
+
+**.NET reference (exact).** `DateTimeParse.cs` is a full state-machine lexer:
+it tokenises, tracks `DTFI` patterns, and fails on any unconsumed token
+(`ParseFraction`, `Lex`, and the terminal `if (str.Index < str.Length)`
+consumption test). There is no prefix-acceptance path in the reference at all.
+`TimeOnly.cs` and `DateOnly.cs` delegate to the same machinery. So the reference
+rejects **every** input in the table below.
+
+**Exact before/after.** All of these return `true` today and would return
+`false`; `Parse` succeeds today and would throw `FormatException`.
+
+| Entry | Input | Currently accepted as | Under #1879 |
+|---|---|---|---|
+| `DateTime::TryParse` | `"2024-06-15junk"` | 2024-06-15 00:00:00 | `false` |
+| `DateTime::TryParse` | `"2024-06-15 10:xx:00"` | 2024-06-15 **00:00:00** | `false` |
+| `DateTime::TryParse` | `"2024-06-15 trailing"` | 2024-06-15 **00:00:00** | `false` |
+| `DateTime::TryParse` | `"2024-06-15T10:20:30zzzz"` | 10:20:30 | `false` |
+| `DateTime::TryParse` | `"2024-06-15T10:20:30."` | 10:20:30.000 | `false` |
+| `DateTime::TryParse` | `"2024-06-15T10:20:30.abc"` | 10:20:30.000 | `false` |
+| `DateTime::TryParse` | `"2024-06-15T10:20:30.1234"` | 10:20:30.**123** | `false` |
+| `DateTimeOffset::TryParse` | `"…+02:00junk"` | +120 min | `false` |
+| `DateTimeOffset::TryParse` | `"…+2:5"` | **+125 min** | `false` |
+| `TimeOnly::TryParse` | `"10:20:30.abc"` | 10:20:30.000 | `false` |
+| `TimeOnly::TryParse` | `"10:20:30junk"` | 10:20:30.000 | `false` |
+| `TimeOnly::TryParse` | `"10:20:30."` | 10:20:30.000 | `false` |
+| `TimeOnly::TryParse` | `"10:20:30.1234"` | 10:20:30.**123** | `false` |
+| `DateOnly::TryParse` | `"2024-06-15junk"` | 2024-06-15 | `false` |
+| `DateOnly::TryParse` | `"2024-06-15 10:20:30"` | 2024-06-15 | `false` |
+
+**Unchanged in every option** — the documented grammars keep parsing to identical
+values: `"yyyy-MM-dd"`, `"yyyy-MM-dd HH:mm:ss"`, `"yyyy-MM-ddTHH:mm:ss"`, an
+optional 1–3-digit fraction, a trailing `Z`/`z`, and a `±HH:MM` offset.
+
+**Options.**
+
+- **(A) Full-consumption parity.** Replace `std::sscanf` in all four parsers with
+  a hand-written strict scanner that consumes a fixed-width field, requires the
+  exact separator, and fails on any residual character. Also removes the
+  fabricated-midnight substitution, and removes `sscanf`'s formally undefined
+  behaviour on a numeral outside `int` (measured as saturating on glibc, §4.3
+  shapes 4/5, so this is a standards-conformance repair, not an observed bug).
+- **(B) Full consumption only, keep the fabricated midnight.** Rejects trailing
+  text but still turns `"10:xx:00"` into midnight — internally inconsistent, and
+  recommended against.
+- **(C) Do nothing.** Leaves three `confirmed` findings open indefinitely.
+
+**Recommendation: (A).** It is the only option that makes the port's own
+documented grammar (`DateTime.hpp:337-339`, `TimeOnly.hpp:32-34`) true.
+
+**Approval trigger:** accepted textual grammar. A caller that today gets a usable
+`DateTime` from a log line with a trailing token would start getting `false`.
+
+**Source / ABI / layout / `noexcept`:** none under any option. All four bodies
+are in `.cpp` files; no public signature, `noexcept` specification, virtual
+function, vtable slot, data member, `sizeof`, `alignof` or member offset changes.
+Consumers need no migration beyond correcting inputs that were never valid.
+
+**Rollback:** revert the single commit; the parsers are self-contained and no
+other subsystem reads their internals.
+
+**Test matrix (add-only, when approved):** every row of the table above in both
+directions — the listed input rejected, and the corresponding well-formed input
+still parsed to its exact current value — plus `Parse`/`TryParse` asserted
+separately, plus the four `Ccf002_*GrammarIsPinnedUnchanged` tests inverted in
+the same commit.
+
+**Performance:** a hand-written scanner is strictly faster than `sscanf`
+(no format-string interpretation, no locale lookup). No benchmark is required.
+
+### 20.2 CCF2-E / #1880 — `TryParse` failure-output normalisation
+
+**Current state (measured).** All four parsers leave the caller's previous output
+value in place when they return `false` (cases 045–047, 059, 070–074, 078–079).
+
+**.NET reference (exact).** `DateTimeParse.cs:2459-2472` assigns
+`result = DateTime.MinValue` before returning `false`. `DateTime.TryParse(null,
+out)` assigns `default` explicitly (`DateTime.cs:1774-1780`).
+
+**Why this is not folded into #1877 or #1878.** It changes the observable output
+of **every** failing parse, including the ones that already failed before this
+batch — it is not a consequence of validation, it is a separate contract. It is
+the same class as the just-closed CCF-014, and CCF-014's own lesson was that a
+`Try` output contract deserves its own measured record.
+
+**Corrected premise it rests on.** The "Required post-audit verification" text of
+all four CCF-002 reports asks for an assertion that a failed `TryParse` does
+**not** overwrite the output. That is the opposite of the reference. Any batch
+that implements those verification paragraphs literally would pin the divergence
+as the contract. See §7.4.
+
+**Options.** (A) adopt .NET's assign-minimum-on-failure for all four parsers;
+(B) adopt it only where a `Try*` sibling in the same module already does;
+(C) document the divergence as deliberate and close the ticket `wontfix`.
+No recommendation is made here — it needs its own probe of how many
+same-repository `Try*` methods follow each convention, which is why #1880 is
+**inactive** rather than `needs_user`.
+
+**Source / ABI / layout / `noexcept`:** none under any option.
+
+**Ticket status:** `todo`, **inactive** — do not start without confirming it is
+still wanted. No `SR-AUD-*` identifier issued.
