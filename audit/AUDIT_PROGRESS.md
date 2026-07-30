@@ -5434,3 +5434,54 @@ Module graph **41 / 91**.
 **Source and ABI consequences: none.** No signature, virtual, vtable, object layout or
 mangled symbol changed. The function was not `noexcept` before and is not now; it already
 threw for every input the new guard rejects.
+
+---
+
+Ticket **#1834** (`REMED-CORE-INT128-MINVALUE-DEFINED`, P1, size S, category `remediation`,
+area *Core*) is **done** and **SR-AUD-019 is now `remediated`** — the fifth CCF-004 member
+repaired under `docs/DefinedArithmeticBoundaryPlan.md`. The index counts move to
+**26 remediated** and **338 confirmed** of 364.
+
+Two public paths negated a **signed** `__int128` whose magnitude 2^127 is not
+representable. `Int128::TryParse` (`Int128.hpp:234`) converted the already-correct unsigned
+magnitude to signed and *then* negated it; `Int128::ToString` (`Int128.hpp:143`) negated
+`value_` to build its decimal magnitude. Both reported
+`negation of 0x80000000000000000000000000000000 cannot be represented in type '__int128'`.
+Both now stay in `unsigned __int128` and convert once at the end — the idiom
+`Int128::operator-()` in the same header already used, with a comment at each site saying so
+in case a later reader mistakes the cast for redundancy.
+
+**CCF-004 class A, verified by measurement.** `build-probe/1834_prefix_values.log` and the
+values section of `build-probe/1834_postfix.log` are **identical** across thirty-one probes:
+both endpoints, both endpoints' neighbours in both directions, the malformed inputs, the
+zero-magnitude negative `"-0"`, every format path, and the operator vectors. Both
+diagnostics present before, zero present after under `-fno-sanitize-recover=undefined`.
+
+**The finding's reach is wider than the two entry points the audit named, and the extra
+reach needed no extra fix.** `ToString(format)` is a *third* public door onto
+`Int128.hpp:143`: the `D`, `d` and `G` paths, and the width-padded `D40`/`D45` forms, all
+delegate to `ToString()` and so all reported the same diagnostic (probe cases 4 and 5).
+`Parse` is a fourth, onto `:234` (case 3). All four are now silent, and all four are pinned
+by tests — because a fix justified only by `TryParse` and `ToString()` would leave a reader
+unable to tell whether the format overloads had been considered. The hexadecimal `X`/`x`
+path never negated and is pinned unchanged.
+
+**Nothing else in the file has this shape**, verified rather than assumed: the only other
+candidate negations are `Abs`, which explicitly throws `OverflowException` for `MinValue`
+before negating, and `operator/` / `operator%`, which explicitly throw for `MinValue / -1`.
+`operator+`, `operator-`, `operator*` and unary `operator-` already compute in
+`unsigned __int128`. `UInt128` cannot have the defect. Plan §10.5's exclusion of the
+operator arithmetic therefore holds, and the existing operator vectors are asserted here so
+this ticket cannot disturb them.
+
+**No new compiler-extension dependency**: `unsigned __int128` was already required by this
+header, so the MSVC limitation recorded in `CLAUDE.md` is unchanged.
+
+**Tests: +8 permanent regressions.** `SharpRuntimeTests_Core_Base` **5030/5030**, clean
+under **ASan + UBSan + LSan with zero reports** (`build-asan/1834_core_asan.log`), with the
+ASan `IntegerTypesTests.cpp.o` and `libsharp_runtime_core.a` proven rebuilt first.
+Repository gate: **0 warnings, 0 errors, 14,134 tests across 37 executables** (was 14,126).
+Module graph **41 / 91**.
+
+**Source and ABI consequences: none.** No signature, virtual, vtable, object layout or
+mangled symbol changed.

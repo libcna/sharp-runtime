@@ -179,3 +179,107 @@ TEST(IntPtrTests2, AddAndSubtract_ExtremeOffsets) {
     EXPECT_EQ(System::IntPtr::Subtract(zero, 2147483647).ToInt64(), -2147483647LL);
     EXPECT_EQ(System::IntPtr::Subtract(zero, -2147483647 - 1).ToInt64(), 2147483648LL);
 }
+
+// ---------------------------------------------------------------------------
+// CCF-004 / SR-AUD-019 — Int128 MinValue parse and format (ticket #1834)
+//
+// Two public paths negated a SIGNED `__int128` whose magnitude 2^127 is not
+// representable, which is undefined behaviour:
+//   * `TryParse`  (Int128.hpp:234) converted the unsigned magnitude to signed and then
+//     negated it — reached by the MinValue decimal string;
+//   * `ToString`  (Int128.hpp:143) negated `value_` to build its decimal magnitude —
+//     reached by `MinValue().ToString()` and by every format that delegates to it.
+// Both now stay in `unsigned __int128` and convert once at the end, the same idiom
+// `operator-()` in that header already used.
+//
+// CCF-004 class A: no value may change. Every expectation below is the value measured
+// BEFORE the change (build-probe/1834_prefix_values.log).
+// ---------------------------------------------------------------------------
+
+namespace {
+    constexpr const char* kInt128MinDecimal = "-170141183460469231731687303715884105728";
+    constexpr const char* kInt128MaxDecimal = "170141183460469231731687303715884105727";
+}
+
+TEST(Int128DefinedArithmeticTests, MinValueFormatsToItsExactDecimalForm) {
+    EXPECT_EQ(System::Int128::MinValue().ToString(), kInt128MinDecimal);
+    EXPECT_EQ(System::Int128::MaxValue().ToString(), kInt128MaxDecimal);
+}
+
+TEST(Int128DefinedArithmeticTests, MinValueParsesToExactlyMinValue) {
+    System::Int128 v;
+    ASSERT_TRUE(System::Int128::TryParse(kInt128MinDecimal, v));
+    EXPECT_TRUE(v == System::Int128::MinValue());
+    // And through the throwing entry point, which forwards to the same code.
+    EXPECT_TRUE(System::Int128::Parse(kInt128MinDecimal) == System::Int128::MinValue());
+}
+
+TEST(Int128DefinedArithmeticTests, MinValueRoundTripsThroughFormatAndParse) {
+    System::Int128 back;
+    ASSERT_TRUE(System::Int128::TryParse(System::Int128::MinValue().ToString(), back));
+    EXPECT_TRUE(back == System::Int128::MinValue());
+    ASSERT_TRUE(System::Int128::TryParse(System::Int128::MaxValue().ToString(), back));
+    EXPECT_TRUE(back == System::Int128::MaxValue());
+}
+
+TEST(Int128DefinedArithmeticTests, EveryFormatPathThatDelegatesToToStringIsUnchanged) {
+    const auto mn = System::Int128::MinValue();
+    EXPECT_EQ(mn.ToString("D"), kInt128MinDecimal);
+    EXPECT_EQ(mn.ToString("G"), kInt128MinDecimal);
+    // Width padding inserts zeros AFTER the sign, which the negative magnitude path feeds.
+    EXPECT_EQ(mn.ToString("D40"), "-0170141183460469231731687303715884105728");
+    EXPECT_EQ(mn.ToString("D45"), "-000000170141183460469231731687303715884105728");
+    // The hex path never negated and must stay untouched.
+    EXPECT_EQ(mn.ToString("X"), "80000000000000000000000000000000");
+    EXPECT_EQ(mn.ToString("x"), "80000000000000000000000000000000");
+}
+
+TEST(Int128DefinedArithmeticTests, BothDomainEndpointsAndTheirNeighboursParseAsBefore) {
+    System::Int128 v;
+    // MinValue + 1 and MaxValue: still accepted.
+    EXPECT_TRUE(System::Int128::TryParse("-170141183460469231731687303715884105727", v));
+    EXPECT_EQ(v.ToString(), "-170141183460469231731687303715884105727");
+    EXPECT_TRUE(System::Int128::TryParse(kInt128MaxDecimal, v));
+    // One past each end: still rejected, so the unsigned negation did not widen the domain.
+    EXPECT_FALSE(System::Int128::TryParse("-170141183460469231731687303715884105729", v));
+    EXPECT_FALSE(System::Int128::TryParse("170141183460469231731687303715884105728", v));
+}
+
+TEST(Int128DefinedArithmeticTests, OrdinaryAndZeroSignedValuesAreUnchanged) {
+    System::Int128 v;
+    // A negative zero magnitude is the degenerate case of the changed expression.
+    ASSERT_TRUE(System::Int128::TryParse("-0", v));
+    EXPECT_TRUE(v == System::Int128(0));
+    EXPECT_EQ(v.ToString(), "0");
+
+    ASSERT_TRUE(System::Int128::TryParse("-1", v));
+    EXPECT_EQ(v.ToString(), "-1");
+    ASSERT_TRUE(System::Int128::TryParse("-42", v));
+    EXPECT_EQ(v.ToString(), "-42");
+    ASSERT_TRUE(System::Int128::TryParse("42", v));
+    EXPECT_EQ(v.ToString(), "42");
+    EXPECT_EQ(System::Int128(0).ToString(), "0");
+    EXPECT_EQ(System::Int128(static_cast<__int128>(-42)).ToString(), "-42");
+}
+
+TEST(Int128DefinedArithmeticTests, MalformedInputIsStillRejected) {
+    System::Int128 v;
+    EXPECT_FALSE(System::Int128::TryParse("", v));
+    EXPECT_FALSE(System::Int128::TryParse("-", v));
+    EXPECT_FALSE(System::Int128::TryParse("+", v));
+    EXPECT_FALSE(System::Int128::TryParse("-1x", v));
+    EXPECT_THROW((void)System::Int128::Parse("-1x"), System::FormatException);
+}
+
+TEST(Int128DefinedArithmeticTests, TheExistingOverflowOperatorVectorsStillHold) {
+    // Plan section 10.5: SR-AUD-019 is the parse/format paths, NOT the operators. These
+    // assertions exist so this ticket cannot silently disturb them.
+    const auto mn = System::Int128::MinValue();
+    const auto mx = System::Int128::MaxValue();
+    EXPECT_TRUE(-mn == mn);                                  // unchecked negation wraps
+    EXPECT_TRUE(mn - System::Int128(1) == mx);
+    EXPECT_TRUE(mx + System::Int128(1) == mn);
+    EXPECT_THROW((void)System::Int128::Abs(mn), System::OverflowException);
+    EXPECT_THROW((void)(mn / System::Int128(-1)), System::OverflowException);
+    EXPECT_THROW((void)(mn % System::Int128(-1)), System::OverflowException);
+}

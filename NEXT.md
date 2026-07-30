@@ -7536,3 +7536,42 @@ plan §7 names it for the one member touching a pointer and a length). Post-fix 
 under `-fno-sanitize-recover=undefined`. Repository gate **14,126 tests across 37
 executables**, 0 warnings, 0 errors. Audit index **25 remediated / 339 confirmed of 364**.
 No public signature, virtual, vtable, object layout or mangled symbol changed.
+
+## Completed Int128 MinValue defined arithmetic: ticket #1834 (2026-07-30)
+
+`REMED-CORE-INT128-MINVALUE-DEFINED`, P1, size S. **CCF-004 class A**, fifth member of the
+family implemented. **SR-AUD-019 is now `remediated`.**
+
+`Int128::TryParse` (`Int128.hpp:234`) converted its already-correct unsigned magnitude to a
+signed `__int128` and *then* negated it; `Int128::ToString` (`Int128.hpp:143`) negated
+`value_` to build its decimal magnitude. Both reported
+`negation of 0x80000000000000000000000000000000 cannot be represented in type '__int128'`.
+Both now stay in `unsigned __int128` and convert once at the end — the idiom
+`Int128::operator-()` in the same header already used.
+
+**Class A, measured.** `build-probe/1834_prefix_values.log` and the values section of
+`build-probe/1834_postfix.log` are identical across thirty-one probes: both endpoints, both
+neighbours in both directions, malformed inputs, the zero-magnitude `"-0"`, every format
+path, the operator vectors. Both diagnostics gone under `-fno-sanitize-recover=undefined`.
+
+**The finding reaches further than the two entry points the audit named.**
+`ToString(format)` is a **third** public door onto `:143` — `D`, `d`, `G` and the
+width-padded `D40`/`D45` all delegate to `ToString()` and all reported the same diagnostic;
+`Parse` is a fourth onto `:234`. No extra fix was needed, but all four are pinned, because a
+fix justified only by `TryParse`/`ToString()` leaves a reader unable to tell whether the
+format overloads were considered. `X`/`x` never negated and is pinned unchanged.
+
+**Nothing else in the file has this shape**, checked rather than assumed: `Abs` throws
+`OverflowException` for `MinValue` before negating; `operator/` and `operator%` throw for
+`MinValue / -1`; `operator+`, `operator-`, `operator*` and unary `operator-` already compute
+in `unsigned __int128`; `UInt128` cannot have the defect. Plan §10.5's operator exclusion
+holds, and the operator vectors are asserted so this ticket cannot disturb them. **No new
+compiler-extension dependency** — `unsigned __int128` was already required here, so
+`CLAUDE.md`'s MSVC limitation is unchanged.
+
+8 permanent regressions. `SharpRuntimeTests_Core_Base` **5030/5030**, clean under
+ASan + UBSan + LSan, 0 reports (`build-asan/1834_core_asan.log`; the ASan
+`IntegerTypesTests.cpp.o` **and** `libsharp_runtime_core.a` were rebuilt first, so the asan
+core archive is now current as of #1834). Repository gate **14,134 tests across 37
+executables**, 0 warnings, 0 errors. Audit index **26 remediated / 338 confirmed of 364**.
+No public signature, virtual, vtable, object layout or mangled symbol changed.

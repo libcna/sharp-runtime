@@ -140,8 +140,16 @@ namespace System {
         [[nodiscard]] std::string ToString() const {
             if (value_ == 0) return "0";
             bool neg = value_ < 0;
-            unsigned __int128 v = neg ? static_cast<unsigned __int128>(-value_)
-                                      : static_cast<unsigned __int128>(value_);
+            // CCF-004 class A (defined wrap): the magnitude is derived wholly in
+            // `unsigned __int128`. Negating `value_` as a SIGNED __int128 is undefined
+            // behaviour for MinValue, whose magnitude 2^127 is not representable --
+            // `MinValue().ToString()` reported
+            // `negation of 0x80000000000000000000000000000000 cannot be represented in type
+            // '__int128'` (SR-AUD-019). Unsigned negation is always defined and yields the
+            // same bit pattern, so every formatted string is unchanged. This matches what
+            // operator-() in this same header already does; do not "simplify" it back.
+            const unsigned __int128 u = static_cast<unsigned __int128>(value_);
+            unsigned __int128 v = neg ? -u : u;
             std::string s;
             while (v > 0) { s += char('0' + int(v % 10)); v /= 10; }
             if (neg) s += '-';
@@ -231,7 +239,16 @@ namespace System {
                 if (val > (absMax - digit) / 10) return false;
                 val = val * 10 + digit;
             }
-            result = neg ? Int128(-static_cast<__int128>(val))
+            // CCF-004 class A (defined wrap): `val` is already the unsigned magnitude and the
+            // loop above has proved it is at most `absMax`, i.e. 2^127 for a negative input.
+            // Converting that to a signed __int128 FIRST and then negating it is undefined
+            // behaviour for exactly the MinValue case -- parsing MinValue's decimal form,
+            // "-170141183460469231731687303715884105728", reported
+            // `negation of 0x80000000000000000000000000000000 cannot be represented in type
+            // '__int128'` (SR-AUD-019). Negate in the unsigned domain, where it is always
+            // defined, and convert once at the end; C++20 makes that conversion the
+            // two's-complement reinterpretation this needs, so the parsed value is unchanged.
+            result = neg ? Int128(static_cast<__int128>(-val))
                         : Int128(static_cast<__int128>(val));
             return true;
         }
