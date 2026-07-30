@@ -7,6 +7,7 @@
 #include "System/ArithmeticException.hpp"
 #include "System/FormatException.hpp"
 #include <cmath>
+#include <limits>
 
 using System::Single;
 using System::ArithmeticException;
@@ -44,6 +45,17 @@ TEST(SingleTest, IsRealNumber_True)     { EXPECT_TRUE(Single::IsRealNumber(1.0f)
 TEST(SingleTest, IsRealNumber_NaN_False){ EXPECT_FALSE(Single::IsRealNumber(Single::NaN)); }
 TEST(SingleTest, IsPow2_True)           { EXPECT_TRUE(Single::IsPow2(8.0f)); }
 TEST(SingleTest, IsPow2_False)          { EXPECT_FALSE(Single::IsPow2(6.0f)); EXPECT_FALSE(Single::IsPow2(0.0f)); EXPECT_FALSE(Single::IsPow2(-8.0f)); }
+
+// SR-AUD-030 (#1860, CCF-007): subnormal powers of two must be recognised (one
+// trailing-significand bit), matching .NET Single.IsPow2; the normal rule rejected them.
+TEST(SingleTest, IsPow2_SubnormalPowersOfTwo) {
+    EXPECT_TRUE(Single::IsPow2(Single::Epsilon));            // smallest subnormal = 2^-149
+    EXPECT_TRUE(Single::IsPow2(Single::Epsilon * 2.0f));     // 2^-148, still one bit
+    EXPECT_TRUE(Single::IsPow2(Single::Epsilon * 4.0f));     // 2^-147
+    EXPECT_FALSE(Single::IsPow2(Single::Epsilon * 3.0f));    // two bits -> not a power of two
+    EXPECT_FALSE(Single::IsPow2(-Single::Epsilon));          // negative subnormal
+    EXPECT_TRUE(Single::IsPow2(1.0f));                       // normal power of two unaffected
+}
 
 // Arithmetic
 TEST(SingleTest, Abs_Negative)          { EXPECT_EQ(Single::Abs(-5.0f), 5.0f); }
@@ -109,6 +121,18 @@ TEST(SingleTest, RadiansToDegrees)      { EXPECT_NEAR(Single::RadiansToDegrees(S
 TEST(SingleTest, FusedMultiplyAdd)      { EXPECT_NEAR(Single::FusedMultiplyAdd(2.0f, 3.0f, 1.0f), 7.0f, 0.001f); }
 TEST(SingleTest, ScaleB)               { EXPECT_EQ(Single::ScaleB(1.0f, 3), 8.0f); }
 TEST(SingleTest, ILogB)                { EXPECT_EQ(Single::ILogB(8.0f), 3); }
+
+// SR-AUD-031 (#1859, CCF-007): .NET reserves int.MinValue for zero and returns
+// int.MaxValue for NaN and both infinities; std::ilogb collided NaN with zero (INT_MIN).
+TEST(SingleTest, ILogB_SpecialValues) {
+    EXPECT_EQ(Single::ILogB(0.0f),  std::numeric_limits<int>::min());
+    EXPECT_EQ(Single::ILogB(-0.0f), std::numeric_limits<int>::min());
+    EXPECT_EQ(Single::ILogB(Single::PositiveInfinity), std::numeric_limits<int>::max());
+    EXPECT_EQ(Single::ILogB(Single::NegativeInfinity), std::numeric_limits<int>::max());
+    EXPECT_EQ(Single::ILogB(Single::NaN), std::numeric_limits<int>::max());
+    EXPECT_EQ(Single::ILogB(Single::Epsilon), -149);   // smallest subnormal, 2^-149
+    EXPECT_EQ(Single::ILogB(1.0f), 0);
+}
 TEST(SingleTest, BitDecrement)          { EXPECT_LT(Single::BitDecrement(1.0f), 1.0f); }
 TEST(SingleTest, BitIncrement)          { EXPECT_GT(Single::BitIncrement(1.0f), 1.0f); }
 TEST(SingleTest, ReciprocalEstimate)    { EXPECT_NEAR(Single::ReciprocalEstimate(4.0f), 0.25f, 0.001f); }

@@ -217,6 +217,17 @@ TEST(DoubleTests, IsPow2_False_Inf) {
     EXPECT_FALSE(Double::IsPow2(Double::PositiveInfinity));
 }
 
+// SR-AUD-030 (#1860, CCF-007): subnormal powers of two must be recognised (one
+// trailing-significand bit), matching .NET Double.IsPow2; the normal rule rejected them.
+TEST(DoubleTests, IsPow2_SubnormalPowersOfTwo) {
+    EXPECT_TRUE(Double::IsPow2(Double::Epsilon));           // smallest subnormal = 2^-1074
+    EXPECT_TRUE(Double::IsPow2(Double::Epsilon * 2.0));     // 2^-1073, still one bit
+    EXPECT_TRUE(Double::IsPow2(Double::Epsilon * 4.0));     // 2^-1072
+    EXPECT_FALSE(Double::IsPow2(Double::Epsilon * 3.0));    // two bits -> not a power of two
+    EXPECT_FALSE(Double::IsPow2(-Double::Epsilon));         // negative subnormal
+    EXPECT_TRUE(Double::IsPow2(1.0));                       // normal power of two unaffected
+}
+
 // ---------------------------------------------------------------------------
 // Math helpers
 // ---------------------------------------------------------------------------

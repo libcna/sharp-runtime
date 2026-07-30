@@ -25,6 +25,9 @@ unqualified native result or silently reinterpret an invalid public enum.
   .NET returns `Int32.MaxValue` for NaN and infinities while retaining
   `Int32.MinValue` for zero:
   <https://source.dot.net/System.Private.CoreLib/src/runtime/src/libraries/System.Private.CoreLib/src/System/Math.cs.html>.
+  **Remediated (#1859, 2026-07-30, CCF-007):** `Math::ILogB` (with
+  `Single::ILogB` and `Double::ILogB`) now returns `INT_MIN` for zero and
+  `INT_MAX` for NaN and both infinities before the finite `std::ilogb`.
 - **SR-AUD-036:** both public `Round` overloads that accept
   `MidpointRounding` use their switch default as `ToEven`.  The probe obtains
   `math_round_invalid=2` for `Round(1.9, static_cast<MidpointRounding>(99))`.

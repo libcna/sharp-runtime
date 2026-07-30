@@ -463,8 +463,17 @@ namespace System
         // ILogB / BigMul(long,long,long&) / DivRem pair overloads
         // ------------------------------------------------------------------
 
-        /** @brief Returns the base-2 integer logarithm of @p x (std::ilogb). */
-        [[nodiscard]] static intcs ILogB(double x) { return static_cast<intcs>(std::ilogb(x)); }
+        /** @brief Returns the base-2 integer logarithm of @p x. Returns Int32.MinValue for
+         *  zero and Int32.MaxValue for NaN and both infinities, matching .NET Math.ILogB. */
+        [[nodiscard]] static intcs ILogB(double x) {
+            // SR-AUD-031 (#1859): .NET reserves Int32.MinValue for zero and returns
+            // Int32.MaxValue for NaN and both infinities; std::ilogb's sentinels are
+            // implementation-defined (NaN maps to INT_MIN on this toolchain, colliding with
+            // zero). Classify explicitly before the finite std::ilogb.
+            if (std::isnan(x) || std::isinf(x)) return std::numeric_limits<intcs>::max();
+            if (x == 0.0) return std::numeric_limits<intcs>::min();
+            return static_cast<intcs>(std::ilogb(x));
+        }
 
 #if !defined(_MSC_VER)
         /**

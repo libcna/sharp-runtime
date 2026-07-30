@@ -165,8 +165,16 @@ public:
         uint64_t bits;
         static_assert(sizeof(double) == sizeof(uint64_t));
         __builtin_memcpy(&bits, &value, sizeof(bits));
-        // Trailing significand must be zero (only the implicit leading 1 bit)
+        constexpr uint64_t BiasedExponentMask = 0x7FF0'0000'0000'0000ull;
+        // Trailing significand must be zero for a normal power of two (only the implicit
+        // leading 1 bit); SR-AUD-030 (#1860): a subnormal (biased exponent 0) power of two
+        // carries exactly one trailing-significand bit, so the normal rule wrongly rejects
+        // Double::Epsilon and every subnormal power of two. Match .NET Double.IsPow2: for
+        // subnormals accept exactly one significand bit. The zero/negative guard above and
+        // !IsFinite already reject zero, negatives, NaN and infinity.
         constexpr uint64_t TrailingMask = 0x000F'FFFF'FFFF'FFFFull;
+        if ((bits & BiasedExponentMask) == 0)
+            return std::popcount(bits & TrailingMask) == 1;
         return (bits & TrailingMask) == 0;
     }
 
@@ -518,7 +526,15 @@ public:
      * @brief Returns the base-2 integer exponent of @p x.
      * C++ counterpart of .NET Double.ILogB(double).
      */
-    [[nodiscard]] static intcs ILogB(double x) noexcept { return static_cast<intcs>(std::ilogb(x)); }
+    [[nodiscard]] static intcs ILogB(double x) noexcept {
+        // SR-AUD-031 (#1859): .NET reserves Int32.MinValue for zero and returns
+        // Int32.MaxValue for NaN and both infinities; std::ilogb's sentinels are
+        // implementation-defined (NaN maps to INT_MIN on this toolchain, colliding with
+        // zero). Classify explicitly, matching MathF::ILogB, before the finite std::ilogb.
+        if (std::isnan(x) || std::isinf(x)) return std::numeric_limits<intcs>::max();
+        if (x == 0.0) return std::numeric_limits<intcs>::min();
+        return static_cast<intcs>(std::ilogb(x));
+    }
 
     /**
      * @brief Returns x * 2^n. C++ counterpart of .NET Double.ScaleB(double,int).

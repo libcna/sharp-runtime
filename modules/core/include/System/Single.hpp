@@ -121,7 +121,15 @@ public:
         uint32_t bits;
         static_assert(sizeof(float) == sizeof(uint32_t));
         __builtin_memcpy(&bits, &value, sizeof(bits));
-        constexpr uint32_t TrailingMask = 0x007F'FFFFu;
+        constexpr uint32_t BiasedExponentMask   = 0x7F80'0000u;
+        constexpr uint32_t TrailingMask         = 0x007F'FFFFu;
+        // SR-AUD-030 (#1860): a subnormal (biased exponent 0) power of two carries exactly
+        // one trailing-significand bit, so the normal "trailing significand == 0" rule wrongly
+        // rejects Epsilon and every subnormal power of two. Match .NET Single.IsPow2: for
+        // subnormals accept exactly one significand bit; the zero/negative guard above and
+        // !isfinite already reject zero, negatives, NaN and infinity (max biased exponent).
+        if ((bits & BiasedExponentMask) == 0)
+            return std::popcount(bits & TrailingMask) == 1;
         return (bits & TrailingMask) == 0;
     }
 
@@ -461,7 +469,15 @@ public:
      * @brief Returns the base-2 integer exponent of @p x.
      * C++ counterpart of .NET Single.ILogB(float).
      */
-    [[nodiscard]] static intcs ILogB(float x) noexcept { return static_cast<intcs>(std::ilogb(x)); }
+    [[nodiscard]] static intcs ILogB(float x) noexcept {
+        // SR-AUD-031 (#1859): .NET reserves Int32.MinValue for zero and returns
+        // Int32.MaxValue for NaN and both infinities; std::ilogb's sentinels are
+        // implementation-defined (NaN maps to INT_MIN on this toolchain, colliding with
+        // zero). Classify explicitly, matching MathF::ILogB, before the finite std::ilogb.
+        if (std::isnan(x) || std::isinf(x)) return std::numeric_limits<intcs>::max();
+        if (x == 0.0f) return std::numeric_limits<intcs>::min();
+        return static_cast<intcs>(std::ilogb(x));
+    }
 
     /**
      * @brief Returns x * 2^n. C++ counterpart of .NET Single.ScaleB(float,int).

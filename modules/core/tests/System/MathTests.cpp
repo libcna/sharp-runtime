@@ -706,6 +706,20 @@ TEST(MathTests, Round_EveryNamedMode_StillReturnsExactValue) {
     EXPECT_DOUBLE_EQ(Math::Round(2.1, System::MidpointRounding::ToPositiveInfinity), 3.0);
 }
 
+// SR-AUD-031 (#1859, CCF-007): Math::ILogB must reserve int.MinValue for zero and return
+// int.MaxValue for NaN and both infinities, matching .NET Math.ILogB; std::ilogb collided
+// NaN with zero (INT_MIN) on this toolchain.
+TEST(MathTests, ILogB_SpecialValuesAndNormals) {
+    EXPECT_EQ(Math::ILogB(8.0), 3);
+    EXPECT_EQ(Math::ILogB(1.0), 0);
+    EXPECT_EQ(Math::ILogB(0.0),  std::numeric_limits<int>::min());
+    EXPECT_EQ(Math::ILogB(-0.0), std::numeric_limits<int>::min());
+    EXPECT_EQ(Math::ILogB(std::numeric_limits<double>::infinity()),  std::numeric_limits<int>::max());
+    EXPECT_EQ(Math::ILogB(-std::numeric_limits<double>::infinity()), std::numeric_limits<int>::max());
+    EXPECT_EQ(Math::ILogB(std::numeric_limits<double>::quiet_NaN()), std::numeric_limits<int>::max());
+    EXPECT_EQ(Math::ILogB(std::numeric_limits<double>::denorm_min()), -1074);  // smallest subnormal
+}
+
 TEST(MathTests, ReciprocalSqrtEstimate_Four) {
     EXPECT_NEAR(Math::ReciprocalSqrtEstimate(4.0), 0.5, 1e-10);
 }

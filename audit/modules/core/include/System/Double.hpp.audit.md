@@ -28,10 +28,17 @@ facilities do not implement the default .NET grammar or format layout.
   cannot raise `ArgumentOutOfRangeException`.
 - **SR-AUD-030:** `IsPow2(Double::Epsilon)` returns false because the normal
   trailing-significand-zero rule is incorrectly applied to subnormals.
+  **Remediated (#1860, 2026-07-30, CCF-007):** a subnormal branch
+  (`popcount(trailingSignificand)==1`) was added; `IsPow2(Double::Epsilon)` is
+  now true. See `Single.hpp.audit.md` §SR-AUD-030.
 - **SR-AUD-031:** the direct `std::ilogb` forwarding reports
   `ilogb_nan=-2147483648`, while zero also maps to that value and infinity
   maps to `2147483647`. .NET reserves `Int32.MinValue` for zero and returns
   `Int32.MaxValue` for all non-finite values.
+  **Remediated (#1859, 2026-07-30, CCF-007):** `Double::ILogB` (with
+  `Single::ILogB` and `Math::ILogB`) now returns `INT_MIN` for zero and
+  `INT_MAX` for NaN and both infinities before the finite `std::ilogb`. See
+  `Single.hpp.audit.md` §SR-AUD-031.
 - **SR-AUD-032:** direct multiplication by `Pi` produces
   `sinpi_1=1.22464679914735321e-16`,
   `cospi_half=6.12323399573676604e-17`, and

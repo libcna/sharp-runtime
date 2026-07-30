@@ -66,6 +66,13 @@ Decode exponent and significand separately; for exponent zero accept exactly
 one significand bit, while retaining the zero/negative/NaN/infinity rejection.
 Add `Epsilon`, `2 * Epsilon`, and a two-bit subnormal negative control.
 
+**Remediated (#1860, 2026-07-30, CCF-007):** `Single::IsPow2`/`Double::IsPow2`
+now branch on a zero biased exponent (subnormal) and accept
+`std::popcount(trailingSignificand) == 1`, retaining the existing
+zero/negative/NaN/infinity rejection and the normal-value `trailingSignificand
+== 0` rule. Tests added for `Epsilon`, `2·Epsilon`, `4·Epsilon`, a two-bit
+subnormal (false), a negative subnormal (false), and a normal power of two.
+
 ## SR-AUD-031 — medium — `ILogB(NaN)` leaks the C library sentinel instead of the .NET result
 
 The wrapper forwards directly to `std::ilogb`.  On this supported toolchain,
@@ -88,6 +95,13 @@ The current behavior therefore makes zero and NaN indistinguishable to callers.
 Classify zero and non-finite values before calling or replacing `ilogb`, then
 test zero, positive/negative infinity, NaN, the smallest subnormal, and a
 normal exponent.
+
+**Remediated (#1859, 2026-07-30, CCF-007):** `Single::ILogB`, `Double::ILogB`,
+and `Math::ILogB` now return `INT_MIN` for zero and `INT_MAX` for NaN and both
+infinities before the finite `std::ilogb`, matching the already-fixed
+`MathF::ILogB` and .NET `Math.ILogB`; `noexcept` unchanged. Tests added for
+zero, ±infinity, NaN, the smallest subnormal (`-149`/`-1074`), and a normal
+exponent, on all three types.
 
 ## SR-AUD-032 — medium — Pi-scaled trigonometric APIs lose exact turn-boundary results
 

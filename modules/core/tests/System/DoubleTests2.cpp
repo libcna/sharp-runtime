@@ -132,6 +132,18 @@ TEST(DoubleTests2, ILogB_PowerOfTwo) {
     EXPECT_EQ(Double::ILogB(8.0), 3);
 }
 
+// SR-AUD-031 (#1859, CCF-007): .NET reserves int.MinValue for zero and returns
+// int.MaxValue for NaN and both infinities; std::ilogb collided NaN with zero (INT_MIN).
+TEST(DoubleTests2, ILogB_SpecialValues) {
+    EXPECT_EQ(Double::ILogB(0.0),  std::numeric_limits<int>::min());
+    EXPECT_EQ(Double::ILogB(-0.0), std::numeric_limits<int>::min());
+    EXPECT_EQ(Double::ILogB(Double::PositiveInfinity), std::numeric_limits<int>::max());
+    EXPECT_EQ(Double::ILogB(Double::NegativeInfinity), std::numeric_limits<int>::max());
+    EXPECT_EQ(Double::ILogB(Double::NaN), std::numeric_limits<int>::max());
+    EXPECT_EQ(Double::ILogB(Double::Epsilon), -1074);   // smallest subnormal, 2^-1074
+    EXPECT_EQ(Double::ILogB(1.0), 0);
+}
+
 TEST(DoubleTests2, ScaleB_MultipliesByPowerOfTwo) {
     EXPECT_DOUBLE_EQ(Double::ScaleB(1.0, 3), 8.0);
 }
