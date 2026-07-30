@@ -90,3 +90,22 @@ The range-slice repair is sound, but this foundational header still permits
 malformed length state to reach memory operations and silently corrupts
 overlapping nontrivial copies.  No implementation was modified during this
 audit.
+
+### Partially remediated (SR-AUD-043a) — ticket #1852 (2026-07-30)
+
+`Span(T*, intcs)` and `ReadOnlySpan(const T*, intcs)` now throw
+`ArgumentOutOfRangeException("length")` when `length < 0`, and the
+`Span`/`ReadOnlySpan` vector constructors route `v.size()` through the shared
+`System::detail::checkedSpanLength` (`System/detail/SpanLength.hpp`), which throws
+`ArgumentOutOfRangeException` when the source holds more than `INT32_MAX`
+elements instead of silently narrowing to a negative length. The `length_` field
+stays signed `intcs` and every signature is unchanged (no layout/ABI change) —
+matching .NET, which keeps `_length` a signed `int` and validates at
+construction. This closes the **reachable** SR-AUD-043 exploit: a negative-length
+span can no longer be constructed, so it can never reach `HashCode::AddBytes`.
+ASan reproduced the pre-fix `heap-buffer-overflow READ` at `HashCode.hpp:76`
+(`build-probe/1852_span_hashcode_prefix.log`) and confirmed a clean
+construction-time throw post-fix (`…_postfix.log`). The **SR-AUD-043b** tail (the
+`ReadOnlyMemory` `noexcept`/`constexpr` ctors and `HashCode::AddBytes noexcept`)
+stays open as approval-gated ticket #1854. SR-AUD-044 (overlap copy) is untouched
+and remains open. `docs/ConversionBoundaryFamilyPlan.md` §19.3.

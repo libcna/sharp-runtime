@@ -69,3 +69,20 @@ raw-pointer overload's documented null/length preconditions.  Audit all
 The valid-input accumulator behaves consistently, but the span path contains
 an ASan-confirmed high-severity out-of-bounds read caused by unchecked signed
 length conversion.  No implementation was modified during this audit.
+
+### Partially remediated (SR-AUD-043a) — ticket #1852 (2026-07-30)
+
+The out-of-bounds read is closed at its source rather than in `AddBytes`. Ticket
+#1852 makes `ReadOnlySpan(const T*, intcs)` reject a negative length at
+construction, so `ReadOnlySpan<uint8_t>(oneByte, -1)` — the exact input that drove
+`AddBytes` past its buffer — can no longer be built. ASan confirmed the pre-fix
+`heap-buffer-overflow READ of size 1` at `HashCode.hpp:76 in AddBytes`
+(`build-probe/1852_span_hashcode_prefix.log`) and a clean construction-time throw
+post-fix (`…_postfix.log`); a `HashCodeTests` case asserts the negative-length
+span cannot be constructed.
+
+`HashCode::AddBytes(const ReadOnlySpan<uint8_t>&)` (L92) is still `noexcept` and
+still casts the span length straight to `size_t` — that defense-in-depth guard is
+**SR-AUD-043b**, which cannot throw without dropping `noexcept`. It is tracked as
+approval-gated ticket #1854 (`needs_user`) and stays open; the reachable exploit
+is already closed by 043a. `docs/ConversionBoundaryFamilyPlan.md` §19.3.

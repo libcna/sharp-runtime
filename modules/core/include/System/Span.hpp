@@ -11,6 +11,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IndexOutOfRangeException.hpp"
+#include "System/detail/SpanLength.hpp"
 
 namespace System {
 
@@ -50,15 +51,23 @@ namespace System {
          * C++ counterpart of .NET Span&lt;T&gt;(void*, int).
          * @param ptr    Pointer to the first element.
          * @param length Number of elements.
+         * @throws System::ArgumentOutOfRangeException if @p length is negative.
          */
-        Span(T* ptr, intcs length) : ptr_(ptr), length_(length) {}
+        Span(T* ptr, intcs length) : ptr_(ptr), length_(length) {
+            // A negative length is stored as-is by .NET's field but rejected at
+            // construction; without this a later size_t use turns it into a huge
+            // unbounded read (SR-AUD-043a). Field stays signed intcs -- no layout change.
+            if (length < 0)
+                throw System::ArgumentOutOfRangeException("length");
+        }
 
         /**
          * @brief Constructs a Span covering the entire contents of a vector.
          * @param v The source vector; must outlive this span.
+         * @throws System::ArgumentOutOfRangeException if @p v holds more than INT32_MAX elements.
          */
         explicit Span(std::vector<T>& v)
-            : ptr_(v.data()), length_(static_cast<intcs>(v.size())) {}
+            : ptr_(v.data()), length_(System::detail::checkedSpanLength(v.size(), "v")) {}
 
         // -----------------------------------------------------------------------
         // Properties
@@ -297,15 +306,24 @@ namespace System {
          * @brief Constructs a ReadOnlySpan over @p length elements starting at @p ptr.
          * @param ptr    Pointer to the first element.
          * @param length Number of elements.
+         * @throws System::ArgumentOutOfRangeException if @p length is negative.
          */
-        ReadOnlySpan(const T* ptr, intcs length) : ptr_(ptr), length_(length) {}
+        ReadOnlySpan(const T* ptr, intcs length) : ptr_(ptr), length_(length) {
+            // Rejecting a negative length here closes the reachable exploit: a
+            // ReadOnlySpan<uint8_t>(oneByte,-1) can no longer be constructed and so
+            // can no longer reach HashCode::AddBytes as an unbounded raw read
+            // (SR-AUD-043a). Field stays signed intcs -- no layout change.
+            if (length < 0)
+                throw System::ArgumentOutOfRangeException("length");
+        }
 
         /**
          * @brief Constructs a ReadOnlySpan covering the entire contents of a vector.
          * @param v The source vector; must outlive this span.
+         * @throws System::ArgumentOutOfRangeException if @p v holds more than INT32_MAX elements.
          */
         explicit ReadOnlySpan(const std::vector<T>& v)
-            : ptr_(v.data()), length_(static_cast<intcs>(v.size())) {}
+            : ptr_(v.data()), length_(System::detail::checkedSpanLength(v.size(), "v")) {}
 
         /**
          * @brief Constructs a ReadOnlySpan from a mutable Span.

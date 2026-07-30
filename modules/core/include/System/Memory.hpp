@@ -10,6 +10,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/detail/SpanLength.hpp"
 #include "System/Span.hpp"
 #include "System/ArraySegment.hpp"
 #include "System/ReadOnlyMemory.hpp"
@@ -53,10 +54,11 @@ namespace System {
          *
          * C++ counterpart of .NET Memory&lt;T&gt;(T[]).
          * @param array The underlying vector.
+         * @throws System::ArgumentOutOfRangeException if @p array holds more than INT32_MAX elements.
          */
         explicit Memory(std::vector<T>& array)
             : data_(&array), offset_(0),
-              length_(static_cast<intcs>(array.size())) {}
+              length_(System::detail::checkedSpanLength(array.size(), "array")) {}
 
         /**
          * @brief Initializes a Memory&lt;T&gt; from an ArraySegment&lt;T&gt;.

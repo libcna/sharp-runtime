@@ -2,9 +2,11 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <cstdint>
 #include <string>
 #include "System/HashCode.hpp"
 #include "System/Span.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 using System::HashCode;
@@ -63,6 +65,18 @@ TEST(HashCodeTests, AddBytes_Span_MatchesVectorOverload) {
     hc1.AddBytes(data);
     hc2.AddBytes(span);
     EXPECT_EQ(hc1.ToHashCode(), hc2.ToHashCode());
+}
+
+// SR-AUD-043a (#1852): HashCode::AddBytes casts the span's signed length straight
+// to size_t, so a negative-length ReadOnlySpan<uint8_t> would drive an unbounded
+// raw read. That path is closed at the source: once ReadOnlySpan's constructor
+// rejects a negative length, such a span can never be built to hand to AddBytes.
+// (AddBytes itself stays noexcept; making it reject a negative length is the
+// approval-gated #1854 / SR-AUD-043b, still open.)
+TEST(HashCodeTests, AddBytes_NegativeLengthSpan_CannotBeConstructed) {
+    std::uint8_t one = 0x42;
+    EXPECT_THROW(System::ReadOnlySpan<std::uint8_t>(&one, -1),
+                 System::ArgumentOutOfRangeException);
 }
 
 TEST(HashCodeTests, Seed_DiffersAcrossProcessesButConsistentWithinOne) {

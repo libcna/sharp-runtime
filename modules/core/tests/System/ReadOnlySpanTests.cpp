@@ -2,9 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <cstddef>
 #include <stdexcept>
 #include <vector>
 #include "System/ReadOnlySpan.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/detail/SpanLength.hpp"
 
 using System::ReadOnlySpan;
 using System::Span;
@@ -237,4 +240,86 @@ TEST(ReadOnlySpanTests, Empty_IsEmpty) {
     auto e = ReadOnlySpan<int>::Empty();
     EXPECT_TRUE(e.getIsEmptyProperty());
     EXPECT_EQ(e.getLengthProperty(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-043a (#1852): the pointer/length constructors reject a negative length
+// before it can become a huge size_t and drive an unbounded raw read. .NET keeps
+// _length a signed int and validates at construction; the port does the same and
+// keeps intcs length_ (no layout change). A zero length stays valid.
+// ---------------------------------------------------------------------------
+
+TEST(ReadOnlySpanTests, PtrLengthCtor_NegativeLength_ThrowsAOORE) {
+    int arr[] = {1, 2, 3};
+    EXPECT_THROW(ReadOnlySpan<int>(arr, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(SpanTests, PtrLengthCtor_NegativeLength_ThrowsAOORE) {
+    int arr[] = {1, 2, 3};
+    EXPECT_THROW(Span<int>(arr, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ReadOnlySpanTests, PtrLengthCtor_IntMinLength_ThrowsAOORE) {
+    int arr[] = {1};
+    EXPECT_THROW(ReadOnlySpan<int>(arr, SharpRuntime::INTCS_MIN), System::ArgumentOutOfRangeException);
+}
+
+TEST(ReadOnlySpanTests, PtrLengthCtor_ZeroLength_Constructs) {
+    int arr[] = {1};
+    ReadOnlySpan<int> s(arr, 0);
+    EXPECT_EQ(s.getLengthProperty(), 0);
+    EXPECT_TRUE(s.getIsEmptyProperty());
+}
+
+TEST(SpanTests, PtrLengthCtor_ZeroLength_Constructs) {
+    int arr[] = {1};
+    Span<int> s(arr, 0);
+    EXPECT_EQ(s.getLengthProperty(), 0);
+}
+
+// The reachable exploit: a ReadOnlySpan<uint8_t> with a negative length used to be
+// constructible and could reach HashCode::AddBytes as an unbounded raw read. It can
+// no longer be constructed, so that path is closed at the source.
+TEST(ReadOnlySpanTests, NegativeLengthByteSpan_CannotBeConstructed) {
+    std::uint8_t one = 0x42;
+    EXPECT_THROW(ReadOnlySpan<std::uint8_t>(&one, -1), System::ArgumentOutOfRangeException);
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-043a (#1852): the vector constructors narrow size() to a signed intcs.
+// checkedSpanLength is the shared guard that rejects a size() > INT32_MAX instead
+// of silently producing a negative length. Tested directly with a synthetic size
+// so the guard is exercised without allocating a 2.1-billion-element container.
+// ---------------------------------------------------------------------------
+
+TEST(SpanLengthTests, CheckedSpanLength_WithinRange_ReturnsNarrowed) {
+    EXPECT_EQ(System::detail::checkedSpanLength(0, "v"), 0);
+    EXPECT_EQ(System::detail::checkedSpanLength(123, "v"), 123);
+    EXPECT_EQ(System::detail::checkedSpanLength(
+                  static_cast<std::size_t>(SharpRuntime::INTCS_MAX), "v"),
+              SharpRuntime::INTCS_MAX);
+}
+
+TEST(SpanLengthTests, CheckedSpanLength_OverInt32Max_ThrowsAOORE) {
+    const std::size_t oversized = static_cast<std::size_t>(SharpRuntime::INTCS_MAX) + 1;
+    EXPECT_THROW(System::detail::checkedSpanLength(oversized, "v"),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(SpanLengthTests, CheckedSpanLength_MaxSizeT_ThrowsAOORE) {
+    EXPECT_THROW(System::detail::checkedSpanLength(static_cast<std::size_t>(-1), "v"),
+                 System::ArgumentOutOfRangeException);
+}
+
+// The empty-vector constructors still work (size 0 narrows cleanly).
+TEST(SpanTests, VectorCtor_Empty_Constructs) {
+    std::vector<int> v;
+    Span<int> s(v);
+    EXPECT_EQ(s.getLengthProperty(), 0);
+}
+
+TEST(ReadOnlySpanTests, VectorCtor_Empty_Constructs) {
+    std::vector<int> v;
+    ReadOnlySpan<int> s(v);
+    EXPECT_EQ(s.getLengthProperty(), 0);
 }

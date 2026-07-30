@@ -1778,7 +1778,17 @@ metadata/attribute source inventory.
 - **SR-AUD-043 (high):** `HashCode::AddBytes(ReadOnlySpan<byte>)` casts a
   negative public span length to an unsigned size and reads past its buffer;
   ASan confirms the overflow.  Span/ReadOnlySpan construction is the confirmed
-  upstream cause.
+  upstream cause. **043a partially remediated — ticket #1852 (2026-07-30):**
+  the `Span`/`ReadOnlySpan` pointer ctors now reject a negative length and the
+  `Span`/`ReadOnlySpan`/`Memory`/`ArraySegment` vector ctors reject a
+  `size()>INT32_MAX` source (shared `System::detail::checkedSpanLength`), keeping
+  the signed `intcs` field (no layout change). ASan reproduced the pre-fix
+  `heap-buffer-overflow READ` at `HashCode.hpp:76` and confirmed a clean
+  construction-time throw post-fix, closing the reachable exploit. **043b stays
+  open (ticket #1854, `needs_user`):** the `ReadOnlyMemory` `noexcept`/`constexpr`
+  ctors and `HashCode::AddBytes noexcept` need an exception-spec change to throw,
+  which requires user approval; they are defense-in-depth now that 043a closes
+  the reachable path. Finding stays **confirmed** until 043b lands.
 - **SR-AUD-044 (high):** Span and ReadOnlySpan CopyTo/TryCopyTo use forward
   `std::copy`, corrupting overlapping nontrivial source ranges instead of
   preserving .NET's overlap-safe copy semantics.

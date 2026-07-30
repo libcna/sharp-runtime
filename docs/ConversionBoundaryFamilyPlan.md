@@ -432,3 +432,41 @@ index, an index == size, an insufficient-width case, and an exact-fit index-0
 round-trip, plus the `ToBoolean` width-1 quirk. Not `noexcept`; no
 signature/layout change. `SR-AUD-041 → remediated`. Remaining CCF-005
 memory-safety queue: #1852 (043a), #1853 (026/027), #1854 (043b, `needs_user`).
+
+### 19.3 CCF5-C / #1852 — SR-AUD-043a — Span/view ctor length validation — **DONE (2026-07-30)**
+
+`Span(T*, intcs)` and `ReadOnlySpan(const T*, intcs)` now throw
+`ArgumentOutOfRangeException("length")` when `length < 0` (the ticket's chosen
+paramName; .NET uses a parameterless throw but documents the `length`
+parameter). The four vector ctors — `Span(vector&)`, `ReadOnlySpan(vector&)`,
+`Memory(vector&)`, `ArraySegment(vector&)` — route `size()` through a new shared
+`System::detail::checkedSpanLength(n, paramName)`
+(`System/detail/SpanLength.hpp`), which throws `ArgumentOutOfRangeException` on a
+`size()>INT32_MAX` source rather than silently narrowing to a negative length.
+Per plan §4#4 the `length_`/`count_` fields stay signed `intcs` and every
+signature/layout is unchanged (no ABI change); .NET agrees (`_length` is signed
+`int`, validated at construction).
+
+This **closes the reachable SR-AUD-043 exploit**: a negative-length
+`ReadOnlySpan<uint8_t>` can no longer be constructed, so it can never reach
+`HashCode::AddBytes` (§4#5, §11's 043a→043b ordering). ASan reproduced the
+pre-fix `heap-buffer-overflow READ of size 1` at `HashCode.hpp:76 in AddBytes`
+(negative-length span, `build-probe/1852_span_hashcode_prefix.log`) and confirmed
+a clean construction-time throw post-fix
+(`build-probe/1852_span_hashcode_postfix.log`). +12 tests
+(`SharpRuntimeTests_Core_Base` 5136 → 5148): negative-length ptr ctors throw
+(`Span`/`ReadOnlySpan`, incl. `INTCS_MIN`), zero-length still constructs, the
+`checkedSpanLength` guard tested directly at `INT32_MAX`, `INT32_MAX+1` and
+`SIZE_MAX` (no huge allocation), the byte-span exploit-closure asserted in both
+`ReadOnlySpanTests` and `HashCodeTests`, and empty-vector ctors still work. Not
+`noexcept`; no signature/layout change. `SR-AUD-043a → remediated`; SR-AUD-043
+stays **confirmed** overall until 043b lands.
+
+**043b (#1854) stays blocked on approval.** The `ReadOnlyMemory`
+`noexcept`/`constexpr` ctors (ReadOnlyMemory.hpp:49/58/67) and
+`HashCode::AddBytes(const ReadOnlySpan<uint8_t>&) noexcept` (HashCode.hpp:92)
+cannot throw on a bad length without dropping `noexcept`/`constexpr` — an
+exception-spec change (§13). Now that 043a closes the reachable path, 043b is
+pure defense-in-depth; it remains `needs_user` pending the drop-`noexcept`
+(option a) vs clamp-to-empty (option b) decision. Remaining CCF-005 memory-safety
+queue: #1853 (026/027), #1854 (043b, `needs_user`).

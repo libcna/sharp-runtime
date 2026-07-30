@@ -8,6 +8,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/detail/SpanLength.hpp"
 
 namespace System {
 
@@ -47,9 +48,10 @@ namespace System {
          *
          * C++ counterpart of .NET ArraySegment<T>(T[]).
          * @param array The underlying vector to wrap.
+         * @throws System::ArgumentOutOfRangeException if @p array holds more than INT32_MAX elements.
          */
         explicit ArraySegment(std::vector<T>& array)
-            : array_(&array), offset_(0), count_(static_cast<intcs>(array.size())) {}
+            : array_(&array), offset_(0), count_(System::detail::checkedSpanLength(array.size(), "array")) {}
 
         /**
          * @brief Initializes a new ArraySegment that delimits the specified sub-range.
