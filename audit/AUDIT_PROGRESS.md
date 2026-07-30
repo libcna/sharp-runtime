@@ -5581,3 +5581,38 @@ executables** (was 14,139). Module graph **41 / 91**.
 **Source and ABI consequences: none.** No signature, virtual, vtable, object layout or mangled
 symbol changed. The observable change is confined to what a **closed** wrapper reports, which
 is the wrong answer being corrected.
+
+---
+
+Ticket **#1840** (`DOC-IO-STREAM-CAPABILITY-DEFAULTS`, P3, size XS, category `remediation`,
+area *IO*) is **done**. **Documentation only** — no behaviour, signature or default changed.
+It carries **no `SR-AUD-*` identifier** and changes no finding's status; audit numbering stays
+frozen at **364** and the index still reads **27 remediated / 337 confirmed**. Layer 1(a) of
+`docs/StreamCapabilityContractDesign.md`.
+
+`System::IO::Stream`'s class doc-comment listed which members a subclass must implement and
+said **nothing** about the three capability properties, whose defaults are
+`getCanWriteProperty() == false`, `getCanReadProperty() == true` and
+`getCanSeekProperty() == false` — all three **abstract** in .NET (`Stream.cs:29-31`). A stream
+author therefore had no way to learn that **omitting an override is itself a declaration**, and
+that the declaration made by silence differs per property.
+
+That gap is the root of the whole #1824/#1827/#1828 family, and it is not hypothetical:
+`tests/integration/…/CompressionTests.cpp`'s `ThrowingWriteStream` overrides `Write()` and not
+the property, which is why it is the only thing in the repository that #1839's measured
+experiment broke.
+
+The class doc-comment now carries the three-row table, states that the two mistakes the defaults
+invite point in **opposite** directions (an unwritten `CanWrite` makes a guard **over**-reject a
+working stream; an unwritten `CanRead` makes a guard **under**-reject an unreadable one), notes
+that `getCanSeekProperty()` does **not** gate `Seek()`/`Position` — so leaving it out does not
+stop seeking, it only makes capability-checking callers refuse — and states that a stream whose
+capability depends on its lifetime must fold that in, citing `MemoryStream` (#1826) and the zlib
+wrappers (#1841). Each of the three properties also gained its own doc-comment saying what its
+default is, that it is a deviation, and what omitting it declares.
+
+**No test-count change** — a doc-only ticket adds no regressions and the repository gate holds at
+**14,145 tests across 37 executables**, 0 warnings, 0 errors. Canonical Doxygen: **1,941**
+warnings against the 1,942 ceiling, unchanged. Module graph **41 / 91**.
+
+**Source and ABI consequences: none whatsoever.**

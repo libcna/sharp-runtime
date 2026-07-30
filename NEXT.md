@@ -7716,3 +7716,27 @@ a wrapper over a closed inner stream, with a message telling a future reader to 
 ASan + UBSan + LSan, 0 reports. Repository gate **14,145 tests across 37 executables**, 0
 warnings, 0 errors. No public signature, virtual, vtable, object layout or mangled symbol
 changed.
+
+## Completed Stream capability documentation: ticket #1840 (2026-07-30)
+
+`DOC-IO-STREAM-CAPABILITY-DEFAULTS`, P3, size XS. **Documentation only** — no behaviour,
+signature or default changed. **Layer 1(a)** of
+[`docs/StreamCapabilityContractDesign.md`](docs/StreamCapabilityContractDesign.md). No
+`SR-AUD-*` identifier and no finding status change.
+
+`Stream`'s class doc-comment listed the members a subclass must implement and said **nothing**
+about the three capability properties, whose defaults are write `false`, read `true`, seek
+`false` — all three **abstract** in .NET. A stream author had no way to learn that **omitting an
+override is itself a declaration**, and that the declaration differs per property. That gap is
+the root of the #1824/#1827/#1828 family, and it is not hypothetical: `ThrowingWriteStream` in
+the integration tests overrides `Write()` and not the property, which is why it was the only
+thing #1839's measured experiment broke.
+
+The class comment now carries the three-row table, states that the two mistakes point in
+**opposite** directions, notes that `getCanSeekProperty()` does **not** gate `Seek()`/`Position`
+(so omitting it does not stop seeking — it only makes capability-checking callers refuse), and
+requires a stream whose capability depends on its lifetime to fold that in, citing `MemoryStream`
+(#1826) and the zlib wrappers (#1841). Each property also gained its own doc-comment.
+
+No test-count change. Repository gate **14,145 tests across 37 executables**, 0 warnings, 0
+errors. Doxygen **1,941** against the 1,942 ceiling, unchanged. No source or ABI consequence.
