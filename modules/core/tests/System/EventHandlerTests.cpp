@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <functional>
 #include <string>
 #include <vector>
 #include "System/EventHandler.hpp"
@@ -200,4 +201,98 @@ TEST(EventHandlerTests, ReplayHook_ClearedBySettingEmptyFunction) {
 
     h += [](System::Object*, const EventArgs&) {};
     EXPECT_EQ(replayCount, 0);
+}
+
+// --- Empty subscription is a no-op (#1868 / SR-AUD-121 / CCF-011) ---
+//
+// Add() used to store every handler, including an empty std::function, so Size() counted a
+// subscriber that could never run and Raise() reached the native std::bad_function_call.
+// With a replay hook set the failure happened inside Add() itself, because the hook calls
+// the handler directly. C# `SomethingHappened += null` is Delegate.Combine(d, null) == d.
+// See docs/EmptyCallableBoundaryPlan.md.
+
+TEST(EventHandlerTests, EmptyHandler_AddDoesNotThrowAndStoresNothing) {
+    EventHandler<EventArgs> h;
+    EXPECT_NO_THROW((void)h.Add(EventHandler<EventArgs>::HandlerType{}));
+    EXPECT_TRUE(h.Empty());
+    EXPECT_EQ(h.Size(), 0u);
+}
+
+TEST(EventHandlerTests, EmptyHandler_PlusEqualsDoesNotThrowAndStoresNothing) {
+    EventHandler<EventArgs> h;
+    EXPECT_NO_THROW(h += EventHandler<EventArgs>::HandlerType{});
+    EXPECT_TRUE(h.Empty());
+    EXPECT_EQ(h.Size(), 0u);
+}
+
+TEST(EventHandlerTests, EmptyHandler_RaiseDoesNotThrow) {
+    EventHandler<EventArgs> h;
+    h += EventHandler<EventArgs>::HandlerType{};
+    EXPECT_NO_THROW(h.Raise(nullptr, EventArgs::Empty));
+    EXPECT_NO_THROW(h.Invoke(nullptr, EventArgs::Empty));
+}
+
+TEST(EventHandlerTests, EmptyHandler_ReplayHookIsNotInvoked) {
+    EventHandler<EventArgs> h;
+    int replayCount = 0;
+    h.SetReplayHook([&](const EventHandler<EventArgs>::HandlerType& handler) {
+        ++replayCount;
+        handler(nullptr, EventArgs::Empty);   // would be std::bad_function_call if reached
+    });
+    EXPECT_NO_THROW((void)h.Add(EventHandler<EventArgs>::HandlerType{}));
+    EXPECT_EQ(replayCount, 0);
+    EXPECT_EQ(h.Size(), 0u);
+}
+
+TEST(EventHandlerTests, EmptyHandler_DoesNotDisturbRealSubscribers) {
+    EventHandler<EventArgs> h;
+    std::vector<int> order;
+    h += [&](System::Object*, const EventArgs&) { order.push_back(1); };
+    h += EventHandler<EventArgs>::HandlerType{};
+    h += [&](System::Object*, const EventArgs&) { order.push_back(2); };
+    EXPECT_EQ(h.Size(), 2u);
+    h.Raise(nullptr, EventArgs::Empty);
+    ASSERT_EQ(order.size(), 2u);
+    EXPECT_EQ(order[0], 1);
+    EXPECT_EQ(order[1], 2);
+}
+
+TEST(EventHandlerTests, EmptyHandler_TokenIsUniqueAndSafeToRemove) {
+    EventHandler<EventArgs> h;
+    const auto ignored = h.Add(EventHandler<EventArgs>::HandlerType{});
+    int called = 0;
+    const auto real = h.Add([&](System::Object*, const EventArgs&) { ++called; });
+    EXPECT_NE(ignored, real);          // reusing the token would unsubscribe the real one
+    EXPECT_NO_THROW(h.Remove(ignored));
+    EXPECT_EQ(h.Size(), 1u);
+    h.Raise(nullptr, EventArgs::Empty);
+    EXPECT_EQ(called, 1);
+    h.Remove(real);
+    EXPECT_EQ(h.Size(), 0u);
+}
+
+TEST(EventHandlerTests, EmptyHandler_ManyTimes_StillSilent) {
+    EventHandler<EventArgs> h;
+    for (int i = 0; i < 100; ++i) h += EventHandler<EventArgs>::HandlerType{};
+    EXPECT_EQ(h.Size(), 0u);
+    int called = 0;
+    h += [&](System::Object*, const EventArgs&) { ++called; };
+    EXPECT_NO_THROW(h.Raise(nullptr, EventArgs::Empty));
+    EXPECT_EQ(called, 1);
+}
+
+TEST(EventHandlerTests, EmptyHandler_AddedDuringRaise_IsStillANoOp) {
+    // Raise() iterates a snapshot; a handler that subscribes an empty handler mid-raise
+    // must neither be invoked in this raise nor break the next one.
+    EventHandler<EventArgs> h;
+    int called = 0;
+    h += [&](System::Object*, const EventArgs&) {
+        ++called;
+        h += EventHandler<EventArgs>::HandlerType{};
+    };
+    EXPECT_NO_THROW(h.Raise(nullptr, EventArgs::Empty));
+    EXPECT_EQ(called, 1);
+    EXPECT_EQ(h.Size(), 1u);
+    EXPECT_NO_THROW(h.Raise(nullptr, EventArgs::Empty));
+    EXPECT_EQ(called, 2);
 }

@@ -121,7 +121,10 @@ namespace System
          * as closely as possible. The token is discarded; use Add() when you need
          * to remove the handler later.
          *
-         * @param handler Handler to add.
+         * Delegates to Add(), so an empty handler is a no-op here too, matching C#'s
+         * `SomethingHappened += null`.
+         *
+         * @param handler Handler to add; ignored if empty.
          * @return Reference to this instance.
          */
         EventHandler& operator+=(HandlerType handler)
@@ -165,16 +168,36 @@ namespace System
          * If a replay hook is set (see SetReplayHook()), it is invoked with handler before
          * handler is stored, replaying whatever backlog the owner wants a new subscriber to see.
          *
-         * @param handler Handler to add.
+         * An **empty** handler is a no-op: nothing is stored, the replay hook is not
+         * invoked, and Size()/Empty() are unchanged. That is the C# event contract this
+         * class models -- `SomethingHappened += null` is `Delegate.Combine(d, null) == d`,
+         * so subscribing a null delegate cannot create a later invocation failure. This
+         * method used to store every handler, so an empty one made Raise() throw the
+         * native `std::bad_function_call`, and -- because the replay hook ran first and
+         * calls the handler directly -- made the failure happen inside Add() itself
+         * whenever a hook was set. Ticket #1868 / SR-AUD-121 / CCF-011; see
+         * docs/EmptyCallableBoundaryPlan.md.
+         *
+         * A token is still consumed and returned for an empty handler, so tokens stay
+         * unique: reusing the value would make a later Remove() of the ignored
+         * subscription unsubscribe the *next* real handler instead. Passing the returned
+         * token to Remove() is safe and has no effect, exactly like removing an
+         * already-removed subscription.
+         *
+         * @param handler Handler to add; ignored if empty.
          * @return Token that identifies this subscription.
          */
         Token Add(HandlerType handler)
         {
+            const Token token = nextToken_++;
+            if (!handler)
+            {
+                return token;
+            }
             if (replayHook_)
             {
                 replayHook_(handler);
             }
-            const Token token = nextToken_++;
             handlers_.emplace_back(token, std::move(handler));
             return token;
         }
@@ -246,7 +269,13 @@ namespace System
             auto snapshot = handlers_;
             for (auto& entry : snapshot)
             {
-                entry.second(sender, e);
+                // The truthiness test mirrors C#'s `SomethingHappened?.Invoke(...)` and is
+                // defence in depth: Add() refuses to store an empty handler, so this loop
+                // cannot see one through the public API.
+                if (entry.second)
+                {
+                    entry.second(sender, e);
+                }
             }
         }
 

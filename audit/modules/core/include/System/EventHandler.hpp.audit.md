@@ -53,3 +53,61 @@ subscriber can implement a stateful acknowledgement/cancellation-style event.
 The normal tokenized event collection works, but empty callbacks and mutable
 event-data handlers have incompatible public behavior.  No source or test was
 modified during this audit.
+
+---
+
+## SR-AUD-121 — REMEDIATED (ticket #1868, 2026-07-30, CCF-011)
+
+The original evidence above is retained unchanged.
+
+`Add` now consumes and returns a token but stores nothing when the supplied
+`HandlerType` is empty, and it returns **before** the replay hook rather than
+after it. `operator+=` delegates to `Add` and inherits the rule. `Raise` invokes
+only truthy handlers. Adding a null delegate to a .NET event is
+`Delegate.Combine(d, null) == d` — a no-op that cannot create a later invocation
+failure — so this surface does not throw.
+
+**Correction to the finding's premise (measured 2026-07-30).** The finding's
+title says the failure is deferred "during Raise"; its body already notes that a
+replay hook makes it happen earlier. Measured, that second path is the binding
+one for the repair: with a hook set, `eventhandler.add.replayhook` reported
+`bad_function_call` raised **inside `Add` itself**, before any storage happened
+(`build-probe/1866_prefix.log`). The empty check therefore has to precede the
+hook, not merely precede the `emplace_back`. Both now report `no-throw`
+(`build-probe/1868_postfix_asan.log`). The historical text above is left as
+written, per this repository's practice.
+
+**One observable behaviour change, deliberate.** `Size()` no longer counts an
+empty subscription: `eventhandler.size` went from `1` to `0` and `Empty()` from
+`false` to `true` for a lone empty `Add`. A consumer counting *subscriptions*
+rather than *subscribers* would see a different number — but only for a
+subscriber that could never have been invoked. This is recorded as B2 in
+`docs/EmptyCallableBoundaryPlan.md` §9 and is not an approval-gated change: no
+signature, `noexcept`, vtable or layout is affected.
+
+The token is still consumed for an ignored handler. Returning the *unchanged*
+`nextToken_` would have made a later `Remove()` of the ignored subscription
+unsubscribe the next real handler instead; a permanent test pins that the two
+tokens differ and that removing the ignored one leaves the real subscriber
+attached.
+
+Closure evidence: 8 new permanent regressions in `EventHandlerTests.cpp` (empty
+`Add` and empty `operator+=` each storing nothing and leaving `Size()`/`Empty()`
+alone; `Raise`/`Invoke` silent afterwards; the replay hook not invoked; ordering
+preserved across an ignored empty subscription between two real ones; token
+uniqueness and safe `Remove`; 100 ignored subscriptions followed by a real one;
+and an empty subscription made from *inside* `Raise`, which must not disturb the
+snapshot iteration). `ProgressTest` + `EventHandlerTests` 46/46,
+`SharpRuntimeTests_Core_Base` 5,280/5,280. The direct probe compiled **with**
+`-fsanitize=address,undefined` exits 0 with zero AddressSanitizer,
+UndefinedBehaviorSanitizer and LeakSanitizer reports, including a handler that
+adds, removes and `Clear()`s the list from inside `Raise` — the case where
+iterating the live list rather than the snapshot would be a use-after-free.
+
+Source, ABI and layout consequences: none. `Add`, `operator+=`, `Raise` and
+`Invoke` keep their signatures and their (absent) `noexcept` specifications; no
+data member was added, removed, reordered or retyped. `SetReplayHook`'s empty
+value remains the documented "clear the hook" spelling and is explicitly out of
+this family's scope.
+
+The plan for this family is `docs/EmptyCallableBoundaryPlan.md` (ticket #1866).

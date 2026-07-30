@@ -38,7 +38,10 @@ namespace System {
          */
         virtual void OnReport(const T& value) {
             if (handler_) handler_(value);
-            for (auto& h : progressChanged_) h(value);
+            // The truthiness test mirrors .NET's `ProgressChanged?.Invoke(...)` and is
+            // defence in depth: addProgressChangedHandler() refuses to store an empty
+            // handler, so this loop cannot see one through the public API.
+            for (auto& h : progressChanged_) if (h) h(value);
         }
 
     public:
@@ -75,9 +78,25 @@ namespace System {
          *
          * C++ equivalent of subscribing to the .NET Progress<T>.ProgressChanged event.
          * Multiple handlers are called in the order they were registered.
-         * @param handler Callback to append to the handler list.
+         *
+         * An **empty** @p handler is a no-op: nothing is stored and the handler list is
+         * left unchanged. That is the C# event contract this method models --
+         * `ProgressChanged += null` is `Delegate.Combine(d, null) == d`, so subscribing a
+         * null delegate cannot create a later invocation failure. This method used to
+         * append the empty handler unconditionally, so a subsequent, entirely unrelated
+         * Report() raised `std::bad_function_call` from OnReport() -- a native exception
+         * outside the System::Exception hierarchy, reported by a different public API than
+         * the one at fault. Ticket #1868 / SR-AUD-058 / CCF-011; see
+         * docs/EmptyCallableBoundaryPlan.md.
+         *
+         * Unlike the constructor, which mirrors .NET's `Progress(Action<T> handler)` and
+         * therefore throws ArgumentNullException, this is an event-subscription surface
+         * and must not throw.
+         *
+         * @param handler Callback to append to the handler list; ignored if empty.
          */
         void addProgressChangedHandler(std::function<void(T)> handler) {
+            if (!handler) return;
             progressChanged_.push_back(std::move(handler));
         }
     };
