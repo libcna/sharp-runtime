@@ -827,10 +827,54 @@ later.
 
 | # | Kind | Scope | Status |
 |---|---|---|---|
-| **#1881** | design | this document, including the CCF-012 vs CCF-017 comparison | this ticket |
-| **#1882** | implementation, compatible | `String::Format`: single-pass parse; bounded specifier parsing; termination; UB removal; `std::` exception containment | planned |
-| **#1883** | implementation, compatible | `FormattableString::ToString`: single-pass substitution; argument isolation | planned |
-| **#1884** | **`needs_user`** | adopt .NET's composite-format grammar in both engines: `{{`/`}}` escaping, stray-`}` rejection, missing-index rejection, alignment, and `{N:spec}` in `FormattableString` | to be created by #1881 |
+| **#1881** | design | this document, including the CCF-012 vs CCF-017 comparison | **done** (2026-07-30) |
+| **#1882** | implementation, compatible | `String::Format`: single-pass parse; bounded specifier parsing; termination; UB removal; `std::` exception containment | **done** (2026-07-30, +34 tests) |
+| **#1883** | implementation, compatible | `FormattableString::ToString`: single-pass substitution; argument isolation | **done** (2026-07-30, +20 tests) |
+| **#1884** | **`needs_user`** | adopt .NET's composite-format grammar in both engines: `{{`/`}}` escaping, stray-`}` rejection, missing-index rejection, alignment, and `{N:spec}` in `FormattableString` | **created, NOT implemented** — approval wording in §20.7 |
+
+### 19.1 Implementation outcome (2026-07-30)
+
+Both compatible tickets landed. Measured against the section 5 matrices, with
+`build-probe/1881_prefix.log` as the before and `build-probe/1882_postfix.log` /
+`build-probe/1883_postfix.log` as the after:
+
+| Row | Before | After | Status |
+|---|---|---|---|
+| D1, D2 | did not terminate | `"{0}"`, `"[x{0}y]"` | fixed |
+| K3 | did not terminate | `FormatException` at the reference bound | fixed |
+| C1, C2 | `"XX"`, `"Y\|Y"` | `"{1}X"`, `"{1}\|Y"` | fixed |
+| K1, K2 | `"FF/FF"`, `"255/255"` | `"FF/255"`, `"255/FF"` | fixed |
+| K4 | spurious `FormatException` | `"{1}{0}"` | fixed |
+| E1, E4 | `std::out_of_range` escaped | `FormatException("Format specifier was invalid.")` | fixed |
+| E2 | `std::invalid_argument` escaped | `"42"` | fixed |
+| E3, E5 | UBSan-confirmed UB | `FormatException` | fixed |
+| J1 | `"second"` | `"{1}"` | fixed |
+| G2 | index message | `"Input string was not in a correct format."` | fixed |
+| A1–A3, B1, B2, F1, J2–J4, J6, J7 | — | **unchanged, pinned by test** | **#1884** |
+
+The section 9.3 invariant holds: of the 28 measured rows across both engines,
+the only ones whose result changed are the twelve above, every one of which was
+undefined, non-terminating, a leaked `std::` exception, a silently wrong value,
+or a spurious failure. Seven of `FormattableString`'s eight rows and thirteen of
+`String::Format`'s twenty are byte-identical before and after.
+
+Two implementation decisions departed from the letter of this plan and are
+recorded rather than silently absorbed:
+
+1. **Section 11's "a tail containing any non-digit (including `-`) means the
+   specifier is not a standard one" was too coarse.** It would have changed
+   `"{0:D-3}"` from `"007"` to `"7"` — a currently-succeeding call. The
+   implementation instead reproduces `std::stoi`'s **prefix** semantics (optional
+   sign, digits, trailing junk ignored) so every successful specifier keeps its
+   exact text, and applies the reference's digit bound to the magnitude. A sign
+   whose magnitude exceeds the bound, such as `"{0:D-2147483648}"`, is therefore
+   rejected with `FormatException` rather than emitted plainly — an outcome that
+   replaces undefined behaviour, so it is compatible either way.
+2. **`std::bad_alloc` needed containing too.** A width the reference *accepts*
+   can still fail to allocate. Letting `std::bad_alloc` escape would reintroduce
+   exactly the defect class E1/E2/E4 represent, so an allocation failure inside a
+   specifier now raises `System::OutOfMemoryException` — .NET's own outcome. This
+   was not in the plan as written.
 
 **#1884 is not implemented by this batch under any circumstance.** Section 20
 holds its exact approval wording.

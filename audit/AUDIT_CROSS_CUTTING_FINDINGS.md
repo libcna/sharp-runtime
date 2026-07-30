@@ -580,6 +580,106 @@ See SR-AUD-015 and:
 - `modules/core/include/System/FormattableString.hpp.audit.md`;
 - `modules/core/tests/System/FormattableStringTests.cpp.audit.md`.
 
+**PARTIALLY REMEDIATED — tickets #1881/#1882/#1883 (2026-07-30). CCF-012 is NOT
+closed.** Its single member, SR-AUD-015, stays `confirmed`. The original
+evidence above and in the per-file reports is retained unchanged.
+
+This cause named the right repair — "a shared parsed-token model" — and warned
+that "altering just one API preserves divergent brace rules". Both halves were
+therefore done in one batch, to one grammar. Design-only ticket #1881 recorded
+`docs/CompositeFormatBoundaryPlan.md` (20 sections) and, in its section 0, the
+measured comparison against CCF-017 that selected this family.
+
+**The cause was understated, not overstated.** Reproduced against the shipped
+library before anything was changed
+(`build-probe/1881_family_compare_probe.cpp`, `1881_extra_probe.cpp`; logs
+`1881_prefix.log`, `1881_ubsan_prefix.log`, `1881_extra_prefix.log`), the same
+root cause — producing output by repeatedly mutating a buffer that already held
+substituted argument text — also produced four classes the record does not
+mention, every one reachable from an ordinary public call:
+
+- **`String::Format` did not terminate.** `replaceArg` reset its scan cursor to
+  0 after every substitution, so it re-read the text it had just inserted.
+  `Format("{0}", "{0}")` and `Format("[{0}]", "x{0}y")` never returned. This
+  required no malformed format string and no attacker-supplied format:
+  `Format("{0}", userText)` hung whenever `userText` contained `{0}` — a
+  public-input denial of service in the library's most-called formatting entry.
+- **A second, independent non-termination.** `fmtInt`'s padding loop prepended
+  one character at a time, copying the whole string each iteration, so
+  `Format("{0:D999999999}", 7)` was ~10^18 byte copies. Neither the parse model
+  nor `std::stoi` — a third root cause in the same call chain.
+- **UBSan-confirmed undefined behaviour**: `String.cpp:149:41: runtime error:
+  negation of -2147483648 cannot be represented in type 'int'`, from
+  `Format("{0:D-2147483648}", 42)`.
+- **Two `std::` exception types escaping a `System`-shaped public API**
+  (`std::out_of_range`, `std::invalid_argument`), where the reference raises
+  `FormatException`; plus a second silent-corruption shape the audit never
+  named, `extractSpec` giving every occurrence of an index the *first*
+  occurrence's specifier, so `Format("{0:X}/{0:D3}", 255)` returned `"FF/FF"`.
+
+The severity as filed (`medium`) understates a reachable hang. **No new
+`SR-AUD-*` identifier was issued** — all four were found during remediation of
+an existing finding, in the files that finding owns — and numbering stays frozen
+at 364.
+
+**What #1882 and #1883 shipped.** `String::Format`'s `extractSpec`/`replaceArg`/
+`FinalizeFormat` are replaced by one `formatCore` that walks the format string
+once and appends to a separate output; all 22 overloads route through it, and so
+do the 11 `StringBuilder::AppendFormat` and 11 `Console::Write`/`WriteLine`
+wrappers the audit never mentioned. `FormattableString::ToString`'s per-index
+find/replace sweep is replaced by the same single pass. `fmtInt`/`fmtDouble`
+gained a bounded, non-throwing specifier parse that keeps `std::stoi`'s prefix
+semantics — so every specifier that formatted successfully still produces
+identical text — while adopting the reference's own digit bound from
+`Number.Formatting.Common.cs:93-105`, and an allocation failure inside a
+specifier now raises `System::OutOfMemoryException` rather than letting
+`std::bad_alloc` escape.
+
+**Why it is not closed.** This cause's own headline claims are the
+approval-gated remainder. `{{`/`}}` escaping, rejecting a malformed closing
+brace, alignment padding, and `FormattableString`'s missing-index
+`FormatException` all change what **currently-succeeding** calls return or
+whether they throw at all, across 46 public entries. They are one coherent
+decision — adopt .NET's composite-format grammar — split into ticket **#1884**
+(`needs_user`) with fourteen exact before/after rows and the precise approval
+wording in the plan's section 20, following the #1857/#1858, #1864/#1865 and
+#1878/#1879 precedent. Four of the six rows in the plan's engine-divergence
+table (§5.3) are therefore still open, and the plan states in advance
+(§18) that CCF-012 closes only when #1884 lands.
+
+Compatibility of what did land: **none**. No signature, `noexcept`
+specification, virtual function, vtable slot, calling convention, data member or
+layout changed in either file; `String` has no data members and
+`FormattableString` keeps `format_`/`args_` in order. `FormattableString.hpp`'s
+body is inline, so a consumer must recompile — the ordinary consequence of an
+inline change, as with #1867/#1868/#1870.
+
+Evidence: **54 permanent add-only regressions** (30 `StringFormatBoundaryTests`,
+20 `FormattableStringBoundaryTests`, 4 `StringBuilderTests` pinning the wrapper);
+every one of the 38 pre-existing `String::Format` tests, 11
+`FormattableStringTests2` cases and 13 integration cases passes **unmodified**.
+Whole repository **14,568 tests across 37 executables**, from 14,514; build clean
+with zero errors and zero warnings. **Mutation-checked four ways**, each rebuilt
+and re-executed: re-parsing rendered argument text dumps core on the termination
+test; accepting an oversized specifier fails 5 tests; one bounded round of the
+replaced engine's cross-argument reinterpretation fails 5 tests; restoring
+`FormattableString`'s per-index sweep fails 5 tests. UBSan is silent at
+`String.cpp:149` afterwards, with the probe compiled **together with
+`String.cpp`** so the changed code is instrumented directly. ASan + UBSan +
+LeakSanitizer over 3,675 `String::Format` cases and the full `FormattableString`
+matrix — every format string and operand built at **run time** so constant
+folding cannot suppress a diagnostic, including 100 000-character formats with an
+item at the last byte — report zero diagnostics, zero leaks and **0 escaped**
+non-`System` exceptions. TSan recorded **not applicable**: neither engine has
+shared mutable state, an atomic, a lock or a cache.
+
+Deliberately **not** members and not closed by this work: SR-AUD-016
+(`String::LastIndexOf` range spill, same file, unrelated cause); the
+UTF-8/culture classification bullets in both per-file reports, which are
+CCF-015's subject (SR-AUD-048); `Concat`/`Join` size-overflow diagnostics;
+`fmtInt`'s `unsigned int` hex truncation for a 64-bit argument; and
+`System.Text.CompositeFormat`, which is not ported.
+
 ## CCF-013 — sibling Base64 encoders duplicate an unsafe in-place write order
 
 `Base64::EncodeToUtf8InPlace` and `Base64Url::TryEncodeToUtf8InPlace` both
