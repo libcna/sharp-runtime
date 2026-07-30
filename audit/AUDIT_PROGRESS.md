@@ -5861,6 +5861,7 @@ rejections with exact messages; the Read-mode unseekable tolerance proved by a r
 null-before-mode-before-capability order; the fully-capable valid path across all three modes;
 capability-rejection runs no destructor). `SharpRuntimeIntegrationTests` **864/864**, and the
 #1827 subset is clean under **ASan + UBSan + LSan, 0 reports** on the rejection/disposal path.
-Repository gate: **0 warnings, 0 errors, 14,197 tests across 37 executables**. Module graph
-**41 / 91**. **Source and ABI consequences: none** -- one added file-local validator plus one
-call in a `.cpp` body, no signature, member, vtable, layout or symbol change.
+Repository gate: **0 warnings, 0 errors, 14,196 tests across 37 executables** (verified by a full
+`scripts/run_component_tests.sh build` run). Module graph **41 / 91**. **Source and ABI
+consequences: none** -- one added file-local validator plus one call in a `.cpp` body, no
+signature, member, vtable, layout or symbol change.

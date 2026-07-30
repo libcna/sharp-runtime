@@ -3,13 +3,16 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-29. Branch: `feature/remediation-batch-base64-followup`.
+*Last verified: 2026-07-30. Branch: `feature/remediation-batch-ccf004-stream-capabilities`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production
-dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,113 tests across 37 executables (the 13,127 figure this
+dependency edges (90 until ticket #1814 added `Net.Http.Json` -> `Core.Base`), and 14,196 tests across 37 executables (the 13,127 figure this
 line carried until ticket #1796 was a stale relic: each remediation ticket's own
-section below states the count it measured, and the current floor is the 14,113
+section below states the count it measured, and the current floor is the 14,196
+verified by this batch (#1836/#1837/#1842/#1838/#1824/#1828/#1827, which closed CCF-004 and
+the Stream-capability family), raised from the 14,145 verified at the close of the previous
+batch, and before that the 14,113
 verified by #1832, raised from the 14,106
 verified by #1830, raised from the 14,098
 verified by #1826, raised from the 14,091
@@ -8077,5 +8080,104 @@ simulate I/O failure), not to bypass the guard; its two Dispose/Destructor asser
 **+8 regressions** in integration `CompressionTests.cpp` (per-mode rejections + exact messages;
 Read-mode unseekable tolerance via round trip; null→mode→capability order; fully-capable valid
 path; capability-rejection runs no destructor). IntegrationTests **864/864**; #1827 subset clean
-under **ASan+UBSan+LSan, 0 reports**. Gate **14,197 across 37 executables**, clean. **No
-signature/member/vtable/layout/symbol change** — one file-local validator + one call.
+under **ASan+UBSan+LSan, 0 reports**. Gate **14,196 across 37 executables** (full run), clean.
+**No signature/member/vtable/layout/symbol change** — one file-local validator + one call.
+
+## CONTEXT-REFRESH handoff — 2026-07-30, CCF-004 closure + Stream capability family
+
+Branch `feature/remediation-batch-ccf004-stream-capabilities`. **Nothing pushed, merged, rebased
+or tagged.** Seven ticket commits plus this handoff, all local.
+
+### Tickets completed (seven)
+
+| # | Finding / key | Class | What landed |
+|---|---|---|---|
+| #1836 | SR-AUD-008 | CCF-004 A+C | `TimeSpan::Subtract` unsigned wrap; `TryParse`/`Parse` range-check before multiply; **the previous session's uncommitted work, verified and committed** |
+| #1837 | SR-AUD-060 | CCF-004 C | `DateOnly` `FromDayNumber`/`AddDays`/`AddMonths`/`AddYears` defined arithmetic; **closes CCF-004 (8/8)** |
+| #1842 | (no SR-AUD) | — | `FileStream` `CanRead`/`CanWrite` fold in `is_open()`; prerequisite for the wrapper guards |
+| #1838 | (no SR-AUD) | CCF-004-shape A | `SslApplicationProtocol::GetHashCode` unsigned djb2 |
+| #1824 | (no SR-AUD) | Stream 6.2 | `StreamWriter` rejects an unwritable stream |
+| #1828 | (no SR-AUD) | Stream 6.2 | zlib wrappers delegate `CanRead`/`CanWrite` to the inner stream |
+| #1827 | (no SR-AUD) | Stream 6.2 | `ZipArchive` per-mode capability guard; **closes the Stream capability family** |
+
+**Two families closed this batch:** CCF-004 (all eight defined-arithmetic members remediated:
+#1830 #1831 #1832 #1833 #1834 #1835 #1836 #1837), and the Stream-capability family
+(#1840 #1841 #1842 #1824 #1828 #1827), the latter using the single §6.2 approval the previous
+handoff requested.
+
+### Current baselines — all verified this batch, not carried forward
+
+- **Repository gate: 14,196 tests across 37 executables**, 0 warnings, 0 errors (full
+  `scripts/run_component_tests.sh build`, raised from 14,145). +17 #1836, +8 #1837, +5 #1842,
+  +2 #1838, +8 #1824, +3 #1828, +8 #1827.
+- **Audit: 29 remediated / 335 confirmed of 364.** SR-AUD-008 and SR-AUD-060 flipped
+  `confirmed → remediated`; the other five tickets carry **no SR-AUD-\*** (numbering frozen at 364).
+- **Module graph 41 modules / 91 edges** — unchanged (no boundary changes).
+- **Canonical Doxygen 1,941 warnings** (ceiling 1,942) — unchanged.
+- **Negative fixtures 9 / 66 sites; version seams 2 / 18 specialisations** — both unchanged.
+
+### The §6.2 approval, used exactly as scoped
+
+The user approved `docs/StreamCapabilityContractDesign.md` §6.2 (a `Stream` that does not override
+`getCanWriteProperty()` is unwritable). Used for the **CanWrite** rejection direction in
+`StreamWriter`, `ZipArchive` `Create`/`Update`, and the zlib delegated `CanWrite`. The two decisions
+§6.2 left to #1827 were taken there: **Update requires CanSeek** (adopted, matching .NET, measured
+compatible) and a **Read-mode unseekable stream is buffered, not rejected** (the port already
+buffers the whole input at construction). The one in-repo migration was applied: `ThrowingWriteStream`
+gained a truthful `getCanWriteProperty() -> true`. **Layer 3 (pure virtual) deliberately not
+implemented** — no fourth guard ticket appeared (design §13). No new approval is outstanding.
+
+### Premises corrected (all by measurement)
+
+- **SR-AUD-060 has seven sites, not four** (four entry points + the three-multiply `jdnToDate`
+  cascade), and the cascade is reachable in the negative direction *without* an entry-point
+  overflow (`DefinedArithmeticBoundaryPlan.md` §18.2). **CCF-004 has two silent-wrong-answer
+  members, not one**: `DateOnly::AddYears(INTCS_MIN)` returned `0001-01-01` unchanged (§18.4).
+- **SR-AUD-008 has six sites and five public doors**, not the two the audit recorded (§17.8).
+- **The DateOnly paramName decision** (§18.5): adopted .NET's per-method names
+  (`dayNumber`/`value`/`months`/`value`) over the leaked DateTime-constructor `year`; one
+  documented consequence on a non-UB rejection path, authorised by the acceptance criterion.
+- **#1838 was a side-finding**, not an SR-AUD member — same djb2 shape, different module.
+- **A UBSan sweep enumerates undefined operations, not wrong answers** — #1836 and #1837 each had
+  wrong answers UBSan is silent about; enumerate the inputs a correct impl must reject.
+
+### Blocked approvals / new tickets
+
+- **No approval is outstanding** — the §6.2 approval was the only one this batch needed and it is
+  fully consumed.
+- **No new tickets created.** No separable new defect was found; every discovered surface addition
+  was folded into the owning finding's record by appending.
+
+### Remaining queue
+
+| # | P | Status | Note |
+|---|---|---|---|
+| #1773 | P2 | **blocked** | Migrate CNA/mobile-eggbert to the ICollection CopyTo boundary — blocked until they deliberately upgrade; downstream not inspected, per the batch boundary. |
+| #1804 | P3 | **blocked** | `check_version_seam_odr.py` exits 0 when a seam *leaves* discovery — a tooling false-pass documented in `NegativeConsumerFixtureValidation.md` §18.4; needs a design decision. |
+
+**No compatible ready remediation work remains** in `plan.sqlite3`: both open tickets are blocked.
+
+### Next recommended work
+
+The remediation queue is drained of ready items. The natural next step is a **plan.sqlite3
+namespace-review pass** (the `prompt.md` workflow over `status IN ('', 'todo')` System types), or
+a design ticket for **#1804**'s tooling gap (the only in-repository open item; small, self-contained).
+#1773 stays blocked on downstream and must not be started here.
+
+### Sanitizer-tree freshness
+
+`build-asan` was reused, not recreated. For every post-fix conclusion the changed object and
+`libsharp_runtime_core.a` were verified newer than the source **before and after** the edit
+(#1837 timestamps recorded in `build-probe/1837_postfix.log`), and the aborting
+`-fno-sanitize-recover=undefined` build was used only to prove a site gone. #1837 relinked
+`sharp_runtime_core_base`; #1842/#1827 rebuilt `SharpRuntimeTests_IO`/`SharpRuntimeIntegrationTests`
+under `build-asan`; #1838 is header-only and needed no relink.
+
+### Known limitations
+
+- `scripts/__pycache__/*.pyc` remain tracked in git; every Python command this batch ran with
+  `PYTHONDONTWRITEBYTECODE=1`, and none were staged. Still worth its own untrack ticket.
+- `test/check_version_seam_odr_test.py` is not executable; run as `python3 …` (unchanged).
+- The Bash safety classifier was intermittently unavailable during this session; read-only
+  validation and test-binary runs were executed with the sandbox override, never builds beyond the
+  three-job ceiling.

@@ -4112,3 +4112,40 @@ estimated.
 
 Full detail, including build directories, the three-job parallelism record and the `build-probe`
 disk accounting, is in `NEXT.md` under "CONTEXT-REFRESH handoff — 2026-07-30".
+
+### Autonomous batch handoff, 2026-07-30 (CCF-004 closure and the Stream capability family)
+
+Seven tickets on `feature/remediation-batch-ccf004-stream-capabilities`: **#1836**
+(`TimeSpan` defined ticks, class A+C — the previous session's uncommitted work, verified and
+committed), **#1837** (`DateOnly` defined arithmetic, class C — **closes CCF-004, 8/8 members**),
+**#1842** (`FileStream` closed-state capabilities, the wrapper-guard prerequisite), **#1838**
+(`SslApplicationProtocol::GetHashCode` unsigned djb2, a #1831 side-finding), **#1824**
+(`StreamWriter` `CanWrite` guard), **#1828** (zlib wrappers' inner-stream delegation) and
+**#1827** (`ZipArchive` per-mode capability guard — **closes the Stream-capability family**). The
+last three used the single `docs/StreamCapabilityContractDesign.md` §6.2 approval the previous
+handoff requested; #1836/#1837 carry the class-C compatibility argument in-ticket per the
+defined-arithmetic plan §9, no new approval.
+
+Gate **14,196 tests across 37 executables** (0 warnings, 0 errors), up from 14,145. Audit index
+**29 remediated / 335 confirmed of 364** — SR-AUD-008 and SR-AUD-060 flipped to `remediated`; the
+other five tickets carry no `SR-AUD-*` and numbering stays frozen at 364. Module graph **41 / 91**,
+canonical Doxygen **1,941 / 1,942**, negative fixtures **9 / 66**, version seams **2 / 18** — all
+unchanged (no boundary, seam, or fixture surface changed).
+
+Premises corrected by measurement: SR-AUD-060 is **seven** sites with a `jdnToDate` cascade
+reachable without an entry-point overflow, and CCF-004 has **two** silent-wrong-answer members
+(`DateOnly::AddYears`, not only `TimeSpan::TryParse`); SR-AUD-008 is **six** sites / **five**
+public doors; the DateOnly paramName decision adopted .NET's per-method names over the leaked
+`year`; and a UBSan sweep enumerates undefined operations, not wrong answers (two members had
+wrong answers UBSan is silent about). No new tickets and no new defects; every surface addition
+was recorded by appending to the owning finding. The `git` branch was pushed/merged/tagged
+**not at all** — everything is local.
+
+Ready queue is **drained of compatible remediation work**: the only open tickets are **#1773**
+(blocked on CNA/mobile-eggbert, downstream not inspected) and **#1804** (a P3 tooling false-pass
+needing a design decision). Next recommended: a `plan.sqlite3` namespace-review pass, or a #1804
+design ticket.
+
+Full detail, including build-directory sizes, the three-job parallelism record and the
+`build-probe` accounting, is in `NEXT.md` under "CONTEXT-REFRESH handoff — 2026-07-30, CCF-004
+closure + Stream capability family".
