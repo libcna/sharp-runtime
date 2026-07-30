@@ -9,6 +9,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
 #include "System/DateTimeOffset.hpp"
+#include "System/FormatException.hpp"
 #include "System/DayOfWeek.hpp"
 #include "System/TimeSpan.hpp"
 
@@ -393,4 +394,95 @@ TEST(DateTimeOffsetTests2, Ccf002_ParserRejectsOutOfRangeClockComponents) {
     EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:60:00+02:00", out));
     ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T23:59:59+02:00", out));
     EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 120);
+}
+
+// ---------------------------------------------------------------------------
+// CCF-002 class C (SR-AUD-007a, ticket #1878) -- offset-field range validation
+// in TryParse.
+//
+// The two numeric fields of a textual offset were read with sscanf and used
+// unchecked, so an impossible minute value was absorbed into the TimeSpan before
+// the whole-minute and +/-14h guards could see it, a negative field inverted the
+// sign the caller wrote, and a large hour field made TryParse itself THROW.
+//
+// This is a range check on numeric component values, not a grammar change: the
+// same character sequences still match. The remaining grammar defects of this
+// parser (SR-AUD-007b) are ticket #1879 and are pinned below as *current*
+// behaviour.
+// ---------------------------------------------------------------------------
+
+TEST(DateTimeOffsetTests2, Ccf002_ImpossibleOffsetMinutesAreRejected) {
+    DateTimeOffset out;
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+02:60", out)); // meant +03:00
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+02:75", out)); // meant +03:15
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+02:99", out)); // meant +03:39
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00-02:75", out)); // meant -03:15
+    EXPECT_THROW((void)DateTimeOffset::Parse("2024-06-15T10:30:00+02:75"),
+                 System::FormatException);
+}
+
+TEST(DateTimeOffsetTests2, Ccf002_NegativeOffsetFieldsCannotInvertTheSign) {
+    DateTimeOffset out;
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+02:-30", out)); // meant +01:30
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+-05:00", out)); // meant -05:00
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00--05:00", out)); // meant +05:00
+}
+
+TEST(DateTimeOffsetTests2, Ccf002_TryParseNeverThrowsForAnOversizedOffsetField) {
+    // TimeSpan::FromSeconds threw OverflowException from OUTSIDE TryParse's
+    // try/catch, so a Try-style method escaped as an exception.
+    DateTimeOffset out;
+    EXPECT_NO_THROW({
+        EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+999999999999:00", out));
+    });
+    EXPECT_NO_THROW({
+        EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+2147483647:00", out));
+    });
+    EXPECT_NO_THROW({
+        EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00-2147483647:00", out));
+    });
+    // Parse now reports the documented FormatException instead of OverflowException.
+    EXPECT_THROW((void)DateTimeOffset::Parse("2024-06-15T10:30:00+2147483647:00"),
+                 System::FormatException);
+}
+
+TEST(DateTimeOffsetTests2, Ccf002_EveryValidOffsetStillParsesToTheSameValue) {
+    struct Case { const char* text; int minutes; };
+    const Case cases[] = {
+        {"2024-06-15T10:30:00+00:00",   0},
+        {"2024-06-15T10:30:00+00:59",  59},
+        {"2024-06-15T10:30:00+02:00", 120},
+        {"2024-06-15T10:30:00-05:30", -330},
+        {"2024-06-15T10:30:00+14:00", 840},
+        {"2024-06-15T10:30:00-14:00", -840},
+    };
+    for (const Case& c : cases) {
+        DateTimeOffset out;
+        ASSERT_TRUE(DateTimeOffset::TryParse(c.text, out)) << c.text;
+        EXPECT_EQ(out.getTotalOffsetMinutesProperty(), c.minutes) << c.text;
+        EXPECT_EQ(out.getTicksProperty(), 638540442000000000LL) << c.text;
+    }
+    DateTimeOffset z;
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00Z", z));
+    EXPECT_EQ(z.getTotalOffsetMinutesProperty(), 0);
+}
+
+TEST(DateTimeOffsetTests2, Ccf002_OutOfRangeOffsetHoursStillFailTheSameWay) {
+    // "+15:00" was already rejected -- by the +/-14h guard, after the arithmetic.
+    // It is now rejected before it, with the identical observable result.
+    DateTimeOffset out;
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+15:00", out));
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00-15:00", out));
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+14:01", out));
+}
+
+TEST(DateTimeOffsetTests2, Ccf002_CurrentlyAcceptedOffsetGrammarIsPinnedUnchanged) {
+    // SR-AUD-007b is NOT repaired by ticket #1878. Both inputs are accepted today
+    // and must stay accepted until ticket #1879 obtains explicit approval for the
+    // accepted-grammar change; then these expectations flip.
+    DateTimeOffset out;
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00+02:00junk", out));
+    EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 120);
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00+2:5", out));
+    EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 125);
 }

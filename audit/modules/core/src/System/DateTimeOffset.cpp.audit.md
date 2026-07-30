@@ -139,3 +139,78 @@ Full component gate **14,508 tests across 37 executables**.
 **Mutation-checked:** restoring the pre-repair ordering fails
 `Ccf002_OffsetIsValidatedBeforeTheClockDateTime` and
 `Ccf002_TickConstructorValidatesTheOffsetFirst`.
+
+---
+
+## SR-AUD-007 — SPLIT: 007a REMEDIATED (ticket #1878, 2026-07-30, CCF-002), 007b OPEN
+
+The original evidence above is retained unchanged. Following the
+SR-AUD-035 → #1857/#1858 and SR-AUD-033 → #1864/#1865 convention, this finding
+is split by cause, because its two halves have different approval status:
+
+- **007a — impossible offset minutes (compatible, REMEDIATED here).** A range
+  check on numeric component values. The accepted textual grammar is unchanged:
+  `%d:%d` still matches the same character sequences.
+- **007b — parser grammar (approval-gated, OPEN).** Trailing text after a
+  complete offset, unpadded fields, and the `DateTime` half's fabricated
+  midnight. Ticket **#1879**, `needs_user`, with its exact before/after string
+  table in `docs/DateTimeValidationBoundaryPlan.md` §8.2.
+
+**The finding's reproduction is correct and its class is three defects wide, not
+one.** `TryParse` read both offset fields with `std::sscanf` and used them
+unchecked:
+
+| Input | Was | Now |
+|---|---|---|
+| `"…+02:75"` | `true`, offset **+03:15** | `false` |
+| `"…+02:60"` | `true`, **+03:00** | `false` |
+| `"…+02:99"` | `true`, **+03:39** | `false` |
+| `"…-02:75"` | `true`, **−03:15** | `false` |
+| `"…+02:-30"` | `true`, **+01:30** | `false` |
+| `"…+-05:00"` | `true`, **−05:00** — a `+` sign yielding a negative offset | `false` |
+| `"…--05:00"` | `true`, **+05:00** — a `-` sign yielding a positive offset | `false` |
+| `"…+2147483647:00"` | **`TryParse` THREW `OverflowException`** | `false` |
+| `"…+999999999999:00"` | **`TryParse` THREW `OverflowException`** | `false` |
+| `"…+15:00"` | `false` (via the ±14 h guard, after the arithmetic) | `false` (before it) |
+| `"…+00:00"`, `"…+00:59"`, `"…+02:00"`, `"…-05:30"`, `"…+14:00"`, `"…-14:00"`, `"…Z"` | correct | **identical** |
+
+**Two defects the finding does not record (measured 2026-07-30,
+`build-probe/1876_current_behaviour.log` cases 063–064 and
+`build-probe/1878_prefix.log`).**
+
+1. **Sign inversion.** The sign character is consumed separately into `neg`, so a
+   second one reaches `sscanf` as part of the number. `"+-05:00"` produced a
+   *negative* five-hour offset and `"--05:00"` a *positive* one — the parser
+   returned the opposite of what the text says.
+2. **`TryParse` could throw.** `TimeSpan::FromSeconds` → `IntervalFromDoubleTicks`
+   rejects an out-of-`int64` tick count with `OverflowException`, and that call
+   sat **outside** `TryParse`'s own `try`/`catch` — the very block whose comment
+   states that "TryParse's entire contract is to never throw, only report failure
+   via its bool return". `"…+2147483647:00"` escaped as an exception from a
+   Try-style method, and `Parse` surfaced `OverflowException` where its
+   documentation promises `FormatException`. **No new `SR-AUD-*` identifier is
+   issued**: the defect is inseparable from 007a's repair — one
+   bounds-before-arithmetic guard closes all three — and the numbering stays
+   frozen at 364.
+
+**The repair.** `if (hh < 0 || hh > 14 || mm < 0 || mm > 59) return false;`
+before the `TimeSpan` is built. The bounds are the ones .NET already enforces on
+the finished offset (whole hours in `[0, 14]`, the sign living in `neg`; minutes
+in `[0, 59]`), moved ahead of the arithmetic instead of behind it — the same
+bounds-before-operation strategy ticket #1877 applied to `dateToTicks`, recorded
+in `docs/DateTimeValidationBoundaryPlan.md` §10.
+
+Compatibility: **none** beyond the observable rejection. No public signature,
+`noexcept` specification, virtual function, vtable slot, data member, `sizeof`,
+`alignof` or member offset changed; the whole repair is one statement in one
+`.cpp` body.
+
+Closure evidence: 6 new permanent regressions in `DateTimeOffsetTests2`
+(impossible minutes, sign inversion, never-throws, every valid offset unchanged,
+out-of-range hours, and the currently-accepted grammar pinned unchanged).
+Full component gate **14,514 tests across 37 executables**, up from 14,508.
+**Mutation-checked:** deleting the guard fails 3 permanent tests.
+Sanitizers **not applicable** and recorded as such: one integer comparison, no
+allocation, pointer arithmetic, lifetime change or shared state — and the probe
+`build-probe/1878_offset_field_probe.cpp` shows the previously escaping
+`OverflowException` is gone (`build-probe/1878_postfix.log`).

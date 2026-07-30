@@ -340,6 +340,37 @@ namespace System {
                 bool neg = offStr[0] == '-';
                 int hh = 0, mm = 0;
                 if (std::sscanf(offStr.c_str() + 1, "%d:%d", &hh, &mm) != 2) return false;
+
+                // CCF-002 class C (SR-AUD-007a, ticket #1878). The two numeric fields were
+                // read and then used unchecked, which is three defects in one line.
+                //
+                //   1. An impossible minute field was silently ABSORBED by the TimeSpan and
+                //      therefore invisible to the whole-minute and +/-14h guards below.
+                //      "+02:75" meant +03:15, "+02:60" meant +03:00, "+02:99" meant +03:39 --
+                //      an offset the input never named.
+                //   2. A NEGATIVE field inverted the sign the caller wrote. The sign character
+                //      is consumed separately into `neg`, so a second one reaches sscanf as
+                //      part of the number: "+02:-30" meant +01:30, "+-05:00" meant *minus*
+                //      five hours, and "--05:00" meant *plus* five hours.
+                //   3. A large hour field made TryParse THROW. TimeSpan::FromSeconds ->
+                //      IntervalFromDoubleTicks rejects an out-of-int64 tick count with
+                //      OverflowException, and this call sits OUTSIDE the try/catch below --
+                //      so "+2147483647:00" escaped as an exception from a Try-style method
+                //      whose entire contract, as the comment below states, is to report
+                //      failure through its bool return (build-probe/1878_prefix.log). Parse
+                //      surfaced the same OverflowException instead of FormatException.
+                //
+                // One bounds-before-arithmetic guard closes all three, and the bounds are the
+                // ones .NET already enforces on the finished offset: whole hours in [0, 14]
+                // (the sign lives in `neg`) and minutes in [0, 59]. Nothing that used to
+                // produce a valid offset is rejected -- "+14:00", "-14:00", "+00:59" and
+                // "+00:00" all still parse to exactly the same values -- and "+15:00", which
+                // the +/-14h guard already rejected after the fact, is now rejected before the
+                // arithmetic instead. The accepted textual GRAMMAR is untouched: "%d:%d"
+                // still matches the same character sequences, including the unpadded "+2:5"
+                // form, which stays accepted pending ticket #1879's approval.
+                if (hh < 0 || hh > 14 || mm < 0 || mm > 59) return false;
+
                 double secs = (hh * 3600.0 + mm * 60.0) * (neg ? -1.0 : 1.0);
                 offset = TimeSpan::FromSeconds(secs);
             }
