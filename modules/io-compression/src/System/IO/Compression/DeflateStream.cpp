@@ -95,19 +95,23 @@ DeflateStream::~DeflateStream() { try { Close(); } catch (...) {} }
 // This needs NO new member and NO object-layout change; that is why this half of #1828 needed no
 // approval and could ship ahead of the rest.
 //
-// DELIBERATELY NOT ADDED HERE: .NET also conjoins the inner stream's matching capability
-// (`_mode == CompressionMode.Decompress && _stream.CanRead`). That DELEGATION consults another
-// object's possibly-defaulted declaration -- System::IO::Stream::getCanWriteProperty() defaults
-// to false -- so it is covered by the single approval in StreamCapabilityContractDesign.md
-// section 6.2 and remains blocked ticket #1828. Today a wrapper over an unreadable inner stream
-// still reports CanRead == true (build-probe/1841_prefix.log, last line).
+// Ticket #1828 (the delegation half) now conjoins the inner stream's matching capability, as
+// .NET does (`_mode == CompressionMode.Decompress && _stream.CanRead`, DeflateStream.cs:171-195).
+// That delegation consults another object's possibly-defaulted declaration --
+// System::IO::Stream::getCanWriteProperty() defaults to false -- so it needed the single approval
+// in StreamCapabilityContractDesign.md section 6.2, which the user granted. `inner_ == nullptr`
+// is added to the closed guard so the delegation cannot dereference a null inner stream (it is
+// nulled by a non-leaveOpen Close()); before, a wrapper over an unreadable inner stream still
+// reported CanRead == true (build-probe/1841_prefix.log, last line). Now a Compress-mode wrapper
+// over a non-writable inner stream reports CanWrite == false, and a Decompress-mode wrapper over
+// a non-readable inner stream reports CanRead == false.
 bool DeflateStream::getCanReadProperty()  const {
-    if (!state_ || !state_->initialized) return false;
-    return mode_ == CompressionMode::Decompress;
+    if (!state_ || !state_->initialized || inner_ == nullptr) return false;
+    return mode_ == CompressionMode::Decompress && inner_->getCanReadProperty();
 }
 bool DeflateStream::getCanWriteProperty() const {
-    if (!state_ || !state_->initialized) return false;
-    return mode_ == CompressionMode::Compress;
+    if (!state_ || !state_->initialized || inner_ == nullptr) return false;
+    return mode_ == CompressionMode::Compress && inner_->getCanWriteProperty();
 }
 
 SharpRuntime::intcs DeflateStream::getLengthProperty() const {

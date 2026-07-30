@@ -5797,3 +5797,30 @@ FileStream rejected; the `StreamWriter`/`BinaryWriter` cross-type identity). Two
 Repository gate: **0 warnings, 0 errors, 14,185 tests across 37 executables**. Module graph
 **41 / 91**. **Source and ABI consequences: none** -- one added guard in a `.cpp` body, no
 signature, member, vtable, layout or symbol change.
+
+Ticket **#1828** (`REMED-IO-COMPRESSION-STALE-CAPABILITIES`, delegation half, P3, size S,
+category `remediation`, area *IO*) is **done**. **No SR-AUD-\* identifier**; numbering stays
+frozen at 364, counts stay **29 remediated / 335 confirmed**. The closed-state half shipped as
+#1841; this is the inner-stream **delegation** half, covered by the §6.2 approval.
+
+All three zlib wrappers (`DeflateStream`, `GZipStream`, `ZLibStream` -- separate bodies in this
+port, not the single delegation .NET uses) now conjoin the inner stream's matching capability:
+`getCanReadProperty()` is `mode_ == Decompress && inner_->getCanReadProperty()` and
+`getCanWriteProperty()` is `mode_ == Compress && inner_->getCanWriteProperty()`, matching
+`DeflateStream.cs:171-195`. `inner_ == nullptr` is added to the closed guard so the delegation
+cannot dereference the inner stream a non-`leaveOpen` `Close()` nulled. Before this a wrapper over
+an incapable inner stream still claimed the mode's capability (`build-probe/1841_prefix.log`,
+last line); now a Decompress wrapper over a non-readable inner reports `CanRead == false` and a
+Compress wrapper over a non-writable inner reports `CanWrite == false`. Measured compatible under
+#1839 (the whole-gate experiment showed the zlib delegation breaks nothing).
+
+The `ZlibClosedCapabilityTests.InnerStreamDelegationIsStillAbsent` test that #1841 wrote to pin
+the *absent* delegation was **inverted** as its own comment instructed ("when #1828 lands this
+assertion inverts"), and replaced by four `ZlibInnerDelegationTests`: Decompress over an
+unreadable inner and Compress over a non-writable inner both report false across all three
+wrappers; a capable `MemoryStream` inner still reports the mode capability; and a closed wrapper
+still reports false over a live capable inner (the #1841 guard wins). **Net +3 regressions**
+(four added, one inverted-and-renamed). `SharpRuntimeTests_IO_Compression` **40/40**. Repository
+gate: **0 warnings, 0 errors, 14,188 tests across 37 executables**. Module graph **41 / 91**.
+**Source and ABI consequences: none** -- three `.cpp` body edits (one conjunct and one null
+guard each), no signature, member, vtable, layout or symbol change.

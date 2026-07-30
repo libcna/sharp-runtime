@@ -368,10 +368,12 @@ TEST(CompressionNullStream, LargeIncompressibleRoundtripStillWorks) {
 // measuring only one wrapper would not have shown that GZipStream and ZLibStream have their
 // own copies of these bodies rather than delegating as .NET's do.
 //
-// NOT asserted here, deliberately: .NET also conjoins the INNER stream's matching
-// capability. That delegation is blocked ticket #1828 -- it consults another object's
-// possibly-defaulted declaration, and System::IO::Stream::getCanWriteProperty() defaults to
-// false. The current behaviour is pinned below so the split stays visible.
+// The INNER stream's matching capability is now conjoined too, under ticket #1828's delegation
+// half (StreamCapabilityContractDesign.md section 6.2, approved). The helper below wraps a
+// default MemoryStream, which is both readable and writable while open, so the closed-state
+// matrix is unchanged; the delegation is exercised separately below over incapable inner
+// streams, where a Decompress wrapper over a non-readable inner reports CanRead == false and a
+// Compress wrapper over a non-writable inner reports CanWrite == false.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -445,15 +447,84 @@ TEST(ZlibClosedCapabilityTests, TheValidCompressPathIsUnchanged) {
     EXPECT_LT(inner.getLengthProperty(), static_cast<intcs>(payload.size()));
 }
 
-TEST(ZlibClosedCapabilityTests, InnerStreamDelegationIsStillAbsent) {
-    // Pins blocked ticket #1828's remaining half. .NET returns
-    // `_mode == Decompress && _stream.CanRead`, so this SHOULD be false; today it is true,
-    // because delegating would consult a possibly-defaulted declaration on another object.
-    // When #1828 lands this assertion inverts, deliberately and visibly.
-    MemoryStream inner;
-    inner.Close();
-    ASSERT_FALSE(inner.getCanReadProperty());
-    GZipStream gz(&inner, CompressionMode::Decompress, /*leaveOpen=*/true);
-    EXPECT_TRUE(gz.getCanReadProperty())
-        << "if this now fails, ticket #1828's delegation half has landed -- invert it";
+// ---------------------------------------------------------------------------
+// Inner-stream capability delegation (ticket #1828, the second half)
+//
+// StreamCapabilityContractDesign.md section 6.2 (approved): each wrapper now conjoins the inner
+// stream's matching capability, so a Decompress wrapper is readable only if its inner stream is
+// readable and a Compress wrapper is writable only if its inner stream is writable -- matching
+// DeflateStream.cs:171-195. Before this, the wrappers reported their mode alone and a wrapper
+// over an incapable inner stream lied. `inner_ == nullptr` guards the delegation.
+// ---------------------------------------------------------------------------
+
+namespace {
+    // Readable, never writable (does not override getCanWriteProperty(), so it inherits the
+    // base default of false). Used as the incapable inner for a Compress wrapper.
+    class ReadableOnlyInner final : public System::IO::Stream {
+    public:
+        intcs Read(SharpRuntime::bytecs*, intcs, intcs) override { return 0; }
+        void Close() override {}
+        [[nodiscard]] intcs getLengthProperty() const override { return 0; }
+        [[nodiscard]] bool getCanReadProperty() const override { return true; }
+    };
+
+    // Positively unreadable. Used as the incapable inner for a Decompress wrapper.
+    class UnreadableInner final : public System::IO::Stream {
+    public:
+        intcs Read(SharpRuntime::bytecs*, intcs, intcs) override { return 0; }
+        void Write(const SharpRuntime::bytecs*, intcs, intcs) override {}
+        void Close() override {}
+        [[nodiscard]] intcs getLengthProperty() const override { return 0; }
+        [[nodiscard]] bool getCanReadProperty() const override { return false; }
+        [[nodiscard]] bool getCanWriteProperty() const override { return true; }
+    };
+}
+
+TEST(ZlibInnerDelegationTests, DecompressOverUnreadableInner_ReportsNotReadable_1828) {
+    // The inverted assertion. Before #1828 this reported CanRead == true even though the inner
+    // stream cannot be read; it now delegates and reports false. All three wrappers.
+    for (const char* which : {"Deflate", "GZip", "ZLib"}) {
+        UnreadableInner inner;
+        ASSERT_FALSE(inner.getCanReadProperty());
+        bool r = true;
+        if (std::string(which) == "Deflate") { DeflateStream w(&inner, CompressionMode::Decompress, true); r = w.getCanReadProperty(); }
+        else if (std::string(which) == "GZip") { GZipStream w(&inner, CompressionMode::Decompress, true); r = w.getCanReadProperty(); }
+        else                                   { ZLibStream w(&inner, CompressionMode::Decompress, true); r = w.getCanReadProperty(); }
+        EXPECT_FALSE(r) << which << " Decompress over an unreadable inner";
+    }
+}
+
+TEST(ZlibInnerDelegationTests, CompressOverNonWritableInner_ReportsNotWritable_1828) {
+    // A Compress wrapper over a readable-only inner (CanWrite defaults false) must report
+    // CanWrite == false via delegation. All three wrappers.
+    for (const char* which : {"Deflate", "GZip", "ZLib"}) {
+        ReadableOnlyInner inner;
+        ASSERT_FALSE(inner.getCanWriteProperty());
+        bool w = true;
+        if (std::string(which) == "Deflate") { DeflateStream s(&inner, CompressionMode::Compress, true); w = s.getCanWriteProperty(); }
+        else if (std::string(which) == "GZip") { GZipStream s(&inner, CompressionMode::Compress, true); w = s.getCanWriteProperty(); }
+        else                                   { ZLibStream s(&inner, CompressionMode::Compress, true); w = s.getCanWriteProperty(); }
+        EXPECT_FALSE(w) << which << " Compress over a non-writable inner";
+    }
+}
+
+TEST(ZlibInnerDelegationTests, CapableInnerStillReportsTheModeCapability_1828) {
+    // Delegation must not over-reject: a MemoryStream inner is both readable and writable, so a
+    // Decompress wrapper is readable and a Compress wrapper is writable, exactly as before.
+    { MemoryStream inner; DeflateStream w(&inner, CompressionMode::Decompress, true);
+      EXPECT_TRUE(w.getCanReadProperty()); EXPECT_FALSE(w.getCanWriteProperty()); }
+    { MemoryStream inner; DeflateStream w(&inner, CompressionMode::Compress, true);
+      EXPECT_TRUE(w.getCanWriteProperty()); EXPECT_FALSE(w.getCanReadProperty()); }
+}
+
+TEST(ZlibInnerDelegationTests, ClosedWrapperStillReportsNoCapability_LeaveOpenBoth_1828) {
+    // The closed-state guard (#1841) still wins over delegation, for both leaveOpen values:
+    // a closed wrapper reports false regardless of the (still-live, capable) inner stream.
+    for (bool leaveOpen : {false, true}) {
+        MemoryStream inner;
+        DeflateStream w(&inner, CompressionMode::Compress, leaveOpen);
+        w.Close();
+        EXPECT_FALSE(w.getCanWriteProperty()) << "leaveOpen=" << leaveOpen;
+        EXPECT_FALSE(w.getCanReadProperty()) << "leaveOpen=" << leaveOpen;
+    }
 }

@@ -8034,3 +8034,22 @@ also reports CanWrite false and is rejected at construction.
 production streams still construct; closed FileStream rejected; StreamWriter/BinaryWriter identity)
 plus two doubles. IO suite 599/599. Gate **14,185 across 37 executables**, clean. **No
 signature/member/vtable/layout/symbol change** — one guard in a `.cpp` body.
+
+## Completed zlib inner-stream delegation: ticket #1828 (2026-07-30)
+
+`REMED-IO-COMPRESSION-STALE-CAPABILITIES` (delegation half), P3, size S. **No SR-AUD-\***; audit
+frozen at 364. Closed-state half shipped as #1841; this delegation half is covered by the §6.2
+approval.
+
+All three zlib wrappers (separate bodies in this port) now conjoin the inner stream's capability:
+`CanRead = mode==Decompress && inner_->CanRead`, `CanWrite = mode==Compress && inner_->CanWrite`
+(`DeflateStream.cs:171-195`), with `inner_ == nullptr` added to the closed guard. A wrapper over
+an incapable inner used to still claim its mode's capability; now a Decompress wrapper over a
+non-readable inner reports CanRead false and a Compress wrapper over a non-writable inner reports
+CanWrite false. Measured compatible (#1839's whole-gate experiment).
+
+The #1841 `InnerStreamDelegationIsStillAbsent` test was **inverted** as its comment instructed,
+and replaced by four `ZlibInnerDelegationTests` (unreadable/non-writable inner across all three
+wrappers; capable inner still reports the mode; closed wrapper still false over a live capable
+inner). Net **+3 regressions**. IO_Compression 40/40. Gate **14,188 across 37 executables**,
+clean. **No signature/member/vtable/layout/symbol change** — three `.cpp` body edits.
