@@ -175,6 +175,14 @@ TEST(UInt128Test, Clamp_MinGreaterThanMax_Throws) {
                  System::ArgumentException);
     EXPECT_TRUE(UInt128::Clamp(UInt128(0, 5), UInt128(0, 7), UInt128(0, 7)) == UInt128(0, 7));
 }
+// SR-AUD-023 (#1845): 128-bit binary ToString("B"/"b").
+TEST(UInt128Test, ToString_Binary) {
+    EXPECT_EQ(UInt128(0, 5).ToString(std::string("B")), "101");
+    EXPECT_EQ(UInt128(0, 5).ToString(std::string("b")), "101");
+    EXPECT_EQ(UInt128(0, 0).ToString(std::string("B")), "0");
+    EXPECT_EQ(UInt128::MaxValue().ToString(std::string("B")), std::string(128, '1'));
+    EXPECT_EQ(UInt128(0, 5).ToString(std::string("B128")), std::string(125, '0') + "101");
+}
 
 TEST(UInt128Test, Sign) {
     EXPECT_EQ(UInt128::Sign(UInt128(0, 0)), 0);

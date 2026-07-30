@@ -34,6 +34,23 @@ from .NET 8 and specifies zero-padding through precision:
 <https://learn.microsoft.com/en-us/dotnet/standard/base-types/standard-numeric-format-strings>.
 `UInt128` has the same missing capability and is included in this finding.
 
+### Remediated — ticket #1845 (2026-07-30)
+
+Done. `B`/`b` now formats binary for all six listed wrappers (`SByte`, `Int16`,
+`UInt16`, `UInt32`, `UInt64`, `UInt128`) — and for `Int128`, a **premise
+correction**: measurement showed `Int128::ToString(format)` *also* had no `B`
+branch (its X/D-then-fallthrough shape matched `UInt128`'s), though the finding
+listed only `UInt128`. All seven now emit the raw two's-complement bits at the
+natural width (`0xFF` mask for `SByte`, `0xFFFF` for `Int16`/`UInt16`, the full
+32/64/128-bit value otherwise), strip leading zeros, and zero-pad to the `Bn`
+precision — the exact algorithm the already-correct `Byte`/`Int32`/`Int64`
+wrappers use, and equal to .NET's `UInt32ToBinaryStr`/`hexMask` behaviour
+(`Number.Formatting.cs`). Permanent vectors added per type: value 5, zero, an
+uppercase/lowercase pair, `MaxValue` (all-ones at the width), the signed
+`MinValue` and `-1` two's-complement cases, and a width-padded `Bn`. `Byte`,
+`Int32`, `Int64` already had it and are unchanged. The unknown-format-fallthrough
+and 128-bit `std::stoi` width guard belong to SR-AUD-021 / ticket #1847.
+
 ### Required post-audit verification
 
 Implement `B/b` with a validated non-negative precision for UInt64 and UInt128,

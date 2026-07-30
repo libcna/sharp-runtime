@@ -341,3 +341,35 @@ positive". The two suites that pinned the wrong result
 to assert `IsPositive(0) == true` and each gained a negative/`MinValue`/`MaxValue`
 vector. Net **+2** test cases (two wrong ones replaced by four). Both stay
 `noexcept`; no signature/layout/symbol change. `SR-AUD-024 → remediated`.
+
+### 15.3 #1845 — SR-AUD-023 — binary ToString("B"/"b") — **DONE**
+
+**Premise corrected: seven types, not six.** The finding lists `SByte`, `Int16`,
+`UInt16`, `UInt32`, `UInt64`, `UInt128`. Re-inventory (`grep` for a `'B'` branch
+in every integral `ToString(value, format)`) confirms those six lacked it — and
+found **`Int128` lacked it too**: its `ToString(format)` had the same
+X/D-then-fallthrough shape as `UInt128`, so `Int128(5).ToString("B")` returned
+decimal `"5"`. The finding named only `UInt128`. `Byte`, `Int32`, `Int64`
+already had a correct `B` branch. So #1845 fixes **seven** wrappers, extending
+the finding's surface to `Int128.hpp` (recorded, identifier kept — the SR-AUD-060
+precedent). Leaving `Int128` as the one integral type without binary formatting
+while its unsigned sibling gained it would have been an indefensible gap, so it
+is inseparable from this repair, not a separate ticket.
+
+**.NET algorithm confirmed** (`Number.Formatting.cs` `UInt32ToBinaryStr` /
+`UInt128ToBinaryStr`, and the signed `value & hexMask` path): mask to the natural
+width (raw two's-complement bits), emit `max(1, requested_precision)` digits with
+no surplus leading zeros. This is exactly the existing `Byte`/`Int32`/`Int64`
+implementation, so the fix **replicates that pattern** per type at the right
+width (`0xFF`/`0xFFFF` masks for the small signed types; the full value
+otherwise) rather than inventing a new one — and deliberately does **not** add a
+sign or a `-` (`Do not copy a signed implementation if it would add a sign`): the
+signed types emit two's-complement bits, so `SByte(-1)="11111111"`,
+`Int128(-1)=` 128 ones, `Int16::MinValue="1000000000000000"`.
+
+**Tests.** +7 `ToString_Binary` cases (one per fixed type), each pinning: value
+5, zero, an uppercase/lowercase pair, `MaxValue` (all-ones at the width), the
+signed `MinValue`/`-1` two's-complement forms, and a width-padded `Bn`. All
+computed against the .NET reference semantics and green.
+`SharpRuntimeTests_Core_Base` 5070 → **5077**. No layout/symbol change; new
+output value only. `SR-AUD-023 → remediated`.

@@ -78,6 +78,16 @@ TEST(Int16NewTests, Clamp_MinGreaterThanMax_Throws) {
     EXPECT_THROW(Int16::Clamp(5, 10, 1), System::ArgumentException);
     EXPECT_EQ(Int16::Clamp(5, 7, 7), 7);
 }
+// SR-AUD-023 (#1845): integral binary ToString("B"/"b") — raw two's-complement bits.
+TEST(Int16NewTests, ToString_Binary) {
+    EXPECT_EQ(Int16::ToString(5,  std::string("B")), "101");
+    EXPECT_EQ(Int16::ToString(5,  std::string("b")), "101");
+    EXPECT_EQ(Int16::ToString(0,  std::string("B")), "0");
+    EXPECT_EQ(Int16::ToString(-1, std::string("B")), std::string(16, '1'));
+    EXPECT_EQ(Int16::ToString(Int16::MinValue, std::string("B")), "1000000000000000");
+    EXPECT_EQ(Int16::ToString(Int16::MaxValue, std::string("B")), std::string(15, '1'));
+    EXPECT_EQ(Int16::ToString(5, std::string("B16")), "0000000000000101");
+}
 
 TEST(Int16NewTests, Max_ReturnsLarger)  { EXPECT_EQ(Int16::Max(3, 7), 7); }
 TEST(Int16NewTests, Min_ReturnsSmaller) { EXPECT_EQ(Int16::Min(3, 7), 3); }

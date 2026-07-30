@@ -195,6 +195,16 @@ namespace System {
                 return neg ? "-" + s : s;
             }
             if (type == 'G' || type == 'g') return ToString(value);
+            if (type == 'B' || type == 'b') {
+                // .NET formats the raw two's-complement bits at the natural width.
+                unsigned uv = static_cast<unsigned>(value) & 0xFFu;
+                std::string s;
+                for (int i = 7; i >= 0; --i) s += ((uv >> i) & 1u) ? '1' : '0';
+                s.erase(0, s.find_first_not_of('0'));
+                if (s.empty()) s = "0";
+                while (static_cast<int>(s.size()) < width) s = "0" + s;
+                return s;
+            }
             return ToString(value);
         }
 

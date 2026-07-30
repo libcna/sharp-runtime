@@ -28,6 +28,16 @@ TEST(SByteNewTests, Clamp_MinGreaterThanMax_Throws) {
     EXPECT_THROW(SByte::Clamp(sbytecs(5), sbytecs(10), sbytecs(1)), System::ArgumentException);
     EXPECT_EQ(SByte::Clamp(sbytecs(5), sbytecs(7), sbytecs(7)), sbytecs(7));
 }
+// SR-AUD-023 (#1845): integral binary ToString("B"/"b") — raw two's-complement bits.
+TEST(SByteNewTests, ToString_Binary) {
+    EXPECT_EQ(SByte::ToString(sbytecs(5),  std::string("B")), "101");
+    EXPECT_EQ(SByte::ToString(sbytecs(5),  std::string("b")), "101");
+    EXPECT_EQ(SByte::ToString(sbytecs(0),  std::string("B")), "0");
+    EXPECT_EQ(SByte::ToString(sbytecs(-1), std::string("B")), "11111111");
+    EXPECT_EQ(SByte::ToString(SByte::MinValue, std::string("B")), "10000000");
+    EXPECT_EQ(SByte::ToString(SByte::MaxValue, std::string("B")), "1111111");
+    EXPECT_EQ(SByte::ToString(sbytecs(5),  std::string("B8")), "00000101");
+}
 
 TEST(SByteNewTests, Max_ReturnsLarger)  { EXPECT_EQ(SByte::Max(sbytecs(3), sbytecs(7)), sbytecs(7)); }
 TEST(SByteNewTests, Min_ReturnsSmaller) { EXPECT_EQ(SByte::Min(sbytecs(3), sbytecs(7)), sbytecs(3)); }

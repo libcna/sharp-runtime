@@ -52,6 +52,14 @@ TEST(UInt32NewTests, Clamp_MinGreaterThanMax_Throws) {
     EXPECT_THROW(UInt32::Clamp(5u, 10u, 1u), System::ArgumentException);
     EXPECT_EQ(UInt32::Clamp(5u, 7u, 7u), 7u);
 }
+// SR-AUD-023 (#1845): integral binary ToString("B"/"b").
+TEST(UInt32NewTests, ToString_Binary) {
+    EXPECT_EQ(UInt32::ToString(5u,  std::string("B")), "101");
+    EXPECT_EQ(UInt32::ToString(5u,  std::string("b")), "101");
+    EXPECT_EQ(UInt32::ToString(0u,  std::string("B")), "0");
+    EXPECT_EQ(UInt32::ToString(4294967295u, std::string("B")), std::string(32, '1'));
+    EXPECT_EQ(UInt32::ToString(5u,  std::string("B32")), std::string(29, '0') + "101");
+}
 
 TEST(UInt32NewTests, Max_ReturnsLarger) { EXPECT_EQ(UInt32::Max(3u,7u), 7u); }
 TEST(UInt32NewTests, Min_ReturnsSmaller) { EXPECT_EQ(UInt32::Min(3u,7u), 3u); }

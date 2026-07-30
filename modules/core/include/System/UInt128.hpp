@@ -140,9 +140,9 @@ namespace System {
          * using the specified format.
          *
          * C++ counterpart of .NET UInt128.ToString(string). Supports "X"/"x" (hexadecimal),
-         * "D"/"d" (decimal), and "G"/"g" (general), each optionally followed by a minimum
-         * field width (e.g. "X32"), zero-padded. Mirrors Int128::ToString(string) minus the
-         * sign handling, since UInt128 is never negative.
+         * "D"/"d" (decimal), "G"/"g" (general), and "B"/"b" (binary), each optionally
+         * followed by a minimum field width (e.g. "X32", "B128"), zero-padded. Mirrors
+         * Int128::ToString(string) minus the sign handling, since UInt128 is never negative.
          * @param format The numeric format specifier.
          * @return A string containing the formatted representation of this value.
          */
@@ -168,6 +168,15 @@ namespace System {
             }
             if (type == 'D' || type == 'd') {
                 std::string s = ToString();
+                while (static_cast<int>(s.size()) < width) s = "0" + s;
+                return s;
+            }
+            if (type == 'B' || type == 'b') {
+                unsigned __int128 uv = value_;
+                std::string s;
+                for (int i = 127; i >= 0; --i) s += ((uv >> i) & 1) ? '1' : '0';
+                s.erase(0, s.find_first_not_of('0'));
+                if (s.empty()) s = "0";
                 while (static_cast<int>(s.size()) < width) s = "0" + s;
                 return s;
             }

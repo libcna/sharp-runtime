@@ -185,6 +185,14 @@ namespace System {
                 return s;
             }
             if (type == 'G' || type == 'g') return ToString(value);
+            if (type == 'B' || type == 'b') {
+                std::string s;
+                for (int i = 15; i >= 0; --i) s += ((uv >> i) & 1u) ? '1' : '0';
+                s.erase(0, s.find_first_not_of('0'));
+                if (s.empty()) s = "0";
+                while (static_cast<int>(s.size()) < width) s = "0" + s;
+                return s;
+            }
             return ToString(value);
         }
 

@@ -26,6 +26,14 @@ TEST(UInt64Test, Clamp_MinGreaterThanMax_Throws) {
     EXPECT_THROW(UInt64::Clamp(5ULL, 10ULL, 1ULL), System::ArgumentException);
     EXPECT_EQ(UInt64::Clamp(5ULL, 7ULL, 7ULL), 7ULL); // equal bound is valid
 }
+// SR-AUD-023 (#1845): integral binary ToString("B"/"b").
+TEST(UInt64Test, ToString_Binary) {
+    EXPECT_EQ(UInt64::ToString(5ULL,  std::string("B")), "101");
+    EXPECT_EQ(UInt64::ToString(5ULL,  std::string("b")), "101");
+    EXPECT_EQ(UInt64::ToString(0ULL,  std::string("B")), "0");
+    EXPECT_EQ(UInt64::ToString(18446744073709551615ULL, std::string("B")), std::string(64, '1'));
+    EXPECT_EQ(UInt64::ToString(5ULL,  std::string("B64")), std::string(61, '0') + "101");
+}
 
 TEST(UInt64Test, ParseBasic) {
     EXPECT_EQ(UInt64::Parse("12345"), 12345ULL);

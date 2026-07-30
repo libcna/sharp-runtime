@@ -262,6 +262,20 @@ TEST(Int128DefinedArithmeticTests, OrdinaryAndZeroSignedValuesAreUnchanged) {
     EXPECT_EQ(System::Int128(static_cast<__int128>(-42)).ToString(), "-42");
 }
 
+// SR-AUD-023 (#1845): Int128 also lacked binary ToString("B"/"b") (a premise
+// correction — the finding listed only UInt128). Raw two's-complement bits at
+// the natural 128-bit width.
+TEST(Int128Tests, ToString_Binary) {
+    using System::Int128;
+    EXPECT_EQ(Int128(static_cast<__int128>(5)).ToString(std::string("B")), "101");
+    EXPECT_EQ(Int128(static_cast<__int128>(5)).ToString(std::string("b")), "101");
+    EXPECT_EQ(Int128(static_cast<__int128>(0)).ToString(std::string("B")), "0");
+    EXPECT_EQ(Int128(static_cast<__int128>(-1)).ToString(std::string("B")), std::string(128, '1'));
+    EXPECT_EQ(Int128::MinValue().ToString(std::string("B")), "1" + std::string(127, '0'));
+    EXPECT_EQ(Int128::MaxValue().ToString(std::string("B")), std::string(127, '1'));
+    EXPECT_EQ(Int128(static_cast<__int128>(5)).ToString(std::string("B128")), std::string(125, '0') + "101");
+}
+
 TEST(Int128DefinedArithmeticTests, MalformedInputIsStillRejected) {
     System::Int128 v;
     EXPECT_FALSE(System::Int128::TryParse("", v));

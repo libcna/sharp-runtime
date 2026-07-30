@@ -103,6 +103,14 @@ TEST(UInt16Test, Clamp_MinGreaterThanMax_Throws) {
     EXPECT_THROW(UInt16::Clamp(5u, 10u, 1u), System::ArgumentException);
     EXPECT_EQ(UInt16::Clamp(5u, 7u, 7u), 7u); // equal bound is valid
 }
+// SR-AUD-023 (#1845): integral binary ToString("B"/"b").
+TEST(UInt16Test, ToString_Binary) {
+    EXPECT_EQ(UInt16::ToString(5,  std::string("B")), "101");
+    EXPECT_EQ(UInt16::ToString(5,  std::string("b")), "101");
+    EXPECT_EQ(UInt16::ToString(0,  std::string("B")), "0");
+    EXPECT_EQ(UInt16::ToString(UInt16::MaxValue, std::string("B")), std::string(16, '1'));
+    EXPECT_EQ(UInt16::ToString(5,  std::string("B16")), "0000000000000101");
+}
 
 TEST(UInt16Test, IsEvenInteger) {
     EXPECT_TRUE(UInt16::IsEvenInteger(4u));

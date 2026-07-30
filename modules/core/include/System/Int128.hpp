@@ -162,8 +162,9 @@ namespace System {
          * using the specified format.
          *
          * C++ counterpart of .NET Int128.ToString(string). Supports "X"/"x" (hexadecimal),
-         * "D"/"d" (decimal), and "G"/"g" (general), each optionally followed by a minimum
-         * field width (e.g. "X32"), zero-padded.
+         * "D"/"d" (decimal), "G"/"g" (general), and "B"/"b" (binary, raw two's-complement
+         * bits at the natural 128-bit width), each optionally followed by a minimum field
+         * width (e.g. "X32", "B128"), zero-padded.
          * @param format The numeric format specifier.
          * @return A string containing the formatted representation of this value.
          */
@@ -195,6 +196,16 @@ namespace System {
                     while (static_cast<int>(digits.size()) < width) digits = "0" + digits;
                     return neg ? "-" + digits : digits;
                 }
+                return s;
+            }
+            if (type == 'B' || type == 'b') {
+                // .NET formats the raw two's-complement bits at the natural 128-bit width.
+                unsigned __int128 uv = static_cast<unsigned __int128>(value_);
+                std::string s;
+                for (int i = 127; i >= 0; --i) s += ((uv >> i) & 1) ? '1' : '0';
+                s.erase(0, s.find_first_not_of('0'));
+                if (s.empty()) s = "0";
+                while (static_cast<int>(s.size()) < width) s = "0" + s;
                 return s;
             }
             return ToString();
