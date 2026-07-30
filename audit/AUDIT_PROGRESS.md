@@ -5376,3 +5376,61 @@ graph **41 / 91**.
 **Source and ABI consequences: none.** No signature, virtual, vtable, object layout or
 mangled symbol changed. `tupleHashCombine` remains `noexcept`, pinned by a `static_assert`
 inside a test, as plan §8 requires.
+
+---
+
+Ticket **#1833** (`REMED-CORE-READONLYMEMORY-SLICE-ORDER`, P2, size S, category
+`remediation`, area *Core*) is **done** and **SR-AUD-049 is now `remediated`** — the fourth
+CCF-004 member repaired under `docs/DefinedArithmeticBoundaryPlan.md`. The index counts
+move to **25 remediated** and **339 confirmed** of 364.
+
+`ReadOnlyMemory<T>::Slice(intcs start)` evaluated `length_ - start` as the second **call
+argument**, so the subtraction ran before the two-argument overload's already-correct
+unsigned check could reject `start`. `Slice(INTCS_MIN)` on a three-element memory reported
+`ReadOnlyMemory.hpp:140:25: runtime error: signed integer overflow: 3 - -2147483648`. It
+then happened to throw the correct exception, which is exactly why this is CCF-004
+**class B**: the repair moves the check earlier and nothing else. It is now the single
+unsigned compare real .NET uses at `ReadOnlyMemory.cs:154-163`, so a negative `start`
+compares as huge and one comparison covers both ends; once `0 <= start <= length_` is
+known, `length_ - start` provably cannot overflow.
+
+**Byte-identical exception, proven not assumed.** The probe prints the exception type,
+`paramName` and full `Message` for every boundary of every one-argument `Slice`;
+`build-probe/1833_prefix_values.log` and the values section of
+`build-probe/1833_postfix.log` are **identical** with the pre-fix UBSan line removed. The
+rejected inputs already threw `ArgumentOutOfRangeException("start")` with
+`"Specified argument was out of the range of valid values. (Parameter 'start')"`, and still
+do.
+
+**The whole one-argument-`Slice` family was inventoried, as the ticket required, and the
+audit's site count is confirmed correct at one.** `Memory<T>::Slice(intcs)`,
+`Span<T>::Slice(intcs)`, `ReadOnlySpan<T>::Slice(intcs)` and
+`ArraySegment<T>::Slice(intcs)` all validate with a signed `start < 0 || start > length_`
+pair-compare **before** subtracting, so their `length_ - start` is unreachable with an
+out-of-range operand; each was run with `INTCS_MIN` in its own process at `-O0` and
+measured **clean** (`build-probe/1833_prefix_ub.log`, cases 2–5). They are pinned by tests
+anyway, so a later "simplification" into the old forward-then-check shape is caught.
+`ReadOnlySequence<T>`'s five one-argument `Slice` forms were inventoried too and are clear:
+each resolves through `GetPosition`, which validates, and its `Slice(longcs, longcs)`
+carries a comment recording the same class of fix from an earlier ticket.
+
+`ArraySegment<T>::Slice`'s `paramName` is `"index"`, not `"start"`. That is **correct and
+deliberate** — .NET's `ArraySegment<T>.Slice`'s parameter is named `index` — and is now
+pinned as such so the divergence is not "harmonised" away.
+
+**This finding is why plan §3 cause 2 exists**, and it held: at `-O1` GCC folds the wholly
+compile-time `3 - INT_MIN` and emits **no UBSan check at all**, so the audited case passes
+silently. The probe uses `-O0` and additionally holds its operands in `volatile`, so it
+does not depend on the optimisation level.
+
+**Tests: +7 permanent regressions.** `SharpRuntimeTests_Core_Base` **5022/5022**, clean
+under **ASan + UBSan + LSan with zero reports** (`build-asan/1833_core_asan.log`), with the
+ASan `Batch3TypeTests.cpp.o` proven recompiled first; ASan matters here because plan §7
+names it for the one member whose fix touches a pointer and a length. Post-fix probe run
+under `-fno-sanitize-recover=undefined`, so a surviving site would abort rather than print.
+Repository gate: **0 warnings, 0 errors, 14,126 tests across 37 executables** (was 14,119).
+Module graph **41 / 91**.
+
+**Source and ABI consequences: none.** No signature, virtual, vtable, object layout or
+mangled symbol changed. The function was not `noexcept` before and is not now; it already
+threw for every input the new guard rejects.

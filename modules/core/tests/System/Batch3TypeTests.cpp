@@ -240,3 +240,128 @@ TEST(FlagsAttributeNewTests, IsA_Attribute) {
 TEST(FlagsAttributeNewTests, DefaultCtor_DoesNotThrow) {
     EXPECT_NO_THROW(System::FlagsAttribute f);
 }
+
+// ---------------------------------------------------------------------------
+// CCF-004 / SR-AUD-049 — one-argument Slice validates before it subtracts (#1833)
+//
+// `ReadOnlyMemory<T>::Slice(intcs start)` used to evaluate `length_ - start` as the
+// second CALL ARGUMENT, so the subtraction happened before the two-argument overload's
+// unsigned check could reject `start`. For `start == INTCS_MIN` that subtraction is
+// undefined behaviour; the audited input was `Slice(INTCS_MIN)` on a 3-element memory
+// (`signed integer overflow: 3 - -2147483648`). The exception it then threw was already
+// correct, which is why this is CCF-004 class B: the repair must leave the exception
+// type, paramName and message byte-identical and only move the check earlier.
+//
+// The whole one-argument-Slice family is covered here, not only the audited type, because
+// the inventory that accompanied the fix is part of the finding's remediation:
+// `Memory<T>`, `Span<T>`, `ReadOnlySpan<T>` and `ArraySegment<T>` each validate with a
+// signed pair-compare BEFORE subtracting and were measured clean. These tests pin that,
+// so a later "simplification" of any of them into a forward-then-check shape fails here.
+// ---------------------------------------------------------------------------
+
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/ArraySegment.hpp"
+#include "System/Memory.hpp"
+#include "System/Span.hpp"
+
+namespace {
+    // The exact strings measured before the change (build-probe/1833_prefix_values.log).
+    constexpr const char* kStartMessage =
+        "Specified argument was out of the range of valid values. (Parameter 'start')";
+}
+
+TEST(SliceDefinedArithmeticTests, ReadOnlyMemorySliceRejectsIntcsMinWithTheUnchangedException) {
+    std::vector<int> v{10, 20, 30};
+    System::ReadOnlyMemory<int> m(v.data(), 3);
+    try {
+        (void)m.Slice(SharpRuntime::INTCS_MIN);
+        FAIL() << "Slice(INTCS_MIN) must throw";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "start");
+        EXPECT_EQ(e.getMessageProperty(), kStartMessage);
+    }
+}
+
+TEST(SliceDefinedArithmeticTests, ReadOnlyMemorySliceRejectsEveryOutOfRangeStart) {
+    std::vector<int> v{10, 20, 30};
+    System::ReadOnlyMemory<int> m(v.data(), 3);
+    for (SharpRuntime::intcs bad : {SharpRuntime::INTCS_MIN, SharpRuntime::INTCS_MIN + 1,
+                                    static_cast<SharpRuntime::intcs>(-1),
+                                    static_cast<SharpRuntime::intcs>(4),
+                                    SharpRuntime::INTCS_MAX}) {
+        EXPECT_THROW((void)m.Slice(bad), System::ArgumentOutOfRangeException) << "start=" << bad;
+    }
+}
+
+TEST(SliceDefinedArithmeticTests, ReadOnlyMemorySliceKeepsEveryValidStartUnchanged) {
+    std::vector<int> v{10, 20, 30};
+    System::ReadOnlyMemory<int> m(v.data(), 3);
+    EXPECT_EQ(m.Slice(0).getLengthProperty(), 3);
+    EXPECT_EQ(m.Slice(1).getLengthProperty(), 2);
+    EXPECT_EQ(m.Slice(2).getLengthProperty(), 1);
+    // start == Length is legal and yields an empty memory — the boundary the guard must
+    // NOT reject; `>` rather than `>=` in the unsigned compare is what makes it legal.
+    EXPECT_EQ(m.Slice(3).getLengthProperty(), 0);
+    // Contents, not only lengths.
+    auto s = m.Slice(1);
+    EXPECT_EQ(s[0], 20);
+    EXPECT_EQ(s[1], 30);
+    // Composition still works, so the guard is not applied to the wrong length.
+    EXPECT_EQ(m.Slice(1).Slice(1).getLengthProperty(), 1);
+    EXPECT_EQ(m.Slice(1).Slice(1)[0], 30);
+}
+
+TEST(SliceDefinedArithmeticTests, DefaultReadOnlyMemorySliceZeroStaysLegal) {
+    System::ReadOnlyMemory<int> empty;
+    EXPECT_EQ(empty.Slice(0).getLengthProperty(), 0);
+    EXPECT_THROW((void)empty.Slice(1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)empty.Slice(SharpRuntime::INTCS_MIN), System::ArgumentOutOfRangeException);
+}
+
+TEST(SliceDefinedArithmeticTests, EverySiblingOneArgumentSliceAlsoRejectsIntcsMin) {
+    // Inventoried alongside the fix and measured clean under UBSan; pinned so that a later
+    // rewrite into ReadOnlyMemory's old forward-then-check shape is caught here.
+    std::vector<int> v{10, 20, 30};
+
+    System::Memory<int> mem(v);
+    EXPECT_THROW((void)mem.Slice(SharpRuntime::INTCS_MIN), System::ArgumentOutOfRangeException);
+    EXPECT_EQ(mem.Slice(3).getLengthProperty(), 0);
+
+    System::Span<int> sp(v.data(), 3);
+    EXPECT_THROW((void)sp.Slice(SharpRuntime::INTCS_MIN), System::ArgumentOutOfRangeException);
+    EXPECT_EQ(sp.Slice(3).getLengthProperty(), 0);
+
+    System::ReadOnlySpan<int> rsp(v.data(), 3);
+    EXPECT_THROW((void)rsp.Slice(SharpRuntime::INTCS_MIN), System::ArgumentOutOfRangeException);
+    EXPECT_EQ(rsp.Slice(3).getLengthProperty(), 0);
+
+    System::ArraySegment<int> seg(v);
+    EXPECT_THROW((void)seg.Slice(SharpRuntime::INTCS_MIN), System::ArgumentOutOfRangeException);
+    EXPECT_EQ(seg.Slice(3).getCountProperty(), 0);
+}
+
+TEST(SliceDefinedArithmeticTests, ArraySegmentSliceKeepsItsOwnParamNameAndMessage) {
+    // Deliberately NOT "start": .NET's ArraySegment<T>.Slice's parameter is named `index`,
+    // so this divergence from the rest of the family is correct and is pinned as such.
+    std::vector<int> v{10, 20, 30};
+    System::ArraySegment<int> seg(v);
+    try {
+        (void)seg.Slice(SharpRuntime::INTCS_MIN);
+        FAIL() << "ArraySegment::Slice(INTCS_MIN) must throw";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "index");
+        EXPECT_EQ(e.getMessageProperty(),
+                  "ArraySegment::Slice: index out of range (Parameter 'index')");
+    }
+}
+
+TEST(SliceDefinedArithmeticTests, TwoArgumentReadOnlyMemorySliceIsStillReachableAndUnchanged) {
+    // The one-argument guard must not shadow the two-argument overload's own checks.
+    std::vector<int> v{10, 20, 30};
+    System::ReadOnlyMemory<int> m(v.data(), 3);
+    EXPECT_EQ(m.Slice(1, 2).getLengthProperty(), 2);
+    EXPECT_EQ(m.Slice(3, 0).getLengthProperty(), 0);
+    EXPECT_THROW((void)m.Slice(1, 3), System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)m.Slice(SharpRuntime::INTCS_MAX, 10), System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)m.Slice(0, -1), System::ArgumentOutOfRangeException);
+}

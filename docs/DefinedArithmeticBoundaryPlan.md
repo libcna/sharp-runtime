@@ -465,3 +465,38 @@ The current state is:
 
 Audit numbering remains frozen at **364**; the index reads **24 remediated / 340
 confirmed** after #1831.
+
+---
+
+## 14. Confirmations and corrections from #1833 (2026-07-30)
+
+**14.1 — §4.2's proposed transformation was correct as written and was applied verbatim.**
+The one unsigned compare `static_cast<uintcs>(start) > static_cast<uintcs>(length_)` ahead
+of the forwarding call is what real .NET does at `ReadOnlyMemory.cs:154-163`, and the
+exception type, `paramName` and full `Message` are byte-identical before and after
+(`build-probe/1833_prefix_values.log` vs `build-probe/1833_postfix.log`).
+
+**14.2 — §4.2's inventory question is answered: SR-AUD-049 is ONE site, not four.**
+§4.2 required checking whether `Memory<T>`, `Span<T>` and `ReadOnlySpan<T>` share the
+one-argument shape. They have the overload but **not** the defect: each validates with a
+signed `start < 0 || start > length_` pair-compare *before* subtracting, so the subtraction
+is unreachable with an out-of-range operand. `ArraySegment<T>::Slice(intcs index)` is the
+same. All four were run with `INTCS_MIN` in their own process at `-O0` and measured clean.
+`ReadOnlySequence<T>`'s five one-argument forms are clear as well — each resolves through
+`GetPosition`, which validates.
+
+So the family has **one** defective member, and the audit's site count for SR-AUD-049 was
+right. That is worth recording explicitly, because §2.1 and §12 each *raised* a count; a
+plan that only ever finds more sites has not been checked, it has been trusted.
+
+**14.3 — the two idioms in the family are both correct, and neither was harmonised.**
+`ReadOnlyMemory` now uses .NET's unsigned single compare; its four siblings keep the signed
+pair-compare. Both make the following subtraction provably safe, and changing four working
+functions to match a fifth is not this family's business. Likewise
+`ArraySegment<T>::Slice`'s `paramName` is `"index"`, matching .NET's own parameter name, and
+is now pinned rather than aligned with the `"start"` used elsewhere.
+
+**14.4 — §3 cause 2 was confirmed on the case it was written for.** At `-O1` GCC folds the
+wholly compile-time `3 - INT_MIN` and emits no check, so the audited case passes silently.
+`-O0` plus `volatile` operands is what makes the probe independent of the optimisation
+level; do not relax either.

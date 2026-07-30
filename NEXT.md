@@ -7493,3 +7493,46 @@ tree's core objects as pre-#1830. Repository gate **14,119 tests across 37 execu
 0 warnings, 0 errors. Audit index **24 remediated / 340 confirmed of 364**. No public
 signature, virtual, vtable, object layout or mangled symbol changed; `tupleHashCombine`
 remains `noexcept`, pinned by a `static_assert` in a test.
+
+## Completed ReadOnlyMemory::Slice ordering: ticket #1833 (2026-07-30)
+
+`REMED-CORE-READONLYMEMORY-SLICE-ORDER`, P2, size S. **CCF-004 class B**, fourth member of
+the family implemented. **SR-AUD-049 is now `remediated`.**
+
+`ReadOnlyMemory<T>::Slice(intcs start)` evaluated `length_ - start` as the second **call
+argument**, so the subtraction ran before the two-argument overload's already-correct
+unsigned check could reject `start`. `Slice(INTCS_MIN)` on a three-element memory reported
+`ReadOnlyMemory.hpp:140:25: signed integer overflow: 3 - -2147483648`, then threw the
+*correct* exception — which is exactly what makes it class B. It now carries .NET's own
+single unsigned compare from `ReadOnlyMemory.cs:154-163` ahead of the forwarding call.
+
+**Byte-identical exception, measured.** The probe prints type, `paramName` and full
+`Message` for every boundary of every one-argument `Slice`;
+`build-probe/1833_prefix_values.log` and the values section of
+`build-probe/1833_postfix.log` are identical once the pre-fix UBSan line is removed.
+
+**SR-AUD-049 is ONE site, and this time the audit's count was right.** §4.2 of the plan
+required inventorying the siblings. `Memory<T>`, `Span<T>`, `ReadOnlySpan<T>` and
+`ArraySegment<T>` all have the one-argument overload but validate with a signed
+`start < 0 || start > length_` pair-compare **before** subtracting; each was run with
+`INTCS_MIN` in its own process at `-O0` and measured **clean**. `ReadOnlySequence<T>`'s five
+one-argument forms are clear too — they resolve through the validating `GetPosition`. Worth
+stating plainly: §2.1 and §12 each *raised* a count, so a family plan that only ever finds
+more sites has not been checked, only trusted. All four clean siblings are pinned by tests
+anyway, so a later rewrite into the old forward-then-check shape fails.
+
+**Two idioms coexist deliberately.** `ReadOnlyMemory` uses .NET's unsigned single compare;
+its siblings keep the signed pair-compare. Both make the subtraction provably safe, and
+`ArraySegment<T>::Slice`'s `paramName` stays `"index"` — .NET's own parameter name — pinned
+rather than harmonised to `"start"`.
+
+**Plan §3 cause 2 confirmed on the case it was written for:** at `-O1` GCC folds the wholly
+compile-time `3 - INT_MIN` and emits no check, so the audited case passes silently. The
+probe uses `-O0` **and** `volatile` operands.
+
+7 permanent regressions. `SharpRuntimeTests_Core_Base` **5022/5022**, clean under
+ASan + UBSan + LSan, 0 reports (`build-asan/1833_core_asan.log`; ASan matters here because
+plan §7 names it for the one member touching a pointer and a length). Post-fix probe run
+under `-fno-sanitize-recover=undefined`. Repository gate **14,126 tests across 37
+executables**, 0 warnings, 0 errors. Audit index **25 remediated / 339 confirmed of 364**.
+No public signature, virtual, vtable, object layout or mangled symbol changed.

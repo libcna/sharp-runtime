@@ -137,6 +137,22 @@ namespace System {
          * @throws System::ArgumentOutOfRangeException if start is out of bounds.
          */
         [[nodiscard]] ReadOnlyMemory<T> Slice(intcs start) const {
+            // CCF-004 class B (validate first): `length_ - start` used to be evaluated as the
+            // second CALL ARGUMENT, so the subtraction ran before the two-argument overload's
+            // already-correct unsigned check could reject `start`. For `start == INTCS_MIN` that
+            // subtraction is undefined behaviour -- `Slice(INTCS_MIN)` on a 3-element memory was
+            // SR-AUD-049's audited input and reported
+            // `signed integer overflow: 3 - -2147483648`. It then happened to throw the right
+            // exception, but only after the UB.
+            //
+            // Real .NET's ReadOnlyMemory.cs:154-163 validates with exactly this one unsigned
+            // compare before touching `_length - start`; a negative start compares as huge, so
+            // one comparison covers both ends. Once `0 <= start <= length_` is known,
+            // `length_ - start` provably cannot overflow. The exception type, paramName and
+            // message are unchanged -- the two-argument overload already threw
+            // ArgumentOutOfRangeException("start") for every input this now rejects directly.
+            if (static_cast<SharpRuntime::uintcs>(start) > static_cast<SharpRuntime::uintcs>(length_))
+                throw System::ArgumentOutOfRangeException("start");
             return Slice(start, length_ - start);
         }
 
