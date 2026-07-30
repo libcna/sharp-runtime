@@ -4069,3 +4069,46 @@ design covering that line than by four per-type guards.
 Full detail, including build directories, the three-job parallelism record and the
 `build-probe` disk accounting, is in `NEXT.md` under "CONTEXT-REFRESH handoff — 2026-07-29,
 text/IO + CCF-004 batch".
+
+### Autonomous batch handoff, 2026-07-30 (CCF-004 class A/B closure and the Stream capability design)
+
+Seven tickets on `feature/remediation-batch-ccf004-stream-design`: **#1831**
+(`tupleHashCombine`, **SR-AUD-062 remediated**), **#1833** (`ReadOnlyMemory::Slice`,
+**SR-AUD-049 remediated**), **#1834** (`Int128` MinValue, **SR-AUD-019 remediated**), **#1835**
+(`Utf8Parser` Int64 minimum, **SR-AUD-084 remediated**), **#1839** (the shared Stream capability
+design, design-only), **#1841** (zlib closed-state capabilities) and **#1840** (Stream capability
+documentation).
+
+**CCF-004's class A and class B members are now complete.** Six of the eight are done
+(#1830, #1831, #1832, #1833, #1834, #1835); only the two **class C** members remain, #1836
+(`TimeSpan`) and #1837 (`DateOnly`), both still **ready** and both now reproduced against a
+current sanitizer tree with their evidence recorded as
+[`docs/DefinedArithmeticBoundaryPlan.md`](docs/DefinedArithmeticBoundaryPlan.md) §16.
+
+Baselines, all verified rather than carried forward: repository gate **14,145 tests across 37
+executables**, 0 warnings; audit **27 remediated / 337 confirmed / 364**; module graph 41 / 91;
+canonical Doxygen **1,941** against the 1,942 ceiling; negative fixtures 9 / 66; version seams
+2 / 18.
+
+**Seven premises were corrected by measurement, four of them in this repository's own design
+documents.** The plan's §2 lists a finding by the site that *reports*, which is right for
+enumerating a repair and wrong for enumerating a public surface: `Int128` had four more public
+doors and `Utf8Parser` four more overloads than §2 names (§15). UBSan **deduplicates by source
+location**, so shapes sharing a line hide each other even in a recovering build — one process per
+shape (§13.2). "Largest operand" is **not** the worst case for a shift-then-add step (§13.1).
+`SR-AUD-049` really is one site, and recording a count that did **not** move matters as much as
+raising one (§14.2). The `Stream` family's premise was a third of the problem: all **three**
+capabilities have different undocumented defaults and the two failure directions are **opposite**.
+`TimeSpan::Parse` does not throw either, and `DateOnly::AddYears` is a **second**
+silent-wrong-answer member where the plan claimed there was only one (§16.1, §16.4).
+
+Ready queue: **#1836** and **#1837** (the two class C CCF-004 members, evidence already
+captured), then **#1838** (`SslApplicationProtocol` hash, XS) and **#1842** (`FileStream` closed
+capabilities, XS). Blocked: **#1773** (untouched), **#1804**, and **#1824** / **#1827** /
+**#1828**, which now share **one** stated approval —
+[`docs/StreamCapabilityContractDesign.md`](docs/StreamCapabilityContractDesign.md) §6.2 — whose
+in-repository migration cost was **measured** at one line in one test double rather than
+estimated.
+
+Full detail, including build directories, the three-job parallelism record and the `build-probe`
+disk accounting, is in `NEXT.md` under "CONTEXT-REFRESH handoff — 2026-07-30".

@@ -528,3 +528,67 @@ several downstream sites.
 
 Both findings' site counts stand at what §2 records (two each). Only the reachability is
 corrected, by appending.
+
+---
+
+## 16. Pre-implementation reproduction of the two class C members (2026-07-30)
+
+The batch that closed #1831, #1833, #1834 and #1835 did **not** implement #1836 or #1837. It
+did reproduce both against a `build-asan` tree **proven current** — `DateOnly.cpp.o` and
+`TimeSpan.cpp.o` are both newer than their sources and `libsharp_runtime_core.a` was relinked
+under #1834 — with the **recovering** build and **one process per case**, so every site in every
+call is visible. Evidence: `build-probe/1836_1837_classc_survey.cpp` and
+`build-probe/1836_1837_prefix.log`. Four things came out of it that §2 does not say.
+
+**16.1 — `TimeSpan::Parse` does not throw either; it returns the wrapped value.** §2 case 15
+records only that `TryParse` returns `parsed=1`. Measured, `Parse("2147483647.00:00:00")`
+**returns** a `TimeSpan` of `-7695280436664713216` ticks rather than raising anything. So #1836's
+criterion "`Parse` raises `OverflowException`" is a **behaviour change on the throwing entry
+point too**, not merely a consequence of fixing `TryParse`. Both entry points must be stated in
+that ticket's compatibility argument.
+
+**16.2 — the largest day count that must keep parsing is measured.**
+`TryParse("10675199.02:48:05")` succeeds with `ticks = 9223372036850000000`. That is #1836's
+"largest input that must still succeed", now a measured value rather than one to be derived.
+
+**16.3 — SR-AUD-060's cascade is reachable WITHOUT the entry-point overflow.** §2.1 records the
+cascade as what happens *after* a wrapped day number reaches `jdnToDate`. In the **negative**
+direction it is reached directly: `FromDayNumber(INTCS_MIN)` and
+`MinValue.AddDays(INTCS_MIN)` each report `DateOnly.cpp:35`, `:37` and `:39` and **no**
+diagnostic at `:65` or `:76`, because `INTCS_MIN + JDN_EPOCH` does not overflow — it is simply a
+wildly out-of-range argument that `jdnToDate` then multiplies. A repair that only guards the
+four entry points against *overflow* would leave these three sites live. `jdnToDate` must be
+provably unreachable with an out-of-range argument, which is what #1837's acceptance criterion
+already demands and which this measurement shows is a **separate** requirement rather than a
+restatement of the first one.
+
+**16.4 — `AddYears` produces a silent WRONG ANSWER, so SR-AUD-060 has a class C wrong-answer of
+its own.** §2.2 says `TimeSpan::TryParse` "is the only member of this family that silently
+produces one". That is **wrong**. `DateOnly(1,1,1).AddYears(INTCS_MIN)` reports the overflow at
+`DateOnly.cpp:92` and then **returns `1-01-01` successfully** — `INTCS_MIN * 12` is exactly
+`-6 · 2^32`, so it wraps to **zero** and `AddYears` degenerates into `AddMonths(0)`, i.e. an
+identity operation. A caller asking for a date 2.1 billion years earlier gets the same date back
+and no error. `AddMonths(INTCS_MIN)` by contrast throws cleanly with no diagnostic at all.
+
+So the family has **two** silent-wrong-answer members, not one, and #1837 must carry the class C
+compatibility argument for `AddYears` specifically as well as for the out-of-range rejections.
+
+**16.5 — a bounded-iteration requirement, confirmed as real.** `AddMonths`'s normalisation is
+`while (m > 12) { m -= 12; ++y; }` and `while (m < 1) { m += 12; --y; }` with `m = month_ + n`.
+For `AddMonths(INTCS_MAX)` the wrapped `m` is `-2147483637`, so the second loop runs about
+**179 million** iterations before returning. It completes, so this is not a hang, but the loop
+is unbounded in principle and is on a public path. #1837's "no month-normalisation loop can run
+more than a bounded number of iterations" criterion is therefore load-bearing, not defensive.
+
+**16.6 — every current rejection names `year`.** All eight rejecting `DateOnly` cases throw
+`ArgumentOutOfRangeException` with paramName `year` and the message
+`"DateTime: date component out of range (Parameter 'year')"`, from the `DateTime` constructor
+rather than from `DateOnly`. §4.3 predicted this; it is now measured, so #1837's paramName
+decision has the exact "before" string to reason about.
+
+**Neither ticket's classification changes.** Both remain **ready**, both remain CCF-004 members
+in good standing, and §9's conclusion that neither needs a **new** approval still holds — the
+inputs 16.1 and 16.4 describe are undefined behaviour producing demonstrably wrong answers, which
+is the compatible-narrowing argument §4.3 already states and which each ticket must restate for
+itself. What changed is that the argument is now larger: it must cover `Parse` as well as
+`TryParse`, and `AddYears`'s identity-result as well as the rejections.

@@ -7740,3 +7740,152 @@ requires a stream whose capability depends on its lifetime to fold that in, citi
 
 No test-count change. Repository gate **14,145 tests across 37 executables**, 0 warnings, 0
 errors. Doxygen **1,941** against the 1,942 ceiling, unchanged. No source or ABI consequence.
+
+## CONTEXT-REFRESH handoff — 2026-07-30, CCF-004 class A/B closure + Stream capability design
+
+Branch `feature/remediation-batch-ccf004-stream-design`. **Nothing pushed, merged, rebased or
+tagged.** CNA and mobile-eggbert were **not inspected or modified**; **#1773 remains `blocked`**.
+No compilation exceeded **three** aggregate jobs.
+
+### Tickets completed (seven)
+
+| Ticket | Key | Finding | Outcome |
+|---|---|---|---|
+| **#1831** | `REMED-CORE-TUPLE-DEFINED-HASH` | **SR-AUD-062 → `remediated`** | `tupleHashCombine` computes in `uintcs`; every hash value byte-identical |
+| **#1833** | `REMED-CORE-READONLYMEMORY-SLICE-ORDER` | **SR-AUD-049 → `remediated`** | `Slice(start)` validates before subtracting, with .NET's unsigned compare |
+| **#1834** | `REMED-CORE-INT128-MINVALUE-DEFINED` | **SR-AUD-019 → `remediated`** | neither parse nor format negates a signed `__int128` |
+| **#1835** | `REMED-BUFFERS-UTF8PARSER-INT64-MIN` | **SR-AUD-084 → `remediated`** | both `Int64` minimum paths negate in the unsigned domain |
+| **#1839** | `DESIGN-IO-STREAM-CAPABILITY-CONTRACT` | none (design) | `docs/StreamCapabilityContractDesign.md`; **one** approval now unblocks three tickets |
+| **#1841** | `REMED-IO-COMPRESSION-CLOSED-CAPABILITIES` | none | the three zlib wrappers report `false` after `Close()`; **no** new member |
+| **#1840** | `DOC-IO-STREAM-CAPABILITY-DEFAULTS` | none | `Stream.hpp` finally says what omitting a capability override declares |
+
+**CCF-004's class A and class B members are complete** — six of eight done (#1830–#1835);
+only the two **class C** members remain.
+
+### Current baselines — all verified this batch, not carried forward
+
+| Baseline | Value |
+|---|---|
+| repository gate | **14,145 tests across 37 executables**, 0 warnings, 0 errors |
+| audit | **27 remediated / 337 confirmed / 364 total** |
+| module graph | 41 modules / 91 edges |
+| canonical Doxygen | **1,941** warnings (ceiling 1,942) |
+| negative fixtures | 9 fixtures / 66 sites, every site rejected |
+| version seams | 2 seams / 18 specialisations |
+| `Core_Base` | 5030 · `Buffers` 522 · `IO_Compression` 37 · `IO` 586 |
+
+The inherited handoff's baselines were **accurate** this time (14,113 / 23 remediated / 341
+confirmed), which is worth recording because the previous two were not. Counts were still
+re-derived by counting index rows rather than trusting the prose.
+
+### Premises corrected (seven, all by measurement, four in this repository's own designs)
+
+1. **A finding's §2 site list enumerates the *repair*, not the *public surface*.** `Int128` has
+   **four more public doors** onto the same two sites (`Parse`, and `ToString("D"/"d"/"G")` plus
+   the width-padded forms); `Utf8Parser` has **four more overloads** (`int32_t`, `int16_t`,
+   `int8_t` and their `N` forms) that execute the undefined negation and only *then* fail the
+   caller's width check. Neither needed extra work; both needed tests. Plan §15.
+2. **UBSan deduplicates by source location**, so shapes sharing a line hide each other **even in
+   a recovering build**. §12 said "use the recovering build"; that is necessary and **not
+   sufficient**. One process per shape. Plan §13.2.
+3. **"Largest operand" is not the worst case for a shift-then-add step.** Three of five `Tuple`
+   shapes overflow; `combine(INTCS_MAX, 0)` does **not**. Plan §13.1.
+4. **SR-AUD-049 really is one site** — `Memory`, `Span`, `ReadOnlySpan` and `ArraySegment` all
+   validate before subtracting. Recording a count that did **not** move matters as much as
+   raising one; a plan that only ever finds more sites has not been checked. Plan §14.2.
+5. **The `Stream` family's premise was a third of the problem.** Not just
+   `getCanWriteProperty() == false`: all **three** capabilities have different undocumented
+   defaults (write `false`, read **`true`**, seek `false`) and the two failure directions are
+   **opposite** — write over-rejects, read under-rejects. Design §1.
+6. **Every production `Stream` already overrides both `CanRead` and `CanWrite`.** Pure-virtualising
+   those two costs **zero** production edits; the obstacle is entirely outside production code,
+   reversing the assumption the three blocked tickets were written under. Design §2.1.
+7. **`TimeSpan::Parse` does not throw either**, and **`DateOnly::AddYears` is a *second*
+   silent-wrong-answer member** where plan §2.2 claimed `TimeSpan::TryParse` was the only one:
+   `AddYears(INTCS_MIN)` wraps `INTCS_MIN * 12` to exactly **zero** and returns the **same date**.
+   Plan §16.1, §16.4.
+
+### Newly created tickets (five)
+
+- **Ready, no approval:** **#1838** (`SslApplicationProtocol::GetHashCode`, XS — the same signed
+  djb2 overflow, found while inventorying SR-AUD-062; `"spdy/3.1"` reproduces),
+  **#1842** (`FileStream` `CanRead`/`CanWrite` ignore `is_open()`, XS — #1826's defect in another
+  type).
+- **Done this batch:** **#1839** (design), **#1840**, **#1841**.
+
+No `SR-AUD-*` identifier was issued for any of them. Audit numbering stays frozen at **364**.
+
+### The single approval that unblocks three tickets
+
+`docs/StreamCapabilityContractDesign.md` **§6.2**, quoted in full there:
+
+> Adopt .NET's rule that a `Stream` subclass which does not override `getCanWriteProperty()` is
+> **unwritable**, accepting that a custom stream implementing `Write()` without overriding the
+> property will start being **rejected at construction** by `StreamWriter`, by `ZipArchive` in
+> `Create`/`Update` mode, and by the zlib wrappers' delegated `CanWrite`; the fix for such a
+> stream is one line.
+
+**Its in-repository cost was measured, not estimated:** all three candidate guards were applied
+at once and the whole gate run (`build-probe/1839_capability_experiment.patch`,
+`build-probe/1839_experiment_full.log`; tree reverted and rebuilt clean). **Exactly two tests of
+14,139 fail** — both `ZipArchiveTests` over `ThrowingWriteStream`, fixable by **one line**.
+`StreamWriter`'s guard and the zlib change break **nothing**. Approving §6.2 unblocks **#1824**,
+**#1827** and **#1828**'s delegation half together.
+
+### Remaining ready queue, in recommended order
+
+1. **#1836** `TimeSpan` — M, class C. Evidence already captured (`build-probe/1836_1837_prefix.log`,
+   binary **retained**). Its argument must cover **`Parse` as well as `TryParse`** (§16.1).
+2. **#1837** `DateOnly` — M, class C, **seven sites plus two additions**: the `jdnToDate` cascade
+   is reachable **without** any entry-point overflow in the negative direction (§16.3), and
+   `AddYears` returns a **silently wrong date** rather than throwing (§16.4). The
+   bounded-loop criterion is load-bearing — `AddMonths(INTCS_MAX)` runs ~**179 million**
+   iterations (§16.5).
+3. **#1838** `SslApplicationProtocol` hash — XS, mechanical, the #1831 idiom; probe binary retained.
+4. **#1842** `FileStream` closed capabilities — XS, the #1826 idiom. Do it **before** #1824, since
+   a closed `FileStream` would otherwise **pass** #1824's new guard and fail at first write.
+
+**Next recommended family after CCF-004:** CCF-005 or CCF-003, both of which touch `Int128.hpp`
+and `IntPtr.hpp` with *different* causes — do not let a CCF-004 ticket drift into them.
+
+### Sanitizer-tree freshness — corrected
+
+The previous handoff warned that `build-asan`'s core archive was **pre-#1830/#1832**. That is
+**no longer true and was verified rather than assumed**: `libsharp_runtime_core.a` was relinked
+under #1834, and `DateOnly.cpp.o` and `TimeSpan.cpp.o` are both **newer than their sources**
+(the build system reported nothing to do when asked). Targets refreshed this batch:
+`SharpRuntimeTests_Core_Base` (three times), `SharpRuntimeTests_Buffers`,
+`SharpRuntimeTests_IO_Compression`, `sharp_runtime_core`, and the archives
+`libsharp_runtime_core.a`, `libsharp_runtime_io.a`, `libsharp_runtime_io_compression.a`. **The two
+class C tickets can trust this tree.** Every affected object was proven recompiled by timestamp
+before its sanitizer run was believed.
+
+### Build directories and disk
+
+| Directory | Start | End |
+|---|---|---|
+| `build/` | 715 M | 716 M |
+| `build-asan/` | 3.4 G | 3.5 G (**reused**, never recreated) |
+| `build-probe/` | 15 M | **22 M** (peaked at 28 M; **6 MB reclaimed**) |
+| `build-consumer/` | 12 K | 12 K |
+| `build-tmp/` | 201 M | 201 M |
+| `build-modular/` | 777 M | 777 M |
+| `cmake-build-debug/` | 88 M | 88 M |
+
+**6 MB reclaimed** by deleting five probe binaries belonging to **closed** tickets. Two binaries
+were **deliberately retained** — `1836_1837_classc_survey` (the next batch's starting evidence)
+and `1831_ssl_alpn_hash` (ready ticket #1838's) — so neither forces a wasteful rebuild. Every
+probe `.cpp`, `.log` and the capability-experiment `.patch` are retained. No build tree was
+cleaned, recreated or created under `/tmp`; `TMPDIR` was `build-tmp/` throughout. ccache stayed
+enabled.
+
+### Limitations
+
+- `scripts/check_version_seam_odr.py` is executable but `test/check_version_seam_odr_test.py` is
+  **not** — it must be run as `python3 test/check_version_seam_odr_test.py`. Still unfixed
+  (unrelated cleanup); still worth a one-line ticket.
+- `scripts/__pycache__/*.pyc` are **tracked in git**. Deleting them shows as staged deletions;
+  restore with `git checkout -- scripts/__pycache__`. Worth its own ticket to untrack.
+- `docs/StreamCapabilityContractDesign.md` inventories the **repository only**. Downstream
+  consumers were not inspected, per the batch boundary, so §6.2's approval must be judged on
+  external-stream risk that this document deliberately does not estimate.
