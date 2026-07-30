@@ -5938,3 +5938,51 @@ layout or symbol change.
 **Audit tally: 30 remediated / 334 confirmed / 364 total** (SR-AUD-020 moved `confirmed →
 remediated`; `AUDIT_FINDINGS_INDEX.md` updated). Numbering stays frozen at 364; **no new SR-AUD-\*
 identifier** was issued by this batch.
+
+## Post-audit remediation checkpoint — CCF-007 Pi-trig + parse whitespace (2026-07-30)
+
+Batch `feature/remediation-batch-floating-fidelity`. Two units.
+
+**Implementation #1861 (`REMED-CORE-PITRIG-FIDELITY`, P2, `done`)** remediated
+**SR-AUD-032** (CCF-007). `Single`/`Double` `SinPi`/`CosPi`/`TanPi`/`SinCosPi`
+were rewritten from the naive `std::sin(x*Pi)` forms to the .NET
+integral/fractional-turn reduction, ported verbatim from `sinpi(f)`/`cospi(f)`/
+`tanpi(f)` (amd/aocl-libm-ose, BSD 3-Clause) including the interval kernels
+`SinForIntervalPiBy4`/`CosForIntervalPiBy4`/`TanForIntervalPiBy4` (the Double
+kernels keep the reference `xTail` parameter, always `0.0` at the Pi-scaled call
+sites). Integer turns now return a sign-carried zero, Sin half-turns `±1`, Cos
+half-turns `0`, Tan half-turns `±Infinity`, non-finite inputs `NaN`, and ordinary
+fractional values stay within libm ULPs. `noexcept`/`[[nodiscard]]`/signatures/
+object layout unchanged (both header-only). **+20 permanent tests** (10 `SingleTest`
++ 10 `DoubleTests2`). UBSan + ASan + `float-cast-overflow` clean on the header-only
+inline probe `build-probe/1861_pitrig_probe.cpp`. **Premise corrected:** the
+CCF-007 plan §12 / ticket said `TanPi(1)==+0`; the reference returns `-0` for odd
+positive integers (`Single.cs:2125`, `Double.cs:2209`), so `TanPi(+1)==-0` and
+`TanPi(-1)==+0` — the tests assert the measured values. **Source and ABI
+consequences: none** beyond the enlarged inline bodies. `SR-AUD-032 → remediated`.
+
+**Implementation #1864 (parse whitespace slice, `done`)** landed the compatible
+portion of **SR-AUD-033** parse: `Single`/`Double` `tryParseCore` trims
+leading/trailing ASCII whitespace via a non-allocating `std::string_view` before
+the NaN/Infinity token checks and `FromCharsFloat`; interior whitespace and an
+empty/all-whitespace string still fail. `equalsIgnoreCaseAscii` widened to
+`std::string_view`. **+8 permanent tests** (4 `SingleTest` + 4 `DoubleTests`).
+The approval-gated tail (accept `,` thousands + return `±Infinity` on magnitude
+overflow) was split to **needs_user #1865** (no new SR-AUD identifier — part of
+SR-AUD-033), mirroring #1857→#1858. `SR-AUD-033` stays `confirmed` (partial) until
+its format slice (#1863) and parse tail (#1865) both land.
+
+**Design refinement** added `docs/FloatingValueFidelityPlan.md` §19 (reference-exact
+decision records for #1862/#1863 and the #1854↔#1862 reconciliation and #1858↔#1865
+comma decision), with reciprocal cross-refs in `ConversionBoundaryFamilyPlan.md`
+§19.5 and `DecimalBoundaryFamilyPlan.md` §12. #1858's design was already precise
+and is left blocked unchanged. No approval-gated implementation was performed.
+
+**Audit tally: 43 remediated / 321 confirmed / 364 total** (SR-AUD-032 moved
+`confirmed → remediated`; `AUDIT_FINDINGS_INDEX.md` updated). Numbering stays
+frozen at 364; **no new SR-AUD-\* identifier** was issued. (The intermediate
+30→42 progression from the CCF-004/CCF-005/CCF-006 and earlier CCF-007 batches was
+tracked in `NEXT.md`, `plan.md`, and `AUDIT_FINDINGS_INDEX.md`; this file's
+per-batch log resumes here.) Full component gate **14,396/14,396** across 37
+executables; Doxygen 1,941/1,942; module graph 41/91; seams 2/18; negative
+fixtures 9/66 — all green.

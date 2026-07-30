@@ -3,20 +3,22 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-30. Branch: `feature/remediation-batch-decimal-ccf007`
-(previously `feature/remediation-batch-ccf005-convert-decimal`). The test floor is
-now **14,368** (was 14,344): the CCF-005 Decimal slice landed #1855 (SR-AUD-036
-MidpointRounding, **closes CCF-008**, +9), #1856 (SR-AUD-038 negative zero, +6),
-#1857 (SR-AUD-035 parser compatible portion: whitespace + excess-precision
-rounding, +4), and the two compatible CCF-007 fixes #1859 (SR-AUD-031 ILogB
-non-finite sentinels, +3) and #1860 (SR-AUD-030 IsPow2 subnormals, +2), total
-+24. Post-audit tally: **42 remediated, 322 confirmed, of 364**. The CCF-007
-floating value-fidelity family was planned (`docs/FloatingValueFidelityPlan.md`)
-and opened as tickets #1859–#1864. New blocked tickets: #1858 (SR-AUD-035 comma
-+ overflow-taxonomy, `needs_user`), #1862 (SR-AUD-029 Round `noexcept`,
-`needs_user`), #1863 (SR-AUD-033 format output, `needs_user`). #1854 (SR-AUD-043b)
-stays `needs_user`; #1773 stays blocked. See "Autonomous batch handoff,
-2026-07-30 (CCF-005 Decimal slice + CCF-007 plan)" immediately below. The prior
+*Last verified: 2026-07-30. Branch: `feature/remediation-batch-floating-fidelity`
+(previously `feature/remediation-batch-decimal-ccf007`). The test floor is
+now **14,396** (was 14,368): the CCF-007 floating value-fidelity batch landed
+#1861 (SR-AUD-032 Pi-trig turn boundaries, +20) and the #1864 whitespace slice
+(SR-AUD-033 parse leading/trailing whitespace, +8), total +28. Post-audit tally:
+**43 remediated, 321 confirmed, of 364** (SR-AUD-032 moved `confirmed →
+remediated`). The prior batch left it at 14,368 / 42-remediated via the CCF-005
+Decimal slice (#1855 SR-AUD-036 `MidpointRounding`, **closed CCF-008**, +9; #1856
+SR-AUD-038 negative zero, +6; #1857 SR-AUD-035 compatible portion, +4) and the two
+compatible CCF-007 fixes #1859 (SR-AUD-031 ILogB, +3) and #1860 (SR-AUD-030
+IsPow2, +2). **New ticket this batch:** #1865 (SR-AUD-033 parse thousands +
+overflow-to-Infinity tail, `needs_user`, split from #1864 like #1857→#1858).
+Still `needs_user`: #1858 (Decimal comma + overflow taxonomy), #1862 (SR-AUD-029
+Round `noexcept`), #1863 (SR-AUD-033 format output), #1854 (SR-AUD-043b noexcept);
+#1773 stays blocked. See "Autonomous batch handoff, 2026-07-30 (CCF-007 Pi-trig +
+parse whitespace)" immediately below. The prior
 batch reached 14,344 via #1851/#1852/#1853/#1849; the one before that left the
 floor at 14,233 via the CCF-003 close
 (#1846/#1844/#1845/#1847, +31), tooling #1848, and CCF-005's first fix #1850 (+3);
@@ -180,6 +182,130 @@ per this repository's practice of preserving historical audit narrative.*
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
+
+## Autonomous batch handoff, 2026-07-30 (CCF-007 Pi-trig + parse whitespace)
+
+Branch `feature/remediation-batch-floating-fidelity` (off
+`feature/remediation-batch-decimal-ccf007`). Three commits: one
+implementation (#1861 + #1864), one design-refinement, plus this handoff.
+**Nothing pushed, merged, rebased, or tagged.** CNA and mobile-eggbert were not
+inspected or modified; #1773 remains blocked. Maximum aggregate compilation
+parallelism was **3 jobs** throughout (`cmake --build … --parallel 3`);
+`check_selective_components.sh` was run with `TMPDIR="$PWD/build-tmp"` (absolute)
+to honour the no-`/tmp`-builds rule.
+
+### Completed (committed)
+
+| Ticket | Finding | Fix | Sanitizer | Tests |
+|---|---|---|---|---|
+| **#1861** | SR-AUD-032 / CCF7-3 → **remediated** | `Single`/`Double` `SinPi`/`CosPi`/`TanPi`/`SinCosPi` rewritten from naive `std::sin(x*Pi)` to the .NET integral/fractional-turn reduction (amd/aocl-libm-ose kernels, ported verbatim incl. `SinForIntervalPiBy4`/`CosForIntervalPiBy4`/`TanForIntervalPiBy4`; Double kernels keep the reference `xTail`, always `0.0`). Integer turns → sign-carried zero; Sin half-turns → `±1`; Cos half-turns → `0`; Tan half-turns → `±Infinity`; non-finite → `NaN`; ordinary values within libm ULPs. `noexcept`/signatures/layout unchanged. | UBSan + ASan + `float-cast-overflow` clean (`build-probe/1861_pitrig_probe.cpp`) | +20 |
+| **#1864** | SR-AUD-033 parse whitespace slice / CCF7-6 → **partial** (SR-AUD-033 stays `confirmed`) | `Single`/`Double` `tryParseCore` trims leading/trailing ASCII whitespace via a non-allocating `std::string_view` before token/`FromCharsFloat` parsing; interior whitespace and empty/all-whitespace still fail. `equalsIgnoreCaseAscii` widened to `std::string_view`. The `,`-thousands + overflow→`±Infinity` tail split to **#1865** (`needs_user`). | n/a (value/parse contract) | +8 |
+
+**Batch total +28** over the 14,368 floor → **14,396 across 37 executables**,
+verified through the full component gate.
+
+### Premise corrected (measured 2026-07-30)
+
+- **`TanPi(1) == -0.0`, not `+0`.** The CCF-007 plan §12 and #1861's acceptance
+  text said `TanPi(1)==+0`. The reference returns `sign * (odd ? -0.0 : +0.0)`
+  at integer turns (`Single.cs:2125`, `Double.cs:2209`), so `TanPi(+1)==-0` (odd,
+  positive) and `TanPi(-1)==+0`. Tests assert the measured .NET values; the
+  correction is recorded in `docs/FloatingValueFidelityPlan.md` §12 and both
+  per-file audit reports. Historical text preserved.
+
+### Design deliverable
+
+`docs/FloatingValueFidelityPlan.md` §19 — reference-exact approval decision
+records for the three still-blocked CCF-007 tickets and the #1854 reconciliation:
+§19.1 #1862 (exact `ArgumentOutOfRangeException("digits", …)` messages, 0-6/0-15
+limits, option A drop-`noexcept` vs B clamp, no ABI symbol break, SR-AUD-040 kept
+separate); §19.2 #1863 (exact before/after `E`/`N`/`G` strings, backend decision,
+golden-file impact); §19.3 #1854↔#1862 (same decision shape, independent
+findings, decide together); §19.4 #1858↔#1865 shared comma decision. Reciprocal
+cross-refs in `ConversionBoundaryFamilyPlan.md` §19.5 and
+`DecimalBoundaryFamilyPlan.md` §12.
+
+### New ticket created this batch
+
+- **#1865** (SR-AUD-033 parse tail, `needs_user`) — `Single`/`Double` accept `,`
+  thousands (rejected→accepted widening; shares #1858's comma decision) and return
+  `±Infinity` on magnitude overflow instead of failing (throw→value). Split from
+  #1864. No new SR-AUD identifier (part of SR-AUD-033). Current behaviour verified
+  with `build-probe/1864_blocked_probe.cpp` (`TryParse("1,234.5")`/`("1e999")`
+  both false today).
+
+### Blocked / approval-gated (do NOT start without explicit per-action approval)
+
+- **#1862** SR-AUD-029 (CCF7-4) — `Round(x,digits)` needs `noexcept` dropped
+  (A) or clamp (B). Decision record `FloatingValueFidelityPlan.md` §19.1.
+- **#1863** SR-AUD-033 format (CCF7-5) — observable `ToString` text change. §19.2.
+- **#1865** SR-AUD-033 parse tail (CCF7-6) — thousands + overflow→Infinity. §19.4.
+- **#1858** SR-AUD-035 tail — Decimal comma + overflow taxonomy. `needs_user`.
+- **#1854** SR-AUD-043b — `ReadOnlyMemory`/`HashCode::AddBytes` drop-`noexcept`.
+  Sibling of #1862; decide together. §19.3.
+- **#1773** — CNA/mobile-eggbert migration; blocked until they upgrade.
+
+### Baselines (verified this batch)
+
+- Full component gate: **14,396 tests across 37 executables**, no failures.
+- Audit: **43 remediated, 321 confirmed, of 364** (SR-AUD-032 → remediated).
+- Module graph: **41 physical modules, 91 dependency edges** (unchanged).
+- Negative fixtures: **9 fixtures, 66 sites**, every site rejected (unchanged).
+- Version seams: **2 seams, 18 specialisations** (unchanged).
+- Canonical Doxygen: **1,941 warnings** (ceiling 1,942) — unchanged; the new
+  `/** */` doc-comments added no warning.
+- `db_consistency_check.py`, `validate_module_boundaries.py`,
+  `generate_component_catalog.py --check`, both seam checks, both negative-fixture
+  checks, `git diff --check`, `check_selective_components.sh`, and
+  `local_ci_check.sh build` all pass.
+
+### Sanitizer freshness
+
+The #1861 kernels are header-only inline, so the probe
+`build-probe/1861_pitrig_probe.cpp` was compiled **with**
+`-fsanitize=undefined,address` and separately `-fsanitize=undefined,float-cast-overflow`,
+which recompiles the changed inline code with instrumentation (no stale-archive
+risk). All special-value and ordinary-value cases pass; UBSan/ASan/`float-cast-overflow`
+report nothing. `build-asan` was not needed for this batch (the defects are
+value/exception-contract, and the inline-probe route instruments the exact code).
+
+### Build-directory sizes (start → end of batch)
+
+| Dir | Start | End |
+|---|---|---|
+| `build` | 721M | ~723M (incremental, ccache) |
+| `build-asan` | 3.5G | 3.5G (untouched this batch) |
+| `build-probe` | 30M | ~30M (probe sources + logs retained; binaries removed) |
+| `build-consumer` | 12K | 12K |
+| `build-tmp` | 8.1M | ~8M (selective-check mktemp matrix cleaned by the script) |
+
+No new build directories; `build` reused incrementally with `ccache`. Probe
+binaries (`1861_pitrig_probe*`, `1864_blocked_probe`) were removed after evidence
+was recorded; the probe **sources** are retained.
+
+### Known limitations / notes
+
+- **Concurrency observation (not acted on):** a separate, unrelated session was
+  compiling in the sibling `cnaaudit` checkout during this batch. That is outside
+  this repository's boundary; it was neither inspected nor modified, and this
+  batch's own compilation never exceeded 3 parallel jobs.
+- The Decimal `Parse("1,5")` comma semantics (#1858) and float-parse thousands
+  (#1865) are the **same** invariant-culture `,`-as-group decision, differing only
+  in blast radius (Decimal silent value change vs float rejected→accepted
+  widening); resolve together.
+- `Decimal` is 32 bytes (vs .NET's 16) — unrelated ABI deviation, out of scope.
+
+### Recommended next work
+
+CCF-007 has no remaining *compatible* ready work — SR-AUD-030/031/032 are
+remediated and the SR-AUD-033 whitespace slice landed; the four remaining members
+(#1862, #1863, #1865, plus #1858) are all approval-gated. Next autonomous batch
+should either (a) obtain the §19 decisions and land the gated set, or (b) start a
+new coherent compatible family from the audit index — build one family plan first
+(the `FloatingValueFidelityPlan.md` / `DefinedArithmeticBoundaryPlan.md` quality
+bar) before file-by-file fixes.
+
+---
 
 ## Autonomous batch handoff, 2026-07-30 (CCF-005 Decimal slice + CCF-007 plan)
 
