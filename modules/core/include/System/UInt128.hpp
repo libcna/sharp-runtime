@@ -91,10 +91,25 @@ namespace System {
         UInt128 operator^(const UInt128& o) const { return UInt128(value_ ^ o.value_); }
         /** @brief Bitwise NOT operator. */
         UInt128 operator~()               const { return UInt128(~value_); }
-        /** @brief Left-shift operator. */
-        UInt128 operator<<(int n)         const { return UInt128(value_ << n); }
-        /** @brief Right-shift operator. */
-        UInt128 operator>>(int n)         const { return UInt128(value_ >> n); }
+        /**
+         * @brief Left-shift operator.
+         *
+         * The shift count is masked to the low seven bits (`n & 127`), matching
+         * .NET `UInt128.operator <<`, which does `shiftAmount &= 0x7F`, and the
+         * sibling `Int128`. The mask is required because the native
+         * `unsigned __int128` shift is undefined behaviour for a count of 128 or
+         * more, or a negative count; a count in `[0, 127]` is unaffected.
+         */
+        UInt128 operator<<(int n)         const { return UInt128(value_ << (n & 127)); }
+        /**
+         * @brief Right-shift operator.
+         *
+         * The shift count is masked to the low seven bits (`n & 127`), matching
+         * .NET `UInt128.operator >>>` (`shiftAmount &= 0x7F`) and the sibling
+         * `Int128`; the native shift is undefined behaviour for a count of 128 or
+         * more, or a negative count, while a count in `[0, 127]` is unaffected.
+         */
+        UInt128 operator>>(int n)         const { return UInt128(value_ >> (n & 127)); }
 
         /** @brief Equality comparison. */
         bool operator==(const UInt128& o) const { return value_ == o.value_; }

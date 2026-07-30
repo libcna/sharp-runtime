@@ -102,6 +102,39 @@ TEST(UInt128Test, LeftShift) {
     EXPECT_EQ(shifted.getLowerProperty(), 16ULL);
 }
 
+// SR-AUD-020 / ticket #1843: an out-of-range shift count must not reach the
+// native `unsigned __int128` shift (undefined behaviour for a count >= 128 or a
+// negative count). .NET masks the count with `& 0x7F` (modulo 128), so a count
+// of 128 behaves as 0 and a count of 130 as 2; the sibling Int128 already does.
+// The measured pre-fix values were undefined behaviour, so these assertions pin
+// the .NET-defined result the mask now produces.
+TEST(UInt128Test, LeftShift_CountIsMaskedModulo128) {
+    UInt128 one(0, 1);
+    UInt128 by128 = one << 128;              // 128 & 0x7F == 0  -> unchanged
+    EXPECT_EQ(by128.getUpperProperty(), 0ULL);
+    EXPECT_EQ(by128.getLowerProperty(), 1ULL);
+    UInt128 by130 = one << 130;              // 130 & 0x7F == 2  -> value * 4
+    EXPECT_EQ(by130.getUpperProperty(), 0ULL);
+    EXPECT_EQ(by130.getLowerProperty(), 4ULL);
+}
+
+TEST(UInt128Test, RightShift_CountIsMaskedModulo128) {
+    UInt128 hi(0x8000000000000000ULL, 0);    // value == 1 << 127
+    UInt128 by128 = hi >> 128;               // 128 & 0x7F == 0  -> unchanged
+    EXPECT_EQ(by128.getUpperProperty(), 0x8000000000000000ULL);
+    EXPECT_EQ(by128.getLowerProperty(), 0ULL);
+    UInt128 by130 = hi >> 130;               // 130 & 0x7F == 2  -> 1 << 125
+    EXPECT_EQ(by130.getUpperProperty(), 0x2000000000000000ULL);
+    EXPECT_EQ(by130.getLowerProperty(), 0ULL);
+}
+
+TEST(UInt128Test, LeftShift_NegativeCountMasksToLowSevenBits) {
+    UInt128 one(0, 1);
+    UInt128 byNeg1 = one << -1;               // -1 & 0x7F == 127 -> 1 << 127
+    EXPECT_EQ(byNeg1.getUpperProperty(), 0x8000000000000000ULL);
+    EXPECT_EQ(byNeg1.getLowerProperty(), 0ULL);
+}
+
 TEST(UInt128Test, ZeroSingleton) {
     UInt128 z = UInt128::Zero();
     EXPECT_EQ(z.getLowerProperty(), 0ULL);
