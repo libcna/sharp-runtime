@@ -168,6 +168,33 @@ TEST(MemoryExtensionsTests, CopyTo_CopiesElements) {
     EXPECT_EQ(dst[2], 3);
 }
 
+// SR-AUD-047 (#1850): a source longer than the destination must throw before any
+// write (ASan-confirmed heap-buffer-overflow otherwise), matching .NET and the
+// member Span<T>::CopyTo. Throw-before-copy: the destination is left untouched.
+TEST(MemoryExtensionsTests, CopyTo_ShortDestination_ThrowsBeforeWriting) {
+    std::vector<int> src = {11, 22};
+    std::vector<int> dst(1, 7);  // shorter than source
+    EXPECT_THROW(MemoryExtensions::CopyTo(ReadOnlySpan<int>(src), Span<int>(dst)),
+                 System::ArgumentException);
+    EXPECT_EQ(dst[0], 7);  // no partial write
+}
+
+TEST(MemoryExtensionsTests, CopyTo_SpanOverload_ShortDestination_Throws) {
+    std::vector<int> src = {11, 22};
+    std::vector<int> dst(1, 7);
+    EXPECT_THROW(MemoryExtensions::CopyTo(Span<int>(src), Span<int>(dst)),
+                 System::ArgumentException);
+    EXPECT_EQ(dst[0], 7);
+}
+
+TEST(MemoryExtensionsTests, CopyTo_EqualLength_StillCopies) {
+    std::vector<int> src = {5, 6};
+    std::vector<int> dst(2, 0);
+    MemoryExtensions::CopyTo(ReadOnlySpan<int>(src), Span<int>(dst));
+    EXPECT_EQ(dst[0], 5);
+    EXPECT_EQ(dst[1], 6);
+}
+
 // ---------------------------------------------------------------------------
 // Sort
 // ---------------------------------------------------------------------------

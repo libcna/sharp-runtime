@@ -56,6 +56,28 @@ exception type.  Its same forward-copy implementation also independently
 reproduces SR-AUD-044: copying three overlapping nontrivial `Cell` values one
 place to the right changes `abcd` to `aaaa` instead of `aabc`.
 
+### Remediated — ticket #1850 (2026-07-30)
+
+Done. The static `MemoryExtensions::CopyTo(ReadOnlySpan<T>, Span<T>)`
+(`MemoryExtensions.hpp:425`) now checks
+`source.getLengthProperty() > destination.getLengthProperty()` and throws
+`System::ArgumentException("Destination is too short.")` **before** the
+`std::copy` — the exact message and throw-before-copy contract the member
+`Span<T>::CopyTo` already uses, matching .NET's `SR.Argument_DestinationTooShort`.
+The `CopyTo(Span<T>, Span<T>)` overload delegates and inherits the check. The OOB
+was reproduced under ASan driving the real static helper with a 2-element source
+into a tight 1-element heap destination — pre-fix `heap-buffer-overflow WRITE of
+size 8` in `std::copy` at `MemoryExtensions.hpp:427`
+(`build-probe/1850_copyto_prefix.log`), post-fix a clean `ArgumentException`
+before any write (`build-probe/1850_copyto_postfix.log`). +3 tests
+(short-destination throws with the destination left untouched, the `Span`
+overload throws, equal-length still copies). No `noexcept`/signature/layout
+change (the static helper was never `noexcept`).
+
+**SR-AUD-044 stays open (out of scope).** The forward-only `std::copy` still
+mishandles a right-overlapping copy; that is the separate SR-AUD-044 finding, not
+touched here.
+
 ### SR-AUD-048 — medium — character-span whitespace trim recognizes only C-locale byte whitespace
 
 `TrimStart` and `TrimEnd` call `std::isspace(static_cast<unsigned char>(...))`

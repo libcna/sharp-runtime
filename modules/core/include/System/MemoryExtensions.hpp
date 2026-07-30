@@ -8,6 +8,7 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Span.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -421,9 +422,17 @@ namespace System {
          * @brief Copies the contents of @p source into @p destination.
          *
          * C++ counterpart of .NET MemoryExtensions.CopyTo<T>(ReadOnlySpan<T>, Span<T>).
+         * @throws System::ArgumentException if @p destination is shorter than @p source.
+         *
+         * SR-AUD-047 (#1850): .NET throws before any element is written when the
+         * source does not fit; a missing check let a longer source overflow a
+         * shorter destination (ASan-confirmed heap-buffer-overflow write). The
+         * member Span<T>::CopyTo already enforces this — the static helper must too.
          */
         template<typename T>
         static void CopyTo(ReadOnlySpan<T> source, Span<T> destination) {
+            if (source.getLengthProperty() > destination.getLengthProperty())
+                throw System::ArgumentException("Destination is too short.");
             std::copy(source.begin(), source.end(), destination.begin());
         }
 

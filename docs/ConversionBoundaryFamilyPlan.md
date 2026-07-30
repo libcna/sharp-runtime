@@ -378,3 +378,26 @@ regression and Doxygen inside 1,942. **SR-AUD-043 may be split** — 043a
 remediated; 043b (the `noexcept` drop) stays open until the user approves the
 exception-specification change, tracked as a separate blocked ticket. The Decimal
 slice (035/036/038) is **not** part of this completion criterion.
+
+---
+
+## 19. Implementation status
+
+Appended as tickets land.
+
+### 19.1 CCF5-A / #1850 — SR-AUD-047 — MemoryExtensions CopyTo — **DONE (2026-07-30)**
+
+The static `MemoryExtensions::CopyTo(ReadOnlySpan<T>, Span<T>)`
+(`MemoryExtensions.hpp:425`) now throws
+`System::ArgumentException("Destination is too short.")` when
+`source.getLengthProperty() > destination.getLengthProperty()`, **before** the
+`std::copy` — the message and throw-before-copy contract the member
+`Span<T>::CopyTo` already uses and .NET's `Argument_DestinationTooShort`. The
+`Span<T>` source overload delegates. ASan reproduced the OOB write in the real
+helper (pre-fix `heap-buffer-overflow WRITE of size 8` at
+`MemoryExtensions.hpp:427`, `build-probe/1850_copyto_prefix.log`; post-fix clean
+throw, `build-probe/1850_copyto_postfix.log`). +3 tests
+(`SharpRuntimeTests_Core_Base` 5087 → 5090). Not `noexcept`; no signature/layout
+change. `SR-AUD-047 → remediated`. **SR-AUD-044 (overlap) stays open** — out of
+scope. Remaining CCF-005 memory-safety queue: #1851 (041), #1852 (043a), #1853
+(026/027), #1854 (043b, `needs_user`).
