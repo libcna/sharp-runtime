@@ -293,17 +293,21 @@ void Decimal::GetBits(const Decimal& d, intcs& lo, intcs& mid, intcs& hi, intcs&
 // Parse / ToString
 // ---------------------------------------------------------------------------
 
-bool Decimal::TryParse(const std::string& s, Decimal& result) {
+Decimal::ParseStatus Decimal::tryParseCore(const std::string& s, Decimal& result) {
     // SR-AUD-035 (#1857): skip leading/trailing whitespace, matching .NET's default
     // NumberStyles.Number (AllowLeadingWhite | AllowTrailingWhite). This is a pure
     // widening -- inputs that used to be rejected are now accepted; no previously
-    // accepted input changes value. NOTE (deferred to #1858, approval-blocked): ',' is
-    // still treated here as a decimal point, NOT a .NET group separator; converting it
-    // to a group separator would silently change the value of Parse("1,5") (1.5 -> 15).
+    // accepted input changes value.
+    //
+    // SR-AUD-035 tail (#1858, approved 2026-07-31): this scanner now reports WHY it
+    // failed. .NET separates a malformed string (FormatException) from a well-formed
+    // one whose magnitude is past decimal's range (OverflowException,
+    // SR.Overflow_Decimal); TryParse returns false for both, and only Parse can tell
+    // them apart. Nothing is written to `result` unless the scan succeeds.
     size_t begin = 0, end = s.size();
     while (begin < end && std::isspace(static_cast<unsigned char>(s[begin]))) ++begin;
     while (end > begin && std::isspace(static_cast<unsigned char>(s[end - 1]))) --end;
-    if (begin >= end) return false;
+    if (begin >= end) return ParseStatus::Malformed;
 
     size_t i = begin;
     bool neg = false;
@@ -319,7 +323,7 @@ bool Decimal::TryParse(const std::string& s, Decimal& result) {
     for (; i < end; ++i) {
         char c = s[i];
         if (c == '.' || c == ',') {
-            if (seenDot) return false;
+            if (seenDot) return ParseStatus::Malformed;
             seenDot = true;
         } else if (c >= '0' && c <= '9') {
             seenDigit = true;
@@ -333,12 +337,15 @@ bool Decimal::TryParse(const std::string& s, Decimal& result) {
                 continue;
             }
             if (seenDot) ++scale;
-            if (mantissa > MAX_MANTISSA / 10) return false;
+            // A magnitude past decimal's 96-bit mantissa is an OVERFLOW, not a
+            // malformed string: .NET's Number.TryParseDecimal returns
+            // ParsingStatus.Overflow here and Parse throws OverflowException.
+            if (mantissa > MAX_MANTISSA / 10) return ParseStatus::Overflow;
             mantissa = mantissa * 10 + uint8_t(c - '0');
-            if (mantissa > MAX_MANTISSA) return false;
-        } else { return false; }
+            if (mantissa > MAX_MANTISSA) return ParseStatus::Overflow;
+        } else { return ParseStatus::Malformed; }
     }
-    if (!seenDigit) return false;
+    if (!seenDigit) return ParseStatus::Malformed;
 
     // Round-half-to-even (banker's) rounding of the dropped fractional precision, matching
     // .NET's NumberToDecimal. A first-dropped digit > 5 always rounds up; == 5 rounds up
@@ -364,14 +371,29 @@ bool Decimal::TryParse(const std::string& s, Decimal& result) {
     // NumberBufferKind.Decimal path does NOT clear IsNegative for a zero value, unlike
     // the Integer path). -0 still compares and hashes equal to +0.
     result = Decimal(mantissa, scale, neg);
-    return true;
+    return ParseStatus::Ok;
+}
+
+bool Decimal::TryParse(const std::string& s, Decimal& result) {
+    return tryParseCore(s, result) == ParseStatus::Ok;
 }
 
 Decimal Decimal::Parse(const std::string& s) {
     Decimal r;
-    if (!TryParse(s, r))
-        throw System::FormatException("Input string was not in a correct format.");
-    return r;
+    switch (tryParseCore(s, r)) {
+        case ParseStatus::Ok:
+            return r;
+        case ParseStatus::Overflow:
+            // .NET SR.Overflow_Decimal, verbatim (ticket #1858). Before this, a
+            // well-formed but oversized magnitude such as
+            // "79228162514264337593543950336" was reported as a FormatException,
+            // which told the caller the text was wrong when the text was fine.
+            throw System::OverflowException(
+                "Value was either too large or too small for a Decimal.");
+        case ParseStatus::Malformed:
+            break;
+    }
+    throw System::FormatException("Input string was not in a correct format.");
 }
 
 std::string Decimal::ToString() const {

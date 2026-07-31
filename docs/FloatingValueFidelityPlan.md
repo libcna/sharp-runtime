@@ -374,6 +374,50 @@ return type, layout, vtable or mangled name change; no exported-symbol break.
 
 Neither carries an `SR-AUD-*` identifier; audit numbering stays frozen at **364**.
 
+**CCF7-6 (parse tail) — SR-AUD-033 parse — DONE (#1865, 2026-07-31).** Approved
+by the batch instruction in the exact words of
+`docs/RemainingApprovalDecisions.md` §B.8 items (1) and (3)/(4) — option
+**B(i)** for the `Single`/`Double` half. `tryParseCore` now implements the two
+parts of `NumberStyles.Float | AllowThousands` that `std::from_chars` cannot
+express, through one shared private header
+`System/detail/FloatParseGrammar.hpp` (so the two types cannot drift):
+
+1. **Group separators.** `detail::tryStripGroupSeparators` mirrors .NET's
+   scanner rule from `Number.Parsing.Common.cs` exactly — a `,` is accepted only
+   after at least one digit and before the decimal separator, and group *sizes*
+   are deliberately **not** validated, because they are a formatting concept.
+   So `"1,234.5"` → `1234.5`, `"1,2,3"` → `123`, `"1,,2"` → `12` and `"1,"` → `1`,
+   while `",5"`, `"1.5,"`, `"1.2,3"` and `"1e2,3"` still fail. Nothing is
+   allocated unless the input actually contains a separator, and the one
+   allocation that a separator does cause is wrapped so `TryParse`'s `noexcept`
+   stays honest — **`TryParse`'s exception specification is unchanged**, which
+   Group B's approval does not cover and this ticket did not touch.
+2. **Out-of-range magnitudes.** **Measured premise correction, and the reason the
+   repair is wider than §B.3's single row:** `std::from_chars` reports **one**
+   `std::errc::result_out_of_range` for overflow *and* underflow and — measured
+   on libstdc++ 2026-07-31, `build-probe/1865_prefix_plain.log` cases B01–B08 —
+   leaves the output **unmodified** in both. The packet's §B.3 lists only
+   `Double.Parse("1e999")`, but its §B.6 describes the implementation as
+   "a `result_out_of_range`-with-all-chars-consumed branch", which is one branch
+   covering both directions, and .NET treats them identically in one function:
+   `Number.NumberToFloat` yields `PositiveInfinity` above `MaxDecimalExponent`
+   and `Zero` below `MinDecimalExponent`, applying the sign afterwards
+   (`Number.Parsing.cs:1482–1503`). Underflow is therefore structurally
+   equivalent and governed by the same recorded contract, and is repaired under
+   the same approval. `detail::outOfRangeIsOverflow` recovers the direction from
+   the text by an exact test — every magnitude whose normalized decimal exponent
+   is `>= 0` is at least 1 and so can only have been rejected for being too
+   large. Result: `"1e999"` → `+∞`, `"-1e999"` → `−∞`, `"1e-999"` → `+0`,
+   `"-1e-999"` → `−0`, `"3.5e38"` → `+∞` for `float` but `3.5e38` for `double`.
+
+Everything else is byte-identical, and the deliberate rejections stay: `"inf"`
+is still refused (it is a C spelling, not .NET's `Infinity` symbol) while `"nan"`
+and `"infinity"` are still accepted case-insensitively, exactly as .NET compares
+against `NaNSymbol`/`PositiveInfinitySymbol`. `Half` inherits the whole widened
+grammar by delegation with no edit, pinned by a test. +19 tests. No public
+signature, exception specification, object layout or ABI change.
+`SR-AUD-033 → remediated` once #1863 lands; the parse half is complete.
+
 CCF7-5/#1863 (format output) remains approval-blocked, per §11.
 
 **CCF-007 family status:** SR-AUD-030, SR-AUD-031, SR-AUD-032 remediated; the

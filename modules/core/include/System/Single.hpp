@@ -20,6 +20,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ArithmeticException.hpp"
 #include "System/FormatException.hpp"
+#include "System/detail/FloatParseGrammar.hpp"
 
 namespace System {
 
@@ -929,16 +930,50 @@ private:
             result = -std::numeric_limits<float>::infinity();
             return true;
         }
+        // Invariant-culture group separators (SR-AUD-033 parse tail, ticket #1865):
+        // .NET's Single.Parse defaults to NumberStyles.Float | AllowThousands, and
+        // std::from_chars has no grouping mode, so a ',' is validated and removed
+        // here first. Nothing is allocated unless the input actually contains one.
+        std::string groupScratch;
+        std::string_view numeric;
+        if (!System::detail::tryStripGroupSeparators(sv, groupScratch, numeric)) {
+            result = 0.0f;
+            return false;
+        }
+
         // SharpRuntime::FromCharsFloat, not a bare std::from_chars call: Apple's libc++ omits
         // the floating-point std::from_chars overload entirely below a 13.3+ deployment target
         // (see PortableFromChars.hpp's own header comment) -- this stays correct either way
         // without forcing a higher minimum runtime macOS version.
-        auto [ptr, ec] = SharpRuntime::FromCharsFloat(sv.data(), sv.data() + sv.size(), result);
-        if (ec != std::errc{} || ptr != sv.data() + sv.size() || !std::isfinite(result)) {
-            result = 0.0f;
-            return false;
+        const char* const first = numeric.data();
+        const char* const last  = numeric.data() + numeric.size();
+        auto [ptr, ec] = SharpRuntime::FromCharsFloat(first, last, result);
+        if (ec == std::errc{}) {
+            // The !isfinite rejection is deliberate and unchanged: from_chars's
+            // general format also accepts the C spellings "inf"/"infinity"/"nan",
+            // which .NET does not -- only the "Infinity"/"NaN" tokens handled above.
+            if (ptr != last || !std::isfinite(result)) {
+                result = 0.0f;
+                return false;
+            }
+            return true;
         }
-        return true;
+        if (ec == std::errc::result_out_of_range && ptr == last && ptr != first) {
+            // A magnitude outside float's range is not a format error in .NET:
+            // Number.NumberToFloat saturates a scale past MaxDecimalExponent to
+            // ±Infinity and one below MinDecimalExponent to ±0, then applies the
+            // sign. std::from_chars reports one errc for both directions and does
+            // not write the output, so the direction is recovered from the text.
+            const bool negative = !numeric.empty() && numeric.front() == '-';
+            if (System::detail::outOfRangeIsOverflow(numeric))
+                result = negative ? -std::numeric_limits<float>::infinity()
+                                  :  std::numeric_limits<float>::infinity();
+            else
+                result = negative ? -0.0f : 0.0f;
+            return true;
+        }
+        result = 0.0f;
+        return false;
     }
 
 public:

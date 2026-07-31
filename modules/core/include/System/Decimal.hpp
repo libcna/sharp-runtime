@@ -68,6 +68,24 @@ class Decimal {
     /** @brief Private constructor from raw internal parts. */
     Decimal(u128 m, uint8_t s, bool n);
 
+    /**
+     * @brief The three-state outcome of the number-text scanner (ticket #1858).
+     *
+     * .NET distinguishes a malformed string (`FormatException`) from a
+     * well-formed one whose magnitude exceeds `decimal`'s range
+     * (`OverflowException`). `TryParse` cannot carry that distinction in its
+     * `bool`, so the scanner returns it and `Parse` maps it to the exception.
+     */
+    enum class ParseStatus { Ok, Malformed, Overflow };
+
+    /**
+     * @brief Scans @p s per .NET's `NumberStyles.Number` grammar.
+     * @param s      The candidate text.
+     * @param result Written **only** when the return value is `Ok`; a failed
+     *               scan never partially mutates the caller's value.
+     */
+    static ParseStatus tryParseCore(const std::string& s, Decimal& result);
+
 public:
     // -----------------------------------------------------------------------
     // Constructors

@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <string>
 
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -212,12 +213,14 @@ TEST(DecimalTests2, Parse_CommaIsStillDecimalPoint_PendingApproval) {
     EXPECT_FALSE(Decimal::TryParse("1,234.5", d));
 }
 
-// DOCUMENTATION (pre-#1858): a value past decimal's range is still reported as a
-// FormatException, not .NET's OverflowException. #1858 (approval-blocked) would
-// narrow the overflow case to OverflowException via an internal status channel.
-TEST(DecimalTests2, Parse_OverflowStillFormatException_PendingApproval) {
+// INVERTED by #1858 (approved 2026-07-31), which is exactly what the decision
+// packet §B.7 required of this test: a value past decimal's range is now .NET's
+// OverflowException, not a FormatException. The original pre-approval assertion
+// is preserved in the git history of this file and in
+// docs/DecimalBoundaryFamilyPlan.md §12.
+TEST(DecimalTests2, Parse_OverflowIsAnOverflowException) {
     EXPECT_THROW(Decimal::Parse("79228162514264337593543950336"),
-                 System::FormatException);
+                 System::OverflowException);
     Decimal d;
     EXPECT_FALSE(Decimal::TryParse("79228162514264337593543950336", d));
     // A well-formed in-range boundary still parses.
@@ -480,4 +483,56 @@ TEST(DecimalTests2, ExplicitConversionOperators) {
     EXPECT_EQ(static_cast<SharpRuntime::sbytecs>(d), 42);
     EXPECT_EQ(static_cast<SharpRuntime::shortcs>(d), 42);
     EXPECT_EQ(static_cast<SharpRuntime::ushortcs>(d), 42);
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-035 overflow taxonomy (#1858, approved 2026-07-31, packet §B.8 item 2):
+// a well-formed string whose magnitude is past decimal's range is an
+// OverflowException in .NET (SR.Overflow_Decimal), not a FormatException.
+// TryParse still returns false for both and still leaves the caller's value
+// untouched -- the distinction exists only on the Parse path.
+// ---------------------------------------------------------------------------
+
+TEST(DecimalTests2, Parse_MagnitudePastRange_ThrowsOverflowException) {
+    EXPECT_THROW(Decimal::Parse("79228162514264337593543950336"),
+                 System::OverflowException);
+    EXPECT_THROW(Decimal::Parse("-79228162514264337593543950336"),
+                 System::OverflowException);
+    EXPECT_THROW(Decimal::Parse("792281625142643375935439503350"),
+                 System::OverflowException);
+}
+
+TEST(DecimalTests2, Parse_OverflowCarriesTheDotNetMessage) {
+    try {
+        (void)Decimal::Parse("79228162514264337593543950336");
+        FAIL() << "expected OverflowException";
+    } catch (const System::OverflowException& e) {
+        EXPECT_NE(std::string(e.what()).find(
+                      "Value was either too large or too small for a Decimal."),
+                  std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(DecimalTests2, Parse_MalformedTextIsStillAFormatException) {
+    // The taxonomy split must not turn a genuinely malformed string into an
+    // OverflowException -- that is the half the change could plausibly break.
+    EXPECT_THROW(Decimal::Parse("abc"), System::FormatException);
+    EXPECT_THROW(Decimal::Parse(""), System::FormatException);
+    EXPECT_THROW(Decimal::Parse("   "), System::FormatException);
+    EXPECT_THROW(Decimal::Parse("1.2.3"), System::FormatException);
+    EXPECT_THROW(Decimal::Parse("1x"), System::FormatException);
+}
+
+TEST(DecimalTests2, TryParse_StillFalseForBothAndLeavesTheOutputUntouched) {
+    Decimal poison(999);
+    EXPECT_FALSE(Decimal::TryParse("79228162514264337593543950336", poison));
+    EXPECT_EQ(poison, Decimal(999));
+    EXPECT_FALSE(Decimal::TryParse("abc", poison));
+    EXPECT_EQ(poison, Decimal(999));
+}
+
+TEST(DecimalTests2, Parse_InRangeBoundariesStillParse) {
+    EXPECT_EQ(Decimal::Parse("79228162514264337593543950335"), Decimal::MaxValue);
+    EXPECT_EQ(Decimal::Parse("-79228162514264337593543950335"), Decimal::MinValue);
 }

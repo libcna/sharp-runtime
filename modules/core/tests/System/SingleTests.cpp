@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/Half.hpp"
 #include "System/Single.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -422,4 +423,70 @@ TEST(SingleTest, RoundDigits_ExceptionSpecificationIsTheApprovedOne) {
                   "#1862: Round(float) must stay noexcept");
     EXPECT_FLOAT_EQ(Single::Round(0.5f), 0.0f);  // ties-to-even, unchanged
     EXPECT_FLOAT_EQ(Single::Round(1.5f), 2.0f);
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-033 parse tail (#1865, approved 2026-07-31, CCF-007 item CCF7-6).
+// Single mirrors Double exactly -- same shared System::detail grammar helpers,
+// same .NET NumberStyles.Float | AllowThousands contract -- so the same matrix
+// is pinned here rather than assumed to follow.
+// ---------------------------------------------------------------------------
+
+TEST(SingleTest, Parse_GroupSeparators_Accepted) {
+    EXPECT_FLOAT_EQ(Single::Parse("1,234.5"), 1234.5f);
+    EXPECT_FLOAT_EQ(Single::Parse("1,234,567"), 1234567.0f);
+    EXPECT_FLOAT_EQ(Single::Parse("-1,234.5"), -1234.5f);
+    EXPECT_FLOAT_EQ(Single::Parse(" 1,234.5 "), 1234.5f);
+    float r = 0;
+    EXPECT_TRUE(Single::TryParse("1,234.5", r));
+    EXPECT_FLOAT_EQ(r, 1234.5f);
+}
+
+TEST(SingleTest, Parse_GroupSizesAreNotValidated_MatchingDotNet) {
+    EXPECT_FLOAT_EQ(Single::Parse("1,2,3"), 123.0f);
+    EXPECT_FLOAT_EQ(Single::Parse("1,,2"), 12.0f);
+    EXPECT_FLOAT_EQ(Single::Parse("1,"), 1.0f);
+}
+
+TEST(SingleTest, Parse_GroupSeparatorInAnIllegalPosition_StillRejected) {
+    float r = 0;
+    EXPECT_FALSE(Single::TryParse(",5", r));
+    EXPECT_FALSE(Single::TryParse("1.5,", r));
+    EXPECT_FALSE(Single::TryParse("1.2,3", r));
+    EXPECT_FALSE(Single::TryParse("1e2,3", r));
+    EXPECT_THROW(Single::Parse(",5"), System::FormatException);
+}
+
+TEST(SingleTest, Parse_MagnitudeOverflow_SaturatesToInfinity) {
+    EXPECT_TRUE(std::isinf(Single::Parse("1e999")) && Single::Parse("1e999") > 0);
+    EXPECT_TRUE(std::isinf(Single::Parse("-1e999")) && Single::Parse("-1e999") < 0);
+    // Past float's range but well inside double's -- the limit is per type.
+    EXPECT_TRUE(std::isinf(Single::Parse("3.5e38")));
+    float r = 0;
+    EXPECT_TRUE(Single::TryParse("1e999", r));
+    EXPECT_TRUE(std::isinf(r) && r > 0);
+}
+
+TEST(SingleTest, Parse_MagnitudeUnderflow_CollapsesToSignedZero) {
+    EXPECT_FLOAT_EQ(Single::Parse("1e-999"), 0.0f);
+    EXPECT_FALSE(std::signbit(Single::Parse("1e-999")));
+    EXPECT_TRUE(std::signbit(Single::Parse("-1e-999")));
+}
+
+TEST(SingleTest, Parse_RepresentableValues_Unchanged) {
+    EXPECT_FLOAT_EQ(Single::Parse("1.5"), 1.5f);
+    EXPECT_FLOAT_EQ(Single::Parse("3.4e38"), 3.4e38f);
+    EXPECT_TRUE(std::isnan(Single::Parse("NaN")));
+    float r = 0;
+    EXPECT_FALSE(Single::TryParse("inf", r));  // C spelling still rejected
+}
+
+// Half delegates its parse to Single, so it inherits the widened grammar with
+// no edit of its own -- pinned so a future Half rewrite cannot silently drop it.
+TEST(SingleTest, HalfInheritsTheWidenedParseGrammarFromSingle) {
+    System::Half h;
+    EXPECT_TRUE(System::Half::TryParse("1,024", h));
+    EXPECT_FLOAT_EQ(h.ToSingle(), 1024.0f);
+    EXPECT_TRUE(System::Half::TryParse("1e999", h));
+    EXPECT_TRUE(std::isinf(h.ToSingle()));
 }

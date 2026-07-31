@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <limits>
+#include <string>
 #include "System/Double.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArithmeticException.hpp"
@@ -478,4 +479,96 @@ TEST(DoubleTests, ToString_ValidSpecifiers_StillWork) {
     EXPECT_FALSE(Double::ToString(3.14159, "G").empty());
     EXPECT_EQ(Double::ToString(1.5, "R"), Double::ToString(1.5));
     EXPECT_FALSE(Double::ToString(1.5, "N2").empty());
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-033 parse tail (#1865, approved 2026-07-31, CCF-007 item CCF7-6):
+// the grammar Double::Parse accepts is NumberStyles.Float | AllowThousands,
+// exactly as .NET's Double.Parse(string) declares it (Double.cs:388).
+//
+// Two pieces have no std::from_chars equivalent and are supplied by
+// System/detail/FloatParseGrammar.hpp: group separators, and the direction of an
+// out-of-range magnitude (from_chars uses one errc for overflow and underflow
+// and leaves the output unwritten).
+// ---------------------------------------------------------------------------
+
+TEST(DoubleTests, Parse_GroupSeparators_Accepted) {
+    EXPECT_EQ(Double::Parse("1,234.5"), 1234.5);
+    EXPECT_EQ(Double::Parse("1,234,567"), 1234567.0);
+    EXPECT_EQ(Double::Parse("-1,234.5"), -1234.5);
+    EXPECT_EQ(Double::Parse(" 1,234.5 "), 1234.5);
+    EXPECT_EQ(Double::Parse("1,234e2"), 123400.0);
+    double r = 0;
+    EXPECT_TRUE(Double::TryParse("1,234.5", r));
+    EXPECT_EQ(r, 1234.5);
+}
+
+TEST(DoubleTests, Parse_GroupSizesAreNotValidated_MatchingDotNet) {
+    // .NET's scanner never checks group SIZES -- group sizes are a formatting
+    // concept -- so these parse, and the port must not be stricter.
+    EXPECT_EQ(Double::Parse("1,2,3"), 123.0);
+    EXPECT_EQ(Double::Parse("1,,2"), 12.0);
+    EXPECT_EQ(Double::Parse("1,"), 1.0);
+}
+
+TEST(DoubleTests, Parse_GroupSeparatorInAnIllegalPosition_StillRejected) {
+    // .NET accepts a group separator only after a digit and before the decimal
+    // separator; anywhere else its scan stops and the parse fails.
+    double r = 0;
+    EXPECT_FALSE(Double::TryParse(",5", r));
+    EXPECT_FALSE(Double::TryParse(",", r));
+    EXPECT_FALSE(Double::TryParse("1.5,", r));
+    EXPECT_FALSE(Double::TryParse("1.2,3", r));
+    EXPECT_FALSE(Double::TryParse("1e2,3", r));
+    EXPECT_FALSE(Double::TryParse("-,5", r));
+    EXPECT_THROW(Double::Parse(",5"), System::FormatException);
+}
+
+TEST(DoubleTests, Parse_MagnitudeOverflow_SaturatesToInfinity) {
+    // Number.NumberToFloat: a scale past MaxDecimalExponent yields
+    // PositiveInfinity and the sign is applied afterwards. Not a FormatException.
+    EXPECT_TRUE(std::isinf(Double::Parse("1e999")));
+    EXPECT_GT(Double::Parse("1e999"), 0.0);
+    EXPECT_TRUE(std::isinf(Double::Parse("-1e999")));
+    EXPECT_LT(Double::Parse("-1e999"), 0.0);
+    EXPECT_TRUE(std::isinf(Double::Parse("1e99999999999999999999")));
+    double r = 0;
+    EXPECT_TRUE(Double::TryParse("1e999", r));
+    EXPECT_TRUE(std::isinf(r) && r > 0);
+}
+
+TEST(DoubleTests, Parse_MagnitudeUnderflow_CollapsesToSignedZero) {
+    // The same from_chars errc covers the other direction, and .NET's
+    // NumberToFloat yields Zero for a scale below MinDecimalExponent, sign
+    // applied afterwards -- so "-1e-999" is negative zero, not a failure.
+    EXPECT_EQ(Double::Parse("1e-999"), 0.0);
+    EXPECT_FALSE(std::signbit(Double::Parse("1e-999")));
+    EXPECT_EQ(Double::Parse("-1e-999"), 0.0);
+    EXPECT_TRUE(std::signbit(Double::Parse("-1e-999")));
+}
+
+TEST(DoubleTests, Parse_RepresentableBoundaries_Unchanged) {
+    EXPECT_EQ(Double::Parse("1e308"), 1e308);
+    EXPECT_EQ(Double::Parse("1e-320"), 1e-320);   // subnormal, from_chars succeeds
+    EXPECT_EQ(Double::Parse("0e999"), 0.0);       // zero significand is never out of range
+    EXPECT_EQ(Double::Parse("1.5"), 1.5);
+    EXPECT_EQ(Double::Parse("1e2"), 100.0);
+    EXPECT_TRUE(std::signbit(Double::Parse("-0")));
+}
+
+TEST(DoubleTests, Parse_CSpellingOfInfinity_StillRejected) {
+    // from_chars's general format also accepts the C spellings "inf"/"infinity";
+    // .NET's NaNSymbol/PositiveInfinitySymbol are "NaN"/"Infinity", so "inf" is
+    // not a .NET token and its rejection (the !isfinite guard on the success
+    // path) is unchanged by #1865. The FULL words are accepted case-insensitively
+    // in both -- .NET compares against NaNSymbol/PositiveInfinitySymbol with
+    // SpanEqualsOrdinalIgnoreCase -- so "nan" and "infinity" are valid there too.
+    double r = 0;
+    EXPECT_FALSE(Double::TryParse("inf", r));
+    EXPECT_TRUE(Double::TryParse("nan", r));
+    EXPECT_TRUE(std::isnan(r));
+    EXPECT_TRUE(Double::TryParse("infinity", r));   // case-insensitive, as .NET
+    EXPECT_TRUE(std::isinf(r));
+    EXPECT_TRUE(Double::TryParse("Infinity", r));
+    EXPECT_TRUE(std::isinf(r));
 }
