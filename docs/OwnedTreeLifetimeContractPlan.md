@@ -3099,3 +3099,77 @@ Implemented for A by ticket #1898
 | the reference survives reallocation (probe X16) | held across 64 attribute `Add`s |
 | **`Attributes()` is the owning alternative** | held across the element's **destruction**; the attributes are alive, detached, and re-addable |
 | the borrowed contract's precondition is the caller's | documented in the suite header; deliberately **not** exercised after destruction, because that is the undefined behaviour the suite exists to describe |
+
+---
+
+## 43. CCF-019 reconciliation — **compatible remediation complete** (2026-07-31)
+
+*Every §31 item, reconciled against its owning ticket, current status, probe
+case, required approval and landing commit. Read the status words literally:
+**neither SR-AUD-327 nor SR-AUD-333 is remediated**, and CCF-019 as a whole is
+not implemented.*
+
+### 43.1 Item-by-item
+
+| §31 item | Owning ticket(s) | Status | Probe cases | Approval | Commit |
+|---|---|---|---|---|---|
+| **1** — owner-side detachment | #1886, #1890 | **done** | J01–J06, J08, J16, J17; X01–X14, X18, X19, X22, X25, X26 | **granted** 2026-07-31 (§32) | `6f4e59c6`, `f6f0f69e` |
+| **2** — exception-path consistency | #1887, #1891 | **done** | J10, X20 | **granted** by batch instruction (§35.0) | `0a5b4c81`, `463358f2` |
+| **3** — `JsonNode` value semantics | #1888 | **blocked — declined** | J08 alias, J09, J13 | **declined** 2026-07-31; preserved for a coordinated source-breaking release | design `6bbc1377` (§37) |
+| **4** — enumerator lifetime | #1889 | **blocked — declined** | J11, J12 | **declined** 2026-07-31; §39 package preserved, exact wording in §39.12 | design `6bbc1377` (§39) |
+| **5** — borrowed-view surface | ~~#1892~~ → #1898 + #1899 | #1898 **done**, #1899 **blocked** | X15, X17 (X16 pinned as safe) | wording **rejected as non-implementable**; replaced by §42, one question open (§42.8) | `9b4cff27` (§42) |
+| **6** — deep-tree/deep-parse | ~~#1893~~ → #1895 + #1896 + #1897 | #1895 **done**, #1896 **blocked**, #1897 **blocked** | J19c, X27c done; J19d, X27d, X28c open | teardown half **granted**; quadratic half **declined**; parse half **one question** | `e2688c7d` (§41) |
+| — | #1894 | **blocked** | — | none of its own | — |
+
+`#1892` and `#1893` are **retired (`wontfix`)** rather than deleted, so §31's
+item references stay resolvable; every case each owned is owned by exactly one
+successor.
+
+### 43.2 The 58-case probe, start to finish
+
+| | #1885 baseline | after item 1 | after item 2 | **after item 6's teardown half** |
+|---|---|---|---|---|
+| ASan `heap-use-after-free` cases | 29 | 3 | 3 | **3** — J11, X15, X17 |
+| Faulting accesses, recoverable ASan | 57 | 5 | 5 | **5** |
+| `pure virtual method called` aborts | 8 | 0 | 0 | **0** |
+| ASan `stack-overflow`s | 3 | 3 | 3 | **1** — X28c only |
+| Timeouts | 2 | 2 | 2 | **2** — J19d, X27d |
+| Silent data-loss paths | 2 | 2 | **0** | **0** |
+| Leaks | 0 | 0 | 0 | **0** |
+
+Every remaining case is attributed, and each attribution is **measured** — the
+teardown changed neither the classification nor the answer lines of any of them:
+
+| Remaining | Root cause | Owner |
+|---|---|---|
+| **J11**, J12 | stale iterator over reallocated storage | #1889 (declined) |
+| **X15**, **X17** | borrowed raw pointer / borrowed reference | #1899 (one question) |
+| J08 alias, J09, J13 | implicit copy operations, public `DetachParent()` | #1888 (declined) |
+| J19d, X27d | quadratic ancestor guards during **construction** | #1896 (declined) |
+| X28c | recursive tree building in `fromNlohmann` on **untrusted** text | #1897 (one question) |
+| J15, X21 | options not inherited; `Add` moves rather than clones | permanent exclusions (§30.2, §30.4) |
+
+### 43.3 Status, in the words that fit
+
+- **Compatible remediation complete.** Every CCF-019 repair that can be made
+  without a public source, ABI, object-layout, iterator-layout or accepted-input
+  change has been made: #1886, #1887, #1890, #1891, #1895, #1898.
+- **Residual ABI-breaking redesign deferred** — #1888 and #1889, both declined
+  by the user on 2026-07-31 and preserved intact for a future coordinated
+  ABI-breaking release.
+- **Residual layout-changing redesign blocked** — #1896, whose only O(1) route
+  is a cached depth or root in every node (+8 on `JsonNode`, +8 on `XObject`).
+- **False or impossible premise corrected** — §31 item 5's "return owning
+  handles" is **not implementable at any layout cost** (§42.2); item 4 is a
+  source break and a **silent** ABI break, not only a `+8` (§39.1); item 6's
+  depth bound **already exists** in the module (§40.2) and its quadratic half
+  cannot be delivered under item 6's own stated constraints (§40.3); §13.5's
+  "matches .NET" was wrong (§35.4); and §25/§14.3's "validate before removing"
+  is not implementable as written (§36.4).
+- **Two open questions, one each**, quoted verbatim in §42.8 and in #1897's
+  ticket notes. Nothing else in CCF-019 is waiting on the user.
+
+**SR-AUD-327 and SR-AUD-333 both remain `confirmed (design-complete)`**, and the
+post-audit tally is **unchanged at 57 remediated / 306 confirmed / 364**.
+Numbering stays frozen at **364**; no new `SR-AUD-*` identifier was issued by any
+ticket in this family.
