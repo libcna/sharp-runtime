@@ -109,14 +109,29 @@ namespace System::Text::Json::Nodes {
             return properties_[static_cast<size_t>(idx)].second;
         }
 
-        /** @brief Sets the value of @p propertyName, adding it if not already present. */
+        /**
+         * @brief Sets the value of @p propertyName, adding it if not already present.
+         *
+         * @p value is adopted first and the replaced value is only detached once that adoption
+         * has succeeded, so a rejected call leaves this object exactly as it found it. Doing it
+         * the other way round — the ordering this method used to have, and the ordering .NET's
+         * own `JsonObject.SetItem` still has (`JsonObject.cs`: `DetachParent(replacedValue);
+         * dict.SetAt(index, value); … value?.AssignParent(this);`) — detaches the stored value
+         * before `AssignParent` can throw, which leaves this object holding a value that reports
+         * **no** parent. Any other container then accepts that value, so one node ends up owned
+         * by two containers, each of which will clear the other's link on destruction. This is
+         * the ordering `JsonArray::SetItem` has always had.
+         *
+         * @throws System::InvalidOperationException if @p value already has a parent, or if
+         * adopting it would close a cycle. Neither case mutates this object.
+         */
         void SetItem(const std::string& propertyName, std::shared_ptr<JsonNode> value) {
             intcs idx = findIndex(propertyName);
             if (idx >= 0) {
                 auto& slot = properties_[static_cast<size_t>(idx)].second;
                 if (slot == value) return;
-                if (slot) slot->DetachParent();
                 if (value) value->AssignParent(this);
+                if (slot) slot->DetachParent();
                 slot = std::move(value);
             } else {
                 if (value) value->AssignParent(this);

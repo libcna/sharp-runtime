@@ -1890,3 +1890,157 @@ SR-AUD-336's inert events (separate finding). Because X15 and X17 are still
 ASan-confirmed use-after-free in this finding's own files, **SR-AUD-333 stays
 `confirmed (design-complete)`** and the post-audit tally is unchanged at 57
 remediated / 306 confirmed / 364.
+
+---
+
+## 35. Implementation record — #1887, `JsonObject::SetItem` assign-before-detach (2026-07-31)
+
+*Everything in this section is **measured**. Nothing in §§1–34 was rewritten; the
+corrections this ticket found are appended in §35.4.*
+
+### 35.0 What authorised it
+
+§31 item 2 was **unanswered** when §32 was written. The user's batch instruction
+of 2026-07-31 directed this batch to *"Start the autonomous CCF-019 residual
+batch now with §31 item 2: ticket #1887, followed by ticket #1891"*, and set an
+approval boundary that grants nothing for public source breaks, virtual-interface
+or vtable changes, object- or iterator-layout changes, return calling-convention
+changes, mandatory downstream migration, or broad observable semantic changes.
+**#1887 and #1891 require none of those** (§35.3, §36.3), so item 2 was taken as
+approved and items 3, 4, 5 and 6 were **not**. §32's record of what item 1 covered
+is unchanged.
+
+### 35.1 What changed
+
+One method body, in one header:
+`modules/text-json/include/System/Text/Json/Nodes/JsonObject.hpp`.
+
+```diff
+     void SetItem(const std::string& propertyName, std::shared_ptr<JsonNode> value) {
+         intcs idx = findIndex(propertyName);
+         if (idx >= 0) {
+             auto& slot = properties_[static_cast<size_t>(idx)].second;
+             if (slot == value) return;
+-            if (slot) slot->DetachParent();
+-            if (value) value->AssignParent(this);
++            if (value) value->AssignParent(this);
++            if (slot) slot->DetachParent();
+             slot = std::move(value);
+         } else {
+```
+
+Two statements swapped. The `else` branch (a brand-new key) already validated
+before it stored, and is untouched.
+
+### 35.2 The structurally equivalent surface, enumerated
+
+Every mutating entry point of both containers was inspected, not only the one the
+probe named. `SetItem` on `JsonObject` was the **only** site that mutated before
+it validated:
+
+| Entry point | Order | Verdict |
+|---|---|---|
+| `JsonObject::SetItem` (existing key) | detach-then-assign | **the defect (J10)** — fixed |
+| `JsonObject::SetItem` (new key) | assign-then-store | already correct |
+| `JsonObject::Add` | duplicate-key check, assign, store | already correct |
+| `JsonObject::Remove` / `Clear` | detach only | no validation to order against |
+| `JsonArray::SetItem` | assign-then-detach | already correct (**J18**) |
+| `JsonArray::Add` / `Insert` | range check, assign, store | already correct |
+| `JsonArray::RemoveAt` / `Remove` / `Clear` | detach only | no validation to order against |
+
+### 35.3 Measured evidence
+
+**Probe.** The #1885 probe was rebuilt from source and re-run **unmodified**
+(same `1885_build.sh`, same 60 translation units compiled into the binary, no
+archive linked, one `fork()`ed process per case, same 5-second watchdog). The
+pre-change replay reproduced `1890_postfix_asan.log` exactly — **0 of 58 cases
+changed classification** — so this batch's baseline is the previous batch's
+recorded end state, verified rather than inherited
+(`build-probe/1887_prefix_asan.log`).
+
+After the change, **exactly 1 of 58 cases changed**, and it is J10:
+
+| Case | Before | After |
+|---|---|---|
+| **J10** | `clean` — *"object still holds it (count=1, same node: YES) but its parent is **NULL**"*, then *"the SAME node is now in two containers; second count = 1"* | `throws: The node already has a parent.` — *"object still holds it (count=1, same node: YES) but its parent is **non-null**"*, and the second container **rejects** it |
+| J18 (contrast) | `clean` — old still stored with parent == the array | unchanged |
+| every other 56 cases | — | **identical classification** |
+
+`build-probe/1887_postfix_asan.log`. The residual matrix is unchanged: 3 ASan
+`heap-use-after-free` cases (J11, X15, X17), 3 ASan `stack-overflow`s (J19c,
+X27c, X28c), 2 timeouts (J19d, X27d), and J02/J16's *probe-side* null
+dereferences (§33.4).
+
+**Permanent tests.** `JsonNodeMutationConsistencyTests`, a new suite of **22**
+cases in
+`modules/text-json/tests/System/Text/Json/Nodes/JsonNodeMutationConsistencyTests.cpp`:
+five rejected-`SetItem` shapes (already-parented value, the cycle door, a new
+key, a value owned by the same object under another key, and the second-container
+refusal that made J10 a double-ownership defect), seven success paths (replace,
+re-attach the replaced value elsewhere, same-node-same-key no-op, new key, null
+value, over a null slot, serialised form unchanged), the two `JsonArray`
+contrasts (J18 and the out-of-range rejection), five further rejection paths on
+`Add`/`Insert`, `Remove`/`Clear` detachment, and the composition with #1886's
+destructor. `SharpRuntimeTests_Text_Json` goes **179 → 201**; all 179 pre-existing
+cases pass **unmodified**.
+
+**Mutation test.** Reversing the two statements — the exact pre-fix ordering —
+fails **5** of the 22 (`RejectedObjectSetItem_LeavesTheReplacedValueOwned`,
+`…_TheReplacedValueIsStillRefusedElsewhere`, `CycleRejectedObjectSetItem_…`,
+`…_ValueOwnedBySameObject_MovesNothing`, `…_ThenOwnerDestroyed_DetachesTheValue`)
+and passes the other 196 in the executable, so the repair is load-bearing and the
+tests are specific to it.
+
+**Sanitizers.** `build-asan` (`-fsanitize=address,undefined`,
+`detect_leaks=1`, `print_stacktrace=1`), binary proved newer than both changed
+files (`build-probe/1887_asan_freshness.log`): **201/201 pass, zero ASan, UBSan
+or LeakSanitizer diagnostics** (`build-probe/1887_asan_tests.log`). Sanitizer
+activation is the same controlled self-test §33.5 recorded
+(`build-probe/1886_sanitizer_selftest.log`) — the flags and the tree are
+unchanged.
+
+**Source / ABI / layout / performance.** No declaration changed: `SetItem`'s
+signature, `JsonObject`'s members and every other member are untouched, so
+`sizeof(JsonObject)` stays 48, no vtable slot moves, and the inline member's weak
+COMDAT symbol already existed under the same mangling. No allocation is added or
+removed — the two swapped statements each write one raw pointer. Consumers
+recompile because the body is inline in a public header; **no consumer source
+edit is required**, and the only observable change is on a path that already
+threw.
+
+### 35.4 Corrected premise — .NET's own ordering
+
+§13.5 row J-2 reads *"`JsonObject::SetItem` → assign-before-detach, matching
+`JsonArray::SetItem` **and .NET**"*. That is preserved above as written, and the
+second half of it is **wrong**. Read on 2026-07-31 from
+`/rv/tmp/runtime/src/libraries/System.Text.Json/src/System/Text/Json/Nodes/JsonObject.cs`
+(`internal void SetItem`, lines 284–314):
+
+```csharp
+DetachParent(replacedValue);
+dict.SetAt(index, value);
+…
+value?.AssignParent(this);
+```
+
+.NET detaches the replaced value **and commits the dictionary write** before
+`AssignParent` runs, so a .NET `SetItem` that throws leaves the object holding
+the *new* value while that value still reports its original parent, and the
+replaced value both detached and evicted. That is a strictly larger inconsistency
+than the port's, not a model for it. **This ticket deliberately diverges from
+.NET here and matches `JsonArray::SetItem` instead**, which is what the acceptance
+criterion asked for and what §22's exception-safety requirement demands. The
+divergence is unobservable on every path that does not throw.
+
+### 35.5 What this ticket did **not** do
+
+- `std::bad_alloc` from `properties_.emplace_back` (new-key branch) can still
+  leave `value` adopted but unstored. It is **not** closed here: the allocator
+  failure path cannot be exercised without an allocator injection point that
+  `std::vector<std::pair<std::string, std::shared_ptr<JsonNode>>>` does not
+  provide, so a repair would be untestable code on an untested path, and .NET's
+  `JsonObject`, `JsonArray::Add`, `JsonArray::Insert` and `XContainer` all carry
+  the identical residue. Recorded, not hidden.
+- Nothing owned by #1888 (J08/J09/J13), #1889 (J11/J12) or #1893 (J19c/J19d)
+  was absorbed. `SR-AUD-327` therefore **stays `confirmed (design-complete)`**:
+  J11 is still an ASan-confirmed use-after-free inside this finding's own files.
