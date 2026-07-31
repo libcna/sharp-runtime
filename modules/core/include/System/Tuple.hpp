@@ -8,6 +8,7 @@
 #include <tuple>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System {
 
@@ -51,7 +52,10 @@ namespace detail {
     template<typename T>
     intcs tupleHash(const T& val)
     {
-        return static_cast<intcs>(std::hash<T>{}(val) & 0x7fffffff);
+        // hashValue rather than std::hash directly: once tupleCompare/operator==
+        // treat two NaNs as equal (CCF-010), a hash that depended on NaN's payload
+        // bits would break the equal-objects-equal-hashes invariant.
+        return static_cast<intcs>(hashValue(val) & 0x7fffffff);
     }
     template<typename T>
     std::string tupleItemStr(const T& val)
@@ -61,13 +65,27 @@ namespace detail {
         oss << val;
         return oss.str();
     }
-    /** @brief Three-way lexicographic comparison of a single element pair, matching .NET's Comparer<T>.Default.Compare. */
+    /**
+     * @brief Three-way lexicographic comparison of a single element pair, matching
+     *        .NET's Comparer<T>.Default.Compare.
+     *
+     * CCF-010: the raw `<`-only body this replaced said it matched
+     * `Comparer<T>.Default` but did not, for `float` and `double`: a NaN component
+     * compared as neither less nor greater than a finite one, so `CompareTo`
+     * returned 0 for tuples that are not equal. `compareValues` is the port's single
+     * statement of that contract; for every non-floating T it generates exactly the
+     * two comparisons that were here before.
+     */
     template<typename T>
     intcs tupleCompare(const T& a, const T& b)
     {
-        if (a < b) return -1;
-        if (b < a) return 1;
-        return 0;
+        return static_cast<intcs>(compareValues(a, b));
+    }
+    /** @brief Equality of a single element pair, matching .NET's EqualityComparer<T>.Default.Equals. */
+    template<typename T>
+    bool tupleEquals(const T& a, const T& b)
+    {
+        return equalValues(a, b);
     }
 } // namespace detail
 
@@ -96,7 +114,7 @@ struct Tuple1 {
     [[nodiscard]] std::tuple<T1> ToStdTuple() const { return {Item1}; }
 
     /** @brief Returns true if both tuples have equal elements. */
-    bool operator==(const Tuple1& o) const { return Item1 == o.Item1; }
+    bool operator==(const Tuple1& o) const { return detail::tupleEquals(Item1, o.Item1); }
 
     /** @brief Returns true if any element differs. */
     bool operator!=(const Tuple1& o) const { return !(*this == o); }
@@ -161,7 +179,7 @@ struct Tuple2 {
     [[nodiscard]] std::tuple<T1, T2> ToStdTuple() const { return {Item1, Item2}; }
 
     /** @brief Returns true if all elements compare equal. */
-    bool operator==(const Tuple2& o) const { return Item1 == o.Item1 && Item2 == o.Item2; }
+    bool operator==(const Tuple2& o) const { return detail::tupleEquals(Item1, o.Item1) && detail::tupleEquals(Item2, o.Item2); }
 
     /** @brief Returns true if any element differs. */
     bool operator!=(const Tuple2& o) const { return !(*this == o); }
@@ -236,7 +254,7 @@ struct Tuple3 {
     /** @brief Returns true if all elements compare equal. */
     bool operator==(const Tuple3& o) const
     {
-        return Item1 == o.Item1 && Item2 == o.Item2 && Item3 == o.Item3;
+        return detail::tupleEquals(Item1, o.Item1) && detail::tupleEquals(Item2, o.Item2) && detail::tupleEquals(Item3, o.Item3);
     }
 
     /** @brief Returns true if any element differs. */
@@ -324,7 +342,7 @@ struct Tuple4 {
     /** @brief Returns true if all elements compare equal. */
     bool operator==(const Tuple4& o) const
     {
-        return Item1 == o.Item1 && Item2 == o.Item2 && Item3 == o.Item3 && Item4 == o.Item4;
+        return detail::tupleEquals(Item1, o.Item1) && detail::tupleEquals(Item2, o.Item2) && detail::tupleEquals(Item3, o.Item3) && detail::tupleEquals(Item4, o.Item4);
     }
 
     /** @brief Returns true if any element differs. */
@@ -411,8 +429,8 @@ struct Tuple5 {
 
     bool operator==(const Tuple5& o) const
     {
-        return Item1 == o.Item1 && Item2 == o.Item2 && Item3 == o.Item3
-            && Item4 == o.Item4 && Item5 == o.Item5;
+        return detail::tupleEquals(Item1, o.Item1) && detail::tupleEquals(Item2, o.Item2) && detail::tupleEquals(Item3, o.Item3)
+            && detail::tupleEquals(Item4, o.Item4) && detail::tupleEquals(Item5, o.Item5);
     }
     bool operator!=(const Tuple5& o) const { return !(*this == o); }
 
@@ -652,8 +670,8 @@ struct Tuple8 {
     /** @brief Returns true if all elements, including Rest, compare equal. */
     bool operator==(const Tuple8& o) const
     {
-        return Item1 == o.Item1 && Item2 == o.Item2 && Item3 == o.Item3 && Item4 == o.Item4
-            && Item5 == o.Item5 && Item6 == o.Item6 && Item7 == o.Item7 && Rest == o.Rest;
+        return detail::tupleEquals(Item1, o.Item1) && detail::tupleEquals(Item2, o.Item2) && detail::tupleEquals(Item3, o.Item3) && detail::tupleEquals(Item4, o.Item4)
+            && detail::tupleEquals(Item5, o.Item5) && detail::tupleEquals(Item6, o.Item6) && detail::tupleEquals(Item7, o.Item7) && Rest == o.Rest;
     }
 
     /** @brief Returns true if any element differs. */

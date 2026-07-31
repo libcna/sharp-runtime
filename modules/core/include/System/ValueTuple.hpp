@@ -8,6 +8,7 @@
 #include <tuple>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System {
 
@@ -29,7 +30,32 @@ namespace detail {
 
     template<typename T>
     size_t vtHash(const T& v) noexcept {
-        return std::hash<T>{}(v);
+        // hashValue rather than std::hash directly: once vtEquals treats two NaNs as
+        // equal (CCF-010), a hash that depended on NaN's payload bits would break the
+        // equal-objects-equal-hashes invariant.
+        return hashValue(v);
+    }
+
+    /**
+     * @brief Equality of a single component pair, matching .NET's
+     *        EqualityComparer<T>.Default.Equals (ValueTuple.cs:308-311).
+     */
+    template<typename T>
+    bool vtEquals(const T& a, const T& b) {
+        return equalValues(a, b);
+    }
+
+    /**
+     * @brief Three-way comparison of a single component pair, matching .NET's
+     *        Comparer<T>.Default.Compare (ValueTuple.cs:317-329).
+     *
+     * CCF-010: the raw `<` pair this replaced returned 0 for a NaN component against
+     * a finite one, so CompareTo reported "equal" for tuples that are not equal. For
+     * every non-floating T it generates exactly the two comparisons that were there.
+     */
+    template<typename T>
+    intcs vtCompare(const T& a, const T& b) {
+        return static_cast<intcs>(compareValues(a, b));
     }
 
 } // namespace detail
@@ -56,7 +82,7 @@ struct ValueTuple1 {
 
     /** @brief Determines whether this instance equals another. */
     [[nodiscard]] bool Equals(const ValueTuple1& other) const {
-        return Item1 == other.Item1;
+        return detail::vtEquals(Item1, other.Item1);
     }
 
     /**
@@ -73,8 +99,7 @@ struct ValueTuple1 {
      * @return -1 if less, 0 if equal, 1 if greater.
      */
     [[nodiscard]] intcs CompareTo(const ValueTuple1& other) const {
-        if (Item1 < other.Item1) return -1;
-        if (other.Item1 < Item1) return  1;
+        if (const intcs c = detail::vtCompare(Item1, other.Item1); c != 0) return c;
         return 0;
     }
 
@@ -87,7 +112,7 @@ struct ValueTuple1 {
         return "(" + detail::vtItemStr(Item1) + ")";
     }
 
-    bool operator==(const ValueTuple1& o) const { return Item1 == o.Item1; }
+    bool operator==(const ValueTuple1& o) const { return detail::vtEquals(Item1, o.Item1); }
     bool operator!=(const ValueTuple1& o) const { return !(*this == o); }
     bool operator< (const ValueTuple1& o) const { return CompareTo(o) < 0; }
     bool operator<=(const ValueTuple1& o) const { return CompareTo(o) <= 0; }
@@ -119,7 +144,7 @@ struct ValueTuple2 {
 
     /** @brief Determines whether this instance equals another. */
     [[nodiscard]] bool Equals(const ValueTuple2& other) const {
-        return Item1 == other.Item1 && Item2 == other.Item2;
+        return detail::vtEquals(Item1, other.Item1) && detail::vtEquals(Item2, other.Item2);
     }
 
     /**
@@ -138,10 +163,8 @@ struct ValueTuple2 {
      * @return -1 if less, 0 if equal, 1 if greater.
      */
     [[nodiscard]] intcs CompareTo(const ValueTuple2& other) const {
-        if (Item1 < other.Item1) return -1;
-        if (other.Item1 < Item1) return  1;
-        if (Item2 < other.Item2) return -1;
-        if (other.Item2 < Item2) return  1;
+        if (const intcs c = detail::vtCompare(Item1, other.Item1); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item2, other.Item2); c != 0) return c;
         return 0;
     }
 
@@ -154,7 +177,7 @@ struct ValueTuple2 {
         return "(" + detail::vtItemStr(Item1) + ", " + detail::vtItemStr(Item2) + ")";
     }
 
-    bool operator==(const ValueTuple2& o) const { return Item1 == o.Item1 && Item2 == o.Item2; }
+    bool operator==(const ValueTuple2& o) const { return detail::vtEquals(Item1, o.Item1) && detail::vtEquals(Item2, o.Item2); }
     bool operator!=(const ValueTuple2& o) const { return !(*this == o); }
     bool operator< (const ValueTuple2& o) const { return CompareTo(o) < 0; }
     bool operator<=(const ValueTuple2& o) const { return CompareTo(o) <= 0; }
@@ -189,7 +212,7 @@ struct ValueTuple3 {
 
     /** @brief Determines whether this instance equals another. */
     [[nodiscard]] bool Equals(const ValueTuple3& other) const {
-        return Item1 == other.Item1 && Item2 == other.Item2 && Item3 == other.Item3;
+        return detail::vtEquals(Item1, other.Item1) && detail::vtEquals(Item2, other.Item2) && detail::vtEquals(Item3, other.Item3);
     }
 
     /** @brief Returns a hash code for this instance. */
@@ -205,12 +228,9 @@ struct ValueTuple3 {
      * @return -1 if less, 0 if equal, 1 if greater.
      */
     [[nodiscard]] intcs CompareTo(const ValueTuple3& other) const {
-        if (Item1 < other.Item1) return -1;
-        if (other.Item1 < Item1) return  1;
-        if (Item2 < other.Item2) return -1;
-        if (other.Item2 < Item2) return  1;
-        if (Item3 < other.Item3) return -1;
-        if (other.Item3 < Item3) return  1;
+        if (const intcs c = detail::vtCompare(Item1, other.Item1); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item2, other.Item2); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item3, other.Item3); c != 0) return c;
         return 0;
     }
 
@@ -222,7 +242,7 @@ struct ValueTuple3 {
     }
 
     bool operator==(const ValueTuple3& o) const {
-        return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3;
+        return detail::vtEquals(Item1, o.Item1) && detail::vtEquals(Item2, o.Item2) && detail::vtEquals(Item3, o.Item3);
     }
     bool operator!=(const ValueTuple3& o) const { return !(*this == o); }
     bool operator< (const ValueTuple3& o) const { return CompareTo(o) < 0; }
@@ -261,8 +281,8 @@ struct ValueTuple4 {
 
     /** @brief Determines whether this instance equals another. */
     [[nodiscard]] bool Equals(const ValueTuple4& other) const {
-        return Item1==other.Item1 && Item2==other.Item2 &&
-               Item3==other.Item3 && Item4==other.Item4;
+        return detail::vtEquals(Item1, other.Item1) && detail::vtEquals(Item2, other.Item2) &&
+               detail::vtEquals(Item3, other.Item3) && detail::vtEquals(Item4, other.Item4);
     }
 
     /** @brief Returns a hash code for this instance. */
@@ -279,14 +299,10 @@ struct ValueTuple4 {
      * @return -1 if less, 0 if equal, 1 if greater.
      */
     [[nodiscard]] intcs CompareTo(const ValueTuple4& other) const {
-        if (Item1 < other.Item1) return -1;
-        if (other.Item1 < Item1) return 1;
-        if (Item2 < other.Item2) return -1;
-        if (other.Item2 < Item2) return 1;
-        if (Item3 < other.Item3) return -1;
-        if (other.Item3 < Item3) return 1;
-        if (Item4 < other.Item4) return -1;
-        if (other.Item4 < Item4) return 1;
+        if (const intcs c = detail::vtCompare(Item1, other.Item1); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item2, other.Item2); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item3, other.Item3); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item4, other.Item4); c != 0) return c;
         return 0;
     }
 
@@ -299,7 +315,7 @@ struct ValueTuple4 {
     }
 
     bool operator==(const ValueTuple4& o) const {
-        return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3 && Item4==o.Item4;
+        return detail::vtEquals(Item1, o.Item1) && detail::vtEquals(Item2, o.Item2) && detail::vtEquals(Item3, o.Item3) && detail::vtEquals(Item4, o.Item4);
     }
     bool operator!=(const ValueTuple4& o) const { return !(*this == o); }
     bool operator< (const ValueTuple4& o) const { return CompareTo(o) < 0; }
@@ -340,8 +356,8 @@ struct ValueTuple5 {
 
     /** @brief Determines whether this instance equals another. */
     [[nodiscard]] bool Equals(const ValueTuple5& o) const {
-        return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3 &&
-               Item4==o.Item4 && Item5==o.Item5;
+        return detail::vtEquals(Item1, o.Item1) && detail::vtEquals(Item2, o.Item2) && detail::vtEquals(Item3, o.Item3) &&
+               detail::vtEquals(Item4, o.Item4) && detail::vtEquals(Item5, o.Item5);
     }
 
     /**
@@ -363,16 +379,11 @@ struct ValueTuple5 {
      * @return -1 if less, 0 if equal, 1 if greater.
      */
     [[nodiscard]] intcs CompareTo(const ValueTuple5& o) const {
-        if (Item1 < o.Item1) return -1;
-        if (o.Item1 < Item1) return 1;
-        if (Item2 < o.Item2) return -1;
-        if (o.Item2 < Item2) return 1;
-        if (Item3 < o.Item3) return -1;
-        if (o.Item3 < Item3) return 1;
-        if (Item4 < o.Item4) return -1;
-        if (o.Item4 < Item4) return 1;
-        if (Item5 < o.Item5) return -1;
-        if (o.Item5 < Item5) return 1;
+        if (const intcs c = detail::vtCompare(Item1, o.Item1); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item2, o.Item2); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item3, o.Item3); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item4, o.Item4); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item5, o.Item5); c != 0) return c;
         return 0;
     }
 
@@ -429,8 +440,8 @@ struct ValueTuple6 {
 
     /** @brief Determines whether this instance equals another. */
     [[nodiscard]] bool Equals(const ValueTuple6& o) const {
-        return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3 &&
-               Item4==o.Item4 && Item5==o.Item5 && Item6==o.Item6;
+        return detail::vtEquals(Item1, o.Item1) && detail::vtEquals(Item2, o.Item2) && detail::vtEquals(Item3, o.Item3) &&
+               detail::vtEquals(Item4, o.Item4) && detail::vtEquals(Item5, o.Item5) && detail::vtEquals(Item6, o.Item6);
     }
 
     /**
@@ -453,18 +464,12 @@ struct ValueTuple6 {
      * @return -1 if less, 0 if equal, 1 if greater.
      */
     [[nodiscard]] intcs CompareTo(const ValueTuple6& o) const {
-        if (Item1 < o.Item1) return -1;
-        if (o.Item1 < Item1) return 1;
-        if (Item2 < o.Item2) return -1;
-        if (o.Item2 < Item2) return 1;
-        if (Item3 < o.Item3) return -1;
-        if (o.Item3 < Item3) return 1;
-        if (Item4 < o.Item4) return -1;
-        if (o.Item4 < Item4) return 1;
-        if (Item5 < o.Item5) return -1;
-        if (o.Item5 < Item5) return 1;
-        if (Item6 < o.Item6) return -1;
-        if (o.Item6 < Item6) return 1;
+        if (const intcs c = detail::vtCompare(Item1, o.Item1); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item2, o.Item2); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item3, o.Item3); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item4, o.Item4); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item5, o.Item5); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item6, o.Item6); c != 0) return c;
         return 0;
     }
 
@@ -525,8 +530,8 @@ struct ValueTuple7 {
 
     /** @brief Determines whether this instance equals another. */
     [[nodiscard]] bool Equals(const ValueTuple7& o) const {
-        return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3 && Item4==o.Item4 &&
-               Item5==o.Item5 && Item6==o.Item6 && Item7==o.Item7;
+        return detail::vtEquals(Item1, o.Item1) && detail::vtEquals(Item2, o.Item2) && detail::vtEquals(Item3, o.Item3) && detail::vtEquals(Item4, o.Item4) &&
+               detail::vtEquals(Item5, o.Item5) && detail::vtEquals(Item6, o.Item6) && detail::vtEquals(Item7, o.Item7);
     }
 
     /**
@@ -550,20 +555,13 @@ struct ValueTuple7 {
      * @return -1 if less, 0 if equal, 1 if greater.
      */
     [[nodiscard]] intcs CompareTo(const ValueTuple7& o) const {
-        if (Item1 < o.Item1) return -1;
-        if (o.Item1 < Item1) return 1;
-        if (Item2 < o.Item2) return -1;
-        if (o.Item2 < Item2) return 1;
-        if (Item3 < o.Item3) return -1;
-        if (o.Item3 < Item3) return 1;
-        if (Item4 < o.Item4) return -1;
-        if (o.Item4 < Item4) return 1;
-        if (Item5 < o.Item5) return -1;
-        if (o.Item5 < Item5) return 1;
-        if (Item6 < o.Item6) return -1;
-        if (o.Item6 < Item6) return 1;
-        if (Item7 < o.Item7) return -1;
-        if (o.Item7 < Item7) return 1;
+        if (const intcs c = detail::vtCompare(Item1, o.Item1); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item2, o.Item2); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item3, o.Item3); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item4, o.Item4); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item5, o.Item5); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item6, o.Item6); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item7, o.Item7); c != 0) return c;
         return 0;
     }
 
@@ -676,8 +674,8 @@ struct ValueTuple8 {
 
     /** @brief Determines whether this instance equals another. */
     [[nodiscard]] bool Equals(const ValueTuple8& o) const {
-        return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3 && Item4==o.Item4 &&
-               Item5==o.Item5 && Item6==o.Item6 && Item7==o.Item7 && Rest.Equals(o.Rest);
+        return detail::vtEquals(Item1, o.Item1) && detail::vtEquals(Item2, o.Item2) && detail::vtEquals(Item3, o.Item3) && detail::vtEquals(Item4, o.Item4) &&
+               detail::vtEquals(Item5, o.Item5) && detail::vtEquals(Item6, o.Item6) && detail::vtEquals(Item7, o.Item7) && Rest.Equals(o.Rest);
     }
 
     /** @brief Returns a hash code for this instance. */
@@ -698,20 +696,13 @@ struct ValueTuple8 {
      * @return -1 if less, 0 if equal, 1 if greater.
      */
     [[nodiscard]] intcs CompareTo(const ValueTuple8& o) const {
-        if (Item1 < o.Item1) return -1;
-        if (o.Item1 < Item1) return 1;
-        if (Item2 < o.Item2) return -1;
-        if (o.Item2 < Item2) return 1;
-        if (Item3 < o.Item3) return -1;
-        if (o.Item3 < Item3) return 1;
-        if (Item4 < o.Item4) return -1;
-        if (o.Item4 < Item4) return 1;
-        if (Item5 < o.Item5) return -1;
-        if (o.Item5 < Item5) return 1;
-        if (Item6 < o.Item6) return -1;
-        if (o.Item6 < Item6) return 1;
-        if (Item7 < o.Item7) return -1;
-        if (o.Item7 < Item7) return 1;
+        if (const intcs c = detail::vtCompare(Item1, o.Item1); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item2, o.Item2); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item3, o.Item3); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item4, o.Item4); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item5, o.Item5); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item6, o.Item6); c != 0) return c;
+        if (const intcs c = detail::vtCompare(Item7, o.Item7); c != 0) return c;
         return Rest.CompareTo(o.Rest);
     }
 

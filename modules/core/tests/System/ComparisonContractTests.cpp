@@ -22,6 +22,8 @@
 #include "System/Array.hpp"
 #include "System/MemoryExtensions.hpp"
 #include "System/Span.hpp"
+#include "System/Tuple.hpp"
+#include "System/ValueTuple.hpp"
 #include "System/detail/ComparisonPolicy.hpp"
 
 using SharpRuntime::intcs;
@@ -458,4 +460,132 @@ TEST(MemoryExtensionsComparisonContractTests, SequenceEqual_And_Contains_Still_F
     EXPECT_TRUE(System::MemoryExtensions::Contains(a, kNaNf));
     EXPECT_EQ(System::MemoryExtensions::IndexOf(a, kNaNf), 0);
     EXPECT_EQ(System::MemoryExtensions::Count(a, kNaNf), 1);
+}
+
+// ===========================================================================
+// Tuple / ValueTuple — CompareTo, equality and the hash invariant (#1908)
+// ===========================================================================
+
+TEST(TupleComparisonContractTests, Tuple1_CompareTo_Orders_NaN_First) {
+    System::Tuple1<float> nan(kNaNf);
+    System::Tuple1<float> one(1.0f);
+    EXPECT_EQ(nan.CompareTo(one), -1);
+    EXPECT_EQ(one.CompareTo(nan), 1);
+    EXPECT_EQ(nan.CompareTo(System::Tuple1<float>(kNaNf)), 0);
+    // NaN sorts below negative infinity, as Single.CompareTo requires.
+    System::Tuple1<double> negInf(-kInf);
+    EXPECT_EQ(System::Tuple1<double>(kNaN).CompareTo(negInf), -1);
+}
+
+TEST(TupleComparisonContractTests, Tuple1_Equality_Is_NaN_Reflexive) {
+    System::Tuple1<float> a(kNaNf);
+    System::Tuple1<float> b(kNaNf);
+    EXPECT_TRUE(a == b);
+    EXPECT_FALSE(a != b);
+    EXPECT_FALSE(a == System::Tuple1<float>(1.0f));
+}
+
+TEST(TupleComparisonContractTests, Tuple_NaN_In_Each_Component_Position) {
+    EXPECT_EQ((System::Tuple2<int, float>(1, kNaNf).CompareTo(System::Tuple2<int, float>(1, 1.0f))), -1);
+    EXPECT_EQ((System::Tuple3<int, int, double>(1, 1, kNaN)
+                   .CompareTo(System::Tuple3<int, int, double>(1, 1, 1.0))), -1);
+    EXPECT_EQ((System::Tuple2<float, int>(kNaNf, 9).CompareTo(System::Tuple2<float, int>(1.0f, 0))), -1);
+    EXPECT_TRUE((System::Tuple2<int, float>(1, kNaNf) == System::Tuple2<int, float>(1, kNaNf)));
+}
+
+TEST(TupleComparisonContractTests, Tuple_Equal_Objects_Have_Equal_Hashes) {
+    System::Tuple2<int, double> a(1, kNaN);
+    System::Tuple2<int, double> b(1, std::nan("7"));
+    ASSERT_TRUE(a == b);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+
+    System::Tuple1<double> pz(0.0);
+    System::Tuple1<double> nz(-0.0);
+    ASSERT_TRUE(pz == nz);
+    EXPECT_EQ(pz.GetHashCode(), nz.GetHashCode());
+}
+
+TEST(TupleComparisonContractTests, Tuple_NonFloating_Unchanged) {
+    EXPECT_EQ((System::Tuple2<int, int>(1, 2).CompareTo(System::Tuple2<int, int>(1, 3))), -1);
+    EXPECT_EQ((System::Tuple2<int, int>(1, 3).CompareTo(System::Tuple2<int, int>(1, 3))), 0);
+    EXPECT_TRUE((System::Tuple2<int, std::string>(1, "a") == System::Tuple2<int, std::string>(1, "a")));
+    EXPECT_FALSE((System::Tuple2<int, std::string>(1, "a") == System::Tuple2<int, std::string>(1, "b")));
+}
+
+TEST(ValueTupleComparisonContractTests, CompareTo_Orders_NaN_First) {
+    System::ValueTuple1<float> nan{kNaNf};
+    System::ValueTuple1<float> one{1.0f};
+    EXPECT_EQ(nan.CompareTo(one), -1);
+    EXPECT_EQ(one.CompareTo(nan), 1);
+    EXPECT_EQ(nan.CompareTo(System::ValueTuple1<float>{kNaNf}), 0);
+    EXPECT_EQ((System::ValueTuple1<double>{kNaN}.CompareTo(System::ValueTuple1<double>{-kInf})), -1);
+}
+
+TEST(ValueTupleComparisonContractTests, Relational_Operators_Follow_CompareTo) {
+    System::ValueTuple1<float> nan{kNaNf};
+    System::ValueTuple1<float> one{1.0f};
+    EXPECT_TRUE(nan < one);
+    EXPECT_TRUE(nan <= one);
+    EXPECT_FALSE(nan > one);
+    EXPECT_FALSE(nan >= one);
+    EXPECT_TRUE(nan <= System::ValueTuple1<float>{kNaNf});
+    EXPECT_TRUE(nan >= System::ValueTuple1<float>{kNaNf});
+}
+
+TEST(ValueTupleComparisonContractTests, Equality_Is_NaN_Reflexive) {
+    System::ValueTuple1<float> a{kNaNf};
+    System::ValueTuple1<float> b{kNaNf};
+    EXPECT_TRUE(a == b);
+    EXPECT_TRUE(a.Equals(b));
+    EXPECT_FALSE(a != b);
+    EXPECT_FALSE((a == System::ValueTuple1<float>{1.0f}));
+}
+
+TEST(ValueTupleComparisonContractTests, NaN_In_First_Middle_And_Last_Component) {
+    using VT4 = System::ValueTuple4<int, double, int, double>;
+    EXPECT_EQ((VT4{1, kNaN, 1, 1.0}.CompareTo(VT4{1, 1.0, 1, 1.0})), -1);      // middle
+    EXPECT_EQ((VT4{1, 1.0, 1, kNaN}.CompareTo(VT4{1, 1.0, 1, 1.0})), -1);      // last
+    using VT2 = System::ValueTuple2<double, int>;
+    EXPECT_EQ((VT2{kNaN, 9}.CompareTo(VT2{1.0, 0})), -1);                      // first
+    EXPECT_TRUE((VT4{1, kNaN, 1, kNaN} == VT4{1, kNaN, 1, kNaN}));
+}
+
+TEST(ValueTupleComparisonContractTests, NaN_Inside_ValueTuple8_Rest) {
+    using Rest = System::ValueTuple1<double>;
+    using VT8 = System::ValueTuple8<int, int, int, int, int, int, int, Rest>;
+    VT8 a{1, 2, 3, 4, 5, 6, 7, Rest{kNaN}};
+    VT8 b{1, 2, 3, 4, 5, 6, 7, Rest{kNaN}};
+    VT8 c{1, 2, 3, 4, 5, 6, 7, Rest{1.0}};
+    EXPECT_TRUE(a == b);
+    EXPECT_EQ(a.CompareTo(b), 0);
+    EXPECT_EQ(a.CompareTo(c), -1);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(ValueTupleComparisonContractTests, Equal_Objects_Have_Equal_Hashes) {
+    System::ValueTuple1<double> a{kNaN};
+    System::ValueTuple1<double> b{std::nan("7")};
+    ASSERT_TRUE(a == b);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+
+    System::ValueTuple2<int, double> pz{1, 0.0};
+    System::ValueTuple2<int, double> nz{1, -0.0};
+    ASSERT_TRUE(pz == nz);
+    EXPECT_EQ(pz.GetHashCode(), nz.GetHashCode());
+}
+
+TEST(ValueTupleComparisonContractTests, NonFloating_Unchanged) {
+    using VT2 = System::ValueTuple2<int, std::string>;
+    EXPECT_EQ((VT2{1, "a"}.CompareTo(VT2{1, "b"})), -1);
+    EXPECT_EQ((VT2{1, "b"}.CompareTo(VT2{1, "b"})), 0);
+    EXPECT_EQ((VT2{2, "a"}.CompareTo(VT2{1, "z"})), 1);
+    EXPECT_TRUE((VT2{1, "a"} == VT2{1, "a"}));
+    EXPECT_FALSE((VT2{1, "a"} == VT2{1, "b"}));
+}
+
+TEST(ValueTupleComparisonContractTests, EmptyValueTuple_Is_Still_Constant_True) {
+    System::ValueTuple a;
+    System::ValueTuple b;
+    EXPECT_TRUE(a == b);
+    EXPECT_TRUE(a.Equals(b));
 }
