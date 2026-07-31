@@ -484,3 +484,42 @@ TEST(DateOnlyTests, AddYears_BoundAndResultRejections_1837) {
     EXPECT_EQ(DateOnly(1, 6, 15).AddYears(9998), DateOnly(9999, 6, 15));
     EXPECT_EQ(DateOnly(9999, 6, 15).AddYears(-9998), DateOnly(1, 6, 15));
 }
+
+// ---------------------------------------------------------------------------
+// CCF-002 class D (SR-AUD-061, ticket #1879, approved 2026-07-31): DateOnly's
+// parser consumes the whole string or fails. The worst row is
+// "2024-06-15 10:20:30" -- a full timestamp silently truncated to its date.
+// ---------------------------------------------------------------------------
+
+TEST(DateOnlyTests, Ccf002d_TrailingTextIsRejected) {
+    System::DateOnly d;
+    EXPECT_FALSE(System::DateOnly::TryParse("2024-06-15junk", d));
+    EXPECT_FALSE(System::DateOnly::TryParse("2024-06-15 10:20:30", d));
+    EXPECT_FALSE(System::DateOnly::TryParse("2024-06-15 ", d));
+    EXPECT_THROW(System::DateOnly::Parse("2024-06-15junk"), System::FormatException);
+    EXPECT_THROW(System::DateOnly::Parse("2024-06-15 10:20:30"), System::FormatException);
+}
+
+TEST(DateOnlyTests, Ccf002d_SscanfLeniencyShapesAreGone) {
+    System::DateOnly d;
+    EXPECT_FALSE(System::DateOnly::TryParse(" 024-06-15", d));
+    EXPECT_FALSE(System::DateOnly::TryParse("+024-06-15", d));
+}
+
+TEST(DateOnlyTests, Ccf002d_WellFormedDatesKeepTheirExactValues) {
+    System::DateOnly d;
+    ASSERT_TRUE(System::DateOnly::TryParse("2024-06-15", d));
+    EXPECT_EQ(d.getYearProperty(), 2024);
+    EXPECT_EQ(d.getMonthProperty(), 6);
+    EXPECT_EQ(d.getDayProperty(), 15);
+    ASSERT_TRUE(System::DateOnly::TryParse("0001-01-01", d));
+    EXPECT_EQ(d.getYearProperty(), 1);
+    ASSERT_TRUE(System::DateOnly::TryParse("9999-12-31", d));
+    EXPECT_EQ(d.getDayProperty(), 31);
+    // A trailing UTC designator parsed before this ticket and still does.
+    ASSERT_TRUE(System::DateOnly::TryParse("2024-06-15Z", d));
+    EXPECT_EQ(d.getDayProperty(), 15);
+    // Previously-rejected shapes stay rejected.
+    EXPECT_FALSE(System::DateOnly::TryParse("2024-02-30", d));
+    EXPECT_FALSE(System::DateOnly::TryParse("2024-6-15", d));
+}

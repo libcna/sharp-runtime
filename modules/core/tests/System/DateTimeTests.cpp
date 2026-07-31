@@ -404,9 +404,29 @@ TEST(DateTimeTests, TryParse_MillisecondsWithTrailingOffset_ParsesCorrectly) {
     EXPECT_EQ(dt.getMillisecondProperty(), 123);
 }
 
-TEST(DateTimeTests, TryParse_SevenFractionalDigitsWithTrailingZ_TruncatesToMilliseconds) {
+// FLIPPED by #1879 (approved 2026-07-31). A fraction of more than three digits
+// is text this port cannot represent -- DateTime::TryParse resolves to
+// milliseconds -- and §8.2 approved rejecting it rather than silently discarding
+// the extra precision. The whole-string consumption rule makes that automatic.
+//
+// PREMISE CORRECTION, recorded where the claim was made. The decision packet
+// §20.1 asserted that ".NET rejects EVERY input in the table below". Measured
+// against the reference: .NET's ParseFraction
+// (Globalization/DateTimeParse.cs:479-492) reads ALL fractional digits and only
+// requires that there be at least one, so .NET ACCEPTS ".1234567" and keeps
+// 100-ns precision. Rejecting it is therefore a deliberate narrowing of this
+// port's millisecond-resolution parse subset -- a defensible "refuse what you
+// cannot represent" over "silently change the value", and what was approved --
+// but it is not the removal of a divergence. The port's 3-digit fraction limit
+// versus .NET's 7 is inactive ticket #1929. A bare "." and ".abc" ARE rejected
+// by .NET too, so those rows of §20.1 are exactly right.
+TEST(DateTimeTests, TryParse_FractionLongerThanMilliseconds_IsRejected) {
     DateTime dt;
-    ASSERT_TRUE(DateTime::TryParse("2024-06-15 10:30:45.1234567Z", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 10:30:45.1234567Z", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 10:30:45.1234", dt));
+    EXPECT_THROW(DateTime::Parse("2024-06-15 10:30:45.1234"), System::FormatException);
+    // One, two and three digits still parse to exactly their previous values.
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15 10:30:45.123Z", dt));
     EXPECT_EQ(dt.getMillisecondProperty(), 123);
 }
 
@@ -841,4 +861,113 @@ TEST(DateTimeTests, Ccf002_ParserStillAcceptsEveryValidShape) {
     EXPECT_EQ(out.getTicksProperty(), DateTime(2024, 6, 15, 10, 20, 30, 123).getTicksProperty());
     ASSERT_TRUE(DateTime::TryParse("2024-06-15T00:00:00", out));
     EXPECT_EQ(out.getTicksProperty(), DateTime(2024, 6, 15).getTicksProperty());
+}
+
+// ---------------------------------------------------------------------------
+// CCF-002 class D (SR-AUD-007b, ticket #1879, approved 2026-07-31): the four
+// date/time parsers consume the whole string or fail.
+//
+// std::sscanf was replaced by a full-consumption scanner
+// (System/detail/DateTimeTextScanner.hpp). Two things went with it: the PREFIX
+// acceptance that made "2024-06-15junk" a valid date, and the zero substitution
+// that turned an unparseable time into MIDNIGHT -- a wrong answer a caller
+// cannot detect. Every row of docs/DateTimeValidationBoundaryPlan.md §20.1 is
+// pinned here in BOTH directions: the malformed input rejected, and the
+// well-formed input still parsed to its exact previous value.
+// ---------------------------------------------------------------------------
+
+TEST(DateTimeTests, Ccf002d_TrailingTextIsRejected) {
+    DateTime dt;
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15junk", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 trailing", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30zzzz", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 10:20:30 ", dt));
+    EXPECT_THROW(DateTime::Parse("2024-06-15junk"), System::FormatException);
+}
+
+TEST(DateTimeTests, Ccf002d_UnparseableTimeNoLongerFabricatesMidnight) {
+    // The defect this ticket exists for: all three used to return true with a
+    // time of 00:00:00 that appears nowhere in the input.
+    DateTime dt;
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 10:xx:00", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 trailing", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15T::", dt));
+    EXPECT_THROW(DateTime::Parse("2024-06-15 10:xx:00"), System::FormatException);
+}
+
+TEST(DateTimeTests, Ccf002d_MalformedFractionIsRejected) {
+    DateTime dt;
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30.", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30.abc", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30.-1", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30.1234", dt));
+}
+
+TEST(DateTimeTests, Ccf002d_SscanfLeniencyShapesAreGone) {
+    // std::sscanf's "%d" skipped leading whitespace and accepted an explicit
+    // sign, so all of these parsed -- " 024-06-15" as the year 24. None is part
+    // of any documented grammar, and none is listed in §20.1; they go away as an
+    // unavoidable consequence of replacing sscanf, and are pinned here so that
+    // consequence is a decision rather than a surprise.
+    DateTime dt;
+    EXPECT_FALSE(DateTime::TryParse(" 024-06-15", dt));
+    EXPECT_FALSE(DateTime::TryParse("+024-06-15", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 +1:20:30", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15  1:20:30", dt));
+    // An out-of-int numeral was formally undefined behaviour in sscanf; the
+    // scanner never reads more digits than fit, so it is simply not a match.
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15T99999999999999:20:30", dt));
+}
+
+TEST(DateTimeTests, Ccf002d_EveryDocumentedShapeKeepsItsExactValue) {
+    DateTime dt;
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15", dt));
+    EXPECT_EQ(dt.getYearProperty(), 2024);
+    EXPECT_EQ(dt.getMonthProperty(), 6);
+    EXPECT_EQ(dt.getDayProperty(), 15);
+    EXPECT_EQ(dt.getHourProperty(), 0);
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15 10:20:30", dt));
+    EXPECT_EQ(dt.getHourProperty(), 10);
+    EXPECT_EQ(dt.getMinuteProperty(), 20);
+    EXPECT_EQ(dt.getSecondProperty(), 30);
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15T10:20:30", dt));
+    EXPECT_EQ(dt.getSecondProperty(), 30);
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15T10:20:30.1", dt));
+    EXPECT_EQ(dt.getMillisecondProperty(), 100);
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15T10:20:30.12", dt));
+    EXPECT_EQ(dt.getMillisecondProperty(), 120);
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15T10:20:30.123", dt));
+    EXPECT_EQ(dt.getMillisecondProperty(), 123);
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15T10:20:30Z", dt));
+    EXPECT_EQ(dt.getSecondProperty(), 30);
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15T10:20:30.123+02:00", dt));
+    EXPECT_EQ(dt.getMillisecondProperty(), 123);
+    ASSERT_TRUE(DateTime::TryParse("0001-01-01", dt));
+    EXPECT_EQ(dt.getYearProperty(), 1);
+    ASSERT_TRUE(DateTime::TryParse("9999-12-31 23:59:59", dt));
+    EXPECT_EQ(dt.getYearProperty(), 9999);
+    ASSERT_TRUE(DateTime::TryParse("2024-02-29", dt));
+    EXPECT_EQ(dt.getDayProperty(), 29);
+}
+
+TEST(DateTimeTests, Ccf002d_TrailingOffsetKeepsItsTwoDigitFields) {
+    // §20.1's "unchanged in every option" list names the ±HH:MM offset, so it
+    // stays accepted (and stays ignored -- this port has no DateTimeKind), but it
+    // is consumed strictly, exactly as DateTimeOffset consumes it.
+    DateTime dt;
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15 10:30:45.56+02:00", dt));
+    EXPECT_EQ(dt.getMillisecondProperty(), 560);
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30+2:5", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30+02:00junk", dt));
+}
+
+TEST(DateTimeTests, Ccf002d_PreviouslyRejectedInputIsStillRejected) {
+    DateTime dt;
+    EXPECT_FALSE(DateTime::TryParse("", dt));
+    EXPECT_FALSE(DateTime::TryParse("junk", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 25:00:00", dt));  // #1877
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 10:99:00", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-13-01", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-02-30", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-6-15", dt));
 }

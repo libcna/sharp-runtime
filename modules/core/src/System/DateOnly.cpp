@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 
 #include "System/DateOnly.hpp"
+#include "System/detail/DateTimeTextScanner.hpp"
 #include "System/DateTime.hpp"
 #include "System/TimeOnly.hpp"
 #include "System/FormatException.hpp"
@@ -166,9 +167,22 @@ DateTime DateOnly::ToDateTime(const TimeOnly& time) const {
 }
 
 bool DateOnly::TryParse(const std::string& s, DateOnly& result) {
-    int y, m, d;
-    if (s.size() < 10 || s[4] != '-' || s[7] != '-') return false;
-    if (std::sscanf(s.c_str(), "%d-%d-%d", &y, &m, &d) != 3) return false;
+    // CCF-002 class D (SR-AUD-061, ticket #1879, approved 2026-07-31). The
+    // std::sscanf PREFIX conversion accepted "2024-06-15junk" and, worse,
+    // "2024-06-15 10:20:30" -- a full timestamp silently truncated to its date.
+    // The grammar is now required to match the WHOLE string:
+    //
+    //     yyyy '-' MM '-' dd [ 'Z'|'z' ]
+    detail::DateTimeTextScanner scanner(s);
+    int y = 0, m = 0, d = 0;
+    if (!scanner.takeDigits(4, 4, y) || !scanner.take('-') ||
+        !scanner.takeDigits(2, 2, m) || !scanner.take('-') ||
+        !scanner.takeDigits(2, 2, d))
+        return false;
+    // A trailing UTC designator stays accepted and stays ignored, matching
+    // DateTime::TryParse; "2024-06-15Z" parsed before this ticket and still does.
+    if (!scanner.take('Z')) (void)scanner.take('z');
+    if (!scanner.atEnd()) return false;
     if (y < 1 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31) return false;
     try {
         result = DateOnly(y, m, d);

@@ -924,3 +924,97 @@ same-repository `Try*` methods follow each convention, which is why #1880 is
 
 **Ticket status:** `todo`, **inactive** — do not start without confirming it is
 still wanted. No `SR-AUD-*` identifier issued.
+
+### 20.3 CCF2-D / #1879 — **APPROVED AND DONE (2026-07-31, option A)**
+
+Approved by the batch instruction in the exact words of
+`docs/RemainingApprovalDecisions.md` §C.8 item (1). `std::sscanf` is gone from
+all four parsers, replaced by `System::detail::DateTimeTextScanner`
+(a new private header) and a whole-string consumption requirement. **Every one of
+§20.1's fifteen rows now returns `false`, and `Parse` throws `FormatException`;
+every documented shape in the "unchanged in every option" list keeps its exact
+previous value** (`build-probe/1879_{prefix,postfix}_plain.log`, 82 cases).
+
+**Grammars now enforced, in full:**
+
+| Parser | Grammar |
+|---|---|
+| `DateTime` | `yyyy '-' MM '-' dd [ (' '\|'T') HH ':' mm ':' ss [ '.' f{1,3} ] ] [ 'Z'\|'z' \| ('+'\|'-') HH ':' mm ]` |
+| `DateOnly` | `yyyy '-' MM '-' dd [ 'Z'\|'z' ]` |
+| `TimeOnly` | `H{1,2} ':' m{1,2} ':' s{1,2} [ '.' f{1,3} ]` |
+| `DateTimeOffset` | `DateTime`'s date/time text, then `'Z'\|'z'` or `('+'\|'-') HH ':' mm` |
+
+#### 20.3.1 Two premises of §20.1 are wrong about .NET. Recorded, not silently reversed.
+
+§20.1 asserts: *"So the reference rejects **every** input in the table below."*
+Measured against the reference on 2026-07-31, that is false for **two of the
+fifteen rows**, and the original text is preserved above rather than edited.
+
+1. **`".1234"` — .NET accepts it.** `Globalization/DateTimeParse.cs:479-492`,
+   `ParseFraction`, reads **all** fractional digits and returns `digits > 0`; it
+   imposes no upper bound, and .NET keeps 100-ns precision. The port resolves
+   `TryParse` to milliseconds, so a 4+-digit fraction is text it cannot
+   represent. Rejecting it — rather than silently discarding the extra precision,
+   which is what it used to do — is a defensible *"refuse what you cannot
+   represent"* choice and is what was approved, **but it is a narrowing of this
+   port's subset, not the removal of a divergence.** A bare `"."` and `".abc"`
+   *are* rejected by .NET (`digits > 0` fails), so those two rows are exactly
+   right.
+2. **`"+2:5"` — .NET accepts it, and reads it as 125 minutes, which is precisely
+   what the port already produced.** `DateTimeParse.cs:530-548`, `ParseTimeZone`,
+   accepts a one- **or** two-digit hour, then optionally `':'` and a one- or
+   two-digit minute, and builds `new TimeSpan(hourOffset, minuteOffset, 0)` —
+   `2h05m`. §C.4 of the decision packet calls the port's 125 minutes "a wrong
+   answer that survives round-tripping"; measured, the port and .NET **agreed**
+   on this input. Rejecting it is again a narrowing.
+
+**Why the approved outcome is still coherent.** This port's date grammar has
+*always* been narrower than .NET's in exactly this way: it requires
+`yyyy-MM-dd` with two-digit month and day, and rejects `"2024-6-15"`, which .NET
+accepts. Requiring two-digit offset fields makes the offset consistent with the
+date fields rather than introducing a new kind of divergence. `TimeOnly`'s
+`H:m:s` fields were **deliberately left unpadded**, because there the port and
+.NET agree today and padding them would have been a fresh divergence — so the
+narrowing is applied exactly where §20.1 asked for it and nowhere else.
+
+The wider question — whether this port should accept .NET's full date/time
+grammar (unpadded date fields, 7-digit fractions, `"+8"`/`"+0800"` offsets) — is
+new API surface under §16.4 and is recorded as **inactive ticket #1929**. No new
+`SR-AUD-*` identifier was issued; numbering stays frozen at **364**.
+
+#### 20.3.2 A third correction: the change is wider than §20.1's table, unavoidably.
+
+§20.1 lists fifteen inputs. Replacing `std::sscanf` necessarily removes `%d`'s
+own leniencies too, none of which belongs to any documented grammar and none of
+which §20.1 mentions. Measured (`1879_prefix_plain.log` cases C70–C89), these
+also move from accepted to rejected:
+
+| Input | Was | Why it parsed |
+|---|---|---|
+| `" 024-06-15"`, `" 10:20:30"` | year 24 / 10:20:30 | `%d` skips leading whitespace |
+| `"+024-06-15"`, `"+10:20:30"` | year 24 / 10:20:30 | `%d` accepts an explicit sign |
+| `"2024-06-15 +1:20:30"`, `"2024-06-15  1:20:30"` | 01:20:30 | both, inside the time field |
+| `"…+ 2:00"` | +120 min | both, inside the offset field |
+| `"10:20:30.-1"` | 10:20:30.000 | sign inside the fraction |
+| `"…10:20:30 "`, `"10:20:30Z"`, `"2024-06-15 "` | accepted | trailing text, which is the approved change |
+
+These are structurally the same defect as the prefix acceptance — one `sscanf`
+call that is more permissive than the grammar it claims to implement — and are
+repaired under the same approval rather than left as a residue.
+
+#### 20.3.3 Consequences
+
+**No public signature, `noexcept` specification, virtual function, vtable slot,
+data member, `sizeof`, `alignof` or member offset changed**; all four bodies are
+in `.cpp` files, exactly as §12 predicted. `+29` permanent tests, including the
+inversion of the two `Ccf002_*GrammarIsPinnedUnchanged` tests (§20.1's test
+matrix says "the four"; **there are two** — a fourth corrected premise) and of
+`DateTimeTests.TryParse_SevenFractionalDigitsWithTrailingZ_TruncatesToMilliseconds`,
+which §20.1 did not anticipate. Gate **14,964 → 14,978 across 37 executables**.
+ASan and UBSan over all 82 probe cases with the four `.cpp` files compiled
+**into** the probe: **zero diagnostics before and after**, answers identical to
+the plain build — which restates rather than claims coverage, since no sanitizer
+can see an over-permissive grammar. `SR-AUD-007b`, `SR-AUD-009` and `SR-AUD-061`
+all `→ remediated`, and with 007a (#1878) **SR-AUD-007 is fully remediated**.
+CCF-002's remaining member is #1880 (CCF2-E, `TryParse` failure output),
+`todo`/inactive.

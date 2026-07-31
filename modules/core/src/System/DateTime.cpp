@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 
 #include "System/DateTime.hpp"
+#include "System/detail/DateTimeTextScanner.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include <algorithm>
@@ -386,32 +387,63 @@ namespace System {
 
     bool DateTime::TryParse(const std::string& s, DateTime& result)
     {
+        // CCF-002 class D (SR-AUD-007b, ticket #1879, approved 2026-07-31).
+        //
+        // This used to check that s[4] and s[7] were dashes and then run one
+        // std::sscanf PREFIX conversion, never asking whether the conversion
+        // consumed the whole string -- so "2024-06-15junk" was a valid date. Worse,
+        // when the "%d:%d:%d" time conversion yielded fewer than three fields it
+        // substituted zeros, so "2024-06-15 10:xx:00" and "2024-06-15 trailing"
+        // both parsed successfully as MIDNIGHT: a wrong answer with no diagnostic.
+        //
+        // The grammar below is the port's documented one and nothing more
+        // (docs/DateTimeValidationBoundaryPlan.md §16.4 keeps widening it out of
+        // scope), now required to match the WHOLE string:
+        //
+        //     yyyy '-' MM '-' dd [ (' '|'T') HH ':' mm ':' ss [ '.' f{1,3} ] ] [ 'Z'|'z' ]
+        //
+        // Every currently-valid input still produces its exact previous value.
+        detail::DateTimeTextScanner scanner(s);
         int yr = 0, mo = 0, dy = 0, hr = 0, mn = 0, sc = 0, ms = 0;
-        // Require at least "yyyy-MM-dd" (10 chars with dashes at [4] and [7])
-        if (s.size() < 10 || s[4] != '-' || s[7] != '-') return false;
-        if (std::sscanf(s.c_str(), "%d-%d-%d", &yr, &mo, &dy) != 3) return false;
-        if (s.size() >= 19 && (s[10] == ' ' || s[10] == 'T')) {
-            if (std::sscanf(s.c_str() + 11, "%d:%d:%d", &hr, &mn, &sc) != 3)
-                hr = mn = sc = 0;
-            if (s.size() > 20 && s[19] == '.') {
-                // Note: the gate is "at least 1 char after the dot", not "at least 3" -- a
-                // 1-2 digit fraction (e.g. ".5" or ".5Z") is valid and must be scaled up to
-                // milliseconds below, not silently skipped because the string happens to be
-                // short.
-                std::sscanf(s.c_str() + 20, "%d", &ms);
-                // Count only the actual fractional-digit characters -- a trailing
-                // 'Z'/'+hh:mm'/'-hh:mm' timezone marker (common on ISO-8601/wire-format
-                // timestamps such as "...ss.123Z") is not part of the fraction and must not
-                // be counted as if it were extra digits, or the millisecond normalisation
-                // below divides by the wrong power of ten (e.g. ".123Z" would previously be
-                // read as 4 fractional digits and truncated from 123ms to 12ms).
-                size_t fracLen = 0;
-                while (20 + fracLen < s.size() && s[20 + fracLen] >= '0' && s[20 + fracLen] <= '9')
-                    ++fracLen;
-                while (fracLen < 3) { ms *= 10; ++fracLen; }
-                if (fracLen > 3) { for (size_t k = 3; k < fracLen; ++k) ms /= 10; }
+        if (!scanner.takeDigits(4, 4, yr) || !scanner.take('-') ||
+            !scanner.takeDigits(2, 2, mo) || !scanner.take('-') ||
+            !scanner.takeDigits(2, 2, dy))
+            return false;
+
+        if (scanner.take(' ') || scanner.take('T')) {
+            if (!scanner.takeDigits(2, 2, hr) || !scanner.take(':') ||
+                !scanner.takeDigits(2, 2, mn) || !scanner.take(':') ||
+                !scanner.takeDigits(2, 2, sc))
+                return false;
+            if (scanner.take('.')) {
+                // A fraction must have 1-3 digits. A bare "." and a non-numeric
+                // ".abc" are now rejected rather than read as .000, and ".1234"
+                // is rejected rather than truncated to .123 -- the port honours
+                // milliseconds only, so a 4-digit fraction is text it cannot
+                // represent, not text to round.
+                int digits = 0;
+                if (!scanner.takeDigits(1, 3, ms, &digits)) return false;
+                while (digits < 3) { ms *= 10; ++digits; }
             }
         }
+        // A trailing time-zone designator stays accepted, and stays ignored: this
+        // port has no DateTimeKind (§16.4), so "…T10:20:30Z" and
+        // "…T10:20:30.123+02:00" keep the exact values they have always had.
+        // §20.1's "unchanged in every option" list names both spellings, and
+        // three DateTimeTests pin the offset one. The offset fields are two
+        // digits each, the same rule DateTimeOffset applies -- and the same rule
+        // the date fields have always had, since "2024-6-15" was never accepted
+        // either.
+        if (!scanner.take('Z') && !scanner.take('z')) {
+            if (scanner.take('+') || scanner.take('-')) {
+                int offsetHours = 0, offsetMinutes = 0;
+                if (!scanner.takeDigits(2, 2, offsetHours) || !scanner.take(':') ||
+                    !scanner.takeDigits(2, 2, offsetMinutes))
+                    return false;
+            }
+        }
+        if (!scanner.atEnd()) return false;
+
         try {
             result = DateTime(yr, mo, dy, hr, mn, sc, ms);
             return true;

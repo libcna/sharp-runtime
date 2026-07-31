@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 
 #include "System/TimeOnly.hpp"
+#include "System/detail/DateTimeTextScanner.hpp"
 #include "System/DateTime.hpp"
 #include "System/FormatException.hpp"
 #include <algorithm>
@@ -41,24 +42,36 @@ TimeOnly TimeOnly::FromDateTime(const DateTime& dt) {
 }
 
 bool TimeOnly::TryParse(const std::string& s, TimeOnly& result) {
-    int h, m, sc;
-    if (std::sscanf(s.c_str(), "%d:%d:%d", &h, &m, &sc) != 3) return false;
+    // CCF-002 class D (SR-AUD-009, ticket #1879, approved 2026-07-31).
+    //
+    // This used to run one std::sscanf PREFIX conversion and then hand-walk the
+    // fraction, never asking whether the whole string had been consumed -- so
+    // "10:20:30junk" was a valid time, "10:20:30." and "10:20:30.abc" were read
+    // as .000, and "10:20:30.1234" was truncated to .123. The grammar below is
+    // required to match the WHOLE string:
+    //
+    //     H{1,2} ':' m{1,2} ':' s{1,2} [ '.' f{1,3} ]
+    //
+    // One-or-two-digit fields are DELIBERATE and unchanged: "1:2:3" parses today
+    // and .NET's TimeOnly.Parse accepts it too (its "H:m:s" standard pattern), so
+    // requiring zero padding here would be a narrowing this approval does not
+    // cover and a divergence from .NET rather than a step towards it. The
+    // *offset* fields in DateTimeOffset are the ones §20.1 requires to be
+    // two-digit, and they are handled there.
+    detail::DateTimeTextScanner scanner(s);
+    int h = 0, m = 0, sc = 0, ms = 0;
+    if (!scanner.takeDigits(1, 2, h) || !scanner.take(':') ||
+        !scanner.takeDigits(1, 2, m) || !scanner.take(':') ||
+        !scanner.takeDigits(1, 2, sc))
+        return false;
+    if (scanner.take('.')) {
+        int digits = 0;
+        if (!scanner.takeDigits(1, 3, ms, &digits)) return false;
+        while (digits < 3) { ms *= 10; ++digits; }
+    }
+    if (!scanner.atEnd()) return false;
     if (h < 0 || h > 23 || m < 0 || m > 59 || sc < 0 || sc > 59) return false;
 
-    int ms = 0;
-    const char* p = s.c_str();
-    int colons = 0;
-    while (*p && colons < 2) { if (*p == ':') ++colons; ++p; }
-    while (*p >= '0' && *p <= '9') ++p;
-    if (*p == '.') {
-        ++p;
-        int fracDigits = 0;
-        while (*p >= '0' && *p <= '9' && fracDigits < 3) {
-            ms = ms * 10 + (*p - '0');
-            ++fracDigits; ++p;
-        }
-        while (fracDigits < 3) { ms *= 10; ++fracDigits; }
-    }
     result = TimeOnly(h, m, sc, ms);
     return true;
 }

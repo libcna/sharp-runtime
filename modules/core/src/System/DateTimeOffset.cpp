@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 
 #include "System/DateTimeOffset.hpp"
+#include "System/detail/DateTimeTextScanner.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
@@ -339,7 +340,25 @@ namespace System {
                 const std::string offStr = s.substr(offPos);
                 bool neg = offStr[0] == '-';
                 int hh = 0, mm = 0;
-                if (std::sscanf(offStr.c_str() + 1, "%d:%d", &hh, &mm) != 2) return false;
+                // CCF-002 class D (ticket #1879, approved 2026-07-31). The
+                // std::sscanf PREFIX conversion accepted trailing text
+                // ("+02:00junk") and the UNPADDED form "+2:5" -- which, because
+                // %d then read 5 as the minute field, meant an offset of +125
+                // MINUTES the input never named, and one that survives
+                // round-tripping. Both rows are named in
+                // docs/DateTimeValidationBoundaryPlan.md §20.1. The offset
+                // grammar is now exactly two digits, a colon, two digits, and
+                // then the end of the offset text -- unlike TimeOnly's H:m:s,
+                // where the unpadded form is valid in .NET too.
+                {
+                    detail::DateTimeTextScanner offsetScanner(
+                        std::string_view(offStr).substr(1));
+                    if (!offsetScanner.takeDigits(2, 2, hh) ||
+                        !offsetScanner.take(':') ||
+                        !offsetScanner.takeDigits(2, 2, mm) ||
+                        !offsetScanner.atEnd())
+                        return false;
+                }
 
                 // CCF-002 class C (SR-AUD-007a, ticket #1878). The two numeric fields were
                 // read and then used unchecked, which is three defects in one line.

@@ -486,13 +486,57 @@ TEST(TimeOnlyTests, Ccf002_FractionalScalingIsCorrectAndPinned) {
     EXPECT_EQ(t.getMillisecondProperty(), 123);
 }
 
-TEST(TimeOnlyTests, Ccf002_CurrentlyAcceptedMalformedGrammarIsPinnedUnchanged) {
-    // SR-AUD-009 is NOT repaired by ticket #1877. Every input here is accepted
-    // today and must stay accepted until ticket #1879 obtains explicit approval
-    // for the accepted-grammar change; then these expectations flip together.
+// FLIPPED by #1879 (approved 2026-07-31), which is exactly what this test said
+// would happen to it.
+TEST(TimeOnlyTests, Ccf002_MalformedGrammarIsNowRejected) {
     TimeOnly t;
-    EXPECT_TRUE(TimeOnly::TryParse("10:20:30.abc", t));
-    EXPECT_TRUE(TimeOnly::TryParse("10:20:30junk", t));
-    EXPECT_TRUE(TimeOnly::TryParse("10:20:30.", t));
-    EXPECT_TRUE(TimeOnly::TryParse("10:20:30.1234", t));
+    EXPECT_FALSE(TimeOnly::TryParse("10:20:30.abc", t));
+    EXPECT_FALSE(TimeOnly::TryParse("10:20:30junk", t));
+    EXPECT_FALSE(TimeOnly::TryParse("10:20:30.", t));
+    EXPECT_FALSE(TimeOnly::TryParse("10:20:30.1234", t));
+    EXPECT_THROW(TimeOnly::Parse("10:20:30junk"), System::FormatException);
+}
+
+TEST(TimeOnlyTests, Ccf002_WellFormedTimesKeepTheirExactValues) {
+    TimeOnly t;
+    ASSERT_TRUE(TimeOnly::TryParse("10:20:30", t));
+    EXPECT_EQ(t.getHourProperty(), 10);
+    EXPECT_EQ(t.getMinuteProperty(), 20);
+    EXPECT_EQ(t.getSecondProperty(), 30);
+    EXPECT_EQ(t.getMillisecondProperty(), 0);
+    ASSERT_TRUE(TimeOnly::TryParse("10:20:30.5", t));
+    EXPECT_EQ(t.getMillisecondProperty(), 500);
+    ASSERT_TRUE(TimeOnly::TryParse("10:20:30.12", t));
+    EXPECT_EQ(t.getMillisecondProperty(), 120);
+    ASSERT_TRUE(TimeOnly::TryParse("10:20:30.123", t));
+    EXPECT_EQ(t.getMillisecondProperty(), 123);
+    ASSERT_TRUE(TimeOnly::TryParse("00:00:00", t));
+    EXPECT_EQ(t.getHourProperty(), 0);
+    ASSERT_TRUE(TimeOnly::TryParse("23:59:59", t));
+    EXPECT_EQ(t.getSecondProperty(), 59);
+}
+
+// The unpadded "H:m:s" form is DELIBERATELY still accepted. It parses today, and
+// .NET's TimeOnly.Parse accepts it too, so requiring zero padding here would
+// diverge from .NET rather than converge on it. Contrast the DateTimeOffset
+// offset fields, which #1879 does require to be two digits.
+TEST(TimeOnlyTests, Ccf002_UnpaddedFieldsAreStillAccepted) {
+    TimeOnly t;
+    ASSERT_TRUE(TimeOnly::TryParse("1:2:3", t));
+    EXPECT_EQ(t.getHourProperty(), 1);
+    EXPECT_EQ(t.getMinuteProperty(), 2);
+    EXPECT_EQ(t.getSecondProperty(), 3);
+}
+
+// std::sscanf's "%d" skipped leading whitespace and accepted an explicit sign,
+// so these parsed before #1879 replaced it with a digits-only scanner. None of
+// them is part of any documented grammar.
+TEST(TimeOnlyTests, Ccf002_SscanfLeniencyShapesAreGone) {
+    TimeOnly t;
+    EXPECT_FALSE(TimeOnly::TryParse(" 10:20:30", t));
+    EXPECT_FALSE(TimeOnly::TryParse("+10:20:30", t));
+    EXPECT_FALSE(TimeOnly::TryParse("10:20:30.-1", t));
+    EXPECT_FALSE(TimeOnly::TryParse("10:20:30Z", t));
+    EXPECT_FALSE(TimeOnly::TryParse("10:20:30 ", t));
+    EXPECT_FALSE(TimeOnly::TryParse("99999999999999:20:30", t));
 }

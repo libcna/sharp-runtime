@@ -50,6 +50,18 @@ The repair should replace prefix conversion with a full grammar/consumption
 check, preserving the intentional ISO-only adaptation if that reduced surface
 remains desired.
 
+**Remediated (#1879, 2026-07-31, CCF-002 class D).** Approved in the exact words
+of `docs/RemainingApprovalDecisions.md` §C.8 item (1). `std::sscanf` was replaced
+by the full-consumption `System::detail::DateTimeTextScanner`, so the parser
+consumes the whole string or fails, and the `%d` leniencies that came with
+`sscanf` (leading whitespace, an explicit sign, an out-of-`int` numeral) are gone
+with it. Every well-formed input keeps its exact previous value. Measured over 82
+cases in `build-probe/1879_{prefix,postfix}_plain.log`; +29 permanent tests
+across the four parsers. No signature, `noexcept`, layout, vtable or symbol
+change. Two of the fifteen approved rejections rest on an incorrect .NET premise
+and are recorded, not silently reversed, in
+`docs/DateTimeValidationBoundaryPlan.md` §20.3.1 (inactive ticket #1929).
+
 ## Other missing assertions and diagnostics
 
 - `FromDayNumber` relies on eventual DateTime construction instead of an

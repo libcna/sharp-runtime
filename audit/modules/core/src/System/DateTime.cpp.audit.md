@@ -195,3 +195,43 @@ The plan for this family is `docs/DateTimeValidationBoundaryPlan.md` (ticket
 #1876). SR-AUD-007 and SR-AUD-009 remain **confirmed**; SR-AUD-007's
 offset-minute half is ticket #1878 and its grammar half is the `needs_user`
 ticket #1879.
+
+### SR-AUD-007b remediated — ticket #1879 (2026-07-31)
+
+Approved by the batch instruction in the exact words of
+`docs/RemainingApprovalDecisions.md` §C.8 item (1). `std::sscanf` was removed
+from `DateTime::TryParse`, `DateTimeOffset::TryParse`, `TimeOnly::TryParse` and
+`DateOnly::TryParse` and replaced by `System::detail::DateTimeTextScanner` plus a
+whole-string consumption requirement. Two defects went with it: the **prefix
+acceptance** that made `"2024-06-15junk"` a valid date, and the **zero
+substitution** that turned `"2024-06-15 10:xx:00"` and `"2024-06-15 trailing"`
+into **midnight** — a wrong answer with no diagnostic, which is the finding's own
+headline. Every one of `docs/DateTimeValidationBoundaryPlan.md` §20.1's fifteen
+rows now returns `false` and throws `FormatException` from `Parse`; every
+documented shape keeps its exact previous value, including the trailing `Z`/`z`
+and the `±HH:MM` offset that three `DateTimeTests` cases pin.
+
+**Three premises corrected, all preserved additively in the plan §20.3.** (1)
+§20.1's claim that ".NET rejects **every** input in the table" is wrong for two
+rows: `ParseFraction` (`Globalization/DateTimeParse.cs:479-492`) accepts
+`".1234567"`, and `ParseTimeZone` (`:530-548`) accepts `"+2:5"` and reads it as
+2h05m — **125 minutes, exactly what the port already produced**, so §C.4's
+"wrong answer that survives round-tripping" was not wrong at all. Both
+rejections are deliberate narrowings of this port's fixed-width,
+millisecond-resolution subset — the same subset that has always rejected
+`"2024-6-15"`, which .NET accepts — and were implemented as approved, with the
+widening question filed as inactive ticket **#1929**. (2) Replacing `sscanf`
+necessarily also removes `%d`'s leading-whitespace and explicit-sign leniencies,
+which §20.1 does not list; structurally the same defect, repaired under the same
+approval. (3) §20.1's test matrix names "the four `Ccf002_*GrammarIsPinnedUnchanged`
+tests"; **there are two**, plus one unanticipated `DateTimeTests` fraction test
+that also had to be inverted.
+
+`TimeOnly`'s unpadded `"1:2:3"` was **deliberately kept**, because .NET accepts it
+too — the narrowing is applied exactly where §20.1 asked for it and nowhere else.
++29 permanent tests; ASan and UBSan clean before and after over 82 probe cases
+with all four `.cpp` files compiled into the probe. No signature, `noexcept`,
+layout, vtable or symbol change. **SR-AUD-007 is now fully `remediated`** (007a
+#1878, 007b #1879); SR-AUD-009 and SR-AUD-061 are `remediated` by the same
+ticket. CCF-002's remaining member is #1880 (`TryParse` failure output),
+inactive. **No new `SR-AUD-*` identifier; numbering stays frozen at 364.**

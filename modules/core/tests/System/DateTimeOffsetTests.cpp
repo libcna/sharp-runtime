@@ -476,13 +476,42 @@ TEST(DateTimeOffsetTests2, Ccf002_OutOfRangeOffsetHoursStillFailTheSameWay) {
     EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+14:01", out));
 }
 
-TEST(DateTimeOffsetTests2, Ccf002_CurrentlyAcceptedOffsetGrammarIsPinnedUnchanged) {
-    // SR-AUD-007b is NOT repaired by ticket #1878. Both inputs are accepted today
-    // and must stay accepted until ticket #1879 obtains explicit approval for the
-    // accepted-grammar change; then these expectations flip.
+// FLIPPED by #1879 (approved 2026-07-31), which is exactly what this test said
+// would happen to it. The offset text must now be consumed in full and its two
+// fields must be two digits each.
+TEST(DateTimeOffsetTests2, Ccf002_OffsetGrammarIsNowStrict) {
     DateTimeOffset out;
-    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00+02:00junk", out));
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+02:00junk", out));
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+2:5", out));
+    EXPECT_THROW(DateTimeOffset::Parse("2024-06-15T10:30:00+2:5"),
+                 System::FormatException);
+    // Every well-formed offset still parses to exactly its previous value.
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00+02:00", out));
     EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 120);
-    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00+2:5", out));
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00-05:30", out));
+    EXPECT_EQ(out.getTotalOffsetMinutesProperty(), -330);
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00+14:00", out));
+    EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 840);
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00Z", out));
+    EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 0);
+}
+
+// PREMISE CORRECTION, recorded where the claim was made. The decision packet
+// §C.4 called "+2:5" a "wrong answer that survives round-tripping" because it
+// yields 125 minutes. Measured against the reference: .NET's ParseTimeZone
+// (Globalization/DateTimeParse.cs:530-548) accepts a one- OR two-digit hour and
+// a one- or two-digit minute and builds `new TimeSpan(hourOffset, minuteOffset,
+// 0)`, so .NET reads "+2:5" as 2h05m -- 125 minutes, the very value the port
+// already produced. The port and .NET AGREED on this input; rejecting it is a
+// deliberate narrowing of the port's already-narrow fixed-width subset (which
+// likewise rejects "2024-6-15", as .NET does not), not the removal of a wrong
+// answer. Approved as such and recorded in
+// docs/DateTimeValidationBoundaryPlan.md §20.3; the wider question of whether
+// the port should accept .NET's full grammar is inactive ticket #1929.
+TEST(DateTimeOffsetTests2, Ccf002_UnpaddedOffsetRejectionIsANarrowingNotAParityFix) {
+    DateTimeOffset out;
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+2:5", out));
+    // The padded spelling of the same instant is the supported way to say it.
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00+02:05", out));
     EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 125);
 }
