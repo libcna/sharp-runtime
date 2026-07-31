@@ -490,3 +490,52 @@ TEST(SingleTest, HalfInheritsTheWidenedParseGrammarFromSingle) {
     EXPECT_TRUE(System::Half::TryParse("1e999", h));
     EXPECT_TRUE(std::isinf(h.ToSingle()));
 }
+
+// ---------------------------------------------------------------------------
+// SR-AUD-033 format slice (#1863, approved 2026-07-31, CCF-007 item CCF7-5).
+// Single shares the emitted-text helpers with Double, so the same matrix is
+// pinned here rather than assumed to follow. Half delegates its ToString to
+// Single and inherits the change with no edit of its own.
+// ---------------------------------------------------------------------------
+
+TEST(SingleTest, Ccf7_5_ExponentIsSignedAndAtLeastThreeDigits) {
+    EXPECT_EQ(Single::ToString(1.25f, "E2"), "1.25E+000");
+    EXPECT_EQ(Single::ToString(1.25f, "e2"), "1.25e+000");
+    EXPECT_EQ(Single::ToString(-1.25f, "E2"), "-1.25E+000");
+    EXPECT_EQ(Single::ToString(1e30f, "E2"), "1.00E+030");
+}
+
+TEST(SingleTest, Ccf7_5_NumberFormatGroupsTheIntegerDigits) {
+    EXPECT_EQ(Single::ToString(1234.5f, "N2"), "1,234.50");
+    EXPECT_EQ(Single::ToString(-1234.5f, "N2"), "-1,234.50");
+    EXPECT_EQ(Single::ToString(123.0f, "N2"), "123.00");
+}
+
+TEST(SingleTest, Ccf7_5_GeneralFormatIsRoundTripCapable) {
+    EXPECT_EQ(Single::ToString(0.1f, "G9"), "0.100000001");   // float's round-trip width
+    for (float v : {0.1f, 1.0f / 3.0f, 1e-30f, 1e30f, 12345.6789f, 1.5f, 3.14159265f}) {
+        float back = 0;
+        ASSERT_TRUE(Single::TryParse(Single::ToString(v, "G9"), back)) << v;
+        EXPECT_EQ(back, v);
+        ASSERT_TRUE(Single::TryParse(Single::ToString(v, "G"), back)) << v;
+        EXPECT_EQ(back, v);
+    }
+}
+
+TEST(SingleTest, Ccf7_5_TheRoundTripFastPathDidNotMove) {
+    EXPECT_EQ(Single::ToString(0.1f, "R"), Single::ToString(0.1f));
+    EXPECT_EQ(Single::ToString(0.1f, "R"), "0.1");
+    EXPECT_EQ(Single::ToString(2.5f, "R"), Single::ToString(2.5f));
+}
+
+TEST(SingleTest, Ccf7_5_HalfInheritsTheEmittedTextByDelegation) {
+    EXPECT_EQ(System::Half::FromSingle(1234.5f).ToString("N2"), "1,234.00");
+    EXPECT_EQ(System::Half::FromSingle(1.25f).ToString("E2"), "1.25E+000");
+}
+
+TEST(SingleTest, Ccf7_5_EverythingElseIsUnchanged) {
+    EXPECT_EQ(Single::ToString(3.14159f, "F2"), "3.14");
+    EXPECT_EQ(Single::ToString(1234.5f, "F2"), "1234.50");   // F does NOT group
+    EXPECT_EQ(Single::ToString(Single::NaN, "N2"), "NaN");
+    EXPECT_THROW(Single::ToString(1.0f, "Q"), System::FormatException);
+}

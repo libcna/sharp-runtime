@@ -21,6 +21,7 @@
 #include "System/ArithmeticException.hpp"
 #include "System/FormatException.hpp"
 #include "System/detail/FloatParseGrammar.hpp"
+#include "System/detail/FloatTextFormat.hpp"
 
 namespace System {
 
@@ -1182,19 +1183,37 @@ public:
             return oss.str();
         }
         if (type == 'E' || type == 'e') {
+            // SR-AUD-033 format slice (#1863, approved 2026-07-31): .NET's E format
+            // always writes a sign and AT LEAST THREE exponent digits ("1.25E+000");
+            // libstdc++'s std::scientific writes the C minimum of two. The stream
+            // cannot be told otherwise, so its output is post-processed -- mantissa,
+            // sign and the case of the exponent letter are left exactly as emitted.
             if (type == 'E') oss << std::uppercase;
             oss << std::scientific << std::setprecision(prec >= 0 ? prec : 6) << value;
-            return oss.str();
+            return System::detail::padExponentToThreeDigits(oss.str());
         }
         if (type == 'G' || type == 'g') {
-            if (prec > 0) oss << std::setprecision(prec);
-            oss << value;
-            return oss.str();
+            // SR-AUD-033 format slice (#1863): a G with an explicit precision means
+            // "round-trip-capable at this many significant digits" -- G17 for double,
+            // G9 for float -- which is std::to_chars' general form, not setprecision.
+            // A G with no precision means the SHORTEST round-trippable text, which is
+            // exactly what the no-format ToString fast path already produces, so it
+            // delegates there rather than growing a second implementation of it.
+            if (prec > 0) {
+                std::string general = System::detail::generalWithPrecision(value, prec);
+                if (!general.empty()) return general;
+            }
+            return ToString(value);
         }
         if (type == 'R' || type == 'r') return ToString(value);
         if (type == 'N' || type == 'n') {
+            // SR-AUD-033 format slice (#1863): .NET's N format inserts
+            // InvariantInfo's NumberGroupSeparator every NumberGroupSizes[0] == 3
+            // integer digits, which the stream has no mode for at all -- which is why
+            // N used to be formatted identically to F. Two default decimals, as
+            // before, so only the separators are new.
             oss << std::fixed << std::setprecision(prec >= 0 ? prec : 2) << value;
-            return oss.str();
+            return System::detail::insertGroupSeparators(oss.str());
         }
         // SR-AUD-021 float slice (#1849 / CCF-006): an unrecognised specifier is a
         // FormatException in .NET, not a silent round-trip fallback (matching #1847 for the

@@ -572,3 +572,84 @@ TEST(DoubleTests, Parse_CSpellingOfInfinity_StillRejected) {
     EXPECT_TRUE(Double::TryParse("Infinity", r));
     EXPECT_TRUE(std::isinf(r));
 }
+
+// ---------------------------------------------------------------------------
+// SR-AUD-033 format slice (#1863, approved 2026-07-31, CCF-007 item CCF7-5):
+// the text ToString(value, format) emits.
+//
+// The std::ostringstream back end cannot emit a three-digit exponent, cannot
+// insert group separators, and does not give a shortest round-trippable G. The
+// first two are now post-processed (System/detail/FloatTextFormat.hpp) and the
+// third is replaced by std::to_chars. The default/R fast path is the one thing
+// that must NOT move, and is pinned below.
+// ---------------------------------------------------------------------------
+
+TEST(DoubleTests, Ccf7_5_ExponentIsSignedAndAtLeastThreeDigits) {
+    EXPECT_EQ(Double::ToString(1.25, "E2"), "1.25E+000");
+    EXPECT_EQ(Double::ToString(1.25, "e2"), "1.25e+000");
+    EXPECT_EQ(Double::ToString(1.25, "E"), "1.250000E+000");   // default precision 6
+    EXPECT_EQ(Double::ToString(0.000125, "E2"), "1.25E-004");
+    EXPECT_EQ(Double::ToString(-1.25, "E2"), "-1.25E+000");
+    EXPECT_EQ(Double::ToString(0.0, "E2"), "0.00E+000");
+    // An exponent already three digits or wider is untouched.
+    EXPECT_EQ(Double::ToString(1e100, "E2"), "1.00E+100");
+    EXPECT_EQ(Double::ToString(1e-100, "E2"), "1.00E-100");
+    EXPECT_EQ(Double::ToString(1e300, "E4"), "1.0000E+300");
+}
+
+TEST(DoubleTests, Ccf7_5_NumberFormatGroupsTheIntegerDigits) {
+    EXPECT_EQ(Double::ToString(1234.5, "N2"), "1,234.50");
+    EXPECT_EQ(Double::ToString(1234.5, "N"), "1,234.50");      // default two decimals
+    EXPECT_EQ(Double::ToString(1234567.891, "N2"), "1,234,567.89");
+    EXPECT_EQ(Double::ToString(-1234567.891, "N2"), "-1,234,567.89");
+    EXPECT_EQ(Double::ToString(1000000.0, "N2"), "1,000,000.00");
+    EXPECT_EQ(Double::ToString(1234.5, "N0"), "1,234");
+    // Three integer digits or fewer need no separator at all.
+    EXPECT_EQ(Double::ToString(123.0, "N2"), "123.00");
+    EXPECT_EQ(Double::ToString(0.5, "N2"), "0.50");
+    EXPECT_EQ(Double::ToString(-0.25, "N2"), "-0.25");
+}
+
+TEST(DoubleTests, Ccf7_5_GeneralFormatIsRoundTripCapable) {
+    // G with no precision is the SHORTEST round-trippable text -- it used to be
+    // std::ostringstream's default six significant digits, which is neither.
+    EXPECT_EQ(Double::ToString(1.0 / 3.0, "G"), "0.3333333333333333");
+    EXPECT_EQ(Double::ToString(1.5, "G"), "1.5");
+    // G17 is double's round-trip width.
+    EXPECT_EQ(Double::ToString(0.1, "G17"), "0.10000000000000001");
+    for (double v : {0.1, 1.0 / 3.0, 1e-300, 1e300, 123456789.123456789,
+                     2.2250738585072014e-308, 1.5, 3.141592653589793}) {
+        double back = 0;
+        ASSERT_TRUE(Double::TryParse(Double::ToString(v, "G17"), back)) << v;
+        EXPECT_EQ(back, v);
+        ASSERT_TRUE(Double::TryParse(Double::ToString(v, "G"), back)) << v;
+        EXPECT_EQ(back, v);
+    }
+}
+
+TEST(DoubleTests, Ccf7_5_TheRoundTripFastPathDidNotMove) {
+    // The one non-negotiable constraint of the approval: R and the no-format
+    // overload already produced shortest round-trip text through std::to_chars,
+    // and must keep producing exactly the same text.
+    EXPECT_EQ(Double::ToString(1.5, "R"), Double::ToString(1.5));
+    EXPECT_EQ(Double::ToString(1.5, "R"), "1.5");
+    EXPECT_EQ(Double::ToString(0.1, "R"), Double::ToString(0.1));
+    EXPECT_EQ(Double::ToString(0.1, "R"), "0.1");
+    EXPECT_EQ(Double::ToString(1e100, "R"), "1e+100");
+    for (double v : {0.1, 1.0 / 3.0, 1e-300, 1e300, 1.5}) {
+        double back = 0;
+        ASSERT_TRUE(Double::TryParse(Double::ToString(v, "R"), back)) << v;
+        EXPECT_EQ(back, v);
+    }
+}
+
+TEST(DoubleTests, Ccf7_5_EverythingElseIsUnchanged) {
+    EXPECT_EQ(Double::ToString(3.14159, "F2"), "3.14");
+    EXPECT_EQ(Double::ToString(1234.5, "F2"), "1234.50");   // F does NOT group
+    EXPECT_EQ(Double::ToString(1.0, ""), "1");
+    EXPECT_EQ(Double::ToString(Double::NaN, "N2"), "NaN");
+    EXPECT_EQ(Double::ToString(Double::PositiveInfinity, "E2"), "Infinity");
+    EXPECT_EQ(Double::ToString(Double::NegativeInfinity, "N2"), "-Infinity");
+    EXPECT_THROW(Double::ToString(1.0, "Q"), System::FormatException);
+    EXPECT_THROW(Double::ToString(1.0, "F99999999999"), System::FormatException);
+}

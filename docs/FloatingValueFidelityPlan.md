@@ -418,7 +418,60 @@ grammar by delegation with no edit, pinned by a test. +19 tests. No public
 signature, exception specification, object layout or ABI change.
 `SR-AUD-033 → remediated` once #1863 lands; the parse half is complete.
 
-CCF7-5/#1863 (format output) remains approval-blocked, per §11.
+**CCF7-5 — SR-AUD-033 format — DONE (#1863, 2026-07-31).** Approved by the batch
+instruction in the exact words of `docs/RemainingApprovalDecisions.md` §D.5 —
+option **D(i)**. Implemented as §19.2's option (i), post-processing the
+`std::ostringstream` result for `E` and `N`, plus `std::to_chars` for `G`, in one
+shared private header `System/detail/FloatTextFormat.hpp` so the two types'
+emitted text cannot drift apart. Measured over 46 cases
+(`build-probe/1863_{prefix,postfix}_plain.log`):
+
+| Format | Before | After |
+|---|---|---|
+| `E2` of `1.25` | `"1.25E+00"` | `"1.25E+000"` |
+| `e2` of `1.25`, `E` of `1.25`, `E2` of `0.000125`/`-1.25`/`0.0` | two exponent digits | three |
+| `E2` of `1e100`/`1e-100`, `E4` of `1e300` | already ≥ 3 digits | **unchanged** |
+| `N2` of `1234.5` | `"1234.50"` | `"1,234.50"` |
+| `N2` of `1234567.891` / `-1234567.891` / `1000000.0` | ungrouped | `"1,234,567.89"` / `"-1,234,567.89"` / `"1,000,000.00"` |
+| `N2` of `123.0`/`0.5`/`-0.25` | — | **unchanged** (≤ 3 integer digits) |
+| `G` of `1/3` | `"0.333333"` | `"0.3333333333333333"` |
+| `G17` of `0.1`, `G9` of `0.1f`, `G5` of `0.1` | — | **unchanged** |
+| `R`, no format, `F`, `NaN`/`Infinity`, every rejection | — | **unchanged** |
+
+**Two premises of §19.2 corrected by measurement, preserved additively.**
+
+1. **`G17`/`G9` already round-tripped.** §19.2 records them as
+   "`ostringstream setprecision` (not guaranteed shortest/round-trip)". Measured,
+   `setprecision(17)` with `defaultfloat` gives exactly 17 significant digits,
+   which *is* `double`'s round-trip width — `G17` of `0.1` was already
+   `"0.10000000000000001"`, and a round-trip sweep over ten doubles and eight
+   floats passed **before** the change. The guarantee was missing, not the
+   behaviour; `std::to_chars` now supplies it, and the emitted text for these two
+   widths is unchanged.
+2. **`G` with no precision was *not* the `to_chars` fast path.** §D.3 of the
+   decision packet lists `ToString(x, "G")` alongside `"R"` and the no-format
+   overload as "already shortest-round-trip via `to_chars` — **must be
+   preserved**". Measured, `G` fell to `oss << value`, i.e. **six** significant
+   digits: `G` of `1/3` was `"0.333333"`. So making it shortest round-trip is a
+   *change*, and it is one §D.5 explicitly approves ("`G`/`G9`/`G17`/`R` become
+   shortest-round-trip and round-trip widths"). The genuinely untouchable path is
+   `R` and the no-format overload, and a test pins that it did not move.
+
+**Also changed, following from the same rule:** `G0` and a negative `G`
+precision now yield the shortest round-trip text instead of six significant
+digits, because "no positive precision" means "shortest" — which is .NET's own
+reading of `G0`.
+
+`Half` inherits the whole change by delegation with no edit, pinned by a test.
+**No public signature, `noexcept` specification, object layout or ABI change** —
+both bodies are header-inline. `+11` permanent tests. Gate **14,987 → 14,998
+across 37 executables**. ASan and UBSan over all 46 probe cases: zero
+diagnostics, answers identical to the plain build — restating rather than
+claiming coverage, since no sanitizer can see emitted text. **Migration cost, as
+§D.4 states: any golden file, snapshot test or serialized text that captured
+`"1234.50"`, `"1.25E+00"` or a six-digit `G` changes, with no compiler
+diagnostic.** `SR-AUD-033 → remediated` (whitespace #1864, parse tail #1865,
+format slice #1863), and **CCF-007 is complete**.
 
 **CCF-007 family status:** SR-AUD-030, SR-AUD-031, SR-AUD-032 remediated; the
 compatible parse-whitespace slice of SR-AUD-033 landing in #1864;
@@ -489,7 +542,7 @@ absorb it.
 message; option (B): equal the clamped-at-limit value. `Round(x,0)`,
 `Round(x,6)` (float) / `Round(x,15)` (double) remain valid and unchanged.
 
-### 19.2 CCF7-5 / #1863 — `ToString(value,format)` output (SR-AUD-033 format)
+### 19.2 CCF7-5 / #1863 — `ToString(value,format)` output (SR-AUD-033 format) — **APPROVED AND DONE (2026-07-31, option D(i)); see §18**
 
 **Current vs .NET (exact before/after), invariant culture:**
 

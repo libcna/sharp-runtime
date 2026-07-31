@@ -274,3 +274,44 @@ overload is not `noexcept` so no exception-spec changed. +6 tests. This closes t
 CCF-006 float slice of SR-AUD-021. The `N`-branch's missing group separators and
 the `E` two-vs-three exponent-digit divergence are value-fidelity gaps tracked
 under CCF-007, not this leak. `docs/NumericWrapperBoundaryPlan.md` §15.5.
+
+### SR-AUD-033 fully remediated — ticket #1863 (2026-07-31), and CCF-007 complete
+
+Approved by the batch instruction in the exact words of
+`docs/RemainingApprovalDecisions.md` §D.5, option D(i). The last open half of this
+finding — the text `Single::ToString(value, format)` and
+`Double::ToString(value, format)` **emit** — now matches .NET, through one shared
+private header `System/detail/FloatTextFormat.hpp` so the two types cannot drift
+apart: `E`/`e` carry a sign and at least three exponent digits (`"1.25E+000"`,
+was `"1.25E+00"`), `N`/`n` insert invariant-culture group separators
+(`"1,234.50"`, was `"1234.50"` — identical to `F`), and `G` becomes the shortest
+round-trippable text while `G<n>` uses `std::to_chars`' general form. The
+`to_chars` default/`R` fast path is unchanged and a test pins that it did not
+move — that was the approval's one non-negotiable constraint.
+
+**Two premises corrected by measurement** (`build-probe/1863_{prefix,postfix}_plain.log`,
+46 cases), preserved additively in `docs/FloatingValueFidelityPlan.md` §18:
+
+1. **`G17` and `G9` already round-tripped.** The plan recorded them as
+   "`setprecision` (not guaranteed shortest/round-trip)". Measured,
+   `setprecision(17)` with `defaultfloat` gives exactly 17 significant digits,
+   which *is* `double`'s round-trip width; a round-trip sweep over ten doubles
+   and eight floats passed **before** the change, and their emitted text is
+   unchanged after it. What was missing was the guarantee, not the behaviour.
+2. **`G` with no precision was not the `to_chars` fast path.** §D.3 of the
+   decision packet lists it alongside `R` and the no-format overload as "already
+   shortest-round-trip … must be preserved". Measured, it fell to
+   `oss << value` — **six** significant digits, `"0.333333"` for one third. So
+   making it shortest is a change, and one §D.5 explicitly approves.
+
+`Half` inherits the whole change by delegation with no edit of its own, pinned by
+a test. No public signature, `noexcept` specification, object layout or ABI
+change; both bodies are header-inline. +11 permanent tests; ASan and UBSan clean
+over all 46 probe cases with answers identical to the plain build. The migration
+cost §D.4 named is real and has no compiler diagnostic: any golden file, snapshot
+test or serialized text that captured `"1234.50"`, `"1.25E+00"` or a six-digit
+`G` changes.
+
+**`SR-AUD-033 → remediated`** (whitespace #1864, parse tail #1865, format slice
+#1863). **CCF-007 is complete**: SR-AUD-029, 030, 031, 032 and 033 are all
+`remediated`.
