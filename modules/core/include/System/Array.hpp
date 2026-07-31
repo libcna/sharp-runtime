@@ -13,6 +13,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System {
 
@@ -37,10 +38,27 @@ namespace System {
             return std::numeric_limits<intcs>::max();
         }
 
-        /** @brief Sorts all elements of @p array using the default less-than comparator. */
+        /**
+         * @brief Sorts all elements of @p array under .NET's default comparison contract.
+         *
+         * C++ counterpart of .NET Array.Sort<T>(T[]), which uses `Comparer<T>.Default`
+         * rather than the operand type's `<`. For every type but `float` and `double`
+         * the two agree; for those two, .NET orders NaN *before* every value including
+         * negative infinity. This overload therefore moves NaN to the front in a
+         * pre-pass and sorts only the NaN-free remainder — `ArraySortHelper<T>.Sort`'s
+         * own algorithm (`ArraySortHelper.cs:285-305`).
+         *
+         * @note That pre-pass is a correctness requirement, not an optimisation: raw
+         * `<` over a range containing NaN is not a strict weak ordering, so passing it
+         * to `std::sort` violates `[alg.sort]`'s precondition and was measured leaving
+         * the *finite* elements unsorted. See `docs/ComparisonContractPlan.md`.
+         *
+         * @note This body is `inline`; a consumer must be fully rebuilt after a change
+         * to it, and the linker cannot enforce that.
+         */
         template<typename T>
         static void Sort(std::vector<T>& array) {
-            std::sort(array.begin(), array.end());
+            detail::defaultSort(array.begin(), array.end());
         }
 
         /**
@@ -57,14 +75,18 @@ namespace System {
         }
 
         /**
-         * @brief Sorts @p length elements starting at @p index using the default comparator.
+         * @brief Sorts @p length elements starting at @p index under .NET's default
+         *        comparison contract.
+         *
+         * Same NaN-before-everything rule and same NaN pre-pass as
+         * Sort(std::vector<T>&); see that overload.
          * @throws System::ArgumentOutOfRangeException if @p index or @p length is negative.
          * @throws System::ArgumentException if [@p index, @p index+@p length) is out of bounds.
          */
         template<typename T>
         static void Sort(std::vector<T>& array, intcs index, intcs length) {
             requireValidRange(static_cast<intcs>(array.size()), index, length);
-            std::sort(array.begin() + index, array.begin() + index + length);
+            detail::defaultSort(array.begin() + index, array.begin() + index + length);
         }
 
         /**
@@ -157,7 +179,7 @@ namespace System {
         template<typename T>
         static intcs IndexOf(const std::vector<T>& array, const T& value) {
             for (intcs i = 0; i < static_cast<intcs>(array.size()); ++i)
-                if (array[i] == value) return i;
+                if (detail::equalValues(array[static_cast<size_t>(i)], value)) return i;
             return -1;
         }
 
@@ -169,7 +191,7 @@ namespace System {
         static intcs IndexOf(const std::vector<T>& array, const T& value, intcs startIndex) {
             requireValidStartIndex(static_cast<intcs>(array.size()), startIndex);
             for (intcs i = startIndex; i < static_cast<intcs>(array.size()); ++i)
-                if (array[static_cast<size_t>(i)] == value) return i;
+                if (detail::equalValues(array[static_cast<size_t>(i)], value)) return i;
             return -1;
         }
 
@@ -184,7 +206,7 @@ namespace System {
             requireValidRange(static_cast<intcs>(array.size()), startIndex, count);
             intcs end = startIndex + count;
             for (intcs i = startIndex; i < end; ++i)
-                if (array[static_cast<size_t>(i)] == value) return i;
+                if (detail::equalValues(array[static_cast<size_t>(i)], value)) return i;
             return -1;
         }
 
@@ -232,9 +254,10 @@ namespace System {
             intcs lo = 0, hi = static_cast<intcs>(array.size()) - 1;
             while (lo <= hi) {
                 intcs mid = lo + (hi - lo) / 2;
-                if (array[static_cast<size_t>(mid)] == value) return mid;
-                if (array[static_cast<size_t>(mid)] < value)  lo = mid + 1;
-                else                                           hi = mid - 1;
+                const int cmp = detail::compareValues(array[static_cast<size_t>(mid)], value);
+                if (cmp == 0) return mid;
+                if (cmp < 0)  lo = mid + 1;
+                else          hi = mid - 1;
             }
             return ~lo;
         }
@@ -254,9 +277,10 @@ namespace System {
             intcs lo = index, hi = index + length - 1;
             while (lo <= hi) {
                 intcs mid = lo + (hi - lo) / 2;
-                if (array[static_cast<size_t>(mid)] == value) return mid;
-                if (array[static_cast<size_t>(mid)] < value)  lo = mid + 1;
-                else                                           hi = mid - 1;
+                const int cmp = detail::compareValues(array[static_cast<size_t>(mid)], value);
+                if (cmp == 0) return mid;
+                if (cmp < 0)  lo = mid + 1;
+                else          hi = mid - 1;
             }
             return ~lo;
         }
@@ -527,11 +551,16 @@ namespace System {
             return true;
         }
 
-        /** @brief Returns the zero-based index of the last occurrence of @p value in @p array, or -1. */
+        /**
+         * @brief Returns the zero-based index of the last occurrence of @p value in @p array, or -1.
+         *
+         * Equality follows .NET's default contract, as for IndexOf above: a NaN
+         * element is found by a NaN @p value.
+         */
         template<typename T>
         [[nodiscard]] static intcs LastIndexOf(const std::vector<T>& array, const T& value) {
             for (intcs i = static_cast<intcs>(array.size()) - 1; i >= 0; --i)
-                if (array[static_cast<size_t>(i)] == value) return i;
+                if (detail::equalValues(array[static_cast<size_t>(i)], value)) return i;
             return -1;
         }
 
@@ -546,7 +575,7 @@ namespace System {
             intcs size = static_cast<intcs>(array.size());
             requireValidBackwardRange(size, startIndex, size == 0 ? 0 : startIndex + 1);
             for (intcs i = startIndex; i >= 0; --i)
-                if (array[static_cast<size_t>(i)] == value) return i;
+                if (detail::equalValues(array[static_cast<size_t>(i)], value)) return i;
             return -1;
         }
 
@@ -561,7 +590,7 @@ namespace System {
             requireValidBackwardRange(static_cast<intcs>(array.size()), startIndex, count);
             intcs endIdx = startIndex - count + 1;
             for (intcs i = startIndex; i >= endIdx && i >= 0; --i)
-                if (array[static_cast<size_t>(i)] == value) return i;
+                if (detail::equalValues(array[static_cast<size_t>(i)], value)) return i;
             return -1;
         }
 
