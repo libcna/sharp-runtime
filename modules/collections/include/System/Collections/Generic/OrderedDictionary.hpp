@@ -13,6 +13,7 @@
 #include "System/Collections/Generic/KeyValuePair.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Collections/detail/MutationCounter.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Generic {
 
@@ -304,7 +305,7 @@ public:
      */
     [[nodiscard]] bool ContainsValue(const TValue& value) const {
         for (const auto& e : entries_)
-            if (e.second == value) return true;
+            if (System::detail::equalValues(e.second, value)) return true;
         return false;
     }
 

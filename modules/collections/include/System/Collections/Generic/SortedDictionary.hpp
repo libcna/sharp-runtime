@@ -11,6 +11,7 @@
 #include "System/InvalidOperationException.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/detail/MutationCounter.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Generic {
 
@@ -197,7 +198,7 @@ public:
      */
     [[nodiscard]] bool ContainsValue(const TValue& value) const {
         for (const auto& kv : map_)
-            if (kv.second == value) return true;
+            if (System::detail::equalValues(kv.second, value)) return true;
         return false;
     }
 

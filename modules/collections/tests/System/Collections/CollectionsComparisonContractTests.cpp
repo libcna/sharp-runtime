@@ -25,12 +25,19 @@
 #include "System/Collections/Generic/NullableEqualityComparer.hpp"
 #include "System/Collections/Generic/ObjectComparer.hpp"
 #include "System/Collections/Generic/ObjectEqualityComparer.hpp"
+#include "System/Collections/Concurrent/ConcurrentDictionary.hpp"
+#include "System/Collections/Generic/Dictionary.hpp"
 #include "System/Collections/Generic/LinkedList.hpp"
+#include "System/Collections/Generic/OrderedDictionary.hpp"
+#include "System/Collections/Generic/SortedDictionary.hpp"
+#include "System/Collections/Generic/SortedList.hpp"
 #include "System/Collections/Generic/List.hpp"
 #include "System/Collections/Generic/Queue.hpp"
 #include "System/Collections/Generic/Stack.hpp"
 #include "System/Collections/Generic/ReferenceEqualityComparer.hpp"
 #include "System/Collections/Immutable/ImmutableArray.hpp"
+#include "System/Collections/Immutable/ImmutableDictionary.hpp"
+#include "System/Collections/Immutable/ImmutableSortedDictionary.hpp"
 #include "System/Collections/ObjectModel/Collection.hpp"
 #include "System/Collections/ObjectModel/KeyedCollection.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyCollection.hpp"
@@ -700,4 +707,125 @@ TEST(CollectionsComparisonContract, KeyedCollectionFindsANaNItem) {
     EXPECT_TRUE(k.Contains(kNaN));
     EXPECT_TRUE(k.Remove(kNaN));
     EXPECT_EQ(k.getCountProperty(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// The associative value-equality sites (#1917)
+// ---------------------------------------------------------------------------
+
+TEST(CollectionsComparisonContract, DictionaryFamilyFindsANaNValue) {
+    G::Dictionary<int, double> d;
+    d.Add(0, kNaN);
+    d.Add(1, 5.0);
+    EXPECT_TRUE(d.ContainsValue(kNaN));
+    EXPECT_FALSE(d.ContainsValue(9.0));
+
+    G::SortedDictionary<int, double> sd;
+    sd.Add(0, kNaN);
+    EXPECT_TRUE(sd.ContainsValue(kNaN));
+    EXPECT_FALSE(sd.ContainsValue(9.0));
+
+    G::OrderedDictionary<int, double> od;
+    od.Add(0, kNaN);
+    EXPECT_TRUE(od.ContainsValue(kNaN));
+    EXPECT_FALSE(od.ContainsValue(9.0));
+}
+
+TEST(CollectionsComparisonContract, SortedListFindsANaNValueByValueAndByIndex) {
+    G::SortedList<int, double> sl;
+    sl.Add(0, 1.0);
+    sl.Add(1, kNaN);
+    EXPECT_TRUE(sl.ContainsValue(kNaN));
+    EXPECT_EQ(sl.IndexOfValue(kNaN), 1);
+    EXPECT_EQ(sl.IndexOfValue(9.0), -1);
+}
+
+TEST(CollectionsComparisonContract, DictionaryValueEqualityHandlesSignedZero) {
+    G::Dictionary<int, double> d;
+    d.Add(0, -0.0);
+    EXPECT_TRUE(d.ContainsValue(0.0));   // -0.0 == +0.0 under the default contract
+}
+
+TEST(CollectionsComparisonContract, DictionaryValueEqualityNegativeControls) {
+    G::Dictionary<int, std::string> d;
+    d.Add(0, "x");
+    EXPECT_TRUE(d.ContainsValue("x"));
+    EXPECT_FALSE(d.ContainsValue("y"));
+
+    G::Dictionary<int, int> ints;
+    ints.Add(0, 7);
+    EXPECT_TRUE(ints.ContainsValue(7));
+    EXPECT_FALSE(ints.ContainsValue(8));
+}
+
+TEST(CollectionsComparisonContract, ImmutableDictionaryFamilyFindsANaNValue) {
+    namespace I = System::Collections::Immutable;
+    auto d = I::ImmutableDictionary<int, double>::Empty().Add(0, kNaN);
+    EXPECT_TRUE(d.ContainsValue(kNaN));
+    EXPECT_TRUE(d.Contains(std::pair<int, double>(0, kNaN)));
+    EXPECT_FALSE(d.Contains(std::pair<int, double>(0, 5.0)));
+
+    auto sd = I::ImmutableSortedDictionary<int, double>::Empty().Add(0, kNaN);
+    EXPECT_TRUE(sd.ContainsValue(kNaN));
+    EXPECT_TRUE(sd.Contains(std::pair<int, double>(0, kNaN)));
+}
+
+TEST(CollectionsComparisonContract, ImmutableDictionaryAddOfAnEqualNaNIsANoOpNotAThrow) {
+    namespace I = System::Collections::Immutable;
+    // .NET's ImmutableDictionary.Add compares the existing value with the value
+    // comparer: same key with an EQUAL value is a no-op, a different value
+    // throws. Before the repair a NaN never compared equal to itself, so
+    // re-adding the same NaN threw "An item with the same key has already been
+    // added."
+    auto d = I::ImmutableDictionary<int, double>::Empty().Add(0, kNaN);
+    auto again = d.Add(0, kNaN);
+    EXPECT_EQ(again.getCountProperty(), 1);
+    EXPECT_THROW((void)d.Add(0, 5.0), System::ArgumentException);
+
+    auto sd = I::ImmutableSortedDictionary<int, double>::Empty().Add(0, kNaN);
+    auto sdAgain = sd.Add(0, kNaN);
+    EXPECT_EQ(sdAgain.getCountProperty(), 1);
+    EXPECT_THROW((void)sd.Add(0, 5.0), System::ArgumentException);
+}
+
+TEST(CollectionsComparisonContract, ImmutableDictionaryAddRangeAppliesTheSameRule) {
+    namespace I = System::Collections::Immutable;
+    auto d = I::ImmutableDictionary<int, double>::Empty().Add(0, kNaN);
+    auto merged = d.AddRange({{0, kNaN}, {1, 2.0}});
+    EXPECT_EQ(merged.getCountProperty(), 2);
+    EXPECT_TRUE(merged.ContainsValue(2.0));
+}
+
+TEST(CollectionsComparisonContract, ConcurrentDictionaryCompareAndSwapAcceptsANaNComparand) {
+    System::Collections::Concurrent::ConcurrentDictionary<int, double> d;
+    d.TryAdd(0, kNaN);
+    // Before the repair this could never succeed: the comparison value never
+    // compared equal to the stored NaN, so the entry was permanently frozen.
+    EXPECT_TRUE(d.TryUpdate(0, 5.0, kNaN));
+    double got = 0.0;
+    ASSERT_TRUE(d.TryGetValue(0, got));
+    EXPECT_DOUBLE_EQ(got, 5.0);
+}
+
+TEST(CollectionsComparisonContract, ConcurrentDictionaryCompareAndSwapDoesNotMutateOnMismatch) {
+    System::Collections::Concurrent::ConcurrentDictionary<int, double> d;
+    d.TryAdd(0, 1.0);
+    EXPECT_FALSE(d.TryUpdate(0, 5.0, kNaN));   // stored 1.0 is not NaN
+    double got = 0.0;
+    ASSERT_TRUE(d.TryGetValue(0, got));
+    EXPECT_DOUBLE_EQ(got, 1.0);                // unchanged: no partial mutation
+    EXPECT_FALSE(d.TryUpdate(9, 5.0, 1.0));    // absent key
+}
+
+TEST(CollectionsComparisonContract, ConcurrentDictionaryAddOrUpdateRetriesAgainstANaNObservation) {
+    System::Collections::Concurrent::ConcurrentDictionary<int, double> d;
+    d.TryAdd(0, kNaN);
+    const double result = d.AddOrUpdate(
+        0, 99.0, [](const int&, const double& existing) {
+            return std::isnan(existing) ? 42.0 : existing;
+        });
+    EXPECT_DOUBLE_EQ(result, 42.0);
+    double got = 0.0;
+    ASSERT_TRUE(d.TryGetValue(0, got));
+    EXPECT_DOUBLE_EQ(got, 42.0);
 }

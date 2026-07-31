@@ -11,6 +11,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Immutable {
 
@@ -148,7 +149,7 @@ public:
      * @return true if at least one entry has the value; otherwise false.
      */
     [[nodiscard]] bool ContainsValue(const TValue& value) const {
-        for (const auto& kv : *data_) if (kv.second == value) return true;
+        for (const auto& kv : *data_) if (System::detail::equalValues(kv.second, value)) return true;
         return false;
     }
 
@@ -161,7 +162,7 @@ public:
      */
     [[nodiscard]] bool Contains(const std::pair<TKey, TValue>& pair) const {
         auto it = data_->find(pair.first);
-        return it != data_->end() && it->second == pair.second;
+        return it != data_->end() && System::detail::equalValues(it->second, pair.second);
     }
 
     /**
@@ -211,7 +212,7 @@ public:
         Add(const TKey& key, const TValue& value) const {
         auto it = data_->find(key);
         if (it != data_->end()) {
-            if (it->second == value) return *this;
+            if (System::detail::equalValues(it->second, value)) return *this;
             throw System::ArgumentException("An item with the same key has already been added.");
         }
         auto m = std::make_shared<MapT>(*data_);
@@ -235,7 +236,7 @@ public:
         for (const auto& p : pairs) {
             auto it = m->find(p.first);
             if (it != m->end()) {
-                if (it->second == p.second) continue;
+                if (System::detail::equalValues(it->second, p.second)) continue;
                 throw System::ArgumentException("An item with the same key has already been added.");
             }
             (*m)[p.first] = p.second;

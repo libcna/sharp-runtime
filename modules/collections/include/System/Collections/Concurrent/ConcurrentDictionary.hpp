@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Concurrent {
 
@@ -70,7 +71,7 @@ namespace System::Collections::Concurrent {
         bool TryUpdate(const TKey& key, const TValue& newValue, const TValue& comparisonValue) {
             std::lock_guard<std::mutex> lk(mutex_);
             auto it = map_.find(key);
-            if (it == map_.end() || !(it->second == comparisonValue)) return false;
+            if (it == map_.end() || !System::detail::equalValues(it->second, comparisonValue)) return false;
             it->second = newValue;
             return true;
         }
@@ -188,7 +189,7 @@ namespace System::Collections::Concurrent {
                 TValue updated = updateFactory(key, observed);
                 std::lock_guard<std::mutex> lk(mutex_);
                 auto it = map_.find(key);
-                if (it != map_.end() && it->second == observed) {
+                if (it != map_.end() && System::detail::equalValues(it->second, observed)) {
                     it->second = updated;
                     return updated;
                 }
@@ -226,7 +227,7 @@ namespace System::Collections::Concurrent {
                 TValue updated = updateFactory(key, observed);
                 std::lock_guard<std::mutex> lk(mutex_);
                 auto it = map_.find(key);
-                if (it != map_.end() && it->second == observed) {
+                if (it != map_.end() && System::detail::equalValues(it->second, observed)) {
                     it->second = updated;
                     return updated;
                 }

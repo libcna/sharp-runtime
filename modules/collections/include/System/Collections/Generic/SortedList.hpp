@@ -12,6 +12,7 @@
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Collections/detail/MutationCounter.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Generic {
 
@@ -270,7 +271,7 @@ public:
      * @return true if at least one entry has the value; otherwise false.
      */
     [[nodiscard]] bool ContainsValue(const TValue& value) const {
-        for (const auto& p : map_) if (p.second == value) return true;
+        for (const auto& p : map_) if (System::detail::equalValues(p.second, value)) return true;
         return false;
     }
 
@@ -327,7 +328,7 @@ public:
     [[nodiscard]] intcs IndexOfValue(const TValue& value) const {
         intcs i = 0;
         for (const auto& p : map_) {
-            if (p.second == value) return i;
+            if (System::detail::equalValues(p.second, value)) return i;
             ++i;
         }
         return -1;
