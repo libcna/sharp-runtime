@@ -8,8 +8,10 @@
 **14,815** (was 14,745). **CCF-010 is COMPLETE and SR-AUD-046 is
 `remediated`** — the second post-audit family finished outright. Tickets
 **#1904**–**#1911** are all `done`, none needed user approval, and the tally
-moves to **59 remediated / 305 confirmed / 364** (304 plain `confirmed` rows
-plus the one split row), numbering still frozen at 364. New ticket **#1912**
+moves to **59 remediated / 304 confirmed / 364** — 302 plain `confirmed` rows
+plus two carrying the `confirmed (design-complete)` qualifier, with the single
+split row (SR-AUD-043) counted in neither, exactly as the previous batch's
+58/305 was derived — numbering still frozen at 364. New ticket **#1912**
 (`todo`, P2) records a larger population with the same cause in the
 `Collections` module. See "Autonomous remediation batch handoff, 2026-07-31
 (CCF-010 comparison contract)" immediately below. Previously, on
