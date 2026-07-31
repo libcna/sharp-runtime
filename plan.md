@@ -64,7 +64,7 @@ work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
 
 
-## 2026-07-31 — Group E subset, #1897 option B (iterative `JsonNode::Parse`)
+## 2026-07-31 — Group E subset: #1897 option B, and three decision records (#1899, #1926, #1927-#1929)
 
 Branch `feature/remediation-batch-group-e-subset-decisions`. The batch
 instruction approved **exactly one implementation**, `#1897` **option B** as
@@ -102,6 +102,36 @@ of 364**, numbering frozen at **364** — SR-AUD-327 keeps its
 `confirmed (design-complete)` qualifier; module graph **41 / 91** unchanged;
 version seams **2 / 18** and negative fixtures **10 / 74** unchanged, because
 option B outlaws no spelling and so does **not** unblock #1894.
+
+**Three design units accompanied it, and none implemented anything.**
+
+- **#1899** (`blocked`, no option chosen) gained four measured corrections:
+  the surface is **four** overloads not two and all four take a range, so option
+  D's single-node visitor is a counterpart to none of them; option B is a
+  **silent** ABI break of the class declined in #1889, because the accessor *is*
+  emitted as a weak symbol and an Itanium mangled name does not encode the return
+  type; `Ancestors`/`AncestorsAndSelf` contribute **zero** symbols, so options C
+  and E are pure source changes; and the disputed accessor is **one of eighteen**
+  borrowed `const&` accessors in the same headers. Two options the record lacked
+  were added — a debug-only lifetime **registry** and **deprecation** beside
+  additive safe spellings — because none of A–E gave a diagnostic without a
+  break. `docs/OwnedTreeLifetimeContractPlan.md` §45.
+- **#1927/#1928/#1929** were resolved into one packet,
+  `docs/TextSubsetCompatibilityDecision.md`. It finds the **numeric half already
+  closed** — every disputed row matches .NET, including .NET's own permissive
+  grouping rule — corrects #1927's premise (below each round limit the two
+  funnels agree **bit for bit** over 140,000 samples, so it is a defect fix, not
+  a value change), and finds **six** date/time narrowings rather than four, two
+  of them the port disagreeing with **itself** about whitespace and about
+  fractional-second precision. It recommends approving #1927, #1928 and #1929's
+  self-consistency rows together and deciding the widening rows separately.
+- **#1926** was isolated (`docs/CollectionsComparisonContractPlan.md` §20): the
+  mechanism is **proven** — restoring only `__is_fast_hash` restores both the
+  node size and the iterator type — the insert regression **replicates** at
+  1.319× (24 of 25 rounds), and the recorded **lookup improvement does not**.
+  Recommendation unchanged: defer, leaning `wontfix`, since it means specialising
+  a reserved libstdc++ internal that is dead code on every other standard
+  library.
 
 ## 2026-07-31 — approved Groups A–D of the decision packet (#1854, #1862, #1858, #1865, #1879, #1884, #1863)
 

@@ -4,6 +4,289 @@
 # NEXT.md
 
 *Last verified: 2026-07-31. Branch:
+`feature/remediation-batch-group-e-subset-decisions`. The test floor rose to
+**15,024** (was 14,998). **The one implementation the batch instruction approved
+— #1897 option B — is delivered**, and with it CCF-019's **only case reachable
+from untrusted input** is closed: `JsonNode::Parse` no longer overflows the
+stack. Three design units were produced and **nothing else was implemented**:
+**#1899** gained four measured corrections and two options its record did not
+contain; **#1927/#1928/#1929** were resolved into one consolidated packet,
+`docs/TextSubsetCompatibilityDecision.md`, which finds the **numeric half of that
+family already closed** and splits #1929 into an approvable half and a deferred
+one; and **#1926** was isolated, proving its mechanism and replicating its
+insert regression at 1.319× while showing its recorded *lookup* improvement does
+**not** replicate. **Five premises were corrected by measurement**, all preserved
+additively beside the original text. **No new ticket was filed**, **no `SR-AUD-*`
+identifier was issued**, and audit numbering stays frozen at **364**. See
+"Autonomous batch handoff, 2026-07-31 (Group E subset + text-subset decisions)"
+immediately below.*
+
+---
+
+## Autonomous batch handoff, 2026-07-31 (Group E subset + text-subset decisions)
+
+Branch `feature/remediation-batch-group-e-subset-decisions`, five commits on top
+of `50bc87ea`.
+
+### 1. What the instruction approved, and what was done with it
+
+The instruction approved **exactly one thing**: *"ticket #1897 — option B"*. It
+explicitly did **not** approve #1899, #1894, another option for #1897, any
+behaviour change from #1927/#1928/#1929, or reopening #1888/#1889/#1896. That
+boundary was held.
+
+| Ticket | Approved? | Outcome |
+|---|---|---|
+| **#1897** | **yes, option B** | **`done`** — implemented, tested, committed alone |
+| **#1899** | no | `blocked` — design evidence corrected and extended; **no option chosen** |
+| **#1927** | no | `todo`, inactive — measured; premise corrected; recommended for approval |
+| **#1928** | no | `todo`, inactive — measured; confirmed and sharpened; recommended for approval |
+| **#1929** | no | `todo`, inactive — measured; **six** narrowings not four; recommended **split** |
+| **#1926** | no | `todo` — isolated and measured; **recommendation unchanged: defer, leaning `wontfix`** |
+| **#1925** | no | `todo` — untouched, deliberately (§9) |
+| **#1894** | no | `blocked` — still nothing for a negative fixture to reject |
+| **#1888/#1889/#1896** | declined | **still declined, not reopened** |
+| **#1773** | — | **still `blocked`**; CNA and mobile-eggbert were **not inspected** |
+
+**No ticket is left `doing`.**
+
+### 2. Commits, in order
+
+| Commit | Content |
+|---|---|
+| `ca78cdce` | **#1897** — `JsonNode::Parse` builds its tree iteratively (the only production change) |
+| `563b832d` | **#1899** — four corrected premises, two new options, no implementation |
+| `c89ebcda` | **#1927/#1928/#1929** — one consolidated decision packet from one measured picture |
+| `f3d9d525` | **#1926** — mechanism isolated, insert regression replicated, lookup claim withdrawn |
+| *(this one)* | handoff |
+
+### 3. #1897 — what was closed, and what was deliberately left open
+
+**The defect.** `fromNlohmann` recursed once per nesting level. Measured on an
+8 MiB stack: **16,000 nested arrays survived, 18,000 did not**, and every ASan
+frame was in the port's own recursion — not nlohmann's parser (iterative) and not
+a destruction path (#1895 already made that iterative). The reproduction is
+`JsonNode::Parse(std::string(20000,'[') + "1" + std::string(20000,']'))`; a
+caller need only pass a string it did not write.
+
+**The repair.** An explicit heap worklist of suspended containers. Arrays,
+objects and alternating containers now build correctly to **200,000**.
+
+**Compatibility, measured rather than asserted:**
+
+| Property | Result |
+|---|---|
+| 19 round-trip shapes, null semantics, 13 malformed inputs, 1,000-sibling order | **byte-for-byte identical** before and after |
+| strong (`T`) symbols in `JsonNode.o` | **13 before, 13 after, identical**; undefined set identical |
+| layout / vtable / exception specification | unchanged (`JsonNode` 24/8, `JsonArray` 48/8, `JsonObject` 48/8) |
+| parse throughput | neutral — median 0.932×, best-of-7 1.012×, inside a far wider noise band |
+| permanent tests | **+26**, gate **14,998 → 15,024** across 37 executables |
+| sanitizers | 244/244 `Text_Json` clean under ASan+UBSan+LSan, binary newer than the changed body; sanitizer activation proved separately |
+
+**Left open on purpose: option A was not approved and is not implemented.**
+`JsonNode::Parse` applies **no depth bound**, so it accepts text that .NET's own
+`JsonNode.Parse(string)` **and this module's `JsonDocument::Parse`** both reject
+beyond `DefaultMaxDepth = 64`. That deviation is now stated in the `Parse`
+doc-comment and pinned by two tests
+(`ParseAcceptsDepthThatJsonDocumentParseRejects`,
+`BothParseEntryPointsAgreeInsideTheDefaultDepthBound`), so option A cannot land
+— or be forgotten — silently.
+
+### 4. #1899 — classification: **blocked on a decision, and its recorded decision was wrong in four ways**
+
+Not implemented, no option chosen. It is **not** the same defect as #1897
+(recursion during construction vs a lifetime the return type does not express),
+and `SharpRuntimeTests_Xml_Linq` is **184/184 clean under ASan+UBSan+LSan** on a
+binary built after #1897 — so #1897 neither closed nor disturbed X15/X17.
+
+Measured corrections (`docs/OwnedTreeLifetimeContractPlan.md` §45):
+
+1. **The surface is four overloads, not two.** `Ancestors` and `AncestorsAndSelf`
+   each have a plain and an `XName`-filtered form, and **all four take a range**.
+   Option D's single-node, unfiltered `ForEachAncestor` is a counterpart to none
+   of them; a complete D is ~4× its recorded size.
+2. **Option B is a *silent* ABI break** — the class the user **declined** in
+   #1889. `getAttributesProperty()` **is** emitted as a weak symbol
+   (`_ZNK6System3Xml4Linq8XElement21getAttributesPropertyEv`), and an Itanium
+   mangled name does not encode the return type, so returning by value changes
+   the calling convention with **no diagnostic from compiler or linker**.
+3. **`Ancestors`/`AncestorsAndSelf` contribute zero symbols** — header templates
+   the library never instantiates — so options C and E are **pure source**
+   changes with no link-time hazard, which §42.6 overstated while understating B.
+4. **X17 is one of eighteen** borrowed `const&` accessors in these headers.
+   Either that is the ordinary C++ reference contract — which #1898 documented
+   and for which `Attributes()` is already the owning alternative — or all
+   eighteen need the same treatment.
+
+**Two options the record did not contain**, because none of A–E gives a
+*diagnostic* without a *break*: **(F)** an off-by-default lifetime registry that
+**detects** X15 in test builds at zero release cost and zero ABI, and **(G)**
+`[[deprecated]]` on the borrowed spellings beside D's additive safe ones, which
+diagnoses every borrowed call site while breaking none.
+
+**Revised recommendation: D (complete, four overloads) + G; F if a detection net
+is wanted; B only in a coordinated ABI-breaking release with #1889 — never
+alone.**
+
+### 5. #1927/#1928/#1929 — the decision matrix
+
+New document: **`docs/TextSubsetCompatibilityDecision.md`**. It opens by
+correcting its own commission: the instruction framed all three as *text subset*
+questions, and measured, **only #1929 is one** — #1927 is a returned value and
+#1928 an exception message.
+
+| Question | Verdict | Approval needed |
+|---|---|---|
+| numeric grouping, malformed grouping, exponent range, signed zero, numeric whitespace, overflow taxonomy | **CLOSED — the port matches .NET on every measured row** | **no** |
+| emitted text and round trips | **CLOSED** — all six forms round-trip | **no** |
+| **#1927** `Round` overflowing to ∞ | **defect**, not a subset | **yes** |
+| **#1928** `Math::Round`'s message | **defect** — one string, zero test edits | **yes** |
+| **#1929** date/time grammar, **six** respects | the only genuine policy question | **yes, split** |
+
+**The numeric half needed no decision at all.** #1858 and #1865 reproduced
+.NET's own rule *including its permissiveness*:
+`Number.Parsing.Common.cs:156` accepts a group separator after any digit with no
+size check, so `"1,23,456"`, `"1,2345"`, `"1,"` and `"1,,5"` are accepted by
+.NET too — they look like defects and are not.
+
+**#1929 has six narrowings, not four**, and the two extra ones are the port
+disagreeing with **itself**: the numeric parsers trim surrounding whitespace
+while the date/time parsers do not (.NET trims in both), and `TimeOnly`/`TimeSpan`
+accept one-digit fields — and `TimeSpan` a **seven-digit** fraction — while
+`DateTime` rejects both.
+
+**Recommendation:** approve **#1927 + #1928 + #1929 rows 5–6 together**; decide
+**#1929 rows 1 and 3 separately**, because row 3 would re-accept `"+2:5"`, which
+#1879 was explicitly approved to reject; treat row 4 (`ParseExact`, providers,
+`DateTimeKind`) as new API under its own ticket. Copyable wording: §6.5 of that
+document, items (1)–(4).
+
+### 6. Corrected premises — five, all preserved additively
+
+| # | Premise, as recorded | Measured |
+|---|---|---|
+| 1 | #1927: the delegate may move *"possibly the last ulp for ordinary values"* | **false.** Below each type's round limit the two funnels agree **bit for bit** in **140,000** samples. Every difference above it is the current code returning `∞` or a neighbouring ulp where the delegate returns `x` exactly. #1927 is a **defect fix**, not a value change |
+| 2 | `DateTime.cpp:419-423` / date-time plan §20.3.1: *"the port honours milliseconds only, so a 4-digit fraction is text it cannot represent"* | **wrong about the representation.** `DateTime` holds ticks at **100 ns**, like .NET, and `TimeSpan` already parses `"10:20:30.1234567"` today. What cannot represent it is the parser's own `int ms` intermediate |
+| 3 | Owned-tree plan §42.6: option B's cost is *"return calling-convention change"* | it is a **silent** ABI break — same mangled name, different convention, no diagnostic |
+| 4 | Owned-tree plan §42.8: option D stands *"beside the existing `Ancestors`/`AncestorsAndSelf`"* | it is a counterpart to **none of the four** actual overloads |
+| 5 | Collections plan §19.1: `long double` *"lookup got faster (0.791×)"*, and the node *"loses a word"* | lookup is **within noise** (0.772× over 9 rounds, 1.210× over 25) and must not be cited; the node loses **16 bytes**, not 8 |
+
+### 7. Baselines, all re-verified this batch
+
+| Baseline | Value |
+|---|---|
+| repository gate | **15,024 tests / 37 executables** (was 14,998) |
+| module graph | **41 modules / 91 edges** — unchanged |
+| version seams | **2 / 18** — unchanged |
+| negative consumer fixtures | **10 fixtures / 74 sites** — unchanged |
+| canonical Doxygen | **1,937** warnings (ceiling 1,942) — unchanged |
+| audit tally | **67 remediated / 297 open / 364 total** — **unchanged**; SR-AUD-327 and SR-AUD-333 keep `confirmed (design-complete)` |
+| audit numbering | frozen at **364**; **no new identifier issued** |
+| CCF-019 ASan stack overflows | **3 → 1 (after #1895) → 0** |
+
+### 8. Exact approval wording still needed
+
+Copyable verbatim; the full argument for each is in the cited section.
+
+> **(1)** Approve making `System::Single::Round(float, intcs)` and
+> `System::Double::Round(double, intcs)` delegate to
+> `MathF::Round(x, digits, MidpointRounding::ToEven)` and
+> `Math::Round(x, digits, MidpointRounding::ToEven)` exactly as .NET does, so a
+> magnitude at or above the type's round limit is returned unchanged instead of
+> overflowing to infinity. Measured: no value below the round limit changes. No
+> public signature or object-layout change. Ticket **#1927**.
+>
+> **(2)** Approve changing the message thrown by
+> `System::Math::Round(double, intcs, MidpointRounding)` — and therefore by
+> `Math::Round(double, intcs)` — to .NET's verbatim `"Rounding digits must be
+> between 0 and 15, inclusive."`, matching `MathF::Round`, `Single::Round` and
+> `Double::Round`. Ticket **#1928**.
+>
+> **(3)** Approve making the date/time parsers self-consistent in two respects:
+> (a) `DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly` and `TimeSpan`
+> `Parse`/`TryParse` ignore leading and trailing whitespace, as the numeric
+> parsers and .NET already do; and (b) `DateTime`'s time fields accept one or two
+> digits as `TimeOnly`'s already do, and `DateTime`'s and `TimeOnly`'s fractional
+> second accepts one to seven digits at 100-nanosecond resolution as `TimeSpan`'s
+> already does. Every currently-accepted input keeps its exact current value. No
+> public signature or object-layout change. Ticket **#1929**, rows 5 and 6 only.
+>
+> **(4)** *(separate decision)* Approve **or decline** widening the date grammar
+> to accept unpadded month/day (`"2024-6-15"`) and the short and compact
+> time-zone offsets (`"+2"`, `"+2:5"`, `"+0205"`) — noting this re-accepts text
+> #1879 was explicitly approved to reject. Ticket **#1929**, rows 1 and 3.
+>
+> **(5)** For the Xml.Linq borrowed views, take **(D)** additive visitor
+> spellings — **one per existing overload, i.e. four** — **(G)** D plus
+> `[[deprecated]]` on the borrowed spellings, **(F)** an off-by-default lifetime
+> registry that detects a live borrow in test builds, or **(B)**
+> `getAttributesProperty()` by value — noting B is now measured to be a **silent**
+> ABI break of the same class declined in #1889, and that the accessor is one of
+> **eighteen** such borrowed accessors. Ticket **#1899**.
+>
+> **(6)** *(optional, recommended `wontfix`)* Approve or decline specialising
+> `std::__is_fast_hash<System::detail::DefaultHash<long double>>` to `false`
+> behind `#ifdef __GLIBCXX__`. Measured: it recovers the insert regression in
+> full (1.319× → parity) and restores the pre-#1919 iterator type, but it
+> specialises a reserved libstdc++ internal and is dead code on every other
+> standard library. Ticket **#1926**.
+
+### 9. What was deliberately **not** started
+
+- **#1925** — its repair moves the public `SetType`/`MapType` of a further family
+  of instantiations, i.e. it is the same approval class as #1919 and cannot be
+  started without one. The decision packet already states its case (§F.1); no
+  measurement this batch would have changed it, so starting it would only have
+  raised the ticket count.
+- **#1894** — still nothing for a negative fixture to reject. Option B outlawed
+  no spelling. It is unblocked by #1899 option **B** or **G**, and **not** by
+  option D.
+- **#1888 / #1889 / #1896** — declined, untouched, not reopened.
+- **#1773** — blocked on an external event. **CNA and mobile-eggbert were not
+  inspected, searched, built or modified.**
+
+### 10. Recommended next batch
+
+1. If (1)–(3) above are approved: land **#1927**, **#1928** and **#1929 rows 5–6**
+   as three separate commits. All three are `.cpp`/inline-header changes with no
+   signature, layout, vtable or mangled-name effect, and #1928 needs zero test
+   edits.
+2. If (5) is answered **D** or **G**: land it, then **#1894** finally becomes
+   startable — G in particular creates the first outlawed spellings CCF-019 has
+   produced.
+3. Otherwise: **#1880** (`TryParse` failure-output normalisation, CCF-002's last
+   member) and **#1875** (the 45 HResult-less exception types) are the two
+   remaining `todo` P3s that need no new approval.
+
+### 11. Build directories and resources
+
+| Directory | Start | End |
+|---|---|---|
+| `build/` | 750 MB | 753 MB |
+| `build-asan/` | 3.8 GB | 3.8 GB |
+| `build-modular/` | 1.3 GB | 1.3 GB |
+| `build-probe/` | 42 MB | **45 MB** (peaked at 65 MB; **20 MB reclaimed** by deleting this batch's binaries after transcribing their logs) |
+| `build-consumer/` | 12 KB | 12 KB |
+| `build-tmp/` | 8 KB | 8 KB |
+| `cmake-build-debug/` | 88 MB | 88 MB |
+
+**Maximum aggregate compilation parallelism: two jobs**, everywhere — `cmake
+--build … --parallel 2`, `SHARP_RUNTIME_BUILD_JOBS=2` for
+`check_selective_components.sh` and `local_ci_check.sh`, `--jobs 2` for
+`check_negative_consumer_fixtures.py`, and one `g++` process per probe. **No
+build tree was created under `/tmp`, `/var/tmp` or `/dev/shm`**; `TMPDIR` was
+redirected to the repository-local `build-tmp/` for every `mktemp`-based script.
+ccache stayed enabled. **No push, merge, rebase, tag or publication.** The three
+stash entries are **unchanged**.
+
+---
+
+## Previous batch summary, preserved
+
+*Superseded as the live floor by the batch above; retained because its
+behaviour-incompatible rows are still the operative migration record.*
+
+*Verified: 2026-07-31. Branch:
 `feature/remediation-batch-approved-groups-a-d`. The test floor rose to
 **14,998** (was 14,920). **The approved Groups A, B, C and D of
 `docs/RemainingApprovalDecisions.md` are delivered in full** — all seven tickets

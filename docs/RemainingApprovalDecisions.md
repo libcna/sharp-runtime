@@ -7,9 +7,26 @@ Written by ticket **#1924** on 2026-07-31, after #1919 closed the last approved
 item in the post-audit queue. It exists so the remaining work can be approved or
 rejected **in batches by shared consequence**, instead of one ticket at a time.
 
-**Nothing in this document has been implemented.** Every group states the exact
-current behaviour, the .NET behaviour, a reproducer, and — in §"Approval
-wording" — a sentence that can be copied verbatim into the next batch prompt.
+> **STATUS UPDATE, 2026-07-31 (Group E subset batch).** Groups **A, B, C and D**
+> were approved and are **delivered in full**. Group **E1 (#1897) option B** was
+> approved and is **delivered** — `commit ca78cdce`, design record
+> `docs/OwnedTreeLifetimeContractPlan.md` §44. **§E.1's parenthetical option A —
+> applying `DefaultMaxDepth = 64` — was NOT approved and is NOT implemented.**
+> **§E.2 (#1899) is superseded**: measurement found four errors in its recorded
+> options and added two options it did not contain — read
+> `docs/OwnedTreeLifetimeContractPlan.md` §45 **before** using §E.2's approval
+> wording, which is now known to be incomplete. **§F.2 (#1926) has been
+> isolated and measured** (`docs/CollectionsComparisonContractPlan.md` §20): the
+> insert regression is real and replicates at 1.319×, its cause is proven, and
+> its recorded *lookup* improvement does **not** replicate. Groups **A–D's**
+> three follow-up tickets **#1927/#1928/#1929** now have their own consolidated
+> packet, `docs/TextSubsetCompatibilityDecision.md`, which supersedes nothing
+> here but is where their approval wording lives.
+
+**Nothing in this document was implemented when it was written.** Every group
+states the exact current behaviour, the .NET behaviour, a reproducer, and — in
+§"Approval wording" — a sentence that can be copied verbatim into the next batch
+prompt.
 
 **Scope of this packet.** Every ticket with status `needs_user` (7), plus the
 `blocked` tickets whose blocker is a user design decision rather than an
