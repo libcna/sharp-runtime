@@ -9,6 +9,7 @@
 #include <string>
 #include <type_traits>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 #include "System/InvalidOperationException.hpp"
 
 namespace System {
@@ -111,24 +112,35 @@ namespace System {
          * @brief Indicates whether the current Nullable<T> object is equal to
          * a specified object.
          *
-         * C++ counterpart of .NET Nullable<T>.Equals(object).
+         * C++ counterpart of .NET Nullable<T>.Equals(object), which delegates to the
+         * contained value's own `Equals` — `EqualityComparer<T>.Default` semantics —
+         * rather than to `operator ==`. For `float` and `double` that makes NaN equal
+         * to itself (`Single.Equals`: `obj == m_value || (IsNaN(obj) && IsNaN(m_value))`).
+         *
+         * @note This is deliberately *not* the same rule as operator== below, which is
+         * C#'s lifted `==` and stays raw IEEE. See `System::detail::equalValues`.
          * @param other A Nullable<T> object.
-         * @return true if both have no value, or both have the same value.
+         * @return true if both have no value, or both have equal values.
          */
         [[nodiscard]] bool Equals(const Nullable<T>& other) const noexcept {
-            return value_ == other.value_;
+            if (!value_.has_value()) return !other.value_.has_value();
+            if (!other.value_.has_value()) return false;
+            return detail::equalValues(*value_, *other.value_);
         }
 
         /**
          * @brief Retrieves the hash code of the object returned by the Value
          * property, or zero if HasValue is false.
          *
-         * C++ counterpart of .NET Nullable<T>.GetHashCode().
+         * C++ counterpart of .NET Nullable<T>.GetHashCode(). Routed through
+         * `System::detail::hashValue` so that the NaN-reflexive Equals above keeps
+         * the equal-objects-equal-hashes invariant, exactly as .NET's own
+         * `Single.GetHashCode` does by folding every NaN to one value.
          * @return The hash code of the wrapped value, or 0 if HasValue is false.
          */
         [[nodiscard]] intcs GetHashCode() const noexcept {
             if (!value_) return 0;
-            return static_cast<intcs>(std::hash<T>{}(*value_));
+            return static_cast<intcs>(detail::hashValue(*value_));
         }
 
         /**
@@ -168,7 +180,16 @@ namespace System {
          */
         explicit operator T() const { return getValueProperty(); }
 
-        /** @brief Returns true if both Nullable<T> instances are equal. */
+        /**
+         * @brief Returns true if both Nullable<T> instances are equal, using the
+         *        underlying type's own `operator ==`.
+         *
+         * C++ counterpart of C#'s **lifted** `==` on `T?`, which is the underlying
+         * type's `operator ==` and not `EqualityComparer<T>.Default`. For `float` and
+         * `double` that means `(double?)double.NaN == (double?)double.NaN` is `false`
+         * — in .NET as well as here. This is a deliberate asymmetry with Equals above
+         * and is pinned by a permanent test; do not "repair" it.
+         */
         bool operator==(const Nullable<T>& other) const noexcept {
             return value_ == other.value_;
         }
@@ -197,9 +218,12 @@ namespace System {
         /**
          * @brief Compares the relative values of two Nullable<T> objects.
          *
-         * C++ counterpart of .NET Nullable.Compare<T>(T?, T?).
-         * @return Negative if n1 < n2, zero if equal, positive if n1 > n2.
-         *         A null value is considered less than any non-null value.
+         * C++ counterpart of .NET Nullable.Compare<T>(T?, T?)
+         * (`Nullable.cs:77-85`), which uses `Comparer<T>.Default.Compare` on the two
+         * contained values. For `float` and `double` that orders NaN before every
+         * value including negative infinity, and treats two NaNs as equal.
+         * @return Negative if n1 sorts before n2, zero if equivalent, positive
+         *         otherwise. A null value is considered less than any non-null value.
          */
         template<typename T>
         [[nodiscard]] static int Compare(const Nullable<T>& n1, const Nullable<T>& n2) {
@@ -207,9 +231,7 @@ namespace System {
                 if (n2.getHasValueProperty()) {
                     const T& v1 = n1.getValueProperty();
                     const T& v2 = n2.getValueProperty();
-                    if (v1 < v2) return -1;
-                    if (v2 < v1) return  1;
-                    return 0;
+                    return detail::compareValues(v1, v2);
                 }
                 return 1;   // n1 has value, n2 is null → n1 > n2
             }
@@ -219,12 +241,14 @@ namespace System {
         /**
          * @brief Indicates whether two specified Nullable<T> objects are equal.
          *
-         * C++ counterpart of .NET Nullable.Equals<T>(T?, T?).
-         * @return true if both are null or both hold the same value.
+         * C++ counterpart of .NET Nullable.Equals<T>(T?, T?) (`Nullable.cs:87-95`),
+         * which uses `EqualityComparer<T>.Default.Equals` — so, unlike the lifted
+         * `operator ==`, two NaN values are equal here.
+         * @return true if both are null, or both hold equal values.
          */
         template<typename T>
         [[nodiscard]] static bool Equals(const Nullable<T>& n1, const Nullable<T>& n2) noexcept {
-            return n1 == n2;
+            return n1.Equals(n2);
         }
     };
 

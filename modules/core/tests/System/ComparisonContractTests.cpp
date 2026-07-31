@@ -22,6 +22,7 @@
 #include "System/Array.hpp"
 #include "System/MemoryExtensions.hpp"
 #include "System/Span.hpp"
+#include "System/Nullable.hpp"
 #include "System/Tuple.hpp"
 #include "System/ValueTuple.hpp"
 #include "System/detail/ComparisonPolicy.hpp"
@@ -588,4 +589,86 @@ TEST(ValueTupleComparisonContractTests, EmptyValueTuple_Is_Still_Constant_True) 
     System::ValueTuple b;
     EXPECT_TRUE(a == b);
     EXPECT_TRUE(a.Equals(b));
+}
+
+// ===========================================================================
+// Nullable — Compare, Equals, GetHashCode; operator== stays lifted (#1907)
+// ===========================================================================
+
+TEST(NullableComparisonContractTests, Compare_Orders_NaN_First) {
+    System::Nullable<float> nan(kNaNf);
+    System::Nullable<float> one(1.0f);
+    EXPECT_LT(System::NullableHelper::Compare(nan, one), 0);
+    EXPECT_GT(System::NullableHelper::Compare(one, nan), 0);
+    EXPECT_EQ(System::NullableHelper::Compare(nan, System::Nullable<float>(kNaNf)), 0);
+    System::Nullable<double> negInf(-kInf);
+    EXPECT_LT(System::NullableHelper::Compare(System::Nullable<double>(kNaN), negInf), 0);
+}
+
+TEST(NullableComparisonContractTests, Compare_Null_Is_Below_Everything_Including_NaN) {
+    System::Nullable<float> none;
+    System::Nullable<float> nan(kNaNf);
+    EXPECT_LT(System::NullableHelper::Compare(none, nan), 0);
+    EXPECT_GT(System::NullableHelper::Compare(nan, none), 0);
+    EXPECT_EQ(System::NullableHelper::Compare(none, System::Nullable<float>()), 0);
+}
+
+TEST(NullableComparisonContractTests, Equals_Is_NaN_Reflexive) {
+    System::Nullable<double> a(kNaN);
+    System::Nullable<double> b(std::nan("7"));
+    EXPECT_TRUE(a.Equals(b));
+    EXPECT_TRUE(System::NullableHelper::Equals(a, b));
+    EXPECT_FALSE(a.Equals(System::Nullable<double>(1.0)));
+}
+
+TEST(NullableComparisonContractTests, Equals_Handles_Null_On_Either_Side) {
+    System::Nullable<double> none;
+    System::Nullable<double> nan(kNaN);
+    EXPECT_FALSE(none.Equals(nan));
+    EXPECT_FALSE(nan.Equals(none));
+    EXPECT_TRUE(none.Equals(System::Nullable<double>()));
+    EXPECT_FALSE(System::NullableHelper::Equals(none, nan));
+    EXPECT_TRUE(System::NullableHelper::Equals(none, System::Nullable<double>()));
+}
+
+// C#'s LIFTED == is the underlying operator==, not EqualityComparer<T>.Default,
+// so (double?)NaN == (double?)NaN is false in .NET too. The port was already
+// right here; this pins it so a future reader does not "fix" it.
+TEST(NullableComparisonContractTests, OperatorEquals_Stays_Raw_IEEE_For_NaN) {
+    System::Nullable<double> a(kNaN);
+    System::Nullable<double> b(kNaN);
+    EXPECT_FALSE(a == b);
+    EXPECT_TRUE(a != b);
+    // ... while Equals on the very same pair is true.
+    EXPECT_TRUE(a.Equals(b));
+    // Non-NaN values behave identically through both.
+    System::Nullable<double> x(2.5);
+    System::Nullable<double> y(2.5);
+    EXPECT_TRUE(x == y);
+    EXPECT_TRUE(x.Equals(y));
+}
+
+TEST(NullableComparisonContractTests, Equal_Objects_Have_Equal_Hashes) {
+    System::Nullable<double> a(kNaN);
+    System::Nullable<double> b(-kNaN);
+    ASSERT_TRUE(a.Equals(b));
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+
+    System::Nullable<double> pz(0.0);
+    System::Nullable<double> nz(-0.0);
+    ASSERT_TRUE(pz.Equals(nz));
+    EXPECT_EQ(pz.GetHashCode(), nz.GetHashCode());
+
+    EXPECT_EQ(System::Nullable<double>().GetHashCode(), 0);
+}
+
+TEST(NullableComparisonContractTests, NonFloating_Unchanged) {
+    System::Nullable<int> a(3);
+    System::Nullable<int> b(4);
+    EXPECT_LT(System::NullableHelper::Compare(a, b), 0);
+    EXPECT_GT(System::NullableHelper::Compare(b, a), 0);
+    EXPECT_EQ(System::NullableHelper::Compare(a, System::Nullable<int>(3)), 0);
+    EXPECT_TRUE(a.Equals(System::Nullable<int>(3)));
+    EXPECT_FALSE(a.Equals(b));
+    EXPECT_TRUE(a == System::Nullable<int>(3));
 }
