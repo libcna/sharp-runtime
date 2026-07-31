@@ -11,6 +11,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Span.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
@@ -21,13 +22,16 @@ namespace System {
         // treats NaN as equal to itself (float.Equals: "obj == m_value || (IsNaN(obj) &&
         // IsNaN(m_value))"), unlike operator==, which is always false for NaN. A plain
         // `==`-based port would silently fail to find/count/replace NaN elements.
+        //
+        // Ticket #1906 (CCF-010): this rule used to be stated here and nowhere else,
+        // while the ordering half of the same contract -- and every other file that
+        // needed either half -- went without. It now forwards to the port's single
+        // statement of the contract, System::detail::equalValues, so the two halves
+        // cannot drift apart again. The name is retained because it is what this
+        // file's own call sites read as.
         template<typename T>
         [[nodiscard]] inline bool MemoryExtensionsElementEquals(const T& a, const T& b) {
-            if constexpr (std::is_floating_point_v<T>) {
-                return a == b || (std::isnan(a) && std::isnan(b));
-            } else {
-                return a == b;
-            }
+            return System::detail::equalValues(a, b);
         }
     } // namespace Detail
 
@@ -357,8 +361,8 @@ namespace System {
                                                                     ReadOnlySpan<T> b) {
             SharpRuntime::intcs minLen = std::min(a.getLengthProperty(), b.getLengthProperty());
             for (SharpRuntime::intcs i = 0; i < minLen; ++i) {
-                if (a[i] < b[i]) return -1;
-                if (a[i] > b[i]) return  1;
+                const int c = System::detail::compareValues(a[i], b[i]);
+                if (c != 0) return c;
             }
             return a.getLengthProperty() - b.getLengthProperty();
         }
@@ -447,19 +451,33 @@ namespace System {
         // ---------------------------------------------------------------
 
         /**
-         * @brief Sorts the elements of the span using operator<.
+         * @brief Sorts the elements of the span under .NET's default comparison contract.
          *
-         * C++ counterpart of .NET MemoryExtensions.Sort<T>(Span<T>).
+         * C++ counterpart of .NET MemoryExtensions.Sort<T>(Span<T>), which uses
+         * `Comparer<T>.Default` rather than the operand type's `<`. For `float` and
+         * `double` that orders NaN before every value including negative infinity, so
+         * this overload moves NaN to the front in a pre-pass and sorts only the
+         * NaN-free remainder -- `ArraySortHelper<T>.Sort`'s own algorithm.
+         *
+         * @note The pre-pass is a correctness requirement: raw `<` over a NaN-bearing
+         * range is not a strict weak ordering, so handing it to `std::sort` violates
+         * that algorithm's precondition. See `docs/ComparisonContractPlan.md`.
          */
         template<typename T>
         static void Sort(Span<T> span) {
-            std::sort(span.begin(), span.end());
+            System::detail::defaultSort(span.begin(), span.end());
         }
 
         /**
          * @brief Sorts the elements of the span using a custom comparator.
          *
          * C++ counterpart of .NET MemoryExtensions.Sort<T, TComparer>(Span<T>, TComparer).
+         *
+         * @note @p comparer is passed straight through, exactly as .NET's
+         * `IntrospectiveSort` does with a non-default `IComparer<T>`. A caller who
+         * supplies a predicate that is not a strict weak ordering gets undefined
+         * behaviour in both runtimes; that is the caller's contract and is
+         * deliberately not repaired here.
          */
         template<typename T, typename TComparer>
         static void Sort(Span<T> span, TComparer comparer) {
@@ -474,6 +492,8 @@ namespace System {
          * @brief Searches for @p value in a sorted span using binary search.
          *
          * C++ counterpart of .NET MemoryExtensions.BinarySearch<T>(ReadOnlySpan<T>, T).
+         * Ordering follows `Comparer<T>.Default`, so for `float`/`double` a NaN element
+         * is found and sorts below every value including negative infinity.
          * @return The index of the found element, or a negative bitwise-complement index
          *         indicating where the value would be inserted (matching .NET convention).
          */
@@ -482,9 +502,10 @@ namespace System {
             SharpRuntime::intcs lo = 0, hi = span.getLengthProperty() - 1;
             while (lo <= hi) {
                 SharpRuntime::intcs mid = lo + (hi - lo) / 2;
-                if (span[mid] == value) return mid;
-                if (span[mid] < value) lo = mid + 1;
-                else                   hi = mid - 1;
+                const int c = System::detail::compareValues(span[mid], value);
+                if (c == 0) return mid;
+                if (c < 0) lo = mid + 1;
+                else       hi = mid - 1;
             }
             return ~lo;
         }

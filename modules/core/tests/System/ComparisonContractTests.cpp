@@ -20,6 +20,8 @@
 #include <vector>
 
 #include "System/Array.hpp"
+#include "System/MemoryExtensions.hpp"
+#include "System/Span.hpp"
 #include "System/detail/ComparisonPolicy.hpp"
 
 using SharpRuntime::intcs;
@@ -358,4 +360,102 @@ TEST(ArrayComparisonContractTests, IndexOf_NonFloating_Unchanged) {
 
     std::vector<std::string> s{"a", "b"};
     EXPECT_EQ(Array::IndexOf(s, std::string("b")), 1);
+}
+
+// ===========================================================================
+// MemoryExtensions — Sort, BinarySearch, SequenceCompareTo (ticket #1906)
+// ===========================================================================
+
+TEST(MemoryExtensionsComparisonContractTests, Sort_Float_Puts_NaN_First) {
+    std::vector<float> v{3.0f, kNaNf, 1.0f};
+    System::MemoryExtensions::Sort(System::Span<float>(v));
+    EXPECT_TRUE(std::isnan(v[0]));
+    EXPECT_FLOAT_EQ(v[1], 1.0f);
+    EXPECT_FLOAT_EQ(v[2], 3.0f);
+}
+
+TEST(MemoryExtensionsComparisonContractTests, Sort_Puts_NaN_Below_NegativeInfinity) {
+    std::vector<double> v{kInf, 0.0, kNaN, -kInf};
+    System::MemoryExtensions::Sort(System::Span<double>(v));
+    EXPECT_TRUE(std::isnan(v[0]));
+    EXPECT_DOUBLE_EQ(v[1], -kInf);
+    EXPECT_DOUBLE_EQ(v[3], kInf);
+}
+
+TEST(MemoryExtensionsComparisonContractTests, Sort_LargeRange_Leaves_Finite_Elements_Sorted) {
+    const int n = 4096;
+    std::vector<float> v;
+    v.reserve(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i)
+        v.push_back((i % 3 == 1) ? kNaNf : static_cast<float>(n - i));
+    System::MemoryExtensions::Sort(System::Span<float>(v));
+    EXPECT_EQ(finiteInversions(v), 0);
+}
+
+TEST(MemoryExtensionsComparisonContractTests, Sort_Degenerate_And_NonFloating) {
+    std::vector<double> empty;
+    System::MemoryExtensions::Sort(System::Span<double>(empty));
+    EXPECT_TRUE(empty.empty());
+
+    std::vector<double> allNaN{kNaN, kNaN};
+    System::MemoryExtensions::Sort(System::Span<double>(allNaN));
+    EXPECT_TRUE(std::isnan(allNaN[0]));
+    EXPECT_TRUE(std::isnan(allNaN[1]));
+
+    std::vector<int> ints{3, 1, 2};
+    System::MemoryExtensions::Sort(System::Span<int>(ints));
+    EXPECT_EQ(ints, (std::vector<int>{1, 2, 3}));
+}
+
+TEST(MemoryExtensionsComparisonContractTests, BinarySearch_Finds_NaN) {
+    std::vector<float> v{kNaNf, 1.0f, 3.0f};
+    System::ReadOnlySpan<float> ro(v.data(), static_cast<intcs>(v.size()));
+    EXPECT_EQ(System::MemoryExtensions::BinarySearch(ro, kNaNf), 0);
+    EXPECT_EQ(System::MemoryExtensions::BinarySearch(ro, 3.0f), 2);
+    EXPECT_EQ(System::MemoryExtensions::BinarySearch(System::Span<float>(v), kNaNf), 0);
+    // Absent NaN inserts at the front, because NaN sorts below everything.
+    std::vector<float> noNaN{1.0f, 3.0f};
+    System::ReadOnlySpan<float> ro2(noNaN.data(), 2);
+    EXPECT_EQ(System::MemoryExtensions::BinarySearch(ro2, kNaNf), ~static_cast<intcs>(0));
+}
+
+TEST(MemoryExtensionsComparisonContractTests, SequenceCompareTo_NaN_Sorts_First) {
+    std::vector<float> nan{kNaNf};
+    std::vector<float> one{1.0f};
+    System::ReadOnlySpan<float> a(nan.data(), 1);
+    System::ReadOnlySpan<float> b(one.data(), 1);
+    EXPECT_LT(System::MemoryExtensions::SequenceCompareTo(a, b), 0);
+    EXPECT_GT(System::MemoryExtensions::SequenceCompareTo(b, a), 0);
+}
+
+TEST(MemoryExtensionsComparisonContractTests, SequenceCompareTo_TwoNaNs_Are_Equal) {
+    // Already correct before ticket #1906 -- pinned so it cannot regress.
+    std::vector<double> l{kNaN};
+    std::vector<double> r{kNaN};
+    System::ReadOnlySpan<double> a(l.data(), 1);
+    System::ReadOnlySpan<double> b(r.data(), 1);
+    EXPECT_EQ(System::MemoryExtensions::SequenceCompareTo(a, b), 0);
+}
+
+TEST(MemoryExtensionsComparisonContractTests, SequenceCompareTo_Length_Tail_And_NonFloating) {
+    std::vector<int> shortv{1, 2};
+    std::vector<int> longv{1, 2, 3};
+    System::ReadOnlySpan<int> a(shortv.data(), 2);
+    System::ReadOnlySpan<int> b(longv.data(), 3);
+    EXPECT_LT(System::MemoryExtensions::SequenceCompareTo(a, b), 0);
+    EXPECT_GT(System::MemoryExtensions::SequenceCompareTo(b, a), 0);
+    EXPECT_EQ(System::MemoryExtensions::SequenceCompareTo(a, a), 0);
+}
+
+TEST(MemoryExtensionsComparisonContractTests, SequenceEqual_And_Contains_Still_Find_NaN) {
+    // The equality half of the contract was already correct in this file; ticket
+    // #1906 only re-pointed it at the shared policy. Pinned unchanged.
+    std::vector<float> l{kNaNf};
+    std::vector<float> r{kNaNf};
+    System::ReadOnlySpan<float> a(l.data(), 1);
+    System::ReadOnlySpan<float> b(r.data(), 1);
+    EXPECT_TRUE(System::MemoryExtensions::SequenceEqual(a, b));
+    EXPECT_TRUE(System::MemoryExtensions::Contains(a, kNaNf));
+    EXPECT_EQ(System::MemoryExtensions::IndexOf(a, kNaNf), 0);
+    EXPECT_EQ(System::MemoryExtensions::Count(a, kNaNf), 1);
 }
