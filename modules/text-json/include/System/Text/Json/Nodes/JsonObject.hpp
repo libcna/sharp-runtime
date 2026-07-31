@@ -63,13 +63,16 @@ namespace System::Text::Json::Nodes {
          * moved to another container, or one shared with a copy-constructed object (whose values
          * still report the original as their parent), is left untouched. A retained value is
          * therefore left in exactly the state `Remove`/`SetItem`/`Clear` already produce — no
-         * parent, its own root, and re-attachable. Non-throwing and allocation-free, so it is safe
-         * during exception unwinding and after a partially constructed derived object.
+         * parent, its own root, and re-attachable. Non-throwing, so it is safe during exception
+         * unwinding and after a partially constructed derived object.
+         *
+         * The remaining subtree is then released **iteratively** rather than by letting
+         * `properties_` recurse into it: a deeply nested tree used to overflow the stack while
+         * being released (one frame per level). Depth is now bounded by the heap, not by the call
+         * stack. The body is out of line in `JsonNode.cpp` because the worklist it feeds is shared
+         * with `~JsonArray` and neither header can see the other's store.
          */
-        ~JsonObject() override {
-            for (const auto& [name, value] : properties_)
-                if (value && value->getParentProperty() == this) value->DetachParent();
-        }
+        ~JsonObject() override;
 
         /** @return The number of properties in the object. */
         [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(properties_.size()); }

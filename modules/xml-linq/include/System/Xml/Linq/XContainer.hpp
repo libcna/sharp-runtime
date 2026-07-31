@@ -74,18 +74,20 @@ namespace System::Xml::Linq {
          * never dereferenced, so an already transferred child is never touched at all. A retained
          * node is left in exactly the state `RemoveNodes()`/`XNode::Remove()` already produce: no
          * parent, no document, no siblings, `Remove()` throws `The parent is missing.`, and it can
-         * be re-added elsewhere. Non-throwing and allocation-free, so it is safe during exception
-         * unwinding and after a partially constructed derived object.
+         * be re-added elsewhere. Non-throwing, so it is safe during exception unwinding and after
+         * a partially constructed derived object.
+         *
+         * The remaining subtree is then released **iteratively** rather than by letting
+         * `children_` recurse into it: a 20,000-deep element nest used to overflow the stack while
+         * being released, one frame per level, after it had been built successfully. Depth is now
+         * bounded by the heap, not by the call stack. The body is out of line in `XContainer.cpp`
+         * so the worklist it feeds has one definition rather than one per translation unit.
          *
          * `~XElement` runs before this and clears the attribute side; see XElement.hpp.
+         * Attributes need no such treatment — an `XAttribute` owns no children, so releasing one
+         * has never recursed.
          */
-        ~XContainer() override {
-            for (const auto& child : children_) {
-                if (!child) continue;
-                XObject& obj = *child;                 // XContainer is a friend of XObject
-                if (obj.parent_ == this) obj.parent_ = nullptr;
-            }
-        }
+        ~XContainer() override;
 
         /** @return The first child node, or nullptr if this container has no children. */
         [[nodiscard]] std::shared_ptr<XNode> getFirstNodeProperty() const { return children_.empty() ? nullptr : children_.front(); }

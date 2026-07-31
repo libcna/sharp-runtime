@@ -2682,3 +2682,239 @@ its J19c/X27c half needs no approval at all and could land on its own; its X28c
 half is item 6's real content, reduced to a consistency repair by §40.2; and its
 J19d/X27d half cannot be delivered under item 6's stated no-layout-change
 constraint. None of the three was started.
+
+---
+
+## 41. Implementation record — #1895, iterative container teardown (2026-07-31)
+
+*Everything in this section is **measured**. Nothing in §§1–40 was rewritten.*
+
+### 41.0 What authorised it
+
+The user's decision of 2026-07-31 split §31 item 6 into root-cause tickets and
+**explicitly approved the compatible iterative-teardown half (probe cases J19c
+and X27c)**, on condition that it requires no public signature change, no virtual
+or vtable change, no public object-layout change, no iterator-layout change, no
+mandatory consumer source migration, and no weakening of the existing
+`DefaultMaxDepth = 64` contract. §41.4 shows each condition is met. The other
+three halves of the old #1893 are now #1896 and #1897 and remain blocked.
+
+### 41.1 The defect, restated precisely
+
+Releasing an owned tree recursed. `~JsonArray` released `items_`, which dropped
+the last `shared_ptr` to each child, which ran that child's destructor — **one
+call frame per level**. Measured frames for J19c:
+
+```
+#0 JsonArray::~JsonArray()            JsonArray.hpp:42
+#1 std::destroy_at<JsonArray>
+#2 std::_Destroy<JsonArray>
+#3 allocator_traits<...>::destroy<JsonArray>
+#4 _Sp_counted_ptr_inplace<JsonArray>::_M_dispose()
+#5 _Sp_counted_base<_S_atomic>::_M_release()      → back to #0
+```
+
+So a 20,000-deep nest crashed **after it had been built successfully**, and the
+depth at which it crashed was a function of the thread's stack size — not of
+anything the program could observe or bound. X27c is the identical shape through
+`~XContainer` and `children_`.
+
+This is **recursive destruction**, and §40.1 distinguishes it from the four other
+recursive shapes in these families, none of which this ticket touches:
+`fromNlohmann` (parsing, X28c → #1897), `toNlohmann`/`SerializeTo` (formatting),
+`DeepClone` (cloning), `CollectDescendants`/`CollectDescendantNodes`
+(traversal), and `AssignParent`/`InsertNodeAt`'s ancestor walks (ownership
+validation, quadratic rather than deep → #1896).
+
+### 41.2 The repair
+
+Three destructors, in two bodies:
+`modules/text-json/src/System/Text/Json/Nodes/JsonNode.cpp` (`~JsonArray`,
+`~JsonObject`) and `modules/xml-linq/src/System/Xml/Linq/XContainer.cpp`
+(`~XContainer`).
+
+> The **outermost** container destructor publishes a worklist; every container
+> destructor that runs while a worklist is published **donates** its own children
+> to it and returns instead of releasing them. Stack depth is constant; the bound
+> is the heap.
+
+```cpp
+JsonArray::~JsonArray() {
+    for (const auto& item : items_)
+        if (item && item->getParentProperty() == this) item->DetachParent();  // #1886, unchanged
+
+    if (items_.empty()) return;                       // leaf containers cost nothing
+    if (pendingRelease != nullptr) {                  // a teardown is draining: donate
+        donateChildren(items_, *pendingRelease);
+        return;
+    }
+    std::vector<std::shared_ptr<JsonNode>> worklist;  // outermost: publish and drain
+    PendingReleaseScope scope(worklist);
+    donateChildren(items_, worklist);
+    drainPendingRelease(worklist);
+}
+```
+
+Five properties, each deliberate:
+
+1. **`thread_local` worklist pointer.** The worklist belongs to one in-progress
+   teardown on one thread. It is never shared between threads, so it needs no
+   synchronisation and introduces **no race** — two threads tearing trees down
+   simultaneously each publish their own. TSan was therefore not run and is not
+   required (§41.5).
+2. **Donation is last-child-first, and the worklist is drained from its back.**
+   That is what reproduces the recursive teardown's front-to-back depth-first
+   order rather than merely terminating (§41.3).
+3. **The `== this` detach guard runs first, unchanged.** #1886's contract is
+   untouched: a child owned by a different container keeps that container's link,
+   and the donate path never bypasses it — every node's children are detached by
+   that node's own destructor before they reach the worklist.
+4. **Allocation failure is contained, not converted into `terminate`.** The only
+   way donation can fail is `std::bad_alloc` from the worklist's growth. It is
+   caught inside the destructor; whatever is still in the store keeps its
+   (already detached) children and is released by the store's own destructor —
+   i.e. **exactly the recursive behaviour this repair replaces**. Nothing is
+   lost, leaked, double-detached or released twice, because the worklist and the
+   store never hold the same `shared_ptr`: each one is *moved* across. Partial
+   progress is therefore safe at every point.
+5. **Growth is geometric, not exact.** Reserving the exact requirement on every
+   donation would make a container that repeatedly refills a full worklist
+   reallocate on each one — trading a stack-depth problem for a quadratic-copying
+   one. The reserve doubles instead (§41.4 measures the result).
+
+**A retained node stops the teardown dead**, with no `use_count` check needed:
+releasing the worklist's reference to a node someone else still holds simply
+decrements, the destructor does not run, and the node keeps its whole subtree.
+When its real owner later releases it, no worklist is published, so it publishes
+its own.
+
+### 41.3 Measured evidence
+
+**Probe.** The retained 58-case probe was rebuilt from its tracked source and run
+unmodified. The pre-change replay reproduced the previous batch's end state
+exactly — **0 of 58 cases changed** — so this batch's baseline was verified, not
+inherited (`build-probe/1895_prefix_asan.log`).
+
+After the change, **exactly 2 of 58 cases changed**, and they are the two the
+user approved:
+
+| Case | Before | After |
+|---|---|---|
+| **J19c** — 20,000-deep `JsonArray`, build then release | `ASAN stack-overflow`; without a sanitizer `-> built` then **KILLED by signal 11** | **`clean`** — `-> built, released` |
+| **X27c** — 20,000-deep `XElement`, build then release | `ASAN stack-overflow`; **KILLED by signal 11** | **`clean`** — `-> built, released` |
+| J19d, X27d | `TIMEOUT` | **`TIMEOUT`** — unchanged (#1896) |
+| X28c | `ASAN stack-overflow` | **`ASAN stack-overflow`** — unchanged (#1897) |
+| J11, X15, X17 | `heap-use-after-free` | **`heap-use-after-free`** — unchanged (#1888/#1898) |
+
+Diffing every answer line of the **no-sanitizer** build across all 58 cases
+yields exactly those two differences plus ASLR address noise in the three cases
+that print a pointer (`build-probe/1895_postfix_none.log`).
+
+**J11, X15 and X17 do not belong to this repair, and that is now measured rather
+than argued:** the teardown changed neither their classification nor their answer
+lines, and none of the three reaches its defect through a destruction path — J11
+is a stale iterator over reallocated storage, X15 a borrowed raw `XElement*`,
+X17 a borrowed reference to a vector member.
+
+**Permanent tests.** 34 new cases:
+`modules/text-json/tests/System/Text/Json/Nodes/JsonNodeTeardownTests.cpp` (17)
+and `modules/xml-linq/tests/System/Xml/Linq/XLinqTeardownTests.cpp` (17). They
+cover the deep chain at the probe's own depth (20,000) for `JsonArray`, for a
+mixed `JsonObject`/`JsonArray` chain, for `XElement`, under an `XDocument`, in
+**automatic storage** (where the outermost container is not heap-owned), and
+released through `Clear()`/`RemoveNodes()` (where the *child* rather than the
+root is the outermost teardown); the empty, singleton, wide (10,000 siblings),
+wide-of-wide (200×200) and mixed-node-kind shapes; 5,000 attributes, asserting
+that the attribute side is deliberately not part of the worklist because an
+`XAttribute` owns no children; #1886/#1890's invariants (retained child detached
+and re-attachable, retained subtree intact, foreign child keeps its real owner,
+retained attribute's `next_` cleared); destruction during live exception
+unwinding; `is_nothrow_destructible_v` for all seven types; and `weak_ptr`
+observers proving every node is genuinely destroyed rather than merely detached.
+
+**Destruction order is pinned, not assumed.** Two tests assert the exact order
+(`{0,1,2,3,4,5}` for a branching tree, root-to-leaf for a chain) using a
+test-local `JsonArray`/`XElement` subclass that records its own destruction. Both
+tests **pass under the recursive implementation as well** — that is what makes
+them a proof of order *preservation* rather than a description of the new
+behaviour.
+
+**Mutation tests.** Reverting each family's teardown to the recursive form:
+
+| Mutation | Detected by |
+|---|---|
+| `~JsonArray`/`~JsonObject` recursive again | **4** of 17 — all four as `SIGSEGV`, the exact pre-fix failure |
+| `~XContainer` recursive again | **4** of 17 — all four as `SIGSEGV` |
+
+Run one test per process so a crash cannot hide the rest. The order tests are in
+the surviving 13 in both runs, as noted above.
+
+**Sanitizers.** `build-asan` (`-fsanitize=address,undefined`, `detect_leaks=1`,
+`print_stacktrace=1`), both binaries proved newer than both changed bodies
+(`build-probe/1895_asan_freshness.log`): **218/218 Text.Json** and **170/170
+Xml.Linq**, **zero** ASan, UBSan or LeakSanitizer diagnostics. The deep cases run
+under ASan too, which uses more stack per frame than the plain build — so the
+bound really is gone rather than merely raised.
+
+### 41.4 Source, ABI, layout, allocation
+
+| Condition the approval set | Result |
+|---|---|
+| No public signature change | **met.** `~JsonArray`, `~JsonObject` and `~XContainer` keep their declarations; only the *definition* moved out of line, because the JSON worklist is shared by two destructors whose headers cannot see each other's store |
+| No virtual or vtable change | **met.** No virtual function added, removed or reordered; all three destructors were already virtual through their base |
+| No public object-layout change | **met.** No member added anywhere; the 23 `static_assert`s in the existing lifetime suites still hold |
+| No iterator-layout change | **met.** No iterator touched |
+| No mandatory consumer source migration | **met.** No consumer source edit; consumers recompile (header change) and relink |
+| No weakening of `DefaultMaxDepth = 64` | **met.** No parse path touched at all |
+
+**ABI, measured** (`nm --defined-only --extern-only`, `-O2`, pre-fix bodies and
+headers extracted from `72ed51b3`):
+
+- `JsonNode.o`: **225 external/weak defined symbols before, 225 after, the same
+  names.** The six destructor symbols
+  `_ZN…9JsonArrayD0Ev`/`D1Ev`/`D2Ev` and `_ZN…10JsonObjectD0Ev`/`D1Ev`/`D2Ev`
+  change **binding from `W` (weak COMDAT) to `T` (strong)** — the expected and
+  only consequence of an out-of-line destructor. **No name added or removed.**
+- `XContainer.o`: **49 → 62.** Added are `_ZN…10XContainerD0Ev`/`D1Ev`/`D2Ev` as
+  `T`; the typeinfo, type-name and vtable objects for `XContainer`, `XNode` and
+  `XObject`, because this translation unit is now the key-function TU; and
+  `ValidateNode`'s weak COMDAT plus two `std::vector` destructor instantiations.
+  **No name was removed**, and every addition is weak or a definition site that
+  consumers already emitted for themselves.
+- `build-probe/1895_{JsonNode,XContainer}_{prefix,postfix}.syms`.
+
+**Allocation, measured with the retained `1886_alloc_probe`**, against the
+`#1886`/`#1890` baseline it recorded:
+
+| Phase | Before | After |
+|---|---|---|
+| `JsonArray` construct + 4 `Add` + retain child | 16 new | **16 new** — unchanged |
+| 100,000 × (`getParentProperty` + `getRootProperty`) | 0 new | **0 new** — unchanged |
+| `JsonArray` destruction (4 owned children) | **0 new** | **1 new** |
+| `XElement` construct + 4 nodes + 2 attributes | 12 new | **12 new** — unchanged |
+| 100,000 × (`getParentProperty` + `getDocumentProperty`) | 0 new | **0 new** — unchanged |
+| `XElement` destruction (4 children, 2 attributes) | **0 new** | **1 new** |
+
+**This is the one cost the repair has, and it is recorded rather than glossed:
+destroying a container that has at least one child now performs exactly one heap
+allocation** — the worklist — where it previously performed none. An **empty**
+container still allocates nothing (the early return), and the deep chain that
+motivated the ticket allocates **once for the whole 20,000-level teardown**,
+because the worklist's capacity is reached immediately and never grows again. The
+first draft of this repair allocated **three** times for four children (geometric
+growth from empty); the geometric `reserve` in §41.2 property 5 reduced that to
+one, and the measurement above is after that change.
+
+### 41.5 What this ticket did **not** do
+
+- **TSan was not run.** The only new mutable state is a `thread_local` pointer,
+  which is per-thread by construction and is never published to another thread.
+  No shared mutable state, atomic, cache or cross-thread ownership was introduced.
+- **Reentrancy is bounded but not zero-cost.** If an unrelated container is
+  destroyed *while* a worklist is published — for example from a destructor
+  running inside the drain — it donates to that worklist, so its nodes are
+  released a little later, inside the outer loop, rather than immediately. The
+  set of objects destroyed is identical; only the interleaving differs. Recorded
+  rather than hidden.
+- **J19d/X27d (quadratic ancestor guards) and X28c (recursive parse) are
+  untouched**, by design: they are #1896 and #1897.

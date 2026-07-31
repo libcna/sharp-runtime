@@ -10,6 +10,98 @@ namespace System::Xml::Linq {
 
     using System::Xml::XmlNodeType;
 
+    namespace {
+
+        /**
+         * Worklist for the iterative container teardown (ticket #1895), the Xml.Linq twin of the
+         * one in `JsonNode.cpp`.
+         *
+         * Releasing an element tree used to recurse: `~XContainer` released `children_`, which
+         * dropped the last `shared_ptr` to each child node, which ran that child's destructor, one
+         * call frame per level. A 20,000-deep nest therefore crashed with a stack overflow *after*
+         * it had been built successfully (probe case X27c).
+         *
+         * The **outermost** container destructor publishes a worklist here and drains it in a
+         * loop; every container destructor that runs while a worklist is published donates its own
+         * children to that worklist and returns. Stack depth is constant; the bound is the heap.
+         *
+         * `thread_local` because the worklist belongs to one in-progress teardown on one thread.
+         * It is never shared between threads, so it needs no synchronisation and introduces no
+         * race.
+         */
+        thread_local std::vector<std::shared_ptr<XNode>>* pendingRelease = nullptr;
+
+        /** Publishes `pending` for the duration of the outermost teardown, and unpublishes it. */
+        class PendingReleaseScope {
+        public:
+            explicit PendingReleaseScope(std::vector<std::shared_ptr<XNode>>& pending) noexcept {
+                pendingRelease = &pending;
+            }
+            ~PendingReleaseScope() { pendingRelease = nullptr; }
+            PendingReleaseScope(const PendingReleaseScope&) = delete;
+            PendingReleaseScope& operator=(const PendingReleaseScope&) = delete;
+        };
+
+        /**
+         * Moves every non-null child onto the worklist, **last child first**, so that draining the
+         * worklist from its back reproduces exactly the front-to-back document order the recursive
+         * teardown produced.
+         *
+         * The only way this can fail is `std::bad_alloc` from the worklist's own growth, which is
+         * caught rather than allowed to escape a destructor: whatever is still in `store` keeps
+         * its (already detached) children and is released by `store`'s own destructor, i.e. the
+         * recursive behaviour this repair replaces. Nothing is lost, leaked, double-detached or
+         * released twice — the worklist and `store` never hold the same `shared_ptr`, because each
+         * one is *moved* across.
+         */
+        void donateChildren(std::vector<std::shared_ptr<XNode>>& store,
+                            std::vector<std::shared_ptr<XNode>>& worklist) noexcept {
+            try {
+                // Grow the worklist once for the whole donation instead of a child at a time, and
+                // keep that growth geometric: reserving the exact requirement every time would
+                // trade a stack-depth problem for a quadratic-copying one.
+                const size_t needed = worklist.size() + store.size();
+                if (needed > worklist.capacity())
+                    worklist.reserve(needed > worklist.capacity() * 2 ? needed : worklist.capacity() * 2);
+                for (auto it = store.rbegin(); it != store.rend(); ++it)
+                    if (*it) worklist.push_back(std::move(*it));
+            } catch (...) {
+            }
+        }
+
+        /**
+         * Drains the worklist. Each `shared_ptr` released here re-enters a container destructor,
+         * which sees a published worklist and donates instead of recursing, so this loop is the
+         * only stack frame the whole teardown needs.
+         */
+        void drainPendingRelease(std::vector<std::shared_ptr<XNode>>& worklist) noexcept {
+            while (!worklist.empty()) {
+                std::shared_ptr<XNode> node = std::move(worklist.back());
+                worklist.pop_back();
+                // `node` is released at the end of this iteration.
+            }
+        }
+
+    } // namespace
+
+    XContainer::~XContainer() {
+        for (const auto& child : children_) {
+            if (!child) continue;
+            XObject& obj = *child;                 // XContainer is a friend of XObject
+            if (obj.parent_ == this) obj.parent_ = nullptr;
+        }
+
+        if (children_.empty()) return;
+        if (pendingRelease != nullptr) {
+            donateChildren(children_, *pendingRelease);
+            return;
+        }
+        std::vector<std::shared_ptr<XNode>> worklist;
+        PendingReleaseScope scope(worklist);
+        donateChildren(children_, worklist);
+        drainPendingRelease(worklist);
+    }
+
     void XContainer::RemoveNode(XNode* n) {
         auto it = std::find_if(children_.begin(), children_.end(),
                                 [n](const std::shared_ptr<XNode>& c) { return c.get() == n; });
