@@ -1,16 +1,19 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-07-30 — 41 physical components, 91 direct production
-dependency edges, a clean native build, 14,396 passing tests across 37
+*Last verified: 2026-07-31 — 41 physical components, 91 direct production
+dependency edges, a clean native build, 14,635 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
-is recorded as audit finding `SR-AUD-001`. Post-audit tally: 43 findings
-remediated, 321 confirmed, of 364 total (CCF-008 closed by #1855; CCF-005
-Decimal slice #1855/#1856/#1857 + the compatible CCF-007 fixes #1859/#1860 and,
-this batch, #1861 (SR-AUD-032 Pi-trig, → remediated) and the #1864 whitespace
-slice landed 2026-07-30; the CCF-007 approval-gated members #1862/#1863/#1865 and
-sibling #1854 stay `needs_user`, with decision records in
-`docs/FloatingValueFidelityPlan.md` §19).*
+is recorded as audit finding `SR-AUD-001`. Post-audit tally: **57 findings
+remediated, 306 confirmed, of 364 total** — this line read `43 / 321` until
+2026-07-31 and had been stale for several batches; the per-batch sections below
+each state the figure they measured. The 2026-07-31 CCF-019 batch (#1886, #1890)
+landed the approved owner-side detachment contract and left the tally
+**unchanged**, because both SR-AUD-327 and SR-AUD-333 keep the
+`confirmed (design-complete)` qualifier: item 1 of
+`docs/OwnedTreeLifetimeContractPlan.md` §31 closes 26 of their 29 measured
+use-after-free cases, and the remaining three (J11, X15, X17) belong to the
+still-unapproved #1889 and #1892.*
 
 Sharp Runtime is in the post-audit remediation phase. The original type
 classification, stabilization, and modularization queues are complete, and the
@@ -4659,3 +4662,88 @@ deliberately inactive. The next work is the **#1886/#1890 approval decision**
 (plan §31 item 1), not another family. Full detail, build-directory sizes,
 three-job parallelism record and probe accounting: `NEXT.md` under "Autonomous
 design batch handoff, 2026-07-30 (CCF-019, DESIGN-COMPLETE)".
+
+## Autonomous remediation batch, 2026-07-31 — CCF-019 owner-side detachment (#1886, #1890)
+
+Branch `feature/remediation-ccf019-owner-detachment`, off
+`feature/design-ccf019-owned-tree-lifetimes`. The user approved
+**`docs/OwnedTreeLifetimeContractPlan.md` §31 item 1 and only item 1**, which
+covers **#1886** and **#1890** together. Items 2–6 were not answered, so #1887,
+#1888, #1889, #1891, #1892 and #1893 stay `needs_user` and none was started.
+CCF-019 is now **PARTIALLY REMEDIATED**: both core repairs shipped, **both
+findings stay `confirmed (design-complete)`**, and that must not be reported
+otherwise.
+
+**#1886 — `JsonArray`/`JsonObject` detach their children.** Two destructors, two
+headers. Each clears the parent link of every child whose link still names *that*
+container. The `== this` guard strengthens §13.1's unconditional sketch and is
+load-bearing here: `JsonArray copy = *orig;` (J08) and the public
+`DetachParent()` (J13) both leave a container holding a child owned by someone
+else. No helper was added, so no new name of any linkage entered a public header.
+
+**#1890 — `XContainer`/`XElement` detach their children and attributes.** Same
+rule, plus `XElement` clears each owned attribute's **second** borrowed link,
+`XAttribute::next_`, which dangles independently of `parent_`. Both links are
+written directly (the classes are already mutual `friend`s) because the
+destructor must *read* the parent link to decide ownership and `AdoptObject` only
+writes; the link is only ever compared, never dereferenced.
+
+**Measured by re-running the #1885 probe unmodified**, through the unmodified
+#1885 build script, in the same three builds from one source, one forked process
+per case under the same watchdog:
+
+| | #1885 baseline | after #1886 | after #1890 |
+|---|---|---|---|
+| ASan `heap-use-after-free` **cases** | 29 | 22 | **3** |
+| Faulting **accesses**, recoverable ASan | 57 | 49 | **5** |
+| `pure virtual method called` process aborts | 8 | 8 | **0** |
+
+**26 of 29 use-after-free cases closed.** §1 of the design record estimated 27;
+the measured figure is **26**, recorded rather than rounded (§34.4) — §13.5 and
+§14.3 always listed three cases as outside the core repair, not two. The three
+that remain are **J11** (stale `JsonArray` iterator → #1889), **X15**
+(`Extensions::Ancestors`' raw `XElement*` → #1892) and **X17**
+(`getAttributesProperty()`'s reference → #1892); none goes through `parent_`, so
+no parent-link repair could have reached them.
+
+**Cost, measured on both sides:** `sizeof` unchanged for all **11** public types
+(24/48/48/40 and 16/16/40/128/120/48/56, `static_assert`ed in the permanent
+suites); GCC's own `-fdump-lang-class` class and vtable dumps **identical** for
+all eleven, pre-fix headers versus current; **zero** allocations added to
+construction, access or destruction (counting `operator new`, 100,000 parent/root
+accesses allocate nothing on either side); LeakSanitizer clean; module graph
+still **41/91**. ABI: the JsonNode side is symbol-identical (219 external defined
+symbols before and after); the Xml.Linq side **gains three weak COMDAT symbols**
+(`XContainerD0/D1/D2Ev`) because GCC previously inlined that implicit destructor
+and emitted no standalone definition — **no symbol name was removed**.
+
+**Recorded against itself:** two things this batch found and did not paper over.
+(i) The probe's J02 and J16 bodies dereference the returned parent without a null
+check, so post-fix they fault *in probe code*; the library-side use-after-free is
+gone and the permanent suite asserts the defined answer for the same shapes.
+(ii) The ownership guard is **not** mutation-detectable on the Xml.Linq side —
+insertion there erases from the previous owner and `XObject` deletes copy/move,
+so no container can hold a foreign object; removing both guards fails zero tests.
+They are retained because item 1 specifies them and #1891/#1892 may change
+insertion.
+
+**Baselines:** tests **14,568 → 14,635** across 37 executables (+32
+`JsonNodeLifetimeTests`, +35 `XLinqLifetimeTests`; all 53 existing
+`JsonNodeTests` and 92 existing Xml.Linq cases pass unmodified). Mutation-checked
+five ways in total. Under `build-asan`: 179/179 Text.Json and 127/127 Xml.Linq,
+zero ASan/UBSan/LSan diagnostics, with sanitizer activation proved by a
+controlled self-test. Doxygen **1,941/1,942**, negative fixtures **9/66**,
+version seams **2/18**, module graph **41/91**, audit tally **unchanged at 57
+remediated / 306 confirmed / 364** — no new `SR-AUD-*` identifier, numbering
+frozen at **364**.
+
+Nothing pushed/merged/rebased/tagged; **CNA and mobile-eggbert were not
+inspected, searched, built or modified**; **#1773 stays `blocked`**; #1875 and
+#1880 remain inactive; #1854/#1858/#1862/#1863/#1865/#1879/#1884 remain
+`needs_user`. Maximum aggregate compilation parallelism was **three jobs**.
+
+**Ready queue: empty again.** The next work is the **§31 items 2–6 approval
+decision**, in the order #1887/#1891 (item 2, no source break), #1888 (item 3),
+#1892 (item 5), #1889 (item 4), #1893 (item 6), then #1894. Full detail,
+build-directory sizes and probe accounting: `NEXT.md` under "Autonomous
+remediation batch handoff, 2026-07-31 (CCF-019, PARTIALLY REMEDIATED)".

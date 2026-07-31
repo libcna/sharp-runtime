@@ -4011,3 +4011,75 @@ Implementation is proposed as **#1886–#1894**, every one `needs_user` or
 `blocked` pending six explicit approvals (§31 of the plan). **CNA and
 mobile-eggbert were not inspected, searched, built or modified**, and #1773
 remains `blocked`.
+
+
+---
+
+## CCF-019 core-repair batch, 2026-07-31 (tickets #1886, #1890) — PARTIAL, NEITHER FINDING REMEDIATED
+
+The user approved `docs/OwnedTreeLifetimeContractPlan.md` **§31 item 1 and only
+item 1** — the owner-side detachment contract, which item 1 deliberately scopes
+to cover **both** core repairs with one approval. Items 2–6 were not answered, so
+**#1887, #1888, #1889, #1891, #1892 and #1893 remain `needs_user` and #1894
+remains `blocked`; none was started.**
+
+**#1886** gives `System::Text::Json::Nodes::JsonArray` and `JsonObject` a
+destructor that clears the parent link of every child whose link still names that
+container. The ownership guard is load-bearing there: `JsonArray copy = *orig;`
+and the still-public `DetachParent()` both produce a container holding a child
+owned by someone else. **#1890** gives `System::Xml::Linq::XContainer` the same
+for child nodes and `XElement` one that additionally clears every owned
+attribute's parent link **and** its intrusive `XAttribute::next_` sibling link —
+a second borrowed link that the original finding did not name and that dangles
+independently of `parent_`.
+
+Both were measured by re-running the #1885 probe **unmodified**, through the
+unmodified #1885 build script, in the same three builds from one source, one
+forked process per case under the same watchdog:
+
+| | #1885 baseline | after #1886 | after #1890 |
+|---|---|---|---|
+| ASan `heap-use-after-free` **cases** | 29 | 22 | **3** |
+| Faulting **accesses**, recoverable ASan | 57 | 49 | **5** |
+| `pure virtual method called` process aborts | **8** | 8 | **0** |
+
+**26 of the 29 measured use-after-free cases are closed.** The design record's §1
+estimated 27; the measured figure is **26**, and §34.4 records the difference
+rather than rounding, because §13.5 and §14.3 always listed three cases as
+outside the core repair. The three that remain are **J11** (a stale `JsonArray`
+iterator held across a reallocating `Add` → #1889), **X15**
+(`Extensions::Ancestors`' `std::vector<XElement*>` → #1892) and **X17**
+(`getAttributesProperty()`'s reference to the element's own vector → #1892).
+**None of the three reaches its defect through `parent_`**, so no parent-link
+repair could have closed them — which is why **SR-AUD-327 and SR-AUD-333 both
+keep the `confirmed (design-complete)` qualifier** and the tally is **unchanged
+at 57 remediated / 306 confirmed / 364 total**. **No new `SR-AUD-*` identifier
+was issued**; numbering stays frozen at 364.
+
+Cost, measured on both sides: `sizeof` unchanged for all eleven public types
+(24/48/48/40 and 16/16/40/128/120/48/56); GCC's own `-fdump-lang-class` class and
+vtable dumps **identical** for all eleven, pre-fix headers versus current; **zero
+allocations added** to construction, access or destruction, with 100,000
+parent/root accesses allocating nothing on either side; LeakSanitizer clean;
+module graph unchanged at **41 / 91**. The only ABI movement is three **weak
+COMDAT** symbols — `XContainerD0/D1/D2Ev` — which GCC previously inlined away and
+emitted nowhere; **no symbol name was removed**, and the JsonNode side is
+symbol-identical at 219 external defined symbols.
+
+Two results are recorded against the batch rather than glossed. The probe's J02
+and J16 bodies dereference the returned parent without a null check, so post-fix
+they fault **in probe code**, not in the library; the permanent suites assert the
+defined answer for the same shapes. And the ownership guard is **not
+mutation-detectable on the Xml.Linq side** — insertion there erases from the
+previous owner and `XObject` deletes all four copy/move operations, so no
+container can hold a foreign object; removing both guards fails zero tests, and
+they are retained because item 1 specifies them and #1891/#1892 may change
+insertion.
+
+Evidence: **+67 permanent tests**, floor **14,568 → 14,635** across 37
+executables, with all 53 existing `JsonNodeTests` and all 92 existing Xml.Linq
+cases passing **unmodified**; five mutation checks; ASan+UBSan+LSan clean over
+179/179 `SharpRuntimeTests_Text_Json` and 127/127 `SharpRuntimeTests_Xml_Linq`,
+with sanitizer activation proved by a controlled self-test; Doxygen 1,941/1,942;
+version seams 2/18; negative consumer fixtures 9/66. **CNA and mobile-eggbert
+were not inspected, searched, built or modified**, and #1773 remains `blocked`.

@@ -1245,6 +1245,48 @@ report **no parent**. Implementation is proposed as #1886–#1894, every one
 `docs/OwnedTreeLifetimeContractPlan.md` §31. **CNA and mobile-eggbert were not
 inspected**, and #1773 stays `blocked`.
 
+**Remediation status of the two remaining members (tickets #1886 and #1890,
+2026-07-31): PARTIAL — the core repair landed, NEITHER FINDING IS REMEDIATED.**
+The user approved `docs/OwnedTreeLifetimeContractPlan.md` §31 **item 1 and only
+item 1**, which covers both core repairs with one approval. #1886 gives
+`JsonArray` and `JsonObject` a destructor that clears the parent link of every
+child still owned by that container; #1890 gives `XContainer` one for child nodes
+and `XElement` one that additionally clears each owned attribute's parent link
+**and** its intrusive `next_` sibling link. Everything above is retained
+unchanged; **no new `SR-AUD-*` identifier was issued** and numbering stays frozen
+at **364**.
+
+Measured by re-running the #1885 probe **unmodified**, through the same build
+script, in the same three builds from one source:
+
+| | #1885 baseline | after #1886 | after #1890 |
+|---|---|---|---|
+| ASan `heap-use-after-free` **cases** | 29 | 22 | **3** |
+| Faulting **accesses**, recoverable ASan | 57 | 49 | **5** |
+| `pure virtual method called` process aborts | **8** | 8 | **0** |
+
+**26 of the 29 use-after-free cases are closed**, not the 27 the paragraph above
+estimated; the difference is recorded rather than rounded, because §13.5 and
+§14.3 of the design record always listed three cases as outside the core repair.
+The three that remain are **J11** (stale `JsonArray` iterator → #1889), **X15**
+(`Extensions::Ancestors`' `std::vector<XElement*>` → #1892) and **X17**
+(`getAttributesProperty()`'s reference → #1892); none reaches the defect through
+`parent_`, so no parent-link repair could have closed them. **SR-AUD-327 and
+SR-AUD-333 therefore both keep the `confirmed (design-complete)` qualifier**, and
+the post-audit tally is unchanged at 57 remediated / 306 confirmed / 364.
+
+Cost, measured on both sides: `sizeof` unchanged for all eleven public types,
+GCC's own `-fdump-lang-class` class and vtable dumps identical pre- and post-fix,
+zero allocations added to construction, access or destruction, LeakSanitizer
+clean, module graph still 41/91. The only ABI movement is three **weak COMDAT**
+symbols (`XContainerD0/D1/D2Ev`) that GCC had previously inlined away entirely;
+no symbol name was removed. +67 permanent tests (14,568 → 14,635), all 53
+existing `JsonNodeTests` and 92 existing Xml.Linq cases unmodified,
+mutation-checked five ways. **§31 items 2–6 remain unapproved and unstarted**, so
+#1887, #1888, #1889, #1891, #1892 stay `needs_user`, #1893 stays `needs_user` and
+#1894 stays `blocked`. **CNA and mobile-eggbert were again not inspected**, and
+#1773 stays `blocked`.
+
 **Related, but deliberately not a member (ticket #1782, 2026-07-27):**
 SR-AUD-361 (`SortedSet<T>::GetViewBetween`) is **not** a CCF-019 instance and
 must not be counted as one. Its returned object is a fully detached snapshot

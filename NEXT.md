@@ -3,12 +3,32 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-30. Branch:
-`feature/design-ccf019-owned-tree-lifetimes` (previously
-`feature/remediation-batch-ccf012-composite-format`). The test floor is
-**unchanged at 14,568** — this batch was **DESIGN-ONLY** and changed **no
-production file**. Design ticket **#1885** planned **CCF-019**, the owned-tree
-lifetime family: **SR-AUD-327** (`JsonNode`) and **SR-AUD-333** (`XObject`).
+*Last verified: 2026-07-31. Branch:
+`feature/remediation-ccf019-owner-detachment` (previously
+`feature/design-ccf019-owned-tree-lifetimes`). The test floor rose to
+**14,635** (was 14,568). The user approved
+**`docs/OwnedTreeLifetimeContractPlan.md` §31 item 1 and only item 1**, and this
+batch implemented it in both families: **#1886** (`JsonArray`/`JsonObject`
+detach their children in their own destructor, +32 tests) and **#1890**
+(`XContainer`/`XElement` detach their children, their attributes and each
+attribute's intrusive `next_` link, +35 tests). Re-running the #1885 probe
+**unmodified**: ASan `heap-use-after-free` **cases 29 → 3**, faulting accesses
+**57 → 5**, `pure virtual method called` process aborts **8 → 0** — **26 of 29
+closed**, one fewer than §1's estimate of 27, recorded in §34.4 rather than
+rounded. Cost, measured: `sizeof` unchanged for all **11** public types, GCC
+`-fdump-lang-class` class/vtable dumps **identical**, **zero** allocations added
+to construction, access or destruction, LSan clean, module graph still **41/91**;
+the only ABI movement is three **weak COMDAT** `XContainerD0/D1/D2Ev` symbols GCC
+had previously inlined away, with **no name removed**. **CCF-019 is PARTIALLY
+REMEDIATED and both findings stay `confirmed (design-complete)`**: J11 (#1889)
+and X15/X17 (#1892) are still ASan-confirmed use-after-free, and items 2–6 of
+§31 remain **unapproved and unstarted**. Post-audit tally **unchanged at 57
+remediated / 306 confirmed / 364**; numbering frozen at **364**. See "Autonomous
+remediation batch handoff, 2026-07-31 (CCF-019, PARTIALLY REMEDIATED)"
+immediately below. Previously, on
+`feature/design-ccf019-owned-tree-lifetimes`: design ticket **#1885** planned
+**CCF-019**, the owned-tree lifetime family: **SR-AUD-327** (`JsonNode`) and
+**SR-AUD-333** (`XObject`).
 Both were reproduced against the shipped bodies before any design was written —
 47 cases, one forked process each under a watchdog, three builds from one source
 — giving **29 ASan `heap-use-after-free` accesses**, **3 `stack-overflow`s**,
@@ -255,6 +275,249 @@ per this repository's practice of preserving historical audit narrative.*
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
+
+## Autonomous remediation batch handoff, 2026-07-31 (CCF-019, PARTIALLY REMEDIATED)
+
+Branch `feature/remediation-ccf019-owner-detachment`, off
+`feature/design-ccf019-owned-tree-lifetimes`. Three commits: **#1886**
+(`6f4e59c6`), **#1890** (`f6f0f69e`), and this handoff. Nothing was pushed,
+merged, rebased, tagged or published.
+
+### What was approved, and what was not
+
+The user approved **`docs/OwnedTreeLifetimeContractPlan.md` §31 item 1 and only
+item 1** — the owner-side detachment contract, covering **#1886 and #1890
+together** — and explicitly accepted its one observable behaviour change: after
+the owning container is destroyed, `getParentProperty()` returns `nullptr`
+instead of a dangling pointer, and consumers recompile.
+
+**Items 2, 3, 4, 5 and 6 were not answered.** #1887, #1888, #1889, #1891, #1892
+and #1893 remain `needs_user`; #1894 remains `blocked`; **none of them was
+started, and nothing they own was quietly absorbed into #1886/#1890.**
+
+### #1886 — `JsonArray`/`JsonObject` detach their children (SR-AUD-327)
+
+Two files, two destructors:
+`modules/text-json/include/System/Text/Json/Nodes/JsonArray.hpp` and
+`.../JsonObject.hpp`. Each clears the parent link of every child **whose link
+still names that container**:
+
+```cpp
+~JsonArray() override {
+    for (const auto& item : items_)
+        if (item && item->getParentProperty() == this) item->DetachParent();
+}
+```
+
+The `== this` guard strengthens §13.1's unconditional sketch and is
+**load-bearing** here: `JsonArray copy = *orig;` (probe case J08) and the public
+`DetachParent()` (J13) both leave a container holding a child owned by someone
+else, and an unguarded loop would steal that link. **No helper was added** — the
+rule is one line over two differently shaped stores whose only common base is
+`JsonNode`, so any shared helper would have had to put a new name into a public
+header; both loops use only the already-public `getParentProperty()` and
+`DetachParent()`, which is what `Clear()` already calls.
+
+### #1890 — `XContainer`/`XElement` detach children and attributes (SR-AUD-333)
+
+`modules/xml-linq/include/System/Xml/Linq/XContainer.hpp` clears every owned
+child node's parent link; `.../XElement.hpp` clears every owned attribute's
+parent link **and** its intrusive `next_` sibling link — a *second* borrowed link
+that dangles independently (probe case X13). Both links are written directly
+(`XContainer` is already a `friend` of `XObject`, `XElement` of `XAttribute`)
+because the destructor must **read** the parent link to decide ownership and
+`AdoptObject()` only writes; writing `next_` directly also keeps the destructor
+independent of the public `setNextAttributeProperty()` that #1892 proposes to
+remove. The parent link is only ever **compared, never dereferenced**, so an
+already-transferred object is never touched.
+
+### Measured result — the #1885 probe re-run **unmodified**
+
+Same probe source (`build-probe/1885_ccf019_lifetime_probe.cpp`), same build
+script (`build-probe/1885_build.sh`, one `g++` process compiling 60 production
+translation units from source — no archive linked), same three builds from one
+source, one `fork()`ed process per case under the same 5-second watchdog.
+Classification is mechanical (`build-probe/1886_classify_cases.py`).
+
+| | #1885 baseline | after #1886 | after #1890 |
+|---|---|---|---|
+| ASan `heap-use-after-free` **cases** (of 47 total cases) | 29 | 22 | **3** |
+| Faulting **accesses**, `-fsanitize-recover=address` | 57 | 49 | **5** |
+| … JsonNode section / Xml.Linq section | 9 / 48 | 1 / 48 | **1 / 4** |
+| `pure virtual method called` process aborts | 8 | 8 | **0** |
+| ASan `stack-overflow`s | 3 | 3 | 3 (**#1893**) |
+
+**26 of the 29 use-after-free cases are closed.** The design record's §1
+estimated **27**; the measured figure is **26**, and §34.4 records the difference
+rather than rounding it — §13.5 and §14.3 always listed three cases as outside
+the core repair, not two.
+
+Closed by #1886: **J01, J02, J03, J04, J08, J16, J17** (plus J05's stale non-null
+parent and J06's permanent `The node already has a parent.` orphan).
+Closed by #1890: **X01–X14, X18, X19, X22, X25, X26** — every one of them now
+returns exactly what a *detached* object already returned, or throws
+`The parent is missing.`
+
+**Two things this batch recorded against itself rather than glossing:**
+
+1. The probe's **J02 and J16** bodies dereference the returned parent *without a
+   null check* (they were written when it was never null), so post-fix they fault
+   **in probe code** at `1885_ccf019_lifetime_probe.cpp:141` and `:342` — UBSan
+   names it `member access within null pointer of type 'struct JsonNode'`. The
+   library-side use-after-free is gone; `JsonNodeLifetimeTests` asserts the
+   defined answer for the same two shapes.
+2. The ownership guard is **not mutation-detectable on the Xml.Linq side.**
+   `InsertNodeAt` and `XElement::Add(attribute)` both *erase* from the previous
+   owner before adopting, and `XObject` deletes all four copy/move operations, so
+   no container can hold a foreign object. Removing both guards fails **zero**
+   tests. They are kept because §31 item 1 specifies them and #1891/#1892 may
+   change insertion; the invariant they rest on is pinned by two tests that
+   assert the source container is empty after a move
+   (`docs/OwnedTreeLifetimeContractPlan.md` §34.2).
+
+### Invariants — measured, not asserted
+
+| Claim | Evidence |
+|---|---|
+| `sizeof` unchanged for all **11** public types | 24/48/48/40 and 16/16/40/128/120/48/56 — `build-probe/1886_layout_sizes.log`, plus 23 `static_assert`s across the two permanent suites |
+| No member added, **no vtable slot added or reordered** | GCC's own `-fdump-lang-class` class + vtable dumps, pre-fix headers versus current, are **identical** for all eleven types (`build-probe/1886_layout_{prefix,postfix}.public.txt`, rebuild with `1886_layout_build.sh`) |
+| No public signature change | the four production files add nothing but the two destructors |
+| ABI — JsonNode side | **219 external/weak defined symbols before, 219 identical after**; the `D0`/`D1`/`D2` destructor symbols and both vtable symbols were already emitted (`build-probe/1886_extsyms_*.txt`) |
+| ABI — Xml.Linq side | **three weak COMDAT symbols added**, `_ZN6System3Xml4Linq10XContainerD0Ev`/`D1Ev`/`D2Ev`, because GCC previously inlined that implicit destructor and emitted no standalone definition. `XElement`'s three already existed. **No symbol name was removed** (`build-probe/1890_extsyms_*.txt`) |
+| **Zero** allocations added | counting `operator new`/`delete`: construction 16 / 12 new both sides, destruction **0 new** both sides, and **100,000 × (`getParentProperty` + `getRootProperty`/`getDocumentProperty`) allocates nothing** on either side (`build-probe/1886_alloc_{prefix,postfix}.log`) |
+| No new ownership cycle, no leak | LeakSanitizer clean over both ASan suites and the probe; the repair **adds no edge**, it clears existing non-owning ones earlier |
+| Destructors cannot terminate | `std::is_nothrow_destructible_v` asserted for all four containers; four permanent tests destroy owners during live exception unwinding |
+| Module graph unchanged | **41 modules, 91 edges**; generated catalogue current |
+
+### Permanent tests
+
+- `modules/text-json/tests/System/Text/Json/Nodes/JsonNodeLifetimeTests.cpp` — **32 cases**
+- `modules/xml-linq/tests/System/Xml/Linq/XLinqLifetimeTests.cpp` — **35 cases**
+
+Floor **14,568 → 14,635** across 37 executables. All **53** existing
+`JsonNodeTests` cases and all **92** existing Xml.Linq cases pass **unmodified**;
+nothing was weakened, deleted or recategorised.
+
+**Mutation checks, five in total** (Xml.Linq run one test per process so an abort
+cannot hide the rest):
+
+| Mutation | Detected by |
+|---|---|
+| both JsonNode destructor bodies emptied | **22** of 32 (ticket required ≥ 4) |
+| JsonNode `== this` guard removed | **exactly 2** — the two written for it |
+| both XObject destructor bodies emptied | **23** of 35 (ticket required ≥ 6); thirteen as `pure virtual method called` aborts |
+| `attr->next_ = nullptr` deleted | **2** |
+| XObject ownership guards removed | **0** — see the honest note above |
+
+Under `build-asan` (`-fsanitize=address,undefined`, `detect_leaks=1`):
+**179/179 Text.Json** and **127/127 Xml.Linq**, **zero** ASan/UBSan/LSan
+diagnostics (`build-probe/1886_asan_tests.log`, `1890_asan_tests.log`), with the
+binaries proved newer than every source they compile
+(`build-probe/188{6,9}0_asan_freshness.log`). **Sanitizer activation is proved by
+a controlled self-test** compiled with the same flags: a deliberate
+use-after-free aborts under ASan, a deliberate leak is reported by LSan, and the
+control run is clean (`build-probe/1886_sanitizer_selftest.log`).
+
+### Audit status — both findings stay `confirmed`
+
+**SR-AUD-327 and SR-AUD-333 are NOT remediated.** Each still has an
+ASan-confirmed use-after-free inside its own files, so both keep the
+`confirmed (design-complete)` qualifier and the post-audit tally is **unchanged
+at 57 remediated / 306 confirmed / 364**. **No new `SR-AUD-*` identifier was
+issued; numbering stays frozen at 364.**
+
+Residual exposure, each mapped to its own unapproved item:
+
+| Left open | Shape | Ticket / §31 item |
+|---|---|---|
+| **J11**, J12 | stale `JsonArray`/`JsonObject` iterator (J11 still an ASan UAF) | #1889 / item 4 (**layout change**) |
+| J08 alias, J09 slice, J13 double owner | `JsonNode`'s implicit copy ops + public `DetachParent()` | #1888 / item 3 (**source break**) |
+| J10 | `JsonObject::SetItem` detaches before it assigns | #1887 / item 2 |
+| **X15**, **X17** | `Extensions::Ancestors`' raw `XElement*`; `getAttributesProperty()`'s reference — both still ASan UAF, neither reachable through `parent_` | #1892 / item 5 (**source break**) |
+| X20 | `ReplaceWith` removes before it validates and loses the node | #1891 / item 2 |
+| J19c/J19d, X27c/X27d, X28c | 20,000-deep teardown/parse crashes, 100,000 times out | #1893 / item 6 (**accepted-input change**) |
+| J15, X21 | options not inherited; `Add` moves rather than clones | permanent exclusions, §30.2 / §30.4 |
+
+### Validation run at the end of the batch
+
+`scripts/local_ci_check.sh build` → **passed, 14,635 tests / 37 executables**.
+Also, individually: `validate_module_boundaries.py` (41/91),
+`test/validate_module_boundaries_test.py` (7), `generate_component_catalog.py
+--check` (current), `db_consistency_check.py` (OK),
+`check_version_seam_odr.py` (**2 seams / 18 definitions**),
+`test/check_version_seam_odr_test.py` (15),
+`check_negative_consumer_fixtures.py` (**9 fixtures / 66 sites**, 75 compiler
+invocations, peak **3** jobs), `test/check_negative_consumer_fixtures_test.py`
+(37), `scripts/check_selective_components.sh` (ten fixtures, ~7 min),
+`scripts/check_doxygen_warnings.sh` (**1,941 / ceiling 1,942**), `git diff
+--check` clean.
+
+### Build resources
+
+| Directory | Size at end | Note |
+|---|---|---|
+| `build/` | 730 MiB | incremental only; never cleaned or reconfigured |
+| `build-asan/` | 3.7 GiB | incremental; only the two touched test targets rebuilt |
+| `build-modular/` | 777 MiB | untouched |
+| `build-probe/` | **34 MiB** (peak **124 MiB**) | 90 MiB reclaimed — see below |
+| `build-tmp/` | 8.4 MiB | repository-local `TMPDIR` for every `mktemp` script |
+| `build-consumer/`, `cmake-build-debug/` | 12 KiB / 88 MiB | untouched |
+
+**Maximum aggregate compilation parallelism: three jobs.** Every `cmake --build`
+used `--parallel 3`; every probe/self-test/symbol/layout compile was a **single**
+`g++` process; `check_selective_components.sh` and `local_ci_check.sh` already
+pin `--parallel 3` internally and `check_negative_consumer_fixtures.py` reported
+`peak 3 job(s)`. No `nproc`, no bare `-j`, no unbounded `--parallel`. No build
+tree was created under `/tmp`, `/var/tmp` or `/dev/shm`; no build directory was
+cleaned or reconfigured; `ccache` stayed enabled everywhere.
+
+**Reclaimed:** the three 13–41 MiB probe binaries and the two 10 MiB raw
+`-fdump-lang-class` dumps were deleted after their results were transcribed —
+all of them regenerate from retained sources (`1885_build.sh`,
+`1886_layout_build.sh`, `1886_alloc_build.sh`). Retained: every probe source,
+build script, classifier, log, symbol table, layout extract and the extracted
+pre-fix header tree `build-probe/1886_prefix-include/`.
+
+**Still reclaimable, from earlier tickets, left alone deliberately:**
+`build-probe/1836_*` (~14 MiB), `1831_*`, `1823_*` binaries.
+
+### Reproducing this batch's evidence
+
+```bash
+export TMPDIR="$PWD/build-tmp"
+./build-probe/1885_build.sh 1885_ccf019_lifetime_probe asan     # 1 job, ~70 s
+./build-probe/1885_ccf019_lifetime_probe_asan > /tmp/after.log 2>&1
+python3 build-probe/1886_classify_cases.py \
+    build-probe/1885_prefix_asan.log build-probe/1890_postfix_asan.log
+
+./build-probe/1886_layout_build.sh prefix && ./build-probe/1886_layout_build.sh postfix
+./build-probe/1886_alloc_build.sh prefix  && ./build-probe/1886_alloc_build.sh postfix
+
+cmake --build build-asan --parallel 3 --target SharpRuntimeTests_Text_Json
+ASAN_OPTIONS=detect_leaks=1 ./build-asan/SharpRuntimeTests_Text_Json
+```
+
+### Queue
+
+**Empty.** Every open ticket is `needs_user`, `blocked`, or deliberately
+inactive. The next work is a **decision, not a family**: `§31` items 2–6 of
+`docs/OwnedTreeLifetimeContractPlan.md`, best taken in the order
+
+1. **item 2** → #1887 + #1891 — exception paths, *no* source/layout/ABI change,
+   and #1891 fixes the only remaining way to **lose data** (X20);
+2. **item 3** → #1888 — `JsonNode` copy/move `= delete` (source break; closes
+   J08/J09/J13);
+3. **item 5** → #1892 — Xml.Linq borrowed views (source break; closes the last
+   two ASan UAFs, X15/X17);
+4. **item 4** → #1889 — enumerator lifetime (the only layout change, 48→56,
+   module graph 91→92; closes J11/J12);
+5. **item 6** → #1893 — deep-parse/teardown bounds (accepted-input change);
+6. then **#1894** — negative fixtures + permanent sanitizer closure.
+
+Also still `needs_user` from earlier batches: #1854, #1858, #1862, #1863, #1865,
+#1879, #1884. **#1773 stays `blocked`**; #1875 and #1880 stay inactive. **CNA and
+mobile-eggbert were not inspected, searched, built or modified** at any point in
+this batch.
 
 ## Autonomous design batch handoff, 2026-07-30 (CCF-019, DESIGN-COMPLETE)
 

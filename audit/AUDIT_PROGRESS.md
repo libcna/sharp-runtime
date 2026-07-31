@@ -6012,3 +6012,38 @@ new SR-AUD-\* identifier** was issued. Implementation is #1886–#1894, all
 forward unchanged (nothing was rebuilt): 14,568 tests / 37 executables, module
 graph 41/91, Doxygen 1,941/1,942, seams 2/18, negative fixtures 9/66. CNA and
 mobile-eggbert were not inspected; #1773 stays `blocked`.
+
+
+**CCF-019 core-repair batch (#1886 + #1890, 2026-07-31) — PARTIAL; neither
+finding remediated.** The user approved
+`docs/OwnedTreeLifetimeContractPlan.md` §31 **item 1 and only item 1**, which
+covers both core repairs. **#1886**: `JsonArray` and `JsonObject` each declare a
+destructor that clears the parent link of every child whose link still names that
+container (the `== this` guard is load-bearing here — J08's aliasing copy and
+J13's public `DetachParent()` both leave a container holding a child owned by
+someone else). **#1890**: `XContainer` does the same for child nodes and
+`XElement` additionally clears every owned attribute's parent link **and** its
+intrusive `next_` sibling link, a second borrowed link that dangles
+independently. Re-running the #1885 probe **unmodified**, same build script,
+same three builds from one source: ASan `heap-use-after-free` **cases 29 → 3**,
+faulting accesses **57 → 5**, and `pure virtual method called` process aborts
+**8 → 0**. **26 of 29 closed** — one fewer than §1's estimate of 27, recorded in
+§34.4 rather than rounded. The three that remain are **J11** (stale `JsonArray`
+iterator → #1889) and **X15**/**X17** (`Extensions::Ancestors`' raw `XElement*`
+and `getAttributesProperty()`'s reference → #1892); none reaches its defect
+through `parent_`. **Audit tally unchanged: 57 remediated / 306 confirmed / 364
+total**, and SR-AUD-327 and SR-AUD-333 both keep the
+`confirmed (design-complete)` qualifier; numbering stays frozen at 364 and **no
+new SR-AUD-\* identifier** was issued. Cost, measured: `sizeof` unchanged for all
+eleven public types, GCC `-fdump-lang-class` class/vtable dumps identical
+pre/post, zero allocations added to construction, access or destruction, LSan
+clean; the only ABI movement is three weak COMDAT `XContainerD0/D1/D2Ev` symbols
+GCC had previously inlined away, with no name removed. Baselines: **14,635 tests
+/ 37 executables** (was 14,568; +32 `JsonNodeLifetimeTests`, +35
+`XLinqLifetimeTests`, all 53 existing `JsonNodeTests` and 92 existing Xml.Linq
+cases unmodified), module graph 41/91, Doxygen 1,941/1,942, seams 2/18, negative
+fixtures 9/66. Mutation-checked five ways; ASan+UBSan+LSan clean over 179/179
+Text.Json and 127/127 Xml.Linq with sanitizer activation proved by a controlled
+self-test. §31 items 2–6 remain unapproved and unstarted (#1887, #1888, #1889,
+#1891, #1892, #1893 `needs_user`; #1894 `blocked`). CNA and mobile-eggbert were
+not inspected; #1773 stays `blocked`.
