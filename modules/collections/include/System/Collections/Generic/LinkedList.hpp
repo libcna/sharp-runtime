@@ -16,6 +16,7 @@
 #include "System/InvalidOperationException.hpp"
 #include "System/NullReferenceException.hpp"
 #include "System/Collections/detail/MutationCounter.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Generic {
 
@@ -278,7 +279,9 @@ public:
     /** @brief Returns true if this handle refers to a node. */
     bool operator!=(std::nullptr_t) const { return static_cast<bool>(data_); }
     /** @brief Returns true if the node's value equals @p other; false for a null handle. */
-    bool operator==(const T& other) const { return data_ != nullptr && data_->item == other; }
+    bool operator==(const T& other) const {
+        return data_ != nullptr && System::detail::equalValues(data_->item, other);
+    }
     /** @brief Returns true if the node's value differs from @p other. */
     bool operator!=(const T& other) const { return !(*this == other); }
     /**
@@ -754,7 +757,7 @@ public:
      */
     bool Remove(const T& value) {
         for (node_ptr current = head_; current; current = current->next) {
-            if (current->item == value) {
+            if (System::detail::equalValues(current->item, value)) {
                 unlink(current);
                 return true;
             }
@@ -794,7 +797,7 @@ public:
      */
     [[nodiscard]] bool Contains(const T& value) const {
         for (data_t* current = head_.get(); current != nullptr; current = current->next.get()) {
-            if (current->item == value) return true;
+            if (System::detail::equalValues(current->item, value)) return true;
         }
         return false;
     }
@@ -808,7 +811,7 @@ public:
      */
     [[nodiscard]] LinkedListNode<T> Find(const T& value) {
         for (node_ptr current = head_; current; current = current->next) {
-            if (current->item == value) return LinkedListNode<T>(current);
+            if (System::detail::equalValues(current->item, value)) return LinkedListNode<T>(current);
         }
         return {};
     }
@@ -822,7 +825,7 @@ public:
      */
     [[nodiscard]] LinkedListNode<T> FindLast(const T& value) {
         for (node_ptr current = tail_.lock(); current; current = current->prev.lock()) {
-            if (current->item == value) return LinkedListNode<T>(current);
+            if (System::detail::equalValues(current->item, value)) return LinkedListNode<T>(current);
         }
         return {};
     }

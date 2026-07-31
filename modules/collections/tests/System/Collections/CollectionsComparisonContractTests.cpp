@@ -25,9 +25,16 @@
 #include "System/Collections/Generic/NullableEqualityComparer.hpp"
 #include "System/Collections/Generic/ObjectComparer.hpp"
 #include "System/Collections/Generic/ObjectEqualityComparer.hpp"
+#include "System/Collections/Generic/LinkedList.hpp"
 #include "System/Collections/Generic/List.hpp"
+#include "System/Collections/Generic/Queue.hpp"
+#include "System/Collections/Generic/Stack.hpp"
 #include "System/Collections/Generic/ReferenceEqualityComparer.hpp"
 #include "System/Collections/Immutable/ImmutableArray.hpp"
+#include "System/Collections/ObjectModel/Collection.hpp"
+#include "System/Collections/ObjectModel/KeyedCollection.hpp"
+#include "System/Collections/ObjectModel/ReadOnlyCollection.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/Collections/Immutable/ImmutableList.hpp"
 
 namespace {
@@ -476,4 +483,221 @@ TEST(CollectionsComparisonContract, ImmutableArraySortPutsNaNFirst) {
                     std::vector<int>{3, 1, 2}).Sort();   // negative control
     EXPECT_EQ(ints[0], 1);
     EXPECT_EQ(ints[2], 3);
+}
+
+// ---------------------------------------------------------------------------
+// The sequence-collection default-equality sites (#1916)
+// ---------------------------------------------------------------------------
+
+TEST(CollectionsComparisonContract, ListFindsAndRemovesANaNElement) {
+    G::List<double> l(std::vector<double>{1, kNaN, 2});
+    EXPECT_TRUE(l.Contains(kNaN));
+    EXPECT_EQ(l.IndexOf(kNaN), 1);
+    EXPECT_TRUE(l.Remove(kNaN));
+    EXPECT_EQ(l.getCountProperty(), 2);
+    EXPECT_FALSE(l.Contains(kNaN));
+}
+
+TEST(CollectionsComparisonContract, ListRangeOverloadsFindANaNElement) {
+    G::List<double> l(std::vector<double>{1, kNaN, 2, kNaN});
+    EXPECT_EQ(l.IndexOf(kNaN, 2), 3);
+    EXPECT_EQ(l.IndexOf(kNaN, 2, 2), 3);
+    EXPECT_EQ(l.LastIndexOf(kNaN), 3);
+    EXPECT_EQ(l.LastIndexOf(kNaN, 2), 1);
+    EXPECT_EQ(l.LastIndexOf(kNaN, 3, 2), 3);
+}
+
+TEST(CollectionsComparisonContract, ListRemoveDoesNotMutateWhenNothingMatches) {
+    // No partial mutation on a failed match: neither the contents nor the
+    // fail-fast mutation counter may move.
+    G::List<double> l(std::vector<double>{1, 2, 3});
+    auto* e = l.GetEnumerator();
+    EXPECT_FALSE(l.Remove(kNaN));
+    EXPECT_EQ(l.getCountProperty(), 3);
+    EXPECT_TRUE(e->MoveNext());          // would throw if the version had advanced
+    delete e;
+}
+
+TEST(CollectionsComparisonContract, ListEqualityHandlesSignedZeroAndDuplicates) {
+    G::List<double> l(std::vector<double>{-0.0, kNaN, kNaN, 0.0});
+    EXPECT_EQ(l.IndexOf(0.0), 0);        // -0.0 == +0.0, so the first slot wins
+    EXPECT_EQ(l.LastIndexOf(-0.0), 3);
+    EXPECT_EQ(l.IndexOf(kNaN), 1);
+    EXPECT_EQ(l.LastIndexOf(kNaN), 2);
+}
+
+TEST(CollectionsComparisonContract, ListEqualityNegativeControls) {
+    G::List<int> ints(std::vector<int>{1, 2, 3});
+    EXPECT_TRUE(ints.Contains(2));
+    EXPECT_EQ(ints.IndexOf(2), 1);
+    EXPECT_FALSE(ints.Contains(9));
+    EXPECT_EQ(ints.IndexOf(9), -1);
+
+    G::List<std::string> strings(std::vector<std::string>{"a", "b"});
+    EXPECT_TRUE(strings.Contains("b"));
+    EXPECT_EQ(strings.IndexOf("b"), 1);
+    EXPECT_FALSE(strings.Remove("z"));
+}
+
+TEST(CollectionsComparisonContract, CollectionAndReadOnlyCollectionFindANaNElement) {
+    System::Collections::ObjectModel::Collection<double> c;
+    c.Add(1.0);
+    c.Add(kNaN);
+    EXPECT_TRUE(c.Contains(kNaN));
+    EXPECT_EQ(c.IndexOf(kNaN), 1);
+    EXPECT_TRUE(c.Remove(kNaN));
+    EXPECT_EQ(c.getCountProperty(), 1);
+    EXPECT_FALSE(c.Remove(kNaN));        // absent now, and no partial mutation
+    EXPECT_EQ(c.getCountProperty(), 1);
+
+    System::Collections::ObjectModel::ReadOnlyCollection<double> ro(std::vector<double>{1, kNaN});
+    EXPECT_EQ(ro.IndexOf(kNaN), 1);
+    EXPECT_TRUE(ro.Contains(kNaN));
+    EXPECT_EQ(ro.IndexOf(5.0), -1);
+}
+
+TEST(CollectionsComparisonContract, GenericQueueAndStackFindANaNElement) {
+    G::Queue<double> q;
+    q.Enqueue(1.0);
+    q.Enqueue(kNaN);
+    EXPECT_TRUE(q.Contains(kNaN));
+    EXPECT_FALSE(q.Contains(5.0));
+
+    G::Stack<double> s;
+    s.Push(1.0);
+    s.Push(kNaN);
+    EXPECT_TRUE(s.Contains(kNaN));
+    EXPECT_FALSE(s.Contains(5.0));
+
+    G::Queue<int> ints;                  // negative control
+    ints.Enqueue(7);
+    EXPECT_TRUE(ints.Contains(7));
+    EXPECT_FALSE(ints.Contains(8));
+}
+
+TEST(CollectionsComparisonContract, LinkedListFindsANaNElement) {
+    G::LinkedList<double> l;
+    l.AddLast(kNaN);
+    l.AddLast(1.0);
+    l.AddLast(kNaN);
+    EXPECT_TRUE(l.Contains(kNaN));
+    EXPECT_TRUE(static_cast<bool>(l.Find(kNaN)));
+    EXPECT_TRUE(static_cast<bool>(l.FindLast(kNaN)));
+    EXPECT_NE(l.Find(kNaN), l.FindLast(kNaN));
+    EXPECT_TRUE(l.Remove(kNaN));
+    EXPECT_EQ(l.getCountProperty(), 2);
+    EXPECT_FALSE(l.Contains(5.0));
+    EXPECT_FALSE(static_cast<bool>(l.Find(5.0)));
+}
+
+TEST(CollectionsComparisonContract, LinkedListNodeValueComparisonUsesDefaultEquality) {
+    G::LinkedList<double> l;
+    l.AddLast(kNaN);
+    auto node = l.getFirstProperty();
+    EXPECT_TRUE(node == kNaN);
+    EXPECT_FALSE(node == 1.0);
+}
+
+TEST(CollectionsComparisonContract, LinkedListRemoveDoesNotMutateWhenNothingMatches) {
+    G::LinkedList<double> l;
+    l.AddLast(1.0);
+    l.AddLast(2.0);
+    EXPECT_FALSE(l.Remove(kNaN));
+    EXPECT_EQ(l.getCountProperty(), 2);
+}
+
+TEST(CollectionsComparisonContract, ImmutableArrayFindsReplacesAndRemovesANaNElement) {
+    namespace I = System::Collections::Immutable;
+    auto a = I::ImmutableArray<double>::Create(std::vector<double>{1, kNaN});
+    EXPECT_TRUE(a.Contains(kNaN));
+    EXPECT_EQ(a.IndexOf(kNaN), 1);
+
+    auto replaced = a.Replace(kNaN, 7.0);
+    ASSERT_EQ(replaced.getLengthProperty(), 2);
+    EXPECT_DOUBLE_EQ(replaced[1], 7.0);
+
+    auto removed = a.Remove(kNaN);
+    ASSERT_EQ(removed.getLengthProperty(), 1);
+    EXPECT_DOUBLE_EQ(removed[0], 1.0);
+
+    auto three = I::ImmutableArray<double>::Create(std::vector<double>{kNaN, 1, kNaN});
+    EXPECT_EQ(three.LastIndexOf(kNaN), 2);
+
+    // The source is immutable and must be untouched by any of the above.
+    EXPECT_EQ(a.getLengthProperty(), 2);
+    EXPECT_TRUE(std::isnan(a[1]));
+}
+
+TEST(CollectionsComparisonContract, ImmutableListFindsReplacesAndRemovesANaNElement) {
+    namespace I = System::Collections::Immutable;
+    auto l = I::ImmutableList<double>::Create(std::vector<double>{1, kNaN});
+    EXPECT_TRUE(l.Contains(kNaN));
+    EXPECT_EQ(l.IndexOf(kNaN), 1);
+
+    auto removed = l.Remove(kNaN);
+    ASSERT_EQ(removed.getCountProperty(), 1);
+    EXPECT_DOUBLE_EQ(removed[0], 1.0);
+
+    // This one THREW ArgumentException("Cannot find the old value in the list.")
+    // before the repair -- the family's only exception-visible row.
+    auto replaced = l.Replace(kNaN, 7.0);
+    ASSERT_EQ(replaced.getCountProperty(), 2);
+    EXPECT_DOUBLE_EQ(replaced[1], 7.0);
+
+    auto three = I::ImmutableList<double>::Create(std::vector<double>{kNaN, 1, kNaN});
+    EXPECT_EQ(three.LastIndexOf(kNaN), 2);
+    EXPECT_EQ(three.IndexOf(kNaN, 1, 2), 2);
+}
+
+TEST(CollectionsComparisonContract, ImmutableListReplaceStillThrowsWhenGenuinelyAbsent) {
+    namespace I = System::Collections::Immutable;
+    auto l = I::ImmutableList<double>::Create(std::vector<double>{1, kNaN});
+    EXPECT_THROW((void)l.Replace(5.0, 7.0), System::ArgumentException);
+}
+
+TEST(CollectionsComparisonContract, ImmutableListBinarySearchFindsNaNAtTheFront) {
+    namespace I = System::Collections::Immutable;
+    auto l = I::ImmutableList<double>::Create(std::vector<double>{kNaN, 1, 2});
+    EXPECT_EQ(l.BinarySearch(kNaN), 0);
+    EXPECT_EQ(l.BinarySearch(1.0), 1);
+    EXPECT_EQ(l.BinarySearch(2.0), 2);
+    EXPECT_LT(l.BinarySearch(1.5), 0);
+}
+
+TEST(CollectionsComparisonContract, ImmutableListBuilderFindsANaNElement) {
+    namespace I = System::Collections::Immutable;
+    auto b = I::ImmutableList<double>::Create(std::vector<double>{1, kNaN}).ToBuilder();
+    EXPECT_TRUE(b.Contains(kNaN));
+    EXPECT_EQ(b.IndexOf(kNaN), 1);
+    EXPECT_TRUE(b.Remove(kNaN));
+    EXPECT_EQ(b.getCountProperty(), 1);
+    EXPECT_FALSE(b.Remove(kNaN));
+}
+
+TEST(CollectionsComparisonContract, ImmutableExplicitComparerOverloadsStillUseTheCallersComparer) {
+    namespace I = System::Collections::Immutable;
+    // A comparer that calls everything equal must remove the FIRST element,
+    // not the NaN the policy would have matched.
+    auto everythingEqual = G::EqualityComparer<double>::Create(
+        [](const double&, const double&) { return true; },
+        [](const double&) -> intcs { return 0; });
+    auto l = I::ImmutableList<double>::Create(std::vector<double>{1, kNaN});
+    auto removed = l.Remove(kNaN, *everythingEqual);
+    ASSERT_EQ(removed.getCountProperty(), 1);
+    EXPECT_TRUE(std::isnan(removed[0]));   // element 0 (the 1.0) went, not the NaN
+}
+
+TEST(CollectionsComparisonContract, KeyedCollectionFindsANaNItem) {
+    struct Keyed : System::Collections::ObjectModel::KeyedCollection<int, double> {
+    protected:
+        int GetKeyForItem(const double& item) const override {
+            return std::isnan(item) ? -1 : static_cast<int>(item);
+        }
+    };
+    Keyed k;
+    k.Add(1.0);
+    k.Add(kNaN);
+    EXPECT_TRUE(k.Contains(kNaN));
+    EXPECT_TRUE(k.Remove(kNaN));
+    EXPECT_EQ(k.getCountProperty(), 1);
 }

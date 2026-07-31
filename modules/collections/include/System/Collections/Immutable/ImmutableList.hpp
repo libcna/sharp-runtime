@@ -145,7 +145,8 @@ public:
 
         /** @brief Removes the first matching item and reports whether one was removed. */
         bool Remove(const T& item) {
-            const auto found = std::find(data_.begin(), data_.end(), item);
+            const auto found = std::find_if(data_.begin(), data_.end(),
+                                            [&item](const T& v) { return System::detail::equalValues(v, item); });
             if (found == data_.end()) {
                 return false;
             }
@@ -170,12 +171,15 @@ public:
 
         /** @brief Determines whether this Builder contains @p item. */
         [[nodiscard]] bool Contains(const T& item) const {
-            return std::find(data_.begin(), data_.end(), item) != data_.end();
+            return std::find_if(data_.begin(), data_.end(),
+                                [&item](const T& v) { return System::detail::equalValues(v, item); })
+                   != data_.end();
         }
 
         /** @brief Returns the first index of @p item, or -1 if it is absent. */
         [[nodiscard]] intcs IndexOf(const T& item) const {
-            const auto found = std::find(data_.begin(), data_.end(), item);
+            const auto found = std::find_if(data_.begin(), data_.end(),
+                                            [&item](const T& v) { return System::detail::equalValues(v, item); });
             return found == data_.end() ? -1 : static_cast<intcs>(found - data_.begin());
         }
 
@@ -344,7 +348,8 @@ public:
      */
     [[nodiscard]] ImmutableList<T> Replace(const T& oldValue, const T& newValue) const {
         auto v = std::make_shared<std::vector<T>>(*data_);
-        auto it = std::find(v->begin(), v->end(), oldValue);
+        auto it = std::find_if(v->begin(), v->end(),
+                               [&oldValue](const T& x) { return System::detail::equalValues(x, oldValue); });
         if (it == v->end()) {
             throw System::ArgumentException("Cannot find the old value in the list.", "oldValue");
         }
@@ -388,7 +393,7 @@ public:
         auto v = std::make_shared<std::vector<T>>();
         bool removed = false;
         for (const auto& x : *data_) {
-            if (!removed && x == item) { removed = true; continue; }
+            if (!removed && System::detail::equalValues(x, item)) { removed = true; continue; }
             v->push_back(x);
         }
         return ImmutableList<T>(std::move(v));
@@ -468,7 +473,8 @@ public:
     [[nodiscard]] ImmutableList<T> RemoveRange(const std::vector<T>& items) const {
         auto v = std::make_shared<std::vector<T>>(*data_);
         for (const auto& item : items) {
-            auto it = std::find(v->begin(), v->end(), item);
+            auto it = std::find_if(v->begin(), v->end(),
+                                   [&item](const T& x) { return System::detail::equalValues(x, item); });
             if (it != v->end()) {
                 v->erase(it);
             }
@@ -854,7 +860,9 @@ public:
      * @return true if found; otherwise false.
      */
     [[nodiscard]] bool Contains(const T& item) const {
-        return std::find(data_->begin(), data_->end(), item) != data_->end();
+        return std::find_if(data_->begin(), data_->end(),
+                            [&item](const T& v) { return System::detail::equalValues(v, item); })
+               != data_->end();
     }
 
     /**
@@ -865,7 +873,8 @@ public:
      * @return The zero-based index, or -1 if not found.
      */
     [[nodiscard]] intcs IndexOf(const T& item) const {
-        auto it = std::find(data_->begin(), data_->end(), item);
+        auto it = std::find_if(data_->begin(), data_->end(),
+                               [&item](const T& v) { return System::detail::equalValues(v, item); });
         return it == data_->end() ? -1 : static_cast<intcs>(it - data_->begin());
     }
 
@@ -884,7 +893,7 @@ public:
         requireValidRange(index, count);
         const intcs end = index + count;
         for (intcs current = index; current < end; ++current) {
-            if ((*data_)[static_cast<size_t>(current)] == item) {
+            if (System::detail::equalValues((*data_)[static_cast<size_t>(current)], item)) {
                 return current;
             }
         }
@@ -926,7 +935,7 @@ public:
      */
     [[nodiscard]] intcs LastIndexOf(const T& item) const {
         for (intcs i = getCountProperty() - 1; i >= 0; --i)
-            if ((*data_)[static_cast<size_t>(i)] == item) return i;
+            if (System::detail::equalValues((*data_)[static_cast<size_t>(i)], item)) return i;
         return -1;
     }
 
@@ -956,7 +965,7 @@ public:
 
         const intcs first = index - count + 1;
         for (intcs current = index; current >= first; --current) {
-            if ((*data_)[static_cast<size_t>(current)] == item) {
+            if (System::detail::equalValues((*data_)[static_cast<size_t>(current)], item)) {
                 return current;
             }
         }
@@ -1014,10 +1023,11 @@ public:
         intcs lo = 0, hi = getCountProperty() - 1;
         while (lo <= hi) {
             intcs mid = lo + (hi - lo) / 2;
-            const T& mid_val = (*data_)[static_cast<size_t>(mid)];
-            if (mid_val == item) return mid;
-            if (mid_val < item) lo = mid + 1;
-            else hi = mid - 1;
+            const int cmp = System::detail::compareValues(
+                (*data_)[static_cast<size_t>(mid)], item);
+            if (cmp == 0) return mid;
+            if (cmp < 0) lo = mid + 1;
+            else         hi = mid - 1;
         }
         return ~lo;
     }

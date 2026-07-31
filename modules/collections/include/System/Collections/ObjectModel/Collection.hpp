@@ -11,6 +11,7 @@
 #include "System/Collections/Generic/IList.hpp"
 #include "System/Collections/detail/ElementReference.hpp"
 #include "System/Collections/detail/MutationCounter.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::ObjectModel {
 
@@ -197,7 +198,9 @@ public:
      * @return true if found; otherwise false.
      */
     [[nodiscard]] bool Contains(const T& item) const override {
-        return std::find(items_.begin(), items_.end(), item) != items_.end();
+        return std::find_if(items_.begin(), items_.end(),
+                            [&item](const T& v) { return System::detail::equalValues(v, item); })
+               != items_.end();
     }
 
     /**
@@ -232,7 +235,8 @@ public:
      * @return true if the element was found and removed; otherwise false.
      */
     bool Remove(const T& item) override {
-        auto it = std::find(items_.begin(), items_.end(), item);
+        auto it = std::find_if(items_.begin(), items_.end(),
+                               [&item](const T& v) { return System::detail::equalValues(v, item); });
         if (it == items_.end()) return false;
         RemoveItem(static_cast<intcs>(it - items_.begin()));
         return true;
@@ -313,7 +317,8 @@ public:
      * @return The zero-based index, or -1 if not found.
      */
     [[nodiscard]] intcs IndexOf(const T& item) const override {
-        auto it = std::find(items_.begin(), items_.end(), item);
+        auto it = std::find_if(items_.begin(), items_.end(),
+                               [&item](const T& v) { return System::detail::equalValues(v, item); });
         if (it == items_.end()) return -1;
         return static_cast<intcs>(it - items_.begin());
     }

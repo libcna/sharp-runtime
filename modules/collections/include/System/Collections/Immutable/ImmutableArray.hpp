@@ -218,7 +218,8 @@ public:
     [[nodiscard]] ImmutableArray<T> Replace(const T& oldValue, const T& newValue) const {
         ensureNotDefault();
         auto v = std::make_shared<std::vector<T>>(*data_);
-        auto it = std::find(v->begin(), v->end(), oldValue);
+        auto it = std::find_if(v->begin(), v->end(),
+                               [&oldValue](const T& x) { return System::detail::equalValues(x, oldValue); });
         if (it != v->end()) *it = newValue;
         return ImmutableArray<T>(std::move(v));
     }
@@ -235,7 +236,7 @@ public:
         auto v = std::make_shared<std::vector<T>>();
         bool removed = false;
         for (const auto& x : *data_) {
-            if (!removed && x == item) { removed = true; continue; }
+            if (!removed && System::detail::equalValues(x, item)) { removed = true; continue; }
             v->push_back(x);
         }
         return ImmutableArray<T>(std::move(v));
@@ -298,7 +299,9 @@ public:
      */
     [[nodiscard]] bool Contains(const T& item) const {
         ensureNotDefault();
-        return std::find(data_->begin(), data_->end(), item) != data_->end();
+        return std::find_if(data_->begin(), data_->end(),
+                            [&item](const T& v) { return System::detail::equalValues(v, item); })
+               != data_->end();
     }
 
     /**
@@ -310,7 +313,8 @@ public:
      */
     [[nodiscard]] intcs IndexOf(const T& item) const {
         ensureNotDefault();
-        auto it = std::find(data_->begin(), data_->end(), item);
+        auto it = std::find_if(data_->begin(), data_->end(),
+                               [&item](const T& v) { return System::detail::equalValues(v, item); });
         return it == data_->end() ? -1 : static_cast<intcs>(it - data_->begin());
     }
 
@@ -323,7 +327,7 @@ public:
      */
     [[nodiscard]] intcs LastIndexOf(const T& item) const {
         for (intcs i = getLengthProperty() - 1; i >= 0; --i)
-            if ((*data_)[static_cast<size_t>(i)] == item) return i;
+            if (System::detail::equalValues((*data_)[static_cast<size_t>(i)], item)) return i;
         return -1;
     }
 

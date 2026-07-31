@@ -9,6 +9,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "System/Collections/ObjectModel/Collection.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::ObjectModel {
 
@@ -56,7 +57,8 @@ protected:
      *         @p newKey is already used by a different item.
      */
     void ChangeItemKey(const TItem& item, const TKey& newKey) {
-        auto it = std::find(this->items_.begin(), this->items_.end(), item);
+        auto it = std::find_if(this->items_.begin(), this->items_.end(),
+                               [&item](const TItem& v) { return System::detail::equalValues(v, item); });
         if (it == this->items_.end())
             throw System::ArgumentException("The specified item does not exist in this KeyedCollection.");
 

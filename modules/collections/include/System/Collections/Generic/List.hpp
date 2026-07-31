@@ -155,14 +155,31 @@ class List : public IList<T> {
         /** @brief Removes all elements from the list. */
         void Clear() override { items_.clear(); ++version_; }
 
+        /**
+         * @brief Determines whether the list contains @p item.
+         *
+         * C++ counterpart of .NET List<T>.Contains(T), which uses
+         * `EqualityComparer<T>.Default` rather than the element type's `==`; a NaN
+         * element is therefore found by a NaN @p item, exactly as `float.Equals` says.
+         */
         [[nodiscard]] bool Contains(const T& item) const override
         {
-            return std::find(items_.begin(), items_.end(), item) != items_.end();
+            return std::find_if(items_.begin(), items_.end(),
+                                [&item](const T& v) { return System::detail::equalValues(v, item); })
+                   != items_.end();
         }
 
+        /**
+         * @brief Removes the first occurrence of @p item.
+         *
+         * C++ counterpart of .NET List<T>.Remove(T), which locates the element with
+         * `EqualityComparer<T>.Default`. Nothing is erased and the mutation counter does
+         * not advance when no element matches.
+         */
         bool Remove(const T& item) override
         {
-            auto it = std::find(items_.begin(), items_.end(), item);
+            auto it = std::find_if(items_.begin(), items_.end(),
+                                   [&item](const T& v) { return System::detail::equalValues(v, item); });
             if (it == items_.end()) return false;
             items_.erase(it);
             ++version_;
@@ -241,9 +258,15 @@ class List : public IList<T> {
                 &items_[static_cast<std::size_t>(index)], &version_} = value;
         }
 
+        /**
+         * @brief Returns the zero-based index of the first occurrence of @p item, or -1.
+         *
+         * C++ counterpart of .NET List<T>.IndexOf(T) — `EqualityComparer<T>.Default`.
+         */
         [[nodiscard]] intcs IndexOf(const T& item) const override
         {
-            auto it = std::find(items_.begin(), items_.end(), item);
+            auto it = std::find_if(items_.begin(), items_.end(),
+                                   [&item](const T& v) { return System::detail::equalValues(v, item); });
             if (it == items_.end()) return -1;
             return static_cast<intcs>(it - items_.begin());
         }
@@ -596,7 +619,7 @@ class List : public IList<T> {
             if (startIndex < 0 || startIndex > static_cast<intcs>(items_.size()))
                 throw System::ArgumentOutOfRangeException("startIndex");
             for (intcs i = startIndex; i < static_cast<intcs>(items_.size()); ++i)
-                if (items_[static_cast<size_t>(i)] == item) return i;
+                if (System::detail::equalValues(items_[static_cast<size_t>(i)], item)) return i;
             return -1;
         }
 
@@ -619,7 +642,7 @@ class List : public IList<T> {
                 throw System::ArgumentOutOfRangeException("count");
             intcs end = startIndex + count;
             for (intcs i = startIndex; i < end; ++i)
-                if (items_[static_cast<size_t>(i)] == item) return i;
+                if (System::detail::equalValues(items_[static_cast<size_t>(i)], item)) return i;
             return -1;
         }
 
@@ -632,7 +655,7 @@ class List : public IList<T> {
          */
         [[nodiscard]] intcs LastIndexOf(const T& item) const {
             for (intcs i = static_cast<intcs>(items_.size()) - 1; i >= 0; --i)
-                if (items_[static_cast<size_t>(i)] == item) return i;
+                if (System::detail::equalValues(items_[static_cast<size_t>(i)], item)) return i;
             return -1;
         }
 
@@ -649,7 +672,7 @@ class List : public IList<T> {
             if (startIndex < 0 || startIndex >= static_cast<intcs>(items_.size()))
                 throw System::ArgumentOutOfRangeException("startIndex");
             for (intcs i = startIndex; i >= 0; --i)
-                if (items_[static_cast<size_t>(i)] == item) return i;
+                if (System::detail::equalValues(items_[static_cast<size_t>(i)], item)) return i;
             return -1;
         }
 
@@ -678,7 +701,7 @@ class List : public IList<T> {
             if (count > startIndex + 1) throw System::ArgumentOutOfRangeException("count");
             intcs lo = startIndex - count + 1;
             for (intcs i = startIndex; i >= lo; --i)
-                if (items_[static_cast<size_t>(i)] == item) return i;
+                if (System::detail::equalValues(items_[static_cast<size_t>(i)], item)) return i;
             return -1;
         }
 

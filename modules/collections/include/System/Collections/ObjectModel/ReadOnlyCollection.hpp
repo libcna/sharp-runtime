@@ -11,6 +11,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/Collections/Generic/IList.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::ObjectModel {
 
@@ -187,7 +188,7 @@ public:
      */
     [[nodiscard]] intcs IndexOf(const T& item) const override {
         for (intcs i = 0; i < static_cast<intcs>(items_->size()); ++i)
-            if ((*items_)[static_cast<size_t>(i)] == item) return i;
+            if (System::detail::equalValues((*items_)[static_cast<size_t>(i)], item)) return i;
         return -1;
     }
 
