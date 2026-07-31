@@ -4,23 +4,204 @@
 # NEXT.md
 
 *Last verified: 2026-07-31. Branch:
-`feature/remediation-batch-1919-collections-comparison`. The test floor rose to
-**14,920** (was 14,890). Ticket **#1919** was **approved and delivered in full**,
-and with it ticket **#1912** — the `Collections` continuation of CCF-010 — is
-**closed**: every ordered container (6 of 6) and every hashed container
-(11 of 11) now carries the .NET default comparison contract. #1919 shipped as
-four bounded tickets, **#1921** (SortedSet), **#1922** (Dictionary, HashSet),
-**#1923** (the four frozen and read-only projections) and **#1924** (evidence
-and closure), all `done`. Two follow-ups were discovered while implementing it
-and are `todo`, neither a member of #1912's population: **#1925** (a nullable or
-composite floating key keeps raw IEEE equality) and **#1926** (`long double`
-hashed insertion is 1.300× slower). **No `SR-AUD-*` identifier was issued** and
-audit numbering stays frozen at **364**; the distribution is unchanged from the
-previous handoff. Every remaining approval question is consolidated into six
-groups in **`docs/RemainingApprovalDecisions.md`**, each with a copyable
-approval sentence — start there. See "Autonomous remediation batch handoff,
-2026-07-31 (#1919 Collections public-representation containers)" immediately
-below.*
+`feature/remediation-batch-approved-groups-a-d`. The test floor rose to
+**14,998** (was 14,920). **The approved Groups A, B, C and D of
+`docs/RemainingApprovalDecisions.md` are delivered in full** — all seven tickets
+**#1854, #1862, #1858, #1865, #1879, #1884 and #1863** are `done`. Six audit
+findings moved to `remediated` (SR-AUD-007, 009, 015, 029, 033, 035, 043), and
+with them **three families closed outright: CCF-005, CCF-007 and CCF-012**.
+**This batch is behaviour-incompatible by design in four places**, each with its
+own before/after table: `Decimal::Parse` now reads `,` as a group separator
+(**`docs/Migration-DecimalCommaGroupSeparator.md`** — the only change with no
+diagnostic at all), the four date/time parsers reject text they used to accept,
+`String::Format` adopts .NET's brace and alignment grammar, and
+`Single`/`Double` `ToString(value, format)` emit different `E`/`N`/`G` text.
+**Eleven premises of the decision packet and its plans were corrected by
+measurement** — including two rows where the packet's stated .NET behaviour is
+simply wrong — all preserved additively beside the original text. Three new
+inactive tickets were filed (**#1927**, **#1928**, **#1929**); **no `SR-AUD-*`
+identifier was issued** and audit numbering stays frozen at **364**. See
+"Autonomous remediation batch handoff, 2026-07-31 (approved Groups A-D)"
+immediately below.*
+
+---
+
+## Autonomous remediation batch handoff, 2026-07-31 (approved Groups A–D)
+
+Branch `feature/remediation-batch-approved-groups-a-d`, six commits on top of
+`04746dc5`. **Every ticket the batch instruction approved is delivered.**
+
+### 1. Tickets
+
+| Group | Ticket | Scope | Status |
+|---|---|---|---|
+| **A** | **#1862** | `Single`/`Double` `Round(x,digits)` validation | **done** |
+| **A** | **#1854** | `ReadOnlyMemory` ctors ×3, `HashCode::AddBytes` | **done** |
+| **B** | **#1865** | `Single`/`Double` parse: `,` groups, magnitude saturation | **done** |
+| **B** | **#1858** | `Decimal` parse: overflow taxonomy **and** `,` as a group separator | **done** (2 commits) |
+| **C** | **#1879** | the four date/time parsers consume the whole string | **done** |
+| **C** | **#1884** | .NET's composite-format grammar in both engines | **done** |
+| **D** | **#1863** | `Single`/`Double` `ToString(value,format)` emitted text | **done** |
+| — | **#1927** | *new* — `Single`/`Double` `Round` do not delegate to `MathF`/`Math` | `todo`, P3, inactive |
+| — | **#1928** | *new* — `Math::Round`'s message is missing .NET's leading `"Rounding "` | `todo`, P3, inactive |
+| — | **#1929** | *new* — the date/time grammar is narrower than .NET in four respects | `todo`, P3, inactive |
+
+Only one implementation ticket was ever `doing`. **No ticket is left `doing`.**
+
+### 2. Commits, in order
+
+| Commit | Content |
+|---|---|
+| `7df911af` | #1854 + #1862 — five exception specifications and one `constexpr` dropped |
+| `dd09de1a` | #1865 + #1858's overflow half — the three safe rows of group B |
+| `67227e6b` | **#1858's comma half, isolated on purpose** — the one silent value change |
+| `fa82a706` | #1879 — `std::sscanf` gone from four date/time parsers |
+| `0d4c3d09` | #1884 — one shared composite-format scanner for both engines |
+| `e5fef4f8` | #1863 — `E`/`N`/`G` emitted text |
+
+Group B's three-commit split is not stylistic: `docs/RemainingApprovalDecisions.md`
+§B.5 **required** it, so that the one change that alters the value of input
+already parsing successfully can be reverted alone with one command.
+
+### 3. The four behaviour-incompatible changes, with their migration cost
+
+| Change | Caller finds out? | Migration |
+|---|---|---|
+| `Decimal::Parse("1,5")` **`1.5m` → `15m`**, and `Parse(",5")` `0.5m` → `FormatException` | **No — silent** | `docs/Migration-DecimalCommaGroupSeparator.md` |
+| Date/time parsers reject trailing text, fabricated midnight, `+2:5`, 4+-digit fractions | Yes — `false` / `FormatException` | correct the input; `docs/DateTimeValidationBoundaryPlan.md` §20.3 |
+| `String::Format`: `{{`/`}}` escape, bare `}` throws, `{N,width}` pads | Yes for the throws, **no for the text** | double a literal `}`; `docs/CompositeFormatBoundaryPlan.md` §21 |
+| `ToString(x,"E2")` `"1.25E+00"` → `"1.25E+000"`, `"N2"` `"1234.50"` → `"1,234.50"`, `"G"` 6 digits → shortest | **No — silent** | re-baseline golden files; `docs/FloatingValueFidelityPlan.md` §18 |
+
+### 4. Eleven premises corrected by measurement
+
+Every one is appended beside the original text, never edited over it.
+
+1. **#1854 was not "pure defence in depth"** (packet §A.5). `ReadOnlyMemory(const T*, intcs)` was
+   directly reachable and stored `-1` and `INTCS_MIN` verbatim; only the
+   `ArraySegment` and `AddBytes` halves are unreachable, and their tests pin the
+   exception *specification* rather than a throw.
+2. **The dropped `constexpr` costs nothing observable** (§A.8): no accessor on
+   `ReadOnlyMemory<T>` is `constexpr`, so such a view could never be *queried* in
+   a constant expression anyway.
+3. **`std::from_chars` reports one `errc` for overflow *and* underflow** and
+   leaves the output unwritten, so #1865's repair covers both directions — which
+   §B.6's own wording ("a `result_out_of_range`-with-all-chars-consumed branch")
+   describes and §B.3's single row does not.
+4. **B-1 changes two values, not one** (§B.3): `Parse(",5")` also moves, from
+   `0.5m` to `FormatException`.
+5. **The packet disagrees with itself about B-1.** §0's summary row says "take
+   only #1858's overflow half"; §B.5 and §B.8 approve the comma explicitly. The
+   preamble designates §"Approval wording" as operative, so it was implemented —
+   and the single-commit isolation the approval demanded makes reverting it alone
+   a one-command operation if §0 was the intent.
+6. **`docs/DateTimeValidationBoundaryPlan.md` §20.1's ".NET rejects every input
+   in the table" is false for two rows.** `ParseFraction` accepts `".1234567"`;
+   `ParseTimeZone` accepts `"+2:5"` and reads it as 2h05m — **125 minutes,
+   exactly what the port already produced**. Both rejections are deliberate
+   narrowings of the port's fixed-width subset, implemented as approved →
+   **#1929**.
+7. **Replacing `sscanf` also removes `%d`'s leniencies**, unlisted: `" 024-06-15"`
+   parsed as year 24; `"+10:20:30"`, `"2024-06-15  1:20:30"` and `"+ 2:00"` all
+   parsed.
+8. **§20.1 names "the four `Ccf002_*GrammarIsPinnedUnchanged` tests"; there are
+   two**, plus one unanticipated fraction test.
+9. **`docs/CompositeFormatBoundaryPlan.md` §20.1 row 5 names the wrong reason**: a
+   *trailing* `}` runs .NET's `MoveNext` off the end first, so the reference
+   reports `Format_UnclosedFormatItem`.
+10. **`G17`/`G9` already round-tripped** — `setprecision(17)` *is* `double`'s
+    round-trip width; the guarantee was missing, not the behaviour, and their
+    emitted text is unchanged.
+11. **`ToString(x,"G")` was not the `to_chars` fast path** the packet's §D.3
+    called "must be preserved" — it was six significant digits.
+
+### 5. What was deliberately NOT done, and why
+
+- **`TimeOnly`'s unpadded `"1:2:3"` kept** — .NET accepts it, so padding it would
+  be a fresh divergence. The narrowing is applied exactly where §20.1 asked.
+- **Whitespace inside a format item (`"{0 }"`, `"{0, 6}"`) still rejected** — a
+  *widening*, and §20.7 authorises only the §20.1 rows.
+- **`Single::Round`/`Double::Round` still do not delegate to `MathF`/`Math`**, so
+  `Round(3.0e38f,6)` still returns `inf` — a value change on valid input, outside
+  the approval → **#1927**.
+- **`Math::Round`'s message left alone** → **#1928**.
+- **#1888, #1889 and #1896 remain declined**; **#1773 remains `blocked`** on an
+  external event; **#1897, #1899, #1894** stay `blocked` — group E was never part
+  of this approval; **#1925, #1926** untouched, exactly as instructed.
+
+### 6. Evidence
+
+Five probes, each case in its own process, run plain + ASan + UBSan, with the
+affected `.cpp` files compiled **into** the probe so the non-header halves are
+instrumented too:
+
+| Probe | Cases | Prefix source |
+|---|---|---|
+| `build-probe/1854_probe.cpp` | 35 | measured before any edit |
+| `build-probe/1865_probe.cpp` | 68 | measured before any edit |
+| `build-probe/1879_probe.cpp` | 82 | measured before any edit |
+| `build-probe/1884_probe.cpp` | 36 | **`git worktree` checkout of `fa82a706`** |
+| `build-probe/1863_probe.cpp` | 46 | measured before any edit |
+
+**Zero ASan/UBSan diagnostics across all 267 cases, before and after, with every
+answer identical to the plain build.** That restates rather than claims
+coverage: **no sanitizer can see a missing argument check, an over-permissive
+grammar, an exception taxonomy or emitted text.** The permanent tests are the
+correctness gate; the sanitizers only prove the repairs introduced no memory or
+arithmetic defect.
+
+### 7. Baselines, all re-measured
+
+| Metric | Value |
+|---|---|
+| Repository gate | **14,998 tests / 37 executables**, zero failures (was 14,920) |
+| Build | **zero errors, zero warnings** |
+| Module graph | **41 modules / 91 edges** (unchanged) |
+| Version seams | **2 seams / 18 specialisations** (unchanged) |
+| Negative fixtures | **10 fixtures / 74 sites**, every site rejected (unchanged) |
+| Canonical Doxygen | **1,937 warnings** (ceiling 1,942, unchanged) |
+| Audit total | **364**, numbering frozen |
+| Audit distribution | **67 remediated / 297 open** (295 `confirmed` + 2 `confirmed (design-complete)`); was 59 / 305 |
+| Generated catalogue | current |
+| `db_consistency_check` | OK |
+
+### 8. Source, ABI and representation consequence
+
+**Nothing moved.** Across all seven tickets: no parameter list, no return type,
+no object layout, no `sizeof`/`alignof`, no member offset, no virtual function,
+no vtable slot and no mangled name changed. Five `noexcept` specifications and
+one `constexpr` were **removed** (group A), which an Itanium mangled name does
+not encode — a source-level trait change with **no exported-symbol break**.
+`Decimal` gained one private static member function and an enum, which is
+additive. Four new private headers were added under
+`modules/core/include/System/detail/`: `FloatParseGrammar.hpp`,
+`DateTimeTextScanner.hpp`, `CompositeFormat.hpp`, `FloatTextFormat.hpp`. All
+consumers must recompile (header-inline bodies); none must be edited to keep
+compiling.
+
+### 9. Next recommended work
+
+1. **Group E of the packet, item by item** — `#1897` (JsonNode::Parse stack
+   overflow on deep untrusted text; option **B**, iterative, is fully compatible
+   and is the only CCF-019 case reachable from untrusted input) and `#1899`
+   (option **D**, a purely additive `ForEachAncestor` visitor). Each needs its
+   own answer; neither is covered by this batch's approval.
+2. **The three new inactive tickets** #1927/#1928/#1929, which between them ask
+   one question: *how narrow should this port's numeric and date/time subsets
+   be?* They are cheap to decide together and expensive to decide piecemeal.
+3. **#1880** (CCF2-E, `TryParse` failure-output normalisation) — the last CCF-002
+   member, and a CCF-014-class contract question.
+4. **#1925 / #1926**, deferred by §F and untouched here.
+
+### 10. Known limitations
+
+- The **`Decimal` comma** change has no compiler diagnostic and no
+  culture-aware parse overload to migrate to. Untrusted `,`-bearing decimal text
+  should be normalised or rejected explicitly by the caller.
+- The port's date/time grammar is now narrower than .NET's in four measured
+  respects (#1929), two of them made narrower **by this batch, under its
+  approval**.
+- `String::Format` still rejects whitespace inside a format item, which .NET
+  accepts.
 
 ---
 

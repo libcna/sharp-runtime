@@ -1,9 +1,23 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-31 — 41 physical components, 91 direct production
-dependency edges, a clean native build, 14,920 passing tests across 37
+dependency edges, a clean native build, 14,998 passing tests across 37
 executables, and a locally green ten-job selective matrix. The 2026-07-31
-#1919 batch (#1921–#1924) delivered the approval-blocked half of #1912 and
+**approved Groups A–D batch** (#1854, #1862, #1858, #1865, #1879, #1884, #1863)
+delivered every ticket the decision packet
+`docs/RemainingApprovalDecisions.md` put up for approval in those four groups,
+moved **seven findings to `remediated`** (SR-AUD-007, 009, 015, 029, 033, 035,
+043) and **closed three families outright — CCF-005, CCF-007 and CCF-012** —
+taking the tally to **67 remediated / 297 open of 364**. It is
+**behaviour-incompatible by design in four places**: `Decimal::Parse` reads `,`
+as a group separator (`docs/Migration-DecimalCommaGroupSeparator.md`), the four
+date/time parsers reject text they used to accept, `String::Format` adopts
+.NET's brace and alignment grammar, and `Single`/`Double`
+`ToString(value, format)` emit different `E`/`N`/`G` text. Eleven premises of
+the packet and its plans were corrected by measurement, two of them cases where
+the packet's stated .NET behaviour is wrong; three inactive tickets (#1927,
+#1928, #1929) were filed and **no `SR-AUD-*` identifier was issued**. Before it,
+the #1919 batch (#1921–#1924) delivered the approval-blocked half of #1912 and
 **closed the family**: every ordered container (6 of 6) and every hashed
 container (11 of 11) now carries the default comparison contract, and the floor
 rose 14,890 → 14,920. Its two follow-ups, #1925 and #1926, are `todo` and are
@@ -12,10 +26,10 @@ consolidated in `docs/RemainingApprovalDecisions.md`. The 2026-07-31
 #1912 batch (#1913–#1918, #1920) before it carried the **default comparison
 contract** into `Collections`, leaving only the then-blocked #1919; the floor
 rose 14,815 → 14,890. The CCF-010 batch (#1904–#1911) before it closed the family
-in `Core` outright: SR-AUD-046 is `remediated`. The tally is **59 remediated,
-305 confirmed, of 364** — three of the 305 carry a qualifier, and the "304"
-this line previously carried counted neither side of the one split row
-(SR-AUD-043). The tracked CI
+in `Core` outright: SR-AUD-046 is `remediated`. The tally read **59 remediated,
+305 confirmed, of 364** at that point — three of the 305 carried a qualifier, and
+the "304" this line previously carried counted neither side of the one split row
+(SR-AUD-043); the Groups A–D batch then took it to **67 / 297**. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
 is recorded as audit finding `SR-AUD-001`. Post-audit tally: **57 findings
 remediated, 306 confirmed, of 364 total** — this line read `43 / 321` until
@@ -41,6 +55,62 @@ proceeds from the evidence-backed `audit/` inventory in bounded, independently
 validated repair tickets. Consumer-driven API breadth remains legitimate later
 work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
+
+
+## 2026-07-31 — approved Groups A–D of the decision packet (#1854, #1862, #1858, #1865, #1879, #1884, #1863)
+
+Branch `feature/remediation-batch-approved-groups-a-d`, six commits. **All seven
+tickets the batch instruction approved are `done`**, in the packet's own
+dependency order and, for group B, in the packet's own three-commit split.
+
+| Group | Tickets | Result |
+|---|---|---|
+| **A** | #1862, #1854 | five `noexcept` specifications and one `constexpr` dropped so five boundaries can reject bad input |
+| **B** | #1865, #1858 | `,` means "group separator" to `Decimal`, `Single` and `Double` alike; an out-of-range magnitude saturates or overflows instead of being a format error |
+| **C** | #1879, #1884 | the date/time parsers and both composite-format engines consume their whole input or fail |
+| **D** | #1863 | `E`, `N` and `G` emit .NET's text |
+
+**Seven findings → `remediated`**: SR-AUD-007 (with 007a), 009, 015, 029, 033,
+035, 043. **CCF-005, CCF-007 and CCF-012 are complete.** Post-audit tally
+**59 → 67 remediated, 305 → 297 open, of 364**; numbering frozen at 364 and no
+new `SR-AUD-*` issued.
+
+**Behaviour-incompatible by design in four places.** Only one of them is silent
+to the caller in the dangerous direction — `Decimal::Parse("1,5")` was `1.5m` and
+is now `15m`, with `Parse(",5")` moving from `0.5m` to `FormatException`. That
+row landed as **its own commit with its own migration note**
+(`docs/Migration-DecimalCommaGroupSeparator.md`) because §B.5 of the packet
+required exactly that, so it can be reverted alone. The date/time and
+composite-format changes reject rather than mis-answer, so the caller finds out;
+the `ToString` change alters emitted text and needs golden files re-baselined.
+
+**Eleven corrected premises**, all appended beside the original text rather than
+edited over it. Two matter most, because in each the packet's stated .NET
+behaviour is simply wrong: `.NET`'s `ParseFraction` **accepts** `".1234567"`, and
+its `ParseTimeZone` **accepts** `"+2:5"` and reads it as 2h05m — 125 minutes,
+exactly what this port already produced, so §C.4's "wrong answer that survives
+round-tripping" was not wrong at all. Both rejections were implemented as
+approved and are recorded as deliberate **narrowings** of the port's fixed-width
+subset — the same subset that has always rejected `"2024-6-15"` — with the
+widening question filed as inactive **#1929**. Two more inactive tickets,
+**#1927** and **#1928**, hold value and message divergences found while
+implementing #1862 and deliberately not absorbed into it.
+
+**Nothing moved in the representation.** No parameter list, return type, object
+layout, `sizeof`/`alignof`, member offset, virtual function, vtable slot or
+mangled name changed across all seven tickets. Four new private headers under
+`modules/core/include/System/detail/` hold the shared grammar and formatting
+helpers, so the paired types cannot drift apart. Gate **14,920 → 14,998 across
+37 executables**; Doxygen 1,937/1,942; graph 41/91; seams 2/18; fixtures 10/74 —
+all unchanged. ASan and UBSan over 267 probe cases, before and after: zero
+diagnostics, every answer identical to the plain build, which restates rather
+than claims coverage — **no sanitizer can see a missing argument check, an
+over-permissive grammar, an exception taxonomy or emitted text.**
+
+Records: `docs/ConversionBoundaryFamilyPlan.md` §19.6,
+`docs/FloatingValueFidelityPlan.md` §18, `docs/DecimalBoundaryFamilyPlan.md` §12,
+`docs/DateTimeValidationBoundaryPlan.md` §20.3,
+`docs/CompositeFormatBoundaryPlan.md` §21.
 
 
 ## 2026-07-31 — #1919 Collections public-representation containers (#1921–#1924)
