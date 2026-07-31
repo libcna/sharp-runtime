@@ -170,8 +170,7 @@ public:
      * @return true if the element is found; otherwise false.
      */
     [[nodiscard]] bool Contains(const T& item) const {
-        return std::find_if(stack_.begin(), stack_.end(),
-                            [&item](const T& v) { return System::detail::equalValues(v, item); })
+        return System::detail::findValue(stack_.begin(), stack_.end(), item)
                != stack_.end();
     }
 

@@ -164,8 +164,7 @@ class List : public IList<T> {
          */
         [[nodiscard]] bool Contains(const T& item) const override
         {
-            return std::find_if(items_.begin(), items_.end(),
-                                [&item](const T& v) { return System::detail::equalValues(v, item); })
+            return System::detail::findValue(items_.begin(), items_.end(), item)
                    != items_.end();
         }
 
@@ -178,8 +177,7 @@ class List : public IList<T> {
          */
         bool Remove(const T& item) override
         {
-            auto it = std::find_if(items_.begin(), items_.end(),
-                                   [&item](const T& v) { return System::detail::equalValues(v, item); });
+            auto it = System::detail::findValue(items_.begin(), items_.end(), item);
             if (it == items_.end()) return false;
             items_.erase(it);
             ++version_;
@@ -265,8 +263,7 @@ class List : public IList<T> {
          */
         [[nodiscard]] intcs IndexOf(const T& item) const override
         {
-            auto it = std::find_if(items_.begin(), items_.end(),
-                                   [&item](const T& v) { return System::detail::equalValues(v, item); });
+            auto it = System::detail::findValue(items_.begin(), items_.end(), item);
             if (it == items_.end()) return -1;
             return static_cast<intcs>(it - items_.begin());
         }

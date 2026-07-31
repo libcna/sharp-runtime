@@ -4,166 +4,269 @@
 # NEXT.md
 
 *Last verified: 2026-07-31. Branch:
-`feature/remediation-ccf010-comparison-contract`. The test floor rose to
-**14,815** (was 14,745). **CCF-010 is COMPLETE and SR-AUD-046 is
-`remediated`** — the second post-audit family finished outright. Tickets
-**#1904**–**#1911** are all `done`, none needed user approval, and the tally
-moves to **59 remediated / 304 confirmed / 364** — 302 plain `confirmed` rows
-plus two carrying the `confirmed (design-complete)` qualifier, with the single
-split row (SR-AUD-043) counted in neither, exactly as the previous batch's
-58/305 was derived — numbering still frozen at 364. New ticket **#1912**
-(`todo`, P2) records a larger population with the same cause in the
-`Collections` module. See "Autonomous remediation batch handoff, 2026-07-31
-(CCF-010 comparison contract)" immediately below. Previously, on
-`feature/remediation-ccf019-final-compatible`: the test floor rose to **14,745**
-(was 14,731). **CCF-009 is COMPLETE and SR-AUD-010 is `remediated`** — the first
-post-audit family finished outright rather than left design-complete or
-approval-blocked. Tickets **#1901**, **#1902** and **#1903** are all `done`, none
-needed user approval, and the post-audit tally moves for the first time in
-several batches: **58 remediated / 305 confirmed / 364**, numbering still frozen
-at 364. See "Autonomous remediation batch handoff, 2026-07-31 (CCF-009 shared
-PRNG)" immediately below. Previously, on the same branch, the floor rose to
-14,731 (was 14,683) and the user decided **§31 items 3–6**: items 3 (#1888) and 4 (#1889) are
-**declined** and moved `needs_user → blocked` with their designs preserved for a
-coordinated ABI-breaking release; item 5's wording is **rejected as
-non-implementable** and replaced by §42 (#1898 **done**, #1899 **blocked** on one
-question); item 6 is **split**, its compatible iterative-teardown half
-**approved** and delivered as **#1895** (probe **J19c** and **X27c**: ASan
-`stack-overflow` → `clean`), its quadratic half declined as #1896 and its parse
-half left as #1897. **CCF-019 is compatible-remediation-complete and not
-implemented** — §43 reconciles all six items; both findings keep `confirmed
-(design-complete)` and the tally is **unchanged at 57 remediated / 306 confirmed
-/ 364**. Next family selected and planned: **CCF-009**
-(`docs/SharedPrngConcurrencyPlan.md`, #1900–#1903) — and **ready work exists
-again**: #1901 then #1902, both compatible, no approval needed. See "Autonomous
-remediation batch handoff, 2026-07-31 (CCF-019 compatible closure + CCF-009
-plan)" immediately below. Previously, on
-`feature/remediation-ccf019-residuals`: the test floor rose to
-**14,683** (was 14,635). Under the user's batch instruction directing
-**`docs/OwnedTreeLifetimeContractPlan.md` §31 item 2**, this batch landed
-**#1887** (`JsonObject::SetItem` adopts before it detaches, +22 tests) and
-**#1891** (`XNode::ReplaceWith` restores the replaced node when a replacement is
-refused; `XContainer::InsertNodeAt` adopts after it inserts, +26 tests). **Both
-of CCF-019's silent data-loss paths, J10 and X20, are now closed**; the ASan
-residue is unchanged at **3** use-after-free cases (J11, X15, X17), 3
-stack-overflows and 2 timeouts. The same batch completed **design-only** records
-for every remaining residual — #1888 (§37), #1892 (§38), #1889 (§39, the full
-sixteen-item package) and #1893 (§40) — all four still `needs_user`, #1894 still
-`blocked`. **Five plan premises were corrected by measurement**, two of which
-make **§31 items 4 and 5 wrong as worded**. Post-audit tally **unchanged at 57
-remediated / 306 confirmed / 364**; numbering frozen at **364**. See "Autonomous
-remediation batch handoff, 2026-07-31 (CCF-019 exception paths)" immediately
-below. Previously, on `feature/remediation-ccf019-owner-detachment`: the test
-floor rose to **14,635** (was 14,568). The user approved
-**`docs/OwnedTreeLifetimeContractPlan.md` §31 item 1 and only item 1**, and this
-batch implemented it in both families: **#1886** (`JsonArray`/`JsonObject`
-detach their children in their own destructor, +32 tests) and **#1890**
-(`XContainer`/`XElement` detach their children, their attributes and each
-attribute's intrusive `next_` link, +35 tests). Re-running the #1885 probe
-**unmodified**: ASan `heap-use-after-free` **cases 29 → 3**, faulting accesses
-**57 → 5**, `pure virtual method called` process aborts **8 → 0** — **26 of 29
-closed**, one fewer than §1's estimate of 27, recorded in §34.4 rather than
-rounded. Cost, measured: `sizeof` unchanged for all **11** public types, GCC
-`-fdump-lang-class` class/vtable dumps **identical**, **zero** allocations added
-to construction, access or destruction, LSan clean, module graph still **41/91**;
-the only ABI movement is three **weak COMDAT** `XContainerD0/D1/D2Ev` symbols GCC
-had previously inlined away, with **no name removed**. **CCF-019 is PARTIALLY
-REMEDIATED and both findings stay `confirmed (design-complete)`**: J11 (#1889)
-and X15/X17 (#1892) are still ASan-confirmed use-after-free, and items 2–6 of
-§31 remain **unapproved and unstarted**. Post-audit tally **unchanged at 57
-remediated / 306 confirmed / 364**; numbering frozen at **364**. See "Autonomous
-remediation batch handoff, 2026-07-31 (CCF-019, PARTIALLY REMEDIATED)"
-immediately below. Previously, on
-`feature/design-ccf019-owned-tree-lifetimes`: design ticket **#1885** planned
-**CCF-019**, the owned-tree lifetime family: **SR-AUD-327** (`JsonNode`) and
-**SR-AUD-333** (`XObject`).
-Both were reproduced against the shipped bodies before any design was written —
-47 cases, one forked process each under a watchdog, three builds from one source
-— giving **29 ASan `heap-use-after-free` accesses**, **3 `stack-overflow`s**,
-**57 reads / 0 writes** under recoverable ASan, and **12** further cases wrong
-with **no diagnostic in any build**. `docs/OwnedTreeLifetimeContractPlan.md` (32
-sections) records the selected contract — **the owner detaches what it owns, in
-its own destructor**, at zero layout, zero vtable, zero allocation and zero
-per-access cost — and every rejected alternative with measured evidence,
-including the only one that matches .NET exactly (a strong parent link), which
-**leaks**. Post-audit tally **unchanged**: **57 remediated, 306 confirmed, of
-364** — two of the 306 now carry the `confirmed (design-complete)` qualifier the
-index header already defines. Nine new tickets, **#1886–#1894**, every one
-`needs_user` or `blocked` pending **six explicit approvals** (§31 of the plan).
-**No CCF-019 production repair was made and none is approved.** See "Autonomous
-design batch handoff, 2026-07-30 (CCF-019, DESIGN-COMPLETE)" immediately below.
-Previously, on `feature/remediation-batch-ccf012-composite-format`: the test
-floor rose to
-**14,568** (was 14,514): that batch compared **CCF-012** against **CCF-017** on
-measured evidence, selected **CCF-012 — composite formatting**, and left it
-**PARTIALLY REMEDIATED**. Design ticket **#1881** wrote
-`docs/CompositeFormatBoundaryPlan.md` (20 sections plus the durable family
-comparison in section 0); implementation **#1882** (+34) replaced
-`String::Format`'s output-mutating replacement engine with a single-pass parse,
-and **#1883** (+20) did the same for `FormattableString::ToString`. Post-audit
-tally: **57 remediated, 306 confirmed, of 364** — SR-AUD-015 stays `confirmed`
-because its own headline claims are the approval-gated tail. New this batch:
-**#1884** (`needs_user` — adopt .NET's composite-format grammar across 46 public
-entries, with fourteen exact before/after rows and the approval wording in the
-plan's §20). **CCF-017 was deferred, not closed or downgraded**: its demanded
-fieldwise `Attribute` equality needs runtime reflection, a permanent CLAUDE.md
-deviation, and everything left of it is approval-gated. The compatible queue is
-again **empty**. See "Autonomous batch handoff, 2026-07-30 (CCF-012, PARTIALLY
-REMEDIATED)" immediately below. Previously: the CCF-002 batch left the floor at
-14,514 and 57-remediated; it took **CCF-002 — date/time validation** and left it
-**PARTIALLY REMEDIATED**, not closed. Design ticket #1876 wrote
-`docs/DateTimeValidationBoundaryPlan.md` (20 sections) from 84 measured probe
-cases plus five one-shape-per-process UBSan runs; implementation **#1877**
-remediated **SR-AUD-006** (+32) by validating `DateTime`'s time components
-before the arithmetic that consumes them — removing UBSan-confirmed
-signed-integer-overflow UB reachable from a plain constructor *and* from
-`DateTime::TryParse`, which returned `true` with a negative tick count — and by
-restoring .NET's offset-first validation order in `DateTimeOffset`;
-implementation **#1878** closed **SR-AUD-007a** (+6) by range-checking the
-parsed offset's fields, which also stopped `DateTimeOffset::TryParse` throwing
-`OverflowException` out of a `Try`-style method. Post-audit tally: **57
-remediated, 306 confirmed, of 364**. New this batch: **#1879**
-(`needs_user` — the parser accepted-grammar change, with fifteen exact
-before/after rows in §20.1) and **#1880** (inactive — `TryParse`
-failure-output normalisation, **no `SR-AUD-*` identifier**). The compatible
-queue is now **empty**. Previously: the CCF-014 + CCF-016 batch left the floor
-at 14,476 / 56-remediated and **closed two whole families** — CCF-014 via
-design ticket #1871 (`docs/TryOutputFailureContractPlan.md`) and implementation
-#1872 (SR-AUD-075 `SequenceReader` + SR-AUD-085 `Utf8Parser`, +14), and CCF-016
-via design ticket #1873 (`docs/DerivedExceptionHResultPlan.md`) and
-implementation #1874 (SR-AUD-093/094/095/096/100, eleven exception types, 40
-constructors, +18) — total +32. Post-audit tally: **56 remediated, 307
-confirmed, of 364**. **CCF-014 and CCF-016 are both CLOSED.** New this batch:
-**#1875**, opened **inactive** for the measured 45-type HResult population
-outside `modules/core/include/System/` (no `SR-AUD-*` identifier). The previous
-batch left the floor at 14,444 / 49-remediated: the **CCF-011 empty-callable
-batch closed that whole family** — design ticket #1866 (`docs/EmptyCallableBoundaryPlan.md`) plus four
-implementations, #1867 (SR-AUD-065 `Lazy<T>` + SR-AUD-099
-`AggregateException::Handle`, +14), #1868 (SR-AUD-058 `Progress<T>` +
-SR-AUD-121 `EventHandler`, +13), #1869 (SR-AUD-052 `Array`, +13) and #1870
-(SR-AUD-134 `Linq`, +8), total +48. Post-audit tally: **49 remediated, 315
-confirmed, of 364** (six findings moved `confirmed → remediated`; one row is the
-split `043a remediated; 043b open`). **CCF-011 is CLOSED.** The batch before it
-left the floor at 14,396 / 43-remediated via the CCF-007 slice
-#1861 (SR-AUD-032 Pi-trig turn boundaries, +20) and #1864 (SR-AUD-033 parse
-leading/trailing whitespace, +8). The prior batch left it at 14,368 / 42-remediated via the CCF-005
-Decimal slice (#1855 SR-AUD-036 `MidpointRounding`, **closed CCF-008**, +9; #1856
-SR-AUD-038 negative zero, +6; #1857 SR-AUD-035 compatible portion, +4) and the two
-compatible CCF-007 fixes #1859 (SR-AUD-031 ILogB, +3) and #1860 (SR-AUD-030
-IsPow2, +2). **New ticket this batch:** #1865 (SR-AUD-033 parse thousands +
-overflow-to-Infinity tail, `needs_user`, split from #1864 like #1857→#1858).
-Still `needs_user`: **#1879** (CCF-002 parser grammar), #1858 (Decimal comma +
-overflow taxonomy), #1862 (SR-AUD-029 Round `noexcept`), #1863 (SR-AUD-033
-format output), #1865 (SR-AUD-033 parse tail), #1854 (SR-AUD-043b noexcept);
-#1773 stays blocked, and the only `todo` rows are the **inactive** #1875 and
-#1880. See "Autonomous batch handoff, 2026-07-30 (CCF-002, PARTIALLY
-REMEDIATED)" immediately below for this batch's queue, baselines and next
-recommended family; the CCF-014/CCF-016, CCF-011 and CCF-007 sections follow
-it. The prior
-batch reached 14,344 via #1851/#1852/#1853/#1849; the one before that left the
-floor at 14,233 via the CCF-003 close
-(#1846/#1844/#1845/#1847, +31), tooling #1848, and CCF-005's first fix #1850 (+3);
-the one before that raised 14,196 → 14,199 via #1804/#1843.
+`feature/remediation-batch-1912-collections-comparers`. The test floor rose to
+**14,890** (was 14,815). Ticket **#1912** — the `Collections` continuation of
+CCF-010 — is **remediated except for one approval-blocked subfamily**. Seven
+tickets, **#1913**–**#1918** and **#1920**, are `done`; **#1919** is `blocked`
+on one explicit approval whose exact wording is
+`docs/CollectionsComparisonContractPlan.md` §10. **No `SR-AUD-*` identifier was
+issued** and audit numbering stays frozen at **364**. The exact status
+distribution, which sums to 364, is under "Audit arithmetic" in the
+reconciliation section immediately below — the previous handoff's "59 remediated / 304 confirmed" summed to 363
+because it counted neither side of the one split row. See "Autonomous
+remediation batch handoff, 2026-07-31 (#1912 Collections comparison contract)"
+immediately below.
+
+---
+
+## Reconciliation of the previous handoff (2026-07-31)
+
+Three items were checked against Git, `plan.sqlite3` and measured output rather
+than against the prose handoff.
+
+### 1. Ticket #1804 — **completed, and omitted from the report only**
+
+`plan.sqlite3` has it `done`, updated 2026-07-30, with a full resolution note.
+Commit `6e37051b` ("fix(tooling): reject a seam whose primary template LEAVES
+discovery (#1804)") is an ancestor of this branch's HEAD and touches
+`scripts/check_version_seam_odr.py` (+81/−17), `test/check_version_seam_odr_test.py`
+(+108), `docs/CollectionVersionTestSeamDesign.md` (+98) and `CLAUDE.md`. The
+checker and its self-test both pass in this batch's validation run (2 seams, 18
+specialisations; self-test OK). **Nothing to redo and no record to correct** —
+the previous batch simply did not mention it. Recorded here so the next reader
+does not re-investigate.
+
+### 2. Audit arithmetic — the missing finding is **SR-AUD-043**
+
+`audit/AUDIT_FINDINGS_INDEX.md` has exactly **364** rows, `SR-AUD-001` through
+`SR-AUD-364`, with **no gap and no duplicate**. The distribution is:
+
+| Status string in the index | Count |
+|---|---|
+| `remediated` | **59** |
+| `confirmed` | **302** |
+| `confirmed (design-complete)` | **2** |
+| `confirmed (043a remediated; 043b open)` | **1** |
+| **Total** | **364** |
+
+The previous handoff's "304 confirmed" is 302 + 2, which silently drops the
+third qualifier form. **SR-AUD-043** is the missing row: it is a single finding
+split by compatibility, whose 043a half is remediated (#1852) and whose 043b
+half is open (#1854, `needs_user`). It is neither `remediated` nor plainly
+`confirmed`, and the index preamble's rule — a qualifier is not a separate
+status — puts it in the **confirmed** family. So the honest one-line tally is
+**59 remediated / 305 confirmed of 364**, of which three confirmed rows carry a
+qualifier. Nothing was declined, blocked, no-actioned, duplicated or missing
+from an index; no finding was moved to make the arithmetic work.
+
+### 3. Test baseline 14,196 → 14,745 → 14,815 — **stale handoff bookkeeping, no defect**
+
+The 14,196 figure is the *header paragraph* of the previous NEXT.md, last
+rewritten by the batch that closed CCF-004 and the Stream-capability family. It
+was never wrong when written; it simply stopped being rewritten while twelve
+later batches each recorded their own delta further down the same file. The
+549-test difference is fully accounted for, batch by batch, from those records:
+
+```
+14,196  CCF-004 + Stream capability close
+   +3   #1804/#1843                       -> 14,199
+  +34   CCF-003 close (#1846/#1844/#1845/#1847) + #1848 + #1850 -> 14,233
+ +111   #1851/#1852/#1853/#1849           -> 14,344
+  +24   CCF-005 Decimal slice + CCF-007   -> 14,368
+  +28   #1861 (+20), #1864 (+8)           -> 14,396
+  +48   CCF-011 (#1867/#1868/#1869/#1870) -> 14,444
+  +32   CCF-014 (#1872) + CCF-016 (#1874) -> 14,476
+  +38   CCF-002 (#1877 +32, #1878 +6)     -> 14,514
+  +54   CCF-012 (#1882 +34, #1883 +20)    -> 14,568
+  +67   CCF-019 (#1886 +32, #1890 +35)    -> 14,635
+  +48   #1887 (+22), #1891 (+26)          -> 14,683
+  +48   #1895                             -> 14,731
+  +14   CCF-009 (#1901/#1902)             -> 14,745
+  +70   CCF-010 (#1904-#1910)             -> 14,815
+```
+
+Every step is a ticket that added tests. **No test was deleted, recategorised,
+suppressed or hidden; test discovery did not change; no executable started or
+stopped registering cases; both reports used the same gate**
+(`scripts/run_component_tests.sh build`). This batch re-ran that gate on the
+unmodified tree before touching anything and measured **14,815 across 37
+executables**, confirming the newer figure. **No ticket was created**: this is
+purely stale bookkeeping, and the header paragraph is rewritten above so it
+stops being stale.
+
+---
+
+## Autonomous remediation batch handoff, 2026-07-31 (#1912 Collections comparison contract)
+
+**Branch:** `feature/remediation-batch-1912-collections-comparers`, 7 commits,
+nothing pushed. **Gate: 14,890 tests across 37 executables**, 0 warnings, 0
+errors.
+
+### What the family is
+
+.NET collections compare elements, keys and values with `Comparer<T>.Default`
+and `EqualityComparer<T>.Default`, never with the operand type's `<` or `==`.
+The port used `<` and `==` everywhere. For every type but `float` and `double`
+the two agree exactly, which is why it was invisible for the whole life of these
+files; for those two they differ in NaN's order and NaN's equality with itself,
+and that is the whole family. Design record:
+[`docs/CollectionsComparisonContractPlan.md`](docs/CollectionsComparisonContractPlan.md)
+(15 sections).
+
+### Tickets
+
+| Ticket | Scope | Result |
+|---|---|---|
+| **#1913** | family plan + 74-case probe, design only | `done` |
+| **#1914** | the six **named default comparers** | `done`, +19 tests |
+| **#1915** | five default-ordering sites | `done`, +14 tests |
+| **#1916** | 38 sequence equality sites (+1 miscategorised ordering site) | `done`, +17 tests |
+| **#1917** | 16 associative value-equality sites | `done`, +10 tests |
+| **#1918** | ten containers whose repair changes no public type | `done`, +13 tests |
+| **#1920** | mutation matrix, performance, premise corrections, closure | `done`, +2 tests |
+| **#1919** | seven containers whose backing container is **public** | **`blocked`** |
+
+### Site counts — measured, and where #1912 was wrong
+
+#1912's inventory was a token sweep that §18a of the CCF-010 plan explicitly
+labelled "measured-by-analogy" and told #1912 to reproduce. It did. The original
+§18a text is unchanged; the correction is appended as **§18b** of
+`docs/ComparisonContractPlan.md`.
+
+| Population | #1912 said | Measured | Repaired |
+|---|---|---|---|
+| named default comparers | **not named at all** | 6 | 6 |
+| default-ordering sites | 5 | **6** | 6 |
+| default-equality sites | 56 / 20 headers | **55 defect-capable / 16 headers** (+11 shaped-but-incapable, +4 caller-supplied) | 54 |
+| ordered containers | 3 | **6** | 5 of 6 |
+| hashed containers | **not named at all** | 11 | 6 of 11 |
+
+Two premises were corrected in the direction of **greater** severity.
+`SortedSet<double>` does not merely hold an invalid invariant: `Add(NaN);
+Add(1); Add(2)` ends at `Count == 1` holding `[NaN]` — two elements accepted by
+the call and **silently discarded**. And the hash-based containers, absent from
+§18a, fail unboundedly in the opposite direction: `Dictionary<double,V>` accepts
+the same NaN key any number of times while `ContainsKey` and `TryGetValue`
+answer false forever.
+
+Three defects were **exception-visible**, not merely wrong-answer:
+`ImmutableList<double>::Replace(NaN, x)` threw `ArgumentException("Cannot find
+the old value in the list.")`; `ImmutableDictionary::Add`/`ImmutableSortedDictionary::Add`
+threw "An item with the same key has already been added." when re-adding the
+*same* NaN value; and `SortedDictionary`/`SortedList` **rejected** a genuinely
+new NaN key as a duplicate of an unrelated key.
+
+### Sanitizers — what they can and cannot see
+
+| Build | Result over the 74 probe cases |
+|---|---|
+| ASan | **no report on any case**, before or after |
+| UBSan | **no report on any case** |
+| `_GLIBCXX_ASSERTIONS` + `_GLIBCXX_DEBUG` | exactly **one**: `List<T>::BinarySearch`'s `std::lower_bound`, *"elements in iterator range are not partitioned by the value"*. Gone after #1915. |
+
+**The permanent GoogleTest suite is the primary gate for this family**, and the
+plan says so in §3.3. A semantic comparison defect is not a memory-safety defect;
+libstdc++ debug mode checks irreflexivity (which NaN satisfies) and partitioning,
+but nothing about transitivity of equivalence.
+
+### Mutation matrix — 12 mutations, 10 killed, 2 declared negative controls survived
+
+Full table in the plan's §13. The campaign found a hole in the **suite**, not
+only in the code: **M8** (leave the equality policy, restore `std::hash`)
+*survived* the first run, because every container test reused one NaN object,
+which hashes to one bucket either way. .NET's guarantee is stronger — every NaN
+folds to one hash — so a key stored under one NaN must be findable by a
+*different* NaN. `HashedContainersFindANaNKeyByADifferentNaN` was added for
+exactly that and kills M8.
+
+### Performance — three regressions found and eliminated, not reported
+
+Paired `-O2` measurement from one source against a temporary `git worktree` of
+the pre-change tree, runtime-generated data, `volatile` sink, three alternating
+runs. Eight of ten workloads land at or inside their own run-to-run noise floor.
+The first pass measured **1.80×** (sequential equality search), **1.45×**
+(`OrderedDictionary` insert+lookup) and **1.16×** (`SortedDictionary`); all
+three were traced and removed:
+
+1. the needle's NaN-ness is loop-invariant — `detail::findValue` tests it once
+   and otherwise runs a vectorisable `std::find` (1.80× → 1.00×);
+2. `noexcept` on the hasher is load-bearing — without it libstdc++'s
+   `_Hashtable` caches a hash code in every node (1.45× → 0.99×);
+3. `DefaultLess` rewritten to decide in one comparison (1.16× → within noise).
+
+Two ratios remain outside noise and are stated rather than absorbed: **1.040×**
+on a no-NaN 1M sort (the NaN pre-pass is a real extra O(n) pass, which .NET also
+pays) and **1.169×** on a 4.3 ms binary search.
+
+### Representation, measured not asserted
+
+`sizeof`/`alignof` **identical for all 22 representative instantiations** — 11
+non-floating, 9 floating, 2 iterator types — because the comparators are empty
+classes and the empty-base optimisation absorbs them. A fixture with 18 explicit
+instantiations compiled against the pre- and post-change include trees goes from
+**727 to 729** external symbols: all 39 removed names mention `double`, 40 of the
+41 added mention `double`, and the single exception is
+`std::priority_queue<PriorityQueue<int,int>::Entry,…>::pop()`, a **weak COMDAT**
+symbol GCC had previously inlined away. **No name was removed for any
+non-floating instantiation.** Same shape of movement ticket #1890 recorded for
+`XContainer`'s destructors.
+
+### #1919 — the one blocked subfamily
+
+`SortedSet`, `Dictionary`, `HashSet`, `FrozenSet`, `FrozenDictionary`,
+`ReadOnlySet`, `ReadOnlyDictionary`. Identical defect, identical repair, but each
+names its backing `std::` container in its **public** surface (`SortedSet::SetIterator`
+and `comparer()`; `Dictionary::ToMap()` and the public iterator typedefs;
+`HashSet`'s iterator typedefs; `FrozenSet`/`FrozenDictionary`'s `const_iterator`
+and `CreateFromSet`/`CreateFromMap`; `ReadOnlySet`/`ReadOnlyDictionary`'s
+`shared_ptr` constructors and `getDictionaryProperty()`). For every **non-floating**
+instantiation the conditional alias is token-identical to today, so nothing
+changes; for a floating element or key the public type does change. #1912's row
+says "no approval required", but that was written before this measurement
+existed and does not authorise these seven. **Exact approval wording:
+`docs/CollectionsComparisonContractPlan.md` §10**, with the four rejected
+alternatives and the rollback.
+
+Still failing until it lands: probe rows S1, S2, S2b, S3, S8, S9, S11, S12, S20.
+
+### Tooling changed, and why
+
+`scripts/check_selective_components.sh` and `scripts/local_ci_check.sh`
+hardcoded `--parallel 3`. An explicit `--parallel` on the command line overrides
+`CMAKE_BUILD_PARALLEL_LEVEL`, so neither could be bounded from outside — a
+session required to run at a **lower** ceiling could not use them at all. Both
+now read `SHARP_RUNTIME_BUILD_JOBS`, default 3, **rejected above 3**, so
+CLAUDE.md's maximum is unchanged and only lowering is newly possible. This batch
+ran both at 2.
+
+### Baselines after this batch
+
+| Invariant | Value |
+|---|---|
+| Test floor | **14,890** across 37 executables |
+| Module graph | **41 modules / 91 edges** (unchanged) |
+| Canonical Doxygen | **1,941** warnings (ceiling 1,942, unchanged) |
+| Negative consumer fixtures | **9 fixtures / 66 sites**, every site rejected |
+| Version seams | **2 seams / 18 specialisations** |
+| Audit | **59 remediated / 305 confirmed of 364** (3 of the 305 carry a qualifier) |
+
+### Queue after this batch
+
+- **`blocked`, needs one approval:** #1919 (this family), #1888, #1889, #1894,
+  #1896, #1897, #1899, and #1773 (still blocked on CNA/mobile-eggbert, untouched).
+- **`needs_user`:** #1854, #1858, #1862, #1863, #1865, #1879, #1884.
+- **`todo`, inactive:** #1875, #1880.
+- **Compatible work remaining:** none in this family. The next candidates are
+  **CCF-001** (tracked-CI matrix coverage) and **CCF-015** (Unicode whitespace
+  policy, which must not begin implementation before a durable whitespace
+  contract exists).
+
+**Recommended next:** decide #1919 — it is the only thing standing between this
+family and closure, the design is complete, and `SortedSet<double>` silently
+losing elements is the most severe unfixed defect the batch measured.
+
+---
+
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 91 production

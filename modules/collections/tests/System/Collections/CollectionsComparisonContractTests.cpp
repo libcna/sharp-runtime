@@ -1002,3 +1002,70 @@ TEST(CollectionsComparisonContract, ContainerNegativeControlsAreUnchanged) {
     auto ihs = I::ImmutableHashSet<std::string>::Create(std::vector<std::string>{"a", "a", "b"});
     EXPECT_EQ(ihs.getCountProperty(), 2);
 }
+
+// ---------------------------------------------------------------------------
+// Hash/equality consistency for a hashed container key (#1920)
+//
+// Added because mutation M8 -- leave the equality policy in place but restore
+// std::hash for the backing hasher -- SURVIVED the suite as first written. Every
+// earlier test reused one NaN object, which hashes to one bucket under either
+// hasher, so the mismatch was invisible. A key must be findable by a DIFFERENT
+// NaN, which is what .NET's fold-every-NaN-to-one-value GetHashCode guarantees.
+// ---------------------------------------------------------------------------
+
+TEST(CollectionsComparisonContract, HashedContainersFindANaNKeyByADifferentNaN) {
+    const double a = kNaN;
+    const double b = payloadNaN();
+    ASSERT_TRUE(std::isnan(a) && std::isnan(b));
+    ASSERT_NE(std::hash<double>{}(a), std::hash<double>{}(b))
+        << "the two NaNs must have different raw hashes, or this test proves nothing";
+
+    G::OrderedDictionary<double, int> od;
+    od.Add(a, 1);
+    EXPECT_TRUE(od.ContainsKey(b));
+    int got = 0;
+    ASSERT_TRUE(od.TryGetValue(b, got));
+    EXPECT_EQ(got, 1);
+    EXPECT_THROW(od.Add(b, 2), System::ArgumentException);
+
+    System::Collections::Concurrent::ConcurrentDictionary<double, int> cd;
+    EXPECT_TRUE(cd.TryAdd(a, 1));
+    EXPECT_FALSE(cd.TryAdd(b, 2));
+    got = 0;
+    ASSERT_TRUE(cd.TryGetValue(b, got));
+    EXPECT_EQ(got, 1);
+
+    namespace I = System::Collections::Immutable;
+    auto id = I::ImmutableDictionary<double, int>::Empty().Add(a, 1);
+    EXPECT_TRUE(id.ContainsKey(b));
+    EXPECT_EQ(id.Add(b, 1).getCountProperty(), 1);
+
+    auto ihs = I::ImmutableHashSet<double>::Empty().Add(a).Add(b);
+    EXPECT_EQ(ihs.getCountProperty(), 1);
+    EXPECT_TRUE(ihs.Contains(b));
+
+    struct Keyed : System::Collections::ObjectModel::KeyedCollection<double, std::string> {
+    protected:
+        double GetKeyForItem(const std::string&) const override {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+    };
+    Keyed k;
+    k.Add("only");
+    EXPECT_TRUE(k.Contains(b));
+}
+
+TEST(CollectionsComparisonContract, HashedContainerKeysStillSeparateDistinctValues) {
+    // The complement of the test above: folding NaN must not fold anything else.
+    G::OrderedDictionary<double, int> od;
+    od.Add(1.0, 1);
+    od.Add(2.0, 2);
+    od.Add(kNaN, 3);
+    EXPECT_EQ(od.getCountProperty(), 3);
+    EXPECT_TRUE(od.ContainsKey(1.0));
+    EXPECT_TRUE(od.ContainsKey(2.0));
+    EXPECT_FALSE(od.ContainsKey(3.0));
+    od.Add(-0.0, 4);
+    EXPECT_TRUE(od.ContainsKey(0.0));    // -0.0 and +0.0 are one key, as in .NET
+    EXPECT_EQ(od.getCountProperty(), 4);
+}

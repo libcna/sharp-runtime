@@ -31,7 +31,7 @@ SR-AUD-362 established.
 
 | #1912's claim | Verdict | Measured |
 |---|---|---|
-| 5 default-ordering sites | **correct** | 5, all reproduced (§3, cases L1/L3/L5/L6/L7) |
+| 5 default-ordering sites | **understated by one** | 5 reproduced as listed (§3, cases L1/L3/L5/L6/L7); `ImmutableList::BinarySearch` is a sixth, miscategorised there as an equality site — see §2.2 |
 | the four `std::sort` sites carry §6.2's precondition violation | **correct, and understated** | 164 of 196 shapes corrupted, worst 216,078,912 inversions (§3.2) |
 | 3 ordered associative containers | **understated** | 5 ordered containers; `ImmutableSortedSet` and `ImmutableSortedDictionary` were not named |
 | 56 default-equality sites across 20 headers | **wrong in composition, close in count** | **55** defect-capable sites across **16** headers; 11 of the sites the named header list implies are **not** defect-capable (§2.4) |
@@ -119,7 +119,7 @@ the object is therefore not a valid comparator for `std::sort`, for
 the same `[alg.sort]`/`[associative.reqmts]` precondition violation as
 CCF-010 §6.2, one level of indirection further out.
 
-### 2.2 Default-ordering sites — 5, exactly as #1912 said
+### 2.2 Default-ordering sites — 6, one more than #1912 counted
 
 | Site | Entry | Algorithm |
 |---|---|---|
@@ -128,6 +128,14 @@ CCF-010 §6.2, one level of indirection further out.
 | `Immutable/ImmutableList.hpp:606` | `ImmutableList<T>::Sort()` | `std::sort` |
 | `Immutable/ImmutableList.hpp:623` | `ImmutableList<T>::Sort(index,count)` | `std::sort` |
 | `Immutable/ImmutableArray.hpp:283` | `ImmutableArray<T>::Sort()` | `std::sort` |
+
+| `Immutable/ImmutableList.hpp:1009` | `ImmutableList<T>::BinarySearch(item)` | hand-rolled loop, `mid_val == item` + `mid_val < item` |
+
+The last row is a **premise correction**. #1912 listed it among the *equality*
+sites because its hit test was `==`, but it is an ordering site: the `==` test
+was mixed with a raw `<` step, so it inherited both halves of the family. It is
+repaired with `compareValues` throughout, by #1916, alongside the site that
+misled the inventory.
 
 `ArrayList::Sort` (`ArrayList.hpp:552,568`) and every `Sort(comparison)` /
 `Sort(comparer)` overload take a caller-supplied predicate and are excluded on
@@ -657,3 +665,138 @@ reverting the alias restores today's behaviour exactly.
 `docs/ComparisonContractPlan.md`. Where §7 of this document corrects §18a, the
 original §18a text stays as written and the correction is additive — the same
 convention CCF-010 §19 adopted.
+
+---
+
+## 13. Mutation matrix (ticket #1920)
+
+`build-probe/1920_mutations.py` applies each mutation to the shipped headers,
+rebuilds **only** the permanent contract-test translation unit
+(`build-probe/1920_mutate.sh`, one TU, aggregate parallelism 1 job), runs the
+suite, and reverts with `git checkout --`. Full log:
+`build-probe/1920_mutation_matrix.log`.
+
+| ID | Mutation | Expected | Result | Tests failed |
+|---|---|---|---|---|
+| M1 | default equality → raw `==` (`List::Contains`) | KILLED | **KILLED** | 1 |
+| M2 | default ordering → raw `std::sort` (`List::Sort`) | KILLED | **KILLED** | 4 |
+| M3 | remove NaN normalisation from `hashValue` | KILLED | **KILLED** | 4 |
+| M4 | equality where **ordering equivalence** is required (`SortedList::IndexOfKey`) | KILLED | **KILLED** | 1 |
+| M5 | **negative control** — ordering equivalence where equality is used (`List::Contains`) | SURVIVED | **SURVIVED** | 0 |
+| M6 | ignore an explicit caller comparer (`ImmutableSortedSet::Create`) | KILLED | **KILLED** | 1 |
+| M7 | restore `std::less` for a default ordering path (`SortedList`) | KILLED | **KILLED** | 1 |
+| M8 | mismatch hash and equality (`DefaultKeyHash` → `std::hash`) | KILLED | **KILLED** | 1 |
+| M9 | bypass nullable comparison (`NullableEqualityComparer::Equals`) | KILLED | **KILLED** | 2 |
+| M10 | restore raw `>` for the `PriorityQueue` heap comparator | KILLED | **KILLED** | 1 |
+| M11 | **negative control** — `std::stable_sort` for the NaN-free remainder | SURVIVED | **SURVIVED** | 0 |
+| M12 | drop the NaN pre-pass and sort the whole range | KILLED | **KILLED** | 8 |
+
+10 defect mutations killed, 2 declared negative controls survived, 0 surprises
+in the final run.
+
+### 13.1 What the campaign found in the *suite*
+
+**M8 survived the first run**, and that was a real hole rather than a harmless
+one. Every container test up to that point reused one NaN object, which hashes
+to one bucket under either hasher, so leaving `std::hash` in place while the
+equality policy stayed correct was invisible. The contract .NET actually
+guarantees is stronger: `Single/Double.GetHashCode` folds **every** NaN to one
+value, so a key stored under one NaN must be findable by a *different* NaN.
+`HashedContainersFindANaNKeyByADifferentNaN` was added for exactly that, with an
+`ASSERT_NE(std::hash<double>{}(a), std::hash<double>{}(b))` guard so the test
+fails loudly if the two payloads ever stop hashing differently and the test
+stops proving anything. M8 is killed by it. A companion test pins the
+complement — folding NaN must not fold anything else, and `-0.0`/`+0.0` must
+remain one key.
+
+M5's first run reported `ANCHOR-BROKEN`, not a verdict: its substring matched
+three sites in `List.hpp`. That is a tooling failure, not a result, and it was
+fixed and re-run rather than counted.
+
+---
+
+## 14. Performance (ticket #1920)
+
+`build-probe/1920_perf.cpp`, compiled `-O2` from **one** source against the
+pre-change and post-change include trees (the pre-change tree is a temporary
+`git worktree` at `bd7cce25` under `build-probe/1918-baseline`, repository-local
+as the build policy requires). All data is produced at run time by a seeded
+xorshift and consumed through a `volatile` sink, so nothing is constant-foldable.
+Three alternating runs of each binary; each cell is a median of medians.
+`noise` is `max/min` across the three runs of the **unchanged** binary — the
+run-to-run floor for that workload on this machine.
+
+| Workload | before ms | after ms | ratio | noise |
+|---|---|---|---|---|
+| sort 1M double, no NaN | 70.61 | 73.40 | **1.040** | 1.009 |
+| sort 1M double, 1 % NaN | 64.88 | 65.96 | 1.017 | 1.056 |
+| sort 1M double, 50 % NaN | 31.67 | 32.37 | 1.022 | 1.088 |
+| sort 1M double, duplicate-heavy | 26.97 | 27.12 | 1.006 | 1.049 |
+| sort 1M int (negative control) | 46.09 | 45.70 | 0.992 | 1.019 |
+| sequential equality search, 1k misses over 1M | 264.10 | 261.25 | 0.989 | 1.026 |
+| binary search, 100k hits | 4.29 | 5.02 | **1.169** | 1.114 |
+| `SortedDictionary<double,int>` 200k insert+lookup | 107.38 | 114.96 | 1.071 | 1.105 |
+| `OrderedDictionary<double,int>` 200k insert+lookup | 26.34 | 26.20 | 0.995 | 1.367 |
+| `Dictionary::ContainsValue` ×200 over 200k | 35.40 | 37.09 | 1.048 | 1.049 |
+
+Eight of the ten ratios are at or inside their own noise floor. Two are outside
+it and are stated rather than absorbed:
+
+- **sort, no NaN — 1.040.** The NaN pre-pass is an extra O(n) pass over a
+  million doubles that finds nothing. .NET pays the same pass for the same
+  reason, and CCF-010 measured 1.011× for `Array::Sort` over its own shape set.
+  Accepted.
+- **binary search — 1.169.** `DefaultLess` plus `equalValues` against raw `<`
+  and `==`, on a 4.3 ms workload. Small in absolute terms, above noise, and the
+  price of a search that agrees with the sort that produced the range.
+
+### 14.1 Three regressions found and eliminated, not reported
+
+The first paired run measured **1.80×** on the sequential equality search,
+**1.45×** on `OrderedDictionary` insert+lookup and **1.16×** on
+`SortedDictionary`. Both causes were mechanical, and both fixes are in
+`ComparisonPolicy.hpp`:
+
+1. **The needle's NaN-ness is loop-invariant.** Writing
+   `std::find_if(…, [&]{ return equalValues(v, value); })` evaluates an `isnan`
+   pair for **every element**, defeating vectorisation, even though it can only
+   matter when `value` itself is NaN. `detail::findValue` tests the needle once
+   and falls back to a plain `std::find` — which for a non-NaN needle *is*
+   `equalValues`, exactly. 1.80× → 1.00×. Nineteen scan sites use it.
+2. **`noexcept` on the hasher is load-bearing.** libstdc++'s `_Hashtable` turns
+   on per-node hash-code caching unless the hasher is both "fast" and
+   non-throwing, which grows every node by a word. `DefaultHash::operator()` and
+   `DefaultEqualTo::operator()` are now `noexcept` — honestly so, since
+   `std::hash` over an arithmetic type and `std::isnan` cannot throw. 1.45× →
+   0.99×.
+3. `DefaultLess::operator()` was rewritten to reach a verdict in **one**
+   comparison for two ordinary numbers, evaluating the NaN tests only when
+   neither ordering nor equality holds. 1.16× → within noise.
+
+---
+
+## 15. Closure
+
+**Delivered:** #1913 (this plan), #1914 (six named default comparers), #1915
+(six default-ordering sites), #1916 (38 sequence equality sites), #1917 (16
+associative value-equality sites), #1918 (ten containers), #1920 (this section).
+
+**Not delivered, blocked:** #1919 — `SortedSet`, `Dictionary`, `HashSet`,
+`FrozenSet`, `FrozenDictionary`, `ReadOnlySet`, `ReadOnlyDictionary`. Probe rows
+S1, S2, S2b, S3, S8, S9, S11, S12, S20 still return the wrong answer, and
+`SortedSet<double>` still silently discards every element added after a NaN.
+The approval text is §10. Nothing about this half is undecided except the
+approval.
+
+**Site counts, final and measured**
+
+| Population | #1912 said | Measured | Repaired |
+|---|---|---|---|
+| named default comparers | not named | 6 | 6 |
+| default-ordering sites | 5 | **6** (`ImmutableList::BinarySearch` was miscategorised as an equality site) | 6 |
+| default-equality sites | 56 across 20 headers | **55 defect-capable across 16 headers**, plus 11 shaped-but-not-capable and 4 caller-supplied | 54 (38 in #1916, 16 in #1917; the 55th is `SortedList::IndexOfKey`, repaired as an ordering site in #1918) |
+| ordered containers | 3 | **6** (incl. `ImmutableSortedSet`, `ImmutableSortedDictionary`, `PriorityQueue`) | 5 of 6 (`SortedSet` blocked) |
+| hashed containers | not named | 11 | 6 of 11 (5 blocked) |
+
+**Audit numbering:** no `SR-AUD-*` identifier was issued by any ticket in this
+family. It stays frozen at **364**.

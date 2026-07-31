@@ -646,6 +646,31 @@ identifier was issued**, and it is ticket **#1912** with the full inventory in
 `docs/ComparisonContractPlan.md` §18a. Nothing there is claimed to be wrong
 until #1912 reproduces each site itself.
 
+**#1912 reproduced it, and the inventory above was wrong in five places** —
+tickets #1913–#1918 and #1920, 2026-07-31, recorded in
+`docs/CollectionsComparisonContractPlan.md` and additively in
+`docs/ComparisonContractPlan.md` §18b. The paragraph above stays as written.
+Measured: **six** default-ordering sites, not five (`ImmutableList::BinarySearch`
+is a sixth, counted above as an equality site because its hit test was `==`
+while it also stepped with a raw `<`); **55** defect-capable equality sites
+across **16** headers, not 56 across 20, because eleven of the sites the header
+list implies compare `std::string` or a `void*` recovered from `std::any` and
+cannot exhibit the cause at all; **six** ordered containers, not three
+(`ImmutableSortedSet`, `ImmutableSortedDictionary` and `PriorityQueue` were not
+named); and two populations were omitted entirely — the **six named default
+comparers**, which *are* the port's `Comparer<T>.Default` and
+`EqualityComparer<T>.Default` and were every one of them the raw operator, and
+**eleven hash-based containers**, whose failure is worse than the ordered ones
+and in the opposite direction. The third shape's consequence is also understated
+here: it is not only an invalid container invariant but **silent data loss** —
+`SortedSet<double>` with `Add(NaN); Add(1); Add(2)` ends at `Count == 1` holding
+`[NaN]`, the two later elements accepted by the call and discarded. **Still no
+`SR-AUD-*` identifier was issued**; numbering stays frozen at 364. All of it is
+repaired except **#1919**, `blocked`: the seven containers that name their
+backing `std::` container in their public surface (`SortedSet`, `Dictionary`,
+`HashSet`, `FrozenSet`, `FrozenDictionary`, `ReadOnlySet`, `ReadOnlyDictionary`),
+whose exact approval wording is `docs/CollectionsComparisonContractPlan.md` §10.
+
 Deliberately **not** members and not closed by this work: the caller-supplied
 comparer overloads of `Array::Sort`, `Array::BinarySearch` and
 `MemoryExtensions::Sort`, which pass the predicate straight through exactly as

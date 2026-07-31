@@ -1,11 +1,15 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-31 — 41 physical components, 91 direct production
-dependency edges, a clean native build, 14,815 passing tests across 37
+dependency edges, a clean native build, 14,890 passing tests across 37
 executables, and a locally green ten-job selective matrix. The 2026-07-31
-CCF-010 batch (#1904–#1911) closed the **default comparison contract** family
-outright: SR-AUD-046 is `remediated`, taking the tally to **59 remediated,
-304 confirmed, of 364**, and the floor rose 14,745 → 14,815. The tracked CI
+#1912 batch (#1913–#1918, #1920) carried the **default comparison contract**
+into `Collections`, leaving only the approval-blocked #1919; the floor rose
+14,815 → 14,890. The CCF-010 batch (#1904–#1911) before it closed the family
+in `Core` outright: SR-AUD-046 is `remediated`. The tally is **59 remediated,
+305 confirmed, of 364** — three of the 305 carry a qualifier, and the "304"
+this line previously carried counted neither side of the one split row
+(SR-AUD-043). The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
 is recorded as audit finding `SR-AUD-001`. Post-audit tally: **57 findings
 remediated, 306 confirmed, of 364 total** — this line read `43 / 321` until
@@ -31,6 +35,44 @@ proceeds from the evidence-backed `audit/` inventory in bounded, independently
 validated repair tickets. Consumer-driven API breadth remains legitimate later
 work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
+
+
+## 2026-07-31 — #1912 Collections default comparison contract (7 of 8 tickets)
+
+Branch `feature/remediation-batch-1912-collections-comparers`. The `Collections`
+continuation of CCF-010, recorded as ticket **#1912** by CCF-010's own §18a.
+**No `SR-AUD-*` identifier issued; audit numbering frozen at 364.**
+
+- **#1913** (design) — `docs/CollectionsComparisonContractPlan.md`, 15 sections,
+  from a 74-case probe run one case per process in four build flavours.
+- **#1914** — the six *named* default comparers (`Generic::Comparer<T>::Default`,
+  `EqualityComparer<T>::Default`, `ObjectComparer`, `ObjectEqualityComparer`,
+  `NullableComparer`, `NullableEqualityComparer`), which #1912 did not name and
+  which are the port's own `Comparer<T>.Default`. `Compare(NaN, x)` returned 0
+  for every `x`, making the object an invalid comparator in its own right.
+- **#1915** — six default-ordering sites (`List::Sort`, `List::BinarySearch`,
+  `ImmutableList::Sort` ×2, `ImmutableArray::Sort`, `ImmutableList::BinarySearch`).
+  The 196-shape sweep went from 164 corrupted shapes / 216,078,912 worst-case
+  inversions to 0/0.
+- **#1916** — 38 sequence equality sites across 9 headers.
+- **#1917** — 16 associative value-equality sites across 7 headers.
+- **#1918** — ten containers whose backing comparator is private or a
+  `std::function`, at measured zero representation cost.
+- **#1920** — 12-mutation matrix (10 killed, 2 declared negative controls
+  survived), paired performance with three regressions found and removed, the
+  additive §18b correction to `docs/ComparisonContractPlan.md`, closure.
+- **#1919 — `blocked`.** `SortedSet`, `Dictionary`, `HashSet`, `FrozenSet`,
+  `FrozenDictionary`, `ReadOnlySet`, `ReadOnlyDictionary`: same defect, but each
+  names its backing `std::` container in its public surface. Design complete;
+  exact approval wording in the plan's §10.
+
+Tooling: `scripts/check_selective_components.sh` and `scripts/local_ci_check.sh`
+now honour `SHARP_RUNTIME_BUILD_JOBS` (default 3, rejected above 3) so a session
+required to run below CLAUDE.md's ceiling can use them; the maximum is unchanged.
+
+Gate **14,815 → 14,890** across 37 executables. Module graph 41/91, Doxygen
+1,941 (ceiling 1,942), negative fixtures 9/66, seams 2/18. Maximum compilation
+parallelism **2 jobs** (user lowered the ceiling mid-batch).
 
 ## Sources of truth
 

@@ -914,3 +914,34 @@ This document uses "the finding" for SR-AUD-046 and "the record" for
 `audit/AUDIT_CROSS_CUTTING_FINDINGS.md`'s CCF-010 section. Where §9 corrects
 either, the original text stays as written and the correction is additive, per
 the convention established by SR-AUD-081, SR-AUD-100 and SR-AUD-362.
+
+---
+
+## 18b. §18a corrected by measurement (ticket #1913, 2026-07-31)
+
+§18a above stays **exactly as written**. It said so itself: its counts were
+"measured-by-analogy rather than by their own probe", and it instructed #1912 to
+"reproduce each site itself before claiming anything". #1912 did, through design
+ticket **#1913**. This section records where the measurement disagreed. The full
+record is `docs/CollectionsComparisonContractPlan.md`; only the corrections to
+*this* document's claims are listed here.
+
+| §18a claim | Measured |
+|---|---|
+| §18a.1: 5 default-ordering sites | **6.** `ImmutableList<T>::BinarySearch(item)` (`ImmutableList.hpp:1009`) is a sixth; §18a.3 counted it as an equality site because its hit test was `==`, but it mixed that with a raw `<` step. |
+| §18a.1: "the four `std::sort` sites carry exactly §6.2's precondition violation" | **Correct, and understated.** `List<double>{3,NaN,1,2}.Sort()` gave `[1,3,NaN,2]` — the finite elements unsorted in a *four*-element list — and a 196-shape sweep left 164 shapes with a non-zero inversion count among the finite elements, worst case 216,078,912. CCF-010's own `Array::Sort` figure was 64/196 and 3,874. |
+| §18a.2: "3 ordered associative containers" | **6.** `ImmutableSortedSet`, `ImmutableSortedDictionary` and `PriorityQueue<TElement,TPriority>` were not named. |
+| §18a.2: a lifetime-of-the-container ordering violation | **True, and the observable consequence is silent data loss.** `SortedSet<double>` with `Add(NaN); Add(1); Add(2)` ends at `Count == 1` holding `[NaN]`: the two later elements were accepted by the call and discarded. `SortedDictionary`/`SortedList` with keys 1 and 2 *reject* `Add(NaN, …)` as a duplicate while `ContainsKey(NaN)` answers true. |
+| §18a.3: "56 sites across 20 headers", listing `StringDictionary`, `StringCollection` and the legacy `ArrayList`/`Queue`/`Stack` | **55 defect-capable sites across 16 headers.** Eleven of the sites the named header list implies cannot exhibit the defect at all — their operand is `std::string` or a `void*` recovered from `std::any`. Four more take a caller-supplied comparer and are excluded on §18.1's own rule. |
+| — (not in §18a) | **The six named default comparers.** `Generic::Comparer<T>::Default`, `EqualityComparer<T>::Default`, `ObjectComparer`, `ObjectEqualityComparer`, `NullableComparer`, `NullableEqualityComparer` — the port's *own* `Comparer<T>.Default` and `EqualityComparer<T>.Default` — were all the raw operator. `Comparer<double>::Default().Compare(NaN, x)` returned `0` for every `x`, making the object an invalid comparator in its own right. |
+| — (not in §18a) | **Eleven hash-based containers**, whose failure is worse than the ordered ones and in the opposite direction: `Dictionary<double,V>` accepted the *same* NaN key without limit while `ContainsKey` and `TryGetValue` answered false forever. |
+
+§18a.4's reasoning — that the population is recorded and ticketed rather than
+folded into CCF-010 — is unaffected and was the right call: the family needed
+seven implementation tickets, and one of them (**#1919**, the seven containers
+whose backing `std::` container is part of their public surface) is
+approval-blocked. Absorbing any of it into CCF-010 would have made a fully
+compatible family depend on an approval.
+
+Audit numbering is unchanged at **364**; no `SR-AUD-*` identifier was issued for
+any of the above.
