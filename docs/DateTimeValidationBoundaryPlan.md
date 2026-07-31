@@ -1018,3 +1018,75 @@ can see an over-permissive grammar. `SR-AUD-007b`, `SR-AUD-009` and `SR-AUD-061`
 all `→ remediated`, and with 007a (#1878) **SR-AUD-007 is fully remediated**.
 CCF-002's remaining member is #1880 (CCF2-E, `TryParse` failure output),
 `todo`/inactive.
+
+---
+
+## 21. Correction to §20.3.1 and two respects it did not record (2026-07-31)
+
+*Measured by the Group E subset batch while preparing
+`docs/TextSubsetCompatibilityDecision.md`. §20 above is preserved verbatim.
+**Nothing was implemented** — #1929 is still `todo` and inactive, and #1879's
+approved narrowing stands.*
+
+### 21.1 The "text it cannot represent" justification is wrong about the representation
+
+§20.3.1 premise 1, and the comment it produced at
+`modules/core/src/System/DateTime.cpp:419-423`, justify rejecting a 4-or-more-digit
+fractional second like this:
+
+> *"the port honours milliseconds only, so a 4-digit fraction is text it cannot
+> represent, not text to round."*
+
+Measured, the port's `DateTime` holds `longcs ticks_` with
+`TicksPerMillisecond = 10000` (`DateTime.hpp:33` and `:56`) — **100-nanosecond
+resolution, the same as .NET's** — and both `explicit DateTime(longcs ticks)`
+(`DateTime.hpp:99`) and `AddTicks(longcs)` (`:259`) are public. What cannot
+represent a 4-digit fraction is not the type; it is the **parser's own `int ms`
+intermediate and the millisecond-taking constructor it feeds**.
+
+The proof is in the same repository: **`TimeSpan::TryParse("10:20:30.1234567")`
+succeeds today** and round-trips to `10:20:30.1234567`
+(`build-probe/1927_subset_matrix.log`, case D5d), while
+`DateTime::TryParse("2024-06-15T10:20:30.1234")` returns `false` (case D2d). The
+port already parses a 7-digit fraction — in a sibling parser, into the same
+tick-based representation.
+
+This does not make #1879 wrong: rejecting text the *parser* could not then
+represent was a defensible and approved choice, and it replaced **silent
+truncation**, which was strictly worse. It does mean the justification recorded
+for making that choice **permanent** does not hold, and the choice should be
+re-taken on its merits.
+
+### 21.2 Two narrowings §20.3.1 did not list
+
+§20.3.1 and ticket #1929 record four respects in which this port is narrower than
+.NET. Measured, there are **six**. The two extra ones are different in kind,
+because in both the port disagrees with **itself**:
+
+| # | Measured | Evidence |
+|---|---|---|
+| **5** | **Whitespace.** `Int32::TryParse(" 12 ")`, `Double::TryParse(" 1.5 ")` and `Decimal::TryParse(" 1,234.5 ")` all **accept** surrounding whitespace; `DateTime::TryParse(" 2024-06-15 ")` and `TimeSpan::TryParse(" 01:02:03 ")` **reject** it. .NET accepts in all five — `NumberStyles.cs:63/70/73` for the numbers, `DateTimeParse.cs`'s `SkipWhiteSpaces()` for the dates, `TimeSpanParse.cs:696`'s `input = input.Trim()` for the span | cases N1c, N2c, N3b vs D4g, D5g |
+| **6** | **Two time grammars.** `TimeOnly::TryParse("1:2:3")` and `TimeSpan::TryParse("1:2:3")` **accept** one-digit fields; `DateTime::TryParse("2024-06-15 1:2:3")` **rejects** them. `TimeSpan` accepts a 7-digit fraction; `DateTime` and `TimeOnly` reject 4 | cases D1f, D5a vs D1c; D5d vs D2d, D2i |
+
+§20.3's grammar table already states both — `DateTime` uses `HH ':' mm ':' ss`
+while `TimeOnly` uses `H{1,2} ':' m{1,2} ':' s{1,2}` — so row 6 is visible in the
+record; what was not recorded is that this is a **divergence between the port's
+own parsers**, not only a subset of .NET's grammar.
+
+### 21.3 One respect in which the port is **wider** than .NET
+
+`DateOnly::TryParse("2024-06-15Z")` **succeeds** (case D4c). .NET's `DateOnly`
+has no time-zone concept and rejects a trailing designator. Recorded for
+completeness; not proposed for change here.
+
+### 21.4 Where the decision now sits
+
+The consolidated analysis, options and copyable approval wording are in
+`docs/TextSubsetCompatibilityDecision.md` §§3 and 6. Its recommendation splits
+#1929: rows **5 and 6** (the self-inconsistencies) are recommended for approval,
+rows **1 and 3** (unpadded date fields, short/compact offsets) for deferral —
+row 3 in particular would re-accept `"+2:5"`, which #1879 was explicitly approved
+to reject — and row 4 (`ParseExact`, providers, `DateTimeKind`) as new API under
+its own ticket.
+
+No `SR-AUD-*` identifier was issued; numbering stays frozen at **364**.

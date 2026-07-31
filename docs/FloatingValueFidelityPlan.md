@@ -609,3 +609,59 @@ become `15m` — a *silent value change* of an already-accepted input; for
 `Single`/`Double`, `,` is today *rejected* (`Parse("1,234.5")` fails), so adoption
 is a rejected→accepted widening with **no** existing accepted value changing. Both
 must be resolved consistently; neither is authorised here.
+
+---
+
+## 20. Correction to §18's premise 1 — #1927 is a defect fix, not a value change (2026-07-31)
+
+*Measured by the Group E subset batch. §18's text above is preserved verbatim;
+this section is the correction, and it changes #1927's **risk class**, not its
+content. Nothing was implemented — #1927 is still `todo` and inactive.*
+
+§18 premise 1, and ticket #1927's own acceptance criteria, describe delegating to
+`MathF::Round`/`Math::Round` as *"a value change on currently-valid input (large
+magnitudes, **and possibly the last ulp for ordinary values**, since the delegate
+uses an exact power-of-ten lookup table rather than `std::pow`)"*. That
+parenthesis is why it was filed as a semantic decision rather than a repair.
+
+**Measured, the parenthesis is false.** `build-probe/1927_round_sweep.cpp`,
+deterministic PRNG, 20,000 samples per magnitude band, `digits` uniform over its
+whole legal range (`build-probe/1927_round_sweep.log`):
+
+| Type | Bands **below** the round limit | Result |
+|---|---|---|
+| `double` (limit 1e16) | 1e-9…1e-3, 1e-3…1e3, 1e3…1e8, 1e8…1e15 — 80,000 samples | **0 differ** |
+| `float` (limit 1e8) | 1e-6…1e-3, 1e-3…1e3, 1e3…1e8 — 60,000 samples | **0 differ** |
+
+`Single::Round`/`Double::Round` and the `MathF`/`Math` delegates agree **bit for
+bit** on every one of those 140,000 samples. There is no last-ulp movement to
+weigh.
+
+**Above** the limit, every difference is the current code being wrong
+(`1927_round_examples.log`, `1927_round_detail.log`). A `double` of magnitude
+≥ 1e16 has no representable fractional part, so the correct rounded value *is*
+`x`, and the delegate returns exactly `x` in every sampled case while the current
+code returns `∞` or a neighbouring ulp:
+
+```
+INFINITY  x=-1.8894988582774554e+299 d= 9  current=-inf                     delegate = x exactly
+FINITE    x= 6.6932819227719057e+299 d= 7  current= 6.6932819227719064e+299 delegate = x exactly
+```
+
+Counted: of 140,000 `double` samples, 13,351 differ (9.54 %), **8,628 of them
+because the current code returns infinity**; of 100,000 `float` samples, 18,306
+differ (18.31 %), **16,745 of them infinity**. Every single differing sample is
+at or above the round limit.
+
+**Consequence for the decision.** #1927 still needs approval, because it changes
+a returned value for input that is accepted today. But it should be read as a
+**defect fix with a bounded, measured blast radius** — nothing below 1e16
+(`double`) or 1e8 (`float`) changes at all — rather than as a general-purpose
+value change. The consolidated recommendation and copyable wording are in
+`docs/TextSubsetCompatibilityDecision.md` §6.5 item (1).
+
+§18 premise 2 (#1928) is confirmed unchanged and sharpened: the wrong string is
+at `Math.hpp:588`, is reached by **both** `Math::Round(double,intcs,MidpointRounding)`
+and `Math::Round(double,intcs)`, and **no test in the repository pins it** — the
+only two message assertions, `SingleTests.cpp:403` and `DoubleTests2.cpp:352`,
+pin the *correct* text. So #1928 is one string and zero test edits.
