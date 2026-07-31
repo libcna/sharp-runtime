@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/String.hpp"
+#include "System/detail/CompositeFormat.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OutOfMemoryException.hpp"
@@ -155,7 +156,7 @@ namespace System
         // or std::invalid_argument straight out of a System-shaped public API for inputs such as
         // "{0:D99999999999}" and "{0:DX}", and the std::abs() applied to its result was
         // UBSan-confirmed undefined behaviour for "{0:D-2147483648}" (negation of INT_MIN).
-        SpecNumber parseSpecNumber(const std::string& spec) {
+        SpecNumber parseSpecNumber(std::string_view spec) {
             if (spec.size() <= 1) return {};
             std::size_t i = 1;
             bool negative = false;
@@ -179,7 +180,7 @@ namespace System
         }
 
         // Format integer with .NET-style specifier (X/x=hex, D=decimal padded, else plain).
-        std::string fmtInt(SharpRuntime::intcs value, const std::string& spec) {
+        std::string fmtInt(SharpRuntime::intcs value, std::string_view spec) {
             if (spec.empty()) return std::to_string(value);
             const char sc = spec[0];
             const SpecNumber num = parseSpecNumber(spec);
@@ -230,7 +231,7 @@ namespace System
         }
 
         // Format double with .NET-style specifier (F=fixed, G=general, E=scientific).
-        std::string fmtDouble(double value, const std::string& spec) {
+        std::string fmtDouble(double value, std::string_view spec) {
             if (spec.empty()) {
                 std::array<char, 64> buf;
                 auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
@@ -264,7 +265,7 @@ namespace System
             }
         }
 
-        std::string renderArg(const FormatArg& arg, const std::string& spec) {
+        std::string renderArg(const FormatArg& arg, std::string_view spec) {
             switch (arg.kind) {
                 case FormatArg::Kind::Int:    return fmtInt(arg.i, spec);
                 case FormatArg::Kind::Double: return fmtDouble(arg.d, spec);
@@ -274,75 +275,17 @@ namespace System
             return {};
         }
 
-        // Upper bound on a parsed item index. .NET uses the same 1'000'000 limit
-        // (AppendFormat.cs's IndexLimit); anything at or beyond it cannot address an argument of
-        // any Format overload and is reported as an out-of-range index rather than being
-        // accumulated into an overflowing int.
-        constexpr long long kIndexLimit = 1'000'000LL;
-
-        [[noreturn]] void throwIndexOutOfRange() {
-            throw System::FormatException(
-                "Index (zero based) must be greater than or equal to zero and less than the size of the argument list.");
-        }
-
-        [[noreturn]] void throwInvalidFormatString() {
-            throw System::FormatException("Input string was not in a correct format.");
-        }
-
-        // One left-to-right pass over @p format. Argument text is appended to @p out and is never
-        // re-examined, so an argument containing its own placeholder terminates and is emitted
-        // verbatim.
+        // One left-to-right pass over @p format, driven by the shared .NET
+        // composite-format grammar in System/detail/CompositeFormat.hpp. Argument
+        // text is appended to the output and is never re-examined, so an argument
+        // containing its own placeholder terminates and is emitted verbatim
+        // (ticket #1882); the grammar the scan accepts became .NET's in #1884.
         std::string formatCore(const std::string& format, const FormatArg* args, std::size_t argCount) {
-            std::string out;
-            out.reserve(format.size() + 16 * argCount);
-            const std::size_t n = format.size();
-            std::size_t i = 0;
-            while (i < n) {
-                if (format[i] != '{') { out.push_back(format[i++]); continue; }
-
-                // Item index: at least one ASCII digit must follow the opening brace.
-                std::size_t j = i + 1;
-                if (j >= n || !std::isdigit(static_cast<unsigned char>(format[j]))) throwInvalidFormatString();
-                long long index = 0;
-                bool indexTooLarge = false;
-                for (; j < n && std::isdigit(static_cast<unsigned char>(format[j])); ++j) {
-                    if (index >= kIndexLimit) indexTooLarge = true;
-                    else index = index * 10 + (format[j] - '0');
-                }
-
-                // Optional alignment component. It is consumed so that "{0,6}" keeps resolving
-                // exactly as it did before, and deliberately NOT applied -- padding to the
-                // alignment width changes successful output and belongs to ticket #1884.
-                if (j < n && format[j] == ',') {
-                    std::size_t k = j + 1;
-                    if (k < n && format[k] == '-') ++k;
-                    if (k < n && std::isdigit(static_cast<unsigned char>(format[k]))) {
-                        while (k < n && std::isdigit(static_cast<unsigned char>(format[k]))) ++k;
-                        j = k;
-                    }
-                }
-
-                // Optional format specifier, terminated by the first closing brace -- the same
-                // rule the replaced extractSpec used, so a brace inside a specifier resolves
-                // identically.
-                std::string spec;
-                if (j < n && format[j] == ':') {
-                    const std::size_t close = format.find('}', j + 1);
-                    if (close == std::string::npos) throwInvalidFormatString();
-                    spec = format.substr(j + 1, close - (j + 1));
-                    j = close;
-                }
-
-                if (j >= n || format[j] != '}') throwInvalidFormatString();
-
-                // Index range is checked before the argument is touched, so a malformed item can
-                // never be reported after part of its substitution was published.
-                if (indexTooLarge || index >= static_cast<long long>(argCount)) throwIndexOutOfRange();
-
-                out += renderArg(args[static_cast<std::size_t>(index)], spec);
-                i = j + 1;
-            }
-            return out;
+            return System::detail::runCompositeFormat(
+                format, argCount,
+                [args](std::size_t index, std::string_view spec) {
+                    return renderArg(args[index], spec);
+                });
         }
     }
 

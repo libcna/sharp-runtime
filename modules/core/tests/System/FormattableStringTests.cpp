@@ -2,7 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/FormatException.hpp"
 #include "System/FormattableString.hpp"
+#include "System/String.hpp"
 
 using System::FormattableString;
 
@@ -125,8 +127,13 @@ TEST(FormattableStringBoundaryTests, MultiDigitIndexResolves) {
 }
 
 TEST(FormattableStringBoundaryTests, AbsurdIndexRunDoesNotOverflow) {
+    // FLIPPED by #1884: an index with no argument is now a FormatException
+    // rather than literal text. The property this test exists for -- that a long
+    // digit run is capped rather than overflowing the accumulator -- still holds,
+    // and is now observable as the out-of-range-index message rather than as
+    // passthrough text.
     FormattableString fs("{99999999999999999999}", {"a"});
-    EXPECT_EQ(fs.ToString(), "{99999999999999999999}");
+    EXPECT_THROW(fs.ToString(), System::FormatException);
 }
 
 // --- Preserved behaviour (the section 9.3 invariant) ---
@@ -141,38 +148,58 @@ TEST(FormattableStringBoundaryTests, PreservedSuccess_OrdinarySubstitution) {
     EXPECT_EQ(FormattableString("{0}", {""}).ToString(), "");
 }
 
-TEST(FormattableStringBoundaryTests, PinsCurrentGrammar_BracesAreNotEscapes) {
-    // .NET returns "{0}". Adopting that grammar is ticket #1884.
-    EXPECT_EQ(FormattableString("{{0}}", {"value"}).ToString(), "{value}");
+// FLIPPED by #1884 (approved 2026-07-31): rows 9-13 of
+// docs/CompositeFormatBoundaryPlan.md §20.1. Each of these tests said what would
+// happen to it, and this is it. FormattableString and String::Format now scan
+// with the SAME grammar (System::detail::runCompositeFormat), which is the
+// substantive result: before #1884 they disagreed about braces, about a missing
+// index, and about whether an alignment component existed at all.
+TEST(FormattableStringBoundaryTests, BracesAreEscapes) {
+    EXPECT_EQ(FormattableString("{{0}}", {"value"}).ToString(), "{0}");
+    EXPECT_EQ(FormattableString("{{}}", {"value"}).ToString(), "{}");
+    EXPECT_EQ(FormattableString("a}}b", {"value"}).ToString(), "a}b");
 }
 
-TEST(FormattableStringBoundaryTests, PinsCurrentGrammar_MissingIndexStaysLiteral) {
-    // .NET throws FormatException. #1884.
-    EXPECT_EQ(FormattableString("{1}", {"only"}).ToString(), "{1}");
-    EXPECT_EQ(FormattableString("{0}{5}", {"a"}).ToString(), "a{5}");
+TEST(FormattableStringBoundaryTests, MissingIndexIsRejected) {
+    EXPECT_THROW(FormattableString("{1}", {"only"}).ToString(), System::FormatException);
+    EXPECT_THROW(FormattableString("{0}{5}", {"a"}).ToString(), System::FormatException);
 }
 
-TEST(FormattableStringBoundaryTests, PinsCurrentGrammar_StrayClosingBraceIsLiteral) {
-    // .NET throws FormatException. #1884.
-    EXPECT_EQ(FormattableString("value}", {"a"}).ToString(), "value}");
+TEST(FormattableStringBoundaryTests, StrayClosingBraceIsRejected) {
+    EXPECT_THROW(FormattableString("value}", {"a"}).ToString(), System::FormatException);
 }
 
-TEST(FormattableStringBoundaryTests, PinsCurrentGrammar_AlignmentAndSpecifierStayLiteral) {
-    // .NET pads and applies the specifier. #1884.
-    EXPECT_EQ(FormattableString("{0,6}", {"a"}).ToString(), "{0,6}");
-    EXPECT_EQ(FormattableString("{0:D4}", {"a"}).ToString(), "{0:D4}");
+TEST(FormattableStringBoundaryTests, AlignmentPadsAndTheSpecifierIsConsumed) {
+    EXPECT_EQ(FormattableString("{0,6}", {"a"}).ToString(), "     a");
+    EXPECT_EQ(FormattableString("{0,-6}|", {"a"}).ToString(), "a     |");
+    // The stored arguments are already text, so a specifier has nothing left to
+    // re-format: it is consumed and ignored, exactly as .NET does for a string
+    // argument (string is not IFormattable).
+    EXPECT_EQ(FormattableString("{0:D4}", {"a"}).ToString(), "a");
 }
 
 TEST(FormattableStringBoundaryTests, LoneBracesAtBufferEdges) {
-    EXPECT_EQ(FormattableString("{", {"a"}).ToString(), "{");
-    EXPECT_EQ(FormattableString("}", {"a"}).ToString(), "}");
-    EXPECT_EQ(FormattableString("{0", {"a"}).ToString(), "{0");
-    EXPECT_EQ(FormattableString("{}", {"a"}).ToString(), "{}");
+    EXPECT_THROW(FormattableString("{", {"a"}).ToString(), System::FormatException);
+    EXPECT_THROW(FormattableString("}", {"a"}).ToString(), System::FormatException);
+    EXPECT_THROW(FormattableString("{0", {"a"}).ToString(), System::FormatException);
+    EXPECT_THROW(FormattableString("{}", {"a"}).ToString(), System::FormatException);
 }
 
 TEST(FormattableStringBoundaryTests, NoArgumentsAtAll) {
-    EXPECT_EQ(FormattableString("{0}", {}).ToString(), "{0}");
+    EXPECT_THROW(FormattableString("{0}", {}).ToString(), System::FormatException);
     EXPECT_EQ(FormattableString("plain", {}).ToString(), "plain");
+}
+
+TEST(FormattableStringBoundaryTests, TheTwoEnginesNowAgree) {
+    // The point of sharing one scanner. Every row here used to differ between
+    // FormattableString::ToString and String::Format.
+    EXPECT_EQ(FormattableString("{{0}}", {"x"}).ToString(), System::String::Format("{{0}}", std::string("x")));
+    EXPECT_EQ(FormattableString("a}}b", {"x"}).ToString(), System::String::Format("a}}b", std::string("x")));
+    EXPECT_EQ(FormattableString("{0,6}|", {"x"}).ToString(), System::String::Format("{0,6}|", std::string("x")));
+    EXPECT_THROW(FormattableString("v}", {"x"}).ToString(), System::FormatException);
+    EXPECT_THROW(System::String::Format("v}", std::string("x")), System::FormatException);
+    EXPECT_THROW(FormattableString("{9}", {"x"}).ToString(), System::FormatException);
+    EXPECT_THROW(System::String::Format("{9}", std::string("x")), System::FormatException);
 }
 
 // --- Every entry that reaches ToString honours a subclass override ---

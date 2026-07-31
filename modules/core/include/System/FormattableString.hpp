@@ -6,6 +6,7 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/IFormatProvider.hpp"
+#include "System/detail/CompositeFormat.hpp"
 #include "System/IndexOutOfRangeException.hpp"
 
 namespace System {
@@ -109,49 +110,29 @@ namespace System {
          * returned `"second"` — argument 1 overwriting argument 0's literal text —
          * where the correct result is `"{1}"`.
          *
-         * The **accepted grammar is deliberately unchanged**: `{{`/`}}` are not
-         * escapes, a stray `}` is literal text, an index with no matching argument
-         * stays literal rather than raising `FormatException`, and `{N,width}` /
-         * `{N:spec}` are not recognised as items. Adopting .NET's grammar changes what
-         * currently-succeeding calls return and is gated on explicit user approval as
-         * ticket #1884 (`docs/CompositeFormatBoundaryPlan.md` §20).
+         * Ticket #1884 (approved 2026-07-31) then adopted **.NET's grammar**: `{{`
+         * and `}}` are escapes producing one literal brace, an unescaped `}` is a
+         * `FormatException`, an index with no matching argument is a
+         * `FormatException` instead of staying literal, and `{N,width}` pads the
+         * substituted text. The scan itself is
+         * `System::detail::runCompositeFormat`, shared with `String::Format`, so
+         * the two engines cannot answer differently. `docs/CompositeFormatBoundaryPlan.md`
+         * §20.
          *
          * @return The formatted result string.
          */
         [[nodiscard]] virtual std::string ToString() const {
-            // Beyond this an index cannot address any argument, so the accumulator is
-            // capped rather than allowed to overflow on a long digit run.
-            constexpr std::size_t kIndexLimit = 1000000u;
-
-            std::string result;
-            result.reserve(format_.size());
-            const std::size_t n = format_.size();
-            std::size_t i = 0;
-            while (i < n) {
-                if (format_[i] != '{') { result.push_back(format_[i++]); continue; }
-
-                std::size_t j = i + 1;
-                std::size_t index = 0;
-                bool tooLarge = false;
-                while (j < n && format_[j] >= '0' && format_[j] <= '9') {
-                    if (index >= kIndexLimit) tooLarge = true;
-                    else index = index * 10 + static_cast<std::size_t>(format_[j] - '0');
-                    ++j;
-                }
-
-                // A resolvable item is "{" digits "}" naming a stored argument. Anything
-                // else — no digits, no closing brace, an alignment or specifier
-                // component, or an index with no argument — stays literal, exactly as
-                // before.
-                if (j > i + 1 && j < n && format_[j] == '}' && !tooLarge && index < args_.size()) {
-                    result += args_[index];
-                    i = j + 1;
-                    continue;
-                }
-                result.push_back('{');
-                ++i;
-            }
-            return result;
+            // The grammar and the padding come from the shared scanner, so this
+            // engine and String::Format can no longer disagree about what a
+            // composite format string means. The arguments are already text, so
+            // an item's `:specifier` has nothing left to re-format and is
+            // consumed and ignored -- which is what .NET does for a string
+            // argument too, since string is not IFormattable.
+            return System::detail::runCompositeFormat(
+                format_, args_.size(),
+                [this](std::size_t index, std::string_view) -> const std::string& {
+                    return args_[index];
+                });
         }
 
         /**

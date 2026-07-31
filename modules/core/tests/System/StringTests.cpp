@@ -1066,11 +1066,17 @@ TEST(StringFormatBoundaryTests, PreservedFailure_Types) {
 TEST(StringFormatBoundaryTests, UnclosedItemReportsAMalformedFormatNotABadIndex) {
     // The replaced FinalizeFormat classified purely on "is the next character a digit",
     // so an unclosed item was reported as an out-of-range index. The type is unchanged.
+    // #1884 (row 14 of §20.1) added .NET's offset-and-reason tail
+    // (SR.Format_InvalidStringWithOffsetAndReason). The exception TYPE is still
+    // FormatException and is still not the out-of-range-index one, which is what
+    // this test was written to pin.
     try {
         (void)String::Format("value={0", 42);
         FAIL() << "expected FormatException";
     } catch (const System::FormatException& e) {
-        EXPECT_EQ(e.getMessageProperty(), "Input string was not in a correct format.");
+        EXPECT_EQ(e.getMessageProperty(),
+                  "Input string was not in a correct format. "
+                  "Failure to parse near offset 8. Format item ends prematurely.");
     }
 }
 
@@ -1087,25 +1093,53 @@ TEST(StringFormatBoundaryTests, OutOfRangeIndexKeepsTheReferenceMessage) {
 
 // --- Grammar rows pinned as CURRENT behaviour (ticket #1884 changes these) ---
 
-TEST(StringFormatBoundaryTests, PinsCurrentGrammar_BracesAreNotEscapes) {
-    // .NET returns "{0}", "{}" and "{42}" for these. Adopting that grammar is #1884.
-    EXPECT_THROW(String::Format("{{0}}", 42), System::FormatException);
-    EXPECT_THROW(String::Format("{{}}", 42), System::FormatException);
-    EXPECT_THROW(String::Format("{{{0}}}", 42), System::FormatException);
-    EXPECT_EQ(String::Format("a}}b", 42), "a}}b");
+// FLIPPED by #1884 (approved 2026-07-31): rows 1-4 of
+// docs/CompositeFormatBoundaryPlan.md §20.1. These three tests said what would
+// happen to them, and this is it.
+TEST(StringFormatBoundaryTests, BracesAreEscapes) {
+    EXPECT_EQ(String::Format("{{0}}", 42), "{0}");
+    EXPECT_EQ(String::Format("{{}}", 42), "{}");
+    EXPECT_EQ(String::Format("{{{0}}}", 42), "{42}");
+    EXPECT_EQ(String::Format("a}}b", 42), "a}b");
+    EXPECT_EQ(String::Format("{{", 42), "{");
+    EXPECT_EQ(String::Format("}}", 42), "}");
+    EXPECT_EQ(String::Format("{0}}}", 42), "42}");
 }
 
-TEST(StringFormatBoundaryTests, PinsCurrentGrammar_StrayClosingBraceIsLiteral) {
-    // .NET throws FormatException for an unescaped closing brace. #1884.
-    EXPECT_EQ(String::Format("value}", 42), "value}");
-    EXPECT_EQ(String::Format("a}b{0}", 42), "a}b42");
+TEST(StringFormatBoundaryTests, StrayClosingBraceIsRejected) {
+    // Rows 5 and 6. A caller formatting a brace-heavy template must double it.
+    EXPECT_THROW(String::Format("value}", 42), System::FormatException);
+    EXPECT_THROW(String::Format("a}b{0}", 42), System::FormatException);
 }
 
-TEST(StringFormatBoundaryTests, PinsCurrentGrammar_AlignmentParsesButDoesNotPad) {
-    // .NET pads to the alignment width. #1884.
-    EXPECT_EQ(String::Format("{0,6}|", 42), "42|");
-    EXPECT_EQ(String::Format("{0,-6}|", 42), "42|");
-    EXPECT_EQ(String::Format("{0,6:D3}|", 42), "042|");
+TEST(StringFormatBoundaryTests, AlignmentPads) {
+    // Rows 7 and 8. The specifier is applied first, then the result is padded.
+    EXPECT_EQ(String::Format("{0,6}|", 42), "    42|");
+    EXPECT_EQ(String::Format("{0,-6}|", 42), "42    |");
+    EXPECT_EQ(String::Format("{0,6:D3}|", 42), "   042|");
+    // A width no wider than the text pads nothing.
+    EXPECT_EQ(String::Format("{0,2}|", 42), "42|");
+    EXPECT_EQ(String::Format("{0,0}|", 42), "42|");
+}
+
+TEST(StringFormatBoundaryTests, MalformedAlignmentIsRejected) {
+    // §20.5's vectors: an alignment component needs at least one digit.
+    EXPECT_THROW(String::Format("{0,}", 42), System::FormatException);
+    EXPECT_THROW(String::Format("{0,-}", 42), System::FormatException);
+    EXPECT_THROW(String::Format("{0,x}", 42), System::FormatException);
+}
+
+TEST(StringFormatBoundaryTests, BraceInsideASpecifierIsRejected) {
+    // §20.5's vector. .NET refuses to guess which brace closes the item.
+    EXPECT_THROW(String::Format("{0:{1}}", 42), System::FormatException);
+}
+
+TEST(StringFormatBoundaryTests, IndexAndWidthLimitsMatchTheReference) {
+    // §20.5's vectors. Both bounds are .NET's own 1,000,000.
+    EXPECT_THROW(String::Format("{1000000}", 42), System::FormatException);
+    const std::string wide = String::Format("{0,1000000}", 42);
+    EXPECT_EQ(wide.size(), 1000000u);
+    EXPECT_EQ(wide.substr(999998), "42");
 }
 
 // --- Empty and minimal inputs ---
@@ -1118,7 +1152,8 @@ TEST(StringFormatBoundaryTests, EmptyAndItemFreeFormats) {
 
 TEST(StringFormatBoundaryTests, LoneBracesAtBufferEdges) {
     EXPECT_THROW(String::Format("{", 42), System::FormatException);
-    EXPECT_EQ(String::Format("}", 42), "}");
+    // FLIPPED by #1884: a lone closing brace is now an unescaped `}`.
+    EXPECT_THROW(String::Format("}", 42), System::FormatException);
     EXPECT_THROW(String::Format("{0:", 42), System::FormatException);
     EXPECT_THROW(String::Format("{0,", 42), System::FormatException);
 }
@@ -1129,4 +1164,87 @@ TEST(StringFormatBoundaryTests, ItemAtTheVeryEndOfALargeFormat) {
     const std::string r = String::Format(big, std::string("tail"));
     EXPECT_EQ(r.size(), 100004u);
     EXPECT_EQ(r.substr(100000), "tail");
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-015 tail (#1884, approved 2026-07-31, CCF-012): .NET's composite-format
+// grammar, adopted verbatim in System/detail/CompositeFormat.hpp.
+//
+// Every row of docs/CompositeFormatBoundaryPlan.md §20.1, in the order the plan
+// lists them, plus §20.5's extra vectors. The grammar is shared with
+// FormattableString::ToString, so a row proved here is proved for both engines
+// and for the 46 public entries that funnel through them
+// (String::Format ×22, FormattableString ×4, StringBuilder::AppendFormat ×11,
+// Console::Write/WriteLine ×11). The transitive halves are pinned in their own
+// modules, because a core test may not depend on Text or Console.
+// ---------------------------------------------------------------------------
+
+TEST(StringFormatBoundaryTests, Ccf012_Section20_1_RowsOneToEight) {
+    EXPECT_EQ(String::Format("{{0}}", 42), "{0}");                 // row 1
+    EXPECT_EQ(String::Format("{{}}", 42), "{}");                   // row 2
+    EXPECT_EQ(String::Format("{{{0}}}", 42), "{42}");              // row 3
+    EXPECT_EQ(String::Format("a}}b", 42), "a}b");                  // row 4
+    EXPECT_THROW(String::Format("value}", 42), System::FormatException);  // row 5
+    EXPECT_THROW(String::Format("a}b{0}", 42), System::FormatException);  // row 6
+    EXPECT_EQ(String::Format("{0,6}|", 42), "    42|");            // row 7
+    EXPECT_EQ(String::Format("{0,-6}|", 42), "42    |");           // row 8
+}
+
+TEST(StringFormatBoundaryTests, Ccf012_Row14_MessageCarriesOffsetAndReason) {
+    // Row 14: .NET's SR.Format_InvalidStringWithOffsetAndReason, with each of the
+    // three reasons it distinguishes.
+    auto messageOf = [](const char* format) {
+        try {
+            (void)String::Format(format, 42);
+            return std::string("no-throw");
+        } catch (const System::FormatException& e) {
+            return e.getMessageProperty();
+        }
+    };
+    EXPECT_EQ(messageOf("{0"),
+              "Input string was not in a correct format. "
+              "Failure to parse near offset 2. Format item ends prematurely.");
+    // A trailing "}" runs MoveNext off the end first, so .NET reports it as an
+    // unclosed item rather than an unexpected brace -- verified against
+    // ValueStringBuilder.AppendFormat.cs's MoveNext, which throws
+    // Format_UnclosedFormatItem when pos reaches the end.
+    EXPECT_EQ(messageOf("value}"),
+              "Input string was not in a correct format. "
+              "Failure to parse near offset 6. Format item ends prematurely.");
+    EXPECT_EQ(messageOf("a}b{0}"),
+              "Input string was not in a correct format. Failure to parse near offset 2. "
+              "Unexpected closing brace without a corresponding opening brace.");
+    EXPECT_EQ(messageOf("{x}"),
+              "Input string was not in a correct format. "
+              "Failure to parse near offset 1. Expected an ASCII digit.");
+}
+
+TEST(StringFormatBoundaryTests, Ccf012_PreservedGrammarStillProducesIdenticalText) {
+    // The larger half of the test plan: everything the approval does NOT change.
+    EXPECT_EQ(String::Format("{0}", 42), "42");
+    EXPECT_EQ(String::Format("{0} and {1}", 1, 2), "1 and 2");
+    EXPECT_EQ(String::Format("{1}{0}", std::string("A"), std::string("B")), "BA");
+    EXPECT_EQ(String::Format("{0}{0}", 7), "77");
+    EXPECT_EQ(String::Format("{0:D3}", 42), "042");
+    EXPECT_EQ(String::Format("{0:X}", 255), "FF");
+    EXPECT_EQ(String::Format("{0:x}", 255), "ff");
+    EXPECT_EQ(String::Format("{0:F2}", 3.14159), "3.14");
+    EXPECT_EQ(String::Format("{0:X}/{0:D3}", 255), "FF/255");
+    EXPECT_EQ(String::Format("", 42), "");
+    EXPECT_EQ(String::Format("abc", 42), "abc");
+    EXPECT_EQ(String::Format("{0}", std::string("{1}")), "{1}");   // #1882's invariant
+    EXPECT_THROW(String::Format("{5}", 42), System::FormatException);
+    EXPECT_THROW(String::Format("{", 42), System::FormatException);
+}
+
+TEST(StringFormatBoundaryTests, Ccf012_OutOfRangeIndexKeepsItsOwnMessage) {
+    // A bad index is not a malformed format string, and .NET keeps them apart.
+    try {
+        (void)String::Format("{5}", 42);
+        FAIL() << "expected FormatException";
+    } catch (const System::FormatException& e) {
+        EXPECT_EQ(e.getMessageProperty(),
+                  "Index (zero based) must be greater than or equal to zero and less "
+                  "than the size of the argument list.");
+    }
 }

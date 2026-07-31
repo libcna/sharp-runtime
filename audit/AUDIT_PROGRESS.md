@@ -6274,3 +6274,70 @@ signature, exception specification, object layout or ABI change.
 closed, because #1863 still owns the format half). **The CCF-005 Decimal slice is
 complete.** CNA and mobile-eggbert were not inspected; #1773 stays `blocked`;
 #1888/#1889/#1896 stay declined.
+
+## Post-audit remediation checkpoint — Group C of the approved A–D packet (2026-07-31)
+
+**Tickets #1879 and #1884 — both `done`. SR-AUD-007 (with 007a), SR-AUD-009,
+SR-AUD-061 and SR-AUD-015 are all `remediated`; CCF-012 is complete.** Approved by
+the batch instruction in the exact words of
+`docs/RemainingApprovalDecisions.md` §C.8. Group C is the batch's **behaviour-
+incompatible by design** group: text the library used to accept is now rejected —
+and unlike group B's comma, **the caller finds out**, through `false` or a
+`FormatException`.
+
+**#1879** replaced `std::sscanf` in all four date/time parsers with
+`System::detail::DateTimeTextScanner` and a whole-string consumption rule.
+`"2024-06-15junk"` was a valid date; `"2024-06-15 10:xx:00"` and
+`"2024-06-15 trailing"` both parsed as **midnight**; `DateOnly::TryParse` read a
+full timestamp and silently kept only its date.
+
+**#1884** gave `String::Format` and `FormattableString::ToString` one shared
+scanner transcribed from `ValueStringBuilder.AppendFormat.cs`. Beyond the fourteen
+approved rows it closes a divergence neither finding named: **the two engines
+disagreed with each other**, not only with .NET — `"{{0}}"` threw in one and
+produced `"{v}"` in the other; a missing index threw in one and stayed literal in
+the other.
+
+**Five premises corrected, all preserved additively.**
+
+1. **`docs/DateTimeValidationBoundaryPlan.md` §20.1 is wrong about .NET for two of
+   its fifteen rows.** `ParseFraction` (`Globalization/DateTimeParse.cs:479-492`)
+   accepts `".1234567"`; `ParseTimeZone` (`:530-548`) accepts `"+2:5"` and reads
+   it as 2h05m — **125 minutes, exactly what the port already produced**, so
+   §C.4's "wrong answer that survives round-tripping" was not wrong at all. Both
+   rejections are deliberate **narrowings** of this port's fixed-width,
+   millisecond-resolution subset — the same subset that has always rejected
+   `"2024-6-15"` — implemented as approved and recorded, with the widening
+   question filed as inactive **#1929**.
+2. **Replacing `sscanf` removes `%d`'s own leniencies too**, which §20.1 does not
+   list: `" 024-06-15"` parsed as year 24, and `"+10:20:30"`,
+   `"2024-06-15  1:20:30"` and `"+ 2:00"` all parsed. Structurally the same
+   defect, repaired under the same approval.
+3. **§20.1's test matrix names "the four `Ccf002_*GrammarIsPinnedUnchanged`
+   tests"; there are two**, plus one unanticipated `DateTimeTests` fraction test
+   that also had to be inverted.
+4. **`docs/CompositeFormatBoundaryPlan.md` §20.1 row 5 names the wrong reason.** A
+   **trailing** `}` runs .NET's `MoveNext` off the end first, so the reference
+   reports `Format_UnclosedFormatItem`, not `Format_UnexpectedClosingBrace`. The
+   port matches .NET and pins both spellings.
+5. **`TimeOnly`'s unpadded `"1:2:3"` was deliberately kept**, because .NET accepts
+   it; padding it would have been a fresh divergence. The narrowing is applied
+   exactly where the packet asked and nowhere else.
+
+**Deliberately not adopted:** whitespace inside a format item (`"{0 }"`,
+`"{0, 6}"`), which .NET accepts. It is a *widening*, no approved row asks for it,
+and §20.7 authorises only the §20.1 rows — recorded in the plan §21.4.
+
++51 permanent tests; gate **14,964 → 14,987 across 37 executables**. ASan and
+UBSan over 82 + 36 probe cases with the five affected `.cpp` files compiled
+**into** the probes: **zero diagnostics before and after**, answers identical to
+the plain builds — restating rather than claiming coverage, since no sanitizer can
+see an over-permissive grammar. **No public signature, `noexcept` specification,
+virtual function, vtable slot, data member, `sizeof`, `alignof` or member offset
+changed** in either ticket.
+
+**Tally: 62 → 66 remediated, 302 → 298 confirmed, 364 total.** **CCF-012 is
+complete** (#1881, #1882, #1883, #1884). CCF-002's remaining member is #1880
+(CCF2-E, `TryParse` failure output), inactive. **No new `SR-AUD-*` identifier;
+numbering frozen at 364.** CNA and mobile-eggbert were not inspected; #1773 stays
+`blocked`; #1888/#1889/#1896 stay declined.

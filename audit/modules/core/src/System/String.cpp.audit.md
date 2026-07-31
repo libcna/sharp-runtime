@@ -225,3 +225,44 @@ from position 0 after every substitution, and re-scanned the format once per
 argument in `extractSpec`; a 2-argument call performed at least four full scans
 and two full string copies. `formatCore` is one scan with one `reserve` and one
 append per segment.
+
+### SR-AUD-015 fully remediated — ticket #1884 (2026-07-31)
+
+Approved by the batch instruction in the exact words of
+`docs/RemainingApprovalDecisions.md` §C.8 item (2), which points at
+`docs/CompositeFormatBoundaryPlan.md` §20.7. The approval-gated half of this
+finding — the half that *is* its headline — has landed: `{{` and `}}` are escapes
+producing one literal brace, an unescaped `}` outside a format item is a
+`FormatException`, an index with no argument is a `FormatException` in
+`FormattableString` too, and the `,alignment` component pads the substituted
+text. All fourteen rows of §20.1, measured before and after against a
+`git worktree` checkout of the pre-change tree
+(`build-probe/1884_{prefix,postfix}_plain.log`, 36 cases).
+
+**The result the finding never named.** One shared scanner,
+`System::detail::runCompositeFormat`, transcribed from
+`ValueStringBuilder.AppendFormat.cs`'s `AppendFormatHelper`, now drives **both**
+engines. Before #1884 they disagreed with each other, not only with .NET:
+`"{{0}}"` was a `FormatException` from `String::Format` and `"{v}"` from
+`FormattableString`; a missing index threw in one and stayed literal in the
+other; `"{0,6}"` consumed the alignment in one and emitted it verbatim in the
+other. A test pins that they can no longer diverge.
+
+**Premise correction.** §20.1's row 5 (`"value}"`) is right that it now throws,
+but its reason is not `Format_UnexpectedClosingBrace`: a **trailing** `}` makes
+.NET's `MoveNext` step past the end of the string first, so the reference reports
+`Format_UnclosedFormatItem`. The port matches .NET exactly and the test pins both
+spellings rather than treating them as interchangeable.
+
+**Deliberately not adopted.** .NET also accepts whitespace inside a format item
+(`"{0 }"`, `"{0, 6}"`); the port still rejects it. That is a *widening* of the
+accepted grammar, no row of §20.1 asks for it, and §20.7 authorises only those
+rows — recorded in the plan §21.4 rather than smuggled in.
+
++22 permanent tests, including the flip of all seven `PinsCurrentGrammar_*` and
+edge tests written to be flipped by this ticket, and one in `modules/text`
+pinning that `StringBuilder::AppendFormat` inherits the grammar transitively.
+No signature, `noexcept`, virtual, vtable, data member or layout change. ASan and
+UBSan clean over all 36 probe cases with `String.cpp` compiled into the probe.
+**`SR-AUD-015 → remediated`; CCF-012 is complete** (#1881 design, #1882, #1883,
+#1884).

@@ -602,3 +602,30 @@ TEST(StringBuilderTests, AppendFormat_OversizedSpecifierThrowsFormatException) {
     System::Text::StringBuilder sb;
     EXPECT_THROW(sb.AppendFormat("{0:D99999999999}", 42), System::FormatException);
 }
+
+// ---------------------------------------------------------------------------
+// SR-AUD-015 tail (#1884, approved 2026-07-31, CCF-012). AppendFormat funnels
+// through String::Format, so it inherits .NET's composite-format grammar with no
+// edit of its own. This is the transitive half of
+// docs/CompositeFormatBoundaryPlan.md §20.2, pinned in the owning module because
+// a core test may not depend on Text.
+// ---------------------------------------------------------------------------
+
+TEST(StringBuilderTests, Ccf012_AppendFormatInheritsTheDotNetGrammar) {
+    System::Text::StringBuilder sb;
+    sb.AppendFormat("{{0}}={0,4}", 42);
+    EXPECT_EQ(sb.ToString(), "{0}=  42");
+
+    System::Text::StringBuilder left;
+    left.AppendFormat("[{0,-4}]", 42);
+    EXPECT_EQ(left.ToString(), "[42  ]");
+
+    System::Text::StringBuilder bad;
+    EXPECT_THROW(bad.AppendFormat("oops}", 42), System::FormatException);
+    // A failed AppendFormat must not have published a partial substitution.
+    EXPECT_EQ(bad.ToString(), "");
+
+    System::Text::StringBuilder preserved;
+    preserved.AppendFormat("{0:D3}", 42);
+    EXPECT_EQ(preserved.ToString(), "042");
+}

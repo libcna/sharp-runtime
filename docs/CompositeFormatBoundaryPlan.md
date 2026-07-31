@@ -962,3 +962,88 @@ with #1882/#1883, both of which remain correct without it.
 > Approving this authorises **only** the grammar rows in §20.1. It does not
 > authorise culture behaviour, `ICustomFormatter`, custom numeric format
 > strings, or any change to `String::Format`'s overload set.
+
+---
+
+## 21. Implementation record — #1884 — **APPROVED AND DONE (2026-07-31)**
+
+Approved by the batch instruction in the exact words of
+`docs/RemainingApprovalDecisions.md` §C.8 item (2), which points at §20.7 of this
+document. **All fourteen rows of §20.1 land exactly as written**, measured
+before and after against a `git worktree` checkout of the pre-change tree
+(`build-probe/1884_{prefix,postfix}_plain.log`, 36 cases, one process each).
+
+### 21.1 What was built
+
+One shared scanner, `System::detail::runCompositeFormat`
+(`System/detail/CompositeFormat.hpp`), transcribed from
+`ValueStringBuilder.AppendFormat.cs`'s `AppendFormatHelper`: escaped braces, an
+unescaped `}` rejected, .NET's 1,000,000 index and width limits, an alignment
+component that pads, and a specifier that may not contain `{`. **Both** engines
+now call it — `String::Format` through `formatCore`, and
+`FormattableString::ToString` directly — which is the substantive result beyond
+the fourteen rows: **before #1884 the two engines disagreed** about braces, about
+a missing index, and about whether an alignment component existed at all. A test,
+`FormattableStringBoundaryTests.TheTwoEnginesNowAgree`, pins that they no longer
+can.
+
+The three `[[noreturn]]` helpers and the index limit that #1882 had put in
+`String.cpp` moved into the shared header; nothing was duplicated.
+
+### 21.2 Measured before/after (the §20.1 rows, verbatim)
+
+| Row | Input | Before | After |
+|---|---|---|---|
+| 1–3 | `"{{0}}"`, `"{{}}"`, `"{{{0}}}"` | `FormatException` ×3 | `"{0}"`, `"{}"`, `"{42}"` |
+| 4 | `"a}}b"` | `"a}}b"` | `"a}b"` |
+| 5–6 | `"value}"`, `"a}b{0}"` | `"value}"`, `"a}b42"` | `FormatException` ×2 |
+| 7–8 | `"{0,6}\|"`, `"{0,-6}\|"` | `"42\|"` ×2 | `"    42\|"`, `"42    \|"` |
+| 9 | `FormattableString("{{0}}", {"v"})` | `"{v}"` | `"{0}"` |
+| 10 | `FormattableString("{1}", {"only"})` | `"{1}"` | `FormatException` |
+| 11 | `FormattableString("value}", {"a"})` | `"value}"` | `FormatException` |
+| 12–13 | `FormattableString("{0,6}"/"{0:D4}", {"a"})` | literal passthrough | `"     a"`, `"a"` |
+| 14 | `String::Format("{0", 42)` message | `"Input string was not in a correct format."` | + `" Failure to parse near offset 2. Format item ends prematurely."` |
+
+§20.5's extra vectors: `"{{"`→`"{"`, `"}}"`→`"}"`, `"{0}}}"`→`"42}"`, `"{0,}"`
+and `"{0,-}"`→`FormatException` (*Expected an ASCII digit*), `"{0:{1}}"`→
+`FormatException` (was `"42}"`), `"{1000000}"`→ index-out-of-range,
+`"{0,1000000}"`→ a 1,000,000-character result (was 2). Every "Preserved grammar"
+row of §14.1 is unchanged, including #1882's own invariant that an argument
+containing `"{1}"` is emitted verbatim.
+
+### 21.3 Premise correction — one row of §20.1 names the wrong reason
+
+§20.1 row 5 (`"value}"`) is right that it now throws, but the *reason* is not the
+one the plan implies. Measured against the reference: a **trailing** `}` makes
+.NET's `MoveNext` step past the end of the string first, so it reports
+`Format_UnclosedFormatItem` ("Format item ends prematurely."), **not**
+`Format_UnexpectedClosingBrace`. The port matches .NET exactly, and the test pins
+both spellings — `"value}"` for the premature-end reason and `"a}b{0}"` for the
+unexpected-brace one — rather than assuming they are interchangeable.
+
+### 21.4 What was deliberately not adopted
+
+§20.7 authorises "**only** the grammar rows in §20.1". .NET additionally accepts
+**whitespace inside a format item** (`"{0 }"`, `"{0, 6}"`, `"{0 ,6}"`), which
+this port still rejects. That is a residual divergence, recorded here rather than
+smuggled in: it is a *widening* of the accepted grammar, no row of §20.1 asks for
+it, and no test in this repository depends on it either way. Culture,
+`ICustomFormatter` and custom numeric format strings remain out of scope per
+§17.
+
+### 21.5 Consequences
+
+**No signature, `noexcept` specification, virtual, vtable slot, data member or
+layout change** — exactly as §20.3 predicted. `FormattableString.hpp` is inline,
+so downstream must recompile; nothing must be edited to keep compiling.
+Migration cost is §20.4's: a caller formatting a literal `}` must double it, and
+a caller asserting on exact output text of `{{`, `}}` or `{N,width}` sees
+different text. **+22 permanent tests**, including the flip of all seven
+`PinsCurrentGrammar_*`/edge tests that were written to be flipped by this ticket,
+plus one in `modules/text` pinning that `StringBuilder::AppendFormat` inherits
+the grammar transitively (a core test may not depend on Text). Gate
+**14,978 → 14,987 across 37 executables**. ASan and UBSan over all 36 probe cases
+with `String.cpp` compiled **into** the probe: **zero diagnostics, answers
+identical to the plain build** — restating rather than claiming coverage, since
+no sanitizer can see a grammar change. `SR-AUD-015 → remediated`, and **CCF-012
+is complete** (#1881 design, #1882, #1883, #1884).
