@@ -3355,3 +3355,168 @@ totals stay at 2/18 and 10/74.
 **SR-AUD-327 and SR-AUD-333 both remain `confirmed (design-complete)`**; the
 post-audit tally is unchanged, and no new `SR-AUD-*` identifier was issued.
 Numbering stays frozen at **364**.
+
+---
+
+## 45. Design update — #1899, the Xml.Linq borrowed views (2026-07-31)
+
+*#1899 was **not** approved by the 2026-07-31 Group E subset instruction, which
+approved #1897 option B and nothing else. **No production change was made.**
+This section adds what §42 asserted qualitatively or got wrong, all measured
+(`build-probe/1899_abi_census.log`), and revises the option set. §42 is retained
+unchanged; where the two disagree, §45 is the measured one.*
+
+### 45.1 It is not the same defect as #1897, and #1897 did not touch it
+
+Both are CCF-019, and that is the whole of the relationship:
+
+| | #1897 (done) | #1899 (blocked) |
+|---|---|---|
+| Root cause | unbounded **recursion** during construction | a **lifetime** that the return type does not express |
+| Reachable from | untrusted text | a program that stores a borrowed result |
+| Symptom | `stack-overflow` | `heap-use-after-free` |
+| Repair shape | internal, in one `.cpp` body | a public-surface decision |
+
+`SharpRuntimeTests_Xml_Linq` is **184/184 clean under ASan+UBSan+LSan** after
+#1897, against a binary built after it (`build-probe/1899_asan_xml_linq.log`) —
+so #1897 neither closed X15/X17 nor disturbed them, exactly as expected from a
+Text.Json-only change.
+
+### 45.2 Corrected premise — the surface is **four** overloads, not two, and none has the shape option D proposes
+
+§42.8 words option D as
+`template <class F> void Extensions::ForEachAncestor(const std::shared_ptr<XNode>&, F&&)`
+and describes it as standing "beside the existing `Ancestors`/`AncestorsAndSelf`".
+Measured, the existing surface is:
+
+| # | Signature (all in `Extensions.hpp`, all function templates) | Source constraint |
+|---|---|---|
+| 1 | `std::vector<XElement*> Ancestors(const R& source)` | `range_value_t<R>` → `shared_ptr<XNode>` |
+| 2 | `std::vector<XElement*> Ancestors(const R& source, const XName& name)` | same |
+| 3 | `std::vector<XElement*> AncestorsAndSelf(const R& source)` | `range_value_t<R>` → `shared_ptr<XElement>` |
+| 4 | `std::vector<XElement*> AncestorsAndSelf(const R& source, const XName& name)` | same |
+
+Every one takes a **range** of nodes, and two take an `XName` filter. Option D's
+single-node, unfiltered visitor is therefore **not a counterpart to any of the
+four**: a caller who uses the filtered overloads, or who passes a multi-node
+range, would still have no safe spelling. **Option D as worded is incomplete**,
+and a complete D needs four visitor overloads mirroring the four above (or one
+range-taking visitor plus a name-filtered one, leaving the caller to compose).
+This does not argue against D; it prices it correctly, at roughly four times its
+recorded size.
+
+### 45.3 Corrected premise — option B is a **silent** ABI break, the exact shape declined in #1889
+
+§42.6 records option B's ABI cost as "return calling-convention change". Measured,
+it is worse than that phrase suggests, and in a way that matters:
+
+```
+$ nm --defined-only build/libsharp_runtime_xml_linq.a | grep AttributesProperty
+0000000000000000 W _ZNK6System3Xml4Linq8XElement21getAttributesPropertyEv
+```
+
+The accessor **is** emitted into the library, as a weak symbol, and its Itanium
+mangled name **does not encode the return type**. Changing it from
+`const std::vector<…>&` to `std::vector<…>` by value changes the return
+convention from a register-returned pointer to a hidden `sret` out-parameter
+**while leaving the mangled name character-for-character identical**. A
+translation unit compiled against the old header and linked with one compiled
+against the new header produces a program in which caller and callee disagree
+about the calling convention, and **neither the compiler nor the linker emits a
+diagnostic**.
+
+That is precisely the failure mode §39.1 identified for #1889 — *"a return type
+is not part of an Itanium mangled name"* — and it is one of the reasons #1889
+was **declined**. Option B therefore carries a declined ticket's risk class,
+which §42 did not say.
+
+By contrast, `Ancestors`/`AncestorsAndSelf` contribute **zero symbols** to the
+archive: they are header templates that no library translation unit instantiates.
+Any change to them, up to and including deletion, is a **pure source** change
+with no link-time hazard at all. §42.6's "ABI: return-type change" row for
+options C and E overstates their cost in the same measurement that understates
+option B's.
+
+### 45.4 New evidence — X17 is one of **eighteen**, and the other seventeen are not in question
+
+The Xml.Linq public headers contain **18** accessors returning a `const`
+reference to a member: 14 `const std::string&`, 3 `const XName&`, and
+`getAttributesProperty`'s one `const std::vector<std::shared_ptr<XAttribute>>&`
+(full list in `build-probe/1899_abi_census.log`).
+
+`&el->getValueProperty()` dangles after `el` dies for exactly the same reason
+`&el->getAttributesProperty()` does. So either
+
+- a borrowed `const&` accessor is the **ordinary C++ reference contract** —
+  which is what #1898 documented, and what `std::vector::front()` and
+  `std::string::c_str()` also are — in which case `getAttributesProperty` needs
+  no repair either; or
+- it is unsafe enough to change, in which case consistency demands changing all
+  eighteen, at eighteen times option B's cost and eighteen silent ABI breaks.
+
+**This is the strongest argument yet against option B**, and it is measured
+rather than asserted. §42.1 already classified X17 as "the ordinary C++
+reference-lifetime contract" and noted that a safe spelling — `Attributes()` —
+**already exists and is already public**. §45.4 adds that treating it otherwise
+would be inconsistent with seventeen sibling accessors nobody has proposed
+touching.
+
+### 45.5 Two options §42 did not consider
+
+Neither is a replacement for B/D/E; both fill a gap the recorded set has, which
+is that **no** option gives a *diagnostic* on the dangerous spelling without
+also breaking the safe ones.
+
+| | Option | What it does | Source | ABI | Runtime cost | Closes |
+|---|---|---|---|---|---|---|
+| **F** | **Debug-only lifetime registry.** Behind an off-by-default macro, record each pointer handed out by `Ancestors`/`AncestorsAndSelf` in a side table keyed by raw pointer, and have `~XObject` report any live borrow of the object being destroyed | none | **none** — no type, signature or layout changes in either build mode | zero when off | **detects** X15 in test builds; prevents nothing |
+| **G** | **Deprecate, do not remove.** Add D's safe spellings, then mark the four borrowed overloads and `getAttributesProperty` `[[deprecated("borrowed view; see …")]]` | none — every call site still compiles | none | none | **diagnoses** every borrowed call site at compile time, on the caller's own schedule |
+
+**F's caveat, stated rather than discovered later:** the side table must not
+change any type's layout in either mode, or the macro becomes an ODR hazard
+between differently configured translation units. Keying it on `const void*` in
+a `.cpp`-local registry satisfies that; storing anything in `XObject` does not.
+
+**G's caveat:** `[[deprecated]]` on a function template that the port's own
+tests call would make the repository's own build noisy, so G must land together
+with a migration of the in-repo call sites — which is bounded and visible, unlike
+a downstream migration.
+
+### 45.6 The revised option set, priced
+
+| | Option | Closes X15 | Closes X17 | Source break | ABI risk | Size |
+|---|---|---|---|---|---|---|
+| **A** | state and pin the contract | no (documents) | no (names `Attributes()`) | none | none | **done** (#1898) |
+| **B** | `getAttributesProperty()` by value | — | yes | `&el->get…()` only | **silent**, per §45.3 | 1 accessor |
+| **C** | owning handles, omitting unowned | **disqualified on correctness** (§42.2) | — | — | — | — |
+| **D** | additive visitor spellings | yes, for adopters | already `Attributes()` | none | none | **4 overloads**, per §45.2 |
+| **E** | B + D + removal | yes | yes | **hard, every call site** | source-only for the templates; silent for the accessor | large |
+| **F** | debug-only lifetime registry (**new**) | **detects only** | detects only | none | none | small |
+| **G** | deprecate + D (**new**) | diagnoses | diagnoses | none (warnings) | none | D + attributes |
+
+**Revised recommendation: D (complete, four overloads) + G, and F if a
+detection net is wanted; B only in a coordinated ABI-breaking release with
+#1889, never alone.** The change from §42.7 is the reason for B's deferral: §42
+deferred it for *cost*, §45.3 defers it because it is a **silent** break of the
+same class the user already declined once.
+
+### 45.7 Permanent tests each option would need
+
+| Option | Tests |
+|---|---|
+| **B** | `Attributes()`/`getAttributesProperty()` return the same content and order; the returned vector is independent of later `Add`/`RemoveAttribute`; the returned handles keep attributes alive past the element's destruction; a negative consumer fixture site for `&el->getAttributesProperty()` — **the first spelling any CCF-019 repair would outlaw, and therefore the first thing that would unblock #1894** |
+| **D** | one test per visitor overload for postcondition, order, self-first, name filter, null and detached sources, empty range, multi-node range; a test that the visitor's pointers are unusable after the call by construction (a compile-time check, since it cannot be run) |
+| **F** | the registry reports a live borrow across destruction in the instrumented build; the instrumented and uninstrumented builds agree on every observable result; `sizeof`/`alignof` identical in both modes |
+| **G** | a negative consumer fixture site per deprecated spelling, asserting the deprecation diagnostic — note `-Wdeprecated-declarations` is a **warning**, so the fixture must compile with `-Werror` for the site to be a rejection |
+
+### 45.8 Status
+
+**#1899 stays `blocked`.** It is not implemented, no option is chosen here, and
+nothing about #1897's approval extends to it. The question for the user is
+restated, with §45's corrections folded in, in
+`docs/RemainingApprovalDecisions.md` §E.2′ and in the consolidated packet
+`docs/TextSubsetCompatibilityDecision.md` §7. **#1894 remains blocked** for the
+same reason as before: no landed CCF-019 repair has outlawed a spelling, so
+seam and fixture totals stay **2/18** and **10/74**. **SR-AUD-333 stays
+`confirmed (design-complete)`**, and no new `SR-AUD-*` identifier was issued —
+numbering stays frozen at **364**.
