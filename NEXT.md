@@ -4,18 +4,246 @@
 # NEXT.md
 
 *Last verified: 2026-07-31. Branch:
-`feature/remediation-batch-1912-collections-comparers`. The test floor rose to
-**14,890** (was 14,815). Ticket **#1912** — the `Collections` continuation of
-CCF-010 — is **remediated except for one approval-blocked subfamily**. Seven
-tickets, **#1913**–**#1918** and **#1920**, are `done`; **#1919** is `blocked`
-on one explicit approval whose exact wording is
-`docs/CollectionsComparisonContractPlan.md` §10. **No `SR-AUD-*` identifier was
-issued** and audit numbering stays frozen at **364**. The exact status
-distribution, which sums to 364, is under "Audit arithmetic" in the
-reconciliation section immediately below — the previous handoff's "59 remediated / 304 confirmed" summed to 363
-because it counted neither side of the one split row. See "Autonomous
-remediation batch handoff, 2026-07-31 (#1912 Collections comparison contract)"
-immediately below.
+`feature/remediation-batch-1919-collections-comparison`. The test floor rose to
+**14,920** (was 14,890). Ticket **#1919** was **approved and delivered in full**,
+and with it ticket **#1912** — the `Collections` continuation of CCF-010 — is
+**closed**: every ordered container (6 of 6) and every hashed container
+(11 of 11) now carries the .NET default comparison contract. #1919 shipped as
+four bounded tickets, **#1921** (SortedSet), **#1922** (Dictionary, HashSet),
+**#1923** (the four frozen and read-only projections) and **#1924** (evidence
+and closure), all `done`. Two follow-ups were discovered while implementing it
+and are `todo`, neither a member of #1912's population: **#1925** (a nullable or
+composite floating key keeps raw IEEE equality) and **#1926** (`long double`
+hashed insertion is 1.300× slower). **No `SR-AUD-*` identifier was issued** and
+audit numbering stays frozen at **364**; the distribution is unchanged from the
+previous handoff. Every remaining approval question is consolidated into six
+groups in **`docs/RemainingApprovalDecisions.md`**, each with a copyable
+approval sentence — start there. See "Autonomous remediation batch handoff,
+2026-07-31 (#1919 Collections public-representation containers)" immediately
+below.*
+
+---
+
+## Autonomous remediation batch handoff, 2026-07-31 (#1919 Collections public-representation containers)
+
+Branch `feature/remediation-batch-1919-collections-comparison`, four commits on
+top of `1369fcda`. **Ticket #1919 was approved by the batch instruction in the
+exact words of `docs/CollectionsComparisonContractPlan.md` §10 and is delivered
+in full.** With it, ticket **#1912** and the CCF-010 `Collections` continuation
+are **closed**.
+
+### 1. Tickets
+
+| Ticket | Scope | Status |
+|---|---|---|
+| **#1919** | umbrella — the seven public-representation containers | **done** (decomposed) |
+| **#1921** | `SortedSet<T>` — the ordered container | **done** |
+| **#1922** | `Dictionary<K,V>`, `HashSet<T>` — the mutable hash containers | **done** |
+| **#1923** | `FrozenSet`, `FrozenDictionary`, `ReadOnlySet`, `ReadOnlyDictionary` | **done** |
+| **#1924** | mutation matrix, representation/ABI, performance, closure, decision packet | **done** |
+| **#1925** | *new* — a nullable/composite floating key keeps raw IEEE equality | `todo`, P3 |
+| **#1926** | *new* — `long double` hashed insertion is 1.300× slower | `todo`, P3 |
+| **#1912** | family | **done / closed** |
+
+Only one implementation ticket was ever `doing`. No ticket is left `doing`.
+
+### 2. The implementation, exactly
+
+One private alias per container, replacing the backing `std::` container's
+comparator / hasher / equality template argument with the CCF-010 policy
+aliases from `System/detail/ComparisonPolicy.hpp` (#1905). **No second policy
+framework was created.**
+
+| Container | Backing type now |
+|---|---|
+| `SortedSet<T>` | `std::set<T, detail::DefaultKeyLess<T>>` (private `BackingSet`) |
+| `Dictionary<K,V>` | `std::unordered_map<K,V, DefaultKeyHash<K>, DefaultKeyEqual<K>>` (public `MapType`) |
+| `HashSet<T>` | `std::unordered_set<T, DefaultKeyHash<T>, DefaultKeyEqual<T>>` (public `SetType`) |
+| `FrozenSet<T>` | same as `HashSet<T>` (public `SetType`) |
+| `FrozenDictionary<K,V>` | same as `Dictionary<K,V>` (public `MapType`) |
+| `ReadOnlySet<T>` | same as `HashSet<T>` (public `SetType`) |
+| `ReadOnlyDictionary<K,V>` | same as `Dictionary<K,V>` (public `MapType`) |
+
+Each alias is **token-identical to the standard default for every non-floating
+`T`**, so `std::set<T, std::less<T>>` *is* `std::set<T>` and nothing moves.
+Floating scope is `float`, `double` **and `long double`** — every type for which
+`std::is_floating_point_v` holds. Explicit caller comparers, identity paths
+(`ReferenceEqualityComparer`) and the lifted `Nullable<T>::operator==` are
+untouched.
+
+### 3. Corrected premises
+
+1. **`SortedSet` is representation-private.** §6.1/§10 called `SetIterator` and
+   `comparer()` public; measured, both sit **above** the class's `public:`
+   label. The only public declaration naming the backing type, `Iterator`'s
+   constructor, also takes the private nested `State` and cannot be called.
+   The split is **11 compatible / 6 public-representation**, not 10 / 7. Why the
+   original search missed it: the table recorded, per header, the declaration
+   that mentioned the backing type, without checking its access-specifier region.
+2. **The `double`/`float` iterator typedefs did not change.** §10 approved
+   changing them; measured, libstdc++'s
+   `_Node_iterator<Value, ConstantIterators, CacheHashCode>` never mentions the
+   hasher and both bools are unchanged for `float` and `double`. **Only
+   `long double` moves**, because `__is_fast_hash<std::hash<long double>>` is
+   specialised to `false` while the primary template says `true` for the policy
+   hasher: `_Hashtable_traits<true,true,true>` → `<false,true,true>`, with
+   `double`'s `<false,true,true>` unchanged in both.
+
+Both are recorded additively in `docs/CollectionsComparisonContractPlan.md`
+§16, `docs/ComparisonContractPlan.md` §18c and
+`audit/AUDIT_CROSS_CUTTING_FINDINGS.md`. Original text preserved.
+
+### 4. Before/after, measured (`build-probe/1919_{prefix,postfix}_plain.log`, 46 cases)
+
+| Case | Before | After |
+|---|---|---|
+| `SortedSet<double>` `Add(NaN);Add(1);Add(2)` | count **1**, `[NaN]` | count 3, `[NaN,1,2]` |
+| `SortedSet<double>` 1..8 then `Add(NaN)` | count **8**, NaN dropped | count 9 |
+| `SortedSet<double>{3,NaN,1,2}` | count **3** | count 4 |
+| `SortedSet` union / intersect over NaN sets | `[NaN]` / `[NaN]` | `[NaN,1,2,3]` / `[NaN,2]` |
+| `Dictionary<double,int>` `Add(NaN)` twice | no throw, count 2, `ContainsKey` **false** | throws, count 1, true |
+| `Dictionary` NaN key + 200k inserts | **lost across the rehash** | found, and after `TrimExcess` |
+| `HashSet<double>` `Add(NaN)` twice | `true/true`, count 2, `Contains` **false** | `true/false`, count 1, true |
+| `FrozenSet<double>::Create({NaN,NaN,1})` | count **3**, `Contains` false | count 2, true |
+| `FrozenDictionary<double,int>` NaN key | `ContainsKey` **false** | true |
+| `ReadOnlySet<double>.SetEquals(*this)` | **false** | true |
+| `ReadOnlyDictionary<double,int>` NaN key | `ContainsKey` **false** | true |
+| every `int` / `string` / `pair` control | — | **unchanged** |
+
+### 5. Source / ABI / representation consequence
+
+- **57 `sizeof`/`alignof` readings, 0 changed**, either instantiation family.
+  Standard-layout and trivially-copyable unchanged.
+- **External symbols 1,758 → 1,757.** 106 removed, 105 added; 97 of each a
+  genuine predicate move, 8 of each a `long double` typeinfo name. **No symbol
+  moved for any non-floating instantiation.** The one unpaired removal is a weak
+  COMDAT `_Hashtable<optional<double>,…>::find` GCC now inlines away — a codegen
+  artefact, the shape #1918 recorded for `priority_queue::pop`.
+- **Public types that changed, floating element/key only:** `Dictionary::ToMap`
+  ×2; `FrozenSet::CreateFromSet` and `FrozenDictionary::CreateFromMap`
+  parameters; `ReadOnlySet` and `ReadOnlyDictionary` `shared_ptr` constructor
+  parameters; `ReadOnlyDictionary::getDictionaryProperty()` (protected); and the
+  `long double` iterator typedefs only.
+- Migration note: **`docs/Migration-CollectionsFloatingComparers.md`**. Every
+  failure is a hard compile error naming both types; `auto` and range-`for`
+  need no change. All consumers must be rebuilt (header-only templates).
+  Serialized data unaffected.
+- Boundary fixture: **`test/consumer/collections_floating_comparer_negative.cpp`**,
+  8 sites, pinning **both** halves — the floating spellings rejected *and* the
+  non-floating ones still accepted.
+
+### 6. Mutations — 19 run, 0 surprises
+
+**9 killed, 6 REJECTED at compile time** (the suite's cross-container
+`static_assert`s make the mutation fail to build — a stronger verdict than
+killed, so the harness now reports three verdicts), **2 declared controls and
+2 declared *equivalents* survived**. Full table: plan §18.
+
+The two equivalents were written expecting a kill and are kept and relabelled,
+because *why* they are equivalent is the campaign's most useful result:
+
+- a **"bypass after rehash" is structurally unreachable** — the hasher is a
+  property of the container *type*, not a decision taken per call site;
+- a raw-set fold inside `FrozenSet::Create` cannot change a *set*, because the
+  copy folds again — which is exactly what makes the `FrozenDictionary` version
+  (N15) a real defect, where the raw temporary loses last-value-wins and
+  depends on an unspecified iteration order.
+
+Reporting either as killed would have been false.
+
+### 7. Sanitizers
+
+**Zero ASan, LSan and UBSan diagnostics over all 46 probe cases**, every answer
+identical to the plain build. This restates the family's central fact rather
+than claiming coverage: **the sanitizers cannot see a semantic comparison defect
+at all.** The permanent suite and the mutation matrix are the correctness gate.
+
+### 8. Performance — 7 alternating rounds, 19 workloads
+
+Every control and every `double`/`float` workload is **inside its own noise
+floor**. Full table: plan §19.
+
+- **One genuine regression:** `Dictionary<long double,int>` insert 200k,
+  **52.41 → 68.12 ms, ratio 1.300, noise 1.206** — the hash-code cache of §3.2.
+  Accepted and ticketed as **#1926**; the same container's *lookup* got faster.
+- **Three rows are not ratios**, because the *before* binary was not doing the
+  same work: `SortedSet` 1 % NaN held **two** elements rather than 200,000, and
+  `HashSet<double>` insert with 50 % NaN took **16,953 ms** against **8.83 ms**
+  after — 100,000 NaNs in one bucket, none comparing equal, quadratic. That is
+  the removal of a blow-up any NaN-bearing input could trigger.
+
+### 9. Verified state
+
+| Invariant | Value |
+|---|---|
+| Test gate | **14,920** across **37** executables (was 14,890) |
+| Module graph | **41 modules / 91 edges** (unchanged) |
+| Version seams | **2 seams / 18 specialisations** (unchanged) |
+| Negative fixtures | **10 fixtures / 74 sites** (was 9 / 66) |
+| Canonical Doxygen | **1,937** warnings (ceiling 1,942) |
+| Audit distribution | 59 remediated, 302 confirmed, 2 confirmed (design-complete), 1 split (SR-AUD-043a remediated / 043b open) = **364** |
+| `scripts/local_ci_check.sh build` | **passed** |
+| Max aggregate compilation parallelism | **2 jobs** |
+
+### 10. Remaining queue — start with the decision packet
+
+**`docs/RemainingApprovalDecisions.md`** consolidates every `needs_user` row and
+every `blocked` row whose blocker is a user decision into **six groups by shared
+root cause**, each with a copyable approval sentence:
+
+| Group | Tickets | Recommend |
+|---|---|---|
+| **A** `noexcept` vs validation | #1854, #1862 | approve A(i) — drop `noexcept`, throw |
+| **B** numeric text grammar | #1858, #1865 | approve, but `Decimal`'s comma re-interpretation as its own commit |
+| **C** accepted grammar becomes strict | #1879, #1884 | approve |
+| **D** emitted text changes | #1863 | approve |
+| **E** Text.Json / Xml.Linq residuals | #1897, #1899 | approve E1(B) and E2(D), item by item |
+| **F** this batch's follow-ups | #1925, #1926 | defer both |
+
+**Groups A, B, C and D can be approved as ONE batch** — all ten tickets are
+header or body changes with no signature, layout, vtable or mangled-name change.
+#1888, #1889 and #1896 are recorded as **declined** and deliberately not
+re-proposed. **#1773 remains `blocked`** on CNA/mobile-eggbert upgrading, an
+external event.
+
+**Recommended next work:** approve groups A–D and run them as one remediation
+batch; they are the largest block of ready, low-risk parity work left.
+
+### 11. Build directories
+
+| Directory | Start | End |
+|---|---|---|
+| `build/` | 745 M | 748 M |
+| `build-asan/` | 3.8 G | 3.8 G (untouched) |
+| `build-probe/` | 42 M | 42 M (peak 91 M) |
+| `build-modular/` | 1.3 G | 1.3 G |
+| `build-tmp/` | 7.6 M | 4 K |
+| `cmake-build-debug/` | 88 M | 88 M |
+
+**~181 MB reclaimed** — the temporary `git worktree` at `1369fcda` (32 M),
+all probe/benchmark/mutation binaries, and `build-tmp`. Sources, scripts, logs,
+benchmark inputs and outputs, mutation results and ABI inventories are retained
+under `build-probe/1919_*`.
+
+### 12. Known limitations
+
+- **#1925** — the policy selects on `std::is_floating_point_v`, so a *nullable
+  or composite* floating key keeps raw IEEE equality.
+  `Dictionary<std::optional<double>,V>` cannot find a NaN key **by the object
+  that was inserted**; .NET can. Pinned by
+  `CollectionsComparisonContract.NullableFloatingKeysKeepRawIeeeEqualityForNow`.
+- **#1926** — `long double` hashed insertion is 1.300× slower.
+- The `Doxygen`, module-graph, seam and fixture invariants above were all
+  re-measured this batch; none was taken from a previous handoff.
+
+### 13. Confirmations
+
+CNA and mobile-eggbert were **not** inspected, searched, built or modified. All
+**three** pre-existing stash entries are intact and untouched; no `git stash`
+command was run. No push, merge, rebase of a shared branch, tag or publication
+occurred. No sharp-runtime compilation exceeded **2** aggregate jobs. No build
+tree was created under `/tmp`, `/var/tmp` or `/dev/shm`. No new `SR-AUD-*`
+identifier was issued; numbering stays frozen at **364**.
 
 ---
 

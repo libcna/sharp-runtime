@@ -1,11 +1,17 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-31 — 41 physical components, 91 direct production
-dependency edges, a clean native build, 14,890 passing tests across 37
+dependency edges, a clean native build, 14,920 passing tests across 37
 executables, and a locally green ten-job selective matrix. The 2026-07-31
-#1912 batch (#1913–#1918, #1920) carried the **default comparison contract**
-into `Collections`, leaving only the approval-blocked #1919; the floor rose
-14,815 → 14,890. The CCF-010 batch (#1904–#1911) before it closed the family
+#1919 batch (#1921–#1924) delivered the approval-blocked half of #1912 and
+**closed the family**: every ordered container (6 of 6) and every hashed
+container (11 of 11) now carries the default comparison contract, and the floor
+rose 14,890 → 14,920. Its two follow-ups, #1925 and #1926, are `todo` and are
+not members of #1912's population. Every remaining approval question is
+consolidated in `docs/RemainingApprovalDecisions.md`. The 2026-07-31
+#1912 batch (#1913–#1918, #1920) before it carried the **default comparison
+contract** into `Collections`, leaving only the then-blocked #1919; the floor
+rose 14,815 → 14,890. The CCF-010 batch (#1904–#1911) before it closed the family
 in `Core` outright: SR-AUD-046 is `remediated`. The tally is **59 remediated,
 305 confirmed, of 364** — three of the 305 carry a qualifier, and the "304"
 this line previously carried counted neither side of the one split row
@@ -35,6 +41,43 @@ proceeds from the evidence-backed `audit/` inventory in bounded, independently
 validated repair tickets. Consumer-driven API breadth remains legitimate later
 work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
+
+
+## 2026-07-31 — #1919 Collections public-representation containers (#1921–#1924)
+
+Branch `feature/remediation-batch-1919-collections-comparison`. The
+approval-blocked half of #1912, approved in the exact words of
+`docs/CollectionsComparisonContractPlan.md` §10 and delivered as four bounded
+tickets. **#1912 and the CCF-010 `Collections` continuation are now closed.**
+
+- **#1921 — `SortedSet<T>`.** `Add(NaN); Add(1); Add(2)` left `Count` **1**
+  holding `[NaN]`; every element added after a NaN was silently discarded,
+  because `std::less<double>` violated `[associative.reqmts]` for the
+  container's whole lifetime.
+- **#1922 — `Dictionary<K,V>`, `HashSet<T>`.** A NaN key was accepted without
+  limit and then unfindable forever, and did not survive a rehash.
+- **#1923 — `FrozenSet`, `FrozenDictionary`, `ReadOnlySet`,
+  `ReadOnlyDictionary`.** The projections now agree with their sources;
+  `ReadOnlySet<double>.SetEquals(*this)` answered **false** before.
+- **#1924 — evidence and closure.** 19 mutations (9 killed, 6 rejected at
+  compile time, 2 controls and 2 declared *equivalents* survived), 57
+  `sizeof`/`alignof` readings with **0** changed, a symbol inventory in which
+  **no symbol moved for any non-floating instantiation**, 7 benchmark rounds,
+  and `docs/RemainingApprovalDecisions.md`.
+
+**Two of §10's own premises were wrong and are corrected additively:**
+`SortedSet`'s `SetIterator`/`comparer()` are **private**, so the split is
+11 / 6 rather than 10 / 7; and the `double`/`float` iterator typedefs **did not
+change** — only `long double`'s did, because its hash-code cache is switched
+off.
+
+**New, not members of #1912:** #1925 (a nullable/composite floating key keeps
+raw IEEE equality) and #1926 (`long double` hashed insertion 1.300× slower).
+
+Gate **14,890 → 14,920** across 37 executables. Module graph 41/91, seams 2/18,
+negative fixtures **9/66 → 10/74**, Doxygen 1,937 of 1,942, `local_ci_check.sh`
+passed. No `SR-AUD-*` issued; numbering frozen at **364**. Maximum aggregate
+compilation parallelism **2 jobs**.
 
 
 ## 2026-07-31 — #1912 Collections default comparison contract (7 of 8 tickets)
