@@ -10,6 +10,17 @@ cd "$REPO_ROOT"
 
 BUILD_DIR="${1:-build}"
 
+# CLAUDE.md's build-resource policy caps every compilation in this repository at
+# three parallel jobs and explicitly allows fewer. An explicit --parallel on the
+# command line overrides CMAKE_BUILD_PARALLEL_LEVEL, so a hardcoded 3 could not
+# be bounded from outside; SHARP_RUNTIME_BUILD_JOBS lets a caller lower the
+# ceiling. It defaults to 3 and is rejected above 3, so the maximum is unchanged.
+BUILD_JOBS="${SHARP_RUNTIME_BUILD_JOBS:-3}"
+if ! [[ "$BUILD_JOBS" =~ ^[123]$ ]]; then
+    echo "FAIL: SHARP_RUNTIME_BUILD_JOBS must be 1, 2 or 3 (got '$BUILD_JOBS')" >&2
+    exit 1
+fi
+
 echo "==> Validating module boundaries"
 python3 scripts/validate_module_boundaries.py
 python3 test/validate_module_boundaries_test.py
@@ -23,9 +34,9 @@ python3 test/check_version_seam_odr_test.py
 # #1801). It runs here, before anything is configured, because it needs only the
 # tracked sources and the CMake component metadata -- and because a broken
 # compile-rejection contract should be reported in seconds rather than after a
-# full build. Its own compiles are capped at three parallel jobs internally.
+# full build. Its own compiles are capped at $BUILD_JOBS parallel jobs.
 echo "==> Validating negative consumer fixtures (ticket #1801)"
-python3 scripts/check_negative_consumer_fixtures.py
+python3 scripts/check_negative_consumer_fixtures.py --jobs "$BUILD_JOBS"
 python3 test/check_negative_consumer_fixtures_test.py
 
 echo "==> Configuring ($BUILD_DIR)"
@@ -35,7 +46,7 @@ echo "==> Building (checking for zero warnings/errors)"
 BUILD_LOG="$(mktemp)"
 trap 'rm -f "$BUILD_LOG"' EXIT
 
-if ! cmake --build "$BUILD_DIR" --parallel 3 > "$BUILD_LOG" 2>&1; then
+if ! cmake --build "$BUILD_DIR" --parallel "$BUILD_JOBS" > "$BUILD_LOG" 2>&1; then
     echo "FAIL: build failed" >&2
     tail -60 "$BUILD_LOG" >&2
     exit 1

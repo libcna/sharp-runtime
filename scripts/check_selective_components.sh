@@ -8,6 +8,20 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MATRIX_ROOT="$(mktemp -d)"
 trap 'rm -rf "$MATRIX_ROOT"' EXIT
 
+# CLAUDE.md's build-resource policy caps every compilation in this repository at
+# three parallel jobs, and explicitly allows fewer. This script used to hardcode
+# --parallel 3, which meant a session or machine that had to run at a LOWER
+# ceiling could not use it at all: an explicit --parallel on the command line
+# overrides CMAKE_BUILD_PARALLEL_LEVEL, so there was no way to bound it from
+# outside. SHARP_RUNTIME_BUILD_JOBS lets a caller lower the ceiling; it defaults
+# to 3 and is rejected above 3, so the policy maximum is unchanged.
+BUILD_JOBS="${SHARP_RUNTIME_BUILD_JOBS:-3}"
+if ! [[ "$BUILD_JOBS" =~ ^[123]$ ]]; then
+    echo "FAIL: SHARP_RUNTIME_BUILD_JOBS must be 1, 2 or 3 (got '$BUILD_JOBS');" >&2
+    echo "      CLAUDE.md caps every compilation in this repository at three jobs." >&2
+    exit 1
+fi
+
 MATRIX=(
     "Core.Base:core_base.cpp"
     "Collections.Blocking:blocking_collection.cpp"
@@ -54,7 +68,7 @@ expect_consumer_failure() {
     local build_log="$MATRIX_ROOT/negative-$fixture_name.log"
 
     configure_consumer "$build_dir" "$component" "$source_name"
-    if cmake --build "$build_dir" --parallel 3 >"$build_log" 2>&1; then
+    if cmake --build "$build_dir" --parallel "$BUILD_JOBS" >"$build_log" 2>&1; then
         echo "FAIL: forbidden consumer fixture $fixture_name compiled" >&2
         exit 1
     fi
@@ -84,7 +98,7 @@ check_component() {
         -DCMAKE_PROJECT_INCLUDE="$REPO_ROOT/test/consumer/InjectFixture.cmake" \
         -DCMAKE_BUILD_TYPE=Debug \
         >/dev/null
-    cmake --build "$build_dir" --parallel 3 >/dev/null
+    cmake --build "$build_dir" --parallel "$BUILD_JOBS" >/dev/null
 
     if find "$build_dir" -maxdepth 1 -type f -perm -111 \
             -name 'SharpRuntimeTests_*' -print -quit | grep -q .; then
