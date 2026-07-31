@@ -86,3 +86,33 @@ still casts the span length straight to `size_t` — that defense-in-depth guard
 **SR-AUD-043b**, which cannot throw without dropping `noexcept`. It is tracked as
 approval-gated ticket #1854 (`needs_user`) and stays open; the reachable exploit
 is already closed by 043a. `docs/ConversionBoundaryFamilyPlan.md` §19.3.
+
+### Fully remediated (SR-AUD-043b) — ticket #1854 (2026-07-31)
+
+Approved by the batch instruction in the exact words of
+`docs/RemainingApprovalDecisions.md` §A.10 (option A: drop `noexcept`, throw).
+`HashCode::AddBytes(const ReadOnlySpan<uint8_t>&)` dropped `noexcept` and now
+throws `ArgumentOutOfRangeException("value")` for a negative length; the three
+`ReadOnlyMemory<T>` constructors dropped `noexcept` — and the pointer/length one
+its `constexpr` — and now reject a negative length
+(`ArgumentOutOfRangeException("length")`), an oversized `std::vector` (through
+the shared `detail::checkedSpanLength`, the same guard 043a introduced) and a
+negative-offset/count `ArraySegment`. The fields stay signed `intcs`; no
+parameter list, return type, layout, vtable or mangled name changed, and an
+Itanium mangled name does not encode `noexcept`, so there is **no exported-symbol
+break**. +11 tests (`Batch3TypeTests.cpp`, `HashCodeTests.cpp`).
+
+**Reachability, measured rather than assumed** (`build-probe/1854_prefix_plain.log`,
+cases A21/A22/A27/A28): the `ReadOnlyMemory(const T*, intcs)` constructor **was**
+directly reachable and stored `-1` and `INTCS_MIN` verbatim — that half was a
+real, reachable defect, not defence in depth as §A.5 of the decision packet
+described the ticket as a whole. The other two halves are genuinely unreachable
+and are recorded as such: `ArraySegment` validates its own offset/count, so no
+segment carrying a negative one can be handed to the segment constructor; and
+since 043a no negative-length `ReadOnlySpan` can be constructed, so `AddBytes`'s
+guard has no reachable caller. For those two, the permanent tests pin the
+approved exception *specification* (`static_assert(!noexcept(…))`) plus the
+unchanged valid behaviour, and say plainly that the throw itself cannot be
+triggered through the public surface — an unreachable guard must not be reported
+as a covered behaviour. `SR-AUD-043 → remediated` (043a #1852, 043b #1854).
+`docs/ConversionBoundaryFamilyPlan.md` §19.3, §19.6.

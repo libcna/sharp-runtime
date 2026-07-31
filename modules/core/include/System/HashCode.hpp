@@ -7,6 +7,7 @@
 #include <functional>
 #include <random>
 #include <vector>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/IEqualityComparer.hpp"
 #include "System/Span.hpp"
 
@@ -88,8 +89,20 @@ namespace System {
          * @brief Adds a span of bytes to the hash code.
          * C++ counterpart of .NET HashCode.AddBytes(ReadOnlySpan&lt;byte&gt;).
          * @param value The span of bytes to add.
+         * @throws System::ArgumentOutOfRangeException if @p value has a negative length.
          */
-        void AddBytes(const ReadOnlySpan<uint8_t>& value) noexcept {
+        void AddBytes(const ReadOnlySpan<uint8_t>& value) {
+            // A negative length would become a huge std::size_t here and read past
+            // the end of the buffer (SR-AUD-043b). Since #1852 a negative-length
+            // ReadOnlySpan can no longer be CONSTRUCTED, so this guard is defence
+            // in depth for a hand-forged or future span; rejecting instead of
+            // reading required dropping the `noexcept` (ticket #1854, approved
+            // 2026-07-31), because a throw from a noexcept function is
+            // std::terminate. The AddBytes(const uint8_t*, std::size_t) and
+            // AddBytes(const std::vector<uint8_t>&) overloads take an unsigned
+            // length that cannot be negative and stay noexcept.
+            if (value.getLengthProperty() < 0)
+                throw System::ArgumentOutOfRangeException("value");
             AddBytes(value.getPointer(), static_cast<std::size_t>(value.getLengthProperty()));
         }
 

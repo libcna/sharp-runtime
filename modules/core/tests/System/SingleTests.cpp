@@ -4,10 +4,12 @@
 #include <gtest/gtest.h>
 #include "System/Single.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ArithmeticException.hpp"
 #include "System/FormatException.hpp"
 #include <cmath>
 #include <limits>
+#include <string>
 
 using System::Single;
 using System::ArithmeticException;
@@ -356,4 +358,68 @@ TEST(SingleTest, ToString_ValidSpecifiers_StillWork) {
     EXPECT_FALSE(Single::ToString(3.14159f, "G").empty());
     EXPECT_EQ(Single::ToString(2.5f, "R"), Single::ToString(2.5f));
     EXPECT_FALSE(Single::ToString(1.5f, "N2").empty());
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-029 (#1862, approved 2026-07-31): Round(x, digits) validates digits.
+//
+// .NET's Single.Round(x,digits) forwards to MathF.Round(x,digits,ToEven), whose
+// funnel rejects `(uint)digits > 6` -- so a negative count throws too. The port
+// used to be noexcept and fed digits straight to std::pow, returning a spurious
+// value or NaN with no diagnostic. Adding the check required dropping noexcept;
+// that is a source-level change only (an Itanium mangled name does not encode
+// noexcept), so no exported symbol, parameter list, return type or layout moved.
+// ---------------------------------------------------------------------------
+
+TEST(SingleTest, RoundDigits_ValidRange_UnchangedValues) {
+    EXPECT_FLOAT_EQ(Single::Round(1.2345f, 0), 1.0f);
+    EXPECT_NEAR(Single::Round(1.2345f, 2), 1.23f, 1e-6f);
+    EXPECT_NEAR(Single::Round(1.456f, 2), 1.46f, 1e-3f);
+    EXPECT_NEAR(Single::Round(1.2345f, 6), 1.2345f, 1e-6f);
+}
+
+TEST(SingleTest, RoundDigits_AboveMaximum_ThrowsAOORE) {
+    EXPECT_THROW(Single::Round(1.2345f, 7), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Single::Round(1.2345f, 99), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Single::Round(1.2345f, SharpRuntime::INTCS_MAX),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(SingleTest, RoundDigits_Negative_ThrowsAOORE) {
+    EXPECT_THROW(Single::Round(1.2345f, -1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Single::Round(1.2345f, SharpRuntime::INTCS_MIN),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(SingleTest, RoundDigits_ThrowCarriesDotNetParamNameAndMessage) {
+    try {
+        (void)Single::Round(1.2345f, 7);
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "digits");
+        // .NET SR.ArgumentOutOfRange_RoundingDigits_MathF, verbatim.
+        EXPECT_NE(std::string(e.what()).find(
+                      "Rounding digits must be between 0 and 6, inclusive."),
+                  std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(SingleTest, RoundDigits_LimitIsSixNotFifteen) {
+    // The float limit is MathF's 6, deliberately distinct from Math's 15 --
+    // float carries only ~7 significant decimal digits.
+    EXPECT_NO_THROW((void)Single::Round(1.2345f, 6));
+    EXPECT_THROW(Single::Round(1.2345f, 15), System::ArgumentOutOfRangeException);
+}
+
+TEST(SingleTest, RoundDigits_ExceptionSpecificationIsTheApprovedOne) {
+    float x = 1.0f;
+    // The two-argument overload gave up noexcept so it can reject digits (#1862).
+    static_assert(!noexcept(Single::Round(x, 2)),
+                  "#1862: Round(float,intcs) must be able to throw");
+    // The one-argument overload validates nothing and keeps its noexcept.
+    static_assert(noexcept(Single::Round(x)),
+                  "#1862: Round(float) must stay noexcept");
+    EXPECT_FLOAT_EQ(Single::Round(0.5f), 0.0f);  // ties-to-even, unchanged
+    EXPECT_FLOAT_EQ(Single::Round(1.5f), 2.0f);
 }

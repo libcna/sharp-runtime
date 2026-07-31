@@ -17,6 +17,7 @@
 #include "SharpRuntime/PortableFromChars.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ArithmeticException.hpp"
 #include "System/FormatException.hpp"
 
@@ -287,9 +288,30 @@ public:
     /** @brief Rounds @p x to the nearest integer (ties to even). C++ counterpart of .NET Double.Round(double). */
     [[nodiscard]] static double Round(double x) noexcept { return std::nearbyint(x); }
 
-    /** @brief Rounds @p x to @p digits decimal places (ties to even). C++ counterpart of .NET Double.Round(double,int). */
-    [[nodiscard]] static double Round(double x, intcs digits) noexcept
+    /**
+     * @brief Rounds @p x to @p digits decimal places (ties to even). C++ counterpart of .NET Double.Round(double,int).
+     *
+     * @param x      The value to round.
+     * @param digits The number of decimal places; must be in [0, 15].
+     * @throws System::ArgumentOutOfRangeException if @p digits is outside [0, 15].
+     */
+    [[nodiscard]] static double Round(double x, intcs digits)
     {
+        // .NET's Double.Round(x,digits) forwards to Math.Round(x,digits,ToEven),
+        // whose funnel validates `(uint)digits > maxRoundingDigits` first -- the
+        // unsigned cast makes a NEGATIVE digits count throw as well. Adding that
+        // check here required dropping this overload's `noexcept` (ticket #1862,
+        // approved 2026-07-31): a throw from a noexcept function is
+        // std::terminate, not an exception. Before the check, an out-of-range
+        // digits count reached std::pow and returned a spurious value or NaN with
+        // no diagnostic (Round(1.2345, 99) silently ignored the request,
+        // Round(1.2345, INTCS_MIN) == NaN). The limit is 15 here and 6 for float,
+        // exactly as .NET splits Math.Round from MathF.Round. The mangled name
+        // does not encode noexcept, so this is a source-level change only -- no
+        // ABI symbol break, no layout change.
+        if (digits < 0 || digits > 15)
+            throw System::ArgumentOutOfRangeException(
+                "digits", "Rounding digits must be between 0 and 15, inclusive.");
         double factor = std::pow(10.0, static_cast<double>(digits));
         return std::nearbyint(x * factor) / factor;
     }

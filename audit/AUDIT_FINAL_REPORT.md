@@ -4221,3 +4221,65 @@ different finding at the same lines and **stays `confirmed`** — this batch cha
 who owns the engine, not what kind of entropy it produces. **CNA and
 mobile-eggbert were not inspected, searched, built or modified**, and #1773
 remains `blocked`.
+
+## Approved packet, Group A, 2026-07-31 (tickets #1854, #1862) — SR-AUD-043 AND SR-AUD-029 REMEDIATED
+
+The first group of the six-group decision packet
+(`docs/RemainingApprovalDecisions.md`) to be approved and delivered. Its two
+tickets share nothing but a shape: **.NET validates an argument by throwing, and
+a `noexcept` function cannot.** They were deliberately decided together, so the
+answer — option **A(i)**, drop the qualifier and throw — is now the project's
+single convention rather than a per-type judgement call.
+
+**#1862 was the live defect.** `Single::Round(1.2345f, 99)` returned **NaN** and
+`Round(1.2345f, -1)` returned **0**; `Double::Round(1.2345, 16)` silently ignored
+the request. .NET throws for all three, and its guard is `(uint)digits > max`, so
+a negative count throws too — the port now matches, with
+`ArgumentOutOfRange_RoundingDigits_MathF` and `ArgumentOutOfRange_RoundingDigits`
+copied verbatim and the 0–6 / 0–15 split preserved.
+
+**#1854 was half what the packet said it was.** §A.5 described it as "pure
+defence in depth" on the strength of #1852. Measured, that holds for
+`HashCode::AddBytes` (no negative-length `ReadOnlySpan` can be constructed) and
+for the `ArraySegment` constructor (`ArraySegment` validates its own
+offset/count), but **not** for `ReadOnlyMemory<T>(const T*, intcs)`, which was
+directly reachable and stored `-1` and `INTCS_MIN` verbatim. The repair is the
+same either way; what changed is what the tests claim. The reachable site gets
+behavioural assertions; the two unreachable ones get `static_assert`s pinning the
+approved exception specification, tests that the valid paths are unchanged, and
+comments saying plainly that the throw cannot be triggered through the public
+surface. **An unreachable guard is not reported as covered behaviour.**
+
+A second packet premise was corrected: §A.8's `constexpr` concern is
+unobservable. No accessor on `ReadOnlyMemory<T>` is `constexpr`, so a
+`constexpr`-constructed view could never be *queried* in a constant expression
+even before the qualifier was dropped. The `constexpr` default constructor is
+untouched and still usable, pinned by a test.
+
+**The batch also found two defects it refused to fix.** The port's
+`Single::Round`/`Double::Round` re-implement the scale/round/divide inline
+instead of delegating to `MathF::Round`/`Math::Round` the way .NET's do, so they
+lack the large-magnitude short-circuit: `Single::Round(3.0e38f,6)` and
+`Double::Round(1e300,15)` return **`inf`** where the port's own `MathF`/`Math`
+return the value unchanged (#1927). And `Math::Round`'s exception message is
+missing .NET's leading `"Rounding "` while `MathF`'s is correct (#1928). Both
+change a value or a pinned message on currently-valid input, which this approval
+does not cover, so both were filed inactive with their probe evidence and left
+alone. **No new `SR-AUD-*` identifier was issued; numbering stays frozen at 364.**
+
+Evidence: `build-probe/1854_probe.cpp` + `1854_run.sh`, 35 cases each in its own
+process (so a `std::terminate` from a throw inside a `noexcept` function could
+not hide the cases after it), run plain, ASan and UBSan against both the
+pre-change and post-change include trees. **Zero sanitizer diagnostics, answers
+identical to the plain build** — restating, not claiming coverage: no sanitizer
+can see a missing argument check. **+24 permanent tests**, gate **14,920 →
+14,941 across 37 executables**. No parameter list, return type, object layout,
+vtable or mangled name changed, and an Itanium mangled name does not encode
+`noexcept`, so **no exported symbol moved**.
+
+**SR-AUD-029 and SR-AUD-043 both flip `confirmed → remediated`**, taking the
+post-audit tally to **61 remediated / 303 confirmed / 364 total**. **CCF-005 is
+complete** (#1850, #1851, #1852, #1853, #1854). CCF-007 still carries SR-AUD-033's
+format slice (#1863) and parse tail (#1865). **CNA and mobile-eggbert were not
+inspected, searched, built or modified**, #1773 remains `blocked`, and #1888,
+#1889 and #1896 remain declined.

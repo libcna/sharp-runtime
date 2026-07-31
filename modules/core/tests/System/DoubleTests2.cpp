@@ -4,7 +4,9 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <limits>
+#include <string>
 
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Double.hpp"
 
 using System::Double;
@@ -307,4 +309,65 @@ TEST(DoubleTests2, GetHashCode_AllNaNsMatch) {
     double nan1 = Double::NaN;
     double nan2 = -Double::NaN;
     EXPECT_EQ(Double::GetHashCode(nan1), Double::GetHashCode(nan2));
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-029 (#1862, approved 2026-07-31): Round(x, digits) validates digits.
+//
+// .NET's Double.Round(x,digits) forwards to Math.Round(x,digits,ToEven), whose
+// funnel rejects `(uint)digits > 15` -- so a negative count throws too. The port
+// used to be noexcept and fed digits straight to std::pow, silently ignoring an
+// oversized count and returning NaN for INTCS_MIN. Adding the check required
+// dropping noexcept; that is a source-level change only (an Itanium mangled name
+// does not encode noexcept), so no exported symbol or layout moved.
+// ---------------------------------------------------------------------------
+
+TEST(DoubleTests2, RoundDigits_ValidRange_UnchangedValues) {
+    EXPECT_DOUBLE_EQ(Double::Round(1.2345, 0), 1.0);
+    EXPECT_NEAR(Double::Round(3.14159, 2), 3.14, 1e-9);
+    EXPECT_NEAR(Double::Round(1.2345, 15), 1.2345, 1e-12);
+}
+
+TEST(DoubleTests2, RoundDigits_AboveMaximum_ThrowsAOORE) {
+    EXPECT_THROW(Double::Round(1.2345, 16), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Double::Round(1.2345, 99), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Double::Round(1.2345, SharpRuntime::INTCS_MAX),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(DoubleTests2, RoundDigits_Negative_ThrowsAOORE) {
+    EXPECT_THROW(Double::Round(1.2345, -3), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Double::Round(1.2345, SharpRuntime::INTCS_MIN),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(DoubleTests2, RoundDigits_ThrowCarriesDotNetParamNameAndMessage) {
+    try {
+        (void)Double::Round(1.2345, 16);
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "digits");
+        // .NET SR.ArgumentOutOfRange_RoundingDigits, verbatim.
+        EXPECT_NE(std::string(e.what()).find(
+                      "Rounding digits must be between 0 and 15, inclusive."),
+                  std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(DoubleTests2, RoundDigits_LimitIsFifteenNotSix) {
+    // The double limit is Math's 15, deliberately wider than MathF's 6.
+    EXPECT_NO_THROW((void)Double::Round(1.2345, 7));
+    EXPECT_NO_THROW((void)Double::Round(1.2345, 15));
+    EXPECT_THROW(Double::Round(1.2345, 16), System::ArgumentOutOfRangeException);
+}
+
+TEST(DoubleTests2, RoundDigits_ExceptionSpecificationIsTheApprovedOne) {
+    double x = 1.0;
+    static_assert(!noexcept(Double::Round(x, 2)),
+                  "#1862: Round(double,intcs) must be able to throw");
+    static_assert(noexcept(Double::Round(x)),
+                  "#1862: Round(double) must stay noexcept");
+    EXPECT_DOUBLE_EQ(Double::Round(2.5), 2.0);  // ties-to-even, unchanged
+    EXPECT_DOUBLE_EQ(Double::Round(3.5), 4.0);
 }

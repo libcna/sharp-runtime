@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 #include "System/HashCode.hpp"
 #include "System/Span.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -71,12 +73,49 @@ TEST(HashCodeTests, AddBytes_Span_MatchesVectorOverload) {
 // to size_t, so a negative-length ReadOnlySpan<uint8_t> would drive an unbounded
 // raw read. That path is closed at the source: once ReadOnlySpan's constructor
 // rejects a negative length, such a span can never be built to hand to AddBytes.
-// (AddBytes itself stays noexcept; making it reject a negative length is the
-// approval-gated #1854 / SR-AUD-043b, still open.)
 TEST(HashCodeTests, AddBytes_NegativeLengthSpan_CannotBeConstructed) {
     std::uint8_t one = 0x42;
     EXPECT_THROW(System::ReadOnlySpan<std::uint8_t>(&one, -1),
                  System::ArgumentOutOfRangeException);
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-043b (#1854, approved 2026-07-31): AddBytes(ReadOnlySpan<uint8_t>)
+// rejects a negative length rather than casting it to a huge size_t.
+//
+// This is the defence-in-depth half of 043: since #1852 no negative-length span
+// can be CONSTRUCTED, so the throw is unreachable through the public surface and
+// there is nothing to assert about it behaviourally -- what IS assertable is the
+// approved contract change itself, the exception specification. The overloads
+// taking an unsigned length cannot receive a negative one and keep noexcept.
+// ---------------------------------------------------------------------------
+
+TEST(HashCodeTests, AddBytes_ExceptionSpecificationsAreTheApprovedOnes) {
+    HashCode hc;
+    std::vector<uint8_t> data = {1, 2, 3};
+    System::ReadOnlySpan<uint8_t> span(data.data(), 3);
+    static_assert(!noexcept(std::declval<HashCode&>().AddBytes(
+                      std::declval<const System::ReadOnlySpan<uint8_t>&>())),
+                  "#1854: AddBytes(ReadOnlySpan) must be able to throw");
+    static_assert(noexcept(std::declval<HashCode&>().AddBytes(
+                      std::declval<const std::uint8_t*>(), std::size_t{0})),
+                  "#1854: AddBytes(const uint8_t*, size_t) must stay noexcept");
+    static_assert(noexcept(std::declval<HashCode&>().AddBytes(
+                      std::declval<const std::vector<std::uint8_t>&>())),
+                  "#1854: AddBytes(const vector<uint8_t>&) must stay noexcept");
+    // The valid path is unchanged: an ordinary span still hashes as before.
+    hc.AddBytes(span);
+    HashCode reference;
+    reference.AddBytes(data);
+    EXPECT_EQ(hc.ToHashCode(), reference.ToHashCode());
+}
+
+TEST(HashCodeTests, AddBytes_EmptySpan_IsANoOp) {
+    std::vector<uint8_t> data;
+    System::ReadOnlySpan<uint8_t> empty(data.data(), 0);
+    HashCode withEmpty, without;
+    withEmpty.AddBytes(empty);
+    EXPECT_EQ(withEmpty.ToHashCode(), without.ToHashCode());
 }
 
 TEST(HashCodeTests, Seed_DiffersAcrossProcessesButConsistentWithinOne) {

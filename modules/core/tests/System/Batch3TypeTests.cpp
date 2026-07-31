@@ -6,11 +6,15 @@
 //   ReadOnlyMemory, Activator, ThreadStaticAttribute, FlagsAttribute
 #include <gtest/gtest.h>
 #include <limits>
+#include <type_traits>
+#include <vector>
 #include "System/MidpointRounding.hpp"
 #include "System/UInt128.hpp"
 #include "System/MarshalByRefObject.hpp"
 #include "System/EventHandler.hpp"
 #include "System/EventArgs.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/ArraySegment.hpp"
 #include "System/ReadOnlyMemory.hpp"
 #include "System/Activator.hpp"
 #include "System/ThreadStaticAttribute.hpp"
@@ -179,6 +183,105 @@ TEST(ReadOnlyMemoryTests, ToArray_CopiesData) {
 TEST(ReadOnlyMemoryTests, Empty_IsEmpty) {
     auto e = System::ReadOnlyMemory<int>::getEmptyProperty();
     EXPECT_TRUE(e.getIsEmptyProperty());
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-043b (#1854, approved 2026-07-31): the three ReadOnlyMemory
+// constructors reject an invalid length instead of storing it.
+//
+// #1852 (043a) closed the reachable exploit by validating Span/ReadOnlySpan
+// construction; these constructors were still directly reachable and stored a
+// negative length verbatim, which any later size_t use would turn into an
+// unbounded read. Rejecting it required dropping `noexcept` from all three and
+// `constexpr` from the pointer/length one. An Itanium mangled name does not
+// encode noexcept, so this moved no exported symbol; the fields stay signed
+// intcs, so nothing moved in the layout either.
+// ---------------------------------------------------------------------------
+
+TEST(ReadOnlyMemoryTests, PtrLengthCtor_NegativeLength_ThrowsAOORE) {
+    const int arr[] = {1, 2, 3};
+    EXPECT_THROW(System::ReadOnlyMemory<int>(arr, -1),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(ReadOnlyMemoryTests, PtrLengthCtor_IntcsMinLength_ThrowsAOORE) {
+    const int arr[] = {1};
+    EXPECT_THROW(System::ReadOnlyMemory<int>(arr, SharpRuntime::INTCS_MIN),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(ReadOnlyMemoryTests, PtrLengthCtor_ThrowNamesTheLengthParameter) {
+    const int arr[] = {1};
+    try {
+        System::ReadOnlyMemory<int> m(arr, -1);
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "length");
+    }
+}
+
+TEST(ReadOnlyMemoryTests, PtrLengthCtor_ZeroAndPositiveLength_StillConstruct) {
+    const int arr[] = {1, 2, 3};
+    System::ReadOnlyMemory<int> empty(arr, 0);
+    EXPECT_EQ(empty.getLengthProperty(), 0);
+    EXPECT_TRUE(empty.getIsEmptyProperty());
+    System::ReadOnlyMemory<int> full(arr, 3);
+    EXPECT_EQ(full.getLengthProperty(), 3);
+    EXPECT_EQ(full[2], 3);
+}
+
+TEST(ReadOnlyMemoryTests, VectorCtor_UsesTheSharedCheckedNarrowing) {
+    // The vector constructor's only way to a negative length was narrowing a
+    // size() > INT32_MAX; it now routes through the same checkedSpanLength guard
+    // as Span/ReadOnlySpan/Memory/ArraySegment (unit-tested directly in
+    // ReadOnlySpanTests). Empty and ordinary vectors are unaffected.
+    std::vector<int> empty;
+    System::ReadOnlyMemory<int> me(empty);
+    EXPECT_EQ(me.getLengthProperty(), 0);
+    std::vector<int> v = {1, 2, 3};
+    System::ReadOnlyMemory<int> mv(v);
+    EXPECT_EQ(mv.getLengthProperty(), 3);
+}
+
+TEST(ReadOnlyMemoryTests, ArraySegmentCtor_ValidSegmentsStillConstruct) {
+    // ArraySegment validates its own offset/count, so no segment reachable
+    // through the public surface can carry a negative one -- the guard added to
+    // this constructor is defence in depth, kept so all three constructors carry
+    // one contract. What is testable is that every valid segment still works.
+    std::vector<int> v = {1, 2, 3, 4};
+    System::ReadOnlyMemory<int> whole{System::ArraySegment<int>(v, 0, 4)};
+    EXPECT_EQ(whole.getLengthProperty(), 4);
+    System::ReadOnlyMemory<int> part{System::ArraySegment<int>(v, 1, 2)};
+    EXPECT_EQ(part.getLengthProperty(), 2);
+    EXPECT_EQ(part[0], 2);
+    System::ReadOnlyMemory<int> none{System::ArraySegment<int>()};
+    EXPECT_EQ(none.getLengthProperty(), 0);
+    EXPECT_THROW(System::ArraySegment<int>(v, 0, -1),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(ReadOnlyMemoryTests, ExceptionSpecificationsAreTheApprovedOnes) {
+    const int* p = nullptr;
+    std::vector<int> v;
+    // All three validating constructors gave up noexcept (#1854).
+    static_assert(!noexcept(System::ReadOnlyMemory<int>(p, 1)),
+                  "#1854: the pointer/length ctor must be able to throw");
+    static_assert(!noexcept(System::ReadOnlyMemory<int>(v)),
+                  "#1854: the vector ctor must be able to throw");
+    static_assert(!std::is_nothrow_constructible_v<System::ReadOnlyMemory<int>,
+                                                   const System::ArraySegment<int>&>,
+                  "#1854: the ArraySegment ctor must be able to throw");
+    // The default constructor validates nothing and keeps constexpr + noexcept,
+    // so a ReadOnlyMemory<T> object can still be created in a constant
+    // expression. Note the dropped `constexpr` on the pointer/length ctor cost
+    // nothing observable: no accessor on this type is constexpr, so even before
+    // #1854 a constexpr-constructed ReadOnlyMemory could not be QUERIED in a
+    // constant expression.
+    static_assert(std::is_nothrow_default_constructible_v<System::ReadOnlyMemory<int>>,
+                  "#1854: the default ctor must stay noexcept");
+    constexpr System::ReadOnlyMemory<int> defaulted{};
+    EXPECT_EQ(defaulted.getLengthProperty(), 0);
+    EXPECT_TRUE(defaulted.getIsEmptyProperty());
 }
 
 // ---------------------------------------------------------------------------

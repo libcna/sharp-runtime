@@ -44,6 +44,41 @@ Validate `digits` before evaluating a scale, throw
 negative and 7-digit exception tests, the valid 0/6 boundaries, and a large
 invalid value proving that no NaN is returned.
 
+**Remediated (#1862, 2026-07-31, CCF-007 item CCF7-4).** Approved by the batch
+instruction in the exact words of `docs/RemainingApprovalDecisions.md` §A.10
+(option A: drop `noexcept`, throw). `Single::Round(float,intcs)` and
+`Double::Round(double,intcs)` dropped `noexcept` and now reject
+`digits < 0 || digits > 6` (float) / `> 15` (double) **before** the `std::pow`,
+throwing `ArgumentOutOfRangeException("digits", …)` with .NET's own resource
+strings verbatim — `ArgumentOutOfRange_RoundingDigits_MathF`
+("Rounding digits must be between 0 and 6, inclusive.") and
+`ArgumentOutOfRange_RoundingDigits` ("Rounding digits must be between 0 and 15,
+inclusive."). Because .NET's guard is `(uint)digits > max`, a negative count
+throws too, and the port matches. Measured before/after over 16 rounding cases:
+`build-probe/1854_{prefix,postfix}_plain.log` (`Round(1.2345f,99)` NaN → throw;
+`Round(1.2345f,-1)` `0` → throw; `Round(1.2345,16)` silently-ignored → throw).
++13 tests in `SingleTests.cpp`/`DoubleTests2.cpp`, including `static_assert`s
+pinning that the two-argument overload is no longer `noexcept` and the
+one-argument overload still is. No parameter list, return type, layout, vtable
+or mangled name changed (an Itanium mangled name does not encode `noexcept`), so
+there is no exported-symbol break. **SR-AUD-029 → remediated.**
+
+**Premise correction — the audit text is right about the defect and silent about
+its cause.** The audit recorded that `Round(float,digits)` "computes
+`pow(10.0f, digits)`" without saying *why* .NET does not: .NET's
+`Single.Round(x,d)` **forwards to `MathF.Round(x,d,ToEven)`**, and this port's
+`Single::Round` does not — it re-implements the scale/round/divide inline. The
+port's own `MathF::Round(float,intcs,MidpointRounding)` already carried both the
+correct guard and .NET's large-magnitude short-circuit. Two consequences,
+measured 2026-07-31 (`build-probe/1854_prefix_plain.log` cases A30–A35) and
+**deliberately left unrepaired because they are outside #1862's approval**:
+`Single::Round(3.0e38f,6)` returns `inf` and `Double::Round(1e300,15)` returns
+`inf`, where `MathF::Round`/`Math::Round` return the value unchanged; and
+`Math::Round(x,digits,mode)` throws the message
+"digits must be between 0 and 15, inclusive.", missing .NET's leading
+"Rounding ". Filed as inactive tickets **#1927** and **#1928**; no new
+`SR-AUD-*` identifier was issued and audit numbering stays frozen at 364.
+
 ## SR-AUD-030 — medium — `IsPow2` rejects every valid subnormal power of two
 
 `IsPow2` requires all trailing-significand bits to be zero.  That is correct

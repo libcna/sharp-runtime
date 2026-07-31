@@ -6145,3 +6145,60 @@ sanitizer**, and are caught by the new tests alone.
 identifier; no `CCF-*` cause added. SR-AUD-050 (predictable PRNG at the same
 lines) stays `confirmed` — unrelated to ownership. CNA and mobile-eggbert were
 not inspected; #1773 stays `blocked`.
+
+## Post-audit remediation checkpoint — Group A of the approved A–D packet (2026-07-31)
+
+**Tickets #1854 and #1862 — both `done`. SR-AUD-043 and SR-AUD-029 are
+`remediated`.** Approved by the batch instruction in the exact words of
+`docs/RemainingApprovalDecisions.md` §A.10 — option **A(i)**, drop `noexcept`
+(and the one `constexpr`), throw. Both tickets were decided the same way in the
+same batch, which is what §A.6 asked for: the project now has **one** convention
+for "an argument check is blocked by an exception specification", not two.
+
+Five exception specifications and one `constexpr` were removed.
+`Single::Round(float,intcs)` and `Double::Round(double,intcs)` reject `digits`
+outside `[0,6]` / `[0,15]` before the `std::pow`, with .NET's own resource
+strings verbatim; `ReadOnlyMemory<T>`'s three constructors and
+`HashCode::AddBytes(ReadOnlySpan<uint8_t>)` reject a negative length, an
+oversized `std::vector` and a negative-offset/count `ArraySegment`.
+
+**Measured, 35 probe cases in one process each**
+(`build-probe/1854_{prefix,postfix}_plain.log`): eleven previously-silent wrong
+answers became throws — `Round(1.2345f,99)` was **NaN**, `Round(1.2345f,-1)` was
+**0**, `Round(1.2345,16)` silently ignored the request, and
+`ReadOnlyMemory<uint8_t>(data,-1)` constructed with `length == -1`. Every valid
+input is **byte-identical** before and after.
+
+**Two premises corrected, both preserved additively.** (1) §A.5 called #1854
+"pure defence in depth"; measured, only two of its three halves are unreachable —
+`ReadOnlyMemory(const T*, intcs)` was directly reachable. The tests say so
+site-by-site rather than averaging: the reachable site gets behavioural
+assertions, the two unreachable ones get `static_assert`s on the exception
+specification plus unchanged-valid-behaviour tests, and comments stating the
+throw cannot be triggered publicly. (2) §A.8's `constexpr` concern is
+unobservable — no accessor on `ReadOnlyMemory<T>` is `constexpr`, so a
+`constexpr`-constructed view could never be queried in a constant expression.
+
+**Two newly discovered defects filed as inactive tickets, not absorbed.**
+**#1927** — `Single::Round`/`Double::Round` re-implement the rounding inline
+instead of delegating to `MathF::Round`/`Math::Round` as .NET does, so
+`Single::Round(3.0e38f,6)` and `Double::Round(1e300,15)` return **`inf`** where
+the port's own `MathF`/`Math` return the value unchanged. **#1928** —
+`Math::Round`'s message is missing .NET's leading `"Rounding "`. Both are value
+or message changes on currently-valid input, outside this approval. **No new
+`SR-AUD-*` identifier; numbering frozen at 364.**
+
++24 permanent tests; gate **14,920 → 14,941 across 37 executables** (the count is
++21, not +24: three of the additions replaced or extended existing cases in
+place). ASan and UBSan over all 35 probe cases: **zero diagnostics, answers
+identical to the plain build** — which restates rather than claims coverage,
+since neither sanitizer can see a missing argument check. No parameter list,
+return type, object layout, vtable or mangled name changed; an Itanium mangled
+name does not encode `noexcept`, so there is **no exported-symbol break**.
+
+**Tally: 59 → 61 remediated, 305 → 303 confirmed, 364 total** (SR-AUD-029 and
+SR-AUD-043 both `confirmed → remediated`; SR-AUD-043's status string was
+`confirmed (043a remediated; 043b open)` and is now plain `remediated`).
+**CCF-005 is complete.** CCF-007 keeps SR-AUD-033's format (#1863) and parse
+(#1865) slices. CNA and mobile-eggbert were not inspected; #1773 stays `blocked`;
+#1888/#1889/#1896 stay declined.

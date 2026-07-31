@@ -10,6 +10,7 @@
 #include "System/ArraySegment.hpp"
 #include "System/Buffers/MemoryHandle.hpp"
 #include "System/Span.hpp"
+#include "System/detail/SpanLength.hpp"
 
 namespace System {
 
@@ -45,28 +46,48 @@ namespace System {
          * @brief Constructs from a raw const pointer and element count.
          * @param ptr    Pointer to the first element.
          * @param length Number of elements.
+         * @throws System::ArgumentOutOfRangeException if @p length is negative.
          */
-        constexpr ReadOnlyMemory(const T* ptr, intcs length) noexcept
-            : ptr_(ptr), length_(length) {}
+        ReadOnlyMemory(const T* ptr, intcs length) : ptr_(ptr), length_(length) {
+            // .NET rejects an out-of-range length at construction; a stored
+            // negative length turns every later size_t use into an unbounded read
+            // (SR-AUD-043b). Validating it required dropping this constructor's
+            // `noexcept` AND its `constexpr` (ticket #1854, approved 2026-07-31):
+            // a throw from a noexcept function is std::terminate. The field stays
+            // signed intcs -- no layout change -- and the mangled name does not
+            // encode noexcept, so this is a source-level change only. Since
+            // #1852 the ReadOnlySpan this view yields validates too; the check
+            // here is the same contract applied at the owning boundary.
+            if (length < 0)
+                throw System::ArgumentOutOfRangeException("length");
+        }
 
         /**
          * @brief Constructs from a std::vector, borrowing its data without copying.
          *
          * The vector must outlive this ReadOnlyMemory.
          * @param v Source vector.
+         * @throws System::ArgumentOutOfRangeException if @p v holds more than INT32_MAX elements.
          */
-        explicit ReadOnlyMemory(const std::vector<T>& v) noexcept
-            : ptr_(v.data()), length_(static_cast<intcs>(v.size())) {}
+        explicit ReadOnlyMemory(const std::vector<T>& v)
+            : ptr_(v.data()), length_(System::detail::checkedSpanLength(v.size(), "v")) {}
 
         /**
          * @brief Constructs a ReadOnlyMemory<T> from an ArraySegment<T>.
          *
          * C++ counterpart of .NET implicit operator ReadOnlyMemory<T>(ArraySegment<T>).
          * @param segment The source segment.
+         * @throws System::ArgumentOutOfRangeException if @p segment has a negative offset or count.
          */
-        ReadOnlyMemory(const ArraySegment<T>& segment) noexcept
+        ReadOnlyMemory(const ArraySegment<T>& segment)
             : ptr_(segment.getArrayProperty() ? segment.getArrayProperty()->data() + segment.getOffsetProperty() : nullptr),
-              length_(segment.getCountProperty()) {}
+              length_(segment.getCountProperty()) {
+            // ArraySegment validates its own offset/count, so no segment reachable
+            // through the public surface fails this -- it is the defence-in-depth
+            // half of #1854, kept so the three constructors carry one contract.
+            if (segment.getOffsetProperty() < 0 || segment.getCountProperty() < 0)
+                throw System::ArgumentOutOfRangeException("segment");
+        }
 
         /**
          * @brief Returns the number of elements in this memory region.

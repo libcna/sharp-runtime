@@ -332,14 +332,59 @@ The approval-gated tail (accept `,` thousands + overflow→`±Infinity`) was spl
 **needs_user #1865** (mirroring #1857→#1858); SR-AUD-033 stays `confirmed`
 (partial) until both #1863 format and #1865 parse-tail land.
 
-CCF7-4/#1862 (Round `noexcept`) and CCF7-5/#1863 (format output) remain
-approval-blocked, per §11.
+**CCF7-4 — SR-AUD-029 — DONE (#1862, 2026-07-31).** Approved by the batch
+instruction in the exact words of `docs/RemainingApprovalDecisions.md` §A.10,
+option **(A)**: `Single::Round(float,intcs)` and `Double::Round(double,intcs)`
+dropped `noexcept` and reject `digits` outside `[0,6]` / `[0,15]` **before** the
+`std::pow`, throwing `ArgumentOutOfRangeException("digits", …)` with .NET's
+resource strings verbatim (`ArgumentOutOfRange_RoundingDigits_MathF` and
+`ArgumentOutOfRange_RoundingDigits`). Option (B) (clamp) was not taken; #1854 was
+decided identically in the same batch, so §19.3's "decide together" requirement
+is satisfied. Measured (`build-probe/1854_{prefix,postfix}_plain.log`):
+`Round(1.2345f,99)` NaN → throw, `Round(1.2345f,7)` a spurious value → throw,
+`Round(1.2345f,-1)` `0` → throw, `Round(1.2345,16)`/`(…,99)` silently ignored →
+throw, `Round(…,INTCS_MIN)`/`(…,INTCS_MAX)` → throw. Valid `0`/`2`/`6` (float)
+and `0`/`2`/`15` (double) and both one-argument overloads are **byte-identical**.
++13 tests, including `static_assert`s pinning that the two-argument overload is
+no longer `noexcept` and the one-argument overload still is. No parameter list,
+return type, layout, vtable or mangled name change; no exported-symbol break.
+`SR-AUD-029 → remediated`.
+
+**Two premises corrected by measurement, and deliberately left unrepaired.**
+
+1. **`Single::Round`/`Double::Round` do not delegate the way .NET's do.** .NET's
+   `Single.Round(x,d)` is `=> MathF.Round(x, d)` and `Double.Round(x,d)` is
+   `=> Math.Round(x, d)` (`Single.cs:683`, `Double.cs:688`); this port
+   re-implements the scale/round/divide inline in each type, so it does **not**
+   inherit `MathF::Round`'s `|x| >= 1e8` / `Math::Round`'s `|x| >= 1e16`
+   short-circuit. Measured 2026-07-31: `Single::Round(3.0e38f, 6)` returns
+   **`inf`** where `MathF::Round(3.0e38f, 6)` returns `3.0e38f`, and
+   `Double::Round(1e300, 15)` returns **`inf`** where `Math::Round(1e300, 15)`
+   returns `1e300` (probe cases A30–A33). This is a *value* change on
+   currently-valid input, so it is **outside #1862's approval**, which covers
+   invalid-argument rejection only. Filed as inactive ticket **#1927**.
+2. **`Math::Round`'s message is not .NET's.** `Math.hpp`'s
+   `Round(double,intcs,MidpointRounding)` throws
+   `"digits must be between 0 and 15, inclusive."`, missing .NET's leading
+   `"Rounding "` (probe case A35); `MathF.hpp`'s float counterpart is already
+   correct (A34). #1862 gave `Double::Round` .NET's exact string, which makes the
+   two spellings differ inside this repository until `Math::Round` is corrected.
+   Changing a pinned message on a different type is outside this approval. Filed
+   as inactive ticket **#1928**.
+
+Neither carries an `SR-AUD-*` identifier; audit numbering stays frozen at **364**.
+
+CCF7-5/#1863 (format output) remains approval-blocked, per §11.
 
 **CCF-007 family status:** SR-AUD-030, SR-AUD-031, SR-AUD-032 remediated; the
-compatible parse-whitespace slice of SR-AUD-033 landing this batch (#1864);
+compatible parse-whitespace slice of SR-AUD-033 landing in #1864;
 SR-AUD-029 (#1862), the SR-AUD-033 format slice (#1863), and the SR-AUD-033
 thousands+overflow parse tail (#1865) all remain approval-gated. The family closes
 only when all five findings are `remediated` (§17).
+
+*Revised 2026-07-31:* **SR-AUD-029 is now `remediated` (#1862).** The family's
+remaining findings are the SR-AUD-033 format slice (#1863) and its parse tail
+(#1865), both carried by the approved Groups B and D of this batch.
 
 ---
 
@@ -350,7 +395,7 @@ approval-gated tickets, plus the reconciliation with the sibling noexcept findin
 #1854. **No implementation is authorised by this section**; each requires the
 explicit per-action user decision named below.
 
-### 19.1 CCF7-4 / #1862 — `Round(x,digits)` precision validation (SR-AUD-029)
+### 19.1 CCF7-4 / #1862 — `Round(x,digits)` precision validation (SR-AUD-029) — **APPROVED AND DONE (2026-07-31, option A); see §18**
 
 **Current state (measured):** `Single::Round(float x, intcs digits) noexcept`
 (`Single.hpp:246`) and `Double::Round(double x, intcs digits) noexcept`

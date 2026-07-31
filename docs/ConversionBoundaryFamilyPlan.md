@@ -525,3 +525,75 @@ encode `noexcept`); the impact is the source-level `noexcept` trait only.
 **They should be decided together** so one convention is adopted across the
 codebase rather than split A/B. See `docs/FloatingValueFidelityPlan.md` §19.1/§19.3.
 #1854 stays `needs_user`; no new ticket was created by this reconciliation.
+
+### 19.6 CCF5-E / #1854 — SR-AUD-043b — the `noexcept` validation boundary — **DONE (2026-07-31)**
+
+**Approval applied, verbatim.** `docs/RemainingApprovalDecisions.md` §A.10,
+option **A(i)** — drop `noexcept`, throw. Delivered exactly as worded and no
+further: five exception specifications and one `constexpr` were removed, and each
+affected function throws `ArgumentOutOfRangeException` on an invalid argument.
+Option A(ii) (clamp) and A(iii) (split conventions) were **not** taken; #1862 was
+decided the same way in the same batch, so the project now has one convention.
+
+| Site | Before | After |
+|---|---|---|
+| `ReadOnlyMemory<T>(const T*, intcs)` | `constexpr … noexcept`, stores any length | throws `ArgumentOutOfRangeException("length")` for `length < 0` |
+| `ReadOnlyMemory<T>(const std::vector<T>&)` | `noexcept`, `static_cast<intcs>(v.size())` | routes through `detail::checkedSpanLength(v.size(), "v")` |
+| `ReadOnlyMemory<T>(const ArraySegment<T>&)` | `noexcept` | throws `ArgumentOutOfRangeException("segment")` for a negative offset or count |
+| `HashCode::AddBytes(const ReadOnlySpan<uint8_t>&)` | `noexcept` | throws `ArgumentOutOfRangeException("value")` for a negative length |
+
+**Measured before/after** (`build-probe/1854_{prefix,postfix}_plain.log`, 35
+cases, one process each): `ReadOnlyMemory<uint8_t>(data, -1)` constructed with
+`length == -1` before and throws after; `(data, INTCS_MIN)` likewise. Every valid
+case — zero length, full length, empty vector, ordinary vector, whole/partial/
+default `ArraySegment`, valid `AddBytes` — is **byte-identical** before and after.
+
+**Premise correction — §A.5 of the decision packet undersold half of this
+ticket.** It described #1854 as "now pure defence in depth" on the strength of
+#1852. That is right for `HashCode::AddBytes` and for the `ArraySegment`
+constructor, and **wrong for `ReadOnlyMemory(const T*, intcs)`**, which was
+directly reachable from the public surface and stored `-1` and `INTCS_MIN`
+verbatim (probe cases A21/A22). The packet's own §A.5 says as much in its last
+sentence — "The `ReadOnlyMemory` constructors themselves remain directly
+reachable" — but its headline severity did not. The repair is unchanged either
+way; what changes is what the tests can honestly claim (below).
+
+**Reachability, and what the tests therefore assert.** Three sites, three
+different reachability verdicts, recorded rather than averaged:
+
+1. `ReadOnlyMemory(const T*, intcs)` — reachable. Behavioural tests: negative
+   length and `INTCS_MIN` throw, the `paramName` is `"length"`, zero and positive
+   lengths still construct.
+2. `ReadOnlyMemory(const ArraySegment<T>&)` — **unreachable with invalid input**.
+   `ArraySegment`'s own constructors reject a negative offset/count (probe case
+   A27 throws from `ArraySegment`, not from `ReadOnlyMemory`), so no segment
+   carrying one can be built to hand over. The test asserts the valid segments
+   still work and pins the exception specification.
+3. `HashCode::AddBytes(ReadOnlySpan)` — **unreachable** since #1852: a
+   negative-length `ReadOnlySpan` cannot be constructed (probe case A28). Same
+   treatment.
+
+For 2 and 3 the permanent tests pin `!noexcept(…)` via `static_assert` — the
+approved contract change itself — plus the unchanged valid behaviour, and say in
+comments that the throw cannot be triggered through the public surface. An
+unreachable guard is not reported as covered behaviour.
+
+**Second correction — the dropped `constexpr` cost nothing observable.** §A.8
+lists "using `Round` in a `constexpr` context" and notes only `ReadOnlyMemory`'s
+L49 constructor was `constexpr`. Measured: **no accessor on `ReadOnlyMemory<T>`
+is `constexpr`** (`getLengthProperty`, `getIsEmptyProperty`, `getSpanProperty`,
+`operator[]` are all plain member functions), so even before this change a
+`constexpr`-constructed `ReadOnlyMemory` could not be *queried* in a constant
+expression. The `constexpr` default constructor is untouched and a
+`constexpr ReadOnlyMemory<int> m{};` still compiles — pinned by a test.
+
+**Consequences.** No parameter list, return type, object layout, vtable or
+mangled name changed; an Itanium mangled name does not encode `noexcept`, so
+there is **no exported-symbol break**. Source breaks are the three §A.8 spellings
+only. **+11 permanent tests** (`Batch3TypeTests.cpp` ×8, `HashCodeTests.cpp` ×2,
+plus one existing comment corrected). ASan and UBSan over all 35 probe cases:
+**zero diagnostics, answers identical to the plain build** — restating, not
+claiming coverage, that neither sanitizer can see a missing argument check.
+`SR-AUD-043 → remediated` (043a #1852 + 043b #1854). **CCF-005 is complete**:
+#1850, #1851, #1852, #1853, #1854 all `done`; the Decimal slice (035/036/038)
+remains the separate review named in §17.
