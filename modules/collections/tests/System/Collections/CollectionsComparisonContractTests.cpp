@@ -1219,3 +1219,217 @@ TEST(CollectionsComparisonContract, SortedSetNegativeControlsAreUnchanged) {
     p.Add({1, 2.0});
     EXPECT_EQ(p.getCountProperty(), 1);
 }
+
+// ---------------------------------------------------------------------------
+// Dictionary<K,V> and HashSet<T> -- the mutable hash containers of #1919's
+// seven (ticket #1922)
+//
+// Before this repair a NaN key could be inserted without limit and was then
+// unfindable forever: std::equal_to<double> says NaN != NaN and
+// std::hash<double> hashes NaN's payload bits. Equality and hashing are
+// repaired together, so two NaNs that compare equal also share a bucket.
+// ---------------------------------------------------------------------------
+
+TEST(CollectionsComparisonContract, DictionaryHoldsANaNKeyExactlyOnceAndFindsIt) {
+    G::Dictionary<double, int> d;
+    d.Add(kNaN, 1);
+    EXPECT_THROW(d.Add(kNaN, 2), System::ArgumentException);
+    EXPECT_EQ(d.getCountProperty(), 1);
+    EXPECT_TRUE(d.ContainsKey(kNaN));
+    int got = 0;
+    ASSERT_TRUE(d.TryGetValue(kNaN, got));
+    EXPECT_EQ(got, 1);
+}
+
+TEST(CollectionsComparisonContract, DictionaryFindsANaNKeyAmongOrdinaryKeys) {
+    G::Dictionary<double, int> d;
+    d.Add(1.0, 1); d.Add(2.0, 2); d.Add(kNaN, 3);
+    EXPECT_EQ(d.getCountProperty(), 3);
+    EXPECT_THROW(d.Add(kNaN, 4), System::ArgumentException);
+    EXPECT_EQ(d.getCountProperty(), 3);
+    EXPECT_TRUE(d.ContainsKey(kNaN));
+    EXPECT_TRUE(d.ContainsKey(1.0));
+    EXPECT_FALSE(d.ContainsKey(3.0));
+}
+
+TEST(CollectionsComparisonContract, DictionaryFindsANaNKeyStoredUnderADifferentPayload) {
+    ASSERT_NE(std::hash<double>{}(kNaN), std::hash<double>{}(payloadNaN()))
+        << "the two NaNs must hash differently raw, or this test proves nothing";
+    G::Dictionary<double, int> d;
+    d.Add(kNaN, 7);
+    EXPECT_TRUE(d.ContainsKey(payloadNaN()));
+    int got = 0;
+    ASSERT_TRUE(d.TryGetValue(payloadNaN(), got));
+    EXPECT_EQ(got, 7);
+    EXPECT_FALSE(d.TryAdd(payloadNaN(), 9));
+    EXPECT_EQ(d.getCountProperty(), 1);
+    using ConstDict = const G::Dictionary<double, int>&;
+    EXPECT_EQ(static_cast<ConstDict>(d)[payloadNaN()], 7);
+    EXPECT_EQ(d.GetValueOrDefault(payloadNaN(), -1), 7);
+}
+
+TEST(CollectionsComparisonContract, DictionaryRemovesAndReinsertsANaNKey) {
+    G::Dictionary<double, int> d;
+    d.Add(kNaN, 1);
+    EXPECT_TRUE(d.Remove(payloadNaN()));
+    EXPECT_EQ(d.getCountProperty(), 0);
+    EXPECT_TRUE(d.TryAdd(kNaN, 2));
+    int got = 0;
+    ASSERT_TRUE(d.TryGetValue(kNaN, got));
+    EXPECT_EQ(got, 2);
+    EXPECT_EQ(d.getCountProperty(), 1);
+}
+
+TEST(CollectionsComparisonContract, DictionaryKeepsSignedZeroAsOneKeyAndInfinitiesApart) {
+    G::Dictionary<double, int> d;
+    d.Add(0.0, 1);
+    EXPECT_TRUE(d.ContainsKey(-0.0));       // one key, as in .NET
+    EXPECT_FALSE(d.TryAdd(-0.0, 2));
+    d.Add(kInf, 3);
+    d.Add(-kInf, 4);
+    d.Add(kNaN, 5);
+    EXPECT_EQ(d.getCountProperty(), 4);
+    EXPECT_TRUE(d.ContainsKey(kInf));
+    EXPECT_TRUE(d.ContainsKey(-kInf));
+    EXPECT_TRUE(d.ContainsKey(kNaN));
+}
+
+TEST(CollectionsComparisonContract, DictionaryNaNKeySurvivesGrowthAndTrim) {
+    G::Dictionary<double, int> d;
+    d.Add(kNaN, 42);
+    for (int i = 0; i < 20000; ++i) d.Add(static_cast<double>(i) + 0.5, i);
+    ASSERT_GT(d.getCountProperty(), 1000);   // enough insertions to have rehashed
+    int got = 0;
+    ASSERT_TRUE(d.TryGetValue(payloadNaN(), got));
+    EXPECT_EQ(got, 42);
+    d.TrimExcess();
+    got = 0;
+    ASSERT_TRUE(d.TryGetValue(payloadNaN(), got));
+    EXPECT_EQ(got, 42);
+}
+
+TEST(CollectionsComparisonContract, HashSetHoldsANaNElementExactlyOnceAndFindsIt) {
+    G::HashSet<double> s;
+    EXPECT_TRUE(s.Add(kNaN));
+    EXPECT_FALSE(s.Add(kNaN));
+    EXPECT_EQ(s.getCountProperty(), 1);
+    EXPECT_TRUE(s.Contains(kNaN));
+
+    EXPECT_FALSE(s.Add(payloadNaN()));       // a different payload is the same element
+    EXPECT_EQ(s.getCountProperty(), 1);
+    double actual = 0.0;
+    ASSERT_TRUE(s.TryGetValue(payloadNaN(), actual));
+    EXPECT_TRUE(std::isnan(actual));
+}
+
+TEST(CollectionsComparisonContract, HashSetSetOperationsSurviveANaNElement) {
+    G::HashSet<double> a, b;
+    a.Add(kNaN); a.Add(1.0); a.Add(2.0);
+    b.Add(payloadNaN()); b.Add(2.0); b.Add(3.0);
+
+    G::HashSet<double> u(a); u.UnionWith(b);
+    EXPECT_EQ(u.getCountProperty(), 4);              // NaN, 1, 2, 3
+
+    G::HashSet<double> i(a); i.IntersectWith(b);
+    EXPECT_EQ(i.getCountProperty(), 2);              // NaN and 2
+    EXPECT_TRUE(i.Contains(kNaN));
+
+    G::HashSet<double> e(a); e.ExceptWith(b);
+    EXPECT_EQ(e.getCountProperty(), 1);              // 1 only
+    EXPECT_FALSE(e.Contains(kNaN));
+
+    G::HashSet<double> x(a); x.SymmetricExceptWith(b);
+    EXPECT_EQ(x.getCountProperty(), 2);              // 1 and 3
+
+    EXPECT_TRUE(a.Overlaps(b));
+    EXPECT_TRUE(a.SetEquals(a));
+    EXPECT_FALSE(a.IsSubsetOf(b));
+}
+
+TEST(CollectionsComparisonContract, HashSetRemovesReAddsAndSweepsANaNElement) {
+    G::HashSet<double> s;
+    s.Add(kNaN); s.Add(1.0);
+    EXPECT_TRUE(s.Remove(payloadNaN()));
+    EXPECT_TRUE(s.Add(kNaN));
+    EXPECT_EQ(s.RemoveWhere([](const double& d) { return std::isnan(d); }), 1);
+    EXPECT_EQ(s.getCountProperty(), 1);
+    EXPECT_TRUE(s.Contains(1.0));
+}
+
+TEST(CollectionsComparisonContract, HashSetNaNElementSurvivesGrowthAndTrim) {
+    G::HashSet<double> s;
+    s.Add(kNaN);
+    for (int i = 0; i < 20000; ++i) s.Add(static_cast<double>(i) + 0.5);
+    EXPECT_TRUE(s.Contains(payloadNaN()));
+    s.TrimExcess();
+    EXPECT_TRUE(s.Contains(payloadNaN()));
+    EXPECT_FALSE(s.Add(payloadNaN()));
+}
+
+TEST(CollectionsComparisonContract, HashContainersGiveFloatAndLongDoubleTheSameContract) {
+    G::Dictionary<float, int> df;
+    df.Add(kNaNf, 1);
+    int got = 0;
+    ASSERT_TRUE(df.TryGetValue(payloadNaNf(), got));
+    EXPECT_EQ(got, 1);
+
+    G::HashSet<float> sf;
+    EXPECT_TRUE(sf.Add(kNaNf));
+    EXPECT_FALSE(sf.Add(payloadNaNf()));
+    EXPECT_EQ(sf.getCountProperty(), 1);
+
+    G::Dictionary<long double, int> dl;
+    dl.Add(std::numeric_limits<long double>::quiet_NaN(), 5);
+    EXPECT_TRUE(dl.ContainsKey(std::numeric_limits<long double>::quiet_NaN()));
+
+    G::HashSet<long double> sl;
+    EXPECT_TRUE(sl.Add(std::numeric_limits<long double>::quiet_NaN()));
+    EXPECT_FALSE(sl.Add(std::numeric_limits<long double>::quiet_NaN()));
+    EXPECT_EQ(sl.getCountProperty(), 1);
+}
+
+TEST(CollectionsComparisonContract, HashContainerNegativeControlsAreUnchanged) {
+    G::Dictionary<int, std::string> d;
+    d.Add(1, "a"); d.Add(2, "b");
+    EXPECT_THROW(d.Add(1, "c"), System::ArgumentException);
+    EXPECT_EQ(d.getCountProperty(), 2);
+    EXPECT_TRUE(d.ContainsKey(1));
+    EXPECT_FALSE(d.ContainsKey(3));
+
+    G::Dictionary<std::string, int> ds;
+    ds.Add("a", 1);
+    EXPECT_TRUE(ds.ContainsKey("a"));
+    EXPECT_FALSE(ds.ContainsKey("b"));
+
+    G::HashSet<int> s;
+    s.Add(1); s.Add(2); s.Add(1);
+    EXPECT_EQ(s.getCountProperty(), 2);
+
+    G::HashSet<std::string> ss;
+    ss.Add("x"); ss.Add("x");
+    EXPECT_EQ(ss.getCountProperty(), 1);
+}
+
+// Recorded limitation, NOT a repair: std::optional<double> is not a
+// floating-point type, so the policy deliberately does not select for it and a
+// nullable floating key keeps raw IEEE equality. In .NET
+// `Dictionary<double?,V>` uses EqualityComparer<double?>.Default, which is
+// NaN-reflexive, so this row DIVERGES. Ticket #1925 records it; the test pins
+// today's behaviour so the divergence cannot change silently.
+TEST(CollectionsComparisonContract, NullableFloatingKeysKeepRawIeeeEqualityForNow) {
+    G::Dictionary<std::optional<double>, int> d;
+    d.Add(std::optional<double>(kNaN), 1);
+    int got = 0;
+    EXPECT_FALSE(d.TryGetValue(std::optional<double>(kNaN), got))
+        << "if this now succeeds, ticket #1925 has been implemented -- update the record";
+    EXPECT_FALSE(d.TryGetValue(std::optional<double>(payloadNaN()), got));
+    EXPECT_EQ(d.getCountProperty(), 1);
+
+    // An ordinary nullable key is unaffected in either direction.
+    d.Add(std::optional<double>(1.5), 2);
+    EXPECT_TRUE(d.TryGetValue(std::optional<double>(1.5), got));
+    EXPECT_EQ(got, 2);
+    EXPECT_FALSE(d.ContainsKey(std::optional<double>()));
+    d.Add(std::optional<double>(), 3);                    // nullopt is an ordinary key
+    EXPECT_TRUE(d.ContainsKey(std::optional<double>()));
+}

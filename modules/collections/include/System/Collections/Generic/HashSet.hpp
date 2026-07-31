@@ -9,6 +9,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Collections/detail/MutationCounter.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Generic {
 
@@ -18,7 +19,26 @@ using SharpRuntime::intcs;
  * @brief Represents a set of values with no duplicate elements.
  *
  * C++ counterpart of .NET System.Collections.Generic.HashSet<T>.
- * Backed by std::unordered_set; provides O(1) average-case Add, Remove, and Contains.
+ * Backed by std::unordered_set keyed under @c EqualityComparer<T>.Default; provides O(1)
+ * average-case Add, Remove, and Contains.
+ *
+ * @par Default equality and hashing (ticket #1919)
+ * The backing set is parameterised on @ref SetType's hasher and equality predicate,
+ * `System::detail::DefaultKeyHash<T>` and `System::detail::DefaultKeyEqual<T>`. Both are
+ * **token-identical to `std::hash<T>` and `std::equal_to<T>` for every non-floating T**, so
+ * nothing about those instantiations moves. For a `float`, `double` or `long double` element
+ * they are the .NET contract instead. Before this ticket `Add(NaN)` twice returned
+ * `true`/`true`, left `Count` 2, and `Contains(NaN)` answered **false**: `std::equal_to`
+ * says NaN is not equal to itself, so the set accepted the same element without limit and
+ * could never find it again. Equality and hashing move together by necessity, so that two
+ * NaNs that compare equal also land in one bucket. See
+ * docs/CollectionsComparisonContractPlan.md section 5.3.
+ *
+ * @warning **PUBLIC TYPE CHANGE for a floating-point element** (ticket #1919, approved). For
+ * `T` = `float`, `double` or `long double` the @ref iterator and @ref const_iterator typedefs
+ * wrap @ref SetType's iterators rather than `std::unordered_set<T>`'s. No non-floating
+ * instantiation is affected in any respect. See
+ * docs/Migration-CollectionsFloatingComparers.md.
  *
  * @note begin()/end() return a version-checked iterator that throws
  * System::InvalidOperationException("Collection was modified; enumeration operation may not "
@@ -39,7 +59,21 @@ using SharpRuntime::intcs;
  */
 template<typename T>
 class HashSet {
-    std::unordered_set<T> set_;
+public:
+    /**
+     * @brief The backing set type: a `std::unordered_set` keyed under
+     *        @c EqualityComparer<T>.Default.
+     *
+     * Token-identical to `std::unordered_set<T>` for every non-floating @p T. Named publicly
+     * so a consumer can spell the type this class stores without depending on whether @p T is
+     * floating-point (ticket #1919).
+     */
+    using SetType = std::unordered_set<T,
+                                       System::detail::DefaultKeyHash<T>,
+                                       System::detail::DefaultKeyEqual<T>>;
+
+private:
+    SetType set_;
     System::Collections::detail::MutationCounter version_;
 
     /**
@@ -350,8 +384,11 @@ public:
      */
     void TrimExcess() { set_.rehash(set_.size()); ++version_; }
 
-    using iterator = VersionCheckedIterator<typename std::unordered_set<T>::iterator>;
-    using const_iterator = VersionCheckedIterator<typename std::unordered_set<T>::const_iterator>;
+    /** @brief Version-checked iterator over @ref SetType. See the class warning for the
+     *         floating-point element consequence (ticket #1919). */
+    using iterator = VersionCheckedIterator<typename SetType::iterator>;
+    /** @brief Const version-checked iterator over @ref SetType. */
+    using const_iterator = VersionCheckedIterator<typename SetType::const_iterator>;
 
     /**
      * @brief Returns a version-checked iterator to the first element (for range-based for).

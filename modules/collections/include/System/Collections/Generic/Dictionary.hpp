@@ -23,7 +23,30 @@ using SharpRuntime::intcs;
  * @brief Represents a generic collection of key/value pairs.
  *
  * C++ counterpart of .NET System.Collections.Generic.Dictionary<TKey,TValue>.
- * Backed by std::unordered_map; provides O(1) average-case lookup, insertion, and removal.
+ * Backed by std::unordered_map keyed under @c EqualityComparer<TKey>.Default; provides O(1)
+ * average-case lookup, insertion, and removal.
+ *
+ * @par Default key equality and hashing (ticket #1919)
+ * The backing map is parameterised on @ref MapType's hasher and key-equality predicate,
+ * `System::detail::DefaultKeyHash<TKey>` and `System::detail::DefaultKeyEqual<TKey>`. Both are
+ * **token-identical to `std::hash<TKey>` and `std::equal_to<TKey>` for every non-floating
+ * TKey**, so nothing about those instantiations moves. For a `float`, `double` or
+ * `long double` key they are the .NET contract instead: `Double.Equals` is
+ * `x == y || (IsNaN(x) && IsNaN(y))`, and `Double.GetHashCode` folds every NaN -- and both
+ * zeros -- to one value. `std::equal_to<double>` says NaN is not equal to itself and
+ * `std::hash<double>` hashes NaN's payload bits, so before this ticket a NaN key could be
+ * added without limit and was then unfindable forever: measured, `Add(NaN,1); Add(NaN,2)`
+ * did not throw, reached `Count` 2, and answered `ContainsKey(NaN)` **false**. Equality and
+ * hashing move together by necessity -- repairing one alone would break the
+ * equal-objects-equal-hashes invariant instead. See
+ * docs/CollectionsComparisonContractPlan.md section 5.3.
+ *
+ * @warning **PUBLIC TYPE CHANGE for a floating-point key** (ticket #1919, approved). For
+ * `TKey` = `float`, `double` or `long double` the type returned by both @ref ToMap overloads
+ * and the types of the @ref iterator and @ref const_iterator typedefs are the policy-keyed
+ * `MapType`, not `std::unordered_map<TKey,TValue>`. Spell @ref MapType rather than the raw
+ * `std::unordered_map` to be correct for every key type. No non-floating instantiation is
+ * affected in any respect. See docs/Migration-CollectionsFloatingComparers.md.
  *
  * @note begin()/end() return a version-checked iterator that throws
  * System::InvalidOperationException("Collection was modified; enumeration operation may not "
@@ -50,7 +73,23 @@ using SharpRuntime::intcs;
  */
 template<typename TKey, typename TValue>
 class Dictionary {
-    std::unordered_map<TKey, TValue> map_;
+public:
+    /**
+     * @brief The backing map type: a `std::unordered_map` keyed under
+     *        @c EqualityComparer<TKey>.Default.
+     *
+     * Token-identical to `std::unordered_map<TKey,TValue>` for every non-floating @p TKey,
+     * because `DefaultKeyHash<TKey>` *is* `std::hash<TKey>` and `DefaultKeyEqual<TKey>` *is*
+     * `std::equal_to<TKey>` for them. Named publicly so a consumer can spell the type
+     * @ref ToMap returns without depending on whether @p TKey is floating-point (ticket
+     * #1919).
+     */
+    using MapType = std::unordered_map<TKey, TValue,
+                                       System::detail::DefaultKeyHash<TKey>,
+                                       System::detail::DefaultKeyEqual<TKey>>;
+
+private:
+    MapType map_;
     System::Collections::detail::MutationCounter version_;
 
     /**
@@ -351,8 +390,11 @@ public:
         return it->second;
     }
 
-    using iterator = VersionCheckedIterator<typename std::unordered_map<TKey, TValue>::iterator>;
-    using const_iterator = VersionCheckedIterator<typename std::unordered_map<TKey, TValue>::const_iterator>;
+    /** @brief Version-checked iterator over @ref MapType. See the class warning for the
+     *         floating-point key consequence (ticket #1919). */
+    using iterator = VersionCheckedIterator<typename MapType::iterator>;
+    /** @brief Const version-checked iterator over @ref MapType. */
+    using const_iterator = VersionCheckedIterator<typename MapType::const_iterator>;
 
     /**
      * @brief Returns a version-checked iterator to the first element (for range-based for).
@@ -368,18 +410,21 @@ public:
     [[nodiscard]] const_iterator end()   const { return const_iterator(this, map_.cend()); }
 
     /**
-     * @brief Returns a const reference to the underlying std::unordered_map.
+     * @brief Returns a const reference to the underlying map.
      *
-     * Provides direct STL interoperability when needed.
+     * Provides direct STL interoperability when needed. The returned type is @ref MapType,
+     * which is `std::unordered_map<TKey,TValue>` for every non-floating @p TKey and the
+     * policy-keyed map for a floating one (ticket #1919).
      */
-    [[nodiscard]] const std::unordered_map<TKey, TValue>& ToMap() const { return map_; }
+    [[nodiscard]] const MapType& ToMap() const { return map_; }
 
     /**
-     * @brief Returns a reference to the underlying std::unordered_map.
+     * @brief Returns a reference to the underlying map.
      *
-     * Provides direct STL interoperability when needed.
+     * Provides direct STL interoperability when needed. See the const overload for the
+     * floating-point key consequence.
      */
-    std::unordered_map<TKey, TValue>& ToMap() { return map_; }
+    MapType& ToMap() { return map_; }
 };
 
 } // namespace System::Collections::Generic
