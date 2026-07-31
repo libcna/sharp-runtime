@@ -7,6 +7,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/Generic/IEqualityComparer.hpp"
 #include "System/NotSupportedException.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Generic {
 
@@ -49,15 +50,31 @@ public:
     /**
      * @brief Gets the default equality comparer for type T.
      *
-     * C++ counterpart of .NET EqualityComparer<T>.Default.
-     * Uses operator== for equality and std::hash<T> for hash codes.
+     * C++ counterpart of .NET EqualityComparer<T>.Default, which is
+     * `GenericEqualityComparer<T>` — `x.Equals(y)` and `x.GetHashCode()`, *not*
+     * the operand type's `operator==` and not a raw bit hash. For every type in
+     * this port but `float` and `double` the two agree exactly; for those two,
+     * `Single.Equals`/`Double.Equals` are
+     * `obj == m_value || (IsNaN(obj) && IsNaN(m_value))`, so **NaN equals
+     * itself**, and `Single.GetHashCode`/`Double.GetHashCode` fold every NaN
+     * (and both zeros) to one value so that equal objects still hash alike.
+     *
+     * Routed through @c System::detail::equalValues and
+     * @c System::detail::hashValue, which state that rule once for the whole
+     * port. The two must move together: making `Equals` NaN-reflexive while
+     * `std::hash` still hashed NaN's payload bits would break the
+     * equal-objects-equal-hashes invariant instead of fixing it. See
+     * `docs/CollectionsComparisonContractPlan.md` §5.3.
+     *
      * @return A singleton reference to the default comparer.
      */
     static const EqualityComparer<T>& Default() {
         static struct DefaultImpl : EqualityComparer<T> {
-            [[nodiscard]] bool Equals(const T& x, const T& y) const override { return x == y; }
+            [[nodiscard]] bool Equals(const T& x, const T& y) const override {
+                return System::detail::equalValues(x, y);
+            }
             [[nodiscard]] intcs GetHashCode(const T& obj) const override {
-                return static_cast<intcs>(std::hash<T>{}(obj));
+                return static_cast<intcs>(System::detail::hashValue(obj));
             }
         } instance;
         return instance;

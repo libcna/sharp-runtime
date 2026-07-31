@@ -6,6 +6,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/Generic/IComparer.hpp"
 #include "System/Collections/Generic/EqualityComparer.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Generic {
 
@@ -36,17 +37,30 @@ public:
     [[nodiscard]] virtual intcs Compare(const T& x, const T& y) const override = 0;
 
     /**
-     * @brief Gets the default comparer for type T, using operator<.
+     * @brief Gets the default comparer for type T.
      *
-     * C++ counterpart of .NET Comparer<T>.Default.
-     * @return A singleton comparer that orders elements using operator<.
+     * C++ counterpart of .NET Comparer<T>.Default, which is
+     * `GenericComparer<T>.Compare` — `x.CompareTo(y)`, *not* the operand type's
+     * `operator<`. For every type in this port but `float` and `double` the two
+     * agree exactly; for those two, `Single.CompareTo`/`Double.CompareTo` order
+     * NaN **before every value including negative infinity** and treat two NaNs
+     * as equal. Routed through @c System::detail::compareValues so this class
+     * and every collection that ports a `Comparer<T>.Default` expression state
+     * the rule once.
+     *
+     * @note Using the built-in `<` here did not merely give a different answer:
+     * `Compare(NaN, x)` returned `0` — *equivalent* — for every `x`, which makes
+     * the induced equivalence intransitive and this object an invalid comparator
+     * for `std::sort`, `std::lower_bound` and every ordered associative
+     * container a caller might hand it to. See
+     * `docs/CollectionsComparisonContractPlan.md` §2.1.
+     *
+     * @return A singleton comparer implementing .NET's default ordering for T.
      */
     static const Comparer<T>& Default() {
         static struct DefaultComparer : Comparer<T> {
             [[nodiscard]] intcs Compare(const T& x, const T& y) const override {
-                if (x < y) return -1;
-                if (y < x) return  1;
-                return 0;
+                return static_cast<intcs>(System::detail::compareValues(x, y));
             }
         } instance;
         return instance;
