@@ -12,6 +12,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IndexOutOfRangeException.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 #include "System/InvalidOperationException.hpp"
 
 namespace System::Collections::Immutable {
@@ -272,15 +273,19 @@ public:
     }
 
     /**
-     * @brief Returns a new array with elements sorted in ascending order.
+     * @brief Returns a new array sorted under .NET's default comparison contract.
      *
-     * C++ counterpart of .NET ImmutableArray<T>.Sort().
+     * C++ counterpart of .NET ImmutableArray<T>.Sort(), which delegates to Array.Sort and
+     * therefore uses `Comparer<T>.Default` rather than the element type's `<`. NaN orders
+     * before every value including negative infinity, and is moved out of the comparator's
+     * input by a pre-pass first — see List<T>::Sort() for why that is a correctness
+     * requirement rather than an optimisation.
      * @return A new ImmutableArray sorted in ascending order.
      */
     [[nodiscard]] ImmutableArray<T> Sort() const {
         ensureNotDefault();
         auto v = std::make_shared<std::vector<T>>(*data_);
-        std::sort(v->begin(), v->end());
+        System::detail::defaultSort(v->begin(), v->end());
         return ImmutableArray<T>(std::move(v));
     }
 

@@ -17,6 +17,7 @@
 #include "System/Collections/ObjectModel/ReadOnlyCollection.hpp"
 #include "System/Collections/detail/ElementReference.hpp"
 #include "System/Collections/detail/MutationCounter.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Generic {
 
@@ -412,12 +413,24 @@ class List : public IList<T> {
         [[nodiscard]] std::vector<T> ToArray() const { return items_; }
 
         /**
-         * @brief Sorts the elements in the list using the default comparer.
+         * @brief Sorts the elements in the list under .NET's default comparison contract.
          *
-         * C++ counterpart of .NET List<T>.Sort().
+         * C++ counterpart of .NET List<T>.Sort(), which is `Array.Sort(_items, 0, _size)`
+         * and therefore uses `Comparer<T>.Default` rather than the element type's `<`.
+         * For every type but `float` and `double` the two agree; for those two, .NET orders
+         * NaN *before* every value including negative infinity, so this overload moves NaN
+         * to the front in a pre-pass and sorts only the NaN-free remainder —
+         * `ArraySortHelper<T>.Sort`'s own algorithm (`ArraySortHelper.cs:285-305`).
+         *
+         * @note The pre-pass is a correctness requirement, not an optimisation: raw `<` over
+         * a range containing NaN is not a strict weak ordering, so handing it to `std::sort`
+         * violates `[alg.sort]`'s precondition. Measured on the previous body, that left the
+         * *finite* elements unsorted in 164 of 196 shapes, worst case 216,078,912 inversions,
+         * with AddressSanitizer and UndefinedBehaviorSanitizer both silent. See
+         * `docs/CollectionsComparisonContractPlan.md` §3.2.
          */
         void Sort() {
-            std::sort(items_.begin(), items_.end());
+            System::detail::defaultSort(items_.begin(), items_.end());
             ++version_;
         }
 
@@ -550,16 +563,22 @@ class List : public IList<T> {
         }
 
         /**
-         * @brief Searches a sorted list for a value using the default comparer.
+         * @brief Searches a sorted list for a value under .NET's default comparison contract.
          *
-         * C++ counterpart of .NET List<T>.BinarySearch(T).
+         * C++ counterpart of .NET List<T>.BinarySearch(T), which is
+         * `Array.BinarySearch(_items, index, count, item, Comparer<T>.Default)`. The list must
+         * already be sorted by the same ordering — the one Sort() above produces, in which NaN
+         * comes first. Passing the raw `<` here was a `[alg.binary.search]` precondition
+         * violation that `_GLIBCXX_DEBUG` reports as *"elements in iterator range are not
+         * partitioned by the value"*.
          * @param item The value to search for.
          * @return The zero-based index if found; the bitwise complement of the
          *         insertion point if not found.
          */
         [[nodiscard]] intcs BinarySearch(const T& item) const {
-            auto it = std::lower_bound(items_.begin(), items_.end(), item);
-            if (it != items_.end() && *it == item)
+            auto it = std::lower_bound(items_.begin(), items_.end(), item,
+                                       System::detail::DefaultLess<T>{});
+            if (it != items_.end() && System::detail::equalValues(*it, item))
                 return static_cast<intcs>(it - items_.begin());
             return ~static_cast<intcs>(it - items_.begin());
         }

@@ -13,6 +13,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/IComparer.hpp"
 #include "System/Collections/Generic/IEqualityComparer.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Immutable {
 
@@ -596,22 +597,30 @@ public:
     }
 
     /**
-     * @brief Returns a new list with all elements sorted using T::operator<.
+     * @brief Returns a new list with all elements sorted under .NET's default
+     *        comparison contract.
      *
-     * C++ counterpart of .NET ImmutableList<T>.Sort().
+     * C++ counterpart of .NET ImmutableList<T>.Sort(), which uses
+     * `Comparer<T>.Default` rather than the element type's `<`. NaN orders before every
+     * value including negative infinity, and is moved out of the comparator's input by a
+     * pre-pass first — see List<T>::Sort() for why that is a correctness requirement
+     * rather than an optimisation.
      * @return A sorted immutable list; the source list is unchanged.
      */
     [[nodiscard]] ImmutableList<T> Sort() const {
         auto values = std::make_shared<std::vector<T>>(*data_);
-        std::sort(values->begin(), values->end());
+        System::detail::defaultSort(values->begin(), values->end());
         return ImmutableList<T>(std::move(values));
     }
 
     /**
-     * @brief Returns a new list with only the requested range sorted using T::operator<.
+     * @brief Returns a new list with only the requested range sorted under .NET's
+     *        default comparison contract.
      *
      * C++ counterpart of .NET ImmutableList<T>.Sort(int, int, IComparer<T>) using the
-     * default comparison.
+     * default comparison. Same NaN-before-everything rule and same NaN pre-pass as
+     * Sort(); the pre-pass is confined to the requested range, so elements outside it
+     * keep their positions.
      * @param index The zero-based first element in the range.
      * @param count The number of elements to sort.
      * @return A list with only the requested range sorted; the source is unchanged.
@@ -620,7 +629,7 @@ public:
     [[nodiscard]] ImmutableList<T> Sort(intcs index, intcs count) const {
         requireValidRange(index, count);
         auto values = std::make_shared<std::vector<T>>(*data_);
-        std::sort(values->begin() + index, values->begin() + index + count);
+        System::detail::defaultSort(values->begin() + index, values->begin() + index + count);
         return ImmutableList<T>(std::move(values));
     }
 
