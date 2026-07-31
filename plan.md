@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-31 — 41 physical components, 91 direct production
-dependency edges, a clean native build, 14,635 passing tests across 37
+dependency edges, a clean native build, 14,683 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
 is recorded as audit finding `SR-AUD-001`. Post-audit tally: **57 findings
@@ -13,7 +13,9 @@ landed the approved owner-side detachment contract and left the tally
 `confirmed (design-complete)` qualifier: item 1 of
 `docs/OwnedTreeLifetimeContractPlan.md` §31 closes 26 of their 29 measured
 use-after-free cases, and the remaining three (J11, X15, X17) belong to the
-still-unapproved #1889 and #1892.*
+still-unapproved #1889 and #1892. The follow-on 2026-07-31 batch (#1887, #1891)
+closed both of CCF-019's silent data-loss paths and likewise left the tally
+**unchanged**, for the same reason.*
 
 Sharp Runtime is in the post-audit remediation phase. The original type
 classification, stabilization, and modularization queues are complete, and the
@@ -4747,3 +4749,74 @@ decision**, in the order #1887/#1891 (item 2, no source break), #1888 (item 3),
 #1892 (item 5), #1889 (item 4), #1893 (item 6), then #1894. Full detail,
 build-directory sizes and probe accounting: `NEXT.md` under "Autonomous
 remediation batch handoff, 2026-07-31 (CCF-019, PARTIALLY REMEDIATED)".
+
+## Autonomous remediation batch, 2026-07-31 — CCF-019 exception paths (#1887, #1891) and four design records (#1888, #1889, #1892, #1893)
+
+Branch `feature/remediation-ccf019-residuals`, off
+`feature/remediation-ccf019-owner-detachment`. Four ticket commits plus the
+handoff. **Nothing was pushed, merged, rebased, tagged or published.**
+
+### What was authorised
+
+The user's batch instruction of 2026-07-31 directed
+`docs/OwnedTreeLifetimeContractPlan.md` **§31 item 2** to be started (#1887 then
+#1891) and set an approval boundary granting nothing for public source breaks,
+virtual-interface or vtable changes, object- or iterator-layout changes, return
+calling-convention changes, mandatory downstream migration, or broad observable
+semantic changes. Item 2 requires none of those. **Items 3, 4, 5 and 6 remain
+unanswered**, so #1888, #1889, #1892 and #1893 stay `needs_user` and #1894 stays
+`blocked`; none of them was started and nothing they own was absorbed.
+
+### Tickets completed (two implementations, four design records)
+
+| # | Finding | Outcome |
+|---|---|---|
+| **#1887** | SR-AUD-327, probe **J10** | `JsonObject::SetItem` adopts the incoming value **before** detaching the value it replaces, matching `JsonArray::SetItem`. A rejected call no longer leaves the object holding a value that reports no parent, and a second container now refuses it. |
+| **#1891** | SR-AUD-333, probe **X20** | `XNode::ReplaceWith` restores the replaced node when a replacement is refused; `XContainer::InsertNodeAt` adopts after it inserts. `<a>victim</a>` stays `<a>victim</a>` instead of becoming `<a/>`. |
+| #1888 | §37 | compatibility review — **no compatible repair exists**; stays `needs_user` |
+| #1892 | §38 | compatibility review — **§31 item 5 is not implementable as worded**; stays `needs_user` |
+| #1889 | §39 | full sixteen-item design package — **item 4 is also a source break and a silent ABI break**; stays `needs_user` |
+| #1893 | §40 | root-cause classification — **three distinct defects**, and the depth bound item 6 asks for already exists in the module; stays `needs_user` |
+
+### Measured result
+
+| | #1885 baseline | after #1886/#1890 | after #1887/#1891 |
+|---|---|---|---|
+| ASan `heap-use-after-free` cases | 29 | 3 | **3** (J11, X15, X17) |
+| Faulting accesses (recoverable ASan) | 57 | 5 | **5** |
+| `pure virtual method called` aborts | 8 | 0 | **0** |
+| ASan `stack-overflow`s | 3 | 3 | **3** |
+| Timeouts | 2 | 2 | **2** |
+| **Silent data-loss paths** | **2** | **2** | **0** |
+| Leaks | 0 | 0 | **0** |
+
+The pre-change replay reproduced the previous batch's recorded end state exactly
+(**0 of 58 cases changed**) before either edit, so the baseline was verified
+rather than inherited. After both edits, diffing every answer line of the
+no-sanitizer probe build across all 58 cases yields exactly **two** semantic
+differences in the whole matrix — J10 and X20.
+
+**+48 permanent tests**; repository gate **14,635 → 14,683 across 37
+executables**, zero warnings, zero errors. Six mutation checks (5 / 12 / 12 / 3,
+plus one recorded honestly at **0**). ASan+UBSan+LSan clean over 201/201
+Text.Json and 153/153 Xml.Linq. Module graph **41/91**, Doxygen **1,941/1,942**,
+seams **2/18**, negative fixtures **9/66** — all unchanged. No signature, member,
+`sizeof`, `alignof` or vtable change; the only ABI movement is two weak COMDAT
+standard-library instantiations newly emitted in `XNode.o`, no name removed.
+
+### Five premises corrected by measurement
+
+Appended to the design record rather than rewritten into it: §35.4 (.NET's
+`JsonObject.SetItem` does **not** assign before detaching), §36.4 (validating
+replacements before removing the node regresses document-root replacement),
+§38.1 (`Ancestors` **cannot** return owning handles without a layout change),
+§39.1 (#1889 is a source break and a silent ABI break, not only `+8`), and
+§40.2/§40.3 (`JsonDocumentOptions::DefaultMaxDepth = 64` already exists and is
+already applied by `JsonDocument::Parse`; item 6's J19d/X27d half needs a layout
+change it says it does not).
+
+**SR-AUD-327 and SR-AUD-333 both stay `confirmed (design-complete)`**; the
+post-audit tally is unchanged at **57 remediated / 306 confirmed / 364** and
+numbering stays frozen at **364**. **CNA and mobile-eggbert were not inspected,
+searched, built or modified**; **#1773 stays `blocked`**. Maximum aggregate
+compilation parallelism was **three jobs**.

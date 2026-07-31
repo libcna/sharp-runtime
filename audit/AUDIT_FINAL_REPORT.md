@@ -4083,3 +4083,38 @@ cases passing **unmodified**; five mutation checks; ASan+UBSan+LSan clean over
 with sanitizer activation proved by a controlled self-test; Doxygen 1,941/1,942;
 version seams 2/18; negative consumer fixtures 9/66. **CNA and mobile-eggbert
 were not inspected, searched, built or modified**, and #1773 remains `blocked`.
+
+## CCF-019 exception-path batch, 2026-07-31 (tickets #1887, #1891) — PARTIAL, NEITHER FINDING REMEDIATED
+
+Started under the user's batch instruction directing
+`docs/OwnedTreeLifetimeContractPlan.md` §31 **item 2**. **#1887** reorders
+`JsonObject::SetItem` to adopt the incoming value before detaching the value it
+replaces; **#1891** makes `XNode::ReplaceWith` restore the replaced node when a
+replacement is refused and `XContainer::InsertNodeAt` adopt after it inserts.
+**Both of CCF-019's silent data-loss paths (J10, X20) are closed.** The
+ASan-confirmed residue is unchanged — J11 (#1889), X15 and X17 (#1892) — so
+**SR-AUD-327 and SR-AUD-333 both keep the `confirmed (design-complete)`
+qualifier** and the post-audit tally stays **57 remediated / 306 confirmed / 364**,
+with **numbering frozen at 364**.
+
+Evidence: the #1885 probe re-run unmodified (its pre-change replay reproduced the
+previous batch's end state exactly, 0 of 58 cases changed); after both edits,
+diffing every answer line of the no-sanitizer build across all 58 cases yields
+exactly two semantic differences in the whole matrix. **+48 permanent tests**,
+floor **14,635 → 14,683** across 37 executables, all 306 pre-existing cases in the
+two suites passing **unmodified**; six mutation checks; ASan+UBSan+LSan clean over
+201/201 `SharpRuntimeTests_Text_Json` and 153/153 `SharpRuntimeTests_Xml_Linq`;
+Doxygen 1,941/1,942; version seams 2/18; negative consumer fixtures 9/66; module
+graph 41/91. No signature, member, `sizeof`, `alignof` or vtable change; the only
+ABI movement is two weak COMDAT standard-library instantiations newly emitted in
+`XNode.o`, with no name removed.
+
+The same batch produced design-only records for the four unapproved residuals —
+#1888 (no compatible repair exists; the compatible-looking half-repair injects
+`-Wdeprecated-copy` into consumer builds), #1892 (**§31 item 5 is not
+implementable as worded**), #1889 (the full design package; **item 4 is also a
+source break and a silent ABI break**, not only a layout change) and #1893 (three
+distinct root causes, and the depth bound item 6 asks for **already exists** in
+the same module). All four remain `needs_user`; #1894 remains `blocked`. **CNA and
+mobile-eggbert were not inspected, searched, built or modified**, and #1773
+remains `blocked`.

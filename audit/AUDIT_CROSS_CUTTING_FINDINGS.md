@@ -1327,6 +1327,54 @@ inline body and touches no owner pointer, no `shared_ptr`, no lifetime rule, and
 no member of `SortedSet<T>` or `Iterator`. This cause's membership list, the
 closure above, and SR-AUD-361's `remediated` status are all unchanged by it.
 
+
+**Remediation status after the exception-path batch (tickets #1887 and #1891,
+2026-07-31): still PARTIAL — the two data-loss paths are closed, NEITHER FINDING
+IS REMEDIATED.** Everything above is retained unchanged; **no new `SR-AUD-*`
+identifier was issued** and numbering stays frozen at **364**.
+
+The user's batch instruction of 2026-07-31 directed `docs/OwnedTreeLifetimeContractPlan.md`
+§31 **item 2** to be started, and granted no approval for a source break, a
+vtable change, an object- or iterator-layout change, a return calling-convention
+change or downstream migration. **#1887** reorders `JsonObject::SetItem` to adopt
+the incoming value before detaching the value it replaces (probe case J10);
+**#1891** makes `XNode::ReplaceWith` put the replaced node back when a
+replacement is refused, and `XContainer::InsertNodeAt` adopt after it inserts
+(probe case X20). Items 3, 4, 5 and 6 remain unanswered.
+
+| | after #1886/#1890 | after #1887/#1891 |
+|---|---|---|
+| ASan `heap-use-after-free` cases | 3 | **3** (J11, X15, X17) |
+| Faulting accesses, recoverable ASan | 5 | **5** |
+| `pure virtual method called` aborts | 0 | **0** |
+| ASan `stack-overflow`s | 3 | **3** (J19c, X27c, X28c) |
+| Timeouts | 2 | **2** (J19d, X27d) |
+| **Silent data-loss paths** | **2** (J10, X20) | **0** |
+
+Diffing every answer line of the no-sanitizer probe build across all 58 cases
+yields exactly **two** semantic differences in the whole matrix — J10 and X20 —
+so nothing else in either family moved. +48 permanent tests
+(`JsonNodeMutationConsistencyTests` 22, `XLinqMutationConsistencyTests` 26);
+repository gate **14,635 → 14,683 tests across 37 executables**.
+
+Both findings keep the `confirmed (design-complete)` qualifier: **SR-AUD-327**
+still has J11 and **SR-AUD-333** still has X15/X17, each an ASan-confirmed
+use-after-free inside its own files. The post-audit tally is **unchanged at 57
+remediated / 306 confirmed / 364**.
+
+Three premises were corrected by measurement and appended to the design record
+rather than rewritten into it: §13.5's claim that assign-before-detach *"matches
+.NET"* (it does not — .NET's `JsonObject.SetItem` detaches and commits the write
+before `AssignParent` runs, §35.4); §25/§14.3's *"validate every replacement
+before removing `this`"* (not implementable — it regresses
+`doc->getRootProperty()->ReplaceWith(newRoot)`, §36.4); and §31 item 4's
+description of #1889 as *only* a layout change (`begin()`/`end()` return the raw
+libstdc++ iterator, so it is also a public source break and a **silent** ABI
+break, §39.1). Two further items were found unimplementable as worded — §31 item
+5's *"return owning handles"* (§38.1) and item 6's no-layout-change claim for
+J19d/X27d (§40.3). **CNA and mobile-eggbert were not inspected**, and #1773 stays
+`blocked`.
+
 ## CCF-020 — raw polymorphic output parameters erase the validation information public contracts require
 
 The legacy non-generic ICollection interface accepts `void*` plus a starting

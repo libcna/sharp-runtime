@@ -6047,3 +6047,39 @@ Text.Json and 127/127 Xml.Linq with sanitizer activation proved by a controlled
 self-test. §31 items 2–6 remain unapproved and unstarted (#1887, #1888, #1889,
 #1891, #1892, #1893 `needs_user`; #1894 `blocked`). CNA and mobile-eggbert were
 not inspected; #1773 stays `blocked`.
+
+**CCF-019 exception-path batch (#1887 + #1891, 2026-07-31) — PARTIAL; neither
+finding remediated.** Started under the user's batch instruction directing
+`docs/OwnedTreeLifetimeContractPlan.md` §31 **item 2**, which grants no approval
+for a source break, a vtable change, an object- or iterator-layout change, a
+return calling-convention change or downstream migration — and needs none.
+**#1887** reorders `JsonObject::SetItem` to adopt the incoming value before
+detaching the value it replaces (probe case J10: the object no longer holds a
+value reporting no parent, and a second container now rejects it). **#1891**
+makes `XNode::ReplaceWith` put the replaced node back when a replacement is
+refused, and `XContainer::InsertNodeAt` adopt after it inserts (probe case X20:
+`<a>victim</a>` stays `<a>victim</a>` instead of becoming `<a/>`). **Both
+CCF-019 data-loss paths are now closed; the ASan residue is unchanged at 3
+use-after-free cases** (J11 → #1889, X15/X17 → #1892), 3 stack-overflows and 2
+timeouts (→ #1893).
+
+Evidence: the #1885 probe re-run unmodified, whose pre-change replay reproduced
+the previous batch's recorded end state exactly (0 of 58 changed) before either
+edit; diffing every answer line of the no-sanitizer build across all 58 cases
+after both edits yields exactly **two** semantic differences in the whole matrix,
+J10 and X20. **+48 permanent tests** (`JsonNodeMutationConsistencyTests` 22,
+`XLinqMutationConsistencyTests` 26); floor **14,635 → 14,683 tests / 37
+executables**; all 179 pre-existing Text.Json and 127 pre-existing Xml.Linq cases
+pass unmodified. Six mutations across the two tickets (5, 12, 12, 3, and one
+recorded honestly at **0** because it is only observable on `std::bad_alloc`).
+ASan+UBSan+LSan clean over 201/201 Text.Json and 153/153 Xml.Linq. Module graph
+41/91, Doxygen 1,941/1,942, seams 2/18, negative fixtures 9/66 — all unchanged.
+
+**SR-AUD-327 and SR-AUD-333 both stay `confirmed (design-complete)`**; the
+post-audit tally is **unchanged at 57 remediated / 306 confirmed / 364** and
+**numbering stays frozen at 364**. The same batch completed design-only
+compatibility reviews for #1888 (§37), #1892 (§38), #1889 (§39, the full
+sixteen-item package) and #1893 (§40, root-cause classification); all four stay
+`needs_user` and #1894 stays `blocked`. Five plan premises were corrected by
+measurement and appended rather than rewritten (§35.4, §36.4, §38.1, §39.1,
+§40.2/§40.3). CNA and mobile-eggbert were not inspected; #1773 stays `blocked`.

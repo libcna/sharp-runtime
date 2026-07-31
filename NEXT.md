@@ -4,9 +4,24 @@
 # NEXT.md
 
 *Last verified: 2026-07-31. Branch:
-`feature/remediation-ccf019-owner-detachment` (previously
-`feature/design-ccf019-owned-tree-lifetimes`). The test floor rose to
-**14,635** (was 14,568). The user approved
+`feature/remediation-ccf019-residuals` (previously
+`feature/remediation-ccf019-owner-detachment`). The test floor rose to
+**14,683** (was 14,635). Under the user's batch instruction directing
+**`docs/OwnedTreeLifetimeContractPlan.md` §31 item 2**, this batch landed
+**#1887** (`JsonObject::SetItem` adopts before it detaches, +22 tests) and
+**#1891** (`XNode::ReplaceWith` restores the replaced node when a replacement is
+refused; `XContainer::InsertNodeAt` adopts after it inserts, +26 tests). **Both
+of CCF-019's silent data-loss paths, J10 and X20, are now closed**; the ASan
+residue is unchanged at **3** use-after-free cases (J11, X15, X17), 3
+stack-overflows and 2 timeouts. The same batch completed **design-only** records
+for every remaining residual — #1888 (§37), #1892 (§38), #1889 (§39, the full
+sixteen-item package) and #1893 (§40) — all four still `needs_user`, #1894 still
+`blocked`. **Five plan premises were corrected by measurement**, two of which
+make **§31 items 4 and 5 wrong as worded**. Post-audit tally **unchanged at 57
+remediated / 306 confirmed / 364**; numbering frozen at **364**. See "Autonomous
+remediation batch handoff, 2026-07-31 (CCF-019 exception paths)" immediately
+below. Previously, on `feature/remediation-ccf019-owner-detachment`: the test
+floor rose to **14,635** (was 14,568). The user approved
 **`docs/OwnedTreeLifetimeContractPlan.md` §31 item 1 and only item 1**, and this
 batch implemented it in both families: **#1886** (`JsonArray`/`JsonObject`
 detach their children in their own destructor, +32 tests) and **#1890**
@@ -275,6 +290,335 @@ per this repository's practice of preserving historical audit narrative.*
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
+
+## Autonomous remediation batch handoff, 2026-07-31 (CCF-019 exception paths)
+
+Branch `feature/remediation-ccf019-residuals`, off
+`feature/remediation-ccf019-owner-detachment`. Five commits: **#1887**
+(`0a5b4c81`), **#1891** (`463358f2`), the #1888/#1889/#1892 design records
+(`6bbc1377`), the #1893 classification (`5449278b`), and this handoff. **Nothing
+was pushed, merged, rebased, tagged or published.**
+
+### What was authorised, and what was not
+
+The user's batch instruction directed **`docs/OwnedTreeLifetimeContractPlan.md`
+§31 item 2** to be started (*"Start the autonomous CCF-019 residual batch now
+with §31 item 2: ticket #1887, followed by ticket #1891"*) and set an approval
+boundary granting **nothing** for public source breaks, virtual-interface or
+vtable changes, object- or iterator-layout changes, return calling-convention
+changes, mandatory downstream migration, or broad observable semantic changes.
+Item 2 requires none of those, so it was taken as approved and recorded in
+§35.0.
+
+**Items 3, 4, 5 and 6 remain unanswered.** #1888, #1889, #1892 and #1893 stay
+`needs_user`; #1894 stays `blocked`. **None of them was started and nothing they
+own was absorbed into #1887/#1891.**
+
+### #1887 — `JsonObject::SetItem` adopts before it detaches (SR-AUD-327, probe J10)
+
+Two statements swapped in one inline body,
+`modules/text-json/include/System/Text/Json/Nodes/JsonObject.hpp`. The value
+being replaced was detached *before* `AssignParent` could reject the incoming
+value, so a rejected call left the object holding a value reporting **no**
+parent — and any other container then accepted it, giving one node two owners,
+each of which clears the other's link on destruction. This is the ordering
+`JsonArray::SetItem` has always had (probe J18).
+
+Every mutating entry point of both containers was enumerated (§35.2), not only
+the one the probe named: `JsonObject::SetItem` on an existing key was the **only**
+site that mutated before it validated.
+
+### #1891 — `ReplaceWith` keeps the node it replaces (SR-AUD-333, probe X20)
+
+`modules/xml-linq/src/System/Xml/Linq/XNode.cpp` and `.../XContainer.cpp`. The
+replaced node is now held in a local `shared_ptr` across its own removal
+(`children_` may hold its last owning reference), the insertion loop runs inside
+a `try`, and a refused insertion undoes every insertion the call had already made
+and puts the node back at its original index with its original parent.
+`InsertNodeAt` now adopts **after** the vector insert.
+
+**The rollback cannot throw**: `RemoveNode` only searches, writes one raw pointer
+and erases, and the final insert cannot reallocate because the erases leave
+`size() < capacity()`. It is written with direct container operations rather than
+by calling `InsertNodeAt` back, so it cannot replace the caller's real diagnosis
+with a fabricated one.
+
+**One bounded residue is asserted, not hidden**: a replacement that was already
+attached somewhere and was inserted before a *later* replacement was refused is
+left **detached**, because `Add`'s documented move semantics have no inverse.
+Test `RejectedLaterReplacement_LeavesAMovedReplacementDetached` pins it.
+
+### Measured result — the #1885 probe re-run **unmodified**
+
+Same probe source, same `1885_build.sh` (one `g++` process compiling 60
+production translation units from source; **no archive linked**), same three
+builds from one source, one `fork()`ed process per case under the same 5-second
+watchdog, same mechanical classifier (`1886_classify_cases.py`).
+
+**The pre-change replay reproduced the previous batch's recorded end state
+exactly — 0 of 58 cases changed — so this batch's baseline was verified, not
+inherited** (`build-probe/1887_prefix_asan.log`).
+
+| | #1885 baseline | after #1886/#1890 | after #1887/#1891 |
+|---|---|---|---|
+| ASan `heap-use-after-free` **cases** | 29 | 3 | **3** (J11, X15, X17) |
+| Faulting **accesses**, recoverable ASan | 57 | 5 | **5** |
+| `pure virtual method called` aborts | 8 | 0 | **0** |
+| ASan `stack-overflow`s | 3 | 3 | **3** (J19c, X27c, X28c) |
+| Timeouts | 2 | 2 | **2** (J19d, X27d) |
+| **Silent data-loss paths** | **2** (J10, X20) | **2** | **0** |
+| Leaks | 0 | 0 | **0** |
+
+J10's classification changes (`clean` → `throws: The node already has a parent.`,
+because the probe's own second container now refuses the node). **X20's does
+not**, and that is the correct result rather than a null one: X20 is one of the
+twelve cases §4.3/§5.3 record as *silent* — a wrong answer with **no** sanitizer
+diagnostic in any build — so its repair shows in the answer lines. Diffing every
+answer line of the **no-sanitizer** build across all 58 cases yields exactly
+**two** semantic differences in the whole matrix, J10 and X20, plus ASLR address
+noise in the three cases that print a pointer.
+
+Pre-fix / post-fix, in the probe's own words:
+
+```
+J10  -> object still holds it (count=1, same node: YES) but its parent is NULL
+     -> the SAME node is now in two containers; second count = 1
+J10  -> object still holds it (count=1, same node: YES) but its parent is non-null
+     -> System exception: The node already has a parent.
+
+X20  -> victim still in the tree: NO (LOST); victim parent: null   /  a serialises to <a/>
+X20  -> victim still in the tree: yes; victim parent: non-null     /  a serialises to <a>victim</a>
+```
+
+### Permanent tests and mutation results
+
+- `modules/text-json/tests/System/Text/Json/Nodes/JsonNodeMutationConsistencyTests.cpp` — **22 cases**
+- `modules/xml-linq/tests/System/Xml/Linq/XLinqMutationConsistencyTests.cpp` — **26 cases**
+
+Floor **14,635 → 14,683** across 37 executables. All **179** pre-existing
+Text.Json and all **127** pre-existing Xml.Linq cases pass **unmodified**;
+nothing was weakened, deleted or recategorised.
+
+**Six mutations** (Xml.Linq run one test per process so an abort cannot hide the
+rest):
+
+| Mutation | Detected by |
+|---|---|
+| `JsonObject::SetItem`'s two statements swapped back | **5** of 22 |
+| the whole `ReplaceWith` rollback removed (pre-fix body) | **12** of 26 |
+| insertions undone but the replaced node **not** restored | **12** of 26 |
+| the replaced node restored but the insertions **not** undone | **3** of 26 |
+| `InsertNodeAt` adopts before it inserts (pre-fix order) | **0** — see below |
+| *(experiment, reverted)* literal "validate before removing" | **2**, one of them a **regression** |
+
+The zero is recorded rather than hidden, exactly as §34.2 recorded #1890's
+guard mutation. `InsertNodeAt`'s adoption order is only observable when
+`children_.insert` throws, i.e. on `std::bad_alloc`, and
+`std::vector<std::shared_ptr<XNode>>` offers no allocator injection point. It is
+kept because the reverse order lets a node report a parent that does not hold
+it, whose own `Remove()` would then silently do nothing.
+
+### Sanitizers
+
+`build-asan` (`-fsanitize=address,undefined`, `detect_leaks=1`,
+`print_stacktrace=1`), each binary proved newer than every file it compiles
+(`build-probe/188{7,9}1_asan_freshness.log`): **201/201 Text.Json** and
+**153/153 Xml.Linq**, **zero** ASan, UBSan or LeakSanitizer diagnostics
+(`1887_asan_tests.log`, `1891_asan_tests.log`). Eleven of the new Xml.Linq cases
+exercise the rollback path under the sanitizers, so the "cannot throw, cannot
+reallocate" reasoning is checked dynamically as well as argued. Sanitizer
+activation is the same controlled self-test §33.5 recorded
+(`1886_sanitizer_selftest.log`); flags and tree unchanged. **TSan was not run and
+was not needed** — no shared mutable state, atomic, cache or cross-thread
+ownership was introduced or investigated.
+
+### Source, ABI, layout, performance
+
+| Claim | Evidence |
+|---|---|
+| No public signature change | `JsonObject.hpp` swaps two statements and adds doc-comments; `XNode.hpp` gains doc-comments only; both Xml.Linq bodies are out-of-line |
+| `sizeof`/`alignof`/vtable unchanged | no member and no virtual function added anywhere; the 23 `static_assert`s in the two lifetime suites still hold |
+| ABI — `XContainer.o` | **49 external/weak defined symbols before, 49 identical after** (`build-probe/XContainer_{prefix,postfix}.syms`) |
+| ABI — `XNode.o` | **46 → 48**; the two added are weak COMDAT standard-library instantiations the new body needs locally (`_Sp_counted_base::_M_release`, `vector<shared_ptr<XNode>>::insert`). **No name removed** |
+| ABI — Text.Json | inline member, weak COMDAT symbol already existed under the same mangling |
+| Allocations | `SetItem` writes two raw pointers; `ReplaceWith`'s success path adds **one atomic refcount increment and no allocation**; the rollback path allocates nothing |
+| Migration | **none.** Consumers recompile (Text.Json) or relink (Xml.Linq); **no consumer source edit** |
+
+### Five premises corrected by measurement
+
+All appended to the design record, never rewritten into the historical text.
+
+1. **§13.5 row J-2** claimed assign-before-detach *"matches … .NET"*. It does
+   not: .NET's `JsonObject.cs` `SetItem` detaches the replaced value **and
+   commits the dictionary write** before `AssignParent` runs, leaving a strictly
+   larger inconsistency. The port deliberately diverges (§35.4).
+2. **§25/§14.3** say `ReplaceWith` should *"validate every replacement **before**
+   removing `this`"*. Not implementable: measured, it makes
+   `doc->getRootProperty()->ReplaceWith(newRoot)` throw *"This document already
+   has a root element."* Making pre-validation aware of the node being removed
+   needs a protected **virtual signature change** (vtable) or a new `XContainer`
+   **member** (layout) — neither authorised (§36.4).
+3. **§31 item 5's X-4** asks `Ancestors`/`AncestorsAndSelf` to *"return owning
+   handles"*. **Not implementable**: no `enable_shared_from_this` anywhere in
+   `modules/xml-linq` (0 grep hits), the only owning handles live in a node's
+   parent's `children_`, and the **topmost** ancestor — which `Ancestors` returns
+   for every input — has none; 51 automatic-storage `XElement`/`XDocument`/
+   `XContainer` declarations in the repository's own tests have no `shared_ptr`
+   at all. Item 5 silently depends on a **layout change it does not mention**
+   (§38.1). **Item 5 must be reworded before it can be approved.**
+4. **§31 item 4** describes #1889 as *"sizeof grows 48 → 56"* and *"the only
+   layout change"*. Measured, `JsonArray::begin()`/`end()` return the **raw
+   libstdc++ vector iterator** (`__gnu_cxx::__normal_iterator`, `sizeof` 8), a
+   type this project does not own, so it is **also a public source break** (new
+   iterator type, `sizeof` 24) **and a silent ABI break** — a return type is not
+   part of an Itanium mangled name, so an un-recompiled consumer links and
+   misbehaves (§39.1).
+5. **§31 item 6** presents bounding `JsonNode::Parse` as a new grammar decision.
+   `JsonDocumentOptions::DefaultMaxDepth = 64` **already exists**, is already
+   applied by `JsonDocument::Parse`, and is already pinned by `JsonTests` — so
+   the module's two JSON parse entry points disagree about the same untrusted
+   text, and X28c is a **consistency repair**. Item 6 also claims *"no signature,
+   layout or vtable change"*, but its J19d/X27d half needs a depth cached in
+   every node: **+8 on `JsonNode` (24) and `XObject` (16)** (§40.2, §40.3).
+
+### Design records completed this batch — all four still `needs_user`
+
+| # | § | Verdict |
+|---|---|---|
+| **#1888** | §37 | **No compatible repair exists.** The only source-compatible J09 repair (a parent-preserving `operator=`) fixes J09 but makes the implicit copy **constructor** deprecated, so `-Wdeprecated-copy` — part of `-Wextra`, under a zero-warnings rule — fires **from a public header** at every derived-container copy site, and it leaves J08 unfixed (`build-probe/1888_valuesem_probe.cpp`). J13 has no compatible repair at all. Item 3's in-repo cost is **one test edit**. |
+| **#1892** | §38 | **No compatible repair, and item 5 is not implementable as worded** (premise 3 above). Also recorded: `XElement::Attributes()` **already** returns the same content by value, so a by-value `getAttributesProperty()` would duplicate it exactly; and X17 is the ordinary C++ reference-lifetime contract, whereas X15 is genuinely different because the returned **object** survives while its elements are borrowed. |
+| **#1889** | §39 | **Full sixteen-item design package**: exact types, layouts (48→56, iterator 8→24), vtable/symbol consequences, before/after stale-iterator behaviour **including the honest limit that no counter design closes an iterator outliving its container**, six evaluated alternatives with costs, why .NET's fail-fast does not justify a C++ public type change, allocation/performance requirements, the interaction that means **#1889 must land after #1888**, migration, rollback, the test and mutation matrix, and the precise approval wording in **§39.12**. |
+| **#1893** | §40 | **Three distinct root causes, not one.** J19c/X27c are recursive **destruction** (ASan frames: `~JsonArray` → `_M_dispose` → `_M_release` → `~JsonArray`) and an iterative teardown needs **no approval at all**. X28c is recursive tree building on **untrusted** text and is the only one of the five so reachable. J19d/X27d are **quadratic construction** and cannot be fixed under item 6's stated no-layout constraint. **#1893 should be split before it is answered.** |
+
+### The exact approval wording still required
+
+**§31 item 2 is consumed.** The four outstanding asks, quoted in the form they
+are needed:
+
+- **Item 3 (#1888)** — unchanged from §31: *"Approve `= delete` for `JsonNode`'s
+  copy constructor, copy assignment, move constructor and move assignment
+  (inherited by `JsonArray`, `JsonObject`, `JsonValue`), and moving
+  `JsonNode::DetachParent()` from `public` to `protected`."*
+- **Item 4 (#1889)** — **the §31 wording is insufficient**; use §39.12 verbatim:
+  approve **(1)** a `detail::MutationCounter` member growing `sizeof` **48 → 56**
+  for both containers (`alignof` 8, no vtable change); **(2)** replacing
+  `begin()`/`end()`'s return type — today the raw `std::vector<…>::const_iterator`,
+  `sizeof` **8** — with a project-owned enumerator, `sizeof` **24**, which is a
+  **public source break** at every site spelling the iterator type and a
+  **silent ABI break** at `begin()`/`end()`; **(3)** a stale dereference throwing
+  `System::InvalidOperationException`; **(4)** a new **public** edge
+  `Text.Json → Collections.Core`, module graph **91 → 92**, catalogue
+  regenerated; **(5)** a third version seam with both mandatory checks. It does
+  **not** close an iterator outliving its *container*.
+- **Item 5 (#1892)** — **cannot be approved as written.** Choose first between:
+  *(i)* `Ancestors`/`AncestorsAndSelf` return `std::vector<std::shared_ptr<XElement>>`
+  and **omit or reject the root ancestor**, which has no owning handle; *(ii)*
+  keep `std::vector<XElement*>` and only **document** it as a borrowed view
+  (compatible, closes nothing); or *(iii)* add `enable_shared_from_this` to
+  `XObject`, **+16 bytes on a 16-byte base**, under its own layout approval.
+- **Item 6 (#1893)** — split it: the J19c/X27c **iterative teardown needs no
+  approval**; X28c is *"apply the `DefaultMaxDepth = 64` the module already
+  has"*; J19d/X27d **cannot be delivered** without a layout change.
+
+### Audit status
+
+**SR-AUD-327 and SR-AUD-333 both stay `confirmed (design-complete)`.** Each still
+has an ASan-confirmed use-after-free inside its own files, so the post-audit
+tally is **unchanged at 57 remediated / 306 confirmed / 364**. **No new
+`SR-AUD-*` identifier was issued; numbering stays frozen at 364.** **No new
+ticket was created** — every discovery this batch made belongs to a ticket that
+already exists and was appended to its record.
+
+### Validation run at the end of the batch
+
+`scripts/local_ci_check.sh build` → **passed, 14,683 tests / 37 executables**,
+zero warnings, zero errors. Individually: `validate_module_boundaries.py`
+(**41/91**), `test/validate_module_boundaries_test.py` (OK),
+`generate_component_catalog.py --check` (current), `db_consistency_check.py`
+(OK), `check_version_seam_odr.py` (**2 seams / 18 definitions**),
+`test/check_version_seam_odr_test.py` (OK),
+`check_negative_consumer_fixtures.py` (**9 fixtures / 66 sites**, 75 compiler
+invocations, peak **3** jobs), `test/check_negative_consumer_fixtures_test.py`
+(OK), `scripts/check_selective_components.sh` (ten fixtures, passed),
+`scripts/check_doxygen_warnings.sh` (**1,941 / ceiling 1,942**), `git diff
+--check` clean. **No network-dependent test was disabled.**
+
+### Build resources
+
+| Directory | Start | End | Note |
+|---|---|---|---|
+| `build/` | 730 MiB | **733 MiB** | incremental only; never cleaned or reconfigured |
+| `build-asan/` | 3.7 GiB | **3.7 GiB** | incremental; only the two touched test targets rebuilt |
+| `build-modular/` | 777 MiB | **777 MiB** | untouched |
+| `build-probe/` | 34 MiB | **35 MiB** (peak **88 MiB**) | **53 MiB reclaimed** |
+| `build-tmp/` | 8.4 MiB | **8.4 MiB** | repository-local `TMPDIR` for every `mktemp` script |
+| `build-consumer/`, `cmake-build-debug/` | 12 KiB / 88 MiB | unchanged | untouched |
+
+**Maximum aggregate compilation parallelism: three jobs.** Every `cmake --build`
+used `--parallel 3`; every probe, ABI and model compile was a **single** `g++`
+process; `check_selective_components.sh` and `local_ci_check.sh` pin
+`--parallel 3` internally and `check_negative_consumer_fixtures.py` reported
+`peak 3 job(s)`. No `nproc`, no bare `-j`, no unbounded `--parallel`, no
+concurrent builds. No build tree was created under `/tmp`, `/var/tmp` or
+`/dev/shm`; no build directory was cleaned or reconfigured; `ccache` stayed
+enabled everywhere. Every Python invocation used `PYTHONDONTWRITEBYTECODE=1` and
+no `__pycache__` file was staged.
+
+**Reclaimed:** the 41 MiB ASan probe, the 13 MiB no-sanitizer probe and the two
+model probes, deleted after their results were transcribed — all regenerate from
+retained sources. **Retained:** every probe source, build script, classifier,
+log, freshness record and the four `.syms` symbol tables.
+
+### Reproducing this batch's evidence
+
+```bash
+export TMPDIR="$PWD/build-tmp"
+./build-probe/1885_build.sh 1885_ccf019_lifetime_probe asan     # 1 job, ~65 s
+./build-probe/1885_ccf019_lifetime_probe_asan > after.log 2>&1
+python3 build-probe/1886_classify_cases.py build-probe/1887_prefix_asan.log after.log
+
+./build-probe/1885_build.sh 1885_ccf019_lifetime_probe none
+diff <(grep -E "^[JX][0-9]|^      ->" build-probe/1890_postfix_none.log) \
+     <(grep -E "^[JX][0-9]|^      ->" build-probe/1891_postfix_none.log)
+
+g++ -std=c++23 -Wall -Wextra -Wpedantic -O2 -o /dev/null build-probe/1888_valuesem_probe.cpp  # -Wdeprecated-copy
+cmake --build build-asan --parallel 3 --target SharpRuntimeTests_Xml_Linq
+ASAN_OPTIONS=detect_leaks=1 ./build-asan/SharpRuntimeTests_Xml_Linq
+```
+
+### Queue
+
+**Empty of ready work.** Every CCF-019 residual is `needs_user` or `blocked`, and
+the next step is a **decision, not a family**. Recommended order, revised by this
+batch's measurements:
+
+1. **item 3 → #1888** — unchanged wording, one in-repo test edit, closes
+   J08/J09/J13.
+2. **item 4 → #1889** — use §39.12's wording, **not** §31's; must land after
+   #1888.
+3. **item 5 → #1892** — **choose a restatement first** (§38.4); both remaining
+   ASan use-after-frees are here, so SR-AUD-333 cannot be remediated until it is
+   answered.
+4. **item 6 → #1893** — **split it**; its J19c/X27c half needs no approval and
+   could land immediately.
+5. then **#1894** — negative fixtures and permanent sanitizer closure, still
+   `blocked` on #1888, #1892.
+
+Also still `needs_user` from earlier batches: #1854, #1858, #1862, #1863, #1865,
+#1879, #1884. **#1773 stays `blocked`**; #1875 and #1880 stay inactive. **CNA and
+mobile-eggbert were not inspected, searched, built or modified** at any point in
+this batch.
+
+### Known limitations
+
+- `scripts/__pycache__/*.pyc` remain tracked in git; every Python command this
+  batch ran with `PYTHONDONTWRITEBYTECODE=1` and none were staged. Still worth
+  its own untrack ticket.
+- `test/check_version_seam_odr_test.py` is not executable; run as `python3 …`.
+- The `std::bad_alloc` residue in `JsonObject::SetItem`'s new-key branch and in
+  `XContainer::InsertNodeAt` is **not** closed and is untestable without an
+  allocator injection point (§35.5, §36.5). .NET carries the identical residue.
+
 
 ## Autonomous remediation batch handoff, 2026-07-31 (CCF-019, PARTIALLY REMEDIATED)
 
