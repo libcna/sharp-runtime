@@ -14,6 +14,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace SharpRuntime::Testing {
 
@@ -43,7 +44,8 @@ using SharpRuntime::intcs;
  * @brief Represents a collection of objects maintained in sorted order with no duplicate elements.
  *
  * C++ counterpart of .NET System.Collections.Generic.SortedSet<T>.
- * Backed by std::set<T>; provides O(log n) Add, Remove, and Contains.
+ * Backed by std::set ordered by @c Comparer<T>.Default; provides O(log n) Add, Remove, and
+ * Contains.
  *
  * @par Two roles, one type
  * A SortedSet<T> object is either an **owning full set** (created by a public constructor,
@@ -115,14 +117,40 @@ using SharpRuntime::intcs;
  * two cache fields atomic with a release/acquire publication protocol. The cache, its cost,
  * and the object layout are otherwise unchanged.
  *
- * @tparam T The type of elements in the set. Only the ordering used by std::set<T> -- by
- *           default `std::less<T>`, hence `operator<` -- is required; no member of this class
- *           spells a comparison with `operator>`, `operator<=`, `operator>=`, or
- *           `operator==`. Range membership and set equality are decided by comparer
- *           equivalence (`!cmp(a,b) && !cmp(b,a)`).
+ * @par Default ordering (ticket #1919)
+ * The backing tree is ordered by @ref BackingSet's comparator, which is
+ * `System::detail::DefaultKeyLess<T>` -- the C++ statement of .NET's `Comparer<T>.Default`.
+ * That alias is **token-identical to `std::less<T>` for every non-floating T**, so nothing
+ * about this class moves for them. For a `float`, `double` or `long double` element it is
+ * `System::detail::DefaultLess<T>`, which orders NaN below every value including negative
+ * infinity and treats two NaNs as equivalent, exactly as `Single.CompareTo`/`Double.CompareTo`
+ * do. Plain `std::less<double>` is not merely a different answer here: it makes NaN
+ * *equivalent* to every finite value while the finite values order among themselves, so
+ * equivalence is not transitive and `[associative.reqmts]`'s ordering requirement is violated
+ * for as long as the container exists. Measured on the shipped bodies before this ticket,
+ * `Add(NaN); Add(1); Add(2)` left `Count` **1** and contents `[NaN]` -- every element added
+ * after a NaN was silently discarded, with no diagnostic from ASan, UBSan or libstdc++ debug
+ * mode. See docs/CollectionsComparisonContractPlan.md section 5.2.
+ *
+ * @tparam T The type of elements in the set. Only the ordering used by @ref BackingSet -- by
+ *           default `Comparer<T>.Default`, which for every non-floating T is `operator<` -- is
+ *           required; no member of this class spells a comparison with `operator>`,
+ *           `operator<=`, `operator>=`, or `operator==`. Range membership and set equality are
+ *           decided by comparer equivalence (`!cmp(a,b) && !cmp(b,a)`).
  */
 template<typename T>
 class SortedSet {
+    /**
+     * @brief The backing tree type: a `std::set<T>` ordered by `Comparer<T>.Default`.
+     *
+     * Token-identical to `std::set<T>` for every non-floating T, because
+     * `System::detail::DefaultKeyLess<T>` *is* `std::less<T>` for them. Deliberately private:
+     * no public member of this class names it, and the only public declaration that mentions
+     * it at all -- @ref Iterator's constructor -- also takes the private nested `State`, so it
+     * cannot be called from outside. See docs/CollectionsComparisonContractPlan.md section 16.
+     */
+    using BackingSet = std::set<T, System::detail::DefaultKeyLess<T>>;
+
     /**
      * @brief Independently owned, reference-counted tree state shared by an owning set and
      *        every live view derived from it.
@@ -132,7 +160,7 @@ class SortedSet {
      * counter that drives fail-fast enumeration for every handle onto it.
      */
     struct State {
-        std::set<T> data;
+        BackingSet data;
         /**
          * Shared mutation counter driving fail-fast enumeration and the per-view Count cache.
          *
@@ -214,11 +242,14 @@ class SortedSet {
     static_assert(alignof(std::atomic<SharpRuntime::uintcs>) == alignof(intcs),
                   "the Count cache tag must stay exactly as aligned as the field it replaced");
 
-    using SetIterator = typename std::set<T>::const_iterator;
+    using SetIterator = typename BackingSet::const_iterator;
 
     // std::set::key_comp() returns BY VALUE, so binding it to a const reference would return
     // a reference to a temporary (-Wreturn-local-addr). Copy the predicate; never alias it.
-    [[nodiscard]] typename std::set<T>::key_compare comparer() const {
+    //
+    // Every member that decides bound membership, set equality or view narrowing goes through
+    // this one predicate, so they all inherit Comparer<T>.Default automatically (#1919).
+    [[nodiscard]] typename BackingSet::key_compare comparer() const {
         return state_->data.key_comp();
     }
 
@@ -292,7 +323,7 @@ class SortedSet {
 
 public:
     /**
-     * @brief A version-checked wrapper over std::set<T>::const_iterator that throws
+     * @brief A version-checked wrapper over the backing tree's const_iterator that throws
      * System::InvalidOperationException on dereference/increment if the shared state was
      * structurally modified since this iterator was obtained -- matching real .NET's fail-fast
      * enumerator contract (ticket 1713).
@@ -346,7 +377,7 @@ public:
      * @param items The initial elements.
      */
     explicit SortedSet(std::initializer_list<T> items) : state_(std::make_shared<State>()) {
-        state_->data = std::set<T>(items);
+        state_->data = BackingSet(items);
     }
 
     /**

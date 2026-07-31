@@ -15,8 +15,11 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "System/Collections/Generic/Comparer.hpp"
@@ -30,6 +33,12 @@
 #include "System/Collections/Generic/LinkedList.hpp"
 #include "System/Collections/Generic/OrderedDictionary.hpp"
 #include "System/Collections/Generic/SortedDictionary.hpp"
+#include "System/Collections/Generic/SortedSet.hpp"
+#include "System/Collections/Generic/HashSet.hpp"
+#include "System/Collections/Frozen/FrozenSet.hpp"
+#include "System/Collections/Frozen/FrozenDictionary.hpp"
+#include "System/Collections/ObjectModel/ReadOnlySet.hpp"
+#include "System/Collections/ObjectModel/ReadOnlyDictionary.hpp"
 #include "System/Collections/Generic/PriorityQueue.hpp"
 #include "System/Collections/Generic/SortedList.hpp"
 #include "System/Collections/Generic/List.hpp"
@@ -63,6 +72,14 @@ double payloadNaN() {
     double d;
     std::memcpy(&d, &bits, sizeof d);
     return d;
+}
+
+/** The `float` counterpart of payloadNaN(). */
+float payloadNaNf() {
+    std::uint32_t bits = 0x7FC00007U;
+    float f;
+    std::memcpy(&f, &bits, sizeof f);
+    return f;
 }
 
 } // namespace
@@ -1068,4 +1085,137 @@ TEST(CollectionsComparisonContract, HashedContainerKeysStillSeparateDistinctValu
     od.Add(-0.0, 4);
     EXPECT_TRUE(od.ContainsKey(0.0));    // -0.0 and +0.0 are one key, as in .NET
     EXPECT_EQ(od.getCountProperty(), 4);
+}
+
+// ---------------------------------------------------------------------------
+// SortedSet<T> -- the ordered container of #1919's seven (ticket #1921)
+//
+// Before this repair `Add(NaN); Add(1); Add(2)` left Count 1 and contents
+// [NaN]: std::less<double> makes NaN equivalent to every value, so the tree's
+// ordering requirement was violated for its whole lifetime and every element
+// added after a NaN was silently dropped. See the plan's section 5.2.
+// ---------------------------------------------------------------------------
+
+TEST(CollectionsComparisonContract, SortedSetKeepsEveryElementAddedAfterANaN) {
+    G::SortedSet<double> s;
+    EXPECT_TRUE(s.Add(kNaN));
+    EXPECT_TRUE(s.Add(1.0));
+    EXPECT_TRUE(s.Add(2.0));
+    ASSERT_EQ(s.getCountProperty(), 3);
+    const auto v = s.ToVector();
+    ASSERT_EQ(v.size(), 3u);
+    EXPECT_TRUE(std::isnan(v[0]));      // NaN sorts below every value
+    EXPECT_EQ(v[1], 1.0);
+    EXPECT_EQ(v[2], 2.0);
+}
+
+TEST(CollectionsComparisonContract, SortedSetAcceptsANaNAddedLast) {
+    G::SortedSet<double> s;
+    for (int i = 1; i <= 8; ++i) s.Add(static_cast<double>(i));
+    EXPECT_TRUE(s.Add(kNaN));
+    ASSERT_EQ(s.getCountProperty(), 9);
+    const auto v = s.ToVector();
+    EXPECT_TRUE(std::isnan(v.front()));
+    EXPECT_EQ(v.back(), 8.0);
+}
+
+TEST(CollectionsComparisonContract, SortedSetHoldsEveryNaNPayloadExactlyOnce) {
+    ASSERT_NE(std::hash<double>{}(kNaN), std::hash<double>{}(payloadNaN()))
+        << "the two NaNs must differ bitwise, or this test proves nothing";
+    G::SortedSet<double> s;
+    EXPECT_TRUE(s.Add(kNaN));
+    EXPECT_FALSE(s.Add(payloadNaN()));    // ordering-equivalent, so a duplicate
+    EXPECT_EQ(s.getCountProperty(), 1);
+    EXPECT_TRUE(s.Contains(payloadNaN()));
+    EXPECT_TRUE(s.Remove(payloadNaN()));
+    EXPECT_EQ(s.getCountProperty(), 0);
+}
+
+TEST(CollectionsComparisonContract, SortedSetKeepsSignedZeroAsOneElementAndOrdersInfinities) {
+    G::SortedSet<double> z;
+    EXPECT_TRUE(z.Add(0.0));
+    EXPECT_FALSE(z.Add(-0.0));            // +0.0 and -0.0 are one element, as in .NET
+    EXPECT_EQ(z.getCountProperty(), 1);
+    EXPECT_TRUE(z.Contains(-0.0));
+
+    G::SortedSet<double> s;
+    s.Add(kInf); s.Add(-kInf); s.Add(kNaN); s.Add(1.0);
+    ASSERT_EQ(s.getCountProperty(), 4);
+    const auto v = s.ToVector();
+    EXPECT_TRUE(std::isnan(v[0]));        // below negative infinity, per Double.CompareTo
+    EXPECT_EQ(v[1], -kInf);
+    EXPECT_EQ(v[2], 1.0);
+    EXPECT_EQ(v[3], kInf);
+}
+
+TEST(CollectionsComparisonContract, SortedSetSetOperationsSurviveANaNElement) {
+    G::SortedSet<double> a, b;
+    a.Add(kNaN); a.Add(1.0); a.Add(2.0);
+    b.Add(payloadNaN()); b.Add(2.0); b.Add(3.0);
+
+    G::SortedSet<double> u(a); u.UnionWith(b);
+    EXPECT_EQ(u.getCountProperty(), 4);           // NaN, 1, 2, 3
+
+    G::SortedSet<double> i(a); i.IntersectWith(b);
+    EXPECT_EQ(i.getCountProperty(), 2);           // NaN and 2
+    EXPECT_TRUE(i.Contains(kNaN));
+
+    G::SortedSet<double> e(a); e.ExceptWith(b);
+    EXPECT_EQ(e.getCountProperty(), 1);           // 1 only -- the NaN was removed
+    EXPECT_FALSE(e.Contains(kNaN));
+
+    G::SortedSet<double> x(a); x.SymmetricExceptWith(b);
+    EXPECT_EQ(x.getCountProperty(), 2);           // 1 and 3
+
+    EXPECT_TRUE(a.SetEquals(a));
+    EXPECT_TRUE(a.Overlaps(b));
+    EXPECT_FALSE(a.IsSubsetOf(b));
+}
+
+TEST(CollectionsComparisonContract, SortedSetConstructionCopyAndViewsCarryTheContract) {
+    G::SortedSet<double> s{3.0, kNaN, 1.0, 2.0};
+    ASSERT_EQ(s.getCountProperty(), 4) << "the initializer-list constructor must not drop NaN";
+    EXPECT_TRUE(std::isnan(s.ToVector().front()));
+
+    G::SortedSet<double> copy(s);                 // an owning copy deep-clones
+    EXPECT_EQ(copy.getCountProperty(), 4);
+
+    auto view = s.GetViewBetween(kNaN, 2.0);      // NaN is the minimum, so it bounds from below
+    EXPECT_EQ(view.getCountProperty(), 3);        // NaN, 1, 2
+    EXPECT_TRUE(view.Contains(kNaN));
+    EXPECT_FALSE(view.Contains(3.0));
+    EXPECT_TRUE(view.IsWithinRange(kNaN));
+
+    EXPECT_TRUE(std::isnan(s.getMinProperty()));  // Min is the NaN, not 1.0
+    EXPECT_EQ(s.getMaxProperty(), 3.0);
+}
+
+TEST(CollectionsComparisonContract, SortedSetGivesFloatAndLongDoubleTheSameContract) {
+    G::SortedSet<float> f;
+    f.Add(kNaNf); f.Add(1.0f); f.Add(2.0f);
+    EXPECT_EQ(f.getCountProperty(), 3);
+    EXPECT_TRUE(std::isnan(f.ToVector().front()));
+    EXPECT_TRUE(f.Contains(payloadNaNf()));
+
+    G::SortedSet<long double> ld;
+    ld.Add(std::numeric_limits<long double>::quiet_NaN());
+    ld.Add(1.0L); ld.Add(2.0L);
+    EXPECT_EQ(ld.getCountProperty(), 3);
+    EXPECT_TRUE(std::isnan(ld.ToVector().front()));
+}
+
+TEST(CollectionsComparisonContract, SortedSetNegativeControlsAreUnchanged) {
+    G::SortedSet<int> i{3, 1, 2, 1};
+    EXPECT_EQ(i.getCountProperty(), 3);
+    EXPECT_EQ(i.ToVector(), (std::vector<int>{1, 2, 3}));
+
+    G::SortedSet<std::string> s{"b", "a", "c", "a"};
+    EXPECT_EQ(s.getCountProperty(), 3);
+    EXPECT_EQ(s.ToVector(), (std::vector<std::string>{"a", "b", "c"}));
+
+    // A pair is orderable but not hashable; it must still behave exactly as before.
+    G::SortedSet<std::pair<int, double>> p;
+    p.Add({1, 2.0});
+    p.Add({1, 2.0});
+    EXPECT_EQ(p.getCountProperty(), 1);
 }
