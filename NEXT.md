@@ -4,8 +4,24 @@
 # NEXT.md
 
 *Last verified: 2026-07-31. Branch:
-`feature/remediation-ccf019-residuals` (previously
-`feature/remediation-ccf019-owner-detachment`). The test floor rose to
+`feature/remediation-ccf019-final-compatible` (previously
+`feature/remediation-ccf019-residuals`). The test floor rose to **14,731** (was
+14,683). The user decided **§31 items 3–6**: items 3 (#1888) and 4 (#1889) are
+**declined** and moved `needs_user → blocked` with their designs preserved for a
+coordinated ABI-breaking release; item 5's wording is **rejected as
+non-implementable** and replaced by §42 (#1898 **done**, #1899 **blocked** on one
+question); item 6 is **split**, its compatible iterative-teardown half
+**approved** and delivered as **#1895** (probe **J19c** and **X27c**: ASan
+`stack-overflow` → `clean`), its quadratic half declined as #1896 and its parse
+half left as #1897. **CCF-019 is compatible-remediation-complete and not
+implemented** — §43 reconciles all six items; both findings keep `confirmed
+(design-complete)` and the tally is **unchanged at 57 remediated / 306 confirmed
+/ 364**. Next family selected and planned: **CCF-009**
+(`docs/SharedPrngConcurrencyPlan.md`, #1900–#1903) — and **ready work exists
+again**: #1901 then #1902, both compatible, no approval needed. See "Autonomous
+remediation batch handoff, 2026-07-31 (CCF-019 compatible closure + CCF-009
+plan)" immediately below. Previously, on
+`feature/remediation-ccf019-residuals`: the test floor rose to
 **14,683** (was 14,635). Under the user's batch instruction directing
 **`docs/OwnedTreeLifetimeContractPlan.md` §31 item 2**, this batch landed
 **#1887** (`JsonObject::SetItem` adopts before it detaches, +22 tests) and
@@ -290,6 +306,311 @@ per this repository's practice of preserving historical audit narrative.*
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
+
+## Autonomous remediation batch handoff, 2026-07-31 (CCF-019 compatible closure + CCF-009 plan)
+
+Branch `feature/remediation-ccf019-final-compatible`, off
+`feature/remediation-ccf019-residuals`. Five commits: **#1895** (`e2688c7d`),
+**#1898/#1899** (`9b4cff27`), the CCF-019 reconciliation and CCF-009 plan
+(`579f9665`), and this handoff. **Nothing pushed, merged, rebased, tagged or
+published.**
+
+### The user's decisions on §31 items 3–6, and exactly what each produced
+
+| Item | Decision | Result |
+|---|---|---|
+| **3** (#1888) | **declined** — keep the layout/ABI-affecting implementation blocked; record that no compatible implementation exists under the current ABI; do not ask again | `needs_user` → **`blocked`**, design intact (§37) |
+| **4** (#1889) | **declined** — do not change the public iterator contract (`begin()`, `end()`, iterator representation or return types, exposure of the raw libstdc++ iterator); preserve §39 for a coordinated ABI-breaking release | `needs_user` → **`blocked`**, §39 package and §39.12 wording intact |
+| **5** (#1892) | **wording rejected as non-implementable**; produce a precise replacement | #1892 → **`wontfix`**; **#1898 done**, **#1899 blocked** on one question (§42) |
+| **6** (#1893) | **split** into root-cause tickets; the compatible iterative-teardown half **approved** | #1893 → **`wontfix`**; **#1895 done**, **#1896** and **#1897 blocked** (§40, §41) |
+
+**No `needs_user` row remains for anything the user has now answered.**
+
+### #1895 — iterative container teardown (approved; the only implementation approval)
+
+`~JsonArray` and `~JsonObject` (`JsonNode.cpp`) and `~XContainer`
+(`XContainer.cpp`). Releasing a tree used to recurse one call frame per level —
+measured frames `~JsonArray → destroy_at → _M_dispose → _M_release → ~JsonArray`
+— so a 20,000-deep nest crashed **after being built successfully**, at a depth
+set by the thread's stack size.
+
+> The **outermost** container destructor publishes a worklist; every container
+> destructor that runs while a worklist is published **donates** its children to
+> it and returns. Stack depth is constant; the bound is the heap.
+
+Five deliberate properties: a `thread_local` worklist pointer (per-thread by
+construction, no synchronisation, **no race** — so TSan was neither run nor
+needed); donation **last-child-first** with the worklist drained from the back,
+which is what *reproduces the recursive front-to-back depth-first order*;
+#1886's `== this` detach guard runs first, unchanged; `std::bad_alloc` during
+donation is **caught** and degrades to exactly the recursive behaviour, with the
+worklist and the store never holding the same `shared_ptr`, so partial progress
+is safe at every point; and growth is **geometric, not exact**, so the repair
+cannot trade a stack-depth problem for a quadratic-copying one. A retained node
+stops the teardown dead with **no `use_count` check needed**.
+
+The three definitions moved **out of line** because the JSON worklist is shared
+by two destructors whose headers cannot see each other's store.
+
+**All six stated approval conditions met and measured** (§41.4): no public
+signature change, no virtual/vtable change, no public object-layout change, no
+iterator-layout change, no mandatory consumer source migration, no weakening of
+`DefaultMaxDepth = 64` (no parse path touched at all).
+
+### #1898 — the Xml.Linq borrowed-view contract (item 5's compatible half)
+
+Doc-comments and tests only. The contract is now stated as **preconditions,
+postconditions, invalidation and failure behaviour** rather than adjectives: the
+caller keeps the tree/element alive; the result names what was an ancestor, or
+the live attribute store, in order; an entry is invalidated by destruction of the
+object it names **and by nothing else** — in particular **not** by tree mutation
+and **not** by container reallocation, because an entry names an object, not a
+slot; there is no failure mode. **Every clause is decidable through public
+operations**, and 14 tests pin all of them, including probe case X16's
+reallocation clause and `XElement::Attributes()` as the **owning alternative**
+(held across the element's destruction, its attributes are alive, detached and
+re-addable).
+
+This **does not close X15 or X17**, and says so. The suite deliberately does not
+use a borrowed view after its owner dies — that is the undefined behaviour the
+contract exists to describe.
+
+### Probe — the 58-case matrix, rebuilt from tracked source
+
+Pre-change replay reproduced the previous batch's end state **exactly, 0 of 58
+changed**, so the baseline was verified rather than inherited. After the change,
+**exactly 2 of 58 changed**, and both are the approved cases:
+
+| Case | Before | After |
+|---|---|---|
+| **J19c** — 20,000-deep `JsonArray` | `ASAN stack-overflow`; plain build `-> built` then **SIGSEGV** | **`clean`** — `-> built, released` |
+| **X27c** — 20,000-deep `XElement` | `ASAN stack-overflow`; **SIGSEGV** | **`clean`** — `-> built, released` |
+
+Diffing every answer line of the **no-sanitizer** build across all 58 cases
+yields exactly those two differences plus ASLR address noise.
+
+| | #1885 baseline | after items 1+2 | **now** |
+|---|---|---|---|
+| ASan `heap-use-after-free` cases | 29 | 3 | **3** — J11, X15, X17 |
+| Faulting accesses (recoverable ASan) | 57 | 5 | **5** |
+| `pure virtual method called` aborts | 8 | 0 | **0** |
+| ASan `stack-overflow`s | 3 | 3 | **1** — X28c only |
+| Timeouts | 2 | 2 | **2** — J19d, X27d |
+| Silent data-loss paths | 2 | 0 | **0** |
+| Leaks | 0 | 0 | **0** |
+
+**J11, X15 and X17 are now *measured*, not argued, not to belong to this
+repair**: the teardown changed neither their classification nor their answer
+lines, and none reaches its defect through a destruction path — J11 is a stale
+iterator over reallocated storage, X15 a borrowed raw `XElement*`, X17 a borrowed
+reference to a vector member.
+
+### Tests, mutations, sanitizers
+
+- **+48 permanent tests**: `JsonNodeTeardownTests` 17, `XLinqTeardownTests` 17,
+  `XLinqBorrowedViewTests` 14. Text.Json **201 → 218**, Xml.Linq **153 → 184**.
+  Every pre-existing case passes **unmodified**; nothing was weakened.
+- **Mutations**, one test per process: each family's teardown reverted to the
+  recursive form fails **4 of 17**, all as `SIGSEGV` — the exact pre-fix failure.
+- **Destruction order is pinned by two tests that also pass under the recursive
+  implementation.** That is what makes them a proof of order *preservation*
+  rather than a description of the new behaviour.
+- **ASan+UBSan+LSan**: 218/218 and 184/184, zero diagnostics, binaries proved
+  newer than both changed bodies. The deep cases run under ASan too, which uses
+  more stack per frame — so the bound is gone, not merely raised.
+- **TSan not run and not needed**: the only new mutable state is a `thread_local`
+  pointer, never published to another thread.
+
+### Source, ABI, layout, allocation
+
+| Claim | Evidence |
+|---|---|
+| No public signature change | three destructors keep their declarations; only definitions moved out of line |
+| `sizeof`/`alignof`/vtable unchanged | no member and no virtual added anywhere; the existing `static_assert`s hold |
+| ABI — `JsonNode.o` | **225 symbols before, 225 after, same names**; six destructor symbols change binding **weak COMDAT → strong** |
+| ABI — `XContainer.o` | **49 → 62**, **no name removed**; additions are the out-of-line destructors plus the key-function TU's typeinfo/vtable objects |
+| Allocation | destroying a container with ≥1 child now performs **exactly one** heap allocation (the worklist) where it performed **none**; an empty container allocates nothing; the 20,000-deep chain allocates **once** for the whole teardown. A first draft allocated **three** times for four children; the geometric `reserve` reduced it to one |
+| Migration | **none** — recompile and relink, no consumer source edit |
+
+### Premises corrected by measurement (this batch)
+
+1. **§31 item 5's "return owning handles" is not implementable at any layout
+   cost** (§42.2). Two independent reasons: the topmost ancestor has no parent
+   to own it, **and** `XElement`/`XDocument`/`XContainer` are routinely
+   automatic-storage — 51 such declarations in this repository's own Xml.Linq
+   tests — with no control block at all. The second also disposes of the escape
+   §38.1 had left open: `enable_shared_from_this` would **not** rescue it,
+   because `shared_from_this()` on an automatic-storage element throws
+   `bad_weak_ptr`. The "owning handles, omitting unowned ancestors" variant is
+   disqualified on **correctness**, not cost.
+2. **Item 5 conflated two different defects.** X17 is the ordinary C++
+   reference-lifetime contract (`vector::front()`, `string::c_str()` behave
+   identically) and a safe spelling **already exists**: `Attributes()`. X15 is a
+   genuine design defect, because the returned vector outlives the expression and
+   nothing in its type says its elements are borrowed.
+3. **Item 6's five cases are three defects** (§40.1), and only **X28c** is
+   reachable from untrusted input.
+4. **Item 6's depth bound already exists**: `JsonDocumentOptions::DefaultMaxDepth
+   = 64` is applied by `JsonDocument::Parse` and pinned by `JsonTests`, so the
+   module's two JSON parse entry points disagree about the same text (§40.2).
+5. **Item 6's "no signature, layout or vtable change" is false for its
+   quadratic half**: an O(1) guard needs a depth cached in every node, **+8 on
+   `JsonNode` (24)** and **+8 on `XObject` (16)** (§40.3).
+
+### CCF-019 status — use these words
+
+- **Compatible remediation complete** — #1886, #1887, #1890, #1891, #1895, #1898.
+- **Residual ABI-breaking redesign deferred** — #1888, #1889 (both declined,
+  preserved intact).
+- **Residual layout-changing redesign blocked** — #1896.
+- **False or impossible premise corrected** — five, above.
+- **Not implemented as a whole.** **SR-AUD-327 and SR-AUD-333 both remain
+  `confirmed (design-complete)`**; the tally is **unchanged at 57 remediated /
+  306 confirmed / 364**; numbering frozen at **364**; **no ticket created this
+  batch carries an `SR-AUD-*` identifier**.
+
+§43 reconciles every §31 item against ticket, status, probe case, approval and
+commit.
+
+### The two open questions — the only CCF-019 items awaiting the user
+
+1. **#1899 (was item 5).** *"For the Xml.Linq borrowed views, take **(B)** change
+   `XElement::getAttributesProperty()` to return by value — every ordinary call
+   site keeps compiling, `&el->getAttributesProperty()` stops compiling, the
+   return calling convention changes, and each call gains one vector copy;
+   **(D)** add a visitor spelling
+   `template <class F> void Extensions::ForEachAncestor(const std::shared_ptr<XNode>&, F&&)`
+   whose borrowed pointers cannot outlive the call, **beside** the existing
+   `Ancestors`/`AncestorsAndSelf` which keep their signatures and their
+   now-documented contract; or **(E)** both, plus removal, in a coordinated
+   ABI-breaking release with #1889?"* — recommendation **D first** (purely
+   additive, no break at all).
+2. **#1897 (was part of item 6).** *"Should `JsonNode::Parse` **(A)** reject text
+   nested deeper than the existing `DefaultMaxDepth = 64`, matching
+   `JsonDocument::Parse`, or **(B)** build the tree iteratively so any depth the
+   parser accepts is also built and released?"* — recommendation **(A)**, because
+   it makes the module self-consistent; (B) alone leaves the two entry points
+   still disagreeing.
+
+**#1894** stays `blocked`, and *exactly which dependency remains* is now
+recorded: every landed CCF-019 repair is source-compatible **by construction**,
+so **no spelling has been outlawed** and there is literally nothing for a
+negative fixture to reject until #1888 or #1899 lands. Its other half — permanent
+sanitizer closure — is already effectively delivered.
+
+### Next family — CCF-009, planned and ticketed
+
+`prompt.md` Step 1 **had nothing to select**: the `task` table is fully
+classified and `SELECT COUNT(*) WHERE status IN ('','todo')` is **0** (14,979
+`ignored` / 1,082 `ported` / 140 `ignore`). The established cross-cutting
+fallback applied.
+
+**CCF-009 — process-wide mutable PRNG state has no concurrency boundary
+(SR-AUD-010, high).** Chosen over CCF-018 (overlaps the just-declined #1889),
+CCF-020 (blocked on downstream via #1773) and the formatting families
+(approval-gated before they start), on four measurable grounds: **high**
+severity, **TSan-confirmed** so the gate is objective, bounded at **two** sites,
+and **fully compatible** — no signature, layout, vtable or ABI change needed.
+
+`docs/SharedPrngConcurrencyPlan.md` records the inventory, public surface, root
+cause, cited reference behaviour, compatibility boundary, dependency order,
+test/sanitizer matrix, ticket breakdown and completion criteria. Two findings it
+establishes up front:
+
+- **`Random`'s generator state lives in the public header**, so a mutex or flag
+  **member** would be an object-layout change. The compatible route is a
+  `this == &shared` pointer comparison inside the already out-of-line
+  `Random.cpp`.
+- **The one-word repair is wrong, and .NET rejected exactly it.**
+  `static thread_local Random instance;` would make
+  `&Random::getSharedProperty()` differ per thread. `Random.cs:755–759`:
+  *"one thread could retrieve Shared and pass it to another thread, so Shared
+  can't just access a ThreadStatic to return a Random instance stored there."*
+  `Shared` must be **one stable object routing to thread-local state**.
+
+Tickets: **#1900** (plan, done), **#1901** (`Guid::NewGuid` — first, smallest
+blast radius, establishes the TSan gate), **#1902** (`Random::getSharedProperty`),
+**#1903** (SR-AUD-010 closure, blocked on both — the cross-cutting record is
+explicit that repairing one singleton leaves the other independently unsafe).
+
+### Validation at the end of the batch
+
+`scripts/local_ci_check.sh build` → **passed, 14,731 tests / 37 executables**,
+zero warnings, zero errors. Individually: `validate_module_boundaries.py`
+(**41/91**), its unit test, `generate_component_catalog.py --check` (current),
+`db_consistency_check.py` (OK), `check_version_seam_odr.py` (**2 seams / 18
+definitions**), its unit test, `check_negative_consumer_fixtures.py` (**9
+fixtures / 66 sites**, 75 invocations, peak **3** jobs), its unit test,
+`scripts/check_selective_components.sh` (ten fixtures, passed),
+`scripts/check_doxygen_warnings.sh` (**1,941 / ceiling 1,942**), `git diff
+--check` clean. **No network-dependent test was disabled.**
+
+### Build resources
+
+| Directory | Start | End | Note |
+|---|---|---|---|
+| `build/` | 733 MiB | **735 MiB** | incremental; never cleaned or reconfigured |
+| `build-asan/` | 3.7 GiB | **3.7 GiB** | incremental; only the two touched targets rebuilt |
+| `build-modular/` | 777 MiB | **777 MiB** | untouched |
+| `build-probe/` | 35 MiB | **36 MiB** (peak **89 MiB**) | **53 MiB reclaimed** |
+| `build-tmp/` | 8.4 MiB | **8.4 MiB** | repository-local `TMPDIR` |
+| `build-consumer/`, `cmake-build-debug/` | 12 KiB / 88 MiB | unchanged | untouched |
+
+**Maximum aggregate compilation parallelism: three jobs.** Every `cmake --build`
+used `--parallel 3`; every probe, ABI and model compile was a **single** `g++`
+process; `check_selective_components.sh` and `local_ci_check.sh` pin
+`--parallel 3` internally and `check_negative_consumer_fixtures.py` reported
+`peak 3 job(s)`. No `nproc`, no bare `-j`, no unbounded `--parallel`, no
+concurrent builds. No build tree under `/tmp`, `/var/tmp` or `/dev/shm`; nothing
+cleaned or reconfigured; `ccache` on throughout. Every Python invocation used
+`PYTHONDONTWRITEBYTECODE=1`; no `__pycache__` file was staged.
+
+**Reclaimed:** the 41 MiB ASan probe, the 13 MiB plain probe and the allocation
+probe, deleted after transcription — all regenerate from retained sources.
+**Retained:** every probe source, build script, classifier, log, freshness record
+and the four `1895_*.syms` symbol tables.
+
+### Reproducing this batch's evidence
+
+```bash
+export TMPDIR="$PWD/build-tmp"
+./build-probe/1885_build.sh 1885_ccf019_lifetime_probe asan       # 1 job, ~65 s
+./build-probe/1885_ccf019_lifetime_probe_asan > after.log 2>&1
+python3 build-probe/1886_classify_cases.py build-probe/1895_prefix_asan.log after.log
+
+./build-probe/1886_alloc_build.sh postfix && ./build-probe/1886_alloc_probe_postfix
+cmake --build build-asan --parallel 3 --target SharpRuntimeTests_Text_Json SharpRuntimeTests_Xml_Linq
+ASAN_OPTIONS=detect_leaks=1 ./build-asan/SharpRuntimeTests_Xml_Linq
+```
+
+### Queue
+
+**Ready work exists again**, for the first time in several batches: **#1901**
+then **#1902** (CCF-009), both `todo`, both compatible, no approval needed.
+**#1903** is blocked on those two.
+
+Blocked/deferred: **#1888**, **#1889**, **#1896** (all declined — do not
+re-request), **#1897** and **#1899** (one question each), **#1894** (nothing to
+pin yet), **#1773** (downstream). Still `needs_user` from earlier batches:
+#1854, #1858, #1862, #1863, #1865, #1879, #1884. Inactive: #1875, #1880.
+Retired this batch: #1892, #1893 (`wontfix`, superseded).
+
+**CNA and mobile-eggbert were not inspected, searched, built or modified** at any
+point.
+
+### Known limitations
+
+- `scripts/__pycache__/*.pyc` remain tracked in git; every Python command ran
+  with `PYTHONDONTWRITEBYTECODE=1` and none were staged. Still worth its own
+  untrack ticket.
+- `test/check_version_seam_odr_test.py` is not executable; run as `python3 …`.
+- The `std::bad_alloc` residue in `JsonObject::SetItem`'s new-key branch and in
+  `XContainer::InsertNodeAt` is still open and untestable without an allocator
+  injection point (§35.5, §36.5). The teardown's own `bad_alloc` path *is*
+  handled, but likewise cannot be exercised.
+- The deep-nesting tests add ~7 s to the gate, dominated by the **quadratic**
+  ancestor guard #1896 owns, not by the teardown.
+
 
 ## Autonomous remediation batch handoff, 2026-07-31 (CCF-019 exception paths)
 

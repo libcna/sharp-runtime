@@ -1375,6 +1375,43 @@ break, §39.1). Two further items were found unimplementable as worded — §31 
 J19d/X27d (§40.3). **CNA and mobile-eggbert were not inspected**, and #1773 stays
 `blocked`.
 
+
+**Remediation status after the compatible-closure batch (tickets #1895 and
+#1898, 2026-07-31): COMPATIBLE REMEDIATION COMPLETE, NOT IMPLEMENTED, NEITHER
+FINDING REMEDIATED.** Everything above is retained unchanged; **no new
+`SR-AUD-*` identifier was issued** and numbering stays frozen at **364**.
+
+The user decided §31 items 3-6. Items 3 (#1888) and 4 (#1889) are **declined**
+and moved `needs_user -> blocked`, designs preserved for a coordinated
+ABI-breaking release. Item 5's wording is **rejected as non-implementable** and
+replaced by §42: #1898 (done) states and pins the borrowed-view contract, #1899
+(blocked) holds the one open question. Item 6 is **split**: #1895 (done, the
+approved iterative teardown), #1896 (declined, quadratic guards) and #1897 (one
+open question, recursive parse). #1892 and #1893 are retired as superseded.
+
+| | after items 1+2 | after the teardown half |
+|---|---|---|
+| ASan `heap-use-after-free` cases | 3 | **3** - J11, X15, X17 |
+| ASan `stack-overflow`s | 3 | **1** - X28c only |
+| Timeouts | 2 | **2** - J19d, X27d |
+| Silent data-loss paths | 0 | **0** |
+
+**J11, X15 and X17 are now measured, not argued, not to belong to any compatible
+repair**: the teardown changed neither their classification nor their answer
+lines, and none reaches its defect through a destruction path. §43 reconciles
+every §31 item against ticket, status, probe case, approval and commit.
+
+Five premises were corrected by measurement and appended rather than rewritten:
+item 5's "return owning handles" is impossible at any layout cost (§42.2); item 5
+conflated the ordinary C++ reference-lifetime contract with a genuine design
+defect; item 6's five cases are three defects (§40.1); item 6's depth bound
+already exists as `JsonDocumentOptions::DefaultMaxDepth = 64` (§40.2); and item
+6's "no layout change" claim is false for its quadratic half (§40.3).
+
+**SR-AUD-327 and SR-AUD-333 both stay `confirmed (design-complete)`** and the
+post-audit tally is **unchanged at 57 remediated / 306 confirmed / 364**. **CNA
+and mobile-eggbert were not inspected**, and #1773 stays `blocked`.
+
 ## CCF-020 — raw polymorphic output parameters erase the validation information public contracts require
 
 The legacy non-generic ICollection interface accepts `void*` plus a starting

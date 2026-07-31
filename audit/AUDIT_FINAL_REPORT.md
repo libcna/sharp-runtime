@@ -4118,3 +4118,44 @@ distinct root causes, and the depth bound item 6 asks for **already exists** in
 the same module). All four remain `needs_user`; #1894 remains `blocked`. **CNA and
 mobile-eggbert were not inspected, searched, built or modified**, and #1773
 remains `blocked`.
+
+## CCF-019 compatible closure, 2026-07-31 (tickets #1895, #1898) — NEITHER FINDING REMEDIATED
+
+The user decided §31 items 3–6 of `docs/OwnedTreeLifetimeContractPlan.md`. Items
+3 (#1888) and 4 (#1889) are **declined**, moved `needs_user → blocked` with their
+designs preserved for a coordinated ABI-breaking release. Item 5's wording is
+**rejected as non-implementable** — §42.2 shows an owning handle to an object no
+`shared_ptr` owns cannot be manufactured **at any layout cost**, because an
+automatic-storage `XElement` has no control block and `enable_shared_from_this`
+therefore does not rescue it either — and is replaced by **#1898** (done) and
+**#1899** (blocked, one question). Item 6 is **split**; its compatible
+iterative-teardown half was **approved** and delivered as **#1895**, its
+quadratic half declined as **#1896**, its parse half left as **#1897**.
+
+**#1895** makes `~JsonArray`, `~JsonObject` and `~XContainer` release owned trees
+iteratively: probe **J19c** and **X27c** go from ASan `stack-overflow` to
+`clean`, and **exactly 2 of 58** probe cases changed. All six stated approval
+conditions are met and measured. **#1898** states the Xml.Linq borrowed-view
+contract as preconditions, postconditions, invalidation and failure behaviour and
+pins every clause, with no source, ABI, layout or semantic change.
+
+**J11, X15 and X17 — the three remaining ASan-confirmed use-after-free cases —
+are now measured, not argued, not to belong to any compatible repair:** the
+teardown changed neither their classification nor their answer lines. They are
+owned by #1889 (declined) and #1899 (one question).
+
+Evidence: **+48 permanent tests**, floor **14,683 → 14,731** across 37
+executables; two mutations detecting the teardown 4/17 each, all as `SIGSEGV`;
+destruction order pinned by tests that also pass under the recursive
+implementation; ASan+UBSan+LSan clean over 218/218 and 184/184; `JsonNode.o`
+keeping all 225 symbol names and `XContainer.o` losing none; one heap allocation
+added per non-empty container teardown, recorded rather than glossed; Doxygen
+1,941/1,942; seams 2/18; fixtures 9/66; module graph 41/91.
+
+**CCF-019 is compatible-remediation-complete and not implemented.** SR-AUD-327
+and SR-AUD-333 both keep `confirmed (design-complete)`; the post-audit tally
+stays **57 remediated / 306 confirmed / 364**; numbering stays frozen at **364**
+and no ticket created in this family carries an `SR-AUD-*` identifier. The next
+family, **CCF-009** (SR-AUD-010), is planned in
+`docs/SharedPrngConcurrencyPlan.md` with #1900–#1903. **CNA and mobile-eggbert
+were not inspected, searched, built or modified**, and #1773 remains `blocked`.

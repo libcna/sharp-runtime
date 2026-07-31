@@ -6083,3 +6083,30 @@ sixteen-item package) and #1893 (§40, root-cause classification); all four stay
 `needs_user` and #1894 stays `blocked`. Five plan premises were corrected by
 measurement and appended rather than rewritten (§35.4, §36.4, §38.1, §39.1,
 §40.2/§40.3). CNA and mobile-eggbert were not inspected; #1773 stays `blocked`.
+
+**CCF-019 compatible closure (#1895 + #1898, 2026-07-31) — neither finding
+remediated.** The user decided §31 items 3–6: item 3 (#1888) and item 4 (#1889)
+**declined** and moved `needs_user → blocked` with their designs preserved; item
+5's wording **rejected as non-implementable** and replaced (§42) by #1898
+(**done**) and #1899 (**blocked**, one question); item 6 **split**, its
+compatible iterative-teardown half **approved** and delivered as #1895, its
+quadratic half declined as #1896 and its parse half left as #1897.
+
+**#1895** makes container teardown iterative: probe **J19c** and **X27c** go from
+ASan `stack-overflow` to `clean`, and exactly 2 of 58 probe cases changed. All
+six stated approval conditions are met and measured — no signature, vtable,
+object-layout or iterator-layout change, no consumer migration, and no touch to
+`DefaultMaxDepth`. **#1898** states and pins the Xml.Linq borrowed-view contract
+without any source, ABI, layout or semantic change.
+
++48 permanent tests; gate **14,683 → 14,731 across 37 executables**. Module graph
+41/91, Doxygen 1,941/1,942, seams 2/18, fixtures 9/66 — unchanged.
+ASan+UBSan+LSan clean over 218/218 and 184/184.
+
+**SR-AUD-327 and SR-AUD-333 both stay `confirmed (design-complete)`**; the tally
+is **unchanged at 57 remediated / 306 confirmed / 364**; numbering frozen at
+**364**; **no new ticket carries an `SR-AUD-*` identifier**. Five plan premises
+were corrected by measurement (§40.2/§40.3, §42.2, plus §39.1 and §38.1 retained
+from the previous batch). Next family selected and planned: **CCF-009**
+(`docs/SharedPrngConcurrencyPlan.md`, #1900–#1903). CNA and mobile-eggbert were
+not inspected; #1773 stays `blocked`.

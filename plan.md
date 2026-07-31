@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-31 — 41 physical components, 91 direct production
-dependency edges, a clean native build, 14,683 passing tests across 37
+dependency edges, a clean native build, 14,731 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
 is recorded as audit finding `SR-AUD-001`. Post-audit tally: **57 findings
@@ -15,7 +15,11 @@ landed the approved owner-side detachment contract and left the tally
 use-after-free cases, and the remaining three (J11, X15, X17) belong to the
 still-unapproved #1889 and #1892. The follow-on 2026-07-31 batch (#1887, #1891)
 closed both of CCF-019's silent data-loss paths and likewise left the tally
-**unchanged**, for the same reason.*
+**unchanged**, for the same reason; so did the 2026-07-31 batch (#1895, #1898)
+that completed CCF-019's **compatible** remediation. CCF-019 is
+**compatible-remediation-complete, not implemented**: #1888/#1889/#1896 are
+declined and deferred, #1897/#1899 hold one open question each, and both
+findings keep the `confirmed (design-complete)` qualifier.*
 
 Sharp Runtime is in the post-audit remediation phase. The original type
 classification, stabilization, and modularization queues are complete, and the
@@ -4820,3 +4824,53 @@ post-audit tally is unchanged at **57 remediated / 306 confirmed / 364** and
 numbering stays frozen at **364**. **CNA and mobile-eggbert were not inspected,
 searched, built or modified**; **#1773 stays `blocked`**. Maximum aggregate
 compilation parallelism was **three jobs**.
+
+## Autonomous remediation batch, 2026-07-31 — CCF-019 compatible closure (#1895, #1898) and the CCF-009 plan (#1900–#1903)
+
+Branch `feature/remediation-ccf019-final-compatible`, off
+`feature/remediation-ccf019-residuals`. Four commits plus the handoff. **Nothing
+pushed, merged, rebased, tagged or published.**
+
+### The user's decisions on §31 items 3–6, and what each produced
+
+| Item | Decision | Result |
+|---|---|---|
+| **3** (#1888) | **declined** — no layout/ABI change, record that no compatible implementation exists | `needs_user` → **blocked**, design preserved (§37) |
+| **4** (#1889) | **declined** — do not change the public iterator contract; preserve §39 for a coordinated ABI-breaking release | `needs_user` → **blocked**, §39 package intact |
+| **5** (#1892) | **wording rejected as non-implementable** — produce a precise replacement | #1892 retired; **#1898 done**, **#1899 blocked** on one question (§42) |
+| **6** (#1893) | **split**; compatible teardown half **approved** | #1893 retired; **#1895 done**, **#1896** and **#1897 blocked** (§40, §41) |
+
+### What landed
+
+- **#1895** — `~JsonArray`, `~JsonObject` and `~XContainer` release owned trees
+  **iteratively**: the outermost destructor publishes a worklist, and every
+  container destructor running while one is published donates its children and
+  returns. Probe **J19c** and **X27c** go from ASan `stack-overflow` to `clean`;
+  exactly 2 of 58 cases changed. +34 tests; two mutations detect it 4/17 each,
+  all as `SIGSEGV`. All six approval conditions met and measured.
+- **#1898** — the Xml.Linq **borrowed-view contract**, stated as preconditions,
+  postconditions, invalidation and failure behaviour and pinned by 14 tests,
+  including `Attributes()` as the owning alternative. Doc-comments and tests
+  only.
+- **#1900** — `docs/SharedPrngConcurrencyPlan.md`, the next family (**CCF-009**),
+  with #1901/#1902/#1903 created in dependency order.
+
+### Measured
+
+Repository gate **14,683 → 14,731 tests across 37 executables**, 0 warnings,
+0 errors. Module graph **41/91**, Doxygen **1,941/1,942**, seams **2/18**,
+negative fixtures **9/66** — all unchanged. ASan+UBSan+LSan clean over 218/218
+Text.Json and 184/184 Xml.Linq. ABI: `JsonNode.o` keeps all 225 symbol names
+(six destructors weak → strong), `XContainer.o` 49 → 62 with **no name removed**.
+The one cost is recorded rather than glossed: destroying a container with at
+least one child now performs **exactly one** heap allocation where it performed
+none; an empty container still allocates nothing.
+
+**CCF-019 is compatible-remediation-complete and not implemented.** §43
+reconciles all six items; the residue is J11/J12 (#1889, declined), J08/J09/J13
+(#1888, declined), X15/X17 (#1899, one question), J19d/X27d (#1896, declined) and
+X28c (#1897, one question). **SR-AUD-327 and SR-AUD-333 stay `confirmed
+(design-complete)`**; the tally is unchanged at **57 remediated / 306 confirmed /
+364** and numbering stays frozen at **364**. **CNA and mobile-eggbert were not
+inspected**; **#1773 stays `blocked`**. Maximum aggregate compilation parallelism
+was **three jobs**.
