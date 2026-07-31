@@ -6202,3 +6202,75 @@ SR-AUD-043 both `confirmed → remediated`; SR-AUD-043's status string was
 **CCF-005 is complete.** CCF-007 keeps SR-AUD-033's format (#1863) and parse
 (#1865) slices. CNA and mobile-eggbert were not inspected; #1773 stays `blocked`;
 #1888/#1889/#1896 stay declined.
+
+## Post-audit remediation checkpoint — Group B of the approved A–D packet (2026-07-31)
+
+**Tickets #1865 and #1858 — both `done`. SR-AUD-035 is `remediated`; SR-AUD-033's
+parse half is closed and its format half stays open as #1863.** Approved by the
+batch instruction in the exact words of `docs/RemainingApprovalDecisions.md`
+§B.8 — option **B(i)**, staged in the three commits §B.5 required so that the one
+dangerous row can be reverted alone.
+
+**Commit 1 (#1865, rows B-3 and B-4).** `Single`/`Double` `tryParseCore` now
+implements the two parts of `NumberStyles.Float | AllowThousands` that
+`std::from_chars` cannot express, through one shared private header
+`System/detail/FloatParseGrammar.hpp` so the two types cannot drift: `,` group
+separators by .NET's exact scanner rule (accepted only after a digit and before
+the decimal separator; group **sizes** deliberately unvalidated, because they are
+a formatting concept), and an out-of-range magnitude saturating instead of
+throwing.
+
+**Commit 2 (#1858, row B-2).** The `Decimal` scanner became a private static
+returning `ParseStatus { Ok, Malformed, Overflow }`, so `Parse` throws .NET's
+`OverflowException` for a well-formed oversized magnitude while malformed text
+stays a `FormatException`. `TryParse` keeps its `bool` and its no-partial-write
+guarantee.
+
+**Commit 3 (#1858, row B-1) — the one dangerous change, isolated on purpose.**
+`,` is now the invariant-culture group separator in `Decimal` too. Migration
+note: `docs/Migration-DecimalCommaGroupSeparator.md`.
+
+**Three premises corrected, all preserved additively.**
+
+1. **The overflow repair is wider than §B.3's single row, and legitimately so.**
+   Measured (`build-probe/1865_prefix_plain.log` cases B01–B08), `std::from_chars`
+   returns **one** `errc::result_out_of_range` for overflow *and* underflow and
+   leaves the output **unwritten** in both. §B.3 lists only `"1e999"`, but §B.6
+   describes the implementation as "a `result_out_of_range`-with-all-chars-consumed
+   branch" — one branch, both directions — and .NET decides both in one function
+   (`Number.NumberToFloat`: `PositiveInfinity` above `MaxDecimalExponent`, `Zero`
+   below `MinDecimalExponent`, sign applied afterwards). Underflow is therefore
+   structurally equivalent under exactly the same recorded contract, and is
+   repaired here: `"1e-999"` → `+0`, `"-1e-999"` → `−0`.
+2. **B-1 changes two values, not one.** §B.3 names `Parse("1,5")` (`1.5m` →
+   `15m`). Measured, `Parse(",5")` also changes — `0.5m` → `FormatException` —
+   because a group separator requires a preceding digit, which is what .NET does.
+   Tabulated in the migration note rather than left to be discovered.
+3. **The packet disagrees with itself about B-1, and that is recorded rather than
+   resolved silently.** §0's summary row recommends "Approve B, split — take
+   #1865 whole, take only #1858's overflow half", i.e. **not** B-1; §B.5
+   recommends "B(i), staged" and §B.8's approval wording approves B-1 explicitly,
+   as its own commit, with a migration note. The packet's preamble designates
+   §"Approval wording" as the operative sentence, so B-1 was implemented — and
+   the isolation the approval itself demanded is exactly what makes reverting it
+   alone a one-command operation if §0 was the intent.
+
+`TryParse`'s `noexcept` is unchanged on all three types — the one allocation the
+separator path can make is guarded — so no exception specification moved. That
+would have been a Group A-shaped change, and Group B does not approve one.
+`Half` inherits the widened float grammar by delegation with no edit, pinned by a
+test.
+
++38 permanent tests (two of them replacing the two `*_PendingApproval` tests,
+which §B.7 required to be inverted); gate **14,941 → 14,964 across 37
+executables**. ASan and UBSan over 68 probe cases with `Decimal.cpp` compiled
+**into** the probe so the `.cpp` half is instrumented too: **zero diagnostics,
+answers identical to the plain build** — restating rather than claiming coverage,
+since no sanitizer can see a grammar or exception-taxonomy defect. No public
+signature, exception specification, object layout or ABI change.
+
+**Tally: 61 → 62 remediated, 303 → 302 confirmed, 364 total** (SR-AUD-035
+`confirmed → remediated`; SR-AUD-033 stays `confirmed` with its parse half
+closed, because #1863 still owns the format half). **The CCF-005 Decimal slice is
+complete.** CNA and mobile-eggbert were not inspected; #1773 stays `blocked`;
+#1888/#1889/#1896 stay declined.

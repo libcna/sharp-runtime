@@ -302,3 +302,66 @@ directive.
 accepted as `1.5m` and would silently become `15m`; for `Single`/`Double`, `,` is
 today *rejected*, so adoption is a rejected→accepted widening with no existing
 value change. Both are `needs_user` and must be resolved consistently.
+
+**CCF5D-3 — SR-AUD-035 — COMPLETE (#1858, 2026-07-31).** Approved by the batch
+instruction in the exact words of `docs/RemainingApprovalDecisions.md` §B.8 items
+(2) and (3) — option **B(i)**, staged exactly as §B.5 required, in **two
+separate commits**.
+
+**Commit 1 — the overflow taxonomy (§B.8 item 2, packet row B-2).** The scanner
+became `Decimal::tryParseCore`, a private static returning a three-state
+`ParseStatus { Ok, Malformed, Overflow }`. `TryParse` is now a one-line
+`== ParseStatus::Ok` and keeps its `bool` and its no-partial-write guarantee;
+only `Parse` can tell the two failures apart, and it throws
+`OverflowException("Value was either too large or too small for a Decimal.")` —
+.NET's `SR.Overflow_Decimal`, verbatim — for a well-formed magnitude past
+decimal's 96-bit mantissa, while genuinely malformed text stays a
+`FormatException`. Adding a private static member function changes no layout, no
+vtable and no existing mangled name. Measured: `"79228162514264337593543950336"`,
+its negative, and a 30-digit magnitude all move `FormatException` →
+`OverflowException`; `"abc"`, `""`, `"   "`, `"1.2.3"` and `"1x"` stay
+`FormatException`; the in-range boundaries still parse
+(`build-probe/1865_{prefix,postfix}_plain.log` cases B80–B88).
+
+**Commit 2 — the comma (§B.8 item 3, packet row B-1).** `,` is now the
+invariant-culture **group separator**, per .NET's `NumberStyles.Number` default,
+accepted only after at least one digit and before the decimal separator, with
+group sizes deliberately unvalidated. **This is the one change in the whole
+approved A–D batch that alters the value of input that already parsed, and it has
+no compiler diagnostic**, which is why the packet required it to be its own
+commit with its own migration note: **`docs/Migration-DecimalCommaGroupSeparator.md`**.
+Reverting that single commit restores the previous behaviour exactly.
+
+| Input | Before | After |
+|---|---|---|
+| `"1,5"` | **`1.5m`** | **`15m`** |
+| `",5"` | **`0.5m`** | **`FormatException`** |
+| `"1,234.5"` / `" 1,234.5 "` / `"1,234,567"` | `FormatException` | `1234.5m` / `1234.5m` / `1234567m` |
+| `"1,2,3"` / `"1,,2"` / `"1,"` | `FormatException` / `FormatException` / `1m` | `123m` / `12m` / `1m` |
+| `"1.5,"` / `"1.2,3"` / `","` | `FormatException` | `FormatException` |
+| `"1.5"`, `"-0"`, every comma-free input | — | **unchanged** |
+
+**Premise correction — the packet named one value change; there are two.** §B.3
+lists only `Decimal.Parse("1,5")` (`1.5m` → `15m`). Measured, `Parse(",5")` also
+changes, from `0.5m` to `FormatException`, because a group separator requires a
+preceding digit. It follows from the same rule and matches .NET, and it is
+recorded in the migration note's table rather than left to be discovered.
+
+**Second premise correction — an internal inconsistency in the packet itself.**
+§0's summary row for Group B recommends "**Approve B, split** — take #1865 whole,
+take only #1858's overflow half", i.e. **not** row B-1; §B.5 recommends "B(i),
+staged" and §B.8's approval wording approves B-1 explicitly as its own commit.
+The packet's preamble designates §"Approval wording" as the operative sentence,
+so B-1 was implemented — but the disagreement is real, it is recorded here rather
+than resolved silently, and the single-commit isolation the approval demanded is
+exactly what makes reverting B-1 alone a one-command operation if §0 was the
+intent.
+
++15 tests across both commits, including the inversion of both
+`*_PendingApproval` tests, which is what §B.7 required of them. ASan and UBSan
+clean over 68 probe cases with `Decimal.cpp` compiled into the probe so the
+`.cpp` half is instrumented, answers identical to the plain build — restating,
+not claiming coverage, since no sanitizer can see a grammar or exception-taxonomy
+defect. `SR-AUD-035 → remediated`. **The CCF-005 Decimal slice is complete**
+(SR-AUD-035, SR-AUD-036, SR-AUD-038 all `remediated`), and with #1865 the three
+numeric parsers now agree on what `,` means.

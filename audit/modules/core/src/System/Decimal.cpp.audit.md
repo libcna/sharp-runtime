@@ -34,11 +34,24 @@ zero.
   leading/trailing whitespace (`std::isspace`), a pure widening, and (b) rounds
   excess fractional precision beyond scale 28 half-to-even instead of
   discarding it, so `0.0…06` → `1e-28` (with a defensive scale-drop on the rare
-  rounding carry past the 96-bit mantissa). **Still open (approval-blocked as
-  #1858):** `','` remains a decimal point rather than a .NET group separator
-  (changing it silently alters `Parse("1,5")`), and range overflow still throws
-  `FormatException` rather than `OverflowException` (needs an internal status
-  channel). SR-AUD-035 stays `confirmed` until #1858 lands.
+  rounding carry past the 96-bit mantissa). **Fully remediated (#1858, 2026-07-31):** approved in the exact words of
+  `docs/RemainingApprovalDecisions.md` §B.8 items (2) and (3) and delivered as
+  the two separate commits §B.5 required. The scanner became a private
+  three-state `ParseStatus { Ok, Malformed, Overflow }`, so `Parse` throws
+  `OverflowException("Value was either too large or too small for a Decimal.")`
+  (`SR.Overflow_Decimal`, verbatim) for a well-formed oversized magnitude while
+  malformed text stays a `FormatException`; `TryParse` keeps its `bool` and its
+  no-partial-write guarantee. Then `','` became the invariant-culture **group
+  separator** per `NumberStyles.Number`, so `" 1,234.5 "` — the finding's own
+  example — parses to `1234.5m`. **Premise correction:** the finding, and the
+  decision packet §B.3, each name one value change (`Parse("1,5")` 1.5→15);
+  measured, there are **two** — `Parse(",5")` also changes, from `0.5m` to
+  `FormatException`, because a group separator requires a preceding digit, which
+  is what .NET does. Both are tabulated in
+  `docs/Migration-DecimalCommaGroupSeparator.md`. Adding a private static member
+  function changed no layout, no vtable and no existing mangled name. +15 tests,
+  including the inversion of both `*_PendingApproval` tests. `SR-AUD-035 →
+  remediated`, and with it the CCF-005 Decimal slice is complete.
 - **SR-AUD-036:** `Round(d, decimals, static_cast<MidpointRounding>(99))`
   reaches the switch default and returns `1` for `1.9` rather than throwing
   `ArgumentException`.  .NET requires that exception for an invalid

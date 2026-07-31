@@ -322,9 +322,23 @@ Decimal::ParseStatus Decimal::tryParseCore(const std::string& s, Decimal& result
 
     for (; i < end; ++i) {
         char c = s[i];
-        if (c == '.' || c == ',') {
+        if (c == '.') {
             if (seenDot) return ParseStatus::Malformed;
             seenDot = true;
+        } else if (c == ',') {
+            // SR-AUD-035 tail (#1858, approved 2026-07-31): ',' is the
+            // invariant-culture GROUP separator, not a second spelling of the
+            // decimal point. .NET's decimal.Parse defaults to
+            // NumberStyles.Number, which includes AllowThousands, and its scanner
+            // (Number.Parsing.Common.cs) accepts a group separator only after at
+            // least one digit and before the decimal separator -- and deliberately
+            // does NOT validate group sizes, which are a formatting concept. So
+            // "1,234.5" is 1234.5 and "1,2,3" is 123, while ",5" and "1.5," fail.
+            //
+            // THIS CHANGES THE VALUE OF INPUT THAT ALREADY PARSED:
+            // Parse("1,5") was 1.5 and is now 15. There is no compiler diagnostic
+            // for it. See docs/Migration-DecimalCommaGroupSeparator.md.
+            if (!seenDigit || seenDot) return ParseStatus::Malformed;
         } else if (c >= '0' && c <= '9') {
             seenDigit = true;
             if (seenDot && scale >= 28) {

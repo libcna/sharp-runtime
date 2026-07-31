@@ -7,9 +7,11 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Decimal.hpp"
+#include "System/Double.hpp"
 #include "System/FormatException.hpp"
 #include "System/MidpointRounding.hpp"
 #include "System/OverflowException.hpp"
+#include "System/Single.hpp"
 
 using System::Decimal;
 using System::MidpointRounding;
@@ -204,13 +206,67 @@ TEST(DecimalTests2, Parse_RoundsExcessFractionalPrecisionHalfToEven) {
     EXPECT_EQ(Decimal::Parse("1." + z27 + "55"), Decimal::Parse("1." + z27 + "6"));
 }
 
-// DOCUMENTATION (pre-#1858): ',' is still interpreted as a decimal point, NOT a .NET
-// group separator. #1858 (approval-blocked) would make Parse("1,5") == 15 instead.
-TEST(DecimalTests2, Parse_CommaIsStillDecimalPoint_PendingApproval) {
-    EXPECT_EQ(Decimal::Parse("1,5"), Decimal::Parse("1.5"));
-    // Two separators are rejected, so ".NET grouped" input like "1,234.5" still fails.
+// ---------------------------------------------------------------------------
+// SR-AUD-035 comma semantics (#1858, approved 2026-07-31, packet §B.8 item 3).
+// INVERTED from Parse_CommaIsStillDecimalPoint_PendingApproval, which is exactly
+// what packet §B.7 required of it: ',' is now the invariant-culture GROUP
+// separator, matching .NET's NumberStyles.Number default, not a second spelling
+// of the decimal point.
+//
+// THIS IS THE ONE CHANGE IN THE A-D BATCH THAT ALTERS THE VALUE OF INPUT THAT
+// ALREADY PARSED, with no compiler diagnostic:
+// docs/Migration-DecimalCommaGroupSeparator.md.
+// ---------------------------------------------------------------------------
+
+TEST(DecimalTests2, Parse_CommaIsAGroupSeparator) {
+    // The migration row: 1.5m before, 15m now.
+    EXPECT_EQ(Decimal::Parse("1,5"), Decimal(15));
+    EXPECT_NE(Decimal::Parse("1,5"), Decimal::Parse("1.5"));
+    // Grouped input that used to be rejected outright now parses.
+    EXPECT_EQ(Decimal::Parse("1,234.5"), Decimal::Parse("1234.5"));
+    EXPECT_EQ(Decimal::Parse(" 1,234.5 "), Decimal::Parse("1234.5"));
+    EXPECT_EQ(Decimal::Parse("1,234,567"), Decimal(1234567));
     Decimal d;
-    EXPECT_FALSE(Decimal::TryParse("1,234.5", d));
+    EXPECT_TRUE(Decimal::TryParse("1,234.5", d));
+    EXPECT_EQ(d, Decimal::Parse("1234.5"));
+}
+
+TEST(DecimalTests2, Parse_GroupSizesAreNotValidated_MatchingDotNet) {
+    // .NET's scanner never checks group SIZES -- they are a formatting concept.
+    EXPECT_EQ(Decimal::Parse("1,2,3"), Decimal(123));
+    EXPECT_EQ(Decimal::Parse("1,"), Decimal(1));
+    EXPECT_EQ(Decimal::Parse("1,,2"), Decimal(12));
+}
+
+TEST(DecimalTests2, Parse_GroupSeparatorInAnIllegalPosition_Rejected) {
+    // A group separator needs a preceding digit and must come before the decimal
+    // separator. ",5" is the batch's second value change: it used to be 0.5m.
+    Decimal d;
+    EXPECT_FALSE(Decimal::TryParse(",5", d));
+    EXPECT_FALSE(Decimal::TryParse(",", d));
+    EXPECT_FALSE(Decimal::TryParse("1.5,", d));
+    EXPECT_FALSE(Decimal::TryParse("1.2,3", d));
+    EXPECT_FALSE(Decimal::TryParse("-,5", d));
+    EXPECT_THROW(Decimal::Parse(",5"), System::FormatException);
+}
+
+TEST(DecimalTests2, Parse_DecimalPointBehaviourIsOtherwiseUnchanged) {
+    EXPECT_EQ(Decimal::Parse("1.5"), Decimal::Parse("1.50"));
+    EXPECT_THROW(Decimal::Parse("1.2.3"), System::FormatException);
+    EXPECT_EQ(Decimal::Parse("-3.25"), Decimal::Parse("-3.25"));
+    EXPECT_TRUE(Decimal::Parse("-0").getIsNegativeProperty());
+    // A grouped magnitude past the range is still an overflow, not a format error.
+    EXPECT_THROW(Decimal::Parse("79,228,162,514,264,337,593,543,950,336"),
+                 System::OverflowException);
+}
+
+TEST(DecimalTests2, Parse_CommaSemanticsNowAgreeAcrossTheThreeNumericParsers) {
+    // The single answer packet §B existed to obtain: ',' means "group separator"
+    // to Decimal, Single and Double alike. Before #1858/#1865 it meant "decimal
+    // point" to Decimal and was rejected outright by the other two.
+    EXPECT_EQ(Decimal::Parse("1,234.5"), Decimal::Parse("1234.5"));
+    EXPECT_EQ(System::Double::Parse("1,234.5"), 1234.5);
+    EXPECT_FLOAT_EQ(System::Single::Parse("1,234.5"), 1234.5f);
 }
 
 // INVERTED by #1858 (approved 2026-07-31), which is exactly what the decision
