@@ -106,7 +106,7 @@ template<typename T>
  * @brief Counterpart of .NET @c Single.GetHashCode / @c Double.GetHashCode's
  *        NaN and signed-zero normalisation.
  *
- * Once @ref equalValues treats NaN as equal to itself, a hash that depends on
+ * Once `equalValues` treats NaN as equal to itself, a hash that depends on
  * NaN's payload bits would break the equal-objects-equal-hashes invariant:
  * libstdc++'s `std::hash<double>` already folds `+0.0` and `-0.0` to `0` but
  * hashes NaN's bit pattern, so two NaNs with different payloads hash
@@ -137,11 +137,12 @@ template<typename T>
  *
  * Use this where the ordered values are not the ones being permuted — a
  * `keySelector`'s results, for example. Where the range itself is the
- * floating data, prefer @ref moveNaNsToFront followed by an ordinary sort of
+ * floating data, prefer `moveNaNsToFront` followed by an ordinary sort of
  * the remainder, which is what .NET's own `ArraySortHelper` does.
  */
 template<typename T>
 struct DefaultLess {
+    /** @brief Returns true if @p a sorts strictly before @p b. */
     [[nodiscard]] constexpr bool operator()(const T& a, const T& b) const {
         if constexpr (std::is_floating_point_v<T>) {
             return compareValues(a, b) < 0;
@@ -154,6 +155,7 @@ struct DefaultLess {
 /** @brief The reverse of @ref DefaultLess, for descending orderings. */
 template<typename T>
 struct DefaultGreater {
+    /** @brief Returns true if @p a sorts strictly after @p b. */
     [[nodiscard]] constexpr bool operator()(const T& a, const T& b) const {
         if constexpr (std::is_floating_point_v<T>) {
             return compareValues(a, b) > 0;
@@ -206,7 +208,7 @@ template<typename It>
 /**
  * @brief Sorts `[first, last)` under .NET's default comparison contract.
  *
- * The NaN pre-pass of @ref moveNaNsToFront followed by an ordinary
+ * The NaN pre-pass of `moveNaNsToFront` followed by an ordinary
  * `std::sort` of the NaN-free remainder — the algorithm
  * `ArraySortHelper<T>.Sort` uses for `float`, `double` and `Half`
  * (`ArraySortHelper.cs:285-305`). For a non-floating value type it is exactly

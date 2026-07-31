@@ -4,7 +4,16 @@
 # NEXT.md
 
 *Last verified: 2026-07-31. Branch:
-`feature/remediation-ccf019-final-compatible`. The test floor rose to **14,745**
+`feature/remediation-ccf010-comparison-contract`. The test floor rose to
+**14,815** (was 14,745). **CCF-010 is COMPLETE and SR-AUD-046 is
+`remediated`** — the second post-audit family finished outright. Tickets
+**#1904**–**#1911** are all `done`, none needed user approval, and the tally
+moves to **59 remediated / 305 confirmed / 364** (304 plain `confirmed` rows
+plus the one split row), numbering still frozen at 364. New ticket **#1912**
+(`todo`, P2) records a larger population with the same cause in the
+`Collections` module. See "Autonomous remediation batch handoff, 2026-07-31
+(CCF-010 comparison contract)" immediately below. Previously, on
+`feature/remediation-ccf019-final-compatible`: the test floor rose to **14,745**
 (was 14,731). **CCF-009 is COMPLETE and SR-AUD-010 is `remediated`** — the first
 post-audit family finished outright rather than left design-complete or
 approval-blocked. Tickets **#1901**, **#1902** and **#1903** are all `done`, none
@@ -312,6 +321,159 @@ per this repository's practice of preserving historical audit narrative.*
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
+
+## Autonomous remediation batch handoff, 2026-07-31 (CCF-010 comparison contract)
+
+**CCF-010 is COMPLETE. SR-AUD-046 is `remediated`.** Tickets **#1904** (plan),
+**#1905**–**#1909** (implementations), **#1910** (closure) and **#1911** (a
+record defect found during family selection) are all `done`. Nothing needed
+user approval and nothing was left blocked.
+
+### Family selection — why CCF-010, and what was deferred
+
+With CCF-009 complete, the CCF inventory was re-derived from
+`audit/AUDIT_FINDINGS_INDEX.md` rather than from the cross-cutting file's prose.
+Only **three** families had unplanned, compatible, unblocked work: **CCF-001**
+(the tracked CI matrix's missing `Collections.Blocking` selective consumer),
+**CCF-010**, and **CCF-015** (`std::isspace` on UTF-8 bytes). CCF-010 was
+selected because it is the only one of the three that contains **undefined
+behaviour**. CCF-001 is a tooling coverage gap with no defect in shipped
+behaviour; CCF-015 needs a new UTF-8 decode plus Unicode whitespace policy the
+port does not have, which is a larger design commitment for two entry points
+than CCF-010's was for a hundred. Both are deferred with nothing lost, and the
+full table is §0 of `docs/ComparisonContractPlan.md`.
+
+### What changed
+
+Six header-only `Core.Base` files plus one new private header. **No `.cpp`
+touched, no signature, `noexcept`, layout, vtable or calling convention
+changed.**
+
+| Ticket | Site | Repair |
+|---|---|---|
+| #1905 | new `System/detail/ComparisonPolicy.hpp` + `Array.hpp` (10 entries) | one shared policy; `Sort` adopts .NET's NaN pre-pass |
+| #1906 | `MemoryExtensions.hpp` (5 entries) | same policy; the file-local equality rule now forwards to it |
+| #1908 | `Tuple.hpp` + `ValueTuple.hpp` (41 bodies) | `tupleCompare`/`vtCompare`/`vtEquals`/hashes |
+| #1907 | `Nullable.hpp` (4 entries) | `Compare`/`Equals`/`GetHashCode`; `operator==` **deliberately unchanged** |
+| #1909 | `Linq.hpp` (6 entries) | `Contains`/`Distinct`/`OrderBy`/`OrderByDescending` + the asymmetric `Min`/`Max` |
+
+The policy is `compareValues`, `equalValues`, `hashValue`,
+`DefaultLess`/`DefaultGreater`, `moveNaNsToFront` and `defaultSort`, each
+`if constexpr`-gated so every non-floating instantiation generates exactly the
+code that was there before.
+
+### The finding was understated, and that is the batch's substantive result
+
+`Array::Sort`, `MemoryExtensions::Sort` and `Linq::OrderBy` handed `std::sort`
+a predicate that is **not a strict weak ordering** when the range contains NaN,
+which `[alg.sort]` makes a precondition violation rather than a wrong answer.
+Measured consequence: the **finite** elements came out unsorted in **64 of 196**
+size/density/placement shapes, worst case **3,874 inversions** in 65,536
+elements. A single NaN in 4,096 elements does *not* corrupt — which is exactly
+why the audit's three-element `{3,NaN,1}` example could not find it. Both `Sort`
+surfaces now use .NET's own repair (`ArraySortHelper.cs:285-305`): move every
+NaN to the front, sort the remainder, so NaN never reaches the comparator. The
+sweep reads `corrupted=0`.
+
+**No sanitizer sees any of this.** ASan, UBSan and
+`-D_GLIBCXX_ASSERTIONS -D_GLIBCXX_DEBUG` reported **zero** diagnostics on all 36
+probe cases, before and after. libstdc++'s debug mode checks irreflexivity,
+which `NaN < NaN == false` satisfies; nothing checks transitivity of
+equivalence. The suite is the only gate, so this family carries **ten**
+mutations — M-1, M-2, M-3, M-5, M-6, M-7, M-8, M-9, M-10 all detected, and
+**M-4 is a deliberate negative control** (`Sort` via a total-order comparator
+instead of the pre-pass) that must and does still pass.
+
+### Premises corrected by measurement (five)
+
+- **CCF-010's `MemoryExtensions` claim is stale**: that file already held a
+  correct `float.Equals` rule in `Detail::MemoryExtensionsElementEquals`. The
+  real defect was that it was stated in one file and shared with none.
+- **`Linq::Min` and `Linq::Max` fail in opposite directions**, not
+  symmetrically: `Min({1,2,NaN})` lost the NaN, `Max({NaN,1,2})` kept it. The
+  reference is deliberately asymmetric; a mutation pins it.
+- **`Nullable<T>::operator==` was already right and must not be "fixed"** —
+  C#'s lifted `==` is the underlying `operator ==`, so `(double?)NaN ==
+  (double?)NaN` is `false` in .NET too. Pinned.
+- **Hashing is part of the repair**, because NaN-reflexive equality would
+  otherwise break the equal-implies-equal-hash invariant.
+- **Two rows were already correct by accident** (`SequenceCompareTo` of two
+  NaNs; `BinarySearch` for a finite value in a NaN-led array) and are now
+  pinned.
+
+### Evidence
+
+- **All 36 probe cases match .NET** with the probe **unmodified**: 28 defect
+  rows repaired, 8 already-correct rows unchanged.
+- **+70 permanent tests** in `modules/core/tests/System/ComparisonContractTests.cpp`;
+  floor **14,745 → 14,815** across 37 executables.
+- **ABI**: `nm --extern-only` identical before and after (6,168 symbols);
+  `sizeof`/`alignof` identical for all eleven measured instantiations.
+- **Sanitizers**: ASan/UBSan/LSan clean, with activation proved separately
+  (`build-probe/1904_sanitizer_activation.log`). TSan **not applicable** — the
+  family has no shared mutable state, atomic, lock, cache or singleton.
+- **Performance**, paired median of 11 on 1,000,000 elements: 1.011× `float`
+  without NaN, 0.994× with 1% NaN, 1.009× `int`.
+- `scripts/local_ci_check.sh build` and
+  `scripts/check_selective_components.sh` both passed; Doxygen **1,941** of the
+  1,942 ceiling.
+
+### Selective-components decision
+
+**Run, and passed.** The family adds a public header
+(`System/detail/ComparisonPolicy.hpp`), which is the batch policy's first
+trigger. The omission precedent from the CCF-009 batch does not apply.
+
+### New tickets
+
+- **#1911** (`done`) — `audit/AUDIT_CROSS_CUTTING_FINDINGS.md` carried **no
+  closure note for CCF-003 or CCF-006** although every member of both is
+  `remediated`. Found during family selection; a session choosing from that file
+  alone would have re-selected a finished family. Both sections now carry an
+  accurate closure paragraph. Record defect only; no status changed.
+- **#1912** (`todo`, P2, size L) — the **`Collections` module repeats this
+  cause**: 5 default-ordering sites (`List<T>::Sort`, `List<T>::BinarySearch`,
+  `ImmutableList<T>::Sort` ×2, `ImmutableArray<T>::Sort`), of which the four
+  `std::sort` calls carry the same precondition violation; 56 default-equality
+  sites across 20 headers; and a **third shape with no CCF-010 counterpart** —
+  `SortedSet<T>`/`SortedDictionary`/`SortedList` use `std::less` on a
+  possibly-NaN element or key, violating `[associative.reqmts]` for the
+  container's whole lifetime. Deliberately not absorbed (`docs/ComparisonContractPlan.md`
+  §18a). **No `SR-AUD-*` identifier issued; numbering stays frozen at 364.**
+  **Nothing there is claimed to be wrong until #1912 reproduces each site.**
+
+### Scope boundaries held
+
+SR-AUD-050 (`NewGuid` uses a predictable PRNG) is untouched and **stays
+`confirmed`**. CNA and mobile-eggbert were not inspected, searched, built or
+modified; **#1773 remains `blocked`**. No push, merge, rebase, tag or
+publication occurred. **No compilation exceeded three aggregate jobs.**
+
+### Next
+
+The compatible queue is **not** empty for once: **#1912** is ready and needs no
+approval, and it is the natural continuation — it reuses
+`System/detail/ComparisonPolicy.hpp` unchanged for its ordering and equality
+halves, and needs its own analysis only for the associative-container shape. The
+alternative unplanned families remain **CCF-001** and **CCF-015**. Open approval
+questions elsewhere are unchanged: **#1899** and **#1897** each need one user
+decision; **#1888**, **#1889** and **#1896** are declined with designs
+preserved; **#1854**, **#1858**, **#1862**, **#1863**, **#1865**, **#1879** and
+**#1884** stay `needs_user`.
+
+### Build resources
+
+`build/` (the only persistent tree compiled this batch) **736 MB → 739 MB**;
+`build-probe/` **36 MB → 41 MB** (probe sources, driver scripts, mutation
+scripts and answer-line logs retained; every probe *binary* deleted once its log
+was written, reclaiming ~24 MB); `build-tmp/` 8.4 MB → 7.6 MB, used as `TMPDIR`
+throughout; `build-asan/` (3.8 GB), `build-modular/` (1.3 GB),
+`build-consumer/` and `cmake-build-debug/` **untouched**. No new build directory
+was created and none was cleaned or reconfigured. `ccache` stayed enabled.
+Maximum aggregate compilation parallelism: **3 jobs**, for the repository build,
+`check_selective_components.sh` (which caps itself at `--parallel 3`),
+`check_negative_consumer_fixtures.py` (reported "peak 3 job(s)") and the
+single-translation-unit probe (1 job).
 
 ## Autonomous remediation batch handoff, 2026-07-31 (CCF-009 shared PRNG)
 

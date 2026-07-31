@@ -1,8 +1,11 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-31 — 41 physical components, 91 direct production
-dependency edges, a clean native build, 14,731 passing tests across 37
-executables, and a locally green ten-job selective matrix. The tracked CI
+dependency edges, a clean native build, 14,815 passing tests across 37
+executables, and a locally green ten-job selective matrix. The 2026-07-31
+CCF-010 batch (#1904–#1911) closed the **default comparison contract** family
+outright: SR-AUD-046 is `remediated`, taking the tally to **59 remediated,
+304 confirmed, of 364**, and the floor rose 14,745 → 14,815. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
 is recorded as audit finding `SR-AUD-001`. Post-audit tally: **57 findings
 remediated, 306 confirmed, of 364 total** — this line read `43 / 321` until
@@ -4874,3 +4877,56 @@ X28c (#1897, one question). **SR-AUD-327 and SR-AUD-333 stay `confirmed
 364** and numbering stays frozen at **364**. **CNA and mobile-eggbert were not
 inspected**; **#1773 stays `blocked`**. Maximum aggregate compilation parallelism
 was **three jobs**.
+
+## Autonomous remediation batch, 2026-07-31 — CCF-010 default comparison contract (#1904–#1912)
+
+Branch `feature/remediation-ccf010-comparison-contract`, off
+`feature/remediation-ccf019-final-compatible`. **CCF-010 is CLOSED and
+SR-AUD-046 is `remediated`** — the second post-audit family finished outright,
+after CCF-009. Nothing in it needed user approval and nothing is left blocked.
+
+**Family selection.** With CCF-009 complete, only three families had unplanned,
+compatible, unblocked work: CCF-001 (tracked-CI matrix gap), CCF-010 and
+CCF-015 (UTF-8 whitespace). CCF-010 was selected because it is the only one of
+the three containing undefined behaviour. The full candidate review — every
+family's member statuses re-derived from `audit/AUDIT_FINDINGS_INDEX.md` rather
+than from the cross-cutting file's prose — is §0 of
+`docs/ComparisonContractPlan.md`.
+
+**What the family is.** Six header-only `Core.Base` files used a raw C++ `<`,
+`>` or `==` where .NET uses `Comparer<T>.Default` / `EqualityComparer<T>.Default`.
+For every type in the port except `float` and `double` those agree exactly,
+which is why the defect was invisible for the whole life of the files; for those
+two they differ in NaN's order and in NaN's equality with itself.
+
+**The severity the record understated.** `Array::Sort`, `MemoryExtensions::Sort`
+and `Linq::OrderBy` did not merely place NaN wrongly: raw `<` over a NaN-bearing
+range is not a strict weak ordering, so `std::sort`'s `[alg.sort]` precondition
+was violated and the **finite** elements came out unsorted — **64 of 196**
+measured shapes corrupted, worst case **3,874 inversions** in 65,536 elements.
+**ASan, UBSan and `_GLIBCXX_DEBUG` were all silent**, before and after; the
+permanent suite is the only possible gate, which is why the family carries ten
+mutations including a negative control.
+
+| Ticket | Scope |
+|---|---|
+| #1904 | design-only plan, `docs/ComparisonContractPlan.md`, 36-case probe |
+| #1905 | `System/detail/ComparisonPolicy.hpp` + `Array.hpp` (10 entries) |
+| #1906 | `MemoryExtensions.hpp` (5 entries; its file-local equality rule now forwards to the shared policy) |
+| #1908 | `Tuple.hpp` + `ValueTuple.hpp` (41 bodies, incl. the hash invariant) |
+| #1907 | `Nullable.hpp` (4 entries; `operator==` deliberately unchanged) |
+| #1909 | `Linq.hpp` (6 entries, incl. the asymmetric `Min`/`Max` NaN rules) |
+| #1910 | reconciliation and closure |
+| #1911 | CCF-003 and CCF-006 closure notes (record defect found during §0's review) |
+| #1912 | the `Collections` population, opened and **not** begun |
+
+**Baselines after the batch:** 14,815 tests across 37 executables (was 14,745);
+post-audit tally **59 remediated / 304 confirmed / 364**, numbering frozen at
+**364**; module graph **41 / 91** unchanged; canonical Doxygen **1,941** of the
+1,942 ceiling, unchanged; negative fixtures **9 / 66**; version seams **2 / 18**;
+`nm --extern-only` on `libsharp_runtime_core.a` **identical** before and after
+(6,168 symbols); `sizeof`/`alignof` identical for all eleven measured
+instantiations; `scripts/check_selective_components.sh` **run and passed**,
+because the family adds a public header; `scripts/local_ci_check.sh build`
+passed; `git diff --check` clean. Measured cost on 1,000,000 elements: 1.011×
+`float` without NaN, 0.994× with 1% NaN, 1.009× `int`.

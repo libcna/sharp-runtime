@@ -171,6 +171,23 @@ generic-math zero rule. See SR-AUD-019 through SR-AUD-024, and:
 - `modules/core/include/System/MathF.hpp.audit.md`.
 - `modules/core/tests/System/MathFTests.cpp.audit.md`.
 
+**REMEDIATED — tickets #1843/#1844/#1845/#1846/#1847 (2026-07-29/30). CCF-003 is
+CLOSED.** All six members are `remediated`: SR-AUD-019 (`Int128` `MinValue`
+negation UB), SR-AUD-020 (`UInt128` shift counts masked with `& 127`, matching
+`UInt128.operator <<`'s `shiftAmount &= 0x7F`), SR-AUD-021 (unknown format
+specifier now raises `FormatException` in all ten integer wrappers, and see
+CCF-006 below for the `Single`/`Double` slice), SR-AUD-022 (inverted `Clamp`
+bounds rejected with `ArgumentException` across eleven overloads, replacing a
+`[alg.clamp]` precondition violation), SR-AUD-023 (`B`/`b` binary formatting
+added — for **seven** types, not the six the record names, because `Int128` was
+missing it too) and SR-AUD-024 (`SByte`/`Int16` `IsPositive(0)`). The family
+plan is `docs/NumericWrapperBoundaryPlan.md`; per-finding evidence is in
+`audit/AUDIT_FINDINGS_INDEX.md`. **This closure note was added by ticket #1911
+on 2026-07-31**, which found that this section had carried no closure paragraph
+since the last member landed — a record defect, not a code defect, and one that
+would have made a future session re-select an already-finished family. No
+finding status changed and no `SR-AUD-*` identifier was issued.
+
 ## CCF-004 — native-width and fixed-width boundaries must not rely on signed C++ overflow
 
 `Int128` decimal parsing/formatting, `TimeSpan::Subtract`, `IntPtr::Add`/`Subtract`,
@@ -344,6 +361,21 @@ policy rather than type-specific behavior.  See SR-AUD-021 and:
 - `modules/core/include/System/Single.hpp.audit.md`.
 - `modules/core/include/System/Double.hpp.audit.md`.
 
+**REMEDIATED — tickets #1847 (integer slice) and #1849 (float slice), 2026-07-29/30.
+CCF-006 is CLOSED.** Its single member, SR-AUD-021, is `remediated` on both
+slices. The ten integral wrappers now raise `System::FormatException` for an
+unrecognised format specifier instead of silently treating it as a
+general/decimal request, and `Single::ToString`/`Double::ToString` no longer let
+`std::invalid_argument`/`std::out_of_range` escape from the precision
+`std::stoi` — they raise `FormatException("Format specifier was invalid.")` and
+reject an unrecognised specifier loudly, so the two wrapper families now share
+one validation policy, which is exactly what this cause asked for. `F`, `E`,
+`G`, `R` and `N` remain valid. The residual `N` group-separator and `E`
+exponent-width **fidelity** gaps are CCF-007's subject, not this cause's, and
+stay open there. **This closure note was added by ticket #1911 on 2026-07-31**,
+on the same terms as CCF-003's above: a record defect only, no status change and
+no `SR-AUD-*` identifier.
+
 ## CCF-007 — the binary float wrappers delegate public edge semantics to unsuitable native primitives
 
 `Single` and `Double` independently use the same direct native recipes for
@@ -496,6 +528,133 @@ only one surface leaves the others divergent. See SR-AUD-046 and:
 - `modules/core/tests/System/TupleNewTests.cpp.audit.md`.
 - `modules/core/include/System/Linq.hpp.audit.md`.
 - `modules/core/tests/System/LinqTests.cpp.audit.md`.
+
+**REMEDIATED AND COMPLETE — tickets #1904 through #1910, 2026-07-31. CCF-010 is
+CLOSED.** Its single member, **SR-AUD-046, is `remediated`**, taking the
+post-audit tally to **59 remediated / 304 confirmed / 364**; numbering stays
+frozen at **364**, no new `SR-AUD-*` was issued and no `CCF-*` cause was added.
+The original evidence above and in the six per-file reports is retained
+unchanged. Planned in `docs/ComparisonContractPlan.md` (19 sections plus §0's
+candidate-family review and §18a's newly discovered population), written before
+any production file was changed.
+
+**This cause named the right repair and this batch did exactly it.** The
+demand — "centralize or consistently reuse the local comparison policy;
+changing only one surface leaves the others divergent" — is met by one new
+private header, `modules/core/include/System/detail/ComparisonPolicy.hpp`,
+stating the port's counterpart of `Comparer<T>.Default` and
+`EqualityComparer<T>.Default` once: `compareValues`, `equalValues`, `hashValue`,
+`DefaultLess`/`DefaultGreater`, `moveNaNsToFront` and `defaultSort`. All **66**
+comparison sites across the six headers route through it, and each entry point
+is `if constexpr`-gated so every non-floating instantiation generates exactly
+the code that was there before.
+
+**The record understates its own severity, and that is the substantive finding
+of the family.** This section says the operators "make NaN unequal to itself and
+unordered against every finite number", i.e. a wrong *answer*. Measured against
+the shipped headers before anything changed
+(`build-probe/1904_ccf010_probe.cpp`, 36 cases, one forked process each, every
+operand produced at run time through `volatile`), `Array::Sort` and
+`MemoryExtensions::Sort` also hand `std::sort` a predicate that is **not a
+strict weak ordering** — NaN is "equivalent" to every finite value while finite
+values order among themselves, so equivalence is not transitive — and
+`[alg.sort]` makes that a precondition violation rather than a wrong answer. The
+consequence is that the **non-NaN** elements come out **unsorted**: **64 of 196**
+size/density/placement shapes corrupted, worst case **3,874 inversions** in
+65,536 elements. A single NaN in 4,096 elements does *not* corrupt, which is
+exactly why the audit's three-element `{3,NaN,1}` example could not find it.
+**No new `SR-AUD-*` identifier was issued** — this was found during remediation
+of an existing finding, in the files that finding owns.
+
+**No sanitizer sees any of it.** Across all 36 cases, AddressSanitizer,
+UndefinedBehaviorSanitizer and `-D_GLIBCXX_ASSERTIONS -D_GLIBCXX_DEBUG` each
+reported **zero** diagnostics, before and after. libstdc++'s debug mode is blind
+for a checkable reason: `__glibcxx_requires_irreflexive` verifies `!comp(x, x)`,
+and `NaN < NaN` is `false`, so irreflexivity holds; nothing checks transitivity
+of equivalence. The permanent suite is therefore the **only** gate, which is why
+this family carries **ten** mutations rather than the usual two or three — and
+one of them is a deliberate **negative** control (`Sort` via a total-order
+comparator instead of the pre-pass) that must and does still pass, so the suite
+is shown to pin the contract rather than the implementation.
+
+**Both `Sort` surfaces use .NET's own repair**, not a hand-written comparator:
+`SortUtils.MoveNansToFront` followed by an ordinary sort of the remainder
+(`ArraySortHelper.cs:285-305`, whose comment gives the same reason). That makes
+the precondition violation structurally unreachable. The 196-shape sweep reads
+`corrupted=0` afterwards.
+
+**Five further premises were corrected by measurement** and are recorded in
+`docs/ComparisonContractPlan.md` §9 rather than by editing the text above:
+
+- **The `MemoryExtensions` half of this section is stale.** That file already
+  held a correct `float.Equals` rule in `Detail::MemoryExtensionsElementEquals`,
+  used by `Contains`, `IndexOf`, `LastIndexOf`, `Count`, `Replace`,
+  `SequenceEqual`, `StartsWith` and `EndsWith`. The real defect was that the
+  rule was stated in one file and shared with none; it now forwards to
+  `System::detail::equalValues`.
+- **`Linq::Min` and `Linq::Max` fail in opposite directions**, where the report
+  reads as one symmetric problem: `Min({1,2,NaN})` *lost* the NaN and returned
+  1, while `Max({NaN,1,2})` *kept* it and returned NaN. The reference is
+  deliberately asymmetric (`Min.cs:130-139` explains why), and a repair that
+  made them symmetric would have broken one. A mutation pins this.
+- **`Nullable<T>::operator==` was already correct and must not be "fixed".**
+  C#'s *lifted* `==` on `T?` is the underlying type's `operator ==`, so
+  `(double?)NaN == (double?)NaN` is `false` in .NET too. The `Nullable.hpp`
+  report's framing invited changing it alongside `Equals`; that would have been
+  a divergence. A permanent test now pins the asymmetry — `a == b` false and
+  `a.Equals(b)` true on the same pair.
+- **Hashing is part of the repair, not an extra.** Once equality is
+  NaN-reflexive, a hash that depends on NaN's payload bits breaks the
+  equal-objects-equal-hashes invariant that did not exist before. .NET folds NaN
+  and zero together in `Single.GetHashCode`; `hashValue` reproduces that, and
+  `Nullable`, `Tuple` and `ValueTuple` route their `GetHashCode` through it.
+- **Two rows were already right by accident and are now pinned**:
+  `SequenceCompareTo` of two NaNs returns 0, and `Array::BinarySearch` for a
+  finite value in a NaN-led array finds it.
+
+Source, ABI, layout, vtable and `noexcept` consequences: **none**. No signature,
+`noexcept` specification, virtual function, vtable slot, calling convention,
+data member or object layout changed anywhere in the family;
+`nm --extern-only` on `libsharp_runtime_core.a` is **identical** before and
+after (6,168 symbols) and `sizeof`/`alignof` are identical for all eleven
+measured instantiations. Every changed body is `inline` or a template, so a
+**full consumer rebuild is mandatory and silent if skipped** — the standing
+hazard recorded for #1791, #1802, #1867 and CCF-012. Measured cost on 1,000,000
+elements: 1.011× for `float` without NaN, 0.994× with 1% NaN, 1.009× for `int`.
+
+Evidence: **70 permanent add-only regressions** in
+`modules/core/tests/System/ComparisonContractTests.cpp`; whole repository
+**14,815 tests across 37 executables**, from 14,745; build clean with zero
+errors and zero warnings; module graph unchanged at **41/91**; Doxygen 1,941
+(ceiling 1,942); `scripts/check_selective_components.sh` passed, run because
+the family adds a public header. TSan is recorded **not applicable** rather than
+skipped: nothing in the family has shared mutable state, an atomic, a lock, a
+cache or a singleton, and every function is pure over its arguments.
+
+**A larger population with the identical cause exists in the `Collections`
+module and was deliberately not absorbed.** Measured while planning: **five**
+default-ordering sites (`List<T>::Sort`, `List<T>::BinarySearch`,
+`ImmutableList<T>::Sort` ×2, `ImmutableArray<T>::Sort`), of which the four
+`std::sort` calls carry this cause's precondition violation exactly; **56**
+default-equality sites across 20 headers; and a **third shape with no CCF-010
+counterpart** — `SortedSet<T>` (`std::set<T>`), `SortedDictionary<K,V>` and
+`SortedList<K,V>` (`std::map`) use `std::less` on a possibly-NaN element or key,
+violating `[associative.reqmts]`'s ordering requirement for the container's
+whole lifetime rather than for one algorithm call. This is a **newly discovered
+population found during remediation**, not a CCF-010 finding: **no `SR-AUD-*`
+identifier was issued**, and it is ticket **#1912** with the full inventory in
+`docs/ComparisonContractPlan.md` §18a. Nothing there is claimed to be wrong
+until #1912 reproduces each site itself.
+
+Deliberately **not** members and not closed by this work: the caller-supplied
+comparer overloads of `Array::Sort`, `Array::BinarySearch` and
+`MemoryExtensions::Sort`, which pass the predicate straight through exactly as
+.NET's `IntrospectiveSort` does with a non-default `IComparer<T>`;
+`SequenceCompareTo`'s length-tail magnitude; `Linq::Distinct`'s O(n²) loop and
+`Linq::OrderBy`'s per-comparison key selection; SR-AUD-044, SR-AUD-051,
+SR-AUD-053, SR-AUD-063 and SR-AUD-135 in the same reports; and **CCF-015**
+(SR-AUD-048), which shares `MemoryExtensions.hpp` but has an entirely different
+cause.
 
 ## CCF-011 — empty `std::function` values cross public boundaries without an explicit policy
 
