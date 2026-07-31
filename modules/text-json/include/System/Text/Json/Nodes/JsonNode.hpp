@@ -89,6 +89,22 @@ namespace System::Text::Json::Nodes {
         /**
          * @brief Parses JSON text into a JsonNode tree.
          * @return The root node, or nullptr if @p json is the literal "null".
+         * @throws System::Text::Json::JsonException if @p json is not a single valid JSON value.
+         *
+         * @note The tree is built **iteratively** (ticket #1897): nesting depth costs heap, not
+         * call stack, so text this method accepts is also built and released successfully however
+         * deeply it nests. It used to recurse once per level and crash the process with a stack
+         * overflow at roughly 17,000 levels on an 8&nbsp;MiB stack — reachable from untrusted
+         * text, since the caller need only pass a string it did not write.
+         *
+         * @note **Deliberate, documented deviation from .NET.** `JsonNode.Parse(string)` in .NET
+         * takes a `JsonDocumentOptions` whose `MaxDepth` defaults to 64 and therefore *rejects*
+         * more deeply nested text with a `JsonException`. This method applies no depth bound and
+         * accepts it, which is also why it disagrees with its own sibling
+         * `System::Text::Json::JsonDocument::Parse`, which does apply
+         * `JsonDocumentOptions::DefaultMaxDepth`. Adopting that bound here would change which
+         * input is accepted, so it is a separate decision recorded in
+         * `docs/OwnedTreeLifetimeContractPlan.md` §44 and not taken by #1897.
          */
         [[nodiscard]] static std::shared_ptr<JsonNode> Parse(const std::string& json, JsonNodeOptions options = {});
     };

@@ -6092,6 +6092,26 @@ remediated.** The user decided §31 items 3–6: item 3 (#1888) and item 4 (#188
 compatible iterative-teardown half **approved** and delivered as #1895, its
 quadratic half declined as #1896 and its parse half left as #1897.
 
+**CCF-019 parse half (#1897, 2026-07-31) — the last stack overflow closed;
+neither finding remediated.** The user approved **option B only**:
+`JsonNode::Parse` now builds its tree with an explicit heap worklist instead of
+recursing. Probe **X28c** goes from ASan `stack-overflow` to `clean`, so
+**CCF-019 has no stack-overflow case left** and its only case reachable from
+**untrusted input** is closed. Measured: SIGSEGV between 16,000 and 18,000
+nested levels before, correct construction to 200,000 after; the round-trip,
+null-semantics, malformed-input and sibling-ordering control output is
+**byte-for-byte identical** before and after; 13 strong symbols before and 13
+after, identical, with an identical undefined set; layout, vtable and exception
+specification untouched; throughput neutral. Option **A** (apply the existing
+`JsonDocumentOptions::DefaultMaxDepth = 64`, as .NET and this module's own
+`JsonDocument::Parse` do) was **not approved and is not implemented**, so
+`JsonNode::Parse` still accepts text .NET rejects — documented in its
+doc-comment and pinned by two tests. **SR-AUD-327 and SR-AUD-333 both stay
+`confirmed (design-complete)`** because J11, X15/X17 and J19d/X27d remain; the
+post-audit tally is unchanged and numbering stays frozen at **364**. Evidence:
+`docs/OwnedTreeLifetimeContractPlan.md` §44. CNA and mobile-eggbert were not
+inspected; #1773 stays `blocked`.
+
 **#1895** makes container teardown iterative: probe **J19c** and **X27c** go from
 ASan `stack-overflow` to `clean`, and exactly 2 of 58 probe cases changed. All
 six stated approval conditions are met and measured — no signature, vtable,

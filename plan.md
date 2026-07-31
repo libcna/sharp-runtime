@@ -1,8 +1,15 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-31 — 41 physical components, 91 direct production
-dependency edges, a clean native build, 14,998 passing tests across 37
+dependency edges, a clean native build, 15,024 passing tests across 37
 executables, and a locally green ten-job selective matrix. The 2026-07-31
+**Group E subset batch** landed the approved **#1897 option B**: `JsonNode::Parse`
+builds its tree iteratively, so the one CCF-019 case reachable from **untrusted
+input** — an ASan stack overflow between 16,000 and 18,000 nested levels — is
+closed at zero compatibility cost, and CCF-019 now has **no stack-overflow case
+left**. It deliberately did **not** take option A (a depth bound), so
+`JsonNode::Parse` still accepts text .NET rejects; that deviation is documented
+and pinned. Before it, the 2026-07-31
 **approved Groups A–D batch** (#1854, #1862, #1858, #1865, #1879, #1884, #1863)
 delivered every ticket the decision packet
 `docs/RemainingApprovalDecisions.md` put up for approval in those four groups,
@@ -56,6 +63,45 @@ validated repair tickets. Consumer-driven API breadth remains legitimate later
 work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
 
+
+## 2026-07-31 — Group E subset, #1897 option B (iterative `JsonNode::Parse`)
+
+Branch `feature/remediation-batch-group-e-subset-decisions`. The batch
+instruction approved **exactly one implementation**, `#1897` **option B** as
+worded in `docs/RemainingApprovalDecisions.md` §E.1, and nothing else in Group E.
+
+**What was wrong.** `fromNlohmann` recursed once per nesting level while turning
+the parsed document into `JsonNode` objects, so `JsonNode::Parse` of deeply
+nested text killed the process with a stack overflow — measured between **16,000
+(survived)** and **18,000 (SIGSEGV)** levels on an 8 MiB stack, with every ASan
+frame in the port's own recursion rather than in nlohmann's parser. It is the
+**only CCF-019 case reachable from untrusted input**: the caller merely has to
+pass `Parse` a string it did not write.
+
+**What landed.** An explicit heap worklist of suspended containers, the same
+shape #1895 used for teardown. Arrays, objects and alternating containers now
+build correctly to **200,000**, and the change is **fully compatible** — the 19
+round-trip shapes, the null semantics, the 13 malformed inputs and the
+1,000-sibling ordering are **byte-for-byte identical** before and after; strong
+symbols are 13 before and 13 after, identical, with an identical undefined set;
+layout, vtable and exception specification are untouched; parse throughput is
+neutral (median 0.932×, best-of-7 1.012×, inside a much wider noise band).
+Design record: `docs/OwnedTreeLifetimeContractPlan.md` §44.
+
+**What it deliberately did not do.** Option A — applying the existing
+`JsonDocumentOptions::DefaultMaxDepth = 64`, as .NET's `JsonNode.Parse(string)`
+and this module's own `JsonDocument::Parse` both do — **was not approved and is
+not implemented**. `JsonNode::Parse` therefore still accepts text .NET rejects.
+That deviation is now stated in the `Parse` doc-comment and pinned by two tests,
+so option A cannot land, or be forgotten, silently.
+
+**Baselines after the ticket:** 15,024 tests across 37 executables (was 14,998,
+**+26**); 244/244 `Text_Json` clean under ASan+UBSan+LSan against a binary newer
+than the changed body; post-audit tally **unchanged at 67 remediated / 297 open
+of 364**, numbering frozen at **364** — SR-AUD-327 keeps its
+`confirmed (design-complete)` qualifier; module graph **41 / 91** unchanged;
+version seams **2 / 18** and negative fixtures **10 / 74** unchanged, because
+option B outlaws no spelling and so does **not** unblock #1894.
 
 ## 2026-07-31 — approved Groups A–D of the decision packet (#1854, #1862, #1858, #1865, #1879, #1884, #1863)
 

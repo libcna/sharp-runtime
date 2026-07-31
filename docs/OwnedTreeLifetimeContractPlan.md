@@ -3173,3 +3173,185 @@ teardown changed neither the classification nor the answer lines of any of them:
 post-audit tally is **unchanged at 57 remediated / 306 confirmed / 364**.
 Numbering stays frozen at **364**; no new `SR-AUD-*` identifier was issued by any
 ticket in this family.
+
+---
+
+## 44. Implementation record — #1897, iterative `JsonNode::Parse` (2026-07-31)
+
+*Everything in this section is **measured**. Nothing in §§1–43 was rewritten;
+§43's status rows for item 6 are superseded by §44.7 rather than edited.*
+
+### 44.0 What authorised it
+
+The user's decision of 2026-07-31 approved **ticket #1897, option B**, and
+nothing else in Group E. The operative wording is
+`docs/RemainingApprovalDecisions.md` §E.1:
+
+> Approve making `System::Text::Json::Nodes::JsonNode::Parse` build its tree
+> iteratively with an explicit worklist instead of recursively, removing the
+> stack overflow on deeply nested untrusted text with no change to the accepted
+> input, no signature change and no layout change. Ticket #1897.
+
+The parenthetical option that §E.1 offered alongside it — *"and then apply the
+existing `DefaultMaxDepth = 64` to it"* — is **option A and was not approved**.
+It is not implemented, and §44.6 pins the resulting deviation with a test so
+that a future option-A ticket has to invert it deliberately.
+
+### 44.1 The defect, reproduced
+
+`fromNlohmann` called itself once per nesting level while turning the parsed
+`nlohmann::ordered_json` document into `JsonNode` objects. Measured on an
+8 MiB stack (`ulimit -s` = 8192), `build-probe/1897_prefix_threshold.log`:
+
+| Depth | Arrays | Objects | Alternating |
+|---|---|---|---|
+| 12,000 | ok | ok | — |
+| 14,000 | ok | ok | — |
+| 15,000 | ok | — | — |
+| 16,000 | **ok** | — | — |
+| 18,000 | **SIGSEGV** | — | — |
+| 20,000 | SIGSEGV | SIGSEGV | SIGSEGV |
+| 50,000 / 100,000 | SIGSEGV | — | — |
+
+The ASan frames (`build-probe/1897_prefix_asan.log`, sanitizer activation proved
+in `build-probe/1897_sanitizer_selftest.log`) are the port's own recursion, not
+nlohmann's parser and not a destruction path:
+
+```
+#3..#10  operator new -> make_shared<JsonArray>
+#11 fromNlohmann   modules/text-json/src/System/Text/Json/Nodes/JsonNode.cpp:194
+#12 fromNlohmann   …/JsonNode.cpp:195     <- repeated to the end of the report
+```
+
+**This is the only case in CCF-019 reachable from untrusted input.** The caller
+has to do nothing unusual: `JsonNode::Parse(s)` on a string it did not write is
+the whole reproduction. The exact input is
+`std::string(20000, '[') + "1" + std::string(20000, ']')`.
+
+Two things nlohmann does **not** contribute, both re-measured here rather than
+assumed: its parser is iterative (`sax_parse_internal` drives a `states`
+vector), and its `basic_json::destroy` is iterative too
+(`vendor/nlohmann/json.hpp:18636`). Post-fix parsing succeeds at 200,000, which
+could not happen if either were recursive.
+
+### 44.2 The repair
+
+One body, `modules/text-json/src/System/Text/Json/Nodes/JsonNode.cpp`. A
+`BuildFrame` records one **suspended** container: where the source value had got
+to, the port node being filled from it, and the key that node will be attached
+under when it completes. Frames live in a heap `std::vector`, so nesting depth
+costs heap and the C++ call stack stays at one frame.
+
+Three properties are load-bearing and each is pinned by a test rather than
+argued:
+
+1. **Order.** A frame is not advanced past a container child until that child's
+   own frame has drained, so children are attached front to back and a container
+   is created before its children — identical to the recursive version. A
+   worklist drained from the wrong end would silently reverse siblings, which is
+   why `WideContainerKeepsDocumentOrder` uses a thousand elements.
+2. **Attach direction stays bottom-up.** A completed subtree is attached to a
+   parent that is not yet anyone's child, so `AssignParent`'s cycle guard walks
+   exactly one step. Building top-down instead would have imported #1896's
+   quadratic construction cost into the parse path; it does not.
+3. **Exception safety is by RAII.** If an allocation throws mid-build, unwinding
+   destroys `stack`, and each frame's partially built subtree is released
+   through #1895's iterative teardown. Nothing is leaked, nothing is released
+   twice — a node is owned by one frame or by one parent, never both.
+
+### 44.3 Measured evidence
+
+| Evidence | Result |
+|---|---|
+| `1897_postfix_sweep.log` | 64 / 100 / 1,000 / 5,000 / 10,000 / 20,000 / 50,000 / **100,000** all exit 0 |
+| `1897_postfix_deep.log` | arrays, objects and alternating containers built to **200,000**, every parent link consistent |
+| `1897_prefix_controls.log` vs `1897_postfix_controls.log` | **byte-for-byte identical** — 19 round-trip shapes, null semantics, 13 malformed inputs, 1,000-sibling ordering |
+| `1897_postfix_deep_malformed.log` | 5 deep malformed shapes at 20,000 → `JsonException`, never a crash |
+| `1897_postfix_asan.log` (ASan+LSan, `detect_leaks=1`) | clean on all deep and control cases |
+| `1897_postfix_ubsan.log` (UBSan, `-fno-sanitize-recover=all`) | clean on all deep and control cases |
+| `1897_asan_suite.log` | **244/244** `SharpRuntimeTests_Text_Json` clean under ASan+UBSan+LSan, binary newer than the changed body (`1897_asan_suite_freshness.log`) |
+| `1897_asan_cost.log` | ASan cost of the 100,000 case: 0.18 s, 76 MB |
+
+Sanitizers are supporting evidence only. The correctness gate is the permanent
+matrix in §44.5 — ASan cannot see a missing sibling or a reversed order, and it
+could not have seen this defect either until it became a stack overflow.
+
+### 44.4 Source, ABI, layout, symbols, performance
+
+| Property | Result |
+|---|---|
+| Public signature | unchanged — `Parse` still `static shared_ptr<JsonNode>(const std::string&, JsonNodeOptions)` |
+| Object layout | unchanged — `JsonNode` 24/8, `JsonArray` 48/8, `JsonObject` 48/8, `JsonValue` 40/8, `JsonNodeOptions` 1/1 (`1897_postfix_layout.log`) |
+| Vtable | unchanged — no virtual added, removed or reordered |
+| Exception specification | unchanged — `Parse` was not and is not `noexcept` |
+| Strong (`T`) symbols in `JsonNode.o` | **13 before, 13 after, identical** (`1897_prefix_strong.syms` vs `1897_postfix_strong.syms`) |
+| Undefined symbols (imports) | **identical set** |
+| Other symbol movement | internal-linkage (`t`) only: the old anonymous-namespace `fromNlohmann` body is replaced by `openContainer`/`appendToFrame`/`~BuildFrame`, plus one weak (`W`) `JsonValue::FromNlohmann` that the recursive version had fully inlined. None is nameable by a consumer |
+| Accepted input | **unchanged** — every string that parsed still parses to the identical tree; every string that threw still throws `JsonException` |
+| Emitted text | unchanged — `ToJsonString` round-trips byte for byte |
+| Parse throughput | **neutral.** 20,000-object 3.6 MB document, 7 paired alternating rounds: median 93.19 → 86.87 ms (0.932×), best-of-7 82.76 → 83.78 ms (1.012×). The 82–140 ms spread is far wider than the difference, so the honest reading is "no measurable change" (`1897_perf_paired.log`, `1897_perf_summary.log`) |
+| Memory | one heap frame (~80 bytes) per *open* container, i.e. per level of depth, not per node. Peak is depth-proportional and released as frames close |
+| Rollback | revert the commit; no data, no serialized text and no downstream source is affected |
+
+**Not changed, deliberately.** `JsonObject::Add`'s duplicate-key guard is a
+linear scan, so building an *n*-property object is O(n²). That is pre-existing,
+identical in both versions, and unreachable from `Parse` anyway — nlohmann's
+`ordered_map` collapses a repeated key before the port sees it, which
+`DuplicateKeysInSourceTextCollapseWithoutThrowing` pins.
+
+### 44.5 Permanent test matrix
+
+`modules/text-json/tests/System/Text/Json/Nodes/JsonNodeParseDepthTests.cpp`,
+**26 tests**, all passing in `build` and in `build-asan`:
+
+| Group | Tests | What it holds |
+|---|---|---|
+| The crash itself | 3 | arrays, objects, alternating containers at 20,000 — depth and every parent link verified iteratively |
+| Five times past it | 2 | 100,000 — a toolchain that merely enlarged the stack would not pass |
+| Build **and** release | 1 | parse-then-reset, so neither half reintroduces the other's crash |
+| Deep content | 3 | innermost value, innermost JSON `null` slot, 4,096 preserved property names |
+| Deep invalid input | 3 | 6 malformed shapes at 20,000 → `JsonException`; caller's handle untouched on refusal; 32 repeated refusals stay consistent |
+| Minimum / empty / boundary | 3 | `null` `0` `true` `false` `""` `[]` `{}`, one-level and nested-empty containers, empty string |
+| Unchanged behaviour | 6 | 19 round-trip shapes byte-identical, 1,000-sibling order, object property order, null slots in both container kinds, 12 shallow malformed inputs, parent links through every public container path |
+| Node identity | 2 | parsed nodes stay detachable/re-attachable; every node of a parsed tree is actually destroyed (`weak_ptr`) |
+| Source quirks | 1 | duplicate source keys collapse without throwing |
+| The open deviation | 2 | depth 65 accepted by `JsonNode::Parse` and rejected by `JsonDocument::Parse`; depth 64 accepted by both |
+
+Repository gate after this ticket: **15,024 tests across 37 executables**, up
+from 14,998.
+
+### 44.6 The deviation option B deliberately leaves open
+
+.NET's `JsonNode.Parse(string)` takes a `JsonDocumentOptions` whose `MaxDepth`
+defaults to 64 and calls `JsonElement.Parse(json, documentOptions)`
+(`/rv/tmp/runtime/src/libraries/System.Text.Json/src/System/Text/Json/Nodes/JsonNode.Parse.cs`),
+so **.NET rejects** text nested deeper than 64 with a `JsonException`. So does
+this module's own `JsonDocument::Parse`, via
+`JsonDocumentOptions::DefaultMaxDepth`. `JsonNode::Parse` now **accepts** it.
+
+That disagreement is not new — it predates #1897 — but before this ticket it
+resolved itself as a crash, and it now resolves itself as acceptance. Two tests,
+`ParseAcceptsDepthThatJsonDocumentParseRejects` and
+`BothParseEntryPointsAgreeInsideTheDefaultDepthBound`, state it explicitly, and
+the `Parse` doc-comment records it as a deliberate documented deviation. Option
+A remains available and still needs its own approval, because it changes which
+input is accepted.
+
+### 44.7 Where CCF-019 stands after §31 item 6's parse half
+
+| §43.2 row | After #1895 | **After #1897** |
+|---|---|---|
+| ASan `stack-overflow`s | 1 — X28c | **0** |
+| ASan `heap-use-after-free` | 3 — J11, X15, X17 | 3 — unchanged |
+| Timeouts | 2 — J19d, X27d | 2 — unchanged |
+| Leaks | 0 | 0 |
+
+**X28c is closed**, and with it the only CCF-019 case reachable from untrusted
+input. Item 6's remaining half is J19d/X27d, owned by #1896 (declined, layout
+change). #1894 is **still blocked**: option B outlaws no spelling, so there is
+still nothing for a negative consumer fixture to reject — seam and fixture
+totals stay at 2/18 and 10/74.
+
+**SR-AUD-327 and SR-AUD-333 both remain `confirmed (design-complete)`**; the
+post-audit tally is unchanged, and no new `SR-AUD-*` identifier was issued.
+Numbering stays frozen at **364**.

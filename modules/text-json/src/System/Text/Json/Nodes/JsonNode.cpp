@@ -2,6 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Text/Json/Nodes/JsonNode.hpp"
+#include <string>
+#include <utility>
+#include <vector>
 #include "System/InvalidOperationException.hpp"
 #include "System/Text/Json/JsonException.hpp"
 #include "System/Text/Json/Nodes/JsonArray.hpp"
@@ -183,19 +186,111 @@ namespace System::Text::Json::Nodes {
     }
 
     namespace {
+
+        /**
+         * One suspended container while a tree is being built **iteratively** (ticket #1897).
+         *
+         * `fromNlohmann` used to call itself once per nesting level, so `JsonNode::Parse` of
+         * 20,000 nested arrays crashed with a stack overflow before it had built anything —
+         * the measured ASan frames were the port's own `fromNlohmann`, not nlohmann's parser
+         * (`build-probe/1897_prefix_asan.log`). Unlike the four other deep shapes in this
+         * family, that one is reachable from **untrusted text**: the caller only has to hand
+         * `Parse` a string it did not write.
+         *
+         * A frame records where the source container had got to, the port node being filled
+         * from it, and the key that node will be attached under once it is complete. Frames
+         * live in a heap `std::vector`, so the only thing that grows with nesting depth is the
+         * heap — the C++ call stack stays at one frame however deep the text is.
+         */
+        struct BuildFrame {
+            nlohmann::ordered_json::const_iterator next; ///< the next source child to consume
+            nlohmann::ordered_json::const_iterator last; ///< one past the last source child
+            std::shared_ptr<JsonNode> node;              ///< the JsonObject/JsonArray being filled
+            std::string key;                             ///< key to attach `node` under; empty unless the parent is an object
+            bool isObject;                               ///< whether `node` is a JsonObject rather than a JsonArray
+        };
+
+        /**
+         * Appends `child` to the container `frame` is filling, in document order.
+         *
+         * The static_cast is safe by construction: `isObject` is recorded from the same source
+         * value that decided which node type was created, and nothing between then and here can
+         * change either.
+         */
+        void appendToFrame(BuildFrame& frame, const std::string& key, std::shared_ptr<JsonNode> child) {
+            if (frame.isObject)
+                static_cast<JsonObject&>(*frame.node).Add(key, std::move(child));
+            else
+                static_cast<JsonArray&>(*frame.node).Add(std::move(child));
+        }
+
+        /** Creates the empty port container matching the source container `j`, and opens a frame over it. */
+        BuildFrame openContainer(const nlohmann::ordered_json& j, JsonNodeOptions options, std::string key) {
+            const bool isObject = j.is_object();
+            std::shared_ptr<JsonNode> node =
+                isObject ? std::static_pointer_cast<JsonNode>(std::make_shared<JsonObject>(options))
+                         : std::static_pointer_cast<JsonNode>(std::make_shared<JsonArray>(options));
+            return BuildFrame{j.begin(), j.end(), std::move(node), std::move(key), isObject};
+        }
+
+        /**
+         * Builds the port's node tree for one parsed nlohmann value, without recursion.
+         *
+         * The result is the tree the recursive version built, node for node: a container is
+         * created before its children (pre-order allocation, as before), each child is completed
+         * before it is attached (as before), and children are attached front to back (as before),
+         * so document order, `ToJsonString` output and every parent link are unchanged.
+         *
+         * Attaching bottom-up also keeps `JsonNode::AssignParent`'s cycle guard **O(1) per
+         * attach**, exactly as the recursive version did: a container is attached to its own
+         * parent only after that parent has stopped being anyone's child, so the guard's ancestor
+         * walk always terminates after one step. Building top-down instead would have made this
+         * quadratic — that is the separate, still-open defect #1896 owns, and this repair must
+         * not import it.
+         *
+         * Exception safety is unchanged too. If an allocation throws part-way, `stack` is
+         * destroyed by unwinding, which releases every partially built subtree through the
+         * iterative teardown ticket #1895 installed. Nothing is leaked and nothing is
+         * double-released, because a node is only ever owned by one frame or by one parent.
+         */
         std::shared_ptr<JsonNode> fromNlohmann(const nlohmann::ordered_json& j, JsonNodeOptions options) {
             if (j.is_null()) return nullptr;
-            if (j.is_object()) {
-                auto obj = std::make_shared<JsonObject>(options);
-                for (const auto& [key, val] : j.items()) obj->Add(key, fromNlohmann(val, options));
-                return obj;
+            if (!j.is_object() && !j.is_array()) return JsonValue::FromNlohmann(j, options);
+
+            std::vector<BuildFrame> stack;
+            stack.push_back(openContainer(j, options, std::string()));
+
+            std::shared_ptr<JsonNode> root;
+            while (!stack.empty()) {
+                BuildFrame& frame = stack.back();
+
+                if (frame.next == frame.last) {
+                    // This container is complete: hand it to its parent, or return it as the root.
+                    std::shared_ptr<JsonNode> finished = std::move(frame.node);
+                    const std::string finishedKey = std::move(frame.key);
+                    stack.pop_back();
+                    if (stack.empty())
+                        root = std::move(finished);
+                    else
+                        appendToFrame(stack.back(), finishedKey, std::move(finished));
+                    continue;
+                }
+
+                const nlohmann::ordered_json& child = *frame.next;
+                const std::string childKey = frame.isObject ? frame.next.key() : std::string();
+                ++frame.next;
+
+                if (child.is_object() || child.is_array()) {
+                    // `frame` is invalidated by this push_back if the vector reallocates, so
+                    // everything it is needed for has already happened above.
+                    stack.push_back(openContainer(child, options, childKey));
+                } else if (child.is_null()) {
+                    appendToFrame(frame, childKey, nullptr);
+                } else {
+                    appendToFrame(frame, childKey, JsonValue::FromNlohmann(child, options));
+                }
             }
-            if (j.is_array()) {
-                auto arr = std::make_shared<JsonArray>(options);
-                for (const auto& item : j) arr->Add(fromNlohmann(item, options));
-                return arr;
-            }
-            return JsonValue::FromNlohmann(j, options);
+            return root;
         }
     } // namespace
 

@@ -1658,6 +1658,37 @@ already exists as `JsonDocumentOptions::DefaultMaxDepth = 64` (§40.2); and item
 post-audit tally is **unchanged at 57 remediated / 306 confirmed / 364**. **CNA
 and mobile-eggbert were not inspected**, and #1773 stays `blocked`.
 
+**Update after ticket #1897 (2026-07-31): the last CCF-019 stack overflow is
+closed, and it was the only case reachable from untrusted input.** Everything
+above is retained unchanged; **no new `SR-AUD-*` identifier was issued** and
+numbering stays frozen at **364**.
+
+The user approved **#1897 option B only** — build the tree with an explicit
+worklist instead of recursing. `JsonNode::Parse` used to die between 16,000 and
+18,000 nested levels on an 8 MiB stack, with every ASan frame in the port's own
+`fromNlohmann`; it now builds arrays, objects and alternating containers to
+200,000, and every accepted input, emitted text, public signature, strong
+symbol, object layout, vtable and exception specification is unchanged (measured:
+`docs/OwnedTreeLifetimeContractPlan.md` §44).
+
+| | after the teardown half | **after #1897** |
+|---|---|---|
+| ASan `heap-use-after-free` cases | 3 - J11, X15, X17 | **3** - unchanged |
+| ASan `stack-overflow`s | 1 - X28c only | **0** |
+| Timeouts | 2 - J19d, X27d | **2** - unchanged |
+| Silent data-loss paths | 0 | **0** |
+
+**Option A was not approved and is not implemented.** `JsonNode::Parse` applies
+no depth bound, so it still accepts text that .NET's `JsonNode.Parse(string)`
+and this module's own `JsonDocument::Parse` reject beyond
+`JsonDocumentOptions::DefaultMaxDepth = 64`. That deviation is documented in the
+`Parse` doc-comment and pinned by two permanent tests rather than left implicit.
+
+**SR-AUD-327 and SR-AUD-333 both still stay `confirmed (design-complete)`**,
+because J11 (#1889, declined), X15/X17 (#1899, one open question) and J19d/X27d
+(#1896, declined) remain. The post-audit tally is **unchanged**. **CNA and
+mobile-eggbert were not inspected**, and #1773 stays `blocked`.
+
 ## CCF-020 — raw polymorphic output parameters erase the validation information public contracts require
 
 The legacy non-generic ICollection interface accepts `void*` plus a starting
