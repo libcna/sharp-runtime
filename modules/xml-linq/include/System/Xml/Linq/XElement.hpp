@@ -107,9 +107,30 @@ namespace System::Xml::Linq {
             return nullptr;
         }
 
-        /** @return All attributes of this element, in document order. */
+        /**
+         * @return All attributes of this element, in document order.
+         *
+         * @warning **Borrowed view.** The reference names this element's live attribute store.
+         * - **Precondition:** this element outlives every use of the reference.
+         * - **Invalidation:** by this element's destruction, and by nothing else — in particular
+         *   **not** by `Add`/`RemoveAttribute` reallocating the vector, because the reference
+         *   names the vector *object*, which lives inside the element.
+         * - **Owning alternative:** `Attributes()`, below, returns the same content by value; its
+         *   `shared_ptr`s keep the attributes alive after this element is destroyed.
+         *
+         * This is the ordinary C++ reference-lifetime contract that `std::vector::front()` and
+         * `std::string::c_str()` also have; it is stated here because the borrow is easy to keep
+         * (`docs/OwnedTreeLifetimeContractPlan.md` §42.2).
+         */
         [[nodiscard]] const std::vector<std::shared_ptr<XAttribute>>& getAttributesProperty() const { return attributes_; }
-        /** @return All attributes of this element, in document order (.NET-style method name; same content as getAttributesProperty()). */
+        /**
+         * @return All attributes of this element, in document order (.NET-style method name; same
+         * content as getAttributesProperty()).
+         *
+         * Unlike `getAttributesProperty()` this returns **owning** handles by value, so the result
+         * stays valid after this element is destroyed — the attributes are then detached, exactly
+         * as `RemoveAttributes()` leaves them. Prefer it whenever the result outlives the call.
+         */
         [[nodiscard]] std::vector<std::shared_ptr<XAttribute>> Attributes() const { return attributes_; }
 
         /** @return The first attribute of this element, or nullptr. */

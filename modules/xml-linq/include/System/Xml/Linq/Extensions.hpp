@@ -147,9 +147,27 @@ namespace System::Xml::Linq::Extensions {
 
     /**
      * @return The ancestor elements (parent, grandparent, ... up to the root) of every node in
-     * @p source. Does not include the nodes themselves. Returned as raw XElement* (non-owning),
-     * matching XObject::getParentProperty()'s existing raw-pointer convention — the tree already
-     * owns these elements.
+     * @p source, in that order. Does not include the nodes themselves.
+     *
+     * @warning **Borrowed view.** The returned `XElement*`s are non-owning, matching
+     * `XObject::getParentProperty()`'s existing raw-pointer convention, and — unlike that
+     * accessor — the returned *vector* outlives the expression, so the borrow is easy to keep by
+     * accident. The contract is exactly:
+     * - **Precondition:** the caller keeps the tree containing @p source alive for as long as it
+     *   uses the result. Nothing in the result keeps any element alive.
+     * - **Postcondition:** each entry names an element that was an ancestor at the moment of the
+     *   call. A null or detached source node contributes no entries.
+     * - **Invalidation:** an entry is invalidated by the destruction of the element it names, and
+     *   by nothing else — in particular **not** by mutating the tree and **not** by any container
+     *   reallocation, because an entry names an object, not a slot.
+     * - **Failure:** none; this function does not throw.
+     *
+     * Real .NET returns `IEnumerable<XElement>` over a garbage-collected heap, where holding a
+     * result keeps it alive; this port has no equivalent, so the rule above is the port's stated
+     * replacement rather than a divergence that could be designed away. An owning result cannot
+     * be produced in general: the topmost ancestor has no parent to own it, and an element in
+     * automatic storage has no control block at all
+     * (`docs/OwnedTreeLifetimeContractPlan.md` §42.2).
      */
     template <std::ranges::input_range R>
     [[nodiscard]] std::vector<XElement*> Ancestors(const R& source)
@@ -165,7 +183,10 @@ namespace System::Xml::Linq::Extensions {
         return result;
     }
 
-    /** @return As Ancestors(source), filtered to ancestor elements named @p name. */
+    /**
+     * @return As Ancestors(source), filtered to ancestor elements named @p name.
+     * @warning Borrowed view; the same lifetime contract as Ancestors(source) applies.
+     */
     template <std::ranges::input_range R>
     [[nodiscard]] std::vector<XElement*> Ancestors(const R& source, const XName& name)
         requires std::convertible_to<std::ranges::range_value_t<R>, std::shared_ptr<XNode>>
@@ -185,6 +206,8 @@ namespace System::Xml::Linq::Extensions {
      * own ancestors), matching real .NET's `AncestorsAndSelf`. Only defined for a source of
      * XElement (not any XNode), matching real .NET's overload constraint — "self" only makes
      * sense when the source item is itself an element.
+     * @warning Borrowed view; the same lifetime contract as Ancestors(source) applies, including
+     * to the source element's own entry.
      */
     template <std::ranges::input_range R>
     [[nodiscard]] std::vector<XElement*> AncestorsAndSelf(const R& source)
@@ -200,7 +223,10 @@ namespace System::Xml::Linq::Extensions {
         return result;
     }
 
-    /** @return As AncestorsAndSelf(source), filtered to elements named @p name. */
+    /**
+     * @return As AncestorsAndSelf(source), filtered to elements named @p name.
+     * @warning Borrowed view; the same lifetime contract as Ancestors(source) applies.
+     */
     template <std::ranges::input_range R>
     [[nodiscard]] std::vector<XElement*> AncestorsAndSelf(const R& source, const XName& name)
         requires std::convertible_to<std::ranges::range_value_t<R>, std::shared_ptr<XElement>>

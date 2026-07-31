@@ -2918,3 +2918,184 @@ one, and the measurement above is after that change.
   rather than hidden.
 - **J19d/X27d (quadratic ancestor guards) and X28c (recursive parse) are
   untouched**, by design: they are #1896 and #1897.
+
+---
+
+## 42. Replacement for §31 item 5 — the Xml.Linq borrowed-view contract (2026-07-31)
+
+*The user rejected §31 item 5's wording as non-implementable on 2026-07-31 and
+directed that it be replaced by a precise design. This section is that
+replacement. The **compatible portion** — a measurable contract and the tests
+that pin it — is ticket **#1898** and landed with this section. The **repair**
+that would make X15 and X17 impossible rather than merely documented is ticket
+**#1899** and is **blocked** on one question (§42.8).*
+
+### 42.1 The actual defective observable behaviour
+
+Two entry points hand out a **borrowed view** whose lifetime is not expressed in
+its type, and neither says so:
+
+| Probe case | Expression | What happens |
+|---|---|---|
+| **X15** | `std::vector<XElement*> anc = Extensions::Ancestors(src);` then the tree is destroyed, then `anc[0]->getNameProperty()` | ASan `heap-use-after-free`; without a sanitizer it returns `"root"` from freed storage |
+| **X17** | `const auto* p = &el->getAttributesProperty();` then `el` is destroyed, then `p->size()` | ASan `heap-use-after-free`; without a sanitizer it returns `1` from freed storage |
+
+The two are **not the same defect**, and §31 item 5 treated them as one:
+
+- **X17 is the ordinary C++ reference-lifetime contract.** `getAttributesProperty()`
+  returns `const std::vector<…>&` bound to a member. `std::vector::front()`,
+  `std::string::c_str()` and every other accessor returning a reference behave
+  identically. It is undocumented, not unusual. **A safe spelling already exists
+  and is already public**: `XElement::Attributes()` returns the same content **by
+  value**, as owning `shared_ptr`s.
+- **X15 is a design defect.** The returned **object** — a `std::vector<XElement*>`
+  — outlives the full expression and is trivially storable, yet nothing in its
+  type says its elements are borrowed. There is **no** safe spelling today.
+
+### 42.2 Desired invariants versus impossible requirements
+
+**Impossible, and this is the sharpening §38.1 did not have.** §31 item 5 asks
+`Ancestors`/`AncestorsAndSelf` to "return owning handles". An owning handle to an
+object that **no `shared_ptr` owns cannot be manufactured**, and there are two
+independent reasons here, not one:
+
+1. The **topmost** ancestor has no parent, so no `children_` vector owns it.
+2. `XElement`, `XDocument` and `XContainer` are routinely **automatic-storage** —
+   51 such declarations in this repository's own Xml.Linq tests. Those objects
+   have **no control block at all**.
+
+Reason 2 also disposes of the escape §38.1 left open: adding
+`std::enable_shared_from_this` to `XObject` would **not** rescue the design
+either, because `shared_from_this()` on an automatic-storage element throws
+`std::bad_weak_ptr` and `weak_from_this()` is expired — the exact ground on which
+§12 rejected the `weak_ptr` candidate. **There is no representation, at any
+layout cost, that makes "always return an owning handle" implementable.**
+
+**Achievable invariants**, stated as pre/postconditions rather than adjectives:
+
+> **`Ancestors(source)` / `AncestorsAndSelf(source)`**
+> - *Precondition:* every node in `source` is non-null or skipped; the caller
+>   keeps the tree containing them alive for as long as it uses the result.
+> - *Postcondition:* the result names, in order, each element that was an
+>   ancestor (and for `AncestorsAndSelf`, the source element itself first) at the
+>   moment of the call.
+> - *Invalidation:* a returned pointer is invalidated by **the destruction of the
+>   element it names, and by nothing else** — in particular **not** by mutation of
+>   the tree and **not** by reallocation of any container, because it names an
+>   object, not a slot.
+> - *Failure:* none. Neither overload throws; a null or detached source node
+>   contributes no entries.
+>
+> **`XElement::getAttributesProperty()`**
+> - *Precondition:* the element outlives every use of the returned reference.
+> - *Postcondition:* the reference names the element's live attribute store, in
+>   document order.
+> - *Invalidation:* by the element's destruction, and by nothing else — **not** by
+>   `Add`/`RemoveAttribute` reallocating the vector, because the reference names
+>   the vector *object*, which lives inside the element (probe case X16 measured
+>   exactly this).
+> - *Owning alternative:* `XElement::Attributes()`, which returns the same content
+>   by value and whose `shared_ptr`s keep the attributes alive after the element
+>   is destroyed.
+
+Every clause above is decidable through public operations, which is why §42.9's
+matrix can pin all of them.
+
+### 42.3 Current behaviour, reproduced
+
+`build-probe/1885_ccf019_lifetime_probe.cpp`, cases X15, X16 and X17, re-run
+unmodified this batch (`build-probe/1895_postfix_asan.log`): X15 and X17 are ASan
+`heap-use-after-free`; **X16 is `clean`**, confirming the "not invalidated by
+reallocation" clause against 63 `Add`s.
+
+### 42.4 The reference behaviour, cited
+
+- `XNode.Ancestors()` — `/rv/tmp/runtime/…/System/Xml/Linq/XNode.cs:188` — returns
+  `IEnumerable<XElement>` produced lazily by `GetAncestors`.
+- `XElement.Attributes()` — returns `IEnumerable<XAttribute>`, likewise lazy.
+
+In .NET both hand back **references into a garbage-collected heap**: holding one
+keeps the object alive, so the invalidation clause simply does not exist there.
+The port has no equivalent, so *some* explicit lifetime rule is unavoidable —
+the only question is whether it is stated in the type or in the contract.
+
+### 42.5 Concrete implementable alternatives
+
+| | Alternative | Closes X15 | Closes X17 |
+|---|---|---|---|
+| **A** | **State and pin the borrowed contract** (§42.2) in doc-comments and tests; keep every signature | no — makes it defined and testable | no — but names the existing owning alternative |
+| **B** | `getAttributesProperty()` returns by value | — | **yes** — `&el->getAttributesProperty()` stops compiling |
+| **C** | `Ancestors`/`AncestorsAndSelf` return `std::vector<std::shared_ptr<XElement>>`, **omitting** any ancestor no `shared_ptr` owns | partly — and silently loses ancestors | — |
+| **D** | Add owning/visitor spellings (`ForEachAncestor(node, f)`) **beside** the existing ones | yes, for callers who adopt them | already exists as `Attributes()` |
+| **E** | Delete `getAttributesProperty()` in favour of `Attributes()`, and `Ancestors` in favour of D | yes | yes |
+
+### 42.6 Consequences of each
+
+| | Source | ABI | Layout | Ownership | Semantics |
+|---|---|---|---|---|---|
+| **A** | none | none | none | unchanged | none — states what already happens |
+| **B** | compiles at every ordinary spelling; **breaks `&el->getAttributesProperty()`**, the dangling one | **return calling-convention change** (register → hidden `sret`) | none | unchanged | one `std::vector` copy + N atomic increments per call, where the call was free |
+| **C** | **break** at every call site | return-type change | none | **silently incomplete** — an ancestor the tree does not own vanishes from the result, so a correct program can get a shorter list than .NET would give it | changed, and wrongly |
+| **D** | **none** (additive) | additive | none | unchanged | none for existing callers |
+| **E** | **hard break** at every call site | yes | none | unchanged | migration required |
+
+**C is disqualified on correctness**, not cost: a result that silently omits
+ancestors is worse than one that is explicitly borrowed.
+
+### 42.7 Recommendation — the narrowest reference-compatible alternative
+
+**A now, D next, B and E only in a coordinated ABI-breaking release alongside
+#1889.**
+
+A is the narrowest thing that is unambiguous, reference-compatible and free of
+any source, ABI, layout or semantic break, so it is what this batch implements
+(ticket #1898). It converts X15 and X17 from *undocumented* undefined behaviour
+into a *stated, tested* precondition — which is what the C++ standard library
+itself does for every reference-returning accessor — and it names the owning
+alternative that already exists for the attribute half.
+
+It does **not** make X15 and X17 impossible. **SR-AUD-333 therefore stays
+`confirmed`.** Making them impossible is #1899.
+
+### 42.8 Exact replacement wording for §31 item 5, and the one open question
+
+§31 item 5 is **withdrawn** and replaced by:
+
+> **Item 5′ (ticket #1899).** Approve **one** of:
+> **(B)** changing `XElement::getAttributesProperty()` to return
+> `std::vector<std::shared_ptr<XAttribute>>` **by value** — every ordinary call
+> site keeps compiling, `&el->getAttributesProperty()` stops compiling, the
+> return calling convention changes, and each call gains one vector copy; **or**
+> **(D)** adding a visitor spelling
+> `template <class F> void Extensions::ForEachAncestor(const std::shared_ptr<XNode>&, F&&)`
+> whose borrowed pointers cannot outlive the call, **beside** the existing
+> `Ancestors`/`AncestorsAndSelf`, which keep their current signatures and their
+> now-documented borrowed contract; **or**
+> **(E)** both, plus removal of the borrowed spellings, in a coordinated
+> ABI-breaking release together with #1889.
+>
+> Approval of **(C)** — returning owning handles — is **not** sought: §42.2 shows
+> it cannot be implemented without silently omitting ancestors, at any layout
+> cost, because an automatic-storage element has no control block.
+
+**The single question for the user:** *"For the Xml.Linq borrowed views, take (B)
+the by-value attribute accessor, (D) an additive visitor spelling for ancestors,
+or (E) both plus removal in a coordinated ABI-breaking release with #1889?"*
+
+### 42.9 Permanent test matrix
+
+Implemented for A by ticket #1898
+(`modules/xml-linq/tests/System/Xml/Linq/XLinqBorrowedViewTests.cpp`):
+
+| Clause | Test |
+|---|---|
+| `Ancestors` postcondition, one level / many levels / named filter | ancestors of a leaf name parent then grandparent, in order |
+| `AncestorsAndSelf` includes self first | asserted for one and several sources |
+| null and detached sources contribute nothing | asserted |
+| result is **not** invalidated by tree mutation | ancestors taken, then siblings added and removed, then re-read |
+| result is **not** invalidated by container reallocation | ancestors taken across 64 `Add`s |
+| a document root's ancestors stop at the root element | asserted (`getParentProperty()` yields no `XDocument`) |
+| `getAttributesProperty()` postcondition and order | asserted |
+| the reference survives reallocation (probe X16) | held across 64 attribute `Add`s |
+| **`Attributes()` is the owning alternative** | held across the element's **destruction**; the attributes are alive, detached, and re-addable |
+| the borrowed contract's precondition is the caller's | documented in the suite header; deliberately **not** exercised after destruction, because that is the undefined behaviour the suite exists to describe |
