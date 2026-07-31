@@ -1102,3 +1102,124 @@ rather than folded in.
 
 **Audit numbering:** no `SR-AUD-*` identifier was issued by any ticket in this
 family, including #1919's four. It stays frozen at **364**.
+
+---
+
+## 20. #1926 isolated — the mechanism is proven, the number replicates, the *other* half does not (2026-07-31)
+
+*Measured by the Group E subset batch. **Evidence only** — no production change
+was made, no `std::` internal was specialised outside a throwaway probe, and
+**#1926 stays `todo` and unapproved.** §19.1 is preserved verbatim; §20 is what
+independent measurement adds and where it disagrees.*
+
+### 20.1 Why this needed isolating at all
+
+§19.1 attributes the 1.300× `long double` insert regression to libstdc++'s
+per-node hash-code cache being switched off, and reads that attribution **out of
+the header**. It was never isolated: the #1919 benchmark compares a pre-change
+tree with a post-change tree, so *every* difference between them is in the
+measurement, and "the hasher's `__is_fast_hash` answer" is only the most likely
+of several.
+
+`build-probe/1926_fasthash_probe.cpp` isolates it. Three hashers, one process,
+one `std::unordered_map<long double,int>`, alternated within each round:
+
+| | Hasher | `__is_fast_hash` | Cache | Meaning |
+|---|---|---|---|---|
+| **A** | `std::hash<long double>` | `false` (libstdc++ specialises it) | **on** | the pre-#1919 shape |
+| **B** | `System::detail::DefaultHash<long double>` | `true` (primary template) | **off** | today |
+| **C** | a probe-local hasher computing **exactly B's value**, with `std::__is_fast_hash` specialised to `false` | `false` | **on** | what the proposed fix would do |
+
+If the attribution is right, A and C agree and B alone is slow. Specialising a
+reserved `std::` internal is the very thing #1926 asks the user to decide about;
+it is done **in the probe only**, so the decision can be taken with the number in
+hand.
+
+### 20.2 The mechanism is confirmed exactly
+
+```
+  A std::hash<long double>            __is_fast_hash=false  node_size=64
+  B detail::DefaultHash<long double>  __is_fast_hash=true   node_size=48
+  C same + __is_fast_hash=false       __is_fast_hash=false  node_size=64
+
+  A iterator: _Node_iterator<pair<const long double,int>, false, true >
+  B iterator: _Node_iterator<pair<const long double,int>, false, false>   <-- differs
+  C iterator: _Node_iterator<pair<const long double,int>, false, true >   <-- back to A
+```
+
+Three things follow, and all three are measured, not argued:
+
+1. **The named mechanism is the whole cause.** Restoring only the trait, changing
+   nothing else, restores A's node size *and* A's iterator type.
+2. **The specialisation really would undo #1919's only iterator-type movement** —
+   §19.1 claimed this; here it is, in `typeid`.
+3. **Corrected premise: the node loses 16 bytes, not "a word".** §19.1 and the
+   ticket both say the node "loses a word". Measured, 64 → **48**: the cached
+   `size_t` costs 16 bytes of node because `long double` is 16-byte aligned on
+   x86-64. So today's shape is **25 % smaller per node** — the trade is speed for
+   memory, and the memory side was understated by half.
+
+### 20.3 The insert regression replicates; the lookup improvement does not
+
+25 alternating rounds, 200,000 keys (`build-probe/1926_fasthash_25.log`,
+`1926_fasthash_summary.log`):
+
+| Workload | median B/A | min B/A | median C/A | rounds B slower than A |
+|---|---|---|---|---|
+| **insert** | **1.319×** | 1.571× | 0.895× | **24 of 25** |
+| lookup | 1.210× | 1.006× | 1.107× | 17 of 25 |
+
+- **Insert: real, stable, and it reproduces §19.1's 1.300× almost exactly** — an
+  independent harness on an independent workload lands at 1.319×, and B is slower
+  in 24 of 25 rounds. C tracks A (0.895× median, 1.018× on the least
+  noise-sensitive min-of-rounds statistic), i.e. **the fix would recover it in
+  full**.
+- **Lookup: §19.1's "the same container's lookup got *faster* (0.791×)" does not
+  replicate.** A 9-round run of this probe reproduced it (0.772×); the 25-round
+  run reversed it (1.210×). Over both, lookup is **within noise** and should not
+  be cited in either direction. The plausible cause of the original reading — a
+  denser table from the smaller node — is real, but it is not worth a decimal
+  place.
+
+**The noise floor on this machine is enormous** — max/min within a single
+series reached 3.0–6.3× across runs — which is why only the median over ≥25
+rounds and the sign-test (24 of 25) carry any weight here, and why a
+single-round comparison of any of these numbers is meaningless.
+
+### 20.4 The finding that matters most: it is toolchain-specific
+
+`__is_fast_hash`, `_Hash_node<T, cache>` and the whole per-node hash-cache
+mechanism are **libstdc++ implementation details**. libc++ and the MSVC STL have
+no such trait and make no such choice, so on those standard libraries **neither
+the regression nor the proposed fix exists**. The repository's tracked CI is
+Ubuntu/GCC only, so the measurement above describes the only configuration this
+project currently tests — and a specialisation guarded by `#ifdef __GLIBCXX__`
+would be dead code everywhere else.
+
+That is a complete and valid answer to #1926's question in its own right: the
+regression is **real, reproducible, fully explained, recoverable in full, and
+confined to one standard library**.
+
+### 20.5 What is still a decision, and what is not
+
+**Not a decision any more** (measured here):
+
+- whether the 1.300× is real — **yes**, 1.319× median, 24 of 25 rounds;
+- whether `__is_fast_hash` is the cause — **yes**, proven by C;
+- whether the fix would recover it — **yes**, in full, plus the iterator type;
+- whether the lookup number should be cited — **no**, it is noise;
+- whether it affects `float`/`double` — **no**, unchanged (§19.1, unrevised).
+
+**Still a decision, and still the user's:** may this project specialise
+`std::__is_fast_hash`, a **reserved libstdc++ internal it does not own**, behind
+`#ifdef __GLIBCXX__`? Specialising a `std::` template not designated for user
+specialisation is undefined by the letter of the standard. The measurement does
+not settle that; it only prices it. **Recommendation unchanged from §19.1 and the
+decision packet: defer, leaning `wontfix`** — 1.3× on insertion, on the rarest of
+the three floating types, on one standard library, is a thin return for a
+non-portable specialisation of a reserved name. The one argument on the other
+side is now firmer than it was: it would also restore the pre-#1919 iterator
+type, which is measured, not asserted.
+
+**#1926 stays `todo`.** No `SR-AUD-*` identifier was issued; numbering stays
+frozen at **364**.
