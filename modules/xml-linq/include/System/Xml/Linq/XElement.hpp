@@ -39,6 +39,37 @@ namespace System::Xml::Linq {
             if (!value.empty()) setValueProperty(value);
         }
 
+        /**
+         * @brief Destroys this element, first clearing the parent link **and** the next-sibling
+         * link of every attribute it still owns.
+         *
+         * Attributes are held by `std::shared_ptr`, so an attribute a caller retained outlives
+         * this element. `XAttribute` carries **two** unguarded borrowed links, not one: the
+         * inherited `XObject::parent_` (whose dereference is a virtual call, so a retained
+         * attribute's `getParentProperty()`, `getPreviousAttributeProperty()` and `Remove()` all
+         * aborted the process), and the intrusive `next_` sibling pointer, which dangles
+         * independently — a retained attribute returned a freed sibling from
+         * `getNextAttributeProperty()` and reading its name silently succeeded. Both are cleared
+         * here, matching what `RemoveAttributes()`/`RemoveAttribute()` already do.
+         *
+         * Only attributes whose parent link still names *this* element are touched, and the link
+         * is only ever compared, never dereferenced. The loop runs before `attributes_` is
+         * released, so every attribute is still fully alive; `~XContainer` then runs and clears
+         * the child-node side. Non-throwing and allocation-free, so it is safe during exception
+         * unwinding and after a partially constructed derived object.
+         */
+        ~XElement() override {
+            for (const auto& attr : attributes_) {
+                if (!attr) continue;
+                // XElement is a friend of XAttribute, so both links are reachable directly. That
+                // deliberately avoids depending on the public setNextAttributeProperty(), which is
+                // itself proposed for removal by ticket #1892.
+                if (attr->parent_ != this) continue;
+                attr->parent_ = nullptr;
+                attr->next_ = nullptr;
+            }
+        }
+
         using XContainer::Add;
         using XContainer::AddFirst;
 

@@ -57,6 +57,36 @@ namespace System::Xml::Linq {
         void InsertNodeAt(size_t index, const std::shared_ptr<XNode>& n);
 
     public:
+        /**
+         * @brief Destroys this container, first clearing the parent link of every child node it
+         * still owns.
+         *
+         * Children are held by `std::shared_ptr`, so a node a caller retained outlives this
+         * container; `XObject`'s `parent_` is a raw non-owning pointer that no destruction path
+         * used to clear, so such a node kept pointing into freed storage. That is worse here than
+         * in the JSON node family: `XObject::getParentProperty()` does not merely read the
+         * pointer, it dispatches a **virtual call** through it, so eight public entry points
+         * aborted the process with `pure virtual method called` even with no sanitizer present.
+         * This loop runs before `children_` is released, so every child is still fully alive here.
+         *
+         * Only children whose parent link still names *this* container are detached — a node that
+         * was moved to another container is left untouched — and the link is only ever compared,
+         * never dereferenced, so an already transferred child is never touched at all. A retained
+         * node is left in exactly the state `RemoveNodes()`/`XNode::Remove()` already produce: no
+         * parent, no document, no siblings, `Remove()` throws `The parent is missing.`, and it can
+         * be re-added elsewhere. Non-throwing and allocation-free, so it is safe during exception
+         * unwinding and after a partially constructed derived object.
+         *
+         * `~XElement` runs before this and clears the attribute side; see XElement.hpp.
+         */
+        ~XContainer() override {
+            for (const auto& child : children_) {
+                if (!child) continue;
+                XObject& obj = *child;                 // XContainer is a friend of XObject
+                if (obj.parent_ == this) obj.parent_ = nullptr;
+            }
+        }
+
         /** @return The first child node, or nullptr if this container has no children. */
         [[nodiscard]] std::shared_ptr<XNode> getFirstNodeProperty() const { return children_.empty() ? nullptr : children_.front(); }
         /** @return The last child node, or nullptr if this container has no children. */

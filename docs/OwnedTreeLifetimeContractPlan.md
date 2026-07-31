@@ -1720,3 +1720,173 @@ copy-assign and J13's public `DetachParent()` (→ #1888, §31 item 3); J10's
 Because J11 is still an ASan-confirmed use-after-free in this finding's own
 files, **SR-AUD-327 stays `confirmed (design-complete)`** and the post-audit
 tally is unchanged at 57 remediated / 306 confirmed / 364.
+---
+
+## 34. Implementation record — #1890, XObject owner-side detachment (2026-07-31)
+
+*Everything in this section is **measured**. Nothing in §§1–31 was rewritten.*
+
+### 34.1 What changed
+
+Two files, two destructors:
+
+| File | Change |
+|---|---|
+| `modules/xml-linq/include/System/Xml/Linq/XContainer.hpp` | `~XContainer() override` — detaches every owned child node |
+| `modules/xml-linq/include/System/Xml/Linq/XElement.hpp` | `~XElement() override` — detaches every owned attribute **and clears its `next_`** |
+
+```cpp
+~XContainer() override {
+    for (const auto& child : children_) {
+        if (!child) continue;
+        XObject& obj = *child;                 // XContainer is a friend of XObject
+        if (obj.parent_ == this) obj.parent_ = nullptr;
+    }
+}
+
+~XElement() override {
+    for (const auto& attr : attributes_) {
+        if (!attr) continue;
+        if (attr->parent_ != this) continue;   // XElement is a friend of XAttribute
+        attr->parent_ = nullptr;
+        attr->next_ = nullptr;
+    }
+}
+```
+
+Two deliberate differences from §14.1's sketch, both required by the ticket's own
+constraints:
+
+1. **The links are written directly instead of through `AdoptObject()` /
+   `setNextAttributeProperty()`.** `~XElement` must *read* the attribute's parent
+   link to decide whether it owns it, and `AdoptObject` only writes. `XContainer`
+   is already a `friend` of `XObject` and `XElement` is already a `friend` of
+   `XAttribute`, so both links are reachable without adding anything to any
+   header. Writing `next_` directly also means the destructor does not depend on
+   the public `setNextAttributeProperty()`, which #1892 proposes to remove.
+2. **The `parent_` link is only ever *compared*, never dereferenced.** §14.1's
+   `AdoptObject(*c, nullptr)` would have written unconditionally; the comparison
+   is what makes "do not alter an object that has already been detached or
+   transferred" true by construction, and it never touches the pointee, so a
+   hypothetical stale link cannot be followed even to test it.
+
+`~XElement` runs first and clears the attribute side; `~XContainer` then runs and
+clears the child side. Both stores are still fully alive at their loop.
+
+### 34.2 The ownership guard is **not** load-bearing here, and that is recorded
+
+On the JsonNode side (§33.1) the `== this` guard is load-bearing: J08's aliasing
+copy and J13's public `DetachParent()` both create a container that holds an
+object owned by someone else, and removing the guard fails tests. **In this
+family it is currently unreachable to violate.** `XContainer::InsertNodeAt` calls
+`n->parent_->RemoveNode(n.get())` and `XElement::Add(attribute)` calls
+`owner->RemoveAttribute(attr.get())`, both of which **erase** the object from the
+previous owner's vector before adopting it; and `XObject` deletes all four
+copy/move operations, so no aliasing container can exist. Measured: removing both
+guards fails **zero** of the 35 permanent tests.
+
+The guards are retained anyway — §31 item 1 specifies them, they make the
+destructor's contract explicit, and #1891/#1892 may change insertion — but the
+measurement is recorded rather than implied. What *is* pinned is the invariant
+they rest on: `NodeMovedToAnotherOwner_KeepsTheNewParentAfterTheOldOwnerDies` and
+`AttributeMovedToAnotherOwner_KeepsTheNewParentAfterTheOldOwnerDies` both assert
+that the source container is empty after a move.
+
+### 34.3 Measured evidence
+
+Same probe, same build script, same three builds, same forked-per-case watchdog;
+classification by `build-probe/1886_classify_cases.py`; tables in
+`build-probe/1890_asan_before_after.txt` and `1890_none_before_after.txt`.
+
+| Case | before (ASan) | after (ASan) | before (plain) | after (plain) |
+|---|---|---|---|---|
+| X01 `getParentProperty()` | heap-use-after-free | **clean** | **SIGABRT** `pure virtual method called` | **`(nil)`** |
+| X02 `getDocumentProperty()` | heap-use-after-free | **clean** | **SIGABRT** | **`(nil)`** |
+| X03 / X04 sibling pointers | heap-use-after-free | **clean** | `nil` (by luck) | **`(nil)`** |
+| X05 `NodesBeforeSelf()` | heap-use-after-free (8 accesses) | **clean** | **SIGSEGV** | **size 0** |
+| X06 `NodesAfterSelf()` | heap-use-after-free | **clean** | 0 | **size 0** |
+| X07 `Remove()` | heap-use-after-free on a mutating path | **throws `The parent is missing.`** | returned silently | **throws** |
+| X08 `ReplaceWith(node)` | heap-use-after-free | **throws** | **SIGABRT** | **throws** |
+| X09 `CompareDocumentOrder` | heap-use-after-free | **throws `A common ancestor is missing.`** | throws | throws |
+| X10 attribute `getParentProperty()` | heap-use-after-free | **clean** | **SIGABRT** | **`(nil)`** |
+| X11 `getPreviousAttributeProperty()` | heap-use-after-free | **clean** | **SIGABRT** | **`(nil)`** |
+| X12 `XAttribute::Remove()` | heap-use-after-free | **throws** | **SIGABRT** | **throws** |
+| X13 `getNextAttributeProperty()` | heap-use-after-free | **clean** | a freed `XAttribute*`, name read `"b"` | **`nullptr`** |
+| X14 orphan re-`Add`ed to a live element | heap-use-after-free at `XContainer.cpp:40` | **clean** | succeeded through a stale parent | **succeeds cleanly** |
+| X18 / X19 destroyed `XDocument`, 1 and 2 levels | heap-use-after-free | **clean** | **SIGABRT** | **`(nil)`** |
+| X22 allocator reuse | heap-use-after-free | **clean** | stale parent reported `"squatter"` | **`(nil)`, no name** |
+| X25 two retained attributes → `Remove()` | heap-use-after-free | **throws** | **SIGABRT** | **throws** |
+| X26 retained child → `ReplaceWith({r1,r2})` | heap-use-after-free | **throws** | **SIGABRT** | **throws** |
+| X15 `Extensions::Ancestors` | heap-use-after-free | heap-use-after-free (**#1892**) | returns `"root"` | unchanged |
+| X17 `getAttributesProperty()` reference | heap-use-after-free | heap-use-after-free (**#1892**) | size 1 from freed storage | unchanged |
+| X20 `ReplaceWith` rejection | clean but loses the node | unchanged (**#1891**) | `<a/>` | unchanged |
+| X21 `Add` moves | clean | unchanged — deliberate (§14.4) | moves | moves |
+| X27c / X27d | stack-overflow / timeout | unchanged (**#1893**) | SIGSEGV / timeout | unchanged |
+
+**Totals.** XObject cases producing an ASan `heap-use-after-free`: **21 → 2**
+(X15 and X17). Faulting accesses in the XObject section under
+`-fsanitize-recover=address`: **48 → 4** (two each for X15 and X17). Public entry
+points aborting with `pure virtual method called`: **8 → 0**.
+
+### 34.4 Both tickets together
+
+| | #1885 baseline | after #1886 | after #1890 |
+|---|---|---|---|
+| ASan `heap-use-after-free` **cases**, both families | 29 | 22 | **3** |
+| Faulting **accesses**, recoverable ASan | 57 | 49 | **5** |
+| `pure virtual method called` aborts | 8 | 8 | **0** |
+| Remaining cases | — | — | J11 (#1889), X15, X17 (#1892) |
+
+**26 of the 29 measured use-after-free cases are closed.** §1 of this document
+estimated 27; the measured figure is **26**, and the difference is recorded
+rather than rounded: §13.5 and §14.3 always listed J11 (→ #1889) and X15/X17
+(→ #1892) as *out* of the core repair, which is three, not two.
+
+### 34.5 Permanent tests
+
+`modules/xml-linq/tests/System/Xml/Linq/XLinqLifetimeTests.cpp` — **35 cases,
++35 to the repository floor (14,600 → 14,635)**, none of the 92 existing Xml.Linq
+cases modified. Coverage: owner alive, element and document (2); retained text
+node after a heap and an automatic owner (2); non-dereferenceable parent (1);
+sibling navigation (1); `Remove`/`ReplaceWith`/`CompareDocumentOrder` on an
+orphan (3); retained attribute parent, `next_`, `Remove` (3); eight attributes
+and eight children (2); nested trees and destroyed documents at one and two
+levels (4); moved node and moved attribute (2); removed / replaced / `RemoveAll`
+before destruction (4); empty owners and attributes-only/children-only owners
+(2); exception unwinding, flat and nested (2); rejected duplicate attribute and
+self-insertion (2); re-attachment of a node, an attribute and a subtree (3);
+allocator reuse (1); public layout (1) plus fourteen `static_assert`s.
+
+**Mutation checks, each test run in its own process so an abort cannot hide the
+rest.** Emptying both destructor bodies is detected by **23** of 35 (ticket #1890
+required ≥ 6) — thirteen of those as `pure virtual method called` aborts, which is
+the pre-fix failure mode reproduced exactly. Deleting only `attr->next_ = nullptr`
+is detected by **2**. Removing both ownership guards is detected by **0**, for the
+reason in §34.2.
+
+Under `build-asan` (`-fsanitize=address,undefined`, LSan on): **127/127
+`SharpRuntimeTests_Xml_Linq` pass, zero diagnostics, zero leaks**
+(`build-probe/1890_asan_tests.log`), alongside 179/179 for Text.Json. Sanitizer
+activation proved by the same controlled self-test (§33.5).
+
+### 34.6 Invariants, and what is still open
+
+| Claim | Evidence |
+|---|---|
+| `sizeof` of all eleven public types unchanged | `build-probe/1886_layout_sizes.log` — 16/16/40/128/120/48/56 on this side, plus fourteen `static_assert`s |
+| No member added, no vtable slot added or reordered | GCC `-fdump-lang-class`, pre-fix headers versus current, **identical** for all eleven types |
+| No public signature change | none of the four files touches a declaration other than adding the two destructors |
+| ABI surface | **three weak COMDAT symbols added** — `_ZN6System3Xml4Linq10XContainerD0Ev`/`D1Ev`/`D2Ev` — because GCC previously inlined `XContainer`'s implicit destructor and emitted no standalone definition. `XElement`'s three were already emitted. **No symbol name was removed**, and the added names are the standard Itanium mangling the destructor already had as a language entity (`build-probe/1890_extsyms_*.txt`) |
+| No allocation added anywhere | counting `operator new`/`delete`: construct+4 nodes+2 attributes 12 new both sides; 100,000 × (`getParentProperty` + `getDocumentProperty`) **0 new both sides**; destruction **0 new / 8 delete both sides** |
+| No new ownership cycle, no leak | LSan clean over the ASan test run and the probe; the repair adds no edge, it clears two existing non-owning ones earlier |
+| Destructors cannot terminate | `std::is_nothrow_destructible_v` asserted for `XContainer` and `XElement`; two permanent tests destroy owners during live exception unwinding |
+| Value semantics untouched | `!is_copy_constructible`, `!is_copy_assignable`, `!is_move_constructible` still asserted for `XElement` |
+| Module graph unchanged | 41 modules, 91 edges; catalogue check current |
+
+**Still reachable after #1890:** X15 and X17 (borrowed views → #1892, §31 item 5);
+X20 (`ReplaceWith` exception path → #1891, §31 item 2); X27c/X27d (deep nesting →
+#1893, §31 item 6); X21's move-on-`Add` (permanent authorised deviation, §30.2);
+SR-AUD-336's inert events (separate finding). Because X15 and X17 are still
+ASan-confirmed use-after-free in this finding's own files, **SR-AUD-333 stays
+`confirmed (design-complete)`** and the post-audit tally is unchanged at 57
+remediated / 306 confirmed / 364.

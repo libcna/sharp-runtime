@@ -60,6 +60,71 @@ approval request: `docs/OwnedTreeLifetimeContractPlan.md`. Implementation is
 #1890/#1891/#1892/#1893/#1894, all `needs_user` or `blocked`. **Nothing has been
 implemented; SR-AUD-333 remains `confirmed`.**
 
+### Correction appended by ticket #1890 (2026-07-31) — the approved core repair landed; finding still `confirmed`
+
+Both blocks above are retained as the historical record. `XContainer` now
+declares a destructor that clears the parent link of every child node that still
+names *that* container, and `XElement` one that clears every owned attribute's
+parent link **and** its intrusive `next_` sibling link, each before its store is
+released (`docs/OwnedTreeLifetimeContractPlan.md` §14, §31 item 1, §34). Measured
+by re-running **the same** probe `build-probe/1885_ccf019_lifetime_probe.cpp`,
+unmodified, in the same three builds from one source:
+
+| | before (#1885) | after (#1890) |
+|---|---|---|
+| XObject cases producing an ASan `heap-use-after-free` | 21 (X01–X15, X17–X19, X22, X25, X26) | **2** (X15, X17 only) |
+| XObject faulting accesses, recoverable ASan | 48 | **4** |
+| Public entry points aborting with `pure virtual method called` | **8** | **0** |
+| Retained node: `getParentProperty()` / `getDocumentProperty()` | SIGABRT | **`nullptr`** |
+| Retained node: sibling navigation | UAF / SIGSEGV | **`nullptr`, empty** |
+| Retained node: `Remove()` / `ReplaceWith()` | UAF on a mutating path, SIGABRT | **throws `The parent is missing.`** |
+| Retained attribute: `getNextAttributeProperty()` (X13) | a freed `XAttribute*` whose name read as `"b"` | **`nullptr`** |
+| Retained node re-`Add`ed to a live element (X14) | UAF at `XContainer.cpp:40` | **succeeds cleanly** |
+| Allocator reuse (X22) | stale parent reported the squatter's name | **`nullptr`, no name** |
+| `sizeof` XObject/XNode/XContainer/XElement/XAttribute/XText/XDocument | 16/16/40/128/120/48/56 | **unchanged** |
+| Allocations added to construction / access / destruction | — | **0 / 0 / 0** |
+
+Every one of X01–X14, X18, X19, X22, X25 and X26 now produces exactly the answer
+a **detached** object already produced, which is the contract §14.2 specified.
+
+**Residual exposure, all of it approval-blocked and none of it closed by this
+ticket:**
+
+- **X15** — `Extensions::Ancestors`/`AncestorsAndSelf` return `std::vector<XElement*>`,
+  raw handles that still outlive the tree; **X17** — `getAttributesProperty()`
+  returns a reference to the element's own vector, which still outlives the
+  element. Both are still ASan-confirmed use-after-free and both are ticket
+  **#1892** (public source break; §31 item 5). The parent-link repair cannot
+  reach either: neither goes through `parent_`.
+- **X20** — `XNode::ReplaceWith` still removes `this` before it validates the
+  replacements, so a rejected replacement still loses the original node
+  (measured again post-fix: `<a/>` where `<a>victim</a>` was expected). Ticket
+  **#1891** (§31 item 2).
+- **X27c / X27d** — a 20,000-deep element nest still overflows the stack on
+  release and a 100,000-deep one still times out. Ticket **#1893** (§31 item 6).
+- **X21** — `Add` still **moves** an already-attached node where .NET clones it.
+  That is the authorised documented deviation and is deliberately unchanged
+  (`docs/OwnedTreeLifetimeContractPlan.md` §14.4, §30.2).
+- **SR-AUD-336** — `Changed`/`Changing` remain inert; a separate `confirmed`
+  finding, untouched.
+
+One honest note on the ownership guard. Each destructor clears a link only if it
+still names the destroying object. On the JsonNode side that guard is
+load-bearing and mutation-detectable. Here it is **not currently reachable to
+violate**: `XContainer::InsertNodeAt` and `XElement::Add(attribute)` both *erase*
+the object from its previous owner's vector before adopting it, and `XObject`
+deletes all four copy/move operations, so a container never holds an object whose
+`parent_` names someone else. Removing the guard fails **no** test, and that is
+recorded rather than papered over — the guard is retained because §31 item 1
+specifies it, because it makes the destructor's contract explicit, and because
+#1891/#1892 may change insertion. The invariant it depends on is itself pinned by
+`NodeMovedToAnotherOwner_…` and `AttributeMovedToAnotherOwner_…`.
+
+Because X15 and X17 are still ASan-confirmed use-after-free inside this finding's
+own files, **SR-AUD-333 stays `confirmed (design-complete)`** and the post-audit
+total is unchanged. No new `SR-AUD-*` identifier was issued; numbering stays
+frozen at **364**.
+
 ## SR-AUD-336 — medium — Changed and Changing accept handlers but never notify mutations
 
 The declared event accessors discard each handler. The direct probe registers
