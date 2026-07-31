@@ -23,6 +23,27 @@ namespace System::Text::Json::Nodes {
     public:
         explicit JsonArray(JsonNodeOptions options = {}) : JsonNode(options) {}
 
+        /**
+         * @brief Destroys this array, first clearing the parent link of every child it still owns.
+         *
+         * Items are held by `std::shared_ptr`, so a child a caller retained outlives this array;
+         * `JsonNode`'s `parent_` is a raw non-owning pointer that no destruction path used to
+         * clear, so such a child kept pointing into freed storage and every parent-walking entry
+         * point (`getParentProperty`, `getRootProperty`, `AssignParent`'s cycle guard) read it.
+         * This loop runs before `items_` is released, so every child is still fully alive here.
+         *
+         * Only children whose parent link still names *this* array are detached: a child that was
+         * moved to another container, or one shared with a copy-constructed array (whose children
+         * still report the original as their parent), is left untouched. A retained child is
+         * therefore left in exactly the state `RemoveAt`/`Remove`/`Clear` already produce — no
+         * parent, its own root, and re-attachable. Non-throwing and allocation-free, so it is
+         * safe during exception unwinding and after a partially constructed derived object.
+         */
+        ~JsonArray() override {
+            for (const auto& item : items_)
+                if (item && item->getParentProperty() == this) item->DetachParent();
+        }
+
         /** @return The number of items in the array. */
         [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(items_.size()); }
 

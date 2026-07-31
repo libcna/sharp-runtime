@@ -49,6 +49,28 @@ namespace System::Text::Json::Nodes {
     public:
         explicit JsonObject(JsonNodeOptions options = {}) : JsonNode(options) {}
 
+        /**
+         * @brief Destroys this object, first clearing the parent link of every value it still owns.
+         *
+         * Property values are held by `std::shared_ptr`, so a value a caller retained outlives
+         * this object; `JsonNode`'s `parent_` is a raw non-owning pointer that no destruction path
+         * used to clear, so such a value kept pointing into freed storage and every parent-walking
+         * entry point (`getParentProperty`, `getRootProperty`, `AssignParent`'s cycle guard) read
+         * it. This loop runs before `properties_` is released, so every value is still fully alive
+         * here.
+         *
+         * Only values whose parent link still names *this* object are detached: a value that was
+         * moved to another container, or one shared with a copy-constructed object (whose values
+         * still report the original as their parent), is left untouched. A retained value is
+         * therefore left in exactly the state `Remove`/`SetItem`/`Clear` already produce — no
+         * parent, its own root, and re-attachable. Non-throwing and allocation-free, so it is safe
+         * during exception unwinding and after a partially constructed derived object.
+         */
+        ~JsonObject() override {
+            for (const auto& [name, value] : properties_)
+                if (value && value->getParentProperty() == this) value->DetachParent();
+        }
+
         /** @return The number of properties in the object. */
         [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(properties_.size()); }
 

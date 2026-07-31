@@ -1555,6 +1555,168 @@ to `SR-AUD-328` or `SR-AUD-336`. All are excluded in §30 with reasons.
 
 ## 32. Decision
 
-**Pending.** SR-AUD-327 and SR-AUD-333 remain `confirmed`. Tickets #1886–#1894
-are created `blocked` or `needs_user` and may not start until the items in §31
-are answered.
+**Item 1 approved by the user on 2026-07-31** — and only item 1. Items 2, 3, 4,
+5 and 6 remain **unanswered**, so tickets #1887, #1888, #1889, #1891, #1892 and
+#1893 stay `needs_user` and none of them was started. The approval covers
+tickets **#1886** and **#1890** together, exactly as §31 item 1 asked, and it
+explicitly accepts the one observable behaviour change (§19.2): after the owning
+container is destroyed, `getParentProperty()` returns `nullptr` instead of a
+dangling pointer, and consumers recompile.
+
+The paragraph this section previously held — *"Pending. SR-AUD-327 and
+SR-AUD-333 remain `confirmed`. Tickets #1886–#1894 are created `blocked` or
+`needs_user` and may not start until the items in §31 are answered."* — is
+retained here as the historical record of the state #1885 left behind.
+
+**SR-AUD-327 and SR-AUD-333 both stay `confirmed (design-complete)`**: item 1
+closes most of each finding but not all of it, and §33.6 / §34.6 list exactly
+what each one still leaves reachable. See §33 and §34 for the implementation
+evidence.
+
+---
+
+## 33. Implementation record — #1886, JsonNode owner-side detachment (2026-07-31)
+
+*Everything in this section is **measured**. Nothing in §§1–31 was rewritten;
+this section is appended, exactly as #1882/#1883 appended theirs.*
+
+### 33.1 What changed
+
+Two files, two destructors, 43 added lines of which 37 are doc-comment:
+
+| File | Change |
+|---|---|
+| `modules/text-json/include/System/Text/Json/Nodes/JsonArray.hpp` | `~JsonArray() override` — detaches every owned child |
+| `modules/text-json/include/System/Text/Json/Nodes/JsonObject.hpp` | `~JsonObject() override` — detaches every owned value |
+
+```cpp
+~JsonArray() override {
+    for (const auto& item : items_)
+        if (item && item->getParentProperty() == this) item->DetachParent();
+}
+
+~JsonObject() override {
+    for (const auto& [name, value] : properties_)
+        if (value && value->getParentProperty() == this) value->DetachParent();
+}
+```
+
+**One deliberate strengthening over §13.1's sketch:** the `getParentProperty() ==
+this` guard. §13.1 wrote the loop unconditionally; that is wrong for the two
+shapes this family actually has, both measured in #1885. `JsonArray copy =
+*orig;` (J08) leaves the *copy* holding children whose `parent_` names the
+**original**, and the public `DetachParent()` (J13) lets a node sit in one
+container while its link names another. An unguarded loop would let the
+destroying container steal a link it does not own. Mutation-checked: removing the
+guard fails exactly the two permanent tests written for it
+(§33.5), while the loops themselves are pinned by 22.
+
+### 33.2 Why there is no helper
+
+§13.1's rule is one line of logic over two differently shaped stores
+(`vector<shared_ptr<JsonNode>>` versus
+`vector<pair<string, shared_ptr<JsonNode>>>`). The only class both containers
+share is `JsonNode`, so any shared helper would have to be **added to a public
+header** — a new protected or static member on the very type whose surface the
+approval pins at "nothing changes". Both loops use only `getParentProperty()` and
+`DetachParent()`, which are already public and are already what `Clear()` calls,
+so the destructors need no new name anywhere. **No helper was added**, and
+therefore no new entity of any linkage appears in any public header. A
+file-local helper is not an option either: an anonymous-namespace function
+referenced from an inline destructor is an ODR violation.
+
+### 33.3 Measured evidence
+
+Re-ran **the same** probe `build-probe/1885_ccf019_lifetime_probe.cpp`,
+**unmodified**, through **the same** `build-probe/1885_build.sh`, in the same
+three builds from one source, one forked process per case under the same
+5-second watchdog. Every production translation unit is compiled from source into
+the probe, so no archive can be stale. Case-by-case classification is mechanical
+(`build-probe/1886_classify_cases.py`); the tables are
+`build-probe/1886_asan_before_after.txt` and `1886_none_before_after.txt`.
+
+| Case | before (ASan) | after (ASan) | before (plain) | after (plain) |
+|---|---|---|---|---|
+| J01 `getRootProperty()` | heap-use-after-free | **clean** | freed address | **the child itself** |
+| J02 `parent->GetValueKind()` | heap-use-after-free | probe-side null deref (§33.4) | **SIGABRT** `pure virtual method called` | probe-side null deref |
+| J03 `JsonObject` value | heap-use-after-free | **clean** | freed address | **the child itself** |
+| J04 3-level tree | heap-use-after-free | **clean** | freed address | **the child itself** |
+| J05 stale parent value | clean but non-null | **clean, `nullptr`** | non-null stale | **`nullptr`** |
+| J06 re-`Add` an orphan | throws `The node already has a parent.` | **succeeds** | throws | **succeeds** |
+| J08 copy-constructed array | heap-use-after-free | **clean** | freed address | defined |
+| J16 allocator reuse | heap-use-after-free | probe-side null deref (§33.4) | wrong `GetValueKind` at the same address | probe-side null deref |
+| J17 stale-ancestor cycle guard | heap-use-after-free at `JsonNode.cpp:22` | **clean** | succeeded on freed memory | **succeeds on live memory** |
+| J11 stale iterator | heap-use-after-free | heap-use-after-free (**#1889**) | SIGSEGV | SIGSEGV |
+| J19c / J19d | stack-overflow / timeout | unchanged (**#1893**) | SIGSEGV / timeout | unchanged |
+
+**Totals.** JsonNode cases producing an ASan `heap-use-after-free`: **8 → 1**
+(J11 alone). Faulting accesses in the JsonNode section under
+`-fsanitize-recover=address` with `halt_on_error=0`: **9 → 1**. The Xml.Linq
+section is byte-for-byte unchanged at 48 faulting accesses in the same run, which
+is the control: it shows the JSON-side change did not perturb the other family
+and that #1890 was still outstanding when this was measured.
+
+### 33.4 The two cases that now fault in *probe* code
+
+J02 and J16 call `child->getParentProperty()->GetValueKind()` **with no null
+check**, because when the probe was written the pointer was never null. Post-fix
+it is `nullptr`, so those two lines dereference null *inside the probe*, at
+`1885_ccf019_lifetime_probe.cpp:141` and `:342`; UBSan names it
+`member access within null pointer of type 'struct JsonNode'`. This is not a
+library defect and is recorded rather than glossed: the library-side
+use-after-free is gone, and the permanent suite asserts the defined answer for
+the identical two shapes
+(`RetainedChild_AfterOwnerDestroyed_ParentIsNotDereferenceable`,
+`RetainedChild_ReportsNoParentEvenIfTheFreedOwnersStorageIsReused`). A consumer
+that dereferences a null parent gets exactly what it already gets today for a
+node it removed itself.
+
+### 33.5 Permanent tests
+
+`modules/text-json/tests/System/Text/Json/Nodes/JsonNodeLifetimeTests.cpp` —
+**32 cases, +32 to the repository floor (14,568 → 14,600)**, none of the 53
+existing `JsonNodeTests` cases modified. Coverage: owner alive (2); retained
+child/value after a heap owner (2); after an automatic-storage owner (2);
+non-dereferenceable parent (1); nested and leaf-only retention (2); links owned
+by another container (2); removed / replaced / moved / cleared before destruction
+(5); empty owners, null slots, eight children, eight properties (4); rejected
+insertion, failed `SetItem` ×2, duplicate-key `Add` (4); destruction during
+exception unwinding, flat and nested (2); re-attachment of a child, a value and a
+whole subtree (3); allocator reuse (1); public layout (1) plus nine
+`static_assert`s.
+
+**Mutation checks.** Emptying both destructor bodies fails **22** of the 32
+(ticket #1886 required ≥ 4). Removing only the `getParentProperty() == this`
+guard fails exactly **2** — the two written for it — and nothing else, which is
+what proves the guard is load-bearing and not merely defensive.
+
+Under `build-asan` (`-fsanitize=address,undefined`, LSan on): **179/179
+`SharpRuntimeTests_Text_Json` pass, zero diagnostics, zero leaks**
+(`build-probe/1886_asan_tests.log`). Sanitizer activation is proved separately by
+a controlled self-test compiled with the same flags: a deliberate
+use-after-free aborts with ASan and a deliberate leak is reported by LSan, while
+the control run is clean (`build-probe/1886_sanitizer_selftest.log`).
+
+### 33.6 Invariants, and what is still open
+
+| Claim | Evidence |
+|---|---|
+| `sizeof` of all eleven public types unchanged | `build-probe/1886_layout_sizes.log` — 24/48/48/40 and 16/16/40/128/120/48/56, plus nine `static_assert`s in the permanent suite |
+| No member added, no vtable slot added or reordered | GCC's own `-fdump-lang-class` dumps, pre-fix headers versus current, are **identical** for all eleven types (`build-probe/1886_layout_{prefix,postfix}.public.txt`). The only whole-dump difference is extra `std::iterator_traits`/`__normal_iterator` instantiations the range-`for` pulls in. |
+| No public signature change, no ABI surface change | 219 external/weak defined symbols in `JsonNode.cpp` before, **219 identical** after; the `D0`/`D1`/`D2` destructor symbols and the two vtable symbols were already emitted by the implicit destructors (`build-probe/1886_extsyms_*.txt`) |
+| No allocation added to construction, access or destruction | counting `operator new`/`delete`: construct+4×`Add` 16 new both sides, 100,000 × (`getParentProperty` + `getRootProperty`) **0 new both sides**, destruction **0 new / 11 delete both sides** (`build-probe/1886_alloc_{prefix,postfix}.log`) |
+| No per-access overhead | same probe: the access loop allocates nothing and the accessors are unchanged source |
+| No new ownership cycle, no leak | LSan clean over the whole ASan test run and over the probe |
+| Destructors cannot terminate | `std::is_nothrow_destructible_v` asserted for both; two permanent tests destroy owners during live exception unwinding |
+| Repeated detach is harmless | `OriginalDestroyedBeforeItsCopy_DetachesOnceAndTheCopyIsHarmless` |
+| Partially constructed containers are safe | the loop touches only `items_`/`properties_`, which are constructed before any derived body can throw; `EmptyOwnersDestroyCleanly` pins the empty case |
+| Module graph unchanged | `scripts/validate_module_boundaries.py` and `generate_component_catalog.py --check` — 41 modules, 91 edges, no new dependency (the destructors call nothing new) |
+
+**Still reachable after #1886, each mapped to its own approval item:** J11 and
+J12 (enumerator lifetime → #1889, §31 item 4); J08's aliasing copy, J09's slicing
+copy-assign and J13's public `DetachParent()` (→ #1888, §31 item 3); J10's
+`SetItem` exception path (→ #1887, §31 item 2); J19c/J19d/X28c deep nesting (→
+#1893, §31 item 6); J15's option inheritance (permanent exclusion, §30.4).
+Because J11 is still an ASan-confirmed use-after-free in this finding's own
+files, **SR-AUD-327 stays `confirmed (design-complete)`** and the post-audit
+tally is unchanged at 57 remediated / 306 confirmed / 364.
