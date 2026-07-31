@@ -2044,3 +2044,206 @@ divergence is unobservable on every path that does not throw.
 - Nothing owned by #1888 (J08/J09/J13), #1889 (J11/J12) or #1893 (J19c/J19d)
   was absorbed. `SR-AUD-327` therefore **stays `confirmed (design-complete)`**:
   J11 is still an ASan-confirmed use-after-free inside this finding's own files.
+
+---
+
+## 36. Implementation record — #1891, `ReplaceWith` keeps the node it replaces (2026-07-31)
+
+*Everything in this section is **measured**. Nothing in §§1–35 was rewritten; the
+correction this ticket found is appended in §36.4.*
+
+### 36.0 What authorised it
+
+The same §31 item 2 approval §35.0 records. #1891 changes two `.cpp` bodies and
+one header's doc-comments; no declaration, member, layout, vtable slot or
+symbol name changes (§36.3).
+
+### 36.1 What changed
+
+**`modules/xml-linq/src/System/Xml/Linq/XNode.cpp` — `ReplaceWith(vector)`.**
+The node being replaced is now held in a local `shared_ptr` across its own
+removal, the insertion loop runs inside a `try`, and a refused insertion undoes
+every insertion the call had already made and puts the replaced node back at its
+original index with its original parent:
+
+```cpp
+std::shared_ptr<XNode> replaced = (it != siblings.end()) ? *it : nullptr;
+c->RemoveNode(this);
+size_t inserted = 0;
+try {
+    for (const auto& n : replacements) { if (!n) continue; c->InsertNodeAt(index + inserted, n); ++inserted; }
+} catch (...) {
+    size_t undone = 0;
+    for (const auto& n : replacements) { if (!n) continue; if (undone == inserted) break; ++undone; c->RemoveNode(n.get()); }
+    if (replaced) { c->children_.insert(c->children_.begin() + index, replaced); XContainer::AdoptObject(*replaced, c); }
+    throw;
+}
+```
+
+**`modules/xml-linq/src/System/Xml/Linq/XContainer.cpp` — `InsertNodeAt`.**
+`AdoptObject(*n, this)` moved from *before* the vector insert to *after* it.
+
+**Why the rollback cannot itself throw.** `RemoveNode` only searches, writes one
+raw pointer and erases — `std::vector<std::shared_ptr<XNode>>::erase` moves
+`shared_ptr`s, which is `noexcept`. The final `insert` cannot reallocate: the
+call erased one element (`this`) and then erased the `inserted` it had added, so
+`size() < capacity()` holds and `vector::insert` is only permitted to reallocate
+when `size() == capacity()`. Copying a `shared_ptr` does not allocate. A rollback
+that threw would replace the caller's real diagnosis with a fabricated one, which
+is why it is written with direct container operations rather than by calling
+`InsertNodeAt` back.
+
+**Why `replaced` is captured.** `c->children_` may hold the node's last owning
+reference, in which case `RemoveNode` destroys it — pre-fix that was harmless
+only because nothing afterwards touched `this`, and it is fatal to a rollback
+that has to put the node back. Capturing it also defers that destruction to the
+end of the call, which is the only success-path behaviour change and is not
+observable through the public surface.
+
+### 36.2 Measured evidence
+
+**Probe, `asan` build.** The unmodified #1885 probe was rebuilt from source and
+re-run. X20 changes from
+
+```
+-> victim still in the tree: NO (LOST); victim parent: null
+   a serialises to <a/>
+```
+
+to
+
+```
+-> victim still in the tree: yes; victim parent: non-null
+   a serialises to <a>victim</a>
+```
+
+(`build-probe/1891_postfix_asan.log`). The mechanical classifier reports **0 of
+58 cases changed classification**, and that is the correct result rather than a
+null one: X20 is one of the twelve cases §4.3/§5.3 record as *silent* — it
+produces a wrong answer with **no** sanitizer diagnostic in any build — so its
+repair is visible in the answer lines, not in the diagnosis. X21's documented
+move-on-`Add` behaviour is unchanged.
+
+**Probe, `none` build (the canonical build for the silent shapes).** Diffing
+every answer line of `1890_postfix_none.log` against `1891_postfix_none.log`
+across all 58 cases yields exactly **two** semantic differences in the whole
+matrix — J10 (#1887) and X20 (#1891) — plus ASLR address noise in the three cases
+that print a pointer. Nothing else in either family moved.
+
+**Permanent tests.** `XLinqMutationConsistencyTests`, a new suite of **26** cases
+in `modules/xml-linq/tests/System/Xml/Linq/XLinqMutationConsistencyTests.cpp`:
+five rejection shapes (an ancestor, the container itself, a wrong node kind
+inside an `XElement`, CDATA inside an `XDocument`, and a refused *second*
+replacement), index restoration in the middle of a sibling list, the replaced
+node's continued usability (`getPreviousNodeProperty`, `Remove()`), a rejected
+call followed by a successful one, the container-holds-the-last-reference case,
+seven success paths (single, several, null, empty vector, orphan, moving an
+attached node, a sibling), the `XDocument` root replacement and the two-root
+batch, and five `Add`/`AddFirst`/move-ordering cases for `InsertNodeAt`.
+`SharpRuntimeTests_Xml_Linq` goes **127 → 153**; all 127 pre-existing cases pass
+**unmodified**.
+
+**Mutation tests, four**, each run one test per process so an abort cannot hide
+the rest:
+
+| Mutation | Detected by |
+|---|---|
+| the whole rollback removed (the pre-fix `ReplaceWith` body) | **12** of 26 |
+| insertions undone but the replaced node **not** restored | **12** of 26 |
+| the replaced node restored but the insertions **not** undone | **3** of 26 |
+| `InsertNodeAt` adopts before it inserts (the pre-fix order) | **0** — see below |
+
+The fourth mutation is recorded at zero rather than hidden. Adoption order is
+only observable when `children_.insert` throws, i.e. on `std::bad_alloc`, and
+`std::vector<std::shared_ptr<XNode>>` offers no allocator injection point, so the
+difference cannot be exercised from a test. It is kept because the reverse order
+lets a node report a parent that does not hold it — a state whose own `Remove()`
+would then silently do nothing — and because it costs nothing. This is the same
+kind of honest zero §34.2 recorded for the Xml.Linq ownership guards.
+
+**Sanitizers.** `build-asan` (`-fsanitize=address,undefined`, `detect_leaks=1`,
+`print_stacktrace=1`), binary proved newer than all three changed files
+(`build-probe/1891_asan_freshness.log`): **153/153 pass, zero ASan, UBSan or
+LeakSanitizer diagnostics** (`build-probe/1891_asan_tests.log`). The rollback
+path is exercised under the sanitizers by eleven of the new cases, so the
+"cannot throw, cannot reallocate" reasoning above is also checked dynamically.
+
+### 36.3 Source / ABI / layout / performance
+
+| Claim | Evidence |
+|---|---|
+| No declaration changed | `XNode.hpp` gains doc-comments only; both bodies are out-of-line in `.cpp` |
+| `sizeof`/`alignof` unchanged | no member added anywhere; the 23 `static_assert`s in the two permanent lifetime suites still hold (`XLinqLifetimeTests.PublicLayoutIsUnchangedByTheDetachContract` passes unmodified) |
+| No vtable slot added or reordered | no virtual function added, removed or reordered; `ValidateNode` keeps its signature (a change there would have been a vtable change, which §36.4 is precisely about avoiding) |
+| ABI — `XContainer.o` | **49 external/weak defined symbols before, 49 identical after** (`build-probe/XContainer_{prefix,postfix}.syms`) |
+| ABI — `XNode.o` | **46 before, 48 after**; the two added are weak COMDAT standard-library instantiations the new body needs locally — `std::_Sp_counted_base<_S_atomic>::_M_release()` and `std::vector<shared_ptr<XNode>>::insert(const_iterator, const&)`. **No symbol name was removed** (`build-probe/XNode_{prefix,postfix}.syms`) |
+| Allocations | success path adds **one `shared_ptr` copy** — an atomic refcount increment, no allocation. The rollback path allocates nothing at all (it reuses capacity the container already had) |
+| Migration | **none.** No consumer source edit; `XNode.cpp`/`XContainer.cpp` are library bodies, so consumers need only relink |
+
+### 36.4 Corrected premise — "validate before removing" is not implementable as written
+
+§25's #1891 entry and §14.3's row X-2 both say *"`ReplaceWith` validates every
+replacement **before** removing `this`"*. Both are preserved as written, and taken
+literally that design is **wrong**, because half of the validation is
+state-dependent on the node that is about to be removed.
+
+Measured: implementing exactly that wording — calling `c->ValidateNode(*n)` plus
+the ancestor guard for every replacement before `c->RemoveNode(this)` — makes
+
+```cpp
+doc->getRootProperty()->ReplaceWith(newRoot);
+```
+
+throw `This document already has a root element.`, because at validation time the
+document still holds the root that is being replaced. That is a supported
+operation today, it is what .NET does (`XNode.cs:537-547` removes first and then
+inserts), and the permanent test
+`XLinqMutationConsistencyTests.ReplaceWith_ADocumentRoot_ReplacesIt` fails under
+the experiment. The experiment was run and reverted; it is not shipped.
+
+The two ways to keep pre-validation and still get this right were both rejected:
+teaching `XContainer::ValidateNode` to ignore a node (a **protected virtual
+signature change**, i.e. a vtable change, which §31 does not ask for and this
+batch is not authorised to make), or giving `XContainer` a "node being replaced"
+member (an **object-layout change**, likewise unauthorised). **The shipped design
+removes first, and undoes the removal if any insertion is refused** — which
+reaches the acceptance criterion (*"X20 leaves `<a>victim</a>` intact"*) with no
+signature, vtable or layout consequence at all, and additionally covers the
+cumulative case pre-validation could never see: `ReplaceWith({e1, e2})` on an
+`XDocument` root, where both elements validate against a document that has no
+root and only the *second* insertion conflicts (permanent test
+`ReplaceWith_TwoRootElements_IsRejectedAndRestoresTheOriginalRoot`).
+
+### 36.5 What this ticket did **not** do
+
+- **A replacement that was already attached elsewhere and was inserted before a
+  later replacement was refused is left detached, not returned to its previous
+  position.** `Add`'s documented move semantics (§14.4, probe case X21) have no
+  inverse to roll back to, and restoring one would mean snapshotting every
+  container the call could touch — an allocation on every successful
+  `ReplaceWith` to improve one failure path. The behaviour is **asserted**, not
+  merely documented, by
+  `RejectedLaterReplacement_LeavesAMovedReplacementDetached`.
+- `std::bad_alloc` from a container's vector growth can still leave a node
+  removed from its previous owner and unadopted — the same residue §35.5 records
+  for `JsonObject`, for the same untestability reason.
+- Nothing owned by #1892 (X15/X17) or #1893 (X27c/X27d) was absorbed.
+  **SR-AUD-333 stays `confirmed (design-complete)`**: X15 and X17 are still
+  ASan-confirmed use-after-free inside this finding's own files.
+
+### 36.6 Where CCF-019 stands after §31 item 2
+
+| | #1885 baseline | after #1886/#1890 | after #1887/#1891 |
+|---|---|---|---|
+| ASan `heap-use-after-free` cases | 29 | 3 | **3** (J11, X15, X17) |
+| Faulting accesses, recoverable ASan | 57 | 5 | **5** |
+| `pure virtual method called` aborts | 8 | 0 | **0** |
+| ASan `stack-overflow`s | 3 | 3 | **3** (J19c, X27c, X28c) |
+| Timeouts | 2 | 2 | **2** (J19d, X27d) |
+| **Data-loss paths** | 2 (J10, X20) | 2 | **0** |
+| Leaks | 0 | 0 | **0** |
+
+**Both remaining data-loss paths are closed and neither finding is remediated.**
+The residue is J11 (#1889, layout change), J08/J09/J13 (#1888, source break),
+X15/X17 (#1892, source break) and the five deep-nesting cases (#1893,
+accepted-input change) — §31 items 3, 4, 5 and 6, all still unanswered.

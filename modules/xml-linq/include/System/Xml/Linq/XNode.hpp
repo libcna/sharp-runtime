@@ -75,10 +75,36 @@ namespace System::Xml::Linq {
         /** @brief Removes this node from its parent container. @throws System::InvalidOperationException if this node has no parent. */
         void Remove();
 
-        /** @brief Replaces this node with @p replacement (which may be nullptr, meaning "just remove this node"). @throws System::InvalidOperationException if this node has no parent. */
+        /**
+         * @brief Replaces this node with @p replacement (which may be nullptr, meaning "just
+         * remove this node").
+         * @throws System::InvalidOperationException if this node has no parent.
+         */
         void ReplaceWith(std::shared_ptr<XNode> replacement);
 
-        /** @brief Replaces this node with @p replacements. @throws System::InvalidOperationException if this node has no parent. */
+        /**
+         * @brief Replaces this node with @p replacements, in order, at this node's position.
+         *
+         * A rejected replacement leaves **this node where it was**. The container may refuse a
+         * replacement — because it is the container itself or one of the container's own
+         * ancestors, or because its node kind may not live there (an XDocument inside an
+         * XElement, a second root element in an XDocument, …) — and this node has to be removed
+         * before the replacements can be validated in the state they will actually be inserted
+         * into. If any insertion is then refused, every insertion this call had already made is
+         * undone and this node is put back at its original index with its original parent, so a
+         * caller that catches the exception finds the tree exactly as it left it. Previously the
+         * removal happened first and was never undone: `<a>victim</a>` became `<a/>` and the
+         * only signal was the exception.
+         *
+         * One bounded consequence remains, and it is deliberate: a replacement that was already
+         * attached somewhere and had been inserted before a *later* replacement was refused is
+         * left **detached** rather than returned to its previous position — `Add`'s documented
+         * move semantics have no inverse to roll back to.
+         *
+         * @throws System::InvalidOperationException if this node has no parent.
+         * @throws System::InvalidOperationException, System::ArgumentException if the container
+         * refuses a replacement; this node is unchanged in both cases.
+         */
         void ReplaceWith(const std::vector<std::shared_ptr<XNode>>& replacements);
 
         /** @return The sibling nodes before this node, in document order. Empty if this node has no parent. */

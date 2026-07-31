@@ -78,11 +78,39 @@ namespace System::Xml::Linq {
         auto it = std::find_if(siblings.begin(), siblings.end(),
                                 [this](const std::shared_ptr<XNode>& n) { return n.get() == this; });
         size_t index = static_cast<size_t>(it - siblings.begin());
+        // Keep this node alive and restorable across its own removal. `siblings` may hold its
+        // last owning reference, and the rollback below has to be able to put it back.
+        std::shared_ptr<XNode> replaced = (it != siblings.end()) ? *it : nullptr;
         c->RemoveNode(this);
-        for (const auto& n : replacements) {
-            if (!n) continue;
-            c->InsertNodeAt(index, n);
-            ++index;
+        size_t inserted = 0;
+        try {
+            for (const auto& n : replacements) {
+                if (!n) continue;
+                c->InsertNodeAt(index + inserted, n);
+                ++inserted;
+            }
+        } catch (...) {
+            // InsertNodeAt rejects a replacement that is the container itself or one of its
+            // own ancestors, and a container's ValidateNode rejects a node kind it may not
+            // hold. Without this rollback the node being replaced was already gone by then:
+            // `<a>victim</a>` became `<a/>` and the caller was left with a throw and no way
+            // to tell that the tree had lost content (probe case X20).
+            //
+            // Nothing here can throw. RemoveNode only searches, writes one raw pointer and
+            // erases; the final insert cannot reallocate, because the erases above left the
+            // capacity that had already held one more element than the container now holds.
+            size_t undone = 0;
+            for (const auto& n : replacements) {
+                if (!n) continue;
+                if (undone == inserted) break;
+                ++undone;
+                c->RemoveNode(n.get());
+            }
+            if (replaced) {
+                c->children_.insert(c->children_.begin() + static_cast<std::ptrdiff_t>(index), replaced);
+                XContainer::AdoptObject(*replaced, c);
+            }
+            throw;
         }
     }
 

@@ -39,9 +39,13 @@ namespace System::Xml::Linq {
         if (n->parent_ != nullptr) {
             n->parent_->RemoveNode(n.get());
         }
-        AdoptObject(*n, this);
         index = std::min(index, children_.size());
+        // Adopt only once the insertion has actually happened. The reverse order left `n`
+        // reporting this container as its parent while the container did not hold it, if the
+        // vector growth threw -- a node claiming an owner that has never heard of it, whose
+        // own Remove() would then silently do nothing (ticket #1891).
         children_.insert(children_.begin() + static_cast<std::ptrdiff_t>(index), n);
+        AdoptObject(*n, this);
     }
 
     void XContainer::Add(std::shared_ptr<XNode> node) {
