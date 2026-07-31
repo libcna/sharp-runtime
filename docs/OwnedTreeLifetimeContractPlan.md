@@ -2247,3 +2247,357 @@ root and only the *second* insertion conflicts (permanent test
 The residue is J11 (#1889, layout change), J08/J09/J13 (#1888, source break),
 X15/X17 (#1892, source break) and the five deep-nesting cases (#1893,
 accepted-input change) — §31 items 3, 4, 5 and 6, all still unanswered.
+
+---
+
+## 37. Compatibility review — #1888 (§31 item 3), **not implemented**
+
+*Recorded 2026-07-31 by the batch that landed #1887/#1891. That batch's instruction
+grants **no** approval for a public source break, so this section asks whether a
+**compatible** repair for J08/J09/J13 exists. Measured answer: **no**, and the
+half-repair that looks compatible is measurably worse than the break.*
+
+### 37.1 What each case actually is, after #1886
+
+| Case | Spelling | Still open? |
+|---|---|---|
+| **J08** | `JsonArray copy = *orig;` (implicit copy ctor) | the **use-after-free is closed** by #1886's `== this` guard; what remains is silent aliasing — two containers hold the same children, and the copy's `parent_` was copied from the original |
+| **J09** | `JsonNode& a = *attached; a = *detached;` (implicit copy assign) | open — `parent_` is overwritten on a node that is still stored |
+| **J13** | public `DetachParent()` on a still-stored node | open — one node then legitimately enters a second container |
+
+### 37.2 The three candidate compatible repairs, and why each fails
+
+**(a) A parent-preserving user-provided `operator=` on `JsonNode`** — the only J09
+repair that keeps every existing spelling compiling. **Measured** with
+`build-probe/1888_valuesem_probe.cpp` (a model of `JsonNode`'s exact shape,
+compiled `-Wall -Wextra -Wpedantic`):
+
+- it **does** fix J09 — *"attached parent is non-null (CORRECT)"*; and
+- it makes the implicitly declared copy **constructor** deprecated, so GCC emits
+  `warning: implicitly-declared 'Node::Node(const Node&)' is deprecated
+  [-Wdeprecated-copy]` at **every copy-construction site of every derived
+  container** (`build-probe/1888_valuesem_compile.log`). `-Wdeprecated-copy` is
+  part of `-Wextra`, which this repository builds with and whose non-negotiable
+  rule 1 is **zero warnings**. The warning would be emitted from a **public
+  header**, i.e. in consumer builds, not only here; and
+- it does **not** fix J08 — *"J08 still compiles; copy shares 1 item(s) whose
+  parent is the original: YES"*.
+
+A repair that fixes one of three cases and injects a warning into every consumer
+that copies is not a compatible repair.
+
+**(b) A deep-cloning user-provided copy constructor on `JsonArray`/`JsonObject`** —
+would keep `JsonArray copy = *orig;` compiling and make it well-defined. Rejected:
+it silently converts an O(1) alias into an O(tree) deep copy with allocations, and
+invents a value semantics **.NET does not have** (`JsonNode` is a reference type;
+`DeepClone()` is already the explicit spelling). Changing what an existing
+expression *does* is a broad observable semantic change, which this batch's
+instruction lists as unapproved alongside source breaks.
+
+**(c) Leaving `DetachParent()` public** — J13 has **no** compatible repair. The
+node cannot tell whether a container still stores it, so no runtime check exists;
+only visibility can close the door. `XObject` has no equivalent hole because its
+detach primitive (`AdoptObject`) is already `protected`.
+
+### 37.3 What §31 item 3 costs the repository, measured
+
+| Question | Measured answer |
+|---|---|
+| In-repo `DetachParent()` call sites outside the owning header | **1** — `JsonNodeLifetimeTests.cpp:186`, the test written *for* J13 |
+| In-repo `JsonNode` copy-construction or copy-assignment sites | **0** |
+| Automatic-storage `JsonArray`/`JsonObject` declarations in the repository's own tests | **96** — all unaffected, `= delete` on copy/move does not touch construction |
+| Layout / vtable | **unchanged** — `= delete` and a visibility change alter neither |
+
+So item 3's in-repository cost is **one test edit**. Its cost outside the
+repository is whatever external code copies a `JsonNode` subclass or calls
+`DetachParent()`; that cannot be measured here, because CNA and mobile-eggbert are
+outside this batch's boundary and were not inspected.
+
+### 37.4 Verdict
+
+**#1888 stays `needs_user`.** The design in §25 (`= delete` all four value
+operations, `DetachParent()` → `protected` + friend) remains the recommendation:
+it makes `JsonNode` match `XObject`, which already deletes all four with a comment
+explaining why, it is diagnosed at compile time rather than silently, and §37.2(a)
+shows the compatible-looking alternative is strictly worse. The approval wording
+in §31 item 3 is unchanged and still needed verbatim.
+
+---
+
+## 38. Compatibility review — #1892 (§31 item 5), **not implemented**
+
+*Same authorisation boundary as §37. Measured answer: **no compatible repair
+exists**, and — a new finding — **item 5 as currently worded is not implementable
+at all**.*
+
+### 38.1 X15 — `Extensions::Ancestors` / `AncestorsAndSelf`
+
+```cpp
+template <std::ranges::input_range R>
+[[nodiscard]] std::vector<XElement*> Ancestors(const R& source)
+```
+
+The returned vector **outlives the full-expression** and **owns nothing**. Probe
+X15 assigns it to a named variable, lets the tree die, and reads
+`anc[0]->getNameProperty()` — ASan `heap-use-after-free`.
+
+**§14.3's row X-4 says "return owning handles". That is not implementable.**
+Measured:
+
+1. `grep -rn "enable_shared_from_this" modules/xml-linq modules/text-json` → **0
+   hits**. No node type can produce a `shared_ptr` to itself.
+2. The only owning handles to a node live in its parent's `XContainer::children_`.
+   The **topmost** ancestor has no parent, so **no owning handle to it exists
+   anywhere in the tree**, and `Ancestors` returns exactly that ancestor for every
+   input.
+3. `XElement`, `XDocument` and `XContainer` are frequently **automatic-storage** —
+   **51** such declarations in the repository's own Xml.Linq tests alone — and for
+   those objects **no `shared_ptr` exists at all**, so there is nothing to return.
+
+Making X-4 implementable therefore requires adding
+`std::enable_shared_from_this` to `XObject` — **+16 bytes on a 16-byte base**,
+i.e. exactly §12's rejected candidate and exactly the class of change §31 item 4
+is about. **§31 item 5 as written silently depends on a layout change it does not
+mention.** It must be restated before it can be approved. The honest restatements
+are: *(i)* return `std::vector<std::shared_ptr<XElement>>` and accept that it can
+only be produced for ancestors that have a parent, rejecting or omitting the root;
+*(ii)* keep `std::vector<XElement*>` and **document** it as a borrowed view valid
+only while the tree lives; or *(iii)* add `enable_shared_from_this` under its own
+layout approval. Only *(ii)* is compatible, and *(ii)* closes nothing.
+
+### 38.2 X17 — `XElement::getAttributesProperty()`
+
+```cpp
+[[nodiscard]] const std::vector<std::shared_ptr<XAttribute>>& getAttributesProperty() const;
+[[nodiscard]] std::vector<std::shared_ptr<XAttribute>>        Attributes() const;   // ALREADY EXISTS
+```
+
+**A lifetime-safe spelling is already shipped and public.** `Attributes()` returns
+the same content **by value**; it is the `.NET`-named twin of the accessor and has
+no lifetime hazard. §14.3's parenthetical *"(or is removed in favour of
+`Attributes()`)"* is therefore the accurate description of the choice, and it
+changes what item 5 is asking for: if `getAttributesProperty()` returned by value
+it would become an **exact duplicate** of `Attributes()`.
+
+Compatibility of the by-value change, measured against the ordinary spellings:
+
+| Spelling | After a by-value change |
+|---|---|
+| `const auto& a = el->getAttributesProperty();` | compiles — lifetime-extended temporary |
+| `for (auto& a : el->getAttributesProperty())` | compiles — range-`for` extends the temporary |
+| `auto a = el->getAttributesProperty();` | compiles |
+| passing it to `const std::vector<…>&` parameter | compiles |
+| **`&el->getAttributesProperty()`** (probe X17's exact spelling) | **compile error** — cannot take the address of a prvalue |
+
+So it is *nearly* source-compatible and it fails exactly at the dangling
+spelling — but it **is** a **return calling-convention change** (a reference is
+returned in a register; a `std::vector` is returned through a hidden `sret`
+pointer), and it adds **one allocation plus N atomic increments per call** to an
+accessor that is free today. Both are on this batch's unapproved list.
+
+There is also a framing correction worth recording: X17 is the **ordinary C++
+reference-lifetime contract** — `std::vector::front()`, `std::string::c_str()` and
+every other accessor returning a reference behave identically. What makes X15
+different, and worse, is that its returned **object** survives the expression while
+its elements are borrowed, and nothing in `std::vector<XElement*>` says so.
+
+### 38.3 X-5 — `XAttribute::setNextAttributeProperty`
+
+`void setNextAttributeProperty(XAttribute* n) { next_ = n; }` is public and writes
+the intrusive sibling link directly. In-repo callers are the **three** sites in
+`XElement.cpp` that maintain the chain; `~XElement` deliberately writes `next_`
+directly instead (#1890), precisely so the destructor does not depend on a setter
+item 5 proposes to remove. Making it non-public is a source break by definition
+and has no compatible equivalent.
+
+### 38.4 Verdict
+
+**#1892 stays `needs_user`, and §31 item 5 needs rewording before it can be
+approved.** Nothing in it is implementable within this batch's boundary: X-3 is a
+return-convention change, X-4 is **not implementable as stated** and needs a
+layout change to become so, and X-5 is a source break. The two remaining
+ASan-confirmed use-after-free cases in CCF-019 are both here, so **SR-AUD-333
+cannot be remediated until item 5 is answered.**
+
+---
+
+## 39. Design package — #1889 (§31 item 4), **not implemented, approval-blocked**
+
+*Recorded 2026-07-31. **This prompt grants no approval for an object-layout
+change**, and none is claimed. This section completes the durable design so the
+decision can be taken from measurement rather than estimate. It corrects §31 item
+4's own description of the change.*
+
+### 39.1 Corrected premise — item 4 is **not only** a layout change
+
+§25 and §31 item 4 describe #1889 as *"`sizeof(JsonArray)`/`sizeof(JsonObject)`
+grow by 8"* and *"the only layout change proposed"*. Measured
+(`build-probe/1889_layout_probe.cpp`, `1889_layout.log`), it is **three** changes,
+two of which item 4 does not mention:
+
+```
+decltype(JsonArray::begin())  = __gnu_cxx::__normal_iterator<const std::shared_ptr<JsonNode>*,
+                                                             std::vector<std::shared_ptr<JsonNode>>>
+is vector<shared_ptr<JsonNode>>::const_iterator: YES        sizeof = 8
+```
+
+`JsonArray::begin()`/`end()` and `JsonObject::begin()`/`end()` return the
+**raw libstdc++ vector iterator**, not a type this project owns. A version-guarded
+enumerator cannot be that type, so item 4 additionally requires:
+
+- **a new public iterator type** and therefore a **changed return type** on four
+  public functions — a **source break** at every site that spells
+  `std::vector<std::shared_ptr<JsonNode>>::const_iterator` explicitly, and a
+  behaviour change for every `auto it = arr.begin();`;
+- **a silent ABI break**: a function's return type is *not* part of its Itanium
+  mangled name, so `_ZNK…9JsonArray5beginEv` keeps its name while changing what it
+  returns. An un-recompiled consumer links successfully and misbehaves — strictly
+  worse than a name change, which fails at link time.
+
+### 39.2 Exact affected types
+
+| Type | File | Role |
+|---|---|---|
+| `JsonArray` | `modules/text-json/include/System/Text/Json/Nodes/JsonArray.hpp` | gains the counter; `begin`/`end` change type |
+| `JsonObject` | `.../JsonObject.hpp` | same |
+| *(new)* `JsonArray::Enumerator`, `JsonObject::Enumerator` | same headers | the version-guarded iterators |
+| `JsonNode`, `JsonValue` | `.../JsonNode.hpp`, `.../JsonValue.hpp` | **unaffected** (24 / 40, no counter) |
+| `Text.Json` component | `modules/text-json/CMakeLists.txt` | gains a **public** edge → `Collections.Core` |
+| `CollectionVersionSeam.hpp`, `test/consumer/*_negative.cpp` | test trees | a new seam and its two mandatory checks |
+
+### 39.3 Layouts, measured before and modelled after
+
+| | before | after | delta |
+|---|---|---|---|
+| `sizeof(JsonNode)` / `alignof` | 24 / 8 | 24 / 8 | 0 |
+| `sizeof(JsonArray)` / `alignof` | **48** / 8 | **56** / 8 | **+8** |
+| `sizeof(JsonObject)` / `alignof` | **48** / 8 | **56** / 8 | **+8** |
+| `sizeof(JsonValue)` / `alignof` | 40 / 8 | 40 / 8 | 0 |
+| `sizeof(JsonArray` iterator`)` | **8** | **24** | **+16 (×3)** |
+| `sizeof(detail::MutationCounter)` | — | 8 | — |
+| `sizeof(detail::MutationVersion)` | — | 8 | — |
+
+Current field order is `vptr` (8), `JsonNode::parent_` (8), `options_` (8),
+container (24) = 48 with no tail padding, so the counter appends at offset 48 and
+`alignof` is unchanged. The iterator must carry the wrapped `__normal_iterator`
+(8), an owner back-pointer (8) and the snapshot (8) = 24.
+
+### 39.4 Vtable, symbols, class dumps
+
+- **No vtable change.** No virtual function is added, removed or reordered; the
+  counter is a data member and the enumerator is a non-polymorphic class.
+- **Symbols.** Four inline member functions (`begin`/`end` × 2) keep their mangled
+  names with different return types (§39.1); the new `Enumerator` types add weak
+  COMDAT symbols for their members; `sizeof` changes are not encoded in any
+  symbol. Reproduce with `build-probe/1886_layout_build.sh` and the
+  `1886_extsyms_*.txt` procedure, which already exists.
+- **Class dumps.** `-fdump-lang-class` before/after is the required evidence, as
+  #1886 used; not produced here because nothing was implemented.
+
+### 39.5 Stale-iterator behaviour, before and after
+
+| Case | Today | After |
+|---|---|---|
+| **J11** — iterator held across 64 `Add`s | ASan `heap-use-after-free`, `SIGSEGV` without a sanitizer | `InvalidOperationException` on dereference |
+| **J12** — `JsonObject` iterator held across `Clear()` | returns `"a"` from destroyed storage, **no diagnostic in any build** | `InvalidOperationException` |
+| iterator held across a non-mutating traversal | works | works, unchanged |
+| iterator outliving the **container** | undefined (the container's storage is gone) | **still undefined** — the snapshot lives in the iterator but the counter lives in the freed container, so the comparison itself reads freed memory |
+
+That last row is the design's honest limit and it must be in the approval:
+**a version counter closes mutation-invalidation, not owner-destruction.** J11's
+probe case destroys nothing, so it is closed; a hypothetical "iterator outlives
+its array" case is not, and would need §12's rejected shared-state candidate.
+
+### 39.6 The six alternatives, evaluated
+
+| Alternative | Layout cost | Closes J11/J12 | Verdict |
+|---|---|---|---|
+| **Counter in the container + snapshot in the iterator** (§25's proposal, and the contract 14 other collections in this repository already use) | +8 container, +16 iterator, new iterator type | **yes / yes** | the recommendation, *if* item 4 is approved |
+| Counter in the container only, no snapshot | +8, no iterator change | **no** — nothing to compare against | useless; recorded because it is the tempting "smaller" version |
+| **Shared invalidation state** (`shared_ptr<State>` co-owned by container and iterators, as `SortedSet<T>` uses) | +8 container, +16 iterator, **plus one allocation per container** | yes / yes, **and** survives owner destruction | strictly more capable and strictly more expensive; the only candidate that also closes the §39.5 last row |
+| **Heap token** (container owns a `shared_ptr<bool>`, iterator holds a `weak_ptr`) | +8 container, +16 iterator, one allocation per container | yes / yes | equivalent to shared state with a worse name; no advantage |
+| **Snapshot iterator** (`begin()` returns an iterator over a *copy* of the storage) | 0 container, iterator holds a `shared_ptr<vector>` | yes / yes | **no layout change**, but changes iteration semantics: mutations stop being visible to a live loop, and every `begin()` allocates and copies the whole container. A different contract, not a repair |
+| **Registry / ownership indirection** | 0 container, global map | yes / yes | a process-wide side table on every mutation; rejected on cost and thread-safety |
+| **Fail-fast vs lifetime-safe continuation** | — | — | .NET fail-fasts (`InvalidOperationException`). Recommended, but §39.7 records why .NET's choice does not by itself justify a C++ layout change |
+
+### 39.7 Why .NET's fail-fast does not settle it
+
+.NET's `List<T>`/`Dictionary<K,V>` enumerators throw
+`InvalidOperationException: Collection was modified` — but in .NET the version
+field costs nothing observable: there is no `sizeof` contract, no ABI, and the
+enumerator is a `struct` whose layout no consumer depends on. In C++ all three
+are observable, and the iterator type here is a **standard library type this
+project does not own**, so matching .NET's behaviour costs a public type change
+that .NET never had to make. **Parity is a reason to prefer the behaviour, not a
+reason to accept the cost.**
+
+### 39.8 Allocation and performance
+
+- Counter+snapshot: **zero allocations**; one increment per mutation, one
+  comparison per dereference; `+8` per container and `+16` per iterator.
+- Shared state / heap token: **one allocation per container**, on a type
+  constructed 96 times in this repository's own tests alone.
+- Snapshot iterator: **one allocation and a full container copy per `begin()`**.
+- Hot-path measurement required before landing: `1886_alloc_build.sh`'s
+  `operator new`/`delete` counting over construction, traversal and mutation, as
+  #1886 used.
+
+### 39.9 Copy / move / destruction consequences
+
+`detail::MutationCounter` deliberately has **no assignment operator that copies
+the source's value** (`docs/CollectionVersionCounterSweep.md`): assigning one
+container to another must not transplant the source's version. `JsonArray` and
+`JsonObject` currently have implicitly generated copy operations (probe J08), so
+adding the counter interacts with #1888 — **#1889 should land after #1888, not
+before**, or the counter's assignment semantics have to be reasoned about for an
+operation #1888 is going to delete anyway.
+
+### 39.10 Migration and rollback
+
+- **Migration.** Consumers must recompile (mandatory, and *silently* mandatory —
+  §39.1). Any consumer that spells the iterator type explicitly must edit; any
+  consumer that stores a `JsonArray`/`JsonObject` by value in a layout-sensitive
+  structure must re-check. CNA and mobile-eggbert were **not inspected**; #1773
+  remains `blocked`.
+- **Rollback.** Remove the two members, the two enumerator types and the four
+  `begin`/`end` bodies; revert `modules/text-json/CMakeLists.txt` and regenerate
+  `docs/generated/ComponentCatalog.md`; remove the seam entry and the negative
+  consumer sites. No data migration; no persisted format.
+
+### 39.11 Permanent test and mutation matrix
+
+| Test | Pins |
+|---|---|
+| J11 — `JsonArray` iterator across `Add` (reallocating and non-reallocating) | throws `InvalidOperationException` |
+| J12 — `JsonObject` iterator across `Clear` | throws |
+| iterator across `Insert`/`RemoveAt`/`Remove`/`SetItem`/`Add` (both containers) | every mutating entry point bumps |
+| iterator across a **non**-mutating traversal, `ToJsonString`, `DeepClone`, `getCountProperty` | does **not** throw |
+| `begin() == end()` on an empty container | works |
+| two live iterators, one mutation | both invalidate |
+| `static_assert(sizeof(JsonArray) == 56)` etc. | the approved layout, not an accidental one |
+| counter wrap (`MutationVersion` at max) | the documented ABA horizon |
+| `scripts/check_version_seam_odr.py` + `test/check_version_seam_odr_test.py` | 2 seams → **3** |
+| `test/consumer/text_json_node_version_negative.cpp` | the private counter is unreachable from a consumer |
+| **Mutations** | remove the bump from each mutator (must fail ≥1 each); remove the comparison from the dereference (must fail every stale case); widen/narrow the snapshot (must fail the wrap test) |
+
+### 39.12 Precise approval wording required
+
+> Approve, for `System::Text::Json::Nodes::JsonArray` and `JsonObject`:
+> **(1)** adding a `System::Collections::detail::MutationCounter` member, growing
+> `sizeof` from **48 to 56** for both (`alignof` unchanged at 8, no vtable change);
+> **(2)** replacing `begin()`/`end()`'s return type — today the raw
+> `std::vector<…>::const_iterator`, `sizeof` **8** — with a new project-owned
+> version-guarded enumerator, `sizeof` **24**, which is a **public source break**
+> at every site that spells the iterator type and a **silent ABI break** at
+> `begin()`/`end()`, whose mangled names do not change;
+> **(3)** a stale dereference throwing `System::InvalidOperationException` instead
+> of reading freed or destroyed storage;
+> **(4)** a new **public** component edge `Text.Json → Collections.Core`, taking
+> the module graph from **91 to 92** edges and requiring the generated catalogue to
+> be regenerated;
+> **(5)** a third version seam, with both its mandatory checks.
+>
+> This does **not** close the case of an iterator outliving its *container* (§39.5),
+> which no counter design can reach.
+
+**#1889 stays `needs_user`.** It should land **after** #1888 (§39.9).
