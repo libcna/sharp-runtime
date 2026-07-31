@@ -410,6 +410,45 @@ singleton leaves the other independently unsafe.  See SR-AUD-010 and:
 - `modules/core/src/System/Guid.cpp.audit.md`;
 - `modules/core/tests/System/GuidTests.cpp.audit.md`.
 
+**REMEDIATED AND COMPLETE — tickets #1901, #1902, #1903, 2026-07-31.** Both
+members now have a real ownership boundary and SR-AUD-010 is `remediated`,
+taking the post-audit tally to **58 remediated / 305 confirmed / 364**;
+numbering stays frozen at **364**, no new `SR-AUD-*` was issued and no `CCF-*`
+cause was added. Planned in `docs/SharedPrngConcurrencyPlan.md`, whose §11–§16
+hold the measured evidence.
+
+Each site kept its public API exactly, as this cause requires. `Guid::NewGuid`'s
+engine and distribution became per-thread (#1901) — nothing is handed out there,
+so per-thread state is exactly equivalent. `Random::getSharedProperty()` (#1902)
+kept **one object with one stable address on every thread** and moved only the
+mutable state per-thread, routed through `internalSample()`, the sole writer and
+the funnel every entry point on the class passes through. That asymmetry is the
+substantive finding of the family: the two singletons look alike but only one
+hands a reference to the caller, and .NET rejects the per-thread-instance
+shortcut explicitly at `Random.cs:755–759` for exactly that reason. Both repairs
+are confined to `.cpp` bodies — no header touched, `sizeof`/`alignof` unchanged
+and asserted, external symbols identical before and after.
+
+The rule this section states — that repairing one singleton leaves the other
+independently unsafe — was honoured procedurally: #1901 and #1902 each carried
+their own TSan gate and neither was allowed to close the finding, which ticket
+#1903 did only after both landed. The 8-thread probe reported **13** races at
+`Guid.cpp:344` and **6** inside `Random::internalSample()` before, and is clean
+at both sites after. +14 tests; ASan/UBSan/LSan clean; a seeded `Random(seed)`
+stream byte-identical across 4,928 dumped values; 100,000 concurrent `NewGuid()`
+with zero duplicates.
+
+**What TSan could not have caught, and why the mutation gate matters here.** Two
+plausible wrong repairs are perfectly race-free: a `thread_local` shared
+*instance*, and per-thread engines that every thread seeds identically. The first
+silently hands a cross-thread caller a different generator; the second replaces a
+data race with duplicate GUIDs. Both are pinned by tests that fail under
+mutation while every sanitizer stays green (§15). A future contributor reaching
+for either will be stopped by the suite, not by TSan.
+
+The `SortedSet<T>` exclusion recorded below is unaffected: #1784 was per-object,
+caller-owned state and remains **not** a member of this cause.
+
 **Related, but deliberately not a member (ticket #1784, 2026-07-28):** the
 `SortedSet<T>` live-view Count-cache race that ticket #1783 introduced and
 ticket #1784 removed is **not** a CCF-009 instance and must not be counted as

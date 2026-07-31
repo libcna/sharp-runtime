@@ -4159,3 +4159,65 @@ and no ticket created in this family carries an `SR-AUD-*` identifier. The next
 family, **CCF-009** (SR-AUD-010), is planned in
 `docs/SharedPrngConcurrencyPlan.md` with #1900–#1903. **CNA and mobile-eggbert
 were not inspected, searched, built or modified**, and #1773 remains `blocked`.
+
+## CCF-009 shared-PRNG batch, 2026-07-31 (tickets #1901, #1902, #1903) — SR-AUD-010 REMEDIATED, FAMILY COMPLETE
+
+The first family since the audit closed to be **finished outright**. CCF-009 was
+selected in `docs/SharedPrngConcurrencyPlan.md` §1 precisely because it could be:
+its only member is high severity, both defects are TSan-confirmed so the gate is
+objective, it is bounded at two implementation sites, and §6 predicted the whole
+repair was achievable with no signature, layout, vtable or ABI change — so no
+approval round stood between the plan and a finished repair. That prediction held
+exactly.
+
+**#1901 — `Guid::NewGuid`/`CreateVersion7`.** The process-wide `std::mt19937_64`
+and its distribution became per-thread. Nothing is handed to the caller at this
+site, so per-thread state is an exactly equivalent repair rather than a
+compromise; `CreateVersion7` inherits it through `NewGuid` with no edit.
+
+**#1902 — `Random::getSharedProperty`.** The harder half, and the family's
+substantive finding: the two singletons look alike, but only this one hands a
+**reference** to the caller. The shared object therefore stays one object with
+**one stable address on every thread**, and only its mutable state became
+per-thread, routed through `internalSample()` — the sole writer of
+`seedArray_`/`inext_`/`inextp_` and the funnel every entry point on the class
+passes through, including the header-inline templates and the `protected
+Sample()` seam. The one-word shortcut — a `thread_local` instance — is the repair
+.NET rejects explicitly at `Random.cs:755–759`, because a caller may obtain
+`Shared` on one thread and use it on another. The `Sample()` seam risk the plan
+flagged did **not** materialise (a derived `Random` can never be the shared
+instance) and the recorded mutex fallback was not needed.
+
+**#1903** flipped the finding only after both sites landed, honouring the
+cross-cutting record's rule that repairing one singleton leaves the other
+independently unsafe.
+
+Evidence: the 8-thread TSan probe reported **13** races at `Guid.cpp:344` and
+**6** inside `Random::internalSample()` **before**, and is **clean at both sites
+after** — the before-run being both the proof the gate can fail and the per-site
+mutation evidence. A seeded `Random(seed)` stream is **byte-identical** to the
+pre-repair one across **4,928** dumped values covering every entry point.
+100,000 concurrent `NewGuid()` across 8 threads yield zero duplicates and zero
+nil values. **+14 permanent tests**, floor **14,731 → 14,745** across 37
+executables; ASan+UBSan+LSan clean over 168/168; no header touched;
+`sizeof`/`alignof` of `Random` (240/8) and `Guid` (16/1) unchanged and asserted;
+`nm --extern-only` **identical** before and after on both objects.
+
+**Four mutations were run, and two of them are the point.** A `thread_local`
+shared instance and identically-seeded per-thread engines are both perfectly
+race-free, so no sanitizer can see them — the first silently hands a cross-thread
+caller a different generator, the second replaces a data race with duplicate
+GUIDs. Both fail the new tests while TSan stays green. Two costs are recorded
+rather than glossed: one acquire load and branch per draw, which `NextBytes` pays
+per byte (hoisting it would need a public-header edit), and move-assigning *to*
+the shared instance now has no effect on its output where before it corrupted the
+shared stream.
+
+**SR-AUD-010 flips `confirmed → remediated`**, taking the post-audit tally to
+**58 remediated / 305 confirmed / 364 total**; numbering stays frozen at **364**,
+no new `SR-AUD-*` identifier was issued and no `CCF-*` cause was added.
+SR-AUD-050 (`NewGuid` uses a predictable PRNG, not the platform CSPRNG) is a
+different finding at the same lines and **stays `confirmed`** — this batch changed
+who owns the engine, not what kind of entropy it produces. **CNA and
+mobile-eggbert were not inspected, searched, built or modified**, and #1773
+remains `blocked`.

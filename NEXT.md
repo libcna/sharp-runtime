@@ -4,9 +4,15 @@
 # NEXT.md
 
 *Last verified: 2026-07-31. Branch:
-`feature/remediation-ccf019-final-compatible` (previously
-`feature/remediation-ccf019-residuals`). The test floor rose to **14,731** (was
-14,683). The user decided **§31 items 3–6**: items 3 (#1888) and 4 (#1889) are
+`feature/remediation-ccf019-final-compatible`. The test floor rose to **14,745**
+(was 14,731). **CCF-009 is COMPLETE and SR-AUD-010 is `remediated`** — the first
+post-audit family finished outright rather than left design-complete or
+approval-blocked. Tickets **#1901**, **#1902** and **#1903** are all `done`, none
+needed user approval, and the post-audit tally moves for the first time in
+several batches: **58 remediated / 305 confirmed / 364**, numbering still frozen
+at 364. See "Autonomous remediation batch handoff, 2026-07-31 (CCF-009 shared
+PRNG)" immediately below. Previously, on the same branch, the floor rose to
+14,731 (was 14,683) and the user decided **§31 items 3–6**: items 3 (#1888) and 4 (#1889) are
 **declined** and moved `needs_user → blocked` with their designs preserved for a
 coordinated ABI-breaking release; item 5's wording is **rejected as
 non-implementable** and replaced by §42 (#1898 **done**, #1899 **blocked** on one
@@ -306,6 +312,90 @@ per this repository's practice of preserving historical audit narrative.*
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
+
+## Autonomous remediation batch handoff, 2026-07-31 (CCF-009 shared PRNG)
+
+**CCF-009 is COMPLETE. SR-AUD-010 is `remediated`.** Tickets **#1901**, **#1902**
+and **#1903** are all `done`; **#1900** (the plan) was already `done`. Nothing in
+this family needed user approval, and nothing was left blocked.
+
+### What changed
+
+Two `.cpp` bodies and their two test files. **No header was touched.**
+
+| Ticket | Site | Repair |
+|---|---|---|
+| #1901 | `Guid::NewGuid` (+ `CreateVersion7` through it) | engine and distribution became per-thread |
+| #1902 | `Random::getSharedProperty()` | shared object keeps **one stable address on every thread**; `internalSample()` routes the draw to the calling thread's generator |
+
+The asymmetry is the family's real finding: the two singletons look alike, but
+only `Random` hands a **reference** to the caller, so it could not simply become
+per-thread. The one-word shortcut — `static thread_local Random instance;` — is
+the repair .NET rejects explicitly at `Random.cs:755–759`, because a caller may
+obtain `Shared` on one thread and use it on another. `internalSample()` is the
+sole writer of `seedArray_`/`inext_`/`inextp_` and the funnel every entry point
+passes through, including the header-inline templates and the `protected
+Sample()` seam, so one pointer comparison covers the whole public surface.
+
+**Two plan risks did not materialise, and are recorded as closed, not forgotten.**
+The `Sample()` seam concern (plan §9) is moot — a derived `Random` can never *be*
+the shared instance — so the recorded **mutex fallback was not needed and is not
+used**. The plan's §6 warning about identically-seeded threads *was* real and is
+handled: both sites mix a once-per-process entropy base with an atomic counter
+through an odd multiplier, so seeds are distinct by construction even where
+`std::random_device` is deterministic (MinGW-w64 historically was).
+
+**One judgement call made during implementation, not in the plan.** The
+per-thread `Random` is placement-constructed in thread-local storage and
+deliberately **never destroyed**. A plain `thread_local Random` is destroyed at
+thread exit, which would dangle for any code drawing from `Shared` *during*
+teardown — a window the old process-wide instance did not have. Nothing leaks
+(TLS storage, no owned resource; LSan confirms), and it keeps
+`__cxa_thread_atexit` out of the object, measured absent, which matters for the
+compile-only MinGW and Emscripten targets.
+
+### Evidence
+
+- **TSan, before and after.** One probe, 8 threads, per-site selectable. Before:
+  **13** races at `Guid.cpp:344`, **6** inside `Random::internalSample()`.
+  After: **0** at both sites. The before-run is both the proof the gate can fail
+  and the per-site mutation evidence.
+- **Determinism.** A seeded `Random(seed)` stream is **byte-identical** to the
+  pre-repair one across **4,928** dumped values, 8 seeds × every entry point.
+- **Uniqueness.** 100,000 concurrent `NewGuid()` across 8 threads: zero
+  duplicates, zero nil, version/variant checked on every one.
+- **+14 tests** (6 Guid, 8 Random); floor **14,731 → 14,745** across 37
+  executables. ASan+UBSan+LSan clean over 168/168. `local_ci_check.sh` passes.
+- **ABI.** `nm --extern-only` **identical** before and after on both objects (58
+  and 87 symbols). `sizeof`/`alignof` unchanged — `Random` 240/8, `Guid` 16/1 —
+  asserted at compile time and at run time.
+
+**Four mutations were run and two of them are the point:** a `thread_local`
+shared instance and identically-seeded per-thread engines are both perfectly
+race-free, so **no sanitizer can see them**; both fail the new tests. That is
+what the suite buys over TSan.
+
+**Two costs recorded rather than glossed:** one acquire load and branch per draw,
+which `NextBytes` pays per byte (hoisting it would need a public-header edit);
+and move-assigning *to* the shared instance now has no effect on its output where
+before it corrupted the shared stream — both pathological, neither pinned.
+
+### Scope boundaries held
+
+SR-AUD-050 (`NewGuid` uses a predictable PRNG, not the platform CSPRNG) sits at
+the same lines and **stays `confirmed`** — this batch changed who owns the
+engine, not what entropy it produces. CNA and mobile-eggbert were not inspected,
+searched, built or modified; **#1773 remains `blocked`**. No push, merge, rebase,
+tag or publication occurred.
+
+### Next
+
+There is **no ready work left in CCF-009**. The next session should select a new
+cross-cutting family from `audit/AUDIT_CROSS_CUTTING_FINDINGS.md` — the
+`plan.sqlite3` `task` queue is still fully classified, so `prompt.md` Step 1 has
+nothing to select and the established fallback applies. Open approval questions
+elsewhere are unchanged: **#1899** and **#1897** each need one user decision;
+**#1888**, **#1889** and **#1896** are declined with designs preserved.
 
 ## Autonomous remediation batch handoff, 2026-07-31 (CCF-019 compatible closure + CCF-009 plan)
 

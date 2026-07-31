@@ -8,6 +8,7 @@
 #include "System/OverflowException.hpp"
 #include "System/DateTimeOffset.hpp"
 
+#include <atomic>
 #include <random>
 #include <algorithm>
 #include <utility>
@@ -336,9 +337,45 @@ namespace System {
         return FromCanonicalBytes(b);
     }
 
+    namespace {
+
+        // -------------------------------------------------------------------
+        // Per-thread generator for NewGuid (CCF-009 / SR-AUD-010, ticket #1901).
+        //
+        // These were function-local `static`s, i.e. one process-wide engine and
+        // distribution that every caller advanced with no synchronisation.
+        // C++11 guarantees only that their *initialisation* is thread-safe, not
+        // the mutation that follows, so concurrent NewGuid() calls raced on the
+        // engine's internal state -- ThreadSanitizer reported it. Nothing is
+        // handed out to the caller here (unlike Random::getSharedProperty(),
+        // which must keep one stable address), so giving each thread its own
+        // engine is a complete and exactly equivalent repair.
+        std::mt19937_64& newGuidEngine() {
+            // Seeded from a per-thread sequence rather than std::random_device
+            // alone: a platform whose random_device is deterministic -- as
+            // MinGW-w64's historically was -- would otherwise hand every thread
+            // the identical seed and so the identical GUID stream, turning a
+            // data race into duplicate GUIDs. `base` contributes real entropy
+            // once per process where it exists; the counter guarantees the
+            // seeds are distinct even where it does not.
+            static std::atomic<uint64_t> counter{0};
+            static const uint64_t base =
+                (static_cast<uint64_t>(std::random_device{}()) << 32) ^ std::random_device{}();
+
+            static thread_local std::mt19937_64 engine{[] {
+                const uint64_t n = counter.fetch_add(1, std::memory_order_relaxed);
+                // Multiplying by an odd constant is a bijection modulo 2^64, so
+                // distinct counter values always yield distinct seeds.
+                return base + n * 0x9E3779B97F4A7C15ULL;
+            }()};
+            return engine;
+        }
+
+    } // namespace
+
     Guid Guid::NewGuid() {
-        static std::mt19937_64 rng{std::random_device{}()};
-        static std::uniform_int_distribution<uint32_t> dist(0, 255);
+        std::mt19937_64& rng = newGuidEngine();
+        static thread_local std::uniform_int_distribution<uint32_t> dist(0, 255);
 
         std::array<bytecs, 16> b{};
         for (auto& byte : b) byte = static_cast<bytecs>(dist(rng));

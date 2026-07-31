@@ -8,6 +8,9 @@
 #include "System/Random.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 
+#include <atomic>
+#include <new>
+
 namespace System {
 
     // -----------------------------------------------------------------------
@@ -28,6 +31,83 @@ namespace System {
     namespace {
         inline int32_t wrappingSub(int32_t a, int32_t b) {
             return static_cast<int32_t>(static_cast<uint32_t>(a) - static_cast<uint32_t>(b));
+        }
+
+        // -------------------------------------------------------------------
+        // Ownership boundary for the shared instance
+        // (CCF-009 / SR-AUD-010, ticket #1902).
+        //
+        // getSharedProperty() returns a *reference*, so the object it names has
+        // to stay one object with one stable address on every thread. .NET
+        // rejects the obvious shortcut -- a per-thread instance -- explicitly:
+        // "It's also possible that one thread could retrieve Shared and pass it
+        // to another thread, so Shared can't just access a ThreadStatic to
+        // return a Random instance stored there" (Random.cs, lines 755-759).
+        // The shared *object* therefore stays shared, and the mutable generator
+        // *state* it draws from becomes per-thread: every generator entry point
+        // in this class funnels through internalSample(), which is the only
+        // method that writes seedArray_/inext_/inextp_, so routing there covers
+        // the whole public surface -- including the header-inline templates and
+        // the protected Sample() seam -- with one test.
+        //
+        // The check is a pointer comparison, deliberately: a `bool isShared_`
+        // member would have changed sizeof(Random), and Random's state lives in
+        // the public header.
+        //
+        // The address is published by getSharedProperty()'s initialiser and read
+        // by internalSample() on other threads, so it is atomic. It stays null
+        // for the duration of the shared instance's own construction, which is
+        // intentional -- a generator call made from inside that construction
+        // takes the ordinary path on the real object rather than re-entering the
+        // static initialisation it is already inside.
+        std::atomic<const Random*> sharedInstanceAddress{nullptr};
+
+        /**
+         * @brief Produces one distinct seed per thread for the shared instance's
+         *        stand-in generator.
+         *
+         * Not derived from std::random_device alone: on a platform whose
+         * random_device is deterministic (MinGW-w64's historically was) every
+         * thread would seed identically and produce the identical stream, which
+         * is the failure §6 of docs/SharedPrngConcurrencyPlan.md warns about.
+         * `base` supplies process entropy where it exists; the counter
+         * guarantees distinctness where it does not.
+         */
+        intcs nextThreadSeed() {
+            static const uint32_t base = std::random_device{}();
+            static std::atomic<uint32_t> counter{0};
+            const uint32_t n = counter.fetch_add(1, std::memory_order_relaxed);
+            // Reduced to 31 bits because initializeSeed() takes |seed|, so a
+            // negative seed would collide with its positive twin. Multiplying by
+            // an odd constant is a bijection modulo 2^31, and reducing a mod-2^32
+            // computation modulo 2^31 is the same as computing it modulo 2^31,
+            // so distinct counter values always yield distinct seeds.
+            return static_cast<intcs>((base + n * 2654435761u) & 0x7FFFFFFFu);
+        }
+
+        /**
+         * @brief The calling thread's own generator, standing in for the shared
+         *        instance's state.
+         *
+         * A full Random, so the per-thread stream is produced by exactly the
+         * same ported algorithm rather than a second one kept in sync by hand.
+         *
+         * Constructed in thread-local storage and deliberately never destroyed.
+         * A plain `thread_local Random` would be destroyed at thread exit, which
+         * would leave any code that draws from the shared instance *during*
+         * thread teardown -- another thread_local's destructor, say -- holding a
+         * reference to a destroyed object. The old process-wide instance had no
+         * such window, so the repair must not open one. Skipping the destructor
+         * leaks nothing: the storage is thread-local, not heap, and Random owns
+         * no resource. It also keeps this translation unit free of a
+         * `__cxa_thread_atexit` dependency, which matters for the compile-only
+         * MinGW and Emscripten targets.
+         */
+        Random& sharedStateForThisThread() {
+            alignas(Random) static thread_local unsigned char storage[sizeof(Random)];
+            static thread_local Random* state = nullptr;
+            if (state == nullptr) state = ::new (static_cast<void*>(storage)) Random(nextThreadSeed());
+            return *state;
         }
     }
 
@@ -69,6 +149,16 @@ namespace System {
     }
 
     int32_t Random::internalSample() {
+        // The shared instance owns no mutable state of its own -- see the
+        // ownership-boundary comment above. This is not recursion: the
+        // stand-in is a different object, so it falls through to the body
+        // below. Its cost is one acquire load and one predictable branch per
+        // draw, paid by every generator call including per byte of NextBytes;
+        // hoisting it out of the loops would mean a new private member
+        // function, i.e. a public-header edit, which this repair avoids.
+        if (this == sharedInstanceAddress.load(std::memory_order_acquire))
+            return sharedStateForThisThread().internalSample();
+
         int locINext = inext_;
         if (++locINext >= 56) locINext = 1;
 
@@ -244,6 +334,14 @@ namespace System {
     Random& Random::getSharedProperty()
     {
         static Random instance;
+        // Published after `instance` is fully constructed and before this
+        // function can hand its address to any thread, so every internalSample()
+        // that can observe the shared instance observes the published address
+        // too. Once published, `instance` is never written again.
+        [[maybe_unused]] static const bool addressPublished = [] {
+            sharedInstanceAddress.store(&instance, std::memory_order_release);
+            return true;
+        }();
         return instance;
     }
 

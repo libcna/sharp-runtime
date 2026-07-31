@@ -49,6 +49,36 @@ public reference API (for example a mutex-protected facade or thread-local
 backing generators), then add a multi-thread stress test and a focused TSan
 run.  Do not merely remove the documentation claim without an API decision.
 
+**REMEDIATED — ticket #1902, 2026-07-31.** The design chosen is thread-local
+backing generators behind an unchanged shared object, which is what .NET itself
+does (`Random.cs:752–773`). `getSharedProperty()` still returns one `static
+Random` with a **stable address on every thread** — the per-thread-*instance*
+shortcut is the one .NET rejects explicitly at `Random.cs:755–759`, because a
+caller may obtain `Shared` on one thread and use it on another — and
+`internalSample()`, the only method that writes `seedArray_`/`inext_`/`inextp_`
+and the funnel every entry point on the class passes through, routes the draw to
+the calling thread's own generator when `this` is the shared instance. After
+construction the shared object is never written again.
+
+The check is a pointer comparison inside this file, not a member: `Random`'s
+state lives in the public header, so a `bool isShared_` would have been an
+object-layout change. **No header was touched**, `sizeof(Random)`/`alignof` are
+unchanged at 240/8 and asserted in the suite, and `nm --extern-only` over this
+translation unit before and after is **identical** at 58 external symbols.
+
+The 8-thread TSan probe reported **6** races here before the repair
+(`internalSample()` lines 72, 78, 83, 84, 85) and is **clean** after. A seeded
+`Random(seed)` stream is byte-identical to the pre-repair one across 4,928
+dumped values covering every entry point. +8 tests, ASan/UBSan/LSan clean,
+mutation-checked — including against the .NET-rejected shortcut, which is
+race-free and so invisible to TSan but fails
+`Shared_ReferenceIsTheSameAddressOnEveryThread`. Full evidence:
+`docs/SharedPrngConcurrencyPlan.md` §11–§16.
+
+The `protected Sample()` seam concern raised in the plan did **not** materialise:
+a derived `Random` can never be the shared instance, so derived types are
+untouched, and the recorded mutex fallback was not needed.
+
 ## Positive findings
 
 The seeded algorithm has direct cross-runtime parity vectors for several

@@ -209,3 +209,158 @@ CCF-009 is complete when **all** hold:
 6. **SR-AUD-010 flips `confirmed → remediated`**, taking the post-audit tally from
    57/306/364 to **58 remediated / 305 confirmed / 364**, with numbering still
    frozen at 364 and no new `SR-AUD-*` issued.
+
+---
+
+# Implementation record — 2026-07-31
+
+*Sections 1–10 above are the plan as written before any code changed. Everything
+below is measured, on branch `feature/remediation-ccf019-final-compatible`.
+Tickets **#1901**, **#1902** and **#1903** are all `done`; **CCF-009 is complete**
+and **SR-AUD-010 is `remediated`**. Probe binaries have been deleted per
+`CLAUDE.md` build-resource rule 11 — this section is the durable evidence.*
+
+## 11. The TSan gate, before and after
+
+One probe, `build-probe/1901_ccf009_tsan_probe.cpp`, 8 threads × 2,000 draws per
+site, selectable per site with `argv[1]` so each defect is attributed to its own
+source. Built by `build-probe/1901_tsan_cc.sh` driven with `xargs -P 3` — the
+40 `Core.Base` translation units the probe needs, compiled with
+`-fsanitize=thread`, **not** a `build-tsan/` tree (which was never created: the
+targeted set costs ~30 MB and 11 s instead of hundreds of MB).
+
+| Probe mode | Before | After |
+|---|---|---|
+| `guid` | **13** data races, all at `Guid.cpp:344` (`dist(rng)`) | **0**, exit 0 |
+| `random` | **6** data races, all inside `Random::internalSample()` — lines 72, 78, 83, 84, 85, i.e. `inext_`, `inextp_` and `seedArray_` | **0**, exit 0 |
+| `both` | — | **0**, exit 0 |
+
+The before-run is the mandatory half: it proves the gate can fail, and it is also
+the **per-site mutation evidence** §8's last row asks for, because it *is* the
+code with the ownership boundary removed at that site.
+
+## 12. What was actually changed
+
+Both repairs are confined to `.cpp` bodies. **No header was touched** — `git
+status` over the change lists exactly `Random.cpp`, `Guid.cpp`, `RandomTests.cpp`,
+`GuidTests.cpp`.
+
+**#1901 — `Guid::NewGuid`.** The function-local `static std::mt19937_64` and
+`static std::uniform_int_distribution` became a per-thread engine reached through
+a file-local `newGuidEngine()`, plus a `thread_local` distribution. Nothing is
+handed to the caller here, so per-thread state is exactly equivalent — §5's
+constraint applies only to `Random`. `CreateVersion7` inherits the repair through
+`NewGuid` with no edit of its own.
+
+**#1902 — `Random::getSharedProperty`.** As §6 predicted, the shared instance
+stays one `static Random` with a stable address, and `internalSample()` gains a
+pointer comparison: if `this` is the shared instance, the draw is taken from the
+calling thread's own generator instead. `internalSample()` is the **only** method
+that writes `seedArray_`/`inext_`/`inextp_`, and every entry point on the class
+funnels through it — including the header-inline templates (`NextInteger`,
+`Shuffle`, `GetItems`) and the `protected Sample()` seam — so one test covers the
+whole public surface. After construction the shared object is never written
+again.
+
+Three things were decided during implementation rather than left implicit:
+
+1. **The `Sample()` seam concern in §9 did not materialise, and the mutex
+   fallback was not needed.** A derived `Random` can never *be* the shared
+   instance — `getSharedProperty()` constructs a `Random` — so `this == &shared`
+   is false for every derived object and derived types are untouched. Pinned by
+   `RandomTests.Shared_DerivedInstancesAreNotAffectedByTheBoundary`.
+2. **Per-thread seeds are made distinct by construction, not by entropy.**
+   §6 flagged that identically-seeded threads would produce identical streams;
+   deriving the seed from `std::random_device` alone would do exactly that on a
+   platform whose `random_device` is deterministic, as MinGW-w64's historically
+   was. Both sites therefore mix a once-per-process entropy `base` with an atomic
+   counter through an odd multiplier, which is a bijection on the modulus and so
+   guarantees distinctness even where the entropy is absent. `Random`'s seed is
+   reduced to 31 bits because `initializeSeed()` takes `|seed|`, so `+n` and `-n`
+   would otherwise collide.
+3. **The per-thread `Random` is placement-constructed in thread-local storage and
+   deliberately never destroyed.** A plain `thread_local Random` is destroyed at
+   thread exit, which would leave code that draws from the shared instance
+   *during* teardown — another `thread_local`'s destructor — holding a reference
+   to a destroyed object. The process-wide instance had no such window, so the
+   repair must not open one. Nothing leaks: the storage is thread-local, not
+   heap, and `Random` owns no resource (LSan confirms, §14). It also keeps the
+   translation unit free of `__cxa_thread_atexit`, measured: that undefined
+   reference appears with a plain `thread_local Random` and is **absent** from the
+   shipped object, which matters for the compile-only MinGW and Emscripten
+   targets.
+
+**One cost, recorded rather than hidden:** the boundary check is one acquire load
+and one predictable branch *per draw*, which `NextBytes` pays per byte. Hoisting
+it out of the loops would require a new private member function — a public-header
+edit — so it was not done.
+
+**One behavioural note:** move-assigning *to* the shared instance now has no
+effect on the values it produces, where before it corrupted the shared stream.
+Both are pathological and the second was already a data race; no test pins either.
+
+## 13. Determinism — measured, not argued
+
+`build-probe/1902_determinism_dump.cpp` dumps **4,928 lines** — 8 seeds (`0`, `1`,
+`7`, `42`, `-1`, `-12345`, `INTCS_MAX`, `INTCS_MIN`) across `Next()` ×3,
+`NextInt64()` ×3, `NextDouble`, `NextSingle`, `NextBytes` ×2, `GetString`,
+`GetHexString` ×2, `Shuffle`, `GetItems` and `NextInteger<T>` ×3 — compiled twice,
+once against `HEAD`'s `Random.cpp` and once against the repaired one, and
+**`cmp` reports the two dumps byte-identical**. The seeded path is untouched,
+value for value. The pre-existing `RandomTests.Parity_*` suite, pinned against
+live Mono output, is unchanged and still passes.
+
+## 14. Test, sanitizer and ABI results
+
+| Gate (§8) | Result |
+|---|---|
+| TSan | §11 — races before, **0** after, at both sites |
+| ASan + UBSan + LSan | `build-asan/SharpRuntimeTests_Core_Base`, `GuidTests.*:RandomTests.*` — **168 passed, 0 diagnostics** |
+| Determinism | §13 — byte-identical, 4,928 lines |
+| Per-thread independence | `Shared_DistinctThreadsDoNotShareAStream`, `NewGuid_DistinctThreadsDoNotShareAStream` |
+| Reference stability | `Shared_ReferenceIsTheSameAddressOnEveryThread` — 8 threads, all `==` the main thread's address |
+| Cross-thread handoff | `Shared_ReferenceObtainedOnOneThreadStaysUsableOnAnother` |
+| Uniqueness | `NewGuid_ConcurrentAcrossThreads_NoDuplicateNoNil` — **100,000** GUIDs, 8 × 12,500, zero duplicates, zero nil, version 4 and variant nibbles checked on every one |
+| `CreateVersion7` | monotone prefix within a thread; every concurrent prefix inside the `[before, after]` window; 16,000 concurrent values, zero duplicates |
+| Mutation | §15 |
+| Layout | `sizeof(Random) == 240`, `alignof == 8`; `sizeof(Guid) == 16`, `alignof == 1` — `static_assert` **and** runtime `EXPECT` in both suites |
+
+**ABI.** `nm -C --defined-only --extern-only` over `Random.o` and `Guid.o`,
+before versus after: **identical, both files** — 58 and 87 external symbols, none
+added, removed or renamed. The only new symbols are internal-linkage (`t`/`b`):
+the file-local helpers and their TLS guards. The only new undefined reference is
+`_GLOBAL_OFFSET_TABLE_`.
+
+**Test count.** 14,731 → **14,745** (+14: 6 in `GuidTests`, 8 in `RandomTests`),
+37 executables, zero failures. `scripts/local_ci_check.sh` passes.
+
+## 15. Mutation gate — what the tests actually pin
+
+TSan alone cannot distinguish a correct repair from a plausible wrong one: both
+the `.NET`-rejected shortcut and an identically-seeded per-thread engine are
+race-free. Each mutation below was applied to the shipped code, the `Core.Base`
+test binary rebuilt at three jobs, the concurrency tests run, and the file
+restored (`build-probe/1901_mutation_check.sh`).
+
+| Mutation | Caught by |
+|---|---|
+| **A** — the boundary removed at either site (i.e. `HEAD`) | the TSan gate, per site, §11 |
+| **B** — `static thread_local Random instance;` in `getSharedProperty()`, the shortcut .NET rejects at `Random.cs:755–759` | `Shared_ReferenceIsTheSameAddressOnEveryThread` **fails**; the other 15 pass, and TSan stays clean — which is the whole point |
+| **C** — `Random`'s per-thread seed made a constant | `Shared_DistinctThreadsDoNotShareAStream` and `Shared_ConcurrentDrawsAreInRangeAndVaried` **fail** |
+| **D** — `Guid`'s per-thread seed made a constant | `NewGuid_DistinctThreadsDoNotShareAStream`, `NewGuid_ConcurrentAcrossThreads_NoDuplicateNoNil` and `CreateVersion7_ConcurrentAcrossThreads_NoDuplicateAndWellFormed` **fail** |
+
+Mutation **B** is the load-bearing one: it is the repair a future contributor is
+most likely to reach for, it passes every sanitizer, and it silently breaks the
+contract §5 exists to protect.
+
+The 18 concurrency tests were also run under `--gtest_repeat=20` (and again ×10
+after the §12.3 refinement) with no failure and ~100 ms per pass, so they are
+neither flaky nor a meaningful addition to gate time.
+
+## 16. Completion
+
+All six criteria in §10 hold. **CCF-009 is complete**; **SR-AUD-010 flips
+`confirmed → remediated`**, taking the post-audit tally to **58 remediated / 305
+confirmed / 364**, numbering still frozen at **364**, no new `SR-AUD-*` issued and
+no `CCF-*` cause added. `CNA` and `mobile-eggbert` were not inspected, built or
+modified.

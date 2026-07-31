@@ -48,6 +48,34 @@ identifies `System::Guid::NewGuid()::rng` as the global location.  This is a
 second independently reproduced instance of SR-AUD-010, not an inference from
 the `Random::Shared` report.
 
+**REMEDIATED — ticket #1901, 2026-07-31.** The engine and the distribution are
+now per-thread, reached through a file-local `newGuidEngine()`. Nothing is handed
+out to the caller here — unlike `Random::getSharedProperty()`, which must keep
+one stable address — so per-thread state is an exactly equivalent repair rather
+than a compromise. `CreateVersion7` inherits it through `NewGuid` with no edit of
+its own, and its timestamp prefix comes from the clock, so it is unaffected.
+
+Each thread's seed mixes a once-per-process `std::random_device` `base` with an
+atomic counter through an odd multiplier, which is a bijection modulo 2^64 and so
+guarantees **distinct** seeds even on a platform whose `random_device` is
+deterministic — as MinGW-w64's historically was. Seeding from `random_device`
+alone would have removed the race and replaced it with duplicate GUIDs; that
+mutation is pinned and fails three tests.
+
+The 8-thread TSan probe reported **13** races at `Guid.cpp:344` before and is
+**clean** after. 100,000 concurrent `NewGuid()` across 8 threads produce zero
+duplicates and zero nil values with correct version/variant nibbles; 16,000
+concurrent `CreateVersion7()` likewise. `sizeof(Guid)`/`alignof` unchanged at
+16/1 and asserted; `nm --extern-only` over this translation unit is **identical**
+before and after at 87 external symbols; no header touched. +6 tests,
+ASan/UBSan/LSan clean. Full evidence: `docs/SharedPrngConcurrencyPlan.md`
+§11–§16.
+
+**This did not touch SR-AUD-050 below.** The engine is still `std::mt19937_64`,
+not the platform CSPRNG; the repair changed *who owns* the engine, not *what kind
+of entropy it produces*, and per-thread ownership makes that finding neither
+better nor worse. SR-AUD-050 stays `confirmed`.
+
 ### SR-AUD-050 — high — `NewGuid` uses a predictable standard PRNG instead of .NET's OS CSPRNG
 
 The same lines seed `std::mt19937_64` once from `std::random_device` and then

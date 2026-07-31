@@ -3,6 +3,10 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 
+#include <set>
+#include <thread>
+#include <vector>
+
 #include "System/Guid.hpp"
 #include "System/FormatException.hpp"
 #include "System/ArgumentException.hpp"
@@ -438,6 +442,141 @@ TEST(GuidTests, CreateVersion7_TwoCallsDiffer) {
     Guid g1 = Guid::CreateVersion7();
     Guid g2 = Guid::CreateVersion7();
     EXPECT_NE(g1, g2);
+}
+
+// ---------------------------------------------------------------------------
+// Concurrency — CCF-009 / SR-AUD-010, ticket #1901
+//
+// NewGuid() used to advance one process-wide std::mt19937_64 with no
+// synchronisation, and CreateVersion7() reaches the same engine through it;
+// ThreadSanitizer reported the race. The engine is now per-thread. These tests
+// pin the observable consequences of that ownership boundary: the results stay
+// unique and well-formed under concurrency, and -- the failure mode a naive
+// per-thread engine would introduce -- distinct threads do not produce the same
+// stream.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+    constexpr int kGuidThreads = 8;
+    constexpr int kGuidsPerThread = 12500; // 8 x 12,500 = 100,000
+
+    /** @brief Runs @p body on kGuidThreads threads, passing each its index. */
+    template<typename Body>
+    void runOnThreads(int threadCount, Body body) {
+        std::vector<std::thread> threads;
+        threads.reserve(static_cast<std::size_t>(threadCount));
+        for (int t = 0; t < threadCount; ++t) threads.emplace_back(body, t);
+        for (auto& th: threads) th.join();
+    }
+
+    /** @brief The 48-bit big-endian Unix-milliseconds prefix of a version-7 GUID. */
+    uint64_t version7TimestampPrefix(const Guid& g) {
+        const auto bytes = g.ToByteArray(true); // big-endian / RFC 4122 order
+        uint64_t ts = 0;
+        for (int i = 0; i < 6; ++i) ts = (ts << 8) | static_cast<uint64_t>(bytes[static_cast<size_t>(i)]);
+        return ts;
+    }
+
+} // namespace
+
+TEST(GuidTests, NewGuid_ConcurrentAcrossThreads_NoDuplicateNoNil) {
+    std::vector<std::vector<Guid>> perThread(static_cast<std::size_t>(kGuidThreads));
+    runOnThreads(kGuidThreads, [&perThread](int t) {
+        auto& out = perThread[static_cast<std::size_t>(t)];
+        out.reserve(static_cast<std::size_t>(kGuidsPerThread));
+        for (int i = 0; i < kGuidsPerThread; ++i) out.push_back(Guid::NewGuid());
+    });
+
+    std::set<Guid> all;
+    for (const auto& chunk: perThread)
+        for (const auto& g: chunk) {
+            ASSERT_NE(g, Guid::Empty);
+            ASSERT_EQ(g.getVersionProperty(), 4);
+            ASSERT_GE(g.getVariantProperty(), 8);
+            ASSERT_LE(g.getVariantProperty(), 11);
+            all.insert(g);
+        }
+
+    EXPECT_EQ(all.size(), static_cast<std::size_t>(kGuidThreads) * kGuidsPerThread);
+}
+
+TEST(GuidTests, NewGuid_DistinctThreadsDoNotShareAStream) {
+    // The regression this guards against is a per-thread engine seeded from a
+    // source that is identical on every thread: the race would be gone, but two
+    // threads would emit the same GUIDs. Compared position by position, because
+    // that is what an identically-seeded pair would produce.
+    constexpr int draws = 256;
+    std::vector<std::vector<Guid>> perThread(2);
+    runOnThreads(2, [&perThread](int t) {
+        auto& out = perThread[static_cast<std::size_t>(t)];
+        for (int i = 0; i < draws; ++i) out.push_back(Guid::NewGuid());
+    });
+
+    int identicalPositions = 0;
+    for (int i = 0; i < draws; ++i)
+        if (perThread[0][static_cast<std::size_t>(i)] == perThread[1][static_cast<std::size_t>(i)])
+            ++identicalPositions;
+    EXPECT_EQ(identicalPositions, 0);
+}
+
+TEST(GuidTests, CreateVersion7_ConcurrentAcrossThreads_NoDuplicateAndWellFormed) {
+    constexpr int perThreadCount = 2000;
+    std::vector<std::vector<Guid>> perThread(static_cast<std::size_t>(kGuidThreads));
+    runOnThreads(kGuidThreads, [&perThread](int t) {
+        auto& out = perThread[static_cast<std::size_t>(t)];
+        out.reserve(static_cast<std::size_t>(perThreadCount));
+        for (int i = 0; i < perThreadCount; ++i) out.push_back(Guid::CreateVersion7());
+    });
+
+    std::set<Guid> all;
+    for (const auto& chunk: perThread)
+        for (const auto& g: chunk) {
+            ASSERT_EQ(g.getVersionProperty(), 7);
+            ASSERT_GE(g.getVariantProperty(), 8);
+            ASSERT_LE(g.getVariantProperty(), 11);
+            all.insert(g);
+        }
+    EXPECT_EQ(all.size(), static_cast<std::size_t>(kGuidThreads) * perThreadCount);
+}
+
+TEST(GuidTests, CreateVersion7_TimestampPrefixStaysMonotoneWithinAThread) {
+    // The prefix comes from the clock, not the generator, so the per-thread
+    // engine must not have perturbed it. Non-decreasing, not strictly
+    // increasing: the field has millisecond resolution.
+    constexpr int draws = 500;
+    std::vector<uint64_t> prefixes;
+    prefixes.reserve(static_cast<std::size_t>(draws));
+    for (int i = 0; i < draws; ++i) prefixes.push_back(version7TimestampPrefix(Guid::CreateVersion7()));
+
+    for (std::size_t i = 1; i < prefixes.size(); ++i)
+        ASSERT_GE(prefixes[i], prefixes[i - 1]) << "at index " << i;
+}
+
+TEST(GuidTests, CreateVersion7_TimestampPrefixStaysInWindowUnderConcurrency) {
+    const uint64_t before = version7TimestampPrefix(Guid::CreateVersion7());
+
+    std::vector<std::vector<uint64_t>> perThread(static_cast<std::size_t>(kGuidThreads));
+    runOnThreads(kGuidThreads, [&perThread](int t) {
+        auto& out = perThread[static_cast<std::size_t>(t)];
+        for (int i = 0; i < 500; ++i) out.push_back(version7TimestampPrefix(Guid::CreateVersion7()));
+    });
+
+    const uint64_t after = version7TimestampPrefix(Guid::CreateVersion7());
+    ASSERT_GE(after, before);
+    for (const auto& chunk: perThread)
+        for (uint64_t ts: chunk) {
+            ASSERT_GE(ts, before);
+            ASSERT_LE(ts, after);
+        }
+}
+
+TEST(GuidTests, LayoutIsUnchangedByTheConcurrencyRepair) {
+    // Ticket #1901's repair is confined to Guid.cpp: no member was added.
+    static_assert(sizeof(Guid) == 16, "Guid must stay 16 bytes");
+    static_assert(alignof(Guid) == 1, "Guid must stay 1-byte aligned");
+    EXPECT_EQ(sizeof(Guid), 16u);
+    EXPECT_EQ(alignof(Guid), 1u);
 }
 
 // ---------------------------------------------------------------------------

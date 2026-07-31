@@ -2,6 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "gtest/gtest.h"
+
+#include <atomic>
+#include <set>
+#include <thread>
+#include <vector>
+
 #include "System/Random.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -187,6 +193,185 @@ TEST(RandomTests, Shared_ProducesValues) {
     int v = System::Random::getSharedProperty().Next(1000);
     EXPECT_GE(v, 0);
     EXPECT_LT(v, 1000);
+}
+
+// ---------------------------------------------------------------------------
+// Shared — concurrency ownership boundary (CCF-009 / SR-AUD-010, ticket #1902)
+//
+// getSharedProperty() used to return one process-wide Random whose
+// seedArray_/inext_/inextp_ every Next() mutated with no synchronisation;
+// ThreadSanitizer reported the race. The shared object now owns no mutable
+// state: generator calls made on it route to the calling thread's own
+// generator.
+//
+// The tempting one-word repair -- making the instance itself thread_local --
+// is the one .NET rejects explicitly (Random.cs, lines 755-759), because it
+// silently gives a caller that obtained Shared on one thread a *different*
+// generator when it uses the reference on another. Shared_ReferenceIs*
+// and Shared_ReferenceObtainedOnOneThread* below are what make that wrong
+// repair fail rather than pass quietly.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+    constexpr int kSharedThreads = 8;
+
+    /** @brief Runs @p body on @p threadCount threads, passing each its index. */
+    template<typename Body>
+    void runOnThreads(int threadCount, Body body) {
+        std::vector<std::thread> threads;
+        threads.reserve(static_cast<std::size_t>(threadCount));
+        for (int t = 0; t < threadCount; ++t) threads.emplace_back(body, t);
+        for (auto& th: threads) th.join();
+    }
+
+} // namespace
+
+TEST(RandomTests, Shared_ReferenceIsTheSameAddressOnEveryThread) {
+    const System::Random* mainAddress = &System::Random::getSharedProperty();
+
+    std::vector<const System::Random*> seen(static_cast<std::size_t>(kSharedThreads), nullptr);
+    runOnThreads(kSharedThreads, [&seen](int t) {
+        seen[static_cast<std::size_t>(t)] = &System::Random::getSharedProperty();
+    });
+
+    for (int t = 0; t < kSharedThreads; ++t)
+        EXPECT_EQ(seen[static_cast<std::size_t>(t)], mainAddress) << "thread " << t;
+}
+
+TEST(RandomTests, Shared_ReferenceObtainedOnOneThreadStaysUsableOnAnother) {
+    // The cross-thread handoff .NET's comment is about: acquire on this thread,
+    // draw on another. It must stay valid and produce in-range values.
+    System::Random& shared = System::Random::getSharedProperty();
+
+    std::vector<intcs> drawn;
+    runOnThreads(1, [&shared, &drawn](int) {
+        for (int i = 0; i < 1000; ++i) drawn.push_back(shared.Next(1000));
+    });
+
+    ASSERT_EQ(drawn.size(), 1000u);
+    for (intcs v: drawn) {
+        ASSERT_GE(v, 0);
+        ASSERT_LT(v, 1000);
+    }
+    EXPECT_GT(std::set<intcs>(drawn.begin(), drawn.end()).size(), 1u);
+}
+
+TEST(RandomTests, Shared_DistinctThreadsDoNotShareAStream) {
+    // Two threads seeded identically would emit identical sequences -- the
+    // failure mode a per-thread generator introduces if its seed is not made
+    // distinct per thread.
+    constexpr int draws = 1000;
+    std::vector<std::vector<intcs>> perThread(2);
+    runOnThreads(2, [&perThread](int t) {
+        auto& out = perThread[static_cast<std::size_t>(t)];
+        out.reserve(static_cast<std::size_t>(draws));
+        for (int i = 0; i < draws; ++i) out.push_back(System::Random::getSharedProperty().Next());
+    });
+
+    ASSERT_EQ(perThread[0].size(), static_cast<std::size_t>(draws));
+    ASSERT_EQ(perThread[1].size(), static_cast<std::size_t>(draws));
+    EXPECT_NE(perThread[0], perThread[1]);
+}
+
+TEST(RandomTests, Shared_ConcurrentDrawsAreInRangeAndVaried) {
+    constexpr int draws = 4000;
+    std::vector<std::vector<intcs>> perThread(static_cast<std::size_t>(kSharedThreads));
+    runOnThreads(kSharedThreads, [&perThread](int t) {
+        auto& out = perThread[static_cast<std::size_t>(t)];
+        out.reserve(static_cast<std::size_t>(draws));
+        for (int i = 0; i < draws; ++i) out.push_back(System::Random::getSharedProperty().Next(1000000));
+    });
+
+    std::set<intcs> distinct;
+    for (const auto& chunk: perThread)
+        for (intcs v: chunk) {
+            ASSERT_GE(v, 0);
+            ASSERT_LT(v, 1000000);
+            distinct.insert(v);
+        }
+    // Comfortably below the ~2% birthday-collision loss expected for 32,000
+    // draws from a million-wide range, but far above what a stuck or shared
+    // stream would reach.
+    EXPECT_GT(distinct.size(), 20000u);
+}
+
+TEST(RandomTests, Shared_ConcurrentNextBytesFillsEveryBuffer) {
+    // NextBytes drives internalSample() directly rather than through Next(),
+    // so it exercises the ownership boundary on its own path.
+    std::vector<bool> allZero(static_cast<std::size_t>(kSharedThreads), true);
+    runOnThreads(kSharedThreads, [&allZero](int t) {
+        for (int round = 0; round < 200; ++round) {
+            std::vector<uint8_t> buffer(64, 0);
+            System::Random::getSharedProperty().NextBytes(buffer);
+            for (uint8_t b: buffer)
+                if (b != 0) { allZero[static_cast<std::size_t>(t)] = false; break; }
+        }
+    });
+    for (int t = 0; t < kSharedThreads; ++t)
+        EXPECT_FALSE(allZero[static_cast<std::size_t>(t)]) << "thread " << t;
+}
+
+TEST(RandomTests, Shared_ConcurrentUseLeavesSeededInstancesUntouched) {
+    // The boundary keys on object identity, so a seeded instance must keep its
+    // exact stream even while other threads are hammering the shared one. The
+    // expected values are the .NET-verified seed-42 stream pinned below.
+    std::atomic<bool> stop{false};
+    std::vector<std::thread> noise;
+    for (int t = 0; t < 4; ++t)
+        noise.emplace_back([&stop] {
+            while (!stop.load(std::memory_order_relaxed)) System::Random::getSharedProperty().Next();
+        });
+
+    for (int repeat = 0; repeat < 100; ++repeat) {
+        System::Random rng(42);
+        ASSERT_EQ(rng.Next(), 1434747710);
+        ASSERT_EQ(rng.Next(), 302596119);
+        ASSERT_EQ(rng.Next(), 269548474);
+    }
+
+    stop.store(true, std::memory_order_relaxed);
+    for (auto& th: noise) th.join();
+}
+
+TEST(RandomTests, Shared_DerivedInstancesAreNotAffectedByTheBoundary) {
+    // A derived Random can never be the shared instance, so it keeps drawing
+    // from its own state and its Sample() override keeps seeing the values it
+    // created -- the protected-seam concern
+    // docs/SharedPrngConcurrencyPlan.md section 9 flags.
+    class CountingRandom : public System::Random {
+    public:
+        explicit CountingRandom(intcs seed) : System::Random(seed) {}
+        int samples = 0;
+
+        /** @brief Reaches the protected seam from the test body. */
+        double CallSample() { return Sample(); }
+
+    protected:
+        double Sample() override {
+            ++samples;
+            return System::Random::Sample();
+        }
+    };
+
+    CountingRandom a(42);
+    CountingRandom b(42);
+    EXPECT_NE(&a, &System::Random::getSharedProperty());
+    for (int i = 0; i < 50; ++i) EXPECT_EQ(a.Next(), b.Next());
+
+    EXPECT_GE(a.CallSample(), 0.0);
+    EXPECT_LT(a.CallSample(), 1.0);
+    EXPECT_EQ(a.samples, 2);
+}
+
+TEST(RandomTests, LayoutIsUnchangedByTheConcurrencyRepair) {
+    // Ticket #1902's repair is a pointer comparison inside Random.cpp, not a
+    // member: Random's state lives in the public header, so a flag would have
+    // been an object-layout change.
+    static_assert(sizeof(System::Random) == 240, "Random must stay 240 bytes");
+    static_assert(alignof(System::Random) == 8, "Random must stay 8-byte aligned");
+    EXPECT_EQ(sizeof(System::Random), 240u);
+    EXPECT_EQ(alignof(System::Random), 8u);
 }
 
 // ---------------------------------------------------------------------------

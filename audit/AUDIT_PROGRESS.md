@@ -6110,3 +6110,38 @@ were corrected by measurement (§40.2/§40.3, §42.2, plus §39.1 and §38.1 ret
 from the previous batch). Next family selected and planned: **CCF-009**
 (`docs/SharedPrngConcurrencyPlan.md`, #1900–#1903). CNA and mobile-eggbert were
 not inspected; #1773 stays `blocked`.
+
+## Post-audit remediation checkpoint — CCF-009 shared PRNG concurrency (2026-07-31)
+
+**Tickets #1901, #1902, #1903 — all `done`. CCF-009 is COMPLETE and SR-AUD-010 is
+`remediated`.** This is the first post-audit family to be finished outright
+rather than left design-complete or approval-blocked; it was chosen for exactly
+that reason (`docs/SharedPrngConcurrencyPlan.md` §1).
+
+**#1901** gave `Guid::NewGuid` a per-thread engine and distribution;
+`CreateVersion7` inherited it. **#1902** gave `Random::getSharedProperty()` an
+ownership boundary **without** making the shared object per-thread: it keeps one
+stable address on every thread, and `internalSample()` — the sole writer of the
+generator state and the funnel all entry points pass through — routes the draw to
+the calling thread's generator. The per-thread-instance shortcut is the one .NET
+rejects at `Random.cs:755–759`. **#1903** closed the finding only after both
+landed.
+
+TSan: **13** races at `Guid.cpp:344` and **6** in `Random::internalSample()`
+before, **0** at both sites after. Seeded `Random(seed)` byte-identical across
+4,928 dumped values. 100,000 concurrent `NewGuid()`, zero duplicates.
++14 permanent tests; gate **14,731 → 14,745 across 37 executables**. Module graph
+41/91, Doxygen 1,941/1,942, seams 2/18, fixtures 9/66 — unchanged.
+ASan+UBSan+LSan clean over 168/168. No header touched; `sizeof`/`alignof` of
+`Random` and `Guid` unchanged and asserted; external symbols identical before and
+after on both objects.
+
+Four mutations run; the two that matter (`thread_local` shared instance;
+identically-seeded per-thread engines) are **race-free and invisible to every
+sanitizer**, and are caught by the new tests alone.
+
+**Tally moves for the first time in several batches: 57 → 58 remediated, 306 →
+305 confirmed, 364 total.** Numbering frozen at **364**; no new `SR-AUD-*`
+identifier; no `CCF-*` cause added. SR-AUD-050 (predictable PRNG at the same
+lines) stays `confirmed` — unrelated to ownership. CNA and mobile-eggbert were
+not inspected; #1773 stays `blocked`.
