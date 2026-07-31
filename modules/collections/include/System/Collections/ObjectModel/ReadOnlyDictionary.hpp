@@ -8,6 +8,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::ObjectModel {
 
@@ -15,24 +16,49 @@ namespace System::Collections::ObjectModel {
  * @brief Provides a read-only wrapper around a generic dictionary.
  *
  * C++ counterpart of .NET System.Collections.ObjectModel.ReadOnlyDictionary<TKey,TValue>.
- * Wraps a shared_ptr<unordered_map<K,V>> so that the wrapped dictionary cannot be mutated
+ * Wraps a `shared_ptr<`@ref MapType`>` so that the wrapped dictionary cannot be mutated
  * through this interface (mutations made directly to the wrapped map, if the caller kept
  * a reference to it, are still visible here — matching .NET's wrap-not-copy semantics).
+ *
+ * @par Default key equality and hashing (ticket #1919)
+ * A read-only projection must agree with the dictionary it wraps, so the wrapped type is
+ * keyed under @c EqualityComparer<K>.Default — token-identical to
+ * `std::unordered_map<K,V>` for every non-floating key. Before this ticket a wrapper over a
+ * map holding a `double` NaN key answered `ContainsKey` and `TryGetValue` **false** for that
+ * key forever.
+ *
+ * @warning **PUBLIC TYPE CHANGE for a floating-point key** (ticket #1919, approved). For
+ * `K` = `float`, `double` or `long double` the constructor takes
+ * `std::shared_ptr<`@ref MapType`>` and the protected @ref getDictionaryProperty returns a
+ * reference to @ref MapType. No non-floating instantiation is affected in any respect. See
+ * docs/Migration-CollectionsFloatingComparers.md.
  *
  * @tparam K The type of keys in the dictionary.
  * @tparam V The type of values in the dictionary.
  */
 template<typename K, typename V>
 class ReadOnlyDictionary {
-    std::shared_ptr<std::unordered_map<K, V>> dict_;
+public:
+    /**
+     * @brief The wrapped map type: a `std::unordered_map` keyed under
+     *        @c EqualityComparer<K>.Default.
+     *
+     * Token-identical to `std::unordered_map<K,V>` for every non-floating @p K (ticket #1919).
+     */
+    using MapType = std::unordered_map<K, V,
+                                       System::detail::DefaultKeyHash<K>,
+                                       System::detail::DefaultKeyEqual<K>>;
+
+private:
+    std::shared_ptr<MapType> dict_;
 
 public:
     /**
      * @brief Constructs a ReadOnlyDictionary wrapping the given shared dictionary.
-     * @param dictionary A shared pointer to the underlying dictionary.
+     * @param dictionary A shared pointer to the underlying @ref MapType.
      * @throws System::ArgumentNullException if @p dictionary is null.
      */
-    explicit ReadOnlyDictionary(std::shared_ptr<std::unordered_map<K, V>> dictionary)
+    explicit ReadOnlyDictionary(std::shared_ptr<MapType> dictionary)
         : dict_(std::move(dictionary)) {
         if (!dict_)
             throw System::ArgumentNullException("dictionary");
@@ -48,7 +74,7 @@ public:
      * @return A const reference to a shared, permanently-empty instance.
      */
     static const ReadOnlyDictionary<K, V>& Empty() {
-        static ReadOnlyDictionary<K, V> empty(std::make_shared<std::unordered_map<K, V>>());
+        static ReadOnlyDictionary<K, V> empty(std::make_shared<MapType>());
         return empty;
     }
 
@@ -147,9 +173,9 @@ protected:
      * @brief Gets the dictionary that is wrapped by this ReadOnlyDictionary.
      *
      * C++ counterpart of .NET ReadOnlyDictionary<TKey,TValue>.Dictionary (protected).
-     * @return A const reference to the wrapped map, for use by subclasses.
+     * @return A const reference to the wrapped @ref MapType, for use by subclasses.
      */
-    [[nodiscard]] const std::unordered_map<K, V>& getDictionaryProperty() const { return *dict_; }
+    [[nodiscard]] const MapType& getDictionaryProperty() const { return *dict_; }
 };
 
 } // namespace System::Collections::ObjectModel

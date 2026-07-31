@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentNullException.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::ObjectModel {
 
@@ -13,24 +14,49 @@ namespace System::Collections::ObjectModel {
  * @brief Provides a read-only wrapper around a generic set.
  *
  * C++ counterpart of .NET System.Collections.ObjectModel.ReadOnlySet<T>.
- * Wraps a shared_ptr<unordered_set<T>> and exposes read-only set operations.
+ * Wraps a `shared_ptr<`@ref SetType`>` and exposes read-only set operations.
  * Mutation methods are not provided.
+ *
+ * @par Default equality and hashing (ticket #1919)
+ * A read-only projection must agree with the set it wraps, so the wrapped type is keyed
+ * under @c EqualityComparer<T>.Default — token-identical to `std::unordered_set<T>` for
+ * every non-floating T. Before this ticket a wrapper over a NaN-bearing set answered
+ * `Contains(NaN)` **false** and, worse, `SetEquals(*this)` **false**: every predicate here
+ * is built on `Contains`, so a single unfindable element made the set unequal to itself.
+ *
+ * @warning **PUBLIC TYPE CHANGE for a floating-point element** (ticket #1919, approved). For
+ * `T` = `float`, `double` or `long double` the constructor takes
+ * `std::shared_ptr<`@ref SetType`>`, not `std::shared_ptr<std::unordered_set<T>>`. Spell
+ * @ref SetType to be correct for every element type. No non-floating instantiation is
+ * affected in any respect. See docs/Migration-CollectionsFloatingComparers.md.
  *
  * @tparam T The type of elements in the set.
  */
 template<typename T>
 class ReadOnlySet {
-    std::shared_ptr<std::unordered_set<T>> set_;
+public:
+    /**
+     * @brief The wrapped set type: a `std::unordered_set` keyed under
+     *        @c EqualityComparer<T>.Default.
+     *
+     * Token-identical to `std::unordered_set<T>` for every non-floating @p T (ticket #1919).
+     */
+    using SetType = std::unordered_set<T,
+                                       System::detail::DefaultKeyHash<T>,
+                                       System::detail::DefaultKeyEqual<T>>;
+
+private:
+    std::shared_ptr<SetType> set_;
 
 public:
     /**
      * @brief Constructs a ReadOnlySet wrapping the given shared set.
      *
      * C++ counterpart of .NET ReadOnlySet<T>(ISet<T>).
-     * @param set A shared pointer to the underlying unordered_set.
+     * @param set A shared pointer to the underlying @ref SetType.
      * @throws System::ArgumentNullException if @p set is null.
      */
-    explicit ReadOnlySet(std::shared_ptr<std::unordered_set<T>> set)
+    explicit ReadOnlySet(std::shared_ptr<SetType> set)
         : set_(std::move(set)) {
         if (!set_)
             throw System::ArgumentNullException("set");
@@ -43,7 +69,7 @@ public:
      * @return A shared, permanently-empty instance.
      */
     static ReadOnlySet<T> Empty() {
-        static ReadOnlySet<T> empty(std::make_shared<std::unordered_set<T>>());
+        static ReadOnlySet<T> empty(std::make_shared<SetType>());
         return empty;
     }
 

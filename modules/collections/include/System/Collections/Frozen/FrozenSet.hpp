@@ -8,6 +8,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Frozen {
 
@@ -16,19 +17,49 @@ namespace System::Collections::Frozen {
  *
  * C++ counterpart of .NET System.Collections.Frozen.FrozenSet<T>.
  * Once created via Create() or ToFrozenSet(), the set cannot be modified.
- * Backed by std::unordered_set for O(1) average-case lookups.
+ * Backed by std::unordered_set keyed under @c EqualityComparer<T>.Default for O(1)
+ * average-case lookups.
  * Ideal for data loaded once at startup and read frequently at runtime.
+ *
+ * @par Default equality and hashing (ticket #1919)
+ * A frozen projection must agree with the source it was frozen from, so this class uses the
+ * same @ref SetType predicates `HashSet<T>` does — `System::detail::DefaultKeyHash<T>` and
+ * `System::detail::DefaultKeyEqual<T>`, token-identical to `std::hash<T>` and
+ * `std::equal_to<T>` for every non-floating T. Before this ticket, freezing
+ * `{NaN, NaN, 1}` produced a set of **Count 3** whose `Contains(NaN)` answered **false**:
+ * two entries that are one element in .NET, neither of them reachable. Repairing the mutable
+ * containers and leaving the projections alone would have made a frozen copy disagree with
+ * its own source, which is worse than either alone.
+ *
+ * @warning **PUBLIC TYPE CHANGE for a floating-point element** (ticket #1919, approved). For
+ * `T` = `float`, `double` or `long double`, @ref const_iterator and the parameter type of
+ * @ref CreateFromSet are @ref SetType's, not `std::unordered_set<T>`'s. Spell @ref SetType to
+ * be correct for every element type. No non-floating instantiation is affected in any
+ * respect. See docs/Migration-CollectionsFloatingComparers.md.
  *
  * @tparam T The type of the elements.
  */
 template<typename T>
 class FrozenSet {
-    std::unordered_set<T> set_;
+public:
+    /**
+     * @brief The backing set type: a `std::unordered_set` keyed under
+     *        @c EqualityComparer<T>.Default.
+     *
+     * Token-identical to `std::unordered_set<T>` for every non-floating @p T (ticket #1919).
+     */
+    using SetType = std::unordered_set<T,
+                                       System::detail::DefaultKeyHash<T>,
+                                       System::detail::DefaultKeyEqual<T>>;
 
-    explicit FrozenSet(std::unordered_set<T> s) : set_(std::move(s)) {}
+private:
+    SetType set_;
+
+    explicit FrozenSet(SetType s) : set_(std::move(s)) {}
 
 public:
-    using const_iterator = typename std::unordered_set<T>::const_iterator;
+    /** @brief Const iterator over @ref SetType. See the class warning (ticket #1919). */
+    using const_iterator = typename SetType::const_iterator;
 
     /**
      * @brief Gets an empty FrozenSet singleton.
@@ -36,7 +67,7 @@ public:
      * C++ counterpart of .NET FrozenSet<T>.Empty.
      */
     static const FrozenSet& getEmptyProperty() {
-        static FrozenSet instance{std::unordered_set<T>{}};
+        static FrozenSet instance{SetType{}};
         return instance;
     }
 
@@ -49,7 +80,7 @@ public:
      * @return A new immutable FrozenSet.
      */
     static FrozenSet Create(const std::vector<T>& source) {
-        std::unordered_set<T> s;
+        SetType s;
         s.reserve(source.size());
         for (const auto& item : source) s.insert(item);
         return FrozenSet(std::move(s));
@@ -58,11 +89,13 @@ public:
     /**
      * @brief Creates a FrozenSet from an existing unordered_set.
      *
-     * @param source The set whose elements are copied into the frozen set.
+     * @param source The set whose elements are copied into the frozen set. Its type is
+     *               @ref SetType, which is `std::unordered_set<T>` for every non-floating
+     *               @p T (ticket #1919).
      * @return A new immutable FrozenSet.
      */
-    static FrozenSet CreateFromSet(const std::unordered_set<T>& source) {
-        return FrozenSet(std::unordered_set<T>(source));
+    static FrozenSet CreateFromSet(const SetType& source) {
+        return FrozenSet(SetType(source));
     }
 
     /**

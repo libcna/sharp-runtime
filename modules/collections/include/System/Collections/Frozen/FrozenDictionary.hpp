@@ -10,6 +10,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Frozen {
 
@@ -18,21 +19,49 @@ namespace System::Collections::Frozen {
  *
  * C++ counterpart of .NET System.Collections.Frozen.FrozenDictionary<TKey, TValue>.
  * Once created via Create() or ToFrozenDictionary(), the dictionary cannot be modified.
- * Backed by std::unordered_map for O(1) average-case lookups.
+ * Backed by std::unordered_map keyed under @c EqualityComparer<TKey>.Default for O(1)
+ * average-case lookups.
  * Ideal for data loaded once at startup and read frequently at runtime.
+ *
+ * @par Default key equality and hashing (ticket #1919)
+ * A frozen projection must agree with the source it was frozen from, so this class uses the
+ * same @ref MapType predicates `Dictionary<TKey,TValue>` does — token-identical to
+ * `std::hash<TKey>` and `std::equal_to<TKey>` for every non-floating key. Before this ticket
+ * a `double` NaN key stored by @ref Create was invisible to @ref ContainsKey and
+ * @ref TryGetValue forever.
+ *
+ * @warning **PUBLIC TYPE CHANGE for a floating-point key** (ticket #1919, approved). For
+ * `TKey` = `float`, `double` or `long double`, @ref const_iterator and the parameter type of
+ * @ref CreateFromMap are @ref MapType's, not `std::unordered_map<TKey,TValue>`'s. No
+ * non-floating instantiation is affected in any respect. See
+ * docs/Migration-CollectionsFloatingComparers.md.
  *
  * @tparam TKey   The type of the keys.
  * @tparam TValue The type of the values.
  */
 template<typename TKey, typename TValue>
 class FrozenDictionary {
-    std::unordered_map<TKey, TValue> map_;
+public:
+    /**
+     * @brief The backing map type: a `std::unordered_map` keyed under
+     *        @c EqualityComparer<TKey>.Default.
+     *
+     * Token-identical to `std::unordered_map<TKey,TValue>` for every non-floating @p TKey
+     * (ticket #1919).
+     */
+    using MapType = std::unordered_map<TKey, TValue,
+                                       System::detail::DefaultKeyHash<TKey>,
+                                       System::detail::DefaultKeyEqual<TKey>>;
 
-    explicit FrozenDictionary(std::unordered_map<TKey, TValue> m) : map_(std::move(m)) {}
+private:
+    MapType map_;
+
+    explicit FrozenDictionary(MapType m) : map_(std::move(m)) {}
 
 public:
     using value_type    = std::pair<const TKey, TValue>;
-    using const_iterator = typename std::unordered_map<TKey, TValue>::const_iterator;
+    /** @brief Const iterator over @ref MapType. See the class warning (ticket #1919). */
+    using const_iterator = typename MapType::const_iterator;
 
     /**
      * @brief Gets an empty FrozenDictionary singleton.
@@ -40,7 +69,7 @@ public:
      * C++ counterpart of .NET FrozenDictionary<TKey,TValue>.Empty.
      */
     static const FrozenDictionary& getEmptyProperty() {
-        static FrozenDictionary instance{std::unordered_map<TKey, TValue>{}};
+        static FrozenDictionary instance{MapType{}};
         return instance;
     }
 
@@ -53,7 +82,7 @@ public:
      * @return A new immutable FrozenDictionary.
      */
     static FrozenDictionary Create(const std::vector<std::pair<TKey, TValue>>& source) {
-        std::unordered_map<TKey, TValue> m;
+        MapType m;
         m.reserve(source.size());
         for (const auto& kv : source) m[kv.first] = kv.second;
         return FrozenDictionary(std::move(m));
@@ -62,11 +91,13 @@ public:
     /**
      * @brief Creates a FrozenDictionary from an existing unordered_map.
      *
-     * @param source The map whose entries are copied into the frozen dictionary.
+     * @param source The map whose entries are copied into the frozen dictionary. Its type is
+     *               @ref MapType, which is `std::unordered_map<TKey,TValue>` for every
+     *               non-floating @p TKey (ticket #1919).
      * @return A new immutable FrozenDictionary.
      */
-    static FrozenDictionary CreateFromMap(const std::unordered_map<TKey, TValue>& source) {
-        return FrozenDictionary(std::unordered_map<TKey, TValue>(source));
+    static FrozenDictionary CreateFromMap(const MapType& source) {
+        return FrozenDictionary(MapType(source));
     }
 
     /**

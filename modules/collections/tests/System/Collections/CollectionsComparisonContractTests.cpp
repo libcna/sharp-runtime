@@ -1433,3 +1433,180 @@ TEST(CollectionsComparisonContract, NullableFloatingKeysKeepRawIeeeEqualityForNo
     d.Add(std::optional<double>(), 3);                    // nullopt is an ordinary key
     EXPECT_TRUE(d.ContainsKey(std::optional<double>()));
 }
+
+// ---------------------------------------------------------------------------
+// FrozenSet, FrozenDictionary, ReadOnlySet and ReadOnlyDictionary -- the
+// projections of #1919's seven (ticket #1923)
+//
+// A projection must agree with the container it was made from. Repairing only
+// the mutable containers would have left a frozen copy disagreeing with its own
+// source, which is worse than either alone.
+// ---------------------------------------------------------------------------
+
+TEST(CollectionsComparisonContract, FrozenSetFoldsDuplicateNaNsAndFindsThem) {
+    namespace Fz = System::Collections::Frozen;
+    auto f = Fz::FrozenSet<double>::Create(std::vector<double>{kNaN, payloadNaN(), 1.0});
+    EXPECT_EQ(f.getCountProperty(), 2);          // the two NaNs are one element
+    EXPECT_TRUE(f.Contains(kNaN));
+    EXPECT_TRUE(f.Contains(payloadNaN()));
+    double actual = 0.0;
+    ASSERT_TRUE(f.TryGetValue(payloadNaN(), actual));
+    EXPECT_TRUE(std::isnan(actual));
+}
+
+TEST(CollectionsComparisonContract, FrozenSetPreservesTheSourceContainersContract) {
+    namespace Fz = System::Collections::Frozen;
+    G::HashSet<double> h;
+    h.Add(kNaN); h.Add(1.0);
+    auto f = Fz::FrozenSet<double>::Create(h.ToArray());
+    EXPECT_EQ(f.getCountProperty(), h.getCountProperty());
+    EXPECT_EQ(f.Contains(payloadNaN()), h.Contains(payloadNaN()));
+    EXPECT_TRUE(f.Contains(payloadNaN()));
+
+    // CreateFromSet takes the same SetType the class stores, so a mutable set's
+    // own backing type round-trips without a conversion.
+    G::HashSet<double>::SetType raw;
+    raw.insert(kNaN);
+    raw.insert(2.0);
+    static_assert(std::is_same_v<G::HashSet<double>::SetType,
+                                 Fz::FrozenSet<double>::SetType>,
+                  "HashSet and FrozenSet must key on the same predicates");
+    auto g = Fz::FrozenSet<double>::CreateFromSet(raw);
+    EXPECT_EQ(g.getCountProperty(), 2);
+    EXPECT_TRUE(g.Contains(payloadNaN()));
+}
+
+TEST(CollectionsComparisonContract, FrozenSetHandlesSignedZeroAndInfinities) {
+    namespace Fz = System::Collections::Frozen;
+    auto f = Fz::ToFrozenSet(std::vector<double>{0.0, -0.0, kInf, -kInf, kNaN, payloadNaN()});
+    EXPECT_EQ(f.getCountProperty(), 4);          // {0}, {+inf}, {-inf}, {NaN}
+    EXPECT_TRUE(f.Contains(-0.0));
+    EXPECT_TRUE(f.Contains(kInf));
+    EXPECT_TRUE(f.Contains(-kInf));
+    EXPECT_TRUE(f.Contains(kNaN));
+}
+
+TEST(CollectionsComparisonContract, FrozenDictionaryFoldsDuplicateNaNKeysAndFindsThem) {
+    namespace Fz = System::Collections::Frozen;
+    auto f = Fz::FrozenDictionary<double, int>::Create(
+        std::vector<std::pair<double, int>>{{kNaN, 1}, {payloadNaN(), 2}, {1.0, 3}});
+    EXPECT_EQ(f.getCountProperty(), 2);          // last value wins for the folded key
+    EXPECT_TRUE(f.ContainsKey(kNaN));
+    int got = 0;
+    ASSERT_TRUE(f.TryGetValue(payloadNaN(), got));
+    EXPECT_EQ(got, 2);
+    EXPECT_EQ(f.getItem(kNaN), 2);
+}
+
+TEST(CollectionsComparisonContract, FrozenDictionaryPreservesTheSourceDictionarysContract) {
+    namespace Fz = System::Collections::Frozen;
+    static_assert(std::is_same_v<G::Dictionary<double, int>::MapType,
+                                 Fz::FrozenDictionary<double, int>::MapType>,
+                  "Dictionary and FrozenDictionary must key on the same predicates");
+    G::Dictionary<double, int> d;
+    d.Add(kNaN, 7);
+    d.Add(1.0, 1);
+    auto f = Fz::FrozenDictionary<double, int>::CreateFromMap(d.ToMap());
+    EXPECT_EQ(f.getCountProperty(), d.getCountProperty());
+    EXPECT_EQ(f.ContainsKey(payloadNaN()), d.ContainsKey(payloadNaN()));
+    int got = 0;
+    ASSERT_TRUE(f.TryGetValue(payloadNaN(), got));
+    EXPECT_EQ(got, 7);
+}
+
+TEST(CollectionsComparisonContract, ReadOnlySetProjectsTheContractAndIsEqualToItself) {
+    namespace OM = System::Collections::ObjectModel;
+    auto backing = std::make_shared<OM::ReadOnlySet<double>::SetType>();
+    backing->insert(kNaN);
+    backing->insert(1.0);
+    OM::ReadOnlySet<double> ro(backing);
+    EXPECT_EQ(ro.getCountProperty(), 2);
+    EXPECT_TRUE(ro.Contains(kNaN));
+    EXPECT_TRUE(ro.Contains(payloadNaN()));
+    // Every predicate here is built on Contains, so one unfindable element made
+    // the set unequal to ITSELF before this repair.
+    EXPECT_TRUE(ro.SetEquals(ro));
+    EXPECT_TRUE(ro.IsSubsetOf(ro));
+
+    auto wider = std::make_shared<OM::ReadOnlySet<double>::SetType>();
+    wider->insert(payloadNaN());
+    wider->insert(1.0);
+    wider->insert(2.0);
+    OM::ReadOnlySet<double> rw(wider);
+    EXPECT_TRUE(ro.IsSubsetOf(rw));
+    EXPECT_TRUE(ro.IsProperSubsetOf(rw));
+    EXPECT_TRUE(rw.IsSupersetOf(ro));
+    EXPECT_TRUE(ro.Overlaps(rw));
+}
+
+TEST(CollectionsComparisonContract, ReadOnlyWrappersStayLiveOverTheirSource) {
+    namespace OM = System::Collections::ObjectModel;
+    auto backingSet = std::make_shared<OM::ReadOnlySet<double>::SetType>();
+    OM::ReadOnlySet<double> ros(backingSet);
+    backingSet->insert(kNaN);                    // wrap-not-copy: visible afterwards
+    EXPECT_EQ(ros.getCountProperty(), 1);
+    EXPECT_TRUE(ros.Contains(payloadNaN()));
+
+    auto backingMap = std::make_shared<OM::ReadOnlyDictionary<double, int>::MapType>();
+    OM::ReadOnlyDictionary<double, int> rod(backingMap);
+    (*backingMap)[kNaN] = 3;
+    EXPECT_EQ(rod.getCountProperty(), 1);
+    EXPECT_TRUE(rod.ContainsKey(payloadNaN()));
+    int got = 0;
+    ASSERT_TRUE(rod.TryGetValue(payloadNaN(), got));
+    EXPECT_EQ(got, 3);
+    EXPECT_EQ(rod[payloadNaN()], 3);
+}
+
+TEST(CollectionsComparisonContract, ReadOnlyDictionaryProjectsTheContract) {
+    namespace OM = System::Collections::ObjectModel;
+    static_assert(std::is_same_v<G::Dictionary<double, int>::MapType,
+                                 OM::ReadOnlyDictionary<double, int>::MapType>,
+                  "Dictionary and ReadOnlyDictionary must key on the same predicates");
+    G::Dictionary<double, int> d;
+    d.Add(kNaN, 7);
+    d.Add(1.0, 1);
+    auto shared = std::make_shared<OM::ReadOnlyDictionary<double, int>::MapType>(d.ToMap());
+    OM::ReadOnlyDictionary<double, int> ro(shared);
+    EXPECT_EQ(ro.getCountProperty(), 2);
+    EXPECT_TRUE(ro.ContainsKey(payloadNaN()));
+    EXPECT_EQ(ro.getKeysProperty().size(), 2u);
+}
+
+TEST(CollectionsComparisonContract, FrozenAndReadOnlyNegativeControlsAreUnchanged) {
+    namespace Fz = System::Collections::Frozen;
+    namespace OM = System::Collections::ObjectModel;
+
+    static_assert(std::is_same_v<Fz::FrozenSet<int>::SetType, std::unordered_set<int>>,
+                  "a non-floating FrozenSet must stay token-identical to std::unordered_set");
+    static_assert(std::is_same_v<Fz::FrozenDictionary<std::string, int>::MapType,
+                                 std::unordered_map<std::string, int>>,
+                  "a non-floating FrozenDictionary must stay token-identical");
+    static_assert(std::is_same_v<OM::ReadOnlySet<std::string>::SetType,
+                                 std::unordered_set<std::string>>,
+                  "a non-floating ReadOnlySet must stay token-identical");
+    static_assert(std::is_same_v<OM::ReadOnlyDictionary<std::string, int>::MapType,
+                                 std::unordered_map<std::string, int>>,
+                  "a non-floating ReadOnlyDictionary must stay token-identical");
+    static_assert(std::is_same_v<G::Dictionary<int, int>::MapType,
+                                 std::unordered_map<int, int>>,
+                  "a non-floating Dictionary must stay token-identical");
+    static_assert(std::is_same_v<G::HashSet<int>::SetType, std::unordered_set<int>>,
+                  "a non-floating HashSet must stay token-identical");
+
+    auto f = Fz::FrozenSet<int>::Create(std::vector<int>{1, 2, 2, 3});
+    EXPECT_EQ(f.getCountProperty(), 3);
+    EXPECT_FALSE(f.Contains(4));
+
+    auto fd = Fz::FrozenDictionary<std::string, int>::Create(
+        std::vector<std::pair<std::string, int>>{{"a", 1}, {"b", 2}, {"a", 3}});
+    EXPECT_EQ(fd.getCountProperty(), 2);
+    EXPECT_EQ(fd.getItem("a"), 3);
+
+    auto backing = std::make_shared<std::unordered_map<std::string, int>>();
+    (*backing)["a"] = 1;
+    OM::ReadOnlyDictionary<std::string, int> ro(backing);
+    EXPECT_EQ(ro["a"], 1);
+    using StringDict = OM::ReadOnlyDictionary<std::string, int>;
+    EXPECT_EQ(StringDict::Empty().getCountProperty(), 0);
+}
