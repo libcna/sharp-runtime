@@ -17,11 +17,14 @@
 #include <cmath>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "System/Array.hpp"
 #include "System/MemoryExtensions.hpp"
 #include "System/Span.hpp"
+#include "System/InvalidOperationException.hpp"
+#include "System/Linq.hpp"
 #include "System/Nullable.hpp"
 #include "System/Tuple.hpp"
 #include "System/ValueTuple.hpp"
@@ -671,4 +674,109 @@ TEST(NullableComparisonContractTests, NonFloating_Unchanged) {
     EXPECT_TRUE(a.Equals(System::Nullable<int>(3)));
     EXPECT_FALSE(a.Equals(b));
     EXPECT_TRUE(a == System::Nullable<int>(3));
+}
+
+// ===========================================================================
+// Linq — Contains, Distinct, Min, Max, OrderBy, OrderByDescending (#1909)
+// ===========================================================================
+
+TEST(LinqComparisonContractTests, Contains_Finds_NaN) {
+    std::vector<float> v{1.0f, kNaNf};
+    EXPECT_TRUE(System::Linq::Contains(v, kNaNf));
+    EXPECT_TRUE(System::Linq::Contains(v, 1.0f));
+    EXPECT_FALSE(System::Linq::Contains(v, 2.0f));
+    std::vector<float> noNaN{1.0f};
+    EXPECT_FALSE(System::Linq::Contains(noNaN, kNaNf));
+}
+
+TEST(LinqComparisonContractTests, Distinct_Collapses_NaN) {
+    std::vector<double> v{kNaN, kNaN, 1.0, kNaN, 1.0};
+    auto d = System::Linq::Distinct(v);
+    ASSERT_EQ(d.size(), 2u);
+    EXPECT_TRUE(std::isnan(d[0]));
+    EXPECT_DOUBLE_EQ(d[1], 1.0);
+    // Signed zero is one value, as it already was.
+    std::vector<double> zeros{0.0, -0.0};
+    EXPECT_EQ(System::Linq::Distinct(zeros).size(), 1u);
+}
+
+// The reference is deliberately asymmetric: NaN is the smallest value, so Min
+// short-circuits on it and Max skips it. Making these symmetric breaks one.
+TEST(LinqComparisonContractTests, Min_Returns_NaN_Wherever_It_Appears) {
+    EXPECT_TRUE(std::isnan(System::Linq::Min(std::vector<float>{1.0f, 2.0f, kNaNf})));
+    EXPECT_TRUE(std::isnan(System::Linq::Min(std::vector<float>{kNaNf, 1.0f, 2.0f})));
+    EXPECT_TRUE(std::isnan(System::Linq::Min(std::vector<double>{1.0, kNaN, 2.0})));
+    EXPECT_TRUE(std::isnan(System::Linq::Min(std::vector<double>{kNaN})));
+    EXPECT_DOUBLE_EQ(System::Linq::Min(std::vector<double>{2.0, 1.0, 3.0}), 1.0);
+    EXPECT_DOUBLE_EQ(System::Linq::Min(std::vector<double>{-kInf, 0.0}), -kInf);
+}
+
+TEST(LinqComparisonContractTests, Max_Skips_NaN) {
+    EXPECT_FLOAT_EQ(System::Linq::Max(std::vector<float>{kNaNf, 1.0f, 2.0f}), 2.0f);
+    EXPECT_FLOAT_EQ(System::Linq::Max(std::vector<float>{1.0f, kNaNf, 2.0f}), 2.0f);
+    EXPECT_FLOAT_EQ(System::Linq::Max(std::vector<float>{1.0f, 2.0f, kNaNf}), 2.0f);
+    // All NaN: the reference returns the last element.
+    EXPECT_TRUE(std::isnan(System::Linq::Max(std::vector<double>{kNaN, kNaN})));
+    EXPECT_DOUBLE_EQ(System::Linq::Max(std::vector<double>{2.0, 1.0, 3.0}), 3.0);
+}
+
+TEST(LinqComparisonContractTests, Min_And_Max_On_Empty_Still_Throw) {
+    EXPECT_THROW(System::Linq::Min(std::vector<double>{}), System::InvalidOperationException);
+    EXPECT_THROW(System::Linq::Max(std::vector<double>{}), System::InvalidOperationException);
+}
+
+TEST(LinqComparisonContractTests, Min_And_Max_NonFloating_Unchanged) {
+    EXPECT_EQ(System::Linq::Min(std::vector<int>{3, 1, 2}), 1);
+    EXPECT_EQ(System::Linq::Max(std::vector<int>{3, 1, 2}), 3);
+    EXPECT_EQ(System::Linq::Min(std::vector<std::string>{"b", "a"}), "a");
+    EXPECT_EQ(System::Linq::Max(std::vector<std::string>{"b", "a"}), "b");
+}
+
+TEST(LinqComparisonContractTests, OrderBy_Puts_NaN_First) {
+    std::vector<float> v{3.0f, kNaNf, 1.0f};
+    auto s = System::Linq::OrderBy<float, float>(v, [](const float& x) { return x; });
+    ASSERT_EQ(s.size(), 3u);
+    EXPECT_TRUE(std::isnan(s[0]));
+    EXPECT_FLOAT_EQ(s[1], 1.0f);
+    EXPECT_FLOAT_EQ(s[2], 3.0f);
+}
+
+TEST(LinqComparisonContractTests, OrderByDescending_Puts_NaN_Last) {
+    std::vector<float> v{1.0f, kNaNf, 3.0f};
+    auto s = System::Linq::OrderByDescending<float, float>(v, [](const float& x) { return x; });
+    ASSERT_EQ(s.size(), 3u);
+    EXPECT_FLOAT_EQ(s[0], 3.0f);
+    EXPECT_FLOAT_EQ(s[1], 1.0f);
+    EXPECT_TRUE(std::isnan(s[2]));
+}
+
+TEST(LinqComparisonContractTests, OrderBy_LargeRange_Leaves_Finite_Keys_Sorted) {
+    const int n = 4096;
+    std::vector<float> v;
+    v.reserve(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i)
+        v.push_back((i % 3 == 1) ? kNaNf : static_cast<float>(n - i));
+    auto s = System::Linq::OrderBy<float, float>(v, [](const float& x) { return x; });
+    EXPECT_EQ(finiteInversions(s), 0);
+}
+
+TEST(LinqComparisonContractTests, OrderBy_NonFloating_Keys_Unchanged) {
+    std::vector<std::string> v{"ccc", "a", "bb"};
+    auto s = System::Linq::OrderBy<std::string, std::size_t>(
+        v, [](const std::string& x) { return x.size(); });
+    EXPECT_EQ(s, (std::vector<std::string>{"a", "bb", "ccc"}));
+    auto d = System::Linq::OrderByDescending<std::string, std::size_t>(
+        v, [](const std::string& x) { return x.size(); });
+    EXPECT_EQ(d, (std::vector<std::string>{"ccc", "bb", "a"}));
+}
+
+TEST(LinqComparisonContractTests, OrderBy_Is_Still_Stable) {
+    // Equal keys keep their input order, including NaN keys among themselves.
+    std::vector<std::pair<int, double>> v{{1, kNaN}, {2, kNaN}, {3, 1.0}, {4, 1.0}};
+    auto s = System::Linq::OrderBy<std::pair<int, double>, double>(
+        v, [](const std::pair<int, double>& p) { return p.second; });
+    EXPECT_EQ(s[0].first, 1);
+    EXPECT_EQ(s[1].first, 2);
+    EXPECT_EQ(s[2].first, 3);
+    EXPECT_EQ(s[3].first, 4);
 }

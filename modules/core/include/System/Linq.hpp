@@ -4,12 +4,16 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <functional>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Linq {
 
@@ -246,20 +250,65 @@ namespace System::Linq {
         return result;
     }
 
-    /** @brief Returns the minimum element (requires operator<). */
+    /**
+     * @brief Returns the minimum element under .NET's default comparison contract.
+     *
+     * C++ counterpart of .NET Enumerable.Min. For `float` and `double` the reference
+     * imposes a total ordering in which NaN is smaller than every value including
+     * negative infinity, and says so in a comment at `Linq/Min.cs:130-139`: it
+     * short-circuits and returns the first NaN it meets, so `Min({1,2,NaN})` is NaN.
+     * `std::min_element` with raw `<` returned 1.
+     *
+     * @note Min and Max are deliberately NOT symmetric — see Max below. Both come
+     * from the same rule applied to opposite ends of the ordering.
+     * @throws System::InvalidOperationException if @p source is empty.
+     */
     template<typename T>
     T Min(const std::vector<T>& source)
     {
         if (source.empty()) throw System::InvalidOperationException("Sequence contains no elements.");
-        return *std::min_element(source.begin(), source.end());
+        if constexpr (std::is_floating_point_v<T>) {
+            T value = source[0];
+            if (std::isnan(value)) return value;
+            for (std::size_t i = 1; i < source.size(); ++i) {
+                const T x = source[i];
+                if (x < value) value = x;
+                else if (std::isnan(x)) return x;   // nothing can be smaller
+            }
+            return value;
+        } else {
+            return *std::min_element(source.begin(), source.end());
+        }
     }
 
-    /** @brief Returns the maximum element (requires operator<). */
+    /**
+     * @brief Returns the maximum element under .NET's default comparison contract.
+     *
+     * C++ counterpart of .NET Enumerable.Max. Because NaN is the smallest value in
+     * the reference's ordering, `MaxFloat` (`Linq/Max.cs:96-130`) SKIPS every leading
+     * NaN and then compares ordinarily, so `Max({NaN,1,2})` is 2 — where
+     * `std::max_element` with raw `<` returned NaN. An all-NaN sequence returns its
+     * last element, matching the reference's `return span[^1];`.
+     *
+     * @note This is the opposite direction of adjustment from Min above, not the
+     * same one; making the two symmetric would break one of them.
+     * @throws System::InvalidOperationException if @p source is empty.
+     */
     template<typename T>
     T Max(const std::vector<T>& source)
     {
         if (source.empty()) throw System::InvalidOperationException("Sequence contains no elements.");
-        return *std::max_element(source.begin(), source.end());
+        if constexpr (std::is_floating_point_v<T>) {
+            std::size_t i = 0;
+            while (i < source.size() && std::isnan(source[i])) ++i;
+            if (i == source.size()) return source.back();
+            T value = source[i];
+            for (; i < source.size(); ++i)
+                if (source[i] > value) value = source[i];
+            return value;
+        } else {
+            return *std::max_element(source.begin(), source.end());
+        }
     }
 
     /**
@@ -284,8 +333,9 @@ namespace System::Linq {
     {
         detail::requireCallable(keySelector, "keySelector");
         std::vector<T> result = source;
+        const System::detail::DefaultLess<Key> less{};
         std::stable_sort(result.begin(), result.end(),
-                  [&](const T& a, const T& b) { return keySelector(a) < keySelector(b); });
+                  [&](const T& a, const T& b) { return less(keySelector(a), keySelector(b)); });
         return result;
     }
 
@@ -304,12 +354,19 @@ namespace System::Linq {
     {
         detail::requireCallable(keySelector, "keySelector");
         std::vector<T> result = source;
+        const System::detail::DefaultGreater<Key> greater{};
         std::stable_sort(result.begin(), result.end(),
-                  [&](const T& a, const T& b) { return keySelector(a) > keySelector(b); });
+                  [&](const T& a, const T& b) { return greater(keySelector(a), keySelector(b)); });
         return result;
     }
 
-    /** @brief Returns distinct elements (preserves first occurrence; requires operator==). */
+    /**
+     * @brief Returns distinct elements, preserving the first occurrence.
+     *
+     * C++ counterpart of .NET Enumerable.Distinct, which uses
+     * `EqualityComparer<T>.Default` — so for `float` and `double` two NaN elements
+     * are duplicates of each other and only the first survives.
+     */
     template<typename T>
     std::vector<T> Distinct(const std::vector<T>& source)
     {
@@ -317,7 +374,7 @@ namespace System::Linq {
         for (const auto& item : source) {
             bool found = false;
             for (const auto& existing : result)
-                if (existing == item) { found = true; break; }
+                if (System::detail::equalValues(existing, item)) { found = true; break; }
             if (!found) result.push_back(item);
         }
         return result;
@@ -358,12 +415,18 @@ namespace System::Linq {
         return result;
     }
 
-    /** @brief Returns true if @p source contains @p value (requires operator==). */
+    /**
+     * @brief Returns true if @p source contains @p value.
+     *
+     * C++ counterpart of .NET Enumerable.Contains, which uses
+     * `EqualityComparer<T>.Default` — so a NaN @p value is found in a sequence that
+     * holds a NaN, which raw `==` never was.
+     */
     template<typename T>
     bool Contains(const std::vector<T>& source, const T& value)
     {
         for (const auto& item : source)
-            if (item == value) return true;
+            if (System::detail::equalValues(item, value)) return true;
         return false;
     }
 
