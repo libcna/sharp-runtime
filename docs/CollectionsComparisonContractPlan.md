@@ -800,3 +800,305 @@ approval.
 
 **Audit numbering:** no `SR-AUD-*` identifier was issued by any ticket in this
 family. It stays frozen at **364**.
+
+---
+
+## 16. #1919 as built — corrections to §6.1, §9 and §10 (ticket #1924)
+
+#1919 was approved on 2026-07-31 in the exact words of §10 and implemented as
+**#1921** (SortedSet), **#1922** (Dictionary, HashSet), **#1923** (FrozenSet,
+FrozenDictionary, ReadOnlySet, ReadOnlyDictionary) and **#1924** (this
+section). §6.1, §9 and §10 above are preserved as written; the corrections are
+additive, per §12.
+
+### 16.1 `SortedSet` is representation-**private**, not public
+
+§6.1 and §10 list `SortedSet<T>::SetIterator` and `SortedSet<T>::comparer()`
+as **public**. Measured at the HEAD #1919 was implemented against, both are
+**private** — they are declared above the class's `public:` label. The only
+public declaration mentioning the backing type at all is
+`SortedSet<T>::Iterator`'s constructor, whose other parameter is the private
+nested `State`, so no consumer can call it or name its parameter types.
+
+`SortedSet` therefore belonged with the ten compatible containers of #1918.
+It was implemented under #1919's approval regardless, which names it
+explicitly. **Why the original search missed it:** §6.1's table was built by
+grepping each header for a mention of the backing `std::` type and recording
+the enclosing declaration, without checking which access-specifier region that
+declaration fell in. Six of the seven rows were right; this one was not.
+
+**The blocked/compatible split is therefore 11 compatible and 6 blocked, not
+10 and 7.**
+
+### 16.2 The public **iterator** typedefs of `double` and `float` did **not** change
+
+§10 approved changing "the public `iterator`/`const_iterator` typedefs of
+`Dictionary<double,V>`, `HashSet<double>`, `FrozenSet<double>` and
+`FrozenDictionary<double,V>`". Measured, **they do not change for `double` or
+`float`.** libstdc++'s `_Node_iterator<Value, ConstantIterators, CacheHashCode>`
+does not mention the hasher, and both bools are unchanged for those two types.
+
+They **do** change for `long double`, and only there, for a reason worth
+recording: libstdc++ specialises `__is_fast_hash<std::hash<long double>>` to
+`false`, so the node cached its hash code; `System::detail::DefaultHash<long
+double>` is a new type for which the primary template says `true`, so the cache
+is switched off. Measured in the symbol inventory:
+
+| | `_Hashtable_traits<CacheHashCode, …>` before | after |
+|---|---|---|
+| `unordered_set<long double>` | `<true, true, true>` | `<false, true, true>` |
+| `unordered_set<double>` | `<false, true, true>` | `<false, true, true>` (unchanged) |
+
+Both directions are pinned by baseline `static_assert`s in
+`test/consumer/collections_floating_comparer_negative.cpp`. The performance
+consequence is §19.
+
+### 16.3 The measured public surface that **did** change
+
+Six types, floating element/key only:
+
+| Type | What moved |
+|---|---|
+| `Dictionary<K,V>` | both `ToMap()` overloads' return type; `iterator`/`const_iterator` **for `long double` only** |
+| `HashSet<T>` | `iterator`/`const_iterator` **for `long double` only** |
+| `FrozenSet<T>` | `CreateFromSet`'s parameter; `const_iterator` **for `long double` only** |
+| `FrozenDictionary<K,V>` | `CreateFromMap`'s parameter; `const_iterator` **for `long double` only** |
+| `ReadOnlySet<T>` | the `shared_ptr` constructor's parameter |
+| `ReadOnlyDictionary<K,V>` | the `shared_ptr` constructor's parameter; `getDictionaryProperty()` (protected) |
+
+Each of the six publishes a `SetType`/`MapType` alias naming its own backing
+type. `SortedSet` publishes nothing (§16.1) and keeps a private `BackingSet`.
+The migration note is `docs/Migration-CollectionsFloatingComparers.md`.
+
+### 16.4 Representation, measured
+
+`build-probe/1919_{prefix,postfix}_layout.log`, one fixture, 57 `sizeof`/
+`alignof` measurements over `double`, `float`, `long double`, `int`,
+`long long`, `std::string`, a user-defined comparable-and-hashable type,
+`std::optional<double>` and `std::pair<int,double>`:
+
+- **0 of 57 `sizeof` or `alignof` values changed**, for either instantiation
+  family. The comparators are empty classes and the empty-base optimisation
+  absorbs them.
+- Standard-layout and trivially-copyable properties unchanged for all.
+- The only type-name movement is the `long double` node/iterator flip of §16.2.
+
+External symbols over the same fixture (`nm --extern-only --defined-only`,
+demangled): **1,758 → 1,757**.
+
+| | count | what |
+|---|---|---|
+| removed | 106 | 97 genuine predicate moves + 8 `long double` typeinfo names + 1 weak COMDAT |
+| added | 105 | 97 genuine predicate moves + 8 `long double` typeinfo names |
+
+**No symbol moved for any non-floating instantiation.** The unpaired removal is
+`std::_Hashtable<std::optional<double>, …>::find(…)` — a **weak COMDAT** symbol
+GCC previously emitted out of line and now inlines away. `std::optional<double>`
+is not a floating-point type and its container did not change; this is a
+codegen artefact of the same translation unit, the same shape #1918 recorded
+for `std::priority_queue::pop`. It is stated here rather than papered over with
+"no ABI change".
+
+---
+
+## 17. Recorded, not repaired — the composite-key gap (ticket #1925)
+
+`std::is_floating_point_v` is the policy's selector, so the contract does not
+reach **inside** a composite type. Measured (probe row `D10`):
+
+```
+Dictionary<std::optional<double>,int> d;
+d.Add(std::optional<double>(NaN), 1);
+d.TryGetValue(std::optional<double>(NaN), v);   // FALSE
+```
+
+The key is unfindable **by the very object that was inserted**, because
+`std::equal_to<std::optional<double>>` is `optional::operator==`, which compares
+the contained doubles with raw `==`. .NET's `Dictionary<double?,V>` finds it:
+`EqualityComparer<double?>.Default` is `Nullable<T>.Equals` → `Double.Equals`,
+which is NaN-reflexive. The same applies to `std::pair`, `std::tuple` and any
+user type holding a floating member; the ordered case is the milder
+non-strict-weak-ordering defect one nesting level down.
+
+This is **outside #1919's approval**, which covers floating-point element and
+key types only — repairing it means making the policy recurse and would move a
+further family of public template types. It is ticket **#1925**, and today's
+behaviour is pinned by
+`CollectionsComparisonContract.NullableFloatingKeysKeepRawIeeeEqualityForNow`
+so it cannot change silently in either direction.
+
+---
+
+## 18. Mutation matrix — #1919 (ticket #1924)
+
+`build-probe/1919_mutations.py`, reusing #1920's harness
+(`build-probe/1920_mutate.sh`) unchanged: one mutation, one compile of the
+permanent contract-test translation unit, aggregate parallelism **1 job**. Log:
+`build-probe/1919_mutation_matrix.log`.
+
+Three verdicts, not two. **REJECTED** means the mutation does not *compile*
+against the permanent suite, because the suite's cross-container
+`static_assert`s — Dictionary, HashSet, FrozenSet, FrozenDictionary,
+ReadOnlySet and ReadOnlyDictionary must all key on the **same** predicates —
+contradict it. That is stronger than KILLED, not a harness error.
+
+| ID | Mutation | Expected | Result | Tests failed |
+|---|---|---|---|---|
+| N1 | restore `std::less` for the `SortedSet` tree | KILLED | **KILLED** | 6 |
+| N2 | `Dictionary`: policy hash, native `equal_to` | REJECTED | **REJECTED** | — |
+| N3 | `Dictionary`: native `std::hash`, policy equality | REJECTED | **REJECTED** | — |
+| N4 | `HashSet`: restore both native predicates | REJECTED | **REJECTED** | — |
+| N5 | fail to propagate into `FrozenSet` | REJECTED | **REJECTED** | — |
+| N6 | fail to propagate into `FrozenDictionary` | REJECTED | **REJECTED** | — |
+| N7 | fail to propagate into `ReadOnlySet` | KILLED | **KILLED** | 2 |
+| N8 | fail to propagate into `ReadOnlyDictionary` | REJECTED | **REJECTED** | — |
+| N9 | make NaN ordering-equivalent to every finite value | KILLED | **KILLED** | 12 |
+| N10 | compare NaN **payload bits** instead of .NET equality | KILLED | **KILLED** | 18 |
+| N11 | bypass the policy on **removal** | KILLED | **KILLED** | 2 |
+| N12 | bypass the policy on **duplicate detection** | KILLED | **KILLED** | 2 |
+| N13 | bypass the policy on the **lookup** path | KILLED | **KILLED** | 5 |
+| N14 | bypass the policy in **constructor population** | KILLED | **KILLED** | 1 |
+| N15 | bypass the policy in **one public factory** (`FrozenDictionary::Create`) | KILLED | **KILLED** | 1 |
+| N16 | **control** — spell the same comparator longhand | SURVIVED | **SURVIVED** | 0 |
+| N17 | **control** — pre-reserve on every `HashSet::Add` | SURVIVED | **SURVIVED** | 0 |
+| N18 | **equivalent** — rebuild through a raw map after rehash | SURVIVED | **SURVIVED** | 0 |
+| N19 | **equivalent** — `FrozenSet::Create` folds through a raw set | SURVIVED | **SURVIVED** | 0 |
+
+9 killed, 6 rejected at compile time, 2 declared controls and 2 declared
+equivalents survived, **0 surprises in the final run**.
+
+### 18.1 What the campaign found, and the two mutations that were wrong
+
+**N18 and N19 were written expecting a kill and are provably equivalent.** That
+is the campaign's most useful result, and both are kept and relabelled rather
+than deleted:
+
+- **N18** ("bypass after rehash") rebuilds `Dictionary`'s map through a
+  `std::hash`-keyed temporary inside `TrimExcess`. It cannot change anything,
+  because the map it rebuilds *from* has already folded every equal key on
+  insert and the map it rebuilds *into* folds again. **A "bypass after rehash"
+  is structurally unreachable**: the hasher is a property of the container
+  *type*, not a decision taken per call site. That is a property of the chosen
+  repair, and it is why no per-site audit of the hashed containers is needed.
+- **N19** ("bypass one factory") makes `FrozenSet::Create` fold through a raw
+  set first. The raw set keeps *more* elements than the policy set and the copy
+  folds them again, so the final set is identical. A set has no values, so there
+  is no last-one-wins rule to disturb — which is exactly what makes the
+  `FrozenDictionary` version (N15) a real defect, where the raw temporary both
+  loses the deterministic last-value-wins rule for two equal NaN keys and makes
+  the surviving value depend on an unspecified iteration order. N15 is killed.
+
+The prompt for this batch asked for a mutation that "bypasses it after rehash".
+It exists (N18), it survives, and the reason it survives is a **result**, not a
+gap: reporting it as a killed mutation would have been false.
+
+### 18.2 Sanitizers
+
+`build-probe/1919_run.sh {asan,ubsan}` over all 46 probe cases:
+**zero diagnostics from AddressSanitizer, LeakSanitizer and
+UndefinedBehaviorSanitizer**, and every case returned the same answer as the
+plain build. This restates §3.3's central fact for the seven containers: **the
+sanitizers cannot see a semantic comparison defect at all.** The permanent
+GoogleTest suite and this mutation matrix are the correctness gate; the
+sanitizer runs prove only that the repair introduced no memory or
+undefined-behaviour defect of its own.
+
+---
+
+## 19. Performance — #1919 (ticket #1924)
+
+`build-probe/1919_perf.cpp`, compiled `-O2` from **one** source against the
+pre-change tree (a repository-local `git worktree` at `1369fcda` under
+`build-probe/1919-baseline`) and the post-change tree. All data is produced at
+run time by a seeded xorshift and consumed through a `volatile` sink. **Seven**
+alternating runs of each binary; each cell is a median of medians. `noise` is
+`max/min` across the seven runs of that binary. 200,000 elements per workload.
+Summary: `build-probe/1919_perf_summary.log`.
+
+| Workload | before ms | after ms | ratio | noise |
+|---|---|---|---|---|
+| `SortedSet<double>` insert, no NaN | 43.30 | 45.07 | 1.041 | 1.102 |
+| `SortedSet<double>` insert, duplicate-heavy | 5.22 | 5.28 | 1.010 | 1.075 |
+| `SortedSet<double>` lookup, 200k hits | 35.67 | 37.61 | 1.055 | 1.451 |
+| `SortedSet<int>` insert (control) | 31.03 | 28.07 | 0.905 | 1.214 |
+| `Dictionary<double,int>` insert | 22.36 | 20.46 | 0.915 | 1.367 |
+| `Dictionary<double,int>` insert, duplicate-heavy | 2.56 | 2.60 | 1.014 | 1.151 |
+| `Dictionary<double,int>` lookup, 200k hits | 3.47 | 3.54 | 1.018 | 1.418 |
+| **`Dictionary<long double,int>` insert** | **52.41** | **68.12** | **1.300** | 1.206 |
+| `Dictionary<long double,int>` lookup | 29.56 | 23.38 | 0.791 | 1.485 |
+| `Dictionary<int,int>` insert (control) | 12.89 | 13.12 | 1.018 | 1.108 |
+| `Dictionary<string,int>` insert (control) | 25.93 | 29.25 | 1.128 | 1.749 |
+| `HashSet<double>` insert | 17.41 | 18.06 | 1.037 | 1.491 |
+| `HashSet<double>` lookup, 200k hits | 3.10 | 3.20 | 1.032 | 1.634 |
+| `HashSet<int>` insert (control) | 13.00 | 13.18 | 1.014 | 1.249 |
+| `FrozenSet<double>` lookup | 3.89 | 4.02 | 1.034 | 1.165 |
+| `FrozenDictionary<double,int>` lookup | 4.16 | 4.25 | 1.021 | 1.186 |
+| `FrozenSet<int>` lookup (control) | 1.66 | 1.66 | 1.004 | 1.351 |
+| `ReadOnlySet<double>` lookup | 3.35 | 3.20 | 0.954 | 1.659 |
+| `ReadOnlyDictionary<double,int>` lookup | 3.62 | 3.47 | 0.966 | 1.258 |
+
+**Every control is inside its own noise floor**, and so is every `double` and
+`float` workload. One row is outside it and is stated rather than absorbed.
+
+### 19.1 The one genuine regression: `long double` hash insert, 1.300×
+
+Cause, measured rather than guessed (§16.2): libstdc++ specialises
+`__is_fast_hash<std::hash<long double>>` to `false`, so an
+`unordered_map<long double, …>` node cached its hash code and a rehash never
+recomputed it. `DefaultHash<long double>` is a new type for which the primary
+template says `true`, so the cache is switched off and every rehash recomputes
+200,000 `long double` hashes.
+
+Accepted, for three reasons: the cost falls only on `long double` hashed
+insertion, the rarest of the three floating types in ported game code; the
+**lookup** side of the same container measured *faster* (0.791×, inside noise),
+because the node lost a word and the table got denser; and the alternative —
+specialising `std::__is_fast_hash`, a reserved libstdc++ internal, behind
+`#ifdef __GLIBCXX__` — buys a 1.3× on one workload at the price of a
+non-portable specialisation of a `std::` template this project does not own.
+Recorded as ticket **#1926** so the decision is durable rather than lost.
+
+### 19.2 Three ratios that are not comparisons
+
+Three workloads cannot be expressed as a ratio, because the **before** binary
+was not doing the same work:
+
+| Workload | before ms | after ms | why |
+|---|---|---|---|
+| `SortedSet<double>` insert, 1 % NaN | 0.46 | 44.75 | before, every element after the first NaN was rejected as a duplicate — the set held **two** elements, not 200,000 |
+| `SortedSet<double>` insert, 50 % NaN | 0.46 | 23.65 | same |
+| `HashSet<double>` insert, 50 % NaN | **16,953.59** | **8.83** | before, 100,000 NaNs hashed to one bucket and none compared equal, giving a 100,000-long collision chain and quadratic insertion |
+
+The third is worth stating plainly: on this shape the shipped code took
+**17 seconds** where the repaired code takes **8.8 ms**, a factor of ~1,900.
+That is not a performance improvement claimed for the repair — it is the
+removal of a quadratic blow-up that any NaN-bearing input could trigger. The
+first two are the cost of *keeping* 200,000 elements instead of silently
+discarding 199,998 of them.
+
+---
+
+## 20. Closure of #1919 and of the #1912 family
+
+**Delivered by this batch:** #1921, #1922, #1923, #1924 — the whole of #1919.
+
+Every probe row §3.1 listed as still wrong at §15's closure now returns the
+.NET answer: S1, S2, S2b, S3, S8, S9, S11, S12, S20, plus every case the #1919
+probe added (46 cases, `build-probe/1919_{prefix,postfix}_plain.log`). S16 and
+every other declared control is unchanged.
+
+**Final container tally, superseding §15's:**
+
+| Population | Measured | Repaired |
+|---|---|---|
+| ordered containers | 6 | **6 of 6** (`SortedSet` was the last) |
+| hashed containers | 11 | **11 of 11** |
+| compatible / public-representation split | **11 / 6** (§16.1) | both halves shipped |
+
+**Not repaired, ticketed:** #1925 (composite/nullable floating keys, §17) and
+#1926 (`long double` hash-code caching, §19.1). Neither is a member of #1912's
+population; both were discovered while implementing #1919 and are recorded
+rather than folded in.
+
+**Audit numbering:** no `SR-AUD-*` identifier was issued by any ticket in this
+family, including #1919's four. It stays frozen at **364**.

@@ -49,7 +49,7 @@
 using System::Collections::Frozen::FrozenDictionary;
 using System::Collections::Frozen::FrozenSet;
 using System::Collections::Generic::Dictionary;
-using System::Collections::Generic::HashSet;
+using System::Collections::Generic::HashSet;  // used by the non-floating baseline assertions
 using System::Collections::ObjectModel::ReadOnlyDictionary;
 using System::Collections::ObjectModel::ReadOnlySet;
 
@@ -138,17 +138,36 @@ int main() {
                   "site 7 must be rejected: the non-floating map type must NOT have moved");
 #endif
 
+    // MEASURED CORRECTION to docs/CollectionsComparisonContractPlan.md section
+    // 10, which said the public iterator typedefs of Dictionary<double,V>,
+    // HashSet<double>, FrozenSet<double> and FrozenDictionary<double,V> change.
+    // They do NOT: libstdc++'s node iterator is parameterised on the value type
+    // and two bools, none of which mentions the hasher, and both bools are
+    // unchanged for float and double. Only `long double` moves, because
+    // __is_fast_hash<std::hash<long double>> is false while it is true for the
+    // policy hasher, so the node stops caching its hash code. These two
+    // baseline assertions pin the measurement in both directions.
+    static_assert(std::is_same_v<FrozenSet<double>::const_iterator,
+                                 std::unordered_set<double>::const_iterator>,
+                  "measured: a double node iterator does NOT move");
+    static_assert(!std::is_same_v<FrozenSet<long double>::const_iterator,
+                                  std::unordered_set<long double>::const_iterator>,
+                  "measured: a long double node iterator DOES move");
+
 #if SHARP_RUNTIME_NEGATIVE_SITE == 8
-    // NEGATIVE(hashset-double-iterator-raw): cannot convert
+    // NEGATIVE(frozenset-longdouble-iterator-raw): cannot convert
     //     | conversion from
     //     | no viable conversion
     //     | invalid conversion
-    HashSet<double> hs;
-    std::unordered_set<double>::iterator it = hs.begin();
+    //     | no matching function for call
+    FrozenSet<long double>::SetType raw;
+    auto fs = FrozenSet<long double>::CreateFromSet(raw);
+    std::unordered_set<long double>::const_iterator it = fs.begin();
     (void)it;
 #else
-    HashSet<double> hs;
-    HashSet<double>::iterator it = hs.begin();
+    FrozenSet<long double>::SetType migrated8;
+    auto fs = FrozenSet<long double>::CreateFromSet(migrated8);
+    FrozenSet<long double>::const_iterator it = fs.begin();
     (void)it;
 #endif
 

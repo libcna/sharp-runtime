@@ -671,6 +671,29 @@ backing `std::` container in their public surface (`SortedSet`, `Dictionary`,
 `HashSet`, `FrozenSet`, `FrozenDictionary`, `ReadOnlySet`, `ReadOnlyDictionary`),
 whose exact approval wording is `docs/CollectionsComparisonContractPlan.md` §10.
 
+**#1919 was approved and delivered on 2026-07-31, and the paragraph above was
+wrong in two more places** — tickets #1921, #1922, #1923 and #1924, recorded in
+`docs/CollectionsComparisonContractPlan.md` §16–§20. The two paragraphs above
+stay as written. Measured: `SortedSet`'s `SetIterator` and `comparer()` are
+**private**, not public, so the compatible/public-representation split is
+**11 / 6**, not 10 / 7 — the original table recorded each declaration that
+mentioned the backing type without checking which access-specifier region it
+fell in; and the public `iterator`/`const_iterator` typedefs of
+`Dictionary<double,V>`, `HashSet<double>`, `FrozenSet<double>` and
+`FrozenDictionary<double,V>` **do not change**, because libstdc++'s node
+iterator does not mention the hasher. Only `long double` moves, where the
+hash-code cache is switched off. Measured over 57 `sizeof`/`alignof` readings,
+**nothing changed for any instantiation**; over 1,758 external symbols,
+**no symbol moved for any non-floating instantiation**. Every ordered container
+(6 of 6) and every hashed container (11 of 11) now carries the contract.
+19 mutations: 9 killed, 6 rejected at compile time, 2 declared controls and 2
+declared *equivalents* survived. Two new defects were discovered while
+implementing it and are **not** members of this population — **#1925**
+(composite/nullable floating keys keep raw IEEE equality) and **#1926**
+(`long double` hashed insertion is 1.300× slower). **Still no `SR-AUD-*`
+identifier was issued**; numbering stays frozen at 364. **The #1912 population
+is now closed in full.**
+
 Deliberately **not** members and not closed by this work: the caller-supplied
 comparer overloads of `Array::Sort`, `Array::BinarySearch` and
 `MemoryExtensions::Sort`, which pass the predicate straight through exactly as

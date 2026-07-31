@@ -945,3 +945,42 @@ compatible family depend on an approval.
 
 Audit numbering is unchanged at **364**; no `SR-AUD-*` identifier was issued for
 any of the above.
+
+---
+
+## 18c. §18b's own blocked half, delivered (ticket #1924, 2026-07-31)
+
+§18b above stays **exactly as written**. Its closing paragraph named **#1919** —
+the containers whose backing `std::` container is part of their public surface —
+as approval-blocked. That approval was given on 2026-07-31 in the exact words of
+`docs/CollectionsComparisonContractPlan.md` §10, and #1919 was delivered as
+tickets **#1921** (SortedSet), **#1922** (Dictionary, HashSet), **#1923**
+(FrozenSet, FrozenDictionary, ReadOnlySet, ReadOnlyDictionary) and **#1924**
+(evidence and closure).
+
+Two of §18b's own premises were wrong, and the corrections are additive here as
+well:
+
+| Claim | Measured |
+|---|---|
+| "**seven** containers whose backing `std::` container is part of their public surface" | **Six.** `SortedSet<T>`'s `SetIterator` typedef and `comparer()` are **private** — both are declared above the class's `public:` label — and the only public declaration mentioning the backing type, `Iterator`'s constructor, also takes the private nested `State` and so cannot be called. The compatible / public-representation split is **11 / 6**, not 10 / 7. The original table recorded, for each header, the declaration that mentioned the backing type, without checking which access-specifier region it fell in. |
+| §10's approval of "the public `iterator`/`const_iterator` typedefs of `Dictionary<double,V>`, `HashSet<double>`, `FrozenSet<double>` and `FrozenDictionary<double,V>`" | **Those do not change.** libstdc++'s `_Node_iterator<Value, ConstantIterators, CacheHashCode>` does not mention the hasher, and both bools are unchanged for `float` and `double`. Only `long double` moves, because `__is_fast_hash<std::hash<long double>>` is specialised to `false` while the primary template says `true` for the policy hasher, so the node stops caching its hash code. |
+
+What was measured rather than asserted: **0 of 57** `sizeof`/`alignof` readings
+changed, for either instantiation family; of 1,758 external symbols, 106 were
+removed and 105 added and **not one belongs to a non-floating instantiation**
+(the single unpaired removal is a weak COMDAT `find` GCC now inlines away).
+19 mutations ran — 9 killed, 6 **rejected at compile time** by the suite's
+cross-container assertions, 2 declared controls and 2 declared *equivalents*
+survived. ASan, LSan and UBSan produced **zero** diagnostics over all 46 probe
+cases, restating §15's fact for these containers.
+
+Two new defects were found while implementing it, both **outside** this family's
+population and both ticketed rather than absorbed: **#1925** — the policy
+selects on `std::is_floating_point_v`, so a *nullable or composite* floating key
+(`Dictionary<std::optional<double>,V>`) keeps raw IEEE equality and cannot find
+a NaN key that .NET finds; and **#1926** — `long double` hashed insertion is
+**1.300×** slower for the cache-hash-code reason above.
+
+Audit numbering is unchanged at **364**; no `SR-AUD-*` identifier was issued.
+**SR-AUD-046 / CCF-010 and the whole #1912 continuation are now closed.**

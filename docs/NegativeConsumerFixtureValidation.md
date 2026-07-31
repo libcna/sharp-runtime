@@ -734,6 +734,7 @@ that adds a tracked negative fixture.*
 | 2026-07-29 | **#1801** | — (the convention and the checker itself) | — | **7 fixtures / 37 sites** |
 | 2026-07-29 | **#1791** | `collections_list_indexer_negative.cpp` (`Collections.Core`) | **14** | **8 fixtures / 51 sites** |
 | 2026-07-29 | **#1803** | `collections_sorted_set_version_negative.cpp` (`Collections.Core`) | **15** | **9 fixtures / 66 sites** |
+| 2026-07-31 | **#1923** | `collections_floating_comparer_negative.cpp` (`Collections.Core`) | **8** | **10 fixtures / 74 sites** |
 
 ### 17.1 #1791's fourteen sites
 
@@ -1164,3 +1165,55 @@ clean-first rebuild would have written a full tree's worth of objects to the SSD
 to re-derive an unchanged answer, which is the exact cost the rule exists to
 avoid. `scripts/local_ci_check.sh build` was run in full, and it reconfigures and
 rebuilds incrementally before running the whole gate.
+
+### 17.2 #1923's eight sites — a fixture that pins a boundary in **both** directions
+
+Ticket #1919 (delivered as #1921–#1924) changed the backing `std::` container of
+seven Collections templates for **floating-point element and key types only**.
+For every non-floating type the alias is token-identical to the standard
+default, so nothing changes at all.
+
+That makes this fixture different in kind from the nine before it. The others
+prove that a set of outlawed spellings is rejected. This one has to prove
+**both halves of a boundary at once**: that the floating spellings are rejected
+*and* that the non-floating ones are still accepted. A whole-file "does it fail
+to compile" check cannot express that — and neither can a fixture whose sites
+are all rejections.
+
+| # | Marker | What it proves |
+|---|---|---|
+| 1 | `readonlyset-double-raw-unordered-set` | `ReadOnlySet<double>` no longer takes `shared_ptr<std::unordered_set<double>>` |
+| 2 | `readonlydict-double-raw-unordered-map` | `ReadOnlyDictionary<double,int>` no longer takes `shared_ptr<std::unordered_map<double,int>>` |
+| 3 | `frozenset-double-createfromset-raw` | `FrozenSet<double>::CreateFromSet` no longer takes the raw set |
+| 4 | `frozendict-double-createfrommap-raw` | `FrozenDictionary<double,int>::CreateFromMap` no longer takes the raw map |
+| 5 | `dictionary-double-tomap-raw-reference` | `const std::unordered_map<double,int>&` no longer binds to `ToMap()` |
+| 6 | `dictionary-double-maptype-must-not-be-raw` | a `static_assert` that the **floating** map type is still `std::unordered_map<double,int>` — must FAIL, i.e. the repair is still in place |
+| 7 | `dictionary-int-maptype-must-stay-raw` | a `static_assert` that the **non-floating** map type is *not* `std::unordered_map<int,int>` — must FAIL, i.e. no non-floating consumer was broken |
+| 8 | `frozenset-longdouble-iterator-raw` | `std::unordered_set<long double>::const_iterator` no longer receives `FrozenSet<long double>::begin()` |
+
+Sites 6 and 7 are the unusual ones: each is a `static_assert` that must be
+**rejected**, so the fixture fails loudly if either half of the boundary moves.
+Site 6 catches a silent revert of the repair; site 7 catches a non-floating
+consumer being broken by a future change to the aliases.
+
+Site 8 replaced an earlier draft that asserted
+`std::unordered_set<double>::iterator it = hashSet.begin();` is rejected. It
+**is** rejected — but it was rejected before #1919 too, because
+`HashSet<T>::iterator` has always been the version-checked wrapper rather than a
+raw node iterator, so that site pinned a pre-existing fact and not the migration
+boundary. Measurement then showed the `double` and `float` node iterators do not
+move at all (only `long double` does, because its hash-code cache is switched
+off), so the site was rewritten over `long double` — the one case that genuinely
+moved — and two baseline `static_assert`s were added recording the
+non-movement of `double` in the same file. This is recorded rather than quietly
+fixed because a site that pins the wrong fact is exactly the false-pass mode
+ticket #1801 exists to prevent, and it survived a first passing run of the
+checker.
+
+The `#else` branch of every site is the **migrated** spelling, so the clean
+baseline this file must compile with no site selected is simultaneously a
+positive fixture for the migration. Guide:
+`docs/Migration-CollectionsFloatingComparers.md`.
+
+**Running totals after #1923: 10 fixtures, 74 sites, 84 compiler invocations,
+peak 2 jobs.**
