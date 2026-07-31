@@ -2601,3 +2601,84 @@ operation #1888 is going to delete anyway.
 > which no counter design can reach.
 
 **#1889 stays `needs_user`.** It should land **after** #1888 (§39.9).
+
+---
+
+## 40. Case classification — #1893 (§31 item 6), **not implemented**
+
+*Recorded 2026-07-31. Item 6 is an accepted-input change and is unapproved, so
+this section classifies each case by **root cause** — which §25 never did, it
+grouped all five under "deep-tree and deep-parse bounds" — and corrects one
+premise. No production change was made.*
+
+### 40.1 The five cases are three different defects, not one
+
+| Case | Symptom | Root cause, measured | Reachable from |
+|---|---|---|---|
+| **J19c** | ASan `stack-overflow` on *release* of a 20,000-deep `JsonArray` nest | **recursive destruction.** The ASan frames are `~JsonArray` → `std::destroy_at` → `_Sp_counted_ptr_inplace::_M_dispose` → `_Sp_counted_base::_M_release` → `~JsonArray`, one stack frame per level (`1891_postfix_asan.log`) | programmatic `Add` only |
+| **X27c** | the same for a 20,000-deep `XElement` nest | the same recursive destruction through `children_` | programmatic `Add` only |
+| **J19d** | timeout at 100,000 deep | **quadratic construction.** `JsonNode::AssignParent`'s cycle guard walks the *whole* ancestor chain on every attach — O(depth²) | programmatic `Add` only |
+| **X27d** | the same | **quadratic construction.** `XContainer::InsertNodeAt`'s ancestor-or-self guard walks the whole chain on every insert | programmatic `Add` only |
+| **X28c** | ASan `stack-overflow` while parsing 20,000 nested arrays | **recursive tree building on untrusted text.** The frames sit in the port's own `fromNlohmann` recursion allocating `JsonArray`s, not in a mutation path | **`JsonNode::Parse` — untrusted input** |
+
+None is cyclic ownership (the guards prevent cycles and LSan is clean), none is
+reentrant mutation, none is malformed-tree acceptance, none is algorithmic
+non-termination (J19d/X27d terminate, just not within the 5-second watchdog), and
+none is a probe limitation — the probe uses only public API and each case runs in
+its own process.
+
+**Only X28c is reachable from untrusted input**, and it is the only one of the
+five that is a security-shaped defect rather than a robustness-shaped one. The
+other four require a program that deliberately builds a 20,000-deep tree.
+
+### 40.2 Corrected premise — the depth bound already exists in this module
+
+§31 item 6 presents bounding `JsonNode::Parse` as a new grammar decision, to be
+*"justified against .NET's own `JsonReaderOptions.MaxDepth` (default 64)"*. The
+in-repository justification is stronger and was not recorded: **this module
+already has that bound, already public, already applied.**
+
+- `modules/text-json/include/System/Text/Json/JsonDocumentOptions.hpp`:
+  `static constexpr intcs DefaultMaxDepth = 64;`
+- `modules/text-json/include/System/Text/Json/JsonDocument.hpp`: `Parse` calls
+  `checkMaxDepth(*parsed, 1, effectiveMaxDepth)` and throws
+  `JsonException("The maximum configured depth of N has been exceeded…")`.
+- `JsonTests.ParseExceedingDefaultMaxDepth_Throws` and
+  `…ExceedingCustomMaxDepth_Throws` already pin it.
+
+So the two JSON parse entry points in one module disagree about the same
+untrusted text: `JsonDocument::Parse` rejects beyond 64, `JsonNode::Parse`
+crashes the process at 20,000. Item 6's X28c half is therefore better described
+as **making `JsonNode::Parse` apply the bound its sibling already applies**, with
+the same constant and the same exception type — a consistency repair, not a new
+grammar. It still changes accepted input and still needs item 6's approval, but
+the decision being asked for is much smaller than §31 states, and no new option
+field is needed (`JsonNodeOptions` can stay at its current layout by using
+`JsonDocumentOptions::DefaultMaxDepth` directly).
+
+### 40.3 What each root cause would actually need
+
+| Cause | Repair | Approval class |
+|---|---|---|
+| X28c — recursive parse on untrusted text | apply `JsonDocumentOptions::DefaultMaxDepth` in `fromNlohmann`, raising the existing `JsonException` | **accepted-input change** (item 6) |
+| J19c / X27c — recursive destruction | iterative teardown in `~JsonArray`/`~JsonObject`/`~XContainer`: move children into a local worklist and unwind it in a loop | **none** — no signature, layout or accepted-input change; behaviour is identical for every tree that does not overflow today |
+| J19d / X27d — quadratic guards | the ancestor walk is O(depth) per attach by construction. Making it O(1) needs a depth or root cached **in the node**, i.e. **+8 on `JsonNode` (24) and on `XObject` (16)** | **object-layout change** — item 4's class, which item 6 does not mention |
+
+That third row is the second corrected premise: §31 item 6 says *"No signature,
+layout or vtable change"*, but bounding the guard cost is only achievable by
+bounding **depth** (rejecting deep trees at `Add`, another accepted-input change)
+or by **caching depth in every node** (a layout change). Item 6 as written cannot
+deliver J19d/X27d.
+
+**A global recursion limit is deliberately not proposed** for J19c/X27c: the
+reference contract does not require one, an iterative teardown removes the
+failure entirely rather than converting it into a different one, and .NET's own
+`XContainer`/`JsonNode` impose no teardown depth limit.
+
+### 40.4 Verdict
+
+**#1893 stays `needs_user`**, and it should be **split** before it is answered:
+its J19c/X27c half needs no approval at all and could land on its own; its X28c
+half is item 6's real content, reduced to a consistency repair by §40.2; and its
+J19d/X27d half cannot be delivered under item 6's stated no-layout-change
+constraint. None of the three was started.
