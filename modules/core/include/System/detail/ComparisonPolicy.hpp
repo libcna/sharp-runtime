@@ -166,6 +166,71 @@ struct DefaultGreater {
 };
 
 /**
+ * @brief A hasher matching @ref equalValues, for a `std::unordered_*` container.
+ *
+ * Wraps @ref hashValue so that two NaNs — which @ref equalValues calls equal —
+ * also hash alike. For a non-floating @p T it is exactly `std::hash<T>`.
+ */
+template<typename T>
+struct DefaultHash {
+    /** @brief Returns the .NET-compatible default hash of @p v. */
+    [[nodiscard]] std::size_t operator()(const T& v) const { return hashValue(v); }
+};
+
+/**
+ * @brief An equality predicate matching @ref DefaultHash, for a
+ *        `std::unordered_*` container.
+ *
+ * Wraps @ref equalValues. For a non-floating @p T it is exactly
+ * `std::equal_to<T>`.
+ */
+template<typename T>
+struct DefaultEqualTo {
+    /** @brief Returns whether @p a and @p b are equal under .NET's default contract. */
+    [[nodiscard]] constexpr bool operator()(const T& a, const T& b) const {
+        return equalValues(a, b);
+    }
+};
+
+/**
+ * @name Backing-container template arguments
+ *
+ * These three aliases are what a collection hands to `std::set`, `std::map`,
+ * `std::unordered_set` or `std::unordered_map` in place of `std::less<T>`,
+ * `std::hash<T>` and `std::equal_to<T>`.
+ *
+ * Each is **token-identical to the standard default for every non-floating
+ * @p T**, so substituting it changes nothing at all — not the container's
+ * type, not its `sizeof`, not its iterator types, not a mangled name — for
+ * every instantiation that was already correct. Only a `float` or `double`
+ * element or key selects the policy, and for those the standard defaults were
+ * not merely giving a different answer: `std::less<double>` makes NaN
+ * *equivalent* to every value, violating `[associative.reqmts]`'s ordering
+ * requirement for the container's whole lifetime, and `std::equal_to<double>`
+ * says NaN is not equal to itself, so an `unordered_*` container accepts the
+ * same NaN key without limit and can never find it again. See
+ * `docs/CollectionsComparisonContractPlan.md` §5.2 and §5.3.
+ * @{
+ */
+
+/** @brief `std::less<T>` for every non-floating T; @ref DefaultLess otherwise. */
+template<typename T>
+using DefaultKeyLess = std::conditional_t<std::is_floating_point_v<T>,
+                                          DefaultLess<T>, std::less<T>>;
+
+/** @brief `std::hash<T>` for every non-floating T; @ref DefaultHash otherwise. */
+template<typename T>
+using DefaultKeyHash = std::conditional_t<std::is_floating_point_v<T>,
+                                          DefaultHash<T>, std::hash<T>>;
+
+/** @brief `std::equal_to<T>` for every non-floating T; @ref DefaultEqualTo otherwise. */
+template<typename T>
+using DefaultKeyEqual = std::conditional_t<std::is_floating_point_v<T>,
+                                           DefaultEqualTo<T>, std::equal_to<T>>;
+
+/** @} */
+
+/**
  * @brief Counterpart of .NET's @c SortUtils.MoveNansToFront
  *        (`ArraySortHelper.cs:1111-1139`).
  *

@@ -31,7 +31,11 @@ using SharpRuntime::intcs;
  */
 template<typename TKey, typename TItem>
 class KeyedCollection : public Collection<TItem> {
-    std::unordered_map<TKey, intcs> keyIndex_;
+    /// Keyed by EqualityComparer<TKey>.Default. Both aliases are the standard
+    /// defaults for every non-floating TKey, so this member's type is unchanged.
+    std::unordered_map<TKey, intcs,
+                       System::detail::DefaultKeyHash<TKey>,
+                       System::detail::DefaultKeyEqual<TKey>> keyIndex_;
 
 protected:
     /**

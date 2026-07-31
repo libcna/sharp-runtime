@@ -59,7 +59,15 @@ class ImmutableSortedDictionary {
         return std::make_shared<MapT>(std::move(less));
     }
 
-    static KeyCompareFn defaultLess() { return KeyCompareFn(std::less<TKey>{}); }
+    /**
+     * @brief The default key ordering: @c Comparer<TKey>.Default, not `operator<`.
+     *
+     * Only the stored std::function's VALUE changes; KeyCompareFn and MapT are
+     * unchanged. For a non-floating TKey the policy alias IS `std::less<TKey>`.
+     */
+    static KeyCompareFn defaultLess() {
+        return KeyCompareFn(System::detail::DefaultKeyLess<TKey>{});
+    }
 
 public:
     /** @brief Default-constructs an empty ImmutableSortedDictionary using operator< key ordering. */

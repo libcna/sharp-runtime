@@ -28,7 +28,11 @@ using System::Collections::Generic::KeyNotFoundException;
  */
 template<typename TKey, typename TValue>
 class ImmutableDictionary {
-    using MapT = std::unordered_map<TKey, TValue>;
+    /// Keyed by EqualityComparer<TKey>.Default. Both aliases are the standard
+    /// defaults for every non-floating TKey, so MapT is unchanged for them.
+    using MapT = std::unordered_map<TKey, TValue,
+                                    System::detail::DefaultKeyHash<TKey>,
+                                    System::detail::DefaultKeyEqual<TKey>>;
     std::shared_ptr<const MapT> data_;
 
     explicit ImmutableDictionary(std::shared_ptr<const MapT> data) : data_(std::move(data)) {}

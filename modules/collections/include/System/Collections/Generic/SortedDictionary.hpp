@@ -32,7 +32,9 @@ using SharpRuntime::intcs;
  */
 template<typename TKey, typename TValue>
 class SortedDictionary {
-    std::map<TKey, TValue> map_;
+    /// Ordered by Comparer<TKey>.Default. The alias is `std::less<TKey>` for every
+    /// non-floating TKey, so this member's type is unchanged for them.
+    std::map<TKey, TValue, System::detail::DefaultKeyLess<TKey>> map_;
     System::Collections::detail::MutationCounter version_;
 
     /**
@@ -49,7 +51,7 @@ public:
      * matching real .NET's fail-fast enumerator contract (ticket 1713).
      */
     class Iterator {
-        typename std::map<TKey, TValue>::const_iterator it_;
+        typename std::map<TKey, TValue, System::detail::DefaultKeyLess<TKey>>::const_iterator it_;
         const SortedDictionary* owner_;
         System::Collections::detail::MutationVersion version_;
 
@@ -59,7 +61,8 @@ public:
         }
 
     public:
-        Iterator(typename std::map<TKey, TValue>::const_iterator it, const SortedDictionary* owner)
+        Iterator(typename std::map<TKey, TValue, System::detail::DefaultKeyLess<TKey>>::const_iterator it,
+                 const SortedDictionary* owner)
             : it_(it), owner_(owner), version_(owner->version_) {}
 
         const std::pair<const TKey, TValue>& operator*() const { checkVersion(); return *it_; }

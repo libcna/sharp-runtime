@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Immutable {
 
@@ -48,8 +49,18 @@ class ImmutableHashSet {
         return std::make_shared<SetT>(0, std::move(hash), std::move(eq));
     }
 
-    static HashFn defaultHash() { return HashFn(std::hash<T>{}); }
-    static EqFn defaultEq() { return EqFn(std::equal_to<T>{}); }
+    /**
+     * @brief The default hash and equality: @c EqualityComparer<T>.Default.
+     *
+     * Only the stored std::function VALUES change; HashFn, EqFn and SetT are
+     * unchanged. The two must move together — a NaN-reflexive equality over a
+     * payload-sensitive hash would break equal-objects-equal-hashes instead of
+     * fixing anything. For a non-floating T the policy aliases ARE
+     * `std::hash<T>` and `std::equal_to<T>`.
+     */
+    static HashFn defaultHash() { return HashFn(System::detail::DefaultKeyHash<T>{}); }
+    /** @copydoc defaultHash */
+    static EqFn defaultEq() { return EqFn(System::detail::DefaultKeyEqual<T>{}); }
 
 public:
     /** @brief Default-constructs an empty ImmutableHashSet using the default hash/equality. */

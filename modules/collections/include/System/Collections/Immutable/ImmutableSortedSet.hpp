@@ -7,6 +7,7 @@
 #include <set>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Immutable {
 
@@ -48,7 +49,14 @@ class ImmutableSortedSet {
         return std::make_shared<SetT>(std::move(less));
     }
 
-    static CompareFn defaultLess() { return CompareFn(std::less<T>{}); }
+    /**
+     * @brief The default ordering: @c Comparer<T>.Default, not `operator<`.
+     *
+     * Only the stored std::function's VALUE changes here — CompareFn, SetT and
+     * every public type this class exposes are exactly what they were. For a
+     * non-floating T the policy alias IS `std::less<T>`.
+     */
+    static CompareFn defaultLess() { return CompareFn(System::detail::DefaultKeyLess<T>{}); }
 
 public:
     /** @brief Default-constructs an empty ImmutableSortedSet using operator< ordering. */

@@ -39,7 +39,11 @@ using SharpRuntime::intcs;
 template<typename TKey, typename TValue>
 class OrderedDictionary {
     std::vector<std::pair<TKey, TValue>>       entries_;
-    std::unordered_map<TKey, std::size_t>      keyIndex_;
+    /// Keyed by EqualityComparer<TKey>.Default. Both aliases are the standard
+    /// defaults for every non-floating TKey, so this member's type is unchanged.
+    std::unordered_map<TKey, std::size_t,
+                       System::detail::DefaultKeyHash<TKey>,
+                       System::detail::DefaultKeyEqual<TKey>> keyIndex_;
     System::Collections::detail::MutationCounter version_;
 
     /**
@@ -59,7 +63,9 @@ class OrderedDictionary {
     // Callers that mutate entries_ before calling this must roll that mutation back on a
     // caught exception -- see Insert/Remove/RemoveAt.
     void rebuildIndex() {
-        std::unordered_map<TKey, std::size_t> newIndex;
+        std::unordered_map<TKey, std::size_t,
+                           System::detail::DefaultKeyHash<TKey>,
+                           System::detail::DefaultKeyEqual<TKey>> newIndex;
         newIndex.reserve(entries_.size());
         for (std::size_t i = 0; i < entries_.size(); ++i)
             newIndex[entries_[i].first] = i;

@@ -39,7 +39,9 @@ using SharpRuntime::intcs;
  */
 template<typename TKey, typename TValue>
 class SortedList {
-    std::map<TKey, TValue> map_;
+    /// Ordered by Comparer<TKey>.Default. The alias is `std::less<TKey>` for every
+    /// non-floating TKey, so this member's type is unchanged for them.
+    std::map<TKey, TValue, System::detail::DefaultKeyLess<TKey>> map_;
     System::Collections::detail::MutationCounter version_;
 
     /**
@@ -312,7 +314,11 @@ public:
     [[nodiscard]] intcs IndexOfKey(const TKey& key) const {
         intcs i = 0;
         for (const auto& p : map_) {
-            if (p.first == key) return i;
+            // Ordering EQUIVALENCE, not equality: .NET's SortedList.IndexOfKey is
+            // Array.BinarySearch(keys, ..., comparer), so it must agree with the
+            // ordering the backing map uses for membership. Before this, a NaN key
+            // answered ContainsKey true and IndexOfKey -1 at the same time.
+            if (System::detail::compareValues(p.first, key) == 0) return i;
             ++i;
         }
         return -1;

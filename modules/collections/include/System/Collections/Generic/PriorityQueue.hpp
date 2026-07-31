@@ -9,6 +9,7 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Collections::Generic {
 
@@ -29,7 +30,13 @@ class PriorityQueue {
     struct Entry {
         TElement  element;
         TPriority priority;
-        bool operator>(const Entry& o) const { return priority > o.priority; }
+        /// Ordered by Comparer<TPriority>.Default, so a NaN priority is the
+        /// SMALLEST and is dequeued first, as .NET's PriorityQueue does. Raw `>`
+        /// made NaN equivalent to every priority, which is not a strict weak
+        /// ordering and so violated the heap algorithms' precondition.
+        bool operator>(const Entry& o) const {
+            return System::detail::compareValues(priority, o.priority) > 0;
+        }
     };
 
     std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> heap_;

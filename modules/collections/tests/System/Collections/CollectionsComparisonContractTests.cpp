@@ -30,6 +30,7 @@
 #include "System/Collections/Generic/LinkedList.hpp"
 #include "System/Collections/Generic/OrderedDictionary.hpp"
 #include "System/Collections/Generic/SortedDictionary.hpp"
+#include "System/Collections/Generic/PriorityQueue.hpp"
 #include "System/Collections/Generic/SortedList.hpp"
 #include "System/Collections/Generic/List.hpp"
 #include "System/Collections/Generic/Queue.hpp"
@@ -37,7 +38,9 @@
 #include "System/Collections/Generic/ReferenceEqualityComparer.hpp"
 #include "System/Collections/Immutable/ImmutableArray.hpp"
 #include "System/Collections/Immutable/ImmutableDictionary.hpp"
+#include "System/Collections/Immutable/ImmutableHashSet.hpp"
 #include "System/Collections/Immutable/ImmutableSortedDictionary.hpp"
+#include "System/Collections/Immutable/ImmutableSortedSet.hpp"
 #include "System/Collections/ObjectModel/Collection.hpp"
 #include "System/Collections/ObjectModel/KeyedCollection.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyCollection.hpp"
@@ -828,4 +831,174 @@ TEST(CollectionsComparisonContract, ConcurrentDictionaryAddOrUpdateRetriesAgains
     double got = 0.0;
     ASSERT_TRUE(d.TryGetValue(0, got));
     EXPECT_DOUBLE_EQ(got, 42.0);
+}
+
+// ---------------------------------------------------------------------------
+// The ten containers whose repair changes no public type (#1918)
+// ---------------------------------------------------------------------------
+
+TEST(CollectionsComparisonContract, SortedDictionaryAcceptsANaNKeyAmongOthers) {
+    G::SortedDictionary<double, int> d;
+    d.Add(1.0, 1);
+    d.Add(2.0, 2);
+    d.Add(kNaN, 3);                      // was rejected as a DUPLICATE of 1.0
+    EXPECT_EQ(d.getCountProperty(), 3);
+    EXPECT_TRUE(d.ContainsKey(kNaN));
+    EXPECT_TRUE(d.ContainsKey(1.0));
+    int got = 0;
+    ASSERT_TRUE(d.TryGetValue(kNaN, got));
+    EXPECT_EQ(got, 3);
+    EXPECT_THROW(d.Add(kNaN, 4), System::ArgumentException);   // genuine duplicate
+    EXPECT_EQ(d.getCountProperty(), 3);
+}
+
+TEST(CollectionsComparisonContract, SortedDictionaryOrdersANaNKeyFirst) {
+    G::SortedDictionary<double, int> d;
+    d.Add(2.0, 2);
+    d.Add(kNaN, 0);
+    d.Add(1.0, 1);
+    std::vector<double> keys;
+    for (const auto& kv : d) keys.push_back(kv.first);
+    ASSERT_EQ(keys.size(), 3u);
+    EXPECT_TRUE(std::isnan(keys[0]));
+    EXPECT_DOUBLE_EQ(keys[1], 1.0);
+    EXPECT_DOUBLE_EQ(keys[2], 2.0);
+}
+
+TEST(CollectionsComparisonContract, SortedListAcceptsANaNKeyAndAgreesWithItself) {
+    G::SortedList<double, int> sl;
+    sl.Add(1.0, 1);
+    sl.Add(2.0, 2);
+    sl.Add(kNaN, 3);
+    EXPECT_EQ(sl.getCountProperty(), 3);
+    EXPECT_TRUE(sl.ContainsKey(kNaN));
+    // ContainsKey and IndexOfKey must agree. Before the repair one said true and
+    // the other -1, because membership used ordering and IndexOfKey used ==.
+    EXPECT_EQ(sl.IndexOfKey(kNaN), 0);   // NaN sorts first
+    EXPECT_EQ(sl.IndexOfKey(1.0), 1);
+    EXPECT_EQ(sl.IndexOfKey(9.0), -1);
+}
+
+TEST(CollectionsComparisonContract, GenericOrderedDictionaryAcceptsANaNKeyExactlyOnce) {
+    G::OrderedDictionary<double, int> d;
+    d.Add(kNaN, 1);
+    EXPECT_THROW(d.Add(kNaN, 2), System::ArgumentException);
+    EXPECT_EQ(d.getCountProperty(), 1);
+    EXPECT_TRUE(d.ContainsKey(kNaN));
+    int got = 0;
+    ASSERT_TRUE(d.TryGetValue(kNaN, got));
+    EXPECT_EQ(got, 1);
+}
+
+TEST(CollectionsComparisonContract, ConcurrentDictionaryAcceptsANaNKeyExactlyOnce) {
+    System::Collections::Concurrent::ConcurrentDictionary<double, int> d;
+    EXPECT_TRUE(d.TryAdd(kNaN, 1));
+    EXPECT_FALSE(d.TryAdd(kNaN, 2));     // accepted twice before
+    EXPECT_EQ(d.getCountProperty(), 1);
+    int got = 0;
+    ASSERT_TRUE(d.TryGetValue(kNaN, got));
+    EXPECT_EQ(got, 1);
+}
+
+TEST(CollectionsComparisonContract, KeyedCollectionAcceptsANaNKeyExactlyOnce) {
+    struct Keyed : System::Collections::ObjectModel::KeyedCollection<double, std::string> {
+    protected:
+        double GetKeyForItem(const std::string& item) const override {
+            return item == "nan" ? kNaN : static_cast<double>(item.size());
+        }
+    };
+    Keyed k;
+    k.Add("nan");
+    EXPECT_TRUE(k.Contains(kNaN));
+    std::string item;
+    ASSERT_TRUE(k.TryGetValue(kNaN, item));
+    EXPECT_EQ(item, "nan");
+    EXPECT_TRUE(k.Remove(kNaN));
+    EXPECT_EQ(k.getCountProperty(), 0);
+}
+
+TEST(CollectionsComparisonContract, PriorityQueueDequeuesANaNPriorityFirst) {
+    G::PriorityQueue<int, double> q;
+    q.Enqueue(1, 1.0);
+    q.Enqueue(2, 2.0);
+    q.Enqueue(9, kNaN);                  // NaN is the SMALLEST priority in .NET
+    q.Enqueue(3, 3.0);
+    std::vector<int> order;
+    while (q.getCountProperty() > 0) order.push_back(q.Dequeue());
+    EXPECT_EQ(order, (std::vector<int>{9, 1, 2, 3}));
+
+    G::PriorityQueue<int, int> ints;     // negative control
+    ints.Enqueue(5, 5);
+    ints.Enqueue(1, 1);
+    EXPECT_EQ(ints.Dequeue(), 1);
+}
+
+TEST(CollectionsComparisonContract, ImmutableSortedSetKeepsEveryElementAroundANaN) {
+    namespace I = System::Collections::Immutable;
+    auto s = I::ImmutableSortedSet<double>::Create(std::vector<double>{1.0, 2.0, kNaN});
+    EXPECT_EQ(s.getCountProperty(), 3);   // was 2: one element was silently dropped
+    EXPECT_TRUE(s.Contains(kNaN));
+    EXPECT_TRUE(s.Contains(1.0));
+    EXPECT_TRUE(s.Contains(2.0));
+    EXPECT_EQ(s.Add(kNaN).getCountProperty(), 3);   // already present
+}
+
+TEST(CollectionsComparisonContract, ImmutableSortedSetHonoursAnExplicitComparer) {
+    namespace I = System::Collections::Immutable;
+    // Descending caller-supplied ordering must survive untouched.
+    auto s = I::ImmutableSortedSet<int>::Create(
+        [](const int& a, const int& b) { return b < a; }, std::vector<int>{1, 2, 3});
+    std::vector<int> out;
+    for (int v : s) out.push_back(v);
+    EXPECT_EQ(out, (std::vector<int>{3, 2, 1}));
+}
+
+TEST(CollectionsComparisonContract, ImmutableSortedDictionaryAcceptsANaNKeyAmongOthers) {
+    namespace I = System::Collections::Immutable;
+    auto d = I::ImmutableSortedDictionary<double, int>::Empty()
+                 .Add(1.0, 1).Add(2.0, 2).SetItem(kNaN, 3);
+    EXPECT_EQ(d.getCountProperty(), 3);
+    EXPECT_TRUE(d.ContainsKey(kNaN));
+    int got = 0;
+    ASSERT_TRUE(d.TryGetValue(kNaN, got));
+    EXPECT_EQ(got, 3);
+}
+
+TEST(CollectionsComparisonContract, ImmutableHashSetHoldsOneNaNAndFindsIt) {
+    namespace I = System::Collections::Immutable;
+    auto s = I::ImmutableHashSet<double>::Empty().Add(kNaN).Add(kNaN);
+    EXPECT_EQ(s.getCountProperty(), 1);   // was 2: the same NaN twice
+    EXPECT_TRUE(s.Contains(kNaN));
+    EXPECT_EQ(s.Add(1.0).getCountProperty(), 2);
+    EXPECT_EQ(s.Remove(kNaN).getCountProperty(), 0);
+}
+
+TEST(CollectionsComparisonContract, ImmutableDictionaryAcceptsANaNKeyExactlyOnce) {
+    namespace I = System::Collections::Immutable;
+    auto d = I::ImmutableDictionary<double, int>::Empty().Add(kNaN, 1);
+    EXPECT_EQ(d.getCountProperty(), 1);
+    EXPECT_TRUE(d.ContainsKey(kNaN));
+    EXPECT_EQ(d.Add(kNaN, 1).getCountProperty(), 1);   // equal value -> no-op
+    EXPECT_THROW((void)d.Add(kNaN, 2), System::ArgumentException);
+    int got = 0;
+    ASSERT_TRUE(d.TryGetValue(kNaN, got));
+    EXPECT_EQ(got, 1);
+    EXPECT_EQ(d.Remove(kNaN).getCountProperty(), 0);
+}
+
+TEST(CollectionsComparisonContract, ContainerNegativeControlsAreUnchanged) {
+    G::SortedDictionary<int, int> sd;
+    sd.Add(2, 2); sd.Add(1, 1);
+    std::vector<int> keys;
+    for (const auto& kv : sd) keys.push_back(kv.first);
+    EXPECT_EQ(keys, (std::vector<int>{1, 2}));
+
+    G::SortedList<std::string, int> sl;
+    sl.Add("b", 2); sl.Add("a", 1);
+    EXPECT_EQ(sl.IndexOfKey("a"), 0);
+    EXPECT_EQ(sl.IndexOfKey("b"), 1);
+
+    namespace I = System::Collections::Immutable;
+    auto ihs = I::ImmutableHashSet<std::string>::Create(std::vector<std::string>{"a", "a", "b"});
+    EXPECT_EQ(ihs.getCountProperty(), 2);
 }
