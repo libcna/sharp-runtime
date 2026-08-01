@@ -664,3 +664,47 @@ The negative-consumer boundary grows by seven sites: raw nullable-double
 ReadOnly/Frozen/Dictionary spellings are rejected, the class aliases compile,
 and the nullable-long-double iterator transition is pinned. Final checker:
 10 fixtures, 81 sites, 91 compiler invocations, peak two jobs.
+
+### 12.4 Rebuild and final validation
+
+CMake dependency tracking detected the public core-header transition without a
+target clean. The retained manifest lists 65 rebuilt objects and four directly
+affected executables in `build`, 206 rebuilt objects and all 37 relinked
+executables in `build-modular`, and 76 rebuilt objects plus the Collections.Core
+executable in `build-asan`. Ten isolated selective consumers and all 91
+negative-fixture invocations were compiled separately. No reported result uses
+a stale executable from before `ComparisonPolicy.hpp` changed.
+
+The socket-enabled final gate is 15,081/15,081 tests across 37 executables with
+zero build warnings/errors: Integration 893, Core.Base 5,585, and
+Collections.Core 2,752. The ten-component selective matrix passes, including
+WebSockets 24/24. Module boundaries remain 41 modules / 91 edges, version seams
+2/18, the component catalogue and database are consistent, checker self-tests
+are 45/45, and Doxygen reports 1,938 warnings against the 1,942 ceiling.
+
+The retained sanitizer tree passes 24 nullable-focused tests under ASan+UBSan.
+With leak detection enabled, CMake test discovery reaches the executable but
+LSan terminates because the environment runs under ptrace; this is not a clean
+LSan result. Sanitizers cannot prove equality, ordering, hash consistency, or
+NaN findability.
+
+All compilation commands were non-overlapping and explicitly bounded to two
+jobs. Mktemp-based scripts used repository-local `build-tmp`; the negative
+checker used a repository-local ccache, and network tests used the approved
+socket-enabled execution path. No build tree was created under `/tmp`,
+`/var/tmp`, or `/dev/shm`, and no broad or target clean was required.
+
+### 12.5 Closure, resources, and follow-ups
+
+The build-directory start/final byte counts are retained in the first
+`NEXT.md` handoff. Behavior/ABI/symbol/mutation/benchmark/sanitizer/rebuild
+evidence grows `build-probe` by 16,926,600 bytes. Removing only reproducible
+binaries, mutation worktrees, and the batch ccache reclaimed 214,485,336 bytes;
+all raw results and source probes remain.
+
+Tickets #1934 and #1925 are done. New inactive #1936 owns the separately
+reproduced direct primitive ImmutableSortedSet NaN self-equality defect; new
+inactive #1937 owns the separate 2.092x finite rehash-heavy nullable-double
+HashSet lookup observation. #1926 remains wontfix, #1932/#1935 remain done,
+#1773 remains blocked, and #1929 rows 1–4 are unchanged. No `SR-AUD-*`
+identifier was issued; the audit stays 68 remediated / 296 open / 364 total.

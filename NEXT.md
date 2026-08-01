@@ -4,18 +4,18 @@
 # NEXT.md
 
 *Last verified: 2026-08-01. Branch
-`feature/remediation-batch-1926-tooling-jobs`, no upstream. Ticket #1926 is
-closed `wontfix` by exact user decision, and new inactive tooling ticket #1935
-is `done`. The shared compilation-job contract is explicit argument →
-`SHARP_RUNTIME_BUILD_JOBS` → safe default 2, accepting only 1 or 2. The full
-socket-enabled gate is **15,071 tests across 37 executables** (Integration 893,
-Core.Base 5,585), the audit remains **68 remediated / 296 open / 364 total**,
-the module graph is **41 / 91**, seams **2 / 18**, negative fixtures **10 / 74**
-with peak 2, checker self-tests **45 / 45**, and canonical Doxygen
-**1,937 / 1,942**. Ticket #1932 remains `done`. No other pending decision was
-made. #1773/#1894/#1899 remain blocked; #1888/#1889/#1896 remain declined and
-blocked; partial #1929 rows 1–4 remain `todo`; #1925/#1934 remain
-`needs_user`. See the first handoff below.*
+`feature/remediation-batch-1934-1925-nullable-floating`, no upstream. The exact
+coordinated direct-nullable-floating approval was delivered in dependency
+order: #1934 and #1925 are `done`; #1926 remains `wontfix`; #1932 and #1935
+remain `done`; #1773 remains blocked. The clean socket-enabled gate is
+**15,081 tests across 37 executables** (Integration 893, Core.Base 5,585,
+Collections.Core 2,752), audit **68 remediated / 296 open / 364 total**, module
+graph **41 / 91**, seams **2 / 18**, negative fixtures **10 / 81** over 91
+compiler invocations with peak 2, checker self-tests **45 / 45**, and Doxygen
+**1,938 / 1,942**. The database has **1,937 tickets: 1,924 done, 3 todo,
+6 blocked, 0 needs_user, 4 wontfix**, and none doing. New inactive #1936 and
+#1937 retain separately discovered correctness/performance work. Partial #1929
+rows 1–4 are unchanged. See the first handoff below.*
 
 *Previous handoff snapshot, retained historically: branch
 `feature/remediation-batch-1932-1933-decisions` with no upstream. This
@@ -33,6 +33,294 @@ canonical Doxygen **1,937 / 1,942**. #1930 is done inside #1927's owning commit;
 #1888/#1889/#1896 remain declined/blocked, #1926 remains `todo` leaning
 `wontfix`, and #1929 remains partial with rows 1–4 unchanged. See the first
 2026-08-01 handoff below.*
+
+---
+
+## Autonomous batch handoff, 2026-08-01 (#1934 then bounded #1925)
+
+Branch **feature/remediation-batch-1934-1925-nullable-floating**, created from
+local handoff HEAD f120d799, has no upstream. Logical commits before this final
+handoff:
+
+| Commit | Unit | Result |
+|---|---|---|
+| 5e384fd8 | #1934 | direct nullable-floating generic/default comparer semantics |
+| 6b5403c4 | #1925 production | bounded CCF-010 collection policy selection |
+| 47f84eea | #1925 proof | permanent matrices, migration boundary, negative fixtures, design evidence |
+
+### 1. Exact approval and dependency order
+
+The operative approval in `docs/CompositeFloatingKeyPolicyDesign.md` was
+applied exactly to direct `std::optional<float>`, `std::optional<double>`, and
+`std::optional<long double>`. #1934 landed and passed its focused behavior,
+mutation, ABI/symbol, and sanitizer gates before #1925 was activated. No
+nested optional, pair, tuple, array, variant, vector, custom-struct traversal,
+new hash capability, second policy framework, standard-library
+specialization, or #1926 work was added. Raw optional/Nullable operators and
+explicit caller comparers remain authoritative and unchanged.
+
+The final common contract for all three approved types is:
+
+| Case | Compare | Equals | Hash |
+|---|---:|---:|---|
+| null / null | 0 | true | 0 |
+| null / present; present / null | -1; +1 | false | null is 0 |
+| any NaN payload / any NaN payload | 0 | true | one canonical NaN hash |
+| NaN / finite or infinity | -1 | false | canonical NaN hash |
+| +0 / -0 | 0 | true | equal canonical hash |
+| finite/infinity | normal numeric order | numeric equality | existing CCF-010 hash |
+
+### 2. #1934 before/after comparer surface
+
+Before, generic `Comparer<optional<F>>` treated NaN as ordering-equivalent to
+finite values, generic/interface `EqualityComparer` was NaN-nonreflexive, and
+null used libstdc++'s optional sentinel hash (`-3333` after the probe's int
+narrowing). Dedicated Nullable comparers were already correct. For `float` and
+`double`, distinct NaN payload hashes differed; long double happened to match
+in the tested payload while equality was still false.
+
+After, generic, object, interface/type-erased, and dedicated Nullable paths
+all produce the table above for quiet/multiple-payload NaN, signed zero,
+finite extrema, and infinities. Raw optional equality remains false for
+NaN/NaN. Representative `optional<int>`, `optional<unsigned>`,
+`optional<string>`, `optional<enum>`, and optional user-comparable/hashable type
+outputs are byte-identical before/after. The correction to the design
+inventory is that existing `ObjectComparer<T>` and `ObjectEqualityComparer<T>`
+also delegate through the repaired helpers.
+
+Comparer/equality object and interface size/alignment remain 8/8 throughout;
+their declarations and virtual slot sets are unchanged. The #1934 sharp-
+runtime fixture has identical 438 defined symbols, 54 vtables, and 26 undefined
+symbols. Its complete defined set shrinks 760 to 747 because 13 libstdc++
+optional helpers are no longer instantiated. At #1934's checkpoint
+`DefaultLess<optional<F>>` was not yet selected; #1925 then preserved the old
+selected `std::less<optional<F>>` potentially-throwing specification.
+
+### 3. #1925 collection behavior and affected surfaces
+
+The identical pre-change postcondition suite failed **201 assertions** across
+the three complete type matrices. Hashed paths inserted duplicate NaNs and
+could not find/remove/self-compare them; ordered paths could collapse finite,
+infinite, and signed-zero values around NaN; copied/moved and projected
+collections propagated the defect. After bounded policy selection, all five
+new collection tests pass for all three types, including both NaN insertion
+orders, two payloads, null/duplicate-null, signed zero, extrema, infinities,
+4,096-key growth/trim, 120,000-key benchmark rehash, erase/reinsert, copy/move,
+iteration, union/intersection/equality/self-comparison, and frozen/read-only
+construction and lookup.
+
+All sixteen approved consumers are exercised:
+
+1. `Dictionary`;
+2. `HashSet`;
+3. `FrozenDictionary`;
+4. `FrozenSet`;
+5. `ReadOnlyDictionary`;
+6. `ReadOnlySet`;
+7. `ImmutableDictionary`;
+8. `ImmutableHashSet`;
+9. `ConcurrentDictionary`;
+10. `OrderedDictionary`;
+11. `KeyedCollection`;
+12. `SortedSet` and its live view;
+13. `SortedDictionary`;
+14. `SortedList`;
+15. `ImmutableSortedDictionary`;
+16. `ImmutableSortedSet`.
+
+### 4. Source, ABI, representation, iterators, and symbols
+
+For every approved type, public `DefaultKeyLess`, `DefaultKeyHash`, and
+`DefaultKeyEqual` move from the standard predicates to `DefaultLess`,
+`DefaultHash`, and `DefaultEqualTo`. The six public backing aliases move:
+`Dictionary::MapType`, `HashSet::SetType`, both Frozen `MapType`/`SetType`, and
+both ReadOnly `MapType`/`SetType`. Consequently `Dictionary::ToMap`, Frozen
+`CreateFromMap`/`CreateFromSet`, ReadOnly constructors, and the protected
+ReadOnly dictionary accessor instantiate with new types. Private backing types
+change in the other ten consumers. No declaration text, field, or virtual slot
+was added.
+
+Measured outer layout is identical across all 48 type/consumer combinations:
+
+| Consumer | size / alignment |
+|---|---:|
+| Dictionary, HashSet | 64 / 8 |
+| FrozenDictionary, FrozenSet | 56 / 8 |
+| ReadOnlyDictionary, ReadOnlySet | 16 / 8 |
+| ImmutableDictionary, ImmutableHashSet | 16 / 8 |
+| ConcurrentDictionary | 96 / 8 |
+| OrderedDictionary | 88 / 8 |
+| KeyedCollection probe | 96 / 8 |
+| SortedSet optional float / double / long double | 48/8; 72/8; 128/16 |
+| SortedDictionary, SortedList | 56 / 8 |
+| ImmutableSortedDictionary, ImmutableSortedSet | 16 / 8 |
+
+Standard-layout and trivial-copy classifications are unchanged; no relevant
+field offset is publicly observable. Final predicate properties are
+less/equal `noexcept=false`, hash `noexcept=true`, and less/equal
+`constexpr=true`, matching the selected pre-change standard predicates.
+
+The design's statement that every affected iterator moves was too broad for
+libstdc++ 14. Hash iterator spellings for optional float/double are identical,
+as are all ordered tree and nominal `SortedSet`/`SortedDictionary` iterators.
+Only optional-long-double hash iterators (and the dependent immutable-
+dictionary deduced iterator) change cached-node `true` to `false`. Public
+aliases and template/inline symbols still move for all three types.
+
+The identical full fixture changes 12,708 → 12,745 defined symbols: 2,124
+removed and 2,161 added predicate-bearing/template symbols. All 182 undefined
+symbols are identical. Total vtables remain 113/113; six libstdc++ shared-
+control-block vtables bearing raw predicates are replaced by six bearing the
+selected policies, while all 31 relevant sharp-runtime collection/test
+vtables and slot sets are identical. Mangled added/removed inventories and
+binary hashes are retained. Equal size is not ABI neutrality; every affected
+consumer needs coordinated recompilation.
+
+### 5. Permanent tests, mutations, and exclusions
+
+Ten permanent tests were added: five #1934 comparer/default tests and five
+#1925 collection-policy tests. The focused final gate is 13/13; the retained
+ASan+UBSan Collections.Core executable additionally passes 24 tests selected
+by `*Nullable*`. Collections.Core is 2,752/2,752.
+
+Mutation results:
+
+| Ticket | Killed | Compile rejected | Equivalent | Unexpected |
+|---|---:|---:|---:|---:|
+| #1934 (order/equality/hash selection, null, NaN, signed zero) | 5 | 1 | 0 | 0 |
+| #1925 (ordered/hash/equal aliases and bodies, Frozen/ReadOnly propagation, signed zero, immutable self equality) | 5 | 5 | 0 | 0 |
+
+Pair and tuple Dictionary probes still fail compilation because no invocable
+standard hash exists. The negative-consumer fixture adds sites 9–15 for raw
+nullable backing types, owning aliases, and the measured nullable-long-double
+iterator boundary. Final result: **10 fixtures / 81 sites / 91 invocations /
+peak 2**; checker self-tests remain 45/45.
+
+### 6. Performance
+
+Two independent seven-round campaigns were combined (14 measured rounds per
+cell). Values are post/pre median ratios; counts/finds were checked in every
+round.
+
+| Container | Workload | insert | lookup | Interpretation |
+|---|---|---:|---:|---|
+| Dictionary | finite / null / rehash | 1.142 / 0.966 / 1.566 | 1.055 / 1.023 / 1.059 | same work/counts |
+| Dictionary | mixed / NaN-heavy | 0.686 / 0.250 | 0.886 / 0.211 | corrected duplicates/findability |
+| HashSet | finite / null / rehash | 1.089 / 1.023 / 1.249 | 1.075 / 0.976 / **2.092** | same work/counts; #1937 owns rehash lookup |
+| HashSet | mixed / NaN-heavy | 0.673 / 0.294 | 0.840 / 0.258 | corrected duplicates/findability |
+| SortedSet | finite / null / rehash | 1.032 / 1.018 / 1.009 | 1.255 / 1.302 / 1.123 | same work/counts |
+| SortedSet | mixed / NaN-heavy | 10.157 / 0.764 | 12.729 / 1.325 | mixed pre-tree kept only 2 vs corrected 10,005 |
+
+NaN-heavy hashed results find 40,000/40,000 after versus 8,000/40,000 before,
+and retain 8,001 equivalence classes rather than 40,000 duplicate NaNs. The
+large mixed SortedSet cost is defect removal, not a like-for-like regression:
+the old tree silently discarded 10,003 keys. No incorrect NaN behavior was
+restored. The stable, separate optional-double HashSet rehash-heavy lookup
+observation is inactive #1937 and requires a stronger 25-round alternating
+study before any change; #1926 remains `wontfix`.
+
+### 7. Sanitizers and rebuild manifest
+
+Standalone and retained-tree focused ASan+UBSan runs are clean while
+exercising insertion, lookup, erasure, rehash/trim, copy/move, iteration,
+projection construction, and destruction. The rebuilt retained sanitizer
+target passes 24 nullable-focused tests with leak detection disabled. With
+leak detection enabled, tests enumerate/run but LSan terminates because the
+environment is under ptrace; no clean LSan claim is made. Sanitizers cannot
+prove equality, ordering, hash consistency, or NaN findability—the permanent
+and mutation matrices are the primary gate.
+
+Dependency tracking required no target clean. The retained rebuild manifest
+records:
+
+- main `build`: 65 affected objects and 4 directly affected executables newer
+  than `ComparisonPolicy.hpp`; the final gate ran all 37 executables;
+- `build-modular`: 206 objects rebuilt and all 37 executables relinked/run;
+- `build-asan`: 76 affected objects and Collections.Core relinked/run;
+- ten isolated selective consumers rebuilt and passed; and
+- 91 bounded negative-fixture compiler invocations.
+
+All compiles were sequential by command with explicit aggregate parallelism
+at most two. No broad build-tree deletion or narrowly forced clean was needed.
+
+### 8. Corrected premises and new inactive tickets
+
+- The comparer inventory omitted the object comparer/equality wrappers; they
+  delegate to the same approved helpers and are covered.
+- Only nullable-long-double hash iterator spellings move on this toolchain,
+  not every affected iterator.
+- `ImmutableSortedSet<optional<F>>::SetEquals` needed an explicitly
+  `isDirectNullableFloatingV<T>`-gated membership comparison because its raw
+  element equality is NaN-nonreflexive.
+- That exposed a separate existing direct-primitive defect:
+  `ImmutableSortedSet<double>` has count 3 and contains NaN but
+  `SetEquals(self)` is false. Inactive #1936 owns it; #1925 did not broaden.
+- Inactive #1937 owns the separate 2.092x rehash-heavy nullable-double HashSet
+  lookup observation.
+
+No `SR-AUD-*` identifier was issued; audit numbering remains frozen at 364.
+The optional #1929 row-4 planning tail was not attempted after the long
+template/ABI/rebuild work; rows 1–4 remain unchanged.
+
+### 9. Final validation and state
+
+- full socket-enabled local CI: zero warnings/errors, **15,081/15,081 tests
+  across 37 executables**;
+- Integration **893**, Core.Base **5,585**, Collections.Core **2,752**;
+- socket-enabled ten-component selective matrix green, including WebSockets
+  **24/24** and three forbidden consumers rejected;
+- module graph **41 modules / 91 edges**, catalogue current;
+- seams **2 / 18**, seam tests **15/15**;
+- negative fixtures **10 / 81**, 91 compiler invocations, peak **2**;
+- checker self-tests **45/45**, database consistency green;
+- Doxygen 1.9.8 **1,938 / 1,942**; whitespace gate green.
+
+Final queue: **1,924 done, 3 todo, 6 blocked, 0 needs_user, 4 wontfix of
+1,937**, with none doing. Todo is #1929, #1936, #1937. Blocked is #1773,
+#1888, #1889, #1894, #1896, #1899; the three declined rows remain blocked by
+design. #1926 remains `wontfix`; #1932, #1934, #1935, and now #1925 are done.
+
+### 10. Disk, tooling, and repository safety
+
+Build-directory bytes, start → final:
+
+| Directory | Start | Final |
+|---|---:|---:|
+| build | 805,958,349 | 814,435,852 |
+| build-modular | 1,350,883,628 | 1,400,186,937 |
+| build-asan | 4,127,175,105 | 4,268,408,067 |
+| build-probe | 75,235,954 | 92,162,554 |
+| build-consumer | 72 | 72 |
+| build-tmp | 0 | 0 |
+| cmake-build-debug | 87,549,498 | 87,549,498 |
+
+Retained behavior, ABI/symbol, mutation, benchmark, sanitizer, and rebuild
+evidence grows `build-probe` by 16,926,600 bytes. Reproducible binaries,
+mutation worktrees, and the batch ccache reclaimed **214,485,336 bytes**. All
+raw inputs/results and source probes remain. No build tree was created under
+`/tmp`, `/var/tmp`, or `/dev/shm`; mktemp-based scripts used
+`TMPDIR=$PWD/build-tmp`. The negative checker additionally required
+`CCACHE_DIR=$PWD/build-tmp/ccache`; Doxygen required repository-local TMPDIR;
+selective/full network tests used the approved socket-enabled path. LSan's
+ptrace restriction is the only sanitizer limitation. The historical optional
+helper `test/validate_plan_consistency.py` is not present anywhere in this
+repository; the canonical `scripts/db_consistency_check.py` gate passed. A
+transient gmake jobserver FIFO warning named `/tmp/GMfifo4`; it created no build
+tree and both bounded builds completed.
+
+Initial and final read-only remote observations are unchanged: origin fetch and
+push are `git@github-openeggbert:openeggbert/sharp-runtime.git`; the anomalous
+existing remote ref
+`origin/feature/remediation-batch-group-e-subset-decisions` remains f3a2bb56.
+The three stash objects remain exactly a1b7e297, 61094920, and 09e78454 with
+their original WIP messages. The branch has no upstream.
+
+No push, fetch, pull, merge, rebase, tag, package publication, remote mutation,
+or stash mutation occurred. CNA and mobile-eggbert were not inspected,
+searched, configured, built, tested, or modified. The next recommended clean-
+context batch is a separately approved bounded #1936 design/repair; #1937
+needs evidence-only performance isolation, and #1929 row 4 remains planning-
+only unless separately authorized.
 
 ---
 

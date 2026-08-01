@@ -4,10 +4,11 @@
 
 ## 1. Authority, scope, and how to use this packet
 
-This file supersedes its earlier six-group packet. Groups A and E are retained
-as the exact historical authority for the independently approved and delivered
-#1932 Option 2R contract and the independently approved #1926 `wontfix`
-disposition; neither is an open choice. Every still-pending
+This file supersedes its earlier six-group packet. Groups A, D, and E are
+retained as the exact historical authority for the independently approved and
+delivered #1932 Option 2R contract, the coordinated #1934 then bounded #1925
+contract, and the independently approved #1926 `wontfix` disposition; none is
+an open choice. Every still-pending
 contract remains independent. The evidence authority is:
 
 - docs/NetworkExceptionHResultPropagationDesign.md for #1932;
@@ -29,7 +30,7 @@ There is deliberately no “approve all fixes” choice:
 | **A (delivered)** | #1932 | two networking exceptions' causal HResult rule | Option 2R approved and implemented | closed independently |
 | **B** | #1899, then #1894 | Xml.Linq borrowed-view policy and diagnostic closure | retain #1898 contract; close #1899 wontfix; do not claim a visitor prevents escape | #1894 depends on the chosen #1899 classification |
 | **C1–C4** | #1929 rows 1–4 | four independent date/time acceptance/API choices | retain and document rows 1–3; design row 4 separately | decide by row, not as one grammar switch |
-| **D** | #1934 then #1925 | direct nullable-floating default comparison and key policy | approve the bounded direct-optional group only | #1934 and the bounded #1925 subset share one contract |
+| **D (delivered)** | #1934 then #1925 | direct nullable-floating default comparison and key policy | bounded direct-optional group approved and implemented | closed in dependency order |
 | **E (closed)** | #1926 | libstdc++ long-double hash caching | `wontfix` approved and recorded | closed independently |
 
 #1933 is not an approval item: its performance isolation is complete and no
@@ -385,7 +386,7 @@ Row-4 design wording:
 
 ---
 
-## 5. Group D — #1925 plus #1934 direct nullable-floating policy
+## 5. Delivered Group D — #1925 plus #1934 direct nullable-floating policy
 
 ### 5.1 Corrected current behavior and .NET mapping
 
@@ -493,6 +494,27 @@ No-change alternative:
 > Do not implement tickets #1925 or #1934. Retain and document the current
 > nullable/composite default-comparison divergences and compile limitations.
 
+### 5.5 Delivery record (2026-08-01)
+
+The user approved §5.4's bounded direct-nullable-floating contract and its
+source/template consequences. Ticket #1934 landed first, followed only after
+its focused gates by #1925. Direct `optional<float>`, `optional<double>`, and
+`optional<long double>` now use null-first ordering, null hash zero, NaN-
+reflexive equality/canonical hashing, signed-zero equality/canonical hashing,
+and the existing finite/infinity policy through generic and dedicated
+comparers and all sixteen inventoried collection consumers. Raw nullable
+operators and explicit caller comparers remain unchanged.
+
+The design premise that every affected iterator moves is corrected by measured
+libstdc++ 14 evidence: nullable-float and nullable-double hash iterators and all
+ordered iterators retain their spellings; nullable-long-double hash iterators
+move because the selected hasher changes private hash-code caching. All 48
+outer object size/alignment measurements are unchanged, but backing aliases
+and 4,285 predicate-bearing/template symbols move, so coordinated clean rebuild
+remains mandatory. Pair/tuple hashing remains ill-formed and no excluded
+composite gained capability. Complete closure evidence is in
+`docs/CompositeFloatingKeyPolicyDesign.md` §§11–12.
+
 ---
 
 ## 6. Closed Group E — #1926 libstdc++ long-double cache policy
@@ -557,16 +579,16 @@ Alternative implementation wording:
 
 ## 7. Dependency order, declined items, and closure boundaries
 
-If approvals are granted, the only dependency chains are:
+The only remaining dependency chains are:
 
-1. #1934 helper/default-comparer semantics, then bounded #1925 key selection;
-2. #1899 classification or migration choice, then any accurately re-scoped
+1. #1899 classification or migration choice, then any accurately re-scoped
    #1894 diagnostic fixture;
-3. each #1929 row independently, with row 3 explicitly acknowledging #1879.
+2. each #1929 row independently, with row 3 explicitly acknowledging #1879.
 
-#1926 was standalone and is now closed. Delivered #1932 no longer participates
-in the dependency order. #1929 row 4 is design-first. No choice depends on
-#1933, and no performance ticket authorizes a semantic widening.
+#1934 then #1925 was delivered in its approved order. #1926 was standalone and
+is now closed. Delivered #1932 no longer participates in the dependency order.
+#1929 row 4 is design-first. No choice depends on #1933, and no performance
+ticket authorizes a semantic widening.
 
 | Ticket | State preserved by this packet |
 |---|---|
@@ -576,11 +598,13 @@ in the dependency order. #1929 row 4 is design-first. No choice depends on
 | #1894 | blocked pending an honest classification of what a #1899 choice can prove |
 | #1896 | declined; not re-proposed |
 | #1899 | blocked pending Group B decision |
-| #1925 | needs_user; direct optional subset designed with #1934 |
+| #1925 | done; bounded direct optional subset delivered after #1934 |
 | #1926 | `wontfix`; accepted independently, evidence retained |
 | #1929 | todo/partial; rows 1–4 unchanged |
 | #1932 | done; exact Option 2R delivered independently |
 | #1933 | done; optimization designed but not implemented |
-| #1934 | needs_user; new inactive post-audit ticket, no audit identifier |
+| #1934 | done; direct nullable-floating defaults delivered first |
+| #1936 | todo/inactive; direct primitive ImmutableSortedSet SetEquals defect |
+| #1937 | todo/inactive; nullable-double finite rehash-heavy lookup follow-up |
 
 No new SR-AUD identifier is issued. Audit numbering remains frozen at 364.

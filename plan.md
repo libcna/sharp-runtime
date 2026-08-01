@@ -1,19 +1,17 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-08-01 — branch
-`feature/remediation-batch-1926-tooling-jobs`, no upstream, closes the
-independently approved #1926 decision `wontfix` and completes new inactive
-tooling ticket #1935. `scripts/job_count_policy.py` now owns explicit argument
-→ `SHARP_RUNTIME_BUILD_JOBS` → safe default 2 precedence and rejects every
-value outside 1..2; canonical wrappers export the resolved budget. The clean
-socket-enabled gate is **15,071 tests / 37 executables** (Integration 893,
-Core.Base 5,585); audit **68 remediated / 296 open / 364 total**; graph
-**41/91**; seams **2/18**; negative fixtures **10/74**, 84 compiler
-invocations, peak 2; checker self-tests **45/45**; Doxygen **1,937/1,942**.
-Tickets: **1,922 done, 1 todo, 6 blocked, 2 needs_user, 4 wontfix** of 1,935;
-no ticket is doing. #1932 remains done. #1773/#1894/#1899 remain blocked;
-#1888/#1889/#1896 remain declined/blocked; partial #1929 rows 1–4 remain todo;
-#1925/#1934 remain needs_user; no other decision changed.*
+`feature/remediation-batch-1934-1925-nullable-floating`, no upstream, delivers
+the exact coordinated direct nullable-floating approval in dependency order:
+#1934 then bounded #1925 are `done`. The clean socket-enabled gate is **15,081
+tests / 37 executables** (Integration 893, Core.Base 5,585, Collections.Core
+2,752); audit **68 remediated / 296 open / 364 total**; graph **41/91**; seams
+**2/18**; negative fixtures **10/81**, 91 compiler invocations, peak 2;
+checker self-tests **45/45**; Doxygen **1,938/1,942**. Tickets: **1,924 done,
+3 todo, 6 blocked, 0 needs_user, 4 wontfix** of 1,937; no ticket is doing.
+#1926 remains wontfix; #1932/#1935 remain done; #1773 remains blocked;
+#1888/#1889/#1896 remain declined/blocked; #1894/#1899 remain blocked; partial
+#1929 rows 1–4 remain todo. New inactive #1936/#1937 own separate findings.*
 
 *Previous plan snapshot, retained historically: 2026-08-01 — 41 physical components, 91 direct production
 dependency edges, a clean zero-warning native build, 15,058 passing tests
@@ -97,6 +95,112 @@ proceeds from the evidence-backed `audit/` inventory in bounded, independently
 validated repair tickets. Consumer-driven API breadth remains legitimate later
 work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
+
+
+## 2026-08-01 — coordinated #1934 then bounded #1925 delivered
+
+The user approved the operative wording in
+`docs/CompositeFloatingKeyPolicyDesign.md` for only direct
+`std::optional<float>`, `std::optional<double>`, and
+`std::optional<long double>`. #1934 was activated, completed, validated, and
+committed before #1925 was activated. No nested optional, pair, tuple, array,
+variant, vector, arbitrary object traversal, new hash capability, second
+policy framework, reserved `std` specialization, #1926 work, or unrelated
+ticket was absorbed.
+
+### #1934 generic/default semantics
+
+`ComparisonPolicy.hpp` now identifies only the three direct approved forms.
+Presence is decided first: null equals null, hashes to zero, and orders before
+present values. Present values use existing CCF-010 floating comparison,
+equality, and hashing: all NaN payloads compare/equal together and hash
+canonically; signed zeros compare/equal and hash together; finite values and
+infinities retain numeric ordering/equality. Generic `Comparer` and
+`EqualityComparer`, their interfaces, object wrappers, and dedicated Nullable
+comparers agree. Raw optional/Nullable operators remain NaN-nonreflexive.
+
+Before, generic/interface NaN equality was false and comparison against finite
+was zero while dedicated Nullable paths returned true/-1. After, all approved
+default/dedicated paths agree. Non-floating optional int, unsigned, string,
+enum, and user-type controls are identical. Five permanent tests plus three
+existing focused tests pass 8/8 at the #1934 checkpoint. Six mutations are
+accounted for (5 killed, 1 compile-rejected, zero unexpected). Comparer objects
+and interfaces stay 8/8; 438 sharp-runtime defined symbols, 54 vtables, and 26
+undefined symbols are identical. Thirteen no-longer-used libstdc++ helpers
+disappear from the whole fixture. Commit: 5e384fd8.
+
+### #1925 collection selection
+
+Only after #1934, `DefaultKeyLess`, `DefaultKeyHash`, and `DefaultKeyEqual`
+select those same three forms. Sixteen consumers are permanently instantiated:
+Dictionary, HashSet, both Frozen, both ReadOnly, both Immutable hashed,
+ConcurrentDictionary, OrderedDictionary, KeyedCollection, SortedSet and view,
+SortedDictionary, SortedList, ImmutableSortedDictionary, and
+ImmutableSortedSet. Null, multiple NaN payloads/insertion orders, signed zero,
+finite extrema, infinities, load/trim/rehash, erase/reinsert, copy/move,
+iteration, union/intersection/equality/self-comparison, projection creation and
+lookup, and explicit-comparer precedence are covered.
+
+The identical pre-change postcondition suite had 201 assertion failures over
+the three complete matrices; the final five tests pass. Ten mutations are
+accounted for: five behavior mutations killed and five alias/propagation
+mutations compile-rejected, with zero equivalent or unexpected survivors.
+Pair/tuple dictionaries remain ill-formed. The negative boundary grows seven
+sites to 10 fixtures / 81 sites / 91 compiler invocations, peak two. Commits:
+6b5403c4 production and 47f84eea permanent proof/migration evidence.
+
+### Compatibility, representation, and corrected premises
+
+All three public `DefaultKey*` aliases and the six public Dictionary, HashSet,
+Frozen, and ReadOnly `MapType`/`SetType` backing aliases move. Instantiated
+public functions that name those aliases and private backing types in the
+other consumers move accordingly. All 48 outer object size/alignment,
+standard-layout, and trivial-copy measurements remain equal; public field
+offsets are not observable. Predicate noexcept/constexpr state is preserved.
+
+The design's broad iterator premise is corrected: libstdc++ 14 erases
+predicates from float/double hash iterators and from tree iterators. Only
+optional-long-double hash iterators and its dependent immutable-dictionary
+deduced iterator move from cached to uncached node spelling. This does not
+make the change ABI-neutral. The full fixture has 12,708 → 12,745 defined
+symbols (2,124 removed, 2,161 added), 182 unchanged undefined symbols, and
+113/113 vtables: six standard predicate-bearing control-block vtables move;
+31 relevant sharp-runtime vtables and slots are identical.
+
+`ImmutableSortedSet<optional<F>>::SetEquals` required a branch gated explicitly
+on the approved trait because raw element equality is NaN-nonreflexive. The
+same existing defect reproduces for direct `double`; inactive #1936 owns it.
+Inactive #1937 owns the separate 2.092x finite rehash-heavy nullable-double
+HashSet lookup observation. Neither was absorbed and no audit identifier was
+issued.
+
+### Performance, sanitizer, rebuild, and gates
+
+Two seven-round campaigns cover Dictionary/HashSet/SortedSet finite,
+null-heavy, NaN-heavy, mixed, and rehash-heavy paths. Exact medians are retained
+in `build-probe/1925_nullable_collection_benchmark_summary_combined.log`.
+Corrected NaN-heavy hash paths take 0.211–0.294x while finding all 40,000 probes
+instead of 8,000. Mixed SortedSet insert/lookup takes 10.157x/12.729x because
+the corrected tree keeps 10,005 keys where the old one silently kept 2; this
+is defect removal, not a like-for-like regression. Same-work finite/null paths
+are recorded without optimization. #1926 remains wontfix.
+
+Focused ASan+UBSan is clean, including the rebuilt retained Collections.Core
+target at 24 nullable-focused tests. LSan test discovery is ptrace-blocked and
+is not reported clean. Sanitizers do not establish comparer/hash semantics.
+Dependency tracking rebuilt 65 main objects/4 directly affected executables,
+206 modular objects/all 37 executables, 76 sanitizer objects/Collections.Core,
+ten selective consumers, and 91 negative compiler cases without a target
+clean. All commands were non-overlapping and capped at two jobs.
+
+Final socket-enabled local CI is 15,081/15,081 across 37 executables with zero
+warnings/errors; Collections.Core 2,752, Integration 893, Core.Base 5,585.
+Selective components, module/catalog/database checks, seams 2/18, checker
+45/45, and Doxygen 1,938/1,942 are green. Audit stays 68/296/364. The optional
+#1929 row-4 planning tail was not attempted after the rebuild-sensitive work;
+rows 1–4 remain unchanged. Detailed ABI, mutation, performance, disk, remote,
+stash, and safety evidence is in the first `NEXT.md` handoff and
+`docs/CompositeFloatingKeyPolicyDesign.md` §§11–12.
 
 
 ## 2026-08-01 — #1926 approved `wontfix` closure

@@ -1250,3 +1250,47 @@ on another supported compiler/standard-library configuration. Retain
 their toolchain-specific result as a cross-library regression.
 
 No `SR-AUD-*` identifier was issued; numbering stays frozen at **364**.
+
+---
+
+## 21. #1934 then bounded #1925 delivered (2026-08-01)
+
+Section 17 is preserved as the historical discovery record, but its broad
+composite premise and “recorded, not repaired” status are superseded for one
+approved subset only. Generic comparer/equality semantics were corrected first
+under #1934, then collection defaults were selected under #1925 for exactly
+direct `std::optional<float>`, `std::optional<double>`, and
+`std::optional<long double>`.
+
+The delivered contract is presence-first with null below values and hash zero;
+present values use the existing CCF-010 floating rules, including equal NaNs,
+canonical NaN hash, equal signed zero with equal hash, and normal finite and
+infinity ordering. Dedicated Nullable, generic/default, object/interface, and
+all sixteen inventoried collection paths agree. Raw optional/Nullable
+operators, explicit comparers, non-floating optionals, nested optionals,
+pair/tuple/array/variant/vector/custom types, and pair/tuple hash availability
+remain unchanged.
+
+The permanent comparer and collection suites add ten tests; Collections.Core
+passes 2,752/2,752. Six #1934 mutations and ten #1925 mutations have zero
+unexpected survivors. The pre-change #1925 postcondition suite retained 201
+assertion failures; it now passes all three complete type matrices. The
+negative boundary is 10 fixtures / 81 sites / 91 compiler invocations, with a
+measured peak of two.
+
+All 48 affected collection outer sizes/alignments remain equal. Public backing
+aliases change for all three types, but the earlier claim that every iterator
+changes is corrected: only nullable-long-double hash iterators move on the
+measured libstdc++ 14 toolchain. The full symbol fixture removes 2,124 and adds
+2,161 defined predicate-bearing/template symbols; undefined symbols remain
+182/182, total vtables remain 113/113, and sharp-runtime vtable slot sets are
+identical. This is source/template/inline ABI movement and requires a
+coordinated rebuild despite equal layout. The authoritative behavior, ABI,
+mutation, sanitizer, and benchmark record is
+`docs/CompositeFloatingKeyPolicyDesign.md` §§11–12.
+
+Two unrelated findings remain inactive rather than being absorbed: #1936 owns
+the existing direct primitive `ImmutableSortedSet<double>::SetEquals` NaN
+defect, and #1937 owns the 2.092x finite rehash-heavy nullable-double HashSet
+lookup observation. #1926 remains `wontfix`. No audit identifier was issued;
+the audit total stays frozen at 364.
