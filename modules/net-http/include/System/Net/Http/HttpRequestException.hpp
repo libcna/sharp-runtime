@@ -30,24 +30,35 @@ namespace System::Net::Http {
 
         /**
          * @brief Creates a new instance with a message and inner exception.
-         * @note Real .NET copies `inner.HResult` onto this exception's own HResult when
-         * @p inner is non-null. This runtime doesn't propagate HResult from a `std::exception_ptr`
-         * inner exception anywhere in the codebase (extracting it needs a rethrow/catch, and no
-         * type in this port currently does that for inner exceptions), so this is a known,
-         * project-wide gap rather than something specific to this one type.
+         * @note Copies the HResult of a non-null System::Exception inner exception.
          */
         HttpRequestException(const std::string& message, std::exception_ptr inner)
-            : System::Exception(message, inner) {}
+            : System::Exception(message, inner) {
+            if (inner) {
+                try {
+                    std::rethrow_exception(inner);
+                } catch (const System::Exception& exception) {
+                    setHResultProperty(exception.getHResultProperty());
+                } catch (...) {
+                    // A non-System exception retains the outer base HResult.
+                }
+            }
+        }
 
         /** Creates a new instance with a message, inner exception, and HTTP status code. */
         HttpRequestException(const std::string& message, std::exception_ptr inner, System::Net::HttpStatusCode statusCode)
-            : System::Exception(message, inner), statusCode_(statusCode) {}
+            : HttpRequestException(message, inner) {
+            statusCode_ = statusCode;
+        }
 
         /** Creates a new instance with an HttpRequestError, message, inner exception, and HTTP status code. */
         explicit HttpRequestException(HttpRequestError httpRequestError, const std::string& message = "",
                                       std::exception_ptr inner = nullptr,
                                       std::optional<System::Net::HttpStatusCode> statusCode = std::nullopt)
-            : System::Exception(message, inner), httpRequestError_(httpRequestError), statusCode_(statusCode) {}
+            : HttpRequestException(message, inner) {
+            httpRequestError_ = httpRequestError;
+            statusCode_ = statusCode;
+        }
 
         /** @return The HttpRequestError that caused the exception. */
         [[nodiscard]] HttpRequestError getHttpRequestErrorProperty() const { return httpRequestError_; }

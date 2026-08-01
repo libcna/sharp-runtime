@@ -31,7 +31,17 @@ namespace System::Net {
 
         /** Creates a new instance with a message and inner exception. */
         WebException(const std::string& message, std::exception_ptr innerException)
-            : System::InvalidOperationException(message, innerException) {}
+            : System::InvalidOperationException(message, innerException) {
+            if (innerException) {
+                try {
+                    std::rethrow_exception(innerException);
+                } catch (const System::Exception& exception) {
+                    setHResultProperty(exception.getHResultProperty());
+                } catch (...) {
+                    // A non-System exception retains the outer base HResult.
+                }
+            }
+        }
 
         /** Creates a new instance with a message and status. */
         WebException(const std::string& message, WebExceptionStatus status)
@@ -39,7 +49,9 @@ namespace System::Net {
 
         /** Creates a new instance with a message, inner exception, and status. */
         WebException(const std::string& message, std::exception_ptr innerException, WebExceptionStatus status)
-            : System::InvalidOperationException(message, innerException), status_(status) {}
+            : WebException(message, innerException) {
+            status_ = status;
+        }
 
         /** @return The status of this exception. */
         [[nodiscard]] WebExceptionStatus getStatusProperty() const { return status_; }
