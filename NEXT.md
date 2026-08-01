@@ -4,17 +4,20 @@
 # NEXT.md
 
 *Last verified: 2026-08-01. Branch
-`feature/remediation-batch-1934-1925-nullable-floating`, no upstream. The exact
-coordinated direct-nullable-floating approval was delivered in dependency
-order: #1934 and #1925 are `done`; #1926 remains `wontfix`; #1932 and #1935
-remain `done`; #1773 remains blocked. The clean socket-enabled gate is
+`feature/remediation-batch-1936-1937-design`, no upstream. This design/evidence
+batch fully scopes #1936 as a generic ImmutableSortedSet comparator-equivalence
+defect and leaves its recommended Option 1 unapproved; #1937 is now `done`, not
+reproducible, with no optimization. #1934 and #1925 remain `done`; #1926
+remains `wontfix`; #1932 and #1935 remain `done`; #1773 remains blocked. The
+clean socket-enabled gate is
 **15,081 tests across 37 executables** (Integration 893, Core.Base 5,585,
 Collections.Core 2,752), audit **68 remediated / 296 open / 364 total**, module
 graph **41 / 91**, seams **2 / 18**, negative fixtures **10 / 81** over 91
 compiler invocations with peak 2, checker self-tests **45 / 45**, and Doxygen
-**1,938 / 1,942**. The database has **1,937 tickets: 1,924 done, 3 todo,
-6 blocked, 0 needs_user, 4 wontfix**, and none doing. New inactive #1936 and
-#1937 retain separately discovered correctness/performance work. Partial #1929
+**1,938 / 1,942**. The database has **1,937 tickets: 1,925 done, 2 todo,
+6 blocked, 0 needs_user, 4 wontfix**, and none doing. The previously opened
+#1936/#1937 findings were investigated without a new audit ID: #1936 remains
+the one inactive approval item and #1937 is evidence-complete. Partial #1929
 rows 1–4 are unchanged. See the first handoff below.*
 
 *Previous handoff snapshot, retained historically: branch
@@ -33,6 +36,290 @@ canonical Doxygen **1,937 / 1,942**. #1930 is done inside #1927's owning commit;
 #1888/#1889/#1896 remain declined/blocked, #1926 remains `todo` leaning
 `wontfix`, and #1929 remains partial with rows 1–4 unchanged. See the first
 2026-08-01 handoff below.*
+
+---
+
+## Autonomous batch handoff, 2026-08-01 (#1936 design / #1937 evidence)
+
+Branch **feature/remediation-batch-1936-1937-design**, created from clean local
+HEAD 11cbad6d, has no upstream. Logical commits before this final handoff:
+
+| Commit | Unit | Result |
+|---|---|---|
+| 23c2305e | #1936 | complete generic comparator-equivalence design and approval wording |
+| 055a74b1 | #1937 | corrected 5+25 O2/O3 campaign, mechanism, and not-reproducible disposition |
+| b395aa7d | packet/state | consolidated decision packet, historical corrections, plan status |
+
+No production header/source, canonical tooling, permanent test, public API,
+observable runtime behavior, template ABI, alias, iterator, representation,
+layout, vtable, or production symbol was changed. The only tracked changes are
+documentation and the final handoff. The repository-local ignored
+`plan.sqlite3` was updated and consistency-checked; retained ignored
+`build-probe` evidence grew. No user work was overwritten.
+
+### 1. #1936 complete behavior surface
+
+The retained 105-line characterization output contains 96 floating/nullable
+scenario rows across direct and optional float/double/long double, six surface
+rows, and a non-floating custom-comparer defect plus its surface row. It covers
+self, copy, independent equal sets, insertion order, identical/distinct NaN
+payloads, signed zero, finite values, infinities, empty/single/mixed sets,
+proper relations, duplicate construction, comparer agreement/mismatch, null,
+and every related immutable set operation.
+
+For each direct floating type, a one-NaN set has count 1, contains NaN, and
+returns:
+
+| Operation against itself/copy/equal independent set | Current result |
+|---|---:|
+| SetEquals | **false** |
+| IsSubsetOf / IsSupersetOf | true / true |
+| IsProperSubsetOf / IsProperSupersetOf | **true / true** |
+| Overlaps | true |
+| Intersect / Union / Except / SymmetricExcept counts | 1 / 1 / 0 / 0 |
+
+Mixed equal NaN/finite sets, duplicate inputs, distinct NaN payloads, and
+same-equivalence reverse comparers reproduce the equality/proper-predicate
+defect for all three direct types. Signed zero, ordinary finite/infinity,
+empty, and genuinely unequal proper subset/superset cases are correct. All
+four set-producing operations, both non-proper relations, and overlap are
+correct throughout.
+
+All three direct nullable-floating forms are already correct under #1925:
+equal NaN sets return true and both proper predicates false; null and
+null/NaN proper cases are correct. Raw optional/sequence equality remains
+NaN-nonreflexive and was not changed. A case-insensitive string comparer over
+`{"A"}`/`{"a"}` reproduces `SetEquals=false`, subset/superset true, and both
+proper predicates true. This corrects the ticket's original type premise: the
+root cause is generic, not a missing direct-floating policy alias.
+
+The port's `ImmutableSortedSet<T>` is public concrete only and does not derive
+from its `IImmutableSet<T>`, `ISet<T>`, or `IReadOnlySet<T>` abstractions; there
+is no interface dispatch path to exercise. It has no `Equals` or sequence-
+equality member. This is another corrected requested premise.
+
+### 2. Actual current .NET comparison and root cause
+
+Current dotnet/runtime source returns true for reference identity. With an
+equal comparer it count-checks and linearly compares each ordered pair with
+`KeyComparer.Compare == 0`; with a different comparer it first creates a
+`SortedSet` under **this** comparer, checks the post-collapse count, and uses
+the same scan. `Double.CompareTo` treats all NaNs equivalent and signed zeros
+equivalent. Therefore .NET `ImmutableSortedSet<double>` returns true for NaN
+self/copy/independent equality, equal sets are not proper, signed zeros are set
+equal, and comparer mismatch is governed directionally by this set's
+equivalence relation.
+
+Element raw `==` remains NaN-nonreflexive; `Double.Equals` and default equality
+are NaN-reflexive. LINQ sequence equality is positional/order-sensitive and
+is not mathematical set equality. `Object.Equals` is not overridden and
+remains reference identity. The environment has no dotnet/Mono executable, so
+this comparison is derived from the current official source and API rather
+than a local C# execution; exact links and source logic are retained in the
+owning design.
+
+Sharp-runtime correctly rehashes `other` under this comparator and checks the
+post-collapse count, but every non-nullable-floating `T` then calls raw
+`std::set::operator==`. That positional element `operator==` bypasses the
+container comparator. Production callers are exactly `SetEquals`,
+`IsProperSubsetOf`, and `IsProperSupersetOf`. `SortedSet<T>` already has the
+correct linear comparator scan; the other immutable set operations do not
+call this helper and are unaffected.
+
+### 3. #1936 recommendation and consequences
+
+Recommend generic Option 1: after the existing rehash and count check, scan
+the two same-ordered ranges and require
+`!less(a,b) && !less(b,a)` for each pair; a shared-`data_` true fast path is
+also recommended. Replace both the raw fallback and nullable special case with
+that one algorithm. Reject selected equality (custom comparers differ),
+`SortedSet` delegation (runtime comparer mismatch/API expansion), mutual
+lookup (avoidable O(n log n)), documented divergence, and a direct-floating-
+only specialization (leaves the proved generic defect).
+
+The exact production scope is one inline method body. Public declarations,
+aliases, ordinary/deduced iterators, fields, size/alignment (currently 16/8),
+vtable surface, and public mangled names are expected unchanged. Instantiated
+template body bytes and called helper/local weak-symbol inventories can move
+for every instantiated `T`; observable direct-floating and custom-comparer
+answers intentionally change. Independent comparisons retain O(m log m)
+rehash plus an O(n) tail; self/copy becomes O(1) with the fast path. Explicit
+semantic/template approval, permanent matrices, mutations, performance, and
+source/symbol/layout proof are required. #1934/#1925 remain a separate
+completed bounded contract.
+
+Exact copyable approval wording:
+
+> Approve ticket #1936 Option 1 exactly: change only
+> `ImmutableSortedSet<T>::SetEquals` so that, after rebuilding `other` under
+> this set's existing ordering comparer and checking the post-collapse count,
+> it compares the two ordered ranges by the comparator-equivalence relation
+> `!less(a,b) && !less(b,a)` for every `T`; a shared-backing-data true fast path
+> is also approved. This intentionally fixes direct `float`, `double`, and
+> `long double` NaN reflexivity and the same generic custom-comparer defect,
+> and consequently makes equal sets not proper subsets or supersets. Preserve
+> this-comparer precedence, all other set-operation results, raw floating and
+> optional operators, public declarations and aliases, iterator types, object
+> layout, and vtables. Add the complete direct/nullable/custom-comparer matrix,
+> mutation proof, performance comparison, and source/symbol/layout evidence.
+> Do not change #1934/#1925 policy selection or any other collection.
+
+This recommendation is not user-approved.
+
+### 4. #1937 corrected benchmark and raw round count
+
+The historical 2.092x line is retained, but its premise is corrected. The old
+optional-double source used one discarded warm-up and two separate seven-row
+pre/post campaigns (14 independent rows), fixed container order, hit-only
+queries, and a volatile sink. Its “rehash” case merely grew 120,000 keys
+incrementally; no reserve, explicit rehash, bucket history, load, collision,
+paired spread, or compiler flags were retained.
+
+The corrected GCC 14.2.0/libstdc++ 14 x86-64 harness compiles exact retained
+pre-policy and current headers at O2 and O3. `HashSet<T>::SetType::count`
+matches the wrapper's `Contains` lookup while exposing buckets. Each
+configuration uses five warm-up and 25 measured alternating pairs over 18
+cases: 360 warm-up rows, 1,800 measured rows, **900 measured pairs**. Finite
+cases use 120,000 keys and 960,000 lookups; null/NaN/mixed cases use 60,000
+inputs and 720,000 lookups. Hit/miss, growth/reserved, optional float/double/
+long double, direct double, and optional int are separate.
+
+Primary exact-work result:
+
+| Flags | pre/current median | paired median | p05/p95 | min/max | current W/L |
+|---|---:|---:|---:|---:|---:|
+| O2 | 34.149 / 38.734 ms | **1.026457** | 0.372660 / 2.444113 | 0.295673 / 2.999709 | 12 / 13 |
+| O3 | 24.012 / 28.385 ms | **0.964323** | 0.457956 / 2.150148 | 0.252542 / 2.950840 | 14 / 11 |
+
+Every finite expected key exists. Pre/current count/found is
+120,000/120,000, finite hash digests match, and the primary history is
+`1|13|29|59|127|257|541|1109|2357|5087|10273|20753|42043|85229|172933`:
+172,933 buckets, load 0.69391036, 33,275 collisions, max chain 7. Reserved
+history is `1|126271`, load 0.950336993, 42,553 collisions, max chain 8. Miss
+rows find zero. The full 36-row median/spread/min/max/win-loss table is in
+`docs/NullableFloatingHashSetPerformanceEvidence.md` and raw CSV.
+
+### 5. #1937 mechanism and disposition
+
+Current optional-double hashing adds the required NaN-class branch; current
+equality adds NaN checks only after presence and raw equality fail. The O2
+lookup body is 0x188 bytes current versus 0x161 pre; O3 is 0x3ca versus 0x2ed.
+That is a plausible instruction-cost mechanism, not a stable measured loss.
+Both optional-double forms are fast/nonthrowing with cache off, 24-byte nodes,
+the same ordinary iterator, 56-byte SetType and 64-byte wrapper. Buckets,
+collisions, load, and locality opportunity match. Optional float has the same
+node/ordinary-iterator shape; optional long double's approved #1925 transition
+is separately 64-byte cached pre versus 48-byte uncached current.
+
+The unchanged direct-double and optional-int controls show similarly wide and
+opposite-direction noise, consistent with enabled CPU frequency scaling and
+host load. Null accepted counts/finds match but null hashes intentionally move
+to zero. NaN/mixed work is not comparable: old NaN-heavy accepts 60,000 and
+finds only 12,000 finite probes; current accepts 12,001 logical keys and finds
+all 60,000. No correctness-path speed ratio authorizes an optimization.
+
+#1937 is `done`: **not reproducible on this supported toolchain/host,
+evidence-only, no optimization**. No approval wording is proposed. Reopen only
+for a controlled 5+25 campaign with material same-direction O2/O3 loss across
+finite hit/miss and growth/reserved cases, quiet unchanged controls and exact
+work, or for a portable candidate that proves unchanged accepted keys,
+hash/equality, aliases, every iterator, nodes, layout, relevant symbols, and
+the complete behavior/performance corpus.
+
+### 6. Optional #1929 row 4 and consolidated queue
+
+The optional ParseExact/provider/DateTimeKind row-4 design was deliberately
+not attempted after the substantial #1936 surface and #1937 900-pair campaign.
+Rows 1–4 are unchanged, todo, inactive, and unapproved; rows 1–3 were not
+changed. No new inactive ticket and no `SR-AUD-*` identifier was created.
+
+Database: **1,925 done / 2 todo / 6 blocked / 0 needs_user / 4 wontfix of
+1,937**, none doing. Todo is #1929 and #1936. Blocked is #1773, #1888, #1889,
+#1894, #1896, and #1899; #1888/#1889/#1896 remain declined and are not
+re-proposed. #1894/#1899 remain unchanged. Wontfix is #1772, #1892, #1893,
+and #1926. #1932/#1935 and #1934/#1925 remain complete. #1773 remains blocked
+because its required external/downstream work is prohibited.
+
+Audit is independently recounted from all 364 index rows: **68 remediated / 296
+confirmed/open / 364 total**. Numbering remains frozen.
+
+### 7. Evidence infrastructure and validation
+
+No permanent passing test encodes an unapproved corrected result. Added
+ignored evidence infrastructure consists of the #1936 behavior/ABI source,
+CSV/log/symbol record and the #1937 corpus generator, alternating runner,
+analyzer, four predicate builds, 360/1,800 raw rows, 36-row summary,
+validation, mechanism probe, assembly, and symbol extracts. Official .NET
+source links and the exact divergence matrix are durable in tracked designs.
+
+Final validation:
+
+- full socket-enabled `scripts/local_ci_check.sh build`: zero warnings/errors,
+  **15,081/15,081 across 37 executables**;
+- Integration **893**, Core.Base **5,585**, Collections.Core **2,752**;
+- selective ten-component matrix green, including WebSockets **24/24** and
+  three forbidden consumers rejected;
+- module graph **41 modules / 91 edges**; validator self-tests **7/7**;
+- component catalogue current; database consistent;
+- version seams **2 / 18**; seam self-tests **15/15**;
+- negative fixtures **10 / 81**, 91 compiler invocations, peak **2**;
+  checker self-tests **45/45**;
+- canonical Doxygen 1.9.8 **1,938 / 1,942**;
+- `git diff --check` clean before the final handoff.
+
+The first negative-fixture attempt failed uniformly before attribution because
+ccache used its inaccessible default location. The required rerun with
+`CCACHE_DIR=$PWD/build-tmp/ccache` passed. The first sandboxed selective run
+passed 22/24 WebSocket tests and failed the two loopback tests at 0 ms; the
+complete network-permitted rerun passed 24/24 and the whole matrix. Full CI
+was run network-permitted. Mktemp-based scripts and Doxygen used
+`TMPDIR=$PWD/build-tmp`.
+
+### 8. Disk, repository, and safety record
+
+Build-directory bytes, start → final:
+
+| Directory | Start | Final |
+|---|---:|---:|
+| build | 814,435,852 | 814,435,852 |
+| build-modular | 1,400,186,937 | 1,400,186,937 |
+| build-asan | 4,268,408,067 | 4,268,408,067 |
+| build-probe | 92,162,554 | 95,785,817 |
+| build-consumer | 72 | 72 |
+| build-tmp | 0 | 0 |
+| cmake-build-debug | 87,549,498 | 87,549,498 |
+
+Repository apparent size is 6,799,864,351 → 6,803,542,282 bytes. Retained
+probe growth is **3,623,263 bytes**; overall net growth is **3,677,931 bytes**.
+The reproducible repository-local ccache reclaimed **6,168,642 bytes**. A
+safety review required the named #1936/#1937 binaries to remain with their
+evidence rather than be deleted; no workaround was attempted. All raw source,
+behavior, .NET comparison, ABI/symbol, assembly, corpus, round, mechanism, and
+summary evidence is retained.
+
+No compilation or benchmark overlapped another compilation/benchmark; the
+maximum aggregate was two, reached only by explicitly bounded build/fixture
+commands. No build tree was created under `/tmp`, `/var/tmp`, or `/dev/shm`.
+The repository-local build directories were reused and no clean was run.
+
+Initial and final read-only remote observations are unchanged: origin fetch
+and push are `git@github-openeggbert:openeggbert/sharp-runtime.git`; existing
+remote refs remain origin/develop b797928f, origin/feature/audit 17355264,
+origin/feature/remediation-batch-ccf014-ccf016 76a15fc2,
+origin/feature/remediation-batch-group-e-subset-decisions f3a2bb56,
+origin/feature/work 03a260b7, origin/master 84d1a2e1, and origin/rvc ebc7535c.
+The three stash objects/messages remain exactly a1b7e297, 61094920, and
+09e78454. The current branch has no upstream.
+
+No push, fetch, pull, merge, rebase, tag, publication, remote-reference
+mutation, or stash mutation occurred. CNA, mobile-eggbert, all sibling/parent
+repositories, and downstream consumers were not inspected, searched,
+configured, built, tested, or modified. The only interaction with the external
+Git worktree metadata was creating and committing this repository-local branch.
+
+The recommended next batch is the exactly approved #1936 Option 1
+implementation/proof. Otherwise the remaining planning queue is #1929 row 4
+and the unchanged blocked decisions. A clean context is recommended.
 
 ---
 

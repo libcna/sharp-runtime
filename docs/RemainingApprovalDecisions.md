@@ -20,10 +20,12 @@ contract remains independent. The evidence authority is:
 - docs/ImmutableSortedSetFloatingEqualityDesign.md for #1936; and
 - docs/NullableFloatingHashSetPerformanceEvidence.md for #1937.
 
-Current .NET comparisons use the official dotnet/runtime snapshot
-0eb5481340ea675857c7a7abf18f68a60b52a686. No item below is implemented merely
-because .NET differs. No item grants authority to inspect a downstream
-consumer. CNA and mobile-eggbert were not inspected.
+The existing Groups B/C .NET comparisons use the official dotnet/runtime
+snapshot 0eb5481340ea675857c7a7abf18f68a60b52a686. #1936 separately uses the
+linked current `main` source observed on 2026-08-01; the local environment has
+no dotnet/Mono executable. No item below is implemented merely because .NET
+differs. No item grants authority to inspect a downstream consumer. CNA and
+mobile-eggbert were not inspected.
 
 There is deliberately no “approve all fixes” choice:
 
