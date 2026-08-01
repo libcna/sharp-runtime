@@ -1221,5 +1221,32 @@ non-portable specialisation of a reserved name. The one argument on the other
 side is now firmer than it was: it would also restore the pre-#1919 iterator
 type, which is measured, not asserted.
 
-**#1926 stays `todo`.** No `SR-AUD-*` identifier was issued; numbering stays
-frozen at **364**.
+### 20.6 Approved disposition — close #1926 `wontfix` (2026-08-01)
+
+The user accepted the recommendation in §§19.1 and 20.5. Ticket #1926 is
+closed `wontfix` for the measured GCC 14.2.0 / libstdc++ 14 x86-64
+configuration. The reproducible result remains important evidence: for
+`Dictionary<long double, int>` insertion over 200,000 keys, 25 alternating
+rounds measured the current `DefaultHash<long double>` shape at **1.319×** the
+pre-#1919 `std::hash<long double>` shape, slower in **24 of 25** rounds. The
+previously reported lookup improvement is withdrawn as noise.
+
+This disposition deliberately retains the CCF-010 correctness repair. NaN
+keys remain findable and non-duplicating under the default dictionary policy;
+NaN and signed-zero hashes remain canonical. It does not authorize a second
+comparator/hasher framework, a container-representation change, or a
+specialization of reserved `std::`/libstdc++ machinery. Restoring the old
+mechanism would either restore the incorrect floating-key semantics or rely
+on `std::__is_fast_hash`, an implementation detail that is not a portable
+public customization point and that also changes the measured node/iterator
+representation.
+
+Reopen #1926 only with new evidence that materially changes that tradeoff: a
+relevant standard-library update, a portable public customization point, a
+stable behavior- and representation-preserving optimization, or measurements
+on another supported compiler/standard-library configuration. Retain
+`build-probe/1926_fasthash_probe.cpp`, `1926_fasthash.log`,
+`1926_fasthash_25.log`, and `1926_fasthash_summary.log`; do not reinterpret
+their toolchain-specific result as a cross-library regression.
+
+No `SR-AUD-*` identifier was issued; numbering stays frozen at **364**.

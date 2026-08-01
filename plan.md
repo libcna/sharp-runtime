@@ -1,13 +1,17 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-01 — ticket #1932 exact Option 2R is delivered on
-`feature/remediation-batch-1932-option-2r`, with no upstream. The clean
+*Last verified: 2026-08-01 — the independently approved #1926 decision is
+closed `wontfix` on `feature/remediation-batch-1926-tooling-jobs`, with no
+upstream. The retained GCC 14.2.0/libstdc++ 14 x86-64 evidence measures a
+1.319× median `Dictionary<long double, int>` insertion regression over 25
+alternating rounds (24/25 slower), while the old lookup claim is withdrawn as
+noise. CCF-010 correctness is unchanged. Ticket #1932 remains done. The clean
 socket-enabled gate is **15,071 tests / 37 executables** (Integration 893,
 Core.Base 5,585); audit **68 remediated / 296 open / 364 total**; graph **41/91**;
 seams **2/18**; negative fixtures **10/74**; Doxygen **1,937/1,942**. Ticket
-#1932 is done, no ticket is doing, and no other pending decision changed.
+#1926 is wontfix, no ticket is doing after reconciliation, and no other pending decision changed.
 #1773/#1894/#1899 remain blocked; #1888/#1889/#1896 remain declined/blocked;
-#1926 and partial #1929 rows 1–4 remain todo; #1925/#1934 remain needs_user;
+partial #1929 rows 1–4 remain todo; #1925/#1934 remain needs_user;
 #1933 remains done without an optimization.*
 
 *Previous plan snapshot, retained historically: 2026-08-01 — 41 physical components, 91 direct production
@@ -92,6 +96,30 @@ proceeds from the evidence-backed `audit/` inventory in bounded, independently
 validated repair tickets. Consumer-driven API breadth remains legitimate later
 work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
+
+
+## 2026-08-01 — #1926 approved `wontfix` closure
+
+The independently approved decision closes only #1926. Retained
+`build-probe/1926_fasthash*` evidence covers GCC 14.2.0 / libstdc++ 14 on
+x86-64 and an isolated `Dictionary<long double, int>` insertion workload of
+200,000 keys. Across 25 alternating rounds, today's uncached
+`DefaultHash<long double>` node shape was 1.319× the pre-#1919 cached shape and
+slower in 24 of 25 rounds. The prior lookup-improvement claim is withdrawn as
+noise. The mechanism is libstdc++'s private `std::__is_fast_hash` selection:
+the current node is 48 bytes with the uncached iterator form; the probe-only
+candidate is 64 bytes and restores the cached iterator form.
+
+Correctness, portability, and maintainability take precedence over this
+isolated insertion result. CCF-010's findable/nonduplicating NaN keys and
+canonical NaN/signed-zero hashes must not regress. No reserved-library
+specialization, second policy framework, container representation, public
+alias, iterator, layout, ABI, or symbol change is authorized. Reopen only for
+a relevant standard-library update, a portable public customization point, a
+stable behavior- and representation-preserving optimization, or evidence from
+another supported toolchain. #1925 and #1934 remain `needs_user`; #1929 remains
+partial; #1932 remains done; #1773 remains blocked. No audit identifier was
+issued.
 
 
 ## 2026-08-01 — #1932 exact Option 2R implementation

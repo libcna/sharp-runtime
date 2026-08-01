@@ -4,9 +4,10 @@
 
 ## 1. Authority, scope, and how to use this packet
 
-This file supersedes its earlier six-group packet. Group A is retained as the
-exact historical authority for the independently approved and delivered #1932
-Option 2R contract; it is no longer an open choice. Every still-pending
+This file supersedes its earlier six-group packet. Groups A and E are retained
+as the exact historical authority for the independently approved and delivered
+#1932 Option 2R contract and the independently approved #1926 `wontfix`
+disposition; neither is an open choice. Every still-pending
 contract remains independent. The evidence authority is:
 
 - docs/NetworkExceptionHResultPropagationDesign.md for #1932;
@@ -29,7 +30,7 @@ There is deliberately no “approve all fixes” choice:
 | **B** | #1899, then #1894 | Xml.Linq borrowed-view policy and diagnostic closure | retain #1898 contract; close #1899 wontfix; do not claim a visitor prevents escape | #1894 depends on the chosen #1899 classification |
 | **C1–C4** | #1929 rows 1–4 | four independent date/time acceptance/API choices | retain and document rows 1–3; design row 4 separately | decide by row, not as one grammar switch |
 | **D** | #1934 then #1925 | direct nullable-floating default comparison and key policy | approve the bounded direct-optional group only | #1934 and the bounded #1925 subset share one contract |
-| **E** | #1926 | libstdc++ long-double hash caching | close wontfix | independent performance decision |
+| **E (closed)** | #1926 | libstdc++ long-double hash caching | `wontfix` approved and recorded | closed independently |
 
 #1933 is not an approval item: its performance isolation is complete and no
 production optimization was justified. #1888, #1889, and #1896 remain declined
@@ -494,7 +495,7 @@ No-change alternative:
 
 ---
 
-## 6. Group E — #1926 libstdc++ long-double cache policy
+## 6. Closed Group E — #1926 libstdc++ long-double cache policy
 
 #1926 has no direct .NET reference behavior: System.Double maps to C++ double,
 while C++ long double and libstdc++'s node-cache trait are implementation-
@@ -526,10 +527,11 @@ insertion on this standard library. Rollback removes the specialization.
 Approval would require 25+ alternating post-change rounds, node/iterator/symbol
 evidence, all floating correctness tests, and other-toolchain compile controls.
 
-**Recommendation: close wontfix.** A stable 1.319 insertion cost on a rare,
-toolchain-specific key is not enough to justify undefined/nonportable use of a
-reserved standard-library internal plus 16 bytes per node. This decision is
-separate from #1925/#1934.
+**Decision delivered: close `wontfix`.** The user accepted that a stable 1.319
+insertion cost on a rare, toolchain-specific key is not enough to justify
+undefined/nonportable use of a reserved standard-library internal plus 16
+bytes per node. CCF-010's corrected NaN equality and hashing remain mandatory.
+This decision is separate from #1925/#1934 and grants them no authority.
 
 Copyable recommended wording:
 
@@ -562,9 +564,9 @@ If approvals are granted, the only dependency chains are:
    #1894 diagnostic fixture;
 3. each #1929 row independently, with row 3 explicitly acknowledging #1879.
 
-#1926 is standalone. Delivered #1932 no longer participates in the dependency
-order. #1929 row 4 is design-first. No choice depends on #1933, and no
-performance ticket authorizes a semantic widening.
+#1926 was standalone and is now closed. Delivered #1932 no longer participates
+in the dependency order. #1929 row 4 is design-first. No choice depends on
+#1933, and no performance ticket authorizes a semantic widening.
 
 | Ticket | State preserved by this packet |
 |---|---|
@@ -575,7 +577,7 @@ performance ticket authorizes a semantic widening.
 | #1896 | declined; not re-proposed |
 | #1899 | blocked pending Group B decision |
 | #1925 | needs_user; direct optional subset designed with #1934 |
-| #1926 | todo; recommendation wontfix |
+| #1926 | `wontfix`; accepted independently, evidence retained |
 | #1929 | todo/partial; rows 1–4 unchanged |
 | #1932 | done; exact Option 2R delivered independently |
 | #1933 | done; optimization designed but not implemented |
