@@ -344,3 +344,119 @@ Copyable approval wording:
 Rejected alternatives are selected equality, `SortedSet` delegation,
 mutual lookup, documented divergence, and a direct-floating-only
 specialization. No recommendation in this document is user-approved.
+
+## 9. Option 1 implementation evidence (2026-08-01)
+
+The user subsequently approved Option 1 exactly as quoted above. Commit
+`0ce730a6` changes only the generic `ImmutableSortedSet<T>::SetEquals` body.
+It first returns true for shared backing data, rebuilds `other` under this
+set's current comparator, retains the post-collapse count check, and then
+scans both ordered ranges. Each pair must satisfy both `!less(a, b)` and
+`!less(b, a)`. The method returns true only when both ranges end together.
+There is no raw element equality, raw `std::set` equality, floating-point
+specialization, nullable specialization, or change to another collection.
+
+The retained 105-row pre-fix probe was rebuilt before the production edit and
+was byte-for-byte identical to the design artifact (CSV SHA-256
+`673c77899dcf8cd7d7de9edc7e1d9fbdd135033b1d5cfe6fa848e6c5be877d96`).
+The post-fix probe changed only the approved rows:
+
+- direct `float`, `double`, and `long double` NaN-bearing self, shared-copy,
+  independent, insertion-order, same/distinct-payload, mixed, duplicate, and
+  comparer-identical equality cases changed from false to true;
+- their equal-set proper-subset and proper-superset results changed from true
+  to false;
+- case-insensitive string equality for `{"A"}` and `{"a"}` changed from false
+  to true;
+- nullable floating controls and every retained `IsSubsetOf`, `IsSupersetOf`,
+  `Overlaps`, `Intersect`, `Union`, `Except`, and `SymmetricExcept` result were
+  unchanged. Empty, signed-zero, finite, infinity, genuinely unequal, and
+  genuinely proper controls also retained their expected results.
+
+Commit `0d7d1cc6` adds 11 permanent contract tests. They cover the complete
+direct `float`, `double`, and `long double` matrix; nullable `float`, `double`,
+and `long double` controls including null, NaN, signed zero, finite values,
+and infinities; case-insensitive strings; raw-unequal values collapsed by a
+custom comparator; this-comparer precedence; comparer-mismatched inputs;
+post-collapse cardinality; ordinary raw-equal controls; both proper
+relations; and all seven unchanged related operations. The focused selection
+passed 16/16 tests and the full Collections.Core executable passed 2,763/2,763
+tests after adding the 11 tests.
+
+The final eight-mutation campaign had no unexpected survivor. Restoring raw
+`std::set` equality, using raw element equality, testing only
+`!less(a, b)`, skipping the rebuild, using the other set's comparator, and
+bypassing the generic body for direct floating types were killed by the
+permanent tests. Removing the post-collapse count check was behaviorally
+equivalent because the final two-range completion check still rejects unequal
+cardinality; the required count check remains as an early post-collapse
+invariant. Removing the shared-backing fast path was also behaviorally
+equivalent and affects performance only. Neither equivalent mutation is
+reported as killed.
+
+The before/after source and object probes used representative `float`,
+`double`, `long double`, `optional<double>`, `string`, and `int`
+instantiations; the string instantiation was also exercised with a runtime
+case-insensitive comparator. Public declarations and mangled `SetEquals`
+names, private type aliases, deduced public iterator types, `noexcept`, and
+`constexpr` status are unchanged. Every representative set remains 16 bytes
+with 8-byte alignment, has one `data_` field at offset zero, is standard
+layout and non-polymorphic, and has no vtable or virtual slots. Every const
+iterator remains an 8-byte, 8-byte-aligned `std::_Rb_tree_const_iterator` of
+the corresponding element type. `SetEquals` remains non-`noexcept` and
+non-`constexpr`.
+
+The public mangled-name set and all 35 undefined external names were
+identical. At `-O0 -fno-inline`, defined external helper names changed from
+1,441 to 1,397: 50 weak raw `std::set`/`std::_Rb_tree`/`std::equal`/element
+equality and old optional-lookup helpers disappeared, and six weak
+`std::shared_ptr::operator==` instantiations appeared for the true fast path.
+The weak `SetEquals` body grew from 0x14a bytes for five representatives and
+0x1ed for `optional<double>` to 0x380 for every representative. These are the
+approved inline-template/helper effects, not public declaration or layout
+changes. Unchanged layout does not imply an unchanged template body, so every
+affected target was rebuilt.
+
+The performance probe used five alternating warm-up pairs and eleven measured
+alternating pairs. Median pre/post time and paired post/pre median ratio were:
+
+| case | pre median (ns) | post median (ns) | paired ratio |
+|---|---:|---:|---:|
+| self, 5,000 calls | 39,128,619 | 9,067 | 0.000233 |
+| shared copy, 5,000 calls | 39,181,910 | 8,807 | 0.000226 |
+| equal independent | 1,180,074 | 1,288,127 | 1.087219 |
+| equal, different insertion order | 1,190,554 | 1,275,954 | 1.083954 |
+| comparer-mismatched equivalent | 2,233,449 | 2,276,880 | 1.037902 |
+| unequal, early | 975,298 | 1,002,559 | 0.996970 |
+| unequal, late | 1,221,431 | 1,313,074 | 1.111172 |
+| NaN-bearing independent | 514,820 | 661,156 | 1.255290 |
+| custom-comparer strings | 442,964 | 657,540 | 1.510281 |
+| large integer control | 3,587,010 | 2,793,064 | 0.989305 |
+
+The self and shared-copy results demonstrate the intended O(1) fast path.
+Independent comparison retains O(m log m + n) rebuild-and-scan complexity.
+The NaN and custom-string before measurements stopped at the old incorrect
+answer and therefore do not represent identical semantic work. The integer
+control was noisy (paired ratio range 0.446--2.073), and the remaining
+independent-set changes did not establish a separate stable regression. No
+new inactive ticket was created.
+
+The main and sanitizer builds recompiled every known affected immutable-set
+consumer plus the new test translation unit after the header timestamp, then
+relinked Collections.Core. Focused ASan+UBSan execution passed all 16 selected
+tests. A separate 2,000-iteration ASan+UBSan probe exercised construction,
+rebuilding, comparison, shared copy, move, iteration, destruction, direct and
+nullable NaNs, and a stateful custom comparator capture without a diagnostic.
+The LSan-enabled discovery attempt ran all 11 new tests successfully but then
+failed at LeakSanitizer's ptrace step, so no clean LSan result is claimed.
+Sanitizers cannot prove comparator equivalence, reflexivity, or mathematical
+set semantics; permanent tests and mutation evidence remain the correctness
+gate.
+
+Two design premises were refined without changing the approved contract. The
+post-collapse count check is independently mutation-equivalent to the final
+two-ended scan but is retained exactly as approved, and default/custom string
+comparators share one `ImmutableSortedSet<string>` template instantiation
+rather than producing separate public template symbols. No separate defect
+was found, no SR-AUD identifier was issued, and frozen audit numbering remains
+unchanged.
