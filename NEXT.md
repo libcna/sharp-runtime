@@ -3,25 +3,170 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-31. Branch:
-`feature/remediation-batch-group-e-subset-decisions`. The test floor rose to
-**15,024** (was 14,998). **The one implementation the batch instruction approved
-— #1897 option B — is delivered**, and with it CCF-019's **only case reachable
-from untrusted input** is closed: `JsonNode::Parse` no longer overflows the
-stack. Three design units were produced and **nothing else was implemented**:
-**#1899** gained four measured corrections and two options its record did not
-contain; **#1927/#1928/#1929** were resolved into one consolidated packet,
-`docs/TextSubsetCompatibilityDecision.md`, which finds the **numeric half of that
-family already closed** and splits #1929 into an approvable half and a deferred
-one; and **#1926** was isolated, proving its mechanism and replicating its
-insert regression at 1.319× while showing its recorded *lookup* improvement does
-**not** replicate. **Five premises were corrected by measurement**, all preserved
-additively beside the original text. **No new ticket was filed**, **no `SR-AUD-*`
-identifier was issued**, and audit numbering stays frozen at **364**. See
-"Autonomous batch handoff, 2026-07-31 (Group E subset + text-subset decisions)"
-immediately below.*
+*Last verified: 2026-08-01. Branch:
+`feature/remediation-batch-approved-text-subset-p3` with no upstream. The exact
+approved `docs/TextSubsetCompatibilityDecision.md` §6.5 items (1), (2), and
+(3) are delivered as three independent commits: #1927, #1928, and #1929 rows
+5–6 only. The compatible follow-ons #1880 and #1875 are also complete in their
+own commits. The repository gate is **15,058 tests across 37 executables**
+(was 15,024); the audit tally is **68 remediated / 296 open / 364 total**;
+the module graph is **41 / 91**, version seams **2 / 18**, negative fixtures
+**10 / 74**, and canonical Doxygen **1,937 / 1,942**. #1929 remains partial and
+`todo`; its rows 1, the beyond-seven-digit remainder of row 2, row 3, and row 4
+remain unapproved. #1773, #1894, and #1899 remain blocked;
+#1888/#1889/#1896 remain declined/blocked. Four inactive post-audit tickets
+were recorded without issuing an audit identifier: inseparable #1930/#1931
+are done, while #1932/#1933 remain `todo`. See the 2026-08-01 handoff below.*
 
 ---
+
+## Autonomous batch handoff, 2026-08-01 (approved text subset + compatible P3s)
+
+Branch `feature/remediation-batch-approved-text-subset-p3`, five ticket commits
+plus this handoff on top of `f3a2bb56`; no upstream is configured.
+
+### 1. Exact approval applied
+
+The operative wording matched the prompt materially and was applied without
+generalising it:
+
+1. `Single::Round(float,intcs)` and `Double::Round(double,intcs)` delegate to
+   `MathF::Round`/`Math::Round` with `MidpointRounding::ToEven`; magnitudes at or
+   above the round limit return unchanged, with no below-limit value change and
+   no signature/layout change (#1927).
+2. `Math::Round(double,intcs,MidpointRounding)`, and its two-argument forwarder,
+   use .NET's verbatim `"Rounding digits must be between 0 and 15, inclusive."`
+   (#1928).
+3. Exactly #1929 rows 5–6: the five date/time `Parse`/`TryParse` families ignore
+   surrounding whitespace; DateTime time fields accept one or two digits; and
+   DateTime/TimeOnly fractions accept one through seven digits at 100 ns while
+   every previously accepted input retains its exact value.
+
+No other #1929 row, general current-.NET acceptance policy, #1894/#1899 option,
+public API/ABI change, #1925, or #1926 work was inferred.
+
+### 2. Ticket outcomes and commits
+
+| Commit | Ticket | Before → after |
+|---|---|---|
+| `28e72ba7` | #1927 | large finite rounding could become infinity or a stray ULP → exact delegation returns the magnitude unchanged; strengthened below-limit and special-value matrices are bit-exact |
+| `88020c8d` | #1928 | both Math overloads omitted leading `Rounding ` → exact .NET message; exception type, `digits`, HResult `0x80131502`, validation order and accepted inputs unchanged |
+| `83cfb10a` | #1929 rows 5–6 | five families rejected outer whitespace; DateTime rejected 1-digit clock fields; DateTime/TimeOnly rejected 4–7 fraction digits → approved forms parse with exact ticks in Parse and TryParse |
+| `e3caaedf` | #1880 | four date/time TryParse families preserved caller sentinels on false → each publishes its exact MinValue/default; success and Parse behavior unchanged; CCF-002 closed |
+| `f912b98b` | #1875 | 13 of 15 new population tests failed → 12 type-specific exception constants plus the reduced Win32 root agree with current .NET; 27 inheritance controls stay exact; SR-AUD-157 remediated |
+
+#1929 is **partially remediated**, not closed. Still unapproved and pinned
+unchanged are row 1 (unpadded dates), row 2 beyond seven digits/general all-digit
+fractions, row 3 (short/compact offsets), and row 4
+(`ParseExact`/providers/`DateTimeKind`). Eight fractional digits, malformed
+separators, inner whitespace, trailing garbage, unpadded dates and short/compact
+offsets remain rejected.
+
+### 3. Corrected premises, preserved additively
+
+- #1927's “ordinary last ULP may move” premise was false: 140,000 runtime-
+  generated below-limit samples per type remain bit-identical. A stronger probe
+  found the omitted structural case: the private Math funnel lost negative-zero
+  sign for negative subnormal/normal inputs. Current .NET copies the sign; the
+  inseparable compatible correction is completed inactive ticket #1930.
+- The old “four or more fraction digits cannot be represented” premise was
+  false: all relevant types are tick-based. TimeOnly's public tick contract did,
+  however, truncate its fourth field to milliseconds. Keeping the same 16/4
+  four-int layout while storing ticks-within-second was inseparable from exact
+  seven-digit parsing; inactive #1931 records that completed correction.
+- Historical #1929 row 2 grouped every `4+` fraction, but operative item (3)
+  explicitly approves one through seven digits. Only that overlap changed;
+  eight or more digits remain in the unapproved row-2 remainder.
+- #1875's two-category premise was incomplete. Current .NET's 45-row population
+  is 12 type-specific constants, 30 inheritance rows, and 3 conditional-
+  propagation types. HttpRequestException/WebException propagation is separable
+  inactive #1932; WebSocket native-error overloads remain outside the ported
+  surface and SR-AUD-250 remains open.
+
+### 4. Tests, sanitizers, ABI and performance
+
+Permanent tests rose **15,024 → 15,058** across 37 executables: #1927 +3,
+#1928 +2, #1929 +10, #1880 +4, and #1875 +15. Focused passes were 33 (#1927),
+24 (#1928), 363 (#1929), 4 (#1880), and 15 with 70 assertions (#1875).
+Core.Base passed 5,585/5,585, Integration 880/880, and the full gate passed
+15,058/15,058. The ten negative fixtures rejected all 74 sites in 84 compiler
+invocations at peak two jobs.
+
+Combined ASan+UBSan focused runs are clean for every changed production path;
+affected objects were proven instrumented and newer than changed sources. The
+#1929 LSan semantic subset passed before test discovery hit the environment's
+known `ptrace` limitation; #1875 discovery required `detect_leaks=0`, so no
+LSan-clean claim is made there. LSan/TSan were inapplicable to #1880/#1875's
+non-owning, non-shared-state stores. Sanitizers support memory/arithmetic claims,
+not rounding, grammar, precision, HResult, output-default or exception-message
+semantics; permanent tests carry those contracts.
+
+No public signature, base, overload, `noexcept`, `constexpr`, calling
+convention, mangled name, undefined-symbol set, vtable or virtual slot changed.
+Layouts remain DateTime 16/8, DateTimeOffset 48/8, DateOnly 12/4, TimeOnly 16/4
+and TimeSpan 24/8; #1927/#1928 and exception layouts are likewise unchanged.
+
+Comparable seven-round medians (ms) were:
+
+| Path | Before | After | Disposition |
+|---|---:|---:|---|
+| #1927 Double direct / delegate | 39.801 / 15.488 | 15.578 / 15.431 | duplicate scale/round/divide work removed; direct path now tracks the funnel |
+| #1927 Single direct / delegate | 17.959 / 9.697 | 9.315 / 9.257 | same |
+| #1929 DateTime / DTO / DateOnly / TimeSpan | 24.793 / 91.187 / 14.468 / 25.259 | 24.866 / 83.548 / 13.322 / 20.943 | neutral or faster |
+| #1929 TimeOnly | 12.638 (11.998–14.735) | 17.103 (16.024–18.945) | stable 1.353× required exact-tick cost; extracted as inactive #1933, not optimised here |
+
+#1880's 200,000-failure-call medians before/after were DateTime
+3.756/3.773 ms, DateTimeOffset 4.250/4.599, DateOnly 0.950/0.988 and TimeOnly
+1.549/1.563; the stores are required correct work on failure. #1928 and #1875
+change cold exception paths, so no hot-path benchmark was warranted.
+
+### 5. Final baselines and repository state
+
+| Baseline | Final |
+|---|---|
+| repository gate | **15,058 tests / 37 executables**, clean build 0 warnings / 0 errors |
+| audit | **68 remediated / 296 open / 364 total**; numbering frozen, no new audit ID |
+| module graph | **41 modules / 91 edges** |
+| version seams | **2 seams / 18 definitions** |
+| negative consumers | **10 fixtures / 74 sites** |
+| canonical Doxygen | **1,937 warnings**, ceiling 1,942 |
+
+Starting → final build-directory sizes: `build` 753→777 MiB,
+`build-modular` 1.3→1.3 GiB, `build-asan` 3.8→3.9 GiB,
+`build-probe` 45→73 MiB, `build-consumer` 12→12 KiB, `build-tmp` 8→8 KiB,
+and `cmake-build-debug` 88→88 MiB; `build-ubsan` and `build-tsan` remained
+absent. No reproducible evidence was discarded, so reclaimed space is 0; the
+growth is retained probes and repository-local ccache data. Compilation never
+exceeded two aggregate jobs and no build tree was created under `/tmp`,
+`/var/tmp` or `/dev/shm`.
+
+The selective gate required special handling only because the restricted
+sandbox denies `socket()`; its first WebSocket run failed exactly two tests at
+socket construction, and the unchanged socket-enabled run passed 24/24 without
+skips. The negative-fixture harness likewise required the repository-local
+`CCACHE_DIR` because the configured default cache is outside the writable
+worktree.
+
+The initial and pre-handoff read-only observations agree: the anomalous remote
+tracking ref is `f3a2bb56`, with reflog entries `563b832d` then `f3a2bb56`, both
+labelled `update by push`; no diagnosis is inferred and no remote reference was
+modified. The three stash entries are unchanged. No push, fetch, pull, merge,
+rebase, tag or publication occurred. Commits `67227e6b` and `ca78cdce` remain
+ancestors. #1773 remains blocked, and CNA/mobile-eggbert were not inspected,
+searched, built or modified.
+
+### 6. Remaining decisions and recommended next batch
+
+- **Blocked:** #1773, #1894 and #1899. No #1894/#1899 option was selected.
+- **Declined/blocked:** #1888, #1889 and #1896 remain unchanged.
+- **Partial/unapproved:** #1929 rows 1, row-2 remainder, 3 and 4.
+- **Deferred:** #1926 still leans `wontfix`; #1925 was not started.
+- **Inactive compatible follow-ups:** #1932 (inner-HResult propagation) and
+  #1933 (isolate the TimeOnly exact-tick parse cost).
+
+Use a fresh context before the next batch. Prefer independent #1932 design and
+#1933 performance isolation if they are still wanted; do not infer approval for
+#1929's remaining rows, #1894, #1899, #1925 or #1926.
 
 ## Autonomous batch handoff, 2026-07-31 (Group E subset + text-subset decisions)
 

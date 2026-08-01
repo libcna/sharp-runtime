@@ -1,8 +1,17 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-07-31 — 41 physical components, 91 direct production
-dependency edges, a clean native build, 15,024 passing tests across 37
-executables, and a locally green ten-job selective matrix. The 2026-07-31
+*Last verified: 2026-08-01 — 41 physical components, 91 direct production
+dependency edges, a clean zero-warning native build, 15,058 passing tests
+across 37 executables, and a green two-job selective matrix. The 2026-08-01
+**approved text-subset + compatible P3 batch** delivered exact
+`docs/TextSubsetCompatibilityDecision.md` §6.5 items (1), (2), and (3) as
+independent #1927/#1928/#1929-row-5–6 commits, then completed compatible #1880
+and #1875. #1929 remains partial: rows 1, the beyond-seven-digit remainder of
+row 2, row 3, and row 4 are unapproved and unchanged. CCF-002 is closed and
+SR-AUD-157 is remediated, taking the tally to **68 remediated / 296 open / 364
+total**. Inactive #1930/#1931 record inseparable completed corrections;
+#1932/#1933 retain separable HResult-propagation and TimeOnly-performance work.
+No new audit identifier was issued. The 2026-07-31
 **Group E subset batch** landed the approved **#1897 option B**: `JsonNode::Parse`
 builds its tree iteratively, so the one CCF-019 case reachable from **untrusted
 input** — an ASan stack overflow between 16,000 and 18,000 nested levels — is
@@ -62,6 +71,64 @@ proceeds from the evidence-backed `audit/` inventory in bounded, independently
 validated repair tickets. Consumer-driven API breadth remains legitimate later
 work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
+
+
+## 2026-08-01 — approved #1927/#1928/#1929 rows 5–6, then compatible #1880/#1875
+
+Branch `feature/remediation-batch-approved-text-subset-p3`, with no upstream.
+Five independent ticket commits on `f3a2bb56`:
+
+| Commit | Ticket | Result |
+|---|---|---|
+| `28e72ba7` | #1927 | exact .NET-style Single/Double Round delegation; large finite inputs no longer become infinity/stray ULP; private Math funnel preserves negative zero (#1930) |
+| `88020c8d` | #1928 | exact leading-`Rounding` digits-range message, with taxonomy/order unchanged |
+| `83cfb10a` | #1929 rows 5–6 | outer whitespace, 1–2 digit DateTime clock fields and 1–7 digit exact fractions; TimeOnly exact-tick representation corrected in-place (#1931) |
+| `e3caaedf` | #1880 | all four date/time TryParse false exits publish MinValue/default; CCF-002 closed |
+| `f912b98b` | #1875 | 45-type current-.NET matrix; 12 constants plus Win32-root correction, 27 exact inheritance controls; SR-AUD-157 remediated |
+
+The exact §6.5 approval boundary was held. #1929 remains `todo` and explicitly
+partial; row 1, row 2 beyond seven digits/general all-digit acceptance, row 3,
+and row 4 remain unapproved and permanently pinned unchanged. #1894 and #1899
+remain blocked with no option chosen; #1888/#1889/#1896 remain declined and
+blocked; #1925 was not started; #1926 remains deferred, leaning `wontfix`;
+#1773 remains blocked without downstream inspection.
+
+Corrected premises are additive, not historical rewrites: the original #1927
+ordinary sweep remains bit-exact but stronger volatile probes found the private
+negative-zero defect (#1930); TimeOnly's public tick contract was silently
+millisecond-truncated despite its unchanged 16/4 layout (#1931); historical
+#1929 row 2 overlaps operative row 6 only through seven digits; and #1875's
+population has three categories (12 constants, 30 inheritance, 3 conditional),
+not two. The separable HttpRequestException/WebException inner-HResult policy is
+inactive #1932. A stable TimeOnly valid-parse cost, median 12.638→17.103 ms
+(1.353× over seven identical-work rounds, with disjoint ranges), is required
+exact-tick work and is retained as inactive #1933 rather than optimised inside
+the correctness commit.
+
+Permanent tests **15,024→15,058** (+34) across 37 executables: Core.Base
+5,585/5,585 and Integration 880/880. Combined ASan+UBSan focused runs are clean
+against newer instrumented objects; semantic guarantees remain permanent-test
+claims. LSan is not claimed where sandbox `ptrace` prevented discovery; TSan is
+inapplicable to these non-shared-state changes. No public signature, base,
+overload, `noexcept`, `constexpr`, calling convention, symbol set, vtable,
+layout or module edge changed. Final structural baselines: graph 41/91, seams
+2/18, negative fixtures 10/74, Doxygen 1,937/1,942, audit 68/296/364 with
+numbering frozen.
+
+Build directories began/ended: `build` 753/777 MiB, `build-modular` 1.3/1.3
+GiB, `build-asan` 3.8/3.9 GiB, `build-probe` 45/73 MiB,
+`build-consumer` 12/12 KiB, `build-tmp` 8/8 KiB and `cmake-build-debug` 88/88
+MiB; UBSan/TSan standalone trees remained absent. Reclaimed space: 0, because
+all reproducible evidence was retained. Every compile used at most two jobs and
+no build tree was created outside the repository. The restricted-sandbox
+WebSocket failure was reproduced as `socket()` denial; the unchanged
+socket-enabled selective and full gates passed without skips. Remote/stash
+state remained read-only; the three stashes are unchanged and the observed
+remote reflog remains `563b832d` then `f3a2bb56`, both `update by push`.
+
+Next bounded work after a context refresh: independently design #1932 and
+isolate #1933 if still wanted. Do not infer approval for the remaining #1929
+rows or for #1894/#1899/#1925/#1926.
 
 
 ## 2026-07-31 — Group E subset: #1897 option B, and three decision records (#1899, #1926, #1927-#1929)
