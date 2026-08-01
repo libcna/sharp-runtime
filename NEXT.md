@@ -4,21 +4,17 @@
 # NEXT.md
 
 *Last verified: 2026-08-01. Branch
-`feature/remediation-batch-1936-1937-design`, no upstream. This design/evidence
-batch fully scopes #1936 as a generic ImmutableSortedSet comparator-equivalence
-defect and leaves its recommended Option 1 unapproved; #1937 is now `done`, not
-reproducible, with no optimization. #1934 and #1925 remain `done`; #1926
-remains `wontfix`; #1932 and #1935 remain `done`; #1773 remains blocked. The
-clean socket-enabled gate is
-**15,081 tests across 37 executables** (Integration 893, Core.Base 5,585,
-Collections.Core 2,752), audit **68 remediated / 296 open / 364 total**, module
+`feature/remediation-batch-1936-option-1`, no upstream. Exact approved #1936
+Option 1 is implemented, proved, and `done`. #1934/#1925 remain `done`; #1937
+remains `done`/not reproducible; #1926 remains `wontfix`; #1932/#1935 remain
+`done`; #1773 remains blocked. The clean socket-enabled main and modular gates
+are **15,092 tests across 37 executables** (Integration 893, Core.Base 5,585,
+Collections.Core 2,763), audit **68 remediated / 296 open / 364 total**, module
 graph **41 / 91**, seams **2 / 18**, negative fixtures **10 / 81** over 91
 compiler invocations with peak 2, checker self-tests **45 / 45**, and Doxygen
-**1,938 / 1,942**. The database has **1,937 tickets: 1,925 done, 2 todo,
-6 blocked, 0 needs_user, 4 wontfix**, and none doing. The previously opened
-#1936/#1937 findings were investigated without a new audit ID: #1936 remains
-the one inactive approval item and #1937 is evidence-complete. Partial #1929
-rows 1–4 are unchanged. See the first handoff below.*
+**1,938 / 1,942**. The database has **1,937 tickets: 1,926 done, 1 todo,
+6 blocked, 0 needs_user, 4 wontfix**, and none doing. Partial #1929 rows 1–4
+are the sole todo item. See the first handoff below.*
 
 *Previous handoff snapshot, retained historically: branch
 `feature/remediation-batch-1932-1933-decisions` with no upstream. This
@@ -38,6 +34,298 @@ canonical Doxygen **1,937 / 1,942**. #1930 is done inside #1927's owning commit;
 2026-08-01 handoff below.*
 
 ---
+
+## Autonomous batch handoff, 2026-08-01 (#1936 exact Option 1)
+
+Branch **feature/remediation-batch-1936-option-1**, created from clean local
+`72b09ea0`, has no upstream. The production, test, evidence, and reconciliation
+commits preceding this final handoff are:
+
+| Commit | Unit | Result |
+|---|---|---|
+| `0ce730a6` | production | generic comparer-equivalence `SetEquals` and shared-data fast path |
+| `0d7d1cc6` | permanent tests | 11-test direct/nullable/custom/related-operation matrix |
+| `2ae3af00` | evidence | behavior, mutation, template ABI/symbol/layout, performance, sanitizer, rebuild record |
+| `8f20f537` | reconciliation | #1936 done in plan/decision/audit records; totals unchanged |
+| this commit | final handoff | exact final repository, validation, resource, Git, and queue state |
+
+### 1. Exact approval, root cause, and production scope
+
+Exact Option 1 was applied. `ImmutableSortedSet<T>::SetEquals` now:
+
+1. returns true when the two objects share `data_`;
+2. rebuilds `other` under this set's existing comparator;
+3. checks the post-collapse count;
+4. walks both ordered ranges and requires
+   `!less(a,b) && !less(b,a)` for each pair;
+5. returns true only after both ranges end consistently.
+
+The old body correctly selected this set's comparer for rebuilding and then
+discarded that policy by falling back to raw `std::set::operator==` (or a
+separate nullable lookup path). Raw NaN equality is non-reflexive and custom
+comparator equivalence need not equal raw element equality. The fix replaces
+both branches with the one approved generic algorithm. It does not use raw
+element equality, selected/default equality, another global policy, a direct-
+floating specialization, or another collection.
+
+The only affected production paths are `SetEquals`, plus the existing
+`IsProperSubsetOf` and `IsProperSupersetOf` calls that negate `SetEquals` after
+their non-proper checks. They were not patched separately. `IsSubsetOf`,
+`IsSupersetOf`, `Overlaps`, `Intersect`, `Union`, `Except`, and
+`SymmetricExcept` do not use the faulty equality fallback and retain every
+measured result.
+
+### 2. Complete direct-floating before/after matrix
+
+The retained pre-fix probe was rebuilt before the edit and its 105-row CSV was
+byte-identical to the design artifact (SHA-256
+`673c77899dcf8cd7d7de9edc7e1d9fbdd135033b1d5cfe6fa848e6c5be877d96`).
+The following table applies independently to `float`, `double`, and
+`long double`; columns are `SetEquals / proper-subset / proper-superset`.
+
+| Scenario | Before | After |
+|---|---|---|
+| empty equal | T / F / F | unchanged |
+| one finite equal | T / F / F | unchanged |
+| NaN self | **F / T / T** | **T / F / F** |
+| NaN shared copy | **F / T / T** | **T / F / F** |
+| independent NaN, same payload | **F / T / T** | **T / F / F** |
+| independent NaN, distinct payload | **F / T / T** | **T / F / F** |
+| mixed equal, different insertion/payload | **F / T / T** | **T / F / F** |
+| signed-zero equal | T / F / F | unchanged |
+| finite/infinities equal, different order | T / F / F | unchanged |
+| genuine NaN-bearing proper superset | F / F / T | unchanged |
+| genuine NaN-bearing proper subset | F / T / F | unchanged |
+| duplicate inputs collapse to equal set | **F / T / T** | **T / F / F** |
+| different comparator, same equivalence | **F / T / T** | **T / F / F** |
+| this comparer collapses two other values | T / F / F | unchanged |
+| only the other comparer collapses values | F / F / T | unchanged |
+
+For every row, both non-proper relations, overlap, intersection/union/except/
+symmetric-except counts, raw sequence equality, and comparator-sequence
+control remained exactly as recorded unless the table explicitly names the
+approved equality/proper-relation change. Empty, one-element, signed-zero,
+finite, infinity, genuinely unequal, and genuinely proper controls remain
+correct.
+
+### 3. Nullable and generic custom-comparer controls
+
+`optional<float>`, `optional<double>`, and `optional<long double>` retained
+all already-correct #1934/#1925 results. Equal null, NaN (same or distinct
+payload), signed-zero, finite, infinity, mixed, duplicate, insertion-order,
+shared-copy, and independent sets return true and are not proper. Genuine
+null/NaN and NaN/finite subset/superset controls retain their exact proper
+relations. Raw optional and raw sequence NaN equality remain false; collection
+policy selection, hashing, and raw floating operators are unchanged.
+
+The permanent generic controls prove:
+
+- case-insensitive `{"A"}`/`{"a"}` changes from false/equal-proper-both to
+  true/not-proper-either;
+- a decade comparator equates raw-unequal integers;
+- this-set comparer precedence survives mismatched comparator objects;
+- rebuilding occurs before comparison and collapses `other` under this
+  comparer;
+- post-collapse cardinality is retained and pinned;
+- an asymmetric one-direction mutation is rejected; and
+- ordinary integer/default string cases where raw equality and comparator
+  equivalence agree remain true.
+
+The public surface remains concrete-only: the class does not inherit the
+immutable-set interfaces and has no set-specific `Equals` member. This is a
+retained correction to the original requested surface premise, not a missing
+test path.
+
+### 4. Permanent tests and mutations
+
+`ImmutableSortedSetEqualityContractTests.cpp` adds 11 permanent tests. The
+focused selection is 16/16 (11 new plus five existing nullable controls), and
+Collections.Core is 2,763/2,763. The final mutation matrix is:
+
+| Mutation | Classification |
+|---|---|
+| restore raw `std::set::operator==` | killed |
+| use raw element `operator==` | killed |
+| check only `!less(a,b)` | killed |
+| skip rebuilding under this comparer | killed |
+| remove post-collapse count | behaviorally equivalent; retained as approved early invariant |
+| remove shared-backing fast path | behaviorally equivalent; performance only |
+| use the other set's comparer | killed |
+| bypass generic body for direct floating | killed |
+
+There are no compile-rejected mutations and no unexpected survivors. Neither
+equivalent mutation is misreported as killed.
+
+### 5. Source, template ABI, symbols, and layout
+
+Representative prefix/postfix objects cover `float`, `double`, `long double`,
+`optional<double>`, `string`, and `int`; the same string instantiation is also
+exercised with a runtime case-insensitive comparator.
+
+- Public declarations and public `SetEquals` mangled names are identical.
+- The class declares no public aliases; its private `CompareFn`/`SetT` aliases
+  and deduced public iterator types are unchanged.
+- Every set remains size 16, alignment 8, standard-layout, non-polymorphic,
+  with sole `data_` field at offset zero.
+- Every representative const iterator remains the corresponding 8-byte,
+  8-aligned `std::_Rb_tree_const_iterator`.
+- There is no vtable, virtual destructor, or virtual slot before or after.
+- `SetEquals` remains non-`noexcept` and non-`constexpr`.
+- All 35 undefined external names are identical. Defined external helpers
+  move from 1,441 to 1,397: 50 weak raw set/tree/equal/element-equality and old
+  optional-lookup helpers disappear; six weak `shared_ptr::operator==`
+  instantiations appear.
+- At O0/no-inline, `SetEquals` grows from 0x14a bytes for five controls and
+  0x1ed for optional-double to 0x380 for all six. This is the approved inline-
+  template body/helper effect and is why unchanged layout is not treated as
+  unchanged template ABI.
+
+### 6. Performance
+
+The comparable campaign used five alternating warm-up pairs and eleven
+measured alternating pairs. Values are pre/post medians in ns per benchmark
+row, followed by paired post/pre median and full paired range.
+
+| Case | Pre / post | Ratio | Range |
+|---|---:|---:|---:|
+| self, 5,000 calls | 39,128,619 / 9,067 | 0.000233 | 0.000207–0.000330 |
+| shared copy, 5,000 calls | 39,181,910 / 8,807 | 0.000226 | 0.000207–0.000334 |
+| equal independent | 1,180,074 / 1,288,127 | 1.087219 | 0.959775–1.333972 |
+| equal, different insertion | 1,190,554 / 1,275,954 | 1.083954 | 1.014138–1.262137 |
+| comparer mismatch, equivalent | 2,233,449 / 2,276,880 | 1.037902 | 0.978767–1.183737 |
+| unequal early | 975,298 / 1,002,559 | 0.996970 | 0.959967–1.105079 |
+| unequal late | 1,221,431 / 1,313,074 | 1.111172 | 0.994707–1.176207 |
+| NaN independent | 514,820 / 661,156 | 1.255290 | 1.155506–2.077665 |
+| custom strings | 442,964 / 657,540 | 1.510281 | 1.432038–2.217524 |
+| large integer | 3,587,010 / 2,793,064 | 0.989305 | 0.445991–2.072890 |
+
+The true shared-data path is O(1). Independent comparison remains
+O(m log m + n) because `other` is rebuilt before the linear scan. NaN/string
+prefix rows stopped on the old wrong answer and are not identical semantic
+work. Ordinary independent controls were noisy and do not establish a stable
+separate regression, so no inactive ticket was created.
+
+### 7. Sanitizers and rebuild manifest
+
+The focused ASan+UBSan selection passes 16/16. A separate 2,000-iteration
+ASan+UBSan probe covers construction, rebuild, comparison, shared copy, move,
+iteration, destruction, direct/nullable NaNs, and a stateful case-insensitive
+comparator capture with no diagnostic. LSan-enabled discovery runs all 11 new
+tests successfully, then LeakSanitizer itself fails at its ptrace step; no
+clean LSan result is claimed. Sanitizers cannot prove comparator equivalence,
+reflexivity, or set mathematics; permanent tests and mutations are the primary
+correctness gate.
+
+Main, ASan, and persistent modular builds recompiled the four pre-existing
+affected immutable-set test translation units and the new test after the
+header timestamp, then relinked Collections.Core. The modular rebuild records
+the five objects at 19:59:20–19:59:30 and the executable at 19:59:32, all after
+the 19:20:32 header and 19:23:56 test source. The full fresh selective matrix
+also built and ran all ten component fixtures. Dependency tracking worked; no
+whole build tree was cleaned.
+
+### 8. Final validation and baselines
+
+- canonical socket-enabled `scripts/local_ci_check.sh build`: clean build,
+  zero warnings/errors, **15,092/15,092 across 37 executables**;
+- rebuilt modular tree: the same **15,092/15,092 across 37**;
+- focused Collections.Core: **16/16**; full Collections.Core: **2,763/2,763**;
+- Integration **893**, Core.Base **5,585**;
+- full ten-component selective matrix green, including all three forbidden
+  component-consumer rejections;
+- module graph **41 physical / 91 edges** and validator self-tests **7/7**;
+- version seams **2 / 18** and seam checker self-tests **15/15**;
+- negative fixtures **10 / 81**, **91** compiler invocations, measured peak
+  **2**, checker self-tests **45/45**;
+- generated component catalogue current; database consistency green;
+- Doxygen 1.9.8 **1,938 warnings / 1,942 ceiling**;
+- `git diff --check` clean.
+
+The standalone negative checker and its self-test initially fail inside the
+restricted sandbox because their temporary compiler cache is unwritable; the
+approved elevated reruns are green. The same cache access and socket tests
+require the approved execution path for local CI/selective/modular builds.
+No network or socket test was skipped. LSan ptrace discovery remains the other
+special-handling limitation.
+
+All compiler-launching work was non-overlapping and explicitly serial or
+bounded to **two aggregate jobs**. No build tree was created under `/tmp`,
+`/var/tmp`, or `/dev/shm`; mktemp-based scripts used repository-local
+`build-tmp`.
+
+### 9. Disk and retained evidence
+
+Apparent-byte start/final sizes after reproducible probe cleanup:
+
+| Directory | Start | Final |
+|---|---:|---:|
+| `build` | 814,435,852 | 816,856,131 |
+| `build-modular` | 1,400,186,937 | 1,403,082,755 |
+| `build-asan` | 4,268,408,067 | 4,292,852,742 |
+| `build-probe` | 95,785,817 | 110,890,598 |
+| `build-consumer` | 72 | 72 |
+| `build-tmp` | 0 | 0 |
+| `cmake-build-debug` | 87,549,498 | 87,549,498 |
+| total | 6,666,366,243 | 6,711,231,796 |
+
+`build-probe` reached 155,343,359 bytes before cleanup. Removing only three
+reproducible mutation work directories and ten reproducible probe executables
+reclaimed **44,452,761 bytes**. The 52 named top-level #1936 source/log/CSV/nm/
+DWARF artifacts, frozen pre-header, raw benchmark rows, matrices, mutation
+logs, sanitizer logs, and rebuild manifests remain. Filesystem available bytes
+moved from 294,333,321,216 at start to 288,364,875,776 at final measurement;
+no broader filesystem attribution or out-of-repository inspection is claimed.
+
+### 10. Final queue and repository boundaries
+
+Database: **1,926 done, 1 todo, 6 blocked, 0 doing, 0 needs_user, 4 wontfix**
+of 1,937. The sole todo ticket is partial #1929 rows 1–4. Blocked remain #1773,
+#1888, #1889, #1894, #1896, and #1899; #1888/#1889/#1896 remain declined.
+Wontfix remain #1772, #1892, #1893, and #1926. #1934/#1925, #1932/#1935, and
+#1936/#1937 are done; #1937 remains specifically done/not reproducible.
+
+No corrected premise exposed a separate defect. The two refinements are that
+the count check is mutation-equivalent to the required final both-ended scan
+but remains as approved, and runtime default/custom string comparators share
+one template instantiation. No new ticket or SR-AUD identifier was created;
+audit numbering remains frozen at 364.
+
+CNA, mobile-eggbert, siblings, parents, and downstream consumers were not
+inspected, searched, configured, built, tested, or modified. Ticket #1773
+therefore remains blocked. The recommended next clean-context batch is the
+independent #1929 decision/design work, beginning with row 4 design only and
+making no semantic implementation without its own approval.
+
+### 11. Git/remote/stash closure
+
+Initial local branch/HEAD was
+`feature/remediation-batch-1936-1937-design`/`72b09ea0`; final branch is
+`feature/remediation-batch-1936-option-1` with no upstream. Initial and final
+read-only remote refs are identical:
+
+| Ref | Object |
+|---|---|
+| `origin/develop` | `b797928f81c8542d13856fc98e812a04b20d5f3a` |
+| `origin/feature/audit` | `173552649439b5d8e7bd0f4b577fee7b73783236` |
+| `origin/feature/remediation-batch-ccf014-ccf016` | `76a15fc2d16c48ef189fa445d7ba18af0bfdce8e` |
+| `origin/feature/remediation-batch-group-e-subset-decisions` | `f3a2bb56264a772cbf9b9d1a9ca4255e6f2205f6` |
+| `origin/feature/work` | `03a260b70bed38a06074c0d337ff0ef207c80930` |
+| `origin/master` | `84d1a2e161944eae46004bbd9d996a77f7aeb9f5` |
+| `origin/rvc` | `ebc7535caa6e03d384b22bf9f7212fa1c52fc8a1` |
+
+The pre-existing group-E remote-tracking reflog remains
+`f3a2bb56` then `563b832d`, both labelled `update by push`; it was only read.
+The three stashes are byte-identical and unchanged:
+
+- `stash@{0}` `a1b7e29783f969a07cd424114b4af9794e0cee15`
+  (`WIP on wip: 7db49c0 Math was added`);
+- `stash@{1}` `6109492015ef4e8b9454e4ac6f975537459691fa`
+  (`WIP on wip: 4b5b8d5 Changes`);
+- `stash@{2}` `09e784542ce2fee32806e9310e7e9ffa0adfaef5`
+  (`WIP on wip: 4b5b8d5 Changes`).
+
+No push, fetch, pull, merge, rebase, tag, publication, remote mutation, or
+stash mutation occurred. No user work was overwritten.
 
 ## Autonomous batch handoff, 2026-08-01 (#1936 design / #1937 evidence)
 
