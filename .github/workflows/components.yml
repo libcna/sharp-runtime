@@ -3,6 +3,9 @@
 
 name: Component boundaries
 
+env:
+  SHARP_RUNTIME_BUILD_JOBS: "2"
+
 on:
   push:
   pull_request:

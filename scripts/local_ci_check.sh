@@ -10,16 +10,11 @@ cd "$REPO_ROOT"
 
 BUILD_DIR="${1:-build}"
 
-# CLAUDE.md's build-resource policy caps every compilation in this repository at
-# three parallel jobs and explicitly allows fewer. An explicit --parallel on the
-# command line overrides CMAKE_BUILD_PARALLEL_LEVEL, so a hardcoded 3 could not
-# be bounded from outside; SHARP_RUNTIME_BUILD_JOBS lets a caller lower the
-# ceiling. It defaults to 3 and is rejected above 3, so the maximum is unchanged.
-BUILD_JOBS="${SHARP_RUNTIME_BUILD_JOBS:-3}"
-if ! [[ "$BUILD_JOBS" =~ ^[123]$ ]]; then
-    echo "FAIL: SHARP_RUNTIME_BUILD_JOBS must be 1, 2 or 3 (got '$BUILD_JOBS')" >&2
-    exit 1
-fi
+# One shared resolver owns argument/environment/default precedence and the hard
+# ceiling. Export the resolved value so every nested compiler-launching helper
+# receives the same budget rather than independently expanding it.
+BUILD_JOBS="$(python3 "$REPO_ROOT/scripts/job_count_policy.py")"
+export SHARP_RUNTIME_BUILD_JOBS="$BUILD_JOBS"
 
 echo "==> Validating module boundaries"
 python3 scripts/validate_module_boundaries.py

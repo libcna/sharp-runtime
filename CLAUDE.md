@@ -8,7 +8,7 @@
 
 ## Non-negotiable rules
 
-1. **Zero errors, zero warnings** before any commit. `cmake --build build --parallel 3` must be clean.
+1. **Zero errors, zero warnings** before any commit. `cmake --build build --parallel 2` must be clean.
 2. **No test-count regression.** `scripts/run_component_tests.sh build` must show no failures. The current verified baseline is **15,071 tests across 37 executables**, measured after ticket #1932 Option 2R on 2026-08-01; it was 15,058 immediately before, measured by tickets #1927, #1928, approved #1929 rows 5–6, #1880 and #1875 on the same date; it was 15,024 immediately before, measured by ticket #1897 — the approved option B of Group E in `docs/RemainingApprovalDecisions.md` §E.1, which makes `System::Text::Json::Nodes::JsonNode::Parse` build its tree iteratively — on 2026-07-31. **#1897 is fully compatible**: no accepted input, emitted text, public signature, object layout, vtable or exception specification changed, and it deliberately does **not** apply a depth bound, so `JsonNode::Parse` still accepts text that .NET and this module's own `JsonDocument::Parse` reject beyond `DefaultMaxDepth = 64` (documented in the `Parse` doc-comment, pinned by two tests, and reopenable only as the still-unapproved option A). It was 14,998 immediately before, measured by tickets #1854/#1858/#1862/#1863/#1865/#1879/#1884 — the approved Groups A-D of `docs/RemainingApprovalDecisions.md` — on the same date. **That batch is behaviour-incompatible by design in four places, all documented**: `Decimal::Parse` reads `,` as a group separator (`docs/Migration-DecimalCommaGroupSeparator.md`), the four date/time parsers reject text they used to accept, `String::Format` adopts .NET's brace and alignment grammar, and `Single`/`Double` `ToString(value, format)` emit different `E`/`N`/`G` text. It was 14,920 immediately before, measured by tickets #1921-#1924 (the #1919 public-representation containers, which closed the #1912 Collections comparison-contract family) on the same date; it was 14,890 before that, measured by tickets #1913-#1918 and #1920 (the #1912 family) on the same date; it was 14,815 immediately before, measured by tickets #1904-#1910 (CCF-010) on the same date, and 14,745 before that, measured by tickets #1901/#1902 (CCF-009). This paragraph was last revised at 14,113/36 by ticket #1832; the readings between the two are recorded batch by batch in `NEXT.md`, which the intervening remediation batches kept as the live floor, and are not restated here. The remainder of this note is #1832's own record, preserved verbatim. The verified baseline is 14,113 tests across 36 component executables and one integration executable, measured by ticket #1832 on 2026-07-29 through the full repository gate (an incremental build was correct for it and for #1805/#1806/#1807/#1808/#1809/#1810/#1811/#1812/#1813/#1817/#1818/#1819/#1820/#1821/#1822/#1825/#1826/#1830/#1832: all twenty changed only `.cpp` bodies, inline header bodies, test bodies and header doc-comments, with no layout or public-signature change — #1814 additionally declared one new public component edge, `Net.Http.Json` → `Core.Base`, taking the graph from 90 to 91 edges and requiring the generated catalogue to be regenerated). It read 14,106 after #1830, 14,098 after #1826, 14,091 after #1813, 14,077 after #1825, 14,070 after #1808, 14,060 after #1809, 14,046 after #1821, 14,041 after #1822, 14,033 after #1820, 14,025 after #1819, 14,021 after #1818, 14,014 after #1817, 14,002 after #1816, 13,994 after #1814, 13,987 after #1812, 13,979 after #1811, 13,970 after #1810, 13,958 after #1807, 13,948 after #1806, 13,937 after #1805 and 13,923 after #1789 earlier the same day — that figure came from a fresh configuration and a clean-first rebuild, which #1789's object-layout change made mandatory — 13,880 after #1788, 13,840 after #1791, 13,790 after #1802, and 13,538 before that, having fallen behind several remediation tickets that each added permanent regressions. This floor should be raised as new tests are added and lowered only with an explicit, documented reason.
 3. **Push only to `feature/work`.** Never push to `develop` or `master`, and never create tags, without explicit per-action user approval.
 4. **SPDX header on every project source/header** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution. Vendored sources retain their upstream headers; Markdown uses an HTML SPDX comment where one is present.
@@ -22,12 +22,12 @@
 9. **No merge to master or tags** without explicit per-action user approval.
 10. **No broad header refactor** — naming conventions touch 449+ files and would break CNA.
 11. **Copy doc-comments from .NET source** — when porting a type, if the `.NET` source (`/rv/tmp/runtime/src/libraries/`) has XML doc comments and the sharp-runtime header has none, copy them as Doxygen `/** */` comments where the meaning translates cleanly to C++.
-12. **At most three parallel compilation jobs.** See "Build-resource policy" below. This is
+12. **At most two parallel compilation jobs.** See "Build-resource policy" below. This is
     binding on every build, rebuild, sanitizer build, probe, fixture, and test script in this
     repository, permanently and for all future work. The ceiling was **four** until
-    2026-07-28, when the user lowered it to **three**; historical ticket records that state a
-    four-job measurement describe what was correct under the then-current rule and are not
-    retro-edited.
+    2026-07-28, when the user lowered it to **three**, and **two** from 2026-08-01;
+    historical ticket records that state a four- or three-job measurement describe what was
+    correct under the then-current rule and are not retro-edited.
 
 ---
 
@@ -38,18 +38,18 @@ contributor and by any future Claude Code session, on every ticket — not only 
 that introduced it. It has two halves: a **CPU ceiling** and the pre-existing **SSD-saving**
 rules. Both must be obeyed together.
 
-### CPU ceiling — three jobs, always
+### CPU ceiling — two jobs, always
 
 1. **Every** compilation, link, build, rebuild, sanitizer build, consumer fixture, compile
    probe, dependency build, CMake configure step that compiles, and test script that performs
-   compilation internally **may use at most three parallel jobs / three CPU cores.**
+   compilation internally **may use at most two parallel jobs / two CPU cores.**
 2. Use commands equivalent to:
 
    ```bash
-   cmake --build <dir> --parallel 3
-   ninja -C <dir> -j3
-   make -C <dir> -j3
-   ctest --test-dir <dir> -j3
+   cmake --build <dir> --parallel 2
+   ninja -C <dir> -j2
+   make -C <dir> -j2
+   ctest --test-dir <dir> -j2
    ```
 
    or any **lower** value.
@@ -66,26 +66,25 @@ rules. Both must be obeyed together.
      or CI defaults left to expand to all cores;
    - any script that defaults to "all available cores" when no job count is supplied.
 4. **When a repository script compiles internally**, pass whatever argument or environment
-   variable constrains it to three jobs (for example `CMAKE_BUILD_PARALLEL_LEVEL=3`,
-   `MAKEFLAGS=-j3`, or the script's own job-count parameter), and record in the ticket that
+   variable constrains it to two jobs (for example `CMAKE_BUILD_PARALLEL_LEVEL=2`,
+   `MAKEFLAGS=-j2`, or the script's own job-count parameter), and record in the ticket that
    the constraint was applied.
-5. **If a build script cannot currently be limited to three jobs, fix the script first**, or
-   use a bounded alternative (a direct `cmake --build … --parallel 3` on the same targets).
+5. **If a build script cannot currently be limited to two jobs, fix the script first**, or
+   use a bounded alternative (a direct `cmake --build … --parallel 2` on the same targets).
    Do not run the unbounded script "just this once".
 
-   Two repository scripts hardcoded `--parallel 3` and so could not be bounded from
-   outside at all, because an explicit `--parallel` on the command line overrides
-   `CMAKE_BUILD_PARALLEL_LEVEL`. `scripts/check_selective_components.sh` and
-   `scripts/local_ci_check.sh` now read **`SHARP_RUNTIME_BUILD_JOBS`** (default **3**,
-   **rejected above 3**), so a session working under a lower ceiling can use them and the
-   policy maximum is unchanged. `scripts/check_negative_consumer_fixtures.py` already had
-   `--jobs N`; `local_ci_check.sh` now passes the same value through to it.
-6. **The three-job limit applies even when the machine has more CPU cores.** Core count is not
+   `scripts/job_count_policy.py` is the single resolver used by
+   `scripts/check_selective_components.sh`, `scripts/local_ci_check.sh`, and
+   `scripts/check_negative_consumer_fixtures.py`. Precedence is explicit `--jobs`, then
+   **`SHARP_RUNTIME_BUILD_JOBS`**, then the safe default **2**; only 1 or 2 is accepted, and
+   wrappers export the resolved value to nested helpers. Local CI still passes the resolved
+   value explicitly to the fixture checker.
+6. **The two-job limit applies even when the machine has more CPU cores.** Core count is not
    a licence to raise it.
-7. **Fewer than three jobs is always allowed** and is preferred whenever a target is
-   memory-heavy (sanitizer or template-heavy translation units): drop to `-j2` or `-j1` rather
+7. **Fewer than two jobs is always allowed** and is preferred whenever a target is
+   memory-heavy (sanitizer or template-heavy translation units): drop to `-j1` rather
    than risking swap or an OOM kill.
-8. **Exceeding three jobs requires new explicit user approval**, per action. A previous
+8. **Exceeding two jobs requires new explicit user approval**, per action. A previous
    approval never carries over to another command, another ticket, or another session.
 9. **Every final ticket report must list:**
    - every build directory used;
@@ -260,7 +259,7 @@ Every `.hpp` and `.cpp` file starts with:
 - Discrepancies must be either fixed or explicitly documented as intentional deviations.
 
 ### 6. Clean build
-- `cmake --build build --parallel 3` — **zero errors, zero warnings**.
+- `cmake --build build --parallel 2` — **zero errors, zero warnings**.
 
 ### 7. Tests passing
 - `scripts/run_component_tests.sh build` — all component and integration tests
@@ -350,7 +349,7 @@ Every `.hpp` and `.cpp` file starts with:
   diagnostics** — that clean baseline is what lets a per-site verdict be attributed to its own
   source, so add `(void)x;` wherever disabling a site orphans a local.
   `scripts/check_negative_consumer_fixtures.py` compiles the baseline plus each site
-  separately (`-fsyntax-only`, `-Wall -Wextra -Wpedantic -Werror`, at most three jobs, include
+  separately (`-fsyntax-only`, `-Wall -Wextra -Wpedantic -Werror`, at most two jobs, include
   directories derived from the CMake component metadata) and runs in
   `scripts/local_ci_check.sh`. Never assert only that a whole fixture fails to compile: one
   broken line hides every other line, and a whole-file check reported a **false pass** while
@@ -385,13 +384,13 @@ State lives in `plan.sqlite3` + git history, not conversation memory, so this pr
 
 ```bash
 # Build
-cmake --build build --parallel 3
+cmake --build build --parallel 2
 
 # Run all tests
 scripts/run_component_tests.sh build
 
 # Errors/warnings only
-cmake --build build --parallel 3 2>&1 | grep -E "error:|warning:" | grep -v "^#"
+cmake --build build --parallel 2 2>&1 | grep -E "error:|warning:" | grep -v "^#"
 
 # Run a specific suite
 ./build/SharpRuntimeTests_Net_Sockets --gtest_filter="TcpClient*"

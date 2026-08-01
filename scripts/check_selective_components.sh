@@ -3,24 +3,16 @@
 # Copyright (c) Robert Vokac and contributors
 
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MATRIX_ROOT="$(mktemp -d)"
 trap 'rm -rf "$MATRIX_ROOT"' EXIT
 
-# CLAUDE.md's build-resource policy caps every compilation in this repository at
-# three parallel jobs, and explicitly allows fewer. This script used to hardcode
-# --parallel 3, which meant a session or machine that had to run at a LOWER
-# ceiling could not use it at all: an explicit --parallel on the command line
-# overrides CMAKE_BUILD_PARALLEL_LEVEL, so there was no way to bound it from
-# outside. SHARP_RUNTIME_BUILD_JOBS lets a caller lower the ceiling; it defaults
-# to 3 and is rejected above 3, so the policy maximum is unchanged.
-BUILD_JOBS="${SHARP_RUNTIME_BUILD_JOBS:-3}"
-if ! [[ "$BUILD_JOBS" =~ ^[123]$ ]]; then
-    echo "FAIL: SHARP_RUNTIME_BUILD_JOBS must be 1, 2 or 3 (got '$BUILD_JOBS');" >&2
-    echo "      CLAUDE.md caps every compilation in this repository at three jobs." >&2
-    exit 1
-fi
+# Resolve the same repository job budget as local CI and export it to every
+# nested CMake/build invocation. Invalid, malformed, or excessive values fail.
+BUILD_JOBS="$(python3 "$REPO_ROOT/scripts/job_count_policy.py")"
+export SHARP_RUNTIME_BUILD_JOBS="$BUILD_JOBS"
 
 MATRIX=(
     "Core.Base:core_base.cpp"

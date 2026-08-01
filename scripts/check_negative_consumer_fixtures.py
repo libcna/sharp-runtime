@@ -79,9 +79,11 @@ Usage:
         [--compiler CXX] [--fixture PATTERN] [--list] [--verbose]
         [--log-directory PATH] [--timeout SECONDS] [--no-ccache]
 
+Job precedence is ``--jobs``, then ``SHARP_RUNTIME_BUILD_JOBS``, then the safe
+repository default of 2. Values outside 1..2 are rejected.
+
 Exit codes: 0 every site rejected; 1 a contract failure; 2 a usage or
-environment failure (missing compiler, unreadable metadata, job count above the
-repository ceiling).
+environment failure (missing compiler, unreadable metadata, invalid job count).
 """
 
 from __future__ import annotations
@@ -106,12 +108,14 @@ if str(SCRIPTS_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIRECTORY))
 
 from generate_component_catalog import _load_metadata  # noqa: E402
+from job_count_policy import (  # noqa: E402
+    DEFAULT_JOBS,
+    ENVIRONMENT_VARIABLE,
+    MAXIMUM_JOBS,
+    JobPolicyError,
+    resolve_jobs,
+)
 
-# CLAUDE.md's build-resource policy: at most three parallel compiler processes,
-# permanently, on every ticket. A request above it is refused rather than
-# clamped silently, because the ceiling is a user decision and not a default.
-MAXIMUM_JOBS = 3
-DEFAULT_JOBS = 3
 DEFAULT_TIMEOUT_SECONDS = 300.0
 FIXTURE_DIRECTORY = Path("test/consumer")
 FIXTURE_GLOB = "*_negative.cpp"
@@ -811,18 +815,16 @@ def check_repository(
     root: Path,
     *,
     compiler: str | None = None,
-    jobs: int = DEFAULT_JOBS,
+    jobs: int | str | None = None,
     patterns: list[str] | None = None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     use_ccache: bool = True,
     log_directory: Path | None = None,
 ) -> Report:
-    if jobs < 1 or jobs > MAXIMUM_JOBS:
-        raise EnvironmentProblem(
-            f"--jobs {jobs} is outside 1..{MAXIMUM_JOBS}; CLAUDE.md caps every "
-            "compilation in this repository at three parallel jobs and raising it "
-            "needs explicit per-action approval"
-        )
+    try:
+        resolved_jobs = resolve_jobs(jobs)
+    except JobPolicyError as problem:
+        raise EnvironmentProblem(str(problem)) from problem
     root = root.resolve()
     report = Report()
     started = time.monotonic()
@@ -890,7 +892,7 @@ def check_repository(
             outcome=outcome,
         )
 
-    with ThreadPoolExecutor(max_workers=jobs) as pool:
+    with ThreadPoolExecutor(max_workers=resolved_jobs) as pool:
         results = list(pool.map(execute, cases))
 
     report.results = results
@@ -932,9 +934,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--compiler", default=None, help="C++ compiler (default: $CXX or g++)")
     parser.add_argument(
         "--jobs",
-        type=int,
-        default=DEFAULT_JOBS,
-        help=f"parallel compiler processes, at most {MAXIMUM_JOBS}",
+        default=None,
+        help=(
+            f"parallel compiler processes in 1..{MAXIMUM_JOBS}; overrides "
+            "$SHARP_RUNTIME_BUILD_JOBS; safe default 2"
+        ),
     )
     parser.add_argument(
         "--fixture",

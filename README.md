@@ -52,7 +52,7 @@ git submodule update --init --recursive
 cmake -S . -B build \
   -DSHARP_RUNTIME_COMPONENTS=All \
   -DSHARP_RUNTIME_BUILD_TESTS=ON
-cmake --build build --target SharpRuntimeTests --parallel 3
+cmake --build build --target SharpRuntimeTests --parallel 2
 scripts/run_component_tests.sh build
 ```
 
@@ -70,7 +70,7 @@ For a library-only build:
 cmake -S . -B build-no-tests \
   -DSHARP_RUNTIME_COMPONENTS=All \
   -DSHARP_RUNTIME_BUILD_TESTS=OFF
-cmake --build build-no-tests --parallel 3
+cmake --build build-no-tests --parallel 2
 ```
 
 The complete local validation gate performs boundary checks, a warning-free
@@ -141,7 +141,7 @@ plus explicitly declared test-only dependencies:
 cmake -S . -B build-json-tests \
   -DSHARP_RUNTIME_COMPONENTS=Text.Json \
   -DSHARP_RUNTIME_BUILD_TESTS=ON
-cmake --build build-json-tests --target SharpRuntimeTests --parallel 3
+cmake --build build-json-tests --target SharpRuntimeTests --parallel 2
 scripts/run_component_tests.sh build-json-tests
 ```
 
@@ -179,7 +179,8 @@ The component graph is enforced rather than documented only:
   diagnostic>` comment, and must compile cleanly with no site selected;
   `docs/NegativeConsumerFixtureValidation.md` is the full contract and
   `test/check_negative_consumer_fixtures_test.py` carries the checker's own
-  fixtures.
+  fixtures. Compilation jobs resolve as explicit `--jobs`, then
+  `SHARP_RUNTIME_BUILD_JOBS`, then the safe default 2; only 1 or 2 is accepted.
 - `.github/workflows/components.yml` runs the selective matrix and the full
   compatibility build on Ubuntu for pushes and pull requests.
 
