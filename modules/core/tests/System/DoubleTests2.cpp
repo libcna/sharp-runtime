@@ -2,12 +2,15 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <bit>
+#include <cstdint>
 #include <cmath>
 #include <limits>
 #include <string>
 
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Double.hpp"
+#include "System/Math.hpp"
 
 using System::Double;
 
@@ -370,4 +373,25 @@ TEST(DoubleTests2, RoundDigits_ExceptionSpecificationIsTheApprovedOne) {
                   "#1862: Round(double) must stay noexcept");
     EXPECT_DOUBLE_EQ(Double::Round(2.5), 2.0);  // ties-to-even, unchanged
     EXPECT_DOUBLE_EQ(Double::Round(3.5), 4.0);
+}
+
+TEST(DoubleTests2, RoundDigits_ApprovedDelegateCoversBoundariesAndSpecialValues) {
+    const double below = std::nextafter(1e16, 0.0);
+    const double above = std::nextafter(1e16, std::numeric_limits<double>::infinity());
+    const double values[] = {
+        0.0, -0.0, Double::Epsilon, -Double::Epsilon,
+        std::numeric_limits<double>::min(), -std::numeric_limits<double>::min(),
+        12345.6789012345, -12345.6789012345, below, -below, 1e16, -1e16,
+        above, -above, 1e300, -1e300, Double::PositiveInfinity, Double::NegativeInfinity,
+    };
+    for (double value : values) {
+        for (int digits = 0; digits <= 15; ++digits) {
+            SCOPED_TRACE(::testing::Message() << "value=" << value << " digits=" << digits);
+            EXPECT_EQ(std::bit_cast<std::uint64_t>(Double::Round(value, digits)),
+                      std::bit_cast<std::uint64_t>(
+                          System::Math::Round(value, digits, System::MidpointRounding::ToEven)));
+        }
+    }
+    EXPECT_TRUE(std::isfinite(Double::Round(1e300, 15)));
+    EXPECT_DOUBLE_EQ(Double::Round(1e300, 15), 1e300);
 }

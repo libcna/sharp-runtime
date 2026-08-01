@@ -315,3 +315,14 @@ test or serialized text that captured `"1234.50"`, `"1.25E+00"` or a six-digit
 **`SR-AUD-033 → remediated`** (whitespace #1864, parse tail #1865, format slice
 #1863). **CCF-007 is complete**: SR-AUD-029, 030, 031, 032 and 033 are all
 `remediated`.
+
+### Post-audit remediation — #1927 (2026-08-01)
+
+With the exact approval in `docs/TextSubsetCompatibilityDecision.md` §6.5 item
+(1), `Single::Round(float,intcs)` now delegates to
+`MathF::Round(x,digits,MidpointRounding::ToEven)`. The former local
+`std::pow`/`nearbyint` copy returned infinity for large finite values such as
+`Single::Round(3e38f,6)`; the delegate returns the input unchanged at and above
+the `1e8f` round limit. The permanent boundary/special-value matrix covers both
+signs, zero, subnormal, normal, finite-limit-adjacent and infinite values over
+all seven legal digit counts. The signature and `noexcept` state are unchanged.

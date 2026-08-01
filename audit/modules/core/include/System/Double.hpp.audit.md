@@ -95,3 +95,17 @@ an unrecognised specifier is rejected loudly. `F/E/G/R/N` stay valid; not
 `noexcept`. +6 tests. Closes the CCF-006 float slice of SR-AUD-021. The `N`
 group-separator and `E` exponent-digit fidelity gaps are the separate CCF-007
 review. `docs/NumericWrapperBoundaryPlan.md` §15.5.
+
+### Post-audit remediation — #1927 (2026-08-01)
+
+With the exact approval in `docs/TextSubsetCompatibilityDecision.md` §6.5 item
+(1), `Double::Round(double,intcs)` now uses the
+`Math::Round(x,digits,MidpointRounding::ToEven)` funnel. The former local
+`std::pow`/`nearbyint` copy returned infinity for large finite values such as
+`Double::Round(1e300,15)`; the funnel returns the input unchanged at and above
+the `1e16` round limit. A stronger pre-fix probe corrected the decision
+packet's incomplete premise: negative subnormal and smallest-normal values
+exposed a pre-existing sign-of-zero defect in the port's `Math` funnel. The
+inseparable private-helper correction is recorded in `Math.hpp.audit.md` and
+the packet's appended correction. No declaration, exception specification,
+layout, vtable, or mangled name changed.

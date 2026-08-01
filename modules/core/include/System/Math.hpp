@@ -540,10 +540,18 @@ namespace System
         static double roundToEvenImpl(double value) {
             double floorVal = std::floor(value);
             double diff = value - floorVal;
-            if (diff < 0.5) return floorVal;
-            if (diff > 0.5) return floorVal + 1.0;
+            double result = 0.0;
+            if (diff < 0.5) result = floorVal;
+            else if (diff > 0.5) result = floorVal + 1.0;
             // Exact tie: round to the even neighbor.
-            return (std::fmod(floorVal, 2.0) == 0.0) ? floorVal : floorVal + 1.0;
+            else result = (std::fmod(floorVal, 2.0) == 0.0) ? floorVal : floorVal + 1.0;
+
+            // #1927 corrected-premise measurement found that the proposed Double
+            // delegation exposed a pre-existing defect in this funnel: negative
+            // subnormals, the smallest negative normal, and -0.5 rounded to +0,
+            // while both the old Double body and .NET preserve -0. This sign copy
+            // is inseparable from delegating without changing below-limit results.
+            return result == 0.0 ? std::copysign(0.0, value) : result;
         }
 
         /**

@@ -637,6 +637,18 @@ TEST(MathTests, Round_MidpointRounding_ToEven) {
     EXPECT_DOUBLE_EQ(Math::Round(3.5, System::MidpointRounding::ToEven), 4.0);
 }
 
+TEST(MathTests, Round_ToEvenPreservesNegativeZeroForApprovedDoubleDelegate) {
+    const double values[] = {
+        -0.0, -std::numeric_limits<double>::denorm_min(),
+        -std::numeric_limits<double>::min(), -0.5,
+    };
+    for (double value : values) {
+        const double rounded = Math::Round(value, System::MidpointRounding::ToEven);
+        EXPECT_EQ(rounded, 0.0);
+        EXPECT_TRUE(std::signbit(rounded)) << "value=" << value;
+    }
+}
+
 namespace {
 // RAII guard restoring the default (nearest) FP rounding mode even if an assertion inside the
 // scope fails and unwinds early -- ticket 1723 regression test needs this since it deliberately

@@ -2,7 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <bit>
+#include <cstdint>
 #include "System/Half.hpp"
+#include "System/MathF.hpp"
 #include "System/Single.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -423,6 +426,27 @@ TEST(SingleTest, RoundDigits_ExceptionSpecificationIsTheApprovedOne) {
                   "#1862: Round(float) must stay noexcept");
     EXPECT_FLOAT_EQ(Single::Round(0.5f), 0.0f);  // ties-to-even, unchanged
     EXPECT_FLOAT_EQ(Single::Round(1.5f), 2.0f);
+}
+
+TEST(SingleTest, RoundDigits_ApprovedDelegateCoversBoundariesAndSpecialValues) {
+    const float below = std::nextafter(1e8f, 0.0f);
+    const float above = std::nextafter(1e8f, std::numeric_limits<float>::infinity());
+    const float values[] = {
+        0.0f, -0.0f, Single::Epsilon, -Single::Epsilon,
+        std::numeric_limits<float>::min(), -std::numeric_limits<float>::min(),
+        123.4567f, -123.4567f, below, -below, 1e8f, -1e8f, above, -above,
+        3e38f, -3e38f, Single::PositiveInfinity, Single::NegativeInfinity,
+    };
+    for (float value : values) {
+        for (int digits = 0; digits <= 6; ++digits) {
+            SCOPED_TRACE(::testing::Message() << "value=" << value << " digits=" << digits);
+            EXPECT_EQ(std::bit_cast<std::uint32_t>(Single::Round(value, digits)),
+                      std::bit_cast<std::uint32_t>(
+                          System::MathF::Round(value, digits, System::MidpointRounding::ToEven)));
+        }
+    }
+    EXPECT_TRUE(std::isfinite(Single::Round(3e38f, 6)));
+    EXPECT_FLOAT_EQ(Single::Round(3e38f, 6), 3e38f);
 }
 
 // ---------------------------------------------------------------------------

@@ -397,6 +397,31 @@ re-accepts text #1879 was explicitly approved to reject.
 > noting this re-accepts text ticket #1879 was explicitly approved to reject.
 > Ticket **#1929**, rows 1 and 3.
 
+#### Correction after approval — #1927's below-limit sweep missed signed zero
+
+The approval wording above is retained exactly as presented. A stronger
+pre-change probe on 2026-08-01 (`build-probe/1927_approved_prefix.cpp`) sent
+every input through volatile storage and added signed zero, positive and
+negative subnormals, the smallest normals, infinities, and values immediately
+below, at, and above both round limits. The original random result reproduced:
+140,000 ordinary below-limit samples per type still had zero bit differences,
+and the large-magnitude mismatch set still consisted of infinity or stray-ULP
+answers from the local copies. It also found one omitted structural case:
+`Double::Round(-Double::Epsilon, digits)` returned `-0`, while this port's
+`Math::Round(..., ToEven)` returned `+0` for every legal `digits` value. The
+same funnel lost the sign for the smallest negative normal and `-0.5`.
+
+Current .NET `Math.Round` explicitly copies the input sign back onto a zero
+result. Therefore a literal delegation without correcting this port's funnel
+would have violated item (1)'s requirement that below-limit values remain
+exact. The inseparable repair makes the private `roundToEvenImpl` preserve a
+zero result's sign, then delegates the two type-static overloads. Afterward the
+same 280,000-sample run has zero bit differences, the boundary mismatch counts
+fall to zero, and the special-value matrix agrees bit-for-bit. The original
+premise and measurements remain above; this note corrects their incomplete
+coverage. No new `SR-AUD-*` identifier is issued; numbering remains frozen at
+364.
+
 ### 6.6 Rejected alternatives, and why
 
 | Rejected | Why |

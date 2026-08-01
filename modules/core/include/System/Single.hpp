@@ -20,6 +20,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ArithmeticException.hpp"
 #include "System/FormatException.hpp"
+#include "System/MathF.hpp"
 #include "System/detail/FloatParseGrammar.hpp"
 #include "System/detail/FloatTextFormat.hpp"
 
@@ -253,21 +254,11 @@ public:
      * @throws System::ArgumentOutOfRangeException if @p digits is outside [0, 6].
      */
     [[nodiscard]] static float Round(float x, intcs digits) {
-        // .NET's Single.Round(x,digits) forwards to MathF.Round(x,digits,ToEven),
-        // whose funnel validates `(uint)digits > maxRoundingDigits` first -- the
-        // unsigned cast makes a NEGATIVE digits count throw as well. Adding that
-        // check here required dropping this overload's `noexcept` (ticket #1862,
-        // approved 2026-07-31): a throw from a noexcept function is
-        // std::terminate, not an exception. Before the check, an out-of-range
-        // digits count reached std::pow and returned a spurious value or NaN with
-        // no diagnostic (Round(1.2345f, 99) == NaN, Round(1.2345f, -1) == 0).
-        // The mangled name does not encode noexcept, so this is a source-level
-        // change only -- no ABI symbol break, no layout change.
-        if (digits < 0 || digits > 6)
-            throw System::ArgumentOutOfRangeException(
-                "digits", "Rounding digits must be between 0 and 6, inclusive.");
-        float factor = std::pow(10.0f, static_cast<float>(digits));
-        return std::nearbyint(x * factor) / factor;
+        // #1927 (approved 2026-08-01): use the same validation, fixed power table,
+        // ToEven rule, and >= 1e8 unchanged-value guard as the authoritative .NET
+        // funnel. The former local pow/nearbyint copy could overflow finite large
+        // values to infinity. The signature and exception specification are unchanged.
+        return MathF::Round(x, digits, MidpointRounding::ToEven);
     }
 
     // -------------------------------------------------------------------------

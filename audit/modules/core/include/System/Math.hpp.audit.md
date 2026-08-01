@@ -60,3 +60,20 @@ for both the integer-digits and no-digits overload families.
 Most established Math hardening is present, but direct native sentinel leakage
 and missing enum validation remain observable public defects.  No
 implementation was modified during this audit.
+
+### Post-audit correction supporting #1927 — signed zero (2026-08-01)
+
+The #1927 approval required `Double::Round(double,intcs)` to delegate to this
+class's three-argument funnel while preserving every below-limit result. The
+volatile pre-fix matrix found that `roundToEvenImpl` returned positive zero for
+negative subnormals, the smallest negative normal, and `-0.5`, whereas the old
+`Double` body and current .NET return negative zero. This was not visible in the
+earlier 140,000 random samples because none sampled those tiny exact cases.
+
+The private helper now copies the input sign onto a zero result, matching .NET's
+`Math.Round` implementation and allowing the approved delegation without a
+below-limit regression. The ambient-rounding-mode-independent floor/fmod
+algorithm otherwise remains unchanged. Permanent tests pin negative zero and
+the entire `Double` delegate matrix; the combined ASan+UBSan focused gate is
+clean. This semantic rounding property is guarded primarily by those permanent
+tests, not by a sanitizer. No new audit identifier is issued.
