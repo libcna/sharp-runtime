@@ -10,12 +10,18 @@ namespace System::Threading {
     class WaitHandleCannotBeOpenedException : public System::ApplicationException {
     public:
         /** Initializes a WaitHandleCannotBeOpenedException with a default message. */
-        WaitHandleCannotBeOpenedException() : ApplicationException("No handle of the given name exists.") {}
+        WaitHandleCannotBeOpenedException() : ApplicationException("No handle of the given name exists.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x8013152Cu)); // COR_E_WAITHANDLECANNOTBEOPENED
+        }
         /** Initializes a WaitHandleCannotBeOpenedException with the specified message. */
-        explicit WaitHandleCannotBeOpenedException(const std::string& message) : ApplicationException(message) {}
+        explicit WaitHandleCannotBeOpenedException(const std::string& message) : ApplicationException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x8013152Cu)); // COR_E_WAITHANDLECANNOTBEOPENED
+        }
         /** Initializes a WaitHandleCannotBeOpenedException with a message and an inner exception. */
         WaitHandleCannotBeOpenedException(const std::string& message, std::exception_ptr inner)
-            : ApplicationException(message, std::move(inner)) {}
+            : ApplicationException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x8013152Cu)); // COR_E_WAITHANDLECANNOTBEOPENED
+        }
     };
 
 } // namespace System::Threading

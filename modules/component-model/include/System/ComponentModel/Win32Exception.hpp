@@ -20,7 +20,11 @@ namespace System::ComponentModel {
          */
         explicit Win32Exception(intcs errorCode)
             : System::Exception("Win32 error " + std::to_string(errorCode)),
-              nativeErrorCode_(errorCode) {}
+              nativeErrorCode_(errorCode) {
+            // Current .NET inherits E_FAIL from ExternalException. This reduced adapter has a
+            // different public base, so assign the inherited reference value directly.
+            setHResultProperty(static_cast<intcs>(0x80004005u)); // E_FAIL
+        }
 
         /**
          * Constructs a Win32Exception with a custom message and error code.
@@ -28,7 +32,9 @@ namespace System::ComponentModel {
          * @param message   A human-readable description of the error.
          */
         Win32Exception(intcs errorCode, const std::string& message)
-            : System::Exception(message), nativeErrorCode_(errorCode) {}
+            : System::Exception(message), nativeErrorCode_(errorCode) {
+            setHResultProperty(static_cast<intcs>(0x80004005u)); // E_FAIL
+        }
 
         /** @return The underlying Win32 error code. */
         [[nodiscard]] intcs getNativeErrorCodeProperty() const { return nativeErrorCode_; }

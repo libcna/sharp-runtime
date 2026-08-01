@@ -24,3 +24,10 @@ declaration-level defect is demonstrated.
 ## Final assessment
 
 No new finding. No production or test source was changed.
+
+## Post-audit remediation — ticket #1875 (2026-08-01)
+
+All three represented constructors now assign current .NET's
+`COR_E_SYNCHRONIZATIONLOCK` (`0x80131518`) instead of `COR_E_SYSTEM`. Exact
+per-constructor tests were added; producers, ordering, text, signatures and
+layouts are unchanged.

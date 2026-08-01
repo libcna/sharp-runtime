@@ -4317,3 +4317,25 @@ Parse exception identity remain unchanged. The retained pre/post probe, four
 permanent matrices, 5,585 Core.Base tests and current ASan+UBSan focused run are
 clean. No public/ABI/layout/symbol/module consequence and no new audit ID.
 Audit totals remain **67 remediated / 297 open / 364 total**; CCF-002 is closed.
+
+---
+
+## Post-audit HResult population — ticket #1875 (2026-08-01)
+
+Official current-.NET source corrected the inactive ticket's binary premise:
+the 45 rows comprise 12 dedicated constants, 30 pure inheritance cases and 3
+conditional propagation cases. Ticket #1875 assigns all 12 dedicated codes and
+repairs the reduced Win32 base semantically without changing its public base;
+27 inheritance controls remain exact and pinned. HttpRequestException and
+WebException inner-HResult propagation are separable inactive ticket #1932;
+the unrepresented WebSocket native overloads and SR-AUD-250 are unchanged.
+
+Fifteen permanent tests with 70 exact assertions pass, including all 36 direct
+constructors and every inherited control. The combined ASan+UBSan focused run
+is clean; its object is newer than all changed headers and carries both
+instrumentation runtimes. Leak discovery remains ptrace-limited and is not
+claimed as semantic coverage. No signature, overload, accessibility, base,
+`noexcept`, `constexpr`, layout, vtable, symbol name, module edge or normal-path
+performance characteristic changed. SR-AUD-157 moves to `remediated`; totals
+are **68 remediated / 296 open / 364 total**, with numbering frozen at 364.
+Evidence: `docs/ExceptionHResultPopulationDecision.md`.

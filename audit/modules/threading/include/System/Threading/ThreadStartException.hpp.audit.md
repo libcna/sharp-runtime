@@ -20,3 +20,9 @@ failure detail.
 
 SR-AUD-196 is confirmed by the local managed compiler baseline.  No source or
 test was changed.
+
+## Post-audit remediation — ticket #1875 (2026-08-01)
+
+Every exposed constructor now assigns current .NET's `COR_E_THREADSTART`
+(`0x80131525`) instead of `COR_E_SYSTEM`. SR-AUD-196 remains confirmed: no
+constructor accessibility or public signature changed.

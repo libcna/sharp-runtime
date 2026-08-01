@@ -27,3 +27,11 @@ finding while the type remains outside the supported API baseline.
 
 The ignored-surface discrepancy is documented for a future scope decision. No
 source or test was changed.
+
+## Post-audit remediation — ticket #1875 (2026-08-01)
+
+The explicitly requested 45-type sweep found current .NET's exact
+`COR_E_VERIFICATION` (`0x8013150D`) assignment. Both represented local
+constructors now assign it, moving the measured value from `COR_E_SYSTEM` while
+leaving the ignored-surface classification, text, and missing causal overload
+unchanged. No new audit identifier was issued.

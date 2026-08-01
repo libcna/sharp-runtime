@@ -21,3 +21,10 @@ types explicitly remain process-local, so no production producer is present.
 ## Final assessment
 
 No new finding. No production or test source was changed.
+
+## Post-audit remediation — ticket #1875 (2026-08-01)
+
+All three represented constructors now assign current .NET's
+`COR_E_WAITHANDLECANNOTBEOPENED` (`0x8013152C`) instead of inheriting
+`COR_E_APPLICATION`. The lack of a named-handle producer and the public
+declaration remain unchanged.

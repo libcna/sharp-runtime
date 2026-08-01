@@ -14,19 +14,25 @@ namespace System::Threading {
     class ThreadStateException : public System::SystemException {
     public:
         /** @brief Initializes a ThreadStateException with a default message. */
-        ThreadStateException() : SystemException("Thread is in an invalid state for the operation being executed.") {}
+        ThreadStateException() : SystemException("Thread is in an invalid state for the operation being executed.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131520u)); // COR_E_THREADSTATE
+        }
         /**
          * @brief Initializes a ThreadStateException with the specified message.
          * @param message The error message.
          */
-        explicit ThreadStateException(const std::string& message) : SystemException(message) {}
+        explicit ThreadStateException(const std::string& message) : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131520u)); // COR_E_THREADSTATE
+        }
         /**
          * @brief Initializes a ThreadStateException with a message and an inner exception.
          * @param message The error message.
          * @param inner   The exception that caused this exception.
          */
         ThreadStateException(const std::string& message, std::exception_ptr inner)
-            : SystemException(message, std::move(inner)) {}
+            : SystemException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131520u)); // COR_E_THREADSTATE
+        }
     };
 
 } // namespace System::Threading

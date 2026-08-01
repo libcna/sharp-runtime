@@ -48,3 +48,11 @@ matching constructor; the matching managed hierarchy check prints `False` for
 The ordinary messages and throwable shape are functional, but the type's
 public inheritance, constructor, and diagnostic-code contracts diverge from
 current .NET.  No source or test was modified.
+
+## Post-audit remediation — ticket #1875 (2026-08-01)
+
+SR-AUD-157's HResult half is remediated. Both represented constructors now
+assign `COR_E_AMBIGUOUSIMPLEMENTATION` (`0x8013106A`), and the prefix/postfix
+matrix changes both observed values from `COR_E_SYSTEM` to the reference code.
+The historical text above is retained. SR-AUD-158 remains confirmed: this
+ticket did not change the public base, sealing, or missing causal constructor.

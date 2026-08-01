@@ -18,3 +18,11 @@ The public declaration, its immediate implementation path, and focused call site
 ## Final assessment
 
 AUDITED. No separate evidence-backed finding is assigned to this file.
+
+## Post-audit remediation — ticket #1875 (2026-08-01)
+
+Current .NET assigns `COR_E_KEYNOTFOUND` (`0x80131577`) in every constructor.
+The port previously inherited `COR_E_SYSTEM`; all three represented
+constructors now assign the reference value and are pinned by the permanent
+integration matrix. No new audit identifier was issued; declarations, layout,
+vtables and messages are unchanged.

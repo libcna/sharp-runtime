@@ -45,3 +45,11 @@ name and formatted diagnostic of this specialized exception.
 The represented constructors preserve their provided text and native inner
 pointer, but ExternalException loses both its default diagnostic code and its
 public native-error identity route.  No source or test was modified.
+
+## Post-audit remediation — ticket #1875 (2026-08-01)
+
+The represented-constructor part of SR-AUD-157 is remediated: default, message,
+and message-plus-inner constructors now assign `E_FAIL` (`0x80004005`) exactly,
+with one permanent assertion per constructor. The historical evidence above is
+retained. SR-AUD-159 remains confirmed because no error-code constructor,
+`ErrorCode` accessor, or specialized formatting API was added.

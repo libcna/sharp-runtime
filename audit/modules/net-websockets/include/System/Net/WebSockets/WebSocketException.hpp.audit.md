@@ -31,3 +31,11 @@ code/message construction remains coherent.
 ## Final assessment
 
 SR-AUD-250 is directly reproduced. No source or test was changed.
+
+## Post-audit correction and remediation — ticket #1875 (2026-08-01)
+
+Current .NET conditionally assigns negative native HRESULTs in overloads this
+port already documents as unrepresented; its enum/message constructors inherit
+`E_FAIL`. The shared Win32 root now gives the represented surface that exact
+`0x80004005` value instead of `COR_E_EXCEPTION`, and a permanent derived control
+pins it. No native overload was added and SR-AUD-250 remains confirmed.

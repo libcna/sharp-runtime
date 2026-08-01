@@ -1207,6 +1207,20 @@ are recorded as **not applicable** — one integer store per constructor body, n
 allocation, ownership transfer, pointer arithmetic, lifetime change, shared state
 or new member — rather than skipped silently.
 
+**Population follow-through — ticket #1875 (2026-08-01).** The historical
+inactive text above is retained, but the user later confirmed the sweep was
+still wanted. Official current-.NET source divides the 45 rows into 12
+type-specific assignments, 30 pure inherited values, and 3 conditional
+propagation cases, correcting the earlier binary premise. Twelve direct types
+plus the reduced Win32 root and its represented derived families are now exact;
+27 inherited rows were already exact and are pinned. The two separable
+inner-HResult propagation gaps become inactive ticket #1932, while the
+unrepresented WebSocket native overloads and SR-AUD-250 remain unchanged.
+Fifteen permanent tests / 70 assertions pass. SR-AUD-157 is remediated; all
+adjacent findings retain their prior status. Full evidence is in
+`docs/ExceptionHResultPopulationDecision.md`; no new audit identifier was
+issued and numbering stays frozen at 364.
+
 ## CCF-017 — the Attribute base's identity fallback changes every unoverridden attribute's value semantics
 
 Current .NET makes `Attribute` abstract and supplies same-type fieldwise

@@ -6374,3 +6374,27 @@ Core.Base); affected ASan+UBSan objects were proven current and focused tests
 are clean. No public declaration, `noexcept`, `constexpr`, layout, vtable,
 symbol or module-edge change; no audit identifier. Totals remain **67 / 297 /
 364** and CCF-002 is closed. Evidence: date-time plan §23.
+
+---
+
+## Post-audit HResult population — ticket #1875 (2026-08-01)
+
+The deliberately inactive 45-type population from CCF-016 was independently
+confirmed still wanted and compared against official current-.NET source at
+`dotnet/runtime` commit `0eb5481340ea675857c7a7abf18f68a60b52a686`. The
+historical two-category premise was corrected: 12 types assign a dedicated
+constant, 30 purely inherit, and 3 conditionally propagate. The port was exact
+for 27 pure controls. All 36 represented constructors of the 12 dedicated rows
+now assign the exact code; the reduced Win32 root assigns inherited `E_FAIL`,
+which also corrects NetworkInformation, Socket and the represented WebSocket
+surface. The two separable inner-HResult gaps are retained as inactive #1932.
+
+Prefix 13/15 failing → postfix 15/15 passing, with 70 exact permanent
+assertions; the full integration executable passes 880/880. Combined
+ASan+UBSan focused tests pass 15/15 against an instrumented object newer than
+all changed headers. Leak discovery hit the already-known ptrace limitation,
+so the successful semantic run disabled leak detection honestly; no ownership,
+allocation or shared-state mechanism changed. SR-AUD-157 moves to
+`remediated`; SR-AUD-158, SR-AUD-159, SR-AUD-196, SR-AUD-230 and SR-AUD-250
+retain their prior states. Audit totals are **68 remediated / 296 open / 364
+total**, numbering frozen and no new identifier issued.

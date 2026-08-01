@@ -16,3 +16,9 @@ exception; tests do not claim otherwise.  No new defect is demonstrated.
 
 The declaration is coherent, but real interruption behavior remains absent by
 documented adaptation.  No source or test was changed.
+
+## Post-audit remediation — ticket #1875 (2026-08-01)
+
+All three represented constructors now assign current .NET's
+`COR_E_THREADINTERRUPTED` (`0x80131519`) instead of `COR_E_SYSTEM`. The
+unsupported producer behavior and every public declaration remain unchanged.

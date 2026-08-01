@@ -20,3 +20,13 @@ its cause; that concrete reachable effect is tracked as SR-AUD-250.
 ## Final assessment
 
 No separate finding is added beyond SR-AUD-250. No source or test changed.
+
+## Post-audit correction and remediation — ticket #1875 (2026-08-01)
+
+Current .NET makes no direct HResult assignment here because Win32Exception
+inherits `E_FAIL` (`0x80004005`) from `ExternalException`. This reduced port
+derives from `Exception`, so the same omission produced `COR_E_EXCEPTION`.
+Both represented constructors now assign the inherited reference value
+directly, without changing the public base or any declaration. The permanent
+matrix also pins NetworkInformation, Socket and WebSocket derived controls.
+SR-AUD-250 remains confirmed and unchanged.

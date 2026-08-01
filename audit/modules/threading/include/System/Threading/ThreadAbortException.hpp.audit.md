@@ -22,3 +22,9 @@ demonstrated.
 
 This is a documented legacy compatibility type.  No source or test was
 changed.
+
+## Post-audit remediation — ticket #1875 (2026-08-01)
+
+Both exposed constructors now assign current .NET's `COR_E_THREADABORTED`
+(`0x80131530`) instead of `COR_E_SYSTEM`. This exact-value correction does not
+add or enable `Thread.Abort`; the legacy adaptation above remains unchanged.

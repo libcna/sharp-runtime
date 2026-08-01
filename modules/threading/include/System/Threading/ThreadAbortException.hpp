@@ -16,12 +16,16 @@ namespace System::Threading {
     class ThreadAbortException : public System::SystemException {
     public:
         /** @brief Initializes a ThreadAbortException with a default message. */
-        ThreadAbortException() : SystemException("Thread was being aborted.") {}
+        ThreadAbortException() : SystemException("Thread was being aborted.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131530u)); // COR_E_THREADABORTED
+        }
         /**
          * @brief Initializes a ThreadAbortException with the specified message.
          * @param message The error message.
          */
-        explicit ThreadAbortException(const std::string& message) : SystemException(message) {}
+        explicit ThreadAbortException(const std::string& message) : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131530u)); // COR_E_THREADABORTED
+        }
 
         /**
          * @brief Gets an object that contains application-specific information related to the thread abort.

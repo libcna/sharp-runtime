@@ -328,3 +328,30 @@ refreshing. This is recorded as a deliberate judgement, not an omission.
 completion criterion in §12 is met. `build-probe/1873_hresult_probe.cpp` reports
 `wrong=0` after #1874, with the three base values and all three controls still
 `OK`. Ticket #1875 remains open and inactive for the 45-type population in §6.4.
+
+---
+
+## 14. Correction and completion of the 45-type population (#1875, 2026-08-01)
+
+The historical scope and inactive classification above are preserved. The user
+subsequently confirmed that #1875 was still wanted after the approved text
+subset work, and the complete reference sweep is now recorded in
+`docs/ExceptionHResultPopulationDecision.md`.
+
+The earlier binary expectation — each type either assigns a dedicated code or
+inherits — was incomplete. At official `dotnet/runtime` commit
+`0eb5481340ea675857c7a7abf18f68a60b52a686`, the 45 rows divide into 12
+type-specific assignments, 30 pure inheritance rows, and 3 conditional
+propagation rows. The port was already exact for 27 pure controls. Twelve
+dedicated types were wrong, and the reduced `Win32Exception` base made its own
+value plus the represented NetworkInformation, Socket and WebSocket families
+wrong. Those exact constant/inheritance results are remediated without changing
+a declaration. The conditional inner-HResult mismatches in
+`HttpRequestException` and `WebException` are separable and retained as
+inactive ticket #1932 rather than broadened into this sweep.
+
+The prefix matrix failed 13/15 tests; the postfix matrix passes 15/15 with 70
+exact assertions. SR-AUD-157 moves to `remediated`; SR-AUD-158, SR-AUD-159,
+SR-AUD-196, SR-AUD-230 and SR-AUD-250 remain at their prior states. No new
+`SR-AUD-*` identifier was issued and numbering remains frozen at 364. Ticket
+#1875 is complete.

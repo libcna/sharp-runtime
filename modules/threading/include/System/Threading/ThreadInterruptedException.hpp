@@ -14,19 +14,25 @@ namespace System::Threading {
     class ThreadInterruptedException : public System::SystemException {
     public:
         /** @brief Initializes a ThreadInterruptedException with a default message. */
-        ThreadInterruptedException() : SystemException("Thread was interrupted from a waiting state.") {}
+        ThreadInterruptedException() : SystemException("Thread was interrupted from a waiting state.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131519u)); // COR_E_THREADINTERRUPTED
+        }
         /**
          * @brief Initializes a ThreadInterruptedException with the specified message.
          * @param message The error message.
          */
-        explicit ThreadInterruptedException(const std::string& message) : SystemException(message) {}
+        explicit ThreadInterruptedException(const std::string& message) : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131519u)); // COR_E_THREADINTERRUPTED
+        }
         /**
          * @brief Initializes a ThreadInterruptedException with a message and an inner exception.
          * @param message The error message.
          * @param inner   The exception that caused this exception.
          */
         ThreadInterruptedException(const std::string& message, std::exception_ptr inner)
-            : SystemException(message, std::move(inner)) {}
+            : SystemException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131519u)); // COR_E_THREADINTERRUPTED
+        }
     };
 
 } // namespace System::Threading

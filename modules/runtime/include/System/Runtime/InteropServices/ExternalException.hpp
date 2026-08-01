@@ -13,13 +13,19 @@ namespace System::Runtime::InteropServices
     {
     public:
         ExternalException()
-            : System::SystemException("External component has thrown an exception.") {}
+            : System::SystemException("External component has thrown an exception.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80004005u)); // E_FAIL
+        }
 
         explicit ExternalException(const std::string& message)
-            : System::SystemException(message) {}
+            : System::SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80004005u)); // E_FAIL
+        }
 
         ExternalException(const std::string& message, std::exception_ptr inner)
-            : System::SystemException(message, std::move(inner)) {}
+            : System::SystemException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80004005u)); // E_FAIL
+        }
 
         ~ExternalException() override = default;
     };

@@ -20,7 +20,9 @@ public:
      * C++ counterpart of .NET KeyNotFoundException().
      */
     KeyNotFoundException()
-        : SystemException("The given key was not present in the dictionary.") {}
+        : SystemException("The given key was not present in the dictionary.") {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131577u)); // COR_E_KEYNOTFOUND
+    }
 
     /**
      * @brief Initializes a new instance with the specified error message.
@@ -29,7 +31,9 @@ public:
      * @param message A message that describes the error.
      */
     explicit KeyNotFoundException(const std::string& message)
-        : SystemException(message) {}
+        : SystemException(message) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131577u)); // COR_E_KEYNOTFOUND
+    }
 
     /**
      * @brief Initializes a new instance with a specified error message and a reference
@@ -40,7 +44,9 @@ public:
      * @param inner   The exception that is the cause of the current exception.
      */
     KeyNotFoundException(const std::string& message, std::exception_ptr inner)
-        : SystemException(message, std::move(inner)) {}
+        : SystemException(message, std::move(inner)) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131577u)); // COR_E_KEYNOTFOUND
+    }
 };
 
 } // namespace System::Collections::Generic

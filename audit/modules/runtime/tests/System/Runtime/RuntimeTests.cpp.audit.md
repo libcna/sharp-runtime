@@ -79,3 +79,10 @@ constructor (SR-AUD-158), or ExternalException's absent error-code route
 The complete aggregate fixture is green and provides useful representative
 coverage, but its GC segment preserves the normal-path-only gap behind
 SR-AUD-156.  No source or test was modified.
+
+## Post-audit coverage note — ticket #1875 (2026-08-01)
+
+SR-AUD-157's missing exact-value coverage is now supplied by the add-only
+repository integration matrix, one assertion per represented constructor for
+both affected types. SR-AUD-158 and SR-AUD-159 remain outside that matrix and
+confirmed. This historical test-file assessment is otherwise unchanged.

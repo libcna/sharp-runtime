@@ -20,3 +20,10 @@ checks.  No declaration-only defect is demonstrated.
 
 The declaration is coherent for current consumers.  No source or test was
 changed.
+
+## Post-audit remediation — ticket #1875 (2026-08-01)
+
+All three represented constructors now assign current .NET's
+`COR_E_THREADSTATE` (`0x80131520`) instead of `COR_E_SYSTEM`, with exact
+per-constructor permanent coverage. Producer behavior and public shape are
+unchanged.

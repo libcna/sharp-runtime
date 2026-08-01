@@ -19,3 +19,10 @@ Path normalization, root handling, extension rules, temporary-file creation, and
 ## Final assessment
 
 AUDITED. No standalone confirmed defect was added from this file in the current audit pass.
+
+## Post-audit remediation — ticket #1875 (2026-08-01)
+
+Current .NET assigns `COR_E_PATHTOOLONG` (`0x800700CE`) in every constructor;
+the port previously inherited `COR_E_IO` (`0x80131620`). All three represented
+constructors now assign the exact reference value and are permanently pinned.
+No public declaration, message, layout, vtable or audit identifier changed.

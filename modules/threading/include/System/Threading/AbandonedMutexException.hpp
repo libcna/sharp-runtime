@@ -23,21 +23,36 @@ namespace System::Threading {
 
     public:
         /** Initializes an AbandonedMutexException with a default message. */
-        AbandonedMutexException() : SystemException("The wait completed due to an abandoned mutex.") {}
+        AbandonedMutexException() : SystemException("The wait completed due to an abandoned mutex.") {
+            setHResultProperty(static_cast<intcs>(0x8013152Du)); // COR_E_ABANDONEDMUTEX
+        }
         /** Initializes an AbandonedMutexException with the specified message. */
-        explicit AbandonedMutexException(const std::string& message) : SystemException(message) {}
+        explicit AbandonedMutexException(const std::string& message) : SystemException(message) {
+            setHResultProperty(static_cast<intcs>(0x8013152Du)); // COR_E_ABANDONEDMUTEX
+        }
         /** Initializes an AbandonedMutexException with a message and an inner exception. */
         AbandonedMutexException(const std::string& message, std::exception_ptr inner)
-            : SystemException(message, std::move(inner)) {}
+            : SystemException(message, std::move(inner)) {
+            setHResultProperty(static_cast<intcs>(0x8013152Du)); // COR_E_ABANDONEDMUTEX
+        }
         /** Initializes an AbandonedMutexException identifying the WaitAny index and abandoned handle. */
         AbandonedMutexException(intcs location, WaitHandle* handle)
-            : SystemException("The wait completed due to an abandoned mutex.") { SetupException(location, handle); }
+            : SystemException("The wait completed due to an abandoned mutex.") {
+            setHResultProperty(static_cast<intcs>(0x8013152Du)); // COR_E_ABANDONEDMUTEX
+            SetupException(location, handle);
+        }
         /** Initializes an AbandonedMutexException with a message, plus the WaitAny index and abandoned handle. */
         AbandonedMutexException(const std::string& message, intcs location, WaitHandle* handle)
-            : SystemException(message) { SetupException(location, handle); }
+            : SystemException(message) {
+            setHResultProperty(static_cast<intcs>(0x8013152Du)); // COR_E_ABANDONEDMUTEX
+            SetupException(location, handle);
+        }
         /** Initializes an AbandonedMutexException with a message, inner exception, WaitAny index, and abandoned handle. */
         AbandonedMutexException(const std::string& message, std::exception_ptr inner, intcs location, WaitHandle* handle)
-            : SystemException(message, std::move(inner)) { SetupException(location, handle); }
+            : SystemException(message, std::move(inner)) {
+            setHResultProperty(static_cast<intcs>(0x8013152Du)); // COR_E_ABANDONEDMUTEX
+            SetupException(location, handle);
+        }
 
         /** Returns the abandoned Mutex, if the handle passed at construction was a Mutex; otherwise nullptr. */
         [[nodiscard]] Mutex* getMutexProperty() const { return mutex_; }
