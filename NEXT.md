@@ -3,7 +3,19 @@
 
 # NEXT.md
 
-*Last verified: 2026-08-01. Branch:
+*Last verified: 2026-08-01. Branch
+`feature/remediation-batch-1932-option-2r`, no upstream. The exact independently
+approved #1932 Option 2R is implemented and ticket #1932 is `done`. The full
+socket-enabled gate is **15,071 tests across 37 executables** (Integration 893,
+Core.Base 5,585), the audit remains **68 remediated / 296 open / 364 total**,
+the module graph is **41 / 91**, seams **2 / 18**, negative fixtures **10 / 74**,
+and canonical Doxygen is **1,937 / 1,942**. No other pending decision was made.
+#1773/#1894/#1899 remain blocked; #1888/#1889/#1896 remain declined and
+blocked; #1926 and partial #1929 rows 1–4 remain `todo`; #1925/#1934 remain
+`needs_user`; #1933 remains `done` without an optimization. See the first
+handoff below.*
+
+*Previous handoff snapshot, retained historically: branch
 `feature/remediation-batch-1932-1933-decisions` with no upstream. This
 design/evidence batch completed #1932's constructor-specific HResult design,
 closed #1933 as evidence-only with no optimization, classified #1925 as a
@@ -19,6 +31,196 @@ canonical Doxygen **1,937 / 1,942**. #1930 is done inside #1927's owning commit;
 #1888/#1889/#1896 remain declined/blocked, #1926 remains `todo` leaning
 `wontfix`, and #1929 remains partial with rows 1–4 unchanged. See the first
 2026-08-01 handoff below.*
+
+---
+
+## Autonomous batch handoff, 2026-08-01 (#1932 exact Option 2R)
+
+Branch **feature/remediation-batch-1932-option-2r**, created from local handoff
+HEAD cc833f5d, has no upstream. Three logical commits precede this final
+handoff:
+
+| Commit | Unit | Result |
+|---|---|---|
+| 0e622298 | #1932 production | exact constructor-local Option 2R |
+| 66243a02 | #1932 tests | 13-test permanent constructor and transport matrix |
+| 976be6df | evidence reconciliation | design, audit, decision packet, and test-floor closure |
+
+### 1. Exact approval and implementation
+
+Only #1932 Option 2R was applied. For each existing constructor accepting
+`std::exception_ptr`—HttpRequestException H3/H4/H5 and WebException W3/W5—a
+non-null pointer that rethrows `System::Exception` now supplies the outer exact
+HResult, including zero. Null and non-System pointers retain the existing outer
+base. `HttpRequestError`, `HttpStatusCode`, and `WebExceptionStatus` never take
+precedence.
+
+H3 and W3 retain the original pointer in the existing base state, rethrow it
+only for classification, catch `const System::Exception&`, and copy the integer
+through the existing setter. Their final catch classifies the exception stored
+in the pointer as non-System and performs no write. H4/H5 and W5 delegate to
+their corresponding causal constructor and then assign their existing metadata
+members. There is no universal Exception helper, producer-side wrapping,
+constructor, overload, field, accessor, or new public surface.
+
+Root cause: all five causal constructors previously passed the pointer to their
+base only. `Exception` stored but never inspected it, so HRE retained
+`0x80131500`; WebException's InvalidOperationException base retained
+`0x80131509`. Networking metadata was already orthogonal and transport already
+forwarded the same object.
+
+### 2. Complete before/after matrix
+
+| Family / case | Before | After |
+|---|---:|---:|
+| HRE default, message, null pointer | `0x80131500` | `0x80131500` |
+| HRE System base default | `0x80131500` | `0x80131500` |
+| HRE System zero | `0x80131500` | `0x00000000` |
+| HRE FormatException | `0x80131500` | `0x80131537` |
+| HRE custom nonzero | `0x80131500` | exact custom value |
+| HRE nested HRE/WebException | `0x80131500` | exact nested value |
+| HRE non-System pointer | `0x80131500` | `0x80131500` |
+| Web default, message, status-only, null pointer | `0x80131509` | `0x80131509` |
+| Web System base default | `0x80131509` | `0x80131500` |
+| Web System zero | `0x80131509` | `0x00000000` |
+| Web FormatException | `0x80131509` | `0x80131537` |
+| Web custom nonzero | `0x80131509` | exact custom value |
+| Web nested HRE/WebException | `0x80131509` | exact nested value |
+| Web non-System pointer | `0x80131509` | `0x80131509` |
+
+H4/H5/W5 with explicit status/error match the inner row exactly and preserve
+the requested enum/optional values. All controls preserve message text, inner
+dynamic type and `exception_ptr` identity, inner HResult, copy construction,
+move construction, copy/move assignment, and repeated outer-pointer rethrow.
+The existing HttpClient and HttpMessageInvoker synchronous and asynchronous
+paths forward the same causal exception. Existing built-in HTTP parse and
+`EnsureSuccessStatusCode` producers still create no-inner HREs with
+`0x80131500`; no represented WebException producer exists and none was added.
+
+### 3. Permanent tests and retained evidence
+
+`tests/integration/System/NetworkExceptionHResultPropagationTests.cpp` adds 13
+tests:
+
+- structural constructor/size/alignment/exception-specification controls;
+- all no-inner constructors and nonstandard metadata controls;
+- H3, H4, H5, W3, and W5 over null, default, zero, custom, FormatException,
+  nested HRE, nested WebException, and non-System pointers;
+- copy/move construction and assignment for both types;
+- repeated rethrow of outer `exception_ptr` objects;
+- HttpClient and HttpMessageInvoker synchronous/asynchronous forwarding; and
+- built-in no-inner producer controls.
+
+The retained semantic prefix run was **2/12 passing, 10/12 failing**, with only
+outer HResult assertions failing; identity, messages and metadata were already
+exact. The postfix suite is **13/13**. Combined with #1875 it is **28/28**.
+Prefix/postfix matrices, JSON, symbol sets, header hashes, sanitizer logs, and
+the probe source remain under `build-probe/1932_*`.
+
+### 4. Sanitizers and structural compatibility
+
+The existing `build-asan` tree is a combined
+`-fsanitize=address,undefined -fno-omit-frame-pointer` build. Its changed
+HttpClient/HttpMessageInvoker objects, new test object, and executable were
+proven newer than the two changed headers, `nm` contains both `__asan_*` and
+`__ubsan_*`, and all 13 focused tests pass with no ASan/UBSan diagnostics. This
+exercises constructor success, null/System/non-System/nested inner pointers,
+copy/move/assignment, repeated pointer retention and destruction, and sync/
+async transport.
+
+With leak discovery enabled, all 13 assertions pass and LeakSanitizer then
+reports its ptrace fatal during discovery. No LSan-clean result is claimed.
+Sanitizers cannot establish HResult precedence or .NET parity; the exact
+constructor matrix and permanent tests are the correctness gate.
+
+Public declarations, constructor signatures/default arguments, bases, fields,
+offsets, calling conventions, mangled-name sets, normalized defined/undefined
+symbol sets, vtables, virtual slots, `noexcept`, and `constexpr` state are
+unchanged. Size/alignment remain HttpRequestException **176/8** and
+WebException **168/8**. Inline bodies changed, so consumers require a clean
+rebuild to avoid mixed old/new behavior. No material design premise differed,
+no separate defect was discovered, and no inactive ticket or audit identifier
+was added.
+
+### 5. Full validation and exact baselines
+
+- socket-enabled `scripts/local_ci_check.sh build`: clean build, 0 warnings,
+  0 errors, **15,071/15,071 across 37 executables**;
+- Integration **893/893** and Core.Base **5,585/5,585**;
+- focused plain **13/13**, combined #1875/#1932 **28/28**, ASan+UBSan **13/13**;
+- selective ten-component matrix green, including WebSockets **24/24**;
+- module boundaries and tests green: **41 modules / 91 edges**;
+- component catalog current; version seams **2 / 18**;
+- negative fixtures **10 / 74**, 84 compiler invocations; corrected final run
+  peak **2 jobs**;
+- plan database consistent; Doxygen 1.9.8 **1,937 / 1,942**;
+- `git diff --check` clean.
+
+The audit remains **68 remediated / 296 open / 364 total**, numbering frozen.
+Database population is now 1,934 tickets: 1,921 done, 2 todo, 6 blocked,
+2 needs_user, and 3 wontfix. No ticket is doing.
+
+### 6. Resources, cleanup, and limitations
+
+Build-directory bytes, start → final:
+
+| Directory | Start | Final |
+|---|---:|---:|
+| build | 803,563,744 | 805,958,349 |
+| build-modular | 1,350,883,628 | 1,350,883,628 |
+| build-asan | 4,102,125,218 | 4,127,175,105 |
+| build-probe | 74,744,696 | 75,235,677 |
+| build-consumer | 72 | 72 |
+| build-tmp | 0 | 0 |
+| cmake-build-debug | 87,549,498 | 87,549,498 |
+| build-ubsan / build-tsan | absent | absent |
+
+The repository-local validation ccache peaked with `build-tmp` at 92,574,239
+bytes and was removed after the last compilation, reclaiming **92,574,239
+bytes**. Permanent evidence and reusable build products were retained.
+
+Every build command was sequential and explicitly capped at two jobs, and the
+socket-bearing local CI/selective matrices used the approved socket-enabled
+execution path. However, one standalone no-argument negative-fixture command
+used that script's default pool and reported **peak 3 jobs** before being rerun
+with `--jobs 2` and retained as a peak-two final result. This is a batch process
+policy violation; a “no compilation exceeded two” claim cannot honestly be
+made. `check_negative_consumer_fixtures.py` therefore requires explicit
+`--jobs 2`, while `local_ci_check.sh` and `check_selective_components.sh`
+require `SHARP_RUNTIME_BUILD_JOBS=2`.
+
+All mktemp-based scripts otherwise used the absolute repository-local
+`build-tmp` TMPDIR. The first incremental build attempt inherited an unwritable
+external ccache and failed before compiling the changed object; subsequent
+commands used the repository-local cache. One GNU Make attempt made a jobserver
+FIFO named `/tmp/GMfifo4`; it was not a build tree. No build tree was created
+under `/tmp`, `/var/tmp`, or `/dev/shm`.
+
+### 7. Repository and queue handoff
+
+Initial and final read-only observations agree: the anomalous remote-tracking
+ref is still f3a2bb56, with reflog entries 563b832d at 2026-07-31 19:40:47
++0200 and f3a2bb56 at 19:57:20 +0200, both “update by push.” It was not
+diagnosed or modified. The stashes remain exactly:
+
+- `stash@{0}: WIP on wip: 7db49c0 Math was added`
+- `stash@{1}: WIP on wip: 4b5b8d5 Changes`
+- `stash@{2}: WIP on wip: 4b5b8d5 Changes`
+
+The branch has no upstream. No push, fetch, pull, merge, rebase, tag, package
+publication, remote mutation, or stash mutation occurred. #1773 remains
+blocked. CNA and mobile-eggbert were not inspected, searched, configured,
+built, tested, or modified.
+
+No other decision was inferred: #1925/#1934 remain needs_user; #1926 remains
+todo with its existing wontfix recommendation; #1929 rows 1–4 remain todo and
+unchanged; #1894/#1899 remain blocked; #1888/#1889/#1896 remain declined and
+blocked. The next recommended decision is the independent #1926 wontfix
+wording, or—only with explicit source/ABI approval—the coordinated #1934 then
+bounded #1925 group. Do not begin either semantically from this handoff.
+
+A clean context is recommended before another approval or implementation
+batch.
 
 ---
 

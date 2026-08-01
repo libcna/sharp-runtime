@@ -1,6 +1,16 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-01 — 41 physical components, 91 direct production
+*Last verified: 2026-08-01 — ticket #1932 exact Option 2R is delivered on
+`feature/remediation-batch-1932-option-2r`, with no upstream. The clean
+socket-enabled gate is **15,071 tests / 37 executables** (Integration 893,
+Core.Base 5,585); audit **68 remediated / 296 open / 364 total**; graph **41/91**;
+seams **2/18**; negative fixtures **10/74**; Doxygen **1,937/1,942**. Ticket
+#1932 is done, no ticket is doing, and no other pending decision changed.
+#1773/#1894/#1899 remain blocked; #1888/#1889/#1896 remain declined/blocked;
+#1926 and partial #1929 rows 1–4 remain todo; #1925/#1934 remain needs_user;
+#1933 remains done without an optimization.*
+
+*Previous plan snapshot, retained historically: 2026-08-01 — 41 physical components, 91 direct production
 dependency edges, a clean zero-warning native build, 15,058 passing tests
 across 37 executables, and a green two-job selective matrix. The 2026-08-01
 **#1932/#1933 design, evidence, and remaining-decision batch** made no
@@ -82,6 +92,47 @@ proceeds from the evidence-backed `audit/` inventory in bounded, independently
 validated repair tickets. Consumer-driven API breadth remains legitimate later
 work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
+
+
+## 2026-08-01 — #1932 exact Option 2R implementation
+
+Branch **feature/remediation-batch-1932-option-2r**, no upstream, based on
+cc833f5d. Commits: 0e622298 production, 66243a02 permanent tests, 976be6df
+design/audit/decision reconciliation, followed by the final handoff commit.
+
+The approval was applied only to HRE H3/H4/H5 and WebException W3/W5. A
+non-null pointer rethrowing System::Exception supplies its exact HResult,
+including zero. Null and non-System pointers keep the existing family base;
+request error and both status types remain orthogonal. H3/W3 perform the
+constructor-local classification and H4/H5/W5 delegate to them before assigning
+existing metadata. There is no base helper, producer wrapping, new API, field,
+or representation change.
+
+The pre-fix semantic suite was 2/12 and failed only outer HResult assertions;
+postfix is 13/13, combined #1875/#1932 28/28, ASan+UBSan 13/13, and full CI
+15,071/15,071. Exact zero/default/type-specific/custom/nested/null/non-System,
+copy/move/assignment/rethrow, and sync/async forwarding are permanent. HRE is
+still 176/8 and WebException 168/8; declarations, default arguments, symbol
+sets, vtables, virtual slots, fields/offsets, `noexcept`, and `constexpr` are
+unchanged. LSan discovery is ptrace-blocked and is not claimed.
+
+Queue population: 1,921 done, 2 todo, 6 blocked, 2 needs_user, 3 wontfix of
+1,934. #1932 is done; no ticket is doing. No new inactive ticket or audit ID.
+Audit totals stay 68/296/364. Pending decisions are unchanged: #1926's wontfix
+recommendation; #1929 rows 1–4; coordinated #1934/#1925; and #1899/#1894.
+#1773 remains blocked and downstream inspection remains prohibited.
+
+All required module/catalog/seam/fixture/selective/full-CI/Doxygen/database/
+diff gates are green. Final disk and repository-state details are in the first
+NEXT.md handoff. One no-argument negative-fixture invocation used the script's
+default three-worker pool before the corrected final `--jobs 2` run; this is
+recorded as a process-policy violation and no false two-job-only claim is made.
+All actual CMake builds were capped at two, and no build tree was created under
+`/tmp`, `/var/tmp`, or `/dev/shm`.
+
+Recommended next clean-context decision: independently accept #1926's wontfix
+wording, or explicitly approve the source/ABI-sensitive #1934 then bounded
+#1925 group. Neither is authorized by #1932.
 
 
 ## 2026-08-01 — #1932/#1933 design, #1925 classification, and remaining decisions
