@@ -8,10 +8,30 @@
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
 namespace System::detail {
+
+/**
+ * @brief Identifies the only nullable shape whose default policy is mapped here.
+ *
+ * .NET has an explicit `Nullable<T>` comparer/equality-comparer mapping.  This
+ * port represents that shape as `std::optional<T>`, but the policy is selected
+ * only for a directly contained floating primitive.  Nested optionals and
+ * every other composite remain deliberately outside this bounded contract.
+ */
+template<typename T>
+struct IsDirectNullableFloating : std::false_type {};
+
+template<typename F>
+struct IsDirectNullableFloating<std::optional<F>>
+    : std::bool_constant<std::is_floating_point_v<F>> {};
+
+/** @brief True only for `optional<float>`, `optional<double>` and `optional<long double>`. */
+template<typename T>
+inline constexpr bool isDirectNullableFloatingV = IsDirectNullableFloating<T>::value;
 
 /**
  * @file ComparisonPolicy.hpp
@@ -22,10 +42,10 @@ namespace System::detail {
  * A .NET expression such as `Array.Sort(array)` or `list.Contains(value)` does
  * not use the operand type's `<` or `==`; it uses `Comparer<T>.Default` /
  * `EqualityComparer<T>.Default`, which dispatch to `IComparable<T>.CompareTo`
- * and `IEquatable<T>.Equals`. For every type in this port except the two IEEE
- * binary floating types those agree exactly with the built-in C++ operators,
- * which is why porting them as `<` and `==` was invisible for the whole life of
- * these files. For `float` and `double` they differ in exactly two places:
+ * and `IEquatable<T>.Equals`. At the primitive level those agree with the
+ * built-in C++ operators except for supported IEEE floating types, which is
+ * why porting them as `<` and `==` was invisible for the whole life of these
+ * files. Floating primitives differ in exactly two places:
  *
  *  - **Ordering.** `Single.CompareTo` / `Double.CompareTo` place NaN *below*
  *    every value including negative infinity, and treat two NaNs as equal
@@ -51,9 +71,10 @@ namespace System::detail {
  * `(double?)double.NaN == (double?)double.NaN` is `false` in .NET too. Only
  * the `Equals`-shaped surfaces are NaN-reflexive; see `Nullable<T>::operator==`.
  *
- * Every entry point below is `if constexpr`-gated on
- * `std::is_floating_point_v<T>`, so for every non-floating instantiation it
- * generates the built-in operation and nothing else.
+ * The same rules are mapped through presence-first nullable semantics for only
+ * the three direct `std::optional<F>` floating forms identified by
+ * @ref isDirectNullableFloatingV. Every non-floating, nested, or other
+ * composite instantiation continues to generate the built-in operation.
  */
 
 /**
@@ -61,8 +82,9 @@ namespace System::detail {
  *
  * For IEEE binary floating types this is @c Single.CompareTo /
  * @c Double.CompareTo: NaN orders before every value including negative
- * infinity, and two NaNs compare equal. For every other @p T it is the
- * built-in relational operators, unchanged.
+ * infinity, and two NaNs compare equal. A directly nullable floating value
+ * orders null before present and delegates two present values to that rule.
+ * For every other @p T it is the built-in relational operators, unchanged.
  *
  * @return A negative value if @p a sorts before @p b, zero if they are
  *         equivalent, a positive value if @p a sorts after @p b.
@@ -78,6 +100,12 @@ template<typename T>
         // At least one operand is NaN.
         if (std::isnan(a)) return std::isnan(b) ? 0 : -1;
         return 1;
+    } else if constexpr (isDirectNullableFloatingV<T>) {
+        // NullableComparer<T>: presence is decided before the contained
+        // Comparer<T>.Default is consulted.
+        if (a.has_value() != b.has_value()) return a.has_value() ? 1 : -1;
+        if (!a.has_value()) return 0;
+        return compareValues(*a, *b);
     } else {
         if (a < b) return -1;
         if (b < a) return  1;
@@ -90,13 +118,20 @@ template<typename T>
  *
  * For IEEE binary floating types this is @c Single.Equals / @c Double.Equals:
  * `a == b || (isnan(a) && isnan(b))`, so NaN equals itself and `+0.0` still
- * equals `-0.0`. For every other @p T it is the built-in `==`, unchanged.
+ * equals `-0.0`. Direct nullable floating values decide presence first and
+ * delegate two present values. For every other @p T it is the built-in `==`,
+ * unchanged.
  */
 template<typename T>
 [[nodiscard]] constexpr bool equalValues(const T& a, const T& b)
         noexcept(noexcept(a == b)) {
     if constexpr (std::is_floating_point_v<T>) {
         return a == b || (std::isnan(a) && std::isnan(b));
+    } else if constexpr (isDirectNullableFloatingV<T>) {
+        // NullableEqualityComparer<T>: null equals null; two present values
+        // delegate to EqualityComparer<T>.Default.
+        if (a.has_value() != b.has_value()) return false;
+        return !a.has_value() || equalValues(*a, *b);
     } else {
         return a == b;
     }
@@ -113,7 +148,9 @@ template<typename T>
  * differently. .NET folds both cases together
  * (`Single.GetHashCode`: `bits &= 0x7F800000` when the value is NaN or zero).
  * This helper reproduces that by mapping every NaN to one canonical value
- * before hashing. For every other @p T it is `std::hash<T>`, unchanged.
+ * before hashing. Direct nullable floating values hash null to zero and a
+ * present value through the same underlying rule. For every other @p T it is
+ * `std::hash<T>`, unchanged.
  */
 template<typename T>
 [[nodiscard]] std::size_t hashValue(const T& v) {
@@ -122,6 +159,10 @@ template<typename T>
         // -0.0 to the same value as +0.0.
         if (std::isnan(v)) return std::hash<T>{}(std::numeric_limits<T>::quiet_NaN());
         return std::hash<T>{}(v);
+    } else if constexpr (isDirectNullableFloatingV<T>) {
+        // Nullable<T>.GetHashCode: null is zero; a present value uses the
+        // contained type's default hash, including NaN/zero canonicalisation.
+        return v.has_value() ? hashValue(*v) : std::size_t{0};
     } else {
         return std::hash<T>{}(v);
     }

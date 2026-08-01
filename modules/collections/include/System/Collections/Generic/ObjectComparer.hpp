@@ -13,8 +13,9 @@ namespace System::Collections::Generic {
  * Extends Comparer<T>; used as the fallback comparer when no IComparable<T>-specific
  * comparer is available. Its ordering is @c Comparer<T>.Default's, stated once by
  * @c System::detail::compareValues — the built-in relational operators for every
- * type but `float` and `double`, and `Single.CompareTo`/`Double.CompareTo`'s
- * NaN-orders-first rule for those two.
+ * ordinary non-floating types, `Single.CompareTo`/`Double.CompareTo`'s
+ * NaN-orders-first rule for floating primitives, and the corresponding
+ * null-first rule for the three direct nullable-floating forms.
  *
  * @tparam T The type of objects to compare; must support operator<.
  */

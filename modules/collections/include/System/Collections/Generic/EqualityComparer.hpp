@@ -53,7 +53,7 @@ public:
      * C++ counterpart of .NET EqualityComparer<T>.Default, which is
      * `GenericEqualityComparer<T>` — `x.Equals(y)` and `x.GetHashCode()`, *not*
      * the operand type's `operator==` and not a raw bit hash. For every type in
-     * this port but `float` and `double` the two agree exactly; for those two,
+     * this port but floating primitives the two agree exactly; for those types,
      * `Single.Equals`/`Double.Equals` are
      * `obj == m_value || (IsNaN(obj) && IsNaN(m_value))`, so **NaN equals
      * itself**, and `Single.GetHashCode`/`Double.GetHashCode` fold every NaN
@@ -63,7 +63,10 @@ public:
      * @c System::detail::hashValue, which state that rule once for the whole
      * port. The two must move together: making `Equals` NaN-reflexive while
      * `std::hash` still hashed NaN's payload bits would break the
-     * equal-objects-equal-hashes invariant instead of fixing it. See
+     * equal-objects-equal-hashes invariant instead of fixing it. Exactly the
+     * three direct `std::optional<F>` floating forms additionally use .NET's
+     * presence-first Nullable equality and null hash zero; other composite
+     * types remain unchanged. See
      * `docs/CollectionsComparisonContractPlan.md` §5.3.
      *
      * @return A singleton reference to the default comparer.

@@ -521,3 +521,49 @@ build-probe/1925_focused_existing_tests.log
 
 All new probes are repository-local and ignored. No production source, public
 header, permanent test, or negative fixture was changed.
+
+## 11. #1934 implementation record (2026-08-01)
+
+The approved first work unit is complete. `ComparisonPolicy.hpp` now recognizes
+only direct `std::optional<float>`, `std::optional<double>`, and
+`std::optional<long double>` and applies presence-first comparison, null hash
+zero, and the existing CCF-010 floating comparison/equality/hash policy to the
+present value. Generic `Comparer<T>`/`EqualityComparer<T>`, their interface
+dispatch, `ObjectComparer<T>`/`ObjectEqualityComparer<T>`, and the dedicated
+Nullable comparers therefore agree. Raw `std::optional` and `System::Nullable`
+operators were not changed and remain NaN-nonreflexive.
+
+Correction: the implementation inventory in sections 2 and 4 did not name the
+existing `ObjectComparer<T>` and `ObjectEqualityComparer<T>` wrappers. They
+delegate to the same helpers, so their direct instantiations for exactly the
+three approved optional floating types necessarily change too. This is not a
+new generic capability: non-floating optionals, nested optionals, and other
+composites still take their previous code paths.
+
+Retained before/after behavior evidence is in
+`build-probe/1934_prefix_nullable_comparer.log` and
+`build-probe/1934_postfix_nullable_comparer.log`. The permanent five-test matrix
+is `NullableFloatingComparerContractTests.cpp`; with the three existing
+nullable contract tests, the focused result is 8/8, and the Collections.Core
+executable is 2,747/2,747. Representative `optional<int>`, `optional<unsigned>`,
+`optional<string>`, `optional<enum>`, and optional user-type output is identical
+before and after.
+
+The comparison/equality object and interface sizes and alignments remain 8/8
+bytes for every approved type; declarations, virtual slot sets, and the tested
+`noexcept`/`constexpr` properties are unchanged. The forced-instantiation
+fixture has identical sharp-runtime symbol sets (438 defined symbols and 54
+vtables before and after) and identical undefined sets (26). Its complete
+defined-symbol set changes from 760 to 747 solely because the corrected inline
+paths no longer instantiate 13 libstdc++ optional comparison/hash helpers; the
+generated text bytes consequently differ. This is the approved template/inline
+symbol consequence, not a layout change.
+
+All six #1934 mutations were accounted for: nullable ordering, equality, hash,
+signed-zero hash, and NaN canonicalization were killed by permanent tests; the
+invalid null-presence mutation was rejected by a compile-time assertion; there
+were no unexpected survivors. Focused ASan/UBSan completed without diagnostics.
+LSan discovery was unavailable because the execution environment runs under
+ptrace; that limitation is retained rather than reported as a clean LSan run.
+Collection aliases remain unchanged at this checkpoint; #1925 is still the
+dependent second work unit.

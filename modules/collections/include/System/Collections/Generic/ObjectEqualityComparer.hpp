@@ -15,8 +15,9 @@ namespace System::Collections::Generic {
  * IEquatable<T>-specific comparer is available. Its equality and hash are
  * @c EqualityComparer<T>.Default's, stated once by @c System::detail::equalValues
  * and @c System::detail::hashValue — the built-in `operator==` and `std::hash<T>`
- * for every type but `float` and `double`, and `Single.Equals`/`Double.Equals`'s
- * NaN-equals-itself rule with the matching NaN-folding hash for those two.
+ * for ordinary non-floating types, and `Single.Equals`/`Double.Equals`'s
+ * NaN-equals-itself rule with the matching NaN-folding hash for floating
+ * primitives and the three direct nullable-floating forms.
  *
  * @tparam T The type of objects to compare; must support operator== and std::hash<T>.
  */

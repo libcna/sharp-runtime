@@ -41,12 +41,14 @@ public:
      *
      * C++ counterpart of .NET Comparer<T>.Default, which is
      * `GenericComparer<T>.Compare` — `x.CompareTo(y)`, *not* the operand type's
-     * `operator<`. For every type in this port but `float` and `double` the two
-     * agree exactly; for those two, `Single.CompareTo`/`Double.CompareTo` order
+     * `operator<`. For ordinary non-nullable types in this port the two agree
+     * except for floating primitives, whose `Single.CompareTo`/`Double.CompareTo` order
      * NaN **before every value including negative infinity** and treat two NaNs
      * as equal. Routed through @c System::detail::compareValues so this class
      * and every collection that ports a `Comparer<T>.Default` expression state
-     * the rule once.
+     * the rule once. The same helper maps exactly the three direct
+     * `std::optional<F>` floating forms to .NET's null-first Nullable comparer;
+     * other optional and composite types keep their existing operator behavior.
      *
      * @note Using the built-in `<` here did not merely give a different answer:
      * `Compare(NaN, x)` returned `0` — *equivalent* — for every `x`, which makes
