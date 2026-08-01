@@ -161,3 +161,16 @@ SR-AUD-250, and every other adjacent finding retain their prior status.  Audit
 numbering remains frozen at 364.  The cross-cutting #1875 sweep is complete
 after the 45-row matrix, constant fixes, inheritance pins, and #1932 extraction;
 no public API or ABI choice was made.
+
+## 7. #1932 conditional-propagation follow-through (2026-08-01)
+
+The extraction above is historical and is now complete under the user's exact
+Option 2R approval. HttpRequestException H3/H4/H5 and WebException W3/W5 copy
+the exact HResult, including zero, only when their non-null
+`std::exception_ptr` rethrows a System::Exception. Null and non-System pointers
+retain the existing outer family base, and all networking metadata remains
+orthogonal. No universal Exception behavior was introduced. The 13-test
+permanent matrix and the retained pre/post evidence are recorded in
+`docs/NetworkExceptionHResultPropagationDesign.md` §11. This post-audit closure
+does not change SR-AUD-157's already-remediated state or the audit total of
+68 remediated / 296 open / 364.

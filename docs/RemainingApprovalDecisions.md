@@ -4,10 +4,10 @@
 
 ## 1. Authority, scope, and how to use this packet
 
-This file supersedes its earlier six-group packet. Delivered decisions are no
-longer presented as open choices, corrected ticket premises are not repeated as
-facts, and every remaining contract has independent copyable wording. The
-evidence authority is:
+This file supersedes its earlier six-group packet. Group A is retained as the
+exact historical authority for the independently approved and delivered #1932
+Option 2R contract; it is no longer an open choice. Every still-pending
+contract remains independent. The evidence authority is:
 
 - docs/NetworkExceptionHResultPropagationDesign.md for #1932;
 - docs/OwnedTreeLifetimeContractPlan.md §§42, 45, and 46 for #1894/#1899;
@@ -25,7 +25,7 @@ There is deliberately no “approve all fixes” choice:
 
 | Group | Tickets | Contract | Recommendation | Can be grouped? |
 |---|---|---|---|---|
-| **A** | #1932 | two networking exceptions' causal HResult rule | approve Option 2R | independent only |
+| **A (delivered)** | #1932 | two networking exceptions' causal HResult rule | Option 2R approved and implemented | closed independently |
 | **B** | #1899, then #1894 | Xml.Linq borrowed-view policy and diagnostic closure | retain #1898 contract; close #1899 wontfix; do not claim a visitor prevents escape | #1894 depends on the chosen #1899 classification |
 | **C1–C4** | #1929 rows 1–4 | four independent date/time acceptance/API choices | retain and document rows 1–3; design row 4 separately | decide by row, not as one grammar switch |
 | **D** | #1934 then #1925 | direct nullable-floating default comparison and key policy | approve the bounded direct-optional group only | #1934 and the bounded #1925 subset share one contract |
@@ -37,7 +37,7 @@ and are not re-proposed. #1773 remains blocked on work outside this repository.
 
 ---
 
-## 2. Group A — #1932 network-exception inner HResult
+## 2. Delivered Group A — #1932 network-exception inner HResult
 
 ### 2.1 Current port and current .NET
 
@@ -132,6 +132,17 @@ No-change alternative:
 > Decline #1932 and permanently document that HttpRequestException retains
 > 0x80131500 and WebException retains 0x80131509 even when a System inner
 > exception has another HResult. Keep the retained divergence matrix.
+
+### 2.4 Delivery record (2026-08-01)
+
+The user approved Option 2R verbatim and no other packet group. Ticket #1932 is
+done. H3/H4/H5/W3/W5 now copy an exact System inner HResult, including zero;
+null and non-System pointers retain their family base, and status/error
+metadata stays orthogonal. Thirteen permanent tests cover the complete direct,
+copy/move/assignment, exception-pointer, and synchronous/asynchronous transport
+matrix. Full implementation, sanitizer, layout, and symbol evidence is in
+`docs/NetworkExceptionHResultPropagationDesign.md` §11. Groups B through E
+remain undecided and unchanged by this closure.
 
 ---
 
@@ -551,8 +562,9 @@ If approvals are granted, the only dependency chains are:
    #1894 diagnostic fixture;
 3. each #1929 row independently, with row 3 explicitly acknowledging #1879.
 
-#1932 and #1926 are standalone. #1929 row 4 is design-first. No choice depends
-on #1933, and no performance ticket authorizes a semantic widening.
+#1926 is standalone. Delivered #1932 no longer participates in the dependency
+order. #1929 row 4 is design-first. No choice depends on #1933, and no
+performance ticket authorizes a semantic widening.
 
 | Ticket | State preserved by this packet |
 |---|---|
@@ -565,7 +577,7 @@ on #1933, and no performance ticket authorizes a semantic widening.
 | #1925 | needs_user; direct optional subset designed with #1934 |
 | #1926 | todo; recommendation wontfix |
 | #1929 | todo/partial; rows 1–4 unchanged |
-| #1932 | todo; Option 2R designed, no implementation |
+| #1932 | done; exact Option 2R delivered independently |
 | #1933 | done; optimization designed but not implemented |
 | #1934 | needs_user; new inactive post-audit ticket, no audit identifier |
 

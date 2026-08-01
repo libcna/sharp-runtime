@@ -4339,3 +4339,17 @@ claimed as semantic coverage. No signature, overload, accessibility, base,
 performance characteristic changed. SR-AUD-157 moves to `remediated`; totals
 are **68 remediated / 296 open / 364 total**, with numbering frozen at 364.
 Evidence: `docs/ExceptionHResultPopulationDecision.md`.
+
+---
+
+## Post-audit conditional HResult follow-through — ticket #1932 (2026-08-01)
+
+The two conditional cases extracted by #1875 are now complete under the user's
+independently approved Option 2R. HttpRequestException H3/H4/H5 and WebException
+W3/W5 copy exact System inner HResults, including zero; null and non-System
+pointers keep the existing family base and all network metadata is orthogonal.
+Thirteen permanent tests cover the complete constructor and transport matrix.
+No base helper, producer wrapping, public/ABI/layout/vtable/symbol/`noexcept`/
+`constexpr` change, audit identifier, or tally change was introduced. Totals
+remain **68 remediated / 296 open / 364 total**. Evidence:
+`docs/NetworkExceptionHResultPropagationDesign.md` §11.

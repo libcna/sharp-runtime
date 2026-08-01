@@ -6398,3 +6398,15 @@ allocation or shared-state mechanism changed. SR-AUD-157 moves to
 `remediated`; SR-AUD-158, SR-AUD-159, SR-AUD-196, SR-AUD-230 and SR-AUD-250
 retain their prior states. Audit totals are **68 remediated / 296 open / 364
 total**, numbering frozen and no new identifier issued.
+
+---
+
+## Conditional HResult follow-through — ticket #1932 (2026-08-01)
+
+Exact Option 2R is now implemented for HttpRequestException H3/H4/H5 and
+WebException W3/W5 only. Exact System inner HResults—including zero—propagate;
+null/non-System pointers retain the family base; error/status metadata does not
+win. The new 13-test permanent matrix and sync/async forwarding controls pass.
+The change has no declaration, ABI, layout, vtable, symbol, `noexcept`, or
+`constexpr` consequence. Audit numbering and totals remain **68 / 296 / 364**;
+no new finding was created.

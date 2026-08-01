@@ -1975,3 +1975,13 @@ says so; the evidence is `docs/NegativeConsumerFixtureValidation.md` §18 and
 `docs/CollectionVersionTestSeamDesign.md` §14.
 
 - `scripts/check_version_seam_odr.py.audit.md`, `scripts/local_ci_check.sh.audit.md`.
+
+## CCF-016 conditional propagation follow-through — ticket #1932 (2026-08-01)
+
+The historical #1875 extraction is complete under exact Option 2R. The five
+causal HttpRequestException/WebException constructors conditionally copy a
+System inner HResult, including zero, while null/non-System controls and all
+metadata preserve their prior behavior. This introduced no universal Exception
+rule and does not alter SR-AUD-157's already-remediated state or the frozen
+**68 remediated / 296 open / 364 total** tally. See
+`docs/NetworkExceptionHResultPropagationDesign.md` §11.

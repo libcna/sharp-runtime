@@ -519,3 +519,67 @@ Copyable approval wording:
 decisions, but it should be approved as its **own independent group**. It does
 not share a contract with #1894, #1899, #1925, #1926, or the remaining #1929
 rows and should not be hidden inside a vague “approve all fixes” instruction.
+
+## 11. Approved Option 2R implementation closure (2026-08-01)
+
+The user approved the exact §10 wording for #1932 alone. The implementation is
+limited to H3/H4/H5 and W3/W5. H3 and W3 preserve the supplied
+`std::exception_ptr`, rethrow it only to classify the contained object, catch
+`const System::Exception&`, and copy `getHResultProperty()` exactly. A null
+pointer bypasses classification and a final non-System catch leaves the
+already-constructed outer base value unchanged. H4/H5 and W5 delegate to their
+respective causal constructor, then publish the existing status/error fields;
+the metadata therefore cannot override the copied value. No producer was made
+to wrap an exception.
+
+The retained prefix and postfix matrices establish the complete result:
+
+| Family / input | Prefix outer HResult | Option 2R outer HResult |
+|---|---:|---:|
+| HRE no inner or null | `0x80131500` | `0x80131500` |
+| HRE base `Exception` default | `0x80131500` | `0x80131500` |
+| HRE zero inner | `0x80131500` | `0x00000000` |
+| HRE `FormatException` | `0x80131500` | `0x80131537` |
+| HRE custom inner | `0x80131500` | exact custom value |
+| HRE nested HRE/WebException | `0x80131500` | exact nested value |
+| HRE non-System inner | `0x80131500` | `0x80131500` |
+| WebException no inner or null | `0x80131509` | `0x80131509` |
+| WebException base `Exception` default | `0x80131509` | `0x80131500` |
+| WebException zero inner | `0x80131509` | `0x00000000` |
+| WebException `FormatException` | `0x80131509` | `0x80131537` |
+| WebException custom inner | `0x80131509` | exact custom value |
+| WebException nested HRE/WebException | `0x80131509` | exact nested value |
+| WebException non-System inner | `0x80131509` | `0x80131509` |
+
+Explicit `HttpStatusCode`, `HttpRequestError`, and `WebExceptionStatus` rows
+produce the same HResult column as the corresponding inner row while retaining
+their exact metadata. Copy construction, move construction, copy assignment,
+move assignment, repeated `exception_ptr` rethrow, message text, dynamic type,
+and inner identity remain exact. Existing `HttpClient` and
+`HttpMessageInvoker` synchronous and asynchronous forwarding paths preserve the
+same causal exception. The built-in HTTP producer controls still construct
+without an inner pointer and retain `0x80131500`; no represented WebException
+producer exists.
+
+`NetworkExceptionHResultPropagationTests` adds 13 permanent tests. The prefix
+semantic run was 2/12 passing and 10/12 failing only on the missing outer value;
+the postfix suite is 13/13, including its structural test. Together with the
+15 existing #1875 tests, the focused value gate is 28/28. The socket-enabled
+repository gate is 15,071/15,071 across 37 executables, Integration 893 and
+Core.Base 5,585.
+
+The combined ASan+UBSan build contains both instrumentation runtimes, its
+changed objects and test binary are newer than these headers, and all 13 tests
+pass with leak discovery disabled. A leak-enabled run completes all assertions
+but LeakSanitizer then fails its discovery phase because the sandbox is
+ptraced; no LSan-clean claim is made. Sanitizers support lifetime, cast, and
+destruction checks; the permanent assertions and constructor matrix—not the
+sanitizers—establish HResult precedence.
+
+Public declarations, default arguments, mangled-name sets, defined- and
+undefined-symbol sets, bases, fields, offsets, vtables, virtual slots,
+`noexcept`, and `constexpr` state are unchanged. Measured size/alignment remain
+176/8 for HttpRequestException and 168/8 for WebException. Because the bodies
+are inline, the clean-consumer-rebuild warning in §9 still applies. No material
+design premise differed at implementation time, no separate defect was found,
+and no inactive ticket or audit identifier was added.
