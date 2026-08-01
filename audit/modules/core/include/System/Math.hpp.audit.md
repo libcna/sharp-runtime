@@ -77,3 +77,13 @@ algorithm otherwise remains unchanged. Permanent tests pin negative zero and
 the entire `Double` delegate matrix; the combined ASan+UBSan focused gate is
 clean. This semantic rounding property is guarded primarily by those permanent
 tests, not by a sanitizer. No new audit identifier is issued.
+
+### Post-audit remediation — #1928 (2026-08-01)
+
+With the exact approval in `docs/TextSubsetCompatibilityDecision.md` §6.5 item
+(2), the digits-range message shared by
+`Math::Round(double,intcs,MidpointRounding)` and its two-argument forwarder now
+starts with .NET's leading `"Rounding "`. Exception type, `digits` parameter
+name, `0x80131502` HResult, message suffix, validation order, and all accepted
+results remain unchanged. Permanent tests pin both doors at `-1` and `16`, the
+accepted `0`/`15` neighbors, and digit-before-mode validation.

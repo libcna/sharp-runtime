@@ -474,6 +474,38 @@ TEST(MathTests, Round_Digits_OutOfRange_Throws) {
     EXPECT_NO_THROW(Math::Round(1.5, 15));
 }
 
+TEST(MathTests, Round_Digits_OutOfRange_UsesExactDotNetDiagnosticOnBothDoors) {
+    const auto verify = [](auto&& action) {
+        try {
+            action();
+            FAIL() << "expected ArgumentOutOfRangeException";
+        } catch (const System::ArgumentOutOfRangeException& ex) {
+            EXPECT_EQ(ex.getParamNameProperty(), "digits");
+            EXPECT_EQ(ex.getHResultProperty(),
+                      static_cast<SharpRuntime::intcs>(0x80131502u));
+            EXPECT_STREQ(ex.what(),
+                         "Rounding digits must be between 0 and 15, inclusive. "
+                         "(Parameter 'digits')");
+        }
+    };
+
+    verify([] { (void)Math::Round(1.5, -1); });
+    verify([] { (void)Math::Round(1.5, 16); });
+    verify([] { (void)Math::Round(1.5, -1, System::MidpointRounding::ToEven); });
+    verify([] { (void)Math::Round(1.5, 16, System::MidpointRounding::ToEven); });
+}
+
+TEST(MathTests, Round_DigitsValidationStillPrecedesModeValidation) {
+    try {
+        (void)Math::Round(1.5, 16, static_cast<System::MidpointRounding>(99));
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const System::ArgumentOutOfRangeException& ex) {
+        EXPECT_EQ(ex.getParamNameProperty(), "digits");
+    }
+    EXPECT_THROW(Math::Round(1.5, 15, static_cast<System::MidpointRounding>(99)),
+                 System::ArgumentException);
+}
+
 TEST(MathTests, Round_Digits_LargeMagnitude_ReturnedUnchanged) {
     // Values with magnitude >= 1e16 have no fractional part representable in a
     // double, so .NET's Math.Round(double, int) returns them unchanged rather than

@@ -593,7 +593,8 @@ namespace System
                 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15,
             };
             if (digits < 0 || digits > 15) {
-                throw System::ArgumentOutOfRangeException("digits", "digits must be between 0 and 15, inclusive.");
+                throw System::ArgumentOutOfRangeException(
+                    "digits", "Rounding digits must be between 0 and 15, inclusive.");
             }
             if (Abs(value) < 1e16) {
                 double power10 = kPow10[digits];

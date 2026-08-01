@@ -304,13 +304,6 @@ public:
         // ToEven rule, and >= 1e16 unchanged-value guard as the authoritative .NET
         // funnel. The former local pow/nearbyint copy could overflow finite large
         // values to infinity. The signature and exception specification are unchanged.
-        // Keep #1862's already-correct public diagnostic at this independent
-        // commit boundary. #1928 changes Math's mismatched resource text next;
-        // that commit can then remove this temporary compatibility guard and
-        // leave the overload as a literal one-line delegate.
-        if (digits < 0 || digits > 15)
-            throw System::ArgumentOutOfRangeException(
-                "digits", "Rounding digits must be between 0 and 15, inclusive.");
         return Math::Round(x, digits, MidpointRounding::ToEven);
     }
 
