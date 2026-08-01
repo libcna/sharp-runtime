@@ -16,7 +16,9 @@ contract remains independent. The evidence authority is:
 - docs/DateTimeValidationBoundaryPlan.md §§20–22 and
   docs/TextSubsetCompatibilityDecision.md for #1929;
 - docs/CompositeFloatingKeyPolicyDesign.md for #1925/#1934; and
-- docs/CollectionsComparisonContractPlan.md §20 for #1926.
+- docs/CollectionsComparisonContractPlan.md §20 for #1926;
+- docs/ImmutableSortedSetFloatingEqualityDesign.md for #1936; and
+- docs/NullableFloatingHashSetPerformanceEvidence.md for #1937.
 
 Current .NET comparisons use the official dotnet/runtime snapshot
 0eb5481340ea675857c7a7abf18f68a60b52a686. No item below is implemented merely
@@ -32,10 +34,13 @@ There is deliberately no “approve all fixes” choice:
 | **C1–C4** | #1929 rows 1–4 | four independent date/time acceptance/API choices | retain and document rows 1–3; design row 4 separately | decide by row, not as one grammar switch |
 | **D (delivered)** | #1934 then #1925 | direct nullable-floating default comparison and key policy | bounded direct-optional group approved and implemented | closed in dependency order |
 | **E (closed)** | #1926 | libstdc++ long-double hash caching | `wontfix` approved and recorded | closed independently |
+| **F (open)** | #1936 | generic ImmutableSortedSet comparator-equivalence equality | Option 1; one generic method body | approve separately |
+| **G (closed)** | #1937 | nullable-floating HashSet performance isolation | not reproducible; no optimization | evidence-only closure |
 
 #1933 is not an approval item: its performance isolation is complete and no
-production optimization was justified. #1888, #1889, and #1896 remain declined
-and are not re-proposed. #1773 remains blocked on work outside this repository.
+production optimization was justified. #1937 is likewise not an approval
+item. #1888, #1889, and #1896 remain declined and are not re-proposed. #1773
+remains blocked on work outside this repository.
 
 ---
 
@@ -577,13 +582,74 @@ Alternative implementation wording:
 
 ---
 
-## 7. Dependency order, declined items, and closure boundaries
+## 7. Open Group F — #1936 ImmutableSortedSet comparator equivalence
+
+The complete direct `float`, `double`, and `long double` matrix reproduces
+NaN-nonreflexive `SetEquals`, and both equal-set proper predicates incorrectly
+return true. The three direct nullable-floating controls are correct under the
+bounded #1925 branch. A case-insensitive string set reproduces the same
+contradiction, proving a generic algorithm defect rather than a missing
+floating alias.
+
+Recommend Option 1: retain rebuilding `other` under this set's comparer and
+the post-collapse count check, then compare the ordered ranges using
+`!less(a,b) && !less(b,a)` for every `T`. A shared-backing-data true fast path
+is included. This matches current .NET's comparer-based scan and the port's
+already-correct `SortedSet` algorithm. It changes only one inline method body,
+no declaration, alias, iterator, object layout, or vtable. Emitted template
+body code/helper symbols can move, and custom-comparer as well as direct-
+floating observable results intentionally change, so explicit semantic and
+template approval is required.
+
+Copyable approval wording:
+
+> Approve ticket #1936 Option 1 exactly: change only
+> `ImmutableSortedSet<T>::SetEquals` so that, after rebuilding `other` under
+> this set's existing ordering comparer and checking the post-collapse count,
+> it compares the two ordered ranges by the comparator-equivalence relation
+> `!less(a,b) && !less(b,a)` for every `T`; a shared-backing-data true fast path
+> is also approved. This intentionally fixes direct `float`, `double`, and
+> `long double` NaN reflexivity and the same generic custom-comparer defect,
+> and consequently makes equal sets not proper subsets or supersets. Preserve
+> this-comparer precedence, all other set-operation results, raw floating and
+> optional operators, public declarations and aliases, iterator types, object
+> layout, and vtables. Add the complete direct/nullable/custom-comparer matrix,
+> mutation proof, performance comparison, and source/symbol/layout evidence.
+> Do not change #1934/#1925 policy selection or any other collection.
+
+No recommendation here is approved. Selected equality, delegation, mutual
+lookup, documented divergence, and direct-floating-only specialization are
+rejected for the reasons in the owning design.
+
+---
+
+## 8. Closed Group G — #1937 performance isolation
+
+The retained 2.092x historical line came from one warm-up and two separate
+seven-row campaigns, not 25 alternating pairs, and recorded no bucket history.
+The corrected O2/O3 campaign retains 360 warm-up rows and 1,800 measured rows
+(900 pairs). The exact-work nullable-double finite rehash-hit paired median is
+1.026 at O2 and 0.964 at O3, with wide p05/p95 ranges crossing 1 and 12/13 and
+14/11 wins/losses. Direct-double and optional-int controls show the same host
+noise. Finite hashes, accepted sets, buckets, loads, and collisions match.
+NaN/mixed comparisons are not like-for-like because the old policy cannot
+find its own NaNs; null hashes intentionally differ.
+
+Disposition: `done`, not reproducible on the tested supported GCC/libstdc++
+toolchain and host. No optimization or approval request is proposed. Reopen
+only under the exact stability, identical-work, control, and preservation
+conditions in the owning evidence document.
+
+---
+
+## 9. Dependency order, declined items, and closure boundaries
 
 The only remaining dependency chains are:
 
 1. #1899 classification or migration choice, then any accurately re-scoped
    #1894 diagnostic fixture;
 2. each #1929 row independently, with row 3 explicitly acknowledging #1879.
+3. #1936 is independent and is the next precise implementation approval.
 
 #1934 then #1925 was delivered in its approved order. #1926 was standalone and
 is now closed. Delivered #1932 no longer participates in the dependency order.
@@ -604,7 +670,7 @@ ticket authorizes a semantic widening.
 | #1932 | done; exact Option 2R delivered independently |
 | #1933 | done; optimization designed but not implemented |
 | #1934 | done; direct nullable-floating defaults delivered first |
-| #1936 | todo/inactive; direct primitive ImmutableSortedSet SetEquals defect |
-| #1937 | todo/inactive; nullable-double finite rehash-heavy lookup follow-up |
+| #1936 | todo/inactive; generic Option 1 design complete, explicit approval pending |
+| #1937 | done; not reproducible, evidence-only, no optimization |
 
 No new SR-AUD identifier is issued. Audit numbering remains frozen at 364.

@@ -1294,3 +1294,12 @@ the existing direct primitive `ImmutableSortedSet<double>::SetEquals` NaN
 defect, and #1937 owns the 2.092x finite rehash-heavy nullable-double HashSet
 lookup observation. #1926 remains `wontfix`. No audit identifier was issued;
 the audit total stays frozen at 364.
+
+**Correction (2026-08-01):** #1936 design evidence proves the first defect for
+all three direct floating types and also for a non-floating custom comparer;
+it is a generic comparator-equivalence algorithm defect and remains todo
+pending explicit Option 1 approval. #1937's stronger O2/O3, five-warm-up,
+25-pair campaign does not reproduce 2.092x (primary paired medians 1.026 and
+0.964) and closes the investigation as `done`, not reproducible, with no
+optimization. See `docs/ImmutableSortedSetFloatingEqualityDesign.md` and
+`docs/NullableFloatingHashSetPerformanceEvidence.md`.

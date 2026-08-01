@@ -1,17 +1,21 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-08-01 — branch
-`feature/remediation-batch-1934-1925-nullable-floating`, no upstream, delivers
-the exact coordinated direct nullable-floating approval in dependency order:
-#1934 then bounded #1925 are `done`. The clean socket-enabled gate is **15,081
+`feature/remediation-batch-1936-1937-design`, no upstream. This design/evidence
+batch fully scopes #1936 as a generic ImmutableSortedSet comparator-equivalence
+defect and recommends unapproved Option 1; it closes #1937 as `done`, not
+reproducible, with no optimization. #1929 row 4 was not designed and rows 1–4
+remain unchanged. #1934 then bounded #1925 remain `done`. The latest clean
+socket-enabled gate is **15,081
 tests / 37 executables** (Integration 893, Core.Base 5,585, Collections.Core
 2,752); audit **68 remediated / 296 open / 364 total**; graph **41/91**; seams
 **2/18**; negative fixtures **10/81**, 91 compiler invocations, peak 2;
-checker self-tests **45/45**; Doxygen **1,938/1,942**. Tickets: **1,924 done,
-3 todo, 6 blocked, 0 needs_user, 4 wontfix** of 1,937; no ticket is doing.
+checker self-tests **45/45**; Doxygen **1,938/1,942**. Tickets: **1,925 done,
+2 todo, 6 blocked, 0 needs_user, 4 wontfix** of 1,937; no ticket is doing.
 #1926 remains wontfix; #1932/#1935 remain done; #1773 remains blocked;
 #1888/#1889/#1896 remain declined/blocked; #1894/#1899 remain blocked; partial
-#1929 rows 1–4 remain todo. New inactive #1936/#1937 own separate findings.*
+#1929 rows 1–4 remain todo. Inactive #1936 is the next exact approval; #1937
+is evidence-complete.*
 
 *Previous plan snapshot, retained historically: 2026-08-01 — 41 physical components, 91 direct production
 dependency edges, a clean zero-warning native build, 15,058 passing tests
@@ -95,6 +99,56 @@ proceeds from the evidence-backed `audit/` inventory in bounded, independently
 validated repair tickets. Consumer-driven API breadth remains legitimate later
 work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
+
+
+## 2026-08-01 — #1936 design and #1937 evidence disposition
+
+Ticket #1936 remains todo and unapproved. The complete retained matrix covers
+direct and optional float/double/long double, NaN payloads, signed zero,
+finite/infinity, empty/single/mixed/duplicate/proper sets, self/copy/
+independent/insertion-order cases, same/different comparer relations, every
+related immutable set operation, concrete/interface availability, and a
+non-floating case-insensitive string control. Direct NaN-equal sets and the
+custom string sets return `SetEquals=false` while both non-proper relations are
+true, causing both proper relations to be true. Optional floating is already
+correct under #1925. Other operations are correct.
+
+The root cause is the generic fallback to raw `std::set::operator==` after
+otherwise-correct rehashing under this set's comparator. Current .NET performs
+a comparator-equivalence ordered scan. Recommended Option 1 replaces the raw
+fallback and nullable specialization with one generic two-direction
+comparator-equivalence scan after the current post-collapse count check, plus
+an optional shared-data fast path. It changes one inline template body, no
+declaration, alias, iterator, layout, or vtable, but intentionally changes
+direct-floating and custom-comparer semantics and emitted code. Exact approval
+wording and alternatives are in
+`docs/ImmutableSortedSetFloatingEqualityDesign.md` and the consolidated packet.
+
+Ticket #1937 is now done with disposition not reproducible and no production
+optimization. The historical 2.092x result is retained but corrected: it used
+one warm-up and separate seven-row pre/post campaigns, not alternating pairs,
+and “rehash” recorded no bucket history. The replacement GCC 14.2/libstdc++ 14
+campaign uses O2 and O3, five warm-up and 25 measured alternating pairs, 18
+cases per configuration, 360 warm-up rows, 1,800 measured rows, and 900 paired
+results. The exact-work nullable-double finite rehash-hit ratio is 1.026 at O2
+and 0.964 at O3, with 12/13 and 14/11 wins/losses and wide spreads crossing
+one. Counts, finds, finite hashes, buckets, loads, and collisions match;
+unchanged direct-double and optional-int controls exhibit the same noise.
+
+Generated code contains semantically required NaN checks, but optional-double
+cache selection, 24-byte node, ordinary iterator, 56-byte SetType, 64-byte
+wrapper, bucket distribution, and locality opportunity are identical. NaN and
+mixed pre/current paths are not like-for-like because the old set cannot find
+NaNs; null hashes intentionally differ. No alias, iterator, representation,
+layout, symbol, or behavior was changed. Exact raw results, mechanism, and
+reopening conditions are in
+`docs/NullableFloatingHashSetPerformanceEvidence.md`.
+
+The optional #1929 row-4 design was not attempted after these substantial
+units. Rows 1–4 remain todo/inactive/unapproved. #1894/#1899 remain blocked;
+#1888/#1889/#1896 remain declined and are not re-proposed; #1773 remains
+blocked. #1934/#1925 and #1932/#1935 remain complete; #1926 remains wontfix.
+No new ticket or SR-AUD identifier was created; audit numbering stays 364.
 
 
 ## 2026-08-01 — coordinated #1934 then bounded #1925 delivered

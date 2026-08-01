@@ -649,6 +649,17 @@ One separate stable result is retained as inactive ticket #1937: finite
 rehash-heavy `HashSet<optional<double>>` lookup measured 2.092x with identical
 120,000 counts/finds. It is not optimized here and does not reopen #1926.
 
+**Correction (2026-08-01, ticket #1937 evidence batch):** preserve the
+historical 2.092x line above as the observation that opened the ticket, but
+withdraw “stable.” The old harness had one warm-up and two separate seven-row
+pre/post campaigns, not five warm-ups plus 25 alternating pairs; “rehash” only
+meant a larger incremental insertion corpus and recorded no bucket history.
+The corrected 900-pair O2/O3 campaign measures the exact-work nullable-double
+finite rehash-hit ratio at 1.026/0.964, with 12/13 and 14/11 wins/losses and
+very wide spreads also present in unchanged controls. #1937 is complete as
+not reproducible; no optimization was implemented. Full correction and raw
+evidence: `docs/NullableFloatingHashSetPerformanceEvidence.md`.
+
 ### 12.3 Corrected scope and new defects
 
 `ImmutableSortedSet<optional<F>>::SetEquals` required a bounded comparer-
@@ -708,3 +719,8 @@ inactive #1937 owns the separate 2.092x finite rehash-heavy nullable-double
 HashSet lookup observation. #1926 remains wontfix, #1932/#1935 remain done,
 #1773 remains blocked, and #1929 rows 1–4 are unchanged. No `SR-AUD-*`
 identifier was issued; the audit stays 68 remediated / 296 open / 364 total.
+
+**Correction (2026-08-01):** #1937 has since completed its required isolation
+and is no longer inactive/todo. The original observation remains above for
+traceability; its disposition is not reproducible, evidence-only, with no
+production change.
