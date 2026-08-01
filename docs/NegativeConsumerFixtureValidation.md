@@ -302,7 +302,7 @@ Command line:
 
 ```
 scripts/check_negative_consumer_fixtures.py
-    [--root PATH] [--compiler CXX] [--jobs N]        # N in 1..3
+    [--root PATH] [--compiler CXX] [--jobs N]        # N in 1..2
     [--fixture PATTERN]...                           # development filter
     [--timeout SECONDS] [--no-ccache]
     [--log-directory PATH]                           # full log of FAILING cases
@@ -310,9 +310,9 @@ scripts/check_negative_consumer_fixtures.py
 ```
 
 Exit codes: **0** every site rejected, **1** a fixture-contract failure, **2** a
-usage or environment failure (compiler missing, metadata unreadable, `--jobs`
-above the ceiling). A missing compiler or an unregistered component **fails**;
-there is no skip path.
+usage or environment failure (compiler missing, metadata unreadable, or a job
+value that is zero, negative, malformed, or above the ceiling). A missing
+compiler or an unregistered component **fails**; there is no skip path.
 
 ---
 
@@ -397,10 +397,13 @@ configured build directory.
 
 ## 8. Parallelism policy
 
-`MAXIMUM_JOBS = 3`, matching CLAUDE.md's permanent ceiling. `--jobs` defaults to
-3 and accepts 1..3. A request **above** three is **refused** with exit 2 and a
-message naming the policy — deliberately not clamped, because the ceiling is a
-user decision and silently accepting 8 would hide a violation.
+Ticket #1935 moved the values and parsing into
+`scripts/job_count_policy.py`, the repository's one source of truth.
+Precedence is explicit `--jobs`, then `SHARP_RUNTIME_BUILD_JOBS`, then the safe
+repository default **2**. Only 1 or 2 is accepted. Zero, negative, malformed,
+and excessive values are **refused** with exit 2 rather than clamped, because
+silently accepting a value outside the policy would hide a violation. An
+explicit argument takes precedence even when the environment is malformed.
 
 No CPU-count detection appears anywhere in the checker: no `nproc`, no
 `os.cpu_count()`, no `hardware_concurrency`. Concurrency is a fixed
@@ -420,14 +423,21 @@ failure rather than a stalled gate
 ## 9. Where it runs
 
 `scripts/local_ci_check.sh` — the repository gate, and the `full` job of
-`.github/workflows/components.yml` — gained, immediately after #1800's seam
-block and **before** `cmake -S . -B build`:
+`.github/workflows/components.yml` — runs the checker immediately after
+#1800's seam block and **before** `cmake -S . -B build`:
 
 ```bash
 echo "==> Validating negative consumer fixtures (ticket #1801)"
-python3 scripts/check_negative_consumer_fixtures.py
+python3 scripts/check_negative_consumer_fixtures.py --jobs "$BUILD_JOBS"
 python3 test/check_negative_consumer_fixtures_test.py
 ```
+
+Local CI and the selective-component script obtain `BUILD_JOBS` from the same
+shared resolver and export `SHARP_RUNTIME_BUILD_JOBS` before invoking nested
+tools. The self-tests therefore inherit the already-resolved budget rather
+than choosing another pool. The workflow also sets the variable explicitly to
+2. The selective script does not invoke the checker; sharing the resolver is
+what prevents its own CMake builds from defining a competing policy.
 
 That position is deliberate. The checker needs only the tracked sources and the
 CMake *metadata text*; it needs no configured build directory and no generated
@@ -1217,3 +1227,74 @@ positive fixture for the migration. Guide:
 
 **Running totals after #1923: 10 fixtures, 74 sites, 84 compiler invocations,
 peak 2 jobs.**
+
+---
+
+## 19. Ticket #1935 — one compilation-job policy (2026-08-01)
+
+### 19.1 Exact defect and safe reproduction
+
+The #1932 handoff recorded a direct invocation of
+`scripts/check_negative_consumer_fixtures.py` with no `--jobs`. The old CLI and
+`check_repository()` API both used `DEFAULT_JOBS = 3`, so the run accurately
+reported a peak of three compiler processes even though that batch's aggregate
+ceiling was two. The corrected invocation used `--jobs 2` and reported peak 2.
+This was a tooling/process-safety defect, not a runtime defect.
+
+Ticket #1935 did **not** reproduce that violation with three real compilers.
+The permanent resolution tests establish the old decision path from the
+retained source/history and prove the corrected omitted path at unit level. A
+fake executable exercises subprocess failure and a five-invocation pool; it
+reports an exact peak of 2 without launching a C++ compiler. The real checker
+and self-test validation in this batch always receives the ceiling explicitly.
+
+### 19.2 Caller inventory and canonical contract
+
+Before #1935 there were two competing defaults:
+
+- the checker CLI and Python API defaulted directly to 3 and ignored
+  `SHARP_RUNTIME_BUILD_JOBS`;
+- `local_ci_check.sh` and `check_selective_components.sh` independently
+  defaulted that variable to 3 and accepted 1..3.
+
+Local CI passed its value to the checker, but then launched the Python
+self-tests, whose direct API calls selected the checker's separate default.
+The GitHub workflow called both wrappers without configuring the variable.
+`run_component_tests.sh`, `test/consumer/CMakeLists.txt`, and
+`test/consumer/InjectFixture.cmake` do not invoke this checker and add no nested
+compiler pool.
+
+The single rule now lives in `scripts/job_count_policy.py`:
+
+1. an explicit `--jobs`/API value wins;
+2. otherwise use `SHARP_RUNTIME_BUILD_JOBS` when it is set;
+3. otherwise use the deterministic safe default 2;
+4. accept exactly 1 or 2; reject zero, negative, malformed, and excessive
+   values with a clear error; never detect CPU count and never clamp silently.
+
+Both shell wrappers use that resolver and export its result to nested tools.
+Local CI additionally passes the same value explicitly to this checker. The
+GitHub workflow sets `SHARP_RUNTIME_BUILD_JOBS: "2"`. Thus an omitted checker
+argument cannot start three compilers, explicit 1 and 2 remain supported, and
+nested scripts inherit one budget instead of multiplying independent defaults.
+
+### 19.3 Permanent proof and consequences
+
+`test/check_negative_consumer_fixtures_test.py` now has **45 cases**. In
+addition to the existing child failure, timeout, hygiene, deterministic-order,
+and real-fixture mutation coverage, it permanently proves:
+
+- explicit numeric/text 1 and 2;
+- omitted-value default 2 and configured environment values 1 and 2;
+- explicit argument precedence over a malformed environment;
+- refusal of zero, negative, 3, larger values, empty text, nonnumeric text,
+  fractional text, whitespace-padded text, and signed text;
+- a fake child process returning 86 is surfaced as a compiler failure; and
+- fake subprocess instrumentation reaches exactly two active jobs, while the
+  real compilation path never exceeds two.
+
+Ticket #1935 changes only repository tooling, tests, workflow configuration,
+and documentation. It changes no production header/source, accepted or emitted
+value, exception, public alias, iterator, symbol, ABI, layout, vtable,
+`noexcept`, `constexpr`, or component edge. No `SR-AUD-*` identifier was
+issued; audit numbering remains frozen at 364.

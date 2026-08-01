@@ -3,10 +3,11 @@
 # Copyright (c) Robert Vokac and contributors
 """Fixtures for check_negative_consumer_fixtures.py.
 
-Every case builds a miniature repository on disk -- a CMake module registration,
+Most cases build a miniature repository on disk -- a CMake module registration,
 a public header, and one or more ``test/consumer/*_negative.cpp`` files -- and
-asserts what the checker says about it. The compiles are real; the sources are
-two or three lines each, so the whole suite costs a few seconds.
+assert what the checker says about it. Most compiles are real and tiny. The job-
+policy reproducer uses a fake executable so it can prove subprocess accounting
+without ever recreating the historical three-compiler policy violation.
 
 The temporary repositories are written under the repository-local
 ``build-tmp/negative-fixture-selftest/``, never under ``/tmp``: CLAUDE.md's
@@ -17,12 +18,14 @@ deterministic location is also what makes a failed run inspectable.
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 import shutil
 import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -108,6 +111,54 @@ class FixtureRepository:
             f"test/consumer/{name}_negative.cpp",
             header + '#include "Widget.hpp"\n' + PRELUDE + textwrap.dedent(body),
         )
+
+    def fake_compiler(self, *, fail_every_child: bool = False) -> Path:
+        """Create a deterministic compiler stand-in; it never invokes a compiler."""
+        mode = "True" if fail_every_child else "False"
+        path = self.write(
+            "tools/fake-cxx",
+            f"""\
+            #!/usr/bin/env python3
+            import pathlib
+            import re
+            import sys
+            import time
+
+            if "--version" in sys.argv:
+                print("sharp-runtime fake compiler 1.0")
+                raise SystemExit(0)
+
+            if {mode}:
+                print("forced child compiler failure", file=sys.stderr)
+                raise SystemExit(86)
+
+            site_match = re.search(
+                r"-DSHARP_RUNTIME_NEGATIVE_SITE=(\\d+)", " ".join(sys.argv)
+            )
+            assert site_match is not None
+            site = int(site_match.group(1))
+            time.sleep(0.05)
+            if site == 0:
+                raise SystemExit(0)
+
+            source = pathlib.Path(sys.argv[-1])
+            guard = f"== {{site}}"
+            line = next(
+                number
+                for number, text in enumerate(
+                    source.read_text(encoding="utf-8").splitlines(), start=1
+                )
+                if guard in text
+            )
+            print(
+                f"{{source}}:{{line + 1}}:5: error: forced rejection",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+            """,
+        )
+        path.chmod(0o755)
+        return path
 
 
 class CheckerTestCase(unittest.TestCase):
@@ -598,7 +649,7 @@ class ParallelismTests(CheckerTestCase):
 
     def test_peak_concurrency_never_exceeds_the_ceiling(self) -> None:
         self._four_sites()
-        report = self.check(jobs=CHECKER.MAXIMUM_JOBS)
+        report = self.check(jobs=2)
         self.assertTrue(report.ok, report.problems)
         self.assertEqual(report.invocations, 5)
         self.assertLessEqual(report.peak_jobs, CHECKER.MAXIMUM_JOBS)
@@ -607,13 +658,82 @@ class ParallelismTests(CheckerTestCase):
         self._four_sites()
         with self.assertRaises(CHECKER.EnvironmentProblem) as raised:
             self.check(jobs=CHECKER.MAXIMUM_JOBS + 1)
-        self.assertIn("three parallel jobs", str(raised.exception))
+        self.assertIn(
+            "aggregate compilation ceiling is two jobs", str(raised.exception)
+        )
 
     def test_a_single_job_is_permitted(self) -> None:
         self._four_sites()
         report = self.check(jobs=1)
         self.assertTrue(report.ok, report.problems)
         self.assertEqual(report.peak_jobs, 1)
+
+    def test_fake_compiler_proves_exact_peak_two_without_real_compilation(self) -> None:
+        sites = "".join(
+            f"#if SHARP_RUNTIME_NEGATIVE_SITE == {number}\n"
+            f"    // NEGATIVE(site-{number}): forced rejection\n"
+            "    int value = 0;\n"
+            "    (void)value;\n"
+            "#endif\n"
+            for number in range(1, 5)
+        )
+        self.fixture.write(
+            "test/consumer/fake_parallel_negative.cpp",
+            "// NEGATIVE-FIXTURE: component=Widget\n"
+            '#include "Widget.hpp"\n' + PRELUDE + "int main() {\n" + sites
+            + "    return 0;\n}\n",
+        )
+        fake = self.fixture.fake_compiler()
+        report = self.check(compiler=str(fake), jobs=2, use_ccache=False)
+        self.assertTrue(report.ok, report.problems)
+        self.assertEqual(report.invocations, 5)
+        self.assertEqual(report.peak_jobs, 2)
+
+    def test_fake_child_compiler_failure_is_reported(self) -> None:
+        self._four_sites()
+        fake = self.fixture.fake_compiler(fail_every_child=True)
+        report = self.check(compiler=str(fake), jobs=2, use_ccache=False)
+        self.assertFalse(report.ok)
+        self.assertEqual(report.invocations, 5)
+        self.assertTrue(
+            all(result.outcome.returncode == 86 for result in report.results),
+            report.results,
+        )
+        self.assertLessEqual(report.peak_jobs, 2)
+
+
+class JobResolutionTests(unittest.TestCase):
+    def test_explicit_one_and_two_are_supported(self) -> None:
+        for value in (1, 2, "1", "2"):
+            with self.subTest(value=value):
+                self.assertEqual(CHECKER.resolve_jobs(value, {}), int(value))
+
+    def test_omitted_value_uses_the_safe_repository_default(self) -> None:
+        self.assertEqual(CHECKER.resolve_jobs(None, {}), 2)
+
+    def test_configured_environment_value_is_used(self) -> None:
+        for value in ("1", "2"):
+            with self.subTest(value=value):
+                environment = {CHECKER.ENVIRONMENT_VARIABLE: value}
+                self.assertEqual(CHECKER.resolve_jobs(None, environment), int(value))
+
+    def test_explicit_argument_takes_precedence_over_the_environment(self) -> None:
+        environment = {CHECKER.ENVIRONMENT_VARIABLE: "malformed"}
+        self.assertEqual(CHECKER.resolve_jobs(2, environment), 2)
+
+    def test_invalid_and_excessive_values_are_rejected(self) -> None:
+        for value in (0, -1, 3, 99, "", "zero", "1.5", " 2", "+2"):
+            with self.subTest(value=value):
+                with self.assertRaises(CHECKER.JobPolicyError):
+                    CHECKER.resolve_jobs(value, {})
+
+    def test_malformed_environment_is_rejected_before_fixture_discovery(self) -> None:
+        with mock.patch.dict(
+            os.environ, {CHECKER.ENVIRONMENT_VARIABLE: "not-a-number"}, clear=False
+        ):
+            with self.assertRaises(CHECKER.EnvironmentProblem) as raised:
+                CHECKER.check_repository(Path("repository-is-never-read"))
+        self.assertIn(CHECKER.ENVIRONMENT_VARIABLE, str(raised.exception))
 
 
 class HygieneTests(CheckerTestCase):
