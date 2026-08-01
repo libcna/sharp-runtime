@@ -23,3 +23,17 @@ grammar.  See **SR-AUD-009** in
 
 The intentional precision/API limitations are clear.  The supported parser
 needs strict-input remediation and tests (SR-AUD-009).
+
+---
+
+## Correction — the public ticks contract was not millisecond precision (2026-08-01)
+
+The audit's `millisecond-precision` characterization is preserved above. It
+matched the old storage, but conflicted with the same header's public ticks
+constructor/property contract and caused silent sub-millisecond truncation.
+Ticket #1929's exact row-6 approval requires TimeOnly fractions through seven
+digits at 100-nanosecond resolution. The fourth existing `int` now stores
+ticks-within-the-second, so the object remains four ints (`sizeof=16`,
+`alignof=4`) while its conversions/operators/formatting honor that contract.
+The inseparable defect is inactive post-audit ticket #1931, completed without
+changing SR-AUD-009 or issuing a new finding number.

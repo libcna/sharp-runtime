@@ -97,3 +97,16 @@ six-component constructor has an explicit extreme-day overflow test.
 
 The routine implementation is mature, but SR-AUD-008 is a high-severity input
 and arithmetic correctness defect.
+
+---
+
+## Post-audit subset remediation — #1929 row 5 (2026-08-01)
+
+The SR-AUD-008 repair and its format/overflow taxonomy remain unchanged.
+Exact approval under `docs/TextSubsetCompatibilityDecision.md` §6.5 item (3)
+makes the shared parse core trim surrounding invariant whitespace before its
+existing grammar and range checks. The ordinary no-whitespace path allocates
+nothing; only actually trimmed input needs a NUL-terminated temporary for the
+existing scanner. Seven fraction digits, MinValue/MaxValue, malformed input and
+overflow taxonomy retain their prior values/status. No declaration, layout,
+symbol or exception specification changed; SR-AUD-008's status is unchanged.

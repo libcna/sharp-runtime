@@ -123,3 +123,13 @@ day number and Add* result is byte-identical (measured, `build-probe/1837_postfi
 
 Public doors, all pinned by tests: `FromDayNumber`, `AddDays`, `AddMonths`, `AddYears`. The
 separately documented parse-grammar and format-breadth gaps above are untouched.
+
+## Post-audit subset remediation — #1929 row 5 (2026-08-01)
+
+The original SR-AUD-061 and its #1879 remediation remain preserved above.
+Exact approval under `docs/TextSubsetCompatibilityDecision.md` §6.5 item (3)
+adds only surrounding invariant whitespace to DateOnly Parse/TryParse. Internal
+whitespace, unpadded month/day, trailing garbage and timestamps remain rejected;
+the pre-existing wider trailing `Z`/`z` behavior is unchanged. Parse and
+TryParse agree on values and FormatException identity. This post-audit widening
+does not change SR-AUD-061's remediated status or issue an identifier.

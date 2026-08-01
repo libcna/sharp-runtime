@@ -318,26 +318,30 @@ namespace System {
     // -------------------------------------------------------------------------
 
     bool DateTimeOffset::TryParse(const std::string& s, DateTimeOffset& result) {
-        if (s.size() < 10) return false;
+        // #1929 row 5: all five date/time value parsers accept invariant whitespace at
+        // the outside boundary. Work from one trimmed view before this parser makes its
+        // existing date and offset substrings; internal whitespace is untouched.
+        const std::string_view input = detail::trimDateTimeText(s);
+        if (input.size() < 10) return false;
 
         // Find where the offset starts (after the time part)
         // Look for 'Z' or '+'/'-' that appears after position 10
-        std::string dtStr = s;
+        std::string dtStr(input);
         TimeSpan offset = TimeSpan::Zero;
 
         // Check trailing 'Z'
-        if (!s.empty() && (s.back() == 'Z' || s.back() == 'z')) {
-            dtStr = s.substr(0, s.size() - 1);
+        if (!input.empty() && (input.back() == 'Z' || input.back() == 'z')) {
+            dtStr.assign(input.substr(0, input.size() - 1));
             offset = TimeSpan::Zero;
         } else {
             // Look for '+' or '-' after position 10 (skip date separators)
             size_t offPos = std::string::npos;
-            for (size_t i = 10; i < s.size(); ++i) {
-                if (s[i] == '+' || s[i] == '-') { offPos = i; break; }
+            for (size_t i = 10; i < input.size(); ++i) {
+                if (input[i] == '+' || input[i] == '-') { offPos = i; break; }
             }
             if (offPos != std::string::npos) {
-                dtStr = s.substr(0, offPos);
-                const std::string offStr = s.substr(offPos);
+                dtStr.assign(input.substr(0, offPos));
+                const std::string offStr(input.substr(offPos));
                 bool neg = offStr[0] == '-';
                 int hh = 0, mm = 0;
                 // CCF-002 class D (ticket #1879, approved 2026-07-31). The

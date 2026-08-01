@@ -309,7 +309,7 @@ namespace System {
         result.reserve(format.size() + 8);
         int yr  = getYearProperty(),   mo  = getMonthProperty(),  dy  = getDayProperty();
         int hr  = getHourProperty(),   mn  = getMinuteProperty(), sc  = getSecondProperty();
-        int ms  = getMillisecondProperty();
+        const int fractionTicks = static_cast<int>(ticks_ % TicksPerSecond);
 
         auto pad = [](int n, int w) -> std::string {
             std::string s = std::to_string(n);
@@ -370,8 +370,11 @@ namespace System {
                 i += n;
             } else if (c == 'f') {
                 int n = run('f');
-                std::string mss = pad(ms, 3);
-                result += mss.substr(0, static_cast<size_t>(std::min(n, 3)));
+                std::string fraction = pad(fractionTicks, 7);
+                // Approval covers f through fffffff. Preserve the old three-digit
+                // fallback for a longer unsupported run rather than widening it too.
+                const int width = (n <= 7) ? n : 3;
+                result += fraction.substr(0, static_cast<size_t>(width));
                 i += n;
             } else if (c == '\'') {
                 ++i;
@@ -400,30 +403,36 @@ namespace System {
         // (docs/DateTimeValidationBoundaryPlan.md §16.4 keeps widening it out of
         // scope), now required to match the WHOLE string:
         //
-        //     yyyy '-' MM '-' dd [ (' '|'T') HH ':' mm ':' ss [ '.' f{1,3} ] ] [ 'Z'|'z' ]
+        //     W* yyyy '-' MM '-' dd
+        //        [ (' '|'T') H{1,2} ':' m{1,2} ':' s{1,2} [ '.' f{1,7} ] ]
+        //        [ 'Z'|'z' ] W*
         //
         // Every currently-valid input still produces its exact previous value.
-        detail::DateTimeTextScanner scanner(s);
-        int yr = 0, mo = 0, dy = 0, hr = 0, mn = 0, sc = 0, ms = 0;
+        // Correction/remediation (#1929 rows 5-6, approved 2026-08-01): the preceding
+        // historical grammar accurately described the repaired #1879 subset, but it was
+        // narrower than both the related port doors and current .NET. Outer invariant
+        // whitespace, one-or-two digit clock fields, and one through seven fractional
+        // digits are now the approved shared contract. Date fields, offsets and internal
+        // whitespace remain deliberately fixed/rejected.
+        detail::DateTimeTextScanner scanner(detail::trimDateTimeText(s));
+        int yr = 0, mo = 0, dy = 0, hr = 0, mn = 0, sc = 0, fractionTicks = 0;
         if (!scanner.takeDigits(4, 4, yr) || !scanner.take('-') ||
             !scanner.takeDigits(2, 2, mo) || !scanner.take('-') ||
             !scanner.takeDigits(2, 2, dy))
             return false;
 
         if (scanner.take(' ') || scanner.take('T')) {
-            if (!scanner.takeDigits(2, 2, hr) || !scanner.take(':') ||
-                !scanner.takeDigits(2, 2, mn) || !scanner.take(':') ||
-                !scanner.takeDigits(2, 2, sc))
+            if (!scanner.takeDigits(1, 2, hr) || !scanner.take(':') ||
+                !scanner.takeDigits(1, 2, mn) || !scanner.take(':') ||
+                !scanner.takeDigits(1, 2, sc))
                 return false;
             if (scanner.take('.')) {
-                // A fraction must have 1-3 digits. A bare "." and a non-numeric
-                // ".abc" are now rejected rather than read as .000, and ".1234"
-                // is rejected rather than truncated to .123 -- the port honours
-                // milliseconds only, so a 4-digit fraction is text it cannot
-                // represent, not text to round.
+                // A fraction must have 1-7 digits. A bare ".", a non-numeric
+                // ".abc", and an eighth digit are rejected rather than read as a
+                // prefix. DateTime is tick-based, so every accepted digit is retained.
                 int digits = 0;
-                if (!scanner.takeDigits(1, 3, ms, &digits)) return false;
-                while (digits < 3) { ms *= 10; ++digits; }
+                if (!scanner.takeDigits(1, 7, fractionTicks, &digits)) return false;
+                while (digits < 7) { fractionTicks *= 10; ++digits; }
             }
         }
         // A trailing time-zone designator stays accepted, and stays ignored: this
@@ -445,7 +454,7 @@ namespace System {
         if (!scanner.atEnd()) return false;
 
         try {
-            result = DateTime(yr, mo, dy, hr, mn, sc, ms);
+            result = DateTime(dateToTicks(yr, mo, dy, hr, mn, sc) + fractionTicks);
             return true;
         } catch (...) { return false; }
     }

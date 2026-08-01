@@ -405,9 +405,8 @@ TEST(DateTimeTests, TryParse_MillisecondsWithTrailingOffset_ParsesCorrectly) {
 }
 
 // FLIPPED by #1879 (approved 2026-07-31). A fraction of more than three digits
-// is text this port cannot represent -- DateTime::TryParse resolves to
-// milliseconds -- and §8.2 approved rejecting it rather than silently discarding
-// the extra precision. The whole-string consumption rule makes that automatic.
+// was rejected rather than silently discarded. The whole-string consumption
+// rule made that automatic.
 //
 // PREMISE CORRECTION, recorded where the claim was made. The decision packet
 // §20.1 asserted that ".NET rejects EVERY input in the table below". Measured
@@ -417,17 +416,26 @@ TEST(DateTimeTests, TryParse_MillisecondsWithTrailingOffset_ParsesCorrectly) {
 // 100-ns precision. Rejecting it is therefore a deliberate narrowing of this
 // port's millisecond-resolution parse subset -- a defensible "refuse what you
 // cannot represent" over "silently change the value", and what was approved --
-// but it is not the removal of a divergence. The port's 3-digit fraction limit
-// versus .NET's 7 is inactive ticket #1929. A bare "." and ".abc" ARE rejected
-// by .NET too, so those rows of §20.1 are exactly right.
-TEST(DateTimeTests, TryParse_FractionLongerThanMilliseconds_IsRejected) {
+// but it was not the removal of a divergence.
+//
+// FLIPPED AGAIN by #1929 rows 5-6 (approved 2026-08-01). DateTime has always
+// stored ticks, so the claim that four through seven digits could not be
+// represented was false. The approved shared grammar retains all seven digits;
+// a bare ".", non-digits, and an eighth digit remain rejected.
+TEST(DateTimeTests, TryParse_FractionOneThroughSevenDigitsRetainsTicks) {
     DateTime dt;
-    EXPECT_FALSE(DateTime::TryParse("2024-06-15 10:30:45.1234567Z", dt));
-    EXPECT_FALSE(DateTime::TryParse("2024-06-15 10:30:45.1234", dt));
-    EXPECT_THROW(DateTime::Parse("2024-06-15 10:30:45.1234"), System::FormatException);
-    // One, two and three digits still parse to exactly their previous values.
-    ASSERT_TRUE(DateTime::TryParse("2024-06-15 10:30:45.123Z", dt));
-    EXPECT_EQ(dt.getMillisecondProperty(), 123);
+    const long long wholeSecond = DateTime(2024, 6, 15, 10, 30, 45).getTicksProperty();
+    const char* fractions[] = {"1", "12", "123", "1234", "12345", "123456", "1234567"};
+    const long long expected[] = {1000000, 1200000, 1230000, 1234000, 1234500, 1234560, 1234567};
+    for (int i = 0; i < 7; ++i) {
+        const std::string text = std::string("2024-06-15 10:30:45.") + fractions[i] +
+                                 (i % 2 == 0 ? "Z" : "+02:00");
+        ASSERT_TRUE(DateTime::TryParse(text, dt)) << text;
+        EXPECT_EQ(dt.getTicksProperty(), wholeSecond + expected[i]) << text;
+        EXPECT_EQ(DateTime::Parse(text).getTicksProperty(), dt.getTicksProperty()) << text;
+    }
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15 10:30:45.12345678", dt));
+    EXPECT_THROW(DateTime::Parse("2024-06-15 10:30:45.12345678"), System::FormatException);
 }
 
 TEST(DateTimeTests, TryParse_MillisecondsNoTimezone_StillParsesCorrectly) {
@@ -881,7 +889,8 @@ TEST(DateTimeTests, Ccf002d_TrailingTextIsRejected) {
     EXPECT_FALSE(DateTime::TryParse("2024-06-15junk", dt));
     EXPECT_FALSE(DateTime::TryParse("2024-06-15 trailing", dt));
     EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30zzzz", dt));
-    EXPECT_FALSE(DateTime::TryParse("2024-06-15 10:20:30 ", dt));
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15 10:20:30 ", dt));
+    EXPECT_EQ(dt.getTicksProperty(), DateTime(2024, 6, 15, 10, 20, 30).getTicksProperty());
     EXPECT_THROW(DateTime::Parse("2024-06-15junk"), System::FormatException);
 }
 
@@ -900,7 +909,7 @@ TEST(DateTimeTests, Ccf002d_MalformedFractionIsRejected) {
     EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30.", dt));
     EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30.abc", dt));
     EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30.-1", dt));
-    EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30.1234", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30.12345678", dt));
 }
 
 TEST(DateTimeTests, Ccf002d_SscanfLeniencyShapesAreGone) {
@@ -959,6 +968,101 @@ TEST(DateTimeTests, Ccf002d_TrailingOffsetKeepsItsTwoDigitFields) {
     EXPECT_EQ(dt.getMillisecondProperty(), 560);
     EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30+2:5", dt));
     EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30+02:00junk", dt));
+}
+
+// #1929 row 5 (approved 2026-08-01): whitespace is a boundary rule, not an
+// internal-token rule. Parse and TryParse must agree on the exact tick value.
+TEST(DateTimeTests, Approved1929_OuterWhitespaceOnlyIsAccepted) {
+    const long long expected = DateTime(2024, 6, 15, 1, 2, 3).AddTicks(1'234'567).getTicksProperty();
+    const char* accepted[] = {
+        " 2024-06-15T1:2:3.1234567 ",
+        "\t2024-06-15T1:2:3.1234567\r\n",
+        "\f\v2024-06-15T1:2:3.1234567\v",
+    };
+    for (const char* text : accepted) {
+        DateTime out(17);
+        ASSERT_TRUE(DateTime::TryParse(text, out)) << text;
+        EXPECT_EQ(out.getTicksProperty(), expected) << text;
+        EXPECT_EQ(DateTime::Parse(text).getTicksProperty(), expected) << text;
+    }
+
+    DateTime out(17);
+    const char* rejected[] = {
+        "2024 -06-15T1:2:3", "2024-06-15 T 1:2:3", "2024-06-15T1 :2:3",
+        "2024-06-15T1: 2:3", "2024-06-15T1:2: 3", " \t\r\n ",
+        "2024-06-15T1:2:3.1234567 garbage"
+    };
+    for (const char* text : rejected) {
+        EXPECT_FALSE(DateTime::TryParse(text, out)) << text;
+        try {
+            (void)DateTime::Parse(text);
+            FAIL() << text;
+        } catch (const System::FormatException& e) {
+            EXPECT_EQ(e.getHResultProperty(), static_cast<int>(0x80131537u)) << text;
+            EXPECT_EQ(std::string(e.what()), "String was not recognized as a valid DateTime: " +
+                                             std::string(text)) << text;
+        }
+    }
+}
+
+// #1929 row 6: every clock field independently admits one or two digits. Zero,
+// three digits, signs, malformed separators and trailing content remain outside
+// the approved grammar.
+TEST(DateTimeTests, Approved1929_ClockFieldWidthsAndBoundaries) {
+    struct Accepted { const char* text; int hour; int minute; int second; };
+    const Accepted accepted[] = {
+        {"2024-06-15T0:0:0", 0, 0, 0},
+        {"2024-06-15T1:02:03", 1, 2, 3},
+        {"2024-06-15T01:2:03", 1, 2, 3},
+        {"2024-06-15T01:02:3", 1, 2, 3},
+        {"2024-06-15 23:59:59", 23, 59, 59},
+    };
+    for (const auto& c : accepted) {
+        DateTime out;
+        ASSERT_TRUE(DateTime::TryParse(c.text, out)) << c.text;
+        EXPECT_EQ(out.getHourProperty(), c.hour) << c.text;
+        EXPECT_EQ(out.getMinuteProperty(), c.minute) << c.text;
+        EXPECT_EQ(out.getSecondProperty(), c.second) << c.text;
+        EXPECT_EQ(DateTime::Parse(c.text).getTicksProperty(), out.getTicksProperty()) << c.text;
+    }
+
+    DateTime out;
+    const char* rejected[] = {
+        "2024-06-15T:2:3", "2024-06-15T001:2:3", "2024-06-15T1::3",
+        "2024-06-15T1:002:3", "2024-06-15T1:2:", "2024-06-15T1:2:003",
+        "2024-06-15T+1:2:3", "2024-06-15T1:-2:3", "2024-06-15T1:2:+3",
+        "2024-06-15T24:0:0", "2024-06-15T0:60:0", "2024-06-15T0:0:60",
+        "2024-06-15T1-2-3", "2024-06-15T1:2:3x"
+    };
+    for (const char* text : rejected) EXPECT_FALSE(DateTime::TryParse(text, out)) << text;
+}
+
+TEST(DateTimeTests, Approved1929_FractionFormattingRoundTripsAtTickPrecision) {
+    const DateTime value = DateTime(2024, 6, 15, 1, 2, 3).AddTicks(1'234'567);
+    const std::string text = value.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff");
+    EXPECT_EQ(text, "2024-06-15T01:02:03.1234567");
+    EXPECT_EQ(DateTime::Parse(text).getTicksProperty(), value.getTicksProperty());
+
+    DateTime out;
+    ASSERT_TRUE(DateTime::TryParse("0001-01-01T0:0:0.0000001", out));
+    EXPECT_EQ(out.getTicksProperty(), 1);
+    ASSERT_TRUE(DateTime::TryParse("9999-12-31T23:59:59.9999999", out));
+    EXPECT_EQ(out.getTicksProperty(), DateTime::MaxTicks);
+}
+
+// The non-approved #1929 rows remain pinned. Historical row 2's fractional
+// behavior is superseded only by approved item (3); it is not a blanket policy
+// accepting the remaining date/offset/API/culture shapes.
+TEST(DateTimeTests, Approved1929_UnapprovedRowsRemainUnchanged) {
+    DateTime out;
+    EXPECT_FALSE(DateTime::TryParse("2024-6-15", out));       // row 1: unpadded date
+    EXPECT_FALSE(DateTime::TryParse("2024-06-5", out));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-15T1:2:3+2:5", out)); // row 3: short offset
+    EXPECT_FALSE(DateTime::TryParse("June 15 2024 1:2:3", out));   // culture/wider grammar
+    EXPECT_EQ(DateTime(1'234'567).ToString("ffffffff"), "123"); // unapproved >7 format run
+    // Valid controls from the pre-approved subset remain accepted.
+    EXPECT_TRUE(DateTime::TryParse("2024-06-15T01:02:03+02:05", out));
+    EXPECT_TRUE(DateTime::TryParse("2024-06-15Z", out));
 }
 
 TEST(DateTimeTests, Ccf002d_PreviouslyRejectedInputIsStillRejected) {

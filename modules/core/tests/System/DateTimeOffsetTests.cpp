@@ -515,3 +515,50 @@ TEST(DateTimeOffsetTests2, Ccf002_UnpaddedOffsetRejectionIsANarrowingNotAParityF
     ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00+02:05", out));
     EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 125);
 }
+
+TEST(DateTimeOffsetTests2, Approved1929_WhitespaceClockWidthsAndFractionTicks) {
+    const long long expected = DateTime(2024, 6, 15, 1, 2, 3).AddTicks(1'234'567).getTicksProperty();
+    const char* accepted[] = {
+        " 2024-06-15T1:2:3.1234567+02:05 ",
+        "\t2024-06-15T1:2:3.1234567+02:05\r\n",
+        "\f\v2024-06-15T1:2:3.1234567+02:05\v"
+    };
+    for (const char* text : accepted) {
+        DateTimeOffset out;
+        ASSERT_TRUE(DateTimeOffset::TryParse(text, out)) << text;
+        EXPECT_EQ(out.getTicksProperty(), expected) << text;
+        EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 125) << text;
+        EXPECT_EQ(DateTimeOffset::Parse(text).getTicksProperty(), expected) << text;
+    }
+
+    const char* fractions[] = {"1", "12", "123", "1234", "12345", "123456", "1234567"};
+    const long long fractionTicks[] = {1000000, 1200000, 1230000, 1234000, 1234500, 1234560, 1234567};
+    const long long wholeSecond = DateTime(2024, 6, 15, 1, 2, 3).getTicksProperty();
+    for (int i = 0; i < 7; ++i) {
+        const std::string text = std::string("2024-06-15T1:2:3.") + fractions[i] + "Z";
+        DateTimeOffset out;
+        ASSERT_TRUE(DateTimeOffset::TryParse(text, out)) << text;
+        EXPECT_EQ(out.getTicksProperty(), wholeSecond + fractionTicks[i]) << text;
+    }
+}
+
+TEST(DateTimeOffsetTests2, Approved1929_MalformedAndUnapprovedFormsRemainRejected) {
+    DateTimeOffset out;
+    const char* rejected[] = {
+        "2024-06-15T1:2:3.12345678Z", "2024-06-15T1:2:3.Z",
+        "2024-06-15T1:2:3.abcZ", "2024-06-15T1:2:3.1garbageZ",
+        "2024-06-15T1 :2:3Z", "2024-06-15T1: 2:3Z", "2024-06-15T1:2: 3Z",
+        "2024-6-15T1:2:3Z", "2024-06-5T1:2:3Z",
+        "2024-06-15T1:2:3+2:5", "2024-06-15T1:2:3+02:5",
+        "2024-06-15T1:2:3+2:05", " \t\r\n "
+    };
+    for (const char* text : rejected) EXPECT_FALSE(DateTimeOffset::TryParse(text, out)) << text;
+
+    try {
+        (void)DateTimeOffset::Parse("2024-06-15T1:2:3.12345678Z");
+        FAIL();
+    } catch (const System::FormatException& e) {
+        EXPECT_EQ(e.getHResultProperty(), static_cast<int>(0x80131537u));
+        EXPECT_EQ(std::string(e.what()), "String was not recognized as a valid DateTimeOffset.");
+    }
+}

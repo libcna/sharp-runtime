@@ -1090,3 +1090,54 @@ to reject — and row 4 (`ParseExact`, providers, `DateTimeKind`) as new API und
 its own ticket.
 
 No `SR-AUD-*` identifier was issued; numbering stays frozen at **364**.
+
+---
+
+## 22. #1929 rows 5–6 — approved and partially remediated (2026-08-01)
+
+The original §20 and its §21 corrections remain unchanged above. The user
+approved exactly `docs/TextSubsetCompatibilityDecision.md` §6.5 item (3):
+surrounding whitespace for the five `Parse`/`TryParse` families, DateTime clock
+fields of one or two digits, and DateTime/TimeOnly fractions of one through
+seven digits at 100-nanosecond resolution. No other #1929 behavior was approved.
+
+The retained runtime matrix (`build-probe/1929_approved_probe.cpp`) establishes
+the transition. Before, all five surrounding-whitespace examples returned
+`false`; DateTime rejected `1:2:3`; DateTime and TimeOnly accepted zero through
+three fraction digits and rejected four through seven. After, every approved
+case succeeds in both Parse and TryParse at the exact tick value. Bare dots,
+non-digits, malformed separators, inner whitespace, trailing garbage and an
+eighth digit still fail. Padded dates and offsets retain their old values.
+
+**Correction to the row mapping.** §21 calls rows 5 and 6 the approved half,
+but historical row 2 also groups every `4+` fraction together. The operative
+approval text expressly names one-through-seven digits, so `.1234` through
+`.1234567` change under row 6; row 2's wider all-digit behavior does not.
+Accordingly the four historical unapproved rows remain pinned as row 1, the
+row-2 remainder beyond seven digits, row 3, and row 4. This is not a general
+policy of accepting every form current .NET accepts.
+
+**Correction to TimeOnly's representation premise.** The source audit and
+header described TimeOnly as intentionally millisecond-only, but the public
+ticks constructor and `Ticks` property claim 100-nanosecond units. Measured,
+`TimeOnly(36'002'000'345).Ticks` returned `36'002'000'000`; accepting seven
+fraction digits would therefore have silently truncated the approved value.
+The existing fourth `int` now stores ticks within the second instead of
+milliseconds. `sizeof(TimeOnly)==16`, `alignof(TimeOnly)==4`, the other four
+value-type layouts, public declarations, exception specifications, vtables and
+the 14 affected archive symbol names are unchanged. Conversions, comparisons,
+hashing, subtraction, IsBetween and `f` formatting now retain exact ticks.
+This inseparable defect is inactive post-audit ticket #1931, completed without
+issuing a new audit identifier.
+
+Permanent evidence: 363/363 focused DateTime/DateTimeOffset/DateOnly/TimeOnly/
+TimeSpan tests and 5,581/5,581 Core.Base tests. The existing ASan+UBSan tree was
+rebuilt after every changed source and the same 363 tests passed with no report;
+LSan's 11 approved tests passed before this environment reported its known
+`ptrace` fatal limitation. Sanitizers support ownership/arithmetic safety only;
+the permanent tests guard grammar, tick precision, failure status, exception
+identity and round trips.
+
+Ticket #1929 remains `todo`/inactive and is explicitly **partial**. Rows 1, the
+row-2 >7-digit remainder, 3 and 4 remain unapproved. Audit numbering stays
+frozen at 364.

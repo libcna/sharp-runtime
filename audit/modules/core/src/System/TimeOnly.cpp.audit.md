@@ -63,3 +63,24 @@ extreme values are directly covered.
 
 Normal clock arithmetic is sound; parser full-consumption validation needs
 remediation (SR-AUD-009).
+
+---
+
+## Correction and post-audit remediation — #1929 rows 5–6 (2026-08-01)
+
+The original report's `millisecond TimeOnly` / `documented millisecond model`
+premise is retained above but is incomplete. The public `TimeOnly(long ticks)`
+and `Ticks` property promise 100-nanosecond units; measured before this repair,
+`TimeOnly(36'002'000'345).Ticks` returned `36'002'000'000`. The existing fourth
+`int` truncated rather than represented the input. Exact §6.5 item (3) approval
+for seven-digit fractions made fixing that structural path inseparable: the
+field now stores ticks within the second, and conversions, comparisons, hash,
+subtraction, IsBetween and `f` formatting preserve them. This is completed
+inactive post-audit ticket #1931, with no new audit identifier.
+
+TimeOnly Parse/TryParse now also trim surrounding invariant whitespace and
+accept one through seven fraction digits. Bare dots, non-digits, an eighth
+digit, inner whitespace and trailing garbage remain rejected; the already-valid
+one/two-digit fields remain unchanged. `sizeof=16`, `alignof=4`, declarations,
+exception specifications, vtables and affected exported symbol names are
+unchanged. SR-AUD-009 remains remediated by #1879; #1929 remains partial.

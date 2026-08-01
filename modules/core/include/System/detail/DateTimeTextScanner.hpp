@@ -32,6 +32,23 @@
  */
 namespace System::detail {
 
+/** @brief True for the invariant ASCII whitespace accepted at parser boundaries. */
+[[nodiscard]] constexpr bool isDateTimeTextWhitespace(char c) noexcept {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
+
+/**
+ * @brief Removes leading and trailing invariant ASCII whitespace without allocating.
+ *
+ * Ticket #1929 row 5 deliberately applies this only at the outside boundary. Whitespace
+ * inside a numeric field or next to a separator remains grammar, and remains rejected.
+ */
+[[nodiscard]] constexpr std::string_view trimDateTimeText(std::string_view text) noexcept {
+    while (!text.empty() && isDateTimeTextWhitespace(text.front())) text.remove_prefix(1);
+    while (!text.empty() && isDateTimeTextWhitespace(text.back())) text.remove_suffix(1);
+    return text;
+}
+
 /** @brief A forward-only cursor over a candidate date/time string. */
 class DateTimeTextScanner {
 public:

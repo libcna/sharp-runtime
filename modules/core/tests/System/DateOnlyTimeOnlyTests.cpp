@@ -495,7 +495,8 @@ TEST(DateOnlyTests, Ccf002d_TrailingTextIsRejected) {
     System::DateOnly d;
     EXPECT_FALSE(System::DateOnly::TryParse("2024-06-15junk", d));
     EXPECT_FALSE(System::DateOnly::TryParse("2024-06-15 10:20:30", d));
-    EXPECT_FALSE(System::DateOnly::TryParse("2024-06-15 ", d));
+    ASSERT_TRUE(System::DateOnly::TryParse("2024-06-15 ", d));
+    EXPECT_EQ(d, System::DateOnly(2024, 6, 15));
     EXPECT_THROW(System::DateOnly::Parse("2024-06-15junk"), System::FormatException);
     EXPECT_THROW(System::DateOnly::Parse("2024-06-15 10:20:30"), System::FormatException);
 }
@@ -522,4 +523,33 @@ TEST(DateOnlyTests, Ccf002d_WellFormedDatesKeepTheirExactValues) {
     // Previously-rejected shapes stay rejected.
     EXPECT_FALSE(System::DateOnly::TryParse("2024-02-30", d));
     EXPECT_FALSE(System::DateOnly::TryParse("2024-6-15", d));
+}
+
+TEST(DateOnlyTests, Approved1929_OuterWhitespaceAndUnapprovedDateWidths) {
+    const char* accepted[] = {
+        " 2024-06-15 ", "\t2024-06-15Z\r\n", "\f\v2024-06-15z\v"
+    };
+    for (const char* text : accepted) {
+        System::DateOnly out(1, 1, 1);
+        ASSERT_TRUE(System::DateOnly::TryParse(text, out)) << text;
+        EXPECT_EQ(out, System::DateOnly(2024, 6, 15)) << text;
+        EXPECT_EQ(System::DateOnly::Parse(text), out) << text;
+    }
+
+    System::DateOnly out(1, 1, 1);
+    const char* rejected[] = {
+        "2024 -06-15", "2024- 06-15", "2024-06 -15", "2024-06- 15",
+        "2024-6-15", "2024-06-5", " \t\r\n ", "2024-06-15 Z",
+        "2024-06-15 garbage"
+    };
+    for (const char* text : rejected) EXPECT_FALSE(System::DateOnly::TryParse(text, out)) << text;
+
+    try {
+        (void)System::DateOnly::Parse("2024-06-15 garbage");
+        FAIL();
+    } catch (const System::FormatException& e) {
+        EXPECT_EQ(e.getHResultProperty(), static_cast<int>(0x80131537u));
+        EXPECT_EQ(std::string(e.what()),
+                  "String was not recognized as a valid DateOnly: 2024-06-15 garbage");
+    }
 }

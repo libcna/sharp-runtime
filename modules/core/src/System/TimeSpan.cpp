@@ -13,6 +13,7 @@
 #include "System/FormatException.hpp"
 #include "System/Int64.hpp"
 #include "System/OverflowException.hpp"
+#include "System/detail/DateTimeTextScanner.hpp"
 
 namespace System {
 
@@ -440,7 +441,7 @@ namespace System {
         // overflow ("contains too many digits").
         constexpr int kParseMaxDigitRun = 18;
 
-        bool hasOverlongDigitRun(const std::string& s) {
+        bool hasOverlongDigitRun(std::string_view s) {
             int run = 0;
             for (const char ch : s) {
                 if (ch >= '0' && ch <= '9') {
@@ -457,8 +458,22 @@ namespace System {
     // Internal linkage: TimeSpan.hpp is unchanged by this repair.
     static TimeSpanParseOutcome parseTimeSpanCore(const std::string& s, TimeSpan& result) {
         if (s.empty()) return TimeSpanParseOutcome::BadFormat;
-        if (hasOverlongDigitRun(s)) return TimeSpanParseOutcome::Overflow;
+
+        // Keep the ordinary no-whitespace path byte-for-byte direct. Only row-5 inputs
+        // whose first or last byte is whitespace run the trim and allocate a temporary
+        // NUL-terminated copy for the legacy sscanf-based core below.
+        std::string trimmedStorage;
+        std::string_view input(s);
         const char* p = s.c_str();
+        if (detail::isDateTimeTextWhitespace(s.front()) ||
+            detail::isDateTimeTextWhitespace(s.back())) {
+            const std::string_view trimmedView = detail::trimDateTimeText(s);
+            if (trimmedView.empty()) return TimeSpanParseOutcome::BadFormat;
+            trimmedStorage.assign(trimmedView);
+            input = trimmedStorage;
+            p = trimmedStorage.c_str();
+        }
+        if (hasOverlongDigitRun(input)) return TimeSpanParseOutcome::Overflow;
         bool negative = (*p == '-');
         if (negative) ++p;
 

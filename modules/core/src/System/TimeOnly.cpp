@@ -29,16 +29,13 @@ TimeOnly TimeOnly::AddMinutes(double value) const {
 }
 
 TimeOnly TimeOnly::FromTimeSpan(const TimeSpan& ts) {
-    long long totalMs = static_cast<long long>(ts.getTotalMillisecondsProperty());
-    int ms = static_cast<int>(totalMs % MsPerDay);
-    if (ms < 0) ms += MsPerDay;
-    return TimeOnly(ms / 3600000, (ms % 3600000) / 60000,
-                    (ms % 60000) / 1000, ms % 1000);
+    long long ticks = ts.getTicksProperty() % TicksPerDay_;
+    if (ticks < 0) ticks += TicksPerDay_;
+    return TimeOnly(ticks);
 }
 
 TimeOnly TimeOnly::FromDateTime(const DateTime& dt) {
-    return TimeOnly(dt.getHourProperty(), dt.getMinuteProperty(),
-                    dt.getSecondProperty(), dt.getMillisecondProperty());
+    return TimeOnly(dt.getTicksProperty() % TicksPerDay_);
 }
 
 bool TimeOnly::TryParse(const std::string& s, TimeOnly& result) {
@@ -50,7 +47,7 @@ bool TimeOnly::TryParse(const std::string& s, TimeOnly& result) {
     // as .000, and "10:20:30.1234" was truncated to .123. The grammar below is
     // required to match the WHOLE string:
     //
-    //     H{1,2} ':' m{1,2} ':' s{1,2} [ '.' f{1,3} ]
+    //     W* H{1,2} ':' m{1,2} ':' s{1,2} [ '.' f{1,7} ] W*
     //
     // One-or-two-digit fields are DELIBERATE and unchanged: "1:2:3" parses today
     // and .NET's TimeOnly.Parse accepts it too (its "H:m:s" standard pattern), so
@@ -58,21 +55,31 @@ bool TimeOnly::TryParse(const std::string& s, TimeOnly& result) {
     // cover and a divergence from .NET rather than a step towards it. The
     // *offset* fields in DateTimeOffset are the ones §20.1 requires to be
     // two-digit, and they are handled there.
-    detail::DateTimeTextScanner scanner(s);
-    int h = 0, m = 0, sc = 0, ms = 0;
+    // Correction/remediation (#1929 rows 5-6, approved 2026-08-01): TimeOnly's
+    // tick constructor and related types are 100ns-based, so the historical
+    // claim that this representation could retain only milliseconds was false.
+    // The existing fourth int now retains ticks within the second without any
+    // size/alignment/layout change.
+    detail::DateTimeTextScanner scanner(detail::trimDateTimeText(s));
+    int h = 0, m = 0, sc = 0, fractionTicks = 0;
     if (!scanner.takeDigits(1, 2, h) || !scanner.take(':') ||
         !scanner.takeDigits(1, 2, m) || !scanner.take(':') ||
         !scanner.takeDigits(1, 2, sc))
         return false;
     if (scanner.take('.')) {
         int digits = 0;
-        if (!scanner.takeDigits(1, 3, ms, &digits)) return false;
-        while (digits < 3) { ms *= 10; ++digits; }
+        if (!scanner.takeDigits(1, 7, fractionTicks, &digits)) return false;
+        while (digits < 7) { fractionTicks *= 10; ++digits; }
     }
     if (!scanner.atEnd()) return false;
     if (h < 0 || h > 23 || m < 0 || m > 59 || sc < 0 || sc > 59) return false;
 
-    result = TimeOnly(h, m, sc, ms);
+    TimeOnly parsed;
+    parsed.hour_ = h;
+    parsed.minute_ = m;
+    parsed.second_ = sc;
+    parsed.subsecondTicks_ = fractionTicks;
+    result = parsed;
     return true;
 }
 
@@ -118,8 +125,11 @@ std::string TimeOnly::ToString(const std::string& format) const {
             i += n;
         } else if (c == 'f') {
             int n = run('f');
-            std::string mss = pad(ms_, 3);
-            result += mss.substr(0, static_cast<size_t>(std::min(n, 3)));
+            std::string fraction = pad(subsecondTicks_, 7);
+            // Approval covers f through fffffff. Preserve the old three-digit
+            // fallback for a longer unsupported run rather than widening it too.
+            const int width = (n <= 7) ? n : 3;
+            result += fraction.substr(0, static_cast<size_t>(width));
             i += n;
         } else if (c == '\'') {
             ++i;

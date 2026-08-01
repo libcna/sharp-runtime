@@ -235,3 +235,17 @@ layout, vtable or symbol change. **SR-AUD-007 is now fully `remediated`** (007a
 #1878, 007b #1879); SR-AUD-009 and SR-AUD-061 are `remediated` by the same
 ticket. CCF-002's remaining member is #1880 (`TryParse` failure output),
 inactive. **No new `SR-AUD-*` identifier; numbering stays frozen at 364.**
+
+### Post-audit subset remediation — #1929 rows 5–6 (2026-08-01)
+
+The #1879 record above is preserved. Exact approval under
+`docs/TextSubsetCompatibilityDecision.md` §6.5 item (3) now makes the parser
+trim only surrounding invariant whitespace, accept one- or two-digit clock
+fields, and retain one through seven fractional digits in DateTime's existing
+100-nanosecond tick representation. The corrected-premise note in the #1879
+section was right that .NET accepts `.1234567`, but wrong to call this type
+millisecond-resolution: only the old parser intermediate was. Inner whitespace,
+garbage, an eighth digit, unpadded dates and short/compact offsets remain
+rejected. SR-AUD-007 remains remediated; #1929 is a partial post-audit ticket,
+not a new finding. Evidence and ABI/sanitizer results are in the date-time plan
+§22; numbering remains 364.

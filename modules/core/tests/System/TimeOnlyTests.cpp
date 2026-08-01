@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include "System/TimeOnly.hpp"
 #include "System/TimeSpan.hpp"
+#include "System/DateTime.hpp"
+#include "System/DateOnly.hpp"
 #include "System/FormatException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 
@@ -493,7 +495,7 @@ TEST(TimeOnlyTests, Ccf002_MalformedGrammarIsNowRejected) {
     EXPECT_FALSE(TimeOnly::TryParse("10:20:30.abc", t));
     EXPECT_FALSE(TimeOnly::TryParse("10:20:30junk", t));
     EXPECT_FALSE(TimeOnly::TryParse("10:20:30.", t));
-    EXPECT_FALSE(TimeOnly::TryParse("10:20:30.1234", t));
+    EXPECT_FALSE(TimeOnly::TryParse("10:20:30.12345678", t));
     EXPECT_THROW(TimeOnly::Parse("10:20:30junk"), System::FormatException);
 }
 
@@ -533,10 +535,85 @@ TEST(TimeOnlyTests, Ccf002_UnpaddedFieldsAreStillAccepted) {
 // them is part of any documented grammar.
 TEST(TimeOnlyTests, Ccf002_SscanfLeniencyShapesAreGone) {
     TimeOnly t;
-    EXPECT_FALSE(TimeOnly::TryParse(" 10:20:30", t));
+    EXPECT_TRUE(TimeOnly::TryParse(" 10:20:30", t));
     EXPECT_FALSE(TimeOnly::TryParse("+10:20:30", t));
     EXPECT_FALSE(TimeOnly::TryParse("10:20:30.-1", t));
     EXPECT_FALSE(TimeOnly::TryParse("10:20:30Z", t));
-    EXPECT_FALSE(TimeOnly::TryParse("10:20:30 ", t));
+    EXPECT_TRUE(TimeOnly::TryParse("10:20:30 ", t));
     EXPECT_FALSE(TimeOnly::TryParse("99999999999999:20:30", t));
+}
+
+// #1929 rows 5-6 (approved 2026-08-01). TimeOnly's existing four-int object
+// representation now retains ticks-within-the-second rather than truncating to
+// milliseconds, preserving size/alignment while making all related doors agree.
+TEST(TimeOnlyTests, Approved1929_OneThroughSevenFractionDigitsRetainExactTicks) {
+    const long long wholeSecond = TimeOnly(10, 20, 30).getTicksProperty();
+    const char* fractions[] = {"1", "12", "123", "1234", "12345", "123456", "1234567"};
+    const long long expected[] = {1000000, 1200000, 1230000, 1234000, 1234500, 1234560, 1234567};
+    for (int i = 0; i < 7; ++i) {
+        const std::string text = std::string("10:20:30.") + fractions[i];
+        TimeOnly out;
+        ASSERT_TRUE(TimeOnly::TryParse(text, out)) << text;
+        EXPECT_EQ(out.getTicksProperty(), wholeSecond + expected[i]) << text;
+        EXPECT_EQ(TimeOnly::Parse(text).getTicksProperty(), out.getTicksProperty()) << text;
+    }
+
+    TimeOnly out(7, 7, 7, 7);
+    const char* rejected[] = {
+        "10:20:30.", "10:20:30.abc", "10:20:30.12345678",
+        "10:20:30..1", "10:20:30,1", "10:20:30.1x"
+    };
+    for (const char* text : rejected) EXPECT_FALSE(TimeOnly::TryParse(text, out)) << text;
+}
+
+TEST(TimeOnlyTests, Approved1929_TickPrecisionSurvivesTheStructuralSurface) {
+    const TimeOnly value(36'000'000'000LL + 2'000'000LL + 345LL);
+    EXPECT_EQ(value.getTicksProperty(), 36'002'000'345LL);
+    EXPECT_EQ(value.getMillisecondProperty(), 200);
+    EXPECT_EQ(value.getMicrosecondProperty(), 34);
+    EXPECT_EQ(value.getNanosecondProperty(), 500);
+    EXPECT_EQ(value.ToString("HH:mm:ss.fffffff"), "01:00:00.2000345");
+    EXPECT_EQ(value.ToString("ffffffff"), "200"); // preserve unsupported >7-run behavior
+    EXPECT_EQ(TimeOnly::Parse(value.ToString("HH:mm:ss.fffffff")).getTicksProperty(),
+              value.getTicksProperty());
+    EXPECT_EQ(value.ToTimeSpan().getTicksProperty(), value.getTicksProperty());
+    EXPECT_EQ(TimeOnly::FromTimeSpan(value.ToTimeSpan()).getTicksProperty(), value.getTicksProperty());
+
+    const System::DateTime dt = System::DateTime(2024, 6, 15).AddTicks(value.getTicksProperty());
+    EXPECT_EQ(TimeOnly::FromDateTime(dt).getTicksProperty(), value.getTicksProperty());
+    EXPECT_EQ(System::DateOnly(2024, 6, 15).ToDateTime(value).getTicksProperty(),
+              dt.getTicksProperty());
+
+    const TimeOnly oneTick(1);
+    EXPECT_NE(oneTick, TimeOnly(0));
+    EXPECT_LT(TimeOnly(0), oneTick);
+    EXPECT_EQ((oneTick - TimeOnly(0)).getTicksProperty(), 1);
+    EXPECT_TRUE(oneTick.IsBetween(TimeOnly(0), TimeOnly(2)));
+    EXPECT_EQ(TimeOnly::getMaxValueProperty().getTicksProperty(), 864'000'000'000LL - 1);
+}
+
+TEST(TimeOnlyTests, Approved1929_OuterWhitespaceOnlyAndExactFailureIdentity) {
+    const char* accepted[] = {
+        " 1:2:3.1234567 ", "\t1:2:3.1234567\r\n", "\f\v1:2:3.1234567\v"
+    };
+    for (const char* text : accepted) {
+        TimeOnly out;
+        ASSERT_TRUE(TimeOnly::TryParse(text, out)) << text;
+        EXPECT_EQ(out.getTicksProperty(), TimeOnly::Parse(text).getTicksProperty()) << text;
+    }
+
+    TimeOnly out;
+    const char* rejected[] = {
+        "1 :2:3", "1: 2:3", "1:2: 3", "1:2:3 .1", " \t\r\n ",
+        "+1:2:3", "1:-2:3", "1:2:+3", "1:2:3Z", "1:2:3 garbage"
+    };
+    for (const char* text : rejected) EXPECT_FALSE(TimeOnly::TryParse(text, out)) << text;
+    try {
+        (void)TimeOnly::Parse("1:2:3 garbage");
+        FAIL();
+    } catch (const System::FormatException& e) {
+        EXPECT_EQ(e.getHResultProperty(), static_cast<int>(0x80131537u));
+        EXPECT_EQ(std::string(e.what()),
+                  "String was not recognized as a valid TimeOnly: 1:2:3 garbage");
+    }
 }

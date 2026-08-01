@@ -422,6 +422,41 @@ premise and measurements remain above; this note corrects their incomplete
 coverage. No new `SR-AUD-*` identifier is issued; numbering remains frozen at
 364.
 
+#### Remediation after approval — #1929 rows 5–6, and the row-2 overlap
+
+The exact item (3) wording above was implemented on 2026-08-01. All five
+`Parse`/`TryParse` families now ignore surrounding invariant ASCII whitespace;
+`DateTime` clock fields take one or two digits; and `DateTime`/`TimeOnly`
+fractions take one through seven digits and retain every 100-nanosecond tick.
+The pre-change retained matrix (`build-probe/1929_approved_prefix.log`) rejected
+all five whitespace cases, the one-digit DateTime case, and both types' fourth
+through seventh fraction digits. The corresponding after matrix accepts them
+at the exact measured ticks while still rejecting inner whitespace, garbage,
+an eighth fractional digit, unpadded date fields, and short/compact offsets.
+
+One mapping subtlety must be explicit. The historical matrix labels all
+`4+ fraction digits` as row 2, while the operative approval item (3) explicitly
+places *one through seven fraction digits* in the row-6 self-consistency
+contract. Therefore this remediation changes the row-2 examples `.1234` and
+`.1234567` only because item (3) names those exact behaviors; it does **not**
+approve row 2's general current-.NET all-digit acceptance. Eight or more digits
+remain rejected. The four unapproved historical rows consequently remain:
+row 1 in full; row 2 beyond seven digits; row 3 in full; and row 4 in full.
+Rows 1, 3 and 4 still require their separate decisions, and no provider,
+`ParseExact`, `DateTimeKind`, culture, offset-application, or DateOnly-`Z`
+behavior changed.
+
+A second premise correction was found in the approved structural surface.
+`TimeOnly(long ticks)` claimed 100-nanosecond input but stored only milliseconds
+in its fourth existing `int`; `FromDateTime`, `FromTimeSpan`, `ToTimeSpan`,
+comparison, subtraction and formatting propagated that truncation. Accepting
+seven digits without repairing that representation would have returned the
+wrong value. The fourth field now stores ticks within the second, retaining the
+same four-`int` layout (`sizeof=16`, `alignof=4`) and all public declarations,
+while the related conversions and operators carry the exact tick. This
+inseparable post-audit defect is ticket #1931, completed with #1929a; no new
+`SR-AUD-*` identifier was issued.
+
 ### 6.6 Rejected alternatives, and why
 
 | Rejected | Why |

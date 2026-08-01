@@ -161,9 +161,9 @@ DateOnly DateOnly::FromDateTime(const DateTime& dt) {
 }
 
 DateTime DateOnly::ToDateTime(const TimeOnly& time) const {
-    return DateTime(year_, month_, day_,
-                     time.getHourProperty(), time.getMinuteProperty(),
-                     time.getSecondProperty(), time.getMillisecondProperty());
+    // #1929 row 6 correction: TimeOnly is tick-based; carrying only its millisecond
+    // component discarded the approved fourth-through-seventh fractional digits.
+    return DateTime(year_, month_, day_).AddTicks(time.getTicksProperty());
 }
 
 bool DateOnly::TryParse(const std::string& s, DateOnly& result) {
@@ -173,7 +173,7 @@ bool DateOnly::TryParse(const std::string& s, DateOnly& result) {
     // The grammar is now required to match the WHOLE string:
     //
     //     yyyy '-' MM '-' dd [ 'Z'|'z' ]
-    detail::DateTimeTextScanner scanner(s);
+    detail::DateTimeTextScanner scanner(detail::trimDateTimeText(s));
     int y = 0, m = 0, d = 0;
     if (!scanner.takeDigits(4, 4, y) || !scanner.take('-') ||
         !scanner.takeDigits(2, 2, m) || !scanner.take('-') ||

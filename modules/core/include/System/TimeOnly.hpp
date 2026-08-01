@@ -21,8 +21,9 @@ namespace System {
      *
      * C++ counterpart of .NET System.TimeOnly.
      * Stores the time as hours (0–23), minutes (0–59), seconds (0–59),
-     * and milliseconds (0–999). Sub-millisecond precision is not stored
-     * but ticks-based conversions account for it at ms granularity.
+     * and the 100-nanosecond ticks within the second. The four-int representation
+     * preserves the pre-existing size, alignment, and field layout while retaining
+     * the full precision promised by the ticks constructor and conversions.
      *
      * @note Missing surface versus real .NET's TimeOnly (all additive, none affect the behavior
      * of what's already implemented, which was verified against the reference including the
@@ -31,21 +32,21 @@ namespace System {
      * wrappedDays)` overloads of Add/AddHours/AddMinutes, the 5-arg microsecond constructor
      * overload, and the whole `ParseExact`/`TryParseExact` family plus culture/`DateTimeStyles`-
      * aware `Parse`/`TryParse` overloads (this port's Parse/TryParse only accept the fixed
-     * "HH:MM:SS"/"HH:MM:SS.fff" shapes). Add on demand rather than porting the full surface
+     * "H:M:S"/"H:M:S.fffffff" numeric subset, with one or two digits per clock field and
+     * one through seven fraction digits). Add on demand rather than porting the full surface
      * speculatively.
      */
     class TimeOnly {
         intcs hour_   = 0;
         intcs minute_ = 0;
         intcs second_ = 0;
-        intcs ms_     = 0;
+        intcs subsecondTicks_ = 0;
 
         static constexpr longcs TicksPerMs      = 10000LL;
         static constexpr longcs TicksPerSecond  = 10000000LL;
         static constexpr longcs TicksPerMinute  = 600000000LL;
         static constexpr longcs TicksPerHour    = 36000000000LL;
         static constexpr longcs TicksPerDay     = 864000000000LL;
-        static constexpr int    MsPerDay        = 86400000;
 
     public:
         /**
@@ -90,10 +91,11 @@ namespace System {
          * @param millisecond Millisecond of the second (0–999).
          */
         TimeOnly(intcs hour, intcs minute, intcs second, intcs millisecond)
-            : hour_(hour), minute_(minute), second_(second), ms_(millisecond) {
+            : hour_(hour), minute_(minute), second_(second) {
             validateHms(hour, minute, second);
             if (static_cast<SharpRuntime::uintcs>(millisecond) >= 1000)
                 throw ArgumentOutOfRangeException("millisecond", "Valid values are between 0 and 999, inclusive.");
+            subsecondTicks_ = millisecond * static_cast<intcs>(TicksPerMs);
         }
 
         /**
@@ -105,7 +107,7 @@ namespace System {
         explicit TimeOnly(longcs ticks) {
             if (static_cast<SharpRuntime::ulongcs>(ticks) >= static_cast<SharpRuntime::ulongcs>(TicksPerDay))
                 throw ArgumentOutOfRangeException("ticks", "Ticks must be between 0 and and TimeOnly.MaxValue.Ticks.");
-            ms_     = static_cast<intcs>((ticks / TicksPerMs) % 1000);
+            subsecondTicks_ = static_cast<intcs>(ticks % TicksPerSecond);
             second_ = static_cast<intcs>((ticks / TicksPerSecond) % 60);
             minute_ = static_cast<intcs>((ticks / TicksPerMinute) % 60);
             hour_   = static_cast<intcs>(ticks / TicksPerHour);
@@ -123,11 +125,11 @@ namespace System {
         [[nodiscard]] static TimeOnly getMinValueProperty() { return TimeOnly(0, 0, 0, 0); }
 
         /**
-         * @brief Gets the latest possible TimeOnly value (23:59:59.999).
+         * @brief Gets the latest possible TimeOnly value (23:59:59.9999999).
          *
          * C++ counterpart of .NET TimeOnly.MaxValue.
          */
-        [[nodiscard]] static TimeOnly getMaxValueProperty() { return TimeOnly(23, 59, 59, 999); }
+        [[nodiscard]] static TimeOnly getMaxValueProperty() { return TimeOnly(TicksPerDay - 1); }
 
         // -----------------------------------------------------------------------
         // Properties
@@ -159,21 +161,27 @@ namespace System {
          *
          * C++ counterpart of .NET TimeOnly.Millisecond.
          */
-        [[nodiscard]] intcs getMillisecondProperty() const noexcept { return ms_; }
+        [[nodiscard]] intcs getMillisecondProperty() const noexcept {
+            return subsecondTicks_ / static_cast<intcs>(TicksPerMs);
+        }
 
         /**
-         * @brief Gets the microsecond component (always 0 — sub-ms not stored).
+         * @brief Gets the microsecond component (0–999 after the millisecond component).
          *
          * C++ counterpart of .NET TimeOnly.Microsecond.
          */
-        [[nodiscard]] intcs getMicrosecondProperty() const noexcept { return 0; }
+        [[nodiscard]] intcs getMicrosecondProperty() const noexcept {
+            return (subsecondTicks_ / 10) % 1000;
+        }
 
         /**
-         * @brief Gets the nanosecond component (always 0 — sub-ms not stored).
+         * @brief Gets the nanosecond component (0–900 in 100ns increments).
          *
          * C++ counterpart of .NET TimeOnly.Nanosecond.
          */
-        [[nodiscard]] intcs getNanosecondProperty()  const noexcept { return 0; }
+        [[nodiscard]] intcs getNanosecondProperty() const noexcept {
+            return (subsecondTicks_ % 10) * 100;
+        }
 
         /**
          * @brief Gets the number of 100-nanosecond ticks since midnight.
@@ -184,7 +192,7 @@ namespace System {
             return static_cast<longcs>(hour_)   * TicksPerHour
                  + static_cast<longcs>(minute_) * TicksPerMinute
                  + static_cast<longcs>(second_) * TicksPerSecond
-                 + static_cast<longcs>(ms_)     * TicksPerMs;
+                 + static_cast<longcs>(subsecondTicks_);
         }
 
         // -----------------------------------------------------------------------
@@ -235,7 +243,7 @@ namespace System {
          * C++ counterpart of .NET TimeOnly.Equals(TimeOnly).
          */
         [[nodiscard]] bool Equals(const TimeOnly& value) const noexcept {
-            return toMs() == value.toMs();
+            return getTicksProperty() == value.getTicksProperty();
         }
 
         /**
@@ -245,7 +253,7 @@ namespace System {
          * @return Negative if earlier, zero if equal, positive if later.
          */
         [[nodiscard]] intcs CompareTo(const TimeOnly& value) const noexcept {
-            intcs a = toMs(), b = value.toMs();
+            const longcs a = getTicksProperty(), b = value.getTicksProperty();
             return (a < b) ? -1 : (a > b) ? 1 : 0;
         }
 
@@ -254,7 +262,10 @@ namespace System {
          *
          * C++ counterpart of .NET TimeOnly.GetHashCode().
          */
-        [[nodiscard]] intcs GetHashCode() const noexcept { return toMs(); }
+        [[nodiscard]] intcs GetHashCode() const noexcept {
+            const auto ticks = static_cast<SharpRuntime::ulongcs>(getTicksProperty());
+            return static_cast<intcs>(ticks) ^ static_cast<intcs>(ticks >> 32);
+        }
 
         /**
          * @brief Determines whether this time falls within the range [@p start, @p end)
@@ -272,9 +283,9 @@ namespace System {
             // Uses unsigned wraparound arithmetic (matching .NET's ulong-tick implementation)
             // so that start==end correctly yields false regardless of `this`, and midnight-
             // wrapping ranges (start > end) work without a separate branch's edge cases.
-            auto t = static_cast<SharpRuntime::uintcs>(toMs());
-            auto s = static_cast<SharpRuntime::uintcs>(start.toMs());
-            auto e = static_cast<SharpRuntime::uintcs>(end.toMs());
+            auto t = static_cast<SharpRuntime::ulongcs>(getTicksProperty());
+            auto s = static_cast<SharpRuntime::ulongcs>(start.getTicksProperty());
+            auto e = static_cast<SharpRuntime::ulongcs>(end.getTicksProperty());
             if (s <= e)
                 return (t - s) < (e - s);
             return (t - e) >= (s - e);
@@ -297,7 +308,7 @@ namespace System {
          * C++ counterpart of .NET TimeOnly.ToTimeSpan().
          */
         [[nodiscard]] TimeSpan ToTimeSpan() const {
-            return TimeSpan(0, hour_, minute_, second_, ms_);
+            return TimeSpan(getTicksProperty());
         }
 
         /**
@@ -343,7 +354,7 @@ namespace System {
             oss << std::setw(2) << std::setfill('0') << hour_   << ':'
                 << std::setw(2) << std::setfill('0') << minute_ << ':'
                 << std::setw(2) << std::setfill('0') << second_ << '.'
-                << std::setw(3) << std::setfill('0') << ms_;
+                << std::setw(3) << std::setfill('0') << getMillisecondProperty();
             return oss.str();
         }
 
@@ -352,7 +363,8 @@ namespace System {
          *
          * C++ counterpart of .NET TimeOnly.ToString(string).
          * Supported tokens: HH/H (24h hour), hh/h (12h hour),
-         * mm/m (minute), ss/s (second), fff/ff/f (ms), single-quoted literals.
+         * mm/m (minute), ss/s (second), f through fffffff (100ns precision),
+         * single-quoted literals.
          * @param format A format string.
          */
         [[nodiscard]] std::string ToString(const std::string& format) const;
@@ -362,7 +374,7 @@ namespace System {
         // -----------------------------------------------------------------------
 
         /**
-         * @brief Parses a time string in the form "HH:MM:SS" or "HH:MM:SS.fff".
+         * @brief Parses a time string with one/two-digit fields and up to seven fraction digits.
          *
          * C++ counterpart of .NET TimeOnly.Parse(string).
          * @throws System::FormatException on failure.
@@ -373,7 +385,8 @@ namespace System {
          * @brief Tries to parse a time string; returns false on failure.
          *
          * C++ counterpart of .NET TimeOnly.TryParse(string, out TimeOnly).
-         * Accepted formats: "HH:MM:SS" and "HH:MM:SS.fff".
+         * Accepted numeric subset: "H:M:S" through "HH:MM:SS.fffffff", with
+         * optional invariant whitespace surrounding the whole input.
          * @param s      Input string.
          * @param result Receives the parsed value on success.
          * @return true on success; false on parse failure.
@@ -391,30 +404,28 @@ namespace System {
          * C++ counterpart of .NET TimeOnly.operator-(TimeOnly, TimeOnly).
          */
         friend TimeSpan operator-(const TimeOnly& t1, const TimeOnly& t2) {
-            constexpr intcs msPerDay = 24 * 60 * 60 * 1000;
-            intcs diff = t1.toMs() - t2.toMs();
-            if (diff < 0) diff += msPerDay;
-            return TimeSpan::FromMilliseconds(static_cast<double>(diff));
+            longcs diff = t1.getTicksProperty() - t2.getTicksProperty();
+            if (diff < 0) diff += TicksPerDay;
+            return TimeSpan(diff);
         }
 
         /** @brief Returns true if @p a and @p b represent the same time. */
         bool operator==(const TimeOnly& o) const noexcept {
-            return hour_==o.hour_ && minute_==o.minute_ && second_==o.second_ && ms_==o.ms_;
+            return hour_ == o.hour_ && minute_ == o.minute_ && second_ == o.second_ &&
+                   subsecondTicks_ == o.subsecondTicks_;
         }
         /** @brief Returns true if @p a and @p b represent different times. */
         bool operator!=(const TimeOnly& o) const noexcept { return !(*this==o); }
         /** @brief Returns true if this is earlier than @p o. */
-        bool operator< (const TimeOnly& o) const noexcept { return toMs() <  o.toMs(); }
+        bool operator< (const TimeOnly& o) const noexcept { return getTicksProperty() <  o.getTicksProperty(); }
         /** @brief Returns true if this is earlier than or equal to @p o. */
-        bool operator<=(const TimeOnly& o) const noexcept { return toMs() <= o.toMs(); }
+        bool operator<=(const TimeOnly& o) const noexcept { return getTicksProperty() <= o.getTicksProperty(); }
         /** @brief Returns true if this is later than @p o. */
-        bool operator> (const TimeOnly& o) const noexcept { return toMs() >  o.toMs(); }
+        bool operator> (const TimeOnly& o) const noexcept { return getTicksProperty() >  o.getTicksProperty(); }
         /** @brief Returns true if this is later than or equal to @p o. */
-        bool operator>=(const TimeOnly& o) const noexcept { return toMs() >= o.toMs(); }
+        bool operator>=(const TimeOnly& o) const noexcept { return getTicksProperty() >= o.getTicksProperty(); }
 
     private:
-        intcs toMs() const noexcept { return ((hour_*60+minute_)*60+second_)*1000+ms_; }
-
         static void validateHms(intcs hour, intcs minute, intcs second) {
             if (static_cast<SharpRuntime::uintcs>(hour) >= 24 ||
                 static_cast<SharpRuntime::uintcs>(minute) >= 60 ||

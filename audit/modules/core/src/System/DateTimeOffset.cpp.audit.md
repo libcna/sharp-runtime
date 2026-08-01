@@ -214,3 +214,14 @@ Sanitizers **not applicable** and recorded as such: one integer comparison, no
 allocation, pointer arithmetic, lifetime change or shared state — and the probe
 `build-probe/1878_offset_field_probe.cpp` shows the previously escaping
 `OverflowException` is gone (`build-probe/1878_postfix.log`).
+
+## Post-audit subset remediation — #1929 rows 5–6 (2026-08-01)
+
+The historical SR-AUD-007a repair above is unchanged. Under the exact §6.5
+item (3) approval, DateTimeOffset now trims surrounding invariant whitespace
+and inherits DateTime's approved one/two-digit clock fields and one-through-seven
+digit tick-precision fraction. Offset text is still exactly `Z`/`z` or
+`±HH:MM`; `+2:5`, `+2`, `+0205`, inner whitespace, garbage and eight fraction
+digits still fail. Both Parse and TryParse are pinned. No declaration, layout,
+vtable, exception specification or affected archive symbol name changed; no
+audit status or identifier changed.

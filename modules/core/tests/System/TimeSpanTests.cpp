@@ -428,9 +428,21 @@ TEST(TimeSpanTests, TryParse_TrailingGarbageAfterFraction_ReturnsFalse) {
     EXPECT_FALSE(TimeSpan::TryParse("00:00:01.5000000garbage", ts));
 }
 
-TEST(TimeSpanTests, TryParse_TrailingWhitespace_ReturnsFalse) {
+TEST(TimeSpanTests, TryParse_OuterWhitespace_ReturnsExactValue) {
     TimeSpan ts;
-    EXPECT_FALSE(TimeSpan::TryParse("12:34:56 ", ts));
+    ASSERT_TRUE(TimeSpan::TryParse(" \t12:34:56.1234567\r\n", ts));
+    EXPECT_EQ(ts.getTicksProperty(),
+              12 * TimeSpan::TicksPerHour + 34 * TimeSpan::TicksPerMinute +
+              56 * TimeSpan::TicksPerSecond + 1'234'567);
+    EXPECT_EQ(TimeSpan::Parse(" \t12:34:56.1234567\r\n").getTicksProperty(),
+              ts.getTicksProperty());
+    EXPECT_FALSE(TimeSpan::TryParse("12 :34:56", ts));
+    // Existing sscanf grammar skips whitespace before the minute conversion;
+    // row 5 widens only the outside boundary and does not authorize narrowing it.
+    EXPECT_TRUE(TimeSpan::TryParse("12: 34:56", ts));
+    EXPECT_FALSE(TimeSpan::TryParse("12:34 :56", ts));
+    EXPECT_FALSE(TimeSpan::TryParse("12:34: 56", ts));
+    EXPECT_FALSE(TimeSpan::TryParse(" \t\r\n ", ts));
 }
 
 TEST(TimeSpanTests, Parse_TrailingGarbage_ThrowsFormatException) {
@@ -655,6 +667,8 @@ TEST(TimeSpanTests, Parse_MalformedInputsKeepFormatException_1836) {
     EXPECT_FALSE(TimeSpan::TryParse("", ts));
     EXPECT_THROW(TimeSpan::Parse("1.24:00:00"), System::FormatException);
     EXPECT_THROW(TimeSpan::Parse("1.00:60:00"), System::FormatException);
-    EXPECT_THROW(TimeSpan::Parse("12:34:56 "), System::FormatException);
+    EXPECT_EQ(TimeSpan::Parse("12:34:56 ").getTicksProperty(),
+              12 * TimeSpan::TicksPerHour + 34 * TimeSpan::TicksPerMinute +
+              56 * TimeSpan::TicksPerSecond);
     EXPECT_THROW(TimeSpan::Parse(""), System::FormatException);
 }
