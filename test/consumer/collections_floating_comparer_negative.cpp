@@ -30,6 +30,7 @@
 //
 // NEGATIVE-FIXTURE: component=Collections.Core
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -169,6 +170,97 @@ int main() {
     auto fs = FrozenSet<long double>::CreateFromSet(migrated8);
     FrozenSet<long double>::const_iterator it = fs.begin();
     (void)it;
+#endif
+
+    using NullableDouble = std::optional<double>;
+    using NullableLongDouble = std::optional<long double>;
+
+#if SHARP_RUNTIME_NEGATIVE_SITE == 9
+    // NEGATIVE(readonlyset-nullable-double-raw-unordered-set): no matching function for call
+    //     | no known conversion
+    auto rawNullableSet = std::make_shared<std::unordered_set<NullableDouble>>();
+    ReadOnlySet<NullableDouble> nullableRos(rawNullableSet);
+    (void)nullableRos;
+#else
+    auto migrated9 = std::make_shared<ReadOnlySet<NullableDouble>::SetType>();
+    ReadOnlySet<NullableDouble> nullableRos(migrated9);
+    (void)nullableRos;
+#endif
+
+#if SHARP_RUNTIME_NEGATIVE_SITE == 10
+    // NEGATIVE(readonlydict-nullable-double-raw-unordered-map): no matching function for call
+    //     | no known conversion
+    auto rawNullableMap = std::make_shared<std::unordered_map<NullableDouble, int>>();
+    ReadOnlyDictionary<NullableDouble, int> nullableRod(rawNullableMap);
+    (void)nullableRod;
+#else
+    auto migrated10 =
+        std::make_shared<ReadOnlyDictionary<NullableDouble, int>::MapType>();
+    ReadOnlyDictionary<NullableDouble, int> nullableRod(migrated10);
+    (void)nullableRod;
+#endif
+
+#if SHARP_RUNTIME_NEGATIVE_SITE == 11
+    // NEGATIVE(frozenset-nullable-double-createfromset-raw): cannot convert
+    //     | no matching function for call
+    std::unordered_set<NullableDouble> rawNullableFrozenSet;
+    (void)FrozenSet<NullableDouble>::CreateFromSet(rawNullableFrozenSet);
+#else
+    FrozenSet<NullableDouble>::SetType migrated11;
+    (void)FrozenSet<NullableDouble>::CreateFromSet(migrated11);
+#endif
+
+#if SHARP_RUNTIME_NEGATIVE_SITE == 12
+    // NEGATIVE(frozendict-nullable-double-createfrommap-raw): cannot convert
+    //     | no matching function for call
+    std::unordered_map<NullableDouble, int> rawNullableFrozenMap;
+    (void)FrozenDictionary<NullableDouble, int>::CreateFromMap(rawNullableFrozenMap);
+#else
+    FrozenDictionary<NullableDouble, int>::MapType migrated12;
+    (void)FrozenDictionary<NullableDouble, int>::CreateFromMap(migrated12);
+#endif
+
+    Dictionary<NullableDouble, int> nullableDictionary;
+#if SHARP_RUNTIME_NEGATIVE_SITE == 13
+    // NEGATIVE(dictionary-nullable-double-tomap-raw-reference): invalid initialization of reference
+    //     | cannot bind
+    const std::unordered_map<NullableDouble, int>& nullableBacking =
+        nullableDictionary.ToMap();
+    (void)nullableBacking;
+#else
+    const Dictionary<NullableDouble, int>::MapType& nullableBacking =
+        nullableDictionary.ToMap();
+    (void)nullableBacking;
+#endif
+
+#if SHARP_RUNTIME_NEGATIVE_SITE == 14
+    // NEGATIVE(dictionary-nullable-double-maptype-must-not-be-raw): static assertion failed
+    static_assert(std::is_same_v<Dictionary<NullableDouble, int>::MapType,
+                                 std::unordered_map<NullableDouble, int>>,
+                  "site 14 must be rejected: the nullable-floating map type must move");
+#endif
+
+    static_assert(std::is_same_v<FrozenSet<NullableDouble>::const_iterator,
+                                 std::unordered_set<NullableDouble>::const_iterator>,
+                  "measured: a nullable-double node iterator does not move");
+    static_assert(!std::is_same_v<FrozenSet<NullableLongDouble>::const_iterator,
+                                  std::unordered_set<NullableLongDouble>::const_iterator>,
+                  "measured: a nullable-long-double node iterator moves");
+
+#if SHARP_RUNTIME_NEGATIVE_SITE == 15
+    // NEGATIVE(frozenset-nullable-longdouble-iterator-raw): cannot convert
+    //     | conversion from
+    FrozenSet<NullableLongDouble>::SetType nullableLongSet;
+    auto nullableLongFrozen = FrozenSet<NullableLongDouble>::CreateFromSet(nullableLongSet);
+    std::unordered_set<NullableLongDouble>::const_iterator nullableLongIterator =
+        nullableLongFrozen.begin();
+    (void)nullableLongIterator;
+#else
+    FrozenSet<NullableLongDouble>::SetType migrated15;
+    auto nullableLongFrozen = FrozenSet<NullableLongDouble>::CreateFromSet(migrated15);
+    FrozenSet<NullableLongDouble>::const_iterator nullableLongIterator =
+        nullableLongFrozen.begin();
+    (void)nullableLongIterator;
 #endif
 
     // The whole non-floating surface is unchanged and must keep compiling in

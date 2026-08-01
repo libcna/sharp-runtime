@@ -567,3 +567,100 @@ LSan discovery was unavailable because the execution environment runs under
 ptrace; that limitation is retained rather than reported as a clean LSan run.
 Collection aliases remain unchanged at this checkpoint; #1925 is still the
 dependent second work unit.
+
+## 12. #1925 implementation record (2026-08-01)
+
+The dependent work unit now selects `DefaultLess`, `DefaultHash`, and
+`DefaultEqualTo` for the same three direct nullable-floating forms and no
+others. The former permanent divergence test is inverted. A new five-test
+suite instantiates each approved type across all sixteen consumers and covers
+null/duplicate-null, two NaN payloads in both insertion orders, duplicate NaN,
+signed zero, finite values, infinities, lowest/maximum finite values, growth,
+trim/rehash, lookup, removal/reinsertion, copy/move, iteration, set operations,
+self-comparison, views, frozen/read-only creation and live lookup, immutable
+updates, concurrent/ordered/keyed paths, and explicit runtime comparers.
+
+Before selection, the identical postcondition suite produced 201 failing
+assertions across the three complete type matrices. Hashed containers accepted
+duplicate NaNs and could not find, remove, or self-compare them; ordered
+containers collapsed finite/infinite/zero values around NaN; projections and
+copies propagated the defect. After selection, the five new tests pass, and
+the combined comparer/collection focused gate is 13/13.
+
+### 12.1 Corrected compatibility measurements
+
+The source-level change is exactly the approved one: all three public
+`DefaultKey*` aliases move, as do the six public backing aliases
+(`Dictionary::MapType`, `HashSet::SetType`, both Frozen aliases, and both
+ReadOnly aliases) and the public functions that name them. Private backing
+types change in the remaining consumers. All 48 measured outer objects (16
+consumers times three types) retain size, alignment, standard-layout, and
+trivial-copy classifications. Measured sizes by consumer are recorded in
+`build-probe/1925_{pre,post}_nullable_collection_repr.log`; no field offset is
+publicly observable. Predicate `noexcept` and `constexpr` observations are
+unchanged after preserving the old standard predicates' potentially-throwing
+optional comparison/equality specifications.
+
+Correction: the design's broad “affected iterator/deduced return types move”
+premise is toolchain-dependent and overstated for this libstdc++ 14 baseline.
+Hash-node iterators erase the predicate type. Nullable `float` and nullable
+`double` iterators remain identical; nullable `long double` hash iterators move
+from cached to uncached node form because the selected policy hasher changes
+libstdc++'s private fast-hash classification. Ordered tree iterators and the
+nominal nested `SortedSet`/`SortedDictionary` iterator types remain identical.
+The backing aliases, private member types, and inline symbols still move for
+all approved instantiations, so this correction does not make the change ABI
+neutral.
+
+The identical full-symbol fixture has 12,708 defined symbols before and 12,745
+after: 2,124 removed and 2,161 added predicate-bearing/template symbols. All
+182 undefined symbols are identical. The total vtable count remains 113;
+six standard shared-control-block vtables bearing raw predicates are replaced
+by six bearing CCF-010 predicates, while all 31 sharp-runtime collection/test
+vtables and their slot sets remain identical. Mangled-name changes are retained
+in the complete added/removed inventories. No public function declaration was
+otherwise changed.
+
+### 12.2 Mutation, sanitizer, and performance evidence
+
+All ten #1925 mutations are accounted for with no survivor: ordered/hash/equal
+alias selection and Frozen/ReadOnly propagation are compile-time rejected;
+ordered nullable behavior, hashed equality, hashed hash, signed-zero hashing,
+and immutable-sorted self-equality are killed by permanent tests. The earlier
+six #1934 mutations separately cover nullable comparer/default selection,
+null presence, and NaN canonicalization.
+
+Focused ASan/UBSan passes all five collection tests while exercising insertion,
+lookup, erasure, rehash, copy/move, iteration, projection construction, and
+destruction. LSan executes the tests but cannot perform leak discovery under
+the environment's ptrace restriction. Sanitizers do not prove comparison
+equivalence, ordering, findability, or hash consistency; the behavior and
+mutation matrices are the primary evidence.
+
+Two seven-round campaigns (14 measured rounds combined) cover Dictionary,
+HashSet, and SortedSet insert/lookup for finite, null-heavy, NaN-heavy, mixed,
+and 120,000-key rehash-heavy inputs. Corrected NaN-heavy hashed paths are
+roughly 0.21–0.29x the old time while finding all 40,000 probes instead of only
+8,000. The apparent 10.16x/12.73x mixed SortedSet cost is defect removal: the
+old tree retained only 2 keys, the corrected tree 10,005. Finite/null/rehash
+workloads expose the expected presence/NaN-policy cost; all raw medians and
+counts are in `build-probe/1925_nullable_collection_benchmark_summary_combined.log`.
+One separate stable result is retained as inactive ticket #1937: finite
+rehash-heavy `HashSet<optional<double>>` lookup measured 2.092x with identical
+120,000 counts/finds. It is not optimized here and does not reopen #1926.
+
+### 12.3 Corrected scope and new defects
+
+`ImmutableSortedSet<optional<F>>::SetEquals` required a bounded comparer-
+equivalence path because its generic fallback calls raw element `operator==`
+and is NaN-nonreflexive. The new branch is explicitly gated on
+`isDirectNullableFloatingV<T>`. The same fallback defect is independently
+reproduced for already-supported direct `double` (`Count=3`, `Contains(NaN)=1`,
+`SetEquals(self)=0`) and is deliberately not absorbed; inactive ticket #1936
+owns it. Pair/tuple hash instantiations remain ill-formed, and no composite or
+custom type gained capability.
+
+The negative-consumer boundary grows by seven sites: raw nullable-double
+ReadOnly/Frozen/Dictionary spellings are rejected, the class aliases compile,
+and the nullable-long-double iterator transition is pinned. Final checker:
+10 fixtures, 81 sites, 91 compiler invocations, peak two jobs.

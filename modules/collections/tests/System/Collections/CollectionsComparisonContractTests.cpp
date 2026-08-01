@@ -1410,19 +1410,18 @@ TEST(CollectionsComparisonContract, HashContainerNegativeControlsAreUnchanged) {
     EXPECT_EQ(ss.getCountProperty(), 1);
 }
 
-// Recorded limitation, NOT a repair: std::optional<double> is not a
-// floating-point type, so the policy deliberately does not select for it and a
-// nullable floating key keeps raw IEEE equality. In .NET
-// `Dictionary<double?,V>` uses EqualityComparer<double?>.Default, which is
-// NaN-reflexive, so this row DIVERGES. Ticket #1925 records it; the test pins
-// today's behaviour so the divergence cannot change silently.
-TEST(CollectionsComparisonContract, NullableFloatingKeysKeepRawIeeeEqualityForNow) {
+// Ticket #1925: a direct nullable-floating key follows
+// EqualityComparer<Nullable<F>>.Default rather than lifted operator==. Raw
+// optional equality remains NaN-nonreflexive; the collection policy is not.
+TEST(CollectionsComparisonContract, NullableFloatingKeysUseNullableDefaultEquality) {
     G::Dictionary<std::optional<double>, int> d;
     d.Add(std::optional<double>(kNaN), 1);
     int got = 0;
-    EXPECT_FALSE(d.TryGetValue(std::optional<double>(kNaN), got))
-        << "if this now succeeds, ticket #1925 has been implemented -- update the record";
-    EXPECT_FALSE(d.TryGetValue(std::optional<double>(payloadNaN()), got));
+    EXPECT_TRUE(d.TryGetValue(std::optional<double>(kNaN), got));
+    EXPECT_EQ(got, 1);
+    EXPECT_TRUE(d.TryGetValue(std::optional<double>(payloadNaN()), got));
+    EXPECT_EQ(got, 1);
+    EXPECT_FALSE(d.TryAdd(std::optional<double>(payloadNaN()), 2));
     EXPECT_EQ(d.getCountProperty(), 1);
 
     // An ordinary nullable key is unaffected in either direction.

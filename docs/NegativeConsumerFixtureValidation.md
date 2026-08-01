@@ -1315,3 +1315,26 @@ and real-harness summaries. Their SHA-256 values are respectively
 and `2c4a3e2fd0f7e3ea82abd08ce0288e5748c58e48f87783a0f7ff515cc356ecff`.
 The real run was explicitly configured through both
 `SHARP_RUNTIME_BUILD_JOBS=2` and `--jobs 2`.
+
+## 20. Ticket #1925 — direct nullable-floating migration sites (2026-08-01)
+
+The approved direct nullable-floating alias transition adds sites 9–15 to
+`collections_floating_comparer_negative.cpp`:
+
+- raw `ReadOnlySet<optional<double>>` and
+  `ReadOnlyDictionary<optional<double>,int>` constructor arguments;
+- raw `FrozenSet<optional<double>>::CreateFromSet` and
+  `FrozenDictionary<optional<double>,int>::CreateFromMap` arguments;
+- raw binding of `Dictionary<optional<double>,int>::ToMap()`;
+- the assertion that nullable-double `MapType` must not remain the raw standard
+  map;
+- the measured nullable-long-double raw iterator spelling.
+
+The baseline branches use the owning collection aliases. Static controls pin
+that nullable-double node iterator identity remains unchanged on libstdc++ 14,
+while nullable-long-double iterator identity moves because hash-code caching
+changes. The final bounded checker result is **10 fixtures / 81 sites / 91
+compiler invocations / peak 2 jobs**. The first invocation without a writable
+`CCACHE_DIR` failed before compiling the fixtures; the canonical rerun used
+repository-local `build-tmp/ccache` and is retained in
+`build-probe/1925_negative_fixture.log`.

@@ -241,7 +241,9 @@ TEST(NullableFloatingComparerContract, PublicShapeAndLanguagePropertiesStayFixed
     static_assert(!noexcept(D::compareValues(none, one)));
     static_assert(!noexcept(D::equalValues(none, one)));
     static_assert(!noexcept(D::hashValue(none)));
-    static_assert(noexcept(D::DefaultLess<O>{}(none, one)));
+    // #1925 selects this predicate in place of std::less<O>; preserve the
+    // selected predicate's pre-change potentially-throwing specification.
+    static_assert(!noexcept(D::DefaultLess<O>{}(none, one)));
 
     SUCCEED();
 }
