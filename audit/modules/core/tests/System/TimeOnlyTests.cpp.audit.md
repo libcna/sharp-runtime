@@ -27,3 +27,11 @@ verify failure is non-mutating.
 
 The existing clock-arithmetic coverage is useful but does not guard parser
 strictness (SR-AUD-009).
+
+## Correction — #1880 (2026-08-01)
+
+The non-mutating-sentinel requirement above is retained historically but was
+wrong about .NET. The #1880 matrix now requires every false result to replace a
+prepopulated 07:07:07.007 value with TimeOnly.MinValue, spanning incomplete,
+fraction, suffix, component, empty and precision failures. Min/max success and
+Parse's exact FormatException remain pinned.

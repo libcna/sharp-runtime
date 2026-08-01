@@ -167,6 +167,12 @@ DateTime DateOnly::ToDateTime(const TimeOnly& time) const {
 }
 
 bool DateOnly::TryParse(const std::string& s, DateOnly& result) {
+    // Ticket #1880: every false result assigns DateOnly.MinValue, matching
+    // .NET's out contract while leaving the success path commit-only.
+    const auto fail = [&result]() {
+        result = DateOnly::MinValue;
+        return false;
+    };
     // CCF-002 class D (SR-AUD-061, ticket #1879, approved 2026-07-31). The
     // std::sscanf PREFIX conversion accepted "2024-06-15junk" and, worse,
     // "2024-06-15 10:20:30" -- a full timestamp silently truncated to its date.
@@ -178,18 +184,18 @@ bool DateOnly::TryParse(const std::string& s, DateOnly& result) {
     if (!scanner.takeDigits(4, 4, y) || !scanner.take('-') ||
         !scanner.takeDigits(2, 2, m) || !scanner.take('-') ||
         !scanner.takeDigits(2, 2, d))
-        return false;
+        return fail();
     // A trailing UTC designator stays accepted and stays ignored, matching
     // DateTime::TryParse; "2024-06-15Z" parsed before this ticket and still does.
     if (!scanner.take('Z')) (void)scanner.take('z');
-    if (!scanner.atEnd()) return false;
-    if (y < 1 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31) return false;
+    if (!scanner.atEnd()) return fail();
+    if (y < 1 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31) return fail();
     try {
         result = DateOnly(y, m, d);
     } catch (...) {
         // Rejects dates with a day that doesn't exist in the given month/year
         // (e.g. February 30, or February 29 in a non-leap year).
-        return false;
+        return fail();
     }
     return true;
 }

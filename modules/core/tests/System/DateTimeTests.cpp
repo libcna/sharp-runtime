@@ -1075,3 +1075,40 @@ TEST(DateTimeTests, Ccf002d_PreviouslyRejectedInputIsStillRejected) {
     EXPECT_FALSE(DateTime::TryParse("2024-02-30", dt));
     EXPECT_FALSE(DateTime::TryParse("2024-6-15", dt));
 }
+
+// Ticket #1880: C# `out` is definitely assigned. Every non-throwing failure
+// therefore publishes DateTime.MinValue, never a caller's prior successful value.
+TEST(DateTimeTests, Ticket1880_TryParseFailureAlwaysAssignsMinValue) {
+    DateTime out(638'540'436'301'234'567LL);
+    const auto expectFailure = [&out](const char* text) {
+        out = DateTime(638'540'436'301'234'567LL);
+        EXPECT_FALSE(DateTime::TryParse(text, out)) << text;
+        EXPECT_EQ(out.getTicksProperty(), DateTime::MinValue.getTicksProperty()) << text;
+    };
+
+    expectFailure("");                                      // initial scan / empty
+    expectFailure(" \t\r\n ");                            // whitespace-only
+    expectFailure("not-a-date");                            // malformed date
+    expectFailure("2024-06-15T1:x:3");                      // malformed time
+    expectFailure("2024-06-15T1:2:3.");                     // malformed fraction
+    expectFailure("2024-06-15T1:2:3+2:05");                // malformed offset
+    expectFailure("2024-06-15T1:2:3junk");                 // trailing content
+    expectFailure("2024-02-30");                           // constructor rejection
+    expectFailure("2024-06-15T1:2:3.12345678");            // precision boundary
+
+    ASSERT_TRUE(DateTime::TryParse("0001-01-01T0:0:0", out));
+    EXPECT_EQ(out.getTicksProperty(), DateTime::MinValue.getTicksProperty());
+    ASSERT_TRUE(DateTime::TryParse("9999-12-31T23:59:59.9999999", out));
+    EXPECT_EQ(out.getTicksProperty(), DateTime::MaxTicks);
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15T1:2:3.1234567", out));
+    EXPECT_NE(out.getTicksProperty(), DateTime::MinValue.getTicksProperty());
+
+    try {
+        (void)DateTime::Parse("not-a-date");
+        FAIL();
+    } catch (const System::FormatException& e) {
+        EXPECT_EQ(e.getHResultProperty(), static_cast<int>(0x80131537u));
+        EXPECT_EQ(std::string(e.what()),
+                  "String was not recognized as a valid DateTime: not-a-date");
+    }
+}

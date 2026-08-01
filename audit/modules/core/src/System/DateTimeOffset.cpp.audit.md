@@ -225,3 +225,15 @@ digit tick-precision fraction. Offset text is still exactly `Z`/`z` or
 digits still fail. Both Parse and TryParse are pinned. No declaration, layout,
 vtable, exception specification or affected archive symbol name changed; no
 audit status or identifier changed.
+
+## Correction and post-audit remediation — #1880 (2026-08-01)
+
+The historical output-preservation verification text remains above, but its
+reference premise was wrong. DateTimeOffset::TryParse now assigns
+DateTimeOffset::MinValue on every false result, including malformed/large
+offsets, inherited DateTime failure and UTC-range constructor failure. Current
+.NET constructs the same default clock-plus-zero-offset result on failure, and
+the repository's CCF-014 record makes this compatible convention explicit.
+Parse exception identity and every successful offset value remain unchanged;
+no public/ABI/layout/vtable/`noexcept` consequence. #1880 is complete without a
+new audit identifier.

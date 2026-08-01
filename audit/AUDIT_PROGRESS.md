@@ -6361,3 +6361,16 @@ complete** (#1881, #1882, #1883, #1884). CCF-002's remaining member is #1880
 (CCF2-E, `TryParse` failure output), inactive. **No new `SR-AUD-*` identifier;
 numbering frozen at 364.** CNA and mobile-eggbert were not inspected; #1773 stays
 `blocked`; #1888/#1889/#1896 stay declined.
+
+---
+
+## Post-audit CCF-002 closure — ticket #1880 (2026-08-01)
+
+All four measured date/time TryParse doors now publish MinValue on false,
+matching current .NET and the already-established CCF-014 repository
+convention. The output-preservation wording in their original audit records is
+retained but explicitly corrected. +4 permanent matrices pass (5,585
+Core.Base); affected ASan+UBSan objects were proven current and focused tests
+are clean. No public declaration, `noexcept`, `constexpr`, layout, vtable,
+symbol or module-edge change; no audit identifier. Totals remain **67 / 297 /
+364** and CCF-002 is closed. Evidence: date-time plan §23.

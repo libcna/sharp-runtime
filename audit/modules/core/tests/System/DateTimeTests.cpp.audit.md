@@ -35,3 +35,11 @@ the 9999 upper boundary.  Add `EXPECT_FALSE`/`EXPECT_THROW` pairs for
 
 The existing 93 passing tests give useful regression coverage but miss the
 two confirmed validation contracts in the implementation.
+
+## Correction — #1880 (2026-08-01)
+
+The sentinel-preservation requirement above is opposite current .NET and is
+retained only as historical audit text. The permanent ticket #1880 matrix now
+prepopulates a sentinel and requires every false DateTime::TryParse result to
+replace it with DateTime.MinValue; it also pins every structural failure exit,
+min/max successes and Parse's exact FormatException identity.

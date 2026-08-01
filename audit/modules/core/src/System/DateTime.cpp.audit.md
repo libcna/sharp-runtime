@@ -249,3 +249,14 @@ garbage, an eighth digit, unpadded dates and short/compact offsets remain
 rejected. SR-AUD-007 remains remediated; #1929 is a partial post-audit ticket,
 not a new finding. Evidence and ABI/sanitizer results are in the date-time plan
 §22; numbering remains 364.
+
+### Correction and post-audit remediation — #1880 (2026-08-01)
+
+The original "failed `TryParse` does not overwrite" verification requirement
+and its earlier correction are preserved above. The corrected premise is now
+implemented: DateTime::TryParse assigns `DateTime::MinValue` on every false
+return, matching current .NET and the repository's closed CCF-014 convention.
+Empty, malformed, range, constructor, suffix, offset and precision failures are
+pinned with caller sentinels; Parse retains FormatException `0x80131537` and its
+exact message. No declaration, `noexcept`, layout, vtable or symbol name changed.
+This post-audit contract repair closes #1880/CCF2-E, not a new SR-AUD finding.

@@ -617,3 +617,40 @@ TEST(TimeOnlyTests, Approved1929_OuterWhitespaceOnlyAndExactFailureIdentity) {
                   "String was not recognized as a valid TimeOnly: 1:2:3 garbage");
     }
 }
+
+TEST(TimeOnlyTests, Ticket1880_TryParseFailureAlwaysAssignsMinValue) {
+    TimeOnly out(7, 7, 7, 7);
+    const auto expectFailure = [&out](const char* text) {
+        out = TimeOnly(7, 7, 7, 7);
+        EXPECT_FALSE(TimeOnly::TryParse(text, out)) << text;
+        EXPECT_EQ(out.getTicksProperty(), TimeOnly::getMinValueProperty().getTicksProperty())
+            << text;
+    };
+
+    expectFailure("");                         // initial scan / empty
+    expectFailure(" \t\r\n ");               // whitespace-only
+    expectFailure("not-a-time");               // malformed
+    expectFailure("10:20");                    // incomplete fields
+    expectFailure("10:20:30.");                // malformed fraction
+    expectFailure("10:20:30junk");             // trailing content
+    expectFailure("24:00:00");                 // hour boundary
+    expectFailure("10:60:00");                 // minute boundary
+    expectFailure("10:20:60");                 // second boundary
+    expectFailure("10:20:30.12345678");        // precision boundary
+
+    ASSERT_TRUE(TimeOnly::TryParse("0:0:0", out));
+    EXPECT_EQ(out.getTicksProperty(), TimeOnly::getMinValueProperty().getTicksProperty());
+    ASSERT_TRUE(TimeOnly::TryParse("23:59:59.9999999", out));
+    EXPECT_EQ(out.getTicksProperty(), TimeOnly::getMaxValueProperty().getTicksProperty());
+    ASSERT_TRUE(TimeOnly::TryParse("10:20:30.1234567", out));
+    EXPECT_NE(out.getTicksProperty(), TimeOnly::getMinValueProperty().getTicksProperty());
+
+    try {
+        (void)TimeOnly::Parse("not-a-time");
+        FAIL();
+    } catch (const System::FormatException& e) {
+        EXPECT_EQ(e.getHResultProperty(), static_cast<int>(0x80131537u));
+        EXPECT_EQ(std::string(e.what()),
+                  "String was not recognized as a valid TimeOnly: not-a-time");
+    }
+}

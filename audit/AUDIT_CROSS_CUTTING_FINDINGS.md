@@ -130,6 +130,23 @@ recorded with its exact before/after string table — and inactive ticket **#188
 `PARTIALLY REMEDIATED`, and "three of five classes done" must not be read as
 closure.
 
+### CCF-002 closure — #1880 (2026-08-01)
+
+The historical record above, including the audit reports' incorrect
+"preserve output" verification premise, remains unchanged. Ticket #1880 closes
+the last post-audit member, CCF2-E. A runtime-generated four-parser probe
+reconfirmed that every false result retained caller sentinels; current .NET and
+the already-closed CCF-014 same-repository convention both require the type
+minimum instead. Every false exit now routes through a local failure-only
+helper, while success still commits once and Parse exception identity is
+unchanged. Four permanent matrices pass (5,585 Core.Base tests); the affected
+ASan+UBSan objects were proven current and the focused tests are clean.
+
+No public signature, `noexcept`, `constexpr`, layout, vtable, symbol name or
+module edge changed. No new finding identifier was issued and the audit remains
+67 remediated / 297 open / 364 total. **CCF-002 is closed.** Full evidence is in
+`docs/DateTimeValidationBoundaryPlan.md` §23.
+
 ## CCF-003 — numeric wrappers diverge from safe boundary and formatting behavior used by nearby numeric code
 
 The 128-bit wrappers correctly document their GCC/Clang dependency, but their

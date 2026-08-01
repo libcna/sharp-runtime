@@ -133,3 +133,12 @@ whitespace, unpadded month/day, trailing garbage and timestamps remain rejected;
 the pre-existing wider trailing `Z`/`z` behavior is unchanged. Parse and
 TryParse agree on values and FormatException identity. This post-audit widening
 does not change SR-AUD-061's remediated status or issue an identifier.
+
+## Correction and post-audit remediation — #1880 (2026-08-01)
+
+The audit-era assumption that a failed TryParse should preserve its caller's
+output is retained historically but superseded. DateOnly::TryParse now assigns
+DateOnly::MinValue on scanner, suffix, range and constructor failures, matching
+current .NET's documented and implemented `default` result. Min/max/ordinary
+successes and Parse's exact FormatException remain pinned. No header, signature,
+layout, vtable, symbol-name or exception-specification change; no audit ID.

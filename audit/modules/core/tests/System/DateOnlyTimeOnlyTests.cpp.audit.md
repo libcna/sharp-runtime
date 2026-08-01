@@ -47,3 +47,11 @@ small-range dominant.
 Good ordinary state coverage does not exercise DateOnly's error-domain and
 grammar boundaries, so all 119 filtered tests pass despite two confirmed
 implementation defects.  No test was modified during this audit.
+
+## Post-audit coverage — #1880 (2026-08-01)
+
+The missing output assertion identified above now exists: scanner, suffix,
+component-range and constructor failures each begin with `1999-09-09` and must
+publish DateOnly.MinValue. MinValue, MaxValue and ordinary success plus exact
+Parse FormatException identity are controls. This matches current .NET and
+closes the post-audit ticket without changing the historical audit count.

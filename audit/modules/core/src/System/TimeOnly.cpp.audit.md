@@ -84,3 +84,13 @@ digit, inner whitespace and trailing garbage remain rejected; the already-valid
 one/two-digit fields remain unchanged. `sizeof=16`, `alignof=4`, declarations,
 exception specifications, vtables and affected exported symbol names are
 unchanged. SR-AUD-009 remains remediated by #1879; #1929 remains partial.
+
+## Correction and post-audit remediation — #1880 (2026-08-01)
+
+The original required assertion that false preserves the output is retained
+above as historical audit text; current .NET assigns `default`/MinValue.
+TimeOnly::TryParse now does likewise on incomplete fields, malformed fraction,
+trailing content, component range, empty and precision-boundary failure.
+Successful tick-precision parsing and Parse's exact FormatException are
+unchanged. No declaration, layout, vtable, mangled-name, `noexcept` or audit
+identifier changes; #1880/CCF2-E is complete.

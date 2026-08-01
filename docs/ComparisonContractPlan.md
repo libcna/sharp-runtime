@@ -984,3 +984,14 @@ a NaN key that .NET finds; and **#1926** — `long double` hashed insertion is
 
 Audit numbering is unchanged at **364**; no `SR-AUD-*` identifier was issued.
 **SR-AUD-046 / CCF-010 and the whole #1912 continuation are now closed.**
+
+---
+
+## 18d. Status correction outside this plan — CCF-002 closed (2026-08-01)
+
+The historical cross-family table near the start of this document described
+CCF-002 as partially remediated with inactive #1880 remaining. That was correct
+when written and is preserved. Ticket #1880 has since normalised the failure
+outputs of the four date/time parsers to their .NET `MinValue` results under the
+repository's established CCF-014 convention. CCF-002 is now closed; see
+`docs/DateTimeValidationBoundaryPlan.md` §23. This changes no CCF-010 result.

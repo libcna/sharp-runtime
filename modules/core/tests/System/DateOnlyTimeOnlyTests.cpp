@@ -553,3 +553,36 @@ TEST(DateOnlyTests, Approved1929_OuterWhitespaceAndUnapprovedDateWidths) {
                   "String was not recognized as a valid DateOnly: 2024-06-15 garbage");
     }
 }
+
+TEST(DateOnlyTests, Ticket1880_TryParseFailureAlwaysAssignsMinValue) {
+    System::DateOnly out(1999, 9, 9);
+    const auto expectFailure = [&out](const char* text) {
+        out = System::DateOnly(1999, 9, 9);
+        EXPECT_FALSE(System::DateOnly::TryParse(text, out)) << text;
+        EXPECT_EQ(out, System::DateOnly::MinValue) << text;
+    };
+
+    expectFailure("");                         // initial scan / empty
+    expectFailure(" \t\r\n ");               // whitespace-only
+    expectFailure("not-a-date");               // malformed
+    expectFailure("2024-06-15junk");           // trailing content
+    expectFailure("0000-01-01");               // early range rejection
+    expectFailure("10000-01-01");              // fixed-width range boundary
+    expectFailure("2024-02-30");               // constructor rejection
+
+    ASSERT_TRUE(System::DateOnly::TryParse("0001-01-01", out));
+    EXPECT_EQ(out, System::DateOnly::MinValue);
+    ASSERT_TRUE(System::DateOnly::TryParse("9999-12-31", out));
+    EXPECT_EQ(out, System::DateOnly::MaxValue);
+    ASSERT_TRUE(System::DateOnly::TryParse("2024-06-15", out));
+    EXPECT_EQ(out, System::DateOnly(2024, 6, 15));
+
+    try {
+        (void)System::DateOnly::Parse("not-a-date");
+        FAIL();
+    } catch (const System::FormatException& e) {
+        EXPECT_EQ(e.getHResultProperty(), static_cast<int>(0x80131537u));
+        EXPECT_EQ(std::string(e.what()),
+                  "String was not recognized as a valid DateOnly: not-a-date");
+    }
+}

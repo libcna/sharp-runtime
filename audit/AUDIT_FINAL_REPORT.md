@@ -4303,3 +4303,17 @@ complete** (#1850, #1851, #1852, #1853, #1854). CCF-007 still carries SR-AUD-033
 format slice (#1863) and parse tail (#1865). **CNA and mobile-eggbert were not
 inspected, searched, built or modified**, #1773 remains `blocked`, and #1888,
 #1889 and #1896 remain declined.
+
+---
+
+## Post-audit CCF-002 closure — ticket #1880 (2026-08-01)
+
+The audit reports' historical request to preserve a caller sentinel after a
+failed date/time TryParse was corrected by measurement: current .NET assigns
+the value type's MinValue, and this repository's closed CCF-014 establishes the
+same non-throwing-failure convention. DateTime, DateTimeOffset, DateOnly and
+TimeOnly now assign their exact minima on every false exit while success and
+Parse exception identity remain unchanged. The retained pre/post probe, four
+permanent matrices, 5,585 Core.Base tests and current ASan+UBSan focused run are
+clean. No public/ABI/layout/symbol/module consequence and no new audit ID.
+Audit totals remain **67 remediated / 297 open / 364 total**; CCF-002 is closed.

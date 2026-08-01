@@ -39,6 +39,12 @@ TimeOnly TimeOnly::FromDateTime(const DateTime& dt) {
 }
 
 bool TimeOnly::TryParse(const std::string& s, TimeOnly& result) {
+    // Ticket #1880: every false result assigns TimeOnly.MinValue, matching
+    // .NET's out contract while leaving the success path commit-only.
+    const auto fail = [&result]() {
+        result = TimeOnly::getMinValueProperty();
+        return false;
+    };
     // CCF-002 class D (SR-AUD-009, ticket #1879, approved 2026-07-31).
     //
     // This used to run one std::sscanf PREFIX conversion and then hand-walk the
@@ -65,14 +71,14 @@ bool TimeOnly::TryParse(const std::string& s, TimeOnly& result) {
     if (!scanner.takeDigits(1, 2, h) || !scanner.take(':') ||
         !scanner.takeDigits(1, 2, m) || !scanner.take(':') ||
         !scanner.takeDigits(1, 2, sc))
-        return false;
+        return fail();
     if (scanner.take('.')) {
         int digits = 0;
-        if (!scanner.takeDigits(1, 7, fractionTicks, &digits)) return false;
+        if (!scanner.takeDigits(1, 7, fractionTicks, &digits)) return fail();
         while (digits < 7) { fractionTicks *= 10; ++digits; }
     }
-    if (!scanner.atEnd()) return false;
-    if (h < 0 || h > 23 || m < 0 || m > 59 || sc < 0 || sc > 59) return false;
+    if (!scanner.atEnd()) return fail();
+    if (h < 0 || h > 23 || m < 0 || m > 59 || sc < 0 || sc > 59) return fail();
 
     TimeOnly parsed;
     parsed.hour_ = h;

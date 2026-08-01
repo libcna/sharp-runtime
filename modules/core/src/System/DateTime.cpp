@@ -390,6 +390,13 @@ namespace System {
 
     bool DateTime::TryParse(const std::string& s, DateTime& result)
     {
+        // Ticket #1880: C# out parameters are definitely assigned. Keep the
+        // successful path commit-only, but give every ordinary failure the
+        // reference contract's DateTime.MinValue instead of a caller sentinel.
+        const auto fail = [&result]() {
+            result = DateTime::MinValue;
+            return false;
+        };
         // CCF-002 class D (SR-AUD-007b, ticket #1879, approved 2026-07-31).
         //
         // This used to check that s[4] and s[7] were dashes and then run one
@@ -419,19 +426,19 @@ namespace System {
         if (!scanner.takeDigits(4, 4, yr) || !scanner.take('-') ||
             !scanner.takeDigits(2, 2, mo) || !scanner.take('-') ||
             !scanner.takeDigits(2, 2, dy))
-            return false;
+            return fail();
 
         if (scanner.take(' ') || scanner.take('T')) {
             if (!scanner.takeDigits(1, 2, hr) || !scanner.take(':') ||
                 !scanner.takeDigits(1, 2, mn) || !scanner.take(':') ||
                 !scanner.takeDigits(1, 2, sc))
-                return false;
+                return fail();
             if (scanner.take('.')) {
                 // A fraction must have 1-7 digits. A bare ".", a non-numeric
                 // ".abc", and an eighth digit are rejected rather than read as a
                 // prefix. DateTime is tick-based, so every accepted digit is retained.
                 int digits = 0;
-                if (!scanner.takeDigits(1, 7, fractionTicks, &digits)) return false;
+                if (!scanner.takeDigits(1, 7, fractionTicks, &digits)) return fail();
                 while (digits < 7) { fractionTicks *= 10; ++digits; }
             }
         }
@@ -448,15 +455,15 @@ namespace System {
                 int offsetHours = 0, offsetMinutes = 0;
                 if (!scanner.takeDigits(2, 2, offsetHours) || !scanner.take(':') ||
                     !scanner.takeDigits(2, 2, offsetMinutes))
-                    return false;
+                    return fail();
             }
         }
-        if (!scanner.atEnd()) return false;
+        if (!scanner.atEnd()) return fail();
 
         try {
             result = DateTime(dateToTicks(yr, mo, dy, hr, mn, sc) + fractionTicks);
             return true;
-        } catch (...) { return false; }
+        } catch (...) { return fail(); }
     }
 
     DateTime DateTime::Parse(const std::string& s)

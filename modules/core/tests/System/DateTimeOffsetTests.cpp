@@ -562,3 +562,41 @@ TEST(DateTimeOffsetTests2, Approved1929_MalformedAndUnapprovedFormsRemainRejecte
         EXPECT_EQ(std::string(e.what()), "String was not recognized as a valid DateTimeOffset.");
     }
 }
+
+TEST(DateTimeOffsetTests2, Ticket1880_TryParseFailureAlwaysAssignsMinValue) {
+    const DateTimeOffset sentinel(DateTime(638'540'436'301'234'567LL),
+                                  TimeSpan::FromHours(2));
+    DateTimeOffset out = sentinel;
+    const auto expectFailure = [&out, &sentinel](const char* text) {
+        out = sentinel;
+        EXPECT_FALSE(DateTimeOffset::TryParse(text, out)) << text;
+        EXPECT_EQ(out.getTicksProperty(), DateTimeOffset::MinValue.getTicksProperty()) << text;
+        EXPECT_EQ(out.getUtcTicksProperty(), DateTimeOffset::MinValue.getUtcTicksProperty()) << text;
+        EXPECT_EQ(out.getOffsetProperty().getTicksProperty(), 0) << text;
+    };
+
+    expectFailure("");                                      // too short / empty
+    expectFailure(" \t\r\n ");                            // whitespace-only
+    expectFailure("2024-06-15T1:2:3+02:60");                // offset range
+    expectFailure("2024-06-15T1:2:3+2:05");                 // offset grammar
+    expectFailure("2024-02-30T1:2:3Z");                     // DateTime failure
+    expectFailure("0001-01-01T0:0:0+14:00");                // UTC below MinValue
+    expectFailure("9999-12-31T23:59:59-14:00");             // UTC above MaxValue
+    expectFailure("2024-06-15T1:2:3+02:00junk");            // trailing content
+
+    ASSERT_TRUE(DateTimeOffset::TryParse("0001-01-01T0:0:0Z", out));
+    EXPECT_EQ(out.getUtcTicksProperty(), DateTimeOffset::MinValue.getUtcTicksProperty());
+    ASSERT_TRUE(DateTimeOffset::TryParse("9999-12-31T23:59:59.9999999Z", out));
+    EXPECT_EQ(out.getUtcTicksProperty(), DateTime::MaxTicks);
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T1:2:3.1234567+02:05", out));
+    EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 125);
+
+    try {
+        (void)DateTimeOffset::Parse("not-an-offset");
+        FAIL();
+    } catch (const System::FormatException& e) {
+        EXPECT_EQ(e.getHResultProperty(), static_cast<int>(0x80131537u));
+        EXPECT_EQ(std::string(e.what()),
+                  "String was not recognized as a valid DateTimeOffset.");
+    }
+}

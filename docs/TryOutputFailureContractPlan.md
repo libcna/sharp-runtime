@@ -472,3 +472,20 @@ completion criterion in §17 is met. The post-fix probe run
 (`build-probe/1872_postfix_asan.log`) shows **no surviving sentinel** on any of
 the 19 non-throwing failure cases, and the two throwing cases still report
 `value=42 counter=7` — the parity §4.2 requires.
+
+---
+
+## 19. Post-audit application to date/time parsing — #1880 (2026-08-01)
+
+This plan's closed CCF-014 convention resolves the recommendation that
+`docs/DateTimeValidationBoundaryPlan.md` §20.2 intentionally left open. The
+four date/time `TryParse` methods had lost the same C# `out` definite-assignment
+rule: all returned `false` while retaining caller sentinels, whereas current
+.NET assigns each value type's `MinValue`. Ticket #1880 applies the existing
+failure-only commit rule to DateTime, DateTimeOffset, DateOnly and TimeOnly.
+
+The repair is deliberately not a repository-wide `Try*` sweep. It covers the
+four measured CCF2-E doors only; `Parse` wrappers keep their exception contract,
+and successful parsers still publish one final value. Exact evidence, tests,
+performance and compatibility consequences are recorded in the date-time plan
+§23. No audit identifier is issued, and the frozen total remains 364.

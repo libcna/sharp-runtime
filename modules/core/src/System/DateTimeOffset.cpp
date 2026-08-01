@@ -318,11 +318,17 @@ namespace System {
     // -------------------------------------------------------------------------
 
     bool DateTimeOffset::TryParse(const std::string& s, DateTimeOffset& result) {
+        // Ticket #1880: match .NET's out-parameter contract on every
+        // non-throwing failure without adding a store to the success path.
+        const auto fail = [&result]() {
+            result = DateTimeOffset::MinValue;
+            return false;
+        };
         // #1929 row 5: all five date/time value parsers accept invariant whitespace at
         // the outside boundary. Work from one trimmed view before this parser makes its
         // existing date and offset substrings; internal whitespace is untouched.
         const std::string_view input = detail::trimDateTimeText(s);
-        if (input.size() < 10) return false;
+        if (input.size() < 10) return fail();
 
         // Find where the offset starts (after the time part)
         // Look for 'Z' or '+'/'-' that appears after position 10
@@ -361,7 +367,7 @@ namespace System {
                         !offsetScanner.take(':') ||
                         !offsetScanner.takeDigits(2, 2, mm) ||
                         !offsetScanner.atEnd())
-                        return false;
+                        return fail();
                 }
 
                 // CCF-002 class C (SR-AUD-007a, ticket #1878). The two numeric fields were
@@ -392,7 +398,7 @@ namespace System {
                 // arithmetic instead. The accepted textual GRAMMAR is untouched: "%d:%d"
                 // still matches the same character sequences, including the unpadded "+2:5"
                 // form, which stays accepted pending ticket #1879's approval.
-                if (hh < 0 || hh > 14 || mm < 0 || mm > 59) return false;
+                if (hh < 0 || hh > 14 || mm < 0 || mm > 59) return fail();
 
                 double secs = (hh * 3600.0 + mm * 60.0) * (neg ? -1.0 : 1.0);
                 offset = TimeSpan::FromSeconds(secs);
@@ -400,7 +406,7 @@ namespace System {
         }
 
         DateTime dt;
-        if (!DateTime::TryParse(dtStr, dt)) return false;
+        if (!DateTime::TryParse(dtStr, dt)) return fail();
         // The DateTimeOffset(DateTime, TimeSpan) constructor validates the offset (must be a
         // whole number of minutes, within +-14 hours, and produce a UTC instant within
         // DateTime's representable range) and throws ArgumentException/
@@ -411,7 +417,7 @@ namespace System {
         try {
             result = DateTimeOffset(dt, offset);
         } catch (...) {
-            return false;
+            return fail();
         }
         return true;
     }

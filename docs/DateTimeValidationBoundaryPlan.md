@@ -1141,3 +1141,63 @@ identity and round trips.
 Ticket #1929 remains `todo`/inactive and is explicitly **partial**. Rows 1, the
 row-2 >7-digit remainder, 3 and 4 remain unapproved. Audit numbering stays
 frozen at 364.
+
+---
+
+## 23. CCF2-E / #1880 — completed failure-output normalisation (2026-08-01)
+
+The historical §5.5/§7.4/§16.2/§20.2 record is preserved above. This batch
+explicitly requested compatible #1880 work after the approved text subset, and
+the missing recommendation in §20.2 is now supplied by repository evidence:
+`docs/TryOutputFailureContractPlan.md` documents the already-completed CCF-014
+rule that every non-throwing false `Try*` exit publishes the reference default
+instead of leaking caller state. Its same-module inventory found six correct
+sibling surfaces and identified the lost C# definite-assignment rule as the
+root cause. Applying that established convention requires no new semantic
+choice and no user approval.
+
+Current .NET independently confirms the four results. `DateTimeParse.TryParse`
+assigns `DateTime.MinValue` on false; `DateTimeOffset.TryParse` constructs its
+result from the default `DateTime` and zero offset even when parsing fails; and
+the `DateOnly` and `TimeOnly` internal parsers assign `default` on every failure.
+Their public documentation describes that value as `MinValue`.
+
+The retained runtime-generated probe
+`build-probe/1880_tryparse_output_probe.cpp` covers empty, whitespace-only,
+malformed, range, constructor, trailing-garbage and precision-boundary failures.
+Before, every one retained its sentinel: DateTime ticks
+`638540436301234567`; DateTimeOffset the same clock ticks plus 2 hours; DateOnly
+`1999-09-09`; TimeOnly ticks `256270070000`. After, every false case publishes
+the exact type minimum: ticks/offset zero or `0001-01-01`. Successful ordinary
+and exact seven-digit controls remain unchanged.
+
+Each parser now has one local failure-only helper and routes every false exit
+through it. Successful parsing still commits exactly once at the end; it does
+not pay a speculative output store. `Parse` still delegates to `TryParse` and
+throws the same `FormatException`, HResult `0x80131537`, and stable message.
+Four add-only permanent tests exercise every structural failure exit, min/max
+and ordinary successes, and the wrapper exception identity: 4/4 focused and
+5,585/5,585 Core.Base tests.
+
+The ASan+UBSan Core.Base objects were proven newer than all four changed
+sources and the four focused tests passed with no diagnostic. This supports
+memory/arithmetic safety only; permanent tests, not sanitizers, guard output and
+exception semantics. LSan is not applicable because the repair allocates and
+owns nothing, and TSan is not applicable because it adds no shared state.
+
+Seven-round identical-work, optimized failure-path measurements (200,000 calls
+per parser) gave medians before/after in milliseconds: DateTime
+`3.756/3.773` (ranges `3.694–4.045` / `3.715–3.803`), DateTimeOffset
+`4.250/4.599` (`4.109–6.149` / `4.548–5.229`), DateOnly `0.950/0.988`
+(`0.938–0.961` / `0.969–1.002`), and TimeOnly `1.549/1.563`
+(`1.530–1.966` / `1.540–1.593`). The DateTimeOffset cost is the two required
+minimum assignments on its nested DateTime failure and its own false exit;
+this is more correct work on failure, not a success-path regression.
+
+No public declaration, parameter, return type, `noexcept`, `constexpr`, virtual
+slot, vtable, data member or mangled symbol changes. Layouts remain DateTime
+16/8, DateTimeOffset 48/8, DateOnly 12/4, TimeOnly 16/4 and TimeSpan 24/8
+(size/alignment); the eight Parse/TryParse exported names match the pre-#1880
+set. The module graph remains 41/91. No new `SR-AUD-*` identifier was issued;
+audit numbering remains 364. Ticket #1880 and CCF2-E are complete, so CCF-002
+is closed.

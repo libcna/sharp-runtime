@@ -32,3 +32,11 @@ a pre-set output value around each failed `TryParse` check.
 
 The focused suite is healthy but lacks the negative input assertions needed to
 guard the two confirmed public contract defects.
+
+## Correction — #1880 (2026-08-01)
+
+"Preserve a pre-set output" above is the historical wrong premise. Current
+.NET publishes MinValue on false. The add-only #1880 matrix now proves the
+sentinel is replaced for offset grammar/range, inherited DateTime, UTC-range,
+empty and suffix failures, with min/max/ordinary success and exact Parse
+FormatException controls.
