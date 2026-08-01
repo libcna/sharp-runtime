@@ -3520,3 +3520,46 @@ same reason as before: no landed CCF-019 repair has outlawed a spelling, so
 seam and fixture totals stay **2/18** and **10/74**. **SR-AUD-333 stays
 `confirmed (design-complete)`**, and no new `SR-AUD-*` identifier was issued —
 numbering stays frozen at **364**.
+
+---
+
+## 46. #1899 visitor-escape correction (2026-08-01)
+
+Section 45 is preserved as the record that priced the corrected four-overload
+surface and the silent ABI risk in option B. One further premise in §§42 and 45
+is false: a C++ callback does not impose a borrow lifetime.
+
+Any useful option-D visitor must expose the visited `XElement` as a pointer,
+reference, or equivalent observer. A callback can copy that pointer into an
+outer variable, container, object member, or global and use it after the tree is
+destroyed. Passing a non-copyable proxy does not solve the general problem: the
+callback can retain the proxy's address or any observer obtained through it.
+C++23 has no borrow checker that can reject this escape. Consequently a
+compile-time test that “the visitor's pointers are unusable after the call by
+construction,” required by §45.7, cannot be written for a general-purpose
+visitor without also denying the callback access to the `XElement` itself.
+
+The corrected meanings are therefore:
+
+| Option | What it can prove | What it cannot prove |
+|---|---|---|
+| **D** | adds four range-equivalent, scoped traversal conveniences; a caller that does not retain the observer avoids allocating a raw-pointer result vector | cannot prevent the callback from retaining an observer; does not make X15 unreachable and does not by itself unblock #1894 |
+| **G** | adds D and emits a deprecation diagnostic at each of the four old ancestor overloads and `getAttributesProperty()` | ordinary calls still compile; it does not prevent visitor escape and it does not make X15/X17 structurally impossible |
+| **F** | can detect selected live-borrow patterns in an instrumented build | prevents nothing and cannot prove the absence of unregistered raw copies |
+| **B** | makes X17's exact address-of-temporary spelling fail | remains one inconsistent silent ABI break among eighteen borrowed-reference accessors and says nothing about X15 |
+
+A negative fixture may turn G's warning into an error with
+`-Werror=deprecated-declarations`. That would pin **five diagnostic sites**, not
+five ordinarily ill-formed APIs. It must be described as diagnostic coverage;
+it cannot satisfy #1894's original claim that a lifetime repair outlawed the
+spellings. D alone creates no negative site at all.
+
+The revised recommendation is to retain #1898's explicit ordinary C++ borrowed
+contract and close #1899 as `wontfix` under the current ownership model. D+G
+remains a separately approvable source-compatible migration aid, with warnings
+and in-repository call-site migration, but must not be represented as a memory-
+safety repair. B/E remain reserved for a coordinated breaking release and are
+not recommended. #1894's permanent sanitizer half is complete; its negative-
+fixture half should either be closed as not applicable with the declined
+breaking changes, or explicitly re-scoped to G's warning diagnostics. No
+production change or new `SR-AUD-*` identifier is made by this correction.

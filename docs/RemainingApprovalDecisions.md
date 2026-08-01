@@ -1,577 +1,572 @@
 <!-- SPDX-License-Identifier: MIT -->
-<!-- Copyright (c) Robert Vokac and contributors -->
 
-# Remaining approval decisions — one packet, six groups
+# Remaining approval decisions — authoritative packet (2026-08-01)
 
-Written by ticket **#1924** on 2026-07-31, after #1919 closed the last approved
-item in the post-audit queue. It exists so the remaining work can be approved or
-rejected **in batches by shared consequence**, instead of one ticket at a time.
+## 1. Authority, scope, and how to use this packet
 
-> **STATUS UPDATE, 2026-07-31 (Group E subset batch).** Groups **A, B, C and D**
-> were approved and are **delivered in full**. Group **E1 (#1897) option B** was
-> approved and is **delivered** — `commit ca78cdce`, design record
-> `docs/OwnedTreeLifetimeContractPlan.md` §44. **§E.1's parenthetical option A —
-> applying `DefaultMaxDepth = 64` — was NOT approved and is NOT implemented.**
-> **§E.2 (#1899) is superseded**: measurement found four errors in its recorded
-> options and added two options it did not contain — read
-> `docs/OwnedTreeLifetimeContractPlan.md` §45 **before** using §E.2's approval
-> wording, which is now known to be incomplete. **§F.2 (#1926) has been
-> isolated and measured** (`docs/CollectionsComparisonContractPlan.md` §20): the
-> insert regression is real and replicates at 1.319×, its cause is proven, and
-> its recorded *lookup* improvement does **not** replicate. Groups **A–D's**
-> three follow-up tickets **#1927/#1928/#1929** now have their own consolidated
-> packet, `docs/TextSubsetCompatibilityDecision.md`, which supersedes nothing
-> here but is where their approval wording lives.
+This file supersedes its earlier six-group packet. Delivered decisions are no
+longer presented as open choices, corrected ticket premises are not repeated as
+facts, and every remaining contract has independent copyable wording. The
+evidence authority is:
 
-**Nothing in this document was implemented when it was written.** Every group
-states the exact current behaviour, the .NET behaviour, a reproducer, and — in
-§"Approval wording" — a sentence that can be copied verbatim into the next batch
-prompt.
+- docs/NetworkExceptionHResultPropagationDesign.md for #1932;
+- docs/OwnedTreeLifetimeContractPlan.md §§42, 45, and 46 for #1894/#1899;
+- docs/DateTimeValidationBoundaryPlan.md §§20–22 and
+  docs/TextSubsetCompatibilityDecision.md for #1929;
+- docs/CompositeFloatingKeyPolicyDesign.md for #1925/#1934; and
+- docs/CollectionsComparisonContractPlan.md §20 for #1926.
 
-**Scope of this packet.** Every ticket with status `needs_user` (7), plus the
-`blocked` tickets whose blocker is a user design decision rather than an
-external dependency (3), plus the two follow-ups #1919 discovered (2). Ticket
-**#1773** is excluded: it is blocked on CNA and mobile-eggbert deliberately
-upgrading sharp-runtime, which is an external event and not a decision to be
-taken here. Tickets **#1888**, **#1889** and **#1896** are listed in §E.4 as
-**already declined** and are *not* re-proposed.
+Current .NET comparisons use the official dotnet/runtime snapshot
+0eb5481340ea675857c7a7abf18f68a60b52a686. No item below is implemented merely
+because .NET differs. No item grants authority to inspect a downstream
+consumer. CNA and mobile-eggbert were not inspected.
 
----
+There is deliberately no “approve all fixes” choice:
 
-## 0. Summary and recommended batching
-
-| Group | Tickets | Shared consequence | ABI | Layout | Recommend |
-|---|---|---|---|---|---|
-| **A** | #1854, #1862 | a validation .NET does by throwing cannot be done by a `noexcept` function | none | none | **Approve A(i)** — drop `noexcept`, throw |
-| **B** | #1858, #1865 | invariant-culture separators and overflow taxonomy in the numeric parsers | none | none | **Approve B, split** — take #1865 whole, take only #1858's overflow half |
-| **C** | #1879, #1884 | text the library **accepts** becomes strict | none | none | **Approve C** |
-| **D** | #1863 | text the library **emits** changes | none | none | **Approve D** |
-| **E** | #1897, #1899 | Text.Json / Xml.Linq owned-tree residuals | see rows | none | **Approve E1(B) and E2(D)** |
-| **F** | #1925, #1926 | Collections comparison follow-ups from #1919 | see rows | none | **Defer both** |
-
-**Groups A, B, C and D can safely be approved as ONE batch.** All ten of their
-tickets are header-only or `.cpp`-body changes with **no public signature
-change, no object-layout change, no vtable change and no mangled-name change**.
-Their only cross-group interaction is the comma question, which #1858 and #1865
-must answer the same way — §B exists to make that one answer.
-
-**Group E must be approved item by item.** E1 and E2 have different
-consequences from each other and from anything in A–D.
-
-**Group F should be deferred.** Neither is a shipped-behaviour defect in the
-population #1912 closed; both are follow-ups worth deciding *after* the A–D
-batch, when there is evidence about whether the port's users key containers on
-composite floating types at all.
-
----
-
-## A. `noexcept` versus validation — #1854, #1862
-
-### A.1 Tickets and identifiers
-
-| Ticket | Type | Finding | Family |
-|---|---|---|---|
-| #1854 | `ReadOnlyMemory<T>` ctors ×3, `HashCode::AddBytes` | SR-AUD-043b | CCF-005, item CCF5-E |
-| #1862 | `Single::Round(float,intcs)`, `Double::Round(double,intcs)` | SR-AUD-029 | CCF-007, item CCF7-4 |
-
-### A.2 Root cause, shared
-
-.NET validates an argument by **throwing**. The port's counterparts are
-declared `noexcept` (and one is additionally `constexpr`), and a `throw` from a
-`noexcept` function is `std::terminate`, not an exception. So the validation
-cannot be added without changing the exception specification. Two independent
-findings on unrelated types with the identical decision shape; #1854's own note
-records that they should be decided together for one project-wide convention.
-
-### A.3 Current behaviour vs .NET
-
-| Site | Current | .NET |
-|---|---|---|
-| `ReadOnlyMemory<T>(const T*, intcs)` — `ReadOnlyMemory.hpp:49-50`, `constexpr noexcept` | a negative length is accepted and produces a span of that length | `ArgumentOutOfRangeException` |
-| `ReadOnlyMemory<T>(vector&)` L58-59, `(ArraySegment)` L67-69, `noexcept` | same | same |
-| `HashCode::AddBytes(const ReadOnlySpan<uint8_t>&)` — `HashCode.hpp:92`, `noexcept` | same | same |
-| `Single::Round(float, intcs)` — `Single.hpp:236`, `noexcept` | computes `std::pow(10, digits)` unchecked; out-of-range `digits` returns a spurious value or NaN | `ArgumentOutOfRangeException("digits", "Rounding digits must be between 0 and 6, inclusive.")` |
-| `Double::Round(double, intcs)` — `Double.hpp:282`, `noexcept` | same | same, limits 0–15 |
-
-### A.4 Reproducer
-
-```cpp
-// #1862 -- returns a spurious value instead of throwing
-float  a = System::Single::Round(1.2345f, 99);
-double b = System::Double::Round(1.2345,  -3);
-
-// #1854 -- accepted; .NET throws
-std::vector<std::uint8_t> v{1,2,3};
-System::ReadOnlyMemory<std::uint8_t> m(v.data(), -1);
-```
-
-### A.5 Severity
-
-**#1862 is a live wrong-answer defect** with no diagnostic. **#1854 is now pure
-defence in depth**: ticket #1852 (SR-AUD-043a, landed 2026-07-30) validates
-`Span`/`ReadOnlySpan` construction, so a negative-length span can no longer
-reach `HashCode::AddBytes` through the public surface. The `ReadOnlyMemory`
-constructors themselves remain directly reachable.
-
-### A.6 Options
-
-- **A(i) — drop `noexcept` (and the one `constexpr`), throw.** Full .NET parity.
-- **A(ii) — keep `noexcept`, clamp.** `ReadOnlyMemory` clamps to empty; `Round`
-  clamps `digits` to its valid range. A documented, permanent deviation.
-- **A(iii) — split.** Take A(i) for `Round` (a wrong answer today) and A(ii)
-  for `ReadOnlyMemory` (defence in depth). Rejected as a recommendation: it
-  leaves the project with two conventions for one question.
-
-**Recommended: A(i).** It is what .NET does, and `noexcept` on a function whose
-whole job is to reject bad input is a promise the port should not be making.
-
-### A.7 Exactly what changes
-
-Five exception specifications and one `constexpr`. **No parameter list, no
-return type, no object layout, no vtable, no mangled name.** An Itanium mangled
-name does not encode `noexcept` for a non-function-pointer parameter, so
-**there is no ABI symbol break** — the effect is source-level only.
-
-### A.8 Source compatibility
-
-Breaks exactly three spellings, all rare: `static_assert(noexcept(expr))` over
-one of the five; taking a pointer-to-function with an explicit `noexcept` type;
-and using `Round` in a `constexpr` context (only `ReadOnlyMemory`'s L49 ctor is
-`constexpr` today, and it stays constructible — it just stops being usable in a
-constant expression). No iterator or template effect.
-
-### A.9 Test, sanitizer, performance, rollback
-
-Add-only tests per site: valid input unchanged, each invalid input throws with
-the exact .NET message, and `TryParse`-style siblings unaffected. Sanitizers are
-irrelevant — this is an argument-validation contract, and ASan/UBSan/LSan cannot
-see a missing throw. Performance: one comparison on a path that already calls
-`std::pow`; unmeasurable. Rollback: restore the five specifiers.
-
-### A.10 Approval wording
-
-> Approve dropping `noexcept` — and the one `constexpr` on
-> `ReadOnlyMemory.hpp:49` — from `ReadOnlyMemory<T>`'s three constructors,
-> `HashCode::AddBytes`, `Single::Round(float,intcs)` and
-> `Double::Round(double,intcs)`, so that each throws
-> `ArgumentOutOfRangeException` with .NET's message and parameter name on an
-> invalid argument. No parameter list, return type, object layout, vtable or
-> mangled name changes. Tickets #1854 and #1862.
-
----
-
-## B. Numeric text grammar — #1858, #1865
-
-### B.1 Tickets and identifiers
-
-| Ticket | Type | Finding | Family |
-|---|---|---|---|
-| #1858 | `Decimal::Parse`/`TryParse` | SR-AUD-035 tail | CCF-005 Decimal slice |
-| #1865 | `Single`/`Double` `Parse`/`TryParse` | SR-AUD-033 parse tail | CCF-007, item CCF7-6 |
-
-Each has a **separator** half and an **overflow** half. The separator halves
-must be answered the same way; the overflow halves are independent.
-
-### B.2 Root cause, shared
-
-Both parsers implement a C++ subset of .NET's default `NumberStyles`. .NET's
-`NumberStyles.Number` (Decimal) and `NumberStyles.Float | AllowThousands`
-(Single/Double) both accept invariant-culture **group separators**; neither
-port does, and `Decimal` additionally reuses `,` for something else entirely.
-
-### B.3 Current behaviour vs .NET — the four halves
-
-| # | Input | Current | .NET | Change class |
+| Group | Tickets | Contract | Recommendation | Can be grouped? |
 |---|---|---|---|---|
-| B-1 | `Decimal.Parse("1,5")` | **`1.5m`** — `,` is treated as a decimal point | `15m` — `,` is a group separator | **value of an accepted input silently changes (10×)** |
-| B-1 | `Decimal.Parse(" 1,234.5 ")` | `FormatException` | `1234.5m` | rejected → accepted |
-| B-2 | `Decimal.Parse("79228162514264337593543950336")` | `FormatException` | `OverflowException("Value was either too large or too small for a Decimal.")` | exception type changes |
-| B-3 | `Double.Parse("1,234.5")` | `FormatException` | `1234.5` | rejected → accepted |
-| B-4 | `Double.Parse("1e999")` | `FormatException` | `+∞`, no throw | **throw → value** |
+| **A** | #1932 | two networking exceptions' causal HResult rule | approve Option 2R | independent only |
+| **B** | #1899, then #1894 | Xml.Linq borrowed-view policy and diagnostic closure | retain #1898 contract; close #1899 wontfix; do not claim a visitor prevents escape | #1894 depends on the chosen #1899 classification |
+| **C1–C4** | #1929 rows 1–4 | four independent date/time acceptance/API choices | retain and document rows 1–3; design row 4 separately | decide by row, not as one grammar switch |
+| **D** | #1934 then #1925 | direct nullable-floating default comparison and key policy | approve the bounded direct-optional group only | #1934 and the bounded #1925 subset share one contract |
+| **E** | #1926 | libstdc++ long-double hash caching | close wontfix | independent performance decision |
 
-### B.4 Severity
-
-**B-1 is the only genuinely dangerous row in groups A–D.** It changes the
-*value* of input that already parses successfully: a program that reads
-`"1,5"` from a config file gets `1.5` today and would get `15`. Nothing in this
-repository feeds comma input, so nothing here breaks — the risk is entirely
-downstream and entirely silent. B-2, B-3 and B-4 are safe: each either widens
-what is accepted or changes an exception type on input that fails today.
-
-### B.5 Options
-
-- **B(i) — adopt .NET fully** (all four rows). Maximum parity, accepts B-1's
-  silent value change.
-- **B(ii) — adopt everything except B-1's re-interpretation of `,`**: take
-  B-2, B-3, B-4, and leave `Decimal`'s comma as a decimal point as a
-  documented deviation. Loses parity on one row; loses **consistency**, since
-  `,` would then mean "decimal point" to `Decimal` and "group separator" to
-  `Double`.
-- **B(iii) — status quo**, all four documented as deviations.
-
-**Recommended: B(i), staged.** Land B-2, B-3 and B-4 first (they are pure
-widenings and an exception-type change on already-failing input), then B-1 as
-its own commit with the value change stated in the commit message and a
-migration note, so it can be reverted alone. Approving B(i) as a whole is
-reasonable; approving it *as one commit* is not.
-
-### B.6 Exactly what changes
-
-Internal parse logic only. `Decimal` gains a private
-`enum {OK, Malformed, Overflow}` returned by a helper so `Parse` can map
-overflow to `OverflowException` while `TryParse` still returns `bool`.
-`Single`/`Double` gain a group-aware pre-pass (`std::from_chars` has no
-grouping mode) and a `result_out_of_range`-with-all-chars-consumed branch.
-**No public signature, no object layout, no ABI.**
-
-### B.7 Source compatibility, tests, rollback
-
-Source-compatible. Behaviour-compatible except B-1. Downstream migration: a
-caller that relied on `,` as a decimal point must switch to `.`; there is no
-compiler diagnostic for this, which is why B-1 needs its own commit and its
-own migration note. Two existing tests, `DecimalTests2.Parse_*_PendingApproval`,
-pin today's behaviour and must be inverted when B-1 lands. Sanitizers cannot
-see any of this. Performance: one extra pass over the input string. Rollback:
-per-commit revert.
-
-### B.8 Approval wording
-
-> Approve, as separate commits: (1) `Single`/`Double` `Parse`/`TryParse`
-> accepting invariant-culture `,` group separators per
-> `NumberStyles.Float | AllowThousands`, and returning ±Infinity rather than
-> throwing on a finite-overflow magnitude; (2) `Decimal::Parse` throwing
-> `OverflowException` rather than `FormatException` on an out-of-range
-> magnitude; and (3) — **as its own commit, with a migration note** —
-> `Decimal::Parse` treating `,` as a group separator per `NumberStyles.Number`,
-> accepting that `Decimal.Parse("1,5")` changes from `1.5` to `15`. No public
-> signature or object-layout change. Tickets #1858 and #1865.
+#1933 is not an approval item: its performance isolation is complete and no
+production optimization was justified. #1888, #1889, and #1896 remain declined
+and are not re-proposed. #1773 remains blocked on work outside this repository.
 
 ---
 
-## C. Text the library **accepts** becomes strict — #1879, #1884
+## 2. Group A — #1932 network-exception inner HResult
 
-### C.1 Tickets and identifiers
+### 2.1 Current port and current .NET
 
-| Ticket | Type | Finding | Family |
+The port stores one HResult in System::Exception. It preserves the
+std::exception_ptr and all networking metadata, but it never inspects the
+inner object while constructing these two outer types.
+
+| Constructor shape | Current sharp-runtime outer HResult | Current .NET outer HResult |
+|---|---:|---:|
+| HttpRequestException default or message-only (H1/H2) | 0x80131500 | 0x80131500 |
+| HRE message + null inner (H3) | 0x80131500 | 0x80131500 |
+| HRE message + non-null inner (H3) | 0x80131500 | exact inner HResult |
+| HRE message + inner + HttpStatusCode (H4) | 0x80131500 | exact inner HResult; status has no precedence |
+| HRE HttpRequestError + message + inner + optional status (H5) | 0x80131500 | exact inner HResult; error/status have no precedence |
+| WebException default or message-only (W1/W2) | 0x80131509 | 0x80131509 |
+| WebException message + null inner (W3) | 0x80131509 | 0x80131509 |
+| WebException message + non-null inner (W3) | 0x80131509 | exact inner HResult |
+| WebException message + status, no inner (W4) | 0x80131509 | 0x80131509 |
+| WebException message + inner + status (W5) | 0x80131509 | exact inner HResult; status has no precedence |
+
+.NET's condition is only “inner is non-null.” It copies zero, a base
+Exception value, a type-specific value, a custom value, and a nested
+network-exception value exactly. HttpRequestError, HttpStatusCode, and
+WebExceptionStatus are orthogonal metadata. The two types intentionally share
+the conditional rule but retain different no-inner base values.
+
+C++ adds one case .NET cannot express: an exception_ptr can hold a
+std::runtime_error rather than a System::Exception. Recommended Option 2R keeps
+the outer base value for that case.
+
+Concrete examples:
+
+| Construction | Current outer | Option 2R / .NET |
+|---|---:|---:|
+| HRE("m", FormatException) | 0x80131500 | 0x80131537 |
+| HRE(ConnectionError, "m", custom 0x81234567, 503) | 0x80131500 | 0x81234567 |
+| WebException("m", zero-HResult System exception, Timeout) | 0x80131509 | 0x00000000 |
+| WebException("m", std::runtime_error, Timeout) | 0x80131509 | 0x80131509, port-defined control |
+
+Copy, move, and exception_ptr rethrow preserve whatever outer value was stored
+at original construction. There are no serialization or clone paths in the
+port. Current built-in HTTP producers supply no inner exception, so their
+results remain unchanged. Synchronous and asynchronous HTTP forwarding retain
+the same exception object rather than wrapping it.
+
+### 2.2 Options and recommendation
+
+| Option | Exact rule | Compatibility and consequence | Verdict |
 |---|---|---|---|
-| #1879 | `DateTime`, `DateTimeOffset`, `TimeOnly`, `DateOnly` `TryParse`/`Parse` | SR-AUD-007b, SR-AUD-009, SR-AUD-061 | CCF-002, class CCF2-D |
-| #1884 | `String::Format`, `FormattableString` | SR-AUD-015 tail | CCF-012 |
+| **1** | always retain the outer base/type HResult | no change; permanent divergence on H3/H4/H5/W3/W5 | reject |
+| **2R** | copy exact HResult only when a non-null pointer rethrows System::Exception; otherwise keep the outer base | observable constructor result changes only; matches .NET on the represented surface | **recommend** |
+| **3** | copy selected network/platform values | invents an unstable classifier and rejects valid zero/custom/type-specific .NET cases | reject |
+| **4** | add a separate native/network field | new state/API/layout and redundant metadata | reject |
+| **5** | preserve and document divergence | same behavior as option 1 | reject unless compatibility risk is judged controlling |
+| **6** | add a constructor or factory | new public surface while old constructors remain divergent | reject |
 
-### C.2 Root cause, shared
+Option 2R changes no declaration, overload, default argument, return or
+parameter type, mangled name, symbol set, base, field, offset, vtable, virtual
+slot, sizeof/alignof, noexcept, or constexpr state. Measured sizes remain HRE
+176/8 and WebException 168/8. It does change an observable outer HResult for
+direct causal construction. Because the constructor bodies are inline, all
+consumers must rebuild to avoid mixed old/new semantics.
 
-Both accept malformed text and produce a plausible-looking answer instead of
-rejecting it. The date/time parsers verify separator *positions* and then run
-one `std::sscanf` **prefix** conversion, never checking that the conversion
-consumed the whole string; the composite formatter rewrites its output as it
-goes instead of parsing the format string once.
+The only added cost is one exception_ptr rethrow/catch during causal
+construction. No current request hot path supplies an inner pointer. Rollback
+is a two-header/test revert; there is no persisted-state migration.
 
-### C.3 Current behaviour vs .NET — reproducers
+Permanent tests must cover every H1–H5 and W1–W5 row, null, default,
+type-specific, custom, zero, non-System, nested HRE/WebException, explicit
+status/error precedence, exact message and inner identity, copy/move,
+exception_ptr, and sync/async forwarding. #1932 is atomic; no base-Exception
+helper, unrelated networking type, producer wrapping, new field, or public API
+belongs in the implementation.
 
-```cpp
-DateTime  d;  DateTime::TryParse("2024-06-15junk", d);        // true  -> must be false
-DateTime::TryParse("2024-06-15 10:xx:00", d);                 // true, MIDNIGHT fabricated
-DateTime::TryParse("2024-06-15T10:20:30.1234", d);            // true  -> must be false
-DateTimeOffset::TryParse("2024-06-15T10:20:30+2:5", o);       // true, offset +125 MINUTES
-TimeOnly::TryParse("10:20:30.abc", t);                        // true
-DateOnly::TryParse("2024-06-15 10:20:30", dt);                // true
-```
+### 2.3 Copyable approval wording
 
-The full before/after list is `docs/DateTimeValidationBoundaryPlan.md` §8.2
-(13 inputs) and `docs/CompositeFormatBoundaryPlan.md` §20.1 (14 rows).
+> Approve #1932 Option 2R only: for every existing
+> HttpRequestException and WebException constructor that accepts
+> std::exception_ptr, if the non-null pointer rethrows a System::Exception,
+> copy that inner exception's HResult exactly, including zero; if the pointer
+> is null or contains a non-System exception, retain the current outer base
+> HResult. HttpRequestError, HttpStatusCode, and WebExceptionStatus do not
+> override this rule. Do not add constructors, fields, accessors, or producer
+> wrapping, and do not change public declarations, ABI, layout, vtables,
+> symbols, noexcept, or constexpr. Preserve messages, inner identity, and all
+> error/status fields, and add the complete direct/copy/move/exception-pointer
+> and sync/async transport matrix from
+> docs/NetworkExceptionHResultPropagationDesign.md.
 
-### C.4 Severity
+No-change alternative:
 
-High and silent. `"2024-06-15 10:xx:00"` parsing to **midnight** is a wrong
-answer a caller cannot detect; `+2:5` becoming a 125-minute offset is a wrong
-answer that survives round-tripping. #1879 additionally removes `std::sscanf`'s
-formally undefined behaviour on an out-of-`int` numeral.
-
-### C.5 Options
-
-- **C(i) — adopt .NET's grammar** in both. Every listed input starts returning
-  `false` from `TryParse` and throwing `FormatException` from `Parse`.
-- **C(ii) — status quo**, documented.
-- **C(iii) — #1879 only.** Reasonable if the composite-format output change is
-  unwanted; #1884 is the one that also alters *emitted* text (alignment).
-
-**Recommended: C(i).** Accepting `"2024-06-15junk"` as a valid date is not a
-compatible convenience; it is a wrong answer with no diagnostic.
-
-### C.6 Exactly what changes
-
-`sscanf` is replaced by a full-consumption scanner in all four parsers;
-`String::Format` parses the format string once. **No public signature, no
-object layout, no ABI, no iterator or template effect.** What changes is the
-accepted **language** and, for #1884, the emitted text for alignment.
-
-### C.7 Compatibility, tests, rollback
-
-Source-compatible; **behaviour-incompatible by design**. A caller feeding text
-that was silently accepted starts getting `false`/`FormatException`, which is
-the point — and unlike group B, the caller *finds out*. Every currently-valid
-shape must still parse to the identical value, which is the larger half of the
-test plan. Sanitizers cannot see it. Performance: a hand-written scanner
-replacing `sscanf` is expected to be neutral-to-faster; measure and report.
-Rollback: per-ticket revert.
-
-### C.8 Approval wording
-
-> Approve making the accepted textual grammar strict: (1) `DateTime`,
-> `DateTimeOffset`, `TimeOnly` and `DateOnly` `TryParse` return `false` — and
-> `Parse` throws `FormatException` — for every input listed in
-> `docs/DateTimeValidationBoundaryPlan.md` §8.2, including trailing text and
-> unparseable time text that today yields midnight, with `std::sscanf` replaced
-> by a full-consumption scanner; and (2) `String::Format` and
-> `FormattableString` adopt .NET's composite-format grammar exactly as written
-> in `docs/CompositeFormatBoundaryPlan.md` §20.7. Every currently-valid input
-> must still produce the identical value. No public signature or object-layout
-> change. Tickets #1879 and #1884.
+> Decline #1932 and permanently document that HttpRequestException retains
+> 0x80131500 and WebException retains 0x80131509 even when a System inner
+> exception has another HResult. Keep the retained divergence matrix.
 
 ---
 
-## D. Text the library **emits** changes — #1863
+## 3. Group B — #1899 borrowed views and dependent #1894
 
-### D.1 Ticket
+### 3.1 Actual public surface and reference behavior
 
-#1863 — `Single::ToString(value, format)` (`Single.hpp:602`),
-`Double::ToString(value, format)` (`Double.hpp:685`). SR-AUD-033 format slice,
-CCF-007 item CCF7-5. `Half` inherits by delegation.
+The port has four header-template ancestor overloads, not two:
 
-### D.2 Root cause
+1. Ancestors(range);
+2. Ancestors(range, XName);
+3. AncestorsAndSelf(range); and
+4. AncestorsAndSelf(range, XName).
 
-The formatter is an `std::ostringstream` back end, which cannot emit a
-three-digit exponent or insert group separators. `N` is therefore formatted
-identically to `F`, `E` uses `std::scientific`'s two-digit exponent, and
-`G`/`G9`/`G17` go through `setprecision` rather than shortest-round-trip.
+They materialize vector<XElement*>. XElement::getAttributesProperty() returns a
+const reference to the element's attribute vector. Ancestors can therefore
+leave a raw pointer after the tree dies (probe X15), and the attribute-vector
+reference can outlive its element (X17). Both produce retained ASan
+use-after-free reports when the documented lifetime precondition is violated.
+XElement::Attributes() is already an owning by-value alternative for X17.
 
-### D.3 Current vs .NET
+.NET's four corresponding extension overloads return managed
+IEnumerable<XElement> sequences, and XElement.Attributes() returns managed
+XAttribute references. A retained managed reference keeps its object alive.
+The port also permits automatic-storage XObject instances, so it cannot
+manufacture a shared_ptr ownership handle for every ancestor: such objects have
+no control block.
 
-| Call | Current | .NET |
+#1898 already states and permanently tests the ordinary C++ borrowed contract.
+The focused Xml.Linq sanitizer suite was clean for 184/184 supported operations;
+X15/X17 intentionally exercise use after the stated precondition and remain
+outside that supported matrix.
+
+### 3.2 Correct meanings of options D and G
+
+The earlier design has two corrections:
+
+- D must mirror all four range/name-filtered overloads. A single-node,
+  unfiltered ForEachAncestor is a counterpart to none of them.
+- A visitor cannot enforce a borrow lifetime in C++23. Any callback given an
+  XElement pointer, reference, or equivalent observer can save it and use it
+  after the call. A non-copyable facade does not prevent saving its address or
+  an observer obtained through it.
+
+The authoritative meanings are now:
+
+| Option | Exact meaning | X15/X17 effect | #1894 effect |
+|---|---|---|---|
+| **D** | add four range-equivalent visitor conveniences, preserving all existing overloads | safer idiom for adopters, but callback escape remains; X17 already has Attributes() | no outlawed or diagnosed old spelling; #1894 remains blocked |
+| **G** | D plus deprecate the four borrowed ancestor overloads and getAttributesProperty() | five compile-time warnings; ordinary calls still compile; visitor escape remains | a checker may turn the five warnings into errors, but that is diagnostic coverage, not ordinary ill-formedness |
+
+Therefore D+G is a migration aid, not a memory-safety proof. It does not satisfy
+#1899's original acceptance statement that X15/X17 become unreachable, and it
+must not be reported as doing so.
+
+### 3.3 Full option set and recommendation
+
+| Option | Source/API | ABI/layout/symbol | Runtime/performance | Recommendation |
+|---|---|---|---|---|
+| **A / #1898** retain and pin the borrowed contract | none | none | none | **already done; retain** |
+| **B** return getAttributesProperty() by value | address-of-current-result stops compiling | silent calling-convention break under the unchanged Itanium symbol; layout unchanged | vector copy plus shared_ptr increments per call | reject outside a breaking release |
+| **C** return owning ancestor handles but omit automatic-storage ancestors | hard type change | template/source change | incomplete result | disqualified on correctness |
+| **D** four additive visitor overloads | additive | no existing symbol/layout change | callback per element; avoids result vector for adopters | optional ergonomics only |
+| **E** B + D + removal of borrowed APIs | hard source break | B's silent accessor break; templates are source-only | migration plus B cost | reject; requires coordinated breaking release |
+| **F** off-by-default debug registry | macro/configuration surface | must be cpp-local to avoid layout/ODR change | zero when off; instrumentation when on | detects only; optional separate tooling |
+| **G** D + five deprecations | no rejected call, but new warnings and in-repo migration | none | none beyond D | optional migration diagnostics only |
+
+Option B is especially poor: getAttributesProperty() is one of eighteen public
+borrowed const-reference accessors, yet only it would silently change return
+calling convention while keeping the same mangled name. This is the same
+mixed-object hazard class for which #1889 was declined.
+
+**Recommendation:** retain #1898 and close #1899 wontfix under the current C++
+ownership model. Record that exact .NET lifetime parity is unavailable without
+a much broader ownership/source contract. Close #1894's negative-fixture half
+as not applicable while preserving its already-complete sanitizer evidence.
+D+G may instead be approved as a separate migration aid, but not under a claim
+that it makes borrowed observers non-escapable.
+
+### 3.4 #1894 consequences and exact tests
+
+Current repository totals are 10 negative fixtures / 74 sites and 2 version
+seams / 18 sites. D creates no negative site. If G is chosen, exactly one new
+Xml.Linq fixture can pin five deprecated spellings by compiling each with
+-Werror=deprecated-declarations:
+
+- Ancestors(range);
+- Ancestors(range, name);
+- AncestorsAndSelf(range);
+- AncestorsAndSelf(range, name); and
+- getAttributesProperty().
+
+That would make the checker total 11 fixtures / 79 sites if no other fixture
+changes first. It would not make those calls ill-formed for ordinary consumers.
+No Text.Json negative site should be invented: #1888 was declined. The
+sanitizer half remains the existing supported-operation matrix; sanitizers can
+detect the retained misuse when deliberately run, but cannot prove an observer
+never escapes.
+
+For D, permanent tests cover all four overloads, empty/multi-node ranges,
+null/detached inputs, order, self-first ordering, and filters. A runtime test
+may show the intended scoped idiom, but no compile-time test may claim pointer
+escape is impossible. For G, permanent tests pin exact deprecation diagnostics
+and migrate all in-repository uses. Rollback removes the four additions and/or
+attributes; no stored data or layout migrates.
+
+### 3.5 Copyable decision wording
+
+Recommended no-change classification:
+
+> Retain #1898's documented and tested ordinary C++ borrowed-view contract.
+> Close #1899 as wontfix under the current ownership model: automatic-storage
+> Xml.Linq ancestors have no shared ownership handle, and a C++ visitor callback
+> can retain any pointer or reference it receives, so options D and G cannot
+> make X15 structurally unreachable. Do not implement B or E and do not reopen
+> declined #1889. Record #1894's permanent sanitizer half as complete and close
+> its negative-fixture half as not applicable because no approved repair
+> outlaws a spelling. Preserve the retained X15/X17 misuse probes and do not
+> claim .NET lifetime parity.
+
+Alternative migration-aid approval:
+
+> Approve #1899 options D plus G as migration aids only: add four additive,
+> range-taking visitor overloads matching Ancestors and AncestorsAndSelf with
+> and without XName, then deprecate those four existing borrowed-vector
+> overloads and XElement::getAttributesProperty(). Preserve every existing
+> signature and symbol, migrate in-repository callers, and make no layout,
+> vtable, ABI, noexcept, or constexpr change. I understand that ordinary
+> downstream calls continue to compile with warnings and that a visitor
+> callback can retain its observer, so this does not make X15/X17 impossible.
+> For #1894, add one Xml.Linq diagnostic fixture with exactly five sites using
+> -Werror=deprecated-declarations and describe it as diagnostic coverage, not
+> as proof that the APIs are ordinarily ill-formed. Do not implement B, E, F,
+> or any #1888/#1889 change.
+
+B must use its own breaking-release wording and is not recommended:
+
+> In a separately coordinated ABI-breaking release only, design the migration
+> for returning XElement::getAttributesProperty() by value, acknowledging the
+> unchanged Itanium mangled name, incompatible return calling convention,
+> vector-copy cost, and consistency decision for the other seventeen borrowed
+> const-reference accessors. This wording does not approve implementation.
+
+---
+
+## 4. Groups C1–C4 — #1929 remaining date/time rows
+
+Rows 5–6 are complete. DateTime and TimeOnly accept one through seven
+fractional digits at exact 100-nanosecond resolution; all five date/time
+families accept approved surrounding invariant whitespace. #1931's TimeOnly
+representation correction is complete. The remaining rows are:
+
+| Row | Current sharp-runtime | Current .NET | Recommended decision |
+|---|---|---|---|
+| **1** unpadded month/day | rejects 2024-6-15 and 2024-06-5 | accepts | retain/document subset |
+| **2** more than seven fractional digits | rejects an eighth digit | reads the whole digit run and rounds the fraction to 100-ns ticks | retain/document seven-digit exact boundary |
+| **3** short/compact offset | rejects +2, +2:5, +0205 | accepts; +2:5 means +125 minutes | retain/document subset; do not silently reverse #1879 |
+| **4** exact/provider/kind surface | ParseExact, TryParseExact, provider overloads, DateTimeKind absent | present | separate API design; no implementation approval |
+
+For row 2, current .NET's ParseFraction consumes every ASCII digit, accumulates
+a double fraction, then applies Math.Round(fraction * 10,000,000). For example,
+a .12345678 fraction is accepted and contributes 1,234,568 ticks; the current
+port rejects it. An implementation would need to match current .NET's exact
+rounding and boundary behavior rather than merely truncate after seven digits.
+
+### 4.1 Public surface and compatibility
+
+- Row 1 affects DateTime, DateTimeOffset, and DateOnly general Parse/TryParse
+  grammar.
+- Row 2 affects the general time-bearing parsers, including DateTime,
+  DateTimeOffset, and TimeOnly.
+- Row 3 affects offset-bearing DateTime/DateTimeOffset general parsing.
+- Row 4 adds public overload families and a kind/provider/style contract across
+  date/time types.
+
+Rows 1–3 need no declaration or representation change, but they expand
+accepted input. Callers using parse failure as validation would silently accept
+new text. Row 3 is additionally a policy reversal: #1879 explicitly changed
++2:5 from accepted to rejected after an earlier premise wrongly called its
+125-minute interpretation a bad answer. Each row therefore needs its own
+semantic approval and commit.
+
+Row 4 is additive at source/symbol level but requires exact overloads,
+format/provider semantics, DateTimeKind representation, size/alignment/field
+offset analysis, mangled/undefined symbol evidence, and interaction with
+offset application. It is design-first and cannot be bundled with grammar
+widening.
+
+No remaining row is motivated by #1933 performance. Rollback for rows 1–3 is
+the parser/test commit; row 4 would need its own API rollback/migration plan.
+Tests for any widening must pin Parse/TryParse agreement, exact ticks/offset,
+minimum/maximum and rollover, malformed and trailing text, all currently
+accepted forms, exception type/message, and unchanged output on TryParse
+failure. Row 2 additionally needs 8, 9, long digit runs, below/at/above half-
+tick boundaries, carry into the next second, and out-of-range controls.
+
+### 4.2 Copyable decisions
+
+Recommended retained-subset decision for rows 1–3:
+
+> For #1929 rows 1–3, retain and document sharp-runtime's invariant subset:
+> month and day remain two digits, fractions remain limited to one through
+> seven exact 100-nanosecond digits, and offsets remain the currently approved
+> fixed-width forms. Keep unpadded dates, an eighth fractional digit, and
+> +2/+2:5/+0205 rejected by both Parse and TryParse. This deliberately differs
+> from current .NET and preserves #1879's accepted-input boundary. Do not alter
+> public declarations, representation, or the completed rows 5–6 behavior.
+
+Separate row-1 widening alternative:
+
+> Approve #1929 row 1 only: make DateTime, DateTimeOffset, and DateOnly general
+> Parse/TryParse accept one- or two-digit month/day fields such as 2024-6-15,
+> while preserving exact values and every current rejection outside that row.
+> This is an accepted-input widening with no declaration or layout change.
+
+Separate row-2 widening alternative:
+
+> Approve #1929 row 2 only: make the general time-bearing Parse/TryParse paths
+> accept more than seven fractional digits and match the pinned current .NET
+> conversion to 100-nanosecond ticks, including rounding and second carry.
+> Preserve one-through-seven-digit exact ticks and all unrelated rejections.
+> This is an accepted-input/value rule change with no declaration or layout
+> change.
+
+Separate row-3 reversal alternative:
+
+> Approve #1929 row 3 only: re-accept current .NET's short and compact offsets
+> +2, +2:5, and +0205, with +2:5 interpreted as +125 minutes. I understand that
+> this reverses the accepted-input decision made in #1879. Preserve every
+> other offset boundary and make no declaration or layout change.
+
+Row-4 design wording:
+
+> Authorize a design-only ticket for #1929 row 4 to inventory exact
+> ParseExact/TryParseExact, provider/style, and DateTimeKind surface and
+> semantics, including representation and ABI alternatives. Do not implement
+> any new overload or DateTimeKind representation without a later explicit
+> approval.
+
+---
+
+## 5. Group D — #1925 plus #1934 direct nullable-floating policy
+
+### 5.1 Corrected current behavior and .NET mapping
+
+The original #1925 premise wrongly grouped optional, pair, tuple, and arbitrary
+composites as one recursive policy. Current measurements are:
+
+| Shape | Hashed collection | Ordered collection |
 |---|---|---|
-| `ToString(1234.5, "N2")` | `1234.50` | `1,234.50` |
-| `ToString(1.25, "E2")` | `1.25E+00` | `1.25E+000` |
-| `ToString(x, "G17")` / `"G9"` | `setprecision` width | round-trip width |
-| `ToString(x, "G")` / `"R"` / no format | already shortest-round-trip via `to_chars` | same — **must be preserved** |
+| optional<double> | compiles; copied NaN inserts twice and neither key is findable | NaN, 1, and 2 collapse to one node |
+| nested optional<double> | same defect | same collapse |
+| pair/tuple/array | default Dictionary is ill-formed because libstdc++ has no invocable hash | distinct values collapse around NaN |
+| variant<double,int> | compiles with unfindable NaN | values collapse |
+| arbitrary user type | follows its own operators/hash | follows its own operators |
 
-### D.4 Severity, options, consequences
+The generic defaults are separately inconsistent (#1934):
 
-Medium: wrong output text, always visible, never silent. Options are
-**D(i)** adopt .NET (needs a custom formatter or post-processing over the
-`ostringstream` result) or **D(ii)** document the subset permanently.
-**Recommended: D(i).** No signature, layout or ABI change. The real cost is
-downstream: **any golden file, snapshot test or serialized text that captured
-`1234.50` or `1.25E+00` changes**, and there is no compiler diagnostic. The
-`to_chars` default/`R` fast path must be preserved unchanged — that is the one
-non-negotiable constraint, recorded in
-`docs/FloatingValueFidelityPlan.md` §19.2. Tests: exact-text assertions per
-format specifier plus round-trip tests. Rollback: revert.
+| Surface for optional<double> | NaN equality | equal hashes | Compare NaN vs 1 |
+|---|---:|---:|---:|
+| generic Comparer/EqualityComparer default | false | false | 0 |
+| dedicated Nullable comparers | true | true | -1 |
+| current .NET nullable default | true | true | -1 |
 
-### D.5 Approval wording
+.NET Nullable delegates two present values to the underlying default comparer,
+equality, and hash; null is ordered first. ValueTuple delegates per field.
+.NET does not reflect over arbitrary user fields. Raw lifted nullable equality
+still treats NaN according to the primitive operator, so raw optional equality
+must not be changed.
 
-> Approve changing the text `Single::ToString(value, format)` and
-> `Double::ToString(value, format)` emit: `E`/`e` gain a sign and at least
-> three exponent digits, `N`/`n` gain invariant-culture group separators with
-> two default decimals, and `G`/`G9`/`G17`/`R` become shortest-round-trip and
-> round-trip widths, with the existing `to_chars` default/`R` fast path
-> preserved. Accepting that captured output text changes. No public signature
-> or object-layout change. Ticket #1863.
+### 5.2 Recommended bounded option and affected surface
 
----
+Recommended Option B covers only direct std::optional<F> where F is float,
+double, or long double:
 
-## E. Text.Json and Xml.Linq owned-tree residuals — #1897, #1899
+1. decide presence first;
+2. null equals null, hashes to zero, and orders before present;
+3. two present values use the existing .NET-compatible floating comparer,
+   equality, and canonical NaN/signed-zero hash;
+4. generic Comparer/EqualityComparer and the three DefaultKey policies agree;
+5. dedicated Nullable comparers remain controls; and
+6. raw optional/Nullable operators and explicit caller comparers remain
+   unchanged.
 
-These are **not** a batch. Each needs its own answer.
+#1934 must land first for helper/default-comparer semantics, then bounded #1925
+for key selection. The affected key policies flow through sixteen collection
+headers: Dictionary, HashSet, frozen/read-only/immutable/concurrent/ordered and
+sorted variants. Public MapType/SetType aliases and deduced iterator return
+types move for the newly affected direct-optional family.
 
-### E.1 #1897 — `JsonNode::Parse` overflows the stack on deep untrusted text
+Measured candidate sizes were unchanged for raw standard containers
+(unordered_map 56/8 and iterator 8/8; set 48/8 and iterator 8/8), but comparator
+template arguments make them different C++ types and change inline symbols.
+Equal size is not ABI compatibility. A coordinated consumer rebuild is
+required. Public function declarations and comparer virtual slots can remain;
+every affected outer collection, iterator/proxy, defined/undefined symbol,
+sizeof/alignof, field offset where observable, noexcept, and constexpr property
+must nevertheless be re-measured.
 
-**Identifiers:** CCF-019, probe X28c. No `SR-AUD-*`.
+The runtime cost is one presence branch plus the existing floating policy for
+present operands. Benchmarks must cover null, finite, NaN, signed zero,
+insert/lookup, ordinary controls, and explicit comparers. Migration matches
+#1919 for a narrower additional instantiation family. Rollback restores the
+helper/selectors and the deliberate divergence test; persisted container data
+is not serialized by this change.
 
-**Current:** `fromNlohmann` recurses once per nesting level while turning the
-parsed document into `JsonNode` objects, so `JsonNode::Parse` of 20,000 nested
-arrays crashes with a stack overflow (ASan frames are in the port's own
-recursion, not nlohmann's parser). **This is the only CCF-019 case reachable
-from untrusted input.**
+Permanent tests cover all direct optional floating types; null; finite extrema;
+signed zero; infinities; multiple NaN payloads; duplicate, lookup, removal,
+growth/rebuild and projections across all affected collection families;
+ordered exact NaN/1/2 count/order; generic/dedicated comparer agreement; raw
+operator controls; explicit-comparer authority; and negative controls for
+optional<int>, nested optional, pair, tuple, array, variant, vector, and user
+types. Pair/tuple Dictionary compile failures remain retained evidence unless a
+future ticket explicitly adds hash capability.
 
-**Corrected premise, already recorded** (`docs/OwnedTreeLifetimeContractPlan.md`
-§40.2): the plan once presented "bound the nesting depth" as a *new* grammar
-decision. It is not new — `JsonDocumentOptions::DefaultMaxDepth = 64` already
-exists in this module, `JsonDocument::Parse` already applies it and throws
-`JsonException("The maximum configured depth of N has been exceeded.")`, and
-`JsonTests.ParseExceedingDefaultMaxDepth_Throws` already pins it. **The
-module's two JSON parse entry points disagree about the same untrusted text.**
+### 5.3 Alternatives
 
-**The question:** should `JsonNode::Parse`
-**(A)** reject text nested deeper than the existing `DefaultMaxDepth = 64`,
-matching `JsonDocument::Parse` and .NET's own `JsonReaderOptions.MaxDepth`
-default — an **accepted-input change**, because text that crashes today starts
-being rejected; or
-**(B)** build the tree **iteratively** with an explicit worklist, the same shape
-#1895 used for teardown — **fully compatible**, no accepted-input change, no
-layout or signature change, and it removes the crash without rejecting
-anything?
-
-**Recommendation: (B), then (A).** The plan's own earlier recommendation was
-(A) alone, on the grounds that (B) leaves the two entry points disagreeing.
-That reasoning is sound but incomplete: (B) is *compatible* and removes a
-crash on untrusted input, so it can land immediately, whereas (A) is an
-accepted-input change that should be decided on its own merits. Landing (B)
-first removes the security-relevant crash at zero compatibility cost; (A) can
-then follow to make the module self-consistent. Doing (A) alone also removes
-the crash, so either order is defensible — but (B) first is strictly safer.
-
-**No layout, signature or ABI change in either option.** Rollback: revert.
-
-> **Approval wording:** Approve making `System::Text::Json::Nodes::JsonNode::Parse`
-> build its tree iteratively with an explicit worklist instead of recursively,
-> removing the stack overflow on deeply nested untrusted text with no change to
-> the accepted input, no signature change and no layout change. Ticket #1897.
-> *(Optionally add: and then apply the existing `DefaultMaxDepth = 64` to it, so
-> it rejects the same deeply nested text `JsonDocument::Parse` already rejects.)*
-
-### E.2 #1899 — the Xml.Linq borrowed views are documented but not safe
-
-**Identifiers:** SR-AUD-333, CCF-019, probes X15 and X17 — the last two
-ASan-confirmed use-after-free cases in CCF-019. #1898 (done) made the contract
-explicit and testable; #1899 would make violating it impossible.
-
-**The impossible requirement, disposed of** (`docs/OwnedTreeLifetimeContractPlan.md`
-§42.2): the original wording asked `Extensions::Ancestors`/`AncestorsAndSelf`
-to "return owning handles". That cannot be implemented **at any layout cost**,
-for two independent reasons: the topmost ancestor has no parent to own it, and
-`XElement`/`XDocument`/`XContainer` are routinely automatic-storage (51 such
-declarations in this repository's own tests) with no control block at all —
-so adding `enable_shared_from_this` does not rescue it either, because
-`shared_from_this()` on an automatic-storage element throws `bad_weak_ptr`.
-
-**The question:** take
-**(B)** `XElement::getAttributesProperty()` returns **by value** — every
-ordinary call site keeps compiling, `&el->getAttributesProperty()` stops
-compiling, the return calling convention changes, and each call gains one
-vector copy;
-**(D)** add a visitor spelling
-`template <class F> void Extensions::ForEachAncestor(const shared_ptr<XNode>&, F&&)`
-whose borrowed pointers cannot outlive the call, **beside** the existing
-`Ancestors`/`AncestorsAndSelf`, which keep their signatures and their
-now-documented contract; or
-**(E)** both, plus removal of the borrowed spellings, in a coordinated
-ABI-breaking release together with #1889?
-
-**Recommendation: (D) now, (B) and (E) only in a coordinated ABI-breaking
-release.** (D) is **purely additive** — no break at all, no layout change, no
-existing signature touched — and gives callers a spelling that is safe by
-construction. (B) is a real ABI change (return calling convention) for one
-accessor. (E) depends on #1889, which is declined (§E.4).
-
-> **Approval wording:** Approve adding
-> `template <class F> void System::Xml::Linq::Extensions::ForEachAncestor(const std::shared_ptr<XNode>&, F&&)`
-> — a purely additive visitor whose borrowed pointers cannot outlive the call —
-> beside the existing `Ancestors`/`AncestorsAndSelf`, which keep their
-> signatures and their documented borrowed-view contract. No existing signature,
-> object layout or ABI changes. Ticket #1899, option D.
-
-### E.3 #1894 — blocked on a dependency, not on a decision
-
-#1894 (negative consumer fixtures + sanitizer closure for CCF-019) is `blocked`
-and **needs no answer**. Its purpose is one negative fixture site per spelling a
-CCF-019 repair outlawed, and **no landed CCF-019 repair has outlawed any
-spelling** — every one is source-compatible by construction. Until #1888 or
-#1899 lands there is literally nothing for a fixture to reject. Its other half,
-permanent sanitizer closure, is already delivered (ASan+UBSan+LSan clean over
-218/218 `Text_Json` and 184/184 `Xml_Linq`). Approving §E.2 option D does **not**
-unblock it either — D outlaws nothing. It is listed here only so it is not
-mistaken for a pending question.
-
-### E.4 Declined, preserved, and **not** re-proposed
-
-Per the standing rule that a declined ticket is not reopened without new
-evidence that materially invalidates the decision — and there is none — these
-are recorded, not proposed:
-
-| Ticket | Declined | Preserved design |
+| Option | Consequence | Verdict |
 |---|---|---|
-| #1888 | delete `JsonNode` copy/move, make `DetachParent` protected — public source break | plan §37; measured in-repo cost is **one** test edit and zero copy sites |
-| #1889 | version-guard the `JsonArray`/`JsonObject` enumerators — object-layout **and silent ABI** break (a return type is not part of an Itanium mangled name) | plan §39, approval wording §39.12 |
-| #1896 | one cached ancestor/depth pointer to make the O(d²) attach guard O(1) — layout change | exact future wording in the ticket's notes |
+| preserve current behavior | no compatibility change; unfindable/collapsed keys and generic-default split remain | available no-change choice |
+| direct optional floating (#1934 + bounded #1925) | fixes one exact .NET Nullable mapping with known source/ABI migration | **recommend** |
+| recurse into pair/tuple | must separately decide mapping, new hash capability, combination, arity, and public types | design later |
+| recurse through all standard composites | no single .NET mapping | reject |
+| recurse through user fields | unavailable in C++23 and contrary to .NET type-defined equality | reject |
+| public opt-in trait/factory | new API and ODR contract | separate design |
 
-All three should be revisited **together**, in a future coordinated
-source-and-ABI-breaking release, not individually.
+### 5.4 Copyable approval wording
 
----
+> Approve the coordinated direct nullable-floating default-comparison change
+> for tickets #1925 and #1934 only. For std::optional<float>,
+> std::optional<double>, and std::optional<long double>, make
+> Comparer<T>.Default, EqualityComparer<T>.Default, and
+> DefaultKeyLess/DefaultKeyHash/DefaultKeyEqual use null-first ordering and the
+> existing underlying floating .NET-compatible comparison, equality, and
+> canonical NaN/signed-zero hash rules. I understand that this changes the
+> comparator-bearing backing standard-container type, public MapType/SetType
+> aliases, and affected iterator/deduced return types for that additional key
+> family, requiring coordinated consumer rebuilds, even where measured
+> size/alignment remains unchanged. Preserve raw nullable operator==, all
+> public function declarations, vtable slots, object layout, noexcept, and
+> constexpr state. Do not extend this approval to nested optional, pair, tuple,
+> array, variant, vector, arbitrary user-defined types, new hash support, or
+> ticket #1926.
 
-## F. Collections comparison follow-ups from #1919 — #1925, #1926
+No-change alternative:
 
-Both were discovered and measured **while implementing #1919** and are recorded
-in `docs/CollectionsComparisonContractPlan.md` §17 and §19.1. Neither is a
-member of the #1912 population, which is closed.
-
-### F.1 #1925 — a nullable or composite floating key keeps raw IEEE equality
-
-`System::detail::DefaultKeyHash`/`DefaultKeyEqual` select on
-`std::is_floating_point_v`, so they select for `double` but **not** for
-`std::optional<double>`, `std::pair<int,double>`, `std::tuple<double>` or any
-user type holding a floating member.
-
-```cpp
-Dictionary<std::optional<double>, int> d;
-d.Add(std::optional<double>(NaN), 1);
-d.TryGetValue(std::optional<double>(NaN), v);   // FALSE
-```
-
-The key is unfindable **by the very object that was inserted**. .NET's
-`Dictionary<double?,V>` finds it. Today's behaviour is pinned by
-`CollectionsComparisonContract.NullableFloatingKeysKeepRawIeeeEqualityForNow`
-so it cannot change silently.
-
-**Consequence of repairing it:** the policy must recurse into
-`optional`/`pair`/`tuple`, which moves the backing type — and therefore the
-public `SetType`/`MapType` — of a **further family of instantiations**, exactly
-the class of change #1919 needed approval for. **Recommend: defer.** It is a
-real divergence, but the affected shape (a nullable or tuple floating key in a
-hashed container) is unusual in ported game code, and the decision is better
-taken with evidence that it occurs.
-
-> **Approval wording (if taken):** Approve extending
-> `System::detail::DefaultKeyHash`, `DefaultKeyEqual` and `DefaultKeyLess` to
-> recurse into `std::optional`, `std::pair` and `std::tuple`, changing the
-> backing container type — and the public `SetType`/`MapType` alias — of every
-> Collections instantiation keyed on such a composite containing a
-> floating-point member, on the same terms as #1919. Ticket #1925.
-
-### F.2 #1926 — `long double` hashed insertion is 1.300× slower
-
-libstdc++ specialises `__is_fast_hash<std::hash<long double>>` to `false`, so
-an `unordered_map<long double, …>` node **cached** its hash code.
-`DefaultHash<long double>` is a new type for which the primary template says
-`true`, so the cache is switched off. Measured over 7 alternating rounds,
-`Dictionary<long double,int>` insert of 200k keys went **52.41 → 68.12 ms
-(1.300×, noise 1.206)** — the only genuine regression in #1919's 19-workload
-benchmark. The same container's **lookup** got *faster* (0.791×). `float` and
-`double` are unaffected in both directions.
-
-**The fix** is a specialisation of `std::__is_fast_hash<DefaultHash<long double>>`
-to `false` behind `#ifdef __GLIBCXX__` — a **reserved libstdc++ internal this
-project does not own**, and specialising a `std::` template not designated for
-it is undefined by the letter of the standard. **Recommend: defer, leaning
-wontfix.** It buys 1.3× on one workload on the rarest of the three floating
-types, at the price of a non-portable specialisation. It would additionally
-remove the only iterator-type movement #1919 caused, which is the one argument
-in its favour.
-
-> **Approval wording (if taken):** Approve specialising
-> `std::__is_fast_hash<System::detail::DefaultHash<long double>>` to `false`
-> behind `#ifdef __GLIBCXX__`, restoring libstdc++'s per-node hash-code caching
-> for `long double` hashed containers and with it their pre-#1919 node and
-> iterator types. Ticket #1926.
+> Do not implement tickets #1925 or #1934. Retain and document the current
+> nullable/composite default-comparison divergences and compile limitations.
 
 ---
 
-## G. What this packet deliberately does not do
+## 6. Group E — #1926 libstdc++ long-double cache policy
 
-- It does **not** estimate downstream migration from CNA or mobile-eggbert.
-  Neither was inspected. Every compatibility statement above is derived from
-  sharp-runtime's own public surface and its tracked consumer fixtures
-  (`test/consumer/`, 10 fixtures / 74 negative sites).
-- It does **not** re-propose #1888, #1889 or #1896 (§E.4).
-- It does **not** touch #1773, which waits on an external event.
-- It issues **no** new `SR-AUD-*` identifier. Audit numbering stays frozen at
-  **364**.
+#1926 has no direct .NET reference behavior: System.Double maps to C++ double,
+while C++ long double and libstdc++'s node-cache trait are implementation-
+specific. The controlled three-hasher probe established:
+
+| Shape | std::hash<long double> before #1919 | DefaultHash<long double> today | candidate reserved-trait specialization |
+|---|---|---|---|
+| libstdc++ fast-hash trait | false | true | false |
+| hash cached in node | yes | no | yes |
+| node size on measured x86-64 | 64 | 48 | 64 |
+| iterator cache template argument | true | false | true |
+| insert median relative to before | 1.000 | 1.319, slower 24/25 rounds | 0.895 median; mechanism restored |
+
+The old claim that today's node “loses a word” is corrected: it loses 16 bytes
+because long double is 16-byte aligned, so today's node is 25% smaller. The old
+0.791 lookup improvement is also withdrawn; 25 rounds reversed it to 1.210 and
+the series was inside a 3.0–6.3 max/min noise floor.
+
+The proposed implementation specializes reserved libstdc++ internal
+std::__is_fast_hash behind __GLIBCXX__. The C++ standard does not designate
+that internal template for user specialization. libc++ and MSVC STL have
+neither this mechanism nor this fix.
+
+There is no public declaration, field, vtable, noexcept, or constexpr change,
+but the standard-container node and iterator type return to their pre-#1919
+forms on libstdc++. That is a public template/ABI consequence and grows every
+affected node 48 to 64 bytes. Performance improves only long-double hashed
+insertion on this standard library. Rollback removes the specialization.
+Approval would require 25+ alternating post-change rounds, node/iterator/symbol
+evidence, all floating correctness tests, and other-toolchain compile controls.
+
+**Recommendation: close wontfix.** A stable 1.319 insertion cost on a rare,
+toolchain-specific key is not enough to justify undefined/nonportable use of a
+reserved standard-library internal plus 16 bytes per node. This decision is
+separate from #1925/#1934.
+
+Copyable recommended wording:
+
+> Decline specializing std::__is_fast_hash or any other reserved libstdc++
+> internal for #1926. Close #1926 as wontfix, retain today's 48-byte measured
+> node and iterator type, and preserve the 25-round evidence that long-double
+> hashed insertion is 1.319 times the pre-#1919 shape in 24 of 25 rounds.
+> Withdraw the noisy lookup claim. Do not change correctness behavior or
+> ticket #1919.
+
+Alternative implementation wording:
+
+> Approve #1926 only on libstdc++ by specializing
+> std::__is_fast_hash<System::detail::DefaultHash<long double>> to false behind
+> __GLIBCXX__. I accept the reserved-internal portability risk, the measured
+> node growth from 48 to 64 bytes, and the iterator/type-symbol transition back
+> to the pre-#1919 shape in exchange for recovering the 1.319-times insertion
+> regression. Require at least 25 alternating post-change rounds, full
+> representation/symbol evidence, and all correctness gates. Do not change
+> float/double policy or other standard libraries.
+
+---
+
+## 7. Dependency order, declined items, and closure boundaries
+
+If approvals are granted, the only dependency chains are:
+
+1. #1934 helper/default-comparer semantics, then bounded #1925 key selection;
+2. #1899 classification or migration choice, then any accurately re-scoped
+   #1894 diagnostic fixture;
+3. each #1929 row independently, with row 3 explicitly acknowledging #1879.
+
+#1932 and #1926 are standalone. #1929 row 4 is design-first. No choice depends
+on #1933, and no performance ticket authorizes a semantic widening.
+
+| Ticket | State preserved by this packet |
+|---|---|
+| #1773 | blocked; external/downstream work prohibited |
+| #1888 | declined; not re-proposed |
+| #1889 | declined; not re-proposed |
+| #1894 | blocked pending an honest classification of what a #1899 choice can prove |
+| #1896 | declined; not re-proposed |
+| #1899 | blocked pending Group B decision |
+| #1925 | needs_user; direct optional subset designed with #1934 |
+| #1926 | todo; recommendation wontfix |
+| #1929 | todo/partial; rows 1–4 unchanged |
+| #1932 | todo; Option 2R designed, no implementation |
+| #1933 | done; optimization designed but not implemented |
+| #1934 | needs_user; new inactive post-audit ticket, no audit identifier |
+
+No new SR-AUD identifier is issued. Audit numbering remains frozen at 364.

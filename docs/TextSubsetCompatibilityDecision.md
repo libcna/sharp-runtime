@@ -505,3 +505,30 @@ ABI-breaking release with #1889.**
   `/rv/tmp/runtime` source at the cited line; rows that could not be established
   that way are marked ❓ rather than guessed. None in the tables above is ❓.
 - It issues **no** new `SR-AUD-*` identifier. Numbering stays frozen at **364**.
+
+---
+
+## 9. Superseding status and #1899 visitor correction (2026-08-01)
+
+The historical §7 wording is preserved, but its statement that a visitor's
+borrowed pointer “cannot outlive the call” is false in C++23. A callback can
+retain any pointer, reference, or equivalent observer it receives. Option D is
+therefore four additive range-equivalent traversal conveniences, not a borrow-
+safety guarantee. Option G is D plus five deprecation warnings; ordinary calls
+still compile. A negative fixture using
+`-Werror=deprecated-declarations` would prove that the warning is emitted, not
+that the API is ordinarily ill-formed or that the visitor cannot leak an
+observer. The complete reasoning is in
+`docs/OwnedTreeLifetimeContractPlan.md` §46.
+
+The superseding recommendation is in
+`docs/RemainingApprovalDecisions.md` Group B: retain #1898's documented C++
+borrowed contract and close #1899 `wontfix` under the current ownership model;
+D+G may instead be approved only as migration tooling. B/E remain unapproved
+breaking-release choices. #1894's sanitizer half is complete, while its
+negative-fixture half must not be closed by relabelling warning diagnostics as
+a structural lifetime repair.
+
+Status correction for §8: #1927 and #1928 are done; #1929 is partial, with
+rows 5–6 done and rows 1–4 remaining unchanged as described in §6.5. No new
+semantic approval follows from this note.
