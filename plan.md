@@ -3,6 +3,16 @@
 *Last verified: 2026-08-01 — 41 physical components, 91 direct production
 dependency edges, a clean zero-warning native build, 15,058 passing tests
 across 37 executables, and a green two-job selective matrix. The 2026-08-01
+**#1932/#1933 design, evidence, and remaining-decision batch** made no
+production/header or semantic change: #1932 now has a complete constructor-
+specific Option 2R design and remains `todo`; #1933 is `done`, evidence-only,
+with no stable whole-surface optimization; #1925 is classified `needs_user`
+beside new inactive #1934; and `docs/RemainingApprovalDecisions.md` is the
+superseding five-group packet. A corrected #1899 premise now records that a C++
+visitor callback can retain its observer, so D/G are migration/diagnostic aids,
+not lifetime enforcement. The audit remains **68 remediated / 296 open / 364**,
+the graph **41/91**, seams **2/18**, negative fixtures **10/74**, and Doxygen
+**1,937/1,942**. The preceding 2026-08-01
 **approved text-subset + compatible P3 batch** delivered exact
 `docs/TextSubsetCompatibilityDecision.md` §6.5 items (1), (2), and (3) as
 independent #1927/#1928/#1929-row-5–6 commits, then completed compatible #1880
@@ -10,7 +20,8 @@ and #1875. #1929 remains partial: rows 1, the beyond-seven-digit remainder of
 row 2, row 3, and row 4 are unapproved and unchanged. CCF-002 is closed and
 SR-AUD-157 is remediated, taking the tally to **68 remediated / 296 open / 364
 total**. Inactive #1930/#1931 record inseparable completed corrections;
-#1932/#1933 retain separable HResult-propagation and TimeOnly-performance work.
+#1932 retains the separable approval-bound HResult work, while #1933 is now
+evidence-complete with no TimeOnly optimization.
 No new audit identifier was issued. The 2026-07-31
 **Group E subset batch** landed the approved **#1897 option B**: `JsonNode::Parse`
 builds its tree iteratively, so the one CCF-019 case reachable from **untrusted
@@ -71,6 +82,149 @@ proceeds from the evidence-backed `audit/` inventory in bounded, independently
 validated repair tickets. Consumer-driven API breadth remains legitimate later
 work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
+
+
+## 2026-08-01 — #1932/#1933 design, #1925 classification, and remaining decisions
+
+Branch **feature/remediation-batch-1932-1933-decisions**, no upstream, based on
+0e1b47d6. This was deliberately a design/evidence batch. No production/header
+file, public declaration, accepted/rejected input, value, exception result,
+symbol, layout, vtable, noexcept or constexpr contract changed, and no
+permanent test was added.
+
+| Commit | Planning unit | Status/result |
+|---|---|---|
+| 67433746 | #1932 | complete network-exception HResult design; todo pending semantic approval |
+| 4b2fb2d1 | #1933 | done, evidence-only; optimization designed but not implemented |
+| d000f059 | #1925 / #1934 | direct nullable-floating subset classified needs_user; new inactive #1934 |
+| eb686b48 | consolidated decisions | packet replaced; #1899 visitor-escape premise corrected |
+
+**#1930/#1931 reconstruction:** #1930 is done inside #1927 commit 28e72ba7;
+#1931 is done inside #1929 commit 83cfb10a. They were not merely recorded or
+left open. #1932 remains todo. #1933 is now done. No ticket is doing.
+
+### #1932 decision
+
+The complete matrix shows one constructor-specific .NET rule, not a universal
+Exception rule:
+
+- HRE H1/H2 and null-inner H3/H4/H5 retain 0x80131500.
+- WebException W1/W2/W4 and null-inner W3/W5 retain 0x80131509.
+- A non-null System inner makes H3/H4/H5/W3/W5 copy its exact HResult,
+  including zero; HttpRequestError, HttpStatusCode and WebExceptionStatus never
+  override it.
+- A C++-only non-System exception_ptr retains the outer base value.
+- Copy/move/exception_ptr preserve the already-stored result and every message,
+  inner identity and networking field.
+
+Recommended **Option 2R** implements exactly those two types and five causal
+shapes. It adds no field/helper/API and has no declaration/ABI/layout/vtable/
+symbol/noexcept/constexpr change; HRE remains 176/8 and WebException 168/8.
+It is nevertheless an observable constructor-result change and was not
+implemented. The exact approval and rollback/test matrix are in
+docs/NetworkExceptionHResultPropagationDesign.md and Group A of the packet.
+
+### #1933 decision
+
+The retained actual binaries reproduce a material direction but not one
+universal multiplier: original 7+7 rounds were 12.638 versus 17.103 ms
+(1.353x, disjoint 11.998–14.735 and 16.024–18.945); independent 28+28 rounds
+were 26.343 versus 33.907 ms (1.287x aggregate, 1.286x paired, current slower
+22/28, broad overlapping 16.747–40.501 and 21.304–44.703 ranges). The ticket's
+attribution is corrected: those binaries compare all of #1929 rows 5–6's
+trimming, wider digit scan, tick scaling and direct commit, not tick storage
+alone.
+
+A scale-lookup candidate passed 11,111,110 scaling states, 1,941,233 TryParse
+inputs and 1,030 exact Parse observations. It then ran five warmups plus 25
+measured rounds at GCC 14.2 C++23 -O2 and -O3 over no fraction; 1/3/4/6/7
+digits; whitespace; invalid eighth digit; and out-of-range time, separately for
+Parse/TryParse and success/failure. It improved several valid TryParse rows,
+but -O3 failures favored current and -O2 seven-digit Parse was 5.9% slower,
+losing 23/25. GCC already unrolls current scaling to immediate multipliers at
+-O3. Classification: **optimization designed but not implemented**, with a
+toolchain-specific component. Exact tick behavior and TimeOnly 16/4 remain.
+
+### #1925/#1934 classification
+
+#1925's optional<double> defect is real, but “all composites recurse” is false.
+Direct/nested optional and variant hashed NaNs are unfindable; ordered
+NaN/1/2 can silently collapse; pair/tuple hashed Dictionary is currently
+ill-formed; .NET delegates for mapped Nullable and ValueTuple, not arbitrary
+fields. Generic Comparer/EqualityComparer<optional<F>> also remains wrong while
+dedicated Nullable comparers are correct, so separate inactive #1934 records
+that surface.
+
+Recommended bounded approval is exactly direct
+optional<float/double/long double>, #1934 semantics first and #1925 key
+selection second. It changes comparator-bearing C++ type/symbol identity and
+public MapType/SetType and iterator/deduced types even where measured
+size/alignment stays equal, so it is needs_user and requires a coordinated
+rebuild. No nested optional, pair, tuple, array, variant, vector, user-field
+recursion or new hash support is implied.
+
+### Remaining packet and queue
+
+docs/RemainingApprovalDecisions.md is now authoritative:
+
+1. #1932 Option 2R: recommend independent approval.
+2. #1899/#1894: recommend retaining #1898 and closing #1899 wontfix. D is four
+   additive visitor conveniences; G is D plus five deprecation warnings. A
+   callback can retain its observer, so neither is lifetime enforcement.
+3. #1929 rows 1–4: recommend retaining/documenting rows 1–3 and design-only row
+   4; separate wording exists for each widening/reversal.
+4. #1934 then bounded #1925: recommend only the direct nullable-floating group,
+   with explicit source/ABI rebuild approval.
+5. #1926: recommend wontfix; the 1.319x insert cost is real (24/25) but the
+   reserved libstdc++ specialization grows nodes 48→64 and is nonportable; the
+   old lookup claim is noise.
+
+The #1899 visitor correction is appended in
+docs/OwnedTreeLifetimeContractPlan.md §46 and
+docs/TextSubsetCompatibilityDecision.md §9. D does not unblock #1894. G could
+give #1894 five -Werror deprecation-diagnostic sites, but ordinary calls still
+compile and the fixture could not be called a structural lifetime proof.
+
+Current database population is 1,934 tickets: 1,920 done, 3 todo, 6 blocked,
+2 needs_user and 3 wontfix. Open rows are #1773/#1888/#1889/#1894/#1896/#1899
+blocked; #1926/#1929/#1932 todo; and #1925/#1934 needs_user. The three declined
+rows remain blocked by design. No new audit identifier was issued.
+
+### Closure evidence and resources
+
+The full socket-enabled local gate passed 15,058/15,058 across 37 executables,
+including Integration 880 and Core.Base 5,585, with zero build warnings/errors.
+The selective matrix passed, including WebSockets 24/24 without skips. Module
+boundaries are 41/91; seams 2/18; negative fixtures 10/74 (84 invocations,
+peak two jobs); catalogue/database checks green; Doxygen 1,937/1,942; audit
+68/296/364. No new sanitizer result is claimed because production objects did
+not change; retained sanitizer evidence and semantic probes are distinguished
+in NEXT.md.
+
+Build sizes in KiB, start→final: build 795,596→795,600; build-asan
+4,014,420→4,014,420; build-modular 1,331,520→1,331,520; build-probe
+74,492→75,932; build-consumer 12→12; build-tmp 8→4; build-ubsan/build-tsan
+absent. cmake-build-debug ended 89,296 KiB; only the inherited approximately
+88 MiB start was recorded, a known limitation. Retained evidence grew
+build-probe by 1,440 KiB. Batch-created validation cache/temp cleanup reclaimed
+13,876 KiB.
+
+All compilation was sequential by command with at most two jobs. Every
+mktemp-based script used repository-local build-tmp; no build tree was made
+under /tmp, /var/tmp or /dev/shm. The negative-fixture unit test required the
+repository-local ccache path; its corrected run passed 37/37. Socket-bearing
+gates used approved socket-enabled execution.
+
+Remote refs and stashes were read-only. The anomalous remote ref remains
+f3a2bb56 with the two unchanged update-by-push reflog entries. All three
+stashes are byte-for-byte listed unchanged in NEXT.md. No push/fetch/pull/
+merge/rebase/tag/publication/stash mutation occurred. #1773 remains blocked;
+CNA/mobile-eggbert were not inspected or modified.
+
+Next action requires a clean context and explicit wording from one or more
+independent packet groups. Prefer #1932 alone as the smallest implementation
+batch if Option 2R is approved; keep #1934/#1925 in a separate rebuild-sensitive
+batch.
 
 
 ## 2026-08-01 — approved #1927/#1928/#1929 rows 5–6, then compatible #1880/#1875

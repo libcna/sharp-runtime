@@ -4,19 +4,267 @@
 # NEXT.md
 
 *Last verified: 2026-08-01. Branch:
-`feature/remediation-batch-approved-text-subset-p3` with no upstream. The exact
-approved `docs/TextSubsetCompatibilityDecision.md` §6.5 items (1), (2), and
-(3) are delivered as three independent commits: #1927, #1928, and #1929 rows
-5–6 only. The compatible follow-ons #1880 and #1875 are also complete in their
-own commits. The repository gate is **15,058 tests across 37 executables**
-(was 15,024); the audit tally is **68 remediated / 296 open / 364 total**;
-the module graph is **41 / 91**, version seams **2 / 18**, negative fixtures
-**10 / 74**, and canonical Doxygen **1,937 / 1,942**. #1929 remains partial and
-`todo`; its rows 1, the beyond-seven-digit remainder of row 2, row 3, and row 4
-remain unapproved. #1773, #1894, and #1899 remain blocked;
-#1888/#1889/#1896 remain declined/blocked. Four inactive post-audit tickets
-were recorded without issuing an audit identifier: inseparable #1930/#1931
-are done, while #1932/#1933 remain `todo`. See the 2026-08-01 handoff below.*
+`feature/remediation-batch-1932-1933-decisions` with no upstream. This
+design/evidence batch completed #1932's constructor-specific HResult design,
+closed #1933 as evidence-only with no optimization, classified #1925 as a
+bounded approval-sensitive change coordinated with new inactive #1934, and
+replaced the remaining-decision packet with corrected independent groups. It
+made no production/header or observable semantic change and added no permanent
+test. The repository gate remains **15,058 tests across 37 executables**; the
+audit tally remains **68 remediated / 296 open / 364 total**; the module graph
+is **41 / 91**, version seams **2 / 18**, negative fixtures **10 / 74**, and
+canonical Doxygen **1,937 / 1,942**. #1930 is done inside #1927's owning commit;
+#1931 is done inside #1929 rows 5–6; #1932 remains `todo`; #1933 is `done`;
+#1925/#1934 are `needs_user`. #1773/#1894/#1899 remain blocked,
+#1888/#1889/#1896 remain declined/blocked, #1926 remains `todo` leaning
+`wontfix`, and #1929 remains partial with rows 1–4 unchanged. See the first
+2026-08-01 handoff below.*
+
+---
+
+## Autonomous batch handoff, 2026-08-01 (#1932/#1933 design, evidence, and remaining decisions)
+
+Branch **feature/remediation-batch-1932-1933-decisions**, created from local
+handoff HEAD 0e1b47d6. It has no upstream. Four logical commits precede this
+handoff:
+
+| Commit | Unit | Result |
+|---|---|---|
+| 67433746 | #1932 | complete networking-exception constructor/HResult design; no implementation |
+| 4b2fb2d1 | #1933 | TimeOnly performance isolation, controlled candidate and retained evidence; no production optimization |
+| d000f059 | #1925, new #1934 | composite-key premise corrected; direct nullable-floating subset classified needs_user |
+| eb686b48 | consolidated packet | all remaining choices repriced; #1899 visitor-escape premise corrected |
+
+### 1. Exact ticket reconstruction
+
+- **#1930 is done and inseparable from #1927**, owned by 28e72ba7. It preserves
+  negative-zero sign through the private Math rounding funnel.
+- **#1931 is done and inseparable from #1929 rows 5–6**, owned by 83cfb10a. It
+  stores exact ticks within the second in TimeOnly's existing fourth int, with
+  size/alignment still 16/4.
+- **#1932 remains todo and unapproved.** Its durable design is
+  docs/NetworkExceptionHResultPropagationDesign.md.
+- **#1933 is done, evidence-only.** Its classification is “optimization
+  designed but not implemented,” with a compiler/toolchain-specific component.
+- **#1925 is needs_user**, not compatible implementation-ready. New inactive
+  **#1934 is needs_user** for the separately observable generic nullable
+  Comparer/EqualityComparer default gap.
+- No ticket is doing. #1773 remains blocked; #1888/#1889/#1896 remain declined.
+
+### 2. #1932 — complete constructor and precedence result
+
+The port currently retains the outer base value in every causal constructor.
+Current .NET copies the exact inner HResult whenever the inner System exception
+is non-null, including zero. Status/error metadata is orthogonal:
+
+| Shape | Current port | Current .NET / recommended Option 2R |
+|---|---:|---:|
+| HRE default/message/null-inner | 0x80131500 | 0x80131500 |
+| HRE H3 message + System inner | 0x80131500 | exact inner |
+| HRE H4 status + System inner | 0x80131500 | exact inner; status never wins |
+| HRE H5 error/status + System inner | 0x80131500 | exact inner; error/status never win |
+| WebException default/message/status-only/null-inner | 0x80131509 | 0x80131509 |
+| WebException W3 message + System inner | 0x80131509 | exact inner |
+| WebException W5 status + System inner | 0x80131509 | exact inner; status never wins |
+| either type + non-System exception_ptr | outer base | outer base, port-defined |
+
+The retained matrix covers null, default, type-specific, custom, zero,
+non-System, nested HRE/WebException, explicit status/error, copy, move and
+exception_ptr rethrow. Messages, inner identity and public metadata already
+survive. Current built-in producers pass no inner pointer; sync/async paths
+forward rather than wrap.
+
+Recommendation: **Option 2R**, limited to the five existing causal shapes
+H3/H4/H5/W3/W5. A non-null pointer that rethrows System::Exception copies the
+exact HResult; null or non-System retains the base. No Exception-wide helper,
+new field, public API or producer wrapping. This has no declaration, symbol,
+layout, vtable, noexcept or constexpr change, but it is an observable
+constructor-result change and needs explicit approval. HRE remains 176/8 and
+WebException 168/8. Exact copyable wording is Group A of
+docs/RemainingApprovalDecisions.md.
+
+### 3. #1933 — benchmark corpus, measurements, and mechanism
+
+The controlled corpus is exactly nine inputs: no fraction; 1, 3, 4, 6 and 7
+fraction digits; approved leading/trailing whitespace; an invalid eighth
+fraction digit; and out-of-range 24:00:00. Every row measures Parse and
+TryParse separately, success and failure, after five warm-up rounds. Successful
+and TryParse-failure rows perform 100,000 operations per round; throwing Parse
+failures perform 2,000. GCC 14.2, C++23, -DNDEBUG, both -O2 and -O3; 25 measured
+interleaved rounds per controlled configuration. Atomic/checksum sinks prevent
+elision.
+
+Before timing, current and the lookup-table candidate agreed over:
+
+| Correctness population | Count |
+|---|---:|
+| all possible 1–7 digit scaling states | 11,111,110 |
+| TryParse inputs | 1,941,233 |
+| exact Parse success/exception observations | 1,030 |
+| TimeOnly size/alignment | 16 / 4 |
+
+The actual retained pre/post binaries were also rerun independently:
+
+| Run | Prefix median and spread ms | Current median and spread ms | Result |
+|---|---|---|---|
+| original 7+7 | 12.638, 11.998–14.735 | 17.103, 16.024–18.945 | 1.353x, disjoint ranges |
+| independent 28+28 | 26.343, 16.747–40.501, p05–p95 17.590–33.800 | 33.907, 21.304–44.703, p05–p95 21.796–39.471 | 1.287x aggregate; 1.286x paired; current slower 22/28 |
+
+Independent variances were 31.089687 and 48.740302 ms²; paired-ratio p05–p95
+was 0.869997–1.963344. A CPU-0 diagnostic was noisier and rejected. The original
+1.353x attribution was corrected: the binaries compare the whole #1929 rows
+5–6 bundle—boundary trimming, a wider digit loop, tick scaling and direct field
+commit—not exact-tick storage alone.
+
+The lookup candidate improved valid -O3 TryParse paths by roughly
+1.111–1.132 paired median, but lost the invalid-fraction and range paths. -O3
+Parse was mostly neutral/noisy. At -O2, one-digit TryParse improved 1.229 and
+three-digit 1.146, but seven-digit Parse regressed 5.9% and lost 23/25 rounds.
+Generated code explains the split: -O2 retains the production scaling loop
+while the candidate materializes a stack lookup; -O3 already unrolls the
+production scan/scaling into immediate multipliers. No candidate improved the
+complete Parse/TryParse, success/failure surface stably at both optimization
+levels.
+
+Disposition: **no optimization**. Exact ticks, grammar, failure output,
+exception identity, declarations, size/layout, symbols, noexcept and constexpr
+remain unchanged. Retained raw logs, analyzers, source, binaries and
+disassemblies are listed in docs/TimeOnlyParsePerformanceIsolation.md §13.
+
+### 4. #1925 classification and #1934
+
+The broad ticket premise was false:
+
+- direct optional<double> hashed keys are unfindable and ordered NaN/1/2 keys
+  silently collapse;
+- pair/tuple hashed Dictionary instantiations are currently ill-formed because
+  their standard hashes are not invocable, so adding them would be new
+  capability;
+- nested optional and variant reproduce defects but are different mappings;
+- .NET delegates recursively for mapped Nullable and ValueTuple types, not
+  arbitrary fields; and
+- generic Comparer/EqualityComparer<optional<double>> defaults still disagree
+  with the already-correct dedicated Nullable comparers. #1934 records this
+  separate public surface.
+
+Recommended bounded group: direct optional<float/double/long double> only,
+landing #1934 helper/default semantics before #1925 key selection. This fixes
+one exact Nullable mapping but changes comparator-bearing standard-container
+types, public MapType/SetType aliases and iterator/deduced types for a further
+instantiation family. Measured raw map/set and iterator sizes stayed equal, but
+type and symbol identity do not; a coordinated rebuild and explicit source/ABI
+approval are required. Nested optional, pair, tuple, array, variant, vector,
+user types and new hash capability are excluded.
+
+### 5. Consolidated decisions and corrected premises
+
+docs/RemainingApprovalDecisions.md now contains five independent groups:
+
+1. #1932 Option 2R — recommend approval independently.
+2. #1899/#1894 — recommend retaining #1898 and closing #1899 wontfix; D and G
+   are migration/diagnostic aids only.
+3. #1929 rows 1–4 — recommend documenting the current subset for rows 1–3 and
+   design-only treatment for row 4; every row has separate widening wording.
+4. #1934 then bounded #1925 — recommend approval only for direct nullable
+   floating types, with the source/ABI rebuild acknowledged.
+5. #1926 — recommend wontfix; do not specialize a reserved libstdc++ internal.
+
+The new #1899 correction matters: a C++ visitor callback can retain any raw
+observer it receives. D therefore means four additive range-equivalent
+traversal conveniences, not non-escapable borrows. G means D plus five
+deprecation warnings; ordinary calls still compile. Under
+-Werror=deprecated-declarations, #1894 could pin five diagnostic sites, but
+that is not proof of ordinarily ill-formed APIs or lifetime safety. D alone
+does not unblock #1894. No Text.Json negative site may be invented while #1888
+is declined.
+
+#1926's measured insert regression remains 1.319x, slower 24/25 rounds; its
+current node is 48 bytes versus cached 64, a 16-byte—not one-word—difference.
+The old lookup-improvement claim is noise. Recommendation remains wontfix.
+
+### 6. Validation, tests, sanitizers, and compatibility
+
+There was no production/header implementation and no permanent test was added,
+so the floor stays 15,058 across 37 executables. Required closure:
+
+- full socket-enabled local CI: **15,058/15,058**, build 0 warnings/errors;
+- Core.Base **5,585/5,585**, Integration **880/880**;
+- selective matrix green, including WebSockets **24/24** without skips;
+- module graph **41/91** and both validator suites green;
+- component catalogue and plan database consistent;
+- version seams **2/18**;
+- negative consumers **10 fixtures / 74 sites**, 84 compiler invocations,
+  measured peak **2 jobs**;
+- canonical Doxygen **1,937**, ceiling 1,942;
+- git diff check clean.
+
+No new sanitizer run is claimed because no production object changed. The
+retained #1899 Xml.Linq supported-operation matrix remains 184/184 clean under
+ASan+UBSan+LSan, and retained #1932/#1933/#1925 probes supply semantic/value
+evidence. Sanitizers cannot establish HResult precedence, parse equivalence,
+ordering/hash semantics, or performance; those claims come from the explicit
+matrices. Any later implementation must run the focused sanitizer requirements
+in its owning design.
+
+This batch changes no accepted/rejected input, parsed value, exception result,
+public declaration, parameter/return type, symbol, undefined-symbol set,
+vtable, virtual slot, field, offset, size/alignment, noexcept or constexpr
+state. The only observable output is documentation/planning state.
+
+### 7. Repository, disk, and execution state
+
+Starting → final sizes in KiB:
+
+| Directory | Start | Final |
+|---|---:|---:|
+| build | 795,596 | 795,600 |
+| build-asan | 4,014,420 | 4,014,420 |
+| build-modular | 1,331,520 | 1,331,520 |
+| build-probe | 74,492 | 75,932 |
+| build-consumer | 12 | 12 |
+| build-tmp | 8 | 4 |
+| build-ubsan / build-tsan | absent | absent |
+| cmake-build-debug | inherited handoff approximately 88 MiB; exact start not re-recorded | 89,296 |
+
+The missing exact cmake-build-debug starting KiB is a known recording
+limitation; it was not built or modified intentionally. The batch retained all
+ticket probes and raw performance evidence. It removed only its repository-
+local validation ccache and temporary self-test artifacts, reclaiming 13,876
+KiB; net build-probe growth is 1,440 KiB of retained evidence.
+
+Maximum aggregate compilation was **two jobs**. No build tree was created under
+/tmp, /var/tmp or /dev/shm. Every mktemp-based repository script used
+build-tmp. The negative-fixture self-test initially inherited the unwritable
+home ccache and failed its temporary compilations; rerunning with the
+repository-local CCACHE_DIR passed 37/37. The selective and full socket-bearing
+gates used the approved socket-enabled execution path and passed without
+disabling or skipping tests.
+
+Initial and final read-only remote observations agree:
+origin/feature/remediation-batch-group-e-subset-decisions remains f3a2bb56,
+with reflog entries 563b832d at 2026-07-31 19:40:47 +0200 and f3a2bb56 at
+19:57:20 +0200, both labelled “update by push.” No diagnosis was attempted and
+no remote reference changed. The three stashes remain exactly:
+
+- stash@{0}: WIP on wip: 7db49c0 Math was added
+- stash@{1}: WIP on wip: 4b5b8d5 Changes
+- stash@{2}: WIP on wip: 4b5b8d5 Changes
+
+The batch branch has no upstream. No push, fetch, pull, merge, rebase, tag,
+package publication or stash mutation occurred. #1773 remains blocked. CNA and
+mobile-eggbert were not inspected, searched, built, tested or modified.
+
+### 8. Recommended next clean-context batch
+
+Ask for decisions by copying one or more independent groups from
+docs/RemainingApprovalDecisions.md; do not use a blanket approval. The smallest
+implementation batch is #1932 Option 2R alone if approved. The coordinated
+#1934/#1925 direct-optional group is a separate rebuild-sensitive batch if
+approved. Recommended no-change decisions are #1899/#1894 closure under the
+documented C++ borrow contract, #1926 wontfix, and retaining #1929 rows 1–3
+while designing row 4 separately.
+
+A clean context is recommended before any approved implementation.
 
 ---
 
