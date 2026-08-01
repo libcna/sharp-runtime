@@ -1303,3 +1303,11 @@ pending explicit Option 1 approval. #1937's stronger O2/O3, five-warm-up,
 0.964) and closes the investigation as `done`, not reproducible, with no
 optimization. See `docs/ImmutableSortedSetFloatingEqualityDesign.md` and
 `docs/NullableFloatingHashSetPerformanceEvidence.md`.
+
+**Implementation follow-through (2026-08-01):** the user approved #1936 Option
+1 exactly. `ImmutableSortedSet<T>::SetEquals` now uses one generic ordered
+two-direction comparator-equivalence scan after rebuilding `other` under this
+set's comparator and retaining the post-collapse count check, with a true
+shared-backing fast path. The direct floating and generic custom-comparer
+contradictions are closed; #1934/#1925 policy selection and every other
+collection remain unchanged. Ticket #1936 is done. See the owning design §9.

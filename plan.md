@@ -1,21 +1,20 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-08-01 — branch
-`feature/remediation-batch-1936-1937-design`, no upstream. This design/evidence
-batch fully scopes #1936 as a generic ImmutableSortedSet comparator-equivalence
-defect and recommends unapproved Option 1; it closes #1937 as `done`, not
-reproducible, with no optimization. #1929 row 4 was not designed and rows 1–4
-remain unchanged. #1934 then bounded #1925 remain `done`. The latest clean
-socket-enabled gate is **15,081
-tests / 37 executables** (Integration 893, Core.Base 5,585, Collections.Core
-2,752); audit **68 remediated / 296 open / 364 total**; graph **41/91**; seams
-**2/18**; negative fixtures **10/81**, 91 compiler invocations, peak 2;
-checker self-tests **45/45**; Doxygen **1,938/1,942**. Tickets: **1,925 done,
-2 todo, 6 blocked, 0 needs_user, 4 wontfix** of 1,937; no ticket is doing.
-#1926 remains wontfix; #1932/#1935 remain done; #1773 remains blocked;
-#1888/#1889/#1896 remain declined/blocked; #1894/#1899 remain blocked; partial
-#1929 rows 1–4 remain todo. Inactive #1936 is the next exact approval; #1937
-is evidence-complete.*
+`feature/remediation-batch-1936-option-1`, no upstream. Exact approved #1936
+Option 1 is implemented and fully evidenced: one generic
+`ImmutableSortedSet<T>::SetEquals` comparator-equivalence scan after the
+preserved this-comparer rebuild and post-collapse count check, plus a true
+shared-backing fast path. #1934/#1925 remain `done`; #1937 remains `done`, not
+reproducible; #1926 remains `wontfix`; #1932/#1935 remain `done`; #1773 remains
+blocked. The clean socket-enabled gate is **15,092 tests / 37 executables**
+(Integration 893, Core.Base 5,585, Collections.Core 2,763); audit **68
+remediated / 296 open / 364 total**; graph **41/91**; seams **2/18**; negative
+fixtures **10/81**, 91 compiler invocations, peak 2; checker self-tests
+**45/45**; Doxygen **1,938/1,942**. Tickets: **1,926 done, 1 todo, 6 blocked,
+0 needs_user, 4 wontfix** of 1,937; none doing. #1888/#1889/#1896 remain
+declined/blocked, #1894/#1899 remain blocked, and partial #1929 rows 1–4 remain
+the sole todo item.*
 
 *Previous plan snapshot, retained historically: 2026-08-01 — 41 physical components, 91 direct production
 dependency edges, a clean zero-warning native build, 15,058 passing tests
@@ -100,6 +99,49 @@ validated repair tickets. Consumer-driven API breadth remains legitimate later
 work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
 
+
+## 2026-08-01 — #1936 exact Option 1 delivered
+
+The approved change is confined to the inline generic
+`ImmutableSortedSet<T>::SetEquals` body. Shared backing now returns true in
+O(1); otherwise `other` is rebuilt under this set's existing comparator, the
+post-collapse count check remains, and both ordered ranges are scanned using
+`!less(a,b) && !less(b,a)`. No raw element or raw `std::set` equality remains,
+and no floating/nullable specialization or other collection was changed.
+
+The retained 105-row prefix matrix was reproduced byte-for-byte. Postfix,
+direct float/double/long-double NaN self, copy, independent, insertion-order,
+payload, mixed, duplicate, and comparer-identical equality cases are true;
+equal sets are no longer proper subsets or supersets. Case-insensitive string
+sets are likewise fixed. Nullable floating controls and all non-proper
+relations, overlap, intersection, union, except, and symmetric-except results
+remain unchanged. Eleven permanent tests raise Collections.Core 2,752 →
+2,763 and the repository 15,081 → 15,092.
+
+The eight-mutation campaign has six killed mutations and two correctly
+classified equivalents: removing the count check is redundant with the final
+both-ended scan, while removing the shared-data fast path changes performance
+only. No unexpected survivor remains. Representative source/DWARF/nm probes
+show unchanged public declarations, aliases, iterator types, size/alignment
+(16/8), sole field offset (zero), vtable/virtual surface, `noexcept`,
+`constexpr`, public mangled names, and 35 undefined names. Approved inline
+template effects remove 50 weak raw equality/old optional helpers, add six
+weak shared-pointer equality helpers, and grow the measured `SetEquals` body
+to 0x380.
+
+Five alternating warm-up pairs and eleven measured alternating pairs prove
+self/shared copy at about 9 microseconds per 5,000 calls versus about 39
+milliseconds before. Independent comparisons retain O(m log m + n); ordinary
+controls were noisy and did not justify a new regression ticket. Focused
+ASan+UBSan tests pass 16/16 and a 2,000-iteration stateful-comparer lifecycle
+probe is clean. The LSan-enabled tests complete semantically but LeakSanitizer
+then fails at its ptrace step, so no clean LSan discovery is claimed.
+
+All affected main and sanitizer objects were newer than the edited header and
+the new test before relinking. The full two-job socket-enabled CI gate passes
+15,092 tests across 37 executables with zero warnings/errors; the ten-component
+selective matrix passes; Doxygen remains 1,938/1,942. No new defect, ticket, or
+SR-AUD identifier was created. Audit numbering and totals stay frozen.
 
 ## 2026-08-01 — #1936 design and #1937 evidence disposition
 

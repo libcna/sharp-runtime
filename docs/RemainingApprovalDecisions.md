@@ -4,12 +4,12 @@
 
 ## 1. Authority, scope, and how to use this packet
 
-This file supersedes its earlier six-group packet. Groups A, D, and E are
+This file supersedes its earlier six-group packet. Groups A, D, E, and F are
 retained as the exact historical authority for the independently approved and
 delivered #1932 Option 2R contract, the coordinated #1934 then bounded #1925
-contract, and the independently approved #1926 `wontfix` disposition; none is
-an open choice. Every still-pending
-contract remains independent. The evidence authority is:
+contract, the independently approved #1926 `wontfix` disposition, and the
+independently approved #1936 Option 1 contract; none is an open choice. Every
+still-pending contract remains independent. The evidence authority is:
 
 - docs/NetworkExceptionHResultPropagationDesign.md for #1932;
 - docs/OwnedTreeLifetimeContractPlan.md §§42, 45, and 46 for #1894/#1899;
@@ -36,7 +36,7 @@ There is deliberately no “approve all fixes” choice:
 | **C1–C4** | #1929 rows 1–4 | four independent date/time acceptance/API choices | retain and document rows 1–3; design row 4 separately | decide by row, not as one grammar switch |
 | **D (delivered)** | #1934 then #1925 | direct nullable-floating default comparison and key policy | bounded direct-optional group approved and implemented | closed in dependency order |
 | **E (closed)** | #1926 | libstdc++ long-double hash caching | `wontfix` approved and recorded | closed independently |
-| **F (open)** | #1936 | generic ImmutableSortedSet comparator-equivalence equality | Option 1; one generic method body | approve separately |
+| **F (delivered)** | #1936 | generic ImmutableSortedSet comparator-equivalence equality | Option 1 approved and implemented | closed independently |
 | **G (closed)** | #1937 | nullable-floating HashSet performance isolation | not reproducible; no optimization | evidence-only closure |
 
 #1933 is not an approval item: its performance isolation is complete and no
@@ -584,7 +584,7 @@ Alternative implementation wording:
 
 ---
 
-## 7. Open Group F — #1936 ImmutableSortedSet comparator equivalence
+## 7. Delivered Group F — #1936 ImmutableSortedSet comparator equivalence
 
 The complete direct `float`, `double`, and `long double` matrix reproduces
 NaN-nonreflexive `SetEquals`, and both equal-set proper predicates incorrectly
@@ -593,15 +593,15 @@ bounded #1925 branch. A case-insensitive string set reproduces the same
 contradiction, proving a generic algorithm defect rather than a missing
 floating alias.
 
-Recommend Option 1: retain rebuilding `other` under this set's comparer and
-the post-collapse count check, then compare the ordered ranges using
-`!less(a,b) && !less(b,a)` for every `T`. A shared-backing-data true fast path
-is included. This matches current .NET's comparer-based scan and the port's
-already-correct `SortedSet` algorithm. It changes only one inline method body,
-no declaration, alias, iterator, object layout, or vtable. Emitted template
-body code/helper symbols can move, and custom-comparer as well as direct-
-floating observable results intentionally change, so explicit semantic and
-template approval is required.
+The user approved Option 1 exactly: retain rebuilding `other` under this set's
+comparer and the post-collapse count check, then compare the ordered ranges
+using `!less(a,b) && !less(b,a)` for every `T`. A shared-backing-data true fast
+path is included and implemented. This matches current .NET's comparer-based
+scan and the port's already-correct `SortedSet` algorithm. It changes only one
+inline method body, no declaration, alias, iterator, object layout, or vtable.
+Emitted template body code/helper symbols can move, and custom-comparer as well
+as direct-floating observable results intentionally change. The approved
+semantic and template effects are fully measured in the owning design.
 
 Copyable approval wording:
 
@@ -619,7 +619,7 @@ Copyable approval wording:
 > mutation proof, performance comparison, and source/symbol/layout evidence.
 > Do not change #1934/#1925 policy selection or any other collection.
 
-No recommendation here is approved. Selected equality, delegation, mutual
+This wording was approved and delivered. Selected equality, delegation, mutual
 lookup, documented divergence, and direct-floating-only specialization are
 rejected for the reasons in the owning design.
 
@@ -651,12 +651,11 @@ The only remaining dependency chains are:
 1. #1899 classification or migration choice, then any accurately re-scoped
    #1894 diagnostic fixture;
 2. each #1929 row independently, with row 3 explicitly acknowledging #1879.
-3. #1936 is independent and is the next precise implementation approval.
 
 #1934 then #1925 was delivered in its approved order. #1926 was standalone and
-is now closed. Delivered #1932 no longer participates in the dependency order.
-#1929 row 4 is design-first. No choice depends on #1933, and no performance
-ticket authorizes a semantic widening.
+is now closed. Delivered #1932 and #1936 no longer participate in the
+dependency order. #1929 row 4 is design-first. No choice depends on #1933,
+and no performance ticket authorizes a semantic widening.
 
 | Ticket | State preserved by this packet |
 |---|---|
@@ -672,7 +671,7 @@ ticket authorizes a semantic widening.
 | #1932 | done; exact Option 2R delivered independently |
 | #1933 | done; optimization designed but not implemented |
 | #1934 | done; direct nullable-floating defaults delivered first |
-| #1936 | todo/inactive; generic Option 1 design complete, explicit approval pending |
+| #1936 | done; exact generic Option 1 delivered with full evidence |
 | #1937 | done; not reproducible, evidence-only, no optimization |
 
 No new SR-AUD identifier is issued. Audit numbering remains frozen at 364.

@@ -1985,3 +1985,21 @@ metadata preserve their prior behavior. This introduced no universal Exception
 rule and does not alter SR-AUD-157's already-remediated state or the frozen
 **68 remediated / 296 open / 364 total** tally. See
 `docs/NetworkExceptionHResultPropagationDesign.md` §11.
+
+## Post-audit generic set-equality follow-through — ticket #1936 (2026-08-01)
+
+Comparator equivalence, not raw element equality, is the equality relation of
+an ordered set with a caller-supplied comparator. The old
+`ImmutableSortedSet<T>::SetEquals` correctly rebuilt `other` under this set's
+comparator and then discarded that policy by invoking raw `std::set` element
+equality. Direct floating NaNs and case-insensitive strings consequently made
+a set unequal to itself and simultaneously a proper subset and proper
+superset of an equal set.
+
+Exact approved Option 1 replaces that fallback with one two-direction ordered
+comparator scan for every `T` and adds a shared-backing true fast path. It does
+not change default comparison selection, nullable policy, raw operators, or
+another collection. The full behavior/mutation/template-ABI/layout/performance
+and sanitizer record is `docs/ImmutableSortedSetFloatingEqualityDesign.md`
+§9. This is a post-audit correction with no SR-AUD identifier; numbering and
+the **68 / 296 / 364** tally remain frozen.

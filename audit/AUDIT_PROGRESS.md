@@ -6410,3 +6410,27 @@ win. The new 13-test permanent matrix and sync/async forwarding controls pass.
 The change has no declaration, ABI, layout, vtable, symbol, `noexcept`, or
 `constexpr` consequence. Audit numbering and totals remain **68 / 296 / 364**;
 no new finding was created.
+
+---
+
+## ImmutableSortedSet comparator-equivalence closure — ticket #1936 (2026-08-01)
+
+The user approved exact Option 1 for the post-audit generic defect discovered
+during #1925. `ImmutableSortedSet<T>::SetEquals` now preserves this-set
+comparer precedence, rebuilding, and the post-collapse count check, then uses
+a two-direction comparator-equivalence range scan for every `T`, with a true
+shared-backing fast path. Direct float/double/long-double NaN sets and generic
+custom-comparer sets are reflexive; their proper-subset/proper-superset
+contradiction is closed. Nullable-floating policy and every other collection
+remain unchanged.
+
+Eleven permanent tests raise Collections.Core to 2,763 and the socket-enabled
+repository gate to 15,092 tests across 37 executables. Eight mutations have no
+unexpected survivor; six are killed and the removed count check and fast path
+are correctly classified behaviorally equivalent. ASan+UBSan focused tests
+and a 2,000-iteration lifetime/stateful-comparer probe are clean; LSan cannot
+claim discovery because its post-test ptrace step is denied. Public
+declarations, aliases, iterator types, layout, vtables, `noexcept`, and
+`constexpr` are unchanged; approved inline-template helper/body symbols move.
+Audit numbering stays frozen at 364 and totals remain **68 remediated / 296
+open / 364 total** because #1936 has no SR-AUD identifier.

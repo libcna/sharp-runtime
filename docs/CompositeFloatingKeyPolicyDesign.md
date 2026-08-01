@@ -720,6 +720,14 @@ HashSet lookup observation. #1926 remains wontfix, #1932/#1935 remain done,
 #1773 remains blocked, and #1929 rows 1–4 are unchanged. No `SR-AUD-*`
 identifier was issued; the audit stays 68 remediated / 296 open / 364 total.
 
+**Follow-through correction (2026-08-01):** later complete evidence widened
+#1936's premise from direct primitive floating to the generic
+`ImmutableSortedSet<T>::SetEquals` comparator-equivalence algorithm. The user
+approved and the implementation delivered exact Option 1 without changing
+this document's #1934/#1925 nullable policy selection. Ticket #1936 is done;
+#1937 is likewise done/not reproducible. Audit numbering and totals remain
+unchanged.
+
 **Correction (2026-08-01):** #1937 has since completed its required isolation
 and is no longer inactive/todo. The original observation remains above for
 traceability; its disposition is not reproducible, evidence-only, with no
