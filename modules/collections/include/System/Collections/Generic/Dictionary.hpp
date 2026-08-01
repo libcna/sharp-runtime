@@ -29,9 +29,10 @@ using SharpRuntime::intcs;
  * @par Default key equality and hashing (ticket #1919)
  * The backing map is parameterised on @ref MapType's hasher and key-equality predicate,
  * `System::detail::DefaultKeyHash<TKey>` and `System::detail::DefaultKeyEqual<TKey>`. Both are
- * **token-identical to `std::hash<TKey>` and `std::equal_to<TKey>` for every non-floating
- * TKey**, so nothing about those instantiations moves. For a `float`, `double` or
- * `long double` key they are the .NET contract instead: `Double.Equals` is
+ * **token-identical to `std::hash<TKey>` and `std::equal_to<TKey>` except for floating
+ * primitives and direct nullable-floating keys**, so nothing about all other instantiations
+ * moves. For a `float`, `double`, `long double`, or direct `std::optional` of one of them,
+ * they are the .NET contract instead: `Double.Equals` is
  * `x == y || (IsNaN(x) && IsNaN(y))`, and `Double.GetHashCode` folds every NaN -- and both
  * zeros -- to one value. `std::equal_to<double>` says NaN is not equal to itself and
  * `std::hash<double>` hashes NaN's payload bits, so before this ticket a NaN key could be
@@ -41,12 +42,14 @@ using SharpRuntime::intcs;
  * equal-objects-equal-hashes invariant instead. See
  * docs/CollectionsComparisonContractPlan.md section 5.3.
  *
- * @warning **PUBLIC TYPE CHANGE for a floating-point key** (ticket #1919, approved). For
- * `TKey` = `float`, `double` or `long double` the type returned by both @ref ToMap overloads
+ * @warning **PUBLIC TYPE CHANGE for a floating-point or direct nullable-floating key**
+ * (tickets #1919/#1925, approved). For `TKey` = `float`, `double`, `long double`, or direct
+ * `std::optional` of one of them, the type returned by both @ref ToMap overloads
  * and the types of the @ref iterator and @ref const_iterator typedefs are the policy-keyed
  * `MapType`, not `std::unordered_map<TKey,TValue>`. Spell @ref MapType rather than the raw
- * `std::unordered_map` to be correct for every key type. No non-floating instantiation is
- * affected in any respect. See docs/Migration-CollectionsFloatingComparers.md.
+ * `std::unordered_map` to be correct for every key type. Instantiations outside the bounded
+ * floating/direct-nullable-floating family are unaffected. See
+ * docs/Migration-CollectionsFloatingComparers.md.
  *
  * @note begin()/end() return a version-checked iterator that throws
  * System::InvalidOperationException("Collection was modified; enumeration operation may not "
@@ -78,11 +81,12 @@ public:
      * @brief The backing map type: a `std::unordered_map` keyed under
      *        @c EqualityComparer<TKey>.Default.
      *
-     * Token-identical to `std::unordered_map<TKey,TValue>` for every non-floating @p TKey,
+     * Token-identical to `std::unordered_map<TKey,TValue>` except for floating primitives
+     * and direct nullable-floating @p TKey forms,
      * because `DefaultKeyHash<TKey>` *is* `std::hash<TKey>` and `DefaultKeyEqual<TKey>` *is*
      * `std::equal_to<TKey>` for them. Named publicly so a consumer can spell the type
-     * @ref ToMap returns without depending on whether @p TKey is floating-point (ticket
-     * #1919).
+     * @ref ToMap returns without depending on whether @p TKey selects CCF-010 (tickets
+     * #1919/#1925).
      */
     using MapType = std::unordered_map<TKey, TValue,
                                        System::detail::DefaultKeyHash<TKey>,
@@ -391,7 +395,7 @@ public:
     }
 
     /** @brief Version-checked iterator over @ref MapType. See the class warning for the
-     *         floating-point key consequence (ticket #1919). */
+     *         floating/direct-nullable-floating key consequence (tickets #1919/#1925). */
     using iterator = VersionCheckedIterator<typename MapType::iterator>;
     /** @brief Const version-checked iterator over @ref MapType. */
     using const_iterator = VersionCheckedIterator<typename MapType::const_iterator>;
@@ -413,8 +417,8 @@ public:
      * @brief Returns a const reference to the underlying map.
      *
      * Provides direct STL interoperability when needed. The returned type is @ref MapType,
-     * which is `std::unordered_map<TKey,TValue>` for every non-floating @p TKey and the
-     * policy-keyed map for a floating one (ticket #1919).
+     * which is the raw standard default for every unaffected @p TKey and the
+     * policy-keyed map for a floating/direct-nullable-floating one (tickets #1919/#1925).
      */
     [[nodiscard]] const MapType& ToMap() const { return map_; }
 
@@ -422,7 +426,7 @@ public:
      * @brief Returns a reference to the underlying map.
      *
      * Provides direct STL interoperability when needed. See the const overload for the
-     * floating-point key consequence.
+     * floating/direct-nullable-floating key consequence.
      */
     MapType& ToMap() { return map_; }
 };

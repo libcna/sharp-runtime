@@ -29,7 +29,7 @@ using System::Collections::Generic::KeyNotFoundException;
 template<typename TKey, typename TValue>
 class ImmutableDictionary {
     /// Keyed by EqualityComparer<TKey>.Default. Both aliases are the standard
-    /// defaults for every non-floating TKey, so MapT is unchanged for them.
+    /// defaults except for floating and direct nullable-floating TKey forms.
     using MapT = std::unordered_map<TKey, TValue,
                                     System::detail::DefaultKeyHash<TKey>,
                                     System::detail::DefaultKeyEqual<TKey>>;

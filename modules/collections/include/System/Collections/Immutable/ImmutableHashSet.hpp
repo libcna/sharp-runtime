@@ -55,8 +55,8 @@ class ImmutableHashSet {
      * Only the stored std::function VALUES change; HashFn, EqFn and SetT are
      * unchanged. The two must move together — a NaN-reflexive equality over a
      * payload-sensitive hash would break equal-objects-equal-hashes instead of
-     * fixing anything. For a non-floating T the policy aliases ARE
-     * `std::hash<T>` and `std::equal_to<T>`.
+     * fixing anything. Outside floating and direct nullable-floating forms the policy
+     * aliases ARE `std::hash<T>` and `std::equal_to<T>`.
      */
     static HashFn defaultHash() { return HashFn(System::detail::DefaultKeyHash<T>{}); }
     /** @copydoc defaultHash */

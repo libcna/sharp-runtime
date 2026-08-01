@@ -6,6 +6,14 @@
 **Ticket #1919** (family #1912, the Collections continuation of CCF-010).
 Approved on 2026-07-31 against `docs/CollectionsComparisonContractPlan.md` §10.
 
+**Correction/extension — ticket #1925 (2026-08-01):** the original #1919 text
+below is preserved as its historical migration record. The coordinated approval
+in `docs/CompositeFloatingKeyPolicyDesign.md` now additionally selects exactly
+the three direct `std::optional<float>`, `std::optional<double>`, and
+`std::optional<long double>` forms. Section 11 records that new boundary and
+supersedes the optional-specific statements in sections 1, 2, and 7; it does
+not extend to any other non-floating type.
+
 This note exists for one reason: for a **`float`, `double` or `long double`**
 element or key, seven container templates now expose a **different public C++
 type** than they did before. Nothing else about them changed, and **no
@@ -218,3 +226,61 @@ tests added by each will fail loudly, which is the intended signal.
 - Boundary fixture: `test/consumer/collections_floating_comparer_negative.cpp`.
 - Permanent tests:
   `modules/collections/tests/System/Collections/CollectionsComparisonContractTests.cpp`.
+
+---
+
+## 11. #1925 direct nullable-floating extension
+
+For exactly `std::optional<float>`, `std::optional<double>`, and
+`std::optional<long double>`, the three aliases now select
+`DefaultLess<T>`, `DefaultHash<T>`, and `DefaultEqualTo<T>`. Null orders before
+present and hashes to zero; two present values delegate to the established
+floating policy, so all NaNs are equal/canonically hashed and ordered before
+negative infinity, and both zero signs are equal and hash alike. Raw optional
+operators remain unchanged.
+
+This changes the public `MapType`/`SetType` aliases of `Dictionary`, `HashSet`,
+`FrozenDictionary`, `FrozenSet`, `ReadOnlyDictionary`, and `ReadOnlySet` for all
+three forms. Consequently, the `ToMap`, projection constructor, and
+`CreateFromMap`/`CreateFromSet` signatures naming those aliases also move. Use
+the owning class's alias or `auto`, exactly as shown in section 4:
+
+```cpp
+using Key = std::optional<double>;
+
+// Old raw spelling: no longer compatible with the policy-bearing public type.
+// std::unordered_map<Key, int> raw;
+// auto frozen = FrozenDictionary<Key, int>::CreateFromMap(raw);
+
+Dictionary<Key, int>::MapType map;
+auto frozen = FrozenDictionary<Key, int>::CreateFromMap(map);
+
+auto backing = std::make_shared<ReadOnlySet<Key>::SetType>();
+ReadOnlySet<Key> view(backing);
+```
+
+Measured on the supported x86-64/libstdc++ 14 toolchain, the iterator premise
+is narrower than “every iterator changes.” Predicate template arguments move,
+but libstdc++ node iterator identity erases them. The public/deduced hash-node
+iterators for nullable `float` and nullable `double` remain the same type.
+Nullable `long double` iterators change because the old standard hasher cached
+node hashes while the selected non-throwing policy hasher does not. Ordered
+tree iterators and the nominal nested `SortedSet`/`SortedDictionary` iterator
+types remain the same. The backing/container member types and affected inline
+symbols still change in every approved instantiation; unchanged iterator
+identity is not ABI neutrality.
+
+Every one of the sixteen consumers inventoried by
+`CompositeFloatingKeyPolicyDesign.md` inherits the new behavior. The six
+public backing aliases above require source migration where callers used raw
+standard types. The other ten consumers have private predicate-bearing storage
+or `std::function` predicate storage, so their source-visible class template
+name stays fixed while inline/template bodies must be rebuilt. A clean,
+coordinated rebuild of every header consumer is required.
+
+The extension deliberately does not select non-floating optionals, nested
+optionals, pair, tuple, array, variant, vector, or arbitrary user-defined
+types. In particular, pair/tuple hashed collections remain ill-formed; no new
+hash capability was added. The negative-consumer fixture sites 9–15 pin the
+new raw-container/alias boundary and the measured nullable-long-double iterator
+transition.

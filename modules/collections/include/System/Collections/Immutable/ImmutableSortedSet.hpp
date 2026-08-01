@@ -54,7 +54,8 @@ class ImmutableSortedSet {
      *
      * Only the stored std::function's VALUE changes here — CompareFn, SetT and
      * every public type this class exposes are exactly what they were. For a
-     * non-floating T the policy alias IS `std::less<T>`.
+     * types outside floating and direct nullable-floating forms the policy alias IS
+     * `std::less<T>`.
      */
     static CompareFn defaultLess() { return CompareFn(System::detail::DefaultKeyLess<T>{}); }
 
@@ -322,6 +323,15 @@ public:
         auto otherRehashed = makeEmpty(data_->key_comp());
         otherRehashed->insert(other.data_->begin(), other.data_->end());
         if (otherRehashed->size() != data_->size()) return false;
+        if constexpr (System::detail::isDirectNullableFloatingV<T>) {
+            // The approved Nullable<F> contract is comparer equivalence, while
+            // std::set::operator== delegates to raw optional operator== and is
+            // therefore NaN-nonreflexive. Keep this repair bounded to #1925's
+            // three direct nullable-floating forms.
+            for (const auto& value : *data_)
+                if (otherRehashed->find(value) == otherRehashed->end()) return false;
+            return true;
+        }
         return *data_ == *otherRehashed;
     }
 

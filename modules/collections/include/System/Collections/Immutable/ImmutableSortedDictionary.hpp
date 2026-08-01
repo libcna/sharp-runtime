@@ -63,7 +63,8 @@ class ImmutableSortedDictionary {
      * @brief The default key ordering: @c Comparer<TKey>.Default, not `operator<`.
      *
      * Only the stored std::function's VALUE changes; KeyCompareFn and MapT are
-     * unchanged. For a non-floating TKey the policy alias IS `std::less<TKey>`.
+     * unchanged. Outside floating and direct nullable-floating keys the policy alias IS
+     * `std::less<TKey>`.
      */
     static KeyCompareFn defaultLess() {
         return KeyCompareFn(System::detail::DefaultKeyLess<TKey>{});

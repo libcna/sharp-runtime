@@ -26,7 +26,7 @@ namespace System::Collections::Concurrent {
     class ConcurrentDictionary {
         mutable std::mutex             mutex_;
         /// Keyed by EqualityComparer<TKey>.Default. Both aliases are the standard
-        /// defaults for every non-floating TKey, so this member's type is unchanged.
+        /// defaults except for floating and direct nullable-floating TKey forms.
         std::unordered_map<TKey, TValue,
                            System::detail::DefaultKeyHash<TKey>,
                            System::detail::DefaultKeyEqual<TKey>> map_;

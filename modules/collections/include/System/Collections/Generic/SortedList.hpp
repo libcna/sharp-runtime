@@ -40,7 +40,7 @@ using SharpRuntime::intcs;
 template<typename TKey, typename TValue>
 class SortedList {
     /// Ordered by Comparer<TKey>.Default. The alias is `std::less<TKey>` for every
-    /// non-floating TKey, so this member's type is unchanged for them.
+    /// types other than floating primitives and direct nullable-floating keys.
     std::map<TKey, TValue, System::detail::DefaultKeyLess<TKey>> map_;
     System::Collections::detail::MutationCounter version_;
 

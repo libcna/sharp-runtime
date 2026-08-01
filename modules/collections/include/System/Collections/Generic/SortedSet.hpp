@@ -120,8 +120,9 @@ using SharpRuntime::intcs;
  * @par Default ordering (ticket #1919)
  * The backing tree is ordered by @ref BackingSet's comparator, which is
  * `System::detail::DefaultKeyLess<T>` -- the C++ statement of .NET's `Comparer<T>.Default`.
- * That alias is **token-identical to `std::less<T>` for every non-floating T**, so nothing
- * about this class moves for them. For a `float`, `double` or `long double` element it is
+ * That alias is **token-identical to `std::less<T>` outside floating primitives and direct
+ * nullable-floating forms**, so nothing about this class moves for all other types. For an
+ * approved floating or direct nullable-floating element it is
  * `System::detail::DefaultLess<T>`, which orders NaN below every value including negative
  * infinity and treats two NaNs as equivalent, exactly as `Single.CompareTo`/`Double.CompareTo`
  * do. Plain `std::less<double>` is not merely a different answer here: it makes NaN
@@ -133,7 +134,7 @@ using SharpRuntime::intcs;
  * mode. See docs/CollectionsComparisonContractPlan.md section 5.2.
  *
  * @tparam T The type of elements in the set. Only the ordering used by @ref BackingSet -- by
- *           default `Comparer<T>.Default`, which for every non-floating T is `operator<` -- is
+ *           default `Comparer<T>.Default`, which for every unaffected T is `operator<` -- is
  *           required; no member of this class spells a comparison with `operator>`,
  *           `operator<=`, `operator>=`, or `operator==`. Range membership and set equality are
  *           decided by comparer equivalence (`!cmp(a,b) && !cmp(b,a)`).
@@ -143,8 +144,8 @@ class SortedSet {
     /**
      * @brief The backing tree type: a `std::set<T>` ordered by `Comparer<T>.Default`.
      *
-     * Token-identical to `std::set<T>` for every non-floating T, because
-     * `System::detail::DefaultKeyLess<T>` *is* `std::less<T>` for them. Deliberately private:
+     * Token-identical to `std::set<T>` for every unaffected T, because
+     * `System::detail::DefaultKeyLess<T>` *is* `std::less<T>` there. Deliberately private:
      * no public member of this class names it, and the only public declaration that mentions
      * it at all -- @ref Iterator's constructor -- also takes the private nested `State`, so it
      * cannot be called from outside. See docs/CollectionsComparisonContractPlan.md section 16.

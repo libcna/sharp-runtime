@@ -25,15 +25,16 @@ namespace System::Collections::Frozen {
  *
  * @par Default key equality and hashing (ticket #1919)
  * A frozen projection must agree with the source it was frozen from, so this class uses the
- * same @ref MapType predicates `Dictionary<TKey,TValue>` does — token-identical to
- * `std::hash<TKey>` and `std::equal_to<TKey>` for every non-floating key. Before this ticket
+ * same @ref MapType predicates `Dictionary<TKey,TValue>` does — token-identical to the
+ * standard predicates outside floating and direct nullable-floating keys. Before this ticket
  * a `double` NaN key stored by @ref Create was invisible to @ref ContainsKey and
  * @ref TryGetValue forever.
  *
- * @warning **PUBLIC TYPE CHANGE for a floating-point key** (ticket #1919, approved). For
- * `TKey` = `float`, `double` or `long double`, @ref const_iterator and the parameter type of
- * @ref CreateFromMap are @ref MapType's, not `std::unordered_map<TKey,TValue>`'s. No
- * non-floating instantiation is affected in any respect. See
+ * @warning **PUBLIC TYPE CHANGE for a floating-point or direct nullable-floating key**
+ * (tickets #1919/#1925, approved). For `TKey` = `float`, `double`, `long double`, or direct
+ * `std::optional` of one of them, @ref const_iterator and the parameter type of
+ * @ref CreateFromMap are @ref MapType's, not `std::unordered_map<TKey,TValue>`'s. All other
+ * instantiations are unaffected. See
  * docs/Migration-CollectionsFloatingComparers.md.
  *
  * @tparam TKey   The type of the keys.
@@ -46,8 +47,8 @@ public:
      * @brief The backing map type: a `std::unordered_map` keyed under
      *        @c EqualityComparer<TKey>.Default.
      *
-     * Token-identical to `std::unordered_map<TKey,TValue>` for every non-floating @p TKey
-     * (ticket #1919).
+     * Token-identical to `std::unordered_map<TKey,TValue>` for every unaffected @p TKey
+     * (tickets #1919/#1925).
      */
     using MapType = std::unordered_map<TKey, TValue,
                                        System::detail::DefaultKeyHash<TKey>,
@@ -92,8 +93,8 @@ public:
      * @brief Creates a FrozenDictionary from an existing unordered_map.
      *
      * @param source The map whose entries are copied into the frozen dictionary. Its type is
-     *               @ref MapType, which is `std::unordered_map<TKey,TValue>` for every
-     *               non-floating @p TKey (ticket #1919).
+     *               @ref MapType, which is the raw standard map for every unaffected
+     *               @p TKey (tickets #1919/#1925).
      * @return A new immutable FrozenDictionary.
      */
     static FrozenDictionary CreateFromMap(const MapType& source) {

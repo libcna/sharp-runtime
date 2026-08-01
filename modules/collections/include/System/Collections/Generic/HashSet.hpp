@@ -25,8 +25,9 @@ using SharpRuntime::intcs;
  * @par Default equality and hashing (ticket #1919)
  * The backing set is parameterised on @ref SetType's hasher and equality predicate,
  * `System::detail::DefaultKeyHash<T>` and `System::detail::DefaultKeyEqual<T>`. Both are
- * **token-identical to `std::hash<T>` and `std::equal_to<T>` for every non-floating T**, so
- * nothing about those instantiations moves. For a `float`, `double` or `long double` element
+ * **token-identical to `std::hash<T>` and `std::equal_to<T>` except for floating primitives
+ * and direct nullable-floating elements**, so nothing about all other instantiations moves.
+ * For a `float`, `double`, `long double`, or direct `std::optional` of one of them, the element
  * they are the .NET contract instead. Before this ticket `Add(NaN)` twice returned
  * `true`/`true`, left `Count` 2, and `Contains(NaN)` answered **false**: `std::equal_to`
  * says NaN is not equal to itself, so the set accepted the same element without limit and
@@ -34,10 +35,11 @@ using SharpRuntime::intcs;
  * NaNs that compare equal also land in one bucket. See
  * docs/CollectionsComparisonContractPlan.md section 5.3.
  *
- * @warning **PUBLIC TYPE CHANGE for a floating-point element** (ticket #1919, approved). For
- * `T` = `float`, `double` or `long double` the @ref iterator and @ref const_iterator typedefs
- * wrap @ref SetType's iterators rather than `std::unordered_set<T>`'s. No non-floating
- * instantiation is affected in any respect. See
+ * @warning **PUBLIC TYPE CHANGE for a floating-point or direct nullable-floating element**
+ * (tickets #1919/#1925, approved). For `T` = `float`, `double`, `long double`, or direct
+ * `std::optional` of one of them, the @ref SetType predicate arguments move. Iterator
+ * identity is implementation-dependent and recorded by the migration evidence. All other
+ * instantiations are unaffected. See
  * docs/Migration-CollectionsFloatingComparers.md.
  *
  * @note begin()/end() return a version-checked iterator that throws
@@ -64,9 +66,9 @@ public:
      * @brief The backing set type: a `std::unordered_set` keyed under
      *        @c EqualityComparer<T>.Default.
      *
-     * Token-identical to `std::unordered_set<T>` for every non-floating @p T. Named publicly
+     * Token-identical to `std::unordered_set<T>` for every unaffected @p T. Named publicly
      * so a consumer can spell the type this class stores without depending on whether @p T is
-     * floating-point (ticket #1919).
+     * selected by CCF-010 (tickets #1919/#1925).
      */
     using SetType = std::unordered_set<T,
                                        System::detail::DefaultKeyHash<T>,
@@ -385,7 +387,7 @@ public:
     void TrimExcess() { set_.rehash(set_.size()); ++version_; }
 
     /** @brief Version-checked iterator over @ref SetType. See the class warning for the
-     *         floating-point element consequence (ticket #1919). */
+     *         floating/direct-nullable-floating consequence (tickets #1919/#1925). */
     using iterator = VersionCheckedIterator<typename SetType::iterator>;
     /** @brief Const version-checked iterator over @ref SetType. */
     using const_iterator = VersionCheckedIterator<typename SetType::const_iterator>;

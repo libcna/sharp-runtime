@@ -200,7 +200,9 @@ template<typename It, typename T>
  * Safe to hand to `std::sort` / `std::stable_sort` / `std::lower_bound` even
  * when the range contains NaN, because the induced equivalence is transitive:
  * every NaN is equivalent only to another NaN, and orders below every number.
- * For non-floating @p T this is exactly `a < b`.
+ * Direct nullable floating values use the same presence-first rule as
+ * @ref compareValues. For every other non-floating @p T this is exactly
+ * `a < b`.
  *
  * Use this where the ordered values are not the ones being permuted — a
  * `keySelector`'s results, for example. Where the range itself is the
@@ -210,7 +212,8 @@ template<typename It, typename T>
 template<typename T>
 struct DefaultLess {
     /** @brief Returns true if @p a sorts strictly before @p b. */
-    [[nodiscard]] constexpr bool operator()(const T& a, const T& b) const noexcept {
+    [[nodiscard]] constexpr bool operator()(const T& a, const T& b) const
+            noexcept(noexcept(a < b)) {
         if constexpr (std::is_floating_point_v<T>) {
             // Written to reach a verdict in ONE comparison for the overwhelmingly
             // common case of two ordinary numbers; the NaN tests are only evaluated
@@ -220,6 +223,8 @@ struct DefaultLess {
             if (a < b) return true;
             if (b < a || a == b) return false;
             return std::isnan(a) && !std::isnan(b);
+        } else if constexpr (isDirectNullableFloatingV<T>) {
+            return compareValues(a, b) < 0;
         } else {
             return a < b;
         }
@@ -270,7 +275,8 @@ struct DefaultHash {
 template<typename T>
 struct DefaultEqualTo {
     /** @brief Returns whether @p a and @p b are equal under .NET's default contract. */
-    [[nodiscard]] constexpr bool operator()(const T& a, const T& b) const noexcept {
+    [[nodiscard]] constexpr bool operator()(const T& a, const T& b) const
+            noexcept(noexcept(a == b)) {
         return equalValues(a, b);
     }
 };
@@ -282,11 +288,13 @@ struct DefaultEqualTo {
  * `std::unordered_set` or `std::unordered_map` in place of `std::less<T>`,
  * `std::hash<T>` and `std::equal_to<T>`.
  *
- * Each is **token-identical to the standard default for every non-floating
- * @p T**, so substituting it changes nothing at all — not the container's
- * type, not its `sizeof`, not its iterator types, not a mangled name — for
- * every instantiation that was already correct. Only a `float` or `double`
- * element or key selects the policy, and for those the standard defaults were
+ * Each is **token-identical to the standard default except for floating
+ * primitives and the three direct nullable-floating forms**, so substituting
+ * it changes nothing at all — not the container's type, not its `sizeof`, not
+ * its iterator types, not a mangled name — for every other instantiation.
+ * Only a floating primitive or direct `optional<float>`, `optional<double>`,
+ * or `optional<long double>` element/key selects the policy. For those forms
+ * the standard defaults were
  * not merely giving a different answer: `std::less<double>` makes NaN
  * *equivalent* to every value, violating `[associative.reqmts]`'s ordering
  * requirement for the container's whole lifetime, and `std::equal_to<double>`
@@ -296,19 +304,22 @@ struct DefaultEqualTo {
  * @{
  */
 
-/** @brief `std::less<T>` for every non-floating T; @ref DefaultLess otherwise. */
+/** @brief The bounded CCF-010 key ordering selector. */
 template<typename T>
-using DefaultKeyLess = std::conditional_t<std::is_floating_point_v<T>,
+using DefaultKeyLess = std::conditional_t<std::is_floating_point_v<T> ||
+                                              isDirectNullableFloatingV<T>,
                                           DefaultLess<T>, std::less<T>>;
 
-/** @brief `std::hash<T>` for every non-floating T; @ref DefaultHash otherwise. */
+/** @brief The bounded CCF-010 key hashing selector. */
 template<typename T>
-using DefaultKeyHash = std::conditional_t<std::is_floating_point_v<T>,
+using DefaultKeyHash = std::conditional_t<std::is_floating_point_v<T> ||
+                                              isDirectNullableFloatingV<T>,
                                           DefaultHash<T>, std::hash<T>>;
 
-/** @brief `std::equal_to<T>` for every non-floating T; @ref DefaultEqualTo otherwise. */
+/** @brief The bounded CCF-010 key equality selector. */
 template<typename T>
-using DefaultKeyEqual = std::conditional_t<std::is_floating_point_v<T>,
+using DefaultKeyEqual = std::conditional_t<std::is_floating_point_v<T> ||
+                                               isDirectNullableFloatingV<T>,
                                            DefaultEqualTo<T>, std::equal_to<T>>;
 
 /** @} */

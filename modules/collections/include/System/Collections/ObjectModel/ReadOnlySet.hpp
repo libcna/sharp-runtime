@@ -19,16 +19,18 @@ namespace System::Collections::ObjectModel {
  *
  * @par Default equality and hashing (ticket #1919)
  * A read-only projection must agree with the set it wraps, so the wrapped type is keyed
- * under @c EqualityComparer<T>.Default — token-identical to `std::unordered_set<T>` for
- * every non-floating T. Before this ticket a wrapper over a NaN-bearing set answered
+ * under @c EqualityComparer<T>.Default — token-identical to `std::unordered_set<T>` outside
+ * floating and direct nullable-floating forms. Before this ticket a wrapper over a
+ * NaN-bearing set answered
  * `Contains(NaN)` **false** and, worse, `SetEquals(*this)` **false**: every predicate here
  * is built on `Contains`, so a single unfindable element made the set unequal to itself.
  *
- * @warning **PUBLIC TYPE CHANGE for a floating-point element** (ticket #1919, approved). For
- * `T` = `float`, `double` or `long double` the constructor takes
+ * @warning **PUBLIC TYPE CHANGE for a floating-point or direct nullable-floating element**
+ * (tickets #1919/#1925, approved). For `T` = `float`, `double`, `long double`, or direct
+ * `std::optional` of one of them, the constructor takes
  * `std::shared_ptr<`@ref SetType`>`, not `std::shared_ptr<std::unordered_set<T>>`. Spell
- * @ref SetType to be correct for every element type. No non-floating instantiation is
- * affected in any respect. See docs/Migration-CollectionsFloatingComparers.md.
+ * @ref SetType to be correct for every element type. All other instantiations are unaffected.
+ * See docs/Migration-CollectionsFloatingComparers.md.
  *
  * @tparam T The type of elements in the set.
  */
@@ -39,7 +41,8 @@ public:
      * @brief The wrapped set type: a `std::unordered_set` keyed under
      *        @c EqualityComparer<T>.Default.
      *
-     * Token-identical to `std::unordered_set<T>` for every non-floating @p T (ticket #1919).
+     * Token-identical to `std::unordered_set<T>` for every unaffected @p T (tickets
+     * #1919/#1925).
      */
     using SetType = std::unordered_set<T,
                                        System::detail::DefaultKeyHash<T>,

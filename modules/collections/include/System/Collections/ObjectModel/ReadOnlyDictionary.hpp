@@ -22,15 +22,16 @@ namespace System::Collections::ObjectModel {
  *
  * @par Default key equality and hashing (ticket #1919)
  * A read-only projection must agree with the dictionary it wraps, so the wrapped type is
- * keyed under @c EqualityComparer<K>.Default — token-identical to
- * `std::unordered_map<K,V>` for every non-floating key. Before this ticket a wrapper over a
+ * keyed under @c EqualityComparer<K>.Default — token-identical to the raw standard map
+ * outside floating and direct nullable-floating keys. Before this ticket a wrapper over a
  * map holding a `double` NaN key answered `ContainsKey` and `TryGetValue` **false** for that
  * key forever.
  *
- * @warning **PUBLIC TYPE CHANGE for a floating-point key** (ticket #1919, approved). For
- * `K` = `float`, `double` or `long double` the constructor takes
+ * @warning **PUBLIC TYPE CHANGE for a floating-point or direct nullable-floating key**
+ * (tickets #1919/#1925, approved). For `K` = `float`, `double`, `long double`, or direct
+ * `std::optional` of one of them, the constructor takes
  * `std::shared_ptr<`@ref MapType`>` and the protected @ref getDictionaryProperty returns a
- * reference to @ref MapType. No non-floating instantiation is affected in any respect. See
+ * reference to @ref MapType. All other instantiations are unaffected. See
  * docs/Migration-CollectionsFloatingComparers.md.
  *
  * @tparam K The type of keys in the dictionary.
@@ -43,7 +44,8 @@ public:
      * @brief The wrapped map type: a `std::unordered_map` keyed under
      *        @c EqualityComparer<K>.Default.
      *
-     * Token-identical to `std::unordered_map<K,V>` for every non-floating @p K (ticket #1919).
+     * Token-identical to `std::unordered_map<K,V>` for every unaffected @p K (tickets
+     * #1919/#1925).
      */
     using MapType = std::unordered_map<K, V,
                                        System::detail::DefaultKeyHash<K>,
