@@ -4,16 +4,18 @@
 # NEXT.md
 
 *Last verified: 2026-08-01. Branch
-`feature/remediation-batch-1932-option-2r`, no upstream. The exact independently
-approved #1932 Option 2R is implemented and ticket #1932 is `done`. The full
+`feature/remediation-batch-1926-tooling-jobs`, no upstream. Ticket #1926 is
+closed `wontfix` by exact user decision, and new inactive tooling ticket #1935
+is `done`. The shared compilation-job contract is explicit argument →
+`SHARP_RUNTIME_BUILD_JOBS` → safe default 2, accepting only 1 or 2. The full
 socket-enabled gate is **15,071 tests across 37 executables** (Integration 893,
 Core.Base 5,585), the audit remains **68 remediated / 296 open / 364 total**,
-the module graph is **41 / 91**, seams **2 / 18**, negative fixtures **10 / 74**,
-and canonical Doxygen is **1,937 / 1,942**. No other pending decision was made.
-#1773/#1894/#1899 remain blocked; #1888/#1889/#1896 remain declined and
-blocked; #1926 and partial #1929 rows 1–4 remain `todo`; #1925/#1934 remain
-`needs_user`; #1933 remains `done` without an optimization. See the first
-handoff below.*
+the module graph is **41 / 91**, seams **2 / 18**, negative fixtures **10 / 74**
+with peak 2, checker self-tests **45 / 45**, and canonical Doxygen
+**1,937 / 1,942**. Ticket #1932 remains `done`. No other pending decision was
+made. #1773/#1894/#1899 remain blocked; #1888/#1889/#1896 remain declined and
+blocked; partial #1929 rows 1–4 remain `todo`; #1925/#1934 remain
+`needs_user`. See the first handoff below.*
 
 *Previous handoff snapshot, retained historically: branch
 `feature/remediation-batch-1932-1933-decisions` with no upstream. This
@@ -31,6 +33,184 @@ canonical Doxygen **1,937 / 1,942**. #1930 is done inside #1927's owning commit;
 #1888/#1889/#1896 remain declined/blocked, #1926 remains `todo` leaning
 `wontfix`, and #1929 remains partial with rows 1–4 unchanged. See the first
 2026-08-01 handoff below.*
+
+---
+
+## Autonomous batch handoff, 2026-08-01 (#1926 and #1935)
+
+Branch **feature/remediation-batch-1926-tooling-jobs**, created from local
+handoff HEAD 683e0444, has no upstream. Logical commits before this final
+handoff:
+
+| Commit | Unit | Result |
+|---|---|---|
+| eba22323 | #1926 | approved toolchain-scoped `wontfix` closure |
+| a6c9ee39 | #1935 tooling | shared two-job resolver and canonical callers |
+| 87c55d0b | #1935 proof | 45-case self-test and durable harness contract |
+
+### 1. #1926 exact disposition and retained evidence
+
+Ticket #1926 is `wontfix`. On GCC 14.2.0 / libstdc++ 14 / x86-64, the retained
+three-hasher probe measured `Dictionary<long double, int>` insertion over
+200,000 keys. Across 25 alternating rounds, today's
+`DefaultHash<long double>` form was **1.319×** the pre-#1919
+`std::hash<long double>` form and slower in **24 of 25** rounds; #1919's separate
+harness had measured 1.300×. The earlier lookup-improvement claim is withdrawn:
+9 rounds read 0.772×, while 25 rounds reversed to 1.210× inside the measured
+noise floor.
+
+The mechanism is libstdc++-specific. Its private fast-hash trait selects cache
+off for today's hasher: 48-byte node and uncached iterator form. The
+probe-local reserved-trait specialization selects cache on: 64-byte node and
+cached iterator form, matching the pre-#1919 mechanism. libc++ and MSVC STL do
+not expose this mechanism. The correction to the earlier memory premise also
+stands: the node changed by 16 bytes, not one word.
+
+Correctness, portability, and maintainability outweigh this isolated
+long-double insertion result. CCF-010 remains mandatory: default hashed
+floating keys retain findable/nonduplicating NaN behavior and canonical
+NaN/signed-zero equality and hashing. No reserved `std::`/libstdc++
+specialization, second comparator/hasher framework, container representation,
+public alias, iterator, ABI, layout, symbol, #1934, or #1925 change is
+authorized.
+
+Reopen #1926 only for a relevant standard-library update, a portable public
+customization point, a stable behavior- and representation-preserving
+optimization, or evidence on another supported toolchain. Retained artifacts:
+
+- `build-probe/1926_fasthash_probe.cpp`;
+- `build-probe/1926_fasthash.log`;
+- `build-probe/1926_fasthash_25.log`;
+- `build-probe/1926_fasthash_summary.log`.
+
+### 2. #1935 root cause and exact job contract
+
+The #1932 batch directly invoked the checker without `--jobs`. Its old CLI and
+Python API used `DEFAULT_JOBS = 3`, so `JobMeter` accurately reported peak 3,
+above that workflow's aggregate ceiling of two. The corrected rerun used
+`--jobs 2` and reported peak 2. The checker did not read the general repository
+variable; meanwhile `local_ci_check.sh` and
+`check_selective_components.sh` independently defaulted
+`SHARP_RUNTIME_BUILD_JOBS` to 3. Local CI passed its value to the checker, then
+ran self-tests whose direct API calls selected the separate Python default.
+The GitHub workflow configured neither wrapper. This was a tooling/process-
+safety defect, not a production runtime defect.
+
+`scripts/job_count_policy.py` is now the one resolver:
+
+1. an explicit CLI/API value wins;
+2. otherwise use `SHARP_RUNTIME_BUILD_JOBS`;
+3. otherwise use deterministic safe default 2;
+4. accept only decimal 1 or 2; reject zero, negative, malformed, and excessive
+   values without clamping.
+
+The checker CLI/API import that policy. `local_ci_check.sh` and
+`check_selective_components.sh` call the resolver and export the result to
+nested tools. Local CI additionally passes `--jobs "$BUILD_JOBS"` to the
+checker. `.github/workflows/components.yml` explicitly sets the variable to 2.
+The selective script does not invoke the checker; `run_component_tests.sh` and
+the consumer CMake harness add no nested compiler pool. No CPU detection or
+unbounded inherited jobserver state is used.
+
+### 3. Permanent tests and safe reproduction
+
+`test/check_negative_consumer_fixtures_test.py` is now **45/45**. New coverage
+proves explicit numeric/text 1 and 2, omitted default 2, environment 1 and 2,
+argument-over-environment precedence, and refusal of zero, negative, 3, larger,
+empty, nonnumeric, fractional, padded, and signed values. A fake compiler
+returns exit 86 to prove child failure propagation, and a sleeping fake five-
+invocation run reaches exactly peak 2 to prove accounting. Existing real-
+compiler peak, timeout, deterministic ordering, hygiene, and mutation tests
+remain.
+
+No real three-compiler reproduction was run. Every real checker invocation in
+this batch had both the configured two-job environment and/or explicit
+`--jobs 2`; the final direct and local-CI runs each reported peak 2. Retained
+summaries:
+
+| Artifact | Bytes | SHA-256 |
+|---|---:|---|
+| `build-probe/1935_job_policy_selftest.log` | 144 | `6ea63b8771a42eca0cf74df53f583e0a8162db6665f310541edf41f783e7d381` |
+| `build-probe/1935_negative_fixture_final.log` | 133 | `2c4a3e2fd0f7e3ea82abd08ce0288e5748c58e48f87783a0f7ff515cc356ecff` |
+
+### 4. Validation and baselines
+
+- socket-enabled `scripts/local_ci_check.sh build`: zero warnings/errors,
+  **15,071/15,071 across 37 executables**;
+- Integration **893/893**, Core.Base **5,585/5,585**;
+- socket-enabled ten-component selective matrix green, including WebSockets
+  **24/24**;
+- negative fixtures **10/74**, 84 compiler invocations, peak **2**;
+- checker self-tests **45/45**;
+- module boundaries and tests green: **41 modules / 91 edges**;
+- component catalogue current; version seams **2 / 18**, seam tests 15/15;
+- database consistent; Doxygen 1.9.8 **1,937 / 1,942**;
+- final whitespace and repository-state gates green.
+
+The first checker self-test attempt inherited the known unwritable external
+ccache and failed child processes before useful compilation; the corrected and
+final runs used `CCACHE_DIR=$PWD/build-tmp/ccache`. The first selective run was
+valid through Net.Http.Headers but its two WebSocket local-socket tests were
+sandbox-denied; the complete socket-enabled rerun passed. Neither condition is
+a sharp-runtime failure, and neither altered the two-job cap.
+
+### 5. Consequences, queue, and remaining decisions
+
+There is no production header/source, accepted/rejected input, emitted value,
+exception, public declaration, alias, iterator, ABI, layout, symbol, vtable,
+`noexcept`, `constexpr`, or component-edge consequence. #1935 is a new inactive
+post-audit tooling ticket and is complete; no audit identifier was issued.
+Audit totals stay **68 remediated / 296 open / 364 total**.
+
+The database has **1,935 tickets: 1,922 done, 1 todo, 6 blocked, 2 needs_user,
+4 wontfix**; none is doing. #1932 remains complete. #1929 alone remains todo
+and partial; rows 1–3 retain the documented/no-change recommendation and row 4
+remains design-first. #1925 and #1934 remain `needs_user` and require explicit
+coordinated source/ABI approval, with #1934 first. #1894/#1899 retain the
+existing borrowed C++ contract and remain blocked. #1888/#1889/#1896 remain
+declined/blocked. #1773 remains blocked.
+
+### 6. Disk, process, and repository safety
+
+Build-directory bytes, start → final:
+
+| Directory | Start | Final |
+|---|---:|---:|
+| build | 805,958,349 | 805,958,349 |
+| build-modular | 1,350,883,628 | 1,350,883,628 |
+| build-asan | 4,127,175,105 | 4,127,175,105 |
+| build-probe | 75,235,677 | 75,235,954 |
+| build-consumer | 72 | 72 |
+| build-tmp | 0 | 0 |
+| cmake-build-debug | 87,549,498 | 87,549,498 |
+| build-ubsan / build-tsan | absent | absent |
+
+The two new retained logs add 277 bytes. The repository-local validation ccache
+peaked at **6,271,551 bytes** and was removed after compilation, reclaiming the
+same amount; empty self-test temporary roots were removed. All reusable build
+trees and every #1926 artifact remain.
+
+The actual maximum aggregate compilation parallelism in this batch was **2**.
+No build tree was created under `/tmp`, `/var/tmp`, or `/dev/shm`; all
+mktemp-based repository scripts used `TMPDIR=$PWD/build-tmp`. Doxygen required
+that TMPDIR. The checker required explicit `--jobs 2`; selective/local CI used
+the shared environment plus repository-local cache and required socket-enabled
+execution for their local-network tests.
+
+Initial and final read-only observations agree: the anomalous
+`origin/feature/remediation-batch-group-e-subset-decisions` ref remains
+**f3a2bb56**. It was not diagnosed or changed. The stashes remain exactly:
+
+- `stash@{0}: WIP on wip: 7db49c0 Math was added`
+- `stash@{1}: WIP on wip: 4b5b8d5 Changes`
+- `stash@{2}: WIP on wip: 4b5b8d5 Changes`
+
+The branch has no upstream. No push, fetch, pull, merge, rebase, tag, package
+publication, remote mutation, or stash mutation occurred. CNA and
+mobile-eggbert were not inspected, searched, configured, built, tested, or
+modified. The next recommended approval batch is the explicitly coordinated
+#1934 then bounded #1925 group; without that source/ABI approval, keep both
+inactive and use a planning-only batch for #1929 row 4.
 
 ---
 

@@ -1,18 +1,19 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-01 — the independently approved #1926 decision is
-closed `wontfix` on `feature/remediation-batch-1926-tooling-jobs`, with no
-upstream. The retained GCC 14.2.0/libstdc++ 14 x86-64 evidence measures a
-1.319× median `Dictionary<long double, int>` insertion regression over 25
-alternating rounds (24/25 slower), while the old lookup claim is withdrawn as
-noise. CCF-010 correctness is unchanged. Ticket #1932 remains done. The clean
+*Last verified: 2026-08-01 — branch
+`feature/remediation-batch-1926-tooling-jobs`, no upstream, closes the
+independently approved #1926 decision `wontfix` and completes new inactive
+tooling ticket #1935. `scripts/job_count_policy.py` now owns explicit argument
+→ `SHARP_RUNTIME_BUILD_JOBS` → safe default 2 precedence and rejects every
+value outside 1..2; canonical wrappers export the resolved budget. The clean
 socket-enabled gate is **15,071 tests / 37 executables** (Integration 893,
-Core.Base 5,585); audit **68 remediated / 296 open / 364 total**; graph **41/91**;
-seams **2/18**; negative fixtures **10/74**; Doxygen **1,937/1,942**. Ticket
-#1926 is wontfix, no ticket is doing after reconciliation, and no other pending decision changed.
-#1773/#1894/#1899 remain blocked; #1888/#1889/#1896 remain declined/blocked;
-partial #1929 rows 1–4 remain todo; #1925/#1934 remain needs_user;
-#1933 remains done without an optimization.*
+Core.Base 5,585); audit **68 remediated / 296 open / 364 total**; graph
+**41/91**; seams **2/18**; negative fixtures **10/74**, 84 compiler
+invocations, peak 2; checker self-tests **45/45**; Doxygen **1,937/1,942**.
+Tickets: **1,922 done, 1 todo, 6 blocked, 2 needs_user, 4 wontfix** of 1,935;
+no ticket is doing. #1932 remains done. #1773/#1894/#1899 remain blocked;
+#1888/#1889/#1896 remain declined/blocked; partial #1929 rows 1–4 remain todo;
+#1925/#1934 remain needs_user; no other decision changed.*
 
 *Previous plan snapshot, retained historically: 2026-08-01 — 41 physical components, 91 direct production
 dependency edges, a clean zero-warning native build, 15,058 passing tests
@@ -120,6 +121,42 @@ stable behavior- and representation-preserving optimization, or evidence from
 another supported toolchain. #1925 and #1934 remain `needs_user`; #1929 remains
 partial; #1932 remains done; #1773 remains blocked. No audit identifier was
 issued.
+
+
+## 2026-08-01 — #1935 bounded compilation-job tooling
+
+The previous checker had a built-in default of 3 while the wrapper scripts
+separately defaulted `SHARP_RUNTIME_BUILD_JOBS` to 3. A direct no-argument
+checker invocation therefore started three compiler processes, and direct
+`check_repository()` calls in its own self-tests bypassed the wrapper's value.
+That historical violation was retained, not recreated.
+
+Ticket #1935 centralizes resolution in `scripts/job_count_policy.py`:
+
+1. explicit argument/API value;
+2. `SHARP_RUNTIME_BUILD_JOBS`;
+3. deterministic safe default 2.
+
+Only decimal 1 and 2 are accepted. Zero, negative, malformed, and excessive
+values fail clearly; no CPU detection or silent clamp exists. The checker
+CLI/API, `local_ci_check.sh`, and `check_selective_components.sh` share the
+resolver. Both wrappers export the result, local CI also passes `--jobs`
+explicitly, and the component workflow pins the variable to 2. There is no
+nested independent compiler pool.
+
+The checker suite is 45/45. It covers explicit 1/2, omission, environment 1/2,
+argument precedence, all invalid classes, deterministic ordering, child
+failure, and peak accounting. Its fake compiler reaches exactly peak 2 without
+performing real compilation; no three-job reproduction was run. The final real
+checker is 10 fixtures / 74 sites / 84 invocations / peak 2. Full socket-enabled
+CI remains 15,071/15,071 across 37 executables, and the selective matrix is
+green including WebSockets 24/24.
+
+This is tooling/process safety only: no production header/source, accepted or
+emitted behavior, public API, alias, iterator, ABI, layout, symbol, vtable,
+`noexcept`, `constexpr`, or component edge changed. Retained summaries are
+`build-probe/1935_job_policy_selftest.log` and
+`build-probe/1935_negative_fixture_final.log`. No audit identifier was issued.
 
 
 ## 2026-08-01 — #1932 exact Option 2R implementation

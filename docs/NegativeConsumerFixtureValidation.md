@@ -1298,3 +1298,20 @@ and documentation. It changes no production header/source, accepted or emitted
 value, exception, public alias, iterator, symbol, ABI, layout, vtable,
 `noexcept`, `constexpr`, or component edge. No `SR-AUD-*` identifier was
 issued; audit numbering remains frozen at 364.
+
+### 19.4 Final validation and retained evidence
+
+- direct final checker: **10 fixtures / 74 sites / 84 invocations / peak 2**;
+- checker self-tests: **45/45**, including exact fake peak 2;
+- socket-enabled selective matrix: green, including WebSockets **24/24**;
+- socket-enabled full local CI: zero build warnings/errors and
+  **15,071/15,071 tests across 37 executables**;
+- module graph **41/91**, seams **2/18**, Doxygen **1,937/1,942**.
+
+`build-probe/1935_job_policy_selftest.log` and
+`build-probe/1935_negative_fixture_final.log` retain the permanent self-test
+and real-harness summaries. Their SHA-256 values are respectively
+`6ea63b8771a42eca0cf74df53f583e0a8162db6665f310541edf41f783e7d381`
+and `2c4a3e2fd0f7e3ea82abd08ce0288e5748c58e48f87783a0f7ff515cc356ecff`.
+The real run was explicitly configured through both
+`SHARP_RUNTIME_BUILD_JOBS=2` and `--jobs 2`.
