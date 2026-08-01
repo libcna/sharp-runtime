@@ -310,29 +310,27 @@ public:
      * @return true if both sets are equal; otherwise false.
      */
     [[nodiscard]] bool SetEquals(const ImmutableSortedSet<T>& other) const {
-        // Matches ImmutableSortedSet_1.cs's SetEquals: when the two sets don't share a
-        // comparer, `other`'s elements are rehashed under *this* set's comparer
-        // (`new SortedSet<T>(other, this.KeyComparer)`) before comparing -- the same pattern
-        // already applied to IsSubsetOf/Intersect/Except in this file, just missed here. A
-        // direct std::set::operator== compares elements position-wise after each set's own
-        // internal ordering, which gives a wrong (false-negative) result when the two sets use
-        // different comparers even though they contain the identical elements -- confirmed via
-        // a standalone repro before this fix (ascending {1,2,3} vs. descending {1,2,3} compared
-        // unequal). Comparing sizes AFTER rehashing (not before) also correctly catches the
-        // rarer case where a different equivalence notion collapses distinct elements together.
+        // A shared immutable backing proves equality without rebuilding or comparing elements.
+        if (data_ == other.data_) return true;
+
+        // Interpret `other` under *this* set's comparer, as ImmutableSortedSet_1.cs does.
+        // The count check must follow this rebuild because this comparer's equivalence classes
+        // can collapse elements that were distinct under `other`'s comparer.
         auto otherRehashed = makeEmpty(data_->key_comp());
         otherRehashed->insert(other.data_->begin(), other.data_->end());
         if (otherRehashed->size() != data_->size()) return false;
-        if constexpr (System::detail::isDirectNullableFloatingV<T>) {
-            // The approved Nullable<F> contract is comparer equivalence, while
-            // std::set::operator== delegates to raw optional operator== and is
-            // therefore NaN-nonreflexive. Keep this repair bounded to #1925's
-            // three direct nullable-floating forms.
-            for (const auto& value : *data_)
-                if (otherRehashed->find(value) == otherRehashed->end()) return false;
-            return true;
+
+        // Both ranges now use the same ordering. Set equality is equivalence under that
+        // ordering, not raw element operator==: neither value may sort before the other.
+        const CompareFn less = data_->key_comp();
+        auto left = data_->begin();
+        auto right = otherRehashed->begin();
+        while (left != data_->end() && right != otherRehashed->end()) {
+            if (less(*left, *right) || less(*right, *left)) return false;
+            ++left;
+            ++right;
         }
-        return *data_ == *otherRehashed;
+        return left == data_->end() && right == otherRehashed->end();
     }
 
     /**
