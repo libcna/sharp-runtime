@@ -1,20 +1,19 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-01 — branch
-`feature/remediation-batch-1936-option-1`, no upstream. Exact approved #1936
-Option 1 is implemented and fully evidenced: one generic
-`ImmutableSortedSet<T>::SetEquals` comparator-equivalence scan after the
-preserved this-comparer rebuild and post-collapse count check, plus a true
-shared-backing fast path. #1934/#1925 remain `done`; #1937 remains `done`, not
-reproducible; #1926 remains `wontfix`; #1932/#1935 remain `done`; #1773 remains
+*Last verified: 2026-08-02 — branch
+`feature/remediation-batch-1929-row4-design`, no upstream. Design-only #1938 is
+complete; #1929 remains partial/`needs_user`. Rows 1–3 are remeasured and
+unchanged, and row 4 is split into independent #1939–#1945 contracts with
+#1939 the recommended next approval. No production/header/test semantic change
+was made. #1936 remains complete; #1937 remains done/not reproducible;
+#1934/#1925 and #1932/#1935 remain done; #1926 remains wontfix; #1773 remains
 blocked. The clean socket-enabled gate is **15,092 tests / 37 executables**
 (Integration 893, Core.Base 5,585, Collections.Core 2,763); audit **68
 remediated / 296 open / 364 total**; graph **41/91**; seams **2/18**; negative
 fixtures **10/81**, 91 compiler invocations, peak 2; checker self-tests
-**45/45**; Doxygen **1,938/1,942**. Tickets: **1,926 done, 1 todo, 6 blocked,
-0 needs_user, 4 wontfix** of 1,937; none doing. #1888/#1889/#1896 remain
-declined/blocked, #1894/#1899 remain blocked, and partial #1929 rows 1–4 remain
-the sole todo item.*
+**45/45**; Doxygen **1,938/1,942**. Tickets: **1,927 done, 0 todo, 11 blocked,
+3 needs_user, 4 wontfix** of 1,945; none doing. #1888/#1889/#1896 remain
+declined/blocked and #1894/#1899 remain blocked.*
 
 *Previous plan snapshot, retained historically: 2026-08-01 — 41 physical components, 91 direct production
 dependency edges, a clean zero-warning native build, 15,058 passing tests
@@ -99,6 +98,46 @@ validated repair tickets. Consumer-driven API breadth remains legitimate later
 work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
 
+
+## 2026-08-02 — #1938 row-4 design complete
+
+The design-only batch changes documentation and planning records, not any
+production header/body, ordinary test assertion, accepted/rejected input,
+result, exception, provider, culture, style, kind, exact-format behavior, or
+XML bridge. Rows 1–3 remain: fixed two-digit month/day; one-through-seven exact
+fraction digits with the eighth rejected; and `Z`/`z` or exactly `±HH:MM`
+offsets with short/compact forms rejected. Current .NET accepts each wider
+general form, but the recommendation remains to retain/document the port's
+subset.
+
+`docs/DateTimeExactParsingAndKindDesign.md` contains the five-type overload
+inventory, 50-row exact grammar matrix, provider/culture and style legality
+matrices, kind matrix, pinned dotnet/runtime commit
+`0eb5481340ea675857c7a7abf18f68a60b52a686`, corrected premises, component and
+timezone dependencies, selected/rejected policies, exact approvals, source/
+ABI/layout/vtable/symbol analysis, migration, tests, sanitizers, performance,
+and rollback. All exact families are missing APIs; DateTimeKind is declared but
+unstored; no production culture type implements IFormatProvider; styles are in
+Globalization while parsers are in Core.Base; and XmlConvert format/mode bodies
+ignore their argument.
+
+Validation is green: focused existing date/time tests 370/370; full
+socket-enabled clean gate 15,092/15,092 across 37 executables; ten selective
+components; module graph 41/91 and validator 7/7; seams 2/18 and self-tests
+15/15; negative fixtures 10/81 over 91 compiler invocations at peak two and
+checker 45/45; component catalogue and DB consistent; Doxygen 1,938/1,942;
+whitespace clean. No sanitizer claim is made because no production object
+changed. `ccache` requires repository-local `CCACHE_DIR`; socket gates require
+the approved socket-enabled path.
+
+Compilation never exceeded two aggregate jobs. The repository started at
+40 MiB with `build`, `build-probe`, and `build-tmp` absent. The completed build
+and cache cleanup reclaimed 703,438,848 allocated bytes, preserving only the
+6,877-byte current-behavior probe source and 2,446-byte raw log in a 16 KiB
+`build-probe`. Final total is 171 MiB: the 133,087,232-byte ignored canonical
+Doxygen output is retained because a safety review rejected deleting its
+parent, and the pinned googletest checkout occupies 4,755,456 bytes. No build
+tree was created under `/tmp`, `/var/tmp`, or `/dev/shm`.
 
 ## 2026-08-02 — #1929 row-4 implementation decomposition
 

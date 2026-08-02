@@ -3,18 +3,20 @@
 
 # NEXT.md
 
-*Last verified: 2026-08-01. Branch
-`feature/remediation-batch-1936-option-1`, no upstream. Exact approved #1936
-Option 1 is implemented, proved, and `done`. #1934/#1925 remain `done`; #1937
-remains `done`/not reproducible; #1926 remains `wontfix`; #1932/#1935 remain
-`done`; #1773 remains blocked. The clean socket-enabled main and modular gates
-are **15,092 tests across 37 executables** (Integration 893, Core.Base 5,585,
-Collections.Core 2,763), audit **68 remediated / 296 open / 364 total**, module
-graph **41 / 91**, seams **2 / 18**, negative fixtures **10 / 81** over 91
-compiler invocations with peak 2, checker self-tests **45 / 45**, and Doxygen
-**1,938 / 1,942**. The database has **1,937 tickets: 1,926 done, 1 todo,
-6 blocked, 0 needs_user, 4 wontfix**, and none doing. Partial #1929 rows 1–4
-are the sole todo item. See the first handoff below.*
+*Last verified: 2026-08-02. Branch
+`feature/remediation-batch-1929-row4-design`, no upstream. #1938 completed the
+design-only #1929 row-4 unit without changing production or ordinary test
+semantics. Rows 1–3 are remeasured and unchanged; row 4 is decomposed into
+#1939–#1945, with #1939 the recommended next approval and #1929 remaining
+partial/`needs_user`. #1936 remains complete; #1937 remains done/not
+reproducible; #1934/#1925 and #1932/#1935 remain done; #1926 remains wontfix;
+#1773 remains blocked. The clean socket-enabled gate is **15,092 tests across
+37 executables** (Integration 893, Core.Base 5,585, Collections.Core 2,763),
+audit **68 remediated / 296 open / 364 total**, graph **41 / 91**, seams
+**2 / 18**, negative fixtures **10 / 81** over 91 compiler invocations with
+peak 2, checker self-tests **45 / 45**, and Doxygen **1,938 / 1,942**. The
+database has **1,945 tickets: 1,927 done, 0 todo, 11 blocked, 3 needs_user,
+4 wontfix**, and none doing. See the first handoff below.*
 
 *Previous handoff snapshot, retained historically: branch
 `feature/remediation-batch-1932-1933-decisions` with no upstream. This
@@ -32,6 +34,252 @@ canonical Doxygen **1,937 / 1,942**. #1930 is done inside #1927's owning commit;
 #1888/#1889/#1896 remain declined/blocked, #1926 remains `todo` leaning
 `wontfix`, and #1929 remains partial with rows 1–4 unchanged. See the first
 2026-08-01 handoff below.*
+
+---
+
+## Autonomous batch handoff, 2026-08-02 (#1938 / #1929 row 4 design)
+
+Branch **feature/remediation-batch-1929-row4-design** was created from the clean
+`cbbb7ed1` state of local branch `20260802` and has no upstream. This is a
+design-and-decision batch: no production header/body, ordinary test assertion,
+accepted/rejected input, returned value, exception, provider, culture, style,
+kind, exact-format result, or XML behavior changed.
+
+| Commit | Unit | Result |
+|---|---|---|
+| `a12a4bab` | #1938 evidence/design | complete type/overload and 50-row grammar/provider/style/kind/ABI plan |
+| `0d53f231` | future decomposition | #1939–#1945 bounded at independent approval/rollback boundaries |
+| `6cec2571` | decision packet | historical correction notes and exact copyable approvals consolidated |
+| this reconciliation commit | NEXT/plan/database | #1938 done, #1929 partial/needs_user, exact baselines and queue |
+| following commit | final handoff | final remote/stash/branch/cleanliness/resource observations |
+
+### 1. Exact #1929 rows and rows 1–3
+
+| Row | Exact boundary | Verified current state and recommendation |
+|---|---|---|
+| 1 | general unpadded month/day | `2024-06-15` accepted; `2024-6-15` and `2024-06-5` rejected; current .NET general parsing accepts them; retain fixed width because widening silently weakens parse-as-validation; exact custom widths are opt-in and do not overlap general grammar |
+| 2 | general fractions beyond seven digits | all time-bearing port types preserve one through seven digits at 100 ns; eighth rejected; current .NET general date/time parsing consumes the whole ASCII run and rounds to ticks (`.12345674` → 1,234,567 fraction ticks, `.12345676` → 1,234,568); retain seven exact digits |
+| 3 | general short/compact offsets | only `Z`/`z` and exactly `±HH:MM` accepted; `+2`, `+2:5`, and `+0205` rejected; current .NET accepts them and reads `+2:5` as +125 minutes; retain the #1879 boundary |
+| 4 | ParseExact/TryParseExact, providers/culture, styles, kind, related bridges | fully designed by #1938, unimplemented and unapproved |
+| 5 | surrounding whitespace, short clock fields, one-through-seven exact fractions | previously approved/remediated |
+| 6 | TimeOnly tick representation/conversions | previously approved/remediated with #1931 |
+
+Measured controls remain exact: DateTime fraction value
+`638540436301234567`; TimeOnly and TimeSpan `372301234567`; DateOnly day
+`739051`; DateTimeOffset `+02:05` offset `75,000,000,000` ticks. DateTime still
+discards `Z`/numeric offset and has no kind: no-zone, Z, and +02:05 examples
+produce the same clock ticks. DateTimeOffset preserves the strict offset. No
+historical row text was rewritten; appended correction notes record the new
+measurements.
+
+### 2. Complete row-4 affected surface
+
+DateTime, DateTimeOffset, DateOnly, TimeOnly, and TimeSpan currently expose
+only providerless string `Parse` and `TryParse`. Every single-format,
+multi-format, provider-taking, styles-taking, provider/styles-omitting exact,
+and span-like ParseExact/TryParseExact overload is absent. This is a source/API
+absence, not an incorrectly implemented exact body. DateTimeOffset's general
+parser strips the strict suffix and delegates the clock to DateTime; the other
+four scanners are independent. Try failure writes MinValue for the first four
+types; current TimeSpan general TryParse preserves the caller sentinel.
+
+Related surfaces are explicitly separated: existing
+`XmlConvert::ToDateTime/ToDateTimeOffset(input, format)` and the DateTime mode
+bridge ignore their controlling argument and delegate generally; .NET's XML
+multi-format overloads are absent. HTTP RFC1123 scanners remain independent
+and cookie code remains on general TryParse. Existing ad-hoc `ToString(format)`
+token handling is not an exact grammar oracle.
+
+The pinned reference is dotnet/runtime commit
+`0eb5481340ea675857c7a7abf18f68a60b52a686` (2026-08-01), specifically
+DateTime.cs, DateTimeOffset.cs, DateOnly.cs, TimeOnly.cs, TimeSpan.cs,
+DateTimeParse.cs, DateTimeFormatInfo.cs, XmlConvert.cs, and the corresponding
+five System.Runtime test files. No unpinned `main` behavior or memory-only
+claim is used.
+
+### 3. Exact-format, provider, styles, and kind conclusions
+
+The 50-row durable matrix in
+`docs/DateTimeExactParsingAndKindDesign.md` covers round-trip/sortable/
+universal/date/time standards, custom numeric and repeated fields, `%`, both
+quote forms, escapes, literal and culture separators, fixed/optional fractions,
+AM/PM, eras, `z`/`zzz`, `K`, whitespace/styles, complete consumption,
+empty/null-equivalent/malformed/unsupported formats, ordered/duplicate/empty
+candidate formats, localized names/separators/digits, and TimeSpan standard/
+custom/overflow behavior. For the port every exact result is API absence.
+
+Pinned .NET facts include: `O` DateTime is fixed-width with seven fractional
+digits; `f` requires and `F` optionally consumes up to seven digits; multi-
+format parsing attempts candidates in order and first success wins; DateOnly O
+is `yyyy-MM-dd` and R is invariant RFC1123 date; TimeOnly O is
+`HH:mm:ss.fffffff` and R is `HH:mm:ss`; TimeSpan single-format overflow can be
+OverflowException while multi-format Parse reclassifies exhaustion to
+FormatException. Invalid styles throw even from TryParseExact.
+
+Corrected infrastructure premises:
+
+- DateTimeKind is declared (`Unspecified=0`, `Utc=1`, `Local=2`) but DateTime
+  stores no kind and exposes no kind constructor/property/conversion.
+- DateTimeStyles declares None, the four whitespace forms,
+  NoCurrentDateDefault, AdjustToUniversal, AssumeLocal, AssumeUniversal, and
+  RoundtripKind; TimeSpanStyles declares None/AssumeNegative; no parser uses
+  either enum.
+- Core.Base `IFormatProvider` is abstract, but no production CultureInfo,
+  DateTimeFormatInfo, or NumberFormatInfo derives from it. Null/current/custom
+  provider behavior therefore cannot be claimed.
+- CultureInfo current state is process-global (open SR-AUD-280), unknown
+  culture metadata remains open SR-AUD-285, and DateTimeFormatInfo.CurrentInfo
+  is effectively invariant. Globalization depends on Core.Base; a reverse
+  production edge for parsing would create a cycle.
+- Local TimeZone data is a cached current offset without historical transition/
+  DST rules, so full Local/UTC style/kind behavior is a dependency, not an
+  implementation detail.
+
+Pinned DateTime style legality rejects undeclared bits,
+AssumeLocal|AssumeUniversal, and RoundtripKind combined with an assume or
+AdjustToUniversal. DateTimeOffset additionally rejects NoCurrentDateDefault
+and has pinned compatibility stripping. DateOnly/TimeOnly allow only the
+AllowWhiteSpaces mask; TimeSpan only None/AssumeNegative. Parameter names are
+`style` or `styles` per family and invalid styles use ArgumentException
+`0x80070057` before parsing.
+
+Pinned kind behavior is recorded separately for no-zone/Z/numeric offset,
+None/AssumeLocal/AssumeUniversal/AdjustToUniversal/RoundtripKind, Parse versus
+ParseExact, and round-trip reparse. Unspecified, Local, and Utc production
+cannot be compressed into scanner work. Controlled UTC and DST zones are
+mandatory for future tests.
+
+### 4. Decomposition, source/ABI consequences, and order
+
+| Ticket/group | Final state | Consequence and order |
+|---|---|---|
+| #1938 design | done | document/planning only; no runtime change |
+| #1939 / 4A | needs_user | four additive DateOnly/TimeOnly string single-format symbols; no field/vtable; recommended next |
+| #1940 / 4B | blocked | provider/culture ownership can alter CultureInfo/DTFI/NFI layout and vtables; close SR-AUD-280/285 premises and component/ABI plan first |
+| #1941 / 4D | needs_user | packed DateTime kind representation plus additive kind symbols; size-preserving goal is still a representation/semantic change; conversion is separately timezone-blocked |
+| #1942 / 4C | blocked | style-taking symbols, validation order and value effects; depends on provider/kind/timezone and target overloads |
+| #1943 / 4E1 | blocked | remaining string single-format provider/style exact symbols; depends on #1939–#1942 |
+| #1944 / 4E2 | blocked | independently selected C++ candidate collection and span-like public shapes/symbols |
+| #1945 / 4F | blocked | intentional existing-body XmlConvert semantic correction plus optional new bridge symbols; depends on kind/exact APIs |
+
+New overloads preserve old symbols but are ABI additions and can change source
+overload resolution; they are not “ABI neutral.” The 4D high-bit plan aims to
+retain measured layouts DateTime 16/8, DateTimeOffset 48/8, DateOnly 12/4,
+TimeOnly 16/4, TimeSpan 24/8, but still changes private representation and
+requires all tick/arithmetic/hash/serialization paths to be audited. A new kind
+field is rejected. Groups with different migration and rollback boundaries may
+not be bundled.
+
+### 5. Exact recommended next approval wording
+
+> Approve #1939 only: add the four string-only, providerless declarations
+> `DateOnly::ParseExact(input, format)`,
+> `DateOnly::TryParseExact(input, format, result)`,
+> `TimeOnly::ParseExact(input, format)`, and
+> `TimeOnly::TryParseExact(input, format, result)` specified in
+> `docs/DateTimeExactParsingAndKindDesign.md` section “4A exact selected
+> contract”. Implement invariant standard DateOnly `O/o` and `R/r`, TimeOnly
+> `O/o` and `R/r`, and only the complete custom numeric/name/fraction/AM-PM and
+> quote/escape subset listed there. Require full input consumption; reject
+> whitespace, missing fields, provider separator placeholders, eras/calendars,
+> zones, unsupported/malformed formats, and fractions beyond seven digits.
+> Parse failures and malformed formats throw the existing type-specific
+> `FormatException` family with HResult `0x80131537`; Try failures return false
+> and set `MinValue`. Additive declarations and mangled symbols are approved;
+> no fields, vtables, enum values, default arguments, provider/style overloads,
+> multi-format or span APIs are approved. Do not change general parsing,
+> formatting, XML bridges, #1929 rows 1–3, DateTime, DateTimeOffset, TimeSpan,
+> providers, culture, styles, kind, timezone behavior, or any existing result,
+> exception, message, or failure output.
+
+Before, all four calls fail to compile. After the approved contract only,
+DateOnly O returns day 739051, TimeOnly O returns 372301234567 ticks, an
+explicit `yyyy-M-d` custom date accepts its requested unpadded fields while
+general DateOnly::Parse still rejects them, and an eighth fraction remains an
+exact failure. #1941 storage-only has separately copyable wording and must not
+be combined. Exact conditional 4B–4F wording is retained in the owning design;
+none is safe to approve before its listed dependencies.
+
+### 6. Tests, performance, and sanitizers
+
+4A tests must table every supported token/repetition/literal/fraction/AM-PM/
+range/whitespace/trailing/missing/malformed case, exact day/ticks, Try MinValue,
+FormatException/HResult, compile-positive new overloads, and compile-negative
+unapproved provider/style/multi/span shapes. Later groups add provider fallback
+and concurrency, style validation order, controlled UTC/DST matrices,
+collection ordering/overflow, and XML mode tests. Future behavior does not
+enter the ordinary passing suite before approval.
+
+Benchmarks are separate by group: 4A tokenization success/early/late failure;
+4B null/known/custom/cold/cached provider; 4C whitespace/invalid-style; 4D
+unspecified/UTC/local/transition conversion; 4E 1/2/8/32 candidates; 4F direct
+versus XML bridge. Measure allocations and temporary strings. Caching is not
+approved without bounded lifetime/thread-safety/provider identity evidence.
+
+No sanitizer claim is made in this batch because no production object changed.
+Future sanitizers can find bounds/lifetime/race/arithmetic defects, but cannot
+prove accepted grammar, culture, exception order, ABI, kind, or timezone
+correctness.
+
+### 7. Evidence and validation
+
+- retained local `build-probe/1938_current_behavior_probe.cpp` (6,877 bytes)
+  and raw log (2,446 bytes); the committed design tables are durable because
+  build-probe is ignored;
+- focused unchanged date/time selection: **370/370**;
+- module graph **41/91**, validator self-tests **7/7**, catalogue current;
+- seams **2/18**, checker self-tests **15/15**;
+- negative fixtures **10/81**, 91 compiler invocations, peak **2**, checker
+  **45/45**;
+- all ten selective components and their consumer/forbidden checks passed,
+  including WebSockets **24/24**;
+- Doxygen **1,938/1,942**;
+- clean socket-enabled build, 0 warnings/0 errors, **15,092/15,092 across 37**:
+  Integration 893, Core.Base 5,585, Collections.Core 2,763;
+- DB consistency and `git diff --check` green.
+
+The negative checker initially produced 91 unattributed failures because its
+default ccache directory was unwritable. With the required repository-local
+`CCACHE_DIR=$PWD/build-tmp/ccache`, the exact canonical run passed. Mktemp users
+used `TMPDIR=$PWD/build-tmp`; full/selective socket tests used the approved
+socket-enabled execution path and none was skipped. The canonical #1935 tools
+accept only one or two jobs; despite user permission for up to eight CPUs, the
+actual aggregate maximum was **two**, with no overlapping builds.
+
+### 8. Disk, boundaries, and remaining queue
+
+The repository began at 40 MiB; `build`, `build-probe`, and `build-tmp` were
+absent. Before cleanup, the batch-created directories were build 694,644,736
+allocated bytes, build-tmp 8,507,392, and build-probe 303,104. Removing only
+the reproducible main build, ccache/TMP, size/probe executables reclaimed
+703,438,848 allocated bytes. The 16 KiB probe evidence remains. Final repository
+size is 171 MiB because canonical ignored Doxygen output is 133,087,232 bytes;
+an attempted parent deletion was rejected by the safety reviewer and no
+workaround was used. The pinned googletest submodule checkout is 4,755,456
+bytes. No tree was created in `/tmp`, `/var/tmp`, or `/dev/shm`.
+
+Final ticket population is 1,945: 1,927 done; no todo or doing; 11 blocked;
+three needs_user (#1929 partial, #1939, #1941); and four wontfix (#1772, #1892,
+#1893, #1926). Blocked: #1773, declined #1888/#1889/#1896, #1894/#1899, and
+#1940/#1942–#1945. #1932/#1934/#1935/#1936 remain complete; #1937 remains
+done/not reproducible; #1925 remains complete; #1926 remains wontfix. Audit
+stays 68 remediated / 296 open / 364; no SR-AUD identifier was created.
+
+CNA, mobile-eggbert, sibling/parent repositories, and downstream consumers were
+not inspected or modified. No push, fetch, pull, merge, rebase, tag,
+publication, remote mutation, or stash mutation was performed. The required
+googletest submodule was initialized at its pinned commit with
+`git submodule update --init --no-fetch --checkout`; no fetch command was run.
+Initial remote was
+`git@github-openeggbert:openeggbert/sharp-runtime.git` for fetch/push. Initial
+stash objects were `a1b7e29783f969a07cd424114b4af9794e0cee15`,
+`6109492015ef4e8b9454e4ac6f975537459691fa`, and
+`09e784542ce2fee32806e9310e7e9ffa0adfaef5`; the final handoff commit records
+their read-only recheck.
+
+Recommended next batch: approve exactly #1939 wording above in a fresh context.
+Do not combine #1941 or any blocked provider/style/kind conversion/multi/XML
+group with it.
 
 ---
 
