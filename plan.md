@@ -100,6 +100,36 @@ work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
 
 
+## 2026-08-02 — #1929 row-4 implementation decomposition
+
+Ticket #1938 established that row 4 is not one implementation decision. All
+five exact overload families are absent; providers and culture types are
+disconnected; styles are declared in Globalization but unused by Core.Base;
+DateTimeKind is declared but DateTime has no kind state; and XmlConvert ignores
+existing format/mode arguments. No production behavior is changed by this
+design classification.
+
+The future work is split at independent approval, dependency, API/ABI,
+migration, benchmark, and rollback boundaries:
+
+| Ticket | Group | State after design | Exact boundary |
+|---|---|---|---|
+| #1939 | 4A | `needs_user` | four additive invariant string-only single-format DateOnly/TimeOnly exact APIs and a private scanner |
+| #1940 | 4B | `blocked` | provider/culture ownership and lookup after SR-AUD-280/SR-AUD-285 premises and an explicit component/ABI transition |
+| #1941 | 4D | `needs_user` | storage-only packed DateTimeKind representation and explicit kind surface; conversion remains blocked on timezone capability |
+| #1942 | 4C | `blocked` | exact DateTimeStyles/TimeSpanStyles validation and effects after provider/kind/timezone/overload prerequisites |
+| #1943 | 4E1 | `blocked` | remaining single-format provider/style exact APIs for DateTime, DateTimeOffset, TimeSpan, DateOnly, and TimeOnly |
+| #1944 | 4E2 | `blocked` | separately selected candidate-collection and span-like overload shapes |
+| #1945 | 4F | `blocked` | existing-body XmlConvert exact-format/mode corrections and explicitly approved additive bridges |
+
+#1939 is the recommended next approval batch. #1941's storage-only phase is
+also independently worded but must not be combined with #1939. #1940,
+#1942--#1945 cannot be implemented from the current repository premises.
+`docs/DateTimeExactParsingAndKindDesign.md` owns the complete inventory,
+matrices, dependencies, source/API/ABI analysis, tests, benchmarks, rollback,
+exclusions, and exact copyable wording. No new SR-AUD identifier is created;
+audit numbering remains frozen at 364.
+
 ## 2026-08-01 — #1936 exact Option 1 delivered
 
 The approved change is confined to the inline generic
