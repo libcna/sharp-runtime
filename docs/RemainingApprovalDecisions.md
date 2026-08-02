@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: MIT -->
 
-# Remaining approval decisions — authoritative packet (2026-08-01)
+# Remaining approval decisions — authoritative packet (2026-08-02)
 
 ## 1. Authority, scope, and how to use this packet
 
@@ -14,7 +14,9 @@ still-pending contract remains independent. The evidence authority is:
 - docs/NetworkExceptionHResultPropagationDesign.md for #1932;
 - docs/OwnedTreeLifetimeContractPlan.md §§42, 45, and 46 for #1894/#1899;
 - docs/DateTimeValidationBoundaryPlan.md §§20–22 and
-  docs/TextSubsetCompatibilityDecision.md for #1929;
+  docs/TextSubsetCompatibilityDecision.md for #1929 rows 1–3;
+- docs/DateTimeExactParsingAndKindDesign.md for #1929 row 4 and
+  #1938–#1945;
 - docs/CompositeFloatingKeyPolicyDesign.md for #1925/#1934; and
 - docs/CollectionsComparisonContractPlan.md §20 for #1926;
 - docs/ImmutableSortedSetFloatingEqualityDesign.md for #1936; and
@@ -33,7 +35,7 @@ There is deliberately no “approve all fixes” choice:
 |---|---|---|---|---|
 | **A (delivered)** | #1932 | two networking exceptions' causal HResult rule | Option 2R approved and implemented | closed independently |
 | **B** | #1899, then #1894 | Xml.Linq borrowed-view policy and diagnostic closure | retain #1898 contract; close #1899 wontfix; do not claim a visitor prevents escape | #1894 depends on the chosen #1899 classification |
-| **C1–C4** | #1929 rows 1–4 | four independent date/time acceptance/API choices | retain and document rows 1–3; design row 4 separately | decide by row, not as one grammar switch |
+| **C1–C4** | #1929 rows 1–4; #1939–#1945 | three general-grammar choices plus six independently bounded row-4 groups | retain and document rows 1–3; approve only #1939 next | rows 1–3 stay separate; 4A/4B/4C/4D/4E/4F are not one approval |
 | **D (delivered)** | #1934 then #1925 | direct nullable-floating default comparison and key policy | bounded direct-optional group approved and implemented | closed in dependency order |
 | **E (closed)** | #1926 | libstdc++ long-double hash caching | `wontfix` approved and recorded | closed independently |
 | **F (delivered)** | #1936 | generic ImmutableSortedSet comparator-equivalence equality | Option 1 approved and implemented | closed independently |
@@ -309,7 +311,7 @@ representation correction is complete. The remaining rows are:
 | **1** unpadded month/day | rejects 2024-6-15 and 2024-06-5 | accepts | retain/document subset |
 | **2** more than seven fractional digits | rejects an eighth digit | reads the whole digit run and rounds the fraction to 100-ns ticks | retain/document seven-digit exact boundary |
 | **3** short/compact offset | rejects +2, +2:5, +0205 | accepts; +2:5 means +125 minutes | retain/document subset; do not silently reverse #1879 |
-| **4** exact/provider/kind surface | ParseExact, TryParseExact, provider overloads, DateTimeKind absent | present | separate API design; no implementation approval |
+| **4** exact/provider/kind surface | ParseExact, TryParseExact and provider/style/kind behavior absent; the DateTimeKind enum itself is declared | present | design complete; six separate future groups, no implementation approval |
 
 For row 2, current .NET's ParseFraction consumes every ASCII digit, accumulates
 a double fraction, then applies Math.Round(fraction * 10,000,000). For example,
@@ -324,8 +326,8 @@ rounding and boundary behavior rather than merely truncate after seven digits.
 - Row 2 affects the general time-bearing parsers, including DateTime,
   DateTimeOffset, and TimeOnly.
 - Row 3 affects offset-bearing DateTime/DateTimeOffset general parsing.
-- Row 4 adds public overload families and a kind/provider/style contract across
-  date/time types.
+- Row 4 adds public overload families and separate scanner, provider, style,
+  kind, collection/span, and XML bridge contracts across date/time types.
 
 Rows 1–3 need no declaration or representation change, but they expand
 accepted input. Callers using parse failure as validation would silently accept
@@ -383,13 +385,51 @@ Separate row-3 reversal alternative:
 > this reverses the accepted-input decision made in #1879. Preserve every
 > other offset boundary and make no declaration or layout change.
 
-Row-4 design wording:
+### 4.3 Row-4 design disposition and next exact approval
 
-> Authorize a design-only ticket for #1929 row 4 to inventory exact
-> ParseExact/TryParseExact, provider/style, and DateTimeKind surface and
-> semantics, including representation and ABI alternatives. Do not implement
-> any new overload or DateTimeKind representation without a later explicit
-> approval.
+#1938 completed the previously authorized design. It corrected five premises:
+all five exact families are missing rather than defective overload bodies; no
+production type implements `IFormatProvider`; CultureInfo/DateTimeFormatInfo
+cannot currently supply parser data; DateTimeStyles is in the wrong component
+direction for Core.Base declarations; and DateTimeKind is a declared enum but
+DateTime has no kind representation or behavior. The current local-timezone
+model also lacks historical/DST transitions, and XmlConvert's existing
+format/mode overloads ignore their controlling argument.
+
+The six independently approvable boundaries are #1939 invariant DateOnly/
+TimeOnly single-format exact parsing (4A), #1940 provider/culture infrastructure
+(4B), #1942 styles (4C), #1941 kind storage then separately conversion (4D),
+#1943/#1944 remaining single-format then multi-format/span APIs (4E), and #1945
+XmlConvert bridges (4F). #1940 and #1942–#1945 remain blocked on the exact
+dependencies in the owning design. #1941 storage-only is independently worded
+but must not be combined with #1939.
+
+Recommended next approval, copy exactly:
+
+> Approve #1939 only: add the four string-only, providerless declarations
+> `DateOnly::ParseExact(input, format)`,
+> `DateOnly::TryParseExact(input, format, result)`,
+> `TimeOnly::ParseExact(input, format)`, and
+> `TimeOnly::TryParseExact(input, format, result)` specified in
+> `docs/DateTimeExactParsingAndKindDesign.md` section “4A exact selected
+> contract”. Implement invariant standard DateOnly `O/o` and `R/r`, TimeOnly
+> `O/o` and `R/r`, and only the complete custom numeric/name/fraction/AM-PM and
+> quote/escape subset listed there. Require full input consumption; reject
+> whitespace, missing fields, provider separator placeholders, eras/calendars,
+> zones, unsupported/malformed formats, and fractions beyond seven digits.
+> Parse failures and malformed formats throw the existing type-specific
+> `FormatException` family with HResult `0x80131537`; Try failures return false
+> and set `MinValue`. Additive declarations and mangled symbols are approved;
+> no fields, vtables, enum values, default arguments, provider/style overloads,
+> multi-format or span APIs are approved. Do not change general parsing,
+> formatting, XML bridges, #1929 rows 1–3, DateTime, DateTimeOffset, TimeSpan,
+> providers, culture, styles, kind, timezone behavior, or any existing result,
+> exception, message, or failure output.
+
+The exact conditional wording for 4B–4F, with before/after examples and all
+source/API/ABI/layout/vtable/symbol consequences, is retained verbatim in
+`docs/DateTimeExactParsingAndKindDesign.md`. None is safe to abbreviate to
+“match .NET providers/styles/kind.”
 
 ---
 
@@ -650,12 +690,16 @@ The only remaining dependency chains are:
 
 1. #1899 classification or migration choice, then any accurately re-scoped
    #1894 diagnostic fixture;
-2. each #1929 row independently, with row 3 explicitly acknowledging #1879.
+2. each #1929 row independently, with row 3 explicitly acknowledging #1879;
+3. row 4A #1939 independently; 4B #1940 before 4C #1942 and 4E1 #1943;
+   storage-only 4D #1941 independently, but timezone conversion before the
+   zone-affecting half of #1942/#1943; then 4E2 #1944 and 4F #1945.
 
 #1934 then #1925 was delivered in its approved order. #1926 was standalone and
 is now closed. Delivered #1932 and #1936 no longer participate in the
-dependency order. #1929 row 4 is design-first. No choice depends on #1933,
-and no performance ticket authorizes a semantic widening.
+dependency order. #1929 row-4 design #1938 is complete; the implementation
+groups remain inactive. No choice depends on #1933, and no performance ticket
+authorizes a semantic widening.
 
 | Ticket | State preserved by this packet |
 |---|---|
@@ -667,11 +711,19 @@ and no performance ticket authorizes a semantic widening.
 | #1899 | blocked pending Group B decision |
 | #1925 | done; bounded direct optional subset delivered after #1934 |
 | #1926 | `wontfix`; accepted independently, evidence retained |
-| #1929 | todo/partial; rows 1–4 unchanged |
+| #1929 | needs_user/partial; rows 1–3 unchanged and row 4 designed but unimplemented |
 | #1932 | done; exact Option 2R delivered independently |
 | #1933 | done; optimization designed but not implemented |
 | #1934 | done; direct nullable-floating defaults delivered first |
 | #1936 | done; exact generic Option 1 delivered with full evidence |
 | #1937 | done; not reproducible, evidence-only, no optimization |
+| #1938 | done; row-4 design-only unit, no production change |
+| #1939 | needs_user; recommended next 4A approval |
+| #1940 | blocked; provider/culture prerequisites and ABI transition |
+| #1941 | needs_user; storage-only kind phase separately approvable |
+| #1942 | blocked; styles prerequisites |
+| #1943 | blocked; remaining single-format exact APIs |
+| #1944 | blocked; collection/span API decision and single-format prerequisites |
+| #1945 | blocked; XmlConvert exact/kind prerequisites |
 
 No new SR-AUD identifier is issued. Audit numbering remains frozen at 364.

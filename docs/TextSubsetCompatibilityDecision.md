@@ -532,3 +532,27 @@ a structural lifetime repair.
 Status correction for §8: #1927 and #1928 are done; #1929 is partial, with
 rows 5–6 done and rows 1–4 remaining unchanged as described in §6.5. No new
 semantic approval follows from this note.
+
+---
+
+## 10. Correction — completed row-4 design (2026-08-02)
+
+Historical rows that say `DateTimeKind` is absent mean that DateTime has no
+kind-taking entry point, stored kind, property, conversion, or parse behavior.
+The enum `System::DateTimeKind` is in fact declared with values Unspecified,
+Utc, and Local. This correction preserves the historical wording and does not
+approve a representation or behavior.
+
+#1938 has now completed the design-only work that §6.5 deferred. All
+ParseExact/TryParseExact families remain absent. The provider premise is also
+sharper: `IFormatProvider` exists in Core.Base, but no production CultureInfo,
+DateTimeFormatInfo, or other provider derives from it, and the styles enums live
+in Globalization while the parsers live in Core.Base. The full overload,
+grammar, provider, styles, kind, XmlConvert, ABI, test, performance, rollback,
+and approval record is `docs/DateTimeExactParsingAndKindDesign.md`.
+
+Row 4 is split into 4A/4B/4C/4D/4E/4F tickets #1939–#1945. Only #1939's
+invariant DateOnly/TimeOnly single-format subset is recommended for the next
+approval; no group is implemented by this correction. Rows 1–3 and completed
+rows 5–6 remain exactly as §6.5 records. No SR-AUD identifier was issued and
+audit numbering remains 364.

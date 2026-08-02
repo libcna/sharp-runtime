@@ -1201,3 +1201,29 @@ slot, vtable, data member or mangled symbol changes. Layouts remain DateTime
 set. The module graph remains 41/91. No new `SR-AUD-*` identifier was issued;
 audit numbering remains 364. Ticket #1880 and CCF2-E are complete, so CCF-002
 is closed.
+
+---
+
+## 24. Correction — #1929 row-4 exact/provider/style/kind design (2026-08-02)
+
+Section 16.4's missing-surface conclusion remains correct, but its first phrase
+is overbroad. `System::DateTimeKind` is declared; what is absent is any DateTime
+kind representation, property, kind-taking constructor, conversion, or parsing
+effect. All five ParseExact/TryParseExact families are also absent. This is an
+appended correction, not a rewrite or semantic approval.
+
+#1938 measured the complete current surface and the pinned dotnet/runtime
+commit `0eb5481340ea675857c7a7abf18f68a60b52a686`. Providers cannot be silently
+added: `IFormatProvider` has no production implementation, CultureInfo and
+DateTimeFormatInfo do not derive from it, DateTimeStyles is owned by
+Globalization while parsers are in Core.Base, current culture is process-global
+(SR-AUD-280), and the available local-timezone model lacks date-sensitive DST
+transitions. XmlConvert's format/mode bridges are a separate existing-body
+semantic correction because they currently ignore those arguments.
+
+The durable design and exact approval boundaries are in
+`docs/DateTimeExactParsingAndKindDesign.md`. Future tickets #1939–#1945 split
+invariant exact scanning, provider/culture, styles, kind, remaining/multi-format
+APIs, and XmlConvert. None is implemented. Rows 1–3 are remeasured unchanged;
+rows 5–6 and #1880 remain complete. No new SR-AUD identifier was issued and the
+audit total remains 364.
