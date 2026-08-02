@@ -50,8 +50,8 @@ kind, exact-format result, or XML behavior changed.
 | `a12a4bab` | #1938 evidence/design | complete type/overload and 50-row grammar/provider/style/kind/ABI plan |
 | `0d53f231` | future decomposition | #1939–#1945 bounded at independent approval/rollback boundaries |
 | `6cec2571` | decision packet | historical correction notes and exact copyable approvals consolidated |
-| this reconciliation commit | NEXT/plan/database | #1938 done, #1929 partial/needs_user, exact baselines and queue |
-| following commit | final handoff | final remote/stash/branch/cleanliness/resource observations |
+| `05d922b5` | NEXT/plan/database | #1938 done, #1929 partial/needs_user, exact baselines and queue |
+| this commit | final handoff | final remote/stash/branch/cleanliness/resource observations |
 
 ### 1. Exact #1929 rows and rows 1–3
 
@@ -274,8 +274,13 @@ Initial remote was
 `git@github-openeggbert:openeggbert/sharp-runtime.git` for fetch/push. Initial
 stash objects were `a1b7e29783f969a07cd424114b4af9794e0cee15`,
 `6109492015ef4e8b9454e4ac6f975537459691fa`, and
-`09e784542ce2fee32806e9310e7e9ffa0adfaef5`; the final handoff commit records
-their read-only recheck.
+`09e784542ce2fee32806e9310e7e9ffa0adfaef5`. Final read-only observation is
+identical: the fetch/push URL did not move; all three stash titles and object
+IDs are unchanged; and the branch's upstream field is empty. Googletest is at
+the pinned `7e2c425db2c2e024b2807bfe6d386f4ff068d0d6` commit. Immediately before
+this handoff edit, `git status --short --branch` contained only the branch
+heading, and `cbbb7ed1..HEAD` named only NEXT.md, plan.md, and the four design/
+decision documents. The final post-commit check must likewise be clean.
 
 Recommended next batch: approve exactly #1939 wording above in a fresh context.
 Do not combine #1941 or any blocked provider/style/kind conversion/multi/XML
