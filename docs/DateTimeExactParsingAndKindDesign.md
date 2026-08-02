@@ -1,7 +1,7 @@
 # Date/time exact parsing, providers, styles, and kind design
 
-**Ticket:** #1938, design for #1929 row 4  
-**Date:** 2026-08-02  
+**Ticket:** #1938, design for #1929 row 4
+**Date:** 2026-08-02
 **Scope:** design and retained characterization only; no production behavior is approved or changed
 
 ## Decision summary
