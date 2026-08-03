@@ -25,6 +25,22 @@ namespace System::Text
      * primarily for source-porting convenience in the SharpRuntime layer.
      * Only a practical subset of the original .NET API is provided.
      * </summary>
+     *
+     * @note **Every length, index and count on this type is a UTF-8 storage-byte position,
+     *       not a managed character position.** The buffer is a `std::string` holding UTF-8,
+     *       where .NET's `StringBuilder` holds UTF-16 `char`s. Two measured consequences a
+     *       caller must know about:
+     *       - `StringBuilder(u8"éA").getLengthProperty()` is **3**, not 2, because
+     *         U+00E9 occupies two bytes;
+     *       - an index-taking mutation can therefore **split a character**:
+     *         `Remove(1, 1)` on that same builder yields the byte pair `c3 41`, which is not
+     *         well-formed UTF-8.
+     *
+     *       Ticket #2012 (SR-AUD-296) states this rather than leaving the member
+     *       doc-comments promising characters. Changing the unit — or making the mutations
+     *       character-preserving — is the approval-gated ticket **#2015**
+     *       (`docs/SystemTextNamespaceReviewPlan.md` §14.3), and is not done here. Callers
+     *       that need scalar-wise iteration have `StringBuilderRuneEnumerator`.
      */
     class StringBuilder
     {
@@ -118,8 +134,10 @@ namespace System::Text
         [[nodiscard]] std::string ToString() const;
 
         /**
-         * Gets the number of characters in this instance (.NET Length property).
-         * @return Number of characters in the internal buffer.
+         * Gets the number of UTF-8 **bytes** in this instance (.NET Length property).
+         * @return Number of bytes in the internal buffer -- not the number of managed
+         *         characters. `StringBuilder(u8"\u00e9A").getLengthProperty()` is 3.
+         *         Ticket #2012 (SR-AUD-296); changing the unit is the gated ticket #2015.
          */
         [[nodiscard]] intcs getLengthProperty() const;
 
@@ -164,18 +182,25 @@ namespace System::Text
         StringBuilder& Append(SharpRuntime::longcs value);
 
         /**
-         * Inserts the specified string at the given character position.
-         * @param index Zero-based position at which to insert.
+         * Inserts the specified string at the given UTF-8 **byte** position.
+         * @param index Zero-based BYTE position at which to insert. An index in the middle of
+         *        a multi-byte sequence splits the character, producing ill-formed UTF-8;
+         *        this is checked against the buffer's byte length, not its character count.
          * @param value String to insert.
          * @return Reference to this instance.
+         * @note Ticket #2012 (SR-AUD-296); making the position character-preserving is the
+         *       gated ticket #2015 (docs/SystemTextNamespaceReviewPlan.md section 14.3).
          */
         StringBuilder& Insert(intcs index, const std::string& value);
 
         /**
-         * Removes a range of characters from this instance.
-         * @param startIndex Zero-based position of the first character to remove.
-         * @param count Number of characters to remove.
+         * Removes a range of UTF-8 **bytes** from this instance.
+         * @param startIndex Zero-based BYTE position of the first byte to remove.
+         * @param count Number of BYTES to remove.
          * @return Reference to this instance.
+         * @note Measured: `StringBuilder(u8"\u00e9A").Remove(1, 1)` leaves the byte pair
+         *       `c3 41`, which is not well-formed UTF-8, because the range is in bytes.
+         *       Ticket #2012 (SR-AUD-296); the gated repair is #2015.
          */
         StringBuilder& Remove(intcs startIndex, intcs count);
 

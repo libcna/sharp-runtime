@@ -9,7 +9,25 @@
 
 namespace System::Text {
 
-    /** ISO-8859-1 (Latin-1) encoding: each byte maps 1:1 to code points U+0000–U+00FF. */
+    /**
+     * ISO-8859-1 (Latin-1) encoding.
+     *
+     * @warning **This class does not currently implement the mapping its name and code page
+     *          (28591) advertise.** It copies the runtime's UTF-8 *storage* bytes straight
+     *          through in both directions instead of converting Unicode scalar values, so
+     *          (measured, `build-probe/2006_probe1_before.log` §D):
+     *          - `GetBytes(u8"é")` produces `c3 a9`, where ISO-8859-1 is the single byte
+     *            `e9`; and
+     *          - `GetString({0xE9})` produces the single byte `e9`, which is not well-formed
+     *            UTF-8, where the correct answer is `c3 a9`.
+     *
+     *          Only the ASCII range round-trips correctly. It is the one encoding in this
+     *          component that does **not** decode the UTF-8 storage into scalars first —
+     *          `ASCIIEncoding`, `UnicodeEncoding` and `UTF32Encoding` all do. Ticket #2012
+     *          (SR-AUD-289) states the divergence; repairing it changes the produced bytes
+     *          for every non-ASCII input and is the approval-gated ticket **#2014**
+     *          (`docs/SystemTextNamespaceReviewPlan.md` §14.2).
+     */
     class Latin1Encoding : public Encoding {
     public:
         /** Returns the encoding name "iso-8859-1". */
@@ -19,7 +37,12 @@ namespace System::Text {
         /** Latin-1 always uses exactly one byte per character. */
         [[nodiscard]] bool getIsSingleByteProperty() const override { return true; }
 
-        /** Encodes a string to Latin-1 bytes. */
+        /**
+         * Copies the UTF-8 storage bytes of @p s through unchanged.
+         *
+         * Despite the class name this is **not** an ISO-8859-1 conversion: see the class
+         * warning above and ticket #2014. `GetBytes(u8"é")` returns `c3 a9`, not `e9`.
+         */
         [[nodiscard]] std::vector<SharpRuntime::bytecs> GetBytes(const std::string& s) const override {
             std::vector<SharpRuntime::bytecs> result;
             result.reserve(s.size());
@@ -29,7 +52,11 @@ namespace System::Text {
         }
 
         /**
-         * Decodes a Latin-1 byte range to a string.
+         * Copies the byte range through unchanged as if it were already UTF-8.
+         *
+         * Despite the class name this is **not** an ISO-8859-1 conversion: see the class
+         * warning above and ticket #2014. A byte in 0x80–0xFF is emitted verbatim, which can
+         * make the returned string ill-formed UTF-8.
          *
          * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
          * @throws System::ArgumentNullException if @p data is null and @p count is positive.

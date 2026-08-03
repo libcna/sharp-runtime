@@ -21,6 +21,22 @@ namespace System::Text
      * Abstract base class; use UTF8(), ASCII(), or Unicode() factory methods
      * to obtain a concrete instance.
      * </summary>
+     *
+     * @note **Unit of every count and index in this type: UTF-8 storage bytes, not managed
+     *       characters.** This runtime represents `System::String` as a UTF-8 `std::string`,
+     *       where .NET's `string` is UTF-16, so `GetCharCount` returns the number of **bytes**
+     *       `GetString` would produce — `GetCharCount` of the four UTF-8 bytes of U+1F600 is
+     *       `4`, where .NET reports `2` UTF-16 code units. Ticket #2012 (SR-AUD-290) states
+     *       this rather than leaving the member doc-comments promising characters; changing
+     *       the unit is the approval-gated ticket **#2015**
+     *       (`docs/SystemTextNamespaceReviewPlan.md` §14.3) and is not done here.
+     *
+     * @note **The factory instances are shared and mutable.** `UTF8()` and its six siblings
+     *       each return the *same* object on every call, so a caller that installs a fallback
+     *       on one changes what every other caller decodes, and there is a measured data race
+     *       between a setter and a concurrent conversion. .NET's factory encodings are
+     *       read-only. Making these read-only is the approval-gated ticket **#2013**
+     *       (SR-AUD-288, plan §14.1).
      */
     class Encoding
     {
@@ -90,7 +106,18 @@ namespace System::Text
             return static_cast<SharpRuntime::intcs>(GetBytes(str).size());
         }
 
-        /** Returns the number of characters that GetString() would produce for the given byte range. */
+        /**
+         * Returns the number of UTF-8 **bytes** that GetString() would produce for the given
+         * byte range — not the number of managed UTF-16 characters .NET's `GetCharCount`
+         * returns.
+         *
+         * Measured: for the four UTF-8 bytes of U+1F600 this returns `4`; .NET returns `2`.
+         * Ticket #2012 (SR-AUD-290) makes the contract true; changing it is #2015
+         * (`docs/SystemTextNamespaceReviewPlan.md` §14.3).
+         *
+         * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
+         * @throws System::ArgumentNullException if @p data is null and @p count is positive.
+         */
         [[nodiscard]] virtual SharpRuntime::intcs GetCharCount(const SharpRuntime::bytecs* data, SharpRuntime::intcs index,
                                                                 SharpRuntime::intcs count) const {
             return static_cast<SharpRuntime::intcs>(GetString(data, index, count).size());
