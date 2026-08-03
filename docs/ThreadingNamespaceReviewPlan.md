@@ -960,3 +960,398 @@ specification or component edge changed; the module graph stays **41 / 91**.
 Nineteen of the namespace's 38 findings are `remediated`; two are half-landed; seventeen
 remain, of which sixteen belong to the four approval-gated design tickets #1956–#1959 and one
 (SR-AUD-200) to verification ticket #1963.
+
+---
+
+## 20. Consolidated design and approval package for #1956–#1959 (2026-08-03)
+
+**Nothing in this section is implemented.** All four tickets remain `blocked`. §9 stated the
+four approval questions in outline; this section supplies what an approval actually needs —
+exact declarations, measured current behaviour, the .NET contract, the selected design, the
+alternatives considered and rejected, the compatibility consequences, the test and sanitizer
+plan, the rollback path, and one exact sentence to approve or decline. The four questions are
+gathered so any subset can be answered in one turn.
+
+**Evidence status.** Current behaviour below is measured — by the probes this batch built, by
+the audit's own probes, or by reading the shipped headers. .NET behaviour is taken from the
+contracts quoted in the per-file audit reports plus the reviewer's reading of the reference
+API; **the reference tree `/rv/tmp/runtime/src/libraries/` is not present in this
+environment** (§18.2). Where a design decision turns on a .NET detail that could not be
+re-read here, that is marked **[unverified]** and the implementing ticket must confirm it
+before landing.
+
+---
+
+### 20.1 #1956 — disposal is a real state (cause T-G)
+
+Findings: SR-AUD-191, SR-AUD-203 (dispose-while-held half), SR-AUD-208 (three types),
+SR-AUD-219 (IsValueCreated half).
+
+#### Affected declarations
+
+| File | Declaration | Today |
+|---|---|---|
+| `Mutex.hpp` | `void Close()` | `{}` — empty body; inherited `WaitHandle::Dispose()` is also `{}` |
+| `AutoResetEvent.hpp` | `void Close()` | `{}` |
+| `ManualResetEvent.hpp` | `void Close()` | `{}` |
+| `src/System/TimeProvider.cpp` | `SystemTimeProviderTimer::Change(TimeSpan, TimeSpan)` | forwards and `return true;` unconditionally |
+| `ThreadLocal.hpp` | `bool getIsValueCreatedProperty() const` | reads the map; never calls `ThrowIfDisposed()` |
+| `ReaderWriterLockSlim.hpp` | `void Dispose()` | sets the (now atomic) flag; never checks whether the caller owns a mode |
+
+#### Current behaviour, measured
+
+`Mutex::Close()` then `WaitOne(0)` returns `1`; the same on both events. `ITimer::Change`
+after `Dispose` returns `true` although the worker is stopped. `ThreadLocal::IsValueCreated`
+returns `false` after `Dispose` rather than throwing. `ReaderWriterLockSlim::Dispose()`
+succeeds with a read lock held.
+
+#### .NET behaviour
+
+`WaitHandle.Close()` disposes the underlying `SafeWaitHandle`, and every later wait throws
+`ObjectDisposedException`. `ThreadLocal<T>.IsValueCreated` throws `ObjectDisposedException`.
+`ReaderWriterLockSlim.Dispose()` throws `SynchronizationLockException` when a mode is held.
+**`ITimer.Change` is the one member that does not throw**: its documented contract is a
+`false` return for a disposed timer, which is what the audit's own summary says
+(*"the ITimer contract at minimum requires a false result"*). Any design that made
+`ITimer::Change` throw would be wrong.
+
+#### Selected design
+
+One guard idiom, already race-free after #1955, applied uniformly — **with `ITimer::Change`
+deliberately excluded from the throwing group**:
+
+1. `Mutex`, `AutoResetEvent`, `ManualResetEvent` gain a `std::atomic<bool> closed_{false}`;
+   `Close()` sets it, and `WaitOne`, `WaitOne(intcs)`, `Set`, `Reset` and `ReleaseMutex`
+   throw `System::ObjectDisposedException` when it is set. `Close()` stays idempotent.
+2. `SystemTimeProviderTimer` tracks its own disposal and `Change` **returns `false`**
+   afterwards. No exception, no new public type member — the flag lives in a `.cpp`-local
+   class.
+3. `ThreadLocal<T>::getIsValueCreatedProperty()` calls the existing `ThrowIfDisposed()`.
+4. `ReaderWriterLockSlim::Dispose()` throws `System::Threading::SynchronizationLockException`
+   when the calling thread's `ThreadCounts` shows a held read, write or upgradeable mode.
+
+#### Alternatives considered
+
+- **Leave `Close()` a no-op and document it.** Rejected: the header already says `Close`
+  "closes the mutex handle", so the documentation and the behaviour disagree today; keeping
+  the no-op means keeping a false statement or removing a .NET-shaped API.
+- **Make disposal idempotent-but-silent (later calls no-op instead of throwing).** Rejected:
+  it hides use-after-close exactly as today, only more deliberately.
+- **Make `ITimer::Change` throw for symmetry with the wait handles.** Rejected: it contradicts
+  the documented `ITimer` contract, which is the .NET surface this type implements.
+
+#### Consequences
+
+| Axis | Impact |
+|---|---|
+| Public source | none — no signature, overload set or default argument changes |
+| Vtable | none — `Close()` is non-virtual on all three; `ITimer::Change` is already virtual and keeps its signature |
+| Object layout | **yes, three types**: `Mutex`, `AutoResetEvent`, `ManualResetEvent` each gain one `std::atomic<bool>`. Exact before/after `sizeof`/`alignof` must be measured and quoted, as #1955 did; a `bool`-sized member may or may not fit existing tail padding, so this is **not** assumed layout-neutral |
+| Concurrency | none new: the flag is atomic from the start, and the `ReaderWriterLockSlim` check reads only the calling thread's own counts |
+| Observable behaviour | **the point of the ticket** — calls that succeed today begin throwing |
+| Migration | any consumer that calls `Close()`/`Dispose()` and then keeps using the object must stop. .NET-shaped code never does; code written against this port's no-op might |
+
+#### Test plan
+
+Per type: operation before `Close` succeeds; the same operation after `Close` throws
+`ObjectDisposedException`; `Close` twice does not throw; the exception is catchable as
+`System::Exception`. `ITimer`: `Change` returns `true` while live and `false` after `Dispose`,
+and `Dispose` twice is safe. `ThreadLocal`: `IsValueCreated` throws after `Dispose` and does
+not before, both with and without a created value. `ReaderWriterLockSlim`: `Dispose` throws
+with a read lock held, with a write lock held, with an upgradeable lock held, and succeeds
+after every mode is released; a *different* thread's held lock is covered explicitly, since
+the check is per-thread.
+
+#### Sanitizer plan
+
+LSan (§11 lists it for T-G): each newly throwing path constructed and destroyed 10,000 times
+to prove the throw leaks nothing. TSan on a `Close`-versus-operation pair per type, to prove
+the new flag did not reintroduce cause T-A.
+
+#### Rollback
+
+Each of the four repairs is independent and separately revertible; the layout half (item 1)
+is the only one whose revert affects ABI, and reverting it restores the previous `sizeof`
+exactly.
+
+#### Exact approval request
+
+> **Approve #1956:** may `Mutex::Close`, `AutoResetEvent::Close` and `ManualResetEvent::Close`
+> begin invalidating their objects — each gaining one `std::atomic<bool>` member, so
+> `sizeof` may grow and must be re-measured and quoted before landing — so that every
+> subsequent wait, set, reset or release throws `System::ObjectDisposedException`; may
+> `ThreadLocal<T>::getIsValueCreatedProperty` throw `ObjectDisposedException` after
+> `Dispose`; may `ReaderWriterLockSlim::Dispose` throw
+> `System::Threading::SynchronizationLockException` when the calling thread still owns a
+> mode; and may `SystemTimeProviderTimer::Change` **return `false`** after `Dispose` rather
+> than `true` (returning `false`, not throwing, because that is `ITimer`'s documented
+> contract)?
+
+---
+
+### 20.2 #1957 — the four incomplete state machines (cause T-E/2)
+
+Findings: SR-AUD-201, SR-AUD-202, SR-AUD-204, SR-AUD-210.
+
+#### Affected declarations, current behaviour and .NET contract
+
+| Finding | Declaration | Today | .NET |
+|---|---|---|---|
+| SR-AUD-202 | `Monitor::Wait(const void*)`, `Wait(const void*, intcs)` | releases **one** recursion level, so a caller at depth ≥ 2 keeps the mutex and the signaller can never `Enter`; the audit's bounded probe times out at 2 s (exit 124) | fully releases the recursive count and restores it on reacquisition |
+| SR-AUD-210 | `Barrier::SignalAndWait`, post-phase action | the action runs while `FinishPhase` holds `mutex_`, so a legal `getCurrentPhaseNumberProperty()` inside it self-deadlocks | the action runs with the barrier usable |
+| SR-AUD-204 | `ReaderWriterLockSlim::TryEnterReadLock*` | no waiting-writer state, so a new reader enters past a blocked writer and can starve it indefinitely | a writer waiting blocks subsequent readers |
+| SR-AUD-201 | `PeriodicTimer::WaitForNextTick` | no in-flight-consumer state, so two concurrent waiters both return `true` for one tick (audit probe: `concurrent=1,1`) | documented single-consumer contract |
+
+#### Selected design, and how the four differ
+
+They share a cause but not a repair, which is why they are one ticket only for approval and
+must be four separate commits.
+
+1. **SR-AUD-202** — `Wait` reads the calling thread's depth `n`, unlocks `n` times, waits, then
+   relocks `n` times and restores the count. **No public object layout is involved at all**:
+   `Monitor` is a static-only class whose per-pointer `State` lives in a private static
+   registry, so nothing a consumer can allocate changes size. This is the cheapest member and
+   could be split out to land without approval if the depth bookkeeping is proven exact.
+2. **SR-AUD-210** — `FinishPhase` releases `mutex_` around the post-phase action and reacquires
+   it afterwards, keeping the existing `actionCallerId_` reentrancy guard and the
+   `lastPostPhaseException_` propagation. Likely **no new member**, but the phase transition
+   must stay atomic with respect to other participants, which needs a "phase is finishing"
+   state — that may cost a field.
+3. **SR-AUD-204** — `ReaderWriterLockSlim` gains a waiting-writer count (`intcs` or
+   `std::atomic<intcs>`) and the read-admission predicate consults it. **New member → layout.**
+4. **SR-AUD-201** — `PeriodicTimer` gains an in-flight-consumer flag and `WaitForNextTick`
+   throws `System::InvalidOperationException` for a second concurrent caller **[unverified:
+   whether .NET throws or blocks the second consumer must be confirmed against the reference
+   before landing]**. **New member → layout.**
+
+#### Alternatives considered
+
+- **SR-AUD-204 without a field**, deriving writer-waiting from the condition variable:
+  rejected, a `condition_variable` exposes no waiter count and any approximation reintroduces
+  the starvation window.
+- **SR-AUD-210 by making `mutex_` recursive**: rejected — it would let the action mutate
+  barrier state mid-transition, converting a deadlock into corruption.
+- **SR-AUD-201 by documenting multi-consumer as an accepted adaptation**: rejected, the
+  finding is that two waiters *silently* both consume one tick; if it is to be an adaptation
+  it must at least be documented and asserted, which is itself a behaviour decision.
+
+#### Consequences
+
+Public source: none. Vtable: none. **Object layout: yes** — `ReaderWriterLockSlim` and
+`PeriodicTimer` grow (before/after `sizeof`/`alignof` to be measured and quoted, as
+#1788/#1789/#1955 did); `Monitor` cannot; `Barrier` to be determined. Concurrency: every
+member changes admission or wake-up ordering, which is precisely what is being approved.
+Fairness: SR-AUD-204 introduces writer preference, so a reader-heavy workload that never
+blocked can now block. Migration: none at the API level; a workload relying on reader
+starvation of a writer is not a supported expectation.
+
+#### Test plan
+
+Deterministic where possible: recursive `Wait` at depths 1, 2 and 3 with a bounded timeout
+(the pre-fix behaviour is a hang, so every case must be time-boxed); a post-phase action that
+reads both barrier properties and one that throws, with the exception still reaching every
+participant; a writer blocked behind a reader followed by a new reader, asserting the reader
+waits; two concurrent `WaitForNextTick` callers asserting exactly one tick is consumed. Plus
+the zero/one/maximum, timeout-zero/infinite, signal-before-wait and wait-before-signal,
+cancellation-before/during/after, disposal-while-waiting and duplicate-release axes the batch
+instructions list.
+
+#### Sanitizer plan
+
+TSan is **required** for SR-AUD-204 (§11) and should cover all four; ASan/LSan on the
+`Barrier` restructure, because releasing and reacquiring a lock around a user callback is the
+classic place to lose an exception or a `unique_lock`.
+
+#### Rollback
+
+Four independent commits; reverting any one restores its type's previous `sizeof`.
+
+#### Exact approval request
+
+> **Approve #1957:** may `ReaderWriterLockSlim` gain waiting-writer state and `PeriodicTimer`
+> gain in-flight-consumer state — both growing `sizeof`, to be measured and quoted before
+> landing — so that a new reader no longer overtakes a waiting writer and a second concurrent
+> `WaitForNextTick` no longer consumes another consumer's tick; may `Monitor::Wait` release
+> and restore **all** recursive levels instead of one, so that a depth-2 wait stops
+> deadlocking; and may `Barrier`'s post-phase action run with `mutex_` released, so that a
+> callback reading `CurrentPhaseNumber` or `ParticipantCount` no longer self-deadlocks?
+
+---
+
+### 20.3 #1958 — the eight public-shape divergences (cause T-H)
+
+Findings: SR-AUD-189, 193, 194, 196, 209, 214, 215, 220.
+
+#### The first recommendation is to split this ticket
+
+The eight members are not one decision. Measured against the approval boundary, they fall
+into three groups, and bundling them means the two cheap ones wait for the expensive one:
+
+**Group A — compatible, no approval needed** (recommend splitting into their own ticket and
+landing them like #1951–#1955):
+
+| Finding | Change | Why compatible |
+|---|---|---|
+| SR-AUD-215 | `ExecutionContext::Run(nullptr, …)` throws `InvalidOperationException` | validation only; the only calls that change outcome are ones .NET rejects. **Note:** the port's own `Capture()` always returns `nullptr`, so the local test that passes `nullptr` must be rewritten, and this must be checked before landing |
+| SR-AUD-214 | `AsyncLocal<T>::setValueProperty` writes the new value **before** notifying | ordering only; no signature, layout or vtable change |
+| SR-AUD-189 | `SetMinThreads`/`SetMaxThreads` validate and store, returning `false` for invalid input | fixes a setter that returns `true` and stores nothing. Fold in the `int` → `intcs` correction recorded in §3.1 item 4 |
+
+**Group B — needs approval, moderate**:
+
+| Finding | Change | Gate |
+|---|---|---|
+| SR-AUD-196 | make `ThreadStartException`'s three constructors non-public | **public source break** — Batch8 tests construct all three, and so may consumers |
+| SR-AUD-193 | give externally created threads distinct `ManagedThreadId`s | changes an observable id for every non-`Thread` thread; needs a lazily assigned thread-local id and a decision on whether the main thread keeps id 1 |
+| SR-AUD-194 | make `Start(void*)` deliver its parameter | requires a second start-callback shape (`std::function<void(void*)>`), i.e. a new constructor and a stored variant — **layout** |
+| SR-AUD-220 | add `ThreadLocal<T>::Values` and honour `trackAllValues` | new public API plus cross-thread tracking storage — **layout**, and a real lifetime design (which thread owns the tracked values, and when are they freed) |
+
+**Group C — the expensive one**:
+
+| Finding | Change | Gate |
+|---|---|---|
+| SR-AUD-209 | `AutoResetEvent` and `ManualResetEvent` derive from `WaitHandle` | **both source- and ABI-breaking**: adds a vtable to two types that have none, changes their size and alignment, makes `WaitOne()` virtual with a `bool` return where the current `AutoResetEvent::WaitOne()` returns `void`, and forces `Dispose`/`Close` overrides. Every consumer must recompile |
+
+#### Why SR-AUD-209 is nonetheless worth doing
+
+It is the only finding in the namespace that makes a *documented* API unusable: `WaitHandle`'s
+four multi-wait entry points — repaired in #1952 — cannot accept the two event types at all,
+so `WaitAny`/`WaitAll` over events, the single most common .NET multi-wait pattern, does not
+compile. `EventWaitHandle` already derives from `WaitHandle` and shows the shape.
+
+#### Consequences of Group C, precisely
+
+`sizeof(AutoResetEvent)` and `sizeof(ManualResetEvent)` grow by at least one vptr (8 bytes on
+LP64) plus alignment; a vtable appears where none existed; `AutoResetEvent::WaitOne()`'s
+return type changes from `void` to `bool`, which is a **source break for any caller that
+relies on the void return in an expression context** and a mangled-symbol change either way.
+No mixed-version linking is safe.
+
+#### Test plan
+
+Group A: per-site validation and ordering cases as in #1951–#1954. Group B: id uniqueness
+across external threads, parameter identity and lifetime through `Start(void*)`,
+`Values` contents under `trackAllValues` true and false (the false case throwing, as .NET
+documents), and a negative consumer fixture proving `ThreadStartException`'s constructors are
+rejected. Group C: `WaitAll`/`WaitAny` over an `AutoResetEvent`, a `ManualResetEvent` and a
+mixed array with a `Semaphore`; auto-reset consuming exactly one signal through the multi-wait
+path; plus a compile-only fixture proving the composition that fails today now builds.
+
+#### Sanitizer plan
+
+ASan/LSan on the `ThreadLocal::Values` tracking storage, which is the only member introducing
+cross-thread ownership. TSan on `ManagedThreadId` assignment and on `Values` under concurrent
+access.
+
+#### Rollback
+
+Group A and Group B are per-finding revertible. Group C is not partially revertible: once the
+two events derive from `WaitHandle`, reverting is a second ABI break.
+
+#### Exact approval request
+
+> **Approve #1958, and please answer the three groups separately.**
+> **(A)** May the three compatible members — `ExecutionContext::Run(nullptr, …)` throwing
+> `InvalidOperationException`, `AsyncLocal<T>` notifying **after** it writes, and
+> `ThreadPool::SetMinThreads`/`SetMaxThreads` validating and storing instead of returning a
+> meaningless `true` — be split into a separate ticket and landed without further approval?
+> **(B)** May `ThreadStartException`'s three constructors stop being public (**a source break
+> for existing callers, including this repository's own Batch8 tests**), may `Thread` gain a
+> parameterized start callback so `Start(void*)` delivers its parameter (**new member,
+> layout**), may externally created threads receive distinct `ManagedThreadId`s, and may
+> `ThreadLocal<T>` gain a `Values` surface with real `trackAllValues` tracking (**new member,
+> layout, plus a cross-thread lifetime contract**)?
+> **(C)** May `AutoResetEvent` and `ManualResetEvent` derive from
+> `System::Threading::WaitHandle`, adding a vtable to two types that today have none, growing
+> both by at least one pointer, and changing `AutoResetEvent::WaitOne()`'s return type from
+> `void` to `bool` — a combined **source and ABI break requiring a full downstream rebuild**
+> — in exchange for making the `WaitAll`/`WaitAny` composition that .NET supports compile at
+> all?
+
+---
+
+### 20.4 #1959 — CCF-019's two threading members (cause T-D)
+
+Findings: SR-AUD-187, SR-AUD-221. This is the same cause as the `JsonNode` and `Xml.Linq`
+members whose layout approvals were **declined** (#1888/#1889/#1896/#1899), so the precedent
+matters: CCF-019 is not closed, and a declined answer here is an expected outcome, not a
+failure.
+
+#### Affected declarations and measured behaviour
+
+| Finding | Declaration | Measured |
+|---|---|---|
+| SR-AUD-187 | `static bool ThreadPool::UnsafeQueueUserWorkItem(IThreadPoolWorkItem* callBack, bool preferLocal)` | the raw pointer is captured by a **detached** lambda; the audit's ASan probe deletes the item after `Execute()` has entered and reports **heap-use-after-free** |
+| SR-AUD-221 | `static void SynchronizationContext::SetSynchronizationContext(SynchronizationContext*)` and `static SynchronizationContext* getCurrentProperty()` | a non-owning raw pointer in a `thread_local` slot with no reset hook; ASan reports **stack-use-after-scope** at the virtual call after the context leaves scope |
+
+Note that the **null halves of both are already closed**: `UnsafeQueueUserWorkItem` rejects a
+null `callBack` (§3.1 item 1) and `Send` rejects an empty callable (#1951). Only the
+**lifetime** halves are live.
+
+#### .NET behaviour
+
+Managed object lifetime is the mechanism in both cases: a queued work item is kept alive by
+the queue's reference, and `SynchronizationContext.Current` holds a real reference, which the
+audit's managed probe confirmed by dropping its local, forcing a GC and still observing a live
+weak reference. Neither contract is expressible with a borrowed raw pointer in C++.
+
+#### Candidate designs
+
+| Option | Shape | Break |
+|---|---|---|
+| **1. Owning handle** | take `std::shared_ptr<IThreadPoolWorkItem>` / `std::shared_ptr<SynchronizationContext>` | **public source break** — every call site changes; matches .NET's semantics most closely |
+| **2. Weak observation** | keep the raw parameter, store a `std::weak_ptr` obtained from an `enable_shared_from_this` base | requires the base class change, so still a source break for implementers, and silently skips work whose owner died |
+| **3. Scoped setter** | `SetSynchronizationContext` returns an RAII token that restores the previous value | source-compatible *addition*, but does not stop a caller from ignoring it |
+| **4. Document only** | state the borrowed-pointer contract in the header and add a negative consumer fixture | **no break**, closes nothing; this is what #1899 fell back to for `Xml.Linq` |
+
+Option 1 is the correct design and the one this section recommends; option 4 is the fallback
+if approval is declined, and is exactly the precedent set by the declined `Xml.Linq` ticket.
+
+#### Consequences of option 1
+
+Public source: **yes** — both signatures change, so every call site must be edited. Mangled
+symbols: **yes**. Object layout: none directly, though `SynchronizationContext` would gain an
+`enable_shared_from_this` base under option 2. Concurrency: unchanged. Migration: the same
+class of change as #1771 — a full downstream rebuild plus a mechanical call-site edit.
+
+#### Test plan
+
+The two ASan probes that reported today must report nothing: queue a heap work item, release
+the caller's reference, and prove `Execute()` still runs on a live object; set a
+scope-local context as `Current`, leave the scope, and prove `Current` is either null or
+still valid. Plus a negative consumer fixture per site proving the old borrowed-pointer
+spelling no longer compiles.
+
+#### Sanitizer plan
+
+ASan **required** (both findings were found by it), LSan required (an owning handle must not
+turn a use-after-free into a leak), TSan on `Current` across threads.
+
+#### Rollback
+
+Reverting either signature is a second source break; if this is approved it should be
+approved as final.
+
+#### Exact approval request
+
+> **Approve #1959:** may `ThreadPool::UnsafeQueueUserWorkItem` and
+> `SynchronizationContext::SetSynchronizationContext`/`Current` change their parameter and
+> return types from borrowed raw pointers to owning `std::shared_ptr` handles — **a public
+> source break requiring every call site to be edited and a full downstream rebuild, the same
+> class of change as #1771** — in exchange for removing the ASan-confirmed heap-use-after-free
+> and stack-use-after-scope; or, if that is declined as the `Xml.Linq` member of the same
+> CCF-019 family was, should the fallback be taken instead: document the borrowed-pointer
+> lifetime contract in both headers and pin it with a negative consumer fixture, leaving both
+> findings `confirmed` with a completed design?
+
+---
+
+### 20.5 Summary — the four questions in one place
+
+| Ticket | Question | Layout | Source break | Vtable | If declined |
+|---|---|---|---|---|---|
+| **#1956** | disposal becomes a real state; `ITimer::Change` returns `false` rather than throwing | **yes**, 3 types | no | no | findings stay `confirmed` with a completed design |
+| **#1957** | four state machines gain their missing transition | **yes**, 2 types (+1 to determine) | no | no | as above |
+| **#1958** | split into A (compatible), B (moderate), C (`WaitHandle` hierarchy) | **yes**, B and C | **yes**, B and C | **yes**, C | land A only, if A is approved |
+| **#1959** | borrowed raw pointers become owning handles | no | **yes** | no | documented contract + negative fixture (the #1899 precedent) |
+
+No implementation may begin on any of these until the corresponding question is answered.
