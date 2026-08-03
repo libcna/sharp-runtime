@@ -6700,3 +6700,65 @@ because setters that store nothing cannot break an invariant. TSan 0 data races 
 ASan + UBSan + LSan 0 reports. +16 tests (429 -> 445).
 
 **Index after #1971: 93 remediated / 271 confirmed / 364 total.**
+
+## The `System::Runtime` namespace review and its compatible half — #1972–#1978, #1982 (2026-08-03)
+
+`docs/SystemRuntimeNamespaceReviewPlan.md` (ticket **#1972**) converts the 21 open findings
+in `modules/runtime/` into **twelve** root causes and a bounded queue (#1973–#1986). It
+issues **no new `SR-AUD-*` identifier**; numbering stays frozen at **364**. Selected over
+`System::Uri` on **severity** — three high-severity findings against `uri`'s zero, all three
+in one `.cpp` body — not on count.
+
+**Seven findings remediated by the compatible half**, one cause each:
+
+| Ticket | Cause | Finding | What changed |
+|---|---|---|---|
+| #1973 | R-E | SR-AUD-155 | `Capture`/static `Throw` reject null; the two unnamed moved-from routes get their own guard |
+| #1974 | R-B | SR-AUD-172 | the self-pipe **write** end becomes `O_NONBLOCK`; the read end stays blocking by design |
+| #1975 | R-A | SR-AUD-169 | the complete prior `struct sigaction` is saved and restored, not replaced by `SIG_DFL` |
+| #1976 | R-F | SR-AUD-156 | both `GCSettings` enum domains are validated at the boundary |
+| #1977 | R-D | SR-AUD-170 | positive raw signal numbers are accepted and both spellings of a signal agree |
+| #1978 | R-J | SR-AUD-059 + SR-AUD-168 disclosure | two headers' documented contracts are made true; zero runtime change |
+| #1982 | R-I | SR-AUD-162 | the wider generic domain is classified as a deliberate, documented native adaptation |
+
+**Nine corrections to the audit record, every one measured**, with the historical text
+preserved and the correction appended to the owning per-file report. The four that changed
+what was built:
+
+- **SR-AUD-155 has four undefined-behaviour routes, not the two it names.** The implicitly
+  declared move constructor and move assignment leave a moved-from `ExceptionDispatchInfo`
+  null, so `Throw()` faults through ordinary well-formed C++ that passes no null anywhere.
+  A check placed only where the finding asks leaves both open. Third occurrence of this
+  shape after SR-AUD-199.
+- **SR-AUD-169's consequence is sharper than recorded.** `SIG_IGN` on `SIGHUP` became
+  `SIG_DFL`, and SIGHUP's default **terminates** — so a process that deliberately ignored it
+  is killed by the next one. The audit's SIGWINCH probe cannot show this because SIGWINCH's
+  default *is* ignore.
+- **SR-AUD-170 also rejects the positive spelling of *supported* signals**, so the enum was
+  accepted in exactly one of its two valid spellings. The repair had to make them agree, not
+  merely add a path.
+- **SR-AUD-162's premise does not survive translation.** `std::weak_ptr<int>` is well
+  defined; the managed `where T : class` exists because the **CLR** cannot weakly handle a
+  value type, which has no C++ counterpart. Narrowing would delete working functionality.
+
+A fifth correction is methodological and caught a **false negative before it became a
+conclusion**: the first version of this review's own probe forked *after* the parent had
+registered, so the children inherited `watcherRunning_ == true` with no watcher thread, and
+both SR-AUD-171 and SR-AUD-172 reported "did not reproduce". Reordered, both reproduce.
+Every forked case now prints a liveness marker.
+
+**Two post-audit defects recorded rather than absorbed, neither issuing an identifier:**
+**#1985** (the self-pipe descriptors survive `exec()`) and **#1986** (`dispatchSignal`
+invokes a copied handler after `Dispose()` has returned, so a handler capturing caller stack
+state touches a dead frame — the per-file report hints at this without issuing a finding).
+
+**Still open in this namespace:** ten public-shape divergences (#1980, approval-gated, split
+into five groups with G-1 recommended as a purely additive minimum), the job-control /
+chaining question (#1979, approval-gated — the port's behaviour is reproduced here but
+.NET's is not, which puts it on #1963's side of the managed-probe line rather than #1968's),
+the weak-table enumerator (#1981, approval-gated, object-layout change), and Windows OS
+architecture (#1983, deferred: no toolchain, no host, no reference tree).
+
+**Index after #1982: 100 remediated / 264 confirmed / 364 total** — of which **14** carry
+the `confirmed (design-complete)` qualifier, twelve of them added by this review's §10
+designs.
