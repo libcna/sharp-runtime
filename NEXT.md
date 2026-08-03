@@ -1,5 +1,9 @@
 *Last verified: 2026-08-03. Branch `feature/remediation-batch-system-uri-review`
-(cut from `d998bda`), **not pushed**. The batch performed the **`System::Uri` namespace
+(cut from `d998bda`). **The batch's nine commits, `2ba68fa` … `501d866`, are already on
+`origin/claude/remediation-batch-1804-namespace-b1yjh5`** — that remote branch has been
+receiving this session's pushes since the Tasks/Channels batch. Only the recovery pass's own
+handoff commit is local and unpushed; no push was requested of it. The batch performed the
+**`System::Uri` namespace
 review (#1987)**, wrote `docs/SystemUriNamespaceReviewPlan.md`, created tickets
 **#1988–#2005**, and implemented the **entire compatible half**: **#1988** (cause U-A, no
 SR-AUD identifier), **#1989** SR-AUD-143, **#1990** SR-AUD-144, **#1991** SR-AUD-145a,
@@ -25,8 +29,11 @@ restarted mid-batch and the batch ended without its own handoff section. Every n
 was re-measured on the current tree rather than carried over.*
 
 Branch `feature/remediation-batch-system-uri-review`, cut from the previous batch's tip
-`d998bda`. **Nine commits, all local and all unsigned** (§12). **No push, no merge, no
-rebase, no tag, no PR**, and no previous commit was amended or rewritten. `CNA` and
+`d998bda`. **Nine commits, `2ba68fa` … `501d866`, all unsigned** (§12). They are **already
+present on `origin/claude/remediation-batch-1804-namespace-b1yjh5`**, the remote branch this
+session has been pushing to since the Tasks/Channels batch; the recovery pass's own handoff
+commit is the only local-only one and was deliberately not pushed. **No merge, no rebase, no
+tag, no PR, no force-push**, and no previous commit was amended or rewritten. `CNA` and
 `mobile-eggbert` were not read, searched, built, tested or modified, and no filesystem search
 left this repository.
 
