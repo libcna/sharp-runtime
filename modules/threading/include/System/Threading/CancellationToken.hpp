@@ -75,6 +75,9 @@ namespace System::Threading {
          * If the token is already cancelled, @p callback runs synchronously before this method
          * returns. Otherwise it runs synchronously on whichever thread calls
          * CancellationTokenSource::Cancel().
+         *
+         * @throws System::ArgumentNullException if @p callback is an empty std::function,
+         * matching .NET's `callback ?? throw new ArgumentNullException(nameof(callback))`.
          */
         CancellationTokenRegistration Register(std::function<void()> callback);
 

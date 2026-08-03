@@ -54,3 +54,32 @@ raw current-context lifetime and empty-Send result remain reachable defects.
 
 SR-AUD-221 is ASan-confirmed and SR-AUD-222 is confirmed by direct
 C++/current-.NET comparison.  No production or test source was changed.
+
+
+---
+
+## Remediation record — ticket #1951 (2026-08-03), SR-AUD-222 → `remediated`
+
+Cause **T-B** of `docs/ThreadingNamespaceReviewPlan.md` — the second of the two members whose
+.NET answer is `NullReferenceException` rather than `ArgumentNullException`.
+
+`SynchronizationContext.Send` is declared in the reference as
+`public virtual void Send(SendOrPostCallback d, object? state) => d(state);` with no
+validation, so a null delegate faults with `NullReferenceException` **synchronously, on the
+calling thread** — precisely what this report measured. The base implementation here now
+throws `System::NullReferenceException` instead of testing the callable and returning, so the
+observable matches .NET rather than being replaced with a different diagnostic. An overriding
+context still supplies its own behaviour, exactly as in .NET.
+
+`Post` is deliberately unchanged: .NET's base `Post` hands the delegate to
+`ThreadPool.QueueUserWorkItem` and so returns normally to its caller for a null delegate too,
+which this report already records as matching. A doc-comment now states that, so the asymmetry
+is not read as an oversight.
+
+Evidence: `synccontext.send_empty` moved from `normal` to
+`NullReferenceException|Object reference not set to an instance of an object.`;
+`synccontext.send_control` and `synccontext.post_empty_control` unchanged. Tests:
+`ThreadingEmptyCallableTests.SynchronizationContext_*`.
+
+**SR-AUD-221 is untouched and remains `confirmed`** — the non-owning raw `Current` pointer is
+cause T-D (CCF-019) and belongs to design ticket #1959, which is approval-gated.

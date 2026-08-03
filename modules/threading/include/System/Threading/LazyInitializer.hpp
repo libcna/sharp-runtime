@@ -6,6 +6,7 @@
 #include <functional>
 #include <mutex>
 #include "System/InvalidOperationException.hpp"
+#include "System/NullReferenceException.hpp"
 
 namespace System::Threading {
 
@@ -46,10 +47,28 @@ namespace System::Threading {
         /**
          * @brief Initializes target using valueFactory if it is null; returns the initialized value.
          * @throws System::InvalidOperationException if valueFactory returns nullptr.
+         * @throws System::NullReferenceException if @p valueFactory is an empty
+         * std::function *and* @p target is null.
+         *
+         * This entry is the one member of the CCF-011 empty-callable family whose .NET
+         * answer is **not** `ArgumentNullException`. `LazyInitializer.EnsureInitialized`
+         * performs no null check on `valueFactory` at all: it is
+         * `Volatile.Read(ref target) ?? EnsureInitializedCore(ref target, valueFactory)`,
+         * and the core simply calls `valueFactory()`, so a null delegate raises
+         * `NullReferenceException` -- and only on the path that would have invoked it, so
+         * an already-initialized target suppresses the fault entirely. Both properties are
+         * reproduced here deliberately: the exception type and the data-dependence are
+         * .NET's own observable, verified against the managed probe recorded for
+         * SR-AUD-217. What was wrong before ticket #1951 was only the *hierarchy*: the port
+         * raised `std::bad_function_call`, which does not derive from System::Exception, so
+         * ported `catch (const Exception&)` code could not see it. See
+         * docs/EmptyCallableBoundaryPlan.md and docs/ThreadingNamespaceReviewPlan.md
+         * cause T-B.
          */
         template<typename T>
         static T& EnsureInitialized(T*& target, std::function<T*()> valueFactory) {
             if (!target) {
+                if (!valueFactory) throw System::NullReferenceException();
                 T* candidate = valueFactory();
                 if (!candidate) throw System::InvalidOperationException("ValueFactory returned null.");
                 std::atomic_ref<T*> ref(target);

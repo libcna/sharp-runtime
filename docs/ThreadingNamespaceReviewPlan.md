@@ -561,9 +561,11 @@ a fresh context can pick up.
 ## 15. Status
 
 Written 2026-08-03. **Sections 1–14 changed no production source.** Tickets
-**#1947**, **#1948** and **#1949** were implemented in the same batch and their
-results are recorded in §16. Tickets **#1951–#1955** are `todo` and unstarted;
-**#1956–#1959** are `blocked` on the four approvals in §9.
+**#1947**, **#1948** and **#1949** were implemented in the batch that wrote this
+document and their results are recorded in §16. A second batch on branch
+`feature/remediation-batch-threading-1951-1955` implemented **#1951** onwards;
+its results and corrections are recorded in §17. **#1956–#1959** remain `blocked`
+on the four approvals in §9.
 
 ---
 
@@ -632,3 +634,102 @@ through `Thread` sees its own `ManagedThreadId` from inside its own body. **SR-A
 remains `confirmed`**: that externally created threads all collapse to id 1 is a
 production defect owned by #1958, and none of the new assertions asserts it either
 way.
+
+
+---
+
+## 17. What #1951 measured, and three corrections to §3 and §5 (2026-08-03)
+
+Ticket **#1951** implemented cause **T-B** — the seven sites where an empty
+`std::function` crosses a public `System::Threading` boundary — by applying the
+already-approved CCF-011 policy from `docs/EmptyCallableBoundaryPlan.md`. All seven
+reproduced from the shipped headers before the change and all seven are closed after it;
+the raw evidence is `build-probe/1951_probe1_threading_empty_callables.cpp` with logs
+`1951_probe1_before.log`, `1951_probe1_after.log` and `1951_probe1_asan.log`.
+
+### 17.1 Two of the seven sites are **not** `ArgumentNullException` sites
+
+§5's T-B paragraph says "Threading's seven sites are all the *argument* shape under the
+CCF-011 policy, so all seven become `ArgumentNullException` at entry", and #1951's
+acceptance criteria repeat it. **That is wrong for two of them, and following it would have
+left both findings' measured divergence unclosed.**
+
+CCF-011's policy is *"choose the .NET answer for that shape of API"*; the
+`ArgumentNullException` spelling was selected in `modules/core` because .NET's own APIs there
+run `ArgumentNullException.ThrowIfNull`. Two Threading entries have no such check at all:
+
+| Site | .NET declaration | .NET observable for a null delegate |
+|---|---|---|
+| `LazyInitializer::EnsureInitialized(T*&, factory)` | `Volatile.Read(ref target) ?? EnsureInitializedCore(ref target, valueFactory)`, whose core calls `valueFactory()` | `NullReferenceException`, **suppressed entirely** when `target` is already initialized |
+| `SynchronizationContext::Send` | `public virtual void Send(SendOrPostCallback d, object? state) => d(state);` | `NullReferenceException`, synchronously on the calling thread |
+
+Both audit findings define their divergence *by the managed observable* — SR-AUD-217 quotes
+`lazy_emptyFactory=exception:System.NullReferenceException`, SR-AUD-222 quotes
+`System.NullReferenceException` — so throwing `ArgumentNullException` would have swapped one
+non-matching result for another. Both now throw `System::NullReferenceException` instead,
+which is .NET's answer, is inside the `System::Exception` hierarchy, and closes the defect
+CCF-011 actually names: `std::bad_function_call` (or, for `Send`, a silent return) is not
+something ported `catch (const System::Exception&)` code can see.
+
+For `LazyInitializer` this also means the **data-dependence is reproduced, not removed**: the
+check sits on the path that would have invoked the factory, so an already-initialized target
+still returns its value with an empty factory, exactly as .NET does. Validating at entry
+would have made a call .NET accepts start throwing.
+
+The other five sites — `Timer` (`callback`), `Thread` (`start`),
+`CancellationToken::Register` (`callback`), `SpinWait::SpinUntil` (`condition`) and
+`ThreadLocal`'s two factory constructors (`valueFactory`) — do carry .NET
+`ArgumentNullException.ThrowIfNull` calls with those exact parameter names, and are
+implemented that way.
+
+### 17.2 SR-AUD-219's stated consequence is wrong: the failure was silent, not `bad_function_call`
+
+The finding says an accepted empty `ThreadLocal` factory "fails later with
+`bad_function_call`" at first value access. Measured (`threadlocal.empty_factory_value=normal`
+before the change): it did not fail at all. `getValueProperty()` wrote
+`std::make_unique<T>(factory_ ? factory_() : T{})`, so an empty factory silently produced a
+**default-constructed value on every thread**. The observable was a silent wrong value, which
+is harder to notice than the deferred native exception the finding describes, and no
+`bad_function_call` was reachable from that constructor at all.
+
+The finding's direction is confirmed — .NET rejects the null factory at construction and this
+port did not — and the ternary is deliberately retained, because the default and `bool`-only
+constructors legitimately leave `factory_` empty and must keep defaulting.
+
+### 17.3 SR-AUD-213's two halves now report in the wrong order, temporarily
+
+#1951 owns SR-AUD-213's *callable* half and #1954 owns its *-2 timeout* half. .NET validates
+`millisecondsTimeout` **first**. With only #1951 landed,
+`SpinUntil({}, -2)` reports the condition error where .NET reports
+`ArgumentOutOfRangeException`. #1954 must insert its check **above** the condition check
+rather than beside it. Recorded here so the ordering is a requirement on #1954 rather than a
+discovery.
+
+### 17.4 Nothing in T-B touched layout, ABI or a signature
+
+Seven inline bodies gained an entry check and one `.cpp` body gained one statement. No data
+member was added, removed, reordered or retyped in any of the seven types; no signature,
+template parameter, default argument, virtual, `noexcept` specification or overload set
+changed; `SynchronizationContext::Send` stays `virtual` with the same signature. The module
+graph stays **41 / 91** — `System::NullReferenceException` and `System::ArgumentNullException`
+both live in `Core.Base`, which `Threading` already depends on publicly.
+
+Three observable changes are intended and are what the findings asked for: an empty callable
+that used to be accepted is now rejected at the boundary; `Thread` no longer terminates the
+process; and `SynchronizationContext::Send` no longer silently does nothing. There is no call
+site that worked before and stops working — every changed outcome was already a defect,
+already uncatchable, or already a no-op that could never do the work it was asked for.
+
+### 17.5 Sanitizers
+
+Cause T-B needs none under §11, but the CCF-011 family plan flags **LSan** as material for
+"a constructor that now throws must not leak". Run anyway: the probe compiled with
+`-fsanitize=address,undefined` and `ASAN_OPTIONS=detect_leaks=1` produced **zero** reports
+over all 22 cases. Instrumentation was proved rather than assumed — `__asan_report_*` symbols
+are present in the sanitized binary (32 sanitizer symbols) and absent from the plain one.
+
+### 17.6 Test count
+
+`modules/threading/tests/System/Threading/ThreadingBoundaryTests.cpp` is a new translation
+unit holding the boundary family's permanent regressions. #1951 contributed **24** cases;
+`SharpRuntimeTests_Threading` went from 369 to 393, all passing.

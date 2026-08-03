@@ -8,6 +8,7 @@
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include "System/ArgumentNullException.hpp"
 #include "System/IDisposable.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/ObjectDisposedException.hpp"
@@ -65,17 +66,44 @@ namespace System::Threading {
             if (disposed_) throw System::ObjectDisposedException("ThreadLocal`1");
         }
 
+        // Rejects an *empty* std::function factory at construction, as .NET's
+        // `ThreadLocal(Func<T> valueFactory)` and `ThreadLocal(Func<T>, bool)` both do with
+        // `ArgumentNullException.ThrowIfNull(valueFactory)`. Called from the constructor
+        // *body*, after the member initializer has moved the argument in, because a check
+        // written in the body against the parameter would inspect a moved-from function and
+        // report every factory as empty. This is the same shape as Lazy<T>::requireFactory
+        // (modules/core/include/System/Lazy.hpp), which #1867 established for CCF-011.
+        //
+        // Measured correction to SR-AUD-219 (ticket #1951, probe
+        // build-probe/1951_probe1_threading_empty_callables.cpp): the finding states that a
+        // stored empty factory "fails later with bad_function_call" at first value access.
+        // It did not. getValueProperty() wrote `factory_ ? factory_() : T{}`, so an empty
+        // factory silently produced a default-constructed value on every thread and no
+        // exception was ever raised -- a *silent wrong value*, not a deferred crash. The
+        // ternary is left in place because the two non-factory constructors legitimately
+        // leave factory_ empty and must keep defaulting; this check is what stops a factory
+        // constructor from reaching it.
+        void requireFactory() const {
+            if (!factory_) throw System::ArgumentNullException("valueFactory");
+        }
+
     public:
         /** Constructs a ThreadLocal with default-constructed values. */
         ThreadLocal() = default;
         /** Constructs a ThreadLocal; the trackAllValues flag is accepted but not used. */
         explicit ThreadLocal(bool trackAllValues) : trackAllValues_(trackAllValues) {}
-        /** Constructs a ThreadLocal that calls valueFactory to create the initial value. */
+        /**
+         * @brief Constructs a ThreadLocal that calls valueFactory to create the initial value.
+         * @throws System::ArgumentNullException if @p valueFactory is an empty std::function.
+         */
         explicit ThreadLocal(std::function<T()> valueFactory)
-            : factory_(std::move(valueFactory)) {}
-        /** Constructs a ThreadLocal with a value factory and a tracking flag. */
+            : factory_(std::move(valueFactory)) { requireFactory(); }
+        /**
+         * @brief Constructs a ThreadLocal with a value factory and a tracking flag.
+         * @throws System::ArgumentNullException if @p valueFactory is an empty std::function.
+         */
         ThreadLocal(std::function<T()> valueFactory, bool trackAllValues)
-            : factory_(std::move(valueFactory)), trackAllValues_(trackAllValues) {}
+            : factory_(std::move(valueFactory)), trackAllValues_(trackAllValues) { requireFactory(); }
 
         /** Releases this instance's slot in the current thread's storage on destruction. */
         ~ThreadLocal() override { storageMap().erase(id_); }

@@ -64,3 +64,44 @@ SR-AUD-218 is TSan-confirmed; SR-AUD-219 is confirmed by direct
 C++/current-.NET comparison; SR-AUD-220 follows from the public source/API
 surface and the installed current-.NET contract.  No production or test source
 was changed.
+
+
+---
+
+## Remediation record — ticket #1951 (2026-08-03), SR-AUD-219 **factory half only**
+
+SR-AUD-219 is **split by cause** and stays `confirmed` until both halves land.
+
+**Factory half — done.** Cause **T-B** (CCF-011 in `modules/threading`). Both factory
+constructors now reject an empty `std::function` with
+`System::ArgumentNullException("valueFactory")`, matching .NET's
+`ArgumentNullException.ThrowIfNull(valueFactory)` in `ThreadLocal(Func<T>)` and
+`ThreadLocal(Func<T>, bool)`. The check is a `requireFactory()` call in the constructor
+*body*, the same shape `Lazy<T>` uses (`modules/core/include/System/Lazy.hpp`, ticket #1867):
+a check written against the *parameter* would inspect a moved-from `std::function` and report
+every factory as empty.
+
+**Measured correction to this finding's stated consequence.** The report says the stored empty
+factory "fails later with `bad_function_call`" at first value access. **It did not.**
+`getValueProperty()` wrote `std::make_unique<T>(factory_ ? factory_() : T{})`, so an empty
+factory silently produced a **default-constructed value** on every thread and raised nothing
+at all — probe row `threadlocal.empty_factory_value=normal` before the change. The divergence
+from .NET is therefore *worse* than recorded in one respect (a silent wrong value rather than
+a loud native exception) and *narrower* in another (no `bad_function_call` was ever reachable
+from this constructor). The finding's direction — .NET rejects at construction, this port did
+not — is confirmed. The ternary is deliberately left in place: the default and
+`bool`-only constructors legitimately leave `factory_` empty and must keep defaulting, which
+`ThreadLocal_NonFactoryConstructors_StillDefault` pins.
+
+**IsValueCreated-after-Dispose half — still open, ticket #1956** (cause T-G, approval-gated):
+`getIsValueCreatedProperty()` still bypasses `ThrowIfDisposed()` and returns `false` after
+`Dispose`, where .NET throws `ObjectDisposedException`.
+
+Evidence: `threadlocal.empty_factory_ctor` and `threadlocal.empty_factory2_ctor` moved from
+`normal` to `ArgumentNullException|Value cannot be null. (Parameter 'valueFactory')`; the two
+non-factory controls and the real-factory control are unchanged. Tests:
+`ThreadingEmptyCallableTests.ThreadLocal_*`.
+
+**SR-AUD-218 and SR-AUD-220 are untouched and remain `confirmed`** — the ordinary `disposed_`
+race is cause T-A (ticket #1955) and the inert `trackAllValues`/absent `Values` surface is
+cause T-H (ticket #1958).

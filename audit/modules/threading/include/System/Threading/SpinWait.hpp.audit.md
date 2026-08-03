@@ -35,3 +35,30 @@ the reviewed tests. Public validation is incomplete at the method boundary.
 
 SR-AUD-213 is confirmed by direct current-.NET comparison. No production or
 test source was changed.
+
+
+---
+
+## Remediation record — ticket #1951 (2026-08-03), SR-AUD-213 **callable half only**
+
+SR-AUD-213 is **split by cause** and stays `confirmed` until both halves land.
+
+**Callable half — done.** Cause **T-B** (CCF-011 in `modules/threading`). Both `SpinUntil`
+overloads now throw `System::ArgumentNullException("condition")` before the first spin. The
+infinite-timeout case is the one that matters most: with `millisecondsTimeout == -1` there is
+no deadline to end the loop, so a deferred check meant an uninvocable condition spun forever
+rather than failing. `.NET`'s parameterless overload delegates to the timed one with
+`Timeout.Infinite`, whose `ArgumentNullException.ThrowIfNull(condition)` runs before any
+spinning; this port's two overloads own separate loops, so each carries the check.
+
+**Timeout half — still open, ticket #1954** (cause T-C): `SpinUntil(cond, -2)` still returns
+`false` where .NET throws `ArgumentOutOfRangeException`. When #1954 lands, its check must go
+**above** the condition check so the two run in .NET's order
+(`ThrowIfLessThan(millisecondsTimeout, -1)` then `ThrowIfNull(condition)`). Until then the
+port reports the condition error first for a call that is invalid in both ways — recorded
+here rather than left to be discovered.
+
+Evidence: `spinwait.spinuntil_empty` and `spinwait.spinuntil_timed_empty` both moved from
+`bad_function_call` to `ArgumentNullException|Value cannot be null. (Parameter 'condition')`;
+the two controls are unchanged. Tests: `ThreadingEmptyCallableTests.SpinWait_*`, including the
+`-1` case that would hang a broken implementation.

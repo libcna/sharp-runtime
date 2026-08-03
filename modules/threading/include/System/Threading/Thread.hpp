@@ -10,6 +10,7 @@
 #include <string>
 #include <thread>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Threading/ApartmentState.hpp"
 #include "System/Threading/ThreadPriority.hpp"
@@ -72,10 +73,23 @@ namespace System::Threading {
         /**
          * @brief Constructs a Thread with the given parameterless start function.
          * @param start Function to execute on the new thread.
+         * @throws System::ArgumentNullException if @p start is an empty std::function.
+         *
+         * .NET's `Thread(ThreadStart start)` opens with
+         * `ArgumentNullException.ThrowIfNull(start)`, and this port must, because the
+         * consequence of deferring it is not a catchable exception: `Start()` used to
+         * hand the empty function to a new OS thread, whose call to it raised
+         * `std::bad_function_call` with no handler on that thread, so `std::terminate`
+         * killed the whole process (exit 134) at a point where no caller could observe,
+         * let alone catch, the mistake (SR-AUD-192). Ticket #1951 / CCF-011; see
+         * docs/EmptyCallableBoundaryPlan.md and docs/ThreadingNamespaceReviewPlan.md
+         * cause T-B. Rejecting at construction also means no managed thread id is
+         * consumed and no OS thread exists for a Thread that can never run.
          */
         explicit Thread(std::function<void()> start)
             : fn_(std::move(start))
         {
+            if (!fn_) throw System::ArgumentNullException("start");
             state_->managedThreadId = nextManagedId_.fetch_add(1);
         }
 

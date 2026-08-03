@@ -67,3 +67,32 @@ invalid callback, external identity, or ignored parameter contracts.
 SR-AUD-192 through SR-AUD-194 are confirmed by direct source and native/
 managed boundary evidence.  Shared RunState fixes the previously documented
 raw-owner lifetime hazard.  No source or test was changed.
+
+
+---
+
+## Remediation record — ticket #1951 (2026-08-03), SR-AUD-192 → `remediated`
+
+Cause **T-B** of `docs/ThreadingNamespaceReviewPlan.md` (CCF-011 in `modules/threading`; the
+policy is `docs/EmptyCallableBoundaryPlan.md`).
+
+`Thread`'s constructor now throws `System::ArgumentNullException("start")` for an empty start
+function, matching `Thread(ThreadStart start)`'s `ArgumentNullException.ThrowIfNull(start)`.
+This was the highest-severity member of the cause because deferring the failure did not
+produce a catchable exception: `Start()` handed the empty function to a new OS thread, whose
+call to it raised `std::bad_function_call` with no handler on that thread, so `std::terminate`
+killed the entire process at a point no caller could observe.
+
+The check precedes `nextManagedId_.fetch_add(1)`, so a rejected construction consumes no
+managed thread id — pinned by
+`ThreadingEmptyCallableTests.Thread_EmptyStart_ConsumesNoManagedThreadId`, which asserts that
+two successful constructions separated by three rejected ones stay consecutive.
+
+Evidence: `build-probe/1951_probe1_threading_empty_callables.cpp` runs this case in a forked
+child precisely because its pre-fix outcome kills the process. Before:
+`thread.empty_start=child-signal:6` (SIGABRT). After:
+`thread.empty_start=ArgumentNullException|Value cannot be null. (Parameter 'start')` and child
+exit 0. ASan/UBSan/LSan clean.
+
+**SR-AUD-193 and SR-AUD-194 are untouched and remain `confirmed`** — both are cause T-H
+(public shape) and belong to design ticket #1958.

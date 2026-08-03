@@ -11,6 +11,7 @@
 #include <mutex>
 #include <thread>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
 #  include "System/PlatformNotSupportedException.hpp"
@@ -70,13 +71,31 @@ namespace System::Threading {
     public:
         /**
          * @brief Initializes the timer with the given callback, state, initial delay, and repeat period (in milliseconds).
+         *
          * @throws System::ArgumentOutOfRangeException if @p dueTime or @p period is less than -1.
+         * @throws System::ArgumentNullException if @p callback is an empty std::function.
+         *
+         * The three checks run in .NET's own order. `Timer.cs`'s public constructor
+         * delegates to the private one, which runs
+         * `ArgumentOutOfRangeException.ThrowIfLessThan(dueTime, -1)` and then the same
+         * check for `period`, and only afterwards calls `TimerSetup`, which opens with
+         * `ArgumentNullException.ThrowIfNull(callback)`. An out-of-range due time
+         * therefore wins over a null callback in .NET, and does here too.
+         *
+         * An empty callback used to be moved into the shared state and merely skipped by
+         * run(), so the caller received a live timer object, and a background thread, that
+         * could never perform the work it was created for -- a silent no-op instead of an
+         * entry-boundary diagnostic (SR-AUD-190). Ticket #1951 / CCF-011; see
+         * docs/EmptyCallableBoundaryPlan.md and docs/ThreadingNamespaceReviewPlan.md
+         * cause T-B. The check precedes every side effect: no thread is created and no
+         * schedule is recorded when it fires.
          */
         Timer(std::function<void(void*)> callback, void* state, intcs dueTime, intcs period)
             : state_(std::make_shared<State>())
         {
             System::ArgumentOutOfRangeException::ThrowIfLessThan(dueTime, static_cast<intcs>(-1), "dueTime");
             System::ArgumentOutOfRangeException::ThrowIfLessThan(period, static_cast<intcs>(-1), "period");
+            if (!callback) throw System::ArgumentNullException("callback");
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)callback; (void)state; (void)dueTime; (void)period;
             throw System::PlatformNotSupportedException("Timer requires pthreads (not available in Emscripten single-threaded build)");

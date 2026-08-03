@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <functional>
+#include "System/NullReferenceException.hpp"
 #include "System/Threading/ThreadPool.hpp"
 
 namespace System::Threading {
@@ -30,14 +31,40 @@ namespace System::Threading {
         /** Destroys the SynchronizationContext. */
         virtual ~SynchronizationContext() = default;
 
-        /** Dispatches an asynchronous message to the context (queued to the thread pool by default). */
+        /**
+         * @brief Dispatches an asynchronous message to the context (queued to the thread
+         * pool by default).
+         *
+         * An empty @p d is dropped rather than queued. .NET's base `Post` hands the
+         * delegate to `ThreadPool.QueueUserWorkItem` and so *returns normally* to the
+         * caller for a null delegate too; the difference is confined to a background
+         * thread that has no caller to report to. This port matches the observable the
+         * caller has -- deliberately, and it is not what SR-AUD-222 is about (that finding
+         * names `Send` only, and explicitly records `Post(null, null)` as already matching).
+         */
         virtual void Post(SendOrPostCallback d, void* state) {
             if (d) ThreadPool::QueueUserWorkItem(d, state);
         }
 
-        /** Dispatches a synchronous message to the context (runs immediately on the calling thread). */
+        /**
+         * @brief Dispatches a synchronous message to the context (runs immediately on the
+         * calling thread).
+         *
+         * @throws System::NullReferenceException if @p d is an empty std::function.
+         *
+         * Like LazyInitializer::EnsureInitialized, this is a CCF-011 site whose .NET answer
+         * is not `ArgumentNullException`: `SynchronizationContext.Send` is declared as
+         * `public virtual void Send(SendOrPostCallback d, object? state) => d(state);`
+         * with no validation, so a null delegate faults with `NullReferenceException` on
+         * the calling thread. This port used to test the callable and *return normally*,
+         * turning a managed fault into a silent no-op that no caller could detect
+         * (SR-AUD-222). Ticket #1951 / CCF-011; the exception type is .NET's own, not a
+         * substitution. An overriding context that wants different behaviour still gets it
+         * -- this is the base implementation only, exactly as in .NET.
+         */
         virtual void Send(SendOrPostCallback d, void* state) {
-            if (d) d(state);
+            if (!d) throw System::NullReferenceException();
+            d(state);
         }
 
         /** Returns the synchronization context set for the current thread via SetSynchronizationContext(), or nullptr if none. */

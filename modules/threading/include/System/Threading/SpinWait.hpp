@@ -5,6 +5,7 @@
 #include <functional>
 #include <thread>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentNullException.hpp"
 
 namespace System::Threading {
 
@@ -32,8 +33,21 @@ namespace System::Threading {
         /** Resets the spin counter to zero. */
         void Reset() noexcept { count_ = 0; }
 
-        /** Spins in a loop until condition returns true. */
+        /**
+         * @brief Spins in a loop until condition returns true.
+         *
+         * @throws System::ArgumentNullException if @p condition is an empty std::function.
+         *
+         * .NET's parameterless-timeout overload delegates to the timed one with
+         * `Timeout.Infinite`, which runs `ArgumentNullException.ThrowIfNull(condition)`
+         * before the first spin. This port's two overloads own separate loops, so each
+         * carries the check. An empty condition used to reach
+         * `std::bad_function_call` on the first iteration -- an exception outside the
+         * System::Exception hierarchy that ported `catch (const Exception&)` code cannot
+         * see (SR-AUD-213, callable half). Ticket #1951 / CCF-011.
+         */
         static void SpinUntil(std::function<bool()> condition) {
+            if (!condition) throw System::ArgumentNullException("condition");
             SpinWait sw;
             while (!condition()) sw.SpinOnce();
         }
@@ -45,8 +59,17 @@ namespace System::Threading {
          * SpinUntil(condition) overload delegates to this one with Timeout.Infinite). A
          * deadline computed as now()+milliseconds(-1) would already be in the past, so -1
          * must be special-cased to skip the deadline check entirely.
+         *
+         * @throws System::ArgumentNullException if @p condition is an empty std::function.
+         *
+         * .NET validates @p millisecondsTimeout *before* @p condition
+         * (`ArgumentOutOfRangeException.ThrowIfLessThan(millisecondsTimeout, -1)` then
+         * `ArgumentNullException.ThrowIfNull(condition)`). The timeout half of
+         * SR-AUD-213 is ticket #1954; when it lands, its check goes above this one so the
+         * two run in .NET's order. Ticket #1951 / CCF-011 owns the callable half.
          */
         static bool SpinUntil(std::function<bool()> condition, SharpRuntime::intcs millisecondsTimeout) {
+            if (!condition) throw System::ArgumentNullException("condition");
             if (millisecondsTimeout == -1) {
                 SpinWait sw;
                 while (!condition()) sw.SpinOnce();
