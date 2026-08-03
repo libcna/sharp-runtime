@@ -393,3 +393,105 @@ TEST(PosixSignalTests, Dispose_RestoresSaFlagsAndSaMaskNotJustTheHandler) {
     EXPECT_NE(restored.sa_flags & SA_RESTART, 0) << "SA_RESTART was dropped on restore";
     EXPECT_EQ(sigismember(&restored.sa_mask, SIGUSR2), 1) << "sa_mask was dropped on restore";
 }
+
+// ---------------------------------------------------------------------------------------
+// Ticket #1977 / SR-AUD-170 (cause R-D of docs/SystemRuntimeNamespaceReviewPlan.md).
+//
+// toNativeSignalNumber() indexed a ten-entry table by -value-1, so everything outside
+// [-10,-1] became 0 and Create() threw PlatformNotSupportedException. Measured before the
+// repair (build-probe/1972_probe2_before.log), the rejection was wider than the finding
+// states: SIGUSR1(10), SIGUSR2(12), SIGPIPE(13), SIGALRM(14) AND SIGWINCH(28) -- the
+// positive spelling of a signal the port already supports by name. The change is strictly
+// WIDENING; every rejection that was correct is retained and asserted below.
+// ---------------------------------------------------------------------------------------
+
+TEST(PosixSignalTests, Create_RawPositiveSignalNumber_IsAcceptedAndDelivers) {
+    std::atomic<int> fired{0};
+    auto reg = PosixSignalRegistration::Create(static_cast<PosixSignal>(SIGUSR1),
+                                                [&fired](PosixSignalContext& ctx) {
+                                                    ctx.setCancelProperty(true);
+                                                    fired++;
+                                                });
+    kill(getpid(), SIGUSR1);
+    EXPECT_TRUE(waitFor(fired, 1, 2000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+}
+
+TEST(PosixSignalTests, Create_RawSpellingOfANamedSignal_SharesTheNamedSpellingsDispatch) {
+    // The part SR-AUD-170 does not name: the enum was accepted in exactly one of its two
+    // valid spellings. Both must now reach the same bucket, so a delivery caused under one
+    // spelling is seen by a handler registered under the other.
+    std::atomic<int> viaNamed{0};
+    std::atomic<int> viaRaw{0};
+
+    auto named = PosixSignalRegistration::Create(PosixSignal::Sigwinch,
+                                                  [&viaNamed](PosixSignalContext& ctx) {
+                                                      ctx.setCancelProperty(true);
+                                                      viaNamed++;
+                                                  });
+    auto raw = PosixSignalRegistration::Create(static_cast<PosixSignal>(SIGWINCH),
+                                                [&viaRaw](PosixSignalContext& ctx) {
+                                                    ctx.setCancelProperty(true);
+                                                    viaRaw++;
+                                                });
+
+    kill(getpid(), SIGWINCH);
+    EXPECT_TRUE(waitFor(viaNamed, 1, 2000));
+    EXPECT_TRUE(waitFor(viaRaw, 1, 2000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+}
+
+TEST(PosixSignalTests, Create_RawSigkillAndRawSigstop_AreStillRejected) {
+    // Reachable by number for the first time. Both must be reported the same way as the
+    // named PosixSignal::Sigkill rather than left to sigaction()'s EINVAL.
+    EXPECT_THROW(PosixSignalRegistration::Create(static_cast<PosixSignal>(SIGKILL),
+                                                  [](PosixSignalContext&) {}),
+                 System::PlatformNotSupportedException);
+    EXPECT_THROW(PosixSignalRegistration::Create(static_cast<PosixSignal>(SIGSTOP),
+                                                  [](PosixSignalContext&) {}),
+                 System::PlatformNotSupportedException);
+    // ... and the named spelling is unchanged.
+    EXPECT_THROW(PosixSignalRegistration::Create(PosixSignal::Sigkill, [](PosixSignalContext&) {}),
+                 System::PlatformNotSupportedException);
+}
+
+TEST(PosixSignalTests, Create_OutOfRangeValues_AreStillRejected) {
+    // Zero, a value past what the pending-flag table can track, and an unnamed negative.
+    // Accepting a number this dispatcher cannot record would be worse than rejecting it: the
+    // registration would appear to succeed and then never deliver.
+    EXPECT_THROW(PosixSignalRegistration::Create(static_cast<PosixSignal>(0),
+                                                  [](PosixSignalContext&) {}),
+                 System::PlatformNotSupportedException);
+    EXPECT_THROW(PosixSignalRegistration::Create(static_cast<PosixSignal>(100000),
+                                                  [](PosixSignalContext&) {}),
+                 System::PlatformNotSupportedException);
+    EXPECT_THROW(PosixSignalRegistration::Create(static_cast<PosixSignal>(-99),
+                                                  [](PosixSignalContext&) {}),
+                 System::PlatformNotSupportedException);
+}
+
+TEST(PosixSignalTests, Create_RawSignal_RestoresTheDispositionOnDispose) {
+    // #1975's contract must hold for the newly reachable spelling too, not only for named
+    // members: the raw path installs through exactly the same registry.
+    struct sigaction saved{};
+    ASSERT_EQ(sigaction(SIGUSR2, nullptr, &saved), 0);
+
+    struct sigaction ign{};
+    ign.sa_handler = SIG_IGN;
+    sigemptyset(&ign.sa_mask);
+    ign.sa_flags = 0;
+    ASSERT_EQ(sigaction(SIGUSR2, &ign, nullptr), 0);
+
+    {
+        auto reg = PosixSignalRegistration::Create(
+            static_cast<PosixSignal>(SIGUSR2),
+            [](PosixSignalContext& ctx) { ctx.setCancelProperty(true); });
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    struct sigaction after{};
+    ASSERT_EQ(sigaction(SIGUSR2, nullptr, &after), 0);
+    EXPECT_EQ(after.sa_handler, SIG_IGN);
+
+    sigaction(SIGUSR2, &saved, nullptr);
+}

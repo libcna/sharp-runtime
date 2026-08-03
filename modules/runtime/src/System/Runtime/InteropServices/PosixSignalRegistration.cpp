@@ -26,22 +26,52 @@
 namespace System::Runtime::InteropServices {
 namespace {
 
-    // Maps the portable PosixSignal enum to this platform's actual SIGxxx macro value, indexed by
-    // -static_cast<int>(signal) - 1 (PosixSignal's values run Sighup=-1 .. Sigtstp=-10,
-    // contiguous, matching this table's index 0..9). Sigkill(-11) is intentionally excluded --
-    // it can never be caught (sigaction(SIGKILL, ...) always fails with EINVAL), so Create()
-    // rejects it before reaching this function. Built as a table lookup rather than a switch over
-    // the enum's named members so this function reads naturally with the real SIGxxx macros this
-    // translation unit needs anyway (see PosixSignal.hpp's doc-comment for why the enum members
-    // themselves are spelled Sighup/Sigint/etc. rather than matching those macro names exactly).
+    // One past the highest native signal number this dispatcher can record a pending flag for.
+    // 65 covers Linux/glibc's whole range including SIGRTMAX (64); a raw number at or above it is
+    // refused by toNativeSignalNumber() rather than accepted and then never delivered.
+    constexpr int kMaxSignalNumber = 65;
+
+    // Maps a PosixSignal to this platform's actual signal number, or 0 if it cannot be handled.
+    //
+    // PosixSignal has TWO valid spellings and both must map to the same number:
+    //
+    //   * a NEGATIVE named member -- Sighup=-1 .. Sigtstp=-10, contiguous, matching the table's
+    //     index 0..9 -- looked up below. Sigkill(-11) is intentionally excluded: it can never be
+    //     caught (sigaction(SIGKILL, ...) always fails with EINVAL), so Create() rejects it
+    //     before reaching this function. The table is a lookup rather than a switch so this
+    //     function reads naturally with the real SIGxxx macros this translation unit needs
+    //     anyway (see PosixSignal.hpp for why the members are spelled Sighup/Sigint/etc.);
+    //
+    //   * a POSITIVE raw native signal number, which current .NET's Unix contract expressly
+    //     permits a caller to cast to PosixSignal, and which this function used to reject --
+    //     including static_cast<PosixSignal>(SIGWINCH), the positive spelling of a signal the
+    //     port already supports under the name PosixSignal::Sigwinch. That asymmetry is the
+    //     defect ticket #1977 / SR-AUD-170 repairs: both spellings now return the same number,
+    //     so they share a dispatch bucket and an installed handler.
+    //
+    // Everything else -- zero, an out-of-range positive, an unnamed negative -- returns 0 and
+    // Create() reports PlatformNotSupportedException, exactly as before.
     int toNativeSignalNumber(PosixSignal signal) {
         static const int kNativeSignalNumbers[10] = {
             SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGCHLD, SIGCONT, SIGWINCH, SIGTTIN, SIGTTOU, SIGTSTP
         };
-        int index = -static_cast<int>(signal) - 1;
+        int value = static_cast<int>(signal);
+        if (value > 0) {
+            // The upper bound is the pending_ array's, not the OS's: a number this dispatcher
+            // cannot record a pending flag for must be refused outright rather than accepted and
+            // then silently never delivered. Whether the OS will actually let us catch it is
+            // decided by sigaction() in installIfNeeded().
+            return (value < kMaxSignalNumber) ? value : 0;
+        }
+        int index = -value - 1;
         if (index < 0 || index >= 10) return 0;
         return kNativeSignalNumbers[index];
     }
+
+    // SIGKILL and SIGSTOP cannot be caught or ignored on any POSIX system. The named
+    // PosixSignal::Sigkill was already rejected by Create(); accepting raw positive values makes
+    // both reachable by number for the first time, so both are named here.
+    bool isUncatchableRawSignal(int signo) { return signo == SIGKILL || signo == SIGSTOP; }
 
     struct Entry {
         SharpRuntime::intcs token;
@@ -73,7 +103,6 @@ namespace {
     // writes/reads are guaranteed atomic with respect to signal delivery on the same thread by the
     // C standard; combined with the self-pipe write below, this is the standard safe pattern for
     // moving work out of a signal handler (POSIX.1 "Signal Concepts" / the classic self-pipe trick).
-    constexpr int kMaxSignalNumber = 64;
     volatile std::sig_atomic_t pending_[kMaxSignalNumber] = {};
 
     int selfPipe_[2] = {-1, -1};
@@ -230,6 +259,14 @@ PosixSignalRegistration PosixSignalRegistration::Create(PosixSignal signal, Hand
 
     int signo = toNativeSignalNumber(signal);
     if (signo == 0) throw System::PlatformNotSupportedException();
+    // Reachable only through the raw positive spelling: PosixSignal has no named SIGSTOP member,
+    // and named Sigkill is rejected above. Reported the same way as named Sigkill rather than
+    // being left to sigaction()'s EINVAL, so the two spellings of SIGKILL agree.
+    if (isUncatchableRawSignal(signo)) {
+        throw System::PlatformNotSupportedException(
+            signo == SIGKILL ? "SIGKILL cannot be caught or ignored."
+                             : "SIGSTOP cannot be caught or ignored.");
+    }
 
     std::lock_guard<std::mutex> lock(registryMutex_);
     ensureWatcherStarted();

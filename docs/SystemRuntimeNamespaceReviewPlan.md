@@ -1102,3 +1102,58 @@ No public signature, object layout, vtable, `noexcept` specification, mangled sy
 component edge or **runtime behaviour** changed. `SharpRuntimeTests_Runtime` stays at
 **153** — this ticket's two tests landed with #1976's commit, in the same translation
 unit and the same edit, and are called out there.
+
+---
+
+## 23. What #1977 measured (2026-08-03) — cause R-D
+
+**SR-AUD-170: `confirmed` → `remediated`.** Cause R-D is closed, and with it the whole
+**compatible** half of this review: R-A, R-B, R-D, R-E, R-F, R-I's classification and R-J
+are all closed, leaving only the approval-gated R-C (#1979), R-G (#1980) and R-H (#1981),
+plus the deferred R-K (#1983).
+
+### 23.1 The repair, and the boundary sweep that pins it
+
+`toNativeSignalNumber` now branches on sign: a **positive** value is a raw native signal
+number, accepted when it is inside the range the `pending_` flag table can track; a
+**negative** value takes the unchanged ten-entry named-member lookup. Both spellings of
+the same signal return the same number, so they share a dispatch bucket and one installed
+OS handler — which is the part §4.3 found and the finding does not name.
+
+`kMaxSignalNumber` moved above its first use and widened **64 → 65**, so the trackable
+range covers Linux/glibc's whole range including `SIGRTMAX` (64). Rejecting a number the
+dispatcher cannot record is deliberate and is better than the alternative: accepting it
+would make `Create` appear to succeed and then never deliver.
+
+Measured boundary sweep (`build-probe/1977_probe2_after.log`, all under ASan+UBSan+LSan):
+
+| input | before | after |
+|---|---|---|
+| `SIGUSR1`(10), `SIGUSR2`(12), `SIGPIPE`(13), `SIGALRM`(14) | rejected | **accepted** |
+| raw `SIGWINCH`(28) — positive spelling of a named member | rejected | **accepted** |
+| `1`, `63`, `64` (`SIGRTMAX`) | rejected | **accepted** |
+| `0`, `65`, `1000`, `100000` | rejected | rejected — unchanged |
+| raw `SIGKILL`(9), raw `SIGSTOP`(19) | rejected (generic) | rejected, **named message** |
+| named `Sigkill`(-11), `-12`, `-99` | rejected | rejected — unchanged |
+| named `Sigtstp`(-10) | accepted | accepted — unchanged |
+
+`SIGSTOP` was **unreachable before**: `PosixSignal` has no named member for it, so the raw
+spelling is the first way to ask for it. It is rejected explicitly, the same way named
+`Sigkill` is, rather than being left to `sigaction`'s `EINVAL` — so the two spellings of an
+uncatchable signal agree.
+
+### 23.2 Consequences
+
+No public signature, object layout, vtable, `noexcept` specification, mangled symbol or
+component edge changed. The change is **strictly widening**: every input accepted before
+is still accepted with identical behaviour, and every retained rejection is asserted
+rather than assumed.
+
+ASan + UBSan + LSan over the whole probe including the boundary sweep: **0 reports**; 34
+sanitizer symbols with `toNativeSignalNumber` present in the instrumented image. This was
+the ticket §12 flagged as most likely to carry an off-by-one, which is why the sweep
+exercises `0/1/63/64/65` rather than only the comfortable middle of the range.
+
+Five add-only regressions, including one that pins #1975's restore contract for the newly
+reachable raw spelling — the raw path installs through the same registry, and a repair
+that special-cased it would show up there. `SharpRuntimeTests_Runtime` **153 → 158**.

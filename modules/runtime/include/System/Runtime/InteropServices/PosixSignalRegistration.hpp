@@ -44,10 +44,24 @@ namespace System::Runtime::InteropServices {
          * suppresses the OS's default disposition for that signal delivery (e.g. process
          * termination for SIGTERM/SIGINT/SIGHUP/SIGQUIT); if no handler cancels it, the default
          * disposition runs after all handlers return.
+         *
+         * @param signal Either a named PosixSignal member, or a **positive raw native signal
+         *        number cast to PosixSignal** -- current .NET's Unix contract expressly permits
+         *        the cast, and this port accepts it (ticket #1977). The two spellings of the same
+         *        signal are equivalent: `static_cast<PosixSignal>(SIGWINCH)` and
+         *        `PosixSignal::Sigwinch` register into the same dispatch bucket and share one
+         *        installed OS handler, so a handler registered under either spelling sees a
+         *        delivery caused by the other. Raw values are inherently non-portable; the named
+         *        members are the portable spelling and remain preferred.
+         * @param handler The callback, invoked on the watcher thread. Must not be empty.
+         *
          * @throws System::ArgumentNullException if @p handler is empty.
-         * @throws System::PlatformNotSupportedException if @p signal cannot be caught (SIGKILL),
-         *         or on a platform with no signal-handling support (e.g. Emscripten).
-         * @throws System::IO::IOException if installing the OS-level signal handler fails.
+         * @throws System::PlatformNotSupportedException if @p signal cannot be caught -- SIGKILL
+         *         and SIGSTOP, under either spelling -- if a raw value is outside the range this
+         *         dispatcher can track, or on a platform with no signal-handling support
+         *         (e.g. Emscripten).
+         * @throws System::IO::IOException if installing the OS-level signal handler fails, which
+         *         is how a raw value the OS itself refuses is reported.
          */
         static PosixSignalRegistration Create(PosixSignal signal, Handler handler);
 
