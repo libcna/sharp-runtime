@@ -12,6 +12,7 @@
 //   ticket #1953 (cause T-C) -- the two boundaries that reached a null dereference:
 //                               ThreadPool::RegisterWaitForSingleObject and
 //                               CancellationToken's shared-state constructor;
+//   ticket #1954 (cause T-C) -- the out-of-domain enum and timeout values;
 //
 // Every case here pins an input a caller can supply that used to reach
 // std::bad_function_call, std::terminate, a silent no-op or a silently wrong value, plus
@@ -34,7 +35,10 @@
 #include "System/Threading/CancellationToken.hpp"
 #include "System/Threading/CancellationTokenRegistration.hpp"
 #include "System/Threading/CancellationTokenSource.hpp"
+#include "System/Threading/EventWaitHandle.hpp"
 #include "System/Threading/LazyInitializer.hpp"
+#include "System/Threading/PeriodicTimer.hpp"
+#include "System/Threading/ReaderWriterLockSlim.hpp"
 #include "System/Threading/Semaphore.hpp"
 #include "System/Threading/SpinWait.hpp"
 #include "System/Threading/SynchronizationContext.hpp"
@@ -42,6 +46,7 @@
 #include "System/Threading/ThreadPool.hpp"
 #include "System/Threading/ThreadLocal.hpp"
 #include "System/Threading/Timer.hpp"
+#include "System/TimeSpan.hpp"
 
 using namespace System::Threading;
 
@@ -567,4 +572,145 @@ TEST(ThreadingNullArgumentTests, CancellationToken_LiveState_Unaffected) {
     EXPECT_THROW(sourceToken.ThrowIfCancellationRequested(), System::OperationCanceledException);
     EXPECT_EQ(ran.load(), 10);
     (void)sourceReg;
+}
+
+// ===========================================================================
+// #1954 / SR-AUD-184, 205 and SR-AUD-213 (timeout half), cause T-C -- out-of-domain values.
+//
+// SR-AUD-200 (PeriodicTimer's fractional period) is deliberately NOT repaired here; the
+// control below pins the current behaviour so ticket #1963 can change it only on purpose.
+// ===========================================================================
+
+// SR-AUD-184. An undeclared EventResetMode used to produce a handle that is neither kind of
+// event: Set() took the AutoReset notify_one branch because 42 is not ManualReset, while
+// WaitOne() did not reset because 42 is not AutoReset.
+//
+// The assertion is on the exception CATEGORY, not a derived type: the audit's managed probe
+// records only "an argument exception", and the reference tree is unavailable here, so the
+// port throws System::ArgumentException -- the base of both .NET candidates.
+TEST(ThreadingArgumentDomainTests, EventWaitHandle_UndeclaredMode_Rejected) {
+    for (int raw : {2, 42, -1}) {
+        bool threw = false;
+        try {
+            EventWaitHandle e(false, static_cast<EventResetMode>(raw));
+        } catch (const System::ArgumentException& e) {
+            threw = true;
+            EXPECT_EQ(e.getParamNameProperty(), "mode");
+        }
+        EXPECT_TRUE(threw) << "raw mode " << raw << " was accepted";
+    }
+}
+
+TEST(ThreadingArgumentDomainTests, EventWaitHandle_DeclaredModes_Unchanged) {
+    EventWaitHandle manual(false, EventResetMode::ManualReset);
+    manual.Set();
+    EXPECT_TRUE(manual.WaitOne(50));
+    EXPECT_TRUE(manual.WaitOne(50));  // manual reset stays signalled
+    manual.Reset();
+    EXPECT_FALSE(manual.WaitOne(20));
+
+    EventWaitHandle als(false, EventResetMode::AutoReset);
+    als.Set();
+    EXPECT_TRUE(als.WaitOne(50));
+    EXPECT_FALSE(als.WaitOne(20));  // auto reset consumed the signal
+
+    EventWaitHandle initiallySet(true, EventResetMode::ManualReset);
+    EXPECT_TRUE(initiallySet.WaitOne(50));
+}
+
+// SR-AUD-205. .NET stores a bool and derives RecursionPolicy, so an undeclared value can
+// never be read back; this port stored and reflected it verbatim. Normalisation, NOT
+// rejection -- the opposite of EventWaitHandle above, because .NET treats the two enums
+// differently and this port must not unify them.
+TEST(ThreadingArgumentDomainTests, ReaderWriterLockSlim_UndeclaredPolicy_NormalisedToNoRecursion) {
+    for (int raw : {2, 7, -1}) {
+        ReaderWriterLockSlim lock(static_cast<LockRecursionPolicy>(raw));
+        EXPECT_EQ(lock.getRecursionPolicyProperty(), LockRecursionPolicy::NoRecursion)
+            << "raw policy " << raw << " was reflected verbatim";
+    }
+}
+
+TEST(ThreadingArgumentDomainTests, ReaderWriterLockSlim_DeclaredPolicies_Unchanged) {
+    ReaderWriterLockSlim defaulted;
+    EXPECT_EQ(defaulted.getRecursionPolicyProperty(), LockRecursionPolicy::NoRecursion);
+
+    ReaderWriterLockSlim none(LockRecursionPolicy::NoRecursion);
+    EXPECT_EQ(none.getRecursionPolicyProperty(), LockRecursionPolicy::NoRecursion);
+
+    ReaderWriterLockSlim recursive(LockRecursionPolicy::SupportsRecursion);
+    EXPECT_EQ(recursive.getRecursionPolicyProperty(), LockRecursionPolicy::SupportsRecursion);
+    recursive.EnterReadLock();
+    EXPECT_NO_THROW(recursive.EnterReadLock());
+    recursive.ExitReadLock();
+    recursive.ExitReadLock();
+}
+
+// The behavioural half was already correct before #1954 -- isReentrant() tests for
+// SupportsRecursion, so an undeclared policy already locked like NoRecursion. Pinned so the
+// property and the behaviour cannot drift apart again in either direction.
+TEST(ThreadingArgumentDomainTests, ReaderWriterLockSlim_UndeclaredPolicy_AlsoBehavesAsNoRecursion) {
+    ReaderWriterLockSlim lock(static_cast<LockRecursionPolicy>(2));
+    lock.EnterReadLock();
+    EXPECT_THROW(lock.EnterReadLock(), System::Exception);
+    lock.ExitReadLock();
+}
+
+// SR-AUD-213, timeout half. -2 used to return false, which a caller cannot tell apart from a
+// legitimate expiry.
+TEST(ThreadingArgumentDomainTests, SpinWait_TimeoutBelowMinusOne_Rejected) {
+    for (SharpRuntime::intcs bad : {static_cast<SharpRuntime::intcs>(-2),
+                                    static_cast<SharpRuntime::intcs>(-1000)}) {
+        bool threw = false;
+        try {
+            (void)SpinWait::SpinUntil([] { return true; }, bad);
+        } catch (const System::ArgumentOutOfRangeException& e) {
+            threw = true;
+            EXPECT_EQ(e.getParamNameProperty(), "millisecondsTimeout");
+        }
+        EXPECT_TRUE(threw);
+    }
+}
+
+// The ordering requirement recorded in docs/ThreadingNamespaceReviewPlan.md 17.3: .NET
+// validates millisecondsTimeout before condition, so a call invalid in both ways reports the
+// timeout. Between #1951 and #1954 this port reported the condition.
+TEST(ThreadingArgumentDomainTests, SpinWait_TimeoutCheckPrecedesConditionCheck) {
+    bool threw = false;
+    try {
+        (void)SpinWait::SpinUntil(std::function<bool()>{}, -2);
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        threw = true;
+        EXPECT_EQ(e.getParamNameProperty(), "millisecondsTimeout");
+    }
+    EXPECT_TRUE(threw);
+}
+
+TEST(ThreadingArgumentDomainTests, SpinWait_ValidTimeouts_Unchanged) {
+    EXPECT_TRUE(SpinWait::SpinUntil([] { return true; }, -1));
+    EXPECT_TRUE(SpinWait::SpinUntil([] { return true; }, 0));
+    EXPECT_FALSE(SpinWait::SpinUntil([] { return false; }, 0));
+    EXPECT_FALSE(SpinWait::SpinUntil([] { return false; }, 5));
+}
+
+// SR-AUD-200 is NOT repaired by #1954 and stays confirmed. Its per-file report carries no
+// managed probe, and .NET's PeriodicTimer converts with (long)period.TotalMilliseconds -- a
+// truncating cast, exactly as Timer(TimerCallback, object?, TimeSpan, TimeSpan) does -- so
+// rejecting a fractional period would narrow away from .NET rather than repair a divergence.
+// The reference tree is absent from this environment, so the current behaviour is pinned
+// here and the question is carried by ticket #1963. This case documents the status quo; it
+// is not an endorsement of it.
+TEST(ThreadingArgumentDomainTests, PeriodicTimer_FractionalPeriod_StillTruncates_SeeTicket1963) {
+    EXPECT_NO_THROW({
+        PeriodicTimer t(System::TimeSpan::FromMilliseconds(1.5));
+        t.Dispose();
+    });
+    EXPECT_NO_THROW({
+        PeriodicTimer t(System::TimeSpan::FromMilliseconds(2.0));
+        t.Dispose();
+    });
+    // the range boundary that IS validated today, unchanged by this ticket
+    EXPECT_THROW(PeriodicTimer(System::TimeSpan::FromMilliseconds(0.0)),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(PeriodicTimer(System::TimeSpan::FromMilliseconds(-5.0)),
+                 System::ArgumentOutOfRangeException);
 }

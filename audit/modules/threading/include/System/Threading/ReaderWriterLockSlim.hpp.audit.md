@@ -75,3 +75,48 @@ previously repaired upgrade-to-write and recursive-count paths.
 
 SR-AUD-203 through SR-AUD-205 are confirmed by direct current-.NET comparison
 and native sanitizer evidence. No production or test source was changed.
+
+
+---
+
+## Remediation record — ticket #1954 (2026-08-03), SR-AUD-205 → `remediated`
+
+Cause **T-C** of `docs/ThreadingNamespaceReviewPlan.md`. **SR-AUD-203 and SR-AUD-204 are
+untouched and remain `confirmed`** — the `disposed_` race is cause T-A (ticket #1955), the
+dispose-while-held half is cause T-G (ticket #1956, approval-gated), and the missing
+queued-writer state is cause T-E/2 (ticket #1957, approval-gated).
+
+The constructor now normalises:
+
+```cpp
+explicit ReaderWriterLockSlim(LockRecursionPolicy recursionPolicy)
+    : recursionPolicy_(recursionPolicy == LockRecursionPolicy::SupportsRecursion
+                           ? LockRecursionPolicy::SupportsRecursion
+                           : LockRecursionPolicy::NoRecursion) {}
+```
+
+which is .NET's construction reduced to one expression: `ReaderWriterLockSlim` stores only
+`_fIsReentrant = (recursionPolicy == LockRecursionPolicy.SupportsRecursion)` and exposes
+`RecursionPolicy` derived from that bool, so an undeclared value can never be read back.
+Normalisation rather than rejection is therefore parity, not leniency — and it is the
+**opposite** of what `EventWaitHandle` does in the same ticket, because .NET treats the two
+enums differently.
+
+### Correction to the finding's extent
+
+The finding says the invalid policy is "stored and reflected verbatim". Measured
+(`build-probe/1954_probe1_argument_domain.cpp`): only the **property** diverged.
+`rwls.policy2.property` printed `2` before the change and `0` after, but the row
+`rwls.policy2.recursion_rejected` printed `(recursion rejected)` **both** before and after —
+because `isReentrant()` already tested for `SupportsRecursion`, so a lock constructed with
+policy 2 already *behaved* as `NoRecursion` and already threw `LockRecursionException` on
+recursive entry. The defect was that the reported policy contradicted the lock's own
+behaviour, not that the lock behaved unpredictably. The repair makes the stored value, the
+reported value and the behaviour agree, and
+`ThreadingArgumentDomainTests.ReaderWriterLockSlim_UndeclaredPolicy_AlsoBehavesAsNoRecursion`
+pins the behavioural half so the two cannot drift apart again in either direction.
+
+Coverage: `ThreadingArgumentDomainTests.ReaderWriterLockSlim_*` — raw policies 2, 7 and -1
+all report `NoRecursion`; the default, `NoRecursion` and `SupportsRecursion` constructors are
+unchanged, including `SupportsRecursion` still permitting matched recursive read acquisition.
+No signature, layout, vtable or exception-specification change.

@@ -118,13 +118,40 @@ namespace System::Threading {
     public:
         /** Constructs a ReaderWriterLockSlim with no-recursion policy. */
         ReaderWriterLockSlim() = default;
-        /** Constructs a ReaderWriterLockSlim with the specified recursion policy. */
-        explicit ReaderWriterLockSlim(LockRecursionPolicy recursionPolicy) : recursionPolicy_(recursionPolicy) {}
+        /**
+         * @brief Constructs a ReaderWriterLockSlim with the specified recursion policy.
+         *
+         * Any value other than `LockRecursionPolicy::SupportsRecursion` is **normalised** to
+         * `NoRecursion` rather than rejected, because that is precisely what .NET does:
+         * `ReaderWriterLockSlim(LockRecursionPolicy)` stores only
+         * `_fIsReentrant = (recursionPolicy == LockRecursionPolicy.SupportsRecursion)` and
+         * `RecursionPolicy` is derived from that bool, so no undeclared value can survive to
+         * be read back. This port stored the raw value and reflected it verbatim
+         * (SR-AUD-205, ticket #1954).
+         *
+         * The behavioural half was already correct -- `isReentrant()` tests for
+         * `SupportsRecursion`, so an undeclared policy already locked like `NoRecursion` and
+         * already threw `LockRecursionException` on recursive entry; only the property lied.
+         * Normalising at construction makes the stored state and the reported state agree
+         * with each other and with the behaviour, in one place.
+         *
+         * `EventWaitHandle` in the same ticket **rejects** its undeclared enum instead. That
+         * asymmetry is .NET's own and is deliberately not unified.
+         */
+        explicit ReaderWriterLockSlim(LockRecursionPolicy recursionPolicy)
+            : recursionPolicy_(recursionPolicy == LockRecursionPolicy::SupportsRecursion
+                                   ? LockRecursionPolicy::SupportsRecursion
+                                   : LockRecursionPolicy::NoRecursion) {}
 
         /** Releases this instance's slot in the current thread's per-thread tracking on destruction. */
         ~ReaderWriterLockSlim() override { threadCounts().erase(id_); }
 
-        /** Returns the recursion policy this instance was constructed with. */
+        /**
+         * @brief Returns this instance's recursion policy.
+         *
+         * Always `NoRecursion` or `SupportsRecursion`: an undeclared constructor argument is
+         * normalised to `NoRecursion`, matching .NET's derived-from-a-bool property.
+         */
         [[nodiscard]] LockRecursionPolicy getRecursionPolicyProperty() const { return recursionPolicy_; }
 
         /**

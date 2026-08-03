@@ -62,3 +62,38 @@ Evidence: `spinwait.spinuntil_empty` and `spinwait.spinuntil_timed_empty` both m
 `bad_function_call` to `ArgumentNullException|Value cannot be null. (Parameter 'condition')`;
 the two controls are unchanged. Tests: `ThreadingEmptyCallableTests.SpinWait_*`, including the
 `-1` case that would hang a broken implementation.
+
+
+---
+
+## Remediation record — ticket #1954 (2026-08-03), SR-AUD-213 **timeout half** → finding now `remediated`
+
+The callable half landed with #1951 (recorded above). #1954 adds the timeout half, so
+**SR-AUD-213 is now fully remediated**.
+
+`SpinUntil(condition, millisecondsTimeout)` opens with
+
+```cpp
+System::ArgumentOutOfRangeException::ThrowIfLessThan(
+    millisecondsTimeout, static_cast<SharpRuntime::intcs>(-1), "millisecondsTimeout");
+```
+
+placed **above** the `condition` check added by #1951, reproducing .NET's
+`ArgumentOutOfRangeException.ThrowIfLessThan(millisecondsTimeout, -1)` →
+`ArgumentNullException.ThrowIfNull(condition)` order. That ordering was the explicit
+requirement #1951 left behind in `docs/ThreadingNamespaceReviewPlan.md` §17.3: between the two
+tickets, a call invalid in *both* ways reported the condition where .NET reports the timeout.
+Probe row `spinwait.timeout_minus2_and_empty_condition` moved from
+`ArgumentException|... (Parameter 'condition')` to
+`ArgumentOutOfRangeException|param=millisecondsTimeout`, and
+`ThreadingArgumentDomainTests.SpinWait_TimeoutCheckPrecedesConditionCheck` pins it.
+
+Why the old result was worse than a missing diagnostic: `SpinUntil(cond, -2)` returned
+**`false`**, which is byte-identical to a legitimate expiry, so a caller that passed a bad
+timeout saw a plausible "condition never became true" instead of an error. Probe row
+`spinwait.timeout_minus2` moved from `false` to
+`ArgumentOutOfRangeException(millisecondsTimeout)`.
+
+Both valid special cases are unchanged and asserted: `-1` still waits indefinitely and `0`
+still makes exactly one attempt
+(`ThreadingArgumentDomainTests.SpinWait_ValidTimeouts_Unchanged`).

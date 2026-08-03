@@ -733,3 +733,123 @@ are present in the sanitized binary (32 sanitizer symbols) and absent from the p
 `modules/threading/tests/System/Threading/ThreadingBoundaryTests.cpp` is a new translation
 unit holding the boundary family's permanent regressions. #1951 contributed **24** cases;
 `SharpRuntimeTests_Threading` went from 369 to 393, all passing.
+
+
+---
+
+## 18. What #1952–#1954 measured, and five further corrections (2026-08-03)
+
+### 18.1 SR-AUD-183 (#1952) is larger than recorded in three ways
+
+Probe `build-probe/1952_probe1_waithandle_multiwait.cpp` runs the unbounded cases in forked
+children under `alarm(2)`.
+
+1. **Three non-terminating shapes, not one.** §3 and the finding name the no-timeout
+   `WaitAny({})`. `WaitAny({})`, `WaitAny({}, -1)` **and** `WaitAny({nullptr})` all printed
+   `child-hang`: the infinite-timeout branch is a second copy of the same poll loop, and a
+   null-only collection reached it because null elements were skipped rather than rejected.
+2. **A `-2` timeout gave two different wrong answers.** `WaitAll({}, -2)` returned `true`, as
+   recorded — but `WaitAll({handle}, -2)` returned **`false`**, a spurious timeout, because
+   `now() + milliseconds(-2)` is already past. Same invalid argument, opposite result,
+   decided by the collection's size.
+3. **A mixed collection answered plausibly.** `WaitAny({signalled, nullptr}, 0)` returned `0`
+   by skipping the null. It is the only pre-fix call in this finding's surface that produced a
+   *usable* result, and therefore the sharpest observable change in the ticket.
+
+**One deliberate non-repair.** .NET's `MaxWaitHandles` ceiling of 64 is not adopted: it exists
+for Win32 `WaitForMultipleObjects`, this port waits sequentially, and adopting it would reject
+input that works. The audit records the unrepresentable maximum as an undocumented
+*portability boundary*, not a required rejection; it is documented in the header instead. No
+identifier, no ticket.
+
+### 18.2 SR-AUD-200 (#1954) is the one T-C member that was **not** repaired
+
+It stays `confirmed`, and its open question is carried by **inactive ticket #1963**.
+
+The finding concludes that a fractional `PeriodicTimer` period "must be rejected". Two facts
+argue against doing that blind:
+
+- Its per-file report carries **no managed probe** for the row. Its stated evidence is
+  `fractional=normal` from a *native* probe compared against **this port's own doc-comment**,
+  which promises whole milliseconds. The divergence established is doc-versus-code, not
+  port-versus-.NET. Every other T-C member repaired here (SR-AUD-184, 205, 213) quotes a
+  managed result in its own report.
+- .NET's `PeriodicTimer` converts with `(long)period.TotalMilliseconds`, a **truncating**
+  cast — the same idiom `Timer(TimerCallback, object?, TimeSpan, TimeSpan)` uses — so .NET
+  appears to accept 1.5 ms as 1 ms. Rejecting it would then be a narrowing *away* from .NET
+  that refuses input `TimeSpan` tick arithmetic legitimately produces, and the right repair
+  would be to correct the doc-comment instead.
+
+**The reference tree `/rv/tmp/runtime/src/libraries/` is not present in this environment**, so
+neither reading could be confirmed. Nothing was changed — not the code and not the
+doc-comment, since only one of them is wrong and which one is exactly the open question. The
+current behaviour is pinned by a test naming #1963 so the answer can only be applied
+deliberately.
+
+This is also a general constraint on the batch: every ".NET does X" statement in §17–§18 rests
+on the reference contracts quoted in the per-file audit reports plus the reviewer's reading,
+**not** on a local checkout. Where that was not enough to decide — SR-AUD-200's period, and
+SR-AUD-184's exact derived exception type — the uncertainty is recorded rather than resolved
+by assertion.
+
+### 18.3 SR-AUD-184's exception type is a knowingly partial parity claim (#1954)
+
+`EventWaitHandle` rejects an undeclared `EventResetMode` with the **base**
+`System::ArgumentException("Value of flags is invalid.", "mode")`. The audit's managed probe
+records only the category, and .NET's two plausible spellings —
+`ArgumentException(SR.Argument_InvalidFlag, nameof(mode))` and
+`ArgumentOutOfRangeException(nameof(mode))` — stand in a base/derived relationship. Throwing
+the base means a handler written for either catches this one; the tests assert the category
+and `paramName`, not a derived type.
+
+The measured incoherence the rejection removes: with mode 42, `Set()` took the AutoReset
+`notify_one` branch *for not being ManualReset* while `WaitOne()` skipped its reset *for not
+being AutoReset* (`first=1 second_without_set=1`), producing a handle that is neither kind of
+event.
+
+### 18.4 SR-AUD-205's defect was confined to the property (#1954)
+
+The finding says the invalid policy is "stored and reflected verbatim". Measured: only the
+*property* diverged. `rwls.policy2.property` moved 2 → 0, but `rwls.policy2.recursion_rejected`
+reported "recursion rejected" **before** the change too, because `isReentrant()` already
+tested for `SupportsRecursion`. The lock already behaved as `NoRecursion`; it merely reported
+otherwise. Both halves are now pinned so they cannot drift apart again.
+
+Note the deliberate asymmetry §5's T-C paragraph predicted: `EventWaitHandle` **rejects** and
+`ReaderWriterLockSlim` **normalises**, because .NET validates one enum and derives the other
+from a bool. Landing both in the same ticket makes it obvious this is reproduction, not
+inconsistency.
+
+### 18.5 A second route to SR-AUD-199's crash, not in the finding (#1953)
+
+`CancellationToken` holds a `shared_ptr` and has an implicitly declared move constructor, so a
+**moved-from** token has an empty `state_` and SEGV'd exactly like the explicitly-empty one —
+through ordinary well-formed C++ that never mentions the internal-state constructor. This
+decided the repair: **tolerance, not rejection.** An absent state is now the never-cancellable
+token .NET's null `_source` denotes (`IsCancellationRequested` is
+`_source != null && _source.IsCancellationRequested`; `Register` gives back a dummy
+registration, in .NET's own words). Rejecting the argument would have closed the named route,
+left the unnamed one open, and made the same absent state legal via move and illegal via
+constructor. No public constructor was removed or narrowed, so #1953's source-break clause was
+never reached.
+
+`RegisteredWaitHandle`'s own report asked for the empty `callBack` and the `-2` timeout to be
+repaired *with* the null-wait crash path, and both were, so SR-AUD-188 closed with three
+checks rather than one.
+
+### 18.6 Scoreboard after #1951–#1954
+
+| Cause | Findings | Status |
+|---|---|---|
+| T-B (#1951) | 190, 192, 198, 217, 222 remediated; 213p, 219p landed | done |
+| T-C (#1952) | 183 remediated | done |
+| T-C (#1953) | 188, 199 remediated | done |
+| T-C (#1954) | 184, 205 remediated; 213 now fully remediated | done, **except SR-AUD-200** (§18.2, ticket #1963) |
+
+Eight of the namespace's 38 findings moved to `remediated` in this batch (183, 184, 188, 190,
+192, 198, 199, 205, 213, 217, 222 — eleven, counting SR-AUD-213 which needed both tickets),
+on top of the three (195, 197, 206, 211) closed by the previous one. SR-AUD-219 stays
+`confirmed` pending its T-G half (#1956) and SR-AUD-200 stays `confirmed` pending #1963.
+
+Neither ticket changed a signature, an object layout, a vtable, an exception specification or
+a component edge. The module graph stays **41 / 91**.

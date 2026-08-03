@@ -6,6 +6,7 @@
 #include <thread>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentNullException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Threading {
 
@@ -60,15 +61,19 @@ namespace System::Threading {
          * deadline computed as now()+milliseconds(-1) would already be in the past, so -1
          * must be special-cased to skip the deadline check entirely.
          *
+         * @throws System::ArgumentOutOfRangeException if @p millisecondsTimeout is less than -1.
          * @throws System::ArgumentNullException if @p condition is an empty std::function.
          *
-         * .NET validates @p millisecondsTimeout *before* @p condition
-         * (`ArgumentOutOfRangeException.ThrowIfLessThan(millisecondsTimeout, -1)` then
-         * `ArgumentNullException.ThrowIfNull(condition)`). The timeout half of
-         * SR-AUD-213 is ticket #1954; when it lands, its check goes above this one so the
-         * two run in .NET's order. Ticket #1951 / CCF-011 owns the callable half.
+         * The two checks run in .NET's order --
+         * `ArgumentOutOfRangeException.ThrowIfLessThan(millisecondsTimeout, -1)` then
+         * `ArgumentNullException.ThrowIfNull(condition)` -- so a call that is invalid in both
+         * ways reports the timeout. A `-2` timeout used to return `false`, which is
+         * indistinguishable from a legitimate expiry (SR-AUD-213, timeout half, ticket
+         * #1954); the callable half is ticket #1951. SR-AUD-213 closes only with both.
          */
         static bool SpinUntil(std::function<bool()> condition, SharpRuntime::intcs millisecondsTimeout) {
+            System::ArgumentOutOfRangeException::ThrowIfLessThan(
+                millisecondsTimeout, static_cast<SharpRuntime::intcs>(-1), "millisecondsTimeout");
             if (!condition) throw System::ArgumentNullException("condition");
             if (millisecondsTimeout == -1) {
                 SpinWait sw;
