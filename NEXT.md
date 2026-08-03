@@ -217,9 +217,11 @@ review, then `modules/runtime` (21) or `modules/uri` (14).
 ### 11. Disk, resources, and repository safety
 
 The checkout began with **no build directories at all**, so `build/` was configured
-and built from scratch — unavoidable, not a discarded incremental tree. Final sizes:
-`build/` ≈ 700 MB, `build-tmp/` (logs + selective-matrix root) and `build-probe/`
-(probe sources, binaries and logs) small. `build-asan/`, `build-modular/`,
+and built from scratch — unavoidable, not a discarded incremental tree. Measured
+final sizes: `build/` **1.6 GB** (a Debug build with 37 test executables),
+`build-probe/` **3.0 MB** (probe sources, binaries and before/after logs, all
+retained), `build-tmp/` **176 KB** (build logs; the selective matrix's own tree under
+it was removed by that script's own trap on exit). `build-asan/`, `build-modular/`,
 `build-consumer/` and `cmake-build-debug/` were **not created**. No tree under
 `/tmp`, `/var/tmp` or `/dev/shm`. **Maximum aggregate compilation parallelism: 2**
 (`--parallel 2`, `SHARP_RUNTIME_BUILD_JOBS=2`); every probe was a single translation
