@@ -1157,3 +1157,29 @@ exercises `0/1/63/64/65` rather than only the comfortable middle of the range.
 Five add-only regressions, including one that pins #1975's restore contract for the newly
 reachable raw spelling — the raw path installs through the same registry, and a repair
 that special-cased it would show up there. `SharpRuntimeTests_Runtime` **153 → 158**.
+
+---
+
+## 24. What #1982 did (2026-08-03) — cause R-I
+
+**SR-AUD-162: `confirmed` → `remediated` as a documented deliberate deviation.** Cause
+R-I is closed. **No constraint was added and no behaviour changed.**
+
+§4.6 established that the finding's premise does not survive translation. The disposition
+selected there is now implemented: `ConditionalWeakTable`'s doc-comment states the
+widening as permanent and deliberate, names the reason the managed rule exists (the CLR
+cannot create a weak GC handle to a value type) and the reason it does not transfer (this
+port creates no GC handles; it keys on `std::weak_ptr<TKey>`, which is well defined for
+scalar `TKey`), and states the consequence a caller must know: **the `shared_ptr` control
+block's identity is the key, not the pointed-to value**, so two `shared_ptr<int>` holding
+equal integers are two different keys. That is the same identity rule the managed API
+applies to reference types, which is precisely why scalar `TKey` is not a special case.
+
+Three add-only tests exist so that a later "let's match CS0452" change **fails here**
+rather than silently deleting working functionality: the scalar instantiation works, its
+keys use control-block identity rather than value equality, and — the substantive claim —
+a scalar key still **expires** when its last owner drops, so `weak_ptr<int>` really does
+have the semantics the table depends on.
+
+No public signature, layout, vtable, `noexcept`, mangled symbol, component edge or runtime
+behaviour changed. `SharpRuntimeTests_Runtime` **158 → 161**.

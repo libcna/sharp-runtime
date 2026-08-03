@@ -29,6 +29,26 @@ namespace System::Runtime::CompilerServices {
  *
  * @tparam TKey Type of the object used as a weakly held key.
  * @tparam TValue Type of the value associated with a key.
+ *
+ * @note **Deliberate, permanent widening of the generic domain.** .NET constrains both type
+ * parameters with `where T : class`, so `ConditionalWeakTable<int, int>` fails to compile there
+ * (CS0452). This port applies **no** such constraint, and `ConditionalWeakTable<int, int>` is a
+ * supported instantiation. That is not an oversight and must not be "fixed" by adding a
+ * constraint: the managed rule exists because the **CLR cannot create a weak GC handle to a value
+ * type**, and this port does not create GC handles at all. It keys on `std::weak_ptr<TKey>` and
+ * stores `std::shared_ptr<TValue>`, and `std::weak_ptr<int>` is a perfectly well-defined
+ * reference to a heap-managed control block with exactly the expiry semantics this table needs.
+ * Adopting the constraint would delete working, well-defined functionality in order to imitate a
+ * restriction whose cause does not exist here.
+ *
+ * The consequence a caller should know: the *pointer identity* of the `shared_ptr`'s control
+ * block is the key, not the pointed-to value, so two `shared_ptr<int>` objects holding equal
+ * integers are two different keys. That is the same identity rule the managed API uses for
+ * reference types, and it is why scalar `TKey` works rather than being a special case.
+ *
+ * Recorded for ticket #1982 / SR-AUD-162; see `docs/SystemRuntimeNamespaceReviewPlan.md` §4.6.
+ * It would be reopened by evidence that `weak_ptr<TKey>` keying has a semantic defect for scalar
+ * `TKey` — not merely by the existence of CS0452.
  */
 template<typename TKey, typename TValue>
 class ConditionalWeakTable final

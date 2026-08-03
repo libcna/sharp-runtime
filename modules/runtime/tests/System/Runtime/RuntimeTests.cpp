@@ -774,3 +774,55 @@ TEST(FormattableStringFactoryTests, EmptyFormatWithArguments_IsAlsoAccepted) {
     EXPECT_EQ(fs.getArgumentCountProperty(), 1);
     EXPECT_EQ(fs.ToString(), "");
 }
+
+// ===========================================================================
+// ConditionalWeakTable — the deliberate generic-domain widening, pinned
+//
+// Ticket #1982 / SR-AUD-162 (cause R-I of docs/SystemRuntimeNamespaceReviewPlan.md).
+// .NET's `where T : class` exists because the CLR cannot make a weak GC handle to a value
+// type; this port makes no GC handles and keys on std::weak_ptr<TKey>, which is well
+// defined for scalar TKey. The disposition is to DOCUMENT the widening, not to narrow the
+// domain, so these tests exist to make a later "let's match CS0452" change fail here.
+// ===========================================================================
+
+TEST(ConditionalWeakTableTests, ScalarTypeParameters_AreASupportedInstantiation) {
+    ConditionalWeakTable<int, int> table;
+    auto key = std::make_shared<int>(1);
+    auto value = std::make_shared<int>(42);
+
+    table.Add(key, value);
+    std::shared_ptr<int> actual;
+    ASSERT_TRUE(table.TryGetValue(key, actual));
+    EXPECT_EQ(actual, value);
+    EXPECT_EQ(*actual, 42);
+}
+
+TEST(ConditionalWeakTableTests, ScalarKeys_UseControlBlockIdentityNotValueEquality) {
+    // The consequence a caller has to know, and the reason scalar TKey is not a special
+    // case: two shared_ptr<int> holding equal integers are two different keys, exactly as
+    // two distinct reference-type instances are in the managed API.
+    ConditionalWeakTable<int, int> table;
+    auto first = std::make_shared<int>(7);
+    auto second = std::make_shared<int>(7);
+
+    table.Add(first, std::make_shared<int>(1));
+    std::shared_ptr<int> actual;
+    EXPECT_TRUE(table.TryGetValue(first, actual));
+    EXPECT_FALSE(table.TryGetValue(second, actual));
+}
+
+TEST(ConditionalWeakTableTests, ScalarKeys_StillExpireWhenTheLastOwnerDrops) {
+    // weak_ptr<int> has the expiry semantics the table depends on, which is the substantive
+    // claim behind refusing to adopt the managed constraint.
+    ConditionalWeakTable<int, int> table;
+    {
+        auto key = std::make_shared<int>(5);
+        table.Add(key, std::make_shared<int>(99));
+        std::shared_ptr<int> actual;
+        ASSERT_TRUE(table.TryGetValue(key, actual));
+    }
+    int enumerated = 0;
+    auto e = table.GetEnumerator();
+    while (e->MoveNext()) ++enumerated;
+    EXPECT_EQ(enumerated, 0) << "an expired scalar key was still enumerated";
+}
