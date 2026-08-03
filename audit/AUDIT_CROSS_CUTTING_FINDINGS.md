@@ -2265,3 +2265,61 @@ this cause warns about. The exact approval sentence is
 frozen at **364**, and the index totals are unchanged at **107 remediated /
 257 confirmed / 364 total**, of which **35** carry the
 `confirmed (design-complete)` qualifier.
+
+---
+
+## Post-audit remediation note — the `System::Diagnostics` namespace review (2026-08-03)
+
+Ticket #2023 reviewed `modules/diagnostics`'s eight open findings
+(SR-AUD-268 … SR-AUD-275) and grouped them into seven causes, D-A … D-G
+(`docs/SystemDiagnosticsNamespaceReviewPlan.md` §5).
+
+**How the namespace was selected**, recorded so it is not re-litigated: the
+previous handoff named `modules/collections`, `modules/buffers` and
+`modules/io` and told a fresh context to re-derive the queue rather than trust
+that sentence. Re-derived from this index, `modules/diagnostics` has **eight
+open findings of which five are `high`** — a 62.5 % high ratio, the highest of
+any un-reviewed namespace, where `modules/io` (eleven open) has **zero** high —
+**no** existing `docs/` plan, `PUBLIC_DEPENDENCIES Core.Base` only, one module
+and one namespace, and **seven of eight findings on the same class**.
+
+### Causes governed by an existing family, deliberately without a new identifier
+
+- **D-D** (SR-AUD-271, `Process` state shared with its own pipe-reader thread)
+  is **CCF-009**'s shape one step over — shared mutable state reachable from a
+  public getter — with an internal *thread* rather than a process-wide
+  singleton as the second party. CCF-009's policy is reused; no new family is
+  opened.
+- **D-G** (SR-AUD-275, `Debug`'s provider and the indent-size globals) is
+  **CCF-009**'s shape exactly: a process-global mutable object with no
+  ownership boundary. It is **compatible** here, because `Debug` and `Trace`
+  have no data members and no public signature has to move.
+- **D-A** (SR-AUD-268/272) is a new occurrence of **CCF-005**'s
+  boundary-validation shape. Its repair is worth naming for the same reason
+  `System::Text`'s T-A was: the policy is **transcribed from the same file's own
+  three already-correct `EINTR` retry loops**, so no reference tree was needed.
+
+The remaining causes — D-B (a destructor with no reaping policy), D-C (a restart
+path that assigns over a joinable `std::thread`), D-E (a process-tree contract
+implemented as a process-group signal) and D-F (non-async-signal-safe work
+between `fork` and `exec`) — are **specific to this namespace** and are not
+promoted to `CCF-*` identifiers: the cross-cutting numbering is closed and the
+plan's §5 is their durable record.
+
+### What this review changed in the index
+
+Three findings move to the `confirmed (design-complete)` qualifier —
+**SR-AUD-269**, **SR-AUD-271** and **SR-AUD-273**, blocked as #2029, #2030 and
+#2031 with the approval sentences in plan §14. They remain open and remain
+counted as confirmed. The other five (SR-AUD-268, 270, 272, 274, 275) are
+**compatible** and are ticketed `todo` as #2024–#2027 plus the #2028
+documentation-and-pins ticket; **none was implemented in this batch**. The index
+now reads **107 remediated / 257 confirmed / 364 total**, of which **38** carry
+the `confirmed (design-complete)` qualifier — up from 35, with the confirmed
+total unchanged. **No `SR-AUD-*` identifier was issued; numbering stays frozen
+at 364**, and the five post-audit observations this review measured are recorded
+in the plan's §16 under ordinary ticket numbers only.
+
+**TSan is genuinely applicable to this namespace's compatible half** — the first
+time in the programme. `System::Text`'s review correctly recorded TSan as not
+applicable; here #2027 cannot be closed without it.
