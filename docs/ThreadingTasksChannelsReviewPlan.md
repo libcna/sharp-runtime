@@ -457,3 +457,57 @@ translation unit holding the boundary family's permanent regressions: **+37** ca
 `SharpRuntimeTests_Threading_Tasks` **171 → 208**, all passing.
 
 **SR-AUD-231: `confirmed` → `remediated`.** Cause TC-A is closed.
+
+---
+
+## 16. What #1966 measured (2026-08-03)
+
+Ticket **#1966** implemented cause **TC-B/1** (SR-AUD-232). Evidence:
+`build-probe/1966_probe1_parallel_degree.cpp`, logs `1966_probe1_before.log`,
+`1966_probe1_after.log`, `1966_probe1_asan.log`. `hardware_concurrency` is **4** here.
+
+### 16.1 The finding reproduced exactly, including its concurrency consequence
+
+Degrees -3, -2 and 0 all returned a normally completed loop that ran every iteration at a
+peak concurrency of 4 -- the machine's core count. Degrees 1 and 2 were already honoured
+exactly (measured peak 1 and 2). The report's second consequence, *"running work at a
+potentially much higher degree than requested"*, is therefore confirmed structurally; its
+magnitude is machine-dependent, and is four here only because this container has four
+cores.
+
+### 16.2 §7's "validation only" classification holds, but not where .NET puts it
+
+§7 classifies TC-B/1 as *implement -- validation only; .NET's domain, not a choice*. That
+is right about the **domain** and understates one thing about the **place**: .NET rejects
+the value in the `ParallelOptions.MaxDegreeOfParallelism` **setter**, so an invalid value
+can never be stored at all. This port's field is a bare public mutable data member -- the
+*same shape problem* §3.1 item 1 identifies for `BoundedChannelOptions::FullMode` -- so
+the check had to move to the entry of the one method that reads it.
+
+The difference from SR-AUD-235 is what makes this one compatible and that one not:
+`Parallel::For` *reads* the option, so there is a public entry at which to check it and
+still reject before any work runs. `BoundedChannelOptions::FullMode` is consulted deep
+inside a write, after the channel exists, so nothing short of a property pair recovers
+.NET's contract. Recorded here because the two look identical at a glance and are not.
+
+### 16.3 The ordering constraint §15.6 predicted was real
+
+Measured on the intermediate tree, with #1965 landed and #1966 not:
+`order.badDegree_and_emptyBody=sysexc:Value cannot be null. (Parameter 'body')`. The degree
+check is inserted **above** `requireNonEmptyBody` and a regression pins it.
+
+### 16.4 One site
+
+Only `For(from, to, ParallelOptions, body)` reads the option -- this port has no `ForEach`
+options overload. The other four loop overloads use `DefaultMaxDegreeOfParallelism()` and
+are untouched; a regression asserts it.
+
+### 16.5 Result
+
+Valid: -1 and every value >= 1. Rejected: 0 and every value <= -2, with `ran = 0` measured
+in every rejecting case, including `INTCS_MIN`. ASan + UBSan + LSan: **0 reports**, exit 0,
+32 sanitizer symbols, outcomes identical to the plain run. **+10** regressions,
+`SharpRuntimeTests_Threading_Tasks` **208 -> 218**. No signature, layout, vtable, `noexcept`
+or edge change; graph stays 41 / 91.
+
+**SR-AUD-232: `confirmed` -> `remediated`.** Cause TC-B/1 is closed.

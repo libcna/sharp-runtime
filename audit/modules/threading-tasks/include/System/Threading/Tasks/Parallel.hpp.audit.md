@@ -70,3 +70,75 @@ Two measured corrections belong here as well:
 
 **SR-AUD-232 itself remains `confirmed`** — the maximum-degree validation is
 ticket #1966.
+
+
+---
+
+## Correction and remediation — ticket #1966, 2026-08-03 (cause TC-B/1)
+
+*Audit text above preserved verbatim; this section is appended.*
+
+**Evidence:** `build-probe/1966_probe1_parallel_degree.cpp`, logs
+`1966_probe1_before.log` / `1966_probe1_after.log` / `1966_probe1_asan.log`
+(`hardware_concurrency = 4` on this machine).
+
+### The finding reproduced exactly, and the concurrency claim is confirmed by measurement
+
+| `MaxDegreeOfParallelism` | before | after |
+|---|---|---|
+| −3 | `no-throw`, ran 8, peak concurrency 4 | `ArgumentOutOfRangeException (Parameter 'MaxDegreeOfParallelism')`, ran **0** |
+| −2 | `no-throw`, ran 8, peak 4 | rejected, ran **0** |
+| −1 | `no-throw`, ran 8, peak 4 | **unchanged** — .NET's "unlimited" sentinel |
+| 0 | `no-throw`, ran 8, peak 4 | rejected, ran **0** |
+| 1 | ran 8, peak 1 | unchanged |
+| 2 | ran 8, peak 2 | unchanged |
+| cores + 4 | ran 8 | unchanged |
+
+The report's second consequence — *"running work at a potentially much higher
+degree than requested"* — is confirmed structurally and its magnitude is
+machine-dependent: an invalid cap silently became a cap of
+`hardware_concurrency()`, four here and as many as the core count elsewhere.
+
+### C1 — the repair cannot be placed where .NET places it
+
+.NET validates in the `ParallelOptions.MaxDegreeOfParallelism` **setter**, so an
+invalid value can never be stored. In this port `MaxDegreeOfParallelism` is a
+**public mutable data member** with nowhere to put a check, so validation happens
+at the entry of the one method that reads it. The exception type and parameter
+name are .NET's; only the *point of detection* moves, and that is stated in the
+field's own doc-comment. Converting the field to a property pair would be a
+public source break — the identical shape that gates SR-AUD-235 as ticket #1969
+— and is deliberately not done.
+
+### C2 — the check must precede #1965's `body` check, and did not by default
+
+Measured on the intermediate tree, with #1965 landed and #1966 not:
+`order.badDegree_and_emptyBody=sysexc:Value cannot be null. (Parameter 'body')`.
+Because .NET rejects the invalid degree in the options setter — which necessarily
+runs before `Parallel.For` is called, and therefore before .NET's own `body` null
+check — reporting the body error there is a divergence. The degree check is
+inserted **above** `requireNonEmptyBody`, and a regression pins the order. Same
+shape as `docs/ThreadingNamespaceReviewPlan.md` §17.3's constraint on #1954.
+
+### C3 — one site, not several
+
+Only `For(fromInclusive, toExclusive, ParallelOptions, body)` reads the option;
+there is no `ForEach` options overload in this port. The other four loop
+overloads call `DefaultMaxDegreeOfParallelism()` directly and are untouched,
+which a regression asserts.
+
+*Reference-evidence limitation:* `/rv/tmp/runtime/src/libraries/` is absent from
+this environment. The audit's managed probe records the exception **type**
+(`ArgumentOutOfRangeException`) and the −1-only sentinel rule; the parameter name
+`MaxDegreeOfParallelism` comes from .NET's `nameof(MaxDegreeOfParallelism)`
+setter idiom rather than from a fresh reading of local source.
+
+### Result
+
+Valid values are −1 and every value ≥ 1; 0 and every value ≤ −2 are rejected
+before any iteration is dispatched, with `ran = 0` measured in every rejecting
+case. ASan + UBSan + LSan: 0 reports, exit 0 (32 sanitizer symbols).
+`SharpRuntimeTests_Threading_Tasks` **208 → 218**. No public signature, object
+layout, vtable or component-edge change.
+
+**SR-AUD-232: `confirmed` → `remediated` (#1966, 2026-08-03).**

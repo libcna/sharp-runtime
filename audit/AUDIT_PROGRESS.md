@@ -6544,3 +6544,31 @@ across all 22 entries; every valid-callable case byte-identical. ASan + UBSan + 
 signature, object layout, vtable, `noexcept` specification or component edge changed.
 
 **Index after #1965: 88 remediated / 276 confirmed / 364 total.**
+
+### #1966 -- SR-AUD-232 (cause TC-B/1)
+
+`confirmed -> remediated`. `ParallelOptions::MaxDegreeOfParallelism` is validated at the
+entry of the one method that reads it: -1 keeps its "unlimited" meaning, every value >= 1
+is honoured exactly, and 0 together with every value <= -2 throws
+`ArgumentOutOfRangeException("MaxDegreeOfParallelism")` before any iteration is dispatched.
+Measured before the repair (`hardware_concurrency = 4`): degrees -3, -2 and 0 each ran the
+whole loop at peak concurrency 4, confirming the report's claim that an invalid cap
+silently became a core-count cap.
+
+Three points recorded rather than assumed:
+
+1. **The repair cannot be placed where .NET places it.** .NET validates in the
+   `ParallelOptions` setter; this port's field is a public mutable data member with nowhere
+   to put a check. Only the point of detection moves -- the exception type and parameter
+   name are .NET's. This is the same shape that gates SR-AUD-235 as #1969, and the reason
+   this one is nonetheless compatible is that `Parallel::For` *reads* the option, so there
+   is a public entry at which to reject before any work runs.
+2. **The degree check must precede #1965's `body` check**, and on the intermediate tree it
+   did not: the port reported the body error where .NET reports the degree error.
+3. **One site.** This port has no `ForEach` options overload; the other four loop overloads
+   are untouched, which a regression asserts.
+
+ASan + UBSan + LSan 0 reports. +10 tests (208 -> 218). No signature, layout, vtable or edge
+change.
+
+**Index after #1966: 89 remediated / 275 confirmed / 364 total.**

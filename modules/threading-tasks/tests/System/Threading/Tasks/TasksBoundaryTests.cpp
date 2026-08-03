@@ -17,7 +17,9 @@
 #include <atomic>
 #include <exception>
 #include <functional>
+#include <limits>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "System/AggregateException.hpp"
@@ -365,4 +367,133 @@ TEST(TasksEmptyCallableBoundaryTests, NoEntryPointReachesBadFunctionCall) {
         }
         EXPECT_TRUE(sawSystemException) << "entry " << i << " accepted an empty callable";
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Ticket #1966 (SR-AUD-232, cause TC-B/1) -- ParallelOptions::MaxDegreeOfParallelism
+//
+// Before that ticket every value <= 0 was silently rewritten to hardware_concurrency(), so 0 and
+// -2 ran a completed loop where .NET throws ArgumentOutOfRangeException, and the substitution
+// raised the effective degree to the machine's core count -- the opposite of what a degree cap
+// is for. Only -1 is a valid special value.
+// ---------------------------------------------------------------------------------------------
+
+namespace {
+
+    ParallelLoopResult runForWithDegree(intcs degree, intcs iterations, std::atomic<intcs>& ran) {
+        ParallelOptions opts;
+        opts.MaxDegreeOfParallelism = degree;
+        return Parallel::For(0, iterations, opts,
+                             std::function<void(intcs)>([&](intcs) { ++ran; }));
+    }
+
+    void expectDegreeRejected(intcs degree) {
+        std::atomic<intcs> ran{0};
+        bool threw = false;
+        try {
+            (void)runForWithDegree(degree, 64, ran);
+        } catch (const System::ArgumentOutOfRangeException& e) {
+            threw = true;
+            EXPECT_NE(std::string(e.getMessageProperty()).find("Parameter 'MaxDegreeOfParallelism'"),
+                      std::string::npos)
+                << "message was: " << e.getMessageProperty();
+        }
+        EXPECT_TRUE(threw) << "degree " << degree << " should have been rejected";
+        // No-partial-state: an invalid option runs NO body at all.
+        EXPECT_EQ(ran.load(), 0) << "degree " << degree << " ran " << ran.load() << " iterations";
+    }
+
+} // namespace
+
+TEST(ParallelDegreeBoundaryTests, DegreeMinusTwo_IsRejectedAndRunsNoBody) {
+    expectDegreeRejected(-2);
+}
+
+TEST(ParallelDegreeBoundaryTests, DegreeMinusThree_IsRejectedAndRunsNoBody) {
+    expectDegreeRejected(-3);
+}
+
+TEST(ParallelDegreeBoundaryTests, DegreeZero_IsRejectedAndRunsNoBody) {
+    expectDegreeRejected(0);
+}
+
+TEST(ParallelDegreeBoundaryTests, DegreeIntMin_IsRejected) {
+    expectDegreeRejected(std::numeric_limits<intcs>::min());
+}
+
+// -1 is .NET's "unlimited" sentinel and stays valid; this runtime realises it as
+// hardware_concurrency(), which is what .NET's own default does.
+TEST(ParallelDegreeBoundaryTests, DegreeMinusOne_StaysValidAndRunsEveryIteration) {
+    std::atomic<intcs> ran{0};
+    ParallelLoopResult result = runForWithDegree(-1, 16, ran);
+    EXPECT_TRUE(result.getIsCompletedProperty());
+    EXPECT_EQ(ran.load(), 16);
+}
+
+TEST(ParallelDegreeBoundaryTests, DegreeOne_IsHonouredExactly) {
+    // Deterministic concurrency check: with a degree of 1 no two iterations may ever overlap.
+    std::atomic<intcs> inFlight{0};
+    std::atomic<intcs> peak{0};
+    std::atomic<intcs> ran{0};
+    ParallelOptions opts;
+    opts.MaxDegreeOfParallelism = 1;
+    ParallelLoopResult result =
+        Parallel::For(0, 12, opts, std::function<void(intcs)>([&](intcs) {
+            ++ran;
+            intcs now = ++inFlight;
+            intcs seen = peak.load();
+            while (now > seen && !peak.compare_exchange_weak(seen, now)) { }
+            --inFlight;
+        }));
+    EXPECT_TRUE(result.getIsCompletedProperty());
+    EXPECT_EQ(ran.load(), 12);
+    EXPECT_EQ(peak.load(), 1);
+}
+
+TEST(ParallelDegreeBoundaryTests, DegreeAboveCoreCount_IsAcceptedAndRunsEveryIteration) {
+    const intcs above = static_cast<intcs>(std::thread::hardware_concurrency()) + 4;
+    std::atomic<intcs> ran{0};
+    ParallelLoopResult result = runForWithDegree(above, 16, ran);
+    EXPECT_TRUE(result.getIsCompletedProperty());
+    EXPECT_EQ(ran.load(), 16);
+}
+
+// The degree error must win over #1965's body error: .NET rejects the invalid degree in the
+// ParallelOptions setter, which runs before Parallel.For is even called.
+TEST(ParallelDegreeBoundaryTests, InvalidDegreeAndEmptyBody_ReportsDegreeFirst) {
+    ParallelOptions opts;
+    opts.MaxDegreeOfParallelism = 0;
+    EXPECT_THROW((void)Parallel::For(0, 4, opts, kEmptyBody),
+                 System::ArgumentOutOfRangeException);
+}
+
+// The four overloads that take no options are untouched by this ticket.
+TEST(ParallelDegreeBoundaryTests, OverloadsWithoutOptions_AreUnchanged) {
+    std::atomic<intcs> ran{0};
+    EXPECT_TRUE(Parallel::For(0, 5, std::function<void(intcs)>([&](intcs) { ++ran; }))
+                    .getIsCompletedProperty());
+    EXPECT_EQ(ran.load(), 5);
+
+    ran.store(0);
+    EXPECT_TRUE(Parallel::For(0, 5, std::function<void(intcs, ParallelLoopState&)>(
+                                        [&](intcs, ParallelLoopState&) { ++ran; }))
+                    .getIsCompletedProperty());
+    EXPECT_EQ(ran.load(), 5);
+
+    ran.store(0);
+    std::vector<int> source{1, 2, 3, 4, 5};
+    EXPECT_TRUE(Parallel::ForEach<int>(source, std::function<void(int)>([&](int) { ++ran; }))
+                    .getIsCompletedProperty());
+    EXPECT_EQ(ran.load(), 5);
+}
+
+TEST(ParallelDegreeBoundaryTests, Rejection_IsCatchableAsArgumentException) {
+    ParallelOptions opts;
+    opts.MaxDegreeOfParallelism = 0;
+    const auto call = [&] {
+        (void)Parallel::For(0, 4, opts, std::function<void(intcs)>([](intcs) { }));
+    };
+    EXPECT_THROW(call(), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(call(), System::ArgumentException);
+    EXPECT_THROW(call(), System::Exception);
 }

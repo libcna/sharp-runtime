@@ -16,6 +16,7 @@
 #include "System/AggregateException.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
 #  include "System/PlatformNotSupportedException.hpp"
 #endif
@@ -27,7 +28,30 @@ namespace System::Threading::Tasks {
 
     /** @brief Stores options that configure the operation of methods on the Parallel class. */
     struct ParallelOptions {
-        /** Maximum number of concurrent iterations; -1 (the default) means unlimited. */
+        /**
+         * Maximum number of concurrent iterations; -1 (the default) means unlimited.
+         *
+         * @note **Valid values are -1 and every value greater than or equal to 1.** 0 and every
+         * value less than -1 are rejected with `System::ArgumentOutOfRangeException`
+         * (ticket #1966, SR-AUD-232).
+         *
+         * @note **Where the rejection happens differs from .NET, deliberately.** .NET validates
+         * in the `ParallelOptions.MaxDegreeOfParallelism` *setter*, so an invalid value can never
+         * be stored. This is a public mutable data member with nowhere to put a check, so the
+         * value is validated at the entry of every `Parallel` method that reads it, before any
+         * iteration is dispatched. The exception type and parameter name are .NET's; only the
+         * point of detection moves. Converting this field to a
+         * `getMaxDegreeOfParallelismProperty()`/`setMaxDegreeOfParallelismProperty()` pair would
+         * be a public source break for every consumer that writes `opts.MaxDegreeOfParallelism =
+         * …`, and is deliberately **not** done here — the identical shape problem is why
+         * `BoundedChannelOptions::FullMode` is approval-gated as ticket #1969.
+         *
+         * @note -1 keeps its documented "unlimited" meaning; this runtime realises it as
+         * `std::thread::hardware_concurrency()`, which is what .NET's own default does. That is a
+         * *worker* count chosen at runtime and is explicitly **not** a CLAUDE.md
+         * build-resource-policy violation, which concerns build-job counts
+         * (`docs/ThreadingTasksChannelsReviewPlan.md` §3.1 item 3).
+         */
         intcs MaxDegreeOfParallelism = -1;
     };
 
@@ -163,6 +187,29 @@ namespace System::Threading::Tasks {
             if (body == nullptr) throw System::ArgumentNullException("body");
         }
 
+        // Ticket #1966 (SR-AUD-232, cause TC-B/1). Before this check every
+        // MaxDegreeOfParallelism <= 0 was silently rewritten to hardware_concurrency(), so 0 and
+        // -2 ran a completed loop where .NET throws. Two consequences, both measured
+        // (build-probe/1966_probe1_parallel_degree.cpp): the caller's configuration error was
+        // lost, and the substitution raised the effective degree to the machine's core count --
+        // the opposite of what a degree cap is for.
+        //
+        // ORDERING: this runs BEFORE requireNonEmptyBody. In .NET the invalid degree is rejected
+        // by the ParallelOptions setter, which necessarily executes before Parallel.For is
+        // called and therefore before .NET's own `body` null check; putting the checks the other
+        // way round would report the body error for a call .NET answers with the degree error.
+        // Same shape as docs/ThreadingNamespaceReviewPlan.md 17.3's constraint on #1954.
+        static void requireValidMaxDegreeOfParallelism(intcs maxDegree) {
+            if (maxDegree == 0 || maxDegree < -1)
+                throw System::ArgumentOutOfRangeException("MaxDegreeOfParallelism");
+        }
+
+        // Resolves a validated MaxDegreeOfParallelism to the batch bound this runtime uses.
+        // Only -1 ("unlimited") is substituted; every value >= 1 is honoured exactly.
+        static intcs resolveMaxDegreeOfParallelism(intcs maxDegree) {
+            return maxDegree == -1 ? DefaultMaxDegreeOfParallelism() : maxDegree;
+        }
+
     public:
         /**
          * Executes a for loop from fromInclusive to toExclusive in parallel.
@@ -174,19 +221,22 @@ namespace System::Threading::Tasks {
 
         /**
          * Executes a for loop in parallel, respecting MaxDegreeOfParallelism in @p opts.
+         *
+         * @throws System::ArgumentOutOfRangeException if `opts.MaxDegreeOfParallelism` is 0 or
+         * less than -1 (parameter name `MaxDegreeOfParallelism`) — checked first, because .NET
+         * rejects those values in the options setter, which runs before this call. No iteration
+         * is dispatched when it throws.
          * @throws System::ArgumentNullException if @p body is empty (parameter name `body`).
          */
         static ParallelLoopResult For(intcs fromInclusive, intcs toExclusive, const ParallelOptions& opts,
                                        std::function<void(intcs)> body) {
+            requireValidMaxDegreeOfParallelism(opts.MaxDegreeOfParallelism);
             requireNonEmptyBody(body);
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)fromInclusive; (void)toExclusive; (void)opts; (void)body;
             throw System::PlatformNotSupportedException("Parallel::For requires pthreads (not available in Emscripten single-threaded build)");
 #else
-            intcs maxDeg = opts.MaxDegreeOfParallelism;
-            if (maxDeg <= 0)
-                maxDeg = static_cast<intcs>(std::thread::hardware_concurrency());
-            if (maxDeg < 1) maxDeg = 1;
+            const intcs maxDeg = resolveMaxDegreeOfParallelism(opts.MaxDegreeOfParallelism);
 
             std::vector<std::future<void>> futures;
             std::vector<std::exception_ptr> exceptions;
