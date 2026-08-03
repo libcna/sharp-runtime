@@ -47,3 +47,23 @@ classified separately.
 
 The small value surface is otherwise coherent, but its two public mutation
 boundaries lack mandatory enum validation.  No source or test was modified.
+
+## Post-audit confirmation — the `System::Runtime` namespace review, ticket #1972 (2026-08-03)
+
+SR-AUD-156 reproduces exactly as recorded, with no correction to its premise, count,
+severity or consequence. Measured on 2026-08-03
+(`build-probe/1972_probe1_runtime_boundaries.cpp`, `build-probe/1972_probe1_before.log`),
+each case restoring the shared static to its default first so the retained value is
+that case's own input:
+
+```
+latency(99): outcome=no-throw retained=99      loh(0): outcome=no-throw retained=0
+latency(-1): outcome=no-throw retained=-1      loh(3): outcome=no-throw retained=3
+latency(NoGCRegion=4): outcome=no-throw retained=4
+```
+
+One detail recorded because it decides the repair's shape: `NoGCRegion` is a legal
+value to **observe** and an illegal value to **write**, so the getter's domain and the
+setter's domain deliberately differ. Owned by cause **R-F** and ticket **#1976**.
+
+**No new `SR-AUD-*` identifier was issued**; numbering stays frozen at **364**.

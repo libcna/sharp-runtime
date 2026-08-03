@@ -99,3 +99,85 @@ or a blocking raw-handler write.
 
 The POSIX path has four confirmed behavior/liveness defects (SR-AUD-169
 through SR-AUD-172).  No source or test was modified.
+
+## Post-audit corrections — the `System::Runtime` namespace review, ticket #1972 (2026-08-03)
+
+All four findings remain **confirmed** and every word above is retained. Four
+corrections, each measured on 2026-08-03
+(`build-probe/1972_probe2_posix_signal.cpp`, `build-probe/1972_probe2_before.log`).
+
+### 1. A methodology trap that produced two false negatives before it was caught
+
+The registry's watcher is a **process-global thread started by the first `Create()`**,
+and `fork()` duplicates only the calling thread. A child forked *after* the parent has
+registered anything inherits `watcherRunning_ == true` with **no watcher thread behind
+it**: `ensureWatcherStarted()` returns early, nothing drains the pipe,
+`dispatchSignal()` never runs, and both forked reproductions report a confident
+**false negative**:
+
+```
+(forked after the parent registered)          (forked before any parent registration)
+  child_still_running... callbacks=0            child_stopped_by=20 (WIFSTOPPED) callbacks=1
+  watcher_never_parked                          passed_pipe_capacity ... died_signal_14 (SIGALRM)
+```
+
+This is `docs/ThreadingNamespaceReviewPlan.md` §19.4's rule in a new form — *a probe's
+negative result is evidence about the probe until the probe has been shown capable of
+reporting something*. Every forked case in `1972_probe2` now prints a liveness marker
+(`callbacks=`, `parked`) and the forked cases run first.
+
+### 2. SR-AUD-169's consequence is sharper than "receives the default disposition"
+
+For most catchable signals the default disposition **terminates the process**, so the
+phrasing understates the case the audit's own SIGWINCH probe cannot reach (SIGWINCH's
+default *is* ignore):
+
+```
+sighup_before_create=SIG_IGN
+sighup_during_registration=port-handler
+sighup_after_dispose=SIG_DFL      <-- SIGHUP's default is *terminate*
+```
+
+A process that deliberately set `SIG_IGN` on `SIGHUP` — the standard daemon idiom — is
+**killed by the next SIGHUP** once an unrelated component disposes its last
+registration. The repair must restore `SIG_IGN` exactly, not merely "restore
+something". Owned by cause **R-A**, ticket **#1975**.
+
+### 3. SR-AUD-170 rejects the positive spelling of **named** members too
+
+```
+raw SIGUSR1(10)=rejected   raw SIGUSR2(12)=rejected   raw SIGPIPE(13)=rejected
+raw SIGALRM(14)=rejected   raw SIGWINCH(28)=rejected   <-- a signal the port supports
+```
+
+`static_cast<PosixSignal>(SIGWINCH)` is rejected although `PosixSignal::Sigwinch` is
+accepted. The defect is therefore not "raw numbers are unsupported" but "the enum is
+accepted in exactly one of its two valid spellings", and a repair must make the two
+spellings agree. Owned by cause **R-D**, ticket **#1977**.
+
+### 4. SR-AUD-172's flood reproducer now exists, and the blocked writes carry no information
+
+The finding correctly notes that no flood reproducer was run. One now is, and it is
+deterministic: with the watcher parked inside a user callback, delivery ~65,537 blocks
+**inside the raw handler** and `alarm(10)` is what ends the child
+(`saturation_child=died_signal_14`). Two things follow that the finding does not
+state: the blocked writes are **pure loss** — `pending_[signo]` is a flag already set
+*before* the `write()`, so the byte that blocks carries nothing the watcher does not
+already have — and the thread that blocks is whichever thread the OS chose for
+delivery, which is exactly the "interrupted while holding a lock the watcher needs"
+deadlock the finding describes. Owned by cause **R-B**, ticket **#1974**.
+
+### Dispositions
+
+SR-AUD-169 → **#1975** (compatible: save and restore only). SR-AUD-172 → **#1974**
+(compatible). SR-AUD-170 → **#1977** (compatible: widening only). SR-AUD-171, plus
+SR-AUD-169's *chaining* half, → **#1979**, **approval-gated**: the port's behaviour is
+reproduced here but .NET's is not, because this report's reference basis is a reading
+of `pal_signal.c` taken when `/rv/tmp/runtime/src/libraries/` was present — it is
+**absent** in this environment — and carries no managed probe. That is the same line
+the repository drew between #1968 and #1963.
+
+One separate post-audit defect was found and is **not** folded into #1974: the
+self-pipe descriptors have no `O_CLOEXEC` and survive `exec()`. Tracked as inactive
+ticket **#1985**. **No new `SR-AUD-*` identifier was issued**; numbering stays frozen
+at **364**.

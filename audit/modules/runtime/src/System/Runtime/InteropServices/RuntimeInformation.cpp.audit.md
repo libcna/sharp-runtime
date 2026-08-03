@@ -29,3 +29,24 @@ OS architecture. Linux tests cannot exercise this compile-time Windows branch.
 Linux normal-path behavior is green, but Windows native architecture reporting
 is observably wrong for supported mixed-bitness execution. No source or test
 was modified.
+
+## Post-audit disposition — the `System::Runtime` namespace review, ticket #1972 (2026-08-03)
+
+SR-AUD-154 remains **confirmed** and is **deferred verification**, ticket **#1983** —
+not implemented, not guessed. It is blocked on **three independent absences**, all of
+which must be resolved before any code is written:
+
+1. no Windows toolchain in this environment;
+2. no mixed-bitness Windows host on which the difference between process and OS
+   architecture is observable;
+3. no `/rv/tmp/runtime/src/libraries/`, so the `IsWow64Process2`/`GetNativeSystemInfo`
+   mapping this report cites cannot be re-read.
+
+The report's secondary observation — that the unknown-compile-target fallback
+*fabricates* `X64` rather than refusing an unsupported target — is carried into the
+same ticket rather than dropped. This is the same class of deferral as #1963
+(SR-AUD-200), and for the same stated reason: **nothing is implemented from
+recollection when reference behaviour decides the answer.** Cause **R-K** in
+`docs/SystemRuntimeNamespaceReviewPlan.md`.
+
+**No new `SR-AUD-*` identifier was issued**; numbering stays frozen at **364**.

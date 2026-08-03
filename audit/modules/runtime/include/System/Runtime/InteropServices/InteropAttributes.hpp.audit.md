@@ -76,3 +76,24 @@ that its stated layout/P/Invoke effects are unavailable.
 Some basic enum values and stored fields are present, but the header contains
 incorrect defaults/enum data, a truncated typed metadata surface, and no
 operational interop consumer.  No source or test was modified.
+
+## Post-audit correction — the `System::Runtime` namespace review, ticket #1972 (2026-08-03)
+
+SR-AUD-165, SR-AUD-166 and SR-AUD-167 remain **confirmed** and are owned by cause
+**R-G**, the **approval-gated** ticket **#1980** — every one of them changes a
+declaration a consumer can already name. Group **G-2** of that ticket also records
+that `StructLayoutAttributeTests.DefaultPack_IsEight` deliberately pins the wrong
+value and would have to be rewritten, which is one reason G-2 is not the recommended
+first group.
+
+**SR-AUD-168 is split.** Its structural claim — that these types have no declaration
+attachment, no ABI transformation, no DLL binding and no COM marshaller — restates
+`CLAUDE.md`'s already-accepted permanent deviation **"P/Invoke / interop — out of
+scope"**, so it is not an open design question and carries no ticket. Its
+**actionable residue** is the one thing this report adds that CLAUDE.md does not
+cover, quoted from the report itself: *"this file does not document an explicit native
+alternative or warn that its stated layout/P/Invoke effects are unavailable"*, unlike
+the compiler-service marker headers. That disclosure gap is owned by cause **R-J** and
+ticket **#1978**.
+
+**No new `SR-AUD-*` identifier was issued**; numbering stays frozen at **364**.

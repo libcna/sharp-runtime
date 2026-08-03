@@ -658,3 +658,32 @@ and twelve further rendezvous cases were added.
 **SR-AUD-233: `confirmed` -> `remediated`.** Cause TC-B/2 is closed, and with it the whole
 compatible half of this review: TC-A, TC-B/1, TC-B/2 and TC-C are all closed, leaving only the
 two approval-gated causes TC-B/3 (#1969) and TC-D (#1970).
+
+---
+
+## 19. A wording correction to §17's consequence summary (2026-08-03, ticket #1972)
+
+Neither #1967 nor its tests are reopened — the implementation is complete and correct,
+and nothing below changes a line of code. This corrects a **summary sentence** only.
+
+The batch handoff that landed #1967 described it as involving *"no exception-contract
+change"*. That sentence collapses three consequences this repository deliberately keeps
+apart, and two of the three readings of it are true while the third is false. The
+accurate statement, split:
+
+| Consequence | #1967 |
+|---|---|
+| public signature or `noexcept` **declaration** change | **none** — no declaration was touched |
+| **ABI** or mangled-symbol change | **none** — both repaired bodies are inline in an `INTERFACE` target |
+| deliberate, observable change in the **exception type crossing an API boundary** | **yes — this was the point of the ticket** |
+
+SR-AUD-234's whole subject is an API-specific exception boundary: before #1967, reading
+from or writing to a closed channel surfaced the raw close error, and after it the error
+is wrapped in `ChannelClosedException` at `ChannelReader<T>::ReadAsync` **and** at
+`ChannelWriter<T>::WriteAsync` (the second site being §17's own correction to the
+finding). A caller therefore catches a **different type** than before. That is an
+exception-*behaviour* change with no exception-*specification* change, and calling it
+"no exception-contract change" without that qualifier understates it.
+
+The historical §17 text is retained unchanged. Recorded here so a future session
+reading the handoff does not conclude that #1967 was behaviour-neutral.

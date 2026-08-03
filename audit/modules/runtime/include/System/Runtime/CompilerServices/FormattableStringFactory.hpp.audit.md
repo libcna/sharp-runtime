@@ -40,3 +40,14 @@ contradiction, not a reason to add an empty-string rejection.
 The factory behavior is compatible with empty .NET composite format text, but
 its exception documentation is false.  No source or test was modified during
 this audit.
+
+## Post-audit confirmation — the `System::Runtime` namespace review, ticket #1972 (2026-08-03)
+
+SR-AUD-059 reproduces exactly as recorded: `empty_format=no-throw args=0 text_len=0`
+(`build-probe/1972_probe1_before.log`). The report's own conclusion is adopted
+unchanged — *"a public documentation/diagnostic contradiction, not a reason to add an
+empty-string rejection"* — so the repair makes the **documentation** true and leaves
+the behaviour alone. Owned by cause **R-J** and ticket **#1978**, together with the
+disclosure half of SR-AUD-168.
+
+**No new `SR-AUD-*` identifier was issued**; numbering stays frozen at **364**.

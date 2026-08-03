@@ -61,3 +61,29 @@ contract changes above.
 The normal weak-key table operations are useful and green, but its snapshot
 enumerator and unconstrained generic domain diverge observably from current
 .NET.  No source or test was modified.
+
+## Post-audit correction — the `System::Runtime` namespace review, ticket #1972 (2026-08-03)
+
+SR-AUD-161 remains **confirmed**; it is owned by cause **R-H** and the
+**approval-gated** ticket **#1981**, because repairing the snapshot changes
+`Enumerator`'s data members — an object-layout change in a header-only template — and
+makes `Reset()` a no-op, which removes re-enumeration for any consumer using it.
+
+**SR-AUD-162's premise does not survive translation to C++**, and the finding's
+*disposition* changes accordingly. The historical text above is retained.
+
+The finding cites CS0452 and `where TKey : class`. Measured against the actual C++
+declaration, this port does not instantiate a weak reference to a scalar:
+`ConditionalWeakTable<TKey,TValue>` keys on `std::weak_ptr<TKey>` and stores
+`std::shared_ptr<TValue>`, and `std::weak_ptr<int>` is a perfectly well-defined
+reference to a heap-managed control block. The managed constraint exists because the
+**CLR** cannot create a weak GC handle to a value type — a CLR limitation with no C++
+counterpart. Adopting it would delete working, well-defined functionality in order to
+imitate a restriction whose cause does not exist here.
+
+The selected disposition is therefore to **document the widening as a deliberate,
+permanent native adaptation** and add **no** constraint (cause **R-I**, ticket
+**#1982**). It would be reopened by evidence that `weak_ptr<TKey>` keying has a
+semantic defect for scalar `TKey` — not merely by the existence of CS0452.
+
+**No new `SR-AUD-*` identifier was issued**; numbering stays frozen at **364**.

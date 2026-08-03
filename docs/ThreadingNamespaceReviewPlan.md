@@ -1453,3 +1453,34 @@ ASan + UBSan + LSan over the surface probe: 0 reports.
 `SharpRuntimeTests_Threading` **429 -> 445** (+16), in a new translation unit
 `ThreadingPublicShapeTests.cpp`. **SR-AUD-214 and SR-AUD-189: `confirmed` -> `remediated`.**
 Cause T-H now has **six** open members, all in the blocked #1958.
+
+---
+
+## 22. One correction to §1's namespace-selection prose (2026-08-03, ticket #1972)
+
+§1's table of open findings by module is accurate and is not changed. The **prose**
+immediately below it dismissed the next namespace with:
+
+> Explicitly **not** selected, and why: `runtime` (21) is dominated by reflection and
+> serialization surfaces that CLAUDE.md already classifies as permanent deviations […]
+
+Re-measured against `audit/AUDIT_FINDINGS_INDEX.md` on 2026-08-03, that sentence is
+**wrong on all three of its claims**, and the historical text above is retained only as
+the record of what was believed at the time:
+
+| Claim | Measured |
+|---|---|
+| dominated by **reflection** surfaces | **0 of 21** open `runtime` findings are reflection findings |
+| dominated by **serialization** surfaces | **0 of 21** — `Serialization/SerializationInfo.hpp` and `Serialization/StreamingContext.hpp` carry **no finding at all** |
+| already covered by a CLAUDE.md permanent deviation | **1 of 21** (SR-AUD-168, interop attributes), and even that one has an actionable disclosure residue |
+
+What `runtime` actually contains is **three high-severity POSIX signal-handling
+defects in one `.cpp` body** — the destruction of process-wide signal policy, a
+blocking write inside a raw signal handler, and a job-control stop on mere observation
+— none of which any permanent deviation covers, and none of which `System::Uri`'s
+fourteen findings match for severity.
+
+The selection §1 made was still correct: `System::Threading` had 38 findings and 14
+highs and was rightly first. Only the *reason given for deferring `runtime`* was
+wrong. `docs/SystemRuntimeNamespaceReviewPlan.md` §1 carries the corrected selection
+argument.
