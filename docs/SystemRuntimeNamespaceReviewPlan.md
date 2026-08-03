@@ -1183,3 +1183,117 @@ have the semantics the table depends on.
 
 No public signature, layout, vtable, `noexcept`, mangled symbol, component edge or runtime
 behaviour changed. `SharpRuntimeTests_Runtime` **158 → 161**.
+
+---
+
+## 25. Namespace scoreboard and closing validation (2026-08-03)
+
+### 25.1 Scoreboard — cause by cause
+
+| Cause | Findings | State |
+|---|---|---|
+| **R-A** save/restore the prior disposition | SR-AUD-169 (save/restore half) | **closed** — #1975 |
+| **R-B** async-signal handler liveness | SR-AUD-172 | **closed** — #1974 |
+| **R-D** valid input domain rejected | SR-AUD-170 | **closed** — #1977 |
+| **R-E** null handle deferred to UB | SR-AUD-155 | **closed** — #1973 |
+| **R-F** out-of-domain enum retained | SR-AUD-156 | **closed** — #1976 |
+| **R-I** template-domain classification | SR-AUD-162 | **closed** — #1982, documented deviation |
+| **R-J** documentation truth | SR-AUD-059 + SR-AUD-168 disclosure | **closed** — #1978 |
+| **R-L** accepted permanent deviation | SR-AUD-168 structural | **closed** — no ticket, CLAUDE.md |
+| **R-C** what happens after the callbacks return | SR-AUD-171 + SR-AUD-169 chaining half | **open, approval-gated** — #1979 |
+| **R-G** public shapes | SR-AUD-152/153/158/159/160/163/164/165/166/167 | **open, approval-gated** — #1980 |
+| **R-H** weak-table enumerator | SR-AUD-161 | **open, approval-gated** — #1981 |
+| **R-K** Windows OS architecture | SR-AUD-154 | **open, deferred verification** — #1983 |
+
+**The entire compatible half of this review is closed**: eight of the twelve causes and
+**eight of the twenty-one open findings** are `remediated`. The remaining thirteen are
+ten approval-gated public shapes, two approval-gated behaviour questions, and one
+deferred verification — none of which this batch was authorised to implement.
+
+Two post-audit defects were found and recorded rather than absorbed, **neither issuing an
+`SR-AUD-*` identifier**: **#1985** (self-pipe descriptors survive `exec()`) and **#1986**
+(a handler can be invoked after `Dispose()` returns). Audit numbering stays frozen at
+**364**.
+
+### 25.2 Closing validation, exactly as measured
+
+| Gate | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| Full gate, 37 executables run individually | **15,288 tests — 15,281 passed, 1 skipped, 6 failed** |
+| `SharpRuntimeTests_Runtime` | **126 → 161** (+35), all passing |
+| `validate_module_boundaries.py` | OK — **41 modules, 91 edges** (unchanged) |
+| `validate_module_boundaries_test.py` | 7 / 7 |
+| `generate_component_catalog.py --check` | OK, current |
+| `db_consistency_check.py` | OK, no problems |
+| `check_version_seam_odr.py` | OK — **2 seams, 18 definitions** |
+| `check_version_seam_odr_test.py` | **15 / 15** |
+| `check_negative_consumer_fixtures.py` | OK — **10 fixtures, 81 sites**, 91 invocations, **peak 2 jobs** |
+| `check_negative_consumer_fixtures_test.py` | **45 / 45** |
+| `check_selective_components.sh` | **passed** (every component, 2 jobs) |
+| `local_ci_check.sh build` | every static gate OK, build clean; stops at the same known Ping failures |
+| `git diff --check` | clean |
+| **Doxygen** | **NOT RUN — `doxygen` is not installed here.** The 1,942 ceiling stays *historical*. No system package was installed. |
+
+15,288 is **+35** over the previous batch's 15,253, matching exactly the
+10 + 2 + 5 + 10 + 5 + 3 this batch added.
+
+### 25.3 The six failing tests — same two causes, re-measured, and one attribution sharpened
+
+**No test was disabled, skipped, weakened or recategorised.** All six are the same tests
+the previous batch measured; none is new.
+
+Directly probed on 2026-08-03 rather than inferred:
+
+```
+/proc/sys/net/ipv4/ping_group_range = "1  0"      (low 1 > high 0 -- an EMPTY range)
+socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP)  -> Permission denied
+socket(AF_INET, SOCK_RAW,   IPPROTO_ICMP)  -> OK
+socket(AF_INET6, SOCK_STREAM, 0)           -> Address family not supported by protocol
+/proc/net/if_inet6                          -> does not exist
+```
+
+| Test | Cause |
+|---|---|
+| `PingTests.Send_Loopback_Succeeds` | environment **and** #1962 — see below |
+| `PingTests.Send_LoopbackByString_Succeeds` | same |
+| `PingTests.Send_CustomBuffer_EchoedBack` | same |
+| `PingTests.Send_WithOptions_Succeeds` | same |
+| `PingTests.SendPingAsync_Loopback_Succeeds` | same |
+| `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` | `AF_INET6` unavailable in this kernel namespace |
+
+**The attribution is sharper than the previous batch could make it.** Both halves are now
+measured separately in the same probe: the closed `ping_group_range` is the *environmental
+restriction* that blocks the unprivileged datagram socket, and **`SOCK_RAW`/`IPPROTO_ICMP`
+succeeds in this container** — so a working ICMP path *does* exist here and `Ping` cannot
+use it. That is exactly **#1962**, which stays `blocked`: its design is incomplete and the
+privilege/platform/security decision it needs was not taken here. The environment alone no
+longer fully explains these five failures, and saying so is the point.
+
+One skipped test, unchanged:
+`CultureInvariantFormattingTests.NumericAndDateFormatting_UnaffectedByNonInvariantGlobalLocale`
+— no non-invariant locale installed.
+
+### 25.4 Aggregate consequences of the whole batch
+
+**No public signature, object layout, vtable, `noexcept` specification, mangled symbol or
+component edge changed anywhere.** The module graph stays **41 / 91**; seams **2 / 18**;
+negative fixtures **10 / 81**. Two headers gained an include, both of types already in
+`Core.Base`, already a `PUBLIC_DEPENDENCIES` entry.
+
+Observable changes, all four stated in §9 in advance:
+
+1. four `ExceptionDispatchInfo` calls that ended the process with an uncatchable fault now
+   throw a catchable `System::Exception`;
+2. a signal flood that hung a delivery thread now completes;
+3. the process's signal disposition is restored instead of forced to `SIG_DFL`;
+4. **`GCSettings`' two setters now reject out-of-domain input** — the only change in the
+   batch that makes a currently *succeeding* call fail, and .NET throws for the identical
+   call.
+
+Plus one strict widening (raw signal numbers) and two documentation repairs with zero
+runtime effect.
+
+**Maximum aggregate compilation parallelism: two jobs**, never exceeded. No two
+compilations ran concurrently — the batch waited for `check_selective_components.sh` to
+finish before starting the test gate.
