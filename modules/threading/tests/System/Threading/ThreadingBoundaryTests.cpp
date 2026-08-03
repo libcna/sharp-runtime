@@ -7,6 +7,8 @@
 //
 //   ticket #1951 (cause T-B) -- empty std::function values crossing public boundaries,
 //                               i.e. CCF-011 in modules/threading;
+//   ticket #1952 (cause T-C) -- WaitHandle's four static multi-wait entry points, which
+//                               validated neither the collection nor the timeout;
 //
 // Every case here pins an input a caller can supply that used to reach
 // std::bad_function_call, std::terminate, a silent no-op or a silently wrong value, plus
@@ -283,4 +285,157 @@ TEST(ThreadingEmptyCallableTests, SynchronizationContext_SendNonEmpty_StillRunsS
 TEST(ThreadingEmptyCallableTests, SynchronizationContext_PostEmpty_ReturnsNormally) {
     SynchronizationContext ctx;
     EXPECT_NO_THROW(ctx.Post(SendOrPostCallback{}, nullptr));
+}
+
+// ===========================================================================
+// #1952 / SR-AUD-183 (cause T-C) -- WaitHandle's four static multi-wait entries
+//
+// Every one of them validated nothing: an empty collection produced `true`, `258`, or an
+// unbounded loop; a null element was silently skipped; and a timeout below -1 produced
+// `true` for an empty collection and `false` for a non-empty one. .NET's WaitMultiple
+// validates in the order empty-collection, timeout, null-element, and all four entries here
+// now do too.
+// ===========================================================================
+
+namespace {
+
+    // Minimal concrete WaitHandle: signalled or not, no OS object involved.
+    class SignalHandle final : public WaitHandle {
+        bool signalled_;
+
+    public:
+        explicit SignalHandle(bool signalled) : signalled_(signalled) {}
+        bool WaitOne() override { return signalled_; }
+        bool WaitOne(SharpRuntime::intcs) override { return signalled_; }
+    };
+
+    // Asserts System::ArgumentException (not a derived type) naming `paramName`, so an
+    // empty-collection rejection can never be satisfied by an ArgumentNullException.
+    template <typename F>
+    void ExpectEmptyCollection(F&& call) {
+        bool threw = false;
+        try {
+            call();
+        } catch (const System::ArgumentNullException&) {
+            ADD_FAILURE() << "empty collection reported as a null element";
+        } catch (const System::ArgumentException& e) {
+            threw = true;
+            EXPECT_EQ(e.getParamNameProperty(), "waitHandles");
+            EXPECT_NE(std::string(e.what()).find("Waithandle array may not be empty."),
+                      std::string::npos);
+        }
+        EXPECT_TRUE(threw);
+    }
+
+    template <typename F>
+    void ExpectNullElement(F&& call, const char* paramName) {
+        bool threw = false;
+        try {
+            call();
+        } catch (const System::ArgumentNullException& e) {
+            threw = true;
+            EXPECT_EQ(e.getParamNameProperty(), paramName);
+            EXPECT_NE(std::string(e.what()).find("At least one element in the specified array was null."),
+                      std::string::npos);
+        }
+        EXPECT_TRUE(threw);
+    }
+
+}  // namespace
+
+TEST(ThreadingMultiWaitValidationTests, EmptyCollection_RejectedByAllFourEntries) {
+    const std::vector<WaitHandle*> empty{};
+    ExpectEmptyCollection([&] { (void)WaitHandle::WaitAll(empty); });
+    ExpectEmptyCollection([&] { (void)WaitHandle::WaitAll(empty, 0); });
+    ExpectEmptyCollection([&] { (void)WaitHandle::WaitAny(empty); });
+    ExpectEmptyCollection([&] { (void)WaitHandle::WaitAny(empty, 0); });
+}
+
+// The three loops that never terminated. Each of these calls used to spin forever with no
+// handle to poll; if any regresses, this case hangs the suite rather than failing quietly,
+// which is the only signal a non-terminating function can give.
+TEST(ThreadingMultiWaitValidationTests, UnboundedWaitAnyShapes_TerminateWithADiagnostic) {
+    const std::vector<WaitHandle*> empty{};
+    const std::vector<WaitHandle*> nullOnly{nullptr};
+    ExpectEmptyCollection([&] { (void)WaitHandle::WaitAny(empty); });
+    ExpectEmptyCollection([&] { (void)WaitHandle::WaitAny(empty, -1); });
+    ExpectNullElement([&] { (void)WaitHandle::WaitAny(nullOnly); }, "waitHandles[0]");
+}
+
+TEST(ThreadingMultiWaitValidationTests, NullElement_RejectedWithItsIndex) {
+    SignalHandle signalled(true);
+    const std::vector<WaitHandle*> nullOnly{nullptr};
+    const std::vector<WaitHandle*> secondNull{&signalled, nullptr};
+    const std::vector<WaitHandle*> thirdNull{&signalled, &signalled, nullptr};
+
+    ExpectNullElement([&] { (void)WaitHandle::WaitAll(nullOnly); }, "waitHandles[0]");
+    ExpectNullElement([&] { (void)WaitHandle::WaitAll(nullOnly, 0); }, "waitHandles[0]");
+    ExpectNullElement([&] { (void)WaitHandle::WaitAny(nullOnly, 0); }, "waitHandles[0]");
+    ExpectNullElement([&] { (void)WaitHandle::WaitAll(secondNull, 0); }, "waitHandles[1]");
+    ExpectNullElement([&] { (void)WaitHandle::WaitAny(thirdNull, 0); }, "waitHandles[2]");
+}
+
+// The sharpest observable change in this ticket: a mixed collection used to return a
+// plausible answer by silently skipping the null. .NET rejects it, so the port does now.
+TEST(ThreadingMultiWaitValidationTests, MixedCollection_NoLongerSkipsTheNullSilently) {
+    SignalHandle signalled(true);
+    const std::vector<WaitHandle*> mixed{&signalled, nullptr};
+    ExpectNullElement([&] { (void)WaitHandle::WaitAny(mixed, 0); }, "waitHandles[1]");
+    ExpectNullElement([&] { (void)WaitHandle::WaitAll(mixed, 0); }, "waitHandles[1]");
+}
+
+TEST(ThreadingMultiWaitValidationTests, TimeoutBelowMinusOne_Rejected) {
+    SignalHandle signalled(true);
+    const std::vector<WaitHandle*> valid{&signalled};
+
+    for (SharpRuntime::intcs bad : {static_cast<SharpRuntime::intcs>(-2),
+                                    static_cast<SharpRuntime::intcs>(-100)}) {
+        bool threw = false;
+        try {
+            (void)WaitHandle::WaitAll(valid, bad);
+        } catch (const System::ArgumentOutOfRangeException& e) {
+            threw = true;
+            EXPECT_EQ(e.getParamNameProperty(), "millisecondsTimeout");
+        }
+        EXPECT_TRUE(threw);
+        EXPECT_THROW((void)WaitHandle::WaitAny(valid, bad), System::ArgumentOutOfRangeException);
+    }
+}
+
+// .NET's WaitMultiple checks the collection before the timeout, and the elements after it.
+// Both boundaries are pinned so a later edit cannot reorder them unnoticed.
+TEST(ThreadingMultiWaitValidationTests, ValidationOrder_EmptyBeatsTimeoutBeatsNullElement) {
+    SignalHandle signalled(true);
+    const std::vector<WaitHandle*> empty{};
+    const std::vector<WaitHandle*> withNull{&signalled, nullptr};
+
+    // empty + invalid timeout -> the collection error wins
+    ExpectEmptyCollection([&] { (void)WaitHandle::WaitAll(empty, -2); });
+    ExpectEmptyCollection([&] { (void)WaitHandle::WaitAny(empty, -2); });
+
+    // null element + invalid timeout -> the timeout error wins
+    EXPECT_THROW((void)WaitHandle::WaitAll(withNull, -2), System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)WaitHandle::WaitAny(withNull, -2), System::ArgumentOutOfRangeException);
+}
+
+// The documented sequential/polling adaptation for valid input must be untouched, including
+// the -1 and 0 special cases both overloads carry.
+TEST(ThreadingMultiWaitValidationTests, ValidInput_BehaviourUnchanged) {
+    SignalHandle signalled(true);
+    SignalHandle unsignalled(false);
+    const std::vector<WaitHandle*> allSignalled{&signalled, &signalled};
+    const std::vector<WaitHandle*> secondSignalled{&unsignalled, &signalled};
+
+    EXPECT_TRUE(WaitHandle::WaitAll(allSignalled));
+    EXPECT_TRUE(WaitHandle::WaitAll(allSignalled, -1));
+    EXPECT_TRUE(WaitHandle::WaitAll(allSignalled, 0));
+
+    EXPECT_EQ(WaitHandle::WaitAny(allSignalled), 0);
+    EXPECT_EQ(WaitHandle::WaitAny(allSignalled, -1), 0);
+    EXPECT_EQ(WaitHandle::WaitAny(allSignalled, 0), 0);
+    EXPECT_EQ(WaitHandle::WaitAny(secondSignalled, 0), 1);
+
+    EXPECT_FALSE(WaitHandle::WaitAll(secondSignalled, 0));
+    const std::vector<WaitHandle*> noneSignalled{&unsignalled};
+    EXPECT_EQ(WaitHandle::WaitAny(noneSignalled, 20), WaitHandle::WaitTimeout);
 }
