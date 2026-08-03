@@ -1,28 +1,260 @@
-*Last verified: 2026-08-03. Branch `feature/remediation-batch-system-text-review`, cut from
-`bef4e43` (the previous batch's tip on `feature/remediation-batch-uri-followup-2000`). **Seven
-commits — `67cbfa7` … `4f459de` plus this handoff commit — all unsigned and all local-only; no
-push was requested.**
-The three earlier local-only commits from the two previous batches were carried forward
-untouched: no amend, no rebase, no force-push, no merge, no tag, no PR. This batch performed
-the **`System::Text` namespace review (#2006)** and implemented **its whole compatible half**
-— **#2007** (the raw decode boundary), **#2008** (null fallback setters), **#2009**
-(`StringBuilder::CopyTo`'s capacity overflow), **#2010** (`CompositeFormat::Parse`), **#2011**
-(the Web encoder helpers) and **#2012** (three headers' byte-vs-character contracts). Nine
-approval-sensitive causes are **design-complete and blocked** as **#2013–#2021**, each with an
-exact approval sentence; **no approval was requested or assumed.** Audit moves **104 → 107
-remediated / 260 → 257 confirmed / 364 total**, of which **24 → 35** carry the
-`confirmed (design-complete)` qualifier — **no `SR-AUD-*` identifier was created; numbering
-stays frozen at 364.** Gate **15,461 tests across 37 executables, 15,454 passing, 1 skipped,
-6 failing** for the same two measured environment causes, unchanged and not hidden — **no new
-failure**. `SharpRuntimeTests_Text` **238 → 288** (+50, add-only). Graph **41 / 91**, seams
-**2 / 18**, negative fixtures **10 / 81** (91 invocations, peak 2 jobs), checker self-tests
-**45 / 45** and **15 / 15**, module-boundary self-tests **7 / 7**, build **0 warnings /
-0 errors**, `git diff --check` clean. **Doxygen NOT run — still not installed here.** Database
-**2,020 tickets: 1,972 done, 4 todo, 37 blocked, 3 needs_user, 4 wontfix**, none doing.
-**#1773 remains blocked and its downstream use was not investigated. #1995–#1999 and #2003
-remain blocked, #2005 remains deferred; none was reopened.** Maximum aggregate parallelism
-**2 jobs**. `CNA` and `mobile-eggbert` were not read, searched, built, tested or modified.
+*Last verified: 2026-08-03. Branch `feature/remediation-batch-text-approvals-next-review`, cut from
+`80c804b` (the previous batch's tip on `feature/remediation-batch-system-text-review`). **Four
+commits — `017d336`, `6abd16e`, `8114518` plus this handoff commit — all unsigned and all local-only;
+no push was requested.** The pre-existing local-only commits from the earlier batches were carried
+forward untouched: no amend, no rebase, no force-push, no merge, no tag, no PR. This batch
+**verified and consolidated the `System::Text` approval package** for **#2013-#2021** into
+`docs/SystemTextApprovalPackage.md` (six families, one exact approval sentence each) and found
+**ten premises in the review plan's section 14 that did not survive re-measurement**; it split and
+implemented the **one** genuinely compatible portion, **#2022** (test-only: two blocked findings,
+SR-AUD-294 and SR-AUD-299, had **no behaviour-pinning test at all**); it verified **CCF-012**'s
+closure scope without marking it closed; and it then **re-derived the next namespace by
+measurement** and performed the **`System::Diagnostics` review (#2023)** —
+`docs/SystemDiagnosticsNamespaceReviewPlan.md`, eight findings, seven causes **D-A...D-G**, five
+compatible tickets **#2024-#2028** (`todo`) and three design tickets **#2029-#2031** (`blocked`).
+**No approval was requested, implied or assumed, and no gated work was implemented.** Audit stays
+**107 remediated / 257 confirmed / 364 total**, with `confirmed (design-complete)` **35 -> 38**
+(SR-AUD-269, 271, 273); **no `SR-AUD-*` identifier was created; numbering stays frozen at 364.**
+`SharpRuntimeTests_Text` **288 -> 296** (+8, add-only, no production change). Gate **15,469 tests across 37 executables run individually, 15,462 passing, 1 skipped, 6 failing** for the same two measured causes, unchanged and not hidden — **no new failure**; the +8 is exactly #2022's. Graph **41 / 91**, seams **2 / 18**, negative fixtures **10 / 81** (91 invocations, peak 2 jobs), checker self-tests **45 / 45** and **15 / 15**, module-boundary self-tests **7 / 7**, catalogue current, DB consistency OK, build **0 warnings / 0 errors**, `git diff --check` clean. **`scripts/check_selective_components.sh` did NOT complete — see the handoff's §10.**
+**Doxygen NOT run - still not installed here.** **#1773 remains blocked and its downstream use was
+not investigated; #1962, #1956-#1959, #1969, #1970, #1995-#1999 and #2003 remain blocked; #1963,
+#1983 and #2005 remain deferred; none was reopened.** Maximum aggregate parallelism **2 jobs**.
+`CNA` and `mobile-eggbert` were not read, searched, built, tested or modified.
 See the first handoff below.*
+
+---
+
+## Autonomous batch handoff, 2026-08-03 (`System::Text` approval package #2022 + the `System::Diagnostics` review #2023)
+
+Branch `feature/remediation-batch-text-approvals-next-review`, cut from the clean tip
+`80c804b`. Four new commits (three of work, plus this handoff), all created with
+`git -c commit.gpgsign=false` because this environment has no usable signing key. **Nothing
+was pushed, merged, rebased, tagged, force-pushed or published, no PR was created, no remote
+reference was altered and no history was rewritten** — including the pre-existing local-only
+commits from the previous batches, which were left exactly as they were.
+
+This batch had two jobs: **verify and consolidate the `System::Text` approval package for
+#2013–#2021**, and **re-derive the next namespace and review it**. Both are done. **No
+approval was requested, implied or assumed, and no gated work was implemented.**
+
+### 1. Work unit 1 — the #2013–#2021 approval package, verified rather than transcribed
+
+`docs/SystemTextApprovalPackage.md` is now the single place a decision is asked for. It groups
+the nine blocked tickets into **six families** — object identity (#2013/#2021), the unit of an
+index (#2015), conversion semantics (#2014/#2016/#2017), the composite-format grammar
+(#2020), the Web encoders (#2019) and Unicode classification (#2018) — with one exact approval
+sentence per family, a summary table, and a compact checklist. `docs/SystemTextNamespaceReviewPlan.md`
+§14 stays as the historical design record and is **not** rewritten; its new §25 lists the
+corrections.
+
+Every "now" row was **re-measured against the shipped library**
+(`build-probe/2022_probe1_approval_verify.cpp` → `build-probe/2022_probe1_verify.log`), and
+**ten premises in §14 did not survive**:
+
+| § | What §14 said | Measured |
+|---|---|---|
+| 14.1 | recommends `IsReadOnly` + `Clone()` | that spelling costs `sizeof(Encoding)` **40 → 48** (no free padding) and, virtual, a **vtable slot** — §14.1 states neither. An **identity-based** `IsReadOnly` with a code-page-dispatching non-virtual `Clone()` has **neither** cost, and is now the recommendation |
+| 14.4 | "the bytes `Encoding::UTF32()` produces" | **two** default factories emit a BOM as payload: `BigEndianUnicode()` → `feff0041` as well as `UTF32()` → `fffe000041000000` |
+| 14.4 | silent on decoding | `GetString` **consumes** a leading U+FEFF in UTF-16 and UTF-32, discarding a real ZWNBSP. A round trip cancels both halves exactly, which is why no test ever saw either |
+| 14.5 | "route … through its configured fallback" | the fallback surface takes a **`char`** and cannot carry a non-ASCII scalar; routing scalars needs a **public virtual signature change** — a second gate §14.5 never asks about |
+| 14.6 | `IsWhiteSpace` is the Unicode-aware sibling | it is Unicode-aware **and divergent** — its table contains **U+FEFF**, which .NET excludes — so all seven members change, not six |
+| 14.8 | "any index at or above 1,000,000 begins to throw" | **false.** `kCompositeIndexLimit` stops digit consumption rather than rejecting, so the shared grammar **accepts** `{1000000}` … `{9999999}`; the first rejected shapes are eight-digit indices and `{2147483646}` |
+| 14.8 | describes narrowing only | adoption also **widens**: `{0 }` and `{0  ,5}` are `FormatException` today and are **accepted** by the shared grammar |
+| 14.8 | "validates with `runCompositeFormat`'s grammar" | `runCompositeFormat` is a **formatting** engine — it needs an `argCount` and a `render`, and it **pads while validating** (measured `pad=1000000` for `{0,1000000}`). #2020 must **extract a non-rendering scanner into `modules/core`**, a far wider blast radius than §14.8 implies |
+| 14.9 | silent on the returned object | `GetEncoding()` returns **`Encoding::UTF8()` itself**, the shared mutable singleton, so #2021 and #2013 are one decision about one object |
+| §5 / §4.6 | "a fourth" / "a third" grammar | measured today there are exactly **two** composite-format implementations; `CompositeFormat::Parse` is the **second** and the only divergent one |
+
+### 2. The compatible portion that was split out and implemented — #2022
+
+The #2006 batch stated that every gated behaviour was pinned by a permanent test "so none can
+land silently". That held for #2013, #2014, #2015, #2016's UTF-32 half and #2017's decoder
+half — and was **false** for five things:
+
+- **SR-AUD-294 (#2018) had no pin at all.** Every `Rune` test in the repository uses ASCII
+  exclusively, so all of them pass identically before and after a Unicode repair.
+- **SR-AUD-299 (#2021) had no test anywhere.**
+- SR-AUD-291 (#2016) was pinned for `UTF32()` only; SR-AUD-292 (#2017) for the decoder
+  direction only; SR-AUD-298 (#2020) for its three narrowing rows but not the widening one.
+
+`modules/text/tests/System/Text/TextGatedBehaviourPinTests.cpp`, **+8 tests, add-only**;
+`SharpRuntimeTests_Text` **288 → 296**. **No production file was touched.**
+**Mutation-checked three ways in one pass** — a Latin-1-widened `Rune::IsLetter`, U+FEFF
+removed from `Rune::IsWhiteSpace`, and `EncodingInfo::GetEncoding` resolving code page 20127 to
+ASCII — each rebuilt and re-executed: **all three fail the new pins and all three pass the
+pre-existing `TextUnitContractTests`**, which is precisely the gap. Mutations reverted with
+`git checkout`; suite green at 296.
+
+**No other blocked ticket contained a separable compatible portion.** Each was tested against
+the rule: #2014, #2016, #2017, #2018, #2019, #2020 and #2021 all change a defined,
+currently-observable result on valid input, and #2013 changes a thread-safety guarantee.
+
+### 3. CCF-012 closure — verified, and NOT marked closed
+
+Established by exhaustive search rather than recollection: the population is **exactly two**
+implementations — `System::detail::runCompositeFormat` (reached by `String::Format` ×22,
+`FormattableString::ToString`, `StringBuilder::AppendFormat` ×11 and `Console::Write`/
+`WriteLine` ×11, all delegating; fixed by #1882/#1883/#1884) and
+`CompositeFormat::countPlaceholders` (**#2020, blocked**). Every other brace scanner in the
+repository is a different grammar and not a member: `Regex`'s `${name}`, `XName`'s
+`{ns}local`, `Guid`'s `{…}` specifiers, and the JSON/XML writers.
+
+One shared parser policy **is** possible but **not by calling the existing function** (§1's
+`14.8` rows). Parsing acceptance changes **in both directions**; exception **ordering** does
+not change, only the message text. CCF-012's member SR-AUD-015 is `remediated`, so **#2020 is
+the last member** — and the family closes **only under the shared-scanner option**, because a
+hand-aligned second grammar would preserve exactly the divergence the cause warns about. All
+of this is recorded in `audit/AUDIT_CROSS_CUTTING_FINDINGS.md`; **CCF-012 is not marked
+closed**.
+
+### 4. Work unit 2 — the next namespace, re-derived by measurement
+
+The previous handoff named `modules/collections`, `modules/buffers` and `modules/io`, and
+explicitly told a fresh context to re-derive rather than trust that sentence. Re-derived from
+`audit/AUDIT_FINDINGS_INDEX.md`:
+
+| Module | Open | high | Existing plan? | Reviewed? | Cohesion |
+|---|---|---|---|---|---|
+| `core` | 72 | 9 | many family plans | partly | **poor** — not one namespace |
+| `threading` | 17 | 6 | **yes** | **yes** (#1950) | good |
+| `buffers` | 11 | 3 | partial (Base64) | no | good |
+| `io` | 11 | **0** | partial | no | medium |
+| `net` (+7 siblings) | 10 (39) | 3 | no | no | **poor** — 8 modules, #1962 blocked |
+| **`diagnostics`** | **8** | **5** | **no** | **no** | **excellent** |
+| `xml` | 8 | 2 | no | no | medium |
+| `globalization` | 7 | 1 | no | no | good, but nearly no compatible queue (needs ICU-class data) |
+| `time-zone` | 7 | 0 | no | no | good |
+
+**`System::Diagnostics` wins on every criterion the rule names**: 5 of 8 findings are `high`
+(**62.5 %, the highest high-ratio of any un-reviewed namespace** — `modules/io`, the nearest
+by count, has **zero**), no existing `docs/` plan, `PUBLIC_DEPENDENCIES Core.Base` **only**,
+one module and one namespace, seven of eight findings on the **same class**, and five of eight
+repairs need **no approval**.
+
+### 5. The `System::Diagnostics` review (#2023) — all eight premises reproduced
+
+`docs/SystemDiagnosticsNamespaceReviewPlan.md`, 18 sections, with
+`build-probe/2023_probe1_diagnostics_before.cpp` → `2023_probe1_before.log`:
+
+| Finding | Measured now |
+|---|---|
+| **268** | `WaitForExit(-1)` on a 3 s child returned **`false` after 0 ms**; `WaitForExit(INTCS_MIN)` returned normally with **no diagnostic** |
+| **269** | unredirected destruction left the child in state **`'Z'`**, and the probe's own `waitpid(WNOHANG)` still returned it; **redirected** destruction instead **blocked 2005 ms** for a 2 s child — **two opposite defects**, which is the premise correction |
+| **270** | restart with a live reader: **`terminate called without an active exception`, KILLED by signal 6** |
+| **271** | the **same** output reference read **4 bytes mid-run and 8 after exit** |
+| **272** | a non-`SA_RESTART` `SIGALRM` made the **blocking** `WaitForExit()` return after **1000 ms on a 3 s child**, with `ExitCode` then throwing — **the overload's own contract**, not just `ExitCode`'s availability |
+| **273** | the `setsid` grandchild was **ALIVE** after `Kill(true)` |
+| **274 / 275** | the fork path's `setenv`/`execvp`, and `Debug`'s non-atomic global `shared_ptr` plus two global scalars |
+
+Seven causes **D-A … D-G**; **five compatible** tickets (**#2024**–**#2028**, `todo`) and
+**three design** tickets (**#2029**–**#2031**, `blocked`, each with an exact approval
+sentence). **Nothing was implemented.**
+
+Two facts shape every repair here and are recorded so a later session does not rediscover
+them: **`Process` is a pimpl and `Debug`/`Trace` have no data members**, so mutexes, atomics
+and reaper state are **layout-invisible** and only #2030 changes a public declaration
+(two return types, `const std::string&` → `std::string`); and **TSan genuinely applies to this
+namespace's *compatible* half** (#2027) — the first time in the programme, where `System::Text`
+correctly recorded it as not applicable.
+
+Five post-audit observations are in the plan's §16; **no `SR-AUD-*` identifier was issued.**
+
+### 6. Audit movement
+
+`SR-AUD-269`, `SR-AUD-271` and `SR-AUD-273` move to the `confirmed (design-complete)`
+qualifier. The index reads **107 remediated / 257 confirmed / 364 total**, of which
+**35 → 38** carry the qualifier. **The confirmed total is unchanged** — this batch remediated
+nothing, by design. Five `System::Text` index rows also record their new #2022 pins.
+
+### 7. Known full-gate failures — re-measured, not carried over
+
+| Failure | Cause | Classification |
+|---|---|---|
+| five `PingTests` | `/proc/sys/net/ipv4/ping_group_range` is **`1 0`**, so unprivileged `SOCK_DGRAM` ICMP is denied while `SOCK_RAW` ICMP opens — exactly **#1962** | known implementation gap, still `blocked` |
+| `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` | `/proc/net/if_inet6` does not exist | known environment limitation |
+
+Nothing was disabled, weakened, skipped or recategorised. The one `SKIPPED` test is the
+pre-existing `CultureInvariantFormattingTests` locale case.
+
+### 8. What is still open
+
+**All nine `System::Text` gates (#2013–#2021) remain blocked**, now with a verified,
+consolidated request in `docs/SystemTextApprovalPackage.md` and current behaviour pinned by
+`TextUnitContractTests` **and** `TextGatedBehaviourPinTests`. **#1773 remains blocked and its
+downstream use was not investigated.** #1962, #1956–#1959, #1969, #1970, #1995–#1999 and
+#2003 remain blocked; #1963, #1983, #2005 remain the deferred verifications blocked on the
+absent reference tree; #1985 and #1986 remain the two `System::Runtime` post-audit tickets.
+None was reopened.
+
+`/rv/tmp/runtime/src/libraries/` was **re-verified absent** (so is `/rv`), and no .NET runtime
+is installed. **Two of the nine `System::Text` approvals (E, #2019 and F, #2018) are
+recommended as deferrals precisely because their targets cannot be verified here** — the
+package says so rather than implementing from memory.
+
+### 9. Build directories, disk and parallelism
+
+Only approved directory names were used: **`build/`** (the repository gate), **`build-probe/`**
+(this batch's probes, prefixed `2022_` and `2023_`) and **`build-tmp/`** (`TMPDIR`). No build
+tree was created under `/tmp`, `/var/tmp` or `/dev/shm`, and no ticket-suffixed directory was
+invented. Sizes: **`build/` 1.6 GB**, **`build-probe/` ~4 MB**, **`build-tmp/` 2.6 MB** after the
+killed selective run's `mktemp` trees were removed.
+
+**Maximum aggregate parallel job count: 2**, with **one detected and corrected exception**
+documented in §10 — `cmake --build build --parallel 2`, `SHARP_RUNTIME_BUILD_JOBS=2` exported,
+`--jobs 2` passed explicitly to `check_negative_consumer_fixtures.py` (which reported "peak 2
+job(s)"), and every probe compiled as a single translation unit with one job. No `nproc`, no bare
+`-j`, no bare `--parallel`, no unrestricted `ninja`, no subagents. `ccache` is not installed in
+this container, so nothing was retrofitted.
+
+### 10. Validation, and one build-resource incident reported rather than hidden
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| whole gate, 37 executables run individually | **15,469 tests, 15,462 passed, 1 skipped, 6 failed** (§7); **15,461 → 15,469, exactly #2022's +8** |
+| `scripts/validate_module_boundaries.py` | OK — **41 modules, 91 edges** (unchanged; a new test file adds no edge) |
+| `test/validate_module_boundaries_test.py` | **7 / 7** |
+| `scripts/generate_component_catalog.py --check` | OK, current |
+| `scripts/db_consistency_check.py` | OK |
+| `scripts/check_version_seam_odr.py` | OK — **2 seams, 18 definitions** |
+| `test/check_version_seam_odr_test.py` | **15 / 15** |
+| `scripts/check_negative_consumer_fixtures.py --jobs 2` | OK — **10 fixtures, 81 sites**, 91 invocations, **peak 2 jobs**, 49.1 s |
+| `test/check_negative_consumer_fixtures_test.py` | **45 / 45** |
+| `git diff --check` | clean |
+| `scripts/check_selective_components.sh` | **DID NOT COMPLETE — see below** |
+| **Doxygen** | **NOT RUN — `doxygen` is not installed in this container.** No package was installed |
+
+**The build-resource incident, in full.** The first `check_selective_components.sh` invocation
+exceeded this harness's foreground window and was moved to the background; a `pgrep`-based wait
+loop then reported it finished when it had not, and a **second** invocation was started. For a
+period both ran, so **four compiler jobs were active instead of the two `CLAUDE.md` permits**.
+This was detected by inspecting `ps` output, **both runs were killed immediately**, their
+`mktemp` trees were removed, and the check was restarted as a **single** invocation, verified at
+exactly two `cc1plus` processes. **No other command in this batch exceeded two jobs**, and no
+result reported above was produced during the overlap — the overlap involved only
+`check_selective_components.sh`, whose result is *not* claimed.
+
+The single restarted run then spent **~35 minutes on its first component (`Core.Base`) alone**;
+a full pass over every selective component and consumer fixture is a multi-hour job in this
+container. It was stopped so the batch could be completed and committed durably, and restarted
+afterwards. **Its result is therefore not claimed for this batch.** What can be said is bounded
+and true: this batch changed **one test file, three documents, the audit index and the ticket
+database**; it added **no public header, no component, no module edge and no CMake metadata**,
+and `validate_module_boundaries.py` and `generate_component_catalog.py --check` both confirm the
+graph is unchanged at **41 / 91** — so nothing this batch touched is within what the selective
+check covers. The previous batch's passing run stands as the last complete evidence.
+
+### 11. Next recommended work
+
+1. **The `System::Diagnostics` compatible queue, in the plan's §13 order: #2025 → #2026 →
+   #2024 → #2027 → #2028.** #2025 first because it is the one defect that **aborts the
+   process**, and every other `Process` test needs restart to be safe. This is a full batch
+   on its own and needs no approval.
+2. **The `System::Text` approval package**, if the user answers it: families A (#2013/#2021),
+   B (#2015) and D (#2020, which closes CCF-012) are the recommended three; C is
+   all-or-nothing; E and F are deferrals.
+3. **The next namespace after `Diagnostics`** — re-derive again; on today's numbers
+   `modules/buffers` (11 open, 3 high, partial plan) and `modules/xml` (8 open, 2 high) are
+   the leading candidates, but measure rather than trust this sentence.
 
 ---
 
@@ -635,7 +867,60 @@ relative `Uri` never splits query/fragment), **#2003** (P3 — embedded NUL cros
 **#2004** (P3 — `Equals`/`GetHashCode` asymmetry), **#2005** (P3 — **deferred verification**,
 whitespace; blocked on the absent reference tree, same class as #1963 and #1983).
 
-### 9. Next recommended work
+### 9. Build directories, disk and parallelism
+
+Only approved directory names were used: **`build/`** (the repository gate), **`build-probe/`**
+(this batch's probes, prefixed `2022_` and `2023_`) and **`build-tmp/`** (`TMPDIR`). No build
+tree was created under `/tmp`, `/var/tmp` or `/dev/shm`, and no ticket-suffixed directory was
+invented. Sizes: **`build/` 1.6 GB**, **`build-probe/` ~4 MB**, **`build-tmp/` 2.6 MB** after the
+killed selective run's `mktemp` trees were removed.
+
+**Maximum aggregate parallel job count: 2**, with **one detected and corrected exception**
+documented in §10 — `cmake --build build --parallel 2`, `SHARP_RUNTIME_BUILD_JOBS=2` exported,
+`--jobs 2` passed explicitly to `check_negative_consumer_fixtures.py` (which reported "peak 2
+job(s)"), and every probe compiled as a single translation unit with one job. No `nproc`, no bare
+`-j`, no bare `--parallel`, no unrestricted `ninja`, no subagents. `ccache` is not installed in
+this container, so nothing was retrofitted.
+
+### 10. Validation, and one build-resource incident reported rather than hidden
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| whole gate, 37 executables run individually | **15,469 tests, 15,462 passed, 1 skipped, 6 failed** (§7); **15,461 → 15,469, exactly #2022's +8** |
+| `scripts/validate_module_boundaries.py` | OK — **41 modules, 91 edges** (unchanged; a new test file adds no edge) |
+| `test/validate_module_boundaries_test.py` | **7 / 7** |
+| `scripts/generate_component_catalog.py --check` | OK, current |
+| `scripts/db_consistency_check.py` | OK |
+| `scripts/check_version_seam_odr.py` | OK — **2 seams, 18 definitions** |
+| `test/check_version_seam_odr_test.py` | **15 / 15** |
+| `scripts/check_negative_consumer_fixtures.py --jobs 2` | OK — **10 fixtures, 81 sites**, 91 invocations, **peak 2 jobs**, 49.1 s |
+| `test/check_negative_consumer_fixtures_test.py` | **45 / 45** |
+| `git diff --check` | clean |
+| `scripts/check_selective_components.sh` | **DID NOT COMPLETE — see below** |
+| **Doxygen** | **NOT RUN — `doxygen` is not installed in this container.** No package was installed |
+
+**The build-resource incident, in full.** The first `check_selective_components.sh` invocation
+exceeded this harness's foreground window and was moved to the background; a `pgrep`-based wait
+loop then reported it finished when it had not, and a **second** invocation was started. For a
+period both ran, so **four compiler jobs were active instead of the two `CLAUDE.md` permits**.
+This was detected by inspecting `ps` output, **both runs were killed immediately**, their
+`mktemp` trees were removed, and the check was restarted as a **single** invocation, verified at
+exactly two `cc1plus` processes. **No other command in this batch exceeded two jobs**, and no
+result reported above was produced during the overlap — the overlap involved only
+`check_selective_components.sh`, whose result is *not* claimed.
+
+The single restarted run then spent **~35 minutes on its first component (`Core.Base`) alone**;
+a full pass over every selective component and consumer fixture is a multi-hour job in this
+container. It was stopped so the batch could be completed and committed durably, and restarted
+afterwards. **Its result is therefore not claimed for this batch.** What can be said is bounded
+and true: this batch changed **one test file, three documents, the audit index and the ticket
+database**; it added **no public header, no component, no module edge and no CMake metadata**,
+and `validate_module_boundaries.py` and `generate_component_catalog.py --check` both confirm the
+graph is unchanged at **41 / 91** — so nothing this batch touched is within what the selective
+check covers. The previous batch's passing run stands as the last complete evidence.
+
+### 11. Next recommended work
 
 **Ready with no approval needed inside `System::Uri`: #2000** — it is the only **P2** left in
 the namespace and the highest-priority unblocked ticket anywhere in the queue. It is a
@@ -4106,7 +4391,60 @@ additive. Four new private headers were added under
 consumers must recompile (header-inline bodies); none must be edited to keep
 compiling.
 
-### 9. Next recommended work
+### 9. Build directories, disk and parallelism
+
+Only approved directory names were used: **`build/`** (the repository gate), **`build-probe/`**
+(this batch's probes, prefixed `2022_` and `2023_`) and **`build-tmp/`** (`TMPDIR`). No build
+tree was created under `/tmp`, `/var/tmp` or `/dev/shm`, and no ticket-suffixed directory was
+invented. Sizes: **`build/` 1.6 GB**, **`build-probe/` ~4 MB**, **`build-tmp/` 2.6 MB** after the
+killed selective run's `mktemp` trees were removed.
+
+**Maximum aggregate parallel job count: 2**, with **one detected and corrected exception**
+documented in §10 — `cmake --build build --parallel 2`, `SHARP_RUNTIME_BUILD_JOBS=2` exported,
+`--jobs 2` passed explicitly to `check_negative_consumer_fixtures.py` (which reported "peak 2
+job(s)"), and every probe compiled as a single translation unit with one job. No `nproc`, no bare
+`-j`, no bare `--parallel`, no unrestricted `ninja`, no subagents. `ccache` is not installed in
+this container, so nothing was retrofitted.
+
+### 10. Validation, and one build-resource incident reported rather than hidden
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| whole gate, 37 executables run individually | **15,469 tests, 15,462 passed, 1 skipped, 6 failed** (§7); **15,461 → 15,469, exactly #2022's +8** |
+| `scripts/validate_module_boundaries.py` | OK — **41 modules, 91 edges** (unchanged; a new test file adds no edge) |
+| `test/validate_module_boundaries_test.py` | **7 / 7** |
+| `scripts/generate_component_catalog.py --check` | OK, current |
+| `scripts/db_consistency_check.py` | OK |
+| `scripts/check_version_seam_odr.py` | OK — **2 seams, 18 definitions** |
+| `test/check_version_seam_odr_test.py` | **15 / 15** |
+| `scripts/check_negative_consumer_fixtures.py --jobs 2` | OK — **10 fixtures, 81 sites**, 91 invocations, **peak 2 jobs**, 49.1 s |
+| `test/check_negative_consumer_fixtures_test.py` | **45 / 45** |
+| `git diff --check` | clean |
+| `scripts/check_selective_components.sh` | **DID NOT COMPLETE — see below** |
+| **Doxygen** | **NOT RUN — `doxygen` is not installed in this container.** No package was installed |
+
+**The build-resource incident, in full.** The first `check_selective_components.sh` invocation
+exceeded this harness's foreground window and was moved to the background; a `pgrep`-based wait
+loop then reported it finished when it had not, and a **second** invocation was started. For a
+period both ran, so **four compiler jobs were active instead of the two `CLAUDE.md` permits**.
+This was detected by inspecting `ps` output, **both runs were killed immediately**, their
+`mktemp` trees were removed, and the check was restarted as a **single** invocation, verified at
+exactly two `cc1plus` processes. **No other command in this batch exceeded two jobs**, and no
+result reported above was produced during the overlap — the overlap involved only
+`check_selective_components.sh`, whose result is *not* claimed.
+
+The single restarted run then spent **~35 minutes on its first component (`Core.Base`) alone**;
+a full pass over every selective component and consumer fixture is a multi-hour job in this
+container. It was stopped so the batch could be completed and committed durably, and restarted
+afterwards. **Its result is therefore not claimed for this batch.** What can be said is bounded
+and true: this batch changed **one test file, three documents, the audit index and the ticket
+database**; it added **no public header, no component, no module edge and no CMake metadata**,
+and `validate_module_boundaries.py` and `generate_component_catalog.py --check` both confirm the
+graph is unchanged at **41 / 91** — so nothing this batch touched is within what the selective
+check covers. The previous batch's passing run stands as the last complete evidence.
+
+### 11. Next recommended work
 
 1. **Group E of the packet, item by item** — `#1897` (JsonNode::Parse stack
    overflow on deep untrusted text; option **B**, iterative, is fully compatible

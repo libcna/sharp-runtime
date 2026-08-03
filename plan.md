@@ -1,5 +1,25 @@
 # Sharp Runtime plan
 
+*Last verified: 2026-08-03 — branch `feature/remediation-batch-text-approvals-next-review`, cut
+from `80c804b` and **not pushed; no push was requested during this batch**. No merge, rebase,
+tag, PR, force-push or history rewrite; the pre-existing local-only commits were left untouched.
+Four new commits, `017d336`, `6abd16e`, `8114518` plus this handoff commit, all intentionally
+unsigned. The batch **verified and consolidated the `System::Text` approval package for
+#2013–#2021** into `docs/SystemTextApprovalPackage.md` — six families, one exact approval
+sentence each — correcting **ten premises** in the review plan's §14 that did not survive
+re-measurement; split and implemented the **one** genuinely compatible portion, **#2022**
+(test-only: **SR-AUD-294 and SR-AUD-299 had no behaviour-pinning test at all**, so #2018 and
+#2021 could have landed unapproved); verified **CCF-012**'s closure scope **without marking it
+closed**; and then re-derived the next namespace by measurement and performed the
+**`System::Diagnostics` review (#2023)**, whose eight premises **all reproduced**. **No approval
+was requested, implied or assumed, and no gated work was implemented.** Audit stays **107
+remediated / 257 confirmed / 364 total** with `confirmed (design-complete)` **35 → 38**; **no
+`SR-AUD-*` identifier was created.** `SharpRuntimeTests_Text` **288 → 296**, add-only, with no
+production change. Tickets **2,030: 1,974 done, 9 todo, 40 blocked, 3 needs_user, 4 wontfix**,
+none doing. **Doxygen NOT run — not installed here.** **#1773 remains blocked and its downstream
+use was not investigated.** CNA and mobile-eggbert were not inspected. Maximum aggregate
+parallelism **2 jobs**.*
+
 *Last verified: 2026-08-03 — branch `feature/remediation-batch-system-text-review`, cut from
 `bef4e43` and **not pushed; no push was requested during this batch**. No merge, rebase, tag,
 PR, force-push or history rewrite; the three pre-existing local-only commits were left
@@ -236,6 +256,84 @@ validated repair tickets. Consumer-driven API breadth remains legitimate later
 work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
 
+
+## 2026-08-03 — `System::Text` approval package verified (#2022) and the `System::Diagnostics` review (#2023)
+
+Branch `feature/remediation-batch-text-approvals-next-review`, cut from `80c804b`, **not
+pushed; no push was requested**. No merge, rebase, tag, PR, force-push or history rewrite; the
+pre-existing local-only commits were left untouched. Four new commits — `017d336`, `6abd16e`,
+`8114518` plus the handoff — all intentionally unsigned.
+
+**Work unit 1 — the #2013–#2021 approval package.** `docs/SystemTextApprovalPackage.md` is now
+the single place a decision is asked for, grouping the nine blocked tickets into six families
+with one exact approval sentence each, a summary table and a compact checklist. Every "now"
+row was re-measured against the shipped library
+(`build-probe/2022_probe1_approval_verify.cpp` → `2022_probe1_verify.log`), and **ten premises
+in the review plan's §14 did not survive**: the recommended `IsReadOnly`+`Clone()` spelling
+costs `sizeof(Encoding)` **40 → 48** and a **vtable slot** (an identity-based spelling costs
+neither, and is now recommended); **two** default factories emit a BOM as payload
+(`BigEndianUnicode()` as well as `UTF32()`) and the **decode** side silently **consumes** a
+leading U+FEFF; the fallback surface takes a **`char`** and cannot carry a non-ASCII scalar, so
+#2017 needs a public virtual signature change §14.5 never asks about; `Rune::IsWhiteSpace` is
+Unicode-aware **and divergent** (it contains U+FEFF, which .NET excludes); §14.8's
+*"any index at or above 1,000,000 begins to throw"* is **false** (the shared grammar accepts
+`{1000000}`…`{9999999}`), adoption also **widens** (`{0 }` is rejected here and accepted
+there), and `runCompositeFormat` is a **formatting** engine that **pads while validating**, so
+#2020 must extract a non-rendering scanner into `modules/core`; `EncodingInfo::GetEncoding`
+returns `Encoding::UTF8()` **itself**, coupling #2021 to #2013; and exactly **two**
+composite-format grammars exist today, not three or four.
+
+**The one compatible portion found and implemented — #2022.** The previous batch claimed every
+gated behaviour was pinned "so none can land silently". **SR-AUD-294 (#2018) had no pin at all**
+— every `Rune` test in the repository uses ASCII and passes identically before and after a
+Unicode repair — **SR-AUD-299 (#2021) had no test anywhere**, and three more were pinned only
+in part. `TextGatedBehaviourPinTests.cpp`, **+8 add-only**, `SharpRuntimeTests_Text`
+**288 → 296**, **no production file touched**, mutation-checked three ways (each mutation fails
+the new pins and passes the old ones). No other blocked ticket contained a separable compatible
+portion.
+
+**CCF-012** was verified rather than restated: the population is exactly two implementations,
+every other brace scanner in the repository is a different grammar, acceptance changes in
+**both** directions, exception ordering does not, and the family closes **only** under the
+shared-scanner option. **It is not marked closed.**
+
+**Work unit 2 — the next namespace, re-derived by measurement.** `System::Diagnostics`:
+**8 open findings of which 5 are `high`** (62.5 %, the highest high-ratio of any un-reviewed
+namespace; `modules/io`, the nearest by count at 11, has **zero**), **no** existing `docs/`
+plan, `PUBLIC_DEPENDENCIES Core.Base` only, one module, one namespace, seven of eight findings
+on the same class. `docs/SystemDiagnosticsNamespaceReviewPlan.md` (#2023, 18 sections)
+reproduced **all eight** premises: `WaitForExit(-1)` returns `false` after 0 ms; an
+unredirected destroyed `Process` leaves state `'Z'` while a **redirected** one **blocks
+2005 ms**; restart is `SIGABRT`; a non-`SA_RESTART` `SIGALRM` makes the **blocking**
+`WaitForExit()` return early with `ExitCode` throwing; a `setsid` grandchild **survives**
+`Kill(true)`; the output reference reads 4 bytes then 8. Seven causes **D-A … D-G**, five
+compatible tickets **#2024–#2028** (`todo`) and three design tickets **#2029–#2031**
+(`blocked`). **Nothing was implemented.** `Process` is a **pimpl** and `Debug`/`Trace` have no
+data members, so every repair but #2030 is layout- and signature-invisible; and **TSan applies
+to this namespace's compatible half** (#2027), the first time in the programme.
+
+**Audit:** `SR-AUD-269`, `SR-AUD-271` and `SR-AUD-273` move to `confirmed (design-complete)`.
+**107 remediated / 257 confirmed / 364 total**, design-complete **35 → 38**; the confirmed
+total is unchanged because this batch remediated nothing, by design. **No `SR-AUD-*`
+identifier was created.**
+
+
+**Validation.** Gate **15,469 tests across 37 executables run individually, 15,462 passing,
+1 skipped, 6 failing** for the same two measured causes (five `PingTests`, `ping_group_range` is
+`1 0` — **#1962**; one `SocketTests`, no `/proc/net/if_inet6`), **no new failure**, and the +8 is
+exactly #2022's. Build **0 errors / 0 warnings**; graph **41 / 91**; seams **2 / 18**; negative
+fixtures **10 / 81** (91 invocations, peak 2 jobs); checker self-tests **45 / 45** and
+**15 / 15**; module-boundary self-tests **7 / 7**; catalogue current; DB consistency OK;
+`git diff --check` clean. **Doxygen NOT run — not installed here.**
+**`scripts/check_selective_components.sh` did NOT complete**, and its result is **not claimed**:
+a harness backgrounding mishap briefly left **two** concurrent runs (four compiler jobs, above
+`CLAUDE.md`'s ceiling of two) — detected from `ps`, both killed at once, temp trees removed, and
+the check restarted as a single invocation verified at exactly two `cc1plus` processes; that
+single run then spent ~35 minutes on `Core.Base` alone and was stopped so the batch could be
+committed. No other command exceeded two jobs and no claimed result was produced during the
+overlap. This batch added **no public header, no component, no module edge and no CMake
+metadata**, and the graph is confirmed unchanged, so nothing it touched is within the selective
+check's subject.
 
 ## 2026-08-03 — #1804 re-verified, `System::Threading` namespace review, four repairs
 
