@@ -6608,3 +6608,50 @@ in. ASan + UBSan + LSan: 0 reports.
 `enable_shared_from_this` lifetime design is untouched.
 
 **Index after #1967: 90 remediated / 274 confirmed / 364 total.**
+
+### #1968 -- SR-AUD-233 (cause TC-B/2)
+
+`confirmed -> remediated`. A zero-capacity bounded channel is a rendezvous channel:
+`TryWrite`/`TryRead` return false with no waiting peer, a parked reader is handed a writer's
+item directly, `WriteAsync` blocks until a reader arrives, and `Count` stays 0. Every non-zero
+capacity, the unbounded and prioritized channels, and the drop modes at capacity >= 1 are
+byte-identical before and after.
+
+**The load-bearing part of this ticket is an evidence conflict inside the repository, resolved
+in the open.** `Channel.hpp`'s `effectiveCapacity()` carried a comment asserting it had been
+*"verified against BoundedChannel.cs"* that a capacity-0 channel *"still buffers one item"* and
+is *"observably equivalent to a capacity-1 channel for every publicly-visible outcome"* -- the
+exact opposite of SR-AUD-233. The finding was preferred because its evidence is a **behavioural
+managed probe** while the comment's is a **reading of source**, because it is the later record
+and was re-checked by #1964's review, and because the comment is self-undermining (it concedes
+.NET has a direct-hand-off path, then asserts that path changes no return value). The
+contradicting comment was **replaced, not silently dropped**.
+`/rv/tmp/runtime/src/libraries/` is absent from this environment, so the reading could not be
+adjudicated directly; the repair is confined to the capacity predicates and three methods and is
+revertible without touching any signature.
+
+The drop modes at capacity 0 had no evidence either way -- the audit's probe covers only `Wait`
+mode -- and now discard the item and keep `Count == 0`, which is the only reading consistent
+with a channel that has no room: the incoming item is simultaneously the newest and the oldest.
+Recorded as reasoned, not measured.
+
+**Layout gate.** Every public type is unchanged and now pinned by `static_assert`:
+`Channel<int>` 32, `ChannelReader<int>`/`ChannelWriter<int>` 24, `ChannelOptions` 16,
+`BoundedChannelOptions` 24, both `detail` impls 40, all with alignment 8. The single growth is
+`detail::ChannelState<int>` (240 -> 248) for the waiting-peer counter -- a `detail` type that
+appears in no public signature, in an INTERFACE target where nothing can be linked across
+versions.
+
+**Concurrency evidence.** Four scenarios x 300 rounds on a fresh channel: one reader/one
+producer, four readers/four producers, a completion racing a parked reader, and three writers
+blocked in `WaitToWriteAsync` racing an arriving reader. Capability proved first: **600 wrong
+outcomes against the pre-fix header, 0 after**. The close-while-parked and WaitToWriteAsync-race
+scenarios reported 0 in both runs, recorded honestly -- a capacity-1 buffer also delivers every
+item, so only the "nothing may be buffered" assertions discriminate. TSan 0 data races in both
+runs, fully instrumented from source. ASan + UBSan + LSan 0 reports.
+
+**Test rewrite, identified as such.** The two zero-capacity tests that pinned the incorrect
+capacity-one behaviour were **replaced, not deleted**; each old concern still has a test
+asserting the corrected contract. +12 tests (52 -> 64).
+
+**Index after #1968: 91 remediated / 273 confirmed / 364 total.**

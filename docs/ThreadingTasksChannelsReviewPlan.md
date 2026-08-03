@@ -571,3 +571,90 @@ run.
 signature, layout, vtable, `noexcept` or edge change; graph stays 41 / 91.
 
 **SR-AUD-234: `confirmed` -> `remediated`.** Cause TC-C is closed.
+
+---
+
+## 18. What #1968 measured, and the evidence conflict it had to resolve (2026-08-03)
+
+Ticket **#1968** implemented cause **TC-B/2** (SR-AUD-233). Evidence:
+`build-probe/1968_probe1_zero_capacity.cpp` (24 behavioural cases plus a layout dump) and the
+round-based concurrency probe `build-probe/1968_probe2_rendezvous_tsan.cpp`.
+
+### 18.1 The repository contained two contradictory claims about .NET, and §3 recorded only one
+
+`Channel.hpp`'s `effectiveCapacity()` carried a comment asserting it had been *"verified against
+BoundedChannel.cs's TryWrite"* that a capacity-0 channel *"still buffers one item when no reader
+is synchronously blocked waiting -- i.e. a capacity-0 channel is observably equivalent to a
+capacity-1 channel for every publicly-visible TryWrite/WaitToWriteAsync outcome"*. SR-AUD-233
+says the opposite. §3 of this plan re-verified the finding against current **port** source, which
+confirms the port's behaviour but cannot adjudicate .NET's -- so the conflict survived into this
+ticket.
+
+Resolved in favour of the finding, with the reasoning recorded so the question can be re-opened
+rather than re-derived:
+
+1. The finding's evidence is a **behavioural managed probe** against current .NET; the comment's
+   is a **reading of .NET source**. When the two disagree about an observable, the measurement of
+   the observable wins.
+2. The finding is the later record and was re-checked by #1964 before this ticket was opened.
+3. The comment is self-undermining: it concedes .NET has a direct-hand-off-to-a-blocked-reader
+   path and then asserts that path *"doesn't change any return value"*, which is precisely what
+   the finding's probe contradicts.
+
+**Limitation, stated rather than glossed:** `/rv/tmp/runtime/src/libraries/` is not present in
+this environment, so `BoundedChannel.cs` could not be re-read. The decision rests on the audit's
+managed probe. The repair is confined to `ChannelState`'s capacity predicates plus `TryWrite`,
+`WaitToWriteAsync` and `WaitToReadAsync`, and is revertible without touching a signature. The
+contradicting comment was **replaced**, so the header no longer carries a claim the repository
+has decided against.
+
+This is the mirror image of #1963: there, the previous batch **declined** a repair precisely
+because the report carried *no* managed probe for the row in question. Here the report carries
+one, which is the distinguishing fact, and applying the same rule gives the opposite answer.
+
+### 18.2 The drop modes at capacity 0 are reasoned, not measured
+
+The audit's probe covers only the default `Wait` mode. Measured before: all three drop modes
+accepted a write at capacity 0 and left `Count == 1`. They now discard the item and keep
+`Count == 0`, because that is the only reading consistent with a channel that has no room:
+`DropWrite` drops the incoming item by definition, and with an always-empty buffer the incoming
+item is simultaneously the newest and the oldest.
+
+### 18.3 §8's "object layout: none" needs one qualification
+
+Every **public** type is unchanged and is now pinned by `static_assert`: `Channel<int>` 32,
+`ChannelReader<int>`/`ChannelWriter<int>` 24, `ChannelOptions` 16, `BoundedChannelOptions` 24,
+`detail::ChannelReaderImpl<int>`/`ChannelWriterImpl<int>` 40, all alignment 8.
+
+`detail::ChannelState<int>` grew **240 -> 248** for the waiting-peer counter. §2 item 1 of this
+plan warns that in an INTERFACE target *"every layout question is consumer-visible"*, so the
+growth is recorded rather than waved away -- but it is a `detail`-namespace type that appears in
+no public signature, is reached only through a `shared_ptr` inside the reader/writer
+implementations, and lives in a header-only target where nothing can be linked across versions.
+No approval trigger is reached.
+
+### 18.4 §10's TSan requirement, capability proved first
+
+Four scenarios x 300 rounds on a fresh channel: one reader/one producer, four readers/four
+producers, a completion racing a parked reader, and three writers blocked in `WaitToWriteAsync`
+racing an arriving reader. Every round asserts exact delivery, `Count == 0`, and that no further
+write is accepted once every peer is served.
+
+Pre-fix: **600 wrong outcomes**. Post-fix: **0**. Recorded honestly, the close-while-parked and
+`WaitToWriteAsync`-race scenarios reported **0 in both runs** -- a capacity-1 buffer also
+delivers every item, so only the *"nothing may be buffered"* assertions discriminate between the
+two behaviours. TSan itself: 0 data races in both runs, fully instrumented from source
+(21 `__tsan` symbols, no archive linked). ASan + UBSan + LSan over the surface probe: 0 reports.
+
+### 18.5 The test rewrite §3.1 item 2 required
+
+`ZeroCapacityChannel_TryWrite_SucceedsOnceThenBlocksLikeCapacityOne` and
+`ZeroCapacityChannel_WriteAsync_UnblocksOnceReaderDrains` asserted the incorrect behaviour.
+Both were **replaced, not deleted**: each old test's concern still has a test asserting the
+corrected contract, the replacement is called out in the file itself and in the commit message,
+and twelve further rendezvous cases were added.
+`SharpRuntimeTests_Threading_Channels` **52 -> 64**.
+
+**SR-AUD-233: `confirmed` -> `remediated`.** Cause TC-B/2 is closed, and with it the whole
+compatible half of this review: TC-A, TC-B/1, TC-B/2 and TC-C are all closed, leaving only the
+two approval-gated causes TC-B/3 (#1969) and TC-D (#1970).

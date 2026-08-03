@@ -196,17 +196,34 @@ namespace System::Threading::Channels {
             SharpRuntime::intcs capacity = -1; // -1 == unbounded
             BoundedChannelFullMode fullMode = BoundedChannelFullMode::Wait;
 
-            // Verified against BoundedChannel.cs's TryWrite: a configured capacity of 0 (a
-            // documented legal "rendezvous channel") is handled there by a queue-transition-from-
-            // 0-to-1 special case that still buffers one item when no reader is synchronously
-            // blocked waiting -- i.e. a capacity-0 channel is observably equivalent to a
-            // capacity-1 channel for every publicly-visible TryWrite/WaitToWriteAsync outcome (the
-            // only difference is an internal direct-handoff-to-a-blocked-reader optimization that
-            // doesn't change any return value this port's simpler mutex/condvar model produces).
-            // Previously this port used `capacity` directly in its "is full" comparisons, so a
-            // capacity-0 channel had queue.size() (0) >= capacity (0) true immediately -- every
-            // write blocked forever, even with a reader concurrently waiting to receive.
-            [[nodiscard]] SharpRuntime::intcs effectiveCapacity() const { return capacity == 0 ? 1 : capacity; }
+            // Number of readers currently parked inside WaitToReadAsync. Only a capacity-0
+            // (rendezvous) channel consults it: a write is accepted exactly when a parked reader
+            // is waiting for an item that has not been handed over yet. Added by ticket #1968
+            // (SR-AUD-233); see isRendezvous()/hasWaitingPeer() below.
+            SharpRuntime::intcs waitingReaders = 0;
+
+            /** @return true when this is a zero-capacity rendezvous channel. */
+            [[nodiscard]] bool isRendezvous() const { return capacity == 0; }
+
+            /**
+             * @return true when a parked reader is waiting for an item that no writer has handed
+             * over yet, i.e. when a rendezvous write may proceed. Must be called with `mutex`
+             * held.
+             */
+            [[nodiscard]] bool hasWaitingPeer() const {
+                return waitingReaders > static_cast<SharpRuntime::intcs>(queue.size());
+            }
+
+            /**
+             * @return true when a bounded, non-rendezvous channel has no room left. Must be
+             * called with `mutex` held. Unbounded channels (`capacity < 0`) are never full, and
+             * a rendezvous channel is handled by hasWaitingPeer() instead — it has no room in
+             * the buffering sense at all.
+             */
+            [[nodiscard]] bool isFull() const {
+                return capacity > 0 &&
+                       static_cast<SharpRuntime::intcs>(queue.size()) >= capacity;
+            }
         };
 
         template<typename T>
@@ -256,6 +273,27 @@ namespace System::Threading::Channels {
                 auto state = state_;
                 return System::Threading::Tasks::TaskT<bool>([state]() -> bool {
                     std::unique_lock<std::mutex> lock(state->mutex);
+                    if (state->isRendezvous()) {
+                        // Ticket #1968: on a rendezvous channel, parking here IS the act that
+                        // makes a write possible, so the count is published and the writers are
+                        // woken before the wait begins. The RAII guard restores the count on
+                        // every exit path, including the throwing one below.
+                        struct WaitingPeer {
+                            detail::ChannelState<T>* s;
+                            explicit WaitingPeer(detail::ChannelState<T>* state) : s(state) {
+                                ++s->waitingReaders;
+                                s->notFull.notify_all();
+                            }
+                            ~WaitingPeer() { --s->waitingReaders; }
+                            WaitingPeer(const WaitingPeer&) = delete;
+                            WaitingPeer& operator=(const WaitingPeer&) = delete;
+                        } registration(state.get());
+
+                        state->notEmpty.wait(lock, [&] { return !state->queue.empty() || state->closed; });
+                        if (!state->queue.empty()) return true;
+                        if (state->closeError) std::rethrow_exception(state->closeError);
+                        return false;
+                    }
                     state->notEmpty.wait(lock, [&] { return !state->queue.empty() || state->closed; });
                     if (!state->queue.empty()) return true;
                     if (state->closeError) std::rethrow_exception(state->closeError);
@@ -284,7 +322,26 @@ namespace System::Threading::Channels {
                 std::lock_guard<std::mutex> lock(state_->mutex);
                 if (state_->closed) return false;
 
-                if (state_->capacity >= 0 && static_cast<SharpRuntime::intcs>(state_->queue.size()) >= state_->effectiveCapacity()) {
+                // Ticket #1968 (SR-AUD-233): a zero-capacity channel is a RENDEZVOUS channel,
+                // not an unannounced one-element buffer. A write succeeds only when a reader is
+                // already parked waiting for an item, and the item is handed straight to it.
+                if (state_->isRendezvous()) {
+                    if (state_->hasWaitingPeer()) {
+                        state_->queue.push_back(item);
+                        state_->notEmpty.notify_all();
+                        return true;
+                    }
+                    // No peer. Wait mode reports "no room", exactly as a full bounded channel
+                    // does. The three drop modes consider the write handled and discard the item,
+                    // which is the only reading of "drop" consistent with a channel that has no
+                    // room to hold anything: DropWrite drops the incoming item by definition, and
+                    // with an always-empty buffer the incoming item is simultaneously the newest
+                    // and the oldest, so DropNewest and DropOldest drop it too. Count therefore
+                    // stays 0 for every mode, where before this ticket all three buffered an item.
+                    return state_->fullMode != BoundedChannelFullMode::Wait;
+                }
+
+                if (state_->isFull()) {
                     switch (state_->fullMode) {
                         case BoundedChannelFullMode::Wait:
                             return false;
@@ -321,9 +378,13 @@ namespace System::Threading::Channels {
                 return System::Threading::Tasks::TaskT<bool>([state]() -> bool {
                     std::unique_lock<std::mutex> lock(state->mutex);
                     state->notFull.wait(lock, [&] {
-                        return state->closed || state->capacity < 0 ||
-                               static_cast<SharpRuntime::intcs>(state->queue.size()) < state->effectiveCapacity() ||
-                               state->fullMode != BoundedChannelFullMode::Wait;
+                        if (state->closed) return true;
+                        if (state->fullMode != BoundedChannelFullMode::Wait) return true;
+                        // A rendezvous channel is writable exactly when a reader is parked
+                        // waiting; every other bounded channel is writable when it has room.
+                        // Ticket #1968.
+                        if (state->isRendezvous()) return state->hasWaitingPeer();
+                        return !state->isFull();
                     });
                     if (!state->closed) return true;
                     if (state->closeError) std::rethrow_exception(state->closeError);

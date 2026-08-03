@@ -210,30 +210,45 @@ TEST(ChannelTests, ReadAsync_ChannelDroppedImmediately_StillCompletesSafely) {
     EXPECT_EQ(task.getResultProperty(), 99);
 }
 
-TEST(ChannelTests, ZeroCapacityChannel_TryWrite_SucceedsOnceThenBlocksLikeCapacityOne) {
+// REWRITTEN by ticket #1968 (SR-AUD-233). The two tests that stood here --
+// ZeroCapacityChannel_TryWrite_SucceedsOnceThenBlocksLikeCapacityOne and
+// ZeroCapacityChannel_WriteAsync_UnblocksOnceReaderDrains -- asserted that a zero-capacity
+// bounded channel behaves like a one-element buffer. That behaviour is the defect: a
+// zero-capacity channel is a RENDEZVOUS channel, so a write succeeds only when a reader is
+// already waiting for it. The assertions below replace those expectations rather than deleting
+// the coverage; each of the old tests' concerns (synchronous TryWrite, and a WriteAsync that
+// completes once a peer arrives) still has a test here, asserting the corrected contract.
+TEST(ChannelTests, ZeroCapacityChannel_TryWrite_FailsWithoutAWaitingReader) {
     auto channel = Channel<int>::CreateBounded(0);
-    EXPECT_TRUE(channel.Writer->TryWrite(1));
-    EXPECT_FALSE(channel.Writer->TryWrite(2)); // full, Wait mode rejects synchronous TryWrite
+    EXPECT_FALSE(channel.Writer->TryWrite(1));
+    EXPECT_EQ(channel.Reader->getCountProperty(), 0);
     int value = 0;
-    EXPECT_TRUE(channel.Reader->TryRead(value));
-    EXPECT_EQ(value, 1);
-    EXPECT_TRUE(channel.Writer->TryWrite(3)); // slot freed, write succeeds again
+    EXPECT_FALSE(channel.Reader->TryRead(value));
+    // Still false on a second attempt: nothing was buffered by the first.
+    EXPECT_FALSE(channel.Writer->TryWrite(2));
+    EXPECT_EQ(channel.Reader->getCountProperty(), 0);
 }
 
-TEST(ChannelTests, ZeroCapacityChannel_WriteAsync_UnblocksOnceReaderDrains) {
+TEST(ChannelTests, ZeroCapacityChannel_WriteAsync_CompletesOnlyOnceAReaderArrives) {
     auto channel = Channel<int>::CreateBounded(0);
-    channel.Writer->TryWrite(1);
     auto writeTask = channel.Writer->WriteAsync(2);
 
-    int value = 0;
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    channel.Reader->TryRead(value); // frees the slot, allowing the pending WriteAsync to complete
-    writeTask.Wait();
-    EXPECT_EQ(value, 1);
+    // The write must NOT complete while no reader is waiting. Bounded observation window, no
+    // dependence on a sleep for correctness: the assertion that follows the read is what proves
+    // the hand-off, and this only guards against an immediate completion.
+    std::atomic<bool> completed{false};
+    std::thread waiter([&] {
+        writeTask.Wait();
+        completed.store(true);
+    });
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(150);
+    while (std::chrono::steady_clock::now() < until && !completed.load()) { }
+    EXPECT_FALSE(completed.load()) << "a rendezvous write completed with no reader waiting";
 
-    int second = 0;
-    EXPECT_TRUE(channel.Reader->TryRead(second));
-    EXPECT_EQ(second, 2);
+    EXPECT_EQ(channel.Reader->ReadAsync().getResultProperty(), 2);
+    waiter.join();
+    EXPECT_TRUE(completed.load());
+    EXPECT_EQ(channel.Reader->getCountProperty(), 0);
 }
 
 TEST(ChannelTests, Completion_CompletesOnceClosedAndDrained) {
@@ -739,4 +754,206 @@ TEST(ChannelClosedBoundaryTests, BlockedReader_ErrorCompletedWhileWaiting_Throws
     while (!readerIssued.load()) { }
     channel.Writer->Complete(makeBoom());
     expectClosedWithCause([&] { (void)readTask.getResultProperty(); });
+}
+
+// =============================================================================================
+// Ticket #1968 (SR-AUD-233, cause TC-B/2) -- a zero-capacity bounded channel is a rendezvous
+//
+// Before this ticket ChannelState::effectiveCapacity() rewrote a configured capacity of 0 to 1,
+// so CreateBounded(0).Writer->TryWrite(7) returned true and a reader immediately retrieved 7 --
+// the port advertised a bounded-memory contract it did not keep, and did so silently. A
+// zero-capacity channel holds nothing: a write succeeds only when a reader is already waiting,
+// and the item is handed straight to it.
+// =============================================================================================
+
+TEST(ZeroCapacityRendezvousTests, NoPeer_TryWriteAndTryReadBothFail) {
+    auto channel = Channel<int>::CreateBounded(0);
+    EXPECT_FALSE(channel.Writer->TryWrite(1));
+    int value = 0;
+    EXPECT_FALSE(channel.Reader->TryRead(value));
+    EXPECT_EQ(channel.Reader->getCountProperty(), 0);
+}
+
+TEST(ZeroCapacityRendezvousTests, BlockedReader_IsHandedTheWritersItemDirectly) {
+    auto channel = Channel<int>::CreateBounded(0);
+    auto readTask = channel.Reader->ReadAsync();
+
+    // A succeeding TryWrite IS the observation that a reader is parked -- on a rendezvous
+    // channel it cannot succeed otherwise -- so this loop is a deterministic rendezvous, not a
+    // timing guess. The deadline only bounds a failure.
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    bool wrote = false;
+    while (std::chrono::steady_clock::now() < until) {
+        if (channel.Writer->TryWrite(11)) { wrote = true; break; }
+    }
+    ASSERT_TRUE(wrote) << "a parked reader never made the channel writable";
+    EXPECT_EQ(readTask.getResultProperty(), 11);
+    EXPECT_EQ(channel.Reader->getCountProperty(), 0);
+}
+
+TEST(ZeroCapacityRendezvousTests, OnlyOneWritePerWaitingReaderIsAccepted) {
+    auto channel = Channel<int>::CreateBounded(0);
+    auto readTask = channel.Reader->ReadAsync();
+
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    bool first = false;
+    while (std::chrono::steady_clock::now() < until) {
+        if (channel.Writer->TryWrite(1)) { first = true; break; }
+    }
+    ASSERT_TRUE(first);
+    // The single waiting reader's slot is taken; a second write has no peer left.
+    EXPECT_FALSE(channel.Writer->TryWrite(2));
+    EXPECT_EQ(readTask.getResultProperty(), 1);
+}
+
+TEST(ZeroCapacityRendezvousTests, MultipleReadersEachReceiveExactlyOneItem) {
+    auto channel = Channel<int>::CreateBounded(0);
+    constexpr int kReaders = 4;
+    std::vector<System::Threading::Tasks::TaskT<int>> readers;
+    readers.reserve(kReaders);
+    for (int i = 0; i < kReaders; ++i) readers.push_back(channel.Reader->ReadAsync());
+
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    int written = 0;
+    while (written < kReaders && std::chrono::steady_clock::now() < until) {
+        if (channel.Writer->TryWrite(100 + written)) ++written;
+    }
+    ASSERT_EQ(written, kReaders);
+
+    std::vector<int> received;
+    for (auto& r : readers) received.push_back(r.getResultProperty());
+    std::sort(received.begin(), received.end());
+    EXPECT_EQ(received, (std::vector<int>{100, 101, 102, 103}));
+    EXPECT_EQ(channel.Reader->getCountProperty(), 0);
+}
+
+TEST(ZeroCapacityRendezvousTests, WaitToWriteAsync_UnblocksWhenAReaderArrives) {
+    auto channel = Channel<int>::CreateBounded(0);
+    auto waitTask = channel.Writer->WaitToWriteAsync();
+
+    std::atomic<bool> ready{false};
+    std::thread waiter([&] {
+        (void)waitTask.getResultProperty();
+        ready.store(true);
+    });
+
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(150);
+    while (std::chrono::steady_clock::now() < until && !ready.load()) { }
+    EXPECT_FALSE(ready.load()) << "WaitToWriteAsync completed with no reader waiting";
+
+    auto readTask = channel.Reader->ReadAsync();
+    waiter.join();
+    EXPECT_TRUE(ready.load());
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (channel.Writer->TryWrite(5)) break;
+    }
+    EXPECT_EQ(readTask.getResultProperty(), 5);
+}
+
+// Every drop mode keeps Count at 0, because a rendezvous channel has no room to hold anything:
+// DropWrite drops the incoming item by definition, and with an always-empty buffer that item is
+// simultaneously the newest and the oldest. Before this ticket all three buffered an item.
+TEST(ZeroCapacityRendezvousTests, DropModes_DiscardTheItemAndKeepCountAtZero) {
+    for (auto mode : {BoundedChannelFullMode::DropWrite, BoundedChannelFullMode::DropNewest,
+                      BoundedChannelFullMode::DropOldest}) {
+        BoundedChannelOptions options(0);
+        options.FullMode = mode;
+        auto channel = Channel<int>::CreateBounded(options);
+        EXPECT_TRUE(channel.Writer->TryWrite(1)) << "drop modes report the write as handled";
+        EXPECT_EQ(channel.Reader->getCountProperty(), 0);
+        int value = 0;
+        EXPECT_FALSE(channel.Reader->TryRead(value));
+    }
+}
+
+TEST(ZeroCapacityRendezvousTests, ClosedChannel_BehavesAsBefore) {
+    auto channel = Channel<int>::CreateBounded(0);
+    channel.Writer->Complete();
+    EXPECT_FALSE(channel.Writer->TryWrite(1));
+    EXPECT_THROW((void)channel.Reader->ReadAsync().getResultProperty(), ChannelClosedException);
+    EXPECT_FALSE(channel.Reader->WaitToReadAsync().getResultProperty());
+}
+
+// A reader parked on a rendezvous channel that is then closed must still unblock -- the
+// waiting-peer bookkeeping must not be able to strand it.
+TEST(ZeroCapacityRendezvousTests, BlockedReader_IsReleasedByCompletion) {
+    auto channel = Channel<int>::CreateBounded(0);
+    auto readTask = channel.Reader->ReadAsync();
+    channel.Writer->Complete();
+    EXPECT_THROW((void)readTask.getResultProperty(), ChannelClosedException);
+    // The registration was undone, so the channel is not left believing a peer is waiting.
+    EXPECT_FALSE(channel.Writer->TryWrite(1));
+}
+
+// An error completion while a reader is parked takes #1967's wrapped path, not a stranded wait.
+TEST(ZeroCapacityRendezvousTests, BlockedReader_IsReleasedByErrorCompletion) {
+    auto channel = Channel<int>::CreateBounded(0);
+    auto readTask = channel.Reader->ReadAsync();
+    channel.Writer->Complete(std::make_exception_ptr(std::runtime_error("boom")));
+    expectClosedWithCause([&] { (void)readTask.getResultProperty(); });
+}
+
+// Non-zero capacities are untouched -- the whole point of the repair is that it is confined to
+// capacity 0.
+TEST(ZeroCapacityRendezvousTests, NonZeroCapacities_AreUnchanged) {
+    auto one = Channel<int>::CreateBounded(1);
+    EXPECT_TRUE(one.Writer->TryWrite(1));
+    EXPECT_FALSE(one.Writer->TryWrite(2));
+    EXPECT_EQ(one.Reader->getCountProperty(), 1);
+    int value = 0;
+    EXPECT_TRUE(one.Reader->TryRead(value));
+    EXPECT_EQ(value, 1);
+    EXPECT_TRUE(one.Writer->TryWrite(3));
+
+    auto three = Channel<int>::CreateBounded(3);
+    int accepted = 0;
+    for (int i = 0; i < 5; ++i)
+        if (three.Writer->TryWrite(i)) ++accepted;
+    EXPECT_EQ(accepted, 3);
+    EXPECT_EQ(three.Reader->getCountProperty(), 3);
+
+    auto unbounded = Channel<int>::CreateUnbounded();
+    accepted = 0;
+    for (int i = 0; i < 100; ++i)
+        if (unbounded.Writer->TryWrite(i)) ++accepted;
+    EXPECT_EQ(accepted, 100);
+
+    BoundedChannelOptions dropOldest(1);
+    dropOldest.FullMode = BoundedChannelFullMode::DropOldest;
+    auto dropping = Channel<int>::CreateBounded(dropOldest);
+    dropping.Writer->TryWrite(1);
+    dropping.Writer->TryWrite(2);
+    int survivor = 0;
+    EXPECT_TRUE(dropping.Reader->TryRead(survivor));
+    EXPECT_EQ(survivor, 2);
+}
+
+// The prioritized channel shape is unbounded by construction and has no capacity at all, so it
+// is unaffected -- asserted so a future change to the shared reader base cannot silently
+// regress it.
+TEST(ZeroCapacityRendezvousTests, PrioritizedChannel_IsUnaffected) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    EXPECT_TRUE(channel.Writer->TryWrite(5));
+    EXPECT_TRUE(channel.Writer->TryWrite(1));
+    EXPECT_EQ(channel.Reader->getCountProperty(), 2);
+    EXPECT_EQ(channel.Reader->ReadAsync().getResultProperty(), 1);
+}
+
+// Layout gate: every type a consumer can name keeps its size and alignment. Only the internal
+// detail::ChannelState<T> grew (240 -> 248 bytes on LP64), and it appears in no public
+// signature; Threading.Channels is an INTERFACE target, so nothing can be linked across
+// versions of it.
+TEST(ZeroCapacityRendezvousTests, PublicLayoutIsUnchanged) {
+    static_assert(sizeof(Channel<int>) == 32, "Channel<T> layout changed");
+    static_assert(sizeof(ChannelReader<int>) == 24, "ChannelReader<T> layout changed");
+    static_assert(sizeof(ChannelWriter<int>) == 24, "ChannelWriter<T> layout changed");
+    static_assert(sizeof(ChannelOptions) == 16, "ChannelOptions layout changed");
+    static_assert(sizeof(BoundedChannelOptions) == 24, "BoundedChannelOptions layout changed");
+    static_assert(alignof(Channel<int>) == 8 && alignof(ChannelReader<int>) == 8 &&
+                      alignof(ChannelWriter<int>) == 8 && alignof(ChannelOptions) == 8 &&
+                      alignof(BoundedChannelOptions) == 8,
+                  "channel alignment changed");
+    SUCCEED();
 }
