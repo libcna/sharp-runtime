@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <exception>
+#include "System/ArgumentNullException.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Runtime::ExceptionServices {
 
@@ -30,19 +32,53 @@ namespace System::Runtime::ExceptionServices {
         explicit ExceptionDispatchInfo(std::exception_ptr exception) : exception_(std::move(exception)) {}
 
     public:
-        /** @brief Captures @p source for later rethrowing via Throw(). */
+        /**
+         * @brief Captures @p source for later rethrowing via Throw().
+         * @param source The exception to capture. Must not be null.
+         * @throws System::ArgumentNullException if @p source is null, matching .NET
+         *         ExceptionDispatchInfo.Capture(Exception), which rejects a null source rather
+         *         than deferring the failure. Without this check the null would survive to
+         *         std::rethrow_exception(), whose behaviour is undefined for a null
+         *         exception_ptr -- observed here as a SIGSEGV the caller cannot catch.
+         */
         [[nodiscard]] static ExceptionDispatchInfo Capture(std::exception_ptr source) {
+            if (!source) throw System::ArgumentNullException("source");
             return ExceptionDispatchInfo(std::move(source));
         }
 
-        /** @return The captured exception. */
+        /** @return The captured exception. Never null for a live instance; see Throw(). */
         [[nodiscard]] std::exception_ptr getSourceExceptionProperty() const { return exception_; }
 
-        /** @brief Rethrows the captured exception. */
-        [[noreturn]] void Throw() const { std::rethrow_exception(exception_); }
+        /**
+         * @brief Rethrows the captured exception.
+         *
+         * @throws System::InvalidOperationException if this instance has been moved from.
+         *         Capture() guarantees a non-null capture, so the only way a live instance can
+         *         hold nothing is the implicitly declared move constructor or move assignment
+         *         operator, which leave the *source* object's exception_ptr empty. That state
+         *         has no .NET counterpart -- a managed ExceptionDispatchInfo cannot be emptied
+         *         -- so it is reported as an invalid operation on this object rather than as a
+         *         bad argument: nothing was passed to this call. Without the check the empty
+         *         state reaches std::rethrow_exception() and faults.
+         * @throws whatever exception was captured, in the normal case.
+         */
+        [[noreturn]] void Throw() const {
+            if (!exception_) {
+                throw System::InvalidOperationException(
+                    "This ExceptionDispatchInfo holds no exception because it has been moved from.");
+            }
+            std::rethrow_exception(exception_);
+        }
 
-        /** @brief Captures and immediately rethrows @p source. */
-        [[noreturn]] static void Throw(std::exception_ptr source) { std::rethrow_exception(source); }
+        /**
+         * @brief Captures and immediately rethrows @p source.
+         * @throws System::ArgumentNullException if @p source is null (see Capture()).
+         * @throws whatever exception @p source holds, in the normal case.
+         */
+        [[noreturn]] static void Throw(std::exception_ptr source) {
+            if (!source) throw System::ArgumentNullException("source");
+            std::rethrow_exception(source);
+        }
     };
 
 } // namespace System::Runtime::ExceptionServices

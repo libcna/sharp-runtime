@@ -793,3 +793,68 @@ Then, only with approval: **#1980 G-1** (cheapest, additive) → **#1979** →
 
 Written 2026-08-03. Implementation status is tracked per ticket in `plan.sqlite3`
 and appended to this document as each lands.
+
+---
+
+## 18. What #1973 measured (2026-08-03) — cause R-E
+
+**SR-AUD-155: `confirmed` → `remediated`.** Cause R-E is closed.
+
+### 18.1 Four routes repaired, and where each check had to go
+
+| Route | Before | After |
+|---|---|---|
+| `Capture(null)` | `died_signal_11` (SIGSEGV) | `System::ArgumentNullException`, parameter `source` |
+| static `Throw(null)` | `died_signal_11` | `System::ArgumentNullException`, parameter `source` |
+| moved-from instance `Throw()` | `died_signal_11` | `System::InvalidOperationException` |
+| move-assigned-from `Throw()` | `died_signal_11` | `System::InvalidOperationException` |
+
+`build-probe/1972_probe1_before.log` → `build-probe/1973_probe1_after.log`. The two
+moved-from routes are §4.1's correction and are **not** named by the finding; they are
+also the reason the check could not live only at `Capture`. `Capture` already
+guarantees a non-null capture, so a live instance can only become empty through the
+implicitly declared move operations — which is why the instance `Throw()` guard is
+about *object state* and takes `InvalidOperationException`, while the two entry points
+that receive an argument take `ArgumentNullException`. Fourth site at which the
+CCF-011 policy selected a non-default exception type for a non-default API shape.
+
+### 18.2 The probe's own harness, stated so the two logs stay comparable
+
+The `after` run's child bodies catch `std::exception` and report the message; the
+`before` run's did not. That addition **cannot** be what makes the logs differ: a
+SIGSEGV from `std::rethrow_exception(nullptr)` is not catchable, which is the finding's
+whole point. It is recorded here rather than left as an unexplained difference between
+two logs.
+
+### 18.3 Sanitizers, capability proved first
+
+`build-probe/1973_probe1_asan` — ASan + UBSan + LSan, **0 reports**, exit 0.
+Instrumentation proved rather than assumed: **30** `__asan_*`/`__ubsan_*` symbols
+against **0** in the plain binary, and 12 `ExceptionDispatchInfo` symbols in the
+sanitizer binary, so the changed body — which is entirely inline in the header — is
+compiled *into* the instrumented image rather than linked from an archive.
+
+The clean result is only informative because the harness was shown capable: a control
+translation unit with a deliberate leak, a deliberate `<<= 40` and a deliberate
+heap overflow, compiled with the identical flags, produced **2** sanitizer reports.
+
+Honest limitation: `build/libsharp_runtime_core.a` supplies the exception classes and
+is **not** instrumented, so UBSan says nothing about code inside those constructors.
+ASan's allocator interception is global and does still cover them. The claim made here
+is only about the changed header body.
+
+### 18.4 Consequences
+
+No public signature, object layout (`sizeof(ExceptionDispatchInfo)` is unchanged at 8),
+vtable (none exists), `noexcept` specification (nothing was `noexcept`), mangled symbol
+or component edge changed. `ExceptionDispatchInfo.hpp` now includes
+`System/ArgumentNullException.hpp` and `System/InvalidOperationException.hpp`; both are
+in `Core.Base`, already a `PUBLIC_DEPENDENCIES` entry, so the module graph stays
+**41 / 91**.
+
+Observable: four calls that ended the process with an uncatchable fault now throw a
+catchable `System::Exception`. **No call that worked before behaves differently** —
+pinned by three control tests (the moved-*to* instance still rethrows, a copy does not
+empty its original, and `Throw()` is repeatable).
+
+`SharpRuntimeTests_Runtime` **126 → 136** (+10), all passing.
