@@ -3,7 +3,255 @@
 
 # NEXT.md
 
-*Last verified: 2026-08-02. Branch
+*Last verified: 2026-08-03. Branch `claude/remediation-batch-1804-namespace-b1yjh5`,
+upstream `origin/claude/remediation-batch-1804-namespace-b1yjh5` (pre-existing;
+nothing was pushed). **#1804 was already `done`** — resolved 2026-07-30, re-verified
+not redone. The batch's work was the **`System::Threading` namespace review (#1950)**
+plus **six implementations**: #1946 and #1960 (the repository did not compile on
+GCC 13/libstdc++ 13), #1961 (**P0** — `Dns::GetHostEntry` recursed without bound and
+killed the process), #1947 (SR-AUD-206), #1948 (SR-AUD-211), #1949
+(SR-AUD-195/197). Audit **72 remediated / 292 open / 364 total**. Gate **15,105
+tests across 37 executables**, 15,098 passing, 1 skipped, **6 failing for two
+measured, attributed environment reasons that were not hidden**. Graph **41 / 91**,
+seams **2 / 18**, negative fixtures **10 / 81** over 91 compiler invocations peak 2,
+checker self-tests **45 / 45** and **15 / 15**. **Doxygen NOT run — not installed
+here.** Database **1,962 tickets: 1,934 done, 5 todo, 16 blocked, 3 needs_user, 4
+wontfix**, none doing. #1773 remains blocked. See the first handoff below.*
+
+---
+
+## Autonomous batch handoff, 2026-08-03 (#1804 verification + `System::Threading` review)
+
+### 1. #1804 — already resolved, verified rather than redone
+
+The batch instruction described #1804 as a blocked tooling defect with a live
+false pass. **The database and the source disagree, and they are right.** Ticket
+#1804's row records `RESOLVED 2026-07-30 (batch feature/remediation-batch-1804-namespace-review)`:
+`scripts/check_version_seam_odr.py` gained `_is_class_template_head`, so a class
+template whose **primary** is *defined* inside `namespace SharpRuntime::Testing` in
+a `modules/*/include` header re-enters discovery instead of silently leaving it, and
+the existing rule 1 rejects it. The fix is non-hard-coded (neither seam name appears)
+and template-only, so the ticket's `wontfix` trigger never applied. Re-verified this
+batch, changing nothing:
+
+| Check | Result |
+|---|---|
+| `scripts/check_version_seam_odr.py` | `OK … (2 seam(s), 18 specialisation definition(s))`, exit 0 |
+| `test/check_version_seam_odr_test.py` | 15 / 15 |
+| `scripts/check_negative_consumer_fixtures.py` | 10 fixtures, 81 sites, every site rejected |
+| `test/check_negative_consumer_fixtures_test.py` | 45 / 45 |
+
+**No reproducer was built and no checker line was changed**, because there is
+nothing left to reproduce. Rebuilding a probe for a closed condition would have
+produced evidence for a defect that no longer exists.
+
+### 2. The queue was empty — which is why the namespace review is the batch
+
+`plan.sqlite3` held **zero** `todo` tickets at start; every open row was `blocked`
+(downstream or approval) or `needs_user`. The `task` porting queue is **exhausted**
+(0 rows at `''`/`todo`), so `prompt.md` Step 1 selects nothing. The next unit of work
+therefore had to come from the audit inventory.
+
+### 3. Namespace selected: `System::Threading`, and why
+
+Not alphabetical, and not the largest. Open confirmed findings by module:
+`core` 72, **`threading` 38**, `runtime` 21, `uri` 14, `text` 14, everything else ≤ 11.
+
+`core` was rejected: its 72 findings are already carved up by seven `CCF-*` family
+plans, so a "core review" would mostly re-plan settled work. `threading` was selected
+because all six criteria hold at once — **14 high** findings (the largest untouched
+severity concentration), **no** existing `docs/*Plan.md` covering any threading type,
+`PUBLIC_DEPENDENCIES Core.Base TimeZone` only (so no repair needs a new component
+edge and the graph stays 41/91), the findings collapse to **nine** causes rather than
+38 bugs, a single executable validates it, and nothing in it is blocked on #1773 or on
+the `#1929` approval chain. `Threading.Tasks` and `Threading.Channels` (3 + 3 open)
+are **excluded**: separate components, the natural follow-on review.
+
+### 4. Complete finding inventory and the nine causes
+
+`docs/ThreadingNamespaceReviewPlan.md` §3 lists all 38 with severity, type, defect
+and owning cause. Every one was re-checked against current source; **all 38 remain
+`confirmed` at review time**, none is a duplicate, and none is a false premise.
+
+| Cause | Findings | Classification |
+|---|---|---|
+| **T-A** shared state read outside its own mutex (TSan) | 203p, 207×3, 212, 216, 218 | implement after layout measurement — #1955 |
+| **T-B** empty `std::function` at public boundaries | 190, 192, 198, 213p, 217, 219p, 222 | implement, CCF-011 policy verbatim — #1951 |
+| **T-C** arguments not validated at the boundary | 183, 184, 188, 199, 200, 205, 213p | implement — #1952, #1953, #1954 |
+| **T-D** borrowed raw pointers outlive the owner (ASan) | 187, 221 | design-first, approval — #1959 |
+| **T-E** incomplete synchronisation state machines | 201, 202, 204, 210, **211** | 211 implemented (#1948); rest design-first — #1957 |
+| **T-F** defined boundary computed with signed overflow | **206** | implemented — #1947 |
+| **T-G** disposal is not a real state | 191, 203p, 208×3, 219p | design-first, approval — #1956 |
+| **T-H** the public shape itself diverges | 189, 193, 194, 196, 209, 214, 215, 220 | design-first, approval — #1958 |
+| **T-I** assertions that cannot fail | **195**, **197** | implemented — #1949 |
+
+Three of the nine are **new sites of causes the cross-cutting record already
+carries**, and inherit those repairs rather than getting a second policy: **T-B is
+CCF-011** (closed; `docs/EmptyCallableBoundaryPlan.md`), **T-F is CCF-004's cause**
+(closed 8/8), **T-D is CCF-019's cause** (still open, so not closable by reuse). The
+other six are namespace-specific and are deliberately **not** promoted to `CCF-*`
+identifiers — that numbering is closed.
+
+### 5. Corrected premises
+
+Five, all documented rather than absorbed:
+
+1. **SR-AUD-187's null half is already closed** — `ThreadPool.hpp:78-80` does throw
+   `ArgumentNullException("callBack")`. Only the *lifetime* half is live.
+2. **SR-AUD-196's HResult half was closed by #1875**; only *accessibility* remains.
+3. **SR-AUD-207 spans three types**, not two — `SemaphoreSlim`,
+   `ManualResetEventSlim` **and** `CountdownEvent`.
+4. **SR-AUD-206 has four overflow sites, not two**, and its consequence is a
+   **liveness failure**, not a missing exception: `SemaphoreSlim`'s `CurrentCount`
+   was left at `-2147483648`, after which `count_ > 0` can never hold again.
+5. **`ThreadPool::SetMinThreads`/`SetMaxThreads` take `int`, not `intcs`** — a
+   CLAUDE.md rule 7 convention deviation with no behavioural or ABI consequence
+   (`intcs` *is* `int32_t`). Recorded as an exclusion, **not** ticketed as a defect.
+
+### 6. Three defects found while establishing the baseline
+
+**The repository did not compile.** The first build failed at object 7 of 723:
+`MathF::Round` used `std::floorf`/`std::ceilf`, which libstdc++ does not declare
+(it declares the TR1/C99 set — `nearbyintf`, `roundf`, `truncf` — but not the C89
+set). Fixing that exposed a second break at object 489: GCC 13's `-Wdangling-reference`,
+part of `-Wall` and fatal under `-Werror`, on a binding `ListIndexerProxyTests.cpp`
+deliberately pins. That one is a **false positive** —
+`ElementReference<T>::operator const T&()` returns `*slot_`, into the owning
+collection, not into the temporary proxy — so the suppression is scoped to the single
+statement and guarded off for Clang, and the expression under test is unchanged.
+Tickets **#1946** and **#1960**.
+
+**#1961 (P0) — unbounded recursion from ordinary public input.**
+`Dns::GetHostEntry(const IPAddress&)` reverse-resolved with `::getnameinfo(..., 0)`
+and fed the result to `GetHostEntry(string, family)`. Without `NI_NAMEREQD`,
+`getnameinfo` **succeeds** for an address with no reverse mapping and returns it in
+**numeric** form; the string overload re-parsed that as a literal and called straight
+back in with the same address. Stack exhaustion, SIGSEGV. Measured here: `/etc/hosts`
+has `127.0.0.1 localhost` but no `::1` line, so `getnameinfo(127.0.0.1)` returned
+`"localhost"` and terminated while `getnameinfo(::1)` returned `"::1"` and killed
+`SharpRuntimeTests_Net`, taking every later test in that executable with it. The
+entry is now built directly when the reverse lookup yields a literal.
+
+### 7. Implementations, with before/after evidence
+
+| # | Finding | Before | After |
+|---|---|---|---|
+| #1947 | SR-AUD-206 | 4 UBSan signed-overflow reports; `result=normal`; `SemaphoreSlim` count `-2147483648` | 0 reports; `SemaphoreFullException` from both; count preserved at 1; control `Release(INT_MAX-1)` still succeeds |
+| #1948 | SR-AUD-211 | `reset0=TIMEOUT`, exit 1 | `reset0=released`, `control reset3=still-blocked`, exit 0 |
+| #1949 | SR-AUD-195/197 | `state & 0 == 0`; `(void)id` | exact expected state; positive and stable id |
+| #1961 | new | probe hung under ASan until killed | exit 0, `addresses=1 host=::1` |
+
+Probes retained: `build-probe/1946_probe1_mathf_std_suffixed.cpp`,
+`1947_probe1_semaphore_release_overflow.cpp` (+ before/after logs),
+`1948_probe1_countdown_reset_wake.cpp` (+ before/after logs),
+`1961_probe1_dns_gethostentry_ipv6.cpp`, `1961_probe2_getnameinfo.c`,
+`1961_probe3_timing.c` (+ logs).
+
+**No source, ABI, layout, vtable, exception-specification or accepted-input change**
+in any of the six. Every observable difference is one the owning finding asked for.
+
+### 8. Sanitizers
+
+UBSan was used for #1947 and is the finding's own evidence (four reports before, zero
+after). ASan was used for #1961. **TSan was not run and no `build-tsan/` tree was
+created**: the six TSan-confirmed races are cause T-A, ticket #1955, which this batch
+deliberately did not start — it needs a per-type layout measurement first. LSan was
+not material to any of the six changes.
+
+### 9. Validation, reported exactly as measured
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | exit 0, **0 errors, 0 warnings** |
+| Component gate | **15,105 tests / 37 executables**; 15,098 pass, 1 skip, **6 fail** |
+| `validate_module_boundaries.py` | OK — **41 modules / 91 edges** |
+| `validate_module_boundaries_test.py` | 7 / 7 |
+| `generate_component_catalog.py --check` | catalogue current |
+| `db_consistency_check.py` | OK |
+| `check_version_seam_odr.py` | OK — 2 seams / 18 definitions |
+| `check_version_seam_odr_test.py` | 15 / 15 |
+| `check_negative_consumer_fixtures.py` | 10 fixtures / 81 sites, all rejected, 91 invocations, peak **2** jobs |
+| `check_negative_consumer_fixtures_test.py` | 45 / 45 |
+| `check_selective_components.sh` | **passed** — full component matrix, every isolated consumer check green, forbidden fixtures still rejected |
+| `git diff --check` | clean |
+| Doxygen | **NOT RUN — doxygen is not installed in this container** |
+
+**The six failures, attributed and not hidden.** Five `PingTests` fail because
+`Ping::createIcmpSocket` only ever opens an unprivileged `SOCK_DGRAM` ICMP socket and
+this container's `/proc/sys/net/ipv4/ping_group_range` is `1  0` — while
+`socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)` **succeeds** here. That is a **real gap in
+`Ping`**, opened as **#1962** (`blocked`, unstarted: the fallback needs a second
+receive path that skips the IP header and matches the ICMP identifier itself, which
+was well outside this batch). One `SocketTests` case fails because
+`socket(AF_INET6, SOCK_STREAM, 0)` returns `EAFNOSUPPORT` — IPv6 is absent from the
+container entirely, `/proc/net/if_inet6` does not exist. **No test was disabled,
+skipped or made conditional**, per the batch instruction.
+
+### 10. Remaining queue and the recommended next step
+
+**Ready and compatible — start here, in this order** (the order is the dependency
+graph in the review plan §6, not a preference):
+
+| # | P | Cause | Note |
+|---|---|---|---|
+| #1951 | P1 | T-B | CCF-011 policy verbatim; largest single win, includes the `Thread` process-termination case |
+| #1952 | P1 | T-C | `WaitHandle` multi-wait; the only member whose failure mode is a hang |
+| #1953 | P1 | T-C | the two null-dereference boundaries |
+| #1954 | P2 | T-C | the four out-of-domain argument boundaries |
+| #1955 | P1 | T-A | six data races; **must land after #1951–#1954**, needs a layout measurement gate |
+
+**Blocked on four approvals**, stated together in `docs/ThreadingNamespaceReviewPlan.md`
+§9 so any subset can be approved in one turn: #1956 (disposal becomes a real state →
+previously-succeeding calls throw), #1957 (new private state fields → `sizeof` grows),
+#1959 (ownership of borrowed pointers → public source break, #1771's class), #1958
+(`AutoResetEvent`/`ManualResetEvent` derive from `WaitHandle` → hierarchy + vtable).
+
+Also open and untouched: #1773 (downstream, blocked), #1888/#1889/#1894/#1896/#1899
+(declined/blocked), #1962 (`Ping`), and the `#1929` row-4 chain (#1939–#1945), whose
+own recommendation — approve #1939's exact wording — is unchanged and still stands.
+
+**Next recommended namespace after `System::Threading` closes:**
+`modules/threading-tasks` + `modules/threading-channels` (3 + 3 open) as one small
+review, then `modules/runtime` (21) or `modules/uri` (14).
+
+### 11. Disk, resources, and repository safety
+
+The checkout began with **no build directories at all**, so `build/` was configured
+and built from scratch — unavoidable, not a discarded incremental tree. Final sizes:
+`build/` ≈ 700 MB, `build-tmp/` (logs + selective-matrix root) and `build-probe/`
+(probe sources, binaries and logs) small. `build-asan/`, `build-modular/`,
+`build-consumer/` and `cmake-build-debug/` were **not created**. No tree under
+`/tmp`, `/var/tmp` or `/dev/shm`. **Maximum aggregate compilation parallelism: 2**
+(`--parallel 2`, `SHARP_RUNTIME_BUILD_JOBS=2`); every probe was a single translation
+unit. `ccache` is not installed in this container. `scripts/check_selective_components.sh`
+and the negative-fixture checker were run with an **absolute** `TMPDIR="$PWD/build-tmp"`,
+per the standing note.
+
+`PYTHONDONTWRITEBYTECODE=1` was set on every Python invocation; no `__pycache__`
+file was created or staged. **CNA, mobile-eggbert, sibling and parent repositories,
+and downstream consumers were not inspected, searched, built or modified.** No push,
+fetch, pull, merge, rebase, tag, publication, remote mutation or stash mutation was
+performed. The googletest submodule was initialised at its pinned
+`7e2c425db2c2e024b2807bfe6d386f4ff068d0d6` with `--init --no-fetch --checkout`.
+
+### 12. Known limitations of this environment
+
+- **doxygen is not installed**, so the 1,942 warning ceiling could not be checked.
+  Nothing in this batch adds or removes a documented entity in a way that could
+  plausibly move it, but that is reasoning, not a measurement.
+- **IPv6 is absent** (`/proc/net/if_inet6` missing, `AF_INET6` → `EAFNOSUPPORT`), so
+  one `SocketTests` case cannot pass here.
+- **`net.ipv4.ping_group_range` is closed** (`1  0`), so five `PingTests` cannot pass
+  here until #1962 lands.
+- **GCC 13.3 / libstdc++ 13 and Clang 18** are the only toolchains available; the
+  repository's own verified baseline evidently used a newer libstdc++, which is how
+  #1946 reached `main` uncompiled.
+- `test/check_version_seam_odr_test.py` still lacks the executable bit (#1848) — run
+  via `python3`.
+
+---
+
+*Prior handoff snapshot, retained historically: 2026-08-02. Branch
 `feature/remediation-batch-1929-row4-design`, no upstream. #1938 completed the
 design-only #1929 row-4 unit without changing production or ordinary test
 semantics. Rows 1–3 are remeasured and unchanged; row 4 is decomposed into

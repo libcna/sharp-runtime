@@ -1,6 +1,29 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-02 — branch
+*Last verified: 2026-08-03 — branch
+`claude/remediation-batch-1804-namespace-b1yjh5`, no upstream. **#1804 was
+already `done`** (resolved 2026-07-30) and was re-verified, not redone: the seam
+checker reports 2 seams / 18 specialisations and its self-tests 15/15. The batch's
+real work was the **`System::Threading` namespace review (#1950)** —
+`docs/ThreadingNamespaceReviewPlan.md`, all 38 open findings mapped to nine root
+causes and twelve bounded tickets — plus **four compatible implementations**
+(#1947 SR-AUD-206, #1948 SR-AUD-211, #1949 SR-AUD-195/197) and **three defects
+found while establishing the baseline** (#1946 and #1960: the repository did not
+compile at all on GCC 13/libstdc++ 13; #1961, P0: `Dns::GetHostEntry` recursed
+without bound and killed the process). Audit is now **72 remediated / 292 open /
+364 total**. The gate is **15,105 tests / 37 executables**, 15,098 passing, 1
+skipped, **6 failing for two environment reasons that were measured, attributed
+and not hidden** — five `PingTests` (closed `net.ipv4.ping_group_range`, real gap
+in `Ping`, ticket #1962) and one `SocketTests` (`AF_INET6` unavailable;
+`/proc/net/if_inet6` absent). No test was disabled to obtain green. Graph
+**41/91**; seams **2/18**; negative fixtures **10/81**, 91 compiler invocations,
+peak 2; checker self-tests **45/45** and **15/15**. **Doxygen was NOT run: doxygen
+is not installed in this container**, so the 1,942 ceiling is unverified this
+batch and no change was made that could plausibly move it. Tickets: **1,934 done,
+5 todo, 16 blocked, 3 needs_user, 4 wontfix** of 1,962; none doing. #1773 remains
+blocked; CNA and mobile-eggbert were not inspected.*
+
+*Prior plan snapshot, retained historically: 2026-08-02 — branch
 `feature/remediation-batch-1929-row4-design`, no upstream. Design-only #1938 is
 complete; #1929 remains partial/`needs_user`. Rows 1–3 are remeasured and
 unchanged, and row 4 is split into independent #1939–#1945 contracts with
@@ -98,6 +121,82 @@ validated repair tickets. Consumer-driven API breadth remains legitimate later
 work but must stay behind confirmed crash, lifetime, and public-contract
 findings.
 
+
+## 2026-08-03 — #1804 re-verified, `System::Threading` namespace review, four repairs
+
+**#1804 needed no work.** The batch instruction described it as blocked; the
+database says it was **resolved 2026-07-30** by adding `_is_class_template_head`
+to `scripts/check_version_seam_odr.py`, so a class template whose PRIMARY is
+*defined* inside `namespace SharpRuntime::Testing` in a `modules/*/include`
+header re-enters discovery instead of silently leaving it, and existing rule 1
+rejects it. Re-verified rather than redone: the checker reports **2 seams / 18
+specialisation definitions**, its self-tests **15/15**, and the two consumer-side
+negative fixtures still reject every site. Nothing about the reported false-pass
+condition is still live.
+
+**The queue was empty, so the namespace review was the work.** `plan.sqlite3`
+held zero `todo` tickets and the `task` porting queue is exhausted (0 rows at
+`''`/`todo`), so `prompt.md` Step 1 selects nothing.
+
+| Unit | Result |
+|---|---|
+| #1950 review | `docs/ThreadingNamespaceReviewPlan.md`; 38 findings → 9 causes → 12 tickets |
+| #1946 | `MathF::Round` used `std::floorf`/`std::ceilf`, which libstdc++ does not declare |
+| #1960 | GCC 13 `-Wdangling-reference` false positive under `-Werror` |
+| #1961 (P0) | `Dns::GetHostEntry` recursed without bound → SIGSEGV |
+| #1947 | `Semaphore`/`SemaphoreSlim` `Release` signed overflow (SR-AUD-206) |
+| #1948 | `CountdownEvent::Reset` never woke its waiters (SR-AUD-211) |
+| #1949 | two threading assertions that could not fail (SR-AUD-195/197) |
+| #1962 | `Ping` has no `SOCK_RAW` fallback — opened `blocked`, unstarted |
+
+### The repository did not compile
+
+The first build of the checkout failed at object 7 of 723. `MathF::Round` used
+the C99 float-suffixed `<cmath>` spellings; libstdc++ declares the TR1/C99 set
+(`nearbyintf`, `roundf`, `truncf`) inside `namespace std` but **not** the C89 set
+(`floorf`, `ceilf`). Fixing that exposed a second break at object 489: GCC 13's
+new `-Wdangling-reference`, part of `-Wall` and fatal under `-Werror`, on a
+binding `ListIndexerProxyTests.cpp` deliberately pins. It is a false positive —
+`ElementReference<T>::operator const T&()` returns `*slot_`, a reference into the
+owning collection — and the suppression is scoped to that one statement and
+guarded off for Clang. Neither is a semantic change; both are recorded as their
+own tickets rather than folded into unrelated work.
+
+### #1961 — an unbounded recursion reachable from ordinary input
+
+`Dns::GetHostEntry(const IPAddress&)` reverse-resolved with
+`::getnameinfo(..., 0)` and fed the result straight to `GetHostEntry(string,
+family)`. Without `NI_NAMEREQD`, `getnameinfo` **succeeds** for an address with no
+reverse mapping and returns it in numeric form; the string overload re-parsed
+that as a literal and called back in with the same address. Measured here:
+`/etc/hosts` has `127.0.0.1 localhost` but no `::1` line, so
+`getnameinfo(127.0.0.1)` returned `"localhost"` and terminated while
+`getnameinfo(::1)` returned `"::1"` and killed `SharpRuntimeTests_Net` — which is
+why only the IPv6 case was fatal and the whole executable's later tests were lost
+with it. When the reverse lookup yields a literal there is nothing left to
+resolve, so the entry is now built directly.
+
+### Two corrections to SR-AUD-206, both measured
+
+The audit recorded one overflowing expression per type and "the exception is
+missing". The pre-fix UBSan probe reports **four** — the guard *and* the
+increment in each type, the latter reached precisely because the guard's own
+comparison overflowed — and `SemaphoreSlim`'s `CurrentCount` was left at
+**-2147483648**, so `count_ > 0` could never hold again and every later `Wait`
+blocked forever. That is a liveness failure, not a diagnostics gap, and it is why
+#1947 was scheduled first.
+
+### What is left, and what is honestly not green
+
+Five `todo` tickets remain (#1951–#1955, all `System::Threading`, all compatible,
+in that dependency order) and four designs (#1956–#1959) are `blocked` on the four
+approval questions stated together in the review plan's §9. The gate is **15,105
+tests / 37 executables**, 15,098 passing, **6 failing**: five `PingTests` because
+this container's `net.ipv4.ping_group_range` is `1  0` — a real gap in `Ping`,
+ticket #1962, left open — and one `SocketTests` because IPv6 is absent from the
+container entirely. `scripts/check_selective_components.sh` **passed** in full.
+**Doxygen could not be run: doxygen is not installed here**, so the 1,942
+ceiling is unverified this batch.
 
 ## 2026-08-02 — #1938 row-4 design complete
 
