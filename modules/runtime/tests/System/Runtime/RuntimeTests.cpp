@@ -8,6 +8,7 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Attribute.hpp"
 #include "System/Index.hpp"
 #include "System/Range.hpp"
@@ -21,6 +22,7 @@
 #include "System/Runtime/CompilerServices/CompilerGeneratedAttribute.hpp"
 #include "System/Runtime/CompilerServices/EnumeratorCancellationAttribute.hpp"
 #include "System/Runtime/CompilerServices/ExtensionAttribute.hpp"
+#include "System/Runtime/CompilerServices/FormattableStringFactory.hpp"
 #include "System/Runtime/CompilerServices/InterpolatedStringHandlerAttribute.hpp"
 #include "System/Runtime/CompilerServices/IsExternalInit.hpp"
 #include "System/Runtime/CompilerServices/IteratorStateMachineAttribute.hpp"
@@ -656,4 +658,119 @@ TEST(CompilerGeneratedAttributeTests, IsAttribute) {
     const System::Attribute& base = attr;
     (void)base;
     SUCCEED();
+}
+
+// ===========================================================================
+// GCSettings enum-domain validation
+//
+// Ticket #1976 / SR-AUD-156 (cause R-F of docs/SystemRuntimeNamespaceReviewPlan.md).
+// Both setters were bare assignments, so an arbitrary enum cast became persistent,
+// observable global configuration. Measured before the repair
+// (build-probe/1972_probe1_before.log): latency(99) retained=99, latency(-1) retained=-1,
+// loh(0) retained=0, loh(3) retained=3, every one of them no-throw.
+//
+// Each test restores the shared static, because these are process-global settings and the
+// suite's other GCSettings tests read them.
+// ===========================================================================
+
+TEST(GCSettingsTests, SetLatencyMode_OutOfDomainValue_Throws) {
+    GCSettings::setLatencyModeProperty(GCLatencyMode::Interactive);
+    EXPECT_THROW(GCSettings::setLatencyModeProperty(static_cast<GCLatencyMode>(99)),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(GCSettings::setLatencyModeProperty(static_cast<GCLatencyMode>(-1)),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(GCSettings::setLatencyModeProperty(static_cast<GCLatencyMode>(5)),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(GCSettingsTests, SetLatencyMode_RejectedValue_LeavesThePreviousValueIntact) {
+    // Rejecting is only half the contract: the invalid value must not be stored either.
+    GCSettings::setLatencyModeProperty(GCLatencyMode::LowLatency);
+    EXPECT_THROW(GCSettings::setLatencyModeProperty(static_cast<GCLatencyMode>(99)),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_EQ(GCSettings::getLatencyModeProperty(), GCLatencyMode::LowLatency);
+    GCSettings::setLatencyModeProperty(GCLatencyMode::Interactive);
+}
+
+TEST(GCSettingsTests, SetLatencyMode_NoGCRegion_IsRejectedAsRuntimeOwnedState) {
+    // .NET does not let a caller declare a no-GC region through this setter; the value
+    // reports runtime state. It stays a legal value to READ -- see the next test.
+    GCSettings::setLatencyModeProperty(GCLatencyMode::Interactive);
+    EXPECT_THROW(GCSettings::setLatencyModeProperty(GCLatencyMode::NoGCRegion),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_EQ(GCSettings::getLatencyModeProperty(), GCLatencyMode::Interactive);
+}
+
+TEST(GCSettingsTests, GetLatencyMode_DomainIsWiderThanTheSetterDomain) {
+    // Pins the deliberate asymmetry so a future "simplification" that validates the getter
+    // against the setter's domain fails here rather than in a consumer.
+    EXPECT_EQ(static_cast<int>(GCLatencyMode::NoGCRegion), 4);
+    EXPECT_GT(static_cast<int>(GCLatencyMode::NoGCRegion),
+              static_cast<int>(GCLatencyMode::SustainedLowLatency));
+}
+
+TEST(GCSettingsTests, SetLatencyMode_EveryInDomainValueStillSucceeds) {
+    for (int v = static_cast<int>(GCLatencyMode::Batch);
+         v <= static_cast<int>(GCLatencyMode::SustainedLowLatency); ++v) {
+        GCSettings::setLatencyModeProperty(static_cast<GCLatencyMode>(v));
+        EXPECT_EQ(static_cast<int>(GCSettings::getLatencyModeProperty()), v);
+    }
+    GCSettings::setLatencyModeProperty(GCLatencyMode::Interactive);
+}
+
+TEST(GCSettingsTests, SetCompactionMode_BothAdjacentInvalidValues_Throw) {
+    // 0 and 3 bracket the enum: 0 is the value-initialised default and is NOT a member,
+    // because this enum starts at Default = 1.
+    GCSettings::setLargeObjectHeapCompactionModeProperty(GCLargeObjectHeapCompactionMode::Default);
+    EXPECT_THROW(GCSettings::setLargeObjectHeapCompactionModeProperty(
+                     static_cast<GCLargeObjectHeapCompactionMode>(0)),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(GCSettings::setLargeObjectHeapCompactionModeProperty(
+                     static_cast<GCLargeObjectHeapCompactionMode>(3)),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_EQ(GCSettings::getLargeObjectHeapCompactionModeProperty(),
+              GCLargeObjectHeapCompactionMode::Default);
+}
+
+TEST(GCSettingsTests, SetCompactionMode_EveryInDomainValueStillSucceeds) {
+    for (int v = static_cast<int>(GCLargeObjectHeapCompactionMode::Default);
+         v <= static_cast<int>(GCLargeObjectHeapCompactionMode::CompactOnce); ++v) {
+        GCSettings::setLargeObjectHeapCompactionModeProperty(
+            static_cast<GCLargeObjectHeapCompactionMode>(v));
+        EXPECT_EQ(static_cast<int>(GCSettings::getLargeObjectHeapCompactionModeProperty()), v);
+    }
+    GCSettings::setLargeObjectHeapCompactionModeProperty(GCLargeObjectHeapCompactionMode::Default);
+}
+
+TEST(GCSettingsTests, RejectedWrites_AreCatchableAsSystemException) {
+    GCSettings::setLatencyModeProperty(GCLatencyMode::Interactive);
+    bool caught = false;
+    try {
+        GCSettings::setLatencyModeProperty(static_cast<GCLatencyMode>(42));
+    } catch (const System::Exception&) {
+        caught = true;
+    }
+    EXPECT_TRUE(caught);
+}
+
+// ===========================================================================
+// FormattableStringFactory — SR-AUD-059's behaviour, pinned
+//
+// Ticket #1978 / cause R-J. The doc-comment used to promise std::invalid_argument for an
+// empty format; the body has always forwarded it, and .NET rejects only null, which
+// std::string cannot represent. The BEHAVIOUR is correct and the CLAIM was the defect, so
+// this pins the behaviour rather than adding a rejection.
+// ===========================================================================
+
+TEST(FormattableStringFactoryTests, EmptyFormat_IsAcceptedAndYieldsAnEmptyResult) {
+    auto fs = System::Runtime::CompilerServices::FormattableStringFactory::Create("");
+    EXPECT_EQ(fs.getArgumentCountProperty(), 0);
+    EXPECT_EQ(fs.ToString(), "");
+}
+
+TEST(FormattableStringFactoryTests, EmptyFormatWithArguments_IsAlsoAccepted) {
+    auto fs = System::Runtime::CompilerServices::FormattableStringFactory::Create(
+        "", {"unused"});
+    EXPECT_EQ(fs.getArgumentCountProperty(), 1);
+    EXPECT_EQ(fs.ToString(), "");
 }

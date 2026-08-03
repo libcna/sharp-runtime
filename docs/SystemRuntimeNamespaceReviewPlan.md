@@ -1001,3 +1001,57 @@ is a control proving the repair reproduces whatever it found rather than always
 restoring something non-default. All use `SIGWINCH`, whose default is ignore, so a
 regression cannot kill the suite; each restores the disposition it installed through a
 scope guard whatever the outcome. `SharpRuntimeTests_Runtime` **138 → 143**.
+
+---
+
+## 21. What #1976 measured (2026-08-03) — cause R-F
+
+**SR-AUD-156: `confirmed` → `remediated`.** Cause R-F is closed.
+
+### 21.1 Before and after
+
+| input | before | after |
+|---|---|---|
+| `latency(99)` | `no-throw`, **retained=99** | `ArgumentOutOfRangeException` (`value`), **retained=1** |
+| `latency(-1)` | `no-throw`, **retained=-1** | `ArgumentOutOfRangeException`, retained=1 |
+| `latency(NoGCRegion=4)` | `no-throw`, retained=4 | `ArgumentOutOfRangeException`, retained=1 |
+| `latency(Batch=0)`, `latency(SustainedLowLatency=3)` | `no-throw` | **`no-throw`** — unchanged |
+| `loh(0)`, `loh(3)` | `no-throw`, retained=0 / 3 | `ArgumentOutOfRangeException`, retained=1 |
+| `loh(Default=1)`, `loh(CompactOnce=2)` | `no-throw` | **`no-throw`** — unchanged |
+
+`build-probe/1972_probe1_before.log` → `build-probe/1976_probe1_after.log`. Rejecting is
+only half the contract; every rejected case now also shows the **previous value intact**,
+which the pre-fix log could not (it stored the invalid value).
+
+### 21.2 The asymmetry the repair deliberately introduces
+
+`NoGCRegion` (4) stays a legal value to **read** and is now an illegal value to **write**,
+because it reports runtime-owned state a caller may not establish. So
+`getLatencyModeProperty`'s domain is `Batch..NoGCRegion` while
+`setLatencyModeProperty`'s is `Batch..SustainedLowLatency`. That is not an oversight and
+is pinned by `GCSettingsTests.GetLatencyMode_DomainIsWiderThanTheSetterDomain`, so a
+future "simplification" that aligns the two fails in the suite rather than in a consumer.
+
+A second boundary worth naming: `GCLargeObjectHeapCompactionMode` starts at `Default = 1`,
+so **`0` — the value a `static_cast` from a value-initialised integer produces — is not a
+member** and is rejected. Both adjacent invalid values (0 and 3) are covered.
+
+### 21.3 Consequences
+
+No object layout change is even possible: `GCSettings` has `GCSettings() = delete` and no
+instances. No public signature, vtable, `noexcept` specification, mangled symbol or
+component edge changed; `GCSettings.hpp` now includes
+`System/ArgumentOutOfRangeException.hpp`, which is in `Core.Base`, already a
+`PUBLIC_DEPENDENCIES` entry. Graph stays **41 / 91**.
+
+**This is the one compatible ticket in the batch that makes a currently succeeding call
+fail** — §9 said so in advance. .NET throws for the identical call, every in-domain write
+is unaffected, and both "every in-domain value still succeeds" loops are permanent tests
+rather than a claim.
+
+ASan + UBSan: **0 reports**, 30 sanitizer symbols with 6 `GCSettings` symbols in the
+instrumented image (the type is header-only, so instrumenting the probe recompiles it).
+
+Eight add-only `GCSettings` regressions. `SharpRuntimeTests_Runtime` **143 → 153**, which
+also includes #1978's two behaviour-pinning `FormattableStringFactory` tests, added to the
+same translation unit in the same edit.
