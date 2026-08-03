@@ -1,27 +1,44 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-08-03 — branch
+`feature/remediation-batch-tasks-channels-1965-1968`, cut from `a0cd647` and
+**pushed to `origin/claude/remediation-batch-1804-namespace-b1yjh5` at the
+user's explicit mid-batch request**; no merge, rebase, tag or PR. The batch
+implemented the entire **compatible** half of the `Threading.Tasks` +
+`Threading.Channels` review (`docs/ThreadingTasksChannelsReviewPlan.md`) —
+**#1965** SR-AUD-231, **#1966** SR-AUD-232, **#1967** SR-AUD-234, **#1968**
+SR-AUD-233 — closing causes TC-A, TC-B/1, TC-B/2 and TC-C and leaving only the
+two approval-gated causes #1969 and #1970. It then verified
+`docs/ThreadingNamespaceReviewPlan.md` §20.3's claim that **#1958 Group A** is
+compatible, found it true for **two of the three** members, split those two into
+new ticket **#1971** (SR-AUD-214, SR-AUD-189) and landed it. **SR-AUD-215 was
+verified NOT compatible and stays with the blocked #1958**, whose title is
+corrected from eight members to six: `ExecutionContext`'s constructor is private,
+`Capture()` returns `nullptr` unconditionally and `CreateCopy()` needs an
+instance, so no consumer can obtain a non-null context and rejecting null would
+make `Run` throw for every call that can be written. Audit is now **93
+remediated / 271 confirmed / 364 total**, numbering frozen at **364** — no new
+`SR-AUD-*` was issued, including for `ChannelWriter::WriteAsync`, which is
+SR-AUD-234's own defect at a second site the finding explicitly denies. The gate
+is **15,253 tests / 37 executables**, 15,246 passing, 1 skipped, **6 failing for
+the same two environment reasons, re-measured, attributed and not hidden** — five
+`PingTests` (closed `net.ipv4.ping_group_range`, real gap in `Ping`, ticket
+#1962) and one `SocketTests` (`AF_INET6` unavailable; `/proc/net/if_inet6`
+absent). No test was disabled to obtain green; the two zero-capacity channel
+tests that pinned incorrect behaviour were **rewritten, not deleted**, and said
+so. Graph **41/91**; seams **2/18**; negative fixtures **10/81**, 91 compiler
+invocations, peak 2; checker self-tests **45/45** and **15/15**; selective
+components **passed**. **Doxygen was NOT run: doxygen is not installed in this
+container**, so the 1,942 ceiling stays historical. Tickets: **1,945 done, 1
+todo, 18 blocked, 3 needs_user, 4 wontfix** of 1,971; none doing. #1773, #1962
+and #1963 remain as they were; CNA and mobile-eggbert were not inspected.*
+
+*Prior plan snapshot, retained historically: 2026-08-03 — branch
 `claude/remediation-batch-1804-namespace-b1yjh5`, no upstream. **#1804 was
-already `done`** (resolved 2026-07-30) and was re-verified, not redone: the seam
-checker reports 2 seams / 18 specialisations and its self-tests 15/15. The batch's
-real work was the **`System::Threading` namespace review (#1950)** —
-`docs/ThreadingNamespaceReviewPlan.md`, all 38 open findings mapped to nine root
-causes and twelve bounded tickets — plus **four compatible implementations**
-(#1947 SR-AUD-206, #1948 SR-AUD-211, #1949 SR-AUD-195/197) and **three defects
-found while establishing the baseline** (#1946 and #1960: the repository did not
-compile at all on GCC 13/libstdc++ 13; #1961, P0: `Dns::GetHostEntry` recursed
-without bound and killed the process). Audit is now **72 remediated / 292 open /
-364 total**. The gate is **15,105 tests / 37 executables**, 15,098 passing, 1
-skipped, **6 failing for two environment reasons that were measured, attributed
-and not hidden** — five `PingTests` (closed `net.ipv4.ping_group_range`, real gap
-in `Ping`, ticket #1962) and one `SocketTests` (`AF_INET6` unavailable;
-`/proc/net/if_inet6` absent). No test was disabled to obtain green. Graph
-**41/91**; seams **2/18**; negative fixtures **10/81**, 91 compiler invocations,
-peak 2; checker self-tests **45/45** and **15/15**. **Doxygen was NOT run: doxygen
-is not installed in this container**, so the 1,942 ceiling is unverified this
-batch and no change was made that could plausibly move it. Tickets: **1,934 done,
-5 todo, 16 blocked, 3 needs_user, 4 wontfix** of 1,962; none doing. #1773 remains
-blocked; CNA and mobile-eggbert were not inspected.*
+already `done`** (resolved 2026-07-30) and was re-verified, not redone. The batch's
+real work was the **`System::Threading` namespace review (#1950)** plus four compatible
+implementations and three defects found while establishing the baseline. Audit was
+**72 remediated / 292 open / 364 total**; the gate **15,105 tests / 37 executables**.*
 
 *Prior plan snapshot, retained historically: 2026-08-02 — branch
 `feature/remediation-batch-1929-row4-design`, no upstream. Design-only #1938 is
@@ -5919,3 +5936,71 @@ passed every static gate; `git diff --check` clean. **Doxygen was not run — it
 installed in this environment**, so the 1,942 ceiling is retained as historical rather than
 newly verified. Maximum aggregate compilation parallelism: **two jobs**, never exceeded, with
 no two builds running concurrently.
+
+
+## Batch 2026-08-03 — `Threading.Tasks` + `Threading.Channels` #1965–#1968, and the #1958 Group A split (#1971)
+
+Branch `feature/remediation-batch-tasks-channels-1965-1968`, cut from `a0cd647`. Five ticket
+commits plus a handoff, all unsigned; pushed to
+`origin/claude/remediation-batch-1804-namespace-b1yjh5` at the user's explicit mid-batch
+request, with no merge, rebase, tag or PR and no previous commit rewritten.
+
+| Ticket | Cause | Findings closed | Tests |
+|---|---|---|---|
+| #1965 | TC-A — CCF-011 in a *third* module | SR-AUD-231 | +37 |
+| #1966 | TC-B/1 | SR-AUD-232 | +10 |
+| #1967 | TC-C | SR-AUD-234 (two sites) | +13 |
+| #1968 | TC-B/2 | SR-AUD-233 | +12 |
+| #1971 | T-H — the verified-compatible half of #1958 Group A | SR-AUD-214, SR-AUD-189 | +16 |
+
+**What made this batch worth reading rather than a routine sweep** is that eight of the audit's
+own statements were wrong in ways that changed the repair, and one recommended split turned out
+to be over-broad:
+
+- **SR-AUD-231 has 22 public entries, not two**, and `Parallel`'s empty callable was **already
+  catchable** — it arrived as `System::AggregateException`, so CCF-011's strongest consequence
+  ("the failure is the wrong type") never applied to that file.
+- **`Parallel::Invoke` is not an `ArgumentNullException` site**: .NET rejects a null *element*
+  with a plain `ArgumentException` carrying no parameter name. The same trap
+  `ThreadingNamespaceReviewPlan` §17.1 recorded, in a third module.
+- **SR-AUD-232's repair cannot be placed where .NET places it** — .NET validates in the
+  `ParallelOptions` setter, and this port's field is a public data member — and its check had to
+  be inserted *above* #1965's, confirmed by measurement on the intermediate tree.
+- **SR-AUD-234 has a second site the finding explicitly denies.** `ChannelWriter::WriteAsync`
+  loses the same boundary as `ReadAsync`; repaired together, no new identifier.
+- **SR-AUD-233 collided with a contradictory claim inside this repository.** `Channel.hpp`'s own
+  comment asserted the opposite of the finding, citing a reading of `BoundedChannel.cs`.
+  Resolved in favour of the finding's *behavioural managed probe*, the comment replaced rather
+  than dropped, and the limitation stated: the reference tree is absent here. This is the mirror
+  image of **#1963**, declined precisely because *its* report carries no managed probe — the
+  same rule, opposite answer.
+- **#1958 Group A is two members, not three.** SR-AUD-215 was verified **not** compatible: no
+  consumer can obtain a non-null `ExecutionContext*` at all, so rejecting null would make `Run`
+  throw for every call that can be written. It stays with the blocked #1958.
+
+**Baselines after the batch:** 15,253 tests across 37 executables (was 15,165), 15,246 passing,
+1 skipped, 6 failing for two re-measured environmental causes; audit **93 remediated / 271
+confirmed / 364**, numbering frozen at **364**; module graph **41 / 91** unchanged; negative
+fixtures **10 / 81**; version seams **2 / 18**; checker self-tests **45 / 45** and **15 / 15**;
+`check_selective_components.sh` run and **passed**; `local_ci_check.sh build` passed every
+static gate and stopped at the same known Ping failures; `git diff --check` clean. **Doxygen was
+not run — it is not installed in this environment.**
+
+**Sanitizers, with every probe's capability proved first** (§19.4's rule): TSan reported **0 data
+races before and after** everywhere — correct, since every defect repaired was a *contract*
+defect — and the pre-fix runs are what make that zero informative: 3,600 wrong outcomes → 0
+(#1967), 600 → 0 (#1968), 8,000 → 0 (#1971). ASan + UBSan + LSan: 0 reports throughout. Two
+honest non-discriminators are recorded rather than dressed up.
+
+**Consequences:** no public signature, vtable, `noexcept`, exception-contract or component-edge
+change anywhere. One internal type grew — `detail::ChannelState<int>` 240 → 248 bytes for the
+rendezvous waiting-peer counter — while every public channel type is unchanged and now pinned by
+`static_assert`. One behaviour-incompatible change by design: a zero-capacity bounded channel is
+now a rendezvous, and the two tests that pinned the old behaviour were **rewritten, not
+deleted**, identified as such in the file and the commit. Maximum aggregate compilation
+parallelism: **two jobs**, never exceeded, with no two compilations running concurrently.
+
+**Remaining queue:** the only `todo` is **#1963**, which needs the absent .NET reference tree.
+Six approvals are outstanding — #1956, #1957, #1958 (six members now), #1959, #1969, #1970. The
+recommended next unit is another namespace review, `System.Runtime` or `System.Uri`; if any
+approval lands first, **#1969** is the cheapest remaining win.

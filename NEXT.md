@@ -1,24 +1,300 @@
-<!-- SPDX-License-Identifier: MIT -->
-<!-- Copyright (c) Robert Vokac and contributors -->
+*Last verified: 2026-08-03. Branch `feature/remediation-batch-tasks-channels-1965-1968`
+(cut from `a0cd647`), **pushed to `origin/claude/remediation-batch-1804-namespace-b1yjh5`
+at the user's explicit mid-batch request — no merge, rebase, tag or PR**. The batch
+implemented the entire **compatible** half of the `Threading.Tasks` + `Threading.Channels`
+review — **#1965–#1968** — and then split the verified-compatible part of **#1958 Group A**
+into new ticket **#1971**, landing it. Audit **93 remediated / 271 confirmed / 364 total**
+(+6 this batch); numbering still frozen at **364**. Gate **15,253 tests across 37
+executables**, 15,246 passing, 1 skipped, **6 failing for the same two measured
+environmental reasons, unchanged and not hidden**. Graph **41 / 91**, seams **2 / 18**,
+negative fixtures **10 / 81** over 91 compiler invocations peak 2, checker self-tests
+**45 / 45** and **15 / 15**, selective components **passed**. **Doxygen NOT run — still not
+installed here.** Database **1,971 tickets: 1,945 done, 1 todo, 18 blocked, 3 needs_user,
+4 wontfix**, none doing. **#1958 stays blocked and now has six members, not eight** —
+SR-AUD-215 was verified NOT compatible and stays with it. #1773, #1962 and #1963 unchanged.
+**Commits are intentionally unsigned** (§12). See the first handoff below.*
 
-# NEXT.md
+---
 
-*Last verified: 2026-08-03. Branch `feature/remediation-batch-threading-1951-1955`
-(local only, **nothing pushed**), cut from the previous batch's tip `9082c75` on
-`claude/remediation-batch-1804-namespace-b1yjh5`. The batch implemented the five
-compatible `System::Threading` tickets **#1951–#1955**, wrote the consolidated
-approval package for the four blocked ones **#1956–#1959**, and reviewed the
-**`Threading.Tasks` + `Threading.Channels`** namespaces (**#1964**), opening
-**#1965–#1968** (`todo`) and **#1969–#1970** (`blocked`). Audit **87 remediated /
-277 confirmed / 364 total** (+15 this batch). Gate **15,165 tests across 37
-executables**, 15,158 passing, 1 skipped, **6 failing for two measured
-environmental reasons, unchanged and not hidden**. Graph **41 / 91**, seams
-**2 / 18**, negative fixtures **10 / 81** over 91 compiler invocations peak 2,
-checker self-tests **45 / 45** and **15 / 15**, selective components **passed**.
-**Doxygen NOT run — still not installed here.** Database **1,970 tickets: 1,940
-done, 5 todo, 18 blocked, 3 needs_user, 4 wontfix**, none doing. #1773 and #1962
-remain blocked. **Commits are intentionally unsigned** (§10). See the first
-handoff below.*
+## Autonomous batch handoff, 2026-08-03 (`Threading.Tasks` + `Threading.Channels` #1965–#1968, plus the #1958 Group A split → #1971)
+
+Branch `feature/remediation-batch-tasks-channels-1965-1968`, cut from the previous batch's tip
+`a0cd647`. **Five ticket commits plus this handoff, all unsigned** (§12). Pushed to
+`origin/claude/remediation-batch-1804-namespace-b1yjh5` at the user's explicit mid-batch
+request; **no merge, no rebase, no tag, no PR, and no previous commit was amended or
+rewritten**.
+
+### 1. What landed
+
+| Ticket | Cause | Findings closed | Tests |
+|---|---|---|---|
+| **#1965** | TC-A — CCF-011 in a *third* module | SR-AUD-231 | +37 |
+| **#1966** | TC-B/1 | SR-AUD-232 | +10 |
+| **#1967** | TC-C | SR-AUD-234 | +13 |
+| **#1968** | TC-B/2 | SR-AUD-233 | +12 |
+| **#1971** | T-H — the verified-compatible half of #1958 Group A | SR-AUD-214, SR-AUD-189 | +16 |
+
+`SharpRuntimeTests_Threading_Tasks` 171 → **218**; `SharpRuntimeTests_Threading_Channels`
+39 → **64**; `SharpRuntimeTests_Threading` 429 → **445**. Two new translation units
+(`TasksBoundaryTests.cpp`, `ThreadingPublicShapeTests.cpp`) plus additions to `ChannelTests.cpp`.
+
+**`docs/ThreadingTasksChannelsReviewPlan.md`'s whole compatible half is closed.** TC-A, TC-B/1,
+TC-B/2 and TC-C are all `remediated`; only the two approval-gated causes remain, TC-B/3 (#1969)
+and TC-D (#1970).
+
+### 2. Eight corrections to the audit record, every one measured
+
+Recorded in `docs/ThreadingTasksChannelsReviewPlan.md` §15–§18,
+`docs/ThreadingNamespaceReviewPlan.md` §21, and each per-file report. Historical audit text is
+preserved verbatim; corrections are appended.
+
+1. **SR-AUD-231 has 22 public entries, not the two named** — eleven distinct bodies edited, the
+   rest inheriting the check by forwarding.
+2. **`Parallel`'s empty callable was already catchable.** CCF-011's third and strongest
+   consequence — *"the failure is the wrong type … `catch (const System::Exception&)` does not
+   catch it"* — is **false for all six `Parallel` entries**: they already produced a
+   `System::AggregateException`. It holds exactly for the sixteen `Task`/`TaskT`/`TaskFactory`
+   entries.
+3. **`Parallel::Invoke` is not an `ArgumentNullException` site.** .NET rejects a null *element*
+   of the actions array with a plain `ArgumentException` carrying **no** parameter name. Same
+   trap as `docs/ThreadingNamespaceReviewPlan.md` §17.1's two sites — the family's usual
+   spelling would have swapped one non-matching result for another. Pinned by a test that
+   *fails* if `ArgumentNullException` is thrown.
+4. **Two data-dependent silent shapes SR-AUD-231 does not name:** an empty range or empty source
+   ran no iteration and returned a completed `ParallelLoopResult`, and an already-cancelled
+   token short-circuited before the action, so both accepted an empty callable silently. The
+   argument check now precedes the cancelled-token short circuit, matching .NET.
+5. **SR-AUD-232's repair cannot be placed where .NET places it.** .NET validates in the
+   `ParallelOptions` *setter*; this port's field is a public mutable data member with nowhere to
+   put a check, so only the *point of detection* moves. This is the same shape that gates
+   SR-AUD-235 as #1969 — and the reason *this* one is still compatible is that `Parallel::For`
+   **reads** the option, so there is a public entry at which to reject before any work runs. The
+   degree check also had to be inserted **above** #1965's body check, confirmed by measurement
+   on the intermediate tree.
+6. **SR-AUD-234 has a second site the finding explicitly denies.** It states *"only ReadAsync
+   loses its API-specific closed channel boundary"*. `ChannelWriter<T>::WriteAsync` has the
+   identical defect from the identical code shape. Repaired together as one defect at two sites;
+   **no new `SR-AUD-*` identifier**, numbering frozen at **364**.
+7. **SR-AUD-233 collided with a contradictory claim inside this repository.** `Channel.hpp`'s
+   own `effectiveCapacity()` comment asserted it had been *"verified against BoundedChannel.cs"*
+   that a capacity-0 channel is *"observably equivalent to a capacity-1 channel for every
+   publicly-visible outcome"* — the opposite of the finding. Resolved in favour of the finding
+   (behavioural managed probe beats a reading of source; later record; the comment is
+   self-undermining), the comment **replaced rather than dropped**, and the limitation stated:
+   the reference tree is absent, so it could not be adjudicated directly, and the repair is
+   revertible without touching a signature. This is the **mirror image of #1963**, declined
+   precisely because *its* report carried no managed probe.
+8. **#1958 Group A is a two-member group, not three** — see §4.
+
+### 3. Deliberate non-adoptions, each recorded rather than silently skipped
+
+- **.NET's rule refusing a `ThreadPool` maximum below the processor count** (#1971): could not
+  be verified here, and it would make the port's observable answer depend on the core count of
+  whatever machine runs it. Same reasoning as #1952's `MaxWaitHandles`.
+- **Drop modes at channel capacity 0** (#1968): the audit's probe covers only `Wait` mode, so
+  discarding the item and keeping `Count == 0` is recorded as **reasoned**, not measured.
+- **`ExecutionContext::Run` null rejection** (SR-AUD-215): excluded from #1971, §4.
+
+### 4. The #1958 Group A split — verified independently, and it is two members, not three
+
+`docs/ThreadingNamespaceReviewPlan.md` §20.3 listed **three** members as *"compatible, no
+approval needed"*. Verified by measurement (`build-probe/1971_probe1_group_a.cpp`) **before**
+splitting anything:
+
+| Member | Verdict | Outcome |
+|---|---|---|
+| SR-AUD-214 `AsyncLocal<T>` notify-after-write | compatible | landed in **#1971** |
+| SR-AUD-189 `ThreadPool` setters validate and store | compatible | landed in **#1971** |
+| **SR-AUD-215** `ExecutionContext::Run(nullptr, …)` throws | **not compatible** | **stays in the blocked #1958** |
+
+§20.3 attached its own caveat to SR-AUD-215 — *"`Capture()` always returns `nullptr` … must be
+checked before landing"* — and treated it as a *test* problem. It is a **reachability** problem:
+`Capture()` returns null unconditionally, the default constructor is **private** (proved by a
+compile probe), and `CreateCopy()` is a non-static member needing an instance. **No consumer can
+obtain a non-null `ExecutionContext*` at all**, so rejecting null would make `Run` throw for
+*every* call that can be written, including `Run(Capture(), callback, state)`, which works
+today. That is mandatory downstream migration with no working alternative. Landing it requires a
+`Capture()` that returns a real context — an ownership and lifetime design, not a validation
+change.
+
+**#1958 stays `blocked`**, its title corrected from eight members to six, and its approval
+request (A) re-worded: (A) is satisfied for SR-AUD-214 and SR-AUD-189 only; SR-AUD-215 joins the
+approval-gated remainder. Groups B and C untouched and unapproved. Two regressions pin the
+current `ExecutionContext` contract so the exclusion is **testable**, and one of them fails if
+the type ever becomes publicly constructible — which would re-open the question.
+
+### 5. Validation, exactly as measured
+
+| Gate | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| Full gate, 37 executables run individually | **15,253 tests — 15,246 passed, 1 skipped, 6 failed** |
+| `validate_module_boundaries.py` | OK — **41 modules, 91 edges** (unchanged) |
+| `validate_module_boundaries_test.py` | 7 / 7 |
+| `generate_component_catalog.py --check` | OK, current |
+| `db_consistency_check.py` | OK, no problems |
+| `check_version_seam_odr.py` | OK — **2 seams, 18 definitions** |
+| `check_version_seam_odr_test.py` | **15 / 15** |
+| `check_negative_consumer_fixtures.py` | OK — **10 fixtures, 81 sites**, 91 invocations, **peak 2 jobs** |
+| `check_negative_consumer_fixtures_test.py` | **45 / 45** |
+| `check_selective_components.sh` | **passed** (every component, 2 jobs) |
+| `local_ci_check.sh build` | every static gate OK; stops at the same known Ping failures |
+| `git diff --check` | clean |
+| **Doxygen** | **NOT RUN — `doxygen` is not installed here.** The 1,942 ceiling stays *historical*, not newly verified. No system package was installed. |
+
+15,253 is +88 over the previous batch's 15,165, matching exactly the 37+10+13+12+16 this batch
+added. `run_component_tests.sh` stops at the first failing executable, so the 37 executables were
+run individually; that is the authoritative figure.
+
+### 6. The six failing tests — same two causes, re-measured, none hidden
+
+**No test was disabled, skipped, weakened or recategorised.**
+
+| Test | Cause |
+|---|---|
+| `PingTests.Send_Loopback_Succeeds` | `/proc/sys/net/ipv4/ping_group_range` still reads **`1  0`** — an empty range, so no group may open an unprivileged `SOCK_DGRAM` ICMP socket |
+| `PingTests.Send_LoopbackByString_Succeeds` | same |
+| `PingTests.Send_CustomBuffer_EchoedBack` | same |
+| `PingTests.Send_WithOptions_Succeeds` | same |
+| `PingTests.SendPingAsync_Loopback_Succeeds` | same |
+| `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` | `/proc/net/if_inet6` **still does not exist** — no IPv6 in this kernel namespace, so `socket(AF_INET6, …)` fails with `"Socket::Socket: socket() failed"` |
+
+The required distinction is preserved: the empty `ping_group_range` is the **environmental
+restriction**, and **#1962** — `Ping` has no raw-socket receive path to fall back to — is the
+**implementation gap**. #1962 stays **blocked**: its design is incomplete and the
+privilege/platform/security decision it needs was not taken here.
+
+One skipped test, unchanged:
+`CultureInvariantFormattingTests.NumericAndDateFormatting_UnaffectedByNonInvariantGlobalLocale`
+— no non-invariant locale installed.
+
+**No new regression.** Every failure is one of the six the previous batch measured.
+
+### 7. Sanitizer evidence, with every probe's *capability* proved first
+
+`docs/ThreadingNamespaceReviewPlan.md` §19.4's rule — *"a 'TSan reported nothing' result is
+evidence about the probe until the probe has been shown capable of reporting something"* — was
+applied to every concurrency conclusion in this batch.
+
+| Ticket | Sanitizer | Before → after | Instrumentation |
+|---|---|---|---|
+| #1965 | ASan+UBSan+LSan | 0 → 0 reports (leak check on the newly throwing entries) | 34 symbols vs 0 plain |
+| #1966 | ASan+UBSan+LSan | 0 → 0 | 32 symbols |
+| #1967 | **TSan** + ASan/UBSan/LSan | **3,600 wrong outcomes → 0** over 4 scenarios × 400 rounds; **0 data races both runs** | 21 `__tsan`, fully from source, no archive |
+| #1968 | **TSan** + ASan/UBSan/LSan | **600 wrong outcomes → 0** over 4 scenarios × 300 rounds; **0 data races both runs** | 21 `__tsan`, fully from source |
+| #1971 | **TSan** + ASan/UBSan/LSan | **8,000 wrong outcomes → 0** on the AsyncLocal ordering scenario; **0 data races both runs** | 18 `__tsan`, fully from source |
+
+**TSan reported zero data races everywhere, before and after** — the correct result, because
+every defect this batch repaired is a *contract* defect rather than a race. That zero is only
+informative because the pre-fix runs show the interleavings were actually reached. Two honest
+non-discriminators are recorded rather than dressed up: #1968's close-while-parked and
+`WaitToWriteAsync`-race scenarios reported 0 in *both* runs (a capacity-1 buffer also delivers
+every item), and #1971's ThreadPool scenario likewise (setters that store nothing cannot break
+an invariant).
+
+Every sanitizer binary that mattered was compiled **from source** with the sanitizer flags, not
+linked against a pre-existing archive; every changed body in this batch lives in a header, so
+instrumenting the probe recompiles it.
+
+### 8. Source / ABI / layout consequences
+
+**No public signature, vtable, `noexcept` specification, exception contract or component edge
+changed anywhere in this batch**; the module graph stays **41 / 91**.
+
+One measured layout note, recorded rather than waved away: `detail::ChannelState<int>` grew
+**240 → 248 bytes** for #1968's waiting-peer counter. Every **public** type is unchanged and now
+pinned by `static_assert` — `Channel<int>` 32, `ChannelReader<int>`/`ChannelWriter<int>` 24,
+`ChannelOptions` 16, `BoundedChannelOptions` 24, both `detail` impls 40, all alignment 8. The
+grown type is `detail`-namespace, appears in no public signature, and lives in an **INTERFACE**
+target where nothing can be linked across versions.
+
+`ThreadPool`'s new stored configuration lives in function-local statics behind one mutex:
+`ThreadPool` is static-only (`ThreadPool() = delete`), so **no object layout exists to change**.
+The `int` → `intcs` correction from §3.1 item 4 is folded in and shown mangling-identical by
+`nm` (`_ZN6System9Threading10ThreadPool13SetMinThreadsEii`).
+
+**One behaviour-incompatible change, by design and documented:** a zero-capacity bounded channel
+is now a rendezvous (#1968). It is the only change in the batch that alters a *working* call's
+outcome, and the two tests that pinned the old behaviour were **rewritten, not deleted**, with
+each old test's concern keeping a test — called out in the file and in the commit.
+
+### 9. Audit totals
+
+**93 remediated / 271 confirmed / 364 total** (+6 this batch: SR-AUD-231, 232, 233, 234, 214,
+189). Two of the 271 carry the `confirmed (design-complete)` qualifier. **Numbering stays frozen
+at 364** — no `SR-AUD-*` identifier was issued, including for `WriteAsync` (§2 item 6), which is
+the same defect at a second site.
+
+Database: **1,971 tickets — 1,945 done, 1 todo, 18 blocked, 3 needs_user, 4 wontfix**, none
+`doing`. One new ticket: **#1971** (the split; now `done`). No inactive defect ticket was needed
+— every discovered surface addition was inseparable from its owning finding and was folded in by
+appending to that finding's record.
+
+### 10. #1963 and #1962 — both unchanged, deliberately
+
+- **#1963** (SR-AUD-200, `PeriodicTimer` fractional period) stays **`todo` and deferred**. No
+  authoritative evidence became available: `/rv/tmp/runtime/src/libraries/` is still absent and
+  no managed probe exists for that row. It was **not** implemented from recollection, and its
+  behaviour-pinning regression
+  (`ThreadingArgumentDomainTests.PeriodicTimer_FractionalPeriod_StillTruncates_SeeTicket1963`)
+  is untouched. #1968's §18.1 records why the identical rule gave the *opposite* answer there:
+  SR-AUD-233's report **does** carry a managed probe.
+- **#1962** (`Ping` has no raw-socket path) stays **`blocked`**, design incomplete.
+
+### 11. Blocked approvals still outstanding (six)
+
+`docs/ThreadingNamespaceReviewPlan.md` §20: **#1956**, **#1957**, **#1958** (now six members,
+including SR-AUD-215), **#1959**.
+`docs/ThreadingTasksChannelsReviewPlan.md` §9: **#1969** (`BoundedChannelOptions::FullMode`
+needs a property pair — a public source break), **#1970** (`TaskCanceledException`'s borrowed
+`const Task*` — CCF-019 at a third site).
+
+Nothing in this batch consumed or implied any of them.
+
+### 12. Commits are unsigned, deliberately
+
+`commit.gpgsign=true` with `gpg.format=ssh` is configured, but the private key material is
+absent. Every commit used `git -c commit.gpgsign=false commit`, preserving the configured
+`Claude <noreply@anthropic.com>` identity. **No previous commit was amended, rebased or
+rewritten to add a signature.**
+
+### 13. Build directories and parallelism
+
+| Directory | Start | End |
+|---|---|---|
+| `build/` | 1.6 G | **1.6 G** (reused throughout; never cleaned or reconfigured) |
+| `build-probe/` | 3.2 M | **3.3 M** — this batch's six probe sources and every before/after log retained; **all six of its probe binaries deleted** once their evidence was transcribed (CLAUDE.md rule 11) |
+| `build-tmp/` | 256 K | **268 K** (repository-local `TMPDIR` for every `mktemp`-based command) |
+| `build-modular/`, `build-asan/`, `build-ubsan/`, `build-tsan/`, `build-consumer/`, `cmake-build-debug/` | — | **do not exist**; none was created |
+
+**No new build-directory name was invented.** ~2.9 M of *earlier* batches' probe binaries
+(`1947_probe1`, `1948_probe1`, `1961_probe1..3`) remain and were deliberately left alone — they
+belong to closed tickets from another session and deleting another session's artefacts is not
+this batch's call.
+
+**Maximum aggregate compilation parallelism: two jobs**, never exceeded. Every build used
+`cmake --build … --parallel 2`; `check_selective_components.sh` and `local_ci_check.sh` were
+given `SHARP_RUNTIME_BUILD_JOBS=2` and `TMPDIR=$PWD/build-tmp`; every probe and every sanitizer
+build was a single `g++` invocation. **No two compilations ran concurrently** — the batch waited
+for `check_selective_components.sh` to finish before starting the test gate.
+
+### 14. Next recommended work
+
+**Ready with no approval needed: nothing.** The only `todo` is **#1963**, which needs the .NET
+reference tree this environment does not have.
+
+The natural next unit is another **namespace review** in the `prompt.md`/#1950/#1964 style. By
+open confirmed findings the largest untouched concentrations are `core` (already carved up by
+seven `CCF-*` family plans, so mostly re-planning settled work), `runtime` (~21), `uri` (~14) and
+`text` (~14). **`System.Runtime` or `System.Uri` is the recommended next review** — neither has a
+`docs/*Plan.md`, and both are small enough for one batch.
+
+If the user answers any of the six blocked questions first, the cheapest remaining win is
+**#1969** (one property pair on `BoundedChannelOptions::FullMode`), which is `S`-sized and fully
+designed.
+
+**#1773 remains blocked** on a deliberate downstream upgrade. **CNA and mobile-eggbert were not
+read, searched, built, tested or modified**, and no filesystem search left this repository.
 
 ---
 

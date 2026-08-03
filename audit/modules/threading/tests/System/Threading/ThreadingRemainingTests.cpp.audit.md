@@ -54,3 +54,20 @@ implementation defect is demonstrated by this test source.
 The broad fixture validates many normal and prior-regression paths, but its
 ThreadPool section masks all three newly confirmed boundaries and excludes
 Timer behavior altogether.  No source or test was changed.
+
+
+---
+
+## Note -- ticket #1971, 2026-08-03
+
+`ThreadPoolTests.SetMinMaxThreads_ReturnsTrue` -- which this report identifies as locking in the
+no-op setter behaviour -- still passes and was **not** weakened: `SetMinThreads(1, 1)` and
+`SetMaxThreads(8, 8)` are valid inputs and still return true. What changed is that returning
+true now means something, and the real coverage lives beside it in the new
+`modules/threading/tests/System/Threading/ThreadingPublicShapeTests.cpp`: a fixture that
+snapshots and restores the process-global configuration around each case and asserts
+read-after-set, negative and zero inputs, the minimum/maximum consistency rule in both
+directions, the unchanged defaults, and the invariant under concurrent configuration from four
+threads.
+
+SR-AUD-189 is `remediated`. SR-AUD-187's lifetime half is untouched and still owned by #1959.
