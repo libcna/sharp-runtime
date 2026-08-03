@@ -570,7 +570,23 @@ TEST(ListIndexerProxyLanguage, AutoCopiesTheAliasAndConstAutoReadsThrough) {
     EXPECT_EQ(readOnly.getValueProperty(), 2);
 
     // `const auto&` binding to the element by value conversion.
+    //
+    // GCC 13's -Wdangling-reference (new in that release, part of -Wall, and -Werror here)
+    // reports this binding as "possibly dangling". It is a false positive, and the pragma is
+    // scoped to this one statement rather than the file so that a genuinely dangling binding
+    // elsewhere is still caught: ElementReference<T>::operator const T&() returns `*slot_` --
+    // a reference into the OWNING COLLECTION's storage -- not a reference to any member of
+    // the temporary proxy, so `element` outlives the proxy legally and reads the list's own
+    // element. GCC cannot see through the conversion operator's return here; later GCC
+    // releases do not report it, and Clang has no such warning, hence the compiler guard.
+#if defined(__GNUC__) && !defined(__clang__)
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wdangling-reference"
+#endif
     const int& element = list[2];
+#if defined(__GNUC__) && !defined(__clang__)
+#    pragma GCC diagnostic pop
+#endif
     EXPECT_EQ(element, 3);
 
     // decltype(auto) preserves the proxy, so it stays assignable.
