@@ -96,8 +96,9 @@ recorded in `docs/SystemUriNamespaceReviewPlan.md` §4.
    **#1988**; the repair is a proved strict widening (plan §9.1). **No `SR-AUD-*`
    identifier was issued** — audit numbering stays frozen at **364**.
 
-5. **Three further post-audit defects, recorded as inactive tickets, no `SR-AUD-*`
-   identifier:** an empty authority is accepted (`http://`, `http:///`, `http://:80/path`
+5. **Five further post-audit defects, recorded as inactive tickets, no `SR-AUD-*`
+   identifier** (a sixth, #2004, belongs to `UriBuilder.hpp` and is recorded in that file's
+   report): an empty authority is accepted (`http://`, `http:///`, `http://:80/path`
    all yield `host=""` with the default port) — **#2000**; the two-`Uri` constructor with an
    **opaque** base fabricates an authority (`Uri(Uri("mailto:a@b.com"), "c")` →
    `mailto:///c`) — **#2001**; a relative `Uri` never splits its query or fragment out of

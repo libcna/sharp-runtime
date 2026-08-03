@@ -144,10 +144,25 @@ numbers only.
 | SR-AUD-150 | med | `UriPartial.hpp` | no `Uri::GetLeftPart` consumer | absent (compile-time) | **U-I** | **#1997 blocked (design)** |
 | SR-AUD-151 | med | `UriHostNameType.hpp` | no `Uri::CheckHostName` classifier | absent (compile-time) | **U-I** | **#1997 blocked (design)** |
 
-**Nothing disappears**: 14 findings in, 14 dispositions out — 6 to compatible
-implementation tickets (#1989–#1993 plus #1994's disclosure half), 8 to four
-approval-gated design tickets (#1995–#1999). No finding is dismissed, deduplicated away,
-or marked already-remediated.
+**Nothing disappears**: 14 findings in, 14 dispositions out. Counted by *finding*, which is
+how the index counts them: **4 findings** are closed outright by the compatible tickets —
+SR-AUD-138 (#1993), SR-AUD-143 (#1989), SR-AUD-144 (#1990) and SR-AUD-145, whose two
+unrelated halves needed both #1991 and #1992 — and the remaining **10** go to the five
+approval-gated design tickets #1995–#1999. SR-AUD-149 is in that ten and *additionally*
+receives #1994's disclosure half, which does not close it. Counted by *repair* instead of by
+finding the compatible column reads six, because SR-AUD-145 is two repairs and SR-AUD-149's
+disclosure is a seventh ticket; that is the same fourteen findings seen from the ticket side,
+not a different reconciliation. No finding is dismissed, deduplicated away, or marked
+already-remediated.
+
+*(Correction, 2026-08-03 recovery pass: this paragraph previously read "6 to compatible
+implementation tickets …, 8 to four approval-gated design tickets (#1995–#1999)". Both
+numerals were wrong against the index — the gated set is **five** tickets holding **ten**
+findings — and the 6/8 split silently mixed the per-repair and per-finding counts. The
+dispositions themselves, the §3 table above and the index are unchanged; only this summary
+sentence was miscounted. The same miscount is frozen into commit `2ba68fa`'s message and
+into `501d866`'s "eight findings whose repairs are approval-gated"; those cannot be
+corrected without rewriting history, so they are recorded here instead.)*
 
 ---
 
@@ -719,10 +734,10 @@ approval-gated** (U-G, U-H, U-I, U-J).
 | U-A | #1988 | see §20 |
 | U-B | #1989 | see §21 |
 | U-C | #1990 | see §23 |
-| U-D | #1991 | see §22 |
-| U-E | #1992 | see §24 |
-| U-F | #1993 | see §25 |
-| U-K | #1994 | see §26 |
+| U-D | #1991 | see §22 (§22.1) |
+| U-E | #1992 | see §22 (§22.2) |
+| U-F | #1993 | see §24 |
+| U-K | #1994 | see §25 |
 | U-G | #1995 | **blocked**, design complete (§14.1) |
 | U-H | #1996 | **blocked**, design complete (§14.2) |
 | U-I | #1997, #1999 | **blocked**, designs complete (§14.3, §14.5) |

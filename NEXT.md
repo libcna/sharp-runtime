@@ -1,4 +1,214 @@
-*Last verified: 2026-08-03. Branch `feature/remediation-batch-system-runtime-review`
+*Last verified: 2026-08-03. Branch `feature/remediation-batch-system-uri-review`
+(cut from `d998bda`), **not pushed**. The batch performed the **`System::Uri` namespace
+review (#1987)**, wrote `docs/SystemUriNamespaceReviewPlan.md`, created tickets
+**#1988–#2005**, and implemented the **entire compatible half**: **#1988** (cause U-A, no
+SR-AUD identifier), **#1989** SR-AUD-143, **#1990** SR-AUD-144, **#1991** SR-AUD-145a,
+**#1992** SR-AUD-145b, **#1993** SR-AUD-138, **#1994** SR-AUD-149's disclosure half. Audit
+**104 remediated / 260 confirmed / 364 total** (+4 findings this batch: SR-AUD-138, 143,
+144, 145; **24** of the 260 carry the `confirmed (design-complete)` qualifier, ten added
+here). Numbering still frozen at **364**. Gate **15,352 tests across 37 executables**,
+**15,345 passing, 1 skipped, 6 failing** for the same two measured environment causes as the
+previous batch, unchanged and not hidden — **no new failure**. `SharpRuntimeTests_Uri`
+**149 → 213**. Graph **41 / 91**, seams **2 / 18**, negative fixtures **10 / 81**, checker
+self-tests **45 / 45** and **15 / 15**, selective components **passed**, build **0 warnings
+/ 0 errors**. **Doxygen NOT run — still not installed here.** Database **2,004 tickets:
+1,961 done, 9 todo, 27 blocked, 3 needs_user, 4 wontfix**, none doing. **Commits are
+intentionally unsigned.** #1773, #1962 and #1963 unchanged. Six new post-audit defects
+recorded without an SR-AUD identifier: **#2000–#2005**. See the first handoff below.*
+
+---
+
+## Autonomous batch handoff, 2026-08-03 (`System::Uri` review #1987 + its whole compatible half, #1988–#1994)
+
+*Written by the 2026-08-03 recovery pass, from repository evidence, after the container
+restarted mid-batch and the batch ended without its own handoff section. Every number below
+was re-measured on the current tree rather than carried over.*
+
+Branch `feature/remediation-batch-system-uri-review`, cut from the previous batch's tip
+`d998bda`. **Nine commits, all local and all unsigned** (§12). **No push, no merge, no
+rebase, no tag, no PR**, and no previous commit was amended or rewritten. `CNA` and
+`mobile-eggbert` were not read, searched, built, tested or modified, and no filesystem search
+left this repository.
+
+### 1. What landed
+
+| Ticket | Cause | Finding closed | Tests | Commit |
+|---|---|---|---|---|
+| **#1987** | review | — (maps all 14) | — | `2ba68fa` |
+| **#1988** | U-A | none — post-audit defect, no identifier | +11 | `71a4d99` |
+| **#1989** | U-B | SR-AUD-143 (+ one unnamed site) | +10 | `f92abb9` |
+| **#1991** | U-D | SR-AUD-145a | +12 | `39582ea` |
+| **#1992** | U-E | SR-AUD-145b | +7 | `39582ea` |
+| **#1990** | U-C | SR-AUD-144 | +11 | `63741e0` |
+| **#1993** | U-F | SR-AUD-138 | +8 | `3858282` |
+| **#1994** | U-K | SR-AUD-149's *disclosure* half only | +5 | `7823730` |
+| — | audit reconciliation | 14 status transitions | — | `501d866` |
+
+`SharpRuntimeTests_Uri` **149 → 213** (+64, add-only: **zero** test lines were deleted or
+rewritten anywhere in the batch). #1991 and #1992 share one commit because they edit the same
+two files in the same run; the halves are kept separate everywhere else.
+
+**Seven of eleven causes closed** (U-A, U-B, U-C, U-D, U-E, U-F, U-K); **four remain
+approval-gated** (U-G, U-H, U-I, U-J).
+
+### 2. The one defect the audit never named, and why it was the largest
+
+`Uri::parse` located the scheme with `find("://")` — a search for `"://"` **anywhere** in the
+string — and consulted the grammar-correct `findSchemeColon` only when that failed, although
+that function's own doc-comment has always carried the RFC 3986 rule. The file held two
+contradictory notions of where a scheme ends and used the wrong one first, so
+`/path?redirect=http://evil.com` — the commonest redirect/callback shape there is — **could
+not be constructed at all**. Three more ordinary shapes threw the same way.
+
+Its compatibility is a **proof, not a judgement** (plan §9.1): a scheme that passed the old
+validation contains no colon, so the first colon in the string is exactly the `"://"` the old
+search found, which is exactly what `findSchemeColon` returns. Every input the old code
+*accepted* therefore takes the same branch and yields identical components; only inputs that
+**threw** can change. Confirmed empirically by a whole-sweep probe diff: **6 lines of 100
+changed, none of them a previously-accepted input.**
+
+### 3. Six corrections to the audit record, every one measured
+
+By `build-probe/1987_probe1_uri_boundaries.cpp`; historical audit text preserved **verbatim**
+(the four per-file reports gained 118 lines and lost **zero**).
+
+1. **SR-AUD-145 fabricates a *port*, not only a host.** `http://[::1/path` yielded
+   `host="[:"` **and `port=1`** — a caller that connects to `Port` reached port 1 rather than
+   failing. Two further bracketed shapes the finding never names, `[::1]junk` and the empty
+   `[]`, were accepted the same way. #1991 repairs the *shape*, not the named site.
+2. **SR-AUD-143 is not `mailto`-specific**: the opaque branch hard-coded `-1`, so `telnet:`
+   lost 23 too.
+3. **A second, entirely unnamed site lost the default port**: `http://example.com:/` reported
+   `-1` while `http://example.com/` reported `80` — two spellings of one URI disagreeing.
+4. **The largest defect had no finding at all** (§2 above).
+5. **SR-AUD-140 has an availability half**: a `UriBuilder` with an unparseable field compares
+   equal to itself but has **no obtainable hash**, because `GetHashCode` parses `ToString()`.
+   Recorded as **#2004**, deliberately *not* folded into #1995 — #1995's repair would make
+   the throw more likely, not less.
+6. **`Uri.hpp` promised a lower-case scheme the parser never produced.** Documentation defect,
+   repaired by #1994 with no behaviour change, and explicitly **not** used to close
+   SR-AUD-142.
+
+### 4. Two acceptance changes, both narrowings, both repository-backed
+
+Everything else in the batch changes a **value** or a **document**, never what is accepted.
+
+- **#1991** rejects three malformed bracketed authorities. The evidence is *inside this
+  repository*: `modules/net-http`'s `HttpClient::parseUrl` is a second, independent URL parser
+  that **already** rejected an unterminated IPv6 literal with `UriFormatException`, pinned by
+  its own test. Two parsers in one repository disagreeing about the same malformed input was
+  the defect. All five downstream test executables re-run unchanged.
+- **#1992** rejects an out-of-domain `UriKind` with `ArgumentException(paramName "uriKind")`,
+  reusing the policy already approved for this exact cause at **#1976** (`GCSettings`) and
+  **#1954** (`WaitHandle`) rather than inventing a third rule. A repository-wide search for
+  `static_cast<UriKind>`, `static_cast<System::UriKind>` and `(UriKind)` over `modules/`,
+  `test/`, `tests/` and `bench/` returns **zero hits**, so the narrowing cannot reach a
+  consumer.
+
+**#1998's narrowing was deliberately NOT landed with them**: unlike the two above, **no
+evidence for the .NET behaviour survives here** — the audit's own C# probe directory and
+`/rv/tmp/runtime/src/libraries/` are both absent. That is the line #1963 sits on, and it was
+respected rather than crossed.
+
+### 5. Three consequences that were measured rather than assumed away
+
+Recorded because a batch that only reports its wins is not a record.
+
+1. **#1993 is not rendering-neutral after all.** The ticket was written expecting `ToString()`
+   to be byte-identical for every unmodified builder. Measured, that holds for **three of four**
+   user-info shapes and **fails for one**: `"user:"` now renders `user@` instead of `user:@`.
+   That matches .NET after the identical first-colon split, and it is pinned by its own test
+   (plan §24.3) rather than left for a consumer to discover.
+2. **#1988's widening made one diagnostic worse.** `"  http://example.com/  "` used to throw
+   loudly; it now parses **silently** as a relative URI whose path is the padded text. .NET
+   trims, so both answers are wrong and the new one is wrong quietly. Direct consequence of the
+   proof's shape (only previously-throwing inputs change); **#2005**'s reproduction was updated
+   rather than the fact buried.
+3. **#1988 closed one route into #2004 without closing #2004.** `Uri("bad scheme://localhost/")`
+   is now relative, so that `GetHashCode` no longer throws (it returns `-390761049`). The
+   asymmetry survives through `Host`: `setHostProperty("h:abc")` renders `http://h:abc/`,
+   `Equals` returns 1 and `GetHashCode` **still throws**. Re-verified on the current tree by
+   this recovery pass. **#2004 stays open** with the `Host` route as its live reproduction.
+
+### 6. ABI, layout and source compatibility
+
+Across all seven implementation tickets: **no** public signature, object layout, vtable,
+mangled symbol, `noexcept` specification or component-edge change. `sizeof(System::Uri)`
+stays **240** and `sizeof(System::UriBuilder)` stays **232**, both re-measured by this
+recovery pass and pinned by permanent tests. **No mandatory consumer migration** and **no
+`docs/Migration-*.md`** is created by any ticket in this batch.
+
+### 7. Sanitizers
+
+Recovered from the retained probe logs **and independently re-run at HEAD** by this pass:
+
+| Evidence | Result |
+|---|---|
+| Capability controls (`1988_probe2_control*`) | re-run: **ASan heap-buffer-overflow**, **UBSan signed-overflow**, **LSan leak** all still reported — the harness is provably live, not silently disabled |
+| ASan+UBSan+LSan over the full 100-line sweep at HEAD | **0 reports**, exit 0, output **byte-identical** to the uninstrumented run |
+| Instrumentation proof | **35** sanitizer symbols instrumented vs **0** plain; **45** `System::Uri::` and **21** `System::UriBuilder::` symbols in the image; `libsharp_runtime_uri.a` **not** linked — `Uri.cpp` compiled from source on the command line |
+| `1993_probe2` re-run at HEAD | **0 reports**; output byte-identical to the recorded after-log |
+| TSan | **not run, and stated rather than skipped**: `Uri`/`UriBuilder` have no shared cache, no lazy canonicalisation and no hidden mutable state |
+
+**Honest non-discriminators, recorded as such:** #1989, #1993 and #1994 changed a *value* or a
+*document*, so no sanitizer could have reported anything either way — their value is only that
+the repairs introduce nothing. #1988, #1990 and #1991 are the three that genuinely exercise
+new index arithmetic on attacker-shaped text. One limitation stands: `libsharp_runtime_core.a`
+supplies the exception classes and is **not** instrumented, so UBSan says nothing about code
+inside `UriFormatException`'s constructors.
+
+### 8. Still open in this namespace
+
+**Approval-gated (blocked), designs complete, exact approval sentences in the plan:**
+
+| Ticket | §  | Gate |
+|---|---|---|
+| **#1995** | 14.1 | equality/hash semantics change (SR-AUD-142, 140) |
+| **#1996** | 14.2 | narrowing at a public setter + three rendering changes (SR-AUD-141, 139); four groups, **G-1+G-2 recommended minimum** |
+| **#1997** | 14.3 | additive public API (SR-AUD-146/149/150/151); four groups, **A-1+A-2 recommended minimum**, A-4 alone changes `UriParser`'s vtable |
+| **#1998** | 14.4 | narrowing with **no surviving reference evidence** (SR-AUD-147) |
+| **#1999** | 14.5 | public **virtual signature** change, mandatory override migration (SR-AUD-148) |
+
+**Post-audit defects, ordinary `todo` tickets, no identifier issued:** **#2000** (P2 — empty
+authority accepted), **#2001** (P3 — opaque base fabricates an authority), **#2002** (P3 —
+relative `Uri` never splits query/fragment), **#2003** (P3 — embedded NUL crosses the parser),
+**#2004** (P3 — `Equals`/`GetHashCode` asymmetry), **#2005** (P3 — **deferred verification**,
+whitespace; blocked on the absent reference tree, same class as #1963 and #1983).
+
+### 9. Next recommended work
+
+**Ready with no approval needed inside `System::Uri`: #2000** — it is the only **P2** left in
+the namespace and the highest-priority unblocked ticket anywhere in the queue. It is a
+**narrowing** and therefore owes its own compatibility argument, and it must first decide
+whether `file:///path` — a legitimately host-less scheme — stays accepted. **#2001, #2002,
+#2003 and #2004 are P3** and cheaper; **#2002 and #2003 also narrow**, #2004 does not.
+
+**#2001 is *not* the natural next ticket** despite being named in an earlier handoff draft:
+#2000 outranks it on priority, and #2001's own repair needs information the object does not
+record (whether the base was opaque), so it is a small design as well as a small fix.
+
+Outside this namespace the cheapest compatible code remains **#1986** (P2) and **#1985** (P3),
+both untouched. The natural next *unit* is another **namespace review** in the
+#1950/#1964/#1972/#1987 style; **`text` (14 open findings)** is the recommendation, and it was
+this batch's runner-up.
+
+**#1773 remains blocked** on a deliberate downstream upgrade.
+
+### 10. Recovery-pass note
+
+The container restarted mid-batch. A recovery session committed three interrupted audit-file
+reconciliation changes as `501d866` and left the tree clean, but produced no handoff section —
+which is why this one exists. This pass re-measured the full gate, the module graph, the seam
+and fixture counts, the sanitizer evidence and the ticket database from scratch, and found the
+committed state **substantively correct**. It corrected four prose miscounts and nothing else:
+the plan's §3 disposition sentence, the plan's §19 section pointers, `AUDIT_PROGRESS.md`'s
+"Five post-audit defects" (six are listed) and `Uri.cpp.audit.md`'s "Three further" (five are
+listed). **No finding status, no ticket status, no production line and no test was changed.**
+
+---
+
+*Previous batch's summary, superseded above and kept for the record: Branch
+`feature/remediation-batch-system-runtime-review`
 (cut from `66ff8b3`), **not pushed — no push was requested during this batch**. The batch
 performed the **`System::Runtime` namespace review (#1972)**, wrote
 `docs/SystemRuntimeNamespaceReviewPlan.md`, created tickets **#1972–#1986**, and then
@@ -16,7 +226,7 @@ rather than the environment alone. Graph **41 / 91**, seams **2 / 18**, negative
 here.** Database **1,985 tickets: 1,953 done, 3 todo, 22 blocked, 3 needs_user, 4
 wontfix**, none doing. **Commits are intentionally unsigned.** #1773, #1962 and #1963
 unchanged. Two new post-audit defects recorded without an SR-AUD identifier: **#1985** and
-**#1986**. See the first handoff below.*
+**#1986**. See the `System::Runtime` handoff immediately below.*
 
 ---
 

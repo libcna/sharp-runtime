@@ -6797,7 +6797,7 @@ SR-AUD-145 — whose two unrelated halves needed two tickets, #1991 and #1992.
 - **`Uri.hpp` promised a lower-case scheme the parser never produced** — a documentation
   defect, repaired without behaviour change by #1994.
 
-**Five post-audit defects recorded as inactive tickets, none issuing an identifier:**
+**Six post-audit defects recorded as inactive tickets, none issuing an identifier:**
 **#2000** (empty authority accepted), **#2001** (opaque base fabricates an authority),
 **#2002** (a relative `Uri` never splits its query or fragment), **#2003** (embedded NUL
 crosses the parser), **#2004** (the `Equals`/`GetHashCode` asymmetry) and **#2005**
