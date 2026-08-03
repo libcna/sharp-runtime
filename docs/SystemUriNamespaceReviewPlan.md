@@ -727,3 +727,68 @@ approval-gated** (U-G, U-H, U-I, U-J).
 | U-H | #1996 | **blocked**, design complete (§14.2) |
 | U-I | #1997, #1999 | **blocked**, designs complete (§14.3, §14.5) |
 | U-J | #1998 | **blocked**, design complete (§14.4) |
+
+---
+
+## 20. What #1988 measured (2026-08-03) — cause U-A
+
+### 20.1 The repair
+
+`Uri::parse` now recognises the scheme in exactly one way. `findSchemeColon` — which has
+always carried the RFC 3986 grammar in its own doc-comment — returns the colon index, and
+the URI is hierarchical iff `"//"` immediately follows it. The `find("://")` search, the
+`scheme_.empty()` throw and the per-character re-validation loop are all gone: they were the
+second, wrong grammar, and the loop could not fire at all once the first grammar was the
+only one used.
+
+### 20.2 Before and after, from the same probe
+
+`build-probe/1987_probe1_before.log` vs `build-probe/1988_probe1_after.log` — a diff of the
+whole 100-line sweep, not a selected excerpt. **Six lines differ, and no others.**
+
+| Input | Before | After |
+|---|---|---|
+| `/path?redirect=http://evil.com` | throws | relative, `AbsolutePath` = the whole reference |
+| `search?url=https://example.com` | throws | relative |
+| `mailto:a@b.com?body=see http://x` | throws | opaque, `Scheme=mailto`, `Path=a@b.com`, `Query=?body=see http://x` |
+| `foo:bar://baz` | throws | opaque, `Scheme=foo`, `Path=bar://baz` |
+| `"  http://example.com/  "` | throws | **relative** — see §20.4 |
+| `UriBuilder("bad scheme").GetHashCode()` | throws | returns a hash — see §20.4 |
+
+Everything else in the sweep — 25 absolute parses, the whole port boundary sweep, all six
+combine shapes, every bracketed-IPv6 case, the escapes, the NUL, the `UriBuilder` sections
+— is **byte-identical**, which is the empirical half of the §9.1 proof.
+
+### 20.3 Sanitizers
+
+| Harness | Result |
+|---|---|
+| Capability control (`1988_probe2_control*.log`) | **ASan heap-buffer-overflow reported**, **UBSan signed-overflow reported**, **LSan 64-byte leak reported** — all three prove the harness is not silently disabled |
+| ASan + UBSan + LSan over the full sweep | **0 reports**, exit 0 |
+| Instrumentation proof | 35 sanitizer symbols in the instrumented image vs **0** in the plain one; **44 `System::Uri::` symbols**, compiled from `modules/uri/src/System/Uri.cpp` on the command line — `build/libsharp_runtime_uri.a` was **not** linked |
+
+Honest limitation, recorded rather than dressed up: `build/libsharp_runtime_core.a` supplies
+the exception classes and is not instrumented, so UBSan says nothing about code inside
+`UriFormatException`'s constructors.
+
+### 20.4 Two consequences of the widening that are *not* improvements, stated plainly
+
+1. **`"  http://example.com/  "` stops throwing and becomes a relative URI.** Before, a
+   whitespace-padded absolute URI failed loudly; now it silently parses as a relative
+   reference whose path is the padded text. .NET trims and produces the absolute URI, so
+   *both* answers are wrong — but the new one is wrong **silently**. This is a direct
+   consequence of the proof's shape (only previously-throwing inputs change) and it is not
+   hidden: ticket **#2005**'s reproduction is updated to record the new behaviour, and it
+   stays a deferred verification because whether .NET trims cannot be measured here.
+2. **`UriBuilder::GetHashCode()` stops throwing for the `"bad scheme"` case.** `Uri("bad
+   scheme://localhost/")` is now a relative URI rather than an error, so that particular
+   route into §4.5's equality/hash asymmetry closes. **#2004 is not closed**: the asymmetry
+   survives through any builder field that still produces an unparseable string — a `Host`
+   of `"h:abc"` renders `http://h:abc/`, whose port is malformed, so `Equals` succeeds and
+   `GetHashCode` still throws. #2004's reproduction is updated accordingly.
+
+### 20.5 Consequences
+
+No public signature, object layout, vtable, mangled symbol, `noexcept` specification or
+component edge changed. `sizeof(System::Uri)` stays **240**. Eleven add-only regressions;
+`SharpRuntimeTests_Uri` **149 → 160**.

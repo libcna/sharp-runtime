@@ -35,6 +35,27 @@ namespace {
     /**
      * Detects a leading RFC 3986 scheme "ALPHA *(ALPHA/DIGIT/"+"/"-"/".") \":\""
      * and returns the index of the ':', or npos if the string has no valid scheme prefix.
+     *
+     * This is the SINGLE point at which a scheme is recognised (ticket #1988). parse()
+     * previously located the scheme with `find("://")` -- a search for "://" ANYWHERE in
+     * the string -- and consulted this function only when that search failed, so the file
+     * carried two contradictory notions of where the scheme ends and used the wrong one
+     * first. Measured consequences, every one of them ordinary input:
+     *   "/path?redirect=http://evil.com"   threw "URI scheme must start with a letter"
+     *   "search?url=https://example.com"   threw "Invalid character in URI scheme"
+     *   "mailto:a@b.com?body=see http://x" threw "Invalid character in URI scheme"
+     *   "foo:bar://baz"                    threw "Invalid character in URI scheme"
+     * because the substring match landed inside a query, or past a first colon. A relative
+     * reference whose query embeds an absolute URL -- the commonest redirect/callback
+     * shape there is -- could not be constructed at all.
+     *
+     * The replacement is a strict widening, and that is a proof rather than a judgement
+     * (docs/SystemUriNamespaceReviewPlan.md 9.1): a scheme that passed the old validation
+     * contained no colon, so the first colon in the string was exactly the "://" the old
+     * search found, which is exactly what this function returns. Every input the old code
+     * ACCEPTED therefore takes the same branch here and yields identical components; only
+     * inputs that threw can change, and they become relative or opaque URIs -- which is
+     * what RFC 3986 calls a reference whose leading token is not a scheme.
      */
     std::size_t findSchemeColon(const std::string& s) {
         if (s.empty() || !std::isalpha(static_cast<unsigned char>(s[0])))
@@ -96,24 +117,26 @@ void Uri::parse(const std::string& uriString) {
     if (uriString.empty())
         throw System::UriFormatException("URI string must not be empty");
 
-    auto schemeSep = uriString.find("://");
-    std::size_t opaqueColon = std::string::npos;
-    if (schemeSep == std::string::npos)
-        opaqueColon = findSchemeColon(uriString);
+    // RFC 3986 §3: the scheme is the token before the FIRST colon, and an authority is
+    // present only when "//" immediately follows that colon. findSchemeColon() (above) is
+    // the single point that decides both, per ticket #1988.
+    const std::size_t schemeColon = findSchemeColon(uriString);
+    const bool hasAuthority = schemeColon != std::string::npos &&
+                              uriString.compare(schemeColon + 1, 2, "//") == 0;
 
-    if (schemeSep == std::string::npos && opaqueColon == std::string::npos) {
-        // treat as relative
+    if (schemeColon == std::string::npos) {
+        // No scheme token at all: an RFC 3986 relative reference.
         isAbsoluteUri_ = false;
         absoluteUri_   = uriString;
         path_          = uriString;
         return;
     }
 
-    if (schemeSep == std::string::npos) {
+    if (!hasAuthority) {
         // Opaque (non-hierarchical) absolute URI, e.g. "mailto:user@example.com" or
         // "urn:isbn:0-395-36341-1" — a scheme followed by ':' with no "//" authority.
-        scheme_ = uriString.substr(0, opaqueColon);
-        std::string rest = uriString.substr(opaqueColon + 1);
+        scheme_ = uriString.substr(0, schemeColon);
+        std::string rest = uriString.substr(schemeColon + 1);
 
         auto fragPos = rest.find('#');
         if (fragPos != std::string::npos) {
@@ -135,20 +158,13 @@ void Uri::parse(const std::string& uriString) {
         return;
     }
 
-    scheme_ = uriString.substr(0, schemeSep);
-    if (scheme_.empty())
-        throw System::UriFormatException("URI scheme must not be empty");
+    // The scheme needs no second validation pass: findSchemeColon() returned an index only
+    // because every character before it already satisfied ALPHA *( ALPHA / DIGIT / "+" /
+    // "-" / "." ), which is the identical grammar the removed loop enforced. Keeping the
+    // loop would restore the two-grammars problem #1988 exists to remove.
+    scheme_ = uriString.substr(0, schemeColon);
 
-    // validate scheme: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
-    for (std::size_t i = 0; i < scheme_.size(); ++i) {
-        char c = scheme_[i];
-        if (i == 0 && !std::isalpha(static_cast<unsigned char>(c)))
-            throw System::UriFormatException("URI scheme must start with a letter");
-        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '+' && c != '-' && c != '.')
-            throw System::UriFormatException("Invalid character in URI scheme");
-    }
-
-    std::string rest = uriString.substr(schemeSep + 3);
+    std::string rest = uriString.substr(schemeColon + 3);
 
     // extract fragment
     auto fragPos = rest.find('#');

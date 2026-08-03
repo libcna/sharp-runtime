@@ -56,7 +56,14 @@ namespace System {
         /**
          * @brief Constructs a Uri from an absolute or relative URI string.
          *
-         * @throws System::UriFormatException if the string is empty or the scheme is malformed.
+         * The string is absolute when it begins with an RFC 3986 scheme token followed by
+         * ':'; it is hierarchical when "//" immediately follows that colon, and opaque
+         * otherwise. Text whose leading token is not a scheme is a relative reference, not
+         * an error — including text that merely *contains* "://" further along, such as
+         * `"/path?redirect=http://example.com"` (ticket #1988).
+         *
+         * @throws System::UriFormatException if the string is empty, or the authority
+         *         carries a malformed port.
          */
         explicit Uri(const std::string& uriString);
 

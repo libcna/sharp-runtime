@@ -401,3 +401,99 @@ TEST(UriTests, OriginalString_WorksForRelativeUri) {
     Uri u("relative/path", UriKind::Relative);
     EXPECT_EQ(u.getOriginalStringProperty(), "relative/path");
 }
+
+// ---------------------------------------------------------------------------
+// Scheme recognition — ticket #1988 (cause U-A). parse() previously located the scheme
+// with find("://"), a search for "://" ANYWHERE in the string, and only fell back to the
+// grammar-correct findSchemeColon() when that search failed. The file therefore held two
+// contradictory notions of where the scheme ends and consulted the wrong one first, so a
+// relative reference whose query embeds an absolute URL — the commonest redirect and
+// callback shape there is — threw instead of parsing. See
+// docs/SystemUriNamespaceReviewPlan.md §4.4 and §9.1 (the strict-widening proof).
+// ---------------------------------------------------------------------------
+
+TEST(UriTests, SchemeDetection_RelativeWithAbsoluteUrlInQuery_IsRelative) {
+    Uri u("/path?redirect=http://evil.com");
+    EXPECT_FALSE(u.getIsAbsoluteUriProperty());
+    EXPECT_EQ(u.getAbsolutePathProperty(), "/path?redirect=http://evil.com");
+    EXPECT_EQ(u.getSchemeProperty(), "");
+}
+
+TEST(UriTests, SchemeDetection_PathlessRelativeWithAbsoluteUrlInQuery_IsRelative) {
+    Uri u("search?url=https://example.com");
+    EXPECT_FALSE(u.getIsAbsoluteUriProperty());
+    EXPECT_EQ(u.getOriginalStringProperty(), "search?url=https://example.com");
+}
+
+TEST(UriTests, SchemeDetection_RelativeWithAbsoluteUrlInFragment_IsRelative) {
+    Uri u("page#see=http://example.com");
+    EXPECT_FALSE(u.getIsAbsoluteUriProperty());
+    EXPECT_EQ(u.getAbsolutePathProperty(), "page#see=http://example.com");
+}
+
+TEST(UriTests, SchemeDetection_OpaqueWithAbsoluteUrlInQuery_KeepsSchemeAndQuery) {
+    Uri u("mailto:a@b.com?body=see http://x");
+    EXPECT_TRUE(u.getIsAbsoluteUriProperty());
+    EXPECT_EQ(u.getSchemeProperty(), "mailto");
+    EXPECT_EQ(u.getAbsolutePathProperty(), "a@b.com");
+    EXPECT_EQ(u.getQueryProperty(), "?body=see http://x");
+}
+
+TEST(UriTests, SchemeDetection_ColonBeforeSlashSlash_TakesTheFirstColon) {
+    // The scheme is the token before the FIRST colon; "bar://baz" is opaque content, not
+    // an authority, because "//" does not immediately follow that colon.
+    Uri u("foo:bar://baz");
+    EXPECT_TRUE(u.getIsAbsoluteUriProperty());
+    EXPECT_EQ(u.getSchemeProperty(), "foo");
+    EXPECT_EQ(u.getAbsolutePathProperty(), "bar://baz");
+    EXPECT_TRUE(u.getHostProperty().empty());
+}
+
+TEST(UriTests, SchemeDetection_LeadingColon_IsRelative) {
+    Uri u("://foo");
+    EXPECT_FALSE(u.getIsAbsoluteUriProperty());
+    EXPECT_EQ(u.getAbsolutePathProperty(), "://foo");
+}
+
+TEST(UriTests, SchemeDetection_SchemeStartingWithDigit_IsRelative) {
+    // RFC 3986 requires ALPHA first, so "1http:" is not a scheme token.
+    Uri u("1http://example.com/");
+    EXPECT_FALSE(u.getIsAbsoluteUriProperty());
+}
+
+TEST(UriTests, SchemeDetection_FullSchemeGrammar_IsAccepted) {
+    // ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+    Uri u("a1+-.:opaque-part");
+    EXPECT_TRUE(u.getIsAbsoluteUriProperty());
+    EXPECT_EQ(u.getSchemeProperty(), "a1+-.");
+    EXPECT_EQ(u.getAbsolutePathProperty(), "opaque-part");
+}
+
+TEST(UriTests, SchemeDetection_SingleSlashAfterColon_StaysOpaque) {
+    // Only "//" introduces an authority; one slash does not.
+    Uri u("http:/example.com");
+    EXPECT_TRUE(u.getIsAbsoluteUriProperty());
+    EXPECT_EQ(u.getSchemeProperty(), "http");
+    EXPECT_EQ(u.getAbsolutePathProperty(), "/example.com");
+    EXPECT_TRUE(u.getHostProperty().empty());
+}
+
+TEST(UriTests, SchemeDetection_OrdinaryHierarchical_Unchanged) {
+    // Control: the shape the old substring search got right must be byte-identical.
+    Uri u("https://user:pw@example.com:8443/a/b?q=1#f");
+    EXPECT_TRUE(u.getIsAbsoluteUriProperty());
+    EXPECT_EQ(u.getSchemeProperty(), "https");
+    EXPECT_EQ(u.getUserInfoProperty(), "user:pw");
+    EXPECT_EQ(u.getHostProperty(), "example.com");
+    EXPECT_EQ(u.getPortProperty(), 8443);
+    EXPECT_EQ(u.getAbsolutePathProperty(), "/a/b");
+    EXPECT_EQ(u.getQueryProperty(), "?q=1");
+    EXPECT_EQ(u.getFragmentProperty(), "#f");
+}
+
+TEST(UriTests, SchemeDetection_TryCreateRelativeWithEmbeddedAbsoluteUrl_Succeeds) {
+    std::shared_ptr<Uri> result;
+    EXPECT_TRUE(Uri::TryCreate("/cb?next=http://a.example/b", UriKind::Relative, result));
+    ASSERT_NE(result, nullptr);
+    EXPECT_FALSE(result->getIsAbsoluteUriProperty());
+}
