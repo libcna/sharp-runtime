@@ -327,6 +327,55 @@ TEST(CountdownEventTests, Reset_AfterDispose_ThrowsObjectDisposedException) {
     EXPECT_THROW(ce.Reset(), System::ObjectDisposedException);
     EXPECT_THROW(ce.Reset(5), System::ObjectDisposedException);
 }
+
+// SR-AUD-211 / ticket #1948: Reset(intcs) assigned currentCount_ under mutex_ but never
+// notified cv_. Wait()'s predicate is `currentCount_ == 0`, so Reset(0) reached the signalled
+// state while leaving an already-blocked waiter asleep -- for a quiescent event, forever. The
+// audit's bounded probe timed out at two seconds where the identical .NET 10 program released
+// its waiter immediately.
+TEST(CountdownEventTests, ResetToZero_ReleasesAnAlreadyBlockedWaiter) {
+    CountdownEvent ce(1);
+    std::promise<void> entered;
+    auto enteredFuture = entered.get_future();
+    std::thread waiter([&] {
+        entered.set_value();
+        ce.Wait();
+    });
+    enteredFuture.wait();
+    // Let the waiter actually reach the condition-variable wait before resetting.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    ce.Reset(0);
+
+    auto joined = std::async(std::launch::async, [&] { waiter.join(); });
+    ASSERT_EQ(joined.wait_for(std::chrono::seconds(5)), std::future_status::ready)
+        << "Reset(0) reached the signalled state without waking the blocked waiter";
+    EXPECT_TRUE(ce.getIsSetProperty());
+}
+
+// The control for the case above: the notification is unconditional, but a reset to a NON-zero
+// count leaves the predicate genuinely false, so a woken waiter must re-check it and block
+// again rather than returning from Wait().
+TEST(CountdownEventTests, ResetToNonZero_LeavesAnAlreadyBlockedWaiterBlocked) {
+    CountdownEvent ce(1);
+    std::promise<void> entered;
+    auto enteredFuture = entered.get_future();
+    std::thread waiter([&] {
+        entered.set_value();
+        ce.Wait();
+    });
+    enteredFuture.wait();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    ce.Reset(3);
+
+    auto joined = std::async(std::launch::async, [&] { waiter.join(); });
+    EXPECT_EQ(joined.wait_for(std::chrono::milliseconds(300)), std::future_status::timeout)
+        << "Reset(3) is not a signalling transition and must not release a waiter";
+    EXPECT_FALSE(ce.getIsSetProperty());
+
+    // Release the waiter so the test can finish.
+    ce.Signal(3);
+    joined.wait();
+}
 TEST(CountdownEventTests, Wait_AlreadySet_ReturnsImmediately) {
     CountdownEvent ce(0);
     EXPECT_NO_THROW(ce.Wait());

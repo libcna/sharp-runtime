@@ -99,15 +99,28 @@ namespace System::Threading {
          * previously made an explicit `Reset(-1)` call silently reset to InitialCount instead
          * of throwing as real .NET does.
          *
+         * `Reset` must notify `cv_`, because resetting to **zero** is a transition INTO the
+         * signalled state and `Wait`'s predicate is `currentCount_ == 0`. Without the
+         * notification a thread already blocked in `Wait()` is never re-evaluated: the audit's
+         * bounded probe timed out at two seconds where the identical .NET 10 program released
+         * its waiter immediately, and for a quiescent event no later notification ever arrives,
+         * so the waiter blocks forever (SR-AUD-211, ticket #1948). The notification is
+         * unconditional rather than guarded on `count == 0`: a reset to a non-zero count leaves
+         * the predicate genuinely false, so a woken waiter simply re-checks it and blocks again,
+         * which is exactly what a spurious wakeup already requires it to tolerate.
+         *
          * @throws System::ArgumentOutOfRangeException if @p count is negative.
          * @throws System::ObjectDisposedException if this instance has been disposed.
          */
         void Reset(intcs count) {
             ThrowIfDisposed();
             System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
-            std::unique_lock lock(mutex_);
-            initialCount_ = count;
-            currentCount_ = count;
+            {
+                std::unique_lock lock(mutex_);
+                initialCount_ = count;
+                currentCount_ = count;
+            }
+            cv_.notify_all();
         }
 
         /**
