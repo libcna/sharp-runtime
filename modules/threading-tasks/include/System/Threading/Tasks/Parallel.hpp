@@ -14,6 +14,8 @@
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/AggregateException.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
 #  include "System/PlatformNotSupportedException.hpp"
 #endif
@@ -148,15 +150,35 @@ namespace System::Threading::Tasks {
             return maxDeg;
         }
 
+        // Ticket #1965 (SR-AUD-231, cause TC-A). Every loop-shaped entry point below decides the
+        // emptiness of its body at the public boundary, before any iteration is dispatched,
+        // exactly as .NET's Parallel.For/ForEach do with
+        // `ArgumentNullException.ThrowIfNull(body)`. Before this check the empty std::function
+        // was launched once per iteration and each invocation raised std::bad_function_call,
+        // which this class then collected into an AggregateException -- a *delayed*, iteration-
+        // count-dependent report of an argument error: an empty range or an empty source ran no
+        // iteration at all and returned a normally completed ParallelLoopResult.
+        template<typename TBody>
+        static void requireNonEmptyBody(const TBody& body) {
+            if (body == nullptr) throw System::ArgumentNullException("body");
+        }
+
     public:
-        /** Executes a for loop from fromInclusive to toExclusive in parallel. */
+        /**
+         * Executes a for loop from fromInclusive to toExclusive in parallel.
+         * @throws System::ArgumentNullException if @p body is empty (parameter name `body`).
+         */
         static ParallelLoopResult For(intcs fromInclusive, intcs toExclusive, std::function<void(intcs)> body) {
             return For(fromInclusive, toExclusive, ParallelOptions{}, std::move(body));
         }
 
-        /** Executes a for loop in parallel, respecting MaxDegreeOfParallelism in @p opts. */
+        /**
+         * Executes a for loop in parallel, respecting MaxDegreeOfParallelism in @p opts.
+         * @throws System::ArgumentNullException if @p body is empty (parameter name `body`).
+         */
         static ParallelLoopResult For(intcs fromInclusive, intcs toExclusive, const ParallelOptions& opts,
                                        std::function<void(intcs)> body) {
+            requireNonEmptyBody(body);
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)fromInclusive; (void)toExclusive; (void)opts; (void)body;
             throw System::PlatformNotSupportedException("Parallel::For requires pthreads (not available in Emscripten single-threaded build)");
@@ -188,9 +210,11 @@ namespace System::Threading::Tasks {
          * ParallelLoopState so the loop body can call Stop()/Break() to request early termination.
          * Once requested, no further iterations are scheduled, but iterations already in flight run
          * to completion.
+         * @throws System::ArgumentNullException if @p body is empty (parameter name `body`).
          */
         static ParallelLoopResult For(intcs fromInclusive, intcs toExclusive,
                                        std::function<void(intcs, ParallelLoopState&)> body) {
+            requireNonEmptyBody(body);
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)fromInclusive; (void)toExclusive; (void)body;
             throw System::PlatformNotSupportedException("Parallel::For requires pthreads (not available in Emscripten single-threaded build)");
@@ -217,9 +241,13 @@ namespace System::Threading::Tasks {
 #endif
         }
 
-        /** Executes a foreach loop over source in parallel. */
+        /**
+         * Executes a foreach loop over source in parallel.
+         * @throws System::ArgumentNullException if @p body is empty (parameter name `body`).
+         */
         template<typename TSource>
         static ParallelLoopResult ForEach(const std::vector<TSource>& source, std::function<void(TSource)> body) {
+            requireNonEmptyBody(body);
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)source; (void)body;
             throw System::PlatformNotSupportedException("Parallel::ForEach requires pthreads (not available in Emscripten single-threaded build)");
@@ -243,10 +271,14 @@ namespace System::Threading::Tasks {
 #endif
         }
 
-        /** Executes a foreach loop over source in parallel, passing each iteration a ParallelLoopState. */
+        /**
+         * Executes a foreach loop over source in parallel, passing each iteration a ParallelLoopState.
+         * @throws System::ArgumentNullException if @p body is empty (parameter name `body`).
+         */
         template<typename TSource>
         static ParallelLoopResult ForEach(const std::vector<TSource>& source,
                                            std::function<void(TSource, ParallelLoopState&)> body) {
+            requireNonEmptyBody(body);
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)source; (void)body;
             throw System::PlatformNotSupportedException("Parallel::ForEach requires pthreads (not available in Emscripten single-threaded build)");
@@ -276,8 +308,27 @@ namespace System::Threading::Tasks {
 #endif
         }
 
-        /** Executes all actions in parallel, blocking until all have completed. */
+        /**
+         * Executes all actions in parallel, blocking until all have completed.
+         *
+         * @throws System::ArgumentException — **not** ArgumentNullException — if any element of
+         * @p actions is empty. This is the one Parallel entry whose .NET counterpart does not
+         * report a null delegate as a null *argument*: `Parallel.Invoke(params Action[] actions)`
+         * copies the array and rejects a null element with
+         * `new ArgumentException(SR.Parallel_Invoke_ActionNull)`, i.e. an ArgumentException with
+         * no parameter name, because the null is an *element* of the argument rather than the
+         * argument itself. The message text below is .NET's own. Recorded as ticket #1965's
+         * counterpart to `docs/ThreadingNamespaceReviewPlan.md` §17.1: a member of the CCF-011
+         * family must take .NET's answer for its own shape, not the family's usual spelling.
+         *
+         * Every element is validated before any action is launched, so a rejected call starts no
+         * work at all — where previously the valid actions in a mixed list ran to completion and
+         * only then was an AggregateException raised for the empty one.
+         */
         static void Invoke(std::initializer_list<std::function<void()>> actions) {
+            for (const auto& a : actions) {
+                if (a == nullptr) throw System::ArgumentException("One of the actions was null.");
+            }
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)actions;
             throw System::PlatformNotSupportedException("Parallel::Invoke requires pthreads (not available in Emscripten single-threaded build)");

@@ -18,6 +18,7 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/OperationCanceledException.hpp"
 #include "System/Threading/CancellationToken.hpp"
@@ -43,6 +44,35 @@ namespace System::Threading::Tasks {
     class TaskFactory;
     class TaskExtensions;
     template<typename TResult> class TaskT;
+
+    namespace detail {
+
+        /**
+         * @brief Reports whether @p callable is the empty/null state of a delegate-shaped argument.
+         *
+         * Added by ticket #1965 (SR-AUD-231, cause TC-A) so the CCF-011 empty-callable policy in
+         * `docs/EmptyCallableBoundaryPlan.md` can be applied uniformly to every Threading.Tasks
+         * entry point, including the one that takes an unconstrained callable type
+         * (TaskT&lt;TResult&gt;::ContinueWith's result-producing overload) rather than a
+         * std::function.
+         *
+         * Emptiness is decided by comparison with `nullptr`, which is exactly the set of callable
+         * types that have a null state: `std::function`, function pointers and pointers to
+         * members. Ordinary function objects and lambdas are not comparable with `nullptr` at all
+         * and are therefore never empty -- deliberately, because a capturing lambda has no null
+         * state to detect and a captureless one would otherwise be probed through its
+         * function-pointer conversion for no benefit.
+         */
+        template<typename TCallable>
+        [[nodiscard]] constexpr bool isEmptyCallable(const TCallable& callable) noexcept {
+            if constexpr (requires { static_cast<bool>(callable == nullptr); }) {
+                return static_cast<bool>(callable == nullptr);
+            } else {
+                return false;
+            }
+        }
+
+    } // namespace detail
 
     // Lightweight Task stub backed by std::future<void>.
     // State is held in a shared_ptr so the async lambda never captures `this`.
@@ -146,8 +176,12 @@ namespace System::Threading::Tasks {
          * Constructs and immediately starts a Task that executes @p action on a thread pool thread.
          * On Emscripten, throws PlatformNotSupportedException.
          * @param action The work to execute asynchronously.
+         * @throws System::ArgumentNullException if @p action is empty, matching .NET's
+         * `Task(Action)` (ticket #1965, SR-AUD-231). The check runs before any worker is started,
+         * so an empty action leaves no task running and no state to observe.
          */
         explicit Task(std::function<void()> action) {
+            if (detail::isEmptyCallable(action)) throw System::ArgumentNullException("action");
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)action;
             throw System::PlatformNotSupportedException("Task: std::async requires pthreads (not available in Emscripten single-threaded build)");
@@ -178,10 +212,18 @@ namespace System::Threading::Tasks {
          * escaping @p action while @p token reports cancellation requested transitions the Task to
          * Canceled rather than Faulted, matching .NET's cooperative-cancellation contract.
          * On Emscripten, throws PlatformNotSupportedException.
+         *
+         * @throws System::ArgumentNullException if @p action is empty (ticket #1965,
+         * SR-AUD-231). The check runs BEFORE the already-cancelled-token short circuit below,
+         * matching .NET, whose `Task.Run(Action, CancellationToken)` validates the delegate in
+         * `InternalStartNew` before the task is created at all. An empty action paired with an
+         * already-cancelled token therefore reports the argument error rather than quietly
+         * producing a Canceled task, which is the observable this port used to have.
          */
         Task(std::function<void()> action, System::Threading::CancellationToken token)
             : cancellationToken_(token)
         {
+            if (detail::isEmptyCallable(action)) throw System::ArgumentNullException("action");
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)action;
             throw System::PlatformNotSupportedException("Task: std::async requires pthreads (not available in Emscripten single-threaded build)");
@@ -295,9 +337,15 @@ namespace System::Threading::Tasks {
          * antecedent's outcome. If the predicate isn't satisfied, the returned Task transitions
          * directly to Canceled without running @p continuationAction, matching real .NET.
          * @return A new Task representing the continuation.
+         * @throws System::ArgumentNullException if @p continuationAction is empty, matching
+         * .NET's `Task.ContinueWith(Action&lt;Task&gt;)` (ticket #1965, SR-AUD-231). The check runs
+         * before the continuation Task is constructed and before anything is registered on this
+         * task, so a rejected call leaves no continuation recorded on either task.
          */
         Task ContinueWith(std::function<void(Task)> continuationAction,
                            TaskContinuationOptions continuationOptions = TaskContinuationOptions::None) const {
+            if (detail::isEmptyCallable(continuationAction))
+                throw System::ArgumentNullException("continuationAction");
             Task continuation(PendingTag{});
             auto contState = continuation.state_;
             std::weak_ptr<State> antecedentWeak = state_;
@@ -338,10 +386,16 @@ namespace System::Threading::Tasks {
          * Creates and starts a new Task that runs @p action asynchronously.
          * @param action The work to execute.
          * @return The started Task.
+         * @throws System::ArgumentNullException if @p action is empty (parameter name `action`),
+         * raised by the constructor this forwards to — matching .NET's `Task.Run(Action)`
+         * (ticket #1965, SR-AUD-231).
          */
         static Task Run(std::function<void()> action) { return Task(std::move(action)); }
 
-        /** Creates and starts a new Task that runs @p action asynchronously, observing @p token. */
+        /**
+         * Creates and starts a new Task that runs @p action asynchronously, observing @p token.
+         * @throws System::ArgumentNullException if @p action is empty — see the overload above.
+         */
         static Task Run(std::function<void()> action, System::Threading::CancellationToken token) {
             return Task(std::move(action), std::move(token));
         }
@@ -638,8 +692,12 @@ namespace System::Threading::Tasks {
          * Constructs and immediately starts a TaskT that executes @p func on a thread pool thread.
          * On Emscripten, throws PlatformNotSupportedException.
          * @param func Factory function that produces the result.
+         * @throws System::ArgumentNullException if @p func is empty, matching .NET's
+         * `Task&lt;TResult&gt;(Func&lt;TResult&gt;)`, whose parameter name is `function`
+         * (ticket #1965, SR-AUD-231).
          */
         explicit TaskT(std::function<TResult()> func) {
+            if (detail::isEmptyCallable(func)) throw System::ArgumentNullException("function");
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)func;
             throw System::PlatformNotSupportedException("TaskT: std::async requires pthreads (not available in Emscripten single-threaded build)");
@@ -672,10 +730,15 @@ namespace System::Threading::Tasks {
          * full cooperative-cancellation contract) -- this overload was previously missing entirely,
          * an asymmetry with the non-generic Task that made cancellation unavailable for any TaskT
          * caller. On Emscripten, throws PlatformNotSupportedException.
+         *
+         * @throws System::ArgumentNullException if @p func is empty (parameter name `function`),
+         * checked before the already-cancelled-token short circuit for the same reason as the
+         * non-generic Task overload above (ticket #1965, SR-AUD-231).
          */
         TaskT(std::function<TResult()> func, System::Threading::CancellationToken token)
             : cancellationToken_(token)
         {
+            if (detail::isEmptyCallable(func)) throw System::ArgumentNullException("function");
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)func;
             throw System::PlatformNotSupportedException("TaskT: std::async requires pthreads (not available in Emscripten single-threaded build)");
@@ -788,10 +851,16 @@ namespace System::Threading::Tasks {
          * runs for successful, faulted, and canceled antecedents unless @p continuationOptions
          * excludes that outcome. This runtime invokes continuations inline on the completing
          * thread; only the NotOn and OnlyOn option bits affect scheduling.
+         *
+         * @throws System::ArgumentNullException if @p continuationAction is empty, matching
+         * .NET's `Task&lt;TResult&gt;.ContinueWith(Action&lt;Task&lt;TResult&gt;&gt;)`
+         * (ticket #1965, SR-AUD-231).
          */
         Task ContinueWith(
             std::function<void(TaskT<TResult>)> continuationAction,
             TaskContinuationOptions continuationOptions = TaskContinuationOptions::None) const {
+            if (detail::isEmptyCallable(continuationAction))
+                throw System::ArgumentNullException("continuationAction");
             Task continuation(Task::PendingTag{});
             auto continuationState = continuation.state_;
             std::weak_ptr<State> antecedentWeak = state_;
@@ -833,6 +902,13 @@ namespace System::Threading::Tasks {
          * The result task is canceled when @p continuationOptions excludes the antecedent's
          * terminal state, or faulted when @p continuationFunction throws. See the action
          * overload above for this runtime's inline execution and option limitations.
+         *
+         * @throws System::ArgumentNullException if @p continuationFunction is a *null* callable
+         * -- an empty `std::function`, a null function pointer or a null pointer to member --
+         * matching .NET's
+         * `Task&lt;TResult&gt;.ContinueWith&lt;TNewResult&gt;(Func&lt;Task&lt;TResult&gt;, TNewResult&gt;)`
+         * (ticket #1965, SR-AUD-231). Ordinary function objects and lambdas have no null state
+         * and are never rejected; see `detail::isEmptyCallable`.
          */
         template<typename TContinuation>
             requires std::invocable<TContinuation, TaskT<TResult>> &&
@@ -841,6 +917,8 @@ namespace System::Threading::Tasks {
             TContinuation continuationFunction,
             TaskContinuationOptions continuationOptions = TaskContinuationOptions::None) const
             -> TaskT<std::invoke_result_t<TContinuation, TaskT<TResult>>> {
+            if (detail::isEmptyCallable(continuationFunction))
+                throw System::ArgumentNullException("continuationFunction");
             using TNewResult = std::invoke_result_t<TContinuation, TaskT<TResult>>;
             TaskT<TNewResult> continuation(typename TaskT<TNewResult>::PendingTag{});
             auto continuationState = continuation.state_;
@@ -957,12 +1035,18 @@ namespace System::Threading::Tasks {
          * Creates and starts a new TaskT that executes @p func asynchronously.
          * On Emscripten, throws PlatformNotSupportedException.
          * @param func The work to execute.
+         * @throws System::ArgumentNullException if @p func is empty (parameter name `function`),
+         * raised by the constructor this forwards to — matching .NET's
+         * `Task.Run&lt;TResult&gt;(Func&lt;TResult&gt;)` (ticket #1965, SR-AUD-231).
          */
         static TaskT<TResult> Run(std::function<TResult()> func) {
             return TaskT<TResult>(std::move(func));
         }
 
-        /** Creates and starts a new TaskT that executes @p func asynchronously, observing @p token. */
+        /**
+         * Creates and starts a new TaskT that executes @p func asynchronously, observing @p token.
+         * @throws System::ArgumentNullException if @p func is empty — see the overload above.
+         */
         static TaskT<TResult> Run(std::function<TResult()> func, System::Threading::CancellationToken token) {
             return TaskT<TResult>(std::move(func), std::move(token));
         }

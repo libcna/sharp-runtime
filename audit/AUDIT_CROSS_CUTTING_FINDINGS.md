@@ -827,6 +827,33 @@ empty value, which is the documented "clear the hook" spelling;
 never empty; and CCF-010's separate question of *what* a comparison callable
 computes (SR-AUD-046), which this work never touches.
 
+### The policy's later re-use outside CCF-011's own six members
+
+CCF-011 stayed closed; its **policy** has since been applied twice more, to
+findings that belong to their own namespaces rather than to this cause:
+
+- **`System::Threading` — ticket #1951 (SR-AUD-190/192/198/213/217/219/222, cause
+  T-B, 2026-08-03).** Seven sites. Two of them turned out **not** to be
+  `ArgumentNullException` sites: .NET's `LazyInitializer.EnsureInitialized` and
+  `SynchronizationContext.Send` invoke the delegate with no null check at all, so
+  both now throw `System::NullReferenceException`, which is the .NET observable
+  the two findings actually measured
+  (`docs/ThreadingNamespaceReviewPlan.md` §17.1).
+- **`Threading.Tasks` — ticket #1965 (SR-AUD-231, cause TC-A, 2026-08-03).**
+  Twenty-two public entries across `Task`, `TaskT<TResult>`, `TaskFactory` and
+  `Parallel`. Two further corrections, both measured: `Parallel`'s empty body was
+  **already catchable** — it arrived as `System::AggregateException`, so this
+  cause's third consequence ("the failure is the wrong type") never applied to
+  that file — and `Parallel::Invoke` is **not** an `ArgumentNullException` site,
+  because .NET rejects a null *element* of the actions array with a plain
+  `ArgumentException` carrying no parameter name.
+
+The recurring lesson across all three modules is the one §8 of
+`docs/EmptyCallableBoundaryPlan.md` states and that is easy to lose: the policy
+selects **.NET's answer for that shape of API**, which is not always this
+family's most common spelling. Three of the thirty-three later sites needed a
+different exception type than the family default.
+
 ## CCF-012 — hand-written composite-format replacement is not a format parser
 
 `String::Format` and `FormattableString::ToString` independently reconstruct a

@@ -6491,3 +6491,56 @@ five `PingTests` cannot open an ICMP socket because this container's
 open), and one `SocketTests` case cannot construct an `AF_INET6` socket because IPv6
 is absent from the container entirely (`/proc/net/if_inet6` does not exist). **No test
 was disabled, skipped or made conditional to obtain a green run.**
+
+
+---
+
+## Post-audit remediation batch, 2026-08-03 — `Threading.Tasks` + `Threading.Channels` (#1965–#1968)
+
+Branch `feature/remediation-batch-tasks-channels-1965-1968`. The queue is the one
+`docs/ThreadingTasksChannelsReviewPlan.md` §11 opened; **no new `SR-AUD-*` identifier is
+issued and numbering stays frozen at 364**. Note that the preceding
+`System::Threading` batch (#1947–#1949, #1951–#1955) did not append here, so the
+last tally recorded above (72 remediated) is stale; the authoritative count is the
+one derived from `AUDIT_FINDINGS_INDEX.md`, which read **87 remediated / 277
+confirmed / 364 total** when this batch began.
+
+### #1965 — SR-AUD-231 (cause TC-A, CCF-011 in a third module)
+
+`confirmed → remediated`. Every public `Threading.Tasks` entry that stores a callable
+now decides emptiness at the boundary, before any worker starts or continuation is
+registered, with .NET's own exception type and parameter name.
+
+Five premises corrected by measurement
+(`build-probe/1965_probe1_tasks_empty_callables.cpp`, 37 cases; before/after/ASan logs
+retained), all recorded in the owning per-file report:
+
+1. **22 public entries, not the two named** — eleven distinct bodies edited, the rest
+   inheriting the check by forwarding.
+2. **`Parallel`'s failure was already catchable.** It arrived as
+   `System::AggregateException`, so CCF-011's "outside the `System::Exception`
+   hierarchy" consequence applies only to the sixteen `Task`/`TaskT`/`TaskFactory`
+   entries, where a bare `std::bad_function_call` escaped.
+3. **`Parallel::Invoke` is not an `ArgumentNullException` site.** .NET reports a null
+   *element* of the actions array with a plain `ArgumentException` carrying no
+   parameter name. This is the same trap `docs/ThreadingNamespaceReviewPlan.md` §17.1
+   recorded for `LazyInitializer` and `SynchronizationContext::Send`: the family's
+   usual spelling would have swapped one non-matching result for another.
+4. **The failure was data-dependent in two unnamed shapes** — a zero-length range or
+   empty source ran no iteration, and an already-cancelled token short-circuited
+   before the action, so both returned normally with an empty callable.
+5. **`ContinueWith` did register** the empty continuation and returned a *faulted*
+   task rather than reporting an argument error.
+
+**Reference-evidence limitation.** `/rv/tmp/runtime/src/libraries/` is not present in
+this environment, so .NET parameter names could not be re-read from local source; they
+come from the API contract for the exact overloads, and where the answer was uncertain
+the conservative base type was chosen, following #1954's precedent for SR-AUD-184.
+
+Post-fix probe: **zero** `bad_function_call` and **zero** deferred-aggregate outcomes
+across all 22 entries; every valid-callable case byte-identical. ASan + UBSan + LSan
+**0 reports before, 0 after** (34 sanitizer symbols present in the instrumented binary,
+0 in the plain one). `SharpRuntimeTests_Threading_Tasks` **171 → 208**. No public
+signature, object layout, vtable, `noexcept` specification or component edge changed.
+
+**Index after #1965: 88 remediated / 276 confirmed / 364 total.**

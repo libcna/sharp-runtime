@@ -341,3 +341,119 @@ Tickets **#1965–#1968** are `todo` and unstarted; **#1969** and **#1970** are 
 two approvals in §9. The predecessor review's own blocked set — #1956–#1959, with its
 consolidated approval package in `docs/ThreadingNamespaceReviewPlan.md` §20 — is unaffected
 and still awaiting the same user decision.
+
+---
+
+## 15. What #1965 measured, and five corrections to §3 and §5 (2026-08-03)
+
+Ticket **#1965** implemented cause **TC-A** by applying the already-approved CCF-011 policy
+from `docs/EmptyCallableBoundaryPlan.md`. Evidence:
+`build-probe/1965_probe1_tasks_empty_callables.cpp` (37 cases) with logs
+`1965_probe1_before.log`, `1965_probe1_after.log` and `1965_probe1_asan.log`.
+
+### 15.1 §3.1 item 4 was right to warn, and the real number is 22
+
+The finding names two entries; §3.1 item 4 predicted more. Measured, the entries that
+accept an empty callable are **22**, of which **eleven distinct bodies** needed an edit —
+the other eleven inherit the check by forwarding:
+
+| Type | Bodies edited | Inheriting by forwarding | .NET parameter name |
+|---|---|---|---|
+| `Task` | `Task(action)`, `Task(action, token)`, `ContinueWith` | `Run(action)`, `Run(action, token)` | `action` / `continuationAction` |
+| `TaskT<T>` | `TaskT(func)`, `TaskT(func, token)`, both `ContinueWith` overloads | `Run(func)`, `Run(func, token)` | **`function`** / `continuationAction` / `continuationFunction` |
+| `TaskFactory` | — | four `StartNew` overloads (+ `Task::Factory()`) | `action` / `function` |
+| `Parallel` | `For(opts)`, `For(state)`, both `ForEach`, `Invoke` | `For(from,to,body)` | `body` / *(none — see §15.3)* |
+
+`TaskT<TResult>`'s result-producing `ContinueWith` takes an **unconstrained callable
+type**, not a `std::function`, so it needed `detail::isEmptyCallable` — a
+`requires`-guarded comparison with `nullptr` that catches `std::function`, function
+pointers and pointers to members, and deliberately never fires for a lambda or functor,
+which has no null state.
+
+### 15.2 §5's TC-A severity claim is wrong for `Parallel` — the failure was catchable
+
+§5 says the failure "reappears as an ordinary task fault, so a caller sees a task that
+failed rather than a call that was wrong", inheriting CCF-011's third consequence: the
+error is outside the `System::Exception` hierarchy and ported
+`catch (const System::Exception&)` code cannot see it.
+
+Measured, that is true for the sixteen `Task`/`TaskT`/`TaskFactory` entries — a bare
+`std::bad_function_call` escaped `Wait()`/`getResultProperty()` — and **false for all six
+`Parallel` entries**: `parallel.for.body=aggregate:bad_function_call`. `Parallel` already
+collected every worker exception into `System::AggregateException`, which *is* a
+`System::Exception`. What was wrong there was the diagnostic and its timing, not the
+catchability.
+
+### 15.3 `Parallel::Invoke` is not an `ArgumentNullException` site
+
+This is `docs/ThreadingNamespaceReviewPlan.md` §17.1 repeating itself in a third module.
+.NET's `Parallel.Invoke(params Action[] actions)` copies the array and rejects a null
+**element** with `new ArgumentException(SR.Parallel_Invoke_ActionNull)` — an
+`ArgumentException` with **no parameter name** — because the null is an element of the
+argument, not the argument. Implemented as
+`ArgumentException("One of the actions was null.")` and pinned by a test that *fails* if
+`ArgumentNullException` is thrown, so the family's usual spelling cannot be restored by a
+later reader.
+
+**Reference-evidence limitation, stated rather than glossed:**
+`/rv/tmp/runtime/src/libraries/` is **not present in this environment**. The per-entry
+parameter names and this exception type come from the .NET API contract for the exact
+overloads listed above rather than from a fresh reading of local source, and the audit's
+own managed probe supplies only the `ArgumentNullException` *category* for `Task.Run` and
+`ContinueWith`. Where the answer was uncertain the conservative choice was taken — the
+**base** `ArgumentException` for `Invoke` — following #1954's precedent for SR-AUD-184.
+
+### 15.4 Two data-dependent silent shapes the finding does not name
+
+- **Zero iterations.** `Parallel::For(0, 0, {})`, both `For` state overloads and both
+  `ForEach` overloads over an empty source returned a normally completed
+  `ParallelLoopResult` with an empty body. Same wrong call, silent or fatal by iteration
+  count — the exact shape `docs/EmptyCallableBoundaryPlan.md` §7.1 recorded for `core`.
+- **An already-cancelled token.** `Task(action, cancelledToken)` and its `TaskT`
+  counterpart short-circuit to Canceled *before* launching, so an empty action produced an
+  ordinary Canceled task and never reported the bad argument. The repair puts the argument
+  check **above** the short circuit, matching .NET's `InternalStartNew`, which validates
+  the delegate before the task exists. This is an intended observable change: a call that
+  used to yield a Canceled task now throws.
+
+### 15.5 `ContinueWith` recorded the continuation before failing
+
+`task.continuewith.registered_before_throw=no-throw|side_effects=1`: the empty
+continuation *was* registered on the antecedent and the returned continuation Task was
+left **faulted**, so `ContinueWith` returned normally and handed back a broken task. The
+check therefore had to precede both the continuation Task's construction and
+`registerContinuation`, which the no-partial-state regressions pin.
+
+### 15.6 An ordering requirement this places on #1966
+
+`ParallelOptions::MaxDegreeOfParallelism` is a **public data member** in this port, so
+#1966 must validate it inside `Parallel::For` rather than at assignment. In .NET the
+invalid degree is rejected by the `ParallelOptions.MaxDegreeOfParallelism` *setter*, which
+necessarily runs **before** `Parallel.For` is called and therefore before .NET's own
+`body` null check. #1966's degree check must consequently be inserted **above** #1965's
+`requireNonEmptyBody` call, not beside it — the same shape as
+`docs/ThreadingNamespaceReviewPlan.md` §17.3's `SpinUntil` constraint on #1954.
+
+### 15.7 Nothing in TC-A touched layout, ABI or a signature
+
+Eleven inline bodies gained an entry check; one new file-local helper
+(`detail::isEmptyCallable`) and one class-private helper (`Parallel::requireNonEmptyBody`)
+were added, neither a data member. No signature, template parameter, default argument,
+virtual, `noexcept` specification or overload set changed. `ArgumentNullException` and
+`ArgumentException` both live in `Core.Base`, which `Threading.Tasks` already depends on
+publicly, so the module graph stays **41 / 91**.
+
+### 15.8 Sanitizers and test count
+
+ASan + UBSan + LSan over all 37 probe cases: **0 reports before, 0 after**, exit 0. This
+was an exception-contract defect, not a memory defect; the sanitizer's role is CCF-011
+§13's leak check on entry points that now throw *after* copying a `std::function` by
+value. Instrumentation was proved, not assumed: 34 `__asan`/`__ubsan` symbols in the
+sanitized binary, 0 in the plain one, and the sanitized run's outcomes are identical to
+the plain run's.
+
+`modules/threading-tasks/tests/System/Threading/Tasks/TasksBoundaryTests.cpp` is a new
+translation unit holding the boundary family's permanent regressions: **+37** cases,
+`SharpRuntimeTests_Threading_Tasks` **171 → 208**, all passing.
+
+**SR-AUD-231: `confirmed` → `remediated`.** Cause TC-A is closed.

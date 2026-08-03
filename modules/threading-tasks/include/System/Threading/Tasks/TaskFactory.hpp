@@ -68,12 +68,23 @@ namespace System::Threading::Tasks {
         /** @brief Gets the default TaskContinuationOptions used when creating continuations. */
         [[nodiscard]] TaskContinuationOptions getContinuationOptionsProperty() const { return continuationOptions_; }
 
-        /** @brief Creates and starts a Task that runs @p action, observing this factory's default CancellationToken. */
+        /**
+         * @brief Creates and starts a Task that runs @p action, observing this factory's default CancellationToken.
+         *
+         * @throws System::ArgumentNullException if @p action is empty, with .NET's parameter name
+         * `action`. The check is not repeated here: every StartNew overload forwards to
+         * Task::Run/TaskT::Run, whose constructors perform it at the public boundary before any
+         * worker is started (ticket #1965, SR-AUD-231), and .NET's own
+         * `TaskFactory.StartNew(Action)` uses that same parameter name.
+         */
         [[nodiscard]] Task StartNew(std::function<void()> action) const {
             return Task::Run(std::move(action), defaultCancellationToken_);
         }
 
-        /** @brief Creates and starts a Task that runs @p action, observing @p cancellationToken. */
+        /**
+         * @brief Creates and starts a Task that runs @p action, observing @p cancellationToken.
+         * @throws System::ArgumentNullException if @p action is empty — see the overload above.
+         */
         [[nodiscard]] Task StartNew(std::function<void()> action,
                                      System::Threading::CancellationToken cancellationToken) const {
             return Task::Run(std::move(action), std::move(cancellationToken));
@@ -86,13 +97,19 @@ namespace System::Threading::Tasks {
          * @note Previously did not observe defaultCancellationToken_ at all -- an inconsistency
          * with the non-generic StartNew(action) overload above, which always has. Now that
          * TaskT<TResult> supports cancellation (see Task.hpp), this overload was fixed to match.
+         *
+         * @throws System::ArgumentNullException if @p function is empty, with .NET's parameter
+         * name `function`, raised by TaskT<TResult>'s constructor (ticket #1965, SR-AUD-231).
          */
         template<typename TResult>
         [[nodiscard]] TaskT<TResult> StartNew(std::function<TResult()> function) const {
             return TaskT<TResult>::Run(std::move(function), defaultCancellationToken_);
         }
 
-        /** @brief Creates and starts a TaskT<TResult> that runs @p function, observing @p cancellationToken. */
+        /**
+         * @brief Creates and starts a TaskT<TResult> that runs @p function, observing @p cancellationToken.
+         * @throws System::ArgumentNullException if @p function is empty — see the overload above.
+         */
         template<typename TResult>
         [[nodiscard]] TaskT<TResult> StartNew(std::function<TResult()> function,
                                                System::Threading::CancellationToken cancellationToken) const {

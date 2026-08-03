@@ -26,3 +26,15 @@ Empty callable behavior is the shared SR-AUD-231 boundary defect in `Task.hpp`.
 
 No additional finding beyond SR-AUD-231 was confirmed.  No source or test was
 changed during this audit.
+
+---
+
+## Note — remediated with SR-AUD-231 (#1965, 2026-08-03)
+
+All four `StartNew` overloads forward to `Task::Run` / `TaskT<TResult>::Run`,
+whose constructors now reject an empty callable at the public boundary, so each
+overload raises `System::ArgumentNullException` synchronously with .NET's own
+per-overload parameter name — `action` for the two action overloads, `function`
+for the two generic ones. No body in this header changed; only the
+doc-comments, which now state the contract. Five regressions (including
+`Task::Factory().StartNew`) pin it.

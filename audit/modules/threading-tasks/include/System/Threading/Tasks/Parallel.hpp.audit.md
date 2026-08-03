@@ -43,3 +43,30 @@ accepted outside their managed domain.
 
 SR-AUD-232 is confirmed by direct C++/current-.NET comparison.  No production
 or test source was changed during this audit.
+
+---
+
+## Note — the empty-body half landed with SR-AUD-231 (#1965, 2026-08-03)
+
+The second bullet of "Other missing assertions and diagnostics" above — *"an
+empty `std::function` becomes an aggregate of delayed `bad_function_call`
+exceptions"* — is a CCF-011 shape, not a degree-of-parallelism one
+(`docs/ThreadingTasksChannelsReviewPlan.md` §3.1 item 5), and was repaired by
+ticket **#1965** under SR-AUD-231. All five loop entries now reject an empty
+`body` with `System::ArgumentNullException("body")` before any iteration is
+dispatched, and `Invoke` rejects a null **element** with the plain
+`System::ArgumentException("One of the actions was null.")` that .NET uses —
+see that finding's Correction C3.
+
+Two measured corrections belong here as well:
+
+- **The aggregate was catchable.** `Parallel` already wrapped every worker
+  exception in `System::AggregateException`, so ported
+  `catch (const System::Exception&)` code *did* see the failure. CCF-011's
+  "uncatchable" consequence never applied to this file.
+- **The failure was iteration-count-dependent.** An empty range or an empty
+  source ran no iteration, so the identical wrong call returned a normally
+  completed `ParallelLoopResult`.
+
+**SR-AUD-232 itself remains `confirmed`** — the maximum-degree validation is
+ticket #1966.
