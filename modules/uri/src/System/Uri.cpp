@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Uri.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/UriFormatException.hpp"
 #include <algorithm>
@@ -204,6 +205,30 @@ void Uri::parse(const std::string& uriString) {
         authority = authority.substr(atPos + 1);
     }
 
+    // Validate the bracket structure of an IP-literal authority BEFORE the port split.
+    //
+    // Ticket #1991 (SR-AUD-145a). The split below is `rfind(':')` guarded only by
+    // `rfind(']')`, so a bracketed host whose brackets are malformed was silently
+    // reinterpreted rather than rejected. Measured before the repair:
+    //   "http://[::1/path"      -> host "[:"        AND port 1
+    //   "http://[::1]junk/path" -> host "[::1]junk" (accepted)
+    //   "http://[]/path"        -> host "[]"        (accepted)
+    // The finding names only the first case's host. The fabricated PORT is the more
+    // dangerous half: a caller that connects to Port reaches port 1 rather than failing,
+    // because "[::1" has its last colon at index 2 and "1" reads as a port number.
+    //
+    // Only the bracket STRUCTURE is checked — a ']' must exist, the literal must not be
+    // empty, and nothing but a ':' port separator may follow the ']'. Validating the
+    // literal's CONTENT, and zone identifiers, stay out of scope
+    // (docs/SystemUriNamespaceReviewPlan.md §15.4). This is the same contract this
+    // repository's own HttpClient::parseUrl already enforces for an unterminated literal.
+    if (!authority.empty() && authority[0] == '[') {
+        auto close = authority.find(']');
+        if (close == std::string::npos || close == 1 ||
+            (close + 1 < authority.size() && authority[close + 1] != ':'))
+            throw System::UriFormatException("Invalid URI: An invalid IPv6 address was specified.");
+    }
+
     // extract port — look for last ':' after any IPv6 ']'
     auto bracketClose = authority.rfind(']');
     auto colonPos     = authority.rfind(':');
@@ -256,6 +281,20 @@ Uri::Uri(const std::string& uriString) {
 }
 
 Uri::Uri(const std::string& uriString, UriKind uriKind) {
+    // Ticket #1992 (SR-AUD-145b): reject a value outside the enum's declared domain BEFORE
+    // parsing anything. The two guards below match only Absolute and Relative, so any
+    // other value used to fall through both and silently mean RelativeOrAbsolute --
+    // measured, static_cast<UriKind>(99) and static_cast<UriKind>(-1) were both accepted.
+    // This is the same cause, and reuses the same policy, as System::Runtime's GCSettings
+    // setters (#1976) and System::Threading's boundary checks (#1954); the message mirrors
+    // SR.Argument_InvalidEnumValue, "The value '{0}' is not valid for this usage of the
+    // type {1}.", as Decimal::Round and Math::Round already spell it.
+    if (uriKind != UriKind::RelativeOrAbsolute && uriKind != UriKind::Absolute &&
+        uriKind != UriKind::Relative)
+        throw System::ArgumentException(
+            "The value '" + std::to_string(static_cast<int>(uriKind))
+                + "' is not valid for this usage of the type UriKind.",
+            "uriKind");
     parse(uriString);
     if (uriKind == UriKind::Absolute && !isAbsoluteUri_)
         throw System::UriFormatException("URI must be absolute");

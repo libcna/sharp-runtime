@@ -839,3 +839,83 @@ anything either way — its value here is only that the repair introduces nothin
 
 No signature, layout, vtable, `noexcept`, mangled-symbol or component-edge change. No
 acceptance change. Ten add-only regressions; `SharpRuntimeTests_Uri` **160 → 170**.
+
+---
+
+## 22. What #1991 and #1992 measured (2026-08-03) — causes U-D and U-E, together closing SR-AUD-145
+
+SR-AUD-145 is one finding with two unrelated halves. They are repaired by two tickets and
+landed in one commit because they edit the same two files in the same run; the halves are
+kept separate everywhere else.
+
+### 22.1 #1991 — the IP-literal authority (U-D)
+
+`parse` now validates the bracket **structure** of an authority beginning with `[`, after
+the user-info split and **before** the port split: a `]` must exist, the literal must not be
+empty, and only a `:` may follow the `]`.
+
+`build-probe/1989_probe1_after.log` vs `build-probe/1991_probe1_after.log` — **three lines
+differ, and no others**:
+
+| Input | Before | After |
+|---|---|---|
+| `http://[::1/path` | `host="[:"`, **`port=1`** | `UriFormatException` |
+| `http://[::1]junk/path` | `host="[::1]junk"`, `port=80` | `UriFormatException` |
+| `http://[]/path` | `host="[]"`, `port=80` | `UriFormatException` |
+
+Every well-formed literal is untouched: `[::1]`, `[::1]:8080`,
+`[2001:db8::8a2e:370:7334]:443`, `[::1]:` (which #1989 gives port 80), and the `IsLoopback`
+path. The **fabricated port** is the half the finding does not name and the more dangerous
+one — a caller that connects to `Port` reached port 1 rather than failing.
+
+**Why this narrowing is landable without new approval:** the evidence is *inside this
+repository*. `HttpClient::parseUrl` (`modules/net-http/src/System/Net/Http/HttpClient.cpp`)
+already rejects an unterminated IPv6 literal with `UriFormatException`, pinned by
+`HttpClientUrlParseTests.IPv6Literal_Unterminated_ThrowsUriFormatException`. Two parsers in
+one repository disagreeing about the same malformed input is the defect; this makes them
+agree. All five downstream test executables that consume `Uri` were re-run and are
+unchanged (`Net` 240, `Net.Http` 132, `Net.Http.Headers` 373, `Xml` 379, `IO` 599).
+
+An explicit exclusion is **pinned by a test rather than only asserted**: literal *content*
+is not validated, so `http://[not-an-address]/p` still parses. A later ticket that starts
+validating content will therefore be a deliberate decision.
+
+### 22.2 #1992 — the `UriKind` domain (U-E)
+
+`Uri(const std::string&, UriKind)` rejects a value outside the three declared members with
+`System::ArgumentException`, `paramName` `"uriKind"`, message
+`The value '{n}' is not valid for this usage of the type UriKind.` — the
+`SR.Argument_InvalidEnumValue` spelling `Decimal::Round` and `Math::Round` already use. The
+check runs **before** `parse`, so a malformed string still reports the argument error.
+
+`build-probe/1991_probe1_after.log` vs `build-probe/1992_probe1_after.log` — **four lines
+differ, and no others**:
+
+| Call | Before | After |
+|---|---|---|
+| `Uri(absolute, (UriKind)99)` | accepted, `abs=1` | `ArgumentException … (Parameter 'uriKind')` |
+| `Uri(relative, (UriKind)99)` | accepted, `abs=0` | `ArgumentException` |
+| `Uri(absolute, (UriKind)-1)` | accepted, `abs=1` | `ArgumentException` |
+| `TryCreate(absolute, (UriKind)99)` | `true`, non-null | **`false`, null** |
+
+This reuses the policy the repository already approved for this cause (#1976 `GCSettings`,
+#1954 `WaitHandle`) rather than creating a family. A repository-wide search for
+`static_cast<UriKind>`, `static_cast<System::UriKind>` and `(UriKind)` over `modules/`,
+`test/`, `tests/` and `bench/` returns **zero hits**, so the narrowing cannot reach a
+consumer.
+
+**One deferred verification, pinned rather than guessed.** `TryCreate` catches every
+exception, so the constructor's `ArgumentException` becomes `false` + `nullptr`. Whether
+.NET propagates instead cannot be measured here. The `false` result is therefore fixed by a
+permanent test and disclosed in `Uri.hpp`'s `@note`, so a future change to it is a decision
+rather than a drift.
+
+### 22.3 Sanitizers and consequences
+
+ASan + UBSan + LSan over the full sweep after each ticket: **0 reports**, exit 0, 35
+sanitizer symbols vs 0, 44 `System::Uri::` symbols compiled from source. UBSan specifically
+reports no invalid enum load from #1992's own out-of-domain casts.
+
+No signature, layout, vtable, `noexcept`, mangled-symbol or component-edge change.
+`sizeof(System::Uri)` stays **240**. Nineteen add-only regressions;
+`SharpRuntimeTests_Uri` **170 → 189**. **SR-AUD-145 is fully remediated by the pair.**

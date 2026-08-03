@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
+#include "System/ArgumentException.hpp"
 #include "System/Uri.hpp"
 #include "System/UriFormatException.hpp"
 
@@ -563,4 +565,136 @@ TEST(UriTests, DefaultPort_CombineWithDefaultPortBase_OmitsPort) {
     Uri base("http://example.com:/a/b/");
     Uri combined(base, "c");
     EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://example.com/a/b/c");
+}
+
+// ---------------------------------------------------------------------------
+// IP-literal authorities — ticket #1991 (cause U-D, SR-AUD-145a). The authority was split
+// on rfind(':') guarded only by rfind(']'), so a malformed bracketed host was silently
+// reinterpreted. "http://[::1/path" produced host "[:" AND port 1 — the finding names only
+// the host, and the fabricated port is the more dangerous half. Bracket STRUCTURE only is
+// validated; literal content and zone identifiers stay out of scope
+// (docs/SystemUriNamespaceReviewPlan.md §4.1 and §15.4).
+// ---------------------------------------------------------------------------
+
+TEST(UriTests, IPv6_Unterminated_Throws) {
+    EXPECT_THROW(Uri("http://[::1/path"), System::UriFormatException);
+}
+
+TEST(UriTests, IPv6_UnterminatedWithNoPath_Throws) {
+    EXPECT_THROW(Uri("http://[::1"), System::UriFormatException);
+}
+
+TEST(UriTests, IPv6_TrailingJunkAfterBracket_Throws) {
+    EXPECT_THROW(Uri("http://[::1]junk/path"), System::UriFormatException);
+}
+
+TEST(UriTests, IPv6_EmptyLiteral_Throws) {
+    EXPECT_THROW(Uri("http://[]/path"), System::UriFormatException);
+}
+
+TEST(UriTests, IPv6_WithUserInfoAndUnterminatedLiteral_Throws) {
+    // The check must run after the user-info split, or credentials hide the defect.
+    EXPECT_THROW(Uri("http://user@[::1/path"), System::UriFormatException);
+}
+
+TEST(UriTests, IPv6_MalformedPortAfterBracket_StillThrows) {
+    EXPECT_THROW(Uri("http://[::1]:abc/path"), System::UriFormatException);
+}
+
+TEST(UriTests, IPv6_WellFormed_NoPort_Unchanged) {
+    Uri u("http://[::1]/path");
+    EXPECT_EQ(u.getHostProperty(), "[::1]");
+    EXPECT_EQ(u.getPortProperty(), 80);
+    EXPECT_EQ(u.getAbsolutePathProperty(), "/path");
+}
+
+TEST(UriTests, IPv6_WellFormed_WithPort_Unchanged) {
+    Uri u("http://[::1]:8080/path");
+    EXPECT_EQ(u.getHostProperty(), "[::1]");
+    EXPECT_EQ(u.getPortProperty(), 8080);
+}
+
+TEST(UriTests, IPv6_WellFormed_FullAddress_Unchanged) {
+    Uri u("https://[2001:db8::8a2e:370:7334]:443/a?q=1");
+    EXPECT_EQ(u.getHostProperty(), "[2001:db8::8a2e:370:7334]");
+    EXPECT_EQ(u.getPortProperty(), 443);
+    EXPECT_EQ(u.getQueryProperty(), "?q=1");
+}
+
+TEST(UriTests, IPv6_WellFormed_EmptyPortComponent_UsesDefault) {
+    // #1989's empty-port repair and #1991's bracket check must compose.
+    Uri u("http://[::1]:/path");
+    EXPECT_EQ(u.getHostProperty(), "[::1]");
+    EXPECT_EQ(u.getPortProperty(), 80);
+}
+
+TEST(UriTests, IPv6_Loopback_StillDetected) {
+    Uri u("http://[::1]:8080/");
+    EXPECT_TRUE(u.getIsLoopbackProperty());
+}
+
+TEST(UriTests, IPv6_LiteralContentIsNotValidated_DocumentedExclusion) {
+    // Explicit exclusion: bracket STRUCTURE is checked, content is not. This pins the
+    // boundary so a later "improvement" that starts validating content is a deliberate
+    // decision rather than an accident.
+    Uri u("http://[not-an-address]/p");
+    EXPECT_EQ(u.getHostProperty(), "[not-an-address]");
+}
+
+// ---------------------------------------------------------------------------
+// UriKind domain — ticket #1992 (cause U-E, SR-AUD-145b). The two guards matched only
+// Absolute and Relative, so any other value fell through both and silently meant
+// RelativeOrAbsolute. Same cause and same policy as System::Runtime's GCSettings setters
+// (#1976) and System::Threading's boundary checks (#1954).
+// ---------------------------------------------------------------------------
+
+TEST(UriTests, UriKind_OutOfDomainPositive_ThrowsArgumentException) {
+    EXPECT_THROW(Uri("http://example.com/", static_cast<UriKind>(99)),
+                 System::ArgumentException);
+}
+
+TEST(UriTests, UriKind_OutOfDomainNegative_ThrowsArgumentException) {
+    EXPECT_THROW(Uri("http://example.com/", static_cast<UriKind>(-1)),
+                 System::ArgumentException);
+}
+
+TEST(UriTests, UriKind_OutOfDomainAdjacent_ThrowsArgumentException) {
+    // 3 is one past Relative, the value a careless cast from a count produces.
+    EXPECT_THROW(Uri("http://example.com/", static_cast<UriKind>(3)),
+                 System::ArgumentException);
+}
+
+TEST(UriTests, UriKind_OutOfDomain_ParamNameIsUriKind) {
+    try {
+        Uri u("http://example.com/", static_cast<UriKind>(99));
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "uriKind");
+        EXPECT_NE(std::string(e.what()).find("UriKind"), std::string::npos);
+    }
+}
+
+TEST(UriTests, UriKind_OutOfDomain_RejectedBeforeParsing) {
+    // The domain check must precede parse(), so a malformed string still reports the
+    // argument error rather than a UriFormatException about the text.
+    EXPECT_THROW(Uri("http://h:abc/", static_cast<UriKind>(99)), System::ArgumentException);
+}
+
+TEST(UriTests, UriKind_EveryDeclaredMember_StillAccepted) {
+    for (auto kind : {UriKind::RelativeOrAbsolute, UriKind::Absolute}) {
+        EXPECT_NO_THROW(Uri("http://example.com/", kind));
+    }
+    for (auto kind : {UriKind::RelativeOrAbsolute, UriKind::Relative}) {
+        EXPECT_NO_THROW(Uri("/relative", kind));
+    }
+}
+
+TEST(UriTests, UriKind_OutOfDomain_TryCreateReturnsFalse) {
+    // Deferred verification (docs/SystemUriNamespaceReviewPlan.md §17): TryCreate catches
+    // every exception, so the constructor's ArgumentException becomes false + nullptr.
+    // Whether .NET propagates instead could not be measured here, so the current answer is
+    // PINNED rather than changed on recollection.
+    std::shared_ptr<Uri> result;
+    EXPECT_FALSE(Uri::TryCreate("http://example.com/", static_cast<UriKind>(99), result));
+    EXPECT_EQ(result, nullptr);
 }

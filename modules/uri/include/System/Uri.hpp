@@ -70,6 +70,10 @@ namespace System {
         /**
          * @brief Constructs a Uri from a string, enforcing the specified kind.
          *
+         * @throws System::ArgumentException (paramName @c "uriKind") if @p uriKind is not
+         *         one of the three declared UriKind members. An out-of-domain cast used to
+         *         fall through both guards and silently mean RelativeOrAbsolute
+         *         (ticket #1992).
          * @throws System::UriFormatException if the URI does not match the requested kind.
          */
         Uri(const std::string& uriString, UriKind uriKind);
@@ -157,6 +161,12 @@ namespace System {
          * @param uriKind    The required kind.
          * @param result     Receives a shared_ptr to the new Uri on success, or nullptr.
          * @return @c true on success, @c false if the URI is invalid or the wrong kind.
+         *
+         * @note An out-of-domain @p uriKind makes this return @c false with a null result
+         *   rather than propagating the ArgumentException the constructor throws, because
+         *   this overload catches every exception. Whether .NET propagates instead could
+         *   not be verified in this environment, so the current answer is pinned by a test
+         *   rather than changed on recollection (ticket #1992, deferred verification).
          */
         static bool TryCreate(const std::string& uriString, UriKind uriKind,
                                std::shared_ptr<Uri>& result);
