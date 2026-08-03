@@ -497,3 +497,70 @@ TEST(UriTests, SchemeDetection_TryCreateRelativeWithEmbeddedAbsoluteUrl_Succeeds
     ASSERT_NE(result, nullptr);
     EXPECT_FALSE(result->getIsAbsoluteUriProperty());
 }
+
+// ---------------------------------------------------------------------------
+// Default ports — ticket #1989 (cause U-B, SR-AUD-143 plus one unnamed site).
+// defaultPortForScheme() declares mailto=25 and telnet=23, but the opaque branch assigned
+// -1 unconditionally and the empty-port branch never consulted the table at all, so the
+// file contradicted itself in two places. See docs/SystemUriNamespaceReviewPlan.md §4.2
+// and §4.3.
+// ---------------------------------------------------------------------------
+
+TEST(UriTests, DefaultPort_OpaqueMailto_Is25) {
+    Uri u("mailto:user@example.com");
+    EXPECT_EQ(u.getPortProperty(), 25);
+}
+
+TEST(UriTests, DefaultPort_OpaqueTelnet_Is23) {
+    // SR-AUD-143 names only mailto; every opaque scheme with a table entry was affected.
+    Uri u("telnet:host.example.com");
+    EXPECT_EQ(u.getPortProperty(), 23);
+}
+
+TEST(UriTests, DefaultPort_OpaqueSchemeWithNoTableEntry_IsMinusOne) {
+    Uri u("urn:isbn:0-395-36341-1");
+    EXPECT_EQ(u.getPortProperty(), -1);
+}
+
+TEST(UriTests, DefaultPort_OpaqueMailto_AuthorityStillEmpty) {
+    // The port becoming the default must not make Authority start rendering ":25".
+    Uri u("mailto:user@example.com");
+    EXPECT_EQ(u.getAuthorityProperty(), "");
+}
+
+TEST(UriTests, DefaultPort_EmptyPortComponent_UsesSchemeDefault) {
+    Uri u("http://example.com:/");
+    EXPECT_EQ(u.getPortProperty(), 80);
+    EXPECT_EQ(u.getHostProperty(), "example.com");
+}
+
+TEST(UriTests, DefaultPort_EmptyPortComponentHttps_UsesSchemeDefault) {
+    Uri u("https://example.com:/a");
+    EXPECT_EQ(u.getPortProperty(), 443);
+    EXPECT_EQ(u.getAbsolutePathProperty(), "/a");
+}
+
+TEST(UriTests, DefaultPort_EmptyPortComponent_AuthorityOmitsPort) {
+    Uri u("http://example.com:/");
+    EXPECT_EQ(u.getAuthorityProperty(), "example.com");
+}
+
+TEST(UriTests, DefaultPort_EmptyPortComponentUnregisteredScheme_IsMinusOne) {
+    Uri u("ssh://host:/");
+    EXPECT_EQ(u.getPortProperty(), -1);
+}
+
+TEST(UriTests, DefaultPort_ExplicitPort_Unchanged) {
+    // Control: the branch that already worked must not move.
+    Uri u("http://example.com:8080/");
+    EXPECT_EQ(u.getPortProperty(), 8080);
+    EXPECT_EQ(u.getAuthorityProperty(), "example.com:8080");
+}
+
+TEST(UriTests, DefaultPort_CombineWithDefaultPortBase_OmitsPort) {
+    // Combine renders ":port" only when the port differs from the scheme default; the
+    // opaque/empty-port repair must not start injecting one.
+    Uri base("http://example.com:/a/b/");
+    Uri combined(base, "c");
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://example.com/a/b/c");
+}

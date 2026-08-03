@@ -792,3 +792,50 @@ the exception classes and is not instrumented, so UBSan says nothing about code 
 No public signature, object layout, vtable, mangled symbol, `noexcept` specification or
 component edge changed. `sizeof(System::Uri)` stays **240**. Eleven add-only regressions;
 `SharpRuntimeTests_Uri` **149 → 160**.
+
+---
+
+## 21. What #1989 measured (2026-08-03) — cause U-B
+
+### 21.1 The repair, at both sites
+
+`defaultPortForScheme` is now consulted on **every** path that produces a port:
+
+- the **opaque** branch replaces `port_ = -1` with `port_ = defaultPortForScheme(scheme_)`;
+- the **empty-port** branch (`authority` ending in a bare `:`) gains the same call, which it
+  never had.
+
+### 21.2 Before and after
+
+`build-probe/1988_probe1_after.log` vs `build-probe/1989_probe1_after.log`. **Four lines
+differ, and no others.**
+
+| Input | Before | After |
+|---|---|---|
+| `mailto:user@example.com` | `port=-1` | **`port=25`** |
+| `telnet:host.example.com` | `port=-1` | **`port=23`** (the shape SR-AUD-143 does not name) |
+| `mailto:a@b.com?body=see http://x` | `port=-1` | **`port=25`** |
+| `http://example.com:/` | `port=-1` | **`port=80`** (the unnamed second site) |
+
+`urn:isbn:…` stays `-1` — it has no table entry — and every explicit-port parse is
+unchanged.
+
+### 21.3 The consequence that had to be checked rather than assumed
+
+Both `getAuthorityProperty()` and the two-`Uri` constructor render `:port` only when the
+port **differs** from the scheme default. Setting the port *to* the default therefore
+changes neither: `Uri("mailto:…").getAuthorityProperty()` is still `""` and
+`Uri(Uri("http://example.com:/a/b/"), "c")` still produces
+`http://example.com/a/b/c` with no `:80`. Both are asserted by permanent tests rather than
+argued, because a repair that started injecting `:25` into every `mailto` authority would
+be a rendering change this ticket does not authorise.
+
+### 21.4 Sanitizers and consequences
+
+ASan + UBSan + LSan over the full sweep: **0 reports**, exit 0, 35 sanitizer symbols vs 0,
+44 `System::Uri::` symbols compiled from source. This is an honest **non-discriminator**:
+the defect was a wrong *value*, not a memory error, so the harness could not have reported
+anything either way — its value here is only that the repair introduces nothing.
+
+No signature, layout, vtable, `noexcept`, mangled-symbol or component-edge change. No
+acceptance change. Ten add-only regressions; `SharpRuntimeTests_Uri` **160 → 170**.

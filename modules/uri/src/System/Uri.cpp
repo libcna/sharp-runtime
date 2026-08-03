@@ -152,7 +152,13 @@ void Uri::parse(const std::string& uriString) {
         path_          = rest;
         host_.clear();
         userInfo_.clear();
-        port_          = -1;
+        // Ticket #1989 (SR-AUD-143): this branch used to assign -1 unconditionally, which
+        // bypassed defaultPortForScheme() -- the table two dozen lines above that declares
+        // mailto=25 and telnet=23 -- so the file contradicted itself. Measured before the
+        // repair: "mailto:user@example.com" reported -1 and so did
+        // "telnet:host.example.com". The finding names only mailto; every opaque scheme
+        // with a table entry was affected.
+        port_          = defaultPortForScheme(scheme_);
         absoluteUri_   = uriString;
         isAbsoluteUri_ = true;
         return;
@@ -224,7 +230,13 @@ void Uri::parse(const std::string& uriString) {
             port_ = static_cast<intcs>(parsedPort);
             host_ = authority.substr(0, colonPos);
         } else {
+            // An authority ending in a bare ':' carries no port, so the scheme's default
+            // applies exactly as it does when there is no colon at all. Ticket #1989's
+            // second, unnamed site: before the repair "http://example.com:/" reported -1
+            // while "http://example.com/" reported 80, so two spellings of one URI
+            // disagreed (docs/SystemUriNamespaceReviewPlan.md §4.3).
             host_ = authority.substr(0, colonPos);
+            port_ = defaultPortForScheme(scheme_);
         }
     } else {
         host_ = authority;
