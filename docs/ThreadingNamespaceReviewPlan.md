@@ -853,3 +853,110 @@ on top of the three (195, 197, 206, 211) closed by the previous one. SR-AUD-219 
 
 Neither ticket changed a signature, an object layout, a vtable, an exception specification or
 a component edge. The module graph stays **41 / 91**.
+
+
+---
+
+## 19. What #1955 measured, and the T-A idiom as actually implemented (2026-08-03)
+
+Ticket #1955 closed cause **T-A** — the six types that read shared mutable state outside its
+own mutex. Evidence: `build-probe/1955_probe1_shared_state_races.cpp` under
+`-fsanitize=thread`, and `build-probe/1955_probe1_layout.cpp` for the gate.
+
+### 19.1 The layout gate passed, byte for byte
+
+| Type | `sizeof` before → after | `alignof` before → after |
+|---|---|---|
+| `ReaderWriterLockSlim` | 120 → 120 | 8 → 8 |
+| `SemaphoreSlim` | 104 → 104 | 8 → 8 |
+| `ManualResetEventSlim` | 112 → 112 | 8 → 8 |
+| `CountdownEvent` | 104 → 104 | 8 → 8 |
+| `Barrier` | 160 → 160 | 8 → 8 |
+| `ThreadLocal<int>` | 56 → 56 | 8 → 8 |
+
+`sizeof(std::atomic<bool>) == sizeof(bool) == 1`, `alignof` 1, lock-free;
+`sizeof(std::atomic<intcs>) == sizeof(intcs) == 4`, `alignof` 4, lock-free. The two logs are
+`1955_probe1_layout_before.log` and `1955_probe1_layout_after.log`, and `diff` reports them
+identical. **No user approval was required**, and the numbers are now pinned by
+`ThreadingSharedStateTests.RepairedTypes_LayoutUnchanged` so a future edit that grows one of
+these inline types fails a test before it reaches a consumer.
+
+### 19.2 The counters became atomic fields, not locked properties — §5 corrected
+
+§5's T-A paragraph selected *"a counter that a public property exposes is read **under the
+owning mutex** (the mutex becomes `mutable`)"*. Both counter sites were implemented as
+`std::atomic<intcs>` instead. This is a deliberate change to the selected repair, for two
+reasons.
+
+**It is what .NET does.** `SemaphoreSlim.CurrentCount` returns `m_currentCount`, declared
+`private volatile int`, read with no lock; `Barrier.ParticipantCount` reads its packed count
+field without taking the barrier's lock. A locking property would have been a divergence
+invented by this port on a pair of properties .NET makes deliberately cheap.
+
+**For `Barrier` it would have created a second SR-AUD-210.** `FinishPhase()` invokes the
+post-phase action **while still holding `mutex_`**. A `getParticipantCountProperty()` that took
+that lock would block on the lock its own caller holds, so a legal post-phase action reading
+`ParticipantCount` would self-deadlock — which is exactly the defect SR-AUD-210 describes for
+`getCurrentPhaseNumberProperty()` and exactly what approval-gated ticket #1957 exists to
+remove. A T-A repair that manufactured a second instance of a T-E/2 defect would be a
+regression wearing a fix's clothing.
+`ThreadingSharedStateTests.Barrier_ParticipantCountReadableFromPostPhaseAction` pins the
+property's usability from inside the action.
+
+Every **write** still happens under the owning mutex in both types, so no compound invariant
+is weakened: `0 <= count_ <= maxCount_`, the `count_ > 0` predicate, and
+`participantCount_`/`remainingCount_`'s relationship are untouched. The atomics make the
+unsynchronised *reads* well-defined and nothing else.
+
+The four flags did adopt §5's stated idiom exactly: `std::atomic<bool>`, release store in
+`Dispose()`, acquire load in the guard.
+
+### 19.3 SR-AUD-216 had two racing reads, not one
+
+The finding names the `if (!target)` guard. TSan also reported `return *target;` — a second
+ordinary read of the object another caller publishes through `atomic_ref`'s compare-exchange.
+Six of the pre-fix run's thirteen reports came from this one scenario. Both reads now go
+through the same `std::atomic_ref`, which is the C++ spelling of .NET's opening
+`Volatile.Read(ref target)`.
+
+### 19.4 A TSan methodology correction
+
+The probe's first version used a 2000-iteration loop per thread and reported **zero** races
+for `ManualResetEventSlim` and `CountdownEvent` while reporting one for the structurally
+identical `ReaderWriterLockSlim`. The code was equally racy in all three. A writer loop of
+trivial stores finishes before a reader that must set up a try/catch reaches its first call,
+so the threads never overlap and a happens-before detector sees nothing. Rewritten as **1500
+rounds of a fresh object with one access per thread**, all seven scenarios reproduced.
+
+Recorded because it generalises: a "TSan reported nothing" result is evidence about the probe
+until the probe has been shown capable of reporting something. §11 of this plan says a clean
+TSan run *is* the closure evidence for T-A — that only holds for a probe with a demonstrated
+positive.
+
+**Totals: 13 reports across seven scenarios before, zero after**, exit 66 → 0, every control
+value unchanged (`semaphoreslim.final_count=1`, `barrier.final_participants=1`,
+`lazyinitializer.consistent_rounds=400/400`). 132 `__tsan_*` symbols confirm the binary was
+instrumented.
+
+### 19.5 What #1955 deliberately did not touch
+
+- **SR-AUD-203's dispose-while-held half** (T-G, #1956): the flag is now race-free, but
+  disposal still succeeds while a mode is held.
+- **SR-AUD-219's IsValueCreated half** (T-G, #1956): `getIsValueCreatedProperty()` still
+  bypasses the — now sound — guard.
+- **SR-AUD-204, 210, 201, 202** (T-E/2, #1957) and **SR-AUD-220** (T-H, #1958): untouched.
+
+`SharpRuntimeTests_Threading` 418 → 429 (+11), all passing. No signature, vtable, exception
+specification or component edge changed; the module graph stays **41 / 91**.
+
+### 19.6 Namespace scoreboard after #1947–#1955
+
+| State | Findings |
+|---|---|
+| **remediated (15)** | 183, 184, 188, 190, 192, 195, 197, 198, 199, 205, 206, 207, 211, 212, 213, 216, 217, 218, 222 — nineteen IDs, of which 195/197/206/211 closed in the previous batch |
+| **confirmed, one half landed (2)** | 203 (race half done, T-G half open), 219 (factory half done, T-G half open) |
+| **confirmed, untouched (17)** | 187, 189, 191, 193, 194, 196, 200, 201, 202, 204, 208, 209, 210, 214, 215, 220, 221 |
+
+Nineteen of the namespace's 38 findings are `remediated`; two are half-landed; seventeen
+remain, of which sixteen belong to the four approval-gated design tickets #1956–#1959 and one
+(SR-AUD-200) to verification ticket #1963.

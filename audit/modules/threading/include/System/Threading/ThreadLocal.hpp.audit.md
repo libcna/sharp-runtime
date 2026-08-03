@@ -105,3 +105,44 @@ non-factory controls and the real-factory control are unchanged. Tests:
 **SR-AUD-218 and SR-AUD-220 are untouched and remain `confirmed`** — the ordinary `disposed_`
 race is cause T-A (ticket #1955) and the inert `trackAllValues`/absent `Values` surface is
 cause T-H (ticket #1958).
+
+
+---
+
+## Remediation record — ticket #1955 (2026-08-03), SR-AUD-218 → `remediated`
+
+Cause **T-A** of `docs/ThreadingNamespaceReviewPlan.md`, "shared mutable state is observed
+outside its own mutex". Evidence: `build-probe/1955_probe1_shared_state_races.cpp` under
+`-fsanitize=thread`, logs `1955_probe1_tsan_before.log` (**13** data-race reports across
+seven scenarios, exit 66) and `1955_probe1_tsan_after.log` (**zero** reports, exit 0, every
+control value unchanged). Instrumentation was proved rather than assumed: 132 `__tsan_*`
+symbols in the sanitized binary. The layout gate passed — `sizeof` and `alignof` are
+byte-identical for all six affected types before and after
+(`1955_probe1_layout_before.log` / `1955_probe1_layout_after.log`), so no user approval was
+required, and the numbers are pinned by
+`ThreadingSharedStateTests.RepairedTypes_LayoutUnchanged` in
+`modules/threading/tests/System/Threading/ThreadingSharedStateTests.cpp`.
+
+`disposed_` is now `std::atomic<bool>`: `Dispose()` performs a release store,
+`ThrowIfDisposed()` an acquire load. `sizeof(ThreadLocal<int>)` 56 → 56, `alignof` 8 → 8.
+Scenario `threadlocal.disposed` reported one race before and none after.
+
+**SR-AUD-219's IsValueCreated-after-Dispose half is still open** (cause T-G, approval-gated
+ticket #1956). The flag is now race-free, but `getIsValueCreatedProperty()` still does not
+consult it and still returns `false` after `Dispose` where .NET throws
+`ObjectDisposedException`. #1955 made the guard sound; #1956 is what applies it. SR-AUD-219's
+factory half landed with #1951, recorded above.
+
+**SR-AUD-220 is untouched and remains `confirmed`** — the inert `trackAllValues` flag and the
+absent `Values` surface are cause T-H, design ticket #1958.
+
+### A methodology correction worth keeping
+
+The first version of the probe used a 2000-iteration loop per thread and reported **zero**
+races for `ManualResetEventSlim` and `CountdownEvent` while reporting one for the
+structurally identical `ReaderWriterLockSlim`. The code was equally racy in all three; the
+probe was at fault. A writer loop of trivial stores completes before a reader that must set up
+a try/catch reaches its first call, so the two threads never overlap and a happens-before
+detector sees nothing. Rewriting the disposal scenarios as **1500 rounds of a fresh object
+with exactly one access per thread** made all seven reproduce. A "TSan reported nothing"
+result is evidence about the probe until the probe is shown to be able to report something.

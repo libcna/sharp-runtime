@@ -65,3 +65,63 @@ now uses SemaphoreSlim.cs's own `maxCount_ - count_ < releaseCount`.
 read and the unsynchronised `disposed_` flag are cause T-A in
 `docs/ThreadingNamespaceReviewPlan.md`, owned by ticket #1955, which needs a
 layout measurement #1947 deliberately did not make.
+
+
+---
+
+## Remediation record — ticket #1955 (2026-08-03), SR-AUD-207 → `remediated` (all three types)
+
+Cause **T-A** of `docs/ThreadingNamespaceReviewPlan.md`, "shared mutable state is observed
+outside its own mutex". Evidence: `build-probe/1955_probe1_shared_state_races.cpp` under
+`-fsanitize=thread`, logs `1955_probe1_tsan_before.log` (**13** data-race reports across
+seven scenarios, exit 66) and `1955_probe1_tsan_after.log` (**zero** reports, exit 0, every
+control value unchanged). Instrumentation was proved rather than assumed: 132 `__tsan_*`
+symbols in the sanitized binary. The layout gate passed — `sizeof` and `alignof` are
+byte-identical for all six affected types before and after
+(`1955_probe1_layout_before.log` / `1955_probe1_layout_after.log`), so no user approval was
+required, and the numbers are pinned by
+`ThreadingSharedStateTests.RepairedTypes_LayoutUnchanged` in
+`modules/threading/tests/System/Threading/ThreadingSharedStateTests.cpp`.
+
+### The count: an atomic field, not a locking property — and why
+
+`SemaphoreSlim::count_` is now `std::atomic<intcs>`, acquire-loaded by
+`getCurrentCountProperty()` and still written **only** under `mutex_`.
+
+The namespace plan's §5 proposed *"a counter that a public property exposes is read under the
+owning mutex"*. That is not what .NET does, and the difference is deliberate:
+`SemaphoreSlim.CurrentCount` returns `m_currentCount`, declared `private volatile int`, with
+no lock taken. An atomic field reproduces that exactly; a locking property would add
+contention to a property .NET makes cheap, on a primitive whose whole purpose is to be
+lighter than `Semaphore`.
+
+Nothing about the compound state changes: every write stays inside the critical section, so
+the class invariant `0 <= count_ <= maxCount_` and the condition-variable predicate
+`count_ > 0` are exactly as before. The atomic only makes the unsynchronised *read*
+well-defined.
+`ThreadingSharedStateTests.SemaphoreSlim_CurrentCountStaysInRangeUnderContention` runs three
+threads for 500 iterations each and asserts no observation ever leaves `[0, maxCount]`.
+
+### The flag
+
+`disposed_` is `std::atomic<bool>` with a release store in `Dispose()` and an acquire load in
+`ThrowIfDisposed()`.
+
+### Scope
+
+The finding's index summary names `SemaphoreSlim`, `ManualResetEventSlim` and `CountdownEvent`,
+and the namespace review's §3.1 item 3 records that all three are members rather than two plus
+an extension. All three were repaired in this one change, so the family cannot close falsely.
+`sizeof(SemaphoreSlim)` 104 → 104, `sizeof(ManualResetEventSlim)` 112 → 112,
+`sizeof(CountdownEvent)` 104 → 104.
+
+### A methodology correction worth keeping
+
+The first version of the probe used a 2000-iteration loop per thread and reported **zero**
+races for `ManualResetEventSlim` and `CountdownEvent` while reporting one for the
+structurally identical `ReaderWriterLockSlim`. The code was equally racy in all three; the
+probe was at fault. A writer loop of trivial stores completes before a reader that must set up
+a try/catch reaches its first call, so the two threads never overlap and a happens-before
+detector sees nothing. Rewriting the disposal scenarios as **1500 rounds of a fresh object
+with exactly one access per thread** made all seven reproduce. A "TSan reported nothing"
+result is evidence about the probe until the probe is shown to be able to report something.

@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 #include <condition_variable>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -25,17 +26,35 @@ namespace System::Threading {
     class SemaphoreSlim {
         std::mutex              mutex_;
         std::condition_variable cv_;
-        intcs                   count_;
+        // Ticket #1955 / SR-AUD-207, cause T-A. getCurrentCountProperty() read this with no
+        // lock at all while Wait()/Release() wrote it under mutex_ -- TSan-confirmed
+        // undefined behaviour. The repair is an atomic field rather than a locking property,
+        // because that is what .NET does: SemaphoreSlim.CurrentCount is `m_currentCount`,
+        // declared `private volatile int`, read with no lock. Every write stays inside
+        // mutex_, so the compound invariant 0 <= count_ <= maxCount_ and the condition
+        // variable's predicate are unaffected; the atomic only makes the unsynchronised
+        // *read* well-defined. sizeof/alignof(std::atomic<intcs>) == sizeof/alignof(intcs)
+        // == 4 on every supported target, so the field is layout-neutral (measured in
+        // build-probe/1955_probe1_layout_{before,after}.log).
+        std::atomic<intcs>      count_;
         intcs                   maxCount_;
         // Verified against SemaphoreSlim.cs's CheckDispose()/ObjectDisposedException.ThrowIf:
         // real .NET's Wait/Release all reject calls after Dispose(). This port's sibling
         // primitives (Barrier, CountdownEvent, ManualResetEventSlim, ReaderWriterLockSlim) all
         // already have this guard; SemaphoreSlim was previously missed, with Dispose() a true
         // no-op and no disposal check anywhere.
-        bool                    disposed_ = false;
+        // Ticket #1955 / cause T-A of docs/ThreadingNamespaceReviewPlan.md. This was an
+        // ordinary `bool`, written by Dispose() and read by the guard below with no
+        // synchronisation between them -- a data race, i.e. undefined behaviour, confirmed by
+        // ThreadSanitizer at audit time and again in
+        // build-probe/1955_probe1_shared_state_races.cpp. std::atomic<bool> is 1 byte and
+        // 1-byte aligned on every supported target, so the change is layout-neutral; measured
+        // in build-probe/1955_probe1_layout_{before,after}.log.
+        std::atomic<bool>       disposed_{false};
 
         void ThrowIfDisposed() const {
-            if (disposed_) throw System::ObjectDisposedException("SemaphoreSlim");
+            if (disposed_.load(std::memory_order_acquire))
+                throw System::ObjectDisposedException("SemaphoreSlim");
         }
 
     public:
@@ -128,7 +147,7 @@ namespace System::Threading {
         }
 
         /** Releases resources used by the SemaphoreSlim. */
-        void Dispose() { disposed_ = true; }
+        void Dispose() { disposed_.store(true, std::memory_order_release); }
     };
 
 } // namespace System::Threading

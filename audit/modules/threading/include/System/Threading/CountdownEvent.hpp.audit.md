@@ -64,3 +64,32 @@ keep their existing exceptions and order.
 **SR-AUD-207 remains `confirmed`** here: this type's unsynchronised `disposed_`
 flag is cause T-A in `docs/ThreadingNamespaceReviewPlan.md`, owned by ticket
 #1955, and was deliberately not absorbed into #1948.
+
+
+---
+
+## Remediation record — ticket #1955 (2026-08-03), SR-AUD-207 member → `remediated`
+
+This type is one of SR-AUD-207's three members — the one the audit prose called an
+*extension*; the namespace review's §3.1 item 3 records that it is a full member and must be
+repaired in the same change or the family closes falsely. It was.
+
+`disposed_` is now `std::atomic<bool>` with a release store in `Dispose()` and an acquire load
+in `ThrowIfDisposed()`. `sizeof(CountdownEvent)` 104 → 104, `alignof` 8 → 8. Scenario
+`countdownevent.disposed` reported one race before and none after
+(`build-probe/1955_probe1_tsan_{before,after}.log`).
+
+`currentCount_` needed no change: `getCurrentCountProperty()` and `getIsSetProperty()` already
+read it under the type's own `mutable std::mutex`. SR-AUD-211's `Reset` notification, closed by
+ticket #1948, is unaffected.
+
+### A methodology correction worth keeping
+
+The first version of the probe used a 2000-iteration loop per thread and reported **zero**
+races for `ManualResetEventSlim` and `CountdownEvent` while reporting one for the
+structurally identical `ReaderWriterLockSlim`. The code was equally racy in all three; the
+probe was at fault. A writer loop of trivial stores completes before a reader that must set up
+a try/catch reaches its first call, so the two threads never overlap and a happens-before
+detector sees nothing. Rewriting the disposal scenarios as **1500 rounds of a fresh object
+with exactly one access per thread** made all seven reproduce. A "TSan reported nothing"
+result is evidence about the probe until the probe is shown to be able to report something.

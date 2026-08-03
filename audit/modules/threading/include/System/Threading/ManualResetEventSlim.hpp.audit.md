@@ -41,3 +41,28 @@ not recorded as a finding.
 
 SR-AUD-207 extends here through a TSan-confirmed data race. No production or
 test source was changed.
+
+
+---
+
+## Remediation record — ticket #1955 (2026-08-03), SR-AUD-207 member → `remediated`
+
+This type is one of SR-AUD-207's three members; the finding's primary record is in
+`SemaphoreSlim.hpp.audit.md` and the index row. `disposed_` is now `std::atomic<bool>` with a
+release store in `Dispose()` and an acquire load in `ThrowIfDisposed()`.
+`sizeof(ManualResetEventSlim)` 112 → 112, `alignof` 8 → 8. Scenario
+`manualreseteventslim.disposed` reported one race before and none after
+(`build-probe/1955_probe1_tsan_{before,after}.log`).
+
+`set_` was already `std::atomic<bool>` and is unchanged.
+
+### A methodology correction worth keeping
+
+The first version of the probe used a 2000-iteration loop per thread and reported **zero**
+races for `ManualResetEventSlim` and `CountdownEvent` while reporting one for the
+structurally identical `ReaderWriterLockSlim`. The code was equally racy in all three; the
+probe was at fault. A writer loop of trivial stores completes before a reader that must set up
+a try/catch reaches its first call, so the two threads never overlap and a happens-before
+detector sees nothing. Rewriting the disposal scenarios as **1500 rounds of a fresh object
+with exactly one access per thread** made all seven reproduce. A "TSan reported nothing"
+result is evidence about the probe until the probe is shown to be able to report something.

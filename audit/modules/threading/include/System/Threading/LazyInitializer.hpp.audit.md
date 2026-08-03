@@ -89,3 +89,52 @@ after the throw.
 
 **SR-AUD-216 is untouched and remains `confirmed`** — the ordinary `if (!target)` read racing
 the `atomic_ref` publication is cause T-A and belongs to ticket #1955.
+
+
+---
+
+## Remediation record — ticket #1955 (2026-08-03), SR-AUD-216 → `remediated`
+
+Cause **T-A** of `docs/ThreadingNamespaceReviewPlan.md`, "shared mutable state is observed
+outside its own mutex". Evidence: `build-probe/1955_probe1_shared_state_races.cpp` under
+`-fsanitize=thread`, logs `1955_probe1_tsan_before.log` (**13** data-race reports across
+seven scenarios, exit 66) and `1955_probe1_tsan_after.log` (**zero** reports, exit 0, every
+control value unchanged). Instrumentation was proved rather than assumed: 132 `__tsan_*`
+symbols in the sanitized binary. The layout gate passed — `sizeof` and `alignof` are
+byte-identical for all six affected types before and after
+(`1955_probe1_layout_before.log` / `1955_probe1_layout_after.log`), so no user approval was
+required, and the numbers are pinned by
+`ThreadingSharedStateTests.RepairedTypes_LayoutUnchanged` in
+`modules/threading/tests/System/Threading/ThreadingSharedStateTests.cpp`.
+
+Both `EnsureInitialized` overloads now open with `std::atomic_ref<T*> ref(target);` and read
+through it — `ref.load(std::memory_order_acquire)` for the guard **and** for the returned
+reference — instead of reading `target` directly. This is the C++ spelling of the
+`Volatile.Read(ref target)` that .NET's own `EnsureInitialized` opens with, and it pairs with
+the `compare_exchange_strong` that publishes the value.
+
+### Correction: two racing reads, not one
+
+The finding names the `if (!target)` guard. TSan reported the **return statement** as well:
+`return *target;` was a second ordinary read of the same object another caller publishes
+atomically. Six of the pre-fix run's thirteen reports came from this one scenario, which is
+what made the second site visible. Both are repaired.
+
+`LazyInitializer` declares no data members and has a deleted constructor, so no layout question
+arises here at all.
+
+`ThreadingSharedStateTests.LazyInitializer_ConcurrentCallersAgreeOnOneInstance` runs 200 rounds
+of two threads racing on a fresh target and asserts that both observe the *same* published
+instance and that it is the one left in `target` — .NET's documented contract that the loser's
+candidate is discarded rather than returned.
+
+### A methodology correction worth keeping
+
+The first version of the probe used a 2000-iteration loop per thread and reported **zero**
+races for `ManualResetEventSlim` and `CountdownEvent` while reporting one for the
+structurally identical `ReaderWriterLockSlim`. The code was equally racy in all three; the
+probe was at fault. A writer loop of trivial stores completes before a reader that must set up
+a try/catch reaches its first call, so the two threads never overlap and a happens-before
+detector sees nothing. Rewriting the disposal scenarios as **1500 rounds of a fresh object
+with exactly one access per thread** made all seven reproduce. A "TSan reported nothing"
+result is evidence about the probe until the probe is shown to be able to report something.

@@ -32,16 +32,27 @@ namespace System::Threading {
         /** Prevents instantiation — all members are static. */
         LazyInitializer() = delete;
 
-        /** Initializes target using its default constructor if it is null; returns the initialized value. */
+        /**
+         * @brief Initializes target using its default constructor if it is null; returns the initialized value.
+         *
+         * Ticket #1955 / SR-AUD-216, cause T-A. The guard used to be a plain `if (!target)`
+         * and the result a plain `*target` -- ordinary reads of the very object another
+         * caller publishes through `std::atomic_ref`'s compare-exchange. An ordinary read
+         * racing an atomic write is still a data race, and TSan reported it on both the guard
+         * and the return. Both now load through the same `std::atomic_ref` that performs the
+         * publication, which is the C++ spelling of the `Volatile.Read(ref target)` .NET's own
+         * `EnsureInitialized` opens with. No member exists to change, so there is no layout
+         * question here.
+         */
         template<typename T>
         static T& EnsureInitialized(T*& target) {
-            if (!target) {
+            std::atomic_ref<T*> ref(target);
+            if (ref.load(std::memory_order_acquire) == nullptr) {
                 T* candidate = new T();
-                std::atomic_ref<T*> ref(target);
                 T* expected = nullptr;
                 if (!ref.compare_exchange_strong(expected, candidate)) delete candidate;
             }
-            return *target;
+            return *ref.load(std::memory_order_acquire);
         }
 
         /**
@@ -67,15 +78,15 @@ namespace System::Threading {
          */
         template<typename T>
         static T& EnsureInitialized(T*& target, std::function<T*()> valueFactory) {
-            if (!target) {
+            std::atomic_ref<T*> ref(target);
+            if (ref.load(std::memory_order_acquire) == nullptr) {
                 if (!valueFactory) throw System::NullReferenceException();
                 T* candidate = valueFactory();
                 if (!candidate) throw System::InvalidOperationException("ValueFactory returned null.");
-                std::atomic_ref<T*> ref(target);
                 T* expected = nullptr;
                 if (!ref.compare_exchange_strong(expected, candidate)) delete candidate;
             }
-            return *target;
+            return *ref.load(std::memory_order_acquire);
         }
     };
 

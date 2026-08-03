@@ -38,7 +38,24 @@ namespace System::Threading {
      * completed successfully.
      */
     class Barrier {
-        intcs participantCount_;
+        // Ticket #1955 / SR-AUD-212, cause T-A. getParticipantCountProperty() read this
+        // outside mutex_ while AddParticipant()/RemoveParticipant() wrote it under the lock --
+        // TSan-confirmed undefined behaviour.
+        //
+        // The repair is an atomic field rather than a locking property, for two reasons.
+        // First, .NET does the same: Barrier.ParticipantCount reads the packed
+        // `_currentTotalCount` field directly, without taking the barrier's lock. Second, and
+        // decisively, taking mutex_ in this property would create a NEW self-deadlock: the
+        // post-phase action is invoked by FinishPhase() while it still holds mutex_, so a
+        // legal `barrier.getParticipantCountProperty()` inside that action would block on the
+        // lock its own caller holds. That is exactly SR-AUD-210 (cause T-E/2, approval-gated
+        // ticket #1957) -- which getCurrentPhaseNumberProperty() already suffers -- and #1955
+        // must not add a second instance of the defect a later ticket exists to remove.
+        //
+        // Writers keep writing under mutex_, so the compound invariants with remainingCount_
+        // are unaffected. sizeof/alignof(std::atomic<intcs>) == sizeof/alignof(intcs) == 4,
+        // so the field is layout-neutral (build-probe/1955_probe1_layout_{before,after}.log).
+        std::atomic<intcs> participantCount_;
         intcs remainingCount_;
         longcs phaseCount_ = 0;
         std::function<void(Barrier&)> postPhaseAction_;
@@ -46,7 +63,14 @@ namespace System::Threading {
         std::condition_variable cv_;
         std::exception_ptr lastPostPhaseException_;
         std::atomic<std::thread::id> actionCallerId_;
-        bool disposed_ = false;
+        // Ticket #1955 / cause T-A of docs/ThreadingNamespaceReviewPlan.md. This was an
+        // ordinary `bool`, written by Dispose() and read by the guard below with no
+        // synchronisation between them -- a data race, i.e. undefined behaviour, confirmed by
+        // ThreadSanitizer at audit time and again in
+        // build-probe/1955_probe1_shared_state_races.cpp. std::atomic<bool> is 1 byte and
+        // 1-byte aligned on every supported target, so the change is layout-neutral; measured
+        // in build-probe/1955_probe1_layout_{before,after}.log.
+        std::atomic<bool> disposed_{false};
 
         void ThrowIfCalledFromPostPhaseAction() const {
             if (actionCallerId_.load() == std::this_thread::get_id())
@@ -59,7 +83,8 @@ namespace System::Threading {
         // previously had no disposed_ flag at all -- Dispose() was a true no-op and every method
         // remained fully usable after disposal.
         void ThrowIfDisposed() const {
-            if (disposed_) throw System::ObjectDisposedException("Barrier");
+            if (disposed_.load(std::memory_order_acquire))
+                throw System::ObjectDisposedException("Barrier");
         }
 
     public:
@@ -72,7 +97,15 @@ namespace System::Threading {
         }
 
         /** Returns the total number of participants. */
-        [[nodiscard]] intcs  getParticipantCountProperty() const { return participantCount_; }
+        /**
+         * @brief Returns the total number of participants.
+         *
+         * Read without taking the barrier's lock, matching .NET's own unlocked read and
+         * keeping the property callable from inside a post-phase action (#1955, SR-AUD-212).
+         */
+        [[nodiscard]] intcs  getParticipantCountProperty() const {
+            return participantCount_.load(std::memory_order_acquire);
+        }
         /** Returns the current phase number. */
         [[nodiscard]] longcs getCurrentPhaseNumberProperty() const { std::unique_lock lock(mutex_); return phaseCount_; }
 
@@ -143,7 +176,7 @@ namespace System::Threading {
          */
         void Dispose() {
             ThrowIfCalledFromPostPhaseAction();
-            disposed_ = true;
+            disposed_.store(true, std::memory_order_release);
         }
 
     private:

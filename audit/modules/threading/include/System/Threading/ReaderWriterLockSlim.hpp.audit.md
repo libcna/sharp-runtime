@@ -120,3 +120,46 @@ Coverage: `ThreadingArgumentDomainTests.ReaderWriterLockSlim_*` — raw policies
 all report `NoRecursion`; the default, `NoRecursion` and `SupportsRecursion` constructors are
 unchanged, including `SupportsRecursion` still permitting matched recursive read acquisition.
 No signature, layout, vtable or exception-specification change.
+
+
+---
+
+## Remediation record — ticket #1955 (2026-08-03), SR-AUD-203 **race half only**
+
+SR-AUD-203 is **split by cause** and stays `confirmed` until both halves land.
+
+Cause **T-A** of `docs/ThreadingNamespaceReviewPlan.md`, "shared mutable state is observed
+outside its own mutex". Evidence: `build-probe/1955_probe1_shared_state_races.cpp` under
+`-fsanitize=thread`, logs `1955_probe1_tsan_before.log` (**13** data-race reports across
+seven scenarios, exit 66) and `1955_probe1_tsan_after.log` (**zero** reports, exit 0, every
+control value unchanged). Instrumentation was proved rather than assumed: 132 `__tsan_*`
+symbols in the sanitized binary. The layout gate passed — `sizeof` and `alignof` are
+byte-identical for all six affected types before and after
+(`1955_probe1_layout_before.log` / `1955_probe1_layout_after.log`), so no user approval was
+required, and the numbers are pinned by
+`ThreadingSharedStateTests.RepairedTypes_LayoutUnchanged` in
+`modules/threading/tests/System/Threading/ThreadingSharedStateTests.cpp`.
+
+**Race half — done.** `disposed_` is now `std::atomic<bool>`: `Dispose()` performs a release
+store, `throwIfDisposed()` an acquire load, so the flag every `TryEnter*` route consults is no
+longer an ordinary `bool` racing an ordinary write. Scenario `rwls.disposed_vs_entry` reported
+one race before and none after. `sizeof(ReaderWriterLockSlim)` 120 → 120, `alignof` 8 → 8.
+
+**Dispose-while-held half — still open, approval-gated ticket #1956** (cause T-G): `Dispose()`
+still succeeds while the calling thread owns a read, write or upgradeable mode, where .NET
+throws `SynchronizationLockException`. Making the flag race-free is a prerequisite for
+enforcing it, which is why the plan orders T-A before T-G, but it is not that enforcement.
+
+**SR-AUD-204 is untouched and remains `confirmed`** — the missing queued-writer state is cause
+T-E/2 and belongs to approval-gated ticket #1957.
+
+### A methodology correction worth keeping
+
+The first version of the probe used a 2000-iteration loop per thread and reported **zero**
+races for `ManualResetEventSlim` and `CountdownEvent` while reporting one for the
+structurally identical `ReaderWriterLockSlim`. The code was equally racy in all three; the
+probe was at fault. A writer loop of trivial stores completes before a reader that must set up
+a try/catch reaches its first call, so the two threads never overlap and a happens-before
+detector sees nothing. Rewriting the disposal scenarios as **1500 rounds of a fresh object
+with exactly one access per thread** made all seven reproduce. A "TSan reported nothing"
+result is evidence about the probe until the probe is shown to be able to report something.

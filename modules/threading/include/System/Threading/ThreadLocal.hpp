@@ -60,10 +60,20 @@ namespace System::Threading {
 
         std::function<T()> factory_;
         bool trackAllValues_ = false;
-        bool disposed_ = false;
+        // Ticket #1955 / cause T-A of docs/ThreadingNamespaceReviewPlan.md. This was an
+        // ordinary `bool`, written by Dispose() and read by the guard below with no
+        // synchronisation between them. Mixing synchronised and unsynchronised access to the
+        // same object is a data race and therefore undefined behaviour, and ThreadSanitizer
+        // confirmed it both at audit time and again in
+        // build-probe/1955_probe1_shared_state_races.cpp. std::atomic<bool> is 1 byte and
+        // 1-byte aligned on every supported target -- measured before and after in
+        // build-probe/1955_probe1_layout_{before,after}.log -- so the flag's type change is
+        // layout-neutral and the header stays consumer-compatible.
+        std::atomic<bool> disposed_{false};
 
         void ThrowIfDisposed() const {
-            if (disposed_) throw System::ObjectDisposedException("ThreadLocal`1");
+            if (disposed_.load(std::memory_order_acquire))
+                throw System::ObjectDisposedException("ThreadLocal`1");
         }
 
         // Rejects an *empty* std::function factory at construction, as .NET's
@@ -158,7 +168,7 @@ namespace System::Threading {
 
         /** Releases resources for the current thread's value. */
         void Dispose() override {
-            disposed_ = true;
+            disposed_.store(true, std::memory_order_release);
             storageMap().erase(id_);
         }
     };
