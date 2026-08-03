@@ -6655,3 +6655,48 @@ capacity-one behaviour were **replaced, not deleted**; each old concern still ha
 asserting the corrected contract. +12 tests (52 -> 64).
 
 **Index after #1968: 91 remediated / 273 confirmed / 364 total.**
+
+### #1971 -- SR-AUD-214 and SR-AUD-189 (cause T-H, the verified-compatible half of #1958 Group A)
+
+Both `confirmed -> remediated`. **#1958 remains blocked** and keeps its other six members.
+
+`docs/ThreadingNamespaceReviewPlan.md` §20.3 listed **three** members as compatible and needing
+no approval. That claim was verified independently by measurement before anything was split, and
+**it holds for two of the three**.
+
+**SR-AUD-215 was excluded and stays with #1958.** §20.3 attached its own caveat -- that
+`Capture()` always returns `nullptr` -- and treated it as a test problem. Measured, it is a
+reachability problem: `Capture()` returns null unconditionally, the default constructor is
+private (proved by a compile probe), and `CreateCopy()` is a non-static member needing an
+instance. There is no reachable way to obtain a non-null `ExecutionContext*`, so rejecting null
+would make `Run` throw for **every** call a consumer can write, including
+`Run(Capture(), callback, state)`, which works today. That is mandatory downstream migration with
+no working alternative, not a validation-only change; landing it needs a `Capture()` that returns
+a real context, which is an ownership and lifetime design. #1958's approval request (A) is
+re-worded accordingly, and two regressions pin the current contract so the exclusion is testable.
+
+**SR-AUD-214** reproduced exactly and is confirmed on the half it states only in passing: a
+reentrant write from inside the value-changed handler was overwritten by the delayed outer
+assignment. `setValueProperty` now commits before notifying; the equal-value no-op is untouched
+and separately pinned.
+
+**SR-AUD-189** is wider than the probe the report quotes -- `SetMinThreads(0,0)`,
+`SetMaxThreads(0,0)` and a maximum below the current minimum also all returned true. Every rule
+of the repair carries its provenance, since `/rv/tmp/runtime/src/libraries/` is absent here:
+measured (negative rejected; a valid pair stored and observable), .NET-documented (the min/max
+consistency rule; a maximum of at least 1), or reasoned (zero accepted as a minimum). .NET's
+further rule refusing a maximum below the processor count is deliberately **not** adopted --
+unverifiable here and machine-dependent, the same reasoning as #1952's `MaxWaitHandles`. Measured
+consequence recorded: on this four-core container `SetMinThreads(7,9)` now returns **false**
+because the default maximum is 8, where the audit's 16-core managed probe got `True`.
+
+`ThreadPool` is static-only, so the stored configuration lives in function-local statics behind
+one mutex and **no object layout exists to change**; §3.1 item 4's opportunistic `int -> intcs`
+correction is folded in and shown mangling-identical by `nm`.
+
+Concurrency, capability proved first: the AsyncLocal ordering scenario reported **8,000
+violations before, 0 after**; the ThreadPool scenario reported 0 in both runs, recorded honestly
+because setters that store nothing cannot break an invariant. TSan 0 data races in both runs;
+ASan + UBSan + LSan 0 reports. +16 tests (429 -> 445).
+
+**Index after #1971: 93 remediated / 271 confirmed / 364 total.**

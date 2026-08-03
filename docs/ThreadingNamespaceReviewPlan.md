@@ -1355,3 +1355,101 @@ approved as final.
 | **#1959** | borrowed raw pointers become owning handles | no | **yes** | no | documented contract + negative fixture (the #1899 precedent) |
 
 No implementation may begin on any of these until the corresponding question is answered.
+
+
+---
+
+## 21. The #1958 Group A split, and why it is a two-member group (ticket #1971, 2026-08-03)
+
+§20.3 recommended splitting #1958 and listed **three** members as *"compatible, no approval
+needed"*. Ticket **#1971** verified that claim independently, by measurement, before splitting
+anything (`build-probe/1971_probe1_group_a.cpp`). **It holds for two of the three.**
+
+| §20.3 Group A member | verdict | outcome |
+|---|---|---|
+| SR-AUD-214 -- `AsyncLocal<T>` notifies after it writes | compatible, confirmed | landed in **#1971** |
+| SR-AUD-189 -- `ThreadPool` setters validate and store | compatible, confirmed | landed in **#1971** |
+| SR-AUD-215 -- `ExecutionContext::Run(nullptr, …)` throws | **not compatible** | **stays in the blocked #1958** |
+
+### 21.1 Why SR-AUD-215 is not compatible
+
+§20.3 attached its own caveat -- *"the port's own `Capture()` always returns `nullptr`, so the
+local test that passes `nullptr` must be rewritten, and this must be checked before landing"* --
+and treated it as a test problem. Measured, it is a **reachability** problem:
+
+- `Capture()` returns `nullptr` unconditionally, by documented design;
+- the default constructor is **private**, proved by a compile probe
+  (`-DPROBE_TRY_CONSTRUCT=1` fails with *"'ExecutionContext::ExecutionContext()' is private
+  within this context"*);
+- `CreateCopy()` is a **non-static** member, so it needs an instance only `Capture()` could
+  supply.
+
+There is consequently **no reachable way for a consumer to obtain a non-null
+`ExecutionContext*`**. Rejecting a null context would make `Run` throw for *every* call that can
+be written, including `Run(Capture(), callback, state)`, which works today
+(`ec.run_with_capture_result=invoked`). §9's compatibility test is *"is there a working call site
+that stops working?"* — here every call site stops working, with no alternative to migrate to.
+
+The finding is real; the repair is not a validation change. It needs a `Capture()` that returns a
+real context, which is an ownership and lifetime design (who owns the pointer, when is it freed,
+what `CreateCopy` then means). **#1958's approval request (A) is therefore re-worded: (A) is
+satisfied for SR-AUD-214 and SR-AUD-189 only, and SR-AUD-215 joins the approval-gated
+remainder.** Groups B and C are untouched and unapproved.
+
+Two regressions pin the current contract so the exclusion is testable, not merely documented —
+one fails if `ExecutionContext` ever becomes publicly constructible, which would re-open the
+question.
+
+### 21.2 What #1971 measured for the two members it did land
+
+**SR-AUD-214.** Reproduced exactly (`callback_property=0` while `callback_argument=5`), and the
+report's second, sharper half is confirmed as well: a **reentrant** write from inside the handler
+was overwritten by the delayed outer assignment (a handler writing 99 left the value at 5).
+Repaired by committing before notifying; 99 now survives. The equal-value no-op is untouched and
+separately pinned, because reordering the commit past an early return is the obvious way to
+break it.
+
+**SR-AUD-189.** Wider than the probe the report quotes: besides `SetMinThreads(7,9)` storing
+nothing and `SetMinThreads(-1,-1)` returning true, `SetMinThreads(0,0)`, `SetMaxThreads(0,0)` and
+a maximum below the current minimum **all returned true**. Every rule of the repair carries its
+provenance, because `/rv/tmp/runtime/src/libraries/` is absent here — negative-rejected and
+valid-stored-and-observable are **measured** from the audit's own managed probe, the min/max
+consistency rule and maximum >= 1 are **.NET-documented**, and accepting zero as a minimum is
+**reasoned**. .NET's further rule refusing a maximum below the processor count is **deliberately
+not adopted**: unverifiable here, and it would make the port's observable answer depend on the
+core count of whatever machine runs it (the same reasoning as #1952's `MaxWaitHandles`).
+
+One measured consequence is worth stating rather than discovering later: on this four-core
+container the default maximum is 8, so `SetMinThreads(7, 9)` now returns **false**, where the
+audit's managed probe on a 16-core machine got `True` for the same call. Same rule; .NET's
+*default maximum* is machine-dependent too. The regressions set an explicit maximum first rather
+than relying on the default.
+
+### 21.3 §3.1 item 4's opportunistic `intcs` correction is done, and shown neutral
+
+All four `ThreadPool` configuration entry points moved from `int` to `intcs`. The claim that this
+is mangling-neutral is **measured**: `nm` on the built test binary reports
+`_ZN6System9Threading10ThreadPool13SetMinThreadsEii` and
+`…13GetMinThreadsERiS0_` after the change — `int` parameters, because `intcs` is `int32_t` is
+`int` here.
+
+### 21.4 Layout, ABI and sanitizers
+
+`ThreadPool` is a static-only class (`ThreadPool() = delete`) with no instances, so its stored
+configuration lives in function-local statics behind one shared mutex — a lock rather than
+atomics because each setter is a read-modify-write across both pairs. **No object layout exists
+to change**, and `AsyncLocal<T>`'s repair is the order of two statements. Nothing in #1971
+changed a signature (beyond the mangling-identical rename), a vtable, an exception specification
+or a component edge.
+
+Concurrency, capability proved first per §19.4: the AsyncLocal ordering scenario reported
+**8,000 violations against the pre-fix header — every one of 4 threads x 2,000 iterations — and
+0 after**. The ThreadPool configuration scenario reported 0 invariant violations after and,
+honestly recorded, **0 before as well**, because setters that store nothing cannot break an
+invariant; it is evidence about the new state, not a before/after discriminator. TSan: 0 data
+races in both runs, fully instrumented from source (18 `__tsan` symbols, no archive linked).
+ASan + UBSan + LSan over the surface probe: 0 reports.
+
+`SharpRuntimeTests_Threading` **429 -> 445** (+16), in a new translation unit
+`ThreadingPublicShapeTests.cpp`. **SR-AUD-214 and SR-AUD-189: `confirmed` -> `remediated`.**
+Cause T-H now has **six** open members, all in the blocked #1958.

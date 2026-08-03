@@ -66,14 +66,23 @@ namespace System::Threading {
          * C++ counterpart of .NET AsyncLocal<T>.Value setter, which is a complete no-op
          * (no mutation, no change notification) when the new value equals the previous one
          * (ExecutionContext.SetLocalValue: `if (previousValue == newValue) return;`).
+         *
+         * @note The new value is **committed before** the value-changed handler runs
+         * (ticket #1971, SR-AUD-214). .NET commits first too, so a handler that reads its own
+         * `AsyncLocal<T>`'s `Value` sees the value it is being told about; before this change the
+         * handler received `5` as its `CurrentValue` argument while `getValueProperty()` still
+         * answered `0`, which is a contradiction the handler could observe. Committing first also
+         * makes a **reentrant** write from inside the handler stick: it used to be silently
+         * overwritten by the outer assignment that ran afterwards (measured: a handler writing 99
+         * left the value at 5).
          */
         void setValueProperty(const T& v) {
             auto& map = storageMap();
             auto it = map.find(id_);
             T previous = (it == map.end()) ? T{} : it->second;
             if (previous == v) return;
-            if (valueChangedHandler_) valueChangedHandler_(AsyncLocalValueChangedArgs<T>(previous, v, false));
             map[id_] = v;
+            if (valueChangedHandler_) valueChangedHandler_(AsyncLocalValueChangedArgs<T>(previous, v, false));
         }
     };
 
