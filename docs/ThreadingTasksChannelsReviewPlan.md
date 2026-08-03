@@ -511,3 +511,63 @@ in every rejecting case, including `INTCS_MIN`. ASan + UBSan + LSan: **0 reports
 or edge change; graph stays 41 / 91.
 
 **SR-AUD-232: `confirmed` -> `remediated`.** Cause TC-B/1 is closed.
+
+---
+
+## 17. What #1967 measured, and one correction to §3 (2026-08-03)
+
+Ticket **#1967** implemented cause **TC-C** (SR-AUD-234). Evidence:
+`build-probe/1967_probe1_channel_readasync_closed.cpp` (19 cases) and the round-based
+concurrency probe `build-probe/1967_probe2_channel_tsan.cpp`.
+
+### 17.1 `WriteAsync` is a second site of the same defect -- §3's table is wrong on this
+
+§3's SR-AUD-234 row and the finding both say *"the sibling `WaitToReadAsync`/`WaitToWriteAsync`/
+`Completion` paths are correct"*, which is true, and imply the repair is confined to
+`ReadAsync`, which is not. Measured:
+
+| Path | error-completed, before | clean-completed, before |
+|---|---|---|
+| `ReadAsync` | `std::exception("boom")` | `ChannelClosedException` |
+| **`WriteAsync`** | **`std::exception("boom")`** | `ChannelClosedException` |
+| `WaitToReadAsync` / `WaitToWriteAsync` / `Completion` | `std::exception("boom")` *(correct)* | n/a |
+
+`WriteAsync` is `ReadAsync`'s mirror image and carries the same
+`if (!WaitToXAsync().getResultProperty()) throw ChannelClosedException();` shape; .NET routes
+both through `ChannelUtilities.GetInvalidCompletionValueTask`. Repairing one and not the other
+would leave the port self-inconsistent in the direction the finding is about. Absorbed as the
+same defect at a second site; **no new `SR-AUD-*` identifier**, numbering frozen at 364.
+
+### 17.2 Two contracts that had to be preserved deliberately
+
+- **A subclass's own `ChannelClosedException` is passed through**, not double-wrapped.
+  `ReadAsync`/`WriteAsync` are `virtual` and the wait methods are pure virtual, so a consumer
+  implementation may already report the API-specific type.
+- **Buffered items drain first.** `TryRead` runs before the wait, so an error-completed channel
+  that still holds items hands them over before reporting the closure. Measured before and after
+  (`errorclosed_but_buffered` returns 7 on FIFO and 3 on prioritized). Hoisting the completion
+  check would have broken it silently.
+
+### 17.3 §10's TSan requirement, met with the probe's capability proved first
+
+§10 requires every channel ticket to run its focused scenarios under TSan. Four scenarios x 400
+rounds on a fresh channel per round, completer released by a shared latch: one blocked reader,
+four blocked readers, three writers blocked on a full bounded channel, and a mixed
+`ReadAsync` + `WaitToReadAsync` pair on a prioritized channel.
+
+Following §19.4 of the predecessor plan -- *"a 'TSan reported nothing' result is evidence about
+the probe until the probe has been shown capable of reporting something"* -- the probe was run
+against the **pre-fix** header first: **3,600 wrong outcomes out of 3,600**. Against the repaired
+header: **0**. ThreadSanitizer itself reported **0 data races in both runs**, which is the right
+answer for an exception-contract defect and is only informative because the pre-fix run proves
+the interleaving was reached. Fully instrumented from source (21 `__tsan` symbols); no archive
+linked in. ASan + UBSan + LSan over the 19-case probe: 0 reports, outcomes identical to the plain
+run.
+
+### 17.4 Result
+
+`SharpRuntimeTests_Threading_Channels` **39 -> 52** (+13). `ChannelReader`'s
+`enable_shared_from_this` lifetime design -- §12 item 6's explicit exclusion -- is untouched. No
+signature, layout, vtable, `noexcept` or edge change; graph stays 41 / 91.
+
+**SR-AUD-234: `confirmed` -> `remediated`.** Cause TC-C is closed.

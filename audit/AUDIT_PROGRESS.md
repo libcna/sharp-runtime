@@ -6572,3 +6572,39 @@ ASan + UBSan + LSan 0 reports. +10 tests (208 -> 218). No signature, layout, vta
 change.
 
 **Index after #1966: 89 remediated / 275 confirmed / 364 total.**
+
+### #1967 -- SR-AUD-234 (cause TC-C)
+
+`confirmed -> remediated`. `ChannelReader<T>::ReadAsync` on an error-completed channel throws
+`ChannelClosedException` with the writer's exception retained as its inner exception, for both
+the FIFO and the prioritized shapes. `WaitToReadAsync`, `WaitToWriteAsync` and
+`getCompletionProperty()` keep exposing the cause unwrapped, which is .NET's contract for them
+and what makes the wrapper meaningful; buffered items are still handed over before the closure
+is reported.
+
+**One premise corrected, and it changes the finding's extent.** The report states that *"only
+ReadAsync loses its API-specific closed channel boundary"*. Measured, `ChannelWriter<T>::WriteAsync`
+has the identical defect from the identical code shape: a cleanly completed channel gave it a
+`ChannelClosedException`, an error-completed one let the raw producer error escape. .NET routes
+both through `ChannelUtilities.GetInvalidCompletionValueTask`. Repaired together as the same
+defect at a second site -- the same treatment SR-AUD-008 and SR-AUD-183 received -- with **no new
+`SR-AUD-*` identifier**; numbering stays frozen at 364.
+
+A `ChannelClosedException` raised by a consumer subclass's own `WaitToReadAsync`/`WaitToWriteAsync`
+is passed through rather than nested inside a second one.
+
+**Concurrency evidence, with the probe's capability proved first.** Four scenarios x 400 rounds
+on a fresh channel per round, the completing thread released by a shared latch: one blocked
+reader, four blocked readers, three writers blocked on a full bounded channel, and a mixed
+`ReadAsync` + `WaitToReadAsync` pair on a prioritized channel. Against the pre-fix header the
+probe reported **3,600 wrong outcomes out of 3,600**; against the repaired header, **0**.
+ThreadSanitizer reported **0 data races in both runs** -- the correct result for an
+exception-contract defect -- and the pre-fix run is what makes that zero evidence about the code
+rather than about the probe, per `docs/ThreadingNamespaceReviewPlan.md` §19.4. Every translation
+unit on the racing path was compiled from source with `-fsanitize=thread`; no archive was linked
+in. ASan + UBSan + LSan: 0 reports.
+
++13 tests (39 -> 52). No signature, layout, vtable or edge change; `ChannelReader`'s
+`enable_shared_from_this` lifetime design is untouched.
+
+**Index after #1967: 90 remediated / 274 confirmed / 364 total.**

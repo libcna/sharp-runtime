@@ -66,6 +66,22 @@ namespace System::Threading::Channels {
          * still be executing after this call returns; it keeps `this` alive via
          * `shared_from_this()` for its own duration, so it's safe to call even if every other
          * reference to this reader is dropped immediately after issuing the call.
+         *
+         * @throws ChannelClosedException when the channel is closed and drained. If the writer
+         * completed the channel **with an error**, that error is retained as the
+         * `ChannelClosedException`'s inner exception rather than being rethrown in its place
+         * (ticket #1967, SR-AUD-234), matching .NET's `ChannelReader<T>.ReadAsync`, which routes
+         * a closed channel through `ChannelUtilities.GetInvalidCompletionValueTask`. The caller
+         * can therefore tell "the channel is closed" from "the producer failed" while still
+         * reaching the cause.
+         *
+         * @note `WaitToReadAsync`, `WaitToWriteAsync` and `getCompletionProperty()` deliberately
+         * keep exposing the completion error **unwrapped**, which is also what .NET does: those
+         * are the paths whose whole purpose is to surface the producer's own failure.
+         *
+         * @note Buffered items are still drained first: `TryRead` runs before the wait, so an
+         * error-completed channel that still holds items hands them over before reporting the
+         * closure — measured, and matching .NET.
          */
         virtual System::Threading::Tasks::TaskT<T> ReadAsync() {
             auto self = this->shared_from_this();
@@ -73,7 +89,17 @@ namespace System::Threading::Channels {
                 T item{};
                 while (true) {
                     if (self->TryRead(item)) return item;
-                    if (!self->WaitToReadAsync().getResultProperty()) {
+                    bool hasItem;
+                    try {
+                        hasItem = self->WaitToReadAsync().getResultProperty();
+                    } catch (const ChannelClosedException&) {
+                        // A subclass that already reports the API-specific type is passed
+                        // through rather than double-wrapped.
+                        throw;
+                    } catch (...) {
+                        throw ChannelClosedException(std::current_exception());
+                    }
+                    if (!hasItem) {
                         throw ChannelClosedException();
                     }
                 }
@@ -122,12 +148,34 @@ namespace System::Threading::Channels {
          * still be executing after this call returns; it keeps `this` alive via
          * `shared_from_this()` for its own duration, so it's safe to call even if every other
          * reference to this writer is dropped immediately after issuing the call.
+         *
+         * @throws ChannelClosedException when the channel will accept no further writes. If the
+         * channel was completed **with an error**, that error is retained as the inner exception
+         * rather than being rethrown in its place.
+         *
+         * @note This is the second site of SR-AUD-234, which the finding names only for
+         * `ReadAsync`. Measured before ticket #1967
+         * (`build-probe/1967_probe1_channel_readasync_closed.log`): a cleanly completed channel
+         * gave `WriteAsync` a `ChannelClosedException`, but an error-completed one let the raw
+         * producer error escape — the identical divergence, at the writer's mirror-image entry
+         * point, and .NET routes both through the same
+         * `ChannelUtilities.GetInvalidCompletionValueTask`. Repaired together because it is the
+         * same defect at a second site, not a separate one; **no new `SR-AUD-*` identifier is
+         * issued** and audit numbering stays frozen at 364.
          */
         virtual System::Threading::Tasks::Task WriteAsync(T item) {
             auto self = this->shared_from_this();
             return System::Threading::Tasks::Task([self, item = std::move(item)]() mutable {
                 while (!self->TryWrite(item)) {
-                    if (!self->WaitToWriteAsync().getResultProperty()) {
+                    bool hasSpace;
+                    try {
+                        hasSpace = self->WaitToWriteAsync().getResultProperty();
+                    } catch (const ChannelClosedException&) {
+                        throw;
+                    } catch (...) {
+                        throw ChannelClosedException(std::current_exception());
+                    }
+                    if (!hasSpace) {
                         throw ChannelClosedException();
                     }
                 }

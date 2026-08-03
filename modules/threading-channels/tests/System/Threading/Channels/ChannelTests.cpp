@@ -5,9 +5,13 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <vector>
+#include "System/Exception.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Threading/Channels/Channel.hpp"
 #include "System/Threading/Channels/ChannelClosedException.hpp"
 
@@ -572,4 +576,167 @@ TEST(PrioritizedChannelTests, ConcurrentMultiWriterMultiReader_NoLostOrDuplicate
         EXPECT_EQ(seenPerValue[static_cast<size_t>(v)], 1) << "value " << v << " seen "
             << seenPerValue[static_cast<size_t>(v)] << " times (expected exactly once)";
     }
+}
+
+// =============================================================================================
+// Ticket #1967 (SR-AUD-234, cause TC-C) -- the closed-channel exception boundary
+//
+// When a writer completes a channel WITH an error, ReadAsync used to rethrow that error
+// directly. .NET routes a closed channel through ChannelUtilities.GetInvalidCompletionValueTask,
+// which produces a ChannelClosedException whose InnerException is the supplied error, so a
+// caller can tell "the channel is closed" from "the producer failed" while still reaching the
+// cause. WaitToReadAsync, WaitToWriteAsync and Completion correctly expose the error unwrapped
+// and must keep doing so.
+//
+// Correction to the finding, measured rather than assumed: WriteAsync had the IDENTICAL defect,
+// which SR-AUD-234 does not mention. Repaired with it, as the same defect at a second site; no
+// new SR-AUD identifier was issued.
+// =============================================================================================
+
+namespace {
+
+    std::exception_ptr makeBoom() { return std::make_exception_ptr(std::runtime_error("boom")); }
+
+    // Asserts the outer type is ChannelClosedException and its inner exception is the writer's
+    // own error, with its message intact.
+    void expectClosedWithCause(const std::function<void()>& call) {
+        bool threw = false;
+        try {
+            call();
+        } catch (const ChannelClosedException& e) {
+            threw = true;
+            EXPECT_EQ(std::string(e.getMessageProperty()), "The channel has been closed.");
+            std::exception_ptr inner = e.getInnerExceptionProperty();
+            ASSERT_TRUE(static_cast<bool>(inner)) << "the producer's error was not retained";
+            try {
+                std::rethrow_exception(inner);
+            } catch (const std::runtime_error& cause) {
+                EXPECT_STREQ(cause.what(), "boom");
+            } catch (...) {
+                FAIL() << "inner exception is not the writer's original error";
+            }
+        }
+        EXPECT_TRUE(threw) << "expected ChannelClosedException";
+    }
+
+} // namespace
+
+TEST(ChannelClosedBoundaryTests, ReadAsync_ErrorCompleted_ThrowsChannelClosedWithCause) {
+    auto channel = Channel<int>::CreateUnbounded();
+    channel.Writer->Complete(makeBoom());
+    expectClosedWithCause([&] { (void)channel.Reader->ReadAsync().getResultProperty(); });
+}
+
+TEST(ChannelClosedBoundaryTests, ReadAsync_ErrorCompletedBounded_ThrowsChannelClosedWithCause) {
+    auto channel = Channel<int>::CreateBounded(4);
+    channel.Writer->Complete(makeBoom());
+    expectClosedWithCause([&] { (void)channel.Reader->ReadAsync().getResultProperty(); });
+}
+
+TEST(PrioritizedChannelClosedBoundaryTests, ReadAsync_ErrorCompleted_ThrowsChannelClosedWithCause) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    channel.Writer->Complete(makeBoom());
+    expectClosedWithCause([&] { (void)channel.Reader->ReadAsync().getResultProperty(); });
+}
+
+// The writer's mirror-image entry point -- the site the finding does not name.
+TEST(ChannelClosedBoundaryTests, WriteAsync_ErrorCompleted_ThrowsChannelClosedWithCause) {
+    auto channel = Channel<int>::CreateUnbounded();
+    channel.Writer->Complete(makeBoom());
+    expectClosedWithCause([&] { channel.Writer->WriteAsync(1).Wait(); });
+}
+
+TEST(PrioritizedChannelClosedBoundaryTests, WriteAsync_ErrorCompleted_ThrowsChannelClosedWithCause) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    channel.Writer->Complete(makeBoom());
+    expectClosedWithCause([&] { channel.Writer->WriteAsync(1).Wait(); });
+}
+
+// The three sibling paths must keep exposing the cause UNWRAPPED -- that is .NET's contract for
+// them, and it is what makes the wrapper meaningful on ReadAsync/WriteAsync.
+TEST(ChannelClosedBoundaryTests, SiblingPaths_StillExposeTheCauseUnwrapped) {
+    auto channel = Channel<int>::CreateUnbounded();
+    channel.Writer->Complete(makeBoom());
+    EXPECT_THROW((void)channel.Reader->WaitToReadAsync().getResultProperty(), std::runtime_error);
+    EXPECT_THROW((void)channel.Writer->WaitToWriteAsync().getResultProperty(), std::runtime_error);
+    EXPECT_THROW(channel.Reader->getCompletionProperty().Wait(), std::runtime_error);
+}
+
+TEST(PrioritizedChannelClosedBoundaryTests, SiblingPaths_StillExposeTheCauseUnwrapped) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    channel.Writer->Complete(makeBoom());
+    EXPECT_THROW((void)channel.Reader->WaitToReadAsync().getResultProperty(), std::runtime_error);
+    EXPECT_THROW((void)channel.Writer->WaitToWriteAsync().getResultProperty(), std::runtime_error);
+    EXPECT_THROW(channel.Reader->getCompletionProperty().Wait(), std::runtime_error);
+}
+
+// A CLEAN completion keeps the plain ChannelClosedException with no inner exception.
+TEST(ChannelClosedBoundaryTests, CleanCompletion_ThrowsChannelClosedWithoutCause) {
+    auto channel = Channel<int>::CreateUnbounded();
+    channel.Writer->Complete();
+    try {
+        (void)channel.Reader->ReadAsync().getResultProperty();
+        FAIL() << "expected ChannelClosedException";
+    } catch (const ChannelClosedException& e) {
+        EXPECT_FALSE(static_cast<bool>(e.getInnerExceptionProperty()));
+    }
+    try {
+        channel.Writer->WriteAsync(1).Wait();
+        FAIL() << "expected ChannelClosedException";
+    } catch (const ChannelClosedException& e) {
+        EXPECT_FALSE(static_cast<bool>(e.getInnerExceptionProperty()));
+    }
+}
+
+// Buffered items are handed over BEFORE the closure is reported, on both channel shapes.
+TEST(ChannelClosedBoundaryTests, ErrorCompleted_StillDrainsBufferedItemsFirst) {
+    auto channel = Channel<int>::CreateUnbounded();
+    EXPECT_TRUE(channel.Writer->TryWrite(7));
+    channel.Writer->Complete(makeBoom());
+    EXPECT_EQ(channel.Reader->ReadAsync().getResultProperty(), 7);
+    expectClosedWithCause([&] { (void)channel.Reader->ReadAsync().getResultProperty(); });
+}
+
+TEST(PrioritizedChannelClosedBoundaryTests, ErrorCompleted_StillDrainsBufferedItemsFirst) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    EXPECT_TRUE(channel.Writer->TryWrite(3));
+    channel.Writer->Complete(makeBoom());
+    EXPECT_EQ(channel.Reader->ReadAsync().getResultProperty(), 3);
+    expectClosedWithCause([&] { (void)channel.Reader->ReadAsync().getResultProperty(); });
+}
+
+// A still-open channel is untouched, and so are the synchronous try-methods.
+TEST(ChannelClosedBoundaryTests, OpenChannelAndTryMethods_AreUnchanged) {
+    auto open = Channel<int>::CreateUnbounded();
+    EXPECT_TRUE(open.Writer->TryWrite(42));
+    EXPECT_EQ(open.Reader->ReadAsync().getResultProperty(), 42);
+
+    auto closed = Channel<int>::CreateUnbounded();
+    closed.Writer->Complete(makeBoom());
+    EXPECT_FALSE(closed.Writer->TryWrite(1));
+    int value = 0;
+    EXPECT_FALSE(closed.Reader->TryRead(value));
+}
+
+// ChannelClosedException stays an InvalidOperationException, as .NET's does, so existing
+// handlers keep working.
+TEST(ChannelClosedBoundaryTests, WrappedException_KeepsItsHierarchy) {
+    auto channel = Channel<int>::CreateUnbounded();
+    channel.Writer->Complete(makeBoom());
+    const auto read = [&] { (void)channel.Reader->ReadAsync().getResultProperty(); };
+    EXPECT_THROW(read(), ChannelClosedException);
+    EXPECT_THROW(read(), System::InvalidOperationException);
+    EXPECT_THROW(read(), System::Exception);
+}
+
+// A reader blocked BEFORE the error completion arrives takes the same path -- deterministic
+// hand-off, no sleep-based timing.
+TEST(ChannelClosedBoundaryTests, BlockedReader_ErrorCompletedWhileWaiting_ThrowsChannelClosedWithCause) {
+    auto channel = Channel<int>::CreateUnbounded();
+    std::atomic<bool> readerIssued{false};
+    auto readTask = channel.Reader->ReadAsync();
+    readerIssued.store(true);
+    while (!readerIssued.load()) { }
+    channel.Writer->Complete(makeBoom());
+    expectClosedWithCause([&] { (void)readTask.getResultProperty(); });
 }
