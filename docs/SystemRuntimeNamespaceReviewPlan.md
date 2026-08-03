@@ -77,7 +77,7 @@ deviations."* Measured against the index, that is **wrong**: of the 21 open find
 `Serialization/SerializationInfo.hpp` nor `Serialization/StreamingContext.hpp` carries
 a single finding. The three highest-severity findings are POSIX signal-handling
 defects, which no permanent deviation covers. The historical §1 text is retained; this
-correction is appended to it in §21 of that document.
+correction is appended to it as §22 of that document.
 
 ---
 
@@ -317,7 +317,7 @@ headers which do. §5 R-L splits the finding accordingly.
 
 ### 4.8 `docs/ThreadingNamespaceReviewPlan.md` §1's dismissal of this namespace
 
-Corrected in §1 above and appended to that document as §21.
+Corrected in §1 above and appended to that document as §22.
 
 ### 4.9 One handoff wording correction, carried forward from the previous batch
 
@@ -858,3 +858,87 @@ pinned by three control tests (the moved-*to* instance still rethrows, a copy do
 empty its original, and `Throw()` is repeatable).
 
 `SharpRuntimeTests_Runtime` **126 → 136** (+10), all passing.
+
+---
+
+## 19. What #1974 measured (2026-08-03) — cause R-B
+
+**SR-AUD-172: `confirmed` → `remediated`.** Cause R-B is closed.
+
+### 19.1 The repair and the before/after
+
+`ensureWatcherStarted()` now sets `O_NONBLOCK` on `selfPipe_[1]` via `fcntl`, and rolls
+the pipe back and throws `System::IO::IOException` if that fails. The **read end is
+deliberately left blocking** — `watcherLoop()`'s `read()` is how the watcher parks, and
+making it non-blocking would turn it into a spin loop. `onNativeSignal`'s comment, which
+asserted an `EAGAIN` that only a non-blocking descriptor can produce, is now true and
+says why.
+
+| | before | after |
+|---|---|---|
+| flood past the pipe capacity, watcher parked | `passed_pipe_capacity` then `died_signal_14` (SIGALRM) | `flood_completed=200000`, `saturation_child=exit_0` |
+
+`build-probe/1972_probe2_before.log` → `build-probe/1974_probe2_after.log`.
+
+The structural control line `plain_pipe read_O_NONBLOCK=0 write_O_NONBLOCK=0` is
+**unchanged on purpose**: it replicates a bare `pipe()` call and is what shows the extra
+`fcntl` is necessary rather than redundant.
+
+### 19.2 Sanitizers, capability proved first
+
+| Sanitizer | Result | Instrumentation |
+|---|---|---|
+| ASan + UBSan + LSan | **0 reports** over the full probe including the 200,000-delivery flood | 33 sanitizer symbols vs **0** plain; `ensureWatcherStarted` present in the instrumented image, so the changed body was compiled **from source**, not linked from `build/libsharp_runtime_runtime.a` |
+| **TSan** | **0 data races**, exit 0, over 100,000 deliveries past the pipe capacity | 30 `__tsan` symbols vs **0** plain, also from source |
+
+**Recorded honestly as a non-discriminator:** TSan reported 0 both before and after, and
+it always would have — the defect is a **liveness** failure (a blocking `write` inside a
+signal handler), and TSan reports data races, not hangs. Its value here is the opposite
+direction: it shows the repair introduces no race between the handler's write and the
+watcher's read across 100,000 interleavings. Both harnesses were proved capable against
+deliberate control defects compiled with identical flags — 2 reports from the
+ASan/UBSan/LSan control, 1 data race from the TSan control.
+
+### 19.3 The regression, and why it cannot wedge the suite
+
+`PosixSignalTests.SignalFlood_PastPipeCapacity_DoesNotBlockTheDeliveringThread` floods
+200,000 deliveries with the watcher parked inside a callback. Three properties make it
+safe to keep permanently:
+
+1. the flood runs on a **worker** thread, because `raise()` delivers to the *calling*
+   thread — a regression blocks the worker, not the test's main thread;
+2. releasing the parked watcher **drains the pipe**, which unblocks a regressed write,
+   so the worker is always joinable and no stuck thread is left behind;
+3. the wait for the watcher to park **asserts**, so §4.4's false negative — a probe that
+   silently proves nothing because no watcher exists — fails loudly instead.
+
+A companion test pins that coalescing is unaffected: 1,000 rapid deliveries still
+produce an observed callback. `SharpRuntimeTests_Runtime` **136 → 138**.
+
+### 19.4 One separate defect found while writing that regression — ticket #1986
+
+`dispatchSignal()` copies matching entries — **including each `std::function` handler** —
+into a local snapshot under `registryMutex_`, releases the mutex, and only then invokes
+them. `Dispose()` takes the same mutex and erases the entry. So a dispatch that has
+already taken its snapshot **invokes its copied handler after `Dispose()` has returned
+and after the `PosixSignalRegistration` object has been destroyed**, and a handler
+capturing caller stack state by reference — the natural way to write one, and what every
+existing test does — then touches a dead frame.
+
+`PosixSignalRegistration.hpp.audit.md` hints at this without issuing a finding: *"the
+sleep-only Dispose checks have no proof that a late callback cannot run"*. It is a
+**lifetime** defect, not a timing one; the sleeps only make it unlikely.
+
+It is **not** folded into #1974 — the two are independent, and #1974's regression
+sidesteps it by putting its shared state at namespace scope rather than on the test
+stack. Tracked as inactive ticket **#1986**. **No `SR-AUD-*` identifier was issued**;
+numbering stays frozen at **364**.
+
+### 19.5 Consequences
+
+No public signature, object layout, vtable, `noexcept` specification, mangled symbol or
+component edge changed — the entire repair is inside an anonymous namespace in
+`PosixSignalRegistration.cpp`. One new failure mode is added and documented: if `fcntl`
+cannot set `O_NONBLOCK`, `Create` throws `System::IO::IOException` after closing both
+descriptors, rather than proceeding with a pipe that can hang. `O_CLOEXEC` is
+deliberately **not** added here (§15, ticket #1985).

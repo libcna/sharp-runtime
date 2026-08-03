@@ -13,10 +13,12 @@
 #else
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <mutex>
 #include <thread>
+#include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
 #include <vector>
@@ -68,9 +70,13 @@ namespace {
     void onNativeSignal(int signo) {
         if (signo >= 0 && signo < kMaxSignalNumber) pending_[signo] = 1;
         char byte = 0;
-        // write() to a pipe is async-signal-safe; ignore errors (EAGAIN on a full pipe just means
-        // the watcher thread hasn't drained a previous wakeup yet, which is fine -- pending_ already
-        // recorded this delivery).
+        // write() to a pipe is async-signal-safe; ignore errors. EAGAIN on a full pipe just means
+        // the watcher thread hasn't drained a previous wakeup yet, which is fine -- pending_ above
+        // already recorded this delivery, so the dropped byte carries no information the watcher
+        // does not already have. This is only true because ensureWatcherStarted() makes the write
+        // end O_NONBLOCK; on a blocking descriptor write() would not return EAGAIN at all, it would
+        // BLOCK here, inside a raw signal handler, on whichever thread the OS chose for delivery
+        // (ticket #1974 / SR-AUD-172).
         ssize_t ignored = ::write(selfPipe_[1], &byte, 1);
         (void)ignored;
     }
@@ -128,6 +134,22 @@ namespace {
         if (watcherRunning_.load()) return;
         if (::pipe(selfPipe_) != 0) {
             throw System::IO::IOException("Failed to initialize POSIX signal handling (pipe() failed).");
+        }
+        // The WRITE end must be non-blocking: onNativeSignal() runs inside a raw signal handler,
+        // and a blocking write() there hangs the delivering thread as soon as the finite pipe
+        // buffer fills -- deadlocking the process if that thread holds a lock the watcher or a
+        // handler needs. Losing the byte is harmless because pending_[signo] is already set.
+        // The READ end stays BLOCKING on purpose: watcherLoop()'s read() is how the watcher
+        // parks, and making it non-blocking would turn it into a spin loop.
+        int writeFlags = ::fcntl(selfPipe_[1], F_GETFL, 0);
+        if (writeFlags == -1 || ::fcntl(selfPipe_[1], F_SETFL, writeFlags | O_NONBLOCK) != 0) {
+            int savedErrno = errno;
+            ::close(selfPipe_[0]);
+            ::close(selfPipe_[1]);
+            selfPipe_[0] = selfPipe_[1] = -1;
+            errno = savedErrno;
+            throw System::IO::IOException(
+                "Failed to initialize POSIX signal handling (could not make the self-pipe non-blocking).");
         }
         watcherRunning_.store(true);
         watcherThread_ = std::thread(watcherLoop);

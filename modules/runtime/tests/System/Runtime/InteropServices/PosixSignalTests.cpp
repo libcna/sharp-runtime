@@ -127,3 +127,105 @@ TEST(PosixSignalContextTests, SetCancelProperty_RoundTrips) {
     ctx.setCancelProperty(true);
     EXPECT_TRUE(ctx.getCancelProperty());
 }
+
+// ---------------------------------------------------------------------------------------
+// Ticket #1974 / SR-AUD-172 (cause R-B of docs/SystemRuntimeNamespaceReviewPlan.md).
+//
+// Before the repair the self-pipe was created with a plain pipe(), so BOTH ends were
+// blocking. onNativeSignal() writes one byte per delivery from inside a raw signal
+// handler; once the watcher stops draining and the finite pipe buffer fills, that write
+// blocks *inside the handler*, on whichever thread the OS chose for delivery. Measured in
+// build-probe/1972_probe2_before.log: the reproduction child passed the pipe capacity and
+// then died of SIGALRM.
+//
+// The shared state lives at namespace scope rather than on the test's stack on purpose: a
+// handler copied into dispatchSignal()'s snapshot can still be invoked after Dispose()
+// returns, so a handler capturing stack locals is a lifetime hazard independent of what
+// this test measures (recorded separately as ticket #1986).
+// ---------------------------------------------------------------------------------------
+namespace {
+    std::atomic<bool> floodWatcherParked{false};
+    std::atomic<bool> floodWatcherRelease{false};
+    std::atomic<bool> floodFinished{false};
+    std::atomic<long> floodDelivered{0};
+
+    // Linux's default pipe capacity is 65536 bytes and one byte is written per delivery, so
+    // this is comfortably past the point at which a blocking write end would wedge.
+    constexpr long kFloodDeliveries = 200000;
+}
+
+TEST(PosixSignalTests, SignalFlood_PastPipeCapacity_DoesNotBlockTheDeliveringThread) {
+    floodWatcherParked.store(false);
+    floodWatcherRelease.store(false);
+    floodFinished.store(false);
+    floodDelivered.store(0);
+
+    auto reg = PosixSignalRegistration::Create(PosixSignal::Sigwinch, [](PosixSignalContext& ctx) {
+        ctx.setCancelProperty(true);
+        // Park the watcher inside the callback so nothing drains the self-pipe. Only the
+        // first invocation parks; later ones return at once so teardown cannot deadlock.
+        if (!floodWatcherParked.exchange(true)) {
+            while (!floodWatcherRelease.load())
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+
+    kill(getpid(), SIGWINCH);
+    {
+        auto start = std::chrono::steady_clock::now();
+        while (!floodWatcherParked.load()) {
+            ASSERT_LT(std::chrono::duration_cast<std::chrono::seconds>(
+                          std::chrono::steady_clock::now() - start).count(), 5)
+                << "the watcher never entered the callback, so this test would prove nothing "
+                   "about the self-pipe -- see review plan §4.4";
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+
+    // raise() delivers to the CALLING thread, so a regression blocks this worker rather than
+    // the test's main thread. That is what lets the assertion below fail instead of wedging
+    // the whole executable.
+    std::thread flood([] {
+        for (long i = 0; i < kFloodDeliveries; ++i) {
+            raise(SIGWINCH);
+            floodDelivered.fetch_add(1);
+        }
+        floodFinished.store(true);
+    });
+
+    bool finished = false;
+    {
+        auto start = std::chrono::steady_clock::now();
+        while (!(finished = floodFinished.load())) {
+            if (std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::steady_clock::now() - start).count() > 20) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
+
+    // Releasing the watcher drains the pipe, which unblocks a regressed write, so the worker
+    // is always joinable and this test never leaves a stuck thread behind.
+    floodWatcherRelease.store(true);
+    flood.join();
+
+    EXPECT_TRUE(finished)
+        << "the delivering thread blocked inside the raw signal handler after "
+        << floodDelivered.load() << " of " << kFloodDeliveries
+        << " deliveries: the self-pipe write end is blocking again (SR-AUD-172)";
+    EXPECT_EQ(floodDelivered.load(), kFloodDeliveries);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+}
+
+TEST(PosixSignalTests, SignalDelivery_StillWorksAfterAFlood) {
+    // The dropped bytes must cost nothing: pending_ is a per-signal flag already set before
+    // the write, so coalescing is the designed behaviour and delivery must still be observed.
+    std::atomic<int> fired{0};
+    auto reg = PosixSignalRegistration::Create(PosixSignal::Sigwinch, [&](PosixSignalContext& ctx) {
+        ctx.setCancelProperty(true);
+        fired++;
+    });
+    for (int i = 0; i < 1000; ++i) raise(SIGWINCH);
+    EXPECT_TRUE(waitFor(fired, 1, 5000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+}
