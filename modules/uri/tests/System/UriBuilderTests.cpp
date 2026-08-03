@@ -242,3 +242,149 @@ TEST(UriBuilderTest, CopiedUserInfo_FromUriOverload_SplitsToo) {
     EXPECT_EQ(b.getUserNameProperty(), "user");
     EXPECT_EQ(b.getPasswordProperty(), "pass");
 }
+
+// ---------------------------------------------------------------------------
+// Equals / GetHashCode consistency — ticket #2004 (post-audit defect, no SR-AUD identifier,
+// recorded in docs/SystemUriNamespaceReviewPlan.md §4.5 and §27).
+//
+// Equals() compares the rendered strings and never parses; GetHashCode() used to build a
+// whole Uri from the same string purely to hash it. For any builder whose rendering is not a
+// parseable URI the two disagreed at the worst possible place — b.Equals(b) returned true
+// while b.GetHashCode() threw, so an object that compared equal to itself had no obtainable
+// hash. The repair hashes the rendered string directly. It is value-identical wherever the
+// old code returned at all, because Uri::parse assigns absoluteUri_ = uriString on every
+// accepted branch and Uri::GetHashCode hashes exactly that.
+//
+// This closes ONLY the internal asymmetry. Identity is still raw rendered text: a
+// case-differing or default-port-differing pair is still unequal, which is SR-AUD-142 /
+// SR-AUD-140 and stays approval-gated as ticket #1995. The deliberately-unequal pairs below
+// are pinned so that landing #1995 is a visible change rather than a silent one.
+// ---------------------------------------------------------------------------
+
+namespace {
+    System::intcs hashOf(const UriBuilder& b) { return b.GetHashCode(); }
+
+    // a.Equals(b) => hash(a) == hash(b), asserted for every shape the type can hold.
+    void expectEqualsImpliesEqualHash(const UriBuilder& a, const UriBuilder& b,
+                                      const char* what) {
+        if (a.Equals(b)) {
+            EXPECT_EQ(hashOf(a), hashOf(b)) << "equal builders must hash equally: " << what;
+        }
+    }
+}
+
+TEST(UriBuilderTest, HashIsObtainableWhereverEqualsSucceeds_MalformedPort) {
+    UriBuilder b;
+    b.setHostProperty("h:abc");
+    ASSERT_EQ(b.ToString(), "http://h:abc/");
+    EXPECT_THROW(b.getUriProperty(), UriFormatException); // the string is still unparseable
+    EXPECT_TRUE(b.Equals(b));
+    EXPECT_NO_THROW((void)b.GetHashCode());
+    expectEqualsImpliesEqualHash(b, b, "malformed port");
+}
+
+TEST(UriBuilderTest, HashIsObtainableWhereverEqualsSucceeds_OtherUnparseableRenderings) {
+    // The three remaining measured routes: an out-of-range port, an unterminated IP literal
+    // (#1991) and an empty host (#2000). Each renders a string Uri rejects.
+    const char* hosts[] = {"h:99999", "[::1", ""};
+    for (const char* host : hosts) {
+        UriBuilder b;
+        b.setHostProperty(host);
+        EXPECT_THROW(b.getUriProperty(), UriFormatException) << host;
+        EXPECT_TRUE(b.Equals(b)) << host;
+        EXPECT_NO_THROW((void)b.GetHashCode()) << host;
+        UriBuilder same;
+        same.setHostProperty(host);
+        EXPECT_TRUE(b.Equals(same)) << host;
+        EXPECT_EQ(b.GetHashCode(), same.GetHashCode()) << host;
+    }
+}
+
+TEST(UriBuilderTest, HashIsValueIdenticalWhereTheOldRouteSucceeded) {
+    // The compatibility claim, asserted rather than argued: for every builder whose
+    // rendering parses, hashing the string and hashing the built Uri give the same number.
+    UriBuilder shapes[6];
+    shapes[0].setHostProperty("example.com");
+    shapes[1].setHostProperty("example.com"); shapes[1].setPortProperty(8080);
+    shapes[2].setHostProperty("example.com"); shapes[2].setUserNameProperty("u");
+                                              shapes[2].setPasswordProperty("p");
+    shapes[3].setHostProperty("example.com"); shapes[3].setQueryProperty("a=1");
+    shapes[4].setHostProperty("example.com"); shapes[4].setFragmentProperty("f");
+    shapes[5].setHostProperty("[::1]");       shapes[5].setPortProperty(443);
+    for (const UriBuilder& b : shapes)
+        EXPECT_EQ(b.GetHashCode(), b.getUriProperty().GetHashCode()) << b.ToString();
+}
+
+TEST(UriBuilderTest, EqualsAndGetHashCodeAreTotalOnTheSameSet) {
+    // The single remaining condition under which either operation fails is ToString()
+    // itself failing, and then BOTH fail with the same exception — no asymmetry survives.
+    UriBuilder b;
+    b.setPasswordProperty("secret"); // user name empty, password not
+    EXPECT_THROW(b.ToString(), UriFormatException);
+    EXPECT_THROW((void)b.Equals(b), UriFormatException);
+    EXPECT_THROW((void)b.GetHashCode(), UriFormatException);
+}
+
+TEST(UriBuilderTest, EqualsImpliesEqualHashAcrossEveryEqualityClass) {
+    UriBuilder plain;      plain.setHostProperty("example.com");
+    UriBuilder withPort;   withPort.setHostProperty("example.com");  withPort.setPortProperty(8080);
+    UriBuilder withCreds;  withCreds.setHostProperty("example.com"); withCreds.setUserNameProperty("u");
+                           withCreds.setPasswordProperty("p");
+    UriBuilder withQuery;  withQuery.setHostProperty("example.com"); withQuery.setQueryProperty("a=1");
+    UriBuilder withFrag;   withFrag.setHostProperty("example.com");  withFrag.setFragmentProperty("f");
+    UriBuilder emptyQuery; emptyQuery.setHostProperty("example.com");emptyQuery.setQueryProperty("");
+    UriBuilder badPort;    badPort.setHostProperty("h:abc");
+    UriBuilder emptyHost;  emptyHost.setHostProperty("");
+    UriBuilder fileShape("file", "");  fileShape.setPathProperty("/tmp/x");
+
+    const UriBuilder* shapes[] = {&plain, &withPort, &withCreds, &withQuery, &withFrag,
+                                  &emptyQuery, &badPort, &emptyHost, &fileShape};
+    for (const UriBuilder* a : shapes) {
+        for (const UriBuilder* b : shapes)
+            expectEqualsImpliesEqualHash(*a, *b, "cross product");
+        // and against an independently built copy of the same shape
+        UriBuilder copy = *a;
+        EXPECT_TRUE(a->Equals(copy));
+        EXPECT_EQ(a->GetHashCode(), copy.GetHashCode());
+    }
+}
+
+TEST(UriBuilderTest, DeliberatelyUnequalPairsStayUnequal_PinsTheGatedIdentityChange) {
+    // These are the pairs #1995 would make EQUAL. They must stay unequal until that approval
+    // lands, and this test must be updated with it — the same role
+    // UriTests.DocumentedContract_CaseDifferingUrisAreNotEqualYet plays for Uri.
+    UriBuilder lower;  lower.setHostProperty("example.com");
+    UriBuilder upperHost; upperHost.setHostProperty("EXAMPLE.COM");
+    UriBuilder upperScheme; upperScheme.setSchemeProperty("HTTP"); upperScheme.setHostProperty("example.com");
+    UriBuilder defaultPort; defaultPort.setHostProperty("example.com"); defaultPort.setPortProperty(80);
+
+    EXPECT_FALSE(lower.Equals(upperHost));
+    EXPECT_FALSE(lower.Equals(upperScheme));
+    EXPECT_FALSE(lower.Equals(defaultPort));
+    EXPECT_NE(lower.GetHashCode(), upperHost.GetHashCode());
+    EXPECT_NE(lower.GetHashCode(), upperScheme.GetHashCode());
+    EXPECT_NE(lower.GetHashCode(), defaultPort.GetHashCode());
+}
+
+TEST(UriBuilderTest, UriIdentityItselfIsUnchangedByThisTicket) {
+    // Uri's own operator== and GetHashCode were already paired (both read absoluteUri_) and
+    // this ticket does not touch them. Pinned so a later reader does not mistake #2004 for
+    // an identity change.
+    System::Uri a("http://example.com/p");
+    System::Uri b("http://example.com/p");
+    System::Uri caseDiff("HTTP://EXAMPLE.COM/p");
+    System::Uri explicitDefaultPort("http://example.com:80/p");
+    EXPECT_TRUE(a == b);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+    EXPECT_FALSE(a == caseDiff);
+    EXPECT_NE(a.GetHashCode(), caseDiff.GetHashCode());
+    EXPECT_FALSE(a == explicitDefaultPort);
+    EXPECT_NE(a.GetHashCode(), explicitDefaultPort.GetHashCode());
+}
+
+TEST(UriBuilderTest, Layout_SizeOfUriBuilderIsPinned) {
+    // docs/SystemUriNamespaceReviewPlan.md §9.2 claimed sizeof(System::UriBuilder) == 232 was
+    // "re-asserted by permanent tests"; measured on 2026-08-03 no such test existed. Added
+    // here so the claim becomes true, alongside UriTests.Layout_SizeOfUriIsPinned.
+    EXPECT_EQ(sizeof(System::UriBuilder), 232u);
+}

@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -258,9 +259,38 @@ namespace System {
             return ToString() == other.ToString();
         }
 
-        /** @brief Returns a hash code based on the built URI string. C++ counterpart of .NET UriBuilder.GetHashCode(). */
+        /**
+         * @brief Returns a hash code based on the built URI string.
+         *
+         * C++ counterpart of .NET UriBuilder.GetHashCode().
+         *
+         * Ticket #2004: this used to be `getUriProperty().GetHashCode()`, which built a whole
+         * `Uri` from `ToString()` purely to hash it. Equals() compares the rendered strings
+         * directly and never parses, so for any builder whose rendering is not a parseable
+         * URI the two disagreed at the worst possible place: `b.Equals(b)` returned `true`
+         * while `b.GetHashCode()` **threw**, leaving an object that compares equal to itself
+         * with no obtainable hash. Measured routes, all through ordinary setters:
+         *   setHostProperty("h:abc")  -> "http://h:abc/"  -> throws (invalid port)
+         *   setHostProperty("h:99999")-> "http://h:99999/"-> throws (port out of range)
+         *   setHostProperty("[::1")   -> "http://[::1/"   -> throws (invalid IP literal)
+         *   setHostProperty("")       -> "http:///"       -> throws (no host, #2000)
+         *
+         * Hashing the rendered string directly is **value-identical** wherever the old code
+         * returned at all: `Uri::parse` assigns `absoluteUri_ = uriString` on every branch it
+         * accepts, and `Uri::GetHashCode` hashes exactly that, so
+         * `Uri(s).GetHashCode() == std::hash<std::string>{}(s)` for every `s` a `Uri` accepts.
+         * The only change is that the throw is gone, which is what restores
+         * `a.Equals(b) => a.GetHashCode() == b.GetHashCode()` for the whole domain of
+         * Equals(). Identity itself is unchanged and stays raw rendered text — narrowing it
+         * to URI semantics is SR-AUD-142/SR-AUD-140, approval-gated as ticket #1995.
+         *
+         * @throws System::UriFormatException only where ToString() itself throws, i.e. when
+         *         UserName is empty and Password is not — the same condition, and the same
+         *         exception, that Equals() raises. The two are now total on exactly the same
+         *         set of objects.
+         */
         [[nodiscard]] intcs GetHashCode() const {
-            return getUriProperty().GetHashCode();
+            return static_cast<intcs>(std::hash<std::string>{}(ToString()));
         }
     };
 
