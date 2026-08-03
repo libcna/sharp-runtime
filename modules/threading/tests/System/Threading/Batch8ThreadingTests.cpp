@@ -100,6 +100,13 @@ TEST(ThreadingTests, Thread_ThreadState_UnstartedBeforeStart) {
     EXPECT_EQ(t.getThreadStateProperty(), ThreadState::Unstarted);
 }
 
+// SR-AUD-195 (ticket #1949): this case previously accepted
+//   state == ThreadState::Running || (int(state) & int(ThreadState::Running)) == 0
+// and ThreadState::Running is 0, so the second disjunct is `state & 0 == 0` -- true for
+// Unstarted, Stopped and every other value. The case could not fail. Running being the zero
+// value means "contains Running" is not expressible as a mask test at all; the assertion that
+// carries meaning is the exact state a started, still-executing thread must report, which is
+// Running for a foreground thread and Running|Background for a background one.
 TEST(ThreadingTests, Thread_ThreadState_RunningAfterStart) {
     std::atomic<bool> running{false};
     std::atomic<bool> done{false};
@@ -107,8 +114,11 @@ TEST(ThreadingTests, Thread_ThreadState_RunningAfterStart) {
     t.Start();
     while (!running.load()) {}
     auto state = t.getThreadStateProperty();
-    EXPECT_TRUE(state == ThreadState::Running ||
-                (static_cast<int>(state) & static_cast<int>(ThreadState::Running)) == 0);
+    const bool background = t.getIsBackgroundProperty();
+    EXPECT_EQ(state, background ? (ThreadState::Running | ThreadState::Background)
+                                : ThreadState::Running);
+    EXPECT_NE(state, ThreadState::Unstarted);
+    EXPECT_NE(state, ThreadState::Stopped);
     done.store(true);
     t.Join();
 }

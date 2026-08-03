@@ -38,10 +38,21 @@ TEST(ThreadingTests, Thread_Sleep_ZeroMs_DoesNotThrow) {
     EXPECT_NO_THROW(Thread::Sleep(0));
 }
 
+// SR-AUD-197 (ticket #1949): this case previously read the property and cast the result to
+// void with the comment "any value is valid", so it had no assertion at all and passed for
+// zero, a constant, or an invalid identity.
+//
+// Two things are asserted instead, and both hold today. A managed thread id is a positive
+// value -- .NET assigns ids from 1 upwards and never hands out 0 or a negative -- and the id a
+// thread reads through CurrentThread() is stable across repeated reads on that same thread.
+// SR-AUD-193, that threads NOT created through this wrapper all collapse to id 1, remains
+// confirmed and is deliberately not asserted either way here; the case that a started thread
+// sees its own Thread object's id is covered separately by
+// Thread_CurrentThread_InsideStartedThread_MatchesOwnManagedThreadId below.
 TEST(ThreadingTests, Thread_CurrentThread_ReturnsManagedThreadId) {
-    auto proxy = Thread::CurrentThread();
-    auto id = proxy.getManagedThreadIdProperty();
-    (void)id; // any value is valid — just verifying no throw
+    const auto id = Thread::CurrentThread().getManagedThreadIdProperty();
+    EXPECT_GT(id, 0);
+    EXPECT_EQ(id, Thread::CurrentThread().getManagedThreadIdProperty());
 }
 
 TEST(ThreadingTests, Thread_CurrentThread_IsNotBackground) {
