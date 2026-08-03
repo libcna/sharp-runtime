@@ -46,3 +46,17 @@ the corresponding source audits.
 
 SR-AUD-197 is confirmed by direct test inspection.  The fixture remains useful
 for normal and repaired-regression paths.  No source or test was changed.
+
+## Post-audit remediation — ticket #1949 (2026-08-03)
+
+**SR-AUD-197 is `remediated`.** `Thread_CurrentThread_ReturnsManagedThreadId` no
+longer casts the only observed value to `void`. It asserts that the id is
+positive — .NET assigns ids from 1 upwards and never hands out 0 or a negative —
+and that it is stable across repeated reads on the same thread.
+
+**SR-AUD-193 remains `confirmed`** and is deliberately not asserted either way by
+the repaired case: that every thread not created through this wrapper reports id 1
+is a production defect, cause T-H in `docs/ThreadingNamespaceReviewPlan.md`, owned
+by design ticket #1958. The pre-existing
+`Thread_CurrentThread_InsideStartedThread_MatchesOwnManagedThreadId` already covers
+the wrapper-created case, so #1949 added no duplicate of it. Test-only change.

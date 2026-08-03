@@ -48,3 +48,13 @@ case.
 SR-AUD-195 is confirmed by direct expression analysis.  The fixture otherwise
 supplies valuable normal/regression smoke coverage.  No source or test was
 changed.
+
+## Post-audit remediation — ticket #1949 (2026-08-03)
+
+**SR-AUD-195 is `remediated`.** `Thread_ThreadState_RunningAfterStart` no longer
+carries the `state & 0 == 0` fallback. Because `ThreadState::Running` is zero,
+"contains Running" is not expressible as a mask test at all, so the case now
+asserts the exact state a started, still-executing thread must report — `Running`,
+or `Running | Background` for a background thread — and additionally that the
+observed state is neither `Unstarted` nor `Stopped`. Test-only change; no
+production source, signature, layout or semantic was involved.

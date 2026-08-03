@@ -44,3 +44,23 @@ public operation concurrently with disposal.
 
 SR-AUD-211 is confirmed by bounded C++/.NET comparison; SR-AUD-207 extends
 through TSan. No production or test source was changed.
+
+## Post-audit remediation — ticket #1948 (2026-08-03)
+
+**SR-AUD-211 is `remediated`.** The original evidence above is retained unchanged
+and reproduced exactly as recorded: `build-probe/1948_probe1_countdown_reset_wake.cpp`
+printed `reset0=TIMEOUT` and exited 1 before the repair.
+
+`Reset(intcs)` now releases the lock and calls `cv_.notify_all()`. The
+notification is unconditional rather than guarded on `count == 0`: a reset to a
+non-zero count leaves `Wait`'s predicate genuinely false, so a woken waiter
+re-checks it and blocks again — which spurious wakeups already require it to
+tolerate. The probe's control confirms it: after the repair it prints
+`reset0=released` **and** `control reset3=still-blocked`, and exits 0. Two
+permanent regressions pin both halves. No public signature, object layout, vtable
+or exception contract changed, and `Reset(negative)` / `Reset` after `Dispose`
+keep their existing exceptions and order.
+
+**SR-AUD-207 remains `confirmed`** here: this type's unsynchronised `disposed_`
+flag is cause T-A in `docs/ThreadingNamespaceReviewPlan.md`, owned by ticket
+#1955, and was deliberately not absorbed into #1948.

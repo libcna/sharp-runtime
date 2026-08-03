@@ -41,3 +41,32 @@ guard, which makes this a high public-boundary defect.
 
 SR-AUD-206 is confirmed by UBSan and direct current-.NET comparison. No
 production or test source was changed.
+
+## Post-audit remediation — ticket #1947 (2026-08-03)
+
+**SR-AUD-206 is `remediated`.** The original evidence above is retained unchanged.
+
+`Release(intcs)` now writes the full-semaphore condition as
+`maxCount_ - count_ < releaseCount`, which is .NET's own form and cannot overflow
+given the class invariant `0 <= count_ <= maxCount_` that both constructors
+establish and every Wait/Release preserves.
+
+**One correction to the finding's extent**, measured rather than inferred
+(`build-probe/1947_probe1_semaphore_release_overflow.cpp`, logs
+`1947_probe1_before.log` / `1947_probe1_after.log`): the pre-fix probe reports
+**four** UndefinedBehaviorSanitizer diagnostics across the two types, not two.
+The report above names only the guard (`Semaphore.hpp:91`); the increment
+`count_ += releaseCount` at `:94` is a **second, independent** signed overflow,
+reached precisely because the guard's own comparison overflowed and therefore did
+not fire. The same pair exists in `SemaphoreSlim` at `:108` and `:111`.
+
+**A second correction, to the consequence.** The report records the outcome as
+`Semaphore=normal` — the missing `SemaphoreFullException`. The probe shows the
+more serious half: `SemaphoreSlim`'s `CurrentCount` was left at **-2147483648**,
+so `count_ > 0` could never hold again and every subsequent `Wait` blocked
+forever. That is a liveness failure, not only a diagnostics gap.
+
+After the repair the probe reports **zero** UBSan diagnostics,
+`SemaphoreFullException` from both types, the count preserved at 1, and the
+control `Release(INT_MAX - 1)` still succeeding. Eight permanent regressions were
+added. No public signature, object layout, vtable or exception contract changed.

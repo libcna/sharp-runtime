@@ -2003,3 +2003,41 @@ another collection. The full behavior/mutation/template-ABI/layout/performance
 and sanitizer record is `docs/ImmutableSortedSetFloatingEqualityDesign.md`
 §9. This is a post-audit correction with no SR-AUD identifier; numbering and
 the **68 / 296 / 364** tally remain frozen.
+
+## Post-audit remediation note — the `System::Threading` namespace review (2026-08-03)
+
+Ticket **#1950** reviewed all **38** open confirmed findings in `modules/threading/`
+and grouped them into **nine** shared root causes, recorded in
+`docs/ThreadingNamespaceReviewPlan.md`. **No new `SR-AUD-*` identifier was issued**;
+audit numbering stays frozen at **364**.
+
+Three of the nine causes are **new sites of causes this file already records**, and
+inherit those causes' selected repairs rather than getting their own policy:
+
+- **T-B** (seven findings: SR-AUD-190, 192, 198, 213 part, 217, 219 part, 222) is
+  **CCF-011** in a second module. `docs/EmptyCallableBoundaryPlan.md` already records
+  the implemented policy — decide emptiness at the public boundary, before any input
+  is examined, and choose by API *shape*. All seven Threading sites are the delegate
+  *argument* shape, so all seven become `ArgumentNullException` at entry. CCF-011
+  itself stays **closed**: its six `core` members are unaffected and are not reopened.
+  Ticket #1951.
+- **T-F** (SR-AUD-206, two types) is **CCF-004's** cause — a defined boundary computed
+  with signed C++ overflow — at a site CCF-004's numeric/date-time-scoped membership
+  sweep did not reach. CCF-004 itself stays **closed 8/8** and gains no member; #1947
+  applied its idiom independently and is recorded in the owning per-file reports.
+- **T-D** (SR-AUD-187, SR-AUD-221) is **CCF-019's** cause — borrowed native handles
+  outliving the owner without a liveness boundary — at two new sites, both with ASan
+  evidence. CCF-019 is **still open**, so these are not closable by reusing a settled
+  policy: they need the same class of public source break as #1771 and are
+  design-first under blocked ticket #1959. They are recorded here so CCF-019's
+  eventual closure cannot claim completeness without them.
+
+The other six causes (T-A shared-state data races, T-C argument validation, T-E
+incomplete state machines, T-G disposal state, T-H public-shape divergence, T-I
+unfalsifiable test assertions) are **specific to this namespace** and are not
+promoted to `CCF-*` identifiers: the cross-cutting numbering is closed, and
+`docs/ThreadingNamespaceReviewPlan.md` §5 is their durable record.
+
+**Closed by the same batch:** SR-AUD-206 and SR-AUD-211 (high) and SR-AUD-195 and
+SR-AUD-197 (low) are `remediated` by tickets #1947, #1948 and #1949. The index now
+reads **72 remediated / 292 open / 364 total**.

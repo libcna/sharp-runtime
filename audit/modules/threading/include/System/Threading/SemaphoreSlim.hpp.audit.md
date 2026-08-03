@@ -50,3 +50,18 @@ two sanitizer-confirmed data races.
 
 SR-AUD-206 extends here; SR-AUD-207 is confirmed by two independent TSan
 probes. No production or test source was changed.
+
+## Post-audit remediation — ticket #1947 (2026-08-03)
+
+**SR-AUD-206 is `remediated`** here as well as in its owning `Semaphore.hpp`
+report, which carries the full record and two corrections to the finding's extent
+and consequence. In summary: the pre-fix probe reports overflow at **both**
+`SemaphoreSlim.hpp:108` (the guard, recorded) and `:111` (the increment, not
+recorded), and the surviving state was `CurrentCount == -2147483648`, which makes
+the instance permanently unusable rather than merely under-diagnosed. The guard
+now uses SemaphoreSlim.cs's own `maxCount_ - count_ < releaseCount`.
+
+**SR-AUD-207 remains `confirmed`** and is untouched: the unlocked `CurrentCount`
+read and the unsynchronised `disposed_` flag are cause T-A in
+`docs/ThreadingNamespaceReviewPlan.md`, owned by ticket #1955, which needs a
+layout measurement #1947 deliberately did not make.

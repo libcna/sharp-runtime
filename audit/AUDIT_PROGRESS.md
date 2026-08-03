@@ -6434,3 +6434,60 @@ declarations, aliases, iterator types, layout, vtables, `noexcept`, and
 `constexpr` are unchanged; approved inline-template helper/body symbols move.
 Audit numbering stays frozen at 364 and totals remain **68 remediated / 296
 open / 364 total** because #1936 has no SR-AUD identifier.
+
+## Post-audit remediation checkpoint — the `System::Threading` namespace review (2026-08-03)
+
+Ticket **#1950** performed the namespace review that the drained remediation queue
+called for: `plan.sqlite3` held zero `todo` tickets, and the `task` porting queue is
+exhausted, so the next unit of work had to be selected from the audit inventory.
+`modules/threading/` was chosen over the larger `modules/core/` (72 open) because its
+38 open findings — **14 high** — are the largest untouched severity concentration
+that no existing `docs/*Plan.md` already covers, and because every proposed repair is
+internal to a component whose only public dependencies are `Core.Base` and `TimeZone`.
+The durable record is `docs/ThreadingNamespaceReviewPlan.md`, which carries the file
+and public-surface inventory, all 38 findings mapped to nine root causes, the
+dependency order, the source/ABI/layout approval matrix, the test and sanitizer
+matrices, twelve bounded tickets (#1947–#1949, #1951–#1959), explicit exclusions and
+namespace completion criteria. **No new `SR-AUD-*` identifier was issued.**
+
+Four findings were remediated in the same batch, all with reproduction before repair:
+
+- **SR-AUD-206** (high, #1947) — `Semaphore::Release` and `SemaphoreSlim::Release`
+  computed `count_ + releaseCount > maxCount_` in signed `intcs`. Both guards now use
+  .NET's own non-overflowing `maxCount_ - count_ < releaseCount`. Two corrections to
+  the finding's recorded extent are documented in the owning per-file report: the
+  pre-fix UBSan probe reports **four** sites, not two (the increment overflows
+  independently of the guard), and the surviving state was
+  `CurrentCount == -2147483648`, which left the instance permanently unusable rather
+  than merely under-diagnosed.
+- **SR-AUD-211** (high, #1948) — `CountdownEvent::Reset` reached the signalled state
+  without notifying its condition variable. Reproduced exactly as recorded
+  (`reset0=TIMEOUT`, exit 1) and closed with an unconditional `notify_all()`, with a
+  control test proving a reset to a non-zero count still leaves a waiter blocked.
+- **SR-AUD-195** and **SR-AUD-197** (low, #1949) — two test assertions that could not
+  fail (`state & 0 == 0`; a `(void)id` cast). Both replaced with assertions that can.
+  **SR-AUD-193 was deliberately not asserted either way** and remains `confirmed`.
+
+Three further defects were found while establishing the repository baseline and are
+recorded as their own tickets rather than absorbed silently. **#1946** and **#1960**:
+the repository **did not compile at all** on GCC 13 / libstdc++ 13 — `MathF::Round`
+used `std::floorf`/`std::ceilf`, which libstdc++ does not declare, and a deliberate
+`const T&` binding in `ListIndexerProxyTests.cpp` tripped GCC 13's new
+`-Wdangling-reference` under `-Werror`. **#1961** (P0): `Dns::GetHostEntry(IPAddress)`
+recursed without bound and killed the process with SIGSEGV whenever the queried
+address had no reverse mapping, because `getnameinfo` succeeds and returns the address
+in numeric form, which the string overload re-parsed as a literal and fed straight
+back. All three are fixed. **#1962** is opened `blocked` and unstarted: `Ping` only
+ever opens an unprivileged `SOCK_DGRAM` ICMP socket, so it fails wherever
+`net.ipv4.ping_group_range` is closed even when the process holds `CAP_NET_RAW`.
+
+The index now reads **72 remediated / 292 open / 364 total**.
+
+**Gate result, reported exactly as measured.** 37 executables, **15,105 tests**,
+15,098 passing, 1 skipped (a locale-dependent invariant-formatting case), **6 failing
+for two environment reasons that are not caused by this batch and were not hidden**:
+five `PingTests` cannot open an ICMP socket because this container's
+`net.ipv4.ping_group_range` is `1  0` (ticket #1962 — a real gap in `Ping`, left
+open), and one `SocketTests` case cannot construct an `AF_INET6` socket because IPv6
+is absent from the container entirely (`/proc/net/if_inet6` does not exist). **No test
+was disabled, skipped or made conditional to obtain a green run.**
