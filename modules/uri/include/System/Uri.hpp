@@ -34,6 +34,9 @@ namespace System {
      *
      * @note Status: Partial — supports construction, component access, TryCreate,
      *   and relative-to-absolute combination. No percent-encoding/decoding.
+     * @note A hierarchical URI may have an **empty host** only when no port applies to it —
+     *   neither an explicit port in the authority nor a default port for the scheme. That is
+     *   what keeps `"file:///path"` legal while rejecting `"http:///path"` (ticket #2000).
      */
     class Uri {
         std::string absoluteUri_;
@@ -62,8 +65,14 @@ namespace System {
          * an error — including text that merely *contains* "://" further along, such as
          * `"/path?redirect=http://example.com"` (ticket #1988).
          *
-         * @throws System::UriFormatException if the string is empty, or the authority
-         *         carries a malformed port.
+         * @throws System::UriFormatException if the string is empty, if the authority
+         *         carries a malformed port or a malformed IP literal, or if the authority
+         *         has **no host while a port applies** (ticket #2000). The last rule is
+         *         stated in terms of the port, not the scheme: `"http://"`, `"http:///path"`,
+         *         `"http://:80/path"` and `"http://user@/path"` are rejected because they
+         *         would report the scheme's default port for a host that does not exist,
+         *         while `"file:///path"` (RFC 8089) and every hierarchical scheme with no
+         *         default-port entry keep an empty host with `Port == -1` and are accepted.
          */
         explicit Uri(const std::string& uriString);
 

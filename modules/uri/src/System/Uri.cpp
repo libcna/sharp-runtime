@@ -127,9 +127,36 @@ void Uri::parse(const std::string& uriString) {
 
     if (schemeColon == std::string::npos) {
         // No scheme token at all: an RFC 3986 relative reference.
+        //
+        // Ticket #2002: the whole reference used to be stored as the path, so
+        // Uri("a?b#c") reported AbsolutePath == "a?b#c" with Query and Fragment both empty,
+        // and Uri("?b") reported AbsolutePath == "?b". RFC 3986 §4.2 spells a relative
+        // reference `relative-ref = relative-part [ "?" query ] [ "#" fragment ]` -- it has
+        // the same three components an absolute URI has -- and both other branches of THIS
+        // function already split them exactly this way. Only this branch did not, so the
+        // file contradicted itself about where a query ends, which is the same defect shape
+        // #1988 (two scheme grammars) and #1989 (a port table consulted on some paths only)
+        // existed to remove.
+        //
+        // OriginalString, AbsoluteUri, ToString(), equality and hash are unaffected: they all
+        // read absoluteUri_, which is still the verbatim input. PathAndQuery changes only for
+        // a reference that carries a fragment, and only by dropping it -- which is what
+        // PathAndQuery already does for every absolute URI.
         isAbsoluteUri_ = false;
         absoluteUri_   = uriString;
-        path_          = uriString;
+
+        std::string rest = uriString;
+        auto relFragPos = rest.find('#');
+        if (relFragPos != std::string::npos) {
+            fragment_ = rest.substr(relFragPos);
+            rest      = rest.substr(0, relFragPos);
+        }
+        auto relQueryPos = rest.find('?');
+        if (relQueryPos != std::string::npos) {
+            query_ = rest.substr(relQueryPos);
+            rest   = rest.substr(0, relQueryPos);
+        }
+        path_ = rest;
         return;
     }
 
@@ -268,6 +295,31 @@ void Uri::parse(const std::string& uriString) {
         port_ = defaultPortForScheme(scheme_);
     }
 
+    // Ticket #2000: an authority-bearing URI must never report a PORT for a host that does
+    // not exist. This is the same invariant #1991 restored for a malformed IP literal --
+    // there, "http://[::1/path" fabricated port 1 out of address text; here, "http://",
+    // "http:///path", "http://:80/path" and "http://user@/path" all produced host == "" while
+    // Port reported the scheme's default (80/443/21/23/389/808/...) and Authority reported
+    // "" (or ":8080"). A caller that connects to Host:Port reached a real port number on no
+    // host at all, and two of this repository's own parsers disagreed about the same text:
+    // HttpClient::parseUrl rejects "http://:8080/path" with UriFormatException, pinned by
+    // HttpClientUrlParseTests.EmptyHostThrowsUriFormatException.
+    //
+    // The rule is deliberately NOT "an authority must be non-empty". A host-less authority is
+    // legitimate whenever no port is associated with the URI at all -- "file:///path" is the
+    // canonical case (RFC 8089), it is constructed by two tracked downstream tests
+    // (XmlUrlResolverTests.GetEntity_MissingFile_Throws and IOTests' FileFormatException
+    // case), and it keeps Port == -1 and Authority == "", which is internally consistent.
+    // Unknown hierarchical schemes have no default-port entry either and are likewise
+    // untouched, so this narrowing reaches only text that already produced a self-
+    // contradictory object. See docs/SystemUriNamespaceReviewPlan.md §26.
+    //
+    // The message follows this file's existing "Invalid URI: ..." family and mirrors .NET's
+    // SR.net_uri_BadHostName spelling; the spelling is a consistency choice, not a measured
+    // fact (the reference tree is absent from this environment).
+    if (host_.empty() && port_ != -1)
+        throw System::UriFormatException("Invalid URI: The hostname could not be parsed.");
+
     absoluteUri_   = uriString;
     isAbsoluteUri_ = true;
 }
@@ -322,11 +374,39 @@ Uri::Uri(const Uri& baseUri, const std::string& relativeUri) {
         parse(relativeUri);
         return;
     }
+    // Ticket #2001: does the BASE have an authority at all?
+    //
+    // RFC 3986 §5.2.2 copies the base's authority into the result only when the base HAS one.
+    // An opaque base ("mailto:a@b.com", "urn:isbn:1", "news:comp.lang.c++") has none, and the
+    // reconstruction below used to emit "scheme://" unconditionally, which fed the base's
+    // OPAQUE PATH through parse()'s authority splitter. Measured before the repair:
+    //   ("mailto:a@b.com", "c")         -> "mailto:///c"       (the shape the ticket names)
+    //   ("mailto:a@b.com", "?q")        -> "mailto://a@b.com?q" with host "b.com", port 25
+    //                                       -- the mailbox local-part became user-info and the
+    //                                       DOMAIN became a Host: a silent wrong component,
+    //                                       worse than the named shape
+    //   ("urn:isbn:0-395-36341-1", "?q")-> THROWS "Invalid port specified." -- "isbn:0-395-…"
+    //                                       read as "host:port": a false rejection
+    // parse() itself classifies "mailto:a@b.com" as opaque with host_ == "", so the resolver
+    // was contradicting the parser about the very same base.
+    //
+    // Opacity needs no new member and no layout change: it is exactly parse()'s own rule
+    // applied to the base's original string -- a scheme token whose colon is followed by "//".
+    // findSchemeColon() is the single point that decides this everywhere else in the file
+    // (ticket #1988), so it decides it here too. sizeof(System::Uri) is unchanged at 240.
+    const std::size_t baseSchemeColon = findSchemeColon(baseUri.absoluteUri_);
+    const bool baseIsHierarchical =
+        baseSchemeColon != std::string::npos &&
+        baseUri.absoluteUri_.compare(baseSchemeColon + 1, 2, "//") == 0;
+
     // RFC 3986 §5.3: "if defined, userinfo, host, port [are] copied from base" into the merged
     // authority. The previous code omitted baseUri.userInfo_ entirely, so combining a base URI
     // that carries embedded credentials (e.g. "http://user:pass@example.com/path/") with a
-    // relative reference silently dropped them from the result.
-    const auto baseAuthority = [&baseUri]() {
+    // relative reference silently dropped them from the result. When the base is opaque there
+    // is nothing to copy, and the "//" that introduces an authority must not be written at all.
+    const auto baseAuthority = [&baseUri, baseIsHierarchical]() {
+        if (!baseIsHierarchical)
+            return baseUri.scheme_ + ':';
         std::string s = baseUri.scheme_ + "://";
         if (!baseUri.userInfo_.empty())
             s += baseUri.userInfo_ + '@';
@@ -376,8 +456,15 @@ Uri::Uri(const Uri& baseUri, const std::string& relativeUri) {
         mergedPath = relativePath;
     } else {
         // RFC 3986 §5.3 merge: base path truncated up to and including its last '/'.
+        // When the base path has no '/' at all the merge keeps nothing of it. That case is
+        // unreachable for a hierarchical base -- parse() always gives one a path of at least
+        // "/" -- and is exactly the opaque case ticket #2001 repairs: for base
+        // "mailto:a@b.com" the whole opaque path is one segment, so "c" resolves to
+        // "mailto:c" rather than being rooted under a "/" that has no authority to root it.
         auto lastSlash = baseUri.path_.rfind('/');
-        std::string basePrefix = (lastSlash == std::string::npos) ? "/" : baseUri.path_.substr(0, lastSlash + 1);
+        std::string basePrefix = (lastSlash != std::string::npos)
+            ? baseUri.path_.substr(0, lastSlash + 1)
+            : (baseIsHierarchical ? std::string("/") : std::string());
         mergedPath = basePrefix + relativePath;
     }
     mergedPath = removeDotSegments(mergedPath);
