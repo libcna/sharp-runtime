@@ -5866,3 +5866,56 @@ instantiations; `scripts/check_selective_components.sh` **run and passed**,
 because the family adds a public header; `scripts/local_ci_check.sh build`
 passed; `git diff --check` clean. Measured cost on 1,000,000 elements: 1.011×
 `float` without NaN, 0.994× with 1% NaN, 1.009× `int`.
+
+---
+
+## Batch 2026-08-03 — `System::Threading` #1951–#1955, the #1956–#1959 approval package, and the Tasks/Channels review (#1964)
+
+Branch `feature/remediation-batch-threading-1951-1955`, cut from the previous batch's tip.
+Seven local unsigned commits. This is the direct continuation of the `System::Threading`
+namespace review (#1950): it implemented the whole **compatible** half of that review's queue
+and left the approval-gated half with a design that is ready to be approved rather than
+re-derived.
+
+| Ticket | Cause | Findings closed | Tests |
+|---|---|---|---|
+| #1951 | T-B — CCF-011 in a third module | SR-AUD-190/192/198/217/222 + the 213/219 callable halves | +24 |
+| #1952 | T-C | SR-AUD-183 | +7 |
+| #1953 | T-C | SR-AUD-188, SR-AUD-199 | +9 |
+| #1954 | T-C | SR-AUD-184, SR-AUD-205, SR-AUD-213 (completing it) | +9 |
+| #1955 | T-A | SR-AUD-207 ×3, 212, 216, 218 + the 203 race half | +11 |
+| #1964 | review | — (opens #1965–#1970) | — |
+
+**What made this batch different from a routine validation sweep** is that seven of the
+audit's own statements turned out to be wrong in a way that changed the repair, and one
+requested repair was declined outright:
+
+- Two of #1951's seven sites are **not** `ArgumentNullException` sites, because .NET has no
+  check there at all and faults with `NullReferenceException`; applying the family's usual
+  spelling would have left both findings' measured divergence open.
+- SR-AUD-183 has **three** non-terminating shapes, not one, and its `-2` timeout gives two
+  different wrong answers depending on collection size.
+- SR-AUD-199 has a second route the finding never names — a **moved-from** `CancellationToken`
+  — and that route is what decided the repair (tolerance, not rejection).
+- SR-AUD-219's stated consequence is wrong: the failure was a **silent default value**, not a
+  deferred `bad_function_call`.
+- SR-AUD-205's defect was confined to the reported property; the lock already behaved
+  correctly.
+- SR-AUD-216 had **two** racing reads.
+- The #1955 TSan probe's first version was itself unsound — it reported zero races for two
+  types that were equally racy, because its writer loop finished before its reader started.
+- **SR-AUD-200 was deliberately not repaired** (new ticket #1963): its report carries no
+  managed probe, .NET appears to truncate a fractional `PeriodicTimer` period exactly as this
+  port does, and the reference tree is absent from this environment, so rejecting it would
+  have been a narrowing away from .NET on a recollection.
+
+**Baselines after the batch:** 15,165 tests across 37 executables (was 15,105), 15,158
+passing, 1 skipped, 6 failing for two re-measured environmental causes; post-audit tally
+**87 remediated / 277 confirmed / 364**, numbering frozen at **364**; module graph **41 / 91**
+unchanged; negative fixtures **10 / 81**; version seams **2 / 18**; checker self-tests
+**45 / 45** and **15 / 15**; `sizeof`/`alignof` **identical** for all six types #1955 touched;
+`scripts/check_selective_components.sh` run and **passed**; `scripts/local_ci_check.sh build`
+passed every static gate; `git diff --check` clean. **Doxygen was not run — it is not
+installed in this environment**, so the 1,942 ceiling is retained as historical rather than
+newly verified. Maximum aggregate compilation parallelism: **two jobs**, never exceeded, with
+no two builds running concurrently.

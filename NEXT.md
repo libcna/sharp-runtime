@@ -3,20 +3,287 @@
 
 # NEXT.md
 
-*Last verified: 2026-08-03. Branch `claude/remediation-batch-1804-namespace-b1yjh5`,
-upstream `origin/claude/remediation-batch-1804-namespace-b1yjh5` (pre-existing;
-nothing was pushed). **#1804 was already `done`** — resolved 2026-07-30, re-verified
-not redone. The batch's work was the **`System::Threading` namespace review (#1950)**
-plus **six implementations**: #1946 and #1960 (the repository did not compile on
-GCC 13/libstdc++ 13), #1961 (**P0** — `Dns::GetHostEntry` recursed without bound and
-killed the process), #1947 (SR-AUD-206), #1948 (SR-AUD-211), #1949
-(SR-AUD-195/197). Audit **72 remediated / 292 open / 364 total**. Gate **15,105
-tests across 37 executables**, 15,098 passing, 1 skipped, **6 failing for two
-measured, attributed environment reasons that were not hidden**. Graph **41 / 91**,
-seams **2 / 18**, negative fixtures **10 / 81** over 91 compiler invocations peak 2,
-checker self-tests **45 / 45** and **15 / 15**. **Doxygen NOT run — not installed
-here.** Database **1,962 tickets: 1,934 done, 5 todo, 16 blocked, 3 needs_user, 4
-wontfix**, none doing. #1773 remains blocked. See the first handoff below.*
+*Last verified: 2026-08-03. Branch `feature/remediation-batch-threading-1951-1955`
+(local only, **nothing pushed**), cut from the previous batch's tip `9082c75` on
+`claude/remediation-batch-1804-namespace-b1yjh5`. The batch implemented the five
+compatible `System::Threading` tickets **#1951–#1955**, wrote the consolidated
+approval package for the four blocked ones **#1956–#1959**, and reviewed the
+**`Threading.Tasks` + `Threading.Channels`** namespaces (**#1964**), opening
+**#1965–#1968** (`todo`) and **#1969–#1970** (`blocked`). Audit **87 remediated /
+277 confirmed / 364 total** (+15 this batch). Gate **15,165 tests across 37
+executables**, 15,158 passing, 1 skipped, **6 failing for two measured
+environmental reasons, unchanged and not hidden**. Graph **41 / 91**, seams
+**2 / 18**, negative fixtures **10 / 81** over 91 compiler invocations peak 2,
+checker self-tests **45 / 45** and **15 / 15**, selective components **passed**.
+**Doxygen NOT run — still not installed here.** Database **1,970 tickets: 1,940
+done, 5 todo, 18 blocked, 3 needs_user, 4 wontfix**, none doing. #1773 and #1962
+remain blocked. **Commits are intentionally unsigned** (§10). See the first
+handoff below.*
+
+---
+
+## Autonomous batch handoff, 2026-08-03 (`System::Threading` #1951–#1955 + the #1956–#1959 approval package + the Tasks/Channels review)
+
+Branch `feature/remediation-batch-threading-1951-1955`, cut from `9082c75`. Seven commits,
+all local and all unsigned.
+
+### 1. What landed
+
+| Ticket | Cause | Findings closed | Tests |
+|---|---|---|---|
+| **#1951** | T-B (CCF-011 in a third module) | SR-AUD-190, 192, 198, 217, 222 remediated; 213/219 callable halves | +24 |
+| **#1952** | T-C | SR-AUD-183 remediated | +7 |
+| **#1953** | T-C | SR-AUD-188, 199 remediated | +9 |
+| **#1954** | T-C | SR-AUD-184, 205 remediated; 213 now fully remediated | +9 |
+| **#1955** | T-A | SR-AUD-207 (×3), 212, 216, 218 remediated; 203 race half | +11 |
+
+`SharpRuntimeTests_Threading` **369 → 429**. Two new translation units:
+`ThreadingBoundaryTests.cpp` (#1951–#1954) and `ThreadingSharedStateTests.cpp` (#1955).
+
+### 2. Seven corrections to the audit record, all measured
+
+Recorded in `docs/ThreadingNamespaceReviewPlan.md` §17–§19 and in each per-file report.
+
+1. **Two of #1951's seven sites are not `ArgumentNullException` sites.**
+   `LazyInitializer::EnsureInitialized` and `SynchronizationContext::Send` have **no** null
+   check in .NET at all — both invoke the delegate directly and fault with
+   `NullReferenceException`, which is exactly what SR-AUD-217 and SR-AUD-222 measured.
+   Throwing `ArgumentNullException` would have swapped one non-matching result for another,
+   so both now throw `System::NullReferenceException`. `LazyInitializer` also keeps .NET's
+   **data-dependence**: the check sits on the path that would invoke the factory, so an
+   already-initialised target still returns its value — validating at entry would have made a
+   call .NET *accepts* start throwing.
+2. **SR-AUD-219's stated consequence is wrong.** An accepted empty `ThreadLocal` factory did
+   **not** reach `bad_function_call`; `getValueProperty()` wrote `factory_ ? factory_() : T{}`,
+   so it silently produced a default-constructed value on every thread. A silent wrong value,
+   not a deferred crash.
+3. **SR-AUD-183 has three non-terminating shapes, not one.** `WaitAny({})`, `WaitAny({}, -1)`
+   **and** `WaitAny({nullptr})` all hung. Its `-2` timeout also gave **two different** wrong
+   answers — `true` for an empty collection, `false` for a non-empty one. And a mixed
+   `{handle, nullptr}` collection returned a *usable* index by skipping the null, which is the
+   sharpest observable change in the whole batch.
+4. **SR-AUD-199 has a second route the finding never names.** `CancellationToken` holds a
+   `shared_ptr` and has an implicitly declared move constructor, so a **moved-from** token has
+   an empty state and SEGV'd identically, through ordinary well-formed C++. This decided the
+   repair: tolerance, not rejection.
+5. **SR-AUD-205's defect was confined to the property.** `isReentrant()` already tested for
+   `SupportsRecursion`, so policy 2 already *locked* like `NoRecursion` and already threw
+   `LockRecursionException`; only the reported value lied.
+6. **SR-AUD-216 had two racing reads, not one.** TSan reported `return *target;` as well as
+   the `if (!target)` guard — six of the pre-fix run's thirteen reports.
+7. **A TSan methodology correction.** The #1955 probe's first version reported **zero** races
+   for `ManualResetEventSlim` and `CountdownEvent` while reporting one for the structurally
+   identical `ReaderWriterLockSlim`. The code was equally racy; a writer loop of trivial
+   stores finishes before a reader that must set up a try/catch begins, so the threads never
+   overlap. Rewritten as 1500 rounds of a fresh object with one access per thread, all seven
+   scenarios reproduced. **A "TSan reported nothing" result is evidence about the probe until
+   the probe has been shown capable of reporting something** — which matters, because §11 of
+   the plan makes a clean TSan run the closure evidence for cause T-A.
+
+### 3. One requested repair deliberately declined — SR-AUD-200, new ticket #1963
+
+`PeriodicTimer`'s fractional period was in #1954's scope and was **not** changed. Its per-file
+report carries **no managed probe** for the row — the evidence is a *native* probe compared
+against the port's own doc-comment — and .NET's `PeriodicTimer` converts with
+`(long)period.TotalMilliseconds`, a **truncating** cast, the same idiom
+`Timer(TimerCallback, object?, TimeSpan, TimeSpan)` uses. If that is right, rejecting would
+narrow *away* from .NET and refuse input `TimeSpan` tick arithmetic legitimately produces.
+**`/rv/tmp/runtime/src/libraries/` is not present in this environment**, so neither reading
+could be confirmed and nothing was changed — not even the doc-comment, since only one of code
+and doc is wrong and which one is exactly the open question. The current behaviour is pinned
+by `ThreadingArgumentDomainTests.PeriodicTimer_FractionalPeriod_StillTruncates_SeeTicket1963`.
+
+The same limitation is why SR-AUD-184's repair throws the **base** `System::ArgumentException`
+rather than a derived type: the audit's managed probe records only the category, and the base
+is caught by a handler written for either .NET candidate.
+
+### 4. Two deliberate departures from the plan's own selected repair
+
+Both are in `docs/ThreadingNamespaceReviewPlan.md` §19.2 with full reasoning.
+
+- **The T-A counters became `std::atomic<intcs>`, not locked properties.** .NET reads both
+  without a lock (`SemaphoreSlim.CurrentCount` is `private volatile int`), and for `Barrier` a
+  locking property would have created a **new self-deadlock**: `FinishPhase` invokes the
+  post-phase action while still holding `mutex_`, so a legal in-action `ParticipantCount` read
+  would block on its own caller. That is SR-AUD-210, the defect approval-gated #1957 exists to
+  remove. Every *write* still happens under the owning mutex.
+- **.NET's `MaxWaitHandles` ceiling of 64 is not adopted** (#1952). It exists for Win32
+  `WaitForMultipleObjects`; this port waits sequentially, so adopting it would reject input
+  that works. Documented in the header instead; no identifier, no ticket.
+
+### 5. The layout gate — measured, passed, and now pinned
+
+| Type | `sizeof` before → after | `alignof` |
+|---|---|---|
+| `ReaderWriterLockSlim` | 120 → 120 | 8 → 8 |
+| `SemaphoreSlim` | 104 → 104 | 8 → 8 |
+| `ManualResetEventSlim` | 112 → 112 | 8 → 8 |
+| `CountdownEvent` | 104 → 104 | 8 → 8 |
+| `Barrier` | 160 → 160 | 8 → 8 |
+| `ThreadLocal<int>` | 56 → 56 | 8 → 8 |
+
+`diff` reports the two logs identical, so **no user approval was required**, and
+`ThreadingSharedStateTests.RepairedTypes_LayoutUnchanged` now fails before a growth reaches a
+consumer. **Nothing in this batch changed a public signature, an object layout, a vtable, an
+exception specification or a component edge.**
+
+### 6. Sanitizer evidence
+
+| Ticket | Sanitizer | Before → after | Instrumentation proved |
+|---|---|---|---|
+| #1951 | ASan + UBSan + LSan | 0 → 0 reports (leak check on the new throwing constructors) | 32 `__asan_*`/`__ubsan_*` symbols, 0 in the plain binary |
+| #1953 | ASan + UBSan + LSan | 6 `SIGSEGV` children → 0, clean | 32 symbols |
+| #1955 | **TSan** | **13 reports across 7 scenarios (exit 66) → 0 (exit 0)** | 132 `__tsan_*` symbols |
+
+Probe sources and before/after logs are retained in `build-probe/` (`1951_probe1_*`,
+`1952_probe1_*`, `1953_probe1_*`, `1954_probe1_*`, `1955_probe1_*`); the **binaries were
+deleted** once the evidence was transcribed, per CLAUDE.md rule 11 (18 MB → 3.2 MB).
+
+### 7. The #1956–#1959 approval package — design complete, implementation still blocked
+
+`docs/ThreadingNamespaceReviewPlan.md` **§20**, one section per ticket plus a summary table,
+each ending in one exact approval sentence. **No production source was changed and all four
+remain `blocked`.** Four things the §9 outline did not have:
+
+- **#1956** — `ITimer::Change` must **not** join the throwing group. Its documented contract is
+  a `false` return for a disposed timer, which SR-AUD-191's own summary states. The three
+  `Close()` sites each gain an `atomic<bool>`, so `sizeof` **may grow** and is not assumed
+  layout-neutral the way #1955's *type* changes were.
+- **#1957** — SR-AUD-202 involves **no public object layout at all**, because `Monitor` is a
+  static-only class whose per-pointer `State` lives in a private static registry; it could be
+  split out and landed without approval. Whether .NET's `PeriodicTimer` throws or blocks a
+  second concurrent consumer is marked **unverified**.
+- **#1958** — **recommend splitting into three.** Group A (`ExecutionContext::Run` null
+  rejection, `AsyncLocal` notify-after-write, `ThreadPool` setter validation) is **compatible
+  and needs no approval at all**. Group C is SR-AUD-209 alone, which adds a vtable to two
+  types that have none and changes `AutoResetEvent::WaitOne()`'s return type from `void` to
+  `bool` — and is nonetheless the only finding in the namespace that makes a documented API
+  unusable, since the `WaitAll`/`WaitAny` entries #1952 repaired cannot accept either event
+  type.
+- **#1959** — both **null halves are already closed**, so only the lifetime halves are live.
+  The owning-handle design is recommended; the documented-contract-plus-negative-fixture
+  fallback is the precedent #1899 set for the declined `Xml.Linq` member of the same CCF-019
+  family.
+
+### 8. The Tasks/Channels review — #1964, plan written, six tickets opened
+
+`docs/ThreadingTasksChannelsReviewPlan.md`. Reviewed as **one unit** because they are one
+dependency chain and `Threading.Channels` is an INTERFACE target whose only public dependency
+is `Threading.Tasks`. All six findings re-verified against current source; four root causes,
+**three of them new sites of causes already closed elsewhere** (TC-A is CCF-011 in a *third*
+module, TC-D is CCF-019 at a *third* site, TC-B is `System::Threading`'s T-C). Five
+corrections, of which the load-bearing one is: **SR-AUD-235's repair is blocked by the
+field's *shape*, not its logic** — `FullMode` is a bare public mutable data member with
+nowhere to put a check, so validating it at all needs a property pair and is a public source
+break. Also recorded: `Parallel`'s `std::thread::hardware_concurrency()` is **not** a CLAUDE.md
+build-resource-policy violation (that rule is about build-job counts), so the next reader need
+not re-report it.
+
+New tickets: **#1965** (CCF-011 in Tasks), **#1966** (Parallel degree), **#1967** (ReadAsync
+→ `ChannelClosedException`), **#1968** (zero-capacity rendezvous) — all `todo` and compatible;
+**#1969** (FullMode property pair) and **#1970** (`TaskCanceledException`'s borrowed pointer)
+— `blocked`, one approval question each.
+
+### 9. Validation, exactly as measured
+
+| Gate | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| Full test gate (37 executables, run individually) | **15,165 tests — 15,158 passed, 1 skipped, 6 failed** |
+| `validate_module_boundaries.py` | OK — **41 modules, 91 edges** |
+| `validate_module_boundaries_test.py` | 7 / 7 |
+| `generate_component_catalog.py --check` | OK, current |
+| `db_consistency_check.py` | OK, no problems |
+| `check_version_seam_odr.py` | OK — **2 seams, 18 definitions** |
+| `check_version_seam_odr_test.py` | **15 / 15** |
+| `check_negative_consumer_fixtures.py` | OK — **10 fixtures, 81 sites**, 91 invocations, **peak 2 jobs**, 37.8 s |
+| `check_negative_consumer_fixtures_test.py` | **45 / 45** |
+| `check_selective_components.sh` | **passed** (every component, `--parallel 2`) |
+| `local_ci_check.sh build` | every static gate OK; stops at the same known Ping failures |
+| `git diff --check` | clean |
+| **Doxygen** | **NOT RUN — `doxygen` is not installed here.** The 1,942 ceiling is retained as *historical*, not as newly verified evidence. No system package was installed. |
+
+`scripts/run_component_tests.sh` **stops at the first failing executable**, so it reports
+only through `Net.Mime`. The 15,165 figure comes from running all 37 executables
+individually; that is the authoritative number and it is +60 over the previous batch's
+15,105, matching exactly the 24+7+9+9+11 tests this batch added.
+
+### 10. The six failing tests — same two causes, both re-measured, none hidden
+
+**No test was disabled, skipped, weakened or recategorised.**
+
+| Test | Cause | Classification |
+|---|---|---|
+| `PingTests.Send_Loopback_Succeeds` | `/proc/sys/net/ipv4/ping_group_range` reads **`1 0`** — an empty range, so **no** group may open an unprivileged `SOCK_DGRAM` ICMP socket | environmental **plus** the real #1962 gap |
+| `PingTests.Send_LoopbackByString_Succeeds` | same | same |
+| `PingTests.Send_CustomBuffer_EchoedBack` | same | same |
+| `PingTests.Send_WithOptions_Succeeds` | same | same |
+| `PingTests.SendPingAsync_Loopback_Succeeds` | same | same |
+| `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` | `/proc/net/if_inet6` **does not exist** — no IPv6 in this kernel namespace, so `socket(AF_INET6, …)` fails with `"Socket::Socket: socket() failed"` | purely environmental |
+
+The distinction the batch instructions require is preserved: the empty `ping_group_range` is
+the **environmental limitation**, and #1962 — *`Ping` only ever opens an unprivileged
+`SOCK_DGRAM` ICMP socket, so it has no raw-socket receive path to fall back to* — is the
+**real implementation gap**. #1962 stays **blocked**: its design is not complete, and the
+privilege/platform/security decision it needs was not taken here.
+
+One skipped test, unchanged:
+`CultureInvariantFormattingTests.NumericAndDateFormatting_UnaffectedByNonInvariantGlobalLocale`
+— no non-invariant locale installed.
+
+**No new regression.** Every failure is one of the six the previous batch measured, and each
+was re-classified from first principles rather than inherited.
+
+### 11. Commits are unsigned, deliberately
+
+`commit.gpgsign=true` with `gpg.format=ssh` is configured, but
+`/home/claude/.ssh/commit_signing_key.pub` is empty, the private key is absent and no allowed
+signers file exists. Every commit used
+`git -c commit.gpgsign=false commit`, preserving the configured
+`Claude <noreply@anthropic.com>` identity. **No previous commit was amended, rebased or
+rewritten to add a signature**, and no history-wide `rebase --exec` was run. Re-signing, if
+wanted, is a single operation for a different environment with real key material.
+
+### 12. Build directories
+
+| Directory | Size |
+|---|---|
+| `build/` | 1.6 G (reused throughout; never cleaned or reconfigured) |
+| `build-probe/` | 3.2 M (was 18 M — the eight probe **binaries** were deleted once their evidence was transcribed, per CLAUDE.md rule 11; every `.cpp` and every before/after `.log` is retained) |
+| `build-tmp/` | 256 K (repository-local `TMPDIR` for every `mktemp`-based command) |
+| `build-modular/`, `build-asan/`, `build-ubsan/`, `build-tsan/`, `build-consumer/`, `cmake-build-debug/` | **do not exist** — none was created |
+
+**No new build-directory name was invented.** Sanitizer probes were compiled directly with
+`-fsanitize=…` into `build-probe/` with a per-ticket file-name prefix, which is what
+CLAUDE.md's closed directory set prescribes, and is the correct choice here anyway because
+every changed header is inline (the CCF-011 family plan's freshness rule).
+
+**Maximum aggregate compilation parallelism: two jobs**, never exceeded. Every build used
+`cmake --build … --parallel 2`; `check_selective_components.sh` was given
+`TMPDIR=$PWD/build-tmp` and reports "peak 2 job(s)" itself; `local_ci_check.sh` was given
+`SHARP_RUNTIME_BUILD_JOBS=2`; every probe was a single `g++` invocation. **No two builds ran
+concurrently** — the batch waited for `check_selective_components.sh` to finish before
+starting the test gate.
+
+### 13. Remaining queue and next work
+
+**Ready, no approval needed (5):** #1965, #1966, #1967, #1968 (Tasks/Channels, in that order —
+#1967 before #1968 because both rewrite the same `ChannelTests` cases) and #1963 (needs the
+.NET reference, which this environment lacks).
+
+**Blocked on the user (6 threading-related):** #1956, #1957, #1958, #1959
+(`docs/ThreadingNamespaceReviewPlan.md` §20) and #1969, #1970
+(`docs/ThreadingTasksChannelsReviewPlan.md` §9).
+
+**Recommended next batch:** #1965 → #1966 → #1967 → #1968, which is a direct continuation of
+this one and needs nothing from the user. If any of §20's four questions is answered first,
+**#1958 Group A** is the cheapest win in the repository — three compatible members already
+identified as needing no approval at all.
+
+**#1773 remains blocked** on a deliberate downstream upgrade; downstream was not inspected.
+**CNA and mobile-eggbert were not read, searched, built, tested or modified**, and no
+filesystem search left this repository. **Nothing was pushed, merged, rebased, tagged or
+published.**
 
 ---
 
