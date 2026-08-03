@@ -177,3 +177,68 @@ TEST(UriBuilderTest, SetFragment_Empty_StaysEmpty) {
     b.setFragmentProperty("");
     EXPECT_TRUE(b.getFragmentProperty().empty());
 }
+
+// ---------------------------------------------------------------------------
+// User-info split on copy — ticket #1993 (cause U-F, SR-AUD-138). setFieldsFromUri put the
+// whole user-info in userName_ and never populated password_, although the type publishes
+// UserName and Password separately, so replacing the Password left the original
+// credentials in the serialized URI. See docs/SystemUriNamespaceReviewPlan.md §25.
+// ---------------------------------------------------------------------------
+
+TEST(UriBuilderTest, CopiedUserInfo_SplitsUserAndPassword) {
+    UriBuilder b("http://user:pass@example.com/path");
+    EXPECT_EQ(b.getUserNameProperty(), "user");
+    EXPECT_EQ(b.getPasswordProperty(), "pass");
+}
+
+TEST(UriBuilderTest, CopiedUserInfo_RoundTripsUnchanged) {
+    UriBuilder b("http://user:pass@example.com/path");
+    EXPECT_EQ(b.ToString(), "http://user:pass@example.com:80/path");
+}
+
+TEST(UriBuilderTest, CopiedUserInfo_ReplacingPasswordDoesNotCorrupt) {
+    // The shape SR-AUD-138 names: before the repair this serialized
+    // "http://user:pass:replacement@example.com:80/path".
+    UriBuilder b("http://user:pass@example.com/path");
+    b.setPasswordProperty("replacement");
+    EXPECT_EQ(b.ToString(), "http://user:replacement@example.com:80/path");
+}
+
+TEST(UriBuilderTest, CopiedUserInfo_UserOnly) {
+    UriBuilder b("http://user@example.com/path");
+    EXPECT_EQ(b.getUserNameProperty(), "user");
+    EXPECT_TRUE(b.getPasswordProperty().empty());
+    EXPECT_EQ(b.ToString(), "http://user@example.com:80/path");
+}
+
+TEST(UriBuilderTest, CopiedUserInfo_None) {
+    UriBuilder b("http://example.com/path");
+    EXPECT_TRUE(b.getUserNameProperty().empty());
+    EXPECT_TRUE(b.getPasswordProperty().empty());
+    EXPECT_EQ(b.ToString(), "http://example.com:80/path");
+}
+
+TEST(UriBuilderTest, CopiedUserInfo_PasswordContainingColon_SplitsAtTheFirst) {
+    UriBuilder b("http://u:p:q@example.com/path");
+    EXPECT_EQ(b.getUserNameProperty(), "u");
+    EXPECT_EQ(b.getPasswordProperty(), "p:q");
+    EXPECT_EQ(b.ToString(), "http://u:p:q@example.com:80/path");
+}
+
+TEST(UriBuilderTest, CopiedUserInfo_EmptyPassword_DropsTheTrailingColon) {
+    // The ONE input whose rendering changes: "user:" used to be stored whole and emitted
+    // as "user:@", and is now UserName "user" with an empty Password, emitted as "user@".
+    // That matches .NET's UriBuilder, which splits at the first colon on copy and appends
+    // ":" + password only when the password is non-empty.
+    UriBuilder b("http://user:@example.com/p");
+    EXPECT_EQ(b.getUserNameProperty(), "user");
+    EXPECT_TRUE(b.getPasswordProperty().empty());
+    EXPECT_EQ(b.ToString(), "http://user@example.com:80/p");
+}
+
+TEST(UriBuilderTest, CopiedUserInfo_FromUriOverload_SplitsToo) {
+    // The Uri-taking constructor shares setFieldsFromUri and must behave identically.
+    UriBuilder b(System::Uri("ftp://user:pass@ftp.example.com/f.txt"));
+    EXPECT_EQ(b.getUserNameProperty(), "user");
+    EXPECT_EQ(b.getPasswordProperty(), "pass");
+}

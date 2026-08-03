@@ -40,7 +40,23 @@ namespace System {
             path_     = u.getAbsolutePathProperty();
             query_    = u.getQueryProperty();
             fragment_ = u.getFragmentProperty();
-            userName_ = u.getUserInfoProperty();
+            // Ticket #1993 (SR-AUD-138): the whole user-info used to land in userName_ with
+            // password_ never populated, although this type publishes UserName and Password
+            // as separate properties. Copying "http://user:pass@example.com/path" therefore
+            // reported UserName == "user:pass" and Password == "", and a later
+            // setPasswordProperty("replacement") serialised
+            // "http://user:pass:replacement@example.com:80/path" -- the credentials the
+            // caller replaced were still in the URI. The split is at the FIRST colon,
+            // matching .NET's UriBuilder.SetFieldsFromUri.
+            const std::string& info = u.getUserInfoProperty();
+            const auto colon = info.find(':');
+            if (colon == std::string::npos) {
+                userName_ = info;
+                password_.clear();
+            } else {
+                userName_ = info.substr(0, colon);
+                password_ = info.substr(colon + 1);
+            }
         }
 
     public:

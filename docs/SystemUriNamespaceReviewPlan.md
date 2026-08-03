@@ -982,3 +982,62 @@ No signature, layout, vtable, `noexcept`, mangled-symbol or component-edge chang
 acceptance change** — every resolution that succeeded still succeeds; three of them now
 produce the correct result. Eleven add-only regressions; `SharpRuntimeTests_Uri`
 **189 → 200**.
+
+---
+
+## 24. What #1993 measured (2026-08-03) — cause U-F
+
+### 24.1 The repair
+
+`UriBuilder::setFieldsFromUri` splits the copied user-info at its **first** colon into
+`userName_` and `password_`, and clears the password when there is no colon. Both
+constructors that copy from a `Uri` share that one function, so the string-taking and the
+`Uri`-taking overload are repaired together; both are covered by tests.
+
+### 24.2 Before and after
+
+`build-probe/1993_probe2_before.log` vs `build-probe/1993_probe2_after.log` — **four lines
+differ**:
+
+| Input | Before | After |
+|---|---|---|
+| `http://user:pass@example.com/path` | `user='user:pass'`, `password=''` | **`user='user'`, `password='pass'`** |
+| `http://u:p:q@example.com/p` | `user='u:p:q'`, `password=''` | **`user='u'`, `password='p:q'`** |
+| the same builder after `Password="replacement"` | `http://user:pass:replacement@example.com:80/path` | **`http://user:replacement@example.com:80/path`** |
+| `http://user:@example.com/p` | `user='user:'`, `ToString` `…user:@…` | **`user='user'`, `ToString` `…user@…`** — see §24.3 |
+
+### 24.3 One rendering change, found by measurement and not assumed away
+
+The ticket was written expecting `ToString()` to be byte-identical for every unmodified
+builder. Measured, that is true for **three** of the four shapes and **false for one**: a
+user-info of `"user:"` — a user name with an explicitly empty password — used to be stored
+whole and emitted as `user:@`, and is now `UserName == "user"` with an empty `Password`,
+emitted as `user@`. `ToString()` appends `":" + password` only when the password is
+non-empty, which is also what .NET's `UriBuilder` does after the identical first-colon
+split. The change is recorded here and **pinned by its own test** rather than left to be
+discovered by a consumer.
+
+### 24.4 Sanitizers and consequences
+
+ASan + UBSan + LSan: **0 reports**, exit 0, 32 sanitizer symbols vs 0, 16
+`System::UriBuilder::` symbols in the image. Header-only type, so instrumenting the probe
+recompiles it.
+
+No signature, object layout, vtable, `noexcept`, mangled-symbol or component-edge change;
+`sizeof(System::UriBuilder)` stays **232**. No acceptance change. Eight add-only
+regressions; `SharpRuntimeTests_Uri` **200 → 208**.
+
+### 24.5 #2004's reproduction, updated by the same probe
+
+§20.4 predicted that #1988 closed one route into the `Equals`/`GetHashCode` asymmetry while
+leaving the defect alive. Measured, in the same probe:
+
+```
+host="h:abc" ToString        : http://h:abc/
+host="h:abc" self-Equals     : 1
+host="h:abc" GetHashCode     : THROWS Invalid URI: Invalid port specified.
+scheme="bad scheme" self-Equals : 1
+scheme="bad scheme" GetHashCode : -390761049      <- no longer throws
+```
+
+**#2004 stays open** with the `Host` route as its live reproduction.
