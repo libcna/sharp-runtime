@@ -229,3 +229,167 @@ TEST(PosixSignalTests, SignalDelivery_StillWorksAfterAFlood) {
     EXPECT_TRUE(waitFor(fired, 1, 5000));
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
+
+// ---------------------------------------------------------------------------------------
+// Ticket #1975 / SR-AUD-169 (cause R-A of docs/SystemRuntimeNamespaceReviewPlan.md).
+//
+// installIfNeeded() used to pass nullptr as sigaction()'s oldact out-parameter, throwing the
+// process's existing disposition away, and uninstallIfUnused() then imposed SIG_DFL -- the OS
+// default, not "undo". Measured before the repair (build-probe/1972_probe2_before.log):
+// before_create=original -> during_registration original_calls=0 -> after_dispose=SIG_DFL,
+// and the sharper case sighup_before_create=SIG_IGN -> sighup_after_dispose=SIG_DFL, where
+// SIGHUP's default disposition TERMINATES the process.
+//
+// These tests use SIGWINCH, whose default is ignore, so a regression cannot kill the suite;
+// each one restores the disposition it installed whatever the outcome. What they measure --
+// that the exact prior disposition comes back -- is identical for SIGHUP.
+//
+// They deliberately do NOT assert anything about what happens DURING delivery. Chaining to a
+// saved handler is ticket #1979 and is approval-gated; #1975 saves and restores only.
+// ---------------------------------------------------------------------------------------
+namespace {
+    std::atomic<int> priorHandlerCalls{0};
+
+    extern "C" void priorSigwinchHandler(int) { priorHandlerCalls.fetch_add(1); }
+
+    /** Puts SIGWINCH back to the OS default however a test exits. */
+    struct SigwinchDispositionGuard {
+        ~SigwinchDispositionGuard() {
+            struct sigaction dfl{};
+            dfl.sa_handler = SIG_DFL;
+            sigemptyset(&dfl.sa_mask);
+            dfl.sa_flags = 0;
+            sigaction(SIGWINCH, &dfl, nullptr);
+        }
+    };
+
+    struct sigaction currentSigwinchDisposition() {
+        struct sigaction cur{};
+        sigaction(SIGWINCH, nullptr, &cur);
+        return cur;
+    }
+}
+
+TEST(PosixSignalTests, Dispose_RestoresAPreExistingCustomHandler) {
+    SigwinchDispositionGuard guard;
+
+    struct sigaction mine{};
+    mine.sa_handler = priorSigwinchHandler;
+    sigemptyset(&mine.sa_mask);
+    mine.sa_flags = SA_RESTART;
+    ASSERT_EQ(sigaction(SIGWINCH, &mine, nullptr), 0);
+    ASSERT_EQ(currentSigwinchDisposition().sa_handler, priorSigwinchHandler);
+
+    {
+        std::atomic<int> fired{0};
+        auto reg = PosixSignalRegistration::Create(PosixSignal::Sigwinch,
+                                                    [&fired](PosixSignalContext& ctx) {
+                                                        ctx.setCancelProperty(true);
+                                                        fired++;
+                                                    });
+        // While registered the port owns the disposition -- that part is unchanged.
+        EXPECT_NE(currentSigwinchDisposition().sa_handler, priorSigwinchHandler);
+        kill(getpid(), SIGWINCH);
+        EXPECT_TRUE(waitFor(fired, 1, 2000));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    EXPECT_EQ(currentSigwinchDisposition().sa_handler, priorSigwinchHandler)
+        << "the pre-existing handler was not restored (SR-AUD-169)";
+
+    // And it works again, not merely looks right.
+    priorHandlerCalls.store(0);
+    kill(getpid(), SIGWINCH);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_GE(priorHandlerCalls.load(), 1);
+}
+
+TEST(PosixSignalTests, Dispose_RestoresSigIgnAsSigIgnNotSigDfl) {
+    // The case that carries the severity: for a signal whose default terminates, restoring
+    // SIG_DFL where SIG_IGN was set arms an unrelated kill.
+    SigwinchDispositionGuard guard;
+
+    struct sigaction ign{};
+    ign.sa_handler = SIG_IGN;
+    sigemptyset(&ign.sa_mask);
+    ign.sa_flags = 0;
+    ASSERT_EQ(sigaction(SIGWINCH, &ign, nullptr), 0);
+
+    {
+        auto reg = PosixSignalRegistration::Create(
+            PosixSignal::Sigwinch, [](PosixSignalContext& ctx) { ctx.setCancelProperty(true); });
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    EXPECT_EQ(currentSigwinchDisposition().sa_handler, SIG_IGN)
+        << "SIG_IGN was replaced by SIG_DFL (SR-AUD-169)";
+}
+
+TEST(PosixSignalTests, Dispose_RestoresSigDflWhenSigDflWasWhatWasThere) {
+    // The control: restoring must reproduce whatever was found, including the default.
+    SigwinchDispositionGuard guard;
+
+    struct sigaction dfl{};
+    dfl.sa_handler = SIG_DFL;
+    sigemptyset(&dfl.sa_mask);
+    dfl.sa_flags = 0;
+    ASSERT_EQ(sigaction(SIGWINCH, &dfl, nullptr), 0);
+
+    {
+        auto reg = PosixSignalRegistration::Create(
+            PosixSignal::Sigwinch, [](PosixSignalContext& ctx) { ctx.setCancelProperty(true); });
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    EXPECT_EQ(currentSigwinchDisposition().sa_handler, SIG_DFL);
+}
+
+TEST(PosixSignalTests, Dispose_RestoresOnlyAfterTheLastRegistrationForThatSignal) {
+    SigwinchDispositionGuard guard;
+
+    struct sigaction mine{};
+    mine.sa_handler = priorSigwinchHandler;
+    sigemptyset(&mine.sa_mask);
+    mine.sa_flags = SA_RESTART;
+    ASSERT_EQ(sigaction(SIGWINCH, &mine, nullptr), 0);
+
+    {
+        auto outer = PosixSignalRegistration::Create(
+            PosixSignal::Sigwinch, [](PosixSignalContext& ctx) { ctx.setCancelProperty(true); });
+        {
+            auto inner = PosixSignalRegistration::Create(
+                PosixSignal::Sigwinch, [](PosixSignalContext& ctx) { ctx.setCancelProperty(true); });
+        }
+        // The inner Dispose must NOT restore: the outer registration is still live.
+        EXPECT_NE(currentSigwinchDisposition().sa_handler, priorSigwinchHandler)
+            << "an inner Dispose restored the prior handler while an outer registration was live";
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    EXPECT_EQ(currentSigwinchDisposition().sa_handler, priorSigwinchHandler);
+}
+
+TEST(PosixSignalTests, Dispose_RestoresSaFlagsAndSaMaskNotJustTheHandler) {
+    // The whole struct sigaction is the disposition. Saving only sa_handler would pass the
+    // three tests above and still silently drop the caller's flags and mask.
+    SigwinchDispositionGuard guard;
+
+    struct sigaction mine{};
+    mine.sa_handler = priorSigwinchHandler;
+    sigemptyset(&mine.sa_mask);
+    sigaddset(&mine.sa_mask, SIGUSR2);
+    mine.sa_flags = SA_RESTART | SA_NODEFER;
+    ASSERT_EQ(sigaction(SIGWINCH, &mine, nullptr), 0);
+
+    {
+        auto reg = PosixSignalRegistration::Create(
+            PosixSignal::Sigwinch, [](PosixSignalContext& ctx) { ctx.setCancelProperty(true); });
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    struct sigaction restored = currentSigwinchDisposition();
+    EXPECT_EQ(restored.sa_handler, priorSigwinchHandler);
+    EXPECT_NE(restored.sa_flags & SA_NODEFER, 0) << "SA_NODEFER was dropped on restore";
+    EXPECT_NE(restored.sa_flags & SA_RESTART, 0) << "SA_RESTART was dropped on restore";
+    EXPECT_EQ(sigismember(&restored.sa_mask, SIGUSR2), 1) << "sa_mask was dropped on restore";
+}

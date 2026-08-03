@@ -942,3 +942,62 @@ component edge changed — the entire repair is inside an anonymous namespace in
 cannot set `O_NONBLOCK`, `Create` throws `System::IO::IOException` after closing both
 descriptors, rather than proceeding with a pipe that can hang. `O_CLOEXEC` is
 deliberately **not** added here (§15, ticket #1985).
+
+---
+
+## 20. What #1975 measured (2026-08-03) — cause R-A
+
+**SR-AUD-169: `confirmed` → `remediated`** for its save/restore half. Cause R-A is
+closed; its *chaining* half remains open under R-C / #1979, unchanged and unclaimed.
+
+### 20.1 The repair
+
+`installedSignals_` was a `std::vector<int>` — it recorded *which* signals the port had
+taken over and nothing about what it displaced, which is why uninstalling degenerated
+into imposing `SIG_DFL`. It is now a `std::vector<InstalledSignal>`, each element
+carrying the signal number **and the complete `struct sigaction`** that `sigaction()`
+returns through its `oldact` out-parameter — the argument the old code passed `nullptr`
+for. `uninstallIfUnused` restores that struct instead of forcing the default.
+
+The whole struct is kept, not just `sa_handler`: `sa_flags` and `sa_mask` are equally
+part of a disposition, and saving only the handler would have passed three of the five
+new tests while silently dropping a caller's `SA_NODEFER` and signal mask.
+
+### 20.2 Before and after
+
+| | before | after |
+|---|---|---|
+| `after_dispose_disposition` | `SIG_DFL` | **`original`** |
+| `after_dispose original_calls` | `0` | **`1`** — the restored handler actually runs again |
+| `sighup_after_dispose` | `SIG_DFL` (default = **terminate**) | **`SIG_IGN`** |
+
+`build-probe/1972_probe2_before.log` → `build-probe/1975_probe2_after.log`.
+
+`during_registration original_calls=0` is **unchanged, deliberately**: while a
+registration is live the port owns the disposition, and chaining to the saved handler
+during delivery is #1979's approval-gated question, not this ticket's.
+
+### 20.3 Sanitizers
+
+ASan + UBSan + LSan over the full probe: **0 reports**. Instrumentation proved — 34
+sanitizer symbols against 0 in the plain binary, with 11 `installIfNeeded` /
+`uninstallIfUnused` symbols present, so the changed bodies were compiled **from source**
+rather than linked from `build/libsharp_runtime_runtime.a`. The harness was proved
+capable earlier in this batch against a deliberate control defect (§18.3).
+
+### 20.4 Consequences
+
+No public signature, object layout, vtable, `noexcept` specification, mangled symbol or
+component edge changed — `InstalledSignal` is a new type inside an **anonymous
+namespace** in a `.cpp` body, invisible to every consumer.
+
+Observable: after the last `Dispose` the process's disposition is what it was before the
+first `Create`, instead of `SIG_DFL`. The only thing a consumer loses is the ability to
+use `PosixSignalRegistration` as a way to *clear* a pre-existing handler — which is
+nowhere documented, cannot be deliberate, and is the defect itself.
+
+Five add-only regressions, one of which (`Dispose_RestoresSigDflWhenSigDflWasWhatWasThere`)
+is a control proving the repair reproduces whatever it found rather than always
+restoring something non-default. All use `SIGWINCH`, whose default is ignore, so a
+regression cannot kill the suite; each restores the disposition it installed through a
+scope guard whatever the outcome. `SharpRuntimeTests_Runtime` **138 → 143**.

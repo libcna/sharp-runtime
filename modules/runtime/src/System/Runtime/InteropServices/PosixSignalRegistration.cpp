@@ -49,11 +49,24 @@ namespace {
         PosixSignalRegistration::Handler handler;
     };
 
+    // What was installed for one signal before this port took it over. Recording only the
+    // signal number -- which is all installedSignals_ used to hold -- makes it impossible to
+    // put the process back the way it was found, so uninstalling degenerated into imposing
+    // SIG_DFL. That is the OS default, not "undo": for most catchable signals the default
+    // disposition TERMINATES the process, so a program that had deliberately set SIG_IGN on
+    // SIGHUP was killed by the next SIGHUP once an unrelated component disposed its last
+    // registration (ticket #1975 / SR-AUD-169). The whole struct sigaction is kept, not just
+    // sa_handler, because sa_flags and sa_mask are equally part of the disposition.
+    struct InstalledSignal {
+        int signo;
+        struct sigaction previous;
+    };
+
     // Guards both registrations_ (the C++-visible table) and installedSignals_ (which raw signal
-    // numbers currently have our sigaction handler installed).
+    // numbers currently have our sigaction handler installed, and what they had before).
     std::mutex registryMutex_;
     std::vector<Entry> registrations_;
-    std::vector<int> installedSignals_;
+    std::vector<InstalledSignal> installedSignals_;
     SharpRuntime::intcs nextToken_ = 0;
 
     // Async-signal-safe pending-signal flags, indexed directly by native signal number. sig_atomic_t
@@ -158,25 +171,37 @@ namespace {
 
     void installIfNeeded(int signo) {
         // Caller already holds registryMutex_.
-        for (int s : installedSignals_) if (s == signo) return;
+        for (const auto& s : installedSignals_) if (s.signo == signo) return;
         struct sigaction sa{};
         sa.sa_handler = onNativeSignal;
         sigemptyset(&sa.sa_mask);
         sa.sa_flags = SA_RESTART;
-        if (sigaction(signo, &sa, nullptr) != 0) {
+        // The third argument is sigaction()'s oldact out-parameter. Passing nullptr here -- which
+        // is what this code used to do -- discards the process's existing disposition with no way
+        // to get it back.
+        struct sigaction previous{};
+        if (sigaction(signo, &sa, &previous) != 0) {
             throw System::IO::IOException("Failed to install handler for the requested POSIX signal.");
         }
-        installedSignals_.push_back(signo);
+        installedSignals_.push_back(InstalledSignal{signo, previous});
     }
 
     void uninstallIfUnused(int signo) {
         // Caller already holds registryMutex_.
         for (const auto& e : registrations_)
             if (toNativeSignalNumber(e.signal) == signo) return; // still in use
-        std::signal(signo, SIG_DFL);
-        installedSignals_.erase(
-            std::remove(installedSignals_.begin(), installedSignals_.end(), signo),
-            installedSignals_.end());
+
+        auto it = std::find_if(installedSignals_.begin(), installedSignals_.end(),
+                                [signo](const InstalledSignal& s) { return s.signo == signo; });
+        if (it == installedSignals_.end()) return;
+
+        // Restore exactly what was there before the first registration for this signal, including
+        // sa_flags and sa_mask -- not SIG_DFL. Restoring SIG_IGN as SIG_IGN is the case that
+        // matters most: SIGHUP's default disposition terminates, so imposing SIG_DFL on a process
+        // that had deliberately ignored SIGHUP arms an unrelated kill.
+        struct sigaction previous = it->previous;
+        sigaction(signo, &previous, nullptr);
+        installedSignals_.erase(it);
     }
 
 } // namespace
