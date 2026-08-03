@@ -919,3 +919,66 @@ reports no invalid enum load from #1992's own out-of-domain casts.
 No signature, layout, vtable, `noexcept`, mangled-symbol or component-edge change.
 `sizeof(System::Uri)` stays **240**. Nineteen add-only regressions;
 `SharpRuntimeTests_Uri` **170 → 189**. **SR-AUD-145 is fully remediated by the pair.**
+
+---
+
+## 23. What #1990 measured (2026-08-03) — cause U-C
+
+### 23.1 The repair
+
+`Uri(const Uri&, const std::string&)` now implements three of RFC 3986 §5.2.2's four
+reference cases instead of one. The base-authority reconstruction became a lambda so all
+three exits share it verbatim, and two branches were added **above** the existing path
+merge:
+
+1. a reference beginning `"//"` is a **network-path** reference: only the base's *scheme*
+   survives, so the result is `scheme + ':' + reference`;
+2. a reference whose path component is **empty** — one that is only a query and/or a
+   fragment — keeps the base's path untouched, and when it is fragment-only it additionally
+   keeps the base's query.
+
+The path-bearing case is byte-for-byte the code that was already there.
+
+### 23.2 Before and after
+
+`build-probe/1992_probe1_after.log` vs `build-probe/1990_probe1_after.log` — **three lines
+differ, and no others**. They match SR-AUD-144's recorded reference outputs exactly:
+
+| Base | Reference | Before | After |
+|---|---|---|---|
+| `http://example.com/a/b?old#old` | `?new` | `http://example.com/a/?new` | **`http://example.com/a/b?new`** |
+| `http://example.com/a/b?old#old` | `#new` | `http://example.com/a/#new` | **`http://example.com/a/b?old#new`** |
+| `http://example.com/a/b` | `//other.example/c` | `http://example.com//other.example/c` | **`http://other.example/c`** |
+
+The first two lost the `b` segment because an empty relative path ran through the merge,
+which truncates the base path at its last `/`; the second additionally lost the base query.
+The third produced a URI **pointing at the wrong host** — the base's — with the intended
+host demoted to a path segment.
+
+Unchanged and asserted: every path-bearing merge, the dot-segment cases, the absolute-path
+reference, the opaque-absolute reference that discards the base, the userInfo-preservation
+case, and the empty reference.
+
+### 23.3 One case deliberately left alone
+
+RFC 3986 §5.2.2 drops the base's **fragment** for an **empty** reference; this port has
+always returned the base verbatim, fragment included. That is not repaired here: no
+reference evidence survives in this environment to decide what .NET does with
+`new Uri(base, "")`, and SR-AUD-144 does not name it. The current answer is **pinned by a
+test** so a later change is deliberate.
+
+The **opaque base** shape is also excluded and is ticket **#2001**:
+`Uri(Uri("mailto:a@b.com"), "c")` still produces `mailto:///c`, because detecting that a
+base was opaque needs information the object does not record.
+
+### 23.4 Sanitizers and consequences
+
+ASan + UBSan + LSan over the full sweep: **0 reports**, exit 0, 35 sanitizer symbols vs 0,
+45 `System::Uri::` symbols compiled from source. All six downstream consumers re-run
+unchanged: `Net` 240, `Net.Http` 132, `Net.Http.Headers` 373, `Xml` 379, `IO` 599,
+`Net.WebSockets` 24.
+
+No signature, layout, vtable, `noexcept`, mangled-symbol or component-edge change, and **no
+acceptance change** — every resolution that succeeded still succeeds; three of them now
+produce the correct result. Eleven add-only regressions; `SharpRuntimeTests_Uri`
+**189 → 200**.

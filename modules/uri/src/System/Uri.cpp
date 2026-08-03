@@ -322,6 +322,29 @@ Uri::Uri(const Uri& baseUri, const std::string& relativeUri) {
         parse(relativeUri);
         return;
     }
+    // RFC 3986 §5.3: "if defined, userinfo, host, port [are] copied from base" into the merged
+    // authority. The previous code omitted baseUri.userInfo_ entirely, so combining a base URI
+    // that carries embedded credentials (e.g. "http://user:pass@example.com/path/") with a
+    // relative reference silently dropped them from the result.
+    const auto baseAuthority = [&baseUri]() {
+        std::string s = baseUri.scheme_ + "://";
+        if (!baseUri.userInfo_.empty())
+            s += baseUri.userInfo_ + '@';
+        s += baseUri.host_;
+        if (baseUri.port_ != defaultPortForScheme(baseUri.scheme_) && baseUri.port_ != -1)
+            s += ':' + std::to_string(baseUri.port_);
+        return s;
+    };
+
+    // RFC 3986 §5.2.2 network-path reference: a reference beginning "//" carries its OWN
+    // authority, so only the base's SCHEME survives. Ticket #1990 (SR-AUD-144); before the
+    // repair "//other.example/c" was merged under the base authority and produced
+    // "http://example.com//other.example/c", a URI pointing at the wrong host.
+    if (relativeUri.rfind("//", 0) == 0) {
+        parse(baseUri.scheme_ + ':' + relativeUri);
+        return;
+    }
+
     // Split off query/fragment so dot-segment removal (RFC 3986 §5.2.4) only ever
     // operates on the path component, matching .NET's CombineUri + Compress() (Uri.cs).
     std::string relativePath = relativeUri;
@@ -332,8 +355,24 @@ Uri::Uri(const Uri& baseUri, const std::string& relativeUri) {
         relativePath = relativePath.substr(0, tailPos);
     }
 
+    // RFC 3986 §5.2.2, the R.path == "" case: a reference that is ONLY a query and/or a
+    // fragment keeps the base's path untouched, and a fragment-only reference additionally
+    // keeps the base's query. Ticket #1990 (SR-AUD-144). Before the repair both shapes ran
+    // through the path merge below with an EMPTY relative path, which truncated the base
+    // path at its last '/': for base "http://example.com/a/b?old#old", "?new" produced
+    // "http://example.com/a/?new" and "#new" produced "http://example.com/a/#new", losing
+    // the "b" segment in both and the old query in the second.
+    if (relativePath.empty()) {
+        std::string combined = baseAuthority() + baseUri.path_;
+        if (relativeTail.rfind('#', 0) == 0)
+            combined += baseUri.query_;
+        combined += relativeTail;
+        parse(combined);
+        return;
+    }
+
     std::string mergedPath;
-    if (!relativePath.empty() && relativePath[0] == '/') {
+    if (relativePath[0] == '/') {
         mergedPath = relativePath;
     } else {
         // RFC 3986 §5.3 merge: base path truncated up to and including its last '/'.
@@ -343,19 +382,7 @@ Uri::Uri(const Uri& baseUri, const std::string& relativeUri) {
     }
     mergedPath = removeDotSegments(mergedPath);
 
-    // RFC 3986 §5.3: "if defined, userinfo, host, port [are] copied from base" into the merged
-    // authority. The previous code omitted baseUri.userInfo_ entirely, so combining a base URI
-    // that carries embedded credentials (e.g. "http://user:pass@example.com/path/") with a
-    // relative reference silently dropped them from the result.
-    std::string combined = baseUri.scheme_ + "://";
-    if (!baseUri.userInfo_.empty())
-        combined += baseUri.userInfo_ + '@';
-    combined += baseUri.host_;
-    if (baseUri.port_ != defaultPortForScheme(baseUri.scheme_) && baseUri.port_ != -1)
-        combined += ':' + std::to_string(baseUri.port_);
-    combined += mergedPath;
-    combined += relativeTail;
-    parse(combined);
+    parse(baseAuthority() + mergedPath + relativeTail);
 }
 
 // ---------------------------------------------------------------------------

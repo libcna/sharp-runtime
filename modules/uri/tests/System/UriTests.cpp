@@ -698,3 +698,99 @@ TEST(UriTests, UriKind_OutOfDomain_TryCreateReturnsFalse) {
     EXPECT_FALSE(Uri::TryCreate("http://example.com/", static_cast<UriKind>(99), result));
     EXPECT_EQ(result, nullptr);
 }
+
+// ---------------------------------------------------------------------------
+// Reference resolution — ticket #1990 (cause U-C, SR-AUD-144). The two-Uri constructor
+// implemented only the path case of RFC 3986 §5.2.2/§5.3: it split a "?"/"#" tail off the
+// reference, merged the remainder as a path under the base authority, and re-appended the
+// tail. Three of the four cases were therefore wrong — a query-only reference truncated
+// the base path, a fragment-only reference truncated it AND dropped the base query, and a
+// network-path reference was merged under the WRONG authority.
+// ---------------------------------------------------------------------------
+
+TEST(UriTests, Resolve_QueryOnlyReference_KeepsFullBasePath) {
+    Uri base("http://example.com/a/b?old#old");
+    Uri combined(base, "?new");
+    EXPECT_EQ(combined.getAbsolutePathProperty(), "/a/b");
+    EXPECT_EQ(combined.getQueryProperty(), "?new");
+    EXPECT_TRUE(combined.getFragmentProperty().empty());
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://example.com/a/b?new");
+}
+
+TEST(UriTests, Resolve_FragmentOnlyReference_KeepsBasePathAndBaseQuery) {
+    Uri base("http://example.com/a/b?old#old");
+    Uri combined(base, "#new");
+    EXPECT_EQ(combined.getAbsolutePathProperty(), "/a/b");
+    EXPECT_EQ(combined.getQueryProperty(), "?old");
+    EXPECT_EQ(combined.getFragmentProperty(), "#new");
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://example.com/a/b?old#new");
+}
+
+TEST(UriTests, Resolve_QueryOnlyReferenceWithFragment_ReplacesBothQueryAndFragment) {
+    Uri base("http://example.com/a/b?old#old");
+    Uri combined(base, "?new#frag");
+    EXPECT_EQ(combined.getAbsolutePathProperty(), "/a/b");
+    EXPECT_EQ(combined.getQueryProperty(), "?new");
+    EXPECT_EQ(combined.getFragmentProperty(), "#frag");
+}
+
+TEST(UriTests, Resolve_QueryOnlyReferenceOverBaseWithNoQuery) {
+    Uri base("http://example.com/a/b");
+    Uri combined(base, "?q=1");
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://example.com/a/b?q=1");
+}
+
+TEST(UriTests, Resolve_FragmentOnlyReferenceOverBaseWithNoQuery) {
+    Uri base("http://example.com/a/b");
+    Uri combined(base, "#top");
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://example.com/a/b#top");
+}
+
+TEST(UriTests, Resolve_NetworkPathReference_ReplacesAuthority) {
+    Uri base("http://example.com/a/b");
+    Uri combined(base, "//other.example/c");
+    EXPECT_EQ(combined.getSchemeProperty(), "http");
+    EXPECT_EQ(combined.getHostProperty(), "other.example");
+    EXPECT_EQ(combined.getAbsolutePathProperty(), "/c");
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://other.example/c");
+}
+
+TEST(UriTests, Resolve_NetworkPathReference_KeepsBaseSchemeOnly) {
+    Uri base("https://example.com:8443/a/b");
+    Uri combined(base, "//other.example:9000/c?q#f");
+    EXPECT_EQ(combined.getSchemeProperty(), "https");
+    EXPECT_EQ(combined.getHostProperty(), "other.example");
+    EXPECT_EQ(combined.getPortProperty(), 9000);
+    EXPECT_EQ(combined.getQueryProperty(), "?q");
+    EXPECT_EQ(combined.getFragmentProperty(), "#f");
+}
+
+TEST(UriTests, Resolve_NetworkPathReference_CarriesItsOwnUserInfo) {
+    Uri base("http://olduser@example.com/a/b");
+    Uri combined(base, "//newuser@other.example/c");
+    EXPECT_EQ(combined.getUserInfoProperty(), "newuser");
+    EXPECT_EQ(combined.getHostProperty(), "other.example");
+}
+
+TEST(UriTests, Resolve_PathReference_StillDropsBaseQueryAndFragment) {
+    // Control for the case RFC 3986 already had right: a path-bearing reference replaces
+    // the base's query and fragment rather than inheriting them.
+    Uri base("http://example.com/a/b?old#old");
+    Uri combined(base, "c");
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://example.com/a/c");
+}
+
+TEST(UriTests, Resolve_QueryOnlyReference_PreservesBaseUserInfoAndPort) {
+    Uri base("http://user:pw@example.com:8080/a/b");
+    Uri combined(base, "?z=9");
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://user:pw@example.com:8080/a/b?z=9");
+}
+
+TEST(UriTests, Resolve_EmptyReference_StillReturnsTheBase) {
+    // Unchanged by #1990 and deliberately so: RFC 3986 drops the base fragment for an
+    // empty reference, but this port has always returned the base verbatim and no
+    // reference evidence survives here to decide which .NET does.
+    Uri base("http://example.com/a/b?q#f");
+    Uri combined(base, "");
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://example.com/a/b?q#f");
+}
