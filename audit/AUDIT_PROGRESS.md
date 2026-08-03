@@ -6819,3 +6819,75 @@ groups, A-1+A-2 recommended), `IsKnownScheme` argument validation (#1998), and
 
 **Index after #1994: 104 remediated / 260 confirmed / 364 total** — of which **24** carry
 the `confirmed (design-complete)` qualifier, ten of them added by this review's §14 designs.
+
+---
+
+## `System::Text` namespace review — ticket #2006 (2026-08-03)
+
+Fifth namespace review, after `System::Threading` (#1950),
+`System::Threading::Tasks`/`Channels` (#1964), `System::Runtime` (#1972) and
+`System::Uri` (#1987). Durable record:
+[`docs/SystemTextNamespaceReviewPlan.md`](../docs/SystemTextNamespaceReviewPlan.md).
+
+**Scope.** The C++ namespace `System::Text` spans three CMake components; this review owns
+**one** of them, `Text` (`modules/text`, 27 public headers / 4 implementation files / 6 test
+files), where all fourteen findings live. `Text.Json` and `Text.RegularExpressions` are
+distinct namespaces with their own queues. `System::Text::NormalizationForm` is declared in
+`modules/core` and has no `Normalize` surface to remediate — normalization is an **absent**
+feature, recorded as an explicit exclusion rather than as a finding.
+
+**All fourteen dispositioned, none lost:** six compatible implementation tickets
+(#2007–#2012, all `done`) and nine approval-sensitive design tickets (#2013–#2021, all
+`blocked` with an exact approval sentence in plan §14).
+
+**Six audit premises corrected, historical text preserved:**
+
+- **SR-AUD-286's named reproduction does not reproduce.** `UTF8Encoding::GetString(data, -1, 1)`
+  returns `""`, because the `size_t` wrap makes the derived end `0`. UTF-8 remains a member
+  (it is reachable for `count < |index|`), but the finding's own example is not the evidence.
+- **SR-AUD-286 names one of six failure modes.** Measured and closed with it: a
+  segmentation fault for a null buffer in Latin-1/UTF-16/UTF-32; `std::length_error` escaping
+  `Latin1Encoding` for a negative count; UBSan-confirmed
+  `signed integer overflow: 2147483647 + 4` in `UnicodeEncoding`'s own `intcs end = index + count`;
+  `Decoder::GetString(vec, -1)` reading **five** bytes from a four-element vector; and
+  `std::length_error` from `DecoderExceptionFallback::GetFallbackString(nullptr, -1)`.
+  `UTF7Encoding`, by contrast, was already correct, and its checks **became** the shared policy.
+- **SR-AUD-287 names one direction of a two-direction defect.** `setEncoderFallbackProperty(nullptr)`
+  is the identical segmentation fault as the decoder setter.
+- **SR-AUD-295 understates its own consequence.** The signed overflow does not accompany the
+  bounds check, it **defeats** it: `INTCS_MIN - count` wraps positive, the comparison is
+  false, the guard passes, and `std::copy` writes — ASan reports a heap-buffer-overflow while
+  the call **returns normally**.
+- **SR-AUD-298 names the smaller of two defects in one expression.** One value before the
+  named `std::out_of_range`, `Parse("{2147483647}")` **succeeded** and returned
+  `getMinimumArgumentCountProperty() == -2147483648`.
+- **SR-AUD-297's `Decode` defect is four defects.** Besides `std::invalid_argument` for `%zz`,
+  `std::stoi` accepted non-hexadecimal text and produced a silently wrong byte: `"%-1"` →
+  `0xFF`, `"% 1"` → `0x01`, `"%+f"` → `0x0F`. `HtmlEncoder`'s substring overload, absent from
+  the index row entirely, threw `std::out_of_range` for a negative start and **silently
+  clamped** an over-long count.
+- **CCF-012's exclusion list is wrong** to say `System.Text.CompositeFormat` "is not ported"
+  — see the cross-cutting note.
+
+**Ten post-audit defects recorded, none issuing an identifier**, each folded into the owning
+compatible ticket because each is the same expression as a named defect
+(plan §16). Numbering stays frozen at **364**.
+
+**Evidence discipline.** `/rv/tmp/runtime/src/libraries/` is **absent** from this environment
+and no .NET runtime is installed. Plan §7 states, per repair, what evidence survives. **No
+compatible repair in this batch depends on absent evidence** — #2007 is transcribed from
+`UTF7Encoding`, #2009 from its own four sibling guards, #2011 from RFC 3986 §2.1 and the
+sibling `UrlEncoder::Encode`, and #2010 from the already-approved
+`System::detail::CompositeFormat` header. That is precisely the criterion that separates the
+compatible column from the gated one.
+
+**Still open in this namespace:** the shared mutable factory encodings (#2013, CCF-009 shape),
+Latin-1 over scalars (#2014), the byte-vs-character unit (#2015, the largest gate, and one
+that should not be decided without deciding it for `System::String`), preamble versus payload
+plus a vtable change (#2016), the fallback policy and truncated fixed-width units (#2017), a
+real Unicode `Rune` (#2018), the default Web encoders' allow-list (#2019), one composite-format
+grammar (#2020, and CCF-012 cannot close until it lands), and `EncodingInfo`'s code-page
+resolution (#2021).
+
+**Index after #2012: 107 remediated / 257 confirmed / 364 total** — of which **35** carry the
+`confirmed (design-complete)` qualifier, eleven of them added by this review's §14 designs.

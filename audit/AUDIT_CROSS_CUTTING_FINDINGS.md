@@ -2124,3 +2124,83 @@ numbering is closed and the namespace plan is their durable record.
 `remediated` by tickets #1993, #1989, #1990, and the #1991/#1992 pair. The index now reads
 **104 remediated / 260 confirmed / 364 total**, of which 24 carry the
 `confirmed (design-complete)` qualifier.
+
+---
+
+## Post-audit remediation note — the `System::Text` namespace review (2026-08-03)
+
+Ticket #2006 reviewed `modules/text`'s fourteen findings (SR-AUD-286 … SR-AUD-299)
+and grouped them into eleven causes, T-A … T-N
+(`docs/SystemTextNamespaceReviewPlan.md` §5).
+
+### A correction to CCF-012's own exclusion list
+
+CCF-012 closes with a list of items *"deliberately not members and not closed by
+this work"*, whose last entry reads:
+
+> *"and `System.Text.CompositeFormat`, which is not ported."*
+
+**That is false, and it matters.**
+`modules/text/include/System/Text/CompositeFormat.hpp` has existed throughout, has
+its own audit report and its own confirmed finding (SR-AUD-298), and contains a
+**third** hand-written composite-format grammar that #1882, #1883 and #1884 never
+touched. The historical sentence is preserved above; this is the correction.
+
+The consequence is CCF-012's own stated one: *"altering just one API preserves
+divergent brace rules."* After #1884, `String::Format` and
+`FormattableString::ToString` share `System::detail::runCompositeFormat`;
+`CompositeFormat::Parse` still does not, and it accepts `{0,not-a-width}`, `{0,-}`
+and any index below `INT32_MAX - 1`, none of which the shared grammar accepts.
+**CCF-012 therefore still cannot be closed**, now for a second reason beyond
+#1884's own landing. Ticket **#2020** is the remaining member, blocked on the
+approval sentence in `docs/SystemTextNamespaceReviewPlan.md` §14.8.
+
+What #2010 *did* close in that file is the CCF-012 defect class the family already
+names — a `std::` exception escaping a `System`-shaped API — plus one the audit
+does not: `Parse("{2147483647}")` succeeded and returned a **negative** minimum
+argument count, UBSan-confirmed `signed integer overflow: 2147483647 + 1` from
+`return maxIdx + 1`. #2011 closes the same defect class in
+`Encodings::Web::UrlEncoder::Decode` and `HtmlEncoder::Encode`, which are not
+CCF-012 members and are not made into members — they are the same *cause* (a
+`std::` primitive used as a parser on public input) in a different component, and
+the cross-cutting numbering is closed.
+
+### Causes governed by an existing family, deliberately without a new identifier
+
+- **T-A** (SR-AUD-286, the raw `(data, index, count)` decode boundary) is a new
+  occurrence of **CCF-004**'s arithmetic shape — `UnicodeEncoding`'s
+  `intcs end = index + count` is the fifth module to reach signed overflow at a
+  public boundary — and of **CCF-005**'s boundary-validation shape. It gets no new
+  identifier. Its repair is unusual and worth naming: the policy was **transcribed
+  from `UTF7Encoding`**, the one entry in the same component that already had it,
+  so no reference tree was required.
+- **T-C** (SR-AUD-295, `StringBuilder::CopyTo`) is **CCF-004**'s fourth module and
+  is recorded as such rather than as a new family. Its measured consequence is
+  sharper than CCF-004's framing suggests: the overflow did not merely produce a
+  wrong value, it made the bounds check evaluate **false** and let `std::copy`
+  write into caller memory while the call returned normally.
+- **T-G** (SR-AUD-288, the shared mutable factory encodings) is **CCF-009**'s shape
+  — a process-wide singleton with publicly mutable state and no ownership boundary,
+  exactly `Random::Shared` and `Guid::NewGuid`. CCF-009's policy is reused; no new
+  family is opened. It is blocked (#2013), not repaired.
+- **T-L** (SR-AUD-294, `Rune`'s ASCII-only classification) shares **CCF-015**'s
+  subject but is **not** a CCF-015 member: CCF-015 is about byte-locale predicates
+  applied to UTF-8 bytes, and `Rune` classifies **scalars**. Recorded so a future
+  reader does not merge them.
+
+The remaining causes (T-B nullable owner at a public setter, T-D/T-N the third
+format grammar, T-E/T-M `std::` primitives as parsers, T-F metadata disagreeing
+with behaviour, T-H a code-page encoding over storage bytes, T-I byte-vs-character
+units, T-J preamble as payload, T-K inert fallback policy) are **specific to this
+namespace** and are not promoted to `CCF-*` identifiers: the cross-cutting
+numbering is closed and `docs/SystemTextNamespaceReviewPlan.md` §5 is their durable
+record.
+
+**Closed by the same batch:** SR-AUD-286 and SR-AUD-287 (high) and SR-AUD-295
+(high) are `remediated` by tickets #2007, #2008 and #2009. Eleven more move to the
+`confirmed (design-complete)` qualifier — they remain open and remain counted as
+confirmed. The index now reads **107 remediated / 257 confirmed / 364 total**, of
+which **35** carry the `confirmed (design-complete)` qualifier. **No `SR-AUD-*`
+identifier was issued; numbering stays frozen at 364**, and the ten post-audit
+defects this review measured are recorded in the plan's §16 under ordinary ticket
+numbers only.
