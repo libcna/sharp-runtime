@@ -106,7 +106,18 @@ namespace System {
          */
         [[nodiscard]] const std::string& getOriginalStringProperty() const { return absoluteUri_; }
 
-        /** @brief Returns the scheme (e.g. "https"), lower-case as parsed. */
+        /**
+         * @brief Returns the scheme (e.g. "https") exactly as it appeared in the input.
+         *
+         * This doc-comment used to promise the scheme "lower-case as parsed". The parser
+         * has never lower-cased anything: `Uri("HTTP://EXAMPLE.COM/").getSchemeProperty()`
+         * measurably returns `"HTTP"`, and `getHostProperty()` likewise returns
+         * `"EXAMPLE.COM"`. Real .NET canonicalizes both. That divergence is a genuine open
+         * finding (SR-AUD-142) whose repair changes equality and hash semantics and is
+         * therefore approval-gated as ticket #1995; ticket #1994 corrected only the false
+         * claim, so the documentation now matches the code rather than the intention.
+         * Both behaviours are pinned by tests.
+         */
         [[nodiscard]] const std::string& getSchemeProperty()        const;
 
         /** @brief Returns the host name or IP address (without port). */

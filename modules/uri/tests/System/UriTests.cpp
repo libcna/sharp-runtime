@@ -794,3 +794,41 @@ TEST(UriTests, Resolve_EmptyReference_StillReturnsTheBase) {
     Uri combined(base, "");
     EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://example.com/a/b?q#f");
 }
+
+// ---------------------------------------------------------------------------
+// Documented contract — ticket #1994 (cause U-K). Uri.hpp's getSchemeProperty doc-comment
+// promised a scheme returned "lower-case as parsed"; the parser has never lower-cased
+// anything. The claim was corrected rather than the behaviour, because changing the
+// behaviour changes equality and hash semantics (SR-AUD-142, approval-gated as #1995).
+// These tests make the corrected documentation testable instead of merely asserted.
+// ---------------------------------------------------------------------------
+
+TEST(UriTests, DocumentedContract_SchemeCaseIsPreserved) {
+    Uri u("HTTP://EXAMPLE.COM/Path");
+    EXPECT_EQ(u.getSchemeProperty(), "HTTP");
+}
+
+TEST(UriTests, DocumentedContract_HostCaseIsPreserved) {
+    Uri u("HTTP://EXAMPLE.COM/Path");
+    EXPECT_EQ(u.getHostProperty(), "EXAMPLE.COM");
+}
+
+TEST(UriTests, DocumentedContract_CaseDifferingUrisAreNotEqualYet) {
+    // Pins the open SR-AUD-142 divergence so #1995's repair is a deliberate, visible
+    // change rather than a silent one: this test must be updated when identity changes.
+    Uri a("HTTP://EXAMPLE.COM:80/Path");
+    Uri b("http://example.com/Path");
+    EXPECT_FALSE(a == b);
+    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(UriTests, DocumentedContract_MixedCaseSchemeHasNoDefaultPort) {
+    // A direct consequence of the case-preserving contract: defaultPortForScheme matches
+    // lower-case names only, so "HTTP://" gets no default port.
+    Uri u("HTTP://example.com/");
+    EXPECT_EQ(u.getPortProperty(), -1);
+}
+
+TEST(UriTests, DocumentedContract_EmptyStringThrows) {
+    EXPECT_THROW(Uri(""), System::UriFormatException);
+}

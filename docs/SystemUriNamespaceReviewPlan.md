@@ -1041,3 +1041,38 @@ scheme="bad scheme" GetHashCode : -390761049      <- no longer throws
 ```
 
 **#2004 stays open** with the `Host` route as its live reproduction.
+
+---
+
+## 25. What #1994 did (2026-08-03) — cause U-K
+
+Documentation and pinning tests only. **No behaviour changed**, and the probe output is
+byte-identical before and after.
+
+### 25.1 `Uri::getSchemeProperty`
+
+The doc-comment promised the scheme "lower-case as parsed". The parser has never
+lower-cased anything. The **claim** was corrected, not the behaviour, because the behaviour
+is SR-AUD-142 and its repair changes equality and hash semantics — approval-gated as #1995.
+The new comment states the measured contract, names the finding, and points at the gated
+ticket.
+
+### 25.2 `UriCreationOptions`
+
+The header disclosed that its flag is "not enforced in this stub". Measured, the situation
+is stronger than that reads: **no `Uri` operation accepts the type at all** — there is no
+`Uri(string, UriCreationOptions)` and no options-bearing `TryCreate`, so a value can be
+constructed and read but can never reach a URI operation. A `@warning` now says so and
+points at #1997 group A-3. This is SR-AUD-149's **disclosure half**; the finding itself
+stays `confirmed`.
+
+### 25.3 Why this is not "documentation theatre"
+
+Five permanent tests make the corrected documentation **testable**: case-preserving scheme,
+case-preserving host, the case-differing pair that is deliberately still unequal *and*
+differently hashed, the consequence that a mixed-case scheme gets no default port, and the
+empty-string rejection. The third of these is the important one — it **must be updated when
+#1995 lands**, which turns an identity change from a silent one into a visible one.
+
+`SharpRuntimeTests_Uri` **208 → 213**. No signature, layout, vtable, `noexcept`,
+mangled-symbol or component-edge change. Closes neither SR-AUD-142 nor SR-AUD-149.
