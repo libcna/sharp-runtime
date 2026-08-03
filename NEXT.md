@@ -1,20 +1,311 @@
-*Last verified: 2026-08-03. Branch `feature/remediation-batch-tasks-channels-1965-1968`
-(cut from `a0cd647`), **pushed to `origin/claude/remediation-batch-1804-namespace-b1yjh5`
-at the user's explicit mid-batch request — no merge, rebase, tag or PR**. The batch
-implemented the entire **compatible** half of the `Threading.Tasks` + `Threading.Channels`
-review — **#1965–#1968** — and then split the verified-compatible part of **#1958 Group A**
-into new ticket **#1971**, landing it. Audit **93 remediated / 271 confirmed / 364 total**
-(+6 this batch); numbering still frozen at **364**. Gate **15,253 tests across 37
-executables**, 15,246 passing, 1 skipped, **6 failing for the same two measured
-environmental reasons, unchanged and not hidden**. Graph **41 / 91**, seams **2 / 18**,
-negative fixtures **10 / 81** over 91 compiler invocations peak 2, checker self-tests
-**45 / 45** and **15 / 15**, selective components **passed**. **Doxygen NOT run — still not
-installed here.** Database **1,971 tickets: 1,945 done, 1 todo, 18 blocked, 3 needs_user,
-4 wontfix**, none doing. **#1958 stays blocked and now has six members, not eight** —
-SR-AUD-215 was verified NOT compatible and stays with it. #1773, #1962 and #1963 unchanged.
-**Commits are intentionally unsigned** (§12). See the first handoff below.*
+*Last verified: 2026-08-03. Branch `feature/remediation-batch-system-runtime-review`
+(cut from `66ff8b3`), **not pushed — no push was requested during this batch**. The batch
+performed the **`System::Runtime` namespace review (#1972)**, wrote
+`docs/SystemRuntimeNamespaceReviewPlan.md`, created tickets **#1972–#1986**, and then
+implemented the **entire compatible half**: **#1973** SR-AUD-155, **#1974** SR-AUD-172,
+**#1975** SR-AUD-169, **#1976** SR-AUD-156, **#1977** SR-AUD-170, **#1978** SR-AUD-059 +
+SR-AUD-168's disclosure half, **#1982** SR-AUD-162. Audit **100 remediated / 264 confirmed
+/ 364 total** (+7 this batch; 14 of the 264 now carry the `confirmed (design-complete)`
+qualifier). Numbering still frozen at **364**. Gate **15,288 tests across 37 executables**,
+15,281 passing, 1 skipped, **6 failing for the same two measured causes, unchanged and not
+hidden** — and this batch **sharpened the attribution**: `SOCK_RAW`/`IPPROTO_ICMP` succeeds
+in this container, so a working ICMP path exists and `Ping` cannot use it, which is #1962
+rather than the environment alone. Graph **41 / 91**, seams **2 / 18**, negative fixtures
+**10 / 81**, checker self-tests **45 / 45** and **15 / 15**, selective components
+**passed**, build **0 warnings / 0 errors**. **Doxygen NOT run — still not installed
+here.** Database **1,985 tickets: 1,953 done, 3 todo, 22 blocked, 3 needs_user, 4
+wontfix**, none doing. **Commits are intentionally unsigned.** #1773, #1962 and #1963
+unchanged. Two new post-audit defects recorded without an SR-AUD identifier: **#1985** and
+**#1986**. See the first handoff below.*
 
 ---
+
+## Autonomous batch handoff, 2026-08-03 (`System::Runtime` review #1972 + its whole compatible half, #1973–#1978 and #1982)
+
+Branch `feature/remediation-batch-system-runtime-review`, cut from the previous batch's tip
+`66ff8b3`. **Nine commits, all local and all unsigned** (§12). **No push, no merge, no
+rebase, no tag, no PR**, and no previous commit was amended or rewritten. `CNA` and
+`mobile-eggbert` were not read, searched, built, tested or modified, and no filesystem
+search left this repository.
+
+### 1. The namespace review (#1972)
+
+`docs/SystemRuntimeNamespaceReviewPlan.md` converts the **21 open findings** in
+`modules/runtime/` into **twelve root causes** (R-A … R-L) and a bounded queue, in the
+style of #1950 and #1964. Every finding maps to exactly one disposition; none disappears.
+
+**Why `System::Runtime` and not `System::Uri`** — the handoff recommendation was checked,
+not assumed, and it is **not stale**: `NEXT.md` §14 and `plan.md` both named the pair, and
+the inventory has not changed since. The choice between them was made on **severity, not
+count**: `runtime` carries **three high-severity findings** and `uri` carries **none**, and
+all three highs sit in one `.cpp` body.
+
+**One selection premise corrected.** `docs/ThreadingNamespaceReviewPlan.md` §1 dismissed
+this namespace as *"dominated by reflection and serialization surfaces that CLAUDE.md
+already classifies as permanent deviations"*. Measured, that is wrong on all three counts:
+**0** of 21 are reflection findings, **0** are serialization findings (both `Serialization`
+headers are finding-free), and **1** falls under a permanent deviation. Appended as that
+document's §22; the historical text is retained.
+
+### 2. What landed
+
+| Ticket | Cause | Finding closed | Tests |
+|---|---|---|---|
+| **#1973** | R-E — the CCF-011 policy in a **fourth** module | SR-AUD-155 | +10 |
+| **#1974** | R-B | SR-AUD-172 | +2 |
+| **#1975** | R-A | SR-AUD-169 (save/restore half) | +5 |
+| **#1976** | R-F | SR-AUD-156 | +8 |
+| **#1977** | R-D | SR-AUD-170 | +5 |
+| **#1978** | R-J | SR-AUD-059 + SR-AUD-168 disclosure | +2 |
+| **#1982** | R-I | SR-AUD-162 (documented deviation) | +3 |
+
+`SharpRuntimeTests_Runtime` **126 → 161** (+35), exactly matching the batch total.
+**Eight of the twelve causes are closed**; the four that remain are three approval-gated
+(#1979, #1980, #1981) and one deferred verification (#1983).
+
+### 3. Nine corrections to the audit record, every one measured
+
+Recorded in the plan's §4 and appended to each per-file report with the historical text
+preserved. The four that changed what was built:
+
+1. **SR-AUD-155 has four UB routes, not two.** `ExceptionDispatchInfo` declares no move
+   operations, so the implicitly declared move constructor and move assignment leave the
+   source empty and a moved-from `Throw()` SIGSEGVs through ordinary well-formed C++ that
+   passes no null anywhere. A check placed only where the finding asks leaves both open.
+   **Third occurrence of this shape** after SR-AUD-199.
+2. **SR-AUD-169's consequence is sharper than recorded.** `SIG_IGN` on `SIGHUP` became
+   `SIG_DFL`, and SIGHUP's default **terminates** — so a process that deliberately ignored
+   it is killed by the next one. The audit's SIGWINCH probe cannot show this, because
+   SIGWINCH's default *is* ignore.
+3. **SR-AUD-170 also rejects the positive spelling of *supported* signals** —
+   `static_cast<PosixSignal>(SIGWINCH)` was refused while `PosixSignal::Sigwinch` was
+   accepted. The defect is "the enum is accepted in one of its two valid spellings", so the
+   repair had to make them agree rather than merely add a path.
+4. **SR-AUD-162's premise does not survive translation.** `std::weak_ptr<int>` is well
+   defined; `where T : class` exists because the **CLR** cannot weakly handle a value type,
+   which has no C++ counterpart. Narrowing would delete working functionality, so the
+   disposition is a **documented widening**.
+
+And one that is methodological, which caught a **false negative before it became a
+conclusion**: the first version of this review's own probe forked *after* the parent had
+registered, so the children inherited `watcherRunning_ == true` with **no watcher thread**,
+nothing drained the pipe, and both SR-AUD-171 and SR-AUD-172 reported "did not reproduce".
+Reordered, both reproduce. Every forked case now prints a liveness marker. Same rule as
+§19.4 of the Threading plan, in a new form.
+
+### 4. #1967's consequence wording — corrected, and #1967 is **not** reopened
+
+The previous handoff said #1967 involved *"no exception-contract change"*. That collapses
+three consequences this repository keeps apart. Accurately:
+
+| Consequence | #1967 |
+|---|---|
+| public signature or `noexcept` **declaration** change | **none** |
+| **ABI** or mangled-symbol change | **none** |
+| deliberate, observable change in the **exception type crossing an API boundary** | **yes — that was the ticket's point** |
+
+SR-AUD-234's whole subject is an API-specific exception boundary: the close error is now
+wrapped in `ChannelClosedException` at both `ChannelReader<T>::ReadAsync` and
+`ChannelWriter<T>::WriteAsync`, so a caller catches a **different type** than before.
+Recorded as `docs/ThreadingTasksChannelsReviewPlan.md` §19. **#1967's implementation and
+tests are complete and correct and were not touched.**
+
+### 5. Validation, exactly as measured
+
+| Gate | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| Full gate, 37 executables run individually | **15,288 tests — 15,281 passed, 1 skipped, 6 failed** |
+| `validate_module_boundaries.py` | OK — **41 modules, 91 edges** (unchanged) |
+| `validate_module_boundaries_test.py` | 7 / 7 |
+| `generate_component_catalog.py --check` | OK, current |
+| `db_consistency_check.py` | OK, no problems |
+| `check_version_seam_odr.py` | OK — **2 seams, 18 definitions** |
+| `check_version_seam_odr_test.py` | **15 / 15** |
+| `check_negative_consumer_fixtures.py` | OK — **10 fixtures, 81 sites**, 91 invocations, **peak 2 jobs** |
+| `check_negative_consumer_fixtures_test.py` | **45 / 45** |
+| `check_selective_components.sh` | **passed** (every component, 2 jobs) |
+| `local_ci_check.sh build` | every static gate OK, build clean; stops at the same known Ping failures |
+| `git diff --check` | clean |
+| **Doxygen** | **NOT RUN — `doxygen` is not installed here.** The 1,942 ceiling stays *historical*, not newly verified. No system package was installed. |
+
+15,288 is **+35** over 15,253, matching exactly the 10+2+5+8+5+2+3 this batch added.
+`run_component_tests.sh` stops at the first failing executable, so the 37 were run
+individually; that is the authoritative figure.
+
+### 6. The six failing tests — same two causes, and the attribution is now sharper
+
+**No test was disabled, skipped, weakened or recategorised.** Directly probed rather than
+inferred:
+
+```
+/proc/sys/net/ipv4/ping_group_range = "1  0"      (low 1 > high 0 -- an EMPTY range)
+socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP)  -> Permission denied
+socket(AF_INET, SOCK_RAW,   IPPROTO_ICMP)  -> OK          <-- new measurement
+socket(AF_INET6, SOCK_STREAM, 0)           -> Address family not supported by protocol
+/proc/net/if_inet6                          -> does not exist
+```
+
+Five `PingTests` (`Send_Loopback_Succeeds`, `Send_LoopbackByString_Succeeds`,
+`Send_CustomBuffer_EchoedBack`, `Send_WithOptions_Succeeds`,
+`SendPingAsync_Loopback_Succeeds`) and one `SocketTests`
+(`Connect_ByHostname_NoMatchingAddressFamily_Throws`) — the same six as the previous batch,
+**no new regression**.
+
+**What changed is the attribution, not the outcome.** Both halves are now measured in the
+same probe: the closed `ping_group_range` blocks the unprivileged datagram socket, **but
+`SOCK_RAW`/`IPPROTO_ICMP` succeeds in this container**. A working ICMP path therefore
+*does* exist here and `Ping` cannot use it — which is **#1962**, the implementation gap, not
+the environment alone. #1962 stays **blocked**: its design is incomplete and the
+privilege/platform/security decision it needs was not taken here.
+
+One skipped test, unchanged:
+`CultureInvariantFormattingTests.NumericAndDateFormatting_UnaffectedByNonInvariantGlobalLocale`.
+
+### 7. Sanitizer evidence, with every harness's capability proved first
+
+| Ticket | Sanitizer | Result | Instrumentation |
+|---|---|---|---|
+| #1973 | ASan+UBSan+LSan | 4 SIGSEGV routes → **0 reports** | 30 symbols vs 0 plain; 12 `ExceptionDispatchInfo` symbols in the image |
+| #1974 | ASan+UBSan+LSan; **TSan** | **0 reports**; **0 data races** over 100,000 interleavings | 33 / 30 symbols vs 0; `ensureWatcherStarted` present, compiled from source |
+| #1975 | ASan+UBSan+LSan | **0 reports** | 34 symbols; 11 `installIfNeeded`/`uninstallIfUnused` symbols |
+| #1976 | ASan+UBSan | **0 reports** | 30 symbols; 6 `GCSettings` symbols |
+| #1977 | ASan+UBSan+LSan | **0 reports** over a `0/1/63/64/65/1000/100000/-10/-11/-12/-99` boundary sweep | 34 symbols; `toNativeSignalNumber` present |
+
+Every sanitizer binary was compiled **from source** — `PosixSignalRegistration.cpp` on the
+command line, never linked from `build/libsharp_runtime_runtime.a`, which is not
+instrumented. Both harnesses were proved capable against deliberate control defects: **2**
+reports from an ASan/UBSan/LSan control, **1** data race from a TSan control.
+
+**One honest non-discriminator, recorded rather than dressed up:** TSan reported 0 both
+before and after #1974, and always would have — the defect is a **hang**, and TSan reports
+data races, not liveness failures. Its value is the opposite direction: the repair adds no
+race. One honest limitation: `build/libsharp_runtime_core.a` supplies the exception classes
+and is not instrumented, so UBSan says nothing about code inside those constructors.
+
+### 8. Source / ABI / layout consequences
+
+**No public signature, object layout, vtable, `noexcept` specification, mangled symbol or
+component edge changed anywhere in this batch.** Graph stays **41 / 91**, seams **2 / 18**,
+negative fixtures **10 / 81**. Two headers gained an include, both of types already in
+`Core.Base`, already a `PUBLIC_DEPENDENCIES` entry. All signal-side state changes are inside
+an **anonymous namespace** in a `.cpp` body.
+
+Observable changes, all stated in the plan's §9 **before** they were made:
+
+1. four `ExceptionDispatchInfo` calls that ended the process with an uncatchable fault now
+   throw a catchable `System::Exception`;
+2. a signal flood that hung a delivery thread now completes;
+3. the process's signal disposition is restored instead of forced to `SIG_DFL`;
+4. **`GCSettings`' two setters now reject out-of-domain input** — the only change in this
+   batch that makes a currently *succeeding* call fail. .NET throws for the identical call,
+   and two loops over every in-domain value are permanent tests rather than a claim.
+
+Plus one strict widening (raw signal numbers — nothing that worked stops working) and two
+documentation repairs with zero runtime effect.
+
+### 9. Blocked approvals — three new, six carried forward
+
+New, each with a **complete design and an exact approval sentence** in
+`docs/SystemRuntimeNamespaceReviewPlan.md`:
+
+- **#1979** (§10.1) — job-control signals and disposition chaining. Deliberately **not**
+  landed with #1975: the port's behaviour is reproduced here, .NET's is not. The audit's
+  reference basis is a *reading* of `pal_signal.c` taken when
+  `/rv/tmp/runtime/src/libraries/` was present — it is **absent** now — and carries **no
+  managed probe**. That is exactly the line this repository already drew between **#1968**
+  (SR-AUD-233 *had* a managed probe, so a behaviour-incompatible repair landed) and
+  **#1963** (none, so nothing changed). SR-AUD-171 is on #1963's side.
+- **#1980** (§10.2) — ten public shapes, split into five groups so the answer can be
+  partial. **G-1 is the recommended minimum**: purely additive, closes three medium
+  findings, cannot break a consumer.
+- **#1981** (§10.3) — the weak-table enumerator; object-layout change in a header-only
+  template.
+
+Carried forward unchanged: **#1956**, **#1957**, **#1958** (six members), **#1959**,
+**#1969**, **#1970**. Nothing in this batch consumed or implied any of them.
+
+**Cheapest approval-backed win overall remains #1969**, `S`-sized and fully designed. Within
+this namespace it is **#1980 G-1**, whose exact approval sentence is:
+
+> *"Add `OSPlatform`'s public default constructor (empty name, unequal to every named
+> platform), `RuntimeInformation::getFrameworkDescriptionProperty()` and
+> `getRuntimeIdentifierProperty()`, and `ExternalException`'s `(message, errorCode)`
+> constructor, `getErrorCodeProperty()` accessor and specialised `ToString()` — all strictly
+> additive, changing no existing declaration, layout, vtable or mangled symbol."*
+
+### 10. Deferred verification and new defects
+
+- **#1983** (SR-AUD-154) — Windows `OSArchitecture`. Blocked on **three** absences: no
+  Windows toolchain, no mixed-bitness Windows host, no reference tree. Same class as #1963.
+- **#1963** — unchanged, still `todo` and deferred; no new authoritative evidence appeared.
+- **#1985** — the self-pipe descriptors survive `exec()` (no `O_CLOEXEC`). Deliberately not
+  folded into #1974: changing `exec()` inheritance under cover of a liveness repair would
+  hide an observable behaviour change.
+- **#1986** — `dispatchSignal()` invokes a **copied** handler after `Dispose()` has
+  returned, so a handler capturing caller stack state touches a dead frame. The per-file
+  report hints at this (*"the sleep-only Dispose checks have no proof that a late callback
+  cannot run"*) without issuing a finding. It is a **lifetime** defect, not a timing one.
+
+**Neither #1985 nor #1986 issued an `SR-AUD-*` identifier**; numbering stays frozen at
+**364**.
+
+### 11. Audit totals
+
+**100 remediated / 264 confirmed / 364 total** (+7: SR-AUD-059, 155, 156, 162, 169, 170,
+172). **14** of the 264 carry the `confirmed (design-complete)` qualifier — twelve added by
+this review's §10 designs; it is a qualifier, not a status, so the open count is unaffected.
+
+Database: **1,985 tickets — 1,953 done, 3 todo, 22 blocked, 3 needs_user, 4 wontfix**, none
+`doing`. The three `todo` are #1963 (needs the absent reference tree), #1985 and #1986 (both
+recorded inactive).
+
+### 12. Commits are unsigned, deliberately
+
+`commit.gpgsign=true` with `gpg.format=ssh` is configured but the private key material is
+absent. Every commit used `git -c commit.gpgsign=false commit`, preserving the configured
+`Claude <noreply@anthropic.com>` identity. **No previous commit was amended, rebased or
+rewritten to add a signature.**
+
+### 13. Build directories and parallelism
+
+| Directory | Start | End |
+|---|---|---|
+| `build/` | 1.6 G | **1.6 G** (reused throughout; never cleaned or reconfigured) |
+| `build-probe/` | 3.3 M | **3.4 M** — this batch's two probe sources and all fifteen before/after and sanitizer logs retained; **all eight of its probe binaries deleted** once the evidence was transcribed (CLAUDE.md rule 11), reclaiming **9.6 M** |
+| `build-tmp/` | 268 K | **~380 K** (repository-local `TMPDIR` for every `mktemp`-based command) |
+| `build-modular/`, `build-asan/`, `build-ubsan/`, `build-tsan/`, `build-consumer/`, `cmake-build-debug/` | — | **do not exist**; none was created |
+
+**No new build-directory name was invented.** ~2.9 M of *earlier* batches' probe binaries
+remain and were again left alone — they belong to closed tickets from another session.
+
+**Maximum aggregate compilation parallelism: two jobs**, never exceeded. Every build used
+`cmake --build … --parallel 2`; `check_selective_components.sh` and `local_ci_check.sh` were
+given `SHARP_RUNTIME_BUILD_JOBS=2` and `TMPDIR=$PWD/build-tmp`; every probe and every
+sanitizer build was a single `g++` invocation. **No two compilations ran concurrently** —
+the batch waited for `check_selective_components.sh` to finish before starting anything
+else.
+
+### 14. Next recommended work
+
+**Ready with no approval needed inside `System::Runtime`: nothing.** Its compatible half is
+complete.
+
+Two ordinary compatible tickets are ready **outside** the review's scope and are the
+cheapest next code: **#1986** (P2 — the `Dispose`/dispatch lifetime defect; needs a design
+that does not reintroduce the deadlock the snapshot exists to avoid, since a handler may
+dispose itself) and **#1985** (P3, XS).
+
+The natural next unit is another **namespace review** in the #1950/#1964/#1972 style.
+**`System::Uri` is now the clear recommendation**: 14 open findings, all medium, no
+`docs/*Plan.md`, small enough for one batch, and it was the runner-up here. `text` (14) is
+the alternative.
+
+If the user answers any blocked question first, the cheapest win overall is **#1969**
+(`S`-sized, fully designed); within this namespace it is **#1980 G-1** (§9 above).
+
+**#1773 remains blocked** on a deliberate downstream upgrade.
+
 
 ## Autonomous batch handoff, 2026-08-03 (`Threading.Tasks` + `Threading.Channels` #1965–#1968, plus the #1958 Group A split → #1971)
 
