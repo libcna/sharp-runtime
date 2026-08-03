@@ -2204,3 +2204,64 @@ which **35** carry the `confirmed (design-complete)` qualifier. **No `SR-AUD-*`
 identifier was issued; numbering stays frozen at 364**, and the ten post-audit
 defects this review measured are recorded in the plan's §16 under ordinary ticket
 numbers only.
+
+### CCF-012 closure requirements, verified — ticket #2022 (2026-08-03)
+
+The appendix above recorded that CCF-012 cannot close while
+`System::Text::CompositeFormat::Parse` runs a grammar of its own. Ticket #2022
+verified the whole scope rather than restating it, and the result changes what
+"closing #2020" has to mean. The historical text above stands; this is appended.
+
+**The population is exactly two implementations**, established by exhaustive
+search of `modules/` and not by recollection:
+
+| Implementation | Reached by | State |
+|---|---|---|
+| `System::detail::runCompositeFormat` | `String::Format` ×22, `FormattableString::ToString`, `StringBuilder::AppendFormat` ×11, `Console::Write`/`WriteLine` ×11 — all delegate | fixed by #1882/#1883/#1884 |
+| `System::Text::CompositeFormat::countPlaceholders` | `CompositeFormat::Parse` | **#2020, blocked** |
+
+Every other brace scanner in the repository is a **different grammar and not a
+member**: `Regex`'s `${name}` (`Match.hpp`), `XName`'s `{ns}local`, `Guid`'s
+`{…}` format specifiers, and the JSON/XML writers. The plan's "third"/"fourth
+grammar" wording is superseded: counting what exists **today** there are two,
+and `CompositeFormat::Parse` is the second and the only divergent one.
+
+**One shared parser policy is possible, but not by calling the existing
+function.** `runCompositeFormat` is a *formatting* engine: it takes an
+`argCount` and a `render` callable, raises `Format_IndexOutOfRange` when
+`index >= argCount`, and executes alignment padding as it goes. `Parse` has no
+argument list — reporting `minimumArgumentCount` before any argument exists is
+its whole purpose — and measured, a literal reuse would allocate 1,000,000
+spaces to *validate* `"{0,1000000}"`
+(`build-probe/2022_probe1_verify.log` §A). Closing CCF-012 therefore requires
+extracting a **non-rendering `System::detail::scanCompositeFormat`** that both
+the formatter and `Parse` use — a behaviour-preserving refactor of a
+`modules/core` header on which all 45 formatting entries depend, which is a
+wider blast radius than the plan's §14.8 implies.
+
+**Parsing acceptance changes in both directions**, measured, not inferred:
+`{0,not-a-width}`, `{0,-}`, `{10000000}` and every index above 9,999,999
+(including `{2147483646}`, which succeeds today) begin to **throw**, while
+`{0 }` and `{0  ,5}` — `FormatException` today — begin to be **accepted**,
+because the shared grammar skips spaces after the index. The plan's claim that
+"any index at or above 1,000,000 begins to throw" is **false**:
+`kCompositeIndexLimit` stops digit consumption rather than rejecting, so
+`{1000000}` … `{9999999}` are accepted there too.
+
+**Exception ordering does not change** for `Parse`: it raises
+`System::FormatException` before and after, and the index-out-of-range path of
+the shared engine is unreachable from a `Parse` that has no argument list. What
+changes is the *message*, which gains .NET's offset-and-reason text.
+
+**CCF-012 is NOT closed by this ticket and is not marked closed.** Its member
+SR-AUD-015 is `remediated`; SR-AUD-298's grammar half is the last member and is
+`confirmed (design-complete)`, blocked as **#2020**. The family closes when
+#2020 lands **as the shared-scanner option** — a hand-aligned second grammar
+would satisfy the letter of the repair while preserving exactly the divergence
+this cause warns about. The exact approval sentence is
+`docs/SystemTextApprovalPackage.md` §5, Approval D.
+
+**No `SR-AUD-*` identifier was issued by this verification**; numbering stays
+frozen at **364**, and the index totals are unchanged at **107 remediated /
+257 confirmed / 364 total**, of which **35** carry the
+`confirmed (design-complete)` qualifier.

@@ -867,3 +867,96 @@ ticket, and:
 | #2011 | T-E | 297 (half) | see §23 |
 | #2012 | T-I | 290, 296 (doc half) | see §24 |
 | #2013–#2021 | T-G/H/I/J/K/L/M/N/F | 288, 289, 290, 291, 292, 293, 294, 296, 297, 298, 299 | **blocked**, design complete (§14) |
+
+---
+
+## 20–24. Where the implementation records actually live
+
+**Appended by ticket #2022, 2026-08-03.** §19's table points at sections 20–24
+that were never written: the #2007–#2012 implementation records were kept in
+`ticket.notes`, in the `audit/AUDIT_FINDINGS_INDEX.md` rows for SR-AUD-286,
+287, 289, 290, 295, 296, 297 and 298, and in `NEXT.md`'s 2026-08-03 handoff,
+rather than here. The cross-references are corrected rather than the records
+duplicated:
+
+| §19 says | The record is in |
+|---|---|
+| §20 (#2007, #2008) | tickets #2007/#2008 `notes`; index rows SR-AUD-286, SR-AUD-287; commit `9d2600a`; probes `2007_asan_before.log`, `2007_asan_after.log` |
+| §21 (#2009) | ticket #2009 `notes`; index row SR-AUD-295; commit `82edb12` |
+| §22 (#2010) | ticket #2010 `notes`; index row SR-AUD-298; commit `a4a2b11`; probe `2010_sanitizer_*.log` |
+| §23 (#2011) | ticket #2011 `notes`; index row SR-AUD-297; commit `a4a2b11` |
+| §24 (#2012) | ticket #2012 `notes`; index rows SR-AUD-290, SR-AUD-296, SR-AUD-289; commit `5a225ea` |
+
+---
+
+## 25. Verification of §14 — ticket #2022 (2026-08-03)
+
+§§1–19 are preserved exactly as written. This section records what re-measuring
+§14 against the shipped library found, and where the **request** now lives.
+
+**The approval request has moved.** `docs/SystemTextApprovalPackage.md` is the
+single place a decision is asked for on #2013–#2021. It groups the nine tickets
+into six families, gives one exact approval sentence per family, and carries the
+corrections below. §14 remains the historical design record and is **not**
+rewritten.
+
+**Ten corrections, each measured** (`build-probe/2022_probe1_approval_verify.cpp`
+→ `build-probe/2022_probe1_verify.log`); the full table is
+`docs/SystemTextApprovalPackage.md` §10. In brief:
+
+1. **§14.1** — the recommended `IsReadOnly` + `Clone()` spelling costs
+   `sizeof(Encoding)` **40 → 48** and, with a virtual `Clone()`, a **vtable
+   slot**; §14.1 states neither. An identity-based `IsReadOnly` with a
+   code-page-dispatching non-virtual `Clone()` has **neither** cost.
+2. **§14.4** — **two** default factories emit a byte-order mark as payload, not
+   one: `Encoding::BigEndianUnicode()` → `feff0041` as well as
+   `Encoding::UTF32()` → `fffe000041000000`.
+3. **§14.4** — the **decode** direction *consumes* a leading U+FEFF in both
+   UTF-16 and UTF-32, so a real ZERO WIDTH NO-BREAK SPACE is discarded. Neither
+   the finding nor §14.4 mentions it; a round trip cancels both halves exactly,
+   which is why no test ever saw them.
+4. **§14.5** — the fallback surface takes a **`char`**
+   (`EncoderFallbackBuffer::Fallback`, `EncoderFallback::GetFallbackBytes`,
+   `EncoderFallbackException::getCharUnknownProperty`), which cannot carry a
+   non-ASCII scalar. Routing *scalars* through it requires a **public virtual
+   signature change**; §14.5 does not ask that question.
+5. **§14.6** — `Rune::IsWhiteSpace` is Unicode-aware **and divergent**: its table
+   contains U+FEFF, which .NET excludes. The repair is not "make six members
+   match the seventh".
+6. **§14.8** — *"any index at or above 1,000,000 begin to throw"* is **false**.
+   `kCompositeIndexLimit` stops digit consumption rather than rejecting, so the
+   shared grammar **accepts** `{1000000}` … `{9999999}`; the first rejected
+   shapes are eight-digit indices and `{2147483646}`.
+7. **§14.8** — adoption is **not purely a narrowing**: `{0 }` and `{0  ,5}` are
+   `FormatException` here today and are **accepted** by the shared grammar.
+8. **§14.8** — `runCompositeFormat` is a **formatting** engine (it needs an
+   `argCount` and a `render`, and it **pads while validating** — measured
+   `pad=1000000` for `{0,1000000}`). #2020 must extract a non-rendering scanner
+   into `modules/core`, a far wider blast radius than §14.8 implies.
+9. **§14.9** — `EncodingInfo::GetEncoding` returns `Encoding::UTF8()` **itself**,
+   the shared mutable singleton, so #2021 and #2013 are one decision.
+10. **§5 / §4.6** — measured today there are exactly **two** composite-format
+    grammar implementations in the repository; `CompositeFormat::Parse` is the
+    **second** and the only divergent one, not the third or fourth.
+
+**One completion criterion in §18 was not met, and is now.** The batch claimed
+every gated behaviour was pinned "so none can land silently". **SR-AUD-294
+(#2018) and SR-AUD-299 (#2021) had no pin at all** — every `Rune` test in the
+repository uses ASCII exclusively, and `EncodingInfo` had no test anywhere — and
+SR-AUD-291, SR-AUD-292 and SR-AUD-298 were pinned only in part. Ticket **#2022**
+adds `modules/text/tests/System/Text/TextGatedBehaviourPinTests.cpp` (+8,
+add-only, `SharpRuntimeTests_Text` 288 → 296), mutation-checked three ways: a
+Latin-1-widened `Rune::IsLetter`, U+FEFF removed from `Rune::IsWhiteSpace`, and
+`GetEncoding` resolving code page 20127 to ASCII each **fail** the new pins and
+each **pass** the pre-existing `TextUnitContractTests`.
+
+**CCF-012 is not closed and is not marked closed.** Verified: its member
+SR-AUD-015 is `remediated`, the population is exactly the two implementations
+named above, and #2020 closes the family **only** under the shared-scanner
+option — a hand-aligned second grammar would preserve exactly the divergence
+CCF-012 warns about (`docs/SystemTextApprovalPackage.md` §5.5).
+
+**No `SR-AUD-*` identifier was issued by this verification.** Numbering stays
+frozen at **364**. The two post-audit observations it measured — the decode-side
+BOM consumption and `IsWhiteSpace`'s U+FEFF — are folded into #2016 and #2018
+under ordinary ticket numbers, on the §16 precedent.
