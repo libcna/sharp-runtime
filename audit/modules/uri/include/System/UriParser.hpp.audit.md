@@ -40,3 +40,23 @@ input from a valid unknown scheme.
 
 The builtin lookup table is accurate for ordinary names, but public validation
 and the main custom-parser contract are absent. No source or test was modified.
+
+---
+
+## Post-audit review note — ticket #1987 (2026-08-03)
+
+The historical text above is preserved verbatim.
+
+SR-AUD-146 and SR-AUD-147 are both confirmed by re-measurement:
+`UriParser::Register` is absent (compile-time), and `IsKnownScheme("")` and
+`IsKnownScheme("ht tp")` both return `false`
+(`build-probe/1987_probe1_before.log` §O).
+
+SR-AUD-147's repair is nonetheless **blocked** as ticket **#1998** rather than landed with
+this review's compatible half. It is a **narrowing** at a public static, and the reference
+basis this report cites — the C#/C++ probes under
+`/tmp/sharp-runtimervc-uri-parser-audit-*` — **no longer exists in this environment**, as
+`/rv/tmp/runtime/src/libraries/` also does not. That is the same line ticket #1963 sits on
+and it is respected: `docs/SystemUriNamespaceReviewPlan.md` §14.4 carries the design and the
+exact approval sentence. SR-AUD-146 is blocked as ticket **#1997** group A-4, whose cost
+includes a `UriParser` vtable and access-level change.

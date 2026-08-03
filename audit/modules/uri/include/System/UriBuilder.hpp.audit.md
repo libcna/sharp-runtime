@@ -65,3 +65,33 @@ Normal HTTP construction and query/fragment prefix smoke paths pass, but
 constructor state transfer, relative input, identity, and public component
 normalization materially diverge from current .NET. No source or test was
 modified during this audit.
+
+---
+
+## Post-audit review corrections — ticket #1987 (2026-08-03)
+
+The historical text above is preserved verbatim. Measured on 2026-08-03 by
+`build-probe/1987_probe1_uri_boundaries.cpp`; recorded in
+`docs/SystemUriNamespaceReviewPlan.md` §4.5.
+
+1. **SR-AUD-140 has an availability half the finding does not name.** `GetHashCode()`
+   builds a `Uri` from `ToString()`, so for a builder whose scheme the `Uri` parser rejects
+   it **throws** where `Equals` on the same object returns `true`:
+
+   ```
+   self-Equals with invalid scheme      : 1
+   GetHashCode with invalid scheme      : THROWS Invalid character in URI scheme
+   ```
+
+   An object that compares equal to itself has no obtainable hash. Recorded as inactive
+   ticket **#2004** and deliberately **not** folded into #1995: #1995's repair (delegate
+   identity to `Uri`) makes the throw *more* reachable, not less.
+
+2. **SR-AUD-138 is confirmed exactly as written** and is repaired by ticket **#1993**;
+   the repair leaves `ToString()` byte-identical for an unmodified builder and corrects only
+   the two getters.
+
+3. SR-AUD-139 and SR-AUD-141 are confirmed exactly as written and are approval-gated as
+   ticket **#1996**, split into four independently answerable groups (plan §14.2).
+
+**No `SR-AUD-*` identifier was issued** for #2004 — audit numbering stays frozen at **364**.

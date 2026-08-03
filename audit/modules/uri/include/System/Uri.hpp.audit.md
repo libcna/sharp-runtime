@@ -33,3 +33,18 @@ SR-AUD-151.
 
 The declared partial boundary is useful, but several ordinary supported URI
 forms remain incompatible. No source or test was modified during this audit.
+
+---
+
+## Post-audit review correction — ticket #1987 (2026-08-03)
+
+The historical text above is preserved verbatim.
+
+This report treats the header's documented limits as "not classified here". One of them is
+not a limit but a **false statement**: `getSchemeProperty`'s doc-comment says the scheme is
+returned *"lower-case as parsed"*, and the parser never lower-cases anything —
+`Uri("HTTP://EXAMPLE.COM/").getSchemeProperty()` measurably returns `"HTTP"`
+(`build-probe/1987_probe1_before.log` §A). That is a documentation defect of the same shape
+as `System::Runtime`'s SR-AUD-059, repaired without behaviour change by ticket **#1994**.
+It does **not** close SR-AUD-142, which stays `confirmed` and approval-gated as ticket
+**#1995**. No new `SR-AUD-*` identifier was issued; numbering stays frozen at **364**.
