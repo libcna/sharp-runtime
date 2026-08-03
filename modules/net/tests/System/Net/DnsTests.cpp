@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Net/Dns.hpp"
+#include "System/Net/IPAddress.hpp"
 #include "System/Net/IPHostEntry.hpp"
 #include "System/Net/Sockets/SocketError.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
@@ -126,6 +127,47 @@ TEST(DnsTests, GetHostEntry_ByAddress_Loopback_ResolvesSomeName) {
 TEST(DnsTests, GetHostEntry_ByAddress_IPv6Loopback_ResolvesSomeName) {
     IPHostEntry entry = Dns::GetHostEntry(IPAddress::IPv6Loopback);
     EXPECT_FALSE(entry.getHostNameProperty().empty());
+}
+
+// Ticket #1961: GetHostEntry(const IPAddress&) unconditionally fed getnameinfo's output back
+// into GetHostEntry(string, family). getnameinfo() without NI_NAMEREQD does not fail when an
+// address has no reverse mapping -- it SUCCEEDS and writes the address back in numeric form --
+// so the string overload re-parsed it as a literal and called straight back in with the same
+// address. Unbounded mutual recursion, stack overflow, SIGSEGV, from ordinary public input.
+//
+// Measured on a container whose /etc/hosts has `127.0.0.1 localhost` but no `::1` line:
+// getnameinfo(127.0.0.1) returned "localhost" and terminated, getnameinfo(::1) returned "::1"
+// and killed the process -- which is why only the IPv6 case crashed.
+//
+// The addresses below are the RFC 5737 TEST-NET-1 and RFC 3849 documentation ranges, which are
+// reserved precisely so that they resolve to nothing anywhere, so this exercises the
+// no-reverse-mapping branch even on a host that does have an ::1 entry. The assertion is that
+// the call TERMINATES and reports the address it was asked about; a host that does return a
+// name for these is free to do so, and the entry is then whatever that name resolves to.
+TEST(DnsTests, GetHostEntry_ByAddress_WithNoReverseMapping_TerminatesInsteadOfRecursing) {
+    const IPAddress documentationV4 = IPAddress::Parse("192.0.2.1");
+    const IPHostEntry v4 = Dns::GetHostEntry(documentationV4);
+    EXPECT_FALSE(v4.getHostNameProperty().empty());
+    if (v4.getHostNameProperty() == documentationV4.ToString()) {
+        ASSERT_EQ(v4.getAddressListProperty().size(), 1u);
+        EXPECT_EQ(v4.getAddressListProperty()[0], documentationV4);
+    }
+
+    const IPAddress documentationV6 = IPAddress::Parse("2001:db8::1");
+    const IPHostEntry v6 = Dns::GetHostEntry(documentationV6);
+    EXPECT_FALSE(v6.getHostNameProperty().empty());
+    if (v6.getHostNameProperty() == documentationV6.ToString()) {
+        ASSERT_EQ(v6.getAddressListProperty().size(), 1u);
+        EXPECT_EQ(v6.getAddressListProperty()[0], documentationV6);
+    }
+}
+
+// The same termination guarantee for the loopback addresses the suite already uses, stated as
+// its own case so that a regression shows up as a failure here rather than as a crash that
+// takes the whole executable -- and every test after it -- down with it.
+TEST(DnsTests, GetHostEntry_ByAddress_Loopback_TerminatesForBothFamilies) {
+    EXPECT_FALSE(Dns::GetHostEntry(IPAddress::Loopback).getHostNameProperty().empty());
+    EXPECT_FALSE(Dns::GetHostEntry(IPAddress::IPv6Loopback).getHostNameProperty().empty());
 }
 
 TEST(DnsTests, GetHostAddresses_UnresolvableHost_Throws) {

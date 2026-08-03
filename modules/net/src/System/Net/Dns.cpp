@@ -222,9 +222,35 @@ namespace System::Net {
             throw SocketException(static_cast<intcs>(SocketError::HostNotFound));
         }
 
+        // getnameinfo() without NI_NAMEREQD does NOT fail when the address has no reverse
+        // mapping: it succeeds and writes the address back in its NUMERIC form. Handing that
+        // text to the string overload re-parses it as a literal, which sends it straight back
+        // into this function with the same address -- unbounded mutual recursion, stack
+        // overflow, SIGSEGV, reachable from ordinary public input on any host that simply has
+        // no PTR record or hosts entry for the queried address.
+        //
+        // Measured: on a container whose /etc/hosts has `127.0.0.1 localhost` but no `::1`
+        // line, getnameinfo(127.0.0.1) returns "localhost" and terminates, while
+        // getnameinfo(::1) returns "::1" and recurses until the process dies. That is why the
+        // IPv4 case looked healthy and only DnsTests.GetHostEntry_LiteralIPv6_* crashed
+        // (ticket #1961).
+        //
+        // When the reverse lookup yields a literal rather than a name there is nothing further
+        // to resolve, so the entry is built directly: the host name is the address text, and
+        // the address list is the address that was asked about.
+        const std::string resolvedHost(hostBuf);
+        const bool resolvedToALiteral =
+            tryParseIPv4(resolvedHost).has_value() || tryParseIPv6Literal(resolvedHost).has_value();
+        if (resolvedToALiteral) {
+            IPHostEntry entry;
+            entry.setHostNameProperty(resolvedHost);
+            entry.setAddressListProperty(std::vector<IPAddress>{address});
+            return entry;
+        }
+
         AddressFamily resolvedFamily = address.getIsIPv6Property()
             ? AddressFamily::InterNetworkV6 : AddressFamily::InterNetwork;
-        return GetHostEntry(std::string(hostBuf), resolvedFamily);
+        return GetHostEntry(resolvedHost, resolvedFamily);
 #endif
     }
 
