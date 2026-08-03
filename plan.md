@@ -1,5 +1,63 @@
 # Sharp Runtime plan
 
+*Last verified: 2026-08-03 — branch `feature/remediation-batch-system-text-review`, cut from
+`bef4e43` and **not pushed; no push was requested during this batch**. No merge, rebase, tag,
+PR, force-push or history rewrite; the three pre-existing local-only commits were left
+untouched. Seven new commits, `67cbfa7` … `4f459de` plus this handoff commit, all intentionally unsigned. The batch
+performed the **`System::Text` namespace review (#2006)** —
+`docs/SystemTextNamespaceReviewPlan.md`, converting the 14 open findings in `modules/text/`
+(SR-AUD-286 … SR-AUD-299) into **eleven root causes T-A … T-N** and tickets **#2006–#2021** —
+and then implemented its **entire compatible half**: **#2007** SR-AUD-286 (one shared raw
+decode argument policy, transcribed from `UTF7Encoding`, adopted by all nine decode entries
+plus `Decoder`, `GetCharCount` and `DecoderExceptionFallback`), **#2008** SR-AUD-287 (both
+fallback setters reject null — the finding names only the decoder direction), **#2009**
+SR-AUD-295 (`StringBuilder::CopyTo`'s unvalidated signed capacity, CCF-004's fourth module),
+**#2010** SR-AUD-298's diagnostics half (CCF-012), **#2011** SR-AUD-297's diagnostics half,
+**#2012** SR-AUD-290/296/289's disclosure half. **Nine causes remain approval-gated**
+(**#2013–#2021**), each with a complete design and an exact approval sentence in the plan's
+§14, each with its current behaviour pinned by a permanent test so it cannot land silently;
+**no approval was requested, implied or assumed, and none was implemented.**
+
+The namespace was chosen from tracked state: `NEXT.md` §10 of the previous handoff names it,
+the audit index confirms the fourteen are contiguous and all `confirmed`, and **no `docs/`
+document covered it** — `docs/TextSubsetCompatibilityDecision.md` is *not* one despite its
+name, being the #1927/#1928/#1929 numeric and date/time packet whose §1 puts `Encoding`
+explicitly out of scope. Scope was narrowed by measurement, not assumption: the C++ namespace
+spans three CMake components and this review owns **one** (`Text`), while
+`System::Text::NormalizationForm` lives in `modules/core` with **no `Normalize` surface at
+all**, and `Encoder`/`Decoder` have **no incremental conversion surface**, so normalization
+and streaming state are *absent features* recorded as explicit exclusions rather than
+invented as findings.
+
+**Seven audit premises were corrected**, historical text preserved: SR-AUD-286's named
+reproduction does **not** reproduce and it names one of **six** failure modes; SR-AUD-287
+names one of two directions; SR-AUD-295's overflow **defeats** the bounds check rather than
+merely accompanying it, so an invalid capacity became a **silent write** (ASan-confirmed,
+call returning normally); SR-AUD-298's same expression also returned a **negative** minimum
+argument count; SR-AUD-297's `Decode` defect is **four** defects, three of them silent wrong
+bytes; and **CCF-012's exclusion list is wrong to say `System.Text.CompositeFormat` "is not
+ported"** — it is, it is a third composite-format grammar, and **CCF-012 still cannot close**
+until #2020 lands. Ten post-audit defects were recorded under ordinary ticket numbers only;
+audit numbering stays frozen at **364**.
+
+Audit is now **107 remediated / 257 confirmed / 364 total**, **35** of the 257 carrying the
+`confirmed (design-complete)` qualifier. The gate is **15,461 tests / 37 executables** run
+individually, 15,454 passing, 1 skipped, **6 failing for the same two causes, re-measured,
+none hidden and none new** — `ping_group_range` is `1 0` so unprivileged `SOCK_DGRAM` ICMP is
+denied while `SOCK_RAW` ICMP **opens**, which is **#1962** rather than the environment alone;
+and `/proc/net/if_inet6` does not exist. `SharpRuntimeTests_Text` **238 → 288**, add-only.
+Sanitizers, with the changed production bodies compiled **into** the probes: five ASan
+heap-buffer-overflows, three UBSan signed overflows and **35 escaped `std::` exceptions**
+before; **none** after; TSan **not applicable** to the compatible batch and stated as such.
+Graph **41/91**; seams **2/18**; negative fixtures **10/81**, 91 invocations, peak 2; checker
+self-tests **45/45** and **15/15**; module-boundary self-tests **7/7**; selective components
+**passed**; build **0 warnings / 0 errors**; `git diff --check` clean. **Doxygen was NOT run:
+doxygen is not installed in this container.** Tickets: **1,972 done, 4 todo, 37 blocked, 3
+needs_user, 4 wontfix** of 2,020; none doing. **#1773 remains blocked and its downstream use
+was not investigated; #1995–#1999, #2003 remain blocked and #2005 remains deferred; no
+approval was requested or assumed.** CNA and mobile-eggbert were not inspected. Maximum
+aggregate parallelism 2 jobs.*
+
 *Last verified: 2026-08-03 — branch `feature/remediation-batch-uri-followup-2000`, cut from
 `948f93a` and **not pushed; no push was requested during this batch**. No merge, rebase, tag,
 PR, force-push or history rewrite; the two pre-existing local reconciliation commits were left

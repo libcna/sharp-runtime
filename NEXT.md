@@ -1,29 +1,261 @@
-*Last verified: 2026-08-03. Branch `feature/remediation-batch-uri-followup-2000`, cut from
-`948f93a` (the previous batch's tip on
-`feature/remediation-batch-system-uri-review`). **Two commits, `4280903` and `942f27a`, both
-unsigned and both local-only — no push was requested.** The two earlier reconciliation
-commits `fc2361e` and `948f93a` were carried forward untouched: no amend, no rebase, no
-force-push, no merge, no tag, no PR. This batch worked the **`System::Uri` post-audit
-follow-up queue #2000–#2005**: **#2000** (empty authority), **#2004** (`UriBuilder`
-`Equals`/`GetHashCode` asymmetry), **#2001** (opaque-base resolution) and **#2002** (relative
-query/fragment splitting) are **implemented**; **#2003** (embedded NUL) is **design-complete,
-blocked, behaviour pinned**; **#2005** (whitespace) stays **deferred**, its missing evidence
-re-verified absent. Audit unchanged at **104 remediated / 260 confirmed / 364 total**, of
-which **24** carry the `confirmed (design-complete)` qualifier — **no finding status moved
-and no `SR-AUD-*` identifier was created; numbering stays frozen at 364.** Gate **15,411
-tests across 37 executables, 15,404 passing, 1 skipped, 6 failing** for the same two measured
-environment causes, unchanged and not hidden — **no new failure**. `SharpRuntimeTests_Uri`
-**213 → 272** (+59, add-only). Graph **41 / 91**, seams **2 / 18**, negative fixtures
-**10 / 81** (91 invocations, peak 2 jobs), checker self-tests **45 / 45** and **15 / 15**,
-selective components **passed**, build **0 warnings / 0 errors**, `git diff --check` clean.
-**Doxygen NOT run — still not installed here.** Database **2,004 tickets: 1,965 done, 4 todo,
-28 blocked, 3 needs_user, 4 wontfix**, none doing. **#1773 remains blocked and its downstream
-use was not investigated. #1995–#1999 remain blocked; no approval was requested or assumed.**
-Maximum aggregate parallelism **2 jobs**. `CNA` and `mobile-eggbert` were not read, searched,
-built, tested or modified. See the first handoff below.*
+*Last verified: 2026-08-03. Branch `feature/remediation-batch-system-text-review`, cut from
+`bef4e43` (the previous batch's tip on `feature/remediation-batch-uri-followup-2000`). **Seven
+commits — `67cbfa7` … `4f459de` plus this handoff commit — all unsigned and all local-only; no
+push was requested.**
+The three earlier local-only commits from the two previous batches were carried forward
+untouched: no amend, no rebase, no force-push, no merge, no tag, no PR. This batch performed
+the **`System::Text` namespace review (#2006)** and implemented **its whole compatible half**
+— **#2007** (the raw decode boundary), **#2008** (null fallback setters), **#2009**
+(`StringBuilder::CopyTo`'s capacity overflow), **#2010** (`CompositeFormat::Parse`), **#2011**
+(the Web encoder helpers) and **#2012** (three headers' byte-vs-character contracts). Nine
+approval-sensitive causes are **design-complete and blocked** as **#2013–#2021**, each with an
+exact approval sentence; **no approval was requested or assumed.** Audit moves **104 → 107
+remediated / 260 → 257 confirmed / 364 total**, of which **24 → 35** carry the
+`confirmed (design-complete)` qualifier — **no `SR-AUD-*` identifier was created; numbering
+stays frozen at 364.** Gate **15,461 tests across 37 executables, 15,454 passing, 1 skipped,
+6 failing** for the same two measured environment causes, unchanged and not hidden — **no new
+failure**. `SharpRuntimeTests_Text` **238 → 288** (+50, add-only). Graph **41 / 91**, seams
+**2 / 18**, negative fixtures **10 / 81** (91 invocations, peak 2 jobs), checker self-tests
+**45 / 45** and **15 / 15**, module-boundary self-tests **7 / 7**, build **0 warnings /
+0 errors**, `git diff --check` clean. **Doxygen NOT run — still not installed here.** Database
+**2,020 tickets: 1,972 done, 4 todo, 37 blocked, 3 needs_user, 4 wontfix**, none doing.
+**#1773 remains blocked and its downstream use was not investigated. #1995–#1999 and #2003
+remain blocked, #2005 remains deferred; none was reopened.** Maximum aggregate parallelism
+**2 jobs**. `CNA` and `mobile-eggbert` were not read, searched, built, tested or modified.
+See the first handoff below.*
 
 ---
 
+## Autonomous batch handoff, 2026-08-03 (`System::Text` review #2006 + its whole compatible half, #2007–#2012)
+
+Branch `feature/remediation-batch-system-text-review`, cut from the clean tip `bef4e43`. Seven
+new commits (six of work, plus this handoff), all created with `git -c commit.gpgsign=false` because this environment has no
+usable signing key. **Nothing was pushed, merged, rebased, tagged, force-pushed or published,
+no PR was created, no remote reference was altered and no history was rewritten** — including
+the three pre-existing local-only commits from the two previous batches, which were left
+exactly as they were.
+
+### 1. Why `System::Text`, and what "the namespace" turned out to mean
+
+Selected from tracked state, not alphabetically: `NEXT.md` §10 of the previous handoff names
+it as next with 14 open findings; the audit index confirms **SR-AUD-286 … SR-AUD-299** are
+contiguous, all `confirmed`, all owned by `modules/text`; no open ticket referenced any of
+them; and **no `docs/` document covered the namespace**. `docs/TextSubsetCompatibilityDecision.md`
+is **not** one despite its name — it is the #1927/#1928/#1929 *numeric and date/time* subset
+packet, and its §1 puts `Encoding` explicitly out of scope.
+
+The C++ namespace spans **three** CMake components. This review owns **one**: `Text`
+(`modules/text`), where all fourteen findings live. `Text.Json` and
+`Text.RegularExpressions` are distinct namespaces with their own queues.
+`System::Text::NormalizationForm` is declared in `modules/core` and has **no `Normalize`
+surface at all**, so normalization is an *absent feature*, recorded as an explicit exclusion
+rather than invented as a finding — the same for `Encoder`/`Decoder`, which are documented
+stateless wrappers with no `Convert(…, bytesUsed, charsUsed, completed)` surface, hence **no
+streaming state to be wrong** and no split-sequence contract to violate.
+
+### 2. What landed
+
+| Ticket | Cause | Findings | Before | After | Commit | Tests |
+|---|---|---|---|---|---|---|
+| **#2006** | review | maps all 14 | `todo` | **done** | `67cbfa7` | — |
+| **#2007** | T-A | SR-AUD-286 | `todo` | **done** | `9d2600a` | +19 |
+| **#2008** | T-B | SR-AUD-287 | `todo` | **done** | `9d2600a` | (of the 19) |
+| **#2009** | T-C | SR-AUD-295 | `todo` | **done** | `82edb12` | +8 |
+| **#2010** | T-D | SR-AUD-298 (half) | `todo` | **done** | `a4a2b11` | +7 |
+| **#2011** | T-E | SR-AUD-297 (half) | `todo` | **done** | `a4a2b11` | +10 |
+| **#2012** | T-I | SR-AUD-290/296/289 (docs) | `todo` | **done** | `5a225ea` | +6 |
+| **#2013–#2021** | T-G/H/I/J/K/L/M/N/F | 288, 289, 290, 291, 292, 293, 294, 296, 297, 298, 299 | — | **blocked**, design complete | `67cbfa7` | — |
+
+`SharpRuntimeTests_Text` **238 → 288**; **+50, add-only** — not one pre-existing assertion was
+edited or deleted. #2007 and #2008 share `9d2600a` because both edit the same two regions of
+`Encoding.hpp` in one run (the #1991/#1992 and #2000/#2001/#2002 precedent); #2010 and #2011
+share `a4a2b11` because they are literally the same cause in two files. Every other cause is
+kept separate.
+
+**No `SR-AUD-*` finding was created.** Numbering stays frozen at **364**.
+
+### 3. The repairs, in one line each
+
+- **#2007 (T-A)** — seven public decode entries take a bare pointer plus two signed lengths,
+  and **exactly one of them already validated all three**. `UTF7Encoding`'s four checks
+  *became* the shared policy (`System/Text/detail/RawDecodeRange.hpp`), adopted by all nine
+  overrides, `Decoder`'s two overloads, `GetCharCount` through delegation, and
+  `DecoderExceptionFallback::GetFallbackString` — so the repair needed **no reference tree**.
+- **#2008 (T-B)** — both fallback setters reject null, instead of arming a segmentation fault
+  that fires on the next malformed byte arbitrarily far from its cause.
+- **#2009 (T-C, CCF-004's fourth module)** — `destinationLength` was the one parameter of five
+  with no guard, and the bounds check subtracts from it.
+- **#2010 (T-D, CCF-012)** — the index is accumulated in a wider type with an explicit bound,
+  so neither a `std::` exception nor a signed overflow can reach the caller.
+- **#2011 (T-E)** — `%` is followed by exactly two RFC 3986 `HEXDIG` or it is a
+  `FormatException`; `HtmlEncoder`'s substring overload validates its range.
+- **#2012 (T-I)** — three headers stop promising managed character units they do not deliver,
+  and a new test file **pins the gated behaviour** so #2013–#2017 cannot land silently.
+
+### 4. Premises this batch found to be wrong, and corrected
+
+Historical audit text preserved; every correction appended and separated
+(`docs/SystemTextNamespaceReviewPlan.md` §4, `audit/AUDIT_PROGRESS.md`,
+`audit/AUDIT_CROSS_CUTTING_FINDINGS.md`).
+
+1. **SR-AUD-286's named reproduction does not reproduce.**
+   `UTF8Encoding::GetString(data, -1, 1)` returns `""` — the `size_t` wrap makes the derived
+   end `0`. UTF-8 stays a member (reachable for `count < |index|`), but the finding's own
+   example is not the evidence.
+2. **SR-AUD-286 names one of six failure modes.** The other five, all measured: a
+   segmentation fault for a null buffer in Latin-1/UTF-16/UTF-32; `std::length_error` escaping
+   `Latin1Encoding` for a negative count; UBSan-confirmed
+   `signed integer overflow: 2147483647 + 4` in `UnicodeEncoding`'s **own**
+   `intcs end = index + count`; `Decoder::GetString(vec, -1)` reading **five** bytes from a
+   four-element vector; and `std::length_error` from
+   `DecoderExceptionFallback::GetFallbackString(nullptr, -1)`.
+3. **SR-AUD-287 names one direction of a two-direction defect.**
+   `setEncoderFallbackProperty(nullptr)` is the identical crash.
+4. **SR-AUD-295 understates its own consequence.** The overflow does not accompany the bounds
+   check, it **defeats** it — `INTCS_MIN - count` wraps positive, the comparison is false, the
+   guard passes, and `std::copy` writes. ASan reports a heap-buffer-overflow **while the call
+   returns normally**.
+5. **SR-AUD-298 names the smaller of two defects in one expression.**
+   `Parse("{2147483647}")` **succeeded** and returned `minArgCount == -2147483648`.
+6. **SR-AUD-297's `Decode` defect is four defects**, three of them silent wrong bytes
+   (`"%-1"` → `0xFF`, `"% 1"` → `0x01`, `"%+f"` → `0x0F`), plus a `HtmlEncoder` overload the
+   index row never mentions which threw `std::out_of_range` and **silently clamped** an
+   over-long count.
+7. **CCF-012's exclusion list is wrong.** It states that `System.Text.CompositeFormat` *"is
+   not ported"*. **It is** — it is a third composite-format grammar that #1882/#1883/#1884
+   never touched, so **CCF-012 still cannot close**, now for a second reason beyond #1884's
+   own landing. Ticket **#2020** is the remaining member.
+8. **This plan's own §9.3 predicted a throw that must not happen.** The row was written before
+   the after-probe ran. `GetString(buffer, INTCS_MAX, 4)` **still faults**, deliberately:
+   `INTCS_MAX` is a valid non-negative index and a raw pointer carries no length. What #2007
+   removes is the **undefined addition** on the way there. The correction is in the plan,
+   in the ticket, in the probe source and in the test comment.
+
+### 5. Ten post-audit defects, no identifier issued
+
+Recorded in `docs/SystemTextNamespaceReviewPlan.md` §16 and folded into the owning compatible
+ticket, because each is the *same expression* as a named defect (the #1931/#1929a precedent).
+Numbering stays frozen at **364**.
+
+### 6. Sanitizer evidence
+
+Every conclusion below was produced with the **changed production body compiled into the
+probe** — never linked against a stale archive. Seven of the eleven touched bodies are
+header-inline, so this is the only way to instrument them at all.
+
+| | Before (`build-probe/2007_asan_before.log`, `2010_sanitizer_before.log`) | After (`…_after.log`) |
+|---|---|---|
+| **ASan** | **five** heap-buffer-overflows (ASCII, Latin-1, UTF-16, UTF-32, `Decoder`) plus the `CopyTo` write into a two-byte destination | none |
+| **UBSan** | `UnicodeEncoding.hpp:102 signed integer overflow: 2147483647 + 4`; `StringBuilder.cpp:146 signed integer overflow: -2147483648 - 4`; `CompositeFormat.hpp:52 signed integer overflow: 2147483647 + 1`; three null-pointer loads | none |
+| **LSan** | — | clean, including when a conversion or `Decode` throws part-way |
+| **escaped `std::` exceptions** | **35** (2 `std::out_of_range` from `CompositeFormat`, 4 `std::invalid_argument` from `UrlEncoder`, 29 `std::out_of_range` from `HtmlEncoder`) over 85 run-time-built cases | **0** |
+| **TSan** | **not applicable, stated rather than omitted** — none of #2007–#2012 introduces shared state, an atomic, a lock or a cache. TSan is the *gate* for #2013, where the existing race lives | — |
+
+The before-run compiled against the pre-change sources extracted with `git show HEAD:…` into
+`build-probe/2007_before/` and `build-probe/2010_before/`, so the shadowed headers were the
+historical ones. **A sanitizer-clean result proves memory and arithmetic safety and nothing
+about Unicode parity** — the byte-identity block in `EncodingRawRangeTests` (9 encodings ×
+15 input classes, generated) is what carries that.
+
+### 7. Known full-gate failures — re-measured, not carried over
+
+All 37 executables were run **individually**, with a loop that continues after a failing one;
+`scripts/run_component_tests.sh` exits on the first failure and would have reported a partial
+run.
+
+| Failure | Cause | Classification |
+|---|---|---|
+| `PingTests.Send_Loopback_Succeeds`, `Send_LoopbackByString_Succeeds`, `Send_WithOptions_Succeeds`, `Send_CustomBuffer_EchoedBack`, `SendPingAsync_Loopback_Succeeds` | `/proc/sys/net/ipv4/ping_group_range` is **`1 0`** (an empty range), so an unprivileged `SOCK_DGRAM` ICMP socket is **`Permission denied`** — while `SOCK_RAW` ICMP **opens successfully** in this container. That is exactly #1962: `Ping` only ever opens `SOCK_DGRAM` | **known #1962 implementation gap**, still `blocked` |
+| `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` | `/proc/net/if_inet6` **does not exist** — no IPv6 in this container | **known environment limitation** |
+
+Nothing was disabled, weakened, skipped, recategorised or special-cased. The one `SKIPPED`
+test is the pre-existing `CultureInvariantFormattingTests.NumericAndDateFormatting_UnaffectedByNonInvariantGlobalLocale`.
+
+### 8. Validation
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| whole gate, 37 executables run individually | **15,461 tests, 15,454 passed, 1 skipped, 6 failed** (§7) |
+| `scripts/validate_module_boundaries.py` | OK — **41 modules, 91 edges** (unchanged; the new header is owned by `Text` and adds no edge) |
+| `test/validate_module_boundaries_test.py` | **7 / 7** |
+| `scripts/generate_component_catalog.py --check` | OK, current |
+| `scripts/db_consistency_check.py` | OK |
+| `scripts/check_version_seam_odr.py` | OK — **2 seams, 18 definitions** |
+| `test/check_version_seam_odr_test.py` | **15 / 15** |
+| `scripts/check_negative_consumer_fixtures.py --jobs 2` | OK — **10 fixtures, 81 sites**, 91 invocations, **peak 2 jobs** |
+| `test/check_negative_consumer_fixtures_test.py` | **45 / 45** |
+| `scripts/check_selective_components.sh` | **passed** (every selective component and every isolated consumer fixture) |
+| `scripts/local_ci_check.sh build` | negative fixtures, configure and **build with zero warnings/errors** all passed; the script then **stopped at its test stage on the five known #1962 `PingTests`**, because it exits on the first failing executable. That is reported separately from the complete 37-executable gate above, which was run with a loop that continues past a failure and is the authoritative count |
+| `git diff --check` | clean |
+| **Doxygen** | **NOT RUN — `doxygen` is not installed in this container.** No package was installed, and the historical warning ceiling is **not** reported as newly verified |
+
+### 9. Build directories and disk
+
+Only approved directory names were used: **`build/`** (the repository gate), **`build-probe/`**
+(this batch's probes, all prefixed `2006_`/`2007_`/`2010_`) and **`build-tmp/`** (`TMPDIR`).
+No build tree was created under `/tmp`, `/var/tmp` or `/dev/shm`, and no ticket-suffixed
+directory was invented.
+
+**Maximum aggregate parallel job count: 2**, everywhere — `cmake --build build --parallel 2`,
+`SHARP_RUNTIME_BUILD_JOBS=2` exported to `check_selective_components.sh`, `--jobs 2` passed
+explicitly to `check_negative_consumer_fixtures.py` (which reported "peak 2 job(s)"), and
+every probe compiled as a single translation unit. No `nproc`, no bare `-j`, no bare
+`--parallel`, no unrestricted `ninja`, no concurrent builds, no subagents. `ccache` is not
+installed in this container, so nothing was retrofitted.
+
+Sizes: **`build/` 1.6 GB**, **`build-probe/` 3.9 MB** (after deleting this batch's
+probe binaries once their evidence was transcribed — 20 MB before), **`build-tmp/`
+2.6 MB**.
+
+### 10. What is still open in `System::Text`
+
+| Ticket | Cause | State | What it needs |
+|---|---|---|---|
+| **#2013** | T-G | **blocked**, design complete | plan §14.1 — read-only factory encodings; CCF-009's shape; this repository's own `TextNamespaceTests` must migrate to `Clone()` |
+| **#2014** | T-H | **blocked**, design complete | plan §14.2 — Latin-1 over scalars; produced bytes change for every non-ASCII input |
+| **#2015** | T-I | **blocked**, design complete | plan §14.3 — the byte-vs-character unit; **the largest gate**, and one that should not be decided without deciding it for `System::String` too |
+| **#2016** | T-J | **blocked**, design complete | plan §14.4 — preamble versus payload **and** a virtual `GetPreamble()`, i.e. a vtable change |
+| **#2017** | T-K | **blocked**, design complete | plan §14.5 — the fallback policy; a configured exception fallback starts throwing |
+| **#2018** | T-L | **blocked**, design complete | plan §14.6 — real Unicode categories and casing, plus a stated Unicode version |
+| **#2019** | T-M | **blocked**, design complete | plan §14.7 — the default Web encoders' Basic-Latin allow-list |
+| **#2020** | T-N | **blocked**, design complete | plan §14.8 — one composite-format grammar; **CCF-012 cannot close until this lands** |
+| **#2021** | T-F | **blocked**, design complete | plan §14.9 — `EncodingInfo::GetEncoding` resolving its own code page |
+
+**No approval was requested, implied or assumed for any of these, and none was implemented.**
+Every one has its current behaviour pinned by a permanent test (`TextUnitContractTests` and
+the two `…DeliberatelyStill…` cases), so none can land silently.
+
+`/rv/tmp/runtime/src/libraries/` was **re-verified absent** on 2026-08-03 (so is `/rv`), and
+no .NET runtime is installed. **No compatible repair in this batch depended on absent
+evidence** — that is exactly the criterion that put the other nine in the gated column.
+
+### 11. Also still open, outside this namespace
+
+**#1773** remains `blocked` and its downstream use was **not** investigated. **#1962** remains
+`blocked` (§7). **#1963**, **#1983** and **#2005** remain the three deferred verifications
+blocked on the same absent reference tree and should be resolved together if it ever becomes
+available. **#1995–#1999** and **#2003** remain blocked; **#2005** remains `todo`/deferred.
+None was reopened, re-implemented or edited beyond confirming its record is internally
+consistent. **#1985** and **#1986** remain the two `System::Runtime` post-audit tickets.
+
+### 12. Next recommended work
+
+1. **The `System::Text` approval package, #2013–#2021.** It is nine decisions, but they are
+   not independent: **#2015 (units) subsumes part of #2014 and #2016**, and #2017 must install
+   each encoding's currently hard-coded replacement text or default output changes as a side
+   effect. Presenting §14.1 (read-only factories, low risk, CCF-009 precedent) and §14.8
+   (**which closes CCF-012**) first is the highest-value ordering.
+2. **The next un-reviewed namespace.** With `System::Text` done, the remaining large
+   confirmed-finding clusters are in `modules/collections`, `modules/buffers` and
+   `modules/io`; a fresh context should re-derive the largest queue from
+   `audit/AUDIT_FINDINGS_INDEX.md` rather than trust this sentence.
+3. **#1985 and #1986**, the two remaining `System::Runtime` post-audit tickets.
+
+**Another clean context is recommended** before starting either: this one carried a full
+fourteen-finding review, six implementations and two sanitizer before/after pairs.
+
+---
 ## Autonomous batch handoff, 2026-08-03 (`System::Uri` post-audit follow-up, #2000–#2005)
 
 Branch `feature/remediation-batch-uri-followup-2000`, cut from the clean tip `948f93a`. Two
