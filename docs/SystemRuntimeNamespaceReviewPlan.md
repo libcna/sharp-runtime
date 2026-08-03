@@ -1055,3 +1055,50 @@ instrumented image (the type is header-only, so instrumenting the probe recompil
 Eight add-only `GCSettings` regressions. `SharpRuntimeTests_Runtime` **143 → 153**, which
 also includes #1978's two behaviour-pinning `FormattableStringFactory` tests, added to the
 same translation unit in the same edit.
+
+---
+
+## 22. What #1978 did (2026-08-03) — cause R-J
+
+**SR-AUD-059: `confirmed` → `remediated`.** The **disclosure half** of SR-AUD-168 is
+also closed; its structural half remains an accepted permanent deviation (§4.7, §15) and
+its value divergences remain SR-AUD-165/166/167 under the approval-gated #1980. Cause
+R-J is closed.
+
+**Zero runtime behaviour changed.** Both repairs make a *claim* true; neither touches a
+body.
+
+### 22.1 `FormattableStringFactory::Create`
+
+The `@throws std::invalid_argument if @p format is empty (mirrors ArgumentNullException)`
+line was false in both directions: the body has always forwarded an empty format
+(`empty_format=no-throw args=0 text_len=0`), and .NET's factory null-checks `format` and
+`arguments` and has **no empty-string rule** at all, so the claim did not mirror
+`ArgumentNullException` either. The audit's own conclusion — *"a public
+documentation/diagnostic contradiction, not a reason to add an empty-string rejection"* —
+is adopted verbatim: the claim is removed, the actual contract is stated (including that
+`std::string` has no null state, so there is nothing here to reject), and the correct
+behaviour is now **pinned by two tests** rather than left undescribed. That the audit
+found the false claim only because *no test constructed an empty format* is the reason
+the tests, not just the comment, were part of this ticket.
+
+### 22.2 `InteropAttributes.hpp`
+
+A file-level `@warning` now states that every type in the header is an inert metadata
+object: no declaration attachment, no ABI or field-layout transformation, no DLL binding,
+no COM marshaller, and no way for constructing one to affect a C++ declaration or a
+native call. It names `CLAUDE.md`'s permanent P/Invoke deviation as the reason, points at
+the platform mechanisms to use instead (`extern "C"`, `alignas`, `#pragma pack`,
+`dlopen`/`LoadLibrary`), and separates itself explicitly from SR-AUD-165/166/167, which
+are about the *values* this header declares and are #1980's business.
+
+This closes the one thing the audit added that CLAUDE.md does not cover: this was the
+interop-adjacent header that described effects it cannot produce **without saying so**,
+unlike the compiler-service marker headers beside it.
+
+### 22.3 Consequences
+
+No public signature, object layout, vtable, `noexcept` specification, mangled symbol,
+component edge or **runtime behaviour** changed. `SharpRuntimeTests_Runtime` stays at
+**153** — this ticket's two tests landed with #1976's commit, in the same translation
+unit and the same edit, and are called out there.

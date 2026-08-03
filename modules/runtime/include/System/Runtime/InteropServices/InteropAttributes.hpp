@@ -9,6 +9,38 @@
 
 namespace System::Runtime::InteropServices {
 
+    /**
+     * @file InteropAttributes.hpp
+     *
+     * @warning **Every type in this header is an inert metadata object. None of the layout,
+     * marshalling, calling-convention or COM effects their names and doc-comments describe
+     * happens in this port.**
+     *
+     * There is deliberately no declaration-attachment syntax, no ABI or field-layout
+     * transformation, no DLL binding or symbol resolution, and no COM marshaller behind any of
+     * them. Constructing a `StructLayoutAttribute`, `FieldOffsetAttribute`, `MarshalAsAttribute`,
+     * `DllImportAttribute`, `GuidAttribute`, `ComVisibleAttribute`, `InAttribute`,
+     * `OutAttribute` or `OptionalAttribute` stores values and does nothing else — it cannot
+     * change how a C++ declaration is laid out, how a native call is made, or how anything is
+     * marshalled. In C# these attributes are read by the compiler and the CLR; C++ has no
+     * equivalent consumer, and this port does not provide one.
+     *
+     * That is not an omission to be fixed here. `CLAUDE.md`'s "Known permanent deviations"
+     * classifies **P/Invoke and interop as out of scope**, so these types exist to let ported
+     * declarations keep compiling and to preserve the managed metadata values, not to reproduce
+     * managed interop behaviour. Use the platform's own mechanisms — `extern "C"`, `alignas`,
+     * `#pragma pack`, `dlopen`/`LoadLibrary` — when a real native effect is needed.
+     *
+     * Stated explicitly because the audit found this header to be the one interop-adjacent file
+     * that described effects it cannot produce **without saying so**, unlike the compiler-service
+     * marker headers alongside it (ticket #1978, the disclosure half of SR-AUD-168). The
+     * remaining divergences in the *values* this header declares — `UnmanagedType::LPStruct`,
+     * `StructLayoutAttribute::Pack`, `DllImportAttribute::PreserveSig`/`BestFitMapping`, the
+     * omitted `MarshalAsAttribute` fields and the absent `ComInterfaceType`/`ClassInterfaceType`
+     * enums — are SR-AUD-165/166/167 and are tracked separately by the approval-gated ticket
+     * #1980, because changing them changes declarations a consumer can already name.
+     */
+
     /** Specifies the memory layout of a managed class or struct. */
     enum class LayoutKind : SharpRuntime::intcs {
         Sequential = 0, ///< Members laid out sequentially, as they appear in the source.
