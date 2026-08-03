@@ -6762,3 +6762,60 @@ architecture (#1983, deferred: no toolchain, no host, no reference tree).
 **Index after #1982: 100 remediated / 264 confirmed / 364 total** — of which **14** carry
 the `confirmed (design-complete)` qualifier, twelve of them added by this review's §10
 designs.
+
+---
+
+## Post-audit remediation checkpoint — the `System::Uri` namespace review (2026-08-03)
+
+Review ticket **#1987**; durable record `docs/SystemUriNamespaceReviewPlan.md`. The
+namespace's **fourteen** open findings (SR-AUD-138 … SR-AUD-151, all medium) map to
+**eleven root causes** U-A … U-K and to twelve tickets, with **nothing dropped**: seven
+compatible implementations (#1988–#1994) and five approval-gated designs (#1995–#1999).
+
+**Closed by this batch:** SR-AUD-138 (#1993), SR-AUD-143 (#1989), SR-AUD-144 (#1990) and
+SR-AUD-145 — whose two unrelated halves needed two tickets, #1991 and #1992.
+
+**Six corrections to the audit record, every one measured** by
+`build-probe/1987_probe1_uri_boundaries.cpp` (before/after logs retained):
+
+- **SR-AUD-145 fabricates a *port*, not only a host.** `http://[::1/path` produced
+  `host="[:"` **and `port=1`**, because the authority is split on `rfind(':')` with the
+  brackets unchecked. Two further bracketed shapes the finding never names —
+  `[::1]junk` and the empty `[]` — were accepted the same way.
+- **SR-AUD-143 is not `mailto`-specific**: the opaque branch hard-coded `-1`, so `telnet:`
+  lost 23 too.
+- **A second, unnamed site lost the default port**: `http://example.com:/` reported `-1`
+  while `http://example.com/` reported `80`.
+- **The largest defect in this namespace had no finding at all.** `Uri::parse` located the
+  scheme with `find("://")` — a search for `"://"` *anywhere* — and consulted the
+  grammar-correct `findSchemeColon` only when that failed, although that function's own
+  doc-comment states the RFC 3986 rule. Consequence: `/path?redirect=http://evil.com` and
+  three more ordinary shapes all **threw**. Repaired by #1988 as a **proved** strict
+  widening.
+- **SR-AUD-140 has an availability half**: a `UriBuilder` with an unparseable field compares
+  equal to itself but has no obtainable hash, because `GetHashCode` parses `ToString()`.
+- **`Uri.hpp` promised a lower-case scheme the parser never produced** — a documentation
+  defect, repaired without behaviour change by #1994.
+
+**Five post-audit defects recorded as inactive tickets, none issuing an identifier:**
+**#2000** (empty authority accepted), **#2001** (opaque base fabricates an authority),
+**#2002** (a relative `Uri` never splits its query or fragment), **#2003** (embedded NUL
+crosses the parser), **#2004** (the `Equals`/`GetHashCode` asymmetry) and **#2005**
+(whitespace, deferred for want of reference evidence). Numbering stays frozen at **364**.
+
+**Evidence discipline.** `/rv/tmp/runtime/src/libraries/` and the audit's own
+`/tmp/sharp-runtimervc-uri-*` probe directories are **absent from this environment**. The
+plan's §7 therefore states, per repair, what evidence survives. The two narrowings that
+landed rest on evidence **inside this repository** — `HttpClient::parseUrl`'s identical
+rejection of an unterminated IPv6 literal, and the already-approved enum-domain policy of
+#1976/#1954. SR-AUD-147's narrowing has **no** surviving evidence and is blocked as #1998
+accordingly, on the same line as #1963.
+
+**Still open in this namespace:** URI identity and `UriBuilder` identity (#1995,
+approval-gated — equality semantics), the `UriBuilder` setters and relative promotion
+(#1996, four groups, G-1+G-2 recommended), the four absent public shapes (#1997, four
+groups, A-1+A-2 recommended), `IsKnownScheme` argument validation (#1998), and
+`UriTypeConverter`'s unrepresentable null (#1999, a public virtual signature change).
+
+**Index after #1994: 104 remediated / 260 confirmed / 364 total** — of which **24** carry
+the `confirmed (design-complete)` qualifier, ten of them added by this review's §14 designs.

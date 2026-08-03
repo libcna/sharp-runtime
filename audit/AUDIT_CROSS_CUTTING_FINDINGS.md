@@ -2087,3 +2087,40 @@ promoted to `CCF-*` identifiers: the cross-cutting numbering is closed, and
 **Closed by the same batch:** SR-AUD-206 and SR-AUD-211 (high) and SR-AUD-195 and
 SR-AUD-197 (low) are `remediated` by tickets #1947, #1948 and #1949. The index now
 reads **72 remediated / 292 open / 364 total**.
+
+---
+
+## Post-audit remediation note — the `System::Uri` namespace review (2026-08-03)
+
+Ticket #1987 reviewed `modules/uri`'s fourteen findings (SR-AUD-138 … SR-AUD-151) and
+grouped them into eleven causes, U-A … U-K
+(`docs/SystemUriNamespaceReviewPlan.md` §5). **No `modules/uri` file is named by any of the
+twenty cross-cutting families**, verified by search before the grouping was written, so
+nothing here is a new occurrence of an existing member list.
+
+**One cause is nonetheless governed by an existing policy and deliberately did not get a new
+family.** **U-E** (SR-AUD-145's second half) is an out-of-domain enum cast crossing a public
+boundary — the same cause as `System::Runtime`'s **R-F** (#1976, `GCSettings`' two setters)
+and `System::Threading`'s **T-C** (#1954). Ticket #1992 reuses that policy verbatim, down to
+the `SR.Argument_InvalidEnumValue` message shape `Decimal::Round` and `Math::Round` already
+carry, rather than inventing a second rule for the third occurrence. The cross-cutting
+numbering stays **closed**; this is recorded here only so a future reader can find the third
+site from the family rather than from the namespace.
+
+**One repair rests on evidence that is itself inside this repository, which is worth naming
+as a pattern.** `modules/net-http`'s `HttpClient::parseUrl` is a **second, independent URL
+parser**, and it already rejected an unterminated IPv6 literal with `UriFormatException`
+while `System::Uri` silently fabricated `host="[:"` and `port=1` from the same text. Two
+parsers in one repository disagreeing about the same malformed input is the defect; #1991
+makes them agree. The duplication itself is a genuine architectural redundancy, recorded as
+an explicit exclusion (`docs/SystemUriNamespaceReviewPlan.md` §15.6) rather than repaired
+under cover of a parsing ticket.
+
+The other ten causes are specific to this namespace and are **not** promoted to `CCF-*`
+identifiers, for the same reason the Threading and Runtime reviews gave: the cross-cutting
+numbering is closed and the namespace plan is their durable record.
+
+**Closed by the same batch:** SR-AUD-138, SR-AUD-143, SR-AUD-144 and SR-AUD-145 are
+`remediated` by tickets #1993, #1989, #1990, and the #1991/#1992 pair. The index now reads
+**104 remediated / 260 confirmed / 364 total**, of which 24 carry the
+`confirmed (design-complete)` qualifier.
