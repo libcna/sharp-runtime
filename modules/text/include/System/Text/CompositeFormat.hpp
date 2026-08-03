@@ -22,8 +22,31 @@ namespace System::Text {
         // An earlier version of this parser silently accepted any malformed input (e.g. "Hello {"
         // or a stray "}") and just returned MinimumArgumentCount 0, masking bugs in caller-supplied
         // format strings instead of surfacing them like real .NET does.
+        //
+        // Ticket #2010 (SR-AUD-298, cause T-D of docs/SystemTextNamespaceReviewPlan.md) closed
+        // two defects in one expression, both reachable from ordinary public input:
+        //
+        //   * `std::stoi(idxStr)` threw std::out_of_range for "{2147483648}" -- a std:: exception
+        //     escaping a System-shaped public API whose own doc-comment promises FormatException,
+        //     the same class #1882 removed from String::Format; and
+        //   * one value earlier, "{2147483647}" SUCCEEDED and returned
+        //     getMinimumArgumentCountProperty() == -2147483648, because `maxIdx + 1` on a signed
+        //     intcs already holding INT32_MAX is undefined behaviour. A negative minimum argument
+        //     count is a silent wrong result, which the finding does not name and which is worse
+        //     than the leak it does.
+        //
+        // The digits are therefore accumulated in a wider type with an explicit bound. The bound
+        // is INT32_MAX - 1, i.e. the largest index whose `+ 1` is representable -- deliberately
+        // NOT .NET's kCompositeIndexLimit of 1,000,000, which would additionally reject
+        // "{1000000}".."{2147483646}", inputs this parser accepts today with a defined positive
+        // answer. That narrowing belongs to the approval-gated ticket #2020, which adopts
+        // System::detail::runCompositeFormat's grammar wholesale; #2010 stops exactly one value
+        // short of it.
+        static constexpr long long kMaxRepresentableIndex =
+            static_cast<long long>(SharpRuntime::INTCS_MAX) - 1;
+
         static SharpRuntime::intcs countPlaceholders(const std::string& fmt) {
-            SharpRuntime::intcs maxIdx = -1;
+            long long maxIdx = -1;
             for (std::size_t i = 0; i < fmt.size(); ) {
                 char c = fmt[i];
                 if (c == '{') {
@@ -36,7 +59,15 @@ namespace System::Text {
                     if (idxStr.empty() ||
                         !std::all_of(idxStr.begin(), idxStr.end(), [](unsigned char ch) { return std::isdigit(ch) != 0; }))
                         throw System::FormatException("Input string was not in a correct format.");
-                    SharpRuntime::intcs idx = std::stoi(idxStr);
+                    // Bounded accumulation: no std:: exception can escape, and the loop stops as
+                    // soon as the value can no longer be represented, so a long digit run costs
+                    // no more than a short one.
+                    long long idx = 0;
+                    for (unsigned char ch : idxStr) {
+                        idx = idx * 10 + (ch - '0');
+                        if (idx > kMaxRepresentableIndex)
+                            throw System::FormatException("Input string was not in a correct format.");
+                    }
                     if (idx > maxIdx) maxIdx = idx;
                     while (j < fmt.size() && fmt[j] != '}') ++j;
                     if (j >= fmt.size())
@@ -49,7 +80,7 @@ namespace System::Text {
                     ++i;
                 }
             }
-            return maxIdx + 1;
+            return static_cast<SharpRuntime::intcs>(maxIdx + 1);
         }
 
     public:
