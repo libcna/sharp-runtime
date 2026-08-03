@@ -1,5 +1,38 @@
 # Sharp Runtime plan
 
+*Last verified: 2026-08-03 — branch `feature/remediation-batch-uri-followup-2000`, cut from
+`948f93a` and **not pushed; no push was requested during this batch**. No merge, rebase, tag,
+PR, force-push or history rewrite; the two pre-existing local reconciliation commits were left
+untouched. Two new commits, `4280903` and `942f27a`, both intentionally unsigned. The batch
+worked the **`System::Uri` post-audit follow-up queue #2000–#2005** created by #1987's review.
+**Implemented:** **#2000** — an empty authority is rejected wherever a port applies, so
+`http://`, `http:///path`, `http://:80/path`, `http://user@/path`, `file://:8080/path` and
+`mailto:///c` now throw `UriFormatException` while **`file:///path` stays accepted** (`Port`
+is `-1`, so nothing is fabricated) along with every hierarchical scheme that has no
+default-port entry; **#2004** — `UriBuilder::GetHashCode` hashes the rendered string instead
+of parsing it, removing four measured routes on which `Equals(self)` succeeded but
+`GetHashCode` threw, with **no returned value changed** and **no part of #1995's gated identity
+policy introduced**; **#2001** — resolution against an opaque base follows RFC 3986 §5.2.2/§5.3
+with an undefined authority (`mailto:a@b.com` + `c` → `mailto:c`) instead of fabricating one,
+using opacity **derived from members the object already has**, with no layout change;
+**#2002** — a relative reference now splits its query and fragment exactly as the other two
+branches of the same function always have. **#2003** (embedded NUL) is design-complete and
+**blocked** on approval to narrow, its preserve-as-data behaviour pinned by tests after
+measurement ruled out any prefix-only parse or truncation; **#2005** (whitespace) stays
+**deferred**, its missing reference evidence re-verified absent. The audit is **unchanged at
+104 remediated / 260 confirmed / 364 total**, 24 of the 260 carrying the
+`confirmed (design-complete)` qualifier; **no finding status moved and no `SR-AUD-*`
+identifier was created — numbering stays frozen at 364.** The gate is **15,411 tests / 37
+executables**, 15,404 passing, 1 skipped, **6 failing for the same two causes, re-measured,
+none hidden and none new** (five `PingTests` → #1962; one `SocketTests` resolver case).
+`SharpRuntimeTests_Uri` **213 → 272**. Graph **41/91**; seams **2/18**; negative fixtures
+**10/81**, 91 invocations, peak 2; checker self-tests **45/45** and **15/15**; selective
+components **passed**; build **0 warnings / 0 errors**; `git diff --check` clean. **Doxygen
+was NOT run: doxygen is not installed in this container.** Tickets: **1,965 done, 4 todo, 28
+blocked, 3 needs_user, 4 wontfix** of 2,004; none doing. **#1773 remains blocked and its
+downstream use was not investigated; #1995–#1999 remain blocked and no approval was requested
+or assumed.** CNA and mobile-eggbert were not inspected. Maximum aggregate parallelism 2 jobs.*
+
 *Last verified: 2026-08-03 — branch `feature/remediation-batch-system-runtime-review`,
 cut from `66ff8b3` and **not pushed; no push was requested during this batch**. No merge,
 rebase, tag or PR. The batch performed the **`System::Runtime` namespace review (#1972)**

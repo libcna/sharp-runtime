@@ -1,24 +1,245 @@
-*Last verified: 2026-08-03. Branch `feature/remediation-batch-system-uri-review`
-(cut from `d998bda`). **The batch's nine commits, `2ba68fa` … `501d866`, are already on
-`origin/claude/remediation-batch-1804-namespace-b1yjh5`** — that remote branch has been
-receiving this session's pushes since the Tasks/Channels batch. Only the recovery pass's own
-handoff commit is local and unpushed; no push was requested of it. The batch performed the
-**`System::Uri` namespace
-review (#1987)**, wrote `docs/SystemUriNamespaceReviewPlan.md`, created tickets
-**#1988–#2005**, and implemented the **entire compatible half**: **#1988** (cause U-A, no
-SR-AUD identifier), **#1989** SR-AUD-143, **#1990** SR-AUD-144, **#1991** SR-AUD-145a,
-**#1992** SR-AUD-145b, **#1993** SR-AUD-138, **#1994** SR-AUD-149's disclosure half. Audit
-**104 remediated / 260 confirmed / 364 total** (+4 findings this batch: SR-AUD-138, 143,
-144, 145; **24** of the 260 carry the `confirmed (design-complete)` qualifier, ten added
-here). Numbering still frozen at **364**. Gate **15,352 tests across 37 executables**,
-**15,345 passing, 1 skipped, 6 failing** for the same two measured environment causes as the
-previous batch, unchanged and not hidden — **no new failure**. `SharpRuntimeTests_Uri`
-**149 → 213**. Graph **41 / 91**, seams **2 / 18**, negative fixtures **10 / 81**, checker
-self-tests **45 / 45** and **15 / 15**, selective components **passed**, build **0 warnings
-/ 0 errors**. **Doxygen NOT run — still not installed here.** Database **2,004 tickets:
-1,961 done, 9 todo, 27 blocked, 3 needs_user, 4 wontfix**, none doing. **Commits are
-intentionally unsigned.** #1773, #1962 and #1963 unchanged. Six new post-audit defects
-recorded without an SR-AUD identifier: **#2000–#2005**. See the first handoff below.*
+*Last verified: 2026-08-03. Branch `feature/remediation-batch-uri-followup-2000`, cut from
+`948f93a` (the previous batch's tip on
+`feature/remediation-batch-system-uri-review`). **Two commits, `4280903` and `942f27a`, both
+unsigned and both local-only — no push was requested.** The two earlier reconciliation
+commits `fc2361e` and `948f93a` were carried forward untouched: no amend, no rebase, no
+force-push, no merge, no tag, no PR. This batch worked the **`System::Uri` post-audit
+follow-up queue #2000–#2005**: **#2000** (empty authority), **#2004** (`UriBuilder`
+`Equals`/`GetHashCode` asymmetry), **#2001** (opaque-base resolution) and **#2002** (relative
+query/fragment splitting) are **implemented**; **#2003** (embedded NUL) is **design-complete,
+blocked, behaviour pinned**; **#2005** (whitespace) stays **deferred**, its missing evidence
+re-verified absent. Audit unchanged at **104 remediated / 260 confirmed / 364 total**, of
+which **24** carry the `confirmed (design-complete)` qualifier — **no finding status moved
+and no `SR-AUD-*` identifier was created; numbering stays frozen at 364.** Gate **15,411
+tests across 37 executables, 15,404 passing, 1 skipped, 6 failing** for the same two measured
+environment causes, unchanged and not hidden — **no new failure**. `SharpRuntimeTests_Uri`
+**213 → 272** (+59, add-only). Graph **41 / 91**, seams **2 / 18**, negative fixtures
+**10 / 81** (91 invocations, peak 2 jobs), checker self-tests **45 / 45** and **15 / 15**,
+selective components **passed**, build **0 warnings / 0 errors**, `git diff --check` clean.
+**Doxygen NOT run — still not installed here.** Database **2,004 tickets: 1,965 done, 4 todo,
+28 blocked, 3 needs_user, 4 wontfix**, none doing. **#1773 remains blocked and its downstream
+use was not investigated. #1995–#1999 remain blocked; no approval was requested or assumed.**
+Maximum aggregate parallelism **2 jobs**. `CNA` and `mobile-eggbert` were not read, searched,
+built, tested or modified. See the first handoff below.*
+
+---
+
+## Autonomous batch handoff, 2026-08-03 (`System::Uri` post-audit follow-up, #2000–#2005)
+
+Branch `feature/remediation-batch-uri-followup-2000`, cut from the clean tip `948f93a`. Two
+new commits, both created with `git -c commit.gpgsign=false` because this environment has no
+usable signing key. **Nothing was pushed, merged, rebased, tagged, force-pushed or published,
+no PR was created, no remote reference was altered and no history was rewritten** — including
+the two pre-existing local reconciliation commits, which were left exactly as they were.
+
+### 1. What landed
+
+| Ticket | Before | After | Commit | Tests |
+|---|---|---|---|---|
+| **#2000** empty authority | `todo` | **done** | `4280903` | +22 |
+| **#2001** opaque-base resolution | `todo` | **done** | `4280903` | +11 |
+| **#2002** relative query/fragment | `todo` | **done** | `4280903` | +18 (incl. #2003/#2005 pins) |
+| **#2004** `UriBuilder` hash asymmetry | `todo` | **done** | `942f27a` | +8 |
+| **#2003** embedded NUL | `todo` | **blocked**, design complete | — | pinned by 3 of the 18 |
+| **#2005** whitespace | `todo` | **todo**, deferred verification | — | pinned by 5 of the 18 |
+
+`SharpRuntimeTests_Uri` **213 → 235 → 254 → 272**; +59 net, add-only apart from three
+pre-existing assertions #2002 necessarily updated (each carries an inline note recording what
+it said before; none was deleted). #2000/#2001/#2002 share one commit because they edit the
+same two regions of `Uri::parse` and `Uri::Uri(base, relative)` in the same run — the same
+reason #1991 and #1992 shared `39582ea`; the causes are kept separate everywhere else.
+
+**No `SR-AUD-*` finding changed status.** These six are post-audit defects found by #1987's
+own measurement, not by the audit; audit numbering stays frozen at **364** and the totals
+below are identical to the previous batch's.
+
+### 2. The contracts selected
+
+**#2000 — the one that needed deciding.** The rule is *not* "an authority must be non-empty":
+
+> A hierarchical URI may have an empty host **only when no port applies to it** — neither an
+> explicit port in the authority nor a default port for the scheme.
+
+So **`file:///path` stays accepted** (`Host == ""`, `Port == -1`, `Authority == ""`), as do
+`file://`, `file:///`, `file://:/path` and every unknown hierarchical scheme; and
+`http://`, `http:///path`, `http://:80/path`, `http://user@/path`, `file://:8080/path`,
+`mailto://` and `mailto:///c` are rejected with
+`UriFormatException("Invalid URI: The hostname could not be parsed.")`. Evidence is entirely
+repository-contained: `HttpClientUrlParseTests.EmptyHostThrowsUriFormatException` pins the
+same rejection in this repository's *other* URL parser, and
+`XmlUrlResolverTests.GetEntity_MissingFile_Throws` plus `IOTests`' `FileFormatException` case
+pin `file:///…` as accepted. Port and IP-literal diagnostics keep priority; #1992's `UriKind`
+argument check still runs first; `TryCreate` yields `false` + `nullptr`.
+
+**#2004 — separated from #1995, deliberately and testably.** `UriBuilder::GetHashCode` now
+hashes `ToString()` instead of hashing `getUriProperty().GetHashCode()`. It is
+**value-identical** wherever the old code returned at all, because `Uri::parse` assigns
+`absoluteUri_ = uriString` on every accepted branch and `Uri::GetHashCode` hashes that member;
+measured, six probe lines change and every one is a throw becoming a hash. **No case-folded
+scheme or host identity, no default-port equivalence, no canonical identity and no
+`UriBuilder`→`Uri` delegation was introduced.** The three pairs #1995 *would* make equal are
+fixed as still unequal and still differently hashed by
+`UriBuilderTest.DeliberatelyUnequalPairsStayUnequal_PinsTheGatedIdentityChange`, and a second
+test pins that `Uri`'s own `operator==`/`GetHashCode` are untouched.
+
+**#2001 — RFC 3986 §5.2.2/§5.3 with an undefined base authority.** `mailto:a@b.com` + `c` →
+`mailto:c`; + `?q` → `mailto:a@b.com?q`. A network-path reference still supplies its own
+authority, an absolute reference still discards the base, an empty reference still returns the
+base verbatim, and every hierarchical resolution is byte-identical. Rejecting the operation
+was considered and **not** chosen: that would be a narrowing on no surviving reference
+evidence, where the RFC this function already cites twice is neither.
+
+**#2002 — RFC 3986 §4.2.** The relative branch now splits `#` then `?` exactly as the other
+two branches always have. `OriginalString`, `AbsoluteUri`, `ToString()`, equality and hash are
+unchanged. Consumer impact was **measured**: the nine call sites of the three affected getters
+outside `modules/uri` are all in code that cannot see a relative `Uri`.
+
+### 3. Premises this batch found to be wrong, and corrected
+
+Historical text preserved; every correction appended and separated.
+
+1. **`docs/SystemUriNamespaceReviewPlan.md` §9.2 claimed `sizeof` was "re-asserted by
+   permanent tests."** Measured — **no test in the repository referenced `sizeof` at all.**
+   Two pins were added, so the claim is now true.
+2. **§23.3 said an opaque base could not be detected "because detecting that a base was opaque
+   needs information the object does not record."** Wrong: it is `parse()`'s own rule applied
+   to `absoluteUri_` and `scheme_`, both already members. `build-probe/2001_probe1_before.log`
+   §C separates eight bases with no false answers. **No new member, no layout change.**
+3. **The work order described #2004 as a `Uri` equality/hash asymmetry.** `Uri`'s two
+   operations both read `absoluteUri_` and have always agreed; the asymmetry is
+   `UriBuilder`-only.
+4. **#2001's reproduction was narrower than the defect.** Besides `mailto:///c`,
+   `("mailto:a@b.com", "?q")` produced `Host == "b.com"` — the mailbox **domain** became a
+   host name — and `("urn:isbn:0-395-36341-1", "?q")` **threw**, a false rejection.
+5. **#2005's summary ("whitespace is rejected") is wrong in both directions.** Leading
+   whitespace silently demotes the reference to **relative**; trailing whitespace is
+   **accepted** into the path (`Uri("http://example.com/ ").AbsolutePath == "/ "`).
+
+New plan sections **§26–§32** record all of this. Ticket rows #2000–#2005 carry appended,
+separated correction notes.
+
+### 4. Full gate — 37 executables, run individually
+
+**15,411 tests, 15,404 passed, 1 skipped, 6 failed.** +59 over the previous batch's 15,352,
+matching exactly the 59 this batch added. Every executable was run separately so no failure
+masked another.
+
+The **six failures are the two known environment causes, unchanged, not hidden, not disabled,
+not skipped and not recategorised**:
+
+- `PingTests.Send_Loopback_Succeeds`, `Send_LoopbackByString_Succeeds`,
+  `Send_CustomBuffer_EchoedBack`, `Send_WithOptions_Succeeds`, `SendPingAsync_Loopback_Succeeds`
+  — five, ticket **#1962** (`Ping` only opens an unprivileged `SOCK_DGRAM` ICMP socket);
+- `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` — one, the container's
+  resolver.
+
+`scripts/local_ci_check.sh build` reached **"build clean: 0 warnings, 0 errors"** and its
+negative-fixture stage passed, then **stopped at the first of the five `PingTests`** — it
+exits on the first failing executable, so it is reported here separately from, and is not a
+substitute for, the 37-executable gate above.
+
+### 5. Sanitizer evidence
+
+| Probe | Harness | Result |
+|---|---|---|
+| `2000_probe1_empty_authority` | ASan + UBSan + LSan | **0 reports**, exit 0; 36 sanitizer symbols vs **0** in the plain image; 46 `System::Uri::` symbols |
+| `2001_probe1_opaque_base` | ASan + UBSan + LSan | **0 reports**, exit 0; 32 vs 0; 45 `System::Uri::` symbols |
+| `2002_probe1_relative_and_nul` | ASan + UBSan + LSan | **0 reports**, exit 0; 35 vs 0; 45 `System::Uri::` symbols; sanitized output byte-identical to the plain run |
+| Capability controls | ASan / UBSan / **LSan** | **heap-buffer-overflow**, **signed-integer-overflow** and **64-byte leak** all reported — the harness is proved discriminating before any "0 reports" is believed |
+| TSan | — | **not run.** `Uri` and `UriBuilder` have no shared cache, no lazy canonicalisation and no hidden mutable state; every member is set in the constructor and read `const` afterwards. Stated, not silently skipped |
+
+`modules/uri/src/System/Uri.cpp` was compiled **from source on every sanitizer command line**;
+`build/libsharp_runtime_uri.a` was never linked into an instrumented image. Honest limitation,
+unchanged from #1988: `build/libsharp_runtime_core.a` supplies the exception classes and is
+not instrumented, so UBSan says nothing about code inside `UriFormatException`'s constructors.
+A separate leak-only control (`2000_probe2_control_leak.cpp`) was written because the shared
+#1988 control aborts on its first ASan defect under `-fno-sanitize-recover=all`, so LSan never
+reported there.
+
+### 6. Consequences
+
+No public signature, object layout, vtable, mangled symbol, `noexcept` specification or
+component edge changed by any of the four repairs. `sizeof(System::Uri)` stays **240** and
+`sizeof(System::UriBuilder)` stays **232**, both now pinned by tests.
+
+| Dimension | #2000 | #2004 | #2001 | #2002 |
+|---|---|---|---|---|
+| accepted input | **narrows** | none | **widens** (two shapes that threw now resolve) | none |
+| parsing / components | rejects empty-host shapes | none | opaque-base results | relative `Path`/`Query`/`Fragment`/`PathAndQuery` |
+| normalisation | none | none | none | none |
+| equality / hash | none | **throw removed; no value changed** | none | none |
+| exception boundary | new `UriFormatException` | **fewer** throws | **fewer** throws | none |
+
+Downstream, all six `Uri` consumers re-run unchanged: `Net` 240, `Net.Http` 132,
+`Net.Http.Headers` 373, `Net.WebSockets` 24, `Xml` 379, `IO` 599.
+
+### 7. Validation
+
+| Check | Result |
+|---|---|
+| `scripts/validate_module_boundaries.py --root .` | OK — **41 modules, 91 edges** |
+| `test/validate_module_boundaries_test.py` | 7 tests OK |
+| `scripts/generate_component_catalog.py --check` | OK, catalogue current |
+| `scripts/db_consistency_check.py --db plan.sqlite3` | OK |
+| `scripts/check_version_seam_odr.py` | OK — **2 seams, 18 specialisation definitions** |
+| `test/check_version_seam_odr_test.py` | 15 tests OK |
+| `scripts/check_negative_consumer_fixtures.py --jobs 2` | OK — **10 fixtures, 81 sites**, 91 invocations, **peak 2 jobs** |
+| `test/check_negative_consumer_fixtures_test.py` | 45 tests OK |
+| `scripts/check_selective_components.sh` | **passed**, exit 0 |
+| `git diff --check` | clean |
+| Doxygen | **NOT run — `doxygen` is not installed in this container** |
+
+Every Python invocation used `PYTHONDONTWRITEBYTECODE=1`; no `__pycache__` was created,
+staged or committed. Every `mktemp`-based script ran with `TMPDIR="$PWD/build-tmp"`.
+
+### 8. Build-resource compliance
+
+Build directories used: **`build/`** (the default tree and the gate, reused incrementally —
+no reconfigure, no clean), **`build-probe/`** (all six probe/control sources and their logs,
+under this batch's `2000_`/`2001_`/`2002_` file-name prefixes — **no new directory was
+created**), **`build-tmp/`** (`TMPDIR`, and the two long-running script logs). No build tree
+was created under `/tmp`, `/var/tmp` or `/dev/shm`.
+
+**Maximum aggregate parallel job count: 2**, everywhere — `cmake --build build --parallel 2`,
+`SHARP_RUNTIME_BUILD_JOBS=2` exported to `check_selective_components.sh` and
+`local_ci_check.sh`, `--jobs 2` passed explicitly to `check_negative_consumer_fixtures.py`
+(which reported "peak 2 job(s)"), and every probe compiled as a single translation unit. No
+`nproc`, no bare `-j`, no bare `--parallel`, no unrestricted `ninja`, no concurrent builds, no
+subagents. `ccache` is not installed in this container, so nothing was retrofitted.
+
+Measured sizes: **`build/` 1.6 GB**, **`build-probe/` 3.8 MB** (after deleting this batch's
+nine probe binaries once their evidence was transcribed — 16 MB before), **`build-tmp/`
+2.6 MB**. No other build directory exists.
+
+### 9. What is still open in `System::Uri`
+
+| Ticket | State | What it needs |
+|---|---|---|
+| **#1995** U-G | **blocked** | the §14.1 approval sentence — URI identity / equality semantics |
+| **#1996** U-H | **blocked** | the §14.2 approval sentence (G-1 + G-2 recommended minimum) |
+| **#1997** U-I | **blocked** | the §14.3 approval sentence (A-1 + A-2 recommended minimum) |
+| **#1998** U-J | **blocked** | the §14.4 approval sentence — and reference evidence that does not exist here |
+| **#1999** U-I | **blocked** | the §14.5 approval sentence — a public virtual signature change |
+| **#2003** | **blocked**, design complete | approval to narrow: *"Make `System::Uri` reject an embedded NUL anywhere in the URI string with `UriFormatException`, accepting that the .NET behaviour it matches could not be re-measured in this environment."* |
+| **#2005** | **todo**, deferred | authoritative reference evidence for whether .NET trims surrounding whitespace and rejects internal whitespace |
+
+**No approval was requested, implied or assumed for any of these, and none was implemented.**
+`/rv/tmp/runtime/src/libraries/` was **re-verified absent** on 2026-08-03 (so is `/rv`), as
+were the audit's `/tmp/sharp-runtimervc-uri-*` probe directories.
+
+### 10. Next recommended work
+
+1. **`System::Text`** — 14 open findings, the alternative `docs/SystemUriNamespaceReviewPlan.md`
+   §1 named and left untouched, and now the largest un-reviewed namespace queue. A fresh
+   context should start with its namespace review, in the style of #1950/#1964/#1972/#1987.
+2. Failing that, the two remaining `System::Runtime`/`Threading` post-audit tickets **#1985**
+   and **#1986**, and the deferred verifications **#1963**, **#1983**, **#2005** — all three
+   of which are blocked on the same absent reference tree and should be resolved together if
+   it ever becomes available.
+
+**Another clean context is recommended** before starting the `System::Text` review: this one
+carried a full six-ticket semantic investigation and its remaining headroom is better spent
+than on a new namespace's inventory.
 
 ---
 

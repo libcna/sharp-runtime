@@ -1091,3 +1091,346 @@ empty-string rejection. The third of these is the important one — it **must be
 
 `SharpRuntimeTests_Uri` **208 → 213**. No signature, layout, vtable, `noexcept`,
 mangled-symbol or component-edge change. Closes neither SR-AUD-142 nor SR-AUD-149.
+
+---
+
+## 26. What #2000 measured and decided (2026-08-03) — the empty authority
+
+*Post-audit ticket, no `SR-AUD-*` identifier. Numbering stays frozen at **364**.*
+
+### 26.1 The complete reproduction matrix
+
+`build-probe/2000_probe1_empty_authority.cpp`, output retained as
+`build-probe/2000_probe1_before.log` (before) and `build-probe/2000_probe1_after.log`
+(after). Every parse and construction path that can reach the authority branch with nothing
+where the host belongs was exercised, across five scheme classes.
+
+| Shape class | Before | After |
+|---|---|---|
+| `http://`, `http:///`, `http:///path`, `http://:`, `http://:/path`, `http://:80/path`, `http://?query`, `http://#fragment`, `http://?q#f` | accepted, `host=""`, `port=80`, `Authority=""` | **`UriFormatException`** |
+| `https:///`, `ws:///`, `wss:///`, `ftp:///`, `gopher:///`, `nntp:///`, `telnet:///`, `ldap:///`, `net.tcp:///` | accepted with each scheme's default port | **`UriFormatException`** |
+| `http://user@/path`, `http://user:pass@/path`, `http://@/path`, `http://user@:8080/path` | accepted, `host=""` (the last with `Authority=":8080"`) | **`UriFormatException`** |
+| `file:///path`, `file:///tmp/bad.docx`, `file://`, `file:///`, `file://:/path` | accepted, `host=""`, **`port=-1`** | **unchanged** |
+| `file://host/share` | accepted, `host="host"` | unchanged |
+| `file://:8080/path` | accepted, `host=""`, `port=8080` | **`UriFormatException`** |
+| `unknown://`, `unknown:///path`, `git+ssh:///repo`, `ssh:///host` | accepted, `host=""`, `port=-1` | **unchanged** |
+| `mailto:a@b.com`, `mailto:`, `urn:isbn:…`, `telnet:host.example.com` (opaque branch) | accepted | **unchanged** |
+| `mailto://`, `mailto:///c` (authority-bearing spelling of an opaque scheme) | accepted, `host=""`, `port=25` | **`UriFormatException`** |
+| `http://@example.com/` (empty **user-info**, host present) | accepted | **unchanged** |
+| `//`, `//other.example/c`, `/path`, `path`, `?q`, `#f` (relative) | relative | **unchanged** |
+| `http://[]/path`, `http://[::1/path` | already rejected by #1991 | unchanged |
+| `HTTP:///path` (mixed-case scheme) | accepted, `port=-1` | **unchanged — see §26.4** |
+
+`TryCreate` turns the new rejection into `false` + `nullptr`; `UriBuilder::getUriProperty()`
+with an empty `Host` now throws; `Uri(base, "//")` now throws because #1990 turns that
+reference into `scheme + ":" + "//"`. Copy construction and assignment of a host-less `file:`
+URI are unaffected.
+
+### 26.2 The contract, stated once
+
+> **A hierarchical (authority-bearing) URI may have an empty host only when no port applies
+> to it — neither an explicit port in the authority nor a default port for the scheme.
+> Otherwise the empty host is rejected with
+> `UriFormatException("Invalid URI: The hostname could not be parsed.")`.**
+
+It is deliberately **not** "an authority must be non-empty", which would reject
+`file:///path`. It is also not a scheme allow-list: it is the same invariant #1991 restored —
+*the object must never report a port for a host that does not exist* — and it happens to
+partition the scheme classes correctly because `defaultPortForScheme` is exactly this file's
+own record of which schemes are port-bearing network schemes.
+
+### 26.3 The evidence, per clause
+
+| Clause | Surviving evidence inside this repository |
+|---|---|
+| host-required schemes reject an empty host | `HttpClient::parseUrl` rejects `http://:8080/path` with `UriFormatException`, pinned by `HttpClientUrlParseTests.EmptyHostThrowsUriFormatException`. Two parsers in one repository disagreeing about the same malformed text is the defect; this makes them agree — the identical argument #1991 was landed on |
+| `file:///path` stays accepted | `XmlUrlResolverTests.GetEntity_MissingFile_Throws` and `IOTests`' `FileFormatException` case both construct it today and pass; RFC 8089 makes it the canonical host-less form |
+| unknown schemes stay accepted | no evidence either way survives, so nothing is narrowed there — the deferral discipline of #1998 and #1963 |
+| the message spelling | a **consistency choice**, not a measured fact: it follows this file's existing `"Invalid URI: …"` family. Recorded as a choice rather than presented as reference-derived |
+
+The `/rv/tmp/runtime/src/libraries/` tree and the audit's `/tmp/…` probe directories are still
+absent; **re-verified on 2026-08-03**, not carried over.
+
+### 26.4 Two consequences stated plainly rather than buried
+
+1. **`HTTP:///path` is still accepted.** `defaultPortForScheme` matches lower-case names only,
+   so a mixed-case scheme has no default port and therefore no contradiction to reject. That
+   is a direct artefact of the still-open SR-AUD-142, it is **pinned by its own test**, and it
+   closes when #1995 lands. Not tidied here, because tidying it would be #1995.
+2. **`mailto:///c` — #2001's headline output — became a rejection.** #2000 was not written to
+   repair #2001 and does not: see §28.
+
+### 26.5 Consequences
+
+No public signature, object layout, vtable, mangled symbol, `noexcept` specification or
+component edge changed. `sizeof(System::Uri)` stays **240**. Accepted input **narrows**;
+canonicalisation, equality and hash are untouched. All six downstream consumers re-run
+unchanged: `Net` 240, `Net.Http` 132, `Net.Http.Headers` 373, `Net.WebSockets` 24, `Xml` 379,
+`IO` 599. `SharpRuntimeTests_Uri` **213 → 235**.
+
+---
+
+## 27. What #2004 measured (2026-08-03) — the equality/hash asymmetry
+
+### 27.1 A premise from the batch prompt, corrected
+
+The work order described #2004 as a **`Uri`** equality/hash asymmetry. Measured, it is not:
+`Uri::operator==` compares `absoluteUri_` and `Uri::GetHashCode` hashes the same member, so
+they have always agreed. The asymmetry is **`UriBuilder`-only** and is between two operations
+that read the same rendered text by different routes — `Equals` compares strings, `GetHashCode`
+*parsed* them. `Uri`'s own pairing is asserted by a test in this ticket so the distinction
+stays visible.
+
+### 27.2 The repair and its compatibility proof
+
+`GetHashCode()` now hashes `ToString()` directly instead of hashing
+`getUriProperty().GetHashCode()`. This is **value-identical** wherever the old code returned
+at all: `Uri::parse` assigns `absoluteUri_ = uriString` on every branch it accepts and
+`Uri::GetHashCode` hashes exactly that member, so
+`Uri(s).GetHashCode() == std::hash<std::string>{}(s)` for every `s` a `Uri` accepts. ∎
+
+Measured, `build-probe/2000_probe1_after.log` vs `build-probe/2004_probe1_after.log`:
+**six lines differ, and every one is a throw becoming a hash.** No previously returned value
+moved — the empty-host builder still hashes to `632251956`, the same number it produced
+before #2000 landed.
+
+| Builder | Before | After |
+|---|---|---|
+| `Host = "h:abc"` | `Equals(self)=1`, `GetHashCode` **throws** *Invalid port specified.* | `208857098` |
+| `Host = "h:99999"` | throws | `1715227682` |
+| `Host = "[::1"` | throws (#1991) | `-1773657833` |
+| `Host = ""` | throws (#2000) | `632251956` |
+
+### 27.3 Separation from #1995, and what stays gated
+
+The repair closes **only** the internal asymmetry. It introduces no case-folded scheme or host
+identity, no default-port equivalence, no canonical identity and no `UriBuilder`→`Uri`
+delegation. `DeliberatelyUnequalPairsStayUnequal_PinsTheGatedIdentityChange` fixes the three
+pairs #1995 would make equal (case-differing host, case-differing scheme, explicit default
+port) as **still unequal and still differently hashed**, so landing #1995 is a visible change.
+SR-AUD-140 and SR-AUD-142 remain `confirmed (design-complete)`; #1995 remains **blocked**.
+
+`Equals` and `GetHashCode` are now total on exactly the same set: the only remaining failure
+is `ToString()` itself throwing for an empty `UserName` with a non-empty `Password`, and then
+both raise it. Asserted.
+
+### 27.4 Consequences
+
+No signature, object layout, vtable, mangled-symbol, `noexcept` or component-edge change;
+`sizeof(System::UriBuilder)` stays **232**. Header-only change, so every consumer recompiles.
+`SharpRuntimeTests_Uri` **264 → 272** (this ticket's eight; the numbering reflects the commit
+order, in which #2001/#2002 landed first).
+
+---
+
+## 28. What #2001 measured (2026-08-03) — resolution against an opaque base
+
+### 28.1 A premise from §23.3, corrected
+
+§23.3 wrote that the opaque-base shape was excluded "because detecting that a base was opaque
+needs information the object does not record." **That is wrong, and measurement is what
+showed it.** Opacity is exactly `parse()`'s own rule applied to the base's original string —
+a scheme token whose colon is followed by `"//"` — and both operands are already members
+(`absoluteUri_`, `scheme_`). `build-probe/2001_probe1_before.log` §C evaluates that predicate
+over eight bases and it separates the three opaque ones from the three hierarchical ones
+(including `file:///a` and `unknown:///a`, whose hosts are empty) with no false answers. The
+repair therefore needs **no new member, no virtual and no layout change**;
+`sizeof(System::Uri)` stays **240**. The historical §23.3 text is preserved above; this is the
+correction.
+
+### 28.2 The defect is broader than the ticket names
+
+The ticket names `Uri(Uri("mailto:a@b.com"), "c")` → `mailto:///c`. Measured, the same root
+cause — the reconstruction emitted `"scheme://"` unconditionally, feeding the base's **opaque
+path** through `parse()`'s authority splitter — produces two strictly worse outcomes the
+ticket does not name:
+
+| Base | Reference | Before | Why it is worse |
+|---|---|---|---|
+| `mailto:a@b.com` | `?q` | `mailto://a@b.com?q` with **`Host == "b.com"`**, `Port == 25` | the mailbox local-part became user-info and the **domain became a host name** — a silent wrong component, not a malformed string |
+| `urn:isbn:0-395-36341-1` | `?q` | **throws** *Invalid URI: Invalid port specified.* | `isbn:0-395-36341-1` read as `host:port` — a **false rejection** of well-formed input |
+
+`parse()` classifies both bases as opaque with `host_ == ""`, so the resolver was
+contradicting the parser about the very same base.
+
+### 28.3 The contract selected
+
+RFC 3986 §5.2.2/§5.3 with an **undefined base authority** — the same specification this
+function already cites twice and the same evidence basis #1990 was landed on:
+
+| Base | Reference | Before | After |
+|---|---|---|---|
+| `mailto:a@b.com` | `c` | `mailto:///c` (then `UriFormatException` after #2000) | **`mailto:c`** |
+| `mailto:a@b.com` | `/c` | `mailto:///c` | **`mailto:/c`** |
+| `mailto:a@b.com` | `?q` | `mailto://a@b.com?q`, host `b.com` | **`mailto:a@b.com?q`**, host `""` |
+| `mailto:a@b.com` | `#f` | `mailto://a@b.com#f`, host `b.com` | **`mailto:a@b.com#f`** |
+| `urn:isbn:0-395-36341-1` | `c` | `urn:///c` | **`urn:c`** |
+| `urn:isbn:0-395-36341-1` | `?q` | throws | **`urn:isbn:0-395-36341-1?q`** |
+| `news:`, `tag:`, `about:`, `javascript:`, `telnet:` opaque bases | `c` | `scheme:///c` or a throw | **`scheme:c`** |
+
+**Rejecting the operation was considered and not chosen**: it is a narrowing with no surviving
+reference evidence, where resolution per the RFC the file already names is neither.
+
+Deliberately unchanged: a **network-path** reference (`//other/c`) still supplies its own
+authority whatever the base was — `mailto://other/c` — which is what RFC 3986 §5.2.2 says; an
+**absolute** reference still discards the base; an **empty** reference still returns the base
+verbatim (§23.3's other deferral, untouched). Every hierarchical resolution is byte-identical:
+`build-probe/2001_probe1_before.log` §B and §C are unchanged in the after log.
+
+### 28.4 Consequences
+
+No public signature, object layout, vtable, mangled symbol, `noexcept` or component-edge
+change. **No acceptance narrowing** — two shapes that used to throw now resolve. Equality and
+hash are untouched; every resolved value round-trips through `Uri(result.AbsoluteUri)` to an
+equal object, asserted. `SharpRuntimeTests_Uri` **243 → 254**.
+
+---
+
+## 29. What #2002 measured (2026-08-03) — a relative reference's components
+
+### 29.1 The defect and the evidence
+
+The relative branch of `parse()` stored the whole reference as the path: `Uri("a?b#c")`
+reported `AbsolutePath == "a?b#c"` with `Query` and `Fragment` empty; `Uri("?b")` reported
+`AbsolutePath == "?b"`. RFC 3986 §4.2 spells
+`relative-ref = relative-part [ "?" query ] [ "#" fragment ]` — the same three components an
+absolute URI has — and **both other branches of the same function already split them**. Only
+this one did not. That is the identical "one file, two answers" shape #1988 (two scheme
+grammars) and #1989 (a port table consulted on some paths only) were landed on.
+
+The impact was **measured, not assumed**: a repository-wide search for
+`getAbsolutePathProperty`, `getQueryProperty()` and `getFragmentProperty()` outside
+`modules/uri` returns nine call sites, in `WebProxy`, `CookieContainer`, `CredentialCache` and
+`XmlUrlResolver`, and **not one of them can see a relative `Uri`** —
+`XmlUrlResolver::GetEntity` explicitly branches on `IsAbsoluteUri` and uses `AbsoluteUri` for
+the relative case. Relative resolution consumes the raw reference string, never these
+components, so `Uri(base, relative)` is byte-identical (asserted).
+
+### 29.2 Before and after
+
+`build-probe/2002_probe1_before.log` vs `build-probe/2002_probe1_after.log`. Thirteen lines
+differ, all in §A, and no others.
+
+| Input | `AbsolutePath` before | after | `Query` | `Fragment` |
+|---|---|---|---|---|
+| `a?b` | `a?b` | `a` | `?b` | `` |
+| `a#c` | `a#c` | `a` | `` | `#c` |
+| `a?b#c` | `a?b#c` | `a` | `?b` | `#c` |
+| `?b` | `?b` | `` | `?b` | `` |
+| `#c` | `#c` | `` | `` | `#c` |
+| `a?` / `a#` / `a?#` | verbatim | `a` | `?` / `` / `?` | `` / `#` / `#` |
+| `/p/q?b#c` | verbatim | `/p/q` | `?b` | `#c` |
+| `//host/p?b#c` | verbatim | `//host/p` | `?b` | `#c` |
+| `a?b?c` / `a#c#d` / `a#c?b` | verbatim | `a` | `?b?c` / `` / `` | `` / `#c#d` / `#c?b` |
+| `a%3Fb`, `a%23c` | verbatim | **unchanged** — the no-percent-decoding boundary holds | | |
+
+`OriginalString`, `AbsoluteUri`, `ToString()`, `operator==` and `GetHashCode` all read
+`absoluteUri_`, which is still the verbatim input, and are unchanged. `PathAndQuery` changes
+only for a reference carrying a fragment, and only by dropping it — which is what
+`PathAndQuery` already does for every absolute URI.
+
+### 29.3 Three pre-existing assertions updated
+
+`SchemeDetection_RelativeWithAbsoluteUrlInQuery_IsRelative`,
+`SchemeDetection_RelativeWithAbsoluteUrlInFragment_IsRelative` (both #1988's) and this batch's
+own `EmptyAuthority_RelativeReferencesAreUnaffected` asserted the old whole-reference path.
+Each was updated to assert `OriginalString` **plus** the new split, with an inline note
+recording what it said before. No assertion was deleted.
+
+### 29.4 Consequences
+
+No public signature, object layout, vtable, mangled symbol, `noexcept` or component-edge
+change; `sizeof(System::Uri)` stays **240**. **No acceptance change** — nothing new is
+rejected and nothing new is accepted. Three public properties change value for relative URIs
+only. `SharpRuntimeTests_Uri` **254 → 272** (with §30's and §31's pins).
+
+---
+
+## 30. #2003 — the embedded NUL: pinned, not changed
+
+`build-probe/2002_probe1_after.log` §E–§G is the complete inventory: constructors, every
+component position, relative and opaque forms, leading/trailing/only-NUL, `UriBuilder`'s
+`Scheme`/`Host`/`Path`/`Query`/`Fragment`/`UserName` setters, `ToString`, round trip and
+equality.
+
+**The measured behaviour is preserve-as-data, and it is internally consistent:**
+
+- the NUL reaches `Host`, `AbsolutePath`, `Query`, `Fragment`, `UserInfo` and `AbsoluteUri`
+  intact; the **port** position already rejects it, because a NUL is not a digit;
+- there is **no prefix-only parse and no truncation**: `Uri("http://h/a\0b")` keeps all
+  **12** bytes, `ToString().size() == 12`, it re-parses to an equal object, and it is **not**
+  equal to `Uri("http://h/a")` and does not share its hash;
+- `UriBuilder` renders it through without loss (`size == 32` for the multi-component case).
+
+The ticket's four candidate contracts are *reject*, *preserve*, *escape*, *truncate*. Escape
+is excluded by §15.1 (no percent-encoding). Truncate is the failure mode the measurement rules
+out, and is not proposed. That leaves **reject** versus **preserve**, and choosing *reject*
+would be a narrowing at a public boundary whose reference basis cannot be measured here —
+exactly the line #1998 and #1963 sit on, and it is respected. **#2003 stays open, design-
+complete, and its current behaviour is now pinned by three permanent tests** so a later change
+is a decision rather than a drift.
+
+---
+
+## 31. #2005 — deferred verification, re-checked
+
+**Re-verified on 2026-08-03, not carried over:** `/rv/tmp/runtime/src/libraries/` does not
+exist in this environment (nor does `/rv`), and the audit's `/tmp/sharp-runtimervc-uri-*`
+probe directories are still absent. **No authoritative reference evidence has become
+available**, so #2005 stays deferred and is **not** converted into an implementation ticket.
+
+The measurement did refine the reproduction a second time, and the refinement contradicts the
+ticket's original one-line summary in **both** directions:
+
+| Input | Measured now |
+|---|---|
+| `"  http://example.com/  "` | **relative**, path is the padded text (this is #1988's §20.4 consequence) |
+| `" http://example.com/"` | **relative** |
+| `"\thttp://h/"` | **relative** |
+| `"http://example.com/ "` | **absolute**, `Host == "example.com"`, `AbsolutePath == "/ "` |
+| `"http://exa mple.com/"` | absolute, `Host == "exa mple.com"` |
+| `"http://h/a b"` | absolute, `AbsolutePath == "/a b"` |
+
+So it is not "whitespace is rejected": **leading** whitespace silently demotes the reference to
+relative, while **trailing** whitespace is accepted straight into the path. The exact missing
+evidence is named: whether .NET trims surrounding whitespace before parsing, and whether it
+rejects internal whitespace. Five permanent tests pin the current answers.
+
+---
+
+## 32. Further corrections this follow-up made to the record
+
+Each preserves the historical text and is appended, per the standing rule. No `SR-AUD-*`
+identifier was created; numbering stays frozen at **364**.
+
+1. **§9.2's layout claim was untrue.** It said `sizeof(System::Uri) == 240` and
+   `sizeof(System::UriBuilder) == 232` "are re-asserted by permanent tests, so a later ticket
+   cannot grow either type unnoticed." Measured on 2026-08-03, **no test in the repository
+   referenced `sizeof` at all** — the probe recorded the numbers, nothing pinned them. Two
+   tests (`UriTests.Layout_SizeOfUriIsPinned`, `UriBuilderTest.Layout_SizeOfUriBuilderIsPinned`)
+   were added by this batch, so the claim is now true.
+2. **§23.3's opacity claim was wrong** — see §28.1.
+3. **The batch prompt's description of #2004 as a `Uri` asymmetry was wrong** — see §27.1.
+4. **#2001's, #2003's and #2005's recorded reproductions were incomplete or stale** — see
+   §28.2, §30 and §31. All three ticket rows in `plan.sqlite3` carry an appended, separated
+   correction note; none of the historical text was rewritten.
+5. **§11's test matrix rows for "empty host, user-info, empty user-info", "embedded NUL" and
+   "whitespace" now have owners**: #2000, #2003 and #2005 respectively, rather than "#1988
+   pins current".
+
+### 32.1 Status after this follow-up
+
+| Ticket | Cause | Before | After |
+|---|---|---|---|
+| #2000 | post-audit, empty authority | `todo` | **done** (§26) |
+| #2001 | post-audit, opaque base | `todo` | **done** (§28) |
+| #2002 | post-audit, relative components | `todo` | **done** (§29) |
+| #2004 | post-audit, identity asymmetry | `todo` | **done** (§27) |
+| #2003 | post-audit, embedded NUL | `todo` | **blocked**, design complete, behaviour pinned (§30) |
+| #2005 | post-audit, whitespace | `todo` | **todo**, deferred verification, behaviour pinned (§31) |
+| #1995–#1999 | U-G/U-H/U-I/U-J | blocked | **blocked, unchanged — no approval was requested or assumed** |
+
+§18's completion criteria: criterion 2 (§16's six post-audit tickets resolved or explicitly
+accepted) is now met for four of six, with the remaining two design-complete and pinned.
+Criterion 4 holds — the module graph is still **41 / 91** — and criterion 5 holds:
+`docs/ComponentCatalog.md` regenerates unchanged.
