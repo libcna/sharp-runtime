@@ -60,11 +60,37 @@ namespace System::Threading {
     public:
         /** Constructs a non-cancelled CancellationToken. */
         CancellationToken() : state_(std::make_shared<Detail::CancellationState>()) {}
-        /** Constructs a CancellationToken backed by the given shared state. */
+        /**
+         * @brief Constructs a CancellationToken backed by the given shared state.
+         *
+         * An **absent** state (an empty `shared_ptr`) is accepted and means exactly what a
+         * null `_source` means in .NET: a token that can never reach the cancelled state.
+         * `CancellationToken.Register` documents that case itself -- *"Nothing to do for
+         * tokens than can never reach the canceled state. Give back a dummy registration."*
+         * -- and `IsCancellationRequested` is `_source != null && _source.IsCancellationRequested`.
+         *
+         * Before ticket #1953 the state was dereferenced unconditionally, so the next
+         * property read on such a token was a null dereference with a zero-page SEGV
+         * (SR-AUD-199). The repair is this tolerance rather than a rejection, for two
+         * reasons: it is .NET's own model, and it is the only form that also covers the
+         * second route to an absent state that the finding does not mention -- a
+         * **moved-from** token, whose implicitly declared move constructor leaves the source's
+         * `shared_ptr` empty and which crashed identically. Rejecting the argument would have
+         * left that route open while making the two shapes inconsistent with each other.
+         *
+         * `CancellationTokenRegistration` already used this idiom for its own empty state.
+         */
         explicit CancellationToken(std::shared_ptr<Detail::CancellationState> state) : state_(std::move(state)) {}
 
-        /** Returns true if cancellation has been requested. */
-        [[nodiscard]] bool getIsCancellationRequestedProperty() const { return state_->cancelled.load(); }
+        /**
+         * @brief Returns true if cancellation has been requested.
+         *
+         * A token with no shared state is never cancelled, matching .NET's
+         * `_source != null && _source.IsCancellationRequested` (#1953 / SR-AUD-199).
+         */
+        [[nodiscard]] bool getIsCancellationRequestedProperty() const {
+            return state_ && state_->cancelled.load();
+        }
 
         /** Throws OperationCanceledException if cancellation has been requested. */
         void ThrowIfCancellationRequested() const;

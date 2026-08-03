@@ -88,12 +88,28 @@ namespace System::Threading {
 
         /**
          * @brief Registers a wait on waitObject; callBack is invoked when it is signalled or the timeout elapses.
+         *
+         * @throws System::ArgumentOutOfRangeException if @p millisecondsTimeOutInterval is less than -1.
+         * @throws System::ArgumentNullException if @p waitObject or @p callBack is null/empty.
+         *
+         * The three checks reproduce .NET's own split and order: the public
+         * `RegisterWaitForSingleObject(WaitHandle, WaitOrTimerCallback, object?, int, bool)`
+         * overload runs `ArgumentOutOfRangeException.ThrowIfLessThan(millisecondsTimeOutInterval, -1)`
+         * and then delegates to a private overload that opens with
+         * `ArgumentNullException.ThrowIfNull(waitObject)` and
+         * `ArgumentNullException.ThrowIfNull(callBack)`. The two null checks live in
+         * RegisteredWaitHandle's constructor here for the same reason -- it is the private
+         * step that captures the arguments, and putting them there means the background
+         * thread cannot be created before they run (ticket #1953 / SR-AUD-188).
+         *
          * @note Deliberate simplification: implemented via a dedicated background thread that polls
          * waitObject rather than true OS-level thread-pool wait registration.
          */
         static RegisteredWaitHandle RegisterWaitForSingleObject(
             WaitHandle* waitObject, WaitOrTimerCallback callBack, void* state,
             intcs millisecondsTimeOutInterval, bool executeOnlyOnce) {
+            System::ArgumentOutOfRangeException::ThrowIfLessThan(
+                millisecondsTimeOutInterval, static_cast<intcs>(-1), "millisecondsTimeOutInterval");
             return RegisteredWaitHandle(waitObject, std::move(callBack), state, millisecondsTimeOutInterval, executeOnlyOnce);
         }
     };

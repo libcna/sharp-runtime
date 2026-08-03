@@ -9,6 +9,9 @@
 //                               i.e. CCF-011 in modules/threading;
 //   ticket #1952 (cause T-C) -- WaitHandle's four static multi-wait entry points, which
 //                               validated neither the collection nor the timeout;
+//   ticket #1953 (cause T-C) -- the two boundaries that reached a null dereference:
+//                               ThreadPool::RegisterWaitForSingleObject and
+//                               CancellationToken's shared-state constructor;
 //
 // Every case here pins an input a caller can supply that used to reach
 // std::bad_function_call, std::terminate, a silent no-op or a silently wrong value, plus
@@ -18,19 +21,25 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <memory>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Exception.hpp"
 #include "System/NullReferenceException.hpp"
+#include "System/OperationCanceledException.hpp"
 #include "System/Threading/CancellationToken.hpp"
 #include "System/Threading/CancellationTokenRegistration.hpp"
 #include "System/Threading/CancellationTokenSource.hpp"
 #include "System/Threading/LazyInitializer.hpp"
+#include "System/Threading/Semaphore.hpp"
 #include "System/Threading/SpinWait.hpp"
 #include "System/Threading/SynchronizationContext.hpp"
 #include "System/Threading/Thread.hpp"
+#include "System/Threading/ThreadPool.hpp"
 #include "System/Threading/ThreadLocal.hpp"
 #include "System/Threading/Timer.hpp"
 
@@ -438,4 +447,124 @@ TEST(ThreadingMultiWaitValidationTests, ValidInput_BehaviourUnchanged) {
     EXPECT_FALSE(WaitHandle::WaitAll(secondSignalled, 0));
     const std::vector<WaitHandle*> noneSignalled{&unsignalled};
     EXPECT_EQ(WaitHandle::WaitAny(noneSignalled, 20), WaitHandle::WaitTimeout);
+}
+
+// ===========================================================================
+// #1953 / SR-AUD-188 + SR-AUD-199 (cause T-C) -- the two boundaries that reached a null
+// dereference rather than a wrong diagnostic.
+// ===========================================================================
+
+// SR-AUD-188. A null waitObject used to produce a registration that RETURNED NORMALLY and
+// then killed the process from the background thread at waitObject->WaitOne() -- a crash the
+// caller could neither observe nor catch. The check now lives in RegisteredWaitHandle's
+// constructor, so no std::thread exists for an invalid registration.
+TEST(ThreadingNullArgumentTests, RegisterWaitForSingleObject_NullWaitObject_ThrowsSynchronously) {
+    ExpectArgumentNull(
+        [] {
+            (void)ThreadPool::RegisterWaitForSingleObject(
+                nullptr, [](void*, bool) {}, nullptr, 100, true);
+        },
+        "waitObject");
+}
+
+// Recorded in RegisteredWaitHandle.hpp.audit.md's own "Other missing assertions" as part of
+// SR-AUD-188's repair: the C++ probe reported empty_callback=normal and timeout_minus2=normal
+// where the managed probe reported argument_null and argument_out_of_range.
+TEST(ThreadingNullArgumentTests, RegisterWaitForSingleObject_EmptyCallback_Throws) {
+    Semaphore s(1, 1);
+    ExpectArgumentNull(
+        [&s] {
+            (void)ThreadPool::RegisterWaitForSingleObject(
+                &s, WaitOrTimerCallback{}, nullptr, 50, true);
+        },
+        "callBack");
+}
+
+TEST(ThreadingNullArgumentTests, RegisterWaitForSingleObject_TimeoutBelowMinusOne_Throws) {
+    Semaphore s(1, 1);
+    bool threw = false;
+    try {
+        (void)ThreadPool::RegisterWaitForSingleObject(&s, [](void*, bool) {}, nullptr, -2, true);
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        threw = true;
+        EXPECT_EQ(e.getParamNameProperty(), "millisecondsTimeOutInterval");
+    }
+    EXPECT_TRUE(threw);
+}
+
+// .NET runs the range check in the public overload and the two null checks in the private one
+// it delegates to, so an out-of-range timeout wins over a null waitObject.
+TEST(ThreadingNullArgumentTests, RegisterWaitForSingleObject_RangeCheckPrecedesNullChecks) {
+    EXPECT_THROW((void)ThreadPool::RegisterWaitForSingleObject(
+                     nullptr, WaitOrTimerCallback{}, nullptr, -2, true),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(ThreadingNullArgumentTests, RegisterWaitForSingleObject_ValidRegistration_StillFires) {
+    Semaphore s(1, 1);
+    std::atomic<int> fired{0};
+    auto reg = ThreadPool::RegisterWaitForSingleObject(
+        &s, [&fired](void*, bool) { fired.fetch_add(1); }, nullptr, 1000, true);
+    for (int i = 0; i < 200 && fired.load() == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    reg.Unregister(nullptr);
+    EXPECT_GE(fired.load(), 1);
+}
+
+// SR-AUD-199. An absent shared state is now the never-cancellable token .NET's null _source
+// describes, instead of a zero-page dereference on the next property read. The constructor is
+// unchanged in signature and accessibility, so nothing is narrowed or removed.
+TEST(ThreadingNullArgumentTests, CancellationToken_EmptyState_IsNeverCancelled) {
+    CancellationToken token{std::shared_ptr<Detail::CancellationState>{}};
+    EXPECT_FALSE(token.getIsCancellationRequestedProperty());
+    EXPECT_NO_THROW(token.ThrowIfCancellationRequested());
+}
+
+// .NET: "Nothing to do for tokens than can never reach the canceled state. Give back a dummy
+// registration."
+TEST(ThreadingNullArgumentTests, CancellationToken_EmptyState_RegisterGivesInactiveRegistration) {
+    CancellationToken token{std::shared_ptr<Detail::CancellationState>{}};
+    std::atomic<int> ran{0};
+    auto reg = token.Register([&ran] { ran.fetch_add(1); });
+    EXPECT_FALSE(reg.getIsActiveProperty());
+    EXPECT_NO_THROW(reg.Dispose());
+    EXPECT_EQ(ran.load(), 0);
+    // the empty-callable rejection from #1951 still wins over the absent state
+    EXPECT_THROW((void)token.Register(std::function<void()>{}), System::ArgumentNullException);
+}
+
+// Not named by SR-AUD-199, found while reproducing it: the implicitly declared move
+// constructor leaves the source's shared_ptr empty, which crashed identically. One tolerant
+// definition of "no state" covers both routes.
+TEST(ThreadingNullArgumentTests, CancellationToken_MovedFrom_IsNeverCancelled) {
+    CancellationToken source;
+    CancellationToken moved = std::move(source);
+
+    EXPECT_FALSE(source.getIsCancellationRequestedProperty());  // NOLINT(bugprone-use-after-move)
+    EXPECT_NO_THROW(source.ThrowIfCancellationRequested());     // NOLINT(bugprone-use-after-move)
+    auto reg = source.Register([] {});                          // NOLINT(bugprone-use-after-move)
+    EXPECT_FALSE(reg.getIsActiveProperty());
+
+    EXPECT_FALSE(moved.getIsCancellationRequestedProperty());
+}
+
+// The tolerance must not blunt a real token: a live shared state still observes cancellation
+// and still runs its callbacks.
+TEST(ThreadingNullArgumentTests, CancellationToken_LiveState_Unaffected) {
+    auto state = std::make_shared<Detail::CancellationState>();
+    CancellationToken token{state};
+    EXPECT_FALSE(token.getIsCancellationRequestedProperty());
+
+    std::atomic<int> ran{0};
+    auto reg = token.Register([&ran] { ran.fetch_add(1); });
+    EXPECT_TRUE(reg.getIsActiveProperty());
+
+    CancellationTokenSource sourceObject;
+    CancellationToken sourceToken = sourceObject.getTokenProperty();
+    auto sourceReg = sourceToken.Register([&ran] { ran.fetch_add(10); });
+    sourceObject.Cancel();
+    EXPECT_TRUE(sourceToken.getIsCancellationRequestedProperty());
+    EXPECT_THROW(sourceToken.ThrowIfCancellationRequested(), System::OperationCanceledException);
+    EXPECT_EQ(ran.load(), 10);
+    (void)sourceReg;
 }

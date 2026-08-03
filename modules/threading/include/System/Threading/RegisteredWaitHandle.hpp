@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/Threading/WaitHandle.hpp"
 #include "System/Threading/WaitOrTimerCallback.hpp"
 
@@ -34,6 +35,20 @@ namespace System::Threading {
                               intcs millisecondsTimeOutInterval, bool executeOnlyOnce)
             : state_(std::make_shared<State>())
         {
+            // Ticket #1953 / SR-AUD-188. Both arguments used to be captured unvalidated by the
+            // lambda below, so a null waitObject produced a registration that *returned
+            // normally* and then killed the process from the background thread at
+            // `waitObject->WaitOne(...)` -- asynchronously, where the caller cannot observe or
+            // catch it -- and an empty callback produced a registration that waited correctly
+            // and then quietly notified nobody. .NET's private
+            // RegisterWaitForSingleObject overload opens with
+            // `ArgumentNullException.ThrowIfNull(waitObject)` then
+            // `ArgumentNullException.ThrowIfNull(callBack)`, in that order; the range check on
+            // millisecondsTimeOutInterval has already run in ThreadPool's public entry, which
+            // is where .NET runs it too. Validating here rather than in ThreadPool means the
+            // std::thread below cannot exist for an invalid registration.
+            if (waitObject == nullptr) throw System::ArgumentNullException("waitObject");
+            if (!callback) throw System::ArgumentNullException("callBack");
             // Polls in short slices (rather than a single unbounded WaitOne) so Unregister()
             // takes effect promptly instead of waiting out the full timeout/signal.
             thread_ = std::thread([state = state_, waitObject, callback = std::move(callback),
