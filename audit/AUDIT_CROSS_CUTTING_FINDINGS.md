@@ -854,6 +854,25 @@ selects **.NET's answer for that shape of API**, which is not always this
 family's most common spelling. Three of the thirty-three later sites needed a
 different exception type than the family default.
 
+- **`System::Runtime` — ticket #1973 (SR-AUD-155, cause R-E, 2026-08-03).** A **fourth**
+  module, and the first where the empty handle is not a `std::function` at all: a null
+  `std::exception_ptr` reaching `ExceptionDispatchInfo::Capture` and the static `Throw`,
+  deferred to `std::rethrow_exception(nullptr)` and observed as an uncatchable SIGSEGV.
+  The policy transfers unchanged — decide emptiness at the public boundary, before
+  anything is done with the input — which is the point: the cause is *an empty handle
+  crossing a public boundary*, and `std::function` was only its first carrier.
+
+  Two corrections were measured (`docs/SystemRuntimeNamespaceReviewPlan.md` §4.1). The
+  finding names two routes and there are **four**: the type declares no move operations,
+  so the implicitly declared move constructor and move assignment leave the source's
+  `exception_ptr` empty, and a moved-from instance's `Throw()` faults identically through
+  ordinary well-formed C++ that passes no null anywhere. A check placed only at the two
+  named entries leaves both open. And those two routes are **not** argument errors —
+  nothing was passed — so they take `InvalidOperationException` while the two entry points
+  that receive an argument take `ArgumentNullException`. That is the fourth site at which
+  this policy selected a non-default exception type for a non-default API shape, and the
+  third repository-wide occurrence of the moved-from second route (after SR-AUD-199).
+
 ## CCF-012 — hand-written composite-format replacement is not a format parser
 
 `String::Format` and `FormattableString::ToString` independently reconstruct a
