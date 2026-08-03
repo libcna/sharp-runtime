@@ -67,6 +67,54 @@ TEST(MathFTest, Round_EveryNamedMode_StillReturnsExactValue) {
     EXPECT_FLOAT_EQ(MathF::Round(2.1f, System::MidpointRounding::ToPositiveInfinity), 3.0f);
 }
 
+// Ticket #1946: the five rounding branches used the C99 float-suffixed <cmath> spellings
+// (std::nearbyintf/roundf/truncf/floorf/ceilf). libstdc++ declares the TR1/C99 set inside
+// namespace std but NOT std::floorf or std::ceilf, so on GCC 13 / libstdc++ 13 -- and on Clang
+// using the same standard library -- two of those lines were a hard compile error and the whole
+// repository stopped building at the seventh object file. The repair moves all five to the
+// unsuffixed names, whose float overloads take and return float, matching what Ceiling/Floor/
+// Truncate in the same header already do.
+//
+// These cases exist to pin the RESULTS across that substitution: floor/ceil/trunc/round/
+// nearbyint are exact on every finite float, so a correct repair cannot change any of them,
+// and a wrong one (picking a different mode, or losing the sign of a negative) shows up here.
+TEST(MathFTest, Round_UnsuffixedCmathSubstitution_PreservesEveryModeOnNegativesAndIntegrals) {
+    // Negative midpoints exercise the sign-dependent difference between the five modes.
+    EXPECT_FLOAT_EQ(MathF::Round(-2.5f, System::MidpointRounding::ToEven), -2.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(-2.5f, System::MidpointRounding::AwayFromZero), -3.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(-2.5f, System::MidpointRounding::ToZero), -2.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(-2.5f, System::MidpointRounding::ToNegativeInfinity), -3.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(-2.5f, System::MidpointRounding::ToPositiveInfinity), -2.0f);
+
+    // A negative non-midpoint separates floor from trunc and ceil from trunc.
+    EXPECT_FLOAT_EQ(MathF::Round(-2.1f, System::MidpointRounding::ToZero), -2.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(-2.1f, System::MidpointRounding::ToNegativeInfinity), -3.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(-2.1f, System::MidpointRounding::ToPositiveInfinity), -2.0f);
+
+    // An already-integral value is a fixed point of all five modes, in both signs.
+    for (const auto mode : {System::MidpointRounding::ToEven,
+                            System::MidpointRounding::AwayFromZero,
+                            System::MidpointRounding::ToZero,
+                            System::MidpointRounding::ToNegativeInfinity,
+                            System::MidpointRounding::ToPositiveInfinity}) {
+        EXPECT_FLOAT_EQ(MathF::Round(3.0f, mode), 3.0f);
+        EXPECT_FLOAT_EQ(MathF::Round(-3.0f, mode), -3.0f);
+        EXPECT_FLOAT_EQ(MathF::Round(0.0f, mode), 0.0f);
+    }
+
+    // The parameterless overload is round-to-even and shares the same substitution.
+    EXPECT_FLOAT_EQ(MathF::Round(-2.5f), -2.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(-1.5f), -2.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(-0.5f), -0.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(0.5f), 0.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(3.0f), 3.0f);
+
+    // Every overload still returns float, not a promoted double narrowed on the way out.
+    static_assert(std::is_same_v<decltype(MathF::Round(1.0f)), float>);
+    static_assert(std::is_same_v<
+                  decltype(MathF::Round(1.0f, System::MidpointRounding::ToEven)), float>);
+}
+
 TEST(MathFTest, Sqrt) {
     EXPECT_NEAR(MathF::Sqrt(4.0f), 2.0f, 1e-6f);
     EXPECT_NEAR(MathF::Sqrt(9.0f), 3.0f, 1e-6f);

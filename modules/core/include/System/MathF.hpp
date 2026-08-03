@@ -47,7 +47,7 @@ namespace System {
          * rounding) for midpoint values, matching .NET's default - NOT std::round,
          * which always rounds halfway cases away from zero.
          */
-        static float Round(float x)                { return std::nearbyintf(x); }
+        static float Round(float x)                { return std::nearbyint(x); }
         /** @brief Returns the integral part of @p x, discarding the fractional digits. */
         static float Truncate(float x)             { return std::trunc(x); }
         /** @brief Returns the square root of @p x. */
@@ -228,11 +228,16 @@ namespace System {
          */
         static float Round(float x, MidpointRounding mode) {
             switch (mode) {
-                case MidpointRounding::ToEven:             return std::nearbyintf(x);
-                case MidpointRounding::AwayFromZero:       return std::roundf(x);
-                case MidpointRounding::ToZero:             return std::truncf(x);
-                case MidpointRounding::ToNegativeInfinity: return std::floorf(x);
-                case MidpointRounding::ToPositiveInfinity: return std::ceilf(x);
+                // The float overloads of the unsuffixed <cmath> names are used deliberately:
+                // they return float for a float argument exactly as the C99 `f`-suffixed
+                // spellings do, but the `f`-suffixed names are not portably declared inside
+                // namespace std (libstdc++ 13 has no std::floorf/std::ceilf at all), which
+                // made this switch a hard compile error rather than a behaviour difference.
+                case MidpointRounding::ToEven:             return std::nearbyint(x);
+                case MidpointRounding::AwayFromZero:       return std::round(x);
+                case MidpointRounding::ToZero:             return std::trunc(x);
+                case MidpointRounding::ToNegativeInfinity: return std::floor(x);
+                case MidpointRounding::ToPositiveInfinity: return std::ceil(x);
                 // Matches .NET MathF.Round(float, MidpointRounding): the switch default throws
                 // ArgumentException for an out-of-range enum value (ThrowHelper's
                 // Argument_InvalidEnumValue: "The value '{0}' is not valid for this usage of the
