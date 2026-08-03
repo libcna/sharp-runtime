@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/Text/DecoderFallback.hpp"
 #include "System/Text/EncoderFallback.hpp"
 
@@ -62,10 +63,17 @@ namespace System::Text
 
         /**
          * Decodes a range of bytes to a string using this encoding.
-         * @param data  Pointer to the byte buffer.
+         * @param data  Pointer to the byte buffer; may be null only when @p count is zero.
          * @param index Start index within @p data.
          * @param count Number of bytes to decode.
-         * @return Decoded string.
+         * @return Decoded string; empty when @p count is zero.
+         * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
+         * @throws System::ArgumentNullException if @p data is null and @p count is positive.
+         * @note Ticket #2007 (SR-AUD-286) gave every override in this component one shared
+         *       argument policy (`System/Text/detail/RawDecodeRange.hpp`). A raw pointer
+         *       carries no length, so an @p index or @p count inside the signed domain but
+         *       outside the caller's buffer still cannot be detected — that limit is inherent
+         *       to this signature, not a gap in the validation.
          */
         [[nodiscard]] virtual std::string GetString(
             const SharpRuntime::bytecs* data,
@@ -100,15 +108,42 @@ namespace System::Text
         /** Returns true if this encoding uses exactly one byte per character (e.g. ASCII, Latin-1). */
         [[nodiscard]] virtual bool getIsSingleByteProperty() const { return false; }
 
-        /** Gets the DecoderFallback used when a byte sequence cannot be decoded. */
+        /** Gets the DecoderFallback used when a byte sequence cannot be decoded. Never null. */
         [[nodiscard]] std::shared_ptr<DecoderFallback> getDecoderFallbackProperty() const { return decoderFallback_; }
-        /** Sets the DecoderFallback used when a byte sequence cannot be decoded. */
-        void setDecoderFallbackProperty(std::shared_ptr<DecoderFallback> value) { decoderFallback_ = std::move(value); }
+        /**
+         * Sets the DecoderFallback used when a byte sequence cannot be decoded.
+         *
+         * @throws System::ArgumentNullException if @p value is null.
+         * @note Ticket #2008 (SR-AUD-287). Every conversion path dereferences this object
+         *       without checking it, so accepting null armed a segmentation fault that fired
+         *       on the next malformed byte, arbitrarily far from the setter that caused it —
+         *       measured in `build-probe/2006_probe1_before.log` §B. A rejected value leaves
+         *       the previous fallback installed. .NET's `Encoding.DecoderFallback` setter
+         *       raises the same exception for the same reason.
+         */
+        void setDecoderFallbackProperty(std::shared_ptr<DecoderFallback> value) {
+            if (value == nullptr) {
+                throw System::ArgumentNullException("value");
+            }
+            decoderFallback_ = std::move(value);
+        }
 
-        /** Gets the EncoderFallback used when a character cannot be encoded. */
+        /** Gets the EncoderFallback used when a character cannot be encoded. Never null. */
         [[nodiscard]] std::shared_ptr<EncoderFallback> getEncoderFallbackProperty() const { return encoderFallback_; }
-        /** Sets the EncoderFallback used when a character cannot be encoded. */
-        void setEncoderFallbackProperty(std::shared_ptr<EncoderFallback> value) { encoderFallback_ = std::move(value); }
+        /**
+         * Sets the EncoderFallback used when a character cannot be encoded.
+         *
+         * @throws System::ArgumentNullException if @p value is null.
+         * @note Ticket #2008 (SR-AUD-287). The encoder direction is the identical crash as
+         *       the decoder direction above; the finding names only the decoder, and
+         *       repairing one setter would have left the other.
+         */
+        void setEncoderFallbackProperty(std::shared_ptr<EncoderFallback> value) {
+            if (value == nullptr) {
+                throw System::ArgumentNullException("value");
+            }
+            encoderFallback_ = std::move(value);
+        }
 
         /** Returns true if @p other has the same code page as this encoding. */
         [[nodiscard]] virtual bool Equals(const Encoding& other) const { return getCodePageProperty() == other.getCodePageProperty(); }

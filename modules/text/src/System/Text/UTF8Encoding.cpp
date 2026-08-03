@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Text/UTF8Encoding.hpp"
+#include "System/Text/detail/RawDecodeRange.hpp"
 #include <cstdint>
 
 namespace System::Text {
@@ -75,11 +76,16 @@ namespace {
     std::string UTF8Encoding::GetString(const SharpRuntime::bytecs* data,
                                         SharpRuntime::intcs index,
                                         SharpRuntime::intcs count) const {
-        if (data == nullptr || count <= 0) return {};
-        size_t i = static_cast<size_t>(index);
-        size_t end = i + static_cast<size_t>(count);
+        // Ticket #2007 (SR-AUD-286): a negative index used to reach `static_cast<size_t>`
+        // below. For (-1, 1) the derived `end` wrapped to 0 and the loop did not run -- which
+        // is why the finding's named reproduction does NOT reproduce here (plan §4.1) -- but
+        // for count < |index| it did, and read wild memory.
+        const auto range = detail::checkedRawDecodeRange(data, index, count);
+        if (!range.any()) return {};
+        size_t i = range.begin;
+        size_t end = range.end;
         std::string result;
-        result.reserve(static_cast<size_t>(count));
+        result.reserve(end - i);
         auto fallback = getDecoderFallbackProperty();
         while (i < end) {
             size_t len = wellFormedUtf8Length(data, i, end);

@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include "System/Text/Encoding.hpp"
+#include "System/Text/detail/RawDecodeRange.hpp"
 
 namespace System::Text {
 
@@ -93,15 +94,25 @@ namespace System::Text {
          * raw surrogate value (0xD800-0xDFFF) and reach encodeUtf8() unvalidated -- real UTF-8
          * forbids encoding a surrogate value directly (that's CESU-8/WTF-8, not UTF-8), so this
          * produced ill-formed output bytes rather than a genuine encoding error.
+         *
+         * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
+         * @throws System::ArgumentNullException if @p data is null and @p count is positive.
+         * @note A raw pointer carries no length, so an @p index or @p count inside the signed
+         *       domain but outside the caller's buffer cannot be detected here.
          */
         [[nodiscard]] std::string GetString(const SharpRuntime::bytecs* data,
                                             SharpRuntime::intcs index,
                                             SharpRuntime::intcs count) const override {
+            // Ticket #2007 (SR-AUD-286): this override had no validation, and its own
+            // `intcs end = index + count` was signed overflow -- GetString(p, INTCS_MAX, 4)
+            // was measured as a segmentation fault. The shared range is unsigned, so the
+            // addition cannot overflow.
+            const auto range = detail::checkedRawDecodeRange(data, index, count);
             std::string out;
-            SharpRuntime::intcs i = index;
-            SharpRuntime::intcs end = index + count;
+            std::size_t i = range.begin;
+            const std::size_t end = range.end;
 
-            if (count >= 2) {
+            if (end - i >= 2) {
                 uint16_t bom = readUnit(data, i);
                 if (bom == 0xFEFF) i += 2;
             }
@@ -131,7 +142,7 @@ namespace System::Text {
         }
 
     private:
-        [[nodiscard]] uint16_t readUnit(const SharpRuntime::bytecs* data, SharpRuntime::intcs i) const {
+        [[nodiscard]] uint16_t readUnit(const SharpRuntime::bytecs* data, std::size_t i) const {
             uint8_t b0 = data[i];
             uint8_t b1 = data[i + 1];
             return bigEndian_ ? static_cast<uint16_t>((b0 << 8) | b1) : static_cast<uint16_t>((b1 << 8) | b0);

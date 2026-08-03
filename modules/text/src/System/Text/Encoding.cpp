@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Text/Encoding.hpp"
+#include "System/Text/detail/RawDecodeRange.hpp"
 #include "System/Text/UTF8Encoding.hpp"
 #include "System/Text/ASCIIEncoding.hpp"
 #include "System/Text/UnicodeEncoding.hpp"
@@ -63,13 +64,18 @@ namespace System::Text
         SharpRuntime::intcs index,
         SharpRuntime::intcs count) const
     {
-        if (data == nullptr || count <= 0)
+        // Ticket #2007 (SR-AUD-286): the previous `data == nullptr || count <= 0` guard
+        // silently accepted a NEGATIVE index and formed `data + index`, so
+        // GetString(p, -1, 1) read the byte before the caller's buffer. The shared
+        // validator rejects it, and every valid triple reaches the identical construction.
+        const auto range = detail::checkedRawDecodeRange(data, index, count);
+        if (!range.any())
         {
             return {};
         }
 
         return std::string(
-            reinterpret_cast<const char*>(data + index),
-            static_cast<size_t>(count));
+            reinterpret_cast<const char*>(data) + range.begin,
+            range.end - range.begin);
     }
 }

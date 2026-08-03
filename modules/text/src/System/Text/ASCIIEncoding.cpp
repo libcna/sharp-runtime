@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Text/ASCIIEncoding.hpp"
+#include "System/Text/detail/RawDecodeRange.hpp"
 
 namespace System::Text {
 
@@ -88,11 +89,15 @@ namespace {
     std::string ASCIIEncoding::GetString(const SharpRuntime::bytecs* data,
                                          SharpRuntime::intcs index,
                                          SharpRuntime::intcs count) const {
-        if (data == nullptr || count <= 0) return {};
+        // Ticket #2007 (SR-AUD-286): the finding's own reproduction. `data[index + i]` with
+        // index -1 read the byte before the caller's buffer -- an ASan-confirmed
+        // stack-buffer-underflow that returned '?' for whatever it found there.
+        const auto range = detail::checkedRawDecodeRange(data, index, count);
+        if (!range.any()) return {};
         std::string result;
-        result.reserve(static_cast<size_t>(count));
-        for (SharpRuntime::intcs i = 0; i < count; ++i) {
-            auto b = data[index + i];
+        result.reserve(range.end - range.begin);
+        for (size_t i = range.begin; i < range.end; ++i) {
+            auto b = data[i];
             result.push_back(b <= 127 ? static_cast<char>(b) : '?');
         }
         return result;

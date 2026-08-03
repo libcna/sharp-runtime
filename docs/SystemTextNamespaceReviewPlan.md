@@ -515,13 +515,26 @@ valid four-byte buffer.
 | `GetString(nullptr, 0, 0)` | `""` | `""` |
 | `GetString(p, -1, 1)` | **out-of-bounds read** (ASCII/Latin-1/UTF-16/UTF-32/base) | `ArgumentOutOfRangeException("index")` |
 | `GetString(nullptr, 0, 4)` | **SIGSEGV** (Latin-1/UTF-16/UTF-32) | `ArgumentNullException("data")` |
-| `GetString(p, INTCS_MAX, 4)` | **SIGSEGV** (UTF-16) | `ArgumentOutOfRangeException` — the addition is done in `std::size_t` |
+| `GetString(p, INTCS_MAX, 4)` | **SIGSEGV** (UTF-16), preceded by UBSan `signed integer overflow: 2147483647 + 4` at `UnicodeEncoding.hpp:102` | **still faults** — see the correction below; what changes is that the addition is now done in `std::size_t`, so UBSan is silent |
 | `Latin1.GetString(p, 0, -1)` | **`std::length_error`** | `ArgumentOutOfRangeException("count")` |
 | `GetString(p, 0, -1)` (base/ASCII/UTF-16/UTF-32) | `""` | `ArgumentOutOfRangeException("count")` — **the one row that narrows a defined result**, and the row that makes the six agree with `UTF7Encoding`, which already throws |
 | `GetString(p, -1, 0)` | `""` | `ArgumentOutOfRangeException("index")` — second narrowed row |
 | `UTF7Encoding::GetString(...)` | already throws | **identical**, now through the shared validator |
 | `Decoder::GetString(vec, -1)` | reads past the vector | `ArgumentOutOfRangeException("index")` |
 | `GetCharCount(p, -1, 1)` | `1`, from an out-of-bounds read | `ArgumentOutOfRangeException("index")` |
+
+**Correction to this table, made by #2007's own measurement (2026-08-03).** The
+`INTCS_MAX` row above was written before the after-probe ran, and predicted a
+throw. **It does not throw, and it must not.** `INTCS_MAX` is a valid
+*non-negative* index; a raw pointer carries no length, so no validator can know
+the caller's buffer ends sooner. `build-probe/2007_asan_after.log` records the
+case still faulting under ASan, deliberately. What #2007 removes is the
+**undefined addition** — `build-probe/2007_asan_before.log` shows
+`UnicodeEncoding.hpp:102:33: runtime error: signed integer overflow: 2147483647
++ 4 cannot be represented in type 'int'`, and the after run reports nothing at
+that site. The residual out-of-range read is inherent to the signature, is
+stated in every entry's doc-comment, and is **not** closed by this ticket. It is
+recorded here rather than quietly dropped.
 
 ### 9.4 What no compatible ticket touches
 

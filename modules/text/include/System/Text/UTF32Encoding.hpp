@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include "System/Text/Encoding.hpp"
+#include "System/Text/detail/RawDecodeRange.hpp"
 
 namespace System::Text {
 
@@ -79,20 +80,29 @@ namespace System::Text {
          * (e.g. 0xFFFFFFFF) would previously reach encodeUtf8() unvalidated and produce a
          * byte sequence that isn't even structurally valid UTF-8, not just the wrong code
          * point.
+         *
+         * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
+         * @throws System::ArgumentNullException if @p data is null and @p count is positive.
+         * @note A raw pointer carries no length, so an @p index or @p count inside the signed
+         *       domain but outside the caller's buffer cannot be detected here.
          */
         [[nodiscard]] std::string GetString(const SharpRuntime::bytecs* data,
                                              SharpRuntime::intcs index,
                                              SharpRuntime::intcs count) const override {
+            // Ticket #2007 (SR-AUD-286): this override had no validation -- a null buffer
+            // with a positive count was a segmentation fault, and a negative index read
+            // before the caller's buffer.
+            const auto range = detail::checkedRawDecodeRange(data, index, count);
             std::string result;
-            SharpRuntime::intcs start = index;
-            if (count >= 4) {
+            std::size_t start = range.begin;
+            std::size_t end = range.end;
+            if (end - start >= 4) {
                 uint32_t maybeBom = readUnit(data, start);
                 if (maybeBom == 0x0000FEFF) {
                     start += 4;
-                    count -= 4;
                 }
             }
-            for (SharpRuntime::intcs i = start; i + 3 < start + count; i += 4) {
+            for (std::size_t i = start; i + 3 < end; i += 4) {
                 uint32_t cp = readUnit(data, i);
                 if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;
                 encodeUtf8(cp, result);
@@ -115,7 +125,7 @@ namespace System::Text {
             }
         }
 
-        [[nodiscard]] uint32_t readUnit(const SharpRuntime::bytecs* data, SharpRuntime::intcs i) const {
+        [[nodiscard]] uint32_t readUnit(const SharpRuntime::bytecs* data, std::size_t i) const {
             uint8_t b0 = data[i], b1 = data[i + 1], b2 = data[i + 2], b3 = data[i + 3];
             if (!bigEndian_) {
                 return static_cast<uint32_t>(b0) | (static_cast<uint32_t>(b1) << 8) | (static_cast<uint32_t>(b2) << 16) |

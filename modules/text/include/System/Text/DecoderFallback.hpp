@@ -8,6 +8,8 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Text {
 
@@ -184,6 +186,16 @@ namespace System::Text {
     }
 
     inline std::string DecoderExceptionFallback::GetFallbackString(const SharpRuntime::bytecs* bytesUnknown, SharpRuntime::intcs byteCount) const {
+        // Ticket #2007 (SR-AUD-286): this raw-pointer public virtual formed
+        // `std::vector(p, p + byteCount)` with no validation. A negative byteCount threw
+        // std::length_error ("cannot create std::vector larger than max_size()") out of a
+        // System-shaped API, and a null pointer with a positive count read wild memory.
+        if (byteCount < 0) {
+            throw System::ArgumentOutOfRangeException("byteCount");
+        }
+        if (byteCount > 0 && bytesUnknown == nullptr) {
+            throw System::ArgumentNullException("bytesUnknown");
+        }
         std::vector<SharpRuntime::bytecs> bytes(bytesUnknown, bytesUnknown + byteCount);
         DecoderExceptionFallbackBuffer buffer;
         buffer.Fallback(bytes, 0);

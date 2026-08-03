@@ -10,6 +10,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Text/Encoding.hpp"
 #include "System/Text/Rune.hpp"
+#include "System/Text/detail/RawDecodeRange.hpp"
 
 namespace System::Text {
 
@@ -226,17 +227,13 @@ namespace System::Text {
         [[nodiscard]] std::string GetString(const SharpRuntime::bytecs* data,
                                             SharpRuntime::intcs index,
                                             SharpRuntime::intcs count) const override {
-            if (index < 0) {
-                throw System::ArgumentOutOfRangeException("index");
-            }
-            if (count < 0) {
-                throw System::ArgumentOutOfRangeException("count");
-            }
-            if (count == 0) {
+            // Ticket #2007 (SR-AUD-286): the four checks that used to be written out here
+            // were the ONLY correct raw decode validation in the component, and are now the
+            // shared policy the other six overrides adopted. Routing this entry through the
+            // same helper keeps one statement of the rule; the behaviour is unchanged, and
+            // the tests assert that byte for byte.
+            if (!detail::validateRawDecodeRange(data, index, count)) {
                 return {};
-            }
-            if (data == nullptr) {
-                throw System::ArgumentNullException("data");
             }
 
             std::string output;
