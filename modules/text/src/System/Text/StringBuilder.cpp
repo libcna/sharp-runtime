@@ -138,12 +138,26 @@ namespace System::Text
             throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
         if (destinationIndex < 0)
             throw System::ArgumentOutOfRangeException("destinationIndex", "Non-negative number required.");
+        // Ticket #2009 (SR-AUD-295, CCF-004's fourth module). `destinationLength` was the one
+        // parameter of the five that was never validated, and the comparison below subtracts
+        // from it. Measured before the guard: for destinationLength == INTCS_MIN and count 1
+        // the subtraction wrapped to INTCS_MAX, so `0 > INTCS_MAX` was FALSE and the guard
+        // PASSED -- the undefined arithmetic did not merely accompany the bounds check, it
+        // defeated it, and std::copy then wrote into caller memory. .NET cannot reach this
+        // state because it reads the destination array's own length; a raw C++ pointer makes
+        // the capacity a caller-supplied argument, so it needs the same non-negative check
+        // its four siblings above already carry.
+        if (destinationLength < 0)
+            throw System::ArgumentOutOfRangeException("destinationLength", "Non-negative number required.");
         intcs length = static_cast<intcs>(buffer.size());
         if (sourceIndex < 0 || sourceIndex > length)
             throw System::ArgumentOutOfRangeException("sourceIndex", "Index was out of range. Must be non-negative and less than or equal to the length of the StringBuilder.");
         if (sourceIndex > length - count)
             throw System::ArgumentException("sourceIndex was greater than the length of the source StringBuilder minus count.");
-        if (destinationIndex > destinationLength - count)
+        // Both operands are now non-negative, so the subtraction is performed in a width that
+        // cannot overflow either.
+        if (static_cast<SharpRuntime::longcs>(destinationIndex) >
+            static_cast<SharpRuntime::longcs>(destinationLength) - static_cast<SharpRuntime::longcs>(count))
             throw System::ArgumentException("Offset and length were out of bounds for the destination array, or count is greater than the number of elements from destinationIndex to the end of the destination array.");
         std::copy(buffer.begin() + sourceIndex, buffer.begin() + sourceIndex + count,
                   destination + destinationIndex);

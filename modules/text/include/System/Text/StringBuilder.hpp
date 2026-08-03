@@ -143,9 +143,12 @@ namespace System::Text
          * @param destinationIndex Zero-based index in @p destination at which copying begins.
          * @param count Number of characters to copy.
          * @throws System::ArgumentNullException if @p destination is null.
-         * @throws System::ArgumentOutOfRangeException if @p count, @p sourceIndex, or
-         *         @p destinationIndex is negative, or @p sourceIndex is greater than
-         *         getLengthProperty().
+         * @throws System::ArgumentOutOfRangeException if @p count, @p sourceIndex,
+         *         @p destinationIndex or @p destinationLength is negative, or @p sourceIndex
+         *         is greater than getLengthProperty(). Ticket #2009 (SR-AUD-295) added the
+         *         @p destinationLength check: without it the guard below subtracted from an
+         *         unvalidated signed capacity, and the resulting overflow *defeated* the
+         *         bounds check rather than merely accompanying it.
          * @throws System::ArgumentException if @p sourceIndex + count exceeds
          *         getLengthProperty(), or @p destinationIndex + count exceeds
          *         @p destinationLength.
