@@ -83,12 +83,30 @@ namespace System::Threading {
         /** Releases the semaphore once and returns the count before the release. */
         intcs Release() { return Release(1); }
 
-        /** Releases the semaphore releaseCount times and returns the count before the release. */
+        /**
+         * @brief Releases the semaphore releaseCount times and returns the count before the release.
+         *
+         * The full-semaphore guard is written as `maxCount_ - count_ < releaseCount`, which is
+         * .NET's own form in Semaphore/SemaphoreSlim. The obvious `count_ + releaseCount >
+         * maxCount_` is not equivalent: it overflows signed `intcs` before it can reject the
+         * over-release. `Semaphore(1, Int32.MaxValue).Release(Int32.MaxValue)` computed
+         * `2147483647 + 1`, which UndefinedBehaviorSanitizer reported as signed integer
+         * overflow at this line and at the increment below; the call then returned normally and
+         * left the count NEGATIVE, so `count_ > 0` never held again and the semaphore was
+         * permanently unusable (SR-AUD-206, ticket #1947).
+         *
+         * The subtraction cannot itself overflow: both constructors establish
+         * `0 <= count_ <= maxCount_` and every Wait/Release preserves it, so `maxCount_ - count_`
+         * lies in `[0, INTCS_MAX]`. The increment below is then bounded by that difference.
+         *
+         * @throws System::ArgumentOutOfRangeException if @p releaseCount is less than 1.
+         * @throws System::Threading::SemaphoreFullException if the release would exceed the maximum.
+         */
         intcs Release(intcs releaseCount) {
             if (releaseCount < 1)
                 throw System::ArgumentOutOfRangeException("releaseCount");
             std::unique_lock<std::mutex> lock(mtx_);
-            if (count_ + releaseCount > maxCount_)
+            if (maxCount_ - count_ < releaseCount)
                 throw SemaphoreFullException();
             intcs prev = count_;
             count_ += releaseCount;

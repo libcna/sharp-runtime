@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <atomic>
 #include <chrono>
+#include <limits>
 #include <thread>
 #include <vector>
 #include "System/ArgumentException.hpp"
@@ -429,6 +430,72 @@ TEST(ThreadingTests, Semaphore_Ctor_NegativeInitialCount_ThrowsArgumentOutOfRang
 
 TEST(ThreadingTests, Semaphore_Ctor_NonPositiveMaximumCount_ThrowsArgumentOutOfRangeException) {
     EXPECT_THROW(Semaphore(0, 0), System::ArgumentOutOfRangeException);
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-206 / ticket #1947 — the full-semaphore guard must not overflow.
+//
+// Both Release bodies evaluated `count_ + releaseCount > maxCount_` in signed intcs. For
+// Semaphore(1, Int32.MaxValue).Release(Int32.MaxValue) that is 2147483647 + 1, which is not
+// representable: UndefinedBehaviorSanitizer reported signed integer overflow at the guard AND
+// at the increment below it (four reports across the two types, where the audit recorded two),
+// the call returned normally instead of throwing, and SemaphoreSlim's CurrentCount was left at
+// -2147483648 -- so `count_ > 0` never held again and every later Wait blocked forever.
+// The repair adopts .NET's own non-overflowing form, `maxCount_ - count_ < releaseCount`.
+// ---------------------------------------------------------------------------
+
+TEST(ThreadingTests, Semaphore_Release_ToExactlyMaximum_Succeeds) {
+    Semaphore s(0, 5);
+    EXPECT_EQ(s.Release(5), 0);
+    EXPECT_TRUE(s.WaitOne(0));
+}
+
+TEST(ThreadingTests, Semaphore_Release_OnePastMaximum_ThrowsAndLeavesCountUnchanged) {
+    Semaphore s(0, 5);
+    EXPECT_THROW(s.Release(6), System::Threading::SemaphoreFullException);
+    // Nothing was released: the count is still zero, so a zero-timeout wait fails.
+    EXPECT_FALSE(s.WaitOne(0));
+}
+
+TEST(ThreadingTests, Semaphore_Release_MaximumIntFromNonZeroCount_ThrowsWithoutOverflow) {
+    Semaphore s(1, std::numeric_limits<SharpRuntime::intcs>::max());
+    EXPECT_THROW(s.Release(std::numeric_limits<SharpRuntime::intcs>::max()),
+                 System::Threading::SemaphoreFullException);
+    // The single initial permit survives the rejected over-release.
+    EXPECT_TRUE(s.WaitOne(0));
+    EXPECT_FALSE(s.WaitOne(0));
+}
+
+TEST(ThreadingTests, Semaphore_Release_LargestValidCount_Succeeds) {
+    Semaphore s(1, std::numeric_limits<SharpRuntime::intcs>::max());
+    EXPECT_EQ(s.Release(std::numeric_limits<SharpRuntime::intcs>::max() - 1), 1);
+}
+
+TEST(ThreadingTests, SemaphoreSlim_Release_ToExactlyMaximum_Succeeds) {
+    SemaphoreSlim ss(0, 5);
+    EXPECT_EQ(ss.Release(5), 0);
+    EXPECT_EQ(ss.getCurrentCountProperty(), 5);
+}
+
+TEST(ThreadingTests, SemaphoreSlim_Release_OnePastMaximum_ThrowsAndLeavesCountUnchanged) {
+    SemaphoreSlim ss(0, 5);
+    EXPECT_THROW(ss.Release(6), System::Threading::SemaphoreFullException);
+    EXPECT_EQ(ss.getCurrentCountProperty(), 0);
+}
+
+TEST(ThreadingTests, SemaphoreSlim_Release_MaximumIntFromNonZeroCount_ThrowsWithoutOverflow) {
+    SemaphoreSlim ss(1, std::numeric_limits<SharpRuntime::intcs>::max());
+    EXPECT_THROW(ss.Release(std::numeric_limits<SharpRuntime::intcs>::max()),
+                 System::Threading::SemaphoreFullException);
+    // The pre-repair failure left this at -2147483648 rather than 1.
+    EXPECT_EQ(ss.getCurrentCountProperty(), 1);
+    EXPECT_GT(ss.getCurrentCountProperty(), 0);
+}
+
+TEST(ThreadingTests, SemaphoreSlim_Release_LargestValidCount_Succeeds) {
+    SemaphoreSlim ss(1, std::numeric_limits<SharpRuntime::intcs>::max());
+    EXPECT_EQ(ss.Release(std::numeric_limits<SharpRuntime::intcs>::max() - 1), 1);
+    EXPECT_EQ(ss.getCurrentCountProperty(), std::numeric_limits<SharpRuntime::intcs>::max());
 }
 
 // ---------------------------------------------------------------------------

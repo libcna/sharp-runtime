@@ -97,15 +97,29 @@ namespace System::Threading {
          * the releaseCount validation (the reverse order from Wait(int), which validates its
          * timeout argument before checking disposal -- matching each method's own .NET source).
          *
+         * The full-semaphore guard is written as `maxCount_ - count_ < releaseCount`, which is
+         * SemaphoreSlim.cs's own form. The obvious `count_ + releaseCount > maxCount_` is not
+         * equivalent: it overflows signed `intcs` before it can reject the over-release.
+         * `SemaphoreSlim(1, Int32.MaxValue).Release(Int32.MaxValue)` computed `2147483647 + 1`,
+         * which UndefinedBehaviorSanitizer reported as signed integer overflow at this line and
+         * at the increment below; the call then returned normally and left CurrentCount at
+         * -2147483648, so `count_ > 0` never held again and every subsequent Wait blocked
+         * forever (SR-AUD-206, ticket #1947).
+         *
+         * The subtraction cannot itself overflow: the constructor establishes
+         * `0 <= count_ <= maxCount_` and every Wait/Release preserves it, so `maxCount_ - count_`
+         * lies in `[0, INTCS_MAX]`. The increment below is then bounded by that difference.
+         *
          * @throws System::ObjectDisposedException if this instance has been disposed.
          * @throws System::ArgumentOutOfRangeException if @p releaseCount is less than 1.
+         * @throws System::Threading::SemaphoreFullException if the release would exceed the maximum.
          */
         intcs Release(intcs releaseCount) {
             ThrowIfDisposed();
             if (releaseCount < 1)
                 throw System::ArgumentOutOfRangeException("releaseCount");
             std::lock_guard<std::mutex> lk(mutex_);
-            if (count_ + releaseCount > maxCount_)
+            if (maxCount_ - count_ < releaseCount)
                 throw System::Threading::SemaphoreFullException();
             intcs prev = count_;
             count_ += releaseCount;
