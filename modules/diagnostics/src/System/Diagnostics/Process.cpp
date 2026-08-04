@@ -206,6 +206,35 @@ bool Process::Start() {
     if (impl_->stdoutReader.joinable()) impl_->stdoutReader.join();
     if (impl_->stderrReader.joinable()) impl_->stderrReader.join();
 
+    // Build the child's environment in the PARENT (#2026).  Between fork() and exec() the
+    // child may call only async-signal-safe functions, because it inherits the address space
+    // of the whole parent but only the forking thread: ::setenv allocates, so if any other
+    // thread held the malloc lock at the moment of the fork, the child would deadlock inside
+    // it and never reach exec -- and the parent would then block forever in the status-pipe
+    // read below.  That parent is multithreaded exactly when a previous REDIRECTED Start left
+    // this class's own pipe-reader threads running, so the hazard needs no caller-created
+    // thread to be reachable.
+    //
+    // The array built here reproduces exactly what the per-variable ::setenv loop produced:
+    // the parent's own environment, with each configured variable replacing a same-named
+    // entry and otherwise being appended.  Names were already validated above, so no entry
+    // can be empty or contain '='.
+    std::vector<std::string> envStorage;
+    const auto& envOverrides = si.getEnvironmentVariablesProperty();
+    for (char** entry = ::environ; entry != nullptr && *entry != nullptr; ++entry) {
+        const char* separator = std::strchr(*entry, '=');
+        const std::string name =
+            separator != nullptr
+                ? std::string(*entry, static_cast<std::size_t>(separator - *entry))
+                : std::string(*entry);
+        if (envOverrides.find(name) == envOverrides.end()) envStorage.emplace_back(*entry);
+    }
+    for (const auto& [name, value] : envOverrides) envStorage.push_back(name + "=" + value);
+    std::vector<char*> envp;
+    envp.reserve(envStorage.size() + 1);
+    for (auto& entry : envStorage) envp.push_back(entry.data());
+    envp.push_back(nullptr);
+
     int stdoutPipe[2] = {-1, -1};
     int stderrPipe[2] = {-1, -1};
     int startupStatusPipe[2] = {-1, -1};
@@ -266,12 +295,17 @@ bool Process::Start() {
             if (::chdir(si.getWorkingDirectoryProperty().c_str()) != 0)
                 reportChildStartupFailure(startupStatusPipe[1], errno);
         }
-        for (const auto& [name, value] : si.getEnvironmentVariablesProperty()) {
-            if (::setenv(name.c_str(), value.c_str(), 1) != 0)
-                reportChildStartupFailure(startupStatusPipe[1], errno);
-        }
+        // Nothing from here to exec may allocate (#2026): the environment was marshalled in
+        // the parent above, and std::vector::data() is a plain member read.
+#if defined(__GLIBC__)
+        ::execvpe(argv[0], argv.data(), envp.data());
+#else
+        // Where execvpe is absent (notably macOS), replacing the global environ pointer is a
+        // single store -- async-signal-safe -- and execvp then passes it to the new image.
+        ::environ = envp.data();
         ::execvp(argv[0], argv.data());
-        reportChildStartupFailure(startupStatusPipe[1], errno); // execvp only returns on failure
+#endif
+        reportChildStartupFailure(startupStatusPipe[1], errno); // exec only returns on failure
     }
 
     // Parent

@@ -152,7 +152,7 @@ TEST(ProcessRestartTests, RestartResetsCapturedStandardError) {
 // ---------------------------------------------------------------------------
 
 TEST(ProcessRestartTests, RestartWhileRunning_Redirected_Throws) {
-    Process process = Process::Start(shellStartInfo("sleep 30", true, false));
+    Process process = Process::Start(shellStartInfo("exec sleep 30", true, false));
     process.setStartInfoProperty(shellStartInfo("printf z", true, false));
 
     EXPECT_THROW(process.Start(), System::InvalidOperationException);
@@ -161,7 +161,7 @@ TEST(ProcessRestartTests, RestartWhileRunning_Redirected_Throws) {
 }
 
 TEST(ProcessRestartTests, RestartWhileRunning_Unredirected_Throws) {
-    Process process = Process::Start(shellStartInfo("sleep 30", false, false));
+    Process process = Process::Start(shellStartInfo("exec sleep 30", false, false));
     process.setStartInfoProperty(shellStartInfo("exit 0", false, false));
 
     EXPECT_THROW(process.Start(), System::InvalidOperationException);
@@ -170,7 +170,7 @@ TEST(ProcessRestartTests, RestartWhileRunning_Unredirected_Throws) {
 }
 
 TEST(ProcessRestartTests, RestartWhileRunning_BothStreamsRedirected_Throws) {
-    Process process = Process::Start(shellStartInfo("sleep 30", true, true));
+    Process process = Process::Start(shellStartInfo("exec sleep 30", true, true));
     process.setStartInfoProperty(shellStartInfo("exit 0", true, true));
 
     EXPECT_THROW(process.Start(), System::InvalidOperationException);
@@ -181,7 +181,7 @@ TEST(ProcessRestartTests, RestartWhileRunning_BothStreamsRedirected_Throws) {
 // A refused restart must leave the instance describing the process it already owns, so the
 // caller can still wait for and kill it -- no partial state transition.
 TEST(ProcessRestartTests, RefusedRestart_LeavesPreviousProcessUsable) {
-    Process process = Process::Start(shellStartInfo("sleep 30", false, false));
+    Process process = Process::Start(shellStartInfo("exec sleep 30", false, false));
     const auto originalId = process.getIdProperty();
     process.setStartInfoProperty(shellStartInfo("exit 0", false, false));
 
@@ -196,7 +196,7 @@ TEST(ProcessRestartTests, RefusedRestart_LeavesPreviousProcessUsable) {
 }
 
 TEST(ProcessRestartTests, RestartAfterKillAndWait_Works) {
-    Process process = Process::Start(shellStartInfo("sleep 30", false, false));
+    Process process = Process::Start(shellStartInfo("exec sleep 30", false, false));
     process.Kill();
     ASSERT_TRUE(process.WaitForExit(5000));
 

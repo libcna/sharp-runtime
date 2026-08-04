@@ -580,6 +580,33 @@ existing finding already owns, and is folded into the owning ticket.
 
 ---
 
+## 16.1 A post-audit defect found by the compatible batch and FILED, not absorbed (#2032)
+
+Found by **#2026** while making its regression tests deterministic. It belongs to no existing
+finding and receives no `SR-AUD-*` identifier; numbering stays frozen at 364.
+
+`Process::WaitForExit(intcs)` polls to a deadline, but every poll runs `reapIfNeeded()`, which
+**joins the pipe-reader threads** once it reaps the child. A reader cannot finish until the pipe
+reaches EOF, and EOF requires *every* holder of the write end to close it — including a
+**grandchild** that inherited it. Measured
+(`build-probe/2032_probe1_waitforexit_timeout_ignored.log`): `/bin/sh` is `dash`, and
+`dash -c 'sleep 30'` **forks** rather than exec's, so `Kill()` terminated only `dash`;
+`WaitForExit(5000)` then returned `true` after **29,951 ms** — about six times its own timeout,
+and unbounded in general.
+
+It is **not** SR-AUD-269 (that is the *destructor* blocking), **not** SR-AUD-272 (EINTR) and
+**not** SR-AUD-268 (the argument domain): it is the timeout overload exceeding its own declared
+bound. It is **not fixed here** because every repair has to decide what happens to a reader
+thread that cannot finish — join, detach, or abandon the fd — and **detaching is exactly
+§14.1's option C**, the gated destructor policy. Absorbing it into a compatible ticket would
+pre-empt that approval. Ticket **#2032**, `blocked` on #2029.
+
+Consequence for this namespace's own tests: `#2025` and `#2026` use `exec sleep 30` rather than
+`sleep 30` for a killable redirected child, so no test depends on this defect. The shape is
+preserved in the probe, not hidden.
+
+---
+
 ## 17. Namespace completion criteria
 
 `System::Diagnostics` is complete when **all eight** findings are `remediated`
@@ -607,7 +634,7 @@ implementation ticket, and:
 | #2023 | — | maps all 8 | this document |
 | #2024 | D-A | 268, 272 | `todo`, compatible |
 | #2025 | D-C | 270 | **done** (2026-08-04), compatible, +15 tests |
-| #2026 | D-F | 274 | `todo`, compatible |
+| #2026 | D-F | 274 | **done** (2026-08-04), compatible, +13 tests |
 | #2027 | D-G | 275 | `todo`, compatible |
 | #2028 | — | (docs + gated pins) | `todo`, compatible |
 | #2029 | D-B | 269 | **blocked**, design complete (§14.1) |
