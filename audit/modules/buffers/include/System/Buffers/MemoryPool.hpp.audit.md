@@ -65,3 +65,37 @@ managed disposal diagnostic.
 Input size validation is sound, but the owner fails the essential post-dispose
 contract and turns retained-memory use into an ASan-confirmed native fault.
 No source or test was modified during this audit.
+
+## Design closure for SR-AUD-071 (ticket #2056, 2026-08-04): DESIGN-COMPLETE — NOT REMEDIATED
+
+The audit evidence above is retained unchanged. SR-AUD-071 stays **open**, now marked
+`confirmed (design-complete)`. The owning review is
+[`docs/BuffersNamespaceReviewPlan.md`](../../../../../../docs/BuffersNamespaceReviewPlan.md)
+(ticket #2048) §4.3; **no `SR-AUD-*` identifier was issued.**
+
+Both halves reproduced against the shipped body: `Rent(16)` → `Memory` length 16;
+`Dispose()`; `getMemoryProperty()` returns length **0** without throwing; and the `Memory`
+obtained *before* disposal still reports length **16** over storage `shrink_to_fit` released.
+
+**One premise corrected: this is one finding but two defects, with different blast radii, and
+conflating them would have cost something real.**
+
+- **(a) the post-dispose getter.** .NET's `ArrayMemoryPoolBuffer.Memory` throws
+  `ObjectDisposedException`. Reproducing that needs a terminal flag, because a **live**
+  `Rent(0)` and a **disposed** owner are indistinguishable from the vector alone — both empty,
+  both zero capacity — and that indistinguishability is itself pinned by
+  `MemoryOwnerDisposedPinTests.ZeroLengthRentIsIndistinguishableFromADisposedOwner`. Measured,
+  `sizeof(MemoryPoolHeapOwner_<int>)` is **32** (vptr 8 + `std::vector` 24), `alignof` 8, with
+  **no padding to reuse**; a `bool` takes it to **40**. That is an object-layout change to a
+  class template in a public header, plus a semantic change from "returns empty" to "throws".
+- **(b) the retained view.** `System::Memory<T>` stores a pointer and a length with no owner
+  liveness. Repairing that is a `Memory<T>` ownership change in `Core.Base` — CCF-019's shape
+  — with a blast radius far outside this module, and it is deliberately not scoped here.
+
+**Blocked ticket #2056** carries both. Nothing about it is approved.
+
+**What did land (#2061, doc-only, zero executable change):** `IMemoryOwner<T>` now documents
+both consequences at the point a caller meets them, including the explicit instruction not to
+retain a `Memory<T>` past its owner's `Dispose()`. Five pins guard the current behaviour and
+were mutation-checked — making the getter throw fails three of them, while the retained-view
+pin stays green, which is what shows the mutation was targeted rather than indiscriminate.

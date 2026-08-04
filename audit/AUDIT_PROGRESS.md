@@ -6978,3 +6978,60 @@ SR-AUD-305, 306, 308 and 309 move to `confirmed (design-complete)`.
 **Index after #2034: 112 remediated / 252 confirmed / 364 total** — of which **42** carry the
 `confirmed (design-complete)` qualifier, four of them added by this review's §14 designs.
 **No `SR-AUD-*` identifier was created; numbering stays frozen at 364.**
+
+---
+
+## `System::Buffers` namespace review and its compatible half — tickets #2048–#2061 (2026-08-04)
+
+The **eighth** namespace review in the #1950 / #1964 / #1972 / #1987 / #2006 / #2023 / #2034
+series. Plan: [`docs/BuffersNamespaceReviewPlan.md`](../docs/BuffersNamespaceReviewPlan.md).
+
+**Selection, re-derived by measurement** over `AUDIT_FINDINGS_INDEX.md`, not inherited:
+`modules/buffers` measured **11 open / 3 high / 27 %** by module path — tied with `modules/io`
+on count, but `io` has **zero** high findings, and 27 % is the highest high-severity ratio of
+any un-reviewed unit with more than six findings. All three highs are **memory safety on a
+public door**.
+
+**The namespace is wider than the module: 12 open findings, not 11.** `SR-AUD-088` owns
+`System::Buffers::MemoryHandle`, which lives in `modules/core/include/System/Buffers/` because
+`Core.Base` cannot depend on `Buffers`, so a module-path index does not show it under
+`buffers`. Its `Source` column names `IPinnable.hpp`, which *is* in the module.
+
+**Ten of the twelve premises reproduced** under ASan/UBSan or by direct measurement, including
+an ASan `heap-buffer-overflow` READ four bytes before an allocation, a UBSan null load followed
+by an ASan `SEGV`, and a `TryGet` returning a three-element view for a two-element slice.
+
+**Eight premise corrections, historical text preserved** (plan §6). The four that changed what
+shipped: SR-AUD-073 needs **no forged `SequencePosition`** — an ordinary position held across a
+`Slice` reaches the same out-of-slice view, so the repair validates the *range* rather than the
+segment marker; SR-AUD-071 is **two** defects with different blast radii, not one, and only the
+disclosure half was available without approval; SR-AUD-072's negative-length case observably
+escapes a **native `std::length_error`** rather than faulting, changing the closure criterion;
+and SR-AUD-086 is **two independent claims** about two reference files, neither verifiable
+here, so it was deferred rather than implemented.
+
+**Two post-audit defects, ordinary ticket numbers, no `SR-AUD-*` identifier.** A reachable
+UBSan-confirmed signed overflow in `ArrayBufferWriter`'s growth arithmetic (`1 + 2147483647`
+from a one-element writer), filed by this report only as an untested area — ticket **#2051**;
+and a Θ(n²) `BuffersExtensions::PositionOf` that allocates **384 MB** to search a 32 KB
+sequence — ticket **#2055**, unmentioned anywhere in the audit.
+
+**Six root-cause families.** Three map onto existing policy and mint no duplicate: **CCF-005**
+(caller metadata reaching memory before validation), **CCF-004** (signed C++ overflow at a
+public boundary), **CCF-019** (a borrowed handle with no owner liveness). One is left
+**module-local and deliberately not minted as CCF-021** — a public generic surface silently
+requiring more of `T` than it documents — with an explicit promotion rule.
+
+**Implemented, compatible:** #2049, #2050 (SR-AUD-072, 073), #2051, #2052 (SR-AUD-083), #2053
+(SR-AUD-076), #2055, and #2061 (disclosure and pins, zero executable production change).
+**Not implemented:** #2054 (`todo`, compatible, SR-AUD-070 + 077), #2056–#2059 (`blocked`),
+#2060 (`todo`, deferred verification).
+
+SR-AUD-072, 073, 076 and 083 move to **`remediated`**. SR-AUD-071, 074, 087 and 088 move to
+**`confirmed (design-complete)`**, each with a blocked ticket and a mutation-checked behaviour
+pin. SR-AUD-070, 077 and 086 stay **`confirmed`** with open tickets. SR-AUD-081 keeps its
+#1819 false-positive correction and gains no ticket.
+
+**Index after #2061: 121 remediated / 243 confirmed / 364 total** — of which **47** carry the
+`confirmed (design-complete)` qualifier, four of them added by this review.
+**No `SR-AUD-*` identifier was created; numbering stays frozen at 364.**

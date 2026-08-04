@@ -63,3 +63,46 @@ The primitive happy path is sound under its preconditions, but the generic
 public type has an undocumented compile-time exclusion and unverified
 large-allocation/old-view behavior. No source or test was modified during this
 audit.
+
+## Post-audit record (tickets #2051 and #2054, 2026-08-04)
+
+The audit evidence above is retained unchanged. The owning review is
+[`docs/BuffersNamespaceReviewPlan.md`](../../../../../../docs/BuffersNamespaceReviewPlan.md)
+(ticket #2048); **no `SR-AUD-*` identifier was issued and numbering stays frozen at 364.**
+
+**A defect this report filed only as an untested area turned out to be reachable undefined
+behaviour, and was repaired (#2051).** The *"Other missing assertions"* section says
+*"`currentLength + growBy` is signed `intcs` arithmetic before capacity handling"*. Measured,
+that is not merely untested: an `ArrayBufferWriter<char>` of capacity **1** and a single
+`GetSpan(2147483647)` reached
+
+```
+ArrayBufferWriter.hpp:42:71: runtime error: signed integer overflow:
+    1 + 2147483647 cannot be represented in type 'int'
+terminate called after throwing an instance of 'std::length_error'
+```
+
+— UBSan-confirmed UB requiring no large allocation, followed by a **native** exception
+escaping a public door. .NET performs the same addition, but C#'s unchecked `int` **wraps by
+definition** and .NET catches the wrap immediately with `if ((uint)newSize > MaxArrayLength)`;
+in C++ the wrap is undefined, so the idiom cannot be ported as written. The growth total is
+now computed in `longcs` and compared against a private `MaxArrayLength = 0x7FFFFFC7`
+(.NET's own private constant, `Array.MaxLength`), throwing `System::OutOfMemoryException`
+when even `writtenCount + sizeHint` exceeds it. The throw precedes the `resize`, so capacity
+and written count survive the failure unchanged — asserted, not assumed. CCF-004.
+
+Closure evidence: **7 permanent regressions**, including one that writes two bytes, provokes
+the failure and then re-reads the written span. UBSan report present before and absent after,
+with the header compiled from source into both probe builds. Source and ABI consequences:
+none — `MaxArrayLength` is private and `static constexpr`, so it is neither public surface
+nor part of the layout; `sizeof(ArrayBufferWriter<char>)` stays **40**, now `static_assert`ed.
+
+**SR-AUD-070 remains `confirmed`** and is ticket **#2054** (`todo`, compatible, not yet
+implemented). The review counted the sites independently and found **four** production sites,
+not the two this report names: `checkAndResizeBuffer`'s `resize`, `Clear`'s `T{}`,
+`MemoryPoolHeapOwner_`'s sized-vector constructor, and `SharedArrayPool<T>::Rent` plus
+`ArrayPool<T>::Return(clearArray=true)` — the last of which appears here only as a
+cross-reference note in the `ArrayPool` report. The planned repair states each requirement in
+the doc-comment and adds a `static_assert` **at the point where the requirement is already
+enforced**, so exactly the same set of programs continues to compile; a class-scope assert is
+explicitly rejected because it would reject a mere declaration that compiles today.

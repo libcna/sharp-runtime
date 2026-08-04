@@ -74,3 +74,23 @@ different value despite the header claiming the default representation matches
 Normal format values work, but default/zero-symbol `ToString` is a confirmed
 observable parity defect.  No production or test source was modified during
 this audit.
+
+## Post-audit remediation for SR-AUD-083 (ticket #2052, 2026-08-04): REMEDIATED
+
+The audit evidence above is retained unchanged. The owning review is
+[`docs/BuffersNamespaceReviewPlan.md`](../../../../../../docs/BuffersNamespaceReviewPlan.md)
+(ticket #2048); **no `SR-AUD-*` identifier was issued.**
+
+Re-measured before the change, byte for byte, and **identical to this report's own probe
+output**: `default()` → 2 bytes `{0, 48}`, `StandardFormat('\0')` → 1 byte `{0}`,
+`StandardFormat('\0', 0)` → 2 bytes `{0, 48}`, `Parse("")` → 2 bytes.
+
+`ToString` now returns an empty string whenever the symbol is zero, matching .NET's internal
+`Format`, which tests `symbol != default` first and returns an empty span. Non-zero symbols
+are byte-for-byte unchanged (`"G"`, `"D3"`, `"F99"`, `"X0"`), and
+`Parse(ToString())` still round-trips for every non-zero symbol tested.
+
+Closure evidence: **7 permanent regressions**, each asserting `size()` explicitly rather than
+only equality with `""`, so an embedded NUL cannot pass unnoticed again. Source and ABI
+consequences: none — one early return inside an existing `const` method;
+`sizeof(StandardFormat)` stays **2**, now `static_assert`ed.

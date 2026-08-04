@@ -46,3 +46,33 @@ leak-prone call pattern.
 
 Explicit disposal works, but the documented RAII alternative does not exist.
 No production or test source was modified during this audit.
+
+## Design closure for SR-AUD-088 (ticket #2059, 2026-08-04): DESIGN-COMPLETE — NOT REMEDIATED
+
+The audit evidence above is retained unchanged. SR-AUD-088 stays **open**, now marked
+`confirmed (design-complete)`. It was reviewed as part of the **`System::Buffers` namespace**
+review — [`docs/BuffersNamespaceReviewPlan.md`](../../../../../../../docs/BuffersNamespaceReviewPlan.md)
+(ticket #2048) §4.11 — even though this file lives in `modules/core`, because
+`System::Buffers::MemoryHandle` is a `System::Buffers` type that `Core.Base` hosts only
+because `Memory.hpp` and `ReadOnlyMemory.hpp` need it and `Core.Base` cannot depend on
+`Buffers`. **This is the twelfth open finding of that namespace, and the module-path index
+does not show it there** — recorded so a future review does not miss it again.
+**No `SR-AUD-*` identifier was issued.**
+
+Reproduced with a counting `IPinnable`: a `MemoryHandle` going out of scope leaves
+`unpinCount` at **0**.
+
+**Why this is not a small fix.** `MemoryHandle` is a 24-byte aggregate with **public**
+`pointer_`/`pinnable_` members and an implicit copy constructor. A destructor that unpins
+would unpin **once per copy** — pinned directly by
+`MemoryHandlePinTests.ACopyStillReferencesTheSamePinnable`, which shows two handles produced
+from one `Pin` yielding two `Unpin` calls. A correct repair needs move-only or
+reference-counted semantics on a type reachable from all of `Core.Base`. **Blocked ticket
+#2059** (CCF-019, and the smallest of that family's members). Nothing about it is approved.
+
+**What did land (#2061, doc-only, zero executable change):** the class comment's claim that
+callers may *"let the destructor do it"* is deleted and replaced by an explicit warning that
+the caller **must** call `Dispose()`, with the reason the obvious fix is unavailable. Three
+pins guard the current behaviour, plus a `static_assert` that `sizeof(MemoryHandle) == 24`.
+Mutation-checked: adding `~MemoryHandle() { Dispose(); }` fails
+`MemoryHandlePinTests.ScopeExitDoesNotUnpin`.

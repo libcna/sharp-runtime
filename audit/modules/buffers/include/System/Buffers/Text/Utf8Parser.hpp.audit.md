@@ -164,3 +164,34 @@ Source, ABI and layout consequences: none. `Utf8Parser` has no data members
 class and every signature is byte-identical; no `noexcept` specification changed.
 
 The plan for this family is `docs/TryOutputFailureContractPlan.md` (ticket #1871).
+
+## Deferred verification for SR-AUD-086 (ticket #2060, 2026-08-04): NOT REMEDIATED
+
+The audit evidence above is retained unchanged. SR-AUD-086 stays **`confirmed`**. The owning
+review is
+[`docs/BuffersNamespaceReviewPlan.md`](../../../../../../../docs/BuffersNamespaceReviewPlan.md)
+(ticket #2048) §4.9; **no `SR-AUD-*` identifier was issued.**
+
+**The internal half of the finding is confirmed by measurement.** `tryParseUInt` requires its
+first byte to be a digit and `tryParseInt` recognises only `-`, while `tryParseGrouped` — the
+`'N'` grammar — accepts `+` **unconditionally**: its `else if (c == '+')` branch is not gated
+on `allowMinus`, so `'N'` takes a leading `+` for signed **and** unsigned types alike. `"+42"`
+therefore parses under `'N'` and fails under `'G'`, `'D'` and the default, for the same type.
+
+**One premise corrected, and it is why nothing was changed.** The finding asserts that
+*"Current .NET's signed and unsigned decimal parser paths accept an optional leading `+`"* —
+**two independent claims about two different reference files**, quoted from neither.
+`/rv/tmp/runtime/src/libraries/` is **absent from this container**, no archived vector in this
+repository exercises either path, and no committed design record settles it. Repairing this
+would **widen** an accepted input set, which is exactly what this repository's review method
+forbids on unverified evidence. Ticket **#2060** records precisely which two files must be
+read (`Utf8Parser.Integer.Signed.D.cs` and `Utf8Parser.Integer.Unsigned.D.cs`) and requires
+the two halves to be answered separately.
+
+**What did land (#2061, doc-only, zero executable change):** the class comment now states the
+asymmetry, names #2060, and says plainly which part is measured and which is unverified. All
+**four** combinations — signed and unsigned, `'N'` versus `'G'`/`'D'`/default — are pinned by
+`Utf8ParserPlusSignPinTests`, together with the `-` behaviour, so the verification lands
+against a measured baseline. Mutation-checked: teaching `tryParseUInt` to skip a leading `+`
+failed the two rejection pins while both `'N'` pins stayed green — the controls that show the
+mutation was targeted.

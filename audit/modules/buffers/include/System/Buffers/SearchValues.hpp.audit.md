@@ -57,3 +57,28 @@ with a concise public diagnostic.
 Built-in membership paths pass, but the advertised generic equality contract is
 false at compile time for ordinary equality-only C++ values. No source or test
 was modified during this audit.
+
+## Post-audit record for SR-AUD-077 (ticket #2054, 2026-08-04): NOT REMEDIATED
+
+The audit evidence above is retained unchanged. SR-AUD-077 stays **`confirmed`**. The owning
+review is
+[`docs/BuffersNamespaceReviewPlan.md`](../../../../../../docs/BuffersNamespaceReviewPlan.md)
+(ticket #2048) §4.4; **no `SR-AUD-*` identifier was issued.**
+
+The review grouped SR-AUD-077 with SR-AUD-070 as one root cause — *a public generic surface
+silently requires more of `T` than it documents* — spanning **five** sites across four
+headers, and gave the pair a single compatible ticket, **#2054** (`todo`). The planned repair
+states each requirement in the doc-comment and adds a `static_assert` **at the point where the
+requirement is already enforced**, so exactly the same set of programs continues to compile
+and only the diagnostic improves; a negative consumer fixture site proves the equality-only
+and non-default-constructible cases are still rejected. A class-scope assert is explicitly
+rejected: it would reject a mere declaration that compiles today, which would be a source
+break.
+
+The family is **deliberately not minted as a CCF**: two findings inside one module is not yet
+a cross-cutting pattern. The review's §22 records the promotion rule — if a second module's
+review finds the same shape, mint CCF-021 then, citing both modules' evidence.
+
+`SearchValues<T>`'s immutability after construction and its independence from the source
+vector — neither previously asserted — are now pinned by
+`SearchValuesPinTests.IsImmutableAfterConstructionAndIndependentOfItsSource` (#2061).

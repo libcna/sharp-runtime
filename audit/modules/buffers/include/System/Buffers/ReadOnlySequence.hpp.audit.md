@@ -92,3 +92,64 @@ Happy-path single-segment operations pass, but raw construction and position
 validation expose caller-controlled metadata to ASan-confirmed invalid memory
 access. The default/empty enumeration state also differs observably from .NET.
 No source or test was modified during this audit.
+
+## Post-audit remediation for SR-AUD-072 and SR-AUD-073, and design closure for SR-AUD-074 (tickets #2049, #2050, #2057, 2026-08-04)
+
+The audit evidence above is retained unchanged and is **not** rewritten. This is an
+appended record. The owning review is
+[`docs/BuffersNamespaceReviewPlan.md`](../../../../../../docs/BuffersNamespaceReviewPlan.md)
+(ticket #2048); **no `SR-AUD-*` identifier was issued and numbering stays frozen at 364.**
+
+**SR-AUD-072 — REMEDIATED (ticket #2049).** `ReadOnlySequence(const T*, intcs)` used to run
+`data_(ptr, ptr + length)` from its member-initialiser list, so validation had nowhere to
+live. It now initialises `data_` from a static `validatedCopy` helper that throws
+`ArgumentOutOfRangeException("length")` for a negative length and
+`ArgumentNullException("ptr")` for a null pointer with a positive length. `(nullptr, 0)`
+stays valid — two pre-existing tests rely on it, and adding 0 to a null pointer is well
+defined.
+
+**One premise corrected.** The finding says a negative length *"performs pointer arithmetic
+before any range error can be represented"*. Measured, the **observable** outcome was a
+native `std::length_error: cannot create std::vector larger than max_size()` escaping a
+public door, and UBSan reported nothing for that mode. The defect is real; its class is an
+untranslated native exception, not an out-of-bounds access, so the closure criterion is the
+declared `System::` exception rather than merely a clean ASan run.
+
+**SR-AUD-073 — REMEDIATED (ticket #2050).** `TryGet` tested only `pos >= end_`. It now
+requires `start_ <= pos <= end_` before forming any view. `pos == end_` keeps its pinned
+end-of-sequence result.
+
+**One premise corrected, and it changed the repair.** The finding frames the defect around a
+*forged* position and cites SR-AUD-069's mutable `SequencePosition` as the enabler. **Forgery
+is not required.** `seq.getStartProperty()` is a legitimately obtained position; held across
+`seq.Slice(...)` and passed to the slice's `TryGet`, it returned a view covering elements the
+slice does not contain. That is an ordinary caller mistake, so the finding *understates*
+reachability, and validating the **range** — rather than the segment marker the audit
+suggested — is what closes both that path and the negative-integer path together.
+
+**Measured before and after**, from one probe source compiled twice, the `before` column's
+include path shadowed by `build-probe/2048_before_include/` materialised from `git show`:
+
+| Probe mode | Before | After |
+|---|---|---|
+| `trygetneg` | **ASan `heap-buffer-overflow` READ**, 4 bytes before a 12-byte region | `ArgumentOutOfRangeException` |
+| `trygetslice` | **no exception** — a 3-element view for a 2-element slice, first element `10` | `ArgumentOutOfRangeException` |
+| `ctornull` | **UBSan `load of null pointer of type 'const int'`** then **ASan `SEGV` on 0x0** | `ArgumentNullException` |
+| `ctorneg` | native `std::length_error` | `ArgumentOutOfRangeException` |
+
+**SR-AUD-074 — `confirmed (design-complete)`, NOT remediated (ticket #2057, blocked).**
+Reproduced: a default-constructed `ReadOnlySequence<int>` enumerates **1** segment and
+`getEmpty()` also enumerates 1, where .NET yields 0 and 1. Distinguishing them needs state
+the type does not have: measured `sizeof(ReadOnlySequence<int>)` is **32**
+(`std::vector` 24 + two `intcs` 8), fully packed with no padding, so a discriminator is a
+**public object-layout change** and the enumerator's `MoveNext` result changes for one input.
+`getEmpty`'s doc-comment now says so (#2061) and the behaviour is pinned by
+`ReadOnlySequenceDefaultPinTests`, mutation-checked.
+
+Closure evidence for #2049/#2050: **18 permanent regressions**;
+`SharpRuntimeTests_Buffers` **554/554** at that commit, and the whole suite clean under
+AddressSanitizer + UndefinedBehaviorSanitizer + LeakSanitizer. Source and ABI consequences:
+none — no signature, virtual, `noexcept`, member or layout change;
+`sizeof(ReadOnlySequence<int>)` stays 32 and its `Enumerator` 16, both now `static_assert`ed.
+**The accepted input set narrows** in the direction of memory safety: calls that used to be
+undefined, or to return data outside the sequence, now throw.

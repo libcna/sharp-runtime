@@ -63,3 +63,37 @@ not expose the overload until those controls have semantics.
 The simple allocate-and-clear path is serviceable, but the public configurable
 factory is a nonfunctional stub that accepts invalid input without a
 diagnostic. No source or test was modified during this audit.
+
+## Post-audit remediation for SR-AUD-076 (ticket #2053, 2026-08-04): REMEDIATED
+
+The audit evidence above is retained unchanged. The owning review is
+[`docs/BuffersNamespaceReviewPlan.md`](../../../../../../docs/BuffersNamespaceReviewPlan.md)
+(ticket #2048); **no `SR-AUD-*` identifier was issued.**
+
+Reproduced first: `Create(0, 1)`, `Create(1, 0)` and `Create(-5, -7)` all returned a usable
+pool, and `Create(1024, 10)->Rent(4000)` returned **4000** elements — the declared maximum was
+not applied.
+
+`ArrayPool<T>::Create(intcs, intcs)` now throws `ArgumentOutOfRangeException` for a
+non-positive `maxArrayLength` or `maxArraysPerBucket`, exactly as .NET's
+`ConfigurableArrayPool` constructor does.
+
+**Only the validation half is remediated, and the header now says so plainly.** Honouring the
+limits needs a configured pool type this port does not have: `SharedArrayPool` allocates a
+fresh vector on every `Rent` and has no buckets to size, so a configured pool would be a new
+public class with new state — a public-surface addition outside this batch's envelope. That
+is recorded as an explicit exclusion in the review plan's §21 rather than smuggled in.
+
+**A second contract on this type was false and is now corrected** (#2061, doc-only):
+`Return` is **not** .NET's ownership transfer. `Rent` hands back a `std::vector<T>` by value,
+so the caller keeps owning the storage afterwards and continued use — forbidden in .NET — is
+legal here; nothing is retained for reuse; and `clearArray` zeroes *the caller's own vector*
+rather than scrubbing a buffer the pool is about to hand to someone else, so it is not a
+guarantee that sensitive data has left the process. Pinned by
+`ArrayPoolOwnershipPinTests.ReturnDoesNotTakeOwnershipAndDoesNotPool`.
+
+Closure evidence: **8 permanent regressions** covering all five invalid configurations, the
+smallest valid one, an ordinary one, and the unchanged parameterless `Create()`. Both
+pre-existing call sites pass positive values and stayed green unmodified. Source and ABI
+consequences: none — no signature, layout or exported-symbol change; only the accepted input
+set narrowed.
