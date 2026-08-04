@@ -19,6 +19,15 @@ namespace System::Net {
      * Comment, CommentUri, Discard) and RFC 2965 quoting rules are intentionally not
      * implemented -- real-world cookies overwhelmingly use the simple Version-0 "Netscape"
      * shape this class targets.
+     *
+     * @warning KNOWN GAP, measured and pinned, not yet repaired (SR-AUD-306, ticket #2040,
+     * blocked on approval — `docs/SystemNetNamespaceReviewPlan.md` §14.1). The path- and
+     * domain-accepting constructors below assign `path_`/`domain_` **directly** rather than
+     * through their setters, so `PathImplicit`/`DomainImplicit` stay **true** for a value the
+     * caller supplied explicitly, while the equivalent setters correctly clear them. Because
+     * `CookieContainer::Add` overwrites any value still marked implicit, a path or domain
+     * passed to a constructor is silently replaced by the request URI's. Pinned by
+     * `NetGatedBehaviourPinTests.Pin2040_*`.
      */
     class Cookie {
     public:
@@ -30,13 +39,20 @@ namespace System::Net {
             value_ = value;
         }
 
-        /** @brief Initializes a new instance with the given name, value, and path. */
+        /**
+         * @brief Initializes a new instance with the given name, value, and path.
+         * @warning The path is stored but `PathImplicit` stays **true** — see the class note.
+         */
         Cookie(const std::string& name, const std::string& value, const std::string& path)
             : Cookie(name, value) {
             path_ = path;
         }
 
-        /** @brief Initializes a new instance with the given name, value, path, and domain. */
+        /**
+         * @brief Initializes a new instance with the given name, value, path, and domain.
+         * @warning Both are stored but `PathImplicit` and `DomainImplicit` stay **true** — see
+         * the class note.
+         */
         Cookie(const std::string& name, const std::string& value, const std::string& path,
                const std::string& domain)
             : Cookie(name, value, path) {

@@ -534,10 +534,10 @@ two HTML encoders in one repository with two different escape sets is the CCF-01
 | #2038 | N-D | 303 | **DONE** 2026-08-04 — see §17.5 |
 | #2039 | N-C | 304 (3 halves) | **DONE** 2026-08-04 — see §17.6 |
 | #2041 | N-B | 307 | **DONE** 2026-08-04 — see §17.1 |
-| #2040 | N-E | 305, 306 | **blocked**, design complete (§14.1) |
-| #2042 | N-F | 308 | **blocked**, design complete (§14.2) |
-| #2043 | N-C | 304 (wildcard half) | **blocked**, design complete (§14.3) |
-| #2044 | N-G | 309 | **blocked**, deferred (§14.4), coupled to #2019 |
+| #2040 | N-E | 305, 306 | **blocked**, design complete (§14.1); behaviour pinned by #2047 |
+| #2042 | N-F | 308 | **blocked**, design complete (§14.2); behaviour pinned by #2047 |
+| #2043 | N-C | 304 (wildcard half) | **blocked**, design complete (§14.3); behaviour pinned by #2039 |
+| #2044 | N-G | 309 | **blocked**, deferred (§14.4), coupled to #2019; behaviour pinned by #2047 |
 
 ---
 
@@ -871,6 +871,38 @@ so nothing depends on reaching a network; the one name-dependent group is guarde
 
 **Consequences.** No signature, `noexcept`, virtual, vtable, data member or layout change. The
 header changed only in its doc-comments.
+
+---
+
+### 17.7 #2047 — the mandatory disclosure-and-pins ticket (§13 item 7, §15 criterion 2)
+
+**Zero executable production change.** Only doc-comments and tests.
+
+**Disclosure.** Three headers now state gaps they did not:
+
+| Header | Now states |
+|---|---|
+| `Cookie.hpp` | the path- and domain-accepting constructors assign the fields **directly**, so `PathImplicit`/`DomainImplicit` stay **true** for an explicitly supplied value while the setters clear them, and `CookieContainer::Add` consequently overwrites what the caller passed (SR-AUD-306, #2040) |
+| `CookieContainer.hpp` | there is **no origin check** on an explicit `Domain` (SR-AUD-305, #2040), and storage is unbounded in every direction **including the absence of expiry cleanup** — an expired cookie is retained and only hidden from emission (SR-AUD-308, #2042) |
+| `WebUtility.hpp` | the encode and decode notes are **asymmetric on purpose**: the decoder understands more than the encoder produces, so decode-then-encode is not the identity even though encode-then-decode is; and #2044 is **deferred**, coupled to `System::Text`'s #2019 (SR-AUD-309) |
+
+**Pins: +10**, in `NetGatedBehaviourPinTests.cpp`, plus #2043's three assertions already added by
+#2039 in `DnsLiteralAndDuplicateTests.cpp`. So **all four** gated tickets now satisfy §15's
+criterion 2.
+
+**Every pin was mutation-checked.** Six mutations were applied temporarily — an origin check in
+`Add`, both `Cookie` constructors routed through their setters, a capacity of 300, expired-cookie
+purging on insertion, Latin-1-supplement numeric encoding, and a decoder that no longer knows
+`&copy;` — and **eight of the ten pins failed** under them. All six were reverted and
+`git diff` over the three touched files is empty.
+
+The two pins that stayed green are **deliberate controls**, not gaps:
+`Pin2044_HtmlEncodeEscapesExactlyFiveAsciiCharacters` and
+`Pin2044_EncodeThenDecodeRoundTripsTheFiveEscapedCharacters` must **not** move when the non-ASCII
+policy changes, and their staying green while the non-ASCII pin failed is what shows the
+mutation was targeted rather than indiscriminate.
+
+**Nothing here approves, implements or preselects any part of #2040, #2042, #2043 or #2044.**
 
 ---
 

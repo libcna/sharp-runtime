@@ -25,6 +25,17 @@ namespace System::Net {
      * references (&amp;#NNN; and &amp;#xHH;) and a handful of common named entities
      * (nbsp, copy, reg, apos, trade) — not .NET's full ~250-entry HTML5 named-entity
      * table.
+     * @warning The two notes above are ASYMMETRIC, and that asymmetry is the shape of the
+     * finding rather than an accident: the **decoder understands more than the encoder ever
+     * produces**. `HtmlDecode` accepts `&amp;copy;`, `&amp;#169;` and `&amp;#xA9;`, none of
+     * which `HtmlEncode` can emit, so a decode-then-encode round trip is **not** the identity
+     * even though encode-then-decode is. SR-AUD-309 describes the **encode** direction only.
+     * Ticket **#2044** carries the decision, is **deferred rather than merely blocked** because
+     * .NET's exact default escape set cannot be verified in this container, and is explicitly
+     * coupled to `System::Text::Encodings::Web`'s #2019 — two HTML encoders in one repository
+     * must not be given two different escape sets. Both directions are pinned by
+     * `NetGatedBehaviourPinTests.Pin2044_*`; see
+     * `docs/SystemNetNamespaceReviewPlan.md` §4.4 and §14.4.
      * @note TextWriter-based overloads and the byte[]-based UrlEncodeToBytes/
      * UrlDecodeToBytes overloads are not ported (no TextWriter/byte[] idiom used
      * elsewhere in this class).

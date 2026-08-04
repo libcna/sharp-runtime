@@ -26,12 +26,33 @@ namespace System::Net {
      * real .NET's server-oriented hash-table-of-domains implementation is not replicated.
      * Cookie aging/eviction policies (MaxCookieSize, PerDomainCapacity, Capacity) are not
      * enforced -- this container never evicts cookies on its own.
+     *
+     * @warning KNOWN GAP, measured and pinned, not yet repaired (SR-AUD-305, ticket #2040,
+     * blocked on approval -- `docs/SystemNetNamespaceReviewPlan.md` §14.1). There is **no
+     * origin check**: an explicitly supplied `Domain` is never validated against the URI the
+     * cookie arrived from, so a cookie added from `origin.invalid` carrying
+     * `Domain=.unrelated.invalid` is stored and later emitted by `GetCookieHeader` for
+     * `unrelated.invalid`. .NET's `Cookie.VerifyAndSetDefaults` rejects that relation. Pinned by
+     * `NetGatedBehaviourPinTests.Pin2040_CrossOriginExplicitDomainIsStoredAndEmitted`.
+     *
+     * @warning KNOWN GAP, measured and pinned, not yet repaired (SR-AUD-308, ticket #2042,
+     * blocked on approval -- plan §14.2). Storage is **unbounded in every direction**: no
+     * capacity, no per-domain capacity, no maximum cookie size, and **no expiry cleanup** -- an
+     * expired cookie is retained and only hidden from emission, so `Count` keeps growing.
+     * Pinned by `NetGatedBehaviourPinTests.Pin2042_*`.
      */
     class CookieContainer {
     public:
         CookieContainer() = default;
 
-        /** @brief Adds a Cookie for the given URI, applying the URI's host as the cookie's domain if unset. */
+        /**
+         * @brief Adds a Cookie for the given URI, applying the URI's host as the cookie's domain
+         * if unset.
+         * @warning An explicitly supplied `Domain` is accepted **without any relation check
+         * against @p uri** — see the class note (SR-AUD-305, #2040). A `Path` or `Domain` that
+         * came from a `Cookie` constructor rather than a setter is **overwritten** by @p uri's,
+         * because the constructors leave the implicit flags set (SR-AUD-306, #2040).
+         */
         void Add(const System::Uri& uri, const Cookie& cookie);
 
         /** @brief Adds every Cookie in the collection for the given URI. */
