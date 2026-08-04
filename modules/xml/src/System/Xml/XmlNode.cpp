@@ -6,6 +6,7 @@
 #include <tinyxml2/tinyxml2.h>
 
 #include <memory>
+#include <vector>
 
 #include "System/ArgumentException.hpp"
 #include "System/InvalidOperationException.hpp"
@@ -16,6 +17,7 @@
 #include "System/Xml/XmlDocument.hpp"
 #include "System/Xml/XmlDocumentFragment.hpp"
 #include "System/Xml/XmlElement.hpp"
+#include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlNodeList.hpp"
 #include "System/Xml/XmlWriter.hpp"
 
@@ -46,6 +48,28 @@ namespace System::Xml {
         void ThrowIfDifferentDocument(const XmlNode* thisNode, const XmlDocument* thisDoc, const XmlDocument* childDoc) {
             if (childDoc && childDoc != thisDoc && static_cast<const void*>(childDoc) != static_cast<const void*>(thisNode))
                 throw System::ArgumentException("The node to be inserted is from a different document context.");
+        }
+
+        // Ticket #2075 (SR-AUD-351, cause X-B). The port already validated DOCUMENT identity
+        // (ThrowIfDifferentDocument) and ANCESTRY (ThrowIfSelfOrAncestor) but never
+        // PARENTHOOD, so a same-document node belonging to a DIFFERENT parent passed every
+        // check. Measured before this guard, with root -> {a, b} and b -> {childOfB}:
+        //
+        //   a->RemoveChild(childOfB)      -> B's child was detached
+        //   a->InsertBefore(n, childOfB)  -> refChild silently ignored, n landed inside a
+        //   a->InsertAfter(n, childOfB)   -> n ended up NOWHERE
+        //   a->ReplaceChild(n, childOfB)  -> both wrongs at once
+        //   root->RemoveChild(orphan)     -> a parentless node accepted silently
+        //
+        // Three different failure modes from one missing check. The wording follows this
+        // file's existing ArgumentException messages; .NET's exact text is not verifiable here
+        // (/rv/tmp/runtime/ absent) and is recorded as this port's choice
+        // (docs/SystemXmlNamespaceReviewPlan.md §4.2).
+        void ThrowIfNotChildOf(const tinyxml2::XMLNode* thisNative,
+                               const tinyxml2::XMLNode* candidate,
+                               const char* message) {
+            if (!candidate || candidate->Parent() != thisNative)
+                throw System::ArgumentException(message);
         }
 
         // Verified against XmlNode.cs's Normalize(): real .NET recurses into the full depth of
@@ -150,19 +174,44 @@ namespace System::Xml {
         return printer.CStr() ? printer.CStr() : "";
     }
 
+    // Ticket #2074 (SR-AUD-350, cause X-A). The destructive step used to run FIRST and the
+    // parse's status was discarded, so an invalid fragment emptied the node and returned
+    // normally:
+    //
+    //     element with <keep/>  ->  setInnerXml("<bad>")  ->  innerXml "" , no exception
+    //
+    // That is silent, total content loss on public input. The correct ordering was already one
+    // call away in this same module -- XmlDocument::LoadXml parses the same text through the
+    // same substrate and throws a shaped XmlException -- so this is an ordering change plus an
+    // existing error path, not a new policy (docs/SystemXmlNamespaceReviewPlan.md §4.1).
+    //
+    // Parse into the scratch document FIRST; on failure throw and leave the node exactly as it
+    // was; only then remove the old children and clone the new ones in. The clone loop is the
+    // last step and cannot fail in a way that leaves the node half-populated: every child is
+    // cloned into the owning document before any of them is inserted.
     void XmlNode::setInnerXmlProperty(const std::string& xml) {
-        RemoveAllChildren();
         XmlDocument* doc = GetDocument();
-        if (xml.empty() || !doc) return;
+        if (!doc) return;
+        if (xml.empty()) { RemoveAllChildren(); return; }
+
         tinyxml2::XMLDocument fragmentDoc;
         std::string wrapped = "<root>" + xml + "</root>";
-        fragmentDoc.Parse(wrapped.c_str());
+        if (fragmentDoc.Parse(wrapped.c_str()) != tinyxml2::XML_SUCCESS)
+            throw XmlException(std::string("XmlNode::InnerXml: parse error: ") +
+                               (fragmentDoc.ErrorStr() ? fragmentDoc.ErrorStr() : "unknown error"));
         auto* root = fragmentDoc.RootElement();
-        if (!root) return;
-        for (tinyxml2::XMLNode* child = root->FirstChild(); child; child = child->NextSibling()) {
-            auto* cloned = child->DeepClone(&doc->getNativeDocument());
-            native_->InsertEndChild(cloned);
-        }
+        if (!root)
+            throw XmlException("XmlNode::InnerXml: parse error: the fragment has no content.");
+
+        // Clone every child before touching this node, so a failure inside DeepClone cannot
+        // leave the node stripped of its old content and missing its new content too.
+        std::vector<tinyxml2::XMLNode*> cloned;
+        for (tinyxml2::XMLNode* child = root->FirstChild(); child; child = child->NextSibling())
+            cloned.push_back(child->DeepClone(&doc->getNativeDocument()));
+
+        RemoveAllChildren();
+        for (tinyxml2::XMLNode* child : cloned)
+            native_->InsertEndChild(child);
     }
 
     std::string XmlNode::getOuterXmlProperty() const {
@@ -263,6 +312,8 @@ namespace System::Xml {
         if (!native_ || !newChild) return newChild;
         ThrowIfSelfOrAncestor(native_, newChild->native_);
         ThrowIfDifferentDocument(this, GetDocument(), newChild->GetDocument());
+        ThrowIfNotChildOf(native_, refChild->native_,
+                          "The reference node is not a child of this node.");
         tinyxml2::XMLNode* prevSibling = refChild->native_ ? refChild->native_->PreviousSibling() : nullptr;
         if (!prevSibling) { native_->InsertFirstChild(newChild->native_); return newChild; }
         native_->InsertAfterChild(prevSibling, newChild->native_);
@@ -274,6 +325,8 @@ namespace System::Xml {
         if (!native_ || !newChild) return newChild;
         ThrowIfSelfOrAncestor(native_, newChild->native_);
         ThrowIfDifferentDocument(this, GetDocument(), newChild->GetDocument());
+        ThrowIfNotChildOf(native_, refChild->native_,
+                          "The reference node is not a child of this node.");
         native_->InsertAfterChild(refChild->native_, newChild->native_);
         return newChild;
     }
@@ -281,11 +334,19 @@ namespace System::Xml {
     XmlNode* XmlNode::RemoveChild(XmlNode* oldChild) {
         XmlDocument* doc = GetDocument();
         if (!native_ || !oldChild || !oldChild->native_ || !doc) return oldChild;
+        ThrowIfNotChildOf(native_, oldChild->native_,
+                          "The node to be removed is not a child of this node.");
         doc->DetachNode(oldChild->native_);
         return oldChild;
     }
 
+    // The parenthood check must run BEFORE InsertBefore inserts anything: otherwise a foreign
+    // oldChild would leave newChild already spliced into this node when the removal threw --
+    // the very partial state this repair exists to prevent (#2075).
     XmlNode* XmlNode::ReplaceChild(XmlNode* newChild, XmlNode* oldChild) {
+        if (native_ && oldChild)
+            ThrowIfNotChildOf(native_, oldChild->native_,
+                              "The node to be replaced is not a child of this node.");
         InsertBefore(newChild, oldChild);
         RemoveChild(oldChild);
         return oldChild;

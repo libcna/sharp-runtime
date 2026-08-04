@@ -99,7 +99,21 @@ namespace System::Xml {
 
         /** @return The XML markup of this node's children (not including this node itself). */
         [[nodiscard]] virtual std::string getInnerXmlProperty() const;
-        /** @brief Replaces this node's children by parsing @p xml as a sequence of child nodes. */
+        /**
+         * @brief Replaces this node's children by parsing @p xml as a sequence of child nodes.
+         *
+         * The replacement is **atomic**: @p xml is parsed first, and the existing children are
+         * removed only once the parse has succeeded.
+         *
+         * @throws XmlException if @p xml is not well-formed. The node's existing children are
+         * left untouched.
+         *
+         * @note **Narrowing since ticket #2074** (SR-AUD-350, cause X-A). Before #2074 the
+         * children were removed *first* and the parse's status was discarded, so setting an
+         * invalid fragment emptied the node and returned normally -- silent, total content
+         * loss on public input. A caller who relied on that clearing side effect should call
+         * `RemoveAll()`. The empty string still clears, as it always did.
+         */
         virtual void setInnerXmlProperty(const std::string& xml);
 
         /** @return The XML markup representing this node and all its children. */

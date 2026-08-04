@@ -622,3 +622,63 @@ those terms and remediates nothing by itself.**
 
 Appended as tickets land, so the difference between what this review predicted and what
 implementation measured stays visible.
+
+### 20.1 #2074 landed exactly as §4.1 specified
+
+The repair is an ordering change plus the error path `XmlDocument::LoadXml` already used:
+parse into the scratch document **first**, throw a shaped `XmlException` on failure, clone
+every child **before** touching this node, and only then remove the old children and insert.
+The extra clone-first step is not in §4.1 and was decided while implementing: it means a
+failure inside `DeepClone` cannot leave the node stripped of its old content and missing its
+new content too.
+
+Measured before → after (`2073_probe1_before.log` → the same probe re-run):
+
+| Input | Before | After |
+|---|---|---|
+| `<keep/>` then `setInnerXml("<bad>")` | `innerXml ""`, **no exception** | `XmlException`, `innerXml "<keep/>"` |
+| `setInnerXml("<a/><b/>")` | `<a/><b/>` | **unchanged** |
+| `setInnerXml("")` | clears | **unchanged** |
+| `setInnerXml("plain text")`, `"a<b/>c"` | accepted | **unchanged** |
+
+**Mutation-checked.** Restoring the original ordering — `RemoveAllChildren()` before the parse
+— fails **exactly** `InvalidFragment_ThrowsAndKeepsTheExistingChildren` and
+`RepeatedFailuresLeaveTheNodeUsable`, and nothing else in the 394-test suite. A first attempt
+at the mutation (`if (false && Parse(...))`) was **discarded rather than reported**: `&&`
+short-circuits, so `Parse` was never called at all and three unrelated tests failed instead.
+A mutation that changes more than the guard proves nothing about the guard.
+
+### 20.2 #2075 — the ASan question §13 required is **answered, and the answer is a non-result**
+
+§4.2 flagged `a->InsertAfter(n, foreignRef)` dropping `n` as *"an ASan question, not a reading
+question"* and §13 made answering it a closure condition. Answered, with `XmlNode.cpp`,
+`XmlDocument.cpp`, `XmlElement.cpp` **and `vendor/tinyxml2/tinyxml2.cpp` compiled from source**
+into the probe (`build-probe/2075_probe1_asan.cpp`) — `Xml` is a `STATIC` component and the
+question lives exactly at the port/substrate boundary:
+
+**ASan, UBSan and LSan are all clean, before the repair, including over 200 consecutive drops**
+(`2075_probe1_before.log`). The dropped node is **allocated from the document's own node pool
+and freed with the document**, so it is an *orphan* — neither a leak, nor a dangling wrapper,
+nor a double free. The caller's `XmlNode*` stays valid and readable.
+
+That is a **measured non-result and it corrects this review's own suspicion.** The defect is
+therefore precisely the *silent acceptance*, not a memory-safety hazard, and the closure
+evidence is the behavioural test, not a sanitizer run. The instrumentation is proven live by a
+control heap-use-after-free in the same binary.
+
+**Four mutators, one guard.** `ThrowIfNotChildOf` joins the two guards the file already had.
+`ReplaceChild` checks **before** delegating to `InsertBefore`, because otherwise a foreign
+`oldChild` would leave `newChild` already spliced in when the removal threw — the very partial
+state #2074 exists to prevent, reproduced one function away.
+
+Measured after: all five rows of §4.2's table throw and both trees stay intact; the same four
+calls with a **correct** child are unchanged; a null `refChild` still means append/prepend; and
+the pre-existing cross-document and ancestry guards still fire.
+
+**Mutation-checked.** Emptying `ThrowIfNotChildOf` fails **exactly** the five ownership tests
+and nothing else in the 394-test suite.
+
+**Exception wording is this port's choice.** `"The node to be removed is not a child of this
+node."`, `"The reference node is not a child of this node."` and `"The node to be replaced is
+not a child of this node."` follow this file's existing `ArgumentException` style; .NET's exact
+text is not verifiable here and §16 already says so.

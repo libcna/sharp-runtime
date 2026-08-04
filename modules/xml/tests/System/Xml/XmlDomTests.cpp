@@ -724,3 +724,229 @@ TEST(XmlEntityTests, SetInnerTextProperty_Throws) {
     XmlEntity entity(&doc, "foo", "", "", "");
     EXPECT_THROW(entity.setInnerTextProperty("bar"), System::InvalidOperationException);
 }
+
+// ===========================================================================
+// Ticket #2074 -- InnerXml replacement must be atomic (SR-AUD-350, cause X-A;
+// docs/SystemXmlNamespaceReviewPlan.md §4.1).
+//
+// Before #2074 setInnerXmlProperty removed every child FIRST and then discarded
+// the parse's return status, so setting an invalid fragment emptied the node and
+// returned normally -- silent, total content loss on public input. Measured:
+// an element holding <keep/>, set to "<bad>", ended up with innerXml "" and no
+// exception. The correct ordering was already one call away: XmlDocument::LoadXml
+// parses the same text through the same substrate and throws.
+// ===========================================================================
+
+TEST(XmlNodeInnerXmlAtomicityTests, InvalidFragment_ThrowsAndKeepsTheExistingChildren) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    root->AppendChild(doc.CreateElement("keep"));
+    ASSERT_EQ(root->getInnerXmlProperty(), "<keep/>");
+
+    EXPECT_THROW(root->setInnerXmlProperty("<bad>"), XmlException);
+    EXPECT_EQ(root->getInnerXmlProperty(), "<keep/>")
+        << "an invalid fragment must not destroy the existing content";
+    EXPECT_TRUE(root->getHasChildNodesProperty());
+}
+
+TEST(XmlNodeInnerXmlAtomicityTests, InvalidFragment_MessageNamesTheParseError) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    try {
+        root->setInnerXmlProperty("<a></b>");
+        FAIL() << "expected a rejection";
+    } catch (const XmlException& e) {
+        const std::string message = e.getMessageProperty();
+        EXPECT_NE(message.find("InnerXml"), std::string::npos);
+        EXPECT_NE(message.find("parse error"), std::string::npos);
+    }
+}
+
+TEST(XmlNodeInnerXmlAtomicityTests, InvalidFragment_OnAnEmptyNode_ChangesNothing) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    EXPECT_THROW(root->setInnerXmlProperty("<bad>"), XmlException);
+    EXPECT_EQ(root->getInnerXmlProperty(), "");
+    EXPECT_FALSE(root->getHasChildNodesProperty());
+    // The rest of the document is untouched too.
+    EXPECT_EQ(doc.getOuterXmlProperty(), "<root/>");
+}
+
+TEST(XmlNodeInnerXmlAtomicityTests, ValidFragment_ReplacesAsBefore) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    root->AppendChild(doc.CreateElement("old"));
+    root->setInnerXmlProperty("<a/><b/>");
+    EXPECT_EQ(root->getInnerXmlProperty(), "<a/><b/>");
+}
+
+TEST(XmlNodeInnerXmlAtomicityTests, EmptyString_StillClears) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    root->AppendChild(doc.CreateElement("old"));
+    root->setInnerXmlProperty("");
+    EXPECT_EQ(root->getInnerXmlProperty(), "");
+    EXPECT_FALSE(root->getHasChildNodesProperty());
+}
+
+TEST(XmlNodeInnerXmlAtomicityTests, TextOnlyFragmentAndMixedContent_StillAccepted) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    root->setInnerXmlProperty("plain text");
+    EXPECT_EQ(root->getInnerXmlProperty(), "plain text");
+    root->setInnerXmlProperty("a<b/>c");
+    EXPECT_EQ(root->getInnerXmlProperty(), "a<b/>c");
+}
+
+TEST(XmlNodeInnerXmlAtomicityTests, RepeatedFailuresLeaveTheNodeUsable) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    root->AppendChild(doc.CreateElement("keep"));
+    for (int i = 0; i < 5; ++i)
+        EXPECT_THROW(root->setInnerXmlProperty("<bad>"), XmlException);
+    EXPECT_EQ(root->getInnerXmlProperty(), "<keep/>");
+    root->setInnerXmlProperty("<ok/>");
+    EXPECT_EQ(root->getInnerXmlProperty(), "<ok/>");
+}
+
+// ===========================================================================
+// Ticket #2075 -- a DOM mutator must not act on a node owned by another parent
+// (SR-AUD-351, cause X-B; docs/SystemXmlNamespaceReviewPlan.md §4.2).
+//
+// The finding names RemoveChild. Measured, FOUR public mutators were affected
+// and they failed in THREE different ways, with root -> {a, b} and b ->
+// {childOfB}:
+//
+//   a->RemoveChild(childOfB)     -> B's child was detached
+//   a->InsertBefore(n, childOfB) -> refChild silently ignored, n landed in a
+//   a->InsertAfter(n, childOfB)  -> n ended up NOWHERE
+//   a->ReplaceChild(n, childOfB) -> both wrongs at once
+//
+// The port already validated document identity and ancestry; parenthood was the
+// missing check.
+// ===========================================================================
+
+namespace {
+
+// root -> {a, b}; b -> {childOfB}. Returns the pieces a test needs to name.
+struct TwoParentFixture {
+    XmlDocument doc;
+    XmlElement* root = nullptr;
+    XmlElement* a = nullptr;
+    XmlElement* b = nullptr;
+    XmlElement* childOfB = nullptr;
+
+    TwoParentFixture() {
+        root = doc.CreateElement("root");
+        doc.AppendChild(root);
+        a = doc.CreateElement("a");
+        b = doc.CreateElement("b");
+        root->AppendChild(a);
+        root->AppendChild(b);
+        childOfB = doc.CreateElement("childOfB");
+        b->AppendChild(childOfB);
+    }
+
+    std::string Shape() const { return root->getInnerXmlProperty(); }
+};
+
+constexpr const char* kIntactShape = "<a/><b><childOfB/></b>";
+
+} // namespace
+
+TEST(XmlNodeOwnershipTests, RemoveChild_ForeignChild_ThrowsAndLeavesBothTreesIntact) {
+    TwoParentFixture f;
+    ASSERT_EQ(f.Shape(), kIntactShape);
+    EXPECT_THROW(f.a->RemoveChild(f.childOfB), System::ArgumentException);
+    EXPECT_EQ(f.Shape(), kIntactShape);
+}
+
+TEST(XmlNodeOwnershipTests, InsertBefore_ForeignReference_ThrowsAndInsertsNothing) {
+    TwoParentFixture f;
+    auto* n = f.doc.CreateElement("n");
+    EXPECT_THROW(f.a->InsertBefore(n, f.childOfB), System::ArgumentException);
+    EXPECT_EQ(f.Shape(), kIntactShape) << "n must not have landed inside a";
+}
+
+TEST(XmlNodeOwnershipTests, InsertAfter_ForeignReference_ThrowsInsteadOfDroppingTheNode) {
+    TwoParentFixture f;
+    auto* n = f.doc.CreateElement("n");
+    EXPECT_THROW(f.a->InsertAfter(n, f.childOfB), System::ArgumentException);
+    EXPECT_EQ(f.Shape(), kIntactShape);
+    // Before #2075 this call accepted silently and left n reachable from no
+    // tree at all. ASan and LSan proved that orphan is neither a leak nor a
+    // dangling wrapper -- the document's node pool frees it -- so the defect is
+    // the silent acceptance, and this is what closes it.
+    EXPECT_EQ(n->getNameProperty(), "n");
+}
+
+TEST(XmlNodeOwnershipTests, ReplaceChild_ForeignChild_ThrowsBeforeInsertingAnything) {
+    TwoParentFixture f;
+    auto* n = f.doc.CreateElement("n");
+    EXPECT_THROW(f.a->ReplaceChild(n, f.childOfB), System::ArgumentException);
+    EXPECT_EQ(f.Shape(), kIntactShape)
+        << "the check must run before InsertBefore, or the throw leaves n spliced in";
+}
+
+TEST(XmlNodeOwnershipTests, RemoveChild_ParentlessNode_Throws) {
+    TwoParentFixture f;
+    auto* orphan = f.doc.CreateElement("orphan");
+    EXPECT_THROW(f.root->RemoveChild(orphan), System::ArgumentException);
+    EXPECT_EQ(f.Shape(), kIntactShape);
+}
+
+TEST(XmlNodeOwnershipTests, TheSameFourCallsWithACorrectChildAreUnchanged) {
+    {
+        TwoParentFixture f;
+        f.b->RemoveChild(f.childOfB);
+        EXPECT_EQ(f.Shape(), "<a/><b/>");
+    }
+    {
+        TwoParentFixture f;
+        auto* n = f.doc.CreateElement("n");
+        f.b->InsertBefore(n, f.childOfB);
+        EXPECT_EQ(f.Shape(), "<a/><b><n/><childOfB/></b>");
+    }
+    {
+        TwoParentFixture f;
+        auto* n = f.doc.CreateElement("n");
+        f.b->InsertAfter(n, f.childOfB);
+        EXPECT_EQ(f.Shape(), "<a/><b><childOfB/><n/></b>");
+    }
+    {
+        TwoParentFixture f;
+        auto* n = f.doc.CreateElement("n");
+        f.b->ReplaceChild(n, f.childOfB);
+        EXPECT_EQ(f.Shape(), "<a/><b><n/></b>");
+    }
+}
+
+TEST(XmlNodeOwnershipTests, ANullReferenceNodeStillMeansAppendOrPrepend) {
+    TwoParentFixture f;
+    auto* n = f.doc.CreateElement("n");
+    f.a->InsertBefore(n, nullptr);
+    EXPECT_EQ(f.Shape(), "<a><n/></a><b><childOfB/></b>");
+
+    auto* m = f.doc.CreateElement("m");
+    f.a->InsertAfter(m, nullptr);
+    EXPECT_EQ(f.Shape(), "<a><m/><n/></a><b><childOfB/></b>");
+}
+
+// The pre-existing cross-document and ancestry guards must be unchanged, and
+// must still take precedence where both apply.
+TEST(XmlNodeOwnershipTests, TheCrossDocumentAndAncestryGuardsAreUnchanged) {
+    TwoParentFixture f;
+    XmlDocument other;
+    auto* foreignDoc = other.CreateElement("foreign");
+    EXPECT_THROW(f.a->AppendChild(foreignDoc), System::ArgumentException);
+    EXPECT_THROW(f.a->InsertBefore(foreignDoc, nullptr), System::ArgumentException);
+    EXPECT_THROW(f.childOfB->AppendChild(f.root), System::ArgumentException);
+    EXPECT_EQ(f.Shape(), kIntactShape);
+}
