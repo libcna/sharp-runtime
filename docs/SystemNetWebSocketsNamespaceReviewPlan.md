@@ -486,4 +486,51 @@ blocked ticket and a pin; and #2095's measured behaviour is pinned.
 
 ## 20. Implementation record
 
-Appended as tickets land.
+Appended as tickets land, so the difference between what this review predicted and what
+implementation measured stays visible.
+
+### 20.1 #2090 landed as §7.1–§7.5 specified, and the sharpest detail is where the size check sits
+
+All five checks run **before** any dependent bytes are read. The control-payload limit is
+tested on the **7-bit length field**, so a `len` of 126 or 127 on a control frame is rejected
+**without reading the extended-length bytes and without allocating anything** — which is what
+turns §7.5 from "a 256 MiB Ping is read into memory and echoed back as a Pong" into a two-byte
+rejection.
+
+The mask-key read and the unmasking loop were **deleted**, not left as dead code: a masked
+frame can no longer reach them, and leaving an unreachable unmasking path would invite exactly
+the "it handles masking, so masking must be allowed" misreading the defect came from.
+
+**+15 permanent regressions, add-only — not one existing test was updated.**
+`SharpRuntimeTests_Net_WebSockets` 24 → 39. Every case runs over a **real loopback socket**
+against a mock server thread, with blocking accept/read as the only synchronisation — **no
+sleeps**.
+
+**Five mutations**, each reverted from an exact backup: W1 (reserved bits) → 2 tests; W2
+(opcode domain) → 1; W3 (masked server frame) → 1; W4 (fragmented control frame) → 1; W5
+(oversized control payload) → 1.
+
+**One non-discriminating test was found and fixed rather than reported as a pass.** W5
+originally failed to discriminate: the oversized-control case sent only the two header bytes,
+so with the guard removed the parser read past the end, hit EOF, and threw
+`ConnectionClosedPrematurely` — also a `WebSocketException`. **A truncated frame cannot
+distinguish "rejected for being an oversized control frame" from "rejected for ending early."**
+The test now sends **complete** 200-byte control frames in both the 16-bit and 64-bit length
+forms. This is the fourth such correction in this batch (`SystemXmlNamespaceReviewPlan.md`
+§20.4, §20.6, §20.7): a mutation that fails to fail is a statement about the test.
+
+**Pins landed with it**, as §11 and #2088 require:
+
+- `ClientWebSocket`'s layout, via a **probe struct** — never a literal byte count, because its
+  members include `std::string`, `std::vector`, `std::optional` and `std::mutex` whose sizes
+  differ between libstdc++ and libc++ and the MinGW/Emscripten/Apple-Clang builds must keep
+  compiling;
+- **#2088's CCF-019 ownership pin**: a `static_assert` that `ClientWebSocket` is **not**
+  `enable_shared_from_this`, the same shape as #2066's, because a use-after-free is not a
+  behaviour that can be pinned behaviourally;
+- the **16 KiB handshake-response cap**, which §6.6 recorded as an existing positive and which
+  nothing covered.
+
+**Recorded as this port's choices** (§16): the exception identity — `WebSocketException` with
+the closest `WebSocketError` — and the decision to reject rather than ignore. Every *rule* is
+RFC 6455 cited as a **protocol** fact, not as .NET behaviour.

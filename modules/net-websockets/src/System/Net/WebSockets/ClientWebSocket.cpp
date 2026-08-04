@@ -292,6 +292,31 @@ namespace {
 
 } // namespace
 
+// Ticket #2090 -- frame-header validation. Until this landed, readFrame() decoded the header
+// and validated NOTHING in it, so a server the client had connected to could drive five
+// distinct protocol violations straight through the parser (docs/SystemNetWebSocketsNamespace
+// ReviewPlan.md §7.1-§7.5). Each check below rejects before any dependent bytes are read, so a
+// malformed frame never causes an allocation or a read sized by its own bad header.
+//
+// Every rule here is RFC 6455, cited as a PROTOCOL fact rather than as .NET behaviour: the
+// reference tree is absent, and these five are decidable from the wire format alone. The
+// exception identity -- WebSocketException with the closest WebSocketError -- is THIS PORT'S
+// CHOICE, recorded as such.
+namespace {
+
+    constexpr bool isControlOpcode(bytecs opcode) { return (opcode & 0x08) != 0; }
+
+    /// RFC 6455 §5.2: 0x0 continuation, 0x1 text, 0x2 binary, 0x8 close, 0x9 ping, 0xA pong.
+    /// Everything else (0x3-0x7, 0xB-0xF) is reserved and MUST fail the connection. Before
+    /// this, ReceiveAsync's switch routed every reserved opcode to `default:` and delivered it
+    /// to the caller as ordinary message data.
+    constexpr bool isDefinedOpcode(bytecs opcode) {
+        return opcode == 0x0 || opcode == 0x1 || opcode == 0x2 ||
+               opcode == 0x8 || opcode == 0x9 || opcode == 0xA;
+    }
+
+} // namespace
+
 ClientWebSocket::RawFrame ClientWebSocket::readFrame() {
     std::vector<bytecs> header;
     readExact(*socket_, header, 2);
@@ -300,6 +325,42 @@ ClientWebSocket::RawFrame ClientWebSocket::readFrame() {
     bytecs opcode = header[0] & 0x0F;
     bool masked = (header[1] & 0x80) != 0;
     uint64_t len = header[1] & 0x7F;
+
+    // RFC 6455 §5.2: RSV1/RSV2/RSV3 must be zero unless an extension that defines them was
+    // negotiated. This client negotiates none (permessage-deflate is out of scope), so any set
+    // reserved bit is a protocol error rather than something to ignore.
+    if ((header[0] & 0x70) != 0) {
+        throw WebSocketException(WebSocketError::HeaderError,
+                                  "The WebSocket frame sets a reserved bit, but no extension was negotiated.");
+    }
+
+    if (!isDefinedOpcode(opcode)) {
+        throw WebSocketException(WebSocketError::HeaderError,
+                                  "The WebSocket frame uses a reserved opcode.");
+    }
+
+    // RFC 6455 §5.1: a server MUST NOT mask the frames it sends, and a client that receives a
+    // masked frame MUST fail the connection. This port previously honoured the mask bit and
+    // unmasked the payload, accepting exactly what it is required to reject.
+    if (masked) {
+        throw WebSocketException(WebSocketError::HeaderError,
+                                  "The server sent a masked frame, which RFC 6455 forbids.");
+    }
+
+    // RFC 6455 §5.5: control frames MUST NOT be fragmented and MUST carry at most 125 bytes.
+    // The length check runs on the 7-bit field, BEFORE the extended-length bytes are read, so a
+    // 256 MiB "Ping" is rejected without ever being allocated -- it used to be read into memory
+    // and then echoed straight back to the sender as a Pong.
+    if (isControlOpcode(opcode)) {
+        if (!fin) {
+            throw WebSocketException(WebSocketError::HeaderError,
+                                      "A WebSocket control frame must not be fragmented.");
+        }
+        if (len > 125) {
+            throw WebSocketException(WebSocketError::HeaderError,
+                                      "A WebSocket control frame payload must not exceed 125 bytes.");
+        }
+    }
 
     if (len == 126) {
         std::vector<bytecs> ext;
@@ -326,22 +387,12 @@ ClientWebSocket::RawFrame ClientWebSocket::readFrame() {
                                   "The WebSocket frame payload length exceeds the maximum allowed size.");
     }
 
-    bytecs maskKey[4] = {0, 0, 0, 0};
-    if (masked) {
-        std::vector<bytecs> maskBuf;
-        readExact(*socket_, maskBuf, 4);
-        std::memcpy(maskKey, maskBuf.data(), 4);
-    }
-
+    // No masking key is read and no unmasking is performed: a masked server frame was rejected
+    // above, so by construction every frame reaching this point is unmasked.
     RawFrame result;
     result.fin = fin;
     result.opcode = opcode;
     readExact(*socket_, result.payload, static_cast<size_t>(len));
-    if (masked) {
-        for (size_t i = 0; i < result.payload.size(); ++i) {
-            result.payload[i] = static_cast<bytecs>(result.payload[i] ^ maskKey[i % 4]);
-        }
-    }
     return result;
 }
 
