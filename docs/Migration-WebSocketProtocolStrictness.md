@@ -130,7 +130,83 @@ mechanism that stops a second, quietly diverging copy of the rule from being wri
 
 ## 4. #2091 in detail
 
-Recorded when #2091 lands; see §5 of this note.
+Where #2090 validated the frame **header**, #2091 validates the frame **payload**. All of it is
+driven by the server the client connected to.
+
+### The close payload
+
+| Payload | Before | Now |
+|---|---|---|
+| 0 bytes | accepted, no status | **unchanged** |
+| 1 byte | **silently ignored**, reported as a clean close with no status | `WebSocketException` |
+| 2 bytes, valid code | accepted | **unchanged** |
+| 2 bytes, invalid code | accepted, cast straight to `WebSocketCloseStatus` | `WebSocketException` |
+| 2+ bytes, invalid UTF-8 reason | accepted | `WebSocketException` |
+
+**Accepted close codes** are `1000`–`1003`, `1007`–`1014` and `3000`–`4999`.
+
+**Rejected** are `0`–`999`, `1004` (reserved), `1005` and `1006` (defined for *local* reporting
+only — RFC 6455 §7.4.1 says each MUST NOT be set in a Close frame), `1015` (registered but
+likewise never on the wire), `1016`–`2999` (reserved and undefined) and `5000`+.
+
+`1005` is this port's `WebSocketCloseStatus::Empty`. That an enumerator exists locally does not
+make the value legal in a frame, which is exactly why it is rejected on the wire.
+
+Accepting `1012`–`1014` is **this port's choice**: they are registered under the procedure RFC
+6455 §7.4.2 delegates, so rejecting them would reject a conforming server, and the absent
+reference tree means .NET's own set cannot be consulted.
+
+Codes in `3000`–`4999` (and `1012`–`1014`) are legal but have **no enumerator** in
+`WebSocketCloseStatus` — in this port or in .NET, whose enum names the same subset. That is
+inherent to the enum's design and is **not** what this ticket repairs; what it repairs is codes
+that can *never* be valid reaching the public getter.
+
+### UTF-8
+
+RFC 6455 §8.1. A **close reason** is fully validated — control frames cannot be fragmented
+(#2090 enforces that), so a close reason always arrives whole. A **Text message** is validated
+when it arrives as one complete frame.
+
+**A fragmented Text message is deliberately NOT validated**, and this is a stated limit rather
+than an oversight: a scalar may legally straddle a fragment boundary, so per-frame validation
+would reject conforming input, and validating it properly needs either buffering the whole
+message or carrying incremental decoder state on the object — an **object-layout change**, which
+this compatible ticket does not make. The behaviour is pinned by a test so it cannot change
+silently.
+
+Rejected encodings include a lone surrogate, an overlong form, a truncated sequence and any
+scalar above U+10FFFF. **Binary** messages are not UTF-8 validated — §8.1 constrains Text only.
+
+Validation completes **before any byte is copied into the caller's buffer**, so a rejected
+message is never partially published.
+
+### The negotiated subprotocol
+
+`Sec-WebSocket-Protocol` in the upgrade response is now checked against the requested list. A
+value that was not requested — or *any* value when none was requested — fails the connect with a
+`WebSocketException`. Before this the server chose the client's `SubProtocol` freely.
+
+The comparison is `OrdinalIgnoreCase`, matching the duplicate check `AddSubProtocol` already
+performs on the same values. A server that supports none of the requested protocols and simply
+omits the header still connects successfully with no `SubProtocol`, as RFC 6455 §4.1 intends.
+
+Rejecting rather than ignoring is **this port's choice**: RFC 6455 §4.1 forbids the server from
+sending an unrequested subprotocol, but whether .NET rejects or silently ignores cannot be
+verified here. The server-supplied value is not echoed into the message.
+
+### Exception identity
+
+`WebSocketException` with `WebSocketError::Faulted` for a **payload** violation, deliberately
+distinct from #2090's `WebSocketError::HeaderError` for a **header** violation, so a caller can
+tell the two apart. `WebSocketError::UnsupportedProtocol` for the subprotocol response. All
+recorded as this port's choices.
+
+### One parser, not two
+
+The close payload was decoded in **two** places — `ReceiveAsync`'s `case 0x8` and `CloseAsync`'s
+close-handshake loop — by two copies of the same unvalidated block. Both now go through one
+function. Two structurally identical parsers of remote input are exactly how one ends up fixed
+and the other does not.
 
 ---
 

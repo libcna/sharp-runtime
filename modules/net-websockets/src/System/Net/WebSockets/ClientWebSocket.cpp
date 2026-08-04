@@ -226,8 +226,38 @@ void ClientWebSocket::performHandshake(const System::Uri& uri) {
         throw WebSocketException(WebSocketError::HeaderError, "Sec-WebSocket-Accept did not match the expected value.");
     }
 
+    // Ticket #2091 / plan §7.10. This used to store whatever the server named, so the server
+    // chose the client's SubProtocol freely -- even when the client had requested none at all.
+    // RFC 6455 §4.1 forbids that: the server "MUST NOT" return a subprotocol the client did not
+    // request, and returning one when none was requested is an invalid response.
+    //
+    // Rejecting rather than ignoring is THIS PORT'S CHOICE (plan §16): the reference tree is
+    // absent, so whether .NET rejects or silently ignores cannot be verified here. Rejecting is
+    // chosen because the alternative leaves getSubProtocolProperty() reporting a protocol the
+    // application never agreed to speak.
+    //
+    // The comparison is OrdinalIgnoreCase, matching the duplicate check AddSubProtocol already
+    // performs on the same values, so the two ends of the same list agree about identity.
     auto protoIt = headers.find("sec-websocket-protocol");
     if (protoIt != headers.end()) {
+        const auto& requested = options_.getRequestedSubProtocolsProperty();
+        bool wasRequested = false;
+        for (const auto& candidate : requested) {
+            if (System::String::Equals(candidate, protoIt->second,
+                                       System::StringComparison::OrdinalIgnoreCase)) {
+                wasRequested = true;
+                break;
+            }
+        }
+        if (!wasRequested) {
+            // The server-supplied value is deliberately not echoed into the message: it is
+            // remote text and exception messages get logged.
+            throw WebSocketException(
+                WebSocketError::UnsupportedProtocol,
+                requested.empty()
+                    ? "The server returned a WebSocket subprotocol although none was requested."
+                    : "The server returned a WebSocket subprotocol that was not requested.");
+        }
         subProtocol_ = protoIt->second;
     }
 
@@ -341,6 +371,116 @@ namespace {
     constexpr bool isDefinedOpcode(bytecs opcode) {
         return opcode == 0x0 || opcode == 0x1 || opcode == 0x2 ||
                opcode == 0x8 || opcode == 0x9 || opcode == 0xA;
+    }
+
+    // --- Ticket #2091 ------------------------------------------------------------------------
+    // Where #2090 validated the frame HEADER, these validate the frame's PAYLOAD. Both are
+    // driven entirely by the server the client connected to.
+
+    /// Strict UTF-8 validity, rejecting overlong encodings, surrogate encodings and scalars
+    /// above U+10FFFF, as RFC 6455 §8.1 requires for a Text payload and a close reason.
+    ///
+    /// Transcribed from this repository's own already-correct implementation --
+    /// `System::Net::Security::SslApplicationProtocol::isValidUtf8` -- rather than invented,
+    /// because that one was written against .NET's ExceptionFallback decoder and the reference
+    /// tree is absent. It is copied rather than shared because that one is a *private member*
+    /// of an unrelated class in a different (INTERFACE) component; extracting it would be a
+    /// refactor of a third module, and this repository already holds several independent UTF-8
+    /// decoders (`UTF8Encoding`, `Utf8JsonWriter`, `BinaryReader`, `IdnMapping`). Consolidating
+    /// them is a real but separate concern, recorded in the plan rather than done here.
+    [[nodiscard]] bool isValidUtf8(const std::vector<bytecs>& bytes, size_t from) {
+        size_t i = from, n = bytes.size();
+        while (i < n) {
+            unsigned c0 = static_cast<unsigned char>(bytes[i]);
+            size_t extra;
+            unsigned minCp;
+            if (c0 < 0x80) { ++i; continue; }
+            else if ((c0 & 0xE0) == 0xC0) { extra = 1; minCp = 0x80; }
+            else if ((c0 & 0xF0) == 0xE0) { extra = 2; minCp = 0x800; }
+            else if ((c0 & 0xF8) == 0xF0) { extra = 3; minCp = 0x10000; }
+            else return false;
+            if (i + extra >= n) return false;
+            unsigned cp = c0 & (0xFFu >> (extra + 2));
+            for (size_t k = 1; k <= extra; ++k) {
+                unsigned cb = static_cast<unsigned char>(bytes[i + k]);
+                if ((cb & 0xC0) != 0x80) return false;
+                cp = (cp << 6) | (cb & 0x3F);
+            }
+            if (cp < minCp || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return false;
+            i += extra + 1;
+        }
+        return true;
+    }
+
+    /// RFC 6455 §7.4: which close codes may legitimately appear in a Close frame on the wire.
+    ///
+    /// * 1000-1003 and 1007-1011 are defined by §7.4.1 and may be sent.
+    /// * 1004 is reserved, and 1005 / 1006 are defined for *local* reporting only -- §7.4.1
+    ///   says each of the three MUST NOT be set in a Close frame. 1005 is this port's
+    ///   `WebSocketCloseStatus::Empty`, which is exactly why it must be rejected on the wire:
+    ///   an enumerator existing locally does not make the value legal in a frame.
+    /// * 1012-1014 are registered with IANA under the procedure §7.4.2 delegates ("reserved for
+    ///   definition by this protocol, its future revisions, and extensions specified in a
+    ///   permanent and readily available public specification"), so they are ACCEPTED. This is
+    ///   THIS PORT'S CHOICE, taken deliberately: rejecting them would reject a conforming
+    ///   server, and the reference tree is absent so .NET's own set cannot be consulted.
+    /// * 1015 is registered but §7.4.1 likewise says it MUST NOT appear in a frame.
+    /// * 1016-2999 are reserved and undefined; 3000-4999 are delegated by §7.4.2 to IANA
+    ///   registration and private use respectively, and are ACCEPTED.
+    ///
+    /// Codes in 3000-4999 (and 1012-1014) are legal but have no enumerator in
+    /// `WebSocketCloseStatus` -- in this port or in .NET, whose enum names the same subset. That
+    /// is inherent to the enum's design and is NOT what this ticket repairs; what it repairs is
+    /// codes that can never be valid reaching the public getter.
+    [[nodiscard]] constexpr bool isValidReceivedCloseCode(uint16_t code) {
+        return (code >= 1000 && code <= 1003)
+            || (code >= 1007 && code <= 1014)
+            || (code >= 3000 && code <= 4999);
+    }
+
+} // namespace
+
+// Ticket #2091. Before this, the Close payload was decoded IN TWO PLACES -- ReceiveAsync's
+// `case 0x8` and CloseAsync's close-handshake loop -- by two copies of the same
+// `if (payload.size() >= 2)` block, and neither validated anything. Routing both through one
+// function is half the repair: two structurally identical parsers of remote input are exactly
+// how one of them ends up fixed and the other does not.
+namespace {
+
+    void parseClosePayload(const std::vector<bytecs>& payload,
+                           std::optional<WebSocketCloseStatus>& status,
+                           std::optional<std::string>& description) {
+        status.reset();
+        description.reset();
+
+        // RFC 6455 §5.5.1: a Close frame carries either no payload, or a 2-byte status code
+        // optionally followed by a reason. A 1-byte payload is a protocol error. It used to be
+        // silently ignored by the `>= 2` guard, which reported a CLEAN close with no status.
+        if (payload.empty()) {
+            return;
+        }
+        if (payload.size() == 1) {
+            throw WebSocketException(WebSocketError::Faulted,
+                                      "A WebSocket close payload must be empty or at least two bytes.");
+        }
+
+        const uint16_t code = static_cast<uint16_t>((static_cast<uint16_t>(payload[0]) << 8) | payload[1]);
+        if (!isValidReceivedCloseCode(code)) {
+            throw WebSocketException(WebSocketError::Faulted,
+                                      "The WebSocket close frame carries a status code that RFC 6455 "
+                                      "does not permit on the wire.");
+        }
+        status = static_cast<WebSocketCloseStatus>(code);
+
+        if (payload.size() > 2) {
+            // RFC 6455 §5.5.1: the reason is UTF-8 text. The whole reason is validated before any
+            // of it is published, so a caller never observes a partially decoded reason.
+            if (!isValidUtf8(payload, 2)) {
+                throw WebSocketException(WebSocketError::Faulted,
+                                          "The WebSocket close reason is not valid UTF-8.");
+            }
+            description = std::string(payload.begin() + 2, payload.end());
+        }
     }
 
 } // namespace
@@ -485,13 +625,9 @@ ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs c
                 case 0x8: { // Close
                     std::optional<WebSocketCloseStatus> receivedStatus;
                     std::optional<std::string> receivedDescription;
-                    if (frame.payload.size() >= 2) {
-                        uint16_t code = (static_cast<uint16_t>(frame.payload[0]) << 8) | frame.payload[1];
-                        receivedStatus = static_cast<WebSocketCloseStatus>(code);
-                        if (frame.payload.size() > 2) {
-                            receivedDescription = std::string(frame.payload.begin() + 2, frame.payload.end());
-                        }
-                    }
+                    // Ticket #2091. Throws before closeStatus_/state_ are touched, so a
+                    // malformed close frame cannot leave the socket reporting a clean close.
+                    parseClosePayload(frame.payload, receivedStatus, receivedDescription);
                     closeStatus_ = receivedStatus;
                     closeStatusDescription_ = receivedDescription;
                     state_ = state_ == WebSocketState::CloseSent ? WebSocketState::Closed : WebSocketState::CloseReceived;
@@ -501,6 +637,25 @@ ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs c
                     WebSocketMessageType type =
                         frame.opcode == 0x0 ? fragmentType_ : (frame.opcode == 0x1 ? WebSocketMessageType::Text : WebSocketMessageType::Binary);
                     if (frame.opcode != 0x0) fragmentType_ = type;
+
+                    // Ticket #2091 / RFC 6455 §8.1: a Text message must be valid UTF-8.
+                    //
+                    // SCOPE, stated precisely because the limit is real: this validates a Text
+                    // message that arrives as ONE COMPLETE FRAME (fin && opcode 0x1). A
+                    // FRAGMENTED Text message is NOT validated, because a scalar may legally
+                    // straddle a fragment boundary, so per-frame validation would reject
+                    // conforming input. Validating it correctly needs either buffering the whole
+                    // message or carrying incremental decoder state on the object -- an
+                    // OBJECT-LAYOUT CHANGE, which this ticket is compatible precisely because it
+                    // does not make (plan §10/§11, pinned by the layout static_assert). The gap
+                    // is recorded in the plan rather than closed by a check that would be wrong.
+                    //
+                    // The whole frame is validated BEFORE any byte is copied to the caller, so a
+                    // rejected message is never partially published.
+                    if (frame.fin && frame.opcode == 0x1 && !isValidUtf8(frame.payload, 0)) {
+                        throw WebSocketException(WebSocketError::Faulted,
+                                                  "The WebSocket text message is not valid UTF-8.");
+                    }
 
                     if (frame.payload.size() <= static_cast<size_t>(count)) {
                         std::memcpy(buffer.data() + offset, frame.payload.data(), frame.payload.size());
@@ -548,13 +703,15 @@ ClientWebSocket::CloseAsync(WebSocketCloseStatus closeStatus, const std::optiona
             while (state_ != WebSocketState::Closed) {
                 RawFrame frame = readFrame();
                 if (frame.opcode == 0x8) {
-                    if (frame.payload.size() >= 2) {
-                        uint16_t code = (static_cast<uint16_t>(frame.payload[0]) << 8) | frame.payload[1];
-                        closeStatus_ = static_cast<WebSocketCloseStatus>(code);
-                        if (frame.payload.size() > 2) {
-                            closeStatusDescription_ = std::string(frame.payload.begin() + 2, frame.payload.end());
-                        }
-                    }
+                    // Ticket #2091: the same parser as ReceiveAsync's, not a second copy of it.
+                    // This site had an identical unvalidated `>= 2` block, so a malformed close
+                    // frame arriving during the close handshake was accepted here even after the
+                    // receive path had been repaired.
+                    std::optional<WebSocketCloseStatus> receivedStatus;
+                    std::optional<std::string> receivedDescription;
+                    parseClosePayload(frame.payload, receivedStatus, receivedDescription);
+                    closeStatus_ = receivedStatus;
+                    closeStatusDescription_ = receivedDescription;
                     state_ = WebSocketState::Closed;
                 }
                 // Any other frame received while waiting for the close handshake is discarded.

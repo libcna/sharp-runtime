@@ -57,3 +57,44 @@ could not be exercised without local sockets.
 
 SR-AUD-247, SR-AUD-248, SR-AUD-251, and SR-AUD-252 are confirmed at this
 implementation boundary. No source or test was changed.
+
+---
+
+## Post-audit note — ticket #2091 (2026-08-04), no `SR-AUD-*` identifier
+
+Appended, not rewritten. **This file's four payload-validation defects carry NO audit
+identifier**: SR-AUD-251 is this report's only finding and concerns cancellation, and corrected
+premise 6.5 of `docs/SystemNetWebSocketsNamespaceReviewPlan.md` records why — **the frame parser
+was entirely unaudited**. Audit numbering stays frozen at 364.
+
+Repaired by #2091, all four reproduced first
+(`build-probe/2091_probe1_before.log`) and closed after (`..._after.log`):
+
+1. a **1-byte close payload was silently ignored** (the guard was `payload.size() >= 2`) and
+   reported as a **clean close** with no status;
+2. **any** 16-bit value was cast straight to `WebSocketCloseStatus`, so 0, 999, 1004, 1005, 1006,
+   1015 and 5000 all reached the public `getCloseStatusProperty()`;
+3. Text payloads and close reasons were **never UTF-8 validated**;
+4. the response's `Sec-WebSocket-Protocol` was stored unchecked, so the server chose the client's
+   `SubProtocol` freely — even when the client had requested none.
+
+**Two close parsers existed, not one.** `ReceiveAsync`'s `case 0x8` and `CloseAsync`'s
+close-handshake loop each had their own copy of the same unvalidated block; repairing only the
+receive path would have left the close handshake accepting malformed frames. Both now call one
+`parseClosePayload`, and mutation N1b fails a test at **each** site.
+
+**Premise corrected:** plan §7.7 says the getter "can return an enumerator that does not exist".
+Half right — codes 3000–4999 are legal on the wire and have no enumerator in this port *or* in
+.NET, whose enum names the same subset. That is inherent to the enum's design. What #2091 closes
+is codes that can *never* be valid reaching the getter.
+
+**Stated limit, pinned by a test:** a **fragmented** Text message is deliberately not UTF-8
+validated, because a scalar may straddle a fragment boundary and validating properly needs
+incremental decoder state on the object — an object-layout change this compatible ticket does not
+make.
+
+**Recorded, not changed:** `sendCloseFrame` does not validate a *caller*-supplied close code or
+reason, so an application can still send what this client would reject on receipt. A caller-side
+door, outside this ticket's remote-input subject.
+
+**SR-AUD-251 remains confirmed** and blocked as #2093. No change here touched cancellation.

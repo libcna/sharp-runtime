@@ -597,3 +597,89 @@ heap-buffer-overflow proving the instrumentation was live (`build-probe/2089_pro
 No signature, member, base-class, virtual, vtable, object-layout or exception-specification
 change. Migration note: `docs/Migration-WebSocketProtocolStrictness.md` (which §12 required when
 the first of #2089–#2091 landed, and which #2090 had not yet created).
+
+### 20.3 #2091 landed, and its sharpest result is a mutation that FAILED to fail
+
+All four defects reproduced against `0527b35` before the repair
+(`build-probe/2091_probe1_before.log`) and are closed after
+(`build-probe/2091_probe1_after.log`): a 1-byte close payload accepted and reported as a **clean
+close**; **every one** of 0, 999, 1004, 1005, 1006, 1015 and 5000 reaching the public
+`getCloseStatusProperty()`; invalid UTF-8 accepted in both a close reason and a Text payload; and
+a `Sec-WebSocket-Protocol` response accepted both when it did not match the request and when
+**nothing had been requested at all**.
+
+**Two close parsers existed, not one.** §7.6 describes the `payload.size() >= 2` guard as if it
+were one site. Measured, `ReceiveAsync`'s `case 0x8` and `CloseAsync`'s close-handshake loop each
+had their **own copy** of the same unvalidated block. Repairing only the receive path — which is
+the one §7.6 and §7.7 describe — would have left a malformed close frame accepted during the
+close handshake. Both now call one `parseClosePayload`, and mutation N1b proves both are
+exercised: it fails `AOneBytePayloadIsRejected` **and**
+`TheCloseHandshakeLoopValidatesTheSamePayload`.
+
+**A mutation that failed to fail, found and corrected rather than reported as a pass.** The first
+form of N1 simply deleted the `payload.size() == 1` guard. Every test still passed — but for the
+wrong reason: with the guard gone, `payload[1]` is an **out-of-bounds read** on a one-element
+vector, and the garbage code it produced happened to be invalid, so the *code-domain* check threw
+and the test saw its expected exception. A mutation that introduces undefined behaviour cannot
+discriminate the guard it was aimed at. N1b instead restores the **original** defect —
+`if (payload.size() < 2) return;`, the pre-#2091 `>= 2` guard — and fails exactly the two tests
+above. This is the fifth such correction in the programme (`SystemXmlNamespaceReviewPlan.md`
+§20.4, §20.6, §20.7 and this plan's §20.1) and the first where the false pass came from **UB in
+the mutant** rather than from a truncated fixture.
+
+**The close-code domain, and what is deliberately NOT repaired.** Accepted: 1000–1003, 1007–1014,
+3000–4999. Rejected: 0–999, 1004, 1005, 1006, 1015, 1016–2999, 5000+. §7.7's framing —
+"`getCloseStatusProperty()` can return an enumerator that does not exist" — is **half right and
+worth correcting**: codes in 3000–4999 are perfectly legal on the wire and have **no enumerator**
+in `WebSocketCloseStatus`, in this port *or* in .NET, whose enum names the same subset. Returning
+an unnamed enumerator for those is inherent to the enum's design, not a defect. What #2091 closes
+is codes that can **never** be valid reaching the getter. Accepting 1012–1014 is **this port's
+choice**, taken because they are registered under the procedure RFC 6455 §7.4.2 delegates and
+rejecting them would reject a conforming server; 1005 is rejected on the wire even though it is
+this port's `Empty` enumerator, because a local enumerator does not make a value legal in a frame.
+
+**The UTF-8 limit is stated, not hidden.** A close reason is validated completely (control frames
+cannot be fragmented, which #2090 now enforces). A Text message is validated when it arrives as
+**one complete frame**. A **fragmented** Text message is deliberately not validated: a scalar may
+legally straddle a fragment boundary, so per-frame validation would reject conforming input, and
+doing it correctly needs incremental decoder state on the object — an **object-layout change**
+this compatible ticket does not make, and one the layout `static_assert` from #2090 would reject.
+The gap is **pinned by a test** so it cannot change silently. The validator is transcribed from
+this repository's own already-correct `SslApplicationProtocol::isValidUtf8` rather than invented;
+it is copied rather than shared because that one is a *private member* of an unrelated class in a
+different INTERFACE component, and the repository already holds several independent UTF-8
+decoders (`UTF8Encoding`, `Utf8JsonWriter`, `BinaryReader`, `IdnMapping`) — consolidating them is
+a real but separate concern, recorded here and not done under cover of this ticket.
+
+**Exception identity, recorded as this port's choice** (§16): `WebSocketError::Faulted` for a
+**payload** violation, deliberately distinct from #2090's `HeaderError` for a **header**
+violation so a caller can tell them apart, and `UnsupportedProtocol` for the subprotocol
+response. Rejecting an unrequested subprotocol rather than ignoring it is likewise this port's
+choice, taken from RFC 6455 §4.1; the server-supplied value is not echoed into the message.
+
+**+23 permanent regressions, add-only — not one existing test was updated.**
+`SharpRuntimeTests_Net_WebSockets` 55 → **78**. Every wire case runs over a real loopback socket
+with blocking accept/read as the only synchronisation — no sleeps.
+
+**Four mutations**, each reverted from an exact backup with `git diff --stat` identical on both
+sides and no marker surviving: N1b (original close-length guard) → 2; N2 (close-code domain
+always valid) → 3; N3 (UTF-8 validator always true) → 4; N4 (subprotocol response accepted
+unconditionally) → 2. No unrelated test moved in any of the four.
+
+**Sanitizers**: ASan/UBSan/LSan clean over the whole defect matrix with `ClientWebSocket.cpp`
+compiled **from source** into the probe — verified by `nm`, which shows `performHandshake` and
+`readFrame` as text symbols in the probe binary rather than resolved from the STATIC archive
+(`build-probe/2091_probe1_asan.log`). Instrumentation liveness was demonstrated by the control
+heap-buffer-overflow built with the identical script and flags in §20.2.
+
+**Interaction with #2089 and #2090 is asserted, not assumed.** #2091 edits `performHandshake`, so
+#2089's URI door is re-asserted; it edits `readFrame`'s caller, so #2090's oversized-control-frame
+rejection is re-asserted. Both are permanent tests in the #2091 suite.
+
+No signature, member, base-class, virtual, vtable, object-layout or exception-specification
+change. Migration note: `docs/Migration-WebSocketProtocolStrictness.md` §4.
+
+**Recorded, not changed:** `sendCloseFrame` does **not** validate the code or reason a *caller*
+supplies, so an application can still send a close frame this client would reject on receipt.
+That is a caller-side door outside this ticket's acceptance criteria and outside §7's remote-input
+subject; it is recorded here rather than repaired under cover of a received-payload ticket.
