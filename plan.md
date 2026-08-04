@@ -1,5 +1,46 @@
 # Sharp Runtime plan
 
+*Last verified: 2026-08-04 — branch `claude/remediation-batch-1804-namespace-b1yjh5`,
+fast-forwarded along existing history to the clean tip `13917c2` and developed from there.
+**Not pushed; no push was requested during this batch.** No merge, rebase, tag, PR, force-push,
+amend or history rewrite; all six new commits intentionally unsigned
+(`git -c commit.gpgsign=false`), authored and committed as `Claude <noreply@anthropic.com>`.
+The batch completed **#2100** — which repaired **every** `RandomAccess` argument domain rather
+than the two SR-AUD-340's index summary names, because the **owning per-file report is broader
+than the summary** and already named null buffers, negative lengths, read-only descriptors,
+non-seekable handles and write-zero-progress — and **#2107**, the `HttpClientDescriptorLeakTests`
+descriptor instrument, whose defect turned out to run in **both** directions: a lagging server
+thread produces **−1** (the reported symptom) from an inflated **baseline** and **+1**, *a false
+leak report*, from an inflated final sample, so the ticket's stated root cause named only **half**
+the fix. It then **measured #2098's layout gate** instead of accepting it, which **refuted three
+of the plan's own premises** — `TextWriter::Close()` **does** exist, so no vtable slot is needed;
+option (a) is layout-**neutral** for **four of five** types because the flag lands in existing tail
+padding; and `UnmanagedMemoryStream` **already has `isOpen_`** — leaving a decision **one type
+wide** (`StringWriter`, 384 → 392) against option (b)'s **six**, with the exact approval sentence
+recorded as **Approval IO-1** and the compatible half split out and shipped as **#2108**. It
+**reconciled the CCF numbering policy** (#2109): *"the numbering is closed"* is scoped to
+namespace-local causes, not a global freeze, proven from the same document that instructs
+*"Mint CCF-021 when `net-http-headers` is reviewed"* — so the policy obstacle is gone, **CCF-022
+is still not minted**, and the remaining question (who may mint, and whether to mint a family two
+of whose six sites are blocked) is a bounded decision with three options and a recommendation.
+Finally it **re-derived the next review unit by measurement** and performed the
+**`modules/text-json` namespace review (#2110)** —
+`docs/SystemTextJsonNamespaceReviewPlan.md`, 20 sections, the twelfth in the #1950 series —
+correcting **four** of that module's seven findings and finding **two remotely-triggerable
+post-audit defects that no finding names**: a `std::` exception escaping **four** public parse
+doors on an eight-character number literal, and an embedded NUL **silently truncating** a
+document, proven by a space control that is rejected. Both shipped as **#2111** and **#2112**.
+**Two findings moved `confirmed → remediated`**: SR-AUD-340 (#2100) and SR-AUD-344 (#2108). Audit
+**139 remediated / 225 confirmed / 364 total**, of which **49** carry `confirmed (design-complete)`;
+**no `SR-AUD-*` identifier was created — numbering stays frozen at 364**, and **no CCF was minted**.
+Gate **15,967 tests across 37 executables: 15,960 passing, 1 skipped, 6 failing** for the same two
+re-measured causes. Graph **41 / 91**, seams **2 / 18**, negative fixtures **11 / 94**. Selective
+components passed in **748s** at a verified peak of **2** `cc1plus`. **#1962 and #1773 remain
+blocked.** The prior header stack is retained below.*
+
+---
+
+
 *Last verified: 2026-08-04 — branch `feature/remediation-batch-xml-compatible-websockets-review`,
 cut from the clean tip `e1cc8c3` and **not pushed; no push was requested during this batch**. No
 merge, rebase, tag, PR, force-push, amend or history rewrite; all eight new commits intentionally

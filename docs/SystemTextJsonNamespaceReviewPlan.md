@@ -538,7 +538,7 @@ implementation measured stays visible.
 ### 20.1 #2111 and #2112 landed together — four doors each, and a fourth door found by reading
 
 Both are post-audit defects with **no `SR-AUD-*` identifier**, so the audit index is unchanged at
-**138 remediated / 226 confirmed / 364 total**.
+**139 remediated / 225 confirmed / 364 total**.
 
 **#2111 had a door the probe never reached.** §7.1 measured three leaking doors —
 `JsonDocument::Parse`, `JsonNode::Parse` and `JsonSerializer::Deserialize`. A grep for

@@ -3,6 +3,202 @@
 
 # NEXT.md
 
+*Last verified: 2026-08-04. Branch `claude/remediation-batch-1804-namespace-b1yjh5`, fast-forwarded
+along existing history to the clean tip `13917c2` and developed from there. **Not pushed — no push
+was requested during this batch.** No merge, rebase, tag, force-push, PR, publication, amend or
+history rewrite; all six commits unsigned (`git -c commit.gpgsign=false`, author and committer
+`Claude <noreply@anthropic.com>`) because this environment has no usable private signing key. The
+batch completed **#2100** (RandomAccess argument domain), **#2107** (the descriptor instrument),
+the **#2098 layout measurement and approval package** plus its compatible split **#2108**, the
+**CCF numbering-policy reconciliation** (#2109), the **`modules/text-json` namespace review**
+(#2110, `docs/SystemTextJsonNamespaceReviewPlan.md`, 20 sections) and **two** of the compatible
+tickets that review created, **#2111** and **#2112**. **Two findings moved `confirmed →
+remediated`** (SR-AUD-340, SR-AUD-344). Audit **139 remediated / 225 confirmed / 364 total**, of
+which **49** carry `confirmed (design-complete)`; **no `SR-AUD-*` identifier was created —
+numbering stays frozen at 364**, and **no CCF was minted**. **Nine premises were corrected by
+measurement**, six of which changed what shipped, and **three non-discriminating checks were caught
+and fixed rather than reported** — including a **second stale-binary false pass** and an **ASan
+control that did not fire**. Gate **15,967 tests across 37 executables: 15,960 passing, 1 skipped,
+6 failing** for the same two re-measured causes as before. Graph **41 / 91**, seams **2 / 18**,
+negative fixtures **11 / 94**. Selective components **passed, 748s, peak 2 `cc1plus` verified
+across ~62,000 samples**. **Doxygen and `ccache` are both absent** and were NOT run; `/rv` is
+absent. **#1962 and #1773 remain blocked**; **CCF-012 and CCF-019 were NOT marked closed, and
+CCF-021 and CCF-022 were NOT minted.** The prior header stack is retained below.*
+
+---
+
+## Batch record — #2100, #2107, #2098's approval package, #2108, CCF-022 policy, the Text.Json review, #2111 and #2112
+
+### What shipped
+
+| # | Subject | Findings | Result |
+|---|---|---|---|
+| **#2100** | every `RandomAccess` argument domain, not the two named | SR-AUD-340 | **done**, `remediated` |
+| **#2107** | the `HttpClientDescriptorLeakTests` descriptor instrument | post-audit | **done** |
+| **#2098** | measured layout table + **Approval IO-1** | SR-AUD-337, 343 | **blocked**, design complete |
+| **#2108** | `UnmanagedMemoryStream`'s closed state — #2098's free half | SR-AUD-344 | **done**, `remediated` |
+| **#2109** | CCF numbering policy reconciled; CCF-022 mint filed as a decision | — | **needs_user** |
+| **#2110** | the `modules/text-json` namespace review | 7 open | **done** — plan + 11 tickets |
+| **#2111** | a `std::` exception escaping four parse doors | post-audit | **done** |
+| **#2112** | an embedded NUL silently truncating a document | post-audit | **done** |
+
+### The corrected premises that changed what shipped
+
+1. **#2100 — the OWNING PER-FILE REPORT IS BROADER THAN THE FINDINGS-INDEX SUMMARY.** The summary
+   names a negative `Write` count and `GetLength(-1)`. The report already named **pointer, count
+   and offset** validation, **null buffers**, negative **lengths**, **read-only descriptors**,
+   **non-seekable handles** and **write-zero-progress**. Reading the report rather than the
+   summary is what made the repair the whole class instead of two members.
+2. **#2100 — `GetLength` is wider than "an invalid descriptor".** A perfectly **valid pipe**
+   returned `-1` too, because `lseek` fails with `ESPIPE` and all three results were discarded.
+   And the **Windows branch already threw** — the sentinel was a POSIX-only defect.
+3. **#2107 — the instrument was defective in BOTH directions and the ticket named ONE.** Injecting
+   a server-thread delay makes it deterministic: lag on the **warm-up** connection → delta **−1**
+   (the symptom seen in the wild); lag on the **last** → delta **+1**, **a false leak report**,
+   which is the more dangerous direction and was never recorded.
+4. **#2107 — the ticket's root cause named only HALF the fix.** Joining before the final sample
+   removes the `+1`, but the `−1` **survives it**, because that direction corrupts the *baseline*.
+   A repair that only moved the `join()` would have left the reported symptom in place.
+5. **#2098 — three premises in plan §7.1/§11 are wrong, and each narrows the decision.**
+   `TextWriter::Close()` **does exist** (`TextWriter.hpp:107`), so **no vtable slot is needed**;
+   option (a) is layout-**neutral** for **four of five** types because the flag lands in existing
+   tail padding; and only **four** leaves need a flag, because **`UnmanagedMemoryStream` already
+   has `isOpen_`**. Option (a) costs **exactly one type eight bytes**; option (b) changes **six**.
+6. **#2110 — four of `text-json`'s seven findings needed correcting.** SR-AUD-324 is **not a
+   use-after-free** (`JsonElement` holds an **owning** aliasing `shared_ptr`, so it reads live
+   storage, and the door its own file owns already throws); SR-AUD-326 is **halved** (two of four
+   options *do* work); SR-AUD-328 is **largely refuted** (`JsonElement` already rejects every
+   boundary — only the `Nodes` half survives); SR-AUD-329 is **wider** (the two `Encode` overloads
+   **disagree**).
+7. **#2111 — the probe found three leaking doors; a grep found a FOURTH.**
+   `Utf8JsonWriter::WriteRawValue` validates through the same parser with the same
+   `parse_error`-only catch. Ticketed scope came from the probe, implementation scope from the
+   grep.
+8. **#2112's control is what makes it a finding.** `{"a":1}` NUL `{"b":2}` was **accepted** and
+   truncated; the identical document with a **space** was always **rejected**. The control is now
+   a permanent test, so if it ever passes the guard is knowingly measuring nothing.
+9. **A measured positive that refutes the batch's leading suspicion for a JSON parser:**
+   `JsonDocument::Parse` has **no stack-overflow exposure at 100,000 nesting levels**.
+
+### The three checks that did not discriminate, and were fixed rather than reported
+
+- **A SECOND stale-binary false pass, and this one fired in the harness itself.** #2100's first
+  mutation script restored its backup with `cp -p`, which **preserves the backup's mtime**; the
+  restored source then looked *older* than the object file built from the mutant, the build
+  skipped it, and the run reported the **mutant's** result as the repaired tree's. The harness now
+  never preserves mtime on restore **and** verifies the binary was actually rebuilt. This is the
+  second consecutive batch in which this trap has fired — it is a property of the harness, not of
+  a ticket.
+- **An ASan control that did not fire.** #2100's first control read into an undersized heap buffer
+  **from a freshly truncated file**, so `pread` transferred nothing, nothing overflowed, and the
+  control passed silently. A control that does not fire is not evidence: it was discarded and
+  fixed, and the fixed control's stack trace names `RandomAccess.cpp:172`, proving the *repaired*
+  body — not the archive — is the instrumented one.
+- **A `#2107` reproduction that could not be reproduced.** 15 isolated runs, 3 full-suite runs and
+  12 runs under six spinning CPU hogs all **passed**. Rather than report "could not reproduce" or
+  chase a 2-in-12 race, the mechanism was proven **deterministically** by injecting a server-side
+  delay — stronger evidence than a lucky failure, and it gave the repair a test it must survive.
+
+### #2098: the measured layout table, and why the decision is now one type wide
+
+| Type | Now | (a) bool per leaf | (b) bool per base |
+|---|---:|---:|---:|
+| `TextReader` / `TextWriter` (bases) | 8 | **8** | **16** |
+| `StringReader` | 48 | **48** | 56 |
+| `StringWriter` | 384 | **392** | 392 |
+| `StreamReader` | 24 | **24** | 32 |
+| `StreamWriter` | 24 | **24** | 32 |
+| `UnmanagedMemoryStream` | 40 | **40** (no new field) | 40 |
+| **types whose layout changes** | — | **1** | **6** |
+
+**Recommendation: option (a).** The exact approval sentence is
+`docs/SystemIONamespaceReviewPlan.md` **§21.8, "Approval IO-1"**. The pin covering all seven types
+**landed early, in #2108**, and is itself mutation-checked: adding a `bool` to the `TextWriter`
+base makes it fail with exactly the costed numbers, so option (b)'s blast radius is a reproducible
+test failure rather than an estimate.
+
+### CCF-022: the policy contradiction is RESOLVED; the mint is a decision (#2109)
+
+`AUDIT_CROSS_CUTTING_FINDINGS.md` says *"the cross-cutting numbering is closed"* seven times. Read
+against its own text, that sentence is **scoped to namespace-local causes, not a global freeze**:
+**six of the seven** occurrences say so in the same sentence, the same document instructs
+*"Mint CCF-021 when `net-http-headers` is reviewed"*, and `AUDIT_PROGRESS.md` records a cause left
+unminted *"with an explicit promotion rule"* — meaningless under a freeze. The one occurrence that
+declines a genuinely cross-component cause is recorded as the **honest counter-example**.
+
+**So the policy obstacle is gone, and two narrower ones are not**: every promotion sentence is
+passive and names no agent, and two of CCF-022's six sites are now **blocked behind Approval
+IO-1**, which would make the family unclosable the day it was minted. **CCF-022 stays unminted**;
+**#2109** carries three bounded options, a recommendation (**mint now**) and one exact approval
+sentence. Everything was recorded **additively** — no historical statement was edited.
+
+### `modules/text-json` — selection, and what the review found
+
+Re-derived by measurement. Among the coherent unreviewed units at seven open findings each —
+`time-zone`, `text-json`, `globalization` — `text-json` wins on being the **only one that parses
+untrusted remote documents**, on holding the only `high` (SR-AUD-327, a CCF-019 member with a live
+ASan use-after-free), and on **decidability**: with `/rv` absent, `time-zone` and most of
+`globalization` would yield a deferred-verification queue rather than compatible work.
+
+**The module's defining structural fact:** 34 headers on **three** `.cpp` files, and the parsing
+engine is **not in the module at all** — it is vendored nlohmann. Almost every defect is a
+**boundary** defect between a `System`-shaped surface and a `std::`-shaped parser.
+
+**Four checklist areas have NO SUBJECT here, recorded rather than invented:** `Utf8JsonReader` is
+absent, async serialization and cancellation are absent, converters and `ReferenceHandler` are
+declaration-only and never consulted, and nothing in the module is concurrent.
+
+**Eleven bounded tickets, #2110–#2120.** Compatible and open: **#2113**, **#2114**, **#2116**,
+**#2120**. Gated: #2115 (`needs_user`), #2117 and #2118 (`blocked`, both object-layout),
+#2119 (deferred verification).
+
+### Exact state
+
+- **Audit:** 139 remediated / 225 confirmed / 364 total; **49** carry `confirmed (design-complete)`.
+- **Gate:** 37 executables, **15,967** tests — **15,960 passed, 1 skipped, 6 failed**. Delta +42 =
+  15 (#2100) + 9 (#2108) + 18 (#2111/#2112). Run **executable-by-executable**, not via the script,
+  which stops at the first failing suite.
+- **Known failures, re-measured, unchanged:** five `PingTests` from the real #1962 gap —
+  `ping_group_range` is the **empty** range `1 0` so `SOCK_DGRAM` ICMP is refused with *Permission
+  denied*, while `SOCK_RAW` ICMP **opens fine**, which is exactly #1962's diagnosis; and one
+  `SocketTests` because `/proc/net/if_inet6` is **absent**.
+- **`scripts/local_ci_check.sh`:** every static gate **passed** — boundaries 41/91, catalogue
+  current, seams 2/18, negative fixtures 11/94 (105 invocations, peak 2 jobs, 41.0s), **zero
+  warnings, zero errors** — then **stopped at the known `PingTests` failure**, as it does every
+  batch. Reported separately from the complete gate above, which is why the complete gate is run
+  executable-by-executable.
+- **Graph** 41 modules / 91 edges. **Seams** 2 / 18. **Negative fixtures** 11 / 94.
+- **Selective components:** **passed**, **748s**, peak **2** `cc1plus` verified by sampling
+  ~62,000 times; one script instance, no duplicate wrapper, nothing else compiling.
+- **Build:** 0 errors, 0 warnings.
+- **Doxygen absent. `ccache` absent. `/rv` absent.** Tracked `scripts/__pycache__` **byte-identical**
+  (md5s unchanged end-to-end).
+- **Max compiler concurrency: 2**, everywhere, always.
+- Build directories: `build/` 1.7G, `build-probe/` 73M, `build-tmp/` 7.4M.
+
+### Remaining queue
+
+- **`modules/io` — three compatible tickets left**: **#2099** (`FileStream` `Length`/`Position`/
+  `Seek` after `Close`, which should follow whatever #2098 decides), **#2102** (the watcher) and
+  **#2104** (pins). Gated: **#2098** blocked on **Approval IO-1**; #2105/#2106 deferred.
+- **`modules/text-json` — four compatible tickets left**: **#2113**, **#2114**, **#2116**,
+  **#2120**. Gated: #2115 `needs_user`, #2117/#2118 blocked, #2119 deferred.
+- **Decisions waiting:** **#2109** (mint CCF-022?), **#2115** (the two inert JSON options),
+  **Approval IO-1** (#2098's layout).
+- **`System::Net::WebSockets` — closed for compatible work.** **`System::Net::Http` — closed.**
+- **Next namespace: `modules/net-http-headers`** — 5 open findings, **two `high`**, below the ≥6
+  threshold but carrying the recorded **CCF-021 promotion obligation** with all five members
+  present. This batch was instructed not to begin it.
+
+### Next recommended work
+
+**#2113** and **#2114** (both small, independent, compatible), then **#2116**; or
+`modules/net-http-headers`, which would let **CCF-021** be minted with a complete membership —
+and which #2109's reconciliation has now unblocked on policy grounds.
+
+---
+
+
 *Last verified: 2026-08-04. Branch `feature/remediation-batch-websockets-2089-2091-io-review`,
 cut from the clean tip `a4698e6`. **Not pushed — no push was requested during this batch.** No
 merge, rebase, tag, force-push, PR, publication, amend or history rewrite; all five commits
