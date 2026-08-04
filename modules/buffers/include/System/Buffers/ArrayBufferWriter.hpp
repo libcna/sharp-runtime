@@ -9,12 +9,14 @@
 #include "System/Buffers/IBufferWriter.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Memory.hpp"
+#include "System/OutOfMemoryException.hpp"
 #include "System/ReadOnlyMemory.hpp"
 #include "System/Span.hpp"
 
 namespace System::Buffers {
 
     using SharpRuntime::intcs;
+    using SharpRuntime::longcs;
 
     /**
      * @brief Represents a heap-based, array-backed output sink into which T data can be written.
@@ -29,6 +31,15 @@ namespace System::Buffers {
         std::vector<T> buffer_;
         intcs writtenCount_ = 0;
 
+        /**
+         * @brief The largest backing buffer this writer will allocate.
+         *
+         * Matches .NET's private `ArrayBufferWriter<T>.MaxArrayLength`, which is
+         * `Array.MaxLength`. Private and `static constexpr`, so it is neither public
+         * surface nor part of the object layout.
+         */
+        static constexpr intcs MaxArrayLength = 0x7FFFFFC7;
+
         void checkAndResizeBuffer(intcs sizeHint) {
             if (sizeHint < 0)
                 throw System::ArgumentException("sizeHint must be non-negative", "sizeHint");
@@ -39,7 +50,28 @@ namespace System::Buffers {
                 // special-casing an empty buffer to jump straight to DefaultInitialBufferSize.
                 intcs growBy = std::max(sizeHint, currentLength);
                 if (currentLength == 0) growBy = std::max(growBy, DefaultInitialBufferSize);
-                buffer_.resize(static_cast<std::size_t>(currentLength + growBy));
+                // .NET adds these two in `int` and relies on C#'s DEFINED unchecked wrap,
+                // catching the wrap immediately with `if ((uint)newSize > MaxArrayLength)`.
+                // Signed overflow is UNDEFINED in C++, so that idiom cannot be ported as
+                // written: a one-element writer and GetSpan(INTCS_MAX) reached
+                // "signed integer overflow: 1 + 2147483647 cannot be represented in type
+                // 'int'" under UBSan and then escaped a native std::length_error instead of
+                // a System:: exception. Widening the sum to longcs makes the same check
+                // exact while keeping .NET's outcome, and the throw happens before resize so
+                // capacity and written count survive the failure unchanged.
+                //
+                // Ticket #2051 / CCF-004; see docs/BuffersNamespaceReviewPlan.md §5.2.
+                longcs newSize = static_cast<longcs>(currentLength) + static_cast<longcs>(growBy);
+                if (newSize > static_cast<longcs>(MaxArrayLength)) {
+                    // .NET's own fallback: the caller only truly needs what is already
+                    // written plus the hint, so clamp to the ceiling unless even that fails.
+                    longcs needed = static_cast<longcs>(writtenCount_) + static_cast<longcs>(sizeHint);
+                    if (needed > static_cast<longcs>(MaxArrayLength))
+                        throw System::OutOfMemoryException(
+                            "The requested buffer size exceeds the maximum array length.");
+                    newSize = static_cast<longcs>(MaxArrayLength);
+                }
+                buffer_.resize(static_cast<std::size_t>(newSize));
             }
         }
 

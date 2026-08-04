@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/SequencePosition.hpp"
 #include "System/ReadOnlyMemory.hpp"
@@ -30,6 +31,32 @@ namespace System::Buffers {
         intcs start_ = 0;
         intcs end_   = 0;
 
+        /**
+         * @brief Copies @p length elements from @p ptr after validating the metadata.
+         *
+         * The raw pointer/length constructor used to run `data_(ptr, ptr + length)` straight
+         * from its member-initialiser list, so a caller's numbers reached the vector's range
+         * constructor before anything could reject them: `(nullptr, 1)` reported a UBSan
+         * "load of null pointer of type 'const T'" and then an ASan `SEGV` inside the
+         * constructor, and `(ptr, -1)` escaped a native `std::length_error` — not a
+         * `System::` exception — through a public door. Validation cannot live in the
+         * constructor body because the member is already built by then, so it lives here and
+         * the constructor initialises `data_` from the result.
+         *
+         * `(nullptr, 0)` stays valid and yields the empty sequence: adding 0 to a null
+         * pointer is well defined, two pre-existing tests rely on it, and an empty sequence
+         * with no buffer is a meaningful value.
+         *
+         * Ticket #2049 / SR-AUD-072 / CCF-005; see docs/BuffersNamespaceReviewPlan.md §4.1.
+         */
+        static std::vector<T> validatedCopy(const T* ptr, intcs length) {
+            if (length < 0)
+                throw System::ArgumentOutOfRangeException("length");
+            if (ptr == nullptr && length > 0)
+                throw System::ArgumentNullException("ptr");
+            return std::vector<T>(ptr, ptr + length);
+        }
+
     public:
         /** @brief Constructs an empty ReadOnlySequence. */
         ReadOnlySequence() = default;
@@ -42,12 +69,19 @@ namespace System::Buffers {
             : data_(std::move(data)), start_(0), end_(static_cast<intcs>(data_.size())) {}
 
         /**
-         * @brief Constructs a ReadOnlySequence from a pointer and length.
-         * @param ptr    Pointer to the first element.
-         * @param length Number of elements.
+         * @brief Constructs a ReadOnlySequence by copying @p length elements from @p ptr.
+         *
+         * The elements are copied into this sequence's own storage, so @p ptr need not
+         * outlive the sequence.
+         *
+         * @param ptr    Pointer to the first element. May be null only when @p length is 0.
+         * @param length Number of elements. Must not be negative.
+         * @throws System::ArgumentNullException if @p ptr is null and @p length is positive.
+         * @throws System::ArgumentOutOfRangeException if @p length is negative.
          */
         ReadOnlySequence(const T* ptr, intcs length)
-            : data_(ptr, ptr + length), start_(0), end_(length) {}
+            : data_(validatedCopy(ptr, length)), start_(0),
+              end_(static_cast<intcs>(data_.size())) {}
 
         /**
          * @brief Returns a shared empty ReadOnlySequence.
@@ -207,13 +241,30 @@ namespace System::Buffers {
          * Because this implementation is always a single contiguous segment, this
          * returns the remaining data once (from @p position to the end) and then false.
          * @param position Position to start from; advanced to the end if @p advance is true.
+         *        Must lie within this sequence's own range — a position obtained from a
+         *        different sequence, or from this sequence before it was sliced, is rejected.
          * @param memory   Receives the segment's data, or an empty view if there is none.
          * @param advance  If true, advances @p position past the returned segment.
          * @return true if data was returned; false if @p position was already at the end.
+         * @throws System::ArgumentOutOfRangeException if @p position lies outside
+         *         [getStartProperty(), getEndProperty()].
          */
         [[nodiscard]] bool TryGet(System::SequencePosition& position, System::ReadOnlyMemory<T>& memory,
                                   bool advance = true) const {
             intcs pos = position.GetInteger();
+            // Only `pos >= end_` used to be treated as invalid, so a position *below* start_
+            // reached the view arithmetic untouched. Two measured consequences, neither of
+            // which needs a hand-forged SequencePosition: `getStartProperty()` of an unsliced
+            // sequence, held across a Slice and passed to the slice's TryGet, returned a view
+            // covering elements the slice does not contain; and a negative integer produced
+            // `data_.data() + pos`, whose first element is an ASan-confirmed
+            // heap-buffer-overflow READ before the allocation. Validating the whole range —
+            // rather than only the segment marker, which this single-segment adaptation does
+            // not use — closes both. `pos == end_` keeps its pinned end-of-sequence result.
+            //
+            // Ticket #2050 / SR-AUD-073 / CCF-005; see docs/BuffersNamespaceReviewPlan.md §4.2.
+            if (pos < start_ || pos > end_)
+                throw System::ArgumentOutOfRangeException("position");
             if (pos >= end_) {
                 memory = System::ReadOnlyMemory<T>();
                 return false;
