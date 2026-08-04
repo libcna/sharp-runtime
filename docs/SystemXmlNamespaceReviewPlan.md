@@ -921,3 +921,60 @@ now. It carries the dispatch rule and the `RemoveAllChildren` exception instead.
 **Migration note landed**: `docs/Migration-XmlStrictnessAndLifecycle.md`, covering #2074–#2079
 together as §11 required, and leading with #2079 because it is the only ticket in the namespace
 that can run caller code that never ran before.
+
+### 20.7 #2081 — four coupled symptoms, and the mutation that hangs
+
+§4.7 measured the value. Measured across every run shape and both directions
+(`build-probe/2081_probe1_textruns.cpp`, log `2081_probe1_before.log`), the defect had **four**
+coupled symptoms, and the fourth is the one that makes it more than a cosmetic value bug:
+
+| | Before | After |
+|---|---|---|
+| `<r>left<![CDATA[right]]></r>` forward | `Text='left' Text='right'` | `Text='leftright'` |
+| the same, walked backward from the end | `Text='left'` — **asymmetric** | one node, nothing before it |
+| `IsSamePosition` on two members of one run | `0` | `1` |
+| `Select("text()")` over `<r>a<![CDATA[b]]>c<e/>f</r>` | four nodes | **two**: `"abc"`, `"f"` |
+
+**The repair was named by the file itself.** The 17-line `KNOWN GAP (audited, not fixed …)`
+comment in `getValueProperty` already cited .NET's `ValueText`/`CalibrateText` and already said
+a correct fix *"needs coordinated changes across those three navigation methods plus this
+method"*. That is what landed — plus two the comment did not anticipate,
+`getNodeTypeProperty` and `IsSamePosition` — and the comment was **replaced**, not left
+standing beside code it no longer describes. This is the fourth ticket in the namespace whose
+answer was already written down in the module: #2074 (`LoadXml` parsed first), #2076
+(`VerifyName` existed), #2078 (`EndOfFile` was already terminal), and now #2081.
+
+The model, stated once: **a run's logical position is its first member.** Adjacency is DOM
+sibling adjacency, so any non-text-like sibling ends a run — including one with no XPath
+representation — which is why a comment, a PI and an entity reference each split a run.
+
+**Deliberately unchanged:** element and root string-values, which already computed the correct
+concatenation through `getInnerTextProperty`. A **mixed** run takes its run start's node type
+(`Whitespace` + `Text` reports `Whitespace` with value `"  x"`), matching `CalibrateText`'s
+position-on-first-member model; recorded and pinned rather than left to chance.
+
+**+16 permanent regressions, add-only — not one existing test updated**, including all 74
+pre-existing XPath tests. `SharpRuntimeTests_Xml` 458 → 474.
+
+**Five mutations.** X1 (value is the node's own) → 10 tests; X3 (`MoveToPrevious` uncalibrated)
+→ 2; X4 (`IsSamePosition` compares the native node) → 1; X5 (node type uncalibrated) → 1.
+**X2 — stepping off the current node instead of the run end — makes navigation
+NON-TERMINATING**: `MoveToNext` lands on the next run member and the calibration walks straight
+back to the first, so `while (MoveToNext())` never ends. Reported as a timeout, not a test
+count. It is the sharpest result here because it proves the two halves — *step off the run end*
+and *calibrate onto the run start* — are **coupled**, which is precisely the internal
+inconsistency §4.7 warned a partial fix would produce.
+
+**Two harness corrections, recorded rather than hidden.** X5 was **non-discriminating** at
+first: the only mid-run node-type assertion used a `Text`-after-`CDATA` run, and `CDATA` maps
+to `Text`, so an uncalibrated accessor passed it. A `Whitespace` + `Text` run — members mapping
+to *different* XPath node types — was added, and only then did X5 fail. Separately, the tests
+first encoded node types as numeric literals and one was wrong (`Text` is 4, not 3); they use
+enum names now. Both join §20.4's and §20.6's lesson: a mutation that fails to fail is a
+statement about the test, not about the code.
+
+**Sanitizers, as §13 required** (*"run collapsing keeps references across native siblings"*):
+ASan/UBSan/LSan clean over **37,600** characters walked forward, backward, through
+`Select("text()")` and across DOM mutation between walks, with the navigator, the DOM bodies
+and `vendor/tinyxml2/tinyxml2.cpp` compiled **from source** (`Xml` is `STATIC`) and
+instrumentation proven by a control heap-use-after-free (`2081_probe2_asan.log`).

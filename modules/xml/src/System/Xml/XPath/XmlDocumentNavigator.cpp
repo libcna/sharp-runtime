@@ -36,6 +36,65 @@ namespace System::Xml::XPath {
             return n && ToXPathNodeType(n->getNodeTypeProperty()).has_value();
         }
 
+        // --- Ticket #2081 (SR-AUD-355, cause X-F): the XPath 1.0 logical text node ----------
+        //
+        // The XPath data model has ONE text node per maximal run of adjacent text-like DOM
+        // siblings, whose string-value is their concatenation. This port returned the native
+        // node directly, so <r>left<![CDATA[right]]></r> presented TWO nodes with values
+        // "left" and "right" instead of one node with value "leftright" -- and position(),
+        // count() and every count-based expression diverged with it.
+        //
+        // These three helpers are this port's CalibrateText/ValueText equivalents (named after
+        // the .NET mechanism the previous doc-comment on getValueProperty already identified).
+        // A run's LOGICAL POSITION is its FIRST member: every navigation lands there, every
+        // accessor answers from there, and IsSamePosition compares there, so two navigators on
+        // different members of one run are one XPath position.
+        //
+        // Adjacency is DOM SIBLING adjacency: any non-text-like sibling ends a run, including
+        // one with no XPath representation at all. A comment, a PI and an entity reference
+        // therefore all split a run, which is what the probe measured and what XPath requires.
+
+        bool IsTextLike(System::Xml::XmlNode* n) {
+            if (!n) return false;
+            switch (n->getNodeTypeProperty()) {
+                case System::Xml::XmlNodeType::Text:
+                case System::Xml::XmlNodeType::CDATA:
+                case System::Xml::XmlNodeType::Whitespace:
+                case System::Xml::XmlNodeType::SignificantWhitespace:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// The first member of @p n's text-like run, or @p n unchanged when it is not
+        /// text-like. This is .NET's CalibrateText: navigation must never land mid-run.
+        System::Xml::XmlNode* TextRunStart(System::Xml::XmlNode* n) {
+            if (!IsTextLike(n)) return n;
+            for (System::Xml::XmlNode* prev = n->getPreviousSiblingProperty(); IsTextLike(prev);
+                 prev = n->getPreviousSiblingProperty())
+                n = prev;
+            return n;
+        }
+
+        /// The last member of @p n's text-like run, or @p n unchanged when it is not text-like.
+        System::Xml::XmlNode* TextRunEnd(System::Xml::XmlNode* n) {
+            if (!IsTextLike(n)) return n;
+            for (System::Xml::XmlNode* next = n->getNextSiblingProperty(); IsTextLike(next);
+                 next = n->getNextSiblingProperty())
+                n = next;
+            return n;
+        }
+
+        /// The concatenated string-value of @p n's whole run -- .NET's ValueText.
+        std::string TextRunValue(System::Xml::XmlNode* n) {
+            std::string out;
+            for (System::Xml::XmlNode* cur = TextRunStart(n); IsTextLike(cur);
+                 cur = cur->getNextSiblingProperty())
+                out += cur->getValueProperty();
+            return out;
+        }
+
         bool IsXmlnsAttributeName(const std::string& name, std::string* outPrefix) {
             if (name == "xmlns") { if (outPrefix) *outPrefix = ""; return true; }
             if (name.rfind("xmlns:", 0) == 0) { if (outPrefix) *outPrefix = name.substr(6); return true; }
@@ -45,7 +104,9 @@ namespace System::Xml::XPath {
     } // namespace
 
     System::Xml::XmlNode* XmlDocumentNavigator::GetNode() const {
-        if (pos_ == Pos::Node) return node_;
+        // The run start is the logical node, so a caller that reaches back into the DOM sees
+        // the same node this navigator's own accessors answer from (#2081).
+        if (pos_ == Pos::Node) return TextRunStart(node_);
         if (pos_ == Pos::Attribute) return attr_;
         return nullptr; // namespace nodes have no distinct DOM node representation in this runtime
     }
@@ -53,7 +114,9 @@ namespace System::Xml::XPath {
     XPathNodeType XmlDocumentNavigator::getNodeTypeProperty() const {
         if (pos_ == Pos::Attribute) return XPathNodeType::Attribute;
         if (pos_ == Pos::Namespace) return XPathNodeType::Namespace;
-        auto mapped = ToXPathNodeType(node_->getNodeTypeProperty());
+        // From the run start, so a navigator constructed directly on a mid-run DOM node
+        // agrees with one that navigated to the run (#2081).
+        auto mapped = ToXPathNodeType(TextRunStart(node_)->getNodeTypeProperty());
         if (!mapped.has_value())
             throw System::NotSupportedException(
                 "XmlDocumentNavigator: this DOM node type has no XPath data model equivalent.");
@@ -105,27 +168,19 @@ namespace System::Xml::XPath {
         // exactly what XmlNode::getInnerTextProperty() already computes. Text/Comment/PI/
         // Whitespace/SignificantWhitespace: their own value, via the DOM's own getValueProperty().
         //
-        // KNOWN GAP (audited, not fixed -- see DocumentXPathNavigator.cs's ValueText/
-        // CalibrateText for the real .NET behavior this diverges from): per the XPath 1.0 data
-        // model, adjacent Text/CDATA/Whitespace/SignificantWhitespace DOM sibling nodes (e.g. a
-        // CDATA section immediately followed by plain text, or two Text nodes left un-normalized
-        // after DOM manipulation) collapse into a SINGLE XPath text node -- real .NET's
-        // ValueText concatenates forward through all adjacent text-like siblings, and
-        // CalibrateText() ensures navigation never lands mid-run (always on the first node of a
-        // run). This port has neither: MoveToFirstChild/MoveToNext/MoveToPrevious can land on a
-        // non-first member of an adjacent text-like run (they only skip nodes with no XPath
-        // representation at all, not "continuation" text-like siblings), and this method returns
-        // only the positioned-on node's own value, not the merged run. A correct fix needs
-        // coordinated changes across those three navigation methods (each with different
-        // directional run-boundary logic) plus this method -- out of scope for a single-pass
-        // fix; documented rather than rushed. Reachable only when adjacent text-like DOM
-        // siblings exist without an intervening element/comment/PI (uncommon: most parsers
-        // coalesce adjacent text automatically; requires explicit un-normalized DOM construction
-        // or CDATA directly adjacent to plain text).
+        // Ticket #2081 closed the gap this comment used to describe: adjacent text-like DOM
+        // siblings are ONE XPath text node whose value is their concatenation (TextRunValue,
+        // this port's ValueText), and the three navigation methods calibrate to the run start
+        // so a position is never mid-run.
         switch (node_->getNodeTypeProperty()) {
             case System::Xml::XmlNodeType::Document:
             case System::Xml::XmlNodeType::Element:
                 return node_->getInnerTextProperty();
+            case System::Xml::XmlNodeType::Text:
+            case System::Xml::XmlNodeType::CDATA:
+            case System::Xml::XmlNodeType::Whitespace:
+            case System::Xml::XmlNodeType::SignificantWhitespace:
+                return TextRunValue(node_);
             default:
                 return node_->getValueProperty();
         }
@@ -155,25 +210,29 @@ namespace System::Xml::XPath {
         System::Xml::XmlNode* child = node_->getFirstChildProperty();
         while (child && !HasXPathRepresentation(child)) child = child->getNextSiblingProperty();
         if (!child) return false;
-        node_ = child;
-        return true;
+        node_ = TextRunStart(child); // scanning forward already lands on a run start; explicit
+        return true;                  // so the invariant is stated at every landing site (#2081)
     }
 
     bool XmlDocumentNavigator::MoveToNext() {
         if (pos_ != Pos::Node) return false;
-        System::Xml::XmlNode* sib = node_->getNextSiblingProperty();
+        // Step off the END of the current run, not off its current member, or MoveToNext
+        // would walk the run one native node at a time (#2081).
+        System::Xml::XmlNode* sib = TextRunEnd(node_)->getNextSiblingProperty();
         while (sib && !HasXPathRepresentation(sib)) sib = sib->getNextSiblingProperty();
         if (!sib) return false;
-        node_ = sib;
+        node_ = TextRunStart(sib);
         return true;
     }
 
     bool XmlDocumentNavigator::MoveToPrevious() {
         if (pos_ != Pos::Node) return false;
-        System::Xml::XmlNode* sib = node_->getPreviousSiblingProperty();
+        // Symmetric: step off the START of the current run, and calibrate onto the START of
+        // whatever run we land in (#2081).
+        System::Xml::XmlNode* sib = TextRunStart(node_)->getPreviousSiblingProperty();
         while (sib && !HasXPathRepresentation(sib)) sib = sib->getPreviousSiblingProperty();
         if (!sib) return false;
-        node_ = sib;
+        node_ = TextRunStart(sib);
         return true;
     }
 
@@ -251,7 +310,9 @@ namespace System::Xml::XPath {
     bool XmlDocumentNavigator::IsSamePosition(const XPathNavigator& other) const {
         const auto* o = dynamic_cast<const XmlDocumentNavigator*>(&other);
         if (!o) return false;
-        if (pos_ != o->pos_ || node_ != o->node_) return false;
+        // Compared at the run start, so two navigators sitting on different members of one
+        // text-like run are ONE XPath position -- the data model's whole point (#2081).
+        if (pos_ != o->pos_ || TextRunStart(node_) != TextRunStart(o->node_)) return false;
         switch (pos_) {
             case Pos::Node: return true;
             case Pos::Attribute: return attr_ == o->attr_;
