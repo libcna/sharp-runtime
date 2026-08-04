@@ -20,6 +20,8 @@ namespace {
         snprintf(buf, sizeof(buf), "WSA error %d", WSAGetLastError());
         return buf;
     }
+    // Resolver failures on Windows carry a WSA code, which is what a Windows caller expects.
+    inline std::string resolverErrorText(int /*rc*/) { return netErr(); }
     void wsaInit() {
         static std::once_flag f;
         std::call_once(f, [] { WSADATA d; WSAStartup(MAKEWORD(2, 2), &d); });
@@ -34,7 +36,17 @@ namespace {
 #  include <netdb.h>
 #  include <unistd.h>
 #  include <cerrno>
-namespace { inline void wsaInit() {} }
+#  include <cstring>
+namespace {
+    inline void wsaInit() {}
+    inline std::string netErr() { return std::strerror(errno); }
+    // The resolver's OWN description of its OWN failure code. Before ticket #2039 every Dns
+    // failure on POSIX surfaced as the bare Win32Exception default message "Win32 error 11001"
+    // -- a Winsock error name fabricated on a platform that has no Winsock -- which told the
+    // caller nothing about what actually failed. gai_strerror is the POSIX counterpart, and it
+    // is the same helper modules/net-sockets' TcpClient/UdpClient/Socket already use.
+    inline std::string resolverErrorText(int rc) { return ::gai_strerror(rc); }
+}
 #endif
 
 namespace System::Net {
@@ -46,21 +58,37 @@ namespace System::Net {
 
 #if !defined(__EMSCRIPTEN__)
     namespace {
-        std::optional<IPAddress> tryParseIPv4(const std::string& s) {
-            unsigned a, b, c, d;
-            char extra;
-            if (std::sscanf(s.c_str(), "%u.%u.%u.%u%c", &a, &b, &c, &d, &extra) != 4) return std::nullopt;
-            if (a > 255 || b > 255 || c > 255 || d > 255) return std::nullopt;
-            return IPAddress((a << 24) | (b << 16) | (c << 8) | d);
+        // ONE literal parser for the whole module.
+        //
+        // This used to be two: a bespoke sscanf("%u.%u.%u.%u%c") for IPv4 beside
+        // IPAddress::TryParse for IPv6. The duplicate disagreed with the real parser about
+        // valid input, not merely invalid input (measured, build-probe/2039_probe1_before.log):
+        //
+        //   "-0.0.0.1"    accepted as 0.0.0.1   -- %u takes a sign; IPAddress::TryParse rejects
+        //   "+1.2.3.4"    accepted as 1.2.3.4   -- likewise, and not named by the finding
+        //   " 1.2.3.4"    accepted as 1.2.3.4   -- %u skips leading whitespace
+        //   "0177.0.0.1"  read as 177.0.0.1     -- DECIMAL, while IPAddress::Parse of the same
+        //                                          text yields 127.0.0.1, reading it as OCTAL
+        //   "1.2.3"       declined entirely     -- only 3 conversions, so it fell through to
+        //                                          the resolver
+        //
+        // The last two are the sharp ones: one module returned two different addresses for one
+        // valid literal depending on which door was used. Deleting the duplicate is the repair
+        // (ticket #2039, SR-AUD-304) -- IPAddress::TryParse is this module's own tested parser,
+        // and no external reference is needed to prefer it.
+        std::optional<IPAddress> tryParseIPLiteral(const std::string& s) {
+            IPAddress address;
+            if (!IPAddress::TryParse(s, address)) return std::nullopt;
+            return address;
         }
 
-        // Short-circuits a numeric IPv6 literal (e.g. "::1") without a getaddrinfo() round
-        // trip, mirroring the IPv4 literal shortcut above. Reuses IPAddress::TryParse's
-        // existing, already-tested IPv6 parser rather than hand-rolling a second one here.
-        std::optional<IPAddress> tryParseIPv6Literal(const std::string& s) {
-            IPAddress addr;
-            if (!IPAddress::TryParse(s, addr) || !addr.getIsIPv6Property()) return std::nullopt;
-            return addr;
+        // A literal answers a request only when no particular family was asked for, or when the
+        // family asked for is its own. Before ticket #2039 the two literal shortcuts were guarded
+        // by `family != InterNetworkV6` / `family != InterNetwork`, so EVERY other value --
+        // Unix, Unknown, Max -- passed both guards and got the literal back regardless.
+        bool literalSatisfiesFamily(AddressFamily requested, const IPAddress& literal) {
+            return requested == AddressFamily::Unspecified ||
+                   requested == literal.getAddressFamilyProperty();
         }
 
         IPAddress fromSockaddrIn(const sockaddr_in& sin) {
@@ -81,6 +109,91 @@ namespace System::Net {
             if (family == AddressFamily::InterNetworkV6) return AF_INET6;
             return AF_UNSPEC;
         }
+
+        // Fills the getaddrinfo hints.
+        //
+        // ai_socktype was left at 0, which asks getaddrinfo for one addrinfo PER SOCKET TYPE --
+        // so every answer came back THREE times, once for SOCK_STREAM, SOCK_DGRAM and SOCK_RAW.
+        // That, not the duplicate literal parser, is where SR-AUD-304's duplicate results came
+        // from: measured directly against getaddrinfo (build-probe/2039_probe1_before.log §E),
+        // ai_socktype = 0 returns 3 entries for "localhost", "127.0.0.1" and "1.2.3" alike,
+        // while SOCK_STREAM returns exactly 1. It affected every resolved NAME too, not just the
+        // one literal the finding names, and GetHostEntry(8.8.8.8) returned SIX entries for two
+        // distinct addresses. SOCK_STREAM is what this repository's own TcpClient, UdpClient and
+        // Socket already pass; with no service name it constrains the returned socktype, not the
+        // set of addresses.
+        void fillResolverHints(struct addrinfo& hints, AddressFamily family, bool wantCanonicalName) {
+            hints.ai_family = addressFamilyToAiFamily(family);
+            hints.ai_socktype = SOCK_STREAM;
+            if (wantCanonicalName) hints.ai_flags = AI_CANONNAME;
+        }
+
+        // Collects a getaddrinfo result list, in the resolver's own order, with duplicates
+        // removed.
+        //
+        // The equality used is System::Net::IPAddress::operator== -- BINARY address equality:
+        // address family, all address bits, and (for IPv6) the scope id. Deliberately not
+        // textual equality and deliberately not canonicalising: 1.2.3.4 and ::ffff:1.2.3.4 are
+        // DIFFERENT families and both are kept, as are fe80::1%7 and fe80::1%9, which name
+        // different links. Only an address already present is dropped.
+        //
+        // Ordering is the resolver's, by first occurrence -- getaddrinfo has already applied
+        // RFC 6724 destination-address selection, and reordering it would silently override the
+        // system's own preference.
+        std::vector<IPAddress> collectAddresses(const struct addrinfo* res) {
+            std::vector<IPAddress> addresses;
+            for (const struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
+                std::optional<IPAddress> address;
+                if (p->ai_family == AF_INET) {
+                    address = fromSockaddrIn(*reinterpret_cast<const sockaddr_in*>(p->ai_addr));
+                } else if (p->ai_family == AF_INET6) {
+                    address = fromSockaddrIn6(*reinterpret_cast<const sockaddr_in6*>(p->ai_addr));
+                }
+                if (!address) continue;
+                bool alreadyPresent = false;
+                for (const IPAddress& seen : addresses) {
+                    if (seen == *address) { alreadyPresent = true; break; }
+                }
+                if (!alreadyPresent) addresses.push_back(*address);
+            }
+            return addresses;
+        }
+
+        // Every Dns resolver failure raises the same exception TYPE and the same SocketError as
+        // before -- SocketException / HostNotFound / native code 11001 -- and only the message
+        // changes, from the fabricated "Win32 error 11001" to one naming the operation, the host
+        // and the platform resolver's own description of its own failure.
+        [[noreturn]] void throwResolutionFailed(const std::string& host, int rc) {
+            throw SocketException(SocketError::HostNotFound,
+                                  "Dns: could not resolve host '" + host + "': " + resolverErrorText(rc));
+        }
+
+        std::string addressFamilyName(AddressFamily family) {
+            switch (family) {
+                case AddressFamily::Unknown:        return "Unknown";
+                case AddressFamily::Unspecified:    return "Unspecified";
+                case AddressFamily::Unix:           return "Unix";
+                case AddressFamily::InterNetwork:   return "InterNetwork";
+                case AddressFamily::InterNetworkV6: return "InterNetworkV6";
+                case AddressFamily::Max:            return "Max";
+                default:                            return std::to_string(static_cast<int>(family));
+            }
+        }
+
+        // A literal that exists but is of the wrong family has no valid answer for the request.
+        // This raises SocketException(HostNotFound), NOT an empty vector, because that is this
+        // repository's OWN established and tested contract for the case: the two existing tests
+        // DnsTests.GetHostAddresses_RequestingIPv6Only_MismatchedIPv4Literal_Throws and
+        // ..._RequestingIPv4Only_MismatchedIPv6Literal_Throws pin it, and their comment records
+        // the reasoning verbatim -- "a silent empty vector [is] indistinguishable from 'checked
+        // and found nothing'". docs/SystemNetNamespaceReviewPlan.md §7.3 predicted an empty
+        // result for the AddressFamily::Unix row; that prediction was made without those tests
+        // in view and is corrected in §17.6 rather than followed.
+        [[noreturn]] void throwNoAddressOfRequestedFamily(const std::string& host, AddressFamily family) {
+            throw SocketException(SocketError::HostNotFound,
+                                  "Dns: host '" + host + "' has no address in the requested address family '" +
+                                      addressFamilyName(family) + "'.");
+        }
     }
 #endif
 
@@ -91,7 +204,10 @@ namespace System::Net {
         wsaInit();
         char buf[256] = {};
         if (::gethostname(buf, sizeof(buf) - 1) != 0) {
-            throw SocketException(static_cast<intcs>(SocketError::SocketError));
+            // Same SocketError as before; only the message stops fabricating "Win32 error -1"
+            // on a platform with no Win32 (ticket #2039).
+            throw SocketException(SocketError::SocketError,
+                                  "Dns::GetHostName: gethostname failed: " + netErr());
         }
         return std::string(buf);
 #endif
@@ -107,35 +223,23 @@ namespace System::Net {
         (void)family;
         throw System::PlatformNotSupportedException("Dns.GetHostAddresses is not supported on Emscripten.");
 #else
-        if (family != AddressFamily::InterNetworkV6) {
-            if (auto parsed = tryParseIPv4(hostNameOrAddress)) {
-                return { *parsed };
+        if (auto literal = tryParseIPLiteral(hostNameOrAddress)) {
+            if (!literalSatisfiesFamily(family, *literal)) {
+                throwNoAddressOfRequestedFamily(hostNameOrAddress, family);
             }
-        }
-        if (family != AddressFamily::InterNetwork) {
-            if (auto parsed = tryParseIPv6Literal(hostNameOrAddress)) {
-                return { *parsed };
-            }
+            return { *literal };
         }
 
         wsaInit();
         struct addrinfo hints {};
-        hints.ai_family = addressFamilyToAiFamily(family);
-        hints.ai_socktype = 0;
+        fillResolverHints(hints, family, /*wantCanonicalName=*/false);
         struct addrinfo* res = nullptr;
         int rc = ::getaddrinfo(hostNameOrAddress.c_str(), nullptr, &hints, &res);
         if (rc != 0) {
-            throw SocketException(static_cast<intcs>(SocketError::HostNotFound));
+            throwResolutionFailed(hostNameOrAddress, rc);
         }
 
-        std::vector<IPAddress> result;
-        for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
-            if (p->ai_family == AF_INET) {
-                result.push_back(fromSockaddrIn(*reinterpret_cast<sockaddr_in*>(p->ai_addr)));
-            } else if (p->ai_family == AF_INET6) {
-                result.push_back(fromSockaddrIn6(*reinterpret_cast<sockaddr_in6*>(p->ai_addr)));
-            }
-        }
+        std::vector<IPAddress> result = collectAddresses(res);
         ::freeaddrinfo(res);
         return result;
 #endif
@@ -151,26 +255,20 @@ namespace System::Net {
         (void)family;
         throw System::PlatformNotSupportedException("Dns.GetHostEntry is not supported on Emscripten.");
 #else
-        if (family != AddressFamily::InterNetworkV6) {
-            if (auto parsed = tryParseIPv4(hostNameOrAddress)) {
-                return GetHostEntry(*parsed);
+        if (auto literal = tryParseIPLiteral(hostNameOrAddress)) {
+            if (!literalSatisfiesFamily(family, *literal)) {
+                throwNoAddressOfRequestedFamily(hostNameOrAddress, family);
             }
-        }
-        if (family != AddressFamily::InterNetwork) {
-            if (auto parsed = tryParseIPv6Literal(hostNameOrAddress)) {
-                return GetHostEntry(*parsed);
-            }
+            return GetHostEntry(*literal);
         }
 
         wsaInit();
         struct addrinfo hints {};
-        hints.ai_family = addressFamilyToAiFamily(family);
-        hints.ai_socktype = 0;
-        hints.ai_flags = AI_CANONNAME;
+        fillResolverHints(hints, family, /*wantCanonicalName=*/true);
         struct addrinfo* res = nullptr;
         int rc = ::getaddrinfo(hostNameOrAddress.c_str(), nullptr, &hints, &res);
         if (rc != 0) {
-            throw SocketException(static_cast<intcs>(SocketError::HostNotFound));
+            throwResolutionFailed(hostNameOrAddress, rc);
         }
 
         IPHostEntry entry;
@@ -179,17 +277,8 @@ namespace System::Net {
             canonicalName = res->ai_canonname;
         }
         entry.setHostNameProperty(canonicalName);
-
-        std::vector<IPAddress> addresses;
-        for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
-            if (p->ai_family == AF_INET) {
-                addresses.push_back(fromSockaddrIn(*reinterpret_cast<sockaddr_in*>(p->ai_addr)));
-            } else if (p->ai_family == AF_INET6) {
-                addresses.push_back(fromSockaddrIn6(*reinterpret_cast<sockaddr_in6*>(p->ai_addr)));
-            }
-        }
+        entry.setAddressListProperty(collectAddresses(res));
         ::freeaddrinfo(res);
-        entry.setAddressListProperty(addresses);
         return entry;
 #endif
     }
@@ -219,7 +308,11 @@ namespace System::Net {
             rc = ::getnameinfo(reinterpret_cast<sockaddr*>(&sin), sizeof(sin), hostBuf, sizeof(hostBuf), nullptr, 0, 0);
         }
         if (rc != 0) {
-            throw SocketException(static_cast<intcs>(SocketError::HostNotFound));
+            // Same exception type and SocketError as before; the message now carries
+            // getnameinfo's own description instead of the fabricated "Win32 error 11001".
+            throw SocketException(SocketError::HostNotFound,
+                                  "Dns: reverse lookup failed for '" + address.ToString() +
+                                      "': " + resolverErrorText(rc));
         }
 
         // getnameinfo() without NI_NAMEREQD does NOT fail when the address has no reverse
@@ -238,9 +331,14 @@ namespace System::Net {
         // When the reverse lookup yields a literal rather than a name there is nothing further
         // to resolve, so the entry is built directly: the host name is the address text, and
         // the address list is the address that was asked about.
+        //
+        // The literal test now goes through the module's single parser too. Note that this makes
+        // the #1961 guard STRICTER, not weaker: the old pair could miss a literal the resolver
+        // wrote back in a spelling the sscanf parser declined (a short form such as "1.2.3", or
+        // an octal or hexadecimal octet), and a missed literal is exactly the input that
+        // re-entered this function.
         const std::string resolvedHost(hostBuf);
-        const bool resolvedToALiteral =
-            tryParseIPv4(resolvedHost).has_value() || tryParseIPv6Literal(resolvedHost).has_value();
+        const bool resolvedToALiteral = tryParseIPLiteral(resolvedHost).has_value();
         if (resolvedToALiteral) {
             IPHostEntry entry;
             entry.setHostNameProperty(resolvedHost);

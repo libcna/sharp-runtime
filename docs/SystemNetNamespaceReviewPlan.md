@@ -532,7 +532,7 @@ two HTML encoders in one repository with two different escape sets is the CCF-01
 | #2036 | N-B | 301 | **DONE** 2026-08-04 — see §17.3 |
 | #2037 | N-C | 302 | **DONE** 2026-08-04 — see §17.4 |
 | #2038 | N-D | 303 | **DONE** 2026-08-04 — see §17.5 |
-| #2039 | N-C | 304 (3 halves) | **todo**, compatible |
+| #2039 | N-C | 304 (3 halves) | **DONE** 2026-08-04 — see §17.6 |
 | #2041 | N-B | 307 | **DONE** 2026-08-04 — see §17.1 |
 | #2040 | N-E | 305, 306 | **blocked**, design complete (§14.1) |
 | #2042 | N-F | 308 | **blocked**, design complete (§14.2) |
@@ -774,3 +774,120 @@ from the pre-repair log and the base-inside-its-own-network property at six pref
 
 **Consequences.** No signature, `noexcept`, virtual, vtable, data member or layout change.
 Relink-only — `IPNetwork.hpp` was not touched.
+
+### 17.6 #2039 — N-C, `Dns`'s literal parser, duplicates, family filter and message (SR-AUD-304)
+
+The largest ticket of the batch, and the one whose stated cause was **wrong**.
+
+**Correction 1 — §5's N-C is wrong about where the duplicates come from, and it matters.**
+§5 says the duplicate `sscanf` parser "accepts a leading `-`, produces duplicates, and bypasses
+the family filter". It does the first and the third. It does **not** produce the duplicates.
+Measured against `getaddrinfo` **directly** (probe §E):
+
+| Call | `ai_socktype = 0` | `ai_socktype = SOCK_STREAM` |
+|---|---|---|
+| `getaddrinfo("1.2.3")` | **3** entries (`st=1,2,3`) | **1** |
+| `getaddrinfo("localhost")` | **3** | **1** |
+| `getaddrinfo("127.0.0.1")` | **3** | **1** |
+
+`hints.ai_socktype` was `0`, which asks for one `addrinfo` **per socket type**. So *every* answer
+was tripled — every resolved **name** too, which §4.1 never mentions — and
+`GetHostEntry(8.8.8.8)` returned **six** entries for two distinct addresses. The `sscanf` parser
+never even saw `"1.2.3"` (three conversions, not four, so it declined).
+
+**Why the correction is load-bearing:** replacing the literal parser alone would have made
+`GetHostAddresses("1.2.3")` return one address **by accident** — `IPAddress::TryParse` accepts
+three-part short forms, so the fast path answers with a single value — while `localhost` stayed
+tripled. That is exactly the "one named example repaired" trap. The repair therefore does both:
+`ai_socktype = SOCK_STREAM` (what this repository's own `TcpClient`, `UdpClient` and `Socket`
+already pass) **and** a deduplication pass.
+
+**Correction 2 — the duplicate parser disagreed about *valid* input.**
+
+| Text | Through `Dns` | Through `IPAddress::Parse` |
+|---|---|---|
+| `"0177.0.0.1"` | **177.0.0.1** (decimal) | **127.0.0.1** (octal) |
+| `"+1.2.3.4"` | 1.2.3.4 | rejected |
+| `" 1.2.3.4"` | 1.2.3.4 | rejected |
+| `"1.2.3"` | declined → resolver | 1.2.0.3 |
+| `"-0.0.0.1"` | 0.0.0.1 | rejected — §3's row |
+
+One module gave **two different addresses** for one valid literal depending on the door. §12 is
+right that the repair is deletion; it understates why.
+
+**Correction 3 — §7.3's `Unix` row is wrong, and following it would have reversed a documented
+decision.** §7.3 predicts `GetHostAddresses("127.0.0.1", Unix)` → **empty**. It raises
+`SocketException(HostNotFound)`, because this repository already **has** a tested contract for a
+family-mismatched literal: `DnsTests.GetHostAddresses_RequestingIPv6Only_MismatchedIPv4Literal_Throws`
+and `..._RequestingIPv4Only_MismatchedIPv6Literal_Throws`, whose comment states the reasoning
+verbatim — an empty vector is *"indistinguishable from 'checked and found nothing'"*. §7.3 was
+written without those tests in view.
+
+**Deduplication policy, stated exactly.** Equality is **binary `IPAddress` equality**: address
+family, all address bits, and for IPv6 the scope id. Not textual equality. Ordering is the
+resolver's own, by first occurrence — `getaddrinfo` has already applied RFC 6724 destination
+selection and reordering it would override the system's preference. **No canonicalisation**:
+`1.2.3.4` and `::ffff:1.2.3.4` are different families and both survive; `fe80::1%7` and
+`fe80::1%9` name different links and both survive. Each is pinned.
+
+**Replaces §7.3's four `Dns` rows with the measured set:**
+
+| Call | Before | After |
+|---|---|---|
+| `GetHostAddresses("-0.0.0.1")` | `0.0.0.1` | `SocketException(HostNotFound)` |
+| `GetHostAddresses("+1.2.3.4")`, `(" 1.2.3.4")` | `1.2.3.4` | rejected — **not in §7.3** |
+| `GetHostAddresses("1.2.3")` | **three** identical | **one** |
+| `GetHostAddresses("localhost")`, `("runsc")`, `("vm")` | **three** identical | **one** — **not in §7.3** |
+| `GetHostEntry(8.8.8.8)` | **six** entries, two addresses | **two** — **not in §7.3** |
+| `GetHostAddresses("0177.0.0.1")` | `177.0.0.1` | **`127.0.0.1`** — a changed value on a working call, **not in §7.3**; it makes `Dns` agree with `IPAddress::Parse` |
+| `GetHostAddresses("0x7f.0.0.1")`, `("3232235777")`, `("1.2")` | three identical | one |
+| `GetHostAddresses("127.0.0.1", Unix)` | one IPv4 | `SocketException(HostNotFound)` — §7.3 predicted **empty**; corrected above |
+| `GetHostAddresses("::1", Unix)` | one IPv6 | `SocketException` — **not in §7.3** |
+| `GetHostAddresses("127.0.0.1", InterNetworkV6)` etc. | `SocketException` from the resolver | `SocketException`, thrown deliberately, with a useful message |
+| any failure message | `"Win32 error 11001"` | `"Dns: could not resolve host 'x': <resolver's own text>"` |
+| `GetHostAddresses("0.0.0.0")`, `("::")` | wildcard | **unchanged** — gated #2043, now pinned |
+| every matching-family and `Unspecified` literal | works | **identical** |
+
+**One residual, recorded rather than hidden — new inactive ticket #2046.** The family filter
+reaches a **literal** but not a resolved **name**: `GetHostAddresses("localhost", Unix)` still
+returns an IPv4 address, because `addressFamilyToAiFamily` maps every non-IP family to
+`AF_UNSPEC`. Narrowing that removes a currently-succeeding result for **every** name, which is
+broader than this ticket's approval-free envelope, so it is filed rather than absorbed.
+
+**Disclosure.** `Dns.hpp`'s note claimed resolution was "restricted to IPv4", that the hints
+"always request AF_INET regardless of the family argument", and that `InterNetworkV6` "returns an
+empty result". All three were false; the note now states the real contract, including the literal
+fast path, the family rule, the dedup policy and the failure-message shape.
+
+**Sanitizers.** **LSan is discriminating**: clean across **12,800** `Dns` calls spanning the
+success and failure paths (4,000 succeeded, 8,800 threw), while a control build that abandons one
+`addrinfo` list per iteration reports `12800 byte(s) leaked in 200 allocation(s)` — so LSan was
+demonstrably watching. ASan clean on the same binary. UBSan and TSan are inapplicable and are
+stated so rather than skipped.
+
+**Tests: +16.** `DnsLiteralAndDuplicateTests.cpp`, using only IP literals and `/etc/hosts` names
+so nothing depends on reaching a network; the one name-dependent group is guarded.
+`SharpRuntimeTests_Net` **298 → 314**.
+
+**Consequences.** No signature, `noexcept`, virtual, vtable, data member or layout change. The
+header changed only in its doc-comments.
+
+---
+
+## 18. Corrections to §§1–16 made by the implementation batch
+
+Collected so a reader of §§1–16 is not misled. Every one is measured; none rewrites the original
+text.
+
+| Section | Claim | Correction |
+|---|---|---|
+| §4.3 | `collection[-1]` "terminates with a segmentation fault"; the review corrected it to "returns normally" | Both are true and neither is the whole story: on a **non-empty** collection it returns garbage, on an **empty** one it crashes. The outcome is a property of the heap, not the index (§17.1) |
+| §5, N-C | the duplicate `sscanf` parser "produces duplicates" | **It does not.** `hints.ai_socktype = 0` does, and it tripled every resolved **name** as well (§17.6) |
+| §5, N-C | the parser accepts a leading `-` | True, and it also accepts `+` and leading whitespace, and disagrees with `IPAddress::Parse` about `0177.0.0.1` — a **valid** literal (§17.6) |
+| §7.3 | `IPAddress(bytes, -1)` / `setScopeIdProperty(-5)` → `ArgumentOutOfRangeException("value")` | Each door reports its **own** parameter: `"scopeId"` and `"value"` (§17.3) |
+| §7.3 | `GetHostAddresses("127.0.0.1", Unix)` → **empty** | It **throws** `SocketException(HostNotFound)`, which is this repository's own tested contract for a family-mismatched literal (§17.6) |
+| §7.3 | the `Unix`-family `GetIPEndPoint` is "the one row that removes a non-faulting result" | There are **two**: a `setSizeProperty`-shrunk buffer also decoded successfully (§17.2). And the `Unix` row generalises to **every** non-IP family |
+| §7.3 | `IPNetwork(fe80::1%7, 64).BaseAddress.ScopeId` is the changed row | `ToString()` and equality/hash change too, and the scope is preserved at **every** prefix length (§17.5) |
+| §11 | UBSan for #2041 will be "non-discriminating" | **Half wrong**: silent about the conversion as predicted, but it reports null-pointer binding and null-pointer arithmetic for the empty-collection cases (§17.1) |
+| §11 | UBSan for #2036 will be non-discriminating | **Correct**, and recorded as a non-result (§17.3) |
+| §3, SR-AUD-300 | "reads past undersized buffers" | Also at `SocketAddress.cpp:110` for IPv6, and the port defect spans the whole signed domain (§17.2) |
