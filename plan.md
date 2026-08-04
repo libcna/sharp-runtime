@@ -1,5 +1,30 @@
 # Sharp Runtime plan
 
+*Last verified: 2026-08-04 — branch `feature/remediation-batch-approval-packages-next-review`, cut
+from `1b892f6` and **not pushed; no push was requested during this batch**. No merge, rebase, tag,
+PR, force-push, amend or history rewrite; the pre-existing local-only commits were left untouched.
+All new commits intentionally unsigned. The batch **verified and consolidated both outstanding
+approval packages into one request**, `docs/ConsolidatedApprovalPackage.md`: three
+`System::Diagnostics` decisions (with **#2032 folded into #2029** — the reader-thread join lives in
+`reapIfNeeded` and is reached from **five** public doors, so §14.1's destructor-only sentence would
+have left four blocking with no bound, and its recommended option C is **unsound as written**
+because detaching a reader that holds a raw pointer into the `Impl` is a use-after-free) and nine
+`System::Text` decisions (verified and standing, with #2017 gaining **six** alternatives and a
+changed recommendation, CCF-012 re-enumerated across all 16 brace-scanning files, and A1+A2 made
+atomic). **#2030's two pins and #2031's one were independently re-verified discriminating** by
+applying the proposed change temporarily and reverting it. It split and implemented the **one**
+genuinely compatible portion, **#2033** (the reader-join disclosure half: six header contracts made
+true, +6 mutation-checked tests, zero executable production change), backfilled the three missing
+`plan.md` sections and corrected the previous batch's record-keeping note, and then re-derived the
+next namespace by measurement and performed the **`System::Net` review (#2034)**, whose ten premises
+**all reproduced** and four of whose audit premises were **corrected**. **No approval was requested,
+implied or assumed, and no gated work was implemented; CCF-012 was NOT marked closed.** Audit
+**112 remediated / 252 confirmed / 364 total**, `confirmed (design-complete)` **38 → 42**; **no
+`SR-AUD-*` identifier was created.** `SharpRuntimeTests_Diagnostics` **219 → 225**, add-only.
+**Doxygen NOT run — not installed here; `ccache` also not installed.** **#1773 remains blocked and
+its downstream use was not investigated.** CNA and mobile-eggbert were not inspected. Maximum
+aggregate parallelism **2 jobs**.*
+
 *Last verified: 2026-08-03 — branch `feature/remediation-batch-text-approvals-next-review`, cut
 from `80c804b` and **not pushed; no push was requested during this batch**. No merge, rebase,
 tag, PR, force-push or history rewrite; the pre-existing local-only commits were left untouched.
@@ -6294,6 +6319,16 @@ sessions that did the work. They are **not** invented here — `NEXT.md` and the
 plans hold those records — but the gap is recorded so it is not mistaken for the work not
 having happened.
 
+> **Correction, appended 2026-08-04 by the #2033/#2034 batch.** That note is wrong about one
+> of its three items: the `#2022`/`#2023` batch **did** write its section — commit `9319580`
+> added 98 lines to `plan.md`, and the section *"2026-08-03 — `System::Text` approval package
+> verified (#2022) and the `System::Diagnostics` review (#2023)"* is in this file. The genuine
+> gap is **three** batches, not four: the `System::Uri` review (#1987–#1994), the `System::Uri`
+> follow-up (#2000–#2005) and the `System::Text` review (#2006–#2012). All three are recorded in
+> this file's *"Last verified"* header stack, so `plan.md` was never silent about them — it
+> lacked only a dated section. Those three sections are now backfilled at the end of this file
+> from committed evidence.
+
 **Work unit 0 — the selective-components check the previous session could not finish.**
 Preflight confirmed no `cmake`, `ninja`, `make`, `cc1`, `cc1plus`, `g++`, `clang++` or
 `check_selective_components.sh` process existed. One instance was then run, verified
@@ -6358,3 +6393,119 @@ never exceeded, with no two compilations ever running concurrently.
 
 Full evidence, sanitizer accounting and probe inventory: `NEXT.md` under
 "Autonomous batch handoff, 2026-08-04".
+
+## Batch 2026-08-03 — the `System::Uri` namespace review (#1987) and its compatible half (#1988–#1994)
+
+**Backfilled 2026-08-04** from committed evidence — commits `2ba68fa` … `501d866`,
+`docs/SystemUriNamespaceReviewPlan.md` and this file's own *"Last verified"* header stack. The
+session that did the work wrote a header paragraph but no dated section. Nothing here is new.
+
+The fourth namespace review. Fourteen open `modules/uri` findings — **all medium, no high** —
+mapped to causes U-A … U-J and tickets #1987–#1999. The namespace was chosen over `System::Runtime`
+on count, having no `docs/` plan of its own.
+
+Implemented, all compatible: **#1988** recognises the scheme by grammar instead of searching for
+`"://"`; **#1989** consults the default-port table on every path that yields a port; **#1990**
+resolves query-only, fragment-only and network-path references per RFC 3986; **#1991**/**#1992**
+close both halves of SR-AUD-145 (IP-literal brackets, `UriKind` domain); **#1993** splits copied
+user-info into `UserName` and `Password`; **#1994** makes two headers' contracts true.
+`SharpRuntimeTests_Uri` **213 → 272**.
+
+**Five causes remain approval-gated** — **#1995** (identity as rendered text), **#1996** (setter
+narrowing plus rendering changes), **#1997** (four absent public shapes), **#1998**
+(`IsKnownScheme` narrowing), **#1999** (`UriTypeConverter`'s virtual signature) — each with a
+complete design and an exact approval sentence in the plan's §14, each behaviour-pinned. **None was
+implemented, and no approval was requested or assumed.**
+
+## Batch 2026-08-03 — the `System::Uri` post-audit follow-up queue (#2000–#2005)
+
+**Backfilled 2026-08-04** from commits `4280903`, `942f27a`, `bef4e43` and the header stack.
+
+The six post-audit defects #1987's review filed under ordinary ticket numbers, **no `SR-AUD-*`
+issued**. Implemented: **#2000** rejects an empty authority wherever a port applies, while
+`file:///path` stays accepted; **#2001** resolves against an opaque base per RFC 3986 §5.2.2/§5.3
+instead of fabricating an authority; **#2002** splits a relative reference's query and fragment as
+the other two branches always did; **#2004** hashes `UriBuilder`'s rendered string instead of
+re-parsing it, removing four routes on which `Equals(self)` succeeded but `GetHashCode` threw, with
+**no returned value changed** and no part of #1995's gated identity policy introduced.
+
+**#2003** (an embedded NUL crossing the parser into every component) is design-complete and
+**blocked** on approval to narrow, its preserve-as-data behaviour pinned. **#2005** (surrounding
+whitespace) stays **deferred**, its missing reference evidence re-verified absent. The audit was
+unchanged at 104 remediated / 260 confirmed / 364.
+
+## Batch 2026-08-03 — the `System::Text` namespace review (#2006) and its compatible half (#2007–#2012)
+
+**Backfilled 2026-08-04** from commits `67cbfa7` … `4f459de`,
+`docs/SystemTextNamespaceReviewPlan.md` and the header stack.
+
+The fifth namespace review. Fourteen open `modules/text` findings (SR-AUD-286 … SR-AUD-299) mapped
+to eleven causes **T-A … T-N** and tickets #2006–#2021. Scope was narrowed by measurement: the C++
+namespace spans three CMake components and this review owns **one** (`Text`), while
+`NormalizationForm` lives in `modules/core` with no `Normalize` surface at all and
+`Encoder`/`Decoder` have no incremental conversion surface — recorded as explicit exclusions rather
+than invented as findings.
+
+Implemented, all compatible: **#2007** gives every raw decode entry one argument policy, transcribed
+from `UTF7Encoding`; **#2008** makes both fallback setters reject null (the finding names only the
+decoder direction); **#2009** stops `StringBuilder::CopyTo`'s capacity overflow **defeating** its
+bounds check — an invalid capacity had become a silent write, ASan-confirmed with the call returning
+normally; **#2010**/**#2011** close the diagnostics halves of SR-AUD-298 and SR-AUD-297; **#2012**
+makes three headers' contracts true. `SharpRuntimeTests_Text` **238 → 288**.
+
+**Seven audit premises were corrected**, historical text preserved, including that **CCF-012's
+exclusion list is wrong to say `System.Text.CompositeFormat` "is not ported"**. **Nine causes remain
+approval-gated (#2013–#2021)**; none was implemented and no approval was requested or assumed.
+
+## Batch 2026-08-04 — the consolidated approval package, #2033, and the `System::Net` review (#2034)
+
+Branch `feature/remediation-batch-approval-packages-next-review`, cut from the clean tip `1b892f6`.
+All commits local and unsigned; **nothing pushed, merged, rebased, tagged, amended or force-pushed,
+and no PR was created.**
+
+**Work unit 1 — the `System::Diagnostics` approvals, verified rather than restated.** #2032 is
+**folded into #2029**: the reader-thread join lives in `reapIfNeeded`, not in the destructor, and is
+reached from **five** public doors — `WaitForExit(500)` 7,502 ms, `getHasExitedProperty()` 7,502 ms,
+`Kill(false)` 7,502 ms, the restart `Start()` 7,503 ms and `~Process` 8,004 ms against an 8 s
+grandchild holding the redirected pipe. §14.1's destructor-only approval sentence would have left
+four of them blocking with **no bound at all**. A second, sharper finding: §14.1's recommended
+option C is **unsound as written** — `drainPipe` holds a raw pointer into the `Impl`, so detaching
+in `~Impl` is a **use-after-free** unless the reader gains shared ownership of its buffer. #2030's
+two pins and #2031's one were **independently re-verified discriminating** by temporarily applying
+the proposed change (the return-type change is a compile error; §14.3's `/proc` walk did kill the
+`setsid` grandchild); every mutation was reverted with `git diff` clean.
+
+**Work unit 2 — the `System::Text` approvals.** Verified and found to stand, with three additions:
+#2017 gains **six** alternatives rather than four and its recommendation changes, because the stock
+replacement fallback measurably **ignores** its `char` argument and the decoder surface is already
+byte-vector-shaped; CCF-012 was re-enumerated from scratch across all 16 brace-scanning files
+(**exactly two** composite-format implementations) with grammar rejections separated from
+index-out-of-range; and A1+A2 was promoted to an explicit atomicity requirement. **CCF-012 is not
+marked closed.**
+
+Both are now requested in one place, `docs/ConsolidatedApprovalPackage.md`, as **three** Diagnostics
+decisions and **nine** Text decisions with one grouped checklist. **No approval was requested,
+implied or assumed, and no gated work was implemented.**
+
+**The one compatible portion found and implemented — #2033.** The reader-join disclosure half: six
+`Process.hpp` contracts made true and `ProcessReaderJoinBlockingPinTests.cpp` added (+6 — four pins,
+one control proving they isolate the inherited pipe holder rather than slow calls, one teardown
+check), mutation-checked by replacing the join with option C's `detach`, which failed all four while
+the control stayed green. Zero executable production change.
+`SharpRuntimeTests_Diagnostics` **219 → 225**.
+
+**Work unit 3 — the next namespace, re-derived by measurement.** `System::Net`: **10 open findings
+of which 3 are `high`** (30 %, the highest of any un-reviewed namespace with more than six
+findings), **no** `docs/` plan, one module and one namespace, a freshly reviewed `Uri` dependency,
+and **#1962 is `modules/net-network-information`** so it gates nothing here.
+`docs/SystemNetNamespaceReviewPlan.md` (#2034, 16 sections) reproduced **all ten** premises,
+including an ASan `heap-buffer-overflow` at the finding's own line. **Four premises were corrected.**
+Seven causes **N-A … N-G**, six compatible tickets **#2035–#2039, #2041** and four gated
+**#2040, #2042, #2043, #2044**. **Nothing was implemented.**
+
+**Audit:** SR-AUD-305/306/308/309 move to `confirmed (design-complete)`.
+**112 remediated / 252 confirmed / 364 total**, design-complete **38 → 42**; the confirmed total is
+unchanged because this batch remediated nothing, by design. **No `SR-AUD-*` identifier was created.**
+
+Full evidence, sanitizer accounting and probe inventory: `NEXT.md` under
+"Autonomous batch handoff, 2026-08-04 (approval packages + `System::Net` review)".
