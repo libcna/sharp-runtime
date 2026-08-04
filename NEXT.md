@@ -3,29 +3,337 @@
 
 # NEXT.md
 
-*Last verified: 2026-08-04. Branch `feature/remediation-batch-system-net-compatible`, cut from the
-clean tip `4777f95`. **Not pushed — no push was requested during this batch.** No merge, rebase,
-tag, force-push, PR, publication, amend or history rewrite; all commits unsigned
+*Last verified: 2026-08-04. Branch `feature/remediation-batch-buffers-review`, cut from the clean
+tip `27061bf`. **Not pushed — no push was requested during this batch.** No merge, rebase, tag,
+force-push, PR, publication, amend or history rewrite; all commits unsigned
 (`git -c commit.gpgsign=false`) because this environment has no usable private signing key. The
-batch implemented the **entire compatible `System::Net` queue** created by review #2034 —
-**#2041, #2035, #2036, #2037, #2038, #2039** in the plan's own §13 dependency order — plus the
-mandatory disclosure-and-pins ticket **#2047**. **Five findings moved `confirmed → remediated`**
-(SR-AUD-300, 301, 302, 303, 307) and **SR-AUD-304 became `confirmed (design-complete)`**, three of
-its four halves repaired and the wildcard half left to the gated #2043. **Ten premises were
-corrected by measurement.** Two new ordinary inactive tickets, **#2045** and **#2046**, carry
-defects deliberately not absorbed. Audit **117 remediated / 247 confirmed / 364 total**, of which
-**43** carry `confirmed (design-complete)`; **no `SR-AUD-*` identifier was created — numbering
-stays frozen at 364.** Gate **15,619 tests across 37 executables: 15,612 passing, 1 skipped, 6
+batch performed the **`System::Buffers` namespace review (#2048)** —
+`docs/BuffersNamespaceReviewPlan.md`, 23 sections — and then implemented **seven of its eight
+compatible tickets**: **#2049, #2050, #2051, #2052, #2053, #2055** and the disclosure-and-pins
+ticket **#2061**. **Four findings moved `confirmed → remediated`** (SR-AUD-072, 073, 076, 083) and
+**four became `confirmed (design-complete)`** (SR-AUD-071, 074, 087, 088), each with a blocked
+ticket and a mutation-checked pin. **Eight premises were corrected by measurement**, four of which
+changed what shipped. **Two post-audit defects were found and repaired** — a reachable
+UBSan-confirmed signed overflow and a Θ(n²) search allocating 384 MB for 32 KB of data — with
+**ordinary ticket numbers and no `SR-AUD-*` identifier; numbering stays frozen at 364.** Audit
+**121 remediated / 243 confirmed / 364 total**, of which **47** carry `confirmed
+(design-complete)`. Gate **15,692 tests across 37 executables: 15,685 passing, 1 skipped, 6
 failing** for the same two measured causes as before, unchanged and not hidden.
-`SharpRuntimeTests_Net` **240 → 324**, add-only. Graph **41 / 91**, seams **2 / 18**, negative
+`SharpRuntimeTests_Buffers` **536 → 609**, add-only. Graph **41 / 91**, seams **2 / 18**, negative
 fixtures **10 / 81** over 91 compiler invocations at peak 2 jobs. **Doxygen and `ccache` are both
-absent from this container and were NOT run.** #2040/#2042/#2043/#2044 remain **blocked** and are
-now all behaviour-pinned; **#1962 and #1773 remain blocked**; CCF-012 was **not** marked closed.
-See the first handoff below.*
+absent from this container and were NOT run.** #2054 stays **`todo`** and compatible-ready;
+#2056/#2057/#2058/#2059 are **blocked** and all behaviour-pinned; #2060 is a **deferred
+verification**; **#1962 and #1773 remain blocked**; CCF-012 was **not** marked closed. See the
+first handoff below.*
 
 ---
 
-## Autonomous batch handoff, 2026-08-04 (the whole compatible `System::Net` queue)
+## Autonomous batch handoff, 2026-08-04 (the `System::Buffers` review and its compatible half)
+
+### 1. Selection, verified rather than inherited
+
+The previous handoff nominated `modules/buffers` or `modules/net-http`. That was **re-derived by
+measurement** over `audit/AUDIT_FINDINGS_INDEX.md`, not accepted: the index was re-parsed in full
+and returned **364 findings, 117 remediated, 204 confirmed, 43 design-complete** — exactly the
+previous batch's claim. Every un-reviewed unit with ≥ 6 open findings was scored (plan §1).
+
+`modules/buffers` measured **11 open / 3 high / 27 %**. It is **tied with `modules/io`** for the
+largest open count of any un-reviewed unit, and `io` has **zero** high findings, so the tie breaks
+decisively; 27 % is the highest high-severity ratio of any un-reviewed unit with more than six
+findings (`net-websockets` is 33 % but has only six). All three highs are **memory safety on a
+public door**, not formatting parity. The handoff was **not stale** — it was right, and is now
+right for a recorded reason.
+
+**One correction to the selection itself: the namespace has 12 open findings, not 11.**
+`SR-AUD-088` owns `System::Buffers::MemoryHandle`, which lives in
+`modules/core/include/System/Buffers/` because `Core.Base` cannot depend on `Buffers`, so a
+module-path reading of the index does not show it under `buffers`. It was reviewed here.
+
+### 2. What was implemented
+
+| Commit | Tickets | Findings | Repair | Tests |
+|---|---|---|---|---|
+| `11bf575` | **#2048** | — | the review itself; nothing implemented | — |
+| `a620ade` | **#2049**, **#2050**, **#2051** | SR-AUD-072, 073, + post-audit | validate `ReadOnlySequence`'s raw pointer/length metadata and `TryGet`'s position; compute `ArrayBufferWriter`'s growth total in `longcs` and throw `OutOfMemoryException` | +25 |
+| `e77ec9d` | — | — | plan corrections (§23) | — |
+| `a926730` | **#2052**, **#2053**, **#2055** | SR-AUD-083, 076, + post-audit | empty `ToString` for a zero symbol; validated `ArrayPool::Create`; linear `PositionOf` | +25 |
+| `f9d2a11` | **#2061** | 071, 074, 086, 087, 088 | disclosure only — **zero executable production change** — plus 23 pins and 6 layout `static_assert`s | +23 |
+| `4ed2621` | — | — | audit records, eight status changes | — |
+
+**No signature, `noexcept`, virtual, vtable, data member or object-layout change anywhere.** Six
+`sizeof` values are now `static_assert`ed (`ReadOnlySequence<int>` 32, its `Enumerator` 16,
+`MemoryPoolHeapOwner_<int>` 32, `ArrayBufferWriter<char>` 40, `StandardFormat` 2, `MemoryHandle`
+24), so a gated option that adds a member cannot land silently.
+
+### 3. The load-bearing corrected premises
+
+Eight in total (plan §6); **four changed what shipped.**
+
+**SR-AUD-073 needs no forged `SequencePosition`.** The finding frames the out-of-slice read as a
+forgery enabled by SR-AUD-069's mutable representation. Measured, `seq.getStartProperty()` — a
+perfectly ordinary position — held across `seq.Slice(...)` and passed to the slice's `TryGet`
+returns a view covering elements the slice does not contain. That is an ordinary caller mistake,
+so the finding *understates* reachability, and it is why the repair validates the **range** rather
+than the segment marker the audit proposed: the range check closes both that path and the
+negative-integer path in one rule.
+
+**SR-AUD-071 is two defects, not one.** The post-dispose getter needs a terminal flag —
+measured, `sizeof(MemoryPoolHeapOwner_<int>)` is 32 with **no padding**, so it would become 40, a
+public object-layout change — while the retained-view half needs a `Memory<T>` ownership change in
+`Core.Base` (CCF-019). Treating them as one entry would have either blocked a disclosure that was
+available today or smuggled a layout change in behind a high-severity label.
+
+**SR-AUD-072's negative-length case does not fault.** It escapes a native `std::length_error`
+through a public door, and UBSan reports nothing for it — so the closure criterion is the declared
+`System::` exception, not a clean ASan run.
+
+**SR-AUD-086 is two independent claims, not one.** That .NET's *signed* and its *unsigned* decimal
+parsers accept a leading `+` are facts about two different reference files, and
+`/rv/tmp/runtime/src/libraries/` is **absent from this container**. The internal inconsistency is
+confirmed (`'N'` accepts `+` for both, `'G'`/`'D'`/default for neither), but widening an accepted
+input set on an unverified premise is what the method exists to prevent. **Deferred as #2060**,
+with all four combinations pinned.
+
+### 4. Two post-audit defects, both repaired
+
+Neither carries an `SR-AUD-*` identifier.
+
+**#2051 — `ArrayBufferWriter` growth.** The audit filed `currentLength + growBy` only under *"Other
+missing assertions"*, i.e. as untested. It is reachable UB: a capacity-1 writer and one
+`GetSpan(2147483647)` produced `signed integer overflow: 1 + 2147483647 cannot be represented in
+type 'int'`, then a native `std::length_error`. .NET performs the same addition but C#'s unchecked
+`int` **wraps by definition** and .NET catches the wrap immediately — the idiom cannot be ported
+as written. CCF-004.
+
+**#2055 — `BuffersExtensions::PositionOf`.** Unmentioned anywhere in the audit. It re-sliced and
+materialised the whole sequence once per element; `Slice` copies the *entire* backing vector.
+Measured with a counting `operator new`, searching for the last element:
+
+| n | before | after |
+|---|---|---|
+| 1000 | 2,000 allocations / 6.0 MB | 0 / 0 B |
+| 8000 | 16,000 allocations / **384.0 MB** / 9.28 ms | 0 / 0 B / 0.00 ms |
+| 100000 | not attempted (~60 GB) | 0 / 0 B / 0.07 ms |
+
+Bytes quadrupled per doubling of n — Θ(n²) over a shape that is a single contiguous segment by
+construction.
+
+### 5. Sanitizer evidence — with the discrimination proofs
+
+One probe source compiled twice; the `before` column's include path is shadowed by
+`build-probe/2048_before_include/`, materialised with `git show 11bf575:…`, so the only difference
+between the columns is the code under test. The module is header-only, so both columns compile the
+affected bodies **from source** — no stale archive can be involved.
+
+| Probe mode | Before | After |
+|---|---|---|
+| `trygetneg` | **ASan `heap-buffer-overflow` READ**, 4 bytes before a 12-byte region | `ArgumentOutOfRangeException` |
+| `trygetslice` | **no exception** — a 3-element view for a 2-element slice | `ArgumentOutOfRangeException` |
+| `ctornull` | **UBSan null load** then **ASan `SEGV` on 0x0** | `ArgumentNullException` |
+| `ctorneg` | native `std::length_error` | `ArgumentOutOfRangeException` |
+| `growth` | **UBSan `signed integer overflow: 1 + 2147483647`** then native `std::length_error` | `OutOfMemoryException` |
+
+All five discriminate. The whole 586-test suite at that point also ran clean under **ASan + UBSan
++ LSan** with zero reports, compiled from source at peak 2 jobs.
+
+**Two honest non-results.** The plan predicted UBSan would stay silent for `trygetneg` — it does,
+because the read is in-type and merely outside the allocation, and that prediction is recorded as
+confirmed rather than dropped. And **TSan has no subject anywhere in this batch**: both singletons
+(`ArrayPool<T>::Shared`, `MemoryPool<T>::Shared`) are Meyers singletons that are also *stateless*
+— every `Rent` allocates fresh — so no compatible ticket touches shared mutable state. No TSan
+claim is made.
+
+### 6. #2061's pins were mutation-checked, including three controls
+
+**Six** mutations were applied temporarily and every one failed its own pin:
+
+| Mutation | Result |
+|---|---|
+| disposed owner throws | 3 pins fail (plus 2 pre-existing tests) |
+| `default` sequence enumerates 0 segments | 2 pins fail |
+| `MemoryHandle` gains `~MemoryHandle(){ Dispose(); }` | 1 pin fails |
+| `'G'`/`'D'` accept a leading `+` | 2 pins fail; **both `'N'` pins stay green** |
+| a segment-chain constructor appears | `static_assert` fires **at compile time** |
+| `MemoryPoolHeapOwner_` gains a `bool` | `sizeof` `static_assert` fires, 32 → 40 |
+
+All six reverted; `git diff` over the touched files is empty. **Three pins are controls** and must
+*not* move under the mutation that targets their neighbour — the two `'N'` pins, and the
+retained-view pin which stayed green while the disposed-getter mutation failed three others. That
+is what shows the mutations were targeted rather than indiscriminate.
+
+**Nothing in #2061 approves, implements or preselects any part of #2056, #2057, #2058, #2059 or
+#2060.**
+
+### 7. One process mistake, recorded rather than hidden
+
+Three, all caught by a check rather than by luck, and all recorded rather than hidden.
+
+- Reverting a temporary mutation with `git checkout -- <file>` **destroyed two uncommitted #2061
+  doc edits** (`MemoryHandle.hpp` and `ReadOnlySequence::getEmpty`). Both were detected by a
+  grep over the expected ticket references, re-applied, and verified present before the commit;
+  every remaining mutation used file backups under `build-tmp/` instead.
+- The same reflex **truncated `plan.md`'s stacked header block** — that file keeps one italic
+  header per batch and the new one must be *prepended*, not substituted. Caught immediately by a
+  line count (6,619 → 3,479), restored from `HEAD`, redone as a prepend, and confirmed at
+  **129 insertions / 0 deletions**.
+- A global string replace inserted this batch's `local_ci_check.sh` row into **thirteen**
+  historical handoff tables in this file instead of one. Caught by a `grep -n`, twelve removed,
+  and the diff re-inspected until its only deletions were the previous header — which is itself
+  retained below as a snapshot, per this file's convention.
+
+Separately, `a620ade` carries **#2051** as well as #2049/#2050 although its message names only
+the latter two — `git add modules/buffers` swept it in. Recorded in plan §23.2 and in #2051's
+ticket notes rather than corrected, because this batch does not rewrite history.
+
+### 8. Validation, re-measured in this context
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | exit 0, **0 errors, 0 warnings** |
+| Full gate, all 37 executables run individually | **15,692 tests: 15,685 pass, 6 fail, 1 skip** |
+| `validate_module_boundaries.py` | OK — **41 modules / 91 edges** |
+| `validate_module_boundaries_test.py` | 7 / 7 |
+| `generate_component_catalog.py --check` | catalogue current |
+| `db_consistency_check.py` | OK |
+| `check_version_seam_odr.py` | OK — **2 seams / 18 definitions** |
+| `check_version_seam_odr_test.py` | 15 / 15 |
+| `check_negative_consumer_fixtures.py` | **10 fixtures / 81 sites**, every site rejected, 91 invocations, **peak 2 jobs**, 32.8 s |
+| `check_negative_consumer_fixtures_test.py` | 45 / 45 |
+| `check_selective_components.sh` | **PASSED** — full matrix, **10 components**, every isolated consumer check green, the forbidden fixture still rejected, **651 s** (09:27:57 → 09:38:49), single serialized process, peak 2 compiler jobs |
+| `local_ci_check.sh build` | boundaries **41 / 91**, catalogue current, seams **2 / 18**, fixtures **10 / 81** (peak 2 jobs, 30.6 s), configure and build **0 warnings / 0 errors**, then **stopped at the five known `PingTests`** — reported separately from the complete 37-executable gate above, per this batch's own instruction |
+| `git diff --check` | clean |
+| Doxygen | **NOT RUN — not installed in this container** |
+| `ccache` | **NOT INSTALLED** |
+
+The gate was run as 37 individual executables and parsed from their captured logs, not through a
+first-failure-abort runner, so the totals are a complete measurement. `+73` is exactly this
+batch's own additions (18 + 7 + 25 + 23).
+
+### 9. The six known failures — re-measured, and still NOT environmental-only
+
+Identified by name. Every one is pre-existing and unrelated to this batch; none was disabled,
+weakened, skipped, recategorised or special-cased.
+
+**Five `PingTests`** — `Send_Loopback_Succeeds`, `Send_LoopbackByString_Succeeds`,
+`Send_CustomBuffer_EchoedBack`, `Send_WithOptions_Succeeds`, `SendPingAsync_Loopback_Succeeds`.
+Re-measured here: `/proc/sys/net/ipv4/ping_group_range` is `1  0` (an empty range) and uid is
+**0**; `socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP)` → **EACCES**; `socket(AF_INET, SOCK_RAW,
+IPPROTO_ICMP)` → **succeeds**. A working ICMP socket is available and `Ping` cannot use it because
+it lacks the raw receive path — the real gap **#1962**, still **blocked** and not implemented.
+
+**One `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`** — `socket(AF_INET6,
+SOCK_STREAM, 0)` returns **EAFNOSUPPORT** and `/proc/net/if_inet6` does not exist. This one **is**
+environmental.
+
+**One skip** — `CultureInvariantFormattingTests.NumericAndDateFormatting_UnaffectedByNonInvariantGlobalLocale`,
+locale-dependent, pre-existing.
+
+### 10. Remaining queue for this namespace
+
+**Compatible and ready — one ticket left:**
+
+| # | P | Scope |
+|---|---|---|
+| **#2054** | P2 | make the four implicit default-constructible-`T` requirements and `SearchValues`' `std::hash<T>` requirement explicit and diagnosed (SR-AUD-070 + 077) |
+
+It was left last deliberately: it is the only compatible ticket in this namespace that needs a new
+`test/consumer/*_negative.cpp` site, i.e. the only one touching the fixture checker. The planned
+repair puts each `static_assert` **at the point where the requirement is already enforced**, so
+exactly the same set of programs continues to compile; a class-scope assert is explicitly rejected
+as a source break.
+
+**Blocked on approval — all four behaviour-pinned:**
+
+| # | P | Needs |
+|---|---|---|
+| #2056 | P2 | +8 bytes in `MemoryPoolHeapOwner_` **and** "returns empty" → "throws `ObjectDisposedException`" (SR-AUD-071) |
+| #2057 | P2 | a discriminator member in the public `ReadOnlySequence<T>`, 32 → 40 (SR-AUD-074) |
+| #2058 | P2 | multi-segment `ReadOnlySequence` — new ctor, new members, eight methods rewritten (SR-AUD-087); **supersedes #2057** |
+| #2059 | P3 | move-only or refcounted `MemoryHandle`, reaching all of `Core.Base` (SR-AUD-088, CCF-019) |
+
+**Deferred verification:** #2060 — read `Utf8Parser.Integer.Signed.D.cs` and
+`Utf8Parser.Integer.Unsigned.D.cs` when the reference tree exists; answer the two halves
+separately.
+
+**Also open and untouched by this batch:** the consolidated approval package
+(`docs/ConsolidatedApprovalPackage.md` — Diagnostics D-A/D-B/D-C, Text A1/A2/B/C1/C2/C3/D/E/F,
+**none approved**), #2040/#2042/#2043/#2044, #1995–#1999, #2003, #1956–#1959, #1969, #1970,
+**#1962**, **#1773**, #2045, #2046, and four low-priority `todo` rows (#1963, #1985, #1986,
+#2005).
+
+### 11. Next recommended work
+
+Finish **#2054** first — it is one compatible ticket and it closes the last non-gated finding pair
+in this namespace.
+
+Then the next namespace by the same measured rule is **`modules/net-http`** (9 open, 2 high,
+22 %, no plan) or **`modules/xml`** (8 open, 2 high, 25 %, no plan, plus 4 more in `xml-linq`).
+`modules/io` still has 11 open but **zero** high. Re-derive the table before committing to either;
+this batch's §1 is a snapshot, not a standing answer.
+
+Alternatively, the largest single unblocking action available is still not a review:
+**approving any subset of `docs/ConsolidatedApprovalPackage.md`**, which gates twelve decisions
+across `System::Diagnostics` and `System::Text` — and this batch has now added four more gated
+decisions in `System::Buffers` on top of them.
+
+### 12. Resources and repository safety
+
+| Directory | Size |
+|---|---|
+|---|---|
+| `build/` | 1.7 GB |
+| `build-probe/` | 4.5 MB (probe sources, the `2048_before_include/` tree and every before/after log, all retained; the ~145 MB of probe and sanitizer **binaries** were deleted once their evidence was transcribed into the plan §23.3 and the audit reports, per `CLAUDE.md` rule 11) |
+| `build-tmp/` | 5.1 MB (gate, selective and local-CI logs; the selective matrix's own tree is removed by that script's exit trap) |
+
+`build-asan/`, `build-modular/`, `build-consumer/` and `cmake-build-debug/` were **not** created —
+the sanitizer runs compiled into `build-probe/` instead, which is the shared throwaway directory
+`CLAUDE.md` names. No tree under `/tmp`, `/var/tmp` or `/dev/shm`. **Maximum aggregate compilation
+parallelism: 2 jobs**, verified with `ps -C cc1plus` during the selective run and during the
+sanitizer sweep; the negative-fixture checker reported its own peak as 2. Every Python invocation
+used `PYTHONDONTWRITEBYTECODE=1`; no `__pycache__` file was created or staged.
+
+**CNA, mobile-eggbert, sibling and parent repositories and downstream consumers were not
+inspected, searched, built or modified.** No push, merge, rebase, tag, force-push, PR,
+publication, amend or history rewrite. All commits authored and committed as
+`Claude <noreply@anthropic.com>` and unsigned.
+
+### 13. Known limitations of this environment
+
+- **Doxygen is not installed**, so the warning ceiling could not be checked. This batch adds
+  doc-comments to seven headers, which could plausibly move it — but that is reasoning, not a
+  measurement, and is **not** claimed as a verified result.
+- **`ccache` is not installed**, so no compilation was cached.
+- **The .NET reference tree `/rv/tmp/runtime/src/libraries/` is absent**, re-verified. This is why
+  #2060 exists rather than a repair.
+- **IPv6 is absent** (`/proc/net/if_inet6` missing, `AF_INET6` → `EAFNOSUPPORT`).
+- **`net.ipv4.ping_group_range` is `1  0`**, so unprivileged ICMP is denied while raw ICMP works.
+- A clean sanitizer result here proves memory safety on the paths exercised; it does **not** prove
+  .NET parity, and is not offered as such.
+
+---
+
+## Prior handoff, retained: 2026-08-04 (the whole compatible `System::Net` queue)
+
+*Prior handoff snapshot, retained historically: 2026-08-04. Branch
+`feature/remediation-batch-system-net-compatible`, cut from the clean tip `4777f95`. **Not
+pushed — no push was requested during this batch.** No merge, rebase, tag, force-push, PR,
+publication, amend or history rewrite; all commits unsigned (`git -c commit.gpgsign=false`)
+because this environment has no usable private signing key. The batch implemented the **entire
+compatible `System::Net` queue** created by review #2034 — **#2041, #2035, #2036, #2037, #2038,
+#2039** in the plan's own §13 dependency order — plus the mandatory disclosure-and-pins ticket
+**#2047**. **Five findings moved `confirmed → remediated`** (SR-AUD-300, 301, 302, 303, 307) and
+**SR-AUD-304 became `confirmed (design-complete)`**, three of its four halves repaired and the
+wildcard half left to the gated #2043. **Ten premises were corrected by measurement.** Two new
+ordinary inactive tickets, **#2045** and **#2046**, carry defects deliberately not absorbed. Audit
+**117 remediated / 247 confirmed / 364 total**, of which **43** carried `confirmed
+(design-complete)`; **no `SR-AUD-*` identifier was created — numbering stays frozen at 364.** Gate
+**15,619 tests across 37 executables: 15,612 passing, 1 skipped, 6 failing** for the same two
+measured causes as before, unchanged and not hidden. `SharpRuntimeTests_Net` **240 → 324**,
+add-only. Graph **41 / 91**, seams **2 / 18**, negative fixtures **10 / 81** over 91 compiler
+invocations at peak 2 jobs. **Doxygen and `ccache` are both absent from this container and were
+NOT run.** #2040/#2042/#2043/#2044 remain **blocked** and are now all behaviour-pinned; **#1962
+and #1773 remain blocked**; CCF-012 was **not** marked closed.*
+
 
 ### 1. What was implemented, in the plan's own order
 

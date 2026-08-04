@@ -1,5 +1,30 @@
 # Sharp Runtime plan
 
+*Last verified: 2026-08-04 — branch `feature/remediation-batch-buffers-review`, cut from
+`27061bf` and **not pushed; no push was requested during this batch**. No merge, rebase, tag, PR,
+force-push, amend or history rewrite; the pre-existing local-only commits were left untouched. All
+new commits intentionally unsigned. The batch performed the **`System::Buffers` namespace review
+(#2048)** — `docs/BuffersNamespaceReviewPlan.md`, 23 sections, the eighth in the #1950 series —
+and then implemented **seven of its eight compatible tickets**: **#2049, #2050, #2051, #2052,
+#2053, #2055** plus the disclosure-and-pins ticket **#2061**. **Four findings moved
+`confirmed → remediated`** (SR-AUD-072, 073, 076, 083) and **four became `confirmed
+(design-complete)`** (SR-AUD-071, 074, 087, 088). **Eight premises were corrected by
+measurement**, four of which changed what shipped — the load-bearing one being that SR-AUD-073's
+out-of-slice read needs **no forged `SequencePosition`** at all, since an ordinary
+`getStartProperty()` held across a `Slice` produces it, which is why the repair validates the
+position's **range** rather than the segment marker the audit proposed. **Two post-audit defects
+were found and repaired with ordinary ticket numbers**: a reachable UBSan-confirmed signed
+overflow in `ArrayBufferWriter`'s growth arithmetic that the audit had filed merely as untested,
+and a Θ(n²) `BuffersExtensions::PositionOf` allocating **384 MB** to search 32 KB, which the audit
+never mentioned. **The `System::Buffers` namespace is wider than `modules/buffers`: 12 open
+findings, not 11** — SR-AUD-088 owns `System::Buffers::MemoryHandle`, indexed under `modules/core`
+by path. **No approval was requested, implied or assumed; #2056/#2057/#2058/#2059 are blocked and
+all behaviour-pinned; #2060 is a deferred verification; #1962 and #1773 remain blocked; CCF-012
+was NOT marked closed.** Audit **121 remediated / 243 confirmed / 364 total**, of which **47** are
+design-complete; **no `SR-AUD-*` identifier was created — numbering stays frozen at 364.** Gate
+**15,692 / 15,685 passed / 1 skipped / 6 failed** across all 37 executables run individually, the
+same two measured causes as before. The prior header stack is retained below.*
+
 *Last verified: 2026-08-04 — branch `feature/remediation-batch-system-net-compatible`, cut from
 `4777f95` and **not pushed; no push was requested during this batch**. No merge, rebase, tag, PR,
 force-push, amend or history rewrite; the pre-existing local-only commits were left untouched. All
@@ -6617,3 +6642,111 @@ path) and one `SocketTests` IPv6 case (`/proc/net/if_inet6` **absent**). Graph *
 self-tests **45 / 45** and **15 / 15**, module-boundary self-tests **7 / 7**, catalogue current,
 DB consistency OK, build **0 warnings / 0 errors**, `git diff --check` clean, selective components
 **PASSED**. Doxygen and `ccache` are **not installed** here and nothing was installed.
+
+## Batch 2026-08-04 — the `System::Buffers` namespace review (#2048) and seven of its eight compatible tickets
+
+Branch `feature/remediation-batch-buffers-review` from `27061bf`; six commits, all unsigned and
+local-only, no push. Durable records: `docs/BuffersNamespaceReviewPlan.md` and this file's own
+*"Last verified"* header stack.
+
+The **eighth** namespace review. **The selection was re-derived, not inherited**: the index was
+re-parsed in full (364 / 117 remediated / 204 confirmed / 43 design-complete, matching the
+previous batch exactly) and every un-reviewed unit with ≥ 6 open findings was scored.
+`modules/buffers` measured **11 open / 3 high / 27 %** — tied with `modules/io` on count, but
+`io` has **zero** high findings, and 27 % is the highest high ratio of any un-reviewed unit with
+more than six findings. All three highs are memory safety on a public door. The previous
+handoff's nomination was therefore **right**, and is now right for a recorded reason.
+
+**One correction to the selection itself.** The *namespace* has **12** open findings, not 11:
+`SR-AUD-088` owns `System::Buffers::MemoryHandle`, which lives in `modules/core` because
+`Core.Base` cannot depend on `Buffers`, so a module-path reading of the index hides it. It was
+reviewed here and is now design-complete.
+
+### What was implemented
+
+| Commit | Tickets | Repair |
+|---|---|---|
+| `11bf575` | #2048 | the review; nothing implemented |
+| `a620ade` | #2049, #2050, #2051 | validate `ReadOnlySequence`'s raw metadata and `TryGet`'s position; `ArrayBufferWriter` growth in `longcs` → `OutOfMemoryException` |
+| `e77ec9d` | — | plan §23 corrections |
+| `a926730` | #2052, #2053, #2055 | empty `ToString` for a zero symbol; validated `ArrayPool::Create`; linear `PositionOf` |
+| `f9d2a11` | #2061 | disclosure + 23 pins + 6 layout `static_assert`s, **zero executable production change** |
+| `4ed2621` | — | audit records, eight status changes |
+
+**No signature, `noexcept`, virtual, vtable, data member or object-layout change anywhere.**
+`modules/buffers` is header-only and, measured, no module outside it includes any header this
+batch changed except `MemoryHandle.hpp` (doc-comment only), so the blast radius is the module.
+
+### The corrected premises that changed shipped code
+
+**SR-AUD-073 needs no forged position.** `seq.getStartProperty()` held across `seq.Slice(...)`
+and passed to the slice's `TryGet` returns a view covering elements the slice does not contain —
+an ordinary caller mistake, not the forgery the finding describes. The repair validates the
+**range**, which closes that path and the ASan-confirmed negative-position path in one rule.
+
+**SR-AUD-071 is two defects.** The post-dispose getter needs 8 bytes `MemoryPoolHeapOwner_` has
+no padding for (32 → 40, a public layout change); the retained view needs a `Memory<T>` ownership
+change in `Core.Base`. Only the disclosure was available without approval.
+
+**SR-AUD-072's negative length does not fault** — it escapes a native `std::length_error`, and
+UBSan is silent. **SR-AUD-086 is two unverifiable claims**, not one, and the reference tree is
+absent, so it was deferred (#2060) rather than implemented — widening an accepted input set on an
+unverified premise is what the method exists to prevent.
+
+### Sanitizer evidence
+
+One probe source compiled twice, the `before` include path shadowed by a `git show` tree, so the
+only difference between columns is the code under test:
+
+| Mode | Before | After |
+|---|---|---|
+| `trygetneg` | ASan `heap-buffer-overflow` READ | `ArgumentOutOfRangeException` |
+| `trygetslice` | **no exception**, out-of-slice data | `ArgumentOutOfRangeException` |
+| `ctornull` | UBSan null load + ASan `SEGV` | `ArgumentNullException` |
+| `ctorneg` | native `std::length_error` | `ArgumentOutOfRangeException` |
+| `growth` | UBSan `signed integer overflow: 1 + 2147483647` | `OutOfMemoryException` |
+
+The whole suite also ran clean under ASan + UBSan + LSan. **Two honest non-results**: UBSan stays
+silent for `trygetneg` (predicted, and confirmed as a non-result), and **TSan has no subject** —
+both pool singletons are stateless, so no compatible ticket touches shared mutable state.
+
+### #2061's pins
+
+Six mutations applied temporarily; every one failed its own pin — disposed-throw (3 pins),
+default-enumerates-0 (2), `MemoryHandle` destructor (1), `'G'`/`'D'` accepts `+` (2, while both
+`'N'` pins stayed green), segment-chain constructor (compile-time `static_assert`),
+`MemoryPoolHeapOwner_` gains a `bool` (`sizeof` `static_assert`, 32 → 40). All reverted, `git
+diff` empty. **Three pins are controls** and correctly did not move.
+
+### Validation
+
+Gate **15,692 / 15,685 passed / 1 skipped / 6 failed** across all 37 executables run individually
+and parsed from captured logs — `15,619 → 15,692`, exactly this batch's +73. The six failures are
+the same two measured causes: five `PingTests` (#1962 — `ping_group_range` is `1 0`, so
+unprivileged `SOCK_DGRAM` ICMP is denied while `SOCK_RAW` ICMP **succeeds** and `Ping` has no raw
+receive path) and one `SocketTests` IPv6 case (`/proc/net/if_inet6` **absent**). Graph **41 / 91**,
+seams **2 / 18**, negative fixtures **10 / 81** (91 invocations, peak 2 jobs, 32.8 s), checker
+self-tests **45 / 45** and **15 / 15**, module-boundary self-tests **7 / 7**, catalogue current,
+DB consistency OK, build **0 warnings / 0 errors**, `git diff --check` clean. Doxygen and `ccache`
+are **not installed** here and nothing was installed.
+
+### Three process mistakes, recorded rather than hidden
+
+Reverting a temporary mutation with `git checkout --` destroyed two **uncommitted** #2061 doc
+edits; both were detected by a grep over the expected ticket references, re-applied and verified
+before the commit, and every remaining mutation used file backups instead. The same reflex
+truncated **this file's** stacked header block once — caught immediately by a line count
+(6,619 → 3,479), restored from `HEAD`, and redone as a **prepend**, which is what this file's
+convention actually is, confirmed at 129 insertions / 0 deletions. And a global string replace
+inserted this batch's `local_ci_check.sh` row into **thirteen** historical `NEXT.md` tables
+instead of one; twelve were removed and the diff re-inspected until its only deletions were the
+previous header, which is retained below it as a snapshot. Separately, `a620ade` carries #2051 as
+well as #2049/#2050 although its message names only the latter two.
+
+### Remaining
+
+**#2054** is the one compatible ticket left in this namespace (SR-AUD-070 + 077), left last
+deliberately because it is the only one needing a new negative-consumer-fixture site.
+**#2056–#2059** are blocked and behaviour-pinned; **#2060** is a deferred verification. The next
+namespace by the same measured rule is `modules/net-http` (9 open, 2 high) or `modules/xml`
+(8 open, 2 high) — re-derive before committing.
