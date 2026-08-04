@@ -4,6 +4,7 @@
 #pragma once
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Net/Cookie.hpp"
 
 namespace System::Net {
@@ -35,8 +36,16 @@ namespace System::Net {
         /** @brief Gets whether the collection is empty. */
         [[nodiscard]] bool getIsEmptyProperty() const { return cookies_.empty(); }
 
-        [[nodiscard]] Cookie&       operator[](intcs index)       { return cookies_[static_cast<size_t>(index)]; }
-        [[nodiscard]] const Cookie& operator[](intcs index) const { return cookies_[static_cast<size_t>(index)]; }
+        /**
+         * @brief Indexer: gets the cookie at @p index.
+         * @throws System::ArgumentOutOfRangeException if @p index is negative or not less than Count.
+         */
+        [[nodiscard]] Cookie&       operator[](intcs index)       { return cookies_[validatedIndex(index)]; }
+        /**
+         * @brief Indexer: gets the cookie at @p index.
+         * @throws System::ArgumentOutOfRangeException if @p index is negative or not less than Count.
+         */
+        [[nodiscard]] const Cookie& operator[](intcs index) const { return cookies_[validatedIndex(index)]; }
 
         [[nodiscard]] std::vector<Cookie>::iterator       begin()       { return cookies_.begin(); }
         [[nodiscard]] std::vector<Cookie>::iterator       end()         { return cookies_.end(); }
@@ -44,6 +53,34 @@ namespace System::Net {
         [[nodiscard]] std::vector<Cookie>::const_iterator end()   const { return cookies_.end(); }
 
     private:
+        /**
+         * @brief Converts a public signed index into a container subscript, rejecting every
+         * value outside `[0, Count)`.
+         *
+         * Both indexers previously wrote `cookies_[static_cast<size_t>(index)]`, which is
+         * undefined behaviour for any index the caller got wrong: a negative index becomes a
+         * huge unsigned subscript and `index >= Count` walks off the end of the allocation.
+         * Measured before the guard existed (`build-probe/2041_probe1_before.log`), the two
+         * halves did not even fail the same way -- without a sanitizer `collection[-1]`
+         * *returned normally* with a garbage Cookie whose `Name` printed as `(null)`, while
+         * `collection[Count]` died with SIGSEGV, and under ASan nine of eleven probed indexes
+         * reported a `heap-buffer-overflow` or a `SEGV`. Silently returning wrong data is the
+         * worse of the two, which is why the guard is a domain check rather than an assertion.
+         *
+         * The negative half is tested on the signed value and the upper half only afterwards,
+         * so no `size_t` conversion is ever performed on a negative index -- and, unlike a
+         * single `uintcs` comparison, the bound is not silently truncated if `size()` ever
+         * exceeds `UINTCS_MAX`.
+         */
+        [[nodiscard]] size_t validatedIndex(intcs index) const {
+            if (index < 0 || static_cast<size_t>(index) >= cookies_.size()) {
+                throw System::ArgumentOutOfRangeException(
+                    "index",
+                    "Index was out of range. Must be non-negative and less than the size of the collection.");
+            }
+            return static_cast<size_t>(index);
+        }
+
         std::vector<Cookie> cookies_;
     };
 

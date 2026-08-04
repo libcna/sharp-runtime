@@ -533,8 +533,67 @@ two HTML encoders in one repository with two different escape sets is the CCF-01
 | #2037 | N-C | 302 | **todo**, compatible |
 | #2038 | N-D | 303 | **todo**, compatible |
 | #2039 | N-C | 304 (3 halves) | **todo**, compatible |
-| #2041 | N-B | 307 | **todo**, compatible — do first, it crashes |
+| #2041 | N-B | 307 | **DONE** 2026-08-04 — see §17.1 |
 | #2040 | N-E | 305, 306 | **blocked**, design complete (§14.1) |
 | #2042 | N-F | 308 | **blocked**, design complete (§14.2) |
 | #2043 | N-C | 304 (wildcard half) | **blocked**, design complete (§14.3) |
 | #2044 | N-G | 309 | **blocked**, deferred (§14.4), coupled to #2019 |
+
+---
+
+## 17. Implementation record — the compatible batch
+
+Written as each ticket lands, on branch `feature/remediation-batch-system-net-compatible`
+(cut from `4777f95`). Nothing in §§1–16 is retro-edited; where a measurement here contradicts a
+prediction there, the contradiction is stated rather than the prediction quietly amended.
+
+### 17.1 #2041 — N-B, `CookieCollection`'s indexers (SR-AUD-307)
+
+**Repair.** Both `operator[]` overloads route through one private
+`validatedIndex(intcs) const`, which rejects `index < 0 || index >= Count` with
+`ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less
+than the size of the collection.")` — the message this repository already uses at 23 sites
+(`List<T>`, `Array`, `ArrayList`, `ArraySegment`, `ObservableCollection`), so the absent .NET
+tree was not needed. The negative half is tested on the **signed** value and the `size_t`
+conversion happens only afterwards; the bound is compared in `size_t`, so it cannot be truncated
+the way a single `uintcs` comparison would be when `size()` exceeds `UINTCS_MAX`.
+
+**Evidence — one probe source, six binaries.** `build-probe/2041_probe1_cookiecollection_index.cpp`
+is compiled `{before, after} × {no sanitizer, ASan, UBSan}`; the *before* binaries take the
+pre-repair header from `build-probe/2041_before_include/` (produced by
+`git show HEAD:modules/net/include/System/Net/CookieCollection.hpp`), so the **only** difference
+between the two columns is the header under test. `CookieCollection` is header-inline, so the
+`std::vector<Cookie>` allocation and the indexer read are both compiled from source into every
+binary — no uninstrumented archive stands between them. Eleven indexes × both overloads.
+Log: `build-probe/2041_probe1_before_after.log`.
+
+| Sanitizer | Before | After |
+|---|---|---|
+| ASan | **9 reports** (`heap-buffer-overflow`, `SEGV`) | **0** |
+| UBSan | **2 reports** (null-pointer binding, null-pointer offset) | **0** |
+| none | `[-1]` returns garbage; `[Count]`, `[Count+1]`, `INTCS_MIN`, `INTCS_MAX`, empty-`[0]`, empty-`[-1]` SIGSEGV | every invalid index throws; every valid one identical |
+
+**Two corrections.**
+
+1. **§4.3 is confirmed and is sharper than stated.** The finding's own case `collection[-1]`
+   returns normally on **both** overloads with a garbage `Cookie` — but on an **empty**
+   collection the same `[-1]` crashes. Which outcome appears is a property of the heap, not of
+   the index, which is exactly what makes it undefined behaviour rather than a wrong answer.
+2. **§11's UBSan prediction is half wrong.** It predicted a non-result. UBSan is indeed silent
+   about the `intcs` → `size_t` conversion — that half holds — but it is **not** silent about
+   the consequence on an empty collection, where `data()` is null: two reports before, none
+   after. Recorded as evidence, not as a non-result.
+
+**Tests: +14.** `CookieCollectionIndexTests.cpp` (12) covers `-1`, `0`, `Count-1`, `Count`,
+`Count+1`, `INTCS_MIN`, `INTCS_MAX` on **both** overloads, the empty collection, that a rejected
+access leaves the collection intact, and that iteration and `Count` are untouched.
+`NetLayoutPinTests.cpp` (2) adds the §10 layout pins as `static_assert`s for `Cookie` (152),
+`CookieCollection` (24), `IPAddress` (24), `IPEndPoint` (40) and `SocketAddress` (32) — the guard
+that #2040's option C, which would add a member to the header-only `Cookie`, cannot land
+silently. `SharpRuntimeTests_Net` **240 → 254**.
+
+**Consequences.** No signature, `noexcept`, virtual, vtable, data member or object-layout change.
+Header-inline, so `net-sockets`, `net-http`, `net-http-json`, `net-websockets`,
+`net-network-information` and the integration suite recompiled; all were re-run and all pass
+except the pre-existing `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` (absent
+IPv6) and the five `PingTests` (#1962), neither related to this change.
