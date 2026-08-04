@@ -978,3 +978,84 @@ ASan/UBSan/LSan clean over **37,600** characters walked forward, backward, throu
 `Select("text()")` and across DOM mutation between walks, with the navigator, the DOM bodies
 and `vendor/tinyxml2/tinyxml2.cpp` compiled **from source** (`Xml` is `STATIC`) and
 instrumentation proven by a control heap-use-after-free (`2081_probe2_asan.log`).
+
+---
+
+## 21. Completion reconciliation — `System::Xml` is closed for compatible work
+
+Measured 2026-08-04 at `e34e07f` + the pin commit. **Eight findings own this namespace
+(SR-AUD-348…355). Every one has exactly one disposition; none is unaccounted for.**
+
+| Finding | Severity | Disposition | Ticket | Where the evidence lives |
+|---|---|---|---|---|
+| SR-AUD-348 | medium | **remediated** | #2078 | §20.5 |
+| SR-AUD-349 | medium | **remediated** | #2076 | §20.4 |
+| SR-AUD-350 | high | **remediated** | #2074 | §20.1 |
+| SR-AUD-351 | high | **remediated** | #2075 | §20.2 |
+| SR-AUD-352 | medium | **remediated** | #2079 | §20.6 |
+| SR-AUD-353 | medium | **remediated** | #2077 | §20.3 |
+| SR-AUD-354 | medium | **confirmed — deferred verification, pinned** | #2080 | §4.8, §16, and two pins |
+| SR-AUD-355 | medium | **remediated** | #2081 | §20.7 |
+
+**Seven of eight remediated; the eighth is deferred, not ignored.** `modules/xml-linq` is a
+**separate component** with its own four findings (SR-AUD-333/334/335/336) and stays excluded
+exactly as §18 says.
+
+### 21.1 §19's completion criteria, checked one by one
+
+| # | Criterion | Status |
+|---|---|---|
+| 1 | #2074, #2075, #2076, #2077, #2078, #2079, #2081 are `done` | **met** — all seven |
+| 2 | SR-AUD-348, 349, 350, 351, 352, 353, 355 are `remediated` | **met** — all seven, in the index |
+| 3 | SR-AUD-354 carries a deferred ticket **and a pin** | **met** — #2080 plus two pins in `XmlContractPinTests` |
+| 4 | §7's two post-audit defects carry deferred tickets **and pins** | **met** — #2082 and #2083, one pin each |
+| 5 | the gate shows no new failure and `SharpRuntimeTests_Xml` has grown, add-only | **met** — 394 → **483**, and **not one existing test was updated by #2076/#2078/#2079/#2081** |
+| 6 | §13's ASan question about `InsertAfter`'s dropped node is answered by measurement | **met** by #2075 (§20.2) — a measured *non-result*: an orphan, not a leak |
+
+**Criteria 3, 4 and §10's layout clause were NOT met when the compatible queue finished, and
+that is recorded rather than quietly repaired.** No ticket in the queue had created the pins
+§12 asks for, and §10's `sizeof` probe structs — which it assigns to *"the first implementation
+ticket that lands"*, i.e. #2074 — did not exist either. `modules/xml/tests/System/Xml/
+XmlContractPinTests.cpp` was added during this reconciliation to close all three, and it
+remediates nothing by itself.
+
+### 21.2 What the pins now hold
+
+- **Layout**, via **probe structs, never literal byte counts** (§10's explicit requirement,
+  because these types hold `std::string`/`std::map`/`std::unique_ptr` whose sizes differ
+  between libstdc++ and libc++ and the MinGW/Emscripten/Apple-Clang builds must keep
+  compiling): `XmlReader` and `XmlWriter` are still one owning pointer each — #2076's `closed`
+  flag lives **inside** the `.cpp`-defined `XmlWriterState` — and `XmlNamespaceManager` and
+  `XmlNodeChangedEventArgs` are unmoved. §6.6's premise is pinned too: the six handlers are
+  still assignable **public data members**.
+- **#2080**: `xs:duration` rejected, the native colon form accepted, `ToString` emits no `P`.
+- **#2082**: `<r>&nope;</r>` accepted and round-tripping as `<r>&amp;nope;</r>`.
+- **#2083**: `<p:r/>` accepted, name `p:r`, namespace URI empty.
+- **§7's two security positives, now checked rather than asserted in prose**: internal entities
+  are still never expanded (the billion-laughs shape stays inert literal text) and nesting depth
+  is still bounded; a duplicate attribute and an embedded NUL are still rejected.
+
+### 21.3 No approval-sensitive behaviour was implemented
+
+§14.3 said **none** of this namespace needs a layout, vtable, base-class or public-type change,
+and that held: the four tickets in this batch changed **no** public type, member signature,
+object layout, vtable or exception specification. Every narrowing is documented in
+`docs/Migration-XmlStrictnessAndLifecycle.md`. Nothing deferred was implemented, and no
+deferred acceptance policy was widened or narrowed — the parser's entity, DTD, URI and resolver
+behaviour is untouched, which the pins now enforce.
+
+### 21.4 What remains, and it is all deferred or post-audit
+
+| Ticket | Kind | Why it is not compatible work today |
+|---|---|---|
+| **#2080** | deferred verification (SR-AUD-354) | needs .NET's `xs:duration` grammar and year/month factors; `/rv/tmp/runtime/` absent |
+| **#2082** | deferred verification (post-audit) | narrowing parser acceptance on an unverified premise |
+| **#2083** | deferred verification (post-audit) | same |
+| **#2084** | post-audit, ready but **split from #2076 on purpose** | the `systemId`/`internalSubset` repair is a delimiter/escaping *decision* with no repository evidence; `publicId` alone already has a validator |
+| **#2085** | post-audit, ready | must first decide whether `XmlWriterSettings::CheckCharacters` governs rejection |
+| **#2086** | post-audit, ready | completing `RemoveAllChildren`'s event pair safely needs a lifetime decision (detach vs delete) that is **not** compatible |
+
+**`System::Xml` is complete except for deferred work**, in the precise sense that every
+`SR-AUD-*` finding is either remediated or deferred-with-a-pin, and the three post-audit tickets
+this batch created (#2084, #2085, #2086) are each blocked on a stated decision rather than on
+effort. **No `SR-AUD-*` identifier was created; audit numbering stays frozen at 364.**
