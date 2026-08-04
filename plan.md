@@ -6280,3 +6280,81 @@ documentation repairs with zero runtime effect. Maximum aggregate compilation pa
 unit is the **`System::Uri` namespace review** (14 findings, all medium, no plan yet); if any
 approval lands first, **#1969** is the cheapest win overall and **#1980 G-1** the cheapest
 inside `System::Runtime`.
+
+## Batch 2026-08-04 — the `System::Diagnostics` compatible half (#2024–#2028) and the recovered selective-components gate
+
+Branch `feature/remediation-batch-diagnostics-2024-2028`, cut from the clean tip `9319580`.
+All commits local and unsigned; nothing pushed, merged, rebased, tagged or amended.
+
+**Record-keeping note, stated rather than backfilled.** `plan.md` has no section for the
+`System::Uri` batch (#1987–#2005), the `System::Text` batch (#2006–#2012) or the
+`System::Text` approvals + `System::Diagnostics` review batch (#2022–#2023); its last entry
+before this one is the `System::Runtime` batch. Those sections were not written by the
+sessions that did the work. They are **not** invented here — `NEXT.md` and the per-namespace
+plans hold those records — but the gap is recorded so it is not mistaken for the work not
+having happened.
+
+**Work unit 0 — the selective-components check the previous session could not finish.**
+Preflight confirmed no `cmake`, `ninja`, `make`, `cc1`, `cc1plus`, `g++`, `clang++` or
+`check_selective_components.sh` process existed. One instance was then run, verified
+repeatedly by `ps` at exactly **two** `cc1plus` processes and one
+`cmake --build … --parallel 2`. It **passed, exit 0, in 16 min 40 s** — all ten components,
+all three negative fixtures rejected, and every `Text.Json` isolation assertion held. The
+previous session's report of "~35 minutes on `Core.Base` alone" is consistent with that run
+having been contending with its own accidental duplicate; here `Core.Base` took ~6 minutes.
+**The previous batch's validation gap is closed.**
+
+**Work unit 1 — #2025 → #2026 → #2024 → #2027 → #2028**, the order
+`docs/SystemDiagnosticsNamespaceReviewPlan.md` §13 sets.
+
+| Ticket | Finding | What changed |
+|---|---|---|
+| #2025 | SR-AUD-270 | restarting a `Process` no longer aborts the whole process |
+| #2026 | SR-AUD-274 | the forked child performs no allocating call before `exec` |
+| #2024 | SR-AUD-268, 272 | `WaitForExit` honours `Timeout.Infinite`, rejects `< -1`, and retries on `EINTR` |
+| #2027 | SR-AUD-275 | `Debug`'s provider and both indent-size globals are race-free |
+| #2028 | — | the three headers' contracts made true, and #2029/#2030/#2031 **pinned** |
+
+**Six premises corrected by measurement, none of them cosmetic.** `Process`'s default
+constructor is **private**, so every public call to the instance `Start()` is a restart by
+construction. SR-AUD-270's trigger is a **joinable reader thread**, not a running child, so a
+restart after the previous child had already exited aborted too — the plan's own "must work"
+row was already broken. Captured text **accumulated** across restarts. An **unredirected**
+restart while the child ran silently **abandoned** it unreaped, a path §7.1's one-line
+justification did not cover, so #2025 gets its own observable-change table at §7.4.
+SR-AUD-275's before-state included **heap-use-after-free**, not merely the data race it
+described. And UBSan for #2024 is **non-discriminating** — clean before *and* after — which is
+recorded as such rather than presented as evidence.
+
+**One new defect, filed rather than absorbed: #2032.** `WaitForExit(milliseconds)` blocks past
+its own deadline when a grandchild holds the redirected pipe — measured **29,951 ms against a
+5,000 ms bound**, because `/bin/sh` is `dash`, which forks rather than execs. Every repair
+decides the reader-thread policy that **#2029 gates**, so absorbing it would have pre-empted an
+approval. No `SR-AUD-*` identifier issued; numbering stays frozen at **364**.
+
+**#2029, #2030 and #2031 remain blocked and are now PINNED**, which #2022 made a mandatory
+acceptance criterion rather than an optional courtesy. Every pin was shown to be
+discriminating: the two #2029 pins by temporarily applying §14.1's recommended option C to
+`~Impl` (both failed with their intended messages; reverted, `git diff` clean), #2030 by a
+`static_assert` that makes the §14.2 return-type change a **compile error**, and #2031 by a
+control grandchild that does *not* call `setsid` and **is** killed by the `killpg`.
+**No approval was requested, implied or assumed.**
+
+**Numbers.** Audit **112 remediated / 252 confirmed / 364 total** (was 107 / 257), with
+`confirmed (design-complete)` unchanged at **38**. `SharpRuntimeTests_Diagnostics` **159 → 219
+(+60)**. Whole gate **15,529 tests across 37 executables run individually, 15,522 passed, 1
+skipped, 6 failed** — the same two measured causes, unchanged: five `PingTests` (#1962;
+`ping_group_range` is the empty range `1 0`, so `SOCK_DGRAM` ICMP gives `EACCES` while
+`SOCK_RAW` ICMP succeeds — exactly the missing fallback) and one `SocketTests` (no
+`/proc/net/if_inet6`). Graph **41 / 91 unchanged**, seams **2 / 18**, negative fixtures
+**10 / 81**, build **0 warnings / 0 errors**. **Doxygen was not run — it is not installed.**
+
+**Consequences.** No public signature, object layout, vtable, `noexcept`, mangled-symbol or
+component-edge change. `Process` stays a pimpl; `Debug` and `Trace` have no data members.
+Three narrowed rows, each tabulated before being made: `WaitForExit` below `-1` now throws,
+`WaitForExit(-1)` now blocks instead of returning a meaningless `false`, and a restart while
+the previous child runs is refused. Maximum aggregate compilation parallelism **two jobs**,
+never exceeded, with no two compilations ever running concurrently.
+
+Full evidence, sanitizer accounting and probe inventory: `NEXT.md` under
+"Autonomous batch handoff, 2026-08-04".

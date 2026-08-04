@@ -1,26 +1,243 @@
-*Last verified: 2026-08-03. Branch `feature/remediation-batch-text-approvals-next-review`, cut from
-`80c804b` (the previous batch's tip on `feature/remediation-batch-system-text-review`). **Four
-commits — `017d336`, `6abd16e`, `8114518` plus this handoff commit — all unsigned and all local-only;
-no push was requested.** The pre-existing local-only commits from the earlier batches were carried
-forward untouched: no amend, no rebase, no force-push, no merge, no tag, no PR. This batch
-**verified and consolidated the `System::Text` approval package** for **#2013-#2021** into
-`docs/SystemTextApprovalPackage.md` (six families, one exact approval sentence each) and found
-**ten premises in the review plan's section 14 that did not survive re-measurement**; it split and
-implemented the **one** genuinely compatible portion, **#2022** (test-only: two blocked findings,
-SR-AUD-294 and SR-AUD-299, had **no behaviour-pinning test at all**); it verified **CCF-012**'s
-closure scope without marking it closed; and it then **re-derived the next namespace by
-measurement** and performed the **`System::Diagnostics` review (#2023)** —
-`docs/SystemDiagnosticsNamespaceReviewPlan.md`, eight findings, seven causes **D-A...D-G**, five
-compatible tickets **#2024-#2028** (`todo`) and three design tickets **#2029-#2031** (`blocked`).
-**No approval was requested, implied or assumed, and no gated work was implemented.** Audit stays
-**107 remediated / 257 confirmed / 364 total**, with `confirmed (design-complete)` **35 -> 38**
-(SR-AUD-269, 271, 273); **no `SR-AUD-*` identifier was created; numbering stays frozen at 364.**
-`SharpRuntimeTests_Text` **288 -> 296** (+8, add-only, no production change). Gate **15,469 tests across 37 executables run individually, 15,462 passing, 1 skipped, 6 failing** for the same two measured causes, unchanged and not hidden — **no new failure**; the +8 is exactly #2022's. Graph **41 / 91**, seams **2 / 18**, negative fixtures **10 / 81** (91 invocations, peak 2 jobs), checker self-tests **45 / 45** and **15 / 15**, module-boundary self-tests **7 / 7**, catalogue current, DB consistency OK, build **0 warnings / 0 errors**, `git diff --check` clean. **`scripts/check_selective_components.sh` did NOT complete — see the handoff's §10.**
-**Doxygen NOT run - still not installed here.** **#1773 remains blocked and its downstream use was
-not investigated; #1962, #1956-#1959, #1969, #1970, #1995-#1999 and #2003 remain blocked; #1963,
-#1983 and #2005 remain deferred; none was reopened.** Maximum aggregate parallelism **2 jobs**.
+*Last verified: 2026-08-04. Branch `feature/remediation-batch-diagnostics-2024-2028`, cut from
+`9319580` (the previous batch's tip). **Seven commits, all unsigned and all local-only; no push
+was requested.** Earlier local-only commits were carried forward untouched: no amend, no rebase,
+no force-push, no merge, no tag, no PR. This batch **closed the previous session's incomplete
+`scripts/check_selective_components.sh` gate** — one instance, preflight-verified, **passed in
+16 min 40 s, exit 0**, all ten components and all three negative fixtures — and then
+implemented the **whole compatible half of `System::Diagnostics`**, **#2024–#2028**, in the
+plan's §13 order. **Six premises were corrected by measurement**, including that `Process`'s
+default constructor is **private** (so every public instance `Start()` is a restart) and that
+SR-AUD-270's trigger is a **joinable reader thread**, not a running child. **One new defect was
+filed rather than absorbed — #2032**, `WaitForExit(milliseconds)` blocking 29,951 ms against a
+5,000 ms bound, `blocked` on #2029 because its repair would pre-empt that gate. **#2029, #2030
+and #2031 remain blocked and are now PINNED by #2028, every pin shown discriminating; no
+approval was requested, implied or assumed, and no gated work was implemented.** Audit
+**107 → 112 remediated / 257 → 252 confirmed / 364 total**, `confirmed (design-complete)`
+unchanged at **38**; **no `SR-AUD-*` identifier was created; numbering stays frozen at 364.**
+`SharpRuntimeTests_Diagnostics` **159 → 219 (+60)**. Gate **15,529 tests across 37 executables
+run individually, 15,522 passing, 1 skipped, 6 failing** for the same two measured causes,
+unchanged and not hidden — **no new failure**; the +60 is exactly this batch's. Graph
+**41 / 91**, seams **2 / 18**, negative fixtures **10 / 81** (91 invocations, peak 2 jobs),
+checker self-tests **45 / 45** and **15 / 15**, module-boundary self-tests **7 / 7**, catalogue
+current, DB consistency OK, build **0 warnings / 0 errors**, `git diff --check` clean.
+**Doxygen NOT run — still not installed here.** **#1773 remains blocked and its downstream use
+was not investigated; #1962, #1956–#1959, #1969, #1970, #1980, #1981, #1995–#1999, #2003 and
+#2013–#2021 remain blocked; #1963, #1983 and #2005 remain deferred; none was reopened.** The
+nine `System::Text` approvals **remain ungranted and none of #2013–#2021 was implemented;
+CCF-012 was NOT marked closed.** Maximum aggregate parallelism **2 jobs**.
 `CNA` and `mobile-eggbert` were not read, searched, built, tested or modified.
 See the first handoff below.*
+
+
+---
+
+## Autonomous batch handoff, 2026-08-04 (`System::Diagnostics` #2024–#2028 + the recovered selective-components gate)
+
+Branch `feature/remediation-batch-diagnostics-2024-2028`, cut from the clean tip `9319580`.
+Seven new commits (six of work, plus this handoff), all created with
+`git -c commit.gpgsign=false` because this environment has no usable signing key. **Nothing was
+pushed, merged, rebased, tagged, force-pushed or published, no PR was created, no remote
+reference was altered and no history was rewritten** — including the pre-existing local-only
+commits from the previous batches, which were left exactly as they were.
+
+### 1. Work unit 0 — the selective-components gate, recovered
+
+**Preflight.** `ps -eo pid,ppid,stat,cmd` confirmed **no** `cmake`, `ninja`, `make`, `cc1`,
+`cc1plus`, `g++`, `clang++` or `check_selective_components.sh` process existed. No stale
+process needed terminating.
+
+**The run.** Exactly **one** instance, `TMPDIR="$PWD/build-tmp"`,
+`SHARP_RUNTIME_BUILD_JOBS=2`. **Passed, `EXIT=0`, in 16 min 40 s** (04:19:26 → 04:36:06).
+Verified repeatedly by `ps` at exactly **two** `cc1plus` processes and a single
+`cmake --build … --parallel 2` → `gmake -j2`. The `mktemp` tree lived under `build-tmp/` and
+its `trap` removed it.
+
+| Component | Result |
+|---|---|
+| Core.Base | 5,586 tests, consumer check passed |
+| Collections.Blocking | 8 tests, passed |
+| Text.Json | 244 tests; **7 absent-target assertions** and the no-ZLIB assertion held; `forbidden_text_json_collections` and `forbidden_text_json_object_model` **rejected** |
+| Net.Http.Headers | 373 tests, passed |
+| Net.WebSockets | 24 tests, passed |
+| IO.Compression | 40 tests, passed |
+| IO.Compression.Zip / IO.IsolatedStorage / Security.Cryptography.Random | passed (no test executable in the selective graph) |
+| Xml.Linq | 184 tests; `forbidden_xml_diagnostics` **rejected** |
+
+**One deviation, reported rather than hidden.** This harness kills a foreground command at ten
+minutes, and the check provably cannot finish inside that — `ccache` is **not installed** in
+this container, so every component build is genuinely cold. It was therefore run as **one
+harness-tracked process** rather than in the literal foreground. No shell `&` was used, no
+wrapper forked children, and **no other build, probe, fixture check or compiler command ran
+while it was in flight** — which is the failure the instruction exists to prevent, and which
+`ps` was used to rule out repeatedly. The previous session's "~35 minutes on `Core.Base`
+alone" is consistent with that run having been contending with its own accidental duplicate;
+here `Core.Base` took ~6 minutes. **The gap is closed and the result is claimed.**
+
+A **second, final** run was performed at the end of the batch over the changed tree; see §8.
+
+### 2. Work unit 1 — the five tickets
+
+Plan §13 order: **#2025 → #2026 → #2024 → #2027 → #2028.**
+
+| Ticket | Finding | Repair |
+|---|---|---|
+| **#2025** | SR-AUD-270 | a restart resolves the previous child's readers **before** the `std::thread` assignment: a still-running child is refused with `InvalidOperationException` (uniformly, both redirection combinations), an exited one has its readers joined, its captured text reset and `isCurrentProcess` cleared at the commit point |
+| **#2026** | SR-AUD-274 | the environment is marshalled in the **parent** and handed to `execvpe` (or `environ` + `execvp` off glibc); the child's remaining pre-exec calls are `close`/`setpgid`/`dup2`/`chdir`/`write`/`_exit`/`exec` — **no allocating call remains** |
+| **#2024** | SR-AUD-268, 272 | `-1` is `Timeout.Infinite`; `< -1` raises `ArgumentOutOfRangeException("milliseconds", …)` with `Thread::Join`'s message verbatim; **both** `waitpid` calls retry on `EINTR`, including the `WNOHANG` one in `reapIfNeeded` |
+| **#2027** | SR-AUD-275 | provider reads go through a mutex-guarded `currentProvider()` returning an **owning** snapshot; both indent-**size** globals become `std::atomic`; the clamped local is reported to `OnIndentSizeChanged` |
+| **#2028** | — | three headers made truthful; **8 pins** so #2029/#2030/#2031 cannot land silently |
+
+### 3. Six premises corrected by measurement
+
+1. **`Process`'s default constructor is `private`.** The only public ways to obtain one are the
+   three static `Start` overloads and `GetCurrentProcess()`, so **every** public call to the
+   instance `Start()` is a restart by construction. The "first start" case exists only inside
+   the factories, and the `"No process is associated with this object."` guards are
+   consequently unreachable from public code.
+2. **SR-AUD-270's trigger is a joinable reader thread, not a running child.** Probe case C —
+   previous child already **exited**, caller never waited — aborted with `SIGABRT` too, because
+   only `WaitForExit()`/`getHasExitedProperty()` join the reader. The plan's §10 row *"restart
+   after the previous child exited (must work)"* was **already broken today**.
+3. **Captured text accumulated across restarts** — `"first"` then `"firstsecond"` (case B). §10
+   asked for this to be decided; it is now **reset**.
+4. **An unredirected restart while the child ran silently abandoned it** (case E,
+   `waitpid(WNOHANG)` → 0: alive, still owned, never reapable). This path neither aborted nor
+   deadlocked, so §7.1's one-line compatibility justification **understated** #2025. New §7.4
+   tabulates every row #2025 changes, including that one narrowed row.
+5. **SR-AUD-275's before-state included `heap-use-after-free`**, not merely the data race the
+   finding described: 20 data races **and 12 use-after-free**, the latter inside `Debug::Write`.
+   That is why the repair returns an **owning** snapshot; the mutex alone would not have fixed it.
+6. **UBSan for #2024 is non-discriminating.** §11 asked it to show
+   `now + milliseconds(INTCS_MIN)` is defined — and it is, **clean before *and* after**, because
+   the millisecond→nanosecond conversion stays inside `int64`. Recorded as a non-result, not as
+   evidence.
+
+### 4. One new defect, filed and NOT absorbed — #2032
+
+`Process::WaitForExit(intcs)` blocks past its own deadline when a **grandchild** holds the
+redirected pipe: every poll runs `reapIfNeeded()`, which **joins** the reader threads once it
+reaps, and a reader cannot finish until every holder of the write end closes it. Measured
+**29,951 ms against a 5,000 ms bound** — `/bin/sh` is `dash`, which **forks** for `sleep N`
+rather than exec'ing, so `Kill()` reached only `dash`
+(`build-probe/2032_probe1_waitforexit_timeout_ignored.log`).
+
+It belongs to none of the eight findings — not SR-AUD-269 (the **destructor** blocking), not
+SR-AUD-272 (EINTR), not SR-AUD-268 (the argument domain). It is **not fixed** because every
+repair decides what happens to a reader that cannot finish, and **detaching is exactly §14.1's
+option C**, #2029's gated policy. Ticket **#2032**, `blocked` on #2029. **No `SR-AUD-*`
+identifier was issued; numbering stays frozen at 364.** The two new test files use
+`exec sleep 30` so no test depends on the defect; the shape is preserved in the probe.
+
+### 5. #2029, #2030, #2031 — blocked, and now pinned
+
+`ProcessGatedBehaviourPinTests.cpp` (8 tests) asserts behaviour **known to be wrong**, so none
+of the three can land unnoticed. **Every pin was shown to fail against the behaviour it
+guards** — a pin that cannot fail is not a pin:
+
+| Pin | Discrimination evidence |
+|---|---|
+| #2029, both | **Mutation-checked.** §14.1's option C was applied temporarily to `~Impl` (detach readers, reap `WNOHANG`) and rebuilt: **both failed**, each with its own "#2029 appears to have landed" message. Reverted; `git diff` clean. |
+| #2030, return type | `static_assert` on `decltype(...)`; §14.2's by-value change makes it a **compile error**. Address identity fails too. |
+| #2030, const-mutation | `getHasExitedProperty() const` transitions the object to exited (plan §16 row 5). |
+| #2031 | **Discrimination-checked**: a `setsid` grandchild **survives** `Kill(true)`; an otherwise identical grandchild that does **not** call `setsid` **is killed**. So the pin detects the group escape specifically. |
+
+Plus layout pins (`sizeof(Process) == sizeof(unique_ptr)`) and a zombie-free teardown check in
+each of the four new `Process` suites. **Completing the pins does not authorise or complete
+#2029–#2031.**
+
+### 6. Sanitizer evidence, with every harness's capability proved first
+
+| Sanitizer | Ticket | Result |
+|---|---|---|
+| **TSan** | #2027 | **20 data races + 12 heap-use-after-free → 0 warnings of any kind.** `Debug`/`Trace` are header-only, so the probe **necessarily** instruments the production bodies — no archive could be stale. Fully discriminating. |
+| **ASan** | #2025, #2026 | **0 reports**, with `Process.cpp` compiled **from source** into the probe (346 ASan references verified inside `Process::Start` by `objdump`), not linked from the uninstrumented archive. |
+| **LSan** | #2025, #2026 | **0 reports**, proven discriminating by a deliberate-leak control. **An earlier control reported nothing and was wrong** — the pointer was still reachable from a `volatile` global, so LSan was correct to stay silent; corrected rather than accepted as "LSan is off". |
+| **UBSan** | #2024 | **Non-discriminating, reported as such**: clean **before and after**. Proven live by a deliberate `chrono` duration overflow control. |
+
+**What no sanitizer here proves.** #2026 is an **async-signal-safety** repair, and **TSan
+cannot prove async-signal-safety** — the fork/exec deadlock is a lock-inheritance hazard, not a
+data race, and a clean run of the repeated-start test proves only that the race did not fire.
+The evidence for #2026 is **structural** — no allocating call remains between `fork` and
+`exec`, which is inspectable — plus POSIX `fork(2)`'s requirement. That is stated rather than
+dressed up as a sanitizer result.
+
+### 7. Known full-gate failures — re-measured, not carried over
+
+**6 failures, both causes re-measured this batch, none disabled, weakened, skipped or
+recategorised:**
+
+- **Five `PingTests`** (`SendPingAsync_Loopback_Succeeds`, `Send_CustomBuffer_EchoedBack`,
+  `Send_LoopbackByString_Succeeds`, `Send_Loopback_Succeeds`, `Send_WithOptions_Succeeds`) —
+  the real **#1962** gap. `/proc/sys/net/ipv4/ping_group_range` is **`1  0`**, an *empty*
+  range, and the process gid is `0`, so `socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP)` gives
+  **`EACCES`** while `socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)` **succeeds**. That is exactly
+  the finding: `Ping` only ever opens the unprivileged datagram socket and never falls back to
+  the raw one.
+- **One `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`** —
+  **`/proc/net/if_inet6` is absent**; no IPv6 in this environment.
+- **1 skipped**: `CultureInvariantFormattingTests.NumericAndDateFormatting_UnaffectedByNonInvariantGlobalLocale`.
+
+### 8. Validation
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| whole gate, 37 executables run individually | **15,529 tests, 15,522 passed, 1 skipped, 6 failed** (§7); **15,469 → 15,529, exactly this batch's +60** |
+| `scripts/validate_module_boundaries.py` | OK — **41 modules, 91 edges** (unchanged; `TimeoutInfinite` was spelled locally precisely to avoid a new edge) |
+| `test/validate_module_boundaries_test.py` | **7 / 7** |
+| `scripts/generate_component_catalog.py --check` | OK, current |
+| `scripts/db_consistency_check.py` | OK |
+| `scripts/check_version_seam_odr.py` | OK — **2 seams, 18 definitions** |
+| `test/check_version_seam_odr_test.py` | **15 / 15** |
+| `scripts/check_negative_consumer_fixtures.py --jobs 2` | OK — **10 fixtures, 81 sites**, 91 invocations, **peak 2 jobs**, 47.4 s |
+| `test/check_negative_consumer_fixtures_test.py` | **45 / 45** |
+| `git diff --check` | clean |
+| `scripts/local_ci_check.sh build` | static gates and build passed; **stopped at the five known `PingTests`** — reported separately from the complete 37-executable gate above, which is the authoritative result |
+| `scripts/check_selective_components.sh` | **run a second time over the changed tree — see the final report** |
+| **Doxygen** | **NOT RUN — `doxygen` is not installed in this container.** No package was installed, and the historical ceiling is **not** reported as verified |
+
+### 9. Consequences
+
+**No public signature, object layout, vtable, `noexcept`, mangled-symbol or component-edge
+change anywhere.** `Process` stays a pimpl (`sizeof` == one `unique_ptr`, pinned); `Debug` and
+`Trace` have no data members. `Process.cpp` is relink-only for consumers; `Process.hpp`,
+`Debug.hpp` and `Trace.hpp` changed, so consumers **recompile** — the ordinary consequence of
+an inline/doc change.
+
+**Four narrowed rows, each tabulated before it was made** (plan §7.3 and the new §7.4):
+`WaitForExit(milliseconds < -1)` now throws; `WaitForExit(-1)` now blocks instead of returning
+a meaningless `false`; a restart while the previous child runs is refused; and a restart resets
+the captured text instead of appending to it.
+
+**Process/signal/wait/kill-tree lifetime consequences:** the child is still never reaped by the
+destructor (#2029, pinned); `Kill(true)` still misses a `setsid` descendant (#2031, pinned);
+the captured-output getters still return a live reference (#2030, pinned); and
+`WaitForExit(ms)` can still exceed its bound behind a grandchild (#2032, filed). All four are
+now **documented in the headers** instead of being contradicted by them.
+
+### 10. Build directories, disk and parallelism
+
+`build/` **1.7 G** (reused throughout, never reconfigured), `build-probe/` **4.2 M** after
+deleting this batch's eight probe binaries per `CLAUDE.md` rule 11 — **every `.cpp` source and
+`.log` is retained** as the durable evidence — and `build-tmp/` as the repository-local
+`TMPDIR`. **No new build directory name was invented**, and no tree was created under `/tmp`,
+`/var/tmp` or `/dev/shm`. `ccache` is **not installed** in this container, so nothing was
+retrofitted. **Maximum aggregate compilation parallelism: two jobs, never exceeded**, and no
+two compilations ever ran concurrently — verified by `ps` before every compiler-producing
+command.
+
+### 11. Next recommended work
+
+1. **The `System::Diagnostics` approval package** — #2029, #2030, #2031 are design-complete,
+   now behaviour-pinned, and each has an exact approval sentence at plan §14.1–§14.3. #2032
+   should be answered together with #2029, since one reader-thread policy decides both.
+2. **The `System::Text` approval package** (`docs/SystemTextApprovalPackage.md`) — still
+   **ungranted**; families A (#2013/#2021), B (#2015) and D (#2020, which closes CCF-012) are
+   the recommended three.
+3. **The next namespace** — re-derive by measurement rather than trusting this sentence; on the
+   previous batch's numbers `modules/buffers` and `modules/xml` were the leading candidates.
+4. **Backfill `plan.md`** for the `System::Uri`, `System::Text` and #2022/#2023 batches, whose
+   sections were never written (recorded in `plan.md` under this batch rather than invented).
 
 ---
 
