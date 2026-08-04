@@ -529,7 +529,7 @@ two HTML encoders in one repository with two different escape sets is the CCF-01
 |---|---|---|---|
 | #2034 | — | maps all 10 | this document |
 | #2035 | N-A | 300 | **DONE** 2026-08-04 — see §17.2 |
-| #2036 | N-B | 301 | **todo**, compatible |
+| #2036 | N-B | 301 | **DONE** 2026-08-04 — see §17.3 |
 | #2037 | N-C | 302 | **todo**, compatible |
 | #2038 | N-D | 303 | **todo**, compatible |
 | #2039 | N-C | 304 (3 halves) | **todo**, compatible |
@@ -657,3 +657,41 @@ requirement. `SharpRuntimeTests_Net` **254 → 271**.
 doc-comments stating the new contract, so dependents recompile. `net-sockets`'s
 `UnixDomainSocketEndPoint` — the only cross-module producer of `AddressFamily::Unix`
 `SocketAddress` buffers — never calls `GetIPEndPoint`, verified by grep, and its suite passes.
+
+### 17.3 #2036 — N-B, `IPAddress`'s IPv6 scope-id domain (SR-AUD-301)
+
+**Repair.** One file-local `validatedScopeId(longcs, const char* paramName)` is adopted by
+**both** doors — the audit report's own instruction. Outside `[0, 4294967295]` it raises
+`ArgumentOutOfRangeException`. The constructor validates **before any member is assigned**; the
+setter keeps its **IPv4 family guard first** (an IPv4 address has no scope id at all, so the
+wrong-family answer is the more specific one and its `SocketException` is the pre-existing
+contract) and leaves the previous scope id in place when it rejects.
+
+**One deliberate divergence from §7.3, recorded rather than silently adopted.** §7.3's combined
+row writes `ArgumentOutOfRangeException("value")` for both doors. Each door instead reports its
+**own** parameter — `"scopeId"` for the constructor, `"value"` for the setter — matching .NET's
+`nameof(...)` convention, so a caller is told which argument it got wrong.
+
+**Premise extension** (no `SR-AUD-*` issued): the narrowing is a **modulo-2^32 wrap, not a
+clamp**, so it produced a *plausible* scope id — `-4294967295` and `4294967297` both became
+**1**, `LONGCS_MIN` and `4294967296` both became **0**, and `ToString()` rendered the wrapped
+value (`fe80::1%4294967291` for `-5`). Two addresses built from `-1` and `4294967295` compared
+**equal**.
+
+**The rest of the surface, inventoried by grep rather than assumed.** Every other door that
+reaches the scope-id field is `uint32`-sourced and cannot be out of range: `tryParseIPv6`'s own
+`from_chars<uint32_t>` (which already rejected `%4294967296` and `%-1`), `Dns::fromSockaddrIn6`,
+`SocketAddress::GetIPEndPoint`, and `net-sockets`' `Socket.cpp:169`. So the finding is correctly
+scoped to the two raw doors, and no in-repository caller can trip the new check.
+
+**Sanitizers.** UBSan is **non-discriminating in both directions**, exactly as §11 predicted for
+this conversion, and is recorded as a non-result rather than as evidence. ASan and TSan are
+inapplicable — nothing is allocated, indexed or shared here.
+
+**Tests: +9.** `IPAddressScopeIdTests.cpp` — ten out-of-domain and ten in-domain values on both
+doors, exact `paramName`, the no-mutation guarantee, the family guard, `ToString`, the parser's
+unchanged domain and the equality consequence. `SharpRuntimeTests_Net` **271 → 280**.
+
+**Consequences.** No signature, `noexcept`, virtual, vtable, data member or layout change;
+`sizeof(IPAddress)` is 24 before and after. Relink-only in ABI terms; the header gained
+doc-comments stating the new contract.

@@ -50,7 +50,13 @@ namespace System::Net {
          */
         explicit IPAddress(const std::vector<bytecs>& addressBytes);
 
-        /** Constructs an IPv6 address with the given 16 address bytes and scope ID. */
+        /**
+         * Constructs an IPv6 address with the given 16 address bytes and scope ID.
+         * @throws System::ArgumentOutOfRangeException if @p scopeId is outside
+         *         [0, 4294967295]. The scope ID is stored in 32 unsigned bits, so before ticket
+         *         #2036 an out-of-domain value wrapped modulo 2^32 into a plausible-looking
+         *         scope ID instead of being rejected.
+         */
         IPAddress(const std::array<bytecs, 16>& addressBytes, longcs scopeId);
 
         /** @return true if this is an IPv4 address. */
@@ -74,7 +80,11 @@ namespace System::Net {
         [[nodiscard]] longcs getScopeIdProperty() const;
         /**
          * Sets the IPv6 scope ID.
-         * @throws System::Net::Sockets::SocketException if this is an IPv4 address.
+         * @throws System::Net::Sockets::SocketException if this is an IPv4 address. This check
+         *         runs first: an IPv4 address has no scope ID at all, so the wrong-family answer
+         *         is the more specific one.
+         * @throws System::ArgumentOutOfRangeException if @p value is outside [0, 4294967295]
+         *         (ticket #2036). A rejected set leaves the previous scope ID in place.
          */
         void setScopeIdProperty(longcs value);
 

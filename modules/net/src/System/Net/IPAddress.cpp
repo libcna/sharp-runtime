@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/IPAddress.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include "System/HashCode.hpp"
 #include "System/Net/Sockets/SocketError.hpp"
@@ -219,6 +220,23 @@ namespace System::Net {
             return true;
         }
 
+        // The IPv6 scope id is stored in a uint32_t, but both public doors that set it take a
+        // longcs. Before ticket #2036 each simply wrote static_cast<uint32_t>(value), so every
+        // out-of-domain value wrapped modulo 2^32 instead of being rejected -- and the wrap does
+        // not merely clamp, it produces a PLAUSIBLE scope id: measured before the check existed
+        // (build-probe/2036_probe1_before_after.log), -1 became 4294967295, -5 became 4294967291,
+        // 4294967296 became 0, 4294967297 became 1 and -4294967295 became 1, so a caller could
+        // not tell a narrowed value from one it actually asked for.
+        //
+        // The domain is the storage's own: [0, UInt32.MaxValue]. Both callers pass their own
+        // parameter's name, matching .NET's nameof(...) convention, so a caller is told which
+        // argument it got wrong rather than a shared placeholder.
+        uint32_t validatedScopeId(longcs value, const char* paramName) {
+            System::ArgumentOutOfRangeException::ThrowIfLessThan<longcs>(value, 0, paramName);
+            System::ArgumentOutOfRangeException::ThrowIfGreaterThan<longcs>(value, 0xFFFFFFFFLL, paramName);
+            return static_cast<uint32_t>(value);
+        }
+
         std::string formatIPv4(uint32_t addr) {
             std::ostringstream oss;
             oss << ((addr >> 24) & 0xFF) << '.' << ((addr >> 16) & 0xFF) << '.'
@@ -293,8 +311,11 @@ namespace System::Net {
     }
 
     IPAddress::IPAddress(const std::array<bytecs, 16>& addressBytes, longcs scopeId) {
+        // Validated before any field is written, so a rejected construction leaves nothing
+        // half-initialised.
+        const uint32_t validatedScope = validatedScopeId(scopeId, "scopeId");
         isIPv6_ = true;
-        addressOrScopeId_ = static_cast<uint32_t>(scopeId);
+        addressOrScopeId_ = validatedScope;
         for (int i = 0; i < 8; ++i) {
             numbers_[static_cast<size_t>(i)] = static_cast<uint16_t>(
                 (static_cast<uint16_t>(addressBytes[static_cast<size_t>(i * 2)]) << 8) |
@@ -321,10 +342,14 @@ namespace System::Net {
     }
 
     void IPAddress::setScopeIdProperty(longcs value) {
+        // The family guard stays first: an IPv4 address has no scope id at all, so "wrong
+        // family" is the more specific answer and its SocketException is the pre-existing,
+        // tested contract. Only once the property exists is its domain checked, and a rejected
+        // set leaves the previous scope id in place.
         if (!isIPv6_)
             throw SocketException(SocketError::OperationNotSupported,
                                    "The requested property is not supported for the 'InterNetwork' AddressFamily.");
-        addressOrScopeId_ = static_cast<uint32_t>(value);
+        addressOrScopeId_ = validatedScopeId(value, "value");
     }
 
     std::string IPAddress::ToString() const {
