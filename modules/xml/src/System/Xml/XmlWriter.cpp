@@ -4,6 +4,8 @@
 #include "System/Xml/XmlWriter.hpp"
 #include <tinyxml2/tinyxml2.h>
 #include "System/ArgumentException.hpp"
+#include "System/InvalidOperationException.hpp"
+#include "System/Xml/XmlConvert.hpp"
 #include "System/Xml/XmlException.hpp"
 #include <stack>
 
@@ -18,8 +20,44 @@ struct XmlWriterState {
     std::stack<tinyxml2::XMLNode*> nodeStack;  // top = current parent
     std::string                    filePath;
     bool                           hasDeclaration = false;
+    bool                           closed         = false;
     XmlWriterSettings              settings;
 };
+
+// ---------------------------------------------------------------------------
+// Name and lifecycle validation (ticket #2076, SR-AUD-349)
+//
+// Every writer door that takes an XML *name* routes through XmlConvert::VerifyName --
+// the validator this module already ships and that XmlDocument::CreateElement already
+// uses. Before this, the writer forwarded names straight to tinyxml2, so a successful
+// write could produce markup this module's OWN XmlReader then rejected: measured,
+// WriteStartElement("1bad") emitted "<1bad/>" and CreateFromString on that text threw
+// XML_ERROR_PARSING, while XmlDocument::CreateElement("1bad") already threw XmlException
+// for the same name in the same program.
+//
+// VerifyName throws XmlException("Invalid XML name: '...'.") for a malformed name and
+// System::ArgumentException for an empty one; both are the validator's own pre-existing
+// choices and are deliberately not re-mapped here, so the writer door and the DOM door
+// report an identical diagnostic for identical input.
+// ---------------------------------------------------------------------------
+
+/// Rejects any write once Close() has been called. Close() itself, Flush() and ToString()
+/// stay usable -- ToString() is how an in-memory writer's result is read back, and the
+/// destructor calls Close() unconditionally.
+static void ThrowIfClosed(const XmlWriterState* state, const char* member) {
+    if (state && state->closed)
+        throw System::InvalidOperationException(std::string("XmlWriter::") + member +
+                                                ": the writer is closed.");
+}
+
+/// Rejects a write that has no open element to attach to. This is the "invalid call
+/// ordering" clause of SR-AUD-349: an unbalanced WriteEndElement() and an attribute
+/// written with no element open were both silently discarded.
+static void ThrowIfNoOpenElement(const XmlWriterState* state, const char* member) {
+    if (!state || state->nodeStack.size() <= 1 || !state->nodeStack.top()->ToElement())
+        throw System::InvalidOperationException(std::string("XmlWriter::") + member +
+                                                ": there is no open element.");
+}
 
 // ---------------------------------------------------------------------------
 // Constructor / destructor
@@ -88,16 +126,20 @@ XmlWriter::~XmlWriter() { try { Close(); } catch (...) {} }
 // ---------------------------------------------------------------------------
 
 void XmlWriter::WriteStartDocument() {
+    ThrowIfClosed(state_.get(), "WriteStartDocument");
     if (!state_ || state_->hasDeclaration) return;
     state_->doc.InsertFirstChild(state_->doc.NewDeclaration());
     state_->hasDeclaration = true;
 }
 
 void XmlWriter::WriteEndDocument() {
+    ThrowIfClosed(state_.get(), "WriteEndDocument");
     Flush();
 }
 
 void XmlWriter::WriteStartElement(const std::string& localName) {
+    ThrowIfClosed(state_.get(), "WriteStartElement");
+    (void)XmlConvert::VerifyName(localName);
     if (!state_ || state_->nodeStack.empty()) return;
     tinyxml2::XMLElement* el = state_->doc.NewElement(localName.c_str());
     state_->nodeStack.top()->InsertEndChild(el);
@@ -105,23 +147,30 @@ void XmlWriter::WriteStartElement(const std::string& localName) {
 }
 
 void XmlWriter::WriteEndElement() {
-    if (!state_ || state_->nodeStack.size() <= 1) return; // never pop the document
+    ThrowIfClosed(state_.get(), "WriteEndElement");
+    // An unbalanced WriteEndElement() used to be silently discarded, so a caller that
+    // popped one level too many produced a document whose nesting was not the one it wrote.
+    if (!state_ || state_->nodeStack.size() <= 1) // never pop the document
+        throw System::InvalidOperationException("XmlWriter::WriteEndElement: there is no open element.");
     state_->nodeStack.pop();
 }
 
 void XmlWriter::WriteAttributeString(const std::string& name, const std::string& value) {
-    if (!state_ || state_->nodeStack.empty()) return;
-    auto* el = state_->nodeStack.top()->ToElement();
-    if (el) el->SetAttribute(name.c_str(), value.c_str());
+    ThrowIfClosed(state_.get(), "WriteAttributeString");
+    (void)XmlConvert::VerifyName(name);
+    ThrowIfNoOpenElement(state_.get(), "WriteAttributeString");
+    state_->nodeStack.top()->ToElement()->SetAttribute(name.c_str(), value.c_str());
 }
 
 void XmlWriter::WriteString(const std::string& text) {
+    ThrowIfClosed(state_.get(), "WriteString");
     if (!state_ || state_->nodeStack.empty()) return;
     tinyxml2::XMLText* tn = state_->doc.NewText(text.c_str());
     state_->nodeStack.top()->InsertEndChild(tn);
 }
 
 void XmlWriter::WriteWhitespace(const std::string& whitespace) {
+    ThrowIfClosed(state_.get(), "WriteWhitespace");
     if (whitespace.find_first_not_of(" \t\r\n") != std::string::npos) {
         throw System::ArgumentException("WriteWhitespace accepts only XML whitespace characters.");
     }
@@ -135,12 +184,14 @@ void XmlWriter::WriteElementString(const std::string& name, const std::string& v
 }
 
 void XmlWriter::WriteComment(const std::string& text) {
+    ThrowIfClosed(state_.get(), "WriteComment");
     if (!state_ || state_->nodeStack.empty()) return;
     tinyxml2::XMLComment* cmt = state_->doc.NewComment(sanitizeCommentText(text).c_str());
     state_->nodeStack.top()->InsertEndChild(cmt);
 }
 
 void XmlWriter::WriteCData(const std::string& text) {
+    ThrowIfClosed(state_.get(), "WriteCData");
     if (!state_ || state_->nodeStack.empty()) return;
     tinyxml2::XMLText* tn = state_->doc.NewText(sanitizeCDataText(text).c_str());
     tn->SetCData(true);
@@ -148,6 +199,12 @@ void XmlWriter::WriteCData(const std::string& text) {
 }
 
 void XmlWriter::WriteProcessingInstruction(const std::string& target, const std::string& data) {
+    ThrowIfClosed(state_.get(), "WriteProcessingInstruction");
+    // The PI target is an XML name, and an unvalidated one is not merely ugly: measured,
+    // WriteProcessingInstruction("a?>b", "d") emitted "<?a?>b d?>", whose "?>" closed the
+    // instruction early and spilled the rest into document-level text. sanitizeProcessing-
+    // InstructionText already protects the DATA; the target had no such door.
+    (void)XmlConvert::VerifyName(target);
     if (!state_ || state_->nodeStack.empty()) return;
     std::string sanitizedData = sanitizeProcessingInstructionText(data);
     std::string text = sanitizedData.empty() ? target : (target + " " + sanitizedData);
@@ -157,6 +214,8 @@ void XmlWriter::WriteProcessingInstruction(const std::string& target, const std:
 
 void XmlWriter::WriteDocType(const std::string& name, const std::string& publicId,
                               const std::string& systemId, const std::string& internalSubset) {
+    ThrowIfClosed(state_.get(), "WriteDocType");
+    (void)XmlConvert::VerifyName(name); // the DOCTYPE root-element name is an XML name
     if (!state_ || state_->nodeStack.empty()) return;
     std::string text = "DOCTYPE " + name;
     if (!publicId.empty()) {
@@ -184,7 +243,10 @@ void XmlWriter::Flush() {
 }
 
 void XmlWriter::Close() {
-    if (!state_) return;
+    if (!state_ || state_->closed) return; // idempotent: the destructor also calls Close()
+    // Marked closed BEFORE the flush, so a writer whose save failed is still terminally
+    // closed rather than accepting further writes into a document it could not persist.
+    state_->closed = true;
     Flush();
     // clear the stack
     while (!state_->nodeStack.empty()) state_->nodeStack.pop();

@@ -42,12 +42,21 @@ namespace System::Xml {
         /**
          * @brief Opens a new element with the given local name.
          *
-         * @param localName  Element tag name.
+         * @param localName  Element tag name; validated with @c XmlConvert::VerifyName, the
+         *                   same validator @c XmlDocument::CreateElement already uses, so the
+         *                   writer can no longer emit a name its own @c XmlReader rejects.
+         * @throws System::Xml::XmlException if @p localName is not a valid XML name.
+         * @throws System::ArgumentException if @p localName is empty.
+         * @throws System::InvalidOperationException if @c Close() has already been called.
          */
         void WriteStartElement(const std::string& localName);
 
         /**
          * @brief Closes the most recently opened element.
+         *
+         * @throws System::InvalidOperationException if no element is open, or if @c Close()
+         *         has already been called. An unbalanced call was previously discarded in
+         *         silence, so the emitted nesting was not the nesting the caller wrote.
          */
         void WriteEndElement();
 
@@ -57,8 +66,12 @@ namespace System::Xml {
          * Must be called immediately after @c WriteStartElement, before any child
          * content or @c WriteEndElement.
          *
-         * @param name   Attribute name.
+         * @param name   Attribute name; validated with @c XmlConvert::VerifyName.
          * @param value  Attribute value.
+         * @throws System::Xml::XmlException if @p name is not a valid XML name.
+         * @throws System::ArgumentException if @p name is empty.
+         * @throws System::InvalidOperationException if no element is open, or if @c Close()
+         *         has already been called.
          */
         void WriteAttributeString(const std::string& name, const std::string& value);
 
@@ -119,18 +132,29 @@ namespace System::Xml {
          * If @p data contains @c "?>", a space is silently inserted to keep the emitted
          * markup well-formed, matching real .NET's @c XmlEncodedRawTextWriter.
          *
-         * @param target  The PI target name.
+         * @param target  The PI target name; validated with @c XmlConvert::VerifyName. An
+         *                unvalidated target containing @c "?>" used to close the instruction
+         *                early and spill its remainder into document-level text.
          * @param data    The PI content (not XML-escaped, matching real XML PI syntax).
+         * @throws System::Xml::XmlException if @p target is not a valid XML name.
+         * @throws System::ArgumentException if @p target is empty.
+         * @throws System::InvalidOperationException if @c Close() has already been called.
          */
         void WriteProcessingInstruction(const std::string& target, const std::string& data);
 
         /**
          * @brief Writes a document type declaration: @c <!DOCTYPE name PUBLIC "..." "..." [subset]>.
          *
-         * @param name           The DOCTYPE root element name.
-         * @param publicId       The public identifier, or "" to omit.
+         * @param name           The DOCTYPE root element name; validated with
+         *                       @c XmlConvert::VerifyName.
+         * @param publicId       The public identifier, or "" to omit. Not currently validated;
+         *                       a @c '"' in this or in @p systemId, or a @c ']' in
+         *                       @p internalSubset, still escapes its quoted literal.
          * @param systemId       The system identifier, or "" to omit.
          * @param internalSubset The internal subset, or "" to omit.
+         * @throws System::Xml::XmlException if @p name is not a valid XML name.
+         * @throws System::ArgumentException if @p name is empty.
+         * @throws System::InvalidOperationException if @c Close() has already been called.
          */
         void WriteDocType(const std::string& name, const std::string& publicId,
                            const std::string& systemId, const std::string& internalSubset);
@@ -147,7 +171,14 @@ namespace System::Xml {
         /** @brief Flushes and, if a file path was provided to @c Create(), saves to that file. */
         void Flush();
 
-        /** @brief Same as @c Flush(); releases resources. */
+        /**
+         * @brief Same as @c Flush(); releases resources and terminally closes the writer.
+         *
+         * Idempotent — a second call is a no-op, and the destructor calls it unconditionally.
+         * Afterwards every @c Write* member throws @c System::InvalidOperationException; those
+         * calls were previously accepted and silently discarded. @c ToString() and @c Flush()
+         * stay usable, because @c ToString() is how an in-memory writer's result is read back.
+         */
         void Close();
 
         /**

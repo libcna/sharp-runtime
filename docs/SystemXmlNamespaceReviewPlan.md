@@ -707,3 +707,89 @@ made the desynchronisation possible — over a four-deep push/pop cycle, `HasNam
 **Mutation-checked.** Restoring the single-scope search fails **exactly** the three new
 scope-search tests, the agreement property and the corrected pre-existing test — five
 assertions across four tests — and nothing else in the 400-test suite.
+
+### 20.4 #2076 — four name doors, not two, and the PI target was the sharpest
+
+§4.3 scoped this ticket to element and attribute names plus writer state. Measured against
+`1b65f0f` (`build-probe/2076_probe1_writer_doors.cpp`, log `2076_probe1_before.log`), **four**
+public doors take an XML name and validated none of them, and the two §4.3 does not name are
+not decorative:
+
+| Door | Before | After |
+|---|---|---|
+| `WriteStartElement("1bad")` | `<1bad/>`, rejected by this module's own reader | `XmlException` |
+| `WriteAttributeString("1bad","v")` | `<e 1bad="v"/>`, rejected by the same reader | `XmlException` |
+| `WriteProcessingInstruction("a?>b","d")` | `<?a?>b d?>` — the `?>` **closed the instruction early** and spilled `b d?>` into document-level text | `XmlException` |
+| `WriteDocType("1bad",…)` | `<!DOCTYPE 1bad>` | `XmlException` |
+
+The PI row is the one worth reading twice: the writer **already** sanitized the PI *data*
+against exactly this hazard (`sanitizeProcessingInstructionText`), so the module demonstrably
+understood the shape — and the *target* had no door at all. That is X-C's sentence applied
+inside a single function.
+
+**The state clause was wider too.** All **twelve** `Write*` members stayed callable after
+`Close()` and silently discarded their argument; an unbalanced `WriteEndElement()` and an
+attribute written with no element open were discarded as well. All now throw
+`System::InvalidOperationException` — this port's choice, recorded as such per §16.
+`Close()` marks the writer closed **before** flushing, so a writer whose save failed is
+terminally closed rather than accepting writes into a document it could not persist; it stays
+idempotent because `~XmlWriter()` calls it unconditionally, and `ToString()`/`Flush()` stay
+usable because `ToString()` is the only way to read an in-memory writer's result back.
+
+**The corrected premise of §6.2 held exactly.** All four doors route through
+`XmlConvert::VerifyName`, so the writer door and `XmlDocument::CreateElement` now report an
+**identical** diagnostic for identical input — including `ArgumentException` for an empty name,
+the validator's own pre-existing choice, deliberately not re-mapped. No name grammar was
+invented.
+
+**One narrowing beyond §11's list, recorded rather than glossed:** a name with a **leading
+colon** (`:lead`) was accepted before and produced re-readable markup; `VerifyName` rejects it,
+because `IsStartNCNameChar` does not admit `:`. That is the module's own validator's rule and
+the DOM door has always applied it, so the alternative would have been to make the writer
+*more* permissive than the DOM — which is the defect, reversed.
+
+**+27 permanent regressions, add-only — not one existing test was updated.**
+`SharpRuntimeTests_Xml` 400 → 427; `SharpRuntimeTests_Xml_Linq` stays 184 green even though
+`modules/xml-linq` calls every repaired door through `WriteTo`/`Save`.
+
+**Nine mutations, each reverted from an exact backup.** M1 (`ThrowIfClosed` emptied) → 3 tests;
+M2 (unbalanced `WriteEndElement` silent again) → 3; M3 (element name) → 7; M4 (attribute name)
+→ 4; M5 (PI target) → 2; M6 (DOCTYPE name) → 1; M7 (no-open-element guard reverted to the
+original silent-drop shape) → 1; M8 (`Close()` idempotency) → 1; M9 (`closed` set after the
+flush) → 1. **A false pass is recorded rather than hidden:** M7's first attempt left the helper
+unused, the build aborted on `-Werror=unused-function`, and the run reported the **stale**
+binary's `427 PASSED`. Re-run with the build output unsuppressed, it discriminated. The lesson
+generalises — a mutation run whose build output is suppressed measures the previous binary.
+
+**Sanitizers — §13's "no" is now measured, not assumed.** ASan/UBSan/LSan clean over 3,700
+rejections and the abandoned-mid-document destructor path, with `XmlWriter.cpp`,
+`XmlConvert.cpp` and `vendor/tinyxml2/tinyxml2.cpp` compiled **from source** (`Xml` is
+`STATIC`), instrumentation proven by a control heap-use-after-free
+(`build-probe/2076_probe4_asan.log`).
+
+**Two post-audit defects found while reproducing, deliberately NOT absorbed** — both carry
+ordinary ticket numbers and **no `SR-AUD-*` identifier; numbering stays frozen at 364**:
+
+- **#2084** — `WriteDocType`'s `publicId`/`systemId`/`internalSubset` are **quoted-literal**
+  doors with no validation. `systemId = "s\">x<!--"` emitted
+  `<!DOCTYPE r PUBLIC "p" "s">x<!--">`, and an `internalSubset` containing `]` emitted
+  `<!DOCTYPE r []><evil/><!--]>`. **This module's own reader rejects both**, so it is
+  SR-AUD-349's closure sentence on a *literal* door rather than a *name* door — the same X-C
+  family, a different input class. Not absorbed because the minimal repair for `systemId` and
+  `internalSubset` is a delimiter/escaping decision this review has no evidence to make,
+  whereas `publicId` already has `XmlConvert::VerifyPublicId`. Splitting it keeps #2076's
+  claim exact (`build-probe/2076_probe3_injection.log`).
+- **#2085** — an embedded NUL **silently truncates content** at three doors:
+  `WriteString("a\0b")` → `<e>a</e>`, an attribute value `"x\0y"` → `a="x"`,
+  `WriteCData("c\0d")` → `<![CDATA[c]]>`. Every writer body passes `std::string::c_str()` to
+  tinyxml2, so the byte count is lost at the boundary. This is X-A's shape (silent loss on a
+  public door), not X-C's, and it interacts with `XmlWriterSettings::CheckCharacters`, which
+  the header already documents as *"Not currently enforced"*
+  (`build-probe/2076_probe2_content.log`).
+
+**Measured and recorded with no ticket**, so a later reader does not re-derive them: two roots
+(`<a/><b/>`) and document-level text are accepted, but both are governed by
+`XmlWriterSettings::ConformanceLevel`, which the settings header documents as *"Not currently
+enforced"* — narrowing them is a settings-semantics decision, not this finding. A PI target of
+`xml` is accepted, and `XmlReader.cpp` documents a **deliberate** handling for that exact
+target, so rejecting it would contradict a stated in-module contract.
