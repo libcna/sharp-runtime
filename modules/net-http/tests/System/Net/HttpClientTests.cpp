@@ -3,8 +3,11 @@
 #include <gtest/gtest.h>
 #include <any>
 #include <filesystem>
+#include <memory>
 #include <system_error>
 #include <thread>
+#include <type_traits>
+#include <utility>
 #include "System/Net/Http/HttpClient.hpp"
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/Sockets/Socket.hpp"
@@ -1282,4 +1285,495 @@ TEST(HttpClientDescriptorLeakTests, TheSuccessPathStillClosesItsDescriptor) {
     EXPECT_EQ(0, descriptorDeltaOver(
         "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi", 20, threw));
     EXPECT_EQ(0, threw) << "the success path must not throw -- otherwise the wrong path was measured";
+}
+
+// ---------------------------------------------------------------------------
+// Ticket #2063 -- a control character must not cross a public door into an HTTP
+// or MIME frame (SR-AUD-313 and SR-AUD-316's reason half, cause NH-B;
+// docs/SystemNetHttpNamespaceReviewPlan.md §4.1 and §20.3).
+//
+// CR and LF terminate a field in an HTTP/1.1 or MIME frame and NUL truncates
+// every C-string-shaped consumer downstream of it, so any of the three inside a
+// value this port concatenates into such a frame emits fields the caller never
+// wrote. Measured before the repair, ALL of these doors were open:
+//
+//   request/response header name, request/response header value, the client's
+//   default header name and value, the reason phrase, the whole request URI
+//   (authority AND path -- a CRLF in the path injects a second REQUEST LINE),
+//   the response status line, a response header line, StringContent's charset
+//   and media type, the three other contents' media type, MultipartContent's
+//   subtype, and MultipartFormDataContent's name and file name.
+//
+// The narrowing is deliberate and documented in
+// docs/Migration-HttpControlCharacterRejection.md.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Each control character at the START, in the MIDDLE and at the END of a field,
+// plus the CRLF pair. A repair that only inspected one end passes a
+// single-position test and fails this one.
+const std::vector<std::string>& controlBearingFields() {
+    static const std::vector<std::string> values = {
+        "\ra", "a\rb", "a\r",
+        "\na", "a\nb", "a\n",
+        std::string("\0a", 2), std::string("a\0b", 3), std::string("a\0", 2),
+        "a\r\nb", "\r\n", "a\r\nX-Injected: yes",
+    };
+    return values;
+}
+
+// Text that is legal in an HTTP field and must STILL be accepted, so the
+// narrowing cannot quietly grow.
+const std::vector<std::string>& legalFields() {
+    static const std::vector<std::string> values = {
+        "", "a", "a b", "a\tb", " ", "\t", "text/plain; charset=utf-8",
+        "%0d%0a", "a;b", "a\"b",
+    };
+    return values;
+}
+
+} // namespace
+
+TEST(HttpControlCharacterTests, RequestSetHeaderValue_ControlCharacter_ThrowsFormatException) {
+    for (const auto& bad : controlBearingFields()) {
+        HttpRequestMessage request;
+        EXPECT_THROW(request.setHeader("X-A", bad), System::FormatException);
+        EXPECT_TRUE(request.getHeadersProperty().empty())
+            << "a rejected header must not have been stored";
+    }
+}
+
+TEST(HttpControlCharacterTests, RequestSetHeaderName_ControlCharacter_ThrowsFormatException) {
+    for (const auto& bad : controlBearingFields()) {
+        HttpRequestMessage request;
+        EXPECT_THROW(request.setHeader(bad, "v"), System::FormatException);
+        EXPECT_TRUE(request.getHeadersProperty().empty());
+    }
+}
+
+TEST(HttpControlCharacterTests, RequestSetHeader_LegalText_StillAccepted) {
+    for (const auto& good : legalFields()) {
+        HttpRequestMessage request;
+        EXPECT_NO_THROW(request.setHeader("X-A", good)) << "value must stay accepted";
+        EXPECT_EQ(request.getHeadersProperty().at("X-A"), good);
+    }
+}
+
+TEST(HttpControlCharacterTests, ResponseSetHeader_ControlCharacter_ThrowsFormatException) {
+    for (const auto& bad : controlBearingFields()) {
+        HttpResponseMessage response;
+        EXPECT_THROW(response.setHeader("X-A", bad), System::FormatException);
+        EXPECT_THROW(response.setHeader(bad, "v"), System::FormatException);
+        EXPECT_TRUE(response.getHeadersProperty().empty());
+    }
+}
+
+TEST(HttpControlCharacterTests, ResponseSetHeader_LegalText_StillAccepted) {
+    for (const auto& good : legalFields()) {
+        HttpResponseMessage response;
+        EXPECT_NO_THROW(response.setHeader("X-A", good));
+        EXPECT_EQ(response.getHeader("X-A"), good);
+    }
+}
+
+TEST(HttpControlCharacterTests, SetDefaultHeader_ControlCharacter_ThrowsFormatException) {
+    for (const auto& bad : controlBearingFields()) {
+        HttpClient client;
+        EXPECT_THROW(client.setDefaultHeader("X-A", bad), System::FormatException);
+        EXPECT_THROW(client.setDefaultHeader(bad, "v"), System::FormatException);
+        EXPECT_EQ(client.getDefaultHeader("X-A"), "");
+    }
+}
+
+TEST(HttpControlCharacterTests, SetDefaultHeader_LegalText_StillAccepted) {
+    HttpClient client;
+    for (const auto& good : legalFields()) {
+        EXPECT_NO_THROW(client.setDefaultHeader("X-A", good));
+        EXPECT_EQ(client.getDefaultHeader("X-A"), good);
+    }
+}
+
+TEST(HttpControlCharacterTests, ReasonPhrase_ControlCharacter_ThrowsFormatException) {
+    for (const auto& bad : controlBearingFields()) {
+        HttpResponseMessage response;
+        EXPECT_THROW(response.setReasonPhraseProperty(bad), System::FormatException);
+        EXPECT_EQ(response.getReasonPhraseProperty(), "")
+            << "a rejected reason phrase must not have been stored";
+    }
+}
+
+TEST(HttpControlCharacterTests, ReasonPhrase_LegalText_StillAccepted) {
+    for (const auto& good : legalFields()) {
+        HttpResponseMessage response;
+        EXPECT_NO_THROW(response.setReasonPhraseProperty(good));
+        EXPECT_EQ(response.getReasonPhraseProperty(), good);
+    }
+}
+
+// The review plan named the AUTHORITY as the request URI's injection vector.
+// The PATH is a second one and is worse: it lands in the request LINE, so a
+// CRLF there injects a whole second request rather than one header field.
+TEST(HttpControlCharacterTests, ParseUrl_ControlCharacterInAnyComponent_ThrowsUriFormatException) {
+    const std::vector<std::string> urls = {
+        "http://ho\rst/p",
+        "http://ho\nst/p",
+        "http://ho\r\nst/p",
+        std::string("http://ho\0st/p", 14),
+        "http://host/pa\r\nX-Injected: yes",      // the request LINE
+        "http://host/p?q=a\r\nb",
+        "http://host/p#f\r\n",
+        "http://host:8\r\n0/p",
+        "http\r\n://host/p",
+        "http://host/p\r",
+        "http://host/p\n",
+        std::string("http://host/p\0", 14),
+    };
+    for (const auto& url : urls) {
+        EXPECT_THROW(HttpClient::parseUrl(url), System::UriFormatException) << "url index";
+    }
+}
+
+// System::UriFormatException IS a System::FormatException, so the whole family
+// of doors reports through one catchable base.
+TEST(HttpControlCharacterTests, ParseUrl_RejectionIsAlsoAFormatException) {
+    EXPECT_THROW(HttpClient::parseUrl("http://ho\r\nst/p"), System::FormatException);
+}
+
+// A percent-encoded CRLF is ordinary text, not a control character, and must
+// stay accepted: escaping it is exactly how a caller passes such bytes safely.
+TEST(HttpControlCharacterTests, ParseUrl_PercentEncodedControlCharacters_StillAccepted) {
+    auto parsed = HttpClient::parseUrl("http://host/p%0d%0aX:%20y");
+    EXPECT_EQ(parsed.host, "host");
+    EXPECT_EQ(parsed.path, "/p%0d%0aX:%20y");
+}
+
+TEST(HttpControlCharacterTests, ParseStatusLine_ControlCharacter_ThrowsHttpRequestException) {
+    const std::vector<std::string> lines = {
+        std::string("HTTP/1.1 200 O\0K", 16),
+        "HTTP/1.1 200 O\rK",
+        "HTTP/1.1 200 O\nK",
+        "HTTP/1.1 200 OK\r",
+        "HTTP/1.1 200 OK\r\nX-Injected: yes",
+    };
+    for (const auto& line : lines) {
+        EXPECT_THROW(HttpClient::parseStatusLine(line), HttpRequestException);
+    }
+}
+
+TEST(HttpControlCharacterTests, ContentMediaTypeAndCharset_ControlCharacter_ThrowsFormatException) {
+    for (const auto& bad : controlBearingFields()) {
+        EXPECT_THROW(StringContent("body", "utf-8", bad), System::FormatException);
+        EXPECT_THROW(StringContent("body", bad, "text/plain"), System::FormatException);
+        EXPECT_THROW(ByteArrayContent(std::vector<SharpRuntime::bytecs>{1, 2}, bad),
+                     System::FormatException);
+
+        std::vector<SharpRuntime::bytecs> data = {1};
+        System::ReadOnlyMemory<SharpRuntime::bytecs> memory(data);
+        EXPECT_THROW(ReadOnlyMemoryContent(memory, bad), System::FormatException);
+
+        auto stream = std::make_shared<System::IO::MemoryStream>();
+        EXPECT_THROW(StreamContent(stream, bad), System::FormatException);
+    }
+}
+
+// The BODY is payload, not a protocol field, and must not be validated.
+TEST(HttpControlCharacterTests, ContentBodyWithControlCharacters_StillAccepted) {
+    StringContent content("line1\r\nline2\r\n", "utf-8", "text/plain");
+    EXPECT_EQ(content.ReadAsString(), "line1\r\nline2\r\n");
+    ByteArrayContent bytes(std::vector<SharpRuntime::bytecs>{'\r', '\n', 0, 'x'});
+    EXPECT_EQ(bytes.ReadAsByteArray().size(), 4u);
+}
+
+// A null stream is still reported as a null stream even when the media type is
+// also malformed -- the pre-existing check runs first.
+TEST(HttpControlCharacterTests, StreamContent_NullStreamOutranksBadMediaType) {
+    EXPECT_THROW(StreamContent(nullptr, "a\r\nb"), System::ArgumentNullException);
+}
+
+TEST(HttpControlCharacterTests, MultipartSubtype_ControlCharacter_ThrowsArgumentException) {
+    for (const auto& bad : controlBearingFields()) {
+        // A subtype that is only whitespace is rejected by the pre-existing
+        // ThrowIfNullOrWhiteSpace check, which is also an ArgumentException.
+        EXPECT_THROW(MultipartContent("mixed" + bad, "B"), System::ArgumentException);
+    }
+}
+
+TEST(HttpControlCharacterTests, MultipartFormDataNameAndFileName_ControlCharacter_ThrowsArgumentException) {
+    for (const auto& bad : controlBearingFields()) {
+        MultipartFormDataContent content("B");
+        EXPECT_THROW(content.Add(std::make_shared<StringContent>("v"), "n" + bad),
+                     System::ArgumentException);
+        EXPECT_THROW(content.Add(std::make_shared<StringContent>("v"), "n", "f" + bad),
+                     System::ArgumentException);
+        EXPECT_TRUE(content.getContentsProperty().empty())
+            << "a rejected part must not have been added";
+    }
+}
+
+// End-to-end: the whole point of the four doors is that nothing reaches the
+// wire. A URI carrying a CRLF must fail BEFORE a socket is opened, so the
+// process's descriptor count cannot move -- the same instrument #2065
+// established, and a stronger statement than "an exception was thrown".
+TEST(HttpControlCharacterTests, InjectedRequestUriNeverOpensASocket) {
+    if (!kDescriptorCountAvailable) GTEST_SKIP() << "/proc/self/fd is unavailable";
+
+    HttpClient client;
+    // Port 1 is not listening; if the guard ever stopped working the connect
+    // attempt itself would be visible in the descriptor count.
+    const std::string injected = "http://127.0.0.1:1/pa\r\nX-Injected: yes";
+
+    const SharpRuntime::intcs before = openDescriptorCount();
+    int threw = 0;
+    for (int i = 0; i < 20; ++i) {
+        try {
+            (void)client.Get(injected);
+        } catch (const System::UriFormatException&) {
+            ++threw;
+        }
+    }
+    const SharpRuntime::intcs after = openDescriptorCount();
+
+    EXPECT_EQ(20, threw) << "every attempt must be rejected at the parser";
+    EXPECT_EQ(0, after - before) << "no socket may be opened for a rejected request URI";
+}
+
+// A malformed RESPONSE stays a response error: the handler rejects a
+// control-bearing header line itself rather than letting
+// HttpResponseMessage::setHeader raise System::FormatException at it.
+TEST(HttpControlCharacterTests, ResponseHeaderLineWithControlCharacter_ThrowsHttpRequestException) {
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    std::thread serverThread([&]() {
+        auto server = listener->Accept();
+        std::vector<SharpRuntime::bytecs> reqBuf(4096);
+        server->Receive(reqBuf);
+        // A NUL inside a header field. recvLine() has already consumed the
+        // terminating CRLF, so this is what a malformed field looks like by the
+        // time the handler sees it.
+        server->Send(toBytes(std::string(
+            "HTTP/1.1 200 OK\r\nX-Bad: a\0b\r\nContent-Length: 2\r\n\r\nOK", 52)));
+        server->Close();
+    });
+
+    HttpClient client;
+    EXPECT_THROW(client.GetString("http://127.0.0.1:" + std::to_string(port) + "/"),
+                 HttpRequestException);
+
+    serverThread.join();
+    listener->Close();
+}
+
+// A caller-set header still reaches the wire unchanged when it is legal --
+// the repair must not have broken the ordinary path.
+TEST(HttpControlCharacterTests, LegalCallerHeaderStillReachesTheWire) {
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    std::string raw;
+    std::thread serverThread([&]() {
+        auto server = listener->Accept();
+        std::vector<SharpRuntime::bytecs> reqBuf(4096);
+        SharpRuntime::intcs n = server->Receive(reqBuf);
+        raw.assign(reqBuf.begin(), reqBuf.begin() + n);
+        server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"));
+        server->Close();
+    });
+
+    HttpClient client;
+    auto request = std::make_shared<HttpRequestMessage>(
+        HttpMethod::Get(), "http://127.0.0.1:" + std::to_string(port) + "/");
+    request->setHeader("X-Legal", "a b\tc");
+    auto response = client.Send(request);
+    serverThread.join();
+    listener->Close();
+
+    EXPECT_EQ(response->getStatusCodeProperty(), HttpStatusCode::OK);
+    EXPECT_NE(raw.find("X-Legal: a b\tc\r\n"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Ticket #2063's disclosure suite -- every behaviour a BLOCKED or DEFERRED
+// ticket of this namespace would change is pinned here, so no future approved
+// option can land silently. These tests assert what the port does TODAY; each
+// one is expected to be edited, deliberately and visibly, by the ticket named
+// in its comment. None of them asserts that the current behaviour is correct.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// #2066's repair is an OWNERSHIP change, and the defect it repairs is a
+// use-after-free. A use-after-free is not a behaviour to pin -- it is undefined
+// behaviour, and a test that exercised it would be a test with no defined
+// meaning. What IS pinnable, and what #2066 must change, is the ownership MODEL:
+// HttpClient does not participate in shared ownership today, so its async
+// members have nothing to keep alive.
+static_assert(!std::is_base_of_v<std::enable_shared_from_this<HttpClient>, HttpClient>,
+              "#2066 would make HttpClient participate in shared ownership "
+              "(enable_shared_from_this) -- SR-AUD-310, CCF-019, NOT APPROVED");
+
+// Object layout: expressed against a probe struct with the same declared
+// members rather than a literal byte count, so the pin is exact on every
+// standard library rather than only on the one this baseline uses. Measured on
+// the verified Linux/GCC/libstdc++ baseline: HttpClient 104,
+// HttpRequestMessage 192, HttpResponseMessage 112, StringContent 104,
+// ByteArrayContent 64, MultipartContent 96, HttpMethod 32.
+struct HttpRequestMessageLayoutProbe {
+    HttpMethod                                   method;
+    std::string                                  uri;
+    std::shared_ptr<HttpContent>                 content;
+    std::unordered_map<std::string, std::string> headers;
+    HttpRequestOptions                           options;
+};
+struct HttpResponseMessageLayoutProbe {
+    System::Net::HttpStatusCode                  statusCode;
+    std::string                                  reasonPhrase;
+    std::shared_ptr<HttpContent>                 content;
+    std::unordered_map<std::string, std::string> headers;
+};
+
+} // namespace
+
+static_assert(sizeof(HttpRequestMessage) == sizeof(HttpRequestMessageLayoutProbe),
+              "#2067's sent-state flag would grow HttpRequestMessage -- SR-AUD-314, "
+              "OBJECT LAYOUT CHANGE, NOT APPROVED");
+static_assert(sizeof(HttpResponseMessage) == sizeof(HttpResponseMessageLayoutProbe),
+              "#2068/#2069 must not add state to HttpResponseMessage -- SR-AUD-315/316, "
+              "NOT APPROVED");
+
+// The comparator of the returned map is PUBLIC SURFACE: #2068 cannot make the
+// lookup case-insensitive without changing this type, which is why it is
+// blocked rather than merely unimplemented.
+static_assert(std::is_same_v<decltype(std::declval<const HttpRequestMessage&>().getHeadersProperty()),
+                             const std::unordered_map<std::string, std::string>&>,
+              "#2068 would change the PUBLIC returned map type -- SR-AUD-315, NOT APPROVED");
+static_assert(std::is_same_v<decltype(std::declval<const HttpResponseMessage&>().getHeadersProperty()),
+                             const std::unordered_map<std::string, std::string>&>,
+              "#2068 would change the PUBLIC returned map type -- SR-AUD-315, NOT APPROVED");
+
+TEST(NetHttpGatedBehaviourPins, LayoutAndOwnershipModelAreStaticallyAsserted) {
+    // The static_asserts above are the test; this keeps them visible in the
+    // suite and records the measured baseline numbers in the run output.
+    EXPECT_EQ(sizeof(HttpRequestMessage), sizeof(HttpRequestMessageLayoutProbe));
+    EXPECT_EQ(sizeof(HttpResponseMessage), sizeof(HttpResponseMessageLayoutProbe));
+}
+
+// #2067 (SR-AUD-314) -- .NET throws InvalidOperationException when one
+// HttpRequestMessage is sent twice. This port has no sent state.
+TEST(NetHttpGatedBehaviourPins, Pin2067_OneRequestMessageCanStillBeSentTwice) {
+    auto handler = std::make_shared<RecordingHandler>();
+    HttpClient client(handler);
+    auto request = std::make_shared<HttpRequestMessage>(HttpMethod::Get(), "http://example.com/");
+
+    EXPECT_NO_THROW((void)client.Send(request));
+    EXPECT_NO_THROW((void)client.Send(request));
+    EXPECT_EQ(handler->receivedRequest, request)
+        << "the SAME message object reaches the handler a second time";
+}
+
+// #2068 (SR-AUD-315) -- HTTP field names are case-insensitive; these maps are
+// not.
+TEST(NetHttpGatedBehaviourPins, Pin2068_HeaderMapsAreCaseSensitive) {
+    HttpRequestMessage request;
+    request.setHeader("Content-Type", "a");
+    request.setHeader("content-type", "b");
+    EXPECT_EQ(request.getHeadersProperty().size(), 2u)
+        << "two spellings of one field are still two entries";
+
+    HttpResponseMessage response;
+    response.setHeader("Content-Type", "a");
+    EXPECT_EQ(response.getHeader("content-type"), "")
+        << "a differently cased lookup still misses";
+    EXPECT_EQ(response.getHeader("Content-Type"), "a");
+}
+
+// #2068's second half, which SR-AUD-315 does not name and #2062's review
+// measured: the handler writes Host/User-Agent/Accept/Connection
+// unconditionally, BEFORE the caller's map, so a caller-set Host is sent twice.
+TEST(NetHttpGatedBehaviourPins, Pin2068_HandlerEmitsADuplicateDefaultHeader) {
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    std::string raw;
+    std::thread serverThread([&]() {
+        auto server = listener->Accept();
+        std::vector<SharpRuntime::bytecs> reqBuf(4096);
+        SharpRuntime::intcs n = server->Receive(reqBuf);
+        raw.assign(reqBuf.begin(), reqBuf.begin() + n);
+        server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"));
+        server->Close();
+    });
+
+    HttpClient client;
+    auto request = std::make_shared<HttpRequestMessage>(
+        HttpMethod::Get(), "http://127.0.0.1:" + std::to_string(port) + "/");
+    request->setHeader("Host", "caller.example");
+    (void)client.Send(request);
+    serverThread.join();
+    listener->Close();
+
+    size_t hosts = 0;
+    for (size_t at = raw.find("Host: "); at != std::string::npos; at = raw.find("Host: ", at + 1))
+        ++hosts;
+    EXPECT_EQ(hosts, 2u) << "the handler's Host and the caller's Host are both on the wire";
+}
+
+// #2069 (SR-AUD-316's status-code half) -- the constructor accepts any number.
+TEST(NetHttpGatedBehaviourPins, Pin2069_ResponseAcceptsAnyStatusNumber) {
+    for (int code : {-1, 0, 1000, 99999}) {
+        HttpResponseMessage response(static_cast<HttpStatusCode>(code));
+        EXPECT_EQ(static_cast<int>(response.getStatusCodeProperty()), code);
+        EXPECT_FALSE(response.getIsSuccessStatusCodeProperty());
+        EXPECT_THROW(response.EnsureSuccessStatusCode(), HttpRequestException);
+    }
+}
+
+// #2070 (SR-AUD-317) -- the charset is a label; the bytes are always the
+// storage bytes. Whether .NET encodes through the label is unverified.
+TEST(NetHttpGatedBehaviourPins, Pin2070_StringContentEmitsStorageBytesUnderAnyCharsetLabel) {
+    StringContent content("\xc3\xa9", "utf-16", "text/plain");
+    auto bytes = content.ReadAsByteArray();
+    ASSERT_EQ(bytes.size(), 2u);
+    EXPECT_EQ(static_cast<unsigned>(bytes[0]), 0xc3u);
+    EXPECT_EQ(static_cast<unsigned>(bytes[1]), 0xa9u);
+    EXPECT_EQ(content.getCharSetProperty(), "utf-16");
+}
+
+// #2071 (SR-AUD-318's limits half) -- response reads are unbounded. This pins
+// that no maximum is applied at a modest size; it deliberately does NOT try to
+// exhaust memory.
+TEST(NetHttpGatedBehaviourPins, Pin2071_ResponseReadsAreUnbounded) {
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    const size_t bodySize = 256u * 1024u;
+    std::thread serverThread([&]() {
+        auto server = listener->Accept();
+        std::vector<SharpRuntime::bytecs> reqBuf(4096);
+        server->Receive(reqBuf);
+        server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: " +
+                             std::to_string(bodySize) + "\r\n\r\n" + std::string(bodySize, 'x')));
+        server->Close();
+    });
+
+    HttpClient client;
+    std::string body;
+    std::string threwWhat;
+    // The join must happen whatever the client does. Without this, an approved
+    // #2071 that started rejecting an over-large response would leave the server
+    // thread unjoined and std::terminate the whole executable, hiding every
+    // other result behind one abort instead of reporting one failing pin.
+    try {
+        body = client.GetString("http://127.0.0.1:" + std::to_string(port) + "/");
+    } catch (const System::Exception& e) {
+        threwWhat = e.getMessageProperty();
+    }
+    serverThread.join();
+    listener->Close();
+
+    EXPECT_EQ(threwWhat, "") << "no response-size limit exists to reject this today";
+    EXPECT_EQ(body.size(), bodySize)
+        << "no maximum response size is applied -- .NET's MaxResponseContentBufferSize "
+           "has no equivalent here (#2071, NOT APPROVED)";
 }

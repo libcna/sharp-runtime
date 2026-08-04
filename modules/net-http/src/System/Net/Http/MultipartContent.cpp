@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Http/MultipartContent.hpp"
+#include "System/Net/Http/detail/HttpFieldValidation.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -52,6 +53,14 @@ namespace System::Net::Http {
 
     MultipartContent::MultipartContent(const std::string& subtype, const std::string& boundary) {
         System::ArgumentException::ThrowIfNullOrWhiteSpace(subtype, "subtype");
+        // Ticket #2063 (SR-AUD-313, cause NH-B). The subtype is concatenated into
+        // "multipart/<subtype>; boundary=..." and that media type is written straight onto the
+        // wire as a Content-Type field, so a CR/LF in it emitted extra header fields. The
+        // boundary is already validated character by character against RFC 2046's set (which
+        // excludes CR, LF and NUL); the subtype was not validated at all. ArgumentException
+        // rather than FormatException, because the sibling parameter of this same constructor
+        // already reports its own defects that way.
+        detail::ThrowIfControlCharacterArgument(subtype, "subtype");
         validateBoundary(boundary);
 
         boundary_ = boundary;

@@ -5,6 +5,7 @@
 #include "System/Net/Http/HttpMethod.hpp"
 #include "System/Net/Http/HttpContent.hpp"
 #include "System/Net/Http/HttpRequestOptions.hpp"
+#include "System/Net/Http/detail/HttpFieldValidation.hpp"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -59,8 +60,21 @@ public:
      * @brief Adds or replaces a request header.
      * @param name  Header name.
      * @param value Header value.
+     *
+     * @throws System::FormatException if @p name or @p value contains a carriage return, a
+     * line feed or a NUL character.
+     *
+     * @note **Narrowing since ticket #2063** (SR-AUD-313, cause NH-B). This map is written
+     * straight onto the wire by `HttpClientHandler::Send` as `name + ": " + value + "\r\n"`,
+     * so before #2063 a value of `"v\r\nX-Injected: yes"` emitted **two** header fields.
+     * A space and a horizontal tab are legal in a header value and are still accepted, as is
+     * an empty value. See `docs/Migration-HttpControlCharacterRejection.md`.
      */
-    void setHeader(const std::string& name, const std::string& value) { headers_[name] = value; }
+    void setHeader(const std::string& name, const std::string& value) {
+        detail::ThrowIfControlCharacter(name, "header name");
+        detail::ThrowIfControlCharacter(value, "header value");
+        headers_[name] = value;
+    }
 
     /** Returns the map of all request headers. */
     [[nodiscard]] const std::unordered_map<std::string, std::string>& getHeadersProperty() const {

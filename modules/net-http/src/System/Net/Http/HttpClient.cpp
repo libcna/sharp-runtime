@@ -7,6 +7,7 @@
 #include "System/Net/Http/HttpClientHandler.hpp"
 #include "System/Net/Http/HttpRequestException.hpp"
 #include "System/Net/Http/StringContent.hpp"
+#include "System/Net/Http/detail/HttpFieldValidation.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/UriFormatException.hpp"
@@ -32,6 +33,29 @@ namespace System::Net::Http {
 // System::FormatException&, escaping straight out of a public API.
 HttpClient::ParsedUrl HttpClient::parseUrl(const std::string& url) {
     ParsedUrl result;
+
+    // Ticket #2063 (SR-AUD-313's third and fourth vectors, cause NH-B). The whole URL is
+    // checked ONCE, here, before any splitting -- deliberately not per-component. Every
+    // component this parser produces is concatenated into the request frame by
+    // HttpClientHandler::Send: the host into `Host: `, the path into the request LINE. Both
+    // were open before this check:
+    //
+    //   parseUrl("http://ho\r\nst/p")   -> host "ho\r\nst"   -> two header fields
+    //   parseUrl("http://host/pa\r\nX: y") -> path "/pa\r\nX: y" -> a second REQUEST LINE
+    //
+    // The second of those is request smuggling, and the namespace review named only the
+    // first; see docs/SystemNetHttpNamespaceReviewPlan.md §20.3. Validating the raw input
+    // rather than the parsed pieces is also what makes ticket #2064's authority/query/fragment
+    // re-split safe by construction: no later regrouping of these bytes can reintroduce a
+    // control character the whole string does not contain.
+    //
+    // System::UriFormatException (which IS a System::FormatException) rather than a plain
+    // FormatException, because that is the type this parser already documents and throws for
+    // every other malformed URL.
+    if (detail::ContainsProtocolControlCharacter(url))
+        throw System::UriFormatException(
+            "HttpClient: the request URI must not contain a carriage return, a line feed or a "
+            "NUL character.");
 
     size_t schemeEnd = url.find("://");
     if (schemeEnd == std::string::npos)
@@ -104,6 +128,21 @@ HttpClient::ParsedUrl HttpClient::parseUrl(const std::string& url) {
 // exactly like a successful one to calling code.
 HttpClient::ParsedStatusLine HttpClient::parseStatusLine(const std::string& statusLine) {
     ParsedStatusLine result;
+
+    // Ticket #2063 (SR-AUD-316's reason half, cause NH-B). recvLine() strips the terminating
+    // CRLF, so a CR, LF or NUL still present inside the line is a malformed status line the
+    // server sent -- and the reason phrase is handed straight to
+    // HttpResponseMessage::setReasonPhraseProperty, a public door that now rejects exactly
+    // those characters. Rejecting here, with THIS module's response-error type, is what keeps
+    // a malformed *response* surfacing as HttpRequestException rather than as the
+    // FormatException the public setter raises for a direct caller's bad argument.
+    // The line is not echoed into the message: it is remote-controlled and messages get
+    // logged, so echoing it would recreate the injection in the log.
+    if (detail::ContainsProtocolControlCharacter(statusLine))
+        throw HttpRequestException(
+            "HttpClient: the response status line contains a carriage return, a line feed or a "
+            "NUL character.");
+
     size_t sp1 = statusLine.find(' ');
     if (sp1 == std::string::npos)
         throw HttpRequestException("HttpClient: malformed status line: '" + statusLine + "'");
@@ -222,7 +261,13 @@ HttpClient::GetByteArrayAsync(const std::string& url) {
         [this, url]() { return GetByteArray(url); });
 }
 
+// Ticket #2063 (SR-AUD-313, cause NH-B). A default header is merged onto every request this
+// client sends, so it reaches the wire through exactly the same concatenation as a per-request
+// header and needs the same rejection. Doing it only on HttpRequestMessage::setHeader would
+// have left the client-wide door open.
 void HttpClient::setDefaultHeader(const std::string& name, const std::string& value) {
+    detail::ThrowIfControlCharacter(name, "header name");
+    detail::ThrowIfControlCharacter(value, "header value");
     defaultHeaders_[name] = value;
 }
 

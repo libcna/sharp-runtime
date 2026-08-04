@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include "System/Net/Http/HttpContent.hpp"
+#include "System/Net/Http/detail/HttpFieldValidation.hpp"
 #include "System/ReadOnlyMemory.hpp"
 #include <string>
 #include <vector>
@@ -28,10 +29,15 @@ public:
      * @brief Constructs ReadOnlyMemoryContent from a ReadOnlyMemory<byte> view.
      * @param content   The memory region to use as the content body.
      * @param mediaType MIME type; defaults to "application/octet-stream".
+     *
+     * @throws System::FormatException if @p mediaType contains a carriage return, a line feed
+     * or a NUL character (**narrowing since ticket #2063**, SR-AUD-313).
      */
     explicit ReadOnlyMemoryContent(const System::ReadOnlyMemory<SharpRuntime::bytecs>& content,
                                    const std::string& mediaType = "application/octet-stream")
-        : content_(content), mediaType_(mediaType) {}
+        : content_(content), mediaType_(mediaType) {
+        detail::ThrowIfControlCharacter(mediaType, "media type");
+    }
 
     /** Returns the content body interpreted as a UTF-8 string. */
     [[nodiscard]] std::string ReadAsString() const override {

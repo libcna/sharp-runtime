@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include "System/Net/Http/HttpContent.hpp"
+#include "System/Net/Http/detail/HttpFieldValidation.hpp"
 #include "System/IO/Stream.hpp"
 #include "System/ArgumentNullException.hpp"
 #include <memory>
@@ -32,11 +33,17 @@ public:
      * @brief Constructs StreamContent by eagerly reading @p content to the end.
      * @param content   The stream to read the content body from.
      * @param mediaType MIME type; defaults to "application/octet-stream".
+     *
+     * @throws System::FormatException if @p mediaType contains a carriage return, a line feed
+     * or a NUL character (**narrowing since ticket #2063**, SR-AUD-313). The null-stream check
+     * runs first, so a caller passing both a null stream and a malformed media type still sees
+     * `System::ArgumentNullException`, exactly as before.
      */
     explicit StreamContent(const std::shared_ptr<System::IO::Stream>& content,
                             const std::string& mediaType = "application/octet-stream")
         : mediaType_(mediaType) {
         System::ArgumentNullException::ThrowIfNull(content.get(), "content");
+        detail::ThrowIfControlCharacter(mediaType, "media type");
 
         SharpRuntime::bytecs buffer[4096];
         SharpRuntime::intcs n;

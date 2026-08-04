@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include "System/Net/Http/HttpContent.hpp"
+#include "System/Net/Http/detail/HttpFieldValidation.hpp"
 #include <string>
 #include <vector>
 
@@ -17,10 +18,16 @@ public:
      * @brief Constructs ByteArrayContent from a raw byte array.
      * @param data   Byte array to use as the content body.
      * @param mediaType MIME type; defaults to "application/octet-stream".
+     *
+     * @throws System::FormatException if @p mediaType contains a carriage return, a line feed
+     * or a NUL character (**narrowing since ticket #2063**, SR-AUD-313 — the value is
+     * concatenated into a `Content-Type:` field on the wire and inside a MIME part).
      */
     explicit ByteArrayContent(const std::vector<SharpRuntime::bytecs>& data,
                               const std::string& mediaType = "application/octet-stream")
-        : data_(data), mediaType_(mediaType) {}
+        : data_(data), mediaType_(mediaType) {
+        detail::ThrowIfControlCharacter(mediaType, "media type");
+    }
 
     /** Returns the content body interpreted as a UTF-8 string. */
     [[nodiscard]] std::string ReadAsString() const override {

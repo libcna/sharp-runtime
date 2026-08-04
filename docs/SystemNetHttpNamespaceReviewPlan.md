@@ -607,3 +607,131 @@ carries the mirror assertion, `threw == 0`.
 
 The tests **skip** rather than fail where `/proc/self/fd` does not exist. A missing instrument
 is not a passing measurement, and this is Linux-only by construction.
+
+### 20.3 #2063 — SR-AUD-313 has **ten** public doors, not the four §4.1 named
+
+The single largest correction this implementation made. §4.1 scoped #2063 to *"a header name
+and value, a request authority, and a reason phrase"*. Measured against `257106a` with
+`build-probe/2063_probe1_doors.cpp` (log `2063_probe1_before.log`), **every** door named by
+SR-AUD-313's own audit text was open, and one the audit does not name is worse than any of
+them:
+
+| # | Door | Open before? | In §4.1's list? |
+|---|---|---|---|
+| 1 | `HttpRequestMessage::setHeader` name and value | yes | yes |
+| 2 | `HttpResponseMessage::setHeader` name and value | yes | no — symmetric, added |
+| 3 | `HttpClient::setDefaultHeader` name and value | yes | no — merged onto every request |
+| 4 | `HttpResponseMessage::setReasonPhraseProperty` | yes | yes |
+| 5 | `parseUrl` — the **authority** | yes | yes |
+| 6 | `parseUrl` — the **path** | yes | **no, and it is request smuggling** |
+| 7 | `parseStatusLine` — the whole line | yes | no |
+| 8 | `StringContent` charset + media type; `ByteArrayContent`/`ReadOnlyMemoryContent`/`StreamContent` media type | yes | no — **named by the audit**, missed by the review |
+| 9 | `MultipartContent` subtype | yes | no — **named by the audit** |
+| 10 | `MultipartFormDataContent::Add` name and file name | yes | no — **named by the audit** |
+
+**Door 6 is the load-bearing correction.** `HttpClientHandler::Send` writes
+`method << " " << purl.path << " HTTP/1.1\r\n"`, so
+`parseUrl("http://host/pa\r\nX: y")` returning path `"/pa\r\nX: y"` puts attacker text in the
+request **line**. That is a second request, not a second header field. Had #2063 been
+implemented to §4.1's list it would have closed the authority and left this open, which is
+exactly the failure mode §4.1 itself was written to prevent one step earlier.
+
+**Doors 8–10 were named by the finding and dropped by the review.** SR-AUD-313's text reads
+*"content type/charset, multipart subtype, and form-data name/file name take the same
+unvalidated serialization path… The direct multipart probe emits separately parsed injected
+fields"*. The review's §4.1 paraphrased that as "header, media-type and disposition
+concatenation" and then scoped the ticket to headers. Measured, `MultipartFormDataContent`
+with a CR/LF name emits
+`Content-Disposition: form-data; name="na\r\nX-Injected: yes"` — the audit's claim, reproduced
+exactly. **Closing only the four §4.1 doors would have left SR-AUD-313 marked remediated with
+three of its own named vectors still open.**
+
+**The repair validates the whole URL string once**, at the top of `parseUrl`, rather than the
+parsed components. That closes doors 5 and 6 in one rule *and* makes #2064's
+authority/query/fragment re-split safe by construction: no later regrouping of those bytes can
+reintroduce a control character the whole string does not contain.
+
+**Three exception types, for stated reasons** (`docs/Migration-HttpControlCharacterRejection.md`
+§4): `System::FormatException` for the protocol-field doors; `System::UriFormatException`
+(which **is** a `FormatException`) for `parseUrl`, matching what it already throws;
+`HttpRequestException` for `parseStatusLine` and for the handler's response-header-line check,
+because a malformed **response** is this module's response error rather than the caller's
+format error. `System::ArgumentException` for the two multipart doors, because the same
+parameters already report their other defects that way. §15's record stands: .NET's exact type
+is **not** known here, and these are recorded as this port's choices.
+
+**Rejected text is not echoed into the exception message.** It is attacker-controlled and
+these messages get logged; echoing a CR/LF-bearing value into a log recreates the injection
+the rejection exists to prevent. The messages name the **field**, not the value.
+
+**Sanitizers.** ASan/UBSan/LSan clean over 130 rejections and 19 acceptances, with
+`HttpClient.cpp`, `HttpClientHandler.cpp`, `MultipartContent.cpp` and
+`MultipartFormDataContent.cpp` compiled **from source** into the probe — §12's warning about
+the `STATIC` component applies here exactly as it did to #2065 — and a control
+heap-buffer-overflow proving the instrumentation is live
+(`build-probe/2063_probe3_asan.log`). §12 predicted no sanitizer finding for #2063 and that
+prediction **held**; this is recorded as a **non-discriminating confirmation**, not as proof
+of a repair.
+
+### 20.4 #2063's pin suite, and the one pin §11 asked for that cannot exist as asked
+
+§11's last row asks for a pin per blocked ticket "for #2066, #2067, #2068, #2069, #2070 and
+#2071". **#2066 is different in kind**: its subject is a use-after-free, and §4.6 already says
+so — *"a use-after-free is not a behaviour to pin, it is a defect to fix"*. A test that
+exercised it would have no defined meaning. What #2066 **must** change and what therefore
+**is** pinnable is the *ownership model*, so #2066's pin is a `static_assert` that `HttpClient`
+does **not** derive from `std::enable_shared_from_this<HttpClient>`. The ticket's acceptance
+criterion and §4.6 are both satisfied, and no undefined behaviour is pinned.
+
+**Object layout is pinned against a probe struct, not a byte count.** The Buffers review's
+pins could assert `sizeof(T) == 32` because those types hold no `std::string`. Every public
+type here does, and `sizeof(std::string)` is 32 on libstdc++ and 24 on libc++, so a literal
+byte count would be a portability trap for the MinGW/Emscripten/Apple-Clang builds the
+platform policy requires to keep compiling. The pin instead asserts
+`sizeof(HttpRequestMessage) == sizeof(HttpRequestMessageLayoutProbe)`, a struct with the same
+declared members — exact on every standard library. Measured on the verified Linux/GCC
+baseline and recorded here: `HttpClient` 104, `HttpRequestMessage` 192, `HttpResponseMessage`
+112, `StringContent` 104, `ByteArrayContent` 64, `MultipartContent` 96, `HttpMethod` 32.
+
+**Every pin is mutation-checked.** Nine mutations, each applied and then reverted from an exact
+backup with `git diff --stat` identical on both sides and no `MUTATION` marker surviving:
+
+| # | Mutation | Expected | Measured |
+|---|---|---|---|
+| M1 | `ContainsProtocolControlCharacter` returns `false` | the rejection tests fail, the acceptance tests do not | **exactly 13** rejection tests failed; all 8 acceptance tests and all 7 pins stayed green |
+| M2 | `HttpClient : std::enable_shared_from_this<HttpClient>` | #2066's pin fails | **compile error**, that static_assert |
+| M3 | `bool sentAlready_` added to `HttpRequestMessage` | the layout pin fails | **compile error**, that static_assert |
+| M4 | a sent-state guard stored in `HttpRequestOptions` (**no** layout change, so only the behaviour pin can react) | `Pin2067` fails | failed |
+| M5 | `HttpResponseMessage::getHeader` made case-insensitive | `Pin2068_HeaderMapsAreCaseSensitive` fails | failed |
+| M6 | the handler skips its own `Host` when the caller set one | `Pin2068_HandlerEmitsADuplicateDefaultHeader` fails | failed |
+| M7 | the response constructor rejects a code outside 100–599 | `Pin2069` fails | failed |
+| M8 | `StringContent::ReadAsByteArray` encodes for `charset == "utf-16"` | `Pin2070` fails | failed |
+| M9 | `recvExact` capped at 64 KiB | `Pin2071` fails | failed (see below) |
+
+M4–M9 were applied together in one build; **exactly** the six expected pins reacted and no
+other test in the 165 did, which is what makes the attribution sound. M4 is deliberately
+layout-neutral: had it added the member, M3's static_assert would have stopped the build and
+the *behavioural* pin would never have been exercised.
+
+**One test defect M9 exposed, and fixed.** Under M9 `Pin2071` aborted the whole executable
+rather than failing: the client threw, `serverThread.join()` was skipped, and `std::thread`'s
+destructor called `std::terminate`. An approved #2071 would have hit exactly that and hidden
+every other result behind one abort. The test now joins in all paths and asserts the absence
+of a throw explicitly.
+
+### 20.5 Measured behaviours #2063 did **not** change, recorded rather than fixed
+
+All from `build-probe/2063_probe1_before.log`, all still true after #2063, none of them CR, LF
+or NUL:
+
+- `parseUrl("http://host/p q")` → path `"/p q"`. A **space** in the request target also breaks
+  the request line (`GET /p q HTTP/1.1`), but it is not a frame terminator and no repository
+  evidence pins .NET's handling. Recorded, not changed.
+- `parseUrl("http://user@host/p")` → host `"user@host"`, which then goes to DNS. Userinfo
+  without a password is accepted; with one it already throws (`invalid port`, incidentally).
+  Not in §4.2's row list; no evidence for .NET's behaviour. Recorded as ticket **#2072**,
+  P3, **deferred**.
+- `parseUrl("http://[::1]x/p")` → host `"::1"`, the junk after the bracket silently dropped.
+  Recorded as part of **#2072**.
+- `parseUrl("http://host: 80/p")` and `"http://host:+80/p"` → port 80. `std::stoi` skips
+  leading whitespace and accepts a sign. **This one is #2064's**, not a separate ticket.

@@ -26,6 +26,7 @@
 #include "System/Net/Http/ByteArrayContent.hpp"
 #include "System/Net/Http/HttpClient.hpp"
 #include "System/Net/Http/HttpRequestException.hpp"
+#include "System/Net/Http/detail/HttpFieldValidation.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/Uri.hpp"
 #include <algorithm>
@@ -246,6 +247,13 @@ std::shared_ptr<HttpResponseMessage> HttpClientHandler::Send(std::shared_ptr<Htt
     if (useCookies_ && cookieContainer_ && reqHeaders.find("Cookie") == reqHeaders.end()) {
         uri = std::make_unique<System::Uri>(absoluteUrl);
         std::string cookieHeader = cookieContainer_->GetCookieHeader(*uri);
+        // Ticket #2063 (SR-AUD-313, cause NH-B). Every other entry of reqHeaders came through
+        // HttpRequestMessage::setHeader or HttpClient::setDefaultHeader and is already
+        // validated; this one is synthesised HERE out of cookie state that a previous
+        // response's Set-Cookie put there, so it is the one request header value on this path
+        // with no public door in front of it. CookieContainer lives in another component with
+        // its own open findings, so this guard does not assume anything about what it stores.
+        detail::ThrowIfControlCharacter(cookieHeader, "Cookie header value");
         if (!cookieHeader.empty()) reqHeaders["Cookie"] = cookieHeader;
     }
 
@@ -306,6 +314,17 @@ std::shared_ptr<HttpResponseMessage> HttpClientHandler::Send(std::shared_ptr<Htt
     for (;;) {
         std::string line = recvLine(fd, buf);
         if (line.empty()) break;
+        // Ticket #2063 (SR-AUD-313, cause NH-B). recvLine() has already consumed the
+        // terminating CRLF, so a CR, LF or NUL still inside the line means the server sent a
+        // malformed header field. HttpResponseMessage::setHeader would reject it below with
+        // System::FormatException; rejecting it here instead keeps a malformed RESPONSE
+        // reported as this module's response-error type, exactly like a malformed
+        // Content-Length or chunk size. The line is not echoed -- it is remote-controlled and
+        // this message may be logged.
+        if (detail::ContainsProtocolControlCharacter(line))
+            throw HttpRequestException(
+                "HttpClient: a response header line contains a carriage return, a line feed or "
+                "a NUL character.");
         size_t colon = line.find(':');
         if (colon == std::string::npos) continue;
         std::string name  = line.substr(0, colon);

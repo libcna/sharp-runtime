@@ -21,6 +21,70 @@ Required remediation: centralize field-name/value and media/disposition
 parameter validation/escaping before any serialization; reject CR, LF, NUL,
 invalid tokens, and duplicate protected fields rather than writing raw text.
 
+**REMEDIATED — ticket #2063, 2026-08-04.** *(Appended; the original finding text
+above is preserved verbatim.)*
+
+The finding's own list — *"content type/charset, multipart subtype, and
+form-data name/file name take the same unvalidated serialization path"* — is
+**correct and complete**, and the namespace review's §4.1 paraphrase of it
+("header, media-type and disposition concatenation") narrowed the derived ticket
+to headers only. Measured against `257106a`
+(`build-probe/2063_probe1_doors.cpp`, log `2063_probe1_before.log`), **ten**
+public doors were open, including every one this finding names:
+
+| Door | Open before |
+|---|---|
+| `HttpRequestMessage::setHeader` name and value | yes |
+| `HttpResponseMessage::setHeader` name and value | yes |
+| `HttpClient::setDefaultHeader` name and value | yes |
+| `HttpResponseMessage::setReasonPhraseProperty` | yes |
+| `HttpClient::parseUrl` — the authority | yes |
+| `HttpClient::parseUrl` — the **path**, i.e. the request **LINE** | yes |
+| `HttpClient::parseStatusLine` — the whole line | yes |
+| `StringContent` charset + media type, and the three other contents' media type | yes |
+| `MultipartContent` subtype | yes |
+| `MultipartFormDataContent::Add` name and file name | yes |
+
+Two of those were not in the derived ticket's original scope and are the reason
+this note exists. The **path** vector is worse than the authority one the review
+named: `HttpClientHandler::Send` writes
+`method << " " << purl.path << " HTTP/1.1\r\n"`, so a CRLF in the path injects a
+second **request line**, not one header field. And this report's own multipart
+claim reproduced exactly — `MultipartFormDataContent::Add(content, "na\r\nX-Injected: yes")`
+emitted `Content-Disposition: form-data; name="na\r\nX-Injected: yes"`.
+
+The repair rejects CR, LF and NUL at all ten doors through one shared
+`System::Net::Http::detail` helper, and validates the **whole URL string** once
+at the top of `parseUrl` rather than the parsed components. Two internal sites
+are guarded for the same reason: a **response header line** carrying one of the
+three characters (`HttpRequestException`, so a malformed response stays a
+response error) and the `Cookie` header value synthesised from
+`CookieContainer` — the one request header value on that path with no public
+door in front of it.
+
+Not done here, and deliberately: **escaping** and **duplicate protected fields**.
+The required-remediation text above asks for both. Escaping a MIME parameter
+changes emitted bytes for text that is currently legal, and de-duplicating the
+`Host`/`User-Agent`/`Accept`/`Connection` fields the handler writes
+unconditionally requires the case-insensitive lookup that blocked ticket
+**#2068** introduces. Both stay open; the duplicate-`Host` behaviour is
+**pinned** by `NetHttpGatedBehaviourPins.Pin2068_HandlerEmitsADuplicateDefaultHeader`.
+The `invalid tokens` clause is likewise out of scope: only the three characters
+that terminate a frame are rejected, and a wider token grammar has no
+repository-contained evidence behind it (`/rv/tmp/runtime/` absent, re-verified
+2026-08-04).
+
+Closure evidence: +21 permanent regressions in `HttpClientTests.cpp` covering
+each character at the start, middle and end of every door, an end-to-end
+assertion that an injected request URI **opens no socket at all**, mutation
+check (emptying the shared predicate fails exactly the 13 rejection tests while
+all 8 acceptance tests and all 7 pins stay green), and ASan/UBSan/LSan clean
+over 130 rejections and 19 acceptances with the four changed `.cpp` bodies
+compiled **from source** plus a control heap-buffer-overflow proving
+instrumentation (`build-probe/2063_probe3_asan.log`). No signature, layout,
+vtable or exception-specification change. Deliberate narrowing, documented in
+`docs/Migration-HttpControlCharacterRejection.md`.
+
 ### SR-AUD-318 — medium — terminal response parsing has unbounded buffering, weak framing checks, and leaks connected sockets on exceptions
 
 `recvLine`, `recvAll`, chunks, and body accumulation have no configured size or

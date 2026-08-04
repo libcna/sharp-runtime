@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include "System/Net/Http/HttpContent.hpp"
+#include "System/Net/Http/detail/HttpFieldValidation.hpp"
 #include <string>
 #include <vector>
 
@@ -19,11 +20,29 @@ public:
      * @param content   The text body.
      * @param charset   Character encoding; defaults to "utf-8".
      * @param mediaType MIME type; defaults to "text/plain".
+     *
+     * @throws System::FormatException if @p charset or @p mediaType contains a carriage
+     * return, a line feed or a NUL character.
+     *
+     * @note **Narrowing since ticket #2063** (SR-AUD-313, cause NH-B). Both values are
+     * concatenated into a `Content-Type: <mediaType>; charset=<charset>` field — by
+     * `HttpClientHandler::Send` on the wire and by `MultipartContent::ReadAsString` inside a
+     * MIME part — so a CR/LF in either used to emit extra header fields. The **body** is not
+     * validated: it is payload, not a protocol field.
+     *
+     * @note The charset is a **label only**: the bytes emitted are always the storage bytes of
+     * @p content, so `StringContent("\xc3\xa9", "utf-16")` still emits `c3 a9`. Whether .NET
+     * encodes through the declared charset or treats the label as advisory is an open
+     * question with no repository-contained evidence — deferred ticket #2070, with the
+     * current behaviour pinned so no answer can land silently.
      */
     explicit StringContent(const std::string& content,
                            const std::string& charset   = "utf-8",
                            const std::string& mediaType = "text/plain")
-        : content_(content), mediaType_(mediaType), charset_(charset) {}
+        : content_(content), mediaType_(mediaType), charset_(charset) {
+        detail::ThrowIfControlCharacter(charset, "charset");
+        detail::ThrowIfControlCharacter(mediaType, "media type");
+    }
 
     /** Returns the content body as a string. */
     [[nodiscard]] std::string ReadAsString() const override { return content_; }
