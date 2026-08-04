@@ -23,6 +23,16 @@ namespace System::Diagnostics {
      * Partial C++ counterpart of .NET System.Diagnostics.Debug.
      * In Release builds the Assert/Write/WriteLine methods are compiled out.
      *
+     * @note Thread safety: GetProvider/SetProvider and the IndentSize property are safe to
+     * call concurrently from any thread. Provider reads take an owning snapshot, so a provider
+     * in use cannot be destroyed by a concurrent SetProvider. IndentLevel is per-thread
+     * (matching .NET's ThreadStatic), so each thread sees only its own. No ordering is
+     * promised between a SetProvider on one thread and a Write on another: a Write may still
+     * route through the previous provider, which is the usual last-writer-wins semantics, not
+     * a race. The provider itself is invoked without any lock held, so a provider that calls
+     * back into Debug does not deadlock -- but a provider must be thread-safe on its own
+     * account if it is installed while other threads are writing.
+     *
      * @note Status: Partial. Output is routed through a pluggable DebugProvider
      * (matching .NET's Debug.SetProvider extensibility), and IndentLevel/IndentSize
      * are tracked and reported to the provider. Unlike .NET, Write/WriteLine do not

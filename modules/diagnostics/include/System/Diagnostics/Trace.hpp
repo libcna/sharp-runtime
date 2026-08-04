@@ -14,6 +14,11 @@ namespace System::Diagnostics {
      * Unlike Debug, Trace output is NOT stripped in release builds.
      * Partial C++ counterpart of .NET System.Diagnostics.Trace.
      *
+     * @note Thread safety: the IndentSize property is safe to call concurrently; IndentLevel
+     * is per-thread. The Write/WriteLine/Trace* methods write to std::cerr, which is not
+     * corrupted by concurrent use but whose output may be interleaved between threads --
+     * this class does nothing to prevent that.
+     *
      * @note Status: Partial — writes to std::cerr; no TraceListeners/TraceListenerCollection,
      * no CorrelationManager, no Refreshing event, no category-suffixed Write/WriteLine
      * overloads, and no object-typed Write/WriteLine

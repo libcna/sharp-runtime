@@ -607,6 +607,23 @@ preserved in the probe, not hidden.
 
 ---
 
+## 16.2 Pin discrimination evidence (#2028)
+
+A pin that cannot fail is not a pin, so each was shown to fail against the behaviour it
+guards:
+
+| Pin | How it was shown discriminating |
+|---|---|
+| #2029, both | **Mutation-checked.** §14.1's recommended option C was applied temporarily to `~Impl` (detach the readers, reap with `WNOHANG`) and rebuilt: both tests failed, each with its own "#2029 appears to have landed" message. The mutation was reverted and `git diff` confirmed clean. |
+| #2030, return type | A `static_assert` on `decltype(...)`; the §14.2 change to return by value makes it a **compile error**, which is the intended trip-wire. The address-identity check fails too. |
+| #2030, const-mutation | Asserts that a `const` getter transitions the object to the exited state. |
+| #2031 | **Discrimination-checked** (`build-probe/2028_probe1_pin_discrimination.log`): a grandchild that calls `setsid` survives `Kill(true)` (witness written), while an otherwise identical grandchild that does **not** call `setsid` is killed (witness absent). So the pin detects the group-escape specifically, not merely "some descendant lived". |
+
+**Completing these pins does not authorise or complete #2029, #2030 or #2031.** A failure of
+any of them is the signal the file exists to produce, not a regression to silence.
+
+---
+
 ## 17. Namespace completion criteria
 
 `System::Diagnostics` is complete when **all eight** findings are `remediated`
@@ -636,7 +653,7 @@ implementation ticket, and:
 | #2025 | D-C | 270 | **done** (2026-08-04), compatible, +15 tests |
 | #2026 | D-F | 274 | **done** (2026-08-04), compatible, +13 tests |
 | #2027 | D-G | 275 | **done** (2026-08-04), compatible, +11 tests |
-| #2028 | — | (docs + gated pins) | `todo`, compatible |
-| #2029 | D-B | 269 | **blocked**, design complete (§14.1) |
-| #2030 | D-D | 271 | **blocked**, design complete (§14.2) |
-| #2031 | D-E | 273 | **blocked**, design complete (§14.3) |
+| #2028 | — | (docs + gated pins) | **done** (2026-08-04), compatible, +8 tests |
+| #2029 | D-B | 269 | **blocked**, design complete (§14.1), **PINNED by #2028** (2 tests, mutation-checked) |
+| #2030 | D-D | 271 | **blocked**, design complete (§14.2), **PINNED by #2028** (2 tests, one a `static_assert`) |
+| #2031 | D-E | 273 | **blocked**, design complete (§14.3), **PINNED by #2028** (1 test, discrimination-checked) |

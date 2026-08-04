@@ -22,11 +22,18 @@ namespace System::Diagnostics {
      * external updater/installer, invoking a build/asset-processing tool, opening a URL via a
      * platform "open" helper) rather than real .NET's full systems-programming surface.
      *
-     * @note Status: Partial, POSIX-only (uses fork()/execvp()/waitpid() in the .cpp body, guarded
+     * @note Thread safety: a Process instance is **not** safe for concurrent use, and this is
+     * stronger than the usual "no synchronisation" caveat -- getHasExitedProperty() is declared
+     * const yet mutates the object's exit state, and the captured-output getters hand out a
+     * reference into a buffer an internal thread is still writing. Confine an instance to one
+     * thread. Ticket #2030 gates the repair.
+     *
+     * @note Status: Partial, POSIX-only (uses fork()/execvpe()/waitpid() in the .cpp body, guarded
      * behind #ifdef so the public header stays portable; throws
      * System::PlatformNotSupportedException on Emscripten). Implemented: Start (instance and the
-     * three static overloads), WaitForExit (blocking and timeout forms), Kill (single process and
-     * process-tree via killpg), ExitCode, HasExited, Id, GetCurrentProcess, and optional
+     * three static overloads), WaitForExit (blocking and timeout forms), Kill (single process
+     * and process-GROUP via killpg -- see Kill(bool), which is not the full process tree its
+     * parameter name suggests), ExitCode, HasExited, Id, GetCurrentProcess, and optional
      * captured-text stdout/stderr redirection (a deliberate simplification of real .NET's
      * Stream-based StandardOutput/StandardError -- see getStandardOutputTextProperty). Child
      * setup and exec failures are reported synchronously by Start() rather than being exposed as
@@ -46,6 +53,23 @@ namespace System::Diagnostics {
         static void reapIfNeeded(Impl& impl);
 
     public:
+        /**
+         * @brief Destroys the wrapper. Does **not** reap or terminate the associated process.
+         *
+         * @warning This destructor has two known, opposite shortcomings, both deliberately
+         * left unrepaired because the repair is a policy decision awaiting approval
+         * (ticket #2029, `docs/SystemDiagnosticsNamespaceReviewPlan.md` §14.1). Both are
+         * pinned by permanent tests so neither can change unnoticed.
+         *
+         * - **Without redirection:** destruction returns immediately and the child is never
+         *   waited for, so once it exits it remains a **zombie** for the lifetime of this
+         *   process.
+         * - **With redirection:** destruction **blocks** until the child closes its standard
+         *   output, because the internal reader threads are joined. That is the child's whole
+         *   remaining lifetime, and is unbounded in general (2005 ms measured for a 2 s child).
+         *
+         * Call WaitForExit() before destroying a Process to avoid both.
+         */
         ~Process();
         Process(const Process&) = delete;
         Process& operator=(const Process&) = delete;
@@ -93,20 +117,55 @@ namespace System::Diagnostics {
 
         /**
          * @brief Gets the captured standard output text.
+         *
+         * @warning The returned reference denotes a buffer an internal reader thread appends
+         * to while the child runs, so **reading it before WaitForExit() has returned is a data
+         * race** and the contents may change under the caller (the same reference was measured
+         * holding 4 bytes mid-run and 8 bytes after exit). Read it only after WaitForExit().
+         * Making this safe requires returning by value, which changes the public return type,
+         * so it awaits approval (ticket #2030, plan §14.2); the current shape is pinned by a
+         * permanent test.
+         *
+         * The text is reset when the process is restarted, so it always describes the most
+         * recently started process rather than accumulating across restarts.
+         *
          * @throws System::InvalidOperationException unless RedirectStandardOutput was set before Start().
          */
         [[nodiscard]] const std::string& getStandardOutputTextProperty() const;
 
         /**
          * @brief Gets the captured standard error text.
+         *
+         * @warning Carries the same live-reference caveat as getStandardOutputTextProperty():
+         * read it only after WaitForExit(). Ticket #2030.
+         *
          * @throws System::InvalidOperationException unless RedirectStandardError was set before Start().
          */
         [[nodiscard]] const std::string& getStandardErrorTextProperty() const;
 
-        /** @brief Immediately stops the associated process by sending SIGKILL. */
+        /**
+         * @brief Immediately stops the associated process by sending SIGKILL to it alone.
+         *
+         * Descendants the child created are **not** signalled and keep running, reparented to
+         * init. Does nothing if the process has already exited or was obtained from
+         * GetCurrentProcess().
+         */
         void Kill();
 
-        /** @brief Immediately stops the associated process, and optionally its full process tree, via SIGKILL. */
+        /**
+         * @brief Immediately stops the associated process, and optionally its process group,
+         * via SIGKILL.
+         *
+         * @param entireProcessTree When true, signals the child's **process group** with
+         * `killpg` rather than only the child.
+         *
+         * @warning Despite the parameter's name this is **not** a full process-tree kill. A
+         * descendant that called `setsid()` -- or otherwise left the child's process group --
+         * has a different group and **survives** (measured). Widening this to the transitive
+         * descendant set changes how many processes get killed and needs a Linux-specific
+         * `/proc` walk, so it awaits approval (ticket #2031, plan §14.3); the current
+         * behaviour is pinned by a permanent test.
+         */
         void Kill(bool entireProcessTree);
 
         /**
@@ -127,6 +186,13 @@ namespace System::Diagnostics {
          *        Timeout.Infinite) to wait indefinitely.
          * @return true if the process exited before the timeout; false if the timeout elapsed
          *         first, and false for a Process obtained from GetCurrentProcess().
+         *
+         * @warning When output is redirected, this call can exceed @p milliseconds: reaping
+         * the child also joins the internal reader threads, and a reader cannot finish until
+         * every holder of the pipe's write end closes it -- including a **grandchild** that
+         * inherited it. Measured at 29,951 ms against a 5,000 ms bound. Repairing it requires
+         * deciding the reader-thread policy that ticket #2029 gates, so it is tracked
+         * separately as ticket #2032.
          * @throws System::ArgumentOutOfRangeException if @p milliseconds is less than -1.
          * @throws System::InvalidOperationException if the process has not been started.
          */
