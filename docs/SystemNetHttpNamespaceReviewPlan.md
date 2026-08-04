@@ -830,3 +830,62 @@ so `join()` is always reached, and (c) makes a throwaway `pokeMockServer(port)` 
 when the client failed, so `Accept()` returns. Between them a mutated build **fails** instead
 of hanging or aborting. A mutation check that hangs proves nothing about the test it was
 aimed at.
+
+### 20.7 Completion reconciliation — `System::Net::Http` is closed for compatible work
+
+Re-derived from `audit/AUDIT_FINDINGS_INDEX.md` after #2064, not carried forward from §4.
+**Nine findings own this namespace** — SR-AUD-310…318, every one linking to a file under
+`modules/net-http/`. One further row, SR-AUD-236, names `HttpContentJsonExtensions.hpp` but is
+owned by `modules/net-http-json`, a separate component §16 excludes; it is **not** counted
+here and nothing about it changed.
+
+Every one of the nine has **exactly one** disposition:
+
+| Disposition | Count | Findings | Evidence |
+|---|---:|---|---|
+| `remediated` | 3 | 311, 312 (#2064), 313 (#2063) | permanent regressions + mutation checks + sanitizers |
+| **split**: half `remediated`, half `confirmed` + blocked | 2 | 316 (reason half #2063 / code half #2069), 318 (leak half #2065 / limits half #2071) | both halves recorded in the index row and the per-file report |
+| `confirmed (design-complete)` + blocked ticket + mutation-checked pin | 2 | 314 (#2067), 315 (#2068) | one named repair each, blocked on a public change |
+| `confirmed`, blocked, **not** design-complete | 1 | 310 (#2066, CCF-019) | two competing options, no selection |
+| `confirmed`, deferred verification + pin | 1 | 317 (#2070) | evidence absent; `/rv/tmp/runtime/` re-verified missing |
+
+**Correction to §17's completion criterion 3.** That criterion asks for SR-AUD-310, 314 and
+315 to be `confirmed (design-complete)`. Applied to 314 and 315, whose repair the review names
+**singularly** — a sent-state member, a case-insensitive comparator — each blocked on a stated
+public change. **Not applied to 310**: §4.6 records *two* competing options
+(`enable_shared_from_this` on `HttpClient`, or ownership semantics on `TaskT`) with no
+selection, and §19 says the review deliberately did not re-run its reproduction. That is a
+disposition, not a completed design, and marking it design-complete would overstate what
+exists. 310 stays plain `confirmed`, blocked as #2066, with an ownership-model pin.
+
+**Every gated behaviour is pinned, and every pin is mutation-checked** (§20.4's table): #2066
+by a compile-time ownership-model `static_assert`, #2067 by a behavioural pin **and** a layout
+`static_assert`, #2068 by two behavioural pins **and** two return-type `static_assert`s, #2069,
+#2070 and #2071 by one behavioural pin each.
+
+**Verified against §17's other criteria:**
+
+1. #2063, #2064 and #2065 are `done`. ✔
+2. 311, 312, 313 are `remediated`; 316 and 318 carry split records in both the index and their
+   per-file reports. ✔
+4. 317 carries a deferred-verification ticket and a pin. ✔
+5. `SharpRuntimeTests_Net_Http` **137 → 181**, add-only; no test was removed, weakened,
+   skipped, disabled or recategorised. ✔
+6. The descriptor-leak measurement reads **0** for all five modes, re-run as part of the
+   #2064 end-to-end test that adds a sixth mode (a `GARBAGE` status line). ✔
+
+**No compatible ticket remains.** The queue is #2066 (blocked), #2067 (blocked), #2068
+(blocked), #2069 (blocked), #2071 (blocked), #2070 (deferred verification) and #2072 (deferred
+verification, post-audit, no `SR-AUD-*` identifier). **`System::Net::Http` is complete except
+for gated and deferred work.** Nothing blocked was implemented and nothing blocked is marked
+remediated.
+
+**Two cross-reference corrections to this document's own text**, recorded rather than silently
+edited: §1 item 4 and §2 both point at "§21" for the NH-B promotion rule, which is **§18**;
+there is no §21. And §1's closing sentence says `modules/net-websockets` "should be judged
+against whatever **#2063** concludes" — the ticket meant is **#2066**, the CCF-019 ownership
+ticket, since the shared shape is SR-AUD-247's use-after-free, not the control-character
+family. Neither error changed any decision.
+
+**`modules/xml` remains the recommended next unit**, and §22 records that recommendation
+re-derived by measurement rather than inherited.
