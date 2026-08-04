@@ -521,3 +521,76 @@ a pin.
 
 Appended as tickets land, so the difference between what this review predicted and what
 implementation measured stays visible.
+
+### 20.1 #2101 landed, and its real scope was ONE door, not seven
+
+§13's test matrix and the review's own grep expected several escape routes. Measured
+(`build-probe/2101_probe2_before.log`), **all but one were already guarded**:
+`DirectoryInfo::GetFiles`/`GetDirectories`/`GetFileNames` over a missing directory already threw
+a `System` exception, and `FileInfo::CopyTo("")`/`DirectoryInfo::MoveTo("")` already threw. The
+**only** real leak was the `FileSystemInfo` **constructor**, where
+`std::filesystem::absolute(path)` on an empty path threw
+`std::filesystem::filesystem_error("cannot make absolute path: Invalid argument")` straight out
+of `FileInfo("")` and `DirectoryInfo("")`.
+
+Narrowing the ticket to what was measured — rather than "fixing" six sites that were not broken —
+is the result, and the already-guarded neighbours are now **pinned by a test** so they stay that
+way.
+
+The repair rejects the empty case explicitly and routes **every other** failure through the
+`std::error_code` overload, so `filesystem_error` can no longer escape this door **by
+construction** rather than by being caught.
+
+**A whitespace-only path is deliberately still accepted.** It resolves cleanly on POSIX and no
+repository evidence says .NET rejects it here; narrowing on a guess is exactly what the
+deferred-verification rule exists to prevent. **Pinned by a test** so that changing it is a
+decision rather than a drift.
+
+Exception identity — `System::ArgumentException` with `paramName` `"path"` and the wording
+`FileInfo::CopyTo` already uses for the same defect in a different parameter — is **this port's
+choice**, recorded as such.
+
+### 20.2 #2103 landed by routing the broken door through the sibling that was already right
+
+§6.4's correction was the whole repair. `File::Delete` **already** had the guard, complete with a
+comment recording that real .NET calls `unlink()`, which can never remove a directory.
+`FileInfo::Delete` called `std::filesystem::remove` directly, and `std::filesystem::remove` is
+documented to call the equivalent of `rmdir` on a directory — so it **silently deleted the
+directory**. The repair delegates to `File::Delete` rather than writing a second copy of the
+rule: one guard, one message, and the two siblings cannot drift apart again.
+
+This required adding `#include "System/IO/File.hpp"` to `FileInfo.hpp`. No new component edge:
+both are in `IO`. The module graph is unchanged at **41 modules and 91 edges**.
+
+### 20.3 Evidence
+
+**+12 permanent regressions, add-only** — `SharpRuntimeTests_IO` 599 → **611**, in a new
+`IONamespaceReviewTests` suite. Fixtures live under the repository-local `build-tmp/`, never
+`/tmp`, per the build-resource policy, and each is uniquely named so two runs cannot collide.
+
+**Two mutations**, each reverted from an exact backup with `git diff --stat` identical on both
+sides and no marker surviving: O1 (the original throwing `absolute()`, no guard) → exactly **4**
+tests; O2 (the original `std::filesystem::remove`) → exactly **2**.
+
+**A first mutation attempt was DISCARDED rather than reported.** Removing the empty-path guard by
+commenting out its `if` left unbalanced braces, so the build failed — and the test run that
+followed used the **stale binary** and reported all 611 passing. A stale-binary run is not
+discrimination evidence. The mutation harness was changed to **check the build succeeded before
+trusting the result**, and O1 was re-done as a faithful restoration of the original expression.
+
+**One test is honestly recorded as non-discriminating.**
+`FileInfoDeleteOverANonEmptyDirectoryThrowsAndItsContentsSurvive` passes with O2 applied as well,
+because `std::filesystem::remove` fails with `ENOTEMPTY` on a non-empty directory anyway. It
+asserts a true and worthwhile invariant, but it is **not** evidence for this guard — the
+empty-directory case is.
+
+**Sanitizers**: ASan/UBSan/LSan clean over **600 rejections and 400 acceptances**, with a control
+heap-buffer-overflow proving instrumentation was live (`build-probe/2101_probe3_asan.log`). Both
+repaired bodies are **header-only `inline`**, so they are compiled into the probe TU and
+instrumented by construction — there is no STATIC-archive blind spot here.
+
+**Descriptor accounting** is not applicable to these two tickets (neither opens a descriptor);
+§6.2's measured zero-leak result for `FileStream` is unaffected and untouched.
+
+No signature, member, base-class, virtual, vtable, object-layout or exception-specification
+change.

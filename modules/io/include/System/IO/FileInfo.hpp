@@ -6,6 +6,7 @@
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/IO/File.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/FileSystemInfo.hpp"
 #include "System/IO/IOException.hpp"
@@ -72,15 +73,28 @@ namespace System::IO {
         }
 
         /**
-         * @brief Permanently deletes the file.
+         * @brief Deletes the file.
          *
-         * Matches .NET: deleting a file that does not exist is not an error.
-         * @throws System::IO::IOException on a genuine deletion failure.
+         * Ticket #2103 / SR-AUD-345, cause I-F. This used to call
+         * `std::filesystem::remove(fullPath_)` directly, and `std::filesystem::remove` is
+         * documented to call the equivalent of `rmdir` when its target is a directory — so
+         * `FileInfo(someEmptyDirectory).Delete()` **silently deleted the directory**
+         * (`build-probe/2097_probe1_before.log`).
+         *
+         * The sharper framing the review found is that the sibling `File::Delete` **already had
+         * the guard**, complete with a comment recording that real .NET calls `unlink()`, which
+         * can never remove a directory. Two APIs .NET documents as equivalent were giving
+         * opposite answers for the same input. The repair is therefore to **route this door
+         * through that one** rather than to write a second copy of the rule: one guard, one
+         * message, and the two siblings cannot drift apart again.
+         *
+         * @throws System::IO::IOException if the path names a directory, or if the delete fails.
+         *
+         * @note Deleting a path that does not exist is **not** an error, matching `File::Delete`
+         *       and .NET.
          */
         void Delete() override {
-            std::error_code ec;
-            std::filesystem::remove(fullPath_, ec);
-            if (ec) throw IOException("Failed to delete file '" + fullPath_.string() + "': " + ec.message());
+            File::Delete(fullPath_.string());
         }
 
         /**
