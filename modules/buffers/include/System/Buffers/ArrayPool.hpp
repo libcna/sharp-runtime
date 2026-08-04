@@ -23,7 +23,20 @@ namespace System::Buffers {
          * @throws ArgumentOutOfRangeException if minimumLength is negative.
          */
         virtual std::vector<T> Rent(intcs minimumLength) = 0;
-        /** Returns a rented buffer back to the pool, optionally clearing its contents first. */
+        /**
+         * @brief Returns a rented buffer back to the pool, optionally clearing its contents.
+         *
+         * @warning **This is not .NET's ownership transfer.** `Rent` hands back a
+         * `std::vector<T>` **by value**, so the caller owns that storage and keeps owning it
+         * after `Return`: continuing to read or write the vector afterwards is legal here and
+         * forbidden in .NET, and this implementation does not retain the buffer for reuse.
+         * `Return` is therefore advisory, and @p clearArray zeroes *the caller's own vector*
+         * rather than scrubbing something the pool is about to hand to someone else. Do not
+         * rely on it as a guarantee that sensitive data has left the process.
+         *
+         * @param array      The buffer to return; it remains owned by the caller.
+         * @param clearArray If true, value-initializes every element of @p array first.
+         */
         virtual void Return(std::vector<T>& array, bool clearArray = false) {
             if (clearArray) array.assign(array.size(), T{});
         }

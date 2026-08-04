@@ -28,6 +28,18 @@ using SharpRuntime::intcs;
  * definite-assignment rule with `Unsafe.SkipInit` before throwing (ParserHelpers.cs).
  * See docs/TryOutputFailureContractPlan.md (ticket #1872 / SR-AUD-085 / CCF-014).
  *
+ * @warning **A leading `+` is accepted by the 'N' grammar and rejected by the 'G'/'D'
+ * and default grammars, for signed and unsigned types alike** (SR-AUD-086). So `"+42"`
+ * parses under `'N'` and fails under `'G'`, `'D'` and the default for the same type.
+ * That internal inconsistency is measured and real. What could **not** be established is
+ * which of the two is right: the finding asserts .NET's decimal parsers accept a leading
+ * `+` for signed *and* unsigned values, which is two independent claims about two
+ * different reference files, and the .NET reference tree is not available in this
+ * environment. Widening the accepted input set on an unverified premise is exactly the
+ * mistake this repository's review method exists to prevent, so nothing was changed and
+ * the current behaviour of all four combinations is pinned by permanent tests. Deferred
+ * verification is ticket **#2060**; see docs/BuffersNamespaceReviewPlan.md §4.9.
+ *
  * Covers bool and all integer types (byte/sbyte/short/ushort/int/uint/long/ulong)
  * with the 'G' (default), 'D', 'N', and 'X' format specifiers. .NET's Guid,
  * DateTime, DateTimeOffset, TimeSpan, and floating-point/decimal TryParse

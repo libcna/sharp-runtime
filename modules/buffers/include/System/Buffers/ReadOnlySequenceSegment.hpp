@@ -11,8 +11,23 @@ namespace System::Buffers {
  *
  * C++ counterpart of .NET System.Buffers.ReadOnlySequenceSegment&lt;T&gt;.
  * Subclasses fill in the protected fields via the set-property helpers.
- * A ReadOnlySequence&lt;T&gt; can be constructed from a chain of these segments to
- * represent non-contiguous memory.
+ *
+ * @warning **A chain of these segments cannot currently be turned into a
+ * ReadOnlySequence&lt;T&gt;.** In .NET that is this type's entire reason for existing, and
+ * this header used to claim the same; it is not true here. `ReadOnlySequence<T>` offers
+ * only default, `std::vector` and raw pointer/length construction, is backed by a single
+ * contiguous vector, has no multi-segment state, and its
+ * `getIsSingleSegmentProperty()` is a hard-coded `true`. Linking nodes therefore builds a
+ * list nothing consumes (SR-AUD-087).
+ *
+ * The node shape is retained so that ported C# code declaring segment types still
+ * compiles. Implementing the segment-chain constructor is blocked ticket **#2058**: it
+ * needs new public members on `ReadOnlySequence<T>` (an object-layout change) plus
+ * multi-segment rewrites of `First`, all six `Slice` overloads, both `GetPosition`
+ * overloads, `TryGet`, `ToArray`, `CopyTo` and the enumerator, and of
+ * `SequenceReader<T>`'s single-segment snapshot. See
+ * docs/BuffersNamespaceReviewPlan.md §4.8. The current limitation is pinned by a
+ * permanent test.
  *
  * @tparam T The element type.
  */

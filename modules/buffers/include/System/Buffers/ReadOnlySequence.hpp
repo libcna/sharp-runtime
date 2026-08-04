@@ -85,7 +85,15 @@ namespace System::Buffers {
 
         /**
          * @brief Returns a shared empty ReadOnlySequence.
+         *
          * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.Empty.
+         *
+         * @warning **This port cannot distinguish `Empty` from a default-constructed
+         * sequence** (SR-AUD-074). .NET deliberately can: enumerating `default` yields **no**
+         * segment, while enumerating `Empty` yields **one** empty segment. Here both yield
+         * one, because the discriminating state has nowhere to live in the measured object
+         * layout. Blocked ticket **#2057**; see docs/BuffersNamespaceReviewPlan.md §4.5. The
+         * current behaviour is pinned by a permanent test.
          */
         [[nodiscard]] static ReadOnlySequence<T> getEmpty() { return ReadOnlySequence<T>(); }
 
