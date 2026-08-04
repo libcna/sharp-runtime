@@ -1,0 +1,523 @@
+<!-- SPDX-License-Identifier: MIT -->
+<!-- Copyright (c) Robert Vokac and contributors -->
+
+# `System::IO` (`modules/io`) namespace review — ticket #2097
+
+Owning ticket **#2097**. This document is the durable record; it **remediates nothing by
+itself**. Every claim is measured against the tree at `3c28f38`.
+
+`/rv/tmp/runtime/src/libraries/` is **absent** — re-verified 2026-08-04. Every statement about
+.NET below comes from repository-contained evidence only: the per-file audit reports, the
+doc-comments transcribed from .NET when the module was written, and this module's own tests.
+Where a repair would need .NET's exact behaviour and no repository evidence pins it, a
+**deferred-verification ticket** is created instead of a guess.
+
+**No `SR-AUD-*` identifier is issued. Audit numbering stays frozen at 364.** Post-audit defects
+found by this review carry ordinary ticket numbers only.
+
+CNA and mobile-eggbert were not inspected. Ticket #1773 stays blocked.
+
+Primary evidence: `build-probe/2097_probe1_io_findings.cpp`, log
+`build-probe/2097_probe1_before.log`.
+
+---
+
+## 1. Why this unit was selected — re-measured, not inherited
+
+The `System::Net::WebSockets` review §17 recommended `modules/io`. That recommendation was
+**re-derived from scratch** against `audit/AUDIT_FINDINGS_INDEX.md` at `3c28f38`, after
+`net-websockets` closed, rather than accepted. Every unit with at least six open findings:
+
+| Unit | Open | High | Med | Low | High % | Design-complete | Remediated | Existing review |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| `modules/core` | 72 | 9 | 59 | 4 | 12% | 1 | 47 | family plans only |
+| `modules/threading` | 17 | 6 | 11 | 0 | 35% | 0 | 21 | **yes** |
+| `modules/runtime` | 14 | 1 | 12 | 1 | 7% | 12 | 8 | **yes** |
+| **`modules/io`** | **11** | **0** | **11** | **0** | **0%** | **0** | **2** | **none** |
+| `modules/text` | 11 | 1 | 10 | 0 | 9% | 11 | 3 | **yes** |
+| `modules/uri` | 10 | 0 | 10 | 0 | 0% | 10 | 4 | **yes** |
+| `modules/time-zone` | 7 | 0 | 7 | 0 | 0% | 0 | 0 | none |
+| `modules/globalization` | 7 | 1 | 6 | 0 | 14% | 0 | 0 | none |
+| `modules/text-json` | 7 | 1 | 6 | 0 | 14% | 1 | 0 | none |
+| `modules/net-http` | 6 | 1 | 5 | 0 | 16% | 2 | 3 | **yes** (closed) |
+
+`modules/net-websockets` drops to **4** open with **2** remediated and is closed for compatible
+work.
+
+**Unreviewed units with ≥6 open:** `core` (72), `io` (11), `time-zone` (7), `globalization` (7),
+`text-json` (7).
+
+### Applying the stated priorities, honestly
+
+1. **High-severity memory or lifetime risk.** `io` has **zero `high` findings**, so on the
+   headline metric it *loses* to `text-json` and `globalization` (one each). **This is the
+   objection to answer, and the answer is that the severity column understates it**: five of
+   `io`'s eleven findings (SR-AUD-337, 342, 343, 344, and 339) are **resource- and
+   lifecycle-state** defects — reading and writing through a wrapper that reports itself closed,
+   seeking a closed file, mutating the position of a closed stream, and a watch that outlives the
+   configuration that created it. Those are the *class* the batch's own priority list ranks first
+   (use-after-close, lifetime, resource ownership), recorded at `medium` because each is
+   individually contained.
+2. **Public-input attackability.** `text-json` parses untrusted documents and is genuinely
+   stronger here. `io` handles paths, file contents and descriptors — attackable, but usually by
+   a local caller rather than a remote peer.
+3. **Decidability without the reference tree.** **This is decisive, and it is where `io` wins
+   outright.** `io`'s findings are overwhelmingly self-evident contract violations: a closed
+   stream must not keep reading; a negative count must not be accepted; a `std::` exception must
+   not escape a `System`-shaped API. `time-zone`'s seven findings and five of
+   `globalization`'s seven are *"what exactly does .NET do"* questions — DST rule equality,
+   grapheme clusters, culture-aware collation and casing. With `/rv` absent, reviewing those
+   units today produces a queue of **deferred-verification tickets**, not compatible work.
+4. **Existing family obligation.** `modules/io` holds the **three remaining X-D members**
+   (SR-AUD-337/343/344) that both the `System::Xml` review §17 and the `net-websockets` review
+   §8.3 name as the **CCF-022 trigger**. No other candidate discharges a recorded obligation.
+5. **Coherent module boundary.** One CMake component (`IO`, `TYPE STATIC`,
+   `PUBLIC_DEPENDENCIES Core.Base Uri`, `PRIVATE_DEPENDENCIES TimeZone`): 56 public headers
+   (3,805 lines), 21 sources (2,950 lines), 5 test files (5,468 lines). Larger than
+   `net-websockets` but a single, well-bounded component. `modules/core` at 72 open findings is
+   **not** a coherent unit and already has family plans.
+6. **No existing complete review.** Correct — none.
+
+**Selected: `modules/io`**, on priorities 3, 4 and 5, with priority 1 explicitly conceded to
+`text-json` on the raw severity column and answered in the text above. `modules/text-json` is the
+recommended next unit (§17).
+
+---
+
+## 2. Scope and file inventory
+
+| Kind | Files | Lines |
+|---|---:|---:|
+| public headers | 56 | 3,805 |
+| implementation | 21 | 2,950 |
+| tests | 5 | 5,468 |
+
+**In scope:** everything under `modules/io/`.
+
+**Out of scope, and why:**
+
+- `IO.Compression`, `IO.Compression.Zip`, `IO.Hashing`, `IO.IsolatedStorage` — separate
+  components with their own findings and their own reviews to come.
+- `MemoryMappedFiles`, `Pipes` — absent from this port; no finding names them.
+- **Asynchronous stream APIs** — `Stream` exposes no `ReadAsync`/`WriteAsync`/`CopyToAsync` in
+  this port. The batch's async-lifetime, cancellation-race and callback-after-disposal checklist
+  therefore has **no subject here**, and saying so is more useful than inventing one. The only
+  callback surface in the module is `FileSystemWatcher`'s event handlers (§7.4).
+- `System::IO::Compression`-adjacent exception types re-exported here — declarations only.
+
+---
+
+## 3. Complete public-surface inventory
+
+| Area | Types |
+|---|---|
+| Stream base | `Stream` (pure-virtual `Read`/`Close`/`getLengthProperty`; `Write`, `Seek`, `SetLength`, `Flush`, `Position`, `CanRead`/`CanWrite`/`CanSeek` virtual with three different defaults — `docs/StreamCapabilityContractDesign.md`) |
+| Stream implementations | `FileStream`, `MemoryStream`, `BufferedStream`, `UnmanagedMemoryStream` |
+| Binary | `BinaryReader`, `BinaryWriter` |
+| Text | `TextReader`, `TextWriter`, `StreamReader`, `StreamWriter`, `StringReader`, `StringWriter` |
+| Filesystem statics | `File`, `Directory`, `Path`, `RandomAccess` |
+| Filesystem info | `FileSystemInfo`, `FileInfo`, `DirectoryInfo`, `DriveInfo` |
+| Watching | `FileSystemWatcher` + 5 event-arg/handler types |
+| Unmanaged | `UnmanagedMemoryAccessor`, `UnmanagedMemoryStream` |
+| Data | `System::BinaryData` (note: `System/BinaryData.hpp`, **not** under `System/IO/`) |
+| Enums / options | `FileMode`, `FileAccess`, `FileShare`, `FileOptions`, `FileAttributes`, `SeekOrigin`, `SearchOption`, `SearchTarget`, `MatchType`, `MatchCasing`, `NotifyFilters`, `WatcherChangeTypes`, `UnixFileMode`, `HandleInheritability`, `FileHandleType`, `EnumerationOptions`, `FileStreamOptions` |
+| Exceptions | `EndOfStreamException`, `InvalidDataException`, `FileNotFoundException`, `FileLoadException`, `FileFormatException`, `DriveNotFoundException`, `PathTooLongException`, `InternalBufferOverflowException` |
+
+**Ownership shape worth recording up front:** `StreamReader`/`StreamWriter` take
+`Stream*` — a **raw borrowed pointer** — with a `leaveOpen` flag. The wrapper never owns the
+stream and nothing keeps it alive. That is a borrowed-pointer edge of the CCF-019 shape; see
+§8.1 for why it is recorded rather than ticketed here.
+
+---
+
+## 4. Every open finding, with its measured disposition
+
+All eleven reproduced or refuted against `3c28f38` (`build-probe/2097_probe1_before.log`).
+
+| Finding | Sev | Measured | Disposition | Ticket |
+|---|---|---|---|---|
+| SR-AUD-185 | med | **confirmed** — `ToString()` of `0xFF` returns `FF`, not `EFBFBD` | deferred verification | **#2106** |
+| SR-AUD-186 | med | **premise inverted** — see §6.1 | deferred verification | **#2106** |
+| SR-AUD-337 | med | **confirmed** | compatible | **#2098** |
+| SR-AUD-339 | med | **confirmed** by reading `setPathProperty` | compatible | **#2102** |
+| SR-AUD-340 | med | **confirmed and narrowed** — see §6.3 | compatible | **#2100** |
+| SR-AUD-342 | med | **partly refuted, partly confirmed** — see §6.2 | compatible | **#2099** |
+| SR-AUD-343 | med | **confirmed** | compatible | **#2098** |
+| SR-AUD-344 | med | **confirmed exactly as filed** | compatible | **#2098** |
+| SR-AUD-345 | med | **confirmed, and sharper** — see §6.4 | compatible | **#2103** |
+| SR-AUD-346 | med | **confirmed** — the inotify mask is a compile-time constant | compatible | **#2102** |
+| SR-AUD-347 | med | **confirmed** — raw `std::filesystem_error` escapes | compatible | **#2101** |
+
+### 4.1 SR-AUD-337 / 343 / 344 — a lifecycle state recorded but not enforced
+
+Measured after `Close()`:
+
+- `StreamReader(&ms, /*leaveOpen*/ true)` → `Read()` returns `97` (`'a'`);
+- `StreamWriter(&ms, /*leaveOpen*/ true)` → `Write("after close")` succeeds and the underlying
+  stream grows to 11 bytes;
+- `StringReader("hello")` → `Peek()` = 104, `Read()` = 104, `ReadToEnd()` = `"ello"` — the
+  reader is **entirely unaffected**, because `TextReader::Close()` is literally `{}` and
+  `StringReader` does not override it;
+- `StringWriter` → `Write` after `Close()` succeeds and `ToString()` returns the text;
+- `UnmanagedMemoryStream` → `Read()` **does** throw `ObjectDisposedException`, but
+  `getLengthProperty()` still returns `4` and `setPositionProperty(2)` still succeeds and reads
+  back. **Exactly the split the finding describes.**
+
+### 4.2 SR-AUD-342 — FileStream, see §6.2 for the correction
+
+### 4.3 SR-AUD-339 / 346 — FileSystemWatcher
+
+`setPathProperty` assigns `directory_` and does nothing else — no watch is torn down or
+re-established, so while `EnableRaisingEvents` is true the old `inotify` watch stays on the old
+directory and its events are reported with a `FullPath` built from the **new** `directory_`.
+
+`setNotifyFilterProperty` validates the mask and stores it; `notifyFilter_` is then **never
+read**. The `inotify_add_watch` mask is a `constexpr` constant
+(`IN_CREATE|IN_DELETE|IN_MODIFY|IN_ATTRIB|IN_MOVED_FROM|IN_MOVED_TO`).
+
+---
+
+## 5. Structural root-cause families
+
+- **I-A — a public lifecycle state is recorded but not enforced.** SR-AUD-337, 343, 344, and
+  SR-AUD-342's `Length`/`Position`/`Seek` half. **This is X-D, the CCF-022 candidate** (§8.2).
+- **I-B — a public argument domain is unchecked, or its rejection is untyped.** SR-AUD-340.
+- **I-C — a raw `std::` exception escapes a `System`-shaped public API.** SR-AUD-347. Same cause
+  as `System::Text`'s T-E/T-M and CCF-012's defect class, in a different component.
+- **I-D — a public property is stored, validated, and never consulted.** SR-AUD-346. Same shape
+  as `net-websockets`' W-E (SR-AUD-252) and `text-json`'s SR-AUD-326/330.
+- **I-E — mutating configuration does not re-establish the resource it configures.**
+  SR-AUD-339. No counterpart elsewhere in the audit.
+- **I-F — sibling APIs disagree about the same input.** SR-AUD-345 (§6.4). No counterpart.
+- **I-G — text decoding and copy semantics diverge from .NET.** SR-AUD-185, 186. Both
+  reference-sensitive.
+
+---
+
+## 6. Corrected premises
+
+### 6.1 SR-AUD-186 — the premise is **inverted**, and the port's behaviour is the safer one
+
+The finding says *"C++ preserves byte 01 after its source changes to 02, whereas current .NET
+stores/wraps the supplied `ReadOnlyMemory`."* Measured, that is exactly what happens: the port
+**copies**, so `BinaryData` still reads `01`.
+
+So the divergence is real, but the finding's implicit direction — that the port is wrong — needs
+stating plainly: **.NET's behaviour is the aliasing one, and the port's is the defensive one.**
+"Fixing" this means making `BinaryData` **alias caller memory it does not own**, which
+introduces a borrowed-pointer lifetime hazard of exactly the CCF-019 shape into a type that today
+has none. That is not a repair to make without evidence about which .NET overload is meant
+(`BinaryData(byte[])` copies; `BinaryData(ReadOnlyMemory<byte>)` wraps) and without a decision
+about whether this port wants the aliasing overload at all. **Deferred, #2106.**
+
+### 6.2 SR-AUD-342 — **half of it is already fixed**, and the surviving half is different
+
+The finding says *"OpenOrCreate+Read can write a new file, and closed members …"*. Measured:
+
+- **`Write()` on a `FileAccess::Read` stream already throws** `"Stream does not support
+  writing."` The write half of the finding is **no longer reproducible**. What *is* still true is
+  that `OpenOrCreate` + `Read` **creates the file** — but whether that is wrong is a .NET
+  behaviour question with no repository evidence, so it is **not** ticketed as a defect.
+- **`Read()` after `Close()` already throws** `ObjectDisposedException`.
+- **What survives is narrower and was not named:** after `Close()`,
+  `getLengthProperty()` returns a **stale `5`**, `getPositionProperty()` returns **`-1`** — a
+  sentinel, not an exception — and **`Seek()` succeeds outright**. That is I-A, not a capability
+  defect. #2099 is scoped to those three members only.
+
+**Two positives measured and recorded so they are not lost:** over 20 open/close/**close**
+cycles the `/proc/self/fd` delta is **0**, and over 20 constructors that throw
+(`FileMode::Open` on a missing file) the delta is **0**. `FileStream` **does not leak a
+descriptor** on double close or on a throwing constructor. The batch's leading suspicion for this
+module was descriptor leaks; measured, there are none at these two sites.
+
+### 6.3 SR-AUD-340 — confirmed, but only one of the two directions is silent
+
+- `RandomAccess::Write(fd, buf, /*count*/ -1, 0)` **succeeds silently**. Confirmed, and it is the
+  sharp half.
+- `RandomAccess::Read(fd, buf, -1, 0)` and `Read(fd, buf, 2, /*fileOffset*/ -5)` **do throw** —
+  but with a bare `"RandomAccess::Read failed"`, i.e. an `errno` failure surfaced as a generic
+  message rather than an `ArgumentOutOfRangeException` naming the offending parameter. The
+  defect on the read side is the **exception identity**, not the acceptance.
+- `RandomAccess::GetLength(-1)` returns **`-1`**. Confirmed.
+
+### 6.4 SR-AUD-345 — confirmed, and the sharper framing is that two siblings disagree
+
+`FileInfo(emptyDirectory).Delete()` **deletes the directory**. But `File::Delete(emptyDirectory)`
+**throws** `"Could not delete '…': Is a directory."` Two APIs that .NET documents as equivalent
+give opposite answers for the same input in this port, and the finding names only one of them.
+The repair is to make `FileInfo::Delete` agree with `File::Delete`, which also means the repair
+target already exists in the module.
+
+### 6.5 A probe defect found and fixed rather than reported
+
+The first version of the SR-AUD-343 probe evaluated `Peek()`, `Read()` and `ReadToEnd()` as three
+arguments to **one** `printf`. All three **mutate** the reader and their evaluation order is
+unspecified, so the output (`Peek()=-1 Read()=-1 ReadToEnd()="hello"`) was meaningless — it
+recorded `ReadToEnd()` having run first. Sequenced into three statements, the real answer is
+`Peek()=104 Read()=104 ReadToEnd()="ello"`, which is a **stronger** confirmation than the
+garbled version. Recorded because a measurement taken through UB is not a measurement.
+
+---
+
+## 7. Post-audit observations (no `SR-AUD-*` identifier)
+
+1. **`TextReader::Close()` is `{}` and `TextWriter` has no `Close()` at all** — the base classes
+   have no disposal contract, which is *why* SR-AUD-343 exists. Any I-A repair has to decide
+   whether the state lives in the base or in each leaf. §9 records this as the first design
+   question #2098 must answer.
+2. **`StreamReader`/`StreamWriter` hold a raw borrowed `Stream*`.** A wrapper outliving its
+   stream is a use-after-free with no diagnostic. **CCF-019 shape**; recorded in §8.1, not
+   ticketed here.
+3. **`Stream`'s three-different-defaults virtual surface** (`CanRead` defaults **true**,
+   `CanWrite` defaults **false**, `Read`/`Close`/`getLengthProperty` pure) is already documented
+   in `docs/StreamCapabilityContractDesign.md`. Not re-opened.
+4. **`FileSystemWatcher` is the module's only callback surface**, and its handlers are invoked
+   from the watcher thread. Whether a handler can run *after* `EnableRaisingEvents = false`
+   returns is a concurrency question this review did **not** measure, because doing it properly
+   needs TSan plus a deterministic harness. Recorded as **#2105, deferred**, not asserted.
+5. **`RandomAccess` takes a raw `int fd`** with no ownership or validity concept; `GetLength(-1)`
+   returning `-1` is the visible symptom (§6.3).
+
+---
+
+## 8. CCF mapping
+
+### 8.1 CCF-019 — `modules/io` adds a candidate edge, and it is NOT ticketed here
+
+`StreamReader`/`StreamWriter`'s raw borrowed `Stream*` is the family's shape. It is **recorded,
+not ticketed**, for the same reason `net-websockets` gave: #2066 is the family's open design
+question with **two competing options and no selection**, and adding a seventh local answer would
+defeat the purpose of the family. **CCF-019 remains open**; nothing here closes it.
+
+### 8.2 CCF-022 — the trigger is met, the evidence is complete, and it is **still not minted**
+
+X-D — *a public lifecycle state recorded but not enforced*:
+
+| Module | Finding / site | State |
+|---|---|---|
+| `xml` | SR-AUD-349 (`XmlWriter` after `Close`) | **remediated**, #2076 |
+| `xml` | SR-AUD-348 (`XmlReader::Close` unobservable) | **remediated**, #2078 |
+| `io` | SR-AUD-337 (`leaveOpen` text wrappers) | confirmed, #2098 |
+| `io` | SR-AUD-343 (in-memory text wrappers) | confirmed, #2098 |
+| `io` | SR-AUD-344 (`UnmanagedMemoryStream`) | confirmed, #2098 |
+| `io` | SR-AUD-342 `Length`/`Position`/`Seek` half | confirmed, #2099 |
+
+Six sites, two modules, one structural cause, and one governing policy: *a type that records
+being closed must enforce it at every public member that depends on the closed resource, not
+only at the data-transfer ones.* The `System::Xml` review §17 and the `net-websockets` review
+§8.3 both name **"mint CCF-022 when `modules/io` is reviewed"** as the trigger. **That trigger is
+now met.**
+
+**It is nonetheless NOT minted by this review, and the reason is a contradiction in the durable
+record that belongs to the maintainer, not to me.** `audit/AUDIT_CROSS_CUTTING_FINDINGS.md`
+states in **five** separate namespace appendices that *"the cross-cutting numbering is closed"*.
+Every one of those statements is made while declining to promote a **namespace-local** cause, so
+they do not obviously govern a genuinely cross-module family — but they are unqualified, and
+`AUDIT_CROSS_CUTTING_FINDINGS.md` is the authoritative document for CCF minting. Minting
+CCF-022 would require reading past an unqualified "closed" on the strength of an inference.
+
+**What this review does instead:** records the membership above as complete, so that minting is a
+one-paragraph act whenever the maintainer resolves the contradiction. The same is true of
+CCF-021 (`net-websockets` review §8.2, and the cross-cutting appendix added by that batch).
+**Neither is minted. No finding is marked remediated on account of either.**
+
+Note also that **the number `CCF-021` has been proposed for two different candidate families** —
+the `SearchValues.hpp` per-file report proposes it for a public-generic-surface shape that
+`AUDIT_PROGRESS.md` later declines. Whoever mints must say which family the number names.
+
+### 8.3 CCF-012
+
+Not a member. SR-AUD-347 shares CCF-012's *defect class* (a `std::` primitive's exception
+escaping a `System`-shaped API) but CCF-012 is about **composite-format brace grammars**.
+Recorded so a future reader does not merge them. **CCF-012 is not marked closed.**
+
+---
+
+## 9. Dependency graph of the tickets
+
+```
+#2098  enforce the closed state in the text wrappers and UnmanagedMemoryStream  (P2, M)
+         └─ answers the base-vs-leaf design question §7.1 FIRST; #2099 follows its answer
+#2099  FileStream Length/Position/Seek after Close                              (P2, S) ── AFTER #2098
+#2100  RandomAccess argument domain and GetLength                               (P2, S) ── independent
+#2101  empty-path FileSystemInfo leaks std::filesystem_error                    (P2, S) ── independent
+#2102  FileSystemWatcher: NotifyFilter ignored, Path does not re-arm            (P2, M) ── independent
+#2103  FileInfo::Delete disagrees with File::Delete over a directory            (P3, S) ── independent
+#2104  documentation and gated-behaviour pins for the deferred/blocked items    (P3, S) ── LAST
+#2105  DEFERRED: can a watcher handler run after EnableRaisingEvents = false?   (P3)
+#2106  DEFERRED: BinaryData decoding (185) and copy-vs-wrap semantics (186)     (P3)
+```
+
+---
+
+## 10. Compatible versus blocked or deferred
+
+| Ticket | Compatible? | Why |
+|---|---|---|
+| #2098 | **yes, with a documented narrowing** — but see §11: the *storage* question decides it |
+| #2099 | **yes, with a documented narrowing** — three members start throwing |
+| #2100 | **yes, with a documented narrowing** — a negative count stops being accepted |
+| #2101 | **yes** — an exception type changes from `std::filesystem_error` to a `System` type |
+| #2102 | **yes, with a documented narrowing** — filtered events stop arriving |
+| #2103 | **yes, with a documented narrowing** — `FileInfo::Delete` stops deleting directories |
+| #2104 | **yes** — documentation and pins only |
+| #2105, #2106 | **no** — deferred verification |
+
+**Nothing here is blocked on a user approval.** That is the practical payoff of §1's priority-3
+argument, and it is the strongest contrast with `time-zone` and `globalization`.
+
+---
+
+## 11. Source / ABI / layout / vtable / `noexcept` consequences
+
+**This is the section that decides #2098's shape, and it must be settled before implementation.**
+
+| Ticket | Source | ABI / layout | vtable | `noexcept` |
+|---|---|---|---|---|
+| #2098 | narrows | **SEE BELOW — a `closed_` flag is a LAYOUT CHANGE** | see below | none |
+| #2099 | narrows | **`FileStream` already has a closed flag** — verify before implementing | none | none |
+| #2100 | narrows | none | none | none |
+| #2101 | changes an escaping exception's type | none | none | none |
+| #2102 | narrows | none (both fields already exist) | none | none |
+| #2103 | narrows | none | none | none |
+
+**The layout question.** Enforcing a closed state needs somewhere to record it. Three options,
+and #2098 must pick one **and say so**:
+
+- **(a) a `bool` in each leaf** (`StringReader`, `StringWriter`, `StreamReader`, `StreamWriter`,
+  `UnmanagedMemoryStream`) — an object-layout change in five public types;
+- **(b) a `bool` in `TextReader`/`TextWriter`** — an object-layout change in two **base** classes,
+  which changes the layout of every derived type at once and is the more invasive option;
+- **(c) reuse state each type already has** — e.g. `StringReader` could set its position past the
+  end, `StreamReader`/`StreamWriter` could null their `Stream*`. **No new member, no layout
+  change**, but it conflates "closed" with "at end", which is exactly the kind of aliasing that
+  produces the next finding.
+
+Every option is layout-affecting except (c), and (c) is semantically wrong. **#2098 is therefore
+recorded as compatible *in behaviour* but as requiring an object-layout change**, and it must be
+implemented with a layout pin updated in the same change, following the probe-struct technique
+(`docs/SystemNetWebSocketsNamespaceReviewPlan.md` §11) rather than literal byte counts.
+
+**This is a real gate and it is stated rather than discovered during implementation.**
+
+---
+
+## 12. Observable semantic consequences
+
+- **#2098/#2099** — code that reads or writes through a wrapper after `Close()` starts throwing
+  `ObjectDisposedException`. Code relying on `leaveOpen` to keep *the wrapper* usable breaks;
+  that reliance was on a bug.
+- **#2100** — `RandomAccess::Write` with a negative count throws instead of silently doing
+  nothing.
+- **#2101** — an empty-path `FileInfo`/`DirectoryInfo` throws a `System` exception instead of a
+  `std::filesystem_error`. A caller catching `System::Exception` starts catching what it always
+  should have.
+- **#2102** — a watcher configured with `NotifyFilters::Size` stops raising `Created`. Callers
+  that set a filter and relied on getting everything anyway will see fewer events.
+- **#2103** — `FileInfo::Delete` over a directory throws instead of deleting it. **This one
+  removes a data-loss path**, and is the only finding in the module that destroys user data.
+
+A migration note (`docs/Migration-IOLifecycleAndArgumentStrictness.md`) covers #2098–#2103
+together when the first of them lands.
+
+---
+
+## 13. Test matrix
+
+| Ticket | Required cases |
+|---|---|
+| **#2098** | every public member of `StringReader`, `StringWriter`, `StreamReader`, `StreamWriter`, `UnmanagedMemoryStream` after `Close()`; `leaveOpen` **true and false** for both stream wrappers; the underlying stream still usable when `leaveOpen` is true; double `Close()`; `Close()` then destructor; zero-length reads/writes before and after; the layout pin |
+| **#2099** | `Length`, `Position` (get **and** set), `Seek` (all three `SeekOrigin`s), `SetLength`, `Flush` after `Close()`; double `Close()`; **descriptor count unchanged** across all of them |
+| **#2100** | `count` = −1, 0, 1; `fileOffset` = −1, 0, past EOF; `buffer` null with count 0 and with count > 0; exact exception type **and** `paramName`; `GetLength` on −1 and on a valid fd; a valid read/write still works |
+| **#2101** | `FileInfo("")`, `DirectoryInfo("")`, `FileSystemInfo` subclasses: `Exists`, `Length`, `Create`, `Delete`, `Refresh`, `FullName`; **no `std::` exception escapes any of them**; a whitespace-only path; a valid path unaffected |
+| **#2102** | each `NotifyFilters` value alone: an event that matches arrives, one that does not is absent; `Path` changed while enabled re-arms on the new directory and stops reporting the old; `Path` changed while disabled; deterministic synchronisation only — **no sleeps** |
+| **#2103** | `FileInfo(dir).Delete()` over an empty **and** a non-empty directory; `FileInfo(file).Delete()` still works; a missing path is still a no-op if that is the current contract; `File::Delete` unchanged; **the directory still exists afterwards** |
+| **pins** | `TextReader`/`TextWriter`/`StringReader`/`StringWriter`/`StreamReader`/`StreamWriter`/`UnmanagedMemoryStream`/`FileStream` layout probes; the measured no-leak result of §6.2; #2105's and #2106's current behaviour |
+
+---
+
+## 14. Sanitizer and direct-resource matrix
+
+| Tool | Applicable here? |
+|---|---|
+| **ASan** | yes — `UnmanagedMemoryStream` and `UnmanagedMemoryAccessor` index caller memory; `BinaryReader`/`BinaryWriter` and `MemoryStream` do buffer arithmetic |
+| **UBSan** | yes — `#2100`'s negative counts and offsets, and every `intcs`/`longcs`/`size_t` conversion in the seek and length arithmetic |
+| **LSan** | **weakly** — the module's characteristic resource is a **descriptor**, not heap |
+| **TSan** | only for `FileSystemWatcher` (#2102, #2105). Nothing else in the module is concurrent |
+| **`/proc/self/fd`** | **the primary instrument.** LSan must never be substituted for it: it tracks memory, not descriptors, and a clean LSan run says nothing about a leaked `fd` |
+
+Measured already (§6.2): **zero** descriptor delta over 20 `FileStream` double-close cycles and
+20 throwing constructors. Every ticket that touches `FileStream` or `RandomAccess` must re-measure
+this and report the number, not assert it.
+
+---
+
+## 15. Recommended implementation order
+
+1. **#2101** — smallest, fully independent, and removes a raw `std::` exception from a public API.
+2. **#2100** — small, independent, closes a silently-accepted negative count.
+3. **#2103** — small, independent, and the only finding that **destroys user data**.
+4. **#2098** — the CCF-022 core. Needs §11's storage decision and a layout pin.
+5. **#2099** — after #2098, following whatever storage answer it chose.
+6. **#2102** — largest; needs a deterministic watcher harness.
+7. **#2104** — documentation and pins, last.
+
+**Items 1–3 are the recommended subset for a batch that has already spent most of its context**,
+because each is bounded, independent, and needs no layout decision.
+
+---
+
+## 16. Deferred evidence
+
+`/rv/tmp/runtime/src/libraries/` is absent. These are **not** decided by this review:
+
+- `BinaryData`'s decoding of invalid UTF-8, and whether the copying or the wrapping constructor
+  is the one meant (#2106);
+- whether `FileMode::OpenOrCreate` with `FileAccess::Read` should create the file (§6.2) — the
+  port creates it, and no repository evidence says otherwise, so **nothing is changed**;
+- whether a `FileSystemWatcher` handler can be invoked after `EnableRaisingEvents = false`
+  returns (#2105);
+- the exact exception type and `paramName` .NET raises for a negative `RandomAccess` count —
+  #2100 chooses `ArgumentOutOfRangeException` with the parameter named and **records it as this
+  port's choice**.
+
+---
+
+## 17. Recommended next unit
+
+**`modules/text-json`** — 7 open, 1 high, a parser over untrusted input, and one coherent
+component. Its high finding (SR-AUD-327) is CCF-019 and blocked, but the `net-websockets` review
+demonstrated that a blocked top finding does not make a unit's compatible queue worthless.
+`modules/net-http-headers` remains the **CCF-021 trigger** at 5 open findings (two `high`),
+below the ≥6 threshold but carrying a recorded family obligation — reviewing it would let
+CCF-021 be minted with all five members present.
+
+---
+
+## 18. Exclusions
+
+- The four sibling `IO.*` components — separate reviews.
+- Asynchronous stream APIs — **absent from this port** (§2), so the async-lifetime and
+  cancellation-race checklist has no subject.
+- `docs/StreamCapabilityContractDesign.md`'s virtual-default decisions — settled, not reopened.
+- CNA and mobile-eggbert — not inspected; #1773 stays blocked.
+
+---
+
+## 19. Completion criteria
+
+This review (#2097) is complete when this document exists, each of the eleven open findings has
+exactly one disposition in §4, each post-audit observation carries a ticket or an explicit
+"recorded, not ticketed", and §9's tickets are in `plan.sqlite3`. **It is complete on those terms
+and remediates nothing by itself.**
+
+`modules/io` is closed for *compatible* work when #2098–#2104 are `done`, SR-AUD-337, 339, 340,
+342, 343, 344, 345, 346 and 347 are `remediated`, and SR-AUD-185/186 carry a deferred ticket and
+a pin.
+
+---
+
+## 20. Implementation record
+
+Appended as tickets land, so the difference between what this review predicted and what
+implementation measured stays visible.
