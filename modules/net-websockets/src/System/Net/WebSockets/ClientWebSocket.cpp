@@ -11,6 +11,7 @@
 #include "System/Convert.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Net/IPEndPoint.hpp"
+#include "System/Net/detail/ProtocolFieldValidation.hpp"
 #include "System/Net/WebSockets/WebSocketException.hpp"
 #include "System/PlatformNotSupportedException.hpp"
 
@@ -114,6 +115,33 @@ void ClientWebSocket::performHandshake(const System::Uri& uri) {
     }
     if (scheme != "ws") {
         throw System::ArgumentException("The URI scheme must be 'ws' or 'wss'.", "uri");
+    }
+
+    // Ticket #2089, the door SR-AUD-248 does not name. The finding names SetRequestHeader, and
+    // ClientWebSocketOptions now rejects CR/LF/NUL there -- but the request line and the Host
+    // field are built from the URI, not from the options bag:
+    //
+    //     "GET " + uri.getPathAndQueryProperty() + " HTTP/1.1\r\n"
+    //     "Host: " + uri.getHostProperty() + ":" + port + "\r\n"
+    //
+    // System::Uri preserves CR, LF and NUL in both components (measured in
+    // build-probe/2089_probe2_uri_door.log; the Uri-side finding is the separate, blocked
+    // ticket #2003), so ws://host/a\r\nX-Injected:+yes used to put "GET /a" on the request
+    // line and "X-Injected: yes HTTP/1.1" into a header field -- request smuggling, not one
+    // extra field. This is the same scope correction #2063 made for System::Net::Http, where
+    // the request URI turned out to be a door the review's paraphrase had dropped.
+    //
+    // The check runs BEFORE the socket is constructed, so a rejected URI opens no connection,
+    // sends no bytes and leaks no descriptor. System::Uri is not modified: this is this
+    // module's own door, validated with the shared predicate rather than a second local rule.
+    if (System::Net::detail::ContainsProtocolFieldTerminator(uri.getHostProperty()) ||
+        System::Net::detail::ContainsProtocolFieldTerminator(uri.getPathAndQueryProperty())) {
+        // The offending text is deliberately not echoed -- it is attacker-controlled and
+        // exception messages get logged.
+        throw System::ArgumentException(
+            "The WebSocket URI must not contain a carriage return, a line feed or a NUL "
+            "character in its host, path or query.",
+            "uri");
     }
 
     intcs port = uri.getPortProperty();

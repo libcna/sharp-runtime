@@ -7,6 +7,7 @@
 
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
+#include "System/Net/detail/ProtocolFieldValidation.hpp"
 
 namespace System::Net::Http::detail {
 
@@ -23,11 +24,17 @@ namespace System::Net::Http::detail {
  * frame grammar requires would narrow the accepted input further than the evidence in this
  * repository supports (see `docs/SystemNetHttpNamespaceReviewPlan.md` §15). A space and a
  * horizontal tab are legal inside a header value and stay accepted.
+ *
+ * @note Ticket #2089 found the identical defect on the RFC 6455 WebSocket upgrade — which is
+ *       an HTTP/1.1 request framed by the same three characters — so the **body** of this
+ *       predicate moved down to `System::Net::detail::ContainsProtocolFieldTerminator`, in
+ *       the component both protocol modules already depend on. This name is kept as a
+ *       forwarder so that no `System::Net::Http` call site, exception type or message
+ *       changed, and so that the repository contains exactly one copy of the rule rather
+ *       than a second, quietly diverging one.
  */
 [[nodiscard]] inline bool ContainsProtocolControlCharacter(const std::string& text) noexcept {
-    return text.find('\r') != std::string::npos
-        || text.find('\n') != std::string::npos
-        || text.find('\0') != std::string::npos;
+    return System::Net::detail::ContainsProtocolFieldTerminator(text);
 }
 
 /**

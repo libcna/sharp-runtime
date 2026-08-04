@@ -534,3 +534,66 @@ forms. This is the fourth such correction in this batch (`SystemXmlNamespaceRevi
 **Recorded as this port's choices** (§16): the exception identity — `WebSocketException` with
 the closest `WebSocketError` — and the decision to reject rather than ignore. Every *rule* is
 RFC 6455 cited as a **protocol** fact, not as .NET behaviour.
+
+### 20.2 #2089 landed with a THIRD door the finding does not name
+
+§4.2 named `SetRequestHeader`, and the ticket named it too. Measured against `a4698e6`, the
+**request URI is a third vector**, and closing only the options doors would have left request
+smuggling open:
+
+    "GET " + uri.getPathAndQueryProperty() + " HTTP/1.1\r\n"
+    "Host: " + uri.getHostProperty() + ":" + port + "\r\n"
+
+`System::Uri` preserves CR, LF and NUL in both components
+(`build-probe/2089_probe2_uri_door.log`), so `ws://127.0.0.1:P/a\r\nX-Injected:+yes` put
+`GET /a` on the request line and `X-Injected: yes HTTP/1.1` into a header field. **This is the
+same scope correction #2063 made for `System::Net::Http`**, where the request URI likewise turned
+out to be a door the review's paraphrase had dropped — the second time in two namespaces that a
+control-character finding named the header door and missed the URI. `System::Uri` itself is
+**not** modified; the Uri-side defect stays the separate, blocked ticket #2003.
+
+Measured before the repair (`build-probe/2089_probe1_before.log`): a six-field request became an
+**eight-field** one carrying a smuggled `GET /admin HTTP/1.1`, and **not one** of the seventeen
+RFC 7230 separators was rejected in a subprotocol. §6.2's correction held exactly — a validator
+did exist and already rejected `<= 0x20` and `0x7F`, so this **widened** it.
+
+**The predicate has exactly one body in the repository, and §8.2's constraint is met without
+minting CCF-021.** Rather than either duplicating #2063's predicate or making `Net.WebSockets`
+depend on the whole `Net.Http` component for a three-character check, the body moved down to
+`System::Net::detail::ContainsProtocolFieldTerminator` in the `Net` component **both** protocol
+modules already depend on, and `System::Net::Http::detail::ContainsProtocolControlCharacter` is
+kept as a forwarder under its original name. **No `System::Net::Http` call site, exception type or
+message changed** (181/181 `SharpRuntimeTests_Net_Http` green), and the module graph is unchanged
+at **41 modules and 91 edges** — `Net.WebSockets`' existing `Net` edge only moved `PRIVATE` →
+`PUBLIC`, which is the accurate declaration now that a public header uses it, and costs consumers
+nothing because `Net` already reached them transitively through `Net.Sockets`.
+
+**Exception identity, recorded as this port's choice** (§16): `System::ArgumentException`, not the
+`System::FormatException` `System::Net::Http` uses, because within `ClientWebSocketOptions` the
+sibling character check (`AddSubProtocol`) **already** reported invalid characters as an argument
+error. #2063 resolved the same tension the same way for its multipart doors. The rejected text is
+never echoed into the message.
+
+**+16 permanent regressions, add-only — not one existing test was updated.**
+`SharpRuntimeTests_Net_WebSockets` 39 → 55. The wire-level cases run over a **real loopback
+socket** against a mock server thread, synchronised only by blocking accept/read — **no sleeps**.
+
+**Three mutations**, each reverted from an exact backup with `git diff --stat` identical on both
+sides and no marker surviving: M1 (`validateHeaderField` neutered) → exactly the 5 header-door
+tests, 50 green; M2 (`isSeparator` returns false) → exactly 2; M3 (URI check removed) → exactly 3,
+including the descriptor-count test. No unrelated test moved in any of the three.
+
+**Rejection precedes any byte on the wire**, and the instrument is a **descriptor count**, not
+LSan: LSan tracks memory, not descriptors, and would have said nothing. Over 20 rejected
+connections the `/proc/self/fd` delta is **0** and all 20 threw — the "all 20 threw" half is what
+stops a silently-skipped loop from reading as a pass. SKIPPED where `/proc/self/fd` is absent,
+because a missing instrument is not a passing measurement.
+
+**Sanitizers**: ASan/UBSan/LSan clean over **52 rejections and 19 acceptances** with
+`ClientWebSocket.cpp` compiled **from source** into the probe — `Net.WebSockets` is a STATIC
+archive, so linking it would have measured an uninstrumented `performHandshake` — plus a control
+heap-buffer-overflow proving the instrumentation was live (`build-probe/2089_probe3_asan.log`).
+
+No signature, member, base-class, virtual, vtable, object-layout or exception-specification
+change. Migration note: `docs/Migration-WebSocketProtocolStrictness.md` (which §12 required when
+the first of #2089–#2091 landed, and which #2090 had not yet created).

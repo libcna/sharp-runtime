@@ -10,6 +10,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/Net/detail/ProtocolFieldValidation.hpp"
 #include "System/String.hpp"
 #include "System/StringComparison.hpp"
 #include "System/TimeSpan.hpp"
@@ -47,14 +48,83 @@ namespace System::Net::WebSockets {
             }
         }
 
+        /**
+         * @brief Rejects a subprotocol that is not a single RFC 7230 `token`.
+         *
+         * Ticket #2089 / SR-AUD-249. The rejection set used to be `c <= 0x20 || c == 0x7F`,
+         * which catches a space, a control character and DEL but **not one** of the RFC 7230
+         * separators. `chat,evil` and `a;b` were therefore accepted as a *single* subprotocol
+         * and joined into `Sec-WebSocket-Protocol` with `", "`, so the caller advertised two
+         * protocols where the API reported one — measured in
+         * `build-probe/2089_probe1_before.log`.
+         *
+         * The finding's own premise needed correcting in the port's favour and against it at
+         * once (plan §6.2): a validator **did** exist and already rejected the control range,
+         * so this widens an existing check rather than adding a missing one. Everything the
+         * old check rejected is still rejected — CR, LF and NUL are all `<= 0x20`, so a
+         * subprotocol never was a `ContainsProtocolFieldTerminator` door.
+         *
+         * `tchar` (RFC 7230 §3.2.6) is every VCHAR except the separators below, so `-`, `.`,
+         * `_`, `+`, `!`, `#`, `$`, `%`, `&`, `'`, `*`, `^`, backtick, `|`, `~`, digits and
+         * letters all stay accepted.
+         *
+         * @throws System::ArgumentException if @p subProtocol is empty or is not a token.
+         */
         static void validateSubprotocol(const std::string& subProtocol) {
             if (subProtocol.empty()) {
                 throw System::ArgumentException("Empty string is not a valid subprotocol value.", "subProtocol");
             }
             for (unsigned char c : subProtocol) {
-                if (c <= 0x20 || c == 0x7F) {
+                if (c <= 0x20 || c >= 0x7F || isSeparator(static_cast<char>(c))) {
                     throw System::ArgumentException("The subprotocol contains invalid characters.", "subProtocol");
                 }
+            }
+        }
+
+        /// The RFC 7230 §3.2.6 separator set — every VCHAR that `tchar` excludes.
+        static constexpr bool isSeparator(char c) {
+            switch (c) {
+                case '(': case ')': case '<': case '>': case '@':
+                case ',': case ';': case ':': case '\\': case '"':
+                case '/': case '[': case ']': case '?': case '=':
+                case '{': case '}':
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /**
+         * @brief Rejects handshake header text that would terminate the field it is written into.
+         *
+         * Ticket #2089 / SR-AUD-248. `ClientWebSocket::performHandshake` concatenates
+         * `name + ": " + value + "\r\n"` straight into the upgrade request, so before this a
+         * value carrying CRLF injected an additional header field and a *name* carrying CRLF
+         * injected a whole request line — `build-probe/2089_probe1_before.log` shows a
+         * six-field request becoming an eight-field one carrying a smuggled
+         * `GET /admin HTTP/1.1`.
+         *
+         * The predicate is `System::Net::detail::ContainsProtocolFieldTerminator`, the single
+         * shared body that `System::Net::Http` #2063 established for the same rule across ten
+         * HTTP doors. It is deliberately **not** a second local copy of the policy.
+         *
+         * @note The exception is a `System::ArgumentException` rather than the
+         *       `System::FormatException` that `System::Net::Http`'s protocol-field doors
+         *       throw, because within *this* class the sibling character check
+         *       (`AddSubProtocol`) already reports invalid characters as an argument error.
+         *       Reporting one door's bad characters as an argument error and its neighbour's
+         *       as a format error would be arbitrary; #2063 resolved the same tension the same
+         *       way for its multipart doors. The reference tree is absent, so this is recorded
+         *       as **this port's choice**, not as a match to .NET.
+         *
+         * @note The offending text is deliberately not echoed into the message.
+         */
+        static void validateHeaderField(const std::string& text, const char* paramName) {
+            if (System::Net::detail::ContainsProtocolFieldTerminator(text)) {
+                throw System::ArgumentException(
+                    "A WebSocket handshake header must not contain a carriage return, a line "
+                    "feed or a NUL character.",
+                    std::string(paramName));
             }
         }
 
@@ -64,9 +134,20 @@ namespace System::Net::WebSockets {
     public:
         ClientWebSocketOptions() = default;
 
-        /** @brief Sets an HTTP header to send during the WebSocket handshake. */
+        /**
+         * @brief Sets an HTTP header to send during the WebSocket handshake.
+         *
+         * @throws System::InvalidOperationException if the WebSocket has already been started.
+         * @throws System::ArgumentException if @p headerName or @p headerValue contains a
+         *         carriage return, a line feed or a NUL character (ticket #2089): the header is
+         *         concatenated into the upgrade request verbatim, so such text would inject an
+         *         extra header field or a whole request line. The rejection happens at this
+         *         door, before any socket is opened.
+         */
         void SetRequestHeader(const std::string& headerName, const std::string& headerValue) {
             throwIfReadOnly();
+            validateHeaderField(headerName, "headerName");
+            validateHeaderField(headerValue, "headerValue");
             requestHeaders_[headerName] = headerValue;
         }
 
