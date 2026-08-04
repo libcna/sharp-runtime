@@ -73,7 +73,11 @@ while it was in flight** — which is the failure the instruction exists to prev
 alone" is consistent with that run having been contending with its own accidental duplicate;
 here `Core.Base` took ~6 minutes. **The gap is closed and the result is claimed.**
 
-A **second, final** run was performed at the end of the batch over the changed tree; see §8.
+A **second, final** run was performed at the end of the batch over the changed tree — this
+batch touched three **public headers**, so the selective consumers really do recompile against
+the change. It **passed, `EXIT=0`**, with the same per-component results and the same three
+negative fixtures rejected (`build-tmp/2028_selective_final.log`). Both runs are therefore
+claimed: the recovery run for the previous batch's gap, and this one for this batch's tree.
 
 ### 2. Work unit 1 — the five tickets
 
@@ -193,7 +197,7 @@ recategorised:**
 | `test/check_negative_consumer_fixtures_test.py` | **45 / 45** |
 | `git diff --check` | clean |
 | `scripts/local_ci_check.sh build` | static gates and build passed; **stopped at the five known `PingTests`** — reported separately from the complete 37-executable gate above, which is the authoritative result |
-| `scripts/check_selective_components.sh` | **run a second time over the changed tree — see the final report** |
+| `scripts/check_selective_components.sh` | **PASSED, `EXIT=0`** — run a **second** time over the changed tree, one instance, preflight-verified, peak **2** `cc1plus`. Identical result to the recovery run: all ten components, `Text.Json`'s seven absent-target and no-ZLIB assertions, and all three negative fixtures rejected. `mktemp` tree removed by its `trap`; no leftover tree |
 | **Doxygen** | **NOT RUN — `doxygen` is not installed in this container.** No package was installed, and the historical ceiling is **not** reported as verified |
 
 ### 9. Consequences
