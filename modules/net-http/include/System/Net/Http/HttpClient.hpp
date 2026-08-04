@@ -102,9 +102,27 @@ public:
     };
 
     /**
-     * Parses an absolute HTTP URL into its components.
-     * Throws System::UriFormatException for a malformed URL, or
-     * System::NotSupportedException for a non-HTTP scheme.
+     * @brief Parses an absolute HTTP URL into its components.
+     *
+     * The authority ends at the first `/`, `?` or `#`. A query that follows the authority
+     * directly becomes the request target `"/?…"` rather than part of the host. A **fragment
+     * is never part of a request target** (RFC 9110 §7.1 — it is client-side only) and is
+     * dropped. The host is lowercased, as the scheme already was.
+     *
+     * `port` is a 16-bit TCP port: exactly one to five ASCII digits with no sign, no
+     * surrounding space and no trailing text, in the range 0…65535.
+     *
+     * @throws System::UriFormatException for a malformed URL — a missing scheme, an empty
+     *         host, an unterminated IPv6 literal, a port outside the rules above, or (since
+     *         ticket #2063) a carriage return, line feed or NUL anywhere in @p url.
+     * @throws System::NotSupportedException for a well-formed but non-HTTP scheme.
+     *
+     * @note **Narrowing and value changes since ticket #2064** (SR-AUD-311, cause NH-A /
+     * CCF-002). `http://host:80abc` used to parse to port **80**, `http://host:-1` to **−1**
+     * and `http://host:99999` to **99999**, because `std::stoi` accepts a valid prefix and
+     * reports success. `http://host?q=1` used to parse to host **`host?q=1`** with path `/`,
+     * so a query string reached DNS and the `Host:` header while the request line asked for
+     * `/`. `HOST.EXAMPLE` and `host.example` used to be distinct hosts.
      */
     static ParsedUrl parseUrl(const std::string& url);
 
@@ -114,8 +132,25 @@ public:
     };
 
     /**
-     * Parses an HTTP response status line (e.g. "HTTP/1.1 200 OK").
-     * Throws HttpRequestException if the line has no status code, or the code isn't numeric.
+     * @brief Parses an HTTP response status line (e.g. `"HTTP/1.1 200 OK"`).
+     *
+     * The version token must be exactly `HTTP/<digit>.<digit>` (RFC 9112 §2.3) and the status
+     * code exactly three ASCII digits (RFC 9112 §4). `HTTP/9.9` satisfies the grammar and is
+     * **accepted** — a version this port does not speak is the server's behaviour to report,
+     * not a parse error. `"HTTP/1.1 099 OK"` is likewise **accepted**, as the code 99; it is
+     * three digits, which is all the grammar asks for. Neither choice is verified against the
+     * .NET reference (absent from this container) and both are pinned by tests.
+     *
+     * @throws HttpRequestException if the version token is malformed, if the status code is
+     *         not exactly three digits, or (since ticket #2063) if the line contains a
+     *         carriage return, line feed or NUL.
+     *
+     * @note **Narrowing since ticket #2064** (SR-AUD-312, cause NH-A / CCF-002). The version
+     * token was **never examined at all**, so `"GARBAGE 200 OK"` yielded 200 — a response
+     * that is not HTTP reported as a successful HTTP response. `std::stoi` accepted a prefix,
+     * a sign and any width, so `"HTTP/1.1 200trailer OK"` was 200, `"HTTP/1.1 2 OK"` was 2
+     * and `"HTTP/1.1 -5 OK"` was **−5**, which the handler then cast into
+     * `System::Net::HttpStatusCode` — a public enum holding a value no enumerator names.
      */
     static ParsedStatusLine parseStatusLine(const std::string& statusLine);
 

@@ -20,6 +20,47 @@
 
 namespace System::Net::Http {
 
+namespace {
+
+// Ticket #2064 (SR-AUD-311 + SR-AUD-312, cause NH-A / CCF-002). `std::sto*` stops at the
+// first character it cannot use and reports SUCCESS for the prefix it did consume, and it
+// additionally skips leading whitespace and accepts a sign. Measured before this ticket:
+// "80abc" -> 80, " 80" -> 80, "+80" -> 80, "-1" -> -1, "99999" -> 99999. Nothing checked
+// that the whole field had been consumed, which is exactly CCF-002's shape -- the family
+// already closed in System::DateTime, TimeOnly and XmlConvert by routing through a
+// full-consumption scanner.
+//
+// This is the module-local equivalent: the ENTIRE text must be one to `maxDigits` ASCII
+// digits and nothing else, and the value must fall inside [0, `maxValue`]. No sign, no
+// whitespace, no prefix, no tail. Accumulation is bounded by the digit cap and compared
+// against `maxValue`, so it cannot overflow whatever `maxValue`'s type is.
+[[nodiscard]] bool tryParseWholeUnsignedField(const std::string& text,
+                                              size_t maxDigits,
+                                              long long maxValue,
+                                              long long& valueOut) {
+    if (text.empty() || text.size() > maxDigits) return false;
+    long long value = 0;
+    for (unsigned char c : text) {
+        if (c < '0' || c > '9') return false;
+        value = value * 10 + (c - '0');
+    }
+    if (value > maxValue) return false;
+    valueOut = value;
+    return true;
+}
+
+// A DNS name and an IPv6 literal are both case-insensitive; the scheme was already
+// lowercased here and the host was not, so `HOST.EXAMPLE` and `host.example` were two
+// distinct hosts to every downstream consumer -- the cookie container, the `Host:` header a
+// server compares, and any cache keyed on the parsed result. RFC 3986 §3.2.2. This is the
+// review's premise correction 6.3.
+[[nodiscard]] std::string toLowerAscii(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // URL parser
 // ---------------------------------------------------------------------------
@@ -70,54 +111,84 @@ HttpClient::ParsedUrl HttpClient::parseUrl(const std::string& url) {
             "HttpClient: only HTTP is supported (not '" + result.scheme + "'). "
             "HTTPS requires TLS which is not yet implemented.");
 
-    size_t hostStart = schemeEnd + 3;
-    size_t pathStart = url.find('/', hostStart);
+    // Ticket #2064 (SR-AUD-311, cause NH-A). The authority ends at the FIRST of '/', '?' or
+    // '#', not at the first '/'. Splitting only on '/' made a query string or a fragment part
+    // of the host: measured, `http://host?q=1` parsed to host `host?q=1` with path `/`, so the
+    // query reached DNS *and* the `Host:` header while the request line asked for `/`. A
+    // caller writing `client.Get("http://api.example?key=secret")` therefore put the secret in
+    // the Host header and requested the wrong resource. That is a VALUE change rather than a
+    // rejection, which is what makes it the more dangerous half of this finding to leave
+    // alone (review plan §4.2).
+    const size_t hostStart    = schemeEnd + 3;
+    const size_t authorityEnd = url.find_first_of("/?#", hostStart);
 
-    std::string hostPort;
-    if (pathStart == std::string::npos) {
-        hostPort    = url.substr(hostStart);
-        result.path = "/";
+    std::string authority;
+    std::string requestTarget;
+    if (authorityEnd == std::string::npos) {
+        authority     = url.substr(hostStart);
+        requestTarget = "/";
     } else {
-        hostPort    = url.substr(hostStart, pathStart - hostStart);
-        result.path = url.substr(pathStart);
+        authority = url.substr(hostStart, authorityEnd - hostStart);
+        // A URL whose authority is followed directly by a query has an implicit empty path,
+        // and the request target is "/" + the query. A fragment is NEVER part of a request
+        // target (RFC 9110 §7.1: it is client-side only and is not sent), so it is dropped
+        // here rather than concatenated into the request line -- for a fragment after a path
+        // as well as for one directly after the authority, which is the same rule applied
+        // consistently (plan §20.6).
+        requestTarget = (url[authorityEnd] == '?') ? "/" + url.substr(authorityEnd)
+                      : (url[authorityEnd] == '#') ? std::string("/")
+                                                   : url.substr(authorityEnd);
+        const size_t fragmentStart = requestTarget.find('#');
+        if (fragmentStart != std::string::npos) requestTarget.resize(fragmentStart);
     }
-    if (result.path.empty()) result.path = "/";
+    if (requestTarget.empty()) requestTarget = "/";
+    result.path = requestTarget;
 
-    if (!hostPort.empty() && hostPort[0] == '[') {
+    std::string portText;
+    bool        hasPort = false;
+
+    if (!authority.empty() && authority[0] == '[') {
         // IPv6 literal in bracket notation, e.g. "[::1]" or "[::1]:8080". A bare
         // `rfind(':')` split is wrong here -- an IPv6 address itself contains colons, so
         // splitting on the last colon in "[::1]" (no port) grabs the second colon of the
         // address instead of a port separator, corrupting both host and port.
-        size_t closeBracket = hostPort.find(']');
+        size_t closeBracket = authority.find(']');
         if (closeBracket == std::string::npos)
             throw System::UriFormatException("HttpClient: unterminated IPv6 literal in URL: " + url);
-        result.host = hostPort.substr(1, closeBracket - 1);
-        if (closeBracket + 1 < hostPort.size() && hostPort[closeBracket + 1] == ':') {
-            try {
-                result.port = std::stoi(hostPort.substr(closeBracket + 2));
-            } catch (...) {
-                throw System::UriFormatException("HttpClient: invalid port in URL: " + url);
-            }
-        } else {
-            result.port = 80;
+        result.host = authority.substr(1, closeBracket - 1);
+        if (closeBracket + 1 < authority.size() && authority[closeBracket + 1] == ':') {
+            portText = authority.substr(closeBracket + 2);
+            hasPort  = true;
         }
     } else {
-        size_t colonPos = hostPort.rfind(':');
+        size_t colonPos = authority.rfind(':');
         if (colonPos != std::string::npos) {
-            result.host = hostPort.substr(0, colonPos);
-            try {
-                result.port = std::stoi(hostPort.substr(colonPos + 1));
-            } catch (...) {
-                throw System::UriFormatException("HttpClient: invalid port in URL: " + url);
-            }
+            result.host = authority.substr(0, colonPos);
+            portText    = authority.substr(colonPos + 1);
+            hasPort     = true;
         } else {
-            result.host = hostPort;
-            result.port = 80;
+            result.host = authority;
         }
+    }
+
+    if (hasPort) {
+        // A TCP port is a 16-bit unsigned number: 0..65535, at most five digits, no sign and
+        // no tail. Before this ticket `std::stoi` accepted every one of `80abc`, `-1`, ` 80`,
+        // `+80` and `99999` (review plan §4.2). The empty port text of `http://host:` was
+        // already rejected -- by `std::stoi` throwing -- and still is, by the same rule that
+        // rejects the rest.
+        long long port = 0;
+        if (!tryParseWholeUnsignedField(portText, 5, 65535, port))
+            throw System::UriFormatException("HttpClient: invalid port in URL: " + url);
+        result.port = static_cast<SharpRuntime::intcs>(port);
+    } else {
+        result.port = 80;
     }
 
     if (result.host.empty())
         throw System::UriFormatException("HttpClient: empty host in URL: " + url);
+
+    result.host = toLowerAscii(std::move(result.host));
 
     return result;
 }
@@ -146,15 +217,47 @@ HttpClient::ParsedStatusLine HttpClient::parseStatusLine(const std::string& stat
     size_t sp1 = statusLine.find(' ');
     if (sp1 == std::string::npos)
         throw HttpRequestException("HttpClient: malformed status line: '" + statusLine + "'");
+
+    // Ticket #2064 (SR-AUD-312, cause NH-A). The version token was never examined AT ALL --
+    // the review's premise correction 6.2. Measured before this ticket, `GARBAGE 200 OK`
+    // yielded 200, so a response that is not HTTP at all was reported as a successful HTTP
+    // response. There was nothing to make stricter here; there was a check to ADD.
+    //
+    // RFC 9112 §2.3: HTTP-version = "HTTP" "/" DIGIT "." DIGIT -- exactly one digit each, so
+    // `HTTP/11` and `HTTP/1.10` are malformed. `HTTP/9.9` satisfies the grammar and is
+    // ACCEPTED: this port speaks 1.1, but a version it does not know is the server's
+    // behaviour to report, not a parse error, and no repository-contained evidence says .NET
+    // rejects it. Recorded as this port's choice and pinned, per plan §15.
+    const std::string versionToken = statusLine.substr(0, sp1);
+    const bool versionWellFormed =
+        versionToken.size() == 8
+        && versionToken.compare(0, 5, "HTTP/") == 0
+        && versionToken[5] >= '0' && versionToken[5] <= '9'
+        && versionToken[6] == '.'
+        && versionToken[7] >= '0' && versionToken[7] <= '9';
+    if (!versionWellFormed)
+        throw HttpRequestException(
+            "HttpClient: malformed HTTP version in status line: '" + statusLine + "'");
+
     size_t sp2 = statusLine.find(' ', sp1 + 1);
     std::string codeStr = (sp2 != std::string::npos)
         ? statusLine.substr(sp1 + 1, sp2 - sp1 - 1)
         : statusLine.substr(sp1 + 1);
-    try {
-        result.statusCode = std::stoi(codeStr);
-    } catch (...) {
+
+    // RFC 9112 §4: status-code = 3DIGIT. `std::stoi` accepted a prefix, a sign and any
+    // width, so `200trailer` was 200, `2` was 2, `-5` was -5 and `99999` was 99999 -- and the
+    // caller casts the result into System::Net::HttpStatusCode, a PUBLIC enum, so `-5`
+    // produced an enum value no enumerator names. Exactly three ASCII digits, nothing else.
+    //
+    // `099` IS accepted, as the status code 99: it is exactly three digits, which is all the
+    // grammar asks for. Whether .NET agrees is NOT known here (/rv/tmp/runtime/ absent), so
+    // this is recorded as this port's choice and PINNED either way rather than left open
+    // (plan §11's requirement for this row, §15's deferred-evidence rule).
+    long long code = 0;
+    if (!tryParseWholeUnsignedField(codeStr, 3, 999, code) || codeStr.size() != 3)
         throw HttpRequestException("HttpClient: malformed status line: '" + statusLine + "'");
-    }
+    result.statusCode = static_cast<SharpRuntime::intcs>(code);
+
     if (sp2 != std::string::npos) result.reason = statusLine.substr(sp2 + 1);
     return result;
 }

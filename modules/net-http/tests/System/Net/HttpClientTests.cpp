@@ -1204,6 +1204,25 @@ constexpr bool kDescriptorCountAvailable = false;
 SharpRuntime::intcs openDescriptorCount() { return 0; }
 #endif
 
+// Unblocks a mock server still waiting in Accept() because the client never
+// connected, so a test whose client fails early reports a FAILURE instead of
+// hanging forever in join(). Pair it with a server lambda that swallows its own
+// exceptions: between them, the server thread always terminates and join()
+// always returns, whatever the client did. Both halves are needed -- a mutation
+// check that hangs or aborts proves nothing about the test it was aimed at.
+void pokeMockServer(SharpRuntime::intcs port) {
+    try {
+        System::Net::Sockets::Socket poke(
+            System::Net::Sockets::AddressFamily::InterNetwork,
+            System::Net::Sockets::SocketType::Stream,
+            System::Net::Sockets::ProtocolType::Tcp);
+        poke.Connect(System::Net::IPEndPoint(System::Net::IPAddress::Loopback, port));
+        poke.Close();
+    } catch (const System::Exception&) {
+        // The server may already have gone; nothing to unblock.
+    }
+}
+
 // Runs `iterations` requests against a loopback server that always answers with
 // `reply`, and returns the change in this process's open-descriptor count.
 SharpRuntime::intcs descriptorDeltaOver(const std::string& reply,
@@ -1546,15 +1565,18 @@ TEST(HttpControlCharacterTests, ResponseHeaderLineWithControlCharacter_ThrowsHtt
     SharpRuntime::intcs port = startMockHttpServer(listener);
 
     std::thread serverThread([&]() {
-        auto server = listener->Accept();
-        std::vector<SharpRuntime::bytecs> reqBuf(4096);
-        server->Receive(reqBuf);
-        // A NUL inside a header field. recvLine() has already consumed the
-        // terminating CRLF, so this is what a malformed field looks like by the
-        // time the handler sees it.
-        server->Send(toBytes(std::string(
-            "HTTP/1.1 200 OK\r\nX-Bad: a\0b\r\nContent-Length: 2\r\n\r\nOK", 52)));
-        server->Close();
+        try {
+            auto server = listener->Accept();
+            std::vector<SharpRuntime::bytecs> reqBuf(4096);
+            server->Receive(reqBuf);
+            // A NUL inside a header field. recvLine() has already consumed the
+            // terminating CRLF, so this is what a malformed field looks like by
+            // the time the handler sees it.
+            server->Send(toBytes(std::string(
+                "HTTP/1.1 200 OK\r\nX-Bad: a\0b\r\nContent-Length: 2\r\n\r\nOK", 52)));
+            server->Close();
+        } catch (const System::Exception&) {
+        }
     });
 
     HttpClient client;
@@ -1573,22 +1595,33 @@ TEST(HttpControlCharacterTests, LegalCallerHeaderStillReachesTheWire) {
 
     std::string raw;
     std::thread serverThread([&]() {
-        auto server = listener->Accept();
-        std::vector<SharpRuntime::bytecs> reqBuf(4096);
-        SharpRuntime::intcs n = server->Receive(reqBuf);
-        raw.assign(reqBuf.begin(), reqBuf.begin() + n);
-        server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"));
-        server->Close();
+        try {
+            auto server = listener->Accept();
+            std::vector<SharpRuntime::bytecs> reqBuf(4096);
+            SharpRuntime::intcs n = server->Receive(reqBuf);
+            raw.assign(reqBuf.begin(), reqBuf.begin() + n);
+            server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"));
+            server->Close();
+        } catch (const System::Exception&) {
+        }
     });
 
     HttpClient client;
     auto request = std::make_shared<HttpRequestMessage>(
         HttpMethod::Get(), "http://127.0.0.1:" + std::to_string(port) + "/");
     request->setHeader("X-Legal", "a b\tc");
-    auto response = client.Send(request);
+    // The join must happen whatever Send() does: an unjoined std::thread
+    // terminates the whole executable, which would hide every other result
+    // behind one abort instead of reporting one failing test.
+    std::shared_ptr<HttpResponseMessage> response;
+    std::string threwWhat;
+    try { response = client.Send(request); }
+    catch (const System::Exception& e) { threwWhat = e.getMessageProperty(); }
+    if (!threwWhat.empty()) pokeMockServer(port);
     serverThread.join();
     listener->Close();
 
+    ASSERT_EQ(threwWhat, "");
     EXPECT_EQ(response->getStatusCodeProperty(), HttpStatusCode::OK);
     EXPECT_NE(raw.find("X-Legal: a b\tc\r\n"), std::string::npos);
 }
@@ -1697,21 +1730,28 @@ TEST(NetHttpGatedBehaviourPins, Pin2068_HandlerEmitsADuplicateDefaultHeader) {
 
     std::string raw;
     std::thread serverThread([&]() {
-        auto server = listener->Accept();
-        std::vector<SharpRuntime::bytecs> reqBuf(4096);
-        SharpRuntime::intcs n = server->Receive(reqBuf);
-        raw.assign(reqBuf.begin(), reqBuf.begin() + n);
-        server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"));
-        server->Close();
+        try {
+            auto server = listener->Accept();
+            std::vector<SharpRuntime::bytecs> reqBuf(4096);
+            SharpRuntime::intcs n = server->Receive(reqBuf);
+            raw.assign(reqBuf.begin(), reqBuf.begin() + n);
+            server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"));
+            server->Close();
+        } catch (const System::Exception&) {
+        }
     });
 
     HttpClient client;
     auto request = std::make_shared<HttpRequestMessage>(
         HttpMethod::Get(), "http://127.0.0.1:" + std::to_string(port) + "/");
     request->setHeader("Host", "caller.example");
-    (void)client.Send(request);
+    std::string threwWhat;
+    try { (void)client.Send(request); }
+    catch (const System::Exception& e) { threwWhat = e.getMessageProperty(); }
+    if (!threwWhat.empty()) pokeMockServer(port);
     serverThread.join();
     listener->Close();
+    ASSERT_EQ(threwWhat, "");
 
     size_t hosts = 0;
     for (size_t at = raw.find("Host: "); at != std::string::npos; at = raw.find("Host: ", at + 1))
@@ -1749,12 +1789,16 @@ TEST(NetHttpGatedBehaviourPins, Pin2071_ResponseReadsAreUnbounded) {
 
     const size_t bodySize = 256u * 1024u;
     std::thread serverThread([&]() {
-        auto server = listener->Accept();
-        std::vector<SharpRuntime::bytecs> reqBuf(4096);
-        server->Receive(reqBuf);
-        server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: " +
-                             std::to_string(bodySize) + "\r\n\r\n" + std::string(bodySize, 'x')));
-        server->Close();
+        try {
+            auto server = listener->Accept();
+            std::vector<SharpRuntime::bytecs> reqBuf(4096);
+            server->Receive(reqBuf);
+            server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: " +
+                                 std::to_string(bodySize) + "\r\n\r\n" +
+                                 std::string(bodySize, 'x')));
+            server->Close();
+        } catch (const System::Exception&) {
+        }
     });
 
     HttpClient client;
@@ -1769,6 +1813,7 @@ TEST(NetHttpGatedBehaviourPins, Pin2071_ResponseReadsAreUnbounded) {
     } catch (const System::Exception& e) {
         threwWhat = e.getMessageProperty();
     }
+    if (!threwWhat.empty()) pokeMockServer(port);
     serverThread.join();
     listener->Close();
 
@@ -1776,4 +1821,247 @@ TEST(NetHttpGatedBehaviourPins, Pin2071_ResponseReadsAreUnbounded) {
     EXPECT_EQ(body.size(), bodySize)
         << "no maximum response size is applied -- .NET's MaxResponseContentBufferSize "
            "has no equivalent here (#2071, NOT APPROVED)";
+}
+
+// ---------------------------------------------------------------------------
+// Ticket #2064 -- parseUrl and parseStatusLine must consume the WHOLE field and
+// apply real domain checks (SR-AUD-311 + SR-AUD-312, cause NH-A / CCF-002;
+// docs/SystemNetHttpNamespaceReviewPlan.md §4.2, §4.3 and §20.6).
+//
+// std::sto* stops at the first character it cannot use and reports SUCCESS for
+// the prefix it consumed, and it additionally skips leading whitespace and
+// accepts a sign. Nothing checked that the whole field had been consumed.
+// Measured before the repair: port "80abc" -> 80, "-1" -> -1, "99999" -> 99999,
+// " 80" -> 80, "+80" -> 80; status "200trailer" -> 200, "2" -> 2, "-5" -> -5,
+// "99999" -> 99999; and the version token was never examined AT ALL, so
+// "GARBAGE 200 OK" -> 200.
+//
+// Two of these are VALUE changes rather than rejections, and they are the more
+// dangerous half: "http://host?q=1" parsed to host "host?q=1" (so the query
+// reached DNS and the Host header while the request line asked for "/"), and
+// the host was never lowercased while the scheme already was.
+// ---------------------------------------------------------------------------
+
+TEST(HttpClientUrlParseTests, PortDomain_WholeFieldAndRange) {
+    EXPECT_EQ(HttpClient::parseUrl("http://host:0/p").port, 0);
+    EXPECT_EQ(HttpClient::parseUrl("http://host:80/p").port, 80);
+    EXPECT_EQ(HttpClient::parseUrl("http://host:8080/p").port, 8080);
+    EXPECT_EQ(HttpClient::parseUrl("http://host:65535/p").port, 65535);
+
+    for (const char* bad : {"http://host:65536/p",     // one past the domain
+                            "http://host:99999/p",
+                            "http://host:2147483648/p",
+                            "http://host:80abc",       // valid prefix, invalid tail
+                            "http://host:-1/p",        // sign
+                            "http://host:+80/p",       // sign
+                            "http://host: 80/p",       // leading space std::stoi skipped
+                            "http://host:/p",          // empty port text
+                            "http://host:8 0/p"}) {
+        EXPECT_THROW(HttpClient::parseUrl(bad), System::UriFormatException) << bad;
+    }
+}
+
+TEST(HttpClientUrlParseTests, PortDomain_AppliesToIPv6LiteralsToo) {
+    EXPECT_EQ(HttpClient::parseUrl("http://[::1]:65535/p").port, 65535);
+    EXPECT_THROW(HttpClient::parseUrl("http://[::1]:70000"), System::UriFormatException);
+    EXPECT_THROW(HttpClient::parseUrl("http://[::1]:80abc"), System::UriFormatException);
+}
+
+// The worst row of §4.2: a query string became part of the DNS name AND of the
+// Host header, while the request line asked for "/".
+TEST(HttpClientUrlParseTests, AuthorityEndsAtTheFirstSlashQuestionOrHash) {
+    auto query = HttpClient::parseUrl("http://host?q=1");
+    EXPECT_EQ(query.host, "host");
+    EXPECT_EQ(query.path, "/?q=1");
+
+    auto secret = HttpClient::parseUrl("http://api.example?key=secret");
+    EXPECT_EQ(secret.host, "api.example") << "the query must not reach DNS or the Host header";
+    EXPECT_EQ(secret.path, "/?key=secret");
+
+    auto fragment = HttpClient::parseUrl("http://host#frag");
+    EXPECT_EQ(fragment.host, "host");
+    EXPECT_EQ(fragment.path, "/");
+
+    auto both = HttpClient::parseUrl("http://host:8080?q=1");
+    EXPECT_EQ(both.host, "host");
+    EXPECT_EQ(both.port, 8080);
+    EXPECT_EQ(both.path, "/?q=1");
+}
+
+// A fragment is client-side only (RFC 9110 §7.1) and is never part of a request
+// target, so it is dropped rather than written into the request line.
+TEST(HttpClientUrlParseTests, FragmentIsNeverPartOfTheRequestTarget) {
+    EXPECT_EQ(HttpClient::parseUrl("http://host/p#frag").path, "/p");
+    EXPECT_EQ(HttpClient::parseUrl("http://host/p?q=1#frag").path, "/p?q=1");
+    EXPECT_EQ(HttpClient::parseUrl("http://host/#frag").path, "/");
+    EXPECT_EQ(HttpClient::parseUrl("http://host#frag").path, "/");
+}
+
+// A query that is part of the path is untouched -- this is the behaviour the
+// pre-existing QueryStringPreserved test pins, and #2064 must not change it.
+TEST(HttpClientUrlParseTests, QueryAfterAPathIsStillPartOfTheRequestTarget) {
+    EXPECT_EQ(HttpClient::parseUrl("http://example.com/search?q=hello").path, "/search?q=hello");
+    EXPECT_EQ(HttpClient::parseUrl("http://example.com/search?q=hello").host, "example.com");
+}
+
+TEST(HttpClientUrlParseTests, HostIsLowercasedLikeTheSchemeAlreadyWas) {
+    EXPECT_EQ(HttpClient::parseUrl("http://HOST.EXAMPLE/p").host, "host.example");
+    EXPECT_EQ(HttpClient::parseUrl("HTTP://HOST.EXAMPLE/p").scheme, "http");
+    EXPECT_EQ(HttpClient::parseUrl("http://[2001:DB8::1]/p").host, "2001:db8::1");
+    // The path is case-SENSITIVE and must not be touched.
+    EXPECT_EQ(HttpClient::parseUrl("http://HOST/Path/Mixed?Q=V").path, "/Path/Mixed?Q=V");
+}
+
+TEST(HttpClientStatusLineParseTests, VersionTokenMustBeHttpDigitDotDigit) {
+    EXPECT_EQ(HttpClient::parseStatusLine("HTTP/1.1 200 OK").statusCode, 200);
+    EXPECT_EQ(HttpClient::parseStatusLine("HTTP/1.0 204").statusCode, 204);
+
+    for (const char* bad : {"GARBAGE 200 OK",   // never examined before #2064
+                            "HTTP/11 200 OK",
+                            "HTTP/1.1x 200 OK",
+                            "HTTP/1.10 200 OK",
+                            "HTTP 200 OK",
+                            "http/1.1 200 OK",  // the token is case-sensitive
+                            "/1.1 200 OK"}) {
+        EXPECT_THROW(HttpClient::parseStatusLine(bad), HttpRequestException) << bad;
+    }
+}
+
+// PINNED CHOICE, not a verified match: HTTP/9.9 satisfies the grammar, so a
+// version this port does not speak is reported rather than treated as a parse
+// error. .NET's behaviour is unknown here (/rv/tmp/runtime/ absent).
+TEST(HttpClientStatusLineParseTests, UnknownButWellFormedVersionIsAccepted) {
+    EXPECT_EQ(HttpClient::parseStatusLine("HTTP/9.9 200 OK").statusCode, 200);
+    EXPECT_EQ(HttpClient::parseStatusLine("HTTP/0.9 200 OK").statusCode, 200);
+}
+
+TEST(HttpClientStatusLineParseTests, StatusCodeMustBeExactlyThreeDigits) {
+    EXPECT_EQ(HttpClient::parseStatusLine("HTTP/1.1 100 Continue").statusCode, 100);
+    EXPECT_EQ(HttpClient::parseStatusLine("HTTP/1.1 999 Weird").statusCode, 999);
+
+    for (const char* bad : {"HTTP/1.1 200trailer OK",
+                            "HTTP/1.1 2 OK",
+                            "HTTP/1.1 20 OK",
+                            "HTTP/1.1 2000 OK",
+                            "HTTP/1.1 99999 OK",
+                            "HTTP/1.1 -5 OK",
+                            "HTTP/1.1 +5 OK",
+                            "HTTP/1.1 XYZ OK",
+                            "HTTP/1.1  200 OK",   // double space -- unchanged, still rejected
+                            "HTTP/1.1 "}) {
+        EXPECT_THROW(HttpClient::parseStatusLine(bad), HttpRequestException) << bad;
+    }
+}
+
+// PINNED CHOICE, not a verified match: "099" is exactly three digits, which is
+// all RFC 9112 §4's grammar asks for, so it is accepted as the code 99. The
+// review's §11 requires this row to be pinned whichever way it is decided.
+TEST(HttpClientStatusLineParseTests, LeadingZeroThreeDigitCodeIsAcceptedAsThatNumber) {
+    EXPECT_EQ(HttpClient::parseStatusLine("HTTP/1.1 099 OK").statusCode, 99);
+    EXPECT_EQ(HttpClient::parseStatusLine("HTTP/1.1 000 Zero").statusCode, 0);
+    EXPECT_EQ(HttpClient::parseStatusLine("HTTP/1.1 007 Bond").reason, "Bond");
+}
+
+// A negative code used to be cast into System::Net::HttpStatusCode, a public
+// enum, giving it a value no enumerator names.
+TEST(HttpClientStatusLineParseTests, NoStatusCodeCanEscapeTheEnumDomain) {
+    for (const char* line : {"HTTP/1.1 000 a", "HTTP/1.1 999 a", "HTTP/1.1 200 a"}) {
+        auto parsed = HttpClient::parseStatusLine(line);
+        EXPECT_GE(parsed.statusCode, 0);
+        EXPECT_LE(parsed.statusCode, 999);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// #2063 x #2064 interaction -- both repairs touch parseUrl, and neither may
+// undo the other.
+// ---------------------------------------------------------------------------
+
+TEST(HttpParserInteractionTests, ControlCharacterIsRejectedBeforeAnySplitting) {
+    // A URL that is BOTH control-bearing and domain-invalid must report the
+    // control character: #2063's check runs on the whole string before #2064's
+    // authority split can look at anything.
+    EXPECT_THROW(HttpClient::parseUrl("http://ho\r\nst:99999/p"), System::UriFormatException);
+    EXPECT_THROW(HttpClient::parseUrl("http://host:9\r\n9999?q=1"), System::UriFormatException);
+    try {
+        HttpClient::parseUrl("http://ho\r\nst:99999/p");
+        FAIL() << "expected a rejection";
+    } catch (const System::UriFormatException& e) {
+        EXPECT_NE(e.getMessageProperty().find("carriage return"), std::string::npos)
+            << "#2064's port check must not have shadowed #2063's control-character check";
+    }
+}
+
+TEST(HttpParserInteractionTests, TheNewAuthoritySplitCannotReintroduceAControlCharacter) {
+    // #2064 regroups the authority, query and fragment. Because #2063 validates
+    // the WHOLE url string first, no regrouping can produce a component holding
+    // a control character -- checked here for each split boundary.
+    for (const char* bad : {"http://host\r\n?q=1", "http://host?q=\r\n1", "http://host#\r\n",
+                            "http://host/p\r\n?q=1", "http://host/p?q=1#\r\n"}) {
+        EXPECT_THROW(HttpClient::parseUrl(bad), System::UriFormatException) << bad;
+    }
+    // And a legal URL exercising every one of those boundaries still parses.
+    auto parsed = HttpClient::parseUrl("http://HOST.example:8080/a/b?q=1#frag");
+    EXPECT_EQ(parsed.host, "host.example");
+    EXPECT_EQ(parsed.port, 8080);
+    EXPECT_EQ(parsed.path, "/a/b?q=1");
+}
+
+TEST(HttpParserInteractionTests, StatusLineKeepsBothTheControlCheckAndTheGrammar) {
+    // #2063's control check first...
+    EXPECT_THROW(HttpClient::parseStatusLine(std::string("HTTP/1.1 200 O\0K", 16)),
+                 HttpRequestException);
+    // ...#2064's grammar second, and the two together on one line.
+    EXPECT_THROW(HttpClient::parseStatusLine("GARBAGE 2 OK"), HttpRequestException);
+    EXPECT_THROW(HttpClient::parseStatusLine(std::string("GARBAGE 2 O\0K", 13)),
+                 HttpRequestException);
+    // A well-formed line is untouched by either.
+    auto parsed = HttpClient::parseStatusLine("HTTP/1.1 404 Not Found");
+    EXPECT_EQ(parsed.statusCode, 404);
+    EXPECT_EQ(parsed.reason, "Not Found");
+}
+
+// End-to-end: a server whose status line is not HTTP at all is now rejected,
+// and rejecting it must not reintroduce the #2065 descriptor leak.
+TEST(HttpParserInteractionTests, NonHttpStatusLineIsRejectedAndLeaksNoDescriptor) {
+    if (!kDescriptorCountAvailable) GTEST_SKIP() << "/proc/self/fd is unavailable";
+    int threw = 0;
+    EXPECT_EQ(0, descriptorDeltaOver("GARBAGE 200 OK\r\nContent-Length: 2\r\n\r\nOK", 20, threw));
+    EXPECT_EQ(19, threw) << "the version token must be examined -- this used to parse as 200";
+}
+
+// End-to-end: an authority-only query now reaches the wire as the request
+// target instead of as part of the Host header.
+TEST(HttpParserInteractionTests, AuthorityOnlyQueryReachesTheWireAsTheRequestTarget) {
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    std::string raw;
+    std::thread serverThread([&]() {
+        try {
+            auto server = listener->Accept();
+            std::vector<SharpRuntime::bytecs> reqBuf(4096);
+            SharpRuntime::intcs n = server->Receive(reqBuf);
+            raw.assign(reqBuf.begin(), reqBuf.begin() + n);
+            server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"));
+            server->Close();
+        } catch (const System::Exception&) {
+        }
+    });
+
+    HttpClient client;
+    std::string body;
+    std::string threwWhat;
+    try { body = client.GetString("http://127.0.0.1:" + std::to_string(port) + "?key=secret"); }
+    catch (const System::Exception& e) { threwWhat = e.getMessageProperty(); }
+    if (!threwWhat.empty()) pokeMockServer(port);
+    serverThread.join();
+    listener->Close();
+
+    ASSERT_EQ(threwWhat, "") << "an authority-only query must still reach the server";
+    EXPECT_EQ(body, "OK");
+    EXPECT_NE(raw.find("GET /?key=secret HTTP/1.1\r\n"), std::string::npos)
+        << "the query belongs in the request target";
+    EXPECT_EQ(raw.find("key=secret\r\n"), std::string::npos)
+        << "and must not appear as the tail of the Host header";
 }

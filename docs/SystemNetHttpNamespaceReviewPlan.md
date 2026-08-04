@@ -735,3 +735,98 @@ or NUL:
   Recorded as part of **#2072**.
 - `parseUrl("http://host: 80/p")` and `"http://host:+80/p"` → port 80. `std::stoi` skips
   leading whitespace and accepts a sign. **This one is #2064's**, not a separate ticket.
+
+### 20.6 #2064 landed every row of §4.2 and §4.3, and §12's sanitizer prediction was **wrong**
+
+Both parsers now route their numeric fields through one file-local
+`tryParseWholeUnsignedField(text, maxDigits, maxValue, out)`: the **entire** text must be one
+to `maxDigits` ASCII digits and nothing else, and the value must fall inside `[0, maxValue]`.
+That is CCF-002's remedy shape — the full-consumption scanner already applied in
+`System::DateTime`, `TimeOnly` and `XmlConvert` — reduced to what this module needs. No family
+was minted; **#2064 cites CCF-002**, as §5.1 said it would.
+
+Measured before and after with `build-probe/2063_probe1_doors.cpp`
+(`2063_probe2_after_2063.log` → `2064_probe1_after.log`). Every §4.2 and §4.3 row moved, and
+nothing else did:
+
+| Input | Before | After |
+|---|---|---|
+| `http://host:80abc` | port 80 | rejected |
+| `http://host:-1/p` | port −1 | rejected |
+| `http://host:65536/p`, `:99999` | accepted | rejected |
+| `http://host: 80/p`, `:+80` | port 80 | rejected — `std::stoi` skipped the space and took the sign |
+| `http://host:0`, `:65535` | accepted | **still accepted** |
+| `http://[::1]:70000`, `[::1]:80abc` | accepted | rejected |
+| `http://host?q=1` | host `host?q=1`, path `/` | host `host`, path `/?q=1` |
+| `http://host#frag` | host `host#frag` | host `host`, path `/` |
+| `http://host/p#frag` | path `/p#frag` | path `/p` |
+| `http://HOST.EXAMPLE/p` | host `HOST.EXAMPLE` | host `host.example` |
+| `http://[2001:DB8::1]/p` | host `2001:DB8::1` | host `2001:db8::1` |
+| `HTTP/1.1 200trailer OK`, ` 2 `, ` 20 `, ` -5 `, ` +5 `, ` 99999 ` | parsed | rejected |
+| `GARBAGE 200 OK`, `HTTP/11 …`, `HTTP/1.1x …`, `HTTP/1.10 …` | code 200 | rejected |
+| `HTTP/1.1 200 OK`, `HTTP/1.0 204`, `HTTP/1.1  200 OK` (double space) | unchanged | **unchanged** |
+
+**Not one existing test needed updating.** §13's ticket allowed changing an existing parser
+case "with a recorded reason"; none was required, including
+`QueryStringPreserved`, whose `http://example.com/search?q=hello` keeps path
+`/search?q=hello` because the authority ends at the `/` that precedes the query.
+
+**Two decisions §15 required to be pinned rather than guessed, both taken and both pinned:**
+
+- **`HTTP/1.1 099 OK` is ACCEPTED, as the code 99.** RFC 9112 §4's grammar is `3DIGIT`, and
+  `099` is three digits. Pinned by
+  `HttpClientStatusLineParseTests.LeadingZeroThreeDigitCodeIsAcceptedAsThatNumber`.
+- **`HTTP/9.9 200 OK` is ACCEPTED.** The token satisfies `HTTP/<digit>.<digit>`; a version this
+  port does not speak is the server's behaviour to report, not a parse error. Pinned by
+  `UnknownButWellFormedVersionIsAccepted`.
+
+Neither is claimed as a .NET match. `/rv/tmp/runtime/` is absent and both are recorded as this
+port's choices, exactly as §15 requires.
+
+**One extension of §4.2's rule, applied consistently.** §4.2 lists only `http://host#frag` →
+path `/`, i.e. the authority-only fragment. A fragment is client-side only (RFC 9110 §7.1) and
+is **never** part of a request target, so it is dropped after a path too: `http://host/p#frag`
+→ `/p`. Leaving it in would have written `GET /p#frag HTTP/1.1` on the wire. This changes no
+acceptance decision, only a parsed value, and it is the same rule §4.2 already sanctions for
+the other position.
+
+**§12's sanitizer prediction for #2064 was wrong, and the correction is recorded rather than
+quietly dropped.** §12 says: *"UBSan — **yes**… the `-5` status code is cast into an enum;
+check for an invalid-enum-value report."* Measured with a dedicated discrimination control
+(`build-probe/2064_probe3_enumctl.cpp`, log `2064_probe3_enumctl.log`): casting `-5` into
+`System::Net::HttpStatusCode` under `-fsanitize=enum -fno-sanitize-recover=undefined`
+**reports nothing and exits 0**. `HttpStatusCode` is an `enum class` with the implicit `int`
+underlying type, so every `int` is inside its value range and there is no undefined behaviour
+to detect. **UBSan is therefore NOT a discriminating instrument for this defect**, and the
+clean UBSan run over the repaired parser must not be offered as evidence that it is fixed —
+the behavioural test `NoStatusCodeCanEscapeTheEnumDomain` is. The defect was real; the
+instrument §12 nominated was not the one that could see it.
+
+ASan/UBSan(+`enum`)/LSan are nonetheless clean over 26 parsed and 42 rejected inputs with
+`HttpClient.cpp` compiled **from source** and a control heap-buffer-overflow proving
+instrumentation (`build-probe/2064_probe2_asan.log`) — recorded as a **non-discriminating
+confirmation**.
+
+**Seven mutations, each applied and reverted from an exact backup**, `git diff --stat`
+identical on both sides and no `MUTATION` marker surviving:
+
+| # | Mutation | Measured |
+|---|---|---|
+| N1 | the shared parser `break`s at the first non-digit instead of failing (i.e. `std::stoi` again) | 4 tests fail: both port-domain tests, `StatusCodeMustBeExactlyThreeDigits`, and the pre-existing `NonNumericStatusCode_ThrowsHttpRequestException` |
+| N2 | the version-token check is disabled | `VersionTokenMustBeHttpDigitDotDigit` and the end-to-end `NonHttpStatusLineIsRejectedAndLeaksNoDescriptor` |
+| N3 | the authority ends at the first `/` again | `AuthorityEndsAtTheFirstSlashQuestionOrHash` and the end-to-end `AuthorityOnlyQueryReachesTheWireAsTheRequestTarget` |
+| N4 | `toLowerAscii` returns its argument unchanged | `HostIsLowercasedLikeTheSchemeAlreadyWas` and the interaction test |
+| N5 | the fragment is kept in the request target | `FragmentIsNeverPartOfTheRequestTarget` and the interaction test |
+| N6 | #2063's control check validates only the parsed **host**, at the end, instead of the whole URL at the start | 4 tests, including `ParseUrl_ControlCharacterInAnyComponent` and `ControlCharacterIsRejectedBeforeAnySplitting` — this is the mutation that proves the two tickets' repairs are **ordered**, not merely co-present |
+| N7 | the exactly-three-digits requirement is dropped (1–3 digits accepted) | `StatusCodeMustBeExactlyThreeDigits` |
+
+**Two mutation-harness defects found and fixed, both in the tests this batch added.** N4's
+first form deleted the call to `toLowerAscii` and made the function unused, so `-Werror`
+stopped the build and a **stale binary** was run — the first N3/N4 readings were consequently
+wrong and were re-measured. And N3's first run **hung**: the client never connected, so the
+mock server sat in `Accept()` and `join()` never returned. Every loopback test this batch
+added now (a) runs its server body inside a `try`/`catch`, (b) catches the client's exception
+so `join()` is always reached, and (c) makes a throwaway `pokeMockServer(port)` connection
+when the client failed, so `Accept()` returns. Between them a mutated build **fails** instead
+of hanging or aborting. A mutation check that hangs proves nothing about the test it was
+aimed at.
