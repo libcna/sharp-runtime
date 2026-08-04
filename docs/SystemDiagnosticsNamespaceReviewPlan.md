@@ -431,7 +431,7 @@ assert at teardown that no child of the test process remains in state `Z`.
 | **TSan** | **#2027 (compatible), #2030 and #2029 (gated)** | the `Debug::SetProvider`/`Write` race and the `stdoutText` reader/getter race present **before** and absent **after**, with the changed body compiled into the probe. **TSan is genuinely applicable here** — unlike in `System::Text`, where it was correctly recorded as not applicable |
 | **ASan** | #2025, #2026, #2029 | no use-after-free when a reader thread outlives a restarted or destroyed `Process` |
 | **LSan** | #2024, #2025, #2026 | no fd leak and no thread leak across a failed start, a restart, or an interrupted wait |
-| **UBSan** | #2024 | the timeout arithmetic (`now + milliseconds(INTCS_MIN)`) is defined |
+| **UBSan** | #2024 | the timeout arithmetic (`now + milliseconds(INTCS_MIN)`) is defined. **Run by #2024 and NON-DISCRIMINATING, reported as such:** clean **before and after**, because converting `INTCS_MIN` milliseconds to nanoseconds stays inside `int64`. UBSan was proven live by a deliberate `chrono` overflow control |
 
 `fork`-based tests need `ASAN_OPTIONS=detect_leaks=0` in the child or a
 `_exit` path that does not run atexit handlers; record whichever is used.
@@ -632,7 +632,7 @@ implementation ticket, and:
 | Ticket | Cause | Findings | State |
 |---|---|---|---|
 | #2023 | — | maps all 8 | this document |
-| #2024 | D-A | 268, 272 | `todo`, compatible |
+| #2024 | D-A | 268, 272 | **done** (2026-08-04), compatible, +13 tests |
 | #2025 | D-C | 270 | **done** (2026-08-04), compatible, +15 tests |
 | #2026 | D-F | 274 | **done** (2026-08-04), compatible, +13 tests |
 | #2027 | D-G | 275 | `todo`, compatible |

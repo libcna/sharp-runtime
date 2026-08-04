@@ -109,10 +109,27 @@ namespace System::Diagnostics {
         /** @brief Immediately stops the associated process, and optionally its full process tree, via SIGKILL. */
         void Kill(bool entireProcessTree);
 
-        /** @brief Blocks the calling thread until the associated process terminates. */
+        /**
+         * @brief Blocks the calling thread until the associated process terminates.
+         *
+         * The wait is retried on EINTR, so a signal whose handler was installed without
+         * SA_RESTART interrupts the underlying wait but not this call. Returns immediately for
+         * a Process obtained from GetCurrentProcess(), which is not a child of itself.
+         *
+         * @throws System::InvalidOperationException if the process has not been started.
+         */
         void WaitForExit();
 
-        /** @brief Blocks up to @p milliseconds for the process to terminate. @return true if the process exited before the timeout. */
+        /**
+         * @brief Blocks up to @p milliseconds for the process to terminate.
+         *
+         * @param milliseconds The number of milliseconds to wait, or -1 (.NET's
+         *        Timeout.Infinite) to wait indefinitely.
+         * @return true if the process exited before the timeout; false if the timeout elapsed
+         *         first, and false for a Process obtained from GetCurrentProcess().
+         * @throws System::ArgumentOutOfRangeException if @p milliseconds is less than -1.
+         * @throws System::InvalidOperationException if the process has not been started.
+         */
         bool WaitForExit(intcs milliseconds);
 
         /** @brief Starts a process resource using the specified start info. */

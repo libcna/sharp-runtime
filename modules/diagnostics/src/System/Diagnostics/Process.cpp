@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Diagnostics/Process.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/PlatformNotSupportedException.hpp"
 
@@ -22,6 +23,17 @@
 #endif
 
 namespace System::Diagnostics {
+
+/**
+ * @brief The .NET `Timeout.Infinite` constant: a millisecond timeout of -1 waits indefinitely.
+ *
+ * Spelled here rather than included from `System::Threading::Timeout` because this component
+ * depends only on `Core.Base`; pulling the Threading header in would add a module edge for a
+ * single integer, and a test-only edge would do the same to the module graph. The value is
+ * pinned behaviourally instead: tests assert that -1 waits indefinitely and that -2 and
+ * INTCS_MIN are rejected, so a drift from `System::Threading::Timeout::Infinite` would fail.
+ */
+constexpr intcs TimeoutInfinite = -1;
 
 struct Process::Impl {
     ProcessStartInfo startInfo;
@@ -98,7 +110,14 @@ namespace {
 void Process::reapIfNeeded(Impl& impl) {
     if (impl.hasExited || !impl.started || impl.isCurrentProcess) return;
     int status = 0;
-    pid_t r = ::waitpid(impl.pid, &status, WNOHANG);
+    // Retry on EINTR (#2024).  Even a non-blocking waitpid can be interrupted by a signal
+    // delivered between entry and return; treating that as "not exited yet" would make a
+    // poll silently skip an exit it had already observed.  This mirrors the three EINTR
+    // loops this file already had (drainPipe, reportChildStartupFailure, Start's status read).
+    pid_t r;
+    do {
+        r = ::waitpid(impl.pid, &status, WNOHANG);
+    } while (r < 0 && errno == EINTR);
     if (r == impl.pid) {
         impl.hasExited = true;
         impl.exitCode = WIFEXITED(status) ? WEXITSTATUS(status)
@@ -383,7 +402,14 @@ void Process::WaitForExit() {
     if (impl_->isCurrentProcess) return;
     if (impl_->hasExited) return;
     int status = 0;
-    pid_t r = ::waitpid(impl_->pid, &status, 0);
+    // Retry on EINTR (#2024, SR-AUD-272).  This overload's contract is "blocks the calling
+    // thread until the associated process terminates"; before this loop, any signal whose
+    // handler was installed without SA_RESTART made waitpid fail with EINTR and this function
+    // return with the child still running -- measured at 1000 ms into a 3 s child.
+    pid_t r;
+    do {
+        r = ::waitpid(impl_->pid, &status, 0);
+    } while (r < 0 && errno == EINTR);
     if (r == impl_->pid) {
         impl_->hasExited = true;
         impl_->exitCode = WIFEXITED(status) ? WEXITSTATUS(status)
@@ -398,10 +424,22 @@ void Process::WaitForExit() {
 }
 
 bool Process::WaitForExit(intcs milliseconds) {
-    (void)milliseconds; // unused on non-POSIX platforms, where this throws below
+    // Validated before the platform guard and before any state check, so the argument domain
+    // is the same on every platform -- the System::Threading::Thread::Join(intcs) precedent
+    // in this repository, whose message this transcribes verbatim (#2024, SR-AUD-268).
+    if (milliseconds < TimeoutInfinite)
+        throw System::ArgumentOutOfRangeException("milliseconds",
+            "Number must be either non-negative and less than or equal to Int32.MaxValue or -1.");
 #if defined(SHARP_RUNTIME_PROCESS_POSIX)
     if (!impl_->started) throw System::InvalidOperationException("No process is associated with this object.");
     if (impl_->isCurrentProcess) return false;
+    // -1 is Timeout.Infinite: wait indefinitely rather than computing a deadline in the past.
+    // Before this, the deadline was already elapsed on entry, so the loop body never ran and
+    // the call returned false immediately -- measured at 0 ms against a 2 s child.
+    if (milliseconds == TimeoutInfinite) {
+        WaitForExit();
+        return impl_->hasExited;
+    }
     reapIfNeeded(*impl_);
     if (impl_->hasExited) return true;
     auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
