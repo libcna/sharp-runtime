@@ -53,8 +53,8 @@ Every unit with at least six open findings:
    upgrade response. Apart from `net-http` (already reviewed and closed for compatible work),
    it is the most remotely-attackable surface in the repository. `text-json` is comparable;
    `io`, `time-zone` and `globalization` are weaker.
-3. **Useful compatible queue.** Measured in §14: **four** compatible tickets, **three** blocked
-   or design, **two** deferred. The blocked ones are genuinely blocked, not merely large.
+3. **Useful compatible queue.** Measured in §14: **three** compatible tickets, **five** blocked
+   or design, **one** deferred. The blocked ones are genuinely blocked, not merely large.
 4. **Coherent module boundary.** One CMake component (`Net.WebSockets`, `TYPE STATIC`): **12
    public headers, one 504-line body, two test files**, ~1,650 lines total. The smallest
    coherent unit in the candidate set, and the whole protocol lives in one file.
