@@ -531,7 +531,7 @@ two HTML encoders in one repository with two different escape sets is the CCF-01
 | #2035 | N-A | 300 | **DONE** 2026-08-04 — see §17.2 |
 | #2036 | N-B | 301 | **DONE** 2026-08-04 — see §17.3 |
 | #2037 | N-C | 302 | **DONE** 2026-08-04 — see §17.4 |
-| #2038 | N-D | 303 | **todo**, compatible |
+| #2038 | N-D | 303 | **DONE** 2026-08-04 — see §17.5 |
 | #2039 | N-C | 304 (3 halves) | **todo**, compatible |
 | #2041 | N-B | 307 | **DONE** 2026-08-04 — see §17.1 |
 | #2040 | N-E | 305, 306 | **blocked**, design complete (§14.1) |
@@ -733,3 +733,44 @@ Stated rather than silently skipped.
 **Consequences.** No signature, `noexcept`, virtual, vtable, data member or layout change;
 `sizeof(IPEndPoint)` is 40 before and after. Relink-only — `IPEndPoint.hpp` was not touched at
 all.
+
+### 17.5 #2038 — N-D, `IPNetwork`'s dropped scope id (SR-AUD-303)
+
+**Repair.** `clearNonPrefixBits` rebuilds an IPv6 result through the 16-byte + scope constructor,
+so the scope id survives masking at every prefix length. IPv4 keeps the byte-vector constructor.
+
+**The half that would have broken silently, and the reason this ticket is not one line.**
+`IPAddress::operator==` compares the scope id for IPv6, and `Contains` compared
+`IPAddress(candidateBytes) == baseAddress_` where the candidate is rebuilt from bytes and so
+always carries scope 0. Preserving the base's scope alone would have made containment
+scope-**sensitive** and broken three rows that are `true` today — including
+`fe80::1%7/64 Contains(fe80::1%7)`, i.e. *the base address ceasing to be inside its own network*.
+`Contains` now compares masked **bytes**, which reproduces **all fifteen** probed answers exactly
+(the object comparison already reduced to a byte comparison, since both sides always carried
+scope 0) and is the right semantics independently: a scope id names a link, not a prefix.
+
+**Premise extension** (no `SR-AUD-*` issued): §3 names the lost `ScopeId`. It does not name the
+consequence — two networks on **different links** compared **equal** and **hashed equal**
+(`fe80::1%7/64 == fe80::1%9/64` was `true`), so a map keyed on `IPNetwork` silently merged them.
+
+**Addition to §7.3's narrowed-row table:**
+
+| Call | Before (measured) | After |
+|---|---|---|
+| `IPNetwork(fe80::1%7, 64).BaseAddress.ScopeId` | `0` | `7` — the §7.3 row, confirmed |
+| `IPNetwork(fe80::1%7, p).BaseAddress.ScopeId`, p ∈ {0,1,63,127,128} | `0` | `7` — **§7.3 lists only /64** |
+| `IPNetwork(fe80::1%7, 64).ToString()` | `fe80::/64` | **`fe80::%7/64`** — a second changed value on a working call, not listed in §7.3 |
+| `IPNetwork(fe80::1%7,64) == IPNetwork(fe80::1%9,64)` and their hashes | `true` / equal | **`false`** / different |
+| every IPv4 network, every scope-0 IPv6 network | — | **identical** |
+| all fifteen `Contains` rows | — | **identical** |
+| `Parse`/`ToString` round trip, including the scope | works | works, now carrying the scope |
+
+**Sanitizers.** None applies — nothing allocated, indexed, shared or converted out of domain.
+Stated rather than silently skipped.
+
+**Tests: +8.** `IPNetworkScopeTests.cpp`, including the fifteen-row `Contains` table transcribed
+from the pre-repair log and the base-inside-its-own-network property at six prefix lengths.
+`SharpRuntimeTests_Net` **289 → 298**.
+
+**Consequences.** No signature, `noexcept`, virtual, vtable, data member or layout change.
+Relink-only — `IPNetwork.hpp` was not touched.
