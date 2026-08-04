@@ -723,7 +723,7 @@ Buffers suite baseline: **536 tests** in `SharpRuntimeTests_Buffers` at `27061bf
 | Ticket | Required cases |
 |---|---|
 | #2049 | `(nullptr,0)` still empty (2 existing tests must stay green); `(nullptr,1)` throws `ArgumentNullException`; `(nullptr, INTCS_MAX)` throws the same; `(ptr,-1)` throws `ArgumentOutOfRangeException`; `(ptr,INTCS_MIN)` throws; `(ptr,0)` empty; `(ptr,1)` reads the one element; the thrown parameter names are exact |
-| #2050 | forged `(nullptr,0)` on a `[1,3)` slice throws; `(nullptr,-1)` throws; `getStartProperty()` of the parent on a slice throws (§6.2's non-forged path); `pos == end_` still returns `false` with an empty memory; `pos == start_` still returns the whole remainder; `advance=true` still lands on `getEndProperty()`; a position **past** `end_` still returns `false` (not a throw — pinned, unchanged) |
+| #2050 | forged `(nullptr,0)` on a `[1,3)` slice throws; `(nullptr,-1)` throws; `getStartProperty()` of the parent on a slice throws (§6.2's non-forged path); `pos == end_` still returns `false` with an empty memory; `pos == start_` still returns the whole remainder; `advance=true` still lands on `getEndProperty()`; a position **past** `end_` throws — **corrected while implementing**, see §23.1 |
 | #2051 | `GetSpan(INTCS_MAX)` on a 1-element writer throws `OutOfMemoryException` **and leaves capacity and written count unchanged**; `GetMemory(INTCS_MAX)` likewise; `GetSpan(0)` on an empty writer still gives ≥ 256; ordinary growth 1 → 256 → 512 unchanged; `Advance` past capacity still `InvalidOperationException`; negative hint still `ArgumentException` |
 | #2052 | `ToString()` empty for `default`, `('\0')`, `('\0',0)`, `Parse("")`; `size()==0` asserted explicitly, not just equality with `""`; `'G'`, `"D3"`, `"F99"` unchanged; `Parse(ToString())` round-trip still holds for non-zero symbols |
 | #2053 | `Create(0,1)`, `Create(1,0)`, `Create(-1,10)`, `Create(10,-1)`, `Create(0,0)` all throw `ArgumentOutOfRangeException` with the right parameter name; `Create(1,1)` and `Create(1024,10)` still return a usable pool; `Create()` unchanged |
@@ -864,3 +864,50 @@ The `System::Buffers` namespace is closed for *compatible* work when:
 **Promotion rule for family B-C** (§5.3): if a second module's review finds a public generic
 surface with an undocumented implicit `T` requirement, mint CCF-021 then, citing both modules.
 Do not mint it from this module's two findings alone.
+
+---
+
+## 23. Implementation record — corrections made while implementing
+
+Appended rather than folded into the sections above, so the difference between what the review
+predicted and what implementation measured stays visible.
+
+### 23.1 §17 predicted the wrong contract for a position past `end_` (#2050)
+
+§17's test matrix said a position **above** `end_` "still returns `false` (not a throw —
+pinned, unchanged)". Checked against the suite: **nothing pinned it.** The only two existing
+`TryGet` call sites pass `getEndProperty()` itself (`Batch6BuffersTests.cpp:620-627`,
+`Batch17BuffersTests.cpp:284-296`), i.e. `pos == end_`, and neither exercises `pos > end_`. The
+shipped repair therefore treats `[start_, end_]` as the whole valid position domain and throws
+outside it in **both** directions, which is the only self-consistent rule — a position 4 in a
+3-element sequence is exactly as invalid as a position −1. `pos == end_` keeps its `false`
+result, which *is* pinned, and `ReadOnlySequenceTryGetTests.PositionBeyondEnd_Throws` now pins
+the corrected half.
+
+### 23.2 #2051 landed inside #2049/#2050's commit
+
+`a620ade` carries all three repairs; its message names only #2049 and #2050. The batching was
+unintended — `git add modules/buffers` swept in the `ArrayBufferWriter` change and its seven
+tests — and is recorded here rather than corrected, because this batch does not rewrite history.
+The three repairs are independent, separately tested and separately reverted-checkable
+(`ArrayBufferWriter.hpp` versus `ReadOnlySequence.hpp`), so nothing is lost but the commit
+boundary.
+
+### 23.3 The before/after sanitizer table, as measured
+
+One probe source, compiled twice; the `before` column's include path is shadowed by
+`build-probe/2048_before_include/`, materialised from `git show 11bf575:…`, so the only
+difference between the columns is the code under test. Both columns compile the affected headers
+**from source** — the module is header-only, so no stale archive can be involved.
+
+| Probe mode | Before | After |
+|---|---|---|
+| `trygetneg` | **ASan `heap-buffer-overflow` READ**, 4 bytes before a 12-byte region | `ArgumentOutOfRangeException` |
+| `trygetslice` | **no exception** — a 3-element view returned for a 2-element slice, first element `10` | `ArgumentOutOfRangeException` |
+| `ctornull` | **UBSan `load of null pointer of type 'const int'`** then **ASan `SEGV` on 0x0** | `ArgumentNullException` |
+| `ctorneg` | native `std::length_error: cannot create std::vector larger than max_size()` | `ArgumentOutOfRangeException` |
+| `growth` | **UBSan `signed integer overflow: 1 + 2147483647`** at `ArrayBufferWriter.hpp:42`, then native `std::length_error: vector::_M_default_append` | `OutOfMemoryException` |
+
+All five are **discriminating**. §20 predicted UBSan would not fire for `trygetneg`; that
+prediction is **correct** — the read is in-type and merely outside the allocation, so only ASan
+sees it — and is recorded as a confirmed non-result rather than dropped.
