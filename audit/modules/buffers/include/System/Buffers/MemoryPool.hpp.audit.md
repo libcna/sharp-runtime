@@ -99,3 +99,18 @@ both consequences at the point a caller meets them, including the explicit instr
 retain a `Memory<T>` past its owner's `Dispose()`. Five pins guard the current behaviour and
 were mutation-checked — making the getter throw fails three of them, while the retained-view
 pin stays green, which is what shows the mutation was targeted rather than indiscriminate.
+
+### SR-AUD-070's site in this file is remediated (#2054, 2026-08-04)
+
+The *"SR-AUD-070 (extended)"* note in this report — `MemoryPoolHeapOwner_` constructs its
+`std::vector<T>` sized, so `T` must be default-constructible — is now stated in
+`MemoryPool<T>`'s own Doxygen block and `static_assert`ed in the owner's constructor body.
+
+One measured correction to how that requirement presents: `DefaultMemoryPool_<T>::Rent` is
+`virtual`, so its body — and through it the owner's constructor — is instantiated for the
+**vtable**. The requirement therefore bites when the shared pool is instantiated, not only
+when `Rent` is called. Naming `MemoryPool<NoDefault>` and taking its `sizeof` stay legal,
+before and after, so the assert is in the constructor body rather than at class scope. A
+custom subclass backed by storage that does not value-initialize is free of the requirement,
+and the header says so. SR-AUD-070's full remediation record is in the `ArrayBufferWriter.hpp`
+report. This does **not** touch SR-AUD-071 or blocked ticket #2056.

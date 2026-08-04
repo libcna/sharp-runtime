@@ -97,3 +97,24 @@ smallest valid one, an ordinary one, and the unchanged parameterless `Create()`.
 pre-existing call sites pass positive values and stayed green unmodified. Source and ABI
 consequences: none — no signature, layout or exported-symbol change; only the accepted input
 set narrowed.
+
+### SR-AUD-070's sites in this file are remediated (#2054, 2026-08-04)
+
+`SharedArrayPool<T>::Rent` (a value-initialized `std::vector<T>`) and
+`ArrayPool<T>::Return(array, clearArray = true)` (`assign(n, T{})`) both required more of `T`
+than any public text said. `ArrayPool<T>`'s Doxygen block now states both requirements —
+default-constructible **and** copy-assignable, the second of which no report had named — and
+each is `static_assert`ed in the body that already enforced it.
+
+The measured detail worth keeping: **both members are `virtual`**, so their bodies are
+instantiated for the vtable. `ArrayPool<NoDefault>::Shared().Return(v, false)` — a call that
+needs nothing of `T` — was already rejected before this ticket, and still is. The header says
+that plainly rather than implying the requirement is per-call. Naming `ArrayPool<NoDefault>`
+and taking its `sizeof` stay legal on both sides of the change.
+
+That same virtualness is why the negative fixture cannot pin `ArrayPool<T>::Shared().Rent(n)`
+in the caller's own spelling: the failing member is reached from inside `Shared()`, so the
+instantiation chain roots at a header line and no diagnostic names a fixture line. The two
+sites name `SharedArrayPool<T>` and declare it `extern` instead. Recorded in
+`docs/NegativeConsumerFixtureValidation.md`. This does **not** touch SR-AUD-076's blocked
+"honour the limits" half.

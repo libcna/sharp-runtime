@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <memory>
+#include <type_traits>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -11,7 +12,26 @@ namespace System::Buffers {
 
     using SharpRuntime::intcs;
 
-    /** Provides a resource pool for reusing instances of arrays of type T. */
+    /**
+     * @brief Provides a resource pool for reusing instances of arrays of type T.
+     *
+     * @tparam T The element type of the pooled arrays.
+     *
+     * @par Requirements on T
+     * .NET places no constraint on `ArrayPool<T>`'s `T`. This port is built on
+     * `std::vector<T>`, which constrains it, and **both** constraints bite as soon as a
+     * concrete pool is instantiated rather than when a particular member is called: `Rent`
+     * and `Return` are `virtual`, so their bodies are instantiated for the vtable. Naming
+     * `ArrayPool<T>` (a pointer or reference, a typedef) stays legal for any `T`; reaching
+     * `Shared()`, `Create()` or any subclass object requires
+     * - **default-constructible** — `Rent` returns a value-initialized `std::vector<T>`, and
+     *   `Return(array, true)` overwrites with a value-initialized `T`;
+     * - **copy-assignable** — `Return(array, true)` assigns that value over each element.
+     *
+     * Both are `static_assert`ed where they are already enforced, so the same set of
+     * programs compiles as before and only the diagnostic changes.
+     * Ticket #2054 / SR-AUD-070, family B-C; see docs/BuffersNamespaceReviewPlan.md §4.4.
+     */
     template<typename T>
     class ArrayPool {
     public:
@@ -36,8 +56,24 @@ namespace System::Buffers {
          *
          * @param array      The buffer to return; it remains owned by the caller.
          * @param clearArray If true, value-initializes every element of @p array first.
+         * @note Requires T to be default-constructible and copy-assignable; because this
+         *       member is virtual, the requirement applies to every instantiation of the
+         *       pool, not only to calls that pass @p clearArray as true. See the
+         *       class-level "Requirements on T" note.
          */
         virtual void Return(std::vector<T>& array, bool clearArray = false) {
+            static_assert(
+                std::is_default_constructible_v<T>,
+                "System::Buffers::ArrayPool<T> requires T to be default-constructible: "
+                "Return(array, true) overwrites every element with a value-initialized T. "
+                "Return is virtual, so this applies to every pool instantiation. "
+                "See docs/BuffersNamespaceReviewPlan.md, ticket #2054.");
+            static_assert(
+                std::is_copy_assignable_v<T>,
+                "System::Buffers::ArrayPool<T> requires T to be copy-assignable: "
+                "Return(array, true) assigns a value-initialized T over every element. "
+                "Return is virtual, so this applies to every pool instantiation. "
+                "See docs/BuffersNamespaceReviewPlan.md, ticket #2054.");
             if (clearArray) array.assign(array.size(), T{});
         }
 
@@ -81,8 +117,15 @@ namespace System::Buffers {
         /**
          * @brief Rents a vector of at least minimumLength elements.
          * @throws ArgumentOutOfRangeException if minimumLength is negative.
+         * @note Requires T to be default-constructible; see ArrayPool's "Requirements on T".
          */
         std::vector<T> Rent(intcs minimumLength) override {
+            static_assert(
+                std::is_default_constructible_v<T>,
+                "System::Buffers::ArrayPool<T>::Shared()/Create() require T to be "
+                "default-constructible: Rent returns a value-initialized std::vector<T>. "
+                "Rent is virtual, so this applies to every pool instantiation. "
+                "See docs/BuffersNamespaceReviewPlan.md, ticket #2054.");
             if (minimumLength < 0)
                 throw ArgumentOutOfRangeException("minimumLength");
             return std::vector<T>(static_cast<size_t>(minimumLength));

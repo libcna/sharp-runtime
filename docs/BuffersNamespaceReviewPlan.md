@@ -291,6 +291,13 @@ approved option cannot land silently.
 
 Four sites, independently counted rather than taken from the finding:
 
+> **Corrected while implementing — see §23.4.** The table below is the review's own count and
+> is left as written. Implementation measured **six** production sites (this table's four plus
+> `ArrayBufferWriter(intcs initialCapacity)`, counted here as one row with
+> `checkAndResizeBuffer`), a second undocumented requirement (**copy-assignability**), and a
+> different "where it bites" for three rows: the members are `virtual`, so the requirement is
+> enforced at **construction**, not at the call.
+
 | Site | Implicit requirement | Where it bites |
 |---|---|---|
 | `ArrayBufferWriter<T>::checkAndResizeBuffer` (`resize`) | `std::is_default_constructible_v<T>` | `GetSpan`/`GetMemory` |
@@ -747,7 +754,7 @@ fails, revert, confirm `git diff` is empty.
 | **#2051** | P1 | S | `ArrayBufferWriter` growth: no signed overflow, `OutOfMemoryException` | post-audit | CCF-004 / B-B |
 | **#2052** | P2 | XS | `StandardFormat::ToString` of a zero symbol | SR-AUD-083 | B-E |
 | **#2053** | P2 | S | `ArrayPool<T>::Create(intcs,intcs)` validates its configuration | SR-AUD-076 | B-E |
-| **#2054** | P2 | S | make the four implicit `T` requirements explicit and diagnosed | SR-AUD-070, 077 | B-C |
+| **#2054** | P2 | S | make the six implicit `T` requirements explicit and diagnosed (`done`) | SR-AUD-070, 077 | B-C |
 | **#2055** | P2 | S | `BuffersExtensions::PositionOf` linear scan | post-audit | B-F |
 | **#2061** | P2 | M | disclosure + behaviour pins for everything gated | 071, 074, 086, 087, 088 | B-D / B-E |
 
@@ -911,3 +918,83 @@ difference between the columns is the code under test. Both columns compile the 
 All five are **discriminating**. §20 predicted UBSan would not fire for `trygetneg`; that
 prediction is **correct** — the read is in-type and merely outside the allocation, so only ASan
 sees it — and is recorded as a confirmed non-result rather than dropped.
+
+### 23.4 §4.4 undercounted the sites, named the wrong enforcement point, and missed a second requirement (#2054)
+
+Three corrections, all measured with `build-probe/2054_probe1_generic_requirements.cpp` (16
+sites) and `build-probe/2054_probe3_instantiation_points.cpp` (12 sites), each compiled twice:
+once against the working tree and once against the pre-change headers materialised from
+`b294738` into `build-probe/2054_before_include/`. The only difference between the two columns
+is the code under test — the module is header-only, so no stale archive can be involved.
+
+**(1) Six production sites, not four.** `ArrayBufferWriter(intcs initialCapacity)` resizes the
+backing vector itself and was in neither the finding nor §4.4:
+
+| # | Site | Requirement | Silent before #2054? |
+|---|---|---|---|
+| 1 | `ArrayBufferWriter<T>(intcs)` | default-constructible | yes — **missed by §4.4** |
+| 2 | `ArrayBufferWriter<T>::checkAndResizeBuffer` | default-constructible | yes |
+| 3 | `ArrayBufferWriter<T>::Clear` | default-constructible **and copy-assignable** | yes; the second half named by nothing |
+| 4 | `MemoryPoolHeapOwner_<T>` ctor | default-constructible | yes |
+| 5 | `SharedArrayPool<T>::Rent` | default-constructible | yes |
+| 6 | `ArrayPool<T>::Return(clearArray=true)` | default-constructible **and copy-assignable** | yes; the second half named by nothing |
+| 7 | `SearchValues<T>` (both ctors) | usable `std::hash<T>` **and** `operator==` | yes — SR-AUD-077 |
+| — | `SequenceReader<T>::TryRead`, `::TryPeek` | default-constructible | **no** — already documented (CCF-014); diagnosed only |
+
+Evaluated and **excluded**, with reasons: `SequenceReaderExtensions`' `tryReadBytes` (its public
+surface is fixed integer types, not open to a user `T`), `Utf8Parser::fail` (private, fixed `T`
+set), and `ReadOnlySequence<T>`'s `std::vector<T>` range constructions (copy-constructibility is
+inherent to "a read-only sequence of `T`", not an undocumented extra).
+
+**(2) "Where it bites" was wrong for three rows.** `ArrayBufferWriter`'s `GetSpan`/`GetMemory`
+are `virtual` overrides of `IBufferWriter<T>`, and `ArrayPool`'s `Rent`/`Return` are `virtual`,
+so their bodies are instantiated for the **vtable**. Measured acceptance, identical before and
+after — this is the table that proves "exactly the same set of programs compiles":
+
+| Spelling | Before (`b294738`) | After (#2054) |
+|---|---|---|
+| `ArrayBufferWriter<NoDefault>*` (name only) | legal | legal |
+| `sizeof(ArrayBufferWriter<NoDefault>)` | legal | legal |
+| `ArrayBufferWriter<NoDefault> w;` (default ctor) | **rejected** — `construct_at` | **rejected** — named requirement |
+| `ArrayPool<NoDefault>*`, `sizeof(ArrayPool<NoDefault>)` | legal | legal |
+| `ArrayPool<NoDefault>::Shared()` | **rejected** — `NoDefault::NoDefault()` | **rejected** — named requirement |
+| `MemoryPool<NoDefault>*`, `sizeof(MemoryPool<NoDefault>)` | legal | legal |
+| `SearchValues<EqOnly>*`, `sizeof(SearchValues<EqOnly>)` | legal | legal |
+| `SequenceReader<NoDefault>*`, `sizeof(SequenceReader<NoDefault>)` | legal | legal |
+
+All sixteen hostile sites of probe 1 were rejected before and after; the baseline (every
+surface with a well-behaved `T`, plus the name-only spellings) compiled clean on both sides.
+
+**(3) Copy-assignability was a second undocumented requirement.** `Clear`'s `std::fill(…, T{})`
+and `Return`'s `assign(n, T{})` both need it. A default-constructible but non-copy-assignable
+`T` was already rejected at both; neither the finding, this plan nor any header said so. It is
+now documented and asserted, and `Clear`'s doc-comment points such a caller at
+`ResetWrittenCount()`, which requires neither.
+
+**Predicates.** `std::is_default_constructible_v<T>` and `std::is_copy_assignable_v<T>` for the
+vector sites; `requires`-expressions (`System::Buffers::detail::searchValuesHashUsable<T>` /
+`searchValuesEqualityUsable<T>`) for `SearchValues`, so the check does not assume `std::hash<T>`
+is a complete type. Each was verified to be **exactly** as strict as the code already is —
+false for the hostile type, true for every element type the port serves
+(`build-probe/2054_probe2_predicates.cpp`).
+
+**Closure evidence.** 13 sites in `test/consumer/buffers_generic_requirements_negative.cpp`
+(rejected half) and 9 tests in `BuffersGenericRequirementsTests.cpp` (accepted half, which a
+negative fixture structurally cannot express). ASan/UBSan/LSan over the new runtime paths are
+clean and **proven instrumented by a control heap-buffer-overflow**; §20 predicted "n/a —
+compile-time only" and that prediction stands: the clean result is a non-discriminating
+confirmation of the new tests' paths, not evidence of a repair
+(`build-probe/2054_probe6_asan_ubsan.log`).
+
+**A limit of the per-site negative fixture, recorded rather than worked around.** A
+`static_assert` in a **virtual** member's body cannot be attributed to a fixture line when the
+member is reached from inside another header-defined function: GCC roots the instantiation
+chain at that header line, so `scripts/check_negative_consumer_fixtures.py` reports *"the
+compile failed but no diagnostic names lines N-M"* — the correct answer to an unattributable
+result. The caller-facing spellings `ArrayPool<T>::Shared().Rent(n)` and
+`MemoryPool<T>::Shared().Rent(n)` are rejected, before and after, but are pinned through the
+concrete pool type declared `extern` so the call rather than the vtable is the first
+instantiation. `docs/NegativeConsumerFixtureValidation.md` §21 carries it.
+
+**§22's compatible-closure list is now satisfied in full**: #2049, #2050, #2051, #2052, #2053,
+#2054, #2055 and #2061 are `done`, and SR-AUD-072, 073, 076, 083, 070 and 077 are `remediated`.

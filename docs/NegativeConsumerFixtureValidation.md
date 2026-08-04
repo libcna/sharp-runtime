@@ -1338,3 +1338,112 @@ compiler invocations / peak 2 jobs**. The first invocation without a writable
 `CCACHE_DIR` failed before compiling the fixtures; the canonical rerun used
 repository-local `build-tmp/ccache` and is retained in
 `build-probe/1925_negative_fixture.log`.
+
+---
+
+## 21. Ticket #2054 — the System::Buffers generic-requirement fixture (2026-08-04)
+
+`test/consumer/buffers_generic_requirements_negative.cpp`, **component `Buffers`, 13 sites**.
+It is the first fixture in this repository whose sites were **already rejected before the
+ticket that added them**, and that difference is worth stating precisely, because it changes
+what the fixture proves.
+
+### 21.1 What this fixture is for
+
+#2054 changed no runtime code. Six public `System::Buffers` generic surfaces already required
+more of `T` than any public text said — default-constructibility and copy-assignability through
+`std::vector<T>`, a usable `std::hash<T>` through `std::unordered_set<T>` — and every one of
+those requirements was enforced only by an error deep inside libstdc++. The ticket states each
+requirement in the header and adds a `static_assert` **at the point where it was already
+enforced**, so exactly the same set of programs compiles.
+
+An ordinary negative fixture pins *"the spelling a ticket outlawed is rejected"*. This one pins
+two different claims:
+
+1. every hostile instantiation is **still** rejected — an assert placed in a body that is never
+   instantiated would silently relax a requirement, and only compiling proves it did not; and
+2. it is rejected **by the new message**, which is the ticket's only observable effect.
+
+The `#else` branches are therefore not migrated spellings — nobody has to migrate — but the
+same call with a `T` that meets the requirement, i.e. what a caller writes today and will keep
+writing.
+
+### 21.2 The converse claim lives elsewhere, and must
+
+"…and naming `ArrayBufferWriter<NoDefault>`, taking its `sizeof`, and every well-behaved
+instantiation **still compile**" is a positive claim. A negative fixture cannot hold it: every
+compile it performs either has a site enabled or is the baseline. The baseline covers part of
+it, and `modules/buffers/tests/System/Buffers/BuffersGenericRequirementsTests.cpp` (9 tests)
+covers the rest. The measured before/after acceptance table is
+`docs/BuffersNamespaceReviewPlan.md` §23.4.
+
+### 21.3 A limit of per-site attribution over `virtual` members — measured
+
+Two sites do **not** spell what a caller writes, and the reason is a real limit of the checker
+rather than a convenience.
+
+`ArrayPool<T>::Shared().Rent(n)` and `MemoryPool<T>::Shared().Rent(n)` are rejected for a
+non-default-constructible `T`, before and after #2054. But the failing member is `virtual` and
+is reached from inside `Shared()`'s own body, so GCC roots the instantiation chain at a header
+line:
+
+```
+ArrayPool.hpp: In instantiation of 'std::vector<T> SharedArrayPool<T>::Rent(intcs) [with T = NoDefault]':
+ArrayPool.hpp:122:24:   required from here
+ArrayPool.hpp:124:22: error: static assertion failed: …
+```
+
+No diagnostic names a line of the fixture, so rule 10 fires:
+
+```
+FAIL  …[memorypool-rent-nondefault]: the compile failed but no diagnostic names lines
+      155-157; the fixture may no longer be compiled at all
+```
+
+That is the **right** answer. An unattributable rejection is exactly what rule 10 exists to
+refuse, and weakening it to "the compile failed somewhere" would reintroduce the whole-file
+check that ticket #1801 replaced. The fixture adapts instead: each of the two sites names the
+concrete pool type and declares it `extern` at block scope, so no vtable is required and the
+**call** is the first instantiation — which roots the chain on the fixture line. Same
+requirement, same assert, attributable proof:
+
+```cpp
+extern System::Buffers::SharedArrayPool<NoDefault> heapArrayPool;
+(void)heapArrayPool.Rent(4);
+```
+
+Both spellings were verified rejected against the pre-#2054 headers as well, so the site pins
+a requirement that predates the assert rather than one the assert invented.
+
+**Rule for a future fixture:** a `static_assert` in a `virtual` member's body is attributable
+only when the fixture line is what first instantiates that member. If the member is reached
+through another header-defined function — a factory, a `Shared()`, a `make_unique` inside the
+library — the site must instantiate it directly, or the claim belongs in a positive test.
+
+### 21.4 Site inventory
+
+| # | id | Surface | Hostile `T` | Requirement |
+|---|---|---|---|---|
+| 1 | `arraybufferwriter-capacity-ctor-nondefault` | `ArrayBufferWriter<T>(intcs)` | `NoDefault` | default-constructible |
+| 2 | `arraybufferwriter-getspan-nondefault` | `GetSpan` | `NoDefault` | default-constructible |
+| 3 | `arraybufferwriter-getmemory-nondefault` | `GetMemory` | `NoDefault` | default-constructible |
+| 4 | `arraybufferwriter-clear-nondefault` | `Clear` | `NoDefault` | default-constructible |
+| 5 | `arraybufferwriter-clear-noncopyassignable` | `Clear` | `NoCopyAssign` | copy-assignable |
+| 6 | `memorypool-rent-nondefault` | `MemoryPool` heap owner | `NoDefault` | default-constructible |
+| 7 | `arraypool-rent-nondefault` | `SharedArrayPool<T>::Rent` | `NoDefault` | default-constructible |
+| 8 | `arraypool-return-noclear-nondefault` | `Return(array, false)` | `NoDefault` | default-constructible (via the vtable) |
+| 9 | `arraypool-noncopyassignable` | `Return(array, true)` | `NoCopyAssign` | copy-assignable |
+| 10 | `searchvalues-initializer-list-equality-only` | `SearchValues(std::initializer_list<T>)` | `EqualityOnly` | usable `std::hash<T>` |
+| 11 | `searchvalues-vector-equality-only` | `SearchValues(const std::vector<T>&)` | `EqualityOnly` | usable `std::hash<T>` |
+| 12 | `sequencereader-tryread-nondefault` | `SequenceReader<T>::TryRead` | `NoDefault` | default-constructible |
+| 13 | `sequencereader-trypeek-nondefault` | `SequenceReader<T>::TryPeek` | `NoDefault` | default-constructible |
+
+Site 8 is deliberately the `clearArray = false` call: `Return` is `virtual`, so instantiating
+the pool at all already required a default-constructible `T`, and pinning the call that needs
+*nothing* is what makes that visible.
+
+### 21.5 Result
+
+**11 fixtures / 94 sites.** The bounded checker run over this fixture alone:
+`OK: 1 negative consumer fixture(s), 13 negative site(s), every site rejected (g++ 13.3.0,
+14 compiler invocation(s), peak 2 job(s), 5.4s)`.

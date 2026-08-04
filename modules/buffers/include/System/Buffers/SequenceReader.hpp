@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <type_traits>
 #include <vector>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Buffers/ReadOnlySequence.hpp"
@@ -18,6 +19,14 @@ namespace System::Buffers {
      * elements using TryRead(), IsNext(), Advance(), and related helpers.
      *
      * @tparam T The type of items in the underlying sequence.
+     *
+     * @par Requirements on T
+     * TryRead() and TryPeek() write a value-initialized `T` on the failing path (the
+     * CCF-014 `out`-parameter contract), so those two members — and only those two —
+     * require **T to be default-constructible**. That was already stated in each member's
+     * doc-comment; ticket #2054 adds the matching `static_assert` so the failure names the
+     * requirement instead of pointing into `<vector>`. The requirement is not class-wide:
+     * every other member, and naming the type, work for any `T`.
      */
     template<typename T>
     class SequenceReader {
@@ -88,6 +97,11 @@ namespace System::Buffers {
          * @return true if an element was read; false if at end of sequence.
          */
         bool TryRead(T& value) {
+            static_assert(
+                std::is_default_constructible_v<T>,
+                "System::Buffers::SequenceReader<T>::TryRead requires T to be "
+                "default-constructible: the failing path writes a value-initialized T to "
+                "the output. See docs/BuffersNamespaceReviewPlan.md, ticket #2054.");
             if (getEndProperty()) { value = T{}; return false; }
             value = segment_[consumed_];
             ++consumed_;
@@ -175,6 +189,11 @@ namespace System::Buffers {
          * @return true if an element is available; false if at end.
          */
         [[nodiscard]] bool TryPeek(T& value) const {
+            static_assert(
+                std::is_default_constructible_v<T>,
+                "System::Buffers::SequenceReader<T>::TryPeek requires T to be "
+                "default-constructible: the failing path writes a value-initialized T to "
+                "the output. See docs/BuffersNamespaceReviewPlan.md, ticket #2054.");
             if (getEndProperty()) { value = T{}; return false; }
             value = segment_[consumed_];
             return true;

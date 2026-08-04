@@ -133,3 +133,22 @@ Source, ABI and layout consequences: none beyond the recorded `T` requirement. N
 signature, `noexcept` specification, virtual function or data member changed.
 
 The plan for this family is `docs/TryOutputFailureContractPlan.md` (ticket #1871).
+
+## Post-audit record (ticket #2054, 2026-08-04): two sites diagnosed, no finding changed
+
+The audit evidence above is retained unchanged and **no finding in this file changed status**;
+audit numbering stays frozen at 364 and no `SR-AUD-*` identifier was issued.
+
+While reproducing SR-AUD-070's defect matrix, ticket #2054 measured two further `T{}` sites in
+this header: `SequenceReader<T>::TryRead` and `::TryPeek`, whose failing paths write a
+value-initialized `T` under the CCF-014 `out`-parameter contract (ticket #1872, SR-AUD-075).
+Both require `T` to be default-constructible, and both were **already documented** as doing so
+— *"or a value-initialized `T` if the reader is at the end of the sequence"* — so neither is a
+member of family B-C's *silent* requirement shape.
+
+They are recorded here because the family's repair has two halves and only one of them was
+missing: the requirement was stated but not diagnosed, so a non-default-constructible `T`
+failed with `no matching function for call to 'NoDefault::NoDefault()'` rather than with the
+requirement. A `static_assert` in each body closes that half, and the class-level doc-comment
+now says which two members carry the requirement and that no other member does. Two negative
+consumer sites hold it. Exactly the same set of programs compiles.

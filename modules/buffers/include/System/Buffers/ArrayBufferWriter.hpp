@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <algorithm>
+#include <type_traits>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
@@ -25,6 +26,26 @@ namespace System::Buffers {
      * Implements IBufferWriter&lt;T&gt; using an internal std::vector&lt;T&gt; that grows as needed.
      *
      * @tparam T The type of items in the ArrayBufferWriter.
+     *
+     * @par Requirements on T
+     * .NET places no constraint on `ArrayBufferWriter<T>`'s `T`, but this port is built on
+     * `std::vector<T>`, which constrains it.
+     * - **Default-constructible** — `ArrayBufferWriter(intcs)`, `GetSpan()` and `GetMemory()`
+     *   size the backing vector, which value-initializes the new elements. Because
+     *   `GetSpan`/`GetMemory` are `virtual` overrides of IBufferWriter&lt;T&gt;, their bodies
+     *   are instantiated for the vtable, so this requirement bites when an
+     *   `ArrayBufferWriter<T>` object is **constructed** — including by the default
+     *   constructor — not only when a span is asked for.
+     * - **Copy-assignable**, in addition — `Clear()` assigns a value-initialized `T` over
+     *   every written element. `ResetWrittenCount()` requires neither.
+     *
+     * Measured: naming the type (`ArrayBufferWriter<T>*`, a typedef) and implicitly
+     * instantiating it (`sizeof`) stay legal for **any** `T`, before and after this
+     * disclosure, which is why the assertions are in member bodies and not at class scope.
+     *
+     * Each requirement is `static_assert`ed in the member that already enforces it, so the
+     * same set of programs compiles as before and only the diagnostic changes.
+     * Ticket #2054 / SR-AUD-070, family B-C; see docs/BuffersNamespaceReviewPlan.md §4.4.
      */
     template<typename T>
     class ArrayBufferWriter : public IBufferWriter<T> {
@@ -41,6 +62,11 @@ namespace System::Buffers {
         static constexpr intcs MaxArrayLength = 0x7FFFFFC7;
 
         void checkAndResizeBuffer(intcs sizeHint) {
+            static_assert(
+                std::is_default_constructible_v<T>,
+                "System::Buffers::ArrayBufferWriter<T>::GetSpan/GetMemory require T to be "
+                "default-constructible: growing the backing std::vector<T> value-initializes "
+                "the new elements. See docs/BuffersNamespaceReviewPlan.md, ticket #2054.");
             if (sizeHint < 0)
                 throw System::ArgumentException("sizeHint must be non-negative", "sizeHint");
             if (sizeHint == 0) sizeHint = 1;
@@ -90,8 +116,15 @@ namespace System::Buffers {
          * @brief Constructs an ArrayBufferWriter with the specified initial capacity.
          * @param initialCapacity The minimum initial capacity of the backing buffer.
          * @throws System::ArgumentException if initialCapacity is zero or negative.
+         * @note Requires T to be default-constructible; see the class-level
+         *       "Requirements on T" note.
          */
         explicit ArrayBufferWriter(intcs initialCapacity) {
+            static_assert(
+                std::is_default_constructible_v<T>,
+                "System::Buffers::ArrayBufferWriter<T>(intcs) requires T to be "
+                "default-constructible: sizing the backing std::vector<T> value-initializes "
+                "its elements. See docs/BuffersNamespaceReviewPlan.md, ticket #2054.");
             if (initialCapacity <= 0)
                 throw System::ArgumentException("initialCapacity must be positive", "initialCapacity");
             buffer_.resize(static_cast<std::size_t>(initialCapacity));
@@ -142,8 +175,22 @@ namespace System::Buffers {
          * C++ counterpart of .NET ArrayBufferWriter&lt;T&gt;.Clear(). Slower than
          * ResetWrittenCount() since it also zeroes the buffer; use ResetWrittenCount()
          * if the contents don't need to be cleared.
+         *
+         * @note Requires T to be default-constructible **and** copy-assignable; see the
+         *       class-level "Requirements on T" note. ResetWrittenCount() requires neither.
          */
         void Clear() {
+            static_assert(
+                std::is_default_constructible_v<T>,
+                "System::Buffers::ArrayBufferWriter<T>::Clear() requires T to be "
+                "default-constructible: it writes a value-initialized T over every written "
+                "element. See docs/BuffersNamespaceReviewPlan.md, ticket #2054.");
+            static_assert(
+                std::is_copy_assignable_v<T>,
+                "System::Buffers::ArrayBufferWriter<T>::Clear() requires T to be "
+                "copy-assignable: it assigns a value-initialized T over every written "
+                "element. Use ResetWrittenCount() if T cannot be assigned. "
+                "See docs/BuffersNamespaceReviewPlan.md, ticket #2054.");
             std::fill(buffer_.begin(), buffer_.begin() + writtenCount_, T{});
             writtenCount_ = 0;
         }

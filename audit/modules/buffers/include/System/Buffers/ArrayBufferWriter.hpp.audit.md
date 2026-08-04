@@ -106,3 +106,54 @@ cross-reference note in the `ArrayPool` report. The planned repair states each r
 the doc-comment and adds a `static_assert` **at the point where the requirement is already
 enforced**, so exactly the same set of programs continues to compile; a class-scope assert is
 explicitly rejected because it would reject a mere declaration that compiles today.
+
+### SR-AUD-070 remediated (#2054, 2026-08-04)
+
+**SR-AUD-070 is now `remediated`.** The repair landed exactly as planned — each requirement is
+stated in the owning type's Doxygen block and `static_assert`ed at the point where it was
+already enforced — and implementation measured three things the plan had not.
+
+**1. There are six production sites, not four.** `ArrayBufferWriter(intcs initialCapacity)`
+resizes the backing vector on its own and was missed by both this report and the review's §4.4
+table. The full list: `ArrayBufferWriter(intcs)`, `ArrayBufferWriter::checkAndResizeBuffer`,
+`ArrayBufferWriter::Clear`, `MemoryPoolHeapOwner_`'s constructor, `SharedArrayPool<T>::Rent`
+and `ArrayPool<T>::Return(clearArray=true)`. `SequenceReader<T>::TryRead`/`TryPeek` are two
+further `T{}` sites, but their requirement was **already documented** as part of the CCF-014
+`out`-parameter contract; they gain the assert for the diagnostic and are recorded as
+*documented, now diagnosed* rather than as silent requirements.
+
+**2. "fails to compile at `GetSpan`" understates where the requirement bites.** `GetSpan` and
+`GetMemory` are `virtual` overrides of `IBufferWriter<T>`, so their bodies are instantiated for
+the **vtable**. Measured against the pre-change headers: `ArrayBufferWriter<NoDefault> w;` — a
+plain default construction that asks for no span at all — was already rejected. The same is
+true of `ArrayPool<NoDefault>::Shared().Return(v, false)`, a call that needs nothing of `T`.
+Naming the type (`ArrayBufferWriter<NoDefault>*`) and taking its `sizeof` stay legal, before
+and after, which is precisely why no assert is at class scope.
+
+**3. Copy-assignability was undocumented too.** `Clear` (`std::fill(…, T{})`) and
+`Return(array, true)` (`assign(n, T{})`) require it in addition to default-constructibility. A
+`T` that is default-constructible but not copy-assignable was already rejected at both; both
+now say so, and `Clear`'s doc-comment points such a caller at `ResetWrittenCount()`, which
+requires neither.
+
+**Closure evidence.** 13 sites in `test/consumer/buffers_generic_requirements_negative.cpp`
+prove the rejected half — every hostile instantiation still fails, and fails with the new
+sentence. 9 tests in `BuffersGenericRequirementsTests.cpp` pin the accepted half, which a
+negative fixture cannot express: naming a hostile instantiation, its `sizeof`, and each
+surface still serving a non-trivially-destructible `T` (`std::string`). The before/after
+acceptance table is `docs/BuffersNamespaceReviewPlan.md` §23.4, measured against the pre-change
+headers materialised from `b294738`.
+
+**Source, ABI and behaviour consequences: none.** No runtime code changed, no signature, no
+object layout, no vtable, no exception specification. Exactly the same set of programs
+compiles; only the diagnostic differs. ASan/UBSan/LSan over the new runtime paths are clean
+and proven instrumented by a control defect, which is a non-discriminating confirmation, not a
+repair proof (`build-probe/2054_probe6_asan_ubsan.log`).
+
+**One limit of the negative fixture, recorded rather than papered over.** The caller-facing
+spelling `ArrayPool<T>::Shared().Rent(n)` *is* rejected, before and after, but cannot be
+*proven* rejected per-site: the failing member is reached from inside `Shared()`'s own body, so
+GCC roots the instantiation chain at a header line and no diagnostic ever names a fixture line,
+which the checker correctly refuses to count. Those two sites name the concrete pool type and
+declare it `extern`, so the call rather than the vtable is the first instantiation. Recorded in
+`docs/NegativeConsumerFixtureValidation.md`.
