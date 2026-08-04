@@ -1,5 +1,33 @@
 # Sharp Runtime plan
 
+*Last verified: 2026-08-04 — branch `feature/remediation-batch-net-http-2063-2064-xml-review`, cut
+from the clean tip `257106a` and **not pushed; no push was requested during this batch**. No merge,
+rebase, tag, PR, force-push, amend or history rewrite; all new commits intentionally unsigned
+(`git -c commit.gpgsign=false`), authored and committed as `Claude <noreply@anthropic.com>`. The
+batch **closed the compatible `System::Net::Http` queue** with **#2063** and **#2064** in that
+mandatory order, **reconciled the namespace**, then **re-derived the next review unit by
+measurement** and performed the **`System::Xml` namespace review (#2073)** —
+`docs/SystemXmlNamespaceReviewPlan.md`, 20 sections, the tenth in the #1950 series — and
+implemented **three** of the seven compatible tickets it created: **#2074**, **#2075** and
+**#2077**. **Six findings moved `confirmed → remediated`** — SR-AUD-311, SR-AUD-312 (#2064),
+SR-AUD-313 (#2063), SR-AUD-350, SR-AUD-351 (#2074/#2075) and SR-AUD-353 (#2077) — and **two became
+`confirmed (design-complete)`** (SR-AUD-314, SR-AUD-315). **Fourteen premises were corrected by
+measurement**, five of which changed what shipped: SR-AUD-313 has **ten** public doors, not the
+four the review scoped its ticket to, and one of the missed ones puts attacker text in the
+**request line**; SR-AUD-349's validator **already exists** and one sibling already uses it;
+SR-AUD-350's correct pattern was already one call away; SR-AUD-351 is **four** mutators failing in
+three ways; and SR-AUD-353 was **pinned by a pre-existing test**, which is why it survived a
+passing suite. **Two sanitizer premises were corrected by measurement and reported as
+non-results** — UBSan's `enum` check does not see the `HttpStatusCode` cast, and the XML node
+`InsertAfter` drops is an orphan rather than a leak. Audit **129 remediated / 235 confirmed / 364
+total**, of which **49** carry `confirmed (design-complete)`; **no `SR-AUD-*` identifier was
+created — numbering stays frozen at 364.** Gate **15,771 / 15,764 passed / 1 skipped / 6 failed**
+across all 37 executables run individually, the same two re-measured causes as before. Graph
+**41 / 91**, seams **2 / 18**, negative fixtures **11 / 94**. Doxygen and `ccache` are absent from
+this container and were not run. The prior header stack is retained below.*
+
+*Prior header, retained:*
+
 *Last verified: 2026-08-04 — branch `feature/remediation-batch-buffers-2054-next-review`, cut from
 `b294738` and **not pushed; no push was requested during this batch**. No merge, rebase, tag, PR,
 force-push, amend or history rewrite; the pre-existing local-only commits were left untouched. All
@@ -22,6 +50,78 @@ repair. Audit **123 remediated / 241 confirmed / 364 total**, of which **47** ca
 same two re-measured causes as before. Negative fixtures **10 / 81 → 11 / 94**. Doxygen and
 `ccache` are absent from this container and were not run. The prior header stack is retained
 below.*
+
+---
+
+## 2026-08-04 — `System::Net::Http` closed for compatible work (#2063, #2064), the `System::Xml` review (#2073), and #2074/#2075/#2077
+
+**#2063 — a control character crossed TEN public doors into an HTTP or MIME frame.** SR-AUD-313
+now `remediated`, SR-AUD-316's reason half with it. The namespace review scoped this ticket to
+four doors; measured against `257106a`, **ten** were open, and two of the six the review missed
+are the load-bearing ones. The **request path** reaches the request **LINE** —
+`parseUrl("http://host/pa\r\nX: y")` returned path `"/pa\r\nX: y"` and the handler writes
+`method << " " << path << " HTTP/1.1\r\n"` — so that is request smuggling, not one extra header
+field. And the **media type, charset, multipart subtype and form-data name/file name** doors that
+SR-AUD-313's *own audit text* names were dropped by the review's paraphrase and were all still
+open: `MultipartFormDataContent::Add(c, "na\r\nX-Injected: yes")` emitted a separately parsed
+`Content-Disposition` field, reproducing the audit's multipart probe exactly. Closing only the
+four scoped doors would have marked the finding remediated with three of its own named vectors
+open. One shared `System::Net::Http::detail` helper now guards all ten, plus two internal sites
+with no public door in front of them; `parseUrl` validates the **whole URL string** once, before
+any splitting, which also makes #2064's re-split safe by construction. `System::FormatException`
+for the protocol-field doors, `System::UriFormatException` (which **is** a `FormatException`) for
+`parseUrl`, `HttpRequestException` for `parseStatusLine` and the handler's response-header check,
+`System::ArgumentException` for the two multipart doors — all recorded as **this port's choices**,
+since `/rv/tmp/runtime/` is absent. Rejected text is deliberately **not** echoed into the message.
++28 tests; nine mutations; ASan/UBSan/LSan clean with the four changed `.cpp` bodies compiled from
+source and a control heap-buffer-overflow proving instrumentation.
+`docs/Migration-HttpControlCharacterRejection.md`.
+
+**#2064 — `std::sto*` accepted a valid prefix and called it the whole value.** SR-AUD-311 and
+SR-AUD-312 now `remediated`. One full-consumption parser (the entire text must be ASCII digits and
+the value must fall inside the domain) replaces `std::stoi` in both public static parsers —
+CCF-002's remedy shape reduced to what this module needs, citing the family rather than minting
+one. The **authority now ends at the first `/`, `?` or `#`**, which closes the finding's worst
+row: `http://host?q=1` used to parse to host `host?q=1` with path `/`, so a query string reached
+**DNS and the `Host:` header** while the request line asked for `/`. The **host is lowercased**, as
+the scheme already was. The **version token was never parsed at all** — `GARBAGE 200 OK` yielded
+200 — so there was nothing to tighten and a check to add. `HTTP/1.1 099 OK` is accepted as the
+code 99 and `HTTP/9.9` is accepted; both are **pinned as this port's choices**, not claimed as
+matches. **Not one existing test needed updating.** Seven mutations; the sharpest is that making
+#2063's control check validate only the parsed *host* fails four tests, which is what proves the
+two repairs are **ordered** rather than merely co-present.
+
+**`System::Net::Http` is closed for compatible work.** Nine findings own the namespace: three
+`remediated`, two **split** (half remediated, half blocked), two `confirmed (design-complete)`
+with blocked tickets, one `confirmed` and blocked, one deferred. Every gated behaviour is pinned
+and every pin is mutation-checked. **§17's completion criterion 3 was corrected**: SR-AUD-310 is
+deliberately **not** marked design-complete, because the review records two competing options with
+no selection — marking it so would overstate what exists.
+
+**#2073 — the `System::Xml` namespace review.** Selection re-derived by measurement.
+`modules/net-websockets` wins priority 1 **on the letter** (SR-AUD-247 is an ASan-confirmed UAF)
+and was **not** selected: that finding is CCF-019 verbatim and #2066's disposition is now known —
+blocked, unapproved, two options, no selection — so its highest-value work is blocked on arrival.
+`modules/xml`'s two highs are both actionable. Eight findings, six families, ten tickets, **seven
+compatible and three deferred**, and **nothing in the namespace needs a layout, vtable, base-class
+or public-type change**. The public-input sweep found **two genuine security positives worth
+recording as non-findings** — internal entities are never expanded, and nesting depth is bounded
+by the substrate — and two post-audit acceptance defects, both deferred for want of evidence.
+
+**#2074 / #2075 / #2077 — three of the seven compatible XML tickets.** `InnerXml` replacement is
+atomic (the destructive step used to run before the parse that could fail, so an invalid fragment
+emptied the node **with no exception**); four DOM mutators reject a node owned by another parent
+(the finding named one, and `InsertAfter` left the new node **nowhere**); and `HasNamespace`
+searches every active scope, as its own documented contract and its own sibling already did. The
+ASan question the review refused to answer by reading **is answered and is a non-result**: the
+dropped node is an orphan freed with the document, so the defect is the silent acceptance and the
+behavioural test is the closure evidence. SR-AUD-353 **was pinned by a pre-existing test**, which
+is why it survived; that test was corrected in place and renamed, not deleted.
+
+**Remaining, unchanged by this batch:** #2066–#2069 and #2071 blocked; #2070, #2072, #2080, #2082
+and #2083 deferred; #2076, #2078, #2079 and #2081 compatible and ready in `System::Xml`.
+**#1962 and #1773 remain blocked. CCF-012 and CCF-019 were not marked closed; CCF-021 and CCF-022
+were not minted.**
 
 ## 2026-08-04 — `System::Buffers` closed for compatible work (#2054), the `System::Net::Http` review (#2062), and #2065
 

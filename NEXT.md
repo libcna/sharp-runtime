@@ -3,6 +3,28 @@
 
 # NEXT.md
 
+*Last verified: 2026-08-04. Branch `feature/remediation-batch-net-http-2063-2064-xml-review`, cut
+from the clean tip `257106a`. **Not pushed — no push was requested during this batch.** No merge,
+rebase, tag, force-push, PR, publication, amend or history rewrite; all six commits unsigned
+(`git -c commit.gpgsign=false`, author and committer `Claude <noreply@anthropic.com>`) because
+this environment has no usable private signing key. The batch **closed the compatible
+`System::Net::Http` queue** with **#2063** then **#2064** in that mandatory order, **reconciled
+the namespace**, **re-derived the next review unit by measurement**, reviewed **`System::Xml`
+(#2073)** — `docs/SystemXmlNamespaceReviewPlan.md`, 20 sections — and implemented **three** of the
+seven compatible tickets that review created: **#2074**, **#2075**, **#2077**. **Six findings
+moved `confirmed → remediated`** (SR-AUD-311, 312, 313, 350, 351, 353) and **two became `confirmed
+(design-complete)`** (SR-AUD-314, 315). Audit **129 remediated / 235 confirmed / 364 total**, of
+which **49** carry `confirmed (design-complete)`; **no `SR-AUD-*` identifier was created —
+numbering stays frozen at 364.** **Fourteen premises were corrected by measurement**, five of
+which changed what shipped, and **two sanitizer premises were corrected and reported as honest
+non-results**. Gate **15,771 tests across 37 executables: 15,764 passing, 1 skipped, 6 failing**
+for the same two re-measured causes as before, unchanged and not hidden. Graph **41 / 91**, seams
+**2 / 18**, negative fixtures **11 / 94**. **Doxygen and `ccache` are both absent from this
+container and were NOT run.** `System::Net::Http` is **complete except for gated and deferred
+work**; `System::Xml` has **four compatible tickets left** — #2076, #2078, #2079, #2081.
+**#1962 and #1773 remain blocked**; CCF-012 and CCF-019 were **not** marked closed and CCF-021 and
+CCF-022 were **not** minted. The prior header stack is retained below.*
+
 *Last verified: 2026-08-04. Branch `feature/remediation-batch-buffers-2054-next-review`, cut from
 the clean tip `b294738`. **Not pushed — no push was requested during this batch.** No merge,
 rebase, tag, force-push, PR, publication, amend or history rewrite; all commits unsigned
@@ -49,7 +71,269 @@ first handoff below.*
 
 ---
 
-## Autonomous batch handoff, 2026-08-04 (`System::Buffers` #2054, the `System::Net::Http` review, and #2065)
+## Autonomous batch handoff, 2026-08-04 (`System::Net::Http` #2063/#2064 + reconciliation, the `System::Xml` review, and #2074/#2075/#2077)
+
+### 1. What this batch did
+
+| Commit | Contents |
+|---|---|
+| `6383744` | **#2063** — CR/LF/NUL rejected at all **ten** public frame doors |
+| `cd9327f` | **#2064** — full-consumption `parseUrl`/`parseStatusLine` with real domain checks |
+| `071fc30` | `System::Net::Http` reconciliation and five findings' dispositions |
+| `3b16300` | **#2073** — the `System::Xml` namespace review |
+| `2206277` | **#2074**, **#2075** — atomic `InnerXml`, four DOM mutators get an ownership check |
+| `1b65f0f` | **#2077** — `HasNamespace` searches every active scope |
+| *(this one)* | handoff: `NEXT.md`, `plan.md`, `plan.sqlite3` |
+
+### 2. #2063 — SR-AUD-313 has **ten** public doors, not the four the review scoped
+
+**The single largest correction in the batch.** The review's §4.1 scoped #2063 to *"a header name
+and value, a request authority, and a reason phrase"*. Measured against `257106a`
+(`build-probe/2063_probe1_doors.cpp`, log `2063_probe1_before.log`), **ten** doors were open, and
+two of the six the review missed matter most:
+
+- **The request PATH.** `parseUrl("http://host/pa\r\nX: y")` returned path `"/pa\r\nX: y"`, and
+  `HttpClientHandler::Send` writes `method << " " << path << " HTTP/1.1\r\n"`. That is a second
+  **request line** — request smuggling — not one extra header field.
+- **Media type, charset, multipart subtype, form-data name/file name.** SR-AUD-313's *own audit
+  text* names these; the review's paraphrase dropped them and they were all open.
+  `MultipartFormDataContent::Add(c, "na\r\nX-Injected: yes")` emitted
+  `Content-Disposition: form-data; name="na\r\nX-Injected: yes"`, reproducing the audit's
+  multipart probe exactly.
+
+**Closing only §4.1's four doors would have marked SR-AUD-313 remediated with three of its own
+named vectors still open.** That is precisely the failure mode §4.1 was written to prevent one
+step earlier, and it is the reason this handoff leads with it.
+
+One shared `System::Net::Http::detail` helper guards all ten, plus two internal sites with no
+public door in front of them (a control-bearing response header line, and the
+`CookieContainer`-synthesised `Cookie` value). `parseUrl` validates the **whole URL string** once,
+before any splitting — which also makes #2064's authority/query/fragment re-split safe by
+construction.
+
+**Exception types, all recorded as this port's choices** (`/rv/tmp/runtime/` re-verified absent):
+`System::FormatException` for the protocol-field doors; `System::UriFormatException` (which **is**
+a `FormatException`, so nine of ten doors share one catchable base) for `parseUrl`;
+`HttpRequestException` for `parseStatusLine` and the handler's response-header check, because a
+malformed **response** is this module's response error rather than the caller's format error;
+`System::ArgumentException` for the two multipart doors whose same parameters already report their
+other defects that way. **Rejected text is deliberately not echoed into the message** — it is
+attacker-controlled and messages get logged.
+
+A space, a tab, an empty value, a percent-encoded CRLF and the content **body** all stay accepted.
+
+**+28 tests. Nine mutations**, each reverted from an exact backup with `git diff --stat` identical
+on both sides: emptying the shared predicate fails **exactly** the 13 rejection tests while all 8
+acceptance tests and all 7 pins stay green; M4–M9 each make **only** their own pin fail.
+ASan/UBSan/LSan clean over 130 rejections and 19 acceptances with the four changed `.cpp` bodies
+compiled **from source** (`Net.Http` is `STATIC`) and a control heap-buffer-overflow proving
+instrumentation. `docs/Migration-HttpControlCharacterRejection.md`.
+
+### 3. #2064 — a prefix parser, an unparsed version token, and two value changes
+
+`std::sto*` stops at the first character it cannot use and reports **success**, and it skips
+leading whitespace and accepts a sign. One full-consumption parser now backs both public statics —
+**CCF-002's remedy shape**, citing the family rather than minting one.
+
+Measured before → after: `:80abc` 80 → reject; `:-1` −1 → reject; `:65536`/`:99999` → reject;
+`: 80`/`:+80` 80 → reject; `:0`/`:65535` **still accepted**; `[::1]:70000` → reject.
+
+**The two value changes are the more dangerous half.** `http://host?q=1` parsed to host
+`host?q=1` with path `/`, so a query string reached **DNS and the `Host:` header** while the
+request line asked for `/` — `Get("http://api.example?key=secret")` sent the secret in the Host
+header and requested the wrong resource. And the **host was never lowercased** while the scheme
+was, so `HOST.EXAMPLE` and `host.example` were distinct hosts to the cookie container and to every
+downstream consumer.
+
+**The version token was never parsed at all** — `GARBAGE 200 OK` yielded 200. There was nothing to
+tighten; there was a check to add. `HTTP/1.1 099 OK` is **accepted** as the code 99 and
+`HTTP/9.9` is **accepted**; both are **pinned as this port's choices**, per the review's §15.
+
+**Not one existing test needed updating.** Seven mutations; the sharpest is **N6** — making
+#2063's control check validate only the parsed *host*, at the end, fails four tests, which is what
+proves the two repairs are **ordered** rather than merely co-present.
+
+### 4. Two sanitizer premises corrected, both reported as honest non-results
+
+- **UBSan is not a discriminating instrument for the `-5` status code.** The review's §12
+  nominated an invalid-enum-value report. A dedicated control
+  (`build-probe/2064_probe3_enumctl.cpp`) shows `-fsanitize=enum -fno-sanitize-recover=undefined`
+  **reports nothing and exits 0** for `static_cast<HttpStatusCode>(-5)`: it is an `enum class`
+  with the implicit `int` underlying type, so every `int` is in range. The clean run is recorded
+  as a non-discriminating confirmation and the behavioural test is the closure evidence.
+- **The XML node `InsertAfter` drops is an orphan, not a leak.** The XML review made answering
+  this an explicit closure condition. With the port **and `vendor/tinyxml2` compiled from
+  source**, ASan/UBSan/LSan are clean **before** the repair over 200 consecutive drops: the node
+  comes from the document's own pool and is freed with it. The defect is precisely the *silent
+  acceptance*. Instrumentation proven by a control heap-use-after-free in the same binary.
+
+### 5. `System::Net::Http` reconciliation — complete except for gated and deferred work
+
+Nine findings own the namespace (SR-AUD-310…318). SR-AUD-236 names a `Net.Http` file but is owned
+by `net-http-json`, which §16 excludes, and is not counted.
+
+| Disposition | Count | Findings |
+|---|---:|---|
+| `remediated` | 3 | 311, 312, 313 |
+| **split**: half remediated, half blocked | 2 | 316 (#2063 / #2069), 318 (#2065 / #2071) |
+| `confirmed (design-complete)` + blocked + pin | 2 | 314 (#2067), 315 (#2068) |
+| `confirmed`, blocked, **not** design-complete | 1 | 310 (#2066, CCF-019) |
+| `confirmed`, deferred + pin | 1 | 317 (#2070) |
+
+**§17's completion criterion 3 was corrected.** It asks for 310, 314 and 315 to be
+design-complete. Applied to 314 and 315, whose repair the review names **singularly**. **Not
+applied to 310**: §4.6 records two competing options with no selection and §19 says the
+reproduction was deliberately not re-run. That is a disposition, not a completed design.
+
+**No compatible ticket remains.** Every gated behaviour is pinned and every pin is
+mutation-checked — including #2066's, which is a compile-time `static_assert` on the *ownership
+model* rather than a behavioural test, because a use-after-free is not a behaviour to pin.
+
+### 6. Why `modules/xml` was selected, measured
+
+| Unit | Open | High | High % | Existing review |
+|---|---:|---:|---:|---|
+| `modules/core` | 72 | 9 | 12% | family plans only (excluded on coherence) |
+| `modules/io` | 11 | 0 | 0% | none |
+| **`modules/xml`** | **8** | **2** | **25%** | **none** |
+| `modules/time-zone` | 7 | 0 | 0% | none |
+| `modules/globalization` | 7 | 1 | 14% | none |
+| `modules/text-json` | 7 | 1 | 14% | none |
+| `modules/net-websockets` | 6 | 2 | 33% | none |
+
+**`net-websockets` wins priority 1 on the letter** — SR-AUD-247 is an ASan-confirmed
+use-after-free — **and was not selected.** That finding is **CCF-019 verbatim**, and #2066's
+disposition is now *known*: blocked, unapproved, two options and no selection. Reviewing it today
+produces a review whose highest-value finding is blocked on arrival. `xml`'s two highs are **both
+actionable**, its inputs are hostile by construction, it yields **six** compatible tickets, and it
+is one CMake component (`Xml.XPath` is an alias of the same archive). `modules/io` has eleven
+findings and **zero** highs.
+
+**`modules/net-websockets` is the recommended next unit** and is now *more* valuable than before:
+it is the third CCF-019 site **and** the CCF-021 site.
+
+### 7. #2073 — the `System::Xml` review, and the three tickets implemented
+
+Eight findings, six families (X-A…X-F), ten tickets: **seven compatible, three deferred, none
+blocked on approval**. Nothing in the namespace needs a layout, vtable, base-class or public-type
+change — unusual for this repository and the reason the compatible queue is six deep.
+
+**The public-input sweep the brief asked for found two genuine security positives**, recorded as
+non-findings rather than ticketed: internal entities are **never expanded** (no billion-laughs
+exposure — a parity gap, not a vulnerability) and nesting depth is **bounded** by the substrate
+(`XML_ELEMENT_DEPTH_EXCEEDED` at 2,000 levels). A duplicate attribute and an embedded NUL are both
+rejected. Two post-audit acceptance defects were found and **deferred**: an undeclared entity is
+silently reinterpreted and re-escaped (#2082), and an undeclared namespace prefix is accepted
+(#2083).
+
+**Implemented:**
+
+- **#2074** — `InnerXml` replacement is atomic. The destructive step ran **before** the parse that
+  could fail, so `<keep/>` set to `"<bad>"` ended up empty **with no exception**. The correct
+  pattern was already one call away: `XmlDocument::LoadXml` parses first and throws. Every child
+  is now also cloned before this node is touched.
+- **#2075** — **four** DOM mutators, not the one the finding names, and they failed in **three
+  different ways**: `RemoveChild` detached another parent's child, `InsertBefore` silently ignored
+  `refChild`, `InsertAfter` left the node **nowhere**, `ReplaceChild` did both wrongs.
+  `ReplaceChild` checks **before** delegating, or a foreign `oldChild` leaves `newChild` already
+  spliced in when the removal throws.
+- **#2077** — `HasNamespace` searches every active scope. **The defect was pinned by a
+  pre-existing test** asserting the wrong answer against the type's own documented contract; that
+  is why it survived a passing suite. The test was corrected in place and renamed, not deleted.
+
+### 8. Validation, as measured
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| Full gate, all **37** executables run individually | **15,771 tests — 15,764 passed, 1 skipped, 6 failed** |
+| `validate_module_boundaries.py` | OK — **41 modules / 91 edges** |
+| `validate_module_boundaries_test.py` | OK |
+| `generate_component_catalog.py --check` | OK — catalogue current |
+| `db_consistency_check.py` | OK |
+| `check_version_seam_odr.py` | OK — **2 seams / 18 definitions** |
+| `check_version_seam_odr_test.py` | OK |
+| `check_negative_consumer_fixtures.py` | OK — **11 fixtures / 94 sites**, 105 compiler invocations, peak 2 jobs, **36.7 s** |
+| `check_negative_consumer_fixtures_test.py` | OK |
+| `check_selective_components.sh` | **passed**, one serialized instance, **14 m 38 s**, 10 components, `ps -C cc1plus` never above **2** |
+| `local_ci_check.sh build` | boundaries **41/91**, catalogue current, seams **2/18**, fixtures **11/94** (39.2 s), **build clean: 0 warnings, 0 errors**, then stops at the **known** 5 `PingTests` failure — reported separately from the authoritative gate above |
+| `git diff --check` | clean |
+
+**Known failures, re-measured this batch, unchanged and not hidden:**
+
+- five `PingTests` — `/proc/sys/net/ipv4/ping_group_range` is **`1 0`**, an empty range, so
+  `SOCK_DGRAM` ICMP returns `EACCES` even as uid 0, while `SOCK_RAW` ICMP **does** open. That is
+  exactly the **#1962** gap: `Ping` only ever tries `SOCK_DGRAM`. Blocked, unapproved.
+- one `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` — `/proc/net/if_inet6` does
+  not exist and `socket(AF_INET6, …)` returns `EAFNOSUPPORT`. Environment, not code.
+
+The selective check's **first** attempt was killed at a ten-minute tool timeout partway through
+`Core.Base`. It was **re-run from the start as one serialized detached instance** and passed in
+14 m 38 s. The killed attempt left no compiler process behind — verified with `pgrep` before the
+restart — and no other compiler-producing command ran while either attempt was active.
+
+Nothing was disabled, weakened, skipped, recategorised or special-cased. Test growth is
+**15,706 → 15,771**, add-only: `SharpRuntimeTests_Net_Http` 137 → 181 (+44),
+`SharpRuntimeTests_Xml` 379 → 400 (+21).
+
+**Doxygen and `ccache` are both absent from this container.** Neither was run. `/rv` does not
+exist, so the .NET reference tree stays absent and every reference claim in this batch is recorded
+as a **choice**, not a match.
+
+**Tracked `scripts/__pycache__/*.pyc`:** the three files are **byte-identical** to their committed
+state. Every Python invocation used `PYTHONDONTWRITEBYTECODE=1`; nothing was created, modified,
+staged or committed. They were left in place — the fix is a `.gitignore` entry plus
+`git rm --cached`, which belongs in its own approved cleanup ticket.
+
+### 9. Process notes
+
+- **No `git checkout --` or `git restore` was used to revert a mutation.** Every one of the
+  seventeen mutations in this batch was reverted from an **exact file copy** taken beforehand,
+  with `git diff --stat` captured on both sides and confirmed identical, and a `grep` confirming
+  no `MUTATION` marker survived.
+- **Three mutation-harness defects were found and fixed, all in this batch's own tests.** A
+  mutation that made a function unused hit `-Werror`, so the build failed and a **stale binary**
+  was measured — the first N3/N4 readings were wrong and were re-measured. A second **hung**,
+  because the client never connected and the mock server sat in `Accept()`. A third **aborted the
+  executable**, because an unjoined `std::thread` called `std::terminate`. Every loopback test
+  this batch added now runs its server body inside `try`/`catch`, always reaches `join()`, and
+  pokes the listener when the client failed. **A mutation check that hangs or aborts proves
+  nothing about the test it was aimed at.**
+- **One mutation attempt was discarded rather than reported.** `if (false && Parse(...))`
+  short-circuits, so `Parse` was never called and three unrelated tests failed instead of the two
+  intended. A mutation that changes more than the guard proves nothing about the guard.
+- Every scripted documentation edit named one file, asserted its expected match count, and was
+  inspected immediately afterwards. The stacked headers of `NEXT.md` and `plan.md` were preserved.
+
+**Build directories used:** `build/` (incremental, never reconfigured from scratch), `build-probe/`
+(all probes, prefixed `2063_*`, `2064_*`, `2073_*`, `2075_*`; the sanitizer **binaries** were
+deleted once their evidence was transcribed, per `CLAUDE.md`'s rule 11 — sources and logs are
+retained), `build-tmp/` (the repository-local `TMPDIR`, which is also where the selective check
+builds). Sizes at handoff: `build/` **1.7 G**, `build-probe/` **32 M** (78 M before the cleanup),
+`build-tmp/` as left by the selective run. **Maximum aggregate compiler parallelism was 2
+throughout**, verified with `pgrep -c cc1plus` while the selective check ran; no build tree was
+created under `/tmp`, `/var/tmp` or `/dev/shm`.
+
+### 10. What is next
+
+1. **#2076**, **#2078**, **#2079**, **#2081** — the four remaining compatible `System::Xml`
+   tickets, in the review's §15 order (#2078 and #2076 next, then #2079 after the repaired
+   mutators, then #2081 last because it is the only one that can leave the XPath navigator
+   internally inconsistent if done partially).
+2. Then **`modules/net-websockets`** — the third CCF-019 site and the CCF-021 site, so its review
+   should mint **CCF-021** citing SR-AUD-248, SR-AUD-319/322 and the now-remediated SR-AUD-313.
+3. **`modules/io`** after that, at which point **CCF-022** can be minted for the
+   lifecycle-state-recorded-but-not-enforced family (SR-AUD-337/343/344 + SR-AUD-348/349).
+
+**Blocked and unapproved, unchanged by this batch:** #2066–#2069, #2071, #2056–#2059,
+#2040/#2042/#2043/#2044, #2029–#2031, #2013–#2021, #1995–#1999, #2003, #1956–#1959, #1969, #1970,
+#1962, #1773. **Deferred verification, evidence absent:** #2060, #2070, #2072, #2080, #2082,
+#2083, #2005, #1983, #1963. **CCF-012 and CCF-019 were not marked closed. CCF-021 and CCF-022 were
+not minted.**
+
+---
+
+## Prior handoff, retained: 2026-08-04 (`System::Buffers` #2054, the `System::Net::Http` review, and #2065)
 
 ### 1. What this batch did
 
