@@ -528,7 +528,7 @@ two HTML encoders in one repository with two different escape sets is the CCF-01
 | Ticket | Cause | Findings | State |
 |---|---|---|---|
 | #2034 | — | maps all 10 | this document |
-| #2035 | N-A | 300 | **todo**, compatible |
+| #2035 | N-A | 300 | **DONE** 2026-08-04 — see §17.2 |
 | #2036 | N-B | 301 | **todo**, compatible |
 | #2037 | N-C | 302 | **todo**, compatible |
 | #2038 | N-D | 303 | **todo**, compatible |
@@ -597,3 +597,63 @@ Header-inline, so `net-sockets`, `net-http`, `net-http-json`, `net-websockets`,
 `net-network-information` and the integration suite recompiled; all were re-run and all pass
 except the pre-existing `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` (absent
 IPv6) and the five `PingTests` (#1962), neither related to this change.
+
+### 17.2 #2035 — N-A, `SocketAddress`'s decode and port domain (SR-AUD-300)
+
+**Repair.** `GetIPEndPoint()` rejects (a) any family that is not `InterNetwork` or
+`InterNetworkV6` and (b) any **declared** size below that family's layout minimum, both with
+`ArgumentException`. The minimums are `IPv4AddressSize` (16) and `IPv6AddressSize` (28) —
+**`IPEndPoint::Create`'s own two constants**, so the safe path and the public shortcut it
+bypasses can no longer disagree, and every buffer `SocketAddress(const IPAddress&, intcs)`
+produces is exactly at the minimum. That constructor now validates the port against
+`IPEndPoint::MinPort`/`MaxPort` with `ArgumentOutOfRangeException("port")`, reusing
+`IPEndPoint::validatePort`'s domain and exception identity. The size helper is **file-local, not
+a member**, so `SocketAddress.hpp` needed no declaration change.
+
+**Evidence.** `build-probe/2035_probe1_socketaddress_decode.cpp`, six binaries
+(`{before, after} × {plain, ASan, UBSan}`), the three `.cpp` files compiled from source into each.
+Log `build-probe/2035_probe1_before_after.log`.
+
+| Sanitizer | Before | After |
+|---|---|---|
+| ASan | **2** `heap-buffer-overflow` READs — `:106` (IPv4, 0 bytes after a 2-byte region) and **`:110`** (IPv6, 0 bytes after an 8-byte region) | **0** |
+| UBSan | none | none — **non-discriminating**, recorded as a non-result |
+| LSan | — | no leak across the full matrix |
+
+**Two premise extensions**, neither issued an `SR-AUD-*` identifier:
+
+1. **The port defect spans the whole signed domain.** §3's row names 70000 → 4464 and -1 →
+   65535. Measured, `INTCS_MIN` encoded as port **0** and 65536 also as **0**, while `INTCS_MAX`
+   encoded as 65535 — so the old behaviour could produce a *plausible* port indistinguishable
+   from a real one, not merely a truncated one.
+2. **A defect §3 does not name: the declared size, not just the allocation.**
+   `setSizeProperty(4)` on a well-formed 16-byte IPv4 buffer left `GetIPEndPoint()` decoding
+   `127.0.0.1:80`, reading offsets 4–7 that the type's **own** `operator[]` refuses with
+   `IndexOutOfRangeException` at the same offsets. **No sanitizer can see this** — the allocation
+   is intact and ASan is silent before *and* after — so it is a contract self-contradiction, not
+   a memory error. Validating the **declared** size closes it and the allocation together,
+   because `size_ <= buffer_.size()` is an invariant of `setSizeProperty`.
+
+**Addition to §7.3's narrowed-row table** (the table is not rewritten; these rows are added):
+
+| Call | Before (measured) | After |
+|---|---|---|
+| `SocketAddress(InterNetworkV6, 8).GetIPEndPoint()` | ASan `heap-buffer-overflow` at `:110`, returned `[::]:0` | `ArgumentException` |
+| `SocketAddress(InterNetworkV6, 27).GetIPEndPoint()` | `[::]:0`, one byte overread | `ArgumentException` |
+| `SocketAddress(Unknown/Unspecified/Max/4242, any size).GetIPEndPoint()` | decoded through the IPv4 branch | `ArgumentException` — the `Unix` row of §7.3 generalises to **every** non-IP family |
+| `SocketAddress(Loopback, 80)` then `setSizeProperty(4)` then `GetIPEndPoint()` | `127.0.0.1:80` | `ArgumentException` — **a second row that removes a non-faulting result** |
+| `SocketAddress(Loopback, INTCS_MIN)` / `(…, 65536)` | `127.0.0.1:0` — a plausible port | `ArgumentOutOfRangeException("port")` |
+| `SocketAddress(Loopback, INTCS_MAX)` | `127.0.0.1:65535` | `ArgumentOutOfRangeException("port")` |
+| every well-formed IPv4/IPv6 encode → decode | works | **byte-identical**, pinned by four tests whose literals are transcribed from the before-log |
+
+**Tests: +17.** `SocketAddressDecodeTests.cpp` covers every family × {below minimum, minimum,
+above}, an unnamed enum value, both IP families' size boundaries, the shrunk declared size, the
+port domain on both families, `IPEndPoint::Create` agreeing with the shortcut, four byte-identical
+round-trip pins, and that raw-buffer construction stays permissive — the audit report's own
+requirement. `SharpRuntimeTests_Net` **254 → 271**.
+
+**Consequences.** No signature, `noexcept`, virtual, vtable, data member or layout change;
+`sizeof(SocketAddress)` is 32 before and after. ABI-wise relink-only; the header gained
+doc-comments stating the new contract, so dependents recompile. `net-sockets`'s
+`UnixDomainSocketEndPoint` — the only cross-module producer of `AddressFamily::Unix`
+`SocketAddress` buffers — never calls `GetIPEndPoint`, verified by grep, and its suite passes.

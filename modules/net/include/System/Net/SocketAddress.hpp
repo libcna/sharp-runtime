@@ -52,10 +52,26 @@ namespace System::Net {
         /** Constructs a SocketAddress of exactly @p size bytes for @p family. */
         SocketAddress(System::Net::Sockets::AddressFamily family, intcs size);
 
-        /** Constructs a SocketAddress encoding the given IP endpoint (address + port). */
+        /**
+         * Constructs a SocketAddress encoding the given IP endpoint (address + port).
+         * @throws System::ArgumentOutOfRangeException if @p port is outside
+         *         [IPEndPoint::MinPort, IPEndPoint::MaxPort]. The port occupies two bytes of the
+         *         buffer, so an out-of-range value used to be truncated into it rather than
+         *         rejected (ticket #2035, SR-AUD-300).
+         */
         SocketAddress(const IPAddress& address, intcs port);
 
-        /** Decodes this buffer back into an IPEndPoint (address + port), assuming it was built by the IPAddress+port constructor. */
+        /**
+         * Decodes this buffer back into an IPEndPoint (address + port), assuming it was built by
+         * the IPAddress+port constructor.
+         *
+         * @throws System::ArgumentException if the encoded address family is neither
+         *         InterNetwork nor InterNetworkV6, or if getSizeProperty() is smaller than that
+         *         family's layout requires (IPv4AddressSize / IPv6AddressSize -- the same
+         *         minimums IPEndPoint::Create checks). Before ticket #2035 this method read
+         *         fixed offsets with no check at all, so a non-IP family decoded as IPv4 and an
+         *         undersized buffer was read past its end.
+         */
         [[nodiscard]] IPEndPoint GetIPEndPoint() const;
 
         /** @return The address family encoded in this buffer. */

@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/SocketAddress.hpp"
 #include "System/Net/IPEndPoint.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IndexOutOfRangeException.hpp"
 #include <array>
@@ -23,6 +24,19 @@ namespace System::Net {
                 case AddressFamily::InterNetworkV6:   return "InterNetworkV6";
                 case AddressFamily::Max:              return "Max";
                 default:                              return std::to_string(static_cast<int>(family));
+            }
+        }
+
+        // The number of bytes GetIPEndPoint's layout needs for a family, or 0 when the family
+        // has no IP layout at all. Deliberately the same two constants IPEndPoint::Create
+        // already checks against, so the safe path and this public shortcut cannot disagree.
+        // File-local, not a member: this ticket must not touch SocketAddress.hpp, because a
+        // header change would turn a relink-only repair into a consumer recompile.
+        intcs requiredIPEndPointSize(AddressFamily family) {
+            switch (family) {
+                case AddressFamily::InterNetwork:   return SocketAddress::IPv4AddressSize;
+                case AddressFamily::InterNetworkV6: return SocketAddress::IPv6AddressSize;
+                default:                            return 0;
             }
         }
     }
@@ -85,6 +99,14 @@ namespace System::Net {
     SocketAddress::SocketAddress(const IPAddress& address, intcs port)
         : SocketAddress(address.getAddressFamilyProperty(),
                         address.getIsIPv6Property() ? IPv6AddressSize : IPv4AddressSize) {
+        // The two bytes below hold a 16-bit port, so every intcs outside [MinPort, MaxPort] used
+        // to be silently truncated into that field rather than rejected: measured before this
+        // check existed (build-probe/2035_probe1_before.log), port 70000 encoded as 4464, -1 as
+        // 65535, INTCS_MAX as 65535 and INTCS_MIN as 0. The domain and the exception identity are
+        // IPEndPoint::validatePort's, which this constructor's own result is handed to.
+        System::ArgumentOutOfRangeException::ThrowIfLessThan(port, IPEndPoint::MinPort, "port");
+        System::ArgumentOutOfRangeException::ThrowIfGreaterThan(port, IPEndPoint::MaxPort, "port");
+
         buffer_[2] = static_cast<bytecs>((static_cast<uint16_t>(port) >> 8) & 0xFF);
         buffer_[3] = static_cast<bytecs>(static_cast<uint16_t>(port) & 0xFF);
 
@@ -103,6 +125,39 @@ namespace System::Net {
 
     IPEndPoint SocketAddress::GetIPEndPoint() const {
         AddressFamily family = getFamilyProperty();
+
+        // Neither of the two checks below existed. GetIPEndPoint read fixed offsets 2..7 (IPv4)
+        // or 2..27 (IPv6) out of a buffer whose size and family the caller chose, so:
+        //
+        //   * every family that is not an IP family -- Unix, Unspecified, Unknown, Max and any
+        //     unnamed value -- fell into the IPv4 branch and decoded as an IPv4 endpoint;
+        //   * an undersized buffer was read past its end. ASan reported a heap-buffer-overflow
+        //     READ at this function's own lines for both branches (SocketAddress.cpp:106 for a
+        //     2-byte InterNetwork buffer, :110 for an 8-byte InterNetworkV6 one), and the values
+        //     produced were whatever the heap happened to hold -- "238.85.0.0:52122" in one run;
+        //   * a buffer whose DECLARED size had been shrunk with setSizeProperty() below the
+        //     layout minimum still decoded, reading bytes the object itself reports as unused.
+        //     That case is memory-safe (the allocation is still there) so no sanitizer sees it,
+        //     but it contradicts operator[], which throws IndexOutOfRangeException for exactly
+        //     the same offsets. Validating the DECLARED size closes both: size_ is never greater
+        //     than buffer_.size(), so requiring it also bounds the allocation.
+        //
+        // The required sizes are IPEndPoint::Create's, which is the safe path this public
+        // shortcut bypasses, and are exactly what SocketAddress(const IPAddress&, intcs)
+        // produces -- so no buffer this class builds is affected.
+        const intcs required = requiredIPEndPointSize(family);
+        if (required == 0) {
+            throw System::ArgumentException(
+                "The socket address family '" + addressFamilyToString(family) +
+                "' cannot be decoded as an IPEndPoint. Only InterNetwork and InterNetworkV6 can.");
+        }
+        if (size_ < required) {
+            throw System::ArgumentException(
+                "Socket address size is too small: " + std::to_string(size_) +
+                " byte(s), but address family '" + addressFamilyToString(family) +
+                "' requires " + std::to_string(required) + ".");
+        }
+
         intcs port = (static_cast<intcs>(buffer_[2]) << 8) | static_cast<intcs>(buffer_[3]);
 
         if (family == AddressFamily::InterNetworkV6) {
