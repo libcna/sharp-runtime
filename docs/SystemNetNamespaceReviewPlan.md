@@ -530,7 +530,7 @@ two HTML encoders in one repository with two different escape sets is the CCF-01
 | #2034 | — | maps all 10 | this document |
 | #2035 | N-A | 300 | **DONE** 2026-08-04 — see §17.2 |
 | #2036 | N-B | 301 | **DONE** 2026-08-04 — see §17.3 |
-| #2037 | N-C | 302 | **todo**, compatible |
+| #2037 | N-C | 302 | **DONE** 2026-08-04 — see §17.4 |
 | #2038 | N-D | 303 | **todo**, compatible |
 | #2039 | N-C | 304 (3 halves) | **todo**, compatible |
 | #2041 | N-B | 307 | **DONE** 2026-08-04 — see §17.1 |
@@ -695,3 +695,41 @@ unchanged domain and the equality consequence. `SharpRuntimeTests_Net` **271 →
 **Consequences.** No signature, `noexcept`, virtual, vtable, data member or layout change;
 `sizeof(IPAddress)` is 24 before and after. Relink-only in ABI terms; the header gained
 doc-comments stating the new contract.
+
+### 17.4 #2037 — N-C, `IPEndPoint`'s bracketed parser (SR-AUD-302)
+
+**Repair.** What may follow the closing bracket is now exactly nothing, or `':'` and the port.
+Three lines, transcribed from the function's own unbracketed branch — which §12 predicted would
+suffice, and which is decisive because `/rv/tmp/runtime/src/libraries/` is absent here.
+
+**Premise extension** (no `SR-AUD-*` issued): §3 names **one** shape; there are **four**.
+
+| Input | Before | After |
+|---|---|---|
+| `"[::1]ignored:80"` | `[::1]:80` | `FormatException` / `false` |
+| `"[::1]ignored"` | `[::1]:0` — **no colon anywhere**, the port was cleared and success reported | rejected |
+| `"[::1]x"` | `[::1]:0` | rejected |
+| `"[::1] :80"` | `[::1]:80` — a literal **space** dropped | rejected |
+
+The decisive comparison lives inside the same function: `"1.2.3.4 :80"` was already **rejected**
+by the unbracketed branch. One `TryParse`, two answers to the same input shape.
+
+`Parse` and `TryParse` agree on **all 29** probed inputs, before and after. Every previously
+valid form parses **identically**.
+
+**One adjacent defect deliberately not absorbed — new inactive ticket #2045.** A trailing `':'`
+with no digits is accepted as port 0 in **both** branches (`"[::1]:"` → `[::1]:0`, `"1.2.3.4:"` →
+`1.2.3.4:0`). That is cause N-C's *shape* but not SR-AUD-302's site, and rejecting it would
+violate #2037's own acceptance criterion ("every currently-valid form still parses identically").
+It is blocked on **evidence**, not on effort — the repair is three lines, but the intended
+behaviour cannot be established in this container and it removes a result that succeeds today.
+Both current results are **pinned**, so #2045 cannot land silently.
+
+**Sanitizers.** None applies: no allocation, no index, no shared state, no undefined conversion.
+Stated rather than silently skipped.
+
+**Tests: +9.** `IPEndPointParseTests.cpp`. `SharpRuntimeTests_Net` **280 → 289**.
+
+**Consequences.** No signature, `noexcept`, virtual, vtable, data member or layout change;
+`sizeof(IPEndPoint)` is 40 before and after. Relink-only — `IPEndPoint.hpp` was not touched at
+all.

@@ -85,16 +85,25 @@ namespace System::Net {
         std::string portPart;
 
         if (!s.empty() && s.front() == '[') {
-            // "[ipv6]:port" form.
+            // "[ipv6]" or "[ipv6]:port" form.
             size_t closeBracket = s.find(']');
             if (closeBracket == std::string::npos) return false;
             addressPart = s.substr(1, closeBracket - 1);
 
-            size_t colonPos = s.find(':', closeBracket);
-            if (colonPos == std::string::npos) {
-                portPart.clear();
-            } else {
-                portPart = s.substr(colonPos + 1);
+            // This branch used to search for the next ':' ANYWHERE after the closing bracket and
+            // silently drop everything in between, so text the parser did not understand simply
+            // evaporated: "[::1]ignored:80" parsed as [::1]:80, "[::1]ignored" and "[::1]x" as
+            // [::1]:0, and even "[::1] :80" -- with a space -- as [::1]:80, while the
+            // unbracketed branch below correctly REJECTED the equivalent "1.2.3.4 :80". The two
+            // branches of one function disagreed about the same input shape; the repair is
+            // transcribed from the branch that was already right, not from any external
+            // reference (ticket #2037, SR-AUD-302).
+            //
+            // What may follow the closing bracket is exactly nothing, or ':' and the port.
+            const size_t afterBracket = closeBracket + 1;
+            if (afterBracket < s.size()) {
+                if (s[afterBracket] != ':') return false;
+                portPart = s.substr(afterBracket + 1);
             }
         } else {
             size_t lastColon = s.rfind(':');
