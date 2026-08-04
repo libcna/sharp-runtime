@@ -9,6 +9,7 @@
 #include "System/Text/Json/JsonDocumentOptions.hpp"
 #include "System/Text/Json/JsonElement.hpp"
 #include "System/Text/Json/JsonException.hpp"
+#include "System/Text/Json/detail/JsonParseGuard.hpp"
 #include "nlohmann/json.hpp"
 
 namespace System::Text::Json {
@@ -61,6 +62,9 @@ namespace System::Text::Json {
          */
         static std::shared_ptr<JsonDocument> Parse(const std::string& json, JsonDocumentOptions options = {}) {
             options.Validate();
+            // #2112: an embedded NUL made the vendored parser stop early and silently discard
+            // everything after it. Checked before the parser sees the text.
+            detail::RejectEmbeddedNul(json);
             try {
                 auto parsed = std::make_shared<const nlohmann::ordered_json>(
                     nlohmann::ordered_json::parse(json, /*callback=*/nullptr, /*allow_exceptions=*/true,
@@ -68,7 +72,11 @@ namespace System::Text::Json {
                 auto effectiveMaxDepth = options.MaxDepth == 0 ? JsonDocumentOptions::DefaultMaxDepth : options.MaxDepth;
                 checkMaxDepth(*parsed, 1, effectiveMaxDepth);
                 return std::shared_ptr<JsonDocument>(new JsonDocument(std::move(parsed)));
-            } catch (const nlohmann::ordered_json::parse_error& e) {
+            // #2111: this caught only parse_error, so a number literal that overflows a
+            // double -- which raises out_of_range, NOT parse_error -- escaped as a std::
+            // exception that no caller writing catch(const System::Exception&) could see.
+            // JsonSerializer::Deserialize<T> already caught the BASE and was already correct.
+            } catch (const nlohmann::ordered_json::exception& e) {
                 throw JsonException(std::string("'") + e.what() + "'.");
             }
         }

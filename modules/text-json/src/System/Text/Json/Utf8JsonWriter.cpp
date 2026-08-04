@@ -7,6 +7,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Text/Json/JsonException.hpp"
+#include "System/Text/Json/detail/JsonParseGuard.hpp"
 #include "nlohmann/json.hpp"
 
 namespace System::Text::Json {
@@ -318,10 +319,15 @@ namespace {
 
     void Utf8JsonWriter::WriteRawValue(const std::string& json, bool skipInputValidation) {
         if (!skipInputValidation && !options_.SkipValidation) {
+            // #2112: without this the validation below would stop at the NUL and pass, while the
+            // FULL text -- including everything after the NUL -- was appended to the buffer. The
+            // written document would contain text that was never validated.
+            detail::RejectEmbeddedNul(json);
             try {
                 auto parsed = nlohmann::json::parse(json);
                 (void)parsed;
-            } catch (const nlohmann::json::parse_error& e) {
+            // #2111 -- catch the BASE, not only parse_error; see JsonDocument::Parse.
+            } catch (const nlohmann::json::exception& e) {
                 throw JsonException(std::string("Invalid JSON passed to WriteRawValue: ") + e.what());
             }
         }

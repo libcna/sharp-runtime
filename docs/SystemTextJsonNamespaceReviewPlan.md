@@ -534,3 +534,71 @@ design ticket and a behaviour pin.
 
 Appended as tickets land, so the difference between what this review predicted and what
 implementation measured stays visible.
+
+### 20.1 #2111 and #2112 landed together — four doors each, and a fourth door found by reading
+
+Both are post-audit defects with **no `SR-AUD-*` identifier**, so the audit index is unchanged at
+**138 remediated / 226 confirmed / 364 total**.
+
+**#2111 had a door the probe never reached.** §7.1 measured three leaking doors —
+`JsonDocument::Parse`, `JsonNode::Parse` and `JsonSerializer::Deserialize`. A grep for
+`parse_error` while implementing found a **fourth**: `Utf8JsonWriter::WriteRawValue`, which
+validates through the same parser with the same `parse_error`-only catch. Ticketed scope came
+from the probe; **implementation scope came from the grep**, and the difference is one whole
+public door.
+
+The repair is what §7.1 predicted: catch the **base** nlohmann exception instead of only
+`parse_error`, at each of the three code sites (the fourth caller,
+`JsonSerializer::Deserialize`'s `JsonDocument` overload, delegates to `JsonDocument::Parse` and
+was fixed by that one edit). Each site keeps its **own message wording**, so nothing but the
+exception's type changes.
+
+**#2112's guard is one function, not three copies.** `System::Text::Json::detail::RejectEmbeddedNul`
+lives in a new internal header `System/Text/Json/detail/JsonParseGuard.hpp` and every entry point
+that hands caller text to the parser goes through it. **No new component edge** — the header is
+inside `Text.Json`. The graph stays at **41 modules / 91 edges**.
+
+`Utf8JsonWriter::WriteRawValue` is the **sharper** of #2112's doors: validation stopped at the NUL
+and *passed*, while the **full** text — everything after the NUL included — was appended to the
+buffer, so the written document would have contained text that was never validated.
+
+**A deliberate non-narrowing, pinned:** an escaped NUL inside a *string value* is legal JSON and
+stays accepted, producing a 3-character string. #2112 rejects the **raw byte in the document
+text**, never the escaped character in a value.
+
+### 20.2 #2111/#2112 evidence
+
+**+18 permanent regressions** — `SharpRuntimeTests_Text_Json` 244 → **262**, in a new
+`JsonNamespaceReviewTests.cpp`. Eight of the eighteen are **pins of behaviour this review measured
+and deliberately did not change**: the 100,000-level no-overflow result, the two document options
+that *do* work, the two that are *inert* (a pin of a known defect, not an endorsement —
+#2115 owns it), `JsonElement`'s already-correct integer accessors (#2114 owns the surviving half),
+the disposal guards that already work plus the one that does not (#2117), and the malformed text
+the parser already rejects.
+
+**Two mutations**, both against the final source, control clean, all four files restored
+**byte-identical**:
+
+| Mutation | Restores | Tests failed |
+|---|---|---:|
+| T1 | the three catch sites narrowed back to `parse_error` | **4** |
+| T2 | the NUL guard disabled | **4** |
+
+The load-bearing assertion for T1 is `ExpectNoStdExceptionEscapes`, which catches
+`System::Exception` first and `std::exception` second. A bare
+`EXPECT_THROW(..., JsonException)` would **not** have discriminated: before #2111 the escaping
+type was `nlohmann::detail::out_of_range`, which is a `std::exception` and **not** a
+`System::Exception`, so the process died at the call site rather than throwing something the test
+could observe.
+
+**The control that keeps #2112 honest is itself a test.**
+`THECONTROLTheSameDocumentWithASpaceWasAlreadyRejected` asserts that the identical document with
+a space instead of the NUL was *always* rejected. If that control ever starts passing, the
+finding's premise is gone and #2112's guard is measuring nothing.
+
+**ASan + UBSan + LSan clean over 30,000 rejections and 18,000 acceptances**
+(`build-probe/2111_probe1_san.log`), control proven live, with both repaired `.cpp` bodies
+compiled *into* the instrumented translation unit because `Text.Json` is a `STATIC` component.
+
+**No public signature, member, base-class, virtual, vtable, object-layout or
+exception-specification change.** One new internal header; no public type gained or lost a member.

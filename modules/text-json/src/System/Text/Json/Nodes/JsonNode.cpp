@@ -7,6 +7,7 @@
 #include <vector>
 #include "System/InvalidOperationException.hpp"
 #include "System/Text/Json/JsonException.hpp"
+#include "System/Text/Json/detail/JsonParseGuard.hpp"
 #include "System/Text/Json/Nodes/JsonArray.hpp"
 #include "System/Text/Json/Nodes/JsonObject.hpp"
 #include "System/Text/Json/Nodes/JsonValue.hpp"
@@ -295,10 +296,12 @@ namespace System::Text::Json::Nodes {
     } // namespace
 
     std::shared_ptr<JsonNode> JsonNode::Parse(const std::string& json, JsonNodeOptions options) {
+        detail::RejectEmbeddedNul(json);   // #2112 -- see the guard's own comment
         try {
             auto j = nlohmann::ordered_json::parse(json);
             return fromNlohmann(j, options);
-        } catch (const nlohmann::ordered_json::parse_error& e) {
+        // #2111 -- catch the BASE, not only parse_error; see JsonDocument::Parse.
+        } catch (const nlohmann::ordered_json::exception& e) {
             throw JsonException(std::string("'") + e.what() + "'.");
         }
     }
