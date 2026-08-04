@@ -41,3 +41,61 @@ The six loopback tests are environment-limited here.  They also omit suffix and
 negative lengths, duplicate/conflicting Content-Length, bad chunk CRLF,
 oversized lines/bodies, malformed headers, descriptor closure after errors,
 lower-case `head`, and CR/LF request/header serialization.
+
+## Post-audit record (ticket #2065, 2026-08-04): SR-AUD-318's leak half is remediated
+
+The audit evidence above is retained unchanged. The owning review is
+[`docs/SystemNetHttpNamespaceReviewPlan.md`](../../../../../../docs/SystemNetHttpNamespaceReviewPlan.md)
+(ticket #2062); **no `SR-AUD-*` identifier was issued and numbering stays frozen at 364.**
+
+**A clause this report filed last turned out to be the module's most consequential compatible
+defect, and was repaired.** SR-AUD-318 bundles three claims — unbounded buffering, weak framing,
+and *"exceptions after connect bypass the only socket close"*. The third is separable, and
+quantifying it changed its priority:
+
+| Server response | Requests | Threw | Descriptors leaked (before) | After |
+|---|---:|---:|---:|---:|
+| well-formed | 20 | 0 | 0 | 0 |
+| garbled status line | 20 | 20 | **20** | **0** |
+| `Content-Length: abc` | 20 | 20 | **20** | **0** |
+| chunk size `ZZZ` | 20 | 20 | **20** | **0** |
+| body shorter than `Content-Length` | 20 | 20 | **20** | **0** |
+
+One descriptor per failing request, from four independent failure paths, **every one of them
+chosen by the remote peer**. A server that answers roughly 1,024 requests with a garbled status
+line exhausts a default `RLIMIT_NOFILE`, after which the process cannot open a file, a socket or
+a pipe. That is a remote resource-exhaustion channel, not a hygiene issue, which is why the
+review made it P1 and first in the execution order rather than leaving it inside a medium
+finding.
+
+**The repair** is a `SocketGuard` that owns the descriptor for the rest of `Send()`. It
+deliberately keeps the **original** close point on the success path — `Close()` is called
+exactly where `platformClose(fd)` used to be, and is idempotent, so the destructor is a no-op
+after it has run. The only behaviour that changes is that a failing path now closes too.
+
+**Closure evidence.** 5 permanent regressions, one per mode, asserting the process's own
+open-descriptor delta is 0 **and** that the expected number of requests actually threw — so a
+mode that stopped failing would be reported rather than counted as a pass. Mutation-checked:
+emptying the guard's destructor fails exactly the four failure-path tests, each with the
+pre-repair count of 19, while the success-path test stays green. That asymmetry is what proves
+the mutation was targeted and that the success path's close comes from the retained explicit
+call rather than from the destructor.
+
+**Sanitizers.** ASan/UBSan/LSan clean, with `HttpClientHandler.cpp` and `HttpClient.cpp`
+compiled **from source** into the probe — `Net.Http` is a `STATIC` component, so a probe that
+merely linked `libsharp_runtime_net_http.a` would have measured an uninstrumented body. Stated
+plainly: **LSan does not cover this defect.** It tracks memory allocations, not file
+descriptors, so a clean LSan run says nothing about a leaked socket. The `/proc/self/fd` count
+is the instrument, and no clean sanitizer run is offered as a substitute for it. On a platform
+without `/proc/self/fd` the tests **skip** rather than pass — a missing instrument is not a
+passing measurement.
+
+**Source, ABI and layout consequences: none.** `SocketGuard` is file-local to
+`HttpClientHandler.cpp`; no header, signature, exported symbol or object layout changed.
+
+**Not remediated, and not claimed.** The other two thirds of SR-AUD-318 are untouched:
+`recvAll` and a `Content-Length`-bounded `recvExact` still accumulate without bound, and
+`std::stoul(chunkLine, nullptr, 16)` still accepts a chunk size up to `SIZE_MAX`. Bounding them
+is a **public-surface addition** — .NET's own knob is
+`HttpClient.MaxResponseContentBufferSize`, which this port has no equivalent of — so it is
+blocked ticket **#2071**, and SR-AUD-318 stays `confirmed` for that half.

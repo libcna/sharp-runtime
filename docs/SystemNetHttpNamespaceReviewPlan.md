@@ -559,3 +559,51 @@ alone.
 - It did not inspect `modules/net-http-headers`, although §5.2 shows the two modules share a
   root cause. Scoping to one component is what makes the ticket queue executable.
 - It did not implement anything. Ticket #2062 is the review.
+
+---
+
+## 20. Implementation record — corrections made while implementing
+
+Appended rather than folded into the sections above, so the difference between what the review
+predicted and what implementation measured stays visible.
+
+### 20.1 #2065 landed exactly as §4.7 specified, and the sanitizer prediction held
+
+The repair is a file-local `SocketGuard` in `HttpClientHandler.cpp`. Measured after:
+
+| Server response | Requests | Threw | Leaked before | Leaked after |
+|---|---:|---:|---:|---:|
+| well-formed | 20 | 0 | 0 | **0** |
+| garbled status line | 20 | 20 | 20 | **0** |
+| `Content-Length: abc` | 20 | 20 | 20 | **0** |
+| chunk size `ZZZ` | 20 | 20 | 20 | **0** |
+| body shorter than `Content-Length` | 20 | 20 | 20 | **0** |
+
+§12 predicted that **LSan would not cover this** and that the descriptor count would have to be
+the instrument. That prediction is **correct** and is recorded as a confirmed non-result rather
+than dropped: LSan tracks memory, not descriptors, and a clean LSan run says nothing about a
+leaked socket. ASan/UBSan/LSan were still run, with `HttpClientHandler.cpp` and `HttpClient.cpp`
+compiled **from source** into the probe — §12's warning about the `STATIC` component was
+load-bearing, since linking `libsharp_runtime_net_http.a` would have measured an uninstrumented
+body — and are clean in all five modes.
+
+**One design point the review did not state, decided while implementing.** The guard keeps the
+**original** close point on the success path: `Close()` is called exactly where
+`platformClose(fd)` used to be, and is idempotent, so the destructor is a no-op afterwards. The
+alternative — deleting the explicit call and letting the destructor close at the end of the
+block — would have held the socket open across response construction and cookie handling. That
+is not observably wrong, but it is a change nobody asked for, and the mutation check is sharper
+without it: emptying the destructor fails exactly the four failure-path tests, each with the
+pre-repair count of 19, while the success-path test stays green. An implementation that relied
+on the destructor for both would have failed all five and proved less.
+
+### 20.2 The test asserts the failure count, not only the descriptor delta
+
+Each of the five regressions asserts **both** that the descriptor delta is 0 **and** that the
+expected number of requests actually threw. Without the second assertion a mode that quietly
+stopped failing — because some future change made the malformed response acceptable — would
+report a passing descriptor count over a path that was never exercised. The success-path test
+carries the mirror assertion, `threw == 0`.
+
+The tests **skip** rather than fail where `/proc/self/fd` does not exist. A missing instrument
+is not a passing measurement, and this is Linux-only by construction.

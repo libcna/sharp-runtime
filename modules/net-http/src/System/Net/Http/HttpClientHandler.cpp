@@ -58,6 +58,42 @@ static void platformClose(SocketFd fd) { ::close(fd); }
 
 #if !defined(__EMSCRIPTEN__)
 
+// Owns the connected descriptor for the rest of Send().
+//
+// Before ticket #2065 the descriptor was a bare local and `platformClose(fd)` was reached at
+// exactly ONE point -- after the whole response body had been read -- so every throw between
+// connect and that line leaked it. All four of those throws are chosen by the REMOTE PEER: a
+// garbled status line, a malformed Content-Length, a malformed chunk size, and a body shorter
+// than the declared Content-Length. Measured, 20 requests in each of those four modes leaked
+// 20 descriptors, so a server answering ~1,024 requests with a garbled status line exhausts a
+// default RLIMIT_NOFILE. The success path leaked none.
+//
+// SR-AUD-318's leak half; see docs/SystemNetHttpNamespaceReviewPlan.md §4.7. Note that this
+// deliberately keeps the ORIGINAL close point on the success path -- Close() is still called
+// exactly where `platformClose(fd)` used to be -- so the only behaviour that changes is that
+// a failing path now closes too. `Close()` is idempotent, so the destructor is a no-op after
+// it has run.
+class SocketGuard {
+    SocketFd fd_;
+
+public:
+    explicit SocketGuard(SocketFd fd) noexcept : fd_(fd) {}
+    ~SocketGuard() { Close(); }
+
+    SocketGuard(const SocketGuard&)            = delete;
+    SocketGuard& operator=(const SocketGuard&) = delete;
+    SocketGuard(SocketGuard&&)                 = delete;
+    SocketGuard& operator=(SocketGuard&&)      = delete;
+
+    [[nodiscard]] SocketFd get() const noexcept { return fd_; }
+
+    void Close() noexcept {
+        if (fd_ == kInvalidSocket) return;
+        platformClose(fd_);
+        fd_ = kInvalidSocket;
+    }
+};
+
 static SocketFd connectToHost(const std::string& host, int port) {
     struct addrinfo hints{};
     hints.ai_family   = AF_UNSPEC;
@@ -213,7 +249,9 @@ std::shared_ptr<HttpResponseMessage> HttpClientHandler::Send(std::shared_ptr<Htt
         if (!cookieHeader.empty()) reqHeaders["Cookie"] = cookieHeader;
     }
 
-    SocketFd fd = connectToHost(purl.host, purl.port);
+    // The guard, not the control flow, owns this descriptor from here on (#2065).
+    SocketGuard socket(connectToHost(purl.host, purl.port));
+    const SocketFd fd = socket.get();
 
     // Build request body
     std::shared_ptr<HttpContent> content = request->getContentProperty();
@@ -337,7 +375,7 @@ std::shared_ptr<HttpResponseMessage> HttpClientHandler::Send(std::shared_ptr<Htt
         }
     }
 
-    platformClose(fd);
+    socket.Close();
 
     if (!bodyBytes.empty())
         resp->setContentProperty(

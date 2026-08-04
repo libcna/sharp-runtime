@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 #include <gtest/gtest.h>
 #include <any>
+#include <filesystem>
+#include <system_error>
 #include <thread>
 #include "System/Net/Http/HttpClient.hpp"
 #include "System/Net/IPEndPoint.hpp"
@@ -1163,4 +1165,121 @@ TEST(HttpClientHandlerCookieTests, UseCookies_False_DoesNotSendCapturedCookie) {
     serverThread.join();
 
     EXPECT_EQ(secondRequestRaw.find("Cookie:"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Ticket #2065 -- a post-connect throw must not leak the socket descriptor
+// (SR-AUD-318's leak half; docs/SystemNetHttpNamespaceReviewPlan.md §4.7).
+//
+// Before #2065 the connected descriptor was a bare local closed at exactly one
+// point, after the whole body had been read, so every throw in between leaked
+// it -- and all four of those throws are chosen by the REMOTE PEER. Measured
+// then: 20 requests, 20 leaked descriptors, in each of four modes.
+//
+// The instrument is the process's own open-descriptor count. LSan does NOT
+// cover this: it tracks memory, not descriptors, so a clean LSan run would say
+// nothing about it and must not be substituted. Where /proc/self/fd does not
+// exist (any non-Linux platform) the assertion is SKIPPED rather than failed --
+// a missing instrument is not a passing measurement.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+#if defined(__linux__)
+constexpr bool kDescriptorCountAvailable = true;
+SharpRuntime::intcs openDescriptorCount() {
+    SharpRuntime::intcs count = 0;
+    std::error_code ec;
+    for (auto it = std::filesystem::directory_iterator("/proc/self/fd", ec);
+         !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+        ++count;
+    }
+    return count;
+}
+#else
+constexpr bool kDescriptorCountAvailable = false;
+SharpRuntime::intcs openDescriptorCount() { return 0; }
+#endif
+
+// Runs `iterations` requests against a loopback server that always answers with
+// `reply`, and returns the change in this process's open-descriptor count.
+SharpRuntime::intcs descriptorDeltaOver(const std::string& reply,
+                                        int iterations,
+                                        int& threwOut) {
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    std::thread serverThread([&]() {
+        for (int i = 0; i < iterations; ++i) {
+            auto server = listener->Accept();
+            std::vector<SharpRuntime::bytecs> reqBuf(4096);
+            server->Receive(reqBuf);
+            server->Send(toBytes(reply));
+            server->Close();
+        }
+    });
+
+    HttpClient client;
+    const std::string url = "http://127.0.0.1:" + std::to_string(port) + "/";
+
+    // One warm-up request outside the measurement: the first call through this
+    // client resolves, allocates and may open descriptors that legitimately
+    // stay open, and counting those would make every mode look like a leak.
+    try { (void)client.Get(url); } catch (const System::Exception&) {}
+
+    const SharpRuntime::intcs before = openDescriptorCount();
+    threwOut = 0;
+    for (int i = 1; i < iterations; ++i) {
+        try {
+            (void)client.Get(url);
+        } catch (const System::Exception&) {
+            ++threwOut;
+        }
+    }
+    const SharpRuntime::intcs after = openDescriptorCount();
+
+    serverThread.join();
+    listener->Close();
+    return after - before;
+}
+
+} // namespace
+
+TEST(HttpClientDescriptorLeakTests, GarbledStatusLineDoesNotLeakADescriptor) {
+    if (!kDescriptorCountAvailable) GTEST_SKIP() << "/proc/self/fd is unavailable";
+    int threw = 0;
+    EXPECT_EQ(0, descriptorDeltaOver("GARBLED\r\n\r\n", 20, threw));
+    EXPECT_EQ(19, threw) << "every request must still fail -- otherwise nothing was measured";
+}
+
+TEST(HttpClientDescriptorLeakTests, MalformedContentLengthDoesNotLeakADescriptor) {
+    if (!kDescriptorCountAvailable) GTEST_SKIP() << "/proc/self/fd is unavailable";
+    int threw = 0;
+    EXPECT_EQ(0, descriptorDeltaOver(
+        "HTTP/1.1 200 OK\r\nContent-Length: abc\r\n\r\n", 20, threw));
+    EXPECT_EQ(19, threw);
+}
+
+TEST(HttpClientDescriptorLeakTests, MalformedChunkSizeDoesNotLeakADescriptor) {
+    if (!kDescriptorCountAvailable) GTEST_SKIP() << "/proc/self/fd is unavailable";
+    int threw = 0;
+    EXPECT_EQ(0, descriptorDeltaOver(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nZZZ\r\n", 20, threw));
+    EXPECT_EQ(19, threw);
+}
+
+TEST(HttpClientDescriptorLeakTests, TruncatedBodyDoesNotLeakADescriptor) {
+    if (!kDescriptorCountAvailable) GTEST_SKIP() << "/proc/self/fd is unavailable";
+    int threw = 0;
+    EXPECT_EQ(0, descriptorDeltaOver(
+        "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort", 20, threw));
+    EXPECT_EQ(19, threw);
+}
+
+TEST(HttpClientDescriptorLeakTests, TheSuccessPathStillClosesItsDescriptor) {
+    if (!kDescriptorCountAvailable) GTEST_SKIP() << "/proc/self/fd is unavailable";
+    int threw = 0;
+    EXPECT_EQ(0, descriptorDeltaOver(
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi", 20, threw));
+    EXPECT_EQ(0, threw) << "the success path must not throw -- otherwise the wrong path was measured";
 }
