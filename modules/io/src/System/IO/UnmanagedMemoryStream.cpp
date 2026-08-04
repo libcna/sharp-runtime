@@ -38,6 +38,14 @@ namespace System::IO {
         isOpen_   = true;
     }
 
+    // Ticket #2108 (SR-AUD-344, cause I-A). One door for the closed check, so the members that
+    // consult it cannot drift apart again. The message matches the one Read/Write/SetLength
+    // already raise, so a caller cannot tell which member rejected it -- which is the point.
+    void UnmanagedMemoryStream::EnsureNotClosed() const
+    {
+        if (!isOpen_) throw System::ObjectDisposedException("Cannot access a closed Stream.");
+    }
+
     namespace {
         void validateBufferArguments(const bytecs* buffer, intcs offset, intcs count)
         {
@@ -58,7 +66,7 @@ namespace System::IO {
     // read-only or write-only.
     intcs UnmanagedMemoryStream::Read(bytecs buffer[], intcs offset, intcs count)
     {
-        if (!isOpen_) throw System::ObjectDisposedException("Cannot access a closed Stream.");
+        EnsureNotClosed();
         if (!getCanReadProperty()) throw System::NotSupportedException("Stream does not support reading.");
         validateBufferArguments(buffer, offset, count);
 
@@ -73,7 +81,7 @@ namespace System::IO {
 
     void UnmanagedMemoryStream::Write(const bytecs buffer[], intcs offset, intcs count)
     {
-        if (!isOpen_) throw System::ObjectDisposedException("Cannot access a closed Stream.");
+        EnsureNotClosed();
         if (!getCanWriteProperty()) throw System::NotSupportedException("Stream does not support writing.");
         validateBufferArguments(buffer, offset, count);
         if (count == 0) return;
@@ -105,14 +113,20 @@ namespace System::IO {
 
     void UnmanagedMemoryStream::setPositionProperty(intcs value)
     {
+        // #2108: before this, a closed stream ACCEPTED a position mutation outright.
+        EnsureNotClosed();
         if (value < 0) throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
         position_ = value;
     }
 
     void UnmanagedMemoryStream::SetLength(intcs value)
     {
+        // #2108: the closed check moves AHEAD of the domain check. SetLength already threw for a
+        // closed stream, but only after rejecting a negative value, so SetLength(-1) on a CLOSED
+        // stream reported the argument rather than the disposal -- the opposite order from
+        // Read/Write and from the .NET rule this file's own note transcribes.
+        EnsureNotClosed();
         if (value < 0) throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
-        if (!isOpen_) throw System::ObjectDisposedException("Cannot access a closed Stream.");
         if (!getCanWriteProperty()) throw System::NotSupportedException("Stream does not support writing.");
         if (value > capacity_) {
             throw IOException("Unable to expand length of this stream beyond its capacity.");

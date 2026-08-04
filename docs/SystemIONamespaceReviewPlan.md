@@ -697,3 +697,168 @@ fully usable after repeated rejections.
 **No public signature, member, base-class, virtual, vtable, object-layout or exception-specification
 change.** The only header change is doc-comments. No component edge changes; the graph stays at
 **41 modules / 91 edges**.
+
+---
+
+## 21. #2098 — the measured layout decision and its approval package
+
+**Nothing in this section is implemented.** It exists because §11 declared a layout gate without
+measuring it, and the measurement changes the answer. Evidence:
+`build-probe/2098_probe1_layout.cpp` (log `2098_probe1_layout.log`) and
+`build-probe/2098_probe2_traits.cpp` (log `2098_probe2_traits.log`), both measured at `88224c0`.
+
+### 21.1 Three premises in §7.1, §11 and the ticket are WRONG, and each narrows the decision
+
+1. **"`TextWriter` has no `Close()` at all."** It has one:
+   `TextWriter.hpp:107`, `virtual void Close() {}` — exactly like `TextReader.hpp:37`. **Both**
+   base classes already expose a virtual, non-pure `Close()`. So no base needs a new virtual, and
+   **overriding `Close()` in a leaf adds no vtable slot**. What the bases lack is *state*, not the
+   *hook*.
+2. **"Every option is layout-affecting except (c)."** Measured, option (a) is layout-**neutral**
+   for **four of the five** types, because the bool lands in existing tail padding.
+3. **"a `bool` in each of five leaves."** Only **four** leaves would need one.
+   **`UnmanagedMemoryStream` already has `isOpen_`**, `Close()` already clears it, and
+   `getCanRead`/`getCanWrite`/`getCanSeek` already consult it. Its repair is **pure logic with
+   zero layout impact** — which is why §21.6 splits it out.
+
+### 21.2 Current layout, measured
+
+| Type | `sizeof` | `alignof` | Fields, in declaration order |
+|---|---:|---:|---|
+| `TextReader` | **8** | 8 | *none* — vtable pointer only |
+| `TextWriter` | **8** | 8 | *none* — vtable pointer only |
+| `Stream` | **8** | 8 | *none* — vtable pointer only |
+| `StringReader` | **48** | 8 | `std::string s_` (32); `intcs pos_` (4) |
+| `StringWriter` | **384** | 8 | `std::ostringstream buf_` (376) |
+| `StreamReader` | **24** | 8 | `Stream* stream_`; `bool leaveOpen_`; `bool ownsStream_`; `bool hasPeeked_`; `bytecs peeked_` |
+| `StreamWriter` | **24** | 8 | `Stream* stream_`; `bool leaveOpen_`; `bool ownsStream_` |
+| `UnmanagedMemoryStream` | **40** | 8 | `bytecs* buffer_`; `intcs length_`; `intcs capacity_`; `intcs position_`; `FileAccess access_`; **`bool isOpen_`** |
+
+Every field above is **private**. `TextReader`/`TextWriter`/`Stream` declare no data at all;
+`UnmanagedMemoryStream` has a `protected` default constructor and `Initialize`.
+
+**Spare tail padding today:** `StreamReader` uses 12 of 24 bytes (**12 spare**); `StreamWriter`
+uses 10 of 24 (**14 spare**); `StringReader` uses 44 of 48 (**4 spare**); `StringWriter` uses all
+384 (**0 spare**).
+
+### 21.3 The three options, measured
+
+| Type | Now | **(a)** bool per leaf | **(b)** bool per base | **(c)** reuse existing state |
+|---|---:|---:|---:|---|
+| `TextReader` (base) | 8 | **8** | **16** | 8 |
+| `TextWriter` (base) | 8 | **8** | **16** | 8 |
+| `StringReader` | 48 | **48** | **56** | 48 |
+| `StringWriter` | 384 | **392** | **392** | 384 |
+| `StreamReader` | 24 | **24** | **32** | 24 |
+| `StreamWriter` | 24 | **24** | **32** | 24 |
+| `UnmanagedMemoryStream` | 40 | **40** (no new field) | 40 | 40 |
+| **Types whose layout changes** | — | **1** | **6** | **0** |
+
+**Option (a) costs exactly one type eight bytes: `StringWriter`, 384 → 392 (+2.1%).** Option (b)
+changes six, including both base classes — which changes the layout of *every* type derived from
+them, in this module and in any consumer. Option (c) remains semantically wrong for the reason
+§11 gives: it conflates "closed" with "at end", and for `StreamReader`/`StreamWriter` it would
+mean nulling a `Stream*` that `leaveOpen` semantics still need.
+
+### 21.4 Consequences, by category
+
+| Category | Option (a), the recommendation |
+|---|---|
+| **Source** | Narrows: six members of `StringReader`, one of `StringWriter`, the read/write surface of both stream wrappers, and six of `UnmanagedMemoryStream` begin throwing `ObjectDisposedException` after `Close()`. No signature, name or overload set changes. |
+| **Object layout** | **One type only**: `StringWriter` 384 → 392. The other four absorb the flag into existing padding, and `UnmanagedMemoryStream` needs no new field. |
+| **ABI / mangled symbols** | **No mangled name changes.** Adding a private data member never alters a mangled symbol. But a `sizeof` change is still a **recompilation requirement**: a translation unit compiled against the old header and linked against a new one is an ODR violation with no diagnostic. sharp-runtime ships as a **static library built from source**, so this forces a full consumer rebuild rather than breaking a distributed binary — a real cost, and not the same cost as a shared-library ABI break. **A private field is not automatically ABI-neutral, and this document does not claim it is.** |
+| **vtable** | **Unchanged.** `TextReader::Close()` and `TextWriter::Close()` both already exist and are virtual and non-pure, so overriding them adds no slot. Adding any *new* virtual (a `getIsClosedProperty`, say) **would** add one, and is therefore not proposed. |
+| **`noexcept`** | Unchanged. No member involved is declared `noexcept`; members that begin throwing were already permitted to throw. |
+| **Copy / move** | Unchanged by the flag itself — see §21.5 for a pre-existing hazard it does not create. |
+| **Thread safety** | Unchanged. None of these types is thread-safe today and none becomes so. |
+| **Performance / allocation** | One predictable branch per call; no allocation. `StringWriter` grows one cache-line-irrelevant 8 bytes on a 384-byte object. |
+| **Migration** | `docs/Migration-IOLifecycleAndArgumentStrictness.md` (§12), plus a full consumer rebuild. |
+
+### 21.5 A pre-existing hazard found while measuring, recorded and NOT ticketed here
+
+`StreamReader` and `StreamWriter` are **implicitly copy-constructible and copy-assignable**
+(measured, `2098_probe2_traits.log`) while holding a raw `Stream* stream_` **and** an
+`ownsStream_` flag. Copying one produces two objects that both believe they own the same stream.
+This is a **CCF-019-shaped** defect, it is **not created by #2098**, and it is **not in #2098's
+scope**. It is recorded here so the next reader does not have to rediscover it. `TextWriter` and
+`StringWriter` are already non-copy-constructible, so the family is not even self-consistent.
+
+### 21.6 The compatible split — real, not invented
+
+**`UnmanagedMemoryStream` (SR-AUD-344) is independently separable and needs no layout decision at
+all.** It is a distinct finding over a distinct type; the bundling of SR-AUD-337, 343 and 344
+into one ticket was this review's choice, not a property of the defects. Measured, its flag,
+its `Close()` and three of its capability properties **already exist and already work**; six
+members simply never consult them:
+
+| Member | Today, after `Close()` | Should |
+|---|---|---|
+| `getLengthProperty()` | returns `4` | throw `ObjectDisposedException` |
+| `getCapacityProperty()` | returns the capacity | throw |
+| `getPositionProperty()` | returns the position | throw |
+| `setPositionProperty()` | **succeeds** | throw |
+| `getPositionPointerProperty()` | **hands out a raw pointer into the buffer** | throw |
+| `Flush()` | silently succeeds | throw |
+| `SetLength()` | throws, but checks `value < 0` **before** `isOpen_` | check `isOpen_` first |
+
+`Read`, `Write` and `WriteByte` are **already correct**. And this is decidable **without the
+reference tree**: `UnmanagedMemoryStream.cpp`'s own transcribed comment already records that
+.NET's `EnsureNotClosed()` is checked **first** and throws
+`ObjectDisposedException("Cannot access a closed Stream.")` — repository-contained evidence, not
+a guess.
+
+**Split as ticket #2108**, compatible, zero layout. **#2098 keeps SR-AUD-337 and SR-AUD-343** —
+the four text wrappers — and stays gated on the approval below.
+
+### 21.7 Rollback
+
+Option (a) is one private field per leaf plus guard clauses. Reverting is a clean revert of one
+commit; no data format, no persisted state and no serialized layout is involved.
+
+### 21.8 The exact approval sentence
+
+> **Approval IO-1.** Approve enforcing the closed state in `System::IO::StringReader`,
+> `StringWriter`, `StreamReader` and `StreamWriter` by adding one **private `bool`** to each of
+> those four leaf classes — **not** to `TextReader` or `TextWriter` — so that every public member
+> depending on the closed resource throws `ObjectDisposedException` after `Close()`, accepting
+> that **`sizeof(StringWriter)` grows from 384 to 392 bytes while the other three are unchanged**,
+> that every consumer must be **fully recompiled** because a `sizeof` change across a
+> stale-header boundary is an undiagnosed ODR violation, and that code relying on `leaveOpen` to
+> keep the *wrapper* usable after `Close()` stops working. **No vtable, mangled-symbol,
+> signature or `noexcept` change is involved.** Ticket **#2098**.
+>
+> *(`UnmanagedMemoryStream`/SR-AUD-344 is **excluded** and needs no approval — it already has the
+> state and is split out as **#2108**. Answer separately if you prefer option (b), a `bool` in
+> `TextReader`/`TextWriter`, which changes **six** types' layout including both bases and every
+> type derived from them, in exchange for one flag definition instead of four.)*
+
+**Recommendation: option (a).** It is the measured minimum — one type's layout instead of six —
+and the "one flag in one place" appeal of option (b) is worth less than the layout blast radius
+of changing two base classes that currently have no data members at all.
+
+### 21.9 #2108 landed — the compatible half of #2098
+
+Implemented exactly as §21.6 scoped it, with **zero object-layout change** (`sizeof` stays 40)
+and therefore no approval. Six members gained the existing closed check, `SetLength`'s check
+order was corrected to match `Read`/`Write`, and the three members that were already correct were
+routed through the same `EnsureNotClosed()` so they cannot drift apart.
+
+**+9 permanent regressions** (`SharpRuntimeTests_IO` 626 → **635**), including **#2098's layout
+pin, landed early**. Landing the pin while #2098 is still blocked is what makes Approval IO-1
+auditable: the approval sentence quotes `StringWriter` 384 → 392 and claims the other three are
+free, and the pin proves the "before" half of that claim.
+
+**The layout pin was itself mutation-checked**, which matters more than usual because it is
+evidence for an unapproved decision. Adding a `bool` to the `TextWriter` **base** — option (b) —
+made it fail with exactly the numbers §21.3 predicts: `TextWriter` **8 → 16**, `StreamWriter`
+**24 → 32**, `StringWriter` **384 → 392**. Option (b)'s blast radius is therefore not an
+estimate in this document; it is a measured, reproducible test failure.
+
+**Three implementation mutations**, all against the final source, control clean, restores
+byte-identical: the guard neutered → **5** tests; `SetLength`'s original check order → **1**; the
+raw-pointer getter unguarded → **2**.
+
+**ASan + UBSan + LSan clean over 22,000 rejections and 22,000 acceptances**, control proven live,
+`UnmanagedMemoryStream.cpp` compiled into the instrumented translation unit.
+
+**#2098 is now `blocked`**, scoped to SR-AUD-337 and SR-AUD-343 only, pending Approval IO-1.

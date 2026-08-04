@@ -25,15 +25,25 @@
 #include <string>
 #include <vector>
 
+#include <sstream>
+
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/IO/Directory.hpp"
 #include "System/IO/DirectoryInfo.hpp"
 #include "System/IO/File.hpp"
 #include "System/IO/FileInfo.hpp"
 #include "System/IO/IOException.hpp"
 #include "System/IO/RandomAccess.hpp"
+#include "System/IO/StreamReader.hpp"
+#include "System/IO/StreamWriter.hpp"
+#include "System/IO/StringReader.hpp"
+#include "System/IO/StringWriter.hpp"
+#include "System/IO/TextReader.hpp"
+#include "System/IO/TextWriter.hpp"
+#include "System/IO/UnmanagedMemoryStream.hpp"
 
 using namespace System::IO;
 
@@ -454,4 +464,193 @@ TEST_F(RandomAccessFixture, AWriteToAReadOnlyDescriptorFailsWithItsNativeReason)
     SharpRuntime::bytecs back[4] = {};
     EXPECT_EQ(RandomAccess::Read(ro, back, 4, 0), 4);
     ::close(ro);
+}
+
+// ===========================================================================
+// #2108 / SR-AUD-344 — UnmanagedMemoryStream records being closed and must enforce it
+//
+// Split out of #2098 by measurement: this type ALREADY has `bool isOpen_`, Close() already
+// clears it, and getCanRead/getCanWrite/getCanSeek already consult it, so the repair is pure
+// logic with ZERO object-layout change and needs no approval. The four text wrappers of #2098
+// are a different matter and stay blocked on Approval IO-1.
+// ===========================================================================
+
+namespace {
+
+/// A closed stream over a live buffer. The buffer outlives the stream in every test below, so a
+/// failure here is about the stream's state, never about dangling memory.
+class ClosedUnmanagedStream {
+public:
+    SharpRuntime::bytecs backing[4] = {1, 2, 3, 4};
+    UnmanagedMemoryStream stream{backing, 4};
+    ClosedUnmanagedStream() { stream.Close(); }
+};
+
+} // namespace
+
+TEST(UnmanagedMemoryStreamClosedStateTests, EverySixMemberThatIgnoredTheClosedStateNowThrows) {
+    // Measured before #2108 (build-probe/2098_probe2_traits.log): getLength returned 4,
+    // setPosition(2) SUCCEEDED and getPosition then read back 2, while Read() already threw.
+    ClosedUnmanagedStream c;
+    EXPECT_THROW((void)c.stream.getLengthProperty(), System::ObjectDisposedException);
+    EXPECT_THROW((void)c.stream.getCapacityProperty(), System::ObjectDisposedException);
+    EXPECT_THROW((void)c.stream.getPositionProperty(), System::ObjectDisposedException);
+    EXPECT_THROW(c.stream.setPositionProperty(2), System::ObjectDisposedException);
+    EXPECT_THROW(c.stream.Flush(), System::ObjectDisposedException);
+    // The sharpest one: this handed out a live pointer into the buffer of a CLOSED stream.
+    EXPECT_THROW((void)c.stream.getPositionPointerProperty(), System::ObjectDisposedException);
+}
+
+TEST(UnmanagedMemoryStreamClosedStateTests, TheMembersThatWereAlreadyCorrectStayCorrect) {
+    ClosedUnmanagedStream c;
+    SharpRuntime::bytecs out[2] = {};
+    EXPECT_THROW((void)c.stream.Read(out, 0, 2), System::ObjectDisposedException);
+    EXPECT_THROW(c.stream.Write(out, 0, 2), System::ObjectDisposedException);
+    EXPECT_THROW(c.stream.WriteByte(7), System::ObjectDisposedException);
+    EXPECT_THROW(c.stream.SetLength(2), System::ObjectDisposedException);
+    // The capability properties are the one closed-state surface that must NOT throw: they
+    // answer "can I", and the answer for a closed stream is a plain false.
+    EXPECT_FALSE(c.stream.getCanReadProperty());
+    EXPECT_FALSE(c.stream.getCanWriteProperty());
+    EXPECT_FALSE(c.stream.getCanSeekProperty());
+}
+
+TEST(UnmanagedMemoryStreamClosedStateTests, TheClosedCheckPRECEDESTheArgumentCheck) {
+    // SetLength already threw for a closed stream -- but only AFTER rejecting a negative value,
+    // so SetLength(-1) on a CLOSED stream reported the argument rather than the disposal. That
+    // is the opposite order from Read/Write and from the .NET rule this module's own transcribed
+    // note records. A bare EXPECT_THROW would not have caught it; the TYPE is what discriminates.
+    ClosedUnmanagedStream c;
+    EXPECT_THROW(c.stream.SetLength(-1), System::ObjectDisposedException);
+    EXPECT_THROW(c.stream.setPositionProperty(-1), System::ObjectDisposedException);
+
+    // On an OPEN stream the argument check is still reached and still reports the argument.
+    SharpRuntime::bytecs backing[4] = {1, 2, 3, 4};
+    UnmanagedMemoryStream open(backing, 4, 4, FileAccess::ReadWrite);
+    EXPECT_THROW(open.SetLength(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(open.setPositionProperty(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(UnmanagedMemoryStreamClosedStateTests, DoubleCloseIsSafeAndAnOpenStreamIsUnaffected) {
+    SharpRuntime::bytecs backing[4] = {10, 20, 30, 40};
+    UnmanagedMemoryStream s(backing, 4, 4, FileAccess::ReadWrite);
+
+    // Byte-identical behaviour while open.
+    EXPECT_EQ(s.getLengthProperty(), 4);
+    EXPECT_EQ(s.getCapacityProperty(), 4);
+    EXPECT_EQ(s.getPositionProperty(), 0);
+    EXPECT_EQ(s.getPositionPointerProperty(), backing);
+    EXPECT_NO_THROW(s.Flush());
+    s.setPositionProperty(2);
+    EXPECT_EQ(s.getPositionProperty(), 2);
+    EXPECT_EQ(s.getPositionPointerProperty(), backing + 2);
+    s.setPositionProperty(0);
+    SharpRuntime::bytecs out[4] = {};
+    EXPECT_EQ(s.Read(out, 0, 4), 4);
+    EXPECT_EQ(out[0], 10);
+    EXPECT_EQ(out[3], 40);
+
+    EXPECT_NO_THROW(s.Close());
+    EXPECT_NO_THROW(s.Close()) << "double Close() must stay safe";
+    EXPECT_THROW((void)s.getLengthProperty(), System::ObjectDisposedException);
+}
+
+TEST(UnmanagedMemoryStreamClosedStateTests, EveryRejectionCarriesTheSameClosedStreamMessage) {
+    // One door, one message: a caller must not be able to tell which member rejected it.
+    ClosedUnmanagedStream c;
+    const std::string expected = "Cannot access a closed Stream.";
+    auto messageOf = [](auto&& call) {
+        try { call(); } catch (const System::ObjectDisposedException& e) { return std::string(e.what()); }
+        return std::string("<did not throw ObjectDisposedException>");
+    };
+    EXPECT_NE(messageOf([&] { (void)c.stream.getLengthProperty(); }).find(expected), std::string::npos);
+    EXPECT_NE(messageOf([&] { (void)c.stream.getCapacityProperty(); }).find(expected), std::string::npos);
+    EXPECT_NE(messageOf([&] { (void)c.stream.getPositionProperty(); }).find(expected), std::string::npos);
+    EXPECT_NE(messageOf([&] { (void)c.stream.getPositionPointerProperty(); }).find(expected), std::string::npos);
+    EXPECT_NE(messageOf([&] { c.stream.Flush(); }).find(expected), std::string::npos);
+}
+
+// ===========================================================================
+// #2098's layout PIN — landed early, by #2108
+//
+// #2098's acceptance criteria require "a layout pin covering all five types plus the two base
+// classes". Landing it NOW, while #2098 is still blocked on Approval IO-1, is what makes that
+// approval's cost auditable: the approval sentence quotes StringWriter 384 -> 392 and says the
+// other three are unchanged, and this pin is what proves the "before" half of that claim.
+//
+// It deliberately pins RELATIONSHIPS and a probe-struct comparison rather than literal byte
+// counts wherever it can, per docs/SystemNetWebSocketsNamespaceReviewPlan.md §11.
+// ===========================================================================
+
+namespace {
+
+/// Shadow shapes matching the real classes field-for-field. If a real class gains, loses or
+/// reorders a member, its shadow stops matching and the pin fails -- which is the point.
+struct ShadowTextReader { virtual ~ShadowTextReader() = default; virtual SharpRuntime::intcs Read() { return -1; } };
+struct ShadowTextWriter { virtual ~ShadowTextWriter() = default; virtual void Write(const std::string&) {} };
+struct ShadowStringReader : ShadowTextReader { std::string s_; SharpRuntime::intcs pos_ = 0; };
+struct ShadowStreamReader : ShadowTextReader {
+    Stream* stream_; bool leaveOpen_; bool ownsStream_; bool hasPeeked_; SharpRuntime::bytecs peeked_;
+};
+struct ShadowStreamWriter : ShadowTextWriter { Stream* stream_; bool leaveOpen_; bool ownsStream_; };
+struct ShadowUnmanaged {
+    virtual ~ShadowUnmanaged() = default;
+    SharpRuntime::bytecs* buffer_; SharpRuntime::intcs length_; SharpRuntime::intcs capacity_;
+    SharpRuntime::intcs position_; FileAccess access_; bool isOpen_;
+};
+
+} // namespace
+
+TEST(IoLayoutPinTests, TheBaseClassesCarryNoDataAndAreVtablePointerOnly) {
+    // THE load-bearing fact behind Approval IO-1's recommendation: TextReader and TextWriter have
+    // NO data members, so option (b) -- a bool in the base -- would double them, 8 -> 16, and
+    // change every derived type at once. If this ever stops holding, that trade-off changed.
+    EXPECT_EQ(sizeof(TextReader), sizeof(void*));
+    EXPECT_EQ(sizeof(TextWriter), sizeof(void*));
+    EXPECT_EQ(sizeof(Stream), sizeof(void*));
+    EXPECT_EQ(sizeof(TextReader), sizeof(ShadowTextReader));
+    EXPECT_EQ(sizeof(TextWriter), sizeof(ShadowTextWriter));
+}
+
+TEST(IoLayoutPinTests, TheFiveWrapperLayoutsAreExactlyWhatApprovalIO1WasCostedAgainst) {
+    EXPECT_EQ(sizeof(StringReader), sizeof(ShadowStringReader));
+    EXPECT_EQ(sizeof(StreamReader), sizeof(ShadowStreamReader));
+    EXPECT_EQ(sizeof(StreamWriter), sizeof(ShadowStreamWriter));
+    EXPECT_EQ(sizeof(UnmanagedMemoryStream), sizeof(ShadowUnmanaged));
+    // StringWriter is the ONE type Approval IO-1 says will grow. Its size is dominated by
+    // std::ostringstream, which is a standard-library implementation detail, so it is pinned as
+    // a relationship rather than a literal: it is the base's vtable pointer plus the stream.
+    EXPECT_EQ(sizeof(StringWriter), sizeof(void*) + sizeof(std::ostringstream));
+    EXPECT_EQ(alignof(StringWriter), alignof(std::ostringstream));
+}
+
+TEST(IoLayoutPinTests, ThreeOfTheFourTextWrappersHaveSPARETAILPADDINGForApprovalIO1sFlag) {
+    // Approval IO-1 claims a private bool costs StringReader, StreamReader and StreamWriter
+    // NOTHING because it lands in existing tail padding. This asserts the padding is really
+    // there, by measuring the shadow WITH the flag added.
+    struct WithFlagStringReader : ShadowTextReader { std::string s_; SharpRuntime::intcs pos_ = 0; bool closed_ = false; };
+    struct WithFlagStreamReader : ShadowTextReader {
+        Stream* stream_; bool leaveOpen_; bool ownsStream_; bool hasPeeked_;
+        SharpRuntime::bytecs peeked_; bool closed_ = false;
+    };
+    struct WithFlagStreamWriter : ShadowTextWriter { Stream* stream_; bool leaveOpen_; bool ownsStream_; bool closed_ = false; };
+    EXPECT_EQ(sizeof(WithFlagStringReader), sizeof(ShadowStringReader))
+        << "StringReader's flag was costed as free";
+    EXPECT_EQ(sizeof(WithFlagStreamReader), sizeof(ShadowStreamReader))
+        << "StreamReader's flag was costed as free";
+    EXPECT_EQ(sizeof(WithFlagStreamWriter), sizeof(ShadowStreamWriter))
+        << "StreamWriter's flag was costed as free";
+}
+
+TEST(IoLayoutPinTests, BothBaseClassesAlreadyExposeAVirtualCloseSoNoVtableSlotIsNeeded) {
+    // plan §7.1 and #2098's notes both said "TextWriter has no Close() at all". It does. This
+    // pin is why that premise cannot silently come back: taking the address of the member proves
+    // it exists, and calling it through a base reference proves it is virtual and non-pure.
+    void (TextReader::*readerClose)() = &TextReader::Close;
+    void (TextWriter::*writerClose)() = &TextWriter::Close;
+    EXPECT_NE(readerClose, nullptr);
+    EXPECT_NE(writerClose, nullptr);
+    StringReader reader("x");
+    TextReader& asBase = reader;
+    EXPECT_NO_THROW(asBase.Close()) << "TextReader::Close() is a non-pure virtual no-op";
 }
