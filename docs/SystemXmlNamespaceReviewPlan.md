@@ -793,3 +793,58 @@ ordinary ticket numbers and **no `SR-AUD-*` identifier; numbering stays frozen a
 enforced"* — narrowing them is a settings-semantics decision, not this finding. A PI target of
 `xml` is accepted, and `XmlReader.cpp` documents a **deliberate** handling for that exact
 target, so rejecting it would contradict a stated in-module contract.
+
+### 20.5 #2078 — the class already had a correct terminal state one function away
+
+§4.4 predicted the shape and the repair; measurement widened both.
+`build-probe/2078_probe1_reader_close.cpp` (log `2078_probe1_before.log`) shows the closed
+state was destroyed by **three** members, not one — `Read()`, and
+`ReadStartElement()`/`ReadElementContentAsString()`, which advance through it — while
+`MoveToElement()`, `MoveToNextAttribute()` and `GetAttribute()` all kept answering from a
+closed reader, and the four value accessors kept reporting the last node.
+
+| Member, after `Close()` | Before | After |
+|---|---|---|
+| `Read()` | `true`, advanced, state → `Interactive` | `false`, parked, state stays `Closed` |
+| `ReadStartElement()` / `ReadEndElement()` | advanced, state → `Interactive` | `XmlException`, state stays `Closed` |
+| `ReadElementContentAsString()` | `"t"`, advanced, state → `Interactive` | `""`, state stays `Closed` |
+| `MoveToElement()` / `MoveToNextAttribute()` | `true` | `false` |
+| `GetAttribute("a")` | `"1"` | `""` |
+| `getNodeType` / `Name` / `Value` / `IsEmptyElement` | the last node | `None` / `""` / `""` / `false` |
+
+**The corrected premise this ticket adds, and the reason it is small.** §4.4 justified the
+selected behaviour by self-consistency with `getReadStateProperty()`. Measurement supplies
+something stronger: **this class already implements one terminal read state correctly.** A
+reader driven past its last event reports `EndOfFile`, returns `false` from every further
+`Read()`, and never leaves that state. `Closed` is now literally the same shape. That is the
+same discipline as #2074 (`LoadXml` already parsed first) and #2076 (`VerifyName` already
+existed) — the third ticket in this namespace whose repair was already present in the module
+and simply not reached from the defective door.
+
+Three consequences follow, and each is what keeps the ticket compatible:
+
+- **No new state field.** `ReadState::Closed` *is* the flag, and `Close()` is its only
+  writer — so nothing was added even to the opaque `XmlReaderState`.
+- **No invented accessor values.** Every accessor routes the closed case into the early
+  return it already had for "there is no current node".
+- **No new exception identity.** `ReadStartElement`/`ReadEndElement` throw the same
+  `XmlException` they already threw for any other wrong position.
+
+**+12 permanent regressions, add-only — not one existing test was updated.**
+`SharpRuntimeTests_Xml` 427 → 439.
+
+**Three mutations, each reverted from an exact backup**, with the build output unsuppressed
+after §20.4's stale-binary lesson: R1 (`Read()` unguarded again) → 5 tests; R2
+(accessors/navigation ignore the closed state) → 7; R3 (`isClosed` always false) → 10. The two
+**control** tests — `EndOfFile` unchanged, and reading unaffected until `Close()` — fail under
+**none** of the three, which is what proves the narrowing is confined to the closed state
+rather than merely correlated with it.
+
+**Sanitizers: §13's "no" holds, with the reason stated.** The repair adds no allocation, no
+arithmetic and no ownership change, and every guard strictly *shrinks* the set of reachable
+event indices.
+
+**CCF-022 is still not minted.** Cause X-D now has two remediated members in this module
+(SR-AUD-348 here, SR-AUD-349's second clause in #2076) and three open in `modules/io`
+(SR-AUD-337, 343, 344). §17's rule is unchanged: mint it when `modules/io` is reviewed, citing
+all five, and not from this module's evidence alone.

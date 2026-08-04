@@ -131,12 +131,40 @@ XmlReader::XmlReader(std::unique_ptr<XmlReaderState> s) : state_(std::move(s)) {
 XmlReader::~XmlReader() = default;
 
 // ---------------------------------------------------------------------------
+// Closed-state enforcement (ticket #2078, SR-AUD-348)
+//
+// Close() records ReadState::Closed and nothing else, so the state was a field rather
+// than a precondition: measured, Read() had no guard AND assigned ReadState::Interactive
+// on its way out, so the closed state did not survive a single call. Three members
+// destroyed it -- Read(), and ReadStartElement()/ReadEndElement()/ReadElementContentAs-
+// String(), which advance through Read() -- while MoveToElement(), MoveToNextAttribute()
+// and GetAttribute() kept answering from a closed reader.
+//
+// The repair needs no new state and no new policy: this class ALREADY implements one
+// terminal read state correctly. Measured on the same document, a reader driven past its
+// last event reports EndOfFile, returns false from every further Read(), and never leaves
+// that state. Closed is now the same shape, and every accessor reuses the class's own
+// pre-existing "there is no current node" answer (None / "" / false) rather than a value
+// invented for this ticket.
+// ---------------------------------------------------------------------------
+
+/// Terminally closed. Close() is the only writer of ReadState::Closed, and a null state_
+/// already reports Closed from getReadStateProperty(), so both spellings agree here.
+static bool isClosed(const XmlReaderState* s) {
+    return !s || s->readState == ReadState::Closed;
+}
+
+/// True when the cursor is parked on a real event. A closed reader is on no node.
+static bool hasCurrentNode(const XmlReaderState* s) {
+    return !isClosed(s) && s->pos >= 0 && s->pos < static_cast<int>(s->events.size());
+}
+
+// ---------------------------------------------------------------------------
 // Property accessors
 // ---------------------------------------------------------------------------
 
 XmlNodeType XmlReader::getNodeTypeProperty() const {
-    if (!state_ || state_->pos < 0 ||
-        state_->pos >= static_cast<int>(state_->events.size()))
+    if (!hasCurrentNode(state_.get()))
         return XmlNodeType::None;
     if (state_->attrIndex >= 0)
         return XmlNodeType::Attribute;
@@ -144,8 +172,7 @@ XmlNodeType XmlReader::getNodeTypeProperty() const {
 }
 
 std::string XmlReader::getNameProperty() const {
-    if (!state_ || state_->pos < 0 ||
-        state_->pos >= static_cast<int>(state_->events.size()))
+    if (!hasCurrentNode(state_.get()))
         return {};
     const auto& ev = state_->events[static_cast<size_t>(state_->pos)];
     if (state_->attrIndex >= 0 &&
@@ -155,8 +182,7 @@ std::string XmlReader::getNameProperty() const {
 }
 
 std::string XmlReader::getValueProperty() const {
-    if (!state_ || state_->pos < 0 ||
-        state_->pos >= static_cast<int>(state_->events.size()))
+    if (!hasCurrentNode(state_.get()))
         return {};
     const auto& ev = state_->events[static_cast<size_t>(state_->pos)];
     if (state_->attrIndex >= 0 &&
@@ -166,8 +192,7 @@ std::string XmlReader::getValueProperty() const {
 }
 
 bool XmlReader::getIsEmptyElementProperty() const {
-    if (!state_ || state_->pos < 0 ||
-        state_->pos >= static_cast<int>(state_->events.size()))
+    if (!hasCurrentNode(state_.get()))
         return false;
     return state_->events[static_cast<size_t>(state_->pos)].isEmptyElement;
 }
@@ -181,7 +206,10 @@ ReadState XmlReader::getReadStateProperty() const {
 // ---------------------------------------------------------------------------
 
 bool XmlReader::Read() {
-    if (!state_) return false;
+    // The whole of SR-AUD-348: without this guard the cursor advanced AND the next line
+    // but one overwrote ReadState::Closed with ReadState::Interactive, so a closed reader
+    // both kept traversing and stopped reporting itself as closed.
+    if (isClosed(state_.get())) return false;
     state_->attrIndex = -1;
     ++state_->pos;
     if (state_->pos >= static_cast<int>(state_->events.size())) {
@@ -193,16 +221,14 @@ bool XmlReader::Read() {
 }
 
 bool XmlReader::MoveToElement() {
-    if (!state_ || state_->pos < 0 ||
-        state_->pos >= static_cast<int>(state_->events.size()))
+    if (!hasCurrentNode(state_.get()))
         return false;
     state_->attrIndex = -1;
     return state_->events[static_cast<size_t>(state_->pos)].type == XmlNodeType::Element;
 }
 
 bool XmlReader::MoveToNextAttribute() {
-    if (!state_ || state_->pos < 0 ||
-        state_->pos >= static_cast<int>(state_->events.size()))
+    if (!hasCurrentNode(state_.get()))
         return false;
     const auto& ev = state_->events[static_cast<size_t>(state_->pos)];
     if (ev.type != XmlNodeType::Element) return false;
@@ -213,8 +239,7 @@ bool XmlReader::MoveToNextAttribute() {
 }
 
 std::string XmlReader::GetAttribute(const std::string& name) const {
-    if (!state_ || state_->pos < 0 ||
-        state_->pos >= static_cast<int>(state_->events.size()))
+    if (!hasCurrentNode(state_.get()))
         return {};
     const auto& ev = state_->events[static_cast<size_t>(state_->pos)];
     for (const auto& [k, v] : ev.attributes)
@@ -223,7 +248,7 @@ std::string XmlReader::GetAttribute(const std::string& name) const {
 }
 
 std::string XmlReader::ReadElementContentAsString() {
-    if (!state_) return {};
+    if (isClosed(state_.get())) return {};
     std::string result;
     // advance past the Element node we're sitting on
     Read();
@@ -253,24 +278,24 @@ std::string XmlReader::ReadElementContentAsString() {
     return result;
 }
 
+// A closed reader is on no node, so these two report the same "not on the right node"
+// error they already report for any other wrong position -- no new exception identity.
 void XmlReader::ReadStartElement() {
-    if (!state_ || state_->pos < 0 ||
-        state_->pos >= static_cast<int>(state_->events.size()) ||
+    if (!hasCurrentNode(state_.get()) ||
         state_->events[static_cast<size_t>(state_->pos)].type != XmlNodeType::Element)
         throw XmlException("ReadStartElement: not on an element node");
     Read();
 }
 
 void XmlReader::ReadEndElement() {
-    if (!state_ || state_->pos < 0 ||
-        state_->pos >= static_cast<int>(state_->events.size()) ||
+    if (!hasCurrentNode(state_.get()) ||
         state_->events[static_cast<size_t>(state_->pos)].type != XmlNodeType::EndElement)
         throw XmlException("ReadEndElement: not on an end-element node");
     Read();
 }
 
 void XmlReader::Close() {
-    if (state_) state_->readState = ReadState::Closed;
+    if (state_) state_->readState = ReadState::Closed; // idempotent by construction
 }
 
 // ---------------------------------------------------------------------------
