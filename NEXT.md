@@ -3,6 +3,30 @@
 
 # NEXT.md
 
+*Last verified: 2026-08-04. Branch `feature/remediation-batch-xml-compatible-websockets-review`,
+cut from the clean tip `e1cc8c3`. **Not pushed — no push was requested during this batch.** No
+merge, rebase, tag, force-push, PR, publication, amend or history rewrite; all eight commits
+unsigned (`git -c commit.gpgsign=false`, author and committer `Claude <noreply@anthropic.com>`)
+because this environment has no usable private signing key. The batch **closed the compatible
+`System::Xml` queue** with **#2076**, **#2078**, **#2079** and **#2081**, **reconciled the
+namespace** (§21 of its plan, and the reconciliation found and closed **three unmet completion
+criteria** the queue had left behind), **re-derived the next review unit by measurement**,
+reviewed **`System::Net::WebSockets` (#2087)** —
+`docs/SystemNetWebSocketsNamespaceReviewPlan.md`, 20 sections — and implemented the first
+ticket that review created, **#2090**. **Five findings moved `confirmed → remediated`**
+(SR-AUD-348, 349, 352, 355 and — with #2074/#2075/#2077 from the previous batch — the whole
+`System::Xml` set bar one). Audit **133 remediated / 231 confirmed / 364 total**, of which **49**
+carry `confirmed (design-complete)`; **no `SR-AUD-*` identifier was created — numbering stays
+frozen at 364.** **Nine premises were corrected by measurement**, four of which changed what
+shipped, and **four non-discriminating checks were caught and fixed rather than reported as
+passes** — including one **stale-binary false pass**. Gate **15,869 tests across 37 executables:
+15,862 passing, 1 skipped, 6 failing** for the same two re-measured causes as before, unchanged
+and not hidden. Graph **41 / 91**, seams **2 / 18**, negative fixtures **11 / 94**. **Doxygen and
+`ccache` are both absent from this container and were NOT run.** `System::Xml` is **complete
+except for deferred work**; `System::Net::WebSockets` has **two compatible tickets left** —
+**#2089** then **#2091**. **#1962 and #1773 remain blocked**; **CCF-012, CCF-019 were NOT marked
+closed and CCF-021 and CCF-022 were NOT minted.** The prior header stack is retained below.*
+
 *Last verified: 2026-08-04. Branch `feature/remediation-batch-net-http-2063-2064-xml-review`, cut
 from the clean tip `257106a`. **Not pushed — no push was requested during this batch.** No merge,
 rebase, tag, force-push, PR, publication, amend or history rewrite; all six commits unsigned
@@ -68,6 +92,236 @@ absent from this container and were NOT run.** #2054 stays **`todo`** and compat
 #2056/#2057/#2058/#2059 are **blocked** and all behaviour-pinned; #2060 is a **deferred
 verification**; **#1962 and #1773 remain blocked**; CCF-012 was **not** marked closed. See the
 first handoff below.*
+
+---
+
+## Autonomous batch handoff, 2026-08-04 (the compatible `System::Xml` queue #2076/#2078/#2079/#2081, XML reconciliation, the `System::Net::WebSockets` review, and #2090)
+
+### 1. What this batch did
+
+| Commit | Contents |
+|---|---|
+| `1f2bce9` | **#2076** — all four writer **name** doors routed through the validator the module already ships; writer state enforced |
+| `cc2a82e` | **#2078** — `XmlReader::Close` made terminal, the way `EndOfFile` already was |
+| `208a96a` | **#2079** — the six node-change events dispatched, **except** where the node is destroyed |
+| `e34e07f` | **#2081** — the XPath logical text node its own comment already described |
+| `59ef5b9` | XML pins + **§21 reconciliation** |
+| `8dd059a` | **#2087** — the `System::Net::WebSockets` review |
+| `ab6d6e8` | **#2090** — frame-header validation |
+| `6bdce5b` | a count correction inside the WebSockets plan |
+| *(this one)* | handoff: `NEXT.md`, `plan.md`, `plan.sqlite3` |
+
+### 2. The single largest finding: the WebSocket frame parser is entirely unaudited
+
+**Corrected premise 6.5 of the new review.** All six `SR-AUD` findings in
+`modules/net-websockets` concern the handshake, the options bag, the exception type and
+lifetime. **Not one names `readFrame`** — the code that touches remote bytes. Reading it
+produced **eleven post-audit protocol-validation defects**, every one reachable by the server
+the client connected to:
+
+- reserved bits RSV1/2/3 never examined;
+- the opcode never validated, so **reserved opcodes 0x3–0x7 and 0xB–0xF were delivered to the
+  caller as ordinary application data**;
+- a **masked server frame accepted and unmasked**, although RFC 6455 §5.1 says a client MUST
+  fail the connection on one;
+- fragmented control frames accepted;
+- **a 256 MiB "Ping" read into memory *and echoed straight back* as a Pong** — an amplification
+  the server controls;
+- a 1-byte close payload silently ignored; any 16-bit close code cast to `WebSocketCloseStatus`,
+  so a **public getter can return a value outside the enum's domain**;
+- **no UTF-8 validation anywhere**; an unrequested `Sec-WebSocket-Protocol` response accepted;
+- `state_` raced across task threads, and `socket_` dereferenced with no null check after
+  `Dispose()`.
+
+**#2090 repaired the first five.** The sharpest implementation detail is *where* the size check
+sits: on the **7-bit length field**, before the extended-length bytes are read, so the 256 MiB
+Ping is a two-byte rejection with **no allocation at all**. The mask-key read and unmasking loop
+were **deleted**, not left as dead code.
+
+**This also overturns the previous batch's stated reason for skipping this unit.** The
+`System::Xml` review declined it because *"its highest-value finding is blocked on arrival"*.
+True of SR-AUD-247 — and **not true of the unit**: the compatible work here was never the
+leftovers.
+
+### 3. `System::Xml` — four tickets, and a repair that was already in the module every time
+
+| Ticket | Finding | What measurement added to the filed record |
+|---|---|---|
+| **#2076** | SR-AUD-349 | **Four** name doors, not the two §4.3 scoped: `WriteStartElement`, `WriteAttributeString`, **`WriteProcessingInstruction`'s target** and **`WriteDocType`'s name**. The PI row is the sharpest — `"a?>b"` closed the instruction early and spilled into document text, while the writer **already sanitised the PI *data*** against exactly that hazard. All twelve `Write*` members also stayed callable after `Close()`. |
+| **#2078** | SR-AUD-348 | **Three** members destroyed the closed state, not one. And the class **already implemented one terminal read state correctly** — `EndOfFile` — so `Closed` became the same shape: no new field, no invented accessor values, no new exception identity. |
+| **#2079** | SR-AUD-352 | **Sixteen** silent doors, not three. One stays silent **on purpose**: `RemoveAllChildren` destroys its children, so a `NodeRemoved` handler's `XmlNode*` would name freed storage — the CCF-019 shape, **refused rather than introduced**, pinned by a test and tracked as #2086. |
+| **#2081** | SR-AUD-355 | **Four** coupled symptoms, not one. The repair was **already named in the file**: a 17-line `KNOWN GAP (audited, not fixed…)` comment cited .NET's `ValueText`/`CalibrateText` and listed the methods to change. That comment was **replaced**, not left standing. |
+
+**The through-line:** in all four — plus #2074 and #2077 from the previous batch — **the correct
+pattern was already present in the module and simply not reached from the defective door.**
+`LoadXml` parsed first; `VerifyName` existed and one sibling used it; `EndOfFile` was already
+terminal; the navigator's own comment named the fix. That is a fact about this namespace worth
+carrying forward.
+
+### 4. Four non-discriminating checks caught — including a stale-binary false pass
+
+Reported rather than hidden, because each would have justified deleting a real guard:
+
+1. **#2076 M7 — a stale binary.** The mutation left a helper unused, the build aborted on
+   `-Werror=unused-function`, and the run reported the **previous** binary's `427 PASSED`.
+   Re-run with build output unsuppressed, it discriminated. **A mutation run whose build output
+   is suppressed measures the previous binary.**
+2. **#2079 E3 — twice non-discriminating.** The behavioural mutation left all 458 tests passing,
+   *and the first ASan probe was clean both ways* because the handler did nothing after
+   reassigning itself. Only when the handler **reads a capture after reassigning its own field**
+   does it show: a `heap-use-after-free` without the snapshot copy, clean over **82,500**
+   dispatches with it.
+3. **#2081 X5 —** the only mid-run node-type assertion used a `Text`-after-`CDATA` run, and
+   `CDATA` maps to `Text`. A `Whitespace`+`Text` run was added; only then did it fail. (The same
+   tests also first used numeric node-type literals, one of which was simply wrong.)
+4. **#2090 W5 —** the oversized-control-frame case sent only two header bytes, so with the guard
+   removed the parser read past the end and threw `ConnectionClosedPrematurely` — **also** a
+   `WebSocketException`. A truncated frame cannot distinguish *rejected for being oversized*
+   from *rejected for ending early*.
+
+A fifth result is worth the same note: **#2081's X2 mutation makes navigation
+NON-TERMINATING**, which is what proves the two halves of that repair are *coupled*.
+
+### 5. The XML reconciliation found three unmet completion criteria
+
+The compatible queue finished **without** the pins the review's own §19 requires: criterion 3
+(SR-AUD-354's pin), criterion 4 (the two post-audit acceptance defects' pins), and §10's
+`sizeof` probe structs, which it assigns to *"the first implementation ticket that lands"*.
+**None existed.** `XmlContractPinTests` closes all three and remediates nothing: layout by
+**probe struct, never literal byte counts**; #2080/#2082/#2083's measured behaviour; and the
+review's two **security positives** — internal entities stay inert, nesting depth stays bounded
+— now *checked* rather than asserted in prose.
+
+`System::Xml`: **seven of eight findings remediated**, SR-AUD-354 deferred **and pinned**. All
+six completion criteria met. `SharpRuntimeTests_Xml` **400 → 483**, add-only.
+
+### 6. Why `net-websockets` was selected, measured
+
+| Unit | Open | High | High % | Existing review |
+|---|---:|---:|---:|---|
+| `modules/core` | 72 | 9 | 12% | family plans only |
+| `modules/threading` | 17 | 6 | 35% | **yes** |
+| `modules/io` | 11 | 0 | 0% | none |
+| `modules/time-zone` | 7 | 0 | 0% | none |
+| `modules/text-json` | 7 | 1 | 14% | none |
+| `modules/globalization` | 7 | 1 | 14% | none |
+| **`modules/net-websockets`** | **6** | **2** | **33%** | **none** |
+
+Highest high-severity ratio of any **unreviewed** unit with ≥6 open findings, an ASan-confirmed
+UAF, a remotely-driven frame parser, and the **smallest** coherent component in the candidate
+set. `modules/xml` has dropped to **1** open. **`modules/io` is the recommended next unit.**
+
+### 7. No CCF was minted, and each refusal has a stated reason
+
+- **CCF-019** — `net-websockets` is its **sixth** site. #2066's family design still has **two
+  options and no selection**, so choosing one here would create a sixth answer to the question
+  the family exists to answer once. #2088 instead records the **second borrowed edge** the
+  review found (`SendAsync`/`ReceiveAsync` capture the **caller's buffer by reference**, not
+  only `this`) and **pins the ownership model with a `static_assert`**.
+- **CCF-021** — its evidence is now **complete** across three modules (`net-http` remediated,
+  `net-http-headers` ×2, `net-websockets` ×1). But `net-http-headers` holds two of the four and
+  is **unreviewed**, so the promotion trigger stays there. What this review did instead:
+  **require #2089 to reuse `System::Net::Http`'s existing predicate shape rather than invent a
+  second one** — the whole practical benefit, without pre-empting the process.
+- **CCF-022** — unchanged. `net-websockets` adds a *candidate* (the disposed-socket race) but
+  that is a concurrency defect, not a recorded-but-unenforced lifecycle state. Mint when
+  `modules/io` is reviewed, citing all five.
+
+### 8. Validation, as measured
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| Full gate, all **37** executables run individually | **15,869 tests — 15,862 passed, 1 skipped, 6 failed** |
+| `validate_module_boundaries.py` | OK — **41 modules / 91 edges** |
+| `validate_module_boundaries_test.py` | OK (7 tests) |
+| `generate_component_catalog.py --check` | OK — catalogue current |
+| `db_consistency_check.py` | OK |
+| `check_version_seam_odr.py` | OK — **2 seams / 18 definitions** |
+| `check_version_seam_odr_test.py` | OK (15 tests) |
+| `check_negative_consumer_fixtures.py` | OK — **11 fixtures / 94 sites**, 105 compiler invocations, peak 2 jobs, **36.7 s** |
+| `check_negative_consumer_fixtures_test.py` | OK (45 tests) |
+| `check_selective_components.sh` | **passed** — one serialized process, **674 s (11 m 14 s)**, 10 components, `ps -C cc1plus` sampled repeatedly and **never above 2** |
+| `local_ci_check.sh build` | boundaries **41/91**, catalogue current, seams **2/18**, fixtures **11/94**, **build clean: 0 warnings, 0 errors**, then stops at the **known** 5 `PingTests` failure — reported separately from the authoritative gate above |
+| `git diff --check` | clean |
+
+**The six failures are the two known causes, re-measured this batch and unchanged:**
+
+- **five `PingTests`** — `/proc/sys/net/ipv4/ping_group_range` is `1 0`, an **empty** range, so
+  no gid may open an unprivileged ICMP socket. Measured directly: `SOCK_DGRAM`/`IPPROTO_ICMP`
+  fails `EACCES`, while `SOCK_RAW`/`IPPROTO_ICMP` **opens** (we are root). `Ping` only ever
+  opens `SOCK_DGRAM` — **#1962 exactly**, still blocked.
+- **one `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`** — `/proc/net/if_inet6`
+  is **absent**: no IPv6 in this container.
+
+The **1 skipped** test is
+`CultureInvariantFormattingTests.NumericAndDateFormatting_UnaffectedByNonInvariantGlobalLocale`.
+
+### 9. Suites, sanitizers and resources
+
+`SharpRuntimeTests_Xml` **400 → 483** (+83), measured at this batch's start and end.
+`SharpRuntimeTests_Net_WebSockets` **24 → 39**. `SharpRuntimeTests_Xml_Linq` **184, unchanged**
+though `modules/xml-linq` consumes every repaired writer door. **Not one existing test was
+updated by any of the five implementation tickets.**
+
+Sanitizers, each with the changed bodies and `vendor/tinyxml2` compiled **from source** (`Xml`
+is `STATIC`, so linking the archive would measure an **uninstrumented** body) and each with a
+**control heap-use-after-free** proving instrumentation live:
+
+| Ticket | Result |
+|---|---|
+| #2076 | ASan/UBSan/LSan clean over **3,700** rejections — §13's "no" confirmed rather than assumed |
+| #2078 | not applicable, **with the reason stated**: no allocation, no arithmetic, no ownership change, and every guard strictly *shrinks* the reachable index set |
+| #2079 | **discriminating** — `heap-use-after-free` without the dispatcher's snapshot copy, clean over **82,500** dispatches with it |
+| #2081 | ASan/UBSan/LSan clean over **37,600** characters walked forward, backward, through `Select("text()")` and across DOM mutation |
+
+**Maximum compiler concurrency: two jobs**, everywhere — every `cmake --build … --parallel 2`,
+every probe (single `g++`), `check_negative_consumer_fixtures.py` (peak 2, verified in its own
+output) and `check_selective_components.sh` (`ps -C cc1plus` sampled at **2**). Build
+directories used: `build/`, `build-probe/`, `build-tmp/`, `build-modular/` (created and
+consumed by the selective check). **Sizes: `build/` 1.7 G, `build-probe/` 32 M, `build-tmp/`
+7.3 M.** Probe binaries were deleted once their logs were transcribed; the `.cpp` probes and
+`.log` evidence are retained.
+
+**Doxygen and `ccache` are both ABSENT** from this container and were **not** run; no historical
+Doxygen output is claimed as newly verified. **`/rv/tmp/runtime/` is ABSENT** — re-verified — so
+no reference-sensitive behaviour was implemented from memory; every exception identity and every
+narrowing is recorded as **this port's choice**. The three tracked `scripts/__pycache__` files
+are **byte-identical** (`git status` and `git diff` both empty for them); every Python
+invocation used `PYTHONDONTWRITEBYTECODE=1`.
+
+### 10. What is left, and what it is blocked on
+
+**`System::Xml` — complete except for deferred work.** #2080/#2082/#2083 are
+deferred-verification (the reference tree is absent). Three post-audit tickets this batch
+created are each blocked on a **stated decision**, not on effort: **#2084** (the `systemId`/
+`internalSubset` repair is a delimiter-vs-escaping choice with no repository evidence),
+**#2085** (must first decide whether `XmlWriterSettings::CheckCharacters` governs rejection) and
+**#2086** (completing `RemoveAllChildren`'s event pair safely needs a detach-vs-delete lifetime
+decision that is **not** compatible).
+
+**`System::Net::WebSockets` — two compatible tickets left, in this order:**
+
+1. **#2089** — reject CR/LF/NUL at the handshake header doors and widen the subprotocol
+   validator to the RFC 7230 separator set. **Must reuse `System::Net::Http`'s predicate shape.**
+2. **#2091** — close payload length and code domain, UTF-8 validation, and the negotiated
+   subprotocol response. **After #2090**, because it validates payloads #2090 lets through.
+
+Blocked: **#2088** (CCF-019), **#2092** (needs an inner-exception constructor on
+`Win32Exception`/`Exception` — another component, public base-class change), **#2093**
+(cancellation needs a non-blocking transport design), **#2094** (keep-alive needs a background
+timer thread; depends on #2093), **#2096** (`state_` race and disposed-socket null dereference;
+same concurrency design). Deferred: **#2095**.
+
+**Next recommended unit after that: `modules/io`** — 11 open findings, zero highs, and the
+module that unlocks **CCF-022**.
+
+### 11. Confirmations
+
+**#1773 and #1962 remain blocked.** **CCF-012 and CCF-019 were NOT marked closed; CCF-021 and
+CCF-022 were NOT minted.** **CNA and mobile-eggbert were not inspected, searched, built or
+modified.** No merge, rebase, tag, force-push, PR, publication, amend or history rewrite
+occurred, and **nothing was pushed** — no push was requested.
 
 ---
 
