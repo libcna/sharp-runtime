@@ -5,6 +5,8 @@
 
 #include <tinyxml2/tinyxml2.h>
 
+#include "XmlNodeChangeEvents.hpp"
+
 #include "System/Xml/XmlDocument.hpp"
 
 namespace System::Xml {
@@ -18,11 +20,17 @@ namespace System::Xml {
     }
 
     void XmlAttribute::setValueProperty(const std::string& value) {
+        XmlDocument* doc = GetDocument();
+        const std::string oldValue = getValueProperty();
+        detail::RaiseNodeChanging(doc, this, getParentNodeProperty(), getParentNodeProperty(),
+                                  oldValue, value, XmlNodeChangedAction::Change);
         if (ownerElementNative_) {
             ownerElementNative_->SetAttribute(name_.c_str(), value.c_str());
         } else {
             localValue_ = value;
         }
+        detail::RaiseNodeChanged(doc, this, getParentNodeProperty(), getParentNodeProperty(),
+                                 oldValue, value, XmlNodeChangedAction::Change);
     }
 
     void XmlAttribute::AttachTo(XmlElement* elementWrapper, tinyxml2::XMLElement* elementNative) {

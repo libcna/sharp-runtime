@@ -5,6 +5,8 @@
 
 #include <tinyxml2/tinyxml2.h>
 
+#include "XmlNodeChangeEvents.hpp"
+
 namespace System::Xml {
 
     namespace {
@@ -31,8 +33,14 @@ namespace System::Xml {
     void XmlProcessingInstruction::setDataProperty(const std::string& data) {
         auto* d = native_ ? native_->ToDeclaration() : nullptr;
         if (!d) return;
+        XmlDocument* doc = GetDocument();
+        const std::string oldValue = getDataProperty();
+        detail::RaiseNodeChanging(doc, this, getParentNodeProperty(), getParentNodeProperty(),
+                                  oldValue, data, XmlNodeChangedAction::Change);
         std::string newValue = getTargetProperty() + " " + data;
         d->SetValue(newValue.c_str());
+        detail::RaiseNodeChanged(doc, this, getParentNodeProperty(), getParentNodeProperty(),
+                                 oldValue, data, XmlNodeChangedAction::Change);
     }
 
 } // namespace System::Xml

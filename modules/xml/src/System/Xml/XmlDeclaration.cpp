@@ -5,6 +5,8 @@
 
 #include <tinyxml2/tinyxml2.h>
 
+#include "XmlNodeChangeEvents.hpp"
+
 #include "System/ArgumentException.hpp"
 
 namespace System::Xml {
@@ -70,7 +72,13 @@ namespace System::Xml {
     void XmlDeclaration::setValueProperty(const std::string& value) {
         auto* d = native_ ? native_->ToDeclaration() : nullptr;
         if (!d) return;
+        XmlDocument* doc = GetDocument();
+        const std::string oldValue = getValueProperty();
+        detail::RaiseNodeChanging(doc, this, getParentNodeProperty(), getParentNodeProperty(),
+                                  oldValue, value, XmlNodeChangedAction::Change);
         d->SetValue(("xml" + value).c_str());
+        detail::RaiseNodeChanged(doc, this, getParentNodeProperty(), getParentNodeProperty(),
+                                 oldValue, value, XmlNodeChangedAction::Change);
     }
 
 } // namespace System::Xml

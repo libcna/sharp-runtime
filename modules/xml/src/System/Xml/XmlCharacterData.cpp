@@ -6,6 +6,7 @@
 #include <tinyxml2/tinyxml2.h>
 
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "XmlNodeChangeEvents.hpp"
 #include "System/Xml/XmlWriter.hpp"
 
 namespace System::Xml {
@@ -21,9 +22,21 @@ namespace System::Xml {
         return {};
     }
 
+    // The single choke point for every character-data mutation: AppendData, InsertData,
+    // DeleteData, ReplaceData, setValueProperty and setInnerTextProperty all route here, so
+    // one dispatch site covers all six public doors (#2079).
     void XmlCharacterData::setDataProperty(const std::string& data) {
-        if (auto* t = AsText(native_)) { t->SetValue(data.c_str()); return; }
-        if (auto* c = AsComment(native_)) { c->SetValue(data.c_str()); return; }
+        auto* t = AsText(native_);
+        auto* c = t ? nullptr : AsComment(native_);
+        if (!t && !c) return;
+        XmlDocument* doc = GetDocument();
+        const std::string oldValue = getDataProperty();
+        detail::RaiseNodeChanging(doc, this, getParentNodeProperty(), getParentNodeProperty(),
+                                  oldValue, data, XmlNodeChangedAction::Change);
+        if (t) t->SetValue(data.c_str());
+        else   c->SetValue(data.c_str());
+        detail::RaiseNodeChanged(doc, this, getParentNodeProperty(), getParentNodeProperty(),
+                                 oldValue, data, XmlNodeChangedAction::Change);
     }
 
     SharpRuntime::intcs XmlCharacterData::getLengthProperty() const {

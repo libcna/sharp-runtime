@@ -39,8 +39,19 @@ namespace System::Xml {
      * other non-movable stream-like types in this runtime (e.g. FileStream).
      *
      * @note NodeInserting/NodeInserted/NodeRemoving/NodeRemoved/NodeChanging/NodeChanged are
-     * exposed as settable std::function fields for API-name compatibility, but are not yet
-     * wired into AppendChild/RemoveChild/etc. — a documented gap, not a silent one.
+     * settable std::function fields that are dispatched by every tree mutation whose affected
+     * node survives the operation: PrependChild, AppendChild, InsertBefore, InsertAfter,
+     * ReplaceChild and the InnerXml/InnerText setters raise the Insert pair; RemoveChild
+     * raises the Remove pair; and every value change — XmlCharacterData's data/value setters
+     * and its Append/Insert/Delete/ReplaceData, XmlAttribute::setValueProperty,
+     * XmlDeclaration::setValueProperty and XmlProcessingInstruction::setDataProperty — raises
+     * the Change pair. The @c *ing handler runs before the mutation and the @c *ed handler
+     * after, with @c sender set to this document.
+     *
+     * @note One documented exception: @c XmlNode::RemoveAllChildren (reached by @c RemoveAll)
+     * raises **nothing**. It destroys its children rather than detaching them, so a
+     * @c NodeRemoved handler's @c XmlNode* would name freed storage. Completing that pair
+     * safely is tracked separately; the silence is deliberate and is pinned by a test.
      */
     class XmlDocument : public XmlNode {
         tinyxml2::XMLDocument doc_;

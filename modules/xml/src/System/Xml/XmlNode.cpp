@@ -18,6 +18,7 @@
 #include "System/Xml/XmlDocumentFragment.hpp"
 #include "System/Xml/XmlElement.hpp"
 #include "System/Xml/XmlException.hpp"
+#include "XmlNodeChangeEvents.hpp"
 #include "System/Xml/XmlNodeList.hpp"
 #include "System/Xml/XmlWriter.hpp"
 
@@ -210,8 +211,19 @@ namespace System::Xml {
             cloned.push_back(child->DeepClone(&doc->getNativeDocument()));
 
         RemoveAllChildren();
-        for (tinyxml2::XMLNode* child : cloned)
+        // Ticket #2079: this loop inserts natively rather than through AppendChild, so it
+        // needs its own dispatch or setInnerXml would be the one insert door that stayed
+        // silent while setInnerText (which routes through AppendChild) fired. The removal
+        // half is silent here for the same lifetime reason RemoveAllChildren records.
+        XmlDocument* eventDoc = GetDocument();
+        for (tinyxml2::XMLNode* child : cloned) {
+            XmlNode* wrapped = eventDoc ? eventDoc->WrapNode(child) : nullptr;
+            detail::RaiseNodeChanging(eventDoc, wrapped, nullptr, this, "", "",
+                                      XmlNodeChangedAction::Insert);
             native_->InsertEndChild(child);
+            detail::RaiseNodeChanged(eventDoc, wrapped, nullptr, this, "", "",
+                                     XmlNodeChangedAction::Insert);
+        }
     }
 
     std::string XmlNode::getOuterXmlProperty() const {
@@ -276,13 +288,23 @@ namespace System::Xml {
                 XmlNode* prev = child->getPreviousSiblingProperty();
                 ThrowIfSelfOrAncestor(native_, child->native_);
                 frag->RemoveChild(child);
+                detail::RaiseNodeChanging(GetDocument(), child, frag, this, "", "",
+                                          XmlNodeChangedAction::Insert);
                 native_->InsertFirstChild(child->native_);
+                detail::RaiseNodeChanged(GetDocument(), child, frag, this, "", "",
+                                         XmlNodeChangedAction::Insert);
                 firstInserted = child;
                 child = prev;
             }
             return firstInserted;
         }
+        XmlDocument* doc = GetDocument();
+        XmlNode* oldParent = newChild->getParentNodeProperty();
+        detail::RaiseNodeChanging(doc, newChild, oldParent, this, "", "",
+                                  XmlNodeChangedAction::Insert);
         native_->InsertFirstChild(newChild->native_);
+        detail::RaiseNodeChanged(doc, newChild, oldParent, this, "", "",
+                                 XmlNodeChangedAction::Insert);
         return newChild;
     }
 
@@ -297,13 +319,23 @@ namespace System::Xml {
                 XmlNode* next = child->getNextSiblingProperty();
                 ThrowIfSelfOrAncestor(native_, child->native_);
                 frag->RemoveChild(child);
+                detail::RaiseNodeChanging(GetDocument(), child, frag, this, "", "",
+                                          XmlNodeChangedAction::Insert);
                 native_->InsertEndChild(child->native_);
+                detail::RaiseNodeChanged(GetDocument(), child, frag, this, "", "",
+                                         XmlNodeChangedAction::Insert);
                 lastInserted = child;
                 child = next;
             }
             return lastInserted;
         }
+        XmlDocument* doc = GetDocument();
+        XmlNode* oldParent = newChild->getParentNodeProperty();
+        detail::RaiseNodeChanging(doc, newChild, oldParent, this, "", "",
+                                  XmlNodeChangedAction::Insert);
         native_->InsertEndChild(newChild->native_);
+        detail::RaiseNodeChanged(doc, newChild, oldParent, this, "", "",
+                                 XmlNodeChangedAction::Insert);
         return newChild;
     }
 
@@ -314,9 +346,15 @@ namespace System::Xml {
         ThrowIfDifferentDocument(this, GetDocument(), newChild->GetDocument());
         ThrowIfNotChildOf(native_, refChild->native_,
                           "The reference node is not a child of this node.");
+        XmlDocument* doc = GetDocument();
+        XmlNode* oldParent = newChild->getParentNodeProperty();
         tinyxml2::XMLNode* prevSibling = refChild->native_ ? refChild->native_->PreviousSibling() : nullptr;
-        if (!prevSibling) { native_->InsertFirstChild(newChild->native_); return newChild; }
-        native_->InsertAfterChild(prevSibling, newChild->native_);
+        detail::RaiseNodeChanging(doc, newChild, oldParent, this, "", "",
+                                  XmlNodeChangedAction::Insert);
+        if (!prevSibling) native_->InsertFirstChild(newChild->native_);
+        else               native_->InsertAfterChild(prevSibling, newChild->native_);
+        detail::RaiseNodeChanged(doc, newChild, oldParent, this, "", "",
+                                 XmlNodeChangedAction::Insert);
         return newChild;
     }
 
@@ -327,7 +365,13 @@ namespace System::Xml {
         ThrowIfDifferentDocument(this, GetDocument(), newChild->GetDocument());
         ThrowIfNotChildOf(native_, refChild->native_,
                           "The reference node is not a child of this node.");
+        XmlDocument* doc = GetDocument();
+        XmlNode* oldParent = newChild->getParentNodeProperty();
+        detail::RaiseNodeChanging(doc, newChild, oldParent, this, "", "",
+                                  XmlNodeChangedAction::Insert);
         native_->InsertAfterChild(refChild->native_, newChild->native_);
+        detail::RaiseNodeChanged(doc, newChild, oldParent, this, "", "",
+                                 XmlNodeChangedAction::Insert);
         return newChild;
     }
 
@@ -336,7 +380,15 @@ namespace System::Xml {
         if (!native_ || !oldChild || !oldChild->native_ || !doc) return oldChild;
         ThrowIfNotChildOf(native_, oldChild->native_,
                           "The node to be removed is not a child of this node.");
+        // Safe to report AFTER the mutation as well: DetachNode moves the node under the
+        // document's scratch parent rather than destroying it, so the wrapper the handler
+        // receives is still alive. RemoveAllChildren, which DOES destroy its children,
+        // deliberately raises nothing -- see its own comment.
+        detail::RaiseNodeChanging(doc, oldChild, this, nullptr, "", "",
+                                  XmlNodeChangedAction::Remove);
         doc->DetachNode(oldChild->native_);
+        detail::RaiseNodeChanged(doc, oldChild, this, nullptr, "", "",
+                                 XmlNodeChangedAction::Remove);
         return oldChild;
     }
 
@@ -352,6 +404,13 @@ namespace System::Xml {
         return oldChild;
     }
 
+    // Ticket #2079 deliberately raises NO node-change event here, and the reason is a
+    // lifetime one rather than an oversight: unlike RemoveChild (which detaches), this
+    // PurgeCache()es every wrapper and then DeleteChildren()s the natives, so by the time a
+    // NodeRemoved handler could run its XmlNode* would name a destroyed object. Handing
+    // caller code a borrowed pointer to freed storage is exactly the defect CCF-019 tracks,
+    // and it is not worth introducing to complete an event pair. Recorded in
+    // docs/SystemXmlNamespaceReviewPlan.md §20.6 with the follow-up ticket.
     void XmlNode::RemoveAllChildren() {
         XmlDocument* doc = GetDocument();
         if (!native_ || !doc) return;

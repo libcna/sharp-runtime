@@ -848,3 +848,76 @@ event indices.
 (SR-AUD-348 here, SR-AUD-349's second clause in #2076) and three open in `modules/io`
 (SR-AUD-337, 343, 344). §17's rule is unchanged: mint it when `modules/io` is reviewed, citing
 all five, and not from this module's evidence alone.
+
+### 20.6 #2079 — sixteen silent doors, one deliberately still silent, and a sanitizer result that took three attempts
+
+§4.6 measured *"an inserted element, a removed element and a text change dispatch zero of
+them"*. Measured across the whole module with the pre-#2079 bodies compiled **from source**
+(`build-probe/2079_probe1_events.cpp`, log `2079_probe1_before.log`), **sixteen** distinct
+public mutation doors dispatched **zero** handlers. All are now wired, under one stated rule:
+**every mutation whose affected node survives the operation dispatches.**
+
+| Pair | Doors |
+|---|---|
+| Insert | `PrependChild`, `AppendChild`, `InsertBefore` (both branches), `InsertAfter`, `ReplaceChild`, `InnerXml =`, `InnerText =`, and once per child when an `XmlDocumentFragment` is appended or prepended |
+| Remove | `RemoveChild`, `ReplaceChild`'s removal half, and once per child as it leaves a fragment |
+| Change | `XmlCharacterData::setDataProperty` — the choke point `AppendData`/`InsertData`/`DeleteData`/`ReplaceData`/`setValueProperty`/`setInnerTextProperty` all reach — plus `XmlAttribute::setValueProperty`, `XmlDeclaration::setValueProperty`, `XmlProcessingInstruction::setDataProperty` |
+
+`setInnerXml` needed its **own** dispatch, which §4.6 did not anticipate: it inserts natively
+rather than through `AppendChild`, so it would otherwise have been the one insert door still
+silent while `setInnerText` fired.
+
+**§6.6's corrected premise did real structural work.** Because the handlers are public **data
+members**, the dispatcher can read them directly, and it lives in
+`modules/xml/src/System/Xml/XmlNodeChangeEvents.hpp` — a `src`-only internal header, in the
+place this module already keeps `XPath/XPathAstInternal.hpp`. **No public surface, type,
+signature, layout or vtable changed**, exactly as §10 predicted.
+
+**The one door left silent, and why that is the right answer.**
+`XmlNode::RemoveAllChildren` — reached by `RemoveAll()` — `PurgeCache`es every wrapper and
+`DeleteChildren`s the natives. A `NodeRemoved` handler there would receive an `XmlNode*`
+naming **freed storage**: the borrowed-pointer shape **CCF-019** exists to track. Completing
+an event pair is not a good enough reason to introduce it, and detaching instead of deleting
+would change lifetime semantics (children would outlive the call) — not a compatible change.
+So the silence is deliberate, documented on `XmlDocument` itself, **pinned by a test**, and
+carried by post-audit ticket **#2086**. Mutation **E6** adds the unsafe completion and the pin
+catches it, which is what makes the pin a contract rather than a comment.
+
+**+19 permanent regressions, add-only — not one existing test was updated.**
+`SharpRuntimeTests_Xml` 439 → 458; `SharpRuntimeTests_Xml_Linq` 184 unchanged.
+
+**Five mutations.** E1 (dispatcher inert — SR-AUD-352 fully restored) → 17 tests; E2 (only the
+`*ing` half inert) → 12; E4 (`RemoveChild` silent) → 4; E5 (character-data change silent) → 3;
+E6 (the unsafe `RemoveAllChildren` completion) → 1. **A defect in the new tests was found by
+E1 and fixed rather than reported as a finding:** three assertions indexed the recorded-event
+vector after a non-fatal `EXPECT_EQ`, so the mutated suite **segfaulted** instead of failing,
+hiding every later test. They are `ASSERT_EQ` now. The general lesson joins §20.4's: a
+mutation harness must be able to distinguish *this guard is load-bearing* from *the binary
+died*, and a suppressed build or a crashing suite defeats both.
+
+**The sanitizer result took three attempts and all three are recorded.** §13 predicted
+*"possibly — a handler that mutates during dispatch"*.
+
+1. **Behavioural mutation E3** — invoke the handler through the field instead of through a
+   copy — left **all 458 tests passing**. Non-discriminating.
+2. **The first ASan probe was also clean both ways.** The handler reassigned its own field and
+   then did nothing, so the freed closure was never touched again and there was nothing to
+   report. A clean run that cannot fail is not evidence.
+3. **Made discriminating** by having the handler **read a capture after reassigning its own
+   field**. Without the snapshot copy that is a `heap-use-after-free` in
+   `std::string::size()`; with it, ASan/UBSan/LSan are clean over **82,500** dispatches
+   covering self-reassignment, reentrant tree mutation, throwing handlers on both halves, and
+   the remove/value-change paths. Changed bodies and `vendor/tinyxml2` compiled **from source**
+   (`Xml` is `STATIC`); instrumentation proven by a control heap-use-after-free
+   (`2079_probe2_asan.log`, `2079_probe2_asan_E3.log`).
+
+So the snapshot copy in the dispatcher is **load-bearing and proven**, and the route to
+proving it is the durable part: the first two attempts would each have justified deleting it.
+
+**Documentation corrected rather than merely extended.** `XmlDocument`'s own note said the
+handlers were *"not yet wired into AppendChild/RemoveChild/etc."* — true when written, false
+now. It carries the dispatch rule and the `RemoveAllChildren` exception instead.
+
+**Migration note landed**: `docs/Migration-XmlStrictnessAndLifecycle.md`, covering #2074–#2079
+together as §11 required, and leading with #2079 because it is the only ticket in the namespace
+that can run caller code that never ran before.
