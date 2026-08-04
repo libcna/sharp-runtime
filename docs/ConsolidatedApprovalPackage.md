@@ -28,7 +28,8 @@ rule (§D.5).
 | Text approval re-verification | `build-probe/2033_probe2_text_approval_reverify.cpp` | `..._reverify.log` |
 
 plus four temporary source mutations, each applied, built, run, and reverted with `git diff`
-confirmed clean (§D.4). `/rv/tmp/runtime/src/libraries/` re-verified **absent**; no .NET runtime is
+confirmed clean (§§D.2.3, D.3 and D.4, and #2033's own in §D.5).
+`/rv/tmp/runtime/src/libraries/` re-verified **absent**; no .NET runtime is
 installed in this container, so every claim about .NET is labelled **inferred** and never used as
 the sole support for a recommendation.
 

@@ -1,33 +1,239 @@
-*Last verified: 2026-08-04. Branch `feature/remediation-batch-diagnostics-2024-2028`, cut from
-`9319580` (the previous batch's tip). **Seven commits, all unsigned and all local-only; no push
-was requested.** Earlier local-only commits were carried forward untouched: no amend, no rebase,
-no force-push, no merge, no tag, no PR. This batch **closed the previous session's incomplete
-`scripts/check_selective_components.sh` gate** — one instance, preflight-verified, **passed in
-16 min 40 s, exit 0**, all ten components and all three negative fixtures — and then
-implemented the **whole compatible half of `System::Diagnostics`**, **#2024–#2028**, in the
-plan's §13 order. **Six premises were corrected by measurement**, including that `Process`'s
-default constructor is **private** (so every public instance `Start()` is a restart) and that
-SR-AUD-270's trigger is a **joinable reader thread**, not a running child. **One new defect was
-filed rather than absorbed — #2032**, `WaitForExit(milliseconds)` blocking 29,951 ms against a
-5,000 ms bound, `blocked` on #2029 because its repair would pre-empt that gate. **#2029, #2030
-and #2031 remain blocked and are now PINNED by #2028, every pin shown discriminating; no
-approval was requested, implied or assumed, and no gated work was implemented.** Audit
-**107 → 112 remediated / 257 → 252 confirmed / 364 total**, `confirmed (design-complete)`
-unchanged at **38**; **no `SR-AUD-*` identifier was created; numbering stays frozen at 364.**
-`SharpRuntimeTests_Diagnostics` **159 → 219 (+60)**. Gate **15,529 tests across 37 executables
-run individually, 15,522 passing, 1 skipped, 6 failing** for the same two measured causes,
-unchanged and not hidden — **no new failure**; the +60 is exactly this batch's. Graph
-**41 / 91**, seams **2 / 18**, negative fixtures **10 / 81** (91 invocations, peak 2 jobs),
-checker self-tests **45 / 45** and **15 / 15**, module-boundary self-tests **7 / 7**, catalogue
-current, DB consistency OK, build **0 warnings / 0 errors**, `git diff --check` clean.
-**Doxygen NOT run — still not installed here.** **#1773 remains blocked and its downstream use
-was not investigated; #1962, #1956–#1959, #1969, #1970, #1980, #1981, #1995–#1999, #2003 and
-#2013–#2021 remain blocked; #1963, #1983 and #2005 remain deferred; none was reopened.** The
-nine `System::Text` approvals **remain ungranted and none of #2013–#2021 was implemented;
-CCF-012 was NOT marked closed.** Maximum aggregate parallelism **2 jobs**.
-`CNA` and `mobile-eggbert` were not read, searched, built, tested or modified.
-See the first handoff below.*
+*Last verified: 2026-08-04. Branch `feature/remediation-batch-approval-packages-next-review`, cut
+from `1b892f6` (the previous batch's tip). **All commits unsigned and local-only; no push was
+requested.** Earlier local-only commits were carried forward untouched: no amend, no rebase, no
+force-push, no merge, no tag, no PR. The batch **verified and consolidated both outstanding
+approval packages into one document**, `docs/ConsolidatedApprovalPackage.md` — three
+`System::Diagnostics` decisions and nine `System::Text` decisions with one grouped checklist.
+**#2032 is folded into #2029**: measured, the reader-thread join lives in `reapIfNeeded`, not the
+destructor, and is reached from **five** public doors (7,502 / 7,502 / 7,502 / 7,503 / 8,004 ms
+against an 8 s grandchild), so §14.1's destructor-only approval sentence would have left four of
+them blocking with **no bound at all** — and §14.1's recommended option C is **unsound as written**,
+because `drainPipe` holds a raw pointer into the `Impl` and detaching in `~Impl` is a
+use-after-free. **#2030's two pins and #2031's one were independently re-verified discriminating**
+by applying the proposed change temporarily; all four mutations reverted, `git diff` clean. The
+`System::Text` package was re-measured and **stands**, with three additions: #2017 gains **six**
+alternatives and a **changed recommendation** (the stock replacement fallback measurably *ignores*
+its `char` argument and the decoder surface is already byte-vector-shaped), CCF-012 was
+re-enumerated across all **16** brace-scanning files (exactly **two** implementations) with grammar
+rejections separated from index-out-of-range, and A1+A2 was made atomic. **One compatible portion
+was split out and implemented — #2033**, the reader-join disclosure half: six `Process.hpp`
+contracts made true plus **+6** tests (four pins, one control, one teardown check), mutation-checked,
+**zero executable production change**. Then the next namespace was **re-derived by measurement** and
+reviewed: **`System::Net`** (#2034) — 10 open findings, **3 high (30 %)**, no `docs/` plan, one
+module, one namespace, `#1962` in a different module — **all ten premises reproduced**, including an
+ASan `heap-buffer-overflow` at the finding's own line, and **four audit premises corrected**. Seven
+causes N-A…N-G, six compatible tickets **#2035–#2039, #2041**, four gated **#2040, #2042, #2043,
+#2044**; **nothing implemented**. `plan.md` was reconciled: the previous batch's record-keeping note
+was **corrected** (#2022/#2023 *does* have a section) and the **three** genuinely missing sections
+were backfilled. Audit **112 remediated / 252 confirmed / 364 total**, design-complete **38 → 42**;
+**no `SR-AUD-*` identifier was created; numbering stays frozen at 364.**
+`SharpRuntimeTests_Diagnostics` **219 → 225**. Gate **15,535 tests across 37 executables run
+individually, 15,528 passing, 1 skipped, 6 failing** for the same two measured causes, unchanged and
+not hidden — **no new failure**; the +6 is exactly this batch's. Graph **41 / 91**, seams
+**2 / 18**, negative fixtures **10 / 81** (91 invocations, peak 2 jobs), checker self-tests
+**45 / 45** and **15 / 15**, module-boundary self-tests **7 / 7**, catalogue current, DB consistency
+OK, build **0 warnings / 0 errors**, `git diff --check` clean. **Doxygen NOT run — not installed
+here; `ccache` also not installed.** **#1773 remains blocked and its downstream use was not
+investigated; #1962, #1956–#1959, #1969, #1970, #1980, #1981, #1995–#1999, #2003, #2013–#2021 and
+#2029–#2032 remain blocked; #1963, #1983 and #2005 remain deferred; none was reopened.** The twelve
+approvals **remain ungranted and none was implemented; CCF-012 was NOT marked closed.** Maximum
+aggregate parallelism **2 jobs**. `CNA` and `mobile-eggbert` were not read, searched, built, tested
+or modified. See the first handoff below.*
 
+
+---
+
+## Autonomous batch handoff, 2026-08-04 (approval packages + `System::Net` review)
+
+Branch `feature/remediation-batch-approval-packages-next-review`, cut from the clean tip `1b892f6`.
+All new commits created with `git -c commit.gpgsign=false` because this environment has no usable
+signing key. **Nothing was pushed, merged, rebased, tagged, force-pushed or published, no PR was
+created, no remote reference was altered and no history was rewritten** — including the pre-existing
+local-only commits from earlier batches, which were left exactly as they were.
+
+### 1. Work unit 1 — the `System::Diagnostics` approvals, re-verified against the #2024–#2028 state
+
+The previous approval wording was **not** trusted. Four things changed as a result.
+
+**(a) #2032 is not a separate decision, and it is five doors, not one.**
+`Process::reapIfNeeded` reaps the child **and** joins both pipe-reader threads in one place, so
+"the child exited" and "the readers finished" are welded together. Measured with a dash-forked
+grandchild holding the redirected pipe for 8 s, direct child killed out-of-band
+(`build-probe/2033_probe1_reader_join_entry_points.log`):
+
+| Public call | Blocked | Declared bound |
+|---|---|---|
+| `WaitForExit(500)` | **7,502 ms** | 500 ms — exceeded (the #2032 shape) |
+| `getHasExitedProperty()` | **7,502 ms** | **none** |
+| `Kill(false)` | **7,502 ms** | **none** |
+| `Start()` (restart) | **7,503 ms** | **none** |
+| `~Process` | **8,004 ms** | **none** |
+
+`getExitCodeProperty()` reaches it through `getHasExitedProperty()`, so **six** public members are
+affected. §14.1's sentence changes `~Process` alone and would leave four doors unbounded, so the
+consolidated request asks for the **`reapIfNeeded` join policy** instead.
+
+**(b) §14.1's recommended option C is unsound as written.** `drainPipe` is started as
+`std::thread(drainPipe, fd, &impl_->stdoutText)` — a **raw pointer into the `Impl`**. Detaching it
+in `~Impl` and destroying `Impl` is a **guaranteed use-after-free**. Neither #2028's mutation check
+nor #2033's found it (both detached where the object stays alive; neither ran ASan). The corrected
+option **C′** gives the reader shared ownership of its buffer — layout-invisible behind the pimpl,
+but a **requirement**, not a nicety.
+
+**(c) #2030's pins re-verified, not merely asserted.** The two getters were temporarily changed to
+return `std::string` by value per §14.2: the build **failed** with both `static_assert`s firing by
+name. `reapIfNeeded`'s call was temporarily removed from `getHasExitedProperty()` (the opposite
+behaviour): `Pin2030_ConstHasExitedMutatesObservableState` **failed**. Both reverted; 219/219 green.
+
+**(d) #2031's pin re-verified against the actual proposed repair.** §14.3's transitive `/proc`
+descendant walk was **implemented temporarily** in `Kill(bool)`: the pin failed with its intended
+message **and the walk killed the `setsid` grandchild**, so option A is demonstrably implementable
+in this container — which §14.3 asserted but had not shown. Reverted; `git diff` clean.
+
+**Three of the twelve scenarios the request template names do not exist in this port** — explicit
+disposal (there is no `Dispose()`), asynchronous output readers, and callback lifetime (there is no
+event model). They are answered as "not applicable, and here is why" rather than fabricated.
+
+### 2. Work unit 2 — the `System::Text` approvals
+
+Re-measured 2026-08-04 (`build-probe/2033_probe2_text_approval_reverify.log`) and separately
+confirmed that **no `modules/text` or `modules/core` production file has changed since #2022 wrote
+the package** (`git log 6abd16e..HEAD -- modules/text modules/core` is empty), so its "now" rows are
+current rather than carried forward. All load-bearing rows reproduced. Three additions:
+
+- **#2017's alternatives go from four to six, and the recommendation changes.** Measured, the stock
+  `EncoderReplacementFallback` takes an **unnamed** `char` parameter in both overrides and returns
+  the same bytes for `'A'` and `'\xC3'` — the default path **ignores** the argument entirely — and
+  the **decoder** surface is already `(const bytecs*, intcs)`-shaped. So the bounded option
+  (**1 + 6**: route both directions, keep the `char` reporting surface, document that it is a
+  storage byte) needs **no vtable change and no source break at all**, which the previous package's
+  B-or-C recommendation did not reflect.
+- **CCF-012 re-enumerated from scratch** over all **16** brace-scanning files in `modules/`:
+  exactly **two** composite-format implementations; `Regex`'s `${name}`, `XName`'s `{ns}local`,
+  `Guid`'s specifiers and the JSON/XML writers are different grammars. The acceptance table was
+  re-measured **with grammar rejections separated from index-out-of-range** by reading the exception
+  message: `{0,not-a-width}`, `{0,-}`, `{10000000}` and `{2147483646}` are **grammar** rejections
+  (narrowing); `{0 }` and `{0  ,5}` are **accepted** by the shared engine (widening); `{1000000}`
+  and `{9999999}` are grammar-**accepted**, confirming §14.8's claim is false. **Messages change
+  too** — `Parse` emits the bare text while the shared engine appends
+  `"Failure to parse near offset N. <reason>"` — which Approval D now states. **CCF-012 is NOT
+  marked closed.**
+- **A1 + A2 promoted to an explicit atomicity requirement**: `EncodingInfo::GetEncoding` returns
+  `Encoding::UTF8()` **itself**, so A2 alone hands out a different member of the same mutable family.
+
+### 3. The one compatible portion found and implemented — #2033
+
+Tested against the compatible-subpart rule and passed on every clause: an independent **disclosure**
+root cause, no user decision, no signature/layout/vtable/`noexcept`/symbol change, **no** blocked
+policy preselected, its own permanent tests, and the blocked remainder left accurately scoped.
+
+Shipped: `Process.hpp`'s class note plus six member comments made true, and
+`ProcessReaderJoinBlockingPinTests.cpp` — **+6**: four pins (`WaitForExit(200)`,
+`getHasExitedProperty()`, `Kill()`, the restart `Start()`), **one control** proving the same calls
+return promptly when the child `exec`s so no descendant holds the pipe, and a zombie-free teardown
+check. **Mutation-checked**: replacing `reapIfNeeded`'s join with option C's `detach` made **all
+four pins fail** while the control and the teardown check stayed green; reverted, `git diff` clean.
+`SharpRuntimeTests_Diagnostics` **219 → 225**.
+
+**No other separable compatible portion exists** in #2029/#2030/#2031 or in #2013–#2021 — each was
+re-tested, not inherited.
+
+### 4. Work unit 3 — the next namespace, re-derived by measurement
+
+Every un-reviewed module with ≥ 4 open findings plus every module ≥ 25 % high was scored on the six
+criteria. **`System::Net` won**: 10 open, **3 high (30 %** — highest of any un-reviewed namespace
+with more than six findings), **no** `docs/` plan at all, one module and one namespace, a `Uri`
+dependency reviewed and repaired days earlier, and **#1962 lives in
+`modules/net-network-information`** — a different module and namespace — so it gates nothing here.
+`modules/buffers` (11 / 3 high / 27 %) lost on having a **partial** plan already
+(`Base64FamilyPlan.md`) and lower-consequence findings; `modules/io` has **zero** highs;
+`modules/core` is not a namespace; `modules/globalization` needs ICU data absent here;
+`modules/security-cryptography`'s two findings are inside a permanent out-of-scope deviation. The
+full table is `docs/SystemNetNamespaceReviewPlan.md` §1.
+
+**All ten premises reproduced** (`build-probe/2034_probe1_net_before.log`,
+`build-probe/2034_probe2_asan.log`), including SR-AUD-300's ASan `heap-buffer-overflow` **at the
+finding's own line**, `SocketAddress.cpp:106`, *0 bytes after a 2-byte region*, with the three
+`.cpp` files compiled **from source** into the probe.
+
+**Four audit premises corrected**, historical text preserved:
+
+1. SR-AUD-304 has an unnamed **fourth** defect — `GetHostAddresses("1.2.3")` returns **three
+   identical** addresses.
+2. SR-AUD-304's `999.999.999.999` case never reaches the literal parser; it throws from real
+   resolution, with the Win32-shaped message `"Win32 error 11001"` on POSIX (a disclosure defect
+   folded into #2039, no `SR-AUD-*` issued).
+3. SR-AUD-307's **own named case** (`collection[-1]`) is the one that **silently succeeds** with a
+   garbage `Cookie`; it is `collection[Count]` that crashes. A test must cover both.
+4. SR-AUD-309 describes the **encode** direction only — `HtmlDecode` already understands `&copy;`,
+   `&#169;` and `&#xA9;`.
+
+Seven causes **N-A … N-G**; six compatible tickets **#2035–#2039, #2041** (`todo`) and four gated
+**#2040, #2042, #2043, #2044** (`blocked`). **Nothing was implemented.** Two structural facts that
+make this namespace unlike `System::Diagnostics`: it has **real cross-module consumers**
+(`net-sockets`, `net-http`, `net-websockets`, `net-network-information`, `net-http-json`,
+integration), and `Cookie`/`CookieCollection`/`WebUtility` are **header-inline**, so a repair there
+forces a consumer recompile and any added data member is an object-layout change.
+
+### 5. `plan.md` reconciliation — the previous note was wrong about one of its three items
+
+The #2024–#2028 batch recorded that `plan.md` lacked sections for the `System::Uri` batch, the
+`System::Text` batch **and** the #2022/#2023 batch. Verified: **#2022/#2023 does have a section** —
+commit `9319580` added 98 lines to `plan.md`. The genuine gap was **three** batches (the `Uri`
+review, the `Uri` follow-up, the `Text` review), and all three were already in the file's
+*"Last verified"* header stack, so `plan.md` was never silent about them. The correction is appended
+to the previous note, the three dated sections are backfilled from committed evidence, and this
+batch's own section and header paragraph are added.
+
+### 6. Known full-gate failures — re-measured, not carried over
+
+**6 failures, unchanged, none disabled, weakened, skipped or recategorised:** five `PingTests`
+(the real **#1962** gap — an empty `ping_group_range`, so the unprivileged `SOCK_DGRAM` ICMP socket
+is denied while `SOCK_RAW` succeeds) and one `SocketTests` IPv6 case (no `/proc/net/if_inet6`).
+**1 skipped**: `CultureInvariantFormattingTests.NumericAndDateFormatting_UnaffectedByNonInvariantGlobalLocale`.
+
+### 7. Validation
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| 37 executables run individually | **15,535 tests, 15,528 passed, 1 skipped, 6 failed** — `15,529 → 15,535`, exactly this batch's +6 |
+| `scripts/validate_module_boundaries.py` | OK — **41 modules, 91 edges** (unchanged) |
+| `test/validate_module_boundaries_test.py` | **7 / 7** |
+| `scripts/generate_component_catalog.py --check` | OK, current |
+| `scripts/db_consistency_check.py` | OK |
+| `scripts/check_version_seam_odr.py` | OK — **2 seams, 18 definitions** |
+| `test/check_version_seam_odr_test.py` | **15 / 15** |
+| `scripts/check_negative_consumer_fixtures.py --jobs 2` | OK — **10 fixtures, 81 sites**, 91 invocations, **peak 2 jobs**, 47.1 s |
+| `test/check_negative_consumer_fixtures_test.py` | **45 / 45** |
+| `git diff --check` | clean |
+| `scripts/check_selective_components.sh` | **PASSED, `EXIT=0`** — run **once**, as a single harness-tracked process, `SHARP_RUNTIME_BUILD_JOBS=2`, `TMPDIR=build-tmp`, preflight-verified with no other compiler process. All ten components: `Core.Base` 5,586, `Collections.Blocking` 8, `Text.Json` 244, `Net.Http.Headers` 373, `Net.WebSockets` 24, `IO.Compression` 40, `Xml.Linq` 184, and `IO.Compression.Zip`/`IO.IsolatedStorage`/`Security.Cryptography.Random` (no test executable in the selective graph). All three negative fixtures **rejected**: `forbidden_text_json_collections`, `forbidden_text_json_object_model`, `forbidden_xml_diagnostics`. Log `build-tmp/2034_selective_final.log` |
+| **Doxygen** | **NOT RUN — not installed in this container.** No package was installed |
+| **ccache** | **NOT installed.** Nothing was retrofitted |
+
+### 8. Build directories, disk and parallelism
+
+`build/` reused throughout, never reconfigured; `build-probe/` **4.2 M** after deleting this batch's
+five probe binaries per `CLAUDE.md` rule 11 — **every `.cpp` source and `.log` is retained** as the
+durable evidence; `build-tmp/` as the repository-local `TMPDIR`. **No new build directory name was
+invented**, and no tree was created under `/tmp`, `/var/tmp` or `/dev/shm`. **Maximum aggregate
+compilation parallelism: two jobs, never exceeded**, and no two compilations ever ran concurrently —
+`ps` verified before every compiler-producing command, and `ps -C cc1plus` verified at exactly **two**
+during the selective run. **One counting artifact, recorded rather than hidden:** an early
+`ps -eo cmd | grep -c '[c]c1plus'` reported *four*, which was its own wrapper and grep command lines
+being counted, not four compilers. `pgrep -c cc1plus` and `ps -C cc1plus` both reported **2** at the
+same instant, and the full `ps` listing showed exactly two `cc1plus` children of one
+`gmake -j2`. `ps -C cc1plus` is the reliable form.
+
+### 9. Next recommended work
+
+1. **The consolidated approval package** — `docs/ConsolidatedApprovalPackage.md` is one document
+   with one grouped checklist for all twelve decisions. The recommended grants are Diagnostics
+   **D-A/D-B/D-C** and Text **A1+A2**, **B** and **D**.
+2. **The `System::Net` compatible half** — #2041 first (it crashes), then #2035, #2036, #2037/#2038,
+   #2039, then a mandatory disclosure-and-pins ticket. Plan §13 gives the order and the reason.
+3. **The namespace after that** — measured, `modules/buffers` (11 open, 3 high, 27 %, partial plan)
+   is the leading candidate, but **re-derive it** rather than trusting this sentence.
 
 ---
 
