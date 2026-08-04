@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <atomic>
 #include <iostream>
 #include <string>
 
@@ -22,8 +23,10 @@ namespace System::Diagnostics {
      * shared here -- a documented, intentional simplification rather than a bug.
      */
     class Trace {
-        static int& indentSizeStorage() {
-            static int size = 4;
+        // Process-global, unlike indentLevelStorage() below, which is correctly per-thread.
+        // Atomic so that concurrent IndentSize writers are not a C++ data race (#2027).
+        static std::atomic<int>& indentSizeStorage() {
+            static std::atomic<int> size{4};
             return size;
         }
 
@@ -40,7 +43,9 @@ namespace System::Diagnostics {
          * @brief Gets the amount by which the indent is increased for each IndentLevel step.
          * C++ counterpart of .NET Trace.IndentSize.
          */
-        static int getIndentSizeProperty() { return indentSizeStorage(); }
+        static int getIndentSizeProperty() {
+            return indentSizeStorage().load(std::memory_order_relaxed);
+        }
 
         /**
          * @brief Sets the amount by which the indent is increased for each IndentLevel step.
@@ -48,7 +53,7 @@ namespace System::Diagnostics {
          * @param value The new indent size; negative values are clamped to 0.
          */
         static void setIndentSizeProperty(int value) {
-            indentSizeStorage() = value < 0 ? 0 : value;
+            indentSizeStorage().store(value < 0 ? 0 : value, std::memory_order_relaxed);
         }
 
         /**

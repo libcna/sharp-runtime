@@ -3,9 +3,11 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <atomic>
 #include <cassert>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentNullException.hpp"
@@ -28,13 +30,36 @@ namespace System::Diagnostics {
      * output should build the prefix themselves from getIndentLevelProperty()/getIndentSizeProperty().
      */
     class Debug {
+        /** @brief Guards every access to providerStorage(). */
+        static std::mutex& providerMutex() {
+            static std::mutex mutex;
+            return mutex;
+        }
+
         static std::shared_ptr<DebugProvider>& providerStorage() {
             static std::shared_ptr<DebugProvider> provider = std::make_shared<DebugProvider>();
             return provider;
         }
 
-        static intcs& indentSizeStorage() {
-            static intcs size = 4;
+        /**
+         * @brief Returns an owning snapshot of the active provider.
+         *
+         * Every read of the provider goes through here rather than dereferencing the global
+         * directly. Returning a shared_ptr *by value* is the point: the caller then owns a
+         * reference for the whole of its call, so a concurrent SetProvider that drops the last
+         * other reference cannot destroy the object mid-use. Before this, TSan reported not
+         * merely a data race on the shared_ptr but a heap-use-after-free inside Debug::Write.
+         *
+         * The lock is released before the caller invokes the provider, so a provider that
+         * calls back into Debug (including SetProvider) cannot deadlock.
+         */
+        static std::shared_ptr<DebugProvider> currentProvider() {
+            std::lock_guard<std::mutex> guard(providerMutex());
+            return providerStorage();
+        }
+
+        static std::atomic<intcs>& indentSizeStorage() {
+            static std::atomic<intcs> size{4};
             return size;
         }
 
@@ -53,7 +78,7 @@ namespace System::Diagnostics {
          * C++ counterpart of .NET Debug.GetProvider().
          * @return The active DebugProvider.
          */
-        static std::shared_ptr<DebugProvider> GetProvider() { return providerStorage(); }
+        static std::shared_ptr<DebugProvider> GetProvider() { return currentProvider(); }
 
         /**
          * @brief Installs a new provider to route Write/WriteLine/Fail output, returning the previous one.
@@ -66,8 +91,14 @@ namespace System::Diagnostics {
         static std::shared_ptr<DebugProvider> SetProvider(std::shared_ptr<DebugProvider> provider) {
             if (!provider)
                 throw System::ArgumentNullException("provider");
-            std::shared_ptr<DebugProvider> previous = providerStorage();
-            providerStorage() = std::move(provider);
+            std::shared_ptr<DebugProvider> previous;
+            {
+                std::lock_guard<std::mutex> guard(providerMutex());
+                previous = providerStorage();
+                providerStorage() = std::move(provider);
+            }
+            // `previous` is returned by value, so the outgoing provider outlives the swap even
+            // if this was the last reference the storage held.
             return previous;
         }
 
@@ -77,7 +108,9 @@ namespace System::Diagnostics {
          * C++ counterpart of .NET Debug.IndentSize.
          * @return The current indent size, in characters.
          */
-        static intcs getIndentSizeProperty() { return indentSizeStorage(); }
+        static intcs getIndentSizeProperty() {
+            return indentSizeStorage().load(std::memory_order_relaxed);
+        }
 
         /**
          * @brief Sets the amount by which the indent is increased for each IndentLevel step.
@@ -86,8 +119,12 @@ namespace System::Diagnostics {
          * @param value The new indent size; negative values are clamped to 0.
          */
         static void setIndentSizeProperty(intcs value) {
-            indentSizeStorage() = value < 0 ? 0 : value;
-            providerStorage()->OnIndentSizeChanged(indentSizeStorage());
+            const intcs clamped = value < 0 ? 0 : value;
+            indentSizeStorage().store(clamped, std::memory_order_relaxed);
+            // The clamped local is reported rather than a second read of the global: a
+            // concurrent setter could otherwise change the value between the store and the
+            // read, and the provider would be told about a size this call never set.
+            currentProvider()->OnIndentSizeChanged(clamped);
         }
 
         /**
@@ -106,7 +143,7 @@ namespace System::Diagnostics {
          */
         static void setIndentLevelProperty(intcs value) {
             indentLevelStorage() = value < 0 ? 0 : value;
-            providerStorage()->OnIndentLevelChanged(indentLevelStorage());
+            currentProvider()->OnIndentLevelChanged(indentLevelStorage());
         }
 
         /**
@@ -177,23 +214,23 @@ namespace System::Diagnostics {
         }
 
         /** @brief Writes @p message via the active DebugProvider, without a trailing newline. */
-        static void Write(const char* message)        { providerStorage()->Write(message); }
+        static void Write(const char* message)        { currentProvider()->Write(message); }
         /** @brief Writes @p message via the active DebugProvider, without a trailing newline. */
-        static void Write(const std::string& message) { providerStorage()->Write(message); }
+        static void Write(const std::string& message) { currentProvider()->Write(message); }
 
         /** @brief Writes a blank line via the active DebugProvider. */
-        static void WriteLine()                        { providerStorage()->WriteLine(""); }
+        static void WriteLine()                        { currentProvider()->WriteLine(""); }
         /** @brief Writes @p message followed by a newline via the active DebugProvider. */
-        static void WriteLine(const char* message)    { providerStorage()->WriteLine(message); }
+        static void WriteLine(const char* message)    { currentProvider()->WriteLine(message); }
         /** @brief Writes @p msg followed by a newline via the active DebugProvider. */
-        static void WriteLine(const std::string& msg) { providerStorage()->WriteLine(msg); }
+        static void WriteLine(const std::string& msg) { currentProvider()->WriteLine(msg); }
 
         /**
          * @brief Reports an assertion failure via the active DebugProvider (aborts by default).
          * @param message Failure description.
          */
         static void Fail(const char* message) {
-            providerStorage()->Fail(message, "");
+            currentProvider()->Fail(message, "");
         }
         /** @brief Reports an assertion failure via the active DebugProvider (aborts by default). */
         static void Fail(const std::string& message) { Fail(message.c_str()); }
