@@ -1,5 +1,75 @@
 # Sharp Runtime plan
 
+*Last verified: 2026-08-04 — branch `feature/remediation-batch-buffers-2054-next-review`, cut from
+`b294738` and **not pushed; no push was requested during this batch**. No merge, rebase, tag, PR,
+force-push, amend or history rewrite; the pre-existing local-only commits were left untouched. All
+new commits intentionally unsigned. The batch **closed the compatible `System::Buffers` queue**
+with **#2054**, **re-derived the next review unit by measurement** instead of inheriting it,
+performed the **`System::Net::Http` namespace review (#2062)** —
+`docs/SystemNetHttpNamespaceReviewPlan.md`, 20 sections, the ninth in the #1950 series — and
+implemented the first ticket that review created, **#2065**. **Four findings moved `confirmed →
+remediated`**: SR-AUD-070 and SR-AUD-077 (#2054), and SR-AUD-318's **leak half** (#2065, a split
+record; its limits half stays `confirmed` and blocked as #2071). **Ten premises were corrected by
+measurement**, three of which changed what shipped — the load-bearing ones being that #2054's
+requirements bite at **construction** rather than at the call, because the members are `virtual`
+and are instantiated for the vtable; that SR-AUD-313's injection vector includes the **request
+URI**, not only header text, so a header-only repair would have left the door open; and that
+SR-AUD-318's socket clause, quantified, leaks **one descriptor per failing request** from four
+remote-controlled paths, which promoted it from a clause in a medium finding to the batch's P1
+repair. Audit **123 remediated / 241 confirmed / 364 total**, of which **47** carry `confirmed
+(design-complete)`; **no `SR-AUD-*` identifier was created — numbering stays frozen at 364.** Gate
+**15,706 / 15,699 passed / 1 skipped / 6 failed** across all 37 executables run individually, the
+same two re-measured causes as before. Negative fixtures **10 / 81 → 11 / 94**. Doxygen and
+`ccache` are absent from this container and were not run. The prior header stack is retained
+below.*
+
+## 2026-08-04 — `System::Buffers` closed for compatible work (#2054), the `System::Net::Http` review (#2062), and #2065
+
+**#2054 — six public generic surfaces required more of `T` than they documented.** SR-AUD-070 and
+SR-AUD-077, family B-C, both now `remediated`. Each requirement is stated in the owning type's
+Doxygen block and `static_assert`ed at the point where it was already enforced — never at class
+scope, which would have rejected a mere declaration that compiles today. Measured against the
+pre-change headers materialised from `b294738`: **exactly the same set of programs compiles**, and
+only the diagnostic changes. Three corrected premises: there are **six** production sites, not
+four (`ArrayBufferWriter(intcs)` resizes on its own and was missed by the finding *and* by the
+review plan); the requirement bites at **construction**, because `GetSpan`/`GetMemory` and
+`ArrayPool`'s `Rent`/`Return` are `virtual` and instantiated for the vtable; and
+**copy-assignability** was a second undocumented requirement that nothing named. 13 negative
+consumer sites hold the rejected half, 9 tests the accepted half. `SharpRuntimeTests_Buffers`
+**609 → 618**. No runtime code, signature, layout, vtable or `noexcept` change.
+
+**`System::Buffers` is closed for compatible work.** Nineteen findings own the namespace; each has
+exactly one disposition — 13 `remediated`, 4 `confirmed (design-complete)` with a blocked ticket
+and a pin each (#2056–#2059), 1 deferred verification with a pin (#2060), and SR-AUD-081 left
+`confirmed` only because the status vocabulary has no false-positive value. #2056–#2059 were not
+implemented and not touched; #2060 stays deferred because `/rv/tmp/runtime/` was re-verified
+**absent** on 2026-08-04.
+
+**#2062 — the `System::Net::Http` namespace review.** Selected by measurement over every unit with
+≥6 open findings and no durable review: `modules/net-http` won on priority 1 (SR-AUD-310 is an
+ASan-confirmed use-after-free) and priority 2 (its inputs are remote-attacker-controlled).
+`modules/core` was excluded on **coherence, not count**. Nine findings, one disposition each, six
+root-cause families, nine tickets — three compatible (#2063, #2064, #2065), five blocked
+(#2066 cites CCF-019 and does not close it; #2067, #2068, #2069, #2071), one deferred for absent
+evidence (#2070). Seven corrected premises, all measured. **No CCF was minted**: NH-B's
+control-character shape is open in two further modules, but both are unreviewed, so §18 records
+the promotion rule for CCF-021 instead.
+
+**#2065 — one socket descriptor leaked per failing request.** `connectToHost` returned a bare
+descriptor closed at exactly one point, after the whole body had been read, so every throw in
+between leaked it — and all four of those throws are chosen by the **remote peer**. Measured: 20
+requests, 20 leaked descriptors, in each of four modes; 0 on the success path. A server answering
+~1,024 requests with a garbled status line exhausts a default `RLIMIT_NOFILE`. A file-local
+`SocketGuard` now owns it, keeping the original close point on the success path so the mutation
+check stays sharp: emptying the destructor fails exactly the four failure-path tests with the
+pre-repair count of 19 while the success-path test stays green. **LSan does not cover this** — it
+tracks memory, not descriptors — so the `/proc/self/fd` count is the instrument and no clean
+sanitizer run is substituted for it; the tests **skip** where that path does not exist. SR-AUD-318
+now carries a split record.
+
+**Next:** #2063 (must precede #2064 — both touch `parseUrl`, and the pins must exist first), then
+#2064, then `modules/xml` as the next review unit.
+
 *Last verified: 2026-08-04 — branch `feature/remediation-batch-buffers-review`, cut from
 `27061bf` and **not pushed; no push was requested during this batch**. No merge, rebase, tag, PR,
 force-push, amend or history rewrite; the pre-existing local-only commits were left untouched. All

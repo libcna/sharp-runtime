@@ -3,6 +3,27 @@
 
 # NEXT.md
 
+*Last verified: 2026-08-04. Branch `feature/remediation-batch-buffers-2054-next-review`, cut from
+the clean tip `b294738`. **Not pushed — no push was requested during this batch.** No merge,
+rebase, tag, force-push, PR, publication, amend or history rewrite; all commits unsigned
+(`git -c commit.gpgsign=false`) because this environment has no usable private signing key. The
+batch **closed the compatible `System::Buffers` queue** with its last ticket **#2054**, then
+**re-derived the next review unit by measurement** rather than inheriting it, reviewed
+**`System::Net::Http` (#2062)** — `docs/SystemNetHttpNamespaceReviewPlan.md`, 20 sections — and
+implemented the first ticket that review created, **#2065**. **Four findings moved `confirmed →
+remediated`**: SR-AUD-070 and SR-AUD-077 (#2054), and SR-AUD-318's **leak half** (#2065, a split
+record — its limits half stays `confirmed` and blocked). Audit **123 remediated / 241 confirmed /
+364 total**, of which **47** carry `confirmed (design-complete)`; **no `SR-AUD-*` identifier was
+created — numbering stays frozen at 364.** **Ten premises were corrected by measurement**, three
+of which changed what shipped. Gate **15,706 tests across 37 executables: 15,699 passing, 1
+skipped, 6 failing** for the same two re-measured causes as before, unchanged and not hidden.
+Graph **41 / 91**, seams **2 / 18**, negative fixtures **11 / 94**. **Doxygen and `ccache` are
+both absent from this container and were NOT run.** The `System::Buffers` namespace is **closed
+for compatible work**; #2056–#2059 stay **blocked** and behaviour-pinned, #2060 a **deferred
+verification**. `System::Net::Http` has **two compatible tickets left** — **#2063** then **#2064**,
+in that order — plus five blocked and one deferred. **#1962 and #1773 remain blocked**; CCF-012
+was **not** marked closed. The prior header is retained below.*
+
 *Last verified: 2026-08-04. Branch `feature/remediation-batch-buffers-review`, cut from the clean
 tip `27061bf`. **Not pushed — no push was requested during this batch.** No merge, rebase, tag,
 force-push, PR, publication, amend or history rewrite; all commits unsigned
@@ -28,7 +49,306 @@ first handoff below.*
 
 ---
 
-## Autonomous batch handoff, 2026-08-04 (the `System::Buffers` review and its compatible half)
+## Autonomous batch handoff, 2026-08-04 (`System::Buffers` #2054, the `System::Net::Http` review, and #2065)
+
+### 1. What this batch did
+
+Three ordered goals, all met.
+
+1. **#2054** — the last compatible `System::Buffers` ticket. `System::Buffers` is now closed for
+   compatible work.
+2. **The next review unit was re-derived by measurement**, not inherited from the previous
+   handoff. `modules/net-http` won; the scoring table is `docs/SystemNetHttpNamespaceReviewPlan.md`
+   §1 and is reproduced in §6 below.
+3. **`System::Net::Http` review (#2062)** — a 20-section durable plan, nine tickets — and then the
+   first of the tickets it created, **#2065**.
+
+Commits, all local and unsigned:
+
+| Commit | Contents |
+|---|---|
+| `e62b22a` | `#2054` — six generic surfaces' `T` requirements made explicit and diagnosed |
+| `e4c7d60` | `#2062` — the `System::Net::Http` namespace review |
+| `cfc8202` | `#2065` — the socket descriptor is owned, so a post-connect throw cannot leak it |
+| *(this one)* | handoff: `NEXT.md`, `plan.md`, `plan.sqlite3` |
+
+### 2. #2054 — six public generic surfaces required more of `T` than they documented
+
+**Findings:** SR-AUD-070 and SR-AUD-077, family B-C, both now **`remediated`**.
+
+**Root cause:** the port implements a .NET generic with an unconstrained `T` on top of a C++
+standard container that constrains it, and no public text said so. Every one of those
+requirements was enforced only by an error deep inside libstdc++ — *"no matching function for
+call to `construct_at`"*, *"`std::__hash_enum<…>::~__hash_enum()` is private within this
+context"*.
+
+**Repair:** each requirement is stated in the owning type's Doxygen block and `static_assert`ed
+**at the point where it was already enforced** — never at class scope. Measured site by site
+against the pre-change headers materialised from `b294738` into
+`build-probe/2054_before_include/`: **exactly the same set of programs compiles**, only the
+diagnostic changes.
+
+| Spelling | Before | After |
+|---|---|---|
+| `ArrayBufferWriter<NoDefault>*`, `sizeof(...)` | legal | legal |
+| `ArrayBufferWriter<NoDefault> w;` | rejected — `construct_at` | rejected — **named requirement** |
+| `ArrayPool<NoDefault>*`, `sizeof(...)` | legal | legal |
+| `ArrayPool<NoDefault>::Shared()` | rejected — `NoDefault::NoDefault()` | rejected — **named requirement** |
+| `MemoryPool<NoDefault>*`, `SearchValues<EqOnly>*`, `SequenceReader<NoDefault>*` and their `sizeof` | legal | legal |
+
+**Three corrected premises**, all measured:
+
+1. **Six production sites, not four.** `ArrayBufferWriter(intcs initialCapacity)` resizes on its
+   own and was missed by the finding **and** by the review plan's own §4.4 table.
+2. **"Fails to compile at `GetSpan`" understates where it bites.** `GetSpan`/`GetMemory` are
+   `virtual` overrides and `ArrayPool`'s `Rent`/`Return` are `virtual`, so their bodies are
+   instantiated **for the vtable**: a plain `ArrayBufferWriter<NoDefault> w;` and a
+   `Return(v, false)` call that needs nothing of `T` were already rejected.
+3. **Copy-assignability was a second undocumented requirement** — `Clear`'s `std::fill` and
+   `Return(clearArray = true)`'s `assign` both need it, and nothing named it. `Clear`'s
+   doc-comment now points such a caller at `ResetWrittenCount()`, which requires neither.
+
+`SequenceReader<T>::TryRead`/`TryPeek` are two further `T{}` sites whose requirement was
+**already documented** (the CCF-014 `out`-parameter contract). They gain the assert for the
+diagnostic and are recorded as *documented, now diagnosed* — not as members of the silent-
+requirement family. Evaluated and **excluded with reasons**: `SequenceReaderExtensions`
+(its public surface is fixed integer types), `Utf8Parser::fail` (private, fixed `T` set),
+`ReadOnlySequence<T>`'s range constructions (copy-constructibility is inherent).
+
+**Closure evidence.** 13 sites in `test/consumer/buffers_generic_requirements_negative.cpp` hold
+the rejected half; **9 tests** in `BuffersGenericRequirementsTests.cpp` hold the accepted half,
+which a negative fixture structurally cannot express. `SharpRuntimeTests_Buffers` **609 → 618**,
+add-only.
+
+**A limit of the per-site fixture, recorded rather than worked around.** A `static_assert` in a
+**virtual** member's body is not attributable to a fixture line when the member is reached from
+inside another header-defined function: GCC roots the chain at a header line, so the checker
+correctly reports *"the compile failed but no diagnostic names lines N–M"*. The caller-facing
+`ArrayPool<T>::Shared().Rent(n)` and `MemoryPool<T>::Shared().Rent(n)` **are** rejected, before
+and after, but are pinned through the concrete pool type declared `extern` so the call rather
+than the vtable is the first instantiation. `docs/NegativeConsumerFixtureValidation.md` §21.3
+carries the rule for future fixtures.
+
+**Sanitizers.** ASan/UBSan/LSan over the new runtime paths are **clean and proven instrumented by
+a control heap-buffer-overflow**. #2054 changes no runtime code, so this is a **non-discriminating
+confirmation**, not a repair proof — stated as such (`build-probe/2054_probe6_asan_ubsan.log`).
+
+**Consequences:** no runtime code, signature, object layout, vtable or exception specification
+changed.
+
+### 3. `System::Buffers` is closed for compatible work
+
+Nineteen findings own this namespace (18 in `modules/buffers` plus SR-AUD-088, whose file lives
+in `modules/core/include/System/Buffers/`). Every one has **exactly one** disposition:
+
+| Disposition | Count | Findings |
+|---|---:|---|
+| `remediated` | 13 | 070, 072, 073, 075, 076, 077, 078, 079, 080, 082, 083, 084, 085 |
+| `confirmed (design-complete)`, blocked ticket + pin each | 4 | 071 (#2056), 074 (#2057), 087 (#2058), 088 (#2059) |
+| `confirmed`, deferred verification + pin | 1 | 086 (#2060) |
+| `confirmed`, **false premise, not an open defect** | 1 | 081 — corrected by #1819, no ticket |
+
+**#2056–#2059 were not implemented and were not touched.** #2060 remains correctly deferred:
+`/rv/tmp/runtime/` was **re-verified absent on 2026-08-04** (`/rv` does not exist), so the .NET
+`D`/`G` integer grammar question it asks cannot be answered from this container. Every blocked
+behaviour remains pinned by #2061. **No compatible `System::Buffers` ticket remains.**
+
+### 4. #2062 — the `System::Net::Http` namespace review
+
+`docs/SystemNetHttpNamespaceReviewPlan.md`, 20 sections. **The review remediates nothing by
+itself.** Nine open findings, one disposition each, six root-cause families, nine tickets:
+
+| Family | Shape | Members | Tickets |
+|---|---|---|---|
+| NH-A | a hand-rolled parser accepts a prefix and calls it the whole value | 311, 312 | #2064 — **cites CCF-002**, does not mint a family |
+| NH-B | a control character crosses a public door into a protocol frame | 313, 316 (reason half), + the request URI | #2063 |
+| NH-C | a raw descriptor with one close on one path | 318 (leak half) | **#2065, done** |
+| NH-D | a borrowed `this` with no owner liveness | 310 | #2066 — **CCF-019**, blocked |
+| NH-E | a public container type is the contract | 315 | #2068, blocked |
+| NH-F | the type cannot represent the constraint it needs | 314, 316 (code half), 317, 318 (limits half) | #2067, #2069, #2070, #2071 |
+
+**Seven corrected premises**, all measured
+(`build-probe/2062_probe1_before.log`, `2062_probe2_fdleak.log`, `2062_probe3_ctl.log`):
+
+| # | The record said | Measured |
+|---|---|---|
+| 1 | SR-AUD-313 is header, media-type and disposition text | The **request URI** is a third vector: CR, LF and NUL pass through `parseUrl` into the `Host:` header. A header-only repair would leave the door open. |
+| 2 | SR-AUD-312 covers "invalid versions" | The version token is **never parsed at all** — `GARBAGE 200 OK` yields 200. |
+| 3 | SR-AUD-311's list | Confirmed, **plus** the host is never lowercased while the scheme is. |
+| 4 | SR-AUD-318's socket clause | **Quantified**: 20 requests → 20 leaked descriptors, in each of four remote-controlled modes, 0 on the success path. |
+| 5 | SR-AUD-315 is case-distinct header names | Confirmed, **plus** the handler writes `Host`/`User-Agent`/`Accept`/`Connection` unconditionally *before* the caller's map, so a caller-set `Host` produces two `Host` fields. |
+| 6 | SR-AUD-316 is one finding | **Two**, with different blast radii; only the status-code domain is gated. |
+| 7 | — | `parseUrl` and `parseStatusLine` are **public static members with public nested result structs**, not internals. |
+
+Measured behaviour worth carrying forward: `http://host:80abc` → port **80**; `http://host:-1/p`
+→ port **−1**; `http://host?q=1` → host **`host?q=1`** and path `/`, so a query string reaches DNS
+*and* the `Host` header while the request line asks for `/`; `HTTP/1.1 200trailer OK` → **200**;
+`HTTP/1.1 -5 OK` → **−5**, cast into `System::Net::HttpStatusCode`, a public enum holding a value
+no enumerator names.
+
+**Four questions are recorded as deferred evidence rather than guessed** (§15 of the plan),
+because `/rv/tmp/runtime/` is absent: whether .NET accepts `HTTP/1.1 099 OK`; whether it
+lowercases a request URI's host; its exact exception type and `paramName` for a CR/LF-bearing
+header value; and whether `StringContent` encodes through the declared charset (#2070).
+
+**No CCF was minted.** NH-B's shape is open in `Net.Http.Headers` (SR-AUD-319, 322) and
+`Net.WebSockets` (SR-AUD-248), but two of those three modules are unreviewed. §18 records the
+promotion rule: mint **CCF-021** when one of them is reviewed, citing all three — the same
+discipline the Buffers review's §5.3 applied to family B-C.
+
+### 5. #2065 — one socket descriptor leaked per failing request
+
+**The highest-consequence compatible defect in the module, and the audit filed it as a clause.**
+`connectToHost` returned a bare descriptor and `platformClose(fd)` was reached at exactly **one**
+point, after the whole body had been read. Every throw in between leaked it — and all four of
+those throws are chosen by the **remote peer**.
+
+| Server response | Requests | Threw | Leaked before | Leaked after |
+|---|---:|---:|---:|---:|
+| well-formed | 20 | 0 | 0 | **0** |
+| garbled status line | 20 | 20 | **20** | **0** |
+| `Content-Length: abc` | 20 | 20 | **20** | **0** |
+| chunk size `ZZZ` | 20 | 20 | **20** | **0** |
+| body shorter than `Content-Length` | 20 | 20 | **20** | **0** |
+
+A server answering roughly 1,024 requests with a garbled status line exhausts a default
+`RLIMIT_NOFILE`, after which the process cannot open a file, a socket or a pipe.
+
+**Repair:** a file-local `SocketGuard`. It deliberately keeps the **original** close point on the
+success path — `Close()` is called exactly where `platformClose(fd)` used to be, and is
+idempotent — so the only behaviour that changes is that a failing path closes too.
+
+**Mutation-checked:** emptying the guard's destructor fails **exactly** the four failure-path
+tests, each with the pre-repair count of 19, while the success-path test stays green. That
+asymmetry is what proves the mutation was targeted; an implementation that relied on the
+destructor for both would have failed all five and proved less.
+
+**Sanitizers, and an honest non-result.** ASan/UBSan/LSan clean, with `HttpClientHandler.cpp` and
+`HttpClient.cpp` compiled **from source** into the probe — `Net.Http` is a `STATIC` component, so
+a probe that merely linked the archive would have measured an uninstrumented body. **LSan does
+not cover this defect**: it tracks memory, not descriptors. The `/proc/self/fd` count is the
+instrument and **no clean sanitizer run is offered as a substitute for it**. The five regressions
+**skip** where `/proc/self/fd` does not exist — a missing instrument is not a passing measurement
+— and each asserts *both* the descriptor delta *and* that the expected number of requests
+actually threw, so a mode that quietly stopped failing is reported rather than counted as a pass.
+
+SR-AUD-318 now carries a **split** record: leak half `remediated`, limits half still `confirmed`
+and blocked as **#2071** (bounding response reads is a public-surface addition — .NET spells it
+`MaxResponseContentBufferSize`, which this port has no equivalent of).
+
+### 6. Why `modules/net-http` was selected
+
+Every unit with ≥6 open findings and no durable review, measured from the index at `e62b22a`:
+
+| Unit | Open | High | Med | Low | High % | Existing review |
+|---|---:|---:|---:|---:|---:|---|
+| `modules/core` | 72 | 9 | 59 | 4 | 12% | family plans only |
+| `modules/io` | 11 | 0 | 11 | 0 | 0% | none |
+| **`modules/net-http`** | **9** | **2** | **7** | **0** | **22%** | **none** |
+| `modules/xml` | 8 | 2 | 6 | 0 | 25% | none |
+| `modules/time-zone` | 7 | 0 | 7 | 0 | 0% | none |
+| `modules/globalization` | 7 | 1 | 6 | 0 | 14% | none |
+| `modules/text-json` | 7 | 1 | 6 | 0 | 14% | none |
+| `modules/net-websockets` | 6 | 2 | 4 | 0 | 33% | none |
+
+Applying the stated priorities **in order**: `net-http` wins **priority 1** (SR-AUD-310 is an
+ASan-confirmed use-after-free; `xml`'s SR-AUD-351 is an ownership defect with no confirmed
+dangling read) and **priority 2** (its inputs are remote-attacker-controlled by construction, and
+this review measured a remote resource-exhaustion channel). Priorities 3 and 4 are neutral
+between the two. **`modules/core` was excluded on coherence, not count** — 72 findings across 119
+files is a dozen cross-cutting families, not one review unit, and it should continue to be worked
+family by family.
+
+**`modules/xml` is the recommended next unit**; `modules/net-websockets` after it, since its UAF
+is the same shape as SR-AUD-310 and should be judged against whatever #2066 eventually concludes.
+
+### 7. Validation, as measured
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| Full gate, all **37** executables run individually | **15,706 tests — 15,699 passed, 1 skipped, 6 failed** |
+| `validate_module_boundaries.py` | OK — **41 modules / 91 edges** |
+| `validate_module_boundaries_test.py` | 7 tests OK |
+| `generate_component_catalog.py --check` | OK — catalogue current |
+| `db_consistency_check.py` | OK |
+| `check_version_seam_odr.py` | OK — **2 seams / 18 definitions** |
+| `check_version_seam_odr_test.py` | 15 tests OK |
+| `check_negative_consumer_fixtures.py` | OK — **11 fixtures / 94 sites**, 105 compiler invocations, peak 2 jobs, 38.0 s |
+| `check_negative_consumer_fixtures_test.py` | 45 tests OK |
+| `check_selective_components.sh` | **passed**, one serialized instance, **10 m 42 s**, `ps -C cc1plus` never above **2** |
+| `git diff --check` | clean |
+
+**Known failures, re-measured this batch, unchanged and not hidden:**
+
+- five `PingTests` — `/proc/sys/net/ipv4/ping_group_range` is **`1 0`**, an empty range, so **no**
+  gid may open a `SOCK_DGRAM` ICMP socket and the call returns `EACCES` even as uid 0. `SOCK_RAW`
+  ICMP **does** open here, which is exactly the **#1962** gap: `Ping` only ever tries
+  `SOCK_DGRAM`. Blocked, unapproved.
+- one `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` — `/proc/net/if_inet6` does
+  not exist and `socket(AF_INET6, …)` returns `EAFNOSUPPORT`. Environment, not code.
+
+Nothing was disabled, weakened, skipped, recategorized or special-cased. Test growth is
+**15,692 → 15,706**, add-only (+9 from #2054, +5 from #2065).
+
+**Doxygen and `ccache` are both absent from this container.** Neither was run and no historical
+result is claimed as newly verified.
+
+**Build directories used:** `build/` (incremental, never reconfigured from scratch),
+`build-probe/` (all probes, prefixed `2054_*` and `2062_*`/`2065_*`), `build-tmp/` (the
+repository-local `TMPDIR`). Maximum aggregate compiler parallelism was **2** throughout, verified
+with `ps -C cc1plus` while the selective check ran. No build tree was created under `/tmp`,
+`/var/tmp` or `/dev/shm`.
+
+### 8. Process notes
+
+The previous batch recorded three editing mistakes. None recurred:
+
+- **no `git checkout --` or `git restore` was used to revert a mutation.** #2065's mutation check
+  used two exactly-anchored `Edit` calls (empty the destructor, then restore it), with
+  `git diff --stat` captured before and after — identical on both sides, `40 insertions(+),
+  2 deletions(-)`, and a `grep` confirming no `MUTATION` marker survived.
+- **no unrestricted repository-wide string replacement.** Every scripted documentation edit named
+  one file, asserted its expected match count, and was inspected with `git diff --stat`
+  immediately afterwards.
+- **the stacked headers of `NEXT.md` and `plan.md` were preserved**, with line counts recorded
+  before and after and the previous top section demoted to *"Prior handoff, retained"* rather
+  than overwritten.
+
+Commit `a620ade`'s subject names only #2049/#2050 while it also carries #2051. **It was not
+amended and not rewritten.** The durable handoff already explains it
+(`docs/BuffersNamespaceReviewPlan.md` §23.2), so no new record was created.
+
+**One pre-existing hygiene defect, reported rather than silently changed.**
+`scripts/__pycache__/` holds **three tracked `.pyc` files** — `check_negative_consumer_fixtures`,
+`generate_component_catalog` and `validate_module_boundaries`, committed by an earlier session in
+`dd09de1` and dated 2026-08-03. `build*` is the only `__pycache__`-adjacent entry in
+`.gitignore`, so this path is **not** ignored. This batch ran every Python invocation with
+`PYTHONDONTWRITEBYTECODE=1` and did not create, modify, stage or commit any bytecode — the three
+files are byte-identical to their committed state. They were **left in place**: deleting tracked
+files is a change nobody asked for, and the fix is a one-line `.gitignore` entry plus a
+`git rm --cached`, which belongs in its own commit.
+
+### 9. What is next
+
+1. **#2063** — `System::Net::Http` control-character rejection at four public doors, plus the
+   disclosure-and-pins suite for #2066–#2071. **Must land before #2064**: both touch `parseUrl`,
+   and the pins must exist before anything else moves.
+2. **#2064** — full-consumption `parseUrl`/`parseStatusLine` with real domain checks.
+3. Then `System::Net::Http` is closed for compatible work, and **`modules/xml`** is the next
+   review unit.
+
+**Blocked and unapproved, unchanged by this batch:** #2056–#2059, #2066–#2069, #2071,
+#2040/#2042/#2043/#2044, #2029–#2031, #2013–#2021, #1995–#1999, #2003, #1956–#1959, #1969,
+#1970, #1962, #1773. **CCF-012 was not marked closed.** **CCF-019 was not closed** — #2066 cites
+it and does not claim to. A behaviour-pinning test and a completed design are **not** approval.
+
+**Deferred verification, evidence absent:** #2060 (Buffers), #2070 (`StringContent`'s charset),
+#2005, #1983, #1963.
+
+---
+
+## Prior handoff, retained: 2026-08-04 (the `System::Buffers` review and its compatible half)
 
 ### 1. Selection, verified rather than inherited
 
