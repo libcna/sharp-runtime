@@ -79,8 +79,19 @@ namespace System::Buffers {
 
         /**
          * @brief Returns a string representation of this format, e.g. "G" or "D3".
+         *
+         * A zero symbol has no textual form: .NET's internal `Format` tests
+         * `symbol != default` first and returns an empty span, so `default(StandardFormat)`,
+         * `Parse("")` and an explicitly constructed zero symbol all render as `""`. This port
+         * used to start the string with the symbol unconditionally and then append the
+         * precision, so those three values rendered as 2, 1 and 2 bytes of embedded-NUL text
+         * (`{0, '0'}`, `{0}`, `{0, '0'}`) — text that a logger, a format forwarder or a
+         * textual-equality check observes as different from .NET's.
+         *
+         * Ticket #2052 / SR-AUD-083; see docs/BuffersNamespaceReviewPlan.md §4.7.
          */
         [[nodiscard]] std::string ToString() const {
+            if (format_ == 0) return std::string();
             std::string s(1, static_cast<char>(format_));
             if (precision_ != NoPrecision) s += std::to_string(precision_);
             return s;

@@ -34,14 +34,24 @@ template<typename T>
 [[nodiscard]] std::optional<System::SequencePosition> PositionOf(
     const ReadOnlySequence<T>& source, const T& value)
 {
-    long long len = source.getLengthProperty();
-    for (long long i = 0; i < len; ++i) {
-        auto slice = source.Slice(source.getStartProperty(),
-                                  source.GetPosition(i + 1));
-        auto arr = slice.ToArray();
-        if (!arr.empty() && arr.back() == value) {
-            return source.GetPosition(i);
-        }
+    // One linear scan over the single contiguous segment, with no intermediate allocation.
+    //
+    // This used to re-slice and materialise the whole sequence once per element -- Slice
+    // copies the ENTIRE backing vector and ToArray then copies the prefix -- which is
+    // quadratic in both time and allocated bytes. Measured with a counting operator new while
+    // searching for the last element (build-probe/2048_probe2_before.log): n=1000 took 2,000
+    // allocations and 6.0 MB; n=8000 took 16,000 allocations and 384.0 MB for a sequence
+    // holding 32 KB of data, with bytes quadrupling for every doubling of n.
+    //
+    // The returned position is absolute -- GetPosition(i) is relative to the sequence's own
+    // start -- which is what the previous implementation produced too, so the values are
+    // unchanged. Ticket #2055; see docs/BuffersNamespaceReviewPlan.md §5.6.
+    const System::ReadOnlyMemory<T> first = source.First();
+    const intcs length = first.getLengthProperty();
+    const T* const data = first.getPointer();
+    for (intcs i = 0; i < length; ++i) {
+        if (data[i] == value)
+            return source.GetPosition(static_cast<long long>(i));
     }
     return std::nullopt;
 }

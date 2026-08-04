@@ -40,13 +40,23 @@ namespace System::Buffers {
         static std::unique_ptr<ArrayPool<T>> Create();
 
         /**
-         * @brief Creates a new ArrayPool with specified capacity limits.
+         * @brief Creates a new ArrayPool after validating the specified capacity limits.
          *
          * C++ counterpart of .NET ArrayPool&lt;T&gt;.Create(int, int).
-         * The capacity parameters are accepted for API compatibility but are
-         * not used in this stub implementation.
-         * @param maxArrayLength       Maximum allowed array length.
-         * @param maxArraysPerBucket   Maximum number of arrays per bucket.
+         *
+         * Both arguments are **validated exactly as .NET's `ConfigurableArrayPool` validates
+         * them**, but — unlike .NET — they are **not applied**: this port's pool allocates a
+         * fresh vector on every Rent and has no buckets to size, so `Rent` may return a
+         * buffer longer than @p maxArrayLength and no bucket count is enforced. The
+         * validation is not decoration: it stops a caller silently configuring a pool with
+         * zero or negative limits and believing they took effect. Honouring the limits needs
+         * a configured pool type this port does not have.
+         *
+         * Ticket #2053 / SR-AUD-076; see docs/BuffersNamespaceReviewPlan.md §4.6.
+         *
+         * @param maxArrayLength       Maximum allowed array length. Must be positive.
+         * @param maxArraysPerBucket   Maximum number of arrays per bucket. Must be positive.
+         * @throws ArgumentOutOfRangeException if either argument is zero or negative.
          */
         static std::unique_ptr<ArrayPool<T>> Create(intcs maxArrayLength, intcs maxArraysPerBucket);
     };
@@ -78,7 +88,15 @@ namespace System::Buffers {
     }
 
     template<typename T>
-    std::unique_ptr<ArrayPool<T>> ArrayPool<T>::Create(intcs /*maxArrayLength*/, intcs /*maxArraysPerBucket*/) {
+    std::unique_ptr<ArrayPool<T>> ArrayPool<T>::Create(intcs maxArrayLength, intcs maxArraysPerBucket) {
+        // .NET's ConfigurableArrayPool constructor rejects a non-positive value for either
+        // limit before it builds a single bucket. This port used to discard both arguments
+        // unread, so Create(0, 1), Create(1, 0) and Create(-5, -7) all returned a usable pool
+        // and the caller had no way to learn that the configuration meant nothing.
+        if (maxArrayLength <= 0)
+            throw ArgumentOutOfRangeException("maxArrayLength");
+        if (maxArraysPerBucket <= 0)
+            throw ArgumentOutOfRangeException("maxArraysPerBucket");
         return std::make_unique<SharedArrayPool<T>>();
     }
 

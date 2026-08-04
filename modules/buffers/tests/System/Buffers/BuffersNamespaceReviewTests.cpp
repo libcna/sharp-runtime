@@ -243,3 +243,175 @@ TEST(ArrayBufferWriterGrowthTests, AdvancePastCapacity_StillInvalidOperation) {
     ArrayBufferWriter<char> w(4);
     EXPECT_THROW(w.Advance(5), System::InvalidOperationException);
 }
+
+// ===========================================================================
+// #2052 / SR-AUD-083 — StandardFormat::ToString of a zero symbol is empty
+// ===========================================================================
+
+TEST(StandardFormatToStringTests, DefaultValue_RendersEmptyNotEmbeddedNul) {
+    StandardFormat d;
+    EXPECT_EQ(d.ToString().size(), 0u);
+    EXPECT_EQ(d.ToString(), std::string());
+}
+
+TEST(StandardFormatToStringTests, ExplicitZeroSymbol_RendersEmpty) {
+    StandardFormat z('\0');
+    EXPECT_EQ(z.ToString().size(), 0u);
+}
+
+TEST(StandardFormatToStringTests, ZeroSymbolWithExplicitZeroPrecision_RendersEmpty) {
+    StandardFormat z('\0', 0);
+    EXPECT_EQ(z.ToString().size(), 0u);
+}
+
+TEST(StandardFormatToStringTests, ZeroSymbolWithMaximumPrecision_RendersEmpty) {
+    StandardFormat z('\0', StandardFormat::MaxPrecision);
+    EXPECT_EQ(z.ToString().size(), 0u);
+}
+
+TEST(StandardFormatToStringTests, ParseOfEmptyString_RendersEmpty) {
+    StandardFormat p = StandardFormat::Parse("");
+    EXPECT_TRUE(p.getIsDefaultProperty());
+    EXPECT_EQ(p.ToString().size(), 0u);
+}
+
+TEST(StandardFormatToStringTests, NonZeroSymbolsAreUnchanged) {
+    EXPECT_EQ(StandardFormat('G').ToString(), "G");
+    EXPECT_EQ(StandardFormat('D', 3).ToString(), "D3");
+    EXPECT_EQ(StandardFormat('F', 99).ToString(), "F99");
+    EXPECT_EQ(StandardFormat('X', 0).ToString(), "X0");
+}
+
+TEST(StandardFormatToStringTests, RoundTripStillHoldsForNonZeroSymbols) {
+    for (char symbol : {'G', 'D', 'X', 'N', 'F', 'e'}) {
+        StandardFormat original(symbol, 7);
+        StandardFormat parsed = StandardFormat::Parse(original.ToString());
+        EXPECT_EQ(parsed, original) << "symbol " << symbol;
+    }
+}
+
+// ===========================================================================
+// #2053 / SR-AUD-076 — ArrayPool<T>::Create validates its configuration
+// ===========================================================================
+
+TEST(ArrayPoolCreateTests, ZeroMaxArrayLength_Throws) {
+    EXPECT_THROW((void)ArrayPool<int>::Create(0, 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayPoolCreateTests, ZeroMaxArraysPerBucket_Throws) {
+    EXPECT_THROW((void)ArrayPool<int>::Create(1, 0), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayPoolCreateTests, BothZero_Throws) {
+    EXPECT_THROW((void)ArrayPool<int>::Create(0, 0), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayPoolCreateTests, NegativeMaxArrayLength_Throws) {
+    EXPECT_THROW((void)ArrayPool<int>::Create(-1, 10), System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)ArrayPool<int>::Create(INTCS_MIN, 10), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayPoolCreateTests, NegativeMaxArraysPerBucket_Throws) {
+    EXPECT_THROW((void)ArrayPool<int>::Create(10, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayPoolCreateTests, SmallestValidConfiguration_StillReturnsAUsablePool) {
+    auto pool = ArrayPool<int>::Create(1, 1);
+    ASSERT_NE(pool, nullptr);
+    auto buffer = pool->Rent(4);
+    EXPECT_GE(buffer.size(), 4u);
+}
+
+TEST(ArrayPoolCreateTests, OrdinaryConfiguration_StillReturnsAUsablePool) {
+    auto pool = ArrayPool<double>::Create(1024, 10);
+    ASSERT_NE(pool, nullptr);
+    EXPECT_EQ(pool->Rent(8).size(), 8u);
+}
+
+TEST(ArrayPoolCreateTests, ParameterlessCreateIsUnchanged) {
+    auto pool = ArrayPool<int>::Create();
+    ASSERT_NE(pool, nullptr);
+    EXPECT_EQ(pool->Rent(0).size(), 0u);
+    EXPECT_THROW((void)pool->Rent(-1), System::ArgumentOutOfRangeException);
+}
+
+// ===========================================================================
+// #2055 — BuffersExtensions::PositionOf is one linear scan
+//
+// Values must be identical to the previous quadratic implementation. No
+// allocation-count assertion lives here (not portable); the scaling evidence is
+// in build-probe/2048_probe2_before.log and its post-repair counterpart.
+// ===========================================================================
+
+TEST(BuffersExtensionsPositionOfTests, FirstElement) {
+    ReadOnlySequence<int> seq(std::vector<int>{5, 6, 7});
+    auto pos = BuffersExtensions::PositionOf(seq, 5);
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_EQ(pos->GetInteger(), 0);
+}
+
+TEST(BuffersExtensionsPositionOfTests, LastElement) {
+    ReadOnlySequence<int> seq(std::vector<int>{5, 6, 7});
+    auto pos = BuffersExtensions::PositionOf(seq, 7);
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_EQ(pos->GetInteger(), 2);
+}
+
+TEST(BuffersExtensionsPositionOfTests, MiddleElement) {
+    ReadOnlySequence<int> seq(std::vector<int>{5, 6, 7});
+    auto pos = BuffersExtensions::PositionOf(seq, 6);
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_EQ(pos->GetInteger(), 1);
+}
+
+TEST(BuffersExtensionsPositionOfTests, AbsentValue) {
+    ReadOnlySequence<int> seq(std::vector<int>{5, 6, 7});
+    EXPECT_FALSE(BuffersExtensions::PositionOf(seq, 99).has_value());
+}
+
+TEST(BuffersExtensionsPositionOfTests, EmptySequence) {
+    ReadOnlySequence<int> seq;
+    EXPECT_FALSE(BuffersExtensions::PositionOf(seq, 0).has_value());
+}
+
+TEST(BuffersExtensionsPositionOfTests, EmptySequenceFromNullPointer) {
+    ReadOnlySequence<int> seq(static_cast<const int*>(nullptr), 0);
+    EXPECT_FALSE(BuffersExtensions::PositionOf(seq, 0).has_value());
+}
+
+TEST(BuffersExtensionsPositionOfTests, SingleElement) {
+    ReadOnlySequence<int> seq(std::vector<int>{42});
+    auto pos = BuffersExtensions::PositionOf(seq, 42);
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_EQ(pos->GetInteger(), 0);
+    EXPECT_FALSE(BuffersExtensions::PositionOf(seq, 43).has_value());
+}
+
+TEST(BuffersExtensionsPositionOfTests, DuplicatesReturnTheFirstOccurrence) {
+    ReadOnlySequence<int> seq(std::vector<int>{1, 2, 1, 2});
+    auto pos = BuffersExtensions::PositionOf(seq, 2);
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_EQ(pos->GetInteger(), 1);
+}
+
+TEST(BuffersExtensionsPositionOfTests, SlicedSequenceReturnsAnAbsolutePosition) {
+    ReadOnlySequence<int> seq(std::vector<int>{10, 20, 30, 40});
+    auto sliced = seq.Slice(seq.GetPosition(2), seq.getEndProperty());
+    ASSERT_EQ(sliced.getLengthProperty(), 2LL);
+    auto pos = BuffersExtensions::PositionOf(sliced, 40);
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_EQ(pos->GetInteger(), 3);
+    // A value that lives only outside the slice is not found.
+    EXPECT_FALSE(BuffersExtensions::PositionOf(sliced, 10).has_value());
+}
+
+TEST(BuffersExtensionsPositionOfTests, LargeSequenceCompletesWithoutQuadraticCost) {
+    // 100k elements would have allocated ~60 GB and taken minutes under the previous
+    // implementation; here it is a single pass.
+    std::vector<int> data(100000);
+    for (std::size_t i = 0; i < data.size(); ++i) data[i] = static_cast<int>(i);
+    ReadOnlySequence<int> seq(data);
+    auto pos = BuffersExtensions::PositionOf(seq, 99999);
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_EQ(pos->GetInteger(), 99999);
+}
