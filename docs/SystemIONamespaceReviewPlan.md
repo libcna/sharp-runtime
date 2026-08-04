@@ -325,6 +325,29 @@ Note also that **the number `CCF-021` has been proposed for two different candid
 the `SearchValues.hpp` per-file report proposes it for a public-generic-surface shape that
 `AUDIT_PROGRESS.md` later declines. Whoever mints must say which family the number names.
 
+### 8.2.1 CORRECTION, added by the #2100/#2107/#2098-design batch — the policy contradiction is resolved
+
+§8.2's stated reason for not minting — an unqualified "the cross-cutting numbering is closed" in
+`audit/AUDIT_CROSS_CUTTING_FINDINGS.md` — **no longer stands**, and §8.2's text above is left
+unedited so the reasoning at the time stays visible.
+
+Measured against that document's own text, **"the numbering is closed" is scoped to
+namespace-local causes**, not a global freeze: six of its seven occurrences say so in the same
+sentence, and the same document instructs *"Mint CCF-021 when `net-http-headers` is reviewed"*
+and names this review as CCF-022's trigger. A global freeze and a written instruction to mint
+later cannot both be literal. The full argument, its honest counter-example, and CCF-022's
+re-enumerated membership are in that file's **"Numbering-policy reconciliation"** appendix.
+
+**CCF-022 is still not minted**, but for a different and narrower reason: every promotion
+sentence in the repository is passive and names no agent, so *who* may execute a mint is genuinely
+unsettled, and two of the family's six sites are now blocked behind Approval IO-1 (§21.8), which
+would make the family unclosable on the day it was minted. That is a real decision with more than
+one defensible answer, so it is **decision ticket #2109** with three bounded options, a
+recommendation and an exact approval sentence — not something this batch resolves by inference.
+
+**One member has moved since §8.2 was written:** SR-AUD-344 is **remediated** by #2108, so the
+family now stands at **three remediated of six**.
+
 ### 8.3 CCF-012
 
 Not a member. SR-AUD-347 shares CCF-012's *defect class* (a `std::` primitive's exception

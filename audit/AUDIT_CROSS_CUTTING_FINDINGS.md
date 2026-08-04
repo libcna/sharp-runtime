@@ -2474,3 +2474,94 @@ corrected premise 6.5 — carry ordinary ticket numbers only (#2090, #2091, #209
 `WebSocketsGatedBehaviourPins.cpp` rather than left to inference: a data race and a null
 dereference are undefined behaviour, not behaviour, so a passing test would be asserting on the
 outcome of UB and a deliberately racing test would be flaky by construction.
+
+---
+
+## Numbering-policy reconciliation — ticket #2109 (2026-08-04)
+
+Recorded by the `#2100/#2107/#2098-design` batch. **This section adds; it edits nothing above,
+and no historical statement is rewritten.**
+
+### The apparent contradiction
+
+`docs/SystemIONamespaceReviewPlan.md` §8.2 declined to mint **CCF-022** although it judged the
+trigger met and the membership complete, on the grounds that this document states in several
+places that *"the cross-cutting numbering is closed"* while this document is authoritative for
+minting. The `net-websockets` appendix left **CCF-021** unminted for a related reason. Two
+candidate families are therefore parked behind a sentence whose scope was never stated.
+
+### The authoritative reading, derived from this document's own text
+
+**"The cross-cutting numbering is closed" is scoped to namespace-local causes a namespace review
+would otherwise promote on its own authority. It is not a global freeze on the identifier
+space.** Three independent pieces of evidence, all inside this file:
+
+1. **Six of the seven occurrences say so in the same sentence.** The recurring form is *"The
+   other N causes … are **specific to this namespace** and are not promoted to `CCF-*`
+   identifiers: the cross-cutting numbering is closed"* — Threading (§`CCF-*` appendix, "the
+   other six causes"), Uri ("the other ten causes"), Text ("the remaining causes"), Diagnostics
+   ("the remaining causes"), Net ("causes N-A … N-G") and Net.WebSockets ("causes W-A … W-F").
+   In every one, the subject of "closed" is a list of **namespace-local** causes.
+2. **This same document plans future mints, by name and with triggers.** The `CCF-021` section
+   ends: *"**Mint CCF-021 when `net-http-headers` is reviewed, citing all five findings and this
+   appendix.**"* The `CCF-022` section names *"the trigger remains the `modules/io` review."*
+   A global freeze and a written instruction to mint later cannot both be literal; the promotion
+   records are specific and the "closed" sentences are generic, so the promotion records govern.
+3. **`AUDIT_PROGRESS.md` records the `Buffers` review leaving a cause "module-local and
+   deliberately not minted as CCF-021 — with an explicit promotion rule."** A promotion rule is
+   meaningless under a global freeze.
+
+**The honest counter-example, recorded rather than argued away.** One occurrence — the
+`System::Text` appendix on `Encodings::Web` — is **not** about a namespace-local cause. It
+declines to make two sites in a *different component* into `CCF-012` members, or into a new
+family, and cites "the numbering is closed". That is the weakest point in the reading above. It
+is still consistent with it: what is declined there is a **namespace review minting on its own
+authority** for a cause it discovered incidentally, which is the same posture, not a statement
+that the identifier space is sealed.
+
+### What this establishes, and what it does not
+
+**Established:** `CCF-021` and `CCF-022` are **not blocked by the numbering policy.** The
+identifiers are unallocated, the mechanism for allocating them is the promotion record, and both
+already have one. Any future review may stop citing "numbering is closed" as the reason a
+genuinely cross-module family is parked.
+
+**Not established, and left to the maintainer:** whether a remediation batch may *execute* a
+mint, or whether that act is reserved. Every promotion sentence in this file is written in the
+passive ("Mint CCF-021 when …") and names no agent, and the `modules/io` review explicitly said
+the act "belongs to the maintainer, not to me". This batch does not overturn that by inference.
+
+**CCF-022 is therefore still NOT minted**, and the reason has changed: it is no longer a policy
+contradiction, it is an unresolved question of authority plus the membership state below.
+Recorded as decision ticket **#2109**.
+
+### CCF-022's membership, re-enumerated at this batch's tip
+
+| Module | Finding | Ticket | State |
+|---|---|---|---|
+| `xml` | SR-AUD-349 — `XmlWriter` after `Close` | #2076 | **remediated** |
+| `xml` | SR-AUD-348 — `XmlReader::Close` unobservable | #2078 | **remediated** |
+| `io` | SR-AUD-344 — `UnmanagedMemoryStream` | **#2108** | **remediated (this batch)** |
+| `io` | SR-AUD-337 — `leaveOpen` text wrappers | #2098 | confirmed, **blocked on Approval IO-1** |
+| `io` | SR-AUD-343 — in-memory text wrappers | #2098 | confirmed, **blocked on Approval IO-1** |
+| `io` | SR-AUD-342, `Length`/`Position`/`Seek` half | #2099 | confirmed, `todo` |
+
+Six sites, two modules, one cause, one policy — *a type that records being closed must enforce it
+at every public member that depends on the closed resource, not only at the data-transfer ones.*
+**Three of the six are now remediated**, which is one more than when the `modules/io` review
+wrote §8.2.
+
+**A new fact the trigger's authors did not have:** #2108 measured that
+`UnmanagedMemoryStream` **already carried the state** and merely failed to consult it, while
+#2098's four text wrappers need an object-layout decision. So this family is not homogeneous in
+cost: half of it is free and half is gated. That is an argument for minting (the family's whole
+point is that one policy governs sites with very different local costs) and simultaneously the
+reason minting now would create a family that **cannot be closed** until Approval IO-1 is
+answered. Both halves are stated so the decision is made on complete information.
+
+### CCF-021 is unchanged by this section
+
+Its promotion trigger is the **`net-http-headers` review**, that module is still unreviewed, and
+it holds **two of the family's five findings, both `high`**. Nothing here mints it, and this
+batch did not begin that review. The reconciliation above removes the *policy* obstacle only;
+the *membership* obstacle stands.
