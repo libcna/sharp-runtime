@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 #include <gtest/gtest.h>
 #include <any>
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <system_error>
@@ -1223,21 +1225,83 @@ void pokeMockServer(SharpRuntime::intcs port) {
     }
 }
 
+// The result of one descriptor measurement. BOTH endpoints are reported, not just their
+// difference: a bare delta cannot distinguish "nothing leaked" from "the instrument was
+// measuring the wrong thing", and telling those apart is exactly what ticket #2107 is about.
+struct DescriptorMeasurement {
+    SharpRuntime::intcs before = 0;
+    SharpRuntime::intcs after = 0;
+    bool quiesced = false;   ///< false => the server thread never reached a known state
+    [[nodiscard]] SharpRuntime::intcs delta() const { return after - before; }
+};
+
+// Waits for a specific EVENT -- the mock server having closed its `n`th accepted socket -- and
+// NOT for an arbitrary duration. The deadline is only a safety bound so that a wedged server
+// thread FAILS the test instead of hanging it; the measurement never relies on it elapsing.
+// A sleep long enough to "usually" work is precisely the fix ticket #2107 forbids.
+bool waitForServerToClose(const std::atomic<int>& closed, int n) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (closed.load(std::memory_order_acquire) < n) {
+        if (std::chrono::steady_clock::now() > deadline) return false;
+        std::this_thread::yield();
+    }
+    return true;
+}
+
 // Runs `iterations` requests against a loopback server that always answers with
-// `reply`, and returns the change in this process's open-descriptor count.
-SharpRuntime::intcs descriptorDeltaOver(const std::string& reply,
-                                        int iterations,
-                                        int& threwOut) {
+// `reply`, and reports this process's open-descriptor count before and after.
+//
+// TICKET #2107 -- WHY BOTH SAMPLES ARE QUIESCED. The mock server runs on its own thread and
+// holds an accepted socket for each connection. That socket is a descriptor of THIS process, so
+// whether it happens to be open at a sample point is pure scheduling luck, and it corrupted the
+// measurement in BOTH directions. Measured deterministically by injecting a server-side delay
+// (build-probe/2107_probe1_instrument.cpp, log build-probe/2107_probe1_before.log):
+//
+//   server lags on the WARM-UP connection -> `before` is inflated by 1 -> delta = -1
+//   server lags on the LAST    connection -> `after`  is inflated by 1 -> delta = +1
+//
+// The -1 is the symptom that was observed in the wild, and it is definitionally not a leak. The
+// +1 is worse and was NOT recorded on the ticket: it is a FALSE LEAK REPORT that would send a
+// maintainer hunting through production code for a defect that does not exist.
+//
+// #2107's stated root cause -- "the after sample is taken before join()" -- names only HALF the
+// fix. Joining before the final sample removes the +1 direction completely, but the probe shows
+// the -1 direction SURVIVES it, because that one corrupts the BASELINE. Both ends must be
+// quiesced:
+//
+//   * `before` is taken only after the server has closed the warm-up connection;
+//   * `after`  is taken only after the server thread has been JOINED, so no accepted socket of
+//     any iteration can still be open.
+//
+// Between the two samples the only thread touching descriptors is the client, so nothing
+// unrelated is being counted. The listener stays open across both samples and cancels out.
+//
+// This does NOT weaken the guarantees #2063/#2065 established: a descriptor genuinely leaked by
+// the client is still open after the join, and is still counted. Proven by mutation.
+DescriptorMeasurement descriptorDeltaOver(const std::string& reply,
+                                          int iterations,
+                                          int& threwOut) {
     std::shared_ptr<System::Net::Sockets::Socket> listener;
     SharpRuntime::intcs port = startMockHttpServer(listener);
 
+    std::atomic<int> connectionsClosed{0};
+
     std::thread serverThread([&]() {
-        for (int i = 0; i < iterations; ++i) {
-            auto server = listener->Accept();
-            std::vector<SharpRuntime::bytecs> reqBuf(4096);
-            server->Receive(reqBuf);
-            server->Send(toBytes(reply));
-            server->Close();
+        // The server swallows its own exceptions so that join() always returns. Without this an
+        // Accept() that threw would escape a std::thread and call std::terminate, turning a test
+        // failure into a process abort that proves nothing.
+        try {
+            for (int i = 0; i < iterations; ++i) {
+                auto server = listener->Accept();
+                std::vector<SharpRuntime::bytecs> reqBuf(4096);
+                server->Receive(reqBuf);
+                server->Send(toBytes(reply));
+                server->Close();
+                connectionsClosed.fetch_add(1, std::memory_order_release);
+            }
+        } catch (const System::Exception&) {
+            // Leave connectionsClosed where it is; the waiter's deadline turns this into a
+            // reported failure rather than a hang.
         }
     });
 
@@ -1249,7 +1313,12 @@ SharpRuntime::intcs descriptorDeltaOver(const std::string& reply,
     // stay open, and counting those would make every mode look like a leak.
     try { (void)client.Get(url); } catch (const System::Exception&) {}
 
-    const SharpRuntime::intcs before = openDescriptorCount();
+    DescriptorMeasurement measurement;
+    // The client returning is NOT enough: it says nothing about the server's end of the same
+    // connection. Wait for the server to have closed it before establishing the baseline.
+    measurement.quiesced = waitForServerToClose(connectionsClosed, 1);
+    measurement.before = openDescriptorCount();
+
     threwOut = 0;
     for (int i = 1; i < iterations; ++i) {
         try {
@@ -1258,11 +1327,36 @@ SharpRuntime::intcs descriptorDeltaOver(const std::string& reply,
             ++threwOut;
         }
     }
-    const SharpRuntime::intcs after = openDescriptorCount();
 
+    // JOIN BEFORE SAMPLING, not after. Every accepted socket is closed once this returns.
     serverThread.join();
+    measurement.after = openDescriptorCount();
+
     listener->Close();
-    return after - before;
+    return measurement;
+}
+
+// The assertion every descriptor-leak test makes. It exists so that the three distinct outcomes
+// stay distinguishable in the failure message:
+//
+//   delta > 0  a real leak -- what these tests are for;
+//   delta < 0  IMPOSSIBLE as a leak. Fewer descriptors after than before means the instrument
+//              measured something other than the client, and it must be reported as an
+//              instrument fault rather than silently passing an `EXPECT_LE(0, delta)` or
+//              failing as though it were a leak;
+//   !quiesced  the server thread never reached a known state, so nothing was measured at all.
+void expectNoDescriptorLeak(const DescriptorMeasurement& m, const char* what) {
+    EXPECT_TRUE(m.quiesced)
+        << what << ": the mock server never quiesced, so no measurement was taken";
+    if (m.delta() < 0) {
+        ADD_FAILURE() << what << ": INSTRUMENT FAULT, not a leak -- the descriptor count FELL from "
+                      << m.before << " to " << m.after << " (delta " << m.delta()
+                      << "). A negative delta cannot represent a leak; see ticket #2107.";
+        return;
+    }
+    EXPECT_EQ(m.before, m.after)
+        << what << ": descriptor count went from " << m.before << " to " << m.after
+        << " (delta " << m.delta() << ")";
 }
 
 } // namespace
@@ -1270,39 +1364,41 @@ SharpRuntime::intcs descriptorDeltaOver(const std::string& reply,
 TEST(HttpClientDescriptorLeakTests, GarbledStatusLineDoesNotLeakADescriptor) {
     if (!kDescriptorCountAvailable) GTEST_SKIP() << "/proc/self/fd is unavailable";
     int threw = 0;
-    EXPECT_EQ(0, descriptorDeltaOver("GARBLED\r\n\r\n", 20, threw));
+    expectNoDescriptorLeak(descriptorDeltaOver("GARBLED\r\n\r\n", 20, threw),
+                           "GarbledStatusLine");
     EXPECT_EQ(19, threw) << "every request must still fail -- otherwise nothing was measured";
 }
 
 TEST(HttpClientDescriptorLeakTests, MalformedContentLengthDoesNotLeakADescriptor) {
     if (!kDescriptorCountAvailable) GTEST_SKIP() << "/proc/self/fd is unavailable";
     int threw = 0;
-    EXPECT_EQ(0, descriptorDeltaOver(
-        "HTTP/1.1 200 OK\r\nContent-Length: abc\r\n\r\n", 20, threw));
+    expectNoDescriptorLeak(descriptorDeltaOver(
+        "HTTP/1.1 200 OK\r\nContent-Length: abc\r\n\r\n", 20, threw), "MalformedContentLength");
     EXPECT_EQ(19, threw);
 }
 
 TEST(HttpClientDescriptorLeakTests, MalformedChunkSizeDoesNotLeakADescriptor) {
     if (!kDescriptorCountAvailable) GTEST_SKIP() << "/proc/self/fd is unavailable";
     int threw = 0;
-    EXPECT_EQ(0, descriptorDeltaOver(
-        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nZZZ\r\n", 20, threw));
+    expectNoDescriptorLeak(descriptorDeltaOver(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nZZZ\r\n", 20, threw),
+        "MalformedChunkSize");
     EXPECT_EQ(19, threw);
 }
 
 TEST(HttpClientDescriptorLeakTests, TruncatedBodyDoesNotLeakADescriptor) {
     if (!kDescriptorCountAvailable) GTEST_SKIP() << "/proc/self/fd is unavailable";
     int threw = 0;
-    EXPECT_EQ(0, descriptorDeltaOver(
-        "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort", 20, threw));
+    expectNoDescriptorLeak(descriptorDeltaOver(
+        "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort", 20, threw), "TruncatedBody");
     EXPECT_EQ(19, threw);
 }
 
 TEST(HttpClientDescriptorLeakTests, TheSuccessPathStillClosesItsDescriptor) {
     if (!kDescriptorCountAvailable) GTEST_SKIP() << "/proc/self/fd is unavailable";
     int threw = 0;
-    EXPECT_EQ(0, descriptorDeltaOver(
-        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi", 20, threw));
+    expectNoDescriptorLeak(descriptorDeltaOver(
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi", 20, threw), "SuccessPath");
     EXPECT_EQ(0, threw) << "the success path must not throw -- otherwise the wrong path was measured";
 }
 
@@ -2026,7 +2122,9 @@ TEST(HttpParserInteractionTests, StatusLineKeepsBothTheControlCheckAndTheGrammar
 TEST(HttpParserInteractionTests, NonHttpStatusLineIsRejectedAndLeaksNoDescriptor) {
     if (!kDescriptorCountAvailable) GTEST_SKIP() << "/proc/self/fd is unavailable";
     int threw = 0;
-    EXPECT_EQ(0, descriptorDeltaOver("GARBAGE 200 OK\r\nContent-Length: 2\r\n\r\nOK", 20, threw));
+    expectNoDescriptorLeak(
+        descriptorDeltaOver("GARBAGE 200 OK\r\nContent-Length: 2\r\n\r\nOK", 20, threw),
+        "NonHttpStatusLine");
     EXPECT_EQ(19, threw) << "the version token must be examined -- this used to parse as 200";
 }
 

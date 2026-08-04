@@ -889,3 +889,78 @@ family. Neither error changed any decision.
 
 **`modules/xml` remains the recommended next unit**, and §22 records that recommendation
 re-derived by measurement rather than inherited.
+
+### 20.8 #2107 — the descriptor INSTRUMENT was defective in BOTH directions, and the ticket named only one
+
+Ticket **#2107** was filed by the `#2089/#2091/#2097` batch after
+`HttpClientDescriptorLeakTests` failed once under `local_ci_check.sh` with a delta of **−1** —
+*fewer* descriptors after than before, which cannot represent a leak. It is a **test-instrument**
+ticket, not a production one: nothing about the guarantees #2063 and #2065 established was ever
+in doubt.
+
+**The flake could not be reproduced by load in this container.** 15 isolated runs, 3 full-suite
+runs and 12 runs under six spinning CPU hogs all passed. Rather than hunt a 2-in-12 race, the
+mechanism was proven **deterministically** by reproducing the instrument exactly and injecting a
+server-thread delay (`build-probe/2107_probe1_instrument.cpp`, log
+`build-probe/2107_probe1_before.log`). Measured, 3 runs per mode, perfectly repeatable:
+
+| Injected server lag | `before` | `after` (pre-join) | delta | What it means |
+|---|---:|---:|---:|---|
+| none | 5 | 5 | **0** | the everyday case |
+| on the **warm-up** connection | **6** | 5 | **−1** | the baseline is inflated — **the symptom observed in the wild** |
+| on the **last** connection | 5 | **6** | **+1** | **a FALSE LEAK REPORT** |
+
+**Two corrections to the ticket's own premise:**
+
+1. **The `+1` direction was never recorded, and it is the more dangerous one.** A `−1` is
+   obviously absurd and gets investigated. A `+1` looks exactly like a real descriptor leak and
+   would send a maintainer hunting through `HttpClientHandler` for a defect that does not exist.
+2. **The ticket's stated root cause names only HALF the fix.** It says the `after` sample is
+   taken before `join()`. True, and joining first removes the `+1` completely — but the probe
+   shows the **`−1` survives it**, because that direction corrupts the **baseline**, not the
+   final sample. A repair that only moved the `join()` would have left the exact symptom that was
+   reported. Both ends have to be quiesced.
+
+**The repair**, in `descriptorDeltaOver`:
+
+- the mock server increments an atomic after each `server->Close()`;
+- the **baseline** is taken only once the server has closed the **warm-up** connection — waiting
+  on that *event*, not on a duration. A deadline exists purely so a wedged server thread **fails**
+  the test rather than hanging it, and is never what the measurement relies on. A sleep long
+  enough to "usually" work is exactly the fix this ticket forbids;
+- the **final** sample is taken **after `serverThread.join()`**;
+- the return type became `DescriptorMeasurement`, reporting **both endpoints**, because a bare
+  delta cannot distinguish "nothing leaked" from "the instrument measured the wrong thing";
+- `expectNoDescriptorLeak` reports a **negative delta as an INSTRUMENT FAULT by name**, rather
+  than passing an `EXPECT_LE(0, delta)` or failing as though it were a leak;
+- the server lambda now **swallows its own exceptions**. It did not, so an `Accept()` that threw
+  would have escaped a `std::thread` and called `std::terminate` — a second latent instrument
+  defect, found while reading and repaired here. The file's own comment at the `pokeMockServer`
+  helper already *prescribed* this ("pair it with a server lambda that swallows its own
+  exceptions"); this lambda simply never did.
+
+**Discrimination proof, all three parts required by the ticket:**
+
+- **A timing variation no longer creates a false result.** The repaired instrument, under the
+  *same* injected delays that deterministically produced −1 and +1, gives delta **0** in all
+  three modes, 3 runs each (`build-probe/2107_probe2_after.log`).
+- **A genuine leak is still detected.** #2065's **original** mutation — emptying the
+  `SocketGuard` destructor — was re-applied and re-run against the repaired instrument. The four
+  failure-path tests and the sixth call site fail with the **pre-repair count of exactly +19**,
+  and `TheSuccessPathStillClosesItsDescriptor` stays **green**, which is precisely the signature
+  #2065 recorded. The failure message now also names both endpoints ("descriptor count went from
+  6 to 25"). The production tree was restored from an exact backup, md5-identical, with an empty
+  `git diff`.
+- **Stability.** **50/50 runs passed under six spinning CPU hogs**, plus 3 clean full-executable
+  runs afterwards.
+
+**No production code was changed to make the instrument stable** — the ticket's explicit
+prohibition. The only files touched are the test file and the probes.
+
+**One incidental finding, recorded not ticketed:** running four copies of this suite
+concurrently **deadlocks**. Each copy's mock server does a fixed number of `Accept()` calls and
+`join()`s unconditionally, so a copy whose client is starved leaves its server blocked in
+`Accept()` forever. That is a property of the whole mock-server pattern in this file, not of
+`descriptorDeltaOver`, and it only bites a use nothing in the repository actually makes —
+`ctest` runs each executable once. Recorded so that a future attempt to parallelise inside one
+executable knows about it.
