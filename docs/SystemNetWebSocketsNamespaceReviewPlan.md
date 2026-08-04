@@ -683,3 +683,74 @@ change. Migration note: `docs/Migration-WebSocketProtocolStrictness.md` §4.
 supplies, so an application can still send a close frame this client would reject on receipt.
 That is a caller-side door outside this ticket's acceptance criteria and outside §7's remote-input
 subject; it is recorded here rather than repaired under cover of a received-payload ticket.
+
+---
+
+## 21. Namespace reconciliation — measured after #2089, #2090 and #2091
+
+Every finding and post-audit defect in this namespace, with exactly one disposition. Nothing is
+unaccounted for.
+
+### 21.1 The six `SR-AUD-*` findings
+
+| Finding | Severity | Disposition | Ticket | Pin |
+|---|---|---|---|---|
+| SR-AUD-247 | high | **confirmed** — CCF-019, sixth site, family design unselected | #2088, blocked | `static_assert` on the ownership model |
+| SR-AUD-248 | high | **REMEDIATED** (#2089) | done | 16 permanent tests |
+| SR-AUD-249 | medium | **REMEDIATED** (#2089) | done | 16 permanent tests |
+| SR-AUD-250 | medium | **confirmed** — cause is in another component | #2092, blocked | `Pin2092_…` |
+| SR-AUD-251 | medium | **confirmed** — needs an interruptible transport design | #2093, blocked | `Pin2093_…` |
+| SR-AUD-252 | medium | **confirmed** — needs a background timer thread | #2094, blocked | `Pin2094_…` |
+
+### 21.2 The eleven post-audit protocol defects (§7)
+
+| § | Defect | Disposition |
+|---|---|---|
+| 7.1 | reserved bits never examined | **fixed**, #2090 |
+| 7.2 | opcode never validated | **fixed**, #2090 |
+| 7.3 | masked server frame accepted | **fixed**, #2090 |
+| 7.4 | fragmented control frame accepted | **fixed**, #2090 |
+| 7.5 | oversized control payload accepted and echoed | **fixed**, #2090 |
+| 7.6 | 1-byte close payload silently ignored | **fixed**, #2091 |
+| 7.7 | any 16-bit close code accepted | **fixed**, #2091 (premise corrected — see §20.3) |
+| 7.8 | Text and close reasons never UTF-8 validated | **fixed**, #2091, with a **stated and pinned limit** for fragmented Text |
+| 7.9 | fragmentation ordering never checked | **deferred**, #2095, behaviour **pinned** in two tests |
+| 7.10 | unrequested subprotocol response accepted | **fixed**, #2091 |
+| 7.11 | `state_` race and disposed-socket null dereference | **blocked**, #2096, deliberately **not** behaviourally pinned (it is UB, not behaviour) |
+
+### 21.3 Doors and sites found during implementation that the review did not name
+
+| Found by | What the record missed |
+|---|---|
+| #2089 | the **request URI** is a third injection door — the request line and `Host:` are built from it, and `System::Uri` preserves CR/LF/NUL. The same door #2063 found missing from SR-AUD-313's paraphrase. |
+| #2091 | there were **two** close parsers, not one — `ReceiveAsync`'s and `CloseAsync`'s, each with its own copy of the unvalidated block. |
+| #2091 | `fragmentType_`'s member initialiser is **Binary**, so a bare continuation frame is reported as Binary. A pin written against the assumed default of Text failed, which is what pins are for. |
+| #2091 | `WebSocketError` has **no** `InvalidPayloadData` member — that is a `WebSocketCloseStatus` value. Payload violations use `Faulted`, deliberately distinct from #2090's `HeaderError`. |
+
+### 21.4 Recorded, not ticketed
+
+- `sendCloseFrame` does not validate a **caller**-supplied close code or reason, so an
+  application can still send a close frame this client would reject on receipt. A caller-side
+  door, outside §7's remote-input subject.
+- `statusLine.find(" 101 ")` matches a substring rather than parsing the status code (§7,
+  already recorded) — bounded by the `Sec-WebSocket-Accept` digest check three lines later.
+- The repository holds **several independent UTF-8 decoders** (`UTF8Encoding`, `Utf8JsonWriter`,
+  `BinaryReader`, `IdnMapping`, `SslApplicationProtocol`, and now this module's). #2091's
+  validator is **transcribed** from the existing correct one rather than invented. Consolidating
+  them is a real architectural concern and is deliberately not done under cover of a
+  payload-validation ticket.
+
+### 21.5 Status
+
+**`System::Net::WebSockets` is closed for compatible work.** Every §19 criterion is met: #2089,
+#2090 and #2091 are `done`; SR-AUD-248 and SR-AUD-249 are `remediated`; SR-AUD-247, 250, 251 and
+252 each carry a blocked ticket **and** a pin; and #2095's measured behaviour is pinned in two
+tests.
+
+**No compatible, ready ticket remains in this namespace.** What remains is #2088, #2092, #2093,
+#2094 and #2096 — all blocked on approvals or on designs that belong to other components — and
+#2095, deferred pending reference evidence that does not exist in this container.
+
+**CCF-019 remains open. CCF-021 is not minted** (`net-http-headers` holds two of five findings
+and is unreviewed). **CCF-022 is not minted** (its trigger is the `modules/io` review).
+`SharpRuntimeTests_Net_WebSockets`: 24 → **83**.

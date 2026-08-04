@@ -2375,3 +2375,102 @@ and `System::Text::CompositeFormat::countPlaceholders`. `Regex`'s `${name}`, `XN
 `Guid`'s `{…}` specifiers and the JSON/XML writers are different grammars and are **not** members.
 **CCF-012 remains open** and is closable only by #2020's shared non-rendering scanner
 (`docs/ConsolidatedApprovalPackage.md` §T.6). **It is not marked closed by this or any design work.**
+
+---
+
+## `System::Net::WebSockets` appendix — tickets #2087, #2089, #2090, #2091 (2026-08-04)
+
+Recorded by the eighth namespace review and the three compatible tickets that closed its
+implementable queue. **No new `CCF-*` identifier is created.** The cross-cutting numbering is
+closed, and `docs/SystemNetWebSocketsNamespaceReviewPlan.md` §5 is the durable record of causes
+**W-A … W-F**.
+
+### CCF-019 — this is its sixth site, and it is still unselected
+
+`net-websockets`' SR-AUD-247 (#2088) joins `text-json` SR-AUD-327, `xml-linq` SR-AUD-333,
+`threading` SR-AUD-187/221, `threading-tasks` SR-AUD-230 and `net-http` SR-AUD-310. #2066 remains
+the family's open design question with **two competing options and no selection**, so no policy
+was invented here: choosing one inside `net-websockets` would have created a sixth answer to the
+question the family exists to answer once.
+
+**One additional borrowed edge is recorded so the eventual repair cannot claim completeness
+without it.** The audit says SR-AUD-247 is about `this`. Measured, `SendAsync` and `ReceiveAsync`
+capture `[this, &buffer, …]` — the **caller's `std::vector` by reference** — into a task that may
+outlive the caller's expression. That is a second borrowed object with the same hazard, governed
+by the same policy question. It is **not** a new `SR-AUD` and **not** a new family.
+
+**CCF-019 is NOT marked closed.** SR-AUD-247 remains `confirmed`. Its pin is a compile-time
+`static_assert` that `ClientWebSocket` does not derive from `std::enable_shared_from_this`,
+because a use-after-free is not a behaviour that can be pinned behaviourally — the same reasoning
+#2066's pin rests on.
+
+### CCF-021 — the evidence is complete on the policy, and the family is still NOT minted
+
+Re-enumerated independently after #2089 landed:
+
+| Module | Findings | Severity | State |
+|---|---|---|---|
+| `net-http` | SR-AUD-313, SR-AUD-316 (reason half) | high, medium | **remediated** by #2063 — ten doors, one predicate |
+| `net-http-headers` | SR-AUD-319, SR-AUD-322 | **high, high** | confirmed, **module UNREVIEWED** |
+| `net-websockets` | SR-AUD-248 | high | **remediated** by #2089 — three doors, the same predicate |
+
+**The structural cause is identical at all five findings**: caller- or peer-supplied text is
+concatenated into a protocol frame without rejecting the characters that terminate a field, so
+the text becomes additional protocol structure. **One policy governs all five**: reject CR, LF
+and NUL at the door, before any byte reaches the wire, and do not echo the rejected text into the
+exception message.
+
+**#2089 strengthened that evidence materially rather than merely adding a member.** The predicate
+now has **exactly one body in the repository** —
+`System::Net::detail::ContainsProtocolFieldTerminator`, in the `Net` component both protocol
+modules already depend on — with `System::Net::Http::detail::ContainsProtocolControlCharacter`
+kept as a forwarder under its original name. That the same body serves ten HTTP doors and three
+WebSocket doors, across two protocols, with no call-site or message change, is the strongest
+available demonstration that one repair policy really does govern the family.
+
+**Two boundary corrections that a future promotion must not lose:**
+
+1. **SR-AUD-249 is NOT a member.** `AddSubProtocol` accepting RFC 7230 separators is a **token
+   grammar** defect, not field-terminator injection. It shares a ticket (#2089) and a file with
+   SR-AUD-248 and is adjacent to it in the plan's §5, which makes it easy to miscount as a fifth
+   member. It is not one: a subprotocol never was a CR/LF/NUL door, because all three characters
+   are `<= 0x20` and the pre-existing validator already rejected that range. Cause W-C, not W-B.
+2. **The number `CCF-021` has been proposed for two different candidate families.** The
+   `SearchValues.hpp` per-file report proposes it for a *public generic surface* shape, which
+   `AUDIT_PROGRESS.md` later records as "module-local and deliberately not minted as CCF-021".
+   The `Net.Http`, `Xml` and `Net.WebSockets` reviews propose it for this field-terminator family.
+   The identifier is unallocated; whoever mints it must say which family it names.
+
+**CCF-021 is NOT minted by this batch.** The promotion trigger the `Net.Http` review §18, the
+`Xml` review §17 and this namespace's plan §8.2 all name is the **`net-http-headers` review**,
+and that module is still unreviewed while holding **two of the family's five findings — both
+`high`**. Minting from an incomplete membership would be the failure the promotion discipline
+exists to prevent. What this batch does instead is make the shared policy *physically* shared, so
+no second copy of the rule can drift into existence while the family waits. **Mint CCF-021 when
+`net-http-headers` is reviewed, citing all five findings and this appendix.**
+
+### CCF-022 — unchanged, still not minted
+
+X-D (*a public lifecycle state recorded but not enforced*) has two **remediated** members in
+`System::Xml` (#2076, #2078) and three open in `modules/io` (SR-AUD-337/343/344).
+`net-websockets` contributes **no** member: §7.11's disposed-socket race (#2096) is a
+*concurrency* defect, not a recorded-but-unenforced state. The trigger remains the `modules/io`
+review.
+
+### What this batch changed in the index
+
+**SR-AUD-248** and **SR-AUD-249** move `confirmed` → `remediated` (#2089). SR-AUD-247, 250, 251
+and 252 remain `confirmed` and each now carries both a blocked ticket and a pin (#2088/#2092/
+#2093/#2094, pins in `ClientWebSocketFrameValidationTests` and `WebSocketsGatedBehaviourPins`).
+The index now reads **135 remediated / 229 confirmed / 364 total**, of which **49** carry the
+`confirmed (design-complete)` qualifier — unchanged, because none of this namespace's blocked
+tickets completed a design in this batch.
+
+**No `SR-AUD-*` identifier was issued; numbering stays frozen at 364.** The eleven post-audit
+protocol defects the review found — on a frame parser that **no audit finding names at all**,
+corrected premise 6.5 — carry ordinary ticket numbers only (#2090, #2091, #2095, #2096).
+
+**#2096 is deliberately left without a behavioural pin**, and the reason is recorded in
+`WebSocketsGatedBehaviourPins.cpp` rather than left to inference: a data race and a null
+dereference are undefined behaviour, not behaviour, so a passing test would be asserting on the
+outcome of UB and a deliberately racing test would be flaky by construction.

@@ -1,0 +1,320 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+//
+// `System::Net::WebSockets` gated-behaviour pins.
+//
+// docs/SystemNetWebSocketsNamespaceReviewPlan.md §19 requires that SR-AUD-247, SR-AUD-250,
+// SR-AUD-251 and SR-AUD-252 each carry a blocked ticket **and a pin**, and §13 requires #2095's
+// measured fragmentation behaviour to be pinned. #2090 landed the first three pins (the layout
+// probe, #2088's CCF-019 ownership `static_assert`, and the 16 KiB handshake cap). This file
+// completes the set.
+//
+// **These tests assert what the code does TODAY, not what it should do.** Every one of them
+// documents a defect whose repair is BLOCKED. They exist so that an approved repair cannot land
+// silently: when one of these tickets is unblocked and implemented, the corresponding pin
+// FAILS, and that failure is the signal to update this file in the same change.
+//
+// Nothing here is an endorsement, and none of these findings is remediated by this file
+// existing.
+#include <gtest/gtest.h>
+
+#include <array>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "System/Convert.hpp"
+#include "System/InvalidOperationException.hpp"
+#include "System/Net/IPEndPoint.hpp"
+#include "System/Net/Sockets/Socket.hpp"
+#include "System/Net/WebSockets/ClientWebSocket.hpp"
+#include "System/Net/WebSockets/WebSocketException.hpp"
+#include "System/Threading/CancellationTokenSource.hpp"
+#include "System/TimeSpan.hpp"
+#include "System/Uri.hpp"
+
+using namespace System::Net::WebSockets;
+using System::Net::IPAddress;
+using System::Net::IPEndPoint;
+using System::Net::Sockets::Socket;
+using SharpRuntime::bytecs;
+
+namespace {
+
+std::array<uint8_t, 20> pinSha1(const std::string& input) {
+    uint32_t h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE, h3 = 0x10325476, h4 = 0xC3D2E1F0;
+    std::vector<uint8_t> msg(input.begin(), input.end());
+    uint64_t bitLen = static_cast<uint64_t>(msg.size()) * 8;
+    msg.push_back(0x80);
+    while (msg.size() % 64 != 56) msg.push_back(0);
+    for (int i = 7; i >= 0; --i) msg.push_back(static_cast<uint8_t>((bitLen >> (i * 8)) & 0xFF));
+    for (size_t chunk = 0; chunk < msg.size(); chunk += 64) {
+        std::array<uint32_t, 80> w{};
+        for (int i = 0; i < 16; ++i) {
+            w[i] = (static_cast<uint32_t>(msg[chunk + i * 4]) << 24) |
+                   (static_cast<uint32_t>(msg[chunk + i * 4 + 1]) << 16) |
+                   (static_cast<uint32_t>(msg[chunk + i * 4 + 2]) << 8) |
+                   static_cast<uint32_t>(msg[chunk + i * 4 + 3]);
+        }
+        for (int i = 16; i < 80; ++i) {
+            uint32_t v = w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16];
+            w[i] = (v << 1) | (v >> 31);
+        }
+        uint32_t a = h0, b = h1, c = h2, d = h3, e = h4;
+        for (int i = 0; i < 80; ++i) {
+            uint32_t f, k;
+            if (i < 20)      { f = (b & c) | ((~b) & d);       k = 0x5A827999; }
+            else if (i < 40) { f = b ^ c ^ d;                   k = 0x6ED9EBA1; }
+            else if (i < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDC; }
+            else             { f = b ^ c ^ d;                   k = 0xCA62C1D6; }
+            uint32_t temp = ((a << 5) | (a >> 27)) + f + e + k + w[i];
+            e = d; d = c; c = (b << 30) | (b >> 2); b = a; a = temp;
+        }
+        h0 += a; h1 += b; h2 += c; h3 += d; h4 += e;
+    }
+    std::array<uint8_t, 20> digest{};
+    uint32_t hs[5] = {h0, h1, h2, h3, h4};
+    for (int i = 0; i < 5; ++i) {
+        digest[i * 4]     = static_cast<uint8_t>((hs[i] >> 24) & 0xFF);
+        digest[i * 4 + 1] = static_cast<uint8_t>((hs[i] >> 16) & 0xFF);
+        digest[i * 4 + 2] = static_cast<uint8_t>((hs[i] >> 8) & 0xFF);
+        digest[i * 4 + 3] = static_cast<uint8_t>(hs[i] & 0xFF);
+    }
+    return digest;
+}
+
+std::vector<bytecs> toBytes(const std::string& s) { return std::vector<bytecs>(s.begin(), s.end()); }
+
+std::string readHeaders(Socket& socket) {
+    std::string response;
+    std::vector<bytecs> one(1);
+    while (response.size() < 4 || response.compare(response.size() - 4, 4, "\r\n\r\n") != 0) {
+        if (socket.Receive(one) == 0) break;
+        response += static_cast<char>(one[0]);
+    }
+    return response;
+}
+
+void RunAgainstServer(const std::function<void(ClientWebSocketOptions&)>& configure,
+                      const std::function<void(Socket&)>& afterHandshake,
+                      const std::function<void(ClientWebSocket&)>& clientBody) {
+    Socket listener(System::Net::Sockets::AddressFamily::InterNetwork,
+                    System::Net::Sockets::SocketType::Stream,
+                    System::Net::Sockets::ProtocolType::Tcp);
+    listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    listener.Listen();
+    auto local = std::dynamic_pointer_cast<IPEndPoint>(listener.getLocalEndPointProperty());
+    ASSERT_NE(local, nullptr);
+    const SharpRuntime::intcs port = local->getPortProperty();
+
+    std::thread serverThread([&]() {
+        try {
+            auto server = listener.Accept();
+            const std::string request = readHeaders(*server);
+            const size_t keyPos = request.find("Sec-WebSocket-Key: ");
+            ASSERT_NE(keyPos, std::string::npos);
+            const size_t keyStart = keyPos + std::string("Sec-WebSocket-Key: ").size();
+            const std::string key = request.substr(keyStart, request.find("\r\n", keyStart) - keyStart);
+            const auto digest = pinSha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+            const std::string accept =
+                System::Convert::ToBase64String(std::vector<bytecs>(digest.begin(), digest.end()));
+            server->Send(toBytes("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                                 "Connection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n"));
+            afterHandshake(*server);
+            server->Close();
+        } catch (...) {
+        }
+    });
+
+    ClientWebSocket client;
+    configure(client.getOptionsProperty());
+    System::Uri uri("ws://127.0.0.1:" + std::to_string(port) + "/");
+    client.ConnectAsync(uri).Wait();
+    ASSERT_EQ(client.getStateProperty(), WebSocketState::Open);
+    clientBody(client);
+    client.Dispose();
+    serverThread.join();
+    listener.Close();
+}
+
+void noConfig(ClientWebSocketOptions&) {}
+
+} // namespace
+
+// ===========================================================================
+// SR-AUD-250 → #2092, BLOCKED: the inner exception is discarded
+// ===========================================================================
+
+TEST(WebSocketsGatedBehaviourPins, Pin2092_WebSocketExceptionDiscardsItsInnerException) {
+    // The three-argument constructor contains a literal `(void)innerException;`. The comment
+    // explaining it is ACCURATE, which is exactly what blocks the repair: Win32Exception has no
+    // inner-exception-carrying constructor to forward to, so fixing this is a public
+    // base-class change in modules/component-model or modules/core — another component.
+    //
+    // WHEN #2092 IS APPROVED AND IMPLEMENTED, THIS PIN MUST FAIL.
+    std::exception_ptr inner;
+    try {
+        throw System::InvalidOperationException("the causal exception");
+    } catch (...) {
+        inner = std::current_exception();
+    }
+    ASSERT_TRUE(static_cast<bool>(inner));
+
+    const WebSocketException ex(WebSocketError::Faulted, "outer message", inner);
+    EXPECT_EQ(std::string(ex.what()).find("outer message") != std::string::npos, true);
+    EXPECT_FALSE(static_cast<bool>(ex.getInnerExceptionProperty()))
+        << "SR-AUD-250: the inner exception is currently DISCARDED. If this now holds the "
+           "causal exception, #2092 landed and this pin must be updated in that change.";
+}
+
+// ===========================================================================
+// SR-AUD-251 → #2093, BLOCKED: every CancellationToken is ignored
+// ===========================================================================
+
+TEST(WebSocketsGatedBehaviourPins, Pin2093_AnAlreadyCancelledTokenDoesNotPreventTheOperation) {
+    // All five async members take a token and none consults it. The tasks run a BLOCKING
+    // Socket::Receive, so real cancellation needs a socket timeout, a poll-based read loop, or a
+    // shutdown-based interrupt — a transport-level design touching modules/net-sockets.
+    //
+    // WHEN #2093 IS APPROVED AND IMPLEMENTED, THIS PIN MUST FAIL: an already-cancelled token
+    // should make these operations fault rather than complete.
+    System::Threading::CancellationTokenSource cts;
+    cts.Cancel();
+
+    RunAgainstServer(
+        noConfig,
+        [&](Socket& server) { server.Send(std::vector<bytecs>{0x81, 0x02, 'o', 'k'}); },
+        [&](ClientWebSocket& client) {
+            std::vector<bytecs> buffer(1024);
+            // Completes normally despite the cancelled token.
+            auto result = client.ReceiveAsync(buffer, 0, 1024, cts.getTokenProperty()).getResultProperty();
+            EXPECT_EQ(result.getCountProperty(), 2)
+                << "SR-AUD-251: the token is currently IGNORED. If this now throws or faults, "
+                   "#2093 landed and this pin must be updated in that change.";
+        });
+}
+
+// ===========================================================================
+// SR-AUD-252 → #2094, BLOCKED: KeepAliveInterval/Timeout are inert
+// ===========================================================================
+
+TEST(WebSocketsGatedBehaviourPins, Pin2094_KeepAliveSettingsAreStoredAndNeverConsulted) {
+    // Both are validated, stored and returned, and nothing reads them. Driving them needs a
+    // background timer thread sending Pings and tracking Pong deadlines — new concurrency in a
+    // class that today has one mutex and races on state_ (#2096).
+    //
+    // Half the pin is that the values round-trip; the other half is that NO PING IS EVER SENT.
+    ClientWebSocketOptions options;
+    options.setKeepAliveIntervalProperty(System::TimeSpan::FromMilliseconds(1));
+    options.setKeepAliveTimeoutProperty(System::TimeSpan::FromMilliseconds(1));
+    EXPECT_EQ(options.getKeepAliveIntervalProperty().getTicksProperty(),
+              System::TimeSpan::FromMilliseconds(1).getTicksProperty());
+
+    bool sawClientFrame = false;
+    RunAgainstServer(
+        [](ClientWebSocketOptions& o) {
+            o.setKeepAliveIntervalProperty(System::TimeSpan::FromMilliseconds(1));
+        },
+        [&](Socket& server) {
+            // Deterministic exchange, no sleeps: the server sends a message, the client receives
+            // it, then the client sends one. The only frame the server ever reads is that reply.
+            // A working keep-alive would interleave an unsolicited Ping here.
+            server.Send(std::vector<bytecs>{0x81, 0x02, 'h', 'i'});
+            std::vector<bytecs> header(2);
+            if (server.Receive(header) == 2) {
+                sawClientFrame = true;
+                EXPECT_EQ(header[0] & 0x0F, 0x2)
+                    << "SR-AUD-252: the first client frame must be the test's own Binary send, "
+                       "not a keep-alive Ping. If it is 0x9, #2094 landed and this pin must be "
+                       "updated in that change.";
+                std::vector<bytecs> rest(4 + (header[1] & 0x7F));
+                size_t total = 0;
+                while (total < rest.size()) {
+                    std::vector<bytecs> chunk(rest.size() - total);
+                    const auto n = server.Receive(chunk);
+                    if (n == 0) break;
+                    total += static_cast<size_t>(n);
+                }
+            }
+        },
+        [&](ClientWebSocket& client) {
+            std::vector<bytecs> buffer(1024);
+            (void)client.ReceiveAsync(buffer, 0, 1024).getResultProperty();
+            std::vector<bytecs> out{0x01, 0x02};
+            client.SendAsync(out, 0, 2, WebSocketMessageType::Binary, true).Wait();
+        });
+    EXPECT_TRUE(sawClientFrame) << "the exchange must have happened, or nothing was measured";
+}
+
+// ===========================================================================
+// #2095, DEFERRED VERIFICATION: fragmentation ordering is never checked
+// ===========================================================================
+
+TEST(WebSocketsGatedBehaviourPins, Pin2095_AContinuationFrameWithNoMessageInProgressIsAccepted) {
+    // Plan §7.9. ReceiveAsync never checks fragmentation ordering: a continuation frame (0x0)
+    // arriving with NO message in progress is accepted and reported with `fragmentType_`'s
+    // current value. The ticket is DEFERRED rather than compatible because exactly which
+    // ordering violations .NET rejects, and with what error, cannot be determined without the
+    // absent reference tree — so the measured behaviour is pinned instead of guessed at.
+    //
+    // MEASURED, and not what was first assumed: `fragmentType_` is declared
+    // `= WebSocketMessageType::Binary` (ClientWebSocket.hpp:44), so a bare continuation arriving
+    // on a fresh connection is reported as **Binary** — a message type chosen by a member
+    // initialiser rather than by anything the server sent. Writing this pin against the assumed
+    // default of Text made it fail, which is precisely what a pin is for.
+    RunAgainstServer(
+        noConfig,
+        [&](Socket& server) {
+            // A lone continuation frame, FIN=1, with nothing in progress.
+            server.Send(std::vector<bytecs>{0x80, 0x02, 'h', 'i'});
+        },
+        [&](ClientWebSocket& client) {
+            std::vector<bytecs> buffer(1024);
+            auto result = client.ReceiveAsync(buffer, 0, 1024).getResultProperty();
+            EXPECT_EQ(result.getCountProperty(), 2)
+                << "#2095: a bare continuation frame is currently ACCEPTED.";
+            EXPECT_EQ(result.getMessageTypeProperty(), WebSocketMessageType::Binary)
+                << "#2095: it is reported with fragmentType_'s current value, whose member "
+                   "initialiser is Binary. If this now throws, #2095 was resolved and this pin "
+                   "must be updated in that change.";
+        });
+}
+
+TEST(WebSocketsGatedBehaviourPins, Pin2095_ANewDataFrameArrivingMidFragmentIsAccepted) {
+    // The other half of §7.9: a fresh data frame while a fragmented message is in progress.
+    RunAgainstServer(
+        noConfig,
+        [&](Socket& server) {
+            server.Send(std::vector<bytecs>{0x01, 0x02, 'a', 'b'});  // text, FIN=0
+            server.Send(std::vector<bytecs>{0x82, 0x02, 'c', 'd'});  // binary, FIN=1, mid-fragment
+        },
+        [&](ClientWebSocket& client) {
+            std::vector<bytecs> buffer(1024);
+            auto first = client.ReceiveAsync(buffer, 0, 1024).getResultProperty();
+            EXPECT_FALSE(first.getEndOfMessageProperty());
+            auto second = client.ReceiveAsync(buffer, 0, 1024).getResultProperty();
+            EXPECT_EQ(second.getMessageTypeProperty(), WebSocketMessageType::Binary)
+                << "#2095: message boundaries are currently server-controllable. If this now "
+                   "throws, #2095 was resolved and this pin must be updated.";
+        });
+}
+
+// ===========================================================================
+// #2096, BLOCKED: what is deliberately NOT pinned, and why
+// ===========================================================================
+
+// §7.11 — `state_` is written from task threads and read by `getStateProperty()` with no
+// synchronisation, and `sendFrame`/`readFrame` dereference `socket_` with no null check after
+// `Dispose()` has reset it.
+//
+// **No behavioural pin is written for #2096, deliberately.** A data race and a null dereference
+// are undefined behaviour, not behaviour: a test that "passes" today would be asserting on the
+// outcome of UB, which is neither stable nor meaningful, and a test that races on purpose would
+// be flaky by construction. This is the same reasoning plan §4.6 gives for SR-AUD-247, whose pin
+// is therefore a compile-time `static_assert` on the ownership MODEL
+// (`ClientWebSocketFrameValidationTests`) rather than a behavioural assertion.
+//
+// #2096 is recorded here so that a reader looking for its pin finds this explanation instead of
+// concluding one was forgotten.
