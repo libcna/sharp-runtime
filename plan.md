@@ -83,6 +83,72 @@ below.*
 
 ---
 
+## 2026-08-04 — `System::Net::WebSockets` closed for compatible work (#2089, #2091), the `modules/io` review (#2097), and #2101/#2103
+
+Branch `feature/remediation-batch-websockets-2089-2091-io-review`, cut from the clean tip
+`a4698e6`. Five unsigned commits, not pushed. No merge, rebase, tag, force-push, PR, publication,
+amend or history rewrite.
+
+**#2089 — SR-AUD-248 and SR-AUD-249, both `remediated`.** The load-bearing result is a **third
+door the finding does not name**: the request line is built from `uri.getPathAndQueryProperty()`
+and `Host:` from `uri.getHostProperty()`, and `System::Uri` preserves CR/LF/NUL in both, so a URI
+alone smuggled `GET /admin HTTP/1.1` into the handshake. **The same door #2063 found missing from
+SR-AUD-313's paraphrase, in a second namespace.** SR-AUD-249's premise needed correcting both ways:
+a validator *did* exist and already rejected `<= 0x20` and `0x7F`, but **not one** of the
+seventeen RFC 7230 separators. Rejection precedes any byte on the wire — 20 rejected connections,
+`/proc/self/fd` delta **0**, all 20 throwing.
+
+**One predicate body, and CCF-021 still not minted.** Rather than duplicating #2063's predicate or
+making `Net.WebSockets` depend on the whole `Net.Http` component, the body moved to
+`System::Net::detail::ContainsProtocolFieldTerminator` in the `Net` component both modules already
+depend on, with the `Net.Http` name kept as a forwarder. No `Net.Http` call site, type or message
+changed; graph unchanged at **41 / 91**. CCF-021 is **not** minted — `net-http-headers` holds two
+of five findings, both `high`, and is unreviewed. Recorded so a future promotion cannot lose them:
+**SR-AUD-249 is a token-grammar defect and NOT a member**, and the number has been proposed for
+**two different** candidate families.
+
+**#2091 — the frame payload.** Two close parsers existed, not one: `ReceiveAsync`'s and
+`CloseAsync`'s, each with its own unvalidated `>= 2` block. §7.7's claim is corrected — close codes
+3000–4999 are legal and have no enumerator in this port *or* .NET; what #2091 closes is codes that
+can never be valid. A **fragmented** Text message is deliberately not UTF-8 validated and the
+limit is **pinned**: a scalar may straddle a fragment boundary, and doing it right needs decoder
+state on the object, an object-layout change this compatible ticket does not make.
+
+**Namespace reconciliation found five unmet completion criteria** — §19 requires every blocked
+finding to carry a pin, and only three existed. Five pins added. **#2096 is deliberately left
+without a behavioural pin**, with the reason recorded: a data race and a null dereference are UB,
+not behaviour.
+
+**#2097 — the `modules/io` review**, selected by re-measurement with the objection stated: `io`
+has **zero** high findings and loses priority 1 on the raw severity column. It wins on
+**decidability** — its findings are self-evident contract violations, while `time-zone`'s and most
+of `globalization`'s are "what does .NET do" questions that, with `/rv` absent, would yield only
+deferred tickets. Ten bounded tickets; **nothing blocked on a user approval**. Four premise
+corrections, including **SR-AUD-186's premise is inverted** (the port copies, .NET wraps — .NET's
+is the aliasing behaviour) and **SR-AUD-342 is half already fixed**. **CCF-022's trigger is met and
+its membership complete, and it is still NOT minted**: the cross-cutting document says in five
+places that the numbering is closed, and resolving that contradiction belongs to the maintainer.
+
+**#2101 / #2103.** #2101's real scope was **one door, not seven** — the neighbours a grep flagged
+were already guarded, and are now pinned. #2103 routes `FileInfo::Delete` through `File::Delete`,
+which **already had the guard**; it is the only finding in `modules/io` that destroys user data.
+
+**Three checks that did not discriminate were caught and fixed**, including a **mutation that
+failed to fail because the mutant itself was UB** and a **stale-binary false pass**. One IO test is
+honestly recorded as non-discriminating.
+
+**Audit 137 remediated / 227 confirmed / 364 total**, 49 `confirmed (design-complete)`. **No
+`SR-AUD-*` identifier created — numbering frozen at 364.** Gate **15,925 across 37 executables:
+15,918 passed, 1 skipped, 6 failed** (the same two re-measured causes). Graph **41 / 91**, seams
+**2 / 18**, fixtures **11 / 94**. Selective components passed, ~11 min, peak **2** `cc1plus`.
+Doxygen, `ccache` and `/rv` absent. **#1962 and #1773 remain blocked; CCF-012 and CCF-019 were not
+marked closed; CCF-021 and CCF-022 were not minted.**
+
+**#2107 raised, not silenced:** `local_ci_check` surfaced a descriptor-instrument failure with a
+**negative** delta, hitting different tests under load. Proven **not** a regression from this batch
+(zero commits touched those tests; the delta sign is impossible for a leak) and root-caused to
+`descriptorDeltaOver` sampling before `serverThread.join()`.
+
 ## 2026-08-04 — `System::Xml` closed for compatible work (#2076, #2078, #2079, #2081), the `System::Net::WebSockets` review (#2087), and #2090
 
 **Eight commits**, all local and unsigned, on `feature/remediation-batch-xml-compatible-websockets-review`

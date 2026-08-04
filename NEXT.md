@@ -3,6 +3,180 @@
 
 # NEXT.md
 
+*Last verified: 2026-08-04. Branch `feature/remediation-batch-websockets-2089-2091-io-review`,
+cut from the clean tip `a4698e6`. **Not pushed — no push was requested during this batch.** No
+merge, rebase, tag, force-push, PR, publication, amend or history rewrite; all five commits
+unsigned (`git -c commit.gpgsign=false`, author and committer `Claude <noreply@anthropic.com>`)
+because this environment has no usable private signing key. The batch **closed the compatible
+`System::Net::WebSockets` queue** with **#2089** then **#2091** in that mandatory order,
+**reconciled the namespace** (§21 of its plan, which found and closed **five unmet completion
+criteria** — every blocked finding now carries a pin), **re-derived the next review unit by
+measurement**, reviewed **`modules/io` (#2097)** — `docs/SystemIONamespaceReviewPlan.md`, 20
+sections — and implemented **two** of the seven compatible tickets that review created:
+**#2101** and **#2103**. **Four findings moved `confirmed → remediated`** (SR-AUD-248, 249, 345,
+347). Audit **137 remediated / 227 confirmed / 364 total**, of which **49** carry
+`confirmed (design-complete)`; **no `SR-AUD-*` identifier was created — numbering stays frozen at
+364.** **Eight premises were corrected by measurement**, five of which changed what shipped, and
+**three non-discriminating checks were caught and fixed rather than reported as passes** —
+including one **stale-binary false pass** and one **mutation that failed to fail because the
+mutant itself was UB**. Gate **15,925 tests across 37 executables: 15,918 passing, 1 skipped, 6
+failing** for the same two re-measured causes as before, unchanged and not hidden. Graph
+**41 / 91**, seams **2 / 18**, negative fixtures **11 / 94**. **Doxygen and `ccache` are both
+absent from this container and were NOT run**; `/rv` is absent. `System::Net::WebSockets` is
+**closed for compatible work**; `modules/io` has **five compatible tickets left** — #2100, #2098,
+#2099, #2102, #2104. **#1962 and #1773 remain blocked**; **CCF-012 and CCF-019 were NOT marked
+closed, and CCF-021 and CCF-022 were NOT minted.** The prior header stack is retained below.*
+
+---
+
+## Batch record — #2089, #2091, the `System::Net::WebSockets` closure, the `modules/io` review, #2101 and #2103
+
+### What shipped
+
+| # | Subject | Findings | Result |
+|---|---|---|---|
+| **#2089** | CR/LF/NUL at the WebSocket handshake doors; the subprotocol token grammar | SR-AUD-248, SR-AUD-249 | **done**, both `remediated` |
+| **#2091** | close payload, close codes, UTF-8, negotiated subprotocol | post-audit §7.6–7.8, §7.10 | **done** |
+| pins | SR-AUD-250/251/252 and #2095 gated-behaviour pins | — | **done** (+5) |
+| **#2097** | the `modules/io` namespace review | 11 open | **done** — plan + 10 tickets |
+| **#2101** | a raw `std::filesystem_error` escaping `FileSystemInfo` | SR-AUD-347 | **done**, `remediated` |
+| **#2103** | `FileInfo::Delete` deleting directories | SR-AUD-345 | **done**, `remediated` |
+
+### The corrected premises that changed what shipped
+
+1. **#2089 — the request URI is a THIRD injection door.** SR-AUD-248 names `SetRequestHeader`.
+   Measured, the request line is built from `uri.getPathAndQueryProperty()` and `Host:` from
+   `uri.getHostProperty()`, and `System::Uri` preserves CR/LF/NUL in both. A URI alone was enough
+   to smuggle `GET /admin HTTP/1.1` into the handshake. **This is the same door #2063 found
+   missing from SR-AUD-313's paraphrase, now in a second namespace.** `System::Uri` is not
+   modified; the Uri-side defect stays the blocked #2003.
+2. **#2089 — SR-AUD-249's premise needed correcting in the port's favour and against it at
+   once.** A subprotocol validator *did* exist and already rejected `<= 0x20` and `0x7F`, so the
+   repair **widens** it; but **not one** of the seventeen RFC 7230 separators was rejected.
+3. **#2091 — there were TWO close parsers, not one.** `ReceiveAsync`'s `case 0x8` and
+   `CloseAsync`'s loop each had their own copy of the unvalidated `>= 2` block. Repairing only
+   the receive path the plan describes would have left the close handshake accepting malformed
+   frames.
+4. **#2091 — §7.7's claim is half right.** Close codes 3000–4999 are *legal* and have no
+   enumerator in this port **or in .NET**, whose enum names the same subset. What #2091 closes is
+   codes that can *never* be valid reaching the public getter.
+5. **#2097/#2101 — the IO leak was ONE door, not seven.** `DirectoryInfo`'s enumeration and the
+   Copy/Move destination handling were **already guarded**. Narrowing the ticket to what was
+   measured, and pinning the already-guarded neighbours, is the result.
+6. **#2097/#2103 — SR-AUD-345 is sharper than filed.** Two APIs .NET documents as equivalent gave
+   **opposite** answers: `FileInfo::Delete` deleted a directory, `File::Delete` threw. The repair
+   target already existed in the module.
+7. **#2097 — SR-AUD-342 is HALF ALREADY FIXED**, and SR-AUD-186's premise is **inverted** (the
+   port copies, .NET wraps — .NET's is the aliasing behaviour and the port's the defensive one).
+8. **#2097 — `fragmentType_`'s member initialiser is Binary, not Text.** A pin written against the
+   assumed default failed, which is what pins are for.
+
+### The three checks that did not discriminate, and were fixed rather than reported
+
+- **A mutation that failed to fail because the MUTANT was UB.** Deleting #2091's close-payload
+  length guard left all 78 tests passing — but `payload[1]` on a one-element vector is an
+  out-of-bounds read, and the garbage code it produced happened to be invalid, so the
+  *code-domain* check threw instead. The mutation now restores the **original** defect.
+- **A stale-binary false pass.** An IO mutation left unbalanced braces; the build failed and the
+  run that followed used the old binary and reported everything green. The harness now **checks
+  the build succeeded** before trusting a result.
+- **A probe whose three calls were unsequenced.** `Peek()`, `Read()` and `ReadToEnd()` evaluated
+  as arguments to one `printf` have unspecified order and all three mutate. Sequenced, the real
+  answer is a **stronger** confirmation.
+- Additionally, one IO test is **honestly recorded as non-discriminating**: the non-empty-directory
+  case passes with the guard removed too, because `remove` fails with `ENOTEMPTY` anyway.
+
+### One predicate body, and why CCF-021 is still not minted
+
+#2089 needed the CR/LF/NUL rule on a second protocol. Rather than duplicating #2063's predicate,
+or making `Net.WebSockets` depend on the whole `Net.Http` component for a three-character check,
+the body moved down to **`System::Net::detail::ContainsProtocolFieldTerminator`** in the `Net`
+component both protocol modules already depend on, with
+`System::Net::Http::detail::ContainsProtocolControlCharacter` kept as a **forwarder**. No
+`System::Net::Http` call site, exception type or message changed; the graph is unchanged at
+**41 / 91** (the existing `Net` edge only moved `PRIVATE` → `PUBLIC`).
+
+That is the strongest possible evidence that one policy governs CCF-021 — **and it is still not
+minted**, because `net-http-headers` holds **two of the family's five findings, both `high`**, and
+is unreviewed. Two boundary corrections are recorded so a future promotion cannot lose them:
+**SR-AUD-249 is a token-grammar defect and NOT a member**, and **the number `CCF-021` has been
+proposed for two different candidate families**.
+
+### CCF-022: the trigger is met, the evidence is complete, and it is deliberately NOT minted
+
+Six sites, two modules, one cause, one policy: `xml` SR-AUD-348/349 (**remediated**), `io`
+SR-AUD-337/343/344 and SR-AUD-342's `Length`/`Position`/`Seek` half. The trigger named by two
+prior reviews — *"mint CCF-022 when `modules/io` is reviewed"* — **is now met**.
+
+**It is not minted, and the reason is a contradiction in the durable record that belongs to the
+maintainer.** `audit/AUDIT_CROSS_CUTTING_FINDINGS.md` states in **five** separate appendices that
+*"the cross-cutting numbering is closed"*. Each of those is written while declining a
+**namespace-local** cause, so they may not govern a genuinely cross-module family — but they are
+unqualified, and that document is authoritative for minting. The membership is recorded in the IO
+plan §8.2 so minting is a one-paragraph act once the contradiction is resolved.
+
+### One additional failure appeared, was investigated, and is NOT a regression — #2107
+
+`scripts/local_ci_check.sh` reported
+`HttpClientDescriptorLeakTests.MalformedChunkSizeDoesNotLeakADescriptor` failing, although the
+full executable-by-executable gate and six standalone runs were green. **The batch rule is that an
+additional failure is a regression until proven otherwise, so it was investigated rather than
+re-run away.** What the evidence shows:
+
+1. the failing delta is **−1** — *fewer* descriptors after than before, which is definitionally
+   **not a leak**;
+2. it hits **different tests** each time (`MalformedChunkSize` and `MalformedContentLength` both
+   observed), so it is the **instrument**, not a code path;
+3. **40 isolated runs and 3 full-suite runs passed**; **2 of 12 runs under concurrent load
+   failed**;
+4. **this batch made zero commits touching `modules/net-http/tests/`** — the file and the
+   instrument were last changed by **#2064 in a previous batch** (`cd9327f`), before this batch's
+   base `a4698e6`;
+5. this batch's only `modules/net-http` change is a **pure inline forwarder with identical
+   logic**, and the suite is 181/181 in every unloaded run.
+
+**Root cause:** `descriptorDeltaOver()` samples `after` **before** `serverThread.join()`, so the
+mock server's in-flight accepted socket races both samples. **The production leak guarantees
+#2063/#2065 established are not in doubt** — this is a defect in the measuring instrument.
+Recorded as **#2107**, P3. It is *not* counted in the gate's 6 known failures, which were measured
+with the suite unloaded.
+
+### Exact state
+
+- **Audit:** 137 remediated / 227 confirmed / 364 total; **49** carry `confirmed (design-complete)`.
+- **Gate:** 37 executables, **15,925** tests — **15,918 passed, 1 skipped, 6 failed**. Delta +56
+  = 16 (#2089) + 23 (#2091) + 5 (pins) + 12 (IO). Run **executable-by-executable**, not via the
+  script, which stops at the first failing suite.
+- **Known failures, re-measured, unchanged:** five `PingTests` from the real #1962 gap —
+  `ping_group_range` is the **empty** range `1 0` so `SOCK_DGRAM` ICMP is refused, while
+  `SOCK_RAW` ICMP **opens fine**, which is exactly #1962's diagnosis; and one `SocketTests`
+  because `/proc/net/if_inet6` is **absent**.
+- **Graph** 41 modules / 91 edges. **Seams** 2 / 18. **Negative fixtures** 11 / 94, 105 compiler
+  invocations, peak 2 jobs, 37.2s.
+- **Selective components:** passed, ~11 minutes, peak **2** `cc1plus` verified by sampling.
+- **Build:** 0 errors, 0 warnings.
+- **Doxygen absent. `ccache` absent. `/rv` absent.** Tracked `scripts/__pycache__` **byte-identical**.
+- **Max compiler concurrency: 2**, everywhere, always.
+- Build directories: `build/` 1.7G, `build-probe/` ~35M, `build-tmp/` ~8M.
+
+### Remaining queue
+
+- **`System::Net::WebSockets` — closed for compatible work.** Remaining: #2088, #2092, #2093,
+  #2094, #2096 (all blocked) and #2095 (deferred, behaviour pinned in two tests).
+- **`modules/io` — five compatible tickets left.** Recommended order: **#2100** (RandomAccess
+  negative count, small, independent), then **#2098** (the CCF-022 core — **read plan §11 first:
+  it needs an object-layout decision and a layout pin**), then **#2099**, **#2102**, **#2104**.
+  Deferred: #2105, #2106.
+- **Next namespace: `modules/text-json`** (7 open, 1 high, a parser over untrusted input).
+  `modules/net-http-headers` is below the ≥6 threshold at 5 open but is the **CCF-021 trigger**
+  with all five members present.
+
+### Next recommended work
+
+**#2100**, then **#2098** with its layout decision made explicitly and up front.
+
+---
+
 *Last verified: 2026-08-04. Branch `feature/remediation-batch-xml-compatible-websockets-review`,
 cut from the clean tip `e1cc8c3`. **Not pushed — no push was requested during this batch.** No
 merge, rebase, tag, force-push, PR, publication, amend or history rewrite; all eight commits
