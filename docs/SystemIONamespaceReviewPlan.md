@@ -562,7 +562,61 @@ rule: one guard, one message, and the two siblings cannot drift apart again.
 This required adding `#include "System/IO/File.hpp"` to `FileInfo.hpp`. No new component edge:
 both are in `IO`. The module graph is unchanged at **41 modules and 91 edges**.
 
-### 20.3 Evidence
+### 20.3 #2100 landed, and the ORIGINAL REPORT was broader than both the ticket and §6.3
+
+**The most important correction this ticket produced is that §6.3 under-described SR-AUD-340.**
+§6.3 was written from the finding's index summary — *"negative `Write` counts silently succeed
+and POSIX `GetLength` returns −1 for invalid descriptors"* — and the ticket inherited that
+scope. Reading the **owning per-file report**
+(`audit/modules/io/src/System/IO/RandomAccess.cpp.audit.md`) before editing production code shows
+it already names four more things:
+
+> *"The raw pointer/count overloads do not validate **pointer, count, or offset**"* … *"they omit
+> invalid descriptors, **null buffers**, negative counts/offsets/**lengths**, **read-only
+> descriptors**, **non-seekable handles**, and **write-zero-progress** behavior."*
+
+So the repair surface is not two members but **the whole class**, and the review's own §6.3
+narrowing would have delivered a partial fix. Measured before any edit
+(`build-probe/2100_probe1_before.log`):
+
+| Door | Before | After |
+|---|---|---|
+| `Write(count = -1)` | **returned normally** — the sharp half | `ArgumentOutOfRangeException("count")` |
+| `Read(count = -1)` | `IOException("RandomAccess::Read failed")` | `ArgumentOutOfRangeException("count")` |
+| `Read(fileOffset = -5)` | same bare `IOException` | `ArgumentOutOfRangeException("fileOffset")` |
+| **`Write(fileOffset = -5)`** | same bare `IOException` — **never named by the finding's summary** | `ArgumentOutOfRangeException("fileOffset")` |
+| **`SetLength(length = -1)`** | same bare `IOException` — **never named by the summary** | `ArgumentOutOfRangeException("length")` |
+| **`Read`/`Write(buffer = nullptr, count > 0)`** | same bare `IOException` (an `EFAULT`) | `ArgumentNullException("buffer")` |
+| `Read`/`Write(buffer = nullptr, count == 0)` | returned normally | **unchanged** — nothing is transferred |
+| `GetLength(-1)` | **returned the sentinel `-1`** | `IOException` naming `EBADF` |
+| **`GetLength(pipe)`** | **returned `-1` for a perfectly VALID descriptor** | `IOException` naming `ESPIPE` |
+| every native failure | reason discarded — `EBADF`, `EINVAL` and `ENOSPC` were indistinguishable | the operating system's own text is appended |
+| the `std::vector` overloads | `size()` narrowed to `intcs` unchecked | oversized buffers rejected; the rest inherited |
+
+**`GetLength` is wider than "an invalid descriptor".** The finding says *invalid*; measured, a
+valid pipe returns `-1` too, because `lseek` fails with `ESPIPE` and all three results were
+discarded. The repair covers both, and **the mechanism is deliberately unchanged** — `lseek`
+still supplies the answer and the original position is still restored, so every descriptor that
+worked before returns exactly the same number. Switching to `fstat()` would also answer for
+pipes, but that is a behaviour change on a guess with the reference tree absent, so it is not
+made. Pinned by a test.
+
+**The Windows branch of `GetLength` already threw.** This is a POSIX-only defect, the same
+"the sibling was already right" shape as #2103.
+
+**Two robustness defects the report names and the summary does not, both repaired:**
+`pwrite`/`pread` interrupted by a signal threw — for `Write`, from the middle of the loop, leaving
+the bytes already written in place with no way for a `void` return to report them — and a
+zero-progress write would have **spun the loop forever** because `count` never decreases. Both
+now behave: `EINTR` retries (the idiom `FileSystemWatcher.cpp` already uses), zero progress
+throws. **Neither is covered by a deterministic test** — signal delivery mid-`pwrite` and a
+zero-byte `pwrite` on a regular file cannot be forced in this environment — and they are
+recorded as inspection-verified rather than claimed as tested.
+
+**Exception identity is this port's choice**, per §16, and is now also stated in the header's
+own doc-comment so a caller reads the contract where they use the API.
+
+### 20.4 Evidence
 
 **+12 permanent regressions, add-only** — `SharpRuntimeTests_IO` 599 → **611**, in a new
 `IONamespaceReviewTests` suite. Fixtures live under the repository-local `build-tmp/`, never
@@ -594,3 +648,52 @@ instrumented by construction — there is no STATIC-archive blind spot here.
 
 No signature, member, base-class, virtual, vtable, object-layout or exception-specification
 change.
+
+### 20.5 #2100's evidence
+
+**+15 permanent regressions, add-only** — `SharpRuntimeTests_IO` 611 → **626**, in a new
+`RandomAccessFixture` inside the existing `IONamespaceReviewTests` suite. Fixtures live under the
+repository-local `build-tmp/`, never `/tmp`.
+
+**Five mutations**, each restoring an exact piece of the original defect, all applied to the
+**final shipped source** and all verified to have built, rebuilt the binary and run
+(`build-probe/2100_mutations.py`, log `build-probe/2100_mutations.log`):
+
+| Mutation | Restores | Distinct tests failed |
+|---|---|---:|
+| M1 | `Write` validates nothing | **7** |
+| M2 | `Read`'s rejection is an untyped `IOException` again | **5** |
+| M3 | `GetLength` returns the `-1` sentinel again | **4** |
+| M4 | `SetLength` stops validating `length` | **2** |
+| M5 | the native reason is discarded again | **2** |
+
+The unmutated control failed **0**, and the source was restored **byte-identical**
+(md5 `941ccba9…` on both sides). M2 is the load-bearing one: `Read` *already threw* before
+#2100, so a bare `EXPECT_THROW` would have passed against the old code. What discriminates is
+`ExpectThrowsNaming`, which asserts the exception's `getParamNameProperty()`.
+
+**A stale-binary false pass fired and was caught.** The first mutation harness restored its
+backup with `cp -p`, which preserves the backup's mtime; the restored source then looked *older*
+than the object file built from the mutant, the build skipped it, and the run reported the
+**mutant's** result as the repaired tree's. The harness now never preserves mtime on restore and
+verifies the binary was actually rebuilt. This is the second batch running in which this exact
+trap has fired — it is a property of the harness, not of a particular ticket.
+
+**Sanitizers: ASan + UBSan + LSan clean over 3,900 rejections and 1,300 acceptances**
+(`build-probe/2100_probe2_san.log`). `RandomAccess.cpp` is a real member of
+`libsharp_runtime_io.a`, **not** a header-only inline body, so it is compiled *into* the
+instrumented translation unit (`build-probe/2100_san_compile.sh`); linking the prebuilt archive
+would have left the repaired code uninstrumented and the clean run worthless. **Both controls
+fire**: the ASan control's stack trace names `RandomAccess.cpp:172`, proving the repaired body is
+the instrumented one, and the UBSan control reports the deliberate signed overflow. The ASan
+control's *first* version did **not** fire — it read into a heap buffer from a freshly truncated
+file, so `pread` transferred nothing and there was no overflow. That result was discarded and the
+control fixed rather than reported.
+
+**Direct descriptor accounting**, per §14 and never LSan: `/proc/self/fd` delta is **0** across
+200 rejected calls in the probe and across 200 more in a permanent test, and the descriptor stays
+fully usable after repeated rejections.
+
+**No public signature, member, base-class, virtual, vtable, object-layout or exception-specification
+change.** The only header change is doc-comments. No component edge changes; the graph stays at
+**41 modules / 91 edges**.
