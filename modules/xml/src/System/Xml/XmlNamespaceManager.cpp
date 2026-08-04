@@ -68,8 +68,18 @@ namespace System::Xml {
         return std::nullopt;
     }
 
+    // Ticket #2077 (SR-AUD-353). The header's own contract is "true if @p prefix is declared
+    // in ANY scope", and its sibling LookupNamespace already walks scopes_ from the innermost
+    // outward -- but this predicate inspected scopes_.back() alone. Measured before the
+    // repair, after declaring "p" and pushing a scope, one manager answered
+    // HasNamespace("p")=false and LookupNamespace("p")="urn:outer" at the same time. The
+    // built-in "xml" prefix, which this class installs itself in scope 0 and documents as
+    // permanent, was invisible the same way (docs/SystemXmlNamespaceReviewPlan.md §4.5).
+    //
+    // Expressed in terms of LookupNamespace rather than duplicating its loop, so the two can
+    // no longer disagree.
     bool XmlNamespaceManager::HasNamespace(const std::string& prefix) const {
-        return scopes_.back().find(prefix) != scopes_.back().end();
+        return LookupNamespace(prefix).has_value();
     }
 
     std::map<std::string, std::string> XmlNamespaceManager::GetNamespacesInScope(XmlNamespaceScope scope) const {

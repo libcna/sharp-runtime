@@ -682,3 +682,28 @@ and nothing else in the 394-test suite.
 node."`, `"The reference node is not a child of this node."` and `"The node to be replaced is
 not a child of this node."` follow this file's existing `ArgumentException` style; .NET's exact
 text is not verifiable here and §16 already says so.
+
+### 20.3 #2077 — the defect was **pinned by a pre-existing test**, which is why it survived
+
+The repair is one expression: `HasNamespace` is now `LookupNamespace(prefix).has_value()`,
+expressed in terms of its sibling rather than duplicating its loop, so the two can no longer
+disagree.
+
+**The correction the review did not predict.** `XmlNamespaceManagerTests` contained
+`HasNamespace_ChecksCurrentScopeOnly`, asserting `EXPECT_FALSE(mgr.HasNamespace("foo"))` after
+`PushScope()`. That test **locked in the defect SR-AUD-353 reports**, against the type's own
+documented contract (*"true if @p prefix is declared in any scope"*) and against
+`LookupNamespace`, which has always searched outward. §14's ticket allowed updating an existing
+test "with a recorded reason"; this is that reason, and the test was **corrected in place and
+renamed rather than deleted**, with a comment explaining the history, so the claim's provenance
+stays visible.
+
+Measured after: an inherited prefix, a prefix two scopes deep, and the built-in `xml`, `xmlns`
+and default declarations are all visible; an undeclared prefix and a popped prefix are still
+`false`; prefixes stay case-sensitive. The suite additionally asserts the **property** that
+made the desynchronisation possible — over a four-deep push/pop cycle, `HasNamespace` and
+`LookupNamespace` agree for every probe prefix, on the way down and on the way back up.
+
+**Mutation-checked.** Restoring the single-scope search fails **exactly** the three new
+scope-search tests, the agreement property and the corrected pre-existing test — five
+assertions across four tests — and nothing else in the 400-test suite.

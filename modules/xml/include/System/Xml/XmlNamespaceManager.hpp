@@ -59,7 +59,15 @@ namespace System::Xml {
         [[nodiscard]] std::optional<std::string> LookupNamespace(const std::string& prefix) const override;
         /** @return The first prefix mapped to @p namespaceName found searching from the innermost scope outward, or std::nullopt if not found. */
         [[nodiscard]] std::optional<std::string> LookupPrefix(const std::string& namespaceName) const override;
-        /** @return true if @p prefix is declared in any scope. */
+        /**
+         * @return true if @p prefix is declared in any active scope, including a scope outside
+         * the current one and including the permanent built-in `xml`, `xmlns` and default
+         * declarations.
+         *
+         * @note **Widening since ticket #2077** (SR-AUD-353). Before #2077 this inspected only
+         * the innermost scope, so it disagreed with its own sibling `LookupNamespace` for every
+         * inherited prefix. Nothing that returned `true` returns `false`.
+         */
         [[nodiscard]] bool HasNamespace(const std::string& prefix) const;
 
         /** @return All prefix-to-URI mappings visible in the requested @p scope. */
