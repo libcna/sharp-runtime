@@ -1,4 +1,227 @@
-*Last verified: 2026-08-04. Branch `feature/remediation-batch-approval-packages-next-review`, cut
+<!-- SPDX-License-Identifier: MIT -->
+<!-- Copyright (c) Robert Vokac and contributors -->
+
+# NEXT.md
+
+*Last verified: 2026-08-04. Branch `feature/remediation-batch-system-net-compatible`, cut from the
+clean tip `4777f95`. **Not pushed — no push was requested during this batch.** No merge, rebase,
+tag, force-push, PR, publication, amend or history rewrite; all commits unsigned
+(`git -c commit.gpgsign=false`) because this environment has no usable private signing key. The
+batch implemented the **entire compatible `System::Net` queue** created by review #2034 —
+**#2041, #2035, #2036, #2037, #2038, #2039** in the plan's own §13 dependency order — plus the
+mandatory disclosure-and-pins ticket **#2047**. **Five findings moved `confirmed → remediated`**
+(SR-AUD-300, 301, 302, 303, 307) and **SR-AUD-304 became `confirmed (design-complete)`**, three of
+its four halves repaired and the wildcard half left to the gated #2043. **Ten premises were
+corrected by measurement.** Two new ordinary inactive tickets, **#2045** and **#2046**, carry
+defects deliberately not absorbed. Audit **117 remediated / 247 confirmed / 364 total**, of which
+**43** carry `confirmed (design-complete)`; **no `SR-AUD-*` identifier was created — numbering
+stays frozen at 364.** Gate **15,619 tests across 37 executables: 15,612 passing, 1 skipped, 6
+failing** for the same two measured causes as before, unchanged and not hidden.
+`SharpRuntimeTests_Net` **240 → 324**, add-only. Graph **41 / 91**, seams **2 / 18**, negative
+fixtures **10 / 81** over 91 compiler invocations at peak 2 jobs. **Doxygen and `ccache` are both
+absent from this container and were NOT run.** #2040/#2042/#2043/#2044 remain **blocked** and are
+now all behaviour-pinned; **#1962 and #1773 remain blocked**; CCF-012 was **not** marked closed.
+See the first handoff below.*
+
+---
+
+## Autonomous batch handoff, 2026-08-04 (the whole compatible `System::Net` queue)
+
+### 1. What was implemented, in the plan's own order
+
+`docs/SystemNetNamespaceReviewPlan.md` §13's execution order was followed exactly and **not
+reordered**. Seven work commits on `feature/remediation-batch-system-net-compatible`:
+
+| Commit | Ticket | Finding | Repair | Tests |
+|---|---|---|---|---|
+| `9b41d58` | **#2041** | SR-AUD-307 | both `CookieCollection` indexers route through one `validatedIndex(intcs)` rejecting `index < 0 \|\| index >= Count` | +14 |
+| `201ff4c` | **#2035** | SR-AUD-300 | `GetIPEndPoint` validates family **and declared size** against `IPEndPoint::Create`'s own constants; the `IPAddress`+port ctor validates the port | +17 |
+| `2bef840` | **#2036** | SR-AUD-301 | one shared `validatedScopeId` on **both** doors, each reporting its **own** `paramName` | +9 |
+| `4f7b50a` | **#2037** | SR-AUD-302 | after `']'` may come exactly nothing, or `':'` and the port | +9 |
+| `b0f6196` | **#2038** | SR-AUD-303 | the masked IPv6 base keeps its scope id; `Contains` compares **bytes**, so containment stays scope-independent | +8 |
+| `1c0c5ce` | **#2039** | SR-AUD-304 | delete the duplicate `sscanf` parser **and** set `hints.ai_socktype`; dedup; family filter; message | +16 |
+| `735249c` | **#2047** | 305/306/308/309 | disclosure only — zero executable production change — plus the gated-behaviour pins | +10 |
+
+**No signature, `noexcept`, virtual, vtable, data member or object-layout change in any of the
+seven.** `NetLayoutPinTests.cpp` now `static_assert`s the five §10 layouts (`Cookie` 152,
+`CookieCollection` 24, `IPAddress` 24, `IPEndPoint` 40, `SocketAddress` 32), so a future gated
+option that adds a member cannot land silently.
+
+### 2. The load-bearing corrected premise
+
+**§5's cause N-C blamed the wrong thing, and it changed the code that shipped.** The review said
+the duplicate `sscanf` literal parser "accepts a leading `-`, produces duplicates, and bypasses the
+family filter". It does the first and the third. It does **not** produce the duplicates —
+`hints.ai_socktype = 0` does, which asks `getaddrinfo` for one `addrinfo` **per socket type**:
+
+| Call | `ai_socktype = 0` | `ai_socktype = SOCK_STREAM` |
+|---|---|---|
+| `getaddrinfo("1.2.3")` | **3** | 1 |
+| `getaddrinfo("localhost")` | **3** | 1 |
+| `getaddrinfo("127.0.0.1")` | **3** | 1 |
+
+So **every resolved name was tripled too**, which the review never mentions, and
+`GetHostEntry(8.8.8.8)` returned **six** entries for two distinct addresses. Repairing the parser
+alone would have fixed the one named input **by accident** — `IPAddress::TryParse` accepts
+three-part short forms, so the fast path would have answered with a single value while every
+`localhost` lookup stayed tripled.
+
+Nine further corrections are tabulated in the plan's **§18**. Two others changed shipped code:
+each scope-id door reports its **own** `paramName` (`"scopeId"` / `"value"`, not one shared
+`"value"`), and a family-mismatched `Dns` literal **throws** `SocketException(HostNotFound)`
+rather than returning empty, because two pre-existing tests already pin that as this repository's
+reasoned contract.
+
+### 3. Sanitizer evidence — with the discrimination proofs
+
+Every conclusion below was taken from a binary in which the affected body is **compiled from
+source**, not linked from an uninstrumented archive; the `before` columns take the pre-repair
+header from a `build-probe/*_before_include/` directory produced by `git show`, so the only
+difference between columns is the code under test.
+
+| Ticket | ASan | UBSan | LSan | TSan |
+|---|---|---|---|---|
+| #2041 | **9 → 0** (`heap-buffer-overflow`, `SEGV`) | **2 → 0** (null-pointer binding/offset on the empty collection) | n/a | n/a |
+| #2035 | `heap-buffer-overflow` at the finding's own line **→ 0** | present → 0 | n/a | n/a |
+| #2036 | n/a | **non-discriminating, and recorded as a non-result** | n/a | n/a |
+| #2039 | clean | n/a | **discriminating**: clean over **12,800** calls, while a control build that abandons one `addrinfo` per iteration reports `12800 byte(s) leaked in 200 allocation(s)` | inapplicable, stated |
+
+**§11's UBSan prediction for #2041 was half wrong** and is corrected rather than quietly dropped:
+it predicted a non-result; UBSan is indeed silent about the `intcs` → `size_t` conversion, but it
+is **not** silent about the empty-collection consequence.
+
+### 4. #2047's pins were mutation-checked, including two deliberate controls
+
+Ten pins guard the four gated tickets' **current** behaviour. Six mutations were applied
+temporarily — an origin check in `Add`, both `Cookie` constructors routed through their setters, a
+capacity of 300, expired-cookie purging, Latin-1-supplement numeric encoding, and a decoder that no
+longer knows `&copy;` — and **eight of the ten pins failed**. All six were reverted; `git diff`
+over the three touched files is empty. The two pins that stayed green are **controls**: they must
+not move when the non-ASCII policy changes, and their staying green while the non-ASCII pin failed
+is what shows the mutation was targeted rather than indiscriminate.
+
+**Nothing in #2047 approves, implements or preselects any part of #2040, #2042, #2043 or #2044.**
+
+### 5. Validation, re-measured in this context
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | exit 0, **0 errors, 0 warnings** (`ninja: no work to do` — the committed tree was already fully built) |
+| Full gate, all 37 executables run individually | **15,619 tests: 15,612 pass, 6 fail, 1 skip** |
+| `validate_module_boundaries.py` | OK — **41 modules / 91 edges** |
+| `validate_module_boundaries_test.py` | 7 / 7 |
+| `generate_component_catalog.py --check` | catalogue current |
+| `db_consistency_check.py` | OK |
+| `check_version_seam_odr.py` | OK — **2 seams / 18 definitions** |
+| `check_version_seam_odr_test.py` | 15 / 15 |
+| `check_negative_consumer_fixtures.py` | **10 fixtures / 81 sites**, every site rejected, 91 invocations, **peak 2 jobs**, 34.0 s |
+| `check_negative_consumer_fixtures_test.py` | 45 / 45 |
+| `check_selective_components.sh` | **PASSED** — full matrix, 10 components, every isolated consumer check green, forbidden fixtures still rejected, **651 s**, serialized single process, peak 2 compiler jobs |
+| `git diff --check` | clean |
+| Doxygen | **NOT RUN — not installed in this container** |
+| `ccache` | **NOT INSTALLED** |
+
+The gate was run as 37 individual executables, not through the first-failure-abort runner, so the
+totals are a complete measurement rather than a partial one.
+
+### 6. The six known failures — re-measured, and NOT environmental-only
+
+Identified by name, not merely counted; every one is pre-existing and unrelated to this batch.
+
+**Five `PingTests`** — `Send_Loopback_Succeeds`, `Send_LoopbackByString_Succeeds`,
+`Send_CustomBuffer_EchoedBack`, `Send_WithOptions_Succeeds`, `SendPingAsync_Loopback_Succeeds`.
+Re-measured this context:
+
+- `/proc/sys/net/ipv4/ping_group_range` is `1  0` — an empty range — and uid is **0**;
+- `socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP)` → **EACCES**;
+- `socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)` → **succeeds**.
+
+**This is not an environment-only failure.** A working ICMP socket is available; `Ping` cannot use
+it because it lacks the raw receive path — it would have to skip the IP header by its own IHL and
+match the ICMP identifier itself. That is the real gap **#1962**, which remains **blocked** and was
+**not** implemented here. The five tests were not weakened, skipped, recategorised or
+special-cased.
+
+**One `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`** — `socket(AF_INET6,
+SOCK_STREAM, 0)` returns **EAFNOSUPPORT** and `/proc/net/if_inet6` does not exist. IPv6 is absent
+from this container entirely; this one **is** environmental.
+
+**One skip** — `CultureInvariantFormattingTests.NumericAndDateFormatting_UnaffectedByNonInvariantGlobalLocale`,
+locale-dependent, pre-existing.
+
+### 7. New inactive tickets, and what was deliberately not absorbed
+
+| # | P | Status | Defect |
+|---|---|---|---|
+| **#2045** | P3 | blocked | `IPEndPoint` accepts a trailing `':'` with no port and reports port 0 |
+| **#2046** | P3 | blocked | `Dns` applies the address-family filter to a literal but not to a resolved name |
+
+Both are post-audit defects found while repairing their neighbours, given **ordinary ticket
+numbers**; no `SR-AUD-*` identifier was issued. #2046 in particular is the residue of §2's
+correction: broadening the filter to resolved names is wider than #2039's approval-free envelope,
+so it was filed rather than smuggled in.
+
+### 8. Remaining queue
+
+**Blocked, gated on approval — all four now behaviour-pinned:**
+
+| # | P | Cause |
+|---|---|---|
+| #2040 | P1 | `CookieContainer` stores and emits a cookie for an unrelated explicit domain (SR-AUD-305 + 306) |
+| #2042 | P2 | `CookieContainer` storage is unbounded — no capacity, aging or eviction (SR-AUD-308) |
+| #2043 | P2 | `Dns` returns the wildcard literal `0.0.0.0` as a resolved address (SR-AUD-304 remainder) |
+| #2044 | P2 | `WebUtility::HtmlEncode` is a five-entity subset while `HtmlDecode` understands more (SR-AUD-309) — **encode-only**, deferred and coupled to `System::Text`'s #2019 |
+
+**Also open and untouched by this batch:** the consolidated approval package
+(`docs/ConsolidatedApprovalPackage.md` — Diagnostics D-A/D-B/D-C, Text A1/A2/B/C1/C2/C3/D/E/F,
+none approved), #1995–#1999, #2003, #1956–#1959, #1969, #1970, **#1962**, **#1773**, and four
+low-priority `todo` rows (#1963, #1985, #1986, #2005).
+
+### 9. Next recommended work
+
+`System::Net` is closed for compatible work: every finding is either `remediated` or gated with a
+behaviour pin. The next namespace by the same measured rule the last seven reviews used is
+**`modules/buffers`** (11 open, 3 high, 27 %, partially covered by `docs/Base64FamilyPlan.md`) or
+**`modules/net-http`** (9 open, 2 high, 22 %, no plan, and the natural neighbour of the namespace
+just finished). `modules/io` has 11 open but **zero** high.
+
+Alternatively, the largest single unblocking action available is not a review at all: **approving
+any subset of `docs/ConsolidatedApprovalPackage.md`**, which currently gates twelve decisions
+across `System::Diagnostics` and `System::Text`.
+
+### 10. Resources and repository safety
+
+| Directory | Size |
+|---|---|
+| `build/` | 1.7 GB |
+| `build-probe/` | 4.4 MB (probe sources, before-include trees and before/after logs, all retained) |
+| `build-tmp/` | 4.9 MB (build and gate logs; the selective matrix's own tree is removed by that script's exit trap) |
+
+`build-asan/`, `build-modular/`, `build-consumer/` and `cmake-build-debug/` were **not** created.
+No tree under `/tmp`, `/var/tmp` or `/dev/shm`. **Maximum aggregate compilation parallelism: 2
+jobs**, verified with `ps -C cc1plus` during the selective run; the negative-fixture checker
+reported its own peak as 2. Every Python invocation used `PYTHONDONTWRITEBYTECODE=1`; no
+`__pycache__` file was created or staged.
+
+**CNA, mobile-eggbert, sibling and parent repositories and downstream consumers were not
+inspected, searched, built or modified.** No push, merge, rebase, tag, force-push, PR,
+publication, amend or history rewrite. All commits authored and committed as
+`Claude <noreply@anthropic.com>` and unsigned.
+
+### 11. Known limitations of this environment
+
+- **Doxygen is not installed**, so the 1,942 warning ceiling could not be checked. Nothing in this
+  batch adds or removes a documented entity in a way that could plausibly move it — but that is
+  reasoning, not a measurement, and is not claimed as a verified result.
+- **`ccache` is not installed**, so no compilation was cached.
+- **IPv6 is absent** (`/proc/net/if_inet6` missing, `AF_INET6` → `EAFNOSUPPORT`).
+- **`net.ipv4.ping_group_range` is `1  0`**, so unprivileged ICMP is denied while raw ICMP works.
+- A clean sanitizer result here proves memory safety on the paths exercised; it does **not** prove
+  DNS or network parity with .NET, and is not offered as such.
+
+---
+
+*Prior handoff snapshot, retained historically: 2026-08-04. Branch `feature/remediation-batch-approval-packages-next-review`, cut
 from `1b892f6` (the previous batch's tip). **All commits unsigned and local-only; no push was
 requested.** Earlier local-only commits were carried forward untouched: no amend, no rebase, no
 force-push, no merge, no tag, no PR. The batch **verified and consolidated both outstanding

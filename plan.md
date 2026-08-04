@@ -1,5 +1,30 @@
 # Sharp Runtime plan
 
+*Last verified: 2026-08-04 — branch `feature/remediation-batch-system-net-compatible`, cut from
+`4777f95` and **not pushed; no push was requested during this batch**. No merge, rebase, tag, PR,
+force-push, amend or history rewrite; the pre-existing local-only commits were left untouched. All
+new commits intentionally unsigned. The batch implemented the **whole compatible `System::Net`
+queue** created by review #2034 — **#2041, #2035, #2036, #2037, #2038, #2039** in the plan's own
+§13 dependency order — plus the mandatory **disclosure-and-pins ticket #2047**. **Five findings
+moved `confirmed → remediated`** (SR-AUD-300, 301, 302, 303, 307) and **SR-AUD-304 became
+`confirmed (design-complete)`** with three of its four halves repaired and the wildcard half left
+to the gated #2043. **Ten premises were corrected by measurement**, the load-bearing one being
+that SR-AUD-304's duplicate results do **not** come from the duplicate `sscanf` parser the review
+blamed but from `hints.ai_socktype = 0`, which tripled **every** resolved name as well — so
+repairing the parser alone would have fixed the one named input *by accident*. Two further
+corrections mattered enough to change the code that shipped: each scope-id door reports its **own**
+`paramName`, and a family-mismatched `Dns` literal **throws** rather than returning empty, because
+two pre-existing tests already pin that as this repository's reasoned contract. **Two new ordinary
+inactive tickets, #2045 and #2046**, carry defects deliberately *not* absorbed. **No approval was
+requested, implied or assumed; #2040/#2042/#2043/#2044 remain blocked and are now all
+behaviour-pinned; #1962 and #1773 remain blocked; CCF-012 was NOT marked closed.** Audit **117
+remediated / 247 confirmed / 364 total**, `confirmed (design-complete)` **42 → 43**; **no
+`SR-AUD-*` identifier was created — numbering stays frozen at 364.** `SharpRuntimeTests_Net`
+**240 → 324**, add-only. Gate **15,619 tests across 37 executables, 15,612 passing, 1 skipped, 6
+failing** for the same two measured causes, unchanged and not hidden. **Doxygen NOT run — not
+installed here; `ccache` also not installed.** CNA and mobile-eggbert were not inspected. Maximum
+aggregate parallelism **2 jobs**.*
+
 *Last verified: 2026-08-04 — branch `feature/remediation-batch-approval-packages-next-review`, cut
 from `1b892f6` and **not pushed; no push was requested during this batch**. No merge, rebase, tag,
 PR, force-push, amend or history rewrite; the pre-existing local-only commits were left untouched.
@@ -6509,3 +6534,86 @@ unchanged because this batch remediated nothing, by design. **No `SR-AUD-*` iden
 
 Full evidence, sanitizer accounting and probe inventory: `NEXT.md` under
 "Autonomous batch handoff, 2026-08-04 (approval packages + `System::Net` review)".
+
+## Batch 2026-08-04 — the whole compatible `System::Net` queue (#2035–#2039, #2041) and the pins ticket (#2047)
+
+Branch `feature/remediation-batch-system-net-compatible`, cut from the clean tip `4777f95`. Seven
+work commits plus this handoff, all `git -c commit.gpgsign=false` because this environment has no
+usable signing key. Nothing pushed, merged, rebased, tagged, force-pushed or published; no PR; no
+remote reference altered; no history rewritten.
+
+### Execution order
+
+`docs/SystemNetNamespaceReviewPlan.md` §13's order was followed exactly and not reordered:
+**#2041 → #2035 → #2036 → #2037 → #2038 → #2039**, then the mandatory disclosure-and-pins ticket
+as **#2047**.
+
+| Ticket | Finding | Repair | Tests |
+|---|---|---|---|
+| **#2041** | SR-AUD-307 | both `CookieCollection` indexers route through one `validatedIndex(intcs)` rejecting `index < 0 \|\| index >= Count` | +14 (incl. layout pins for all five §10 types) |
+| **#2035** | SR-AUD-300 | `GetIPEndPoint` validates family and **declared** size against `IPEndPoint::Create`'s own two constants; the `IPAddress`+port constructor validates the port | +17 |
+| **#2036** | SR-AUD-301 | one shared `validatedScopeId` on **both** doors, each reporting its own `paramName` | +9 |
+| **#2037** | SR-AUD-302 | after `']'` may come exactly nothing, or `':'` and the port | +9 |
+| **#2038** | SR-AUD-303 | the masked IPv6 base keeps its scope id; `Contains` compares **bytes** so containment stays scope-independent | +8 |
+| **#2039** | SR-AUD-304 (3 of 4) | one literal parser, the family filter on the literal path, `SOCK_STREAM` hints + dedup, and messages that stop fabricating a Win32 code | +16 |
+| **#2047** | — | three headers made true; **10 pins** for #2040/#2042/#2044, mutation-checked | +10 |
+
+`SharpRuntimeTests_Net` **240 → 324**, entirely add-only.
+
+### Ten premise corrections, all measured
+
+The load-bearing one is #2039's. `docs/SystemNetNamespaceReviewPlan.md` §5's cause N-C says the
+duplicate `sscanf` parser "produces duplicates". Measured against `getaddrinfo` **directly**, it
+does not: `hints.ai_socktype = 0` asks for one `addrinfo` **per socket type**, so every answer came
+back **three** times — `localhost`, `runsc`, `vm` and `127.0.0.1` as well as the finding's
+`"1.2.3"` — and `GetHostEntry(8.8.8.8)` returned **six** entries for two distinct addresses.
+Replacing the literal parser alone would have made `GetHostAddresses("1.2.3")` return one address
+**by accident**, because `IPAddress::TryParse` accepts short forms, while leaving every resolved
+**name** tripled. Two further corrections changed the code that shipped: each scope-id door
+reports its **own** `paramName` rather than §7.3's shared `"value"`, and a family-mismatched `Dns`
+literal **throws** rather than returning §7.3's predicted empty vector, because two pre-existing
+`DnsTests` already pin that as this repository's own reasoned contract. The full table is the
+plan's new **§18**.
+
+### Two new ordinary inactive tickets, deliberately not absorbed
+
+- **#2045** — `IPEndPoint` accepts a trailing `':'` with no port and reports port 0, in **both**
+  branches. Cause N-C's *shape* but not SR-AUD-302's site, and rejecting it would violate #2037's
+  own acceptance criterion. Blocked on **evidence**; both results pinned.
+- **#2046** — `Dns` applies the address-family filter to a **literal** but not to a resolved
+  **name**, so `("localhost", Unix)` still returns an IPv4 address. Narrowing it removes a
+  currently-succeeding result for every name.
+
+No `SR-AUD-*` identifier was created for either, nor for any of the ten corrections; audit
+numbering stays frozen at **364**.
+
+### The four gated tickets are now all behaviour-pinned
+
+§15's completion criterion 2 is satisfied: **#2043** by #2039's `DnsWildcardPinTests`, and
+**#2040**, **#2042** and **#2044** by #2047's `NetGatedBehaviourPinTests`. Six mutations were
+applied temporarily and **eight of the ten pins failed**, then everything was reverted with an
+empty `git diff`. The two that stayed green are deliberate controls. **None of the four was
+implemented, approved or preselected.**
+
+### Sanitizer evidence
+
+| Ticket | Sanitizer | Before | After |
+|---|---|---|---|
+| #2041 | ASan | **9** reports | **0** |
+| #2041 | UBSan | **2** reports — §11 predicted a non-result and was **half wrong** | **0** |
+| #2035 | ASan | **2** `heap-buffer-overflow` READs (`:106` IPv4, `:110` IPv6) | **0** |
+| #2035 | UBSan | none | none — non-discriminating, recorded as a non-result |
+| #2036 | UBSan | none | none — non-discriminating, as §11 predicted |
+| #2039 | LSan | — | clean across **12,800** calls; a control build leaking one `addrinfo` list per iteration **is** reported |
+
+### Validation
+
+Gate **15,619 / 15,612 passed / 1 skipped / 6 failed** across all 37 executables run
+individually — `15,535 → 15,619`, exactly this batch's +84. The six failures are the same two
+measured causes: five `PingTests` (#1962 — `ping_group_range` is `1 0`, so unprivileged
+`SOCK_DGRAM` ICMP is denied while `SOCK_RAW` ICMP **succeeds**, and `Ping` has no raw receive
+path) and one `SocketTests` IPv6 case (`/proc/net/if_inet6` **absent**). Graph **41 / 91**, seams
+**2 / 18**, negative fixtures **10 / 81** (91 invocations, peak 2 jobs, 29.6 s), checker
+self-tests **45 / 45** and **15 / 15**, module-boundary self-tests **7 / 7**, catalogue current,
+DB consistency OK, build **0 warnings / 0 errors**, `git diff --check` clean, selective components
+**PASSED**. Doxygen and `ccache` are **not installed** here and nothing was installed.
