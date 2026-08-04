@@ -174,6 +174,38 @@ bool Process::Start() {
     for (auto& s : argvStorage) argv.push_back(s.data());
     argv.push_back(nullptr);
 
+    // Restart preamble (#2025).  The default constructor is private, so the ONLY way a caller
+    // reaches this function twice is the restart this class's own doc-comment advertises --
+    // every public instance Start() is by definition a restart.  Assigning into
+    // impl_->stdoutReader/stderrReader below calls std::thread::operator=, which calls
+    // std::terminate when the target is joinable, so the previous child's readers must be
+    // resolved *before* that assignment or the whole process aborts.
+    //
+    // Measured (build-probe/2025_probe1_before.log): the trigger is a JOINABLE READER, not a
+    // running child.  Restarting after the previous child had already exited aborted too
+    // (case C), because nothing had joined the reader yet -- only WaitForExit() and
+    // getHasExitedProperty() do that.  Both cases are handled here.
+    //
+    // A still-running previous child is REFUSED rather than absorbed.  The two alternatives
+    // are both worse: joining its readers cannot finish until the child closes stdout, so it
+    // would block for the child's whole lifetime (the SR-AUD-269 blocking failure mode), and
+    // detaching them is exactly the gated destructor policy of #2029, which is not approved.
+    // Refusing is uniform across both redirection combinations and loses nothing a caller
+    // could previously rely on: unredirected, the old behaviour silently abandoned the first
+    // child unreaped (case E); redirected, it aborted.
+    if (impl_->started && !impl_->isCurrentProcess) {
+        reapIfNeeded(*impl_);
+        if (!impl_->hasExited)
+            throw System::InvalidOperationException(
+                "The associated process is still running. Wait for it to exit, or call Kill() "
+                "and then wait, before starting another process with this Process instance.");
+    }
+    // The previous child has exited (or none was started), so its pipes are at EOF and these
+    // joins complete promptly.  Joining here rather than at the assignment keeps the object
+    // unchanged if anything below throws.
+    if (impl_->stdoutReader.joinable()) impl_->stdoutReader.join();
+    if (impl_->stderrReader.joinable()) impl_->stderrReader.join();
+
     int stdoutPipe[2] = {-1, -1};
     int stderrPipe[2] = {-1, -1};
     int startupStatusPipe[2] = {-1, -1};
@@ -269,6 +301,12 @@ bool Process::Start() {
         throw System::InvalidOperationException(
             std::string("Failed to receive process startup status: ") + std::strerror(statusReadError));
     }
+    // Committed to the new child from here on: nothing below throws, so the object never
+    // observes a half-applied restart.  The captured text belongs to the process that
+    // produced it, so a restart starts from empty rather than appending the new child's
+    // output to the previous one's (measured before this change: "first" then "firstsecond").
+    impl_->stdoutText.clear();
+    impl_->stderrText.clear();
     if (redirOut) {
         ::close(stdoutPipe[1]);
         impl_->stdoutReader = std::thread(drainPipe, stdoutPipe[0], &impl_->stdoutText);
@@ -280,6 +318,10 @@ bool Process::Start() {
     impl_->pid = pid;
     impl_->started = true;
     impl_->hasExited = false;
+    // A Process obtained from GetCurrentProcess() now describes the child it just started,
+    // not the current process; leaving this set would make WaitForExit/Kill silently no-op
+    // on a real child.
+    impl_->isCurrentProcess = false;
     return true;
 #else
     throw System::PlatformNotSupportedException("System::Diagnostics::Process is only supported on POSIX platforms.");

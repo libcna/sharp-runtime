@@ -58,9 +58,21 @@ namespace System::Diagnostics {
 
         /**
          * @brief Starts (or restarts) the process using getStartInfoProperty().
+         *
+         * Because the default constructor is private, every call on an existing instance is a
+         * restart: the first launch always goes through one of the static Start overloads or
+         * GetCurrentProcess(). A restart is permitted only once the previously started process
+         * has exited; the captured standard-output and standard-error text is then reset, so
+         * the properties describe the newly started process rather than accumulating across
+         * restarts.
+         *
          * @return true if a process resource was started.
-         * @throws System::InvalidOperationException if child setup or exec fails; its message
-         * includes the executable name and native error text.
+         * @throws System::InvalidOperationException if getStartInfoProperty()'s FileName is
+         * empty, if the previously started process is still running, or if child setup or exec
+         * fails; in the last case its message includes the executable name and native error
+         * text.
+         * @throws System::ArgumentException if an environment variable name is empty or
+         * contains '='.
          */
         bool Start();
 

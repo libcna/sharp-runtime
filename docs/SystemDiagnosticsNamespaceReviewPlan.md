@@ -178,7 +178,35 @@ validation**. They share one expression, so #2024 repairs them together, but the
 first changes a defined result and the second only closes an unvalidated domain;
 §7.3 tabulates them separately rather than blending them.
 
-### 4.4 Three audit statements that are correct and are **not** corrected
+### 4.5 SR-AUD-270's trigger is a joinable reader, not a running child (#2025, measured)
+
+Appended by **#2025** from `build-probe/2025_probe1_before.log`. §5's D-C and §10's test
+matrix both frame the abort as happening while the previous child is **still running**
+("restarting a `Process` **with a live pipe-reader**"). Measured, the trigger is a **joinable
+reader thread**, which outlives the child:
+
+- **Probe case C** — the previous child had already **exited**, and the restart still aborted
+  with `SIGABRT`, because nothing had joined the reader. Only `WaitForExit()` and
+  `getHasExitedProperty()` join it. So §10's row *"restart after the previous child exited
+  (must work)"* was **already broken today** in the redirected case, for any caller that had
+  not happened to wait first.
+- **Probe case B** — the captured text **accumulates** across a restart: `"first"` then
+  `"firstsecond"`. §10 asked for "`stdoutText` state after a restart" to be decided; it is now
+  **reset** at the commit point.
+- **Probe case E** — an **unredirected** restart while the child runs neither aborts nor is
+  refused today: it silently **abandons** the first child, which is never reaped
+  (`waitpid(WNOHANG)` returned 0, i.e. still alive and still owned). §7.1's one-line
+  justification ("changes only paths that today abort or deadlock") therefore **understates**
+  #2025: this path today neither aborts nor deadlocks, and #2025 narrows it to an exception.
+  That row is tabulated in §7.4 rather than absorbed silently.
+
+A fourth measured fact reframes the whole ticket: **`Process`'s default constructor is
+private**, so the only public ways to obtain one are the three static `Start` overloads and
+`GetCurrentProcess()`. Every public call to the **instance** `Start()` is therefore a
+**restart** by construction — the "first start" case exists only inside the static factories.
+
+### 4.6 Three audit statements that are correct and are **not** corrected
+
 
 - SR-AUD-274's async-signal-safety claim is exactly right, and the measured
   aggravating detail is that the parent becomes multithreaded **through this
@@ -304,6 +332,30 @@ exited and the caller asked to wait). It is proposed as compatible on the
 #2007 precedent — a defined result with no possible use — but a reviewer who
 disagrees can split it into its own gated ticket without disturbing the other
 three rows.
+
+### 7.4 The complete observable-change table for #2025 (appended by #2025, measured)
+
+§7.1's one-line justification for #2025 ("changes only paths that today abort or deadlock")
+does not cover every row, so every row is listed. "Before" is
+`build-probe/2025_probe1_before.log`; "after" is `build-probe/2025_probe1_after.log`.
+
+| Call | Before (measured) | After |
+|---|---|---|
+| restart after exit, unredirected (case A) | works | **identical** |
+| restart after exit, redirected, caller waited (case B) | works, but captured text **accumulates** (`"firstsecond"`) | works; captured text is **reset** (`"second"`) |
+| restart after exit, redirected, caller did **not** wait (case C) | **`SIGABRT`** — `terminate called without an active exception` | works |
+| restart while running, redirected (case D) | **`SIGABRT`** | `InvalidOperationException` |
+| restart while running, unredirected (case E) | **succeeds**, silently abandoning the first child unreaped | `InvalidOperationException` — **the one narrowed row** |
+| restart after a failed restart (case F) | works | **identical** |
+| restart with an empty `FileName` | `InvalidOperationException` | **identical** (validation order unchanged) |
+| `Start()` on a `GetCurrentProcess()` instance | forks, but leaves `isCurrentProcess` set, so `WaitForExit`/`Kill` silently no-op on a real child | the flag is cleared, so the instance describes the child it started |
+
+Case E is the only row that removes a currently-working call. It is proposed as compatible
+because what it removed was a **silent child leak**: the caller lost the pid, the object stopped
+describing the abandoned process, and nothing could ever reap it. Case B's reset is the second
+behaviour change on a working path, and is the answer to §10's open question about
+`stdoutText` after a restart. A reviewer who disagrees with either can split it out without
+disturbing cases C and D, which are the abort this ticket exists to remove.
 
 ---
 
@@ -554,7 +606,7 @@ implementation ticket, and:
 |---|---|---|---|
 | #2023 | — | maps all 8 | this document |
 | #2024 | D-A | 268, 272 | `todo`, compatible |
-| #2025 | D-C | 270 | `todo`, compatible |
+| #2025 | D-C | 270 | **done** (2026-08-04), compatible, +15 tests |
 | #2026 | D-F | 274 | `todo`, compatible |
 | #2027 | D-G | 275 | `todo`, compatible |
 | #2028 | — | (docs + gated pins) | `todo`, compatible |
