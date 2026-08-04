@@ -6891,3 +6891,90 @@ resolution (#2021).
 
 **Index after #2012: 107 remediated / 257 confirmed / 364 total** — of which **35** carry the
 `confirmed (design-complete)` qualifier, eleven of them added by this review's §14 designs.
+
+## `System::Diagnostics` namespace review and its compatible half — #2023–#2028, #2033 (2026-08-03/04)
+
+Recorded 2026-08-04. This section is a **backfill**: the #2023 review and the #2024–#2028 batch
+updated `AUDIT_FINDINGS_INDEX.md` but never appended here, so the progress log jumped from #2012
+to nothing. Nothing below is new work; every statement is taken from the committed index rows,
+`docs/SystemDiagnosticsNamespaceReviewPlan.md` and the retained probe logs.
+
+**The review (#2023).** All eight open `modules/diagnostics` findings — SR-AUD-268 … SR-AUD-275,
+five of them `high` — mapped to seven root causes **D-A … D-G** and tickets #2023–#2031. All eight
+premises reproduced (`build-probe/2023_probe1_before.log`).
+
+**The compatible half, all `done` 2026-08-04:**
+
+| Ticket | Finding | Outcome |
+|---|---|---|
+| #2024 | SR-AUD-268, SR-AUD-272 | `WaitForExit` honours `Timeout.Infinite`, rejects `< -1`, retries on `EINTR` — **both remediated** |
+| #2025 | SR-AUD-270 | the restart no longer aborts the process — **remediated** |
+| #2026 | SR-AUD-274 | the environment is marshalled in the parent; no allocating call remains between `fork` and `exec` — **remediated** |
+| #2027 | SR-AUD-275 | `Debug`'s provider and both indent-size globals are race-free; TSan went from **20 data races + 12 heap-use-after-free** to **0** — **remediated** |
+| #2028 | — | three headers made truthful; 8 pins so #2029–#2031 cannot land silently |
+| #2033 | — | the reader-join disclosure half (below) |
+
+**The gated half, all still `blocked` and `confirmed (design-complete)`:** SR-AUD-269 (#2029),
+SR-AUD-271 (#2030), SR-AUD-273 (#2031).
+
+**One post-audit defect filed, not absorbed: #2032** — `WaitForExit(milliseconds)` blocking
+29,951 ms against a 5,000 ms bound behind a grandchild holding the redirected pipe.
+
+**Corrected 2026-08-04 by #2033:** that defect is **five public doors, not one**. Measured against
+an 8 s grandchild — `WaitForExit(500)` 7,502 ms, `getHasExitedProperty()` 7,502 ms, `Kill(false)`
+7,502 ms, the restart `Start()` 7,503 ms, `~Process` 8,004 ms
+(`build-probe/2033_probe1_reader_join_entry_points.log`) — because the join lives in
+`reapIfNeeded`, not in the destructor. #2033 shipped the compatible disclosure half (six doc
+corrections, four pins, one control, mutation-checked) and left the policy with #2029.
+`docs/ConsolidatedApprovalPackage.md` now asks for the **`reapIfNeeded` join policy** rather than
+§14.1's destructor-only sentence, and records that §14.1's recommended option C is **unsound as
+written** — `drainPipe` holds a raw pointer into the `Impl`, so detaching in `~Impl` is a
+use-after-free unless the reader gains shared ownership of its buffer.
+
+**No `SR-AUD-*` identifier was issued by any of this; numbering stays frozen at 364.**
+
+## `System::Net` namespace review — ticket #2034 (2026-08-04)
+
+The seventh namespace review. Selected by re-deriving the queue from
+`AUDIT_FINDINGS_INDEX.md`, not by inheriting the previous handoff (which named
+`modules/buffers` and `modules/xml`): `modules/net` has **10 open findings of which 3 are `high`**
+— a **30 %** high ratio, the highest of any un-reviewed namespace with more than six findings —
+**no** `docs/` plan at all, one module and one namespace, and a `Uri` dependency that was itself
+reviewed and repaired days earlier. **#1962 lives in `modules/net-network-information`**, a
+different module and namespace, so it gates nothing here. `modules/buffers`, the nearest
+competitor on the numbers, is partially covered by `docs/Base64FamilyPlan.md` and its findings are
+lower-consequence.
+
+**All ten premises reproduced** (`build-probe/2034_probe1_net_before.log`, plus
+`build-probe/2034_probe2_asan.log` for the memory-safety half, with `SocketAddress.cpp`,
+`IPAddress.cpp` and `IPEndPoint.cpp` compiled **from source** into the ASan probe):
+
+- **SR-AUD-300** — ASan `heap-buffer-overflow` READ at `SocketAddress.cpp:106`, *0 bytes after a
+  2-byte region*, exactly as the finding states; plus a `Unix`-family buffer decoding as
+  `0.0.0.0:0` and ports `70000` and `-1` truncating to `4464` and `65535`.
+- **SR-AUD-301** — scope id `-1` → `4294967295`, `4294967296` → `0`, `setScopeIdProperty(-5)` →
+  `4294967291`.
+- **SR-AUD-302** — `IPEndPoint::Parse("[::1]ignored:80")` → `[::1]:80`.
+- **SR-AUD-303** — the masked IPv6 base address loses scope id `7`.
+- **SR-AUD-304** — `-0.0.0.1` accepted, the wildcard returned, the family filter ignored.
+- **SR-AUD-305** — a cookie from `origin.invalid` with `Domain=.unrelated.invalid` emitted for
+  `unrelated.invalid`.
+- **SR-AUD-306** — both value-taking constructors leave the implicit flags set.
+- **SR-AUD-307** — `collection[Count]` SIGSEGV.
+- **SR-AUD-308** — 10,000 cookies retained.
+- **SR-AUD-309** — `HtmlEncode` escapes five entities and passes non-ASCII through.
+
+**Four premise corrections, historical text preserved** (plan §4): SR-AUD-304 has an unnamed
+**fourth** defect — `GetHostAddresses("1.2.3")` returns **three identical** addresses — and its
+`999.999.999.999` case does not reach the literal parser at all but throws with the Win32-shaped
+message `"Win32 error 11001"` on POSIX; SR-AUD-307's own named case (`collection[-1]`) is the one
+that **silently succeeds** rather than crashing; and SR-AUD-309 describes the **encode** direction
+only, since `HtmlDecode` already understands `&copy;`, `&#169;` and `&#xA9;`.
+
+Seven causes **N-A … N-G**; six compatible tickets **#2035–#2039, #2041** (`todo`) and four
+approval-gated **#2040, #2042, #2043, #2044** (`blocked`). **Nothing was implemented.**
+SR-AUD-305, 306, 308 and 309 move to `confirmed (design-complete)`.
+
+**Index after #2034: 112 remediated / 252 confirmed / 364 total** — of which **42** carry the
+`confirmed (design-complete)` qualifier, four of them added by this review's §14 designs.
+**No `SR-AUD-*` identifier was created; numbering stays frozen at 364.**

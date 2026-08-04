@@ -25,7 +25,7 @@ rule (§D.5).
 | Probe | Source | Log |
 |---|---|---|
 | Diagnostics reader-join doors | `build-probe/2033_probe1_reader_join_entry_points.cpp` | `..._entry_points.log` |
-| Text approval re-verification | `build-probe/2034_probe1_text_approval_reverify.cpp` | `..._reverify.log` |
+| Text approval re-verification | `build-probe/2033_probe2_text_approval_reverify.cpp` | `..._reverify.log` |
 
 plus four temporary source mutations, each applied, built, run, and reverted with `git diff`
 confirmed clean (§D.4). `/rv/tmp/runtime/src/libraries/` re-verified **absent**; no .NET runtime is
@@ -315,7 +315,7 @@ in which processes receive a signal.
 ## T.1 Status of the existing package
 
 `docs/SystemTextApprovalPackage.md` (#2022, 2026-08-03) is **verified and stands**. Independently
-re-measured 2026-08-04 (`build-probe/2034_probe1_text_approval_reverify.log`), and separately
+re-measured 2026-08-04 (`build-probe/2033_probe2_text_approval_reverify.log`), and separately
 confirmed that **no `modules/text` or `modules/core` production file has changed since that
 package was written** (`git log 6abd16e..HEAD -- modules/text modules/core` is empty), so its
 "now" rows are still the current behaviour and not a carried-forward measurement.

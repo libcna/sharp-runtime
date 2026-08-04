@@ -2323,3 +2323,55 @@ in the plan's §16 under ordinary ticket numbers only.
 **TSan is genuinely applicable to this namespace's compatible half** — the first
 time in the programme. `System::Text`'s review correctly recorded TSan as not
 applicable; here #2027 cannot be closed without it.
+
+---
+
+## `System::Net` appendix — ticket #2034 (2026-08-04)
+
+Recorded by the seventh namespace review. **No new `CCF-*` identifier is created**; the
+cross-cutting numbering is closed and `docs/SystemNetNamespaceReviewPlan.md` §5 is the durable
+record of causes **N-A … N-G**.
+
+### Which of this namespace's causes are new occurrences of existing families
+
+- **N-B** (SR-AUD-301 `IPAddress::ScopeId`, SR-AUD-307 `CookieCollection::operator[]`) is
+  **CCF-004's shape one layer up**: not undefined *arithmetic* but an undefined *conversion
+  domain* — a signed public parameter converted to unsigned and used without a domain check. It is
+  recorded as an occurrence, **not** made a CCF-004 member, because CCF-004's own closing
+  condition was about defined arithmetic and that family is closed (8/8, #1837).
+- **N-G** (SR-AUD-309 `WebUtility::HtmlEncode`) is the **same cause** as `System::Text`'s **T-M**
+  (SR-AUD-297 policy half, #2019): a declared-subset text transformation whose target cannot be
+  verified in this container. **They must be decided together.** Two HTML encoders in one
+  repository with two different escape sets is precisely the divergence CCF-012 exists to warn
+  about, and #2044's approval sentence says so explicitly. Neither is a CCF-012 member — CCF-012
+  is about *composite-format brace grammars*, not about escaping — but the family's lesson
+  applies.
+- **N-A** (SR-AUD-300) shares a subject with the memory-safety findings without being a member of
+  any family: it is a single decoder that reads fixed offsets from a caller-sized buffer.
+
+### Which are genuinely local
+
+**N-C** (parsers that discard what they do not understand), **N-D** (a transformation that drops
+carried state), **N-E** (absent cookie origin policy) and **N-F** (unbounded public state) have no
+counterpart elsewhere in the audit and are recorded in the plan's §5 only.
+
+### What this review changed in the index
+
+Four findings move to the `confirmed (design-complete)` qualifier — **SR-AUD-305**, **SR-AUD-306**
+(both blocked as #2040, one decision), **SR-AUD-308** (#2042) and **SR-AUD-309** (#2044, deferred).
+They remain open and remain counted as confirmed. The other six are **compatible** and are
+ticketed `todo` as #2035–#2039 and #2041, with SR-AUD-304's wildcard half split to the gated
+#2043; **none was implemented in this batch**. The index now reads
+**112 remediated / 252 confirmed / 364 total**, of which **42** carry the qualifier — up from 38,
+with the confirmed total unchanged because this review remediated nothing, by design. **No
+`SR-AUD-*` identifier was issued; numbering stays frozen at 364**, and the four premise
+corrections this review measured are recorded in the plan's §4.
+
+### CCF-012 status is unchanged by this review
+
+Re-enumerated independently on 2026-08-04 across all 16 brace-scanning files in `modules/`:
+**exactly two composite-format grammar implementations exist**, `System::detail::runCompositeFormat`
+and `System::Text::CompositeFormat::countPlaceholders`. `Regex`'s `${name}`, `XName`'s `{ns}local`,
+`Guid`'s `{…}` specifiers and the JSON/XML writers are different grammars and are **not** members.
+**CCF-012 remains open** and is closable only by #2020's shared non-rendering scanner
+(`docs/ConsolidatedApprovalPackage.md` §T.6). **It is not marked closed by this or any design work.**
