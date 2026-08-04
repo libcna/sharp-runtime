@@ -428,9 +428,9 @@ assert at teardown that no child of the test process remains in state `Z`.
 
 | Sanitizer | Applies to | What it must show |
 |---|---|---|
-| **TSan** | **#2027 (compatible), #2030 and #2029 (gated)** | the `Debug::SetProvider`/`Write` race and the `stdoutText` reader/getter race present **before** and absent **after**, with the changed body compiled into the probe. **TSan is genuinely applicable here** — unlike in `System::Text`, where it was correctly recorded as not applicable |
-| **ASan** | #2025, #2026, #2029 | no use-after-free when a reader thread outlives a restarted or destroyed `Process` |
-| **LSan** | #2024, #2025, #2026 | no fd leak and no thread leak across a failed start, a restart, or an interrupted wait |
+| **TSan** | **#2027 (compatible), #2030 and #2029 (gated)** | the `Debug::SetProvider`/`Write` race and the `stdoutText` reader/getter race present **before** and absent **after**, with the changed body compiled into the probe. **TSan is genuinely applicable here** — unlike in `System::Text`, where it was correctly recorded as not applicable. **#2027's half is DONE and discriminating:** `Debug`/`Trace` are header-only, so the probe necessarily instruments the production bodies. Before: **20 data races and 12 `heap-use-after-free`** (`build-probe/2027_probe1_tsan_before.log`). After: **0 warnings of any kind, clean exit** (`..._after.log`). The `heap-use-after-free` was **not** predicted by SR-AUD-275, which described only a race. #2030's and #2029's halves remain unrun, being gated |
+| **ASan** | #2025, #2026, #2029 | no use-after-free when a reader thread outlives a restarted or destroyed `Process`. **Run by #2025/#2026 and clean**, with `Process.cpp` compiled from source into the probe (`build-probe/2026_probe2_asan.log`) so no uninstrumented archive is involved |
+| **LSan** | #2024, #2025, #2026 | no fd leak and no thread leak across a failed start, a restart, or an interrupted wait. **Run by #2025/#2026 and clean**, and proven discriminating by a deliberate-leak control -- an earlier control that reported nothing turned out to be *reachable* memory, not a dead detector |
 | **UBSan** | #2024 | the timeout arithmetic (`now + milliseconds(INTCS_MIN)`) is defined. **Run by #2024 and NON-DISCRIMINATING, reported as such:** clean **before and after**, because converting `INTCS_MIN` milliseconds to nanoseconds stays inside `int64`. UBSan was proven live by a deliberate `chrono` overflow control |
 
 `fork`-based tests need `ASAN_OPTIONS=detect_leaks=0` in the child or a
@@ -635,7 +635,7 @@ implementation ticket, and:
 | #2024 | D-A | 268, 272 | **done** (2026-08-04), compatible, +13 tests |
 | #2025 | D-C | 270 | **done** (2026-08-04), compatible, +15 tests |
 | #2026 | D-F | 274 | **done** (2026-08-04), compatible, +13 tests |
-| #2027 | D-G | 275 | `todo`, compatible |
+| #2027 | D-G | 275 | **done** (2026-08-04), compatible, +11 tests |
 | #2028 | — | (docs + gated pins) | `todo`, compatible |
 | #2029 | D-B | 269 | **blocked**, design complete (§14.1) |
 | #2030 | D-D | 271 | **blocked**, design complete (§14.2) |
