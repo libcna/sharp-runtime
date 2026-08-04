@@ -605,6 +605,38 @@ Consequence for this namespace's own tests: `#2025` and `#2026` use `exec sleep 
 `sleep 30` for a killable redirected child, so no test depends on this defect. The shape is
 preserved in the probe, not hidden.
 
+### 16.1.1 #2032 understates itself: the join is reached from **five** public doors (#2033, measured)
+
+Appended by the #2033 batch from `build-probe/2033_probe1_reader_join_entry_points.log`
+(source `build-probe/2033_probe1_reader_join_entry_points.cpp`), 2026-08-04. §16.1 and
+`Process.hpp` both named only `WaitForExit(intcs)`. Measured against an 8 s grandchild holding
+the redirected write end, with the direct child killed out-of-band so it is dead but unreaped:
+
+| Public call | Blocked for | Declared bound |
+|---|---|---|
+| `WaitForExit(500)` | **7,502 ms** | 500 ms — **exceeded**, the #2032 shape |
+| `getHasExitedProperty()` | **7,502 ms** | **none exists** — it takes no timeout |
+| `Kill(false)` | **7,502 ms** | **none exists** — documented as "immediately stops" |
+| `Start()` (restart) | **7,503 ms** | **none exists** |
+| `~Process` | **8,004 ms** | **none exists** — SR-AUD-269's blocking half |
+
+`getExitCodeProperty()` reaches it through `getHasExitedProperty()`, so **six** public members are
+affected. The single cause is `reapIfNeeded`'s join (`Process.cpp:126-127`) plus `WaitForExit()`'s
+own join (`:419-420`).
+
+**Why this matters to the approval, and not only to the record.** §14.1's approval sentence
+changes **`~Process` alone**. If it were granted as written, four public doors would keep blocking
+without bound — including a `const` getter documented as a poll. The consolidated request
+(`docs/ConsolidatedApprovalPackage.md`, Approval **D-A**) therefore asks for the **`reapIfNeeded`
+join policy**, of which the destructor is one consumer, rather than for a destructor-only change.
+§14.1 is not rewritten; this is the appended correction.
+
+**The compatible half was split out and shipped as #2033**: the four doors' contracts are now
+true, and four permanent pins assert the blocking, mutation-checked by temporarily applying option
+C's `detach` to `reapIfNeeded` — all four failed, the control and the zombie check kept passing,
+the mutation was reverted and `git diff` confirmed clean. **The policy itself is untouched and
+still gated.**
+
 ---
 
 ## 16.2 Pin discrimination evidence (#2028)
@@ -656,4 +688,6 @@ implementation ticket, and:
 | #2028 | — | (docs + gated pins) | **done** (2026-08-04), compatible, +8 tests |
 | #2029 | D-B | 269 | **blocked**, design complete (§14.1), **PINNED by #2028** (2 tests, mutation-checked) |
 | #2030 | D-D | 271 | **blocked**, design complete (§14.2), **PINNED by #2028** (2 tests, one a `static_assert`) |
-| #2031 | D-E | 273 | **blocked**, design complete (§14.3), **PINNED by #2028** (1 test, discrimination-checked) |
+| #2031 | D-E | 273 | **blocked**, design complete (§14.3), **PINNED by #2028** (1 test, discrimination-checked); pin **re-verified 2026-08-04** by implementing §14.3's own `/proc` descendant walk temporarily — the pin failed, the walk killed the `setsid` grandchild, the mutation was reverted |
+| #2032 | D-B | — | **blocked** on #2029; scope corrected by §16.1.1 — **five** public doors, not one |
+| #2033 | D-B disclosure | — | **done** (2026-08-04), compatible, +6 tests; four doors' contracts made true and pinned, mutation-checked against option C |

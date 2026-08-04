@@ -28,6 +28,22 @@ namespace System::Diagnostics {
      * reference into a buffer an internal thread is still writing. Confine an instance to one
      * thread. Ticket #2030 gates the repair.
      *
+     * @note Blocking, when output is redirected: reaping the child also **joins** the internal
+     * pipe-reader threads, and a reader cannot finish until every holder of the pipe's write end
+     * closes it -- including a **grandchild** that inherited it and outlives the direct child.
+     * Five public members reach that join and can therefore block for as long as such a holder
+     * lives: getHasExitedProperty() (and getExitCodeProperty() through it), Kill() and
+     * Kill(bool), the restart Start(), WaitForExit(intcs), and ~Process. Measured 2026-08-04
+     * with an 8 s grandchild: 7,502 ms, 7,502 ms, 7,503 ms and 8,004 ms respectively
+     * (`build-probe/2033_probe1_reader_join_entry_points.log`). Only WaitForExit(intcs) declares
+     * a bound to exceed; the others simply take arbitrarily long. Removing this requires deciding
+     * what a reader that cannot finish should do -- join, detach, or abandon the descriptor --
+     * which is the policy ticket **#2029** gates (`docs/SystemDiagnosticsNamespaceReviewPlan.md`
+     * §14.1); the bound violation is tracked as **#2032** and the disclosure as **#2033**. The
+     * behaviour is pinned by permanent tests. A caller that must not block should not redirect
+     * output, or should ensure the child does not leave the write end open in a descendant
+     * (`exec`ing the real program from a shell wrapper is enough).
+     *
      * @note Status: Partial, POSIX-only (uses fork()/execvpe()/waitpid() in the .cpp body, guarded
      * behind #ifdef so the public header stays portable; throws
      * System::PlatformNotSupportedException on Emscripten). Implemented: Start (instance and the
@@ -90,6 +106,11 @@ namespace System::Diagnostics {
          * the properties describe the newly started process rather than accumulating across
          * restarts.
          *
+         * @warning A restart first resolves the previous child, which with redirected output
+         * joins its reader threads, so this call blocks for as long as any descendant of the
+         * previous child still holds that pipe's write end (7,503 ms measured against an 8 s
+         * grandchild). Tickets #2029 and #2033.
+         *
          * @return true if a process resource was started.
          * @throws System::InvalidOperationException if getStartInfoProperty()'s FileName is
          * empty, if the previously started process is still running, or if child setup or exec
@@ -106,11 +127,26 @@ namespace System::Diagnostics {
          */
         [[nodiscard]] intcs getIdProperty() const;
 
-        /** @brief Gets a value indicating whether the associated process has terminated. */
+        /**
+         * @brief Gets a value indicating whether the associated process has terminated.
+         *
+         * @warning This is **not** a cheap poll when output is redirected. Observing the exit
+         * also reaps the child, which joins the internal reader threads, so the call blocks
+         * until every holder of the pipe's write end has closed it -- a **grandchild** that
+         * inherited it will hold it after the direct child is gone (7,502 ms measured against an
+         * 8 s grandchild). It takes no timeout and so has no bound to exceed. See the class
+         * note; ticket #2029 gates the reader-thread policy, #2033 this disclosure.
+         *
+         * @warning Declared const, yet it mutates the object's exit state (ticket #2030).
+         */
         [[nodiscard]] bool getHasExitedProperty() const;
 
         /**
          * @brief Gets the exit code returned by the associated process.
+         *
+         * @warning Reached through getHasExitedProperty(), so it inherits that member's
+         * redirected-output blocking behaviour verbatim.
+         *
          * @throws System::InvalidOperationException if the process has not exited yet.
          */
         [[nodiscard]] intcs getExitCodeProperty() const;
@@ -149,6 +185,13 @@ namespace System::Diagnostics {
          * Descendants the child created are **not** signalled and keep running, reparented to
          * init. Does nothing if the process has already exited or was obtained from
          * GetCurrentProcess().
+         *
+         * @warning "Immediately" describes the signal, not this call. With redirected output,
+         * Kill first checks whether the child has already exited, and observing that reaps it
+         * and joins the internal reader threads -- so the call blocks for as long as any
+         * descendant still holds the pipe's write end (7,502 ms measured against an 8 s
+         * grandchild), with no timeout parameter to bound it. See the class note; ticket #2029
+         * gates the reader-thread policy, #2033 this disclosure.
          */
         void Kill();
 
@@ -165,6 +208,10 @@ namespace System::Diagnostics {
          * descendant set changes how many processes get killed and needs a Linux-specific
          * `/proc` walk, so it awaits approval (ticket #2031, plan §14.3); the current
          * behaviour is pinned by a permanent test.
+         *
+         * @warning Carries Kill()'s redirected-output blocking caveat verbatim: this call can
+         * take arbitrarily long while a descendant holds the pipe's write end, and has no
+         * timeout parameter. Tickets #2029 and #2033.
          */
         void Kill(bool entireProcessTree);
 
@@ -174,6 +221,13 @@ namespace System::Diagnostics {
          * The wait is retried on EINTR, so a signal whose handler was installed without
          * SA_RESTART interrupts the underlying wait but not this call. Returns immediately for
          * a Process obtained from GetCurrentProcess(), which is not a child of itself.
+         *
+         * @note With redirected output this waits for **more** than the process: after the child
+         * terminates it joins the internal reader threads, which cannot finish until every
+         * holder of the pipe's write end has closed it. That is deliberate here -- it is what
+         * makes the captured text complete when this call returns -- but it means the wait can
+         * outlast the child by the lifetime of any descendant that inherited the pipe. The
+         * timeout overload inherits the same behaviour and so can exceed its bound (#2032).
          *
          * @throws System::InvalidOperationException if the process has not been started.
          */
