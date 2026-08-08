@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Http/Headers/CacheControlHeaderValue.hpp"
+#include "HeaderFieldSplitter.hpp"
 #include "System/FormatException.hpp"
 #include "System/HashCode.hpp"
 #include <algorithm>
@@ -41,24 +42,12 @@ namespace System::Net::Http::Headers {
         }
 
         // Splits a comma-separated list at the top level, ignoring commas inside a quoted string.
-        std::vector<std::string> splitTopLevel(const std::string& input) {
-            std::vector<std::string> parts;
-            std::string current;
-            bool inQuotes = false;
-            for (size_t i = 0; i < input.size(); ++i) {
-                char c = input[i];
-                if (c == '"') {
-                    inQuotes = !inQuotes;
-                    current += c;
-                } else if (c == ',' && !inQuotes) {
-                    parts.push_back(current);
-                    current.clear();
-                } else {
-                    current += c;
-                }
-            }
-            parts.push_back(current);
-            return parts;
+        // Ticket #2126 (SR-AUD-320, cause NH-H): this was one of SEVEN list splitters that toggled
+        // on every quote with no notion of a quoted-pair, so a legal escaped quote followed by the
+        // delimiter split a parameter in the middle of its own value. They are now one body, in
+        // HeaderFieldSplitter.hpp. This is a WIDENING: valid RFC 9110 text starts being accepted.
+        inline std::vector<std::string> splitTopLevel(const std::string& input) {
+            return System::Net::Http::Headers::detail::SplitTopLevel(input, ',');
         }
 
         // Verified against HeaderUtilities.cs's TryParseInt32, which delegates to

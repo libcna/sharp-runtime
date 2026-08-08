@@ -717,3 +717,46 @@ twelve repaired bodies compiled into the instrumented TU and a live heap-use-aft
 
 **No signature, layout, vtable or exception-specification change. Graph unchanged at 41 / 92.**
 
+### 18.4 #2126 — six were escape-blind; the seventh tracked no quoting at all
+
+§4.2's sharpening held for six of the seven: they *do* track quotes and simply cannot see a
+quoted-pair, which is why an **unescaped** `;` inside a quoted parameter was accepted (the control)
+while `text/plain; p="a\";b"` was rejected. All six now call one body,
+`src/System/Net/Http/Headers/HeaderFieldSplitter.hpp` (implementation-only, beside the sources).
+
+**The seventh is worse than the plan says, and no document names it.**
+`NameValueWithParametersHeaderValue::TryParse` split on a bare `input.find(';')` with **no quote
+tracking whatsoever**, so §4.2's own control case — the unescaped delimiter inside quotes — was
+split *there* too. Describing all seven as "escape-blind" understates one of them; it is folded
+into the same body and has its own test, because that assertion is the only thing that
+distinguishes *escape*-blind from *quote*-blind.
+
+**The scanner deliberately does not validate.** An unterminated quote or a trailing backslash still
+produces one final segment that the caller's own grammar check rejects, exactly as before.
+Splitting and validating stay separate, which is why the widening cannot leak into acceptance of
+malformed quoting — pinned by its own test.
+
+**A backslash OUTSIDE a quoted-string stays an ordinary character**, because `quoted-pair` occurs
+only inside `quoted-string` and `comment`.
+
+**Mutations, and a second vacuous assertion caught.** **M1 under-repair** (ignore the escape):
+**2 tests fail**. **M2 over-repair** (honour the escape outside quotes too): **passed everything on
+the first attempt**. The assertion was `EXPECT_FALSE(MediaTypeHeaderValue::TryParse(...))`, and the
+over-repair merges two segments into one still-invalid segment — so `TryParse` returns `false`
+either way and the test could not see the difference. Re-pointed at `Accept`, whose `parseList`
+*skips* an unparsable element rather than failing the whole value, the observable becomes the
+element **count** (2-with-one-invalid versus 1-long-invalid) and M2 fails **exactly one** test.
+That is the second time in this batch a mutation found a vacuous test rather than a broken repair;
+both are recorded rather than quietly fixed. **M3 control** (respell the append as
+`current.append(1, c).append(1, …)`): **0 failures**.
+
+**+7 tests** (`SharpRuntimeTests_Net_Http_Headers` 401 → **408**). Sanitizer coverage folded into
+the batch probe, now with the four parameter-carrying bodies also compiled in: **ASan + UBSan +
+LSan clean over 200,040 operations**. Note the accept/reject split is unchanged by #2126, and that
+is expected rather than suspicious — the probe counts *thrown* results, and a `TryParse` widening
+changes a `bool`, not a throw.
+
+**This is a widening.** Nothing that parsed before stops parsing (pinned), and text valid per
+RFC 9110 starts parsing. **No signature, layout, vtable or exception-specification change. Graph
+unchanged at 41 / 92.**
+

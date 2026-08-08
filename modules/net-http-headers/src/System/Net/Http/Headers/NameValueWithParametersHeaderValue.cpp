@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Http/Headers/NameValueWithParametersHeaderValue.hpp"
+#include "HeaderFieldSplitter.hpp"
 #include "System/FormatException.hpp"
 #include "System/HashCode.hpp"
 #include <algorithm>
@@ -57,9 +58,13 @@ namespace System::Net::Http::Headers {
         return result;
     }
 
+    // Ticket #2126 (SR-AUD-320, cause NH-H) -- and a PREMISE REFINEMENT. §4.2 described seven
+    // "escape-blind" splitters. Six were escape-blind; THIS one, the seventh, tracked no quoting at
+    // all -- it split on a bare `input.find(';')` -- so even §4.2's own control case, an UNESCAPED
+    // ';' inside a quoted parameter, was split here. It now uses the same body as the other six.
     bool NameValueWithParametersHeaderValue::TryParse(const std::string& input, NameValueWithParametersHeaderValue& parsedValue) {
-        size_t semi = input.find(';');
-        std::string head = trim(semi == std::string::npos ? input : input.substr(0, semi));
+        const std::vector<std::string> segments = detail::SplitTopLevel(input, ';');
+        std::string head = trim(segments[0]);
 
         // Real .NET's GetNameValueWithParametersLength parses the head via the same
         // NameValueHeaderValue.GetNameValueLength grammar used by plain NameValueHeaderValue
@@ -77,21 +82,13 @@ namespace System::Net::Http::Headers {
                 ? NameValueWithParametersHeaderValue(name)
                 : NameValueWithParametersHeaderValue(name, value);
 
-            if (semi != std::string::npos) {
-                std::string rest = input.substr(semi + 1);
-                size_t start = 0;
-                while (start <= rest.size()) {
-                    size_t next = rest.find(';', start);
-                    std::string segment = trim(next == std::string::npos ? rest.substr(start) : rest.substr(start, next - start));
-                    if (segment.empty()) return false;
+            for (size_t i = 1; i < segments.size(); ++i) {
+                const std::string segment = trim(segments[i]);
+                if (segment.empty()) return false;
 
-                    NameValueHeaderValue param("x");
-                    if (!NameValueHeaderValue::TryParse(segment, param)) return false;
-                    result.parameters_.push_back(param);
-
-                    if (next == std::string::npos) break;
-                    start = next + 1;
-                }
+                NameValueHeaderValue param("x");
+                if (!NameValueHeaderValue::TryParse(segment, param)) return false;
+                result.parameters_.push_back(param);
             }
 
             parsedValue = result;
