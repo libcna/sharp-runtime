@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <limits>
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Net/Sockets/IPPacketInformation.hpp"
@@ -251,4 +252,77 @@ TEST(UnixDomainSocketEndPointTests, GetHashCode_DifferingPathDiffers) {
     UnixDomainSocketEndPoint a("/tmp/a.sock");
     UnixDomainSocketEndPoint c("/tmp/b.sock");
     EXPECT_NE(a.GetHashCode(), c.GetHashCode());
+}
+
+// --- Ticket #2135 / SR-AUD-264 / cause NS-D -----------------------------------------------------
+//
+// A negative `count` used to mean "the whole buffer": SendPacketsElement({1,2,3}, 0, -2) was
+// accepted with count == 3, and so were -1, -100 and INT_MIN. The cause was that
+// `count >= 0 ? count : buffer_.size()` ran BEFORE any range check, so the sign was consumed by
+// the ternary and never reached one.
+//
+// PREMISE CORRECTION (docs/SystemNetSocketsNamespaceReviewPlan.md §4.2): the negative OFFSET was
+// already rejected, by the unsigned-cast idiom two lines below the ternary, and the FILE-PATH
+// overload already called ThrowIfNegative. So this was one overload's ternary, not a type-wide gap.
+
+TEST(SendPacketsElementCountTests, EveryNegativeCountIsRejected) {
+    for (SharpRuntime::intcs count : {static_cast<SharpRuntime::intcs>(-1),
+                                      static_cast<SharpRuntime::intcs>(-2),
+                                      static_cast<SharpRuntime::intcs>(-100),
+                                      std::numeric_limits<SharpRuntime::intcs>::min()}) {
+        try {
+            System::Net::Sockets::SendPacketsElement element(
+                std::vector<SharpRuntime::bytecs>{1, 2, 3}, 0, count);
+            ADD_FAILURE() << "count " << count << " was accepted";
+        } catch (const System::ArgumentOutOfRangeException& e) {
+            EXPECT_NE(std::string(e.what()).find("count"), std::string::npos) << e.what();
+        }
+    }
+}
+
+TEST(SendPacketsElementCountTests, THECONTROLTheValidCountsAreUnchanged) {
+    // The whole-buffer meaning now lives in the one-argument constructor, where it is meant.
+    System::Net::Sockets::SendPacketsElement whole(std::vector<SharpRuntime::bytecs>{1, 2, 3});
+    EXPECT_EQ(whole.getCountProperty(), 3);
+
+    for (SharpRuntime::intcs count : {0, 1, 3}) {
+        System::Net::Sockets::SendPacketsElement element(
+            std::vector<SharpRuntime::bytecs>{1, 2, 3}, 0, count);
+        EXPECT_EQ(element.getCountProperty(), count);
+    }
+    // ...and the upper bound still rejects, so the repair did not remove the check it sits beside.
+    EXPECT_THROW((void)System::Net::Sockets::SendPacketsElement(
+                     std::vector<SharpRuntime::bytecs>{1, 2, 3}, 0, 4),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)System::Net::Sockets::SendPacketsElement(
+                     std::vector<SharpRuntime::bytecs>{1, 2, 3}, 4, 1),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)System::Net::Sockets::SendPacketsElement(
+                     std::vector<SharpRuntime::bytecs>{1, 2, 3}, 3, 1),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(SendPacketsElementCountTests, ARejectionNamesTheCallersValueNotItsUnsignedReinterpretation) {
+    // The diagnostic defect neither the finding nor the review brief names: a caller who passed
+    // offset = -1 was told "'offset' must be less than or equal to 3. Actual value was 4294967295."
+    try {
+        System::Net::Sockets::SendPacketsElement element(
+            std::vector<SharpRuntime::bytecs>{1, 2, 3}, -1, 1);
+        ADD_FAILURE() << "a negative offset was accepted";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        const std::string message = e.what();
+        EXPECT_EQ(message.find("4294967295"), std::string::npos)
+            << "the message must not report the unsigned reinterpretation: " << message;
+        EXPECT_NE(message.find("-1"), std::string::npos) << message;
+    }
+}
+
+TEST(SendPacketsElementCountTests, THEPINTheFilePathOverloadWasAlreadyCorrect) {
+    EXPECT_THROW((void)System::Net::Sockets::SendPacketsElement("/x", 5, -1),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)System::Net::Sockets::SendPacketsElement("/x", -1, 1),
+                 System::ArgumentOutOfRangeException);
+    System::Net::Sockets::SendPacketsElement ok("/x", 5, 1);
+    EXPECT_EQ(ok.getOffsetLongProperty(), 5);
+    EXPECT_EQ(ok.getCountProperty(), 1);
 }

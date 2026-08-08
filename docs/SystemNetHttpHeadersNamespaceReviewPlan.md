@@ -599,10 +599,17 @@ live heap-use-after-free control.
 §4.1's mechanism was exactly right: the field-terminator check lived in the **`else` branch** of
 `NameValueHeaderValue::checkValueFormat`, so it ran only for an unquoted value, and the repair had
 to sit in `NameValueHeaderValue` because five types hand out their parameter vector by mutable
-reference. Measured over 414 door/payload pairs (`build-probe/2124_probe1_doors.cpp`, logs
-`2124_probe1_before.log` / `2124_probe1_after.log`): **145 accept-and-emit results before, zero
-after** — the 24 residuals in the "after" log are all non-terminator payloads matching the CRLF
+reference. Measured over 414 door/payload pairs (`build-probe/2124_probe1_doors.cpp`, log
+`2124_probe1_after.log`): **145 accept-and-emit results before, zero after** — the 24 residuals in the "after" log are all non-terminator payloads matching the CRLF
 that `HttpHeaders::ToString()` legitimately emits as framing.
+
+**An evidence note, recorded rather than glossed.** The *before* half of that sweep was produced by
+running the same probe against the pre-repair tree, and its log was deleted during probe cleanup;
+`build-probe/` is git-ignored, so it is not recoverable. The numbers above are the transcription,
+which is what `CLAUDE.md`'s probe-retention rule says is the durable evidence — but the
+reproduction that survives on disk is the review's own `build-probe/2122_probe1_before.log`, and
+the "before" column of §4.1's table, not a rerun of this sweep. The *after* log is reproducible from
+`2124_probe1_doors.cpp` at any time and was regenerated to check that claim.
 
 **Three facts §4.1 got wrong, and how.**
 

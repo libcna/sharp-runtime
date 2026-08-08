@@ -469,3 +469,32 @@ behaviour pin, and SR-AUD-266's family half carries a design ticket and a pin.
 
 Appended as tickets land, so the difference between what this review predicted and what
 implementation measured stays visible.
+
+### 17.1 #2135 — the prediction held, and the diagnostic half turned out to matter more than expected
+
+§4.2's two corrections held without amendment: the negative *offset* was already rejected by the
+unsigned-cast idiom two lines below the ternary, and the file-path overload was already correct.
+
+**The repair is smaller than "add a check".** The whole-buffer meaning moved to the one-argument
+constructor, where it is what the caller actually asked for, so no negative sentinel travels into
+the checked overload at all and the ternary simply ceases to exist. That is why the checked overload
+now reads as three ordinary bounds in a row.
+
+**The diagnostic half is what the mutations proved was load-bearing.** M1 restores the ternary in
+the buffer overload only, and it fails **two** tests — `EveryNegativeCountIsRejected` *and*
+`ARejectionNamesTheCallersValueNotItsUnsignedReinterpretation`. The second failure is the
+interesting one: with the ternary back, the negative *offset* path reverts to being caught by the
+unsigned bound, and the message goes back to telling a caller who passed `-1` about `4294967295`. A
+repair that fixed only the sign check would have left that in place and looked complete. M2
+over-repairs with `ThrowIfNegativeOrZero`, so `count == 0` is rejected too, and fails **exactly
+one** test — the valid-counts control. M3, a semantics-preserving `uintcs` round-trip on the stored
+value, fails **none**.
+
+**+7 tests** (`SharpRuntimeTests_Net_Sockets` 84 → **91**; the module's one pre-existing failure,
+`SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`, is unrelated — `/proc/net/if_inet6`
+is absent in this environment). **ASan + UBSan + LSan clean over 1,458 constructions**
+(`build-probe/2135_probe2_san.log`) covering `INT_MIN` and `INT_MAX` at both parameters across
+buffer sizes 0–5 and both overloads, with a live heap-use-after-free control. UBSan is the right
+instrument here specifically because `INT_MIN` no longer reaches an unsigned cast.
+
+**No signature, layout, vtable or exception-specification change. Graph unchanged at 41 / 92.**

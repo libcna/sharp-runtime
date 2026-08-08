@@ -40,22 +40,48 @@ namespace System::Net::Sockets {
             System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
         }
 
-        /** @brief Constructs a buffer element sending the entire buffer. */
+        /**
+         * @brief Constructs a buffer element sending the entire buffer.
+         *
+         * @note The whole-buffer meaning is expressed here, at the door that means it, rather than
+         * by a negative sentinel travelling into the checked overload — see that overload's note.
+         */
         explicit SendPacketsElement(std::vector<SharpRuntime::bytecs> buffer)
-            : SendPacketsElement(std::move(buffer), 0, -1, false) {}
+            : buffer_(std::move(buffer)), count_(static_cast<SharpRuntime::intcs>(buffer_.size())) {}
 
-        /** @brief Constructs a buffer element sending @p count bytes starting at @p offset. */
+        /**
+         * @brief Constructs a buffer element sending @p count bytes starting at @p offset.
+         * @throws System::ArgumentOutOfRangeException if @p offset or @p count is negative, or if
+         * @p offset is past the end of @p buffer, or if @p count exceeds the bytes available from
+         * @p offset.
+         *
+         * @note Ticket #2135 (SR-AUD-264): a **negative `count` used to mean "the whole buffer"**,
+         * so `SendPacketsElement({1,2,3}, 0, -2)` was accepted with `count == 3` — and so were
+         * `-1`, `-100` and `INT_MIN`. The cause was that `count >= 0 ? count : buffer_.size()` ran
+         * **before** any range check, so the sign was consumed by the ternary and never reached
+         * one. Note the idiom two lines below it does the opposite deliberately: it converts to
+         * `uintcs` precisely so a negative value becomes enormous and trips the bound, which is why
+         * a negative *offset* was already rejected.
+         *
+         * @note The negative-`offset` and negative-`count` rejections are now written as explicit
+         * `ThrowIfNegative` calls **before** the unsigned bound checks. That is not only clearer:
+         * the unsigned trick reported the wrong number. A caller who passed `offset = -1` was told
+         * *"'offset' must be less than or equal to 3. Actual value was 4294967295."* — the unsigned
+         * reinterpretation of their own argument. Fixing the sign check and leaving the message
+         * lying about the argument would have been half a repair.
+         */
         SendPacketsElement(std::vector<SharpRuntime::bytecs> buffer, SharpRuntime::intcs offset,
                             SharpRuntime::intcs count, bool endOfPacket = false)
             : buffer_(std::move(buffer)), offset_(offset), endOfPacket_(endOfPacket) {
-            SharpRuntime::intcs actualCount = count >= 0 ? count : static_cast<SharpRuntime::intcs>(buffer_.size());
+            System::ArgumentOutOfRangeException::ThrowIfNegative(offset, "offset");
+            System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
             System::ArgumentOutOfRangeException::ThrowIfGreaterThan(static_cast<SharpRuntime::uintcs>(offset),
                                                                      static_cast<SharpRuntime::uintcs>(buffer_.size()),
                                                                      "offset");
             System::ArgumentOutOfRangeException::ThrowIfGreaterThan(
-                static_cast<SharpRuntime::uintcs>(actualCount),
+                static_cast<SharpRuntime::uintcs>(count),
                 static_cast<SharpRuntime::uintcs>(buffer_.size() - static_cast<size_t>(offset)), "count");
-            count_ = actualCount;
+            count_ = count;
         }
 
         /** @return The file path, if this is a file element. */
