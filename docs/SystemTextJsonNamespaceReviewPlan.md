@@ -139,7 +139,7 @@ All seven reproduced or refuted against `59a8107`.
 | SR-AUD-325 | med | **confirmed exactly as filed** | blocked — architectural | **#2118** |
 | SR-AUD-326 | med | **confirmed and halved** — §6.2 | split: pin + design | **#2115** |
 | SR-AUD-327 | high | **unchanged** — design-complete, residual J11 | **blocked** (#1888/#1889/#1894) | — |
-| SR-AUD-328 | med | **largely REFUTED** — §6.3 | compatible, narrowed | **#2114** |
+| SR-AUD-328 | med | **largely REFUTED, survivor is UB** — §6.3, §20.7 | **remediated (#2114)** | **#2114** |
 | SR-AUD-329 | med | **confirmed, wider AND narrower** — §6.4, §20.3 | **remediated (#2113)** | **#2113** |
 | SR-AUD-330 | med | **confirmed** — §6.5 | compatible in part | **#2116** |
 
@@ -696,3 +696,99 @@ the run proved UBSan live and said nothing about ASan.
 **No public signature, member, base-class, virtual, vtable, object-layout or
 exception-specification change.** No new file, no new component edge; the graph stays at
 **41 modules / 91 edges**.
+
+### 20.7 #2114 — the surviving half is **undefined behaviour**, not truncation
+
+§6.3 refuted most of SR-AUD-328 and scoped the survivor to *"`JsonValue::Create(1.5)->GetInt32()`
+returns `1`"*. Measured, the survivor is worse in kind and one door wider.
+
+**One door wider.** `JsonSerializer::Deserialize<int>` — which the finding does not name and which
+takes **untrusted document text directly** — had the identical defect. §6.3 had already spotted it;
+implementation confirmed it and, unlike the `JsonValue` door, it is reachable without the caller
+constructing anything.
+
+**Worse in kind.** `nlohmann`'s `get<int>()` on a `number_float` is a bare
+`static_cast<int>(double)`, which is **undefined behaviour** out of range. Built with
+`-fsanitize=float-cast-overflow` (GCC does **not** include it in `-fsanitize=undefined`, which is
+why the first UBSan run reported nothing and would have been a false clean):
+
+| Probe | float-cast-overflow reports |
+|---|---:|
+| `build-probe/2114_probe1_fcorec.log` — **before** | **3** |
+| `build-probe/2114_probe2_san.log` — **after** | **0** |
+
+All three name `vendor/nlohmann/json.hpp:4279` and are reached from
+`JsonValue::GetInt32`, `JsonValue::GetInt64` and `JsonSerializer::Deserialize<T>`. Observable
+results before the repair were the x86 "integer indefinite" value: `1e100` → `-2147483648`,
+`99999999999999999999` → `-9223372036854775808`, **and NaN → `-2147483648`**.
+
+### 20.8 #2114 — the repair target already existed, and was extracted rather than copied
+
+`JsonElement::TryGetInt32` already implemented the correct rule **and carried a comment naming
+exactly this UB**. Copying that body into `JsonValue` and again into `JsonSerializer` would have
+created the module's second and third copy of one rule — which is cause **TJ-E**, the defect #2113
+had repaired one file away. The rule was therefore *extracted* into
+`System/Text/Json/detail/JsonNumberConversion.hpp` and all three doors now share it.
+
+`JsonElement`'s observable behaviour is unchanged; only the rule's home moved. **Mutation N3
+proves the sharing is real**: deleting one line from the shared predicate breaks all three doors
+at once, including `JsonReviewPinTests.JsonElementSIntegerAccessorsAreALREADYCorrect`, the pin
+#2111/#2112 had already added.
+
+**The ticket's acceptance criterion is corrected.** It asked for *"the same exception `JsonElement`
+already raises"* — a `FormatException`. That would contradict repository-contained reference
+evidence: `JsonValue`'s own `GetString` doc-comment records .NET's `JsonValueOfElement.cs` raising
+`ThrowInvalidOperationException_NodeUnableToConvertElement`. The three doors therefore keep three
+deliberately different exception types, each matching its own transcribed .NET note, and a test
+pins the difference so neither is "harmonised" later:
+
+| Door | Exception |
+|---|---|
+| `JsonValue::GetInt32`/`GetInt64` | `InvalidOperationException` |
+| `JsonElement::GetInt32`/`GetInt64` | `FormatException` (unchanged) |
+| `JsonSerializer::Deserialize<T>` | `JsonException` (its existing contract) |
+
+### 20.9 #2114 — the measured residual, pinned rather than implied
+
+`Deserialize<T>`'s guard is **top-level only**. `Deserialize<std::vector<int>>("[1.5]")` still
+returns `{1}`, because an aggregate is deserialized by `nlohmann`'s ADL customization points — the
+design this port uses *in place of* reflection — and there is no hook between them. Closing it
+would mean replacing that design, not fixing a defect. It is pinned by
+`THERESIDUALANestedIntegerStillReachesTheVendorConversion`, so the residual is visible in the test
+output rather than living only in a doc-comment.
+
+### 20.10 #2114 evidence
+
+**+7 permanent regressions** — `SharpRuntimeTests_Text_Json` 271 → **278**.
+
+| Mutation | Restores | Tests failed | Note |
+|---|---|---:|---|
+| N1 | `JsonValue` reverted to the raw vendor conversion | **4** | |
+| N2 | `Deserialize<T>`'s guard removed | **1** | only the `Deserialize` test, correctly |
+| N3 | the **shared** predicate's float-literal rule removed | **6** | breaks all three doors **and** the pre-existing `JsonElement` pin |
+
+**ASan + UBSan + LSan + float-cast-overflow clean over 84,168 conversions** — 21,426 converted,
+62,742 rejected (`build-probe/2114_probe2_san.log`), with the changed out-of-line body
+(`JsonElement.cpp`) compiled **into** the instrumented translation unit and a live
+heap-use-after-free control.
+
+**One check was caught not discriminating and fixed rather than reported:** the first sanitizer run
+showed a single UBSan report, which on reading was a signed-overflow in the **probe's own literal
+generator**, not in production code. It was fixed in the probe; the production tree was never the
+subject of that report.
+
+**One new internal header. No public signature, member, base-class, virtual, vtable, object-layout
+or exception-specification change**, and no new component edge — the graph stays at
+**41 modules / 91 edges**.
+
+### 20.11 A door #2112 missed, found while probing #2114
+
+`JsonSerializer::Deserialize<T>` (the **template** overload) calls
+`nlohmann::ordered_json::parse` directly and therefore **never reaches
+`detail::RejectEmbeddedNul`**. Measured: `Deserialize<int>("1" NUL " junk")` returns **`1`** — the
+same silent truncation #2112 closed — while `JsonDocument::Parse` on the identical bytes throws,
+and so does the `JsonDocument` overload of `Deserialize`, which delegates to it.
+
+§20.1 claimed *"every entry point that hands caller text to the parser goes through it"*. That
+statement was **wrong by one door**, and is corrected here rather than edited away. Filed as
+**#2121** and closed with #2116, which rewrites that exact function.

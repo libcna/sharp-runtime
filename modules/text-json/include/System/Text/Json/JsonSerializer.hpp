@@ -4,9 +4,11 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <type_traits>
 #include "System/Text/Json/JsonDocument.hpp"
 #include "System/Text/Json/JsonException.hpp"
 #include "System/Text/Json/JsonSerializerOptions.hpp"
+#include "System/Text/Json/detail/JsonNumberConversion.hpp"
 #include "nlohmann/json.hpp"
 
 namespace System::Text::Json {
@@ -54,11 +56,39 @@ namespace System::Text::Json {
             }
         }
 
-        /** @brief Deserializes @p json into a value of type @p T. @throws JsonException on invalid input/shape mismatch. */
+        /**
+         * @brief Deserializes @p json into a value of type @p T.
+         * @throws JsonException on invalid input or a shape mismatch, and — when @p T is a
+         * non-`bool` integral type — when the JSON number does not convert to it exactly.
+         *
+         * Ticket #2114 (SR-AUD-328, cause TJ-F): for integral @p T this used to reach
+         * `nlohmann`'s `get<T>()` directly, so `Deserialize<int>("1.5")` returned `1`,
+         * `Deserialize<int>("2147483648")` returned `-2147483648`, and
+         * `Deserialize<int>("99999999999999999999")` executed **undefined behaviour** (a bare
+         * `static_cast<int>(double)`, reported by UBSan's `float-cast-overflow`). It now shares
+         * `JsonElement`'s already-correct rule through
+         * `detail::TryConvertJsonNumberToIntegral`.
+         *
+         * @note The guard applies to a **top-level** integral @p T only. An integer nested inside
+         * an aggregate — `Deserialize<std::vector<int>>("[1.5]")` — still reaches `nlohmann`'s own
+         * conversion, because the aggregate is deserialized by `nlohmann`'s ADL customization
+         * points (see the class note) and this port has no hook between them. That residual is
+         * measured, pinned by a test, and recorded in the review plan rather than left implicit;
+         * closing it would mean replacing the customization-point design, not fixing a defect.
+         */
         template <typename T>
         static T Deserialize(const std::string& json, const JsonSerializerOptions& /*opts*/ = JsonSerializerOptions::Default()) {
             try {
-                return nlohmann::ordered_json::parse(json).get<T>();
+                auto parsed = nlohmann::ordered_json::parse(json);
+                if constexpr (std::is_integral_v<T> && !std::is_same_v<std::remove_cv_t<T>, bool>) {
+                    if (parsed.is_number()) {
+                        T value{};
+                        if (!detail::TryConvertJsonNumberToIntegral(parsed, value))
+                            throw JsonException("The JSON value could not be converted to the requested integral type.");
+                        return value;
+                    }
+                }
+                return parsed.get<T>();
             } catch (const nlohmann::ordered_json::exception& e) {
                 throw JsonException(e.what());
             }

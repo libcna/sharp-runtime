@@ -7,6 +7,7 @@
 #include "System/IndexOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Text/Json/JsonProperty.hpp"
+#include "System/Text/Json/detail/JsonNumberConversion.hpp"
 
 namespace System::Text::Json {
 
@@ -59,8 +60,6 @@ namespace System::Text::Json {
     }
 
     bool JsonElement::TryGetInt32(intcs& value) const {
-        value = 0;
-        const auto& n = require(JsonValueKind::Number, "Number");
         // Verified against JsonDocument.cs's TryGetValue(out int): real .NET parses the
         // original number *text* with Utf8Parser.TryParse<int>, which fails outright for a
         // JSON float literal (e.g. "1.0", "2e1") regardless of its numeric value, and never
@@ -68,33 +67,19 @@ namespace System::Text::Json {
         // get<double>() first, as this port previously did, is UB when casting an
         // out-of-int32-range (or NaN-adjacent) double to intcs, and silently accepts float
         // literals whose value happens to be integral.
-        if (n.is_number_float()) return false;
-        if (n.is_number_unsigned()) {
-            auto u = n.get<std::uint64_t>();
-            if (u > static_cast<std::uint64_t>(SharpRuntime::INTCS_MAX)) return false;
-            value = static_cast<intcs>(u);
-            return true;
-        }
-        auto i = n.get<std::int64_t>();
-        if (i < static_cast<std::int64_t>(SharpRuntime::INTCS_MIN) || i > static_cast<std::int64_t>(SharpRuntime::INTCS_MAX)) return false;
-        value = static_cast<intcs>(i);
-        return true;
+        //
+        // #2114 moved that rule into detail::TryConvertJsonNumberToIntegral so JsonValue and
+        // JsonSerializer::Deserialize<T> -- which both still had the defect this body had
+        // already fixed -- share it rather than carrying a second and third copy. The
+        // behaviour of this door is unchanged; only the rule's home moved.
+        return detail::TryConvertJsonNumberToIntegral(require(JsonValueKind::Number, "Number"), value);
     }
 
     bool JsonElement::TryGetInt64(longcs& value) const {
-        value = 0;
-        const auto& n = require(JsonValueKind::Number, "Number");
-        // See TryGetInt32's note: same text-based-parse semantics, and the same UB risk this
-        // port previously had casting an out-of-int64-range double to longcs.
-        if (n.is_number_float()) return false;
-        if (n.is_number_unsigned()) {
-            auto u = n.get<std::uint64_t>();
-            if (u > static_cast<std::uint64_t>(SharpRuntime::LONGCS_MAX)) return false;
-            value = static_cast<longcs>(u);
-            return true;
-        }
-        value = n.get<std::int64_t>();
-        return true;
+        // See TryGetInt32's note: same text-based-parse semantics, the same UB risk this port
+        // previously had casting an out-of-int64-range double to longcs, and the same shared
+        // rule since #2114.
+        return detail::TryConvertJsonNumberToIntegral(require(JsonValueKind::Number, "Number"), value);
     }
 
     JsonElement JsonElement::GetProperty(const std::string& name) const {

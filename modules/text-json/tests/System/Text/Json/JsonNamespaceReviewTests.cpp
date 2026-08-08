@@ -17,19 +17,26 @@
 // reference tree is absent.
 #include <gtest/gtest.h>
 
+#include <limits>
+#include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
+#include "System/FormatException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Text/Json/JsonDocument.hpp"
 #include "System/Text/Json/JsonElement.hpp"
 #include "System/Text/Json/JsonEncodedText.hpp"
 #include "System/Text/Json/JsonException.hpp"
 #include "System/Text/Json/JsonSerializer.hpp"
 #include "System/Text/Json/Nodes/JsonNode.hpp"
+#include "System/Text/Json/Nodes/JsonValue.hpp"
 #include "System/Text/Json/Utf8JsonWriter.hpp"
 
 using namespace System::Text::Json;
 using System::Text::Json::Nodes::JsonNode;
+using SharpRuntime::intcs;
 
 namespace {
 
@@ -449,4 +456,159 @@ TEST(JsonEncodedTextTests, THEPINUtf8JsonWriterIsADIFFERENTKindOfDoorAndIsUnchan
         w.WriteStringValue(std::string("a\0b", 3));
         EXPECT_EQ(w.GetString(), "\"a\\u0000b\"") << "the writer ESCAPES a NUL rather than rejecting it";
     }
+}
+
+// ===========================================================================
+// #2114 (SR-AUD-328, narrowed) — a JSON number that does not convert exactly must be
+// rejected at every integral door, not truncated, wrapped, or cast as undefined behaviour
+// ===========================================================================
+//
+// The finding's summary implies the whole integer-accessor family truncates. Measured
+// (build-probe/2114_probe1_before.log), JsonElement was ALREADY CORRECT at every boundary
+// and only two doors survived — JsonValue's accessors and JsonSerializer::Deserialize<T>,
+// the second of which the finding does not name.
+//
+// And it is worse than "truncates". Built with -fsanitize=float-cast-overflow, the two
+// surviving doors produced THREE reports of
+//   "1e+20 is outside the range of representable values of type 'int'/'long int'/'long long int'"
+// at vendor/nlohmann/json.hpp:4279 (build-probe/2114_probe1_fcorec.log) — nlohmann's
+// get<int>() on a number_float is a bare static_cast<int>(double), which is UNDEFINED
+// BEHAVIOUR out of range. After the repair the same probe reports ZERO.
+//
+// The repair target already existed in the module: JsonElement's body carried the correct
+// rule AND a comment explaining precisely this UB. #2114 moved that rule into
+// detail::TryConvertJsonNumberToIntegral so all three doors share it rather than carrying
+// two more copies — a duplicated rule that drifts apart being exactly cause TJ-E, which
+// #2113 had just repaired one file away.
+
+namespace {
+
+/// Number literals that must NOT convert to an integer at any door: JSON float literals
+/// (whatever their numeric value) and integers outside the destination's range.
+const char* const kNonConvertible32[] = {
+    "1.5", "-0.5", "1.0", "2e1",                 // float literals -- a grammar rule, not arithmetic
+    "1e100", "-1e100",                           // float, and out of range: the UB cases
+    "99999999999999999999",                      // beyond uint64, so stored as a float
+    "2147483648", "-2147483649",                 // integers just outside Int32
+};
+const char* const kNonConvertible64[] = {
+    "1.5", "-0.5", "1.0", "2e1",
+    "1e100", "-1e100",
+    "99999999999999999999",
+    "9223372036854775808",                       // just outside Int64
+};
+/// Integer literals that must still convert exactly.
+const char* const kExact[] = {"0", "7", "-7", "2147483647", "-2147483648"};
+
+std::shared_ptr<Nodes::JsonValue> ValueOf(const std::string& literal) {
+    auto node = JsonNode::Parse(literal);
+    auto value = std::dynamic_pointer_cast<Nodes::JsonValue>(node);
+    EXPECT_NE(value, nullptr) << "expected " << literal << " to parse as a JsonValue";
+    return value;
+}
+
+} // namespace
+
+TEST(JsonIntegralConversionTests, JsonValueRejectsEveryNumberThatDoesNotConvertExactly) {
+    for (const char* literal : kNonConvertible32)
+        EXPECT_THROW((void)ValueOf(literal)->GetInt32(), System::InvalidOperationException)
+            << literal << " must not convert to Int32";
+    for (const char* literal : kNonConvertible64)
+        EXPECT_THROW((void)ValueOf(literal)->GetInt64(), System::InvalidOperationException)
+            << literal << " must not convert to Int64";
+}
+
+TEST(JsonIntegralConversionTests, JsonValueStillConvertsExactIntegers) {
+    for (const char* literal : kExact) {
+        EXPECT_EQ(ValueOf(literal)->GetInt32(), std::stoi(literal)) << literal;
+        EXPECT_EQ(ValueOf(literal)->GetInt64(), std::stoll(literal)) << literal;
+    }
+    EXPECT_EQ(ValueOf("9223372036854775807")->GetInt64(), 9223372036854775807LL);
+    EXPECT_EQ(ValueOf("2147483648")->GetInt64(), 2147483648LL) << "in range for Int64, out for Int32";
+    // The finding's named example, and the two the probe added.
+    EXPECT_THROW((void)Nodes::JsonValue::Create(1.5)->GetInt32(), System::InvalidOperationException);
+    EXPECT_THROW((void)Nodes::JsonValue::Create(1e100)->GetInt64(), System::InvalidOperationException);
+    EXPECT_THROW((void)Nodes::JsonValue::Create(std::numeric_limits<double>::quiet_NaN())->GetInt32(),
+                 System::InvalidOperationException);
+    // A double that IS an exact integer is still a JSON float literal, and still does not convert.
+    EXPECT_THROW((void)Nodes::JsonValue::Create(3.0)->GetInt32(), System::InvalidOperationException);
+    // GetDouble is untouched.
+    EXPECT_DOUBLE_EQ(Nodes::JsonValue::Create(1.5)->GetDouble(), 1.5);
+    EXPECT_DOUBLE_EQ(ValueOf("1e100")->GetDouble(), 1e100);
+}
+
+TEST(JsonIntegralConversionTests, DeserializeOfAnIntegralTypeRejectsTheSameNumbers) {
+    // The door the finding does NOT name, and the one reachable straight from document text.
+    for (const char* literal : kNonConvertible32)
+        EXPECT_THROW((void)JsonSerializer::Deserialize<int>(literal), JsonException) << literal;
+    for (const char* literal : kNonConvertible64)
+        EXPECT_THROW((void)JsonSerializer::Deserialize<long long>(literal), JsonException) << literal;
+    for (const char* literal : kExact)
+        EXPECT_EQ(JsonSerializer::Deserialize<int>(literal), std::stoi(literal)) << literal;
+    // Unsigned destinations reject a negative literal rather than wrapping it.
+    EXPECT_THROW((void)JsonSerializer::Deserialize<unsigned int>("-1"), JsonException);
+    EXPECT_EQ(JsonSerializer::Deserialize<unsigned int>("4294967295"), 4294967295u);
+    EXPECT_THROW((void)JsonSerializer::Deserialize<short>("40000"), JsonException);
+    EXPECT_EQ(JsonSerializer::Deserialize<short>("-32768"), -32768);
+}
+
+TEST(JsonIntegralConversionTests, NonIntegralDeserializeTargetsAreCompletelyUnaffected) {
+    EXPECT_DOUBLE_EQ(JsonSerializer::Deserialize<double>("1.5"), 1.5);
+    EXPECT_DOUBLE_EQ(JsonSerializer::Deserialize<double>("1e100"), 1e100);
+    EXPECT_EQ(JsonSerializer::Deserialize<std::string>("\"x\""), "x");
+    EXPECT_TRUE(JsonSerializer::Deserialize<bool>("true"));
+    EXPECT_FALSE(JsonSerializer::Deserialize<bool>("false"));
+    EXPECT_EQ(JsonSerializer::Deserialize<std::vector<int>>("[1,2,3]"), (std::vector<int>{1, 2, 3}));
+    // A non-number for an integral target still fails as a shape mismatch, as it always did.
+    EXPECT_THROW((void)JsonSerializer::Deserialize<int>("\"7\""), JsonException);
+    EXPECT_THROW((void)JsonSerializer::Deserialize<int>("null"), JsonException);
+}
+
+TEST(JsonIntegralConversionTests, THEPINJsonElementWasALREADYCorrectAndItsExceptionTypeDiffers) {
+    // #2114 must not change JsonElement. Its rule only moved house.
+    for (const char* literal : kNonConvertible32) {
+        auto doc = JsonDocument::Parse(literal);
+        EXPECT_THROW((void)doc->getRootElementProperty().GetInt32(), System::FormatException) << literal;
+        intcs sink = 0;
+        EXPECT_FALSE(doc->getRootElementProperty().TryGetInt32(sink)) << literal;
+        EXPECT_EQ(sink, 0) << "a failed TryGet must leave the output zeroed";
+    }
+    for (const char* literal : kExact) {
+        auto doc = JsonDocument::Parse(literal);
+        EXPECT_EQ(doc->getRootElementProperty().GetInt32(), std::stoi(literal)) << literal;
+    }
+    // The exception TYPES differ, deliberately, and that difference is .NET's: JsonValue's
+    // doc-comment records JsonValueOfElement.cs raising
+    // ThrowInvalidOperationException_NodeUnableToConvertElement, while JsonElement matches
+    // JsonDocument.cs's FormatException. Pinned so neither is "harmonised" by mistake.
+    EXPECT_THROW((void)JsonDocument::Parse("1.5")->getRootElementProperty().GetInt32(),
+                 System::FormatException);
+    EXPECT_THROW((void)ValueOf("1.5")->GetInt32(), System::InvalidOperationException);
+}
+
+TEST(JsonIntegralConversionTests, THEPINWrongKindStillFailsAsAKindErrorNotAConversionError) {
+    // The kind check must run before the conversion rule, and keep its own wording.
+    EXPECT_THROW((void)ValueOf("\"x\"")->GetInt32(), System::InvalidOperationException);
+    try {
+        (void)ValueOf("\"x\"")->GetInt32();
+        FAIL() << "expected a throw";
+    } catch (const System::InvalidOperationException& e) {
+        EXPECT_NE(std::string(e.what()).find("not a number"), std::string::npos) << e.what();
+    }
+    try {
+        (void)ValueOf("1.5")->GetInt32();
+        FAIL() << "expected a throw";
+    } catch (const System::InvalidOperationException& e) {
+        EXPECT_NE(std::string(e.what()).find("could not be converted"), std::string::npos) << e.what();
+    }
+}
+
+TEST(JsonIntegralConversionTests, THERESIDUALANestedIntegerStillReachesTheVendorConversion) {
+    // Measured and deliberately NOT repaired: Deserialize<T>'s guard is top-level only,
+    // because an aggregate is deserialized by nlohmann's ADL customization points (the
+    // design this port uses in place of reflection) and there is no hook between them.
+    // Pinned so the residual is visible rather than implied. If this ever starts throwing,
+    // the design changed and the plan's §20.9 must be revisited.
+    EXPECT_EQ(JsonSerializer::Deserialize<std::vector<int>>("[1.5]"), (std::vector<int>{1}))
+        << "a nested float literal is still truncated by the vendored conversion";
 }

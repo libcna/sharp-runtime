@@ -7,6 +7,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Text/Json/Nodes/JsonNode.hpp"
+#include "System/Text/Json/detail/JsonNumberConversion.hpp"
 #include "nlohmann/json.hpp"
 
 namespace System::Text::Json::Nodes {
@@ -50,15 +51,42 @@ namespace System::Text::Json::Nodes {
             if (!value_.is_string()) throw System::InvalidOperationException("The JsonValue is not a string.");
             return value_.get<std::string>();
         }
-        /** @return The value as a 32-bit integer. @throws System::InvalidOperationException if this isn't a JSON number. */
+        /**
+         * @return The value as a 32-bit integer.
+         * @throws System::InvalidOperationException if this isn't a JSON number, or if it is a
+         * number that does not convert exactly — a JSON float literal (`1.5`, but also `1.0` and
+         * `2e1`, whose numeric values *are* integral), or an integer outside `Int32`'s range.
+         *
+         * Ticket #2114 (SR-AUD-328, cause TJ-F). This accessor used to hand the value straight to
+         * `nlohmann`'s `get<intcs>()`, which truncated `1.5` to `1`, wrapped `2147483648` to
+         * `-2147483648`, and executed **undefined behaviour** — a bare `static_cast<int>(double)`
+         * — for `99999999999999999999`, `1e100` and NaN. `JsonElement` had already fixed exactly
+         * this; the rule now lives in `detail::TryConvertJsonNumberToIntegral` and both share it.
+         *
+         * @note The exception is `InvalidOperationException`, **not** the `FormatException`
+         * `JsonElement::GetInt32` raises. That difference is deliberate and is .NET's: see
+         * `GetString`'s note above, transcribed from `JsonValueOfElement.cs`, where a `JsonValue`
+         * that cannot convert raises `ThrowInvalidOperationException_NodeUnableToConvertElement`.
+         */
         [[nodiscard]] intcs GetInt32() const {
             if (!value_.is_number()) throw System::InvalidOperationException("The JsonValue is not a number.");
-            return value_.get<intcs>();
+            intcs result = 0;
+            if (!detail::TryConvertJsonNumberToIntegral(value_, result))
+                throw System::InvalidOperationException("The JsonValue could not be converted to Int32.");
+            return result;
         }
-        /** @return The value as a 64-bit integer. @throws System::InvalidOperationException if this isn't a JSON number. */
+        /**
+         * @return The value as a 64-bit integer.
+         * @throws System::InvalidOperationException if this isn't a JSON number, or if it is a
+         * number that does not convert exactly. See GetInt32 for the full contract and for why
+         * the exception type differs from `JsonElement`'s.
+         */
         [[nodiscard]] longcs GetInt64() const {
             if (!value_.is_number()) throw System::InvalidOperationException("The JsonValue is not a number.");
-            return value_.get<longcs>();
+            longcs result = 0;
+            if (!detail::TryConvertJsonNumberToIntegral(value_, result))
+                throw System::InvalidOperationException("The JsonValue could not be converted to Int64.");
+            return result;
         }
         /** @return The value as a double. @throws System::InvalidOperationException if this isn't a JSON number. */
         [[nodiscard]] double GetDouble() const {
