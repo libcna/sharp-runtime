@@ -2449,6 +2449,55 @@ exists to prevent. What this batch does instead is make the shared policy *physi
 no second copy of the rule can drift into existence while the family waits. **Mint CCF-021 when
 `net-http-headers` is reviewed, citing all five findings and this appendix.**
 
+#### CCF-021 evidence obligation — DISCHARGED by the `net-http-headers` review (#2122, 2026-08-08)
+
+*Appended additively; nothing above is edited.*
+
+The trigger has fired. `modules/net-http-headers` is now reviewed
+(`docs/SystemNetHttpHeadersNamespaceReviewPlan.md` §11), and the evidence the promotion was waiting
+for is complete:
+
+| # | Finding | Module | Door | Field boundary | State |
+|---|---|---|---|---|---|
+| 1 | SR-AUD-313 | `net-http` | ten frame doors | request line + header field | **remediated** (#2063) |
+| 2 | SR-AUD-316 (reason half) | `net-http` | status reason phrase | status line | **remediated** (#2063) |
+| 3 | SR-AUD-248 | `net-websockets` | `SetRequestHeader`, request URI, `Host:` | handshake request line + headers | **remediated** (#2089) |
+| 4 | SR-AUD-319 | `net-http-headers` | **nine** typed value doors | header field value | **confirmed** → #2124 |
+| 5 | SR-AUD-322 | `net-http-headers` | `TryAddWithoutValidation` | header field **name** | **confirmed** → #2123 |
+
+One cause, one predicate (`System::Net::detail::ContainsProtocolFieldTerminator`, still exactly one
+body), one validation timing (at the public door, before storage).
+
+**One boundary difference a promotion must state rather than paper over.** For members 1–3 the
+guarantee is *no byte reaches the wire*. For members 4 and 5 it must be stated one step earlier —
+*no field terminator appears in the serialized text* — because the review measured that
+`modules/net-http-headers` is **not on this repository's own wire path**:
+`HttpRequestMessage` stores a raw `std::unordered_map` and `HttpClientHandler` serializes from
+that, so this module's `ToString()` output reaches a socket only through a consumer. That is a
+difference in *where the boundary is*, not in the cause, the predicate or the timing.
+
+**Boundary corrections re-verified at this tip, and two added:**
+
+- SR-AUD-249 is still **not** a member (token grammar).
+- SR-AUD-320 and SR-AUD-321 are **not** members (grammar and full-consumption defects).
+- **New:** ticket **#2129** — an RFC 5987 value decoding to a raw CR/LF — is **not** a member. It is
+  the family's closest call, and it is excluded because its CR/LF travels **inward, to the caller**;
+  `ToString()` percent-encodes it, so no field terminator ever appears in serialized text. Cause
+  NH-K.
+- **New:** ticket **#2128** — singleton headers joined with a comma, and `Transfer-Encoding`
+  coexisting with `Content-Length` — is **not** a member. A request-smuggling shape, but no field
+  terminator is involved and the comma is a legal character. Cause NH-L.
+- The identifier remains **ambiguous between two proposed families** and whoever mints must say
+  which one it names.
+
+**CCF-021 is still NOT minted, and the reason has changed.** It is no longer *"the membership is
+incomplete"* — that is discharged. It is now the same two narrower obstacles #2109 recorded for
+CCF-022: every promotion sentence in this corpus is **passive and names no agent**, and **two of
+five members are open**, one of which (#2124) requires a **new component edge**
+(`Net.Http.Headers` → `Net`, 91 → 92) that has not been approved. Filed as decision ticket
+**#2131**, with three bounded options, a recommendation (**mint once #2123 and #2124 land**) and one
+exact approval sentence.
+
 ### CCF-022 — unchanged, still not minted
 
 X-D (*a public lifecycle state recorded but not enforced*) has two **remediated** members in
