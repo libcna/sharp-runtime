@@ -4,32 +4,238 @@
 # NEXT.md
 
 *Last verified: 2026-08-08. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
-harness-designated branch**, continued from its own clean tip `a3cfa69`. The batch prompt again
-suggested this branch and `CLAUDE.md` rule 3 names `feature/work`; nothing was pushed, so the two
-never conflicted in practice, and the discrepancy is recorded rather than resolved silently.
-**Not pushed — no push was requested during this batch.** No merge, rebase, tag, force-push, PR,
-publication, amend or history rewrite; all seven commits unsigned
-(`git -c commit.gpgsign=false`, author and committer `Claude <noreply@anthropic.com>`) because this
-environment has no usable private signing key. The batch **closed `modules/net-http-headers` for
-compatible work** — **#2124**, **#2125**, **#2126**, **#2127**, **#2129** and **#2132** — leaving
-**all five of that module's audit findings `remediated`**, then **re-derived the next review unit by
-measurement** and reviewed **`modules/net-sockets` (#2133)**
-(`docs/SystemNetSocketsNamespaceReviewPlan.md`, 17 sections), and implemented **#2135**, the first of
-that review's compatible tickets. **Five findings moved `confirmed → remediated`** (SR-AUD-319, 320,
-321, 323, 264). Audit **148 remediated / 216 confirmed / 364 total**, of which **49** carry
-`confirmed (design-complete)`; **no `SR-AUD-*` identifier was created — numbering stays frozen at
-364**, and **no CCF was minted**. **CCF-021's membership is now complete AND fully remediated** —
-strictly stronger than #2131's own recommended option — and it is **still not minted**, because the
-obstacle was never evidence: it is authority, and the repository's **only non-passive statement on
-the subject reserves the act to the maintainer**. **CCF-022 gained a candidate member** (a closed
-`NetworkStream` that silently accepts writes) and is likewise **not minted**. **Nine premises were
-corrected by measurement**, six of which changed what shipped, and **three mutations exposed vacuous
-assertions rather than broken repairs** — each fixed and recorded rather than quietly patched. One
-**new component edge** was declared, `Net.Http.Headers → Net`, taking the graph **41 / 91 → 41 / 92**.
-Gate **16,052 tests across 37 executables: 16,045 passing, 1 skipped, 6 failing** for the same two
-re-measured causes as before. Seams **2 / 18**, negative fixtures **11 / 94**. **Doxygen and `ccache`
-are both absent** and were NOT run; `/rv` is absent. **#1962 and #1773 remain blocked**; **CCF-012
-and CCF-019 were NOT marked closed.** The prior header stack is retained below.*
+harness-designated branch**, continued from its own clean tip `f013fe1`. `CLAUDE.md` rule 3 names
+`feature/work`; nothing was pushed, so the two never conflicted in practice, and the discrepancy is
+recorded rather than resolved silently. **Not pushed — no push was requested during this batch.** No
+merge, rebase, tag, force-push, PR, publication, amend or history rewrite; all six commits unsigned
+(`git -c commit.gpgsign=false`) because this environment has no usable private signing key. This
+batch **reconciled the inherited three-test gate discrepancy — the inherited 16,005 was RIGHT** —
+then **closed `modules/net-sockets` for compatible work** (**#2136**, **#2137**, **#2139**), leaving
+**only #2134 (blocked, CCF-019) and #2138 (needs_user) open there**, then **re-derived the next
+review unit by measurement** and reviewed **`modules/io-hashing` (#2140)**
+(`docs/SystemIOHashingNamespaceReviewPlan.md`, 17 sections, 4 tickets, **all four compatible — the
+first unit in several reviews with no gated remainder**), and fixed **#2145**, a ~7% flaky gate test
+the required validation exposed. **Two findings moved `confirmed → remediated`** (SR-AUD-265,
+SR-AUD-267) and **SR-AUD-266's endpoint half** landed while its family half stays open. Audit
+**150 remediated / 214 confirmed / 364 total**, of which **49** carry `confirmed (design-complete)`;
+**no `SR-AUD-*` identifier was created — numbering stays frozen at 364**, and **no CCF was minted**.
+**CCF-022 gained a seventh site and its third module, now remediated, and is still NOT minted**
+(#2109); **CCF-021 is unchanged and still NOT minted** (#2131). **Seven premises were corrected by
+measurement**, five of which changed what shipped. Gate **16,082 tests across 37 executables:
+16,075 passing, 1 skipped, 6 failing** for the same two re-measured causes as before. Graph
+**41 modules / 92 edges** (unchanged), seams **2 / 18**, negative fixtures **11 / 94**. **Doxygen and
+`ccache` are both absent** and were NOT run; `/rv` is absent. **#1962 and #1773 remain blocked**;
+**CCF-012 and CCF-019 were NOT marked closed.** The prior header stack is retained below.*
+---
+
+## Batch record — the gate reconciliation, `modules/net-sockets` closed (#2136, #2137, #2139), the `modules/io-hashing` review (#2140) and #2145
+
+### What shipped
+
+| # | Subject | Findings | Result |
+|---|---|---|---|
+| — | **the inherited 16,005 vs 16,002 gate discrepancy**, reconciled | — | **the inherited 16,005 was RIGHT** |
+| **#2136** | `NetworkStream` took any `int`, and a **closed** stream silently accepted writes | SR-AUD-265 | **done**, `remediated` |
+| **#2137** | two constructors discarded the caller's argument — three bare-`int` port doors, not one | SR-AUD-267 + SR-AUD-266 endpoint half | **done**; 267 `remediated` |
+| **#2139** | net-sockets gated-behaviour pins + §19 reconciliation | — | **done** |
+| **#2140** | the `modules/io-hashing` namespace review | 3 open | **done** — plan + 4 tickets |
+| **#2145** | a ~7% flaky gate test, exposed by the required validation | post-audit | **done** |
+
+### Work unit 0 — the three-test discrepancy, resolved by measurement
+
+The previous handoff reported the gate as **16,052** and its own additions as **+50**, implying a
+prior total of **16,002** where the inherited figure said **16,005**. **The inherited figure was
+correct.** Method and evidence, in
+`docs/SystemNetSocketsNamespaceReviewPlan.md` §18:
+
+1. **Registration is a property of the sources**, so no rebuild at every commit was needed — only a
+   rebuild-free enumeration at the tip plus per-commit registration deltas from git.
+2. All **37** executables enumerated with `--gtest_list_tests`: **16,052**. The two binaries in
+   question were verified **newer than their sources**, so the enumeration was of the current tree.
+3. Exactly **six** test files changed since `a3cfa69`: five new `net-http-headers` files (**43**
+   `TEST` macros) and `net-sockets`' `SocketsSupportTests.cpp` (**33 → 37**, **+4**). **No test was
+   deleted anywhere** in the range.
+4. **`a3cfa69` = 16,052 − 43 − 4 = 16,005** — the inherited figure exactly.
+5. The chain before it also holds: the measured `^+TEST` counts of the five commits behind
+   *15,967 + 38* are **9, 7, 8, 7, 7**, matching the stated decomposition commit by commit.
+6. **The `net-sockets` executable has been 88 since 2026-07-31 and 92 since `5087c2c`. No commit in
+   this repository's history ever had it at 84 or 91**, so the earlier figures were not a stale
+   reading of some other state either.
+
+**Cause: one mis-transcription, not a change in the tests.** #2135's implementation record said
+"+7 (84 → 91)" where measurement says "+4 (88 → 92)"; that propagated into the handoff's "+50", and
+**50 − 47 = 3** is the whole discrepancy. Corrected in the review plan §17.1 and in the SR-AUD-264
+index row. **The figure to distrust was never 16,005 or 16,052 — it was the "+50" in between.**
+
+### The corrected premises that changed what shipped
+
+1. **#2136 — the destination half of SR-AUD-265's family is the bigger one, and the XXH-style
+   "already repaired" claim did not survive contact.** Measured, `NetworkStream` accepted a
+   **listening socket**, a **regular file** and a **pipe** as well as the shapes the finding names,
+   and a socket after `shutdown(RDWR)` is measurably still a connected stream socket and is
+   deliberately still accepted.
+2. **#2137 — the port surface is three doors, not one.** The review measured `UdpClient(int port)`;
+   `UdpClient::Connect(host, port)` and `TcpClient::Connect(host, port)` are the same defect with a
+   **more misleading** failure mode: a negative port was rejected by **`getaddrinfo`** as
+   *"DNS failed: Servname not supported"* — name resolution blamed for the caller's argument — while
+   65536 and 70000 were **truncated** and connected to the wrong port.
+3. **#2137 — the endpoint half needed a state, not a member.** `fd_ >= 0 && !connected_` was
+   previously **unreachable**, so it is free to mean *bound, not yet connected*.
+   **`sizeof(TcpClient)` is unchanged and no member moves.**
+4. **#2139 — the IPv4-only limitation is NOT silent, and that changes what #2138's option (b)
+   costs.** Every endpoint path reaches `IPAddress::getAddressProperty()`, which **throws**
+   `SocketException(OperationNotSupported)` for a v6 address rather than narrowing it, and the
+   hostname paths throw `HostNotFound` because `hints.ai_family` is `AF_INET`. Nothing is silently
+   narrowed. The honest complaint is that a caller gets **three different refusals, none of them the
+   operation's own** — so option (b) is *"make it say what it means"*, not *"make it loud"*.
+5. **#2140 — SR-AUD-260 is far wider than filed.** **58 of 102** measured cases segfault; the
+   **destination** half (35) is bigger than the **source** half (21) and lives in **one** file; the
+   four XXH types are **not** exempt; and the base class already validates the destination
+   **length** and not its **pointer**, so the message convention is already chosen.
+6. **#2145 — the failing test was not a PRNG defect.** `std::vector<bool>` is bit-packed, so eight
+   threads writing eight *different* elements write the same word, and
+   `[container.requirements.dataraces]` exempts `vector<bool>` from the distinct-element guarantee.
+7. **#2136/#2137 — placement, not the check, is the repair.** Both non-leak guarantees were made
+   **structural**: `NetworkStream` validates in the constructor **body** (a throwing body means the
+   destructor never runs), and `ValidatePort` runs **before** the socket is created. Two mutations
+   were written specifically to prove those orderings are load-bearing, and each fails exactly the
+   accounting test.
+
+### Mutations — eleven, each killed by its own test
+
+| Ticket | Mutation | Tests failed |
+|---|---|---|
+| #2136 | M1 revert `Write`'s closed check | 2 |
+| #2136 | M2 remove the connected check | 2 — including the accounting test |
+| #2136 | M3 close the descriptor before rejecting it | 2 — the mutation the AC exists for |
+| #2136 | M4 closed check in front of the argument checks | **exactly 1** — the ordering pin |
+| #2137 | N1 remove `TcpClient::Connect`'s port check | 2 |
+| #2137 | N2 move `UdpClient`'s check **after** the socket exists | **exactly 1** — the accounting test |
+| #2137 | N3 restore the empty local-endpoint constructor | 4 |
+| #2137 | N4 `Connect(host, port)` ignores the bound socket | **exactly 1** — the hostname-path test |
+| #2139 | P1 `hints.ai_family = AF_UNSPEC` | **exactly 1** — the IPv6-literal gate pin |
+| #2139 | P2 `Socket : enable_shared_from_this` | **compile error** quoting the CCF-019 pin |
+| #2145 | (none — the fix was verified by 2/30 → 0/60 instead) | — |
+
+### `modules/net-sockets` — final disposition
+
+| Item | Disposition |
+|---|---|
+| SR-AUD-263 (high) | **blocked** — CCF-019, unapproved; **pinned by shape**, not remediated |
+| SR-AUD-264 | **remediated** (#2135, previous batch) |
+| SR-AUD-265 | **remediated** (#2136) — both halves |
+| SR-AUD-266 endpoint half | **remediated** (#2137) |
+| SR-AUD-266 family half | **needs_user** (#2138) — design; current behaviour pinned |
+| SR-AUD-267 | **remediated** (#2137) |
+
+**The namespace is complete except for gated work.** SR-AUD-266's index row stays `confirmed` by the
+established split-finding convention. **No compatible ticket remains in the module.**
+
+### Work unit 2 — the next unit, chosen by measurement
+
+Only units with **no existing review plan** were candidates; everything else has been reviewed.
+
+| Unit | Open | Actionable high | `/rv`-dependent | Expected compatible |
+|---|---:|---:|---|---|
+| `core` (72) | — | some | mixed | **not a coherent unit** — excluded, as by every previous review |
+| `time-zone` | 7 | 0 | **7 of 7** | ~0 |
+| `globalization` | 7 | 1 | **5 of 7** | ~2 of 7 |
+| `numerics` | 4 | **0** | 2 of 4 | 2 of 4, one a public signature break |
+| `xml-linq` | 4 | **0** (its high is design-complete behind **declined** #1899) | 1 of 4 | 2 of 4 |
+| **`io-hashing`** | **3** | **1** | **0 of 3** | **3 of 3** |
+| `io-compression` | 3 | 1 | 0 of 3 | 2 of 3 |
+| `net-network-information` | 3 | 0 | 1 of 3 | ~1 of 3 — dominated by blocked #1962 |
+
+**Selected `modules/io-hashing`**, and the deciding criterion was the one the batch instruction
+names: **three of three findings are compatible work**, with no blocked item, no layout decision, no
+CCF membership and nothing waiting on `/rv`. Secondary: an **actionable** `high` (a null dereference
+reachable from public API), **published check values** that make verification independent of any
+reference tree, and a repair target that **already exists inside the module**.
+
+### The `modules/io-hashing` review (#2140) — 4 tickets, all compatible
+
+Measured with a **fork-per-case** probe, because a defect whose symptom is SIGSEGV cannot be
+enumerated in-process: **102 cases, 25 accepted, 19 threw, 58 crashed**.
+
+```
+#2142  SR-AUD-261  a negative length is a successful EMPTY operation
+                   in Adler32/Crc32/Crc64                          (P2, S) ── FIRST
+#2141  SR-AUD-260  every raw-pointer door dereferences a null
+                   buffer -- SOURCE and DESTINATION                (P1, M) ── SECOND
+#2143  SR-AUD-262  the "LE" helpers are native-order memcpy        (P2, M) ── THIRD
+#2144  documentation and measured-positive pins                    (P3, S) ── LAST
+```
+
+**#2142 goes first despite #2141 carrying the `high`**, for a structural reason: #2142 adopts a
+guard that **already exists** in the module's four XXH types, which is where the shared validation
+helper comes from, and #2141 then extends it; the other order writes the helper twice.
+
+**The module's output was verified against the published check values** of Adler-32, CRC-32,
+CRC-64/ECMA-182, xxHash32/64, XXH3 and XXH128 — evidence no reference checkout could improve on, and
+the pin any repair must leave untouched. **SR-AUD-262's limit is stated rather than glossed**: a
+portable rewrite can be proved value-preserving here and byte-order-correct by a host-independent
+helper test, but **big-endian runtime behaviour cannot be demonstrated in this environment**, and
+#2143 is scoped to the provable half. That is an environment limit, not a `/rv` question.
+
+**No implementation ticket was started in `io-hashing`.** The batch's remaining context was spent on
+the required validation and this handoff instead, which is the deliberate choice: #2141 touches nine
+types and both parameter sets, and starting it half-way would have left a large partial edit.
+
+### CCF status — nothing minted
+
+- **CCF-019**: `net-sockets` SR-AUD-263 is a member, **blocked**, and now **pinned by shape**
+  (#2139). **NOT marked closed.**
+- **CCF-022**: gained its **seventh** site and **third** module — `NetworkStream`'s closed state,
+  now **remediated** by #2136 — in its **strongest form seen so far**, because it was not enforced at
+  the data-transfer members either. **NOT minted**; the obstacle is authority, and #2109 stands.
+- **CCF-021**: unchanged, **NOT minted**; #2131 stands.
+- **A cross-module shape recorded and NOT promoted:** SR-AUD-261's cause (*a sign consumed before a
+  check can see it*) is `net-sockets`' **NS-D** shape in another module. Two sites is not a family,
+  and adding a third unminted candidate would not help the unresolved authority question.
+- **CCF-012 and CCF-019 were NOT marked closed.**
+
+### Numbers, re-measured
+
+| Quantity | Value |
+|---|---|
+| audit index | **150 remediated / 214 confirmed / 364 total**, **49** design-complete |
+| gate | **16,082 tests across 37 executables — 16,075 passing, 1 skipped, 6 failing** |
+| gate delta | **+30** = 13 (#2136) + 11 (#2137) + 6 (#2139); #2145 changed no count |
+| known failures | 5 × `PingTests` (#1962) + `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` |
+| module graph | **41 modules / 92 edges** — unchanged; no new edge was needed |
+| version seams | **2 seams / 18 definitions** |
+| negative fixtures | **11 files / 94 sites**, 105 invocations, peak **2** jobs, 39.3s |
+| build | **0 warnings, 0 errors** |
+| selective components | **passed**, **one** run, **723s** (12m), 10 isolated consumer checks, peak **2** `cc1plus` |
+| `local_ci_check.sh build` | every static gate green, build clean, then its **known** `PingTests` stop — reported separately from the 37-executable gate above |
+| build directories | `build` **1.7G**, `build-probe` **16M** (probe binaries deleted, evidence kept), `build-tmp` **9.0M** |
+
+### #1962's cause and the environment, re-measured
+
+| Probe | Result |
+|---|---|
+| `/proc/sys/net/ipv4/ping_group_range` | **`1 0`** — an *empty* range, so no GID may open an unprivileged ICMP socket |
+| `socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP)` | **Permission denied** |
+| `socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)` | **OPENED** — the privileged path `Ping` never attempts works here |
+| `/proc/net/if_inet6` | **absent** |
+
+**Doxygen absent. `ccache` absent. `/rv/tmp/runtime/` absent** — all three re-verified, none
+installed. **Tracked `scripts/__pycache__` files byte-identical**; every Python invocation used
+`PYTHONDONTWRITEBYTECODE=1`. **Maximum aggregate compiler parallelism: two jobs**, on every build,
+probe, sanitizer compile and fixture check. **`pgrep -f` was NOT used to decide whether anything had
+finished** — the selective-components run was launched once, its PID recorded to
+`build-probe/2140_selective.pid`, waited on by PID, and compiler concurrency was checked only with
+`ps -C cc1plus`.
+
+### The queue after this batch
+
+- **`modules/net-sockets` is closed for compatible work.** Remaining: **#2134** (`blocked`, CCF-019,
+  pinned) and **#2138** (`needs_user`, IPv6 scope, pinned, with #2139's premise correction attached).
+- **`modules/io-hashing` is next**: **#2142**, then **#2141**, then **#2143**, then **#2144** — all
+  four compatible, none gated.
+- **Decisions still open and untouched**: #2131 (CCF-021), #2109 (CCF-022), Approval IO-1 / #2098,
+  #2128, #2115, #1929's date/time family, #1899's declined layout approval.
+- **#1962 and #1773 remain blocked.**
 
 ---
 

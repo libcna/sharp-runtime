@@ -1,42 +1,65 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-08-08 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
-harness-designated branch, continued from its own clean tip `a3cfa69`. **Not pushed; no push was
+harness-designated branch, continued from its own clean tip `f013fe1`. **Not pushed; no push was
 requested during this batch.** No merge, rebase, tag, PR, force-push, amend or history rewrite; all
-seven new commits intentionally unsigned (`git -c commit.gpgsign=false`), authored and committed as
-`Claude <noreply@anthropic.com>`. The batch **closed `modules/net-http-headers` for compatible
-work** and then reviewed **`modules/net-sockets`**. **#2124** found the field-terminator check
-sitting in the **`else` branch**, so it ran only for an *unquoted* value — and found that the module
-already held **four hand-written copies** of the same rule that **disagreed**, which is cause NH-H
-hiding inside the repair target; it corrected the review's claim that `ViaHeaderValue` already
-rejected CR *and* LF (it rejected CR only, and the CRLF probe string hid the LF), found a **tenth**
-door no document names, and declared the **new component edge `Net.Http.Headers → Net`**, taking the
-graph **91 → 92**. **#2125** found **seven** copies of the HTTP-date parser rather than six and
-deliberately **did not narrow the grammar**, because a fixed-width rewrite would reject text
-`sscanf` accepts and `/rv` is absent. **#2126** found the seventh splitter **quote**-blind rather
-than escape-blind. **#2127** found **three** defects in one decoder, including a truncated
-percent-escape kept as literal text at a door whose job is producing file names. **#2132** pinned
-what stays, and found the one fact **#2128** was missing: over a comma-joined singleton the two
-typed accessors **already disagree**. **Three mutations exposed vacuous assertions** rather than
-broken repairs, each fixed and recorded. **CCF-021's membership is now complete AND fully
-remediated** — strictly stronger than #2131's own recommendation — and is **still not minted**,
-because the obstacle was never evidence: the repository's **only non-passive sentence on who may
-mint reserves the act to the maintainer**. **#2133** then selected `modules/net-sockets` on
-decidability with `/rv` absent — **zero of five** of its findings ask what .NET does, against
-**seven of seven** for `time-zone` — on the highest *actionable* high-severity ratio of any
-unreviewed unit, and on being the only remaining unit where `/proc/self/fd` accounting is a real
-instrument; it states up front that the module's only `high` is CCF-019 and will be blocked. It
-found that a **closed `NetworkStream` silently accepts writes**, a new **CCF-022 candidate**, which
-is likewise **not minted**. **#2135** landed, and its under-repair mutation failed **two** tests
-because restoring the ternary also restores a diagnostic defect that told a caller who passed `-1`
-about `4294967295`. **Five findings moved `confirmed → remediated`** (SR-AUD-319, 320, 321, 323,
-264): the audit index reads **148 remediated / 216 confirmed / 364 total**, **49** design-complete,
-numbering **frozen at 364**. Gate **16,052 tests across 37 executables: 16,045 passing, 1 skipped, 6
-failing** for the same two re-measured causes; the inherited 16,005 figure is three tests off this
-batch's counting and the discrepancy is recorded in NEXT.md rather than reconciled away. Graph
-**41 / 92**, seams **2 / 18**, negative fixtures **11 / 94**. **No CCF was minted; CCF-012 and
-CCF-019 were NOT marked closed; #1962 and #1773 remain blocked.** The prior header is retained
-below.*
+six new commits intentionally unsigned (`git -c commit.gpgsign=false`), authored and committed as
+`Claude <noreply@anthropic.com>`. The batch first **reconciled the inherited three-test gate
+discrepancy and found the inherited 16,005 was RIGHT**: the tip enumerates 16,052, the only test
+files changed since `a3cfa69` add 43 + 4 = **47** registrations and delete none, so `a3cfa69` was
+16,005 and the error was the previous report's **"+50"** — #2135's record said "+7 (84 → 91)" where
+measurement says "+4 (88 → 92)", and the `net-sockets` executable has **never** been 84 or 91 at any
+commit in this repository's history. It then **closed `modules/net-sockets` for compatible work**.
+**#2136** found the finding far wider than filed — a **listening socket**, a **regular file** and a
+**pipe** all constructed a `NetworkStream` — and put the validation in the constructor **body**, so
+"a rejected construction leaks nothing" is **structural**: a throwing body means the destructor
+never runs. **#2137** found **three** bare-`int` port doors rather than one, and the two extra ones
+failed *more* misleadingly — `getaddrinfo` blamed **DNS** for the caller's argument while a port
+above 65535 was truncated and connected to the wrong port; its endpoint half needed **a state, not a
+member** (`fd_ >= 0 && !connected_` was previously unreachable), so `sizeof(TcpClient)` is unchanged.
+**#2139** pinned what is gated and corrected a premise that changes **#2138**'s cost: the IPv4-only
+limitation is **not silent** — every endpoint path throws `SocketException(OperationNotSupported)`
+from `IPAddress::getAddressProperty()` — so option (b) is *"make it say what it means"*, not *"make
+it loud"*. **Eleven mutations** were run, and the four that failed **exactly one** test each are the
+ones that prove an *ordering* rather than a check. **#2140** then reviewed `modules/io-hashing`,
+selected because **three of three** findings are compatible work with **zero** waiting on `/rv`; a
+**fork-per-case** probe measured **102 cases, 58 crashing**, and found SR-AUD-260's **destination**
+half larger than its source half and living in **one** file. **#2145** fixed a ~7% flaky gate test
+the required validation exposed — a `std::vector<bool>` data race in the test's own bookkeeping, not
+a PRNG defect, and proved pre-existing because the failing binary predates this batch by four days.
+**Two findings moved `confirmed → remediated`** (SR-AUD-265, 267) plus SR-AUD-266's endpoint half:
+the audit index reads **150 remediated / 214 confirmed / 364 total**, **49** design-complete,
+numbering **frozen at 364**. Gate **16,082 tests across 37 executables: 16,075 passing, 1 skipped, 6
+failing** for the same two re-measured causes. Graph **41 / 92** (unchanged), seams **2 / 18**,
+negative fixtures **11 / 94**. **No CCF was minted; CCF-012 and CCF-019 were NOT marked closed;
+#1962 and #1773 remain blocked.** The prior header is retained below.*
+
+---
+
+## 2026-08-08 (later) — the gate reconciliation, `modules/net-sockets` closed (#2136, #2137, #2139), the `modules/io-hashing` review (#2140) and #2145
+
+### What shipped
+
+| # | Subject | Result |
+|---|---|---|
+| — | the inherited **16,005 vs 16,002** gate discrepancy | **inherited 16,005 was right**; the "+50" was the error |
+| **#2136** | `NetworkStream` took any `int`, and a closed stream silently accepted writes (SR-AUD-265) | **done**, `remediated`, +13 tests |
+| **#2137** | two constructors discarded the caller's argument (SR-AUD-267 + SR-AUD-266 endpoint half) | **done**, 267 `remediated`, +11 tests |
+| **#2139** | net-sockets gated-behaviour pins and namespace reconciliation | **done**, +6 tests |
+| **#2140** | the `modules/io-hashing` namespace review | **done** — plan + 4 tickets, **all compatible** |
+| **#2145** | a ~7% flaky gate test (`std::vector<bool>` race in the test) | **done**, 2/30 → 0/60 |
+
+### What remains in `modules/net-sockets`
+
+**#2134** (`blocked`, CCF-019, now pinned by shape) and **#2138** (`needs_user`, IPv6 scope, pinned).
+Nothing compatible remains. **CCF-019 is NOT marked closed.**
+
+### What is next
+
+`modules/io-hashing`: **#2142** → **#2141** → **#2143** → **#2144**, in that order — #2142 first
+because it adopts a guard that already exists in the module's four XXH types, which is where the
+shared validation helper comes from; the other order writes the helper twice. **All four are
+compatible; the module has no gated remainder.**
 
 ---
 
