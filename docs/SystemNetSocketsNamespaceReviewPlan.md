@@ -633,6 +633,94 @@ because `INT_MIN`/`INT_MAX` no longer reach `static_cast<uint16_t>`.
 
 **No layout, vtable or exception-specification change. Graph unchanged at 41 / 92.**
 
+### 17.4 #2139 — the pins, and a premise the review got wrong about IPv6
+
+**A premise correction, and it matters for #2138's options.** §4.4 and #2138's option (b) both
+assume the IPv4-only limitation is **silent** — option (b) offers to "reject a non-IPv4 endpoint
+explicitly at the door, so the limitation is loud rather than silent". Measured
+(`build-probe/2139_probe1_v6.log`), **it is already loud**, by an accident of a different module:
+
+| Path | measured refusal |
+|---|---|
+| `TcpClient::Connect(IPEndPoint(::1, 80))` | `SocketException(OperationNotSupported)` — *"The requested property is not supported for the 'InterNetworkV6' AddressFamily."* |
+| `TcpListener(IPEndPoint(::1, 0)).Start()` | the same |
+| `UdpClient(IPEndPoint(::1, 0))` | the same |
+| `TcpClient::Connect("::1", 80)` | `SocketException(HostNotFound)` — *"DNS failed: Address family for hostname not supported"* |
+| `UdpClient::Connect("::1", 80)` | the same |
+| `IPEndPoint(::1, 80).ToString()` | `"[::1]:80"` — the endpoint is representable, only unusable |
+
+Every endpoint path reaches `IPAddress::getAddressProperty()`, which **throws** for a v6 address
+rather than returning a narrowed 32-bit value, and the two hostname paths never resolve the literal
+because `hints.ai_family` is `AF_INET`. **Nothing is silently narrowed to IPv4.** What is true, and
+is the honest version of the complaint, is that a caller gets **three different refusals, none of
+them the operation's own**: one names an `IPAddress` property, one blames DNS, and none says
+*"this client is IPv4-only"*. #2138's option (b) is therefore not "make it loud" but "make it say
+what it means", which is a smaller change than the ticket assumed. Recorded on #2138; the decision
+itself is untouched.
+
+**The pins, and what each is for.**
+
+| Pin | Kind | Fires when |
+|---|---|---|
+| `Socket` is not `enable_shared_from_this` | compile-time | the CCF-019 repair lands |
+| `~Socket` is `noexcept` | compile-time | a **joining** destructor is added |
+| `Socket` is move-assignable, non-copyable | compile-time | the reachability half of SR-AUD-263 changes |
+| `AcceptAsync`/`SendAsync` return types | compile-time | a shared-ownership redesign alters the async surface |
+| the six IPv6 refusals above | runtime | #2138 is decided |
+| an empty `SendPacketsElement` file path is accepted | runtime | §6.1's recorded-not-ticketed observation changes |
+| no `std::` exception escapes eleven public doors | runtime | a door starts leaking a non-`System::` exception |
+| every descriptor-owning type is non-copyable | compile-time | a double-close becomes expressible |
+
+**#2134 is pinned by SHAPE, not by a race.** A racing use-after-free reproduction is flaky by
+construction (#2096's recorded reason) and a data race is undefined behaviour rather than
+behaviour. What *can* be pinned exactly is that the ownership model is unchanged — which is
+precisely what a CCF-019 repair changes.
+
+**Both gate pins were proven to fire**, because a pin that cannot fail is decoration:
+
+| Mutation | Result |
+|---|---|
+| P1 — `hints.ai_family = AF_UNSPEC` in `TcpClient::Connect` (a slice of #2138 option (a)) | the IPv6-literal pin **fails**; the other five pass |
+| P2 — `class Socket : public std::enable_shared_from_this<Socket>` | **compile error** quoting the CCF-019 pin's own message |
+
+**+6 tests** (`SharpRuntimeTests_Net_Sockets` 116 → **122**). Doc-comments now state the corrected
+contracts on `NetworkStream` (#2136), `TcpClient`/`TcpListener`/`UdpClient` (#2137 and the IPv4-only
+note), and `Socket`'s async `@warning` — which already described the CCF-019 contract — is left as
+written.
+
+---
+
+## 19. Namespace reconciliation — `modules/net-sockets` after #2135, #2136, #2137 and #2139
+
+**Every finding and post-audit observation this review owns, with exactly one disposition:**
+
+| Item | Severity | Disposition | Where |
+|---|---|---|---|
+| SR-AUD-263 | high | **blocked** — CCF-019, unapproved; pinned by shape | #2134, §17.4 |
+| SR-AUD-264 | med | **remediated** | #2135, §17.1 |
+| SR-AUD-265 | med | **remediated** (both halves: construction **and** closed state) | #2136, §17.2 |
+| SR-AUD-266 endpoint half | med | **remediated** | #2137, §17.3 |
+| SR-AUD-266 family half (AF_INET only) | med | **needs_user** — design; current behaviour pinned | #2138, §17.4 |
+| SR-AUD-267 | med | **remediated** | #2137, §17.3 |
+| §6.1 empty `SendPacketsElement` path | — | recorded, **not ticketed**, now **pinned** | §17.4 |
+| §6.1 non-socket descriptor accepted | — | **folded into #2136 and remediated** | §17.2 |
+| §6.2's seven measured positives | — | **pinned** | §17.4 |
+
+**The finding index reads: SR-AUD-264, 265, 267 `remediated`; SR-AUD-263 `confirmed` (blocked);
+SR-AUD-266 `confirmed` (endpoint half remediated, family half open).** SR-AUD-266 keeps
+`confirmed` by the established convention for a split finding — the same one SR-AUD-342 follows.
+
+**`modules/net-sockets` is complete except for gated and deferred work.** What remains is exactly
+two items, and neither is compatible work this batch was permitted to do:
+
+- **#2134** — `blocked` on **CCF-019**, which is **not approved and not marked closed**.
+- **#2138** — `needs_user`; the decision is unchanged, but §17.4's measurement narrows what option
+  (b) actually costs.
+
+**No compatible ticket in this module remains.** The graph is unchanged at **41 modules / 92
+edges**, and no repair here changed a layout, a vtable, a `noexcept` specification or a public
+signature.
+
 ---
 
 ## 18. Historical gate-total reconciliation — the inherited 16,005 was right

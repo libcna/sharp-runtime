@@ -19,6 +19,17 @@ namespace System::Net::Sockets {
      * Uses Winsock2 on Windows, POSIX sockets on Linux/macOS,
      * and throws PlatformNotSupportedException on Emscripten.
      *
+     * @par IPv4 only — a measured, gated limitation (#2138, SR-AUD-266 family half)
+     * Every connect, bind and accept path in this type is `AF_INET` with a `sockaddr_in`. The
+     * limitation is **loud, not silent**, though not by design: an `IPEndPoint` carrying an IPv6
+     * address reaches `IPAddress::getAddressProperty()`, which throws
+     * `SocketException(OperationNotSupported)` — *"The requested property is not supported for
+     * the 'InterNetworkV6' AddressFamily."* — and a hostname path refuses an IPv6 literal with
+     * `SocketException(HostNotFound)` because `hints.ai_family` is `AF_INET`, so `getaddrinfo`
+     * never resolves it. Nothing is silently narrowed to IPv4. **How far this port should carry
+     * IPv6 is an open decision (#2138)**, not a bug awaiting a fix; the current behaviour is
+     * pinned by `SocketsGatedBehaviourPins`.
+     *
      * @note Status: Implemented — Windows (Winsock2) and POSIX (Linux/macOS).
      */
     class UdpClient {
