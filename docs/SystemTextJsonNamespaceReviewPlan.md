@@ -140,7 +140,7 @@ All seven reproduced or refuted against `59a8107`.
 | SR-AUD-326 | med | **confirmed and halved** — §6.2 | split: pin + design | **#2115** |
 | SR-AUD-327 | high | **unchanged** — design-complete, residual J11 | **blocked** (#1888/#1889/#1894) | — |
 | SR-AUD-328 | med | **largely REFUTED** — §6.3 | compatible, narrowed | **#2114** |
-| SR-AUD-329 | med | **confirmed and wider** — §6.4 | compatible | **#2113** |
+| SR-AUD-329 | med | **confirmed, wider AND narrower** — §6.4, §20.3 | **remediated (#2113)** | **#2113** |
 | SR-AUD-330 | med | **confirmed** — §6.5 | compatible in part | **#2116** |
 
 ### 4.1 SR-AUD-327 is not re-opened by this review
@@ -602,3 +602,97 @@ compiled *into* the instrumented translation unit because `Text.Json` is a `STAT
 
 **No public signature, member, base-class, virtual, vtable, object-layout or
 exception-specification change.** One new internal header; no public type gained or lost a member.
+
+### 20.3 #2113 — the finding was wider AND narrower than filed, and the module was contradicting itself
+
+**Wider.** §6.4 framed the defect as *"two overloads disagree"*. Measured
+(`build-probe/2113_probe1_encodedtext.cpp`, log `2113_probe1_before.log`),
+`Encode(const std::string&)` had **no validation whatsoever** — it copied its argument into
+`Value` and returned. Every malformed class was certified: `C3 28`, the UTF-8-encoded lone
+surrogates `ED A0 80` and `ED B0 80`, the overlong `C0 AF`, the out-of-range `F5 80 80 80`, a
+stray continuation byte `80`, a truncated lead `C3`, raw control characters and an embedded NUL.
+
+**Narrower.** The two overloads can only genuinely **disagree** on the lone-surrogate class,
+because that is the only malformed class UTF-16 can also express. `C3 28`, `C0 AF`,
+`F5 80 80 80`, `80` and `C3` have **no UTF-16 equivalent at all** and can only arrive through
+the narrow door. So "the overloads disagree" is true but is not the whole defect; "the narrow
+door certifies anything" is.
+
+**The decisive evidence is the module contradicting itself.** For five byte classes, `Encode`
+answered *"validated JSON text"* about the very bytes this module's own `JsonDocument::Parse`
+**rejects**:
+
+| Bytes | `JsonEncodedText::Encode` | `JsonDocument::Parse` |
+|---|---|---|
+| embedded NUL | **certified** | rejected |
+| raw `0x01`, raw `0x1F` | **certified** | rejected |
+| `C3 28` | **certified** | rejected |
+| `ED A0 80` | **certified** | rejected |
+| raw `0x7F` | certified | **accepted** — *not* a contradiction |
+
+The `0x7F` row is what makes the other five a finding rather than a general observation about
+leniency: the same probe found a byte where the two agree, so the disagreement is specific.
+
+### 20.4 #2113 — the control-character boundary is measured, not stipulated
+
+`JsonEncodedText` has **no consumer anywhere in this module** — this port's `Utf8JsonWriter`
+deliberately ships no `JsonEncodedText` overload (its own doc-comment says so). So whether
+`Value` is a whole JSON **document** or a single JSON **string body** is undetermined, and a byte
+may only be rejected when it is illegal at **both** granularities. A granularity matrix over
+`0x00`–`0x20` plus `0x7F`, run against this module's own parser, fixes the boundary exactly:
+
+| Byte class | Inside a string | In whitespace position | `Encode` |
+|---|---|---|---|
+| `0x00`–`0x08`, `0x0B`, `0x0C`, `0x0E`–`0x1F` (**29 bytes**) | rejected | rejected | **rejects** |
+| `0x09`, `0x0A`, `0x0D` | rejected | **accepted** | **accepts** |
+| `0x20` | accepted | accepted | accepts |
+| `0x7F` | **accepted** | rejected | **accepts** |
+
+This is RFC 8259's rule, derived entirely from repository-contained evidence — `/rv` is absent
+and no reference was consulted. It **subsumes** the ticket's "embedded NUL" acceptance criterion:
+NUL is one of the 29, and repairing only NUL would have been repairing only the named example.
+
+`THECONTROLTheFourBytesThatAreLegalSOMEWHEREStayAccepted` is a permanent test whose whole job is
+to fail if a later change widens the rejection past that evidence. Mutation **M3** proves it does.
+
+### 20.5 #2113 — what was deliberately **not** changed
+
+- **`Utf8JsonWriter` is a different kind of door, and is pinned as one.** Measured, it
+  **replaces** ill-formed sequences with U+FFFD (`WriteStringValue("\xED\xA0\x80")` emits
+  `"\ufffd\ufffd\ufffd"`, which re-parses) and **escapes** control characters
+  (`a` NUL `b` → `"a\u0000b"`). It promises "escape whatever you are given", not "certify what
+  you gave me", so it is not a second site of SR-AUD-329. Both behaviours are now pinned.
+- **`Value` is a public field**, so `JsonEncodedText t; t.Value = <anything>;` bypasses `Encode`.
+  .NET's counterpart is a readonly struct whose only public producer is `Encode`. Closing that
+  door is a **public source break**, out of scope for this layout-neutral ticket, and recorded in
+  the header's doc-comment rather than silently left. Aggregate initialization is **not** a second
+  bypass — C++20's P1008R1 disqualifies the struct because of its user-declared `= default`
+  constructor, which the probe confirmed by failing to compile.
+
+### 20.6 #2113 evidence
+
+**+9 permanent regressions** — `SharpRuntimeTests_Text_Json` 262 → **271**.
+
+| Mutation | Restores | Tests failed | Controls |
+|---|---|---:|---|
+| M1 | the UTF-8 validation removed | **4** | stable |
+| M2 | the control-character scan disabled | **2** | stable |
+| M3 | the boundary widened to all of `< 0x20` plus `0x7F` | **1** | the boundary control, exactly |
+
+M2 deliberately does **not** fail `BOTHOverloadsAgreeOnEveryInputClassTheyCanBOTHExpress`: with
+the scan gone both overloads still *agree* (both accept a NUL), which is the correct result and
+confirms that test measures agreement rather than the policy.
+
+**ASan + UBSan + LSan clean over 61,357 inputs** — 16,543 accepted, 44,814 rejected
+(`build-probe/2113_probe2_san.log`), covering every single byte value alone and embedded, every
+truncation prefix of a valid multi-byte string, 40,000 fuzzed narrow strings, 20,000 fuzzed
+UTF-16 strings, and the `value.size() * 4` transcoding buffer at its worst case (all-surrogate-pair
+input). The subject is header-only, so the **repaired body is compiled into the instrumented
+translation unit** and no stale archive copy exists. The live-instrumentation control is a
+**heap-use-after-free**, chosen deliberately after a first control was found to be masked: an
+out-of-bounds read tripped UBSan's `object-size` check and aborted **before ASan reported**, so
+the run proved UBSan live and said nothing about ASan.
+
+**No public signature, member, base-class, virtual, vtable, object-layout or
+exception-specification change.** No new file, no new component edge; the graph stays at
+**41 modules / 91 edges**.

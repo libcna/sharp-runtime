@@ -18,9 +18,11 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <utility>
 
 #include "System/Text/Json/JsonDocument.hpp"
 #include "System/Text/Json/JsonElement.hpp"
+#include "System/Text/Json/JsonEncodedText.hpp"
 #include "System/Text/Json/JsonException.hpp"
 #include "System/Text/Json/JsonSerializer.hpp"
 #include "System/Text/Json/Nodes/JsonNode.hpp"
@@ -268,4 +270,183 @@ TEST(JsonReviewPinTests, MalformedTextThatTheParserALREADYRejects) {
     // Property lookup is case-sensitive, and a missing key is a System exception.
     auto doc = JsonDocument::Parse("{\"Name\":1}");
     EXPECT_THROW((void)doc->getRootElementProperty().GetProperty("name"), System::Exception);
+}
+
+// ===========================================================================
+// #2113 (SR-AUD-329, cause TJ-E) — JsonEncodedText's two Encode overloads must agree,
+// and the narrow one must stop certifying text this module's own parser rejects
+// ===========================================================================
+//
+// The finding names only the narrow overload's leniency. Measured
+// (build-probe/2113_probe1_encodedtext.cpp), the defect is wider in one direction and
+// narrower in another than the finding's summary:
+//
+//   WIDER  — the narrow overload had NO validation at all. It accepted every malformed
+//            UTF-8 class: C3 28, the UTF-8-encoded lone surrogates ED A0 80 / ED B0 80,
+//            the overlong C0 AF, the out-of-range F5 80 80 80, a stray continuation byte
+//            and a truncated sequence — plus raw control characters and an embedded NUL.
+//   NARROWER— the two overloads can only genuinely DISAGREE on the lone-surrogate class,
+//            because that is the only malformed class UTF-16 can also express. The other
+//            malformed classes can arrive through the narrow door only.
+//
+// The decisive evidence is the module contradicting ITSELF: `Encode` certified bytes as
+// validated JSON text that this module's own `JsonDocument::Parse` rejects.
+
+namespace {
+
+/// Every raw byte the granularity matrix proved illegal at BOTH granularities — inside a
+/// JSON string AND in whitespace position. 0x09/0x0A/0x0D are excluded because they are
+/// legal whitespace between tokens; 0x7F is excluded because it is legal inside a string.
+std::string IllegalControlBytes() {
+    std::string bytes;
+    for (int b = 0x00; b <= 0x1F; ++b)
+        if (b != 0x09 && b != 0x0A && b != 0x0D) bytes.push_back(static_cast<char>(b));
+    return bytes;
+}
+
+} // namespace
+
+TEST(JsonEncodedTextTests, TheNarrowOverloadRejectsEveryMalformedUtf8Class) {
+    const std::pair<const char*, std::string> malformed[] = {
+        {"invalid C3 28", std::string("\xC3\x28")},
+        {"lone HIGH surrogate as UTF-8", std::string("\xED\xA0\x80")},
+        {"lone LOW surrogate as UTF-8", std::string("\xED\xB0\x80")},
+        {"overlong C0 AF", std::string("\xC0\xAF")},
+        {"out of range F5 80 80 80", std::string("\xF5\x80\x80\x80")},
+        {"stray continuation byte", std::string("\x80")},
+        {"truncated 2-byte lead", std::string("\xC3")},
+        {"truncated 3-byte lead", std::string("\xE2\x82")},
+    };
+    for (const auto& [name, bytes] : malformed) {
+        EXPECT_THROW((void)JsonEncodedText::Encode(bytes), System::ArgumentException)
+            << name << " must not be certified as validated UTF-8/JSON text";
+    }
+}
+
+TEST(JsonEncodedTextTests, TheRejectionIsAnArgumentExceptionNamingTheParameter) {
+    try {
+        (void)JsonEncodedText::Encode(std::string("\xC3\x28"));
+        FAIL() << "expected an ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        const std::string what = e.what();
+        EXPECT_NE(what.find("value"), std::string::npos) << "must name the parameter: " << what;
+        EXPECT_NE(what.find("UTF-8"), std::string::npos) << "must say what was wrong: " << what;
+        EXPECT_NE(what.find("index 0"), std::string::npos) << "must locate it: " << what;
+    }
+}
+
+TEST(JsonEncodedTextTests, ValidTextIsStillAcceptedByteForByte) {
+    const std::string valid[] = {
+        std::string(""),                      // empty
+        std::string("hello"),                 // ASCII
+        std::string("\xC3\xA9"),              // U+00E9, 2-byte
+        std::string("\xE2\x82\xAC"),          // U+20AC, 3-byte
+        std::string("\xF0\x9F\x98\x80"),      // U+1F600, 4-byte
+        std::string("{\"a\": 1}"),            // a whole JSON document
+        std::string("a\"b\\c"),               // raw quote and backslash are NOT control chars
+    };
+    for (const std::string& v : valid) {
+        JsonEncodedText t = JsonEncodedText::Encode(v);
+        EXPECT_EQ(t.Value, v) << "valid text must survive byte-for-byte";
+    }
+}
+
+TEST(JsonEncodedTextTests, EveryControlByteIllegalAtBOTHGranularitiesIsRejected) {
+    for (char c : IllegalControlBytes()) {
+        const std::string input = std::string("a") + c + "b";
+        EXPECT_THROW((void)JsonEncodedText::Encode(input), System::ArgumentException)
+            << "raw control byte 0x" << std::hex << static_cast<int>(static_cast<unsigned char>(c))
+            << " is illegal in JSON text at every granularity";
+    }
+    EXPECT_EQ(IllegalControlBytes().size(), 29u) << "0x00-0x1F minus tab, LF and CR";
+}
+
+TEST(JsonEncodedTextTests, THECONTROLTheFourBytesThatAreLegalSOMEWHEREStayAccepted) {
+    // This is what stops the previous test from being an invented blanket policy. Measured
+    // against this module's own parser: tab, LF and CR are legal AS WHITESPACE between
+    // tokens, and 0x7F is legal INSIDE a string. JsonEncodedText has no consumer in this
+    // module, so its granularity is undetermined and none of the four may be rejected.
+    // If this test ever starts failing, #2113's boundary has been widened past its evidence.
+    for (char c : {'\t', '\n', '\r', '\x7F'}) {
+        const std::string input = std::string("a") + c + "b";
+        EXPECT_NO_THROW((void)JsonEncodedText::Encode(input))
+            << "0x" << std::hex << static_cast<int>(static_cast<unsigned char>(c))
+            << " is legal at one granularity, so Encode must not reject it";
+    }
+    // And the measurements that fix the boundary, pinned directly.
+    EXPECT_NO_THROW((void)JsonDocument::Parse("{\t\"k\":1}"));      // tab as whitespace
+    EXPECT_NO_THROW((void)JsonDocument::Parse("{\n\"k\":1}"));      // LF as whitespace
+    EXPECT_NO_THROW((void)JsonDocument::Parse("{\r\"k\":1}"));      // CR as whitespace
+    EXPECT_NO_THROW((void)JsonDocument::Parse("{\"k\":\"a\x7F""b\"}"));  // DEL inside a string
+    EXPECT_THROW((void)JsonDocument::Parse("{\x01\"k\":1}"), JsonException);
+    EXPECT_THROW((void)JsonDocument::Parse("{\"k\":\"a\x01""b\"}"), JsonException);
+}
+
+TEST(JsonEncodedTextTests, THECONTRADICTIONEncodeNoLongerCertifiesWhatTheParserRejects) {
+    // The measurement that makes this a defect rather than mere leniency: for each input,
+    // Encode said "validated JSON text" while this module's own parser rejected the very
+    // same bytes. Both halves are asserted, so the day the parser starts accepting one of
+    // these the contradiction is gone and this test says so.
+    const std::string contradictory[] = {
+        std::string("a\0b", 3),          // embedded NUL
+        std::string("a\x01""b"),         // raw control
+        std::string("a\x1F""b"),         // raw control
+        std::string("\xC3\x28"),         // invalid UTF-8
+        std::string("\xED\xA0\x80"),     // lone surrogate as UTF-8
+    };
+    for (const std::string& bytes : contradictory) {
+        EXPECT_THROW((void)JsonEncodedText::Encode(bytes), System::ArgumentException);
+        EXPECT_THROW((void)JsonDocument::Parse("{\"k\":\"" + bytes + "\"}"), JsonException)
+            << "the parser half of the contradiction must still hold";
+    }
+}
+
+TEST(JsonEncodedTextTests, BOTHOverloadsAgreeOnEveryInputClassTheyCanBOTHExpress) {
+    struct Pair { const char* name; std::string narrow; std::u16string wide; };
+    const Pair pairs[] = {
+        {"ASCII",            std::string("hello"),            u"hello"},
+        {"empty",            std::string(""),                 u""},
+        {"U+00E9",           std::string("\xC3\xA9"),         u"é"},
+        {"U+1F600",          std::string("\xF0\x9F\x98\x80"), u"\U0001F600"},
+        {"lone HIGH surrogate", std::string("\xED\xA0\x80"),  std::u16string(1, 0xD800)},
+        {"lone LOW surrogate",  std::string("\xED\xB0\x80"),  std::u16string(1, 0xDC00)},
+        {"embedded NUL",     std::string("a\0b", 3),          std::u16string(u"a\0b", 3)},
+        {"raw control 0x01", std::string("a\x01""b"),         std::u16string(u"a\x01""b", 3)},
+        {"tab",              std::string("a\tb"),             std::u16string(u"a\tb")},
+    };
+    for (const auto& p : pairs) {
+        bool narrowThrew = false, wideThrew = false;
+        try { (void)JsonEncodedText::Encode(p.narrow); } catch (const System::ArgumentException&) { narrowThrew = true; }
+        try { (void)JsonEncodedText::Encode(p.wide); }   catch (const System::ArgumentException&) { wideThrew = true; }
+        EXPECT_EQ(narrowThrew, wideThrew)
+            << p.name << ": the two Encode overloads must not disagree -- that IS SR-AUD-329";
+    }
+}
+
+TEST(JsonEncodedTextTests, TheUtf16OverloadStillRejectsMalformedUtf16OnItsOwnTerms) {
+    // Its own precondition is unchanged: it reports invalid UTF-16, not invalid UTF-8.
+    try {
+        (void)JsonEncodedText::Encode(std::u16string(1, 0xD800));
+        FAIL() << "expected an ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_NE(std::string(e.what()).find("UTF-16"), std::string::npos) << e.what();
+    }
+}
+
+TEST(JsonEncodedTextTests, THEPINUtf8JsonWriterIsADIFFERENTKindOfDoorAndIsUnchanged) {
+    // The writer neither validates nor certifies: it REPLACES ill-formed sequences with
+    // U+FFFD and ESCAPES control characters, so its output re-parses. That is why #2113
+    // does not touch it, and why it is not a second site of the same defect.
+    {
+        Utf8JsonWriter w;
+        w.WriteStringValue(std::string("\xED\xA0\x80"));
+        EXPECT_EQ(w.GetString(), "\"\\ufffd\\ufffd\\ufffd\"");
+        EXPECT_NO_THROW((void)JsonDocument::Parse("[" + w.GetString() + "]"))
+            << "the writer's output must remain re-parseable";
+    }
+    {
+        Utf8JsonWriter w;
+        w.WriteStringValue(std::string("a\0b", 3));
+        EXPECT_EQ(w.GetString(), "\"a\\u0000b\"") << "the writer ESCAPES a NUL rather than rejecting it";
+    }
 }
