@@ -4,6 +4,232 @@
 # NEXT.md
 
 *Last verified: 2026-08-08. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
+harness-designated branch**, continued from its own clean tip `a3cfa69`. The batch prompt again
+suggested this branch and `CLAUDE.md` rule 3 names `feature/work`; nothing was pushed, so the two
+never conflicted in practice, and the discrepancy is recorded rather than resolved silently.
+**Not pushed — no push was requested during this batch.** No merge, rebase, tag, force-push, PR,
+publication, amend or history rewrite; all seven commits unsigned
+(`git -c commit.gpgsign=false`, author and committer `Claude <noreply@anthropic.com>`) because this
+environment has no usable private signing key. The batch **closed `modules/net-http-headers` for
+compatible work** — **#2124**, **#2125**, **#2126**, **#2127**, **#2129** and **#2132** — leaving
+**all five of that module's audit findings `remediated`**, then **re-derived the next review unit by
+measurement** and reviewed **`modules/net-sockets` (#2133)**
+(`docs/SystemNetSocketsNamespaceReviewPlan.md`, 17 sections), and implemented **#2135**, the first of
+that review's compatible tickets. **Five findings moved `confirmed → remediated`** (SR-AUD-319, 320,
+321, 323, 264). Audit **148 remediated / 216 confirmed / 364 total**, of which **49** carry
+`confirmed (design-complete)`; **no `SR-AUD-*` identifier was created — numbering stays frozen at
+364**, and **no CCF was minted**. **CCF-021's membership is now complete AND fully remediated** —
+strictly stronger than #2131's own recommended option — and it is **still not minted**, because the
+obstacle was never evidence: it is authority, and the repository's **only non-passive statement on
+the subject reserves the act to the maintainer**. **CCF-022 gained a candidate member** (a closed
+`NetworkStream` that silently accepts writes) and is likewise **not minted**. **Nine premises were
+corrected by measurement**, six of which changed what shipped, and **three mutations exposed vacuous
+assertions rather than broken repairs** — each fixed and recorded rather than quietly patched. One
+**new component edge** was declared, `Net.Http.Headers → Net`, taking the graph **41 / 91 → 41 / 92**.
+Gate **16,052 tests across 37 executables: 16,045 passing, 1 skipped, 6 failing** for the same two
+re-measured causes as before. Seams **2 / 18**, negative fixtures **11 / 94**. **Doxygen and `ccache`
+are both absent** and were NOT run; `/rv` is absent. **#1962 and #1773 remain blocked**; **CCF-012
+and CCF-019 were NOT marked closed.** The prior header stack is retained below.*
+
+---
+
+## Batch record — #2124–#2127, #2129, #2132 (net-http-headers closed), CCF-021's final answer, the `modules/net-sockets` review (#2133) and #2135
+
+### What shipped
+
+| # | Subject | Findings | Result |
+|---|---|---|---|
+| **#2124** | CR/LF/NUL at **ten** typed value doors; the module held **four** copies of the rule | SR-AUD-319 | **done**, `remediated` — **+1 component edge** |
+| **#2125** | **seven** copies of a non-consuming HTTP-date parser | SR-AUD-321 | **done**, `remediated` |
+| **#2126** | **seven** list splitters; six escape-blind, one quote-blind | SR-AUD-320 | **done**, `remediated` — a **widening** |
+| **#2127** | the RFC 5987 charset label was discarded — **three** defects, not one | SR-AUD-323 | **done**, `remediated` |
+| **#2129** | an RFC 5987 value decoded to a raw CR/LF **for the caller** | post-audit | **done** (with #2127) |
+| **#2132** | net-http-headers gated-behaviour pins + §19 reconciliation | — | **done** |
+| **CCF-021** | membership complete **and fully remediated**; still **not minted** | — | **#2131**, `needs_user` |
+| **#2133** | the `modules/net-sockets` namespace review | 5 open | **done** — plan + 6 tickets |
+| **#2135** | a negative `SendPacketsElement` count meant "the whole buffer" | SR-AUD-264 | **done**, `remediated` |
+
+### The corrected premises that changed what shipped
+
+1. **#2124 — `ViaHeaderValue` did NOT already reject CR *and* LF.** The review recorded that only
+   NUL was its gap, and called the finding "exactly right" about it. Measured character by
+   character, `isValidReceivedBy` rejects on `find_first_of(" \t\r/,")`: **LF and NUL were never in
+   that set**, so `ViaHeaderValue("1.1", "safe\nX")` was accepted and `ToString()` emitted a raw LF.
+   `WarningHeaderValue::isValidAgent` had the identical gap. **The cause of the error is the
+   instructive part**: the probe payload was `"safe\r\nX-Injected: yes"`, which rejects on its CR
+   and hides the LF. A per-scenario matrix missed what a per-character one caught.
+2. **#2124 — the module already held FOUR hand-written copies of the field-terminator rule**
+   (`HttpHeaders`, `AuthenticationHeaderValue`, `HttpRequestHeaders`, `NameValueHeaderValue`) and
+   they disagreed. That is cause **NH-H** — the module's dominant defect shape — hiding inside the
+   repair target itself. All four now call
+   `System::Net::detail::ContainsProtocolFieldTerminator`, which still has **exactly one body in
+   the repository**.
+3. **#2124 — five mutable parameter vectors, not two, and a tenth door no document names.**
+   `ContentDispositionHeaderValue`, `CacheControlHeaderValue` and `NameValueWithParametersHeaderValue`
+   hand out their vector by mutable reference too, and `RangeConditionHeaderValue(std::string)`
+   inherits `EntityTagHeaderValue`'s gap. Because every element *is* a `NameValueHeaderValue`, one
+   check in its constructor and `setValueProperty` closes all of them.
+4. **#2125 — SEVEN copies of the date parser, not six.** `WarningHeaderValue`'s date field is the
+   one the review did not name.
+5. **#2126 — the seventh splitter was not escape-blind, it was quote-blind.**
+   `NameValueWithParametersHeaderValue::TryParse` split on a bare `input.find(';')` with no quote
+   tracking at all, so even the review's own **control** case was split there.
+6. **#2127 — three defects in one decoder.** Besides the discarded charset label, a **truncated**
+   percent-escape (`a%`, `a%C`) fell through to the literal branch and was kept as text — silently
+   turning malformed input into a plausible-looking file name, at a door whose whole job is
+   producing file names.
+7. **#2133 — SR-AUD-264 is narrower than it reads.** The negative *offset* was **already** rejected,
+   by the unsigned-cast idiom two lines below the ternary that lets a negative *count* through, and
+   the file-path overload was already correct. One overload's ternary, not a type-wide gap.
+8. **#2133 — SR-AUD-265 has a second defect underneath it.** A **closed** `NetworkStream` returns
+   EOF from `Read` and **silently succeeds** from `Write`. `Close()` *records* the state and no
+   member enforces it — CCF-022's cause in its strongest form yet.
+9. **#2133 — SR-AUD-266 is two defects wearing one number.** The ignored local endpoint is an empty
+   constructor body **with the parameter name commented out**; the `AF_INET`-only family selection
+   is a design question. They do not share a ticket (#2137 and #2138).
+
+### Three mutations that exposed a vacuous assertion rather than a broken repair
+
+Recorded because the pattern repeated, and because each time the mutation was *right* and the test
+was wrong:
+
+- **#2125's over-repair** (require `consumed == size`, rejecting trailing whitespace) passed
+  everything, because the assertion went through `RetryConditionHeaderValue::TryParse` — which
+  **pre-trims its input**, so the parser never saw the whitespace. Re-pointed at
+  `HttpResponseHeaders`, which reads the stored raw value untrimmed, it fails exactly one test.
+- **#2126's over-repair** (honour the escape outside quotes too) passed everything, because
+  `EXPECT_FALSE(TryParse(...))` cannot distinguish two segments from one longer invalid segment.
+  Re-pointed at `Accept`, whose `parseList` **skips** an unparsable element, the element **count**
+  discriminates.
+- **#2135's under-repair** failed **two** tests, and the second one is the point: restoring the
+  ternary also restores the diagnostic defect, where a caller who passed `offset = -1` is told
+  *"Actual value was 4294967295"*. A repair that fixed only the sign check would have looked
+  complete.
+
+### CCF-021 — the final answer, and it is about authority, not evidence
+
+**Membership is complete at five findings across three modules, and after #2124 and #2123 it is
+also FULLY REMEDIATED** — strictly stronger than #2131's own recommended option (b), which asked
+only that the two open members land. The common invariants were verified rather than asserted: one
+cause, one predicate with **exactly one body**, one validation timing, no partial framing state
+published at any member. **One honest exception is recorded rather than smoothed over:** member 5
+(SR-AUD-322, a field *name*) is sufficiently governed by the stricter `isToken`, which subsumes the
+terminator rejection rather than performing it.
+
+**It is still not minted.** Every promotion sentence in the audit corpus is passive and names no
+agent; the **single non-passive statement** — `docs/SystemIONamespaceReviewPlan.md` §8.2 — reserves
+the act to the maintainer, and #2109's own conclusion explicitly left "whether a remediation batch
+may execute a mint" open. So the instruction not to infer authority from passive prose is not merely
+satisfied here: the repository's only agent-naming sentence points the other way.
+
+**Exact approval sentence, unchanged from #2131 and now cheaper to accept:** *"Mint CCF-021 as the
+protocol-field-terminator injection family, citing SR-AUD-313, SR-AUD-316 (reason half), SR-AUD-248,
+SR-AUD-319 and SR-AUD-322, and record that the SearchValues.hpp proposal for that number is
+withdrawn."*
+
+**CCF-022 / #2109 is the same conclusion, and this batch did NOT execute a second promotion.**
+`modules/net-sockets`' closed-`NetworkStream` defect would be its seventh site and third module;
+it is recorded on #2109 as a candidate and nothing more. CCF-022's membership is in any case still
+gated on Approval IO-1.
+
+### `modules/net-sockets` — why it, and what it costs
+
+Re-derived by measurement at this tip. **The deciding criterion is the one the batch instruction
+names: decidability with `/rv` absent.** **Zero of five** net-sockets findings ask "what exactly
+does .NET do"; `time-zone` is **seven of seven** and `globalization` **five of seven**, so reviewing
+either today produces deferred-verification tickets rather than compatible work. It also has the
+highest **actionable** high-severity ratio of any unreviewed unit — `xml-linq` shows 25% but its
+only `high` sits behind #1899's **declined** layout approval, so its actionable count is zero — it
+is the only remaining unreviewed unit where `/proc/self/fd` accounting is a real instrument rather
+than a formality, and it is the **last unreviewed member of the `Net` family**.
+
+**The cost, stated up front rather than discovered later:** its one `high` (SR-AUD-263, four async
+members capturing a raw `this`) is **CCF-019** and is `blocked`, so the compatible queue is four
+mediums. **No use-after-free was executed to confirm it**, deliberately — a racing ASan reproduction
+of a lifetime bug is flaky by construction, the reason #2096 already recorded.
+
+### Numbers, re-measured
+
+| Quantity | Value |
+|---|---|
+| audit index | **148 remediated / 216 confirmed / 364 total**, **49** design-complete |
+| gate | **16,052 tests across 37 executables — 16,045 passing, 1 skipped, 6 failing** |
+| known failures | 5 × `PingTests` (#1962) + `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` (`/proc/net/if_inet6` absent — re-verified) |
+| selective components | **passed**, one serialized run, **16m26s** wall (27m26s user), peak **2** `cc1plus` |
+| `local_ci_check.sh build` | validators green, **build clean: 0 warnings, 0 errors**, then **stops at the same `PingTests` failure** — its known stop, reported separately from the complete 37-executable gate above |
+| module graph | **41 modules / 92 edges** (was 91; `Net.Http.Headers → Net`, `PRIVATE_DEPENDENCIES`) |
+| version seams | **2 seams / 18 definitions** |
+| negative fixtures | **11 files / 94 sites**, 105 compiler invocations, peak **2** jobs |
+| build | **0 warnings, 0 errors** |
+
+**One discrepancy in an inherited figure, recorded rather than reconciled away.** The previous
+handoff states **16,005** gate tests. This batch's verified additions are **+50** (net-http-headers
+380 → 423, net-sockets 84 → 91), which implies a prior total of **16,002** under this batch's
+counting, not 16,005. **No suite lost tests** and every suite except the two known-failure sets is
+fully green, so this is a counting-method difference in the inherited number, not a regression — but
+it is a three-test difference that was not resolved, and the measured figure above is the one to
+trust.
+
+### #1962's cause, re-measured — and the measurement strengthens the finding
+
+| Probe | Result |
+|---|---|
+| `/proc/sys/net/ipv4/ping_group_range` | **`1 0`** — an *empty* range (low > high), so **no** GID may open an unprivileged ICMP socket |
+| `socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP)` | **`EACCES`** |
+| `socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)` | **OPENED** — this session runs as uid 0 |
+| `/proc/net/if_inet6` | **absent** |
+
+**The raw socket opens.** So the five `PingTests` failures are not "this environment cannot ping":
+the privileged path that `Ping` never attempts **works here**, and only the unprivileged path it
+does attempt is closed. That is precisely #1962's claim — *`Ping` only ever opens an unprivileged
+`SOCK_DGRAM` ICMP socket, so it fails outright wherever `ping_group_range` is closed* — now
+demonstrated rather than inferred. Recorded on the ticket; **#1962 stays blocked** and this batch
+did not touch it.
+
+### Environment
+
+**Doxygen absent** (`which doxygen` empty) — not installed, not run. **`ccache` absent** — not
+installed, not retrofitted. **`/rv/tmp/runtime/` absent** — re-verified; every .NET claim in this
+batch rests on repository-contained evidence and is labelled as such where it is a choice rather
+than a fact. **Tracked `scripts/__pycache__` files byte-identical** (`git status --short` empty for
+that path); every Python invocation used `PYTHONDONTWRITEBYTECODE=1`. **Maximum aggregate compiler
+parallelism: two jobs** on every build, probe, sanitizer compile and fixture check.
+
+**One deviation from that ceiling, recorded because it happened rather than because it was
+discovered later.** The final selective-components run was launched twice. A monitor written as
+`until ! pgrep -f check_selective_components.sh; do …` matched **its own wrapper process**, whose
+`eval` string contains that script name — so it reported the first run finished while the run was
+still compiling, and a second run was started on top of it. For roughly **35 seconds** four
+`cc1plus` processes were alive instead of two. It was caught by inspecting **actual compiler
+processes** rather than the wrapper lines — which is exactly why the batch instruction says to do
+that — and corrected by stopping the *second* run, leaving the first to finish alone; two `cc1plus`
+was re-verified immediately afterwards. **A `pgrep -f` liveness check on a script name is
+self-matching inside a shell wrapper and must not be used again**; check a PID, or a marker the
+wrapper cannot contain.
+
+### The queue after this batch
+
+- **`modules/net-http-headers` is closed for compatible work.** Remaining: **#2128** (`needs_user`,
+  singleton/TE+CL design, behaviour pinned) and **#2130** (`todo`, deferred verification, undecidable
+  without `/rv`; the port-side half is measured and pinned).
+- **`modules/net-sockets` next**: **#2136** (`NetworkStream` construction + the closed-state half —
+  the CCF-022 candidate), then **#2137** (the two constructors that discard their argument, and the
+  only ticket in the module that must prove a **non**-leak with `/proc/self/fd`), then **#2139**
+  (pins). **#2134** is `blocked` (CCF-019) and **#2138** is `needs_user` (how far does IPv6 go?).
+- **Decisions still open and untouched**: #2131 (CCF-021), #2109 (CCF-022), Approval IO-1 / #2098,
+  #2115, #2117/#2118, CCF-019, the Diagnostics / `System::Text` / Uri / XML approval packages,
+  **#1962** and **#1773**.
+
+### Next recommended work
+
+**#2136, then #2137, then #2139**, in that order — the recommended order in
+`docs/SystemNetSocketsNamespaceReviewPlan.md` §13, which puts #2136 second precisely because its
+closed-state half improves CCF-022's evidence before anyone is asked to decide on it. A clean
+context is recommended first: this batch spans two namespace reviews' worth of implementation.
+
+---
+
+*Last verified: 2026-08-08. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
 harness-designated branch**, continued from its own clean tip `5aca799`. The batch prompt suggested
 cutting a new `feature/…` branch; the session's binding git rule names this branch and forbids
 pushing elsewhere, so the designated branch was kept and the discrepancy is recorded rather than

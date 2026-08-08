@@ -1,6 +1,70 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-08-08 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
+harness-designated branch, continued from its own clean tip `a3cfa69`. **Not pushed; no push was
+requested during this batch.** No merge, rebase, tag, PR, force-push, amend or history rewrite; all
+seven new commits intentionally unsigned (`git -c commit.gpgsign=false`), authored and committed as
+`Claude <noreply@anthropic.com>`. The batch **closed `modules/net-http-headers` for compatible
+work** and then reviewed **`modules/net-sockets`**. **#2124** found the field-terminator check
+sitting in the **`else` branch**, so it ran only for an *unquoted* value — and found that the module
+already held **four hand-written copies** of the same rule that **disagreed**, which is cause NH-H
+hiding inside the repair target; it corrected the review's claim that `ViaHeaderValue` already
+rejected CR *and* LF (it rejected CR only, and the CRLF probe string hid the LF), found a **tenth**
+door no document names, and declared the **new component edge `Net.Http.Headers → Net`**, taking the
+graph **91 → 92**. **#2125** found **seven** copies of the HTTP-date parser rather than six and
+deliberately **did not narrow the grammar**, because a fixed-width rewrite would reject text
+`sscanf` accepts and `/rv` is absent. **#2126** found the seventh splitter **quote**-blind rather
+than escape-blind. **#2127** found **three** defects in one decoder, including a truncated
+percent-escape kept as literal text at a door whose job is producing file names. **#2132** pinned
+what stays, and found the one fact **#2128** was missing: over a comma-joined singleton the two
+typed accessors **already disagree**. **Three mutations exposed vacuous assertions** rather than
+broken repairs, each fixed and recorded. **CCF-021's membership is now complete AND fully
+remediated** — strictly stronger than #2131's own recommendation — and is **still not minted**,
+because the obstacle was never evidence: the repository's **only non-passive sentence on who may
+mint reserves the act to the maintainer**. **#2133** then selected `modules/net-sockets` on
+decidability with `/rv` absent — **zero of five** of its findings ask what .NET does, against
+**seven of seven** for `time-zone` — on the highest *actionable* high-severity ratio of any
+unreviewed unit, and on being the only remaining unit where `/proc/self/fd` accounting is a real
+instrument; it states up front that the module's only `high` is CCF-019 and will be blocked. It
+found that a **closed `NetworkStream` silently accepts writes**, a new **CCF-022 candidate**, which
+is likewise **not minted**. **#2135** landed, and its under-repair mutation failed **two** tests
+because restoring the ternary also restores a diagnostic defect that told a caller who passed `-1`
+about `4294967295`. **Five findings moved `confirmed → remediated`** (SR-AUD-319, 320, 321, 323,
+264): the audit index reads **148 remediated / 216 confirmed / 364 total**, **49** design-complete,
+numbering **frozen at 364**. Gate **16,052 tests across 37 executables: 16,045 passing, 1 skipped, 6
+failing** for the same two re-measured causes; the inherited 16,005 figure is three tests off this
+batch's counting and the discrepancy is recorded in NEXT.md rather than reconciled away. Graph
+**41 / 92**, seams **2 / 18**, negative fixtures **11 / 94**. **No CCF was minted; CCF-012 and
+CCF-019 were NOT marked closed; #1962 and #1773 remain blocked.** The prior header is retained
+below.*
+
+---
+
+## 2026-08-08 — `modules/net-http-headers` closed for compatible work (#2124–#2127, #2129, #2132), CCF-021's final answer, the `modules/net-sockets` review (#2133) and #2135
+
+### What shipped
+
+| # | Subject | Finding | Result |
+|---|---|---|---|
+| #2124 | one field-terminator predicate for the whole module; **+1 component edge** | SR-AUD-319 | done, `remediated` |
+| #2125 | one HTTP-date parser that consumes its whole value (7 copies) | SR-AUD-321 | done, `remediated` |
+| #2126 | one escape-aware list splitter (7 splitters) — a **widening** | SR-AUD-320 | done, `remediated` |
+| #2127 | the RFC 5987 charset label is normative — 3 defects | SR-AUD-323 | done, `remediated` |
+| #2129 | an RFC 5987 value decoded to a raw CR/LF for the **caller** | post-audit | done |
+| #2132 | gated-behaviour pins + the namespace reconciliation (§19) | — | done |
+| #2133 | the `modules/net-sockets` namespace review | 5 open | done — plan + 6 tickets |
+| #2135 | a negative `SendPacketsElement` count meant "the whole buffer" | SR-AUD-264 | done, `remediated` |
+
+### Still open, untouched, and correctly classified
+
+`#2128` (needs_user, pinned), `#2130` (deferred verification), `#2131` (CCF-021 mint), `#2109`
+(CCF-022 mint), `#2134` (blocked, CCF-019), `#2138` (needs_user, IPv6 scope), `#2136`/`#2137`/`#2139`
+(todo, compatible — the next work), Approval IO-1 / `#2098`, `#2115`, `#2117`/`#2118`, the
+Diagnostics / `System::Text` / Uri / XML approval packages, `#1962` and `#1773`.
+
+---
+
+*Last verified: 2026-08-08 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
 harness-designated branch, continued from its own clean tip `5aca799`. **Not pushed; no push was
 requested during this batch.** No merge, rebase, tag, PR, force-push, amend or history rewrite; all
 seven new commits intentionally unsigned (`git -c commit.gpgsign=false`), authored and committed as
