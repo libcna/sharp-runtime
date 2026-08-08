@@ -803,3 +803,87 @@ control): **1 test fails** — and it is the scope control, not the defect test,
 
 **No signature, layout, vtable or exception-specification change. Graph unchanged at 41 / 92.**
 
+### 18.6 #2132 — the pins, and one fact about #2128 the review did not have
+
+§6.2's positives and #2128's current behaviour are pinned in
+`HeadersGatedBehaviourPins.cpp`; #2130's deferred question is pinned in
+`HttpDateConsumptionTests.cpp` instead, beside the parser it constrains, rather than in a file a
+reader would have to know to look in.
+
+**The new fact, and it changes what #2128 has to decide.** Over a comma-joined singleton the two
+typed accessors already **disagree**:
+
+| Header | `Add` twice | Typed accessor |
+|---|---|---|
+| `Content-Length` | serializes `Content-Length: 10,20` | reports the value **absent** |
+| `Host` | serializes `Host: a.example,b.example` | returns the **joined text** |
+
+So this port is already half-way to option (b) — enforce at the typed accessor — for one header, by
+accident of the numeric parse failing on `"10,20"`, and not at all for the other. #2128 cannot pick
+an option without reconciling those two, and that was not visible when the ticket was written.
+
+**#2128 is NOT implemented**, and this is the boundary the batch instruction draws: pinning what a
+`needs_user` ticket currently does is the opposite of quietly deciding it. Every pin here is
+written so that a failure means *someone took the decision*, not *something regressed*.
+
+**+7 tests** (`SharpRuntimeTests_Net_Http_Headers` 416 → **423**). No production change.
+
+---
+
+## 19. Namespace reconciliation — every finding and defect, one disposition each (2026-08-08)
+
+### 19.1 The five audit findings
+
+| Finding | Sev | Disposition | Ticket | Status |
+|---|---|---|---|---|
+| SR-AUD-319 | high | **remediated** | #2124 | done |
+| SR-AUD-320 | med | **remediated** | #2126 | done |
+| SR-AUD-321 | med | **remediated** | #2125 | done |
+| SR-AUD-322 | high | **remediated** | #2123 | done |
+| SR-AUD-323 | med | **remediated** | #2127 | done |
+
+**All five. The module went from zero remediated findings to five in two batches.**
+
+### 19.2 The post-audit defects (ordinary ticket numbers, no `SR-AUD-*`)
+
+| Defect | Ticket | Disposition |
+|---|---|---|
+| an RFC 5987 value decodes to a raw CR/LF for the caller (NH-K) | **#2129** | **done** |
+| singleton headers comma-joined; TE + CL coexist (NH-L) | **#2128** | **`needs_user`** — design; behaviour **pinned** by #2132 |
+| RFC 850 / asctime HTTP-dates | **#2130** | **`todo`, deferred verification** — the port side is measured and pinned (§18.3); the .NET side needs `/rv` |
+| documentation and gated-behaviour pins | **#2132** | **done** |
+
+### 19.3 Defects found during implementation that no document had
+
+Recorded here because they are the difference between what the review predicted and what
+implementation measured, and because three of them changed what shipped:
+
+1. **`ViaHeaderValue` and `WarningHeaderValue` accepted a bare LF and a bare NUL** — §4.1 said the
+   opposite. Closed by #2124 (§18.2).
+2. **`RangeConditionHeaderValue(std::string)` is a tenth field-terminator door.** Closed by #2124.
+3. **Five mutable parameter/extension vectors, not two.** Governed by #2124.
+4. **Four hand-written copies of the terminator rule inside the module.** Unified by #2124.
+5. **A seventh HTTP-date parser copy** (`WarningHeaderValue`). Unified by #2125.
+6. **The seventh list splitter tracked no quoting at all** (`NameValueWithParametersHeaderValue`),
+   not merely no escapes. Unified by #2126.
+7. **A truncated percent-escape was kept as literal text** in the RFC 5987 decoder. Closed by #2127.
+8. **The two typed singleton accessors disagree** over a comma-joined value (§18.6). Handed to
+   #2128, not decided.
+
+### 19.4 Is the namespace complete?
+
+**Yes, except for gated and deferred work.** §17's criterion was: #2123–#2127, #2129 and #2132
+`done`, SR-AUD-319/320/321/322/323 `remediated`, and #2128 carrying a design ticket and a behaviour
+pin. **Every clause is satisfied.** What remains is exactly two items, both correctly classified:
+
+- **#2128** — `needs_user`. A genuine architecture decision about what a long-standing public API
+  accepts, now with the §18.6 fact it was missing.
+- **#2130** — `todo`, deferred verification. Undecidable here: it asks what **.NET** does, and
+  `/rv/tmp/runtime/` is absent. The port-side half is measured and pinned.
+
+**No ticket in this namespace is blocked**, and none needed an object-layout, vtable or
+exception-specification change — §7 predicted that and it held. The only architectural change was
+the one component edge §7 predicted, `Net.Http.Headers` → `Net`, **41 modules / 91 → 92 edges**.
+
+**Test count: 373 → 423** across the two batches (`SharpRuntimeTests_Net_Http_Headers`).
+
