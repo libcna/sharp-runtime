@@ -33,7 +33,12 @@ namespace System::Net::Http::Headers {
         explicit RangeConditionHeaderValue(const EntityTagHeaderValue& entityTag);
         /**
          * @brief Constructs an entity-tag-based value from a quoted-string tag.
-         * @throws System::FormatException if @p entityTag is not a valid quoted-string.
+         * @throws System::FormatException if @p entityTag is not a valid quoted-string, or
+         * contains CR, LF or NUL.
+         *
+         * @note Ticket #2124 (SR-AUD-319): this door forwards to EntityTagHeaderValue and so
+         * inherited its field-terminator gap. No audit finding named it; it was found by
+         * inventorying the module's public surface rather than the finding's list.
          */
         explicit RangeConditionHeaderValue(const std::string& entityTag);
 

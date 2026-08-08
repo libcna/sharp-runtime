@@ -97,7 +97,14 @@ namespace System::Net::Http::Headers {
         [[nodiscard]] bool getProxyRevalidateProperty() const { return proxyRevalidate_; }
         void setProxyRevalidateProperty(bool value) { proxyRevalidate_ = value; }
 
-        /** @return Any unrecognized "name[=value]" directives, mutable. */
+        /**
+         * @return The cache-control extension list, **mutable**.
+         * @note Handing this out by mutable reference is why ticket #2124 (SR-AUD-319) put the
+         * field-terminator rule in NameValueHeaderValue's own constructor and setValueProperty()
+         * rather than in this type: validating at construction of the container cannot govern a
+         * parameter pushed here afterwards. Every element is a NameValueHeaderValue, so no
+         * element carrying CR, LF or NUL can be built in the first place.
+         */
         [[nodiscard]] std::vector<NameValueHeaderValue>& getExtensionsProperty() { return extensions_; }
         [[nodiscard]] const std::vector<NameValueHeaderValue>& getExtensionsProperty() const { return extensions_; }
 

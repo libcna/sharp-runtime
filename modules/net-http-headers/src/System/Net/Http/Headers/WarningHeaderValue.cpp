@@ -6,6 +6,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include "System/HashCode.hpp"
+#include "System/Net/detail/ProtocolFieldValidation.hpp"
 #include "System/TimeSpan.hpp"
 #include <algorithm>
 #include <array>
@@ -34,13 +35,24 @@ namespace System::Net::Http::Headers {
             return !s.empty() && std::all_of(s.begin(), s.end(), [](char c) { return isHttpTokenChar(static_cast<unsigned char>(c)); });
         }
 
+        // #2124 (SR-AUD-319) -- and a PREMISE CORRECTION. The review recorded that the agent
+        // filter "rejects CR", which the CRLF probe string appeared to confirm; measured
+        // character by character it rejects CR because '\r' is in the set below and rejects
+        // nothing else: `WarningHeaderValue(112, "safe\nX", "\"t\"")` was accepted and ToString()
+        // emitted a raw LF, and a NUL-bearing agent was accepted too. The CRLF probe only ever
+        // rejected on the CR. All three terminators are now rejected by the family's one
+        // predicate; the list-delimiter filter below is unchanged.
         bool isValidAgent(const std::string& s) {
             if (s.empty()) return false;
+            if (System::Net::detail::ContainsProtocolFieldTerminator(s)) return false;
             if (isToken(s)) return true;
             return s.find_first_of(" \t\r/,") == std::string::npos;
         }
 
+        // #2124: warn-text is a quoted-string stored with its quotes and emitted verbatim, so the
+        // quoting grammar alone is not enough -- see EntityTagHeaderValue.cpp for the same repair.
         bool isValidQuotedString(const std::string& value) {
+            if (System::Net::detail::ContainsProtocolFieldTerminator(value)) return false;
             if (value.size() < 2 || value.front() != '"' || value.back() != '"') return false;
             for (size_t i = 1; i + 1 < value.size(); ) {
                 if (value[i] == '\\') {
@@ -124,6 +136,14 @@ namespace System::Net::Http::Headers {
         System::ArgumentOutOfRangeException::ThrowIfNegative(code, "code");
         System::ArgumentOutOfRangeException::ThrowIfGreaterThan(code, 999, "code");
         System::ArgumentException::ThrowIfNullOrEmpty(agent, "agent");
+        // #2124: separated from the grammar failures below only so the message does not echo the
+        // offending text (ProtocolFieldValidation.hpp's companion rule).
+        if (System::Net::detail::ContainsProtocolFieldTerminator(agent)) {
+            throw System::FormatException("The agent contains invalid CR, LF, or NUL characters.");
+        }
+        if (System::Net::detail::ContainsProtocolFieldTerminator(text)) {
+            throw System::FormatException("The text contains invalid CR, LF, or NUL characters.");
+        }
         if (!isValidAgent(agent)) {
             throw System::FormatException("The agent value is not valid: " + agent);
         }

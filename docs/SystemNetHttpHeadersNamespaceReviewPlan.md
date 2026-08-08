@@ -594,3 +594,81 @@ live heap-use-after-free control.
 
 **No signature, layout, vtable or exception-specification change. Graph unchanged at 41 / 91.**
 
+### 18.2 #2124 — the prediction held on the mechanism and was wrong on three facts
+
+§4.1's mechanism was exactly right: the field-terminator check lived in the **`else` branch** of
+`NameValueHeaderValue::checkValueFormat`, so it ran only for an unquoted value, and the repair had
+to sit in `NameValueHeaderValue` because five types hand out their parameter vector by mutable
+reference. Measured over 414 door/payload pairs (`build-probe/2124_probe1_doors.cpp`, logs
+`2124_probe1_before.log` / `2124_probe1_after.log`): **145 accept-and-emit results before, zero
+after** — the 24 residuals in the "after" log are all non-terminator payloads matching the CRLF
+that `HttpHeaders::ToString()` legitimately emits as framing.
+
+**Three facts §4.1 got wrong, and how.**
+
+1. **`ViaHeaderValue` did not already reject CR *and* LF.** §4.1 called the finding "exactly
+   right" about it and said only NUL was its gap. `isValidReceivedBy` rejects on
+   `find_first_of(" \t\r/,")`: **LF is not in that set and never was**, and neither is NUL.
+   `ViaHeaderValue("1.1", "safe\nX")` was accepted and `ToString()` emitted a raw LF.
+   `WarningHeaderValue::isValidAgent` is the same filter with the same gap. **The cause of the
+   error is instructive**: the probe payload was `"safe\r\nX-Injected: yes"`, which rejects on
+   its CR, so the LF was never tested independently. A per-character matrix would have caught it;
+   a per-scenario one did not.
+2. **Five mutable parameter/extension vectors, not two.** §4.1 named `MediaTypeHeaderValue` and
+   `TransferCodingHeaderValue`; `ContentDispositionHeaderValue`, `CacheControlHeaderValue`
+   (`getExtensionsProperty`) and `NameValueWithParametersHeaderValue` do it too. And there is a
+   **tenth door no document names**: `RangeConditionHeaderValue(const std::string&)`, which
+   forwards to `EntityTagHeaderValue` and inherited its gap.
+3. **The module already held FOUR hand-written copies of the terminator rule**, and they
+   disagreed: `HttpHeaders::checkValueChars`, `AuthenticationHeaderValue::containsNewLineOrNull`
+   and `HttpRequestHeaders::checkNoNewlineOrNul` were all correct;
+   `NameValueHeaderValue::checkValueFormat` was correct only outside quotes; and
+   `ViaHeaderValue`/`WarningHeaderValue` had a fourth, narrower spelling that was not the rule at
+   all. **That is cause NH-H applied to the terminator rule itself** — the module's dominant
+   defect shape, hiding inside the repair target.
+
+**The component edge, resolved.** §7 predicted it and it was needed: `Net.Http.Headers` now
+declares `PRIVATE_DEPENDENCIES Net`, taking the graph from **41 / 91 to 41 / 92**, with
+`docs/ComponentCatalog.md` regenerated and `validate_module_boundaries.py` confirming no cycle.
+`PRIVATE` is correct because no public header here includes anything from `Net`, so no consumer's
+include surface grows. **It was declared, not deferred**, on the basis that `CLAUDE.md` reserves
+per-action approval for pushes, tags, merges, the two-job ceiling and broad header refactors — not
+for declaring a component edge — and that #1814 declared a *public* edge (90 → 91) as ordinary
+work under the same policy. The alternative, a fifth copy of the predicate, **is** cause NH-H.
+
+**Where the repair sits, and why it is that small.** Because every parameter *is* a
+`NameValueHeaderValue`, one check in its constructor and `setValueProperty` closes all five
+mutable vectors, `ContentDispositionHeaderValue`'s `Name`/`FileName` (they route through
+`setOrAddParameter`), and every parameter-carrying `TryParse` (they route through
+`NameValueHeaderValue::Parse`). `TryParse` needed its own guard because it assigns the fields
+directly and never reaches `checkValueFormat`. `EntityTagHeaderValue`, `WarningHeaderValue` (text
+**and** agent) and `ViaHeaderValue` carry their own copies of the quoting/host grammar and each
+needed the predicate added. The three already-correct doors were re-expressed through the shared
+body with **no change to what they accept**, pinned by its own test.
+
+**One thing the repair adds that no ticket asked for**, because
+`ProtocolFieldValidation.hpp`'s doc-comment states it as a companion rule with no code: the new
+rejection messages **do not echo the offending text**. The pre-existing messages in this module
+do (`"The value is not valid: " + value`), which is why the terminator check is a separate,
+earlier branch at every door rather than folded into the grammar failure below it.
+
+**Mutations.** **M1 under-repair** — restore the pre-#2124 shape, terminator check back in the
+`else` branch: rebuilt (binary hash changed), **6 tests fail**. **M2 over-repair** — reject every
+C0 control and DEL rather than the three terminators: **exactly one test fails**,
+`THECONTROLNonTerminatingCharactersAreStillAccepted`. Without that control the over-repair would
+have looked like a stricter, better fix while narrowing the accepted set past what the frame
+grammar requires — the same lesson #2123's Q2 taught, in the opposite direction. **M3 control** —
+re-spell the shared predicate call at one site as the literal pre-#2124 expression, semantics
+identical: **0 failures**, proving the suite measures behaviour and not spelling.
+
+**+14 tests** (`SharpRuntimeTests_Net_Http_Headers` 380 → **394**), in a new file
+`HttpHeaderValueTerminatorTests.cpp`. **ASan + UBSan + LSan clean over 167,926 operations**
+(84,379 accepted / 83,547 rejected, `build-probe/2124_probe2_san.log`) across every byte value in
+a value position and as a quoted-pair escapee, every truncation prefix of a rich
+`Content-Disposition` value, degenerate quoting (unterminated quotes, trailing backslashes,
+truncated percent-escapes), 4,000 fuzzed values and embedded-NUL values — with all eight repaired
+bodies compiled into the instrumented TU and a live heap-use-after-free control proving the
+instrumentation answered. **TSan has no subject** and **`/proc/self/fd` is not applicable** (§13).
+
+**No signature, layout, vtable or exception-specification change. Graph 41 / 91 → 41 / 92.**
+

@@ -46,7 +46,19 @@ namespace System::Net::Http::Headers {
          * @brief Constructs a name/value pair.
          * @throws System::ArgumentException if @p name is empty.
          * @throws System::FormatException if @p name is not a valid HTTP token, or @p value is
-         * not empty/a valid token/a valid quoted-string.
+         * not empty/a valid token/a valid quoted-string, or @p value contains CR, LF or NUL.
+         *
+         * @note **A field terminator is rejected whether or not the value is quoted.** Ticket
+         * #2124 (SR-AUD-319): the CR/LF/NUL check used to run only for an *unquoted* value, so
+         * `NameValueHeaderValue("p", "\"a\r\nX-Injected: yes\"")` was accepted and `ToString()`
+         * emitted the terminator verbatim — a second header field where the caller supplied one
+         * parameter. Because every parameter in this namespace is a `NameValueHeaderValue`, and
+         * five types hand out their parameter vector by mutable reference, this constructor and
+         * setValueProperty() are the only place that rule can sit and still cover them all.
+         * A quoted-*pair* whose escapee is a terminator (`"a\\\rb"`) is rejected too: the
+         * backslash is a quoted-string escape, not a wire-level one, and the CR still ends the
+         * field. HTAB, DEL, the other C0 controls and non-ASCII bytes stay accepted — only the
+         * three characters that terminate a field are rejected.
          */
         NameValueHeaderValue(const std::string& name, const std::string& value);
 
@@ -59,7 +71,9 @@ namespace System::Net::Http::Headers {
         [[nodiscard]] const std::string& getValueProperty() const { return value_; }
         /**
          * Sets the parameter value.
-         * @throws System::FormatException if @p value is non-empty and not a valid token or quoted-string.
+         * @throws System::FormatException if @p value is non-empty and not a valid token or
+         * quoted-string, or contains CR, LF or NUL (see the two-argument constructor; #2124).
+         * A rejected call leaves the existing value unchanged.
          */
         void setValueProperty(const std::string& value);
 

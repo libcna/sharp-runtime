@@ -36,7 +36,12 @@ namespace System::Net::Http::Headers {
          * @throws std::out_of_range if @p code is outside [0, 999].
          * @throws System::ArgumentException if @p agent is empty.
          * @throws System::FormatException if @p agent is not a valid token/host-like string, or
-         * @p text is not a valid quoted-string.
+         * @p text is not a valid quoted-string, or either contains CR, LF or NUL.
+         *
+         * @note Ticket #2124 (SR-AUD-319). The warn-text is a quoted-string stored with its
+         * quotes and emitted verbatim, so the quoting grammar alone let a terminator through.
+         * The **agent** filter had the same gap as ViaHeaderValue's: it rejected CR only, so a
+         * bare LF or NUL in the agent was accepted and serialized.
          */
         WarningHeaderValue(SharpRuntime::intcs code, const std::string& agent, const std::string& text);
 

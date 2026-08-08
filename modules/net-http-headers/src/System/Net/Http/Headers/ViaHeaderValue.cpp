@@ -4,6 +4,7 @@
 #include "System/Net/Http/Headers/ViaHeaderValue.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
+#include "System/Net/detail/ProtocolFieldValidation.hpp"
 #include <algorithm>
 #include <cctype>
 #include <string_view>
@@ -30,8 +31,16 @@ namespace System::Net::Http::Headers {
         // Practical approximation of HttpRuleParser.GetHostLength: accepts a token, or any
         // non-empty string containing none of the HTTP list-delimiter characters (space, tab,
         // CR, '/', ',') — covers hostnames, "host:port", and bracketed IPv6 literals.
+        //
+        // #2124 (SR-AUD-319) -- and a PREMISE CORRECTION. The review recorded that this filter
+        // "already rejects CR AND LF", so that only NUL was its gap. Measured character by
+        // character, LF is not in the set below and never was: `ViaHeaderValue("1.1", "safe\nX")`
+        // was accepted and ToString() emitted a raw LF. The CRLF probe string that produced the
+        // original reading rejects on its CR, which hides the LF. All three terminators are now
+        // rejected by the family's one predicate.
         bool isValidReceivedBy(const std::string& s) {
             if (s.empty()) return false;
+            if (System::Net::detail::ContainsProtocolFieldTerminator(s)) return false;
             if (isToken(s)) return true;
             return s.find_first_of(" \t\r/,") == std::string::npos;
         }
@@ -83,6 +92,10 @@ namespace System::Net::Http::Headers {
 
         void checkReceivedBy(const std::string& receivedBy) {
             System::ArgumentException::ThrowIfNullOrEmpty(receivedBy, "receivedBy");
+            // #2124: separated so the message does not echo the offending text.
+            if (System::Net::detail::ContainsProtocolFieldTerminator(receivedBy)) {
+                throw System::FormatException("The receivedBy value contains invalid CR, LF, or NUL characters.");
+            }
             if (!isValidReceivedBy(receivedBy)) {
                 throw System::FormatException("The receivedBy value is not valid: " + receivedBy);
             }

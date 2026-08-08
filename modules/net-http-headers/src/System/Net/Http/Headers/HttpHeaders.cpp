@@ -5,6 +5,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/Net/detail/ProtocolFieldValidation.hpp"
 #include <algorithm>
 #include <cctype>
 #include <string_view>
@@ -34,8 +35,13 @@ namespace System::Net::Http::Headers {
         // instead of this type's own stricter reference behavior, which would have let an
         // embedded "\r\n evil: header" obs-fold sequence through Add() -- a genuine HTTP header
         // injection vector once ToString() serializes it back out verbatim.
+        //
+        // Ticket #2124 routed this through System::Net::detail::ContainsProtocolFieldTerminator,
+        // the family's single body, rather than leaving a hand-written fourth copy of the same
+        // three characters in this module. The accepted/rejected set is byte-for-byte identical;
+        // only the number of places the rule is written down changed.
         void checkValueChars(const std::string& value) {
-            if (value.find_first_of("\r\n") != std::string::npos || value.find('\0') != std::string::npos) {
+            if (System::Net::detail::ContainsProtocolFieldTerminator(value)) {
                 throw System::FormatException("The value contains invalid CR, LF, or NUL characters.");
             }
         }

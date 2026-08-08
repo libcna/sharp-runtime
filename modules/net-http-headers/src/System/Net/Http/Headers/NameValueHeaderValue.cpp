@@ -4,6 +4,7 @@
 #include "System/Net/Http/Headers/NameValueHeaderValue.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
+#include "System/Net/detail/ProtocolFieldValidation.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -56,19 +57,40 @@ namespace System::Net::Http::Headers {
         }
     }
 
+    // Ticket #2124 (SR-AUD-319, cause NH-H, docs/SystemNetHttpHeadersNamespaceReviewPlan.md §4.1).
+    //
+    // Before #2124 the field-terminator check sat in the `else` branch below, so it ran only for an
+    // UNQUOTED value. A value that began with '"' was handed to isValidQuotedString(), which checks
+    // the quoting grammar and nothing else -- so `NameValueHeaderValue("p", "\"a\r\nX-Injected: yes\"")`
+    // was accepted and ToString() emitted the terminator verbatim. Every parameter in this module is
+    // a NameValueHeaderValue, and five types (MediaTypeHeaderValue, TransferCodingHeaderValue,
+    // ContentDispositionHeaderValue, CacheControlHeaderValue and NameValueWithParametersHeaderValue)
+    // hand out their parameter vector by MUTABLE reference, so this is the only place the rule can
+    // sit and still cover them all.
+    //
+    // The check is now flat and applies to the whole value, quoted or not, which is also what makes
+    // a quoted-PAIR terminator (`"a\<CR>b"` -- an escape sequence whose escapee is a raw CR) a
+    // rejection: the backslash is not a wire-level escape, the CR still ends the field.
+    //
+    // The predicate is System::Net::detail::ContainsProtocolFieldTerminator -- the family's single
+    // body, shared with the ten System::Net::Http doors of #2063 and the three
+    // System::Net::WebSockets doors of #2089. A fourth copy of it here would BE cause NH-H.
     void NameValueHeaderValue::checkValueFormat(const std::string& value) {
         if (value.empty()) return;
+
+        // Checked first and separately: the offending text is deliberately NOT echoed, per the
+        // companion rule in ProtocolFieldValidation.hpp -- a CR/LF-bearing value copied into an
+        // exception message and then logged re-creates the injection the rejection prevents.
+        if (System::Net::detail::ContainsProtocolFieldTerminator(value)) {
+            throw System::FormatException("The value contains invalid CR, LF, or NUL characters.");
+        }
 
         if (value.front() == ' ' || value.front() == '\t' || value.back() == ' ' || value.back() == '\t') {
             throw System::FormatException("The value is not valid: " + value);
         }
 
-        if (value.front() == '"') {
-            if (!isValidQuotedString(value)) {
-                throw System::FormatException("The value is not a valid quoted-string: " + value);
-            }
-        } else if (value.find('\r') != std::string::npos || value.find('\n') != std::string::npos || value.find('\0') != std::string::npos) {
-            throw System::FormatException("The value is not valid: " + value);
+        if (value.front() == '"' && !isValidQuotedString(value)) {
+            throw System::FormatException("The value is not a valid quoted-string: " + value);
         }
     }
 
@@ -115,6 +137,13 @@ namespace System::Net::Http::Headers {
     }
 
     bool NameValueHeaderValue::TryParse(const std::string& input, NameValueHeaderValue& parsedValue) {
+        // #2124: TryParse assigns name_/value_ directly and so never reaches checkValueFormat.
+        // A field terminator anywhere in the input means the text is not one header field value,
+        // whatever the rest of the grammar says, so it is rejected before the grammar runs. This
+        // is also the door MediaTypeHeaderValue, TransferCodingHeaderValue, CacheControlHeaderValue
+        // and ContentDispositionHeaderValue reach their parameters through.
+        if (System::Net::detail::ContainsProtocolFieldTerminator(input)) return false;
+
         size_t start = input.find_first_not_of(" \t");
         if (start == std::string::npos) return false;
         size_t end = input.find_last_not_of(" \t");

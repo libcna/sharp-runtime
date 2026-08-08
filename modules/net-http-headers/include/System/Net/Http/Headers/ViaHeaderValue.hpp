@@ -31,7 +31,13 @@ namespace System::Net::Http::Headers {
          * @brief Constructs a value with the given protocol version and received-by host.
          * @throws System::ArgumentException if @p receivedBy is empty.
          * @throws System::FormatException if @p protocolVersion is not a valid HTTP token, or
-         * @p receivedBy is not a valid token or host-like string.
+         * @p receivedBy is not a valid token or host-like string, or @p receivedBy contains CR,
+         * LF or NUL.
+         *
+         * @note Ticket #2124 (SR-AUD-319) — and a correction to the review that filed it. The
+         * host-like filter rejected CR because CR is one of its list delimiters; it did **not**
+         * reject LF or NUL, so `ViaHeaderValue("1.1", "safe\nX")` was accepted and ToString()
+         * emitted a raw LF. All three field terminators are now rejected.
          */
         ViaHeaderValue(const std::string& protocolVersion, const std::string& receivedBy);
 

@@ -26,13 +26,20 @@ namespace System::Net::Http::Headers {
         /**
          * @brief Constructs a strong entity-tag.
          * @param tag The tag, given as a quoted-string including its surrounding quotes (e.g. "\"abc\"").
-         * @throws System::FormatException if @p tag is not a valid quoted-string.
+         * @throws System::FormatException if @p tag is not a valid quoted-string, or contains
+         * CR, LF or NUL.
+         *
+         * @note Ticket #2124 (SR-AUD-319): the tag is stored **with** its quotes and ToString()
+         * emits it verbatim, so before #2124 a CR/LF/NUL inside the quoted-string became an
+         * injected header field. The quoting grammar cannot see that on its own. Parse/TryParse
+         * and RangeConditionHeaderValue's string constructor funnel through the same check.
          */
         explicit EntityTagHeaderValue(const std::string& tag);
 
         /**
          * @brief Constructs an entity-tag with the given weakness.
-         * @throws System::FormatException if @p tag is not a valid quoted-string.
+         * @throws System::FormatException if @p tag is not a valid quoted-string, or contains
+         * CR, LF or NUL (#2124).
          */
         EntityTagHeaderValue(const std::string& tag, bool isWeak);
 

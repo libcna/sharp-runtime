@@ -5,6 +5,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
 #include "System/HashCode.hpp"
+#include "System/Net/detail/ProtocolFieldValidation.hpp"
 #include <algorithm>
 #include <cctype>
 #include <string_view>
@@ -36,8 +37,13 @@ namespace System::Net::Http::Headers {
             return static_cast<SharpRuntime::intcs>(std::hash<std::string>{}(lower));
         }
 
+        // Ticket #2124: this door was ALREADY correct -- it is one of the module's measured
+        // positives -- but it had written the rule out a second time. It now forwards to
+        // System::Net::detail::ContainsProtocolFieldTerminator, the family's single body, so a
+        // future change to what terminates a field cannot reach this door and miss the others.
+        // The accepted/rejected set is unchanged.
         bool containsNewLineOrNull(const std::string& s) {
-            return s.find('\r') != std::string::npos || s.find('\n') != std::string::npos || s.find('\0') != std::string::npos;
+            return System::Net::detail::ContainsProtocolFieldTerminator(s);
         }
     }
 

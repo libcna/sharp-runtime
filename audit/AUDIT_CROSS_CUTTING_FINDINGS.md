@@ -2614,3 +2614,92 @@ Its promotion trigger is the **`net-http-headers` review**, that module is still
 it holds **two of the family's five findings, both `high`**. Nothing here mints it, and this
 batch did not begin that review. The reconciliation above removes the *policy* obstacle only;
 the *membership* obstacle stands.
+
+---
+
+## CCF-021 — final membership and the authority question, after #2124 (2026-08-08)
+
+*Appended additively. Nothing above is edited; the two earlier CCF-021 sections stand as written,
+including the parts #2124 measured to be wrong, so the difference between what was predicted and
+what was measured stays visible.*
+
+### Every member, with its final state
+
+| # | Finding | Module | Public door(s) | Remotely controlled input | Field boundary crossed | Exact former failure | Repair | Predicate | Timing | State | Sev |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | SR-AUD-313 | `net-http` | ten frame doors: method, URL, header name, header value, … | caller **and peer** text | HTTP/1.1 request line + header field | an injected request line or header field | reject at each door | `ContainsProtocolFieldTerminator` | at the door, before storage | **remediated** (#2063) | high |
+| 2 | SR-AUD-316 (reason half) | `net-http` | `HttpResponseMessage` reason phrase | caller text | HTTP/1.1 status line | a terminator inside the status line | reject at the door | same body | at the door | **remediated** (#2063) | medium |
+| 3 | SR-AUD-248 | `net-websockets` | `SetRequestHeader`, the request URI, `Host:` | caller text **and a `System::Uri`** | RFC 6455 handshake request line + headers | a smuggled `GET /admin HTTP/1.1` | reject at each door | same body | at the door | **remediated** (#2089) | high |
+| 4 | SR-AUD-319 | `net-http-headers` | ten value doors (§4.1's nine + `RangeConditionHeaderValue(std::string)`), reaching five mutable parameter vectors | caller text | header field **value** | `ToString()` emitting an injected header field | one check in `NameValueHeaderValue`, plus `EntityTagHeaderValue`, `WarningHeaderValue` (text **and agent**) and `ViaHeaderValue` | same body | at the door, before storage | **remediated** (#2124) | high |
+| 5 | SR-AUD-322 | `net-http-headers` | `TryAddWithoutValidation` (the **name**) | caller text | header field **name** | a `true` return plus two serialized fields | route the name through `Add`'s own `isToken` | `isToken` + this family's timing | at the door, before storage | **remediated** (#2123) | high |
+
+**Five findings, three modules, all five now remediated.** Members 1 and 2 share ticket #2063 and
+are counted as one row in the earlier five-finding table; the count is unchanged.
+
+### The claimed common invariants, verified rather than asserted
+
+1. **A protocol-field terminator reaches an HTTP/WebSocket framing boundary at every member.**
+   Yes — request line (1, 3), status line (2), field name (5), field value (4).
+2. **The same predicate is sufficient at every member.** Yes for 1–4:
+   `System::Net::detail::ContainsProtocolFieldTerminator` still has **exactly one body in the
+   repository**, and after #2124 it serves ten `Net.Http` doors, three `Net.WebSockets` doors and
+   the `Net.Http.Headers` value doors. **Member 5 is the one honest exception**: a field *name* is
+   a token, so the sufficient predicate there is the stricter `isToken`, which subsumes the
+   terminator rejection rather than performing it. Recorded rather than smoothed over.
+3. **Rejection happens before any byte is emitted.** Yes at all five — at the public door, before
+   storage, never at serialization.
+4. **No partial framing state may be published.** Verified at every member: #2063 and #2089
+   validate before assignment; #2123's vector overload checks the name once before storing
+   anything; #2124's `setOrAddParameter` validates inside `NameValueHeaderValue` before the vector
+   is touched, so a rejected `setFileNameProperty` leaves zero parameters behind (pinned).
+5. **Token-grammar defects are separate from field-terminator defects.** Re-verified: SR-AUD-249
+   (subprotocol separators) and SR-AUD-320/321 (escape-blind splitters, non-consuming date
+   parsers) are **not** members, nor are #2129 (a terminator travelling *inward* to the caller,
+   cause NH-K) or #2128 (singleton/framing, no terminator, cause NH-L).
+
+**The one boundary difference, restated because it is now permanent.** For members 1–3 the
+guarantee is *no byte reaches the wire*. For members 4 and 5 it is *no field terminator appears in
+the serialized text*, because `modules/net-http-headers` is not on this repository's own wire path
+(`docs/SystemNetHttpHeadersNamespaceReviewPlan.md` §4.6). A difference in where the boundary is,
+not in the cause, the predicate or the timing.
+
+**#2124's structural contribution beyond closing its own doors.** The module held **four**
+independently written copies of the terminator rule, and they disagreed —
+`ViaHeaderValue`/`WarningHeaderValue` rejected CR only, `NameValueHeaderValue` only outside quotes,
+while `HttpHeaders`, `AuthenticationHeaderValue` and `HttpRequestHeaders` were correct. All of them
+now call the one body, which required the new component edge **`Net.Http.Headers` → `Net`**,
+declared `PRIVATE_DEPENDENCIES` (41 modules / 91 → **92** edges, no cycle, catalogue regenerated).
+A sixth copy of the rule is now a visible family violation rather than a local choice.
+
+### The authority question — asked directly, and answered with what the repository actually says
+
+Every statement in this corpus governing CCF creation was re-read at this tip:
+
+| Source | What it says | Does it name who may mint? |
+|---|---|---|
+| the seven *"the cross-cutting numbering is closed"* sentences | scoped to **namespace-local** causes a namespace review would promote on its own authority (#2109's reconciliation) | no |
+| the CCF-021 promotion sentence | *"**Mint CCF-021 when `net-http-headers` is reviewed**, citing all five findings and this appendix."* | **no — passive, no agent** |
+| the CCF-022 promotion sentence | *"the trigger remains the `modules/io` review."* | **no — passive, no agent** |
+| `docs/SystemIONamespaceReviewPlan.md` §8.2 | the act *"belongs to the maintainer, not to me"* | **yes — reserves it to the maintainer** |
+| #2109's own conclusion | *"**Not established, and left to the maintainer:** whether a remediation batch may execute a mint"* | **yes — explicitly leaves it open** |
+
+**Conclusion: authority is ambiguous, and the single statement that does name an agent reserves
+the act to the maintainer.** The prompt-level instruction not to infer authority from passive
+prose is therefore not merely satisfied — the repository's only non-passive sentence points the
+other way. **CCF-021 is NOT minted.** The evidence obligation is discharged twice over and the
+membership is now **complete AND fully remediated**, which is strictly stronger than #2131's
+recommended option (b); nothing except the authority question remains.
+
+**The same conclusion applies to CCF-022 / #2109 by the identical reasoning**, and it is recorded
+here rather than executed: this batch does **not** mint CCF-022, and CCF-022's membership is in any
+case still gated on Approval IO-1.
+
+**Promotion would change no finding's status and no ticket's ownership** — SR-AUD-313/316/248/319/322
+are `remediated` on their own repairs, independently of the family label.
+
+### What this batch changed in the index
+
+**SR-AUD-319** moves `confirmed` → `remediated` (#2124). The index now reads
+**144 remediated / 220 confirmed / 364 total**, of which **49** carry the
+`confirmed (design-complete)` qualifier — unchanged, because no design completed in this batch.
+**No `SR-AUD-*` identifier was issued; numbering stays frozen at 364.**

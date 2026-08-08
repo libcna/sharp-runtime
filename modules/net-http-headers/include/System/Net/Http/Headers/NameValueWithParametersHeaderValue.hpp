@@ -32,7 +32,14 @@ namespace System::Net::Http::Headers {
         /** Constructs a name/value pair with no parameters. */
         NameValueWithParametersHeaderValue(const std::string& name, const std::string& value);
 
-        /** @return The parameter list (mutable — add entries directly). */
+        /**
+         * @return The parameter list, **mutable**.
+         * @note Handing this out by mutable reference is why ticket #2124 (SR-AUD-319) put the
+         * field-terminator rule in NameValueHeaderValue's own constructor and setValueProperty()
+         * rather than in this type: validating at construction of the container cannot govern a
+         * parameter pushed here afterwards. Every element is a NameValueHeaderValue, so no
+         * element carrying CR, LF or NUL can be built in the first place.
+         */
         [[nodiscard]] std::vector<NameValueHeaderValue>& getParametersProperty() { return parameters_; }
         /** @return The parameter list. */
         [[nodiscard]] const std::vector<NameValueHeaderValue>& getParametersProperty() const { return parameters_; }

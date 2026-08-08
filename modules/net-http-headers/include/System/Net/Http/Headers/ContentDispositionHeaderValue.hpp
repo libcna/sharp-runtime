@@ -56,18 +56,34 @@ namespace System::Net::Http::Headers {
          */
         void setDispositionTypeProperty(const std::string& value);
 
-        /** @return The parameter list, mutable. */
+        /**
+         * @return The parameter list, **mutable**.
+         * @note Handing this out by mutable reference is why ticket #2124 (SR-AUD-319) put the
+         * field-terminator rule in NameValueHeaderValue's own constructor and setValueProperty()
+         * rather than in this type: validating at construction of the container cannot govern a
+         * parameter pushed here afterwards. Every element is a NameValueHeaderValue, so no
+         * element carrying CR, LF or NUL can be built in the first place.
+         */
         [[nodiscard]] std::vector<NameValueHeaderValue>& getParametersProperty() { return parameters_; }
         [[nodiscard]] const std::vector<NameValueHeaderValue>& getParametersProperty() const { return parameters_; }
 
         /** @return The "name" parameter (quotes stripped), or empty if not present. */
         [[nodiscard]] std::string getNameProperty() const;
-        /** Sets (or removes, if empty) the "name" parameter. */
+        /**
+         * Sets (or removes, if empty) the "name" parameter.
+         * @throws System::FormatException if @p value contains CR, LF or NUL (#2124). The value
+         * is stored quoted, so before #2124 a terminator here reached ToString() verbatim; a
+         * rejected call adds no parameter and leaves any existing one unchanged.
+         */
         void setNameProperty(const std::string& value);
 
         /** @return The "filename" parameter (quotes stripped), or empty if not present. */
         [[nodiscard]] std::string getFileNameProperty() const;
-        /** Sets (or removes, if empty) the "filename" parameter, quoted. */
+        /**
+         * Sets (or removes, if empty) the "filename" parameter, quoted.
+         * @throws System::FormatException if @p value contains CR, LF or NUL (#2124); see
+         * setNameProperty().
+         */
         void setFileNameProperty(const std::string& value);
 
         /** @return The RFC 5987-decoded "filename*" parameter, or empty if not present/undecodable. */

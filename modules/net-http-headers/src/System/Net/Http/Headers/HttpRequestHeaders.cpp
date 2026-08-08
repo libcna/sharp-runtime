@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Http/Headers/HttpRequestHeaders.hpp"
 #include "System/FormatException.hpp"
+#include "System/Net/detail/ProtocolFieldValidation.hpp"
 #include "System/TimeSpan.hpp"
 #include <algorithm>
 #include <array>
@@ -61,8 +62,10 @@ namespace System::Net::Http::Headers {
             return result;
         }
 
+        // Ticket #2124: already correct, and now expressed through the family's single predicate
+        // instead of a third hand-written copy in this module. Accepted/rejected set unchanged.
         void checkNoNewlineOrNul(const std::string& value) {
-            if (value.find_first_of("\r\n") != std::string::npos || value.find('\0') != std::string::npos) {
+            if (System::Net::detail::ContainsProtocolFieldTerminator(value)) {
                 throw System::FormatException("New-line or NUL characters are not allowed in header values.");
             }
         }

@@ -39,7 +39,14 @@ namespace System::Net::Http::Headers {
         /** @return The transfer-coding token (e.g. "gzip", "chunked"). */
         [[nodiscard]] const std::string& getValueProperty() const { return value_; }
 
-        /** @return The parameter list, mutable. */
+        /**
+         * @return The parameter list, **mutable**.
+         * @note Handing this out by mutable reference is why ticket #2124 (SR-AUD-319) put the
+         * field-terminator rule in NameValueHeaderValue's own constructor and setValueProperty()
+         * rather than in this type: validating at construction of the container cannot govern a
+         * parameter pushed here afterwards. Every element is a NameValueHeaderValue, so no
+         * element carrying CR, LF or NUL can be built in the first place.
+         */
         [[nodiscard]] std::vector<NameValueHeaderValue>& getParametersProperty() { return parameters_; }
         [[nodiscard]] const std::vector<NameValueHeaderValue>& getParametersProperty() const { return parameters_; }
 
