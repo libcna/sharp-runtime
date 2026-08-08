@@ -3,6 +3,217 @@
 
 # NEXT.md
 
+*Last verified: 2026-08-08. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
+harness-designated branch**, continued from its own clean tip `5aca799`. The batch prompt suggested
+cutting a new `feature/…` branch; the session's binding git rule names this branch and forbids
+pushing elsewhere, so the designated branch was kept and the discrepancy is recorded rather than
+resolved silently. **Not pushed — no push was requested during this batch.** No merge, rebase, tag,
+force-push, PR, publication, amend or history rewrite; all seven commits unsigned
+(`git -c commit.gpgsign=false`, author and committer `Claude <noreply@anthropic.com>`) because this
+environment has no usable private signing key. The batch **closed the compatible `System::Text::Json`
+queue** — **#2113**, **#2114**, **#2116** (+ **#2121**, a door #2112 had missed, found by #2114's
+probe) and **#2120** — **reconciled the namespace** (§21 of its plan), **re-derived the next review
+unit by measurement**, reviewed **`modules/net-http-headers` (#2122)**
+(`docs/SystemNetHttpHeadersNamespaceReviewPlan.md`, 18 sections), **discharged CCF-021's evidence
+obligation in full**, and implemented **#2123**, the first of that review's compatible tickets.
+**Four findings moved `confirmed → remediated`** (SR-AUD-328, 329, 330, 322). Audit
+**143 remediated / 221 confirmed / 364 total**, of which **49** carry `confirmed (design-complete)`;
+**no `SR-AUD-*` identifier was created — numbering stays frozen at 364**, and **no CCF was minted**.
+**Eleven premises were corrected by measurement**, seven of which changed what shipped, and **three
+checks were caught not discriminating and fixed rather than reported** — including a **would-be
+false clean under UBSan**. Gate **16,005 tests across 37 executables: 15,998 passing, 1 skipped, 6
+failing** for the same two re-measured causes as before. Graph **41 / 91**, seams **2 / 18**,
+negative fixtures **11 / 94**. **Doxygen and `ccache` are both absent** and were NOT run; `/rv` is
+absent. **#1962 and #1773 remain blocked**; **CCF-012 and CCF-019 were NOT marked closed, and
+CCF-021 and CCF-022 were NOT minted.** The prior header stack is retained below.*
+
+---
+
+## Batch record — #2113, #2114, #2116, #2121, #2120, the Text.Json closure, the `net-http-headers` review, CCF-021's evidence and #2123
+
+### What shipped
+
+| # | Subject | Findings | Result |
+|---|---|---|---|
+| **#2113** | `JsonEncodedText`'s narrow `Encode` had **no** validation | SR-AUD-329 | **done**, `remediated` |
+| **#2114** | a JSON number that does not convert exactly — and it was **UB** | SR-AUD-328 | **done**, `remediated` |
+| **#2116** | `Deserialize` discarded its options — really: **two parsers** | SR-AUD-330 | **done**, `remediated` |
+| **#2121** | a **fifth** parse door #2112's NUL guard never reached | post-audit | **done** (with #2116) |
+| **#2120** | Text.Json gated-behaviour pins + §21 reconciliation | — | **done** |
+| **#2122** | the `modules/net-http-headers` namespace review | 5 open | **done** — plan + 11 tickets |
+| **CCF-021** | evidence obligation **discharged**; mint filed as a decision | — | **#2131**, `needs_user` |
+| **#2123** | `TryAddWithoutValidation` accepted a CR/LF header **name** | SR-AUD-322 | **done**, `remediated` |
+
+### The corrected premises that changed what shipped
+
+1. **#2113 — SR-AUD-329 is wider AND narrower than filed.** The narrow `Encode` had **no
+   validation at all**, not merely a lenient one — it certified `C3 28`, both UTF-8-encoded lone
+   surrogates, the overlong `C0 AF`, the out-of-range `F5 80 80 80`, a stray continuation byte, a
+   truncated lead, raw controls and an embedded NUL. Narrower: the two overloads can only genuinely
+   **disagree** on the lone-surrogate class, the only malformed class UTF-16 can also express.
+2. **#2113 — the module was contradicting ITSELF, and that is the evidence.** `Encode` certified as
+   "validated JSON text" five byte classes this module's own `JsonDocument::Parse` **rejects**. Raw
+   `0x7F` is accepted by both — which is what makes the other five a finding rather than general
+   leniency.
+3. **#2113 — the control-character boundary is MEASURABLE, and was measured.** A granularity matrix
+   over `0x00`–`0x20` and `0x7F` against the module's own parser fixes it at exactly RFC 8259's set:
+   29 bytes illegal at both granularities, with `0x09`/`0x0A`/`0x0D` (legal whitespace) and `0x7F`
+   (legal inside a string) deliberately outside it. Repairing only the NUL the ticket named would
+   have been repairing only the named example.
+4. **#2114 — the survivor is UNDEFINED BEHAVIOUR, not truncation.** `nlohmann`'s `get<int>()` on a
+   `number_float` is a bare `static_cast<int>(double)`. Three `float-cast-overflow` reports before,
+   **zero** after. `1e100` → `-2147483648`, `99999999999999999999` → `-9223372036854775808`, **NaN →
+   `-2147483648`**.
+5. **#2114 — GCC's `-fsanitize=undefined` does NOT include `float-cast-overflow`.** The first UBSan
+   run reported nothing and would have been a **false clean**. It was caught by enabling the check
+   explicitly, not by trusting the umbrella flag.
+6. **#2114 — the ticket's acceptance criterion was wrong.** It asked for `JsonElement`'s
+   `FormatException`; `JsonValue`'s own doc-comment transcribes `JsonValueOfElement.cs` raising
+   `InvalidOperationException`. Three doors now keep three deliberately different exception types,
+   pinned.
+7. **#2116 — SR-AUD-330's real defect is two parsers, not a discarded argument.**
+   `JsonDocument::Parse` and `JsonSerializer::Deserialize` were independent implementations of one
+   operation and had drifted in **two** directions: no option validation, no `MaxDepth`, no
+   `CommentHandling` — **and no NUL guard**.
+8. **#2121 — the plan's §20.1 was wrong by exactly one door.** "Every entry point that hands caller
+   text to the parser goes through it" did not cover `Deserialize<T>`. Found by #2114's probe, filed
+   as its own ticket, corrected **additively**.
+9. **#2122 — SR-AUD-322's validating sibling is ALREADY correct.** `HttpHeaders::Add` rejects
+   CR/LF/NUL/space in **both** name and value, plus padded names and obs-fold. The repair was
+   routing, not writing.
+10. **#2122 — `modules/net-http-headers` is NOT on this repository's own wire path.**
+    `HttpRequestMessage` stores a raw `std::unordered_map` and `HttpClientHandler` serializes from
+    *that*. The honest framing is *an injection primitive handed to consumers*, not *remotely
+    exploitable in-repo today* — and it forces CCF-021's guarantee for these two members to be
+    stated one step earlier.
+11. **#2122 — SR-AUD-319 has two doors the finding does not name** (`MediaTypeHeaderValue` and
+    `TransferCodingHeaderValue` hand out a **mutable** parameter vector), while **`ViaHeaderValue`
+    already rejects CR/LF**, so NUL is precisely its only gap. And **SR-AUD-320's splitter is
+    escape-blind, not quote-blind** — an *unescaped* `;` inside quotes is accepted, which is the
+    control that proves it.
+
+### The three checks that did not discriminate, and were fixed rather than reported
+
+- **A would-be FALSE CLEAN under UBSan.** #2114's first sanitizer run used `-fsanitize=undefined`
+  and reported **zero** issues. GCC does not put `float-cast-overflow` in that umbrella; enabling it
+  explicitly produced three reports at `vendor/nlohmann/json.hpp:4279`. Reporting the first run
+  would have concluded "not UB, merely truncation" — the opposite of the truth.
+- **An ASan control masked by UBSan.** #2113's first live-instrumentation control was an
+  out-of-bounds read, which tripped UBSan's `object-size` check and **aborted before ASan
+  reported**. It proved UBSan live and said nothing about ASan. Replaced with a
+  heap-use-after-free.
+- **A mutation that failed to BUILD, reported as invalid rather than as a result.** #2116's first
+  P1 mutant dropped the option forwarding without consuming `opts`, so `-Werror=unused-parameter`
+  stopped it. A mutation whose build fails is not evidence.
+- (A fourth, smaller one: #2114's sanitizer probe produced one UBSan report that on reading was a
+  signed overflow in **the probe's own literal generator**. Fixed in the probe; the production tree
+  was never its subject.)
+
+### `System::Text::Json` — CLOSED for compatible work
+
+Every ticket §15 classified as compatible is `done`: #2111, #2112, #2113, #2114, #2116, #2120, plus
+#2121 which §15 did not know about. §19's completion criteria are met in full, **including the
+behaviour pin each blocked finding was required to carry** — the criterion only #2120 delivered.
+
+**Remaining and untouched:** #2115 (`needs_user`, the two inert options are not equally
+implementable), #2117 and #2118 (`blocked`, object layout), #1888/#1889/#1894 (`blocked`, public
+source break + layout, CCF-019), #2119 (deferred verification).
+
+### `modules/net-http-headers` — selected by measurement, at 5 open findings
+
+Below the ≥6 threshold, and selected anyway on three grounds that are **not** CCF-021: the
+**highest high-severity ratio in the repository (40%, 2 of 5)**; both `high` findings are
+**protocol-field injection**; and its defects are **decidable from a public grammar this repository
+already encodes**, whereas `time-zone`'s seven (0% high) and five of `globalization`'s seven are
+"what exactly does .NET do" questions that with `/rv` absent yield a deferred-verification queue.
+That it completes CCF-021 is listed **fourth**.
+
+**Its dominant cause is NH-H — one rule, many copies, and the copies disagree**: three of five
+findings are a quoted-string validator, a delimiter splitter (**7 copies**) and an HTTP-date parser
+(**6 copies**). **The sharpest planning fact:** `Net.Http.Headers` does **not** depend on `Net`, so
+using the family's single predicate requires a **new component edge, 91 → 92**. A fourth copy of
+the predicate would *be* cause NH-H.
+
+**One new post-audit defect:** singleton headers are joined with a comma (`Content-Length: 10,20`,
+`Host: a,b`) and `Transfer-Encoding` coexists with `Content-Length` — a request-smuggling shape,
+filed as the **design** ticket #2128 rather than silently implemented.
+
+### CCF-021 — evidence DISCHARGED, mint still NOT taken
+
+Membership is complete: **five findings across three modules** — SR-AUD-313 and SR-AUD-316 (reason
+half) in `net-http` (**remediated**, #2063), SR-AUD-248 in `net-websockets` (**remediated**, #2089),
+SR-AUD-319 and SR-AUD-322 in `net-http-headers` (#2124 open, **#2123 remediated**). One cause, one
+predicate with exactly one body, one validation timing.
+
+**One boundary difference a promotion must state rather than paper over:** members 1–3 guarantee
+*no byte reaches the wire*; members 4–5 must guarantee *no field terminator appears in the
+serialized text*, one step earlier, because this module is not on the wire path.
+
+**Not minted**, and the reason has **changed** — no longer "incomplete membership" but the two
+narrower obstacles #2109 recorded for CCF-022: every promotion sentence is **passive and names no
+agent**, and **two of five members are open**, one needing an **unapproved component edge**. Filed
+as **#2131** with three options, a recommendation (**mint once #2123 and #2124 land**) and one exact
+approval sentence. The identifier is still **ambiguous between two proposed families**.
+
+### Exact state
+
+- **Audit:** **143 remediated / 221 confirmed / 364 total**; **49** carry `confirmed (design-complete)`.
+  Recounted directly from the index, not inferred.
+- **Gate:** 37 executables, **16,005** tests — **15,998 passed, 1 skipped, 6 failed**. Delta +38 =
+  9 (#2113) + 7 (#2114) + 8 (#2116/#2121) + 7 (#2120) + 7 (#2123). Run **executable-by-executable**,
+  not via the script, which stops at the first failing suite.
+- **Known failures, re-measured, unchanged:** five `PingTests` from the real #1962 gap —
+  `ping_group_range` is the **empty** range `1 0`, so `SOCK_DGRAM` ICMP is refused with *Permission
+  denied* while `SOCK_RAW` ICMP **opens fine**, exactly #1962's diagnosis; and one `SocketTests`
+  (`Connect_ByHostname_NoMatchingAddressFamily_Throws`) because `/proc/net/if_inet6` is **absent**.
+  The single skip is `CultureInvariantFormattingTests.NumericAndDateFormatting_UnaffectedByNonInvariantGlobalLocale`.
+- **Graph** 41 modules / 91 edges. **Seams** 2 / 18. **Negative fixtures** 11 / 94
+  (105 invocations, peak 2 jobs, 52.7s).
+- **Build:** 0 errors, 0 warnings.
+- **Doxygen absent. `ccache` absent. `/rv` absent.** Tracked `scripts/__pycache__`
+  **byte-identical** (md5s unchanged end-to-end).
+- **Selective components:** **passed**, **1,009s**, **10** isolated consumer checks, peak **2**
+  `cc1plus` verified across **4,000+** samples; **one** script process, no duplicate wrapper,
+  nothing else compiling. Slower than the previous batch's 748s because the selective tree was
+  reconfigured; recorded rather than smoothed over. Run as one serialized process under
+  `SHARP_RUNTIME_BUILD_JOBS=2` and `TMPDIR="$PWD/build-tmp"`; the first attempt was killed by the
+  10-minute tool ceiling with **no orphaned compilers left behind** (verified) and re-run in the
+  background.
+- **`scripts/local_ci_check.sh build`:** every static gate **passed** — boundaries 41/91, catalogue
+  current, seams 2/18, negative fixtures 11/94 (105 invocations, peak 2 jobs, 54.2s), **zero
+  warnings, zero errors** — then **stopped at the known `PingTests` failure**, as it does every
+  batch. Reported separately from the complete gate above, which is why the complete gate is run
+  executable-by-executable.
+- **Max compiler concurrency: 2**, everywhere, always.
+- Build directories: `build/` 1.7G, `build-probe/` **9.5M** (142 MB of probe binaries deleted once
+  their evidence was transcribed; all `.cpp` sources and 194 logs retained), `build-tmp/` 64M.
+
+### Remaining queue
+
+- **`modules/net-http-headers` — six compatible tickets left**: **#2124** (SR-AUD-319, nine doors,
+  **needs the new component edge**), **#2125** (SR-AUD-321, six date parsers), **#2126**
+  (SR-AUD-320, seven splitters — a **widening**), **#2127** (SR-AUD-323, RFC 5987 charset),
+  **#2129** (an RFC 5987 value decoding to raw CR/LF), **#2132** (pins). Gated: **#2128**
+  `needs_user`, **#2130** deferred.
+- **`modules/io` — three compatible tickets left**: #2099, #2102, #2104. Gated: #2098 blocked on
+  **Approval IO-1**; #2105/#2106 deferred.
+- **`System::Text::Json` — CLOSED for compatible work.** **`System::Net::WebSockets` — closed.**
+  **`System::Net::Http` — closed.**
+- **Decisions waiting:** **#2131** (mint CCF-021?), **#2109** (mint CCF-022?), **#2128** (singleton
+  headers), **#2115** (the two inert JSON options), **Approval IO-1** (#2098's layout).
+- **Next namespace after `net-http-headers`:** `modules/time-zone` (7 open) or
+  `modules/globalization` (7 open) — both currently yield deferred-verification queues with `/rv`
+  absent, so `modules/net-sockets` (5 open, 1 `high`, unreviewed) may be the better next unit.
+  Re-derive by measurement rather than inheriting this note.
+
+### Next recommended work
+
+**#2124** — it is CCF-021's remaining open member, and landing it answers the component-edge
+question that #2131's recommended option (b) depends on. Then **#2125** and **#2126**, which are the
+two largest NH-H copies.
+
+---
+
 *Last verified: 2026-08-04. Branch `claude/remediation-batch-1804-namespace-b1yjh5`, fast-forwarded
 along existing history to the clean tip `13917c2` and developed from there. **Not pushed — no push
 was requested during this batch.** No merge, rebase, tag, force-push, PR, publication, amend or

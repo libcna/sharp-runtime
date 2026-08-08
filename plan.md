@@ -1,5 +1,69 @@
 # Sharp Runtime plan
 
+*Last verified: 2026-08-08 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
+harness-designated branch, continued from its own clean tip `5aca799`. **Not pushed; no push was
+requested during this batch.** No merge, rebase, tag, PR, force-push, amend or history rewrite; all
+seven new commits intentionally unsigned (`git -c commit.gpgsign=false`), authored and committed as
+`Claude <noreply@anthropic.com>`. The batch **closed the compatible `System::Text::Json` queue** and
+then reviewed **`modules/net-http-headers`**, discharging **CCF-021's evidence obligation** without
+minting it. **#2113** found that `JsonEncodedText`'s narrow `Encode` had **no validation at all** —
+and that the module was **contradicting itself**, certifying as "validated JSON text" five byte
+classes its own parser rejects, while raw `0x7F` is accepted by both, which is what makes it a
+finding rather than general leniency; its control-character boundary was **measured** by a
+granularity matrix rather than stipulated, landing on exactly RFC 8259's 29 bytes with tab, LF, CR
+and DEL deliberately outside. **#2114** found the surviving half of SR-AUD-328 to be **undefined
+behaviour**, not truncation — and caught a **would-be false clean**, because GCC's
+`-fsanitize=undefined` does **not** include `float-cast-overflow`; with it enabled, three reports
+before and zero after. It also **corrected its own acceptance criterion**, which asked for the
+wrong exception type against the port's transcribed .NET evidence. **#2116** found SR-AUD-330's real
+defect to be **two parsers**, not a discarded argument, and **#2121** — a fifth parse door #2112's
+NUL guard never reached, found by #2114's probe — corrected the plan's own claim **additively**
+rather than editing it away. **#2120** delivered the behaviour pins the completion criteria
+required, closing Text.Json for compatible work. **#2122** then selected `modules/net-http-headers`
+by re-measurement at **5 open findings**, below the ≥6 threshold, on the **highest high-severity
+ratio in the repository (40%)**, on both `high` findings being protocol-field injection, and on
+decidability with `/rv` absent — with CCF-021 listed **fourth**. It measured that the module is
+**not on this repository's own wire path**, which forces CCF-021's guarantee for its two members to
+be stated one step earlier, and found a new request-smuggling shape (singleton headers joined with a
+comma) filed as the design ticket **#2128**. **#2123** then landed, and its interesting mutation was
+the one that **over**-repaired: validating the value as well as the name fails exactly one test, the
+one pinning that "without validation" governs the value and never the name. **Four findings moved
+`confirmed → remediated`** (SR-AUD-328, 329, 330, 322): the audit index reads **143 remediated / 221
+confirmed / 364 total**, **49** design-complete, numbering **frozen at 364**. Gate **16,005 tests
+across 37 executables: 15,998 passing, 1 skipped, 6 failing** for the same two re-measured causes.
+Graph **41 / 91**, seams **2 / 18**, negative fixtures **11 / 94**. **No CCF was minted; CCF-012 and
+CCF-019 were NOT marked closed; #1962 and #1773 remain blocked.** The prior header is retained
+below.*
+
+---
+
+## 2026-08-08 — `System::Text::Json` closed for compatible work (#2113, #2114, #2116, #2121, #2120), the `modules/net-http-headers` review (#2122), CCF-021's evidence, and #2123
+
+| # | Subject | Findings | Result |
+|---|---|---|---|
+| #2113 | `JsonEncodedText`'s narrow `Encode` had **no** validation | SR-AUD-329 | done, `remediated` |
+| #2114 | a non-exact JSON number conversion — measured to be **UB** | SR-AUD-328 | done, `remediated` |
+| #2116 | `Deserialize` discarded its options — really **two parsers** | SR-AUD-330 | done, `remediated` |
+| #2121 | a **fifth** parse door #2112's NUL guard never reached | post-audit | done |
+| #2120 | Text.Json gated-behaviour pins and the §21 reconciliation | — | done |
+| #2122 | the `modules/net-http-headers` namespace review | 5 open | done — plan + 11 tickets |
+| #2131 | CCF-021: evidence **discharged**, mint filed as a decision | — | `needs_user` |
+| #2123 | `TryAddWithoutValidation` accepted a CR/LF header **name** | SR-AUD-322 | done, `remediated` |
+
+**Durable records:** `docs/SystemTextJsonNamespaceReviewPlan.md` §20.3–§21.5 and
+`docs/SystemNetHttpHeadersNamespaceReviewPlan.md` (18 sections), plus the CCF-021 discharge appended
+additively to `audit/AUDIT_CROSS_CUTTING_FINDINGS.md`.
+
+**Eleven premises corrected by measurement**, seven of which changed what shipped; **three checks
+caught not discriminating and fixed rather than reported**, including a would-be false clean under
+UBSan, an ASan control masked by an earlier UBSan abort, and a mutation whose build failed and was
+recorded as invalid rather than as a result. Full detail in `NEXT.md`.
+
+**Still open and untouched:** #2115, #2117, #2118, #2119, #1888/#1889/#1894 (Text.Json); #2124–#2132
+(net-http-headers); #2098/#2099/#2102/#2104 (io); #2109; Approval IO-1.
+
+---
+
 *Last verified: 2026-08-04 — branch `claude/remediation-batch-1804-namespace-b1yjh5`,
 fast-forwarded along existing history to the clean tip `13917c2` and developed from there.
 **Not pushed; no push was requested during this batch.** No merge, rebase, tag, PR, force-push,
