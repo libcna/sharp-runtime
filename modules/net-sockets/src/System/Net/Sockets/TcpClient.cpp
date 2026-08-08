@@ -199,7 +199,18 @@ std::shared_ptr<NetworkStream> TcpClient::GetStream() const {
     int dupfd = ::dup(fd_);
     if (dupfd < 0)
         throw SocketException(toSocketError(lastErrorCode()), "TcpClient::GetStream: dup() failed: " + netErr());
-    stream_ = std::make_shared<NetworkStream>(dupfd);
+    // #2136 gave NetworkStream's constructor a validating body, so it can now throw -- and this
+    // is the one place in the module that hands it a descriptor it has just created. Without this
+    // guard a rejected construction would leak the dup(), which is exactly the accounting defect
+    // the validation exists to prevent. A connected, blocking, stream socket passes every check,
+    // so this is a path that should never be taken; it is here because "should never" is not an
+    // accounting argument.
+    try {
+        stream_ = std::make_shared<NetworkStream>(dupfd);
+    } catch (...) {
+        ::close(dupfd);
+        throw;
+    }
 #  endif
     return stream_;
 #endif

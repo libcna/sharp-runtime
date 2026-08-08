@@ -509,6 +509,65 @@ four are `EveryNegativeCountIsRejected`, `THECONTROLTheValidCountsAreUnchanged`,
 `THEPINTheFilePathOverloadWasAlreadyCorrect`. Nothing about the repair itself changes; only the
 count was mis-transcribed.
 
+### 17.2 #2136 — the finding held exactly, and the accounting question turned out to be the design constraint
+
+§4.3's measurements held without amendment, and the probe widened the shape list rather than
+changing it (`build-probe/2136_probe1_fdstate.cpp`, log `2136_probe1_before.log`): a **listening**
+socket and a **regular file** join the pipe end and the datagram socket as things this constructor
+accepted, and a socket that has been **`shutdown(RDWR)`** but not closed is measurably still a
+connected stream socket and therefore still wrappable — recorded because "shut down" reads like a
+rejectable state until you look.
+
+**What .NET rejects is evidence; how it rejects is this port's choice, and the two are labelled
+separately.** The per-file report names four checks — null, non-blocking, unconnected, non-stream.
+This constructor takes a raw `int`, so it must first answer a question .NET never has to ask
+(*is this a socket at all?*), and that check necessarily precedes the other four. The resulting
+split is: **not a socket handle** → `ArgumentException` with `paramName == "fd"` (an argument-domain
+statement about the parameter); **non-blocking / non-connected / non-stream** → `IOException`
+carrying .NET's own three messages. With `/rv` absent, that mapping is recorded as a decision, not
+reported as a fact.
+
+**The constructor validates in its BODY, and that is the design constraint rather than a style
+choice.** The acceptance criterion "`/proc/self/fd` unchanged across every rejection" is not
+something to be careful about — it is something to make structurally true. A constructor body that
+throws means the object's destructor never runs, so `~NetworkStream → Close()` cannot close a
+descriptor the instance was never allowed to own. Validating anywhere else would have made the
+non-leak a matter of discipline.
+
+**One consequence the plan did not predict.** `TcpClient::GetStream` creates a descriptor
+(`dup(fd_)`) and immediately hands it to this constructor. A validating constructor can now reject
+it, and the `dup` would leak — so `GetStream` gained a `catch`-and-`close`. A connected, blocking,
+stream socket passes every check, so the path should never be taken; it is there because
+"should never" is not an accounting argument.
+
+**Ordering is a repair a fix can silently get wrong, so it is pinned.** The argument checks stay in
+front of the closed check: a caller who passes a negative `offset` to a closed stream has two
+defects and hears about the one under their control. The closed check then precedes the
+`count == 0` shortcut, so a zero-length transfer on a closed stream throws too — the state, not the
+size, is what is wrong.
+
+**+13 tests** (`SharpRuntimeTests_Net_Sockets` 92 → **105**; the module's one pre-existing failure,
+`SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`, is unrelated and unchanged).
+**Four mutations, each killed by its own test** (`build-probe/2136_mutate.sh`; every verdict
+preceded by a proven source change, a successful build and a proven relink):
+
+| Mutation | Tests failed |
+|---|---|
+| M1 — revert `Write`'s closed check only | **2**: the read/write refusal and the shared-message test |
+| M2 — remove the connected check | **2**: the wrong-state test **and** the accounting test, because an accepted unconnected socket is then *closed* by the temporary |
+| M3 — close the descriptor before rejecting it | **2**, including the accounting test — the mutation the AC exists for |
+| M4 — move the closed check in front of the argument checks | **exactly 1**: the ordering pin |
+
+**ASan + UBSan + LSan clean over 2,200 constructions / 2,000 rejections**
+(`build-probe/2136_probe2_san.log`) with `/proc/self/fd` measured before setup, after setup, after
+the rejection sweep and at exit — **zero drift** — and a live heap-use-after-free control proving
+the sanitizer was armed. **LSan is not the instrument here and is not claimed to be**: a leaked
+descriptor is not a leaked allocation.
+
+**No layout, vtable or exception-specification change.** The header gains one **private**
+non-virtual member (`ThrowIfClosed`) and doc-comments; `sizeof(NetworkStream)` is unchanged.
+Graph unchanged at 41 / 92.
+
 ---
 
 ## 18. Historical gate-total reconciliation — the inherited 16,005 was right

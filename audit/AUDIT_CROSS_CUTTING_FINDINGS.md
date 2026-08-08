@@ -2703,3 +2703,45 @@ are `remediated` on their own repairs, independently of the family label.
 **144 remediated / 220 confirmed / 364 total**, of which **49** carry the
 `confirmed (design-complete)` qualifier — unchanged, because no design completed in this batch.
 **No `SR-AUD-*` identifier was issued; numbering stays frozen at 364.**
+
+---
+
+## CCF-022 — a seventh site, measured and now remediated, and still not minted (2026-08-08, #2136)
+
+*Appended additively. Nothing above is edited.*
+
+The `modules/net-sockets` review (#2133) recorded `NetworkStream`'s closed-state defect as a
+**candidate** member of X-D / CCF-022 and deliberately did not enlarge the family on its own
+authority. **#2136 has now remediated it**, so the candidate record is updated for fact rather
+than for status.
+
+| Module | Finding | Ticket | State |
+|---|---|---|---|
+| `xml` | SR-AUD-349 — `XmlWriter` after `Close` | #2076 | **remediated** |
+| `xml` | SR-AUD-348 — `XmlReader::Close` unobservable | #2078 | **remediated** |
+| `io` | SR-AUD-344 — `UnmanagedMemoryStream` | #2108 | **remediated** |
+| `io` | SR-AUD-337 — `leaveOpen` text wrappers | #2098 | confirmed, **blocked on Approval IO-1** |
+| `io` | SR-AUD-343 — in-memory text wrappers | #2098 | confirmed, **blocked on Approval IO-1** |
+| `io` | SR-AUD-342, `Length`/`Position`/`Seek` half | #2099 | confirmed, `todo` |
+| **`net-sockets`** | **SR-AUD-265, closed half — `NetworkStream::Read`/`Write`** | **#2136** | **remediated (this batch)** |
+
+**Seven sites, three modules, four remediated.** The new member is the family's **strongest
+form**: in the other six the lifecycle state was enforced at the data-transfer members and missed
+at the peripheral ones, whereas `NetworkStream` enforced it **nowhere** — `Read` answered `0`
+(a clean end-of-stream, as far as a caller can tell) and `Write`, being `void`, returned normally
+having written nothing. A family statement drafted from the `io` sites alone would have said
+*"not only at the data-transfer ones"*, and this site shows that clause is not the boundary.
+
+**Not minted.** The obstacle is unchanged and is not evidential: every promotion sentence in this
+corpus is passive and names no agent, and the one non-passive statement
+(`docs/SystemIONamespaceReviewPlan.md` §8.2) reserves the act to the maintainer. Adding a member
+to an unminted candidate does not confer authority to mint it. **#2109 stands as the decision
+record**, and its membership table is superseded by the one above only in fact, not in status.
+Promotion would change no finding's status and no ticket's ownership.
+
+### What this batch changed in the index
+
+**SR-AUD-265** moves `confirmed` → `remediated` (#2136). Recounted directly from the index, it now
+reads **149 remediated / 215 confirmed / 364 total**, of which **49** carry the
+`confirmed (design-complete)` qualifier — unchanged, because no design completed here.
+**No `SR-AUD-*` identifier was issued; numbering stays frozen at 364.**
