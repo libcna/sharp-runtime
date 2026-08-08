@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Text/Json/JsonDocument.hpp"
@@ -30,6 +31,7 @@
 #include "System/Text/Json/JsonEncodedText.hpp"
 #include "System/Text/Json/JsonException.hpp"
 #include "System/Text/Json/JsonSerializer.hpp"
+#include "System/Text/Json/JsonSerializerOptions.hpp"
 #include "System/Text/Json/Nodes/JsonNode.hpp"
 #include "System/Text/Json/Nodes/JsonValue.hpp"
 #include "System/Text/Json/Utf8JsonWriter.hpp"
@@ -611,4 +613,139 @@ TEST(JsonIntegralConversionTests, THERESIDUALANestedIntegerStillReachesTheVendor
     // the design changed and the plan's §20.9 must be revisited.
     EXPECT_EQ(JsonSerializer::Deserialize<std::vector<int>>("[1.5]"), (std::vector<int>{1}))
         << "a nested float literal is still truncated by the vendored conversion";
+}
+
+// ===========================================================================
+// #2116 (SR-AUD-330, cause TJ-B) — Deserialize must forward its options, and
+// #2121 — Deserialize<T> was a fifth parse door #2112's NUL guard never reached
+// ===========================================================================
+//
+// Both overloads named their options parameter as an unused comment and discarded it, so
+// MaxDepth and ReadCommentHandling -- both of which demonstrably work at JsonDocument::Parse
+// -- were unreachable through the serializer.
+//
+// Probing #2114 then found that the TEMPLATE overload called nlohmann's parser directly and
+// so never reached detail::RejectEmbeddedNul either: Deserialize<int>("1" NUL " junk")
+// returned 1, the same silent truncation #2112 had closed at the other four doors, while the
+// JsonDocument overload -- which delegates to JsonDocument::Parse -- was already guarded.
+// The review plan's claim that "every entry point that hands caller text to the parser goes
+// through it" was wrong by exactly one door; it is corrected in §20.11, not edited away.
+//
+// The two are repaired together because they are one structural fact: JsonDocument::Parse and
+// JsonSerializer::Deserialize were two independent implementations of "parse a document under
+// document options", and they had drifted in two different directions at once. There is now
+// one implementation, detail::ParseDocumentText, and both call it.
+
+TEST(JsonSerializerOptionForwardingTests, MaxDepthIsReachableThroughTheSerializer) {
+    const std::string deep = "[[[[[1]]]]]";      // 5 levels
+    JsonSerializerOptions shallow;
+    shallow.setMaxDepthProperty(3);
+
+    EXPECT_THROW((void)JsonSerializer::Deserialize(deep, shallow), JsonException)
+        << "the JsonDocument overload must honour MaxDepth";
+    using Depth5 = std::vector<std::vector<std::vector<std::vector<std::vector<int>>>>>;
+    EXPECT_THROW((void)JsonSerializer::Deserialize<Depth5>(deep, shallow), JsonException)
+        << "the template overload must honour MaxDepth too";
+
+    JsonSerializerOptions deepEnough;
+    deepEnough.setMaxDepthProperty(10);
+    EXPECT_NO_THROW((void)JsonSerializer::Deserialize(deep, deepEnough));
+    EXPECT_NO_THROW((void)JsonSerializer::Deserialize<Depth5>(deep, deepEnough));
+    // And the same document at the DEFAULT options is accepted, so the rejection is the option's.
+    EXPECT_NO_THROW((void)JsonSerializer::Deserialize(deep));
+}
+
+TEST(JsonSerializerOptionForwardingTests, CommentHandlingIsReachableThroughTheSerializer) {
+    const std::string withComment = "[1] // trailing comment";
+    // Disallow is the default, at both the serializer and the document.
+    EXPECT_THROW((void)JsonSerializer::Deserialize(withComment), JsonException);
+    EXPECT_THROW((void)JsonSerializer::Deserialize<std::vector<int>>(withComment), JsonException);
+
+    JsonSerializerOptions skip;
+    skip.setReadCommentHandlingProperty(JsonCommentHandling::Skip);
+    EXPECT_NO_THROW((void)JsonSerializer::Deserialize(withComment, skip));
+    EXPECT_EQ(JsonSerializer::Deserialize<std::vector<int>>(withComment, skip), (std::vector<int>{1}));
+}
+
+TEST(JsonSerializerOptionForwardingTests, InvalidOptionsAreRejectedAtBothEntryPoints) {
+    // Validate() now runs for the serializer's doors too, because they share the core.
+    JsonSerializerOptions negative;
+    negative.setMaxDepthProperty(-1);
+    EXPECT_THROW((void)JsonSerializer::Deserialize("[1]", negative), System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)JsonSerializer::Deserialize<std::vector<int>>("[1]", negative),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(JsonSerializerOptionForwardingTests, THEDEFAULTPathIsUnchangedForOrdinaryDocuments) {
+    // #2116 must not disturb anything a caller was already doing successfully.
+    EXPECT_EQ(JsonSerializer::Deserialize<int>("7"), 7);
+    EXPECT_EQ(JsonSerializer::Deserialize<std::string>("\"x\""), "x");
+    EXPECT_EQ(JsonSerializer::Deserialize<std::vector<int>>("[1,2,3]"), (std::vector<int>{1, 2, 3}));
+    auto doc = JsonSerializer::Deserialize("{\"a\":{\"b\":[1,2]}}");
+    EXPECT_EQ(doc->getRootElementProperty().GetProperty("a").GetProperty("b")[1].GetInt32(), 2);
+    // Round-tripping through Serialize is byte-identical.
+    EXPECT_EQ(JsonSerializer::Serialize(JsonSerializer::Deserialize("{\"a\":1}")->getRootElementProperty()),
+              "{\"a\":1}");
+}
+
+TEST(JsonSerializerOptionForwardingTests, TheTwoINERTFlagsAreFORWARDEDEvenThoughTheyDoNothingYET) {
+    // Forwarding only the two options that work would have re-created the divergence #2116
+    // exists to remove. All four are forwarded, so whatever #2115 decides takes effect at both
+    // entry points with no further change. This test pins TODAY's behaviour: the two inert
+    // flags still do nothing, at the serializer exactly as at JsonDocument::Parse. If either
+    // starts working, #2115 has been decided and this test must be updated with it.
+    JsonSerializerOptions trailing;
+    trailing.setAllowTrailingCommasProperty(true);
+    EXPECT_THROW((void)JsonSerializer::Deserialize("[1,]", trailing), JsonException)
+        << "still inert -- #2115";
+    JsonDocumentOptions documentTrailing;
+    documentTrailing.AllowTrailingCommas = true;
+    EXPECT_THROW((void)JsonDocument::Parse("[1,]", documentTrailing), JsonException)
+        << "the sibling door is inert in exactly the same way -- that is the point";
+
+    JsonSerializerOptions noDuplicates;
+    noDuplicates.setAllowDuplicatePropertiesProperty(false);
+    auto doc = JsonSerializer::Deserialize("{\"x\":1,\"x\":2}", noDuplicates);
+    EXPECT_EQ(doc->getRootElementProperty().GetProperty("x").GetInt32(), 2) << "still inert -- #2115";
+}
+
+TEST(JsonEmbeddedNulTests, ALLFIVEParseDoorsRejectAnEmbeddedNulIncludingTheOneNumber2112Missed) {
+    // #2121. The fifth door is JsonSerializer::Deserialize<T>. Asserting all five in ONE test
+    // is deliberate: a sixth door cannot be added without this test being the place it shows up.
+    const std::string truncating = std::string("1\0 junk", 7);
+    const std::string objectPair = std::string("{\"a\":1}\0{\"b\":2}", 15);
+
+    EXPECT_THROW((void)JsonDocument::Parse(objectPair), JsonException);            // door 1
+    EXPECT_THROW((void)JsonNode::Parse(objectPair), JsonException);                // door 2
+    EXPECT_THROW((void)JsonSerializer::Deserialize(objectPair), JsonException);    // door 3
+    {
+        Utf8JsonWriter writer;                                                     // door 4
+        EXPECT_THROW(writer.WriteRawValue(objectPair), JsonException);
+    }
+    EXPECT_THROW((void)JsonSerializer::Deserialize<int>(truncating), JsonException);       // door 5
+    EXPECT_THROW((void)JsonSerializer::Deserialize<double>(truncating), JsonException);    // door 5
+    EXPECT_THROW((void)JsonSerializer::Deserialize<std::vector<int>>(std::string("[1]\0[2]", 7)),
+                 JsonException);                                                           // door 5
+}
+
+TEST(JsonEmbeddedNulTests, THECONTROLForTheFifthDoorTheSameBytesWithASpaceWereAlwaysRejected) {
+    // Same control discipline as #2112's: the space version was ALWAYS rejected as trailing
+    // junk, which is what makes the NUL version a truncation rather than mere leniency.
+    EXPECT_THROW((void)JsonSerializer::Deserialize<int>("1 junk"), JsonException);
+    // And the fifth door still accepts a document with no NUL at all, unchanged.
+    EXPECT_EQ(JsonSerializer::Deserialize<int>("1"), 1);
+    EXPECT_EQ(JsonSerializer::Deserialize<std::vector<int>>("[1,2]"), (std::vector<int>{1, 2}));
+}
+
+TEST(JsonEmbeddedNulTests, THEDELIBERATEEXCEPTIONJsonNodeParseStillHasNoDepthBound) {
+    // detail::ParseDocumentText deliberately does NOT own JsonNode::Parse: #1897 made it
+    // iterative and applies NO depth bound, a documented CLAUDE.md-pinned deviation that only
+    // the still-unapproved option A may reopen. If routing JsonNode::Parse through the core
+    // were ever attempted, this test is where it would surface.
+    std::string deep;
+    for (int i = 0; i < 200; ++i) deep += "[";
+    deep += "1";
+    for (int i = 0; i < 200; ++i) deep += "]";
+    EXPECT_NO_THROW((void)JsonNode::Parse(deep)) << "JsonNode::Parse has no depth bound, by design";
+    EXPECT_THROW((void)JsonDocument::Parse(deep), JsonException) << "JsonDocument::Parse does";
 }

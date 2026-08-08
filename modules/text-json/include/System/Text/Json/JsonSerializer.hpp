@@ -9,6 +9,7 @@
 #include "System/Text/Json/JsonException.hpp"
 #include "System/Text/Json/JsonSerializerOptions.hpp"
 #include "System/Text/Json/detail/JsonNumberConversion.hpp"
+#include "System/Text/Json/detail/JsonParseCore.hpp"
 #include "nlohmann/json.hpp"
 
 namespace System::Text::Json {
@@ -77,9 +78,9 @@ namespace System::Text::Json {
          * closing it would mean replacing the customization-point design, not fixing a defect.
          */
         template <typename T>
-        static T Deserialize(const std::string& json, const JsonSerializerOptions& /*opts*/ = JsonSerializerOptions::Default()) {
+        static T Deserialize(const std::string& json, const JsonSerializerOptions& opts = JsonSerializerOptions::Default()) {
             try {
-                auto parsed = nlohmann::ordered_json::parse(json);
+                auto parsed = detail::ParseDocumentText(json, toDocumentOptions(opts));
                 if constexpr (std::is_integral_v<T> && !std::is_same_v<std::remove_cv_t<T>, bool>) {
                     if (parsed.is_number()) {
                         T value{};
@@ -94,10 +95,39 @@ namespace System::Text::Json {
             }
         }
 
-        /** @brief Deserializes @p json into a JsonDocument (untyped tree). */
+        /**
+         * @brief Deserializes @p json into a JsonDocument (untyped tree).
+         * @throws JsonException if the input is not valid JSON, exceeds @p opts's `MaxDepth`, or
+         * contains an embedded NUL.
+         */
         static std::shared_ptr<JsonDocument> Deserialize(const std::string& json,
-                                                          const JsonSerializerOptions& /*opts*/ = JsonSerializerOptions::Default()) {
-            return JsonDocument::Parse(json);
+                                                          const JsonSerializerOptions& opts = JsonSerializerOptions::Default()) {
+            return JsonDocument::Parse(json, toDocumentOptions(opts));
+        }
+
+    private:
+        /**
+         * @brief Projects the parse-time subset of @p opts onto `JsonDocumentOptions`.
+         *
+         * Ticket #2116 (SR-AUD-330, cause TJ-B). Both `Deserialize` overloads named their options
+         * parameter as an unused comment and discarded it, so `MaxDepth` and `ReadCommentHandling` — both of
+         * which demonstrably work at `JsonDocument::Parse` — were unreachable through the
+         * serializer.
+         *
+         * **All four parse-time options are forwarded, including the two that are currently
+         * inert.** That is deliberate: `AllowTrailingCommas` and `AllowDuplicateProperties` are
+         * inert at `JsonDocument::Parse` too (#2115 owns that decision), and forwarding them now
+         * means whatever #2115 decides takes effect at **both** entry points with no further
+         * change. Forwarding only the two that work would have re-created the divergence this
+         * ticket exists to remove.
+         */
+        [[nodiscard]] static JsonDocumentOptions toDocumentOptions(const JsonSerializerOptions& opts) {
+            JsonDocumentOptions documentOptions;
+            documentOptions.CommentHandling = opts.getReadCommentHandlingProperty();
+            documentOptions.MaxDepth = opts.getMaxDepthProperty();
+            documentOptions.AllowTrailingCommas = opts.getAllowTrailingCommasProperty();
+            documentOptions.AllowDuplicateProperties = opts.getAllowDuplicatePropertiesProperty();
+            return documentOptions;
         }
     };
 

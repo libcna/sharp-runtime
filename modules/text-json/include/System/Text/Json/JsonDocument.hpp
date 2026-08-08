@@ -9,7 +9,7 @@
 #include "System/Text/Json/JsonDocumentOptions.hpp"
 #include "System/Text/Json/JsonElement.hpp"
 #include "System/Text/Json/JsonException.hpp"
-#include "System/Text/Json/detail/JsonParseGuard.hpp"
+#include "System/Text/Json/detail/JsonParseCore.hpp"
 #include "nlohmann/json.hpp"
 
 namespace System::Text::Json {
@@ -25,21 +25,6 @@ namespace System::Text::Json {
         bool disposed_ = false;
 
         explicit JsonDocument(std::shared_ptr<const nlohmann::ordered_json> root) : root_(std::move(root)) {}
-
-        // Verified against Utf8JsonReader.cs (ReadFirstToken/ConsumeNextTokenOrRollback): real .NET
-        // throws when about to open a container while already at the configured MaxDepth -- i.e. at
-        // most MaxDepth levels of nested containers are allowed. currentDepth here is the nesting
-        // level of the container being examined (1 for a root-level object/array).
-        static void checkMaxDepth(const nlohmann::ordered_json& node, SharpRuntime::intcs currentDepth,
-                                   SharpRuntime::intcs maxDepth) {
-            if (!node.is_object() && !node.is_array()) return;
-            if (currentDepth > maxDepth) {
-                throw JsonException("The maximum configured depth of " + std::to_string(maxDepth) +
-                    " has been exceeded. Cannot read next JSON " + (node.is_object() ? "object" : "array") + ".");
-            }
-            for (const auto& child : node)
-                checkMaxDepth(child, currentDepth + 1, maxDepth);
-        }
 
     public:
         ~JsonDocument() override = default;
@@ -61,17 +46,12 @@ namespace System::Text::Json {
          * @throws JsonException if the input is not valid JSON.
          */
         static std::shared_ptr<JsonDocument> Parse(const std::string& json, JsonDocumentOptions options = {}) {
-            options.Validate();
-            // #2112: an embedded NUL made the vendored parser stop early and silently discard
-            // everything after it. Checked before the parser sees the text.
-            detail::RejectEmbeddedNul(json);
             try {
-                auto parsed = std::make_shared<const nlohmann::ordered_json>(
-                    nlohmann::ordered_json::parse(json, /*callback=*/nullptr, /*allow_exceptions=*/true,
-                                          /*ignore_comments=*/options.CommentHandling != JsonCommentHandling::Disallow));
-                auto effectiveMaxDepth = options.MaxDepth == 0 ? JsonDocumentOptions::DefaultMaxDepth : options.MaxDepth;
-                checkMaxDepth(*parsed, 1, effectiveMaxDepth);
-                return std::shared_ptr<JsonDocument>(new JsonDocument(std::move(parsed)));
+                // #2116/#2121: option validation, the #2112 embedded-NUL guard, the parse itself
+                // and the depth check all live in ONE place now, because JsonSerializer had a
+                // second, drifted copy of this sequence. See detail::ParseDocumentText.
+                return std::shared_ptr<JsonDocument>(new JsonDocument(
+                    std::make_shared<const nlohmann::ordered_json>(detail::ParseDocumentText(json, options))));
             // #2111: this caught only parse_error, so a number literal that overflows a
             // double -- which raises out_of_range, NOT parse_error -- escaped as a std::
             // exception that no caller writing catch(const System::Exception&) could see.

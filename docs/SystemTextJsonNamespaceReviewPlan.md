@@ -141,7 +141,7 @@ All seven reproduced or refuted against `59a8107`.
 | SR-AUD-327 | high | **unchanged** — design-complete, residual J11 | **blocked** (#1888/#1889/#1894) | — |
 | SR-AUD-328 | med | **largely REFUTED, survivor is UB** — §6.3, §20.7 | **remediated (#2114)** | **#2114** |
 | SR-AUD-329 | med | **confirmed, wider AND narrower** — §6.4, §20.3 | **remediated (#2113)** | **#2113** |
-| SR-AUD-330 | med | **confirmed** — §6.5 | compatible in part | **#2116** |
+| SR-AUD-330 | med | **confirmed; repair wider than filed** — §6.5, §20.12 | **remediated (#2116)** | **#2116** |
 
 ### 4.1 SR-AUD-327 is not re-opened by this review
 
@@ -792,3 +792,78 @@ and so does the `JsonDocument` overload of `Deserialize`, which delegates to it.
 §20.1 claimed *"every entry point that hands caller text to the parser goes through it"*. That
 statement was **wrong by one door**, and is corrected here rather than edited away. Filed as
 **#2121** and closed with #2116, which rewrites that exact function.
+
+### 20.12 #2116 — the finding is "options are discarded"; the defect is **two parsers**
+
+SR-AUD-330 is confirmed exactly as filed. But repairing it as *"pass the argument along"* would
+have missed what the probe and #2114 together showed: `JsonDocument::Parse` and
+`JsonSerializer::Deserialize` were **two independent implementations of one operation** — parse a
+document under document options — and they had drifted in **two different directions at once**:
+
+| | `JsonDocument::Parse` | `JsonSerializer::Deserialize` |
+|---|---|---|
+| validates the options | yes | **no** |
+| embedded-NUL guard (#2112) | yes | **no** (template overload) — **#2121** |
+| `CommentHandling` | yes | **no** |
+| `MaxDepth` | yes | **no** |
+| catches the base nlohmann exception (#2111) | yes | yes |
+
+There is now **one** implementation, `detail::ParseDocumentText`, and both call it. Mutation **P3**
+proves the sharing is real: deleting the single `RejectEmbeddedNul` line from the core breaks
+tests on **both** doors at once.
+
+**All four parse-time options are forwarded, including the two that are inert.** Forwarding only
+`MaxDepth` and `CommentHandling` — the two that work — would have re-created exactly the divergence
+this ticket removes. With all four forwarded, whatever **#2115** decides takes effect at both entry
+points with no further change, and a test pins that the two inert flags behave *identically* at the
+serializer and at `JsonDocument::Parse` today.
+
+### 20.13 #2116 — two deliberate narrowings, and two doors deliberately left out
+
+**Narrowings, both parity-improving, both pinned:**
+
+| Through `JsonSerializer::Deserialize` | Before | After |
+|---|---|---|
+| document nested beyond 64 levels | accepted | rejected (`MaxDepth`, default 64 — .NET's default too) |
+| document with an embedded NUL (template overload) | **silently truncated** | rejected |
+| invalid options (`MaxDepth = -1`) | ignored | `ArgumentOutOfRangeException` |
+
+**Doors deliberately NOT routed through the core, each for a stated reason:**
+
+- **`JsonNode::Parse`** — #1897 made it iterative and it applies **no depth bound**. That is a
+  documented deviation pinned by `CLAUDE.md` and reopenable only as the still-unapproved option A.
+  Routing it through a depth-checking core would have silently made an unapproved accepted-input
+  change. `THEDELIBERATEEXCEPTIONJsonNodeParseStillHasNoDepthBound` pins it, so a later
+  consolidation cannot swallow it by accident.
+- **`Utf8JsonWriter::WriteRawValue`** — validates a *fragment*, not a document under document
+  options. It keeps its own `RejectEmbeddedNul` call and its own base-exception catch.
+
+`nlohmann`'s own exception is deliberately allowed to escape the core, so each caller keeps its
+existing message wording — the same discipline #2111 applied. `JsonDocument::Parse` still wraps it
+as `'…'.` and `Deserialize` still does not, and the pre-existing
+`TheNativeParserReasonSurvivesIntoTheMessage` test still passes unchanged.
+
+### 20.14 #2116 / #2121 evidence
+
+**+8 permanent regressions** — `SharpRuntimeTests_Text_Json` 278 → **286**.
+
+| Mutation | Restores | Tests failed |
+|---|---|---:|
+| P1 | the options discarded again (SR-AUD-330) | **3** |
+| P2 | the fifth door back on the raw vendor parser (#2121) | **4** |
+| P3 | the **shared** core's NUL guard removed | **4**, across **both** doors |
+
+A fourth mutant was **rejected as invalid rather than reported**: dropping the forwarding without
+also consuming `opts` fails `-Werror=unused-parameter`, so the build never produced a binary. A
+mutation whose build fails is not evidence, and it is recorded here as one that was discarded.
+
+**ASan + UBSan + LSan clean over 30,840 parses** — 805 accepted, 30,035 rejected
+(`build-probe/2116_probe1_san.log`) across four option sets, an embedded NUL at every position of a
+14-byte document, a depth sweep either side of the default bound, and 6,000 fuzzed documents, each
+fed through **all five** parse doors. The changed out-of-line bodies are compiled into the
+instrumented translation unit, and the live control is a heap-use-after-free.
+
+**One new internal header. No public signature, member, base-class, virtual, vtable, object-layout
+or exception-specification change** — `JsonDocument::checkMaxDepth` was a private static and moved
+to `detail::CheckMaxDepth`, which no consumer can observe. No new component edge; the graph stays
+at **41 modules / 91 edges**.
