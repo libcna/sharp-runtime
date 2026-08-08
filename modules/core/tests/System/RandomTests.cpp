@@ -299,17 +299,27 @@ TEST(RandomTests, Shared_ConcurrentDrawsAreInRangeAndVaried) {
 TEST(RandomTests, Shared_ConcurrentNextBytesFillsEveryBuffer) {
     // NextBytes drives internalSample() directly rather than through Next(),
     // so it exercises the ownership boundary on its own path.
-    std::vector<bool> allZero(static_cast<std::size_t>(kSharedThreads), true);
+    //
+    // `std::vector<char>`, NOT `std::vector<bool>` (#2145). This bookkeeping vector used to be
+    // `std::vector<bool>`, which is a bit-packed proxy container: eight threads writing
+    // `allZero[t] = false` for eight DIFFERENT `t` all write the same underlying word, and
+    // [container.requirements.dataraces] exempts `vector<bool>` from the guarantee that distinct
+    // elements may be modified concurrently. A lost update then left one thread's entry `true`
+    // and failed the assertion -- measured at 2 failures in 30 standalone runs, with the
+    // alternative explanation (a thread genuinely receiving 200 x 64 zero bytes from the shared
+    // PRNG) astronomically improbable. The defect was in the test's own bookkeeping, not in
+    // System::Random. `char` elements are independently addressable, so the race is gone.
+    std::vector<char> allZero(static_cast<std::size_t>(kSharedThreads), 1);
     runOnThreads(kSharedThreads, [&allZero](int t) {
         for (int round = 0; round < 200; ++round) {
             std::vector<uint8_t> buffer(64, 0);
             System::Random::getSharedProperty().NextBytes(buffer);
             for (uint8_t b: buffer)
-                if (b != 0) { allZero[static_cast<std::size_t>(t)] = false; break; }
+                if (b != 0) { allZero[static_cast<std::size_t>(t)] = 0; break; }
         }
     });
     for (int t = 0; t < kSharedThreads; ++t)
-        EXPECT_FALSE(allZero[static_cast<std::size_t>(t)]) << "thread " << t;
+        EXPECT_EQ(allZero[static_cast<std::size_t>(t)], 0) << "thread " << t;
 }
 
 TEST(RandomTests, Shared_ConcurrentUseLeavesSeededInstancesUntouched) {
