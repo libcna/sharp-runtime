@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Sockets/TcpClient.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "PortValidation.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
 #include "System/Net/Sockets/detail/ErrnoTranslation.hpp"
 #include <cstdio>
@@ -80,15 +81,61 @@ namespace System::Net::Sockets {
 
 TcpClient::TcpClient() = default;
 
-TcpClient::TcpClient(const IPEndPoint& /*localEP*/) {}
+// SR-AUD-266 (endpoint half) / #2137. This body was empty -- literally `{}`, with the parameter
+// name commented out -- so a caller who asked to be bound to a specific local endpoint got an
+// ephemeral one and no indication that their argument had been dropped. Measured before the
+// repair (build-probe/2137_probe1_before.log): a client asked for local port 40601 and the kernel
+// reported 40998 after Connect().
+//
+// Real .NET binds in this constructor (TCPClient.cs: `_clientSocket.Bind(localEP)`), so a port
+// already in use fails HERE rather than at some later Connect(). This port does the same, and
+// Connect() below then CONNECTS THE SOCKET IT ALREADY OWNS instead of creating a second one --
+// creating a second one is what discarded the endpoint in the first place.
+//
+// The bound-but-not-connected state needs no new member: `fd_ >= 0 && !connected_` was previously
+// unreachable (the default constructor leaves fd_ == -1 and the fd-taking constructor sets
+// connected_ from the fd), so it is available to mean exactly this. sizeof(TcpClient) is
+// unchanged and no member moves.
+TcpClient::TcpClient(const IPEndPoint& localEP) {
+#if defined(__EMSCRIPTEN__)
+    (void)localEP;
+    throw System::PlatformNotSupportedException("TcpClient is not supported on Emscripten.");
+#else
+    wsaInit();
+    SockFd sock = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == kBad)
+        throw SocketException(toSocketError(lastErrorCode()), "TcpClient: socket() failed: " + netErr());
+
+    struct sockaddr_in addr{};
+    addr.sin_family      = AF_INET;
+    addr.sin_addr.s_addr = htonl(localEP.getAddressProperty().getAddressProperty());
+    addr.sin_port        = htons(static_cast<uint16_t>(localEP.getPortProperty()));
+
+    if (::bind(toSk(sock), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
+        auto code = lastErrorCode();
+        auto err  = netErr();
+        closeSk(toFd(sock));
+        throw SocketException(toSocketError(code), "TcpClient: bind() failed: " + err);
+    }
+
+    fd_        = toFd(sock);
+    connected_ = false;
+#endif
+}
 
 TcpClient::TcpClient(int connectedFd) : fd_(connectedFd), connected_(connectedFd >= 0) {}
 
 TcpClient::~TcpClient() { Close(); }
 
 void TcpClient::Connect(const std::string& hostname, int port) {
+    // Measured before #2137: a NEGATIVE port was rejected here, but by getaddrinfo, as "DNS
+    // failed: Servname not supported for ai_socktype" -- name resolution blamed for an argument
+    // the caller controls -- while 65536 and 70000 were truncated by htons and produced a
+    // "Connection refused" against the wrong port. The domain check comes first so both cases
+    // name the parameter that is actually wrong.
+    detail::ValidatePort(static_cast<SharpRuntime::intcs>(port));
 #if defined(__EMSCRIPTEN__)
-    (void)hostname; (void)port;
+    (void)hostname;
     throw System::PlatformNotSupportedException("TcpClient is not supported on Emscripten.");
 #else
     wsaInit();
@@ -100,17 +147,26 @@ void TcpClient::Connect(const std::string& hostname, int port) {
     if (rc != 0)
         throw SocketException(SocketError::HostNotFound, "TcpClient::Connect: DNS failed: " + gaErr(rc));
 
-    SockFd sock = ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    // A client constructed from a local endpoint already owns a socket BOUND to it. Creating a
+    // fresh one here is exactly how the caller's endpoint used to be discarded, so the bound
+    // socket is what gets connected. See the local-endpoint constructor for why `fd_ >= 0 &&
+    // !connected_` is the state that means "bound, not yet connected".
+    const bool bound = validFd(fd_) && !connected_;
+    SockFd     sock  = bound ? toSk(fd_)
+                             : ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (sock == kBad) { auto code = lastErrorCode(); ::freeaddrinfo(res); throw SocketException(toSocketError(code), "socket(): " + netErr()); }
     if (::connect(sock, res->ai_addr, static_cast<int>(res->ai_addrlen)) < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
         ::freeaddrinfo(res);
-        closeSk(toFd(sock));
+        // A bound socket stays owned by this object: closing it here would either leave fd_
+        // dangling or silently discard the local endpoint the caller asked for. An unbound socket
+        // was created by this call and is closed by it.
+        if (!bound) closeSk(toFd(sock));
         throw SocketException(toSocketError(code), "TcpClient::Connect: connect() failed: " + err);
     }
     ::freeaddrinfo(res);
-    if (validFd(fd_)) closeSk(fd_);
+    if (!bound && validFd(fd_)) closeSk(fd_);
     fd_        = toFd(sock);
     connected_ = true;
 #endif
@@ -122,7 +178,9 @@ void TcpClient::Connect(const IPEndPoint& remoteEP) {
     throw System::PlatformNotSupportedException("TcpClient is not supported on Emscripten.");
 #else
     wsaInit();
-    SockFd sock = ::socket(AF_INET, SOCK_STREAM, 0);
+    // Same rule as the hostname overload: a bound client connects the socket it already owns.
+    const bool bound = validFd(fd_) && !connected_;
+    SockFd     sock  = bound ? toSk(fd_) : ::socket(AF_INET, SOCK_STREAM, 0);
     if (sock == kBad)
         throw SocketException(toSocketError(lastErrorCode()), "TcpClient::Connect: socket() failed: " + netErr());
 
@@ -134,10 +192,10 @@ void TcpClient::Connect(const IPEndPoint& remoteEP) {
     if (::connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
-        closeSk(toFd(sock));
+        if (!bound) closeSk(toFd(sock));
         throw SocketException(toSocketError(code), "TcpClient::Connect: connect() failed: " + err);
     }
-    if (validFd(fd_)) closeSk(fd_);
+    if (!bound && validFd(fd_)) closeSk(fd_);
     fd_        = toFd(sock);
     connected_ = true;
 #endif

@@ -568,6 +568,71 @@ descriptor is not a leaked allocation.
 non-virtual member (`ThrowIfClosed`) and doc-comments; `sizeof(NetworkStream)` is unchanged.
 Graph unchanged at 41 / 92.
 
+### 17.3 #2137 — the port half was wider than the finding, and the endpoint half needed a state, not a member
+
+**The review measured one door; there were three.** §4.5 measured `UdpClient(int port)`. Measured
+here (`build-probe/2137_probe1_before.log`), `UdpClient::Connect(host, port)` and
+`TcpClient::Connect(host, port)` are the same defect with a **different failure mode**, and it is
+the more misleading one:
+
+| Door | before, negative port | before, port > 65535 |
+|---|---|---|
+| `UdpClient(int port)` | accepted, bound 65535 | accepted, bound 4464 |
+| `UdpClient::Connect(host, port)` | `SocketException` — *"DNS failed: Servname not supported"* | **accepted**, connected to the truncated port |
+| `TcpClient::Connect(host, port)` | `SocketException` — *"DNS failed: …"* | connected to the truncated port (*"Connection refused"*) |
+| `TcpListener(IPAddress, port)` | correct — `'port' must be ≥ 0` | correct — the **control**, via `IPEndPoint` |
+
+So one door **blamed name resolution for an argument the caller controls** and another said nothing
+at all. That is the same class of defect as #2135's diagnostic half, and it is why the repair is a
+single `ValidatePort` in `src/.../PortValidation.hpp` expressed against `IPEndPoint::MinPort`/
+`MaxPort` and raising `IPEndPoint`'s own exception shape: the bare-`int` doors and the endpoint
+doors now cannot drift apart, because there is one rule and it is the one the endpoint doors
+already used.
+
+**Placement is the repair, not the check.** `ValidatePort` runs **before** the socket is created.
+The plan called the non-leak "the hard part"; making it structural is easier than proving it after
+the fact, and mutation **N2** — the same check moved *after* `makeUdpSocket()` — fails exactly the
+`/proc/self/fd` test and nothing else. That is the ordering being measured rather than asserted.
+
+**The endpoint half needed a state, and the state already existed.** Storing the endpoint would
+have added a member to a public class. It is unnecessary: `fd_ >= 0 && !connected_` was
+**previously unreachable** — the default constructor leaves `fd_ == -1`, and the private fd-taking
+constructor sets `connected_` from the fd — so that combination is free to mean *bound, not yet
+connected*. `Connect()` then connects **the socket it already owns** instead of creating a second
+one, which is exactly how the endpoint used to be discarded. **`sizeof(TcpClient)` is unchanged and
+no member moves.**
+
+**Measured against the kernel, not against the object.** "The constructor stores it" is not the
+claim; "the connection uses it" is. The test asks for a specific local port and then asks
+`getsockname()` what the connection actually used: **40601 → 40998 before, 56579 → 56579 after.**
+
+**A failed `Connect()` on a bound client keeps the socket.** Closing it would either leave `fd_`
+dangling or silently discard the caller's endpoint on a retry — the very defect being repaired.
+Pinned in both directions: the object owns exactly one descriptor after the failure, and exactly
+that one is released at destruction.
+
+**One existing test changed, and why.** `TcpClientTests.EndPointConstructor_NoThrow` named port
+**8080**. A constructor that really binds makes that a machine-dependent test, so it now uses port
+0. The intent — *constructing from a local endpoint does not throw* — is unchanged, and the new
+suite covers what the endpoint now does.
+
+**+11 tests** (`SharpRuntimeTests_Net_Sockets` 105 → **116**). **Four mutations, each killed by its
+own test** (`build-probe/2137_mutate.sh`):
+
+| Mutation | Tests failed |
+|---|---|
+| N1 — remove `TcpClient::Connect`'s port check | **2**: the domain test and the accounting test |
+| N2 — move `UdpClient`'s check *after* the socket is created | **exactly 1**: the accounting test — the ordering claim |
+| N3 — restore the empty local-endpoint constructor | **4**: every endpoint test |
+| N4 — make `Connect(host, port)` ignore the bound socket | **exactly 1**: the hostname-path test, which is why both overloads are pinned separately |
+
+**ASan + UBSan + LSan clean** (`build-probe/2137_probe3_san.log`, zero diagnostics) with both
+repaired bodies compiled into the instrumented TU; **1,152 rejected constructions leak no
+descriptor**, with a deliberate-leak discrimination control. UBSan matters here specifically
+because `INT_MIN`/`INT_MAX` no longer reach `static_cast<uint16_t>`.
+
+**No layout, vtable or exception-specification change. Graph unchanged at 41 / 92.**
+
 ---
 
 ## 18. Historical gate-total reconciliation — the inherited 16,005 was right

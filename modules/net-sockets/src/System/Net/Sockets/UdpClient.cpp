@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Sockets/UdpClient.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "PortValidation.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
 #include "System/Net/Sockets/detail/ErrnoTranslation.hpp"
@@ -94,8 +95,13 @@ UdpClient::UdpClient() {
 }
 
 UdpClient::UdpClient(int port) {
+    // SR-AUD-267 / #2137. Before this check the port went straight to
+    // htons(static_cast<uint16_t>(port)), so 70000 bound port 4464 and -1 bound port 65535 -- the
+    // caller's argument was truncated rather than refused. The check comes BEFORE makeUdpSocket()
+    // deliberately: a rejected port must not leak the socket it would otherwise have created,
+    // which is not a claim to be careful about if the socket never exists.
+    detail::ValidatePort(static_cast<SharpRuntime::intcs>(port));
 #if defined(__EMSCRIPTEN__)
-    (void)port;
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
     fd_ = makeUdpSocket();
@@ -134,8 +140,13 @@ UdpClient::UdpClient(const Net::IPEndPoint& localEP) {
 UdpClient::~UdpClient() { Close(); }
 
 void UdpClient::Connect(const std::string& hostname, int port) {
+    // Measured before #2137: a NEGATIVE port here was rejected by getaddrinfo as "DNS failed:
+    // Servname not supported for ai_socktype" -- a SocketException blaming name resolution for an
+    // argument the caller controls -- while 65536 and 70000 were silently truncated and connected
+    // to the wrong port. Validating first makes both cases say the same, true thing.
+    detail::ValidatePort(static_cast<SharpRuntime::intcs>(port));
 #if defined(__EMSCRIPTEN__)
-    (void)hostname; (void)port;
+    (void)hostname;
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
     struct addrinfo hints{}, *res = nullptr;

@@ -51,7 +51,11 @@ TEST(TcpClientTests, DefaultConstructor_NoThrow) {
 }
 
 TEST(TcpClientTests, EndPointConstructor_NoThrow) {
-    IPEndPoint ep(IPAddress::Parse("127.0.0.1"), 8080);
+    // Port 0 rather than 8080 since #2137: this constructor now really binds, so naming a fixed
+    // port would make the test fail whenever anything else on the machine holds it. The intent --
+    // "constructing from a local endpoint does not throw" -- is unchanged, and
+    // ClientArgumentTests covers what the endpoint now does.
+    IPEndPoint ep(IPAddress::Parse("127.0.0.1"), 0);
     EXPECT_NO_THROW(TcpClient{ep});
 }
 

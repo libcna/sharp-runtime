@@ -30,7 +30,16 @@ namespace System::Net::Sockets {
         /** @brief Creates a UDP socket without binding to a specific port. */
         UdpClient();
 
-        /** @brief Creates a UDP socket bound to the given local port. */
+        /**
+         * @brief Creates a UDP socket bound to the given local port.
+         *
+         * @param port A port in `[IPEndPoint::MinPort, IPEndPoint::MaxPort]`.
+         * @throws System::ArgumentOutOfRangeException with `paramName == "port"` if @p port is
+         *         outside that range. Until #2137 the value was truncated instead
+         *         (`htons(static_cast<uint16_t>(port))`), so `70000` bound port `4464` and `-1`
+         *         bound port `65535`. The check runs **before** the socket is created, so a
+         *         rejected port cannot leak one.
+         */
         explicit UdpClient(intcs port);
 
         /** @brief Creates a UDP socket bound to the given local endpoint. */
@@ -45,7 +54,15 @@ namespace System::Net::Sockets {
         UdpClient(const UdpClient&) = delete;
         UdpClient& operator=(const UdpClient&) = delete;
 
-        /** @brief Sets the default remote host/port for subsequent Send calls. */
+        /**
+         * @brief Sets the default remote host/port for subsequent Send calls.
+         *
+         * @throws System::ArgumentOutOfRangeException with `paramName == "port"` if @p port is
+         *         outside `[IPEndPoint::MinPort, IPEndPoint::MaxPort]` (#2137). Previously a
+         *         negative port surfaced as a `SocketException` about **DNS**, because
+         *         `getaddrinfo` rejected the service string, and a port above 65535 was silently
+         *         truncated.
+         */
         void Connect(const std::string& hostname, intcs port);
 
         /** @brief Sets the default remote endpoint for subsequent Send calls. */

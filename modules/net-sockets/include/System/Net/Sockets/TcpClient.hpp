@@ -40,6 +40,24 @@ namespace System::Net::Sockets {
 
     public:
         TcpClient();
+
+        /**
+         * @brief Creates a client whose socket is **bound** to @p localEP.
+         *
+         * Until #2137 this constructor had an empty body and the caller's endpoint was silently
+         * discarded; a subsequent `Connect()` used an ephemeral local port. It now binds
+         * immediately, as real .NET does (`TCPClient.cs: _clientSocket.Bind(localEP)`), so an
+         * unavailable local endpoint fails here rather than surfacing later or not at all, and
+         * `Connect()` connects **this** socket instead of creating a second one.
+         *
+         * A client in this state reports `getConnectedProperty() == false` — it is bound, not
+         * connected — and `GetStream()` still refuses until a `Connect()` succeeds. If that
+         * `Connect()` fails, the bound socket stays owned by this object rather than being
+         * closed, so nothing leaks and the local endpoint is not silently dropped.
+         *
+         * @throws System::Net::Sockets::SocketException if the socket cannot be created or the
+         *         endpoint cannot be bound.
+         */
         explicit TcpClient(const IPEndPoint& localEP);
         ~TcpClient();
 
@@ -52,7 +70,15 @@ namespace System::Net::Sockets {
         TcpClient(const TcpClient&) = delete;
         TcpClient& operator=(const TcpClient&) = delete;
 
-        /** @brief Connects to a remote host by name and port. */
+        /**
+         * @brief Connects to a remote host by name and port.
+         *
+         * @throws System::ArgumentOutOfRangeException with `paramName == "port"` if @p port is
+         *         outside `[IPEndPoint::MinPort, IPEndPoint::MaxPort]` (#2137). Previously a
+         *         negative port surfaced as a `SocketException` about **DNS** and a port above
+         *         65535 was truncated by `htons`, producing a connection attempt against a
+         *         different port than the caller named.
+         */
         void Connect(const std::string& hostname, intcs port);
 
         /** @brief Connects to the specified remote endpoint. */
