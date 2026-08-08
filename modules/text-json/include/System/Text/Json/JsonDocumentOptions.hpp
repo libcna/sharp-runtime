@@ -14,6 +14,16 @@ namespace System::Text::Json {
      * @brief Provides the ability to define custom behavior when parsing JSON to create a JsonDocument.
      *
      * C++ counterpart of .NET System.Text.Json.JsonDocumentOptions.
+     *
+     * @note **Two of the four options are currently INERT** — SR-AUD-326, cause TJ-B, ticket
+     * **#2115**, awaiting a decision. `CommentHandling` and `MaxDepth` **are** applied;
+     * `AllowTrailingCommas` and `AllowDuplicateProperties` are validated, stored and never
+     * consulted, and `Validate()` says nothing about either, so the inertness is not discoverable
+     * from the API. The two are **not equally fixable**: the vendored parser offers no
+     * trailing-comma mode at all, while `AllowDuplicateProperties = false` is reachable through
+     * its parse callback — which is why #2115 is a design ticket rather than a repair. Pinned by
+     * `JsonGatedBehaviourPins.PIN2115TheTwoINERTOptionsAreInertAtBOTHDoorsIdentically`, at this
+     * door and at `JsonSerializer::Deserialize`, which forwards all four (#2116).
      */
     struct JsonDocumentOptions {
         /** @brief The default maximum nesting depth used when MaxDepth is left at 0. */

@@ -867,3 +867,96 @@ instrumented translation unit, and the live control is a heap-use-after-free.
 or exception-specification change** — `JsonDocument::checkMaxDepth` was a private static and moved
 to `detail::CheckMaxDepth`, which no consumer can observe. No new component edge; the graph stays
 at **41 modules / 91 edges**.
+
+### 20.15 #2120 — the pins the blocked tickets needed, and the doc-comments the review corrected
+
+A blocked ticket with no pin is a ticket whose premise can quietly stop being true. **+7 pins**
+(`SharpRuntimeTests_Text_Json` 286 → **293**), each naming the ticket that owns it and each
+asserting a defect that is knowingly still present:
+
+| Pin | Owns | What it asserts today |
+|---|---|---|
+| `PIN2118GetRawTextReRendersRatherThanReturningSourceText` | **#2118** | `1e+01`→`10.0`, `1.10`→`1.1`, `\u0061`→`a`, whitespace dropped; `ToString` never diverges from it |
+| `PIN2117TheDisposalFlagIsNotPropagatedToElementsHandedOutEarlier` | **#2117** | the two guards that **do** work, and the captured element that still reads **live** storage |
+| `PIN2115TheTwoINERTOptionsAreInertAtBOTHDoorsIdentically` | **#2115** | both flags inert at `JsonDocument::Parse` **and** at the serializer, and `Validate()` still silent |
+| `PINCCF019JsonNodeSParentIsABorrowedPointerAndDetachIsPublic` | **#1888/#1889/#1894** | the raw borrowed parent, and public `DetachParent` severing a link the container still lists |
+| `PINConvertersAndReferenceHandlingAreDECLARATIONONLYNotConsulted` | §12 | `JsonNumberHandling` is stored and **not** consulted; there is no converter dispatch at all |
+| `PINJsonSerializerOptionsDefaultIsONESharedObject` | §12 | one process-wide instance; concurrency was checked and found **absent**, not safe |
+| `PIN2119JsonNodeParseSurvives100000LevelsAndSoDoesItsTeardown` | **#2119** | parse *and* teardown complete; `JsonDocument::Parse` rejects the same text cleanly |
+
+Doc-comments were added at the three doors whose contracts the review corrected —
+`JsonElement::GetRawText` (#2118), `JsonDocumentOptions` (#2115) and `JsonDocument` (#2117) — so a
+reader of the header learns the divergence without finding this plan first.
+
+---
+
+## 21. Namespace reconciliation — `System::Text::Json` after #2113/#2114/#2116/#2120
+
+Measured at this tip, not inherited. **Every one of the seven open findings and every post-audit
+defect has exactly one disposition, and nothing is unaccounted for.**
+
+### 21.1 The seven audit findings
+
+| Finding | Sev | Disposition | Ticket | Pinned? |
+|---|---|---|---|---|
+| SR-AUD-324 | med | **blocked** — object layout | #2117 | **yes** |
+| SR-AUD-325 | med | **blocked** — architectural | #2118 | **yes** |
+| SR-AUD-326 | med | **needs_user** — design | #2115 | **yes** |
+| SR-AUD-327 | high | **blocked** — CCF-019, design-complete | #1888/#1889/#1894 | **yes** |
+| SR-AUD-328 | med | **remediated** | #2114 | n/a |
+| SR-AUD-329 | med | **remediated** | #2113 | n/a |
+| SR-AUD-330 | med | **remediated** | #2116 | n/a |
+
+**Three findings moved `confirmed → remediated` in this batch.** The audit index reads
+**142 remediated / 222 confirmed / 364 total**, of which 49 carry `confirmed (design-complete)`.
+**No `SR-AUD-*` identifier was created — numbering stays frozen at 364.**
+
+### 21.2 The post-audit defects
+
+| # | Defect | Disposition |
+|---|---|---|
+| #2111 | a `std::` exception escaping four parse doors | **done** |
+| #2112 | an embedded NUL truncating a document | **done** |
+| #2121 | **a fifth parse door #2112 never reached** | **done** (with #2116) |
+| #2119 | does #1893's deep-nesting residual survive #1897? | **deferred verification** — open, untouched |
+| #2120 | contracts documented, gated behaviours pinned | **done** |
+
+### 21.3 Is the compatible queue exhausted? **Yes.**
+
+Every ticket §15 classified as compatible is `done`: **#2111, #2112, #2113, #2114, #2116, #2120**,
+plus **#2121**, which §15 did not know about. Nothing compatible remains.
+
+§19's completion criteria are met in full: #2111–#2114, #2116 and #2120 are `done`; SR-AUD-328,
+329 and 330 are `remediated`; and SR-AUD-324/325/326/327 **each** carry a blocked or design ticket
+**and** a behaviour pin — the last of which §19 required and only #2120 delivered.
+
+**`modules/text-json` is complete except for gated and deferred work.**
+
+### 21.4 What remains, and why none of it is startable here
+
+| Work | State | Gate |
+|---|---|---|
+| #2115 | `needs_user` | the two inert options are **not equally implementable**; choosing between "honour it" and "reject it" is a guess about intent |
+| #2117 | `blocked` | **object layout** — `JsonElement` needs shared disposal state |
+| #2118 | `blocked` | **object layout + architecture** — `JsonDocument`/`JsonElement` must retain source spans |
+| #1888 / #1889 / #1894 | `blocked` | **public source break** and **object layout**; CCF-019, whose family decision (#2066) is unselected |
+| #2119 | deferred | needs `OwnedTreeLifetimeContractPlan.md`'s harness re-run **like-for-like**; this review deliberately did not claim #1893 fixed |
+
+**No blocked or deferred finding was marked remediated, and no gated behaviour was changed.**
+**CCF-012 and CCF-019 are NOT marked closed. No CCF was minted.**
+
+### 21.5 Premises this batch corrected
+
+1. **SR-AUD-329 is wider *and* narrower than filed** (§20.3) — the narrow `Encode` had **no**
+   validation at all, yet the two overloads can only genuinely *disagree* on one input class.
+2. **SR-AUD-328's survivor is undefined behaviour, not truncation** (§20.7) — and GCC's
+   `-fsanitize=undefined` does **not** include `float-cast-overflow`, so the first UBSan run was a
+   would-be false clean.
+3. **#2114's acceptance criterion was wrong** (§20.8) — it asked for `JsonElement`'s
+   `FormatException`, contradicting `JsonValue`'s own transcribed .NET note.
+4. **SR-AUD-330's real defect is two parsers, not a discarded argument** (§20.12).
+5. **§20.1 was wrong by one door** (§20.11) — `Deserialize<T>` never reached the NUL guard. Filed
+   as #2121 and corrected additively rather than edited away.
+6. **`JsonEncodedText`'s control-character boundary is measurable** (§20.4) — the module's own
+   parser fixes it at exactly RFC 8259's set, with `0x09`/`0x0A`/`0x0D` and `0x7F` outside it.
+

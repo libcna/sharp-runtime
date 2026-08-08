@@ -33,6 +33,7 @@
 #include "System/Text/Json/JsonSerializer.hpp"
 #include "System/Text/Json/JsonSerializerOptions.hpp"
 #include "System/Text/Json/Nodes/JsonNode.hpp"
+#include "System/Text/Json/Nodes/JsonObject.hpp"
 #include "System/Text/Json/Nodes/JsonValue.hpp"
 #include "System/Text/Json/Utf8JsonWriter.hpp"
 
@@ -748,4 +749,133 @@ TEST(JsonEmbeddedNulTests, THEDELIBERATEEXCEPTIONJsonNodeParseStillHasNoDepthBou
     for (int i = 0; i < 200; ++i) deep += "]";
     EXPECT_NO_THROW((void)JsonNode::Parse(deep)) << "JsonNode::Parse has no depth bound, by design";
     EXPECT_THROW((void)JsonDocument::Parse(deep), JsonException) << "JsonDocument::Parse does";
+}
+
+// ===========================================================================
+// #2120 — the gated-behaviour pins: everything the review MEASURED and deliberately
+// did NOT change, so the blocked and deferred tickets have a live baseline
+// ===========================================================================
+//
+// A blocked ticket with no pin is a ticket whose premise can quietly stop being true.
+// Each test below asserts TODAY's behaviour of a defect that is knowingly still present, and
+// names the ticket that owns it. None of them endorses the behaviour; each of them fails the
+// day it changes, which is exactly when the owning ticket needs re-reading.
+
+TEST(JsonGatedBehaviourPins, PIN2118GetRawTextReRendersRatherThanReturningSourceText) {
+    // SR-AUD-325 / cause TJ-D, blocked: GetRawText calls dump() on the parsed tree, so it
+    // re-renders. Every class the plan measured is pinned here with its CURRENT output.
+    struct Case { const char* source; const char* rendered; };
+    const Case cases[] = {
+        {"{\"a\":1e+01}",   "{\"a\":10.0}"},      // exponent form lost
+        {"{\"a\":1.10}",    "{\"a\":1.1}"},       // trailing zero lost
+        {"{\"a\":\"\\u0061\"}", "{\"a\":\"a\"}"}, // escape resolved
+        {"{ \"a\" : 1 }",   "{\"a\":1}"},         // insignificant whitespace lost
+    };
+    for (const auto& c : cases) {
+        auto doc = JsonDocument::Parse(c.source);
+        EXPECT_EQ(doc->getRootElementProperty().GetRawText(), c.rendered)
+            << "#2118 owns this; if it changed, the ticket's premise did too. Source: " << c.source;
+        // ToString is the same door and must not diverge from it.
+        EXPECT_EQ(doc->getRootElementProperty().ToString(),
+                  doc->getRootElementProperty().GetRawText());
+    }
+    // What DOES round-trip: a document already in the renderer's canonical form.
+    EXPECT_EQ(JsonDocument::Parse("{\"a\":1}")->getRootElementProperty().GetRawText(), "{\"a\":1}");
+}
+
+TEST(JsonGatedBehaviourPins, PIN2117TheDisposalFlagIsNotPropagatedToElementsHandedOutEarlier) {
+    // SR-AUD-324 / cause TJ-H, blocked on an OBJECT LAYOUT change. The review corrected the
+    // finding's framing: this is NOT a use-after-free. JsonElement holds an OWNING aliasing
+    // shared_ptr, so a captured element keeps the tree alive and reads LIVE storage. Both
+    // halves are pinned -- the guard that works and the one that does not.
+    auto doc = JsonDocument::Parse("{\"a\":10,\"b\":[1,2]}");
+    JsonElement scalar = doc->getRootElementProperty().GetProperty("a");
+    JsonElement array = doc->getRootElementProperty().GetProperty("b");
+    doc->Dispose();
+
+    EXPECT_THROW((void)doc->getRootElementProperty(), System::ObjectDisposedException)
+        << "the door the finding's own file owns is ALREADY guarded";
+    EXPECT_NO_THROW(doc->Dispose()) << "double Dispose is already safe";
+
+    EXPECT_EQ(scalar.GetInt32(), 10) << "#2117: reads live storage, not dangling memory";
+    EXPECT_EQ(array[1].GetInt32(), 2) << "#2117: and so does a child derived after disposal";
+    EXPECT_EQ(array.GetArrayLength(), 2);
+}
+
+TEST(JsonGatedBehaviourPins, PIN2115TheTwoINERTOptionsAreInertAtBOTHDoorsIdentically) {
+    // Already pinned at JsonDocument::Parse by #2111/#2112; #2116 made the serializer forward
+    // them, so the pin must now cover both doors or the two could drift again.
+    JsonDocumentOptions trailingDoc;   trailingDoc.AllowTrailingCommas = true;
+    JsonSerializerOptions trailingSer; trailingSer.setAllowTrailingCommasProperty(true);
+    EXPECT_THROW((void)JsonDocument::Parse("[1,]", trailingDoc), JsonException);
+    EXPECT_THROW((void)JsonSerializer::Deserialize("[1,]", trailingSer), JsonException);
+
+    JsonDocumentOptions noDupDoc;   noDupDoc.AllowDuplicateProperties = false;
+    JsonSerializerOptions noDupSer; noDupSer.setAllowDuplicatePropertiesProperty(false);
+    EXPECT_EQ(JsonDocument::Parse("{\"x\":1,\"x\":2}", noDupDoc)
+                  ->getRootElementProperty().GetProperty("x").GetInt32(), 2);
+    EXPECT_EQ(JsonSerializer::Deserialize("{\"x\":1,\"x\":2}", noDupSer)
+                  ->getRootElementProperty().GetProperty("x").GetInt32(), 2);
+    // And Validate() still says nothing about either flag -- #2120 §7.3, folded into #2115.
+    JsonDocumentOptions both;
+    both.AllowTrailingCommas = true;
+    both.AllowDuplicateProperties = false;
+    EXPECT_NO_THROW(both.Validate()) << "#2115: the inertness is not discoverable from the API";
+}
+
+TEST(JsonGatedBehaviourPins, PINCCF019JsonNodeSParentIsABorrowedPointerAndDetachIsPublic) {
+    // SR-AUD-327 / cause TJ-C, CCF-019's first-named site. #1888/#1889/#1894 stay blocked on a
+    // public source break and an object-layout change. This review implements nothing there;
+    // the pin records what is true today so the blocked tickets keep a live baseline.
+    auto object = std::make_shared<Nodes::JsonObject>();
+    auto child = Nodes::JsonValue::Create(intcs{1});
+    object->Add("a", child);
+    EXPECT_EQ(child->getParentProperty(), object.get()) << "a raw, borrowed parent pointer";
+    EXPECT_EQ((*object)["a"]->GetValueKind(), JsonValueKind::Number);
+    // DetachParent is public -- the source break #1888 is blocked on.
+    child->DetachParent();
+    EXPECT_EQ(child->getParentProperty(), nullptr)
+        << "#1888: a caller can sever the link the container believes it owns";
+    EXPECT_TRUE(object->ContainsKey("a")) << "and the container still lists it";
+}
+
+TEST(JsonGatedBehaviourPins, PINConvertersAndReferenceHandlingAreDECLARATIONONLYNotConsulted) {
+    // Plan §12. The batch's converter-recursion and null-callback checklist has NO SUBJECT
+    // here, and this pin is what stops a future reader assuming it was checked and found safe.
+    // JsonSerializerOptions exposes no converter collection at all, so a converter cannot be
+    // registered, let alone consulted.
+    JsonSerializerOptions opts;
+    EXPECT_EQ(JsonSerializer::Deserialize<int>("7", opts), 7)
+        << "deserialization is nlohmann's ADL customization points, not converter dispatch";
+    // The two policy knobs that DO exist are stored and returned unchanged, and nothing reads
+    // them -- the same cause TJ-B as #2115, at type scale rather than option scale.
+    opts.setNumberHandlingProperty(Serialization::JsonNumberHandling::AllowReadingFromString);
+    EXPECT_EQ(opts.getNumberHandlingProperty(), Serialization::JsonNumberHandling::AllowReadingFromString);
+    EXPECT_THROW((void)JsonSerializer::Deserialize<int>("\"7\"", opts), JsonException)
+        << "AllowReadingFromString is stored and NOT consulted -- recorded, not ticketed";
+}
+
+TEST(JsonGatedBehaviourPins, PINJsonSerializerOptionsDefaultIsONESharedObject) {
+    // Plan §12: nothing in this module is thread-safe and Default() hands out a shared object.
+    // Recorded so a future reader does not assume concurrency was checked and found safe --
+    // it was checked and found ABSENT, which is different.
+    EXPECT_EQ(&JsonSerializerOptions::Default(), &JsonSerializerOptions::Default())
+        << "one process-wide instance, by reference";
+}
+
+TEST(JsonGatedBehaviourPins, PIN2119JsonNodeParseSurvives100000LevelsAndSoDoesItsTeardown) {
+    // #2119 is a DEFERRED VERIFICATION against OwnedTreeLifetimeContractPlan.md's residual
+    // table, which this review deliberately did not claim to have refuted. What IS measured
+    // and pinned: at this tip both the parse and the teardown complete.
+    std::string deep;
+    deep.reserve(200001);
+    for (int i = 0; i < 100000; ++i) deep += "[";
+    deep += "1";
+    for (int i = 0; i < 100000; ++i) deep += "]";
+    EXPECT_NO_THROW({
+        auto node = JsonNode::Parse(deep);
+        EXPECT_NE(node, nullptr);
+    }) << "#1897 made this iterative; #2119 owns the like-for-like re-run";
+    // JsonDocument::Parse rejects the same text cleanly at its depth bound -- no overflow.
+    EXPECT_THROW((void)JsonDocument::Parse(deep), JsonException);
 }

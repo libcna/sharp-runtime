@@ -98,6 +98,18 @@ namespace System::Text::Json {
         }
 
         /** @return The raw JSON text of this element. */
+        /**
+         * @return This element re-rendered as JSON text.
+         *
+         * @note **This is NOT the source text, and cannot be** — SR-AUD-325, cause TJ-D,
+         * ticket **#2118**, blocked. The element holds a *parsed* `nlohmann` tree, not a span into
+         * the original document, so `dump()` re-renders from the parsed value. Measured and pinned
+         * by `JsonGatedBehaviourPins.PIN2118GetRawTextReRendersRatherThanReturningSourceText`:
+         * `1e+01` returns as `10.0`, `1.10` as `1.1`, `"\u0061"` as `"a"`, and insignificant
+         * whitespace is dropped. Preserving the source needs retained spans, which is an
+         * **object-layout change to `JsonDocument` and `JsonElement`** — hence blocked, not
+         * deferred.
+         */
         [[nodiscard]] std::string GetRawText() const { return node_ ? node_->dump() : std::string(); }
 
         /**
