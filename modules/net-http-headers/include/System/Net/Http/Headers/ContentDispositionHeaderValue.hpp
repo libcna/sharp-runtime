@@ -86,7 +86,28 @@ namespace System::Net::Http::Headers {
          */
         void setFileNameProperty(const std::string& value);
 
-        /** @return The RFC 5987-decoded "filename*" parameter, or empty if not present/undecodable. */
+        /**
+         * @return The RFC 5987-decoded "filename*" parameter, or empty if it is not present or
+         * not decodable.
+         *
+         * @note **The charset label is honoured, and an unsupported one makes the parameter
+         * undecodable.** Ticket #2127 (SR-AUD-323): the label used to be discarded, so
+         * `filename*=iso-8859-1''foo-%E4.html` returned ten bytes with a raw `0xE4` in a string
+         * the rest of this runtime reads as UTF-8, and `filename*=bogus''x` was accepted as
+         * though the label meant nothing. `UTF-8` and `ISO-8859-1` (case-insensitively) are
+         * supported, per RFC 5987 §3.2.1; an ISO-8859-1 octet is transcoded to UTF-8; anything
+         * else, including an empty label, is rejected. **Rejection is this port's choice**, taken
+         * because the RFC requires it and because it matches the decoder's existing failure mode;
+         * .NET's exact behaviour could not be established from repository evidence.
+         *
+         * @note **The decoded value never contains CR, LF or NUL.** Ticket #2129:
+         * `filename*=UTF-8''a%0D%0Ab` used to decode to a string carrying a raw CR/LF. `ToString()`
+         * re-encodes it, so it did not inject on serialization — but a consumer that puts this
+         * value into another header, a log line, a file name or a `Content-Disposition` it builds
+         * itself does. The scope is exactly those three characters: a decoded TAB or ESC is not a
+         * framing hazard and is still returned. A truncated percent-escape (`a%`, `a%C`) is also
+         * rejected rather than kept as literal text.
+         */
         [[nodiscard]] std::string getFileNameStarProperty() const;
         /** Sets (or removes, if empty) the "filename*" parameter, RFC 5987-encoded as UTF-8. */
         void setFileNameStarProperty(const std::string& value);

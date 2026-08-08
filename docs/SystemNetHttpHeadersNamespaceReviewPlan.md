@@ -760,3 +760,46 @@ changes a `bool`, not a throw.
 RFC 9110 starts parsing. **No signature, layout, vtable or exception-specification change. Graph
 unchanged at 41 / 92.**
 
+### 18.5 #2127 and #2129 — one decoder, two defects, and one narrowing neither ticket named
+
+Both live in `ContentDispositionHeaderValue`'s `tryDecode5987`, so they landed together while
+staying separate tickets in the records.
+
+**#2127 (SR-AUD-323, cause NH-J).** The charset label was parsed only far enough to locate the
+delimiters and then discarded. `filename*=iso-8859-1''foo-%E4.html` produced **ten** bytes with a
+raw `0xE4` — not text, in a `std::string` the rest of this runtime reads as UTF-8 — and
+`filename*=bogus''x` was accepted. `UTF-8` and `ISO-8859-1` are now honoured case-insensitively per
+RFC 5987 §3.2.1, an ISO-8859-1 octet is transcoded (11 bytes, `C3 A4`), and anything else —
+**including an empty label** — is rejected.
+
+**The §10 evidence gap did not have to split the ticket.** Whether .NET rejects an unsupported
+label or drops it silently is undecidable here with `/rv` absent, so the plan scoped a possible
+split. It was not needed: rejection is what RFC 5987 §3.2.1 requires of a recipient, and it is the
+failure mode this decoder already used for every other malformed input — the getter reports the
+parameter absent. Recorded as **this port's choice** in the property's doc-comment rather than as a
+claim about .NET.
+
+**A third defect neither the finding nor the review names.** The escape bound was
+`i + 2 < encoded.size()`, so a **truncated** escape at the end of the value (`a%`, `a%C`) fell
+through to the literal branch and was kept as text — silently turning malformed input into a
+plausible-looking file name, at a door whose whole job is producing file names. It is rejected, for
+the same reason the decoder already rejected a non-hex escape. This is a narrowing, and it is
+recorded here because it is not in #2127's acceptance criteria.
+
+**#2129 (post-audit, cause NH-K).** `filename*=UTF-8''a%0D%0Ab` decoded to a raw CR/LF handed to
+the caller. It uses the family's predicate because the same three characters are the hazard —
+**not** because it is a CCF-021 member. §8.3's exclusion stands and is now pinned from both sides:
+the terminator case is rejected, and a decoded **TAB or ESC is still returned**, so the narrowing
+cannot creep from "the three characters that terminate a field" to "control characters".
+
+**Mutations, four, all discriminating.** #2127 under-repair (discard the label again): **2 tests
+fail**. #2127 over-repair (accept `UTF-8` only): **1 test fails** — the ISO-8859-1 transcoding.
+#2129 under-repair (drop the inward check): **1 test fails**. #2129 over-repair (reject every C0
+control): **1 test fails** — and it is the scope control, not the defect test, which is the point.
+
+**+8 tests** (`SharpRuntimeTests_Net_Http_Headers` 408 → **416**). ASan + UBSan + LSan clean over
+200,040 operations in the batch probe, whose corpus already walks every truncation prefix of a rich
+`Content-Disposition` value and every truncated percent-escape.
+
+**No signature, layout, vtable or exception-specification change. Graph unchanged at 41 / 92.**
+

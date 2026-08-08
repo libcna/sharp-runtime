@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Http/Headers/ContentDispositionHeaderValue.hpp"
 #include "HeaderFieldSplitter.hpp"
+#include "System/Net/detail/ProtocolFieldValidation.hpp"
 #include "HttpDateParser.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -108,6 +109,40 @@ namespace System::Net::Http::Headers {
             return System::Net::Http::Headers::detail::TryParseHttpDate(s, result);
         }
 
+        // Ticket #2127 (SR-AUD-323, cause NH-J, docs/SystemNetHttpHeadersNamespaceReviewPlan.md
+        // §4.5). RFC 5987 §3.2.1 gives the value the form
+        //
+        //     charset "'" [ language ] "'" value-chars
+        //
+        // and the charset label is normative: it says how the percent-decoded octets are to be
+        // read. Before #2127 the label was parsed only far enough to find the delimiters and then
+        // **discarded**, so `filename*=iso-8859-1''foo-%E4.html` produced a 10-byte string with a
+        // raw 0xE4 -- not text in this port's UTF-8 `std::string` world, just a stray byte -- and
+        // `filename*=bogus''x` was accepted as though the label meant nothing.
+        //
+        // RFC 5987 §3.2.1 names exactly two charsets a recipient must handle, `UTF-8` and
+        // `ISO-8859-1`, and requires it to reject a value whose charset it does not support.
+        // That is what this now does. Anything else, including an EMPTY label, is rejected.
+        //
+        // **Recorded as this port's choice.** `/rv/tmp/runtime/` is absent, so whether .NET
+        // rejects the parameter or drops it silently could not be established from repository
+        // evidence (plan §10). Rejection is chosen because it is what the RFC requires and because
+        // it matches the failure mode this decoder already had for malformed input: the getter
+        // reports the parameter as absent rather than handing back text of unknown encoding.
+        bool isSupportedCharset(const std::string& label, bool& isLatin1) {
+            auto equalsIgnoreCase = [](const std::string& a, const char* b) {
+                size_t i = 0;
+                for (; i < a.size() && b[i] != '\0'; ++i) {
+                    if (std::tolower(static_cast<unsigned char>(a[i]))
+                        != std::tolower(static_cast<unsigned char>(b[i]))) return false;
+                }
+                return i == a.size() && b[i] == '\0';
+            };
+            if (equalsIgnoreCase(label, "utf-8")) { isLatin1 = false; return true; }
+            if (equalsIgnoreCase(label, "iso-8859-1")) { isLatin1 = true; return true; }
+            return false;
+        }
+
         bool tryDecode5987(const std::string& value, std::string& result) {
             size_t firstQuote = value.find('\'');
             if (firstQuote == std::string::npos) return false;
@@ -123,10 +158,21 @@ namespace System::Net::Http::Headers {
             // literal apostrophe in the value (isRfc5987AttrChar doesn't allow a raw `'`).
             if (value.find('\'', secondQuote + 1) != std::string::npos) return false;
 
+            // #2127: the charset label is normative, not decoration.
+            bool isLatin1 = false;
+            if (!isSupportedCharset(value.substr(0, firstQuote), isLatin1)) return false;
+
             std::string encoded = value.substr(secondQuote + 1);
             std::string decoded;
             for (size_t i = 0; i < encoded.size(); ++i) {
-                if (encoded[i] == '%' && i + 2 < encoded.size()) {
+                if (encoded[i] == '%') {
+                    // #2127, and a defect the finding does not name: the bound used to be
+                    // `i + 2 < encoded.size()`, so a TRUNCATED escape at the end of the value
+                    // ("a%C", "a%") fell through to the else branch and was kept as literal text
+                    // -- silently turning malformed input into a plausible-looking file name.
+                    // A truncated escape is malformed, and this decoder already rejected a
+                    // non-hex escape, so it is rejected for the same reason.
+                    if (i + 2 >= encoded.size()) return false;
                     auto hexVal = [](char c) -> int {
                         if (c >= '0' && c <= '9') return c - '0';
                         if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -136,12 +182,44 @@ namespace System::Net::Http::Headers {
                     int hi = hexVal(encoded[i + 1]);
                     int lo = hexVal(encoded[i + 2]);
                     if (hi < 0 || lo < 0) return false;
-                    decoded += static_cast<char>((hi << 4) | lo);
+                    const unsigned char octet = static_cast<unsigned char>((hi << 4) | lo);
+                    if (isLatin1 && octet >= 0x80) {
+                        // ISO-8859-1 octet 0x80..0xFF IS the code point, so it becomes two UTF-8
+                        // bytes here. Without this, `iso-8859-1''foo-%E4.html` produced a raw 0xE4
+                        // in a std::string that the rest of this runtime reads as UTF-8.
+                        decoded += static_cast<char>(0xC0 | (octet >> 6));
+                        decoded += static_cast<char>(0x80 | (octet & 0x3F));
+                    } else {
+                        decoded += static_cast<char>(octet);
+                    }
                     i += 2;
+                } else if (isLatin1 && static_cast<unsigned char>(encoded[i]) >= 0x80) {
+                    // A literal high byte is not legal in an RFC 5987 value (attr-char is ASCII),
+                    // but if one arrives under an ISO-8859-1 label it is a Latin-1 code point by
+                    // the same rule as the percent-encoded case, and must not be copied raw into
+                    // a UTF-8 string.
+                    const unsigned char octet = static_cast<unsigned char>(encoded[i]);
+                    decoded += static_cast<char>(0xC0 | (octet >> 6));
+                    decoded += static_cast<char>(0x80 | (octet & 0x3F));
                 } else {
                     decoded += encoded[i];
                 }
             }
+            // Ticket #2129 (post-audit, no SR-AUD identifier, cause NH-K, plan §4.5 last row and
+            // §8.3). `filename*=UTF-8''a%0D%0Ab` decoded to a string containing a RAW CR/LF and
+            // handed it to the caller. `ToString()` re-encodes it percent-escaped, so it does not
+            // inject on serialization -- but any consumer that puts this value into another
+            // header, a log line, a file name, or a `Content-Disposition` it builds itself does.
+            //
+            // **This is deliberately NOT a CCF-021 member**, and it is the family's closest call.
+            // The family's guarantee is "reject the field terminator at the door before any byte
+            // reaches the wire"; here the terminator travels INWARD, to the caller, and never
+            // appears in serialized text. Different guarantee, different cause. It uses the same
+            // predicate because the same three characters are the hazard, not because it is the
+            // same family -- and the scope stays exactly those three: a decoded TAB or ESC is not
+            // a framing hazard and is still returned (pinned).
+            if (System::Net::detail::ContainsProtocolFieldTerminator(decoded)) return false;
+
             result = decoded;
             return true;
         }
