@@ -140,7 +140,7 @@ All five reproduced against `577e836`.
 | SR-AUD-319 | **high** | **confirmed and wider** — §4.1 | compatible | **#2124** |
 | SR-AUD-320 | med | **confirmed, premise sharpened** — §4.2 | compatible | **#2126** |
 | SR-AUD-321 | med | **confirmed exactly as filed** — §4.3 | compatible | **#2125** |
-| SR-AUD-322 | **high** | **confirmed, and half of it is already correct** — §4.4 | compatible | **#2123** |
+| SR-AUD-322 | **high** | **confirmed, and half of it is already correct** — §4.4, §18.1 | **remediated (#2123)** | **#2123** |
 | SR-AUD-323 | med | **confirmed and wider** — §4.5 | split: compatible + deferred | **#2127**, **#2129** |
 
 ### 4.1 SR-AUD-319 — confirmed, and **two doors the finding does not name**
@@ -567,3 +567,30 @@ behaviour pin.
 
 Appended as tickets land, so the difference between what this review predicted and what
 implementation measured stays visible.
+
+### 18.1 #2123 — the prediction held exactly, and one mutation was needed to prove the *restraint*
+
+§4.4 predicted the repair would be "route the name through `Add`'s validator, preserve the
+unvalidated value". Implementation confirmed it without amendment: two call sites, one predicate
+already in the same file, **no new component edge** (the predicate used is this module's own
+`isToken`, not the `Net` component's — that edge is #2124's problem, not this ticket's).
+
+**The interesting mutation is Q2, not Q1.** Q1 restores the defect and fails 3 tests — expected. Q2
+does the opposite: it *over*-repairs, validating the **value** as well, and fails **exactly one**
+test, `THECONTRACTTheVALUEIsStillDeliberatelyUnvalidated`. Without that test the over-repair would
+have looked like a stricter, better fix while silently erasing the only reason the door exists. A
+narrowing ticket needs a test that fires when the narrowing goes too far, not only one that fires
+when it does not go far enough.
+
+**Coverage:** every invalid class the probe measured, plus all seventeen RFC 9110 separators, plus
+the collection asserted **unchanged** after each rejection — not merely that `false` was returned.
+
+**+7 tests** (`SharpRuntimeTests_Net_Http_Headers` 373 → **380**). **ASan + UBSan + LSan clean over
+53,256 operations** — 5,969 accepted, 47,287 rejected (`build-probe/2123_probe1_san.log`) — across
+every byte value in both name and value position, every truncation prefix of a rich
+`Content-Disposition` value, unterminated quotes, trailing backslashes, truncated percent-escapes,
+and 8,000 fuzzed name/value pairs, with the repaired body compiled into the instrumented TU and a
+live heap-use-after-free control.
+
+**No signature, layout, vtable or exception-specification change. Graph unchanged at 41 / 91.**
+

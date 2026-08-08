@@ -54,14 +54,30 @@ namespace System::Net::Http::Headers {
         for (const auto& v : values) Add(name, v);
     }
 
+    // Ticket #2123 (SR-AUD-322, cause NH-I, docs/SystemNetHttpHeadersNamespaceReviewPlan.md §4.4).
+    // "Without validation" governs the VALUE, never the NAME. Before #2123 these two overloads
+    // rejected only an empty name, so `TryAddWithoutValidation("X-Bad\r\nInjected: yes", "v")`
+    // returned **true** and `ToString()` emitted
+    //
+    //     X-Bad\r\nInjected: yes: v\r\n
+    //
+    // -- two header fields where the caller supplied one, through a bool-returning API that
+    // reported success. A NUL-bearing name and a name containing a space were accepted too.
+    //
+    // The repair target already existed in this file: `Add` above validates the name with
+    // `isToken` and has done so all along. Both doors now share that one predicate, so they
+    // cannot drift apart again. The VALUE deliberately stays unvalidated here -- that asymmetry
+    // IS the contract, and it is what separates this door from `Add`.
     bool HttpHeaders::TryAddWithoutValidation(const std::string& name, const std::string& value) {
-        if (name.empty()) return false;
+        if (!isToken(name)) return false;
         headers_.Add(name, value);
         return true;
     }
 
     bool HttpHeaders::TryAddWithoutValidation(const std::string& name, const std::vector<std::string>& values) {
-        if (name.empty()) return false;
+        // The name is checked once, before anything is stored, so a rejected call leaves the
+        // collection completely unchanged rather than partially populated.
+        if (!isToken(name)) return false;
         for (const auto& v : values) headers_.Add(name, v);
         return true;
     }

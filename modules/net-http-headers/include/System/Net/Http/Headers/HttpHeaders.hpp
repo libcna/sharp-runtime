@@ -58,9 +58,27 @@ namespace System::Net::Http::Headers {
         /** @brief Adds each of @p values under @p name (see the single-value Add() for validation). */
         void Add(const std::string& name, const std::vector<std::string>& values);
 
-        /** @brief Adds @p value under @p name without any validation. Always succeeds. */
+        /**
+         * @brief Adds @p value under @p name, bypassing validation of the **value only**.
+         * @return false if @p name is not a valid HTTP token — including an empty name, or one
+         * containing CR, LF, NUL, a space, or any RFC 9110 separator. The collection is left
+         * completely unchanged when this returns false.
+         *
+         * @note **"Without validation" governs the value, never the name.** Ticket #2123
+         * (SR-AUD-322): this used to reject only an empty name, so
+         * `TryAddWithoutValidation("X-Bad\r\nInjected: yes", "v")` returned **true** and
+         * `ToString()` emitted two header fields where the caller supplied one. The name is now
+         * checked with the same `isToken` predicate `Add` has always used. The **value** is still
+         * deliberately unvalidated — a CR-bearing *value* is still accepted through this door and
+         * rejected by `Add`, which is the entire difference between them.
+         */
         bool TryAddWithoutValidation(const std::string& name, const std::string& value);
-        /** @brief Adds each of @p values under @p name without any validation. Always succeeds. */
+        /**
+         * @brief Adds each of @p values under @p name, bypassing validation of the values only.
+         * @return false if @p name is not a valid HTTP token; see the single-value overload. The
+         * name is checked once **before** anything is stored, so a rejected call cannot leave the
+         * collection partially populated.
+         */
         bool TryAddWithoutValidation(const std::string& name, const std::vector<std::string>& values);
 
         /**
