@@ -490,7 +490,7 @@ over-repairs with `ThrowIfNegativeOrZero`, so `count == 0` is rejected too, and 
 one** test — the valid-counts control. M3, a semantics-preserving `uintcs` round-trip on the stored
 value, fails **none**.
 
-**+7 tests** (`SharpRuntimeTests_Net_Sockets` 84 → **91**; the module's one pre-existing failure,
+**+4 tests** (`SharpRuntimeTests_Net_Sockets` 88 → **92**; the module's one pre-existing failure,
 `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`, is unrelated — `/proc/net/if_inet6`
 is absent in this environment). **ASan + UBSan + LSan clean over 1,458 constructions**
 (`build-probe/2135_probe2_san.log`) covering `INT_MIN` and `INT_MAX` at both parameters across
@@ -498,3 +498,57 @@ buffer sizes 0–5 and both overloads, with a live heap-use-after-free control. 
 instrument here specifically because `INT_MIN` no longer reaches an unsigned cast.
 
 **No signature, layout, vtable or exception-specification change. Graph unchanged at 41 / 92.**
+
+**Correction, made by the following batch and recorded here rather than silently.** The paragraph
+above originally read *"+7 tests (84 → 91)"*. That is wrong in all three figures, and it is the
+sole cause of the inherited **16,005 vs 16,002** gate discrepancy — see §18. The measured
+registration delta of commit `5087c2c` is **+4** (`SocketsSupportTests.cpp` 33 → 37 `TEST` macros;
+`SocketTests.cpp` 17 and `SocketsTests.cpp` 38 unchanged), taking the executable **88 → 92**. The
+four are `EveryNegativeCountIsRejected`, `THECONTROLTheValidCountsAreUnchanged`,
+`ARejectionNamesTheCallersValueNotItsUnsignedReinterpretation` and
+`THEPINTheFilePathOverloadWasAlreadyCorrect`. Nothing about the repair itself changes; only the
+count was mis-transcribed.
+
+---
+
+## 18. Historical gate-total reconciliation — the inherited 16,005 was right
+
+The batch that produced §17.1 reported the gate as **16,052** and simultaneously stated that its own
+additions were **+50**, which implies a prior total of **16,002** where the inherited handoff said
+**16,005**. That three-test difference is resolved here, by measurement, and the **inherited
+number was the correct one**.
+
+**Method.** Test *registration* is a property of the sources, so the reconciliation does not need a
+rebuild at every commit — only a rebuild-free enumeration at the tip plus per-commit registration
+deltas from git. Both were done:
+
+1. **Tip, measured.** All **37** executables enumerated with `--gtest_list_tests`: **16,052**
+   registered tests. The two binaries in question were verified newer than their sources
+   (`SharpRuntimeTests_Net_Sockets` 07:36:59 vs `SocketsSupportTests.cpp` 07:35:14), so the
+   enumeration is of the current tree, not a stale build.
+2. **Everything that changed since the previous handoff `a3cfa69`.** `git diff --name-only`
+   lists exactly **six** test files: five **new** `net-http-headers` files (7 + 7 + 7 + 14 + 8 =
+   **43** `TEST` macros) and `net-sockets`' `SocketsSupportTests.cpp` (**33 → 37**, **+4**). No test
+   file elsewhere changed, and **no test was deleted anywhere** (`git show <c> | grep -c '^-TEST'`
+   is 0 for every commit in the range).
+3. **Therefore `a3cfa69` = 16,052 − 43 − 4 = 16,005**, which is exactly the inherited figure.
+4. **The chain before it also holds.** The handoff at `a3cfa69` derived 16,005 as 15,967 + 38 =
+   9 + 7 + 8 + 7 + 7; the measured `^+TEST` counts of `7f19852`, `149f064`, `d193768`, `577e836`
+   and `c4a25e1` are **9, 7, 8, 7, 7** — the stated decomposition is correct commit by commit.
+5. **The `net-sockets` executable has been 88 since 2026-07-31** (`dd09de1`: 33 + 17 + 38) and 92
+   since `5087c2c`. **No commit in this repository's history ever had it at 84 or 91**, so the
+   figures in §17.1 were not a stale reading of some earlier state either.
+
+**Cause: an arithmetic/transcription error in one report, not a change in the tests.** The
+"+7 (84 → 91)" in §17.1 propagated into the handoff's "+50", and 50 − 47 = **3** is the whole
+discrepancy. No test was added or removed by any intermediate commit beyond the 47 above, no suite
+lost tests, no executable is stale, and test discovery is not environment-dependent here.
+
+**Corrected historical baseline, for future delta arithmetic:**
+
+| Commit | Gate total | How established |
+|---|---:|---|
+| `a3cfa69` (previous handoff) | **16,005** | inherited **and** re-derived as 16,052 − 47 |
+| `f013fe1` (this tip, before this batch) | **16,052** | measured, 37 executables |
+
+The figure to distrust is neither 16,005 nor 16,052 — it is the **"+50"** in between, now **+47**.
