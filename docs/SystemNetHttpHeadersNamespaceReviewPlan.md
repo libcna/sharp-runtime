@@ -672,3 +672,48 @@ instrumentation answered. **TSan has no subject** and **`/proc/self/fd` is not a
 
 **No signature, layout, vtable or exception-specification change. Graph 41 / 91 → 41 / 92.**
 
+### 18.3 #2125 — the copies were **seven**, and the interesting question was where to stop
+
+§4.3 counted **six** copies of the `sscanf` HTTP-date parser. There are **seven**: it did not name
+`WarningHeaderValue`'s date field, which extracts the date from inside a quoted string and hands it
+to its own byte-identical copy. All seven are now one body,
+`modules/net-http-headers/src/System/Net/Http/Headers/HttpDateParser.hpp` — an
+**implementation-only** header beside the sources, not under `include/`, so it does not become
+public surface (the placement and the plain relative include follow `modules/xml/src`'s
+`XPathAstInternal.hpp` / `XmlNodeChangeEvents.hpp`).
+
+**The restraint is the substance of this ticket.** The obvious repair is a hand-written fixed-width
+scanner, and it would be wrong here: it would *also* reject text `sscanf` accepts — a signed day
+field, an over-wide year — and with `/rv` absent this repository has no evidence for what .NET does
+with any of it. The conversion string is therefore kept **verbatim** with `%n` appended, so every
+value that parsed before parses to the same instant and every value that failed before still fails.
+Full consumption is what #2125 owns; grammar is not.
+
+**Two things added that the ticket did not name**, both because the shared body made them visible:
+an **embedded NUL is rejected before `c_str()`**, because otherwise `sscanf` would report a complete
+match over a prefix of a value the caller never bounded; and **trailing whitespace stays accepted**,
+because it was accepted before and is not what the finding is about.
+
+**The obsolete formats, measured — this is the pin §14's acceptance criteria demanded.** The
+conversion string requires a comma immediately after a three-letter day name, which **both** the
+RFC 850 and the ANSI C `asctime` forms fail. Neither was **ever** accepted, so #2125 cannot have
+narrowed a required form away. RFC 9110 §5.6.7 requires a *recipient* to accept all three, so this
+is a real gap — and closing it is a **widening**, which is **#2130**'s question and stays deferred.
+
+**Mutations, and one that exposed a vacuous test.** **M1 under-repair** (drop the consumption loop):
+**2 tests fail**. **M2 over-repair** (require `consumed == size`, rejecting trailing whitespace):
+**passed everything on the first attempt** — because the test asserted through
+`RetryConditionHeaderValue::TryParse`, which **trims its input before the date parser ever sees
+it**, so the assertion could not discriminate. Re-pointed at `HttpResponseHeaders`, which reads the
+stored raw value untrimmed, M2 then failed **exactly one** test. The mutation did not find a bug in
+the repair; it found a bug in the test, which is the other thing mutations are for. **M3 control**
+(re-spell `std::isspace` as an explicit six-character comparison): **0 failures**.
+
+**+7 tests** (`SharpRuntimeTests_Net_Http_Headers` 394 → **401**). Sanitizer coverage folded into
+the batch probe: **ASan + UBSan + LSan clean over 200,040 operations** (116,000 accepted / 84,040
+rejected, `build-probe/2124_probe2_san.log`), now including every truncation prefix and every
+single-byte corruption of a valid HTTP-date, both obsolete forms, and NUL-bearing dates, with
+twelve repaired bodies compiled into the instrumented TU and a live heap-use-after-free control.
+
+**No signature, layout, vtable or exception-specification change. Graph unchanged at 41 / 92.**
+

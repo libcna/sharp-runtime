@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Http/Headers/RetryConditionHeaderValue.hpp"
+#include "HttpDateParser.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include <algorithm>
@@ -24,32 +25,11 @@ namespace System::Net::Http::Headers {
 
         // Parses the RFC 1123 format that DateTimeOffset::ToString("r") produces (see
         // ContentDispositionHeaderValue.cpp for the same helper and why it's needed).
-        bool tryParseRfc1123(const std::string& s, System::DateTimeOffset& result) {
-            static constexpr std::array<const char*, 12> months = {
-                "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-
-            char dayName[4] = {};
-            char monthName[4] = {};
-            int day = 0, year = 0, hour = 0, minute = 0, second = 0;
-            char gmt[4] = {};
-
-            int matched = std::sscanf(s.c_str(), "%3[A-Za-z], %d %3[A-Za-z] %d %d:%d:%d %3s",
-                                       dayName, &day, monthName, &year, &hour, &minute, &second, gmt);
-            if (matched != 8) return false;
-            if (std::strcmp(gmt, "GMT") != 0) return false;
-
-            int monthIndex = -1;
-            for (int i = 0; i < 12; ++i) {
-                if (std::strcmp(monthName, months[static_cast<size_t>(i)]) == 0) { monthIndex = i; break; }
-            }
-            if (monthIndex < 0) return false;
-
-            try {
-                result = System::DateTimeOffset(year, monthIndex + 1, day, hour, minute, second, System::TimeSpan::Zero);
-                return true;
-            } catch (...) {
-                return false;
-            }
+        // Ticket #2125 (SR-AUD-321, cause NH-H): this was one of SEVEN byte-identical copies of a
+        // non-consuming sscanf HTTP-date parser. They are now one body, in
+        // detail/HttpDateParser.hpp, which additionally requires the whole value to be consumed.
+        inline bool tryParseRfc1123(const std::string& s, System::DateTimeOffset& result) {
+            return System::Net::Http::Headers::detail::TryParseHttpDate(s, result);
         }
     }
 
