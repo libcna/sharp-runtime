@@ -553,3 +553,58 @@ carry that proof.*
    (`build-probe/2141_probe3_byteorder.log`): Adler-32 big-endian per RFC 1950; a CRC parameter
    set little-endian when it reflects its values and big-endian when it does not. This pin is
    #2143's safety net, and it exists because a mutation proved it was missing.
+
+### 17.3 #2143 — SR-AUD-262, the byte order (landed)
+
+**Predicted vs measured: the prediction held, and the scope limit in §4.3 was respected exactly.**
+
+**The repair.** A new header, `include/System/IO/Hashing/HashingByteOrder.hpp`, holds the module's
+**one** definition of what little-endian means: `ReadUInt32LittleEndian`,
+`ReadUInt64LittleEndian` and `WriteUInt64LittleEndian`, each assembling the value from its bytes
+so the byte order is a property of the code and not of the target. Applied at **every** native
+load in the module:
+
+| Site | Was |
+|---|---|
+| `XxHash3Shared.cpp` `ReadUInt32LE` / `ReadUInt64LE` / `WriteUInt64LE` | `memcpy` of a native integer; now thin delegations, so the names the algorithm code uses survive and the definition does not |
+| `XxHash32::processBlock` (4 lanes) and its 4-byte tail load | `memcpy` of a native `uintcs` |
+| `XxHash64::processBlock` (4 lanes), its 8-byte and its 4-byte tail loads | `memcpy` of a native `ulongcs`/`uintcs` |
+
+`grep -rn "memcpy(&" modules/io-hashing/src/` now returns nothing: **no integer in this module is
+loaded in native order any more.** Everything that remains is a byte-buffer `memcpy`, which has
+no byte order. The output writers (`Adler32`, both parameter sets, all four XXH
+`GetCurrentHashCore`) were already explicit-byte and were not touched.
+
+**What is proved, and what is not — the same distinction §4.3 drew, now measured:**
+
+- **Proved, host-independently:** `ByteOrderHelpers_AreLittleEndianByConstruction` maps a fixed
+  9-byte pattern to specific numeric values, including **unaligned** reads at offset 1 (which the
+  `memcpy` these replaced tolerated and the replacement must too), the write round trip, and the
+  all-zero / all-ones patterns so a shift or sign error cannot hide behind a lucky value.
+- **Proved on this host:** every published check value is unchanged, including
+  `XxHash32`/`XxHash64` over *multi-lane* inputs — the review did not note it, but the existing
+  *"Nobody inspects the spammish repetition"* (39 bytes) and *"The quick brown fox…"* (43/44
+  bytes) vectors do exercise the block path, so the lane loads are pinned by **published values**
+  and not merely by self-consistency. Mutation M7 confirms it.
+- **NOT proved, and not claimed:** that the repaired module computes correct hashes when
+  **executed** on a big-endian machine. There is no such host here and no cross-run in this
+  repository's CI. An environment limit, not a `/rv` question.
+
+**Tests: 122 → 130.** The helper pin plus a seven-type correctness matrix
+(`*_HashingIsSelfConsistentAcrossEveryBoundary`) covering empty, 1–9 bytes, **every internal block
+boundary of every type with its neighbours** (15/16/17, 31/32/33, 63/64/65, 127/128/129,
+239/240/241, 255/256/257), odd and multi-block lengths to 599, a buffer with **embedded NULs**
+spanning all 256 byte values, incremental-versus-one-shot at many interior splits,
+Reset-then-recompute, independent instances, repeated reads, and exact / oversized / undersized
+destinations.
+
+**Mutation evidence:**
+
+| Mutation | Killed | Controls green |
+|---|---|---|
+| `ReadUInt32LittleEndian` reads **big**-endian (a big-endian host, simulated) | **11** — `XxHash32OfficialVectors`, `XxHash64OfficialVectors`, five seeded `XxHash3` vectors, three seeded `XxHash128` vectors, and the helper pin | 119, incl. **every** `Adler32`/`Crc32`/`Crc64` vector and byte-order pin — the read helper feeds only the XXH family, and the kill radius says so |
+| `WriteUInt64LittleEndian` writes **big**-endian | 2 — the 512-byte seeded `XxHash3` vector and the helper pin | 128; the narrow radius is correct, because the write helper is reached only through `DeriveSecretFromSeed`, i.e. only by a **seeded** hash of **over 240 bytes** |
+
+M7 is the closest thing to a big-endian run this environment can produce: it makes the lane loads
+behave as they would on such a host and shows that the published values break. That is evidence
+the helpers are load-bearing — **not** evidence that the repaired code is correct there.

@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/XxHash3Shared.hpp"
 #include "System/IO/Hashing/HashingArgumentValidation.hpp"
+#include "System/IO/Hashing/HashingByteOrder.hpp"
 #include <cstring>
 
 namespace System::IO::Hashing::Detail::XxHash3Shared {
@@ -34,21 +35,22 @@ namespace System::IO::Hashing::Detail::XxHash3Shared {
         0xaf, 0xd7, 0xfb, 0xca, 0xbb, 0x4b, 0x40, 0x7e,
     };
 
+    // These three were a memcpy of a native integer, which is a little-endian load only on a
+    // little-endian host -- a function named ReadUInt32LE performing a native-order copy is wrong
+    // on some target by construction. They now delegate to the module's one definition of the
+    // byte order, which assembles the value from its bytes. See HashingByteOrder.hpp for what
+    // that does and does not prove.
     uintcs ReadUInt32LE(const bytecs* data) {
-        uintcs v;
-        std::memcpy(&v, data, sizeof(v));
-        return v;
+        return ReadUInt32LittleEndian(data);
     }
 
     ulongcs ReadUInt64LE(const bytecs* data) {
-        ulongcs v;
-        std::memcpy(&v, data, sizeof(v));
-        return v;
+        return ReadUInt64LittleEndian(data);
     }
 
     namespace {
         void WriteUInt64LE(bytecs* data, ulongcs value) {
-            std::memcpy(data, &value, sizeof(value));
+            WriteUInt64LittleEndian(data, value);
         }
     }
 

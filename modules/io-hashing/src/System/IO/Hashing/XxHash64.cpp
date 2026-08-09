@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/XxHash64.hpp"
 #include "System/IO/Hashing/HashingArgumentValidation.hpp"
+#include "System/IO/Hashing/HashingByteOrder.hpp"
 #include <cstring>
 
 namespace System::IO::Hashing {
@@ -29,11 +30,11 @@ namespace System::IO::Hashing {
     }
 
     void XxHash64::processBlock(const bytecs* block) {
-        ulongcs lane;
-        std::memcpy(&lane, block,      8); v1_ = round(v1_, lane);
-        std::memcpy(&lane, block + 8,  8); v2_ = round(v2_, lane);
-        std::memcpy(&lane, block + 16, 8); v3_ = round(v3_, lane);
-        std::memcpy(&lane, block + 24, 8); v4_ = round(v4_, lane);
+        // xxHash64's lanes are specified as little-endian loads, not as native-order ones.
+        v1_ = round(v1_, Detail::ReadUInt64LittleEndian(block));
+        v2_ = round(v2_, Detail::ReadUInt64LittleEndian(block + 8));
+        v3_ = round(v3_, Detail::ReadUInt64LittleEndian(block + 16));
+        v4_ = round(v4_, Detail::ReadUInt64LittleEndian(block + 24));
     }
 
     XxHash64::XxHash64(longcs seed)
@@ -109,13 +110,13 @@ namespace System::IO::Hashing {
         const bytecs* p  = buf_;
         intcs remaining = bufLen_;
         while (remaining >= 8) {
-            ulongcs lane; std::memcpy(&lane, p, 8);
+            const ulongcs lane = Detail::ReadUInt64LittleEndian(p);
             h64 ^= round(0, lane);
             h64 = rotl64(h64, 27) * Prime1 + Prime4;
             p += 8; remaining -= 8;
         }
         if (remaining >= 4) {
-            SharpRuntime::uintcs lane; std::memcpy(&lane, p, 4);
+            const SharpRuntime::uintcs lane = Detail::ReadUInt32LittleEndian(p);
             h64 ^= static_cast<ulongcs>(lane) * Prime1;
             h64 = rotl64(h64, 23) * Prime2 + Prime3;
             p += 4; remaining -= 4;

@@ -15,6 +15,8 @@
 #include "System/IO/Hashing/XxHash64.hpp"
 #include "System/IO/Hashing/XxHash3.hpp"
 #include "System/IO/Hashing/XxHash128.hpp"
+#include "System/IO/Hashing/HashingByteOrder.hpp"
+#include "System/IO/Hashing/XxHash3Shared.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ArgumentException.hpp"
@@ -1490,4 +1492,141 @@ TEST(HashingTests, DestinationByteOrder_OfAdlerAndCrc_IsPinned) {
     EXPECT_EQ(a.GetCurrentHash(dest4, 4), 4);
     EXPECT_EQ(std::vector<uint8_t>(dest4, dest4 + 4),
               (std::vector<uint8_t>{0x02, 0x4d, 0x01, 0x27}));
+}
+
+// ===========================================================================
+// Ticket #2143 (SR-AUD-262, cause IH-C) -- the "LE" helpers were native-order
+// memcpy, so the published values were a property of the host.
+//
+// A function named ReadUInt32LE that performs a memcpy of a native integer is
+// a little-endian load only on a little-endian machine. xxHash specifies
+// little-endian lane loads, so on a big-endian target the module would have
+// computed hashes that are not xxHash -- silently, and only there.
+//
+// WHAT THESE TESTS PROVE, stated plainly: that the helpers map a fixed byte
+// pattern to one specific value, which is an assertion about the CODE and
+// holds on any host; and that every published check value is unchanged here.
+// WHAT THEY DO NOT PROVE: that the module is correct when EXECUTED on a
+// big-endian machine. There is no such host in this environment and no
+// cross-run in this repository's CI. That is an environment limit, not a
+// deferred reference question -- no reference checkout would help.
+// ===========================================================================
+
+TEST(HashingTests, ByteOrderHelpers_AreLittleEndianByConstruction) {
+    namespace Detail = System::IO::Hashing::Detail;
+    namespace Shared = System::IO::Hashing::Detail::XxHash3Shared;
+
+    const uint8_t pattern[9] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x5a};
+
+    // Host-independent by construction: these say which BYTE lands in which bit position.
+    EXPECT_EQ(Detail::ReadUInt32LittleEndian(pattern), 0x67452301u);
+    EXPECT_EQ(Detail::ReadUInt64LittleEndian(pattern), 0xefcdab8967452301ULL);
+
+    // Unaligned reads must behave identically -- the memcpy these replaced tolerated them.
+    EXPECT_EQ(Detail::ReadUInt32LittleEndian(pattern + 1), 0x89674523u);
+    EXPECT_EQ(Detail::ReadUInt64LittleEndian(pattern + 1), 0x5aefcdab89674523ULL);
+
+    // The write side, and its round trip.
+    uint8_t out[8] = {};
+    Detail::WriteUInt64LittleEndian(out, 0xefcdab8967452301ULL);
+    EXPECT_EQ(std::vector<uint8_t>(out, out + 8),
+              (std::vector<uint8_t>{0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}));
+    EXPECT_EQ(Detail::ReadUInt64LittleEndian(out), 0xefcdab8967452301ULL);
+
+    // The XxHash3Shared names the algorithm code still uses now delegate to the same definition.
+    EXPECT_EQ(Shared::ReadUInt32LE(pattern), 0x67452301u);
+    EXPECT_EQ(Shared::ReadUInt64LE(pattern), 0xefcdab8967452301ULL);
+
+    // All-zero and all-ones, so a sign or shift error cannot hide behind a lucky pattern.
+    const uint8_t zeros[8] = {};
+    const uint8_t ones[8] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+    EXPECT_EQ(Detail::ReadUInt64LittleEndian(zeros), 0ULL);
+    EXPECT_EQ(Detail::ReadUInt64LittleEndian(ones), 0xffffffffffffffffULL);
+    EXPECT_EQ(Detail::ReadUInt32LittleEndian(ones), 0xffffffffu);
+}
+
+// The correctness matrix a byte-order change has to survive, across every algorithm: empty, one
+// byte, short ASCII, binary containing NUL, the internal block boundaries of each type, odd
+// lengths, multi-block input, incremental versus one-shot, Reset-then-recompute, and independent
+// instances. None of these can be satisfied by a lucky constant.
+namespace {
+
+    template <typename Hasher>
+    void AssertHashingIsSelfConsistent(const char* name) {
+        SCOPED_TRACE(name);
+
+        // A deterministic buffer that CONTAINS EMBEDDED NULs and covers every byte value, so a
+        // truncation-at-NUL or a sign-extension error shows up.
+        std::vector<uint8_t> buf(600);
+        for (size_t i = 0; i < buf.size(); ++i) buf[i] = static_cast<uint8_t>((i * 37) % 256);
+        buf[0] = 0; buf[17] = 0; buf[64] = 0; buf[255] = 0; buf[256] = 0;
+
+        // The internal block boundaries of every type in this module (16 for XxHash32, 32 for
+        // XxHash64, 64/240/256 for XxHash3 and XxHash128), each with its neighbours, plus odd
+        // lengths and sizes spanning several blocks.
+        const int32_t lengths[] = {0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65,
+                                   127, 128, 129, 239, 240, 241, 255, 256, 257, 383, 512, 599};
+
+        for (int32_t n : lengths) {
+            const std::vector<uint8_t> want = Hasher::Hash(buf.data(), n);
+
+            // Incremental versus one-shot, split at many interior points. A lane-order error
+            // inside a block changes both paths identically, so this is a consistency check
+            // rather than a value check -- the published vectors are what pin the value.
+            for (int32_t split = 0; split <= n; split += (n > 24 ? n / 8 + 1 : 1)) {
+                Hasher h;
+                h.Append(buf.data(), split);
+                h.Append(buf.data() + split, n - split);
+                ASSERT_EQ(h.GetCurrentHash(), want) << "length=" << n << " split=" << split;
+            }
+
+            // Reset then recompute reaches the same value as a fresh instance.
+            Hasher reused;
+            reused.Append(buf.data(), 599);
+            reused.Reset();
+            reused.Append(buf.data(), n);
+            ASSERT_EQ(reused.GetCurrentHash(), want) << "length=" << n;
+
+            // Independent instances agree, and repeated reads of one instance are stable.
+            Hasher a, b;
+            a.Append(buf.data(), n);
+            b.Append(buf.data(), n);
+            ASSERT_EQ(a.GetCurrentHash(), b.GetCurrentHash()) << "length=" << n;
+            ASSERT_EQ(a.GetCurrentHash(), a.GetCurrentHash()) << "length=" << n;
+
+            // An exactly sized and an oversized destination receive the same bytes, and both
+            // match the vector form; an undersized one is refused.
+            const int32_t size = a.getHashLengthInBytesProperty();
+            uint8_t exact[16] = {}, over[32] = {};
+            ASSERT_EQ(a.GetCurrentHash(exact, size), size) << "length=" << n;
+            ASSERT_EQ(a.GetCurrentHash(over, 32), size) << "length=" << n;
+            ASSERT_EQ(std::vector<uint8_t>(exact, exact + size), want) << "length=" << n;
+            ASSERT_EQ(std::vector<uint8_t>(over, over + size), want) << "length=" << n;
+            ASSERT_TRUE(ThrowsDestinationTooShort([&] { (void)a.GetCurrentHash(over, size - 1); }))
+                << "length=" << n;
+        }
+    }
+
+} // namespace
+
+TEST(HashingTests, Adler32_HashingIsSelfConsistentAcrossEveryBoundary) {
+    AssertHashingIsSelfConsistent<Adler32>("Adler32");
+}
+TEST(HashingTests, Crc32_HashingIsSelfConsistentAcrossEveryBoundary) {
+    AssertHashingIsSelfConsistent<Crc32>("Crc32");
+}
+TEST(HashingTests, Crc64_HashingIsSelfConsistentAcrossEveryBoundary) {
+    AssertHashingIsSelfConsistent<Crc64>("Crc64");
+}
+TEST(HashingTests, XxHash32_HashingIsSelfConsistentAcrossEveryBoundary) {
+    AssertHashingIsSelfConsistent<XxHash32>("XxHash32");
+}
+TEST(HashingTests, XxHash64_HashingIsSelfConsistentAcrossEveryBoundary) {
+    AssertHashingIsSelfConsistent<XxHash64>("XxHash64");
+}
+TEST(HashingTests, XxHash3_HashingIsSelfConsistentAcrossEveryBoundary) {
+    AssertHashingIsSelfConsistent<XxHash3>("XxHash3");
+}
+TEST(HashingTests, XxHash128_HashingIsSelfConsistentAcrossEveryBoundary) {
+    AssertHashingIsSelfConsistent<XxHash128>("XxHash128");
 }

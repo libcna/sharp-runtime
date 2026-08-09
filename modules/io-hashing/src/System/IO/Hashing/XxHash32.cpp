@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/XxHash32.hpp"
 #include "System/IO/Hashing/HashingArgumentValidation.hpp"
+#include "System/IO/Hashing/HashingByteOrder.hpp"
 #include <cstring>
 
 namespace System::IO::Hashing {
@@ -24,11 +25,11 @@ namespace System::IO::Hashing {
     }
 
     void XxHash32::processBlock(const bytecs* block) {
-        uintcs lane;
-        std::memcpy(&lane, block,      4); v1_ = round(v1_, lane);
-        std::memcpy(&lane, block + 4,  4); v2_ = round(v2_, lane);
-        std::memcpy(&lane, block + 8,  4); v3_ = round(v3_, lane);
-        std::memcpy(&lane, block + 12, 4); v4_ = round(v4_, lane);
+        // xxHash32's lanes are specified as little-endian loads, not as native-order ones.
+        v1_ = round(v1_, Detail::ReadUInt32LittleEndian(block));
+        v2_ = round(v2_, Detail::ReadUInt32LittleEndian(block + 4));
+        v3_ = round(v3_, Detail::ReadUInt32LittleEndian(block + 8));
+        v4_ = round(v4_, Detail::ReadUInt32LittleEndian(block + 12));
     }
 
     XxHash32::XxHash32(intcs seed)
@@ -103,7 +104,7 @@ namespace System::IO::Hashing {
         const bytecs* p  = buf_;
         intcs remaining = bufLen_;
         while (remaining >= 4) {
-            uintcs lane; std::memcpy(&lane, p, 4);
+            const uintcs lane = Detail::ReadUInt32LittleEndian(p);
             h32 += lane * Prime3;
             h32 = rotl32(h32, 17) * Prime4;
             p += 4; remaining -= 4;
