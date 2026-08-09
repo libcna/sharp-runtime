@@ -32,3 +32,30 @@ secret-retention rather than a post-disposal computation defect.
 ## Final assessment
 
 Confirmed high-severity key-material retention defect: SR-AUD-332.
+
+---
+
+## Remediation record — ticket #2159 (2026-08-09)
+
+SR-AUD-332 **remediated**. Repair, evidence and mutations:
+`docs/SystemSecurityCryptographyNamespaceReviewPlan.md` §14. Commit: see `plan.sqlite3` #2159.
+
+The original evidence is retained above and reproduces exactly: the probe re-run before the repair
+measured `innerPad_` 64 bytes with a 32-byte run of `key ^ 0x36`, `outerPad_` 64 with a 32-byte run
+of `key ^ 0x5C`, and **32 of 32** key bytes recovered by one XOR after `Dispose()`. After the
+repair every one of those readings is **0**, against a deliberately uncleared 96-byte control that
+still reads 96 in both columns.
+
+**The finding was narrower than the defect.** Direct measurement of *freed* storage found five
+further sites the report does not name — `derivePads`' `keyPrime` local (the raw key, **even after
+`Dispose`**), `HashFinal`'s two working buffers (both pads, on **every** `ComputeHash`), the old key
+on replacement, plain destruction without `Dispose` (the ordinary C++ RAII path), and, once the
+long-key path was measured, the **36-byte** tail of the key left in the internal block buffer of the
+digest object that hashes an over-long key. All are 0 after the repair.
+
+**Both "missing assertions" this report asked for are now permanent.** The "deterministic secure-zero
+inspection seam" is `SharpRuntime::Testing::KeyMaterialAccess<T>`, defined in exactly one file and
+guarded by `scripts/check_version_seam_odr.py` plus
+`test/consumer/security_cryptography_key_material_negative.cpp` (9 sites). Key replacement,
+long-key hashing, pending-message cleanup and **every** HMAC-SHA3 variant are covered, alongside the
+published digest vectors, which are byte-identical before and after.

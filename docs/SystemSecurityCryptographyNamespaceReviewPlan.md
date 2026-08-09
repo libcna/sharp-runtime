@@ -397,7 +397,125 @@ left to be rediscovered:
 
 ## 14. Implementation record — #2159 (cause SC-A, SR-AUD-332)
 
-*Filled in on completion.*
+**Done 2026-08-09.** `SharpRuntimeTests_Security_Cryptography` **80 → 104** tests, all passing.
+
+### 14.1 The repair
+
+The finding is "clear one more member"; the repair is a **policy**, because §4.2 measured seven sites
+and the audit names two.
+
+1. **A primitive the optimiser may not elide** —
+   `System/Security/Cryptography/detail/SecureMemory.hpp`, a new internal header:
+   `Clear(void*, size_t)` (a `volatile unsigned char` write loop), `ClearContainer` (erase then
+   `clear()`, keeping the block so the *erased* bytes are what the allocator eventually gets back)
+   and `Scrub` (erase, keep the size).
+2. **`KeyedHashAlgorithm`** — `Dispose` now goes through the primitive instead of `std::fill`;
+   `setKeyProperty` erases the previous key **before** the move-assignment releases its block; a new
+   destructor erases the key.
+3. **`HMAC`** — a `Dispose()` override and a destructor, both erasing `innerPad_`, `outerPad_` and
+   `pendingMessage_` through one shared `clearDerivedState()`; `setKeyProperty` scrubs both pads
+   before re-deriving; `Initialize()` erases the buffered message rather than merely dropping it.
+4. **`HMAC::derivePads`** — restructured so the block is **reserved once** up front. That is what
+   makes the erasure sufficient rather than decorative: previously the copy and the `resize` could
+   each reallocate, handing the allocator a block still holding the key *before* any code could
+   reach it. `keyPrime` and the hashed-key temporary are both erased.
+5. **`HMAC::HashFinal`** — the same treatment for `innerInput` and `outerInput`, which both begin
+   with a key-derived pad, plus `innerDigest`.
+6. **The five `.cpp`-backed digests and the Keccak sponge** — a measured extension, not part of the
+   finding's text. `Initialize()` now erases the block buffer, and `Keccak::Sponge::Reset()` uses
+   the primitive instead of `fill(0)`. This closes §14.2's long-key row: HMAC hashes an
+   over-long key with a real digest object, and that object's `std::array` block buffer kept the
+   key's tail.
+
+### 14.2 Measured before / after — `build-probe/2158_probe2_residue.cpp`
+
+Same probe, same control, same build flags (`-O2 -fno-access-control`); logs
+`2158_probe2_residue_before.log` and `2158_probe2_residue_after_2159.log`.
+
+| Observation | Before | After |
+|---|---|---|
+| **Control** — a deliberately uncleared 96-byte block, freed in the window | **96** | **96** |
+| live `innerPad_` size / longest `key ^ 0x36` run after `Dispose` | 64 / **32** | 0 / **0** |
+| live `outerPad_` size / longest `key ^ 0x5C` run after `Dispose` | 64 / **32** | 0 / **0** |
+| **key bytes recovered from a pad after `Dispose`** | **32 of 32** | **0** |
+| live `pendingMessage_` after `Dispose` | 40 | **0** |
+| freed storage after destruction *without* `Dispose` — key / ipad / opad | 32 / 32 / 32 | 0 / 1 / 0 |
+| freed storage after `Dispose` then destruction | 32 / 32 / 32 | 0 / 1 / 0 |
+| freed storage after key replacement — old key | **32** | **0** |
+| freed storage after one `ComputeHash` — ipad / opad | 32 / 32 | 1 / 0 |
+| freed storage after a **131-byte** key (hashed first) — key | **36** | **0** |
+
+The residual **1**s are a single coincidental byte, not a retained pad: a pad is 64 contiguous
+bytes and the constant `0x91` occurs by chance in a digest. The control is what makes that reading
+safe — 96 in both columns means the instrument still sees material when material is there.
+
+### 14.3 Zeroisation evidence — `build-probe/2158_probe3_zeroise.log`
+
+GCC 13.3, `-O2`, disassembled. `naiveClearStack()` compiles to its `printf` tail call and nothing
+else — buffer and `std::fill` both deleted. `naiveClearHeap()` goes from `printf` straight to
+`operator delete` with no zero-store. Both `SecureMemory` variants keep a real store loop
+(`movb $0x0,(%rdx)` / `movb $0x0,(%rax)`) immediately before scope exit or deallocation. This is
+why the repair does not use `std::fill`, and it is measured rather than assumed.
+
+### 14.4 Permanent tests — +24, and what they can and cannot pin
+
+`modules/security-cryptography/tests/System/Security/Cryptography/KeyMaterialErasureTests.cpp`.
+Live-object assertions go through a **new test-only access seam**,
+`SharpRuntime::Testing::KeyMaterialAccess<T>` — declared by `detail/SecureMemory.hpp`, befriended
+by `KeyedHashAlgorithm` and `HMAC`, defined in exactly one file
+(`modules/security-cryptography/tests/support/KeyMaterialSeam.hpp`), per `CLAUDE.md`'s seam rules.
+Seams **2 → 3**, seam definitions **18 → 19** as `scripts/check_version_seam_odr.py` counts them
+(the eight HMAC specialisations share one macro body, which is the point of the macro). A seam is
+needed because erasure is not observable
+through any public API *by construction*, and because the freed-storage recorder cannot separate
+"`Dispose()` erased it" from "`~HMAC()` erased it" — they leave the same zeroed block at the same
+moment, and the first is what SR-AUD-332 is about.
+
+`test/consumer/security_cryptography_key_material_negative.cpp` is the consumer-side half:
+**9 sites**, every one rejected, baseline clean. Negative fixtures **11 → 12 files**,
+**94 → 103 sites**.
+
+Coverage: the control (pads present and invertible **before** `Dispose`); `Dispose`; double and
+triple `Dispose`; post-`Dispose` `ComputeHash` still throwing; key replacement, including replacing
+a block-length key with a 4-byte one so the zero-padded tail is checked; `Initialize`; **all eight**
+HMAC variants; **ten** key shapes (empty, 1, all-zero, block−1, block, block+1, 131, embedded
+zeros, 4 KiB, and a 200-byte key against a 128-byte block); all four copy/move operations; three
+rejected-argument paths followed by a still-correct digest; and the primitive itself with a
+deliberately uncleared control alongside it.
+
+**Honest limitation.** These tests do **not** assert the state of storage already returned to the
+allocator. Doing that needs a replacement global `operator new`/`operator delete`, and installing
+one in this executable would displace AddressSanitizer's own replacement and silently weaken every
+other suite in the binary. That half is probe evidence (§14.2), and the consequence is that the
+**destructor's** erasure is pinned by the probe rather than by the permanent suite. Stated here
+rather than left for a future reader to discover.
+
+### 14.5 Mutations
+
+| Mutation | Result |
+|---|---|
+| Delete `HMAC::Dispose()`, leaving only the destructor | **6 clean failures** / 98 pass, exactly the disposal tests. **Counts** — and it is the mutation the seam exists for; the freed-storage probe cannot see it |
+| Drop the explicitly defaulted move operations, so the new destructor suppresses them | **2 clean failures**, exactly `MoveConstructionTransfersTheKeyAndLeavesTheSourceEmpty` and `MoveAssignmentTransfersTheKeyAndLeavesTheSourceEmpty`. **Counts** — this is the security regression the fix could have introduced, and it is pinned |
+| Revert `derivePads`/`HashFinal` to the unreserved shape | **honest non-result** for the permanent suite: it is invisible to the live-object seam and is caught only by the freed-storage probe (§14.2, rows 6–10). Recorded rather than claimed |
+| Replace `SecureMemory::Clear` with `std::fill` | **honest non-result**: the live-object tests read the buffer afterwards, so the store is not dead and survives. The discriminating instrument for this one is the disassembly in §14.3, not a test |
+
+### 14.6 Sanitizers
+
+`build-probe/2159_probe_san.cpp`, production sources compiled from source under
+`-fsanitize=address,undefined` with `detect_leaks=1`: 8 HMAC variants × 8 key lengths (0, 1, 20,
+63, 64, 65, 131, 4096), each exercising construct → compute → key replacement → compute → copy →
+move → copy-assign → move-assign → double `Dispose` → `Initialize` → `Dispose`, plus a 200-byte
+PBKDF2-SHA512 derivation. **0 reports, exit 0.** TSan was not run and is not claimed: this
+component documents no thread-safety contract for a shared instance, so TSan is not a
+discriminating tool here (§9).
+
+### 14.7 Not changed
+
+`getKeyProperty()` still returns a copy — that is the .NET shape, and the copy's lifetime is the
+caller's. No algorithm, parameter or output byte moved: all 80 pre-existing tests pass unchanged,
+and RFC 4231 case 6 (the 131-byte key that exercises the restructured `derivePads`) plus repeated
+double-digest cycles for MD5/SHA-256/SHA3-256 are pinned explicitly, because the digest
+`Initialize()` change would corrupt an instance's *second* digest rather than its first.
 
 ## 15. Implementation record — #2160 (causes SC-B and SC-C, SR-AUD-331)
 

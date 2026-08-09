@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#include "System/Security/Cryptography/detail/SecureMemory.hpp"
 
 // Not a public System::* API — an internal Keccak-f[1600] permutation and sponge construction
 // shared by SHA3-256/384/512 (fixed-output, domain separator 0x06) and Shake128/256
@@ -85,8 +86,11 @@ namespace SharpRuntimeDetail::Keccak {
             : rateBytes_(rateBytes), domainSeparator_(domainSeparator) {}
 
         void Reset() {
-            state_.fill(0);
-            buffer_.fill(0);
+            // SecureMemory rather than fill(0): the sponge state and block buffer hold the message
+            // just absorbed, which for HMAC-SHA3's long-key path is the key itself, and a plain
+            // store into storage that is about to die is a dead store the optimiser may delete.
+            SecureMemory::Clear(state_.data(), state_.size() * sizeof(uint64_t));
+            SecureMemory::Clear(buffer_.data(), buffer_.size());
             bufferLen_ = 0;
             squeezing_ = false;
         }

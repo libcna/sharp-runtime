@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Security/Cryptography/SHA384.hpp"
+#include "System/Security/Cryptography/detail/SecureMemory.hpp"
 #include <cstring>
 #include "System/Security/Cryptography/detail/Sha512Core.hpp"
 
@@ -12,6 +13,10 @@ void SHA384::Initialize() {
               0x67332667ffc00b31ULL, 0x8eb44a8768581511ULL, 0xdb0c2e0d64f98fa7ULL, 0x47b5481dbefa4fa4ULL};
     bufferLen_ = 0;
     totalBits_ = 0;
+    // The block buffer holds the tail of the message just hashed. When the message is key
+    // material -- HMAC's long-key path hashes the key itself -- that tail is key material too,
+    // so it is erased here rather than left for the allocator (plan section 4.2, extended).
+    SharpRuntimeDetail::SecureMemory::Clear(buffer_.data(), buffer_.size());
 }
 
 void SHA384::HashCore(const std::vector<bytecs>& array, intcs offset, intcs count) {

@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Security/Cryptography/SHA512.hpp"
+#include "System/Security/Cryptography/detail/SecureMemory.hpp"
 #include <cstring>
 #include "System/Security/Cryptography/detail/Sha512Core.hpp"
 
@@ -12,6 +13,10 @@ void SHA512::Initialize() {
               0x510e527fade682d1ULL, 0x9b05688c2b3e6c1fULL, 0x1f83d9abfb41bd6bULL, 0x5be0cd19137e2179ULL};
     bufferLen_ = 0;
     totalBits_ = 0;
+    // The block buffer holds the tail of the message just hashed. When the message is key
+    // material -- HMAC's long-key path hashes the key itself -- that tail is key material too,
+    // so it is erased here rather than left for the allocator (plan section 4.2, extended).
+    SharpRuntimeDetail::SecureMemory::Clear(buffer_.data(), buffer_.size());
 }
 
 void SHA512::HashCore(const std::vector<bytecs>& array, intcs offset, intcs count) {

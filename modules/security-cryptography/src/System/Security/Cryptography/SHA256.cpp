@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Security/Cryptography/SHA256.hpp"
+#include "System/Security/Cryptography/detail/SecureMemory.hpp"
 #include <cstring>
 
 namespace System::Security::Cryptography {
@@ -27,6 +28,10 @@ void SHA256::Initialize() {
     state_ = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
     bufferLen_ = 0;
     totalBits_ = 0;
+    // The block buffer holds the tail of the message just hashed. When the message is key
+    // material -- HMAC's long-key path hashes the key itself -- that tail is key material too,
+    // so it is erased here rather than left for the allocator (plan section 4.2, extended).
+    SharpRuntimeDetail::SecureMemory::Clear(buffer_.data(), buffer_.size());
 }
 
 void SHA256::processBlock(const uint8_t* block) {
