@@ -33,6 +33,10 @@ namespace System::IO::Compression {
 
         static void ValidateQuality(intcs quality);
         static void ValidateWindowLog(intcs windowLog);
+        /// Resolves and validates an options object's window bits (ticket #2149); private.
+        static intcs ResolveOptionsWindowBits(const ZLibCompressionOptions& options);
+        /// Resolves an options object's zlib memLevel (ticket #2149); private.
+        static intcs ResolveOptionsMemLevel(const ZLibCompressionOptions& options);
 
     public:
         /** Initializes a new DeflateEncoder using the default quality. */

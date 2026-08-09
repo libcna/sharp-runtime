@@ -4,6 +4,7 @@
 #pragma once
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/IO/Compression/CompressionMode.hpp"
+#include "System/IO/Compression/ZLibCompressionStrategy.hpp"
 
 namespace System::IO::Compression::Detail {
 
@@ -135,5 +136,29 @@ namespace System::IO::Compression::Detail {
             ThrowStreamClosed(typeName);
         }
     }
+
+    /**
+     * @brief Maps a `ZLibCompressionStrategy` onto the zlib `Z_*_STRATEGY` constant it names.
+     *
+     * Ticket #2149 (SR-AUD-259, cause C-C). All three encoders' options constructors used to drop
+     * `ZLibCompressionOptions::getCompressionStrategyProperty()` on the floor and pass
+     * `Z_DEFAULT_STRATEGY` unconditionally, so all five strategy values produced byte-identical
+     * output — measured over 3 encoders × 5 strategies × 3 payload shapes, 45 of 45 identical to
+     * `Default`, while zlib given the same parameters produced different bytes in 24 of them
+     * (`build-probe/2149_probe1_before.log`; after, the port matches zlib in all 45).
+     *
+     * Declared here, and defined once in `CompressionArgumentValidation.cpp`, so the three
+     * encoders share one mapping: three private copies of a five-way switch is how the two halves
+     * of a codec end up disagreeing. The return type is `intcs`, not a zlib type, so no zlib header
+     * leaks into a public header.
+     *
+     * @return The zlib strategy constant (`Z_DEFAULT_STRATEGY`, `Z_FILTERED`, `Z_HUFFMAN_ONLY`,
+     *         `Z_RLE` or `Z_FIXED`).
+     * @throws System::ArgumentOutOfRangeException if @p strategy is outside the declared domain.
+     *         Unreachable through `ZLibCompressionOptions`, whose setter validates, and kept so a
+     *         future path that bypasses that setter fails loudly rather than silently compressing
+     *         with the wrong strategy.
+     */
+    [[nodiscard]] intcs ResolveZLibStrategy(ZLibCompressionStrategy strategy);
 
 } // namespace System::IO::Compression::Detail

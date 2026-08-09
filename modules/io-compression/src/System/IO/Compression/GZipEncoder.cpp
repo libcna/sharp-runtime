@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Compression/GZipEncoder.hpp"
+#include "System/IO/Compression/CompressionArgumentValidation.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ObjectDisposedException.hpp"
 
@@ -40,19 +41,27 @@ namespace System::IO::Compression {
             return windowLog + 16;
         }
 
-        DeflateEncoder MakeDeflateEncoder(intcs quality, intcs windowLog) {
+        // Ticket #2149 (SR-AUD-259): the strategy is a parameter now. It used to be hard-coded to
+        // Z_DEFAULT_STRATEGY here, so the options constructor below validated
+        // options.getCompressionStrategyProperty() through ZLibCompressionOptions' setter and then
+        // dropped it -- all five values produced byte-identical output
+        // (build-probe/2149_probe1_before.log). The non-options constructors keep
+        // Z_DEFAULT_STRATEGY, which is their own documented contract and is unchanged.
+        DeflateEncoder MakeDeflateEncoder(intcs quality, intcs windowLog, intcs strategy) {
             ValidateQuality(quality);
             ValidateWindowLog(windowLog);
             const intcs memLevel = quality == 0 ? Deflate_NoCompressionMemLevel : Deflate_DefaultMemLevel;
-            return DeflateEncoder(quality, ResolveGZipWindowBits(windowLog), memLevel, Z_DEFAULT_STRATEGY);
+            return DeflateEncoder(quality, ResolveGZipWindowBits(windowLog), memLevel, strategy);
         }
     }
 
-    GZipEncoder::GZipEncoder() : deflateEncoder_(MakeDeflateEncoder(-1, -1)) {}
-    GZipEncoder::GZipEncoder(intcs quality) : deflateEncoder_(MakeDeflateEncoder(quality, -1)) {}
-    GZipEncoder::GZipEncoder(intcs quality, intcs windowLog) : deflateEncoder_(MakeDeflateEncoder(quality, windowLog)) {}
+    GZipEncoder::GZipEncoder() : deflateEncoder_(MakeDeflateEncoder(-1, -1, Z_DEFAULT_STRATEGY)) {}
+    GZipEncoder::GZipEncoder(intcs quality) : deflateEncoder_(MakeDeflateEncoder(quality, -1, Z_DEFAULT_STRATEGY)) {}
+    GZipEncoder::GZipEncoder(intcs quality, intcs windowLog) : deflateEncoder_(MakeDeflateEncoder(quality, windowLog, Z_DEFAULT_STRATEGY)) {}
     GZipEncoder::GZipEncoder(const ZLibCompressionOptions& options)
-        : deflateEncoder_(MakeDeflateEncoder(options.getCompressionLevelProperty(), options.getWindowLogProperty())) {}
+        : deflateEncoder_(MakeDeflateEncoder(options.getCompressionLevelProperty(),
+                                             options.getWindowLogProperty(),
+                                             Detail::ResolveZLibStrategy(options.getCompressionStrategyProperty()))) {}
 
     void GZipEncoder::Dispose() {
         if (disposed_) return;

@@ -30,6 +30,26 @@ namespace System::IO::Compression {
         }
     }
 
+    // Ticket #2149 (SR-AUD-259). The options constructor used to delegate to
+    // DeflateEncoder(quality, windowLog), which hard-codes Z_DEFAULT_STRATEGY, so the strategy
+    // ZLibCompressionOptions had just validated was dropped and all five values produced
+    // byte-identical output (45 of 45 cases; build-probe/2149_probe1_before.log). It now resolves
+    // the same quality/windowLog pair through these two helpers and passes the stored strategy on.
+    //
+    // Both argument validations live in ONE helper so their relative order is fixed: the order in
+    // which a constructor's arguments are evaluated is unspecified, and quality-before-windowLog is
+    // the order DeflateEncoder(quality, windowLog) already established.
+    intcs DeflateEncoder::ResolveOptionsWindowBits(const ZLibCompressionOptions& options) {
+        ValidateQuality(options.getCompressionLevelProperty());
+        ValidateWindowLog(options.getWindowLogProperty());
+        return ResolveDeflateWindowBits(options.getWindowLogProperty());
+    }
+
+    intcs DeflateEncoder::ResolveOptionsMemLevel(const ZLibCompressionOptions& options) {
+        return options.getCompressionLevelProperty() == 0 ? Deflate_NoCompressionMemLevel
+                                                          : Deflate_DefaultMemLevel;
+    }
+
     struct ZLibDeflateEncoderState {
         z_stream zs{};
     };
@@ -66,8 +86,18 @@ namespace System::IO::Compression {
         }
     }
 
+    // Ticket #2149 (SR-AUD-259): this used to delegate to DeflateEncoder(quality, windowLog), which
+    // hard-codes Z_DEFAULT_STRATEGY, so `options.getCompressionStrategyProperty()` was validated on
+    // the way in by ZLibCompressionOptions' setter and then dropped on the way out -- all five
+    // strategy values produced byte-identical output. It now resolves the same quality/windowLog
+    // pair itself and passes the stored strategy to deflateInit2. The quality/windowLog delegation
+    // is deliberately NOT reused: it would need a fourth parameter, and the two-argument
+    // constructor's Z_DEFAULT_STRATEGY is its own documented contract.
     DeflateEncoder::DeflateEncoder(const ZLibCompressionOptions& options)
-        : DeflateEncoder(options.getCompressionLevelProperty(), options.getWindowLogProperty()) {}
+        : DeflateEncoder(options.getCompressionLevelProperty(),
+                         ResolveOptionsWindowBits(options),
+                         ResolveOptionsMemLevel(options),
+                         Detail::ResolveZLibStrategy(options.getCompressionStrategyProperty())) {}
 
     DeflateEncoder::DeflateEncoder(intcs quality, intcs windowBits, intcs memLevel, intcs strategy)
         : state_(std::make_unique<ZLibDeflateEncoderState>())

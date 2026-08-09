@@ -432,3 +432,77 @@ and `(CompressionMode)` over `modules/`, `test/`, `tests/` and `bench/` returns 
 ticket's own tests and probes, so no existing caller is reached.
 
 **SR-AUD-258 is `remediated`.**
+
+---
+
+## 15. Implementation record — #2149 (cause C-C, SR-AUD-259 strategy half)
+
+### 15.1 The finding is confirmed, and its evidence widened from one pair to 45 cases
+
+The audit's evidence is a single pair — "native RLE and default option probes produce identical
+60-byte output" — on one encoder. Measured across the full grid of **3 encoders × 5 strategies ×
+3 payload shapes** (`build-probe/2149_probe1_before.log`):
+
+| | Cases | identical to `Default` | port ≠ zlib given the same parameters |
+|---|---|---|---|
+| before | 45 | **45** | **24** |
+| after | 45 | 21 | **0** |
+
+The 21 that remain identical to `Default` after the repair are not a residual defect: `Filtered`
+genuinely produces `Default`'s bytes at level 6 on all three payloads (zlib agrees, in the same 45
+cases), and raw deflate over incompressible input emits stored blocks whose bytes no strategy
+changes. The port now matches a straight zlib encode with the same
+level/windowBits/memLevel/strategy in **all 45**.
+
+The payload shape is load-bearing and is why the test file builds its own inputs: a test that
+discriminated on `Filtered` alone would have passed against the broken code.
+
+### 15.2 The repair
+
+`Detail::ResolveZLibStrategy` — one mapping, declared in `CompressionArgumentValidation.hpp` and
+defined once in the matching `.cpp`, returning `intcs` so no zlib header leaks into a public
+header. Five `static_assert`s pin the enum's members to zlib's constants, so a renumbering on
+either side stops the build instead of silently compressing with the wrong strategy.
+
+`DeflateEncoder(options)` no longer delegates to `DeflateEncoder(quality, windowLog)` — that
+constructor's `Z_DEFAULT_STRATEGY` is its own documented contract — and instead resolves the same
+window bits and memLevel through two private static helpers and passes the stored strategy to the
+four-argument constructor. `GZipEncoder`/`ZLibEncoder`'s file-local `MakeDeflateEncoder` gains a
+`strategy` parameter; their three **non**-options constructors pass `Z_DEFAULT_STRATEGY`
+explicitly, unchanged.
+
+Both argument validations live in one helper, deliberately: the evaluation order of a
+constructor's arguments is unspecified, and quality-before-windowLog is the order
+`DeflateEncoder(quality, windowLog)` already established.
+
+### 15.3 Mutation testing — two count, one is a proven non-defect
+
+| # | Mutation | Result | Counts? |
+|---|---|---|---|
+| 4 | options path passes `Z_DEFAULT_STRATEGY` again (the pre-#2149 behaviour) | **2 clean failures** | **Yes** |
+| 5 | `RunLengthEncoding` mis-mapped to `Z_FIXED` | **SURVIVED** the suite as first written — the wrong strategy is still *a* strategy, so the output still differed from `Default`, still round-tripped and still landed in the right size order. Adding a **pairwise-distinctness** assertion killed it: **3 clean failures** | **Yes — after the test was strengthened.** This is the mutation that earned its keep |
+| 6 | options path always resolves memLevel 8, never the quality-0 value 7 | **SURVIVED, and correctly so.** The port selects memLevel 7 only for quality 0, and at level 0 zlib emits **stored blocks**, where memLevel has no effect: memLevel 7 and 8 produce identical bytes at level 0 for every input measured, and differ only at levels 1/6/9 where both paths already agree on 8 (`build-probe/2149_probe2_memlevel.log`). The mutation is **observationally equivalent**, not an undetected defect | **No — recorded as a non-result** |
+
+ASan + UBSan + LSan over the whole 45-case matrix with the three encoder bodies instrumented:
+**0 reports**.
+
+### 15.4 Consequences
+
+**Tests: +9** (`CompressionStrategyTests.cpp`); `SharpRuntimeTests_IO_Compression` **89 → 98**.
+
+**The default-option output is byte-identical to before** — the discriminating control this ticket
+exists to protect. Verified by diffing the `Default` rows of the before and after probe logs (all
+nine identical) and pinned by an exact-byte-count test.
+
+**Behaviour change, deliberate and narrow.** A caller who set a non-`Default` strategy previously
+got `Default`'s bytes and now gets that strategy's. That is the finding. Every strategy still
+round-trips through the matching decoder.
+
+No public signature, `noexcept`, virtual, vtable, data member or object-layout change — the two new
+`ResolveOptions*` members are **private static** functions, which add no vtable slot and no storage.
+Component graph unchanged at **41 / 92**.
+
+**SR-AUD-259 is only half closed by this ticket.** Its remaining half — the three stream types'
+absent `ZLibCompressionOptions` constructors — is a public surface addition and stays with the
+**blocked** #2150. The finding therefore stays `confirmed`, with its strategy half recorded as
+landed.
