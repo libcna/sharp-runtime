@@ -4,25 +4,230 @@
 # NEXT.md
 
 *Last verified: 2026-08-09. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
-harness-designated branch**, continued from its own tip `6676a08`. `CLAUDE.md` rule 3 names
+harness-designated branch**, continued from its own tip `894135f`. `CLAUDE.md` rule 3 names
 `feature/work`; the discrepancy is recorded rather than resolved silently. **Pushed after every
-commit**, per `CLAUDE.md` rule 13 (added the same day, in commit `6676a08`, precisely because 108
-commits had been found sitting unpushed on this branch) and per the harness branch policy; this
-supersedes the previous handoff's "not pushed", and the tension with the batch brief's "do not push
-unless requested" is recorded in the closing report rather than resolved by silence. No merge,
-rebase, tag, force-push, PR, publication, amend or history rewrite; all commits unsigned
-(`git -c commit.gpgsign=false`) — no usable private signing key exists here. This batch **finished
-`modules/io-compression`** (#2148, #2149, #2151 + reconciliation) and then **reviewed and closed
-`modules/timers`** (#2153 review, #2154, #2156, #2157). Audit **156 remediated / 208 confirmed /
-364 total**, of which **50** carry `confirmed (design-complete)`; **no `SR-AUD-*` identifier
-created — numbering frozen at 364.** Gate **16,205 tests across 37 executables: 16,198 passing, 1
-skipped, 6 failing** for the same two measured causes, unchanged and not hidden (+53 on the
-inherited 16,152). Graph **41 / 92**, seams **2 / 18**, negative fixtures **11 files / 94 sites**.
-**Doxygen, `ccache` and the `/rv` reference tree are all absent** and were not installed. **CCF-019
-open; CCF-021/#2131 and CCF-022/#2109 remain unminted.** #1773 and #1962 remain blocked. See the
-first handoff below.*
+commit**, per `CLAUDE.md` rule 13 — six commits, six pushes, every one a normal fast-forward. No
+merge, rebase, tag, force-push, PR, publication, amend or history rewrite; all commits unsigned
+(`git -c commit.gpgsign=false`) — no usable private signing key exists here. This batch **fully
+closed `modules/security-cryptography`** (#2158 review, #2159, #2160, #2161) and then **fully
+closed `modules/console`** (#2162 review, #2163, #2164, #2165, + #2166 deferred). Audit
+**160 remediated / 204 confirmed / 364 total**, of which **50** carry
+`confirmed (design-complete)`; **no `SR-AUD-*` identifier created — numbering frozen at 364.**
+Gate **16,274 tests across 37 executables: 16,267 passing, 1 skipped, 6 failing** for the same two
+measured causes, unchanged and not hidden (+69 on the inherited 16,205). Graph **41 / 92**, seams
+**2 → 3** (definitions 18 → 20), negative fixtures **11 → 12 files**, **94 → 104 sites**.
+**Doxygen, `ccache` and the `/rv` reference tree are all absent** and were not installed.
+**CCF-019 open; CCF-021/#2131 and CCF-022/#2109 remain unminted.** #1773, #1962, #2150, #2152 and
+#2155 remain exactly as inherited. See the first handoff below.*
 
 ---
+
+## Batch record — `modules/security-cryptography` fully closed (#2158–#2161) and `modules/console` fully closed (#2162–#2165, + #2166)
+
+**Both namespaces are reconciled with no approval gate.** That is a stronger outcome than the
+brief anticipated, and it rests on one measurement, described in §2.
+
+### 1. Work unit 1 — why `security-cryptography`, measured rather than inherited
+
+`audit/AUDIT_FINDINGS_INDEX.md` was re-parsed from scratch. Among **unreviewed** units:
+
+| Module | Open | high | high % | `/rv`-bound | Verdict |
+|---|---|---|---|---|---|
+| `core` | 72 | 9 | 12 % | mixed | not a namespace; already carved by seven `CCF-*` plans |
+| `globalization` | 7 | 1 | 14 % | **heavily** | needs `/rv` *and* ICU data |
+| `time-zone` | 7 | 0 | **0 %** | **mostly** | zero high; needs a real tz database |
+| `numerics` | 4 | 0 | 0 % | partly | zero high |
+| `xml-linq` | 4 | 1 | 25 % | no | its only high is CCF-019 — **blocked** (#1899) |
+| **`security-cryptography`** | **2** | **2** | **100 %** | **none** | **selected** |
+| `console` | 2 | 0 | 0 % | no | selected second |
+
+Two findings is below the programme's earlier ≥ 6 threshold, so the selection is justified
+explicitly: it is the **only** unreviewed unit whose open findings are 100 % high; the consequence
+class is **disclosure of a caller's key**, not a wrong answer; the retained material survives for
+the life of the **process**, reaching freed heap storage where any later allocation reads it with
+no memory-safety bug at all; and there is **zero `/rv` dependence**, because both findings are
+"storage the object owns still holds a secret", answerable by direct measurement.
+
+Deliverables: `docs/SystemSecurityCryptographyNamespaceReviewPlan.md` (#2158, `e8340b3`) and
+`docs/SystemConsoleNamespaceReviewPlan.md` (#2162, `3f29037`).
+
+### 2. The inherited SR-AUD-331 premise was wrong, and is withdrawn on measurement
+
+The previous handoff stated that SR-AUD-331 needs a disposed flag, *i.e.* **an object-layout
+change**, so "plan for one compatible ticket plus one blocked design". That was a prediction.
+Measured (`build-probe/2160_layout_real.log`, `-fno-access-control` on the real type):
+
+```
+sizeof=160 alignof=8          blockSize_  104
+password_       8             disposed_   108   <- previously unused padding
+salt_          32             buffer_     112
+iterations_    56             block_      136
+hashAlgorithm_ 64             startIndex_ 144 / endIndex_ 152
+pre-existing members moved = 0
+```
+
+`buffer_` needs 8-byte alignment, so the four bytes after `blockSize_` were padding no member used.
+`sizeof` 160 → 160, `alignof` 8 → 8, **zero** pre-existing members moved, derived-class layout
+unchanged (no tail padding: 160 = 8 × 20), and `DeriveBytes` already declares
+`virtual void Dispose()`, so the override **fills an existing vtable slot**. Nothing in that
+namespace was ever approval-gated. The claim is now pinned by a test, not only by a document.
+
+### 3. Security-cryptography — the finding was narrower than the defect
+
+The audit names two sites. Direct measurement of **freed** storage — a replacement global
+`operator delete` snapshotting each block as it is released, against a deliberately uncleared
+96-byte control that reads 96 in **both** columns — found five more:
+`derivePads`' `keyPrime` local (the raw key, **even after `Dispose`**); `HashFinal`'s two working
+buffers (both pads, on **every** `ComputeHash`); the old key on replacement; plain destruction
+without `Dispose` (the ordinary C++ RAII path); and, once the long-key path was measured, a
+**36-byte** tail of the key inside the block buffer of the digest object that hashes an over-long
+key.
+
+| Reading | Before | After |
+|---|---|---|
+| key bytes recovered from a pad after `Dispose` | **32 of 32** | **0** |
+| `pendingMessage_` after `Dispose` | 40 | 0 |
+| freed storage after destruction — key / ipad / opad | 32 / 32 / 32 | 0 / 1 / 0 |
+| old key on replacement | 32 | 0 |
+| long-key (131 bytes) tail | 36 | 0 |
+| PBKDF2 password after `Dispose` / after destruction / after a **rejected** `iterations = 0` | 16 / 16 / 16 | 0 / 0 / 0 |
+| `GetBytes(4)` after `Dispose` | 4 bytes, **byte-identical to a fresh instance's continuation** | throws `ObjectDisposedException` |
+
+The residual `1`s are a single coincidental byte in a digest; a pad is 64 contiguous bytes.
+
+**`std::fill` was not an option, and that is measured.** GCC 13.3 at `-O2`, disassembled: a stack
+secret cleared with `std::fill` compiles to the `printf` tail call and **nothing else**; a heap
+secret cleared immediately before `operator delete` keeps **no** zero-store. The primitive is a
+`volatile` write loop — standard C++, no `#pragma`, no inline asm, no platform `#ifdef` — and both
+its variants keep a real `movb $0x0` loop.
+
+**A regression the fix itself could have introduced, and did not.** The new erasing destructors
+suppress the implicit move operations unless explicitly defaulted, and a suppressed move silently
+becomes a **copy**, leaving the *source* object holding a live key. All four operations are
+`= default`ed and pinned; the mutation that removes them fails exactly the two move tests.
+
+**One defect found by repairing rather than by the finding:** `getSaltProperty` computes
+`salt_.end() - 4`, so erasing the salt without also guarding that door would have swapped a
+disclosure defect for **undefined behaviour**. Guard and erasure had to land together; the mutation
+that removes the guard aborts the test process on an out-of-bounds write.
+
+### 4. Console — two repairs, one extension, one defect found by pinning
+
+Both findings carry a **managed probe result inside the audit itself**
+(`color=exception:System.ArgumentException`, `cursor=exception:System.ArgumentOutOfRangeException`),
+which is what made them actionable with `/rv` absent.
+
+- **SR-AUD-243 is worse than recorded.** `ansiColor` formats into `char buf[12]`, sized for the
+  0–15 domain, so `INT_MIN` emitted `ESC[-21474836` — **truncated mid-number, no terminating `m`**.
+  A terminal that receives an unterminated escape consumes the output that follows it, so the
+  consequence was not merely a wrong colour. GCC says the same statically under `-Wall -Wextra`;
+  the repository build does not surface it because no TU instantiates the setter with a
+  non-constant.
+- **A third defect, found by pinning rather than by repairing.** Because the review deliberately
+  enforces **no** upper cursor bound, `INTCS_MAX` is reachable — and `left + 1`, the
+  0-based-to-ANSI conversion, was **signed integer overflow** there. UBSan **2 reports → 0** after
+  widening the arithmetic. Same shape as #2156's undefined float-to-integer conversion, and it
+  would have been missed had the review either silently added a bound or declined to pin its
+  absence.
+- **Six adjacent doors were deliberately left alone.** `setCursorSizeProperty` outside 1–100,
+  `SetWindowSize`, `SetWindowPosition`, `SetBufferSize`, both buffer setters and `MoveBufferArea`
+  all accept negatives. .NET is believed to reject them, but no managed probe measured any of them,
+  so implementing them would be recollection. **#2166** owns the question — blocked on *evidence*,
+  not approval — and three `PIN_` tests hold the current behaviour so it cannot change silently.
+  The exception **message text** of both repairs rides along on #2166 for the same reason: their
+  *types* were probe-verified, their wording was not.
+
+### 5. Ticket outcomes
+
+| Ticket | Outcome | Commit |
+|---|---|---|
+| **#2158** security-cryptography review | **done** | `e8340b3` |
+| **#2159** SR-AUD-332, cause SC-A | **done** — +24 tests | `e7b7a5d` |
+| **#2160** SR-AUD-331, causes SC-B/SC-C | **done** — +21 tests, layout-neutral | `248c04b` |
+| **#2161** contract, pins, reconciliation | **done** — +9 tests | `be71f14` |
+| **#2162** console review | **done** | `3f29037` |
+| **#2163/#2164/#2165** SR-AUD-243/244 + contract | **done** — +15 tests | `cbf8e85` |
+| **#2166** deferred verification (six doors, cursor bound, message text) | **todo, inactive** — needs `/rv` or a managed probe | — |
+
+Namespace totals: `security-cryptography` **80 → 134** tests, 2 findings, 2 remediated, **0 open**;
+`console` **127 → 142** tests, 2 findings, 2 remediated, **0 open**.
+
+### 6. A new test-only access seam — the third in the repository
+
+`SharpRuntime::Testing::KeyMaterialAccess<T>`, declared by
+`System/Security/Cryptography/detail/SecureMemory.hpp`, befriended by `KeyedHashAlgorithm`, `HMAC`
+and `Rfc2898DeriveBytes`, defined in exactly one file
+(`modules/security-cryptography/tests/support/KeyMaterialSeam.hpp`).
+
+It is **required**, not convenient: erasure is not observable through any public API *by
+construction* — a type that let a caller read its own key-derived pads would be the defect — and
+the freed-storage recorder cannot separate "`Dispose()` erased it" from "`~HMAC()` erased it",
+since both leave the same zeroed block at the same moment, and the first is what SR-AUD-332 is
+about. Both halves of `CLAUDE.md`'s seam rule are satisfied:
+`scripts/check_version_seam_odr.py` (3 seams / 20 definitions) and
+`test/consumer/security_cryptography_key_material_negative.cpp` (10 sites, all rejected, baseline
+clean).
+
+One detail worth carrying forward: the checker **correctly rejected** two macros that both defined
+`KeyMaterialAccess<OwnerType>` with different bodies — exactly the divergence #1800 measured — so
+the `Rfc2898DeriveBytes` specialisation is written out literally rather than macro-generated.
+
+### 7. Honest limitations, stated rather than discovered later
+
+- The permanent crypto suite does **not** assert freed-storage state. Doing so needs a replacement
+  global `operator new`/`delete`, which would displace AddressSanitizer's own replacement and
+  weaken every other suite in the binary. That half is probe evidence, so the **destructor's**
+  erasure is pinned by the probe rather than by the suite.
+- Nothing claims OS-wide erasure. Swap, core dumps, register spills, `pendingMessage_` growth
+  reallocation and caller-held copies are all outside what the implementation can reach, and two
+  deliberate `SUCCEED()` tests record that boundary so a future change has to delete a test to
+  claim more.
+- **TSan was not run and is not claimed** for either namespace: neither documents a thread-safety
+  contract for a shared instance, so it is not a discriminating tool there.
+- Two mutations are recorded as **honest non-results**: reverting the reserve-once restructure is
+  invisible to the live-object seam, and swapping `SecureMemory::Clear` for `std::fill` survives
+  the tests because they read the buffer afterwards. The discriminating instruments for those are
+  the freed-storage probe and the disassembly, and they are named as such.
+
+### 8. Gate, tooling and process
+
+- **Build:** 0 errors, 0 warnings, `--parallel 2` throughout. **Maximum aggregate compiler
+  concurrency observed: 2** (`peak 2 job(s)` reported by the fixture checker; `cc1plus` sampled at
+  0 between runs and never above 2).
+- **Gate:** every one of the **37** executables run individually so a failure could not truncate
+  the sweep — **16,274 ran, 16,267 passed, 1 skipped, 6 failed**. The six are the same two measured
+  causes, re-verified this run: `ping_group_range = "1 0"` (5 `PingTests`, the real #1962 gap) and
+  `/proc/net/if_inet6` absent (1 `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`).
+  Neither was disabled or recategorised.
+- **`scripts/check_selective_components.sh`**: **passed**, ~12 minutes, one launched script, PID
+  **20391** captured via `$!`, verified with `ps -p`, waited on by exact PID, confirmed gone with
+  `cc1plus` at 0 before and after. No other compiler-producing task ran concurrently.
+- **`scripts/local_ci_check.sh build`**: boundaries, catalogue, seams (3/20) and fixtures (12/104)
+  all OK, build clean, then it **stops at the known Ping failure** — the expected stop, reported
+  rather than worked around.
+- All eight required validators pass. `git diff --check` clean.
+- **Doxygen absent, `ccache` absent, `/rv` absent** — none installed. Three tracked `__pycache__`
+  files unchanged; every Python invocation used `PYTHONDONTWRITEBYTECODE=1`.
+- Build directories: `build/` 1.8 G, `build-probe/` 37 M, `build-tmp/` 13 M. No new directory name
+  was invented; every probe is prefixed by its ticket number inside `build-probe/`.
+
+### 9. Next measured unit
+
+Re-derived after this batch. Remaining **unreviewed** modules with ≥ 2 open findings: `core` (72 —
+not a namespace, already carved by seven `CCF-*` plans), `time-zone` (7, **zero high**, mostly
+`/rv`- and tz-database-bound), `globalization` (7, one high, needs `/rv` **and** ICU data),
+`numerics` (4, zero high), `xml-linq` (4, whose only high is the blocked CCF-019),
+`net-network-information` (3, zero high, and its executable cannot pass here), `scripts` (3) and
+`tests` (2).
+
+**Recommended next: `modules/numerics`** — 4 open findings, zero high but zero blocked, no seam or
+layout entanglement, and only partial `/rv` dependence, so a bounded full close is plausible.
+`time-zone` is the alternative if a larger unit is wanted, but 3 of its 7 need a real tz database
+plus .NET parity that `/rv` would have to supply.
+
+Beyond the unreviewed set, the largest remaining actionable pool is **`threading` (17 open, 6
+high, 0 design-complete)** — already reviewed, but its four design tickets (#1956–#1959) are all
+blocked, so it is an approval decision rather than an implementation batch.
 
 ## Batch record — `modules/io-compression` finished (#2148, #2149, #2151) and `modules/timers` reviewed and closed (#2153, #2154, #2156, #2157)
 

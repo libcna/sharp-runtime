@@ -1,5 +1,80 @@
 # Sharp Runtime plan
 
+*Last verified: 2026-08-09 (later still) — branch `claude/remediation-batch-1804-namespace-b1yjh5`,
+the harness-designated branch, continued from its own tip `894135f`. **Pushed after every commit**,
+per `CLAUDE.md` rule 13 — six commits, six pushes, all normal fast-forwards. No merge, rebase, tag,
+force-push, PR, publication, amend or history rewrite; all commits unsigned. This batch **fully
+closed `modules/security-cryptography`** — #2158 (the review), #2159 (SR-AUD-332: a disposed HMAC
+still yielded 32 of 32 key bytes from a retained pad, and measurement widened the two sites the
+finding names to seven), #2160 (SR-AUD-331: a disposed PBKDF2 kept deriving output byte-identical
+to a fresh instance's continuation) and #2161 (the contract and the pins) — and then **fully closed
+`modules/console`**: #2162 (the review), #2163/#2164/#2165 (SR-AUD-243/244, the colour and cursor
+domains, plus the contract). **The inherited claim that SR-AUD-331 required an object-layout change
+is withdrawn on measurement**: the flag fits an existing four-byte padding hole at offset 108, so
+`sizeof` stays 160, `alignof` stays 8, zero pre-existing members move, and `Dispose` was already
+virtual — so what was predicted as "one compatible ticket plus one blocked design" became **two
+compatible tickets and no approval gate anywhere in either namespace**. Audit **160 remediated /
+204 confirmed / 364 total**, `confirmed (design-complete)` **50**; **no `SR-AUD-*` identifier
+created — numbering frozen at 364.** Gate **16,274 across 37 executables, 16,267 passing, 1 skipped,
+6 failing** for the same two measured causes (+69). Graph **41 / 92**, seams **3 / 20** (a new
+`KeyMaterialAccess` seam), negative fixtures **12 / 104**. **Doxygen, `ccache` and `/rv` all
+absent.** CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted; #1773, #1962, #2150, #2152 and
+#2155 unchanged. One new inactive ticket, **#2166**, owns six unvalidated Console doors, the cursor
+upper bound and both repairs' exception message text — blocked on evidence, not approval. Maximum
+aggregate compiler parallelism **2 jobs**.*
+
+## 2026-08-09 (later still) — `modules/security-cryptography` fully closed (#2158–#2161) and `modules/console` fully closed (#2162–#2165)
+
+**security-cryptography.** Selected over larger units because it was the only unreviewed unit whose
+open findings were **100 % high**, its consequence class is disclosure of a caller's key rather than
+a wrong answer, and it has zero `/rv` dependence. Both findings were narrower than the defect. A
+replacement global `operator delete` snapshotting each block as it is released — against a
+deliberately uncleared 96-byte control that read 96 in **both** columns — found five sites beyond
+the two the audit names: `derivePads`' `keyPrime` local held the raw key *even after `Dispose`*,
+`HashFinal`'s two working buffers leaked both pads on **every** `ComputeHash`, key replacement
+released the old key unerased, plain destruction without `Dispose` erased nothing at all, and a
+131-byte key left a 36-byte tail of itself inside the digest object that hashes it. All read 0
+afterwards. **`std::fill` was not an option and that is measured, not assumed**: at `-O2` GCC 13.3
+deletes it outright, both on a dying stack buffer and immediately before `operator delete`, so the
+primitive is a `volatile` write loop whose surviving store loop is visible in the disassembly. The
+fix could itself have introduced a regression — the new erasing destructors suppress the implicit
+moves unless explicitly defaulted, and a suppressed move becomes a **copy** that leaves the source
+holding a live key — so all four operations are `= default`ed and pinned, and the mutation that
+removes them fails exactly the two move tests. Repairing SR-AUD-331 exposed that `getSaltProperty`
+computes `salt_.end() - 4`, so erasing the salt without guarding that door would have swapped a
+disclosure defect for undefined behaviour; guard and erasure had to land together. **Namespace
+80 → 134 tests; 2 findings, 2 remediated, 0 open, nothing gated.**
+
+**console.** Both findings carry a managed probe result inside the audit itself, which is what made
+them actionable with `/rv` absent. SR-AUD-243 is worse than recorded: `ansiColor` formats into
+`char buf[12]`, sized for the 0–15 domain, so `INT_MIN` emitted `ESC[-21474836` — truncated
+mid-number with **no terminator** — and a terminal that receives an unterminated escape consumes the
+output that follows it. A third defect was found by **pinning** rather than by repairing: because
+the review deliberately enforces no upper cursor bound, `INTCS_MAX` is reachable and `left + 1` was
+signed integer overflow there (UBSan 2 → 0 after widening). Six adjacent doors accept the same shape
+of invalid input and were **deliberately left alone** — no managed probe measured any of them, so
+implementing them would be recollection — and are pinned by three `PIN_` tests under #2166.
+**Namespace 127 → 142 tests; 2 findings, 2 remediated, 0 open.**
+
+**A third test-only access seam.** `SharpRuntime::Testing::KeyMaterialAccess<T>` was **required**,
+not convenient: erasure is unobservable through any public API by construction, and the
+freed-storage recorder cannot separate "`Dispose()` erased it" from "`~HMAC()` erased it" — both
+leave the same zeroed block at the same moment, and the first is what SR-AUD-332 is about. Both
+halves of `CLAUDE.md`'s seam rule are satisfied. `scripts/check_version_seam_odr.py` **correctly
+rejected** two macros that each defined `KeyMaterialAccess<OwnerType>` with a different body —
+exactly the divergence #1800 measured — so the `Rfc2898DeriveBytes` specialisation is written out
+literally.
+
+**Honest limitations, recorded rather than left to be discovered.** The permanent crypto suite does
+not assert freed-storage state, because installing a replacement global `operator new`/`delete` in
+that executable would displace AddressSanitizer's own and weaken every other suite in the binary; so
+the **destructor's** erasure is pinned by the probe, not by the suite. Nothing claims OS-wide
+erasure. TSan was not run and is not claimed for either namespace — neither documents a
+thread-safety contract for a shared instance. Two mutations are recorded as **honest non-results**:
+reverting the reserve-once restructure is invisible to the live-object seam, and swapping the
+primitive for `std::fill` survives the tests because they read the buffer afterwards; the
+discriminating instruments there are the freed-storage probe and the disassembly.
+
 *Last verified: 2026-08-09 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
 harness-designated branch, continued from its own tip `6676a08`. **Pushed after every commit**, per
 `CLAUDE.md` rule 13 and the harness branch policy; the tension with the batch brief's "do not push
