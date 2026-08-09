@@ -28,6 +28,18 @@
     2026-07-28, when the user lowered it to **three**, and **two** from 2026-08-01;
     historical ticket records that state a four- or three-job measurement describe what was
     correct under the then-current rule and are not retro-edited.
+13. **Push immediately after every commit.** A commit is not finished until it is on the
+    remote. Run `git push -u origin <current-branch>` as the next action after each `git
+    commit` — do not batch commits up for a later push, and do not end a turn with the local
+    branch ahead of its upstream. This was introduced on 2026-08-09 after 108 commits (three
+    to nine days old, +42,818/−1,051 across 277 files) were found sitting unpushed on
+    `claude/remediation-batch-1804-namespace-b1yjh5`; the container that held them is
+    ephemeral, so that backlog was one reclaim away from being lost. The rule does **not**
+    relax rules 3 and 9: the push target is the session's designated working branch, and
+    `develop`, `master` and tags still need explicit per-action user approval. If a push
+    fails on a network error, retry up to four times with exponential backoff (2s, 4s, 8s,
+    16s); if it still fails, say so explicitly rather than leaving the commit silently
+    unpushed.
 
 ---
 
