@@ -38,3 +38,45 @@ module omits.
 ## Final assessment
 
 SR-AUD-256 and SR-AUD-259 are confirmed. No source or test changed.
+
+---
+
+## Correction and remediation record — ticket #2146, 2026-08-09
+
+**SR-AUD-256 is `remediated`.** The original evidence above is retained unchanged.
+
+Every public raw-pointer door now validates before zlib sees a length, through one module-local
+choke point, `System::IO::Compression::Detail::ValidateSource` / `ValidateDestination`
+(`CompressionArgumentValidation.hpp`). The rule, the exception types and the messages are
+deliberately identical to `System::IO::Hashing::Detail` (#2141/#2142), which repaired the same
+idiom in the sibling module.
+
+**Three corrections to the finding's extent, all measured** (`build-probe/2146_probe1_before.log`,
+`build-probe/2146_probe2.log`):
+
+1. **The source-side defect is in all three encoders, not only `DeflateEncoder`.** The 63-case
+   matrix appears to show `GZipEncoder` and `ZLibEncoder` returning normally for
+   `sourceLength = -1`. That is an artefact of the probe's **1-byte destination**: a gzip or zlib
+   stream must emit a header first, so `deflate()` fills that byte and returns before it reads the
+   source. Raw deflate has no header. With a 4096-byte destination **all three crash**. The
+   destination size decides which over-run fires first, not whether the defect is present.
+2. **The three decoders never crashed** — 21 of 21 cases returned normally, because `inflate()`
+   rejects one byte of garbage with `Z_DATA_ERROR` before consuming the impossible `avail_in`.
+   That is luck, not a guard: valid compressed input has no such early exit, and
+   `bytesConsumed = sourceLength - avail_in` reports a meaningless count either way. They are
+   repaired on those terms.
+3. **Null handling already differed between the two halves**, which the report does not mention:
+   every encoder null case threw (6/6), every decoder null case returned normally (6/6).
+
+**Evidence.** 63 cases: **15 crashes → 0**, with all nine controls (`valid 1→big`, `srcLen=0`)
+unchanged, and the six previously-masked large-destination cases now throwing. ASan reported a
+65,536-byte READ past a one-byte source and a WRITE past a one-byte destination before; none after.
+
+**Tests: +35** (`CompressionBoundsTests.cpp`), typed over all three encoders and all three
+decoders, covering both destination sizes, both axes, null-with-positive-length, the legal
+null-with-zero-length, exact-size destinations, no-partial-modification of out-parameters, and —
+as the discriminating controls — round-trip correctness across eight representative inputs and
+default-option byte stability. `SharpRuntimeTests_IO_Compression` **40 → 75**.
+
+**Consequences.** No public signature, `noexcept`, virtual, vtable, data member or object-layout
+change. SR-AUD-258 and SR-AUD-259 remain `confirmed`, owned by #2148 and #2149/#2150.

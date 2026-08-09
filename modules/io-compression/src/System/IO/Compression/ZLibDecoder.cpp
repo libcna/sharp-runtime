@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include "System/IO/Compression/CompressionArgumentValidation.hpp"
 #include "System/IO/Compression/ZLibDecoder.hpp"
 #include "System/ObjectDisposedException.hpp"
 
@@ -23,6 +24,17 @@ namespace System::IO::Compression {
                                             intcs& bytesConsumed, intcs& bytesWritten)
     {
         if (disposed_) throw System::ObjectDisposedException("ZLibDecoder");
+
+        // Both lengths reach zlib as `static_cast<uInt>` below, so a negative value became an
+        // enormous count. The decoders did NOT crash in the measured matrix -- all 21 cases
+        // returned normally -- but that is luck, not a guard: inflate() rejects one byte of
+        // garbage with Z_DATA_ERROR before it consumes the impossible avail_in. On VALID
+        // compressed input there is no such early exit, and `bytesConsumed = sourceLength -
+        // avail_in` with a negative sourceLength reports a meaningless byte count either way.
+        // The decoders also accepted a NULL buffer with a positive length, which the encoders
+        // already rejected (SR-AUD-256, ticket #2146).
+        Detail::ValidateSource(source, sourceLength);
+        Detail::ValidateDestination(destination, destinationLength);
         return deflateDecoder_.Decompress(source, sourceLength, destination, destinationLength, bytesConsumed, bytesWritten);
     }
 

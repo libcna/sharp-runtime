@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include "System/IO/Compression/CompressionArgumentValidation.hpp"
 #include "System/IO/Compression/DeflateEncoder.hpp"
 #include "System/IO/Compression/ZLibException.hpp"
 #include "System/IO/IOException.hpp"
@@ -125,6 +126,19 @@ namespace System::IO::Compression {
     {
         if (disposed_) throw System::ObjectDisposedException("DeflateEncoder");
 
+        // Validated BEFORE the output parameters are zeroed and before the state shortcuts below,
+        // so a rejected call leaves the caller's bytesConsumed/bytesWritten exactly as they were
+        // and cannot be mistaken for "a successful operation that produced nothing".
+        //
+        // This is the choke point for the whole module's encoder surface: GZipEncoder::Compress and
+        // ZLibEncoder::Compress are two-line forwarders to this function, and all three
+        // TryCompress overloads on all three types funnel through it too. Both lengths reach zlib
+        // as `static_cast<uInt>` below, so a negative value became an enormous count and zlib ran
+        // off the caller's allocation -- ASan reported a 65,536-byte READ past a one-byte source
+        // and a WRITE past a one-byte destination (SR-AUD-256, ticket #2146).
+        Detail::ValidateSource(source, sourceLength);
+        Detail::ValidateDestination(destination, destinationLength);
+
         bytesConsumed = 0;
         bytesWritten = 0;
 
@@ -164,6 +178,10 @@ namespace System::IO::Compression {
 
     OperationStatus DeflateEncoder::Flush(bytecs* destination, intcs destinationLength, intcs& bytesWritten) {
         if (disposed_) throw System::ObjectDisposedException("DeflateEncoder");
+
+        // Flush has no source, but its destination reaches zlib through the same unsigned cast,
+        // and `Flush(dst, -1, w)` was one of the fifteen measured crashes.
+        Detail::ValidateDestination(destination, destinationLength);
 
         bytesWritten = 0;
         if (finished_) return OperationStatus::Done;
