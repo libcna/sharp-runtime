@@ -11,14 +11,43 @@ namespace System::Timers {
 
 namespace {
     constexpr double kMaxInterval = 2147483647.0; // int32 max, matching .NET's validation
+
+    // Ticket #2156 (cause TM-C). ONE domain check, shared by all three doors that write interval_.
+    //
+    // Before this, `Timer(double)` applied the upper bound and `setIntervalProperty` did not, so the
+    // setter accepted +inf, 2147483648 and 3e9 -- three values the constructor rejects -- and both
+    // doors accepted NaN, because `value <= 0` and `std::ceil(value) > kMaxInterval` are BOTH false
+    // for a NaN. Every value in that gap then reached
+    // `static_cast<SharpRuntime::intcs>(std::ceil(interval_))` below, a floating-to-integral
+    // conversion of a value not representable in the destination: undefined behaviour per
+    // [conv.fpint]/1, confirmed by
+    //   Timer.cpp:51:56: runtime error: nan is outside the range of representable values of type 'int'
+    // (build-probe/2153_probe2_fco.log). It surfaced -- when it surfaced at all -- as
+    // ArgumentOutOfRangeException naming `dueTime`, an internal parameter of the PRIVATE
+    // System::Threading::Timer dependency, thrown from Start() rather than from the door that
+    // accepted the value.
+    //
+    // Note for future sanitizer claims in this repository: GCC's `-fsanitize=undefined` does NOT
+    // include `float-cast-overflow`. It must be requested by name, which is why this survived.
+    //
+    // DELIBERATE NARROWING, disclosed: .NET's own setter is `if (value <= 0) throw`, which a NaN
+    // also passes, so .NET may accept NaN and convert it to a defined value. `/rv` is absent here,
+    // so that cannot be confirmed. Rejecting is chosen because undefined behaviour is not an
+    // option, and it is the same answer #2146 gave for a negative length reaching zlib.
+    //
+    // The exception type, message shape and paramName of every value the constructor already
+    // rejected are preserved exactly.
+    void validateInterval(double value, const char* paramName) {
+        if (std::isnan(value) || value <= 0 || std::ceil(value) > kMaxInterval) {
+            throw System::ArgumentException("Invalid value for interval: " + std::to_string(value), paramName);
+        }
+    }
 }
 
 Timer::Timer() = default;
 
 Timer::Timer(double interval) : Timer() {
-    if (interval <= 0 || std::ceil(interval) > kMaxInterval) {
-        throw System::ArgumentException("Invalid value for interval: " + std::to_string(interval), "interval");
-    }
+    validateInterval(interval, "interval");
     interval_ = std::ceil(interval);
 }
 
@@ -34,9 +63,8 @@ void Timer::setAutoResetProperty(bool value) {
 }
 
 void Timer::setIntervalProperty(double value) {
-    if (value <= 0) {
-        throw System::ArgumentException("Invalid value for interval: " + std::to_string(value), "value");
-    }
+    // Ticket #2156: the same domain the constructor applies, with this door's own paramName kept.
+    validateInterval(value, "value");
     interval_ = value;
     updateTimer();
 }

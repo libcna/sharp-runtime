@@ -80,7 +80,13 @@ namespace System::Timers {
 
         /**
          * @brief Constructs with the given interval, in milliseconds.
-         * @throws System::ArgumentException if @p interval is not in (0, INT32_MAX].
+         *
+         * The accepted domain is `(0, INT32_MAX]`, and **`NaN` is rejected** (ticket #2156): all
+         * three doors that write the interval share one check, because a value outside that domain
+         * later reaches a floating-to-integral conversion that is undefined behaviour rather than a
+         * diagnostic.
+         *
+         * @throws System::ArgumentException if @p interval is `NaN` or not in (0, INT32_MAX].
          */
         explicit Timer(double interval);
 
@@ -102,9 +108,28 @@ namespace System::Timers {
         /** @brief Starts (true) or stops (false) the timer. */
         void setEnabledProperty(bool value);
 
-        /** @return The interval, in milliseconds, at which to raise Elapsed. */
+        /**
+         * @return The interval, in milliseconds, at which to raise Elapsed.
+         *
+         * @note The constructor stores `std::ceil(interval)` while this setter stores the value
+         * verbatim, so `Timer(0.5).getIntervalProperty()` is `1` but a timer whose interval was
+         * *set* to `0.5` reports `0.5`. Both schedule the same 1 ms tick, because the schedule is
+         * derived with `std::ceil` at that point. Recorded and pinned by a test rather than
+         * changed: no finding names it, and either answer is a public observable change.
+         */
         [[nodiscard]] double getIntervalProperty() const { return interval_; }
-        /** @brief Sets the interval, in milliseconds. @throws System::ArgumentException if not positive. */
+        /**
+         * @brief Sets the interval, in milliseconds.
+         *
+         * Applies exactly the constructor's domain (ticket #2156). It previously checked only
+         * `value <= 0`, so it accepted `+inf`, `2147483648` and `3e9` — three values the
+         * constructor rejects — and both doors accepted `NaN`; every value in that gap then
+         * reached an undefined float-to-integer conversion and surfaced, if at all, as an
+         * `ArgumentOutOfRangeException` naming an internal parameter of a private dependency,
+         * thrown from `Start()`.
+         *
+         * @throws System::ArgumentException if @p value is `NaN` or not in (0, INT32_MAX].
+         */
         void setIntervalProperty(double value);
 
         /** @brief Starts raising the Elapsed event (equivalent to setEnabledProperty(true)). */

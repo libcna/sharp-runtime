@@ -390,3 +390,50 @@ is *not* reached when the first throws, because the exception unwinds out of
 also stops the rest of the invocation list.
 
 **SR-AUD-238 is `remediated`.**
+
+---
+
+## 15. Implementation record — #2156 (cause TM-C, post-audit defect)
+
+**Repair.** One file-local `validateInterval(value, paramName)`, applied by `Timer(double)` and
+`setIntervalProperty` — and therefore by `Timer(TimeSpan)`, which delegates. It adds
+`std::isnan(value)` to the constructor's existing `(0, INT32_MAX]` test, and gives the setter that
+whole test instead of its `value <= 0` fragment. Each door keeps its own `paramName`
+(`"interval"` / `"value"`) and the message shape is unchanged, so no diagnostic a caller already
+saw changes.
+
+**Before / after — the 10-value × 3-door table.**
+
+| Value | ctor before | setter before | then `Start()` before | ctor after | setter after |
+|---|---|---|---|---|---|
+| `0`, `-1`, `-inf` | reject | reject | — | reject | reject |
+| `0.5`, `1`, `2147483647` | accept | accept | works | accept | accept |
+| **`NaN`** | **accept** | **accept** | `AOORE("dueTime")` | **reject** | **reject** |
+| **`+inf`** | reject | **accept** | `AOORE("dueTime")` | reject | **reject** |
+| **`2147483648`** | reject | **accept** | `AOORE("dueTime")` | reject | **reject** |
+| **`3e9`** | reject | **accept** | `AOORE("dueTime")` | reject | **reject** |
+
+`float-cast-overflow` over the whole domain matrix: **1 report before, 0 after.**
+
+**Mutation testing — both count.**
+
+| # | Mutation | Result | Counts? |
+|---|---|---|---|
+| E | drop the `std::isnan` test | **3 clean failures** — both door tables and the "a rejected write leaves the interval intact" pin | **Yes** |
+| F | restore the setter's old `value <= 0` check | **2 clean failures** — the setter table and the same pin; the constructor table stays green, which is exactly the asymmetry the defect was | **Yes** |
+
+**Consequences.** +8 tests; `SharpRuntimeTests_Timers` **19 → 27**. No public signature, `noexcept`,
+virtual, vtable, data member or object-layout change; graph unchanged at **41 / 92**.
+
+**Narrowing, deliberate and disclosed.** Four values that used to be accepted by the setter now
+throw. Three of them (`+inf`, `2147483648`, `3e9`) were already rejected by the constructor, so the
+change makes one type self-consistent rather than inventing a rule. The fourth, `NaN`, is a genuine
+narrowing at **both** doors: .NET's own setter is `if (value <= 0) throw`, which a `NaN` also
+passes, so .NET may accept it and convert it to a defined value. `/rv` is absent, so that could not
+be confirmed — and it does not change the answer, because the current behaviour here is undefined
+rather than merely different.
+
+**Pinned, not changed.** The constructor stores `std::ceil(interval)` while the setter stores the
+value verbatim, so `Timer(0.5)` reports an interval of `1` and a timer *set* to `0.5` reports `0.5`,
+even though both schedule the same 1 ms tick. No finding names it and either answer is a public
+observable change, so it is recorded in the header and pinned by a test.
