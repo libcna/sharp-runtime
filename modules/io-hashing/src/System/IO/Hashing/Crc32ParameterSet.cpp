@@ -67,7 +67,7 @@ namespace System::IO::Hashing {
         // The single choke point for every Crc32 door as well as this public one: Crc32::Append()
         // and Crc32::HashToUInt32() both land here, and Crc32::Hash()/TryHash() reach it through
         // HashToUInt32(). Validating here is what makes a rejected Append() leave crc_ untouched.
-        Detail::ValidateLength(length);
+        Detail::ValidateSource(source, length);
         uintcs crc = value;
         if (reflectValues_) {
             for (intcs i = 0; i < length; ++i) {
@@ -84,6 +84,9 @@ namespace System::IO::Hashing {
     }
 
     void Crc32ParameterSet::WriteCrcToSpan(uintcs crc, bytecs* destination) const {
+        // A public door with no capacity argument at all -- the size is implied by the
+        // algorithm, so a null check is the only validation available to it.
+        Detail::ValidateNonNullDestination(destination);
         if (reflectValues_) {
             destination[0] = static_cast<bytecs>(crc);
             destination[1] = static_cast<bytecs>(crc >> 8);

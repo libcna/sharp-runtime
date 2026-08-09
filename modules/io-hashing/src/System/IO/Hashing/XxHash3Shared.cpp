@@ -268,7 +268,16 @@ namespace System::IO::Hashing::Detail::XxHash3Shared {
         // construction path, this port's raw-pointer-plus-intcs-length API has no such inherent
         // guarantee, so it must be validated explicitly at this shared entry point (used by both
         // XxHash3::Append and XxHash128::Append).
-        ValidateLength(length);
+        ValidateSource(source, length);
+        // A null pointer with a length of zero is a legal empty append (the control in
+        // section 4.1 of the review plan), so it must NOT be rejected -- but it must also not
+        // reach the pointer arithmetic and memcpy below. Passing a null pointer to memcpy is
+        // undefined even when the count is zero, and UBSan reports exactly that at the small-
+        // input path. Returning here is semantically identical: adding zero to the running
+        // length and copying zero bytes are both no-ops.
+        if (length == 0) {
+            return;
+        }
         state.TotalLength += static_cast<ulongcs>(length);
 
         bytecs* buffer = state.Buffer;

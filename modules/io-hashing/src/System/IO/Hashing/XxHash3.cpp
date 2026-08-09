@@ -2,7 +2,6 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/XxHash3.hpp"
-#include "System/ArgumentException.hpp"
 #include "System/IO/Hashing/HashingArgumentValidation.hpp"
 
 namespace System::IO::Hashing {
@@ -163,7 +162,7 @@ namespace System::IO::Hashing {
             // the length-dispatch logic below -- a severe out-of-bounds read, not just abstract
             // UB. This is the single choke point for all four one-shot public entry points
             // (Hash x2, TryHash, HashToUInt64).
-            Detail::ValidateLength(length);
+            Detail::ValidateSource(source, length);
             uintcs len = static_cast<uintcs>(length);
             if (len <= 16) return HashLength0To16(source, len, seed);
             if (len <= 128) return HashLength17To128(source, len, seed);
@@ -218,9 +217,7 @@ namespace System::IO::Hashing {
     }
 
     intcs XxHash3::Hash(const bytecs* source, intcs length, bytecs* destination, intcs destinationLength, longcs seed) {
-        if (destinationLength < Size) {
-            throw System::ArgumentException("Destination is too short.", "destination");
-        }
+        Detail::ValidateDestination(destination, destinationLength, Size);
         ulongcs hash = HashToUInt64(source, length, seed);
         for (int i = 0; i < 8; ++i) destination[i] = static_cast<bytecs>(hash >> (56 - 8 * i));
         return Size;
@@ -228,7 +225,7 @@ namespace System::IO::Hashing {
 
     bool XxHash3::TryHash(const bytecs* source, intcs length, bytecs* destination, intcs destinationLength,
                           intcs& bytesWritten, longcs seed) {
-        if (destinationLength < Size) {
+        if (!Detail::TryValidateDestination(destination, destinationLength, Size)) {
             bytesWritten = 0;
             return false;
         }

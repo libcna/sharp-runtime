@@ -2,7 +2,6 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/Adler32.hpp"
-#include "System/ArgumentException.hpp"
 #include "System/IO/Hashing/HashingArgumentValidation.hpp"
 
 namespace System::IO::Hashing {
@@ -18,7 +17,7 @@ namespace System::IO::Hashing {
         // makes a rejected Append() leave adler_ untouched -- the throw happens before the
         // caller's `adler_ = Update(...)` assignment can run.
         uintcs Update(uintcs adler, const bytecs* source, intcs length) {
-            Detail::ValidateLength(length);
+            Detail::ValidateSource(source, length);
             if (length == 0) return adler;
 
             uintcs s1 = adler & 0xFFFFu;
@@ -75,7 +74,7 @@ namespace System::IO::Hashing {
     }
 
     bool Adler32::TryHash(const bytecs* source, intcs length, bytecs* destination, intcs destinationLength, intcs& bytesWritten) {
-        if (destinationLength < Size) {
+        if (!Detail::TryValidateDestination(destination, destinationLength, Size)) {
             bytesWritten = 0;
             return false;
         }
@@ -85,9 +84,7 @@ namespace System::IO::Hashing {
     }
 
     intcs Adler32::Hash(const bytecs* source, intcs length, bytecs* destination, intcs destinationLength) {
-        if (destinationLength < Size) {
-            throw System::ArgumentException("Destination is too short.", "destination");
-        }
+        Detail::ValidateDestination(destination, destinationLength, Size);
         WriteUInt32BigEndian(HashToUInt32(source, length), destination);
         return Size;
     }

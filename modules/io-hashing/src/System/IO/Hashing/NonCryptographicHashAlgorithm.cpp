@@ -2,8 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/NonCryptographicHashAlgorithm.hpp"
-#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/IO/Hashing/HashingArgumentValidation.hpp"
 
 namespace System::IO::Hashing {
 
@@ -21,7 +21,7 @@ namespace System::IO::Hashing {
     }
 
     void NonCryptographicHashAlgorithm::ThrowDestinationTooShort() {
-        throw System::ArgumentException("Destination is too short.", "destination");
+        Detail::ThrowDestinationTooShort();
     }
 
     void NonCryptographicHashAlgorithm::Append(const std::vector<bytecs>& source) {
@@ -43,7 +43,7 @@ namespace System::IO::Hashing {
     }
 
     bool NonCryptographicHashAlgorithm::TryGetCurrentHash(bytecs* destination, intcs destinationLength, intcs& bytesWritten) const {
-        if (destinationLength < hashLengthInBytes_) {
+        if (!Detail::TryValidateDestination(destination, destinationLength, hashLengthInBytes_)) {
             bytesWritten = 0;
             return false;
         }
@@ -53,9 +53,7 @@ namespace System::IO::Hashing {
     }
 
     intcs NonCryptographicHashAlgorithm::GetCurrentHash(bytecs* destination, intcs destinationLength) const {
-        if (destinationLength < hashLengthInBytes_) {
-            ThrowDestinationTooShort();
-        }
+        Detail::ValidateDestination(destination, destinationLength, hashLengthInBytes_);
         GetCurrentHashCore(destination);
         return hashLengthInBytes_;
     }
@@ -67,7 +65,7 @@ namespace System::IO::Hashing {
     }
 
     bool NonCryptographicHashAlgorithm::TryGetHashAndReset(bytecs* destination, intcs destinationLength, intcs& bytesWritten) {
-        if (destinationLength < hashLengthInBytes_) {
+        if (!Detail::TryValidateDestination(destination, destinationLength, hashLengthInBytes_)) {
             bytesWritten = 0;
             return false;
         }
@@ -77,9 +75,7 @@ namespace System::IO::Hashing {
     }
 
     intcs NonCryptographicHashAlgorithm::GetHashAndReset(bytecs* destination, intcs destinationLength) {
-        if (destinationLength < hashLengthInBytes_) {
-            ThrowDestinationTooShort();
-        }
+        Detail::ValidateDestination(destination, destinationLength, hashLengthInBytes_);
         GetHashAndResetCore(destination);
         return hashLengthInBytes_;
     }

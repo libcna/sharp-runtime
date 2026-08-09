@@ -2,7 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/Crc64.hpp"
-#include "System/ArgumentException.hpp"
+#include "System/IO/Hashing/HashingArgumentValidation.hpp"
 #include "System/ArgumentNullException.hpp"
 
 namespace System::IO::Hashing {
@@ -62,9 +62,7 @@ namespace System::IO::Hashing {
 
     intcs Crc64::Hash(const std::shared_ptr<Crc64ParameterSet>& parameterSet,
                       const bytecs* source, intcs length, bytecs* destination, intcs destinationLength) {
-        if (destinationLength < Size) {
-            throw System::ArgumentException("Destination is too short.", "destination");
-        }
+        Detail::ValidateDestination(destination, destinationLength, Size);
         const ulongcs hash = HashToUInt64(parameterSet, source, length);
         parameterSet->WriteCrcToSpan(hash, destination);
         return Size;
@@ -76,7 +74,7 @@ namespace System::IO::Hashing {
 
     bool Crc64::TryHash(const std::shared_ptr<Crc64ParameterSet>& parameterSet,
                         const bytecs* source, intcs length, bytecs* destination, intcs destinationLength, intcs& bytesWritten) {
-        if (destinationLength < Size) {
+        if (!Detail::TryValidateDestination(destination, destinationLength, Size)) {
             bytesWritten = 0;
             return false;
         }

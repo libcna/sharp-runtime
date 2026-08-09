@@ -2,7 +2,6 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/XxHash64.hpp"
-#include "System/ArgumentException.hpp"
 #include "System/IO/Hashing/HashingArgumentValidation.hpp"
 #include <cstring>
 
@@ -58,7 +57,16 @@ namespace System::IO::Hashing {
     void XxHash64::Reset() { totalLength_ = 0; bufLen_ = 0; initState(); }
 
     void XxHash64::Append(const bytecs* source, intcs length) {
-        Detail::ValidateLength(length);
+        Detail::ValidateSource(source, length);
+        // A null pointer with a length of zero is a legal empty append (the control in
+        // section 4.1 of the review plan), so it must NOT be rejected -- but it must also not
+        // reach the pointer arithmetic and memcpy below. Passing a null pointer to memcpy is
+        // undefined even when the count is zero, and UBSan reports exactly that at the small-
+        // input path. Returning here is semantically identical: adding zero to the running
+        // length and copying zero bytes are both no-ops.
+        if (length == 0) {
+            return;
+        }
         totalLength_ += static_cast<ulongcs>(length);
         const bytecs* p   = source;
         const bytecs* end = source + length;
@@ -134,9 +142,7 @@ namespace System::IO::Hashing {
     }
 
     intcs XxHash64::Hash(const bytecs* source, intcs length, bytecs* destination, intcs destinationLength, longcs seed) {
-        if (destinationLength < Size) {
-            throw System::ArgumentException("Destination is too short.", "destination");
-        }
+        Detail::ValidateDestination(destination, destinationLength, Size);
         XxHash64 h(seed);
         h.Append(source, length);
         h.GetCurrentHashCore(destination);
@@ -145,7 +151,7 @@ namespace System::IO::Hashing {
 
     bool XxHash64::TryHash(const bytecs* source, intcs length, bytecs* destination, intcs destinationLength,
                            intcs& bytesWritten, longcs seed) {
-        if (destinationLength < Size) {
+        if (!Detail::TryValidateDestination(destination, destinationLength, Size)) {
             bytesWritten = 0;
             return false;
         }

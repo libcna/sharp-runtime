@@ -69,7 +69,7 @@ namespace System::IO::Hashing {
         // The single choke point for every Crc64 door as well as this public one: Crc64::Append()
         // and Crc64::HashToUInt64() both land here, and Crc64::Hash()/TryHash() reach it through
         // HashToUInt64(). Validating here is what makes a rejected Append() leave crc_ untouched.
-        Detail::ValidateLength(length);
+        Detail::ValidateSource(source, length);
         ulongcs crc = value;
         if (reflectValues_) {
             for (intcs i = 0; i < length; ++i) {
@@ -86,6 +86,9 @@ namespace System::IO::Hashing {
     }
 
     void Crc64ParameterSet::WriteCrcToSpan(ulongcs crc, bytecs* destination) const {
+        // A public door with no capacity argument at all -- the size is implied by the
+        // algorithm, so a null check is the only validation available to it.
+        Detail::ValidateNonNullDestination(destination);
         if (reflectValues_) {
             for (int i = 0; i < 8; ++i) destination[i] = static_cast<bytecs>(crc >> (8 * i));
         } else {

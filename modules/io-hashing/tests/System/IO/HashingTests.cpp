@@ -934,6 +934,42 @@ namespace {
 
     constexpr int32_t kNegativeLengths[] = {-1, -2, INT32_MIN};
 
+    // EXPECT_THROW(..., System::ArgumentException) is NOT strict enough for a capacity check:
+    // ArgumentNullException AND ArgumentOutOfRangeException both DERIVE from ArgumentException,
+    // so a door that reported the wrong one of the three would still satisfy it. Every pin whose
+    // point is "the capacity claim is what was decided" uses this instead, and rejects the two
+    // derived types explicitly.
+    template <typename Fn>
+    ::testing::AssertionResult ThrowsDestinationTooShort(Fn&& fn) {
+        try {
+            fn();
+        } catch (const System::ArgumentNullException& e) {
+            return ::testing::AssertionFailure()
+                   << "threw ArgumentNullException('" << e.getParamNameProperty()
+                   << "') instead of reporting the capacity";
+        } catch (const System::ArgumentOutOfRangeException& e) {
+            return ::testing::AssertionFailure()
+                   << "threw ArgumentOutOfRangeException('" << e.getParamNameProperty()
+                   << "') instead of reporting the capacity";
+        } catch (const System::ArgumentException& e) {
+            if (e.getParamNameProperty() != "destination") {
+                return ::testing::AssertionFailure()
+                       << "paramName was '" << e.getParamNameProperty() << "'";
+            }
+            const std::string message = e.what();
+            if (message.find("Destination is too short.") == std::string::npos) {
+                return ::testing::AssertionFailure() << "message was '" << message << "'";
+            }
+            return ::testing::AssertionSuccess();
+        } catch (const System::Exception& e) {
+            return ::testing::AssertionFailure()
+                   << "threw a different System:: exception: " << e.what();
+        } catch (...) {
+            return ::testing::AssertionFailure() << "threw a non-System:: exception";
+        }
+        return ::testing::AssertionFailure() << "returned normally";
+    }
+
 } // namespace
 
 TEST(HashingTests, Adler32_NegativeLength_EveryDoor_Throws) {
@@ -1125,10 +1161,10 @@ TEST(HashingTests, ShortDestination_IsDecidedBeforeNegativeLength) {
     uint8_t dest[1] = {};
     int32_t written = -1;
 
-    EXPECT_THROW((void)Adler32::Hash(data.data(), -1, dest, 1), System::ArgumentException);
-    EXPECT_THROW((void)Crc32::Hash(data.data(), -1, dest, 1), System::ArgumentException);
-    EXPECT_THROW((void)Crc64::Hash(data.data(), -1, dest, 1), System::ArgumentException);
-    EXPECT_THROW((void)XxHash32::Hash(data.data(), -1, dest, 1), System::ArgumentException);
+    EXPECT_TRUE(ThrowsDestinationTooShort([&] { (void)Adler32::Hash(data.data(), -1, dest, 1); }));
+    EXPECT_TRUE(ThrowsDestinationTooShort([&] { (void)Crc32::Hash(data.data(), -1, dest, 1); }));
+    EXPECT_TRUE(ThrowsDestinationTooShort([&] { (void)Crc64::Hash(data.data(), -1, dest, 1); }));
+    EXPECT_TRUE(ThrowsDestinationTooShort([&] { (void)XxHash32::Hash(data.data(), -1, dest, 1); }));
 
     // ... and Try* still reports it by returning false rather than by throwing.
     EXPECT_FALSE(Adler32::TryHash(data.data(), -1, dest, 1, written));
@@ -1155,4 +1191,303 @@ TEST(HashingTests, PublishedCheckValues_AllEight_AreUnchanged) {
     const auto h128 = XxHash128::HashToHash128(abc.data(), 3);
     EXPECT_EQ(h128.High64, 0x06b05ab6733a6185ull);
     EXPECT_EQ(h128.Low64, 0x78af5f94892f3950ull);
+}
+
+// ===========================================================================
+// Ticket #2141 (SR-AUD-260, causes IH-A + IH-D) -- every raw-pointer door
+// dereferenced a null buffer, SOURCE and DESTINATION.
+//
+// Measured before the repair: 58 of the review's 102 cases died with SIGSEGV,
+// and a second probe found NINE MORE the 102-case matrix never reached --
+// TryGetHashAndReset on all seven types (the fifth base-class destination
+// door) and both parameter sets' WriteCrcToSpan, a public destination door
+// that carries no capacity argument at all. 67 doors in total, now zero.
+//
+// The one thing the repair must NOT do is reject every null pointer:
+// default(ReadOnlySpan<byte>) in .NET is an empty span whose reference is
+// null, so a null pointer with length 0 is a legal empty operation and stays
+// accepted. Only a null with a POSITIVE length -- the state a span cannot
+// represent and this port's raw pointer can -- is an error.
+// ===========================================================================
+
+namespace {
+
+    template <typename Fn>
+    ::testing::AssertionResult ThrowsNullArgument(const char* expectedParam, Fn&& fn) {
+        try {
+            fn();
+        } catch (const System::ArgumentNullException& e) {
+            if (e.getParamNameProperty() != expectedParam) {
+                return ::testing::AssertionFailure()
+                       << "paramName was '" << e.getParamNameProperty() << "', expected '"
+                       << expectedParam << "'";
+            }
+            return ::testing::AssertionSuccess();
+        } catch (const System::Exception& e) {
+            return ::testing::AssertionFailure()
+                   << "threw a different System:: exception: " << e.what();
+        } catch (...) {
+            return ::testing::AssertionFailure() << "threw a non-System:: exception";
+        }
+        return ::testing::AssertionFailure() << "returned normally";
+    }
+
+    // Every door of one hasher type, driven uniformly. `oneShot` is the only per-type piece,
+    // because HashToUInt32 / HashToUInt64 / HashToHash128 differ in return type only.
+    template <typename Hasher, typename OneShot>
+    void AssertEveryDoorRejectsNull(const char* name, int32_t size, OneShot oneShot) {
+        SCOPED_TRACE(name);
+        const auto data = bytes("abcdefgh");
+        uint8_t dest[32] = {};
+        int32_t written = -1;
+
+        // --- null SOURCE with a positive length -------------------------------------------
+        EXPECT_TRUE(ThrowsNullArgument("source", [&] { oneShot(nullptr, 1); }));
+        EXPECT_TRUE(ThrowsNullArgument("source", [&] { (void)Hasher::Hash(nullptr, 1); }));
+        EXPECT_TRUE(ThrowsNullArgument("source", [&] {
+            (void)Hasher::Hash(nullptr, 1, dest, 32);
+        }));
+        EXPECT_TRUE(ThrowsNullArgument("source", [&] {
+            (void)Hasher::TryHash(nullptr, 1, dest, 32, written);
+        }));
+        EXPECT_TRUE(ThrowsNullArgument("source", [&] { Hasher h; h.Append(nullptr, 1); }));
+
+        // --- null DESTINATION whose claimed capacity is sufficient -------------------------
+        EXPECT_TRUE(ThrowsNullArgument("destination", [&] {
+            (void)Hasher::Hash(data.data(), 3, nullptr, 32);
+        }));
+        EXPECT_TRUE(ThrowsNullArgument("destination", [&] {
+            (void)Hasher::TryHash(data.data(), 3, nullptr, 32, written);
+        }));
+        EXPECT_TRUE(ThrowsNullArgument("destination", [&] {
+            Hasher h; (void)h.GetCurrentHash(nullptr, 32);
+        }));
+        EXPECT_TRUE(ThrowsNullArgument("destination", [&] {
+            Hasher h; (void)h.TryGetCurrentHash(nullptr, 32, written);
+        }));
+        EXPECT_TRUE(ThrowsNullArgument("destination", [&] {
+            Hasher h; (void)h.GetHashAndReset(nullptr, 32);
+        }));
+        // The fifth base-class destination door, absent from the review's 102-case matrix.
+        EXPECT_TRUE(ThrowsNullArgument("destination", [&] {
+            Hasher h; (void)h.TryGetHashAndReset(nullptr, 32, written);
+        }));
+
+        // --- CONTROL: a null pointer with length 0 is a legal empty operation --------------
+        EXPECT_NO_THROW(oneShot(nullptr, 0));
+        EXPECT_NO_THROW({ Hasher h; h.Append(nullptr, 0); });
+        EXPECT_NO_THROW((void)Hasher::Hash(nullptr, 0));
+
+        // --- CONTROL: capacity is still decided FIRST, and still reported the same way -----
+        // A null destination whose claimed length is INSUFFICIENT is "too short", not "null":
+        // the caller got the capacity claim wrong before the pointer mattered.
+        EXPECT_TRUE(ThrowsDestinationTooShort([&] {
+            Hasher h; (void)h.GetCurrentHash(nullptr, 0);
+        }));
+        EXPECT_TRUE(ThrowsDestinationTooShort([&] {
+            Hasher h; (void)h.GetCurrentHash(dest, size - 1);
+        }));
+        {
+            Hasher h;
+            EXPECT_FALSE(h.TryGetCurrentHash(nullptr, 0, written));
+            EXPECT_EQ(written, 0);
+        }
+
+        // --- CONTROL: the boundary sizes on a real buffer all still work -------------------
+        EXPECT_NO_THROW({ Hasher h; (void)h.GetCurrentHash(dest, size); });      // exactly enough
+        EXPECT_NO_THROW({ Hasher h; (void)h.GetCurrentHash(dest, 32); });        // oversized
+        EXPECT_NO_THROW({ Hasher h; (void)h.TryGetHashAndReset(dest, size, written); });
+        EXPECT_EQ(written, size);
+    }
+
+} // namespace
+
+TEST(HashingTests, Adler32_EveryRawPointerDoor_RejectsNull) {
+    AssertEveryDoorRejectsNull<Adler32>("Adler32", 4,
+        [](const uint8_t* s, int32_t n) { (void)Adler32::HashToUInt32(s, n); });
+}
+TEST(HashingTests, Crc32_EveryRawPointerDoor_RejectsNull) {
+    AssertEveryDoorRejectsNull<Crc32>("Crc32", 4,
+        [](const uint8_t* s, int32_t n) { (void)Crc32::HashToUInt32(s, n); });
+}
+TEST(HashingTests, Crc64_EveryRawPointerDoor_RejectsNull) {
+    AssertEveryDoorRejectsNull<Crc64>("Crc64", 8,
+        [](const uint8_t* s, int32_t n) { (void)Crc64::HashToUInt64(s, n); });
+}
+TEST(HashingTests, XxHash32_EveryRawPointerDoor_RejectsNull) {
+    AssertEveryDoorRejectsNull<XxHash32>("XxHash32", 4,
+        [](const uint8_t* s, int32_t n) { (void)XxHash32::HashToUInt32(s, n); });
+}
+TEST(HashingTests, XxHash64_EveryRawPointerDoor_RejectsNull) {
+    AssertEveryDoorRejectsNull<XxHash64>("XxHash64", 8,
+        [](const uint8_t* s, int32_t n) { (void)XxHash64::HashToUInt64(s, n); });
+}
+TEST(HashingTests, XxHash3_EveryRawPointerDoor_RejectsNull) {
+    AssertEveryDoorRejectsNull<XxHash3>("XxHash3", 8,
+        [](const uint8_t* s, int32_t n) { (void)XxHash3::HashToUInt64(s, n); });
+}
+TEST(HashingTests, XxHash128_EveryRawPointerDoor_RejectsNull) {
+    AssertEveryDoorRejectsNull<XxHash128>("XxHash128", 16,
+        [](const uint8_t* s, int32_t n) { (void)XxHash128::HashToHash128(s, n); });
+}
+
+// The two CRC parameter sets: the public Update door on the source axis, and WriteCrcToSpan --
+// a public destination door with NO capacity argument, so a null check is the only validation
+// available to it. Neither appeared in the review's 102-case matrix.
+TEST(HashingTests, Crc32ParameterSet_RawPointerDoors_RejectNull) {
+    const auto& set = Crc32ParameterSet::getCrc32Property();
+    uint8_t dest[4] = {};
+    EXPECT_TRUE(ThrowsNullArgument("source", [&] { (void)set->Update(0, nullptr, 1); }));
+    EXPECT_TRUE(ThrowsNullArgument("destination", [&] { set->WriteCrcToSpan(0, nullptr); }));
+    EXPECT_NO_THROW((void)set->Update(0, nullptr, 0));   // control
+    EXPECT_NO_THROW(set->WriteCrcToSpan(0, dest));       // control
+}
+
+TEST(HashingTests, Crc64ParameterSet_RawPointerDoors_RejectNull) {
+    const auto& set = Crc64ParameterSet::getCrc64Property();
+    uint8_t dest[8] = {};
+    EXPECT_TRUE(ThrowsNullArgument("source", [&] { (void)set->Update(0, nullptr, 1); }));
+    EXPECT_TRUE(ThrowsNullArgument("destination", [&] { set->WriteCrcToSpan(0, nullptr); }));
+    EXPECT_NO_THROW((void)set->Update(0, nullptr, 0));   // control
+    EXPECT_NO_THROW(set->WriteCrcToSpan(0, dest));       // control
+}
+
+// A guard placed after the state update, or after a partial write, would pass a naive
+// "it throws" test. These two pin that a rejected call changes nothing observable.
+TEST(HashingTests, RejectedNullAppend_LeavesHashStateUntouched) {
+    const auto data = bytes("abcdefgh");
+
+    Adler32 a; a.Append(data.data(), 8);
+    const uint32_t aBefore = a.GetCurrentHashAsUInt32();
+    EXPECT_TRUE(ThrowsNullArgument("source", [&] { a.Append(nullptr, 1); }));
+    EXPECT_EQ(a.GetCurrentHashAsUInt32(), aBefore);
+
+    Crc32 c; c.Append(data.data(), 8);
+    const uint32_t cBefore = c.GetCurrentHashAsUInt32();
+    EXPECT_TRUE(ThrowsNullArgument("source", [&] { c.Append(nullptr, 1); }));
+    EXPECT_EQ(c.GetCurrentHashAsUInt32(), cBefore);
+
+    Crc64 d; d.Append(data.data(), 8);
+    const uint64_t dBefore = d.GetCurrentHashAsUInt64();
+    EXPECT_TRUE(ThrowsNullArgument("source", [&] { d.Append(nullptr, 1); }));
+    EXPECT_EQ(d.GetCurrentHashAsUInt64(), dBefore);
+
+    XxHash3 x; x.Append(data.data(), 8);
+    const uint64_t xBefore = x.GetCurrentHashAsUInt64();
+    EXPECT_TRUE(ThrowsNullArgument("source", [&] { x.Append(nullptr, 1); }));
+    EXPECT_EQ(x.GetCurrentHashAsUInt64(), xBefore);
+}
+
+TEST(HashingTests, RejectedDestinationWrite_LeavesTheBufferUntouched) {
+    const auto data = bytes("abcdefgh");
+    uint8_t dest[32];
+    int32_t written = -1;
+
+    // A rejection must not have written a partial hash first.
+    for (auto& b : dest) b = 0xAB;
+    EXPECT_TRUE(ThrowsDestinationTooShort([&] { (void)Crc64::Hash(data.data(), 8, dest, 7); }));
+    for (auto b : dest) EXPECT_EQ(b, 0xAB);
+
+    for (auto& b : dest) b = 0xCD;
+    EXPECT_FALSE(Crc64::TryHash(data.data(), 8, dest, 7, written));
+    EXPECT_EQ(written, 0);
+    for (auto b : dest) EXPECT_EQ(b, 0xCD);
+
+    for (auto& b : dest) b = 0xEF;
+    EXPECT_TRUE(ThrowsNullArgument("source", [&] {
+        (void)XxHash128::Hash(nullptr, 1, dest, 32);
+    }));
+    for (auto b : dest) EXPECT_EQ(b, 0xEF);
+}
+
+// A null source at the SOURCE axis must not be confused with a legal empty append coming in
+// through the std::vector overload, whose data() is null for an empty vector.
+TEST(HashingTests, EmptyVectorAppend_IsAcceptedOnEveryType) {
+    const std::vector<uint8_t> empty;
+    EXPECT_EQ(empty.data(), nullptr);
+    EXPECT_NO_THROW({ Adler32 h;   h.Append(empty); });
+    EXPECT_NO_THROW({ Crc32 h;     h.Append(empty); });
+    EXPECT_NO_THROW({ Crc64 h;     h.Append(empty); });
+    EXPECT_NO_THROW({ XxHash32 h;  h.Append(empty); });
+    EXPECT_NO_THROW({ XxHash64 h;  h.Append(empty); });
+    EXPECT_NO_THROW({ XxHash3 h;   h.Append(empty); });
+    EXPECT_NO_THROW({ XxHash128 h; h.Append(empty); });
+}
+
+// A null + zero-length Append must be a true no-op, not merely "does not throw": the hash after
+// it must equal the hash without it, on every type.
+TEST(HashingTests, NullZeroLengthAppend_IsATrueNoOp) {
+    const auto data = bytes("abcdefgh");
+
+    Adler32 a1, a2;
+    a1.Append(data.data(), 8);
+    a2.Append(nullptr, 0); a2.Append(data.data(), 8); a2.Append(nullptr, 0);
+    EXPECT_EQ(a1.GetCurrentHashAsUInt32(), a2.GetCurrentHashAsUInt32());
+
+    XxHash32 b1, b2;
+    b1.Append(data.data(), 8);
+    b2.Append(nullptr, 0); b2.Append(data.data(), 8); b2.Append(nullptr, 0);
+    EXPECT_EQ(b1.GetCurrentHashAsUInt32(), b2.GetCurrentHashAsUInt32());
+
+    XxHash64 c1, c2;
+    c1.Append(data.data(), 8);
+    c2.Append(nullptr, 0); c2.Append(data.data(), 8); c2.Append(nullptr, 0);
+    EXPECT_EQ(c1.GetCurrentHashAsUInt64(), c2.GetCurrentHashAsUInt64());
+
+    XxHash3 d1, d2;
+    d1.Append(data.data(), 8);
+    d2.Append(nullptr, 0); d2.Append(data.data(), 8); d2.Append(nullptr, 0);
+    EXPECT_EQ(d1.GetCurrentHashAsUInt64(), d2.GetCurrentHashAsUInt64());
+
+    XxHash128 e1, e2;
+    e1.Append(data.data(), 8);
+    e2.Append(nullptr, 0); e2.Append(data.data(), 8); e2.Append(nullptr, 0);
+    EXPECT_EQ(e1.GetCurrentHashAsHash128(), e2.GetCurrentHashAsHash128());
+}
+
+// PIN: the DESTINATION byte order of the three types that had no byte-order test.
+//
+// This gap was found by a surviving mutation: corrupting Crc64ParameterSet::WriteCrcToSpan's
+// non-reflected byte order changed nothing any test could see, because every Crc32/Crc64/Adler32
+// check-value test read the NUMERIC result and only the four XXH types pinned their bytes. The
+// numeric value and the emitted bytes are two separate parts of each algorithm's published
+// contract, and #2143 rewrites byte-order helpers, so both need pinning independently.
+//
+// Measured (build-probe/2141_probe3_byteorder.log), and each matches its algorithm's convention:
+// Adler-32 is stored most-significant byte first; a CRC parameter set writes little-endian when
+// it reflects its values and big-endian when it does not.
+TEST(HashingTests, DestinationByteOrder_OfAdlerAndCrc_IsPinned) {
+    auto abc = bytes("abc");
+    auto check = bytes("123456789");
+
+    // Adler-32: big-endian, per the zlib/RFC 1950 convention.
+    EXPECT_EQ(Adler32::Hash(abc.data(), 3), (std::vector<uint8_t>{0x02, 0x4d, 0x01, 0x27}));
+
+    // CRC-32 (reflected) -> little-endian.
+    EXPECT_EQ(Crc32::Hash(check.data(), 9), (std::vector<uint8_t>{0x26, 0x39, 0xf4, 0xcb}));
+    EXPECT_EQ(Crc32::Hash(Crc32ParameterSet::getCrc32CProperty(), check.data(), 9),
+              (std::vector<uint8_t>{0x83, 0x92, 0x06, 0xe3}));
+
+    // CRC-64/ECMA-182 does NOT reflect -> big-endian.
+    EXPECT_EQ(Crc64::Hash(check.data(), 9),
+              (std::vector<uint8_t>{0x6c, 0x40, 0xdf, 0x5f, 0x0b, 0x49, 0x73, 0x47}));
+    // CRC-64/NVMe reflects -> little-endian.
+    EXPECT_EQ(Crc64::Hash(Crc64ParameterSet::getNvmeProperty(), check.data(), 9),
+              (std::vector<uint8_t>{0x88, 0x98, 0x79, 0x0a, 0x86, 0x14, 0x8b, 0xae}));
+
+    // ... and the same bytes arrive through the streaming destination doors, not only the
+    // one-shot vector form, so a divergence between the two paths cannot hide.
+    uint8_t dest[8] = {};
+    Crc64 c;
+    c.Append(check.data(), 9);
+    EXPECT_EQ(c.GetCurrentHash(dest, 8), 8);
+    EXPECT_EQ(std::vector<uint8_t>(dest, dest + 8),
+              (std::vector<uint8_t>{0x6c, 0x40, 0xdf, 0x5f, 0x0b, 0x49, 0x73, 0x47}));
+
+    uint8_t dest4[4] = {};
+    Adler32 a;
+    a.Append(abc.data(), 3);
+    EXPECT_EQ(a.GetCurrentHash(dest4, 4), 4);
+    EXPECT_EQ(std::vector<uint8_t>(dest4, dest4 + 4),
+              (std::vector<uint8_t>{0x02, 0x4d, 0x01, 0x27}));
 }

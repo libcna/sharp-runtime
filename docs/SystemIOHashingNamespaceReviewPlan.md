@@ -457,3 +457,99 @@ length; ++i)` is simply false at once, so ASan and UBSan have nothing to report 
 or after it. The defect is a *wrong answer*, not a *bad access*, which is precisely why it survived
 in a module with an otherwise healthy test suite. The instrumented run belongs to #2141, whose
 defect really is a memory-safety one.
+
+### 17.2 #2141 — SR-AUD-260, the null pointer (landed)
+
+**Predicted vs measured: the prediction held, and implementation found MORE.** §4.1's three
+corrections all reproduced. Two things the review did not know are recorded here.
+
+**Correction 4 — the door inventory was incomplete. Nine more doors, none in the 102-case
+matrix.** A second probe (`build-probe/2141_probe2_missed_doors.cpp`) covered what probe 1 did
+not, and found **9 further SIGSEGVs**:
+
+| Door | Types | Crashes | Why probe 1 missed it |
+|---|---:|---:|---|
+| `TryGetHashAndReset(nullptr, n, bw)` | 7 of 7 | 7 | probe 1 exercised the base class's other four destination doors and skipped the fifth |
+| `ParameterSet::WriteCrcToSpan(crc, nullptr)` | 2 of 2 | 2 | **public**, and carries *no capacity argument at all*, so no length check is even available to it — §3's table folded it into "parameter-set overloads" |
+
+**The real blast radius is 67 doors, not 58.** After the repair: **0** in both probes.
+
+**Correction 5 — a null pointer with length 0 was undefined behaviour on XxHash3/XxHash128, on
+the very case the controls require to be *accepted*.** UBSan reports
+`XxHash3Shared.cpp:278: null pointer passed as argument 2, which is declared to never be null`:
+the small-input path calls `memcpy(buffer, source, 0)`, and passing a null pointer to `memcpy` is
+undefined **even when the count is zero**. Rejecting the input was not an option — §4.1's control
+forbids it — so `Append` now returns early on `length == 0`, which is semantically identical
+(adding zero to the running length and copying zero bytes are both no-ops) and removes the
+pointer arithmetic as well. The same early return was added to `XxHash32::Append` and
+`XxHash64::Append`, whose `p + 16 <= end` / `p + 32 <= end` would otherwise compute on a null
+pointer. **This defect was invisible to the 102-case matrix**, which counted the case as
+`ACCEPTED`; only the instrumented run distinguished it.
+
+**The repair.** #2142's seam gained `ValidateSource` (length, then a null check *only when the
+length is positive*), `ValidateDestination`, `TryValidateDestination` and
+`ValidateNonNullDestination`, plus `ThrowNullSource` / `ThrowNullDestination` /
+`ThrowDestinationTooShort`. `NonCryptographicHashAlgorithm::ThrowDestinationTooShort` now
+delegates to the seam, so the *"Destination is too short."* message that was written out at nine
+separate sites has one definition. Applied at the same three source choke points as #2142 plus
+the four XXH `Append`/`…Impl` entry points, and at every destination door: 4 in the base class,
+2 per hasher type, and 1 per parameter set.
+
+**Sanitizer evidence — present-before / absent-after, with the production code provably
+instrumented.** The io-hashing **production sources are compiled into the probe binary** with
+`-fsanitize=address,undefined -fno-sanitize-recover=undefined`
+(`build-probe/2141_asan_compile.sh`), so the instrumentation covers the code under test and not
+merely the probe translation unit; the "before" tree is the real pre-#2141 source extracted from
+commit `c8d8b71`, not a hand-edit.
+
+| | probe 1 (102 cases) | probe 2 (54 cases) |
+|---|---:|---:|
+| UBSan/ASan diagnostics **before** | **60** | **9** |
+| UBSan/ASan diagnostics **after** | **0** | **0** |
+| SIGSEGV before / after (uninstrumented) | 58 / **0** | 9 / **0** |
+
+Before-diagnostics name exact sites: `Adler32.cpp:30` and `:43`, `Crc32ParameterSet.cpp:74`/`:88`,
+`Crc64ParameterSet.cpp:81`/`:92`, `XxHash3.cpp:15`/`:193`, `XxHash128.cpp:29`/`:225`,
+`XxHash32.cpp:80`, `XxHash64.cpp:85`. **LSan** ran (`detect_leaks=1`) and reported nothing — this
+module allocates only `std::vector` returns, so that is a weak result and is not claimed as
+evidence of anything. **TSan** has no subject.
+
+**Controls, all measured and all held:** the 14 null-plus-zero-length cases are still
+`ACCEPTED` — and are now *genuinely* accepted rather than sanitizer-killed; a null destination
+whose claimed length is **insufficient** is still *"Destination is too short."*, not a null
+argument; exactly-sized, oversized and one-byte-short destinations are unchanged; an empty
+`std::vector` append (whose `data()` **is** null) is accepted on all seven types; a rejected call
+leaves both the hash state and the destination buffer byte-identical; all eight published check
+values unchanged.
+
+**Tests: 108 → 122.**
+
+**Mutation evidence — and two mutations that SURVIVED, which is the useful part.**
+
+| Mutation | Killed | Controls green |
+|---|---|---|
+| `ThrowNullSource` reports `"src"` | 11 | 110, incl. every published vector and boundary control |
+| `ThrowNullDestination` reports `"dest"` | 9 | 112 |
+| over-reject an exactly sized destination (`<` → `<=`) | 10 | 111 |
+| null checked **before** capacity (order) | **survived at first** → 7 once the pin was fixed | 115 |
+| corrupt `Crc64` destination byte order | **survived at first** → 1 once the pin was added | 121 |
+| corrupt `Adler32` destination byte order | 1 | 121 |
+
+*Deleting the null-source check outright is **not** reportable evidence: it reintroduces the
+SIGSEGV and kills the test runner rather than failing a test. The before/after probe logs already
+carry that proof.*
+
+**The two survivors each exposed a real gap, now closed:**
+
+1. **`EXPECT_THROW(…, System::ArgumentException)` was never a strict assertion in this file.**
+   `ArgumentNullException` *and* `ArgumentOutOfRangeException` both **derive from**
+   `ArgumentException`, so every "too short" pin was satisfied by any of the three. A strict
+   `ThrowsDestinationTooShort` helper now rejects the two derived types explicitly, and the
+   ordering pins of both #2141 and #2142 use it.
+2. **No test pinned the destination byte order of `Adler32`, `Crc32` or `Crc64`.** Every check
+   value for those three read the *numeric* result; only the four XXH types pinned their bytes.
+   The numeric value and the emitted bytes are separate halves of each published contract, and
+   **#2143 rewrites byte-order helpers**, so a new pin records the measured bytes
+   (`build-probe/2141_probe3_byteorder.log`): Adler-32 big-endian per RFC 1950; a CRC parameter
+   set little-endian when it reflects its values and big-endian when it does not. This pin is
+   #2143's safety net, and it exists because a mutation proved it was missing.
