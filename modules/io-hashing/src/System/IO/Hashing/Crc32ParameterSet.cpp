@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/Crc32ParameterSet.hpp"
+#include "System/IO/Hashing/HashingArgumentValidation.hpp"
 
 namespace System::IO::Hashing {
 
@@ -63,6 +64,10 @@ namespace System::IO::Hashing {
     }
 
     uintcs Crc32ParameterSet::Update(uintcs value, const bytecs* source, intcs length) const {
+        // The single choke point for every Crc32 door as well as this public one: Crc32::Append()
+        // and Crc32::HashToUInt32() both land here, and Crc32::Hash()/TryHash() reach it through
+        // HashToUInt32(). Validating here is what makes a rejected Append() leave crc_ untouched.
+        Detail::ValidateLength(length);
         uintcs crc = value;
         if (reflectValues_) {
             for (intcs i = 0; i < length; ++i) {

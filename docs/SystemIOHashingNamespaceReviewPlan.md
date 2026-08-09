@@ -393,3 +393,67 @@ not "finished except for".
 
 Appended as tickets land, so the difference between what this review predicted and what
 implementation measured stays visible.
+
+### 17.1 #2142 — SR-AUD-261, the negative length (landed)
+
+**Predicted vs measured: the prediction held exactly.** §4.2's table reproduced case for case on the
+implementation tip, and the repair was what §13 said it would be — adopting a guard the module
+already contained rather than inventing one.
+
+**The repair.** A new seam, `System::IO::Hashing::Detail`, in
+`include/System/IO/Hashing/HashingArgumentValidation.hpp` (+ `.cpp`): an out-of-line
+`[[noreturn]] ThrowNegativeLength()` holding the module's one message, and an `inline
+ValidateLength(intcs)` calling it. Applied at **three choke points** that between them cover every
+door of the three defective types:
+
+| Choke point | Doors it closes |
+|---|---|
+| `Adler32.cpp`'s anonymous `Update` | `Adler32::Append`, `HashToUInt32`, `Hash` ×2, `TryHash` |
+| `Crc32ParameterSet::Update` | the public `Update` itself, plus `Crc32::Append`, `HashToUInt32` ×2, `Hash` ×4, `TryHash` ×2 |
+| `Crc64ParameterSet::Update` | the same set for `Crc64` |
+
+The four XXH types' four hand-written copies of the same `if (length < 0) throw …` were **replaced
+by calls to the shared helper**, so the module now has exactly one definition of the rule instead
+of five. That is what makes the pin in §11 meaningful: mutation 2 below proves all seven types read
+their message from the same place.
+
+**Measured, fork-per-case, 102 cases** (`build-probe/2142_probe1_after.log` against
+`build-probe/2140_probe1_before.log`):
+
+| | before | after |
+|---|---:|---:|
+| accepted | 25 | **14** |
+| threw | 19 | **30** |
+| crashed | 58 | **58** — unchanged, and #2141's subject |
+
+The diff is exactly the **11** negative-length cases and nothing else. All eight published check
+values byte-identical.
+
+**Tests: 96 → 108.** Nine new pins plus three controls, covering all three types at every door,
+both parameter sets and both of each set's named instances, lengths `{−1, −2, INT32_MIN}`,
+`paramName == "length"` **and** the message text; the rejected-`Append`-does-not-mutate case for
+all three; the zero-and-positive control; the XXH-unchanged pin; the published-vector pin; and the
+short-destination ordering pin.
+
+**One ordering decision the review did not specify, now pinned.** At a door that has both a
+destination and a source (`Hash(src, len, dst, dstLen)`, `TryHash`), the **destination-capacity
+check runs first**. `Hash(data, −1, dst, 1)` therefore throws *"Destination is too short."*, not the
+negative-length exception, and `TryHash(data, −1, dst, 1, …)` returns `false` without throwing.
+This preserves §6.2's short-destination positive unchanged for every input, and it is now a test
+(`ShortDestination_IsDecidedBeforeNegativeLength`) rather than an accident of guard placement.
+
+**Mutation evidence** (each: source changed, build succeeded, the expected object rebuilt, the
+intended binary ran):
+
+| Mutation | Killed | Controls that stayed green |
+|---|---|---|
+| delete `ValidateLength` from `Crc32ParameterSet::Update` | 3 `Crc32`/parameter-set pins | published vectors, XXH pin, `Adler32` doors — proving the kill is attributable to that one site |
+| change the message to *"Length must not be negative."* | **6** pins, including the XXH pin | published vectors, zero/positive control — proving all seven types share one message |
+| reject `length <= 0` (over-rejection) | 16, including the zero-length control and the published-vector pin | — |
+
+**Sanitizers: honestly non-discriminating for this ticket, and the reason matters.** In
+`Adler32`/`Crc32`/`Crc64` a negative length is **not** undefined behaviour — `for (intcs i = 0; i <
+length; ++i)` is simply false at once, so ASan and UBSan have nothing to report before the repair
+or after it. The defect is a *wrong answer*, not a *bad access*, which is precisely why it survived
+in a module with an otherwise healthy test suite. The instrumented run belongs to #2141, whose
+defect really is a memory-safety one.

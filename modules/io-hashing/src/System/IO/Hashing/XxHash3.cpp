@@ -3,7 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/XxHash3.hpp"
 #include "System/ArgumentException.hpp"
-#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/IO/Hashing/HashingArgumentValidation.hpp"
 
 namespace System::IO::Hashing {
 
@@ -163,8 +163,7 @@ namespace System::IO::Hashing {
             // the length-dispatch logic below -- a severe out-of-bounds read, not just abstract
             // UB. This is the single choke point for all four one-shot public entry points
             // (Hash x2, TryHash, HashToUInt64).
-            if (length < 0)
-                throw System::ArgumentOutOfRangeException("length", "Non-negative number required.");
+            Detail::ValidateLength(length);
             uintcs len = static_cast<uintcs>(length);
             if (len <= 16) return HashLength0To16(source, len, seed);
             if (len <= 128) return HashLength17To128(source, len, seed);

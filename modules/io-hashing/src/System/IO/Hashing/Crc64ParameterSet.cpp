@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/Crc64ParameterSet.hpp"
+#include "System/IO/Hashing/HashingArgumentValidation.hpp"
 
 namespace System::IO::Hashing {
 
@@ -65,6 +66,10 @@ namespace System::IO::Hashing {
     }
 
     ulongcs Crc64ParameterSet::Update(ulongcs value, const bytecs* source, intcs length) const {
+        // The single choke point for every Crc64 door as well as this public one: Crc64::Append()
+        // and Crc64::HashToUInt64() both land here, and Crc64::Hash()/TryHash() reach it through
+        // HashToUInt64(). Validating here is what makes a rejected Append() leave crc_ untouched.
+        Detail::ValidateLength(length);
         ulongcs crc = value;
         if (reflectValues_) {
             for (intcs i = 0; i < length; ++i) {

@@ -2,7 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <cstdint>
 #include <random>
+#include <string>
 
 #include "System/IO/Hashing/Adler32.hpp"
 #include "System/IO/Hashing/Crc32.hpp"
@@ -16,6 +18,7 @@
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/Exception.hpp"
 
 using System::IO::Hashing::Adler32;
 using System::IO::Hashing::Crc32;
@@ -884,4 +887,272 @@ TEST(HashingTests, XxHash128_Hash_DestinationTooShort_Throws) {
     auto data = bytes("abc");
     uint8_t dest[15];
     EXPECT_THROW(XxHash128::Hash(data.data(), 3, dest, 15), System::ArgumentException);
+}
+
+// ===========================================================================
+// Ticket #2142 (SR-AUD-261, cause IH-B) -- a negative length was a successful
+// EMPTY operation in Adler32, Crc32, Crc64 and both CRC parameter sets.
+//
+// The defect was not "an error that goes unreported": every one of those loops
+// is `for (intcs i = 0; i < length; ++i)`, which is false at once for a
+// negative length, so HashToUInt32(data, -1) returned the hash of NOTHING and
+// the caller could not tell. The four XXH types in the same module already
+// rejected it, so this is a divergence being deleted rather than a rule being
+// invented -- the exception type, the parameter name and the message below are
+// verbatim the ones XxHash32/64/3/128 have always used.
+// ===========================================================================
+
+namespace {
+
+    // The exact contract: ArgumentOutOfRangeException, paramName "length", and the module's
+    // one message. Checking all three is what makes a mutation that changes only the message
+    // or only the parameter name fail.
+    template <typename Fn>
+    ::testing::AssertionResult ThrowsNegativeLength(Fn&& fn) {
+        try {
+            fn();
+        } catch (const System::ArgumentOutOfRangeException& e) {
+            if (e.getParamNameProperty() != "length") {
+                return ::testing::AssertionFailure()
+                       << "paramName was '" << e.getParamNameProperty() << "', expected 'length'";
+            }
+            const std::string message = e.what();
+            if (message.find("Non-negative number required.") == std::string::npos) {
+                return ::testing::AssertionFailure()
+                       << "message was '" << message << "', expected it to contain "
+                       << "\"Non-negative number required.\"";
+            }
+            return ::testing::AssertionSuccess();
+        } catch (const System::Exception& e) {
+            return ::testing::AssertionFailure()
+                   << "threw a different System:: exception: " << e.what();
+        } catch (...) {
+            return ::testing::AssertionFailure() << "threw a non-System:: exception";
+        }
+        return ::testing::AssertionFailure() << "returned normally";
+    }
+
+    constexpr int32_t kNegativeLengths[] = {-1, -2, INT32_MIN};
+
+} // namespace
+
+TEST(HashingTests, Adler32_NegativeLength_EveryDoor_Throws) {
+    auto data = bytes("abcdefgh");
+    uint8_t dest[8] = {};
+    int32_t written = -1;
+
+    for (int32_t n : kNegativeLengths) {
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)Adler32::HashToUInt32(data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)Adler32::Hash(data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] {
+            (void)Adler32::Hash(data.data(), n, dest, 8);
+        })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] {
+            (void)Adler32::TryHash(data.data(), n, dest, 8, written);
+        })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { Adler32 h; h.Append(data.data(), n); })) << n;
+    }
+}
+
+TEST(HashingTests, Crc32_NegativeLength_EveryDoor_Throws) {
+    auto data = bytes("abcdefgh");
+    const auto& set = Crc32ParameterSet::getCrc32CProperty();
+    uint8_t dest[8] = {};
+    int32_t written = -1;
+
+    for (int32_t n : kNegativeLengths) {
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)Crc32::HashToUInt32(data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)Crc32::HashToUInt32(set, data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)Crc32::Hash(data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)Crc32::Hash(set, data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)Crc32::Hash(data.data(), n, dest, 8); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)Crc32::Hash(set, data.data(), n, dest, 8); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] {
+            (void)Crc32::TryHash(data.data(), n, dest, 8, written);
+        })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] {
+            (void)Crc32::TryHash(set, data.data(), n, dest, 8, written);
+        })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { Crc32 h; h.Append(data.data(), n); })) << n;
+    }
+}
+
+TEST(HashingTests, Crc64_NegativeLength_EveryDoor_Throws) {
+    auto data = bytes("abcdefgh");
+    const auto& set = Crc64ParameterSet::getNvmeProperty();
+    uint8_t dest[16] = {};
+    int32_t written = -1;
+
+    for (int32_t n : kNegativeLengths) {
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)Crc64::HashToUInt64(data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)Crc64::HashToUInt64(set, data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)Crc64::Hash(data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)Crc64::Hash(set, data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)Crc64::Hash(data.data(), n, dest, 16); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)Crc64::Hash(set, data.data(), n, dest, 16); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] {
+            (void)Crc64::TryHash(data.data(), n, dest, 16, written);
+        })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] {
+            (void)Crc64::TryHash(set, data.data(), n, dest, 16, written);
+        })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { Crc64 h; h.Append(data.data(), n); })) << n;
+    }
+}
+
+TEST(HashingTests, Crc32ParameterSet_Update_NegativeLength_Throws) {
+    auto data = bytes("abcdefgh");
+    for (int32_t n : kNegativeLengths) {
+        EXPECT_TRUE(ThrowsNegativeLength([&] {
+            (void)Crc32ParameterSet::getCrc32Property()->Update(0, data.data(), n);
+        })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] {
+            (void)Crc32ParameterSet::getCrc32CProperty()->Update(0, data.data(), n);
+        })) << n;
+    }
+}
+
+TEST(HashingTests, Crc64ParameterSet_Update_NegativeLength_Throws) {
+    auto data = bytes("abcdefgh");
+    for (int32_t n : kNegativeLengths) {
+        EXPECT_TRUE(ThrowsNegativeLength([&] {
+            (void)Crc64ParameterSet::getCrc64Property()->Update(0, data.data(), n);
+        })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] {
+            (void)Crc64ParameterSet::getNvmeProperty()->Update(0, data.data(), n);
+        })) << n;
+    }
+}
+
+// A guard placed AFTER the state update would pass a naive "it throws" test. These three pin
+// that the rejected Append is a no-op on the accumulated hash, which is why the validation sits
+// inside Update() -- before the caller's `state_ = Update(...)` assignment can run.
+TEST(HashingTests, Adler32_RejectedAppend_LeavesHashStateUntouched) {
+    auto data = bytes("abcdefgh");
+    Adler32 h;
+    h.Append(data.data(), 8);
+    const uint32_t before = h.GetCurrentHashAsUInt32();
+
+    for (int32_t n : kNegativeLengths) {
+        EXPECT_TRUE(ThrowsNegativeLength([&] { h.Append(data.data(), n); })) << n;
+        EXPECT_EQ(h.GetCurrentHashAsUInt32(), before) << n;
+    }
+
+    // And the hasher is still usable afterwards: appending the same bytes twice in total must
+    // equal the one-shot hash of the doubled input, i.e. the rejections changed nothing at all.
+    h.Append(data.data(), 8);
+    auto doubled = bytes("abcdefghabcdefgh");
+    EXPECT_EQ(h.GetCurrentHashAsUInt32(), Adler32::HashToUInt32(doubled.data(), 16));
+}
+
+TEST(HashingTests, Crc32_RejectedAppend_LeavesHashStateUntouched) {
+    auto data = bytes("abcdefgh");
+    Crc32 h;
+    h.Append(data.data(), 8);
+    const uint32_t before = h.GetCurrentHashAsUInt32();
+
+    for (int32_t n : kNegativeLengths) {
+        EXPECT_TRUE(ThrowsNegativeLength([&] { h.Append(data.data(), n); })) << n;
+        EXPECT_EQ(h.GetCurrentHashAsUInt32(), before) << n;
+    }
+
+    h.Append(data.data(), 8);
+    auto doubled = bytes("abcdefghabcdefgh");
+    EXPECT_EQ(h.GetCurrentHashAsUInt32(), Crc32::HashToUInt32(doubled.data(), 16));
+}
+
+TEST(HashingTests, Crc64_RejectedAppend_LeavesHashStateUntouched) {
+    auto data = bytes("abcdefgh");
+    Crc64 h;
+    h.Append(data.data(), 8);
+    const uint64_t before = h.GetCurrentHashAsUInt64();
+
+    for (int32_t n : kNegativeLengths) {
+        EXPECT_TRUE(ThrowsNegativeLength([&] { h.Append(data.data(), n); })) << n;
+        EXPECT_EQ(h.GetCurrentHashAsUInt64(), before) << n;
+    }
+
+    h.Append(data.data(), 8);
+    auto doubled = bytes("abcdefghabcdefgh");
+    EXPECT_EQ(h.GetCurrentHashAsUInt64(), Crc64::HashToUInt64(doubled.data(), 16));
+}
+
+// CONTROL: the repair must not over-reach. Length 0 -- including the zero-length form of every
+// destination door -- and ordinary positive lengths are unchanged.
+TEST(HashingTests, ZeroAndPositiveLengths_AreUnaffectedByTheNegativeLengthGuard) {
+    auto data = bytes("abcdefgh");
+
+    EXPECT_EQ(Adler32::HashToUInt32(data.data(), 0), 1u);
+    EXPECT_EQ(Crc32::HashToUInt32(data.data(), 0), 0u);
+    EXPECT_NO_THROW({ Adler32 h; h.Append(data.data(), 0); });
+    EXPECT_NO_THROW({ Crc32 h; h.Append(data.data(), 0); });
+    EXPECT_NO_THROW({ Crc64 h; h.Append(data.data(), 0); });
+    EXPECT_NO_THROW((void)Crc32ParameterSet::getCrc32Property()->Update(0, data.data(), 0));
+    EXPECT_NO_THROW((void)Crc64ParameterSet::getCrc64Property()->Update(0, data.data(), 0));
+
+    // Positive lengths still agree with the streaming path byte for byte.
+    for (int32_t n = 1; n <= 8; ++n) {
+        Adler32 a; a.Append(data.data(), n);
+        EXPECT_EQ(a.GetCurrentHashAsUInt32(), Adler32::HashToUInt32(data.data(), n)) << n;
+        Crc32 c; c.Append(data.data(), n);
+        EXPECT_EQ(c.GetCurrentHashAsUInt32(), Crc32::HashToUInt32(data.data(), n)) << n;
+        Crc64 d; d.Append(data.data(), n);
+        EXPECT_EQ(d.GetCurrentHashAsUInt64(), Crc64::HashToUInt64(data.data(), n)) << n;
+    }
+}
+
+// PIN: the four XXH types already threw exactly this, and #2142 only moved the rule into a
+// shared helper. If that move changed any of them, this fails.
+TEST(HashingTests, XxHash_NegativeLength_ContractIsUnchanged) {
+    auto data = bytes("abcdefgh");
+    for (int32_t n : kNegativeLengths) {
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)XxHash32::HashToUInt32(data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)XxHash64::HashToUInt64(data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)XxHash3::HashToUInt64(data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { (void)XxHash128::HashToHash128(data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { XxHash32 h; h.Append(data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { XxHash64 h; h.Append(data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { XxHash3 h; h.Append(data.data(), n); })) << n;
+        EXPECT_TRUE(ThrowsNegativeLength([&] { XxHash128 h; h.Append(data.data(), n); })) << n;
+    }
+}
+
+// PIN: a short destination is still reported as a short destination, and it is decided FIRST --
+// the destination-capacity check precedes the source-length check at every door that has both.
+// Pinned so the ordering is a decision rather than an accident of where the guards were added.
+TEST(HashingTests, ShortDestination_IsDecidedBeforeNegativeLength) {
+    auto data = bytes("abcdefgh");
+    uint8_t dest[1] = {};
+    int32_t written = -1;
+
+    EXPECT_THROW((void)Adler32::Hash(data.data(), -1, dest, 1), System::ArgumentException);
+    EXPECT_THROW((void)Crc32::Hash(data.data(), -1, dest, 1), System::ArgumentException);
+    EXPECT_THROW((void)Crc64::Hash(data.data(), -1, dest, 1), System::ArgumentException);
+    EXPECT_THROW((void)XxHash32::Hash(data.data(), -1, dest, 1), System::ArgumentException);
+
+    // ... and Try* still reports it by returning false rather than by throwing.
+    EXPECT_FALSE(Adler32::TryHash(data.data(), -1, dest, 1, written));
+    EXPECT_EQ(written, 0);
+    EXPECT_FALSE(Crc64::TryHash(data.data(), -1, dest, 1, written));
+    EXPECT_EQ(written, 0);
+}
+
+// PIN: the eight published check values of the review plan's section 6.2, in one place. These
+// are the values published by the algorithms' own specifications, not values read out of this
+// implementation, so they are the control every repair in this module must leave standing.
+TEST(HashingTests, PublishedCheckValues_AllEight_AreUnchanged) {
+    auto abc = bytes("abc");
+    auto check = bytes("123456789");
+
+    EXPECT_EQ(Adler32::HashToUInt32(abc.data(), 3), 0x024d0127u);
+    EXPECT_EQ(Crc32::HashToUInt32(check.data(), 9), 0xcbf43926u);
+    EXPECT_EQ(Crc64::HashToUInt64(check.data(), 9), 0x6c40df5f0b497347ull);
+    EXPECT_EQ(XxHash32::HashToUInt32(abc.data(), 0), 0x02cc5d05u);
+    EXPECT_EQ(XxHash32::HashToUInt32(abc.data(), 3), 0x32d153ffu);
+    EXPECT_EQ(XxHash64::HashToUInt64(abc.data(), 3), 0x44bc2cf5ad770999ull);
+    EXPECT_EQ(XxHash3::HashToUInt64(abc.data(), 3), 0x78af5f94892f3950ull);
+
+    const auto h128 = XxHash128::HashToHash128(abc.data(), 3);
+    EXPECT_EQ(h128.High64, 0x06b05ab6733a6185ull);
+    EXPECT_EQ(h128.Low64, 0x78af5f94892f3950ull);
 }

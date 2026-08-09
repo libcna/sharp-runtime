@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/Adler32.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/IO/Hashing/HashingArgumentValidation.hpp"
 
 namespace System::IO::Hashing {
 
@@ -12,7 +13,12 @@ namespace System::IO::Hashing {
         // Largest n such that 255n(n+1)/2 + (n+1)(ModBase-1) <= 2^32-1.
         constexpr intcs NMax = 5552;
 
+        // The single choke point for every Adler32 door: Append() and HashToUInt32() both land
+        // here, and Hash()/TryHash() reach it through HashToUInt32(). Validating here is what
+        // makes a rejected Append() leave adler_ untouched -- the throw happens before the
+        // caller's `adler_ = Update(...)` assignment can run.
         uintcs Update(uintcs adler, const bytecs* source, intcs length) {
+            Detail::ValidateLength(length);
             if (length == 0) return adler;
 
             uintcs s1 = adler & 0xFFFFu;

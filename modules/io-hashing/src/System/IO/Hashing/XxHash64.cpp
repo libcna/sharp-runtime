@@ -3,7 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/XxHash64.hpp"
 #include "System/ArgumentException.hpp"
-#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/IO/Hashing/HashingArgumentValidation.hpp"
 #include <cstring>
 
 namespace System::IO::Hashing {
@@ -58,8 +58,7 @@ namespace System::IO::Hashing {
     void XxHash64::Reset() { totalLength_ = 0; bufLen_ = 0; initState(); }
 
     void XxHash64::Append(const bytecs* source, intcs length) {
-        if (length < 0)
-            throw System::ArgumentOutOfRangeException("length", "Non-negative number required.");
+        Detail::ValidateLength(length);
         totalLength_ += static_cast<ulongcs>(length);
         const bytecs* p   = source;
         const bytecs* end = source + length;

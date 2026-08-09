@@ -2,7 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/XxHash3Shared.hpp"
-#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/IO/Hashing/HashingArgumentValidation.hpp"
 #include <cstring>
 
 namespace System::IO::Hashing::Detail::XxHash3Shared {
@@ -268,8 +268,7 @@ namespace System::IO::Hashing::Detail::XxHash3Shared {
         // construction path, this port's raw-pointer-plus-intcs-length API has no such inherent
         // guarantee, so it must be validated explicitly at this shared entry point (used by both
         // XxHash3::Append and XxHash128::Append).
-        if (length < 0)
-            throw System::ArgumentOutOfRangeException("length", "Non-negative number required.");
+        ValidateLength(length);
         state.TotalLength += static_cast<ulongcs>(length);
 
         bytecs* buffer = state.Buffer;

@@ -3,7 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/XxHash128.hpp"
 #include "System/ArgumentException.hpp"
-#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/IO/Hashing/HashingArgumentValidation.hpp"
 
 namespace System::IO::Hashing {
 
@@ -213,8 +213,7 @@ namespace System::IO::Hashing {
             // is the single choke point for all one-shot public entry points (Hash x3, TryHash,
             // HashToHash128) -- unlike the streaming Append() path, which already validates via
             // Detail::XxHash3Shared::Append, this one-shot path was not covered by that fix.
-            if (length < 0)
-                throw System::ArgumentOutOfRangeException("length", "Non-negative number required.");
+            Detail::ValidateLength(length);
             uintcs len = static_cast<uintcs>(length);
             if (len <= 16) return HashLength0To16(source, len, seed);
             if (len <= 128) return HashLength17To128(source, len, seed);
