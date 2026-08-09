@@ -608,3 +608,38 @@ destinations.
 M7 is the closest thing to a big-endian run this environment can produce: it makes the lane loads
 behave as they would on such a host and shows that the published values break. That is evidence
 the helpers are load-bearing — **not** evidence that the repaired code is correct there.
+
+### 17.4 #2144 — the contract, documented and pinned (landed)
+
+**The README documented none of the raw-pointer contract; now it documents all of it.**
+`modules/io-hashing/README.md` gained a *"The raw-pointer contract"* section stating the input
+rules, the output rules, the **capacity-before-pointer ordering**, the two `WriteCrcToSpan` doors
+that carry no capacity argument at all, the per-algorithm destination byte order, the
+`System::`-only exception guarantee, and — explicitly — that **big-endian execution is not
+exercised anywhere in this repository**. A short *"Deliberate deviations from .NET"* section
+records the absent async append, `Hash128` in place of `System::UInt128`, and the fact that the
+raw-pointer overloads have **no .NET counterpart to match**, so their rules are this port's chosen
+contract rather than a reproduction of one.
+
+**All ten classes that own raw-pointer doors gained the same contract** as an `@section rawptr`
+block inside their existing Doxygen comment — merged into it rather than stacked above it, so the
+original class description is not orphaned. The two `Update` and two `WriteCrcToSpan` doors gained
+`@throws` documentation of their own.
+
+**The last unpinned measured positive from §6.2 now has a test.** The other three — the eight
+published check values, the accepted null-plus-zero-length control and the short-destination
+message — were pinned by #2141/#2142/#2143. `NoStdExceptionEscapesAnyPublicDoor` covers the
+fourth across all seven types, both parameter sets and both null-parameter-set doors: 15 rejecting
+inputs per type at every door shape, each asserted to produce a `System::` exception and to fail
+on a `std::` one. It matters precisely because **every rejection in this module is new** — a guard
+that threw `std::invalid_argument` would be a contract break no other test here would notice.
+Mutation: making `ThrowNullSource` throw `std::invalid_argument` kills 12 tests including this
+pin, with 119 green.
+
+**Tests: 130 → 131.** Module totals after the four tickets: **13 headers, 12 sources**
+(§2 recorded 11 and 11 at `d01601f`; #2142 added `HashingArgumentValidation.{hpp,cpp}` and #2143
+added `HashingByteOrder.hpp`), and **96 → 131 tests**.
+
+**This module had no gated behaviour to pin.** Unlike every recent review there is no blocked
+ticket and no `needs_user` decision here, so every pin above is a measured positive rather than a
+record of something the project decided not to fix.

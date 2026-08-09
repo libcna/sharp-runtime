@@ -40,6 +40,28 @@ namespace System::IO::Hashing {
      *
      * C++ counterpart of .NET System.IO.Hashing.XxHash128. Based on the XXH128 implementation
      * from https://github.com/Cyan4973/xxHash.
+     *
+     * @section rawptr The contract every raw-pointer overload in this component obeys
+     *
+     * .NET's surface is `ReadOnlySpan<byte>`/`Span<byte>`; this port replaced every span with a
+     * raw pointer plus a signed @c intcs length, which makes two states representable that a
+     * span cannot represent. All of them are stated here once rather than repeated per method:
+     *
+     * - **`length < 0`** throws `ArgumentOutOfRangeException("length", "Non-negative number
+     *   required.")`. It is never treated as an empty buffer.
+     * - **A null `source` with a positive `length`** throws `ArgumentNullException("source")`.
+     * - **`length == 0` is accepted whatever `source` is, including `nullptr`** — `default(
+     *   ReadOnlySpan<byte>)` is an empty span with a null reference, and hashing nothing is
+     *   legal. A rejected `Append` leaves the accumulated hash unchanged.
+     * - **A destination whose `destinationLength` is below the hash length** throws
+     *   `ArgumentException("Destination is too short.", "destination")`, or returns `false` from
+     *   the `Try…` forms. **The capacity claim is checked first**, so a null destination with an
+     *   insufficient claimed length is reported as too short rather than as a null argument.
+     * - **A null destination whose claimed capacity suffices** throws
+     *   `ArgumentNullException("destination")`, from the `Try…` forms too. A rejected call leaves
+     *   the destination buffer byte-for-byte unchanged.
+     *
+     * See `modules/io-hashing/README.md` for the same contract with the per-algorithm byte order.
      */
     class XxHash128 final : public NonCryptographicHashAlgorithm {
     private:

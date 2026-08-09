@@ -1630,3 +1630,109 @@ TEST(HashingTests, XxHash3_HashingIsSelfConsistentAcrossEveryBoundary) {
 TEST(HashingTests, XxHash128_HashingIsSelfConsistentAcrossEveryBoundary) {
     AssertHashingIsSelfConsistent<XxHash128>("XxHash128");
 }
+
+// ===========================================================================
+// Ticket #2144 -- document the raw-pointer contract and PIN the measured
+// positives. The eight published check values, the accepted null-plus-zero-
+// length control, the short-destination message and the boundary sizes are
+// pinned above by #2141/#2142/#2143. This is the one remaining measured
+// positive from section 6.2 of the review plan that had no test:
+// NO std:: EXCEPTION ESCAPES A PUBLIC DOOR.
+//
+// It matters because every rejection this module now performs is new. A guard
+// that threw std::invalid_argument, or a std::vector allocation that let
+// std::length_error out of a Hash() call, would be a System:: contract break
+// that no other test in this file would notice.
+// ===========================================================================
+
+namespace {
+
+    // Fails on a std:: exception, on no exception, and on anything that is not a System:: one.
+    template <typename Fn>
+    ::testing::AssertionResult ThrowsOnlySystemException(Fn&& fn) {
+        try {
+            fn();
+        } catch (const System::Exception&) {
+            return ::testing::AssertionSuccess();
+        } catch (const std::exception& e) {
+            return ::testing::AssertionFailure()
+                   << "a std:: exception escaped a public door: " << e.what();
+        } catch (...) {
+            return ::testing::AssertionFailure() << "a non-System:: exception escaped";
+        }
+        return ::testing::AssertionFailure() << "returned normally";
+    }
+
+    template <typename Hasher, typename OneShot>
+    void AssertOnlySystemExceptionsEscape(const char* name, OneShot oneShot) {
+        SCOPED_TRACE(name);
+        const auto data = bytes("abcdefgh");
+        uint8_t dest[32] = {};
+        int32_t written = -1;
+
+        // Every rejecting input this component defines, at every door shape.
+        EXPECT_TRUE(ThrowsOnlySystemException([&] { oneShot(nullptr, 1); }));
+        EXPECT_TRUE(ThrowsOnlySystemException([&] { oneShot(data.data(), -1); }));
+        EXPECT_TRUE(ThrowsOnlySystemException([&] { oneShot(data.data(), INT32_MIN); }));
+        EXPECT_TRUE(ThrowsOnlySystemException([&] { (void)Hasher::Hash(nullptr, 1); }));
+        EXPECT_TRUE(ThrowsOnlySystemException([&] { (void)Hasher::Hash(data.data(), -1); }));
+        EXPECT_TRUE(ThrowsOnlySystemException([&] {
+            (void)Hasher::Hash(data.data(), 8, nullptr, 32);
+        }));
+        EXPECT_TRUE(ThrowsOnlySystemException([&] { (void)Hasher::Hash(data.data(), 8, dest, 1); }));
+        EXPECT_TRUE(ThrowsOnlySystemException([&] {
+            (void)Hasher::TryHash(data.data(), 8, nullptr, 32, written);
+        }));
+        EXPECT_TRUE(ThrowsOnlySystemException([&] { Hasher h; h.Append(nullptr, 1); }));
+        EXPECT_TRUE(ThrowsOnlySystemException([&] { Hasher h; h.Append(data.data(), -1); }));
+        EXPECT_TRUE(ThrowsOnlySystemException([&] {
+            Hasher h; (void)h.GetCurrentHash(nullptr, 32);
+        }));
+        EXPECT_TRUE(ThrowsOnlySystemException([&] { Hasher h; (void)h.GetCurrentHash(dest, 1); }));
+        EXPECT_TRUE(ThrowsOnlySystemException([&] {
+            Hasher h; (void)h.GetHashAndReset(nullptr, 32);
+        }));
+        EXPECT_TRUE(ThrowsOnlySystemException([&] {
+            Hasher h; (void)h.TryGetCurrentHash(nullptr, 32, written);
+        }));
+        EXPECT_TRUE(ThrowsOnlySystemException([&] {
+            Hasher h; (void)h.TryGetHashAndReset(nullptr, 32, written);
+        }));
+    }
+
+} // namespace
+
+TEST(HashingTests, NoStdExceptionEscapesAnyPublicDoor) {
+    AssertOnlySystemExceptionsEscape<Adler32>("Adler32",
+        [](const uint8_t* s, int32_t n) { (void)Adler32::HashToUInt32(s, n); });
+    AssertOnlySystemExceptionsEscape<Crc32>("Crc32",
+        [](const uint8_t* s, int32_t n) { (void)Crc32::HashToUInt32(s, n); });
+    AssertOnlySystemExceptionsEscape<Crc64>("Crc64",
+        [](const uint8_t* s, int32_t n) { (void)Crc64::HashToUInt64(s, n); });
+    AssertOnlySystemExceptionsEscape<XxHash32>("XxHash32",
+        [](const uint8_t* s, int32_t n) { (void)XxHash32::HashToUInt32(s, n); });
+    AssertOnlySystemExceptionsEscape<XxHash64>("XxHash64",
+        [](const uint8_t* s, int32_t n) { (void)XxHash64::HashToUInt64(s, n); });
+    AssertOnlySystemExceptionsEscape<XxHash3>("XxHash3",
+        [](const uint8_t* s, int32_t n) { (void)XxHash3::HashToUInt64(s, n); });
+    AssertOnlySystemExceptionsEscape<XxHash128>("XxHash128",
+        [](const uint8_t* s, int32_t n) { (void)XxHash128::HashToHash128(s, n); });
+
+    // The two parameter sets, including the null-parameter-set doors of Crc32/Crc64.
+    const auto data = bytes("abcdefgh");
+    EXPECT_TRUE(ThrowsOnlySystemException([&] {
+        (void)Crc32ParameterSet::getCrc32Property()->Update(0, nullptr, 1);
+    }));
+    EXPECT_TRUE(ThrowsOnlySystemException([&] {
+        (void)Crc64ParameterSet::getCrc64Property()->Update(0, data.data(), -1);
+    }));
+    EXPECT_TRUE(ThrowsOnlySystemException([&] {
+        Crc32ParameterSet::getCrc32Property()->WriteCrcToSpan(0, nullptr);
+    }));
+    EXPECT_TRUE(ThrowsOnlySystemException([&] {
+        (void)Crc32::HashToUInt32(std::shared_ptr<Crc32ParameterSet>{}, data.data(), 8);
+    }));
+    EXPECT_TRUE(ThrowsOnlySystemException([&] {
+        (void)Crc64::HashToUInt64(std::shared_ptr<Crc64ParameterSet>{}, data.data(), 8);
+    }));
+}
