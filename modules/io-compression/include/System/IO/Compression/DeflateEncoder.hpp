@@ -72,14 +72,47 @@ namespace System::IO::Compression {
          * @param isFinalBlock true to finalize the internal stream; false to allow postponing output.
          * @return The status with which the operation finished.
          * @throws System::ObjectDisposedException if this encoder has been disposed.
+         *
+         * **Raw-pointer length and buffer contract** (ticket #2146, SR-AUD-256; ticket #2151
+         * documents it here). .NET expresses this surface in `ReadOnlySpan<byte>`/`Span<byte>`;
+         * this port replaced every span with a pointer plus a signed `intcs` length, so a length
+         * a span could never hold is now expressible. Every raw-pointer door in this component
+         * therefore validates before zlib sees anything:
+         *
+         * - a **negative** length is rejected -- it used to be cast to `uInt` and become an
+         *   enormous byte count that ran off the caller's allocation;
+         * - a **null** buffer with a **positive** length is rejected;
+         * - a **null** buffer with a length of **zero** is ACCEPTED, deliberately, because
+         *   `default(ReadOnlySpan<byte>)` is an empty span whose reference is null and
+         *   compressing or decompressing nothing is legal;
+         * - validation runs **before** the out-parameters are written, so a rejected call leaves
+         *   `bytesConsumed`/`bytesWritten` exactly as the caller left them rather than looking
+         *   like a successful empty operation.
+         *
+         * @throws System::ArgumentOutOfRangeException if a length is negative
+         *         (`"sourceLength"` / `"destinationLength"`).
+         * @throws System::ArgumentNullException if a buffer is null with a positive length
+         *         (`"source"` / `"destination"`).
          */
         OperationStatus Compress(const bytecs* source, intcs sourceLength,
                                  bytecs* destination, intcs destinationLength,
                                  intcs& bytesConsumed, intcs& bytesWritten, bool isFinalBlock);
 
-        /** Flushes any pending output, ensuring output is produced for all processed input so far. */
+        /**
+         * @brief Flushes any pending output, ensuring output is produced for all processed input so far.
+         *
+         * Subject to the same destination length and buffer contract as `Compress` above
+         * (ticket #2146): a negative `destinationLength` throws
+         * `ArgumentOutOfRangeException("destinationLength")`, and a null `destination` with a
+         * positive length throws `ArgumentNullException("destination")`.
+         */
         OperationStatus Flush(bytecs* destination, intcs destinationLength, intcs& bytesWritten);
 
+        /**
+         * The `Try*` overloads construct a temporary codec and funnel through the member above, so
+         * they carry its raw-pointer contract unchanged: an invalid length or buffer THROWS rather
+         * than returning `false` (ticket #2146; documented here by #2151).
+         */
         /** Tries to compress @p source into @p destination using the default quality and window size. */
         static bool TryCompress(const bytecs* source, intcs sourceLength,
                                  bytecs* destination, intcs destinationLength, intcs& bytesWritten);

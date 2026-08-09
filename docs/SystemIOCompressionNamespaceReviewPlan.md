@@ -506,3 +506,66 @@ Component graph unchanged at **41 / 92**.
 absent `ZLibCompressionOptions` constructors — is a public surface addition and stays with the
 **blocked** #2150. The finding therefore stays `confirmed`, with its strategy half recorded as
 landed.
+
+---
+
+## 16. Implementation record — #2151, and the namespace reconciliation
+
+### 16.1 An acceptance-criterion correction, recorded rather than applied silently
+
+#2151's criterion asked for pins on "the current `CompressionMode` acceptance, the current
+`Write`-after-`Close` silence, and the current strategy-is-ignored behaviour". All three of those
+behaviours were **repaired in the same batch**, by #2148 and #2149. Pinning them as current would
+pin the defects. The criterion was written on the assumption that #2148/#2149 would not land first,
+and the pins that actually exist are their replacements, in `CompressionStreamStateTests` and
+`CompressionStrategyTests`.
+
+What #2151 pins instead is what genuinely remains unchanged and gated.
+
+### 16.2 What #2151 delivered
+
+**Zero executable production change** — header doc-comments and tests only.
+
+1. **The raw-pointer contract is now stated in the six codec headers**, not only in the internal
+   `CompressionArgumentValidation.hpp`: `Compress`, `Flush`, `Decompress` and all nine `Try*`
+   overloads across `DeflateEncoder`/`GZipEncoder`/`ZLibEncoder` and
+   `DeflateDecoder`/`GZipDecoder`/`ZLibDecoder`. It states the negative-length rejection, the
+   null-with-positive-length rejection, the deliberately **accepted** null-with-zero-length case,
+   the "out-parameters untouched on rejection" rule, and — for the `Try*` doors — that an invalid
+   argument **throws** rather than reporting `false`.
+2. **#2150's absent public surface is pinned at compile time.**
+   `static_assert(!hasOptionsConstructor<DeflateStream/GZipStream/ZLibStream>)`, with a companion
+   assertion that the trait reports `true` for the constructor the module does have, so the pin
+   cannot be vacuous. If #2150 ever lands, the build stops until the pin is deliberately updated.
+3. **The documented contract is asserted at the doors the header text names**, so documentation and
+   code cannot drift apart.
+
+### 16.3 Mutation testing
+
+| # | Mutation | Result | Counts? |
+|---|---|---|---|
+| 7 | declare #2150's `(Stream*, const ZLibCompressionOptions&, bool)` constructor on `DeflateStream` | **compile stops**: `static assertion failed: #2150 landed without updating its pin` — the pin's designed failure mode | **Yes** |
+| 8 | `ValidateSource` over-rejects the legal null-with-zero-length source | **8 clean failures**, including the new contract-pin test and, importantly, the round-trip control | **Yes** |
+
+### 16.4 Namespace reconciliation — `System::IO::Compression`
+
+| Finding | Sev | Cause | Ticket | Disposition |
+|---|---|---|---|---|
+| SR-AUD-256 | high | C-A | #2146 | **remediated** |
+| SR-AUD-258 | med | C-B | #2148 | **remediated** |
+| SR-AUD-259 | med | C-C | #2149 + **#2150** | **confirmed** — strategy half landed; stream options constructors are a public surface addition and stay **blocked** |
+
+Post-audit defects found by this review, neither of which carries an `SR-AUD-*` identifier
+(numbering stays frozen at **364**):
+
+| Defect | Ticket | State |
+|---|---|---|
+| the streams do not enforce their own mode on `Read`/`Write` | **#2152** | `todo`, current behaviour pinned; the exception type is unverifiable with `/rv` absent |
+
+**Every compatible-ready ticket in this namespace is complete.** #2146, #2148, #2149 and #2151 are
+`done`. #2150 is blocked on an approval and #2152 is an inactive post-audit ticket whose only
+blocker is the absent reference tree. **`modules/io-compression` is closed except for those two**,
+and both are pinned so neither can change silently.
+
+Test count for the namespace: **40 → 101** across this review's four implementation tickets
+(#2146 +35, #2148 +14, #2149 +9, #2151 +3).
