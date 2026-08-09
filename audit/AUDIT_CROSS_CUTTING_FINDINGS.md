@@ -2745,3 +2745,52 @@ Promotion would change no finding's status and no ticket's ownership.
 reads **149 remediated / 215 confirmed / 364 total**, of which **49** carry the
 `confirmed (design-complete)` qualifier — unchanged, because no design completed here.
 **No `SR-AUD-*` identifier was issued; numbering stays frozen at 364.**
+
+---
+
+## The signed-length-into-an-unsigned-native-count idiom — a family, recorded and deliberately NOT minted (2026-08-09, #2148 closing the record #2146 promised)
+
+`docs/SystemIOCompressionNamespaceReviewPlan.md` §5 states that SR-AUD-256 "is recorded as a
+**third site** of the negative-length idiom in the audit cross-cutting file instead" of being
+minted. **That record did not exist**; #2146 stated the intent and did not carry it out. This
+section is that record, written by #2148 while finishing the namespace, and it is a **statement of
+fact about the corpus, not a mint**.
+
+The shape: a public API takes a signed `intcs` (or `longcs`) length where .NET takes a span, the
+body casts it straight into an **unsigned** native count, and a negative value becomes an enormous
+one that the native library then honours.
+
+| Module | Finding | Native sink | Ticket | Status |
+|---|---|---|---|---|
+| `io-hashing` | SR-AUD-261 | `Adler32`/`Crc32`/`Crc64` update loops | #2142 | remediated |
+| `net-sockets` | SR-AUD-264 | `SendPacketsElement` count | #2135 | remediated |
+| `io-compression` | **SR-AUD-256** | `z_stream::avail_in` / `avail_out` (`uInt`) | **#2146** | **remediated** |
+
+All three were repaired with the **same** shape — a module-local `Detail::Validate*` choke point
+throwing `ArgumentOutOfRangeException(paramName, "Non-negative number required.")`, with a null
+buffer of positive length rejected and a null buffer of **zero** length accepted, because
+`default(ReadOnlySpan<byte>)` is an empty span whose reference is null. `io-compression`'s wording
+was copied verbatim from `io-hashing`'s deliberately: two sibling components answering "what does a
+negative length mean" two different ways is how a repository ends up with two contracts.
+
+A fourth, adjacent site was measured by #2156 the same day and is **not** a member: the
+`System::Timers::Timer` interval is a `double` cast to `intcs`, so its failure mode is an undefined
+**float-to-integer** conversion rather than an unsigned wrap. It is recorded here only so a future
+reader does not add it to the table by resemblance. It carries the same *lesson*, though, and one
+worth stating for the whole corpus: **GCC's `-fsanitize=undefined` does not include
+`float-cast-overflow`**, so no "UBSan clean" claim anywhere in this repository covers that class
+unless the option was named explicitly.
+
+**Not minted.** The obstacle is the one #2109 records and is unchanged: every promotion sentence in
+this corpus is passive and names no agent, and the one non-passive statement reserves the act to the
+maintainer. **No `CCF-*` identifier is created here**, `CCF-021` and `CCF-022` remain unminted, and
+no finding's status or ticket ownership changes. **No `SR-AUD-*` identifier was issued; numbering
+stays frozen at 364.**
+
+### What this batch changed in the index
+
+**SR-AUD-256** and **SR-AUD-258** move `confirmed` → `remediated` (#2146 in the previous batch,
+#2148 in this one), **SR-AUD-238** moves `confirmed` → `remediated` (#2154), and **SR-AUD-239** gains
+the `confirmed (design-complete)` qualifier (#2155, blocked on approval). Recounted directly from
+the index, it now reads **156 remediated / 208 confirmed / 364 total**, of which **50** carry the
+`confirmed (design-complete)` qualifier.

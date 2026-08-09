@@ -4,21 +4,200 @@
 # NEXT.md
 
 *Last verified: 2026-08-09. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
-harness-designated branch**, continued from its own clean tip `3d022d8`. `CLAUDE.md` rule 3 names
-`feature/work`; nothing was pushed, so the two never conflicted, and the discrepancy is recorded
-rather than resolved silently. **Not pushed — no push was requested.** No merge, rebase, tag,
-force-push, PR, publication, amend or history rewrite; all commits unsigned
-(`git -c commit.gpgsign=false`) — no usable private signing key exists here. **Work units 1 and 2
-were already complete on arrival and were verified, not redone**: #2142/#2141/#2143/#2144, the
-io-hashing reconciliation and #2145 all landed in the previous context. This batch therefore did
-**work unit 3**: it re-derived the next review unit by measurement and reviewed
-**`modules/io-compression` (#2147)**, then implemented its one memory-safety ticket **#2146**
-(SR-AUD-256). Audit **154 remediated / 210 confirmed / 364 total**, of which **49** carry
-`confirmed (design-complete)`. Gate **16,152 tests across 37 executables: 16,145 passing, 1
-skipped, 6 failing** for the same two measured causes, unchanged and not hidden. Graph **41 / 92**,
-seams **2 / 18**. **Doxygen, `ccache` and the `/rv` reference tree are all absent** and were not
-installed. **CCF-019 open; CCF-021/#2131 and CCF-022/#2109 remain unminted.** #1773 and #1962
-remain blocked. See the first handoff below.*
+harness-designated branch**, continued from its own tip `6676a08`. `CLAUDE.md` rule 3 names
+`feature/work`; the discrepancy is recorded rather than resolved silently. **Pushed after every
+commit**, per `CLAUDE.md` rule 13 (added the same day, in commit `6676a08`, precisely because 108
+commits had been found sitting unpushed on this branch) and per the harness branch policy; this
+supersedes the previous handoff's "not pushed", and the tension with the batch brief's "do not push
+unless requested" is recorded in the closing report rather than resolved by silence. No merge,
+rebase, tag, force-push, PR, publication, amend or history rewrite; all commits unsigned
+(`git -c commit.gpgsign=false`) — no usable private signing key exists here. This batch **finished
+`modules/io-compression`** (#2148, #2149, #2151 + reconciliation) and then **reviewed and closed
+`modules/timers`** (#2153 review, #2154, #2156, #2157). Audit **156 remediated / 208 confirmed /
+364 total**, of which **50** carry `confirmed (design-complete)`; **no `SR-AUD-*` identifier
+created — numbering frozen at 364.** Gate **16,205 tests across 37 executables: 16,198 passing, 1
+skipped, 6 failing** for the same two measured causes, unchanged and not hidden (+53 on the
+inherited 16,152). Graph **41 / 92**, seams **2 / 18**, negative fixtures **11 files / 94 sites**.
+**Doxygen, `ccache` and the `/rv` reference tree are all absent** and were not installed. **CCF-019
+open; CCF-021/#2131 and CCF-022/#2109 remain unminted.** #1773 and #1962 remain blocked. See the
+first handoff below.*
+
+---
+
+## Batch record — `modules/io-compression` finished (#2148, #2149, #2151) and `modules/timers` reviewed and closed (#2153, #2154, #2156, #2157)
+
+### 1. Work unit 1 — the io-compression queue, classified before anything was implemented
+
+The brief required each of #2148/#2149/#2151 to be classified from its **exact ticket row and the
+durable plan**, not from `todo` alone. All three read **compatible implementation-ready**, and all
+three were implemented. #2150 stayed blocked throughout.
+
+| Ticket | Title | Classification | Outcome |
+|---|---|---|---|
+| **#2148** | the three streams accept an out-of-domain `CompressionMode` and `Write`-after-`Close` is silent (SR-AUD-258, cause C-B) | **compatible** | **done** — `13f9f81` |
+| **#2149** | `ZLibCompressionOptions`' strategy is validated on the way in and dropped on the way out (SR-AUD-259, cause C-C) | **compatible** | **done** — `d2bda2b` |
+| **#2151** | document the raw-pointer contract and pin the deferred behaviours | **compatible** | **done** — `32828cf` |
+| **#2150** | the three streams have no options constructor (SR-AUD-259 remainder) | **blocked — public surface addition** | unchanged; now pinned at compile time |
+
+**#2148 — two premise corrections, both measured before editing.**
+
+1. **An out-of-domain `CompressionMode` is a guaranteed LEAK**, not only a capability
+   inconsistency. Each stream type splits on a **different enumerator** in its two halves: the
+   constructor tests `Decompress` (`inflateInit2` : `deflateInit2`) and `Close()` tests `Compress`
+   (`deflateEnd` : `inflateEnd`). A cast value therefore took the **deflate** arm in and the
+   **inflate** arm out, and `inflateEnd` on a `deflateInit2` stream returns `Z_STREAM_ERROR` and
+   frees nothing. LeakSanitizer: **3 × 5,952 direct + 8 × 65,536 indirect bytes leaked**, exit 1,
+   against a clean `Compress`-mode control; clean after. The caller's payload was discarded too —
+   0 / 10 / 2 inner bytes for Deflate/GZip/ZLib, i.e. a bare header.
+2. **The closed-state defect is on THREE doors**, not the one the finding names: `Read` answered
+   **0** and `Flush` returned silently after `Close()` as well, on all three types and both
+   `leaveOpen` values.
+
+**Acceptance-criterion correction:** the AC named `ArgumentOutOfRangeException`; the implementation
+throws the **base** `System::ArgumentException("Enum value was out of legal range.", "mode")`,
+because the audit's own managed probe recorded .NET's category for this exact call as
+`ArgumentException`, `/rv` is absent to narrow it, and #1954/#1992 already settled the same question
+the same way. Recorded in the plan, the audit record and the ticket — not swapped silently.
+
+**#2149 — evidence widened from one pair to 45 cases.** 3 encoders × 5 strategies × 3 payload
+shapes: **45 of 45** byte-identical to `Default` before, with a straight zlib encode of the same
+parameters diverging in **24**; after, **0 of 45** diverge from zlib. The 21 still equal to
+`Default` are genuine agreements — `Filtered` really does produce `Default`'s bytes at level 6 on
+every payload measured. Payload shape is load-bearing: a test discriminating on `Filtered` alone
+would have passed against the broken code. Default-option output is byte-identical, diffed and
+pinned.
+
+**#2151** states the raw-pointer contract in all six codec headers and pins **#2150's absence at
+compile time**, with a companion assertion so the pin cannot be vacuous.
+
+### 2. io-compression reconciliation
+
+| Finding | Sev | Ticket | Disposition |
+|---|---|---|---|
+| SR-AUD-256 | high | #2146 | **remediated** |
+| SR-AUD-258 | med | #2148 | **remediated** |
+| SR-AUD-259 | med | #2149 + **#2150** | **confirmed** — strategy half landed; the stream options constructors are a public surface addition and stay **blocked** |
+
+One post-audit defect, no `SR-AUD-*` identifier: **#2152** (`todo`) — the streams do not enforce
+their own mode on `Read`/`Write`; `Read` on a Compress-mode open stream answers **0** and `Write`
+on a Decompress-mode open stream throws `IOException("deflate error -2")`. .NET throws
+`InvalidOperationException` for both, but SR-AUD-258 does not name these doors and the type is a
+recollection rather than a measurement with `/rv` absent, so both are **pinned**, not changed.
+
+**`modules/io-compression` is complete except for #2150 (approval-gated) and #2152 (inactive,
+pinned).** Namespace test count **40 → 101**.
+
+### 3. #2150 — exact blocked state, updated additively
+
+Status **unchanged**. Two facts measured by the adjacent tickets were added to its notes because
+they bear on the design: #2149 means the only thing still missing for a stream caller is the
+constructor overload itself, and #2148 means any options overload must validate its mode **before**
+zlib initialisation or it reintroduces the leak. **Missing surface:**
+`DeflateStream(Stream*, const ZLibCompressionOptions&, bool leaveOpen = false)` and the identical
+pair on `GZipStream`/`ZLibStream`. **Consequence:** new mangled symbols and new overload-resolution
+candidates — additive, no layout or vtable change. **Why not compatible through an existing
+method:** the existing constructors take a `CompressionMode`, which carries no level, window log or
+strategy, and the stream types have no setter surface. **Approval sentence:** *"Approved: add a
+`ZLibCompressionOptions`-taking constructor to `DeflateStream`, `GZipStream` and `ZLibStream`
+(#2150)."*
+
+### 4. Work unit 2 — the next unit, re-derived and compared rather than inherited
+
+The previous handoff recommended `modules/timers`. That recommendation was **verified
+independently** by re-parsing `audit/AUDIT_FINDINGS_INDEX.md`, and confirmed — but the comparison
+is what makes a **two-finding** unit defensible below the programme's earlier ≥ 6-finding
+threshold:
+
+- **Consequence class.** SR-AUD-238 does not produce a wrong answer or a leak — it **terminates the
+  process**. Measured **7 of 7 SIGABRT** across `std::`, sharp-runtime and non-`std` exception
+  types, one-shot and periodic, first fire and after three fires, and in one case an entirely
+  unrelated second timer died with it. **One timer's handler kills every timer**, because the
+  failure is process death rather than thread death.
+- **Zero `/rv` dependence.** Both findings carry a **managed probe result recorded in the audit
+  itself** (`throw_process=alive`, `sender_is_timer=True`), so the .NET answer is measured.
+- **Completable.** 4 headers, 1 body, 279 production lines.
+- **The rival, `security-cryptography`** (2 findings, both high, 100 %), loses twice: residual key
+  material after `Dispose` needs a separate disclosure primitive to exploit, and SR-AUD-331 needs a
+  disposed flag — an object-layout change — so that module could not be closed in one pass either.
+
+Deliverable: **`docs/SystemTimersNamespaceReviewPlan.md`** (#2153, `4d325ba`), 16 sections.
+
+### 5. Timers — four premise corrections, all measured
+
+1. **The escape point is in another module.** The finding names the `modules/timers` files, but the
+   raw `std::thread` entry point is `System::Threading::Timer::run` in **modules/threading**. The
+   repair still belongs in `modules/timers`: .NET's `System.Threading.Timer` also crashes on an
+   unhandled callback exception, so the layer below already matches .NET and is **pinned, not
+   changed**.
+2. **The abort is universal and non-local** (the 7-of-7 matrix above).
+3. **A third defect the audit does not record:** `setIntervalProperty` validates strictly **less**
+   than `Timer(double)` — it accepted `+inf`, `2147483648` and `3e9`, and both doors accepted
+   `NaN` — and every value in the gap reached an **undefined** float-to-integer conversion at
+   `Timer.cpp:51`, surfacing as `ArgumentOutOfRangeException` naming the **private** dependency's
+   `dueTime` parameter from `Start()`. **Note for every future UBSan claim in this repository:
+   GCC's `-fsanitize=undefined` does NOT include `float-cast-overflow`** — it must be requested by
+   name, which is why this survived.
+4. **SR-AUD-239's only repair is an object-layout AND vtable change**, measured:
+   `EventHandler::Raise` types its sender as `System::Object*`,
+   `std::is_convertible_v<Timer*, Object*>` is **0**, `System::Object` is abstract and polymorphic,
+   and adding the base takes `sizeof(Timer)` **104 → 112**, makes it polymorphic and shifts every
+   member by 8.
+
+### 6. Timers implementations
+
+| Ticket | Outcome |
+|---|---|
+| **#2154** (SR-AUD-238, TM-A) | **done** — `1e99c31`. One `catch (...)` around the **whole** callback body, silent, matching `Timer.MyTimerCallback`. `catch (...)` rather than `catch (const std::exception&)`, because `throw 42` is a measured case. +10 tests |
+| **#2155** (SR-AUD-239, TM-B) | **blocked**, design complete, approval sentence recorded, pinned at compile time in two test files |
+| **#2156** (post-audit, TM-C) | **done** — one shared `validateInterval` for all three doors; `float-cast-overflow` **1 report → 0**. +8 tests |
+| **#2157** (closing) | **done** — the §9 lifecycle/concurrency matrix made permanent (it was probe-only) + the reconciliation. +9 tests |
+
+**Worker-thread exception behaviour, answered:** the exception escapes a raw `std::thread` entry
+point, calls `std::terminate` and **aborts the process**; one timer can kill every timer. The
+correct public behaviour was **not** implemented from memory — the audit's own managed probe
+recorded .NET's answer as `throw_process=alive`, so the policy is measured, and the .NET layer that
+does *not* catch (`System.Threading.Timer`) is left alone for the same measured reason.
+
+**A test weakness found by mutation testing, and fixed.** Narrowing the production catch to
+`catch (const std::exception&)` **SURVIVED** the new suite as first written: the unwind happens on a
+background thread, and every throwing test stopped waiting the moment the handler *signalled*, so
+the test finished before the abort landed. Every case now starts a **sentinel** periodic timer and,
+after the throwing invocation, waits for it to fire five more times.
+
+**Timers reconciliation:** SR-AUD-238 **remediated**; SR-AUD-239 **confirmed (design-complete)**,
+blocked on #2155; post-audit #2156 **done**. Five items deliberately excluded, each with a named
+pin. **`modules/timers` is closed except for #2155.** Namespace test count **9 → 36**.
+
+### 7. Sanitizer and mutation evidence
+
+| Ticket | Sanitizers | Mutations |
+|---|---|---|
+| #2148 | LSan **present-before / absent-after** with a stable control; UBSan 0 over 51 cases | 3, all counting (clean, precisely targeted) |
+| #2149 | ASan + UBSan + LSan 0 over 45 cases | 2 counting + **1 honest non-result**: always resolving memLevel 8 is *observationally equivalent*, because the port picks memLevel 7 only at quality 0 where zlib emits stored blocks |
+| #2151 | — | 2 counting (one is a compile-time pin failure) |
+| #2154 | ASan + UBSan + LSan **and TSan** 0 reports | 1 counting, 1 abort-only (excluded by policy), 1 that exposed the test weakness above |
+| #2156 | `float-cast-overflow` 1 → 0 | 2, both counting |
+
+A TSan report on #2154 was traced to a **probe artefact** — `System::Threading::Timer::Dispose`
+detaches its worker, so a detached thread outlived a latch with static storage duration. The
+probe's latch is now deliberately leaked; **nothing in production was changed to silence it**, and
+the artefact is recorded rather than deleted.
+
+### 8. Next measured unit
+
+Re-derived from the index after this batch. Remaining **unreviewed** modules with ≥ 2 open
+confirmed findings: `core` (72 — not a namespace, already carved by seven `CCF-*` plans),
+`globalization` (7, needs `/rv` **and** ICU data), `time-zone` (7, zero high, mostly parity-bound),
+`numerics` (4, zero high), `xml-linq` (4, its only high is the blocked CCF-019),
+`net-network-information` (3, zero high, #1962 capability gap), **`security-cryptography` (2, both
+high)** and `console` (2, zero high).
+
+**Recommended next: `security-cryptography`.** It is now the highest-severity unreviewed unit
+(100 % high), has no `/rv` dependence, and both findings are `Dispose`-clearing questions with
+concrete audit probes. Expect a **partial** close: SR-AUD-331 needs a disposed-state flag on
+`Rfc2898DeriveBytes`, i.e. an object-layout change, so plan for one compatible ticket plus one
+blocked design. `console` (2 medium argument-domain items, fully compatible) is the alternative if
+a guaranteed full close is wanted instead.
 
 ---
 

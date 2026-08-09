@@ -1,23 +1,59 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-08-09 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
-harness-designated branch, continued from its own clean tip `3d022d8`. **Not pushed; no push was
-requested.** No merge, rebase, tag, force-push, PR, publication, amend or history rewrite; all
-commits unsigned. **Work units 1 and 2 of the brief were already complete on arrival and were
-verified, not redone** — #2142/#2141/#2143/#2144, the io-hashing reconciliation and #2145 all
-landed in the previous context, so **`modules/io-hashing` is fully closed** with three findings
-remediated and no blocked or deferred remainder. This batch did **work unit 3**: it re-derived the
-next review unit by measurement (with an explicit penalty for parity-bound namespaces, `/rv` being
-absent), reviewed **`modules/io-compression` (#2147)** and implemented its one memory-safety
-ticket **#2146** (SR-AUD-256) — 63 cases, **15 crashes → 0**, +35 tests, two counting mutations.
-**Four premises corrected by measurement**, the load-bearing one being that the source-side defect
-is in **all three** encoders, not only `DeflateEncoder`: probe 1's 1-byte destination masked GZip
-and ZLib because their header fills it before `deflate()` reads the source. Audit **154 remediated
-/ 210 confirmed / 364 total**, `confirmed (design-complete)` **49**; **no `SR-AUD-*` identifier
-created — numbering frozen at 364.** Gate **16,152 across 37 executables, 16,145 passing, 1
-skipped, 6 failing** for the same two measured causes. Graph **41 / 92**, seams **2 / 18**.
+harness-designated branch, continued from its own tip `6676a08`. **Pushed after every commit**, per
+`CLAUDE.md` rule 13 and the harness branch policy; the tension with the batch brief's "do not push
+unless requested" is recorded rather than resolved by silence. No merge, rebase, tag, force-push,
+PR, publication, amend or history rewrite; all commits unsigned. This batch **finished
+`modules/io-compression`** — #2148 (SR-AUD-258: an out-of-domain `CompressionMode` was a
+LeakSanitizer-confirmed leak of the whole zlib state, and three doors, not one, kept answering after
+`Close()`), #2149 (SR-AUD-259's strategy half: 45 of 45 outputs were byte-identical to `Default`
+before, 0 of 45 diverge from zlib after) and #2151 (the contract in the headers plus a compile-time
+pin on #2150's absence) — and then **reviewed and closed `modules/timers`**: #2153 (the review),
+#2154 (SR-AUD-238: a throwing `Elapsed` handler aborted the process, 7 of 7, taking unrelated timers
+with it), #2156 (a post-audit defect — the interval setter's domain was narrower than the
+constructor's and the gap was undefined behaviour) and #2157 (the lifecycle matrix made permanent
+plus the reconciliation). Audit **156 remediated / 208 confirmed / 364 total**,
+`confirmed (design-complete)` **50**; **no `SR-AUD-*` identifier created — numbering frozen at
+364.** Gate **16,205 across 37 executables, 16,198 passing, 1 skipped, 6 failing** for the same two
+measured causes (+53). Graph **41 / 92**, seams **2 / 18**, negative fixtures **11 / 94**.
 **Doxygen, `ccache` and `/rv` all absent.** CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted;
-#1773 and #1962 blocked. Maximum aggregate compiler parallelism **2 jobs**.*
+#1773, #1962, #2150 and #2155 blocked. Maximum aggregate compiler parallelism **2 jobs**.*
+
+## 2026-08-09 (later) — `modules/io-compression` finished (#2148, #2149, #2151) and `modules/timers` reviewed and closed (#2153, #2154, #2156, #2157)
+
+**io-compression.** All three inherited `todo` tickets classified from their exact rows and the
+durable plan, and all three **compatible implementation-ready**, so all three were implemented.
+#2148's two premise corrections were measured before anything was edited: an out-of-domain
+`CompressionMode` leaks the whole zlib state (the constructor splits on `Decompress`, `Close()` on
+`Compress`, so `inflateEnd` was handed a `deflateInit2` stream — LSan: 5,952 direct + 65,536
+indirect bytes per object, clean after), and the closed-state defect was on `Read` and `Flush` as
+well as the `Write` the finding names. Its acceptance criterion named
+`ArgumentOutOfRangeException`; the base `ArgumentException` was implemented instead, because the
+audit's own managed probe recorded that category for .NET — corrected in the plan, the audit record
+and the ticket rather than swapped silently. #2149 widened the evidence from one pair to 45 cases
+and left the default-option output byte-identical. #2151 documented the contract and pinned #2150's
+absence at compile time. **Namespace 40 → 101 tests; closed except for #2150 (approval) and #2152
+(a new inactive post-audit ticket, pinned).**
+
+**timers.** The next unit was re-derived rather than inherited, and the comparison against
+`security-cryptography` is recorded: timers wins because its high **terminates the process** (7 of
+7 SIGABRT, killing unrelated timers with it) while the rival's highs need a separate disclosure
+primitive, and because the rival could not be closed in one pass either. Four premises corrected,
+including that the exception escapes a raw `std::thread` entry point in **modules/threading** (left
+unchanged, because .NET's `System.Threading.Timer` also crashes) and that a third, unrecorded defect
+existed: the interval setter accepted four values the constructor rejects, all of which reached an
+undefined float-to-integer conversion. **GCC's `-fsanitize=undefined` does not include
+`float-cast-overflow`**, which is why it survived every previous UBSan pass. SR-AUD-239 is
+`confirmed (design-complete)` and blocked: its only repair takes `sizeof(Timer)` 104 → 112 and adds
+a vtable. **Namespace 9 → 36 tests; closed except for #2155.**
+
+**Mutation testing earned its keep twice.** Mis-mapping `RunLengthEncoding` to `Z_FIXED` survived
+#2149's suite until a pairwise-distinctness assertion was added, and narrowing #2154's catch to
+`std::exception` survived until every throwing test was given a sentinel timer to wait on after the
+throw. One surviving mutation is recorded as an **honest non-result**: always resolving memLevel 8
+is observationally equivalent, because the port picks memLevel 7 only at quality 0, where zlib emits
+stored blocks.
 
 ## 2026-08-09 — io-hashing verified closed, the `modules/io-compression` review (#2147) and #2146
 
