@@ -103,3 +103,53 @@ Source and ABI consequences: none. No public signature, object layout, vtable or
 exported symbol changed. Behavioural note for consumers: constructing any of the
 three over a null stream now throws instead of deferring a crash to first use. No
 in-repository caller did so.
+
+---
+
+## Post-audit remediation for SR-AUD-258 (ticket #2148, 2026-08-09): REMEDIATED
+
+The audit evidence above is retained unchanged. Cause **C-B** of
+`docs/SystemIOCompressionNamespaceReviewPlan.md`; the full implementation record is that plan's
+§14.
+
+**Two corrections to the finding's extent, both measured before any production change**
+(`build-probe/2148_probe1_before.log`, `build-probe/2148_probe2_before_after.log`):
+
+1. **The out-of-domain mode leaks the whole zlib state.** The report records the consequence as
+   "creates a deflater, and reports both CanRead and CanWrite false". The constructor splits on
+   `Decompress` (`inflateInit2` : `deflateInit2`) while `Close()` splits on `Compress`
+   (`deflateEnd` : `inflateEnd`), so an out-of-domain value takes the **deflate** arm on the way in
+   and the **inflate** arm on the way out. `inflateEnd` on a `deflateInit2` stream returns
+   `Z_STREAM_ERROR` and frees nothing. LeakSanitizer, over instrumented stream bodies:
+   **3 × 5,952 direct + 8 × 65,536 indirect bytes leaked**, exit 1 — against a clean
+   `mode = Compress` control, and clean again after the repair. The caller's payload is discarded
+   too: a 4 KiB write left 0 inner bytes for `DeflateStream`, 10 for `GZipStream` (the gzip header
+   alone) and 2 for `ZLibStream` (the zlib header alone), because `Close()`'s `Z_FINISH` loop is
+   guarded by `mode == Compress` and never runs.
+2. **The closed-state defect is on three doors, not one.** The report names `Write`. Measured on
+   all three types and both `leaveOpen` values, `Read` returned **0** — indistinguishable from "the
+   compressed stream is exhausted" — and `Flush` returned silently, through the identical
+   `!state_->initialized` early return.
+
+**Exception type.** The mode rejection uses the **base** `System::ArgumentException`
+(`"Enum value was out of legal range."`, param `"mode"`), not the derived
+`ArgumentOutOfRangeException` that ticket #2148's acceptance criterion named. This report's own
+managed probe recorded .NET's category for this call as `invalidMode=ArgumentException`, and
+`/rv/tmp/runtime/src/libraries/` is absent here to narrow it further — the same reasoning that
+settled `System::Threading`'s `EventWaitHandle` (#1954) and `System::Uri`'s `Uri(string, UriKind)`
+(#1992). The acceptance criterion is corrected, not satisfied literally.
+
+**Deliberately unchanged, and pinned.** `Read` on a Compress-mode **open** stream still answers 0,
+and `Write` on a Decompress-mode **open** stream still throws `IOException("… deflate error -2")`.
+.NET throws `InvalidOperationException` for both, but SR-AUD-258 does not name these doors and the
+exception type cannot be confirmed with the reference tree absent. Both are pinned by tests naming
+the new ticket **#2152**, rather than changed on recollection.
+
+**Evidence.** +14 tests (`CompressionStreamStateTests.cpp`);
+`SharpRuntimeTests_IO_Compression` **75 → 89**. Three mutations, all three counting with clean,
+precisely-targeted failures: deleting the mode check (2 failures), moving the closed check ahead of
+the buffer validation (1), and moving it after the `count == 0` return (1). UBSan over the whole
+51-case matrix: **0 reports**. No public signature, `noexcept`, virtual, vtable, data member or
+object-layout change; component graph unchanged at 41 / 92.
+
+**SR-AUD-259 is untouched by this ticket and stays `confirmed`**, owned by #2149 and #2150.

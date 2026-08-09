@@ -36,10 +36,14 @@ namespace System::IO::Compression {
          * is initialised, so a rejected call allocates no compressor state.
          *
          * @param stream    The underlying stream for compressed data. Must not be null.
-         * @param mode      @c CompressionMode::Compress or @c ::Decompress.
+         * @param mode      @c CompressionMode::Compress or @c ::Decompress. A value outside
+         *                  those two members is rejected here (ticket #2148); it used to
+         *                  construct a deflater that `Close()` then released with
+         *                  `inflateEnd`, leaking the whole zlib state.
          * @param leaveOpen When @c true the inner stream is not closed on destruction.
          *
          * @throws System::ArgumentNullException if @p stream is null.
+         * @throws System::ArgumentException if @p mode is neither @c Compress nor @c Decompress.
          * @throws System::IO::IOException if zlib initialisation fails.
          */
         GZipStream(Stream* stream, CompressionMode mode, bool leaveOpen = false);
@@ -64,6 +68,11 @@ namespace System::IO::Compression {
          * @param offset Starting index in @p buffer.
          * @param count  Maximum number of bytes to read.
          * @return Number of bytes written; 0 when the compressed stream is exhausted.
+         * @throws System::ArgumentNullException if @p buffer is null.
+         * @throws System::ArgumentOutOfRangeException if @p offset or @p count is negative.
+         * @throws System::ObjectDisposedException if @c Close() has already run. The buffer
+         *         arguments are validated first, matching .NET's
+         *         `ValidateBufferArguments`-then-`EnsureNotDisposed` order.
          */
         SharpRuntime::intcs Read(SharpRuntime::bytecs* buffer,
                                  SharpRuntime::intcs   offset,
@@ -79,6 +88,8 @@ namespace System::IO::Compression {
          * @param count  Number of bytes to compress.
          * @throws System::ArgumentNullException if buffer is null.
          * @throws System::ArgumentOutOfRangeException if offset or count is negative.
+         * @throws System::ObjectDisposedException if @c Close() has already run. Before ticket
+         *         #2148 this returned silently and the caller's bytes were discarded.
          */
         void Write(const SharpRuntime::bytecs* buffer,
                    SharpRuntime::intcs          offset,
@@ -88,6 +99,8 @@ namespace System::IO::Compression {
          * @brief Flushes any pending compressed data using @c Z_SYNC_FLUSH.
          *
          * No-op in Decompress mode.
+         *
+         * @throws System::ObjectDisposedException if @c Close() has already run.
          */
         void Flush() override;
 

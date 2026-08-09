@@ -270,7 +270,10 @@ memory-safety item, and the other two touch the same files.
 ## 12. Status
 
 Written 2026-08-09. §§1–11 changed no production source. **#2146 was implemented in the same
-batch**; its record is §13. #2148/#2149/#2151 are `todo`; #2150 is `blocked`.
+batch**; its record is §13. #2148's record is §14.
+
+Superseded by §14: the sentence "#2148/#2149/#2151 are `todo`" describes the state at the moment
+this plan was written, not the current one.
 
 ---
 
@@ -321,3 +324,111 @@ module's public headers.
 
 **SR-AUD-256 is `remediated`.** SR-AUD-258 and SR-AUD-259 remain `confirmed`, owned by #2148 and
 #2149/#2150.
+
+---
+
+## 14. Implementation record — #2148 (cause C-B, SR-AUD-258)
+
+**Two premise corrections, both measured before anything was edited**
+(`build-probe/2148_probe1_before.log`, `build-probe/2148_probe2_before_after.log`).
+
+### 14.1 The out-of-domain mode is a guaranteed leak, not only a capability inconsistency
+
+The audit records the consequence as "creates a deflater, and reports both CanRead and CanWrite
+false". Measured, it is worse, and the mechanism is a split the two halves of each type make on
+**different** enumerators:
+
+| Body | Test |
+|---|---|
+| constructor | `mode == Decompress ? inflateInit2(…) : deflateInit2(…)` |
+| `Close()` | `mode == Compress ? …Z_FINISH…; deflateEnd(…) : inflateEnd(…)` |
+
+An out-of-domain value takes the **deflate** arm on the way in and the **inflate** arm on the way
+out, so `inflateEnd` is handed a `deflateInit2`-initialised `z_stream`. zlib rejects that with
+`Z_STREAM_ERROR` and frees nothing. LeakSanitizer, with the three stream bodies compiled from
+source and instrumented:
+
+| Arm | Before | After |
+|---|---|---|
+| `mode = 42`, one cycle per type | **leaks: 3 × 5,952 direct + 8 × 65,536 indirect bytes**, exit 1 | three rejections at construction, **no leaks**, exit 0 |
+| `mode = Compress` (control) | clean, exit 0 | clean, exit 0 |
+
+The caller's payload is discarded too: a 4 KiB write through a mode-42 stream left **0** inner
+bytes for `DeflateStream`, **10** for `GZipStream` (the gzip header alone) and **2** for
+`ZLibStream` (the zlib header alone) — a header with no payload and no trailer, because `Close()`'s
+`Z_FINISH` loop is guarded by `mode == Compress` and never ran.
+
+### 14.2 The closed-state defect is on three doors, not one
+
+The finding names `Write`. Measured on all three types × both `leaveOpen` values, `Read` answered
+**0** and `Flush` returned **silently** after `Close()` as well — the identical
+`!state_->initialized` early return. A repair covering only `Write` would have left a closed stream
+still reporting "the compressed stream is exhausted" from `Read`, which is the more dangerous of the
+two because it is a silent *wrong answer* rather than silently dropped work.
+
+### 14.3 The repair
+
+Two more entries in the module's single validation choke point
+(`CompressionArgumentValidation.hpp`, established by #2146):
+
+- `Detail::ValidateCompressionMode(mode)` — throws the **base** `System::ArgumentException`
+  (`"Enum value was out of legal range."`, param `"mode"`). Base, not the derived
+  `ArgumentOutOfRangeException` that #2148's acceptance criterion named: the audit's own managed
+  probe for SR-AUD-258 recorded .NET's category for this exact call as `ArgumentException`
+  (per-file report, "current .NET prints `invalidMode=ArgumentException`"), `/rv` is absent to
+  narrow it further, and the same reasoning already settled `System::Threading`'s `EventWaitHandle`
+  (#1954) and `System::Uri`'s `Uri(string, UriKind)` (#1992). **The acceptance criterion is
+  corrected rather than satisfied literally.**
+- `Detail::ThrowIfStreamClosed(open, typeName)` — throws
+  `ObjectDisposedException(typeName, "Cannot access a closed Stream.")`, the spelling
+  `MemoryStream` and `UnmanagedMemoryStream` already use.
+
+**Placement is load-bearing in three places**, and each is pinned by its own test:
+
+1. the mode check sits **after** the null-stream check and **before** `deflateInit2`/`inflateInit2`
+   — .NET's constructor order, and the only placement at which a rejected construction has nothing
+   to leak;
+2. the closed check sits **after** the buffer-argument validation in `Read`/`Write` — .NET runs
+   `ValidateBufferArguments` before `EnsureNotDisposed`;
+3. the closed check sits **before** the `count == 0` early return — otherwise "nothing to write"
+   launders a use-after-close into a success.
+
+### 14.4 Mutation testing — three mutations, all three count
+
+| # | Mutation | Result | Counts? |
+|---|---|---|---|
+| 1 | delete `ValidateCompressionMode` from `DeflateStream`'s constructor | **2 clean failures** — both mode-domain tests; the other 87 green, including GZip's and ZLib's | **Yes** |
+| 2 | move the closed check **ahead** of `Read`'s buffer validation | **1 clean failure** — the order pin alone | **Yes** |
+| 3 | move `Write`'s closed check **after** the `count == 0` return | **1 clean failure** — the zero-count pin alone | **Yes** |
+
+No mutation crashed, hung or failed to build; all three were reverted and the tree rebuilt to
+89/89 green. UBSan over the whole 51-case matrix: **0 reports** (the enum is scoped, so its
+underlying type is `int` and a cast of 42 is well-defined — the defect was never UB, which is
+exactly why nothing detected it before).
+
+### 14.5 Two doors deliberately NOT changed → new ticket #2152
+
+Measured and **pinned**, not repaired, because SR-AUD-258 does not name them and `/rv` is absent to
+confirm the exception type .NET uses:
+
+| Door | This port, measured | .NET (recollected, unverifiable here) |
+|---|---|---|
+| `Read` on a **Compress**-mode open stream | returns **0** | `InvalidOperationException` |
+| `Write` on a **Decompress**-mode open stream | `IOException("… deflate error -2")` | `InvalidOperationException` |
+
+Both are pinned by `CompressionStreamStatePinTests`, which name #2152 in the test name.
+
+### 14.6 Consequences
+
+**Tests: +14** (`CompressionStreamStateTests.cpp`); `SharpRuntimeTests_IO_Compression`
+**75 → 89**. No public signature, `noexcept`, virtual, vtable, data member or object-layout
+change — the mode and the open flag were both already stored. The component graph is unchanged at
+**41 / 92**: `CompressionArgumentValidation.hpp` now includes `CompressionMode.hpp`, which is a
+header in the same component.
+
+**Narrowing, deliberately.** Two calls that used to succeed now throw: constructing with a cast
+mode, and touching a closed stream. A repository-wide search for `static_cast<CompressionMode>`
+and `(CompressionMode)` over `modules/`, `test/`, `tests/` and `bench/` returns hits only in this
+ticket's own tests and probes, so no existing caller is reached.
+
+**SR-AUD-258 is `remediated`.**

@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Compression/DeflateStream.hpp"
+#include "System/IO/Compression/CompressionArgumentValidation.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IO/IOException.hpp"
@@ -55,6 +56,14 @@ DeflateStream::DeflateStream(Stream* stream, CompressionMode mode, bool leaveOpe
     // is a real post-close state here -- unlike StreamReader's, which ticket #1806
     // removed precisely because nothing there could ever null the member again.
     if (stream == nullptr) throw System::ArgumentNullException("stream");
+    // Ticket #2148 (SR-AUD-258): the mode is checked here, AFTER the null-stream check and BEFORE
+    // zlib initialisation -- .NET's constructor order (ThrowIfNull, then the mode switch whose
+    // default arm throws), and the only placement that cannot leak. The two arms below split on
+    // `Decompress` while Close() splits on `Compress`, so an out-of-domain value took the deflate
+    // arm here and the INFLATE arm there: `inflateEnd` on a `deflateInit2` stream, which zlib
+    // rejects with Z_STREAM_ERROR and frees nothing. LeakSanitizer measured 5,952 direct + 65,536
+    // indirect bytes leaked per object, in all three types (build-probe/2148_probe2_before.log).
+    Detail::ValidateCompressionMode(mode_);
     if (mode_ == CompressionMode::Decompress) {
         // -MAX_WBITS: raw deflate, no zlib wrapper
         if (inflateInit2(&state_->zs, -MAX_WBITS) != Z_OK)
@@ -134,7 +143,11 @@ SharpRuntime::intcs DeflateStream::Read(SharpRuntime::bytecs* buffer,
     if (buffer == nullptr) throw System::ArgumentNullException("buffer");
     if (offset < 0) throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
     if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
-    if (!state_ || !state_->initialized || state_->finished || count == 0) return 0;
+    // Ticket #2148: a closed stream used to answer 0 here, indistinguishable from "the compressed
+    // stream is exhausted". The buffer arguments are validated FIRST, matching .NET, whose
+    // Read(byte[],int,int) runs ValidateBufferArguments before ReadCore's EnsureNotDisposed.
+    Detail::ThrowIfStreamClosed(state_ && state_->initialized, "DeflateStream");
+    if (state_->finished || count == 0) return 0;
 
     auto& s = *state_;
     s.zs.next_out  = reinterpret_cast<Bytef*>(buffer + offset);
@@ -171,7 +184,10 @@ void DeflateStream::Write(const SharpRuntime::bytecs* buffer,
     if (buffer == nullptr) throw System::ArgumentNullException("buffer");
     if (offset < 0) throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
     if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
-    if (!state_ || !state_->initialized || count == 0) return;
+    // Ticket #2148: this is the door the finding names. A write to a closed stream used to return
+    // silently, so the caller's bytes vanished with no diagnostic at all.
+    Detail::ThrowIfStreamClosed(state_ && state_->initialized, "DeflateStream");
+    if (count == 0) return;
 
     auto& s = *state_;
     s.zs.next_in  = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(buffer + offset));
@@ -195,7 +211,10 @@ void DeflateStream::Write(const SharpRuntime::bytecs* buffer,
 // ---------------------------------------------------------------------------
 
 void DeflateStream::Flush() {
-    if (!state_ || !state_->initialized || mode_ != CompressionMode::Compress) return;
+    // Ticket #2148: same closed-state rule as Read/Write. .NET's Flush() opens with
+    // EnsureNotDisposed() and only then no-ops for a Decompress-mode stream.
+    Detail::ThrowIfStreamClosed(state_ && state_->initialized, "DeflateStream");
+    if (mode_ != CompressionMode::Compress) return;
 
     auto& s = *state_;
     s.zs.next_in  = nullptr;

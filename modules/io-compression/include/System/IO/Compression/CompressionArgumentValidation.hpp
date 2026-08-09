@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/IO/Compression/CompressionMode.hpp"
 
 namespace System::IO::Compression::Detail {
 
@@ -78,6 +79,60 @@ namespace System::IO::Compression::Detail {
         }
         if (length > 0 && destination == nullptr) {
             ThrowNullBuffer("destination");
+        }
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Ticket #2148 (SR-AUD-258, cause C-B) — the stream half of the same "state the type cannot
+    // represent must not reach zlib" rule. Kept here, beside the length contract, so the whole
+    // component has exactly one definition of each rejection.
+    // -----------------------------------------------------------------------------------------
+
+    /**
+     * @brief Throws `ArgumentException("Enum value was out of legal range.", paramName)`.
+     *
+     * The **base** `ArgumentException`, not the derived `ArgumentOutOfRangeException`, because the
+     * audit's own managed probe for SR-AUD-258 recorded the category .NET reports for this exact
+     * call as `ArgumentException` (`audit/.../DeflateStream.cpp.audit.md`, "current .NET prints
+     * `invalidMode=ArgumentException`"), and `/rv` is absent here to narrow it further. Same
+     * choice, for the same reason, as `System::Threading`'s `EventWaitHandle` (#1954) and
+     * `System::Uri`'s `Uri(string, UriKind)` (#1992).
+     */
+    [[noreturn]] void ThrowInvalidCompressionMode(const char* paramName);
+
+    /** @brief Throws `ObjectDisposedException(typeName, "Cannot access a closed Stream.")`. */
+    [[noreturn]] void ThrowStreamClosed(const char* typeName);
+
+    /**
+     * @brief Rejects a `CompressionMode` outside the two members the enum declares.
+     *
+     * A cast such as `static_cast<CompressionMode>(42)` used to construct successfully in all
+     * three stream types and take the **deflate** arm of the constructor while `Close()` takes the
+     * **inflate** arm, so `inflateEnd` was called on a `deflateInit2`-initialised stream. zlib
+     * rejects that with `Z_STREAM_ERROR` and frees nothing: LeakSanitizer reported a direct leak of
+     * 5,952 bytes plus a 65,536-byte indirect leak **per constructed object**, in all three types
+     * (`build-probe/2148_probe2_before.log`), while the caller's payload was silently discarded and
+     * both capability properties reported `false`. Rejecting at construction is what closes it —
+     * a check on the I/O path would still leave a constructed object whose two halves disagree.
+     *
+     * @throws System::ArgumentException if @p mode is neither `Decompress` nor `Compress`.
+     */
+    inline void ValidateCompressionMode(CompressionMode mode) {
+        if (mode != CompressionMode::Decompress && mode != CompressionMode::Compress) {
+            ThrowInvalidCompressionMode("mode");
+        }
+    }
+
+    /**
+     * @brief Rejects an operation on a stream whose `Close()` has already run.
+     *
+     * @param open     The wrapper's own open signal (`state_->initialized`).
+     * @param typeName The wrapper's type name, used as the exception's object name.
+     * @throws System::ObjectDisposedException when @p open is false.
+     */
+    inline void ThrowIfStreamClosed(bool open, const char* typeName) {
+        if (!open) {
+            ThrowStreamClosed(typeName);
         }
     }
 
