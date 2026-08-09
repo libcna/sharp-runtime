@@ -437,3 +437,59 @@ rather than merely different.
 value verbatim, so `Timer(0.5)` reports an interval of `1` and a timer *set* to `0.5` reports `0.5`,
 even though both schedule the same 1 ms tick. No finding names it and either answer is a public
 observable change, so it is recorded in the header and pinned by a test.
+
+---
+
+## 16. Implementation record — #2157, and the namespace reconciliation
+
+### 16.1 An acceptance-criterion correction
+
+#2157's criterion asked it to "state in the public header what #2154 and #2156 established" and to
+pin the deferred behaviours. Both tickets landed their own header text and their own pins in the
+same batch, so restating them here would duplicate rather than add. What #2157 actually contributes
+is the part neither of them owned: **the lifecycle and concurrency matrix of §9 as permanent
+tests**, and the reconciliation below.
+
+### 16.2 What #2157 delivered
+
+**Zero executable production change** — tests and this section only.
+
+The §9 matrix was measured by `build-probe/2153_probe1_before.log` and survived in every case, but a
+probe log is not a regression test. Nine cases are now permanent
+(`TimerLifecyclePinTests.cpp`), each one a way a future edit to `Close()`, `setEnabledProperty` or
+the callback lambda could deadlock, use after free, or silently stop firing, and none of them
+covered by the module's original nine tests: `Close()` from inside the handler (a self-join would
+deadlock here — `Dispose` detaches, which is what makes it survivable), rescheduling from inside the
+handler, flipping `AutoReset` from inside the handler, `Stop()` before the first fire, destruction
+while enabled, restarting after `Close()`, `Dispose()` being `Close()`, and the two compile-time
+pins for #2155.
+
+### 16.3 Namespace reconciliation — `System::Timers`
+
+| Finding | Sev | Cause | Ticket | Disposition |
+|---|---|---|---|---|
+| SR-AUD-238 | **high** | TM-A | #2154 | **remediated** |
+| SR-AUD-239 | med | TM-B | **#2155** | **confirmed (design-complete)** — its only repair is an object-layout **and** vtable change (`sizeof` 104 → 112, non-polymorphic → polymorphic); **blocked** on approval, and pinned at compile time so it cannot land silently |
+
+Post-audit defect found by this review, carrying no `SR-AUD-*` identifier (numbering stays frozen at
+**364**):
+
+| Defect | Ticket | State |
+|---|---|---|
+| the interval setter's domain is narrower than the constructor's, and the gap is undefined behaviour | **#2156** | **done** |
+
+Deliberately excluded, each recorded rather than silently dropped:
+
+| Item | Why | Where it is pinned |
+|---|---|---|
+| `System::Threading::Timer` does not catch its own callback either | matches .NET's `System.Threading.Timer`; changing it would diverge in the other direction | `build-probe/2153_probe1_before.log`; not asserted in-process, because the abort would take the test executable with it and because `Threading` is a **private** dependency of this component |
+| the raw-`this`-capture lifetime hazard | documented in the header; same class as `Socket`'s and `ClientWebSocket`'s, both with their own blocked design tickets | header `@note` |
+| a second subscribed handler is not reached when the first throws | matches a C# multicast delegate | `TimerExceptionBoundaryTests` |
+| the constructor ceils the interval and the setter does not | no finding names it; either answer is a public observable change | `TimerIntervalDomainPinTests`, and the header |
+| `Component` / `SynchronizingObject` / `TimersDescriptionAttribute` | documented reductions and an attribute stub; attributes are a permanent deviation | header |
+
+**Every compatible-ready ticket in this namespace is complete.** #2153, #2154, #2156 and #2157 are
+`done`; #2155 is blocked on an approval whose exact wording and measured cost are recorded in its
+ticket. **`modules/timers` is closed except for #2155.**
+
+Test count for the namespace: **9 → 36** (#2154 +10, #2156 +8, #2157 +9).

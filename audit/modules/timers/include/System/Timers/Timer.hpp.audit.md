@@ -97,3 +97,39 @@ change; component graph unchanged at 41 / 92.
 **Pinned rather than changed:** a second subscribed handler is not reached when the first throws,
 because the exception unwinds out of `EventHandler::Raise`'s loop — matching a C# multicast
 delegate, where an exception in one target also stops the rest of the invocation list.
+
+---
+
+## Design record for SR-AUD-239 (ticket #2155, 2026-08-09): CONFIRMED (DESIGN-COMPLETE), BLOCKED
+
+The audit evidence above is retained unchanged, and **SR-AUD-239 remains open**. Cause **TM-B** of
+`docs/SystemTimersNamespaceReviewPlan.md` §4.4; the implementation is blocked on approval.
+
+**`nullptr` is not a forgotten argument — it is the only value that compiles.**
+`EventHandler<T>::Raise(System::Object* sender, const T& e)` types the sender as `Object*`.
+`System::Timers::Timer` does not derive from `System::Object`:
+`std::is_convertible_v<Timer*, Object*>` is **0**. `System::Object` is **abstract** (pure virtual
+`GetTypeName()`) and **polymorphic**, so passing the timer requires giving `Timer` that base.
+
+**Measured cost** (`build-probe/2153_probe4_layout.log`):
+
+| Property | Now | With the `Object` base |
+|---|---|---|
+| `sizeof(System::Timers::Timer)` | **104** | **112** |
+| `alignof` | 8 | 8 |
+| `std::is_polymorphic_v` | false | **true** |
+| every data member's offset | — | **shifted by 8** |
+| new virtual members | — | `~Object`, `GetTypeName`, `ToString`, `Equals`, `GetHashCode` |
+
+`GetTypeName()` must additionally be implemented, because `System::Object` is abstract.
+
+**No compatible alternative exists.** There is no `void*` sender overload on `EventHandler`, the
+sender is a parameter rather than a property of `ElapsedEventArgs`, and handing out some *other*
+`Object*` would be worse than null.
+
+An object-layout **and** vtable change on a public type needs explicit per-action user approval
+under this repository's settled rules — #1788 and #1789 both required one for smaller growth. The
+approval sentence is recorded verbatim in ticket #2155.
+
+**Current behaviour is pinned** by a runtime test and by compile-time `static_assert`s in two test
+files, so the change cannot land silently: the build stops until the pins are deliberately updated.
