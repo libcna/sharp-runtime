@@ -37,7 +37,7 @@ alongside heavy parity dependence.
 ## 2. Scope and surface inventory
 
 **In scope:** `modules/console` — 7 public headers (`Console.hpp` and six enum/event types),
-1 body, 3 test files (`SharpRuntimeTests_Console`, **123 tests** at the start of this review).
+1 body, 3 test files (`SharpRuntimeTests_Console`, **127 tests** at the start of this review — the audit's 123 dates from 2026-07-27).
 Component `Console`, public dependency `Core.Base`.
 
 | Area | Surface | State |
@@ -234,8 +234,97 @@ fixtures unchanged.
 
 ## 12. Implementation record — #2163 and #2164
 
-*Filled in on completion.*
+**Done 2026-08-09.** `SharpRuntimeTests_Console` **127 → 142** tests, all passing. (The audit's
+123 dates from 2026-07-27; the suite had grown to 127 before this review started, and that is the
+baseline used here.)
+
+### 12.1 The repairs
+
+**#2163, cause CN-A.** A private `requireDefinedColor` rejects any `ConsoleColor` outside 0–15 with
+`ArgumentException("Enum value was out of legal range.", "value")`, at the top of both setters,
+before the field is written or anything is emitted. `ansiColor`'s doc-comment now states the
+precondition that makes its 12-byte buffer the right size rather than a lucky one.
+
+**#2164, cause CN-B.** `SetCursorPosition` runs
+`ArgumentOutOfRangeException::ThrowIfNegative` on each coordinate before touching the cache. Both
+property aliases inherit the rejection by the same delegation that gave them the defect, and the
+parameter names stay `left`/`top` because .NET's `CursorLeft`/`CursorTop` setters delegate to
+`SetCursorPosition` too.
+
+### 12.2 A third defect, found by pinning rather than by the finding
+
+§7 deliberately enforces **no** upper bound, so `INTCS_MAX` is a reachable argument. Writing the pin
+for it exposed that `left + 1` — the 0-based-to-ANSI conversion — is **signed integer overflow** at
+`INTCS_MAX`: undefined behaviour, not merely a wrong number. UBSan:
+
+```
+Console.hpp:396:24: runtime error: signed integer overflow: 2147483647 + 1 cannot be represented in type 'int'
+```
+
+Fixed by computing the conversion in `long long`. No value that previously produced a well-defined
+sequence changes. **UBSan 2 reports → 0.** This is the same shape as ticket #2156's undefined
+float-to-integer conversion in `modules/timers`, and it would have gone unnoticed if the review had
+either silently added an upper bound or declined to pin the absence of one.
+
+### 12.3 Measured before / after — `build-probe/2162_probe1_console_before.log`
+
+| Door | Before | After |
+|---|---|---|
+| foreground 16 / 99 / −1 | accepted, emits `ESC[98m` / `ESC[181m` / `ESC[29m` | `ArgumentException`, **emits nothing** |
+| foreground `INT_MIN` | accepted, emits `ESC[-21474836` — **truncated, no terminator** | `ArgumentException`, emits nothing |
+| getter after an invalid set | reads back the invalid value (`-2147483648`) | unchanged from its last valid value |
+| `SetCursorPosition(-1,0)`, `(0,-1)`, both aliases with −5 | accepted and cached | `ArgumentOutOfRangeException`, cache unchanged |
+| `SetCursorPosition(INTCS_MAX, 0)` | accepted, **signed overflow** in the escape | accepted, no overflow (pinned, §7) |
+| every valid colour 0–15, both setters | 32 sequences | **byte-identical** |
+
+### 12.4 Mutations
+
+| Mutation | Result |
+|---|---|
+| Drop `requireDefinedColor` from the foreground setter | **5 clean failures** / 137 pass, exactly the colour tests. **Counts** |
+| Drop `ThrowIfNegative(top, …)` | **4 clean failures** / 138 pass, exactly the cursor tests. **Counts** |
+| Revert the `long long` widening | **honest non-result** for the suite: the pin still passes because a normal build does not trap signed overflow. The discriminating instrument is UBSan, and it is recorded as such rather than claimed as a test |
+
+### 12.5 Sanitizers
+
+`build-probe/2164_probe_ubsan.cpp` under `-fsanitize=address,undefined -fno-sanitize-recover=all`,
+`Console.cpp` compiled from source: 12 colour values × 2 setters and 8 coordinates × 4 doors.
+**Before: exit 1, 2 `signed integer overflow` reports. After: exit 0, 0 reports**, 34 accepted and
+22 rejected. TSan not run and not claimed — all state here is process-global `static inline` with no
+documented thread-safety contract (§9).
 
 ## 13. Implementation record — #2165, and the namespace reconciliation
 
-*Filled in on completion.*
+**Done 2026-08-09.**
+
+### 13.1 The contract is stated where a caller will see it
+
+`Console`'s class doc-comment now names both doors that validate *and* every door that deliberately
+does not, with the reason (no managed probe measured them) and the ticket that owns the question
+(#2166). It also states plainly that no member here is synchronised or documented as thread-safe.
+
+### 13.2 The non-guarantees are pins, not prose
+
+Three `PIN_`-prefixed tests assert the **current** behaviour of everything §4.3 and §7 left alone:
+no cursor upper bound (32766, 32767 and `INTCS_MAX` all accepted, with `INTCS_MAX` read back);
+`setCursorSizeProperty` storing 0, −1 and 101 against a documented 1–100 domain; and
+`SetWindowSize`/`SetWindowPosition`/`SetBufferSize`/both buffer setters/`MoveBufferArea` accepting
+negatives. If #2166 is ever answered, these are the record of what changed and the place to change
+it.
+
+### 13.3 Namespace reconciliation — `System::Console`
+
+| Finding | Sev | Ticket | Disposition |
+|---|---|---|---|
+| **SR-AUD-243** | med | **#2163** | **remediated** |
+| **SR-AUD-244** | med | **#2164** | **remediated** |
+
+**Both open findings are closed.** One post-audit defect was found and fixed with **no** new
+`SR-AUD-*` identifier (numbering frozen at **364**): the signed-overflow escape conversion (§12.2).
+One remains open and inactive: **#2166**, deferred verification for six adjacent doors, the cursor
+upper bound, and the exception *message text* of both repairs — their types were probe-verified,
+their texts were not. #2166 is blocked on **evidence**, not on approval; nothing in this namespace
+is approval-gated.
+
+**Totals:** 2 findings, 2 remediated, 0 open. Tests **127 → 142**. No layout, signature, vtable,
+seam, fixture or graph change.

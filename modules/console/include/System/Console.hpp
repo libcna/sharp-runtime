@@ -33,6 +33,25 @@ namespace System {
      * C++ counterpart of .NET System.Console.
      * All members are static; instantiation is not allowed.
      * Color and cursor features use ANSI escape sequences (POSIX terminals only).
+     *
+     * @note **Argument-domain contract.** Two doors validate, because current .NET's rejection was
+     * measured for them: the colour setters reject a `ConsoleColor` outside 0–15 with
+     * `ArgumentException` (SR-AUD-243), and `SetCursorPosition` and its two property aliases reject
+     * a negative coordinate with `ArgumentOutOfRangeException` (SR-AUD-244). Both reject *before*
+     * storing or emitting anything, so a rejected call leaves this class's state and the terminal
+     * exactly as they were.
+     *
+     * The rest of the argument surface **deliberately does not validate**, and that is a recorded
+     * decision rather than an oversight: no upper bound is enforced on a cursor coordinate,
+     * `setCursorSizeProperty` accepts values outside its documented 1–100 domain, and
+     * `SetWindowSize`, `SetWindowPosition`, `SetBufferSize`, the buffer setters and `MoveBufferArea`
+     * accept negative arguments. .NET is believed to reject all of these, but no managed probe
+     * measured any of them and this port could only guess at the exception type, parameter name and
+     * message. Ticket **#2166** owns the question; the current behaviour is pinned by test so it
+     * cannot change silently in the meantime.
+     *
+     * @note **Thread safety.** All state here is process-global `static inline`. No member is
+     * synchronised and none is documented as thread-safe.
      */
     class Console {
     public:
@@ -340,8 +359,12 @@ namespace System {
         /**
          * @brief Sets the foreground color using ANSI escape codes.
          * @param color The ConsoleColor to set as foreground.
+         * @throws System::ArgumentException if @p color is not one of the sixteen
+         *         `ConsoleColor` enumerators. The value is rejected before anything is stored or
+         *         emitted, so a rejected call leaves the getter and the terminal untouched.
          */
         static void setForegroundColorProperty(ConsoleColor color) {
+            requireDefinedColor(color);
             fg_ = color;
             std::cout << ansiColor(static_cast<int>(color), true);
         }
@@ -349,8 +372,11 @@ namespace System {
         /**
          * @brief Sets the background color using ANSI escape codes.
          * @param color The ConsoleColor to set as background.
+         * @throws System::ArgumentException if @p color is not one of the sixteen
+         *         `ConsoleColor` enumerators.
          */
         static void setBackgroundColorProperty(ConsoleColor color) {
+            requireDefinedColor(color);
             bg_ = color;
             std::cout << ansiColor(static_cast<int>(color), false);
         }
@@ -370,11 +396,30 @@ namespace System {
          * @brief Sets the cursor position using an ANSI escape sequence (0-based).
          * @param left Column index (0-based).
          * @param top  Row index (0-based).
+         * @throws System::ArgumentOutOfRangeException if @p left or @p top is negative. The
+         *         coordinate is rejected before the cache is written or anything is emitted.
+         *
+         * @note **No upper bound is enforced**, deliberately. Current .NET is believed to reject a
+         *   coordinate at or above `short.MaxValue`, but the audit measured only the negative case
+         *   and the `/rv` reference tree is absent here, so `SetCursorPosition(32767, 0)` and
+         *   `(INT_MAX, 0)` are still accepted and are pinned as such by test. Ticket #2166 owns
+         *   the question.
          */
         static void SetCursorPosition(intcs left, intcs top) {
+            // The cache is a documented local reduction, so an invalid coordinate would survive in
+            // the process even where the terminal ignores the sequence it produces (SR-AUD-244).
+            System::ArgumentOutOfRangeException::ThrowIfNegative(left, "left");
+            System::ArgumentOutOfRangeException::ThrowIfNegative(top, "top");
             cursorLeft_ = left;
             cursorTop_  = top;
-            std::printf("\033[%d;%dH", top + 1, left + 1);
+            // The +1 converts 0-based to the ANSI 1-based convention, and it is computed in a wider
+            // type on purpose: `left + 1` at INTCS_MAX is signed overflow, which is undefined
+            // behaviour rather than a wrong number. Since #2164 deliberately enforces no upper
+            // bound (the .NET limit is unmeasured here — see #2166), INTCS_MAX is a reachable
+            // argument, and UBSan reported it. Widening removes the UB without changing the output
+            // for any value that previously produced a well-defined one.
+            std::printf("\033[%lld;%lldH", static_cast<long long>(top) + 1,
+                        static_cast<long long>(left) + 1);
         }
 
         /**
@@ -407,7 +452,11 @@ namespace System {
          *   locally-cached value, not a live terminal query.
          */
         [[nodiscard]] static intcs getCursorLeftProperty() { return cursorLeft_; }
-        /** @brief Sets the cursor's column position. */
+        /**
+         * @brief Sets the cursor's column position.
+         * @throws System::ArgumentOutOfRangeException if @p v is negative — the parameter is named
+         *         `left`, because .NET's `CursorLeft` setter delegates to `SetCursorPosition` too.
+         */
         static void setCursorLeftProperty(intcs v) { SetCursorPosition(v, cursorTop_); }
 
         /**
@@ -416,7 +465,11 @@ namespace System {
          *   locally-cached value, not a live terminal query.
          */
         [[nodiscard]] static intcs getCursorTopProperty() { return cursorTop_; }
-        /** @brief Sets the cursor's row position. */
+        /**
+         * @brief Sets the cursor's row position.
+         * @throws System::ArgumentOutOfRangeException if @p v is negative — the parameter is named
+         *         `top`, because .NET's `CursorTop` setter delegates to `SetCursorPosition` too.
+         */
         static void setCursorTopProperty(intcs v) { SetCursorPosition(cursorLeft_, v); }
 
         /**
@@ -609,6 +662,36 @@ namespace System {
         static inline intcs cursorTop_   = 0;
         static inline intcs cursorSize_  = 25;
 
+        /**
+         * @brief Rejects a `ConsoleColor` that is not one of the sixteen enumerators.
+         *
+         * A scoped enumeration's *type* is not its *value set*: any `intcs` can be cast into
+         * `ConsoleColor`, and before ticket #2163 every arm here treated the result as valid.
+         * The audit's managed probe recorded current .NET as
+         * `color=exception:System.ArgumentException` for a cast 99, because Unix `ConsolePal`
+         * rejects values outside the 0–15 range.
+         *
+         * The message follows this repository's settled precedent for an enum-domain rejection
+         * (#1954, #1992, #2148); the audit measured the exception *type*, not .NET's text, and
+         * `/rv` is absent, so the text is recorded as unverified under #2166.
+         */
+        static void requireDefinedColor(ConsoleColor color) {
+            const int value = static_cast<int>(color);
+            if (value < 0 || value > 15) {
+                throw System::ArgumentException("Enum value was out of legal range.", "value");
+            }
+        }
+
+        /**
+         * @brief Builds the ANSI SGR sequence for a colour index.
+         *
+         * @pre @p c is in 0–15; every caller runs `requireDefinedColor` first. That precondition
+         * is what makes this buffer the right size rather than a lucky one: at
+         * `static_cast<ConsoleColor>(INT_MIN)` the pre-#2163 code emitted `ESC[-21474836` —
+         * truncated mid-number with **no terminating `m`** — and a terminal that receives an
+         * unterminated escape consumes the output that follows it looking for the terminator.
+         * GCC reports the same thing statically under `-Wall -Wextra`.
+         */
         static std::string ansiColor(int c, bool fg) {
             char buf[12];
             if (c < 8)

@@ -44,3 +44,45 @@ direct managed behavioral comparisons.
 
 SR-AUD-243 and SR-AUD-244 are directly reproduced. No source or test was
 changed during this audit.
+
+---
+
+## Remediation record — tickets #2163, #2164 and #2165 (2026-08-09)
+
+SR-AUD-243 and SR-AUD-244 both **remediated**. Repair, evidence and mutations:
+`docs/SystemConsoleNamespaceReviewPlan.md` §12–13.
+
+Both findings reproduce exactly as recorded, and both are repaired at the entry boundary this report
+identified: the colour setters reject anything outside 0–15 with `ArgumentException` and the cursor
+doors reject a negative coordinate with `ArgumentOutOfRangeException`, in each case **before** the
+value is stored or emitted, so a rejected call leaves the getter, the cache and the terminal
+untouched. The exception *types* come from this report's own managed probes; the message texts do
+not, and are recorded as unverified under #2166.
+
+**One consequence this report understates.** Its worst colour case is a wrong-but-well-formed
+`ESC[181m`. `ansiColor` formats into `char buf[12]`, so at `static_cast<ConsoleColor>(INT_MIN)` the
+emitted sequence was `ESC[-21474836` — **truncated mid-number with no terminating `m`**. A terminal
+that receives an unterminated escape consumes the output that follows it, so an out-of-domain colour
+could silently swallow later program output rather than merely mis-colour it. GCC reports the same
+statically under `-Wall -Wextra`; the repository build does not surface it because no translation
+unit instantiates the setter with a non-constant.
+
+**One defect neither this report nor the finding names**, found by pinning rather than by repairing:
+because no upper bound is enforced on a cursor coordinate, `INTCS_MAX` is reachable, and
+`left + 1` — the 0-based-to-ANSI conversion — was **signed integer overflow** there. UBSan reported
+it; the conversion is now computed in a wider type. No well-defined output changed. Fixed with **no**
+new `SR-AUD-*` identifier; numbering stays frozen at 364.
+
+**Deliberately not repaired, and pinned instead of left silent:** the six adjacent doors this report
+does not name (`setCursorSizeProperty` outside 1–100, `SetWindowSize`, `SetWindowPosition`,
+`SetBufferSize`, the buffer setters, `MoveBufferArea`) and the cursor upper bound. .NET is believed
+to reject all of them, but no managed probe measured any of them and `/rv` is absent, so
+implementing them would be recollection. Ticket **#2166** owns the question; three `PIN_` tests hold
+the current behaviour so it cannot change silently.
+
+**The assertions this report asked for are permanent** (+15 tests): invalid colour and negative
+cursor regressions for both the direct and the property setters, `INT_MIN` and `INTCS_MAX` at both
+ends, the exact exception types and parameter names, the getter and cache proved unchanged after a
+rejected set, and all 32 valid colour sequences asserted byte-for-byte so the repair cannot move
+one. The broader Write/WriteLine, EOF, `ReadKey`, redirected-stream and ANSI-disabled matrix this
+report also lists is **not** delivered here and is not claimed.
