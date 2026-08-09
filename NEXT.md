@@ -3,7 +3,220 @@
 
 # NEXT.md
 
-*Last verified: 2026-08-08. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
+*Last verified: 2026-08-09. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
+harness-designated branch**, continued from its own clean tip `3d022d8`. `CLAUDE.md` rule 3 names
+`feature/work`; nothing was pushed, so the two never conflicted, and the discrepancy is recorded
+rather than resolved silently. **Not pushed — no push was requested.** No merge, rebase, tag,
+force-push, PR, publication, amend or history rewrite; all commits unsigned
+(`git -c commit.gpgsign=false`) — no usable private signing key exists here. **Work units 1 and 2
+were already complete on arrival and were verified, not redone**: #2142/#2141/#2143/#2144, the
+io-hashing reconciliation and #2145 all landed in the previous context. This batch therefore did
+**work unit 3**: it re-derived the next review unit by measurement and reviewed
+**`modules/io-compression` (#2147)**, then implemented its one memory-safety ticket **#2146**
+(SR-AUD-256). Audit **154 remediated / 210 confirmed / 364 total**, of which **49** carry
+`confirmed (design-complete)`. Gate **16,152 tests across 37 executables: 16,145 passing, 1
+skipped, 6 failing** for the same two measured causes, unchanged and not hidden. Graph **41 / 92**,
+seams **2 / 18**. **Doxygen, `ccache` and the `/rv` reference tree are all absent** and were not
+installed. **CCF-019 open; CCF-021/#2131 and CCF-022/#2109 remain unminted.** #1773 and #1962
+remain blocked. See the first handoff below.*
+
+---
+
+## Batch record — io-hashing verification, the `System::IO::Compression` review (#2147) and #2146
+
+### 1. Work units 1 and 2 — already complete, verified rather than redone
+
+The brief expected the io-hashing queue to be open. **It was not.** Git history and `plan.sqlite3`
+agree that the previous context landed all of it:
+
+| Commit | Ticket | State |
+|---|---|---|
+| `c8d8b71` | **#2142** SR-AUD-261 | done |
+| `fab0c99` | **#2141** SR-AUD-260 | done |
+| `03f6eb0` | **#2143** SR-AUD-262 | done |
+| `3827ded` | **#2144** contract + pins | done |
+| `3d022d8` | reconciliation | SR-AUD-260/261/262 all `remediated` |
+| `f38b50c` | **#2145** `std::vector<bool>` race | done |
+
+Verified independently rather than assumed: all three io-hashing findings read `remediated` in
+`audit/AUDIT_FINDINGS_INDEX.md`, `SharpRuntimeTests_IO_Hashing` runs **131/131**, and no ticket is
+`doing`. **`modules/io-hashing` is fully closed** — three original findings, all remediated, no
+blocked or deferred remainder. **#2145 is done and was not repeated.** Nothing was re-implemented
+and no commit was created to restate work that already existed.
+
+### 2. Next unit re-derived by measurement
+
+Re-parsed `audit/AUDIT_FINDINGS_INDEX.md` from scratch — **not** inherited from the previous
+handoff — with the explicit penalty this batch required for namespaces whose useful work is
+predominantly unverifiable reference parity, since **`/rv` is absent**.
+
+| Module | Open | high | high % | Reviewed | `/rv`-bound | Verdict |
+|---|---|---|---|---|---|---|
+| `core` | 72 | 9 | 12 % | partly | mixed | poor cohesion — already carved by seven `CCF-*` plans |
+| `globalization` | 7 | 1 | 14 % | no | **heavily** | needs `/rv` **and** ICU data; its high is a process-global-state race needing approval |
+| `time-zone` | 7 | 0 | **0 %** | no | **mostly** | zero high; 3 of 7 need a real tz database plus .NET parity |
+| `numerics` | 4 | 0 | 0 % | no | partly | zero high |
+| `xml-linq` | 4 | 1 | 25 % | no | no | its **only** high is CCF-019 — **blocked** (#1899) |
+| **`io-compression`** | **3** | **1** | **33 %** | **no** | **none** | **winner** |
+| `net-network-information` | 3 | 0 | 0 % | no | no | zero high; its executable cannot pass here (#1962) |
+| `console` | 2 | 0 | 0 % | no | no | zero high |
+| `security-cryptography` | 2 | 2 | **100 %** | no | no | strong severity, only 2 findings, module partly excluded by `CLAUDE.md` |
+| `timers` | 2 | 1 | 50 % | no | no | strong, tiny — **the natural next unit** |
+
+`io-compression` wins because its one high is **actionable memory unsafety with ASan evidence**
+(every larger candidate's high is either blocked or architecture-gated), it has **zero `/rv`
+dependence**, its ordinary job is **parsing attacker-supplied bytes**, and the sibling `IO::Hashing`
+batch had just established the exact repair idiom it needed.
+
+### 3. The review — #2147
+
+`docs/SystemIOCompressionNamespaceReviewPlan.md`, 13 sections. Three findings → three causes →
+six tickets. **No `SR-AUD-*` identifier created; numbering stays frozen at 364.**
+
+| Cause | Findings | Ticket | State |
+|---|---|---|---|
+| **C-A** signed length cast into unbounded native zlib input | SR-AUD-256 | **#2146** | **done** |
+| **C-B** out-of-domain `CompressionMode`; silent `Write` after `Close` | SR-AUD-258 | #2148 | todo |
+| **C-C** stored strategy never reaches the encoder | SR-AUD-259 | #2149 | todo |
+| **C-C** stream options constructors | SR-AUD-259 remainder | #2150 | **blocked** — public surface addition |
+| closing disclosure + pins | — | #2151 | todo |
+
+### 4. Four corrected premises, all measured
+
+1. **The source-side defect is in all three encoders, not only `DeflateEncoder`.** The 63-case
+   matrix appears to clear `GZipEncoder` and `ZLibEncoder` for a negative *source* length. That is
+   an artefact of the probe's **1-byte destination**: a gzip/zlib stream emits a header first, so
+   `deflate()` fills that byte before it ever reads the source; raw deflate has no header. With a
+   **4096-byte** destination **all three crash** (`build-probe/2146_probe2.log`). Taking probe 1 at
+   face value would have under-scoped the repair to one of three types.
+2. **The three decoders never crashed** — 21 of 21 cases returned normally, because `inflate()`
+   rejects one byte of garbage before consuming the impossible `avail_in`. That is luck, not a
+   guard: valid compressed input has no such early exit, and `bytesConsumed = sourceLength -
+   avail_in` is meaningless either way. They were repaired on those terms.
+3. **Null handling already differed between the halves** — encoders threw 6/6, decoders returned
+   normal 6/6. The audit records neither.
+4. **The 15-crash figure is a lower bound, not a total**, for the reason in (1).
+
+### 5. #2146 — repair, evidence, mutations
+
+One module-local choke point, `Detail::ValidateSource` / `ValidateDestination`, at
+`DeflateEncoder::Compress`, `DeflateEncoder::Flush` and all three `Decompress` bodies — which
+covers the module, because the GZip/ZLib doors are two-line forwarders and all nine `TryCompress`
+overloads funnel through `Compress`. Validation runs **before** the out-parameters are zeroed, so a
+rejected call cannot look like a successful empty operation. The rule, exception types and messages
+are **identical to `System::IO::Hashing::Detail`** by design.
+
+| Matrix | Cases | Crashed | Threw | Normal |
+|---|---|---|---|---|
+| before | 63 | **15** | 15 | 33 |
+| after | 63 | **0** | 54 | 9 |
+
+All nine controls unchanged. ASan reported a **65,536-byte READ** past a one-byte source and a
+WRITE past a one-byte destination before; none after.
+
+**Mutations — three run, two count**, and the exclusion is reported rather than hidden:
+
+| # | Mutation | Result | Counts? |
+|---|---|---|---|
+| 1 | remove `ValidateSource` | **SIGSEGV, exit 139** | **No** — abort/UB-only, which this batch's rules exclude. It confirms the defect is real; it is not a clean pin discrimination |
+| 2 | `length < 0` → `length <= 0` | **7 clean failures**, all legal-zero-length and round-trip pins; every rejection test stayed green | **Yes** |
+| 3 | XOR one produced byte | **exactly 2 clean failures** — round-trip and byte-stability — with all 73 bounds tests green | **Yes** |
+
+Mutation 3 is the load-bearing one: it shows the output pins detect output corruption
+*specifically*, and that the bounds tests are not accidentally coupled to the produced bytes.
+
+**Tests: +35.** `SharpRuntimeTests_IO_Compression` **40 → 75**. No signature, `noexcept`, virtual,
+vtable, data member or layout change.
+
+### 6. Validation
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| Full gate, 37 executables run individually | **16,152: 16,145 pass, 6 fail, 1 skip** |
+| `validate_module_boundaries.py` | OK — **41 modules / 92 edges** |
+| `validate_module_boundaries_test.py` | 7 / 7 |
+| `generate_component_catalog.py --check` | OK after regeneration (see §7) |
+| `db_consistency_check.py` | OK |
+| `check_version_seam_odr.py` | OK — **2 seams / 18 definitions** |
+| `check_version_seam_odr_test.py` | 15 / 15 |
+| `check_negative_consumer_fixtures.py` | **11 fixtures / 94 sites**, every site rejected, 105 invocations, **peak 2 jobs**, 56.1 s |
+| `check_negative_consumer_fixtures_test.py` | 45 / 45 |
+| `check_selective_components.sh` | **PASSED** — full matrix, 11 components, `IO.Compression` isolated **75/75**, forbidden fixtures still rejected, **1025 s**, one serialized instance |
+| `git diff --check` | clean |
+
+**Gate arithmetic, fully reconciled.** 16,082 (previous handoff) **+35** io-hashing
+(`SharpRuntimeTests_IO_Hashing` 96 → 131, from the already-landed #2141–#2144) **+35**
+io-compression (40 → 75, this batch) = **16,152**. No unexplained test.
+
+### 7. One catalogue regeneration, and why
+
+`generate_component_catalog.py --check` failed after #2146. The cause is benign and is recorded
+rather than waved through: the catalogue's last column is the alphabetically-first public header of
+each component, and `CompressionArgumentValidation.hpp` now sorts ahead of `CompressionMode.hpp`.
+**No component, dependency or edge changed** — the graph is still 41 / 92 and `IO.Compression`
+still declares `Buffers, Core.Base, IO` with a private ZLIB link. Regenerated in its own commit.
+
+### 8. The six known failures — re-measured, and still not environment-only
+
+| Test | Cause |
+|---|---|
+| 5 × `PingTests` (`Send_Loopback_Succeeds`, `Send_LoopbackByString_Succeeds`, `Send_CustomBuffer_EchoedBack`, `Send_WithOptions_Succeeds`, `SendPingAsync_Loopback_Succeeds`) | `/proc/sys/net/ipv4/ping_group_range` is `1  0`, uid 0; `SOCK_DGRAM/ICMP` → **EACCES** while **`SOCK_RAW/ICMP` succeeds**. A working ICMP socket exists; `Ping` cannot use it because it has no raw receive path. **That is the real #1962 implementation gap, not the environment.** |
+| 1 × `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` | `AF_INET6` → `EAFNOSUPPORT`, `/proc/net/if_inet6` absent. This one **is** environmental. |
+| 1 skip | `CultureInvariantFormattingTests.NumericAndDateFormatting_UnaffectedByNonInvariantGlobalLocale`, locale-dependent, pre-existing. |
+
+No test was disabled, weakened, skipped, recategorised or hidden. No additional failure appeared.
+
+### 9. Process discipline
+
+**Maximum actual compiler concurrency: 2**, verified with
+`ps -C cc1plus -o pid=,ppid=,stat=,etime=,cmd=` during the selective run.
+**`pgrep -f` was not used for any completion or concurrency decision.**
+
+One honest process note: the selective run was launched under `setsid`, so `$!` captured the
+`setsid` PID rather than the script's, and the first wait returned after 10 s against a PID that had
+already exited — exactly the lost-PID failure mode the brief warns about. **No second run was
+started.** The real script PID (`24600`) was recovered by walking the process tree upward from a
+live `cc1plus` with `ps -o ppid=,args=`, and the single in-flight instance was waited on to
+completion.
+
+### 10. Environment
+
+- **Doxygen absent** — the 1,942 ceiling could not be checked.
+- **`ccache` absent** — nothing cached.
+- **`/rv` reference tree absent** — which is why the selection penalised parity-bound namespaces.
+- **Historically tracked `__pycache__` files unchanged** — `git status` over them is empty; every
+  Python invocation used `PYTHONDONTWRITEBYTECODE=1`.
+
+### 11. Queue and next recommended work
+
+**Ready and compatible:** #2148 (C-B), #2149 (C-C plumbing), #2151 (closing pins) — the rest of
+this review's own queue, in that order. **Blocked:** #2150 (public surface addition).
+
+**Next unit after io-compression closes:** **`modules/timers`** (2 open, 1 high, 50 %, no `/rv`
+dependence) — its high, SR-AUD-238, is an exception escaping a worker thread and **aborting the
+process**, the same actionable-safety character that made io-compression win here. Then
+`modules/console` (2, validation-only) or `modules/net-network-information` (3, but its executable
+cannot pass here).
+
+Unchanged and untouched: **#1773** and **#1962** blocked, **#2134** blocked under open **CCF-019**,
+**#2138** `needs_user`, **CCF-021/#2131** and **CCF-022/#2109** unminted, CCF-012 and CCF-019 not
+marked closed, and the twelve `DEFERRED VERIFICATION` tickets that need the absent `/rv` tree.
+
+### 12. Build directories
+
+| Directory | Size |
+|---|---|
+| `build/` | 1.7 GB |
+| `build-probe/` | 45 MB (probe sources, binaries and before/after logs retained) |
+| `build-tmp/` | 11 MB (build and gate logs; the selective matrix's tree is removed by that script's exit trap) |
+
+`build-asan/`, `build-modular/`, `build-consumer/` and `cmake-build-debug/` were **not** created. No
+tree under `/tmp`, `/var/tmp` or `/dev/shm`.
+
+---
+
+*Prior handoff snapshot, retained historically: 2026-08-08. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
 harness-designated branch**, continued from its own clean tip `f013fe1`. `CLAUDE.md` rule 3 names
 `feature/work`; nothing was pushed, so the two never conflicted in practice, and the discrepancy is
 recorded rather than resolved silently. **Not pushed — no push was requested during this batch.** No

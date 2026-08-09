@@ -271,3 +271,53 @@ memory-safety item, and the other two touch the same files.
 
 Written 2026-08-09. §§1–11 changed no production source. **#2146 was implemented in the same
 batch**; its record is §13. #2148/#2149/#2151 are `todo`; #2150 is `blocked`.
+
+---
+
+## 13. Implementation record — #2146 (cause C-A, SR-AUD-256)
+
+**Repair.** One module-local choke point, `Detail::ValidateSource` / `Detail::ValidateDestination`
+(`CompressionArgumentValidation.hpp`), applied at `DeflateEncoder::Compress`,
+`DeflateEncoder::Flush` and all three decoders' `Decompress`. That covers the whole module: the
+GZip/ZLib `Compress`/`Flush` are two-line forwarders and all nine `TryCompress` overloads funnel
+through `DeflateEncoder::Compress`. Validation runs **before** the output parameters are zeroed, so
+a rejected call leaves the caller's `bytesConsumed`/`bytesWritten` untouched rather than looking
+like a successful empty operation.
+
+The rule, exception types and messages are **identical to `System::IO::Hashing::Detail`**
+(#2141/#2142), deliberately: two sibling components answering "what does a negative length mean"
+two different ways is how a repository ends up with two contracts.
+
+**Before / after.**
+
+| Matrix | Cases | Crashed | Threw | Normal |
+|---|---|---|---|---|
+| before | 63 | **15** | 15 | 33 |
+| after | 63 | **0** | 54 | 9 |
+
+All nine controls (`valid 1→big`, `srcLen=0`) are `normal` in both columns. The six
+large-destination cases of `build-probe/2146_probe2.log` — the ones that unmasked GZip and ZLib —
+crashed before and throw after.
+
+**Mutation testing.** Three mutations, of which **two count**:
+
+| # | Mutation | Result | Counts? |
+|---|---|---|---|
+| 1 | remove `ValidateSource` from `DeflateEncoder::Compress` | **SIGSEGV, exit 139** | **No** — an abort/UB-only outcome, which this batch's own rules exclude. It does confirm the defect is real, but it is not a clean pin discrimination |
+| 2 | `length < 0` → `length <= 0` (over-rejection) | **7 clean failures**, all of them the legal-zero-length and round-trip pins; every rejection test stayed green | **Yes** |
+| 3 | XOR one produced byte after `deflate()` | **exactly 2 clean failures** — the round-trip and byte-stability pins — with all 73 bounds tests green | **Yes** |
+
+Mutation 3 is the important one: it shows the output pins detect output corruption *specifically*,
+and that the bounds tests are not accidentally coupled to the produced bytes. Both mutations were
+reverted and the tree rebuilt to 75/75 green.
+
+**Tests: +35** (`CompressionBoundsTests.cpp`), typed over all three encoders and all three decoders.
+`SharpRuntimeTests_IO_Compression` **40 → 75**.
+
+**Consequences.** No public signature, `noexcept`, virtual, vtable, data member or object-layout
+change. The component graph is unchanged at **41 / 92**; the only catalogue movement is the
+representative-header column, because `CompressionArgumentValidation.hpp` now sorts first among the
+module's public headers.
+
+**SR-AUD-256 is `remediated`.** SR-AUD-258 and SR-AUD-259 remain `confirmed`, owned by #2148 and
+#2149/#2150.

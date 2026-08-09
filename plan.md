@@ -1,6 +1,75 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-08 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
+*Last verified: 2026-08-09 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
+harness-designated branch, continued from its own clean tip `3d022d8`. **Not pushed; no push was
+requested.** No merge, rebase, tag, force-push, PR, publication, amend or history rewrite; all
+commits unsigned. **Work units 1 and 2 of the brief were already complete on arrival and were
+verified, not redone** — #2142/#2141/#2143/#2144, the io-hashing reconciliation and #2145 all
+landed in the previous context, so **`modules/io-hashing` is fully closed** with three findings
+remediated and no blocked or deferred remainder. This batch did **work unit 3**: it re-derived the
+next review unit by measurement (with an explicit penalty for parity-bound namespaces, `/rv` being
+absent), reviewed **`modules/io-compression` (#2147)** and implemented its one memory-safety
+ticket **#2146** (SR-AUD-256) — 63 cases, **15 crashes → 0**, +35 tests, two counting mutations.
+**Four premises corrected by measurement**, the load-bearing one being that the source-side defect
+is in **all three** encoders, not only `DeflateEncoder`: probe 1's 1-byte destination masked GZip
+and ZLib because their header fills it before `deflate()` reads the source. Audit **154 remediated
+/ 210 confirmed / 364 total**, `confirmed (design-complete)` **49**; **no `SR-AUD-*` identifier
+created — numbering frozen at 364.** Gate **16,152 across 37 executables, 16,145 passing, 1
+skipped, 6 failing** for the same two measured causes. Graph **41 / 92**, seams **2 / 18**.
+**Doxygen, `ccache` and `/rv` all absent.** CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted;
+#1773 and #1962 blocked. Maximum aggregate compiler parallelism **2 jobs**.*
+
+## 2026-08-09 — io-hashing verified closed, the `modules/io-compression` review (#2147) and #2146
+
+**The brief's first two work units were already done.** `c8d8b71`/`fab0c99`/`03f6eb0`/`3827ded`/
+`3d022d8` and `f38b50c` landed #2142, #2141, #2143, #2144, the reconciliation and #2145 in the
+previous context. Verified independently — all three findings `remediated`, `IO_Hashing` 131/131,
+no ticket `doing` — and **not redone**. No commit was created to restate existing work.
+
+### The next unit, re-derived rather than inherited
+
+Every module with ≥ 2 open findings was re-scored from the index. `io-compression` won on a
+combination no larger candidate matched: an **actionable** memory-safety high (every larger
+candidate's high is blocked — `xml-linq`'s is CCF-019 — or architecture-gated — `globalization`'s
+is a process-global race), **zero `/rv` dependence** where `globalization` and `time-zone` are
+predominantly parity-bound, **hostile-input exposure** (its job is decompressing attacker bytes),
+and an idiom the sibling `IO::Hashing` batch had just settled.
+
+### #2146 — SR-AUD-256
+
+Every raw-pointer door handed its `intcs` length to zlib as unsigned `uInt`:
+`zs.avail_in = static_cast<uInt>(sourceLength)`. A negative length became an enormous count and
+zlib ran off the caller's allocation — ASan reporting a 65,536-byte READ past a one-byte source.
+Repaired with one module-local `Detail::ValidateSource`/`ValidateDestination` choke point whose
+rule, exception types and messages are **identical to `System::IO::Hashing::Detail`**, so the two
+sibling components do not answer "what does a negative length mean" two different ways.
+
+| Matrix | Cases | Crashed |
+|---|---|---|
+| before | 63 | **15** |
+| after | 63 | **0** |
+
+**Four corrected premises**, all measured. The load-bearing one: the source-side defect is in
+**all three** encoders. Probe 1 appears to clear GZip and ZLib, but that is an artefact of its
+1-byte destination — a gzip/zlib header fills it before `deflate()` reads the source, and raw
+deflate has no header. With a 4096-byte destination all three crash. Also: the three **decoders**
+never crashed at all (21/21 normal) because `inflate()` rejects garbage first — luck, not a guard —
+and null handling already differed between encoders (threw 6/6) and decoders (normal 6/6).
+
+**Mutations: three run, two count.** Removing `ValidateSource` gave SIGSEGV — an abort/UB-only
+outcome that the batch's own rules exclude, reported rather than counted. The two that count are
+an over-rejection mutation (7 clean failures, all zero-length and round-trip pins) and an
+output-corruption mutation (**exactly** the 2 output pins, with all 73 bounds tests green).
+
+**+35 tests**, 40 → 75. No signature, `noexcept`, vtable, layout or ABI change.
+
+### Remaining
+
+#2148, #2149 and #2151 are `todo`; #2150 is `blocked` as a public surface addition. The next unit
+by the same measurement is **`modules/timers`** (2 open, 1 high — an exception escaping a worker
+thread and aborting the process).
+
+*Prior plan snapshot, retained historically: 2026-08-08 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
 harness-designated branch, continued from its own clean tip `f013fe1`. **Not pushed; no push was
 requested during this batch.** No merge, rebase, tag, PR, force-push, amend or history rewrite; all
 six new commits intentionally unsigned (`git -c commit.gpgsign=false`), authored and committed as
