@@ -253,7 +253,7 @@ namespace System::IO
         }
     }
 
-#if !defined(_MSC_VER)
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
     System::Decimal BinaryReader::ReadDecimal()
     {
         const int32_t lo = ReadInt32();
@@ -266,5 +266,5 @@ namespace System::IO
 
         return System::Decimal(lo, mid, hi, isNegative, scale);
     }
-#endif
+#endif // SHARP_RUNTIME_HAS_NATIVE_INT128
 }

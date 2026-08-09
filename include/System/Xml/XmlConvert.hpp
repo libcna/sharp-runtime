@@ -8,10 +8,13 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/DateTime.hpp"
 #include "System/DateTimeOffset.hpp"
-#include "System/Decimal.hpp"
 #include "System/Guid.hpp"
 #include "System/TimeSpan.hpp"
 #include "System/Xml/XmlDateTimeSerializationMode.hpp"
+
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
+#  include "System/Decimal.hpp"
+#endif
 
 namespace System::Xml {
 
@@ -78,7 +81,9 @@ namespace System::Xml {
 
         [[nodiscard]] static std::string ToString(bool value);
         [[nodiscard]] static std::string ToString(SharpRuntime::charcs value);
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
         [[nodiscard]] static std::string ToString(System::Decimal value);
+#endif
         [[nodiscard]] static std::string ToString(SharpRuntime::sbytecs value);
         [[nodiscard]] static std::string ToString(SharpRuntime::shortcs value);
         [[nodiscard]] static std::string ToString(SharpRuntime::intcs value);
@@ -101,7 +106,9 @@ namespace System::Xml {
 
         [[nodiscard]] static bool ToBoolean(const std::string& s);
         [[nodiscard]] static SharpRuntime::charcs ToChar(const std::string& s);
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
         [[nodiscard]] static System::Decimal ToDecimal(const std::string& s);
+#endif
         [[nodiscard]] static SharpRuntime::sbytecs ToSByte(const std::string& s);
         [[nodiscard]] static SharpRuntime::shortcs ToInt16(const std::string& s);
         [[nodiscard]] static SharpRuntime::intcs ToInt32(const std::string& s);

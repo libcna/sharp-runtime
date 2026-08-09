@@ -204,7 +204,9 @@ namespace System::Xml {
 
     std::string XmlConvert::ToString(bool value) { return value ? "true" : "false"; }
     std::string XmlConvert::ToString(SharpRuntime::charcs value) { return System::Char::ToString(value); }
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
     std::string XmlConvert::ToString(System::Decimal value) { return value.ToString(); }
+#endif
     std::string XmlConvert::ToString(SharpRuntime::sbytecs value) { return System::SByte::ToString(value); }
     std::string XmlConvert::ToString(SharpRuntime::shortcs value) { return System::Int16::ToString(value); }
     std::string XmlConvert::ToString(SharpRuntime::intcs value) { return System::Int32::ToString(value); }
@@ -257,6 +259,7 @@ namespace System::Xml {
         throw System::FormatException("String '" + s + "' was not recognized as a valid Boolean.");
     }
     SharpRuntime::charcs XmlConvert::ToChar(const std::string& s) { return System::Char::Parse(s); }
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
     // Verified against XmlConvert.cs's ToDecimal(string), which passes NumberStyles.
     // AllowLeadingWhite | AllowTrailingWhite to decimal.Parse. System::Decimal::TryParse
     // tolerates NO whitespace at all (any non-digit/dot/comma/sign character anywhere fails
@@ -264,6 +267,7 @@ namespace System::Xml {
     // formatting/indentation -- previously threw FormatException; same bug class as
     // ToSingle/ToDouble below.
     System::Decimal XmlConvert::ToDecimal(const std::string& s) { return System::Decimal::Parse(TrimXmlWhitespace(s)); }
+#endif
     SharpRuntime::sbytecs XmlConvert::ToSByte(const std::string& s) { return System::SByte::Parse(s); }
     SharpRuntime::shortcs XmlConvert::ToInt16(const std::string& s) { return System::Int16::Parse(s); }
     SharpRuntime::intcs XmlConvert::ToInt32(const std::string& s) { return System::Int32::Parse(s); }

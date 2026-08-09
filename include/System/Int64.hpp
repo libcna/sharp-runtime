@@ -17,9 +17,12 @@
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/Globalization/NumberStyles.hpp"
-#include "System/Int128.hpp"
 #include "System/OverflowException.hpp"
 #include "System/detail/IntegerNumberStylesParser.hpp"
+
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
+#  include "System/Int128.hpp"
+#endif
 
 namespace System {
 
@@ -338,6 +341,7 @@ namespace System {
             return static_cast<longcs>(std::bit_width(static_cast<uint64_t>(value)) - 1);
         }
 
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
         /**
          * @brief Produces the full 128-bit product of two 64-bit numbers.
          * C++ counterpart of .NET Int64.BigMul(long, long).
@@ -347,6 +351,7 @@ namespace System {
             return Int128(static_cast<uint64_t>(static_cast<unsigned __int128>(product) >> 64),
                           static_cast<uint64_t>(product));
         }
+#endif
 
         /**
          * @brief Copies the sign of @p sign to the magnitude of @p value.
@@ -407,4 +412,3 @@ namespace System {
     };
 
 } // namespace System
-

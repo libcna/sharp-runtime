@@ -42,22 +42,32 @@ These subsystems currently work only on Linux/macOS and are **documented bugs**,
 | `System::Net::NetworkInformation::NetworkInterface` | `getifaddrs` | Linux-only |
 | `System::IO::FileSystemWatcher` | `inotify` | Linux-only |
 
-### What is MSVC-unsupported (compiler-extension dependency, not a platform bug)
+### What requires compiler-provided native 128-bit integers
 
-These types require the GCC/Clang `__int128`/`unsigned __int128` extension and hard-`#error`
-on MSVC. This is a compiler dependency, not an OS dependency — GCC and Clang on Windows (e.g.
-MinGW, or Clang with `-target x86_64-pc-windows-msvc` using its own `__int128` support) are
-unaffected; only the MSVC frontend itself lacks `__int128`. Documented here as a **known,
-accepted, permanent limitation** — not a bug to silently "fix" by working around `__int128`
-with hand-rolled 128-bit arithmetic, per an explicit 2026-07-11 decision (the risk/complexity
-of a from-scratch 128-bit implementation outweighs the benefit for a project that doesn't
-target MSVC as a first-class compiler).
+`System::Decimal`, `System::Int128`, and `System::UInt128` require a compiler-provided 16-byte
+`__int128`/`unsigned __int128` type. This is a compiler-capability dependency, not an OS-name
+test: x86_64 GCC/Clang and x86_64 MinGW GCC provide it, while MSVC and i686 MinGW GCC do not.
+The public `SHARP_RUNTIME_HAS_NATIVE_INT128` macro is always `0` or `1`; CMake sets it from an
+actual compile probe and `SharpRuntimeHelper.hpp` provides the same `__SIZEOF_INT128__`-based
+fallback for non-CMake consumers.
 
-| Type | Requires | Status |
-|------|----------|--------|
-| `System::Decimal` | `unsigned __int128` | MSVC-unsupported |
-| `System::Int128` | `__int128` | MSVC-unsupported |
-| `System::UInt128` | `unsigned __int128` | MSVC-unsupported |
+When the macro is `0`, the three direct type headers reject inclusion with a clear diagnostic and
+the library omits only `Decimal.cpp`. Otherwise-portable types remain available, with only their
+native-128-dependent members absent: `Int64::BigMul(long,long)`, the 64-bit `Math::BigMul`
+overload, 128-bit `BitConverter`/`BinaryPrimitives` overloads, `BinaryReader::ReadDecimal`,
+`IConvertible`/`DBNull::ToDecimal`, and the Decimal `XmlConvert` overloads. This is the supported
+i686 MinGW compile/link boundary used by CNA's Glide backend; it does not claim Decimal or
+Int128/UInt128 support on that compiler.
+
+The lack of native 128-bit integers is a **known, accepted, permanent limitation** — never hide
+it with a hand-rolled representation or reduced semantics. The 2026-07-11 decision remains that
+the risk and complexity of a from-scratch implementation outweigh its benefit.
+
+| Type | Requires | Availability |
+|------|----------|--------------|
+| `System::Decimal` | 16-byte `unsigned __int128` | `SHARP_RUNTIME_HAS_NATIVE_INT128 == 1` |
+| `System::Int128` | 16-byte `__int128` | `SHARP_RUNTIME_HAS_NATIVE_INT128 == 1` |
+| `System::UInt128` | 16-byte `unsigned __int128` | `SHARP_RUNTIME_HAS_NATIVE_INT128 == 1` |
 
 ### Correct platform abstraction approach
 

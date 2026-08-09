@@ -13,8 +13,8 @@
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 
-#if defined(_MSC_VER)
-#  error "Int128 requires __int128 (GCC/Clang only). MSVC is not supported for this type."
+#if !SHARP_RUNTIME_HAS_NATIVE_INT128
+#  error "Int128 requires a compiler-provided 16-byte __int128 type."
 #endif
 
 namespace System {
@@ -25,7 +25,7 @@ namespace System {
      * @brief Represents a 128-bit signed integer.
      *
      * C++ counterpart of .NET System.Int128.
-     * Backed by the GCC/Clang @c __int128 extension; MSVC is not supported.
+     * Backed by a compiler-provided 16-byte @c __int128 type.
      */
     class Int128 {
         __int128 value_;

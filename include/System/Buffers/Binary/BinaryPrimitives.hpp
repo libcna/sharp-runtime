@@ -8,11 +8,8 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Span.hpp"
-// System::Int128/UInt128 themselves #error unconditionally on MSVC (require GCC/Clang's
-// __int128), so including them here must stay conditional -- otherwise this file, which is
-// otherwise fully portable, would silently become MSVC-unsupported too just from adding the
-// Int128/UInt128 overloads below.
-#if !defined(_MSC_VER)
+// Keep this otherwise-portable header usable when the compiler has no native 128-bit integer.
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
 #  include "System/Int128.hpp"
 #  include "System/UInt128.hpp"
 #endif
@@ -397,7 +394,7 @@ namespace System::Buffers::Binary {
             return TryWriteUInt64BigEndian(destination, bits);
         }
 
-#if !defined(_MSC_VER)
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
         // -----------------------------------------------------------------------
         // Int128 / UInt128 (LE/BE, split into two 64-bit halves via System::Int128/UInt128's
         // getUpperProperty()/getLowerProperty() and (upper,lower) constructor -- both types were
@@ -518,7 +515,7 @@ namespace System::Buffers::Binary {
             WriteUInt128BigEndian(destination, value);
             return true;
         }
-#endif // !defined(_MSC_VER)
+#endif // SHARP_RUNTIME_HAS_NATIVE_INT128
 
         // -----------------------------------------------------------------------
         // ReverseEndianness
@@ -549,7 +546,7 @@ namespace System::Buffers::Binary {
         }
         /** @brief Returns @p value with its bytes reversed. */
         static uint64_t ReverseEndianness(uint64_t value) { return bswap64(value); }
-#if !defined(_MSC_VER)
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
         /** @brief Returns @p value with its bytes reversed (the two 64-bit halves swap AND each reverses). */
         static System::Int128 ReverseEndianness(System::Int128 value) {
             return System::Int128(bswap64(value.getLowerProperty()), bswap64(value.getUpperProperty()));
@@ -558,7 +555,7 @@ namespace System::Buffers::Binary {
         static System::UInt128 ReverseEndianness(System::UInt128 value) {
             return System::UInt128(bswap64(value.getLowerProperty()), bswap64(value.getUpperProperty()));
         }
-#endif // !defined(_MSC_VER)
+#endif // SHARP_RUNTIME_HAS_NATIVE_INT128
 
     private:
         static void checkSize(intcs len, intcs needed, const char* paramName) {

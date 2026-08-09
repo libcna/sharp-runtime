@@ -9,11 +9,9 @@
 #include "System/IO/Stream.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
-// System::Decimal requires unsigned __int128 (GCC/Clang only) and #error's out on MSVC -- guard
-// ReadDecimal() the same way, rather than making the whole of BinaryReader MSVC-unsupported over
-// one method. Matches sharp-runtime's own existing Decimal/Int128/UInt128 MSVC-unsupported policy.
-#if !defined(_MSC_VER)
-#include "System/Decimal.hpp"
+// Keep BinaryReader available when its one native-128-dependent method is unavailable.
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
+#  include "System/Decimal.hpp"
 #endif
 
 namespace System::IO
@@ -122,7 +120,7 @@ namespace System::IO
          */
         [[nodiscard]] virtual std::string ReadString();
 
-#if !defined(_MSC_VER)
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
         /**
          * @brief Reads a 16-byte .NET `System.Decimal` value.
          *
@@ -133,11 +131,10 @@ namespace System::IO
          * `lo64`). `flags`' bit 31 is the sign; bits 16-23 are the scale (0-28).
          *
          * @return The decoded Decimal value.
-         * @note MSVC-unsupported: guarded out because `System::Decimal` itself requires
-         *       `unsigned __int128` (GCC/Clang only) -- see this project's MSVC-unsupported policy.
+         * @note Available when @c SHARP_RUNTIME_HAS_NATIVE_INT128 is 1.
          */
         [[nodiscard]] virtual System::Decimal ReadDecimal();
-#endif
+#endif // SHARP_RUNTIME_HAS_NATIVE_INT128
 
         /** Reads exactly count bytes into the caller-supplied buffer. */
         virtual intcs Read(bytecs buffer[], intcs offset, intcs count);

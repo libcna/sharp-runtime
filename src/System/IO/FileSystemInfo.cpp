@@ -23,8 +23,8 @@ namespace System::IO {
 
     namespace {
 
-        System::DateTime fromUnixTime(std::time_t seconds) {
-            longcs ticks = System::DateTime::UnixEpochTicks + static_cast<longcs>(seconds) * System::DateTime::TicksPerSecond;
+        System::DateTime fromUnixTime(longcs seconds) {
+            longcs ticks = System::DateTime::UnixEpochTicks + seconds * System::DateTime::TicksPerSecond;
             return System::DateTime(ticks);
         }
 
@@ -35,12 +35,12 @@ namespace System::IO {
             // system_clock::time_point type, so cast explicitly.
             auto sysTime = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
                 std::chrono::file_clock::to_sys(ft));
-            return fromUnixTime(std::chrono::system_clock::to_time_t(sysTime));
+            return fromUnixTime(static_cast<longcs>(std::chrono::system_clock::to_time_t(sysTime)));
         }
 
         struct RawTimes {
-            std::time_t creation;
-            std::time_t access;
+            longcs creation;
+            longcs access;
         };
 
         RawTimes statTimes(const std::filesystem::path& path) {
@@ -49,7 +49,7 @@ namespace System::IO {
             if (_wstat64(path.wstring().c_str(), &st) != 0)
                 throw IOException("Failed to stat '" + path.string() + "'.");
             // On Windows, st_ctime from _stat64 reflects file creation time.
-            return { st.st_ctime, st.st_atime };
+            return { static_cast<longcs>(st.st_ctime), static_cast<longcs>(st.st_atime) };
 #else
             struct stat st{};
             if (::stat(path.c_str(), &st) != 0)
@@ -57,7 +57,7 @@ namespace System::IO {
             // POSIX has no portable birth-time field in <sys/stat.h>; st_ctime (inode
             // metadata change time) is the closest portable approximation, matching
             // real .NET's own documented Linux fallback behavior.
-            return { st.st_ctime, st.st_atime };
+            return { static_cast<longcs>(st.st_ctime), static_cast<longcs>(st.st_atime) };
 #endif
         }
 

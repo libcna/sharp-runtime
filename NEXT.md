@@ -219,8 +219,10 @@ document, and update this section once you understand what changed.
   fix if picked up: change the default, audit callers/tests relying on the current behavior.
 
 **Needs verification (unknown status)**:
-- No Windows or Emscripten build has ever been compiled for this repo — every platform `#ifdef`
-  branch is unverified beyond code review.
+- Windows and Emscripten have no hosted CI coverage. Local cross-build gates cover the full
+  x86_64 MinGW library and the documented i686 MinGW compile/link boundary, but do not execute
+  the Windows binaries under Wine; individual platform branches outside those build paths may
+  still need runtime verification.
 - Performance is measured only for `String` (optimized), `Dictionary`, `List<T>`, `StringBuilder`
   (measured, no win found) — see §3. Everything else is unmeasured.
 - UndefinedBehaviorSanitizer hasn't had a dedicated re-run since `1cdc80a` (12378 tests) — low
@@ -231,9 +233,11 @@ document, and update this section once you understand what changed.
 - Reflection, GC internals, most delegates' `DynamicInvoke`, serialization infra, P/Invoke/
   interop, symmetric/asymmetric crypto + TLS + X.509 — all permanently out of scope. See
   `CLAUDE.md`.
-- `System::Decimal`/`Int128`/`UInt128` require the GCC/Clang `__int128` extension and
-  hard-`#error` on MSVC — permanent, accepted (2026-07-11 decision); not to be "fixed" with
-  hand-rolled 128-bit arithmetic.
+- `System::Decimal`/`Int128`/`UInt128` require a compiler-provided 16-byte
+  `__int128`/`unsigned __int128` type and hard-`#error` when
+  `SHARP_RUNTIME_HAS_NATIVE_INT128 == 0` — permanent, accepted (2026-07-11 decision); not to be
+  "fixed" with hand-rolled or reduced-semantics 128-bit arithmetic. The rest of the library has
+  a supported i686 MinGW compile/link boundary with only the dependent APIs omitted.
 - `getCurrent()` → `getCurrentProperty()` has **no backward-compat alias** — any code (including
   CNA) calling the old name won't compile until updated on the consumer side. Explicit decision.
 - `TypedReference` — re-verified 2026-07-13: correctly `status='ignore'`/`outofscope=1`. Its
@@ -387,8 +391,9 @@ next, or ask the user first if unsure which to prioritize.
 - **No mass rewrite or reformatting in a single commit** — keep changes small, reviewable, and
   scoped to one ticket/task per commit.
 - **No merge to `master`/`develop`, and no tags**, without explicit per-action user approval.
-- **No touching `Decimal`/`Int128`/`UInt128`'s `__int128`-based MSVC limitation** — permanent,
-  accepted (2026-07-11 decision); do not attempt a hand-rolled 128-bit arithmetic workaround.
+- **No replacing `Decimal`/`Int128`/`UInt128`'s native-`__int128` requirement** — permanent,
+  accepted (2026-07-11 decision); preserve the compiler-capability boundary and do not attempt a
+  hand-rolled or reduced-semantics 128-bit arithmetic workaround.
 - **No adding `.github/workflows/*.yml` (or any other CI config) without asking first** — audit
   finding A-07 (2026-07-14) was explicitly offered and declined for now. This is a real
   infrastructure decision (it activates GitHub Actions runs against the actual repo), not a code

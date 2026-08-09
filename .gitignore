@@ -1,6 +1,7 @@
 build*
 .idea/*
 cmake-build-debug/*
+cmake-build-*/
 plan.sqlite3*
 plan.sqlite3-journal
 docs/generated/

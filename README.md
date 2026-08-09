@@ -99,12 +99,25 @@ cmake --build build-no-tests --parallel 4
   --gtest_filter="SuiteName.*"` (standard GoogleTest filter syntax — see
   `scripts/local_ci_check.sh` for a full build+test gate you can run locally before pushing).
 - **Cross-compiling for Windows (MinGW) or Emscripten** — neither is part of the default build
-  and neither has been wired into CI, but both are real, working, verified targets (not
-  aspirational): `x86_64-w64-mingw32-g++` and `emcmake cmake` both build the `SHARP_RUNTIME`
-  library target cleanly as of the fixes tracked under stabilization tickets #40 (Windows) and
-  #41 (Emscripten) — see those tickets' notes in `plan.sqlite3` for the exact blockers found and
-  fixed, and for what wasn't verified (the test binary itself is not built under either
-  cross-compilation target — GoogleTest isn't cross-compiled for wasm/MinGW in this repo).
+  or wired into CI. `x86_64-w64-mingw32-g++` and `emcmake cmake` build the full
+  `SHARP_RUNTIME` library. i686 MinGW is also a supported compile/link target, but its GCC does
+  not provide `__int128`: `System::Decimal`/`Int128`/`UInt128` and only the methods that expose
+  them are outside that boundary. Consumers can test the public
+  `SHARP_RUNTIME_HAS_NATIVE_INT128` macro before exposing dependent APIs. The regression target
+  configures and builds the complete supported boundary without requiring Wine:
+  ```bash
+  cmake -S . -B cmake-build-mingw-i686 -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/mingw-w64-i686.cmake \
+    -DSHARP_RUNTIME_BUILD_TESTS=OFF \
+    -DSHARP_RUNTIME_BUILD_I686_REGRESSION=ON \
+    -DZLIB_INCLUDE_DIR=/path/to/i686/include \
+    -DZLIB_LIBRARY=/path/to/i686/lib/libz.a \
+    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+  cmake --build cmake-build-mingw-i686 \
+    --target SharpRuntimeI686CompileBoundary --parallel 4
+  ```
+  GoogleTest is not cross-compiled for wasm/MinGW in this repo, so these targets establish
+  compile/link support rather than a cross-platform runtime-test claim.
 - **A header fails to compile when included on its own but works in the full build** — this
   usually means the header is relying on a transitive `#include` pulled in by whatever included
   it first, rather than including everything it uses itself. Check with:
@@ -321,4 +334,3 @@ Instead, it focuses on a **practical subset** useful for native development.
 # 🔗 Related Projects
 
 * CNA — C++ reimplementation of XNA 4.0 (built on top of this library)
-
