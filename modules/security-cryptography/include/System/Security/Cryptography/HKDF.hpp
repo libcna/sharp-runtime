@@ -30,6 +30,12 @@ namespace System::Security::Cryptography {
      * caller supplies, no confidentiality guarantee to get wrong (same reasoning as this
      * project's existing PBKDF2/Rfc2898DeriveBytes port, per CLAUDE.md's hash-algorithm carve-out
      * from the broader crypto-out-of-scope decision).
+     *
+     * @note **Key-material contract.** This type is static-only and holds no state of its own, so
+     * there is nothing here to erase. The per-call `HMAC` objects it constructs erase their own key
+     * and pads when they are destroyed, which is measured rather than assumed. Everything it
+     * *returns* — the pseudorandom key from `Extract`, the output keying material from `Expand` and
+     * `DeriveKey` — is the caller's, and erasing it is the caller's job.
      */
     class HKDF {
         static intcs hashLenForAlgorithm(const HashAlgorithmName& alg) {

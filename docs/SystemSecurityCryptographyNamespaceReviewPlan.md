@@ -629,4 +629,68 @@ and that is now the reason the comment gives. Pinned by
 
 ## 16. Implementation record — #2161, and the namespace reconciliation
 
-*Filled in on completion.*
+**Done 2026-08-09.** `SharpRuntimeTests_Security_Cryptography` **125 → 134** tests, all passing.
+**80 → 134 (+54)** across the whole review.
+
+### 16.1 The contract is now stated where a caller will see it
+
+§6's boundary was prose in this document. It is now a `@note` in every public header that owns a
+piece of it: `KeyedHashAlgorithm` (the key), `HMAC` (the pads and the working buffers),
+`Rfc2898DeriveBytes` (the password, salt and derived-byte buffer, and the rejected-argument path),
+`HashAlgorithm` (an unkeyed digest holds no key, but its block buffer becomes key material in the
+one place `HMAC` hashes an over-long key), and `HKDF` (static-only, holds nothing, and what it
+*returns* is the caller's).
+
+### 16.2 The exclusions are pinned, not merely listed
+
+`KeyMaterialContractTests.cpp`, +9 tests, all of them about the boundary rather than the repair:
+
+- `getKeyProperty()` and `getSaltProperty()` hand out **copies** that disposal does not reach, and
+  a caller's own key vector is untouched. These pin the *absence* of a guarantee: a future change
+  that tried to erase a caller's storage would be reaching into memory it does not own, and these
+  tests would fail.
+- `HKDF` is not default-constructible and holds no state between calls; RFC 5869 test case 1 is
+  byte-identical after the HMAC erasure work.
+- A disposed unkeyed digest rejects further use; the block-buffer erasure does not disturb a
+  **reused** digest (a misplaced erasure would corrupt an instance's second digest, not its first,
+  so a single-shot vector would not catch it); `Keccak::Sponge::Reset` still leaves a fresh sponge
+  for both SHA3 and SHAKE.
+- Two deliberate `SUCCEED()` tests record the two things this component does **not** claim —
+  erasure of storage the allocator has already reused, and any thread-safety contract for a shared
+  instance. They assert nothing, and that is their point: a future change that started claiming
+  either would have to delete a test to do it.
+
+### 16.3 The stale doc-comment
+
+Corrected in §15.7 rather than here, because it travelled with the type it describes.
+
+### 16.4 Namespace reconciliation — `System::Security::Cryptography`
+
+| Finding | Sev | Ticket | Disposition |
+|---|---|---|---|
+| **SR-AUD-331** | high | **#2160** | **remediated** |
+| **SR-AUD-332** | high | **#2159** | **remediated** |
+
+**Both open findings are closed. `modules/security-cryptography` has no blocked, deferred,
+`needs_user` or design-only remainder — the namespace is fully reconciled.** That is a stronger
+outcome than this batch's brief anticipated, and it rests on one measurement: §4.1/§15.1 showed
+SR-AUD-331's repair to be layout-neutral, so the "one compatible ticket plus one blocked design"
+the handoff predicted became two compatible tickets.
+
+Three post-audit defects were found and fixed **without** creating an `SR-AUD-*` identifier
+(numbering stays frozen at **364**): the rejected-constructor-argument password retention (cause
+SC-C, #2160), the five further HMAC retention sites and the digest block-buffer retention (both
+folded into cause SC-A, #2159, because they are the same defect the finding names, measured wider).
+
+Deliberately excluded, each with a named pin or a stated reason: vector reallocation growth
+(§6, §12.1); caller-held copies (§12.6, pinned by test); threading (§9, §12.2, pinned by test);
+`RandomNumberGenerator`/SR-AUD-012, which belongs to the separate `security-cryptography-random`
+component (§12.3); the encryption surface `CLAUDE.md` excluded on 2026-07-07 (§12.4); a digest
+destroyed **mid-message**, which still holds the message tail (§12, stated in `HashAlgorithm`'s
+header).
+
+**Totals for this namespace:** 2 findings, 2 remediated, 0 open. Tests **80 → 134**. Seams
+**2 → 3** (definitions 18 → 20). Negative fixtures **11 → 12 files**, **94 → 104 sites**. Module
+graph unchanged at **41 / 92** — the new `detail/SecureMemory.hpp` is internal to an existing
+component and declares no new edge. No `sizeof`, `alignof`, member offset, public signature or
+vtable-shape change anywhere in the namespace.

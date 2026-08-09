@@ -24,6 +24,15 @@ namespace System::Security::Cryptography {
      * @note Reduced scope: does not implement `ICryptoTransform` (out of scope here, see
      * `plan.sqlite3`) and has no `Stream`-based `ComputeHash(Stream)`/`ComputeHashAsync`
      * overloads — callers read a stream into a buffer themselves and call `ComputeHash(buffer)`.
+     *
+     * @note **Key-material contract.** An unkeyed digest holds no key, so this base erases nothing
+     * on disposal beyond marking itself disposed. What its subclasses *do* hold is the tail of the
+     * message in a block buffer, and that becomes key material in one place: `HMAC` hashes an
+     * over-long key with a real digest object. Every concrete digest in this component therefore
+     * erases its block buffer in `Initialize()`, which `ComputeHash` calls at the end of each
+     * operation. A digest destroyed **mid-message**, before any operation completes, still holds
+     * that tail — measured, deliberately not repaired, and recorded as an exclusion in
+     * `docs/SystemSecurityCryptographyNamespaceReviewPlan.md` section 12.
      */
     class HashAlgorithm {
         bool disposed_ = false;
