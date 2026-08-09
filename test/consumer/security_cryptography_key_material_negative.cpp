@@ -6,7 +6,7 @@
 // it reaches, give an ordinary consumer NOTHING.
 //
 // System/Security/Cryptography/detail/SecureMemory.hpp declares that seam and KeyedHashAlgorithm,
-// HMAC (and, with #2160, Rfc2898DeriveBytes) befriend it, so that the erasure regressions can read a live
+// HMAC and Rfc2898DeriveBytes befriend it, so that the erasure regressions can read a live
 // object's key, inner/outer pads, buffered message, password, salt and derived-byte buffer -- none
 // of which any public API exposes, because a type that let a caller read its own key-derived pads
 // would be the defect those regressions exist to prevent. Production defines nothing: the one
@@ -132,6 +132,13 @@ int main() {
     // NEGATIVE(pbkdf-password-is-private): is private within this context
     //     | private member
     (void)pbkdf.password_;
+#endif
+
+#if SHARP_RUNTIME_NEGATIVE_SITE == 10
+    // The disposed flag lives in an existing padding hole and is nobody's business but the type's.
+    // NEGATIVE(pbkdf-disposed-flag-is-private): is private within this context
+    //     | private member
+    (void)pbkdf.disposed_;
 #endif
 
     return 0;

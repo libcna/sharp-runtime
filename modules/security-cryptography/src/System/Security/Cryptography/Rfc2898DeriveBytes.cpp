@@ -3,7 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Security/Cryptography/Rfc2898DeriveBytes.hpp"
 #include <algorithm>
+#include "System/Security/Cryptography/detail/SecureMemory.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/Security/Cryptography/CryptographicException.hpp"
 #include "System/Security/Cryptography/HMACSHA1.hpp"
 #include "System/Security/Cryptography/HMACSHA256.hpp"
@@ -34,14 +36,47 @@ std::unique_ptr<HMAC> Rfc2898DeriveBytes::createHmac() const {
     throw CryptographicException("'" + n.value_or("") + "' is not a known hash algorithm.");
 }
 
+std::vector<bytecs> Rfc2898DeriveBytes::acceptPassword(std::vector<bytecs> password, intcs iterations,
+                                                        const HashAlgorithmName& hashAlgorithm) {
+    try {
+        System::ArgumentOutOfRangeException::ThrowIfNegativeOrZero(iterations, "iterations");
+        (void)blockSizeForHash(hashAlgorithm);
+    } catch (...) {
+        // The caller's bytes are already here, in a block that is about to be released by the
+        // unwind. Erase them on the way out rather than handing them to the allocator intact.
+        SharpRuntimeDetail::SecureMemory::ClearContainer(password);
+        throw;
+    }
+    return password;
+}
+
 Rfc2898DeriveBytes::Rfc2898DeriveBytes(std::vector<bytecs> password, std::vector<bytecs> salt, intcs iterations,
                                         HashAlgorithmName hashAlgorithm)
-    : password_(std::move(password)), iterations_(static_cast<uint32_t>(iterations)),
-      hashAlgorithm_(std::move(hashAlgorithm)) {
-    System::ArgumentOutOfRangeException::ThrowIfNegativeOrZero(iterations, "iterations");
+    : password_(acceptPassword(std::move(password), iterations, hashAlgorithm)),
+      iterations_(static_cast<uint32_t>(iterations)), hashAlgorithm_(std::move(hashAlgorithm)) {
     blockSize_ = blockSizeForHash(hashAlgorithm_);
     salt_ = std::move(salt);
     salt_.resize(salt_.size() + 4, bytecs{0});
+    initialize();
+}
+
+Rfc2898DeriveBytes::~Rfc2898DeriveBytes() { Dispose(); }
+
+void Rfc2898DeriveBytes::Dispose() {
+    SharpRuntimeDetail::SecureMemory::ClearContainer(password_);
+    SharpRuntimeDetail::SecureMemory::ClearContainer(salt_);
+    SharpRuntimeDetail::SecureMemory::ClearContainer(buffer_);
+    block_ = 0;
+    startIndex_ = endIndex_ = 0;
+    disposed_ = true;
+}
+
+void Rfc2898DeriveBytes::throwIfDisposed() const {
+    System::ObjectDisposedException::ThrowIf(disposed_, "Rfc2898DeriveBytes");
+}
+
+void Rfc2898DeriveBytes::Reset() {
+    throwIfDisposed();
     initialize();
 }
 
@@ -51,22 +86,32 @@ Rfc2898DeriveBytes::Rfc2898DeriveBytes(const std::string& password, std::vector<
                          std::move(hashAlgorithm)) {}
 
 void Rfc2898DeriveBytes::setIterationCountProperty(intcs value) {
+    throwIfDisposed();
     System::ArgumentOutOfRangeException::ThrowIfNegativeOrZero(value, "value");
     iterations_ = static_cast<uint32_t>(value);
     initialize();
 }
 
 std::vector<bytecs> Rfc2898DeriveBytes::getSaltProperty() const {
+    // Not merely a lifecycle nicety: Dispose() empties salt_, and `salt_.end() - 4` on an empty
+    // vector is undefined behaviour, not an empty result.
+    throwIfDisposed();
     return std::vector<bytecs>(salt_.begin(), salt_.end() - 4);
 }
 
 void Rfc2898DeriveBytes::setSaltProperty(std::vector<bytecs> value) {
+    throwIfDisposed();
     value.resize(value.size() + 4, bytecs{0});
+    SharpRuntimeDetail::SecureMemory::Scrub(salt_);
     salt_ = std::move(value);
     initialize();
 }
 
 void Rfc2898DeriveBytes::initialize() {
+    // Erase the previous block's derived bytes rather than merely overwriting the prefix: assign()
+    // to a shorter length would leave the tail readable, and a reset is exactly the moment a
+    // caller expects the previous derivation to be gone.
+    SharpRuntimeDetail::SecureMemory::Scrub(buffer_);
     buffer_.assign(static_cast<size_t>(blockSize_), bytecs{0});
     block_ = 0;
     startIndex_ = endIndex_ = 0;
@@ -85,19 +130,25 @@ void Rfc2898DeriveBytes::func() {
 
     auto hmac = createHmac();
     std::vector<bytecs> u = hmac->ComputeHash(salt_);
-    buffer_ = u;
+    buffer_.assign(u.begin(), u.end());
 
     for (uint32_t i = 2; i <= iterations_; ++i) {
-        u = hmac->ComputeHash(u);
+        std::vector<bytecs> next = hmac->ComputeHash(u);
+        SharpRuntimeDetail::SecureMemory::Scrub(u);
+        u.assign(next.begin(), next.end());
+        SharpRuntimeDetail::SecureMemory::ClearContainer(next);
         for (size_t j = 0; j < buffer_.size(); ++j) {
             buffer_[j] = static_cast<bytecs>(buffer_[j] ^ u[j]);
         }
     }
+    // Every U_i is a PBKDF2 intermediate derived from the password; the last one is still live.
+    SharpRuntimeDetail::SecureMemory::ClearContainer(u);
 
     block_++;
 }
 
 std::vector<bytecs> Rfc2898DeriveBytes::GetBytes(intcs cb) {
+    throwIfDisposed();
     System::ArgumentOutOfRangeException::ThrowIfNegativeOrZero(cb, "cb");
 
     std::vector<bytecs> result(static_cast<size_t>(cb));

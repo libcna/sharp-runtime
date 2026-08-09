@@ -35,3 +35,40 @@ C++ object offers no equivalent invalidation or clearing mechanism.
 ## Final assessment
 
 Confirmed high-severity lifecycle and secret-retention defect: SR-AUD-331.
+
+---
+
+## Remediation record — ticket #2160 (2026-08-09)
+
+SR-AUD-331 **remediated**. Repair, evidence and mutations:
+`docs/SystemSecurityCryptographyNamespaceReviewPlan.md` §15.
+
+The original evidence reproduces exactly. Before the repair: `Dispose()` then `GetBytes(4)` returned
+four bytes (`pbkdf-after-dispose=4`), `password_` held all 16 password bytes, `salt_` 12 and
+`buffer_` 32, and the returned bytes were **byte-identical to a fresh instance's continuation** —
+confirming this report's reading that the post-disposal path is the real derivation. After: all
+three buffers read 0, and `GetBytes` throws `ObjectDisposedException` naming `Rfc2898DeriveBytes`.
+
+**A prediction this repair withdrew.** The handoff that opened this batch stated that repairing this
+finding required an object-layout change. It did not. The type has a **four-byte padding hole at
+offset 108**, between `blockSize_` and the 8-byte-aligned `buffer_`; the flag lives there, so
+`sizeof` stays **160**, `alignof` stays **8**, **zero** pre-existing members moved, and `Dispose`
+was already virtual on `DeriveBytes` so the override filled an existing vtable slot
+(`build-probe/2160_layout_real.log`). Nothing about this finding was ever approval-gated.
+
+**One defect this report does not name, found while repairing it.** `getSaltProperty()` computes
+`salt_.end() - 4`. Erasing the salt on disposal without also guarding that getter would have turned
+a disclosure defect into **undefined behaviour**, so the guard and the erasure had to land together;
+a mutation that removes the guard aborts the test process on an out-of-bounds write. A second,
+separate post-audit defect (no `SR-AUD-*` identifier, cause SC-C) is fixed with it: the constructor
+moved the password into `password_` before validating `iterations` and the hash algorithm, so a
+**rejected** call destroyed a fully populated password buffer without erasing it — measured as a
+16-byte run of the password in freed storage, now 0.
+
+**The assertions this report asked for are now permanent** (+21 tests): SHA-1/256/384/512 PBKDF2
+published vectors including RFC 6070 at 1/2/4096 iterations and this report's own SHA-256 vector,
+split-call continuation, reset, salt and iteration reset, invalid count/iteration/hash with exact
+diagnostics, the lifecycle rejection at every door, and the zeroisation assertion for password,
+salt/counter and residual buffer. The stale comment claiming SHA-3 "has not been ported" is
+corrected: it has been, in this component; PBKDF2's SHA-3 exclusion stays, because .NET's own
+`OpenHmac()` excludes it too.

@@ -519,7 +519,113 @@ double-digest cycles for MD5/SHA-256/SHA3-256 are pinned explicitly, because the
 
 ## 15. Implementation record — #2160 (causes SC-B and SC-C, SR-AUD-331)
 
-*Filled in on completion.*
+**Done 2026-08-09.** `SharpRuntimeTests_Security_Cryptography` **104 → 125** tests, all passing
+(**80 → 125** across the two implementation tickets).
+
+### 15.1 The layout claim, re-measured on the real type after the repair
+
+§4.1 measured the *prediction* on restatement structs. `build-probe/2160_probe_layout_real.cpp`
+measures the **real** `Rfc2898DeriveBytes` with `-fno-access-control` and compares every offset
+against the pre-repair figures (`build-probe/2160_layout_real.log`):
+
+```
+sizeof=160 alignof=8
+password_          8      blockSize_       104
+salt_             32      disposed_        108   <- the previously unused padding
+iterations_       56      buffer_          112
+hashAlgorithm_    64      block_           136
+                          startIndex_      144
+pre-existing members moved = 0                endIndex_        152
+sizeof unchanged (160)     = 1
+```
+
+**Zero pre-existing members moved. `sizeof` 160 → 160, `alignof` 8 → 8.** `Dispose` filled an
+existing vtable slot. No public signature changed. The inherited handoff's "object-layout change,
+so plan for one blocked design" is therefore **withdrawn on measurement**, and this is stated
+rather than quietly dropped.
+
+The claim is pinned in the build, not only in this document: `Rfc2898LayoutTests.TheDisposedFlagCostNothing`
+asserts `sizeof == 160` and `alignof == 8`, so a future change that appends a member instead of
+using the hole fails a test rather than passing unnoticed.
+
+### 15.2 The repair
+
+**SC-B — disposal.** A private `bool disposed_` in the padding hole; a `Dispose()` override that
+erases `password_`, `salt_` and `buffer_` through the primitive, resets the derivation indices and
+sets the flag; a `throwIfDisposed()` at `GetBytes`, `Reset`, `setIterationCountProperty`,
+`setSaltProperty` **and `getSaltProperty`**. The last of those is not a lifecycle nicety: the getter
+computes `salt_.end() - 4`, which on the emptied vector `Dispose` leaves behind is **undefined
+behaviour**, not an empty result — so erasing without guarding would have replaced a disclosure
+defect with a memory-safety one. A destructor covers the ordinary C++ path, with all four
+copy/move operations explicitly defaulted for the reason §8 gives.
+
+**SC-C — the rejected argument.** Validation moved out of the constructor body into
+`acceptPassword()`, called from the member-initialiser list, which erases the password before
+rethrowing. The rejection itself is unchanged — same exception types, same messages — and that is
+pinned by test for invalid `iterations`, for MD5, for SHA3-256, for a nameless
+`HashAlgorithmName`, and for the `std::string` overload.
+
+**Working buffers.** `initialize()` scrubs the previous block before reassigning; `func()` erases
+each PBKDF2 intermediate `U_i` as it is consumed and the last one when the loop ends;
+`setSaltProperty` erases the old salt before the move-assignment releases it.
+
+### 15.3 Measured before / after — the same probe, control, and flags as §14.2
+
+| Observation | Before | After |
+|---|---|---|
+| **Control** — deliberately uncleared 96-byte block | **96** | **96** |
+| live `password_` after `Dispose` (bytes / run of the password byte) | 16 / **16** | 0 / **0** |
+| live `salt_` after `Dispose` | 12 | **0** |
+| live `buffer_` after `Dispose` | 32 | **0** |
+| `GetBytes(4)` after `Dispose` | **4 bytes, byte-identical to a fresh instance's continuation** | **throws** `ObjectDisposedException`, naming `Rfc2898DeriveBytes` |
+| freed storage after destruction — password | **16** | **0** |
+| freed storage after destruction — the HMAC ipad derived from the password | 16 | 1 |
+| freed storage after a **rejected** `iterations = 0` — password | **16** | **0** |
+
+### 15.4 Permanent tests — +21
+
+`Rfc2898DisposalTests.cpp`: the control (secrets resident *before* `Dispose`); erasure of all three
+buffers; **every** door rejecting afterwards; the exact diagnostic naming the type; double and
+triple `Dispose`; `Dispose` after partial consumption and before any derivation at all; rejected
+`iterations` (0, −1) and rejected algorithms (MD5, SHA3-256, nameless) including through the
+`std::string` overload; all four copy/move operations, with a moved-from source proved empty and a
+disposed copy proved not to dispose its original; RFC 6070 PBKDF2-HMAC-SHA1 vectors at 1, 2 and
+4096 iterations; the SHA-256 vector **the audit's own probe recorded for this exact type**
+(`120fb6cf…be17b`); five-way split-call continuation equal to one call; `Reset` and both setters
+restarting the sequence; all four supported algorithms; a rejected `GetBytes` argument leaving the
+instance usable; and the layout assertion.
+
+The `KeyMaterialAccess` seam gained its `Rfc2898DeriveBytes` specialisation — written out literally
+rather than macro-generated, because `scripts/check_version_seam_odr.py` correctly rejects two
+macros that both define `KeyMaterialAccess<OwnerType>` with different bodies (that is precisely the
+divergence ticket #1800 measured). Seam definitions **19 → 20**. The negative fixture gained a
+tenth site for `disposed_`; negative fixtures **12 files / 104 sites**.
+
+### 15.5 Mutations
+
+| Mutation | Result |
+|---|---|
+| `Dispose()` invalidates but does not erase | **4 clean failures** / 121 pass, exactly the erasure tests. **Counts** |
+| Append `disposed_` after `endIndex_` instead of using the hole | `Rfc2898LayoutTests.TheDisposedFlagCostNothing` fails on `sizeof` 168 ≠ 160. **Counts**, and it is the mutation that would silently undo this ticket's central claim |
+| Remove `throwIfDisposed()` from `GetBytes` | One clean assertion failure, then the process **aborts** with "double free or corruption". Recorded, but **excluded** by this batch's abort-only rule. It is worth stating why it aborts: with the erasure in place but the guard gone, `func()` writes `salt_[salt_.size() - 4]` on an emptied vector. The original code had no such window — it never erased — so this is a property of the *mutant*, and it is the reason the guard and the erasure had to land together |
+| Revert `acceptPassword` to body validation | **honest non-result** for the permanent suite: the rejection behaviour is identical and only the freed-storage probe sees the difference (§15.3, last row) |
+
+### 15.6 Sanitizers
+
+`build-probe/2160_probe_san.cpp` under `-fsanitize=address,undefined` with `detect_leaks=1`:
+4 algorithms × 4 iteration counts, each doing five split `GetBytes` calls, `Reset`, both setters,
+copy, move, copy-assign, move-assign, double `Dispose`, then five post-disposal doors, plus four
+rejected constructions — 4,544 bytes derived, 84 rejections, **0 reports, exit 0**. TSan not run
+and not claimed (§9).
+
+### 15.7 A documentation correction that came with it
+
+The type's doc-comment said SHA-3 was excluded because "this runtime hasn't ported SHA-3". It has —
+`SHA3_256`/`SHA3_384`/`SHA3_512` and all three `HMACSHA3_*` live in this component, and `HKDF`
+accepts them. The comment was true when written and stopped being true without noticing. The
+**exclusion itself is correct and unchanged**: .NET's own `OpenHmac()` does not accept SHA-3 either,
+and that is now the reason the comment gives. Pinned by
+`Rfc2898ConstructionTests.AnUnknownHashAlgorithmIsRejectedBeforeThePasswordIsStored`.
 
 ## 16. Implementation record — #2161, and the namespace reconciliation
 

@@ -14,7 +14,7 @@
 // and never defines it, so no production translation unit and no consumer can name a
 // complete type -- proved, not asserted, by
 // `test/consumer/security_cryptography_key_material_negative.cpp`.
-// `KeyedHashAlgorithm` and `HMAC` each befriend it (`Rfc2898DeriveBytes` joins with #2160).
+// `KeyedHashAlgorithm`, `HMAC` and `Rfc2898DeriveBytes` each befriend it.
 //
 // WHY A SEAM AT ALL, when the rest of this batch's evidence comes from a freed-storage
 // recorder: the recorder cannot tell `Dispose()` erased the pads from `~HMAC()` erased them,
@@ -53,6 +53,7 @@
 #include "System/Security/Cryptography/HMACSHA3_384.hpp"
 #include "System/Security/Cryptography/HMACSHA3_512.hpp"
 #include "System/Security/Cryptography/KeyedHashAlgorithm.hpp"
+#include "System/Security/Cryptography/Rfc2898DeriveBytes.hpp"
 #include "System/Security/Cryptography/detail/SecureMemory.hpp"
 
 namespace SharpRuntime::Testing {
@@ -83,5 +84,20 @@ SHARP_RUNTIME_KEY_MATERIAL_SEAM_KEYED(System::Security::Cryptography::HMACSHA512
 SHARP_RUNTIME_KEY_MATERIAL_SEAM_KEYED(System::Security::Cryptography::HMACSHA3_256)
 SHARP_RUNTIME_KEY_MATERIAL_SEAM_KEYED(System::Security::Cryptography::HMACSHA3_384)
 SHARP_RUNTIME_KEY_MATERIAL_SEAM_KEYED(System::Security::Cryptography::HMACSHA3_512)
+
+// Written out rather than macro-generated, and deliberately so: PBKDF2's state is a different
+// shape from a keyed hash's (password + salt/counter + derived-byte buffer + a disposed flag, no
+// pads), and scripts/check_version_seam_odr.py rejects two macros that both define
+// `KeyMaterialAccess<OwnerType>` with different bodies -- correctly, since that is exactly the
+// divergence ticket #1800 measured. One macro per shape is the alternative, and for a single user
+// the literal definition is clearer.
+template <>
+struct KeyMaterialAccess<System::Security::Cryptography::Rfc2898DeriveBytes> {
+    using Owner = System::Security::Cryptography::Rfc2898DeriveBytes;
+    static const std::vector<SharpRuntime::bytecs>& password(const Owner& owner) { return owner.password_; }
+    static const std::vector<SharpRuntime::bytecs>& saltAndCounter(const Owner& owner) { return owner.salt_; }
+    static const std::vector<SharpRuntime::bytecs>& buffer(const Owner& owner) { return owner.buffer_; }
+    static bool disposed(const Owner& owner) { return owner.disposed_; }
+};
 
 } // namespace SharpRuntime::Testing
