@@ -7035,3 +7035,57 @@ pin. SR-AUD-070, 077 and 086 stay **`confirmed`** with open tickets. SR-AUD-081 
 **Index after #2061: 121 remediated / 243 confirmed / 364 total** — of which **47** carry the
 `confirmed (design-complete)` qualifier, four of them added by this review.
 **No `SR-AUD-*` identifier was created; numbering stays frozen at 364.**
+
+## `modules/io-hashing` namespace review and closure (#2140–#2144, 2026-08-09)
+
+**A note on this log's own state before the numbers.** The last tally recorded here was
+*"Index after #2061: 121 remediated"*. Several review batches since then updated
+`AUDIT_FINDINGS_INDEX.md` — the authoritative record — without appending here, so this narrative
+lagged by 29 remediations. The index read **150 remediated / 214 confirmed / 364 total** when this
+batch began. That gap is stated rather than silently closed.
+
+**Three findings, three of three compatible, all remediated.** SR-AUD-260 (**#2141**, high),
+SR-AUD-261 (**#2142**), SR-AUD-262 (**#2143**), plus **#2144** for the contract documentation and
+the measured-positive pins. This is the first unit in several reviews with **no gated remainder**:
+no blocked ticket, no `needs_user` decision, nothing waiting on `/rv`, and no CCF membership.
+
+**All three findings share one cause,** recorded as IH-A: .NET's surface is
+`ReadOnlySpan<byte>`/`Span<byte>`, this port replaced every span with a raw pointer plus a signed
+length, and the contract that substitution needs was never written down. A null pointer with a
+positive length became representable, a negative length became representable, and the byte order
+of a raw load became the implementation's business rather than the algorithm's.
+
+**Measured, not asserted.** Fork-per-case probing (a defect whose symptom is SIGSEGV cannot be
+enumerated in-process) over the review's 102 cases plus 54 more the review's matrix never reached:
+
+| | before | after |
+|---|---:|---:|
+| SIGSEGV | **67** (58 + 9) | **0** |
+| ASan/UBSan diagnostics, production code instrumented | **69** (60 + 9) | **0** |
+| negative length silently accepted | 11 | **0** |
+| published check values changed | — | **0 of 8** |
+
+**Four premise corrections**, each recorded in `docs/SystemIOHashingNamespaceReviewPlan.md` §17:
+the four XXH types were **not** exempt from SR-AUD-260; the review's door inventory was
+**incomplete** by nine doors, including a public one (`WriteCrcToSpan`) that carries no capacity
+argument at all; a null pointer with length **zero** was undefined behaviour on XxHash3/XxHash128
+on the very case the contract requires to be accepted; and XxHash32/64's existing official vectors
+**do** cover the multi-lane path, so #2143's lane loads are pinned by published values rather than
+only by self-consistency.
+
+**Two test-suite weaknesses found by surviving mutations, both closed.**
+`EXPECT_THROW(…, System::ArgumentException)` was never a strict assertion in this suite, because
+`ArgumentNullException` *and* `ArgumentOutOfRangeException` derive from it; and no test pinned the
+destination byte order of `Adler32`, `Crc32` or `Crc64`, whose check values all read the numeric
+result. Both now have real pins, and the byte-order pin is #2143's safety net.
+
+**No `SR-AUD-*` identifier was created; numbering stays frozen at 364.** No post-audit defect in
+this module needed a ticket of its own: the two found during remediation (the nine missed doors,
+the zero-length `memcpy`) are **inside SR-AUD-260's own cause** and were repaired by #2141 rather
+than filed separately, and the two recorded by the review as "not ticketed" (the undocumented
+README, the `GetCurrentHash(dst,1)`-throws-while-`(nullptr,16)`-crashes asymmetry) were absorbed
+by #2144 and #2141 respectively.
+
+**Index after #2144: 153 remediated / 211 confirmed / 364 total** — of which **49** carry the
+`confirmed (design-complete)` qualifier, none of them added by this review.
+**`modules/io-hashing` is fully closed.**

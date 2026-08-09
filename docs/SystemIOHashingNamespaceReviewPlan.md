@@ -643,3 +643,61 @@ added `HashingByteOrder.hpp`), and **96 → 131 tests**.
 **This module had no gated behaviour to pin.** Unlike every recent review there is no blocked
 ticket and no `needs_user` decision here, so every pin above is a measured positive rather than a
 record of something the project decided not to fix.
+
+---
+
+## 18. Final reconciliation — `modules/io-hashing` is fully closed
+
+Written after #2141–#2144 landed. **Every original finding and every post-audit defect has exactly
+one disposition, and no finding was closed from planning alone** — each carries an implemented
+ticket, permanent tests and measured before/after evidence.
+
+### 18.1 The three original findings
+
+| Finding | Sev | Ticket | Status | Closed by |
+|---|---|---|---|---|
+| SR-AUD-260 | high | **#2141** | **remediated** | 67 → 0 SIGSEGVs, 69 → 0 sanitizer diagnostics, +14 tests, 6 mutations |
+| SR-AUD-261 | med | **#2142** | **remediated** | 11 → 0 silently accepted negative lengths, +12 tests, 3 mutations |
+| SR-AUD-262 | med | **#2143** | **remediated** | every native-order integer load eliminated, +8 tests, 2 mutations |
+
+**3 of 3 remediated. None deferred, none blocked, none gated.**
+
+### 18.2 Post-audit defects — four, all dispositioned, none needing its own identifier
+
+| Defect | Source | Disposition |
+|---|---|---|
+| The README documents none of the raw-pointer contract | §6.1, recorded not ticketed | **#2144** — README and all ten headers |
+| `GetCurrentHash(dst,1)` throws while `(nullptr,16)` crashes | §6.1, evidence not defect | **#2141** — it *was* SR-AUD-260's destination half |
+| **Nine doors the 102-case matrix never reached** (`TryGetHashAndReset` ×7, `WriteCrcToSpan` ×2) | found by #2141's probe 2 | **#2141** — inside SR-AUD-260's own cause, repaired with it |
+| **`memcpy(buffer, nullptr, 0)` is UB even at zero count** (XxHash3/XxHash128) | found by #2141's instrumented run | **#2141** — same cause, and the fix had to *preserve* acceptance, not add rejection |
+
+The last two were found **during** remediation and are consequences of the finding being repaired,
+not separate defects; filing them as new tickets would have split one cause across three numbers.
+**No `SR-AUD-*` identifier was created. Numbering stays frozen at 364.**
+
+### 18.3 The checks this reconciliation is required to make
+
+- **Every compatible ticket is `done`.** #2141, #2142, #2143, #2144 — and #2140, the review
+  itself. There were no incompatible ones.
+- **No finding closed from planning alone.** Each of the three has an implemented repair, a
+  permanent test set, a before/after measurement and at least two mutations.
+- **Published check vectors green.** All eight, in the test suite
+  (`PublishedCheckValues_AllEight_AreUnchanged`) and independently in both probe binaries, after
+  every one of the four tickets.
+- **No approval-sensitive work introduced.** No object layout, vtable, public signature,
+  `noexcept` specification or component-graph edge changed; the graph stays at **41 modules /
+  92 edges**. Nothing here needed a user decision, and none was taken.
+- **CCF status untouched.** This module has **no** CCF-019, CCF-021 or CCF-022 member. CCF-012 and
+  CCF-019 are **not** marked closed by this work. CCF-021 and CCF-022 are **not** minted; #2131 and
+  #2109 remain `needs_user`.
+- **Behaviour narrowings, documented.** Three inputs that used to be accepted now throw: a
+  negative length, a null source with a positive length, and a null destination with a
+  sufficient claimed capacity. Each was previously either a crash or a silently wrong answer, so
+  no correct caller is affected; all three are stated in `README.md` and in all ten headers.
+
+### 18.4 Verdict
+
+**`modules/io-hashing` is fully closed.** All three original findings are `remediated`, all four
+tickets are `done`, every post-audit defect has a disposition, and there is **no blocked, deferred,
+`needs_user` or gated remainder** — the module is finished, not "finished except for". Tests
+**96 → 131**.
