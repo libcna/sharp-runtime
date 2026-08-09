@@ -51,3 +51,49 @@ and SR-AUD-239 are independently demonstrated observable failures.
 
 SR-AUD-238 and SR-AUD-239 are directly reproduced. No source or test was
 changed during this audit.
+
+---
+
+## Post-audit remediation for SR-AUD-238 (ticket #2154, 2026-08-09): REMEDIATED
+
+The audit evidence above is retained unchanged. **SR-AUD-239 is untouched and stays `confirmed`**
+— its only repair is an object-layout and vtable change, held by the blocked ticket #2155. Cause
+**TM-A** of `docs/SystemTimersNamespaceReviewPlan.md`; the full record is that plan's §14.
+
+**Two extensions to the finding, both measured before any production change**
+(`build-probe/2153_probe1_before.log`):
+
+1. **The escape point is in another module.** The finding is filed against these files, but the raw
+   `std::thread` entry point the exception actually escapes is `System::Threading::Timer::run`,
+   which calls `s->callback(s->arg)` with no `try`/`catch` inside
+   `std::thread([s = state_]() { run(s); })`. The repair still belongs here: .NET's
+   `System.Threading.Timer` does **not** catch either — an unhandled callback exception on a
+   thread-pool thread terminates the process there too — so the layer below is already correct and
+   was left unchanged, with its behaviour pinned.
+2. **The abort was universal and non-local.** 7 of 7 `SIGABRT`: `std::runtime_error`,
+   `System::ArgumentException` and a non-`std` `throw 42`; one-shot and periodic; on the first fire
+   and after three successful ones; and in one case an entirely **unrelated** second timer died with
+   it, because the failure is process death rather than thread death.
+
+**Repair.** One `try { … } catch (...) {}` around the **whole** callback body — not only
+`Elapsed.Raise` — silent, matching `Timer.MyTimerCallback`, whose `throw_process=alive` this report
+itself measured. `catch (...)` rather than `catch (const std::exception&)`, because `throw 42` is
+one of the measured cases.
+
+**A test weakness found by mutation testing, and fixed.** Narrowing the production catch to
+`catch (const std::exception&)` **survived** the new suite as first written: the exception unwinds on
+a background thread, and every throwing test stopped waiting the moment the handler *signalled*, so
+the test finished before the abort landed. Each case now starts a **sentinel** periodic timer and,
+after the throwing invocation, waits for it to fire five more times — which both gives the abort
+time to happen and proves the process is alive when it has not. Swallowing *and* stopping the timer
+gives one clean, precisely-targeted failure.
+
+**Evidence.** +10 tests (`TimerExceptionBoundaryTests.cpp`); `SharpRuntimeTests_Timers`
+**9 → 19**, every wait a condition variable rather than a sleep. ASan + UBSan + LSan and TSan over
+three rounds of a two-handler timer throwing on every tick while the main thread reschedules:
+**0 reports each**. No public signature, `noexcept`, virtual, vtable, data member or object-layout
+change; component graph unchanged at 41 / 92.
+
+**Pinned rather than changed:** a second subscribed handler is not reached when the first throws,
+because the exception unwinds out of `EventHandler::Raise`'s loop — matching a C# multicast
+delegate, where an exception in one target also stops the rest of the invocation list.

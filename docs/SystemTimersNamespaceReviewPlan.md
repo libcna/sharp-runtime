@@ -322,3 +322,71 @@ current behaviour is process death.
 4. `SharpRuntimeTests_Timers` grows monotonically, with every new timing assertion driven by a
    condition variable rather than a sleep.
 5. #2155's absence is pinned so it cannot land silently.
+
+---
+
+## 14. Implementation record — #2154 (cause TM-A, SR-AUD-238)
+
+**Repair.** One `try { … } catch (...) {}` around the **whole body** of
+`System::Timers::Timer::startTimerThread`'s callback lambda — not only around `Elapsed.Raise`,
+because nothing on that path may reach the thread entry point, including a failure inside
+`DateTime::getNowProperty` or `ElapsedEventArgs`. The catch is silent, matching .NET's
+`Timer.MyTimerCallback`, whose behaviour the audit's own managed probe measured as
+`throw_process=alive`.
+
+`catch (...)`, not `catch (const std::exception&)`: `throw 42` from a handler is a measured case,
+and a narrowed catch lets it through. That distinction is now a test, and it is the reason
+mutation D matters (below).
+
+**`System::Threading::Timer::run` is deliberately unchanged.** It is the raw thread entry point the
+exception actually escapes (§4.1), but .NET's `System.Threading.Timer` does not catch either — an
+unhandled callback exception on a thread-pool thread terminates the process there too. Changing it
+would make this port diverge from .NET in the other direction, on a type in another module and
+another namespace.
+
+**Before / after.**
+
+| Case | Before | After |
+|---|---|---|
+| `std::runtime_error`, one-shot | **SIGABRT** | survives |
+| `std::runtime_error`, periodic, first fire | **SIGABRT** | survives, keeps firing |
+| `std::runtime_error`, periodic, after 3 fires | **SIGABRT** | survives, keeps firing |
+| `System::ArgumentException`, one-shot | **SIGABRT** | survives |
+| non-`std` (`throw 42`), one-shot | **SIGABRT** | survives |
+| an unrelated second timer is running | **SIGABRT — it died too** | it keeps firing |
+| `System::Threading::Timer` callback throws | **SIGABRT** | **SIGABRT — unchanged, by design** |
+
+**Mutation testing — and a test weakness it found.**
+
+| # | Mutation | Result | Counts? |
+|---|---|---|---|
+| A | delete the boundary entirely | the test executable **aborts mid-run** | **No** — abort-only, which this batch's rules exclude. It does confirm the defect is real |
+| C | swallow *and* stop raising (`cookie_ = nullptr` in the catch) | **1 clean failure** — `APeriodicTimerKeepsFiringAfterItsHandlerThrows` alone; the other 18 green | **Yes** |
+| D | narrow the catch to `catch (const std::exception&)` | **SURVIVED the file as first written.** The exception unwinds on a background thread, and every throwing test stopped waiting the moment the handler *signalled* — so the test finished before the abort landed and passed against a broken boundary | **Detected only after the test was fixed** |
+
+Mutation D is the one that earned its keep. The repair for it is structural: every throwing case now
+starts a **sentinel** periodic timer first and, after the throwing invocation, waits for the
+sentinel to fire five more times. That both gives the abort time to happen and proves the process is
+still running when it has not. With the sentinel in place, mutation D kills the executable
+(`terminate called after throwing an instance of 'int'`) — abort-only, so still not a *clean*
+discrimination, but no longer a silent pass.
+
+**Sanitizers.** ASan + UBSan + LSan and TSan over three rounds of a two-handler timer that throws on
+every tick while the main thread reschedules and flips `AutoReset`: **0 reports each**, with the
+`Timer.cpp` body compiled from source and instrumented. TSan initially reported a race on
+`pthread_cond_destroy` — a **probe artefact**: `System::Threading::Timer::Dispose` detaches its
+worker rather than joining it, so a detached thread outlives a latch with static storage duration.
+The probe's latch is now deliberately leaked; nothing about the production path was changed to make
+the report go away, and the artefact is recorded rather than deleted.
+
+**Consequences.** No public signature, `noexcept`, virtual, vtable, data member or object-layout
+change; the component graph is unchanged at **41 / 92**. `SharpRuntimeTests_Timers` **9 → 19**
+(+10). Two behaviours are now documented on `Timer::Elapsed` because a subscriber cannot guess
+them: a handler failure is **invisible**, and the timer **keeps running**.
+
+One further behaviour was measured and **pinned rather than changed**: a second subscribed handler
+is *not* reached when the first throws, because the exception unwinds out of
+`EventHandler::Raise`'s loop. That matches a C# multicast delegate, where an exception in one target
+also stops the rest of the invocation list.
+
+**SR-AUD-238 is `remediated`.**

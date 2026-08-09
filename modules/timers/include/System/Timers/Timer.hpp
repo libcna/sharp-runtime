@@ -51,7 +51,28 @@ namespace System::Timers {
         void startTimerThread();
 
     public:
-        /** @brief Event handler collection for the Elapsed event. */
+        /**
+         * @brief Event handler collection for the Elapsed event.
+         *
+         * **Exception boundary** (ticket #2154, SR-AUD-238). Handlers run on a background thread
+         * whose entry point is a raw `std::thread`, where an escaping exception is `std::terminate`
+         * by definition — before #2154 an ordinary handler that threw killed the whole process,
+         * taking every other timer in it down as well. Any exception a handler throws is now
+         * **caught and discarded**, matching .NET's `Timer.MyTimerCallback`.
+         *
+         * Two consequences a subscriber must know:
+         *
+         * - a handler failure is **invisible**: there is no log, no event and no status flag. A
+         *   handler that needs to report a failure must do so itself, from inside the handler;
+         * - the timer **keeps running**. A periodic timer whose handler throws on every tick loops
+         *   silently at the configured interval rather than stopping.
+         *
+         * @note The sender passed to handlers is currently `nullptr` rather than the raising
+         * timer (SR-AUD-239). That is not an oversight: `EventHandler<T>::Raise` types its sender
+         * as `System::Object*`, this type does not derive from `System::Object`, and giving it that
+         * base is an object-layout and vtable change (`sizeof` 104 → 112, non-polymorphic →
+         * polymorphic) held by the blocked ticket #2155.
+         */
         System::EventHandler<ElapsedEventArgs> Elapsed;
 
         /** @brief Constructs with a default 100ms interval, initially disabled. */
