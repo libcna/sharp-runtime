@@ -50,7 +50,7 @@ for maintainers and are not part of the consumer include surface.
 | `Threading.Channels` | `modules/threading-channels` | interface | `Core.Base`, `Threading.Tasks` | — | — | — | `System/Threading/Channels/BoundedChannelFullMode.hpp` |
 | `Timers` | `modules/timers` | static | `ComponentModel`, `Core.Base` | `Threading` | — | — | `System/Timers/ElapsedEventArgs.hpp` |
 | `IO` | `modules/io` | static | `Core.Base`, `Uri` | `TimeZone` | `IO.IsolatedStorage`, `TimeZone` | — | `System/BinaryData.hpp` |
-| `IO.Compression` | `modules/io-compression` | static | `Buffers`, `Core.Base`, `IO` | — | — | ZLIB (private) | `System/IO/Compression/CompressionMode.hpp` |
+| `IO.Compression` | `modules/io-compression` | static | `Buffers`, `Core.Base`, `IO` | — | — | ZLIB (private) | `System/IO/Compression/CompressionArgumentValidation.hpp` |
 | `IO.Compression.Zip` | `modules/io-compression-zip` | static | `IO` | `Core.Base` | — | vendored miniz (private) | `System/IO/Compression/CompressionLevel.hpp` |
 | `IO.Hashing` | `modules/io-hashing` | static | `Core.Base`, `IO` | — | — | — | `System/IO/Hashing/Adler32.hpp` |
 | `Storage` | `modules/storage` | static | — | — | — | parent-provided SDL3 on Android (private) | `SharpRuntime/Storage/StoragePaths.hpp` |
