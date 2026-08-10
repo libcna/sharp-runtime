@@ -11,6 +11,9 @@
 #include <string>
 #include <vector>
 
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/Buffer.hpp"
+#include "System/Exception.hpp"
 #include "System/SpanSplitEnumerator.hpp"
 
 using SharpRuntime::intcs;
@@ -146,4 +149,99 @@ TEST(CoreMemorySafetySplitTests, EmptySequenceOverNonTrivialElements) {
     ASSERT_TRUE(e.MoveNext());
     EXPECT_EQ(e.getCurrentSpan().getLengthProperty(), 2);
     EXPECT_FALSE(e.MoveNext());
+}
+
+// ===========================================================================
+// SR-AUD-067 (CMS-A) -- raw Buffer::BlockCopy validates its signed metadata
+// ===========================================================================
+
+TEST(CoreMemorySafetyRawBufferTests, RawBlockCopy_NegativeCountIsRejected) {
+    SharpRuntime::bytecs src[4] = {1, 2, 3, 4};
+    SharpRuntime::bytecs dst[4] = {0, 0, 0, 0};
+    EXPECT_THROW(System::Buffer::BlockCopy(src, 0, dst, 0, -1),
+                 System::ArgumentOutOfRangeException);
+    // No write happened: rejection precedes every byte of the memmove.
+    EXPECT_EQ(dst[0], 0);
+    EXPECT_EQ(dst[3], 0);
+}
+
+TEST(CoreMemorySafetyRawBufferTests, RawBlockCopy_NegativeSrcOffsetIsRejected) {
+    SharpRuntime::bytecs src[4] = {1, 2, 3, 4};
+    SharpRuntime::bytecs dst[4] = {0, 0, 0, 0};
+    EXPECT_THROW(System::Buffer::BlockCopy(src, -4, dst, 0, 4),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_EQ(dst[0], 0);
+}
+
+TEST(CoreMemorySafetyRawBufferTests, RawBlockCopy_NegativeDstOffsetIsRejected) {
+    SharpRuntime::bytecs src[4] = {1, 2, 3, 4};
+    SharpRuntime::bytecs dst[4] = {0, 0, 0, 0};
+    EXPECT_THROW(System::Buffer::BlockCopy(src, 0, dst, -4, 4),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_EQ(dst[0], 0);
+}
+
+TEST(CoreMemorySafetyRawBufferTests, RawBlockCopy_ParamNamesAndOrderMatchTheVectorOverload) {
+    SharpRuntime::bytecs src[4] = {1, 2, 3, 4};
+    SharpRuntime::bytecs dst[4] = {0, 0, 0, 0};
+    // srcOffset is reported before dstOffset, which is reported before count --
+    // the same order requireValidBlockCopyRange uses for the checked vector overload.
+    auto paramOf = [&](intcs so, intcs dof, intcs n) {
+        try { System::Buffer::BlockCopy(src, so, dst, dof, n); }
+        catch (const System::ArgumentOutOfRangeException& e) { return std::string(e.getParamNameProperty()); }
+        return std::string("<no throw>");
+    };
+    EXPECT_EQ(paramOf(-1, -1, -1), "srcOffset");
+    EXPECT_EQ(paramOf(0, -1, -1), "dstOffset");
+    EXPECT_EQ(paramOf(0, 0, -1), "count");
+}
+
+TEST(CoreMemorySafetyRawBufferTests, RawBlockCopy_ValidCallsAreUnchanged) {
+    SharpRuntime::bytecs src[4] = {1, 2, 3, 4};
+    SharpRuntime::bytecs dst[4] = {0, 0, 0, 0};
+    System::Buffer::BlockCopy(src, 0, dst, 0, 4);
+    EXPECT_EQ(dst[0], 1);
+    EXPECT_EQ(dst[3], 4);
+
+    SharpRuntime::bytecs dst2[4] = {9, 9, 9, 9};
+    System::Buffer::BlockCopy(src, 1, dst2, 2, 2);
+    EXPECT_EQ(dst2[0], 9);
+    EXPECT_EQ(dst2[2], 2);
+    EXPECT_EQ(dst2[3], 3);
+
+    // count == 0 is legal and must stay legal.
+    SharpRuntime::bytecs dst3[4] = {5, 5, 5, 5};
+    System::Buffer::BlockCopy(src, 0, dst3, 0, 0);
+    EXPECT_EQ(dst3[0], 5);
+}
+
+TEST(CoreMemorySafetyRawBufferTests, RawBlockCopy_OverlappingRegionsStillMove) {
+    // memmove semantics were already correct here and must remain so.
+    SharpRuntime::bytecs buf[5] = {1, 2, 3, 4, 5};
+    System::Buffer::BlockCopy(buf, 0, buf, 1, 4);
+    EXPECT_EQ(buf[0], 1);
+    EXPECT_EQ(buf[1], 1);
+    EXPECT_EQ(buf[2], 2);
+    EXPECT_EQ(buf[3], 3);
+    EXPECT_EQ(buf[4], 4);
+}
+
+TEST(CoreMemorySafetyRawBufferTests, RawBlockCopy_RejectionIsCatchableAsSystemException) {
+    SharpRuntime::bytecs src[1] = {1};
+    SharpRuntime::bytecs dst[1] = {0};
+    EXPECT_THROW(System::Buffer::BlockCopy(src, 0, dst, 0, -1), System::Exception);
+}
+
+TEST(CoreMemorySafetyRawBufferTests, RawBlockCopy_NegativeOffsetIsRejectedEvenWithZeroCount) {
+    // The case the old code "got away with": a zero count means memmove copies nothing,
+    // so a negative offset produced no observable failure while still forming a pointer
+    // before its own buffer. It is invalid metadata either way and is rejected either way.
+    SharpRuntime::bytecs src[4] = {1, 2, 3, 4};
+    SharpRuntime::bytecs dst[4] = {0, 0, 0, 0};
+    EXPECT_THROW(System::Buffer::BlockCopy(src, -4, dst, 0, 0),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(System::Buffer::BlockCopy(src, 0, dst, -4, 0),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(System::Buffer::BlockCopy(src, SharpRuntime::INTCS_MIN, dst, 0, 0),
+                 System::ArgumentOutOfRangeException);
 }

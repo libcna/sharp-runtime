@@ -48,14 +48,32 @@ namespace System {
          * length-aware System::Collections::ObjectSpan destination, so it is no longer an
          * example of an accepted limitation.
          *
+         * @note The capacity of a raw buffer cannot be discovered, but that does not make
+         * every argument unverifiable. A negative @p count used to be cast straight to
+         * @c size_t and a negative offset used to form a pointer *before* its own buffer;
+         * all three were AddressSanitizer-confirmed out-of-bounds `memmove` operations
+         * (SR-AUD-067: `count < 0` a **stack-buffer-overflow**, `srcOffset < 0` a
+         * **stack-buffer-underflow**, `dstOffset < 0` a **stack-buffer-overflow**). Each
+         * is now rejected deterministically before any pointer arithmetic, in the same
+         * order and with the same exception as the sibling `std::vector` overload's
+         * `requireValidBlockCopyRange`, matching .NET's `Buffer.BlockCopy`, which checks
+         * all three inputs before its internal `Memmove`. The upper-bound limitation is
+         * unchanged and remains the caller's responsibility. See
+         * `docs/CoreMemorySafetyFamilyPlan.md` (CMS-A).
+         *
          * @param src       Pointer to the source region.
          * @param srcOffset Byte offset into @p src.
          * @param dst       Pointer to the destination region.
          * @param dstOffset Byte offset into @p dst.
          * @param count     Number of bytes to copy.
+         * @throws System::ArgumentOutOfRangeException if @p srcOffset, @p dstOffset, or
+         *         @p count is negative.
          */
         static void BlockCopy(const void* src, intcs srcOffset,
                                void* dst, intcs dstOffset, intcs count) {
+            System::ArgumentOutOfRangeException::ThrowIfNegative(srcOffset, "srcOffset");
+            System::ArgumentOutOfRangeException::ThrowIfNegative(dstOffset, "dstOffset");
+            System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
             std::memmove(static_cast<bytecs*>(dst) + dstOffset,
                          static_cast<const bytecs*>(src) + srcOffset,
                          static_cast<size_t>(count));
