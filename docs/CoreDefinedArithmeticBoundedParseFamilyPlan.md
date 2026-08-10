@@ -674,3 +674,79 @@ instance measurement. `StopwatchTests` 29/29. No signature, member ordering, `no
 vtable change: the two additions are private `static constexpr` member functions, which are
 neither virtual nor data members. **SR-AUD-131 stays `confirmed`** — it is not remediated until
 #2219 lands its `TimeProvider` half.
+
+---
+
+## 21. What #2219 measured, and SR-AUD-131's closure (2026-08-10)
+
+`TimeProvider`'s half is implemented, so **SR-AUD-131 is `remediated`** (#2218 + #2219). The audit
+index reads **179 remediated / 130 confirmed / 55 confirmed (design-complete)** of 364; numbering is
+still frozen at 364 and CCF-004 is still closed 8/8 with no new member.
+
+### 21.1 Both halves, before and after
+
+| Case | Before | After | Before diagnostic | After |
+|---|---|---|---|---|
+| T1 `(INT64_MIN, INT64_MAX)` | `ticks=-1` | **identical** | `:74:34` signed overflow | none, exit 0 |
+| T2 `(0, INT64_MAX)`, default provider | `ticks=-9223372036854775808` | **`ticks=9223372036854775807`** | `:74:55` float-cast (only with the extra sub-check) | none, exit 0 |
+| T3 `(1000, 3000)` | `ticks=2000` | identical | none | none |
+| T4 frequency 1, `(0, 1e12)` | `ticks=-9223372036854775808` | **`ticks=9223372036854775807`** | `:74:55` | none, exit 0 |
+| T5 frequency 0 | `InvalidOperationException` | identical | — | still thrown before any arithmetic |
+| T6 one-argument door | large negative | identical shape | `:74:34` | none, exit 0 |
+
+### 21.2 A second methodology correction: the exit code is not the evidence for this sub-check
+
+`-fno-sanitize-recover=undefined` names the **`undefined` group**, and `float-cast-overflow` is not
+in it. Measured during mutation M2: with the saturation removed, the diagnostic at `:99:54` printed
+and the process still **exited 0**. So for a floating→integral site, an aborting run proves nothing
+and only the diagnostic text does — unless `-fno-sanitize-recover=all` is used, which the final
+after-run does (`build-probe/2219_after.log`): all twelve `Stopwatch` and `TimeProvider` cases exit
+0, and the deliberately unrepaired `Linq.hpp:236` control in the **same binary** exits 1.
+
+This compounds §5.1.1: it is not enough to enable the right check; the recovery group has to match
+it too, or the run reports "pass" for a site it did diagnose.
+
+### 21.3 The saturation semantics, chosen and justified rather than assumed
+
+`/rv` is absent, so the reference could not be read. The choice is stated as a decision:
+
+- the pre-fix behaviour was **undefined**, and on this toolchain produced `INT64_MIN` for both a
+  huge positive and a huge negative scaled value — indistinguishable, and wrong in sign for the
+  positive case;
+- saturation is defined, is what modern .NET adopted for floating→integer conversions, and is what
+  AArch64 does natively;
+- it makes `TimeProvider::GetElapsedTime(0, INT64_MAX)` agree with
+  `Stopwatch::GetElapsedTime(0, INT64_MAX)`, which never routed through a `double` and already
+  returned `INT64_MAX`. The two APIs disagreeing about the same arguments was itself a defect.
+
+NaN maps to `0`. It is unreachable for a finite delta and a positive finite frequency and is
+guarded anyway rather than left to the conversion.
+
+### 21.4 One property pinned, not changed — precision above 2^53
+
+`TimeProvider::GetElapsedTime` scales through a `double`, exactly as .NET's own does, so a tick
+count above 2^53 is not exact. `(double)(INT64_MIN + 1)` rounds to exactly −2^63, which **is**
+representable, so that sweep point converts to `INT64_MIN` and never reaches the saturation guard;
+`(double)(INT64_MAX - 1)` rounds up to 2^63, which is not, and does. Both are now pinned with the
+reason, together with a direct comparison against `Stopwatch`, which stays exact. This is
+pre-existing and untouched; the test exists so a later reader cannot mistake it for saturation.
+
+### 21.5 Four mutations, and which signal killed each
+
+| Mutation | Gate tests | Sanitizer probe |
+|---|---|---|
+| **M1** — saturation direction swapped | **3 of 11 fail** | silent (both directions are defined) |
+| **M2** — saturation removed, raw conversion restored | **3 of 11 fail** | `:99:54` float-cast diagnostic returns for T2 and T4 |
+| **M3** — the boundary `>=` weakened to `>` | **2 of 11 fail** | `:108:45` returns for T2 (T4 is strictly greater and unaffected) |
+| **M4** — unsigned subtraction reverted to signed | **all 11 pass** | T1 aborts, exit 1 |
+
+M4's signal is the weaker one, for the same structural reason as #2218's M2, and is labelled rather
+than counted as equal.
+
+### 21.6 Consequences
+
++11 permanent regressions in `modules/threading/tests/System/TimeProviderTests.cpp`
+(`TimeProviderDefinedArithmeticTests`); `SharpRuntimeTests_Threading` `TimeProvider*` 21/21.
+**No member added** — the saturation is inline in the existing body — so no layout or vtable change
+is possible, and a `static_assert` pins `sizeof`/`alignof`. `<limits>` is now included. No
+signature, `noexcept` or symbol change.

@@ -10,6 +10,7 @@
 #include "System/Diagnostics/Stopwatch.hpp"
 #include "System/Threading/ITimer.hpp"
 #include "System/Threading/Timer.hpp"
+#include <limits>
 #include <memory>
 
 namespace System {
@@ -65,15 +66,47 @@ namespace System {
             return System::Diagnostics::Stopwatch::GetTimestamp();
         }
 
-        /** Returns elapsed time between two GetTimestamp() values. */
+        /**
+         * Returns elapsed time between two GetTimestamp() values.
+         *
+         * This body used to carry **two** undefined operations on one line, at two different
+         * columns, and only one of them is visible to GCC's default `-fsanitize=undefined` set
+         * (SR-AUD-131, ticket #2219; docs/CoreDefinedArithmeticBoundedParseFamilyPlan.md §5.1.1).
+         *
+         *  1. `endingTimestamp - startingTimestamp` was a signed subtraction. Real .NET evaluates
+         *     it in C#'s *unchecked* integral model, where two's-complement wrap is defined and
+         *     intended, so the wrap is produced in the unsigned domain and converted back --
+         *     CCF-004 class A, changing no value. (CCF-004 stays closed 8/8; this is an
+         *     occurrence, not a new member.)
+         *  2. The `static_cast<longcs>` of the scaled `double` is undefined whenever the value is
+         *     outside `int64`'s range ([conv.fpint]/1), which needs no overflow in step 1 at all:
+         *     `GetElapsedTime(0, INT64_MAX)` on the default system provider scales to exactly
+         *     2^63 and used to return **INT64_MIN** -- a maximal *negative* duration for a
+         *     maximal *positive* interval. It now saturates, which is defined, matches the
+         *     saturating floating-to-integer conversion modern .NET adopted, and makes this
+         *     method agree with `Stopwatch::GetElapsedTime` on the same arguments.
+         */
         TimeSpan GetElapsedTime(longcs startingTimestamp, longcs endingTimestamp) const {
             longcs freq = getTimestampFrequencyProperty();
             if (freq <= 0)
                 throw InvalidOperationException("The operation cannot be performed when TimeProvider.TimestampFrequency is zero or negative.");
-            return TimeSpan(static_cast<longcs>(
-                (endingTimestamp - startingTimestamp) *
-                (static_cast<double>(TimeSpan::TicksPerSecond) / static_cast<double>(freq))
-            ));
+            const longcs delta = static_cast<longcs>(
+                static_cast<SharpRuntime::ulongcs>(endingTimestamp) -
+                static_cast<SharpRuntime::ulongcs>(startingTimestamp));
+            const double scaled = static_cast<double>(delta) *
+                (static_cast<double>(TimeSpan::TicksPerSecond) / static_cast<double>(freq));
+            // 2^63 exactly; the representable domain of longcs as a double is [-2^63, 2^63).
+            constexpr double twoPow63 = 9223372036854775808.0;
+            longcs ticks;
+            if (scaled != scaled)                 // NaN: unreachable for a finite delta and a
+                ticks = 0;                        // positive finite frequency, guarded anyway
+            else if (scaled >= twoPow63)
+                ticks = std::numeric_limits<longcs>::max();
+            else if (scaled < -twoPow63)
+                ticks = std::numeric_limits<longcs>::min();
+            else
+                ticks = static_cast<longcs>(scaled);
+            return TimeSpan(ticks);
         }
 
         /** Returns elapsed time since startingTimestamp. */

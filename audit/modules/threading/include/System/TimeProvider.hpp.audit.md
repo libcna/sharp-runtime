@@ -42,3 +42,30 @@ timer input/disposal boundaries are covered by SR-AUD-190/SR-AUD-191.
 
 SR-AUD-131 extends to this public API; no new independent high finding is
 created.  No source or test was changed.
+
+---
+
+## Extension of SR-AUD-131 — REMEDIATED (ticket #2219, 2026-08-10)
+
+The original evidence above is retained unchanged. **Only the SR-AUD-131 extension is closed**;
+SR-AUD-190 and SR-AUD-191 in this report are untouched, and this ticket creates no new finding.
+
+The full record is in the owning report
+(`audit/modules/core/include/System/Diagnostics/Stopwatch.hpp.audit.md`) and in
+`docs/CoreDefinedArithmeticBoundedParseFamilyPlan.md`. The one thing this report needs to carry is
+the premise correction that belongs to **this** file: the extension is **two** undefined operations,
+not one. `TimeProvider.hpp:74` had undefined behaviour at two columns — `:74:34`, the signed
+subtraction this report describes, and `:74:55`, an out-of-range `double`→`long` conversion that
+GCC's default `-fsanitize=undefined` set does **not** report because `float-cast-overflow` is
+outside that group. The second is reachable **without** the first, on the **default** system
+provider, through `GetElapsedTime(0, INT64_MAX)`, which returned the most negative representable
+duration for a maximal positive interval.
+
+Both are gone: the subtraction is now unsigned (CCF-004 class A, no value change) and the
+conversion saturates (class C). All six `TimeProvider` probe cases exit 0 under
+`-fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all`; +11 permanent tests in
+`TimeProviderTests.cpp`, including the `frequency <= 0` control proving `InvalidOperationException`
+still wins before any arithmetic, a custom-frequency provider, and a `static_assert` that
+`sizeof(TimeProvider)` and `alignof(TimeProvider)` are unchanged. **No member was added**, so no
+layout or vtable change is possible. CCF-004 stays closed 8/8 and gains no member; audit numbering
+stays frozen at 364.
