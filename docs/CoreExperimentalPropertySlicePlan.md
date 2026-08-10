@@ -331,3 +331,39 @@ No mutation was skipped as unsafe, and none is equivalent.
 `ReadonlyProperty.hpp`, `Prop.hpp`, every other `modules/core` header, the
 component graph, the component catalogue, the module boundaries, and the four
 pre-existing `ExperimentalPropertyTests`.
+
+---
+
+## 9. #2247 — the empty getter, closed (2026-08-10)
+
+Opened by this slice's §6 as an **adjacency** to CCF-011 and implemented as a bounded
+compatible ticket in the following batch. `Property<T>`'s constructor now rejects an
+empty getter with `System::ArgumentNullException("customGetter")`, **before** anything
+is done with either callable. CCF-011's established policy — decide emptiness at the
+public boundary, and report an argument to an ordinary method as
+`ArgumentNullException` — applied unchanged, so **no family was reopened, extended,
+renumbered or minted**: CCF-011 stays closed with its six named members, none of them
+this header, and no `SR-AUD-*` identifier was created.
+
+**What was defective**: an empty `std::function` reaching a call throws
+`std::bad_function_call`, a *native* exception that code catching `System::Exception&`
+does not see, raised at the first read — arbitrarily far from the construction that
+caused it.
+
+**Premise correction to #2247's own acceptance criterion.** It says "ReadOnlyProperty
+is unaffected". `ReadOnlyProperty` **does** exist —
+`modules/core/include/SharpRuntime/Experimental/ReadonlyProperty.hpp`, whose filename
+spells the second word with a lowercase `o`, which is why a naive search for the class
+name misses the file — and it is **not** unaffected: it forwards its getter straight to
+this constructor, so it inherits the rejection. That is the correct outcome and is
+pinned by two tests. What is genuinely unaffected is the read-only **spelling**, an
+empty *setter*, which still constructs and still throws
+`System::NotSupportedException` on a write.
+
+**Scope kept.** The empty setter is deliberately not rejected; #2246's layout question
+is not absorbed; the vestigial `cachedValue` and `sizeof(Property<int>) == 72` are
+untouched and their pin still passes.
+
+**+9 tests** in `tests/integration/Task39RemainingTests.cpp`, beside the twelve this
+slice added. No signature, layout, vtable, `noexcept` or symbol change — only a throw
+added on a path that previously produced an uncatchable failure later.

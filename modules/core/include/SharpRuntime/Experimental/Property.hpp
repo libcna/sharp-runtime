@@ -12,6 +12,7 @@
 #include <functional>
 #include <iostream>
 #include <stdexcept>
+#include "System/ArgumentNullException.hpp"
 #include "System/NotSupportedException.hpp"
 
 #define DEF_PROP_AUTO(type, name, init) \
@@ -44,10 +45,29 @@ namespace SharpRuntime::Experimental {
     template <typename T>
     class Property {
     public:
-        /// @param customGetter  Lambda invoked on every read.
+        /// @param customGetter  Lambda invoked on every read. Must not be empty.
         /// @param customSetter  Lambda invoked on every write (nullptr = read-only).
+        /// @throws System::ArgumentNullException if @p customGetter is empty.
+        ///
+        /// The getter is checked HERE, at the public boundary, rather than left to fail at
+        /// the first read (ticket #2247). An empty @c std::function that reaches a call
+        /// throws @c std::bad_function_call, which is a native exception invisible to code
+        /// catching @c System::Exception&, and it surfaces at a read arbitrarily far from
+        /// the construction that caused it. This is the shape CCF-011 named -- decide
+        /// emptiness at the public boundary, before anything is done with the input, and
+        /// report an argument to an ordinary method as @c System::ArgumentNullException. It
+        /// is an ADJACENCY to that family, not a member of it: CCF-011 is closed with six
+        /// named members, none of them this header.
+        ///
+        /// An empty @p customSetter is NOT rejected: it is the deliberate read-only
+        /// spelling that @c IMPL_PROP_AUTO_READONLY and @c IMPL_PROP_CUSTOM_READONLY
+        /// produce, and a write through it throws @c System::NotSupportedException by
+        /// design.
         Property(std::function<T()> customGetter, std::function<void(const T&)> customSetter = nullptr)
-            : getter(customGetter), setter(customSetter) {}
+            : getter(customGetter), setter(customSetter) {
+            if (!getter)
+                throw System::ArgumentNullException("customGetter");
+        }
 
         /// Writes @p value via the custom setter.
         /// @return The value the property reads back afterwards, obtained from the custom

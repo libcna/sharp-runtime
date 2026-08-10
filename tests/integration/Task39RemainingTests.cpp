@@ -30,6 +30,7 @@
 #include "System/Collections/ObjectModel/ReadOnlySet.hpp"
 #include "System/Collections/Generic/CollectionExtensions.hpp"
 #include "SharpRuntime/Storage/StoragePaths.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "SharpRuntime/Experimental/Property.hpp"
 #include "SharpRuntime/Experimental/ReadonlyProperty.hpp"
 #include "System/TimeSpan.hpp"
@@ -671,4 +672,100 @@ TEST(ExperimentalPropertyMacroTests, CustomReadonlyPair_RejectsWrites) {
     EXPECT_EQ(w.Negated.get(), -21);
     EXPECT_THROW(w.Negated.set(1), System::NotSupportedException);
     EXPECT_EQ(w.Negated.get(), -21);
+}
+
+// -----------------------------------------------------------------------
+// Ticket #2247: the constructor decides an empty getter at the public boundary.
+//
+// Before this ticket, Property<T>(std::function<T()>{}) constructed happily and the failure
+// surfaced at the FIRST READ as std::bad_function_call -- a native exception invisible to code
+// catching System::Exception&, raised arbitrarily far from the construction that caused it.
+// That is the shape CCF-011 named, and CCF-011's policy applies unchanged: decide emptiness at
+// the public boundary, before anything is done with the input, and report an argument to an
+// ordinary method as System::ArgumentNullException. It is an ADJACENCY to that family, not a
+// member: CCF-011 is closed with six named members, none of them this header, and no frozen
+// finding names this door. Audit numbering stays frozen, so this carries no SR-AUD-* identifier.
+//
+// PREMISE CORRECTION to #2247's own acceptance criterion: it says "ReadOnlyProperty is
+// unaffected". ReadOnlyProperty DOES exist (SharpRuntime/Experimental/ReadonlyProperty.hpp,
+// spelled with a lowercase 'o' in the filename), and it is NOT unaffected -- it forwards its
+// getter straight to this constructor, so it inherits the rejection. That is correct and is
+// pinned below. What is genuinely unaffected is the read-only SPELLING: an empty SETTER.
+// -----------------------------------------------------------------------
+
+TEST(ExperimentalPropertyTests, Construction_EmptyGetter_ThrowsArgumentNullException) {
+    EXPECT_THROW(Property<int>(std::function<int()>{}), System::ArgumentNullException);
+}
+
+TEST(ExperimentalPropertyTests, Construction_EmptyGetter_NamesTheParameter) {
+    try {
+        Property<int> p(std::function<int()>{});
+        FAIL() << "expected System::ArgumentNullException";
+    } catch (const System::ArgumentNullException& ex) {
+        EXPECT_EQ(ex.getParamNameProperty(), "customGetter");
+    }
+}
+
+TEST(ExperimentalPropertyTests, Construction_EmptyGetter_IsCatchableAsSystemException) {
+    // The whole point: std::bad_function_call is not, and that was the defect.
+    bool caught = false;
+    try {
+        Property<std::string> p(std::function<std::string()>{});
+    } catch (const System::Exception&) {
+        caught = true;
+    }
+    EXPECT_TRUE(caught);
+}
+
+TEST(ExperimentalPropertyTests, Construction_EmptyGetter_ThrowsEvenWithAUsableSetter) {
+    int backing = 0;
+    EXPECT_THROW(
+        Property<int>(std::function<int()>{}, [&backing](const int& v) { backing = v; }),
+        System::ArgumentNullException);
+    EXPECT_EQ(backing, 0);
+}
+
+TEST(ExperimentalPropertyTests, Construction_EmptyGetter_ThrowsBeforeAnyRead) {
+    // "Before anything is done with the input" is the operative half of the policy: no read
+    // path may run first, or the native exception would still escape.
+    bool setterRan = false;
+    try {
+        Property<int> p(std::function<int()>{},
+                        [&setterRan](const int&) { setterRan = true; });
+        FAIL() << "expected System::ArgumentNullException";
+    } catch (const System::ArgumentNullException&) {
+        EXPECT_FALSE(setterRan);
+    }
+}
+
+TEST(ExperimentalPropertyTests, Construction_EmptySetter_StillConstructsAndIsReadOnly) {
+    // The deliberate read-only spelling is untouched: an empty SETTER is legal, reads work, and
+    // a write is still System::NotSupportedException rather than an argument error.
+    int backing = 5;
+    Property<int> p([&backing]() { return backing; }, nullptr);
+    EXPECT_EQ(p.get(), 5);
+    EXPECT_THROW(p.set(9), System::NotSupportedException);
+    EXPECT_EQ(backing, 5);
+}
+
+TEST(ExperimentalPropertyTests, Construction_BothPresent_IsUnaffected) {
+    int backing = 1;
+    Property<int> p([&backing]() { return backing; },
+                    [&backing](const int& v) { backing = v; });
+    EXPECT_EQ(p.get(), 1);
+    p = 7;
+    EXPECT_EQ(backing, 7);
+    EXPECT_EQ(static_cast<int>(p), 7);
+}
+
+TEST(ExperimentalPropertyTests, Construction_ReadOnlyProperty_InheritsTheRejection) {
+    // ReadOnlyProperty forwards its getter to the base constructor, so it is NOT unaffected --
+    // see the premise correction above.
+    EXPECT_THROW(SharpRuntime::Experimental::ReadOnlyProperty<int>(std::function<int()>{}),
+                 System::ArgumentNullException);
+}
+
+TEST(ExperimentalPropertyTests, Construction_ReadOnlyProperty_WithAGetterStillWorks) {
+    SharpRuntime::Experimental::ReadOnlyProperty<int> ro([]() { return 42; });
+    EXPECT_EQ(ro.get(), 42);
 }
