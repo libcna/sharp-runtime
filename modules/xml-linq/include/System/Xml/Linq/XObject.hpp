@@ -32,10 +32,12 @@ namespace System::Xml::Linq {
      *   code realistically never depends on it.
      * - BaseUri / IXmlLineInfo (HasLineInfo/LineNumber/LinePosition) — depend on the annotation
      *   system above; LoadOptions::SetBaseUri/SetLineInfo already document that they're no-ops.
-     * - Changed/Changing events — real change notification would require every mutating method
-     *   in the whole hierarchy to walk up the tree and invoke handlers; this port exposes the
-     *   add/remove accessors for API compatibility but they register nothing, matching this
-     *   codebase's existing no-op event-accessor convention (e.g. NetworkChange).
+     * - Changed/Changing events — the four accessors below take a handler and **discard** it,
+     *   and no mutation anywhere in the hierarchy raises anything. See their doc-comments for
+     *   the two measured blockers that keep it that way; the contract is pinned by
+     *   `XLinqChangeNotificationTests.cpp` so a half-implementation cannot land silently
+     *   (ticket #2198, SR-AUD-336). Implementation is ticket **#2199**, blocked on two
+     *   approvals recorded in `docs/SystemXmlLinqNamespaceReviewPlan.md` §12.3.
      */
     class XObject {
         friend class XContainer;
@@ -71,15 +73,45 @@ namespace System::Xml::Linq {
         [[nodiscard]] XDocument* getDocumentProperty() const;
 
         /**
-         * @brief Stub — event registration is not functional; provided for API compatibility (see class doc-comment).
-         * C++ counterpart of .NET XObject.Changed event add accessor.
+         * @brief **Inert.** Accepts @p handler and discards it; no mutation ever invokes it.
+         *
+         * C++ counterpart of .NET XObject.Changed's add accessor, provided so ported code
+         * compiles. Measured across nine mutation doors — `setValueProperty`,
+         * `setNameProperty`, `Add(node)`, `Add(attribute)`, `RemoveAll`, and a handler on an
+         * ancestor observing a descendant — every one delivers **zero** notifications
+         * (`build-probe/2195_probe1_surface.log`, block `E*`).
+         *
+         * @note **Two measured blockers keep it inert, and both need a decision this port
+         * cannot take on its own** (ticket #2199; `docs/SystemXmlLinqNamespaceReviewPlan.md`
+         * §12.3):
+         * 1. **There is nowhere to put a handler.** .NET stores these registrations in
+         *    `XObject`'s annotation slot, and annotations are documented out of scope above.
+         *    Adding a handler field grows `sizeof(XObject)` from 16 to 24 — measured; there is
+         *    no padding — and every derived node type with it. That exact growth was declined
+         *    for a different purpose on 2026-07-31 (ticket #1896), so it has to be asked again.
+         * 2. **A registration cannot be named for removal.** See @c remove_Changed.
+         *
+         * The inert contract is pinned by `XLinqChangeNotificationTests.cpp`, which fails the
+         * moment notification is partially implemented — the previous coverage asserted only
+         * that registration does not throw, which *preserved* the behaviour instead of
+         * describing it.
          */
         void add_Changed(const XObjectChangeEventHandler& /*handler*/) {}
-        /** @brief Stub — see add_Changed. C++ counterpart of .NET XObject.Changed event remove accessor. */
+        /**
+         * @brief **Inert.** Accepts @p handler and discards it.
+         *
+         * @note This member is the harder half of SR-AUD-336, and it is not implementable at
+         * *any* layout cost as declared. `XObjectChangeEventHandler` is a bare `std::function`
+         * alias, and `std::function` has no `operator==` against another `std::function`, so
+         * there is no way to identify which registration a caller means. Proved at compile
+         * time in `build-probe/2195_probe3_events.cpp` rather than asserted. Resolving it needs
+         * either a public shape change (registration returns a token that removal consumes) or
+         * a documented deviation from .NET's delegate semantics — approval XL-2 on #2199.
+         */
         void remove_Changed(const XObjectChangeEventHandler& /*handler*/) {}
-        /** @brief Stub — event registration is not functional; provided for API compatibility (see class doc-comment). */
+        /** @brief **Inert.** Accepts a handler and discards it — see @c add_Changed. */
         void add_Changing(const XObjectChangeEventHandler& /*handler*/) {}
-        /** @brief Stub — see add_Changing. */
+        /** @brief **Inert.** Accepts a handler and discards it — see @c remove_Changed. */
         void remove_Changing(const XObjectChangeEventHandler& /*handler*/) {}
     };
 

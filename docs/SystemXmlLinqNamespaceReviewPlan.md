@@ -783,3 +783,31 @@ undeclaration, reserved prefixes and every rejecting door: **exit 0, zero report
 non-recovering UBSan **exit 0**; a deliberate out-of-bounds control in the same build **did**
 report (`build-probe/2197_control.log`). No source, ABI, layout, vtable or `noexcept` change;
 the behaviour change is documented in `docs/Migration-XmlLinqNamespaces.md`.
+
+### 20.3 #2198 (SR-AUD-336) — the compatible half landed; the implementation stays blocked
+
+Landed as §4.3 specified, and nothing more: **no behaviour changed and nothing was
+implemented.** `XLinqChangeNotificationTests.cpp` adds **23 permanent regressions** covering
+every mutation door (`setValueProperty`, `setNameProperty`, `Add(node)`, `Add(attribute)`,
+`Add(text)`, `AddFirst`, `Remove`, `ReplaceWith`, `RemoveAll`, `RemoveNodes`,
+`RemoveAttributes`, an attribute's own `setValueProperty` and `Remove`, an `XText`/`XComment`
+value change), a handler registered on an **ancestor** and on the owning **document**, repeated
+registration, removal of a never-registered handler, and an empty `std::function`.
+
+**The mutation that matters here is the inverse of the usual one.** The audit's complaint was
+that the existing test *preserved* the inert behaviour rather than describing it, so the thing to
+prove is that a **half**-implementation now fails. A deliberate one was built — handlers stored in
+a process-wide list, only `XElement::setValueProperty` notifying — compiled, executed, and it
+**fails `SetValue_RaisesNothing`**. The pre-existing
+`XObjectTests.ChangedChangingEventAccessors_DoNotThrow` passes that same half-implementation
+unchanged, which is exactly the gap the audit named. It is kept, unmodified, beside the new suite.
+
+**Both blockers are pinned so they cannot silently stop being true.** Two `static_assert`s (the
+handler is still a bare `std::function`; it is still not equality-comparable) and a runtime
+layout pin (`sizeof(XObject) == 2 * sizeof(void*)`, no padding) fail the build or the suite if
+approval XL-1's or XL-2's premise goes stale.
+
+**Status change.** SR-AUD-336 stays **open** and counted as `confirmed`, and now carries the
+`design-complete` qualifier — the selected repair and its blocked implementation ticket (#2199)
+are recorded. The decomposition moves from 172/138/54 to **172 remediated / 137 confirmed /
+55 confirmed (design-complete) = 364**.
