@@ -605,10 +605,19 @@ TEST(AppDomainTests, BaseDirectory_Linux_IsAbsolutePath) {
 }
 #endif
 
-TEST(AppDomainTests, SetGetData_Stubs_NoThrow) {
+// Retired and replaced by ticket #2249 (SR-AUD-103, data half). This test used
+// to be SetGetData_Stubs_NoThrow and asserted `GetData("k") == nullptr` right
+// after storing through SetData -- it pinned the stub the finding is about.
+// SetData/GetData are now the AppContext forwarding calls .NET implements them
+// as, so the assertion is inverted rather than deleted; the module-owned
+// fixture is AppDomainDataPolicyTests in
+// modules/core/tests/System/AppDomainTests.cpp, and this one keeps the
+// cross-module route covered from the integration binary.
+TEST(AppDomainTests, SetGetData_ForwardsToAppContext) {
     int x = 1;
-    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().SetData("k", &x));
-    EXPECT_EQ(System::AppDomain::CurrentDomain().GetData("k"), nullptr);
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().SetData("Task42Tests.k", &x));
+    EXPECT_EQ(System::AppDomain::CurrentDomain().GetData("Task42Tests.k"), &x);
+    EXPECT_EQ(System::AppDomain::CurrentDomain().GetData("Task42Tests.neverStored"), nullptr);
 }
 
 TEST(AppDomainTests, Id_IsOne) {

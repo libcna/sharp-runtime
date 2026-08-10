@@ -300,7 +300,46 @@ Every mutation was applied to production source, rebuilt with
 
 No mutation was skipped as unsafe, and none is equivalent.
 
-### 11.2 What did not change
+### 11.2 A premise correction the full gate produced, after the slice was pushed
+
+The audit report's Metadata says "no dedicated `AppDomain` fixture exists" and its
+SR-AUD-103 text says "no test invokes any of these public `AppDomain` members".
+**Both are wrong.** `tests/integration/Task42Tests.cpp` already contained an
+`AppDomainTests` suite of 16 tests covering `SetData`/`GetData`, `ApplyPolicy`
+and `IsCompatibilitySwitchSet` — and one of them,
+`SetGetData_Stubs_NoThrow`, asserted
+
+```cpp
+EXPECT_NO_THROW(...SetData("k", &x));
+EXPECT_EQ(...GetData("k"), nullptr);
+```
+
+i.e. it **pinned the stub SR-AUD-103 is about**. The auditor's own recorded
+validation filter, `AppContextExtraTests.*:AppDomainSetupTests.*`, does not
+select that suite, which is how the report came to say there was none.
+
+**How it was found, and the process lesson.** The slice was validated against
+`SharpRuntimeTests_Core_Base` — the module that owns the header — which is green,
+so it was committed and pushed. The stale pin lives in a *different* executable
+and only surfaced in the full 38-executable gate afterwards. Building the owning
+module's suite is not a sufficient gate for a change to a header other modules
+include; the whole-gate run is. This is recorded rather than quietly folded in:
+commit `be2f906` did leave one failing test, and the follow-up commit is what
+repairs it.
+
+The test is **inverted, not deleted** — it is now
+`SetGetData_ForwardsToAppContext` and keeps the cross-module route covered from
+the integration binary, on the same principle the `Environment` slice used when
+it had to retire a pin. The two remaining integration tests that touch this
+header, `ApplyPolicy_ReturnsInput` (a valid name) and
+`IsCompatibilitySwitchSet_ReturnsFalse`, are **unaffected and unchanged**: the
+first is the identity route #2251 preserves, the second is the divergence #2250
+carries.
+
+The module-owned fixture is therefore named `AppDomainDataPolicyTests`, not
+`AppDomainTests`, so the two suites do not collide in filters and logs.
+
+### 11.3 What did not change
 
 `AppContext.hpp` (SR-AUD-102 untouched), the six other `noexcept` members, the
 event stubs, the obsolete path stubs, `sizeof(AppDomain)`, the component graph,
