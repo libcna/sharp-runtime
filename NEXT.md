@@ -7,22 +7,216 @@
 harness-designated branch**. **Pushed after every commit**, per `CLAUDE.md` rule 13 — five commits,
 five pushes, every one a normal fast-forward. No merge, rebase, tag, force-push, PR, publication,
 amend or history rewrite; all commits unsigned (`git -c commit.gpgsign=false`) — no usable private
-signing key exists here. This batch **reviewed `modules/time-zone` and landed its whole compatible
-queue** (#2176 review, #2177–#2184): **six of seven findings remediated outright**, and SR-AUD-228
-alone left `confirmed (design-complete)` behind exactly one gate — **#2185 is an approval for a
-measured object-layout change, 160 → 184 bytes**. The namespace is **closed except for that one
-gate**, and §5 below says why that is the measured answer rather than a shortfall.
-Audit **167 remediated / 197 confirmed / 364 total**, of which **54** carry
-`confirmed (design-complete)`; **no `SR-AUD-*` identifier created — numbering frozen at 364.**
-Gate **16,383 tests across 37 executables: 16,376 passing, 1 skipped, 6 failing** for the same two
-measured causes, unchanged and not hidden (**+73 on the inherited 16,310 — exactly this batch's
-additions, so no regression anywhere**). Graph **41 / 92**, seams **3 / 20**, negative fixtures
-**13 / 116** — all three unchanged. **UBSan, ASan+LSan and TSan over the production bodies: exit 0,
-zero reports.** **Doxygen, `ccache` and the `/rv` reference tree are all absent** and were not
-installed. **CCF-019 open; CCF-021/#2131 and CCF-022/#2109 remain unminted.** #1773, #1962, #2150,
-#2152, #2155, #2166, #2170, #2172 and #2175 remain exactly as inherited. **The measured next unit is
-`modules/net-network-information`**, and its three findings are **independent of blocked #1962** —
-proved, not assumed (§7). See the first handoff below.*
+signing key exists here. This batch **reviewed `modules/net-network-information` and landed its whole
+compatible queue** (#2187 review, #2188–#2191, #2193): **all three findings remediated outright**.
+The namespace is **closed except for two remainders, neither of them an audit finding** — #2192
+(deferred verification) and #2194 (blocked on #1962's testability). Audit **170 remediated /
+194 confirmed / 364 total**, of which **54** carry `confirmed (design-complete)`, unchanged; **no
+`SR-AUD-*` identifier created — numbering frozen at 364.** Gate **16,406 tests across 37
+executables: 16,398 passing, 2 skipped, 6 failing** for the same two measured causes, unchanged and
+not hidden (**+23 on the inherited 16,383 — exactly this batch's additions, so no regression
+anywhere**). Graph **41 / 92**, seams **3 / 20**, negative fixtures **13 / 116** — all three
+unchanged. **ASan+UBSan+LSan, non-recovering UBSan and TSan over the production module bodies: exit
+0, zero reports** — and §9 says what they cannot reach. **Doxygen, `ccache` and the `/rv` reference
+tree are all absent** and were not installed. **CCF-019 open; CCF-021/#2131 and CCF-022/#2109 remain
+unminted.** #1773, #1962, #2150, #2152, #2155, #2166, #2170, #2172, #2175, #2185 and #2186 remain
+exactly as inherited. **The measured next unit is `modules/xml-linq`** (§7). See the first handoff
+below.*
+
+---
+
+## Batch record — `modules/net-network-information` reviewed and its whole compatible queue landed (#2187–#2193)
+
+**Three findings, three remediations.** Two remainders survive, and neither of them is a finding the
+audit raised.
+
+### 1. Work unit 1 — the selection, verified independently
+
+`audit/AUDIT_FINDINGS_INDEX.md` was re-parsed from scratch, all 364 rows grouped by owning module.
+**The decomposition at the start of this batch was 167 remediated / 143 confirmed /
+54 confirmed(design-complete) = 364.** Unlike the previous batch — where the prompt's triple was
+stale and had to be corrected — **the inherited figure was correct**; this batch's prompt
+deliberately declined to state one and asked for a recount, and the recount agrees with the previous
+handoff exactly.
+
+All five claims the handoff made about `net-network-information` checked out: three findings, all
+with concrete current-code evidence, no `/rv` dependency for the repairs, independent of blocked
+#1962, and bounded enough to finish. `net-network-information` remains the only unreviewed unit with
+**zero blocked and zero approval-gated** findings.
+
+Deliverable: `docs/SystemNetNetworkInformationNamespaceReviewPlan.md` (#2187, `79dee1f`).
+
+### 2. The #1962 boundary, re-measured rather than trusted
+
+```
+socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP) = -1  errno=13 (Permission denied)
+socket(AF_INET, SOCK_RAW,   IPPROTO_ICMP) = 3
+ping_group_range = 1	0
+```
+
+`ping_group_range = "1 0"` is an empty range, so no group may open an unprivileged ping socket, and
+the runtime opens only `SOCK_DGRAM`/`IPPROTO_ICMP`. **That is #1962 and this batch did not touch it.**
+No raw-socket path entered production code; the five failing `PingTests` were not weakened, disabled,
+skipped or recategorized, and are not reclassified as environment-only.
+
+The claim that had to be *proved* rather than assumed — that all three findings are independent of
+#1962 — was proved (`build-probe/2187_probe1_surface.log`): SR-AUD-253 reproduces with no socket
+involved at all; SR-AUD-254 is *reached* because the socket fails, but its defect is unconditional
+and would destroy whatever a raw-socket path threw just as thoroughly; SR-AUD-255 is structural here
+for the same reason it always was.
+
+### 3. Five premise corrections, every one measured
+
+- **SR-AUD-253 reaches all eight `SendPingAsync` overloads**, not the one the audit's probe names.
+  Ten probes — negative timeout, oversized buffer, wildcard address, empty host name — every one
+  returned a task and faulted later while the matching synchronous door threw at the call. There was
+  no partially-correct async door.
+- **It starts a real OS thread per already-invalid argument.** `TaskT`'s callable constructor is
+  `std::async(std::launch::async, …)`. The audit states this as a possibility; it is now measured
+  (`build-probe/2187_probe2_resources.log`).
+- **SR-AUD-254 destroys the native error code, not merely the type.** The object thrown is
+  `NetworkInformationException`, `what() == "Win32 error 13"`, `getErrorCodeProperty() == 13`; what
+  survived was `St9exception` / `"std::exception"` / no code. The mechanism is
+  `std::make_exception_ptr(e)` binding to the `std::exception` **base subobject** — slicing at the
+  moment of capture, not at rethrow.
+- **SR-AUD-254 has a second door the audit does not name, and it is the opposite defect.**
+  `Dns::GetHostAddresses` runs **outside** the wrapper, so a resolver failure escapes `Send(host…)`
+  as `System::Net::Sockets::SocketException`, while the module declares
+  `PingException("Could not resolve host name or address.")` three lines later on a branch the
+  resolver makes practically unreachable. Under-wrapping and over-wrapping of one conceptual failure,
+  three lines apart.
+- **SR-AUD-255 is three sites and its fourth sibling was already correct.** `Ping.cpp:351`, `:404`
+  and `:410` fabricated `PingOptions()`; `Ping.cpp:357` already forwarded `nullptr`. The repair is
+  justified by a self-inconsistency **inside one file**, not only by the .NET comparison.
+
+### 4. Ticket outcomes
+
+| Ticket | Outcome | Commit |
+|---|---|---|
+| **#2187** review | **done** | `79dee1f` |
+| **#2189** SR-AUD-254 | **done** — remediated | `161ca7e` |
+| **#2188** SR-AUD-253 | **done** — remediated | `93e3519` |
+| **#2190** SR-AUD-255 | **done** — remediated | `93e3519` |
+| **#2191** raw `this` capture | **done** — post-audit, no `SR-AUD-*` | `93e3519` |
+| **#2193** raw descriptor | **done** — post-audit, no `SR-AUD-*` | `a1a4b23` |
+| **#2192** DNS wrapping question | **todo, deferred verification** — needs `/rv` or a managed runtime; current behaviour pinned | — |
+| **#2194** receive-path matching / `setsockopt` | **blocked** on #1962's testability | — |
+| audit reconciliation | **done** | this commit |
+
+Namespace totals: `net-network-information` **39 → 62** tests, 3 findings, **3 remediated, 0
+design-complete, 0 unaddressed**.
+
+### 5. What #2191 is and is not
+
+Both four-argument async lambdas captured a raw `this` and called a non-static member on it from a
+`std::async` worker, so destroying the `Ping` while its task ran called a member function on a
+destroyed object. **`sizeof(Ping) == 1`** — measured; the class declares no data members — so the
+capture was removable outright by routing the workers through file-local helpers and a `PingCore`
+function pointer formed in member scope.
+
+**This does not resolve, weaken or pre-empt the blocked stateful raw-`this` family** (#2066
+`HttpClient`, #2088/#2096 `ClientWebSocket`, #2134 `Socket`, SR-AUD-263/310). Those owners hold real
+state, so their repair needs the ownership decision the repository has deliberately gated. No CCF was
+minted for this.
+
+### 6. Two limitations, recorded rather than hidden
+
+- **SR-AUD-255 has no discriminating test in this container.** Mutation M4 — restoring the fabricated
+  `PingOptions()` at all three doors — left the suite **green**, because the only test that can
+  observe the consequence needs a reply and skips. The repair is still correct (the file disagreed
+  with itself, and the audit confirms the finding), but this batch cannot demonstrate a
+  discriminating test for #2190 here. Raising `ping_group_range` would produce one and is
+  deliberately not done: modifying system networking configuration is outside the boundary.
+- **#2191 and #2193 have no runtime discriminator either.** Nothing was ever dereferenced through the
+  stale `this`, and no descriptor is ever successfully opened here, so neither a sanitizer nor a
+  mutation can report them. Their evidence is the capture list, the owner list, balanced descriptor
+  accounting against a deliberate leaked-fd control, and code review.
+
+### 7. Work unit 3 — the measured next unit
+
+Re-parsed after this batch: **170 remediated / 194 confirmed (140 plain + 54 design-complete) of
+364.** Among units with **no review plan and no remediated finding**:
+
+| Candidate | Open | high | Compatible-actionable | Blocked | Gated | Evidence-deferred | Memory/lifetime risk | Public-input | Reference data needed | Cohesion |
+|---|---:|---:|---:|---:|---:|---:|---|---|---|---|
+| **`xml-linq`** | **4** | 1 | **3** | **1** — its high **is** CCF-019 (SR-AUD-333, design-complete, #1899/#1894) | 0 | 0 | high, but that half is the blocked half | **high** | **no** | **high** — one namespace |
+| `globalization` | 7 | 1 | ~2 | 0 | **1** (`Calendar` abstract shape, 82 tests pin it) | **3–4** — need ICU collation/grapheme/casing data | **high** (TSan-confirmed culture race) | high | **yes, absent** | medium |
+| `io-isolated-storage` | **1** | **1** | **1** | 0 | 0 | 0 | medium (path escape) | **high** | no | tiny |
+| `text-regular-expressions` | 1 | 1 | ~0 | 0 | likely (stateful raw-`this`) | 0 | high | medium | no | tiny |
+| `collections-object-model` | 1 | 1 | ~0 | 0 | likely (stateful raw-`this`) | 0 | high | low | no | tiny |
+
+**Selected for next: `modules/xml-linq`.** Three of its four findings are compatible-actionable with
+no reference data: SR-AUD-334 (a parsed prefix never resolves to an `XName` URI, so a namespaced tree
+serialises and reparses unqualified), SR-AUD-335 (`]]>`, `--` and `?>` emitted without splitting or
+escaping — a CDATA round trip loses data) and SR-AUD-336 (event registration discards handlers). Its
+one high **is** CCF-019 and is already design-complete and blocked, so it is separable exactly the way
+#1962 was separable here — the pattern this batch just executed. `docs/SystemXmlNamespaceReviewPlan.md`
+already exists for the sibling namespace.
+
+**Two cautions for whoever takes it.** SR-AUD-335 is adjacent to the **unminted CCF-021** (#2131,
+protocol-field-terminator injection): repair it the way #2085 and #2183 repaired their NUL siblings —
+fix the door, do **not** mint the family. And do not let SR-AUD-333/CCF-019 be pulled in; it is
+blocked.
+
+**`globalization` is deliberately not next** despite being largest and carrying a high-severity race:
+three or four of its seven need ICU data this container does not have, and one is a gated public-shape
+change 82 tests hold in place. **`io-isolated-storage` is the strong small alternative** if a bounded
+single-finding unit is wanted instead — SR-AUD-241 is high-severity, security-relevant (an absolute
+caller path escapes the isolated store), needs no reference data, and its .NET behaviour is already
+recorded in the finding.
+
+**No second review was started.** The brief permits one "if context remains strong" and forbids
+starting a second implementation family. The measured scoring above is the deliverable instead, for
+the same reason the last two batches gave: a half-built plan is worse than none.
+
+### 8. Gate, tooling and process
+
+- **Gate: 37 executables run individually — 16,406 ran, 16,398 passed, 2 skipped, 6 failed**
+  (+23 on the inherited 16,383, **exactly** this batch's 39 → 62 module additions, so no regression
+  anywhere). The six are the same two measured causes, **re-verified this run**: `ping_group_range =
+  "1 0"` with `SOCK_DGRAM/ICMP` denied and `SOCK_RAW/ICMP` succeeding (5 `PingTests`, the real #1962
+  gap) and no IPv6 in this container (1 `SocketTests`, `Socket::Socket: socket() failed`;
+  `/proc/net/if_inet6` absent). Skips are 2: the pre-existing `CultureInvariantFormattingTests` locale
+  test plus this batch's **deliberately guarded** SR-AUD-255 end-to-end pin. **Nothing disabled,
+  weakened, skipped-to-hide-a-failure or recategorized.** Note `scripts/run_component_tests.sh` stops
+  at the first failing executable (the #1962 Ping stop), which is why the gate is run per-executable.
+- **Build:** 0 errors, 0 warnings, `--parallel 2` throughout. **Maximum aggregate compiler
+  concurrency observed: 2** — `cc1plus` sampled every 5 s across the selective-components and
+  local-CI runs never exceeded 2.
+- **Selective components: passed**, 10 components, **one run**, launched with `$!` captured
+  (`build-probe/2187_selective.pid`), verified with `ps -p`, waited on that exact PID; no other
+  compiler-producing command ran concurrently. No `pgrep -f`, no `setsid`.
+- **`local_ci_check.sh build`**: boundaries **41/92**, catalogue current, seams **3 / 20**, negative
+  fixtures **13 files / 116 sites** (peak 2 jobs, 59.3 s), configure and build clean (0 warnings,
+  0 errors) — then its **known #1962 Ping stop**, reported separately from the full gate above.
+- All eight required validations green; `git diff --check` clean.
+- **Sanitizers**, all with the three production module bodies compiled **with** the sanitizer and the
+  rest of the runtime linked from the ordinary archives — reported as *instrumented over the
+  production bodies*, never as a whole-program run. Workload: all sixteen public doors ×3, every
+  rejected-argument door, 20 owner-destroyed-during-operation rounds, 4 threads × 10 rounds over the
+  module's process-wide sequence counter, plus `NetworkInterface` enumeration. ASan+UBSan+LSan **exit
+  0, zero reports**; non-recovering UBSan **exit 0**; TSan **exit 0, zero reports**.
+- **Doxygen, `ccache` and `/rv` absent** and not installed. Tracked `scripts/__pycache__/*.pyc`
+  unchanged; every Python invocation used `PYTHONDONTWRITEBYTECODE=1`.
+- **Five commits, five pushes**, every one a normal fast-forward, per `CLAUDE.md` rule 13. All
+  unsigned. No merge, rebase, tag, force-push, amend, PR, publication or history rewrite.
+
+### 9. Honest limitations
+
+- **The wire path is untested and unsanitized here.** Every send fails at socket creation, so the
+  packet construction, checksum, `sendto`, `recv` and reply-parsing code in `sendPingCore` was never
+  executed under any sanitizer or by any assertion in this batch. That is #1962's shadow; it is
+  stated, not implied away.
+- **SR-AUD-255's end-to-end half is unobserved** (§6), and #2191/#2193 have no runtime discriminator.
+- **#2192 cannot be settled here.** Whether .NET wraps a DNS failure in `PingException` needs `/rv` or
+  a managed runtime. Both readings exist in the module; the current one is pinned by test.
+- **Windows, Emscripten and BSD/Darwin are compiled, not executed.** #2188's validation now runs
+  *before* the `PlatformNotSupportedException` on those platforms, which is the .NET ordering, but
+  that is read from the source rather than measured.
+- **The generic `System.Net.NetworkInformation` surface is mostly absent** —
+  `IPInterfaceProperties`, `IPGlobalProperties`, the address-information types and the TCP/UDP
+  statistics are **not ported**, and none was invented here. `Ping` has no cancellation surface at
+  all, so the brief's cancellation checks had no target.
 
 ---
 

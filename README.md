@@ -6,7 +6,14 @@ ports, especially CNA, without attempting to implement a CLR, JIT, garbage
 collector, or the complete .NET platform.
 
 The repository currently builds as 41 independently selectable CMake
-components. The verified Linux baseline on 2026-07-29 is a warning-free build
+components. The verified Linux baseline on **2026-08-10** is a warning-free build with
+**16,406 tests across 37 test executables — 16,398 passing, 2 skipped and 6 failing** for two
+measured environment/implementation causes recorded in `NEXT.md` (five `Ping` tests for the
+still-open raw-ICMP gap, one `Socket` test for the absent IPv6 stack). The paragraph below is the
+historical chain up to 2026-07-29 and is retained rather than rewritten; every reading since is
+recorded batch by batch in `NEXT.md`.
+
+The verified Linux baseline on 2026-07-29 was a warning-free build
 with **14,070 passing tests across 37 test executables**. (This figure had been
 stale at 13,538 for several remediation tickets; ticket #1802 corrected it to
 13,790, ticket #1791 raised it to 13,840, ticket #1788 to 13,880, ticket #1789
@@ -223,6 +230,39 @@ Individual APIs can also document smaller, explicit deviations where C++ has
 no safe or useful equivalent.
 
 ## Breaking changes
+
+### 2026-08-10 — `System::Net::NetworkInformation::Ping` reports its real cause, validates asynchronously-supplied arguments at the call, and stops inventing `PingOptions`
+
+**Behavioural only. No public signature, virtual, vtable slot, object layout, mangled symbol or
+`noexcept` specification changed — `Ping.hpp` is untouched, so ordinary source needs no change and a
+rebuild is enough.**
+
+Three changes, all toward .NET and all on paths that were previously wrong:
+
+1. **A failed `Send` now carries its real cause.** The wrapper caught `const std::exception&` and
+   stored `std::make_exception_ptr(e)`, which copies the handler parameter's *static* type, so the
+   inner exception of every `PingException` was a bare `std::exception` — the concrete type, the
+   message and the native error code were all destroyed. Code that inspected the inner exception and
+   found nothing useful will now find a `NetworkInformationException` with its own message and
+   `getErrorCodeProperty()`. A cause that does not derive from `std::exception` is now preserved
+   rather than escaping the wrapper unwrapped.
+2. **`SendPingAsync` throws at the call for an invalid argument** instead of returning a task that
+   faults later. All eight overloads are affected. The exception *type* and *message* are unchanged;
+   only the delivery point moved. Callers that awaited the task to discover an
+   `ArgumentOutOfRangeException`/`ArgumentException` must now catch it around the call — which is
+   already what the synchronous `Send` doors required.
+3. **`PingReply::getOptionsProperty()` reports absence for the no-options doors.**
+   `Send(host, timeout, buffer)`, `SendPingAsync(address, timeout, buffer)` and
+   `SendPingAsync(host, timeout, buffer)` used to forward a fabricated
+   `PingOptions{ttl = 128, dontFragment = false}` the caller never supplied, while their sibling
+   `Send(address, timeout, buffer)` already forwarded nothing. All four now agree. The optional must
+   be checked before dereferencing — as it already had to be for the fourth door — and the socket
+   keeps the system default TTL rather than having 128 forced on it.
+
+Unchanged: the outer `PingException`'s type and message, the `PlatformNotSupportedException`
+pass-through, every options-carrying overload, and the fact that a DNS resolution failure propagates
+as `System::Net::Sockets::SocketException` rather than as a `PingException` (an open question, pinned
+by test).
 
 ### 2026-08-10 — `System::TimeZoneInfo` reports a zone's *standard* offset and names, and six inputs are now rejected
 

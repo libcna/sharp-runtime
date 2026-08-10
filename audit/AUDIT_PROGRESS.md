@@ -7165,3 +7165,86 @@ its own pins with controls stable; one mutation whose build failed was discarded
 UBSan (non-recovering), ASan+LSan+UBSan and TSan over the production bodies: **exit 0, zero
 reports**, TSan driving 8 threads through concurrent `Local()`, `FindSystemTimeZoneById()` and
 `CurrentTimeZone()`. `sizeof(TimeZoneInfo)` is **160** before and after, now `static_assert`ed.
+
+---
+
+## Reconciliation — `modules/net-network-information` (tickets #2187–#2194, 2026-08-10)
+
+**Three findings, one disposition each, none lost.** All three move `confirmed → remediated`
+(SR-AUD-253, SR-AUD-254, SR-AUD-255).
+
+**Index after this batch: 170 remediated / 194 confirmed / 364 total** — of which **54** carry the
+`confirmed (design-complete)` qualifier, unchanged: this review added none and closed none.
+**No `SR-AUD-*` identifier was created; numbering stays frozen at 364.**
+
+**`modules/net-network-information` is closed except for two recorded remainders**, neither of them
+a finding the audit raised: #2192 (deferred verification, needs `/rv` or a managed runtime) and
+#2194 (blocked on #1962's testability). It is therefore *not* fully closed, and that is the measured
+outcome rather than a shortfall.
+
+### The selection, and the claim that had to be proved
+
+`net-network-information` was the only remaining unreviewed unit with **zero blocked and zero
+approval-gated findings**, all three actionable here. The load-bearing claim — that all three are
+independent of blocked **#1962** — was verified rather than assumed
+(`build-probe/2187_probe1_surface.log`): SR-AUD-253 reproduces with no socket involved at all;
+SR-AUD-254 is reached *because* the socket fails, but its defect is unconditional and would destroy
+whatever a raw-socket path threw just as thoroughly; SR-AUD-255 is structural here for the same
+reason it always was. The socket capability was re-measured, not trusted:
+`SOCK_DGRAM/IPPROTO_ICMP` denied (EACCES), `SOCK_RAW/IPPROTO_ICMP` succeeding,
+`ping_group_range = "1 0"`. **#1962 is untouched and still blocked.**
+
+### Five premise corrections, each measured before any code changed
+
+1. **SR-AUD-253 reaches all eight `SendPingAsync` overloads**, not the one the report's probe names.
+   Ten probes across all eight — negative timeout, oversized buffer, wildcard address, empty host —
+   every one returned a task and faulted later while the matching synchronous door threw at the call.
+2. **Its resource consequence is measured, not conjectured.** `TaskT`'s callable constructor is
+   `std::async(std::launch::async, …)`, so a real OS thread started per already-invalid argument.
+3. **SR-AUD-254 destroys the native error code, not merely the type.** The object thrown was
+   `NetworkInformationException("Win32 error 13")` with `getErrorCodeProperty() == 13`; what survived
+   was `St9exception` / `"std::exception"` / no code. The mechanism is `make_exception_ptr` binding
+   to the `std::exception` **base subobject** — slicing at capture, not at rethrow.
+4. **SR-AUD-254 has a second, opposite door the report does not name.** `Dns` runs *outside* the
+   wrapper, so a resolver failure escapes as `SocketException`, while the module declares an
+   unresolvable-host `PingException` three lines later on a branch `Dns::GetHostAddresses` makes
+   practically unreachable. Under-wrapping and over-wrapping of one conceptual failure. Deferred as
+   #2192 and pinned by test.
+5. **SR-AUD-255 is three sites and its fourth sibling was already correct**, so the repair rests on
+   an inconsistency *inside one file*, not only on the .NET comparison.
+
+### Three post-audit defects, ordinary ticket numbers only
+
+- **#2191 (done)** — both four-argument async lambdas captured a raw `this` and called a non-static
+  member on it from the worker. `sizeof(Ping) == 1`, so the capture was removable outright. This
+  does **not** resolve or pre-empt the blocked stateful raw-`this` family (#2066, #2088, #2134).
+- **#2193 (done)** — `sendPingCore` held a bare descriptor across five allocating operations, and
+  its manual `close` after `recv()` ran before the `errno` reads that report the recv failure.
+- **#2194 (blocked)** — the receive path matches no source/identifier/sequence and every
+  `setsockopt` result is discarded. Untestable while every send fails at socket creation.
+
+**No CCF is minted or closed.** CCF-019 stays open; CCF-021/#2131 and CCF-022/#2109 stay unminted;
+CCF-004 gains no member.
+
+### Two limitations recorded rather than hidden
+
+- **SR-AUD-255 has no discriminating test in this container.** A mutation restoring the fabricated
+  `PingOptions()` leaves the suite green, because the only test that can observe the consequence
+  needs a reply and skips. Raising `ping_group_range` would make it discriminate and is deliberately
+  not done — modifying system networking configuration is outside this batch's boundary.
+- **#2191 and #2193 have no runtime discriminator either.** Nothing was ever dereferenced through
+  the stale `this`, and no descriptor is ever successfully opened here, so no sanitizer or mutation
+  can report either. Their evidence is the capture list, the owner list, balanced descriptor
+  accounting against a deliberate leaked-fd control, and code review.
+
+### Gate
+
+Component suite **39 → 62 tests** (+23), with the **same five #1962 failures throughout, unweakened,
+undisabled and not recategorized**, plus one deliberate skip (the guarded SR-AUD-255 end-to-end pin).
+Four mutations proven, three of them failing exactly their own pins with controls stable and the
+fourth recorded as non-discriminating. ASan+UBSan+LSan, non-recovering UBSan and TSan over the
+production module bodies: **exit 0, zero reports**, TSan driving 4 threads through the module's
+process-wide sequence counter. **What the sanitizers cannot reach is stated too**: every send fails
+at socket creation, so the packet-construction, checksum, `sendto`, `recv` and reply-parsing code was
+never executed under any of them. `Ping.hpp` is untouched; no public signature, member, virtual,
+vtable, object layout, `noexcept` or mangled symbol changed.

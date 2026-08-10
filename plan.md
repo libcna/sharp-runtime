@@ -3,34 +3,76 @@
 *Last verified: 2026-08-10 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
 harness-designated branch. **Pushed after every commit**, per `CLAUDE.md` rule 13 — five commits,
 five pushes, all normal fast-forwards. No merge, rebase, tag, force-push, PR, publication, amend or
-history rewrite; all commits unsigned. This batch **reviewed `modules/time-zone`** (#2176) and
-landed **its whole compatible queue**: #2177 (SR-AUD-224 — a failed `TryFind` handed back the
-caller's previous zone), #2178 (SR-AUD-225 — `CreateCustomTimeZone` validated nothing, and a
-`TimeSpan::MinValue` offset reached `TimeSpan`'s negation guard from a public door), #2179
-(SR-AUD-226 — a reversed date range, on **both** `CreateAdjustmentRule` overloads, not the one the
-audit names), #2180 (SR-AUD-227 — equality compared bytes while the hash folded case, a broken
-equality/hash pair as well as a .NET divergence, and the fold was **locale-dependent**), #2181
-(SR-AUD-229 — one instant stood in for a whole year in **three** properties, not one; over the
-installed database that is **158 of 499 zones**, 141 of them wrong on the day this ran), #2182
-(SR-AUD-223 — **two** independent defects in a 39-line file, plus a **third found while writing the
-pins**: raw `mktime` answers a repeated local hour differently depending on the preceding
-conversion in the same process), #2183 (all seven **non-TZif files** shipped inside
-`/usr/share/zoneinfo` resolved as time zones, as did `America//New_York` and an identifier whose
-embedded NUL truncated the filesystem check) and #2184 (the `TZ` restore was not exception-safe and
-deleted an empty-but-set `TZ`). **`modules/time-zone` is closed except for one gated finding**:
-SR-AUD-228 is `confirmed (design-complete)` as **#2185**, whose repair is a **measured** object
-layout change — `sizeof(TimeZoneInfo)` **160 → 184**, with no member ordering that avoids it.
-**#2186** carries five deferred parity questions, each held by a `PIN_` test. **No `SR-AUD-*`
-identifier created — numbering frozen at 364**; audit **167 remediated / 197 confirmed / 364
-total**, of which **54** carry `confirmed (design-complete)`. Gate **16,383 across 37 executables,
-16,376 passing, 1 skipped, 6 failing** for the same two measured causes (+73, exactly this batch's
-additions). Graph **41 / 92**, seams **3 / 20**, negative fixtures **13 / 116** — all unchanged.
-UBSan, ASan+LSan and **TSan** over the production bodies: exit 0, **zero reports**. **Doxygen,
-`ccache` and `/rv` all absent.** CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted; #1773,
-#1962, #2150, #2152, #2155, #2166, #2170, #2172 and #2175 unchanged. **Next unit, measured:
-`modules/net-network-information`** — 3 open, 0 high, 0 blocked, 0 gated, and two of the three
-reproduced here, one of them *because* the container denies ICMP. Maximum aggregate compiler
-parallelism **2 jobs**.*
+history rewrite; all commits unsigned. This batch **reviewed `modules/net-network-information`**
+(#2187) and landed **its whole compatible queue**: #2189 (SR-AUD-254 — the exception wrapper caught
+by base reference and stored `make_exception_ptr(e)`, so every Ping failure arrived as a bare
+`std::exception` with its type, message **and native error code** destroyed), #2188 (SR-AUD-253 —
+**all eight** `SendPingAsync` overloads validated on the worker, so an already-invalid argument got a
+task and an OS thread instead of a throw), #2190 (SR-AUD-255 — three doors invented a default
+`PingOptions` where the fourth already forwarded `nullptr`), #2191 (both async lambdas captured a raw
+`this`; `sizeof(Ping) == 1`, so the capture was removable outright — this does **not** touch the
+blocked stateful family #2066/#2088/#2134) and #2193 (the send core held a raw descriptor across five
+allocating operations, and closed it **before** reading the `errno` it reports).
+**`modules/net-network-information` is closed except for two remainders**, neither of them an audit
+finding: **#2192** (deferred verification — a DNS failure escapes the wrapper as `SocketException`
+while the module's own unresolvable-host `PingException` is practically unreachable; needs `/rv` or a
+managed runtime, current behaviour pinned) and **#2194** (blocked — the receive path matches no
+source/identifier/sequence and discards every `setsockopt` result, untestable while every send fails
+at socket creation). **No `SR-AUD-*` identifier created — numbering frozen at 364**; audit
+**170 remediated / 194 confirmed / 364 total**, of which **54** carry `confirmed (design-complete)`,
+unchanged. Gate **16,406 across 37 executables, 16,398 passing, 2 skipped, 6 failing** for the same
+two measured causes (+23, exactly this batch's additions, so no regression anywhere). Graph
+**41 / 92**, seams **3 / 20**, negative fixtures **13 / 116** — all unchanged. ASan+UBSan+LSan,
+non-recovering UBSan and **TSan** over the production module bodies: exit 0, **zero reports** — and
+what they cannot reach is stated too. **Doxygen, `ccache` and `/rv` all absent.** CCF-019 open;
+CCF-021/#2131 and CCF-022/#2109 unminted; #1773, #1962, #2150, #2152, #2155, #2166, #2170, #2172,
+#2175, #2185 and #2186 unchanged. **Next unit, measured: `modules/xml-linq`** — 4 open, of which 3
+are compatible-actionable and the one high **is** CCF-019, already design-complete and blocked.
+Maximum aggregate compiler parallelism **2 jobs**.*
+
+## 2026-08-10 — the `modules/net-network-information` review (#2187) and its whole compatible queue (#2188–#2193)
+
+**Selected by recount, not inheritance.** The audit index was re-parsed from scratch: **167
+remediated / 143 confirmed / 54 design-complete = 364**. Unlike the previous batch, the inherited
+figure was **correct** and needed no correction. Among unreviewed units `net-network-information` was
+the only one with **zero blocked and zero approval-gated** findings, all three actionable here.
+Deliverable: `docs/SystemNetNetworkInformationNamespaceReviewPlan.md`.
+
+**The load-bearing claim was proved, not assumed.** All three findings are independent of blocked
+**#1962**: SR-AUD-253 reproduces with no socket involved; SR-AUD-254 is *reached* because the socket
+fails but its defect is unconditional; SR-AUD-255 is structural for the same reason it always was.
+The capability was re-measured — `SOCK_DGRAM/IPPROTO_ICMP` denied (EACCES), `SOCK_RAW/IPPROTO_ICMP`
+succeeding, `ping_group_range = "1 0"`. **#1962 is untouched and still blocked**, and the five
+`PingTests` that fail for want of an unprivileged ICMP socket still fail, unweakened.
+
+**Five premise corrections, each measured before any code changed:**
+
+| Correction | Evidence |
+|---|---|
+| SR-AUD-253 reaches **all eight** `SendPingAsync` overloads, not the one the audit's probe names | probe 1, ten doors |
+| It starts a **real OS thread** per already-invalid argument — `TaskT` is `std::async(std::launch::async, …)` | probe 2 |
+| SR-AUD-254 destroys the **native error code**, not merely the type: `NetworkInformationException("Win32 error 13", code 13)` became `St9exception`/`"std::exception"` | probe 1 |
+| SR-AUD-254 has a **second, opposite door**: `Dns` runs *outside* the wrapper, so a resolver failure escapes as `SocketException` while an unresolvable-host `PingException` sits three lines later on a practically unreachable branch | probe 1 |
+| SR-AUD-255 is **three** sites and its fourth sibling was already correct, so the repair rests on an inconsistency **inside one file** | source, probe 1 |
+
+**Three post-audit defects, ordinary ticket numbers only** — #2191 (raw `this`), #2193 (raw
+descriptor), #2194 (receive-path matching, blocked) — plus #2192 (the DNS wrapping question,
+deferred). **No CCF minted or closed**: CCF-019 stays open, CCF-021/#2131 and CCF-022/#2109 stay
+unminted, CCF-004 gains no member.
+
+**Two limitations recorded rather than hidden.** A mutation restoring SR-AUD-255's fabricated
+`PingOptions()` leaves the suite **green** here, because the only test that can observe it needs a
+reply and skips — so **this batch has no discriminating test for #2190 in this container**, and
+raising `ping_group_range` to get one is outside the boundary. #2191 and #2193 likewise have no
+runtime discriminator: nothing was ever dereferenced through the stale `this`, and no descriptor is
+ever successfully opened here.
+
+**Gate:** module suite **39 → 62** tests; repository **16,406 across 37 executables**, 16,398
+passing, 2 skipped, 6 failing — the same five `PingTests` (#1962) and one `SocketTests`
+(`/proc/net/if_inet6` absent), re-verified this run. Four mutations run, three discriminating
+exactly their own pins with controls stable and the fourth recorded as non-discriminating.
+`Ping.hpp` untouched; no public signature, member, virtual, vtable, object layout, `noexcept` or
+mangled symbol changed.
 
 ## 2026-08-10 — the `modules/time-zone` review (#2176) and its whole compatible queue (#2177–#2184)
 
