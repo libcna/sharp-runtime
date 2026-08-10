@@ -1,6 +1,48 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-08-10 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
+harness-designated branch, at `09461f2`, **pushed and verified on the remote**. This batch reviewed
+and **closed the bounded Core text input-boundary family** (#2223 review, #2224/#2225/#2226/#2227):
+**four findings, four remediated, none blocked**, and opened **#2228** — the SR-AUD-050 design
+ticket — **blocked** on a real platform-behaviour decision. Audit **185 remediated / 124 confirmed /
+55 confirmed (design-complete) / 364 total**, recounted **by finding identifier**; **no `SR-AUD-*`
+created — numbering frozen at 364.** `modules/core` open **64 → 60**. Gate **16,692 across 38
+executables: 16,684 passing, 2 skipped, 6 failing** for the same two inherited causes — **+27
+exactly, this batch's own tests, no regression**. Graph **41 / 92**, seams **3 / 20**. **CCF-015's
+sole member is now remediated**; CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted. Doxygen,
+`ccache` and `/rv` absent. Maximum compiler parallelism **2 jobs**.*
+
+## 2026-08-10 (later) — the bounded Core text input-boundary family, closed (#2223–#2227), #2228 opened
+
+Four public text doors accepted input they should reject or returned results outside the requested
+bounds. One probe measured all four against the shipped library: **46 cases, 19 wrong → 0**.
+
+| Ticket | Finding | Cause | Repair |
+|---|---|---|---|
+| **#2224** | SR-AUD-016 | range arithmetic | search from the last position at which the match still *fits*, not from the latest permitted *start* |
+| **#2225** | SR-AUD-017 | UTF-8 validation | decode through one validating decoder: lead-byte class, shortest form, surrogates, RFC 3629 limit |
+| **#2226** | SR-AUD-048 (CCF-015) | classification level | one declared UTF-8 + Unicode-whitespace policy replacing the single-byte locale predicate |
+| **#2227** | SR-AUD-028 | missing grammar | strip whitespace, validate padding position, then decode known-good text |
+
+**Four premise corrections, all measured.** The inherited CCF claim was half wrong — only SR-AUD-048
+is CCF-governed; **CCF-013 is closed, lives in `modules/buffers`, concerns the encoders**, and never
+covered SR-AUD-028. SR-AUD-016 had **three** failing shapes including the three-argument overload the
+audit never named. Two of SR-AUD-017's cases were already rejected, but by the cardinality check
+rather than by validation. And SR-AUD-028's *"unused-bit rules"* **cannot** be honoured with `/rv`
+absent — .NET is lenient there, enforcing it would reject input .NET accepts, so the lenient
+behaviour is **pinned** instead.
+
+**Deliberately untouched:** `Char::IsWhiteSpace(charcs)` — a different predicate, its own callers, no
+finding in this family, and broadening CCF-015 to it is what that cause's own SR-AUD-294 note forbids.
+
+**#2228 (blocked).** Core's last high. The dependency constraint is confirmed from the graph:
+`Security.Cryptography.Random` → `Core.Base`, so Core reaching `RandomNumberGenerator::Fill` would
+close a cycle. Blocked because `Guid::NewGuid` cannot throw today while the cryptographic path throws
+on Emscripten — a real decision, not paperwork.
+
+**+27 tests**, Core.Base 5,677 → 5,704. No signature, `noexcept`, layout, vtable or ABI change.
+
+*Prior plan snapshot, retained historically: 2026-08-10 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
 harness-designated branch. **Pushed after every commit**, per `CLAUDE.md` rule 13 — seven commits,
 seven pushes, all normal fast-forwards. No merge, rebase, tag, force-push, PR, publication, amend or
 history rewrite; all commits unsigned. This batch reviewed and **closed the bounded `modules/core`
@@ -42,7 +84,6 @@ Selective components passed in **one** run, 735 s, peak **2** compilers. **No `S
 created — numbering frozen at 364** (**181 remediated / 128 confirmed / 55 design-complete**).
 **CCF-019 untouched and open; CCF-021 and CCF-022 remain unminted; #2215, #1773 and #1962 are exactly
 as inherited.*
-
 
 ## 2026-08-10 — the bounded `modules/core` defined-arithmetic and bounded-parse family, closed (#2217–#2222)
 

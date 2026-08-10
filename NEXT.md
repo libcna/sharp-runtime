@@ -4,6 +4,152 @@
 # NEXT.md
 
 *Last verified: 2026-08-10. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
+harness-designated branch**. **Pushed immediately after the commit**, per `CLAUDE.md` rule 13, and
+**verified present on the remote** (`09461f2` on both sides). No merge, rebase, tag, force-push, PR,
+publication, amend or history rewrite; the commit is unsigned (`git -c commit.gpgsign=false`) — this
+environment has no usable private signing key. This batch **reviewed and closed the bounded Core
+text input-boundary family** (#2223 review, #2224, #2225, #2226, #2227): **four findings, four
+remediated, none blocked**. It also opened **#2228**, the SR-AUD-050 design ticket, **blocked** on a
+genuine platform-behaviour decision. Audit **185 remediated / 124 confirmed / 55 confirmed
+(design-complete) / 364 total**, recounted **by finding identifier**; **no `SR-AUD-*` identifier
+created — numbering frozen at 364.** `modules/core` open **64 → 60**. Gate **16,692 tests across 38
+executables: 16,684 passing, 2 skipped, 6 failing** for the same two measured causes — **exactly
++27 on the inherited 16,665, which is precisely this batch's own new tests, so no regression
+anywhere.** Graph **41 / 92**, seams **3 / 20** — both unchanged. **Doxygen, `ccache` and the `/rv`
+reference tree are all absent** and were not installed. **CCF-015's sole member is now remediated;
+CCF-019 stays open; CCF-021/#2131 and CCF-022/#2109 stay unminted.** #2215, #1773, #1962 and the
+other inherited blocked/deferred tickets are exactly as inherited. See the first handoff below.*
+
+---
+
+## Batch record — the bounded Core text input-boundary family, closed (#2223–#2227) and #2228 opened
+
+**Four findings. Four remediated. None blocked.** One design ticket opened for the runner-up.
+
+### 1. Starting state, verified
+
+`833ffb7`, working tree clean, HEAD identical to `origin/`. The audit was recounted **by finding
+identifier**, not by column position — the brief's warning is real: rows SR-AUD-029/033/249/286/307
+carry extra columns and a fixed-column parser reports a false 363. Parsed correctly the corpus is
+**364 unique identifiers, contiguous 1–364, no duplicates**: 181 remediated / 128 confirmed / 55
+design-complete, matching the inherited triple exactly, with **64** `modules/core` findings open.
+
+### 2. Is it really one family? — mostly, and the answer changed the tickets
+
+All four are **input-boundary defects at a public text door**, so the grouping holds as a *review*
+unit. But they share **no code and four distinct root causes**, so they were split into four
+independent bounded tickets rather than one:
+
+| Cause | Finding | Defect |
+|---|---|---|
+| **X-A** range arithmetic | SR-AUD-016 | only the match *start* was bounds-checked |
+| **X-B** incomplete UTF-8 validation | SR-AUD-017 | lead-byte class, shortest form, surrogates, RFC 3629 limit all unchecked |
+| **X-C** wrong classification level | SR-AUD-048 | single-**byte** locale predicate applied to UTF-8 |
+| **X-D** missing grammar | SR-AUD-028 | padding position and whitespace normalisation absent |
+
+X-B and X-C do share one real element: both need a **correct UTF-8 decoder**. That is why
+`System/detail/Utf8Text.hpp` exists and why #2225 introduces it and #2226 consumes it — which is
+also exactly the *"one documented encoding and Unicode-whitespace policy"* CCF-015 demands.
+
+### 3. Premise corrections — four, all measured
+
+1. **The inherited CCF claim is half wrong.** "Two members are governed by existing CCF-013/CCF-015
+   policies" — only **one** is. SR-AUD-048 is CCF-015's sole member and CCF-015 is **open**.
+   SR-AUD-028 has **no** CCF relationship: CCF-013 is **CLOSED**, lives in `modules/buffers`,
+   concerns the in-place **encoders**, and its only member is SR-AUD-078. SR-AUD-028 is Base64
+   **decoding** in `modules/core`. Corrected in the audit record rather than carried forward.
+2. **SR-AUD-016 has three failing shapes, not one.** The audit named the four-argument overload; the
+   **three-argument** overload carries the identical unchecked `rfind`, and
+   `LastIndexOf("abcde","abcde",2,3)` returned **0** — a match overrunning `startIndex` by three
+   positions that the lower-bound check let through.
+3. **Two of SR-AUD-017's listed cases were already rejected** — a lone `0x80` and `0xFF` — but **by
+   the cardinality check, not by validation**. Recorded so the finding's extent is neither
+   overstated nor understated.
+4. **SR-AUD-028's "unused-bit rules" cannot be honoured here.** Real .NET is *lenient*
+   (`Convert.FromBase64String("AB==")` succeeds), `/rv` is absent to confirm the exact rule, and
+   enforcing it would **reject input .NET accepts**. The lenient behaviour is **pinned by a test**
+   and tightening it stays a separate, evidence-gated question.
+
+### 4. Evidence
+
+One probe, `build-probe/2223_probe1_before.cpp`, measures all four findings against the shipped
+library with an OK/BAD verdict per case, so the same binary re-run after the repair is a direct
+comparison: **46 cases, 19 wrong → 0 wrong**, every positive control unchanged.
+
+| Group | Wrong before | Wrong after |
+|---|---|---|
+| SR-AUD-016 | 3 | 0 |
+| SR-AUD-017 | 6 | 0 |
+| SR-AUD-028 | 7 | 0 |
+| SR-AUD-048 | 3 | 0 |
+
+**+27 permanent regressions** (`modules/core/tests/System/TextInputBoundaryTests.cpp`);
+`SharpRuntimeTests_Core_Base` **5,677 → 5,704**. Each suite pairs its rejection cases with the
+positive controls that keep the repair from becoming over-rejection — the failure a validation fix
+is most likely to introduce.
+
+### 5. What was deliberately *not* changed
+
+`Char::IsWhiteSpace(charcs)` still uses `std::iswspace`. It is a **different predicate with its own
+callers and no finding in this family**, and broadening CCF-015 to reach it is precisely what that
+cause's own note about SR-AUD-294 — *"shares CCF-015's subject but is not a CCF-015 member"* —
+forbids. Recorded as an observation, not folded in.
+
+### 6. #2228 — the SR-AUD-050 design ticket, blocked
+
+`modules/core`'s **last remaining HIGH**. `Guid::NewGuid`/`CreateVersion7` derive every random byte
+from `std::mt19937_64`; .NET documents 122 bits from the platform CSPRNG.
+
+**The dependency constraint is confirmed from the module graph, not assumed**:
+`Security.Cryptography.Random` declares `PUBLIC_DEPENDENCIES Core.Base`, and `Core.Base` declares no
+production dependency at all — so Core reaching `RandomNumberGenerator::Fill` would **close a cycle**
+that `validate_module_boundaries.py` rejects. Core needs its own three-platform entropy path,
+mirroring `BCryptGenRandom` / `getrandom` / `getentropy`.
+
+**Blocked on a real decision, not on paperwork.** `Guid::NewGuid` **cannot throw today**; the
+cryptographic path **throws on Emscripten**. So the options each give something up — (A) throw there,
+honest but breaks callers of a never-throwing function; (B) fall back to Mersenne Twister on
+Emscripten, keeps callers but makes the security property silently platform-dependent, which is the
+defect class this finding *is*; (C) leave Emscripten unsupported and document it. Repository evidence
+cannot settle that. **Not implemented — a completed design is not approval.**
+
+### 7. Validation
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| Full gate, 38 executables run individually | **16,692: 16,684 pass, 6 fail, 2 skip** (+27, exactly this batch's tests) |
+| `validate_module_boundaries.py` | OK — **41 / 92** |
+| `validate_module_boundaries_test.py` | OK |
+| `generate_component_catalog.py --check` | OK — unchanged |
+| `db_consistency_check.py` | OK |
+| `check_version_seam_odr.py` (+ self-test) | OK — **3 seams / 20 definitions** |
+| `git diff --check` | clean |
+
+The six failures are the inherited ones, unchanged and not hidden: **5 × PingTests** (#1962, raw-ICMP
+receive-path gap) and **1 × SocketTests** (no IPv6 in this container). **No test was disabled,
+weakened, skipped or recategorised.** Selective-components was **not** re-run: this batch changed no
+component boundary, added no module edge, and the catalogue check is current — the brief's own
+"do not rerun expensive validation gratuitously" applies.
+
+### 8. Environment and process
+
+Maximum compiler concurrency **2**, verified with `ps -C cc1plus` before each build. **Doxygen,
+`ccache` and `/rv` absent** and not installed. Tracked `__pycache__` files unchanged; every Python
+invocation used `PYTHONDONTWRITEBYTECODE=1`. No build tree under `/tmp`, `/var/tmp` or `/dev/shm`.
+
+### 9. Next work, ranked
+
+1. **#2228** once the Emscripten question is answered — the last Core high.
+2. A further **bounded** Core family from the remaining 60. **Not** the large public-representation
+   family: ~12 findings of which 11 need layout/signature approval, which the brief already rejects
+   as an ordinary compatible batch.
+3. `modules/timers` (2 open, 1 high: an exception escaping a worker thread and aborting the process)
+   remains the strongest small non-Core unit.
+
+---
+
+*Prior handoff snapshot, retained historically: 2026-08-10. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
 harness-designated branch**. **Pushed after every commit**, per `CLAUDE.md` rule 13 — seven commits,
 seven pushes, every one a normal fast-forward. No merge, rebase, tag, force-push, PR, publication,
 amend or history rewrite; all commits unsigned (`git -c commit.gpgsign=false`) — no usable private
