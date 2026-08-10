@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 3.20)
 
 project(SHARP_RUNTIME LANGUAGES CXX C)
 
-find_package(ZLIB REQUIRED)
-
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -30,62 +28,32 @@ else()
     set(SHARP_RUNTIME_NATIVE_INT128_VALUE 0)
 endif()
 
-file(GLOB_RECURSE SHARP_RUNTIME_SOURCES CONFIGURE_DEPENDS
-        "src/*.cpp"
-)
-
-if(NOT SHARP_RUNTIME_COMPILER_HAS_NATIVE_INT128)
-    list(REMOVE_ITEM SHARP_RUNTIME_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/System/Decimal.cpp")
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR
+        AND NOT DEFINED SHARP_RUNTIME_COMPONENTS)
+    set(
+        SHARP_RUNTIME_COMPONENTS
+        "All"
+        CACHE STRING
+        "Semicolon-separated Sharp Runtime components to enable"
+    )
 endif()
 
-# Vendored tinyxml2 (two-file library, MIT licence)
-add_library(tinyxml2 STATIC vendor/tinyxml2/tinyxml2.cpp)
-target_include_directories(tinyxml2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinyxml2)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/SharpRuntimeModules.cmake")
 
-# Vendored miniz (multi-file library, MIT/public domain)
-add_library(miniz STATIC
-    vendor/miniz/miniz.c
-    vendor/miniz/miniz_tdef.c
-    vendor/miniz/miniz_tinfl.c
-    vendor/miniz/miniz_zip.c
-)
-target_include_directories(miniz PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor/miniz)
-
-add_library(SHARP_RUNTIME STATIC
-        ${SHARP_RUNTIME_SOURCES}
-)
-
-target_include_directories(SHARP_RUNTIME PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_include_directories(SHARP_RUNTIME SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor)
-target_compile_definitions(SHARP_RUNTIME PUBLIC
+# FINAL-STAB-001: publish the native-__int128 capability to every component and consumer.
+# The monolithic root carried this PUBLIC on the SHARP_RUNTIME archive; the modular carrier
+# is the shared headers surface every component and consumer links transitively.
+target_compile_definitions(sharp_runtime_headers INTERFACE
         SHARP_RUNTIME_HAS_NATIVE_INT128=${SHARP_RUNTIME_NATIVE_INT128_VALUE})
 
-# On Android, StoragePaths.cpp uses SDL_GetPrefPath / SDL_GetAndroidInternalStoragePath
-# which require SDL3 headers and library.  SDL3 is provided by the parent project
-# (CNA) via cna_configure_vendored_sdl() before this subdirectory is added.
-target_link_libraries(SHARP_RUNTIME PRIVATE ZLIB::ZLIB tinyxml2 miniz)
-
-if(MSVC)
-    target_compile_options(SHARP_RUNTIME PRIVATE /W4 /WX)
+if(NOT DEFINED SHARP_RUNTIME_COMPONENTS
+        OR SHARP_RUNTIME_COMPONENTS STREQUAL "")
+    set(sharp_runtime_requested_components All)
 else()
-    target_compile_options(SHARP_RUNTIME PRIVATE -Wall -Wextra -Werror)
-    # -Wformat-truncation is a GCC-only diagnostic -- Clang (incl. Apple Clang) never implemented
-    # it, so -Wno-format-truncation is an unrecognized flag there, which -Werror then turns into a
-    # hard build error (-Werror,-Wunknown-warning-option) rather than a harmless no-op.
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        target_compile_options(SHARP_RUNTIME PRIVATE -Wno-format-truncation)
-    endif()
+    set(sharp_runtime_requested_components ${SHARP_RUNTIME_COMPONENTS})
 endif()
 
-if(WIN32)
-    target_link_libraries(SHARP_RUNTIME PRIVATE ws2_32)
-endif()
-
-if(ANDROID AND TARGET SDL3::SDL3)
-    target_link_libraries(SHARP_RUNTIME PRIVATE SDL3::SDL3)
-elseif(ANDROID AND TARGET SDL3::SDL3-static)
-    target_link_libraries(SHARP_RUNTIME PRIVATE SDL3::SDL3-static)
-endif()
+sharp_runtime_enable_components(${sharp_runtime_requested_components})
 
 set(SHARP_RUNTIME_I686_REGRESSION_SOURCE
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/Platform/SharpRuntimeI686CompileBoundary.cpp")
@@ -123,41 +91,83 @@ if(SHARP_RUNTIME_BUILD_TESTS)
     add_subdirectory(vendor/googletest)
 
     enable_testing()
+    include(GoogleTest)
 
-    file(GLOB_RECURSE SHARP_RUNTIME_TEST_SOURCES CONFIGURE_DEPENDS
-            "tests/*.cpp"
-    )
-    list(REMOVE_ITEM SHARP_RUNTIME_TEST_SOURCES ${SHARP_RUNTIME_I686_REGRESSION_SOURCE})
+    set(sharp_runtime_test_components)
+    set(sharp_runtime_build_integration_tests FALSE)
+    foreach(requested_component IN LISTS sharp_runtime_requested_components)
+        if(requested_component STREQUAL "All")
+            sharp_runtime_get_primary_components(sharp_runtime_primary_components)
+            list(APPEND
+                sharp_runtime_test_components
+                ${sharp_runtime_primary_components}
+            )
+            set(sharp_runtime_build_integration_tests TRUE)
+        else()
+            list(APPEND
+                sharp_runtime_test_components
+                "${requested_component}"
+            )
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES sharp_runtime_test_components)
 
-    add_executable(SharpRuntimeTests
-            ${SHARP_RUNTIME_TEST_SOURCES}
-    )
+    foreach(test_component IN LISTS sharp_runtime_test_components)
+        sharp_runtime_add_component_tests("${test_component}")
+    endforeach()
 
-    target_link_libraries(SharpRuntimeTests
-            PUBLIC
-            SHARP_RUNTIME
-            PRIVATE
-            gtest_main
-    )
-
-    if(NOT MSVC)
-        target_compile_options(SharpRuntimeTests PRIVATE -Wall -Wextra -Werror -Wno-unused-result)
-        # See SHARP_RUNTIME's own identical guard above for why this is GCC-only.
-        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-            target_compile_options(SharpRuntimeTests PRIVATE -Wno-format-truncation)
+    if(sharp_runtime_build_integration_tests)
+        file(GLOB_RECURSE SHARP_RUNTIME_INTEGRATION_TEST_SOURCES CONFIGURE_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/*.cpp"
+        )
+        if(SHARP_RUNTIME_INTEGRATION_TEST_SOURCES)
+            add_executable(
+                SharpRuntimeIntegrationTests
+                ${SHARP_RUNTIME_INTEGRATION_TEST_SOURCES}
+            )
+            target_link_libraries(
+                SharpRuntimeIntegrationTests
+                PRIVATE
+                    SharpRuntime::All
+                    gtest_main
+            )
+            sharp_runtime_apply_build_options(SharpRuntimeIntegrationTests)
+            if(NOT MSVC)
+                target_compile_options(
+                    SharpRuntimeIntegrationTests
+                    PRIVATE
+                        -Wno-unused-result
+                )
+            endif()
+            gtest_discover_tests(
+                SharpRuntimeIntegrationTests
+                TEST_PREFIX "Integration::"
+            )
+            set_property(
+                GLOBAL APPEND PROPERTY
+                SHARP_RUNTIME_TEST_TARGETS
+                SharpRuntimeIntegrationTests
+            )
         endif()
     endif()
 
-    include(GoogleTest)
-    gtest_discover_tests(SharpRuntimeTests)
+    sharp_runtime_get_test_targets(sharp_runtime_test_targets)
+    if(sharp_runtime_test_targets)
+        add_custom_target(
+            SharpRuntimeTests
+            DEPENDS ${sharp_runtime_test_targets}
+        )
+    endif()
 endif()
 
 if(SHARP_RUNTIME_BUILD_BENCHMARKS)
+    sharp_runtime_enable_component(All)
+
     add_executable(SharpRuntimeBench
             bench/StringBenchmark.cpp
     )
 
-    target_link_libraries(SharpRuntimeBench PRIVATE SHARP_RUNTIME)
+    target_link_libraries(SharpRuntimeBench PRIVATE SharpRuntime::All)
 
     if(NOT MSVC)
         target_compile_options(SharpRuntimeBench PRIVATE -Wall -Wextra -Werror -O2)
@@ -165,3 +175,7 @@ if(SHARP_RUNTIME_BUILD_BENCHMARKS)
         target_compile_options(SharpRuntimeBench PRIVATE /O2)
     endif()
 endif()
+
+sharp_runtime_get_enabled_components(sharp_runtime_enabled_components)
+list(JOIN sharp_runtime_enabled_components ", " sharp_runtime_enabled_summary)
+message(STATUS "Sharp Runtime components: ${sharp_runtime_enabled_summary}")

@@ -1,0 +1,228 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include "System/Net/Http/Headers/WarningHeaderValue.hpp"
+#include "HttpDateParser.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
+#include "System/HashCode.hpp"
+#include "System/Net/detail/ProtocolFieldValidation.hpp"
+#include "System/TimeSpan.hpp"
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <cstdio>
+#include <cstring>
+#include <stdexcept>
+#include <string_view>
+
+namespace System::Net::Http::Headers {
+
+    namespace {
+        std::string trim(const std::string& s) {
+            size_t start = s.find_first_not_of(" \t");
+            if (start == std::string::npos) return "";
+            size_t end = s.find_last_not_of(" \t");
+            return s.substr(start, end - start + 1);
+        }
+
+        bool isHttpTokenChar(unsigned char c) {
+            static constexpr std::string_view extras = "!#$%&'*+-.^_`|~";
+            return c != 0 && (std::isalnum(c) || extras.find(static_cast<char>(c)) != std::string_view::npos);
+        }
+
+        bool isToken(const std::string& s) {
+            return !s.empty() && std::all_of(s.begin(), s.end(), [](char c) { return isHttpTokenChar(static_cast<unsigned char>(c)); });
+        }
+
+        // #2124 (SR-AUD-319) -- and a PREMISE CORRECTION. The review recorded that the agent
+        // filter "rejects CR", which the CRLF probe string appeared to confirm; measured
+        // character by character it rejects CR because '\r' is in the set below and rejects
+        // nothing else: `WarningHeaderValue(112, "safe\nX", "\"t\"")` was accepted and ToString()
+        // emitted a raw LF, and a NUL-bearing agent was accepted too. The CRLF probe only ever
+        // rejected on the CR. All three terminators are now rejected by the family's one
+        // predicate; the list-delimiter filter below is unchanged.
+        bool isValidAgent(const std::string& s) {
+            if (s.empty()) return false;
+            if (System::Net::detail::ContainsProtocolFieldTerminator(s)) return false;
+            if (isToken(s)) return true;
+            return s.find_first_of(" \t\r/,") == std::string::npos;
+        }
+
+        // #2124: warn-text is a quoted-string stored with its quotes and emitted verbatim, so the
+        // quoting grammar alone is not enough -- see EntityTagHeaderValue.cpp for the same repair.
+        bool isValidQuotedString(const std::string& value) {
+            if (System::Net::detail::ContainsProtocolFieldTerminator(value)) return false;
+            if (value.size() < 2 || value.front() != '"' || value.back() != '"') return false;
+            for (size_t i = 1; i + 1 < value.size(); ) {
+                if (value[i] == '\\') {
+                    if (i + 1 >= value.size() - 1) return false;
+                    i += 2;
+                } else if (value[i] == '"') {
+                    return false;
+                } else {
+                    ++i;
+                }
+            }
+            return true;
+        }
+
+        // Given s[pos] == '"', finds the end of the quoted-string (handling \-escapes) and returns
+        // the substring including both quotes, or empty on failure.
+        bool extractQuotedString(const std::string& s, size_t pos, std::string& out, size_t& endPos) {
+            if (pos >= s.size() || s[pos] != '"') return false;
+            size_t i = pos + 1;
+            while (i < s.size()) {
+                if (s[i] == '\\') {
+                    if (i + 1 >= s.size()) return false;
+                    i += 2;
+                    continue;
+                }
+                if (s[i] == '"') {
+                    out = s.substr(pos, i - pos + 1);
+                    endPos = i + 1;
+                    return true;
+                }
+                ++i;
+            }
+            return false;
+        }
+
+        bool equalsIgnoreCase(const std::string& a, const std::string& b) {
+            if (a.size() != b.size()) return false;
+            return std::equal(a.begin(), a.end(), b.begin(), [](unsigned char x, unsigned char y) {
+                return std::tolower(x) == std::tolower(y);
+            });
+        }
+
+        SharpRuntime::intcs hashIgnoreCase(const std::string& s) {
+            std::string lower = s;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            return static_cast<SharpRuntime::intcs>(std::hash<std::string>{}(lower));
+        }
+
+        // Parses the RFC 1123 format that DateTimeOffset::ToString("r") produces (see
+        // ContentDispositionHeaderValue.cpp for the same helper and why it's needed).
+        // Ticket #2125 (SR-AUD-321, cause NH-H): this was one of SEVEN byte-identical copies of a
+        // non-consuming sscanf HTTP-date parser. They are now one body, in
+        // detail/HttpDateParser.hpp, which additionally requires the whole value to be consumed.
+        inline bool tryParseRfc1123(const std::string& s, System::DateTimeOffset& result) {
+            return System::Net::Http::Headers::detail::TryParseHttpDate(s, result);
+        }
+    }
+
+    WarningHeaderValue::WarningHeaderValue(SharpRuntime::intcs code, const std::string& agent, const std::string& text) {
+        System::ArgumentOutOfRangeException::ThrowIfNegative(code, "code");
+        System::ArgumentOutOfRangeException::ThrowIfGreaterThan(code, 999, "code");
+        System::ArgumentException::ThrowIfNullOrEmpty(agent, "agent");
+        // #2124: separated from the grammar failures below only so the message does not echo the
+        // offending text (ProtocolFieldValidation.hpp's companion rule).
+        if (System::Net::detail::ContainsProtocolFieldTerminator(agent)) {
+            throw System::FormatException("The agent contains invalid CR, LF, or NUL characters.");
+        }
+        if (System::Net::detail::ContainsProtocolFieldTerminator(text)) {
+            throw System::FormatException("The text contains invalid CR, LF, or NUL characters.");
+        }
+        if (!isValidAgent(agent)) {
+            throw System::FormatException("The agent value is not valid: " + agent);
+        }
+        if (!isValidQuotedString(text)) {
+            throw System::FormatException("The text is not a valid quoted-string: " + text);
+        }
+
+        code_ = code;
+        agent_ = agent;
+        text_ = text;
+    }
+
+    WarningHeaderValue::WarningHeaderValue(SharpRuntime::intcs code, const std::string& agent, const std::string& text, System::DateTimeOffset date)
+        : WarningHeaderValue(code, agent, text) {
+        date_ = date;
+    }
+
+    std::string WarningHeaderValue::ToString() const {
+        char codeBuf[8];
+        std::snprintf(codeBuf, sizeof(codeBuf), "%03d", code_);
+        std::string result = std::string(codeBuf) + " " + agent_ + " " + text_;
+        if (date_.has_value()) {
+            result += " \"" + date_->ToString("r") + "\"";
+        }
+        return result;
+    }
+
+    bool WarningHeaderValue::Equals(const WarningHeaderValue& other) const {
+        return code_ == other.code_ &&
+               equalsIgnoreCase(agent_, other.agent_) &&
+               text_ == other.text_ &&
+               date_ == other.date_;
+    }
+
+    SharpRuntime::intcs WarningHeaderValue::GetHashCode() const {
+        return System::HashCode::Combine(code_, hashIgnoreCase(agent_), text_, date_.has_value());
+    }
+
+    bool WarningHeaderValue::TryParse(const std::string& input, WarningHeaderValue& parsedValue) {
+        std::string trimmed = trim(input);
+
+        size_t ws1 = trimmed.find_first_of(" \t");
+        if (ws1 == std::string::npos || ws1 == 0 || ws1 > 3) return false;
+        std::string codeStr = trimmed.substr(0, ws1);
+        if (!std::all_of(codeStr.begin(), codeStr.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) return false;
+
+        SharpRuntime::intcs code;
+        try {
+            code = static_cast<SharpRuntime::intcs>(std::stoi(codeStr));
+        } catch (...) {
+            return false;
+        }
+        if (code > 999) return false;
+
+        size_t agentStart = trimmed.find_first_not_of(" \t", ws1);
+        if (agentStart == std::string::npos) return false;
+        size_t ws2 = trimmed.find_first_of(" \t", agentStart);
+        if (ws2 == std::string::npos) return false;
+        std::string agent = trimmed.substr(agentStart, ws2 - agentStart);
+        if (!isValidAgent(agent)) return false;
+
+        size_t textStart = trimmed.find_first_not_of(" \t", ws2);
+        if (textStart == std::string::npos || trimmed[textStart] != '"') return false;
+
+        std::string text;
+        size_t afterText = 0;
+        if (!extractQuotedString(trimmed, textStart, text, afterText)) return false;
+
+        std::optional<System::DateTimeOffset> date;
+        size_t dateStart = trimmed.find_first_not_of(" \t", afterText);
+        if (dateStart != std::string::npos) {
+            if (trimmed[dateStart] != '"') return false;
+            std::string dateQuoted;
+            size_t afterDate = 0;
+            if (!extractQuotedString(trimmed, dateStart, dateQuoted, afterDate)) return false;
+            std::string dateInner = dateQuoted.substr(1, dateQuoted.size() - 2);
+            System::DateTimeOffset parsedDate;
+            if (!tryParseRfc1123(dateInner, parsedDate)) return false;
+            date = parsedDate;
+            if (trim(trimmed.substr(afterDate)) != "") return false;
+        }
+
+        try {
+            WarningHeaderValue result = date.has_value()
+                ? WarningHeaderValue(code, agent, text, *date)
+                : WarningHeaderValue(code, agent, text);
+            parsedValue = result;
+        } catch (...) {
+            return false;
+        }
+        return true;
+    }
+
+    WarningHeaderValue WarningHeaderValue::Parse(const std::string& input) {
+        WarningHeaderValue result;
+        if (!TryParse(input, result)) {
+            throw System::FormatException("The Warning header value is not valid: " + input);
+        }
+        return result;
+    }
+
+} // namespace System::Net::Http::Headers

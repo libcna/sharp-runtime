@@ -1,0 +1,251 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#pragma once
+#include <any>
+#include <deque>
+#include <stdexcept>
+#include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/InvalidOperationException.hpp"
+#include "System/Collections/ICollection.hpp"
+#include "System/Collections/IEnumerator.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
+
+namespace System::Collections {
+
+using SharpRuntime::intcs;
+
+/**
+ * @brief Represents a non-generic last-in, first-out (LIFO) collection of objects.
+ *
+ * C++ counterpart of .NET System.Collections.Stack.
+ * Elements are stored as void* pointers. Prefer Generic::Stack&lt;T&gt; for type-safe code.
+ */
+class Stack : public ICollection {
+public:
+    /** @brief Constructs an empty Stack. */
+    Stack() = default;
+
+    /**
+     * @brief Constructs an empty Stack with a reserved capacity hint.
+     *
+     * C++ counterpart of .NET Stack(int initialCapacity).
+     * @param initialCapacity Capacity hint; ignored in this implementation.
+     */
+    explicit Stack(intcs /*initialCapacity*/) {}
+
+    /**
+     * @brief Constructs a Stack populated with all elements from @p col.
+     *
+     * C++ counterpart of .NET Stack(ICollection col).
+     * This collection's element type is `void*`, so each element is unboxed from
+     * the std::any IEnumerator::getCurrentProperty() returns.
+     * @param col Source collection.
+     * @throws std::bad_any_cast if @p col does not enumerate `void*` elements.
+     *         Before ticket #1793 a source of any other element type silently
+     *         yielded a pointer into that source's live storage instead.
+     */
+    explicit Stack(ICollection& col) {
+        IEnumerator* e = col.GetEnumerator();
+        if (e) { while (e->MoveNext()) s_.push_back(std::any_cast<void*>(e->getCurrentProperty())); delete e; }
+    }
+
+    // -----------------------------------------------------------------------
+    // ICollection
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Gets the number of elements in the Stack.
+     *
+     * C++ counterpart of .NET Stack.Count.
+     */
+    [[nodiscard]] intcs getCountProperty() const override {
+        return static_cast<intcs>(s_.size());
+    }
+
+    /** @brief Keeps the inherited validating CopyTo overloads visible next to the typed one. */
+    using ICollection::CopyTo;
+
+    /**
+     * @brief Copies all elements, top-to-bottom, into a typed void* destination.
+     *
+     * C++ counterpart of .NET Stack.CopyTo(Array, int) for the collection's own
+     * element type; the destination carries its own length, so the copy is
+     * bounds-checked before the first write.
+     * @param destination Destination vector, sized by the caller; never resized here.
+     * @param index       Zero-based index at which copying begins.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative.
+     * @throws System::ArgumentException           if @p destination cannot hold
+     *         getCountProperty() elements starting at @p index -- including a
+     *         non-empty collection copied into a zero-length destination.
+     * @throws System::ArgumentNullException       if @p destination has a null
+     *         pointer and a positive length -- a null pointer paired with a zero
+     *         length is a valid empty destination.
+     */
+    void CopyTo(std::vector<void*>& destination, intcs index) {
+        detail::requireValidCopyDestination(destination, index, getCountProperty());
+        intcs i = index;
+        for (auto it = s_.rbegin(); it != s_.rend(); ++it)
+            destination[static_cast<size_t>(i++)] = *it;
+    }
+
+    /** @brief Returns false; Stack is not synchronized. */
+    [[nodiscard]] bool getIsSynchronizedProperty() const override { return false; }
+
+    /** @brief Returns a synchronization root for this Stack. */
+    [[nodiscard]] const void* getSyncRootProperty() const override { return this; }
+
+    /**
+     * @brief Returns a heap-allocated enumerator over the Stack (top-to-bottom); caller takes ownership.
+     *
+     * C++ counterpart of .NET Stack.GetEnumerator().
+     * The enumerator throws InvalidOperationException if the Stack is modified
+     * (Push/Pop/Clear) while enumeration is in progress, matching .NET.
+     */
+    IEnumerator* GetEnumerator() override { return new Enumerator(this); }
+
+    // -----------------------------------------------------------------------
+    // Stack operations
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Inserts an object at the top of the Stack.
+     *
+     * C++ counterpart of .NET Stack.Push(object?).
+     * @param item The object to push.
+     */
+    void Push(void* item) { s_.push_back(item); ++version_; }
+
+    /**
+     * @brief Removes and returns the object at the top of the Stack.
+     *
+     * C++ counterpart of .NET Stack.Pop().
+     * @throws System::InvalidOperationException if the Stack is empty.
+     */
+    void* Pop() {
+        if (s_.empty()) throw System::InvalidOperationException("Stack empty.");
+        void* v = s_.back(); s_.pop_back(); ++version_; return v;
+    }
+
+    /**
+     * @brief Returns the object at the top of the Stack without removing it.
+     *
+     * C++ counterpart of .NET Stack.Peek().
+     * @throws System::InvalidOperationException if the Stack is empty.
+     */
+    [[nodiscard]] void* Peek() const {
+        if (s_.empty()) throw System::InvalidOperationException("Stack empty.");
+        return s_.back();
+    }
+
+    /**
+     * @brief Determines whether an element is in the Stack.
+     *
+     * C++ counterpart of .NET Stack.Contains(object?).
+     * @param item The object to locate.
+     * @return true if @p item is found; otherwise false.
+     */
+    [[nodiscard]] bool Contains(void* item) const {
+        for (void* p : s_) if (p == item) return true;
+        return false;
+    }
+
+    /**
+     * @brief Removes all objects from the Stack.
+     *
+     * C++ counterpart of .NET Stack.Clear().
+     */
+    void Clear() { s_.clear(); ++version_; }
+
+    /**
+     * @brief Copies the Stack elements to a new void*[] array (top element first).
+     *
+     * C++ counterpart of .NET Stack.ToArray().
+     * @return Vector of void* elements with top element first.
+     */
+    [[nodiscard]] std::vector<void*> ToArray() const {
+        return std::vector<void*>(s_.rbegin(), s_.rend());
+    }
+
+    /**
+     * @brief Returns a shallow copy of the Stack.
+     *
+     * C++ counterpart of .NET Stack.Clone().
+     */
+    [[nodiscard]] Stack Clone() const {
+        Stack copy;
+        copy.s_ = s_;
+        return copy;
+    }
+
+protected:
+    /**
+     * @brief Boxes every element as std::any, top-to-bottom, into the validated destination.
+     *
+     * Mirrors .NET's Array.SetValue of each element into an object[] destination:
+     * the natural element type is void*, so each slot receives std::any(void*)
+     * and a caller retrieves it with std::any_cast&lt;void*&gt;.
+     * @param destination Destination validated by ICollection::CopyTo.
+     * @param index       Validated zero-based destination index.
+     */
+    void copyToCore(ObjectSpan destination, intcs index) override {
+        intcs i = index;
+        for (auto it = s_.rbegin(); it != s_.rend(); ++it) destination[i++] = std::any(*it);
+    }
+
+private:
+    std::deque<void*> s_;
+    System::Collections::detail::MutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<System::Collections::Stack>;
+
+    /**
+     * @brief Enumerates the elements of a Stack from top to bottom.
+     *
+     * C++ counterpart of .NET Stack's private StackEnumerator. Detects concurrent
+     * modification via a version counter, matching .NET's fail-fast enumeration contract.
+     */
+    class Enumerator : public IEnumerator {
+        const Stack* s_;
+        System::Collections::detail::MutationVersion version_;
+        intcs index_;   // index from the top (0 == top element); -1 before start / after end
+        bool started_ = false;
+
+    public:
+        explicit Enumerator(const Stack* s) : s_(s), version_(s->version_), index_(-1) {}
+
+        bool MoveNext() override {
+            if (version_ != s_->version_) throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            if (index_ + 1 >= static_cast<intcs>(s_->s_.size())) { started_ = true; index_ = -1; return false; }
+            ++index_;
+            started_ = true;
+            return true;
+        }
+
+        void Reset() override {
+            if (version_ != s_->version_) throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            index_ = -1;
+            started_ = false;
+        }
+
+        /**
+         * @brief Returns the current element, boxed; recover with std::any_cast<void*>.
+         *
+         * This collection's element type *is* `void*`, so the box holds the
+         * stored pointer by value. Nothing here aliased collection storage
+         * before ticket #1793 either; only the spelling of the return changes.
+         */
+        [[nodiscard]] std::any getCurrentProperty() const override {
+            if (!started_ || index_ < 0)
+                throw System::InvalidOperationException("Enumeration has either not started or has already finished.");
+            return std::any(s_->s_[s_->s_.size() - 1 - static_cast<size_t>(index_)]);
+        }
+    };
+};
+
+} // namespace System::Collections

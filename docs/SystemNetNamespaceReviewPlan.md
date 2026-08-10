@@ -1,0 +1,925 @@
+<!-- SPDX-License-Identifier: MIT -->
+<!-- Copyright (c) Robert Vokac and contributors -->
+
+# `System::Net` namespace review and remediation plan
+
+Ticket **#2034**, written 2026-08-04 on branch
+`feature/remediation-batch-approval-packages-next-review`.
+
+The seventh namespace review in the post-audit remediation programme, after `System::Threading`
+(#1950), `System::Threading::Tasks`/`Channels` (#1964), `System::Runtime` (#1972), `System::Uri`
+(#1987), `System::Text` (#2006) and `System::Diagnostics` (#2023). Same contract: **every confirmed
+finding in the namespace gets exactly one disposition, no finding disappears between the audit
+index and this plan, and every premise is re-measured against the shipped library before it is
+relied upon.**
+
+**Nothing in §§1–15 is implemented by writing them.** The measured before-matrix is
+`build-probe/2034_probe1_net_before.log` (source `..._net_before.cpp`) plus
+`build-probe/2034_probe2_asan.log` for the memory-safety half. **All ten premises reproduced**;
+§4 records the four the audit understates or mis-states.
+
+**No `SR-AUD-*` identifier is issued by this review.** Audit numbering stays frozen at **364**.
+
+---
+
+## 1. Why `System::Net` is next — the selection, re-derived
+
+Re-derived by measurement over `audit/AUDIT_FINDINGS_INDEX.md` on 2026-08-04, **not** inherited
+from the previous handoff (which named `modules/buffers` and `modules/xml`). Every un-reviewed
+module with ≥ 4 open findings, plus every module with a ≥ 25 % high ratio:
+
+| Module / namespace | Open | high | med | low | high % | Existing plan? | Reviewed? | Public deps | Cohesion |
+|---|---|---|---|---|---|---|---|---|---|
+| `modules/core` | 72 | 9 | 59 | 4 | 13 % | many family plans | partly, by family | — | **poor** — not a namespace; `System::` spans String, Convert, DateTime, Decimal, Math, Guid, Span, Exception |
+| `modules/threading` | 17 | 6 | 11 | 0 | 35 % | **yes** | **yes** (#1950) | — | — |
+| `modules/runtime` | 14 | 1 | 12 | 1 | 7 % | **yes** | **yes** (#1972) | — | — |
+| `modules/buffers` | 11 | 3 | 8 | 0 | 27 % | **partial** — `Base64FamilyPlan.md` | no | Core.Base | good |
+| `modules/io` | 11 | **0** | 11 | 0 | **0 %** | partial ×2 | no | Core.Base, Uri | medium |
+| `modules/text` | 11 | 1 | 10 | 0 | 9 % | **yes** | **yes** (#2006) | — | — |
+| `modules/uri` | 10 | 0 | 10 | 0 | 0 % | **yes** | **yes** (#1987) | — | — |
+| **`modules/net`** | **10** | **3** | **7** | 0 | **30 %** | **no** | **no** | Collections.Core, ComponentModel, Core.Base, Uri | **good** — one module, one namespace |
+| `modules/net-http` | 9 | 2 | 7 | 0 | 22 % | no | no | — | separate namespace |
+| `modules/xml` | 8 | 2 | 6 | 0 | 25 % | no | no | Core.Base, Uri | medium (+4 in `xml-linq`) |
+| `modules/globalization` | 7 | 1 | 6 | 0 | 14 % | no | no | Core.Base | good, but needs ICU data absent here |
+| `modules/time-zone` | 7 | **0** | 7 | 0 | 0 % | no | no | Core.Base | good |
+| `modules/text-json` | 7 | 1 | 6 | 0 | 14 % | no | no | Core.Base, Text | good |
+| `modules/net-websockets` | 6 | 2 | 4 | 0 | 33 % | no | no | — | separate namespace, only 6 |
+| `modules/security-cryptography` | 2 | 2 | 0 | 0 | 100 % | no | no | — | **mostly out of scope** by `CLAUDE.md`'s permanent deviation |
+
+`System::Net` wins on the rule the previous six reviews used:
+
+- **Severity, and the severity's character.** 30 % `high` — the highest of any un-reviewed
+  namespace with more than six findings. Two of the three highs are **memory-safety**
+  (a heap-buffer-overflow read on a public method; an unchecked signed→`size_t` index into a
+  `std::vector`), and the third is a **security** defect: a cookie supplied by one origin is stored
+  and later emitted for an unrelated domain. That is the highest-consequence single finding in any
+  un-reviewed namespace.
+- **No existing plan at all.** `docs/` contains no `Net` document, and no open ticket referenced
+  SR-AUD-300 … SR-AUD-309 before this review. `modules/buffers`, its nearest competitor on the
+  numbers, is **partially covered** by `docs/Base64FamilyPlan.md`.
+- **Dependency readiness.** Its four public dependencies are `Collections.Core`, `ComponentModel`,
+  `Core.Base` and **`Uri`** — and `System::Uri` was reviewed and repaired only days ago
+  (#1987–#1994, #2000–#2005). Three of this namespace's ten findings parse URI-shaped text, so the
+  dependency being freshly correct is a positive, not a cost.
+- **Not blocked.** **#1962 is `modules/net-network-information`** (`Ping`), a different module and
+  a different namespace, so it does not gate anything here — verified, not assumed.
+- **Cohesion.** One module, one namespace. The eight sibling `Net` modules are *different
+  namespaces* (`System::Net::Http`, `::Sockets`, `::WebSockets`, …), so the "the Net family spans
+  eight modules" objection recorded by the #2023 review is about the **family**, not about this
+  namespace — the same distinction `System::Text` made when it owned one of three components.
+- **A useful compatible queue.** Measured, **five** of the eight repairs need no approval (§7.1),
+  including both memory-safety defects.
+
+Not chosen, with reasons recorded so they are not re-litigated: `modules/core` is not a namespace
+and is already being drained by cross-cutting families; `modules/io` has **zero** high findings;
+`modules/buffers` has a partial plan and its findings are lower-consequence than a cross-origin
+cookie leak (it is the recommended **next** review, §13); `modules/time-zone` has zero highs;
+`modules/globalization` needs culture/ICU data this container does not have;
+`modules/security-cryptography`'s two findings sit inside `CLAUDE.md`'s permanent
+out-of-scope deviation.
+
+---
+
+## 2. Scope and file inventory
+
+Measured. `modules/net` is a `STATIC` target,
+`PUBLIC_DEPENDENCIES Collections.Core ComponentModel Core.Base Uri`, with a platform `SETUP`
+function and no private or test dependency.
+
+### 2.1 Public headers (29 files) and implementation (10 files, 1,974 lines)
+
+| File | Impl lines | Public surface | Findings |
+|---|---|---|---|
+| `IPAddress.hpp` / `.cpp` | 495 | ctors (uint32, byte vector, 16-byte + scope), `Parse`/`TryParse`, `GetAddressBytes`, `ScopeId`, `MapToIPv4`/`v6`, statics `Any`/`Loopback`/`Broadcast`/`None` | **301** |
+| `IPEndPoint.hpp` / `.cpp` | 136 | ctors, `Address`, `Port`, `Parse`/`TryParse`, `ToString`, `Serialize`/`Create` | **302** |
+| `IPNetwork.hpp` / `.cpp` | 104 | ctor, `BaseAddress`, `PrefixLength`, `Contains`, `Parse`/`TryParse` | **303** |
+| `SocketAddress.hpp` / `.cpp` | 135 | ctors (family+size, `IPAddress`+port), `Family`, `Size`, indexer, `GetIPEndPoint`, `ToString` | **300** |
+| `Dns.hpp` / `.cpp` | 257 | 2 × `GetHostAddresses`, 3 × `GetHostEntry`, `GetHostName` | **304** |
+| `Cookie.hpp` | header-only | 4 ctors, `Name`/`Value`/`Domain`/`Path`/`Expires`/`Secure`/`HttpOnly`/`Expired`, `DomainImplicit`/`PathImplicit` | **306** |
+| `CookieCollection.hpp` | header-only | `Add`, `Count`, 2 × `operator[]`, iteration | **307** |
+| `CookieContainer.hpp` / `.cpp` | 150 | 2 × `Add`, `GetCookieHeader`, `GetCookies`, `Count`, `SetCookies` | **305**, **308** |
+| `WebUtility.hpp` | header-only | `HtmlEncode`/`HtmlDecode`, `UrlEncode`/`UrlDecode` | **309** |
+| `WebHeaderCollection`, `WebProxy`, `CredentialCache`, `DnsEndPoint`, `NetworkCredential`, `IPHostEntry`, the enums and the exception types | 617 | — | — |
+
+`Cookie`, `CookieCollection` and `WebUtility` are **fully header-inline**, which is the central ABI
+fact of §8: a repair to any of the three makes every consumer **recompile**, and any data-member
+change there is an **object-layout change**. Everything else has an out-of-line body and is
+relink-only.
+
+### 2.2 Tests (6 files, 1,635 lines, one executable)
+
+`SharpRuntimeTests_Net`: **240 tests** measured 2026-08-04 — `NetTests.cpp` (885), `DnsTests.cpp`
+(175), `CredentialCacheTests.cpp` (154), `WebProxyTests.cpp` (146), `EndPointTests.cpp` (139),
+`WebHeaderCollectionTests.cpp` (136). No test covers an undersized `SocketAddress`, an invalid
+collection index, a cross-origin cookie domain, or a scope id outside `uint32`.
+
+### 2.3 Cross-module callers — unlike `System::Diagnostics`, these exist
+
+Measured by grep over `modules/` and `tests/`. The finding-bearing types are used by
+**`modules/net-sockets`** (6 header sites + 2 source + 2 test), **`modules/net-network-information`**
+(2 header + 1 source), **`modules/net-websockets`**, **`modules/net-http`**,
+**`modules/net-http-json`** and `tests/integration`. So every narrowing here has a real
+in-repository blast radius and each ticket must run the affected sibling suites, not only
+`SharpRuntimeTests_Net`.
+
+---
+
+## 3. Confirmed finding inventory — all 10, with the measured current behaviour
+
+Every row re-measured 2026-08-04. "Measured" quotes `2034_probe1_net_before.log`, or
+`2034_probe2_asan.log` where marked.
+
+| ID | Sev | Cause | Measured now | Disposition |
+|---|---|---|---|---|
+| **300** | high | **N-A** | `SocketAddress(InterNetwork, 2).GetIPEndPoint()` → **ASan `heap-buffer-overflow` READ at `SocketAddress.cpp:106`, 0 bytes after a 2-byte region**; an `AddressFamily::Unix` buffer decodes as `0.0.0.0:0`; `SocketAddress(Loopback, 70000)` → **`127.0.0.1:4464`**; `SocketAddress(Loopback, -1)` → **`127.0.0.1:65535`** | **#2035**, compatible |
+| **301** | med | **N-B** | `IPAddress(bytes, -1)` → `ScopeId` **4294967295**; `IPAddress(bytes, 4294967296)` → **0**; `setScopeIdProperty(-5)` → **4294967291** | **#2036**, compatible |
+| **302** | med | **N-C** | `IPEndPoint::Parse("[::1]ignored:80")` → **`[::1]:80`** — `ignored` silently discarded | **#2037**, compatible |
+| **303** | med | **N-D** | `IPNetwork(fe80::1 scope 7, 64).BaseAddress.ScopeId` → **0** — the scope id the constructor was given is lost | **#2038**, compatible |
+| **304** | med | **N-C** | `GetHostAddresses("-0.0.0.1")` → **`0.0.0.1`**; `("0.0.0.0")` → **the wildcard**; `("127.0.0.1", Unix)` → **one IPv4 result**, family filter not applied; **and `("1.2.3")` → three identical `1.2.0.3`** | **#2039**, compatible + **#2043** gated wildcard half |
+| **305** | high | **N-E** | a cookie added from `origin.invalid` with `Domain=.unrelated.invalid` is returned by `GetCookieHeader(http://unrelated.invalid/)` as **`session=isolated`** | **#2040**, DESIGN, blocked |
+| **306** | med | **N-E** | `Cookie("n","v","/explicit").PathImplicit` → **true**; `Cookie("n","v","/p",".d.invalid").DomainImplicit` → **true**; the equivalent **setters** correctly clear the flag | **#2040**, DESIGN, blocked |
+| **307** | high | **N-B** | `collection[Count]` → **SIGSEGV**; `collection[-1]` returned a garbage `Cookie` whose `Name` printed as `(null)` — both undefined behaviour | **#2041**, compatible |
+| **308** | med | **N-F** | 10,000 cookies from one origin → `Count == 10000`; no capacity, per-domain, size, aging or eviction policy | **#2042**, DESIGN, blocked |
+| **309** | med | **N-G** | `HtmlEncode` escapes exactly `& < > " '` and passes all non-ASCII through; `HtmlDecode` **already** handles `&copy;`, `&#169;` **and** `&#xA9;` | **#2044**, DESIGN, deferred |
+
+**Ten findings in, ten out.** None is a duplicate, none is a false premise, none is already
+remediated, and none receives a "no action" disposition.
+
+---
+
+## 4. Corrections to the audit record
+
+Historical audit text preserved; these are appended corrections, each measured.
+
+### 4.1 SR-AUD-304 has a fourth defect the finding does not name: **duplicate results**
+
+`GetHostAddresses("1.2.3")` returns **three identical `1.2.0.3` entries**. The finding names an
+over-permissive parser, a wildcard result and a missing family filter; it does not name the
+duplication, which is a *separate* wrong answer on a *valid* input and is the one half of #2039
+that is unambiguously a plain bug rather than a policy narrowing.
+
+### 4.2 SR-AUD-304's `999.999.999.999` case does **not** reach the literal parser
+
+`GetHostAddresses("999.999.999.999")` **throws** rather than returning anything — the text falls
+through to real resolution and fails there. The finding's premise is about `-0.0.0.1` and
+`0.0.0.0`, both of which reproduce exactly; the out-of-range case is a different path and is
+recorded here so a future ticket does not write a test asserting the wrong door.
+
+**A second observation on the same door:** the thrown message is **`"Win32 error 11001"`** on a
+POSIX build. A WSA error name leaking into the POSIX branch is a disclosure defect in its own
+right, carries no `SR-AUD-*` identifier, and is folded into #2039 rather than filed separately.
+
+### 4.3 SR-AUD-307's own reproduction is the *less* reliable of the two
+
+The finding says `collection[-1]` "terminates with a segmentation fault". Measured **without**
+ASan, `collection[-1]` **returned normally** with a garbage `Cookie`, while `collection[Count]`
+**crashed with SIGSEGV**. Both are undefined behaviour and the finding stands, but the specific
+case it names is the one that can silently *succeed* — which is worse, not better, and a
+regression test must cover both.
+
+### 4.4 SR-AUD-309 describes the **encode** direction only
+
+`HtmlEncode` is indeed a five-entity subset. `HtmlDecode` is **not**: measured, it already handles
+decimal (`&#169;`) and hexadecimal (`&#xA9;`) character references and named entities beyond the
+five (`&copy;`). So "HTML encoding/decoding is a five-entity byte subset" is half right, and the
+asymmetry — a decoder that understands more than the encoder produces — is itself the shape of the
+finding.
+
+### 4.5 Three audit statements that are correct and are **not** corrected
+
+- SR-AUD-300's ASan claim is exactly right, reproduced at the **same line number**
+  (`SocketAddress.cpp:106`) with the allocation stack showing the 2-byte `std::vector`.
+- SR-AUD-305's reproduction is exact, including the cookie value.
+- SR-AUD-301's narrowing reproduces in **both** directions (negative *and* above `UInt32.MaxValue`)
+  and on **both** doors (constructor and setter), which the finding claims and which is confirmed.
+
+---
+
+## 5. Root causes
+
+### N-A — a decode path with no layout validation
+
+**Member: SR-AUD-300.** `GetIPEndPoint` reads fixed offsets 2–7 (IPv4) or 2–27 (IPv6) from a
+`std::vector<bytecs>` whose size the caller chose, without checking family or size; the
+`SocketAddress(const IPAddress&, intcs)` constructor accepts any `intcs` port and truncates it to
+16 bits. Compatible — reading past the end of a heap allocation has no defined result, and a
+truncated port is a defined-but-meaningless one.
+
+### N-B — a signed public parameter converted to unsigned with no domain check
+
+**Members: SR-AUD-301, SR-AUD-307.** Structurally one cause in two places: `IPAddress`'s
+`longcs scopeId` becomes a `uint32_t` field, and `CookieCollection::operator[]`'s `intcs index`
+becomes a `size_t` handed straight to `std::vector::operator[]`. This is CCF-004's shape one layer
+up — not undefined *arithmetic* but an undefined *conversion domain* at a public boundary.
+Compatible in both cases.
+
+### N-C — a parser that discards what it does not understand
+
+**Members: SR-AUD-302, SR-AUD-304.** `IPEndPoint::TryParse`'s bracketed branch finds `]`, then
+looks for the *last* `:`, so anything between them evaporates. `Dns` carries a **duplicate**
+`sscanf("%u")` IPv4 literal parser beside the real `IPAddress::TryParse`, and that duplicate
+accepts a leading `-`, produces duplicates, and bypasses the family filter. Mostly compatible; the
+wildcard-rejection half is split out as gated (§7.2).
+
+### N-D — a transformation that drops carried state
+
+**Member: SR-AUD-303.** `clearNonPrefixBits` rebuilds an IPv6 address from masked bytes and
+constructs the result with scope id 0, so information the constructor was handed is silently lost.
+Compatible — a silent wrong answer, the #1837 precedent.
+
+### N-E — cookie origin policy is absent
+
+**Members: SR-AUD-305, SR-AUD-306.** There is no equivalent of .NET's
+`Cookie.VerifyAndSetDefaults`: an explicit `Domain` is never checked against the source URI, and
+the three-and-four-argument constructors assign `path_`/`domain_` **directly** rather than through
+their setters, so the implicit flags stay set and container insertion overwrites the caller's
+values. The two are one policy because the implicit flags are the *input* to the domain-matching
+rule the first half must define. **Gated.**
+
+### N-F — unbounded public state
+
+**Member: SR-AUD-308.** No capacity, per-domain capacity, maximum size, expiry cleanup or
+eviction. Gated: every bound is a number somebody must choose, and adding one starts discarding
+data.
+
+### N-G — a declared-subset text transformation
+
+**Member: SR-AUD-309.** The same shape as `System::Text`'s T-M (#2019): a policy about which
+characters must be escaped, whose target cannot be verified in this container. **Deferred**, and
+deliberately coupled to #2019 (§7.2).
+
+---
+
+## 6. Findings and surfaces that are *not* in this namespace's queue
+
+| Item | Why not |
+|---|---|
+| `System::Net::Sockets`, `::Http`, `::WebSockets`, `::NetworkInformation`, `::Mime`, `::Security` | **different namespaces**, different modules, their own future reviews. #1962 lives in `NetworkInformation` and is untouched here |
+| `WebHeaderCollection`, `WebProxy`, `CredentialCache`, `NetworkCredential`, `DnsEndPoint`, `IPHostEntry` | audited, **no** confirmed finding |
+| `HttpStatusCode`, `HttpVersion`, `HttpRequestHeader`/`HttpResponseHeader`, `DecompressionMethods`, `WebExceptionStatus` | enums and constants; audited, no finding |
+| `HttpListener`, `WebClient`, `WebRequest`/`WebResponse`, `ServicePointManager`, `NetworkCredential` domain auth | **not ported**; absent features are not remediation |
+| TLS / `SslStream` | `CLAUDE.md`'s permanent out-of-scope deviation |
+| Downstream migration | CNA and mobile-eggbert; **#1773 stays blocked** and downstream use was not investigated |
+
+---
+
+## 7. Compatible versus approval-sensitive classification
+
+### 7.1 Compatible — no approval required
+
+| Ticket | Cause | Findings | What changes observably |
+|---|---|---|---|
+| **#2035** | N-A | 300 | `GetIPEndPoint` validates family and minimum size and throws instead of reading out of bounds; the `IPAddress`+port constructor rejects a port outside `0..65535` |
+| **#2036** | N-B | 301 | an IPv6 scope id outside `0..4294967295` raises `ArgumentOutOfRangeException` instead of wrapping |
+| **#2037** | N-C | 302 | `IPEndPoint::Parse`/`TryParse` reject text between `]` and `:` instead of discarding it |
+| **#2038** | N-D | 303 | `IPNetwork`'s masked base address **keeps** the scope id it was constructed with |
+| **#2039** | N-C | 304 (3 of 4 halves) | the duplicate `sscanf` literal parser is replaced by `IPAddress::TryParse`, so `-0.0.0.1` is rejected, a literal is returned **once**, the requested family filter is applied, and the POSIX error message stops naming a Win32 code |
+| **#2041** | N-B | 307 | both `CookieCollection` indexers validate `0 <= index < Count` and throw instead of invoking undefined behaviour |
+
+Why each is compatible in one line: **#2035 and #2041 change only paths that today read out of
+bounds or crash; #2036, #2037 and #2039's rejection half narrow inputs whose current results are
+defined but meaningless (a wrapped scope id, a silently truncated endpoint, a negative-signed
+address literal); #2038 and #2039's duplicate half replace silent wrong answers.** §7.3 tabulates
+every narrowed row before it is made.
+
+### 7.2 Approval-sensitive — designed here, not implemented
+
+| Ticket | Cause | Findings | Gate |
+|---|---|---|---|
+| **#2040** | N-E | 305, 306 | the cookie origin policy: `Add` starts **rejecting** cookies it stores today, and constructor-supplied path/domain stop being overwritten — a change in which cookies a container emits |
+| **#2042** | N-F | 308 | the storage bound: what limits, and whether they are default or opt-in. Adding one starts **discarding** stored data |
+| **#2043** | N-C | 304 (wildcard half) | `GetHostAddresses("0.0.0.0")` currently returns a usable wildcard address and would start throwing |
+| **#2044** | N-G | 309 | the HTML escaping policy — **deferred, not merely blocked**: the target is unverifiable here, exactly as `System::Text`'s #2019 |
+
+### 7.3 The complete narrowed-row table for the compatible batch
+
+| Call | Before (measured) | After |
+|---|---|---|
+| `SocketAddress(InterNetwork, 2).GetIPEndPoint()` | **heap-buffer-overflow read**, returned `0.0.0.0:0` | `ArgumentException` |
+| `SocketAddress(Unix, 16).GetIPEndPoint()` | `0.0.0.0:0` | `ArgumentException` — **the one row that removes a non-faulting result** |
+| `SocketAddress(Loopback, 70000)` | `127.0.0.1:4464` | `ArgumentOutOfRangeException("port")` |
+| `SocketAddress(Loopback, -1)` | `127.0.0.1:65535` | `ArgumentOutOfRangeException("port")` |
+| `SocketAddress(InterNetwork, 16)` (well-formed) | works | **identical** |
+| `IPAddress(bytes, -1)` / `setScopeIdProperty(-5)` | wraps to `4294967295` / `4294967291` | `ArgumentOutOfRangeException("value")` |
+| `IPAddress(bytes, 0 … 4294967295)` | works | **identical** |
+| `IPEndPoint::Parse("[::1]ignored:80")` | `[::1]:80` | `FormatException` |
+| `IPEndPoint::Parse("[::1]:80")`, `"1.2.3.4:80"` | works | **identical** |
+| `IPNetwork(fe80::1%7, 64).BaseAddress.ScopeId` | `0` | `7` — **a changed return value on a working call** |
+| `IPNetwork` over IPv4, or IPv6 with scope 0 | works | **identical** |
+| `Dns::GetHostAddresses("-0.0.0.1")` | `0.0.0.1` | `FormatException` (or the resolver's failure) |
+| `Dns::GetHostAddresses("1.2.3")` | **three** identical `1.2.0.3` | **one** `1.2.0.3` |
+| `Dns::GetHostAddresses("127.0.0.1", Unix)` | one IPv4 result | empty |
+| `Dns::GetHostAddresses("0.0.0.0")` | wildcard | **unchanged here** — split to the gated #2043 |
+| `collection[-1]`, `collection[Count]` | garbage `Cookie` / **SIGSEGV** | `ArgumentOutOfRangeException("index")` |
+| `collection[0 … Count-1]` | works | **identical** |
+
+Two rows deserve the reviewer's eye and are called out rather than hidden: the `Unix`-family
+`GetIPEndPoint`, which today returns a non-faulting (if meaningless) endpoint, and `IPNetwork`'s
+changed `ScopeId`, which is a **different value from a working call**. Either can be split into its
+own gated ticket without disturbing the rest.
+
+---
+
+## 8. Compatibility proofs and the source / ABI / layout consequence matrix
+
+### 8.1 Declarations
+
+| Ticket | Signature | `noexcept` | virtual / vtable | data members | mangled names |
+|---|---|---|---|---|---|
+| #2035 | unchanged | unchanged | unchanged | unchanged | unchanged |
+| #2036 | unchanged | unchanged | unchanged | unchanged | unchanged |
+| #2037 | unchanged | unchanged | unchanged | unchanged | unchanged |
+| #2038 | unchanged | unchanged | unchanged | unchanged | unchanged |
+| #2039 | unchanged | unchanged | unchanged | unchanged | unchanged |
+| #2041 | unchanged | unchanged | unchanged | unchanged | unchanged — but **header-inline**, so consumers recompile |
+| #2040 | unchanged | unchanged | unchanged | **possibly `Cookie`** — if the policy needs a stored origin, that is an **object-layout change** in a header-only type | unchanged |
+| #2042 | **additive** if limits are exposed | unchanged | unchanged | **`CookieContainer`** gains limit fields — it has an out-of-line body, but the members live in the header | unchanged |
+| #2043 | unchanged | unchanged | unchanged | unchanged | unchanged |
+| #2044 | **additive** if a `Create(…)` opt-in is added | unchanged | unchanged | unchanged (`WebUtility` is all-static) | unchanged |
+
+**The central ABI fact of this namespace, and it is the opposite of `System::Diagnostics`'s.**
+`Process` was a pimpl and had no in-repository caller; here `Cookie`, `CookieCollection` and
+`WebUtility` are **header-inline** and there are **real cross-module consumers** (§2.3). So:
+
+- every compatible ticket except #2041 touches only a `.cpp` body and is **relink-only**;
+- **#2041 touches a header-only class**, so `net-sockets`, `net-http`, `net-websockets`,
+  `net-network-information` and the integration tests all **recompile**;
+- **#2040 is the only ticket in the namespace that could change an object layout**, and only if the
+  chosen policy requires storing the origin on the `Cookie` — which the recommended option avoids
+  by validating at insertion time instead. §11 makes that explicit.
+
+### 8.2 Recompilation
+
+`IPAddress.cpp`, `IPEndPoint.cpp`, `IPNetwork.cpp`, `SocketAddress.cpp`, `Dns.cpp` and
+`CookieContainer.cpp` are out-of-line bodies: #2035–#2039 and #2043 are relink-only.
+`CookieCollection.hpp`, `Cookie.hpp` and `WebUtility.hpp` are header-inline: #2041, #2040 and #2044
+force a recompilation.
+
+---
+
+## 9. Downstream consumer impact
+
+**Not estimated, by instruction.** CNA and mobile-eggbert were not read, searched, built, tested or
+modified, and no filesystem search left this repository. **#1773 stays `blocked`.**
+In-repository callers **were** measured (§2.3) and are numerous, unlike `System::Diagnostics`'s:
+each ticket must run `SharpRuntimeTests_Net_Sockets`, `SharpRuntimeTests_Net_Http`,
+`SharpRuntimeTests_Net_WebSockets`, `SharpRuntimeTests_Net_NetworkInformation` and
+`SharpRuntimeIntegrationTests` alongside `SharpRuntimeTests_Net`.
+
+---
+
+## 10. Test matrix
+
+Permanent, add-only, in `modules/net/tests/System/Net/`.
+
+| Area | Cases required |
+|---|---|
+| **#2035 SocketAddress** | every family × {size below the minimum, exactly the minimum, above it}; `Unix` and every unsupported family rejected with exact type and message; the port domain `-1`, `0`, `65535`, `65536`, `70000`, `INTCS_MIN`, `INTCS_MAX`; a well-formed IPv4 and IPv6 round trip byte-identical before and after; **an ASan case over the undersized buffer** |
+| **#2036 scope id** | `-1`, `0`, `1`, `4294967295`, `4294967296`, `LONGCS_MIN`, `LONGCS_MAX` on **both** the constructor and the setter; exact `paramName`; every in-range value round-trips |
+| **#2037 IPEndPoint** | `[::1]:80`, `[::1]ignored:80`, `[::1]`, `[::1]:`, `[::1]:99999`, `[fe80::1%7]:80`, `1.2.3.4:80`, `1.2.3.4:80junk`; `TryParse` returns `false` without throwing wherever `Parse` throws |
+| **#2038 IPNetwork** | IPv6 with scope 0 and non-zero across prefix lengths 0/1/63/64/127/128; IPv4 unaffected; `Contains` still agrees with the masked base |
+| **#2039 Dns** | `-0.0.0.1`, `1.2.3`, `1.2.3.4`, `::1`, `0.0.0.0` (**unchanged**, #2043); each literal returned exactly **once**; the family filter for `InterNetwork`, `InterNetworkV6` and `Unix`; the POSIX failure message contains no `Win32` |
+| **#2041 CookieCollection** | `-1`, `0`, `Count-1`, `Count`, `Count+1`, `INTCS_MIN`, `INTCS_MAX` on **both** indexer overloads; exact type, `paramName`, message; an empty collection; **an ASan case** |
+| **gated pins** | mandatory, per the #2022/#2028 lesson: the cross-origin cookie is emitted (#2040); the constructor leaves the implicit flags set (#2040); 10,000 cookies are retained (#2042); `GetHostAddresses("0.0.0.0")` returns the wildcard (#2043); `HtmlEncode` passes non-ASCII through while `HtmlDecode` understands `&copy;`/`&#169;`/`&#xA9;` (#2044). **Every pin must be shown discriminating** |
+| **layout pins** | `sizeof`/`alignof` of `Cookie`, `CookieCollection`, `IPAddress`, `IPEndPoint`, `SocketAddress` — the three header-inline types are where a layout change would be silent |
+
+---
+
+## 11. Sanitizer matrix
+
+| Sanitizer | Applies to | What it must show |
+|---|---|---|
+| **ASan** | **#2035, #2041** | the `heap-buffer-overflow` at `SocketAddress.cpp:106` and the out-of-range `CookieCollection` access present **before** and absent **after**, with the changed bodies compiled **from source** into the probe. The before half is **already run and reproduced** (`build-probe/2034_probe2_asan.log`) |
+| **UBSan** | #2036, #2041 | the `longcs` → `uint32_t` and `intcs` → `size_t` conversions. Expected **non-discriminating** for the conversions themselves (they are implementation-defined, not undefined) — record it as a non-result rather than as evidence, the #2024 precedent |
+| **LSan** | #2039, #2042 | no leak across a failed `getaddrinfo` and across 10,000 cookie insertions |
+| **TSan** | **none** | `System::Net`'s finding-bearing types hold no shared mutable state and start no thread. Stated as inapplicable rather than silently skipped — but **`CookieContainer` is a plausible cross-thread object**, so if #2042's design adds background aging, TSan becomes applicable to it |
+
+---
+
+## 12. Reference evidence actually available, per repair
+
+`/rv/tmp/runtime/src/libraries/` re-verified **absent** 2026-08-04; no .NET runtime is installed.
+
+| Cause | Evidence available here | Sufficient? |
+|---|---|---|
+| **N-A** | ASan; the type's own `getSizeProperty()`/`getFamilyProperty()`; this repository's own `ArgumentException` port precedent | **yes** — a heap overflow needs no reference |
+| **N-B** (scope id) | `IPAddress`'s own `uint32_t` storage; the repository's `ArgumentOutOfRangeException` precedent (#1953, #2024) | **yes** |
+| **N-B** (indexer) | the C++ standard: `std::vector::operator[]` out of range is undefined | **yes** |
+| **N-C** (IPEndPoint) | the function's own two other branches, which do **not** discard trailing text | **yes** — transcribed from the port |
+| **N-C** (Dns) | `IPAddress::TryParse` **in the same module**, which the duplicate parser exists beside | **yes** — the repair is deletion |
+| **N-D** | the constructor that accepted the scope id | **yes** |
+| **N-E** | .NET's exact `Cookie.VerifyAndSetDefaults` domain rule, and whether a public-suffix list is involved | **no** — gated on approval **and** on evidence |
+| **N-F** | .NET's exact default capacities | **no** |
+| **N-G** | .NET's exact default HTML escape set | **no** — same gap as `System::Text` #2019 |
+
+**No repair in §7.1 depends on a .NET behaviour that could not be established here.** That is the
+criterion separating the two columns, and it is the same one the previous six reviews used.
+
+---
+
+## 13. Recommended execution order
+
+1. **#2034** — this plan (no code).
+2. **#2041** (N-B, SR-AUD-307) — first: it is the one defect that **crashes**, and it is a
+   three-line guard in a header.
+3. **#2035** (N-A, SR-AUD-300) — second: the other memory-safety defect, ASan-provable both ways.
+4. **#2036** (N-B, SR-AUD-301) — the sibling narrowing, same cause, different file.
+5. **#2037** and **#2038** — independent single-file parser/transform repairs; may share one commit
+   (the #2007/#2008 precedent) only if their tests stay separable.
+6. **#2039** (N-C, SR-AUD-304) — last of the compatible batch, because deleting the duplicate
+   parser is the largest single behaviour surface and benefits from #2036 being settled first.
+7. **A disclosure-and-pins ticket** — mandatory, the #2012/#2022/#2028 lesson: make the
+   `Cookie`/`CookieContainer`/`WebUtility`/`Dns` doc-comments true and **pin** every gated
+   behaviour, each pin shown discriminating.
+8. **#2040, #2042, #2043, #2044** — design records only; none implemented without its §14 approval
+   sentence.
+
+**After this namespace, the measured next candidate is `modules/buffers`** (11 open, 3 high, 27 %,
+partial plan) — but re-derive it rather than trusting this sentence, as §1 did.
+
+---
+
+## 14. Approval package — the four gated causes
+
+Requested **only** when this namespace's compatible half is done; **none is requested by writing
+this**, and the consolidated request will follow `docs/ConsolidatedApprovalPackage.md`'s format.
+
+### 14.1 #2040 — N-E, the cookie origin policy (SR-AUD-305 + SR-AUD-306)
+
+**Now:** any explicit `Domain` is stored and later emitted for that domain regardless of the URI it
+came from (measured); constructor-supplied `Path`/`Domain` leave the implicit flags set, so
+container insertion overwrites them. **.NET:** `Cookie.VerifyAndSetDefaults` validates the domain
+relation before storage and raises `CookieException` — **inferred, not verifiable here**.
+**Alternatives:** (A) validate the explicit domain as a suffix of the request host with the
+leading-dot and host-only rules, rejecting with `CookieException`, and fix the constructors to go
+through their setters — recommended; (B) additionally consult a public-suffix list, which no data
+source here supports; (C) store the origin on the `Cookie` and filter at emission — **an object
+layout change in a header-only type**, and it keeps the bad data; (D) document the reduction and
+leave. **Recommended: A**, precisely because it needs **no layout change**.
+
+> Approve making `System::Net::CookieContainer::Add(uri, cookie)` validate an explicitly supplied
+> `Domain` against the request URI's host — accepting the leading-dot and host-only rules and
+> raising `System::Net::CookieException` otherwise — and making `Cookie`'s path- and
+> domain-accepting constructors clear the corresponding implicit flags exactly as their setters do,
+> accepting that cookies which are stored and emitted today begin to be rejected, and that a
+> container stops overwriting a constructor-supplied path or domain. Ticket **#2040**.
+
+### 14.2 #2042 — N-F, the storage bound (SR-AUD-308)
+
+**Now:** unbounded (10,000 retained, measured). **Alternatives:** (A) .NET's documented defaults —
+whose exact numbers are **not verifiable here**; (B) expose `Capacity`/`PerDomainCapacity`/
+`MaxCookieSize` with generous defaults and make the unbounded behaviour opt-in; (C) clean expired
+cookies on insertion only — the smallest step that bounds nothing but removes dead state;
+(D) document and leave. **Recommended: C now, B when a number can be justified.**
+
+> Approve bounding `System::Net::CookieContainer`'s storage — by removing expired cookies on
+> insertion, and by adding public capacity, per-domain capacity and maximum-cookie-size limits with
+> stated defaults — accepting that a container begins to discard stored cookies, and stating which
+> defaults, because .NET's exact values cannot be verified in this container. Ticket **#2042**.
+
+### 14.3 #2043 — N-C, the wildcard literal (SR-AUD-304's fourth half)
+
+**Now:** `GetHostAddresses("0.0.0.0")` returns the wildcard address, which is a usable value.
+**Proposed:** reject it as .NET does (inferred). Split out of #2039 precisely because it is the one
+half of that finding that removes a **working, meaningful** result.
+
+> Approve making `System::Net::Dns::GetHostAddresses` and `GetHostEntry` reject the wildcard
+> literals `0.0.0.0` and `::` rather than returning them as resolved addresses, accepting that a
+> call which succeeds today begins to throw. Ticket **#2043**.
+
+### 14.4 #2044 — N-G, the HTML escaping policy (SR-AUD-309)
+
+**Now:** `HtmlEncode` escapes five ASCII characters and passes all non-ASCII through; `HtmlDecode`
+already understands numeric references and more named entities than the encoder produces (§4.4).
+**This is the same gap as `System::Text`'s #2019** and must be decided **with** it, or not at all:
+two HTML encoders in one repository with two different escape sets is the CCF-012 shape.
+**Deferred**, not merely blocked — the target is unverifiable here.
+
+> Approve giving `System::Net::WebUtility::HtmlEncode` a stated escape policy — **and state which**,
+> together with `System::Text::Encodings::Web`'s (#2019), because two HTML encoders in one
+> repository must not diverge and .NET's exact default set cannot be verified in this container.
+> Ticket **#2044**.
+
+---
+
+## 15. Explicit exclusions and completion criteria
+
+**Excluded:** the eight sibling `Net` namespaces (§6); `WebHeaderCollection`, `WebProxy`,
+`CredentialCache` and the enums, all audited without a finding; absent APIs (`HttpListener`,
+`WebClient`, `WebRequest`); TLS; and downstream migration (§9).
+
+`System::Net` is complete when **all ten** findings are `remediated` or carry the
+`confirmed (design-complete)` qualifier with a blocked implementation ticket, and:
+
+1. #2035–#2039 and #2041 are `done` with permanent tests;
+2. #2040, #2042, #2043 and #2044 each carry a durable design here **and** a blocked ticket whose
+   notes name the approval sentence **and** a permanent behaviour-pinning test — mandatory, not
+   optional;
+3. the whole 37-executable gate is green apart from the known environment/#1962 failures;
+4. `SharpRuntimeTests_Net` has grown by the §10 matrix, add-only, from its measured baseline of
+   **240**, and the five sibling suites named in §9 still pass;
+5. ASan is **run** for #2035 and #2041 and shown discriminating in both directions;
+6. no `SR-AUD-*` identifier was created — numbering stays at **364**.
+
+---
+
+## 16. Status
+
+| Ticket | Cause | Findings | State |
+|---|---|---|---|
+| #2034 | — | maps all 10 | this document |
+| #2035 | N-A | 300 | **DONE** 2026-08-04 — see §17.2 |
+| #2036 | N-B | 301 | **DONE** 2026-08-04 — see §17.3 |
+| #2037 | N-C | 302 | **DONE** 2026-08-04 — see §17.4 |
+| #2038 | N-D | 303 | **DONE** 2026-08-04 — see §17.5 |
+| #2039 | N-C | 304 (3 halves) | **DONE** 2026-08-04 — see §17.6 |
+| #2041 | N-B | 307 | **DONE** 2026-08-04 — see §17.1 |
+| #2040 | N-E | 305, 306 | **blocked**, design complete (§14.1); behaviour pinned by #2047 |
+| #2042 | N-F | 308 | **blocked**, design complete (§14.2); behaviour pinned by #2047 |
+| #2043 | N-C | 304 (wildcard half) | **blocked**, design complete (§14.3); behaviour pinned by #2039 |
+| #2044 | N-G | 309 | **blocked**, deferred (§14.4), coupled to #2019; behaviour pinned by #2047 |
+
+---
+
+## 17. Implementation record — the compatible batch
+
+Written as each ticket lands, on branch `feature/remediation-batch-system-net-compatible`
+(cut from `4777f95`). Nothing in §§1–16 is retro-edited; where a measurement here contradicts a
+prediction there, the contradiction is stated rather than the prediction quietly amended.
+
+### 17.1 #2041 — N-B, `CookieCollection`'s indexers (SR-AUD-307)
+
+**Repair.** Both `operator[]` overloads route through one private
+`validatedIndex(intcs) const`, which rejects `index < 0 || index >= Count` with
+`ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less
+than the size of the collection.")` — the message this repository already uses at 23 sites
+(`List<T>`, `Array`, `ArrayList`, `ArraySegment`, `ObservableCollection`), so the absent .NET
+tree was not needed. The negative half is tested on the **signed** value and the `size_t`
+conversion happens only afterwards; the bound is compared in `size_t`, so it cannot be truncated
+the way a single `uintcs` comparison would be when `size()` exceeds `UINTCS_MAX`.
+
+**Evidence — one probe source, six binaries.** `build-probe/2041_probe1_cookiecollection_index.cpp`
+is compiled `{before, after} × {no sanitizer, ASan, UBSan}`; the *before* binaries take the
+pre-repair header from `build-probe/2041_before_include/` (produced by
+`git show HEAD:modules/net/include/System/Net/CookieCollection.hpp`), so the **only** difference
+between the two columns is the header under test. `CookieCollection` is header-inline, so the
+`std::vector<Cookie>` allocation and the indexer read are both compiled from source into every
+binary — no uninstrumented archive stands between them. Eleven indexes × both overloads.
+Log: `build-probe/2041_probe1_before_after.log`.
+
+| Sanitizer | Before | After |
+|---|---|---|
+| ASan | **9 reports** (`heap-buffer-overflow`, `SEGV`) | **0** |
+| UBSan | **2 reports** (null-pointer binding, null-pointer offset) | **0** |
+| none | `[-1]` returns garbage; `[Count]`, `[Count+1]`, `INTCS_MIN`, `INTCS_MAX`, empty-`[0]`, empty-`[-1]` SIGSEGV | every invalid index throws; every valid one identical |
+
+**Two corrections.**
+
+1. **§4.3 is confirmed and is sharper than stated.** The finding's own case `collection[-1]`
+   returns normally on **both** overloads with a garbage `Cookie` — but on an **empty**
+   collection the same `[-1]` crashes. Which outcome appears is a property of the heap, not of
+   the index, which is exactly what makes it undefined behaviour rather than a wrong answer.
+2. **§11's UBSan prediction is half wrong.** It predicted a non-result. UBSan is indeed silent
+   about the `intcs` → `size_t` conversion — that half holds — but it is **not** silent about
+   the consequence on an empty collection, where `data()` is null: two reports before, none
+   after. Recorded as evidence, not as a non-result.
+
+**Tests: +14.** `CookieCollectionIndexTests.cpp` (12) covers `-1`, `0`, `Count-1`, `Count`,
+`Count+1`, `INTCS_MIN`, `INTCS_MAX` on **both** overloads, the empty collection, that a rejected
+access leaves the collection intact, and that iteration and `Count` are untouched.
+`NetLayoutPinTests.cpp` (2) adds the §10 layout pins as `static_assert`s for `Cookie` (152),
+`CookieCollection` (24), `IPAddress` (24), `IPEndPoint` (40) and `SocketAddress` (32) — the guard
+that #2040's option C, which would add a member to the header-only `Cookie`, cannot land
+silently. `SharpRuntimeTests_Net` **240 → 254**.
+
+**Consequences.** No signature, `noexcept`, virtual, vtable, data member or object-layout change.
+Header-inline, so `net-sockets`, `net-http`, `net-http-json`, `net-websockets`,
+`net-network-information` and the integration suite recompiled; all were re-run and all pass
+except the pre-existing `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` (absent
+IPv6) and the five `PingTests` (#1962), neither related to this change.
+
+### 17.2 #2035 — N-A, `SocketAddress`'s decode and port domain (SR-AUD-300)
+
+**Repair.** `GetIPEndPoint()` rejects (a) any family that is not `InterNetwork` or
+`InterNetworkV6` and (b) any **declared** size below that family's layout minimum, both with
+`ArgumentException`. The minimums are `IPv4AddressSize` (16) and `IPv6AddressSize` (28) —
+**`IPEndPoint::Create`'s own two constants**, so the safe path and the public shortcut it
+bypasses can no longer disagree, and every buffer `SocketAddress(const IPAddress&, intcs)`
+produces is exactly at the minimum. That constructor now validates the port against
+`IPEndPoint::MinPort`/`MaxPort` with `ArgumentOutOfRangeException("port")`, reusing
+`IPEndPoint::validatePort`'s domain and exception identity. The size helper is **file-local, not
+a member**, so `SocketAddress.hpp` needed no declaration change.
+
+**Evidence.** `build-probe/2035_probe1_socketaddress_decode.cpp`, six binaries
+(`{before, after} × {plain, ASan, UBSan}`), the three `.cpp` files compiled from source into each.
+Log `build-probe/2035_probe1_before_after.log`.
+
+| Sanitizer | Before | After |
+|---|---|---|
+| ASan | **2** `heap-buffer-overflow` READs — `:106` (IPv4, 0 bytes after a 2-byte region) and **`:110`** (IPv6, 0 bytes after an 8-byte region) | **0** |
+| UBSan | none | none — **non-discriminating**, recorded as a non-result |
+| LSan | — | no leak across the full matrix |
+
+**Two premise extensions**, neither issued an `SR-AUD-*` identifier:
+
+1. **The port defect spans the whole signed domain.** §3's row names 70000 → 4464 and -1 →
+   65535. Measured, `INTCS_MIN` encoded as port **0** and 65536 also as **0**, while `INTCS_MAX`
+   encoded as 65535 — so the old behaviour could produce a *plausible* port indistinguishable
+   from a real one, not merely a truncated one.
+2. **A defect §3 does not name: the declared size, not just the allocation.**
+   `setSizeProperty(4)` on a well-formed 16-byte IPv4 buffer left `GetIPEndPoint()` decoding
+   `127.0.0.1:80`, reading offsets 4–7 that the type's **own** `operator[]` refuses with
+   `IndexOutOfRangeException` at the same offsets. **No sanitizer can see this** — the allocation
+   is intact and ASan is silent before *and* after — so it is a contract self-contradiction, not
+   a memory error. Validating the **declared** size closes it and the allocation together,
+   because `size_ <= buffer_.size()` is an invariant of `setSizeProperty`.
+
+**Addition to §7.3's narrowed-row table** (the table is not rewritten; these rows are added):
+
+| Call | Before (measured) | After |
+|---|---|---|
+| `SocketAddress(InterNetworkV6, 8).GetIPEndPoint()` | ASan `heap-buffer-overflow` at `:110`, returned `[::]:0` | `ArgumentException` |
+| `SocketAddress(InterNetworkV6, 27).GetIPEndPoint()` | `[::]:0`, one byte overread | `ArgumentException` |
+| `SocketAddress(Unknown/Unspecified/Max/4242, any size).GetIPEndPoint()` | decoded through the IPv4 branch | `ArgumentException` — the `Unix` row of §7.3 generalises to **every** non-IP family |
+| `SocketAddress(Loopback, 80)` then `setSizeProperty(4)` then `GetIPEndPoint()` | `127.0.0.1:80` | `ArgumentException` — **a second row that removes a non-faulting result** |
+| `SocketAddress(Loopback, INTCS_MIN)` / `(…, 65536)` | `127.0.0.1:0` — a plausible port | `ArgumentOutOfRangeException("port")` |
+| `SocketAddress(Loopback, INTCS_MAX)` | `127.0.0.1:65535` | `ArgumentOutOfRangeException("port")` |
+| every well-formed IPv4/IPv6 encode → decode | works | **byte-identical**, pinned by four tests whose literals are transcribed from the before-log |
+
+**Tests: +17.** `SocketAddressDecodeTests.cpp` covers every family × {below minimum, minimum,
+above}, an unnamed enum value, both IP families' size boundaries, the shrunk declared size, the
+port domain on both families, `IPEndPoint::Create` agreeing with the shortcut, four byte-identical
+round-trip pins, and that raw-buffer construction stays permissive — the audit report's own
+requirement. `SharpRuntimeTests_Net` **254 → 271**.
+
+**Consequences.** No signature, `noexcept`, virtual, vtable, data member or layout change;
+`sizeof(SocketAddress)` is 32 before and after. ABI-wise relink-only; the header gained
+doc-comments stating the new contract, so dependents recompile. `net-sockets`'s
+`UnixDomainSocketEndPoint` — the only cross-module producer of `AddressFamily::Unix`
+`SocketAddress` buffers — never calls `GetIPEndPoint`, verified by grep, and its suite passes.
+
+### 17.3 #2036 — N-B, `IPAddress`'s IPv6 scope-id domain (SR-AUD-301)
+
+**Repair.** One file-local `validatedScopeId(longcs, const char* paramName)` is adopted by
+**both** doors — the audit report's own instruction. Outside `[0, 4294967295]` it raises
+`ArgumentOutOfRangeException`. The constructor validates **before any member is assigned**; the
+setter keeps its **IPv4 family guard first** (an IPv4 address has no scope id at all, so the
+wrong-family answer is the more specific one and its `SocketException` is the pre-existing
+contract) and leaves the previous scope id in place when it rejects.
+
+**One deliberate divergence from §7.3, recorded rather than silently adopted.** §7.3's combined
+row writes `ArgumentOutOfRangeException("value")` for both doors. Each door instead reports its
+**own** parameter — `"scopeId"` for the constructor, `"value"` for the setter — matching .NET's
+`nameof(...)` convention, so a caller is told which argument it got wrong.
+
+**Premise extension** (no `SR-AUD-*` issued): the narrowing is a **modulo-2^32 wrap, not a
+clamp**, so it produced a *plausible* scope id — `-4294967295` and `4294967297` both became
+**1**, `LONGCS_MIN` and `4294967296` both became **0**, and `ToString()` rendered the wrapped
+value (`fe80::1%4294967291` for `-5`). Two addresses built from `-1` and `4294967295` compared
+**equal**.
+
+**The rest of the surface, inventoried by grep rather than assumed.** Every other door that
+reaches the scope-id field is `uint32`-sourced and cannot be out of range: `tryParseIPv6`'s own
+`from_chars<uint32_t>` (which already rejected `%4294967296` and `%-1`), `Dns::fromSockaddrIn6`,
+`SocketAddress::GetIPEndPoint`, and `net-sockets`' `Socket.cpp:169`. So the finding is correctly
+scoped to the two raw doors, and no in-repository caller can trip the new check.
+
+**Sanitizers.** UBSan is **non-discriminating in both directions**, exactly as §11 predicted for
+this conversion, and is recorded as a non-result rather than as evidence. ASan and TSan are
+inapplicable — nothing is allocated, indexed or shared here.
+
+**Tests: +9.** `IPAddressScopeIdTests.cpp` — ten out-of-domain and ten in-domain values on both
+doors, exact `paramName`, the no-mutation guarantee, the family guard, `ToString`, the parser's
+unchanged domain and the equality consequence. `SharpRuntimeTests_Net` **271 → 280**.
+
+**Consequences.** No signature, `noexcept`, virtual, vtable, data member or layout change;
+`sizeof(IPAddress)` is 24 before and after. Relink-only in ABI terms; the header gained
+doc-comments stating the new contract.
+
+### 17.4 #2037 — N-C, `IPEndPoint`'s bracketed parser (SR-AUD-302)
+
+**Repair.** What may follow the closing bracket is now exactly nothing, or `':'` and the port.
+Three lines, transcribed from the function's own unbracketed branch — which §12 predicted would
+suffice, and which is decisive because `/rv/tmp/runtime/src/libraries/` is absent here.
+
+**Premise extension** (no `SR-AUD-*` issued): §3 names **one** shape; there are **four**.
+
+| Input | Before | After |
+|---|---|---|
+| `"[::1]ignored:80"` | `[::1]:80` | `FormatException` / `false` |
+| `"[::1]ignored"` | `[::1]:0` — **no colon anywhere**, the port was cleared and success reported | rejected |
+| `"[::1]x"` | `[::1]:0` | rejected |
+| `"[::1] :80"` | `[::1]:80` — a literal **space** dropped | rejected |
+
+The decisive comparison lives inside the same function: `"1.2.3.4 :80"` was already **rejected**
+by the unbracketed branch. One `TryParse`, two answers to the same input shape.
+
+`Parse` and `TryParse` agree on **all 29** probed inputs, before and after. Every previously
+valid form parses **identically**.
+
+**One adjacent defect deliberately not absorbed — new inactive ticket #2045.** A trailing `':'`
+with no digits is accepted as port 0 in **both** branches (`"[::1]:"` → `[::1]:0`, `"1.2.3.4:"` →
+`1.2.3.4:0`). That is cause N-C's *shape* but not SR-AUD-302's site, and rejecting it would
+violate #2037's own acceptance criterion ("every currently-valid form still parses identically").
+It is blocked on **evidence**, not on effort — the repair is three lines, but the intended
+behaviour cannot be established in this container and it removes a result that succeeds today.
+Both current results are **pinned**, so #2045 cannot land silently.
+
+**Sanitizers.** None applies: no allocation, no index, no shared state, no undefined conversion.
+Stated rather than silently skipped.
+
+**Tests: +9.** `IPEndPointParseTests.cpp`. `SharpRuntimeTests_Net` **280 → 289**.
+
+**Consequences.** No signature, `noexcept`, virtual, vtable, data member or layout change;
+`sizeof(IPEndPoint)` is 40 before and after. Relink-only — `IPEndPoint.hpp` was not touched at
+all.
+
+### 17.5 #2038 — N-D, `IPNetwork`'s dropped scope id (SR-AUD-303)
+
+**Repair.** `clearNonPrefixBits` rebuilds an IPv6 result through the 16-byte + scope constructor,
+so the scope id survives masking at every prefix length. IPv4 keeps the byte-vector constructor.
+
+**The half that would have broken silently, and the reason this ticket is not one line.**
+`IPAddress::operator==` compares the scope id for IPv6, and `Contains` compared
+`IPAddress(candidateBytes) == baseAddress_` where the candidate is rebuilt from bytes and so
+always carries scope 0. Preserving the base's scope alone would have made containment
+scope-**sensitive** and broken three rows that are `true` today — including
+`fe80::1%7/64 Contains(fe80::1%7)`, i.e. *the base address ceasing to be inside its own network*.
+`Contains` now compares masked **bytes**, which reproduces **all fifteen** probed answers exactly
+(the object comparison already reduced to a byte comparison, since both sides always carried
+scope 0) and is the right semantics independently: a scope id names a link, not a prefix.
+
+**Premise extension** (no `SR-AUD-*` issued): §3 names the lost `ScopeId`. It does not name the
+consequence — two networks on **different links** compared **equal** and **hashed equal**
+(`fe80::1%7/64 == fe80::1%9/64` was `true`), so a map keyed on `IPNetwork` silently merged them.
+
+**Addition to §7.3's narrowed-row table:**
+
+| Call | Before (measured) | After |
+|---|---|---|
+| `IPNetwork(fe80::1%7, 64).BaseAddress.ScopeId` | `0` | `7` — the §7.3 row, confirmed |
+| `IPNetwork(fe80::1%7, p).BaseAddress.ScopeId`, p ∈ {0,1,63,127,128} | `0` | `7` — **§7.3 lists only /64** |
+| `IPNetwork(fe80::1%7, 64).ToString()` | `fe80::/64` | **`fe80::%7/64`** — a second changed value on a working call, not listed in §7.3 |
+| `IPNetwork(fe80::1%7,64) == IPNetwork(fe80::1%9,64)` and their hashes | `true` / equal | **`false`** / different |
+| every IPv4 network, every scope-0 IPv6 network | — | **identical** |
+| all fifteen `Contains` rows | — | **identical** |
+| `Parse`/`ToString` round trip, including the scope | works | works, now carrying the scope |
+
+**Sanitizers.** None applies — nothing allocated, indexed, shared or converted out of domain.
+Stated rather than silently skipped.
+
+**Tests: +8.** `IPNetworkScopeTests.cpp`, including the fifteen-row `Contains` table transcribed
+from the pre-repair log and the base-inside-its-own-network property at six prefix lengths.
+`SharpRuntimeTests_Net` **289 → 298**.
+
+**Consequences.** No signature, `noexcept`, virtual, vtable, data member or layout change.
+Relink-only — `IPNetwork.hpp` was not touched.
+
+### 17.6 #2039 — N-C, `Dns`'s literal parser, duplicates, family filter and message (SR-AUD-304)
+
+The largest ticket of the batch, and the one whose stated cause was **wrong**.
+
+**Correction 1 — §5's N-C is wrong about where the duplicates come from, and it matters.**
+§5 says the duplicate `sscanf` parser "accepts a leading `-`, produces duplicates, and bypasses
+the family filter". It does the first and the third. It does **not** produce the duplicates.
+Measured against `getaddrinfo` **directly** (probe §E):
+
+| Call | `ai_socktype = 0` | `ai_socktype = SOCK_STREAM` |
+|---|---|---|
+| `getaddrinfo("1.2.3")` | **3** entries (`st=1,2,3`) | **1** |
+| `getaddrinfo("localhost")` | **3** | **1** |
+| `getaddrinfo("127.0.0.1")` | **3** | **1** |
+
+`hints.ai_socktype` was `0`, which asks for one `addrinfo` **per socket type**. So *every* answer
+was tripled — every resolved **name** too, which §4.1 never mentions — and
+`GetHostEntry(8.8.8.8)` returned **six** entries for two distinct addresses. The `sscanf` parser
+never even saw `"1.2.3"` (three conversions, not four, so it declined).
+
+**Why the correction is load-bearing:** replacing the literal parser alone would have made
+`GetHostAddresses("1.2.3")` return one address **by accident** — `IPAddress::TryParse` accepts
+three-part short forms, so the fast path answers with a single value — while `localhost` stayed
+tripled. That is exactly the "one named example repaired" trap. The repair therefore does both:
+`ai_socktype = SOCK_STREAM` (what this repository's own `TcpClient`, `UdpClient` and `Socket`
+already pass) **and** a deduplication pass.
+
+**Correction 2 — the duplicate parser disagreed about *valid* input.**
+
+| Text | Through `Dns` | Through `IPAddress::Parse` |
+|---|---|---|
+| `"0177.0.0.1"` | **177.0.0.1** (decimal) | **127.0.0.1** (octal) |
+| `"+1.2.3.4"` | 1.2.3.4 | rejected |
+| `" 1.2.3.4"` | 1.2.3.4 | rejected |
+| `"1.2.3"` | declined → resolver | 1.2.0.3 |
+| `"-0.0.0.1"` | 0.0.0.1 | rejected — §3's row |
+
+One module gave **two different addresses** for one valid literal depending on the door. §12 is
+right that the repair is deletion; it understates why.
+
+**Correction 3 — §7.3's `Unix` row is wrong, and following it would have reversed a documented
+decision.** §7.3 predicts `GetHostAddresses("127.0.0.1", Unix)` → **empty**. It raises
+`SocketException(HostNotFound)`, because this repository already **has** a tested contract for a
+family-mismatched literal: `DnsTests.GetHostAddresses_RequestingIPv6Only_MismatchedIPv4Literal_Throws`
+and `..._RequestingIPv4Only_MismatchedIPv6Literal_Throws`, whose comment states the reasoning
+verbatim — an empty vector is *"indistinguishable from 'checked and found nothing'"*. §7.3 was
+written without those tests in view.
+
+**Deduplication policy, stated exactly.** Equality is **binary `IPAddress` equality**: address
+family, all address bits, and for IPv6 the scope id. Not textual equality. Ordering is the
+resolver's own, by first occurrence — `getaddrinfo` has already applied RFC 6724 destination
+selection and reordering it would override the system's preference. **No canonicalisation**:
+`1.2.3.4` and `::ffff:1.2.3.4` are different families and both survive; `fe80::1%7` and
+`fe80::1%9` name different links and both survive. Each is pinned.
+
+**Replaces §7.3's four `Dns` rows with the measured set:**
+
+| Call | Before | After |
+|---|---|---|
+| `GetHostAddresses("-0.0.0.1")` | `0.0.0.1` | `SocketException(HostNotFound)` |
+| `GetHostAddresses("+1.2.3.4")`, `(" 1.2.3.4")` | `1.2.3.4` | rejected — **not in §7.3** |
+| `GetHostAddresses("1.2.3")` | **three** identical | **one** |
+| `GetHostAddresses("localhost")`, `("runsc")`, `("vm")` | **three** identical | **one** — **not in §7.3** |
+| `GetHostEntry(8.8.8.8)` | **six** entries, two addresses | **two** — **not in §7.3** |
+| `GetHostAddresses("0177.0.0.1")` | `177.0.0.1` | **`127.0.0.1`** — a changed value on a working call, **not in §7.3**; it makes `Dns` agree with `IPAddress::Parse` |
+| `GetHostAddresses("0x7f.0.0.1")`, `("3232235777")`, `("1.2")` | three identical | one |
+| `GetHostAddresses("127.0.0.1", Unix)` | one IPv4 | `SocketException(HostNotFound)` — §7.3 predicted **empty**; corrected above |
+| `GetHostAddresses("::1", Unix)` | one IPv6 | `SocketException` — **not in §7.3** |
+| `GetHostAddresses("127.0.0.1", InterNetworkV6)` etc. | `SocketException` from the resolver | `SocketException`, thrown deliberately, with a useful message |
+| any failure message | `"Win32 error 11001"` | `"Dns: could not resolve host 'x': <resolver's own text>"` |
+| `GetHostAddresses("0.0.0.0")`, `("::")` | wildcard | **unchanged** — gated #2043, now pinned |
+| every matching-family and `Unspecified` literal | works | **identical** |
+
+**One residual, recorded rather than hidden — new inactive ticket #2046.** The family filter
+reaches a **literal** but not a resolved **name**: `GetHostAddresses("localhost", Unix)` still
+returns an IPv4 address, because `addressFamilyToAiFamily` maps every non-IP family to
+`AF_UNSPEC`. Narrowing that removes a currently-succeeding result for **every** name, which is
+broader than this ticket's approval-free envelope, so it is filed rather than absorbed.
+
+**Disclosure.** `Dns.hpp`'s note claimed resolution was "restricted to IPv4", that the hints
+"always request AF_INET regardless of the family argument", and that `InterNetworkV6` "returns an
+empty result". All three were false; the note now states the real contract, including the literal
+fast path, the family rule, the dedup policy and the failure-message shape.
+
+**Sanitizers.** **LSan is discriminating**: clean across **12,800** `Dns` calls spanning the
+success and failure paths (4,000 succeeded, 8,800 threw), while a control build that abandons one
+`addrinfo` list per iteration reports `12800 byte(s) leaked in 200 allocation(s)` — so LSan was
+demonstrably watching. ASan clean on the same binary. UBSan and TSan are inapplicable and are
+stated so rather than skipped.
+
+**Tests: +16.** `DnsLiteralAndDuplicateTests.cpp`, using only IP literals and `/etc/hosts` names
+so nothing depends on reaching a network; the one name-dependent group is guarded.
+`SharpRuntimeTests_Net` **298 → 314**.
+
+**Consequences.** No signature, `noexcept`, virtual, vtable, data member or layout change. The
+header changed only in its doc-comments.
+
+---
+
+### 17.7 #2047 — the mandatory disclosure-and-pins ticket (§13 item 7, §15 criterion 2)
+
+**Zero executable production change.** Only doc-comments and tests.
+
+**Disclosure.** Three headers now state gaps they did not:
+
+| Header | Now states |
+|---|---|
+| `Cookie.hpp` | the path- and domain-accepting constructors assign the fields **directly**, so `PathImplicit`/`DomainImplicit` stay **true** for an explicitly supplied value while the setters clear them, and `CookieContainer::Add` consequently overwrites what the caller passed (SR-AUD-306, #2040) |
+| `CookieContainer.hpp` | there is **no origin check** on an explicit `Domain` (SR-AUD-305, #2040), and storage is unbounded in every direction **including the absence of expiry cleanup** — an expired cookie is retained and only hidden from emission (SR-AUD-308, #2042) |
+| `WebUtility.hpp` | the encode and decode notes are **asymmetric on purpose**: the decoder understands more than the encoder produces, so decode-then-encode is not the identity even though encode-then-decode is; and #2044 is **deferred**, coupled to `System::Text`'s #2019 (SR-AUD-309) |
+
+**Pins: +10**, in `NetGatedBehaviourPinTests.cpp`, plus #2043's three assertions already added by
+#2039 in `DnsLiteralAndDuplicateTests.cpp`. So **all four** gated tickets now satisfy §15's
+criterion 2.
+
+**Every pin was mutation-checked.** Six mutations were applied temporarily — an origin check in
+`Add`, both `Cookie` constructors routed through their setters, a capacity of 300, expired-cookie
+purging on insertion, Latin-1-supplement numeric encoding, and a decoder that no longer knows
+`&copy;` — and **eight of the ten pins failed** under them. All six were reverted and
+`git diff` over the three touched files is empty.
+
+The two pins that stayed green are **deliberate controls**, not gaps:
+`Pin2044_HtmlEncodeEscapesExactlyFiveAsciiCharacters` and
+`Pin2044_EncodeThenDecodeRoundTripsTheFiveEscapedCharacters` must **not** move when the non-ASCII
+policy changes, and their staying green while the non-ASCII pin failed is what shows the
+mutation was targeted rather than indiscriminate.
+
+**Nothing here approves, implements or preselects any part of #2040, #2042, #2043 or #2044.**
+
+---
+
+## 18. Corrections to §§1–16 made by the implementation batch
+
+Collected so a reader of §§1–16 is not misled. Every one is measured; none rewrites the original
+text.
+
+| Section | Claim | Correction |
+|---|---|---|
+| §4.3 | `collection[-1]` "terminates with a segmentation fault"; the review corrected it to "returns normally" | Both are true and neither is the whole story: on a **non-empty** collection it returns garbage, on an **empty** one it crashes. The outcome is a property of the heap, not the index (§17.1) |
+| §5, N-C | the duplicate `sscanf` parser "produces duplicates" | **It does not.** `hints.ai_socktype = 0` does, and it tripled every resolved **name** as well (§17.6) |
+| §5, N-C | the parser accepts a leading `-` | True, and it also accepts `+` and leading whitespace, and disagrees with `IPAddress::Parse` about `0177.0.0.1` — a **valid** literal (§17.6) |
+| §7.3 | `IPAddress(bytes, -1)` / `setScopeIdProperty(-5)` → `ArgumentOutOfRangeException("value")` | Each door reports its **own** parameter: `"scopeId"` and `"value"` (§17.3) |
+| §7.3 | `GetHostAddresses("127.0.0.1", Unix)` → **empty** | It **throws** `SocketException(HostNotFound)`, which is this repository's own tested contract for a family-mismatched literal (§17.6) |
+| §7.3 | the `Unix`-family `GetIPEndPoint` is "the one row that removes a non-faulting result" | There are **two**: a `setSizeProperty`-shrunk buffer also decoded successfully (§17.2). And the `Unix` row generalises to **every** non-IP family |
+| §7.3 | `IPNetwork(fe80::1%7, 64).BaseAddress.ScopeId` is the changed row | `ToString()` and equality/hash change too, and the scope is preserved at **every** prefix length (§17.5) |
+| §11 | UBSan for #2041 will be "non-discriminating" | **Half wrong**: silent about the conversion as predicted, but it reports null-pointer binding and null-pointer arithmetic for the empty-collection cases (§17.1) |
+| §11 | UBSan for #2036 will be non-discriminating | **Correct**, and recorded as a non-result (§17.3) |
+| §3, SR-AUD-300 | "reads past undersized buffers" | Also at `SocketAddress.cpp:110` for IPv6, and the port defect spans the whole signed domain (§17.2) |

@@ -18,7 +18,8 @@ compaction/reset — resume by re-running Step 1, no conversation memory require
 
 ### Step 1 — Select the next item
 
-- Take the first record where `status = ''` or `status = 'todo'` (skip `ignore`, `ported`, and `tobedecided`).
+- Take the first record where `status = ''` or `status = 'todo'` (skip
+  `ignore`, legacy `ignored`, `ported`, and `tobedecided`).
 - **Priority:** namespaces starting with `System` take precedence over others.
 
 ### Step 2 — Decide (no user confirmation)
@@ -42,8 +43,9 @@ Do not stop to ask the user which bucket an item belongs in — make the call an
   - **Exists** → review against the full checklist in `CLAUDE.md` (API surface, doc-comments, SPDX,
     logic parity with .NET, build, tests) as if it were new. Fix any gaps found — do not rubber-stamp.
   - **Does not exist** → implement it per the `CLAUDE.md` checklist.
-- Build clean (`cmake --build build --parallel 4`, zero errors/warnings) and all tests passing
-  (`./build/SharpRuntimeTests`) before moving on.
+- Build clean (`cmake --build build --parallel 4`, zero errors/warnings) and
+  run every component/integration executable exactly once with
+  `scripts/run_component_tests.sh build` before moving on.
 - Set `status = 'ported'`.
 
 ### Step 4 — Save to DB, commit, and continue
@@ -71,9 +73,12 @@ Then loop back to Step 1 for the next item. **Do not stop between items to ask t
 | `todo` | Will be ported |
 | `ported` | Done, satisfies the checklist |
 | `ignore` | Skip (out of scope or irrelevant) |
+| `ignored` | Legacy classified value already present in the database; do not introduce or mechanically rename it |
 | `tobedecided` | Ambiguous — deferred for the user to decide by hand later |
 
-> `in_progress` **does not exist** — porting happens directly, with no intermediate state.
+> `in_progress` **does not exist** — porting happens directly, with no
+> intermediate state. `ignored` is retained only for legacy rows; new
+> classifications use `ignore`.
 
 ## When to still stop and ask
 

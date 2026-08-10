@@ -1,0 +1,478 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#pragma once
+#include <any>
+#include <cstdint>
+#include <vector>
+#include <stdexcept>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/Collections/IEnumerator.hpp"
+#include "System/Collections/detail/MutationCounter.hpp"
+
+namespace System::Collections {
+
+    using SharpRuntime::intcs;
+
+/**
+ * @brief Manages a compact array of bit values, represented as Booleans.
+ *
+ * C++ counterpart of .NET System.Collections.BitArray.
+ * Backed by std::vector<bool>.
+ *
+ * @par Mutation versioning and the fail-fast enumerator
+ * Every *effective* mutation -- `Set`, `SetAll`, `Not`, `And`, `Or`, `Xor`,
+ * `LeftShift`, `RightShift`, the `Length` setter, and whole-object assignment --
+ * advances a private 64-bit unsigned mutation counter that `GetEnumerator()`'s
+ * enumerator snapshots at construction and compares for **equality** before
+ * touching storage. A mutation underneath an outstanding enumerator is therefore
+ * reported as `System::InvalidOperationException` rather than read as valid
+ * memory. Operations that throw (an out-of-range index, a negative length or
+ * shift count, a length-mismatched bitwise operand) advance nothing; read-only
+ * operations advance nothing.
+ *
+ * The counter and the snapshot were **32-bit** until ticket **#1789**, which
+ * widened both to `detail::MutationCounter` / `detail::MutationVersion` under
+ * explicit user approval. The pair moved together, deliberately: widening the
+ * container alone would make the guard a silent truncation and leave the 2^32
+ * alias in place while the code claimed otherwise. The measured cost is
+ * `sizeof(BitArray::Enumerator)` **32 -> 40** on LP64; `sizeof(BitArray)` stays
+ * **48**, because the wider counter landed in tail padding the container already
+ * had. **Every consumer must be fully recompiled**, and no linker or sanitizer
+ * diagnostic announces a stale object file. The remaining horizon is 2^64
+ * effective mutations of one instance -- a bound, not an impossibility. See
+ * `docs/CollectionVersionCounterSweep.md` section 20.
+ *
+ * @note No thread-safety guarantee follows from any of this. The counter is a
+ *       plain non-atomic field; concurrent mutation is unsupported.
+ *
+ * @note `begin()`/`end()` return raw `std::vector<bool>` iterators and are
+ *       **not** version-checked. Only the `GetEnumerator()` enumerator is
+ *       fail-fast.
+ */
+class BitArray {
+    std::vector<bool> bits_;
+    /**
+     * 64-bit since ticket #1789. Never a bare integer: `++` on a signed counter
+     * is undefined behaviour at its maximum, and the implicitly declared
+     * assignment operator would transplant the *source's* counter into the
+     * destination, leaving an enumerator apparently valid over storage the
+     * assignment destroyed (`docs/CollectionVersionCounterSweep.md` section 4).
+     */
+    System::Collections::detail::MutationCounter version_;
+
+    /**
+     * Test-only seam (declared in detail/MutationCounter.hpp, never defined in
+     * production) letting a regression position the mutation counter near a boundary.
+     */
+    friend struct SharpRuntime::Testing::CollectionVersionAccess<BitArray>;
+
+    void requireSameLength(const BitArray& other) const {
+        if (bits_.size() != other.bits_.size())
+            throw System::ArgumentException("Array lengths must be the same.");
+    }
+
+    // .NET's real bounds check (BitArray.cs: `(uint)index >= (uint)_bitLength`) throws
+    // System::ArgumentOutOfRangeException; using std::vector<bool>::at() here throws raw
+    // std::out_of_range instead, which code catching the .NET-matching exception type won't
+    // catch.
+    void checkIndex(intcs index) const {
+        if (static_cast<uint32_t>(index) >= static_cast<uint32_t>(bits_.size()))
+            throw System::ArgumentOutOfRangeException("index");
+    }
+
+public:
+    // -----------------------------------------------------------------------
+    // Constructors
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Constructs a BitArray of the given length with all bits set to @p defaultValue.
+     *
+     * C++ counterpart of .NET BitArray(int) and BitArray(int, bool). Real .NET validates
+     * `ArgumentOutOfRangeException.ThrowIfNegative(length)` before allocating.
+     *
+     * Without this check, a negative @p length cast to size_t wraps to a huge value passed
+     * directly to std::vector<bool>'s constructor -- confirmed via a standalone ASan repro
+     * that this is not merely "throws the wrong exception type" but a genuine, exploitable
+     * heap-buffer-overflow: std::vector<bool>'s internal bit-to-word-count calculation
+     * overflows for a size_t(-1)-scale request, silently allocating far less backing storage
+     * than the reported size() implies, so any subsequent element access (even bits_[0]) is a
+     * wild out-of-bounds write into unrelated heap memory (ASan: "heap-buffer-overflow...
+     * WRITE of size 1").
+     * @throws System::ArgumentOutOfRangeException if @p length is negative.
+     */
+    explicit BitArray(intcs length, bool defaultValue = false) {
+        if (length < 0) throw System::ArgumentOutOfRangeException("length", "Non-negative number required.");
+        bits_.assign(static_cast<size_t>(length), defaultValue);
+    }
+
+    /**
+     * @brief Constructs a BitArray from a vector of bool values.
+     *
+     * C++ counterpart of .NET BitArray(bool[]).
+     */
+    explicit BitArray(const std::vector<bool>& values) : bits_(values) {}
+
+    /**
+     * @brief Constructs a BitArray from a vector of bytes, unpacking each byte into 8 bits (LSB-first).
+     *
+     * C++ counterpart of .NET BitArray(byte[]).
+     */
+    explicit BitArray(const std::vector<SharpRuntime::bytecs>& bytes) {
+        bits_.reserve(bytes.size() * 8);
+        for (auto b : bytes)
+            for (int i = 0; i < 8; ++i)
+                bits_.push_back((b >> i) & 1);
+    }
+
+    /**
+     * @brief Constructs a BitArray from a vector of int values, unpacking each int into 32 bits (LSB-first).
+     *
+     * C++ counterpart of .NET BitArray(int[]).
+     */
+    explicit BitArray(const std::vector<SharpRuntime::intcs>& values) {
+        bits_.reserve(values.size() * 32);
+        for (auto v : values)
+            for (int i = 0; i < 32; ++i)
+                bits_.push_back((static_cast<uint32_t>(v) >> i) & 1u);
+    }
+
+    // -----------------------------------------------------------------------
+    // Properties
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Gets the number of bits in the BitArray.
+     *
+     * C++ counterpart of .NET BitArray.Length.
+     */
+    [[nodiscard]] intcs getLengthProperty() const { return static_cast<intcs>(bits_.size()); }
+
+    /**
+     * @brief Sets the number of bits in the BitArray, growing or truncating as needed.
+     *
+     * C++ counterpart of .NET BitArray.Length setter. New bits introduced by growth are false.
+     * @throws System::ArgumentOutOfRangeException if @p length is negative.
+     */
+    void setLengthProperty(intcs length) {
+        if (length < 0) throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
+        bits_.resize(static_cast<size_t>(length), false);
+        ++version_;
+    }
+
+    /**
+     * @brief Gets the number of elements (bits) in the BitArray.
+     *
+     * C++ counterpart of .NET BitArray.Count.
+     */
+    [[nodiscard]] intcs getCountProperty()  const { return getLengthProperty(); }
+
+    /**
+     * @brief Returns false; BitArray is never read-only.
+     *
+     * C++ counterpart of .NET BitArray.IsReadOnly.
+     */
+    [[nodiscard]] bool getIsReadOnlyProperty() const { return false; }
+
+    /**
+     * @brief Returns false; BitArray is not thread-safe.
+     *
+     * C++ counterpart of .NET BitArray.IsSynchronized.
+     */
+    [[nodiscard]] bool getIsSynchronizedProperty() const { return false; }
+
+    /**
+     * @brief Gets an object that can be used to synchronize access to the BitArray.
+     *
+     * C++ counterpart of .NET BitArray.SyncRoot.
+     */
+    [[nodiscard]] const void* getSyncRootProperty() const { return this; }
+
+    // -----------------------------------------------------------------------
+    // Element access
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Returns the value of the bit at the given index.
+     *
+     * C++ counterpart of .NET BitArray.Get(int).
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or >= Length.
+     */
+    [[nodiscard]] bool Get(intcs index) const { checkIndex(index); return bits_[static_cast<size_t>(index)]; }
+
+    /**
+     * @brief Sets the bit at the given index to the specified value.
+     *
+     * C++ counterpart of .NET BitArray.Set(int, bool).
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or >= Length.
+     */
+    void Set(intcs index, bool value) {
+        checkIndex(index);
+        bits_[static_cast<size_t>(index)] = value;
+        ++version_;
+    }
+
+    /**
+     * @brief Sets all bits in the BitArray to the specified value.
+     *
+     * C++ counterpart of .NET BitArray.SetAll(bool).
+     */
+    void SetAll(bool value) {
+        std::fill(bits_.begin(), bits_.end(), value);
+        ++version_;
+    }
+
+    /**
+     * @brief Returns the value of the bit at index @p i.
+     *
+     * C++ counterpart of .NET BitArray[int].
+     * @throws System::ArgumentOutOfRangeException if @p i is negative or >= Length.
+     */
+    bool operator[](intcs i) const { checkIndex(i); return bits_[static_cast<size_t>(i)]; }
+
+    // -----------------------------------------------------------------------
+    // Bitwise operations
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Performs a bitwise AND of this BitArray with @p other in place.
+     *
+     * C++ counterpart of .NET BitArray.And(BitArray).
+     * @throws System::ArgumentException if @p other's length differs from this BitArray's length.
+     */
+    BitArray& And(const BitArray& other) {
+        requireSameLength(other);
+        for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] && other.bits_[i];
+        ++version_;
+        return *this;
+    }
+
+    /**
+     * @brief Performs a bitwise OR of this BitArray with @p other in place.
+     *
+     * C++ counterpart of .NET BitArray.Or(BitArray).
+     * @throws System::ArgumentException if @p other's length differs from this BitArray's length.
+     */
+    BitArray& Or(const BitArray& other) {
+        requireSameLength(other);
+        for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] || other.bits_[i];
+        ++version_;
+        return *this;
+    }
+
+    /**
+     * @brief Performs a bitwise XOR of this BitArray with @p other in place.
+     *
+     * C++ counterpart of .NET BitArray.Xor(BitArray).
+     * @throws System::ArgumentException if @p other's length differs from this BitArray's length.
+     */
+    BitArray& Xor(const BitArray& other) {
+        requireSameLength(other);
+        for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] != other.bits_[i];
+        ++version_;
+        return *this;
+    }
+
+    /**
+     * @brief Inverts all bit values in this BitArray in place.
+     *
+     * C++ counterpart of .NET BitArray.Not().
+     */
+    BitArray& Not() {
+        for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = !bits_[i];
+        ++version_;
+        return *this;
+    }
+
+    /**
+     * @brief Shifts all bits left (toward higher index) by @p count positions in place.
+     *
+     * C++ counterpart of .NET BitArray.LeftShift(int).
+     * Vacated low positions are set to false.
+     * @throws System::ArgumentOutOfRangeException if @p count is negative.
+     */
+    BitArray& LeftShift(intcs count) {
+        if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+        intcs len = static_cast<intcs>(bits_.size());
+        for (intcs i = len - 1; i >= 0; --i)
+            bits_[static_cast<size_t>(i)] = (i >= count) ? static_cast<bool>(bits_[static_cast<size_t>(i - count)]) : false;
+        ++version_;
+        return *this;
+    }
+
+    /**
+     * @brief Shifts all bits right (toward lower index) by @p count positions in place.
+     *
+     * C++ counterpart of .NET BitArray.RightShift(int).
+     * Vacated high positions are set to false.
+     * @throws System::ArgumentOutOfRangeException if @p count is negative.
+     */
+    BitArray& RightShift(intcs count) {
+        if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+        intcs len = static_cast<intcs>(bits_.size());
+        for (intcs i = 0; i < len; ++i)
+            bits_[static_cast<size_t>(i)] = (i + count < len) ? static_cast<bool>(bits_[static_cast<size_t>(i + count)]) : false;
+        ++version_;
+        return *this;
+    }
+
+    // -----------------------------------------------------------------------
+    // Query
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Returns the number of bits set to true in the BitArray.
+     *
+     * C++ counterpart of .NET BitArray.PopCount().
+     */
+    [[nodiscard]] intcs PopCount() const {
+        intcs count = 0;
+        for (bool b : bits_) if (b) ++count;
+        return count;
+    }
+
+    /**
+     * @brief Returns true if every bit in the array is set to 1.
+     *
+     * C++ counterpart of .NET BitArray.HasAllSet().
+     */
+    [[nodiscard]] bool HasAllSet() const {
+        for (bool b : bits_) if (!b) return false;
+        return true;
+    }
+
+    /**
+     * @brief Returns true if at least one bit in the array is set to 1.
+     *
+     * C++ counterpart of .NET BitArray.HasAnySet().
+     */
+    [[nodiscard]] bool HasAnySet() const {
+        for (bool b : bits_) if (b) return true;
+        return false;
+    }
+
+    // -----------------------------------------------------------------------
+    // Copy / clone
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Copies all bits into a bool vector (resized to match).
+     *
+     * C++ counterpart of .NET BitArray.CopyTo(Array, int) for bool arrays.
+     */
+    void CopyTo(std::vector<bool>& dest) const { dest = bits_; }
+
+    /**
+     * @brief Copies bits packed into bytes (LSB-first per byte) into a byte vector.
+     *
+     * C++ counterpart of .NET BitArray.CopyTo(Array, int) for byte arrays.
+     */
+    void CopyTo(std::vector<SharpRuntime::bytecs>& dest) const {
+        size_t byteCount = (bits_.size() + 7) / 8;
+        dest.assign(byteCount, 0);
+        for (size_t i = 0; i < bits_.size(); ++i)
+            if (bits_[i]) dest[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
+    }
+
+    /**
+     * @brief Returns a copy of this BitArray.
+     *
+     * C++ counterpart of .NET BitArray.Clone().
+     */
+    [[nodiscard]] BitArray Clone() const { return BitArray(bits_); }
+
+    // -----------------------------------------------------------------------
+    // Enumerator
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Enumerates over each bool value in the BitArray.
+     *
+     * getCurrentProperty() returns std::any holding a copy of the current bit;
+     * recover it with std::any_cast<bool>.
+     *
+     * @par Layout, and why it changed
+     * This is a **public** nested class, so a consumer can name and store one --
+     * although every use in this repository hands it out as an `IEnumerator*`
+     * from `GetEnumerator()`. Ticket **#1789** widened its version snapshot from
+     * 32 to 64 bits so that it matches the counter it compares against, which
+     * grew `sizeof(Enumerator)` from **32 to 40** bytes on LP64. There is no
+     * member order that avoids it: nine bytes are needed after an eight-byte
+     * snapshot where eight were available. Every consumer must be recompiled.
+     */
+    class Enumerator : public IEnumerator {
+        const BitArray* arr_;
+        /**
+         * Exactly as wide as the counter it is compared against. A narrower
+         * snapshot would make the guard a silent truncation, which is the 2^32
+         * alias ticket #1789 closed.
+         */
+        System::Collections::detail::MutationVersion version_;
+        intcs index_ = -1;
+        // Not `mutable`: since ticket #1793 getCurrentProperty() returns a copy
+        // rather than a pointer, so a const member function no longer needs a
+        // non-const view of this cache.
+        bool current_ = false;
+        detail::EnumeratorState state_;
+    public:
+        /** @brief Captures the source array and its current mutation version. */
+        explicit Enumerator(const BitArray* arr) : arr_(arr), version_(arr->version_) {}
+        bool MoveNext() override {
+            detail::requireUnmodified(version_ == arr_->version_);
+            if (state_.isAfterLast()) return false;
+
+            const intcs len = arr_->getLengthProperty();
+            const intcs next = index_ + 1;
+            if (next < len) {
+                index_ = next;
+                current_ = arr_->Get(index_);
+                state_.setCurrent();
+                return true;
+            }
+
+            index_ = len;
+            state_.setAfterLast();
+            return false;
+        }
+        void Reset() override {
+            detail::requireUnmodified(version_ == arr_->version_);
+            index_ = -1;
+            current_ = false;
+            state_.Reset();
+        }
+        /**
+         * @brief Returns the current bit value, boxed; recover with std::any_cast<bool>.
+         *
+         * Modifying the copy no longer desynchronises the enumerator from the
+         * array it is walking, which the pre-#1793 pointer to the `mutable`
+         * cache permitted.
+         */
+        [[nodiscard]] std::any getCurrentProperty() const override {
+            state_.requireCurrent();
+            return std::any(current_);
+        }
+    };
+
+    /**
+     * @brief Returns a heap-allocated Enumerator; caller takes ownership.
+     *
+     * C++ counterpart of .NET BitArray.GetEnumerator(). The enumerator rejects
+     * Current before start/after end and fails fast from MoveNext/Reset after
+     * this BitArray is mutated.
+     */
+    [[nodiscard]] IEnumerator* GetEnumerator() { return new Enumerator(this); }
+
+    // -----------------------------------------------------------------------
+    // Range-based for support
+    // -----------------------------------------------------------------------
+
+    /** @brief Returns an iterator to the beginning of the bit sequence. */
+    auto begin() const { return bits_.begin(); }
+    /** @brief Returns an iterator past the end of the bit sequence. */
+    auto end()   const { return bits_.end(); }
+};
+
+} // namespace System::Collections

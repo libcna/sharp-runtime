@@ -1,0 +1,689 @@
+<!-- SPDX-License-Identifier: MIT -->
+<!-- Copyright (c) Robert Vokac and contributors -->
+
+# `Threading.Tasks` + `Threading.Channels` namespace review
+
+**Ticket #1964** (`REVIEW-THREADING-TASKS-CHANNELS`, P2, size M, **review/design**).
+Written 2026-08-03 on branch `feature/remediation-batch-threading-1951-1955`, immediately
+after tickets #1951–#1955 closed the compatible half of the `System::Threading` namespace
+review (`docs/ThreadingNamespaceReviewPlan.md`).
+
+This is the follow-on review that document's §4 and §13.1 named: *"`Threading.Tasks` (3 open)
+and `Threading.Channels` (3 open) are excluded. They are separate components with their own
+dependency edges … They are the natural follow-on review, not part of this one."*
+
+It issues **no new `SR-AUD-*` identifier** — audit numbering stays frozen at **364** — and
+marks **no finding remediated merely because it is planned**. Newly discovered defects, if
+any, get ordinary inactive tickets.
+
+---
+
+## 1. Why these two together, and why now
+
+`System::Threading`'s compatible queue is drained: #1947–#1949 and #1951–#1955 closed nineteen
+of its 38 findings, and the seventeen that remain are owned by the four approval-gated design
+tickets #1956–#1959 plus verification ticket #1963. Nothing further can land there without a
+user decision.
+
+These two components are reviewed as **one unit** because they are one dependency chain and
+one problem domain:
+
+```
+Core.Base ──► Threading ──► Threading.Tasks ──► Threading.Channels
+```
+
+`Threading.Channels` is an **INTERFACE** target whose only public dependency is
+`Threading.Tasks`; every channel operation returns a `Task`/`TaskT`. Reviewing channels
+without tasks would mean reviewing a caller without its callee. Combined, they are **six open
+findings across nineteen headers** — small enough for one plan, too coupled to split.
+
+---
+
+## 2. Scope and file inventory
+
+| Component | Target | Type | `PUBLIC_DEPENDENCIES` |
+|---|---|---|---|
+| `Threading.Tasks` | `sharp_runtime_threading_tasks` | STATIC | `Core.Base Threading` |
+| `Threading.Channels` | `sharp_runtime_threading_channels` | **INTERFACE** | `Core.Base Threading.Tasks` |
+
+| Kind | Count | Location |
+|---|---|---|
+| Public headers, `System::Threading::Tasks` | 14 | `modules/threading-tasks/include/System/Threading/Tasks/*.hpp` |
+| Public headers, `System` (module-owned) | 1 | `IAsyncDisposable.hpp` |
+| Public headers, `System::Threading::Channels` | 4 | `modules/threading-channels/include/System/Threading/Channels/*.hpp` |
+| Implementation bodies | 3 | `TaskCanceledException.cpp`, `TaskScheduler.cpp`, `TaskSchedulerException.cpp` — all in `threading-tasks`; **`threading-channels` has none** |
+| Test translation units | 2 | `TasksTests.cpp` (171 `TEST`s), `ChannelTests.cpp` (39 `TEST`s) |
+| Total header lines | 3,015 | both trees |
+
+Two structural facts drive everything below.
+
+1. **`Threading.Channels` is header-only by construction** — an INTERFACE target with no
+   `src/`. Every member is inline, so *every* layout question there is consumer-visible, with
+   no `.cpp` containment at all. This is the same constraint `docs/ThreadingNamespaceReviewPlan.md`
+   §2 identified for `System::Threading`, and here it is absolute.
+2. **`Task` is a dependency of two other modules' open findings.** SR-AUD-263
+   (`Net.Sockets`) and SR-AUD-310 (`Net.Http`) both name `Task.hpp` among their sources: both
+   are raw-`this` captures in asynchronous methods built on `Task`. Any change to `Task`'s
+   ownership model interacts with them. They are **not** members of this review (§4), but a
+   `Task` repair must not make either harder.
+
+---
+
+## 3. Confirmed finding inventory (all six)
+
+Status re-derived from `audit/AUDIT_FINDINGS_INDEX.md` on 2026-08-03 **and re-checked against
+current source for this review**. All six still reproduce; none is a duplicate, none is stale,
+none rests on a false premise.
+
+| ID | Sev | Type | Defect | Verified in current source |
+|---|---|---|---|---|
+| SR-AUD-230 | **high** | `TaskCanceledException` | `getTaskProperty()` returns a `const Task*` stored at construction; ASan reports `stack-use-after-scope` when the source `Task` has gone | `TaskCanceledException.hpp:20` `const Task* canceledTask_ = nullptr;`, `:56` returns it unguarded. The header *documents* the hazard, which does not make it safe |
+| SR-AUD-231 | med | `Task`, `TaskT`, `TaskFactory` | `Run` and `ContinueWith` accept an empty `std::function` and fault asynchronously with `bad_function_call`; .NET throws `ArgumentNullException` synchronously | `Task.hpp:342` `static Task Run(std::function<void()> action) { return Task(std::move(action)); }` — no check; same for `:345`, `:299`, `:792`, `:840` |
+| SR-AUD-232 | med | `Parallel` | `MaxDegreeOfParallelism <= 0` is silently rewritten to `hardware_concurrency()`; .NET rejects everything below −1 | `Parallel.hpp:164-166`, `if (maxDeg <= 0) maxDeg = hardware_concurrency();` in the options overload |
+| SR-AUD-233 | med | `BoundedChannelOptions`, `Channel` | capacity 0 becomes a one-element buffer; .NET's zero-capacity channel is a **rendezvous** channel | `Channel.hpp:161` `effectiveCapacity() { return capacity == 0 ? 1 : capacity; }`, used at `:239` and `:277` |
+| SR-AUD-234 | med | `ChannelReader::ReadAsync` | rethrows the writer's completion error directly; .NET throws `ChannelClosedException` **with that error as `InnerException`** | `Channel.hpp` default `ReadAsync()` propagates the stored exception unwrapped; the sibling `WaitToReadAsync`/`WaitToWriteAsync`/`Completion` paths are correct |
+| SR-AUD-235 | med | `BoundedChannelOptions` | `FullMode` is a **public mutable enum field** with no validation; `static_cast<BoundedChannelFullMode>(99)` lets a capacity-1 channel reach `Count == 2` | `ChannelOptions.hpp:39` `BoundedChannelFullMode FullMode = BoundedChannelFullMode::Wait;` — a bare public data member |
+
+### 3.1 Corrections and observations recorded rather than absorbed
+
+1. **SR-AUD-235's repair is blocked by the field's *shape*, not by its logic.** `FullMode` is a
+   public data member, so there is nowhere to put a check. Validating it requires converting it
+   to `getFullModeProperty()`/`setFullModeProperty()` — a **public source break** for every
+   consumer that writes `opts.FullMode = …`. The finding does not say this; it is the single
+   most important fact about repairing it, and it is why §8 gates SR-AUD-235 on approval while
+   the other four validation findings are compatible.
+2. **SR-AUD-233's repair changes a *documented and tested* behaviour.** The report itself says
+   *"the two existing zero-capacity tests lock in the incompatible native behavior"*. Those
+   tests must be rewritten, not merely added to. Under this repository's "no test may be
+   weakened to go green" rule, replacing an assertion that pins wrong behaviour is legitimate,
+   but it must be called out in the ticket rather than done quietly.
+3. **`Parallel` uses `std::thread::hardware_concurrency()` and that is *not* a CLAUDE.md
+   violation.** The build-resource policy forbids a runtime core count "used to choose a
+   **build-job** count". `Parallel::For` choosing a *worker* count at runtime is a different
+   thing entirely and is what .NET's own default does. Recorded here so the next reader does
+   not report it. (SR-AUD-232 is about rejecting invalid *explicit* values, not about the
+   default.)
+4. **SR-AUD-231's site count is larger than the finding's two named entries.** `Run` and
+   `ContinueWith` are named; the same unchecked route exists on `Task::Run(action, token)`,
+   `TaskT<T>`'s `ContinueWith` overloads, and `TaskFactory::StartNew` — the finding's own body
+   says so ("inherited by generic `TaskT` and `TaskFactory::StartNew` overloads"). The
+   implementing ticket must enumerate every entry by measurement, exactly as #1951 did for
+   `System::Threading`'s seven.
+5. **`Parallel`'s empty-body case is recorded in SR-AUD-232's report but is a T-B/CCF-011
+   shape, not a domain-validation one** ("an empty `std::function` becomes an aggregate of
+   delayed `bad_function_call` exceptions"). It belongs with SR-AUD-231's repair, not with the
+   degree-of-parallelism repair.
+
+---
+
+## 4. Findings that are *not* in this review's queue
+
+- **SR-AUD-263 (`Net.Sockets`) and SR-AUD-310 (`Net.Http`)** name `Task.hpp` among their
+  sources, but their defect is a raw-`this` capture in *their own* asynchronous methods, not in
+  `Task`. They belong to their own modules' reviews. Recorded because a `Task` ownership change
+  would touch them (§2).
+- **`System::Threading`'s seventeen remaining findings** — owned by #1956–#1959 and #1963.
+- **`ExecutionContext` asynchronous flow, reflection, GC and serialization** — CLAUDE.md
+  permanent deviations, unchanged here.
+- **`ValueTask`, `TaskScheduler`, `TaskExtensions`, `UnobservedTaskExceptionEventArgs`,
+  `ConfigureAwaitOptions`, `IAsyncDisposable`, `TaskStatus`, `TaskCreationOptions`,
+  `TaskContinuationOptions`, `TaskSchedulerException`, `ChannelClosedException`,
+  `BoundedChannelFullMode`** — audited, **no open finding**. Not re-opened here.
+
+---
+
+## 5. Shared root causes
+
+Four causes account for all six findings. **Three of the four are new sites of causes this
+repository has already closed elsewhere**, which is the highest-leverage part of this review.
+
+### TC-A — empty callables cross public boundaries (1 finding, many sites)
+
+`SR-AUD-231` (+ `Parallel`'s empty body, §3.1 item 5).
+
+This is **CCF-011 in a third module**, after `core` (#1866–#1870) and `threading` (#1951). The
+policy in `docs/EmptyCallableBoundaryPlan.md` applies verbatim and nothing needs designing: a
+delegate *argument* is rejected at the boundary with `System::ArgumentNullException` carrying
+.NET's own parameter name (`action`, `continuationAction`, `body`, `function`).
+
+The severity here matches `threading`'s: the failure is not merely deferred, it moves to a
+**background thread** and reappears as an ordinary task fault, so a caller sees a task that
+failed rather than a call that was wrong.
+
+### TC-B — public arguments are not validated at the boundary (3 findings)
+
+`SR-AUD-232, 233, 235`
+
+Non-callable arguments outside their .NET domain: a `MaxDegreeOfParallelism` below −1, a
+zero capacity silently reinterpreted, an undeclared `BoundedChannelFullMode`. Same cause as
+`System::Threading`'s T-C, and the same selected repair — validate at entry, in .NET's order,
+with .NET's exception type and parameter name.
+
+**But one member is not compatible.** SR-AUD-235's `FullMode` is a public data member (§3.1
+item 1), so validating it at all requires a property pair. That is a public source break and
+is gated in §8.
+
+### TC-C — an API-specific exception boundary is lost (1 finding)
+
+`SR-AUD-234`
+
+`ReadAsync` lets the writer's completion error escape instead of wrapping it in
+`ChannelClosedException`. This is the same *shape* as the closed **CCF-004-adjacent** exception
+taxonomy work and as SR-AUD-034's network-exception propagation (#1932): the inner cause must
+be preserved while the API-specific outer type is restored. `ChannelClosedException` already
+has the inner-exception constructor the repair needs, which the audit confirms.
+
+### TC-D — a borrowed raw pointer outlives its owner (1 finding)
+
+`SR-AUD-230`
+
+This is **CCF-019's cause** at a third site, after `JsonNode`/`Xml.Linq` (approvals declined,
+#1888/#1889/#1896/#1899) and `System::Threading`'s two members (#1959, blocked). The precedent
+is directly binding: every previous member of this family either broke public source or was
+resolved by documenting the contract. `TaskCanceledException` already *documents* it — and the
+audit's explicit position is that documenting does not make the ordinary public
+exception/property interaction safe.
+
+---
+
+## 6. Dependency graph
+
+```
+    TC-A (empty callables)  ──── independent; reuses closed CCF-011 policy
+    TC-B/1 (Parallel degree) ─── independent
+    TC-C (ReadAsync wrapper) ─── independent
+                    │
+                    ▼
+    TC-B/2 (zero capacity) ───► must land AFTER TC-C: both change what ReadAsync/TryRead
+                                do at the channel's boundary, and both rewrite the same
+                                ChannelTests cases
+                    ▼
+    TC-B/3 (FullMode)     ─────► public source break; design-first, approval-gated
+    TC-D (Task pointer)   ─────► public source break; design-first, approval-gated
+```
+
+TC-A and TC-B/1 touch disjoint files from the channel work and may proceed in parallel with
+it; the order above is by risk and by edit collision, not by compilation dependency.
+
+---
+
+## 7. Implementation versus design-first classification
+
+| Cause | Classification | Rationale |
+|---|---|---|
+| **TC-A** | **implement** (policy already approved) | `docs/EmptyCallableBoundaryPlan.md` applies verbatim; no new decision |
+| **TC-B/1** (SR-AUD-232) | **implement** | validation only; .NET's domain, not a choice |
+| **TC-C** (SR-AUD-234) | **implement** | restores an API-specific exception while preserving the cause; the constructor already exists |
+| **TC-B/2** (SR-AUD-233) | **implement, with a documented test rewrite** | changes behaviour two existing tests pin (§3.1 item 2) |
+| **TC-B/3** (SR-AUD-235) | **design-first, approval-gated** | needs a property pair → public source break |
+| **TC-D** (SR-AUD-230) | **design-first, approval-gated** | ownership contract on a public property → public source break, CCF-019 precedent |
+
+---
+
+## 8. Source / ABI / layout approval matrix
+
+| Cause | Public signature | Vtable | Object layout | Accepted input | Observable result | Approval |
+|---|---|---|---|---|---|---|
+| TC-A | — | — | — | empty callable now rejected | `ArgumentNullException` replaces an asynchronous `bad_function_call` | none (CCF-011) |
+| TC-B/1 | — | — | — | degree < −1 and 0 now rejected | `ArgumentOutOfRangeException` replaces a silent core-count substitution | none |
+| TC-C | — | — | — | — | `ChannelClosedException` with the cause as inner, replacing the bare cause | none |
+| TC-B/2 | — | — | — | — | capacity 0 becomes a rendezvous channel; `TryWrite`/`TryRead` return `false` without a peer | none, **but two existing tests are rewritten** |
+| TC-B/3 | **yes** (`FullMode` field → property pair) | — | possible | undeclared mode now rejected | `ArgumentOutOfRangeException` on assignment | **required** |
+| TC-D | **yes** (`const Task*` → an owning handle) | — | possible | — | ownership transfer | **required** |
+
+---
+
+## 9. Explicit approval requirements
+
+Two questions, stated so either can be approved independently. Neither is asked during
+implementation; both are recorded here.
+
+1. **TC-B/3 — `BoundedChannelOptions::FullMode` becomes a property pair.** May the public
+   mutable field `FullMode` be replaced by `getFullModeProperty()`/`setFullModeProperty()` so
+   an undeclared `BoundedChannelFullMode` can be rejected with `ArgumentOutOfRangeException` on
+   assignment, as .NET does? Every consumer writing `opts.FullMode = …` must be edited. This is
+   a **public source break** with no ABI-compatible alternative: a bare data member has nowhere
+   to put a check.
+2. **TC-D — `TaskCanceledException`'s task pointer.** May `getTaskProperty()` stop returning a
+   borrowed `const Task*`, in favour of an owning handle (or of removing the accessor), so the
+   ASan-confirmed `stack-use-after-scope` becomes unreachable? This is the same class of change
+   as #1959 and the same family (CCF-019) whose `Xml.Linq` and `JsonNode` members were
+   **declined**; the fallback if declined is the one #1899 took — document the contract and pin
+   it with a negative consumer fixture — except that here the contract is *already* documented
+   and the audit has already rejected documentation as sufficient, so declining leaves the
+   finding open with a completed design and no further work available.
+
+---
+
+## 10. Test and sanitizer strategy
+
+| Cause | Required cases | Sanitizers |
+|---|---|---|
+| TC-A | per entry: empty callable rejected at entry with .NET's parameter name; the first valid callable unaffected; **no task started and no continuation registered before the throw**; the exception is catchable as `System::Exception` — which `bad_function_call` was not | — |
+| TC-B/1 | degrees −2, −1, 0, 1, and a value above the core count; assert the invalid ones run **no body at all** | — |
+| TC-C | error-completed FIFO **and** prioritized channels: `ReadAsync` throws `ChannelClosedException` and its inner exception is the writer's original; `WaitToReadAsync`/`WaitToWriteAsync`/`Completion` keep exposing the cause unwrapped, as they correctly do today | — |
+| TC-B/2 | rendezvous with and without a blocked peer; `TryWrite`/`TryRead` return `false` with no peer; a blocked reader is handed the writer's item; **the two capacity-one expectations in the existing zero-capacity tests are replaced, not deleted** | — |
+| TC-B/3 | every undeclared mode rejected on assignment and at construction; each declared mode still selects its documented behaviour; `Count` never exceeds `Capacity` | — |
+| TC-D | the ASan probe that reports `stack-use-after-scope` today reports nothing after | **ASan required** (the finding *is* an ASan report), **LSan required** (an owning handle must not convert a use-after-free into a leak) |
+
+Channels are inherently concurrent, so every channel ticket additionally runs its focused
+suite under **TSan**, and the batch's standing threading axes apply: zero/one/maximum counts,
+timeout zero and infinite, cancellation before entry, during wait and after release,
+signal-before-wait and wait-before-signal, spurious wake-ups, disposal while idle and while
+waiting, lost wake-ups, duplicate releases, and counter preservation after failure.
+
+The focused executables are `./build/SharpRuntimeTests_Threading_Tasks` and
+`./build/SharpRuntimeTests_Threading_Channels`. No test may be weakened or deleted to go
+green; the two rewrites in TC-B/2 are replacements of assertions that pin *wrong* behaviour and
+must be identified as such in the commit.
+
+---
+
+## 11. Recommended ticket order
+
+| # | Ticket | Cause | Findings | Status at creation |
+|---|---|---|---|---|
+| 1 | **#1965** apply the CCF-011 empty-callable policy to Threading.Tasks | TC-A | SR-AUD-231 (+ `Parallel` body) | `todo` |
+| 2 | **#1966** validate Parallel's MaxDegreeOfParallelism | TC-B/1 | SR-AUD-232 | `todo` |
+| 3 | **#1967** ReadAsync must throw ChannelClosedException with the cause inside | TC-C | SR-AUD-234 | `todo` |
+| 4 | **#1968** a zero-capacity channel is a rendezvous, not a one-element buffer | TC-B/2 | SR-AUD-233 | `todo` |
+| 5 | **#1969** DESIGN: BoundedChannelOptions::FullMode must be validatable | TC-B/3 | SR-AUD-235 | `blocked` (approval 1) |
+| 6 | **#1970** DESIGN: TaskCanceledException's borrowed task pointer (CCF-019) | TC-D | SR-AUD-230 | `blocked` (approval 2) |
+
+Tickets 1–4 need no approval, no layout measurement and no new design, exactly like
+#1951–#1954 in the predecessor review. #1965 is first because it is the largest and reuses a
+policy that is already written down; #1967 precedes #1968 because both rewrite the same
+`ChannelTests` cases.
+
+---
+
+## 12. Explicit exclusions
+
+1. **`Net.Sockets`' SR-AUD-263 and `Net.Http`' SR-AUD-310**, which merely *name* `Task.hpp`
+   (§4).
+2. **Asynchronous continuation scheduling parity** — this port's `ContinueWith` runs its
+   continuation on the completing thread rather than through a scheduler; that is a documented
+   adaptation with no finding, and it is not made one here.
+3. **`TaskScheduler` as a real scheduler** — the port has no thread-pool scheduler and the
+   header says so. No finding.
+4. **`ValueTask`'s allocation-avoidance guarantee** — meaningless without .NET's
+   `IValueTaskSource`; documented, no finding.
+5. **`Parallel`'s `std::thread::hardware_concurrency()` default** — correct, and *not* a
+   CLAUDE.md build-resource-policy violation (§3.1 item 3).
+6. **`ChannelReader`'s `enable_shared_from_this` requirement** — a deliberate lifetime design
+   already documented in the header, and the thing that makes the default `ReadAsync()` safe.
+   No finding, and TC-C must not disturb it.
+
+---
+
+## 13. Completion criteria
+
+`Threading.Tasks` + `Threading.Channels` is closed when:
+
+1. all six findings are `remediated`, or `confirmed` with a completed design and a named
+   blocked ticket carrying an exact approval request;
+2. no public entry point in either component reaches `std::bad_function_call`, an unwrapped
+   library exception, or a dangling pointer for any input a caller can supply;
+3. both focused executables grow monotonically and no test is weakened — the two TC-B/2
+   rewrites being replacements of wrong-behaviour assertions, identified as such;
+4. the module graph stays **41 / 91** — no repair above needs a new edge, since
+   `ArgumentNullException`, `ArgumentOutOfRangeException` and `ChannelClosedException` are all
+   already reachable;
+5. every layout- or signature-affecting change quotes measured before/after `sizeof`/`alignof`
+   and carries its own explicit approval.
+
+---
+
+## 14. Status
+
+Written 2026-08-03. **This document changed no production source and closed no finding.**
+Tickets **#1965–#1968** are `todo` and unstarted; **#1969** and **#1970** are `blocked` on the
+two approvals in §9. The predecessor review's own blocked set — #1956–#1959, with its
+consolidated approval package in `docs/ThreadingNamespaceReviewPlan.md` §20 — is unaffected
+and still awaiting the same user decision.
+
+---
+
+## 15. What #1965 measured, and five corrections to §3 and §5 (2026-08-03)
+
+Ticket **#1965** implemented cause **TC-A** by applying the already-approved CCF-011 policy
+from `docs/EmptyCallableBoundaryPlan.md`. Evidence:
+`build-probe/1965_probe1_tasks_empty_callables.cpp` (37 cases) with logs
+`1965_probe1_before.log`, `1965_probe1_after.log` and `1965_probe1_asan.log`.
+
+### 15.1 §3.1 item 4 was right to warn, and the real number is 22
+
+The finding names two entries; §3.1 item 4 predicted more. Measured, the entries that
+accept an empty callable are **22**, of which **eleven distinct bodies** needed an edit —
+the other eleven inherit the check by forwarding:
+
+| Type | Bodies edited | Inheriting by forwarding | .NET parameter name |
+|---|---|---|---|
+| `Task` | `Task(action)`, `Task(action, token)`, `ContinueWith` | `Run(action)`, `Run(action, token)` | `action` / `continuationAction` |
+| `TaskT<T>` | `TaskT(func)`, `TaskT(func, token)`, both `ContinueWith` overloads | `Run(func)`, `Run(func, token)` | **`function`** / `continuationAction` / `continuationFunction` |
+| `TaskFactory` | — | four `StartNew` overloads (+ `Task::Factory()`) | `action` / `function` |
+| `Parallel` | `For(opts)`, `For(state)`, both `ForEach`, `Invoke` | `For(from,to,body)` | `body` / *(none — see §15.3)* |
+
+`TaskT<TResult>`'s result-producing `ContinueWith` takes an **unconstrained callable
+type**, not a `std::function`, so it needed `detail::isEmptyCallable` — a
+`requires`-guarded comparison with `nullptr` that catches `std::function`, function
+pointers and pointers to members, and deliberately never fires for a lambda or functor,
+which has no null state.
+
+### 15.2 §5's TC-A severity claim is wrong for `Parallel` — the failure was catchable
+
+§5 says the failure "reappears as an ordinary task fault, so a caller sees a task that
+failed rather than a call that was wrong", inheriting CCF-011's third consequence: the
+error is outside the `System::Exception` hierarchy and ported
+`catch (const System::Exception&)` code cannot see it.
+
+Measured, that is true for the sixteen `Task`/`TaskT`/`TaskFactory` entries — a bare
+`std::bad_function_call` escaped `Wait()`/`getResultProperty()` — and **false for all six
+`Parallel` entries**: `parallel.for.body=aggregate:bad_function_call`. `Parallel` already
+collected every worker exception into `System::AggregateException`, which *is* a
+`System::Exception`. What was wrong there was the diagnostic and its timing, not the
+catchability.
+
+### 15.3 `Parallel::Invoke` is not an `ArgumentNullException` site
+
+This is `docs/ThreadingNamespaceReviewPlan.md` §17.1 repeating itself in a third module.
+.NET's `Parallel.Invoke(params Action[] actions)` copies the array and rejects a null
+**element** with `new ArgumentException(SR.Parallel_Invoke_ActionNull)` — an
+`ArgumentException` with **no parameter name** — because the null is an element of the
+argument, not the argument. Implemented as
+`ArgumentException("One of the actions was null.")` and pinned by a test that *fails* if
+`ArgumentNullException` is thrown, so the family's usual spelling cannot be restored by a
+later reader.
+
+**Reference-evidence limitation, stated rather than glossed:**
+`/rv/tmp/runtime/src/libraries/` is **not present in this environment**. The per-entry
+parameter names and this exception type come from the .NET API contract for the exact
+overloads listed above rather than from a fresh reading of local source, and the audit's
+own managed probe supplies only the `ArgumentNullException` *category* for `Task.Run` and
+`ContinueWith`. Where the answer was uncertain the conservative choice was taken — the
+**base** `ArgumentException` for `Invoke` — following #1954's precedent for SR-AUD-184.
+
+### 15.4 Two data-dependent silent shapes the finding does not name
+
+- **Zero iterations.** `Parallel::For(0, 0, {})`, both `For` state overloads and both
+  `ForEach` overloads over an empty source returned a normally completed
+  `ParallelLoopResult` with an empty body. Same wrong call, silent or fatal by iteration
+  count — the exact shape `docs/EmptyCallableBoundaryPlan.md` §7.1 recorded for `core`.
+- **An already-cancelled token.** `Task(action, cancelledToken)` and its `TaskT`
+  counterpart short-circuit to Canceled *before* launching, so an empty action produced an
+  ordinary Canceled task and never reported the bad argument. The repair puts the argument
+  check **above** the short circuit, matching .NET's `InternalStartNew`, which validates
+  the delegate before the task exists. This is an intended observable change: a call that
+  used to yield a Canceled task now throws.
+
+### 15.5 `ContinueWith` recorded the continuation before failing
+
+`task.continuewith.registered_before_throw=no-throw|side_effects=1`: the empty
+continuation *was* registered on the antecedent and the returned continuation Task was
+left **faulted**, so `ContinueWith` returned normally and handed back a broken task. The
+check therefore had to precede both the continuation Task's construction and
+`registerContinuation`, which the no-partial-state regressions pin.
+
+### 15.6 An ordering requirement this places on #1966
+
+`ParallelOptions::MaxDegreeOfParallelism` is a **public data member** in this port, so
+#1966 must validate it inside `Parallel::For` rather than at assignment. In .NET the
+invalid degree is rejected by the `ParallelOptions.MaxDegreeOfParallelism` *setter*, which
+necessarily runs **before** `Parallel.For` is called and therefore before .NET's own
+`body` null check. #1966's degree check must consequently be inserted **above** #1965's
+`requireNonEmptyBody` call, not beside it — the same shape as
+`docs/ThreadingNamespaceReviewPlan.md` §17.3's `SpinUntil` constraint on #1954.
+
+### 15.7 Nothing in TC-A touched layout, ABI or a signature
+
+Eleven inline bodies gained an entry check; one new file-local helper
+(`detail::isEmptyCallable`) and one class-private helper (`Parallel::requireNonEmptyBody`)
+were added, neither a data member. No signature, template parameter, default argument,
+virtual, `noexcept` specification or overload set changed. `ArgumentNullException` and
+`ArgumentException` both live in `Core.Base`, which `Threading.Tasks` already depends on
+publicly, so the module graph stays **41 / 91**.
+
+### 15.8 Sanitizers and test count
+
+ASan + UBSan + LSan over all 37 probe cases: **0 reports before, 0 after**, exit 0. This
+was an exception-contract defect, not a memory defect; the sanitizer's role is CCF-011
+§13's leak check on entry points that now throw *after* copying a `std::function` by
+value. Instrumentation was proved, not assumed: 34 `__asan`/`__ubsan` symbols in the
+sanitized binary, 0 in the plain one, and the sanitized run's outcomes are identical to
+the plain run's.
+
+`modules/threading-tasks/tests/System/Threading/Tasks/TasksBoundaryTests.cpp` is a new
+translation unit holding the boundary family's permanent regressions: **+37** cases,
+`SharpRuntimeTests_Threading_Tasks` **171 → 208**, all passing.
+
+**SR-AUD-231: `confirmed` → `remediated`.** Cause TC-A is closed.
+
+---
+
+## 16. What #1966 measured (2026-08-03)
+
+Ticket **#1966** implemented cause **TC-B/1** (SR-AUD-232). Evidence:
+`build-probe/1966_probe1_parallel_degree.cpp`, logs `1966_probe1_before.log`,
+`1966_probe1_after.log`, `1966_probe1_asan.log`. `hardware_concurrency` is **4** here.
+
+### 16.1 The finding reproduced exactly, including its concurrency consequence
+
+Degrees -3, -2 and 0 all returned a normally completed loop that ran every iteration at a
+peak concurrency of 4 -- the machine's core count. Degrees 1 and 2 were already honoured
+exactly (measured peak 1 and 2). The report's second consequence, *"running work at a
+potentially much higher degree than requested"*, is therefore confirmed structurally; its
+magnitude is machine-dependent, and is four here only because this container has four
+cores.
+
+### 16.2 §7's "validation only" classification holds, but not where .NET puts it
+
+§7 classifies TC-B/1 as *implement -- validation only; .NET's domain, not a choice*. That
+is right about the **domain** and understates one thing about the **place**: .NET rejects
+the value in the `ParallelOptions.MaxDegreeOfParallelism` **setter**, so an invalid value
+can never be stored at all. This port's field is a bare public mutable data member -- the
+*same shape problem* §3.1 item 1 identifies for `BoundedChannelOptions::FullMode` -- so
+the check had to move to the entry of the one method that reads it.
+
+The difference from SR-AUD-235 is what makes this one compatible and that one not:
+`Parallel::For` *reads* the option, so there is a public entry at which to check it and
+still reject before any work runs. `BoundedChannelOptions::FullMode` is consulted deep
+inside a write, after the channel exists, so nothing short of a property pair recovers
+.NET's contract. Recorded here because the two look identical at a glance and are not.
+
+### 16.3 The ordering constraint §15.6 predicted was real
+
+Measured on the intermediate tree, with #1965 landed and #1966 not:
+`order.badDegree_and_emptyBody=sysexc:Value cannot be null. (Parameter 'body')`. The degree
+check is inserted **above** `requireNonEmptyBody` and a regression pins it.
+
+### 16.4 One site
+
+Only `For(from, to, ParallelOptions, body)` reads the option -- this port has no `ForEach`
+options overload. The other four loop overloads use `DefaultMaxDegreeOfParallelism()` and
+are untouched; a regression asserts it.
+
+### 16.5 Result
+
+Valid: -1 and every value >= 1. Rejected: 0 and every value <= -2, with `ran = 0` measured
+in every rejecting case, including `INTCS_MIN`. ASan + UBSan + LSan: **0 reports**, exit 0,
+32 sanitizer symbols, outcomes identical to the plain run. **+10** regressions,
+`SharpRuntimeTests_Threading_Tasks` **208 -> 218**. No signature, layout, vtable, `noexcept`
+or edge change; graph stays 41 / 91.
+
+**SR-AUD-232: `confirmed` -> `remediated`.** Cause TC-B/1 is closed.
+
+---
+
+## 17. What #1967 measured, and one correction to §3 (2026-08-03)
+
+Ticket **#1967** implemented cause **TC-C** (SR-AUD-234). Evidence:
+`build-probe/1967_probe1_channel_readasync_closed.cpp` (19 cases) and the round-based
+concurrency probe `build-probe/1967_probe2_channel_tsan.cpp`.
+
+### 17.1 `WriteAsync` is a second site of the same defect -- §3's table is wrong on this
+
+§3's SR-AUD-234 row and the finding both say *"the sibling `WaitToReadAsync`/`WaitToWriteAsync`/
+`Completion` paths are correct"*, which is true, and imply the repair is confined to
+`ReadAsync`, which is not. Measured:
+
+| Path | error-completed, before | clean-completed, before |
+|---|---|---|
+| `ReadAsync` | `std::exception("boom")` | `ChannelClosedException` |
+| **`WriteAsync`** | **`std::exception("boom")`** | `ChannelClosedException` |
+| `WaitToReadAsync` / `WaitToWriteAsync` / `Completion` | `std::exception("boom")` *(correct)* | n/a |
+
+`WriteAsync` is `ReadAsync`'s mirror image and carries the same
+`if (!WaitToXAsync().getResultProperty()) throw ChannelClosedException();` shape; .NET routes
+both through `ChannelUtilities.GetInvalidCompletionValueTask`. Repairing one and not the other
+would leave the port self-inconsistent in the direction the finding is about. Absorbed as the
+same defect at a second site; **no new `SR-AUD-*` identifier**, numbering frozen at 364.
+
+### 17.2 Two contracts that had to be preserved deliberately
+
+- **A subclass's own `ChannelClosedException` is passed through**, not double-wrapped.
+  `ReadAsync`/`WriteAsync` are `virtual` and the wait methods are pure virtual, so a consumer
+  implementation may already report the API-specific type.
+- **Buffered items drain first.** `TryRead` runs before the wait, so an error-completed channel
+  that still holds items hands them over before reporting the closure. Measured before and after
+  (`errorclosed_but_buffered` returns 7 on FIFO and 3 on prioritized). Hoisting the completion
+  check would have broken it silently.
+
+### 17.3 §10's TSan requirement, met with the probe's capability proved first
+
+§10 requires every channel ticket to run its focused scenarios under TSan. Four scenarios x 400
+rounds on a fresh channel per round, completer released by a shared latch: one blocked reader,
+four blocked readers, three writers blocked on a full bounded channel, and a mixed
+`ReadAsync` + `WaitToReadAsync` pair on a prioritized channel.
+
+Following §19.4 of the predecessor plan -- *"a 'TSan reported nothing' result is evidence about
+the probe until the probe has been shown capable of reporting something"* -- the probe was run
+against the **pre-fix** header first: **3,600 wrong outcomes out of 3,600**. Against the repaired
+header: **0**. ThreadSanitizer itself reported **0 data races in both runs**, which is the right
+answer for an exception-contract defect and is only informative because the pre-fix run proves
+the interleaving was reached. Fully instrumented from source (21 `__tsan` symbols); no archive
+linked in. ASan + UBSan + LSan over the 19-case probe: 0 reports, outcomes identical to the plain
+run.
+
+### 17.4 Result
+
+`SharpRuntimeTests_Threading_Channels` **39 -> 52** (+13). `ChannelReader`'s
+`enable_shared_from_this` lifetime design -- §12 item 6's explicit exclusion -- is untouched. No
+signature, layout, vtable, `noexcept` or edge change; graph stays 41 / 91.
+
+**SR-AUD-234: `confirmed` -> `remediated`.** Cause TC-C is closed.
+
+---
+
+## 18. What #1968 measured, and the evidence conflict it had to resolve (2026-08-03)
+
+Ticket **#1968** implemented cause **TC-B/2** (SR-AUD-233). Evidence:
+`build-probe/1968_probe1_zero_capacity.cpp` (24 behavioural cases plus a layout dump) and the
+round-based concurrency probe `build-probe/1968_probe2_rendezvous_tsan.cpp`.
+
+### 18.1 The repository contained two contradictory claims about .NET, and §3 recorded only one
+
+`Channel.hpp`'s `effectiveCapacity()` carried a comment asserting it had been *"verified against
+BoundedChannel.cs's TryWrite"* that a capacity-0 channel *"still buffers one item when no reader
+is synchronously blocked waiting -- i.e. a capacity-0 channel is observably equivalent to a
+capacity-1 channel for every publicly-visible TryWrite/WaitToWriteAsync outcome"*. SR-AUD-233
+says the opposite. §3 of this plan re-verified the finding against current **port** source, which
+confirms the port's behaviour but cannot adjudicate .NET's -- so the conflict survived into this
+ticket.
+
+Resolved in favour of the finding, with the reasoning recorded so the question can be re-opened
+rather than re-derived:
+
+1. The finding's evidence is a **behavioural managed probe** against current .NET; the comment's
+   is a **reading of .NET source**. When the two disagree about an observable, the measurement of
+   the observable wins.
+2. The finding is the later record and was re-checked by #1964 before this ticket was opened.
+3. The comment is self-undermining: it concedes .NET has a direct-hand-off-to-a-blocked-reader
+   path and then asserts that path *"doesn't change any return value"*, which is precisely what
+   the finding's probe contradicts.
+
+**Limitation, stated rather than glossed:** `/rv/tmp/runtime/src/libraries/` is not present in
+this environment, so `BoundedChannel.cs` could not be re-read. The decision rests on the audit's
+managed probe. The repair is confined to `ChannelState`'s capacity predicates plus `TryWrite`,
+`WaitToWriteAsync` and `WaitToReadAsync`, and is revertible without touching a signature. The
+contradicting comment was **replaced**, so the header no longer carries a claim the repository
+has decided against.
+
+This is the mirror image of #1963: there, the previous batch **declined** a repair precisely
+because the report carried *no* managed probe for the row in question. Here the report carries
+one, which is the distinguishing fact, and applying the same rule gives the opposite answer.
+
+### 18.2 The drop modes at capacity 0 are reasoned, not measured
+
+The audit's probe covers only the default `Wait` mode. Measured before: all three drop modes
+accepted a write at capacity 0 and left `Count == 1`. They now discard the item and keep
+`Count == 0`, because that is the only reading consistent with a channel that has no room:
+`DropWrite` drops the incoming item by definition, and with an always-empty buffer the incoming
+item is simultaneously the newest and the oldest.
+
+### 18.3 §8's "object layout: none" needs one qualification
+
+Every **public** type is unchanged and is now pinned by `static_assert`: `Channel<int>` 32,
+`ChannelReader<int>`/`ChannelWriter<int>` 24, `ChannelOptions` 16, `BoundedChannelOptions` 24,
+`detail::ChannelReaderImpl<int>`/`ChannelWriterImpl<int>` 40, all alignment 8.
+
+`detail::ChannelState<int>` grew **240 -> 248** for the waiting-peer counter. §2 item 1 of this
+plan warns that in an INTERFACE target *"every layout question is consumer-visible"*, so the
+growth is recorded rather than waved away -- but it is a `detail`-namespace type that appears in
+no public signature, is reached only through a `shared_ptr` inside the reader/writer
+implementations, and lives in a header-only target where nothing can be linked across versions.
+No approval trigger is reached.
+
+### 18.4 §10's TSan requirement, capability proved first
+
+Four scenarios x 300 rounds on a fresh channel: one reader/one producer, four readers/four
+producers, a completion racing a parked reader, and three writers blocked in `WaitToWriteAsync`
+racing an arriving reader. Every round asserts exact delivery, `Count == 0`, and that no further
+write is accepted once every peer is served.
+
+Pre-fix: **600 wrong outcomes**. Post-fix: **0**. Recorded honestly, the close-while-parked and
+`WaitToWriteAsync`-race scenarios reported **0 in both runs** -- a capacity-1 buffer also
+delivers every item, so only the *"nothing may be buffered"* assertions discriminate between the
+two behaviours. TSan itself: 0 data races in both runs, fully instrumented from source
+(21 `__tsan` symbols, no archive linked). ASan + UBSan + LSan over the surface probe: 0 reports.
+
+### 18.5 The test rewrite §3.1 item 2 required
+
+`ZeroCapacityChannel_TryWrite_SucceedsOnceThenBlocksLikeCapacityOne` and
+`ZeroCapacityChannel_WriteAsync_UnblocksOnceReaderDrains` asserted the incorrect behaviour.
+Both were **replaced, not deleted**: each old test's concern still has a test asserting the
+corrected contract, the replacement is called out in the file itself and in the commit message,
+and twelve further rendezvous cases were added.
+`SharpRuntimeTests_Threading_Channels` **52 -> 64**.
+
+**SR-AUD-233: `confirmed` -> `remediated`.** Cause TC-B/2 is closed, and with it the whole
+compatible half of this review: TC-A, TC-B/1, TC-B/2 and TC-C are all closed, leaving only the
+two approval-gated causes TC-B/3 (#1969) and TC-D (#1970).
+
+---
+
+## 19. A wording correction to §17's consequence summary (2026-08-03, ticket #1972)
+
+Neither #1967 nor its tests are reopened — the implementation is complete and correct,
+and nothing below changes a line of code. This corrects a **summary sentence** only.
+
+The batch handoff that landed #1967 described it as involving *"no exception-contract
+change"*. That sentence collapses three consequences this repository deliberately keeps
+apart, and two of the three readings of it are true while the third is false. The
+accurate statement, split:
+
+| Consequence | #1967 |
+|---|---|
+| public signature or `noexcept` **declaration** change | **none** — no declaration was touched |
+| **ABI** or mangled-symbol change | **none** — both repaired bodies are inline in an `INTERFACE` target |
+| deliberate, observable change in the **exception type crossing an API boundary** | **yes — this was the point of the ticket** |
+
+SR-AUD-234's whole subject is an API-specific exception boundary: before #1967, reading
+from or writing to a closed channel surfaced the raw close error, and after it the error
+is wrapped in `ChannelClosedException` at `ChannelReader<T>::ReadAsync` **and** at
+`ChannelWriter<T>::WriteAsync` (the second site being §17's own correction to the
+finding). A caller therefore catches a **different type** than before. That is an
+exception-*behaviour* change with no exception-*specification* change, and calling it
+"no exception-contract change" without that qualifier understates it.
+
+The historical §17 text is retained unchanged. Recorded here so a future session
+reading the handoff does not conclude that #1967 was behaviour-neutral.

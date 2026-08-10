@@ -1,0 +1,250 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#pragma once
+
+#include <atomic>
+#include <cassert>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentNullException.hpp"
+#include "System/Diagnostics/DebugProvider.hpp"
+
+namespace System::Diagnostics {
+
+    using SharpRuntime::intcs;
+
+    /**
+     * @brief Provides a set of methods and properties that help debug code.
+     *
+     * Partial C++ counterpart of .NET System.Diagnostics.Debug.
+     * In Release builds the Assert/Write/WriteLine methods are compiled out.
+     *
+     * @note Thread safety: GetProvider/SetProvider and the IndentSize property are safe to
+     * call concurrently from any thread. Provider reads take an owning snapshot, so a provider
+     * in use cannot be destroyed by a concurrent SetProvider. IndentLevel is per-thread
+     * (matching .NET's ThreadStatic), so each thread sees only its own. No ordering is
+     * promised between a SetProvider on one thread and a Write on another: a Write may still
+     * route through the previous provider, which is the usual last-writer-wins semantics, not
+     * a race. The provider itself is invoked without any lock held, so a provider that calls
+     * back into Debug does not deadlock -- but a provider must be thread-safe on its own
+     * account if it is installed while other threads are writing.
+     *
+     * @note Status: Partial. Output is routed through a pluggable DebugProvider
+     * (matching .NET's Debug.SetProvider extensibility), and IndentLevel/IndentSize
+     * are tracked and reported to the provider. Unlike .NET, Write/WriteLine do not
+     * automatically prefix output with the current indent — callers that need indented
+     * output should build the prefix themselves from getIndentLevelProperty()/getIndentSizeProperty().
+     */
+    class Debug {
+        /** @brief Guards every access to providerStorage(). */
+        static std::mutex& providerMutex() {
+            static std::mutex mutex;
+            return mutex;
+        }
+
+        static std::shared_ptr<DebugProvider>& providerStorage() {
+            static std::shared_ptr<DebugProvider> provider = std::make_shared<DebugProvider>();
+            return provider;
+        }
+
+        /**
+         * @brief Returns an owning snapshot of the active provider.
+         *
+         * Every read of the provider goes through here rather than dereferencing the global
+         * directly. Returning a shared_ptr *by value* is the point: the caller then owns a
+         * reference for the whole of its call, so a concurrent SetProvider that drops the last
+         * other reference cannot destroy the object mid-use. Before this, TSan reported not
+         * merely a data race on the shared_ptr but a heap-use-after-free inside Debug::Write.
+         *
+         * The lock is released before the caller invokes the provider, so a provider that
+         * calls back into Debug (including SetProvider) cannot deadlock.
+         */
+        static std::shared_ptr<DebugProvider> currentProvider() {
+            std::lock_guard<std::mutex> guard(providerMutex());
+            return providerStorage();
+        }
+
+        static std::atomic<intcs>& indentSizeStorage() {
+            static std::atomic<intcs> size{4};
+            return size;
+        }
+
+        static intcs& indentLevelStorage() {
+            static thread_local intcs level = 0;
+            return level;
+        }
+
+    public:
+        /** @brief Not instantiable — all members are static. */
+        Debug() = delete;
+
+        /**
+         * @brief Gets the provider currently used to route Write/WriteLine/Fail output.
+         *
+         * C++ counterpart of .NET Debug.GetProvider().
+         * @return The active DebugProvider.
+         */
+        static std::shared_ptr<DebugProvider> GetProvider() { return currentProvider(); }
+
+        /**
+         * @brief Installs a new provider to route Write/WriteLine/Fail output, returning the previous one.
+         *
+         * C++ counterpart of .NET Debug.SetProvider(DebugProvider).
+         * @param provider The new provider to install.
+         * @return The previously installed provider.
+         * @throws System::ArgumentNullException if @p provider is null.
+         */
+        static std::shared_ptr<DebugProvider> SetProvider(std::shared_ptr<DebugProvider> provider) {
+            if (!provider)
+                throw System::ArgumentNullException("provider");
+            std::shared_ptr<DebugProvider> previous;
+            {
+                std::lock_guard<std::mutex> guard(providerMutex());
+                previous = providerStorage();
+                providerStorage() = std::move(provider);
+            }
+            // `previous` is returned by value, so the outgoing provider outlives the swap even
+            // if this was the last reference the storage held.
+            return previous;
+        }
+
+        /**
+         * @brief Gets the amount by which the indent is increased for each IndentLevel step.
+         *
+         * C++ counterpart of .NET Debug.IndentSize.
+         * @return The current indent size, in characters.
+         */
+        static intcs getIndentSizeProperty() {
+            return indentSizeStorage().load(std::memory_order_relaxed);
+        }
+
+        /**
+         * @brief Sets the amount by which the indent is increased for each IndentLevel step.
+         *
+         * C++ counterpart of .NET Debug.IndentSize.
+         * @param value The new indent size; negative values are clamped to 0.
+         */
+        static void setIndentSizeProperty(intcs value) {
+            const intcs clamped = value < 0 ? 0 : value;
+            indentSizeStorage().store(clamped, std::memory_order_relaxed);
+            // The clamped local is reported rather than a second read of the global: a
+            // concurrent setter could otherwise change the value between the store and the
+            // read, and the provider would be told about a size this call never set.
+            currentProvider()->OnIndentSizeChanged(clamped);
+        }
+
+        /**
+         * @brief Gets the current indent level (per-thread), matching .NET's ThreadStatic IndentLevel.
+         *
+         * C++ counterpart of .NET Debug.IndentLevel.
+         * @return The current indent level.
+         */
+        static intcs getIndentLevelProperty() { return indentLevelStorage(); }
+
+        /**
+         * @brief Sets the current indent level (per-thread).
+         *
+         * C++ counterpart of .NET Debug.IndentLevel.
+         * @param value The new indent level; negative values are clamped to 0.
+         */
+        static void setIndentLevelProperty(intcs value) {
+            indentLevelStorage() = value < 0 ? 0 : value;
+            currentProvider()->OnIndentLevelChanged(indentLevelStorage());
+        }
+
+        /**
+         * @brief Increases the current indent level by one.
+         *
+         * C++ counterpart of .NET Debug.Indent().
+         */
+        static void Indent() { setIndentLevelProperty(getIndentLevelProperty() + 1); }
+
+        /**
+         * @brief Decreases the current indent level by one.
+         *
+         * C++ counterpart of .NET Debug.Unindent().
+         */
+        static void Unindent() { setIndentLevelProperty(getIndentLevelProperty() - 1); }
+
+#ifdef NDEBUG
+        /** @brief No-op in release builds. */
+        static void Assert(bool condition)                            {}
+        /** @brief No-op in release builds. */
+        static void Assert(bool condition, const char*)               {}
+        /** @brief No-op in release builds. */
+        static void Assert(bool condition, const std::string&)        {}
+        /** @brief No-op in release builds. */
+        static void Write(const char*)                                {}
+        /** @brief No-op in release builds. */
+        static void Write(const std::string&)                         {}
+        /** @brief No-op in release builds. */
+        static void WriteLine(const char*)                            {}
+        /** @brief No-op in release builds. */
+        static void WriteLine(const std::string&)                     {}
+        /** @brief No-op in release builds. */
+        static void WriteLine()                                       {}
+        /** @brief No-op in release builds. */
+        static void Fail(const char*)                                 {}
+        /** @brief No-op in release builds. */
+        static void Fail(const std::string&)                          {}
+#else
+        /**
+         * @brief Checks @p condition; reports failure via the active DebugProvider if false.
+         *
+         * Routes through the same DebugProvider mechanism as the message-carrying overloads
+         * below, instead of calling the raw assert() macro directly -- a custom provider
+         * installed via SetProvider() must be invoked for this overload too, matching this
+         * class's own doc comment ("output is routed through a pluggable DebugProvider").
+         * @param condition The expression that is expected to be true.
+         */
+        static void Assert(bool condition) {
+            Assert(condition, "");
+        }
+        /**
+         * @brief Checks @p condition; reports failure via the active DebugProvider if false.
+         * @param condition The expression that is expected to be true.
+         * @param message   Diagnostic message emitted on failure.
+         */
+        static void Assert(bool condition, const char* message) {
+            if (!condition) {
+                Fail(message);
+            }
+        }
+        /**
+         * @brief Checks @p condition; reports failure via the active DebugProvider if false.
+         * @param condition The expression that is expected to be true.
+         * @param message   Diagnostic message emitted on failure.
+         */
+        static void Assert(bool condition, const std::string& message) {
+            Assert(condition, message.c_str());
+        }
+
+        /** @brief Writes @p message via the active DebugProvider, without a trailing newline. */
+        static void Write(const char* message)        { currentProvider()->Write(message); }
+        /** @brief Writes @p message via the active DebugProvider, without a trailing newline. */
+        static void Write(const std::string& message) { currentProvider()->Write(message); }
+
+        /** @brief Writes a blank line via the active DebugProvider. */
+        static void WriteLine()                        { currentProvider()->WriteLine(""); }
+        /** @brief Writes @p message followed by a newline via the active DebugProvider. */
+        static void WriteLine(const char* message)    { currentProvider()->WriteLine(message); }
+        /** @brief Writes @p msg followed by a newline via the active DebugProvider. */
+        static void WriteLine(const std::string& msg) { currentProvider()->WriteLine(msg); }
+
+        /**
+         * @brief Reports an assertion failure via the active DebugProvider (aborts by default).
+         * @param message Failure description.
+         */
+        static void Fail(const char* message) {
+            currentProvider()->Fail(message, "");
+        }
+        /** @brief Reports an assertion failure via the active DebugProvider (aborts by default). */
+        static void Fail(const std::string& message) { Fail(message.c_str()); }
+#endif
+    };
+
+} // namespace System::Diagnostics

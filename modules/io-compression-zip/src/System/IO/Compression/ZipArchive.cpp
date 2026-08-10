@@ -1,0 +1,577 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include "System/IO/Compression/ZipArchive.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/IO/IOException.hpp"
+#include "System/IO/InvalidDataException.hpp"
+#include "System/IO/MemoryStream.hpp"
+#include "System/InvalidOperationException.hpp"
+#include "System/NotSupportedException.hpp"
+#include <miniz/miniz.h>
+#include <cstring>
+#include <algorithm>
+#include <unordered_set>
+
+namespace System::IO::Compression {
+
+// ---------------------------------------------------------------------------
+// Internal write-back stream (create/update mode)
+// ---------------------------------------------------------------------------
+
+class ZipEntryWriteStream final : public System::IO::Stream {
+    std::shared_ptr<std::vector<SharpRuntime::bytecs>> buf_;
+public:
+    explicit ZipEntryWriteStream(std::shared_ptr<std::vector<SharpRuntime::bytecs>> b)
+        : buf_(std::move(b)) {}
+
+    SharpRuntime::intcs Read(SharpRuntime::bytecs*, SharpRuntime::intcs, SharpRuntime::intcs) override { return 0; }
+    void Write(const SharpRuntime::bytecs* data, SharpRuntime::intcs offset, SharpRuntime::intcs count) override {
+        // Matches this codebase's established Stream::Write convention (see
+        // MemoryStream::Write): count<=0 is a graceful no-op, but a negative offset was
+        // previously used completely unchecked in `data + offset`, computing a pointer before
+        // the buffer start -- confirmed as a genuine ASan stack-buffer-overflow via a
+        // standalone repro before this fix.
+        if (count <= 0) return;
+        if (offset < 0)
+            throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
+        buf_->insert(buf_->end(), data + offset, data + offset + count);
+    }
+    [[nodiscard]] SharpRuntime::intcs getLengthProperty() const override {
+        return static_cast<SharpRuntime::intcs>(buf_->size());
+    }
+    [[nodiscard]] bool getCanReadProperty()  const override { return false; }
+    [[nodiscard]] bool getCanWriteProperty() const override { return true;  }
+    void Flush() override {}
+    void Close() override {}
+};
+
+// ---------------------------------------------------------------------------
+// Opaque state structs
+// ---------------------------------------------------------------------------
+
+struct PendingEntry {
+    std::string                                         name;
+    std::shared_ptr<std::vector<SharpRuntime::bytecs>> data;
+    int                                                  miniLevel = MZ_DEFAULT_COMPRESSION;
+};
+
+namespace {
+    int ToMinizLevel(CompressionLevel level) {
+        switch (level) {
+            case CompressionLevel::NoCompression: return MZ_NO_COMPRESSION;
+            case CompressionLevel::Fastest:       return MZ_BEST_SPEED;
+            case CompressionLevel::SmallestSize:  return MZ_BEST_COMPRESSION;
+            case CompressionLevel::Optimal:
+            default:                              return MZ_DEFAULT_COMPRESSION;
+        }
+    }
+}
+
+struct ZipArchiveState {
+    mz_zip_archive          zip{};
+    bool                    readerOpen   = false;
+    ZipArchiveMode          mode         = ZipArchiveMode::Read;
+    std::string             filePath;
+    std::vector<SharpRuntime::bytecs> memBuf;      // backing buffer for stream-based read
+    std::vector<PendingEntry>         pending;     // entries queued for write
+    std::unordered_set<std::string>   deletedEntries; // full names marked via ZipArchiveEntry::Delete()
+    bool                    disposed     = false;
+    // Non-owning: set only when constructed via ZipArchive(Stream*, mode) in Create/Update mode.
+    // The finalized memBuf is written back to *stream on Dispose() -- see that method. The
+    // caller retains ownership and must keep the stream alive for the ZipArchive's lifetime,
+    // matching the documented "Source or destination stream" parameter contract. Previously
+    // this pointer was never even stored: Create/Update against a stream silently produced an
+    // archive only in memBuf, which was then discarded on destruction -- the caller-supplied
+    // stream was never touched at all, a confirmed real bug (audit finding A-01, 2026-07-14).
+    System::IO::Stream*     stream       = nullptr;
+};
+
+struct ZipArchiveEntryState {
+    std::shared_ptr<ZipArchiveState>                   archive;
+    mz_uint                                            index    = 0;
+    std::string                                        fullName;
+    std::string                                        name;
+    long long                                          length   = 0;
+    // Create/update mode:
+    bool                                               isWrite  = false;
+    std::shared_ptr<std::vector<SharpRuntime::bytecs>> writeBuf;
+};
+
+// ---------------------------------------------------------------------------
+// ZipArchiveEntry
+// ---------------------------------------------------------------------------
+
+ZipArchiveEntry::ZipArchiveEntry(std::shared_ptr<ZipArchiveEntryState> s)
+    : state_(std::move(s)) {}
+
+bool ZipArchiveEntry::IsValid() const { return state_ != nullptr; }
+
+std::string ZipArchiveEntry::getNameProperty() const {
+    return state_ ? state_->name : std::string{};
+}
+std::string ZipArchiveEntry::getFullNameProperty() const {
+    return state_ ? state_->fullName : std::string{};
+}
+long long ZipArchiveEntry::getLengthProperty() const {
+    return state_ ? state_->length : 0LL;
+}
+
+System::IO::Stream* ZipArchiveEntry::Open() {
+    if (!state_) throw System::InvalidOperationException("ZipArchiveEntry::Open: invalid entry");
+
+    if (state_->isWrite) {
+        // Write-mode: return a stream that writes into our pending buffer
+        return new ZipEntryWriteStream(state_->writeBuf);
+    }
+
+    // Read-mode: extract via miniz
+    auto& arc = *state_->archive;
+    if (!arc.readerOpen)
+        throw System::InvalidOperationException("ZipArchiveEntry::Open: archive not open for reading");
+
+    size_t outSize = 0;
+    void* raw = mz_zip_reader_extract_to_heap(&arc.zip, state_->index, &outSize, 0);
+    if (!raw)
+        throw System::IO::InvalidDataException("ZipArchiveEntry::Open: extract failed for " + state_->fullName);
+
+    auto* ms = new System::IO::MemoryStream(
+        reinterpret_cast<SharpRuntime::bytecs*>(raw),
+        static_cast<SharpRuntime::intcs>(outSize),
+        false);
+    mz_free(raw);
+    return ms;
+}
+
+void ZipArchiveEntry::Delete() {
+    if (!state_) return;
+    if (state_->archive->mode != ZipArchiveMode::Update)
+        throw System::NotSupportedException("ZipArchiveEntry::Delete: archive must be in Update mode");
+    // Record the full name for exclusion when the archive is next flushed (Dispose()).
+    // Covers both a pre-existing entry (excluded from the pass-through copy of the reader's
+    // contents) and a still-pending, not-yet-written CreateEntry() result (excluded from
+    // the pending list) uniformly, since flushWriter() filters both against this set.
+    state_->archive->deletedEntries.insert(state_->fullName);
+    state_ = nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// ZipArchive helpers
+// ---------------------------------------------------------------------------
+
+static std::string basename(const std::string& fullName) {
+    auto pos = fullName.rfind('/');
+    if (pos == std::string::npos) pos = fullName.rfind('\\');
+    return (pos == std::string::npos) ? fullName : fullName.substr(pos + 1);
+}
+
+static void openReader(ZipArchiveState& st) {
+    mz_bool ok;
+    if (!st.filePath.empty()) {
+        ok = mz_zip_reader_init_file(&st.zip, st.filePath.c_str(), 0);
+    } else {
+        ok = mz_zip_reader_init_mem(&st.zip, st.memBuf.data(), st.memBuf.size(), 0);
+    }
+    if (!ok)
+        throw System::IO::InvalidDataException("ZipArchive: failed to open zip for reading: " +
+                                 (st.filePath.empty() ? "(memory)" : st.filePath));
+    st.readerOpen = true;
+}
+
+namespace {
+    struct ExtractedEntry {
+        std::string name;
+        std::vector<SharpRuntime::bytecs> data;
+    };
+}
+
+// Verified against ZipArchive.cs: real .NET keeps a single unified _entries list containing
+// both entries read from disk and newly-created ones, so disposing an Update-mode archive
+// always preserves every entry that wasn't explicitly Delete()'d. This port's miniz-backed
+// design uses a separate reader (existing entries) and pending list (new entries) instead of
+// one unified list, so flushWriter() must explicitly extract and carry forward every
+// pre-existing, non-deleted entry -- previously it wrote only st.pending, silently discarding
+// every pre-existing entry whenever the archive was disposed with at least one CreateEntry()
+// call (real, silent, irreversible data loss on a standard "update a zip" workflow).
+// Passing a null buffer pointer for a zero-length entry (e.g. an empty vector's .data(), which
+// libstdc++ returns as nullptr) eventually reaches miniz's own mz_zip_file_write_func, which
+// calls fwrite(pBuf, 1, 0, file) -- fwrite's first parameter is declared nonnull, so this is
+// technically undefined behavior by the letter of the standard even though it's universally
+// harmless in practice (0 bytes are never actually read through a null pointer). Confirmed via
+// UndefinedBehaviorSanitizer (2026-07-14). vendor/miniz is third-party, unmodified-from-upstream
+// source (see CLAUDE.md) -- not the place to fix this; passing a non-null, never-dereferenced
+// pointer for an empty buffer here avoids the UB entirely at the call site instead.
+static const SharpRuntime::bytecs* safeDataPtr(const SharpRuntime::bytecs* data, size_t size) {
+    static const SharpRuntime::bytecs dummy = 0;
+    return size == 0 ? &dummy : data;
+}
+
+static void flushWriter(ZipArchiveState& st) {
+    const bool hasChanges = !st.pending.empty() || !st.deletedEntries.empty();
+    if (st.mode == ZipArchiveMode::Update && !hasChanges) return;
+    if (st.mode == ZipArchiveMode::Create && st.pending.empty()) return;
+
+    // Extract every pre-existing, non-deleted entry into memory before opening a writer --
+    // the writer may truncate/recreate the same backing file or buffer the reader is
+    // currently attached to, so the reader must be fully drained (and closed) first.
+    std::vector<ExtractedEntry> existing;
+    if (st.mode == ZipArchiveMode::Update && st.readerOpen) {
+        mz_uint count = mz_zip_reader_get_num_files(&st.zip);
+        existing.reserve(count);
+        for (mz_uint i = 0; i < count; ++i) {
+            mz_zip_archive_file_stat stat{};
+            if (!mz_zip_reader_file_stat(&st.zip, i, &stat)) continue;
+            if (stat.m_is_directory) continue;
+            std::string name = stat.m_filename;
+            if (st.deletedEntries.count(name)) continue;
+
+            size_t outSize = 0;
+            void* raw = mz_zip_reader_extract_to_heap(&st.zip, i, &outSize, 0);
+            if (!raw) continue; // best-effort: skip an unreadable entry rather than aborting the flush
+            ExtractedEntry ee;
+            ee.name = std::move(name);
+            ee.data.assign(reinterpret_cast<SharpRuntime::bytecs*>(raw),
+                           reinterpret_cast<SharpRuntime::bytecs*>(raw) + outSize);
+            mz_free(raw);
+            existing.push_back(std::move(ee));
+        }
+        mz_zip_reader_end(&st.zip);
+        st.readerOpen = false;
+    }
+
+    if (!st.filePath.empty()) {
+        mz_zip_archive writer{};
+        if (!mz_zip_writer_init_file(&writer, st.filePath.c_str(), 0))
+            throw System::IO::IOException("ZipArchive: failed to init writer for " + st.filePath);
+        // mz_zip_writer_add_mem/finalize_archive return mz_bool and were previously never
+        // checked, so a write failure (duplicate name, allocation failure, disk full) silently
+        // left a truncated/incomplete zip file on disk with no exception raised at all --
+        // matches the already-established convention just above (init_file's own check) of
+        // treating a miniz failure as IOException, just extended to the calls that were missed.
+        // mz_zip_writer_end must still run on the throw path to release miniz's internal state.
+        try {
+            for (auto& e : existing) {
+                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(), safeDataPtr(e.data.data(), e.data.size()), e.data.size(),
+                                           static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION)))
+                    throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
+            }
+            for (auto& e : st.pending) {
+                if (st.deletedEntries.count(e.name)) continue;
+                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(),
+                                           safeDataPtr(e.data->data(), e.data->size()), e.data->size(),
+                                           static_cast<mz_uint>(e.miniLevel)))
+                    throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
+            }
+            if (!mz_zip_writer_finalize_archive(&writer))
+                throw System::IO::IOException("ZipArchive: failed to finalize " + st.filePath);
+        } catch (...) {
+            mz_zip_writer_end(&writer);
+            throw;
+        }
+        mz_zip_writer_end(&writer);
+    } else {
+        // Memory-based write — store result back in memBuf
+        mz_zip_archive writer{};
+        if (!mz_zip_writer_init_heap(&writer, 0, 65536))
+            throw System::IO::IOException("ZipArchive: failed to init heap writer");
+        void* buf = nullptr; size_t sz = 0;
+        try {
+            for (auto& e : existing) {
+                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(), safeDataPtr(e.data.data(), e.data.size()), e.data.size(),
+                                           static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION)))
+                    throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
+            }
+            for (auto& e : st.pending) {
+                if (st.deletedEntries.count(e.name)) continue;
+                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(),
+                                           safeDataPtr(e.data->data(), e.data->size()), e.data->size(),
+                                           static_cast<mz_uint>(e.miniLevel)))
+                    throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
+            }
+            if (!mz_zip_writer_finalize_heap_archive(&writer, &buf, &sz))
+                throw System::IO::IOException("ZipArchive: failed to finalize heap archive");
+        } catch (...) {
+            mz_zip_writer_end(&writer);
+            throw;
+        }
+        mz_zip_writer_end(&writer);
+        st.memBuf.assign(reinterpret_cast<SharpRuntime::bytecs*>(buf),
+                         reinterpret_cast<SharpRuntime::bytecs*>(buf) + sz);
+        mz_free(buf);
+    }
+    st.pending.clear();
+    st.deletedEntries.clear();
+}
+
+// ---------------------------------------------------------------------------
+// ZipArchive constructors / destructor
+// ---------------------------------------------------------------------------
+
+// Ticket #1813. ZipArchiveMode was tested only with `== Read` / `== Create` / `== Update`,
+// so a value outside the enumerator set took none of the branches and produced a zombie
+// archive: no reader opened, no stream retained, no entries reported, nothing written back.
+// This is NOT merely a missing diagnostic -- build-probe/1813_prefix_defects.log case 9
+// builds a complete one-entry archive over a perfectly good MemoryStream through
+// CreateEntry(), writes "DATA" to the entry stream and calls Dispose(), all accepted, and
+// the stream receives 0 bytes. It is the same silent-data-loss shape ticket #1812 removed
+// from the null-stream path, reached here with a valid stream. Case 14 shows why
+// CreateEntry() does not catch it: that method rejects only `mode == Read`.
+//
+// Note for anyone reaching for a sanitizer: this defect is invisible to one.
+// `enum class ZipArchiveMode` has the implicit fixed underlying type `int`, so holding 42,
+// -1, INT_MAX or INT_MIN in it is well-formed C++ with a well-defined value, not undefined
+// behaviour. UBSan reports nothing for cases 1-5 (measured). Only an explicit range check
+// finds this.
+//
+// Current .NET validates the range in ZipArchive.cs's ValidateMode, whose switch ends in
+//   default: throw new ArgumentOutOfRangeException(nameof(mode));
+// reached from the Stream-taking constructor at ZipArchive.cs:135 -- i.e. AFTER
+// ArgumentNullException.ThrowIfNull(stream). That order is preserved below and pinned by a
+// test: a null stream passed with an invalid mode must still report ArgumentNullException,
+// which is also what this port already did before the guard (case 8).
+//
+// The stream-capability half of ValidateMode (ZipArchive.cs:962-975) is ticket #1827, added
+// as validateZipArchiveCapabilities() below. It was blocked because
+// System::IO::Stream::getCanWriteProperty() DEFAULTS TO FALSE (Stream.hpp:62) where .NET's
+// Stream.CanWrite is abstract; the user approved the shared decision in
+// docs/StreamCapabilityContractDesign.md section 6.2, which unblocked it together with #1824
+// and #1828.
+static void validateZipArchiveMode(ZipArchiveMode mode)
+{
+    switch (mode) {
+    case ZipArchiveMode::Read:
+    case ZipArchiveMode::Create:
+    case ZipArchiveMode::Update:
+        return;
+    default:
+        // ZipArchive.cs:979, verbatim: ArgumentOutOfRangeException(nameof(mode)).
+        throw System::ArgumentOutOfRangeException("mode");
+    }
+}
+
+// Ticket #1827 (REMED-IO-ZIP-MODE-CAPABILITIES, no SR-AUD-*). The stream-capability half of
+// .NET's ValidateModeCapabilities (ZipArchive.cs:962-975), with messages verbatim from
+// System.IO.Compression's Strings.resx. Runs AFTER the null check and #1813's mode-range check,
+// matching .NET's order (ThrowIfNull, then the range switch, then this). Covered by the §6.2
+// approval for the CanWrite direction; the Update CanSeek clause and the Read-mode-unseekable
+// tolerance are this ticket's own decisions, taken as follows:
+//
+//   * Update requires read AND write AND seek. .NET requires all three (ZipArchive.cs:970-974)
+//     because Update reads the existing central directory and rewrites it in place. CanSeek
+//     defaults to false, so this is the design's "harshest clause": a custom Update-mode stream
+//     must override getCanSeekProperty() too, not only getCanWriteProperty(). Measured
+//     compatible against the whole gate under #1839 -- no in-repository Update-mode caller wraps
+//     a stream lacking any capability. Adopting it matches .NET and is more correct than this
+//     port's prior best-effort append-to-a-non-seekable-Update-stream path (Dispose() line ~520),
+//     which would have corrupted the archive by appending rather than overwriting.
+//
+//   * A Read-mode UNSEEKABLE stream is NOT rejected -- only CanRead is required. .NET sets
+//     isReadModeAndUnseekable and buffers (ZipArchive.cs:968-971); this port ALREADY buffers the
+//     entire input into memBuf at construction (see the Stream* constructor's read loop) and
+//     never seeks the caller's stream while reading, so an unseekable readable stream is
+//     genuinely supported here, not merely un-rejected. That is why the Read case checks CanRead
+//     alone and breaks.
+static void validateZipArchiveCapabilities(System::IO::Stream* stream, ZipArchiveMode mode)
+{
+    switch (mode) {
+    case ZipArchiveMode::Create:
+        if (!stream->getCanWriteProperty())
+            throw System::ArgumentException("Cannot use create mode on a non-writable stream.");
+        break;
+    case ZipArchiveMode::Read:
+        if (!stream->getCanReadProperty())
+            throw System::ArgumentException("Cannot use read mode on a non-readable stream.");
+        break;   // an unseekable Read-mode stream is buffered, not rejected -- see above
+    case ZipArchiveMode::Update:
+        if (!stream->getCanReadProperty() || !stream->getCanWriteProperty()
+            || !stream->getCanSeekProperty())
+            throw System::ArgumentException(
+                "Update mode requires a stream with read, write, and seek capabilities.");
+        break;
+    default:
+        break;   // unreachable: validateZipArchiveMode() rejected the out-of-range value first
+    }
+}
+
+ZipArchive::ZipArchive(System::IO::Stream* stream, ZipArchiveMode mode)
+    : state_(std::make_shared<ZipArchiveState>())
+{
+    // Verified against ZipArchive.cs, whose every Stream-taking constructor funnels into the
+    // (stream, mode, leaveOpen, entryNameEncoding) overload and opens with
+    // ArgumentNullException.ThrowIfNull(stream). This port stored the pointer unvalidated, and
+    // the two halves of the resulting defect are not symmetric (ticket #1812 / SR-AUD-242,
+    // build-probe/1812_prefix_defects.log, one process per case):
+    //
+    //   * Read and Update reach the `stream->Read` loop below immediately, an AddressSanitizer
+    //     SEGV on address 0x0 during construction itself -- cases 1 and 2.
+    //   * Create does NOT crash. It stores the null pointer, and every subsequent call the
+    //     caller makes succeeds: CreateEntry, the entry write stream, and Dispose(). The
+    //     finalized archive lands in state_->memBuf and Dispose()'s write-back is gated on
+    //     `state_->stream != nullptr`, so the archive is silently discarded and the caller is
+    //     told nothing -- case 4, which wrote a complete one-entry archive and delivered it
+    //     nowhere. Silent data loss is the worse of the two failure modes, which is why the
+    //     check is unconditional rather than restricted to the modes that crash.
+    //
+    // Checked FIRST, before any state is populated: no reader is opened and no buffer is
+    // filled on the rejected path, and state_ is a shared_ptr that unwinds on its own.
+    if (stream == nullptr) throw System::ArgumentNullException("stream");
+    // Ticket #1813, after the null check exactly as ZipArchive.cs:135 orders it, and before
+    // state_->mode is assigned -- so a rejected mode leaves no mode recorded at all.
+    validateZipArchiveMode(mode);
+    // Ticket #1827, after the mode-range check and before any state is populated or the stream
+    // is touched, so a rejected stream leaves the archive as untouched as a rejected mode does.
+    validateZipArchiveCapabilities(stream, mode);
+    state_->mode = mode;
+    if (mode == ZipArchiveMode::Read || mode == ZipArchiveMode::Update) {
+        // Read full stream into memory buffer
+        SharpRuntime::bytecs tmp[65536];
+        SharpRuntime::intcs n;
+        while ((n = stream->Read(tmp, 0, 65536)) > 0)
+            state_->memBuf.insert(state_->memBuf.end(), tmp, tmp + n);
+        // Found alongside the A-01 fix (2026-07-14): openReader() was only called for Read
+        // mode here, unlike the file-path constructor below, which correctly opens it for
+        // BOTH Read and Update. Without it, readerOpen stayed false for a stream-backed
+        // Update-mode archive, so flushWriter()'s "carry forward every pre-existing entry"
+        // step (gated on readerOpen) never ran -- every existing entry was silently dropped
+        // on Dispose() whenever Update mode was used via a Stream*, confirmed via a
+        // standalone regression test that round-tripped a stream through Create then Update.
+        if (mode == ZipArchiveMode::Read || mode == ZipArchiveMode::Update)
+            openReader(*state_);
+    }
+    // Create/Update mode: retain the stream so Dispose() can write the finalized archive back
+    // to it -- see ZipArchiveState::stream's own doc-comment (audit finding A-01, 2026-07-14).
+    // Not retained for Read mode: read-only, nothing is ever written back.
+    if (mode == ZipArchiveMode::Create || mode == ZipArchiveMode::Update) {
+        state_->stream = stream;
+    }
+}
+
+ZipArchive::ZipArchive(const std::string& archivePath, ZipArchiveMode mode)
+    : state_(std::make_shared<ZipArchiveState>())
+{
+    // Ticket #1813. The path-taking overload accepted an out-of-range mode too
+    // (build-probe/1813_prefix_defects.log case 6), and so did ZipFile::Open, which is
+    // nothing but a forwarder to this constructor (ZipFile.cpp:17) -- case 7. Fixing it here
+    // therefore fixes ZipFile::Open transitively rather than needing a second guard, which is
+    // pinned by its own test so a future refactor that stops forwarding cannot lose the check.
+    //
+    // Checked FIRST, before archivePath is stored and before openReader() touches the file
+    // system. .NET reaches the same conclusion by a different route: ZipFile.Open's
+    // GetFileStreamForOpen (ZipFile.Create.cs:473-479) maps the mode to a FileMode/FileAccess
+    // pair with a `_ => throw new ArgumentOutOfRangeException(nameof(mode))` arm, so the range
+    // is rejected before the FileStream is ever opened.
+    validateZipArchiveMode(mode);
+    state_->mode     = mode;
+    state_->filePath = archivePath;
+    if (mode == ZipArchiveMode::Read || mode == ZipArchiveMode::Update)
+        openReader(*state_);
+}
+
+// Best-effort, non-throwing (audit finding A-02, 2026-07-14) -- see DeflateStream::~DeflateStream's
+// identical doc-comment for the full rationale and confirmed std::terminate repro. Dispose() can
+// throw both from the pre-existing flushWriter() miniz-failure path and from this port's own A-01
+// stream-write-back code (stream->Write()/SetLength() on a failing stream).
+ZipArchive::~ZipArchive() { try { Dispose(); } catch (...) {} }
+
+// ---------------------------------------------------------------------------
+// ZipArchive operations
+// ---------------------------------------------------------------------------
+
+std::vector<ZipArchiveEntry> ZipArchive::getEntriesProperty() const {
+    if (!state_ || !state_->readerOpen) return {};
+    mz_uint count = mz_zip_reader_get_num_files(&state_->zip);
+    std::vector<ZipArchiveEntry> result;
+    result.reserve(count);
+    for (mz_uint i = 0; i < count; ++i) {
+        mz_zip_archive_file_stat stat{};
+        if (!mz_zip_reader_file_stat(&state_->zip, i, &stat)) continue;
+        if (stat.m_is_directory) continue;
+        auto es       = std::make_shared<ZipArchiveEntryState>();
+        es->archive   = state_;
+        es->index     = i;
+        es->fullName  = stat.m_filename;
+        es->name      = basename(stat.m_filename);
+        es->length    = static_cast<long long>(stat.m_uncomp_size);
+        result.emplace_back(std::move(es));
+    }
+    return result;
+}
+
+ZipArchiveEntry ZipArchive::GetEntry(const std::string& entryName) const {
+    if (!state_ || !state_->readerOpen) return ZipArchiveEntry{};
+    mz_uint count = mz_zip_reader_get_num_files(&state_->zip);
+    for (mz_uint i = 0; i < count; ++i) {
+        mz_zip_archive_file_stat stat{};
+        if (!mz_zip_reader_file_stat(&state_->zip, i, &stat)) continue;
+        if (entryName == stat.m_filename) {
+            auto es      = std::make_shared<ZipArchiveEntryState>();
+            es->archive  = state_;
+            es->index    = i;
+            es->fullName = stat.m_filename;
+            es->name     = basename(stat.m_filename);
+            es->length   = static_cast<long long>(stat.m_uncomp_size);
+            return ZipArchiveEntry(std::move(es));
+        }
+    }
+    return ZipArchiveEntry{};
+}
+
+ZipArchiveEntry ZipArchive::CreateEntry(const std::string& entryName, CompressionLevel compressionLevel) {
+    if (!state_)
+        throw System::InvalidOperationException("ZipArchive::CreateEntry: archive not open");
+    if (state_->mode == ZipArchiveMode::Read)
+        throw System::NotSupportedException("ZipArchive::CreateEntry: archive is read-only");
+
+    auto buf = std::make_shared<std::vector<SharpRuntime::bytecs>>();
+    state_->pending.push_back({entryName, buf, ToMinizLevel(compressionLevel)});
+
+    auto es       = std::make_shared<ZipArchiveEntryState>();
+    es->archive   = state_;
+    es->fullName  = entryName;
+    es->name      = basename(entryName);
+    es->isWrite   = true;
+    es->writeBuf  = buf;
+    return ZipArchiveEntry(std::move(es));
+}
+
+void ZipArchive::Dispose() {
+    if (!state_ || state_->disposed) return;
+    state_->disposed = true;
+
+    if (state_->mode == ZipArchiveMode::Create || state_->mode == ZipArchiveMode::Update)
+        flushWriter(*state_);
+
+    if (state_->readerOpen) {
+        mz_zip_reader_end(&state_->zip);
+        state_->readerOpen = false;
+    }
+
+    // Write the finalized archive back to the caller-supplied stream (audit finding A-01,
+    // 2026-07-14): flushWriter() above only ever populates memBuf for a stream-backed archive
+    // (filePath is empty in that case); this port has no live streaming writer the way real
+    // .NET's ZipArchive does, so the simplest correct fix matching this port's existing
+    // buffer-then-flush design is to push the finalized buffer to the stream here, once,
+    // unconditionally -- memBuf always holds the current, complete archive content at this
+    // point, whether flushWriter just rebuilt it or (Update mode, no changes made) it's still
+    // the original content read at construction. Requires seek support to correctly overwrite
+    // from the start and truncate to the new size (matching real .NET's own Seek(0)+
+    // SetLength+write sequence); a non-seekable stream skips the reposition/truncate and just
+    // appends, which is the best this port's simpler buffered design can do without adopting
+    // real .NET's full live-streaming architecture.
+    if (state_->stream != nullptr &&
+        (state_->mode == ZipArchiveMode::Create || state_->mode == ZipArchiveMode::Update)) {
+        System::IO::Stream* stream = state_->stream;
+        if (stream->getCanSeekProperty()) {
+            stream->setPositionProperty(0);
+            stream->SetLength(static_cast<SharpRuntime::intcs>(state_->memBuf.size()));
+        }
+        if (!state_->memBuf.empty()) {
+            stream->Write(state_->memBuf.data(), 0, static_cast<SharpRuntime::intcs>(state_->memBuf.size()));
+        }
+        stream->Flush();
+    }
+}
+
+} // namespace System::IO::Compression

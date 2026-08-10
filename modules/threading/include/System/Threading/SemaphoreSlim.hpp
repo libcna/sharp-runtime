@@ -1,0 +1,153 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#pragma once
+#include <algorithm>
+#include <atomic>
+#include <mutex>
+#include <condition_variable>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/ObjectDisposedException.hpp"
+#include "System/Threading/SemaphoreFullException.hpp"
+#include "System/Threading/WaitHandle.hpp"
+
+namespace System::Threading {
+
+    using SharpRuntime::intcs;
+
+    /**
+     * @brief A lightweight alternative to Semaphore that limits the number of threads that can access a resource.
+     *
+     * Wraps std::condition_variable. Partial C++ counterpart of .NET System.Threading.SemaphoreSlim.
+     *
+     * @note Status: Implemented
+     */
+    class SemaphoreSlim {
+        std::mutex              mutex_;
+        std::condition_variable cv_;
+        // Ticket #1955 / SR-AUD-207, cause T-A. getCurrentCountProperty() read this with no
+        // lock at all while Wait()/Release() wrote it under mutex_ -- TSan-confirmed
+        // undefined behaviour. The repair is an atomic field rather than a locking property,
+        // because that is what .NET does: SemaphoreSlim.CurrentCount is `m_currentCount`,
+        // declared `private volatile int`, read with no lock. Every write stays inside
+        // mutex_, so the compound invariant 0 <= count_ <= maxCount_ and the condition
+        // variable's predicate are unaffected; the atomic only makes the unsynchronised
+        // *read* well-defined. sizeof/alignof(std::atomic<intcs>) == sizeof/alignof(intcs)
+        // == 4 on every supported target, so the field is layout-neutral (measured in
+        // build-probe/1955_probe1_layout_{before,after}.log).
+        std::atomic<intcs>      count_;
+        intcs                   maxCount_;
+        // Verified against SemaphoreSlim.cs's CheckDispose()/ObjectDisposedException.ThrowIf:
+        // real .NET's Wait/Release all reject calls after Dispose(). This port's sibling
+        // primitives (Barrier, CountdownEvent, ManualResetEventSlim, ReaderWriterLockSlim) all
+        // already have this guard; SemaphoreSlim was previously missed, with Dispose() a true
+        // no-op and no disposal check anywhere.
+        // Ticket #1955 / cause T-A of docs/ThreadingNamespaceReviewPlan.md. This was an
+        // ordinary `bool`, written by Dispose() and read by the guard below with no
+        // synchronisation between them -- a data race, i.e. undefined behaviour, confirmed by
+        // ThreadSanitizer at audit time and again in
+        // build-probe/1955_probe1_shared_state_races.cpp. std::atomic<bool> is 1 byte and
+        // 1-byte aligned on every supported target, so the change is layout-neutral; measured
+        // in build-probe/1955_probe1_layout_{before,after}.log.
+        std::atomic<bool>       disposed_{false};
+
+        void ThrowIfDisposed() const {
+            if (disposed_.load(std::memory_order_acquire))
+                throw System::ObjectDisposedException("SemaphoreSlim");
+        }
+
+    public:
+        /** Constructs a SemaphoreSlim with the given initial and maximum counts. */
+        explicit SemaphoreSlim(intcs initialCount, intcs maxCount = 0x7fffffff)
+            : count_(initialCount), maxCount_(maxCount) {
+            if (maxCount < 1)
+                throw System::ArgumentOutOfRangeException("maxCount");
+            if (initialCount < 0 || initialCount > maxCount)
+                throw System::ArgumentOutOfRangeException("initialCount");
+        }
+
+        /** Returns the current count of the semaphore. */
+        [[nodiscard]] intcs getCurrentCountProperty() const { return count_; }
+
+        /**
+         * @brief Blocks until the semaphore can be entered.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
+         */
+        void Wait() {
+            ThrowIfDisposed();
+            std::unique_lock<std::mutex> lk(mutex_);
+            cv_.wait(lk, [this]{ return count_ > 0; });
+            --count_;
+        }
+
+        /**
+         * @brief Tries to enter the semaphore within a timeout. Returns true on success.
+         * @throws System::ArgumentOutOfRangeException if @p milliseconds is less than -1.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
+         */
+        bool Wait(intcs milliseconds) {
+            WaitHandle::ValidateTimeout(milliseconds);
+            ThrowIfDisposed();
+            std::unique_lock<std::mutex> lk(mutex_);
+            // -1 (Timeout.Infinite) waits indefinitely; std::chrono's wait_for treats a
+            // negative duration as already-expired, so it must be special-cased.
+            bool ok;
+            if (milliseconds == -1) {
+                cv_.wait(lk, [this]{ return count_ > 0; });
+                ok = true;
+            } else {
+                ok = cv_.wait_for(lk, std::chrono::milliseconds(milliseconds), [this]{ return count_ > 0; });
+            }
+            if (ok) --count_;
+            return ok;
+        }
+
+        /**
+         * @brief Releases the semaphore once.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
+         */
+        intcs Release() { return Release(1); }
+
+        /**
+         * @brief Releases the semaphore a specified number of times. Returns previous count.
+         *
+         * Verified against SemaphoreSlim.cs's Release(int): the disposal check runs *before*
+         * the releaseCount validation (the reverse order from Wait(int), which validates its
+         * timeout argument before checking disposal -- matching each method's own .NET source).
+         *
+         * The full-semaphore guard is written as `maxCount_ - count_ < releaseCount`, which is
+         * SemaphoreSlim.cs's own form. The obvious `count_ + releaseCount > maxCount_` is not
+         * equivalent: it overflows signed `intcs` before it can reject the over-release.
+         * `SemaphoreSlim(1, Int32.MaxValue).Release(Int32.MaxValue)` computed `2147483647 + 1`,
+         * which UndefinedBehaviorSanitizer reported as signed integer overflow at this line and
+         * at the increment below; the call then returned normally and left CurrentCount at
+         * -2147483648, so `count_ > 0` never held again and every subsequent Wait blocked
+         * forever (SR-AUD-206, ticket #1947).
+         *
+         * The subtraction cannot itself overflow: the constructor establishes
+         * `0 <= count_ <= maxCount_` and every Wait/Release preserves it, so `maxCount_ - count_`
+         * lies in `[0, INTCS_MAX]`. The increment below is then bounded by that difference.
+         *
+         * @throws System::ObjectDisposedException if this instance has been disposed.
+         * @throws System::ArgumentOutOfRangeException if @p releaseCount is less than 1.
+         * @throws System::Threading::SemaphoreFullException if the release would exceed the maximum.
+         */
+        intcs Release(intcs releaseCount) {
+            ThrowIfDisposed();
+            if (releaseCount < 1)
+                throw System::ArgumentOutOfRangeException("releaseCount");
+            std::lock_guard<std::mutex> lk(mutex_);
+            if (maxCount_ - count_ < releaseCount)
+                throw System::Threading::SemaphoreFullException();
+            intcs prev = count_;
+            count_ += releaseCount;
+            cv_.notify_all();
+            return prev;
+        }
+
+        /** Releases resources used by the SemaphoreSlim. */
+        void Dispose() { disposed_.store(true, std::memory_order_release); }
+    };
+
+} // namespace System::Threading

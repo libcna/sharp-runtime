@@ -4,4 +4,6 @@ cmake-build-debug/*
 cmake-build-*/
 plan.sqlite3*
 plan.sqlite3-journal
+plan.sqlite3-wal
+plan.sqlite3-shm
 docs/generated/

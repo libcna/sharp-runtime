@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Inventories every include/**/*.hpp and src/**/*.cpp file: SPDX header
-presence, line count, and (best-effort) the namespace/type name it implies,
-cross-referenced against plan.sqlite3's task table so it's easy to spot
-headers with no matching task row or task rows marked 'ported' with no
-corresponding header file. Prints a summary and writes full detail to CSV.
+"""Inventories every modules/*/include/**/*.hpp and modules/*/src/**/*.cpp
+file: SPDX header presence, line count, and (best-effort) the namespace/type
+name it implies, cross-referenced against plan.sqlite3's task table so it's
+easy to spot headers with no matching task row or task rows marked 'ported'
+with no corresponding header file. Prints a summary and writes full detail
+to CSV.
 
 Usage: scripts/source_header_inventory.py [--csv PATH] [--db PATH]
 """
@@ -29,14 +30,16 @@ TYPE_RE = re.compile(
 
 
 def collect_files():
-    for base in ("include", "src"):
-        base_path = os.path.join(REPO_ROOT, base)
-        for root, _, files in os.walk(base_path):
-            if "vendor" in root.split(os.sep):
-                continue
-            for f in files:
-                if f.endswith((".hpp", ".cpp")):
-                    yield os.path.join(root, f)
+    modules_path = os.path.join(REPO_ROOT, "modules")
+    for module in os.scandir(modules_path):
+        if not module.is_dir():
+            continue
+        for base in ("include", "src"):
+            base_path = os.path.join(module.path, base)
+            for root, _, files in os.walk(base_path):
+                for f in files:
+                    if f.endswith((".hpp", ".cpp")):
+                        yield os.path.join(root, f)
 
 
 def inspect_file(path):
