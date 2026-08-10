@@ -421,3 +421,85 @@ SR-AUD-278 `remediated`; SR-AUD-042, SR-AUD-276 and SR-AUD-277 each carrying a c
 subpart plus exactly one recorded gate (approval or evidence); every §8 row a permanent test; every
 ordinary numeric result bit-identical; zero warnings, zero errors, two jobs maximum; module graph,
 version seams unchanged and the negative-fixture count increased by exactly the #2168 fixture.
+
+---
+
+## 15. Implementation record — #2168, #2169, #2171, #2173
+
+**All four compatible tickets done 2026-08-10.** `SharpRuntimeTests_Numerics` **299 → 335**, all
+passing. Zero warnings, zero errors throughout, `--parallel 2`.
+
+### 15.1 What landed
+
+| Ticket | Finding | Commit | Tests |
+|---|---|---|---|
+| **#2168** | SR-AUD-278 — **closed** | `074adc8` | +6 runtime, +12 negative-fixture sites |
+| **#2169** | SR-AUD-042 subpart | `e763968` | +10 |
+| **#2171** | SR-AUD-277 subpart | `e6a6ce7` | +4 −1 replaced |
+| **#2173** | SR-AUD-276 subpart | `959aed1` | +16 `PIN_` |
+
+### 15.2 Measured before → after
+
+| Door | Before | After |
+|---|---|---|
+| any generic-math static | compiles, **fails at final link** with an unresolved mangled symbol | rejected at the **call site** |
+| `TotalOrderIeee754Comparer<float>::Equals` | **does not exist** | bit-pattern equality, agrees with `Compare == 0` on all 15 vectors |
+| `Compare(-0, +0)` / `Equals(-0, +0)` | `-1` / — | `-1` / **`false`**, and the hashes differ |
+| `Complex(1, 2).ToString()` | `<1.000000; 2.000000>` | `<1; 2>` |
+| `Complex(1e-9, 0).ToString()` | `<0.000000; 0.000000>` — **value destroyed** | `<1e-09; 0>` |
+| `Complex(1e300, -1e300).ToString()` | **619 characters** | `<1e+300; -1e+300>` |
+| `Complex(inf, -inf)` / `(NaN, 1)` | `<inf; -inf>` / `<nan; 1.000000>` | `<Infinity; -Infinity>` / `<NaN; 1>` |
+| every `Normalize` door | undocumented and inconsistent | **unchanged**, documented and pinned by 16 tests |
+| `sizeof` of all three comparers | 8 | **8** (`static_assert`ed) |
+
+### 15.3 Mutations — five applied, five counted
+
+| Mutation | Result |
+|---|---|
+| Undelete `IMinMaxValue::MinValue` (restore the bare declaration) | negative site 1 **COMPILED**; other 11 still rejected. **Counts** |
+| `Equals` → ordinary floating `x == y` | **4 clean failures** / 12 pass — exactly the signed-zero, NaN-payload, agreement and hash tests. **Counts** |
+| binary64 hash truncates instead of folding | **2 clean failures**, including the vector pair written for it. **Counts** |
+| `Complex::ToString` → `std::to_string` | **5 clean failures** — the four repair tests plus the skeleton pin. **Counts** |
+| Apply the **#2175 shape** (unconditional division in `Vector3` and `Plane`) | **10 of 16 pins fire**, the 6 invariance/control tests stable. **Counts** — this is the right mutation for a pins ticket: it proves the pins detect the change they exist to make visible |
+
+All five reverted; `git diff` clean afterwards; 335/335.
+
+### 15.4 Honest limitations
+
+- **No arithmetic-UB repair happened, and none is claimed.** §10's sweep was clean before any
+  change. This namespace has no CCF-004 member.
+- **`Complex::ToString`'s bracket skeleton is unresolved, not resolved.** #2174 owns it, and the
+  `PIN_` test is the record of what would change.
+- **Culture sensitivity is untouched.** .NET formats each `Complex` component with the current
+  culture; this port is invariant throughout, a pre-existing reduction, not part of #2171.
+- **TSan was not run and is not claimed** (§9).
+- The `-0` normalization pin asserts only the sign bit, so it is the one pin the #2175 mutation
+  does **not** fire; the other nine cover the same ground.
+
+## 16. Namespace reconciliation — `System::Numerics`
+
+| Finding | Sev | Compatible ticket | Gated remainder | Disposition |
+|---|---|---|---|---|
+| **SR-AUD-278** | med | **#2168** done | — | **remediated** |
+| **SR-AUD-042** | med | **#2169** done | **#2170** needs_user — object layout 8 → 16 | **confirmed (design-complete)** |
+| **SR-AUD-277** | med | **#2171** done | **#2172** needs_user — public return type | **confirmed (design-complete)** |
+| **SR-AUD-276** | med | **#2173** done | **#2175** blocked on evidence | **confirmed (design-complete)** |
+
+**`modules/numerics` is NOT fully closed, and that is the measured outcome rather than a shortfall
+of effort.** One of four findings is remediated outright; the other three each have their
+compatible subpart complete and exactly one recorded gate. **Two gates are approvals** — a public
+object-layout growth and a public return-type change, both classes this repository has always
+required an explicit per-action decision for — and **one is missing evidence**, not permission:
+SR-AUD-276 carries no managed probe and `/rv` is absent, so implementing four members' NaN
+semantics would be recollection.
+
+Every finding maps to exactly one disposition; none disappeared; no `SR-AUD-*` identifier was
+created and **numbering stays frozen at 364**. Two post-audit tickets carry no identifier:
+**#2174** (four parity questions) and **#2175** (SR-AUD-276's remainder).
+
+**Audit totals after this batch: 161 remediated / 203 confirmed (150 plain + 53 design-complete)
+of 364.**
+
+**Totals:** `numerics` 4 findings, 1 remediated, 3 design-complete, 0 unaddressed. Tests
+**299 → 335**. No layout, signature, vtable, seam or module-graph change; negative fixtures
+**12 → 13 files, 104 → 116 sites**.

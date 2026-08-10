@@ -37,3 +37,45 @@ looks available to a consumer until final linkage.
 ## Final assessment
 
 SR-AUD-278 applies. No implementation was changed during this audit.
+
+---
+
+## Post-audit correction and remediation record — ticket #2168 (2026-08-10)
+
+*Appended by review #2167. The original report above is retained verbatim; nothing in it is
+rewritten.*
+
+**Premise corrected — the surface is 44 members, not 3.** The probe demonstrated
+`IMinMaxValue<int>::MinValue`, `IAdditiveIdentity<int>::AdditiveIdentity` and
+`IMultiplicativeIdentity<int>::MultiplicativeIdentity`. Enumerated from the header, there are
+**37 static function declarations across 9 interface templates** — `IMinMaxValue` (2),
+`IAdditiveIdentity` (1), `IMultiplicativeIdentity` (1), `ITrigonometricFunctions` (12),
+`IHyperbolicFunctions` (6), `ILogarithmicFunctions` (4), `IExponentialFunctions` (3),
+`IPowerFunctions` (1), `IRootFunctions` (4), `IFloatingPointConstants` (3) — plus 7 more reachable
+through the `IBinaryFloatingPointIeee754` aggregate. Every one had the identical defect.
+
+**Context the report does not cite, and which decided the repair.** The reduction this header
+implements is already settled and documented in three places in this repository:
+`System/Half.hpp:43-45` ("Generic math interface conformance … is out of scope, consistent with
+this codebase's position on C# generic-math machinery elsewhere"),
+`System/Numerics/DivisionRounding.hpp`, and this header's own preamble ("these stubs exist for API
+name compatibility"). So the report's first option — "provide constrained definitions" — would
+have meant inventing 44 numeric semantics from recollection with `/rv` absent, and would have
+contradicted a settled position. The second option was taken.
+
+**Repair.** Every declared static is `= delete`, and each interface's doc-comment names the C++
+spelling to use instead. The failure moves from an unresolved symbol at final link — arbitrarily
+far from the call, naming a mangled template specialisation — to a `use of deleted function`
+diagnostic at the call site. **No program that builds today can be affected**: a call that exists
+today already fails to link.
+
+**Evidence.** `test/consumer/numerics_generic_math_negative.cpp`, 12 sites, every one rejected,
+baseline clean — a compile check, because a runtime test cannot assert that something does not
+compile. Undeleting `MinValue` makes site 1 compile again while the other 11 stay rejected.
+`modules/numerics/tests/System/Numerics/GenericMathInterfacesTests.cpp` adds 6 tests for the
+assertable half: `Radix` still 2 (a `static constexpr` initialiser, never part of this finding),
+the hierarchy and all 13 operator interfaces plus the aggregate still instantiate, a derived
+type's own statics still hide the deleted base members, and the documented replacements produce
+the claimed values.
+
+**Status:** `confirmed` → **`remediated`**. See `docs/SystemNumericsNamespaceReviewPlan.md` §4.7.

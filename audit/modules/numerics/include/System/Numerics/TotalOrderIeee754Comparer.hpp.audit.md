@@ -66,3 +66,39 @@ The ordering calculation is sound for its three specializations, but the public
 type is incomplete relative to the companion .NET comparer and cannot preserve
 total-order equality in local hash-based APIs.  No implementation was modified
 during this audit.
+
+---
+
+## Post-audit partial remediation — tickets #2169 / #2170 (2026-08-10)
+
+*Appended by review #2167. The original report above is retained verbatim; its ordering assessment
+and its 65,535-pair probe result are re-confirmed, not superseded.*
+
+**The finding was split on a measurement.** `build-probe/2167_probe2_layout.cpp` compiled three
+shapes side by side:
+
+| Shape | `sizeof` | `alignof` |
+|---|---:|---:|
+| as it shipped | 8 | 8 |
+| **#2169** — non-virtual `Equals`/`GetHashCode` with `IEqualityComparer<T>`'s exact signatures | **8** | 8 |
+| **#2170** — `IEqualityComparer<T>` added as a second base | **16** | 8 |
+
+**Ticket #2169 (done)** delivers the *semantics* the finding is about with **no layout change**:
+all three specializations expose `Equals(const T&, const T&) const` and
+`GetHashCode(const T&) const`, bit-pattern based, agreeing with `Compare == 0` on every vector
+tested (`±inf`, `±max`, `±min normal`, `±subnormal`, both signed zeros, ordinary values and two
+distinct NaN payloads). `-0` and `+0` are **not** equal and hash differently; identical NaN
+payloads are equal and distinct ones are not; the binary64 hash **folds** both halves rather than
+truncating, so two values differing only above bit 32 do not collide. A `static_assert` on `sizeof`
+pins the layout so the gate below cannot be crossed silently, and `std::is_same_v` assertions on
+the member-pointer types keep the signatures aligned with the interface.
+
+**Ticket #2170 (needs_user)** is the remaining half — polymorphic binding, which needs the second
+base and therefore the 8 → 16 growth. Public object-layout growth has required explicit
+per-action user approval in this repository (#1788 `LinkedList<T>` 40→48, #1789
+`BitArray::Enumerator` 32→40) and has been blocked without one (#1889). The risk here is
+**measurably low** and recorded so the decision is cheap: the type is header-only, stateless, and
+has **zero in-repository users outside its own tests**. Approval sentence in
+`docs/SystemNumericsNamespaceReviewPlan.md` §12.
+
+**Status:** `confirmed` → **`confirmed (design-complete)`**.
