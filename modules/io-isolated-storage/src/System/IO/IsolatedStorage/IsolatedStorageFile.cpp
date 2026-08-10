@@ -304,8 +304,13 @@ namespace System::IO::IsolatedStorage
 
     // --- Store lifecycle ---
 
+    // Verified against IsolatedStorageFile.cs: real .NET calls EnsureStoreIsValid() in Remove
+    // and in all three space properties, exactly as it does in the file and directory
+    // operations. This port guarded the ten operations and left these four unguarded, so a
+    // closed or already-removed store still answered them and still deleted its own tree.
     void IsolatedStorageFile::Remove()
     {
+        throwIfDisposed();
         std::error_code ec;
         std::filesystem::remove_all(rootDirectory_, ec);
         disposed_ = true;
@@ -325,6 +330,7 @@ namespace System::IO::IsolatedStorage
 
     SharpRuntime::longcs IsolatedStorageFile::getAvailableFreeSpaceProperty() const
     {
+        throwIfDisposed();
         std::error_code ec;
         auto si = std::filesystem::space(rootDirectory_, ec);
         if (ec) return 0;
@@ -333,6 +339,7 @@ namespace System::IO::IsolatedStorage
 
     SharpRuntime::longcs IsolatedStorageFile::getUsedSizeProperty() const
     {
+        throwIfDisposed();
         SharpRuntime::longcs total = 0;
         if (!std::filesystem::exists(rootDirectory_)) return total;
         for (const auto& entry : std::filesystem::recursive_directory_iterator(rootDirectory_)) {
@@ -350,6 +357,7 @@ namespace System::IO::IsolatedStorage
         // quotas and always returns long.MaxValue. This port previously inherited the
         // IsolatedStorage base class's default of 0, which any caller checking "is there quota
         // remaining" against would read as "no space available" instead of "unlimited."
+        throwIfDisposed();
         return std::numeric_limits<SharpRuntime::longcs>::max();
     }
 

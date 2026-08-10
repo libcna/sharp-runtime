@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <limits>
 #include <vector>
 
 #include "System/ArgumentException.hpp"
@@ -701,6 +702,74 @@ namespace {
         withNul += "tail";
         EXPECT_EQ(messageOf(withNul),
                   "Path must not contain an embedded NUL character. (Parameter 'relativePath')");
+    }
+
+    // =====================================================================================
+    // Disposed-state coverage (#2205).
+    //
+    // Ten members already threw ObjectDisposedException on a closed store; Remove and the
+    // three space properties silently kept working, and Remove still deleted the tree.
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, Disposed_SpacePropertiesThrowObjectDisposedException)
+    {
+        auto s = store();
+        s.Close();
+        EXPECT_THROW((void)s.getAvailableFreeSpaceProperty(), System::ObjectDisposedException);
+        EXPECT_THROW((void)s.getUsedSizeProperty(), System::ObjectDisposedException);
+        EXPECT_THROW((void)s.getQuotaProperty(), System::ObjectDisposedException);
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Disposed_RemoveThrowsAndDoesNotDeleteTheTreeAgain)
+    {
+        auto s = store();
+        { auto st = s.CreateFile("payload.dat"); st.Close(); }
+        s.Close();
+
+        EXPECT_THROW(s.Remove(), System::ObjectDisposedException);
+        EXPECT_TRUE(fs::exists(root_ / "payload.dat"))
+            << "Remove ran on a closed store and deleted its contents";
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Disposed_RemoveIsNotIdempotent)
+    {
+        auto s = store();
+        s.Remove();
+        EXPECT_FALSE(fs::exists(root_));
+        // Remove() closes the store, so a second call is a use-after-close like any other.
+        EXPECT_THROW(s.Remove(), System::ObjectDisposedException);
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Disposed_TheAlreadyGuardedMembersAreUnchanged)
+    {
+        auto s = store();
+        s.Dispose();
+        EXPECT_THROW((void)s.FileExists("x"), System::ObjectDisposedException);
+        EXPECT_THROW((void)s.DirectoryExists("x"), System::ObjectDisposedException);
+        EXPECT_THROW(s.CreateDirectory("x"), System::ObjectDisposedException);
+        EXPECT_THROW(s.DeleteDirectory("x"), System::ObjectDisposedException);
+        EXPECT_THROW(s.DeleteFile("x"), System::ObjectDisposedException);
+        EXPECT_THROW((void)s.GetFileNames(), System::ObjectDisposedException);
+        EXPECT_THROW((void)s.GetDirectoryNames(), System::ObjectDisposedException);
+        EXPECT_THROW({ auto st = s.OpenFile("x", FileMode::Create); st.Close(); },
+                     System::ObjectDisposedException);
+        EXPECT_THROW({ auto st = s.CreateFile("x"); st.Close(); },
+                     System::ObjectDisposedException);
+        EXPECT_THROW(s.CopyFile("a", "b"), System::ObjectDisposedException);
+        EXPECT_THROW(s.MoveFile("a", "b"), System::ObjectDisposedException);
+        EXPECT_THROW(s.MoveDirectory("a", "b"), System::ObjectDisposedException);
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Disposed_ALiveStoreStillAnswersAllFour)
+    {
+        // The guard must not fire on an open store: an over-eager version of #2205 would
+        // break every legitimate caller instead of only the closed ones.
+        auto s = store();
+        { auto st = s.CreateFile("sized.dat"); st.Close(); }
+        EXPECT_GT(s.getAvailableFreeSpaceProperty(), 0);
+        EXPECT_GE(s.getUsedSizeProperty(), 0);
+        EXPECT_EQ(s.getQuotaProperty(), std::numeric_limits<SharpRuntime::longcs>::max());
+        EXPECT_NO_THROW(s.Remove());
     }
 
     // =====================================================================================
