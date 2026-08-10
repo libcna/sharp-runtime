@@ -6,6 +6,7 @@
 #include "System/InvalidOperationException.hpp"
 #include "System/Xml/Linq/XElement.hpp"
 #include "System/Xml/Linq/XNamespace.hpp"
+#include "NamespaceScope.hpp"
 
 namespace System::Xml::Linq {
 
@@ -95,6 +96,32 @@ namespace System::Xml::Linq {
             }
         }
         return out;
+    }
+
+    std::string XAttribute::ToString() const {
+        const std::string& uri = name_.getNamespaceNameProperty();
+        const std::string& local = name_.getLocalNameProperty();
+
+        // A declaration renders as itself. Before #2197 this door rendered `{xmlns-uri}p` as the
+        // bare local name `p`, turning a namespace declaration into an ordinary attribute.
+        if (getIsNamespaceDeclarationProperty()) {
+            return detail::DeclarationAttributeName(detail::DeclaredPrefix(uri, local)) +
+                   "=\"" + EscapeValue(value_) + "\"";
+        }
+        if (uri.empty()) return local + "=\"" + EscapeValue(value_) + "\"";
+
+        // A qualified name needs a prefix. Ask the owning element for one it already has in
+        // scope; a detached attribute, or one whose namespace nothing declares, gets a
+        // generated prefix and carries its own declaration so the text stands alone.
+        if (const XElement* owner = getParentProperty()) {
+            std::string prefix = owner->GetPrefixOfNamespace(XNamespace(uri));
+            if (!prefix.empty())
+                return prefix + ":" + local + "=\"" + EscapeValue(value_) + "\"";
+        }
+        if (uri == detail::kXmlNamespaceUri)
+            return "xml:" + local + "=\"" + EscapeValue(value_) + "\"";
+        return "p1:" + local + "=\"" + EscapeValue(value_) + "\" xmlns:p1=\"" +
+               EscapeValue(uri) + "\"";
     }
 
     XAttribute* XAttribute::getPreviousAttributeProperty() const {

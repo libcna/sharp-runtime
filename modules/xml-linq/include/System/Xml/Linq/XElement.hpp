@@ -18,6 +18,13 @@ namespace System::Xml {
 
 namespace System::Xml::Linq {
 
+    class XNamespace;
+
+    namespace detail {
+        class NamespaceScope;
+    }
+
+
     /**
      * @brief Represents an XML element with a name, attributes, and content (a mix of child
      * elements, text, CDATA, comments, and processing instructions).
@@ -159,6 +166,31 @@ namespace System::Xml::Linq {
             return std::nullopt;
         }
 
+        // --- Namespaces ------------------------------------------------------------------
+
+        /**
+         * @brief Returns the default namespace in scope for this element.
+         *
+         * Resolved from the `xmlns="..."` declarations this element and its ancestor elements
+         * carry as attributes, innermost first; `XNamespace::None` when none is in scope or the
+         * innermost declaration is the undeclaration `xmlns=""`.
+         *
+         * C++ counterpart of .NET XElement.GetDefaultNamespace().
+         */
+        [[nodiscard]] XNamespace GetDefaultNamespace() const;
+
+        /**
+         * @brief Returns the prefix currently bound to @p ns for this element, or "" if none is.
+         *
+         * Resolved from the `xmlns:prefix="..."` declarations this element and its ancestor
+         * elements carry as attributes, innermost first, skipping any prefix a nearer
+         * declaration has rebound to a different URI. The reserved `xml` prefix always resolves,
+         * whether or not it was declared.
+         *
+         * C++ counterpart of .NET XElement.GetPrefixOfNamespace(XNamespace).
+         */
+        [[nodiscard]] std::string GetPrefixOfNamespace(const XNamespace& ns) const;
+
         // --- Serialization ---------------------------------------------------------------
 
         void WriteTo(System::Xml::XmlWriter& writer) const override;
@@ -201,6 +233,36 @@ namespace System::Xml::Linq {
 
     private:
         void AppendTextValue(std::string& sb) const;
+
+        /**
+         * @brief Seeds @p scope with every namespace declaration in scope from this element's
+         * ANCESTORS, outermost first (ticket #2197).
+         *
+         * Walks `getParentProperty()` upward, so it stops at an `XDocument` and touches only
+         * live elements. Nothing is cached: the scope is rebuilt on each serialization entry
+         * point, which is exactly what keeps this repair object-layout compatible.
+         */
+        void CollectInheritedScope(detail::NamespaceScope& scope) const;
+
+        /** @brief Adds this element's own `xmlns`/`xmlns:prefix` attributes to @p scope. */
+        void DeclareOwnNamespaces(detail::NamespaceScope& scope) const;
+
+        /**
+         * @brief Renders this element's start tag into @p qualifiedName plus the attribute
+         * strings @p attributes, declaring whatever @p scope does not already bind.
+         *
+         * @p scope is updated with every declaration emitted, so the caller can pass it down to
+         * this element's children.
+         */
+        void ResolveStartTag(detail::NamespaceScope& scope, std::string& qualifiedName,
+                             std::vector<std::pair<std::string, std::string>>& attributes) const;
+
+        /** @brief The recursive body of SerializeTo, carrying the namespace scope down. */
+        void SerializeElementTo(std::ostream& os, int depth, bool indent,
+                                detail::NamespaceScope scope) const;
+
+        /** @brief The recursive body of WriteTo, carrying the namespace scope down. */
+        void WriteElementTo(System::Xml::XmlWriter& writer, detail::NamespaceScope scope) const;
     };
 
 } // namespace System::Xml::Linq

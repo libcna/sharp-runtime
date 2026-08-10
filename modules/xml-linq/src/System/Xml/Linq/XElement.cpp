@@ -7,13 +7,150 @@
 #include "System/ArgumentException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Xml/Linq/XDocument.hpp"
+#include "System/Xml/Linq/XNamespace.hpp"
 #include "System/Xml/Linq/XText.hpp"
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlWriter.hpp"
+#include "NamespaceScope.hpp"
 
 namespace System::Xml::Linq {
 
     using System::Xml::XmlNodeType;
+
+    // -----------------------------------------------------------------------------------
+    // Namespace-aware serialization (ticket #2197, SR-AUD-334).
+    //
+    // Both serialization doors used to write `name_.getLocalNameProperty()`. The in-code
+    // comments recorded that as a deliberate choice to avoid emitting XName's Clark notation
+    // ("{uri}local") as an XML Name, which would have been literally unparseable. That
+    // reasoning was right about Clark notation and wrong about the alternative: the
+    // alternative is a PREFIX, not a bare local name. Measured, writing bare local names did
+    // not merely lose the namespace, it produced malformed output -- two attributes differing
+    // only by namespace serialized as `<r x="1" x="2"/>`, which this runtime's own parser
+    // rejects with XML_ERROR_PARSING_ATTRIBUTE -- and it degraded an `xmlns:p` declaration
+    // into an ordinary attribute named `p`, silently unbinding the prefix for a whole subtree.
+    //
+    // The scope is rebuilt from the tree on every entry point and cached nowhere. Caching it
+    // would need a field on XObject, which is the object-layout approval #1896 was refused.
+    // -----------------------------------------------------------------------------------
+
+    void XElement::CollectInheritedScope(detail::NamespaceScope& scope) const {
+        // getParentProperty() rather than parent_: it is public, it already returns nullptr for
+        // a detached node and for a node whose parent is an XDocument, and #1890 made it safe
+        // after an owner is destroyed. Nothing here dereferences a link it did not just read.
+        std::vector<const XElement*> chain;
+        for (const XElement* p = getParentProperty(); p != nullptr; p = p->getParentProperty())
+            chain.push_back(p);
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it)
+            (*it)->DeclareOwnNamespaces(scope);
+    }
+
+    void XElement::DeclareOwnNamespaces(detail::NamespaceScope& scope) const {
+        for (const auto& a : attributes_) {
+            if (!a || !a->getIsNamespaceDeclarationProperty()) continue;
+            scope.Declare(detail::DeclaredPrefix(a->getNameProperty().getNamespaceNameProperty(),
+                                                 a->getNameProperty().getLocalNameProperty()),
+                          a->getValueProperty());
+        }
+    }
+
+    void XElement::ResolveStartTag(detail::NamespaceScope& scope, std::string& qualifiedName,
+                                   std::vector<std::pair<std::string, std::string>>& attributes) const {
+        // Whether this element declares a default namespace of its own has to be known before
+        // its declarations are folded into the scope: it decides whether an unqualified name
+        // needs an xmlns="" undeclaration, and emitting both would put two `xmlns` attributes on
+        // one start tag.
+        bool declaresOwnDefault = false;
+        for (const auto& a : attributes_) {
+            if (a && a->getIsNamespaceDeclarationProperty() &&
+                a->getNameProperty().getNamespaceNameProperty().empty()) {
+                declaresOwnDefault = true;
+                break;
+            }
+        }
+        DeclareOwnNamespaces(scope);
+
+        std::vector<std::pair<std::string, std::string>> generated;
+
+        // The element's own name. An element name MAY take the default namespace, so the
+        // lookup allows it; an unqualified element under an inherited default namespace has to
+        // undeclare it with xmlns="" or it would silently acquire one on read-back.
+        const std::string& elementUri = name_.getNamespaceNameProperty();
+        std::string elementPrefix;
+        if (elementUri.empty()) {
+            // `declaresOwnDefault` guards the one self-contradictory tree this can be handed:
+            // an unqualified element carrying its own non-empty xmlns="..." declaration. XML
+            // has no way to express that -- the declaration governs the element's own name --
+            // so the explicit declaration wins and no undeclaration is generated. Emitting both
+            // produced `<e xmlns="" xmlns="urn:y"/>`, which is not well-formed.
+            if (!declaresOwnDefault && !scope.DefaultUri().empty()) {
+                generated.emplace_back(std::string(), std::string());
+                scope.Declare(std::string(), std::string());
+            }
+        } else if (!scope.TryLookupUri(elementUri, /*allowDefault=*/true, elementPrefix)) {
+            elementPrefix = scope.AllocatePrefix();
+            generated.emplace_back(elementPrefix, elementUri);
+            scope.Declare(elementPrefix, elementUri);
+        }
+        qualifiedName = detail::QualifiedName(elementPrefix, name_.getLocalNameProperty());
+
+        // The attributes, in document order. A declaration is rendered AS a declaration -- that
+        // is the half that used to corrupt the tree rather than merely lose fidelity.
+        std::vector<std::pair<std::string, std::string>> rendered;
+        rendered.reserve(attributes_.size());
+        for (const auto& a : attributes_) {
+            if (!a) continue;
+            const XName& n = a->getNameProperty();
+            if (a->getIsNamespaceDeclarationProperty()) {
+                rendered.emplace_back(
+                    detail::DeclarationAttributeName(detail::DeclaredPrefix(
+                        n.getNamespaceNameProperty(), n.getLocalNameProperty())),
+                    a->getValueProperty());
+                continue;
+            }
+            const std::string& uri = n.getNamespaceNameProperty();
+            if (uri.empty()) {
+                rendered.emplace_back(n.getLocalNameProperty(), a->getValueProperty());
+                continue;
+            }
+            // An attribute name never takes the default namespace, so a non-empty prefix is
+            // required even when the default declaration already names this URI.
+            std::string prefix;
+            if (!scope.TryLookupUri(uri, /*allowDefault=*/false, prefix)) {
+                prefix = scope.AllocatePrefix();
+                generated.emplace_back(prefix, uri);
+                scope.Declare(prefix, uri);
+            }
+            rendered.emplace_back(detail::QualifiedName(prefix, n.getLocalNameProperty()),
+                                  a->getValueProperty());
+        }
+
+        attributes.clear();
+        attributes.reserve(generated.size() + rendered.size());
+        // Generated declarations first. Order inside one start tag is not significant -- every
+        // declaration on a tag is in scope for that whole tag -- so this is purely for
+        // readability and for a stable, testable rendering.
+        for (const auto& g : generated)
+            attributes.emplace_back(detail::DeclarationAttributeName(g.first), g.second);
+        for (auto& r : rendered) attributes.push_back(std::move(r));
+    }
+
+    XNamespace XElement::GetDefaultNamespace() const {
+        detail::NamespaceScope scope;
+        CollectInheritedScope(scope);
+        DeclareOwnNamespaces(scope);
+        return XNamespace(scope.DefaultUri());
+    }
+
+    std::string XElement::GetPrefixOfNamespace(const XNamespace& ns) const {
+        detail::NamespaceScope scope;
+        CollectInheritedScope(scope);
+        DeclareOwnNamespaces(scope);
+        std::string prefix;
+        if (scope.TryLookupUri(ns.getNamespaceNameProperty(), /*allowDefault=*/false, prefix))
+            return prefix;
+        return {};
+    }
 
     void XElement::RelinkAttributes() {
         for (size_t i = 0; i < attributes_.size(); ++i) {
@@ -105,24 +242,31 @@ namespace System::Xml::Linq {
     }
 
     void XElement::WriteTo(System::Xml::XmlWriter& writer) const {
-        writer.WriteStartElement(name_.getLocalNameProperty());
-        for (auto& a : attributes_) {
-            // Verified: XName::ToString() returns Clark notation ("{namespace}local") for a
-            // namespace-qualified name. That string was previously passed directly as the
-            // *attribute name* to WriteAttributeString -- '{'/'}' are not legal in an XML Name
-            // production, so this produced literally malformed, unparseable XML for any
-            // namespaced attribute (not just a fidelity gap: Save()-then-Parse() would fail or
-            // silently corrupt the attribute). This port's XmlWriter has no namespace/prefix-
-            // aware WriteAttributeString overload (matching XElement's own getNameProperty()
-            // write path a few lines up, which already only ever writes the local name and
-            // silently drops the element's own namespace -- a separately-tracked, lower-
-            // severity fidelity gap, not corruption). Using the local name here makes
-            // attributes consistent with that existing, valid-XML-but-namespace-lossy
-            // behavior instead of producing invalid XML.
-            writer.WriteAttributeString(a->getNameProperty().getLocalNameProperty(), a->getValueProperty());
-        }
-        for (auto& c : children_) {
-            c->WriteTo(writer);
+        detail::NamespaceScope scope;
+        CollectInheritedScope(scope);
+        WriteElementTo(writer, std::move(scope));
+    }
+
+    void XElement::WriteElementTo(System::Xml::XmlWriter& writer, detail::NamespaceScope scope) const {
+        // The historical comment here recorded that XName::ToString()'s Clark notation
+        // ("{uri}local") must never be written as an XML Name, because '{' and '}' are not
+        // legal in the Name production. That is still true, and it is still not what happens.
+        // What changed with #2197 is the alternative: a qualified name plus a declaration,
+        // instead of a bare local name. XmlConvert::VerifyName -- which this writer already
+        // applies to every name -- accepts a ':', so no writer surface had to change.
+        std::string qualifiedName;
+        std::vector<std::pair<std::string, std::string>> attributes;
+        ResolveStartTag(scope, qualifiedName, attributes);
+
+        writer.WriteStartElement(qualifiedName);
+        for (const auto& a : attributes) writer.WriteAttributeString(a.first, a.second);
+        for (const auto& c : children_) {
+            if (!c) continue;
+            if (c->getNodeTypeProperty() == XmlNodeType::Element) {
+                static_cast<const XElement*>(c.get())->WriteElementTo(writer, scope);
+            } else {
+                c->WriteTo(writer);
+            }
         }
         writer.WriteEndElement();
     }
@@ -153,9 +297,25 @@ namespace System::Xml::Linq {
     }
 
     void XElement::SerializeTo(std::ostream& os, int depth, bool indent) const {
+        detail::NamespaceScope scope;
+        CollectInheritedScope(scope);
+        SerializeElementTo(os, depth, indent, std::move(scope));
+    }
+
+    void XElement::SerializeElementTo(std::ostream& os, int depth, bool indent,
+                                      detail::NamespaceScope scope) const {
+        std::string qualifiedName;
+        std::vector<std::pair<std::string, std::string>> attributes;
+        ResolveStartTag(scope, qualifiedName, attributes);
+
         std::string pad = indent ? std::string(static_cast<size_t>(depth) * 2, ' ') : "";
-        os << pad << "<" << name_.getLocalNameProperty();
-        for (auto& a : attributes_) os << " " << a->ToString();
+        os << pad << "<" << qualifiedName;
+        for (const auto& a : attributes)
+            // XAttribute::EscapeValue, not XNode::EscapeAttributeValue: the former also emits
+            // character references for tab/LF/CR, without which attribute-value normalization
+            // collapses them to spaces on reload. XElement is a friend of XAttribute, so the
+            // one escaper both doors already used stays the one escaper.
+            os << " " << a.first << "=\"" << XAttribute::EscapeValue(a.second) << "\"";
         if (children_.empty()) {
             os << "/>";
             return;
@@ -169,10 +329,14 @@ namespace System::Xml::Linq {
             auto nt = c->getNodeTypeProperty();
             bool isText = (nt == XmlNodeType::Text || nt == XmlNodeType::CDATA);
             if (multiline && !isText) os << "\n";
-            c->SerializeTo(os, depth + 1, indent);
+            if (nt == XmlNodeType::Element) {
+                static_cast<const XElement*>(c.get())->SerializeElementTo(os, depth + 1, indent, scope);
+            } else {
+                c->SerializeTo(os, depth + 1, indent);
+            }
         }
         if (multiline) os << "\n" << pad;
-        os << "</" << name_.getLocalNameProperty() << ">";
+        os << "</" << qualifiedName << ">";
     }
 
     SharpRuntime::intcs XElement::GetDeepHashCode() const {

@@ -729,3 +729,57 @@ out-of-bounds read compiled into the *same* build configuration **did** report
 delimiter decision #2084 records as unsettled), #2201 (embedded NUL — the same
 `CheckCharacters` decision #2085 records as unsettled), #2202 (a parser change bounded by a
 vendored substrate that is never edited).
+
+### 20.2 #2197 (SR-AUD-334) — landed; one self-contradictory tree and one non-discriminating mutation
+
+Landed as §4.2 specified: parse resolves through the DOM's shipped resolvers, both serialization
+doors carry a scope rebuilt from the tree, and `GetDefaultNamespace`/`GetPrefixOfNamespace` were
+added. Every measured door in §4.2 flipped (`build-probe/2195_probe1_after.log`):
+
+| Door | Before | After |
+|---|---|---|
+| `{urn:audit}root` + `{urn:audit}attribute` | `<root attribute="value"/>` | `<p1:root xmlns:p1="urn:audit" p1:attribute="value"/>` |
+| `<p:root xmlns:p="urn:audit" p:a="1"/>` | local `p:root`, URI `''`, `isNsDecl=0`/`0` | `{urn:audit}root`, `{xmlns}p` `isNsDecl=1`, `{urn:audit}a` |
+| `<root xmlns="urn:d"><child/></root>` | both URIs `''` | both `urn:d` |
+| query by `{urn:d}child` / by `child` | MISSING / found | **found / MISSING** |
+| `XAttribute(Xmlns + "p", "urn:x")` | `<e p="urn:x"/>` | `<e xmlns:p="urn:x"/>` |
+| two attributes differing only by namespace | `<r x="1" x="2"/>` (unparseable) | `<r xmlns:p1="urn:a" xmlns:p2="urn:b" p1:x="1" p2:x="2"/>` |
+| `xml:lang` | local `xml:lang`, URI `''` | `{http://www.w3.org/XML/1998/namespace}lang` |
+
+**Two things the plan did not anticipate.**
+
+1. **One tree XML cannot express.** An *unqualified* element carrying its own non-empty
+   `xmlns="urn:y"` declaration asks for two contradictory things: the declaration governs the
+   element's own name, but the name says it has none. The first implementation emitted **both**
+   an undeclaration and the declaration — `<e xmlns="" xmlns="urn:y"/>`, two `xmlns` attributes
+   on one start tag, not well-formed. Resolved by letting the explicit declaration win and
+   suppressing the generated undeclaration; pinned by
+   `Serialize_DefaultDeclarationAttribute_StaysADeclaration`.
+
+2. **A programmatically built tree is deliberately not `DeepEquals` to its own round trip.** It
+   carries no declaration attribute; serialization must add one; declarations *are* attributes
+   and `DeepEquals` compares attributes. .NET has the same asymmetry. The property that matters
+   — and that is now pinned — is that the **second** round trip is stable, and that a *parsed*
+   tree is `DeepEquals` to its round trip on the first pass.
+
+**The mutation that did not discriminate, recorded rather than hidden.** Five mutations were
+run. Four failed tests immediately (parse resolution removed → 9; element prefix dropped → 10;
+declarations rendered as ordinary attributes → 8; prefix-shadowing check removed → 1). The
+fifth — allowing an attribute name to take the **default** namespace's prefix, the XML
+Namespaces rule most often got wrong — **passed the entire 47-test suite**. A test that
+discriminates it (`Serialize_AnAttributeNeverTakesTheDefaultNamespacesPrefix`) was added and the
+mutation re-run against it: it now fails exactly that one test. Final count 48 tests.
+
+**Two pre-existing tests asserted the defect** and were updated, keeping both layers of their
+history in the comment: `XElementTests::ToString_NamespacedAttribute_ProducesValidXml_RoundTrips`
+required a *local-name* lookup to find a namespaced attribute (it now correctly misses, and the
+qualified lookup finds it), and `XAttributeTests::ToString_NamespacedAttribute_DoesNotEmitClarkNotation`
+required the bare local name. The Clark-notation prohibition both were written for is unchanged
+and still asserted.
+
+**Evidence.** Module 212 → 260 tests. ASan+UBSan+LSan over the four changed production bodies
+with a 60-deep rebinding chain, a 200-attribute allocator stress with `p1`–`p50` pre-taken,
+undeclaration, reserved prefixes and every rejecting door: **exit 0, zero reports**;
+non-recovering UBSan **exit 0**; a deliberate out-of-bounds control in the same build **did**
+report (`build-probe/2197_control.log`). No source, ABI, layout, vtable or `noexcept` change;
+the behaviour change is documented in `docs/Migration-XmlLinqNamespaces.md`.

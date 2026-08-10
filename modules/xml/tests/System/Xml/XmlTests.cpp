@@ -677,15 +677,23 @@ TEST(XAttributeTests, TabNewlineCarriageReturn_RoundTripsThroughReader) {
 }
 
 TEST(XAttributeTests, ToString_NamespacedAttribute_DoesNotEmitClarkNotation) {
-    // Regression: XAttribute::ToString() previously wrote XName::ToString()'s Clark notation
+    // Regression, in two layers, exactly like XElementTests::ToString_NamespacedAttribute_*.
+    //
+    // Originally: XAttribute::ToString() wrote XName::ToString()'s Clark notation
     // ("{namespace}local") directly as the attribute *name* -- '{'/'}' are not legal in an XML
-    // Name production, so this produced literally malformed, unparseable XML for any
-    // namespaced attribute instead of just a namespace-fidelity gap.
+    // Name production, so this produced literally malformed, unparseable XML. That is still
+    // outlawed and is still asserted below.
+    //
+    // Ticket #2197 (SR-AUD-334): the bare local name that replaced it was itself the defect --
+    // well-formed, but it silently dropped the namespace and could render two distinct
+    // attributes with the same name. A detached attribute has no element to supply a prefix, so
+    // ToString() now generates one and carries its own declaration, which is the only
+    // self-contained well-formed answer.
     XAttribute a(XName("http://example.com/ns", "kind"), "rare");
     std::string s = a.ToString();
     EXPECT_EQ(s.find('{'), std::string::npos);
     EXPECT_EQ(s.find('}'), std::string::npos);
-    EXPECT_EQ(s, "kind=\"rare\"");
+    EXPECT_EQ(s, "p1:kind=\"rare\" xmlns:p1=\"http://example.com/ns\"");
 }
 
 TEST(XAttributeTests, NextAttribute_DefaultNull) {
@@ -878,10 +886,18 @@ TEST(XElementTests, ToString_WithAttribute) {
 }
 
 TEST(XElementTests, ToString_NamespacedAttribute_ProducesValidXml_RoundTrips) {
-    // Regression: previously ToString() (via SerializeTo -> XAttribute::ToString()) emitted
-    // "{http://example.com/ns}kind=\"rare\"", which is not valid XML and would fail to
-    // reparse. Confirms the fixed output both omits Clark notation and successfully
-    // round-trips through Parse().
+    // Regression, in two layers.
+    //
+    // Originally: ToString() emitted `{http://example.com/ns}kind="rare"` -- Clark notation as
+    // an XML Name, which is unparseable. That was repaired by falling back to the bare local
+    // name, and this test then asserted the fallback by looking the attribute up as "kind".
+    //
+    // Ticket #2197 (SR-AUD-334): the fallback was itself the defect. A bare local name is
+    // well-formed but silently drops the namespace, and two attributes differing only by
+    // namespace collapsed to a duplicate attribute name this runtime's own parser rejects. The
+    // output now carries a prefix and its declaration, so the assertion becomes the stronger
+    // one: the namespace SURVIVES the round trip, and a local-name lookup correctly misses --
+    // which is exactly .NET's behaviour and the opposite of what this test used to require.
     XElement e("special");
     e.Add(std::make_shared<XAttribute>(XName("http://example.com/ns", "kind"), "rare"));
     std::string s = e.ToString();
@@ -889,7 +905,10 @@ TEST(XElementTests, ToString_NamespacedAttribute_ProducesValidXml_RoundTrips) {
 
     auto reloaded = XElement::Parse(s);
     ASSERT_NE(reloaded, nullptr);
-    EXPECT_EQ(reloaded->Attribute("kind")->getValueProperty(), "rare");
+    EXPECT_EQ(reloaded->Attribute("kind"), nullptr);
+    auto qualified = reloaded->Attribute(XName("http://example.com/ns", "kind"));
+    ASSERT_NE(qualified, nullptr);
+    EXPECT_EQ(qualified->getValueProperty(), "rare");
 }
 
 // ===========================================================================

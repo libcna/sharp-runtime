@@ -74,18 +74,29 @@ namespace System::Xml::Linq {
         void Remove();
 
         /**
-         * @return The attribute serialised as name="value" (value is XML-escaped).
+         * @return The attribute serialised as `name="value"` (value is XML-escaped), with a
+         * namespace prefix resolved for a qualified name.
          *
-         * @note Uses the local name only, not XName::ToString()'s Clark notation
-         * ("{namespace}local") -- real .NET's ToString() resolves a proper namespace prefix via
-         * an actual XmlWriter (GetPrefixOfNamespace); this port's XmlWriter has no namespace/
-         * prefix-aware WriteAttributeString overload, so writing Clark notation directly as the
-         * attribute *name* would produce literally malformed, unparseable XML ('{'/'}' are not
-         * legal in an XML Name production) instead of just a namespace-fidelity gap.
+         * @note **Never** XName::ToString()'s Clark notation (`{namespace}local`) — `{` and `}`
+         * are not legal in an XML Name production, so writing that as the attribute *name*
+         * would produce unparseable text. Ticket #2197 replaced the previous fallback, the bare
+         * local name, which was well-formed but silently dropped the namespace and could emit
+         * two attributes with the same rendered name.
+         *
+         * Resolution order: a namespace declaration renders as itself (`xmlns:p="..."` or
+         * `xmlns="..."`); an unqualified name renders as its local name; a qualified name uses
+         * the prefix its owning element has in scope. **A qualified attribute whose namespace
+         * has no prefix in scope — including every detached attribute — renders with a
+         * generated prefix and its declaration appended**, e.g. `p1:x="1" xmlns:p1="urn:a"`, so
+         * the result is self-contained and well-formed on its own. That last shape is this
+         * port's choice: the reference source is unavailable here, so the *spelling* of the
+         * generated prefix is not claimed to match .NET's, only the requirement that the text
+         * be well-formed and lossless.
+         *
+         * XElement's own serialization does **not** call this — it renders attributes with the
+         * whole element's namespace scope, which this single-attribute view cannot see.
          */
-        [[nodiscard]] std::string ToString() const {
-            return name_.getLocalNameProperty() + "=\"" + EscapeValue(value_) + "\"";
-        }
+        [[nodiscard]] std::string ToString() const;
 
     private:
         [[nodiscard]] static std::string EscapeValue(const std::string& s);

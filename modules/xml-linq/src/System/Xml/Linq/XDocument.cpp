@@ -14,6 +14,7 @@
 #include "System/Xml/XmlDocument.hpp"
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlWriter.hpp"
+#include "NamespaceScope.hpp"
 
 namespace System::Xml::Linq {
 
@@ -22,14 +23,56 @@ namespace System::Xml::Linq {
     // ---------------------------------------------------------------------------
     // Parsing: builds an XDocument tree from the tinyxml2-backed System::Xml::XmlDocument DOM.
     //
-    // Note: no XML namespace-URI resolution is performed — parsed XName local names are taken
-    // directly from the element/attribute's qualified tag text, matching the documented
-    // simplification already present in XName (see XName's doc-comment).
+    // Namespace resolution (ticket #2197, SR-AUD-334). Names used to be built from the raw
+    // qualified tag text, so `<p:root xmlns:p="urn:a"/>` produced an XName whose LOCAL name was
+    // `p:root` and whose URI was empty: a namespace-aware query could never match it, a
+    // programmatically namespaced tree round-tripped as unqualified XML, and
+    // `getIsNamespaceDeclarationProperty()` answered false for every `xmlns:prefix` attribute.
+    //
+    // The DOM layer directly underneath already resolves all three parts, including the two
+    // rules that are easiest to get wrong -- an unprefixed attribute takes NO namespace (an
+    // ancestor's default `xmlns` does not apply to it) and the `xml` prefix is built in. This
+    // converter now uses those resolvers instead of re-deriving names from the tag text.
+    //
+    // ONE CASE IS DELIBERATELY LEFT ALONE: an UNDECLARED prefix. `<p:r/>` with no `xmlns:p` in
+    // scope keeps the local name `p:r` and an empty URI, exactly as before. .NET's reader
+    // rejects such input, but narrowing what this runtime accepts is the open question ticket
+    // #2083 already owns at the DOM layer, and answering it from the Linq side would settle it
+    // by accident (docs/SystemXmlLinqNamespaceReviewPlan.md §4.2, §18).
     // ---------------------------------------------------------------------------
     namespace {
 
         bool IsAllWhitespace(const std::string& s) {
             return std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isspace(c) != 0; });
+        }
+
+        /**
+         * Builds the XName for a parsed element or attribute from the DOM's resolved parts.
+         *
+         * @param rawName    the qualified tag text, used verbatim when the prefix is undeclared
+         * @param prefix     the prefix, or "" when the name is unprefixed
+         * @param localName  the local part
+         * @param resolved   the URI the DOM resolved for @p prefix, or "" if it could not
+         * @param isAttribute attributes never take the default namespace; elements do
+         */
+        XName ResolveName(const std::string& rawName, const std::string& prefix,
+                          const std::string& localName, const std::string& resolved,
+                          bool isAttribute) {
+            // A namespace DECLARATION is a name in its own right, and the two forms differ:
+            // `xmlns:p` is `{http://www.w3.org/2000/xmlns/}p`, while a bare `xmlns` is the
+            // unqualified name "xmlns". Both are what XAttribute::getIsNamespaceDeclaration-
+            // Property() has always tested for -- it was simply never handed either of them.
+            if (isAttribute) {
+                if (prefix == "xmlns") return XName(detail::kXmlnsNamespaceUri, localName);
+                if (prefix.empty() && localName == "xmlns") return XName(std::string(), localName);
+                if (prefix.empty()) return XName(std::string(), localName);
+            }
+            if (prefix == "xml") return XName(detail::kXmlNamespaceUri, localName);
+            if (prefix.empty()) return XName(resolved, localName);
+            // Prefixed but undeclared: keep the raw name rather than inventing a URI or
+            // rejecting input this runtime has always accepted (see the block comment above).
+            if (resolved.empty()) return XName(std::string(), rawName);
+            return XName(resolved, localName);
         }
 
         std::shared_ptr<XElement> ConvertElement(System::Xml::XmlElement* srcEl, LoadOptions options);
@@ -66,11 +109,19 @@ namespace System::Xml::Linq {
         }
 
         std::shared_ptr<XElement> ConvertElement(System::Xml::XmlElement* srcEl, LoadOptions options) {
-            auto el = std::make_shared<XElement>(XName(srcEl->getNameProperty()));
+            auto el = std::make_shared<XElement>(
+                ResolveName(srcEl->getNameProperty(), srcEl->getPrefixProperty(),
+                            srcEl->getLocalNameProperty(), srcEl->getNamespaceURIProperty(),
+                            /*isAttribute=*/false));
             if (auto* attrs = srcEl->getAttributesProperty()) {
                 for (SharpRuntime::intcs i = 0; i < attrs->getCountProperty(); ++i) {
                     auto* a = (*attrs)[i];
-                    if (a != nullptr) el->Add(std::make_shared<XAttribute>(XName(a->getNameProperty()), a->getValueProperty()));
+                    if (a == nullptr) continue;
+                    el->Add(std::make_shared<XAttribute>(
+                        ResolveName(a->getNameProperty(), a->getPrefixProperty(),
+                                    a->getLocalNameProperty(), a->getNamespaceURIProperty(),
+                                    /*isAttribute=*/true),
+                        a->getValueProperty()));
                 }
             }
             ConvertChildrenInto(*el, srcEl, options);
