@@ -7,21 +7,227 @@
 harness-designated branch**. **Pushed after every commit**, per `CLAUDE.md` rule 13 — six commits,
 six pushes, every one a normal fast-forward. No merge, rebase, tag, force-push, PR, publication,
 amend or history rewrite; all commits unsigned (`git -c commit.gpgsign=false`) — no usable private
-signing key exists here. This batch **reviewed `modules/io-isolated-storage` and closed its whole
-compatible queue** (#2203 review, #2204, #2205, #2206): **the corpus's last unblocked high-severity
-finding, SR-AUD-241, is remediated**. Audit **173 remediated / 136 confirmed / 55 confirmed
-(design-complete) / 364 total**; **no `SR-AUD-*` identifier created — numbering frozen at 364.**
-Gate **16,563 tests across 38 executables: 16,555 passing, 2 skipped, 6 failing** for the same two
-measured causes, unchanged and not hidden (**+58 on the inherited 16,505 — exactly the new
-executable's own tests, so no regression anywhere**). **The executable count moved 37 → 38**: the
-module had no dedicated test target and now has `SharpRuntimeTests_IO_IsolatedStorage`. Graph
-**41 / 92**, seams **3 / 20**, negative fixtures **13 / 116** — all three unchanged. **ASan+UBSan+LSan
-and non-recovering UBSan over the changed production body: exit 0, zero reports**, with a deliberate
-out-of-bounds control firing in the same build; **7 of 7 mutations killed**. **Doxygen, `ccache` and
-the `/rv` reference tree are all absent** and were not installed. **CCF-019 open; CCF-021/#2131 and
-CCF-022/#2109 remain unminted.** #1773, #1962, #2150, #2152, #2155, #2166, #2170, #2172, #2175,
-#2185, #2186, #2192, #2194 and #2199 remain exactly as inherited. **The measured next unit is
-`modules/core`, split into families** (§7). See the first handoff below.*
+signing key exists here. This batch reviewed and **closed the bounded `modules/core` memory-safety
+family** — SR-AUD-044, 045, 051, 054 and 067, **all five remediated**, one with a named residual
+(#2215, `needs_user`). This is **one bounded family of `modules/core`, not a `modules/core`
+namespace review**: 67 findings in that module remain open and the measured next family is selected
+in §7. Audit **178 remediated / 131 confirmed / 55 confirmed (design-complete) / 364 total**;
+**no `SR-AUD-*` identifier created — numbering frozen at 364.** Gate **16,605 tests across 38
+executables: 16,597 passing, 2 skipped, 6 failing** for the same two measured causes, unchanged and
+not hidden (**+42 on the inherited 16,563 — exactly the five tickets' own new tests, so no
+regression anywhere**). Graph **41 / 92** and seams **3 / 20** unchanged; negative fixtures
+**13 → 14 files, 116 → 120 sites** (one new fixture, four new sites). **ASan+UBSan over the
+instrumented production bodies: every one of the ten before-reports absent afterwards**, with a
+deliberate heap-buffer-overflow control firing in the same build; **25 of 25 mutations killed**, one
+after being strengthened. **Doxygen, `ccache` and the `/rv` reference tree are all absent** and were
+not installed. **CCF-019 untouched and open; CCF-005 recorded as adjacency without being reopened;
+CCF-021/#2131 and CCF-022/#2109 remain unminted.** #1773, #1962, #2150, #2152, #2155, #2166, #2170,
+#2172, #2175, #2185, #2186, #2192, #2194, #2199, #2207, #2208 and #2209 remain exactly as inherited.
+See the first handoff below.*
+
+---
+
+## Batch record — the bounded `modules/core` memory-safety family, closed (#2210–#2216)
+
+**Five audit findings. All five remediated. One named residual.** Six commits, six pushes.
+
+### 1. Work unit 1 — the scope, verified rather than inherited
+
+`audit/AUDIT_FINDINGS_INDEX.md` was re-parsed **by finding identifier**, not by column count:
+**173 remediated / 136 confirmed / 55 confirmed(design-complete) = 364**, matching the inherited
+triple exactly. The brief's warning held — SR-AUD-029 carries a seventh column.
+
+All five owning reports were read in full, `plan.sqlite3` was checked for a live owner of each
+(there was none), and no ticket was `doing`. The five were then **inventoried from the source**
+rather than from the audit text, which produced **32 public doors** against the handful the reports
+name.
+
+### 2. The family is four subfamilies, not one — and two of them are not sanitizer-decidable
+
+The brief asked whether the five share a structural cause. **They do not**, and forcing one family
+would have misstated the repairs. `docs/CoreMemorySafetyFamilyPlan.md` splits them:
+
+| Subfamily | Findings | Cause | Sanitizer-decidable |
+|---|---|---|---|
+| **CMS-A** raw byte copy over typed storage | 051, 067 | signed public metadata cast to `size_t` and handed to `memcpy`/`memmove`; object-representation copy of a type the API does not own | **yes** |
+| **CMS-B** the default state is not a guarded state | 054 | the default value holds a null owner and the operations form references from it | **yes**, for 2 of 12 doors |
+| **CMS-C** forward-only copy is not the overlap contract | 044 | the direction is fixed at "forward" instead of selected | **no** |
+| **CMS-D** a zero-width match does not advance | 045 | no zero-length separator mode, so the cursor is a fixed point | **no** |
+
+**The brief's premise that all five are ASan-decidable is wrong for two of them, and this batch says
+so rather than letting clean sanitizers imply a proof.** Overlapping element assignment is perfectly
+memory-safe and merely loses data; a non-advancing enumerator is a liveness defect. Both were run
+under ASan **and** UBSan, before and after, with **zero reports either way**, while a deliberate
+heap-buffer-overflow control fired in the same binary. Their evidence is measured values and a
+bounded iteration counter.
+
+Conversely, **one door of SR-AUD-044 *is* ASan-decidable and no report said so**: the raw-pointer
+`Array::Copy` uses `memcpy`, and ASan reports **`memcpy-param-overlap`**.
+
+### 3. Twelve premise corrections, every one measured
+
+The five that changed the work:
+
+- **The audit's predicted defect classes are wrong in three places on this toolchain.**
+  `Array::Copy(…, -1)` reports **`unknown-crash`**, not `negative-size-param`; `BlockCopy(…, -1)`
+  reports **`stack-buffer-overflow`**, not `negative-size-param`; the nontrivial `Array::Copy`
+  reports **`double-free`**, not "attempting free on address which was not `malloc()`-ed". GCC 13.3
+  at `-O1` with `_FORTIFY_SOURCE` inlines the checked builtins, so libsanitizer's `memcpy`/`memmove`
+  interceptors — the code that emits `negative-size-param` — never run.
+- **SR-AUD-067 is three doors and SR-AUD-051 is four**, not one and two. Negative `srcOffset` is a
+  *stack-buffer-underflow* while negative `dstOffset` is a *stack-buffer-overflow*; the raw
+  `Array::Copy` additionally fails on a negative `srcIndex` and on overlap.
+- **SR-AUD-054 is twelve doors, of which only two are memory-unsafe.** Both `Slice` overloads reach
+  the null dereference; the other ten are parity breaches with no memory error at all.
+- **The default `ArraySegment` indexer already threw — with the wrong type.** `count_ == 0` makes
+  the range check fire before the null dereference, so it raised `ArgumentOutOfRangeException` where
+  .NET raises `InvalidOperationException`. That is why the guard has to run **first**.
+- **`int` cannot prove a copy-direction claim.** libstdc++ lowers **both** `std::copy` and
+  `std::copy_backward` over a trivially copyable type to `__builtin_memmove`, correct in either
+  direction. Measured while mutation-testing #2213: an unconditionally backward copy **passed every
+  `int` overlap assertion**. Every direction assertion in the family now uses `std::string`.
+
+Plus: left overlap was already correct (so the repair must *select* the direction, not reverse it);
+the empty any-of separator list already terminated; and neither `SpanSplitEnumerator` nor any raw
+door has an in-repo production consumer.
+
+### 4. Ticket outcomes
+
+| Ticket | Finding | Outcome | Commit |
+|---|---|---|---|
+| **#2210** family review + plan | all five | **done** | `87045e5` |
+| **#2211** empty exact sequence never advances | SR-AUD-045 | **done — remediated** | `a817762` |
+| **#2212** raw `Buffer::BlockCopy` negative metadata | SR-AUD-067 | **done — remediated** | `e2f9dc0` |
+| **#2213** raw `Array::Copy` + generic `Buffer` templates | SR-AUD-051 | **done — remediated** | `b423d9b` |
+| **#2214** default `ArraySegment` state guard (10 doors) | SR-AUD-054 | **done — remediated** | `b70e96f` |
+| **#2216** overlap-safe copy across 11 doors | SR-AUD-044 | **done — remediated** | `1e63e29` |
+| **#2215** enumeration door needs a `noexcept` drop | SR-AUD-054 residual | **needs_user** | — |
+| **#2217** next family review | — | **todo** | — |
+
+### 5. What the repairs are, and the one break
+
+- **#2211** — `MoveNext()` gained .NET's `SpanSplitEnumeratorMode.EmptySequence` arm. `findSequence`
+  is deliberately **not** hardened too: a second guard would make the first unobservable to a
+  mutation test.
+- **#2212** — three `ThrowIfNegative` calls before any pointer arithmetic, same helper and same
+  order as the sibling vector overload.
+- **#2213** — the raw `Array::Copy` validates its three signed arguments, rejects a null buffer
+  **when `length > 0`** (a null with zero length stays legal — the C++ empty-range idiom, a
+  documented divergence from .NET), and copies **elements** through the new
+  `System::detail::copyOverlapAware`. The audit offered "constrain to trivially copyable" *or*
+  "preserve generic value semantics"; the second was chosen, because .NET's `Array.Copy` works for
+  every element type.
+- **#2214** — one private `throwIfDefault()` as the first statement of ten doors, throwing
+  `InvalidOperationException("The underlying array is null.")`. Eight further doors are
+  **deliberately not guarded**, matching .NET, and a test asserts their unguardedness so an
+  over-correction fails.
+- **#2216** — eleven doors routed through the shared helper, which **selects** the direction with
+  `std::less` (relational comparison of pointers into different objects is unspecified in ISO C++).
+
+**The family's only source break is a compile-time one.** `Buffer::BlockCopy`, `ByteLength`,
+`GetByte` and `SetByte` over `std::vector<T>` now `static_assert` that `T` is trivially copyable.
+.NET rejects the same call at run time; in C++ the type is known at compile time, so refusing to
+compile is the faithful counterpart. No in-repo call site is affected, every rejected call was
+already corrupting memory, and the migration is named in the header and in the new fixture.
+
+### 6. Evidence
+
+- **Instrumentation is over the production bodies themselves.** Every implicated body is a
+  header-only template or header-only static member, so the probe translation unit *is* the
+  production code — there is no implementation archive that could be stale. Proved by 21 `__asan_*`
+  symbols in the probe binary and by a deliberate `heap-buffer-overflow` control that reports in
+  every run, before and after.
+- **Ten before-reports, all absent after**: `unknown-crash`, two `stack-buffer-underflow`, two
+  `stack-buffer-overflow`, two `double-free`, `memcpy-param-overlap`, two `SEGV` with three
+  accompanying UBSan *reference-binding-to-null* reports.
+- **LSan** ran on the after-cases and is clean — recorded as confirmation, not discovery, because
+  the family allocates nothing a guard could strand. **TSan recorded not applicable**: nothing here
+  has shared mutable state, so a clean TSan run would mean nothing.
+- **25 mutations, 25 killed.** Three for #2211, five for #2212, six for #2213, six for #2214, five
+  for #2216. **One survived first and is reported as the batch's most useful result** — #2213's M5,
+  the unconditional backward copy, which passed every `int` assertion and only died once a
+  `std::string` left-overlap assertion was added. Two further honest notes: #2212's "delete all
+  three guards" mutant kills only by **process abort**, not by assertion, which is why zero-count
+  rejection tests were added to give the individual guards an assertion-level kill; and #2213's
+  "drop one `static_assert`" mutant is killed by the **negative-fixture checker**, not by a runtime
+  test, because the claim it removes is a compile-time one.
+
+### 7. Work unit 2 — the measured next Core family
+
+Re-parsed after this batch: `modules/core` has **67 open findings — 4 high, 58 medium, 4 low, and
+1 medium design-complete.** Grouped structurally:
+
+| # | Candidate family | Findings | Count | Severity | Compatible est. | Blocked est. | Tool-decidable | `/rv` needed |
+|---|---|---|---:|---|---:|---:|---|---|
+| **1** | **defined arithmetic + bounded parse** | **131, 135, 180** | **3** | **3 high** | **3** | **0** | **UBSan ×2, ASan ×1** | **no** |
+| 2 | PRNG predictability | 050 | 1 | 1 high | 1 | 0 | none (statistical) | no |
+| 3 | delegate identity/composition | 118, 119, 120 | 3 | medium | 3 | 0 | none | no |
+| 4 | exception boundary & diagnostics | 091, 092, 098, 101, 114 | 5 | medium | ~3 | ~2 | none | partly |
+| 5 | numeric special values & formatting | 011, 034, 037, 039, 040, 133, 175 | 7 | medium | ~5 | ~2 | UBSan (040 partly) | partly |
+| 6 | Base64 / text grammar | 017, 028, 048 | 3 | medium | 3 | 0 | none | no |
+| 7 | environment & process surface | 105, 106, 107, 108 | 4 | medium | ~2 | ~2 | none | yes for 105 |
+| 8 | Lazy / MemoryHandle lifetime | 064, 066, 088 | 3 | medium | ~2 | 1 (#2059 blocked) | LSan | no |
+| 9 | public representation & immutability | 063, 068, 069, 110, 113, 115, 116, 127, 128, 129, 136, 137 | 12 | medium | **~1** | **~11** | none | no |
+| 10 | Unicode data tables | 173, 174, 182 | 3 | medium | 0 | 3 | none | **yes (ICU/UCD)** |
+| 11 | test-fixture findings | 018, 056, 112 | 3 | low/med | 3 | 0 | UBSan (112) | no |
+| 12 | documentation & attribute plumbing | 053, 111, 117, 179, 181 | 5 | low/med | 4 | 1 | none | no |
+
+**Selected next: family 1 — defined arithmetic and bounded parse (SR-AUD-131, SR-AUD-135,
+SR-AUD-180), tracked as review ticket #2217.** It is the only candidate that is **entirely high
+severity**, it **exhausts the remaining unblocked high findings except SR-AUD-050**, all three are
+decidable here with a sanitizer and none needs the absent `/rv` tree, and **SR-AUD-180 is the only
+open core finding with no ticket of any kind**. SR-AUD-131 and SR-AUD-135 are new occurrences of the
+**already-closed CCF-004** defined-arithmetic cause, so the family consumes no new CCF identifier.
+
+Family 9 is the largest structural group and was **deliberately not selected**: most of its twelve
+members need a public layout or signature change and would land as blocked approval tickets, so its
+compatible yield is roughly one. Family 10 is unreachable without Unicode data. Family 2
+(SR-AUD-050) is the strongest single-finding candidate and is the natural successor to family 1, but
+it needs a three-platform entropy design and a decision about determinism the suite may rely on.
+
+**No second family was started and no second plan was written.** The brief permits a plan "if
+context remains excellent" and forbids a second implementation family; a plan written without its
+own measured before-evidence would be exactly the half-built artefact this batch spent most of its
+effort correcting in the inherited text. The measured scoring, the selection and ticket **#2217**
+are the deliverable instead.
+
+### 8. Gate, tooling and process
+
+- **Gate: 38 executables run individually with a runner that continues after failure — 16,605 ran,
+  16,597 passed, 2 skipped, 6 failed** (**+42** on the inherited 16,563, exactly the five tickets'
+  own new tests: +7 #2211, +8 #2212, +9 #2213, +8 #2214, +10 #2216). The six are the same two
+  measured causes, **re-verified this run**: `/proc/sys/net/ipv4/ping_group_range` reads `1 0` so
+  unprivileged `SOCK_DGRAM`/ICMP is denied (5 `PingTests`, the real #1962 gap) and `/proc/net/if_inet6`
+  is absent (1 `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`). The 2 skips are
+  `CultureInvariantFormattingTests.NumericAndDateFormatting_UnaffectedByNonInvariantGlobalLocale` and
+  the guarded SR-AUD-255 pin. **Nothing disabled, weakened, skipped-to-hide-a-failure or
+  recategorized.**
+- **Build:** 0 errors, 0 warnings, `--parallel 2` throughout. **Maximum aggregate compiler
+  concurrency observed: 2** — `cc1plus` sampled every 10 s across the long runs never exceeded 2.
+- **Selective components: passed**, **one run**, ~702 s, 10 components, launched with `$!` captured
+  (`build-probe/2216_selective.pid`), verified with `ps -p`, monitored by exact `cc1plus` process
+  name. No `pgrep -f`, no fuzzy matching, no `setsid`, no duplicate run.
+- **`local_ci_check.sh build`**: boundaries **41/92**, catalogue current, seams **3 / 20**, negative
+  fixtures **14 files / 120 sites** (peak 2 jobs, 45.1 s), configure and build clean (**0 warnings,
+  0 errors**) — then its **known #1962 Ping stop**, reported separately from the full gate above.
+- All eight required validations green; `git diff --check` clean; tracked `__pycache__` files
+  unchanged (every Python invocation used `PYTHONDONTWRITEBYTECODE=1`).
+- **Filesystem policy honoured**: every probe, binary and log lived under `build-probe/` or
+  `build-tmp/`, never `/tmp`, `/var/tmp`, `/dev/shm` or `$HOME`. Nothing was written outside the
+  repository, and the uid-0 escape the previous batch recorded was not repeated.
+- Build directories: `build/` 1.8 G, `build-probe/` ~60 M, `build-tmp/` 13 M. No new build directory
+  was invented; every probe artefact is prefixed by its ticket number inside `build-probe/`.
+
+### 9. Inherited state, unchanged
+
+`#1773` and `#1962` remain **blocked** and were not investigated. **CCF-019 stays open** and has
+**no member in this family** — none of the five is a dangling-view finding, so no ownership policy
+was consumed and none was invented. **CCF-005** is the already-closed governing family for the
+raw-copy subfamily; the adjacency is recorded in the plan and CCF-005 is **not reopened**.
+**CCF-021/#2131 and CCF-022/#2109 stay unminted.** Every other blocked, `needs_user` and deferred
+ticket — including #2207, #2208 and #2209 from the previous batch — is exactly as inherited. **CNA,
+mobile-eggbert and every sibling, parent and downstream repository were not inspected, searched,
+built or modified.**
 
 ---
 

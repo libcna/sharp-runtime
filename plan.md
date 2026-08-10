@@ -3,41 +3,107 @@
 *Last verified: 2026-08-10 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
 harness-designated branch. **Pushed after every commit**, per `CLAUDE.md` rule 13 — six commits,
 six pushes, all normal fast-forwards. No merge, rebase, tag, force-push, PR, publication, amend or
-history rewrite; all commits unsigned. This batch **reviewed `modules/io-isolated-storage`** (#2203)
-and **closed its whole compatible queue**, remediating **the corpus's last unblocked high-severity
-finding**. #2204 (SR-AUD-241 — the store's only confinement was `rootDirectory_ / relativePath`, and
-`std::filesystem`'s `operator/` *discards the root* when the right operand is absolute; the promise
-was false at **thirteen path arguments across ten members**, and **all four effect classes escaped** —
-an outside file read, an outside file and an outside directory **deleted**, files created and written
-outside, store content moved out, and outside content **imported in** through `CopyFile`'s source and
-`MoveDirectory`'s source). **.NET's own repair is necessary and not sufficient**: stripping leading
-separators closes the audit's named probe and leaves `../outside/x`, `a/../../outside/x` and symbolic
-links at final, intermediate and chained components escaping — the owning per-file report had
-*explicitly declined* to count them. `DeleteFile("")` **deleted the store root**. On this uid-0
-container a leading `/` reached the real filesystem root, which the first probe run demonstrated by
-accident and which was cleaned up by hand. Plus #2205 (four members never checked the disposed flag,
-so a closed store still reported its size and still deleted itself) and #2206 (four doors handed
-callers a native `std::filesystem_error` instead of `IsolatedStorageException`). **A real bug was
-found while testing, not by inspection**: `CopyFile`/`MoveFile`/`MoveDirectory` validated inside the
-call expression, and C++ leaves call-argument evaluation order unspecified — GCC evaluated right to
-left, so a doubly-invalid call named the *destination* parameter. **Two residuals are stated rather
-than folded in**: the check-then-use **TOCTOU** race (#2207, blocked) and
-`IsolatedStorageFileStream`'s **unconfined public constructor** (#2208, blocked on a public signature
-change), the latter pinned by a test that inverts the day #2208 ships. **No `SR-AUD-*` identifier
-created — numbering frozen at 364**; audit **173 remediated / 136 confirmed / 55 confirmed
-(design-complete) / 364 total**. Gate **16,563 across 38 executables, 16,555 passing, 2 skipped,
-6 failing** for the same two measured causes (**+58, exactly the new executable's own tests, so no
-regression anywhere**); **the executable count moved 37 → 38** because the module had no dedicated
-test target and now has `SharpRuntimeTests_IO_IsolatedStorage` (58 tests, up from 0). Graph
-**41 / 92**, seams **3 / 20**, negative fixtures **13 / 116** — all unchanged. **7 of 7 mutations
-killed**; ASan+UBSan+LSan and non-recovering UBSan over the changed production body: exit 0, **zero
-reports**, with a deliberate out-of-bounds control firing in the same build — and sanitizers are not
-offered as confinement evidence, which comes from direct filesystem snapshots with a vulnerable
-control. **Doxygen, `ccache` and `/rv` all absent.** CCF-019 open; CCF-021/#2131 and CCF-022/#2109
-unminted; #1773, #1962, #2150, #2152, #2155, #2166, #2170, #2172, #2175, #2185, #2186, #2192, #2194
-and #2199 unchanged. **Next unit, measured: `modules/core`, split into families** — 72 open findings,
-**9 high, none blocked and none claimed by an existing ticket**, starting with the ASan-decidable
-memory-safety family (SR-AUD-044/045/051/054/067). Maximum aggregate compiler parallelism **2 jobs**.*
+history rewrite; all commits unsigned. This batch reviewed and **closed the bounded `modules/core`
+memory-safety family** (#2210) — **SR-AUD-044, 045, 051, 054 and 067, all five remediated**, one
+with a named residual. It is **one bounded family of `modules/core`, not a namespace review**: 67
+findings in that module stay open and the measured next family is selected as ticket **#2217**.
+The five findings turned out **not** to share one cause and were split into four subfamilies rather
+than a family that is not there, and **two of them are not sanitizer-decidable at all** — overlapping
+element assignment is memory-safe and merely loses data, a non-advancing enumerator is a liveness
+defect, and both ran clean under ASan **and** UBSan before the fix while a deliberate control fired
+in the same binary. Conversely **one door was decidable and no report said so** (`memcpy-param-overlap`
+in the raw `Array::Copy`). Twelve premise corrections were measured, including that the audit's
+predicted defect classes are wrong in three places on this toolchain (GCC 13.3 at `-O1` with
+`_FORTIFY_SOURCE` inlines the checked builtins past libsanitizer's interceptors), that SR-AUD-067 is
+three doors and SR-AUD-051 four, that SR-AUD-054 is **twelve** doors of which only two are
+memory-unsafe and whose indexers already threw *the wrong exception type*, and that **`int` cannot
+prove a copy-direction claim** because libstdc++ lowers both `std::copy` and `std::copy_backward` to
+`__builtin_memmove` — measured when an unconditionally backward mutant passed every `int` assertion.
+#2211 gave `SpanSplitEnumerator` .NET's `EmptySequence` mode (1000 non-terminating moves → 1);
+#2212 validated the raw `BlockCopy`'s three signed arguments; #2213 made the raw `Array::Copy` copy
+**elements** overlap-aware and constrained `Buffer`'s four generic members to trivially copyable
+element types — **the family's only source break, a compile-time one**, with no in-repo call site
+affected; #2214 added one `throwIfDefault()` to ten `ArraySegment` doors while asserting that the
+eight .NET does not guard stay unguarded; #2216 routed eleven copy doors through one
+direction-**selecting** helper. **One residual is stated rather than folded in**: `ArraySegment`'s
+`begin()`/`end()` still iterate a default segment zero times, because guarding them needs an approved
+`noexcept` drop (**#2215**, `needs_user`, #1854's precedent), pinned by a test that inverts the day it
+ships. **No `SR-AUD-*` identifier created — numbering frozen at 364**; audit **178 remediated / 131
+confirmed / 55 confirmed (design-complete) / 364 total**. Gate **16,605 across 38 executables,
+16,597 passing, 2 skipped, 6 failing** for the same two measured causes (**+42, exactly the five
+tickets' own new tests, so no regression anywhere**). Graph **41 / 92** and seams **3 / 20**
+unchanged; negative fixtures **13 → 14 files, 116 → 120 sites**. **25 of 25 mutations killed** — one
+after being strengthened, and two whose kill signal is honestly weaker (a process abort, and a
+fixture-checker failure) are labelled as such. **Doxygen, `ccache` and `/rv` all absent.** CCF-019
+open and with **no member in this family**; CCF-005 recorded as adjacency **without being reopened**;
+CCF-021/#2131 and CCF-022/#2109 unminted; #1773, #1962, #2150, #2152, #2155, #2166, #2170, #2172,
+#2175, #2185, #2186, #2192, #2194, #2199, #2207, #2208 and #2209 unchanged. **Next unit, measured:
+`modules/core` family 1 — defined arithmetic and bounded parse (SR-AUD-131, 135, 180), all three
+high, all sanitizer-decidable, none blocked, no `/rv` needed** (#2217). Maximum aggregate compiler
+parallelism **2 jobs**.*
+
+
+## 2026-08-10 — the bounded `modules/core` memory-safety family, closed (#2210–#2216)
+
+**Five audit findings. All five remediated.** `docs/CoreMemorySafetyFamilyPlan.md` is the durable
+record; this is the summary. **One bounded family of `modules/core`, not a namespace review** — 67
+findings in that module remain open, and the measured next family is ticket **#2217**.
+
+| Ticket | Finding | Outcome | Commit |
+|---|---|---|---|
+| #2210 | all five | review + plan, **done** | `87045e5` |
+| #2211 | SR-AUD-045 | **remediated** — `SpanSplitEnumerator` gained .NET's `EmptySequence` mode | `a817762` |
+| #2212 | SR-AUD-067 | **remediated** — raw `Buffer::BlockCopy` validates `srcOffset`/`dstOffset`/`count` | `e2f9dc0` |
+| #2213 | SR-AUD-051 | **remediated** — raw `Array::Copy` copies elements overlap-aware; `Buffer`'s generics require a trivially copyable `T` | `b423d9b` |
+| #2214 | SR-AUD-054 | **remediated** (residual #2215) — one `throwIfDefault()` on ten `ArraySegment` doors | `b70e96f` |
+| #2216 | SR-AUD-044 | **remediated** — eleven copy doors route through one direction-selecting helper | `1e63e29` |
+| #2215 | SR-AUD-054 residual | **needs_user** — may `begin()`/`end()` drop `noexcept`? | — |
+| #2217 | next family | **todo** — SR-AUD-131/135/180 review | — |
+
+**The five do not share one cause**, so the plan splits them into four subfamilies (CMS-A raw byte
+copy, CMS-B unguarded default state, CMS-C overlap direction, CMS-D non-advancing cursor) rather
+than asserting a family that is not there.
+
+**Twelve premise corrections, every one measured.** The five that changed the work:
+
+1. **Two of the five are not sanitizer-decidable.** SR-AUD-044 (for eleven of its twelve doors) and
+   SR-AUD-045 produce **zero** ASan and UBSan reports, before and after — overlapping element
+   assignment is memory-safe and merely loses data, and non-termination is a liveness defect. A
+   deliberate heap-buffer-overflow control fired in the same binary to show the tooling was live.
+2. **One door *is* decidable and no report said so**: the raw `Array::Copy`'s `memcpy` reports
+   **`memcpy-param-overlap`**.
+3. **The predicted defect classes are wrong in three places** — `unknown-crash` and
+   `stack-buffer-overflow` rather than `negative-size-param`, and `double-free` rather than a bad
+   free — because GCC 13.3 at `-O1` with `_FORTIFY_SOURCE` inlines `__memcpy_chk`/`__memmove_chk`
+   past the libsanitizer interceptors that emit those names.
+4. **SR-AUD-054 is twelve doors, only two of them memory-unsafe**, and its indexers **already threw
+   the wrong exception type** because `count_ == 0` made the range check win.
+5. **`int` cannot prove a copy-direction claim**: libstdc++ lowers **both** `std::copy` and
+   `std::copy_backward` over a trivially copyable type to `__builtin_memmove`. Measured when an
+   unconditionally backward mutant passed every `int` assertion and only died once a `std::string`
+   left-overlap assertion was added.
+
+**One compile-time source break, stated rather than smoothed over.** `Buffer::BlockCopy`,
+`ByteLength`, `GetByte` and `SetByte` over `std::vector<T>` now `static_assert` that `T` is
+trivially copyable — .NET rejects the equivalent call at run time, and in C++ the type is known at
+compile time. No in-repo call site is affected, every rejected call was already corrupting memory,
+and four new negative consumer sites pin the rejection.
+
+**Evidence.** Instrumentation is over the production bodies themselves — every implicated body is a
+header-only template or static member, so the probe translation unit *is* the production code (21
+`__asan_*` symbols; control fires in every run). Ten before-reports, all absent after. LSan clean
+and recorded as confirmation rather than discovery; **TSan recorded not applicable** because nothing
+here has shared mutable state. **25 of 25 mutations killed**, one after being strengthened, and two
+whose kill signal is honestly weaker — a process abort and a fixture-checker failure — are labelled
+as such rather than counted as equivalent.
+
+**Gate 16,605 across 38 executables** (16,597 passing, 2 skipped, 6 failing for the same two measured
+causes; **+42**, exactly the five tickets' own tests). Graph **41 / 92**, seams **3 / 20** unchanged;
+negative fixtures **13 → 14 files, 116 → 120 sites**. Zero warnings, zero errors. **No `SR-AUD-*`
+identifier created**; audit **178 remediated / 131 confirmed / 55 design-complete / 364**.
+**CCF-019 has no member here** and was not consumed; **CCF-005 is recorded as adjacency without
+being reopened**; CCF-021 and CCF-022 stay unminted.
+
 
 ## 2026-08-10 — `modules/io-isolated-storage` reviewed and closed for compatible work (#2203–#2206)
 

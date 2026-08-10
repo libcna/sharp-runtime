@@ -545,3 +545,49 @@ This family is complete when **all** of the following hold:
 
 **Not** a completion criterion: closing `modules/core`. 67 findings in that module are
 outside this family and stay open.
+
+---
+
+## 19. Implementation status — the family is CLOSED except for one named residual (2026-08-10)
+
+| Ticket | Finding | Status | Disposition of the finding |
+|---|---|---|---|
+| #2210 | all five | **done** | this plan |
+| #2211 | SR-AUD-045 | **done** | **remediated** |
+| #2212 | SR-AUD-067 | **done** | **remediated** |
+| #2213 | SR-AUD-051 | **done** | **remediated** (incl. the `Buffer.hpp` extension) |
+| #2214 | SR-AUD-054 | **done** | **remediated**, with residual #2215 named in the index row |
+| #2216 | SR-AUD-044 | **done** | **remediated** (all three owning reports) |
+| **#2215** | SR-AUD-054 residual | **needs_user** | the `noexcept` question, unanswered |
+
+**Every one of §18's eight completion criteria is met**, with criterion 1 met in the qualified form
+it specifies: SR-AUD-054 is `remediated` **and** its residual is stated in the index row rather than
+implied away. All 32 doors of §3 have a repair or a recorded exclusion; all ten before-reports of §4
+are absent afterwards in a build proved instrumented with a control still firing; the two
+non-sanitizer-decidable subfamilies have measured value and termination evidence on both sides; and
+the #2215 pin exists and is marked for inversion.
+
+**Verdict, stated exactly as the brief requires: this bounded Core memory-safety family is closed
+except for one exact residual, ticket #2215.** It is **not** a statement that `modules/core` is
+closed — 67 findings in that module remain open, and §16 of `NEXT.md` selects the next bounded
+family (SR-AUD-131, SR-AUD-135, SR-AUD-180, review ticket #2217).
+
+### 19.1 Aggregate evidence
+
+- **Permanent regressions:** +42 across the five tickets (7 / 8 / 9 / 8 / 10), all in
+  `modules/core/tests/System/CoreMemorySafetyTests.cpp`, plus **4 negative consumer sites** in
+  `test/consumer/core_buffer_trivially_copyable_negative.cpp`.
+- **Mutations: 25 raised, 25 killed.** Two kill signals are labelled as weaker than the rest rather
+  than counted as equivalent: #2212's "delete all three guards" kills by **process abort**, and
+  #2213's "drop one `static_assert`" kills through the **negative-fixture checker** because the
+  claim it removes is a compile-time one. One mutation (#2213's M5) **survived its first run** and
+  produced premise correction 11.
+- **Sanitizers:** ASan and UBSan over the instrumented production bodies, before and after; LSan on
+  the after-cases (confirmation, not discovery); **TSan not applicable and recorded as such**.
+- **Gate:** 16,605 tests across 38 executables, 16,597 passing, 2 skipped, 6 failing for the two
+  pre-existing measured causes. Zero warnings, zero errors.
+- **Boundaries unchanged:** module graph 41 / 92, seams 3 / 20. Negative fixtures 13 → 14 files,
+  116 → 120 sites.
+- **ABI:** no `sizeof`, `alignof`, vtable, `noexcept` specification, default argument, data member
+  or mangled symbol changed anywhere in the family. One new header,
+  `System/detail/OverlapCopy.hpp`, inside the existing `Core.Base` module.
