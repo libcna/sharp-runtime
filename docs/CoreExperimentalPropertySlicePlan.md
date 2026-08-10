@@ -289,3 +289,45 @@ finding.
 4. `sizeof` unchanged for all three instantiations.
 5. Every deliberately-not-done item carries a ticket: #2246 (approval), #2247
    (post-audit adjacency).
+## 11. Outcome, measured 2026-08-10
+
+Both findings remediated. `build-probe/2243_probe3_after.log`, same cases:
+
+```
+case1 stored=new assignment_result=new getter_after=new
+case2 stored=42 assignment_result=42
+case3 (T& bound to the assignment expression) no longer compiles
+case4 stored=0 assignment_result=0 getter_after=0
+case5 sizeof(Property<int>)=72 sizeof(Property<std::string>)=96 sizeof(ReadOnlyProperty<int>)=72 two_functions=64
+case6 threw: Setter not implemented.
+case7 a=9 b=9
+case8 result=5 getterCalls=1 setterCalls=1
+case9 getterCalls=0
+```
+
+Case 5 is identical before and after — the layout did not move. Case 6 is
+identical — the read-only contract did not move. The macro probe compiles and
+runs against the repaired header with `-Wall -Wextra -Wpedantic` and no
+`-D` override.
+
+### 11.1 Mutation checks
+
+Both mutations were applied to the production header, rebuilt with
+`cmake --build build --parallel 2`, and re-run (`build-probe/2243_mutations.log`).
+
+- **M1** — `operator=` returns `cachedValue` again (return type left as `T`, so
+  only the returned *object* is mutated). **6 tests fail**: matrix rows 1, 2, 3,
+  4, 5 and the auto-macro row, which exercises the assignment expression through
+  the macro-generated property. Rows 6–8 correctly survive: they pin behaviour M1
+  does not touch.
+- **M2** — the macros name `SharpRuntime::Property` again. **The build fails with
+  24 errors.** This is the durable half of #2245: the fixture is compiled, so the
+  defect cannot silently return.
+
+No mutation was skipped as unsafe, and none is equivalent.
+
+### 11.2 What did not change
+
+`ReadonlyProperty.hpp`, `Prop.hpp`, every other `modules/core` header, the
+component graph, the component catalogue, the module boundaries, and the four
+pre-existing `ExperimentalPropertyTests`.

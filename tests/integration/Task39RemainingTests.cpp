@@ -31,6 +31,7 @@
 #include "System/Collections/Generic/CollectionExtensions.hpp"
 #include "SharpRuntime/Storage/StoragePaths.hpp"
 #include "SharpRuntime/Experimental/Property.hpp"
+#include "SharpRuntime/Experimental/ReadonlyProperty.hpp"
 #include "System/TimeSpan.hpp"
 
 // ===========================================================================
@@ -493,4 +494,181 @@ TEST(ExperimentalPropertyTests, ImplicitConversion_WorksAsGetter) {
     Property<std::string> p([](){ return std::string("hello"); });
     std::string v = p;
     EXPECT_EQ(v, "hello");
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-179 / ticket #2244 -- the assignment expression's own result.
+//
+// operator= used to return a private `cachedValue` member by T&.  That member
+// was never synchronised with the getter or the setter, so the expression
+// `p = v` evaluated to an unrelated object: an empty string for
+// Property<std::string> (the finding's own reproduction, measured verbatim as
+// `stored=new assignment_result=`), and an INDETERMINATE value for a scalar T,
+// because `T cachedValue;` is default-initialised -- two runs of
+// build-probe/2243_probe1_before printed 535613888 and -455742320 for the same
+// case.  operator= now returns T by value, read back through the getter, as
+// std::atomic's assignment operator does.
+// ---------------------------------------------------------------------------
+
+TEST(ExperimentalPropertyTests, Assignment_ExpressionYieldsTheValueTheGetterReadsBack) {
+    std::string stored = "old";
+    Property<std::string> p(
+        [&stored]() { return stored; },
+        [&stored](const std::string& v) { stored = v; }
+    );
+    const std::string result = (p = std::string("new"));
+    EXPECT_EQ(stored, "new");
+    EXPECT_EQ(result, "new");
+    EXPECT_EQ(p.get(), "new");
+}
+
+TEST(ExperimentalPropertyTests, Assignment_ExpressionYieldsTheValueForAScalarType) {
+    int stored = 0;
+    Property<int> p(
+        [&stored]() { return stored; },
+        [&stored](const int& v) { stored = v; }
+    );
+    const int result = (p = 42);
+    EXPECT_EQ(stored, 42);
+    EXPECT_EQ(result, 42);
+}
+
+// A setter is free to transform what it is given.  The assignment expression
+// must report what the property now holds, not what the caller offered -- which
+// is why the repair reads back through the getter instead of returning `value`.
+TEST(ExperimentalPropertyTests, Assignment_TransformingSetter_ExpressionReportsTheStoredValue) {
+    int stored = 0;
+    Property<int> p(
+        [&stored]() { return stored; },
+        [&stored](const int& v) { stored = v < 0 ? 0 : v; }
+    );
+    const int result = (p = -5);
+    EXPECT_EQ(stored, 0);
+    EXPECT_EQ(result, 0);
+    EXPECT_EQ(p.get(), 0);
+}
+
+// Chained assignment used to propagate the indeterminate cache into the
+// left-hand property; it now propagates the value.
+TEST(ExperimentalPropertyTests, Assignment_Chained_SetsBothProperties) {
+    int a = -1;
+    int b = -1;
+    Property<int> pa([&a]() { return a; }, [&a](const int& v) { a = v; });
+    Property<int> pb([&b]() { return b; }, [&b](const int& v) { b = v; });
+    pa = pb = 9;
+    EXPECT_EQ(b, 9);
+    EXPECT_EQ(a, 9);
+}
+
+TEST(ExperimentalPropertyTests, Assignment_InvokesTheSetterThenTheGetterExactlyOnce) {
+    int stored = 0;
+    int getterCalls = 0;
+    int setterCalls = 0;
+    Property<int> p(
+        [&]() { ++getterCalls; return stored; },
+        [&](const int& v) { ++setterCalls; stored = v; }
+    );
+    getterCalls = 0;
+    const int result = (p = 5);
+    EXPECT_EQ(result, 5);
+    EXPECT_EQ(setterCalls, 1);
+    EXPECT_EQ(getterCalls, 1);
+}
+
+// The read-only route is unchanged: the throw happens before the read-back, so
+// a failed assignment never reaches the getter.
+TEST(ExperimentalPropertyTests, Assignment_ReadOnly_ThrowsBeforeInvokingTheGetter) {
+    int getterCalls = 0;
+    Property<int> p([&]() { ++getterCalls; return 3; });
+    EXPECT_THROW((void)(p = 1), System::NotSupportedException);
+    EXPECT_EQ(getterCalls, 0);
+}
+
+// ReadOnlyProperty deletes its own operator=, which hides the base's by name;
+// reaching the base through a reference still throws rather than mutating.
+TEST(ExperimentalPropertyTests, Assignment_ReadOnlyPropertyThroughBaseReference_Throws) {
+    SharpRuntime::Experimental::ReadOnlyProperty<std::string> ro(
+        []() { return std::string("read-only"); });
+    SharpRuntime::Experimental::Property<std::string>& base = ro;
+    EXPECT_THROW((void)(base = std::string("attempt")), System::NotSupportedException);
+    EXPECT_EQ(ro.get(), "read-only");
+}
+
+// Layout pin.  #2244 deliberately retained the now-vestigial cachedValue member
+// so that sizeof(Property<T>) did not move; ticket #2246 carries the approval
+// request to remove it.  If that approval lands, this test is the one that must
+// be updated in the same change.
+// The concrete sizes are libstdc++-specific (the trailing member is padded to
+// the callables' alignment), so the pin is the invariant rather than a number:
+// the object is strictly larger than its two callables, i.e. the cache is still
+// in the layout.
+TEST(ExperimentalPropertyTests, Layout_CachedValueIsStillPartOfTheObject) {
+    EXPECT_GT(sizeof(Property<int>), 2 * sizeof(std::function<int()>));
+    EXPECT_GE(sizeof(Property<std::string>),
+              2 * sizeof(std::function<std::string()>) + sizeof(std::string));
+    EXPECT_EQ(sizeof(SharpRuntime::Experimental::ReadOnlyProperty<int>), sizeof(Property<int>));
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-181 / ticket #2245 -- the advertised macro family.
+//
+// DEF_PROP_AUTO and DEF_PROP_CUSTOM expanded to `SharpRuntime::Property<type>`
+// while the class is `SharpRuntime::Experimental::Property<T>`, so a minimal
+// class using the documented macros failed to compile at the type name.  This
+// fixture is that minimal class: it exists so the macros are compiled by the
+// test build rather than only by documentation.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+class MacroWidget {
+public:
+    MacroWidget()
+        : IMPL_PROP_AUTO(int, Value)
+        , IMPL_PROP_AUTO_READONLY(std::string, Label)
+        , IMPL_PROP_CUSTOM(int, Doubled, { return raw * 2; }, { raw = v / 2; })
+        , IMPL_PROP_CUSTOM_READONLY(int, Negated, { return -raw; })
+    {}
+
+    DEF_PROP_AUTO(int, Value, 0)
+    DEF_PROP_AUTO(std::string, Label, "label")
+    DEF_PROP_CUSTOM(int, Doubled)
+    DEF_PROP_CUSTOM(int, Negated)
+
+private:
+    int raw = 21;
+};
+
+}  // namespace
+
+TEST(ExperimentalPropertyMacroTests, AutoPair_ReadsAndWritesTheGeneratedBackingField) {
+    MacroWidget w;
+    EXPECT_EQ(w.Value.get(), 0);
+    w.Value.set(7);
+    EXPECT_EQ(w.Value.get(), 7);
+    EXPECT_EQ(static_cast<int>(w.Value = 8), 8);
+    EXPECT_EQ(w.Value.get(), 8);
+}
+
+TEST(ExperimentalPropertyMacroTests, AutoReadonlyPair_ReadsTheInitialiserAndRejectsWrites) {
+    MacroWidget w;
+    EXPECT_EQ(w.Label.get(), "label");
+    EXPECT_THROW(w.Label.set("nope"), System::NotSupportedException);
+    EXPECT_EQ(w.Label.get(), "label");
+}
+
+TEST(ExperimentalPropertyMacroTests, CustomPair_UsesTheSuppliedBodies) {
+    MacroWidget w;
+    EXPECT_EQ(w.Doubled.get(), 42);
+    EXPECT_EQ(w.Negated.get(), -21);
+    w.Doubled.set(100);
+    EXPECT_EQ(w.Doubled.get(), 100);
+    EXPECT_EQ(w.Negated.get(), -50);
+}
+
+TEST(ExperimentalPropertyMacroTests, CustomReadonlyPair_RejectsWrites) {
+    MacroWidget w;
+    EXPECT_EQ(w.Negated.get(), -21);
+    EXPECT_THROW(w.Negated.set(1), System::NotSupportedException);
+    EXPECT_EQ(w.Negated.get(), -21);
 }
