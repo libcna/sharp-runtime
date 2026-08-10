@@ -4,25 +4,191 @@
 # NEXT.md
 
 *Last verified: 2026-08-10. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
-harness-designated branch**. **Pushed immediately after each commit**, per `CLAUDE.md` rule 13 — two
-commits, two pushes, both normal fast-forwards, both **verified present on the remote** (`8107eca`
-and `66c1d78`). No merge, rebase, tag, force-push, PR, publication or history rewrite; both commits
-are unsigned (`git -c commit.gpgsign=false`) — this environment has no usable private signing key.
-This batch **reviewed and closed the bounded Core numeric special-value and rounding-contract
-family** (#2229 review, #2230, #2231, #2232, #2233): **four findings, four remediated, none
-blocked**. It also opened **#2234**, a deferred verification. Audit **189 remediated / 120 confirmed
-/ 55 confirmed (design-complete) / 364 total**, recounted **by finding identifier**; **no `SR-AUD-*`
-identifier created — numbering frozen at 364.** `modules/core` open **60 → 56**. Gate **16,708 tests
-across 38 executables: 16,700 passing, 2 skipped, 6 failing** for the same two measured causes —
-**exactly +16 on the inherited 16,692, which is precisely this batch's own new tests, so no
-regression anywhere.** Graph **41 / 92**, seams **3 / 20**, negative fixtures **14 / 120** — all
-unchanged. **Doxygen, `ccache` and the `/rv` reference tree are all absent** and were not installed.
-**CCF-007 was considered and deliberately NOT extended; CCF-008 stays closed; no new CCF minted.
-CCF-019 stays open; CCF-021/#2131 and CCF-022/#2109 stay unminted.** #2228, #2215, #1773, #1962 and
-every other inherited blocked/deferred ticket are exactly as inherited. **The inherited
-`modules/timers` runner-up is STALE and is corrected in §9**: that namespace was reviewed and closed
-by #2153/#2154 on 2026-08-09, its high SR-AUD-238 is `remediated`, and its one survivor is medium
-and blocked on a layout/vtable change. See the first handoff below.*
+harness-designated branch**. **Pushed immediately after each commit**, per `CLAUDE.md` rule 13 — four
+commits, four pushes, all normal fast-forwards, all **verified present on the remote** (`5df587e`,
+`224852a`, `6f74c1a`, `742ad7c`). No merge, rebase, tag, force-push, PR, publication or history
+rewrite; every commit is unsigned (`git -c commit.gpgsign=false`) — this environment has no usable
+private signing key. This batch **reviewed and closed two bounded Core units**: the **`Lazy<T>`
+thread-safety-mode boundary family** (#2235 review, #2236, #2237) and the **`Environment` compatible
+slice** (#2239 review, #2240, #2241). **Four findings, four remediated, none blocked** — but read
+§2.2 before quoting that: **SR-AUD-066 is closed by its own finding's second stated option
+(document and deliberately expose), so its behavioural divergence is RETAINED BY DESIGN** and the
+behaviour change is deferred to **#2238 (`needs_user`)**. Two further tickets opened: **#2238**
+design/approval and **#2242** deferred verification. Audit **193 remediated / 116 confirmed / 55
+confirmed (design-complete) / 364 total**, recounted **by finding identifier**; **no `SR-AUD-*`
+identifier created — numbering frozen at 364.** `modules/core` open **56 → 52**. Gate **16,730 tests
+across 38 executables: 16,722 passing, 2 skipped, 6 failing** for the same two measured causes —
+**exactly +22 on the inherited 16,708, which is precisely this batch's own new tests (13 Lazy, 9
+Environment), so no regression anywhere.** Graph **41 / 92**, seams **3 / 20**, negative fixtures
+**14 / 120** — all unchanged, so **selective-components was NOT rerun** and §2.5 says why.
+**Doxygen, `ccache` and the `/rv` reference tree are all absent** and were not installed. **No CCF
+minted or extended: CCF-011 was considered for SR-AUD-064 and rejected as adjacency, CCF-021 for
+SR-AUD-108 and likewise rejected; CCF-019 stays open; CCF-021/#2131 and CCF-022/#2109 stay
+unminted.** #2228, #2234, #2215, #1773, #1962 and every other inherited blocked/deferred ticket are
+exactly as inherited. **The `modules/timers` and `modules/threading` runner-ups remain STALE** for
+the reasons the previous handoff recorded; nothing this batch measured changes them. See the first
+handoff below.*
+
+---
+
+## Batch record — the Core `Lazy<T>` mode boundary family and the `Environment` compatible slice, closed (#2235–#2242)
+
+**Four findings. Four remediated. None blocked.** One design/approval ticket and one deferred
+verification opened.
+
+### 1. Starting state, verified
+
+`9857041`, working tree clean, HEAD identical to `origin/`. The audit was recounted **by finding
+identifier**, not by column position — the fixed-column parser's false 363 was avoided. Parsed
+correctly: **364 unique identifiers, contiguous 1–364, no duplicates**; **189 remediated / 120
+confirmed / 55 design-complete**, matching the inherited triple exactly, with **56** `modules/core`
+findings open. **#2228 confirmed still `blocked`** in `plan.sqlite3` — no user decision had
+appeared, so SR-AUD-050 was not touched, no silent entropy fallback was added, no upward dependency
+was introduced and `Guid::NewGuid`'s non-throwing contract is unchanged. **#2234 confirmed still
+`todo`** and was **preserved as deferred**: its acceptance criterion is confirmation against the
+.NET reference, `/rv` is absent in this container, and no new authoritative evidence for the
+`Decimal.ToOACurrency` tie rule appeared, so concluding it would have meant inventing the evidence.
+
+### 2. The two units
+
+#### 2.1 `Lazy<T>` — SR-AUD-064 and SR-AUD-066 (#2235)
+
+Before-probe over the shipped library: 17 cases, **10 OK / 5 BAD / 1 DEVIATION**
+(`build-probe/2235_probe1_before.log`); after: **15 / 0 / 1**. Both premises confirmed exactly as
+written, no correction needed.
+
+**Premise correction to the inherited ranking.** #2229's notes recorded that both findings "turn on
+`LazyThreadSafetyMode` policy rather than a measurable value". That is **half right**, and the
+halves needed different tickets. SR-AUD-064 is a **missing argument validation** with no approval
+boundary anywhere near it. SR-AUD-066 is a **guard placed before a dispatch** whose faithful repair
+is genuinely blocked. One review, two root causes, separate tickets — the inherited grouping was
+not adopted on trust.
+
+**#2236 / SR-AUD-064 — remediated.** The measurement worth more than the finding's own `99,0`
+reproducer: two `getValueProperty()` calls over a **throwing** factory produced **two** factory
+invocations, i.e. no fault caching — `PublicationOnly`'s contract and neither `None`'s nor
+`ExecutionAndPublication`'s. An invalid mode was not merely tolerated, the switch's `default:` label
+was **deciding a public fault-caching contract by accident**. A private `requireValidMode()` now
+carries .NET's three cases and `LazyHelper.Create`'s `default:` throw, called **after**
+`requireFactory()` so #1867's empty-factory rejection keeps winning that race (pinned by a test,
+because .NET checks the factory first).
+
+**#2237 / SR-AUD-066 — remediated by option (b), divergence retained by design.** The finding states
+its own two acceptable repairs; the first is not available without a user decision, because
+`checkNotReentrant()` is **load-bearing for memory safety**: a recursive `getValueProperty()` would
+re-`lock()` the non-recursive `publicationOnlyMutex_`, which `[thread.mutex.requirements.mutex]`
+makes undefined behaviour. Both structural routes to .NET's rule — publish-only locking, or
+same-thread reentrancy with a first-publication-wins discard rule — either **reverse the header's
+already documented `PublicationOnly` serialisation deviation** or let an unconditionally recursive
+factory recurse without bound, trading a catchable exception for stack exhaustion. So the deviation
+is now stated explicitly in the class doc-comment, a stale comment claiming ".NET turns this into a
+clean `InvalidOperationException`" (true for only two of the three modes — precisely this finding)
+was removed, and **+5 tests pin all three modes**. The behaviour change is **#2238 (`needs_user`)**.
+The index entry and the per-file report both say plainly that `remediated` here does **not** mean
+parity.
+
+#### 2.2 `Environment` — SR-AUD-107 and SR-AUD-108 (#2239)
+
+Before-probe: 24 cases, **6 OK / 18 BAD**; after: **24 / 0**. A **slice, not a cause family** —
+107 is a buffer-sizing defect at an OS boundary, 108 is a missing text-encoding algorithm.
+
+**#2240 / SR-AUD-107 — remediated, with the batch's most useful premise correction.** The
+`GetCurrentDirectory` half is a clean reproduction: a real **4,868-byte** current directory (the
+finding says 4,866; the difference is component size) returned length 0 while a dynamically sized
+`getcwd` returned all of it. The POSIX branch now grows on `ERANGE` and **keeps returning `""` for
+every other `errno`, so the error contract does not move**; Windows gets its own documented
+two-call sizing pattern. But the finding's second sentence — review the process-path branch — has an
+answer more interesting than a second repair: the `readlink` truncation defect is **real in code and
+UNREACHABLE on Linux**. A driver built a 4,671-byte directory and `execl`'d a helper binary there;
+the helper's own 1 MiB `readlink("/proc/self/exe")` failed with **`ENAMETOOLONG`**, because procfs
+builds the `exe` link target in a page-sized buffer. Before and after, that case returns the same
+correct empty string. The loop is kept as defensive correctness (with the Windows zero-return
+handling, which *was* a real unconditional defect), and **no reproduced Linux defect is claimed** —
+in the source comment, the plan and the audit report alike. The corresponding mutation is therefore
+**labelled equivalent**, not reported as uncaught. Method note for anyone repeating it: a POSIX
+shell cannot drive that experiment, because `dash`'s `cd` composes an absolute pathname and hits
+`PATH_MAX` at ~4,096 bytes while `chdir()` on a relative name from C does not.
+
+**#2241 / SR-AUD-108 — remediated, behaviour change recorded.** 16 of 18 rows wrong before, half of
+them **round-trip** rows re-parsed with a `CommandLineToArgvW`-shaped reference parser: `prog` +
+`two words` came back as three arguments, `prog` + `""` lost an argument entirely. Both of .NET's
+`PasteArguments` rule sets are now implemented. **The emitted text moves** for an empty argument and
+for one containing whitespace or a quote; everything else is byte-identical, both pre-existing
+expectations still pass, and no in-repository consumer reads the property, so this is recorded in
+the plan rather than migrated. One element is **deferred, not guessed**: argv[0]'s rules cannot
+represent a literal `"`, and what .NET does when asked to is undecidable with `/rv` absent — this
+port emits it verbatim, pinned by a test, residual **#2242**.
+
+#### 2.3 What was deliberately NOT absorbed
+
+**SR-AUD-105 and SR-AUD-106 stay `confirmed` and unclaimed.** 106 needs a way to express "no value"
+that the current `const std::string&` cannot carry — a public signature change — and would retire
+`EnvironmentTests.Set_Empty_RemovesVar`, which pins the incompatible behaviour today. 105 is an XDG
+design entangled with `SpecialFolderOption` semantics, filesystem verification, and directory
+creation from a getter. One adjacency is **recorded rather than acted on**: 105's
+undefined-`SpecialFolder`-returns-empty half is the *same shape* as SR-AUD-064, which this batch
+repaired in `Lazy` — and it is still excluded, because it cannot be separated from the rest of 105.
+
+#### 2.4 Mutation and sanitizer discipline
+
+Seven mutations across the two units, **each applied to production code, rebuilt and re-run**: drop
+the mode check from the factory constructor (3 tests fail), order it before `requireFactory()` (1),
+weaken the pinned recursion message (1), no cwd growth on `ERANGE` (1), `readlink` truncation
+ignored (**0 — labelled equivalent on Linux**), `2n+1` backslash rule weakened to `2n` (2), argv[0]
+never quote-wrapped (1). One mutation was **deliberately not run**: disabling the reentrancy guard
+for `PublicationOnly` is itself undefined behaviour, so its verdict would mean nothing.
+**No sanitizer was run**, and that is a decision, not an omission: #2236 turns a defined no-throw
+into a defined throw, #2237 changes no executable statement, and neither `Environment` door ever
+overran its buffer — it discarded data. The one leak-shaped risk, a `std::function` target on
+`Lazy`'s new throwing constructor path, is covered by a 1,000-iteration test.
+
+#### 2.5 Selective-components was NOT rerun
+
+No module boundary, dependency edge or component-catalogue entry changed: the graph is **41 modules
+/ 92 edges** and `generate_component_catalog.py --check` reports the generated catalogue current,
+both unchanged from the inherited baseline. Every edit was a `.cpp` body, an inline header body, a
+test body or a doc-comment. Rerunning a 735-second ten-fixture matrix to observe that would have
+been ceremony, and this repository's build-resource policy exists to prevent exactly that.
+
+#### 2.6 The full gate, and how the total was obtained
+
+`scripts/run_component_tests.sh` and `scripts/local_ci_check.sh` both **stop at the first failing
+executable**, and this repository has six known failures, so neither can produce a complete total
+here. `local_ci_check.sh` was run for the parts it does validate — boundaries **41 / 92**, catalogue
+current, seams **3 / 20**, negative fixtures **14 files / 120 sites, 134 compiler invocations, peak
+2 jobs**, build **0 warnings / 0 errors** — and it then terminated at
+`SharpRuntimeTests_Net_NetworkInformation`, which is reported here as an early termination, not as
+a pass. The complete total came from running **all 38 executables individually**: **16,730 run,
+16,722 passed, 2 skipped, 6 failed**. The six are the inherited ones and nothing else — 5 ×
+`PingTests` (#1962, no unprivileged ICMP socket) and 1 × `SocketTests` (this container has no IPv6).
+None was disabled, weakened, skipped, recategorised or hidden, and **the gate is not green**.
+
+### 3. Next work, ranked from the resulting state
+
+`modules/core` has **52** open findings (1 high, 47 medium, 4 low). Ranked candidates, each of
+which still needs its own bounded review before implementation:
+
+1. **`Experimental/Property.hpp` — SR-AUD-179 + SR-AUD-181.** Two findings, one file, and both read
+   as ordinary implementation bugs rather than policy: assignment returns the unsynchronised default
+   cache instead of the stored value, and the `DEF_PROP_AUTO`/custom macros expand to
+   `SharpRuntime::Property` although the type is `SharpRuntime::Experimental::Property`, so the
+   documented minimal use does not compile. Smallest coherent unclaimed unit with no visible
+   approval boundary.
+2. **`AppDomain.hpp` — SR-AUD-103 + SR-AUD-104.** `GetData`/`SetData`/`IsCompatibilitySwitchSet` are
+   stubs although the `AppContext` state they should read already works, and `ApplyPolicy` returns
+   empty and NUL-containing names unchanged instead of validating them. Both plausibly compatible;
+   103 needs a check that the one-domain adaptation is representable.
+3. **`ArgumentOutOfRangeException.hpp` — SR-AUD-091 alone.** The generic comparison guards call
+   `std::to_string`, so a documented comparison-only user type fails to compile. A compile-time
+   defect with a mechanical repair; a one-finding ticket, not a family.
+
+**Do not** default to the twelve-member public-representation group (eleven of twelve need layout or
+signature approval — rejected four times now), to `modules/timers` or `modules/threading` (both
+stale, see the previous handoff), or to **#2228** (still blocked on the Emscripten entropy/error-
+semantics decision, which did not appear). The four-member exception-shape cluster
+(SR-AUD-091/092/098/101) is tempting but **mixed**: 092 and 098 change emitted diagnostic text with
+green tests pinning the current output, and 101 is additive public API — it needs its own
+compatibility call before being grouped.
 
 ---
 
