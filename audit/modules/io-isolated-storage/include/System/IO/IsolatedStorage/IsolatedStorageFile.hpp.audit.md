@@ -41,3 +41,52 @@ caller can select the relative-path argument.
 ## Final assessment
 
 SR-AUD-241 is directly reproduced. No source or test was changed during this audit.
+
+
+---
+
+## Correction appended 2026-08-10 (#2203 review, #2204 remediation)
+
+*The original text above is unchanged. This section records what the review measured that the
+audit pass did not.*
+
+**SR-AUD-241 is remediated (#2204).** Its premise was correct and its scope was understated in
+four ways, each measured by `build-probe/2203_probe1_confinement.cpp` against a
+repository-local sandbox:
+
+1. **Thirteen caller path arguments across ten members**, not one door. `CreateDirectory` was
+   the demonstrated example; `FileExists`, `DirectoryExists`, `OpenFile`, `CreateFile`,
+   `DeleteFile`, `CopyFile` (**both** arguments), `MoveFile`, `MoveDirectory` and
+   `DeleteDirectory` escape identically.
+2. **All four effect classes escape**, not just creation: an outside file was *read*, an outside
+   file and an outside directory were *deleted*, files were *created and written* outside, store
+   content was *moved out*, and outside content was *imported in* through `CopyFile`'s source and
+   `MoveDirectory`'s source. A read-only escape is a defect in its own right.
+3. **`..` traversal and symbolic links escape too**, so the .NET repair this report names --
+   stripping leading separators -- is necessary and **not sufficient**. Measured:
+   `../outside/x`, `a/../../outside/x`, and symbolic links at final, intermediate and chained
+   components.
+4. **`DeleteFile("")` deleted the store root**, because `fullPath("")` is the root and
+   `std::filesystem::remove` removes an empty directory. Separately measured; it is what makes
+   an empty-path rejection load-bearing.
+
+Also measured and closed in the same batch, as ordinary tickets (**no `SR-AUD-` identifier was
+created; numbering stays frozen at 364**):
+
+- **#2205** -- `Remove()` and the three space properties never checked the disposed flag while
+  the other ten members did, so a closed store still reported its size and still deleted itself.
+- **#2206** -- the constructor and the three iterator-backed members let a native
+  `std::filesystem_error` cross the public API.
+
+Two residuals are recorded rather than folded into the finding, so its remediated status is not
+overclaimed: the **check-then-use TOCTOU race** (#2207, blocked -- needs `openat(O_NOFOLLOW)`
+per-component resolution, an fd-accepting `FileStream`, and a Windows/Emscripten story) and
+**`IsolatedStorageFileStream`'s unconfined public constructor** (#2208, blocked on a public
+signature change).
+
+The report's "Other missing assertions" list is now satisfied by the module's first dedicated
+test executable, `SharpRuntimeTests_IO_IsolatedStorage` (58 tests): absolute-path rejection at
+every entry point, traversal and symlink-boundary tests, create/open/read/write/copy/move/delete/
+list lifecycle coverage, empty and separator errors, non-empty directory deletion, disposal,
+Remove failure, quota/used/free-space behaviour, and a discriminating control proving the raw
+join still escapes.

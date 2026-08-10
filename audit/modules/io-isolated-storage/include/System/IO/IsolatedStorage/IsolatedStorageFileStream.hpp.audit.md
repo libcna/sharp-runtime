@@ -22,3 +22,18 @@ does not do so (SR-AUD-241).
 ## Final assessment
 
 No independent stream declaration defect was demonstrated. No source or test was changed.
+
+
+---
+
+## Correction appended 2026-08-10 (#2204)
+
+*The original text above is unchanged.*
+
+This report's assessment -- *"Its public constructor accepts a full path, so containment must be
+enforced by its caller; IsolatedStorageFile presently does not do so (SR-AUD-241)"* -- was
+correct on both halves. The caller half is now enforced (#2204). The constructor half is
+deliberately unchanged and is tracked as **#2208**, blocked on approval because confining it
+means taking the owning `IsolatedStorageFile` as a parameter, which breaks every consumer that
+constructs one directly. The header now carries an explicit `@warning` saying the constructor is
+not a confinement boundary.

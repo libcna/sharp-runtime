@@ -316,9 +316,21 @@ For each caller path argument, in this order, **before any filesystem call**:
 | 6 | symlink-resolved escape | `ArgumentException("Path must be relative to the isolated storage root.", paramName)` |
 
 `paramName` is the header's own declared name: `relativePath`, `sourceFileName`,
-`destinationFileName`, `sourceDirectoryName`, `destinationDirectoryName`. The disposed check
-(`ObjectDisposedException`) stays **first** on every member that already has it — a closed store
-must not report an argument problem it never looked at.
+`destinationFileName`, `sourceDirectoryName`, `destinationDirectoryName`.
+
+Order relative to the checks that already existed, **unchanged by this review**: the eight
+single-argument members run `throwIfDisposed()` first, then containment. `CopyFile`, `MoveFile`
+and `MoveDirectory` run their existing `ThrowIfNullOrEmpty` on both arguments first, then
+`throwIfDisposed()`, then containment — which is .NET's own order (`ArgumentNullException.ThrowIfNull`
+precedes `EnsureStoreIsValid()` in `IsolatedStorageFile.cs`) and is therefore kept rather than
+normalized.
+
+**Between two path arguments, the source is validated first.** That is not free: C++ leaves the
+evaluation order of call arguments unspecified, and validating inside the
+`copy_file`/`rename` call expression made the answer compiler-dependent — GCC evaluates right to
+left, so a doubly-invalid call named the *destination*. The arguments are resolved into named
+locals in declared order, which is what makes the order a contract instead of an artefact. This
+was found by the `Order_TheFirstOffendingParameterIsTheOneNamed` test, not by inspection.
 
 `ArgumentException` rather than `IsolatedStorageException` because the module already throws
 `ArgumentException` for empty `CopyFile`/`MoveFile`/`MoveDirectory` arguments (three shipped
@@ -537,3 +549,90 @@ The namespace is **closed for compatible work** when all of:
 
 It is **not** called *fully* closed while #2207 and #2208 remain open — the audit's named probe
 passing is not the same as the invariant holding against every adversary.
+
+---
+
+## 19. Outcome — measured after implementation (2026-08-10)
+
+### 19.1 Every criterion in §18
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | SR-AUD-241 `confirmed → remediated`, original text preserved, correction appended | **done** — index plus four per-file reports |
+| 2 | permanent test per path argument, rejection **and** no side effect | **done** — 58 tests, including two before/after snapshot tests |
+| 3 | legitimate-path controls still pass | **done** — five `LegitimatePaths_*` tests; IO 635/635 and integration 893/893 unchanged |
+| 4 | dedicated executable registered, transition recorded | **done** — `SharpRuntimeTests_IO_IsolatedStorage`, **37 → 38 executables** |
+| 5 | #2205 and #2206 done | **done** |
+| 6 | #2207, #2208, #2209 recorded with exact reasons | **done** |
+| 7 | no new gate failure | **done** — §19.5 |
+
+### 19.2 Before → after, per door
+
+Every escape in §6 is closed. From `build-probe/2203_probe1_before.log` →
+`build-probe/2206_probe1_after.log`:
+
+| Measurement | Before | After |
+|---|---|---|
+| `audit_probe.escaped_exists` / `root_child_exists` | `1` / `0` | **`0` / `1`** |
+| `abs.FileExists.result`, `abs.DirectoryExists` outside | `1` | **`0`** |
+| `abs.{OpenFile,CreateFile,CopyFile.dst,MoveFile.dst}.escaped_exists` | `1` | **`0`** |
+| `abs.{DeleteFile,DeleteDirectory}.victim_still_exists` | `0` | **`1`** |
+| `abs.CopyFile.src.leaked_in_exists`, `abs.MoveDirectory.src.pulled_in_exists` | `1` | **`0`** |
+| every `dotdot.*` escape | `no-throw`, `1` | **`ArgumentException(relativePath)`, `0`** |
+| every `symlink.*` escape (final, intermediate, chain) | `no-throw`, `1` | **`ArgumentException(relativePath)`, `0`** |
+| `root_delete.root_still_exists` | `0` | **`1`** |
+| `degenerate.nul.truncated_name_exists` | `1` | **`0`** |
+| `disposed.{Remove,AvailableFreeSpace,UsedSize,Quota}` | `no-throw` | **`ObjectDisposedException`** |
+| `native.*.root_is_a_file` (4 doors) | `std::filesystem_error` | **`IsolatedStorageException`** |
+| `stream_ctor.escaped_exists` | `1` | `1` — **unchanged by design** (#2208) |
+
+Unchanged and still correct: `dotdot.prefix_name` (`..hidden`), `degenerate.repeated_sep`,
+`trailing_sep`, `dot_segment`, `symlink.dangling`, and both enumeration counts.
+
+### 19.3 Mutation testing — 7 of 7 killed
+
+Each mutation was an exact replacement in the shipped body; the target was rebuilt, the binary
+verified newer than the source, and the suite re-run (`build-probe/2204_mutations.py`).
+
+| Mutation | Killed by |
+|---|---|
+| M1 no lexical containment | 3 tests (`.` / root-rename / message pin) |
+| M2 no separator strip | 12 tests (every absolute-path door) |
+| M3 no symlink resolution | 4 `Symlink_*` tests |
+| M4 no empty rejection | 1 test (**message pin only** — see below) |
+| M5 one door left unguarded (`FileExists`) | 5 tests |
+| M6 over-rejects any `..` text | 2 `LegitimatePaths_*` tests |
+| M7 validate after the side effect | 6 tests |
+
+**M4 is the honest one.** On the first pass it killed **nothing**: an empty path still gets
+rejected, one layer down, by the lexical check that refuses the root. Layer redundancy is the
+right design and bad for mutation visibility, so the fix was to pin the *message* per reason,
+making each layer separately observable. M1's low kill count has the same cause — for an
+escaping path, the canonicalization layer catches what the lexical layer would have. That is
+reported as a property of the design, not hidden.
+
+### 19.4 Sanitizer and direct-filesystem evidence
+
+- **ASan + UBSan + LSan** over the changed production body (`IsolatedStorageFile.cpp` compiled
+  *with* the sanitizer, the rest linked from the ordinary archives): **exit 0, zero reports**.
+- **Non-recovering UBSan** (`-fno-sanitize-recover=undefined`): **exit 0, zero reports**.
+- **Control**: a deliberate heap-buffer-overflow compiled in the *same* build reported
+  `AddressSanitizer: heap-buffer-overflow`, so the clean runs are a result and not an absence of
+  instrumentation.
+- **Sanitizers prove nothing about confinement.** Every confinement verdict above is a direct
+  filesystem observation — `exists()` before and after, plus full recursive snapshots of both
+  trees — with a vulnerable control (`Control_RawJoinStillDiscardsTheRootForAnAbsolutePath`)
+  proving the escape is still reachable through the raw join this repair replaced.
+- **One non-discriminating measurement, recorded rather than dropped**: the audit's suggested
+  unreadable-subdirectory reproduction for #2206 does not work here because the container runs as
+  uid 0 and permissions do not bind. A root-is-a-file reproduction was used instead.
+
+### 19.5 Namespace disposition
+
+`modules/io-isolated-storage`: **1 audit finding, remediated. 0 unaddressed.** Tests **0 → 58**
+in a new dedicated executable (plus the 34 pre-existing tests elsewhere, all still passing).
+
+The namespace is **closed for compatible work** and is deliberately **not** called fully closed:
+#2207 (TOCTOU) and #2208 (the unconfined stream constructor) are real, open, and each blocked on
+something this batch may not decide — a cross-platform architecture and a public signature
+change respectively. #2209 is deferred on absent reference data.
