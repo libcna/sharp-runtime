@@ -63,3 +63,41 @@ four words returned by `GetBits`, not just numeric equality.
 Decimal's ordinary APIs are serviceable, but a financial conversion and the
 public raw representation still have observable .NET compatibility gaps.  No
 implementation was modified during this audit.
+
+### SR-AUD-037 remediated — ticket #2231 (2026-08-10)
+
+`Decimal::ToOACurrency` no longer computes `Truncate(*this * Decimal(10000))`. It
+rounds to the four decimals Currency stores through the existing
+`Decimal::Round(d, 4, MidpointRounding::ToEven)` funnel and only then scales, so
+the value is rounded to the **nearest** currency unit as .NET documents.
+
+Measured on the shipped library before the edit
+(`build-probe/2229_probe1_before.log`, group `[037]`): **15 cases, 5 wrong**.
+The two values the .NET documentation tabulates both failed — `0.123456789`
+returned `1234` (documented `1235`) and `-79.228162514264337593543950335`
+returned `-792281` (documented `-792282`) — and every magnitude below `0.00005`
+collapsed to `0`. After: **0 wrong**, with the exactly-representable controls
+(`0`, `1`, `1.0000`, `-1.2345`, `100000000000000`) unchanged and the untouched
+`FromOACurrency` round trip asserted.
+
+**The tie rule is the one element the documented examples cannot decide**, and
+this is recorded rather than glossed: neither tabulated value is a midpoint.
+`ToEven` was implemented because .NET performs the scale reduction through
+`DecCalc.VarCyFromDec` → `InternalRound(…, MidpointRounding.ToEven)` and because
+every other rounding funnel in this port defaults to `ToEven`; `/rv` is absent in
+this container to confirm the exact call. The choice is **pinned by tests**
+(`1.00005` → `10000`, `1.00015` → `10002`, `-1.00005` → `-10000`; under
+`AwayFromZero` those would be `10001`, `10002`, `-10001`) and the residual
+question is **deferred-verification ticket #2234**, following the #2060 / #2070 /
+#2130 convention.
+
+Overflow was measured rather than assumed. Both `Decimal::MaxValue` and
+`1000000000000000` **already** threw `OverflowException` before this ticket, but
+with the generic messages `"Decimal overflow."` and `"Value was either too large
+or too small for an Int64."`. The exception **type** was already right; only the
+message moves, to .NET's `SR.Overflow_Currency` text `"Value was either too large
+or too small for a Currency."`. `Decimal.hpp` gains `#include
+"System/OverflowException.hpp"` — an intra-`Core.Base` include, so no module edge
+changes. The signature and exception specification are unchanged. +18 test cases
+in `modules/core/tests/System/NumericSpecialValueTests.cpp`. Family plan:
+`docs/CoreNumericSpecialValueRoundingFamilyPlan.md` §4.2.

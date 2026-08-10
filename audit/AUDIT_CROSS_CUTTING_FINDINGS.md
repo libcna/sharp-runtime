@@ -2794,3 +2794,67 @@ stays frozen at 364.**
 the `confirmed (design-complete)` qualifier (#2155, blocked on approval). Recounted directly from
 the index, it now reads **156 remediated / 208 confirmed / 364 total**, of which **50** carry the
 `confirmed (design-complete)` qualifier.
+
+---
+
+## The numeric special-value / rounding-contract shape — recorded, deliberately NOT minted (2026-08-10, #2229)
+
+The `modules/core` family closed by tickets #2229–#2233 shares one root-cause shape across four
+findings: **a public numeric operation whose .NET contract names a specific special-value or
+rounding outcome is implemented by delegating to a C++ primitive or comparison that does not
+provide it.**
+
+| Finding | The wrong door | The sibling that was already correct | Ticket |
+|---|---|---|---|
+| SR-AUD-034 | `Single::IsPositive` adds `&& !std::isnan(value)` to the sign-bit test | `Double::IsPositive` — bare `std::signbit` | #2230 |
+| SR-AUD-039 | `Math::Log(double, newBase)` is a bare `log(a)/log(b)` | `MathF::Log(float, float)` — all four .NET guards | #2232 |
+| SR-AUD-040 | `MathF`/`Single`/`Double` ties-to-even is `std::nearbyint`, which follows `fesetround()` | `Math::roundToEvenImpl` — a `floor`/`fmod` funnel | #2233 |
+| SR-AUD-037 | `Decimal::ToOACurrency` scales then **truncates** | *(none)* | #2231 |
+
+Three of the four had a **sibling in this repository that already implemented the contract**, which
+is what made each divergence measurable rather than arguable, and is the sharpest statement of the
+shape: the port did not lack the knowledge, it applied it to one member of a pair.
+
+**Not minted, and not folded into an existing cause.**
+
+- **No new `CCF-*` identifier is created.** The obstacle #2109 records is unchanged — every
+  promotion sentence in this corpus is passive and names no agent, and the one non-passive
+  statement reserves the act to the maintainer. Independently of that, a cause identifier would
+  carry no work here: #2229's own tickets repaired **every** occurrence the shape has in the
+  corpus, so the identifier would be born closed.
+- **CCF-007** (*"the binary float wrappers delegate public edge semantics to unsuitable native
+  primitives"*) is the closest existing cause and is **deliberately not extended** to these four.
+  Its membership is explicit and complete — SR-AUD-029 through SR-AUD-033, all `remediated` — and
+  its named subjects are decimal rounding precision, `IsPow2`, `ilogb`, Pi-scaled trigonometry and
+  text conversion. None of them is a sign-bit predicate, a logarithm base guard, a currency
+  conversion or an ambient-FP-mode dependency. These findings are **adjacent**, not members.
+  Broadening a cause because the same repair technique is useful is what CCF-015's own SR-AUD-294
+  note forbids, and the #2223 batch was corrected for the mirror-image error a week earlier.
+- **CCF-008** is **closed** and its sole member SR-AUD-036 is `remediated`. SR-AUD-040 shares
+  CCF-008's *files* and none of its subject: CCF-008 is about rejecting an out-of-range
+  `MidpointRounding`, SR-AUD-040 about the value a valid `ToEven` produces. Not a member, not an
+  occurrence. The CCF-008 validation is untouched by #2233 and is pinned by a test.
+
+**CCF-019, CCF-021/#2131 and CCF-022/#2109 are untouched by this family** and remain exactly as
+inherited: CCF-019 open with unresolved ownership/lifetime policy, CCF-021 and CCF-022 candidates
+with the mint authority unresolved.
+
+A measured **residual** is recorded here because it would otherwise look like an unclaimed defect:
+after #2233 the *digits* overloads still differ in the final ULP under `FE_DOWNWARD`/`FE_TOWARDZERO`.
+`Math::Round(double, intcs)` — the reference sibling, untouched by this batch — deviates
+**identically** and matches a bare `22.0 / 10.0` to the bit
+(`build-probe/2229_probe2_digits.log`), so this is the ambient rounding mode acting on ordinary
+C++ arithmetic, not a rounding-rule defect, and it belongs to no finding. It is stated in
+`docs/CoreNumericSpecialValueRoundingFamilyPlan.md` §4.4.1 and carries no ticket, because a ticket
+scoped to `Round` would misdescribe a condition that applies to every `float`/`double` expression
+in the library under a non-default mode.
+
+**No `SR-AUD-*` identifier was issued; numbering stays frozen at 364.**
+
+### What this batch changed in the index
+
+**SR-AUD-034, SR-AUD-037, SR-AUD-039** and **SR-AUD-040** move `confirmed` → `remediated`.
+Recounted **by finding identifier** — a fixed-column parser reports a false 363, because rows
+SR-AUD-029/033/249/286/307 carry extra columns — the index now reads **189 remediated / 120
+confirmed / 364 total**, of which **55** carry the `confirmed (design-complete)` qualifier.
+`modules/core` open findings fall **60 → 56**.

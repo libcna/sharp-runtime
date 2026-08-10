@@ -109,3 +109,15 @@ exposed a pre-existing sign-of-zero defect in the port's `Math` funnel. The
 inseparable private-helper correction is recorded in `Math.hpp.audit.md` and
 the packet's appended correction. No declaration, exception specification,
 layout, vtable, or mangled name changed.
+
+### SR-AUD-040 extension — `Double::Round(double)` shared the defect (ticket #2233, 2026-08-10)
+
+SR-AUD-040 is recorded against `MathF.hpp` and its text describes *"the sibling
+double Math API"* as already having a mode-independent implementation. That is
+true of `Math` and was **false of this wrapper**: `Double.hpp:292` was
+`std::nearbyint(x)`, so `Double::Round(2.5)` returned `3` under `FE_UPWARD` and
+`Double::Round(3.5)` returned `3` under `FE_DOWNWARD`/`FE_TOWARDZERO`. It now
+routes through `Math::roundToEvenImpl`. `Double::Round(double, intcs)` was
+already correct, having been routed to the `Math` funnel by #1927. `noexcept` and
+the signature are unchanged. See that finding's own record in
+`audit/modules/core/include/System/MathF.hpp.audit.md`.

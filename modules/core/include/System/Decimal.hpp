@@ -9,6 +9,7 @@
 
 #include "System/ArgumentException.hpp"
 #include "System/MidpointRounding.hpp"
+#include "System/OverflowException.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 #if defined(_MSC_VER)
@@ -736,14 +737,37 @@ public:
     /**
      * @brief Converts this Decimal to an OLE Automation Currency value.
      *
-     * C++ counterpart of .NET Decimal.ToOACurrency(decimal). Multiplies by
-     * 10000 and truncates to a 64-bit integer.
+     * C++ counterpart of .NET Decimal.ToOACurrency(decimal). Multiplies by 10000 and rounds to the
+     * NEAREST 64-bit integer, so `0.123456789` is `1235` and `-79.228162514264337593543950335` is
+     * `-792282` — the two values the .NET documentation tabulates.
+     *
+     * Ticket #2231 (SR-AUD-037) replaced a `Truncate(*this * 10000)` that discarded the fifth and
+     * later decimal digits outright, returning `1234` and `-792281` for those two values and `0`
+     * for every magnitude below `0.00005`.
+     *
+     * **Midpoints break to even.** Neither value the documentation tabulates is a midpoint, so the
+     * tie rule cannot be derived from them; .NET performs the scale reduction through
+     * `DecCalc.VarCyFromDec` → `InternalRound(…, MidpointRounding.ToEven)`, which is also this
+     * port's own default in `Decimal::Round`, `Math::Round` and `MathF::Round`. The choice is
+     * pinned by tests and the residual verification is ticket #2234.
+     *
      * @return OA Currency representation of this value.
+     * @throws System::OverflowException if the scaled value is outside the Currency (Int64) range.
      */
     [[nodiscard]] long long ToOACurrency() const
     {
-        Decimal scaled = *this * Decimal(10000LL);
-        return Truncate(scaled).ToInt64();
+        try {
+            // Round to the four decimals Currency stores BEFORE scaling: rounding afterwards
+            // would need a value that no longer fits, and `operator*` reduces an over-scaled
+            // product half-away-from-zero rather than half-to-even.
+            Decimal rounded = Round(*this, 4, MidpointRounding::ToEven);
+            return (rounded * Decimal(10000LL)).ToInt64();
+        } catch (const System::OverflowException&) {
+            // Both the scaling multiply and the Int64 conversion already reported the condition,
+            // but with their own generic messages. .NET raises SR.Overflow_Currency here.
+            throw System::OverflowException(
+                "Value was either too large or too small for a Currency.");
+        }
     }
 
     /**

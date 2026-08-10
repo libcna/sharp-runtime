@@ -41,13 +41,41 @@ namespace System {
         /** @brief Returns the largest integral value less than or equal to @p x. */
         static float Floor(float x)                { return std::floor(x); }
         /**
+         * @brief Rounds @p x to the nearest integer, ties to even, independent of the ambient
+         * floating-point rounding-mode register.
+         *
+         * Ticket #2233 (SR-AUD-040). Deliberately does NOT use std::nearbyintf/std::rintf -- both
+         * follow the CURRENT fesetround() mode rather than always implementing ties-to-even, so
+         * under a non-default rounding mode (e.g. FE_UPWARD, which some SIMD/audio libraries set
+         * process-wide) nearbyintf(2.5f) silently returned 3.0f instead of 2.0f, and under
+         * FE_DOWNWARD/FE_TOWARDZERO nearbyintf(3.5f) returned 3.0f instead of 4.0f. std::floor and
+         * std::fmod are, by contrast, specified with fixed rounding behavior independent of
+         * fesetround, so this implementation is immune regardless of what a third-party library
+         * elsewhere in the same process has set the rounding mode to.
+         *
+         * This is the single-precision mirror of `Math::roundToEvenImpl(double)`, including its
+         * signed-zero preservation: -0.5f and -0.0f round to -0.0f, as .NET's MathF.Round does.
+         */
+        static float roundToEvenImpl(float value) {
+            float floorVal = std::floor(value);
+            float diff = value - floorVal;
+            float result = 0.0f;
+            if (diff < 0.5f) result = floorVal;
+            else if (diff > 0.5f) result = floorVal + 1.0f;
+            // Exact tie: round to the even neighbor.
+            else result = (std::fmod(floorVal, 2.0f) == 0.0f) ? floorVal : floorVal + 1.0f;
+
+            return result == 0.0f ? std::copysign(0.0f, value) : result;
+        }
+
+        /**
          * @brief Returns @p x rounded to the nearest integer.
          *
          * C++ counterpart of .NET MathF.Round(float). Uses round-to-even (banker's
          * rounding) for midpoint values, matching .NET's default - NOT std::round,
          * which always rounds halfway cases away from zero.
          */
-        static float Round(float x)                { return std::nearbyint(x); }
+        static float Round(float x)                { return roundToEvenImpl(x); }
         /** @brief Returns the integral part of @p x, discarding the fractional digits. */
         static float Truncate(float x)             { return std::trunc(x); }
         /** @brief Returns the square root of @p x. */
@@ -233,7 +261,10 @@ namespace System {
                 // spellings do, but the `f`-suffixed names are not portably declared inside
                 // namespace std (libstdc++ 13 has no std::floorf/std::ceilf at all), which
                 // made this switch a hard compile error rather than a behaviour difference.
-                case MidpointRounding::ToEven:             return std::nearbyint(x);
+                // #2233 (SR-AUD-040): the mode-independent funnel, not std::nearbyint, which
+                // follows the ambient fesetround() mode. Reached by Round(float, intcs) and
+                // Round(float, intcs, MidpointRounding) too.
+                case MidpointRounding::ToEven:             return roundToEvenImpl(x);
                 case MidpointRounding::AwayFromZero:       return std::round(x);
                 case MidpointRounding::ToZero:             return std::trunc(x);
                 case MidpointRounding::ToNegativeInfinity: return std::floor(x);

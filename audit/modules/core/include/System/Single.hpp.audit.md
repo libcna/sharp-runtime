@@ -326,3 +326,35 @@ With the exact approval in `docs/TextSubsetCompatibilityDecision.md` §6.5 item
 the `1e8f` round limit. The permanent boundary/special-value matrix covers both
 signs, zero, subnormal, normal, finite-limit-adjacent and infinite values over
 all seven legal digit counts. The signature and `noexcept` state are unchanged.
+
+### SR-AUD-034 remediated — ticket #2230 (2026-08-10)
+
+`Single::IsPositive` (Single.hpp:101) is now the bare `!std::signbit(value)`. The
+`&& !std::isnan(value)` term is gone, so `IsPositive(+NaN)` is `true` and
+`IsPositive(-NaN)` is `false`, matching .NET's raw-representation definition
+(`SingleToInt32Bits(value) >= 0`) and the `Double` counterpart that already
+followed it. `IsNegative` was already correct and is untouched.
+
+Measured on the shipped library before the edit
+(`build-probe/2229_probe1_before.log`, group `[034]`): **12 cases, 1 wrong** —
+`Single::IsPositive(+NaN)` returned `false` while the `Double` control returned
+`true`, confirming the divergence is inside the pair rather than a project-wide
+NaN policy. After: **0 wrong**, with `±0`, finite, subnormal and infinite
+controls unchanged.
+
+Verified rather than assumed before the edit: **no production consumer** of the
+float/double `IsPositive` exists in `modules/`, and **no test pinned the wrong
+answer**, so this repair corrects no existing assertion. Signature, `noexcept`
+and layout are unchanged. +4 test cases in
+`modules/core/tests/System/NumericSpecialValueTests.cpp`, which assert the
+`Single`/`Double` pair *agrees* rather than each being separately plausible.
+Family plan: `docs/CoreNumericSpecialValueRoundingFamilyPlan.md` §4.1.
+
+### SR-AUD-040 extension — `Single::Round(float)` shared the defect (ticket #2233, 2026-08-10)
+
+SR-AUD-040 is recorded against `MathF.hpp`, but `Single.hpp:247` carried the same
+`std::nearbyint` and therefore the same dependence on the ambient `fesetround()`
+mode. It now routes through `MathF::roundToEvenImpl`. `Single::Round(float, intcs)`
+inherited the repair through the `MathF` funnel #1927 already routed it to.
+`noexcept` and the signature are unchanged. See that finding's own record in
+`audit/modules/core/include/System/MathF.hpp.audit.md`.

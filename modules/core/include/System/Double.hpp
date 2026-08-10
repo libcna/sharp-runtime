@@ -288,8 +288,16 @@ public:
     /** @brief Returns the integral part (discards fractional part). C++ counterpart of .NET Double.Truncate(double). */
     [[nodiscard]] static double Truncate(double x) noexcept { return std::trunc(x); }
 
-    /** @brief Rounds @p x to the nearest integer (ties to even). C++ counterpart of .NET Double.Round(double). */
-    [[nodiscard]] static double Round(double x) noexcept { return std::nearbyint(x); }
+    /**
+     * @brief Rounds @p x to the nearest integer (ties to even). C++ counterpart of .NET Double.Round(double).
+     *
+     * Ticket #2233 (SR-AUD-040): routed through `Math::roundToEvenImpl`, which implements
+     * ties-to-even directly. The former `std::nearbyint` followed the ambient `fesetround()` mode,
+     * so a process-wide rounding-mode change elsewhere silently altered this result. SR-AUD-040
+     * named only the MathF doors and described "the sibling double Math API" as already safe --
+     * true of `Math`, but this `Double` wrapper carried the identical defect.
+     */
+    [[nodiscard]] static double Round(double x) noexcept { return Math::roundToEvenImpl(x); }
 
     /**
      * @brief Rounds @p x to @p digits decimal places (ties to even). C++ counterpart of .NET Double.Round(double,int).

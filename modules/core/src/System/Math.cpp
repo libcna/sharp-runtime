@@ -154,7 +154,27 @@ namespace System
     }
 
     double Math::Log(double d)    { return std::log(d); }
-    double Math::Log(double a, double newBase) { return std::log(a) / std::log(newBase); }
+
+    double Math::Log(double a, double newBase)
+    {
+        // Ticket #2232 (SR-AUD-039). A bare std::log(a) / std::log(newBase) disagrees with .NET at
+        // three documented bases: log(5)/log(1) is +Inf, log(5)/log(0) is -0 and log(5)/log(+Inf)
+        // is +0, where Math.Log returns NaN for all three. These are exactly the guards
+        // Math.Log(double, double) applies before the quotient, and the ones MathF::Log(float,
+        // float) in this repository already implements -- so the double overload was also out of
+        // step with its own float sibling.
+        //
+        // Note that the `a != 1` condition is part of .NET's guard: with a == 1 it does NOT fire,
+        // so Log(1, 0) falls through to log(1)/log(0) == -0 and Log(1, +Inf) to +0. Both signed
+        // zeros are preserved deliberately.
+        if (std::isnan(a)) return a;
+        if (std::isnan(newBase)) return newBase;
+        if (newBase == 1.0) return std::numeric_limits<double>::quiet_NaN();
+        if (a != 1.0 && (newBase == 0.0 || newBase == std::numeric_limits<double>::infinity()))
+            return std::numeric_limits<double>::quiet_NaN();
+        return std::log(a) / std::log(newBase);
+    }
+
     double Math::Log2(double x)   { return std::log2(x); }
     double Math::Log10(double d)  { return std::log10(d); }
     double Math::Exp(double d)    { return std::exp(d); }

@@ -97,8 +97,17 @@ public:
     /** @brief Returns true if @p value is negative (including negative zero and negative infinity). C++ counterpart of .NET Single.IsNegative(float). */
     [[nodiscard]] static bool IsNegative(float value) noexcept { return std::signbit(value); }
 
-    /** @brief Returns true if @p value is positive (not NaN, not negative). C++ counterpart of .NET Single.IsPositive(float). */
-    [[nodiscard]] static bool IsPositive(float value) noexcept { return !std::signbit(value) && !std::isnan(value); }
+    /**
+     * @brief Returns true if @p value is positive (including positive zero and a positive-sign NaN).
+     *
+     * C++ counterpart of .NET Single.IsPositive(float). .NET defines the generic-math predicate on
+     * the RAW representation (`BitConverter.SingleToInt32Bits(value) >= 0`), so the sign bit alone
+     * decides: a positive-sign NaN is positive and a negative-sign NaN is negative. Ticket #2230
+     * (SR-AUD-034) removed a `&& !std::isnan(value)` term that made `IsPositive(NaN)` false and put
+     * this overload out of step with `Single::IsNegative` and with both `Double` counterparts,
+     * which already used the bare sign bit.
+     */
+    [[nodiscard]] static bool IsPositive(float value) noexcept { return !std::signbit(value); }
 
     /** @brief Returns true if @p value is an integer value (no fractional part). C++ counterpart of .NET Single.IsInteger(float). */
     [[nodiscard]] static bool IsInteger(float value) noexcept {
@@ -243,8 +252,14 @@ public:
     /** @brief Returns the integral part (discards fractional part). C++ counterpart of .NET Single.Truncate(float). */
     [[nodiscard]] static float Truncate(float x) noexcept { return std::trunc(x); }
 
-    /** @brief Rounds @p x to the nearest integer (ties to even). C++ counterpart of .NET Single.Round(float). */
-    [[nodiscard]] static float Round(float x) noexcept { return std::nearbyint(x); }
+    /**
+     * @brief Rounds @p x to the nearest integer (ties to even). C++ counterpart of .NET Single.Round(float).
+     *
+     * Ticket #2233 (SR-AUD-040): routed through `MathF::roundToEvenImpl`, which implements
+     * ties-to-even directly. The former `std::nearbyint` followed the ambient `fesetround()` mode,
+     * so a process-wide rounding-mode change elsewhere silently altered this result.
+     */
+    [[nodiscard]] static float Round(float x) noexcept { return MathF::roundToEvenImpl(x); }
 
     /**
      * @brief Rounds @p x to @p digits decimal places (ties to even). C++ counterpart of .NET Single.Round(float,int).

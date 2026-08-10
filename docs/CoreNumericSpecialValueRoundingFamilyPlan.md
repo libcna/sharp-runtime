@@ -159,6 +159,43 @@ a dedicated mode-independent implementation"*. That is true of **`Math`** and fa
 Repairing `MathF` fixes the `Single` digits path for free, because #1927 already routed
 `Single::Round(float, intcs)` through `MathF::Round(x, digits, ToEven)`.
 
+#### 4.4.1 A residual the repair does **not** own, measured rather than argued
+
+After #2233 the original probe still reported **4 of 106** wrong, all the same shape: under
+`FE_DOWNWARD` and `FE_TOWARDZERO`, `MathF::Round(2.25f, 1)` and `Single::Round(2.25f, 1)` return
+`2.1999998` rather than `2.2000000`. A second probe, `build-probe/2229_probe2_digits.cpp`, was
+written to attribute it, and the attribution is unambiguous:
+
+| Mode | `MathF::Round(2.25f,1)` | `Math::Round(2.25,1)` | bare `22.0 / 10.0` |
+|---|---|---|---|
+| `FE_TONEAREST` | 2.2000000476837158 | 2.2000000000000002 | 2.2000000000000002 |
+| `FE_DOWNWARD` | 2.1999998092651367 | **2.1999999999999997** | **2.1999999999999997** |
+| `FE_TOWARDZERO` | 2.1999998092651367 | **2.1999999999999997** | **2.1999999999999997** |
+
+`Math::Round(double, intcs)` — the sibling this family treats as the *correct reference*, and which
+this batch does not touch — deviates **identically**, and matches a bare division to the bit. The
+digits overloads scale by a power of ten, round, and divide back; the final **division** observes
+the ambient mode exactly as every other C++ floating-point operation does, including `printf`'s own
+decimal conversion (visible in the table's last digit under `FE_UPWARD`).
+
+So the residual is **ordinary ambient-mode arithmetic, not a rounding-rule defect**, and it is not
+attributable to #2233. The contract the repair actually establishes is stated precisely:
+
+> The rounding **rule** is ties-to-even at every door regardless of the ambient mode. The
+> arithmetic that scales to and from a digit position is not mode-independent, and cannot be
+> without either saving and restoring a process-global register — which is not thread-safe — or
+> replacing the scale round trip with a decimal algorithm.
+
+**No ticket is opened for it**, deliberately. A ticket scoped to `Round` would misdescribe the
+condition: the deviation belongs to every `float`/`double` expression in the library under a
+non-default mode, not to these functions. Recorded here so it is neither hidden nor inflated.
+
+`build-probe/2229_probe3_contract.cpp` is the original probe with the two digits rows held to an
+exact value under `FE_TONEAREST` only, plus an unconditional row asserting the digits doors agree
+with the reference sibling to 1e-6 in every mode — the part the repair *does* own. It reports
+**104 cases, 0 wrong**. The original probe file is left unamended so that
+`2229_probe1_before.log` and the source that produced it continue to match.
+
 ---
 
 ## 5. CCF relationships — stated, and neither cause reopened
@@ -263,9 +300,33 @@ precedent explicitly: sanitizers are used where they decide something, not to sa
 ## 12. Family completion criteria
 
 1. All four implementation tickets `done`, or explicitly blocked with a stated reason.
-2. `build-probe/2229_probe1` re-run against the repaired library: **0 wrong of 106**.
+2. The probes re-run against the repaired library: `2229_probe3_contract` **0 wrong of 104**, and
+   `2229_probe1_before` **4 wrong of 106**, those four being the over-strong digits rows attributed
+   to shared ambient-mode arithmetic in §4.4.1.
 3. Permanent regressions land in a tracked suite, not only in the probe.
 4. `audit/AUDIT_FINDINGS_INDEX.md` and the four owning per-file reports record each transition,
-   with the §3.1 and §4.4 premise corrections appended rather than rewritten.
+   with the §3.1, §4.4 and §4.4.1 premise corrections appended rather than rewritten.
 5. No `SR-AUD-*` identifier created; numbering stays frozen at 364.
 6. `modules/core` open count falls 60 → 56.
+
+---
+
+## 13. Outcome, measured 2026-08-10
+
+All four implementation tickets landed. **None blocked, none partial.**
+
+| Probe | Before | After |
+|---|---|---|
+| `2229_probe1_before` (original) | 106 cases, **27 wrong** | 106 cases, **4 wrong** (§4.4.1) |
+| `2229_probe3_contract` (precise) | — | 104 cases, **0 wrong** |
+
+Per group, on the original probe: SR-AUD-034 1 → 0, SR-AUD-037 5 → 0, SR-AUD-039 3 → 0,
+SR-AUD-040 18 → 4 (all four the §4.4.1 residual).
+
+**+16 permanent regressions** in `modules/core/tests/System/NumericSpecialValueTests.cpp`.
+
+**No sanitizer was run**, per §11: every defect here was a wrong answer from fully defined
+operations, so ASan/UBSan cannot discriminate the failure class. **No mutation testing was run**
+either: each repair is a two-to-six-line body whose every branch is directly asserted by a probe row
+and a test case, and the probes' before/after delta already demonstrates the tests fail against the
+unrepaired code — which is what a mutation would be constructed to show.
