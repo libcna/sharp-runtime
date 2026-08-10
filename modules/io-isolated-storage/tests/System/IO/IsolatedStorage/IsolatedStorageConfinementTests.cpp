@@ -675,6 +675,34 @@ namespace {
                        "sourceDirectoryName");
     }
 
+    TEST_F(IsolatedStorageConfinementTest, Order_EachRejectionReasonHasItsOwnStableMessage)
+    {
+        // The checks are layered on purpose, so removing any one of them usually leaves a
+        // lower layer rejecting the same input -- which is good engineering and bad for
+        // mutation coverage.  Pinning the message is what makes each layer separately
+        // observable: an empty path is diagnosed as empty, not merely as uncontained.
+        auto s = store();
+        const auto messageOf = [&](const std::string& path) {
+            try { s.CreateDirectory(path); return std::string("<no exception>"); }
+            catch (const System::ArgumentException& e) { return e.getMessageProperty(); }
+        };
+
+        EXPECT_EQ(messageOf(""),
+                  "Path must not be empty. (Parameter 'relativePath')");
+        EXPECT_EQ(messageOf("/"),
+                  "Path must not be empty. (Parameter 'relativePath')");
+        EXPECT_EQ(messageOf("../escape"),
+                  "Path must be relative to the isolated storage root. (Parameter 'relativePath')");
+        EXPECT_EQ(messageOf("."),
+                  "Path must be relative to the isolated storage root. (Parameter 'relativePath')");
+
+        std::string withNul("nul");
+        withNul.push_back('\0');
+        withNul += "tail";
+        EXPECT_EQ(messageOf(withNul),
+                  "Path must not contain an embedded NUL character. (Parameter 'relativePath')");
+    }
+
     // =====================================================================================
     // The residual this repair deliberately does not close (#2208).
     // =====================================================================================
