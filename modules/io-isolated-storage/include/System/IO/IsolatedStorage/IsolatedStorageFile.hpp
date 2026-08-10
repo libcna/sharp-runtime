@@ -22,6 +22,17 @@ namespace System::IO::IsolatedStorage
      * Practical port of .NET System.IO.IsolatedStorage.IsolatedStorageFile.
      * All paths passed to methods are interpreted relative to the storage root.
      *
+     * @note **Root confinement.** Every path-taking member enforces that invariant rather than
+     *       merely documenting it: a path that would resolve outside the storage root — because
+     *       it is absolute, because `..` climbs past the root, or because a symbolic link in it
+     *       points out — throws System::ArgumentException before any filesystem access or
+     *       mutation happens.  A leading directory separator is stripped rather than rejected,
+     *       matching .NET's `GetFullPath`, so `"/data.bin"` names `data.bin` inside the store.
+     *       The check is check-then-use and therefore does not defeat a process concurrently
+     *       replacing a path component with a symbolic link (ticket #2207), and
+     *       IsolatedStorageFileStream's own public constructor is not confined at all
+     *       (ticket #2208).
+     *
      * @note Status: DONE
      */
     class IsolatedStorageFile : public IsolatedStorage
@@ -30,8 +41,31 @@ namespace System::IO::IsolatedStorage
         std::filesystem::path rootDirectory_; ///< Root directory of this isolated storage scope.
         bool disposed_ = false;               ///< True after Close()/Dispose().
 
-        /** Returns the full absolute path for a relative path inside the store. */
-        [[nodiscard]] std::filesystem::path fullPath(const std::string& relativePath) const;
+        /**
+         * @brief Resolves @p relativePath against the storage root and proves the result is
+         *        confined to it.
+         *
+         * Enforces the store's defining invariant: the resolved target is the storage root's
+         * descendant, or nothing happens at all.  Leading directory separators are stripped
+         * first, matching .NET's `IsolatedStorageFile.GetFullPath`, so a rooted caller path is
+         * reinterpreted as store-relative rather than honoured.  What remains is then checked
+         * lexically (`..` may not climb past the root) and again after resolving every symbolic
+         * link in the existing prefix.
+         *
+         * @param relativePath Caller-supplied path, interpreted relative to the storage root.
+         * @param paramName    Name of the public parameter @p relativePath arrived in, used for
+         *                     the thrown exception.
+         * @return The normalized absolute path to operate on.
+         * @throws System::ArgumentException if @p relativePath contains an embedded NUL, is
+         *         empty once leading separators are removed, is rooted in a way this port does
+         *         not reinterpret, or resolves outside the storage root.
+         *
+         * @note This is a check-then-use test.  It rejects every path the caller can name, but
+         *       it cannot defeat a process that swaps a path component for a symbolic link
+         *       between the check and the operation; see ticket #2207.
+         */
+        [[nodiscard]] std::filesystem::path fullPath(const std::string& relativePath,
+                                                     const char* paramName) const;
 
         /** @throws System::ObjectDisposedException if this store has been Close()d/Remove()d/Dispose()d. */
         void throwIfDisposed() const;

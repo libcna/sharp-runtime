@@ -46,9 +46,96 @@ namespace System::IO::IsolatedStorage
         std::filesystem::create_directories(rootDirectory_);
     }
 
-    std::filesystem::path IsolatedStorageFile::fullPath(const std::string& relativePath) const
+    namespace {
+        constexpr const char* ContainmentMessage =
+            "Path must be relative to the isolated storage root.";
+
+        bool isDirectorySeparator(char c)
+        {
+#ifdef _WIN32
+            return c == '/' || c == '\\';
+#else
+            // On POSIX a backslash is an ordinary name character, so treating it as a
+            // separator here would corrupt legitimate file names.
+            return c == '/';
+#endif
+        }
+
+        // True when `candidate` is a proper descendant of `root`.  A string-prefix test would
+        // be wrong in both directions: it accepts a sibling sharing the root's spelling
+        // ("<root>xyz/evil") and rejects contained paths whenever the root lacks a trailing
+        // separator.  lexically_relative answers the question the invariant actually asks.
+        bool isWithin(const std::filesystem::path& root, const std::filesystem::path& candidate)
+        {
+            const std::filesystem::path relative = candidate.lexically_relative(root);
+            if (relative.empty()) return false;         // no relation at all
+            const std::filesystem::path first = *relative.begin();
+            if (first == "..") return false;            // climbs out of the root
+            if (first == ".") return false;             // the root itself, not a descendant
+            return true;
+        }
+    }
+
+    // Verified against IsolatedStorageFile.cs's GetFullPath(): real .NET removes leading
+    // directory separators before Path.Combine, so a rooted caller path is reinterpreted as
+    // store-relative.  This port previously returned `rootDirectory_ / relativePath` with no
+    // handling at all, and std::filesystem::path::operator/ DISCARDS the left operand when the
+    // right one is absolute -- so every file and directory operation escaped the store for an
+    // absolute path (SR-AUD-241).  .NET's strip alone is not sufficient here: it leaves `..`
+    // traversal and symbolic links pointing out of the store, both measured escaping, so the
+    // resolver also enforces lexical and link-resolved containment.
+    std::filesystem::path IsolatedStorageFile::fullPath(const std::string& relativePath,
+                                                        const char* paramName) const
     {
-        return rootDirectory_ / relativePath;
+        // An embedded NUL is truncated by every native filesystem call, so the object operated
+        // on would not be the one the caller named.
+        if (relativePath.find('\0') != std::string::npos)
+            throw System::ArgumentException("Path must not contain an embedded NUL character.",
+                                            paramName);
+
+        std::size_t start = 0;
+        while (start < relativePath.size() && isDirectorySeparator(relativePath[start]))
+            ++start;
+        const std::string stripped = relativePath.substr(start);
+
+        // "" and "/" both resolve to the storage root itself; remove() would delete it.
+        if (stripped.empty())
+            throw System::ArgumentException("Path must not be empty.", paramName);
+
+        const std::filesystem::path relative(stripped);
+
+        // A Windows drive or UNC root survives the separator strip because it is a root_name,
+        // not a leading separator.  This port has no drive semantics to reinterpret it into,
+        // so it is rejected rather than invented.  On POSIX no such path has a root here.
+        if (relative.has_root_path())
+            throw System::ArgumentException(ContainmentMessage, paramName);
+
+        const std::filesystem::path normalizedRoot = rootDirectory_.lexically_normal();
+        const std::filesystem::path candidate = (normalizedRoot / relative).lexically_normal();
+        if (!isWithin(normalizedRoot, candidate))
+            throw System::ArgumentException(ContainmentMessage, paramName);
+
+        // Link-resolved containment.  weakly_canonical resolves every symbolic link in the
+        // existing prefix and appends a not-yet-existing remainder literally, which is exactly
+        // what create and move destinations need.  The error_code overload is mandatory: the
+        // throwing one would put a std::filesystem_error across a public door.  When the root
+        // itself cannot be canonicalized the lexical verdict above already stands.
+        std::error_code rootEc;
+        const std::filesystem::path canonicalRoot =
+            std::filesystem::weakly_canonical(normalizedRoot, rootEc);
+        if (!rootEc) {
+            std::error_code candidateEc;
+            const std::filesystem::path canonicalCandidate =
+                std::filesystem::weakly_canonical(candidate, candidateEc);
+            if (!candidateEc && canonicalCandidate != canonicalRoot
+                    && !isWithin(canonicalRoot, canonicalCandidate))
+                throw System::ArgumentException(ContainmentMessage, paramName);
+        }
+
+        // The operation runs on the lexically normalized path rather than the canonical one, so
+        // a final component that is a symbolic link keeps its meaning: DeleteFile removes the
+        // link, not whatever it points at.
+        return candidate;
     }
 
     // Verified against IsolatedStorageFile.cs's EnsureStoreIsValid(): real .NET checks this at
@@ -78,7 +165,7 @@ namespace System::IO::IsolatedStorage
     bool IsolatedStorageFile::FileExists(const std::string& relativePath) const
     {
         throwIfDisposed();
-        const auto fp = fullPath(relativePath);
+        const auto fp = fullPath(relativePath, "relativePath");
         return std::filesystem::exists(fp) && std::filesystem::is_regular_file(fp);
     }
 
@@ -87,7 +174,7 @@ namespace System::IO::IsolatedStorage
         System::IO::FileMode mode) const
     {
         throwIfDisposed();
-        return IsolatedStorageFileStream(fullPath(relativePath), mode);
+        return IsolatedStorageFileStream(fullPath(relativePath, "relativePath"), mode);
     }
 
     IsolatedStorageFileStream IsolatedStorageFile::CreateFile(const std::string& relativePath) const
@@ -99,7 +186,7 @@ namespace System::IO::IsolatedStorage
     {
         throwIfDisposed();
         std::error_code ec;
-        std::filesystem::remove(fullPath(relativePath), ec);
+        std::filesystem::remove(fullPath(relativePath, "relativePath"), ec);
         if (ec)
             throw IsolatedStorageException("Failed to delete isolated storage file: " + relativePath);
     }
@@ -117,8 +204,13 @@ namespace System::IO::IsolatedStorage
         auto opts = overwrite
             ? std::filesystem::copy_options::overwrite_existing
             : std::filesystem::copy_options::none;
+        // Resolved into locals, in declared parameter order: C++ leaves the evaluation order
+        // of call arguments unspecified, so validating inside the call expression would make
+        // which parameter gets named on a double violation compiler-dependent.
+        const auto srcPath = fullPath(src, "sourceFileName");
+        const auto dstPath = fullPath(dst, "destinationFileName");
         std::error_code ec;
-        std::filesystem::copy_file(fullPath(src), fullPath(dst), opts, ec);
+        std::filesystem::copy_file(srcPath, dstPath, opts, ec);
         if (ec)
             throw IsolatedStorageException("Failed to copy isolated storage file: " + src);
     }
@@ -128,8 +220,10 @@ namespace System::IO::IsolatedStorage
         System::ArgumentException::ThrowIfNullOrEmpty(src, "sourceFileName");
         System::ArgumentException::ThrowIfNullOrEmpty(dst, "destinationFileName");
         throwIfDisposed();
+        const auto srcPath = fullPath(src, "sourceFileName");
+        const auto dstPath = fullPath(dst, "destinationFileName");
         std::error_code ec;
-        std::filesystem::rename(fullPath(src), fullPath(dst), ec);
+        std::filesystem::rename(srcPath, dstPath, ec);
         if (ec)
             throw IsolatedStorageException("Failed to move isolated storage file: " + src);
     }
@@ -154,7 +248,7 @@ namespace System::IO::IsolatedStorage
     bool IsolatedStorageFile::DirectoryExists(const std::string& relativePath) const
     {
         throwIfDisposed();
-        const auto fp = fullPath(relativePath);
+        const auto fp = fullPath(relativePath, "relativePath");
         return std::filesystem::exists(fp) && std::filesystem::is_directory(fp);
     }
 
@@ -162,7 +256,7 @@ namespace System::IO::IsolatedStorage
     {
         throwIfDisposed();
         std::error_code ec;
-        std::filesystem::create_directories(fullPath(relativePath), ec);
+        std::filesystem::create_directories(fullPath(relativePath, "relativePath"), ec);
         if (ec)
             throw IsolatedStorageException("Failed to create isolated storage directory: " + relativePath);
     }
@@ -175,7 +269,7 @@ namespace System::IO::IsolatedStorage
         // directory. This port previously used remove_all (recursive), silently deleting an
         // entire subtree instead of matching .NET's "must be empty" contract.
         std::error_code ec;
-        std::filesystem::remove(fullPath(relativePath), ec);
+        std::filesystem::remove(fullPath(relativePath, "relativePath"), ec);
         if (ec)
             throw IsolatedStorageException("Failed to delete isolated storage directory: " + relativePath);
     }
@@ -185,8 +279,10 @@ namespace System::IO::IsolatedStorage
         System::ArgumentException::ThrowIfNullOrEmpty(src, "sourceDirectoryName");
         System::ArgumentException::ThrowIfNullOrEmpty(dst, "destinationDirectoryName");
         throwIfDisposed();
+        const auto srcPath = fullPath(src, "sourceDirectoryName");
+        const auto dstPath = fullPath(dst, "destinationDirectoryName");
         std::error_code ec;
-        std::filesystem::rename(fullPath(src), fullPath(dst), ec);
+        std::filesystem::rename(srcPath, dstPath, ec);
         if (ec)
             throw IsolatedStorageException("Failed to move isolated storage directory: " + src);
     }

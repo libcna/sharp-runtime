@@ -1,0 +1,696 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+//
+// Root-confinement suite for System::IO::IsolatedStorage (#2204, SR-AUD-241).
+//
+// The store's defining promise is that every caller-supplied path is relative to the storage
+// root.  Before #2204 that promise was false: `fullPath()` was `rootDirectory_ / relativePath`,
+// and std::filesystem's operator/ DISCARDS the root when the right operand is absolute, so all
+// four effect classes -- read, create/write, delete and rename -- escaped the store.  `..`
+// traversal and symbolic links escaped too.
+//
+// Every test builds its own sandbox under the process working directory (the gate runs test
+// executables from `build/`), never /tmp, /var/tmp, /dev/shm or $HOME, and removes it again.
+// The "outside the store" target is always a sibling directory inside that same sandbox.
+
+#include <gtest/gtest.h>
+
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <vector>
+
+#include "System/ArgumentException.hpp"
+#include "System/IO/FileMode.hpp"
+#include "System/IO/IsolatedStorage/IsolatedStorageException.hpp"
+#include "System/IO/IsolatedStorage/IsolatedStorageFile.hpp"
+#include "System/IO/IsolatedStorage/IsolatedStorageFileStream.hpp"
+#include "System/IO/IsolatedStorage/IsolatedStorageScope.hpp"
+#include "System/ObjectDisposedException.hpp"
+
+namespace fs = std::filesystem;
+
+using System::IO::FileMode;
+using System::IO::IsolatedStorage::IsolatedStorageException;
+using System::IO::IsolatedStorage::IsolatedStorageFile;
+using System::IO::IsolatedStorage::IsolatedStorageScope;
+
+namespace {
+
+    // The one directory every fixture lives under, relative to the process working directory.
+    const char* const kSandboxRoot = "sharp_rt_iso_confinement";
+
+    // Removes the shared parent once the whole suite has finished, so a successful run leaves
+    // no artifact behind at all -- not even an empty directory.
+    class SandboxCleanup : public ::testing::Environment
+    {
+    public:
+        void TearDown() override
+        {
+            std::error_code ec;
+            fs::remove_all(fs::current_path() / kSandboxRoot, ec);
+        }
+    };
+
+    const auto* const kSandboxCleanupRegistration =
+        ::testing::AddGlobalTestEnvironment(new SandboxCleanup());
+
+    class IsolatedStorageConfinementTest : public ::testing::Test
+    {
+    protected:
+        fs::path sandbox_;
+        fs::path root_;
+        fs::path outside_;
+
+        void SetUp() override
+        {
+            const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
+            sandbox_ = fs::current_path() / kSandboxRoot
+                     / (std::string(info->test_suite_name()) + "." + info->name());
+            std::error_code ec;
+            fs::remove_all(sandbox_, ec);
+            root_ = sandbox_ / "store";
+            outside_ = sandbox_ / "outside";
+            fs::create_directories(root_);
+            fs::create_directories(outside_);
+        }
+
+        void TearDown() override
+        {
+            // remove_all removes a symbolic link as a link; it does not descend through one,
+            // so a link planted by a symlink test can never delete outside the sandbox.
+            std::error_code ec;
+            fs::remove_all(sandbox_, ec);
+        }
+
+        [[nodiscard]] IsolatedStorageFile store() const
+        {
+            return IsolatedStorageFile(root_, IsolatedStorageScope::None);
+        }
+
+        static void writeFile(const fs::path& p, const std::string& content)
+        {
+            fs::create_directories(p.parent_path());
+            std::ofstream out(p, std::ios::binary | std::ios::trunc);
+            out << content;
+        }
+
+        // Every entry beneath `dir`, relative and sorted -- a snapshot for the
+        // "a rejected call has no partial effect" assertions.
+        static std::vector<std::string> snapshot(const fs::path& dir)
+        {
+            std::vector<std::string> entries;
+            std::error_code ec;
+            for (fs::recursive_directory_iterator it(dir, ec), end; it != end; it.increment(ec))
+                entries.push_back(it->path().lexically_relative(dir).string());
+            std::sort(entries.begin(), entries.end());
+            return entries;
+        }
+
+        // Asserts the operation is refused as an out-of-contract argument, naming the public
+        // parameter it arrived in.  Written as a helper so every door pins the same contract.
+        template <typename F>
+        static void expectRejected(F&& op, const char* paramName)
+        {
+            try {
+                op();
+                ADD_FAILURE() << "expected ArgumentException for parameter " << paramName;
+            } catch (const System::ArgumentException& e) {
+                EXPECT_EQ(e.getParamNameProperty(), std::string(paramName));
+            } catch (const std::exception& e) {
+                ADD_FAILURE() << "expected ArgumentException, got: " << e.what();
+            }
+        }
+    };
+
+    // =====================================================================================
+    // The control: what SR-AUD-241 actually was.
+    //
+    // This does not exercise the store at all -- it pins the std::filesystem behaviour the
+    // shipped `fullPath()` relied on.  Without it, every "rejected" verdict below could be
+    // explained by the escape never having been possible in this environment.
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, Control_RawJoinStillDiscardsTheRootForAnAbsolutePath)
+    {
+        const fs::path victim = outside_ / "control.dat";
+        EXPECT_EQ(root_ / victim.string(), victim)
+            << "operator/ no longer discards an absolute right operand; the premise of "
+               "SR-AUD-241 changed and this suite must be re-derived";
+        EXPECT_NE((root_ / fs::path("../outside/control.dat")).lexically_normal(),
+                  (root_ / fs::path("outside/control.dat")).lexically_normal())
+            << "a lexical `..` no longer climbs; the traversal premise changed";
+    }
+
+    // =====================================================================================
+    // SR-AUD-241, exactly as the audit recorded it.
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, AuditProbe_CreateDirectoryWithAbsolutePath_StaysInsideTheStore)
+    {
+        // The audit's probe printed `escaped_exists=1 root_child_exists=0`: the directory was
+        // created outside the store and nothing appeared inside it.  Both halves invert here.
+        auto s = store();
+        const fs::path escapeTarget = outside_ / "escaped_dir";
+        s.CreateDirectory(escapeTarget.string());
+
+        EXPECT_FALSE(fs::exists(escapeTarget)) << "the store escaped its root";
+        EXPECT_TRUE(fs::exists(root_ / escapeTarget.relative_path()))
+            << "a rooted path must be reinterpreted as store-relative, matching .NET's "
+               "IsolatedStorageFile.GetFullPath";
+    }
+
+    // =====================================================================================
+    // Absolute paths -- one test per escaping argument measured pre-repair.
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, AbsolutePath_FileExists_DoesNotSeeOutsideTheStore)
+    {
+        writeFile(outside_ / "secret.txt", "secret");
+        EXPECT_FALSE(store().FileExists((outside_ / "secret.txt").string()));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, AbsolutePath_DirectoryExists_DoesNotSeeOutsideTheStore)
+    {
+        fs::create_directories(outside_ / "visible_dir");
+        EXPECT_FALSE(store().DirectoryExists((outside_ / "visible_dir").string()));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, AbsolutePath_OpenFile_CreatesNothingOutsideTheStore)
+    {
+        auto s = store();
+        const fs::path target = outside_ / "opened.dat";
+        { auto stream = s.OpenFile(target.string(), FileMode::Create); stream.Close(); }
+        EXPECT_FALSE(fs::exists(target));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, AbsolutePath_CreateFile_CreatesNothingOutsideTheStore)
+    {
+        auto s = store();
+        const fs::path target = outside_ / "created.dat";
+        { auto stream = s.CreateFile(target.string()); stream.Close(); }
+        EXPECT_FALSE(fs::exists(target));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, AbsolutePath_DeleteFile_LeavesTheOutsideVictimAlone)
+    {
+        const fs::path victim = outside_ / "victim.dat";
+        writeFile(victim, "keep me");
+        auto s = store();
+        // Reinterpreted store-relative, the target does not exist; the door must not reach out.
+        try { s.DeleteFile(victim.string()); } catch (const IsolatedStorageException&) { }
+        EXPECT_TRUE(fs::exists(victim)) << "an outside file was deleted through the store";
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, AbsolutePath_DeleteDirectory_LeavesTheOutsideVictimAlone)
+    {
+        const fs::path victim = outside_ / "victim_dir";
+        fs::create_directories(victim);
+        auto s = store();
+        try { s.DeleteDirectory(victim.string()); } catch (const IsolatedStorageException&) { }
+        EXPECT_TRUE(fs::exists(victim)) << "an outside directory was deleted through the store";
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, AbsolutePath_CopyFileDestination_WritesNothingOutsideTheStore)
+    {
+        auto s = store();
+        { auto stream = s.CreateFile("inside.dat"); stream.Close(); }
+        const fs::path target = outside_ / "copied_out.dat";
+        // Reinterpreted store-relative the destination lands deep inside the store where no
+        // parent exists, so the copy fails -- with the module's own exception, not by escaping.
+        try { s.CopyFile("inside.dat", target.string()); }
+        catch (const IsolatedStorageException&) { }
+        EXPECT_FALSE(fs::exists(target));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, AbsolutePath_CopyFileSource_ImportsNothingFromOutside)
+    {
+        writeFile(outside_ / "secret.txt", "secret");
+        auto s = store();
+        try { s.CopyFile((outside_ / "secret.txt").string(), "leaked.dat"); }
+        catch (const IsolatedStorageException&) { }
+        EXPECT_FALSE(fs::exists(root_ / "leaked.dat"))
+            << "outside content was imported into the store";
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, AbsolutePath_MoveFileDestination_MovesNothingOutOfTheStore)
+    {
+        auto s = store();
+        { auto stream = s.CreateFile("movable.dat"); stream.Close(); }
+        const fs::path target = outside_ / "moved_out.dat";
+        try { s.MoveFile("movable.dat", target.string()); }
+        catch (const IsolatedStorageException&) { }
+        EXPECT_FALSE(fs::exists(target));
+        EXPECT_TRUE(s.FileExists("movable.dat")) << "the source left the store";
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, AbsolutePath_MoveDirectorySource_ImportsNothingFromOutside)
+    {
+        fs::create_directories(outside_ / "movable_dir");
+        auto s = store();
+        try { s.MoveDirectory((outside_ / "movable_dir").string(), "pulled_in"); }
+        catch (const IsolatedStorageException&) { }
+        EXPECT_FALSE(fs::exists(root_ / "pulled_in"));
+        EXPECT_TRUE(fs::exists(outside_ / "movable_dir")) << "an outside directory was moved";
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, LeadingSeparator_IsReinterpretedNotHonoured)
+    {
+        // .NET's GetFullPath strips leading separators before Path.Combine, so this names a
+        // file inside the store rather than one at the filesystem root.
+        auto s = store();
+        { auto stream = s.CreateFile("/data.bin"); stream.Close(); }
+        EXPECT_TRUE(fs::exists(root_ / "data.bin"));
+        EXPECT_TRUE(s.FileExists("/data.bin"));
+        EXPECT_TRUE(s.FileExists("data.bin"));
+    }
+
+    // =====================================================================================
+    // Lexical `..` traversal -- rejected, with the declared parameter name.
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, Traversal_CreateDirectory_IsRejected)
+    {
+        auto s = store();
+        expectRejected([&] { s.CreateDirectory("../outside/traversed"); }, "relativePath");
+        EXPECT_FALSE(fs::exists(outside_ / "traversed"));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Traversal_CreateFile_IsRejected)
+    {
+        auto s = store();
+        expectRejected([&] { auto st = s.CreateFile("../outside/traversed.dat"); st.Close(); },
+                       "relativePath");
+        EXPECT_FALSE(fs::exists(outside_ / "traversed.dat"));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Traversal_OpenFile_IsRejected)
+    {
+        auto s = store();
+        expectRejected(
+            [&] { auto st = s.OpenFile("../outside/traversed.dat", FileMode::Create); st.Close(); },
+            "relativePath");
+        EXPECT_FALSE(fs::exists(outside_ / "traversed.dat"));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Traversal_FileExists_IsRejected)
+    {
+        writeFile(outside_ / "secret.txt", "secret");
+        auto s = store();
+        expectRejected([&] { (void)s.FileExists("../outside/secret.txt"); }, "relativePath");
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Traversal_DirectoryExists_IsRejected)
+    {
+        auto s = store();
+        expectRejected([&] { (void)s.DirectoryExists(".."); }, "relativePath");
+        expectRejected([&] { (void)s.DirectoryExists("../outside"); }, "relativePath");
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Traversal_DeleteFile_IsRejectedAndTheVictimSurvives)
+    {
+        const fs::path victim = outside_ / "victim.dat";
+        writeFile(victim, "keep me");
+        auto s = store();
+        expectRejected([&] { s.DeleteFile("../outside/victim.dat"); }, "relativePath");
+        EXPECT_TRUE(fs::exists(victim));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Traversal_DeleteDirectory_IsRejectedAndTheVictimSurvives)
+    {
+        const fs::path victim = outside_ / "victim_dir";
+        fs::create_directories(victim);
+        auto s = store();
+        expectRejected([&] { s.DeleteDirectory("../outside/victim_dir"); }, "relativePath");
+        EXPECT_TRUE(fs::exists(victim));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Traversal_MixedSegments_IsRejected)
+    {
+        auto s = store();
+        expectRejected([&] { s.CreateDirectory("a/../../outside/mixed"); }, "relativePath");
+        EXPECT_FALSE(fs::exists(outside_ / "mixed"));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Traversal_RepeatedDotDot_IsRejected)
+    {
+        auto s = store();
+        expectRejected([&] { s.CreateDirectory("../../../../../../etc/evil"); }, "relativePath");
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Traversal_CopyFile_NamesTheOffendingParameter)
+    {
+        auto s = store();
+        { auto st = s.CreateFile("inside.dat"); st.Close(); }
+        expectRejected([&] { s.CopyFile("../outside/secret.txt", "dst.dat"); }, "sourceFileName");
+        expectRejected([&] { s.CopyFile("inside.dat", "../outside/dst.dat"); },
+                       "destinationFileName");
+        EXPECT_FALSE(fs::exists(outside_ / "dst.dat"));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Traversal_MoveFile_NamesTheOffendingParameter)
+    {
+        auto s = store();
+        { auto st = s.CreateFile("inside.dat"); st.Close(); }
+        expectRejected([&] { s.MoveFile("../outside/secret.txt", "dst.dat"); }, "sourceFileName");
+        expectRejected([&] { s.MoveFile("inside.dat", "../outside/dst.dat"); },
+                       "destinationFileName");
+        EXPECT_TRUE(s.FileExists("inside.dat")) << "the source was disturbed by a rejected move";
+        EXPECT_FALSE(fs::exists(outside_ / "dst.dat"));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Traversal_MoveDirectory_NamesTheOffendingParameter)
+    {
+        auto s = store();
+        s.CreateDirectory("inside_dir");
+        expectRejected([&] { s.MoveDirectory("..", "stolen"); }, "sourceDirectoryName");
+        expectRejected([&] { s.MoveDirectory("inside_dir", "../outside/stolen"); },
+                       "destinationDirectoryName");
+        EXPECT_TRUE(s.DirectoryExists("inside_dir"));
+        EXPECT_FALSE(fs::exists(outside_ / "stolen"));
+    }
+
+    // =====================================================================================
+    // Over-rejection guard: legitimate relative paths must keep working.
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, LegitimatePaths_NestedRelativePathStillWorks)
+    {
+        auto s = store();
+        s.CreateDirectory("a/b/c");
+        EXPECT_TRUE(s.DirectoryExists("a/b/c"));
+        { auto st = s.CreateFile("a/b/c/leaf.dat"); st.Close(); }
+        EXPECT_TRUE(s.FileExists("a/b/c/leaf.dat"));
+        EXPECT_TRUE(fs::exists(root_ / "a" / "b" / "c" / "leaf.dat"));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, LegitimatePaths_CancellingDotDotIsNotAnEscape)
+    {
+        // `a/../b` normalises to `b`, which is inside; rejecting it would be over-rejection.
+        auto s = store();
+        s.CreateDirectory("a/../b");
+        EXPECT_TRUE(fs::exists(root_ / "b"));
+        EXPECT_TRUE(s.DirectoryExists("a/../b"));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, LegitimatePaths_NameBeginningWithDotDotIsNotTraversal)
+    {
+        auto s = store();
+        s.CreateDirectory("..hidden");
+        EXPECT_TRUE(fs::exists(root_ / "..hidden"));
+        { auto st = s.CreateFile("..config"); st.Close(); }
+        EXPECT_TRUE(s.FileExists("..config"));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, LegitimatePaths_SeparatorAndDotSegmentForms)
+    {
+        auto s = store();
+        s.CreateDirectory("a//b");             // repeated separator
+        EXPECT_TRUE(fs::exists(root_ / "a" / "b"));
+        s.CreateDirectory("trailing/");        // trailing separator
+        EXPECT_TRUE(fs::exists(root_ / "trailing"));
+        s.CreateDirectory("./dot_segment");    // leading "." segment
+        EXPECT_TRUE(fs::exists(root_ / "dot_segment"));
+        s.CreateDirectory("x/./y");            // interior "." segment
+        EXPECT_TRUE(fs::exists(root_ / "x" / "y"));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, LegitimatePaths_UnusualButValidNames)
+    {
+        auto s = store();
+        { auto st = s.CreateFile(".hidden_dotfile"); st.Close(); }
+        EXPECT_TRUE(s.FileExists(".hidden_dotfile"));
+        { auto st = s.CreateFile("name with spaces.dat"); st.Close(); }
+        EXPECT_TRUE(s.FileExists("name with spaces.dat"));
+        { auto st = s.CreateFile("üñîćøde.dat"); st.Close(); }
+        EXPECT_TRUE(s.FileExists("üñîćøde.dat"));
+        { auto st = s.CreateFile("a.b.c.tar.gz"); st.Close(); }
+        EXPECT_TRUE(s.FileExists("a.b.c.tar.gz"));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, LegitimatePaths_LongComponentAndLongPath)
+    {
+        auto s = store();
+        const std::string longComponent(200, 'n');   // under NAME_MAX (255)
+        { auto st = s.CreateFile(longComponent); st.Close(); }
+        EXPECT_TRUE(s.FileExists(longComponent));
+
+        std::string deep;
+        for (int i = 0; i < 20; ++i) deep += "dir" + std::to_string(i) + "/";
+        s.CreateDirectory(deep);
+        EXPECT_TRUE(s.DirectoryExists(deep));
+    }
+
+    // =====================================================================================
+    // Degenerate inputs.
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, Degenerate_EmptyPathIsRejectedAtEveryDoor)
+    {
+        auto s = store();
+        expectRejected([&] { (void)s.FileExists(""); }, "relativePath");
+        expectRejected([&] { (void)s.DirectoryExists(""); }, "relativePath");
+        expectRejected([&] { s.CreateDirectory(""); }, "relativePath");
+        expectRejected([&] { s.DeleteFile(""); }, "relativePath");
+        expectRejected([&] { s.DeleteDirectory(""); }, "relativePath");
+        expectRejected([&] { auto st = s.OpenFile("", FileMode::Create); st.Close(); },
+                       "relativePath");
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Degenerate_SeparatorOnlyPathsAreRejected)
+    {
+        auto s = store();
+        // These strip to nothing, so they name the store root itself.
+        expectRejected([&] { s.DeleteFile("/"); }, "relativePath");
+        expectRejected([&] { s.DeleteDirectory("///"); }, "relativePath");
+        expectRejected([&] { (void)s.DirectoryExists("/"); }, "relativePath");
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Degenerate_DotPathNamesTheRootAndIsRejected)
+    {
+        auto s = store();
+        expectRejected([&] { (void)s.DirectoryExists("."); }, "relativePath");
+        expectRejected([&] { s.DeleteDirectory("."); }, "relativePath");
+        expectRejected([&] { s.DeleteDirectory("a/.."); }, "relativePath");
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Degenerate_EmbeddedNulIsRejectedNotTruncated)
+    {
+        // Every native filesystem call truncates at the NUL, so accepting this would operate
+        // on a different object than the caller named.
+        std::string withNul("truncate_me");
+        withNul.push_back('\0');
+        withNul += "tail";
+
+        auto s = store();
+        expectRejected([&] { s.CreateDirectory(withNul); }, "relativePath");
+        EXPECT_FALSE(fs::exists(root_ / "truncate_me"));
+        expectRejected([&] { auto st = s.CreateFile(withNul); st.Close(); }, "relativePath");
+        expectRejected([&] { s.CopyFile(withNul, "dst.dat"); }, "sourceFileName");
+    }
+
+    // =====================================================================================
+    // The store root itself must survive every path-taking door.
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, RootProtection_DeleteFileEmptyDoesNotDeleteTheRoot)
+    {
+        // Measured pre-repair: fullPath("") was the root, std::filesystem::remove removes an
+        // empty directory, and the store deleted itself.
+        auto s = store();
+        expectRejected([&] { s.DeleteFile(""); }, "relativePath");
+        EXPECT_TRUE(fs::exists(root_)) << "the store root was deleted";
+        EXPECT_TRUE(fs::is_directory(root_));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, RootProtection_DeleteDirectoryEmptyDoesNotDeleteTheRoot)
+    {
+        auto s = store();
+        expectRejected([&] { s.DeleteDirectory(""); }, "relativePath");
+        expectRejected([&] { s.DeleteDirectory("/"); }, "relativePath");
+        EXPECT_TRUE(fs::is_directory(root_));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, RootProtection_MoveDirectoryCannotRenameTheRoot)
+    {
+        auto s = store();
+        expectRejected([&] { s.MoveDirectory("", "renamed"); }, "sourceDirectoryName");
+        expectRejected([&] { s.MoveDirectory(".", "renamed"); }, "sourceDirectoryName");
+        EXPECT_TRUE(fs::is_directory(root_));
+    }
+
+    // =====================================================================================
+    // Symbolic links, planted before the call.  Containment is judged on the resolved
+    // location, so a link is not forbidden -- leaving the root is.
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, Symlink_InsideToInsideIsAllowed)
+    {
+        auto s = store();
+        s.CreateDirectory("real_dir");
+        std::error_code ec;
+        fs::create_directory_symlink(root_ / "real_dir", root_ / "link_dir", ec);
+        ASSERT_FALSE(ec) << "symbolic links are unavailable here: " << ec.message();
+
+        { auto st = s.CreateFile("link_dir/through_link.dat"); st.Close(); }
+        EXPECT_TRUE(fs::exists(root_ / "real_dir" / "through_link.dat"))
+            << "a link whose target is inside the root must not be rejected";
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Symlink_FinalComponentToOutsideFileIsRejected)
+    {
+        const fs::path secret = outside_ / "linked_secret.txt";
+        writeFile(secret, "secret");
+        std::error_code ec;
+        fs::create_symlink(secret, root_ / "filelink", ec);
+        ASSERT_FALSE(ec) << ec.message();
+
+        auto s = store();
+        expectRejected([&] { (void)s.FileExists("filelink"); }, "relativePath");
+        expectRejected([&] { s.DeleteFile("filelink"); }, "relativePath");
+        EXPECT_TRUE(fs::exists(secret)) << "the link's outside target was deleted";
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Symlink_IntermediateComponentToOutsideDirectoryIsRejected)
+    {
+        std::error_code ec;
+        fs::create_directory_symlink(outside_, root_ / "dirlink", ec);
+        ASSERT_FALSE(ec) << ec.message();
+
+        auto s = store();
+        expectRejected([&] { auto st = s.CreateFile("dirlink/written.dat"); st.Close(); },
+                       "relativePath");
+        EXPECT_FALSE(fs::exists(outside_ / "written.dat"));
+        expectRejected([&] { s.CreateDirectory("dirlink/made"); }, "relativePath");
+        EXPECT_FALSE(fs::exists(outside_ / "made"));
+        expectRejected([&] { (void)s.DirectoryExists("dirlink"); }, "relativePath");
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Symlink_ChainToOutsideIsRejected)
+    {
+        std::error_code ec;
+        fs::create_directory_symlink(outside_, root_ / "hop1", ec);
+        ASSERT_FALSE(ec) << ec.message();
+        fs::create_directory_symlink(root_ / "hop1", root_ / "hop2", ec);
+        ASSERT_FALSE(ec) << ec.message();
+
+        auto s = store();
+        expectRejected([&] { auto st = s.CreateFile("hop2/chained.dat"); st.Close(); },
+                       "relativePath");
+        EXPECT_FALSE(fs::exists(outside_ / "chained.dat"));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Symlink_DanglingLinkInsideTheRootIsNotAnEscape)
+    {
+        std::error_code ec;
+        fs::create_symlink(root_ / "never_created.dat", root_ / "dangling", ec);
+        ASSERT_FALSE(ec) << ec.message();
+
+        auto s = store();
+        // Contained but non-existent: a plain false, not a rejection.
+        EXPECT_FALSE(s.FileExists("dangling"));
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Symlink_CopyAndMoveDestinationsAreCheckedToo)
+    {
+        std::error_code ec;
+        fs::create_directory_symlink(outside_, root_ / "dirlink", ec);
+        ASSERT_FALSE(ec) << ec.message();
+
+        auto s = store();
+        { auto st = s.CreateFile("inside.dat"); st.Close(); }
+        expectRejected([&] { s.CopyFile("inside.dat", "dirlink/copied.dat"); },
+                       "destinationFileName");
+        expectRejected([&] { s.MoveFile("inside.dat", "dirlink/moved.dat"); },
+                       "destinationFileName");
+        EXPECT_FALSE(fs::exists(outside_ / "copied.dat"));
+        EXPECT_FALSE(fs::exists(outside_ / "moved.dat"));
+        EXPECT_TRUE(s.FileExists("inside.dat"));
+    }
+
+    // =====================================================================================
+    // A rejected call must have no partial effect, inside or outside.
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, Atomicity_RejectedCallsLeaveBothTreesByteForByteIdentical)
+    {
+        auto s = store();
+        s.CreateDirectory("existing/nested");
+        { auto st = s.CreateFile("existing/nested/kept.dat"); st.Close(); }
+        writeFile(outside_ / "kept_outside.dat", "keep me");
+
+        const auto insideBefore = snapshot(root_);
+        const auto outsideBefore = snapshot(outside_);
+
+        expectRejected([&] { s.CreateDirectory("../outside/new_dir"); }, "relativePath");
+        expectRejected([&] { auto st = s.CreateFile("../outside/new.dat"); st.Close(); },
+                       "relativePath");
+        expectRejected([&] { s.DeleteFile("../outside/kept_outside.dat"); }, "relativePath");
+        expectRejected([&] { s.CopyFile("existing/nested/kept.dat", "../outside/copy.dat"); },
+                       "destinationFileName");
+        expectRejected([&] { s.MoveFile("existing/nested/kept.dat", "../outside/move.dat"); },
+                       "destinationFileName");
+        expectRejected([&] { s.DeleteDirectory(""); }, "relativePath");
+
+        EXPECT_EQ(snapshot(root_), insideBefore) << "a rejected call changed the store";
+        EXPECT_EQ(snapshot(outside_), outsideBefore) << "a rejected call changed the outside tree";
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Atomicity_RejectedOpenCreatesNoParentDirectories)
+    {
+        // IsolatedStorageFileStream creates missing parents; validation must run first, or a
+        // rejected open would still have left a directory behind.
+        auto s = store();
+        const auto before = snapshot(root_);
+        expectRejected(
+            [&] { auto st = s.OpenFile("../outside/deep/nested/file.dat", FileMode::Create); st.Close(); },
+            "relativePath");
+        EXPECT_FALSE(fs::exists(outside_ / "deep"));
+        EXPECT_EQ(snapshot(root_), before);
+    }
+
+    // =====================================================================================
+    // Validation order.
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, Order_DisposedStoreIsReportedBeforeTheContainmentVerdict)
+    {
+        // A closed store never looked at the argument, so it must not report an argument
+        // problem it did not diagnose.
+        auto s = store();
+        s.Close();
+        EXPECT_THROW((void)s.FileExists("../outside/x"), System::ObjectDisposedException);
+        EXPECT_THROW(s.CreateDirectory("../outside/x"), System::ObjectDisposedException);
+        EXPECT_THROW(s.DeleteFile(""), System::ObjectDisposedException);
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Order_TheFirstOffendingParameterIsTheOneNamed)
+    {
+        auto s = store();
+        // Both arguments escape; the source is validated first, so the source is named.
+        expectRejected([&] { s.CopyFile("../outside/a.dat", "../outside/b.dat"); },
+                       "sourceFileName");
+        expectRejected([&] { s.MoveDirectory("../outside/a", "../outside/b"); },
+                       "sourceDirectoryName");
+    }
+
+    // =====================================================================================
+    // The residual this repair deliberately does not close (#2208).
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, Residual_FileStreamConstructorIsNotAConfinementBoundary)
+    {
+        // Pinned, not celebrated: IsolatedStorageFileStream's public constructor takes a full
+        // path and opens it anywhere.  Confining it is a public signature change (#2208).  If
+        // this test ever starts failing, #2208 shipped and this pin must be inverted.
+        const fs::path target = outside_ / "direct_stream.dat";
+        {
+            System::IO::IsolatedStorage::IsolatedStorageFileStream stream(target, FileMode::Create);
+            stream.Close();
+        }
+        EXPECT_TRUE(fs::exists(target))
+            << "IsolatedStorageFileStream became confined; invert this pin and close #2208";
+    }
+
+} // namespace
