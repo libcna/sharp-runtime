@@ -358,3 +358,85 @@ advertised generic surface, which is precisely what the tests audit report
 LSan and TSan cannot discriminate a program that does not compile. The one runtime
 surface this slice adds — new formatting branches that build a `std::string` — is
 covered by the runtime tests in step 2.
+
+---
+
+## 9. The measured after-state (#2254)
+
+Same driver, same 198 pairs, against the repaired header
+(`build-probe/2253_probe2_after.log`), plus 18 further pairs for the two branches
+no candidate type in the original matrix reached
+(`build-probe/2253_probe3_extension.log`):
+
+| Measure | Before | After |
+|---|---|---|
+| `(type, guard)` pairs accepted | 99 | **135** |
+| pairs rejected | 99 | 63 |
+| rejections reported inside libstdc++ | 99 | **0** |
+| rejections reported by a sharp-runtime `static_assert` | 0 | **63** |
+| previously accepted pairs that regressed | — | **0** |
+
+**Zero regressions**, verified pair by pair rather than by count: every one of the
+99 pairs that was `OK` before is `OK` after. The 36 newly accepted pairs are
+exactly `enum class` (9), `std::string` (9), `std::string_view` (9) and a
+string-convertible user type (9). The two remaining branches were proven
+separately, both 9/9: a type with a `ToString()` member (branch 2) and a type with
+an ADL-visible `to_string` (branch 6).
+
+The 63 remaining rejections are all deliberate and all diagnosed by name:
+
+| Shape | Rejected by |
+|---|---|
+| `int*` | the rendering assertion — pointers are excluded (§4.4) |
+| `OrderedOnly`, `NonTrivialOrdered`, `StreamableOrdered` | the rendering assertion — the declared narrowing, with branch 6 as the opt-in |
+| `EqualityOnly` on the six ordering guards | that guard's own comparison assertion |
+| `InequalityOnly` on the eight guards that need `==`, `<`, `<=`, `>` or `>=` | that guard's own comparison assertion |
+| `NonCopyableOrdered` | pass-by-value `T` (§7) plus the rendering assertion |
+
+Note what changed for the finding's own reproducer: `OrderedOnly` is **still
+rejected**, which is the point. It is now rejected by a sentence that names the
+six supported shapes and the extension point, instead of by nine `std::to_string`
+candidates in `<bits/basic_string.h>`. That is precisely the finding's demand —
+"must declare and diagnose the formatting requirement **or** format optional
+actual values through a separate policy" — satisfied on both halves at once.
+
+---
+
+## 10. Mutation matrix
+
+Every mutation was applied to production source, rebuilt, and re-run; the control
+was restored and re-verified green after each.
+
+| # | Mutation | Predicted detector | Result |
+|---|---|---|---|
+| M1 | swap the enumeration branch and the ADL branch | the branch-order test | **caught** — `Branch3_BeatsTheAdlBranchForAnEnumeration` fails, 25/26 still pass |
+| M2 | drop `!std::is_pointer_v<T>` from the `string_view` branch | negative fixture site 2 | **caught** — `guard-char-pointer-operand` *compiled again*; site 1 (`int*`) correctly did **not** fire, because `int*` is not `string_view`-convertible and still reaches the rendering assertion. The two sites test different things, which is why both exist |
+| M3 | delete `ThrowIfLessThan`'s comparison assertion | negative fixture site 4 | **caught** — the site still fails to compile, but on `no match for 'operator<'`, so the expected `must be less-than-comparable` fragment is absent. A whole-file check would have reported a false pass here |
+| M4 | rebuild the `string_view` branch's text through `c_str()` | the embedded-NUL test | **caught** — `Branch4_String_EmbeddedNulSurvivesIntoActualValue` fails, 25/26 still pass |
+
+M1 is the mutation worth explaining. Most branch-order permutations are **not**
+observable, and saying so is more useful than claiming otherwise: an arithmetic
+type has no `ToString()`, is not `string_view`-convertible, and finds nothing by
+ADL, so branch 1 is the only branch it can match no matter where it sits.
+The one ordering that *is* observable is enumeration-versus-ADL, and it is
+observable only for a scoped enumeration that also has a user `to_string` — which
+is why the fixture had to construct exactly that shape. Branch order is still a
+correctness property, but the property is narrower than "any swap breaks
+something", and the test suite pins the part that is real.
+
+---
+
+## 11. Rebuild scope, actually measured
+
+`ninja -t deps` reports **404 translation units** in `build/` depending on
+`System/ArgumentOutOfRangeException.hpp`. The full rebuild ran at
+`--parallel 2` in `build/` (reused, never cleaned or reconfigured) and took
+**≈13 minutes** of wall clock across two invocations — the first was interrupted
+by a 10-minute harness timeout after building most of the library, the second
+completed the remaining 83 targets in **163 s**. Result: **0 errors, 0 warnings**.
+
+Mutation rebuilds were scoped to the `SharpRuntimeTests_Core_Base` target alone
+(**120 steps**, ≈40 s each) rather than the whole tree, and the two compile-domain
+mutations (M2, M3) needed **no** build tree at all — the negative-fixture checker
+compiles each site with `-fsyntax-only`. That is what kept the mutation matrix
+affordable for a header in this position.

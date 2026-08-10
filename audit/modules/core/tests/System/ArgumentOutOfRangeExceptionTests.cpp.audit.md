@@ -19,6 +19,15 @@ declarations.
 - **SR-AUD-091:** every guard test instantiates numeric types accepted by
   `std::to_string`; no equality-only or ordered-only user type compiles the
   advertised generic API, so the hidden formatter constraint remains unseen.
+  **REMEDIATED (#2254, 2026-08-10).** This fixture is unchanged; the generic
+  coverage lives in the new sibling
+  `modules/core/tests/System/ArgumentOutOfRangeGuardDomainTests.cpp` (26 tests, one
+  per formatter branch plus the byte-identical arithmetic regression pins), and the
+  compile-time half — which no run-time fixture can express — in
+  `test/consumer/core_argument_out_of_range_guard_domain_negative.cpp` (6 sites) and
+  `test/consumer/core_base.cpp`. This report's own recommendation that "failure
+  diagnostics should name the supported C++ contract rather than leak a
+  standard-library overload set" is exactly what was implemented.
 
 ## Other missing assertions and diagnostics
 

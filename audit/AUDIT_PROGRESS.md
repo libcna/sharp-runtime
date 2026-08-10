@@ -7248,3 +7248,106 @@ process-wide sequence counter. **What the sanitizers cannot reach is stated too*
 at socket creation, so the packet-construction, checksum, `sendto`, `recv` and reply-parsing code was
 never executed under any of them. `Ping.hpp` is untouched; no public signature, member, virtual,
 vtable, object layout, `noexcept` or mangled symbol changed.
+
+---
+
+## `modules/core` `ArgumentOutOfRangeException` guard-domain slice (#2253–#2254, SR-AUD-091)
+
+**One finding. One remediated. None blocked.** No ticket deferred, none opened.
+`docs/CoreArgumentOutOfRangeGuardDomainPlan.md`.
+
+**Index after this batch: 197 remediated / 112 confirmed / 364 total** — of which **55** carry the
+`confirmed (design-complete)` marker. Recounted **by finding identifier**, never by column position:
+five rows (SR-AUD-029/033/249/286/307) carry embedded `|` characters and defeat a fixed-column
+parser. 364 unique identifiers, contiguous 001–364, no duplicates. `modules/core` open **49 → 48**.
+**No `SR-AUD-*` identifier created — numbering stays frozen at 364.**
+
+### What SR-AUD-091 turned out to be
+
+The finding says the nine public `ThrowIf*` guard templates format through `std::to_string`, adding
+an undeclared requirement beyond their declared comparison contract, and offers two routes:
+*declare and diagnose*, or *format through a separate policy*. **Both were taken at once**, and the
+reason is compatibility rather than ambition — diagnose alone would freeze an accidental
+arithmetic-only domain (the audit's own reference note records that .NET leaves `ThrowIfEqual<T>`
+unconstrained), and widen alone would leave the boundary undiagnosed.
+
+Measured **one `(type, guard)` pair per translation unit**, 22 candidate types × 9 guards, so no
+broken pair could mask another: **99 OK / 99 FAIL before, 135 OK / 63 FAIL after**, with **0 of the
+99 previously accepted pairs regressed** and **0 of the 63 remaining rejections reported inside
+libstdc++**. Compatibility is structural, not incidental: the new formatter's **first** branch is
+the same `std::to_string(value)` call, so no previously accepted type can reach any other branch.
+
+### Four premise corrections
+
+1. **The rejected surface is far wider than the finding's reproducer.** It reproduces with a
+   synthetic comparison-only `OrderedOnly`, which reads as an edge case. Measured, `enum class`,
+   `std::string`, `std::string_view` and every pointer type were also rejected —
+   `ThrowIfEqual(std::string("a"), std::string("a"), "p")` did not compile.
+2. **`std::to_string` is not the only cause of the 99 failures, and one of the two causes is not a
+   defect.** 14 failures are an equality-only or inequality-only type failing on an operator it
+   genuinely lacks. A repair that made those compile would be wrong. Separating the causes is what
+   produced the second declared contract — a `static_assert` per guard for the one comparison
+   expression that guard evaluates.
+3. **The port already carried an invisible split.** An *unscoped* enumeration compiled and printed
+   its integer, because integral promotion selects `std::to_string(int)`; a *scoped* one did not
+   compile at all. Nothing declared or intended that.
+4. **A second undeclared requirement the finding does not mention.** The three unary guards compare
+   against `T{}`, so all three require `T` to be default-constructible.
+
+### Two narrowings kept, both now declared
+
+Raw pointers are **excluded on purpose**: a `std::string_view` from a null pointer is undefined
+behaviour, and `ThrowIfEqual("a", "b", "p")` deduces `T = const char*` by array-to-pointer decay and
+would compare addresses rather than text. And a comparison-only type with no rendering — the
+finding's own `OrderedOnly` — is **still rejected**, now by a sentence naming the six supported
+shapes and the ADL `to_string` extension point, instead of by nine `std::to_string` candidates in
+`<bits/basic_string.h>`. That is the finding's demand satisfied, not evaded.
+
+### A design route rejected on a measurement
+
+The inherited design sketch listed an `operator<<` branch. Supporting it forces `<sstream>` into a
+header that **404** translation units in this build depend on — measured at **+2,819 preprocessed
+lines (+4.6 %)** per unit against +2 for `<string_view>`/`<type_traits>`, both of which already
+arrive transitively. The ADL `to_string` branch reaches the same types for **+0**, and the finding's
+own second route is literally "format optional actual values through a separate policy". The
+correction is recorded rather than the sketch quietly dropped.
+
+### What the mutation matrix taught
+
+Four mutations, each applied to production source, rebuilt and re-run, all caught. Two are worth
+recording beyond their verdict:
+
+- **Dropping the pointer exclusion** was caught by negative-fixture site 2 (`const char*`) and
+  **correctly not** by site 1 (`int*`), which is not `string_view`-convertible and still reaches the
+  rendering assertion. The two sites test different things, which is why both exist.
+- **Deleting one comparison assertion** left the site still failing to compile — on
+  `no match for 'operator<'` instead of the declared sentence. A whole-file "does this fixture
+  fail?" check would have reported a **false pass**. This is the #1801 lesson reproduced on new
+  ground.
+
+**Most branch-order permutations are not observable, and saying so is more useful than claiming
+otherwise**: an arithmetic type has no `ToString()`, is not `string_view`-convertible and finds
+nothing by ADL, so branch 1 is the only branch it can match wherever it sits. The one observable
+ordering is enumeration-versus-ADL, and only for a scoped enumeration that also has a user
+`to_string` — the fixture constructs exactly that shape, and the mutation swapping the two branches
+fails exactly that one test.
+
+### Gate
+
+**+26 tests** (`ArgumentOutOfRangeGuardDomainTests`), full gate **16,756 → 16,782 across 38
+executables**: 16,774 passing, 2 skipped, **6 failing for the same two inherited causes** (5 ×
+`PingTests`, #1962; 1 × `SocketTests`, no IPv6 in this container), none disabled, weakened, hidden or
+recategorised. The delta is exactly this ticket's own new tests, so there is no regression anywhere —
+which matters more than usual here, because the changed header is included by 404 translation units
+and the previous batch's §2.5 lesson was that an owning-module suite is not a sufficient gate.
+Negative-fixture inventory **14 files/120 sites → 15 files/126 sites**; graph **41/92** and seams
+**3/20** unchanged. Build **0 errors, 0 warnings** at `--parallel 2`.
+
+**No sanitizer was run, and that is a decision.** SR-AUD-091 is a *translation* defect: the affected
+programs produce no binary, so ASan, UBSan, LSan and TSan cannot discriminate it. The compile matrix
+and the per-site negative fixture are the primary evidence; the one new runtime surface is covered by
+the 26 tests.
+
+**No CCF is minted, extended or closed.** CCF-019 stays open; CCF-021/#2131 and CCF-022/#2109 stay
+unminted. No public signature, member, virtual, vtable, object layout, `noexcept` or mangled symbol
+changed.

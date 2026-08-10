@@ -21,6 +21,12 @@ memory-safety defect was established here.
 - **SR-AUD-091 (context):** the public static guard templates in the paired
   header cannot accept their documented comparison-only types because they
   require `std::to_string`; this source receives only the resulting strings.
+  **REMEDIATED in the header (#2254, 2026-08-10)**; this source is unchanged and
+  still receives only the resulting strings. The six constructors, the
+  `COR_E_ARGUMENTOUTOFRANGE` HResult and the `"\nActual value was X."` suffix were
+  deliberately not touched — see `docs/CoreArgumentOutOfRangeGuardDomainPlan.md` §1.
+  The typed-`actualValue` question below is likewise untouched: it is a public
+  representation change, not part of SR-AUD-091.
 
 ## Other missing assertions and diagnostics
 
