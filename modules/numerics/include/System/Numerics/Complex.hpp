@@ -6,6 +6,7 @@
 #include <cmath>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Double.hpp"
 
 namespace System::Numerics {
 
@@ -101,10 +102,32 @@ namespace System::Numerics {
         static const Complex One;          ///< The complex number 1 + 0i.
         static const Complex ImaginaryOne; ///< The complex number 0 + 1i.
 
-        /** @return A string of the form "&lt;real; imaginary&gt;". */
+        /**
+         * @return A string of the form "&lt;real; imaginary&gt;".
+         *
+         * Each component is rendered by `System::Double::ToString(double)` — this port's own
+         * renderer for a .NET `double`, which produces the shortest round-trippable form and the
+         * spellings `Infinity`, `-Infinity` and `NaN`. So `Complex(1, 2)` is `<1; 2>` and
+         * `Complex(1e-9, 0)` keeps its value.
+         *
+         * @note SR-AUD-277, tickets #2171 and #2174. Until #2171 this member used
+         * `std::to_string`, the only site in the port that rendered a `double` that way: it fixed
+         * six fractional digits (so `1e-9` became `0.000000` and `1e300` became a 309-digit
+         * expansion) and emitted the C library's `inf`/`nan` spellings. That is repaired here.
+         *
+         * The **bracket and separator characters** are deliberately **unchanged and pinned**.
+         * SR-AUD-277 calls the `<a; b>` skeleton a divergence and cites .NET's constructor
+         * documentation example, `(26.1, 18.06)`; the same audit report also links the current
+         * .NET `Complex` source, which gives `<a; b>`. The two citations disagree, the `/rv`
+         * reference tree is absent here and no managed probe measured this member, so the question
+         * is owned by **#2174** rather than answered from recollection.
+         *
+         * Culture sensitivity is a separate, pre-existing reduction: .NET formats each component
+         * with the current culture, this port is invariant throughout.
+         */
         [[nodiscard]] std::string ToString() const {
-            auto r = value.real(), i = value.imag();
-            return std::string("<") + std::to_string(r) + "; " + std::to_string(i) + ">";
+            return std::string("<") + System::Double::ToString(value.real()) + "; "
+                 + System::Double::ToString(value.imag()) + ">";
         }
     };
 

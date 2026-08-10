@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <numbers>
+#include <limits>
+#include <string>
 
 #include "System/Numerics/Complex.hpp"
 
@@ -259,12 +261,56 @@ TEST(ComplexTests, SinSquaredPlusCosSquaredIsOne) {
 // ToString
 // ---------------------------------------------------------------------------
 
-TEST(ComplexTests, ToStringFormat) {
-    // .NET format is "<real; imaginary>" per this implementation
-    Complex c(1.0, 2.0);
-    std::string s = c.ToString();
-    EXPECT_NE(s.find("1."), std::string::npos);
-    EXPECT_NE(s.find("2."), std::string::npos);
+// Ticket #2171 (SR-AUD-277, text subpart). The test that used to live here asserted
+// s.find("1.") != npos -- it PINNED the defect, because only std::to_string's fixed six
+// fractional digits put a '.' after an integral component. It is replaced, not deleted, the way
+// #1828 replaced #1841's placeholder.
+
+TEST(ComplexTests, ToStringRendersEachComponentLikeSystemDouble) {
+    // The repair: each component goes through System::Double::ToString, this port's own renderer
+    // for a .NET double. An integral value renders WITHOUT a spurious ".000000".
+    EXPECT_EQ(Complex(1.0, 2.0).ToString(), "<1; 2>");
+    EXPECT_EQ(Complex(0.0, 0.0).ToString(), "<0; 0>");
+    EXPECT_EQ(Complex(0.1, 0.2).ToString(), "<0.1; 0.2>");
+    EXPECT_EQ(Complex(26.1, 18.06).ToString(), "<26.1; 18.06>");
+}
+
+TEST(ComplexTests, ToStringNoLongerDestroysSmallOrLargeValues) {
+    // Before #2171: 1e-9 rendered as "0.000000" -- the value was gone -- and 1e300 rendered as a
+    // 309-digit decimal expansion, making the whole string 619 characters.
+    EXPECT_EQ(Complex(1e-9, 0.0).ToString(), "<1e-09; 0>");
+    const std::string big = Complex(1e300, -1e300).ToString();
+    EXPECT_EQ(big, "<1e+300; -1e+300>");
+    EXPECT_LT(big.size(), 40u);
+    // Round-trip fidelity: the shortest form that reads back exactly.
+    EXPECT_EQ(Complex(1.0 / 3.0, 0.0).ToString(), "<0.3333333333333333; 0>");
+}
+
+TEST(ComplexTests, ToStringUsesTheDotNetSpecialValueSpellings) {
+    // Before #2171 these were the C library's "inf" / "-inf" / "nan".
+    const double inf = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_EQ(Complex(inf, -inf).ToString(), "<Infinity; -Infinity>");
+    EXPECT_EQ(Complex(nan, 1.0).ToString(), "<NaN; 1>");
+}
+
+TEST(ComplexTests, ToStringPreservesNegativeZero) {
+    EXPECT_EQ(Complex(-0.0, -0.0).ToString(), "<-0; -0>");
+}
+
+TEST(PIN_ComplexTests, ToStringSkeletonIsUnchangedAndIsNotDecidedHere) {
+    // DELIBERATELY PINNED, not repaired. SR-AUD-277 calls the "<a; b>" skeleton a divergence,
+    // citing .NET's constructor doc example "(26.1, 18.06)"; the same audit report also links the
+    // current .NET Complex source, which gives "<a; b>". The two citations disagree, /rv is
+    // absent and no managed probe measured this member, so #2174 owns the question. If it is ever
+    // answered, this is the test to change.
+    const std::string s = Complex(3.0, 4.0).ToString();
+    ASSERT_FALSE(s.empty());
+    EXPECT_EQ(s.front(), '<');
+    EXPECT_EQ(s.back(), '>');
+    EXPECT_NE(s.find("; "), std::string::npos);
+    EXPECT_EQ(s.find(','), std::string::npos);
+    EXPECT_EQ(s, "<3; 4>");
 }
 
 // ---------------------------------------------------------------------------
