@@ -98,7 +98,26 @@ struct Vector3 {
     static float   Distance(Vector3 a, Vector3 b)          { return (a-b).Length(); }
     /** @return Squared Euclidean distance (avoids sqrt). */
     static float   DistanceSquared(Vector3 a, Vector3 b)   { return (a-b).LengthSquared(); }
-    /** @return Unit vector in the direction of @p v; returns @p v unchanged if its length is zero. */
+    /**
+     * @return Unit vector in the direction of @p v.
+     *
+     * @note **Actual contract, wider than "length is zero"** (SR-AUD-276, #2173/#2175). The guard
+     * is `Length() > 0`, false in three distinct situations, all returning @p v **unchanged**:
+     * the zero vector (signed zeros preserved); **any NaN component**, because `NaN > 0` is false,
+     * so `{NaN,0,0}` returns `{NaN,0,0}` and `{inf,NaN,-inf}` returns itself; and **any vector
+     * whose squared length underflows to zero** (components below roughly 1e-22), a normalizable
+     * direction returned unnormalized.
+     *
+     * Two dependents inherit this: `Plane::CreateFromVertices` on identical or collinear points
+     * yields a `(0,0,0)` normal, and `Matrix4x4::CreateLookAt` with `eye == target` yields a
+     * **singular** view matrix — both silently.
+     *
+     * .NET is believed to divide unconditionally and produce NaN, but that is a reading rather
+     * than a measurement and `/rv` is absent; **#2175** owns it, and the behaviour above is
+     * pinned by test. `Quaternion::Normalize` already divides unconditionally and is the control.
+     * Overflow is a separate, .NET-shared limitation: components near `FLT_MAX` give an infinite
+     * length and normalize to zero.
+     */
     static Vector3 Normalize(Vector3 v)                    { float l=v.Length(); return l>0?v/l:v; }
     /** @return Reflection of @p v about surface normal @p n. */
     static Vector3 Reflect(Vector3 v, Vector3 n)           { return v - 2.0f*Dot(v,n)*n; }

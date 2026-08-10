@@ -57,7 +57,28 @@ struct Plane {
         return Vector3::Dot(plane.Normal, value) + plane.D;
     }
 
-    /** <summary>Normalizes the normal vector of a plane.</summary> */
+    /**
+     * <summary>Normalizes the normal vector of a plane, scaling D by the same factor.</summary>
+     *
+     * @note **This does NOT behave like `Vector3::Normalize`, although SR-AUD-276 groups them**
+     * (#2173/#2175). Measured differences, all reachable:
+     *   - the guard is `Length() < 1e-10f`, roughly twelve orders of magnitude wider than the
+     *     vectors' `Length() > 0`: `{1e-11,0,0}` is returned **unnormalized**, while
+     *     `{1e-9,0,0}` normalizes to `(1,0,0)` with `D` scaled to `1e+09`;
+     *   - `NaN < 1e-10f` is **false**, so a NaN normal falls through and **propagates NaN to all
+     *     four fields** — the exact opposite of `Vector3::Normalize`, which swallows it;
+     *   - a zero normal is returned unchanged, which is the only case the two agree on.
+     *
+     * The module therefore holds three answers to one structural question: `> 0` here in the
+     * vectors, `< 1e-10f` here, and `> 1.192092896e-7f` on the **square** in
+     * `Quaternion::Inverse` (the only one documented as matching a .NET threshold).
+     *
+     * .NET's `Plane.Normalize` is believed to carry an *already-normalized* fast path
+     * (`|lengthSquared - 1| < epsilon`) that the vector types do not have, and then to divide
+     * unconditionally. Measured here, an already-unit plane does come back **bit-identical**, so
+     * no divergence from that fast path is observable — but the rest is a reading rather than a
+     * measurement and `/rv` is absent. **#2175** owns it; the behaviour above is pinned by test.
+     */
     static Plane Normalize(const Plane& plane) {
         float len = plane.Normal.Length();
         if (len < 1e-10f) return plane;

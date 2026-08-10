@@ -104,7 +104,17 @@ struct Vector4 {
     static float   Distance(Vector4 a, Vector4 b)          { return (a-b).Length(); }
     /** @return Squared Euclidean distance (avoids sqrt). */
     static float   DistanceSquared(Vector4 a, Vector4 b)   { return (a-b).LengthSquared(); }
-    /** @return Unit vector in the direction of @p v; returns @p v unchanged if its length is zero. */
+    /**
+     * @return Unit vector in the direction of @p v.
+     *
+     * @note **Actual contract, wider than "length is zero"** (SR-AUD-276, #2173/#2175). The guard
+     * is `Length() > 0`, false for the zero vector (signed zeros preserved), for **any NaN
+     * component** (because `NaN > 0` is false, so the NaN is not propagated to the other
+     * components), and for **any vector whose squared length underflows to zero**. All three
+     * return @p v unchanged. .NET is believed to divide unconditionally and produce NaN; that is
+     * a reading rather than a measurement, `/rv` is absent, **#2175** owns it, and the behaviour
+     * above is pinned by test. See `Vector3::Normalize` for the full note.
+     */
     static Vector4 Normalize(Vector4 v)                    { float l=v.Length(); return l>0?v/l:v; }
     /** @return Component-wise absolute value of @p v. */
     static Vector4 Abs(Vector4 v)                          { return {std::abs(v.X),std::abs(v.Y),std::abs(v.Z),std::abs(v.W)}; }

@@ -120,7 +120,30 @@ struct Vector2 {
     /** @return Squared Euclidean distance (avoids sqrt). */
     static float   DistanceSquared(Vector2 a, Vector2 b)   { return (a - b).LengthSquared(); }
 
-    /** @return Unit vector in the direction of @p v; returns @p v unchanged if its length is zero. */
+    /**
+     * @return Unit vector in the direction of @p v.
+     *
+     * @note **Actual contract, and it is wider than "length is zero"** (SR-AUD-276, #2173/#2175).
+     * The guard is `Length() > 0`, and that is false in three distinct situations, all of which
+     * return @p v **unchanged**:
+     *   - the zero vector — `{0,0}` returns `{0,0}`, `{-0,-0}` returns `{-0,-0}`, signed zeros
+     *     preserved;
+     *   - **any NaN component**, because `NaN > 0` is false — `{NaN,0}` returns `{NaN,0}` and the
+     *     NaN is **not** propagated to the other component;
+     *   - **any vector whose squared length underflows to zero** — every component below roughly
+     *     1e-22 — which is a perfectly normalizable direction returned unnormalized.
+     *
+     * .NET is believed to reach an unconditional division and therefore to produce NaN in the
+     * first two cases, but that is a reading of the .NET source rather than a measured result,
+     * `/rv` is absent here, and `Plane::Normalize` (a different guard again) would need its own
+     * answer. **#2175** owns the question; the behaviour above is pinned by test so it cannot
+     * change silently. `Quaternion::Normalize` in this same module already divides
+     * unconditionally and is the contrasting control.
+     *
+     * A separate limitation this guard does **not** cause, and which .NET shares: a vector whose
+     * squared length **overflows** (components near `FLT_MAX`) has an infinite length and
+     * normalizes to zero.
+     */
     static Vector2 Normalize(Vector2 v) {
         float len = v.Length();
         return len > 0 ? v / len : v;
