@@ -7351,3 +7351,88 @@ the 26 tests.
 **No CCF is minted, extended or closed.** CCF-019 stays open; CCF-021/#2131 and CCF-022/#2109 stay
 unminted. No public signature, member, virtual, vtable, object layout, `noexcept` or mangled symbol
 changed.
+
+---
+
+## `modules/core` `AppContext` named-data design and the `Property` empty getter (#2255–#2256, #2247, SR-AUD-102)
+
+**One finding priced and design-completed, one post-audit defect closed.**
+`docs/CoreAppContextNamedDataDesign.md`, `docs/CoreExperimentalPropertySlicePlan.md` §9.
+
+**Index after this batch: 197 remediated / 111 confirmed / 364 total** — of which **56** carry the
+`confirmed (design-complete)` marker, SR-AUD-102 being the newest. `modules/core` open **48**.
+**No `SR-AUD-*` identifier created — numbering stays frozen at 364.**
+
+### SR-AUD-102 — design-complete, approval-bound in **both** halves
+
+**Both premises reproduce exactly as filed**, by inspection, and **nothing in the report needed
+correcting** — worth recording, because each of the five preceding Core units corrected something.
+`getBaseDirectoryProperty()` delegates straight to `AppDomain` and never reads the data store;
+`TryGetSwitch` uses a separate map and never falls back to it.
+
+**Neither half has a compatible repair**, and three routes were priced rather than one chosen by
+default:
+
+- **A — type the data store.** The only faithful route. A **public signature change on four members
+  across two classes**, `AppContext::SetData`/`GetData` and `AppDomain::SetData`/`GetData` — the
+  latter pair only because **#2249** made them forwarders eleven days ago — and it retires three
+  existing pins.
+- **B — `reinterpret_cast` the `void*` for the two special keys.** **Rejected as undefined behaviour
+  by construction.** A `void*` carries no type, so the assumption is unfalsifiable *at the point of
+  use*: the correct case and the memory-corrupting case are the same instruction sequence, and no
+  test, no sanitizer and no type-system rule can separate them. A public API whose safety rests on
+  an undocumented convention is worse than the gap it closes.
+- **C — a separate typed string channel.** Rejected as inventing public API. .NET has one named data
+  store, not two.
+
+A **fourth** obstacle applies to the `BaseDirectory` half alone and **route A does not solve it**:
+the property returns `const std::string&`, so an override sourced from the store would hand out a
+reference to caller-owned storage with no liveness boundary — the **CCF-019** shape. CCF-019 is
+recorded as an **adjacency** and is **not extended**, following the standard #2243 set for CCF-011
+and #2248 set for this same `void*` store.
+
+**#2255 (`needs_user`)** carries one decision with three priced options. **#2256** landed the
+compatible remainder — documentation and tests only — so the finding **stays `confirmed`**, now with
+the `design-complete` qualifier. **#2250 is unreachable from here and untouched**: nothing in #2256
+changes what `TryGetSwitch` returns.
+
+### #2247 — the `Property<T>` empty getter, closed
+
+CCF-011's policy applied **unchanged**, so **no family was reopened, extended, renumbered or
+minted**: CCF-011 stays closed with its six named members, none of them this header. The constructor
+now throws `System::ArgumentNullException("customGetter")` before anything is done with either
+callable, instead of letting `std::bad_function_call` — a *native* exception that
+`catch (const System::Exception&)` does not see — escape at the first read, arbitrarily far from the
+construction that caused it.
+
+**Premise correction to #2247's own acceptance criterion**, which reads "ReadOnlyProperty is
+unaffected". `ReadOnlyProperty` **does** exist — the file is `Experimental/ReadonlyProperty.hpp`,
+spelling the second word with a lowercase `o`, which is why searching for the class name misses it —
+and it is **not** unaffected: it forwards its getter to this constructor and inherits the rejection.
+That is the correct outcome and is pinned. What is genuinely unaffected is the read-only *spelling*,
+an empty **setter**, which still constructs and still throws `System::NotSupportedException`.
+**#2246's layout question was not absorbed**; the vestigial `cachedValue` and its `sizeof` pin are
+untouched.
+
+### Mutations
+
+Four, each applied to production source, rebuilt and re-run, all caught, controls restored green:
+a `TryGetSwitch` fallback to the data store (1 test), `SetData` refusing to replace an existing key
+(1), deleting the empty-getter rejection (**6**), and over-reaching to reject an empty setter
+(**11** — the read-only spelling is genuinely protected, not merely documented).
+
+### Gate
+
+**+19 tests** (10 `AppContextNamedDataTests`, 9 `ExperimentalPropertyTests`), full gate
+**16,782 → 16,801 across 38 executables**: 16,793 passing, 2 skipped, **6 failing for the same two
+inherited causes**, none disabled, weakened, hidden or recategorised. The delta is exactly this
+batch's own new tests. Build **0 errors, 0 warnings** at `--parallel 2`. Graph **41/92**, seams
+**3/20**, negative fixtures **15 files/126 sites** — the last changed earlier in this batch by
+SR-AUD-091, not by these two units.
+
+**No sanitizer was run.** #2256 changes no executable statement, and #2247 replaces an uncatchable
+later failure with a defined earlier throw; neither is a class a sanitizer discriminates. The one
+concurrency claim (4 threads × 250 iterations over both `AppContext` maps) runs in the ordinary gate.
+
+**No CCF minted, extended or closed.** CCF-011 stays closed; CCF-019 stays open and unextended;
+CCF-021/#2131 and CCF-022/#2109 stay unminted.

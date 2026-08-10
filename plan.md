@@ -1,27 +1,32 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-08-10 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
-harness-designated branch, at `66c1d78`, **pushed and verified on the remote**. This batch reviewed
-and **closed the bounded Core numeric special-value and rounding-contract family** (#2229 review,
-#2230/#2231/#2232/#2233): **four findings, four remediated, none blocked**, and opened **#2234**, a
-deferred verification for the one element the documented .NET examples cannot decide. Audit **189
-remediated / 120 confirmed / 55 confirmed (design-complete) / 364 total**, recounted **by finding
-identifier**; **no `SR-AUD-*` created — numbering frozen at 364.** `modules/core` open **60 → 56**.
-Gate **16,708 across 38 executables: 16,700 passing, 2 skipped, 6 failing** for the same two
-inherited causes — **+16 exactly, this batch's own tests, so no regression anywhere.** Graph
-**41 / 92**, seams **3 / 20**, negative fixtures **14 / 120** — all unchanged. Two premise
-corrections, both measured: SR-AUD-040 reaches **four** production doors, not the two it names
-(`Double::Round(double)` and `Single::Round(float)` carried the identical `std::nearbyint`), and it
-is **not `FE_UPWARD`-only**; and the review probe's own first draft was wrong about
-`Math::Log(1, 0)`, caught by the `MathF` control disagreeing. A measured **residual** in the digits
-overloads is attributed to shared ambient-mode arithmetic — `Math::Round(2.25, 1)`, the untouched
-reference sibling, deviates identically — and deliberately carries **no ticket**. **CCF-007 was
-considered and deliberately NOT extended**; CCF-008 stays closed; **no new CCF minted**. #2228,
-#2215, #1773, #1962, CCF-019, CCF-021/#2131 and CCF-022/#2109 are exactly as inherited. See
-`docs/CoreNumericSpecialValueRoundingFamilyPlan.md`. The inherited `modules/timers` runner-up is
-**stale** — that namespace was reviewed and closed by #2153/#2154 on 2026-08-09, its high
-SR-AUD-238 is `remediated`, and its one survivor is medium and blocked on a layout/vtable change;
-the corrected ranking is in `NEXT.md` §9.*
+harness-designated branch, at `a53efe1`, **pushed and verified on the remote**. This batch closed
+the **Core `ArgumentOutOfRangeException` guard-domain slice** (#2253 review, #2254), completed the
+**`AppContext` named-data design** (#2255 approval, #2256 compatible), closed the **`Property<T>`
+empty-getter defect** (#2247), and opened **#2257**, the scope-checked next singleton. **Two
+findings and one post-audit defect: SR-AUD-091 remediated, SR-AUD-102 design-completed and still
+`confirmed`, #2247 closed.** Audit **197 remediated / 111 confirmed / 56 confirmed
+(design-complete) / 364 total**, recounted **by finding identifier**; **no `SR-AUD-*` created —
+numbering frozen at 364.** `modules/core` open **49 → 48**. Gate **16,801 across 38 executables:
+16,793 passing, 2 skipped, 6 failing** for the same two inherited causes — **+45 exactly, this
+batch's own tests, so no regression anywhere**, which mattered here because
+`ArgumentOutOfRangeException.hpp` is included by **404** translation units. Graph **41 / 92**, seams
+**3 / 20**; negative fixtures **14 / 120 → 15 / 126**. SR-AUD-091's compile domain went from **99 OK
+/ 99 FAIL** to **135 OK / 63 FAIL** over 22 types × 9 guards, with **zero** previously accepted pairs
+regressed and **zero** remaining rejections reported inside libstdc++. Four premise corrections to
+SR-AUD-091 (its rejected surface includes `enum class`, `std::string`, `std::string_view` and every
+pointer type; 14 of its 99 failures are a legitimately absent operator, not the defect; an unscoped
+enumeration already compiled while a scoped one did not; and the unary guards silently require a
+default-constructible `T`), and one to #2247's own acceptance criterion (`ReadOnlyProperty` exists,
+in a file spelling the second word with a lowercase `o`, and is *not* unaffected). An `operator<<`
+formatter branch was **rejected on a measurement** — `<sstream>` costs +2,819 preprocessed lines per
+dependent unit — in favour of an ADL `to_string` extension point costing +0. **No CCF minted,
+extended or closed**: CCF-011 stays closed, CCF-019 open and unextended, CCF-021/#2131 and
+CCF-022/#2109 unminted. #2246, #2250, #2215, #2228, #1773, #1962 and every other inherited
+blocked/`needs_user` ticket are exactly as inherited. Doxygen, `ccache` and `/rv` absent. Maximum
+compiler parallelism **2 jobs**. See `docs/CoreArgumentOutOfRangeGuardDomainPlan.md` and
+`docs/CoreAppContextNamedDataDesign.md`.*
 
 *Prior snapshot, retained historically:*
 
@@ -36,6 +41,40 @@ executables: 16,684 passing, 2 skipped, 6 failing** for the same two inherited c
 exactly, this batch's own tests, no regression**. Graph **41 / 92**, seams **3 / 20**. **CCF-015's
 sole member is now remediated**; CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted. Doxygen,
 `ccache` and `/rv` absent. Maximum compiler parallelism **2 jobs**.*
+
+## 2026-08-10 (latest) — the Core `ArgumentOutOfRangeException` guard domain (#2253–#2254), the `AppContext` named-data design (#2255–#2256) and the `Property` empty getter (#2247)
+
+**SR-AUD-091 remediated.** The nine public `ThrowIf*` guard templates formatted every operand with a
+bare `std::to_string(value)` — an undeclared requirement beyond each guard's declared comparison
+contract. Measured one `(type, guard)` pair per translation unit over 22 candidate types × 9 guards:
+**99 of 198 pairs did not compile**, every failure reported inside `<bits/basic_string.h>` with nine
+standard-library candidates. The guards now share one private ordered `if constexpr` formatter whose
+**first branch is the same `std::to_string` call** — so all 11 previously accepted types take the
+identical path and emit byte-identical text — followed by `ToString()`, enum-underlying,
+`string_view`-convertible, `string`-convertible and ADL `to_string` branches, plus a `static_assert`
+per guard for the one comparison expression it evaluates. After: **135 OK / 63 FAIL**, zero
+regressions, zero rejections inside libstdc++. Raw pointers are excluded deliberately and diagnosed.
+`+26` tests, a new 6-site negative consumer fixture and a widened positive fixture
+(**14 files/120 sites → 15/126**).
+
+**SR-AUD-102 design-completed, still `confirmed`.** Both premises reproduce exactly as filed and
+neither half has a compatible repair. Three routes priced and all blocked — type the store (four
+public signatures across two classes, because #2249 made `AppDomain` forward), `reinterpret_cast`
+the `void*` (undefined behaviour by construction, unfalsifiable at the point of use), or add a
+second typed channel (inventing public API). A fourth obstacle hits the `BaseDirectory` half alone:
+the property returns `const std::string&`, so an override would have no liveness boundary — the
+CCF-019 shape, recorded as an adjacency and **not extended**. **#2255** carries the decision;
+**#2256** landed documentation and `+10` pinning tests with no behaviour change.
+
+**#2247 closed.** `Property<T>`'s constructor rejects an empty getter with
+`System::ArgumentNullException("customGetter")` before anything is done with either callable,
+instead of letting `std::bad_function_call` escape uncatchably at the first read. CCF-011's policy
+applied unchanged; **no family reopened, extended or minted**. `+9` tests.
+
+Gate **16,801 / 38 executables**: 16,793 passing, 2 skipped, 6 failing (inherited), **+45 exactly**.
+Build 0 errors / 0 warnings at `--parallel 2`. Eight mutations, all caught. Selective components
+rerun, because production header code changed in `Core.Base`. **#2257** opened for `SR-AUD-011`
+after a recorded three-way scope check against SR-AUD-053 and SR-AUD-063.
 
 ## 2026-08-10 (later) — the bounded Core text input-boundary family, closed (#2223–#2227), #2228 opened
 
