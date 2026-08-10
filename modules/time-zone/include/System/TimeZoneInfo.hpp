@@ -25,9 +25,19 @@ namespace System {
      * @c FindSystemTimeZoneById() resolves IANA names from @c /usr/share/zoneinfo/.
      *
      * **Limitations (documented, not bugs):**
-     * - DST transitions are not modelled; IsDaylightSavingTime always returns false.
-     * - GetAdjustmentRules() returns an empty array.
+     * - DST transitions are not modelled *by this type*: GetUtcOffset() always returns the
+     *   zone's standard offset, and IsDaylightSavingTime(), IsAmbiguousTime() and
+     *   IsInvalidTime() always return false. The legacy @c System::TimeZone adapter returned
+     *   by @c TimeZone::CurrentTimeZone() *is* date-sensitive -- its contract is per-date and
+     *   it only ever describes the process-local zone -- so the two surfaces deliberately
+     *   differ. See docs/SystemTimeZoneNamespaceReviewPlan.md section 12.
+     * - GetAdjustmentRules() returns an empty array, and HasSameRules() therefore cannot
+     *   distinguish two zones that share a base offset and a DST flag (SR-AUD-228, ticket
+     *   #2185: the repair needs stored rules, an object-layout change).
      * - Serialisation (ToSerializedString / FromSerializedString) is not implemented.
+     * - DisplayName is the raw identifier for a system zone; producing .NET's
+     *   "(UTC+01:00) ..." text needs CLDR display data this repository does not carry.
+     * - GetSystemTimeZones() returns UTC and Local rather than enumerating the database.
      * - POSIX-only: Local() and FindSystemTimeZoneById() use localtime_r and /usr/share/zoneinfo.
      */
     class TimeZoneInfo {
@@ -370,15 +380,19 @@ namespace System {
         /**
          * @brief Gets the standard (non-DST) name.
          *
-         * C++ counterpart of .NET TimeZoneInfo.StandardName.
+         * C++ counterpart of .NET TimeZoneInfo.StandardName. For a system zone this is the
+         * abbreviation the zone uses during standard time (@c "EST" for America/New_York),
+         * derived from the same year scan as BaseUtcOffset and likewise independent of the
+         * current date.
          */
         [[nodiscard]] const std::string& getStandardNameProperty() const { return standardName_; }
 
         /**
          * @brief Gets the daylight-saving name.
          *
-         * C++ counterpart of .NET TimeZoneInfo.DaylightName.
-         * May equal the standard name when DST is not observed.
+         * C++ counterpart of .NET TimeZoneInfo.DaylightName. For a system zone this is the
+         * abbreviation the zone uses during daylight time (@c "EDT" for America/New_York).
+         * Equals the standard name exactly when the zone does not observe daylight time.
          */
         [[nodiscard]] const std::string& getDaylightNameProperty() const { return daylightName_; }
 
@@ -386,7 +400,11 @@ namespace System {
          * @brief Gets the fixed UTC offset for this zone.
          *
          * C++ counterpart of .NET TimeZoneInfo.BaseUtcOffset.
-         * DST transitions are not modelled; this is always the standard offset.
+         * DST transitions are not modelled; this is always the zone's **standard** offset --
+         * the invariant one, not whichever offset happens to be in force today. For a system
+         * zone it is derived by scanning a whole year of the tz database rather than by
+         * reading the current instant, so the value does not depend on the month in which the
+         * object was created (ticket #2181, SR-AUD-229).
          */
         [[nodiscard]] TimeSpan getBaseUtcOffsetProperty()          const { return baseUtcOffset_; }
 
@@ -499,7 +517,14 @@ namespace System {
         /**
          * @brief Returns true if this zone has the same base UTC offset and DST support as @p other.
          *
-         * C++ counterpart of .NET TimeZoneInfo.HasSameRules(TimeZoneInfo).
+         * C++ counterpart of .NET TimeZoneInfo.HasSameRules(TimeZoneInfo), which additionally
+         * compares the two zones' adjustment-rule arrays.
+         *
+         * **Known divergence (SR-AUD-228, ticket #2185).** This type stores no adjustment
+         * rules, so it cannot return false where .NET does: America/New_York and
+         * America/Havana share a standard offset and a DST flag but not their rules, and this
+         * method reports them as same-rule zones. Repairing it means storing the rules, which
+         * grows the object, so it is recorded and gated rather than guessed at.
          */
         [[nodiscard]] bool HasSameRules(const TimeZoneInfo& other) const {
             return baseUtcOffset_ == other.baseUtcOffset_ &&
@@ -599,9 +624,15 @@ namespace System {
          * @brief Looks up a time zone by IANA ID (e.g. "Europe/Prague").
          *
          * C++ counterpart of .NET TimeZoneInfo.FindSystemTimeZoneById(string).
-         * On Linux: checks /usr/share/zoneinfo/ and probes the offset via setenv("TZ").
+         * On Linux: requires @p id to be a relative, NUL-free path of non-empty, non-dot
+         * segments naming a regular file under /usr/share/zoneinfo/ whose first four bytes are
+         * the TZif magic, then derives the zone's metadata via setenv("TZ").
          * On Windows: uses the IANA→Windows CLDR mapping table.
-         * @throws System::TimeZoneNotFoundException if the ID is not found.
+         *
+         * The identifier and magic checks were added by ticket #2183: /usr/share/zoneinfo also
+         * ships plain-text data files (zone.tab, tzdata.zi, leapseconds and others), and
+         * without the magic check every one of them resolved to a zone with offset zero.
+         * @throws System::TimeZoneNotFoundException if the ID is malformed or not found.
          */
         static std::shared_ptr<TimeZoneInfo> FindSystemTimeZoneById(const std::string& id);
 

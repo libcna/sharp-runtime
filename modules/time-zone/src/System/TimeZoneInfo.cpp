@@ -4,57 +4,21 @@
 #include "System/TimeZoneInfo.hpp"
 #include "System/PlatformNotSupportedException.hpp"
 #include "System/TimeZoneNotFoundException.hpp"
+#include "TimeZonePosixSupport.hpp"
 #include <cstdlib>
 #include <ctime>
-#include <mutex>
 
 #if defined(_WIN32)
 #  include <windows.h>
 #elif defined(__EMSCRIPTEN__)
 // No timezone database available
 #else
+#  include <cstdio>
+#  include <cstring>
 #  include <sys/stat.h>
 #endif
 
 namespace System {
-
-#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
-namespace {
-// Guards every read (localtime_r/tm_gmtoff/tm_zone) or write (setenv("TZ", ...)) of the
-// process-global TZ state. FindSystemTimeZoneById() temporarily overwrites the TZ
-// environment variable to query a different zone; without serializing every reader against
-// that window too, a concurrent Local() call on another thread could transiently observe
-// the wrong zone's offset/name -- a real, reachable bug for any multi-threaded caller, not
-// just a race between two FindSystemTimeZoneById() calls (which alone would already need
-// this). A function-local static avoids static-initialization-order concerns between
-// translation units and works regardless of declaration order within this file.
-std::mutex& tzMutex() {
-    static std::mutex m;
-    return m;
-}
-
-// Detects whether the zone currently active via TZ/localtime_r observes DST at
-// all during the year, rather than just whether DST happens to be active right
-// now (SupportsDaylightSavingTime asks "does this zone have DST rules", not
-// "is DST active this instant"). Callers must already hold tzMutex().
-bool posixZoneObservesDst() {
-    time_t now = time(nullptr);
-    struct tm nowUtc{};
-    gmtime_r(&now, &nowUtc);
-    struct tm jan{};
-    jan.tm_year = nowUtc.tm_year; jan.tm_mon = 0; jan.tm_mday = 15; jan.tm_hour = 12;
-    struct tm jul{};
-    jul.tm_year = nowUtc.tm_year; jul.tm_mon = 6; jul.tm_mday = 15; jul.tm_hour = 12;
-    time_t janT = timegm(&jan);
-    time_t julT = timegm(&jul);
-    struct tm janLocal{};
-    localtime_r(&janT, &janLocal);
-    struct tm julLocal{};
-    localtime_r(&julT, &julLocal);
-    return janLocal.tm_isdst > 0 || julLocal.tm_isdst > 0 || janLocal.tm_gmtoff != julLocal.tm_gmtoff;
-}
-} // namespace
-#endif
 
 // ---------------------------------------------------------------------------
 // Local()
@@ -76,15 +40,15 @@ const TimeZoneInfo& TimeZoneInfo::Local() {
 #elif defined(__EMSCRIPTEN__)
         return TimeZoneInfo::Utc();
 #else
-        std::lock_guard<std::mutex> lock(tzMutex());
-        time_t t = time(nullptr);
-        struct tm local_tm {};
-        localtime_r(&t, &local_tm);
-        long   offset_secs = local_tm.tm_gmtoff;
-        bool   hasDst      = posixZoneObservesDst();
-        std::string name   = local_tm.tm_zone ? local_tm.tm_zone : "Local";
-        TimeSpan offset    = TimeSpan::FromSeconds(static_cast<double>(offset_secs));
-        return TimeZoneInfo("Local", offset, name, name, name, hasDst);
+        std::lock_guard<std::mutex> lock(detail::tzMutex());
+        detail::ZoneMetadata meta = detail::describeSelectedZone(detail::currentUtcYear());
+        std::string standard = meta.standardAbbreviation.empty() ? std::string("Local")
+                                                                 : meta.standardAbbreviation;
+        std::string daylight = meta.daylightAbbreviation.empty() ? standard
+                                                                 : meta.daylightAbbreviation;
+        TimeSpan offset = TimeSpan::FromSeconds(static_cast<double>(meta.standardOffsetSeconds));
+        return TimeZoneInfo("Local", offset, standard, standard, daylight,
+                            meta.observesDaylight);
 #endif
     }();
     return tz;
@@ -95,11 +59,55 @@ const TimeZoneInfo& TimeZoneInfo::Local() {
 // ---------------------------------------------------------------------------
 
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+namespace {
+
+// Rejects an identifier that is not a relative, NUL-free, dot-free path of non-empty segments.
+// An identifier reaches the filesystem and then setenv("TZ", ...), so the shapes rejected here
+// are the ones that either escape /usr/share/zoneinfo or name a real zone by a spelling that
+// is not its identifier: "" and " " (no segment), a leading '/', ".." and "." segments, an
+// empty segment ("America//New_York"), a trailing '/', and an embedded NUL -- which is the
+// worst of them, because the C string handed to stat() and setenv() stops at the NUL while the
+// std::string stored as the zone's Id keeps every byte after it.
+bool isWellFormedZoneId(const std::string& id) {
+    if (id.empty()) return false;
+    if (id.front() == '/') return false;
+    if (id.find('\0') != std::string::npos) return false;
+    std::size_t start = 0;
+    while (true) {
+        std::size_t slash = id.find('/', start);
+        std::string segment = id.substr(start, slash == std::string::npos ? std::string::npos
+                                                                          : slash - start);
+        if (segment.empty() || segment == "." || segment == "..") return false;
+        if (slash == std::string::npos) break;
+        start = slash + 1;
+    }
+    return true;
+}
+
+// True when the file begins with the four bytes every version of the TZif format starts with.
+// stat()+S_ISREG alone is not enough: /usr/share/zoneinfo ships plain-text data files
+// (zone.tab, zone1970.tab, iso3166.tab, tzdata.zi, leapseconds, leap-seconds.list -- six of
+// them here) that passed the old check, and glibc then parsed the identifier itself as a POSIX
+// rule string, so every one of them resolved to a zone with offset 0 and a name taken from the
+// filename. Prefixing the TZ value with ':' to force file interpretation was measured and does
+// not change that, so the check has to happen here, at the door.
+bool hasTzifMagic(const std::string& path) {
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return false;
+    char magic[4] = {};
+    std::size_t read = std::fread(magic, 1, sizeof(magic), f);
+    std::fclose(f);
+    return read == sizeof(magic) && std::memcmp(magic, "TZif", sizeof(magic)) == 0;
+}
+
+} // namespace
+
 static bool zoneFileExists(const std::string& id) {
-    if (id.find("..") != std::string::npos) return false;
+    if (!isWellFormedZoneId(id)) return false;
     std::string path = "/usr/share/zoneinfo/" + id;
     struct stat st {};
-    return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+    if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return false;
+    return hasTzifMagic(path);
 }
 #endif
 
@@ -255,28 +263,19 @@ std::shared_ptr<TimeZoneInfo> TimeZoneInfo::FindSystemTimeZoneById(const std::st
         throw System::TimeZoneNotFoundException(
             "The time zone ID '" + id + "' was not found on the local computer.");
 
-    long   offset_secs = 0;
-    bool   hasDst      = false;
-    std::string abbrev = id;
+    detail::ZoneMetadata meta;
     {
-        std::lock_guard<std::mutex> lock(tzMutex());
-        const char* saved = getenv("TZ");
-        std::string savedStr = saved ? saved : "";
-        setenv("TZ", id.c_str(), 1);
-        tzset();
-        time_t t = time(nullptr);
-        struct tm tm_buf {};
-        localtime_r(&t, &tm_buf);
-        offset_secs = tm_buf.tm_gmtoff;
-        hasDst      = posixZoneObservesDst();
-        abbrev      = tm_buf.tm_zone ? tm_buf.tm_zone : id;
-        if (!savedStr.empty()) setenv("TZ", savedStr.c_str(), 1);
-        else                   unsetenv("TZ");
-        tzset();
+        std::lock_guard<std::mutex> lock(detail::tzMutex());
+        detail::ScopedTz restoreTz;      // restores TZ on every path, including an exception
+        restoreTz.select(id);
+        meta = detail::describeSelectedZone(detail::currentUtcYear());
     }
-    TimeSpan offset = TimeSpan::FromSeconds(static_cast<double>(offset_secs));
+    std::string standard = meta.standardAbbreviation.empty() ? id : meta.standardAbbreviation;
+    std::string daylight = meta.daylightAbbreviation.empty() ? standard
+                                                             : meta.daylightAbbreviation;
+    TimeSpan offset = TimeSpan::FromSeconds(static_cast<double>(meta.standardOffsetSeconds));
     return std::shared_ptr<TimeZoneInfo>(
-        new TimeZoneInfo(id, offset, id, abbrev, abbrev, hasDst));
+        new TimeZoneInfo(id, offset, id, standard, daylight, meta.observesDaylight));
 #endif
 }
 

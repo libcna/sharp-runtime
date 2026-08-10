@@ -224,6 +224,45 @@ no safe or useful equivalent.
 
 ## Breaking changes
 
+### 2026-08-10 — `System::TimeZoneInfo` reports a zone's *standard* offset and names, and six inputs are now rejected
+
+**Behavioural only. No public signature, virtual, vtable slot, object layout, mangled symbol or
+`noexcept` specification changed — `sizeof(System::TimeZoneInfo)` is 144 bytes before and after,
+so ordinary source needs no change and a rebuild is enough.**
+
+`FindSystemTimeZoneById` used to read `tm_gmtoff` and `tm_zone` at `time(nullptr)`, so
+`BaseUtcOffset`, `StandardName` and `DaylightName` all depended on **the month the process ran
+in**. `America/New_York` reported a base offset of −4:00 and *both* names as `EDT` when the object
+was created in July, and −5:00/`EST` when it was created in January. The header always documented
+the property as "always the standard offset", and the Windows branch already computed it that way;
+only the POSIX branch disagreed with both.
+
+Measured over the whole installed database — **499 TZif zones, 158 of which observe daylight
+time** — **141 reported the wrong base offset on 2026-08-10**, the other 17 being the
+southern-hemisphere zones that are wrong in January instead. The offset is now derived by scanning
+a whole year of the tz database, so it is a property of the zone rather than of the calendar.
+
+The visible consequence: `ConvertTime`, `ConvertTimeFromUtc`, `ConvertTimeToUtc` and
+`ConvertTimeBySystemTimeZoneId` shift by the standard offset during a zone's daylight period —
+one hour less than before for most zones. That is the consistent reading of the type's documented
+"DST transitions are not modelled" contract, in place of an answer that was right for half the
+year and silently wrong for the other half.
+
+Also changed, each closing an audit finding:
+
+| Change | Before | After |
+|---|---|---|
+| `CreateCustomTimeZone` with an empty id, an offset beyond ±14 h, or a sub-minute offset | accepted | throws (`±14:00` exactly is still accepted) |
+| `AdjustmentRule::CreateAdjustmentRule` with `dateEnd < dateStart`, both overloads | accepted | throws (equal dates still accepted) |
+| `Equals` on ids differing only in ASCII case | `false`, while the hashes were **equal** | `true`, matching the hash and .NET's `OrdinalIgnoreCase` |
+| `TryFindSystemTimeZoneById` failure | left the caller's previous zone in the out parameter | sets it to `nullptr` |
+| `TimeZone::CurrentTimeZone().GetUtcOffset` / `IsDaylightSavingTime` | one frozen offset; DST always `false` | answer per date |
+| ids naming a non-TZif file (`zone.tab`, `tzdata.zi`, `leapseconds`, …) or a malformed path (`America//New_York`, `./America/New_York`, an embedded NUL) | resolved to a zone with offset 0 | rejected |
+
+The full before/after tables, the migration steps and the measurement records are in
+[`docs/Migration-TimeZoneStandardOffset.md`](docs/Migration-TimeZoneStandardOffset.md); the review
+that produced them is [`docs/SystemTimeZoneNamespaceReviewPlan.md`](docs/SystemTimeZoneNamespaceReviewPlan.md).
+
 ### 2026-07-29 — `sizeof(System::Collections::BitArray::Enumerator)` grew from 32 to 40 bytes
 
 **This is a binary-compatibility change only. No source changes, and a full

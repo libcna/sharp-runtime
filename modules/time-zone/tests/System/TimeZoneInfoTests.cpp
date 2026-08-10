@@ -2,7 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <memory>
 #include <stdexcept>
+#include <string>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/TimeZoneInfo.hpp"
 #include "System/TimeZoneNotFoundException.hpp"
@@ -864,4 +866,228 @@ TEST(TimeZoneInfoTests, Equals_SystemZoneComparesCaseInsensitivelyToACustomOne) 
                                                      "d", "s");
     EXPECT_TRUE(sys->Equals(*custom));
     EXPECT_EQ(sys->GetHashCode(), custom->GetHashCode());
+}
+
+// ---------------------------------------------------------------------------
+// Ticket #2181 (SR-AUD-229): the POSIX lookup recorded tm_gmtoff and tm_zone at
+// time(nullptr), so BaseUtcOffset, StandardName and DaylightName all depended on
+// the month the object happened to be created in -- contradicting the header's
+// own "this is always the standard offset" and the Windows branch, which reads
+// Bias (standard) and DaylightBias separately.
+//
+// Scale, measured before the fix over every installed zone
+// (build-probe/2176_probe4_allzones.log): 499 TZif zones, 158 observe DST, and
+// 141 reported the wrong BaseUtcOffset on 2026-08-10 alone; the remaining 17 are
+// southern-hemisphere zones, which were correct that day and wrong in January.
+//
+// The values below are properties of the zones themselves, not of the day the
+// suite runs, which is the whole point: a test that asserted "whatever the
+// current offset is" could not fail.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A zone the suite needs may be missing on a host with a trimmed tzdata; skip rather
+// than fail, the way the pre-existing Prague and Phoenix assertions already assume.
+std::shared_ptr<TimeZoneInfo> zoneOrNull(const std::string& id) {
+    std::shared_ptr<TimeZoneInfo> tz;
+    return TimeZoneInfo::TryFindSystemTimeZoneById(id, tz) ? tz : nullptr;
+}
+
+SharpRuntime::longcs offsetMinutes(const TimeZoneInfo& tz) {
+    return tz.getBaseUtcOffsetProperty().getTicksProperty() / TimeSpan::TicksPerMinute;
+}
+
+} // namespace
+
+TEST(TimeZoneInfoTests, BaseUtcOffset_NewYork_IsStandardMinusFive_NotTheCurrentOffset) {
+    auto ny = zoneOrNull("America/New_York");
+    if (!ny) GTEST_SKIP() << "America/New_York is not installed";
+    EXPECT_EQ(offsetMinutes(*ny), -300);
+    EXPECT_EQ(ny->getStandardNameProperty(), "EST");
+    EXPECT_EQ(ny->getDaylightNameProperty(), "EDT");
+    EXPECT_TRUE(ny->getSupportsDaylightSavingTimeProperty());
+}
+
+TEST(TimeZoneInfoTests, BaseUtcOffset_Prague_IsStandardPlusOne) {
+    auto tz = zoneOrNull("Europe/Prague");
+    if (!tz) GTEST_SKIP() << "Europe/Prague is not installed";
+    EXPECT_EQ(offsetMinutes(*tz), 60);
+    EXPECT_EQ(tz->getStandardNameProperty(), "CET");
+    EXPECT_EQ(tz->getDaylightNameProperty(), "CEST");
+}
+
+TEST(TimeZoneInfoTests, BaseUtcOffset_Dublin_StandardIsZeroWithAPositiveDaylight) {
+    // Dublin is the case where the standard offset is 0 and the daylight offset is +1;
+    // the old snapshot reported +60/IST for both names during the summer.
+    auto tz = zoneOrNull("Europe/Dublin");
+    if (!tz) GTEST_SKIP() << "Europe/Dublin is not installed";
+    EXPECT_EQ(offsetMinutes(*tz), 0);
+    EXPECT_EQ(tz->getStandardNameProperty(), "GMT");
+    EXPECT_EQ(tz->getDaylightNameProperty(), "IST");
+    EXPECT_TRUE(tz->getSupportsDaylightSavingTimeProperty());
+}
+
+TEST(TimeZoneInfoTests, BaseUtcOffset_SouthernHemisphere_IsTheSameRuleAsNorthern) {
+    // Sydney's standard offset is the *smaller* one (+10 AEST, +11 AEDT). A repair that
+    // simply took "the offset in January" would get every southern zone backwards.
+    auto tz = zoneOrNull("Australia/Sydney");
+    if (!tz) GTEST_SKIP() << "Australia/Sydney is not installed";
+    EXPECT_EQ(offsetMinutes(*tz), 600);
+    EXPECT_EQ(tz->getStandardNameProperty(), "AEST");
+    EXPECT_EQ(tz->getDaylightNameProperty(), "AEDT");
+}
+
+TEST(TimeZoneInfoTests, BaseUtcOffset_HalfHourDaylightDelta) {
+    // Lord Howe shifts by 30 minutes, not 60.
+    auto tz = zoneOrNull("Australia/Lord_Howe");
+    if (!tz) GTEST_SKIP() << "Australia/Lord_Howe is not installed";
+    EXPECT_EQ(offsetMinutes(*tz), 630);
+    EXPECT_TRUE(tz->getSupportsDaylightSavingTimeProperty());
+    EXPECT_NE(tz->getStandardNameProperty(), tz->getDaylightNameProperty());
+}
+
+TEST(TimeZoneInfoTests, BaseUtcOffset_QuarterHourZone) {
+    auto tz = zoneOrNull("Pacific/Chatham");
+    if (!tz) GTEST_SKIP() << "Pacific/Chatham is not installed";
+    EXPECT_EQ(offsetMinutes(*tz), 765);   // +12:45 standard
+}
+
+TEST(TimeZoneInfoTests, BaseUtcOffset_NonWholeHourZonesWithoutDaylight) {
+    auto kolkata = zoneOrNull("Asia/Kolkata");
+    if (kolkata) {
+        EXPECT_EQ(offsetMinutes(*kolkata), 330);
+        EXPECT_FALSE(kolkata->getSupportsDaylightSavingTimeProperty());
+        // No daylight time means both names describe the same thing.
+        EXPECT_EQ(kolkata->getStandardNameProperty(), kolkata->getDaylightNameProperty());
+    }
+    auto kathmandu = zoneOrNull("Asia/Kathmandu");
+    if (kathmandu) { EXPECT_EQ(offsetMinutes(*kathmandu), 345); }
+    auto tehran = zoneOrNull("Asia/Tehran");
+    if (tehran) { EXPECT_EQ(offsetMinutes(*tehran), 210); }
+}
+
+TEST(TimeZoneInfoTests, BaseUtcOffset_AllYearDaylightZoneUsesItsStandardReversion) {
+    // Africa/Casablanca is daylight time in BOTH January and July, which is exactly what the
+    // two-sample probe this replaced could not see: it reported +01. Twelve samples find the
+    // Ramadan reversion to +00, which is the zone's standard offset.
+    auto tz = zoneOrNull("Africa/Casablanca");
+    if (!tz) GTEST_SKIP() << "Africa/Casablanca is not installed";
+    EXPECT_EQ(offsetMinutes(*tz), 0);
+    EXPECT_EQ(tz->getStandardNameProperty(), "+00");
+    EXPECT_TRUE(tz->getSupportsDaylightSavingTimeProperty());
+}
+
+TEST(TimeZoneInfoTests, BaseUtcOffset_FixedOffsetZonesAreUnchanged) {
+    auto minus5 = zoneOrNull("Etc/GMT+5");
+    if (minus5) {
+        EXPECT_EQ(offsetMinutes(*minus5), -300);
+        EXPECT_FALSE(minus5->getSupportsDaylightSavingTimeProperty());
+    }
+    auto plus14 = zoneOrNull("Etc/GMT-14");
+    if (plus14) { EXPECT_EQ(offsetMinutes(*plus14), 840); }
+    auto utc = zoneOrNull("Etc/UTC");
+    if (utc) {
+        EXPECT_EQ(offsetMinutes(*utc), 0);
+        EXPECT_FALSE(utc->getSupportsDaylightSavingTimeProperty());
+    }
+}
+
+TEST(TimeZoneInfoTests, BaseUtcOffset_PhoenixNeverObservesDaylightTime) {
+    auto tz = zoneOrNull("America/Phoenix");
+    if (!tz) GTEST_SKIP() << "America/Phoenix is not installed";
+    EXPECT_EQ(offsetMinutes(*tz), -420);
+    EXPECT_FALSE(tz->getSupportsDaylightSavingTimeProperty());
+}
+
+TEST(TimeZoneInfoTests, BaseUtcOffset_RepeatedLookupsAgree) {
+    // The value must be a property of the zone, so two lookups in the same process must give
+    // the same answer -- and so must a lookup of an alias that resolves to the same rules.
+    auto a = zoneOrNull("America/New_York");
+    auto b = zoneOrNull("America/New_York");
+    if (!a || !b) GTEST_SKIP() << "America/New_York is not installed";
+    EXPECT_EQ(offsetMinutes(*a), offsetMinutes(*b));
+    EXPECT_EQ(a->getStandardNameProperty(), b->getStandardNameProperty());
+    auto est = zoneOrNull("EST5EDT");
+    if (est) { EXPECT_EQ(offsetMinutes(*est), offsetMinutes(*a)); }
+}
+
+TEST(TimeZoneInfoTests, StandardAndDaylightNames_DifferExactlyWhenTheZoneObservesDaylightTime) {
+    for (const char* id : {"America/New_York", "Europe/Prague", "Australia/Sydney",
+                           "Europe/Dublin", "Asia/Kolkata", "America/Phoenix", "Etc/UTC"}) {
+        auto tz = zoneOrNull(id);
+        if (!tz) continue;
+        const bool namesDiffer =
+            tz->getStandardNameProperty() != tz->getDaylightNameProperty();
+        EXPECT_EQ(namesDiffer, tz->getSupportsDaylightSavingTimeProperty())
+            << "zone " << id << " std=" << tz->getStandardNameProperty()
+            << " dst=" << tz->getDaylightNameProperty();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Ticket #2183 (post-audit, no SR-AUD identifier): the lookup door validated a
+// file it did not necessarily read. zoneFileExists checked only S_ISREG under
+// /usr/share/zoneinfo and then handed the identifier to setenv("TZ", ...), which
+// glibc parses as a POSIX rule string when it is not a path. Measured before the
+// fix (build-probe/2176_probe2_newdefects.log): all seven non-TZif regular files
+// shipped inside /usr/share/zoneinfo were accepted as zones with offset 0 and a
+// name taken from the filename; "America//New_York", "America/./New_York" and
+// "./America/New_York" were accepted; and an embedded NUL truncated the
+// filesystem check while the full 21-byte string was stored as the zone's Id.
+//
+// The six shipped data files are used as malformed-input fixtures precisely so
+// that nothing has to be written into system zoneinfo.
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, FindSystemTimeZoneById_NonTzifDataFiles_AreRejected) {
+    int checked = 0;
+    for (const char* id : {"zone.tab", "zone1970.tab", "iso3166.tab", "tzdata.zi",
+                           "leapseconds", "leap-seconds.list"}) {
+        std::shared_ptr<TimeZoneInfo> tz;
+        if (TimeZoneInfo::TryFindSystemTimeZoneById(id, tz)) {
+            ADD_FAILURE() << "'" << id << "' is not zone data but was accepted as a zone";
+        }
+        ++checked;
+    }
+    EXPECT_EQ(checked, 6);
+}
+
+TEST(TimeZoneInfoTests, FindSystemTimeZoneById_MalformedPathShapes_AreRejected) {
+    for (const char* id : {"America//New_York", "America///New_York", "./America/New_York",
+                           "America/./New_York", "America/New_York/", "/America/New_York",
+                           "/etc/passwd", "..", "../../etc/passwd", "", "America/../America/New_York"}) {
+        EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById(id), TimeZoneNotFoundException)
+            << "identifier '" << id << "' should not resolve";
+    }
+}
+
+TEST(TimeZoneInfoTests, FindSystemTimeZoneById_EmbeddedNul_IsRejectedNotTruncated) {
+    // The C string stops at the NUL, so the old code stat()ed "America/New_York", succeeded,
+    // and stored all 21 bytes as the zone's Id -- an Id that can never round-trip.
+    std::string truncating("America/New_York\0junk", 21);
+    ASSERT_EQ(truncating.size(), 21u);
+    EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById(truncating), TimeZoneNotFoundException);
+    std::string afterUtc("UTC\0x", 5);
+    EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById(afterUtc), TimeZoneNotFoundException);
+}
+
+TEST(TimeZoneInfoTests, FindSystemTimeZoneById_RealZonesStillResolve) {
+    // The guard must not narrow the door: every shape a real identifier takes still works,
+    // including a multi-segment id, a single-segment id, and a '+' in the last segment.
+    for (const char* id : {"UTC", "Local", "Etc/UTC", "Etc/GMT+5", "America/New_York",
+                           "America/Argentina/Buenos_Aires", "Europe/Prague", "EST5EDT"}) {
+        std::shared_ptr<TimeZoneInfo> tz;
+        if (!TimeZoneInfo::TryFindSystemTimeZoneById(id, tz)) continue;  // trimmed tzdata
+        EXPECT_NE(tz, nullptr) << id;
+        EXPECT_EQ(tz->getIdProperty(), id);
+    }
+    // At minimum the two synthetic ids must always work.
+    EXPECT_NE(TimeZoneInfo::FindSystemTimeZoneById("UTC"), nullptr);
+    EXPECT_NE(TimeZoneInfo::FindSystemTimeZoneById("Local"), nullptr);
+}
+
+TEST(TimeZoneInfoTests, FindSystemTimeZoneById_ADirectoryIsNotAZone) {
+    EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById("America"), TimeZoneNotFoundException);
+    EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById("Etc"), TimeZoneNotFoundException);
 }
