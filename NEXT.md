@@ -4,24 +4,249 @@
 # NEXT.md
 
 *Last verified: 2026-08-10. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
-harness-designated branch**. **Pushed after every commit**, per `CLAUDE.md` rule 13 — six commits,
-six pushes, every one a normal fast-forward. No merge, rebase, tag, force-push, PR, publication,
+harness-designated branch**. **Pushed after every commit**, per `CLAUDE.md` rule 13 — five commits,
+five pushes, every one a normal fast-forward. No merge, rebase, tag, force-push, PR, publication,
 amend or history rewrite; all commits unsigned (`git -c commit.gpgsign=false`) — no usable private
-signing key exists here. This batch **reviewed `modules/numerics` and landed its whole compatible
-queue** (#2167 review, #2168, #2169, #2171, #2173): **SR-AUD-278 remediated outright**, and
-SR-AUD-042, SR-AUD-276 and SR-AUD-277 each carrying a completed compatible subpart plus exactly one
-recorded gate — **#2170 and #2172 are approvals, #2175 is missing evidence**. The namespace is
-**not** fully closed and §5 below says why that is the measured answer rather than a shortfall.
-Audit **161 remediated / 203 confirmed / 364 total**, of which **53** carry
+signing key exists here. This batch **reviewed `modules/time-zone` and landed its whole compatible
+queue** (#2176 review, #2177–#2184): **six of seven findings remediated outright**, and SR-AUD-228
+alone left `confirmed (design-complete)` behind exactly one gate — **#2185 is an approval for a
+measured object-layout change, 160 → 184 bytes**. The namespace is **closed except for that one
+gate**, and §5 below says why that is the measured answer rather than a shortfall.
+Audit **167 remediated / 197 confirmed / 364 total**, of which **54** carry
 `confirmed (design-complete)`; **no `SR-AUD-*` identifier created — numbering frozen at 364.**
-Gate **16,310 tests across 37 executables: 16,303 passing, 1 skipped, 6 failing** for the same two
-measured causes, unchanged and not hidden (+36 on the inherited 16,274). Graph **41 / 92**, seams
-**3 / 20** unchanged, negative fixtures **12 → 13 files, 104 → 116 sites**. **Doxygen, `ccache` and
-the `/rv` reference tree are all absent** and were not installed. **CCF-019 open; CCF-021/#2131 and
-CCF-022/#2109 remain unminted.** #1773, #1962, #2150, #2152, #2155 and #2166 remain exactly as
-inherited. **The measured next unit is `modules/time-zone`** — and the inherited claim that it needs
-a tz database this container lacks is **disproved**: `/usr/share/zoneinfo` is present and three of
-its seven findings reproduced in one probe. See the first handoff below.*
+Gate **16,383 tests across 37 executables: 16,376 passing, 1 skipped, 6 failing** for the same two
+measured causes, unchanged and not hidden (**+73 on the inherited 16,310 — exactly this batch's
+additions, so no regression anywhere**). Graph **41 / 92**, seams **3 / 20**, negative fixtures
+**13 / 116** — all three unchanged. **UBSan, ASan+LSan and TSan over the production bodies: exit 0,
+zero reports.** **Doxygen, `ccache` and the `/rv` reference tree are all absent** and were not
+installed. **CCF-019 open; CCF-021/#2131 and CCF-022/#2109 remain unminted.** #1773, #1962, #2150,
+#2152, #2155, #2166, #2170, #2172 and #2175 remain exactly as inherited. **The measured next unit is
+`modules/net-network-information`**, and its three findings are **independent of blocked #1962** —
+proved, not assumed (§7). See the first handoff below.*
+
+---
+
+## Batch record — `modules/time-zone` reviewed and its whole compatible queue landed (#2176–#2184)
+
+**Six of seven findings remediated; one gated.** That is the measured outcome, not a shortfall —
+the seventh needs an object-layout decision this batch will not take on the user's behalf.
+
+### 1. Work unit 1 — the selection, verified independently
+
+`audit/AUDIT_FINDINGS_INDEX.md` was re-parsed from scratch, all 364 rows grouped by owning module.
+**The decomposition at the start of this batch was 161 remediated / 150 confirmed /
+53 confirmed(design-complete) = 364.** The batch prompt stated *160 / 154 / 50*; that triple was
+**stale**, and the index agrees exactly with the previous batch's own `NEXT.md` paragraph and with
+this recount. Everything else the prompt asserted about `modules/time-zone` checked out: **7 open,
+0 high, 7 medium, 0 blocked, 0 approval-gated, 0 already design-complete**.
+
+The inherited claim that three findings had already reproduced was also verified — and then
+superseded: **all seven reproduced**, in one process, before any code changed
+(`build-probe/2176_probe1_surface.log`). `/usr/share/zoneinfo` holds **499 TZif zones**.
+
+Deliverable: `docs/SystemTimeZoneNamespaceReviewPlan.md` (#2176, `886c066`).
+
+### 2. Six premise corrections, every one measured
+
+- **SR-AUD-229 is three properties, not one.** The `time(nullptr)` snapshot also fed `StandardName`
+  and `DaylightName`, so both names carried the **daylight** abbreviation for any zone queried
+  during its daylight period, and the two were always identical to each other. New York reported
+  `std=EDT dst=EDT`.
+- **Its reach is quantified**: 499 TZif zones, **158 observing daylight time**, **141 reporting the
+  wrong base offset on 2026-08-10**; the other 17 are southern-hemisphere zones, correct that day
+  and wrong in January — the month-dependence shown in both directions from one run.
+- **It contradicts the port's own documentation**, not only .NET: the header already said "always
+  the standard offset", and the Windows branch already computed it that way from `Bias`. Only POSIX
+  disagreed with both, so the repair changes **no contract**.
+- **SR-AUD-223 is two independent defects** in a 39-line file — a frozen offset *and* a hard-coded
+  `false` — and repairing either alone still answers a July date wrongly.
+- **SR-AUD-225 left a public door onto `TimeSpan`'s negation guard**: a zone built with
+  `TimeSpan::MinValue` was accepted, and `ConvertTimeToUtc` then reported a two's-complement
+  diagnostic instead of the argument being refused where it was supplied. **CCF-004 gains no
+  member** — `TimeSpan` already guards the negation, so this is validation, not arithmetic UB, and
+  UBSan over the production bodies is clean.
+- **SR-AUD-226 affects both `CreateAdjustmentRule` overloads** (the audit names one), and
+  **SR-AUD-227's hash was locale-dependent** — `std::tolower` consults `LC_CTYPE`, so the answer
+  depended on a global the caller may change.
+
+### 3. Three post-audit defects, ordinary ticket numbers only
+
+- **#2183 — the lookup validated a file it did not necessarily read.** glibc parses a `TZ` value
+  that is not a path as a POSIX rule string, so **all seven non-TZif regular files shipped inside
+  `/usr/share/zoneinfo`** (`zone.tab`, `zone1970.tab`, `iso3166.tab`, `tzdata.zi`, `leapseconds`,
+  `leap-seconds.list`) resolved as zones with offset 0 and a name taken from the filename, as did
+  `America//New_York`, `./America/New_York`, `America/New_York/` and an identifier whose embedded
+  NUL truncated the filesystem check while all 21 bytes were stored as the `Id`. **A `':'` prefix
+  to force file interpretation was measured and does not help**, so the fix is a `TZif` magic check
+  at the door. The six shipped data files are the malformed-input fixtures — nothing is written
+  into system zoneinfo.
+- **#2184 — the `TZ` save/restore window was not exception-safe**, and it branched on whether the
+  saved value was *empty* rather than *set*, so a process running with `TZ=""` (POSIX: UTC) came
+  back with `TZ` deleted.
+- **A third, found while writing #2182's pins.** Raw `mktime(tm_isdst = -1)` answers a **repeated
+  local hour** differently depending on the preceding conversion in the same process: 2025-11-02
+  01:30 in New York gave −240 as a first call, −300 after a standard conversion and −240 after a
+  daylight one (`build-probe/2176_probe6_ambiguous.log`). The same argument giving three answers is
+  a defect whatever .NET does. Repaired inside #2182 — it is inside SR-AUD-223's own cause — and the
+  *choice* of which reading to prefer (standard) is the only part resting on recollection, carried
+  by #2186.
+
+**The NUL occurrence mints no CCF.** Three occurrences in three modules (#2003 Uri, #2085
+XmlWriter, #2183 here) is exactly the promotion question #2131 and #2109 already hold open; this
+review does not pre-empt them.
+
+### 4. Ticket outcomes
+
+| Ticket | Outcome | Commit |
+|---|---|---|
+| **#2176** time-zone review | **done** | `886c066` |
+| **#2177** SR-AUD-224 | **done** — remediated | `a431bc8` |
+| **#2178** SR-AUD-225 | **done** — remediated | `7888a29` |
+| **#2179** SR-AUD-226 | **done** — remediated | `7888a29` |
+| **#2180** SR-AUD-227 | **done** — remediated | `7888a29` |
+| **#2181** SR-AUD-229 | **done** — remediated | `9210d8f` |
+| **#2182** SR-AUD-223 | **done** — remediated | `9210d8f` |
+| **#2183** non-TZif / malformed ids | **done** — post-audit, no `SR-AUD-*` | `9210d8f` |
+| **#2184** `TZ` scope guard | **done** — post-audit, no `SR-AUD-*` | `9210d8f` |
+| **#2185** SR-AUD-228 | **needs_user** — approval for `sizeof` 160 → 184 | `11b4fc8` |
+| **#2186** five parity questions | **todo, inactive** — needs `/rv` or a managed runtime | `11b4fc8` |
+| audit reconciliation | **done** | `11b4fc8` |
+
+Namespace totals: `time-zone` **114 → 187** tests, 7 findings, **6 remediated, 1 design-complete,
+0 unaddressed**.
+
+### 5. Why SR-AUD-228 is gated rather than shipped
+
+`HasSameRules` compares a base offset and a bool, so `America/New_York` and `America/Havana` — same
+standard offset, same daylight flag, different transition dates — report as same-rule zones where
+.NET returns false. **Fixing #2181 did not fix this and could not**: the two zones agree on
+everything the type stores. The failure is **one-directional** — this port can only be too
+permissive, never too strict — which is why it is medium.
+
+The repair needs stored rules, and the cost is **measured, not predicted**
+(`build-probe/2185_layout.log`): `sizeof(TimeZoneInfo)` **160 → 184**, and **reordering the members
+does not help** — the best packing available is also 184. `std::string` is 32 ×4, `TimeSpan` is
+**24** (not 8), `bool` is 1, leaving seven bytes of tail padding: enough for another `bool`, not for
+a 24-byte vector. No vtable and no mangled name changes; the break is that mixed translation units
+disagree about the size — the shape `README.md`'s 2026-07-29 `BitArray::Enumerator` entry records
+as linking with **zero diagnostics** and then giving silently wrong answers.
+
+Three alternatives were considered and rejected in the design record: comparing `id_` (wrong for
+the case .NET gets right — two differently named zones with identical rules must compare **true**);
+comparing a sampled UTC-offset function (invents an algorithm .NET does not use, answer depends on
+the window); deriving rules inside `HasSameRules` (twelve `setenv`/`tzset` cycles per zone per call,
+under the process-global timezone lock, from an equality-shaped method).
+
+**The approval sentence, stated exactly:**
+
+> **#2185:** *"`System::TimeZoneInfo` may grow from 160 to 184 bytes (one
+> `std::vector<std::shared_ptr<AdjustmentRule>>`) so that `HasSameRules` and `GetAdjustmentRules`
+> can distinguish two zones that share a base offset and a daylight flag but not their transition
+> rules, requiring every consumer to be rebuilt."*
+
+Four `PIN_` tests and a `static_assert` on `sizeof` hold the current behaviour, so implementing the
+repair fails all five and the question cannot be answered silently.
+
+### 6. A correction of record
+
+An earlier draft of the review plan carried an **estimate** of `sizeof(TimeZoneInfo)` = 144 and a
+gate of 144 → 168, written before the shape was compiled, and that estimate reached
+`docs/Migration-TimeZoneStandardOffset.md`, `README.md` and commit `9210d8f`'s message. Compiled, it
+is **160 → 184**. The substantive claim is unaffected — the batch adds no member and `sizeof` is 160
+before and after, now `static_assert`ed — and `9210d8f` is **not rewritten**; the correction is
+recorded in the plan, the migration note, `README.md` and `11b4fc8`'s message.
+
+### 7. Work unit 3 — the measured next unit
+
+Re-parsed after this batch: **167 remediated / 197 confirmed (143 plain + 54 design-complete) of
+364.** Among units with **no review plan and no remediated finding**:
+
+| Candidate | Open | high | Actionable compatible | Gated | Deferred/evidence | Memory risk | Public-input | System data | Cohesion |
+|---|---:|---:|---:|---:|---:|---|---|---|---|
+| **`net-network-information`** | **3** | **0** | **3** | **0** | 0–1 | low | medium | n/a | **high** — one type (`Ping`) |
+| `globalization` | 7 | **1** | ~3 | **1** (`Calendar` abstract, 82 tests pin the shape) | **3** — need ICU collation/grapheme data | **high** (TSan-confirmed culture race) | high | **no** | medium |
+| `xml-linq` | 4 | 1 | 3 | **1** — its high **is** CCF-019 (#1899/#1894), already design-complete | 1 may touch unminted CCF-021 | high, but that half is blocked | high | n/a | high |
+| `io-isolated-storage` | 1 | 1 | 1 | 0 | 0 | medium (path escape) | high | n/a | tiny |
+| `text-regular-expressions` | 1 | 1 | 1 | likely (lifetime) | 0 | high | medium | n/a | tiny |
+| `collections-object-model` | 1 | 1 | 1 | likely (lifetime) | 0 | high | low | n/a | tiny |
+
+**Selected: `modules/net-network-information`.** It is the only remaining unreviewed unit whose
+findings are **all** actionable with **zero gated and zero blocked**, and — the part that had to be
+proved rather than assumed — **its three findings are independent of blocked #1962**, which must
+stay blocked. Measured (`build-probe/2176_probe8_nextunit.log`):
+
+- **SR-AUD-254 reproduces *because* this container denies ICMP.** `sendWithExceptionWrapping`
+  catches `const std::exception&` and stores `std::make_exception_ptr(e)`, **slicing** the real
+  socket exception: the inner exception of every `PingException` here is a bare
+  `St9exception` / `"std::exception"`, and the actual error is gone. #1962 is about opening a
+  `SOCK_RAW` fallback; this is about what happens to the exception either way.
+- **SR-AUD-253 reproduces**: `SendPingAsync(addr, -1, buf)` returns a task without throwing, and the
+  task faults later with `'timeout' must be a non-negative value`; .NET throws
+  `ArgumentOutOfRangeException` at the call. No socket is involved.
+- **SR-AUD-255 confirmed structurally** — `Ping.cpp:351/404/410` pass `PingOptions()` where .NET
+  passes null, and `PingReply` stores the options whenever the pointer is non-null. This is the one
+  of the three that cannot be observed end-to-end here, because every send fails; stated as a
+  limitation rather than claimed.
+
+**`globalization` is deliberately not next** despite being largest and carrying a high-severity
+race: three of its seven need ICU collation and grapheme data this container does not have, and one
+is a gated public-shape change that 82 existing tests hold in place — most of a review there would
+defer.
+
+**No second review was started.** The brief permits one additional review "if context remains
+strong" and explicitly forbids beginning a second implementation family after time-zone. Rather than
+leave a half-built plan for the next session to distrust — the same judgement the previous batch
+made about `time-zone`, which proved right — the measurement above is the deliverable instead, and
+it converts the next batch's central assumption into evidence.
+
+### 8. Gate, tooling and process
+
+- **Gate: 37 executables run individually — 16,383 ran, 16,376 passed, 1 skipped, 6 failed**
+  (+73 on the inherited 16,310, **exactly** this batch's 114 → 187 time-zone additions, so no
+  regression anywhere). The six are the same two measured causes, **re-verified this run**:
+  `ping_group_range = "1 0"` with `SOCK_DGRAM/ICMP` **denied** and `SOCK_RAW/ICMP` **succeeding**
+  (5 `PingTests`, the real #1962 gap) and `/proc/net/if_inet6` **absent** (1 `SocketTests`). The
+  single skip is the pre-existing `CultureInvariantFormattingTests` locale test. **Nothing
+  disabled, weakened, skipped or recategorized.**
+- **Build:** 0 errors, 0 warnings, `--parallel 2` throughout. **Maximum aggregate compiler
+  concurrency observed: 2** — `cc1plus` sampled every 5 s across the selective-components and
+  local-CI runs never exceeded 2.
+- **Selective components: passed**, 10 components, **one run**, launched with `$!` captured
+  (`build-probe/2176_selective.pid`), verified with `ps -p`, waited on that exact PID; no other
+  compiler-producing command ran concurrently. No `pgrep -f`, no `setsid`.
+- **`local_ci_check.sh build`**: boundaries **41/92**, catalogue current, seams **3 / 20**, negative
+  fixtures **13 files / 116 sites** (peak 2 jobs, 57.4 s), configure and build clean (0 warnings,
+  0 errors) — then its **known #1962 Ping stop**. Reported separately from the full gate, which is
+  why the gate is run per-executable.
+- All eight required validations green; `git diff --check` clean.
+- **Sanitizers**, all against the **production** `TimeZoneInfo.cpp` and `TimeZone.cpp` bodies:
+  UBSan non-recovering **exit 0**, ASan+LSan+UBSan **exit 0**, TSan **exit 0 / zero reports** with
+  8 threads × 40 rounds through concurrent `Local()`, `FindSystemTimeZoneById()` and
+  `CurrentTimeZone()`. TSan is run here because the module holds **real** shared mutable state
+  (`tzMutex()`, the `Local()` static, process-global `TZ`), not as a formality — and a clean run is
+  reported as "no report on this workload", never as "the module is thread-safe".
+- **Doxygen, `ccache` and `/rv` absent** and not installed. Tracked `scripts/__pycache__/*.pyc`
+  unchanged; every Python invocation used `PYTHONDONTWRITEBYTECODE=1`.
+- **Five commits, five pushes**, every one a normal fast-forward, per `CLAUDE.md` rule 13. All
+  unsigned. No merge, rebase, tag, force-push, amend, PR, publication or history rewrite.
+
+### 9. Honest limitations
+
+- **`Africa/Casablanca` does not exercise the all-daylight fallback.** It is why twelve monthly
+  samples are taken rather than two — January *and* July are daylight time there — but the year scan
+  finds its Ramadan reversion, so the fallback branch is **defensive and currently unexercised**: no
+  installed zone lacks a standard-time sample in 2025. The code says so rather than implying
+  coverage.
+- **SR-AUD-255 could not be observed end-to-end** (see §7); the structural reading stands.
+- **Windows and Emscripten are compiled, not executed.** The `_WIN32` branch of `Local()` and
+  `FindSystemTimeZoneById` already read the standard offset, so #2181 does not touch it, but that is
+  read from the source, not measured.
+- **Exact .NET resource strings are unverified.** The exception *types* #2178 and #2179 use come
+  from the audit's own current-.NET probes; the message text is pinned by test and carried by #2186.
+- **`GetSystemTimeZones()` still returns two zones** and **`ClearCachedData()` is still inert** —
+  documented feature gaps, pinned, recorded in #2186, not repaired.
+- The six shipped non-TZif files are stable parts of tzdata, but a host with a trimmed database
+  would skip those assertions rather than fail them; the same is true of every zone-specific test.
 
 ---
 
