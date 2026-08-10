@@ -3,23 +3,175 @@
 
 # NEXT.md
 
-*Last verified: 2026-08-09. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
-harness-designated branch**, continued from its own tip `894135f`. `CLAUDE.md` rule 3 names
-`feature/work`; the discrepancy is recorded rather than resolved silently. **Pushed after every
-commit**, per `CLAUDE.md` rule 13 — six commits, six pushes, every one a normal fast-forward. No
-merge, rebase, tag, force-push, PR, publication, amend or history rewrite; all commits unsigned
-(`git -c commit.gpgsign=false`) — no usable private signing key exists here. This batch **fully
-closed `modules/security-cryptography`** (#2158 review, #2159, #2160, #2161) and then **fully
-closed `modules/console`** (#2162 review, #2163, #2164, #2165, + #2166 deferred). Audit
-**160 remediated / 204 confirmed / 364 total**, of which **50** carry
+*Last verified: 2026-08-10. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
+harness-designated branch**. **Pushed after every commit**, per `CLAUDE.md` rule 13 — six commits,
+six pushes, every one a normal fast-forward. No merge, rebase, tag, force-push, PR, publication,
+amend or history rewrite; all commits unsigned (`git -c commit.gpgsign=false`) — no usable private
+signing key exists here. This batch **reviewed `modules/numerics` and landed its whole compatible
+queue** (#2167 review, #2168, #2169, #2171, #2173): **SR-AUD-278 remediated outright**, and
+SR-AUD-042, SR-AUD-276 and SR-AUD-277 each carrying a completed compatible subpart plus exactly one
+recorded gate — **#2170 and #2172 are approvals, #2175 is missing evidence**. The namespace is
+**not** fully closed and §5 below says why that is the measured answer rather than a shortfall.
+Audit **161 remediated / 203 confirmed / 364 total**, of which **53** carry
 `confirmed (design-complete)`; **no `SR-AUD-*` identifier created — numbering frozen at 364.**
-Gate **16,274 tests across 37 executables: 16,267 passing, 1 skipped, 6 failing** for the same two
-measured causes, unchanged and not hidden (+69 on the inherited 16,205). Graph **41 / 92**, seams
-**2 → 3** (definitions 18 → 20), negative fixtures **11 → 12 files**, **94 → 104 sites**.
-**Doxygen, `ccache` and the `/rv` reference tree are all absent** and were not installed.
-**CCF-019 open; CCF-021/#2131 and CCF-022/#2109 remain unminted.** #1773, #1962, #2150, #2152 and
-#2155 remain exactly as inherited. See the first handoff below.*
+Gate **16,310 tests across 37 executables: 16,303 passing, 1 skipped, 6 failing** for the same two
+measured causes, unchanged and not hidden (+36 on the inherited 16,274). Graph **41 / 92**, seams
+**3 / 20** unchanged, negative fixtures **12 → 13 files, 104 → 116 sites**. **Doxygen, `ccache` and
+the `/rv` reference tree are all absent** and were not installed. **CCF-019 open; CCF-021/#2131 and
+CCF-022/#2109 remain unminted.** #1773, #1962, #2150, #2152, #2155 and #2166 remain exactly as
+inherited. **The measured next unit is `modules/time-zone`** — and the inherited claim that it needs
+a tz database this container lacks is **disproved**: `/usr/share/zoneinfo` is present and three of
+its seven findings reproduced in one probe. See the first handoff below.*
 
+---
+
+## Batch record — `modules/numerics` reviewed and its whole compatible queue landed (#2167–#2173)
+
+**The namespace is NOT fully closed, and that is the measured outcome.** One of four findings is
+remediated outright; the other three each have their compatible subpart complete and exactly one
+recorded gate. Two gates are approvals for change classes this repository has always required an
+explicit decision on; one is missing evidence, not permission.
+
+### 1. Work unit 1 — why `numerics`, and the claim this batch disproved
+
+`audit/AUDIT_FINDINGS_INDEX.md` was re-parsed from scratch. Among **unreviewed** units — no review
+plan, no remediated finding — `numerics` (4 open, 0 high) was selected over `time-zone` (7 open,
+0 high) and `globalization` (7 open, 1 high) as the largest that is a real namespace, has zero
+blocked findings, and is decidable without a reference tree.
+
+**That ranking rested partly on an inherited claim which measurement has now disproved.**
+`/usr/share/zoneinfo/America/New_York` **is present in this container**,
+`FindSystemTimeZoneById("America/New_York")` resolves, and **three of `time-zone`'s seven findings
+reproduced in a single probe** (`build-probe/2167_probe5_timezone.log`). `time-zone` did not need a
+tz database it lacks; it has one. The numerics review was worth doing and is complete, but
+`time-zone` was probably the stronger unit and is unambiguously the next one. Recorded rather than
+quietly fixed, in `docs/SystemNumericsNamespaceReviewPlan.md` §1 and §17.
+
+Deliverable: `docs/SystemNumericsNamespaceReviewPlan.md` (#2167, `832726e`).
+
+### 2. Four premise corrections, every one measured
+
+- **SR-AUD-276 is wider and far less uniform than recorded.** The vector guard is `Length() > 0`,
+  not a zero guard, and `NaN > 0` is false — so it also fires for **any NaN component** (the NaN is
+  *swallowed*, not propagated: `{NaN,0,0}` returns `{NaN,0,0}`) and for **any vector whose squared
+  length underflows to zero** (components below ~1e-22, a normalizable direction returned
+  unnormalized). `{-0,-0,-0}` returns `-0`, not "finite zero". And **`Plane::Normalize` does not
+  share the behaviour the finding groups with it**: its `len < 1e-10f` guard *propagates* NaN, and
+  it returns `{1e-11,0,0}` unnormalized while normalizing `{1e-9,0,0}` with `D` scaled to `1e+09`.
+  The module holds **three** thresholds for one structural question, and `Quaternion::Normalize`
+  already answers it .NET's way.
+- **SR-AUD-277's target is contested by the audit's own two citations.** It calls the port's
+  `<a; b>` skeleton a divergence citing .NET's *constructor documentation example*
+  `(26.1, 18.06)`, while the same report links the *current .NET source*, which gives `<a; b>`.
+  The text defect is also worse than "fixed six decimals": `Complex(1e-9, 0)` printed
+  `<0.000000; 0.000000>`, destroying the value, and `1e300` produced a 619-character string.
+- **SR-AUD-278 is 44 members across 9 templates, not the 3 the probe names** — and the reduction it
+  implements is already settled and documented in three places (`Half.hpp:43-45`,
+  `DivisionRounding.hpp`, the header preamble). The defect was the *shape* of the reduction.
+- **SR-AUD-042's complete repair is a measured object-layout change,** 8 → 16 bytes with a second
+  vptr — not a signature-only change.
+
+### 3. The sanitizer result is clean, and that is reported as a result
+
+`build-probe/2167_probe3_ubsan.cpp` compiles the **production** `BigInteger.cpp` under
+`-fsanitize=undefined,address`, drives everything through `volatile` operands, and covers `0`,
+`±1`, `INTCS_MIN(+1)`, `INTCS_MAX(-1)`, `LONGCS_MIN(+1)`, `LONGCS_MAX(-1)`, `LONGCS_MIN / -1`,
+`LONGCS_MIN % -1`, division by zero, the base-10⁹ limb boundaries, ten shift counts, 14 parse
+texts, every `BitOperations` rotation extreme and the vector/matrix/quaternion extremes.
+**Exit 0, zero reports.** **No ticket in this batch is an arithmetic-UB repair and none is
+claimed**; `CCF-004 has no member in this namespace`. Sanitizer cleanliness does not show
+numerical parity and is not offered as if it did.
+
+### 4. Ticket outcomes
+
+| Ticket | Outcome | Commit |
+|---|---|---|
+| **#2167** numerics review | **done** | `832726e` |
+| **#2168** SR-AUD-278 | **done** — the finding is **remediated** | `074adc8` |
+| **#2169** SR-AUD-042 compatible subpart | **done** — layout-neutral, 8/8 `static_assert`ed | `e763968` |
+| **#2170** SR-AUD-042 remainder | **needs_user** — approval for 8 → 16 bytes | — |
+| **#2171** SR-AUD-277 text subpart | **done** | `e6a6ce7` |
+| **#2172** SR-AUD-277 remainder | **needs_user** — approval for a public return-type change | — |
+| **#2173** SR-AUD-276 contract + pins | **done** — 16 `PIN_` tests | `959aed1` |
+| **#2174** four deferred parity questions | **todo, inactive** — needs `/rv` or a managed probe | — |
+| **#2175** SR-AUD-276 remainder | **todo, inactive** — needs a managed probe | — |
+| audit reconciliation | **done** | `0bb2bcd` |
+
+Namespace totals: `numerics` **299 → 335** tests, 4 findings, **1 remediated, 3 design-complete,
+0 unaddressed**.
+
+### 5. Why #2175 is deferred rather than shipped as a documented break
+
+This batch deliberately did **not** apply the change SR-AUD-276 asks for. The repository has drawn
+this line consistently, and the two precedents point opposite ways: `#2148`/`#2163`/`#2164` shipped
+deliberate breaks without approval **because the audit itself carried a managed probe naming .NET's
+exception type**, and the console review says so explicitly. SR-AUD-276 has **no** managed probe —
+its .NET claim is the auditor's reading of the source, corroborated by this module's own
+`Quaternion.hpp` doc-comment, and it does not cover `Plane::Normalize`'s believed
+already-normalized fast path. Turning a previously-accepted input's numeric answer from finite to
+**NaN**, with no diagnostic, in geometry code is the class `CLAUDE.md` records as the approved
+Groups A–D of `RemainingApprovalDecisions.md`. #2173's 16 pins hold the current behaviour so the
+question cannot be answered silently; applying the #2175 shape fires 10 of them.
+
+### 6. The two approval sentences, stated exactly
+
+- **#2170:** *"`TotalOrderIeee754Comparer<float>`, `<double>` and `<Half>` may grow from 8 to 16
+  bytes (a second vptr) so that they also implement `IEqualityComparer<T>`."* Risk is measurably
+  low and recorded so the decision is cheap: header-only, stateless, **zero in-repository users
+  outside its own tests**. #2169 already ships the semantics.
+- **#2172:** *"`Complex::Abs` may change its public return type from `Complex` to `double`,
+  breaking source compatibility for any caller that assigns its result to a `Complex`."* There is
+  **no implicit conversion either way**, so an affected caller gets a hard compile error, not a
+  silent change; **zero in-repository callers** use `Abs`, all three use `AbsD`.
+
+### 7. Work unit 2 — the measured next unit
+
+**`modules/time-zone`**: 7 open, 0 high, **0 blocked, 0 approval-gated, no reference dependence**,
+and three findings already reproduced here (`2167_probe5_timezone.log`) — the base-offset snapshot
+(New York reports base −4 h and DST **false in July**), the failed `TryFind` that leaves its out
+parameter intact, and `CreateCustomTimeZone` accepting an empty ID and a +15-hour offset. Runner-up
+`xml-linq` (4 open, 3 actionable, but its high **is** CCF-019 and cannot be closed); then
+`net-network-information` (3 open, all actionable, small, adjacent to blocked #1962).
+**`globalization` is deliberately not next** despite its high-severity TSan-confirmed culture race:
+three of its seven need collation and grapheme data, and one is a gated public-shape change that
+82 existing tests hold in place. Full scoring in `SystemNumericsNamespaceReviewPlan.md` §17.
+
+**No `time-zone` review was started** — a seven-finding review that could not be finished would
+leave a half-built plan for the next session to distrust.
+
+### 8. Gate, tooling and process
+
+- **Gate: 37 executables run individually — 16,310 ran, 16,303 passed, 1 skipped, 6 failed**
+  (+36 on the inherited 16,274, exactly this batch's numerics additions). The six are the same two
+  measured causes, re-verified this run: `ping_group_range = "1 0"` (5 `PingTests`, the real #1962
+  gap) and `/proc/net/if_inet6` absent (1 `SocketTests`). **Nothing disabled, weakened, skipped or
+  recategorized.**
+- **Build:** 0 errors, 0 warnings, `--parallel 2` throughout. **Maximum aggregate compiler
+  concurrency observed: 2** — `cc1plus` sampled every 5 s across the selective-components and
+  local-CI runs never exceeded 2, and was 0 between them.
+- **Selective components: passed**, 10 components, one run, launched directly with `$!` captured
+  (`build-probe/2167_selective.pid`), verified with `ps -p`, waited on that exact PID; no other
+  compiler-producing command ran concurrently.
+- **`local_ci_check.sh build`**: boundaries 41/92, catalogue current, seams **3 / 20**, negative
+  fixtures **13 files / 116 sites** (peak 2 jobs), configure and build clean — then its **known
+  #1962 Ping stop** at `SharpRuntimeTests_Net_NetworkInformation`. Reported separately from the
+  full gate, which is why the gate is run per-executable.
+- All eight required validations green; `git diff --check` clean.
+- **Doxygen, `ccache` and `/rv` absent** and not installed. Tracked `scripts/__pycache__/*.pyc`
+  unchanged; every Python invocation used `PYTHONDONTWRITEBYTECODE=1`.
+- **Six commits, six pushes**, every one a normal fast-forward, per `CLAUDE.md` rule 13. All
+  unsigned (`git -c commit.gpgsign=false`) — no usable private signing key exists here. No merge,
+  rebase, tag, force-push, amend, PR, publication or history rewrite.
+
+### 9. Honest limitations
+
+- The `-0` normalization pin asserts only the sign bit, so it is the one pin the #2175 mutation
+  does not fire; nine others cover the same ground.
+- **TSan was not run and is not claimed**: nothing in `numerics` holds shared mutable state or
+  documents a thread-safety contract, so it is not a discriminating tool here.
+- `Complex::ToString`'s culture sensitivity is untouched — a pre-existing, port-wide reduction.
+- `BigInteger(1) << INTCS_MAX` does not return within 30 s (unbounded work). Recorded under #2174
+  rather than bounded, because choosing a bound without knowing .NET's answer would be invention.
 ---
 
 ## Batch record — `modules/security-cryptography` fully closed (#2158–#2161) and `modules/console` fully closed (#2162–#2165, + #2166)

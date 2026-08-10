@@ -1,27 +1,64 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-08-09 (later still) — branch `claude/remediation-batch-1804-namespace-b1yjh5`,
-the harness-designated branch, continued from its own tip `894135f`. **Pushed after every commit**,
-per `CLAUDE.md` rule 13 — six commits, six pushes, all normal fast-forwards. No merge, rebase, tag,
-force-push, PR, publication, amend or history rewrite; all commits unsigned. This batch **fully
-closed `modules/security-cryptography`** — #2158 (the review), #2159 (SR-AUD-332: a disposed HMAC
-still yielded 32 of 32 key bytes from a retained pad, and measurement widened the two sites the
-finding names to seven), #2160 (SR-AUD-331: a disposed PBKDF2 kept deriving output byte-identical
-to a fresh instance's continuation) and #2161 (the contract and the pins) — and then **fully closed
-`modules/console`**: #2162 (the review), #2163/#2164/#2165 (SR-AUD-243/244, the colour and cursor
-domains, plus the contract). **The inherited claim that SR-AUD-331 required an object-layout change
-is withdrawn on measurement**: the flag fits an existing four-byte padding hole at offset 108, so
-`sizeof` stays 160, `alignof` stays 8, zero pre-existing members move, and `Dispose` was already
-virtual — so what was predicted as "one compatible ticket plus one blocked design" became **two
-compatible tickets and no approval gate anywhere in either namespace**. Audit **160 remediated /
-204 confirmed / 364 total**, `confirmed (design-complete)` **50**; **no `SR-AUD-*` identifier
-created — numbering frozen at 364.** Gate **16,274 across 37 executables, 16,267 passing, 1 skipped,
-6 failing** for the same two measured causes (+69). Graph **41 / 92**, seams **3 / 20** (a new
-`KeyMaterialAccess` seam), negative fixtures **12 / 104**. **Doxygen, `ccache` and `/rv` all
-absent.** CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted; #1773, #1962, #2150, #2152 and
-#2155 unchanged. One new inactive ticket, **#2166**, owns six unvalidated Console doors, the cursor
-upper bound and both repairs' exception message text — blocked on evidence, not approval. Maximum
-aggregate compiler parallelism **2 jobs**.*
+*Last verified: 2026-08-10 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
+harness-designated branch. **Pushed after every commit**, per `CLAUDE.md` rule 13 — six commits,
+six pushes, all normal fast-forwards. No merge, rebase, tag, force-push, PR, publication, amend or
+history rewrite; all commits unsigned. This batch **reviewed `modules/numerics`** (#2167) and landed
+its **whole compatible queue**: #2168 (SR-AUD-278 — 44 generic-math statics were declared and never
+defined, so a consumer failed at final link; every one is now `= delete`, moving the failure to the
+call site, and **no program that builds today can be affected** because such a call already fails to
+link), #2169 (SR-AUD-042's layout-neutral half — `Equals`/`GetHashCode` with `IEqualityComparer<T>`'s
+exact signatures, `-0` ≠ `+0`, NaN payloads distinguished, the binary64 hash folded not truncated),
+#2171 (SR-AUD-277's text half — `Complex(1e-9, 0)` printed `<0.000000; 0.000000>`, **destroying the
+value**, and `1e300` produced a 619-character string; both components now render through
+`System::Double::ToString`) and #2173 (SR-AUD-276's contract and 16 `PIN_` tests).
+**`modules/numerics` is NOT fully closed, and that is measured, not a shortfall**: three findings
+carry exactly one gate each — **#2170** (approval: object layout **8 → 16**, measured, not
+predicted), **#2172** (approval: a public return-type change with no conversion path) and **#2175**
+(missing **evidence** — SR-AUD-276 carries no managed probe, so turning finite geometry into NaN
+would be recollection). Four premises corrected, all measured: the normalization guard is
+`Length() > 0`, so it also swallows **NaN** and fires on squared-length **underflow**;
+**`Plane::Normalize` behaves oppositely to `Vector3::Normalize`** although the finding groups them;
+SR-AUD-277's parenthesis target rests on a doc example the same report's other citation contradicts;
+and the generic-math surface is 44 members, not 3. **UBSan+ASan over the production `BigInteger`
+body and the whole arithmetic surface: exit 0, zero reports — CCF-004 has no member here**, and
+that is reported as a result, not as parity evidence. Audit **161 remediated / 203 confirmed / 364
+total**, `confirmed (design-complete)` **53**; **no `SR-AUD-*` identifier created — numbering frozen
+at 364.** Gate **16,310 across 37 executables, 16,303 passing, 1 skipped, 6 failing** for the same
+two measured causes (+36). Graph **41 / 92**, seams **3 / 20** unchanged, negative fixtures
+**12 → 13 files, 104 → 116 sites**. **Doxygen, `ccache` and `/rv` all absent.** CCF-019 open;
+CCF-021/#2131 and CCF-022/#2109 unminted; #1773, #1962, #2150, #2152, #2155 and #2166 unchanged.
+**Next unit, measured: `modules/time-zone`** — 7 open, 0 high, 0 blocked, 0 gated, and the inherited
+claim that it needs an absent tz database is **disproved** (`/usr/share/zoneinfo` is present; three
+findings reproduced in one probe). Maximum aggregate compiler parallelism **2 jobs**.*
+
+## 2026-08-10 — the `modules/numerics` review (#2167) and its whole compatible queue (#2168, #2169, #2171, #2173)
+
+**Selection, and the claim this batch disproved.** `numerics` (4 open, 0 high) was chosen over
+`time-zone` (7 open, 0 high) and `globalization` (7 open, 1 high) as the largest unreviewed real
+namespace with zero blocked findings that is decidable without `/rv`. That ranking rested partly on
+an inherited claim — that `time-zone` needs a tz database this container lacks — which is **false**:
+`/usr/share/zoneinfo/America/New_York` is present, `FindSystemTimeZoneById` resolves it, and three
+of `time-zone`'s seven findings reproduced in a single probe. Recorded in
+`docs/SystemNumericsNamespaceReviewPlan.md` §1 and §17 rather than quietly fixed.
+
+**The four findings, and what each became.** SR-AUD-278 → **remediated** (#2168). SR-AUD-042 →
+#2169 done + **#2170 needs_user**, split on a measurement: the layout-neutral subpart is 8/8, the
+complete repair is 8 → 16 with a second vptr, the class this repository has gated since #1788/#1789.
+SR-AUD-277 → #2171 done + **#2172 needs_user**, split because a public return type has no conversion
+path. SR-AUD-276 → #2173 done + **#2175 blocked on evidence**, because the finding carries no managed
+probe and `Plane::Normalize` — measured to behave *oppositely* to the vectors — would need its own
+answer. Every finding maps to exactly one disposition; none disappeared.
+
+**Five mutations, five counted.** Undeleting `IMinMaxValue::MinValue` made negative site 1 compile
+again while the other 11 stayed rejected; `Equals` → ordinary floating equality produced 4 clean
+failures; a truncating binary64 hash produced 2; `Complex::ToString` → `std::to_string` produced 5;
+and applying the **#2175 shape** fired **10 of #2173's 16 pins**, which is the right mutation for a
+pins ticket — it proves the pins detect the change they exist to make visible. All reverted.
+
+**Namespace 299 → 335 tests.** No layout, signature, vtable, seam or module-graph change; negative
+fixtures gained one file and twelve sites. Full record in
+`docs/SystemNumericsNamespaceReviewPlan.md` §15–§17 and in `NEXT.md`.
 
 ## 2026-08-09 (later still) — `modules/security-cryptography` fully closed (#2158–#2161) and `modules/console` fully closed (#2162–#2165)
 

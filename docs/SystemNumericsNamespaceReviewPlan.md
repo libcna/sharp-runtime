@@ -33,6 +33,15 @@ seven-finding alternatives both fail the last clause: `time-zone` and `globaliza
 questions against data this container does not have, so a review of either would produce mostly
 deferred-verification tickets — exactly what the batch brief says to avoid.
 
+> **Correction, added at the end of this batch (§17).** The clause above about `time-zone` is
+> **wrong, and it was inherited rather than measured.** `/usr/share/zoneinfo/America/New_York`
+> **is present in this container**, `FindSystemTimeZoneById("America/New_York")` resolves, and
+> three of `time-zone`'s seven findings reproduced in a single probe. The numerics review was
+> still worth doing and is complete, but `time-zone` — not `globalization` — is the measured next
+> unit, and it was ranked below numerics on a claim this batch has now disproved. §17 records the
+> measurement. The lesson is the one this programme keeps relearning: an inherited environmental
+> claim is a prediction until a probe runs.
+
 **The inherited handoff's characterisation is confirmed in three of four parts and corrected in the
 fourth.** Confirmed: 4 open findings, 0 high, no seam entanglement. **Corrected: "no blocked work
 expected" is wrong.** Two of the four findings have a repair whose *complete* form is gated —
@@ -503,3 +512,56 @@ of 364.**
 **Totals:** `numerics` 4 findings, 1 remediated, 3 design-complete, 0 unaddressed. Tests
 **299 → 335**. No layout, signature, vtable, seam or module-graph change; negative fixtures
 **12 → 13 files, 104 → 116 sites**.
+
+
+---
+
+## 17. Work unit 2 — the measured next actionable unit
+
+Re-parsed after this batch: **161 remediated / 203 confirmed (150 plain + 53 design-complete) of
+364.** Candidates are units with **no review plan and no remediated finding**. "Actionable here"
+means the audit summary carries an explicit statement of .NET's answer *and* the question is
+decidable in this container, judged per finding rather than per module.
+
+| Candidate | Open | high | Actionable here | Blocked | Approval-gated | `/rv`-bound | Memory risk | Public-input exposure | Cohesion |
+|---|---:|---:|---:|---:|---:|---|---|---|---|
+| **`time-zone`** | **7** | **0** | **7** | **0** | **0** | **no — see §17.1** | none | low | **high** — one namespace, 4 headers, 2 bodies, 114 tests |
+| `xml-linq` | 4 | 1 | 3 | **1** (SR-AUD-333 is CCF-019 → #1899/#1894) | 0 | no | **high**, but that half is the blocked one | high (parser input) | high |
+| `net-network-information` | 3 | 0 | 3 | 0 | 0 | no | low | medium | high, but small and adjacent to blocked #1962 |
+| `globalization` | 7 | **1** | ~2 | 0 | **1** (SR-AUD-281 makes `Calendar` abstract — a public-shape change with **82 tests** on the current shape) | **yes** — 279/283/284 need grapheme and collation data | **high** (SR-AUD-280 is a TSan-confirmed race on process-global culture) | high | medium |
+| `core` | 72 | 9 | many | — | several | mixed | mixed | high | **not a namespace** — already carved by seven `CCF-*` plans, 47 findings already remediated |
+| `scripts` / `tests` / `.github` | 3 / 2 / 1 | 0 | most | 0 | 0 | no | low | none | tooling, not a namespace |
+
+**Selected next unit: `modules/time-zone`.** It is the only remaining candidate with **seven open
+findings, zero high, zero blocked, zero approval-gated, and no reference dependence** — the
+largest fully-decidable unit left. `xml-linq` is the runner-up and is the right choice if
+`time-zone` is taken by someone else, but one of its four is CCF-019 and cannot be closed.
+`globalization` is deliberately **not** next despite its high-severity race: three of its seven
+need collation and grapheme data, and one is a gated public-shape change that 82 existing tests
+hold in place, so most of a `globalization` review would defer.
+
+### 17.1 The measurement that overturns the inherited claim
+
+`build-probe/2167_probe5_timezone.cpp`, run against the shipped library:
+
+```
+/usr/share/zoneinfo/America/New_York                      PRESENT
+FindSystemTimeZoneById("America/New_York")                resolves
+Local id=Local  base=-240 min                             SR-AUD-229 reproduces
+  Jan 15 DST=0   Jul 15 DST=0                             SR-AUD-223 reproduces
+TryFind("No/Such_Zone") -> false, out still "UTC"         SR-AUD-224 reproduces
+CreateCustomTimeZone("", 0h, …)      -> accepted, id=""   SR-AUD-225 reproduces
+CreateCustomTimeZone("X", +15h, …)   -> accepted          SR-AUD-225 reproduces
+```
+
+Three findings reproduced in one probe, with **no reference tree and no managed runtime**, because
+each of them is a *validation or contract* question whose .NET answer the audit already states:
+".NET assigns null to the out parameter", ".NET rejects them with argument diagnostics",
+".NET throws ArgumentException", ".NET returns false". The base-offset pair (223/229) is
+structural — the adapter snapshots **one** offset, the current one, so a January query in New York
+reports −4 and no DST — and is measurable here precisely because the zone database is present.
+
+**No `time-zone` review is started in this batch.** The four compatible numerics tickets, the
+audit reconciliation, the full gate and the selective-components run consumed the context this
+batch had, and starting a seven-finding review that could not be finished would leave a half-built
+plan for the next session to distrust. The measurement above is the deliverable instead.
