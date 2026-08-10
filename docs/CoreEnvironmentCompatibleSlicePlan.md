@@ -123,6 +123,12 @@ truncation signal `readlink` gives. The Windows branch likewise loops while
 stops ignoring a zero return, which previously produced whatever was in the
 buffer.
 
+> **Read §11.1 before quoting this paragraph.** The code claim above survived
+> measurement; the *reachability* claim did not. Linux's procfs cannot represent
+> an `exe` link target past `PATH_MAX` at all, so the truncation is unreachable
+> through `/proc/self/exe` and this branch is defensive correctness, not a
+> reproduced Linux defect.
+
 Deliberately **not** switched to `std::filesystem::current_path()` despite the
 `modules/io` sibling: on Windows `path::string()` converts through a different
 narrow encoding than `GetCurrentDirectoryA`, so it would change bytes on a
@@ -240,3 +246,65 @@ Both findings dispositioned in `audit/AUDIT_FINDINGS_INDEX.md` and in the
 `Environment.cpp` per-file report; #2242 recorded as deferred; SR-AUD-105 and
 SR-AUD-106 still `confirmed` and unclaimed; zero build warnings; no test
 regression; the before-probe re-run with every BAD row turned OK.
+
+---
+
+## 11. Outcome, measured 2026-08-10
+
+The slice probe moved from **6 OK / 18 BAD** to **24 OK / 0 BAD**
+(`build-probe/2239_probe1_before.log`, `…_after.log`). `EnvironmentTests`
+99 → 108 (+9). Build clean, zero warnings.
+
+### 11.1 A premise correction the process-path probe produced
+
+§4.1 said `getProcessPathProperty()` carries a worse version of SR-AUD-107's
+defect because `readlink` cannot report truncation. The **code** claim is
+correct. The **reachability** claim is not, on Linux, and the correction matters
+more than the repair:
+
+`build-probe/2240_probe2_driver.cpp` builds a 4,671-byte directory, copies a
+helper binary into it and `execl`s it there, so the running process's own
+executable path exceeds 4 KiB. The helper's own independently sized
+`readlink("/proc/self/exe", buf, 1 MiB)` then fails with **`ENAMETOOLONG`**:
+
+```
+[107] helper directory is 4671 bytes at depth 23
+[107] readlink(/proc/self/exe) failed: File name too long
+[107] exe path: reference=0 port=0  OK   (match)
+```
+
+Linux's procfs builds the `exe` link target in a page-sized buffer, so a path
+past `PATH_MAX` cannot be represented through that interface **at all**. The
+port's fixed 4 KiB buffer was therefore never the binding constraint on Linux:
+before and after the repair the answer is the same empty string, and it is the
+right one. The `getProcessPathProperty()` change is kept as defensive
+correctness — it detects truncation instead of silently accepting it, and stops
+the Windows branch from ignoring a zero `GetModuleFileNameA` return — but this
+plan does **not** claim a reproduced Linux defect there. Only the
+`GetCurrentDirectory` half is a measured data-loss reproduction.
+
+A second, smaller correction, for anyone repeating this: a POSIX shell cannot
+drive that experiment. `dash`'s `cd` builtin composes an absolute pathname and
+hits `PATH_MAX` at ~4,096 bytes, while `chdir()` on a *relative* name from C has
+no such limit — which is why both the probe and the driver are C++ and why the
+regression test unwinds with `chdir("..")` rather than a long path.
+
+### 11.2 Mutation checks
+
+Each was applied to production code, rebuilt and re-run:
+
+| Mutation | Result |
+|---|---|
+| POSIX `getcwd` returns `""` on `ERANGE` instead of growing | 1 test fails (`GetCurrentDirectory_LongPath_IsNotTruncatedOrLost`) |
+| `readlink` loop returns the buffer without testing for truncation | **no test fails — labelled EQUIVALENT on Linux**, for the `ENAMETOOLONG` reason in §11.1 |
+| `2n + 1` backslash rule weakened to `2n` | 2 tests fail (the backslash-rule test and the round-trip table) |
+| argv[0] never quote-wrapped | 1 test fails (`CommandLine_ArgV0_UsesTheArgV0Rules`) |
+
+### 11.3 What did not change
+
+`CommandLine_JoinsArgs` (`"prog arg1"`) and `CommandLine_EmptyWhenNotInitialized`
+(`""`) are untouched and still pass, which is the compatibility statement of
+§4.3 in test form: an argument that is non-empty and free of whitespace and
+quotes is emitted byte-identically to the old join. The `GetCurrentDirectory`
+error contract is unchanged — a non-`ERANGE` failure still yields `""` — and a
+short cwd is asserted equal to a dynamically sized `getcwd`.

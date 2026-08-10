@@ -29,8 +29,11 @@
 #  include <sys/utsname.h>
 #  include <cstdio>
 #endif
+#include <cerrno>
+#include <cstddef>
 #include <cstring>
 #include <sstream>
+#include <vector>
 
 // HOST_NAME_MAX is a Linux/glibc extension (POSIX.1-2001 mentions it but doesn't mandate it) --
 // Apple's libc headers never define it at all (confirmed via a real macOS CI build: "use of
@@ -113,16 +116,41 @@ System::OperatingSystem Environment::getOSVersionProperty() {
 #endif
 }
 
+// Upper bound on the buffers the two path-retrieval doors below are allowed to grow to.
+// It is a runaway guard, not a path limit: a pathological or repeated ERANGE must not turn
+// into unbounded allocation. Every real current directory, and every real executable path,
+// is orders of magnitude below it. The 4 KiB fixed buffers this replaced were the defect
+// (SR-AUD-107) precisely because they were near the size of real data.
+static constexpr std::size_t kPathRetrievalCeiling = 1024u * 1024u;
+
 std::string Environment::GetCurrentDirectory() {
+    // The current directory has no portable length limit: a process can reach one longer
+    // than PATH_MAX by chdir()ing one legal component at a time, and getcwd() then reports
+    // ERANGE for any buffer that cannot hold it. This used to call getcwd() once into a
+    // fixed char[4096] and return "" on ERANGE, so a real 4,868-byte current directory --
+    // built exactly that way and measured in build-probe/2239_probe1_before.log -- became
+    // an empty string. .NET's Unix Interop.Sys.GetCwd imposes no such public ceiling, and
+    // this repository's own System::IO::Directory::GetCurrentDirectory has never had one
+    // (it is std::filesystem::current_path()). Grow until the call succeeds; every failure
+    // that is NOT ERANGE keeps returning "", so the error contract is unchanged.
+    // Ticket #2240 / SR-AUD-107; see docs/CoreEnvironmentCompatibleSlicePlan.md.
 #if defined(_WIN32)
-    char buf[4096];
-    if (GetCurrentDirectoryA(static_cast<DWORD>(sizeof(buf)), buf))
-        return std::string(buf);
-    return "";
+    // Win32's own documented two-call pattern: a zero-length call returns the required
+    // buffer size INCLUDING the terminating NUL.
+    const DWORD needed = GetCurrentDirectoryA(0, nullptr);
+    if (needed == 0 || needed > kPathRetrievalCeiling) return "";
+    std::vector<char> buf(needed);
+    const DWORD written = GetCurrentDirectoryA(needed, buf.data());
+    if (written == 0 || written >= needed) return "";
+    return std::string(buf.data(), written);
 #else
-    char buf[4096];
-    if (getcwd(buf, sizeof(buf))) return std::string(buf);
-    return "";
+    std::vector<char> buf(4096);
+    for (;;) {
+        if (getcwd(buf.data(), buf.size())) return std::string(buf.data());
+        if (errno != ERANGE) return "";
+        if (buf.size() >= kPathRetrievalCeiling) return "";
+        buf.resize(buf.size() * 2);
+    }
 #endif
 }
 
@@ -378,17 +406,44 @@ void Environment::SetCurrentDirectory(const std::string& path) {
 }
 
 std::string Environment::getProcessPathProperty() {
+    // Same fixed-4-KiB ceiling as GetCurrentDirectory had, and worse: neither OS primitive
+    // here reports truncation as an error. readlink() returns the number of bytes it
+    // WROTE, so a longer path used to come back silently TRUNCATED rather than empty, and
+    // GetModuleFileNameA's return was discarded entirely, so a failure handed back whatever
+    // was in the buffer. A filled buffer is the only truncation signal either one gives, so
+    // that is what the loops test. Ticket #2240 / SR-AUD-107, which names this branch.
+    //
+    // Measured, and deliberately NOT overclaimed: on Linux the truncation is unreachable
+    // through this interface. procfs builds the `exe` link target in a page-sized buffer, so
+    // a running process whose own executable path exceeds PATH_MAX gets ENAMETOOLONG from
+    // readlink() rather than a long path -- reproduced by running a helper binary from a
+    // 4,671-byte directory (build-probe/2240_probe2.log). Before and after this change that
+    // case returns the same empty string, which is the right answer. What the loop buys is
+    // defensive correctness on any platform that does not cap the answer for us, plus the
+    // Windows zero-return handling, which was a real unconditional defect.
 #if defined(_WIN32)
-    char buf[4096]{};
-    GetModuleFileNameA(nullptr, buf, sizeof(buf) - 1);
-    return std::string(buf);
+    std::vector<char> buf(4096);
+    for (;;) {
+        SetLastError(ERROR_SUCCESS);
+        const DWORD len = GetModuleFileNameA(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+        if (len == 0) return "";
+        if (len < buf.size() && GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+            return std::string(buf.data(), len);
+        if (buf.size() >= kPathRetrievalCeiling) return "";
+        buf.resize(buf.size() * 2);
+    }
 #elif defined(__EMSCRIPTEN__)
     return "";
 #else
-    char buf[4096]{};
-    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    if (len > 0) { buf[len] = '\0'; return std::string(buf); }
-    return "";
+    std::vector<char> buf(4096);
+    for (;;) {
+        const ssize_t len = readlink("/proc/self/exe", buf.data(), buf.size());
+        if (len <= 0) return "";
+        if (static_cast<std::size_t>(len) < buf.size())
+            return std::string(buf.data(), static_cast<std::size_t>(len));
+        if (buf.size() >= kPathRetrievalCeiling) return "";
+        buf.resize(buf.size() * 2);
+    }
 #endif
 }
 
@@ -466,19 +521,101 @@ std::vector<std::string> Environment::GetCommandLineArgs() {
     return s_commandLineArgs;
 }
 
+namespace {
+
+    // The ASCII whitespace set char.IsWhiteSpace recognises among the Basic-Latin bytes that
+    // can appear unescaped in an argument. Deliberately NOT std::isspace, which is
+    // locale-dependent and takes an int: this is a byte-level operation over UTF-8 storage.
+    bool isArgWhitespace(char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
+    }
+
+    bool containsNoWhitespaceOrQuotes(const std::string& s) {
+        for (char c : s)
+            if (isArgWhitespace(c) || c == '"') return false;
+        return true;
+    }
+
+    // PasteArguments.AppendArgument -- the inverse of CommandLineToArgvW's parsing rules for
+    // every argument after argv[0]:
+    //   - a backslash is an ordinary character EXCEPT when followed by a quote;
+    //   - 2n backslashes before a quote parse as n literal backslashes plus a delimiter quote;
+    //   - 2n+1 backslashes before a quote parse as n literal backslashes plus a literal quote;
+    //   - parsing stops at the first whitespace outside a quoted region.
+    void appendArgument(std::string& out, const std::string& argument) {
+        if (!out.empty()) out += ' ';
+
+        if (!argument.empty() && containsNoWhitespaceOrQuotes(argument)) {
+            out += argument;   // the common case emits byte-identically to the old join
+            return;
+        }
+
+        out += '"';
+        std::size_t idx = 0;
+        while (idx < argument.size()) {
+            const char c = argument[idx++];
+            if (c == '\\') {
+                std::size_t numBackSlash = 1;
+                while (idx < argument.size() && argument[idx] == '\\') { ++idx; ++numBackSlash; }
+                if (idx == argument.size()) {
+                    // A closing quote is about to follow, so these must be doubled.
+                    out.append(numBackSlash * 2, '\\');
+                } else if (argument[idx] == '"') {
+                    out.append(numBackSlash * 2 + 1, '\\');
+                    out += '"';
+                    ++idx;
+                } else {
+                    out.append(numBackSlash, '\\');
+                }
+            } else if (c == '"') {
+                out += '\\';
+                out += '"';
+            } else {
+                out += c;
+            }
+        }
+        out += '"';
+    }
+
+    // PasteArguments.Paste's pasteFirstArgumentUsingArgV0Rules branch. argv[0] parses under
+    // different rules: a backslash is always an ordinary character and quotes exist only to
+    // carry whitespace, so there is no way to escape anything.
+    void appendArgV0(std::string& out, const std::string& argument) {
+        bool hasWhitespace = false;
+        for (char c : argument)
+            if (isArgWhitespace(c)) { hasWhitespace = true; break; }
+
+        if (argument.empty() || hasWhitespace) {
+            // A literal '"' cannot be represented under these rules at all. This port emits
+            // it verbatim rather than rejecting the argument, because a public diagnostic
+            // property that throws for a legal argv[0] would be a worse failure than an
+            // unparseable one. What .NET does here is not derivable from the finding and
+            // /rv is absent in this container, so the choice is PINNED by a test and
+            // deferred to ticket #2242 rather than guessed.
+            out += '"';
+            out += argument;
+            out += '"';
+        } else {
+            out += argument;
+        }
+    }
+
+} // namespace
+
 std::string Environment::getCommandLineProperty() {
-    // Real .NET's Environment.CommandLine (PasteArguments.Paste) re-quotes each argument using
-    // the same backslash-doubling rules as Windows' CommandLineToArgvW, so an argument containing
-    // whitespace/quotes round-trips unambiguously. This simplified version just space-joins the
-    // raw argv entries verbatim -- correct for the common case (no whitespace/quote characters in
-    // any argument), but an argument containing a space would be indistinguishable from two
-    // separate arguments if this string were re-parsed. Not fixed: full CommandLineToArgvW-style
-    // quoting is a Windows-specific escaping scheme with limited practical value for this
-    // POSIX-focused runtime's primarily-diagnostic use of this property.
+    // .NET's Environment.CommandLine is
+    // PasteArguments.Paste(GetCommandLineArgs(), pasteFirstArgumentUsingArgV0Rules: true),
+    // which quotes whitespace and escapes quotes and backslashes so the argument sequence
+    // round-trips. This used to space-join the raw entries verbatim, so "prog" + "two words"
+    // re-parsed as three arguments and "prog" + "" lost an argument entirely -- measured
+    // against a CommandLineToArgvW-shaped reference parser in
+    // build-probe/2239_probe1_before.log, 16 of 18 rows wrong. An argument that is non-empty
+    // and free of whitespace and quotes is still emitted verbatim, so the common case is
+    // byte-identical to the old output. Ticket #2241 / SR-AUD-108.
     std::string result;
     for (std::size_t i = 0; i < s_commandLineArgs.size(); ++i) {
-        if (i > 0) result += ' ';
-        result += s_commandLineArgs[i];
+        if (i == 0) appendArgV0(result, s_commandLineArgs[i]);
+        else        appendArgument(result, s_commandLineArgs[i]);
     }
     return result;
 }

@@ -2,12 +2,18 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <algorithm>
+#include <cerrno>
+#include <cstddef>
+#include <string>
+#include <vector>
 #include <gtest/gtest.h>
 #include "System/ArgumentException.hpp"
 #include "System/Environment.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/Version.hpp"
 #ifndef _WIN32
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 #endif
 
@@ -674,4 +680,210 @@ TEST(EnvironmentTests, GetLogicalDrives_ContainsRoot) {
 TEST(EnvironmentTests, SystemDirectory_MatchesGetFolderPathSystem) {
     EXPECT_EQ(Environment::getSystemDirectoryProperty(),
               Environment::GetFolderPath(Environment::SpecialFolder::System));
+}
+
+// ---------------------------------------------------------------------------
+// GetCurrentDirectory has no length ceiling (#2240 / SR-AUD-107)
+//
+// GetCurrentDirectory() used to call getcwd() once into a fixed char[4096] and return ""
+// on ERANGE, so a legal current directory past 4 KiB -- reachable by chdir()ing one
+// component at a time -- became an empty string. Measured before the fix
+// (build-probe/2239_probe1_before.log): a real 4,868-byte cwd returned length 0.
+// See docs/CoreEnvironmentCompatibleSlicePlan.md section 4.1.
+// ---------------------------------------------------------------------------
+
+#ifndef _WIN32
+namespace {
+
+// getcwd() with a buffer that grows until the call succeeds -- the independent reference
+// this test compares the public port against.
+std::string dynamicGetcwd() {
+    std::vector<char> buf(256);
+    for (;;) {
+        if (::getcwd(buf.data(), buf.size())) return std::string(buf.data());
+        if (errno != ERANGE) return "";
+        buf.resize(buf.size() * 2);
+    }
+}
+
+} // namespace
+
+TEST(EnvironmentTests, GetCurrentDirectory_LongPath_IsNotTruncatedOrLost) {
+    const std::string original = dynamicGetcwd();
+    ASSERT_FALSE(original.empty());
+
+    // A uniquely named root under the test's own working directory, so this never touches
+    // a shared temp path and never collides with a concurrently running suite.
+    const std::string root = "sr_2240_deep_" + std::to_string(::getpid());
+    if (::mkdir(root.c_str(), 0777) != 0 || ::chdir(root.c_str()) != 0) {
+        GTEST_SKIP() << "could not create a scratch directory in " << original;
+    }
+
+    // Every mkdir/chdir uses a RELATIVE 200-byte name, so no single pathname argument ever
+    // approaches PATH_MAX -- only the resulting cwd grows.
+    const std::string component(200, 'd');
+    int depth = 0;
+    while (dynamicGetcwd().size() < 4600) {
+        if (::mkdir(component.c_str(), 0777) != 0 && errno != EEXIST) break;
+        if (::chdir(component.c_str()) != 0) break;
+        ++depth;
+    }
+    const std::string actual = dynamicGetcwd();
+    const bool deepEnough = actual.size() > 4096;
+
+    if (deepEnough) {
+        EXPECT_EQ(Environment::GetCurrentDirectory(), actual);
+        EXPECT_EQ(Environment::GetCurrentDirectory().size(), actual.size());
+    }
+
+    // Unwind bottom-up so no long pathname is ever passed to the OS, then restore.
+    for (int i = 0; i < depth; ++i) {
+        const std::string here = dynamicGetcwd();
+        const std::string leaf = here.substr(here.rfind('/') + 1);
+        if (::chdir("..") != 0) break;
+        ::rmdir(leaf.c_str());
+    }
+    ASSERT_EQ(::chdir(original.c_str()), 0);
+    ::rmdir(root.c_str());
+    ASSERT_EQ(dynamicGetcwd(), original);
+
+    if (!deepEnough) {
+        GTEST_SKIP() << "filesystem would not accept a current directory past 4 KiB (reached "
+                     << actual.size() << " bytes)";
+    }
+}
+
+TEST(EnvironmentTests, GetCurrentDirectory_ShortPath_MatchesDynamicGetcwd) {
+    // The control the repair must not move: an ordinary cwd is reported byte-identically.
+    EXPECT_EQ(Environment::GetCurrentDirectory(), dynamicGetcwd());
+}
+
+TEST(EnvironmentTests, ProcessPath_IsAbsoluteAndNotTruncated) {
+    const std::string path = Environment::getProcessPathProperty();
+    ASSERT_FALSE(path.empty());
+    EXPECT_EQ(path.front(), '/');
+    // readlink() reports truncation only by filling the buffer, so the repaired loop must
+    // agree with an independently sized read of the same link.
+    std::vector<char> buf(65536);
+    const ssize_t len = ::readlink("/proc/self/exe", buf.data(), buf.size());
+    if (len > 0 && static_cast<std::size_t>(len) < buf.size()) {
+        EXPECT_EQ(path, std::string(buf.data(), static_cast<std::size_t>(len)));
+    }
+}
+#endif // !_WIN32
+
+// ---------------------------------------------------------------------------
+// CommandLine quotes and escapes as PasteArguments does (#2241 / SR-AUD-108)
+//
+// getCommandLineProperty() used to space-join the raw argv entries, so an argument
+// containing whitespace or a quote could not be told apart from two arguments. .NET builds
+// this string with PasteArguments.Paste(..., pasteFirstArgumentUsingArgV0Rules: true).
+// Each case below asserts the exact emitted text AND re-parses it with a
+// CommandLineToArgvW-shaped reference parser, so the round trip is measured rather than
+// asserted. See docs/CoreEnvironmentCompatibleSlicePlan.md sections 4.2 and 4.3.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// The inverse of PasteArguments.AppendArgument, i.e. CommandLineToArgvW's rules for every
+// argument after argv[0]. Deliberately written independently of the production code.
+std::vector<std::string> parseCommandLineTail(const std::string& s) {
+    auto isWs = [](char c) { return c == ' ' || c == '\t'; };
+    std::vector<std::string> out;
+    std::size_t i = 0;
+    while (i < s.size()) {
+        while (i < s.size() && isWs(s[i])) ++i;
+        if (i >= s.size()) break;
+        std::string arg;
+        bool inQuotes = false;
+        while (i < s.size()) {
+            if (s[i] == '\\') {
+                std::size_t n = 0;
+                while (i < s.size() && s[i] == '\\') { ++n; ++i; }
+                if (i < s.size() && s[i] == '"') {
+                    arg.append(n / 2, '\\');
+                    if (n % 2) { arg.push_back('"'); ++i; }
+                    else { inQuotes = !inQuotes; ++i; }
+                } else {
+                    arg.append(n, '\\');
+                }
+                continue;
+            }
+            if (s[i] == '"') { inQuotes = !inQuotes; ++i; continue; }
+            if (!inQuotes && isWs(s[i])) break;
+            arg.push_back(s[i++]);
+        }
+        out.push_back(arg);
+    }
+    return out;
+}
+
+std::string commandLineOf(const std::vector<std::string>& argv) {
+    std::vector<char*> raw;
+    raw.reserve(argv.size());
+    for (const auto& a : argv) raw.push_back(const_cast<char*>(a.c_str()));
+    Environment::InitializeCommandLine(static_cast<int>(raw.size()),
+                                       raw.empty() ? nullptr : raw.data());
+    return Environment::getCommandLineProperty();
+}
+
+} // namespace
+
+TEST(EnvironmentTests, CommandLine_PlainArguments_AreEmittedVerbatim) {
+    // The common case must stay byte-identical to the old space-join.
+    EXPECT_EQ(commandLineOf({"prog", "arg1"}), "prog arg1");
+    EXPECT_EQ(commandLineOf({"prog", "--flag", "value"}), "prog --flag value");
+}
+
+TEST(EnvironmentTests, CommandLine_WhitespaceAndQuotes_AreQuotedAndEscaped) {
+    EXPECT_EQ(commandLineOf({"prog", "two words"}),    "prog \"two words\"");
+    EXPECT_EQ(commandLineOf({"prog", "a\tb"}),         "prog \"a\tb\"");
+    EXPECT_EQ(commandLineOf({"prog", "a\nb"}),         "prog \"a\nb\"");
+    EXPECT_EQ(commandLineOf({"prog", "quote\"value"}), "prog \"quote\\\"value\"");
+    EXPECT_EQ(commandLineOf({"prog", ""}),             "prog \"\"");
+}
+
+TEST(EnvironmentTests, CommandLine_BackslashRuns_FollowThe2nAnd2nPlus1Rules) {
+    // Two backslashes then a quote -> 2*2+1 = five backslashes then an escaped quote.
+    EXPECT_EQ(commandLineOf({"prog", "a\\\\\"b"}), "prog \"a\\\\\\\\\\\"b\"");
+    // Trailing backslashes are doubled because a closing quote follows them.
+    EXPECT_EQ(commandLineOf({"prog", "a b\\"}),    "prog \"a b\\\\\"");
+    // A backslash not followed by a quote is NOT doubled.
+    EXPECT_EQ(commandLineOf({"prog", "a\\b c"}),   "prog \"a\\b c\"");
+}
+
+TEST(EnvironmentTests, CommandLine_EveryCaseRoundTripsThroughAReferenceParser) {
+    const std::vector<std::vector<std::string>> cases = {
+        {"prog", "arg1"},
+        {"prog", "two words"},
+        {"prog", "a\tb"},
+        {"prog", "quote\"value"},
+        {"prog", ""},
+        {"prog", "a\\\\\"b"},
+        {"prog", "a b\\"},
+        {"prog", "a\\b c"},
+        {"prog", "one", "t w o", "thr\"ee", ""},
+    };
+    for (const auto& argv : cases) {
+        const std::string text = commandLineOf(argv);
+        std::vector<std::string> expected(argv.begin() + 1, argv.end());
+        EXPECT_EQ(parseCommandLineTail(text.substr(text.find(' ') + 1)), expected)
+            << "emitted: " << text;
+    }
+}
+
+TEST(EnvironmentTests, CommandLine_ArgV0_UsesTheArgV0Rules) {
+    // argv[0] parses under different rules: a backslash is an ordinary character and quotes
+    // exist only to carry whitespace.
+    EXPECT_EQ(commandLineOf({"my prog", "x"}), "\"my prog\" x");
+    EXPECT_EQ(commandLineOf({"C:\\dir\\prog", "x"}), "C:\\dir\\prog x");
+    EXPECT_EQ(commandLineOf({""}), "\"\"");
+    // PINNED, and deferred to ticket #2242: argv[0]'s rules cannot represent a literal
+    // quote, and what .NET does when asked to is not decidable in this container. This port
+    // emits it verbatim rather than throwing from a public diagnostic property.
+    EXPECT_EQ(commandLineOf({"pro\"g", "x"}), "pro\"g x");
+}
+
+TEST(EnvironmentTests, CommandLine_EmptyArgvIsStillEmpty) {
+    EXPECT_EQ(commandLineOf({}), "");
 }
