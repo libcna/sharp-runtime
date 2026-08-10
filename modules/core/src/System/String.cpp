@@ -117,6 +117,35 @@ namespace System
     // grammar changes what currently-succeeding calls return and is gated on explicit user
     // approval as ticket #1884 (plan section 20).
     namespace {
+        // The one bounded backward substring search for `String::LastIndexOf` (#2224,
+        // SR-AUD-016).
+        //
+        // `std::string::rfind(substr, startIndex)` treats `startIndex` as the latest permitted
+        // match **start**, but .NET's bounded LastIndexOf defines a *searched section* and the
+        // whole match must lie inside it. Both substring overloads used to check only the lower
+        // bound, so a match that began inside the section and ran off its end was returned:
+        // `LastIndexOf("abcde", "de", 3, 4)` answered 3 although the section is indices 0..3 and
+        // the match consumes index 4, and `LastIndexOf("abcde", "abcde", 2, 3)` answered 0,
+        // overrunning `startIndex` by three positions.
+        //
+        // Searching from `searchEnd = startIndex + 1 - substr.size()` — the last position at
+        // which the match still *fits* — is what makes the upper bound hold, and the size
+        // comparison is done in `size_t` so a substring longer than the section cannot produce a
+        // negative intermediate. The single-character overloads do not need this: a one-character
+        // match can never overrun its own start.
+        SharpRuntime::intcs lastIndexOfBounded(const std::string& value, const std::string& substr,
+                                               SharpRuntime::intcs startIndex,
+                                               SharpRuntime::intcs lowerBound) {
+            const size_t inclusiveEnd = static_cast<size_t>(startIndex) + 1u;
+            if (substr.size() > inclusiveEnd) return -1;  // cannot fit at or before startIndex
+            const size_t searchEnd = inclusiveEnd - substr.size();
+            const auto pos = value.rfind(substr, searchEnd);
+            if (pos == std::string::npos) return -1;
+            return static_cast<SharpRuntime::intcs>(pos) >= lowerBound
+                       ? static_cast<SharpRuntime::intcs>(pos)
+                       : -1;
+        }
+
         // Every Format overload's arguments, type-erased just enough to be indexed by a parsed
         // format item. `text` points at the caller's own std::string parameter, which outlives
         // the call; nothing here owns or copies it.
@@ -589,8 +618,7 @@ namespace System
         if (startIndex == len) startIndex = len - 1;
         if (startIndex < 0 || startIndex >= len)
             throw System::ArgumentOutOfRangeException("startIndex", "String::LastIndexOf: startIndex must be within the bounds of the string.");
-        auto pos = value.rfind(substr, static_cast<size_t>(startIndex));
-        return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
+        return lastIndexOfBounded(value, substr, startIndex, 0);
     }
 
     SharpRuntime::intcs String::LastIndexOf(const std::string& value, char ch, SharpRuntime::intcs startIndex)
@@ -896,10 +924,7 @@ namespace System
         if (count < 0 || count > startIndex + 1)
             throw System::ArgumentOutOfRangeException("count", "String::LastIndexOf: count must refer to a location within the string.");
         if (substr.empty()) return startIndex;
-        SharpRuntime::intcs begin = startIndex - count + 1;
-        auto pos = value.rfind(substr, static_cast<size_t>(startIndex));
-        if (pos == std::string::npos) return -1;
-        return static_cast<SharpRuntime::intcs>(pos) >= begin ? static_cast<SharpRuntime::intcs>(pos) : -1;
+        return lastIndexOfBounded(value, substr, startIndex, startIndex - count + 1);
     }
 
     std::vector<char> String::ToCharArray(const std::string& value, SharpRuntime::intcs startIndex, SharpRuntime::intcs length)

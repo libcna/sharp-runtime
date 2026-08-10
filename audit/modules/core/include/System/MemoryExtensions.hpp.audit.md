@@ -180,3 +180,40 @@ instantiations. **Ten mutations**, one of them a deliberate *negative* control
 that must still pass. ASan/UBSan/LSan clean with activation proved separately;
 TSan recorded **not applicable** — nothing in the family has shared mutable
 state. Full record: `docs/ComparisonContractPlan.md`.
+
+---
+
+## Remediation record — ticket #2226 (SR-AUD-048, CCF-015), 2026-08-10
+
+**`remediated`.** Original evidence retained unchanged.
+
+CCF-015 asked for *"one documented encoding and Unicode-whitespace policy rather than adding an
+ASCII-only special case here"*, and that policy is now
+`modules/core/include/System/detail/Utf8Text.hpp`: a validating UTF-8 decoder plus
+`IsUnicodeWhiteSpace`, the .NET `Char.IsWhiteSpace` set written out as an explicit, **locale-independent**
+table. Both of the cause's sites consume it — `MemoryExtensions::TrimStart`/`TrimEnd` and
+`ArgumentException::ThrowIfNullOrWhiteSpace`. Neither `std::isspace` nor `std::iswspace` can serve:
+both answer differently under a different `LC_CTYPE`, and the first cannot see a multibyte
+character at all.
+
+`TrimEnd` was rewritten as a **forward** scan that tracks the offset just past the last
+non-whitespace character. Scanning backwards over UTF-8 to find where a trailing run begins is the
+kind of resynchronisation that invites an off-by-one on a continuation byte; the forward form is
+correct by construction and drops a trailing run of any length whole.
+
+**Malformed UTF-8 decodes as non-whitespace**, deliberately: neither door has ever reported an
+encoding error and neither gains one. The validation half of the cause is the load-bearing part —
+`ThrowIfNullOrWhiteSpace` previously **accepted** an argument consisting only of U+00A0, which is a
+validation bypass rather than a spelling difference.
+
+**Deliberately not changed:** `Char::IsWhiteSpace(charcs)`, whose `std::iswspace` body is a
+different predicate with its own callers and **no finding in this family**. Broadening CCF-015 to it
+is precisely what the cause's own note about SR-AUD-294 — *"shares CCF-015's subject but is not a
+CCF-015 member"* — forbids.
+
+**Evidence.** 3 wrong → 0, with ASCII trimming byte-identical and non-whitespace multibyte text
+(U+00E9, U+20AC) untouched. **+8 permanent regressions** covering U+00A0, U+3000, U+2003,
+U+2028/U+2029, U+0085, U+202F/U+205F, U+1680, mixed runs, and malformed input.
+
+No signature, `noexcept`, layout, vtable or ABI change. **CCF-015's sole member is now
+`remediated`.**

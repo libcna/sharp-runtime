@@ -266,3 +266,31 @@ No signature, `noexcept`, virtual, vtable, data member or layout change. ASan an
 UBSan clean over all 36 probe cases with `String.cpp` compiled into the probe.
 **`SR-AUD-015 → remediated`; CCF-012 is complete** (#1881 design, #1882, #1883,
 #1884).
+
+---
+
+## Remediation record — ticket #2224 (SR-AUD-016), 2026-08-10
+
+**`remediated`.** Original evidence retained unchanged.
+
+Both substring overloads now search from `startIndex + 1 - substr.size()` — the last position at
+which a match still *fits* inside the section — through one file-local `lastIndexOfBounded` helper,
+and the size comparison is made in `size_t` so a substring longer than the section cannot produce a
+negative intermediate.
+
+**Premise correction, measured.** The finding named only the four-argument overload. The
+**three-argument** overload (`String.cpp:592`) carried the identical unchecked
+`rfind(substr, startIndex)` and failed the same way: `LastIndexOf("abcde", "de", 3)` returned 3.
+A third shape the finding did not name also failed — `LastIndexOf("abcde", "abcde", 2, 3)` returned
+**0**, a match overrunning `startIndex` by three positions, because the lower-bound check
+(`pos >= begin`, `begin == 0`) passed it. Three failing cases, not one.
+
+The single-character overloads were verified **unaffected** and left alone: a one-character match
+cannot overrun its own start.
+
+**Evidence.** `build-probe/2223_probe1_before.log` → `_after.log`: the SR-AUD-016 group goes 3 wrong
+→ 0 with all five positive controls unchanged, including the documented `startIndex == Length`
+off-by-one fixup and the empty-substring return. **+7 permanent regressions** in
+`modules/core/tests/System/TextInputBoundaryTests.cpp`.
+
+No signature, `noexcept`, layout, vtable or ABI change.

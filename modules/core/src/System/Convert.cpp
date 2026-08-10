@@ -310,25 +310,72 @@ namespace System {
 
     std::vector<SharpRuntime::bytecs> Convert::FromBase64String(const std::string& s)
     {
+        // Ticket #2227, SR-AUD-028. Two independent defects lived in the previous body:
+        //
+        //  1. '=' was mapped to the sentinel -1 and accepted ANYWHERE, so "=AAA" decoded to three
+        //     bytes, "A=AA" to two and "AA==AAAA" was accepted outright. The sentinel then
+        //     reached `v0 << 2`, so the emitted bytes were arithmetic on -1.
+        //  2. The length-multiple-of-four test ran on the RAW string, before the whitespace the
+        //     documented contract permits was removed, so the legal "T Q==" threw instead of
+        //     decoding to "M".
+        //
+        // Both are fixed by separating the three jobs the old loop conflated: strip whitespace,
+        // validate the grammar, then decode a string already known to be well formed.
+        //
+        // @see https://learn.microsoft.com/en-us/dotnet/api/system.convert.frombase64string
         auto b64val = [](char c) -> int {
             if (c >= 'A' && c <= 'Z') return c - 'A';
             if (c >= 'a' && c <= 'z') return c - 'a' + 26;
             if (c >= '0' && c <= '9') return c - '0' + 52;
             if (c == '+') return 62;
             if (c == '/') return 63;
-            if (c == '=') return -1;
             throw FormatException("Invalid Base64 character.");
             return 0;
         };
-        if (s.size() % 4 != 0) throw FormatException("Base64 string length must be a multiple of 4.");
+
+        // Step 1 — remove the whitespace the contract permits. .NET ignores space, tab, CR and LF
+        // anywhere in the input, including inside a quad.
+        std::string packed;
+        packed.reserve(s.size());
+        for (char c : s) {
+            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') continue;
+            packed += c;
+        }
+
+        // Step 2 — validate length and padding placement on the packed text.
+        if (packed.size() % 4 != 0)
+            throw FormatException("Base64 string length must be a multiple of 4.");
+
+        // Padding is legal only as the last one or two characters of the whole string. Counting
+        // from the end and then requiring every remaining character to be a non-'=' data
+        // character is what rejects leading, interior and non-final-quad padding uniformly --
+        // the previous code had no notion of position at all.
+        size_t padding = 0;
+        while (padding < 2 && padding < packed.size() && packed[packed.size() - 1 - padding] == '=')
+            ++padding;
+        const size_t dataLength = packed.size() - padding;
+        for (size_t i = 0; i < dataLength; ++i) {
+            if (packed[i] == '=')
+                throw FormatException("Invalid Base64 character.");
+        }
+        // A quad of "====" leaves padding == 2 with the two earlier '=' caught above; a lone
+        // trailing "=" in a 4k-length string is still a valid one-pad quad, which is why the
+        // count is bounded at two rather than run to exhaustion.
+
+        // Step 3 — decode. Every character below is now known to be a data character, so no
+        // sentinel and no negative value ever enters the arithmetic.
         std::vector<bytecs> out;
-        out.reserve(s.size() / 4 * 3);
-        for (size_t i = 0; i < s.size(); i += 4) {
-            int v0 = b64val(s[i]), v1 = b64val(s[i+1]);
-            int v2 = b64val(s[i+2]), v3 = b64val(s[i+3]);
+        out.reserve(packed.size() / 4 * 3);
+        for (size_t i = 0; i < packed.size(); i += 4) {
+            const bool twoPad = (i + 4 == packed.size()) && padding == 2;
+            const bool onePad = (i + 4 == packed.size()) && padding == 1;
+            const int v0 = b64val(packed[i]);
+            const int v1 = b64val(packed[i + 1]);
+            const int v2 = twoPad ? 0 : b64val(packed[i + 2]);
+            const int v3 = (twoPad || onePad) ? 0 : b64val(packed[i + 3]);
             out.push_back(static_cast<bytecs>((v0 << 2) | (v1 >> 4)));
-            if (v2 != -1) out.push_back(static_cast<bytecs>(((v1 & 0xF) << 4) | (v2 >> 2)));
-            if (v3 != -1) out.push_back(static_cast<bytecs>(((v2 & 0x3) << 6) | v3));
+            if (!twoPad) out.push_back(static_cast<bytecs>(((v1 & 0xF) << 4) | (v2 >> 2)));
+            if (!twoPad && !onePad) out.push_back(static_cast<bytecs>(((v2 & 0x3) << 6) | v3));
         }
         return out;
     }

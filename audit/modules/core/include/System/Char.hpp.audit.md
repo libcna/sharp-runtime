@@ -65,3 +65,32 @@ for the same invalid input.
 Well-documented partial string-indexed behavior and broad ASCII tests, but the
 public UTF-8 parser violates its own invalid-input contract.  Fix its decoder
 and add malformed-sequence diagnostics before expanding surface area.
+
+---
+
+## Remediation record — ticket #2225 (SR-AUD-017), 2026-08-10
+
+**`remediated`.** Original evidence retained unchanged.
+
+`Parse` now decodes through `System::detail::DecodeUtf8`
+(`modules/core/include/System/detail/Utf8Text.hpp`), the module's single validating UTF-8 decoder,
+which rejects stray continuations and `0xC0`/`0xC1` leads, truncation, malformed continuations,
+**overlong** forms (checked against the minimum scalar for the length actually used), UTF-8-encoded
+**surrogates**, and scalars beyond `U+10FFFF`.
+
+The old body's `b0 < 0xE0` two-byte test was the root cause: it admitted `0x80..0xBF` and
+`0xC0`/`0xC1` as two-byte leads, after which only continuation-bit *shape* was checked. Measured
+before the repair: `C0 80` → U+0000, `C1 BF` → U+007F, `E0 80 80` → U+0000, `ED A0 80` → U+D800,
+`F8 80 80 80` → U+0000. Two cases the finding lists as defects — a lone `0x80` and `0xFF` — were
+already rejected, but **by the cardinality check rather than by validation**; that is recorded here
+so the finding's extent is neither overstated nor understated.
+
+Validity and length are checked **separately**, so a well-formed sequence followed by more text
+still reports the long-standing *"String must be exactly one character long."* message and a
+well-formed non-BMP scalar still reports its own *"outside BMP"* diagnostic.
+
+**Evidence.** 5 wrong → 0 in the SR-AUD-017 group, with all nine valid vectors (U+0000, U+0080,
+U+00E9, U+07FF, U+0800, U+20AC, U+FFFF, ASCII, and the outside-BMP diagnostic) unchanged.
+`TryParse` mirrors `Parse` and clears its output. **+5 permanent regressions.**
+
+No signature, `noexcept`, layout, vtable or ABI change.

@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/ArgumentException.hpp"
+#include "System/detail/Utf8Text.hpp"
 #include <algorithm>
 #include <cctype>
 
@@ -75,9 +76,25 @@ namespace System {
 
     void ArgumentException::ThrowIfNullOrWhiteSpace(const std::string& argument,
                                                     const std::string& paramName) {
-        bool allSpace = argument.empty() ||
-            std::all_of(argument.begin(), argument.end(),
-                        [](unsigned char c) { return std::isspace(c); });
+        // Classified through the module's one whitespace policy (#2226, SR-AUD-048, CCF-015).
+        // The previous `std::all_of` over `std::isspace` was a single-BYTE, locale-dependent
+        // predicate applied to UTF-8 text, so an argument consisting only of U+00A0 was ACCEPTED
+        // -- an observable validation bypass rather than a spelling difference, since .NET's
+        // Char.IsWhiteSpace includes U+00A0 and the counterpart throws. Malformed UTF-8 decodes
+        // as non-whitespace, so this door still never reports an encoding error.
+        bool allSpace = argument.empty();
+        if (!allSpace) {
+            allSpace = true;
+            for (std::size_t i = 0; i < argument.size();) {
+                std::size_t consumed = 1;
+                if (!System::detail::IsUtf8WhiteSpace(argument.data() + i,
+                                                      argument.size() - i, consumed)) {
+                    allSpace = false;
+                    break;
+                }
+                i += consumed;
+            }
+        }
         if (allSpace) {
             throw ArgumentException(
                 "The value cannot be null, empty, or consist only of white-space characters.",

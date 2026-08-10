@@ -10,6 +10,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
+#include "System/detail/Utf8Text.hpp"
 
 namespace System {
 
@@ -345,21 +346,25 @@ public:
      */
     static SharpRuntime::charcs Parse(const std::string& s) {
         if (s.empty()) throw System::FormatException("String must be exactly one character long.");
-        auto b0 = static_cast<unsigned char>(s[0]);
-        uint32_t cp;
-        size_t   bytes;
-        if      (b0 < 0x80u) { cp = b0;        bytes = 1; }
-        else if (b0 < 0xE0u) { cp = b0 & 0x1F; bytes = 2; }
-        else if (b0 < 0xF0u) { cp = b0 & 0x0F; bytes = 3; }
-        else                  { cp = b0 & 0x07; bytes = 4; }
-        if (s.size() != bytes) throw System::FormatException("String must be exactly one character long.");
-        for (size_t i = 1; i < bytes; ++i) {
-            auto bi = static_cast<unsigned char>(s[i]);
-            if ((bi & 0xC0u) != 0x80u) throw System::FormatException("Invalid UTF-8 sequence.");
-            cp = (cp << 6) | (bi & 0x3Fu);
-        }
-        if (cp > 0xFFFFu) throw System::FormatException("Character is outside BMP; cannot fit in char16_t.");
-        return static_cast<SharpRuntime::charcs>(cp);
+
+        // Decoded through the module's single validating UTF-8 decoder (#2225, SR-AUD-017).
+        // The previous body derived the byte count from the lead byte with `b0 < 0xE0` for two
+        // bytes -- which also admits 0x80..0xBF (a stray continuation) and 0xC0/0xC1 (leads that
+        // can only introduce an overlong form) -- and then checked continuation-bit shape alone.
+        // It never checked shortest form, the surrogate range or the RFC 3629 limit, so `C0 80`
+        // decoded to U+0000, `C1 BF` to U+007F, `E0 80 80` to U+0000 and `ED A0 80` to U+D800,
+        // all silently, although this header's own documentation promises FormatException for
+        // invalid UTF-8.
+        const System::detail::Utf8Decoded d = System::detail::DecodeUtf8(s.data(), s.size());
+        if (!d.valid) throw System::FormatException("Invalid UTF-8 sequence.");
+        // The length check stays separate from validity so a *well-formed* sequence followed by
+        // more text keeps reporting the long-standing cardinality message rather than an
+        // encoding one.
+        if (d.length != s.size())
+            throw System::FormatException("String must be exactly one character long.");
+        if (d.scalar > 0xFFFFu)
+            throw System::FormatException("Character is outside BMP; cannot fit in char16_t.");
+        return static_cast<SharpRuntime::charcs>(d.scalar);
     }
 
     /**

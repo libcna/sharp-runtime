@@ -78,3 +78,34 @@ UBSan clean. The inline `ToUInt32/ToUInt64(double)` counterparts are fixed the
 same way in `Convert.hpp`. +15 tests across the four converters plus the
 delegating `ToByte(double)`. SR-AUD-028 (Base64) is separate and stays open.
 `docs/ConversionBoundaryFamilyPlan.md` §19.4.
+
+---
+
+## Remediation record — ticket #2227 (SR-AUD-028), 2026-08-10
+
+**`remediated`.** Original evidence retained unchanged.
+
+The old loop conflated three jobs; the repair separates them. **Step 1** removes the space, tab, CR
+and LF the documented contract permits. **Step 2** validates length *on the packed text* and admits
+`=` only as the final one or two characters of the whole string, rejecting a `=` anywhere in the
+data region — which catches leading, interior, non-final-quad and excess padding uniformly, where
+the old body had no notion of position at all. **Step 3** decodes text already known to be well
+formed, so the `-1` sentinel never enters the arithmetic; previously `"=AAA"` computed `(-1 << 2)`
+and emitted three bytes derived from it.
+
+**Evidence.** 7 wrong → 0: `"=AAA"`, `"A=AA"`, `"AA=A"` and `"AA==AAAA"` now throw, and the legal
+`"T Q=="`, `"TQ\n=="` and `"T\tQ\r\n=="` now decode to `"M"`. Valid vectors, the empty string,
+invalid characters and bad lengths are unchanged. **+6 permanent regressions**, including a 0..16
+round-trip sweep over every remainder shape.
+
+**Deferred, and recorded rather than assumed.** The finding also asks for *"unused-bit rules"*. Real
+.NET is **lenient** there — `Convert.FromBase64String("AB==")` succeeds despite the non-zero unused
+bits of `B` — and `/rv` is absent here to pin the exact rule. Enforcing it would reject input .NET
+accepts, so the current lenient behaviour is **pinned by a test** instead and tightening it stays a
+separate, evidence-gated question.
+
+**Not a CCF-013 member.** CCF-013 is CLOSED, lives in `modules/buffers`, concerns the in-place
+**encoders**, and its sole member is SR-AUD-078. This finding is Base64 **decoding** in
+`modules/core`. The inherited grouping note that placed it under CCF-013 is corrected here.
+
+No signature, `noexcept`, layout, vtable or ABI change.

@@ -11,6 +11,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Span.hpp"
+#include "System/detail/Utf8Text.hpp"
 #include "System/detail/ComparisonPolicy.hpp"
 #include "System/detail/OverlapCopy.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -591,9 +592,19 @@ namespace System {
          * C++ counterpart of .NET MemoryExtensions.TrimStart(ReadOnlySpan<char>).
          */
         [[nodiscard]] static ReadOnlySpan<char> TrimStart(ReadOnlySpan<char> span) {
+            // UTF-8 decoded through the module's one whitespace policy (#2226, SR-AUD-048,
+            // CCF-015). `std::isspace` is a single-BYTE, locale-dependent predicate: it cannot
+            // see the two bytes of U+00A0, so this door used to return a span still carrying the
+            // no-break spaces its .NET counterpart removes.
             SharpRuntime::intcs i = 0;
-            while (i < span.getLengthProperty() &&
-                   std::isspace(static_cast<unsigned char>(span[i]))) ++i;
+            const SharpRuntime::intcs n = span.getLengthProperty();
+            while (i < n) {
+                std::size_t consumed = 1;
+                if (!System::detail::IsUtf8WhiteSpace(span.getPointer() + i,
+                                                      static_cast<std::size_t>(n - i), consumed))
+                    break;
+                i += static_cast<SharpRuntime::intcs>(consumed);
+            }
             return span.Slice(i);
         }
 
@@ -603,9 +614,22 @@ namespace System {
          * C++ counterpart of .NET MemoryExtensions.TrimEnd(ReadOnlySpan<char>).
          */
         [[nodiscard]] static ReadOnlySpan<char> TrimEnd(ReadOnlySpan<char> span) {
-            SharpRuntime::intcs i = span.getLengthProperty() - 1;
-            while (i >= 0 && std::isspace(static_cast<unsigned char>(span[i]))) --i;
-            return span.Slice(0, i + 1);
+            // Trailing whitespace is found by scanning FORWARD (#2226, SR-AUD-048, CCF-015).
+            // UTF-8 is not self-synchronising backwards for this purpose without extra care, and
+            // a forward scan that remembers where the current whitespace run began is both
+            // correct and obvious: `end` is the offset just past the last non-whitespace
+            // character, so a trailing run of any length -- ASCII or multibyte -- is dropped
+            // whole and a multibyte character whose trailing byte merely resembles one is not.
+            const SharpRuntime::intcs n = span.getLengthProperty();
+            SharpRuntime::intcs i = 0, end = 0;
+            while (i < n) {
+                std::size_t consumed = 1;
+                const bool ws = System::detail::IsUtf8WhiteSpace(
+                    span.getPointer() + i, static_cast<std::size_t>(n - i), consumed);
+                i += static_cast<SharpRuntime::intcs>(consumed);
+                if (!ws) end = i;
+            }
+            return span.Slice(0, end);
         }
 
         // ---------------------------------------------------------------
