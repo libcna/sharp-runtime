@@ -773,6 +773,69 @@ namespace {
     }
 
     // =====================================================================================
+    // No native std:: exception may cross a public door (#2206).
+    //
+    // The constructor and the three iterator-backed members used throwing std::filesystem
+    // entry points, so an unusable root surfaced a std::filesystem_error rather than the
+    // module's own IsolatedStorageException.  A regular file standing where the root should
+    // be is the reproduction: every one of the four fails, and each must fail in-contract.
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, NativeErrors_ConstructorTranslatesAnUnusableRoot)
+    {
+        const fs::path rootIsAFile = sandbox_ / "root_is_a_file";
+        writeFile(rootIsAFile, "not a directory");
+
+        try {
+            IsolatedStorageFile s(rootIsAFile, IsolatedStorageScope::None);
+            ADD_FAILURE() << "expected IsolatedStorageException";
+        } catch (const IsolatedStorageException&) {
+            SUCCEED();
+        } catch (const fs::filesystem_error& e) {
+            ADD_FAILURE() << "a native std::filesystem_error crossed the public API: " << e.what();
+        }
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, NativeErrors_EnumerationAndAccountingTranslate)
+    {
+        auto s = store();
+        // Replace the root with a regular file behind the store's back.
+        fs::remove_all(root_);
+        writeFile(root_, "not a directory");
+
+        const auto expectInContract = [](auto&& op, const char* what) {
+            try {
+                op();
+                ADD_FAILURE() << what << ": expected IsolatedStorageException";
+            } catch (const IsolatedStorageException&) {
+                SUCCEED();
+            } catch (const fs::filesystem_error& e) {
+                ADD_FAILURE() << what << ": native std::filesystem_error escaped: " << e.what();
+            }
+        };
+
+        expectInContract([&] { (void)s.GetFileNames("*"); }, "GetFileNames");
+        expectInContract([&] { (void)s.GetDirectoryNames("*"); }, "GetDirectoryNames");
+        expectInContract([&] { (void)s.getUsedSizeProperty(); }, "getUsedSizeProperty");
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, NativeErrors_TheHealthyPathsAreUnaffected)
+    {
+        // The translation must not turn a working enumeration into a failure.
+        auto s = store();
+        { auto st = s.CreateFile("one.dat"); st.Close(); }
+        { auto st = s.CreateFile("two.dat"); st.Close(); }
+        s.CreateDirectory("a_dir");
+        s.CreateDirectory("b_dir");
+        { auto st = s.CreateFile("a_dir/nested.dat"); st.Close(); }
+
+        EXPECT_EQ(s.GetFileNames("*").size(), 2u);
+        EXPECT_EQ(s.GetDirectoryNames("*").size(), 2u);
+        EXPECT_EQ(s.GetFileNames("one*"), std::vector<std::string>{"one.dat"});
+        EXPECT_GE(s.getUsedSizeProperty(), 0);   // recurses into a_dir without throwing
+    }
+
+    // =====================================================================================
     // The residual this repair deliberately does not close (#2208).
     // =====================================================================================
 

@@ -39,11 +39,20 @@ namespace System::IO::IsolatedStorage
         return p == pattern.size();
     }
 
+    // The four doors below used throwing std::filesystem entry points, so a root that could
+    // not be created or iterated put a native std::filesystem_error across the public API
+    // instead of this module's IsolatedStorageException. Each now takes the error_code overload
+    // and translates, keeping the original error as the inner exception.
     IsolatedStorageFile::IsolatedStorageFile(const std::filesystem::path& rootDirectory, IsolatedStorageScope scope)
         : rootDirectory_(rootDirectory)
     {
         scope_ = scope;
-        std::filesystem::create_directories(rootDirectory_);
+        std::error_code ec;
+        std::filesystem::create_directories(rootDirectory_, ec);
+        if (ec)
+            throw IsolatedStorageException(
+                "Failed to open isolated storage root: " + rootDirectory_.string()
+                + " (" + ec.message() + ")");
     }
 
     namespace {
@@ -233,8 +242,13 @@ namespace System::IO::IsolatedStorage
         throwIfDisposed();
         std::vector<std::string> names;
         if (!std::filesystem::exists(rootDirectory_)) return names;
-        for (const auto& entry : std::filesystem::directory_iterator(rootDirectory_)) {
-            if (!entry.is_regular_file()) continue;
+        std::error_code ec;
+        std::filesystem::directory_iterator it(rootDirectory_, ec);
+        if (ec)
+            throw IsolatedStorageException(
+                "Failed to enumerate isolated storage files (" + ec.message() + ")");
+        for (const auto& entry : it) {
+            if (!entry.is_regular_file(ec) || ec) { ec.clear(); continue; }
             std::string name = entry.path().filename().string();
             if (globMatch(searchPattern, name))
                 names.push_back(name);
@@ -292,8 +306,13 @@ namespace System::IO::IsolatedStorage
         throwIfDisposed();
         std::vector<std::string> names;
         if (!std::filesystem::exists(rootDirectory_)) return names;
-        for (const auto& entry : std::filesystem::directory_iterator(rootDirectory_)) {
-            if (!entry.is_directory()) continue;
+        std::error_code ec;
+        std::filesystem::directory_iterator it(rootDirectory_, ec);
+        if (ec)
+            throw IsolatedStorageException(
+                "Failed to enumerate isolated storage directories (" + ec.message() + ")");
+        for (const auto& entry : it) {
+            if (!entry.is_directory(ec) || ec) { ec.clear(); continue; }
             std::string name = entry.path().filename().string();
             if (globMatch(searchPattern, name))
                 names.push_back(name);
@@ -342,11 +361,19 @@ namespace System::IO::IsolatedStorage
         throwIfDisposed();
         SharpRuntime::longcs total = 0;
         if (!std::filesystem::exists(rootDirectory_)) return total;
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(rootDirectory_)) {
-            if (entry.is_regular_file()) {
-                std::error_code ec;
-                total += static_cast<SharpRuntime::longcs>(entry.file_size(ec));
-            }
+        std::error_code ec;
+        std::filesystem::recursive_directory_iterator it(rootDirectory_, ec);
+        if (ec)
+            throw IsolatedStorageException(
+                "Failed to measure isolated storage usage (" + ec.message() + ")");
+        for (std::filesystem::recursive_directory_iterator end; it != end; it.increment(ec)) {
+            if (ec)
+                throw IsolatedStorageException(
+                    "Failed to measure isolated storage usage (" + ec.message() + ")");
+            std::error_code entryEc;
+            if (!it->is_regular_file(entryEc) || entryEc) continue;
+            const auto size = it->file_size(entryEc);
+            if (!entryEc) total += static_cast<SharpRuntime::longcs>(size);
         }
         return total;
     }
