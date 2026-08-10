@@ -830,3 +830,76 @@ rather than counting M1 as equal to the other four.
 `Linq*` 77/77. Both overloads are free function templates, so no mangled symbol exists to change;
 no signature, `noexcept` or default argument changed, and `addForSum` holds no state.
 `System/OverflowException.hpp` is now included by `Linq.hpp`.
+
+---
+
+## 23. What #2221 measured, and SR-AUD-180's closure (2026-08-10)
+
+The bounded-parse subfamily's own finding is closed. **SR-AUD-180 is `remediated`**; the audit index
+reads **181 remediated / 128 confirmed / 55 confirmed (design-complete)** of 364.
+
+### 23.1 The primary evidence is a guard page, not a sanitizer
+
+| Run | `std::from_chars` | `PortableFromCharsFloat` |
+|---|---|---|
+| **before** | `survived ec=0 ptr_offset=2 value=12` | **Segmentation fault**, exit 139 |
+| **after** | unchanged | `survived ec=0 ptr_offset=2 value=12` |
+
+That is `build-probe/2217_probe_guard.cpp`: two pages, the second `PROT_NONE`, `"12"` in the last
+two bytes of the readable one so `last` is exactly the boundary. **AddressSanitizer says nothing
+about the same read on a heap allocation**, because it happens inside glibc's `strtod` — neither
+instrumented nor intercepted (§5.3.1). §13's matrix predicted this and is confirmed.
+
+### 23.2 Every measured case now returns `std::from_chars`'s answer
+
+| Case | Before (value / ptr) | After | `std::from_chars` |
+|---|---|---|---|
+| P1 `"12"` heap, `[0,1)` | 12 / 2 | **1 / 1** | 1 / 1 |
+| P2 `"12"`, `[0,1)` | 12 / 2 | **1 / 1** | 1 / 1 |
+| P12 `"1e3"`, `[0,1)` | 1000 / 3 | **1 / 1** | 1 / 1 |
+| P13 `"-57"` heap, `[0,2)` | −57 / 3 | **−5 / 2** | −5 / 2 |
+| P14 `"12"`, `[0,1)`, `float` | 12 / 2 | **1 / 1** | 1 / 1 |
+| P5–P11, P15 full-range controls | correct | unchanged | — |
+
+### 23.3 The design decisions, and why each is the way it is
+
+- **Copy rather than scan.** The C parser has no bound; the only way to stop it is a terminator it
+  owns. Exactly `length + 1` bytes — no multiplication, no amplification of a caller-controlled
+  length.
+- **Nothrow heap rather than truncation** for a range longer than the 512-byte stack buffer.
+  Truncating a digit run changes the value: a 600-digit integer is not its first 511 digits.
+  Mutation M4 exists to keep that honest.
+- **`noexcept` added.** `std::from_chars` is `noexcept`; the "drop-in" claim was false without it.
+  It is load-bearing rather than cosmetic: `Single::tryParseCore` and `Single::TryParse` are
+  `noexcept`, so on the fallback platform a throwing helper would have called `std::terminate`.
+  Adding a guarantee needs no approval — this is the **opposite** direction from #2215.
+- **`std::errc::not_enough_memory`** is the one status a real `std::from_chars` never returns. It is
+  reachable only when a copy of the caller's own range cannot be allocated, and every caller in this
+  repository treats any non-`errc{}` value as failure.
+
+### 23.4 The coverage gap the audit named is closed on every platform
+
+The report says "no test forces the fallback path; Linux normally chooses native floating
+`std::from_chars`". That is true of `FromCharsFloat`, the dispatching wrapper — and **not** of
+`PortableFromCharsFloat`, which is an ordinary public function template any platform can call
+directly. `modules/core/tests/SharpRuntime/PortableFromCharsTests.cpp` calls it directly, so the
+Apple-only fallback now runs on the Linux gate: **23 tests**, asserting acceptance, consumption,
+value and status **separately**, and agreeing with the platform's real `std::from_chars` rather than
+with hand-written expectations wherever one exists.
+
+### 23.5 Four mutations, all killed
+
+| Mutation | Gate tests | Guard probe |
+|---|---|---|
+| **M1** — copy without the terminator | **11 of 23 fail** | survives (stack garbage happened to terminate) |
+| **M2** — return the copy's pointer, unrebased | **18 of 23 fail** | `ptr_offset=566078643028` |
+| **M3** — parse `first` directly again (the original defect) | **6 of 23 fail** | **segfault, exit 139** |
+| **M4** — truncate an over-long range instead of the heap path | **1 of 23 fails** | survives |
+
+### 23.6 Consequences
+
++23 permanent regressions in a new file; `PortableFromChars*` 23/23. The three consumers are
+unaffected — `Single*`/`Double*` 372/372 and XPath 90/90 — which is expected: on Linux
+`FromCharsFloat` selects the native overload and the fallback is not on their path at all. Both
+entry points are free function templates, so no mangled symbol exists to change; the only contract
+change is the **added** `noexcept`, pinned by `static_assert`.

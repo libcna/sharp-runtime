@@ -17,7 +17,11 @@
 
 #include <charconv>
 #include <cerrno>
+#include <cstddef>
 #include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <new>
 #include <type_traits>
 
 namespace SharpRuntime
@@ -28,15 +32,34 @@ namespace SharpRuntime
         std::from_chars(first, last, value);
     };
 
-    // strtof/strtod require a NUL-terminated C string. Every real call site here passes
-    // `s.data()`/`s.data() + s.size()` from a std::string, which is guaranteed NUL-terminated
-    // since C++11 (s[s.size()] == '\0'), so `first` itself is always safe to hand directly to
-    // strtof/strtod without an extra copy -- `last` is used only to detect trailing garbage via
-    // the returned end pointer, matching std::from_chars's own "ptr != last means not fully
-    // consumed" contract exactly.
+    // strtof/strtod take NO end pointer: they scan until a NUL and there is no way to tell them
+    // where the caller's range stops. This function used to hand them `first` and simply discard
+    // `last`, which is SR-AUD-180: the C parser ran straight past the declared range.
     //
-    // strtof/strtod are NOT a drop-in behavioral match for std::from_chars, and this function
-    // corrects for the two known real differences before delegating, rather than silently
+    //   * `"12"` restricted to `[0,1)` returned value 12 and a pointer TWO past a one-character
+    //     range, where a real from_chars returns 1 and stops at offset 1;
+    //   * `"1e3"` restricted to `[0,1)` returned 1000 rather than 1;
+    //   * with the range placed flush against a PROT_NONE guard page, the read at `last` is a
+    //     SEGFAULT -- while std::from_chars on the same layout survives.
+    //
+    // AddressSanitizer cannot see any of it: the over-read happens inside the C library's own
+    // strtod, which is neither instrumented nor an ASan interceptor, so a heap buffer with no NUL
+    // in it produces no report at all. That is why the evidence for this repair is a guard page
+    // rather than a sanitizer (docs/CoreDefinedArithmeticBoundedParseFamilyPlan.md section 5.3.1).
+    //
+    // The header also used to claim that "every real call site here passes `s.data()`/`s.data() +
+    // s.size()` from a std::string". That is false and was measured false: Single::tryParseCore
+    // and Double::tryParseCore trim surrounding ASCII whitespace (ticket #1864) BEFORE forming the
+    // range, so for `" 1.5 "` they hand over a subrange whose `last` is a space, not the string
+    // terminator. Only the XPath caller passes a whole string.
+    //
+    // The repair is to give the C parser a range it cannot leave: copy `[first, last)` into a
+    // NUL-terminated local buffer, parse the copy, and rebase the returned pointer into the
+    // caller's range. The copy is exactly `len + 1` bytes -- no multiplication, no amplification
+    // of a caller-controlled length -- and stays on the stack for every realistic numeric literal.
+    //
+    // strtof/strtod are still NOT a drop-in behavioral match for std::from_chars, and this
+    // function corrects for the known real differences before delegating rather than silently
     // inheriting them:
     //  1. strtof/strtod skip leading whitespace per the C standard; std::from_chars does not
     //     skip any whitespace at all (this codebase's own callers rely on that strictness --
@@ -46,28 +69,56 @@ namespace SharpRuntime
     //     a well-known, deliberate asymmetry from most other numeric parsers).
     // Both are rejected up front as std::errc::invalid_argument, matching what a real
     // std::from_chars call would do for the same input, before strtof/strtod ever run.
+    //
+    // noexcept is ADDED rather than dropped, and it is load-bearing: std::from_chars is itself
+    // noexcept, and Single::tryParseCore / Single::TryParse are noexcept, so on the fallback
+    // platform a throwing helper would have called std::terminate. The heap path for an
+    // over-long range therefore uses a nothrow allocation and reports std::errc::not_enough_memory
+    // -- the one errc a real std::from_chars never returns, reachable only when a copy of the
+    // caller's own range cannot be allocated, and treated as failure by every caller here.
     template <class T>
-    inline std::from_chars_result PortableFromCharsFloat(const char* first, const char* last, T& value)
+    inline std::from_chars_result PortableFromCharsFloat(const char* first, const char* last, T& value) noexcept
     {
         if (first == last || *first == '+' ||
             *first == ' ' || *first == '\t' || *first == '\n' || *first == '\r' ||
             *first == '\f' || *first == '\v')
             return {first, std::errc::invalid_argument};
 
+        // Large enough for every representable decimal literal plus a long digit run; anything
+        // longer takes the nothrow heap path rather than being truncated, because truncating a
+        // digit run changes the value (a 600-digit integer is not its first 511 digits).
+        constexpr std::size_t stackCapacity = 512;
+        const std::size_t length = static_cast<std::size_t>(last - first);
+        char stackBuffer[stackCapacity];
+        std::unique_ptr<char[]> heapBuffer;
+        char* buffer = stackBuffer;
+        if (length >= stackCapacity) {
+            heapBuffer.reset(new (std::nothrow) char[length + 1]);
+            if (!heapBuffer)
+                return {first, std::errc::not_enough_memory};
+            buffer = heapBuffer.get();
+        }
+        std::memcpy(buffer, first, length);
+        buffer[length] = '\0';
+
         errno = 0;
         char* endPtr = nullptr;
         T parsed;
         if constexpr (std::is_same_v<T, float>)
-            parsed = std::strtof(first, &endPtr);
+            parsed = std::strtof(buffer, &endPtr);
         else
-            parsed = static_cast<T>(std::strtod(first, &endPtr));
+            parsed = static_cast<T>(std::strtod(buffer, &endPtr));
 
-        if (endPtr == first)
+        // Rebase into the caller's range. The consumed count cannot exceed `length`, because the
+        // copy is exactly that long and its terminator stops the parse.
+        const char* const consumedEnd = first + (endPtr - buffer);
+
+        if (endPtr == buffer)
             return {first, std::errc::invalid_argument};
         if (errno == ERANGE)
-            return {endPtr, std::errc::result_out_of_range};
+            return {consumedEnd, std::errc::result_out_of_range};
         value = parsed;
-        return {endPtr, std::errc{}};
+        return {consumedEnd, std::errc{}};
     }
 
     // Drop-in replacement for `std::from_chars(first, last, value)` (the 3-argument
@@ -76,7 +127,7 @@ namespace SharpRuntime
     // all. Same {ptr, ec} return shape as std::from_chars, so existing
     // `auto [ptr, ec] = ...` call sites need only the function name changed.
     template <class T>
-    inline std::from_chars_result FromCharsFloat(const char* first, const char* last, T& value)
+    inline std::from_chars_result FromCharsFloat(const char* first, const char* last, T& value) noexcept
     {
         if constexpr (HasFromCharsOverload<T>)
             return std::from_chars(first, last, value);
