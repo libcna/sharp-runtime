@@ -184,3 +184,73 @@ instantiations. **Ten mutations**, one of them a deliberate *negative* control
 that must still pass. ASan/UBSan/LSan clean with activation proved separately;
 TSan recorded **not applicable** — nothing in the family has shared mutable
 state. Full record: `docs/ComparisonContractPlan.md`.
+
+---
+
+## SR-AUD-135 — REMEDIATED (ticket #2220, 2026-08-10)
+
+The original evidence above is retained unchanged. **Only SR-AUD-135 is closed by this ticket.**
+SR-AUD-134 and SR-AUD-046 in this report were already closed (CCF-011 / CCF-010) and are untouched;
+the remaining "other missing assertions" observations stay open.
+
+**This is a CCF-004 *occurrence*, not a new CCF-004 member.** CCF-004 stays **closed 8/8** and is
+neither edited nor reopened — the same treatment the cross-cutting record gives T-F, T-A, T-C and
+N-B. No `SR-AUD-*` identifier was issued; numbering stays frozen at **364**. The family record is
+`docs/CoreDefinedArithmeticBoundedParseFamilyPlan.md`.
+
+**Two corrections to the finding's premises, both measured** (`build-probe/2217_probe_before.cpp`,
+`-O0`, `volatile` operands, one process per case, instrumented header-only production body).
+
+1. **There are two sites, not one.** The finding says "both Sum overloads" but names only the value
+   overload's line. Measured, `Linq.hpp:236` is the plain overload and `Linq.hpp:249` is the
+   **selector** overload, and each needed its own repair; a fix applied to one leaves the other
+   live. A permanent test covers the selector overload separately.
+2. **The finding's domain is wider than the undefined behaviour, and the difference matters.**
+   `Sum<unsigned>({UINT_MAX, 1})` returns `0` and `Sum<short>({SHRT_MAX, 1})` returns `-32768`,
+   both with **no** UBSan report: unsigned arithmetic wraps by definition, and `short`/`signed char`
+   are promoted to `int` before the addition so only the narrowing store is lossy (well defined
+   since C++20). The finding's own remediation note asks for exactly this split — "separately
+   specify unsigned/floating/custom type behavior rather than inheriting native overflow" — and the
+   repair does so rather than sweeping them in.
+
+**The sharpest measured case is one the finding's framing does not reach.**
+`Sum<int>({INT_MAX, INT_MAX, INT_MIN})` executed undefined behaviour at the *first* addition and
+then returned **`2147483646`, the mathematically correct total**. The conceptual result is
+representable; only the intermediate is not. So the defect is not "the answer is wrong" — it is
+that the program has no defined meaning, and a guard placed *after* the addition would have found
+nothing to report here. Current .NET's `Enumerable.Sum` is checked **per element**, so it raises at
+the same intermediate; the repair is faithful to the reference rather than to the final total, and
+that is a **deliberate behaviour change** on a previously undefined path, pinned by a test.
+
+**What changed.** One shared step, `System::Linq::detail::addForSum`, now drives both overloads.
+For **signed integral `T`, excluding `char` and `bool`**, the sum is formed in the unsigned
+counterpart (defined wrap) and the overflow recognised from the operand signs — so nothing undefined
+is executed on the way to the diagnosis — and `System::OverflowException` is raised with .NET's
+verbatim message `Arithmetic operation resulted in an overflow.`. `char` is excluded **by name**
+because its signedness is implementation-defined, so throwing for it would make this port's
+observable behaviour differ between x86-64 and AArch64, and .NET's `char` is not a summable numeric
+type. Unsigned, floating and every other `T` are **unchanged and pinned**.
+
+**Compatibility.** No `Linq::Sum` call site exists anywhere in this repository outside its own
+tests, so nothing in-repo changes. For a downstream caller the argument is the one this repository
+accepted for #1817, #1818, #1825, #1836 and #1837: the results that now throw were produced by
+undefined behaviour and are not guaranteed between two builds of this repository — **they never
+worked**. The one non-undefined change, `short`/`signed char`, replaced a silently truncated total
+with a diagnostic. No new approval is required.
+
+**Closure evidence.** ASan + UBSan + `float-cast-overflow` + LSan at `-O0` under
+`-fno-sanitize-recover=all`, one process per case: all eight measured Sum shapes exit **0**, with
+every before-diagnostic absent, and 1,000 consecutive throw/catch cycles leak nothing. Activation is
+proved in the **same binary** by two deliberate controls that must still fire — a signed overflow
+(exit 1, diagnostic at the probe's own line) and a 256-byte leak (exit 1, LeakSanitizer summary).
++13 permanent tests in `LinqTests.cpp` (`LinqCheckedSumTests`); `Linq*` 77/77.
+**Five mutations, all killed**: detecting the overflow *after* a raw signed addition (killed by the
+probe only — the gate build is uninstrumented and GCC's wrap yields the same value, so this one is
+labelled as the weaker signal it is), widening the checked path to unsigned, over-rejecting any
+same-sign pair, dropping the narrow signed types, and leaving the selector overload on the raw
+accumulation (the last four each fail gate tests).
+
+**Source, ABI and layout consequences: none.** Both `Sum` overloads are free function templates, so
+no mangled symbol exists to change; no signature, `noexcept` specification or default argument
+changed. `addForSum` is one new `inline` function template in the pre-existing `System::Linq::detail`
+namespace and holds no state. `System/OverflowException.hpp` is now included.

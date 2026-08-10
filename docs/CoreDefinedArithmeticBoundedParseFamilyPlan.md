@@ -750,3 +750,83 @@ than counted as equal.
 **No member added** — the saturation is inline in the existing body — so no layout or vtable change
 is possible, and a `static_assert` pins `sizeof`/`alignof`. `<limits>` is now included. No
 signature, `noexcept` or symbol change.
+
+---
+
+## 22. What #2220 measured, and SR-AUD-135's closure (2026-08-10)
+
+`Linq::Sum` is checked on the signed integral domain, so **SR-AUD-135 is `remediated`**. The audit
+index reads **180 remediated / 129 confirmed / 55 confirmed (design-complete)** of 364.
+
+### 22.1 One shared step, two overloads, one stated domain
+
+`System::Linq::detail::addForSum` — one new `inline` function template in the namespace #1870
+already created — drives both `Sum` overloads. The checked branch forms the sum in the **unsigned**
+counterpart and recognises the overflow from the operand signs, so **nothing undefined is executed
+on the way to diagnosing it**. That distinction is the whole point of mutation M1 below.
+
+§8's table is implemented verbatim; nothing in it was decided during implementation.
+
+### 22.2 Before and after
+
+| Case | Before | After |
+|---|---|---|
+| L1 `Sum<int>({INT_MAX,1})` | `-2147483648`, `Linq.hpp:236:48` UB | `OverflowException`, no diagnostic, exit 0 |
+| L2 `Sum<long long>({INT64_MAX,1})` | `INT64_MIN`, UB | `OverflowException` |
+| L3 `Sum<int>({INT_MIN,-1})` | `2147483647`, UB | `OverflowException` |
+| L4 `Sum<int>({1,2,3})` | `6` | `6` |
+| L5 `Sum<double>({DBL_MAX,DBL_MAX})` | `inf` | `inf` (pinned unchanged) |
+| L6 selector overload | `-2147483648`, `Linq.hpp:249:48` UB | `OverflowException` |
+| L7 `Sum<unsigned>({UINT_MAX,1})` | `0` | `0` (pinned unchanged) |
+| L8 `Sum<short>({SHRT_MAX,1})` | `-32768`, **no UB** | `OverflowException` |
+| L9 `Sum<int>({INT_MAX,INT_MAX,INT_MIN})` | **`2147483646` — correct — through UB** | `OverflowException` |
+| L10 empty / single | `0`, `7` | unchanged |
+| L11 ×1000 throw/catch | — | LSan clean |
+
+### 22.3 The two behaviour changes that are not undefined behaviour, said out loud
+
+Most of this family's changes replace undefined behaviour. Two do not, and both are deliberate:
+
+- **L8** (`short`, `signed char`) was already defined — integral promotion means the addition
+  happens in `int` and only the store truncates. It now throws, because a silently truncated total
+  is a wrong answer whether or not the language calls it undefined.
+- **L9** returned the mathematically **correct** total. It now throws, because .NET's `Sum` is
+  checked **per element** and raises at the same intermediate. Faithfulness to the reference was
+  chosen over faithfulness to the final sum, and this line is here so that choice is visible rather
+  than buried.
+
+**No `Linq::Sum` call site exists anywhere in this repository outside its own tests** (verified by
+search across `modules/`, `tests/`, `test/` and `bench/`), so nothing in-repo changes.
+
+### 22.4 Activation proved by two deliberate controls, not by absence
+
+Every arithmetic finding in this family is repaired by this point, so no unrepaired production site
+was left to serve as the control. Two were added to the probe instead, in the **same binary** as the
+verdict:
+
+```
+CONTROL-UB   -> exit 1, "signed integer overflow: 2147483647 + 1" at the probe's own line
+CONTROL-LEAK -> exit 1, "LeakSanitizer: detected memory leaks ... 256 byte(s) in 1 allocation(s)"
+```
+
+### 22.5 Five mutations, and which signal killed each
+
+| Mutation | Gate tests | Probe |
+|---|---|---|
+| **M1** — detect the overflow **after** a raw signed `a + b` | **all 13 pass** | `Linq.hpp:113:25` UB returns, exit 1 for L1 and L3 |
+| **M2** — widen the checked path to unsigned | **5 of 13 fail** | — |
+| **M3** — over-reject every same-sign pair | **4 of 13 fail** | — |
+| **M4** — drop `short`/`signed char` from the checked domain | **1 of 13 fails** | — |
+| **M5** — leave the selector overload on the raw accumulation | **1 of 13 fails** | — |
+
+M1 is the important one and its signal is the weak one: the naive "add, then look at the result"
+repair passes every value test, because GCC's wrap gives the same number the unsigned domain gives.
+Only the sanitizer distinguishes a defined computation from an undefined one, and the record says so
+rather than counting M1 as equal to the other four.
+
+### 22.6 Consequences
+
++13 permanent regressions in `modules/core/tests/System/LinqTests.cpp` (`LinqCheckedSumTests`);
+`Linq*` 77/77. Both overloads are free function templates, so no mangled symbol exists to change;
+no signature, `noexcept` or default argument changed, and `addForSum` holds no state.
+`System/OverflowException.hpp` is now included by `Linq.hpp`.

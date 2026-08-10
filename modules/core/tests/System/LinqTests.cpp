@@ -2,13 +2,16 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <cmath>
 #include <functional>
+#include <limits>
 #include <string>
 #include <vector>
 #include "System/ArgumentNullException.hpp"
 #include "System/Exception.hpp"
 #include "System/Linq.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/OverflowException.hpp"
 
 using namespace System::Linq;
 
@@ -416,4 +419,146 @@ TEST(LinqTests, NonEmptyCallbacks_StillBehaveAsBefore) {
     EXPECT_EQ((Sum<int, int>(v, dbl)), 24);
     EXPECT_EQ((OrderBy<int, int>(v, dbl)), (std::vector<int>{1, 2, 4, 5}));
     EXPECT_EQ((OrderByDescending<int, int>(v, dbl)), (std::vector<int>{5, 4, 2, 1}));
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-135 / ticket #2220 -- integral Sum accumulates in a checked domain.
+//
+// Both overloads used `result = result + item`, which UBSan confirmed as undefined behaviour at
+// Linq.hpp for int, long and long long, at TWO sites -- the plain overload and the selector one.
+// Current .NET's Enumerable.Sum accumulates in a checked context and raises OverflowException,
+// so this is a CCF-004 class C repair (CCF-004 itself stays closed 8/8 and gains no member).
+//
+// The domain is deliberately narrower than "everything that can overflow": unsigned wrap and
+// floating infinity are DEFINED and .NET does not check them either, so both are pinned
+// unchanged. See docs/CoreDefinedArithmeticBoundedParseFamilyPlan.md sections 5.2 and 8.
+// ---------------------------------------------------------------------------
+
+TEST(LinqCheckedSumTests, IntMaxPlusOneThrowsInsteadOfWrapping) {
+    // Probe case L1: the audited input. Returned -2147483648 through undefined behaviour.
+    std::vector<int> v{std::numeric_limits<int>::max(), 1};
+    EXPECT_THROW((void)System::Linq::Sum<int>(v), System::OverflowException);
+}
+
+TEST(LinqCheckedSumTests, IntMinMinusOneThrows) {
+    // Probe case L3: the negative direction. Returned 2147483647.
+    std::vector<int> v{std::numeric_limits<int>::min(), -1};
+    EXPECT_THROW((void)System::Linq::Sum<int>(v), System::OverflowException);
+}
+
+TEST(LinqCheckedSumTests, LongLongBoundariesThrow) {
+    // Probe case L2, plus its negative counterpart.
+    std::vector<long long> hi{std::numeric_limits<long long>::max(), 1};
+    std::vector<long long> lo{std::numeric_limits<long long>::min(), -1};
+    EXPECT_THROW((void)System::Linq::Sum<long long>(hi), System::OverflowException);
+    EXPECT_THROW((void)System::Linq::Sum<long long>(lo), System::OverflowException);
+}
+
+TEST(LinqCheckedSumTests, OverflowExceptionCarriesTheDotNetMessageAndIsCatchableAsException) {
+    std::vector<int> v{std::numeric_limits<int>::max(), 1};
+    try {
+        (void)System::Linq::Sum<int>(v);
+        FAIL() << "expected OverflowException";
+    } catch (const System::OverflowException& e) {
+        EXPECT_STREQ("Arithmetic operation resulted in an overflow.", e.what());
+    }
+    // Ported `catch (const Exception&)` code must see it.
+    EXPECT_THROW((void)System::Linq::Sum<int>(v), System::Exception);
+}
+
+TEST(LinqCheckedSumTests, IntermediateOverflowThrowsEvenWhenTheTotalWouldFit) {
+    // Probe case L9, and the sharpest one in the family: this returned 2147483646, which is the
+    // mathematically CORRECT total, through an undefined intermediate. .NET checks per element
+    // and raises at the same intermediate, so the repair is faithful to the reference rather
+    // than to the final sum. This is a deliberate behaviour change on a previously undefined
+    // path, recorded in the family plan.
+    std::vector<int> v{std::numeric_limits<int>::max(), std::numeric_limits<int>::max(),
+                       std::numeric_limits<int>::min()};
+    EXPECT_THROW((void)System::Linq::Sum<int>(v), System::OverflowException);
+}
+
+TEST(LinqCheckedSumTests, LargestSumThatMustStillSucceed) {
+    // The guard must not be inverted: every total that fits still returns.
+    const int max = std::numeric_limits<int>::max();
+    const int min = std::numeric_limits<int>::min();
+    EXPECT_EQ(max, System::Linq::Sum<int>(std::vector<int>{max - 1, 1}));
+    EXPECT_EQ(max, System::Linq::Sum<int>(std::vector<int>{max}));
+    EXPECT_EQ(min, System::Linq::Sum<int>(std::vector<int>{min + 1, -1}));
+    EXPECT_EQ(min, System::Linq::Sum<int>(std::vector<int>{min}));
+    EXPECT_EQ(-1, System::Linq::Sum<int>(std::vector<int>{max, min}));
+    EXPECT_EQ(0, System::Linq::Sum<int>(std::vector<int>{min, max, 1}));
+}
+
+TEST(LinqCheckedSumTests, SignedSweepAsSingletonsIsIdentity) {
+    const int max = std::numeric_limits<int>::max();
+    const int min = std::numeric_limits<int>::min();
+    for (int p : {min, min + 1, -1, 0, 1, max - 1, max})
+        EXPECT_EQ(p, System::Linq::Sum<int>(std::vector<int>{p})) << "value=" << p;
+}
+
+TEST(LinqCheckedSumTests, EmptyAndOrdinarySequencesAreUnchanged) {
+    // Probe cases L4 and L10.
+    EXPECT_EQ(0, System::Linq::Sum<int>(std::vector<int>{}));
+    EXPECT_EQ(7, System::Linq::Sum<int>(std::vector<int>{7}));
+    EXPECT_EQ(6, System::Linq::Sum<int>(std::vector<int>{1, 2, 3}));
+    EXPECT_EQ(-6, System::Linq::Sum<int>(std::vector<int>{-1, -2, -3}));
+    EXPECT_EQ(0, System::Linq::Sum<int>(std::vector<int>{-5, 5}));
+}
+
+TEST(LinqCheckedSumTests, NarrowSignedTypesAreCheckedToo) {
+    // short and signed char were never UNDEFINED here -- both promote to int before the addition
+    // -- but a silently truncated total is a wrong answer either way. Probe case L8 measured
+    // Sum<short>({SHRT_MAX,1}) == -32768 before this ticket.
+    std::vector<short> s{std::numeric_limits<short>::max(), 1};
+    EXPECT_THROW((void)System::Linq::Sum<short>(s), System::OverflowException);
+    std::vector<signed char> c{std::numeric_limits<signed char>::max(), 1};
+    EXPECT_THROW((void)System::Linq::Sum<signed char>(c), System::OverflowException);
+    // and the in-range totals still come out
+    EXPECT_EQ(static_cast<short>(30000),
+              System::Linq::Sum<short>(std::vector<short>{20000, 10000}));
+}
+
+TEST(LinqCheckedSumTests, UnsignedStillWrapsBecauseThatIsDefinedAndDotNetHasNoOverload) {
+    // Probe case L7, pinned UNCHANGED. This is not an oversight: the wrap is defined C++ and
+    // there is no .NET unsigned Sum overload to correct it to.
+    std::vector<unsigned> v{std::numeric_limits<unsigned>::max(), 1u};
+    EXPECT_EQ(0u, System::Linq::Sum<unsigned>(v));
+    std::vector<unsigned long long> w{std::numeric_limits<unsigned long long>::max(), 1ull};
+    EXPECT_EQ(0ull, System::Linq::Sum<unsigned long long>(w));
+}
+
+TEST(LinqCheckedSumTests, FloatingStillSaturatesToInfinityBecauseDotNetDoesNotCheckEither) {
+    // Probe case L5, pinned UNCHANGED.
+    std::vector<double> v{std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
+    EXPECT_TRUE(std::isinf(System::Linq::Sum<double>(v)));
+    EXPECT_DOUBLE_EQ(6.5, System::Linq::Sum<double>(std::vector<double>{1.5, 2.0, 3.0}));
+    EXPECT_FLOAT_EQ(6.5f, System::Linq::Sum<float>(std::vector<float>{1.5f, 2.0f, 3.0f}));
+}
+
+TEST(LinqCheckedSumTests, NonArithmeticElementTypesAreUntouched) {
+    // Any other T keeps `a + b` and its own operator contract.
+    std::vector<std::string> v{"a", "b", "c"};
+    EXPECT_EQ("abc", System::Linq::Sum<std::string>(v));
+}
+
+TEST(LinqCheckedSumTests, SelectorOverloadIsTheSecondSiteAndIsCheckedIdentically) {
+    // Probe case L6: Linq.hpp's OTHER accumulation, which the finding covers but does not name.
+    std::vector<int> v{std::numeric_limits<int>::max(), 1};
+    std::function<int(const int&)> identity = [](const int& x) { return x; };
+    EXPECT_THROW((void)(System::Linq::Sum<int, int>(v, identity)), System::OverflowException);
+    // The projected type is what decides, not the source type.
+    std::vector<int> small{1, 2, 3};
+    std::function<long long(const int&)> widen = [](const int& x) {
+        return static_cast<long long>(x) * 1000;
+    };
+    EXPECT_EQ(6000LL, (System::Linq::Sum<int, long long>(small, widen)));
+    std::function<unsigned(const int&)> toUnsigned = [](const int&) {
+        return std::numeric_limits<unsigned>::max();
+    };
+    std::vector<int> two{0, 0};
+    EXPECT_EQ(std::numeric_limits<unsigned>::max() - 1u,
+              (System::Linq::Sum<int, unsigned>(two, toUnsigned)));
+    // and the empty-selector rejection from #1870 still wins ahead of everything
+    std::function<int(const int&)> empty;
+    EXPECT_THROW((void)(System::Linq::Sum<int, int>(v, empty)), System::ArgumentNullException);
 }

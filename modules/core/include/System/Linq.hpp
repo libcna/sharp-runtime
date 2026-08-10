@@ -13,6 +13,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/OverflowException.hpp"
 #include "System/detail/ComparisonPolicy.hpp"
 
 namespace System::Linq {
@@ -63,6 +64,63 @@ namespace System::Linq {
         template<typename Fn>
         inline void requireCallable(const Fn& callable, const char* paramName) {
             if (!callable) throw System::ArgumentNullException(paramName);
+        }
+
+        /**
+         * @brief The accumulation step of both `Sum` overloads, with a checked domain for the
+         *        signed integral types and every other domain left exactly as it was.
+         *
+         * `result = result + item` reached UBSan-confirmed signed overflow for `int`,
+         * `long` and `long long` (SR-AUD-135, ticket #2220). Current .NET's
+         * `Enumerable.Sum` accumulates in a **checked** context and raises
+         * `OverflowException`, so this is a CCF-004 class C repair: detect the overflow
+         * *before* it happens and throw. (CCF-004 itself stays closed 8/8 and gains no
+         * member; this is an occurrence of its cause, recorded in
+         * `docs/CoreDefinedArithmeticBoundedParseFamilyPlan.md`.)
+         *
+         * The domain is stated deliberately rather than swept, because measurement showed
+         * the finding's framing was wider than the undefined behaviour:
+         *
+         *  - **signed integral, excluding `char` and `bool`** — checked, throws. The sum is
+         *    formed in the unsigned counterpart, where wrap is defined, and the overflow is
+         *    recognised from the operand signs, so nothing undefined is executed on the way
+         *    to the diagnosis. .NET has `Sum` overloads for `int` and `long` and this
+         *    matches them; the narrower fixed-width siblings follow for consistency.
+         *  - **`char`** — excluded by name. Its signedness is implementation-defined, so
+         *    throwing for it would make this port's observable behaviour differ between
+         *    x86-64 and AArch64; and .NET's `char` is not a summable numeric type at all.
+         *  - **unsigned integral** — unchanged. `Sum<unsigned>({UINT_MAX, 1})` wraps to `0`
+         *    today, which is *defined* C++, and .NET has no unsigned `Sum` overload to
+         *    match, so there is nothing to correct it to.
+         *  - **floating point** — unchanged. .NET's `float`/`double` `Sum` is not checked
+         *    either; `Sum<double>({DBL_MAX, DBL_MAX})` stays `inf`.
+         *  - **any other `T`** — unchanged `a + b`; the operator's own contract governs.
+         *
+         * Note that `short` and `signed char` were *never* undefined here (both promote to
+         * `int` before the addition, so only the narrowing store was lossy) but are checked
+         * all the same, because a silently truncated total is a wrong answer either way.
+         *
+         * @param a The running total.
+         * @param b The next term.
+         * @return The sum.
+         * @throws System::OverflowException if a checked domain's sum is not representable.
+         */
+        template<typename T>
+        [[nodiscard]] inline T addForSum(const T& a, const T& b) {
+            if constexpr (std::is_integral_v<T> && std::is_signed_v<T> &&
+                          !std::is_same_v<std::remove_cv_t<T>, char> &&
+                          !std::is_same_v<std::remove_cv_t<T>, bool>) {
+                using U = std::make_unsigned_t<T>;
+                const T sum = static_cast<T>(static_cast<U>(static_cast<U>(a) + static_cast<U>(b)));
+                // Two operands of the same sign whose sum has the other sign is exactly the
+                // overflow condition, and it is evaluated on a value the wrap already produced
+                // rather than on an operation the language leaves undefined.
+                if ((a < 0) == (b < 0) && (sum < 0) != (a < 0))
+                    throw System::OverflowException();
+                return sum;
+            } else {
+                return a + b;
+            }
         }
 
     } // namespace detail
@@ -228,25 +286,42 @@ namespace System::Linq {
     template<typename T>
     std::vector<T> ToList(const std::vector<T>& source) { return source; }
 
-    /** @brief Returns the sum of all elements (requires operator+). */
+    /**
+     * @brief Returns the sum of all elements (requires operator+).
+     *
+     * C++ counterpart of .NET `Enumerable.Sum`. For the signed integral types the
+     * accumulation is **checked**, exactly as the reference's is, and raises
+     * `System::OverflowException` on the first term that leaves the type's range —
+     * including a chain whose intermediate overflows even though the conceptual total
+     * would be representable, which is what .NET's per-element check does too. Every
+     * other element type keeps the behaviour it had; `detail::addForSum` states the whole
+     * domain and its reasons (SR-AUD-135, ticket #2220).
+     *
+     * @throws System::OverflowException if a signed integral sum is not representable.
+     */
     template<typename T>
     T Sum(const std::vector<T>& source)
     {
         T result{};
-        for (const auto& item : source) result = result + item;
+        for (const auto& item : source) result = detail::addForSum<T>(result, item);
         return result;
     }
 
     /**
      * @brief Returns the sum of a projected value (requires operator+).
+     *
+     * The projected accumulation is checked on exactly the same domain as the plain
+     * overload above; the selector's own result type decides.
+     *
      * @throws System::ArgumentNullException if @p selector is an empty std::function.
+     * @throws System::OverflowException if a signed integral sum is not representable.
      */
     template<typename T, typename R>
     R Sum(const std::vector<T>& source, std::function<R(const T&)> selector)
     {
         detail::requireCallable(selector, "selector");
         R result{};
-        for (const auto& item : source) result = result + selector(item);
+        for (const auto& item : source) result = detail::addForSum<R>(result, selector(item));
         return result;
     }
 
