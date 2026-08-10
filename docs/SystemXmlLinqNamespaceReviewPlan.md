@@ -682,4 +682,50 @@ plan.
 
 ## 20. Implementation record — corrections made while implementing
 
-*Filled in as each ticket lands.*
+### 20.1 #2196 (SR-AUD-335) — landed; the round-trip premise needed one correction
+
+Landed as §4.1 specified. Three things the plan had right and one it had wrong.
+
+**Right, and re-confirmed by the repair:** five doors not three; the writer doors already
+correct; family X-C; one shared definition rather than a copy. The transforms moved to
+`modules/xml/include/System/Xml/detail/XmlLexicalSanitizer.hpp` — a `detail` namespace in a
+public header, the same placement `System::Collections::detail::MutationCounter` already uses —
+so `System::Xml::XmlWriter` and the three Linq serializers now cannot drift apart. `XmlWriter`'s
+behaviour is unchanged character for character: 483/483 `SharpRuntimeTests_Xml` pass unmodified.
+
+**Wrong, and corrected by measurement.** §4.1 said the processing-instruction round trip
+"does not merely corrupt, it **throws**". A regression written on that premise **failed after a
+correct repair**, which is what exposed it. Probe `build-probe/2196_probe4_pi.log` separates the
+two causes with the emitted text held constant:
+
+| Case | Input | Result |
+|---|---|---|
+| P03 | `<root><?p d?></root>` — **no special character anywhere** | **throws** `XML_ERROR_PARSING_DECLARATION` |
+| P02 | `<root/><?p d?>` | throws |
+| P05 | `<!--c--><?p d?><root/>` | throws |
+| P01 | `<?p d?><root/>` | parses |
+| **P09** | `<?p left?>right?><root/>` — the **pre-repair** text | **parses, `data == "left"`** — `right` silently **gone** |
+| **P10** | `<?p left? >right?><root/>` — the **post-repair** text | parses, `data == "left? >right"` |
+
+So the throw §4.1 attributed to SR-AUD-335 is a **separate substrate limitation**: the
+tinyxml2 backend parses every `<?` as an XML *declaration*, and `tinyxml2.cpp:1126` rejects a
+declaration that is not before every other node. **SR-AUD-335's own consequence for the
+processing instruction is silent data loss, not a throw** — which makes it the same shape as the
+CDATA case, not a different one. The limitation is now ticket **#2202** (post-audit, no
+`SR-AUD-*` identifier), pinned by
+`ProcessingInstruction_ParserPositionLimitIsSubstrateNotSerialization` so it cannot be lost, and
+it is why #2196's PI round-trip regression asserts at document level.
+
+**Evidence.** +28 permanent regressions (`XLinqLexicalSerializationTests.cpp`); module 184 → 212.
+**Four mutations, every one discriminating** — removing the CDATA split fails 8 tests, the
+comment protection 6, the PI target validation 2, the PI data protection 2; each was built,
+executed and restored, none was a build failure, hang or short-circuit. ASan+UBSan+LSan over the
+four changed production bodies plus a 28-value boundary workload: **exit 0, zero reports**;
+non-recovering UBSan: **exit 0**. The result is discriminating because a deliberate
+out-of-bounds read compiled into the *same* build configuration **did** report
+(`build-probe/2196_control.log`). TSan was not run, for the reason §16 gives.
+
+**Not repaired here, deliberately:** #2200 (`XDocumentType`'s quoted literals — the same
+delimiter decision #2084 records as unsettled), #2201 (embedded NUL — the same
+`CheckCharacters` decision #2085 records as unsettled), #2202 (a parser change bounded by a
+vendored substrate that is never edited).

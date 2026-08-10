@@ -13,9 +13,19 @@ namespace System::Xml::Linq {
      * C++ counterpart of .NET System.Xml.Linq.XProcessingInstruction.
      *
      * @note .NET validates Target as a well-formed NCName (and rejects the reserved "xml"
-     * target, case-insensitively) via XmlConvert.VerifyNCName. This port does not perform that
-     * validation — out of scope, consistent with this runtime's general lack of strict XML name
-     * validation elsewhere (e.g. XName).
+     * target, case-insensitively) via XmlConvert.VerifyNCName **at construction**. This port
+     * deliberately still does not validate at construction or in setTargetProperty() — out of
+     * scope, consistent with this runtime's general lack of strict XML name validation elsewhere
+     * (e.g. XName) — but **both serialization doors now reject a malformed target**
+     * (`System::Xml::XmlConvert::VerifyName`, throwing `System::Xml::XmlException`). `WriteTo()`
+     * has always done so; `ToString()`/`Save()` gained it with ticket #2196 (SR-AUD-335), where
+     * the two doors were measured to disagree completely: `XProcessingInstruction("a?>b", "d")`
+     * emitted `<?a?>b d?>` through the direct door while the writer door threw.
+     *
+     * @note Data containing `?>` is **repaired by inserting a space** (`<?p left? >right?>`),
+     * matching real .NET's `XmlEncodedRawTextWriter.WriteCommentOrPi`. Before #2196 the direct
+     * door emitted the raw `?>`, which closed the instruction early and made the resulting text
+     * unparseable — this node kind is the one whose corruption was not silent.
      */
     class XProcessingInstruction : public XNode {
         std::string target_;

@@ -11,6 +11,14 @@ namespace System::Xml::Linq {
      * @brief Represents an XML comment.
      *
      * C++ counterpart of .NET System.Xml.Linq.XComment.
+     *
+     * @note Content that cannot appear verbatim inside `<!-- -->` — an embedded `--`, or a
+     * trailing `-` that would abut the closing delimiter — is **repaired by inserting a space**,
+     * matching real .NET's `XmlEncodedRawTextWriter.WriteCommentOrPi`: `left--right` serializes
+     * as `<!--left- -right-->`. .NET never throws for this, and neither does this port. Both
+     * serialization doors (`ToString()`/`Save()` and `WriteTo()`) share one definition of the
+     * repair (ticket #2196, SR-AUD-335); before that, only `WriteTo()` performed it, and the
+     * direct door emitted an invalid comment that this runtime's own parser accepted silently.
      */
     class XComment : public XNode {
         std::string value_;

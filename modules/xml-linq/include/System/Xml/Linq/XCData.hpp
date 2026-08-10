@@ -14,9 +14,16 @@ namespace System::Xml::Linq {
      * from XText (not directly from XNode) — it is exactly like a text node except for how it
      * serializes and its NodeType.
      *
-     * @note Content containing the literal sequence "]]>" is written verbatim (not split across
-     * multiple CDATA sections the way real .NET's XmlWriter does) — a narrow, documented gap for
-     * an XML edge case unlikely to matter for game data.
+     * @note Content containing the literal sequence `]]>` is **split across adjacent CDATA
+     * sections**, matching real .NET's `XmlEncodedRawTextWriter.WriteCDataSection`: the section
+     * is closed immediately before the embedded terminator and reopened immediately after its
+     * first character, so `left]]>right` serializes as
+     * `<![CDATA[left]]]]><![CDATA[>right]]>` and the concatenated value survives a read-back.
+     * Note that re-parsing such text yields **two** adjacent CDATA nodes, not one — that is what
+     * .NET produces too, and it is why `getValueProperty()` on the containing element, which
+     * concatenates, is the round-trip-stable reading. Both serialization doors (`ToString()`/
+     * `Save()` and `WriteTo()`) share one definition of the split (ticket #2196, SR-AUD-335);
+     * before that, only `WriteTo()` performed it and the direct door emitted the raw terminator.
      */
     class XCData : public XText {
     public:
