@@ -214,11 +214,22 @@ ordinal ASCII fold so that equality and hash are computed by the *same* function
 
 ### 5.7 SR-AUD-228's repair is a measured object-layout change
 
-`sizeof(TimeZoneInfo)` is **144** bytes on LP64 (4 × `std::string` = 128, `TimeSpan` = 8, `bool` =
-1, 7 bytes of tail padding). A second `bool` fits the padding and is layout-neutral; a
-`std::vector<std::shared_ptr<AdjustmentRule>>` (24 bytes) is **not**. `HasSameRules` cannot return
+`sizeof(TimeZoneInfo)` is **160** bytes on LP64 — measured, not derived
+(`build-probe/2185_layout.log`): 4 × `std::string` = 128, `TimeSpan` = **24** (not the 8 an
+estimate suggests; this port's `TimeSpan` is wider than a bare tick count), `bool` = 1, 7 bytes of
+tail padding. A second `bool` fits that padding and is layout-neutral, confirmed at 160; a
+`std::vector<std::shared_ptr<AdjustmentRule>>` (24 bytes) takes it to **184**, and reordering the
+members does not help — the best packing available is also 184. `HasSameRules` cannot return
 `false` where .NET does without rule data to compare, so the complete repair needs that vector.
 This is why #2185's implementation half is gated and #2185's design half is not.
+
+> **Correction.** Sections 5.7 and 11 of this document first carried an *estimate* of 144 → 168,
+> written before the shape was compiled, and that estimate reached
+> `docs/Migration-TimeZoneStandardOffset.md`, `README.md` and commit `9210d8f`'s message. The
+> measured numbers are **160 → 184**. The substantive claim is unaffected — #2177–#2184 add no
+> member and `sizeof` is 160 before and after, now pinned by a `static_assert` in
+> `TimeZoneInfoTests.cpp` — but the arithmetic behind the gate is restated here from measurement.
+> `9210d8f` is already pushed and is not rewritten; this is the correction of record.
 
 ### 5.8 `FindSystemTimeZoneById` validates a file it does not necessarily read
 
@@ -328,7 +339,7 @@ wrong-answer classes with no diagnostic; neither is a memory-safety class.
 | #2182 | compatible | none | none (file-local class) | legacy adapter becomes date-sensitive | none |
 | #2183 | **documented break** | none | none | 7 data files and 4 malformed id shapes now throw | none needed — they were never zones |
 | #2184 | compatible | none | none | an empty-but-set `TZ` is restored as empty | none |
-| #2185 | **gated** | would change `sizeof` 144 → 168 | **object layout** | `HasSameRules` would distinguish rule sets | **needs_user** |
+| #2185 | **gated** | would change `sizeof` 160 → 184 (measured) | **object layout** | `HasSameRules` would distinguish rule sets | **needs_user** |
 | #2186 | record | — | — | — | needs `/rv` or a managed runtime |
 
 **No public signature, virtual function, vtable slot, object layout, mangled symbol or
@@ -487,6 +498,75 @@ a statement *about .NET*, not about this code.
   not zone data" is exactly the kind of claim this review will not make without evidence. Recorded.
 - **Windows and Emscripten runtime behaviour** — compiled, not executed. Unchanged from the
   repository's standing platform policy.
+
+---
+
+## 18a. SR-AUD-228 design record (ticket #2185) — the one gated finding
+
+### 18a.1 The defect, restated from measurement
+
+`HasSameRules` compares `baseUtcOffset_` and `supportsDst_` and nothing else. With #2181 landed,
+`America/New_York` and `America/Havana` both report a standard offset of −05:00 and
+`SupportsDaylightSavingTime` true, so the method returns **true**; .NET returns false, because their
+transition dates differ. Fixing #2181 did not fix this and could not: the two zones agree on
+everything this type stores.
+
+Note the direction of the failure. This port can never return `false` where .NET returns `true` —
+it can only be **too permissive**. That bounds the risk of leaving it as it is, and it is why the
+finding is medium rather than high.
+
+### 18a.2 The selected repair
+
+Give `TimeZoneInfo` a `std::vector<std::shared_ptr<AdjustmentRule>> rules_`, populate it in
+`FindSystemTimeZoneById` from the year scan #2181 already performs (each scan already observes the
+standard offset, the daylight offset, whether a transition occurs and in which months), return it
+from `GetAdjustmentRules()`, and make `HasSameRules` compare `baseUtcOffset_`, `supportsDst_` **and**
+the rule vector element-wise via the `AdjustmentRule::Equals` that already exists.
+
+Three alternatives were considered and rejected:
+
+| Alternative | Why not |
+|---|---|
+| Compare `id_` as well | Wrong for the case .NET gets right: two *differently named* zones with identical rules must compare **true**. Comparing ids would turn a permissive answer into a wrong one. |
+| Compare the observed UTC-offset function over a sampled window | Invents an algorithm .NET does not use, and its answer depends on the sampling window. The review declines to invent. |
+| Derive rules on demand inside `HasSameRules` without storing them | Avoids the layout change but makes an equality-shaped method perform twelve `setenv`/`tzset` cycles per zone per call, under the process-global timezone lock. |
+
+### 18a.3 The measured gate
+
+`build-probe/2185_layout.log`, three shapes compiled side by side against the real
+`AdjustmentRule`:
+
+```
+TimeZoneInfo (real)          sizeof 160  align 8      <- shipped, unchanged by #2177-#2184
+model: as shipped            sizeof 160  align 8
+model: + one bool            sizeof 160  align 8      <- the tail padding absorbs it
+model: + rule vector         sizeof 184  align 8      <- the repair
+model: + rule vector, reordered  sizeof 184  align 8  <- no ordering avoids it
+```
+
+`std::string` is 32, `TimeSpan` is **24**, `bool` is 1: 128 + 24 + 1 = 153, padded to 160, leaving
+seven bytes — enough for another `bool`, not for a 24-byte vector.
+
+`TimeZoneInfo` has no virtual functions, so no vtable is involved and no mangled name changes; the
+break is purely that a translation unit compiled against the old header believes the object is 160
+bytes and one compiled against the new header believes 184. Instances are handed out through
+`std::shared_ptr` from the factories and as `const&` from `Utc()`/`Local()`, so a consumer is
+unlikely to embed one by value — but the type is copyable and nothing prevents it, which is exactly
+the situation `README.md`'s 2026-07-29 `BitArray::Enumerator` entry records as linking with zero
+diagnostics and then giving silently wrong answers.
+
+### 18a.4 The approval sentence, stated exactly
+
+> **#2185:** *"`System::TimeZoneInfo` may grow from 160 to 184 bytes (one
+> `std::vector<std::shared_ptr<AdjustmentRule>>`) so that `HasSameRules` and `GetAdjustmentRules`
+> can distinguish two zones that share a base offset and a daylight flag but not their transition
+> rules, requiring every consumer to be rebuilt."*
+
+Until that is answered, the current behaviour is held by four `PIN_` tests
+(`PIN_HasSameRules_CannotDistinguishNewYorkFromHavana`,
+`PIN_HasSameRules_OnlyDistinguishesOffsetAndTheDaylightFlag`,
+`PIN_GetAdjustmentRules_IsEmptyForEverySystemZone`, and a `static_assert` on `sizeof`), so the
+question cannot be answered silently: implementing the repair fails all four.
 
 ---
 

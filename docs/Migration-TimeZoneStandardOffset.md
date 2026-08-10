@@ -8,8 +8,8 @@ post-audit defects. **No public signature, virtual function, vtable slot, object
 symbol or `noexcept` specification changed** — every change below is behavioural. Source compiles
 unchanged; a rebuild is enough.
 
-`sizeof(TimeZoneInfo)` is **144** bytes before and after; `sizeof(TimeZoneInfo::TransitionTime)`
-and `sizeof(TimeZoneInfo::AdjustmentRule)` are likewise unchanged.
+`sizeof(TimeZoneInfo)` is **160** bytes before and after, pinned by a `static_assert` in the test
+suite; `sizeof(TimeZoneInfo::TransitionTime)` (40) is likewise unchanged.
 
 ---
 

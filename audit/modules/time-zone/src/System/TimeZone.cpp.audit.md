@@ -23,3 +23,13 @@ source of SR-AUD-223.
 
 SR-AUD-223 is confirmed in the paired public-header report.  No production or
 test source was changed.
+
+---
+
+## Remediation record — ticket #2182 (2026-08-10)
+
+**SR-AUD-223 → remediated.** See the paired header report for the full record. In this file the
+adapter's `GetUtcOffset` and `IsDaylightSavingTime` now resolve per date through the shared POSIX
+helper in `modules/time-zone/src/System/TimeZonePosixSupport.hpp`, under the same mutex that guards
+every other read of the process-global timezone state, with the previously cached offset retained
+as the unresolvable-date fallback and as the Windows/Emscripten answer.

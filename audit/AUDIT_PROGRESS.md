@@ -7089,3 +7089,79 @@ by #2144 and #2141 respectively.
 **Index after #2144: 153 remediated / 211 confirmed / 364 total** — of which **49** carry the
 `confirmed (design-complete)` qualifier, none of them added by this review.
 **`modules/io-hashing` is fully closed.**
+
+---
+
+## Reconciliation — `modules/time-zone` (tickets #2176–#2186, 2026-08-10)
+
+**Seven findings, one disposition each, none lost.** Six move `confirmed → remediated`
+(SR-AUD-223, 224, 225, 226, 227, 229); SR-AUD-228 moves `confirmed → confirmed (design-complete)`
+with its implementation gated as ticket #2185.
+
+**Index after this batch: 167 remediated / 197 confirmed / 364 total** — of which **54** carry the
+`confirmed (design-complete)` qualifier, one of them (SR-AUD-228) added by this review.
+**No `SR-AUD-*` identifier was created; numbering stays frozen at 364.**
+
+**`modules/time-zone` is closed except for one gated finding.** It is *not* fully closed, and the
+reason is a decision this batch will not take on the user's behalf: SR-AUD-228's repair is a
+measured object-layout change.
+
+### Six premise corrections, each measured before any code changed
+
+1. **SR-AUD-229 is three properties, not one.** The `time(nullptr)` snapshot fed `BaseUtcOffset`,
+   `StandardName` **and** `DaylightName`, so both names carried the daylight abbreviation all
+   summer and were always identical to each other.
+2. **Its reach is quantified.** 499 installed TZif zones, **158 observing daylight time**, **141
+   reporting the wrong base offset on 2026-08-10**; the other 17 are southern-hemisphere zones,
+   correct that day and wrong in January — the month-dependence demonstrated in both directions
+   from one run.
+3. **SR-AUD-229 contradicts the port's own documentation, not only .NET.** `TimeZoneInfo.hpp`
+   already said "this is always the standard offset", and the Windows branch already computed it
+   that way from `Bias`. Only POSIX disagreed with both, which is why the repair changes no
+   contract.
+4. **SR-AUD-223 is two independent defects** in a 39-line file — a frozen offset *and* a hard-coded
+   `false` — and repairing either alone still answers July wrongly.
+5. **SR-AUD-225 left a public door onto `TimeSpan`'s negation guard.** A zone built with
+   `TimeSpan::MinValue` was accepted, and `ConvertTimeToUtc` then reported a two's-complement
+   diagnostic instead of the argument being refused where it was supplied. **CCF-004 gains no
+   member**: `TimeSpan` already guards the negation, so this is a validation defect, not
+   arithmetic UB. UBSan over the production bodies confirms it — exit 0, zero reports.
+6. **SR-AUD-226 affects both `CreateAdjustmentRule` overloads**, and **SR-AUD-227's hash was
+   locale-dependent** (`std::tolower` consults `LC_CTYPE`), neither of which the reports record.
+
+### Three post-audit defects, ordinary ticket numbers only
+
+- **#2183** — `FindSystemTimeZoneById` validated a file it did not necessarily read. glibc parses a
+  `TZ` value that is not a path as a POSIX rule string, so **all seven non-TZif regular files
+  shipped inside `/usr/share/zoneinfo`** resolved to zones with offset 0, as did
+  `America//New_York`, `./America/New_York` and an identifier whose embedded NUL truncated the
+  filesystem check while all 21 bytes were stored as the `Id`. A `':'` prefix to force file
+  interpretation was measured and does **not** help.
+- **#2184** — the `TZ` save/restore window was not exception-safe, and an empty-but-set `TZ` (POSIX:
+  UTC) was deleted rather than restored.
+- **#2182's third defect** — raw `mktime(tm_isdst = -1)` answers a *repeated* local hour differently
+  depending on the preceding conversion in the same process. Repaired inside #2182 rather than
+  filed separately, because it is inside SR-AUD-223's own cause.
+
+**The NUL-truncation occurrence in #2183 mints no CCF.** Three occurrences in three modules
+(#2003 Uri, #2085 XmlWriter, #2183 here) is exactly the promotion question tickets #2131 and #2109
+already hold open; this review does not pre-empt them.
+
+### What is deferred, and why it is not a shortfall
+
+`/rv` is absent, and five parity questions genuinely need it or a managed runtime: whether the
+conversions clamp or throw at the `DateTime` extremes; whether `CreateAdjustmentRule` also rejects
+three adjacent shapes measured as accepted here; the exact resource strings behind the diagnostics
+#2178 and #2179 add (the exception **types** come from the audit's own managed probes, the text does
+not); whether `TryFindSystemTimeZoneById` swallows every failure; and which reading .NET prefers for
+an ambiguous local time. All five are ticket #2186 and all five are held by `PIN_` tests, so none can
+drift silently. **Nothing was deferred merely because `/rv` is absent** — each is a statement *about
+.NET*, not about this code.
+
+### Gate
+
+Component suite **114 → 187 tests**. Eight mutations proven across the batch, each failing exactly
+its own pins with controls stable; one mutation whose build failed was discarded and re-run.
+UBSan (non-recovering), ASan+LSan+UBSan and TSan over the production bodies: **exit 0, zero
+reports**, TSan driving 8 threads through concurrent `Local()`, `FindSystemTimeZoneById()` and
+`CurrentTimeZone()`. `sizeof(TimeZoneInfo)` is **160** before and after, now `static_assert`ed.

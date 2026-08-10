@@ -227,7 +227,7 @@ no safe or useful equivalent.
 ### 2026-08-10 — `System::TimeZoneInfo` reports a zone's *standard* offset and names, and six inputs are now rejected
 
 **Behavioural only. No public signature, virtual, vtable slot, object layout, mangled symbol or
-`noexcept` specification changed — `sizeof(System::TimeZoneInfo)` is 144 bytes before and after,
+`noexcept` specification changed — `sizeof(System::TimeZoneInfo)` is 160 bytes before and after,
 so ordinary source needs no change and a rebuild is enough.**
 
 `FindSystemTimeZoneById` used to read `tm_gmtoff` and `tm_zone` at `time(nullptr)`, so

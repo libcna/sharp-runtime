@@ -1091,3 +1091,139 @@ TEST(TimeZoneInfoTests, FindSystemTimeZoneById_ADirectoryIsNotAZone) {
     EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById("America"), TimeZoneNotFoundException);
     EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById("Etc"), TimeZoneNotFoundException);
 }
+
+// ---------------------------------------------------------------------------
+// Ticket #2185 (SR-AUD-228): HasSameRules reduces every rule set to a base offset
+// plus a bool, so it cannot return false where .NET does. America/New_York and
+// America/Havana share a standard offset (-05:00) and a daylight flag but not
+// their transition rules; .NET reports them as different, this port reports them
+// as the same.
+//
+// The complete repair needs stored adjustment rules, which is a measured object
+// layout change -- sizeof(TimeZoneInfo) 160 -> 184 on LP64
+// (build-probe/2185_layout.log), with no member ordering that avoids it. That
+// needs an explicit decision, so #2185's implementation half is gated.
+//
+// These tests PIN the current behaviour so the question cannot be answered
+// silently: if a later change makes HasSameRules rule-aware, they fail and force
+// the author to come back to the gate rather than slipping a layout change
+// through. They assert what IS, not what OUGHT to be.
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, PIN_HasSameRules_CannotDistinguishNewYorkFromHavana) {
+    auto ny = zoneOrNull("America/New_York");
+    auto havana = zoneOrNull("America/Havana");
+    if (!ny || !havana) GTEST_SKIP() << "America/New_York or America/Havana is not installed";
+    // Both are -05:00 standard with daylight time; their transition dates differ.
+    ASSERT_EQ(offsetMinutes(*ny), offsetMinutes(*havana));
+    ASSERT_TRUE(ny->getSupportsDaylightSavingTimeProperty());
+    ASSERT_TRUE(havana->getSupportsDaylightSavingTimeProperty());
+    EXPECT_TRUE(ny->HasSameRules(*havana))
+        << "PIN (#2185, SR-AUD-228): this port cannot tell these two zones apart. .NET returns "
+           "false. If this now fails, the rule-aware repair has been implemented -- that is an "
+           "object layout change (160 -> 184) and needs the gate in #2185 to be cleared first.";
+}
+
+TEST(TimeZoneInfoTests, PIN_HasSameRules_OnlyDistinguishesOffsetAndTheDaylightFlag) {
+    auto ny = zoneOrNull("America/New_York");
+    auto phoenix = zoneOrNull("America/Phoenix");
+    if (!ny || !phoenix) GTEST_SKIP() << "a required zone is not installed";
+    // A different offset is the one thing it can see.
+    EXPECT_FALSE(ny->HasSameRules(*phoenix));
+    // And a matching offset plus a matching flag is all it needs to say "same".
+    auto fake = TimeZoneInfo::CreateCustomTimeZone("Invented/Zone", TimeSpan::FromMinutes(-300),
+                                                   "d", "s");
+    EXPECT_FALSE(ny->HasSameRules(*fake))   // custom zones report SupportsDaylightSavingTime false
+        << "PIN: the daylight flag is the second and last thing HasSameRules compares.";
+    auto twin = TimeZoneInfo::CreateCustomTimeZone("Another/Zone", TimeSpan::FromMinutes(-420),
+                                                   "d", "s");
+    EXPECT_TRUE(phoenix->HasSameRules(*twin))
+        << "PIN: an invented zone with Phoenix's offset and no daylight time is 'same rules'.";
+}
+
+TEST(TimeZoneInfoTests, PIN_GetAdjustmentRules_IsEmptyForEverySystemZone) {
+    // The reason HasSameRules cannot do better: there is nothing to compare.
+    for (const char* id : {"America/New_York", "America/Havana", "Europe/Prague", "UTC"}) {
+        auto tz = zoneOrNull(id);
+        if (!tz) continue;
+        EXPECT_TRUE(tz->GetAdjustmentRules().empty())
+            << "PIN (#2185): " << id << " would need stored rules for HasSameRules to improve.";
+    }
+}
+
+TEST(TimeZoneInfoTests, PIN_TimeZoneInfoObjectLayoutIsUnchanged) {
+    // #2177-#2184 add no member. The gate in #2185 is precisely a change to this number, so it
+    // is asserted rather than described. Measured on LP64: 4 x std::string (32) + TimeSpan (24)
+    // + bool (1) + 7 bytes tail padding.
+    static_assert(sizeof(TimeZoneInfo) == 160,
+                  "sizeof(TimeZoneInfo) changed; if this is the SR-AUD-228 rule storage, ticket "
+                  "#2185's approval gate must be cleared first");
+    static_assert(alignof(TimeZoneInfo) == 8, "alignof(TimeZoneInfo) changed");
+    static_assert(sizeof(TimeZoneInfo::TransitionTime) == 40,
+                  "sizeof(TimeZoneInfo::TransitionTime) changed");
+    SUCCEED();
+}
+
+// ---------------------------------------------------------------------------
+// Ticket #2186 (deferred verification): behaviours this review measured but will
+// not change without a reference answer. Pinned so that answering the question
+// later is a deliberate act with a failing test attached, not a silent drift.
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, PIN_ConversionOverflowThrowsRatherThanClamping) {
+    // .NET's ConvertUtcToTimeZone appears to clamp to DateTime.MinValue/MaxValue; this port
+    // propagates DateTime::Add's ArgumentOutOfRangeException. Unverifiable here (#2186).
+    auto plus14 = TimeZoneInfo::CreateCustomTimeZone("+14", TimeSpan::FromHours(14), "d", "s");
+    auto minus14 = TimeZoneInfo::CreateCustomTimeZone("-14", TimeSpan::FromHours(-14), "d", "s");
+    EXPECT_THROW((void)TimeZoneInfo::ConvertTimeFromUtc(DateTime::MaxValue, *plus14),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)TimeZoneInfo::ConvertTimeFromUtc(DateTime::MinValue, *minus14),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)TimeZoneInfo::ConvertTimeToUtc(DateTime::MinValue, *plus14),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)TimeZoneInfo::ConvertTimeToUtc(DateTime::MaxValue, *minus14),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(TimeZoneInfoTests, PIN_ClearCachedDataIsInertAndGetSystemTimeZonesReturnsTwo) {
+    // Both are documented feature gaps rather than defects; sizing them needs .NET's caching
+    // contract, so they are recorded in #2186 and pinned here.
+    auto before = TimeZoneInfo::Local().getBaseUtcOffsetProperty().getTicksProperty();
+    EXPECT_NO_THROW(TimeZoneInfo::ClearCachedData());
+    EXPECT_EQ(TimeZoneInfo::Local().getBaseUtcOffsetProperty().getTicksProperty(), before)
+        << "PIN (#2186): ClearCachedData() is a no-op; Local() uses a block-scope static.";
+    auto zones = TimeZoneInfo::GetSystemTimeZones();
+    EXPECT_EQ(zones.size(), 2u)
+        << "PIN (#2186): the database holds hundreds of zones; this returns UTC and Local.";
+}
+
+TEST(TimeZoneInfoTests, PIN_AdjacentAdjustmentRuleValidationsAreStillAbsent) {
+    // Measured as missing alongside SR-AUD-226 but NOT repaired: the audit's managed probe
+    // covers only the reversed date range, and inventing three more rejections on a
+    // recollection of the .NET source is exactly what this review declines to do (#2186).
+    DateTime tod;
+    auto tt = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    EXPECT_NO_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+        DateTime(2025, 1, 1, 5, 30, 0), DateTime(2025, 12, 31), TimeSpan::Zero, tt, tt))
+        << "PIN (#2186): a dateStart carrying a time-of-day is still accepted.";
+    EXPECT_NO_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+        DateTime(2025, 1, 1), DateTime(2025, 12, 31), TimeSpan::FromHours(15), tt, tt))
+        << "PIN (#2186): a daylightDelta beyond +/-14 hours is still accepted.";
+    EXPECT_NO_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+        DateTime(2025, 1, 1), DateTime(2025, 12, 31), TimeSpan::FromSeconds(30), tt, tt))
+        << "PIN (#2186): a sub-minute daylightDelta is still accepted.";
+}
+
+TEST(TimeZoneInfoTests, PIN_TimeZoneInfoItselfModelsNoDaylightTransitions) {
+    // The documented limitation, asserted so that making TimeZoneInfo date-sensitive is a
+    // deliberate act. The legacy TimeZone adapter deliberately differs; see TimeZoneTests.cpp.
+    auto ny = zoneOrNull("America/New_York");
+    if (!ny) GTEST_SKIP() << "America/New_York is not installed";
+    const DateTime january(2025, 1, 15, 12, 0, 0), july(2025, 7, 15, 12, 0, 0);
+    EXPECT_EQ(ny->GetUtcOffset(january).getTicksProperty(),
+              ny->GetUtcOffset(july).getTicksProperty());
+    EXPECT_FALSE(ny->IsDaylightSavingTime(july));
+    EXPECT_FALSE(ny->IsAmbiguousTime(DateTime(2025, 11, 2, 1, 30, 0)));
+    EXPECT_FALSE(ny->IsInvalidTime(DateTime(2025, 3, 9, 2, 30, 0)));
+    EXPECT_TRUE(ny->GetAmbiguousTimeOffsets(DateTime(2025, 11, 2, 1, 30, 0)).empty());
+}

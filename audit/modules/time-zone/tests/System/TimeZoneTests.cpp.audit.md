@@ -23,3 +23,14 @@ adapter.
 
 The green happy-path suite cannot detect SR-AUD-223.  No source or test was
 changed during this audit.
+
+---
+
+## Remediation record — ticket #2182 (2026-08-10)
+
+Both gaps this report names are closed. `TimeZoneTests.cpp` now controls `TZ` through an RAII guard
+that restores it exactly (distinguishing unset from empty-but-set), and exercises the adapter's
+summer and winter branches, both 2025 transitions from four sides each, the repeated and
+non-existent local hours, a southern-hemisphere zone, a zone with no daylight time, and the
+`DateTime` range extremes. The one-time static cache is addressed by resolving per call rather than
+by asserting a cached value, so no test depends on which zone was in force at first use.
