@@ -1,0 +1,685 @@
+<!-- SPDX-License-Identifier: MIT -->
+<!-- Copyright (c) Robert Vokac and contributors -->
+
+# `modules/xml-linq` (`System::Xml::Linq`) — namespace review plan
+
+*Ticket #2195. Written 2026-08-10 on branch `claude/remediation-batch-1804-namespace-b1yjh5`.*
+
+Every claim below was measured in **this** container from the **shipped** bodies, not inherited
+from the audit text or from the previous handoff. The reproduction probes are
+`build-probe/2195_probe1_surface.cpp` (log `…_surface.log`),
+`build-probe/2195_probe2_malformed.cpp` (log `…_malformed.log`) and
+`build-probe/2195_probe3_events.cpp` (log `…_events.log`), all compiled with
+`build-probe/2195_compile.sh`, one translation unit at a time, at most two jobs.
+
+`/rv/tmp/runtime/` is **absent** (re-verified 2026-08-10), so no .NET behaviour is assumed from
+the reference source. Where a .NET rule is relied on, it comes from something this repository
+already contains — most often `modules/xml`, which ships the resolver or sanitiser the Linq
+layer bypasses. Where nothing in the repository settles a question, it is recorded as deferred
+rather than guessed.
+
+**No `SR-AUD-*` identifier is issued by this review. Audit numbering stays frozen at 364.**
+
+---
+
+## 1. Work unit 1 — why `modules/xml-linq`, verified rather than inherited
+
+### 1.1 The audit decomposition, recounted from scratch
+
+`audit/AUDIT_FINDINGS_INDEX.md` was re-parsed row by row at the start of this batch:
+
+```
+364 rows, 364 unique SR-AUD identifiers, none missing in 1..364
+170 remediated
+140 confirmed (plain)
+ 54 confirmed (design-complete)
+```
+
+That is exactly the triple the inherited handoff stated, and exactly the triple this batch's
+brief predicted. (One row — SR-AUD-029 — carries a seventh column and needs a looser parse than
+the other 363; a strict six-column regex silently reports 363/169 and misses it. Recorded so the
+next recount does not "discover" a different total.)
+
+### 1.2 The inherited claims about `xml-linq`, checked one by one
+
+| Claim | Verdict |
+|---|---|
+| 4 open findings | **True** — SR-AUD-333, 334, 335, 336; no remediated finding in this module. |
+| 1 high, and that high is blocked | **True** — SR-AUD-333, `confirmed (design-complete)`, owned by CCF-019; its remaining tickets are #1899 (blocked on one approval question), #1894 and #1896 (both blocked), and #1892/#1893 (`wontfix`). |
+| 3 compatible-actionable findings | **Confirmed for two outright, corrected for the third.** SR-AUD-334 and SR-AUD-335 are compatible. **SR-AUD-336 is not** — §12.3 measures two independent blockers, one of which is the *same* `sizeof(XObject)` growth the user explicitly declined on 2026-07-31 for #1896. It splits into a compatible pin ticket (#2198) and a blocked implementation ticket (#2199). |
+| no `/rv` dependency for those three | **True.** Every rule the repairs rely on is already implemented in `modules/xml` — see §5. |
+| a small coherent namespace | **True** — 22 headers, 12 sources, 6 test files, one CMake target, one component (`Xml.Linq`), 5,533 lines total. |
+
+### 1.3 Candidate scoring against the strongest alternatives
+
+Recomputed from the index, restricted to units with open findings and no review plan:
+
+| Candidate | Open | high | Compatible-actionable | Blocked | Approval-gated | Memory/lifetime risk | Public-input exposure | Security consequence | `/rv` needed | Cohesion | Can close compatible work |
+|---|---:|---:|---:|---:|---:|---|---|---|---|---|---|
+| **`xml-linq`** | **4** | 1 | **2 outright + 1 split** | 1 (its high **is** CCF-019) | 1 (SR-AUD-336's implementation half) | high — but that half is the blocked half | **high** — parse and serialise are the doors | **medium** — emits unparseable text; no code execution, no resource fetch | **no** | **high**, one namespace | **yes — two findings fully** |
+| `io-isolated-storage` | 1 | **1** | 1 | 0 | 0 | medium (path escape) | **high** | **high** — an absolute caller path escapes the store | no | tiny | yes — the whole unit |
+| `globalization` | 7 | 1 | ~2 | 0 | 1 (`Calendar` shape, 82 tests pin it) | high (TSan-confirmed culture race) | high | low | **yes, absent** (ICU collation/casing) | medium | partly |
+| `text-regular-expressions` | 1 | 1 | ~0 | likely (stateful raw-`this`) | 0 | high | medium | low | no | tiny | probably not |
+| `collections-object-model` | 1 | 1 | ~0 | likely (stateful raw-`this`) | 0 | high | low | low | no | tiny | probably not |
+
+**Selection: `modules/xml-linq`, and the reason is not raw severity.** `io-isolated-storage`
+carries the single highest-consequence *unblocked* defect in the corpus, and this review does
+**not** claim it outranks nothing — §18.2 recommends it as the next unit and §19 of this batch's
+work carries a scoped review of it. `xml-linq` is taken first because:
+
+1. it is the only candidate where **two findings can be closed outright** in one context, and
+   both close a *shared* root cause (§5, family X-C) rather than two unrelated ones;
+2. its high-severity finding is **already design-complete and already partially repaired**
+   (#1890/#1891/#1895/#1898 landed), so the compatible remainder is genuinely separable — the
+   same separation the previous batch executed against blocked #1962;
+3. **its defect is not merely a fidelity gap.** §4.2 measures that a legal, `.NET`-shaped tree
+   serialises to text that **this module's own parser rejects** (`XML_ERROR_PARSING_ATTRIBUTE`).
+   Silent data corruption on a round trip through a public door outranks a namespace-loss
+   parity gap, and it was not visible from the index summary;
+4. `xml-linq`'s repairs need no new component edge and no reference data.
+
+`io-isolated-storage` is **not** deferred for being unimportant. It is deferred because it is
+one finding, and taking it first would leave two closable findings and a shared root cause
+untouched in a namespace nobody had scoped.
+
+---
+
+## 2. Namespace scope and file inventory
+
+Component `Xml.Linq`, target `sharp_runtime_xml_linq`, `PUBLIC_DEPENDENCIES Core.Base Xml`.
+No component edge is added, changed or removed by any ticket in this review.
+
+**Public headers (22)** — `modules/xml-linq/include/System/Xml/Linq/`:
+
+`Extensions.hpp`, `LoadOptions.hpp`, `ReaderOptions.hpp`, `SaveOptions.hpp`, `XAttribute.hpp`,
+`XCData.hpp`, `XComment.hpp`, `XContainer.hpp`, `XDocument.hpp`, `XDocumentType.hpp`,
+`XElement.hpp`, `XName.hpp`, `XNamespace.hpp`, `XNode.hpp`, `XNodeDocumentOrderComparer.hpp`,
+`XNodeEqualityComparer.hpp`, `XObject.hpp`, `XObjectChange.hpp`, `XObjectChangeEventArgs.hpp`,
+`XProcessingInstruction.hpp`, `XStreamingElement.hpp`, `XText.hpp`.
+
+**Sources (12)** — `XAttribute.cpp`, `XCData.cpp`, `XComment.cpp`, `XContainer.cpp`,
+`XDocument.cpp`, `XDocumentType.cpp`, `XElement.cpp`, `XNode.cpp`, `XObject.cpp`,
+`XProcessingInstruction.cpp`, `XStreamingElement.cpp`, `XText.cpp`.
+
+**Tests (6, 184 tests, all passing at review start)** — `XLinqBorrowedViewTests.cpp` (14),
+`XLinqLifetimeTests.cpp` (32), `XLinqMutationConsistencyTests.cpp` (24), `XLinqNodeTests.cpp`
+(77), `XLinqSupportTests.cpp` (20), `XLinqTeardownTests.cpp` (17).
+
+**The bridge to `System::Xml`.** `XDocument::Parse`/`Load` build a `System::Xml::XmlDocument`
+(tinyxml2-backed) and convert it; `WriteTo` writes through `System::Xml::XmlWriter`;
+`SerializeTo` bypasses both and writes to a `std::ostream` directly. **That asymmetry is the
+whole of §5's root-cause family.**
+
+---
+
+## 3. Complete public-surface inventory
+
+### 3.1 Present
+
+| Area | Surface |
+|---|---|
+| Object base | `XObject` — `getNodeTypeProperty`, `getParentProperty`, `getDocumentProperty`, `add_Changed`, `remove_Changed`, `add_Changing`, `remove_Changing`; copy/move all deleted |
+| Node base | `XNode` — `SerializeTo`, `getNextNodeProperty`, `getPreviousNodeProperty`, `Remove`, `ReplaceWith`×2, `NodesBeforeSelf`, `NodesAfterSelf`, `CompareDocumentOrder`, `IsAfter`, `IsBefore`, `DeepEquals`, `GetDeepHashCode`, `ToString`×2, `WriteTo` |
+| Container | `XContainer` — `getFirstNodeProperty`, `getLastNodeProperty`, `Add`×2, `AddFirst`×2, `Nodes`, `DescendantNodes`, `Element`, `Elements`×2, `Descendants`×2, `RemoveNodes`; protected `ValidateNode`, `RemoveNode`, `InsertNodeAt`, `AdoptObject` |
+| Element | `XElement` — 2 constructors, `getNameProperty`/`setNameProperty`, `getValueProperty`/`setValueProperty`, `Add(attr)`, `Add(text)`, `Attribute`, `getAttributesProperty`, `Attributes`, `getFirstAttributeProperty`, `getLastAttributeProperty`, `getHasAttributesProperty`, `getHasElementsProperty`, `getIsEmptyProperty`, `RemoveAttributes`, `RemoveAttribute`, `RemoveAll`, `getAttributeValue`, `WriteTo`, `Save`×2, `Parse`, `Load`, `GetDeepHashCode` |
+| Document | `XDocument` — `getRootProperty`/`setRootProperty`, `getDocumentTypeProperty`, `getDeclarationProperty`/`setDeclarationProperty`, `WriteTo`, `Save`×2, `Parse`, `Load`; `XDeclaration` |
+| Attribute | `XAttribute` — 2 constructors, `getNameProperty`, `getValueProperty`/`setValueProperty`, `getIsNamespaceDeclarationProperty`, `getNextAttributeProperty`/`setNextAttributeProperty`, `getPreviousAttributeProperty`, `Remove`, `ToString` |
+| Leaf nodes | `XText`, `XCData`, `XComment`, `XProcessingInstruction`, `XDocumentType` |
+| Names | `XName` (4 constructors, `getLocalNameProperty`, `getNamespaceNameProperty`, `getNamespaceProperty`, `ToString`, `Equals`, `==`/`!=`, `GetHashCode`, `Get`×2, `std::hash` specialisation); `XNamespace` (`getNamespaceNameProperty`, `ToString`, `Equals`, `==`/`!=`, `GetName`, `operator+`, `Get`, `None`/`Xml`/`Xmlns`) |
+| Comparers | `XNodeDocumentOrderComparer`, `XNodeEqualityComparer` |
+| Options | `LoadOptions`, `ReaderOptions`, `SaveOptions` (flag enums with `|`/`&`) |
+| Events | `XObjectChange`, `XObjectChangeEventArgs` (+4 static instances), `XObjectChangeEventHandler` |
+| Streaming | `XStreamingElement` — `getNameProperty`/`setNameProperty`, `Add`×4, `WriteTo`, `Save`×2, `ToString`×2 |
+| Extensions | `Extensions::Elements`, `Attributes`, `Descendants`, `DescendantNodes`, `Ancestors`, `AncestorsAndSelf`, `Remove`, `InDocumentOrder` (each with plain and `XName`-filtered forms) |
+
+### 3.2 Absent — recorded so the review is not read as claiming coverage it does not have
+
+- **Annotations** (`AddAnnotation`/`Annotation`/`Annotations`/`RemoveAnnotations`) — documented
+  out of scope on `XObject`. This is not incidental: in .NET the `Changed`/`Changing` handler
+  storage *is* an annotation, which is precisely why SR-AUD-336 has nowhere to put a handler
+  (§12.3).
+- **`BaseUri`, `IXmlLineInfo`** — depend on annotations; `LoadOptions::SetBaseUri`/`SetLineInfo`
+  already document themselves as no-ops.
+- **`XNode::CreateReader`/`XContainer::CreateWriter`** — documented out of scope.
+- **`XElement::GetPrefixOfNamespace` / `GetDefaultNamespace`** — absent today. #2197 adds both
+  (purely additive; they fall out of the scope resolver it has to build anyway).
+- **`XElement`'s value-conversion `explicit operator T`** family (`(int)element` etc.) — absent;
+  `getValueProperty()`/`getAttributeValue()` are the ported spelling. No open finding names it,
+  and none is invented here.
+- **`XNamespace` interning / reference equality** — deliberately value-based; documented on both
+  `XName` and `XNamespace`.
+- **`SaveOptions::OmitDuplicateNamespaces`** — accepted and inert. #2197 does **not** implement
+  it and says so in the doc-comment; §18 records it as an exclusion.
+
+---
+
+## 4. The four findings, dispositions, and the tickets that carry them
+
+| Finding | Severity | Status at review start | Disposition | Ticket |
+|---|---|---|---|---|
+| SR-AUD-333 | high | `confirmed (design-complete)` | **blocked** — CCF-019; not touched by this batch beyond re-measurement | #1899 (blocked), #1894 (blocked), #1896 (blocked); #1892/#1893 `wontfix` |
+| SR-AUD-334 | medium | `confirmed` | **compatible implementation** | **#2197** |
+| SR-AUD-335 | medium | `confirmed` | **compatible implementation** | **#2196** |
+| SR-AUD-336 | medium | `confirmed` | **split**: compatible pin + blocked implementation | **#2198** (compatible) + **#2199** (blocked) |
+
+Two post-audit defects were found while inventorying, both **structurally equivalent to an
+already-open `modules/xml` ticket** and both deliberately left to settle with their twin:
+**#2200** (`XDocumentType::SerializeTo`, twin of #2084) and **#2201** (embedded NUL through the
+direct serialisers, twin of #2085). **No `SR-AUD-*` identifier is issued for either**, exactly
+as #2051/#2055/#2072/#2082/#2083 did.
+
+### 4.1 SR-AUD-335 — the direct serialisers bypass sanitisers the module already ships → **#2196, compatible**
+
+**Reproduced exactly as written** (`2195_probe1_surface.log`, block `L*`), and the audit's own
+sentence — "the local parser accepts the comment but does not make the output valid" — is
+confirmed by probe 2 (`D03`, `D05`: tinyxml2 accepts `<!--left--right-->` on re-read).
+
+The premise is right and the surface is larger than the three types named. **Measured:**
+
+| Door | `SerializeTo` (ToString / Save) | `WriteTo` (XmlWriter) |
+|---|---|---|
+| `XCData("left]]>right")` | `<![CDATA[left]]>right]]>` — **broken** | `<![CDATA[left]]]]><![CDATA[>right]]>` — **already correct** |
+| `XComment("left--right")` | `<!--left--right-->` — **broken** | `<!--left- -right-->` — **already correct** |
+| `XComment("trailing-")` | `<!--trailing--->` — **broken** | `<!--trailing- -->` — **already correct** |
+| `XProcessingInstruction("p","left?>right")` | `<?p left?>right?>` — **broken** | `<?p left? >right?>` — **already correct** |
+| `XProcessingInstruction("a?>b","d")` — the **target** | `<?a?>b d?>` — **broken** | **throws** `Invalid XML name: 'a?>b'.` — already correct |
+
+**Five doors, not three**, and the fifth (the PI *target*) fails differently from the other
+four: the writer *rejects* it where the direct serialiser emits it. That asymmetry is the
+finding's real shape.
+
+**Consequences, measured rather than asserted:**
+
+- `L02` — a CDATA round trip is **lossy**: `left]]>right` comes back as `leftright]]>`
+  (`roundtrip-lossless=0`). Probe 2 `D04` shows *why*: the one CDATA node re-reads as a CDATA
+  node `left` **plus a text node** `right]]>`.
+- `L08` — the PI round trip does not merely corrupt, it **throws**:
+  `XML_ERROR_PARSING_DECLARATION`. The emitted document is not parseable by the module's own
+  parser.
+- `L07`/`D03` — the comment round trip is **silent**: this parser accepts the invalid comment,
+  so nothing signals the corruption. A conforming parser would reject it.
+
+**Repair (#2196).** Route the four direct serialisers through the behaviour
+`modules/xml/src/System/Xml/XmlWriter.cpp` already implements — `sanitizeCDataText`,
+`sanitizeCommentText`, `sanitizeProcessingInstructionText` — and the PI target through
+`XmlConvert::VerifyName`, which the writer already calls. This is family **X-C** (§5.1): the
+repair reuses a shipped validator instead of inventing a grammar, exactly as #2076 did in the
+sibling namespace.
+
+### 4.2 SR-AUD-334 — namespace URIs discarded on parse and on serialisation → **#2197, compatible**
+
+**Reproduced, and materially understated.** The index calls this a case where "a namespaced
+programmatic tree serializes/reparses as unqualified XML". It is that, and three further things
+the audit does not say:
+
+1. **It emits XML that this module's own parser rejects.** Two attributes differing only by
+   namespace serialise as `<r x="1" x="2"/>`; re-reading that throws
+   `XML_ERROR_PARSING_ATTRIBUTE` (probe 2 `D01`). Duplicate attribute names are not
+   well-formed. This is **silent corruption at a public door**, not a fidelity gap.
+2. **It destroys namespace declarations built the .NET way.** `XAttribute(XNamespace::Xmlns + "p", "urn:x")`
+   — the exact spelling `XAttribute.cpp`'s own `ValidateAttribute` exists to validate — serialises as
+   `<e p="urn:x"/>`: the declaration becomes an **ordinary attribute named `p`** (probe 1 `N10`,
+   probe 2 `D02`). A round trip therefore silently unbinds every prefix in the document.
+3. **`getIsNamespaceDeclarationProperty()` is wrong for parsed input, inconsistently.** For
+   `<p:root xmlns:p="…" xmlns="…"/>` it answers **0** for `xmlns:p` and **1** for `xmlns`
+   (probe 2 `D06`). The default form works only by accident — its literal local name *is*
+   `"xmlns"` — while the prefixed form is misclassified because its name was never split.
+
+**The root cause is one line, and it is family X-C again.** `XDocument.cpp`'s converter builds
+every name from the raw qualified tag text:
+
+```cpp
+auto el = std::make_shared<XElement>(XName(srcEl->getNameProperty()));           // "p:root"
+el->Add(std::make_shared<XAttribute>(XName(a->getNameProperty()), a->getValueProperty()));
+```
+
+while **the DOM layer directly underneath already resolves all three parts** —
+`XmlNode::getLocalNameProperty()`, `getPrefixProperty()`, `getNamespaceURIProperty()` (which
+walks ancestors for `xmlns`/`xmlns:prefix`), and `XmlAttribute::getNamespaceURIProperty()`,
+which already implements the two rules that are easy to get wrong: an **unprefixed attribute has
+no namespace** (an ancestor's default `xmlns` does not apply to it), and the **`xml` prefix is
+built in**. The Linq converter calls none of them.
+
+The serialisation half is symmetric: `XElement::SerializeTo`, `XElement::WriteTo`,
+`XAttribute::ToString` and `XStreamingElement::WriteTo` all write
+`name.getLocalNameProperty()`, with in-code comments recording that this was a deliberate choice
+to avoid emitting Clark notation as an XML Name. **That choice was correct about Clark notation
+and wrong about the alternative** — the alternative is a prefix, not a bare local name.
+
+**Repair (#2197).**
+
+- **Parse**: build `XName` from the DOM's resolved `(namespaceURI, localName)`, special-casing
+  the `xmlns` prefix to `XNamespace::Xmlns` and the bare `xmlns` attribute to the unqualified
+  name `"xmlns"`, so declarations survive as declarations.
+- **Serialise**: give the element serialisers a namespace scope built from the declarations
+  already carried as attributes, plus a prefix allocator for namespaces used but not declared.
+  Emit qualified names and declarations.
+- **Additive**: `XElement::GetDefaultNamespace()` and `GetPrefixOfNamespace()` — both fall out
+  of the scope resolver, both are real .NET surface, neither changes layout.
+
+**Undeclared prefixes are deliberately left alone** (`<p:r/>` with no `xmlns:p` in scope keeps
+the local name `p:r` and an empty URI). Narrowing accepted input is the open question #2083
+already owns at the DOM layer; this review does not answer it from the Linq side. §18 records
+it as an exclusion and #2197 pins the current behaviour.
+
+### 4.3 SR-AUD-336 — `Changed`/`Changing` accept handlers and never notify → **#2198 compatible + #2199 blocked**
+
+**Reproduced across nine doors** (`2195_probe1_surface.log`, block `E*`): `setValueProperty`,
+`Add(node)`, `Add(attribute)`, `setNameProperty`, `RemoveAll`, and an ancestor observing a
+descendant's change — **every one reports 0**. The audit's second sentence is also confirmed:
+`XLinqNodeTests.cpp:87` (`ChangedChangingEventAccessors_DoNotThrow`) asserts only that
+registration does not throw, so it *preserves* the inert behaviour rather than pinning it.
+
+**The premise is right. The classification "compatible-actionable" is not**, and §12.3 records
+why with structural evidence rather than opinion. Two independent blockers:
+
+1. **Per-object handler storage is an object-layout change.** `sizeof(XObject)` is **16** —
+   vptr plus `XContainer* parent_`, with **no padding** (`alignof` 8). Adding one pointer takes
+   it to **24** (measured directly, `2195_probe3_events.log`: `growth-per-object=8`), and every
+   derived type grows with it: `XNode` 16, `XContainer` 40, `XElement` 128, `XAttribute` 120,
+   `XText`/`XCData`/`XComment` 48, `XProcessingInstruction` 80, `XDocument` 56. **The user
+   explicitly declined exactly this growth — `XObject` 16 → 24 — on 2026-07-31**, recorded in
+   #1896's notes for the CCF-019 depth cache. A different motive does not make it a different
+   approval.
+2. **The handler type cannot be compared, so `remove_Changed` cannot name a registration.**
+   `XObjectChangeEventHandler` is a bare `std::function` alias, and `std::function` has no
+   `operator==` against another `std::function`. Proved at compile time — the probe carries a
+   `static_assert(!HasEquality<XObjectChangeEventHandler>::value)` that would fail if this ever
+   stopped holding. **The removal half is therefore not implementable at any layout cost**
+   without either a public API shape change (return a registration token) or a documented
+   deviation about which handler `remove_Changed` drops.
+
+The third avenue — a process-wide side table keyed by `const XObject*` — avoids blocker 1 but
+not blocker 2, and #1896's notes already record "memoising outside the object needs a side table
+on every mutation" among the alternatives judged **worse**. It is not adopted here on this
+review's own authority.
+
+**Split, not deferred.** #2198 (compatible) makes the inert contract explicit and
+**discriminating** across every mutation door and corrects the class doc-comment to name both
+blockers — the same "state and pin the contract" move #1898 made for CCF-019's borrowed views.
+#2199 (blocked) carries the implementation and the exact approval sentence (§12.3).
+
+### 4.4 SR-AUD-333 — the CCF-019-owned high finding → **blocked, re-measured only**
+
+Re-measured, not repaired. Probe 1's `X*` block confirms the residual set is exactly what
+`XObject.hpp.audit.md`'s #1890 correction records:
+
+- **X15** — `Extensions::Ancestors`/`AncestorsAndSelf` return `std::vector<XElement*>`; the raw
+  handles outlive the tree (`ancestor-count-while-alive=2`, then dangling). Four overloads.
+- **X17** — `XElement::getAttributesProperty()` returns a reference to the element's own vector,
+  which outlives the element.
+- **X21** — `Add` still **moves** an already-attached node (`donor-child-count=0`,
+  `receiver-child-count=1`) where .NET clones. Authorised documented deviation, unchanged.
+
+**Neither X15 nor X17 was dereferenced by this probe**, deliberately: their use-after-free is
+already ASan-confirmed and recorded, and re-triggering it proves nothing new while making every
+other measurement in the run unreadable. §11 states this as a non-result rather than implying
+coverage.
+
+**Why it stays blocked.** #1899 is blocked on **one** approval question with three named options
+(B / D / E) and a recorded recommendation; #1894 cannot start because no CCF-019 repair has yet
+outlawed a spelling for a negative fixture to reject; #1896 is blocked on the declined layout
+approval. **This review chooses no ownership policy, adds no retain/detach/copy/share
+behaviour, and marks nothing remediated.** §7 records what it *did* contribute: one structurally
+equivalent borrowed edge inventory and the classification of each.
+
+---
+
+## 5. Structural root-cause families
+
+### 5.1 X-C — a public door bypasses a validator or resolver the module already ships
+
+**Members: SR-AUD-334 and SR-AUD-335 — both of them, which is why this unit closes two findings
+with one shape of repair.**
+
+- SR-AUD-335: `SerializeTo` bypasses `sanitizeCDataText`/`sanitizeCommentText`/
+  `sanitizeProcessingInstructionText`/`XmlConvert::VerifyName`, all shipped in `modules/xml`
+  and all already used by the `WriteTo` door of the *same node objects*.
+- SR-AUD-334: the parse converter bypasses `XmlNode::getLocalNameProperty`/`getPrefixProperty`/
+  `getNamespaceURIProperty` and `XmlAttribute::getNamespaceURIProperty`, all shipped in
+  `modules/xml`, all already correct including the two subtle attribute rules.
+
+This is the family `docs/SystemXmlNamespaceReviewPlan.md` §17 predicted in writing: *"Watch for
+it in `modules/xml-linq`, whose SR-AUD-335 is the mirror image."* The prediction was right and
+**under**-stated: SR-AUD-334 is a second member of the same family in the same module.
+
+**Promotion: not minted.** X-C now has three members across two modules (SR-AUD-349 in
+`modules/xml`, SR-AUD-334 and SR-AUD-335 here). The sibling review declined to mint from one
+module's evidence; minting from two modules is a maintainer act, and #2109 records that every
+promotion sentence in the corpus is passive and names no agent. **Recorded as evidence, not
+minted.** No CCF number is claimed or reserved for it.
+
+### 5.2 X-E — a public surface exists and is inert
+
+Member: SR-AUD-336. The sibling namespace's SR-AUD-352 was the same shape and was **compatible**
+there because `XmlDocument`'s handlers are public *data members*. Here they are *accessors that
+discard*, and there is no member to write into. **Same family, opposite cost** — recorded
+because it is exactly the asymmetry #2109 flags as making a family non-homogeneous.
+
+### 5.3 CCF-019 — a borrowed edge with no liveness bound
+
+Member: SR-AUD-333, already owned. §7 is this review's contribution to it.
+
+---
+
+## 6. Corrected premises
+
+Every row is additive; no historical text is rewritten.
+
+| # | The record said | Measured 2026-08-10 |
+|---|---|---|
+| 6.1 | SR-AUD-335 covers `XCData`, `XComment`, `XProcessingInstruction` | **Five doors, not three.** The PI **target** is a fifth and behaves differently from the other four — the writer door **throws** `Invalid XML name` for it while the direct serialiser emits it. |
+| 6.2 | SR-AUD-335's writer paths share the defect | **They do not.** `WriteTo` was **already correct** at all five doors before this batch. The defect is confined to `SerializeTo`, i.e. `ToString()`, `ToString(SaveOptions)` and `Save(fileName)` — and to every containing element/document, which recurse into them. |
+| 6.3 | SR-AUD-335 "a CDATA round trip loses data" | Confirmed, **with the mechanism**: the single CDATA node re-reads as a CDATA node (`left`) **plus a text node** (`right]]>`), so the concatenated value becomes `leftright]]>`. The PI round trip does not corrupt — it **throws**. |
+| 6.4 | SR-AUD-334 is a namespace fidelity/round-trip gap | **It also emits malformed XML.** Two attributes differing only by namespace serialise to a duplicate attribute name that this module's own parser rejects (`XML_ERROR_PARSING_ATTRIBUTE`). |
+| 6.5 | — | **An `xmlns:p` declaration built the .NET way degrades into an ordinary attribute `p`** on serialisation, silently unbinding the prefix for the whole subtree. |
+| 6.6 | — | **`getIsNamespaceDeclarationProperty()` is wrong for parsed input** — `0` for `xmlns:p`, `1` for `xmlns`. The correct answer for the default form is reached by accident, not by resolution. |
+| 6.7 | — | **The DOM layer already resolves namespaces correctly**, including the two rules easiest to get wrong (unprefixed attributes take no default namespace; the `xml` prefix is built in). SR-AUD-334's repair *reuses* that resolver; it does not invent one. |
+| 6.8 | SR-AUD-334 names five files | **Six**, and the sixth is a separate class: `XStreamingElement::WriteTo` writes local names only, by the same reasoning and with the same in-code comment. |
+| 6.9 | SR-AUD-336 is compatible-actionable | **It is not.** §12.3: per-object storage is the `XObject` 16 → 24 growth the user declined for #1896, and `std::function` has no equality so `remove_Changed` cannot identify a registration. Split into compatible #2198 and blocked #2199. |
+| 6.10 | SR-AUD-336's test "only asserts that registration does not throw" | Confirmed verbatim (`XLinqNodeTests.cpp:87`) — **and that is the whole of the module's event coverage**: 184 tests, none of which would fail if notification were half-implemented. |
+| 6.11 | — | Two post-audit defects, each the exact twin of an already-open `modules/xml` ticket: `XDocumentType::SerializeTo` (#2200 ↔ #2084) and NUL through the direct serialisers (#2201 ↔ #2085). The NUL pair is a **mirror image**: the Linq door *emits* the NUL, the writer door *truncates* at it. |
+
+---
+
+## 7. CCF-019 mapping — the borrowed-edge inventory this review contributes
+
+The brief requires the blocked finding's structurally equivalent edges to be inventoried and
+classified, without choosing a policy. Every borrowed edge reachable from this module's public
+surface, classified by kind:
+
+| # | Edge | Kind | Owner | Guarded? | Status |
+|---|---|---|---|---|---|
+| 1 | `XObject::parent_` | raw back-pointer | child object | **yes** — cleared by `~XContainer` (#1890) | closed by #1890 |
+| 2 | `XAttribute::next_` | intrusive raw sibling link | attribute | **yes** — cleared by `~XElement` (#1890) | closed by #1890 |
+| 3 | `XElement::getAttributesProperty()` → `const std::vector<…>&` | borrowed **reference into owner storage** | element | no | **X17, open, #1899** |
+| 4 | `Extensions::Ancestors` → `std::vector<XElement*>` | borrowed **raw handles** (4 overloads) | tree | no | **X15, open, #1899** |
+| 5 | `XAttribute::getPreviousAttributeProperty()` → `XAttribute*` | borrowed raw pointer | element | reaches #1 and #2, both now guarded | derived; no separate exposure |
+| 6 | `XAttribute::getNextAttributeProperty()` → `XAttribute*` | borrowed raw pointer | element | guarded by #2 | closed by #1890 |
+| 7 | `XObject::getParentProperty()` / `getDocumentProperty()` → raw | borrowed raw pointer | tree | guarded by #1 | closed by #1890 |
+| 8 | `XNode::CompareDocumentOrder(const XNode*, const XNode*)` | borrowed **parameters** | caller | n/a — never retained | not an edge |
+| 9 | `XContainer::Nodes()`, `XElement::Attributes()` | **owning snapshots**, by value | caller | n/a | measured safe, recorded so no repair breaks them |
+| 10 | `XObjectChangeEventHandler` registrations | **callback capture** | would-be registry | n/a — discarded | **inert; see SR-AUD-336 / #2199** |
+| 11 | `XStreamingElement::content_` `std::any` items | owning `shared_ptr` / value | streaming element | n/a | owning, not borrowed |
+| 12 | `XContainer::children_` / `XElement::attributes_` | **owning** `shared_ptr` | container | n/a | owning |
+
+**Two open borrowed edges, both already owned by #1899, both raw-handle/reference kinds, neither
+reachable through `parent_`** — which is why #1890's repair could not close them and why they are
+still the finding's residual. **No policy is chosen here.** Edge 10 is added to the CCF-019
+inventory as a *callback-capture* edge for the first time — it is currently inert, so it carries
+no live exposure, and #2199 must not be implemented without deciding whether a registered
+handler may outlive its `XObject` (a question CCF-019 owns, and a second reason #2199 is
+blocked).
+
+---
+
+## 8. SR-AUD-335 and candidate CCF-021 — the adjacency, answered
+
+The brief warns that SR-AUD-335 is adjacent to the unminted CCF-021 (#2131) and forbids minting.
+**It is not a member, and the reason is structural rather than a judgement call.**
+
+| Test | CCF-021's five members | SR-AUD-335 |
+|---|---|---|
+| What crosses the door | a **control character** (CR, LF, NUL) | a **multi-character markup delimiter** (`]]>`, `--`, `?>`) |
+| What it terminates | a **protocol field** in a header/frame the peer parses | a **document lexical construct** in text the same process re-reads |
+| Boundary the guarantee is stated at | "no byte reaches the wire" / "no field terminator in the serialized text" | "the emitted document is well-formed" |
+| Correct repair | **rejection** at the door | **self-healing** — split the CDATA section, insert a protective space |
+| Does the module already ship the fix | no | **yes**, on the sibling door of the same object |
+
+The repair policies are **opposite**: CCF-021's members reject; SR-AUD-335's correct behaviour —
+already implemented in `modules/xml` and matching .NET's `XmlEncodedRawTextWriter` — preserves
+the content and repairs the markup. A family whose members need opposite repairs is not one
+family. Independently, `docs/SystemXmlNamespaceReviewPlan.md` §17 already assigned SR-AUD-335 to
+**X-C**, not to CCF-021, and §5.1 confirms that assignment with measurement.
+
+**Action taken: append this determination to #2131's evidence as a re-verified NON-member. CCF-021
+is not minted. No finding's status is changed. No CCF number is reserved.**
+
+---
+
+## 9. Dependency graph
+
+```
+#2195 (review, this document)
+  ├── #2196  SR-AUD-335 — direct serialisers            [compatible, independent]
+  ├── #2197  SR-AUD-334 — namespaces                    [compatible, independent of #2196]
+  ├── #2198  SR-AUD-336 — pin the inert contract        [compatible, independent]
+  │     └── #2199  SR-AUD-336 implementation            [BLOCKED: 2 approvals]
+  ├── #2200  XDocumentType quoted literals              [waits on #2084's decision]
+  └── #2201  NUL through the direct serialisers         [waits on #2085's decision]
+
+SR-AUD-333 / CCF-019 — untouched
+  ├── #1899 blocked (one approval question, options B/D/E)
+  ├── #1894 blocked (nothing to pin until #1888 or #1899 lands)
+  └── #1896 blocked (layout approval declined 2026-07-31)
+```
+
+`#2196` and `#2197` touch disjoint functions (`XCData/XComment/XProcessingInstruction::SerializeTo`
+versus `XElement`/`XAttribute`/`XDocument`/`XStreamingElement`), so either order works. #2196 is
+taken first because it is the smaller of the two and its tests are the ones #2197's round-trip
+assertions build on.
+
+---
+
+## 10. Severity
+
+| Finding | Index | This review | Why |
+|---|---|---|---|
+| SR-AUD-333 | high | **high, unchanged** | Two ASan-confirmed use-after-free edges remain. |
+| SR-AUD-334 | medium | **medium, at the top of the band** | Silent corruption on a public round trip, and output the module's own parser rejects. Not raised to high: no memory unsafety, no code execution, no resource fetch, and the corruption is confined to text the caller asked to be produced. |
+| SR-AUD-335 | medium | **medium, unchanged** | Same reasoning; the PI round trip at least *throws* rather than corrupting silently. |
+| SR-AUD-336 | medium | **medium, unchanged** | Inert surface; no unsafety. The severity is unaffected by the finding being harder to repair than the index implies. |
+
+---
+
+## 11. Compatible / blocked / deferred matrix
+
+| Ticket | Compatible | Behaviour change | Approval needed | Deferred on |
+|---|---|---|---|---|
+| #2196 | **yes** | **yes** — four direct-serialiser doors change their output; one previously-accepted PI target is now rejected | no | — |
+| #2197 | **yes** | **yes** — parsed names, query semantics and serialised text all change for namespaced input | no | — |
+| #2198 | **yes** | **no** | no | — |
+| #2199 | no | yes | **two** (§12.3) | — |
+| #2200 | no | yes | — | #2084's delimiter/escaping decision |
+| #2201 | no | yes | — | #2085's `CheckCharacters` decision |
+
+**Neither #2196 nor #2197 is source-, ABI-, layout-, vtable- or `noexcept`-breaking.** Both are
+*behaviour*-changing, which this repository handles with a migration note rather than an
+approval — the same treatment `Migration-XmlStrictnessAndLifecycle.md` and
+`Migration-WebSocketProtocolStrictness.md` gave to their equivalents.
+
+---
+
+## 12. Source / ABI / layout / vtable / `noexcept` consequences
+
+### 12.1 #2196
+
+- **Source:** none. No signature, no new public member, no new type.
+- **Layout / vtable:** none — `.cpp` bodies plus file-local helpers only.
+- **`noexcept`:** none. `SerializeTo` is not `noexcept` today and is not made so; the PI target
+  door gains a `throw`, which is only reachable from an already-throwing-capable function.
+- **Behaviour:** four doors emit different text; the PI target door rejects input it accepted.
+
+### 12.2 #2197
+
+- **Source:** **additive only** — `XElement::GetDefaultNamespace()` and
+  `GetPrefixOfNamespace(const XNamespace&)`. No existing signature changes.
+- **Layout / vtable:** none. The namespace scope is computed from the tree at serialisation
+  time and from the DOM at parse time; **nothing is cached in any object**. This is the
+  deliberate reason the repair is compatible where SR-AUD-336's is not.
+- **Cost:** `XElement::SerializeTo`/`WriteTo` called on a *non-root* element walks `parent_` once
+  to collect inherited declarations — O(depth) for the entry call only, not per descendant.
+- **`noexcept`:** none.
+
+### 12.3 #2199 — the two approvals, stated exactly
+
+> **Approval XL-1 (object layout).** *"Approve adding one pointer-sized handler-storage field to
+> `System::Xml::Linq::XObject`, growing `sizeof(XObject)` from 16 to 24 and growing every
+> derived node type with it — `XNode` 16→24, `XContainer` 40→48, `XElement` 128→136,
+> `XAttribute` 120→128, `XText`/`XCData`/`XComment` 48→56, `XProcessingInstruction` 80→88,
+> `XDocument` 56→64 — in exchange for working `Changed`/`Changing` notification. The break is
+> binary-only and silent; every consumer must rebuild completely."*
+>
+> This is the **same growth (`XObject` 16 → 24) the user declined on 2026-07-31** for #1896's
+> O(1) cycle guard. A different motive does not carry the earlier refusal over, and does not
+> reverse it either — it has to be asked again, for this purpose.
+
+> **Approval XL-2 (handler identity).** *"`XObjectChangeEventHandler` is `std::function`, which
+> is not equality-comparable, so `remove_Changed(handler)` cannot identify which registration to
+> drop. Choose: (a) change the public shape so registration returns a token that removal
+> consumes; (b) document that `remove_Changed` removes **all** handlers; or (c) document that it
+> removes the **most recently added** handler."*
+>
+> Option (a) is a public source addition; (b) and (c) are documented deviations from .NET's
+> delegate semantics. **This review does not choose.**
+
+A third question CCF-019 owns must be answered with them: **may a registered handler outlive the
+`XObject` it was registered on?** (§7 edge 10.) `#2199` must not be implemented before it is.
+
+---
+
+## 13. Ownership / lifetime consequences
+
+- **#2196 and #2197 add no owning or borrowed edge.** #2196 rewrites four function bodies that
+  hold no pointers. #2197's scope objects are automatic-storage `std::vector<std::pair<std::string,
+  std::string>>` values that never outlive the serialisation call, and its parse path holds only
+  `shared_ptr` handles the converter already held.
+- **Nothing in this batch touches `XObject::parent_`, `XAttribute::next_`, `~XContainer` or
+  `~XElement`** — the four sites #1890 repaired. Their tests must pass unmodified, and they do.
+- **#2197 walks `parent_` upward** in `CollectInheritedScope`. That walk **only compares and
+  reads**, on a live tree, from a public entry point that already requires the tree to be alive;
+  it introduces no new lifetime assumption beyond the one `getDocumentProperty()` already makes
+  and #1890 already made safe for detached nodes.
+
+---
+
+## 14. Mutation / serialisation consequences
+
+The brief's mutation matrix applies to #2197 only through *serialisation* (neither ticket adds a
+mutator). The insertion/removal/replacement matrix is already covered by
+`XLinqMutationConsistencyTests.cpp` (24 tests) and `XLinqLifetimeTests.cpp` (32 tests), all of
+which must keep passing unchanged — they are this review's regression floor for the mutation
+half, and no ticket here is permitted to modify them.
+
+Serialisation matrix — required for #2196 and #2197 (§16).
+
+---
+
+## 15. Test matrix
+
+### 15.1 #2196 — direct serialisers
+
+Empty value; value that is exactly the delimiter; delimiter at the start / middle / end; two
+adjacent delimiters; a comment of `-`, `--`, `---`; trailing hyphen; PI with empty data; PI whose
+data contains `?>` once and twice; PI target rejected; `ToString()`, `ToString(DisableFormatting)`
+and `Save(file)` each producing the same text; the same node inside an element and inside a
+document; **`SerializeTo` and `WriteTo` agree** for every shape; **round trip is lossless** for
+CDATA and parseable for PI and comment.
+
+### 15.2 #2197 — namespaces
+
+Programmatic namespaced element; namespaced attribute; default namespace; prefixed input; prefix
+rebinding in a nested scope; default-namespace undeclaration (`xmlns=""`); `xml:lang`; `xmlns:p`
+and `xmlns` round-tripping as declarations with `IsNamespaceDeclaration` true; two namespaces
+with the same local name under one parent; two attributes differing only by namespace;
+namespace-aware `Element`/`Elements`/`Descendants`/`Attribute` query; `DeepEquals` across a round
+trip; `GetDefaultNamespace`/`GetPrefixOfNamespace`; `XStreamingElement`; document-level round
+trip; **undeclared prefix pinned unchanged**; generated prefixes do not collide with declared
+ones; `SerializeTo` and `WriteTo` agree.
+
+### 15.3 #2198 — the inert event contract
+
+Every mutation door (`setValueProperty`, `setNameProperty`, `Add(node)`, `Add(attribute)`,
+`Add(text)`, `AddFirst`, `Remove`, `ReplaceWith`, `RemoveAll`, `RemoveNodes`,
+`RemoveAttributes`, attribute `setValueProperty`) with a handler registered on the object and on
+an ancestor; registration/removal of an unregistered handler; and a `static_assert` pinning
+blocker 2 so the contract cannot silently stop being true.
+
+### 15.4 Parsing / serialisation matrix required by the brief
+
+Empty document, single root, text, CDATA, comment, PI, DOCTYPE, namespaces, default namespace,
+prefix rebinding, malformed names, CR/LF/NUL, Unicode, supplementary scalar, invalid XML
+character, escaping, round-trip. Rows that this batch **does not** close are recorded in §17 with
+the ticket that owns them (NUL/invalid characters → #2201; DOCTYPE literals → #2200).
+
+---
+
+## 16. Sanitizer matrix
+
+| Sanitizer | Target | Why |
+|---|---|---|
+| **ASan** | the changed production bodies, over the whole `#2195` probe workload plus the new tests | #2197 walks the ancestor chain and builds scope vectors; #2196 rewrites string-building loops with index arithmetic. Buffer and lifetime coverage. |
+| **UBSan** | same | index and `size_t` arithmetic in the sanitiser loops and the prefix allocator. |
+| **LSan** | same | the parse path allocates every node; a rejected parse must not leak. |
+| **TSan** | **not run, and the reason is stated** | Neither ticket introduces shared mutable state. The one `thread_local` in this module (`pendingRelease`, #1895) is untouched. Running TSan over single-threaded serialisation would produce a clean result that proves nothing. |
+
+Every sanitizer conclusion must prove the production body was instrumented and the target
+rebuilt, use a discriminating control, and record present-before/absent-after or state an honest
+non-result.
+
+---
+
+## 17. Exclusions — what this review deliberately does not do
+
+- **SR-AUD-333 / CCF-019.** No ownership policy chosen, no borrowed view changed, nothing marked
+  remediated. #1899/#1894/#1896 stay blocked.
+- **CCF-021 is not minted** (§8), **CCF-022 is not minted**, and **no new CCF number is minted or
+  reserved** for family X-C (§5.1).
+- **`SaveOptions::OmitDuplicateNamespaces`** stays inert. #2197 emits a declaration only where
+  one is needed, which is *close* to the flag's effect, but the flag itself is not consulted and
+  the doc-comment says so.
+- **Undeclared namespace prefixes** stay accepted and unresolved (#2083 owns the question).
+- **Undeclared entity references** — #2082's question; not reached from this module.
+- **NUL and non-XML characters** — #2201, waiting on #2085.
+- **DOCTYPE quoted literals** — #2200, waiting on #2084.
+- **`XName` interning / reference equality** — permanent documented deviation.
+- **Annotations, `BaseUri`, `IXmlLineInfo`, `CreateReader`** — documented out of scope; not
+  invented here.
+- **Entity expansion and external-resource loading are not introduced.** The substrate expands
+  no internal entity and resolves no external one (measured in the sibling review, §7); nothing
+  in #2196/#2197 changes the parser, only the converter above it and the writers beside it.
+- **CNA, mobile-eggbert and every repository outside `sharp-runtime` were not inspected.** #1773
+  stays blocked.
+
+---
+
+## 18. Implementation order and the next unit
+
+### 18.1 Order
+
+1. **#2195** — this document.
+2. **#2196** — SR-AUD-335. Smallest, and its round-trip helpers are reused by #2197.
+3. **#2197** — SR-AUD-334. Largest.
+4. **#2198** — SR-AUD-336's compatible half.
+5. Reconciliation: recount all four findings, give each exactly one disposition, and state that
+   `modules/xml-linq` is **closed except for exactly the blocked and deferred work named in §9**.
+   **It must not be called fully closed while CCF-019 is unresolved.**
+
+### 18.2 The next unit
+
+`modules/io-isolated-storage` / SR-AUD-241, scored in §1.3. Reviewed separately in this batch's
+work unit 3.
+
+---
+
+## 19. Completion criteria
+
+This review (#2195) is complete when:
+
+1. this document exists and covers all nineteen required sections; ✅
+2. every one of the four findings has exactly **one** disposition and none has disappeared; ✅
+3. every premise correction is additive and measured, not inherited; ✅
+4. the CCF-019 borrowed-edge inventory exists and chooses no policy; ✅
+5. the CCF-021 adjacency is answered with evidence and the family is **not** minted; ✅
+6. bounded tickets exist in `plan.sqlite3` for every disposition; ✅
+7. **no `SR-AUD-*` identifier was issued** and numbering stays frozen at 364. ✅
+
+#2196, #2197 and #2198 are complete when their own acceptance criteria in `plan.sqlite3` pass,
+the full gate shows no new failure, and §20 records what implementing them corrected in this
+plan.
+
+---
+
+## 20. Implementation record — corrections made while implementing
+
+*Filled in as each ticket lands.*
