@@ -69,6 +69,10 @@ namespace SharpRuntime
     //     a well-known, deliberate asymmetry from most other numeric parsers).
     // Both are rejected up front as std::errc::invalid_argument, matching what a real
     // std::from_chars call would do for the same input, before strtof/strtod ever run.
+    //  3. strtof/strtod accept C99 hexadecimal floating literals; std::from_chars with
+    //     chars_format::general does not, and stops at the 'x' (ticket #2222). Handled in the
+    //     body, where the copy is truncated so the C parser sees only what the standard grammar
+    //     would have consumed.
     //
     // noexcept is ADDED rather than dropped, and it is load-bearing: std::from_chars is itself
     // noexcept, and Single::tryParseCore / Single::TryParse are noexcept, so on the fallback
@@ -88,7 +92,22 @@ namespace SharpRuntime
         // longer takes the nothrow heap path rather than being truncated, because truncating a
         // digit run changes the value (a 600-digit integer is not its first 511 digits).
         constexpr std::size_t stackCapacity = 512;
-        const std::size_t length = static_cast<std::size_t>(last - first);
+        std::size_t length = static_cast<std::size_t>(last - first);
+
+        // Difference 3, ticket #2222: strtof/strtod accept C99 HEXADECIMAL floating literals and
+        // std::from_chars with chars_format::general does not. Measured, the standard function
+        // stops at the 'x' and reports the leading zero it did consume: "0x10" -> value 0 with
+        // ptr at offset 1, "-0x10" -> value -0 with ptr at offset 2. Truncating the copy right
+        // after that zero reproduces exactly that, for every measured shape, including "0x",
+        // "0X1p3" and "0xg". Sequences where the 'x' does not immediately follow the FIRST digit
+        // ("00x1", "0.0x1") are not hexadecimal prefixes and are deliberately left alone -- the C
+        // parser already stops in the right place there, which the tests pin.
+        {
+            const std::size_t digitStart = (length > 0 && *first == '-') ? 1u : 0u;
+            if (length > digitStart + 1 && first[digitStart] == '0' &&
+                (first[digitStart + 1] == 'x' || first[digitStart + 1] == 'X'))
+                length = digitStart + 1;
+        }
         char stackBuffer[stackCapacity];
         std::unique_ptr<char[]> heapBuffer;
         char* buffer = stackBuffer;

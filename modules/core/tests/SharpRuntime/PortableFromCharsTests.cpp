@@ -382,3 +382,61 @@ TEST(PortableFromCharsContractTests, TheTrimmedSubrangeSingleAndDoubleActuallyPa
     EXPECT_EQ(3, fb.consumed);
     EXPECT_DOUBLE_EQ(1.5, fb.value);
 }
+
+// ---------------------------------------------------------------------------
+// Ticket #2222 -- a second, different divergence in the same helper, found by inventory while
+// reproducing SR-AUD-180 and deliberately not folded into it: strtof/strtod accept C99
+// hexadecimal floating literals and std::from_chars with chars_format::general does not.
+// This is a GRAMMAR cause, not the range cause, so it carries no SR-AUD identifier.
+//
+// Measured before the fix: PortableFromCharsFloat("0x10") returned ec=0, ptr at offset 4, value
+// 16, where std::from_chars returns ec=0, ptr at offset 1, value 0.
+// ---------------------------------------------------------------------------
+
+TEST(PortableFromCharsGrammarTests, HexadecimalPrefixStopsAtTheXExactlyAsFromCharsDoes) {
+    for (const char* text : {"0x10", "-0x10", "0X1p3", "0x", "-0x", "0xg", "0x0", "0X"}) {
+        const std::size_t n = std::strlen(text);
+        expectAgreesWithNative(std::string_view(text, n), n, text);
+    }
+    // Spelled out for the headline case, so the intended answer is readable and not only implied.
+    const Outcome fb = runFallback("0x10", "0x10" + 4);
+    EXPECT_EQ(std::errc{}, fb.ec);
+    EXPECT_EQ(1, fb.consumed);
+    EXPECT_DOUBLE_EQ(0.0, fb.value);
+    // The sign is still consumed and carried, so "-0x10" yields a negative zero over two
+    // characters.
+    const Outcome neg = runFallback("-0x10", "-0x10" + 5);
+    EXPECT_EQ(std::errc{}, neg.ec);
+    EXPECT_EQ(2, neg.consumed);
+    EXPECT_TRUE(std::signbit(neg.value));
+}
+
+TEST(PortableFromCharsGrammarTests, DecimalSpellingsThatStartWithZeroKeepWorking) {
+    // The guard must key on an 'x' immediately after the FIRST digit, and nothing else.
+    for (const char* text : {"0", "-0", "0.5", "-0.5", "0e3", "0.0", "0000", "0.25e-3"}) {
+        const std::size_t n = std::strlen(text);
+        expectAgreesWithNative(std::string_view(text, n), n, text);
+    }
+}
+
+TEST(PortableFromCharsGrammarTests, AnXThatIsNotAHexPrefixIsLeftToTheOrdinaryParser) {
+    // "00x1" and "0.0x1" have no hexadecimal prefix -- the 'x' does not follow the first digit --
+    // and the C parser already stops in the right place, so the guard must not touch them.
+    for (const char* text : {"00x1", "0.0x1", "1x", "10x2", "-00x1"}) {
+        const std::size_t n = std::strlen(text);
+        expectAgreesWithNative(std::string_view(text, n), n, text);
+    }
+}
+
+TEST(PortableFromCharsGrammarTests, TheHexGuardDoesNotDisturbTheRangeBound) {
+    // The two repairs compose: a hexadecimal prefix split by the range boundary must still obey
+    // `last`, and must not read the character that would have completed the prefix.
+    expectAgreesWithNative("0x10", 1, "\"0x10\" over [0,1)");
+    expectAgreesWithNative("0x10", 2, "\"0x10\" over [0,2)");
+    expectAgreesWithNative("0x10", 3, "\"0x10\" over [0,3)");
+    std::vector<char> block{'0', 'x', '1'};
+    const Outcome fb = runFallback(block.data(), block.data() + 1);
+    EXPECT_EQ(std::errc{}, fb.ec);
+    EXPECT_EQ(1, fb.consumed);
+    EXPECT_DOUBLE_EQ(0.0, fb.value);
+}

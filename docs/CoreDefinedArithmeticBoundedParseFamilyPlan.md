@@ -903,3 +903,84 @@ unaffected — `Single*`/`Double*` 372/372 and XPath 90/90 — which is expected
 `FromCharsFloat` selects the native overload and the fallback is not on their path at all. Both
 entry points are free function templates, so no mangled symbol exists to change; the only contract
 change is the **added** `noexcept`, pinned by `static_assert`.
+
+---
+
+## 24. What #2222 measured (2026-08-10)
+
+The adjacent grammar divergence §5.3.3 recorded is closed. **No `SR-AUD-*` identifier was created**
+and none of the three findings' statuses changed — this was never an audit finding, only something
+the inventory turned up in the same fifteen-line function.
+
+### 24.1 The reference behaviour was measured, not assumed
+
+`build-probe/2222_probe.cpp` runs the platform's own `std::from_chars` over thirteen shapes
+(`build-probe/2222_native_grammar.log`). It stops at the `x` and reports the leading zero it did
+consume:
+
+| Input | `std::from_chars` | fallback before | fallback after |
+|---|---|---|---|
+| `"0x10"` | `ec=0 ptr=1 value=0` | `ec=0 ptr=4 value=16` | `ec=0 ptr=1 value=0` |
+| `"-0x10"` | `ec=0 ptr=2 value=-0` | — | matches |
+| `"0X1p3"`, `"0x"`, `"-0x"`, `"0xg"`, `"0x0"` | stop at the `x` | — | match |
+| `"00x1"`, `"0.0x1"` | `ptr=2`, `ptr=3` | — | unchanged, and deliberately untouched |
+
+### 24.2 The guard keys on the position, not on the character
+
+`00x1` and `0.0x1` are **not** hexadecimal prefixes: the `x` does not immediately follow the first
+digit, and the C parser already stops in the right place. The guard therefore truncates only when
+`0` immediately followed by `x`/`X` begins the number, after an optional `-`.
+
+### 24.3 Two mutations, and the second is an **equivalent** mutant — said plainly
+
+| Mutation | Result |
+|---|---|
+| **M1** — remove the guard (the pre-#2222 behaviour) | **2 of 27 tests fail** — killed |
+| **M3** — do not skip the leading sign before the `0x` test | **1 of 27 fails** (`"-0x10"` returns −16 over five characters instead of −0 over two) — killed |
+| **M2** — widen the guard to truncate at **any** `x` | **27/27 pass** |
+
+M2 is **not a surviving mutant, it is an equivalent one**, and the difference matters. Outside a
+leading `0x`/`0X` the C parser already stops at the `x` of its own accord, so truncating there
+changes nothing observable — there is no input that can distinguish the two forms. The narrow
+condition is kept because it states the intent (a *hexadecimal prefix*, not *an `x`*), not because
+it changes behaviour. Recording it as a kill would have been false.
+
+### 24.4 Consequences
+
++4 permanent tests (`PortableFromCharsGrammarTests`); `PortableFromChars*` 27/27. The two repairs
+compose: the guard-page probe still survives, and a hexadecimal prefix split by the range boundary
+still obeys `last`. Consumers unaffected — `Single*`/`Double*` 372/372, XPath 90/90 — as expected,
+since Linux selects the native overload and this code is not on their path. No signature, `noexcept`
+or symbol change.
+
+---
+
+## 25. Family reconciliation (2026-08-10)
+
+| Finding | Disposition | Closed by |
+|---|---|---|
+| **SR-AUD-131** | **`remediated`** | #2218 (`Stopwatch`) **and** #2219 (`TimeProvider`) — both were required |
+| **SR-AUD-135** | **`remediated`** | #2220 |
+| **SR-AUD-180** | **`remediated`** | #2221 |
+| — (no identifier) | closed | #2222, the adjacent grammar divergence |
+
+**The bounded family is fully closed. There is no residual, no blocked ticket and no `needs_user`
+question arising from it** — which is what §10 predicted when it classified all five tickets as
+compatible-ready, and is the property that made this family the measured selection.
+
+Against §16's criteria: (1) and (2) and (3) are met and the audit index carries all three flips;
+(4) every diagnostic listed in §5 is absent afterwards, each with the sub-check that found it
+enabled and, for the floating conversion, with `-fno-sanitize-recover=all` so the exit code means
+something, and the guard-page probe survives in `fallback` mode; (5) the permanent tests exist and
+pass; (6) every mutation in §15 is killed except the one that turned out to be an **equivalent**
+mutant, which is recorded as such in §24.3 rather than counted; (7) the records are updated and
+numbering is still **364**.
+
+**No unrelated `modules/core` finding was closed, and `modules/core` is NOT closed.** SR-AUD-130,
+which shares a file and a report with SR-AUD-131, is untouched and still `confirmed`, as is the
+`Stopwatch` synchronisation observation, SR-AUD-046's neighbours in the LINQ report, and the 61
+other open findings in that module. **CCF-004 stays closed 8/8 and gained no member; CCF-019 was not
+touched; CCF-021 and CCF-022 stay unminted.**
+
+Audit decomposition at the close of the family: **181 remediated / 128 confirmed / 55 confirmed
+(design-complete) / 364 total**, from **178 / 131 / 55** at the open.
