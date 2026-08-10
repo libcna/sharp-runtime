@@ -4,26 +4,272 @@
 # NEXT.md
 
 *Last verified: 2026-08-10. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
-harness-designated branch**. **Pushed after every commit**, per `CLAUDE.md` rule 13 — six commits,
-six pushes, every one a normal fast-forward. No merge, rebase, tag, force-push, PR, publication,
+harness-designated branch**. **Pushed after every commit**, per `CLAUDE.md` rule 13 — seven commits,
+seven pushes, every one a normal fast-forward. No merge, rebase, tag, force-push, PR, publication,
 amend or history rewrite; all commits unsigned (`git -c commit.gpgsign=false`) — no usable private
-signing key exists here. This batch reviewed and **closed the bounded `modules/core` memory-safety
-family** — SR-AUD-044, 045, 051, 054 and 067, **all five remediated**, one with a named residual
-(#2215, `needs_user`). This is **one bounded family of `modules/core`, not a `modules/core`
-namespace review**: 67 findings in that module remain open and the measured next family is selected
-in §7. Audit **178 remediated / 131 confirmed / 55 confirmed (design-complete) / 364 total**;
-**no `SR-AUD-*` identifier created — numbering frozen at 364.** Gate **16,605 tests across 38
-executables: 16,597 passing, 2 skipped, 6 failing** for the same two measured causes, unchanged and
-not hidden (**+42 on the inherited 16,563 — exactly the five tickets' own new tests, so no
-regression anywhere**). Graph **41 / 92** and seams **3 / 20** unchanged; negative fixtures
-**13 → 14 files, 116 → 120 sites** (one new fixture, four new sites). **ASan+UBSan over the
-instrumented production bodies: every one of the ten before-reports absent afterwards**, with a
-deliberate heap-buffer-overflow control firing in the same build; **25 of 25 mutations killed**, one
-after being strengthened. **Doxygen, `ccache` and the `/rv` reference tree are all absent** and were
-not installed. **CCF-019 untouched and open; CCF-005 recorded as adjacency without being reopened;
-CCF-021/#2131 and CCF-022/#2109 remain unminted.** #1773, #1962, #2150, #2152, #2155, #2166, #2170,
-#2172, #2175, #2185, #2186, #2192, #2194, #2199, #2207, #2208 and #2209 remain exactly as inherited.
-See the first handoff below.*
+signing key exists here. This batch reviewed and **closed the bounded `modules/core`
+defined-arithmetic and bounded-parse family** — **SR-AUD-131, SR-AUD-135 and SR-AUD-180, all three
+remediated, with no residual and no `needs_user` question**. This is **one bounded family of
+`modules/core`, not a `modules/core` namespace review**: **64 findings in that module remain open**
+and the measured next family is selected in §7 as review ticket **#2223**. Audit **181 remediated /
+128 confirmed / 55 confirmed (design-complete) / 364 total**; **no `SR-AUD-*` identifier created —
+numbering frozen at 364.** Gate **16,665 tests across 38 executables: 16,657 passing, 2 skipped, 6
+failing** for the same two measured causes, unchanged and not hidden (**+60 on the inherited
+16,605 — exactly the five tickets' own new tests, so no regression anywhere**). Graph **41 / 92**,
+seams **3 / 20** and negative fixtures **14 files / 120 sites** all unchanged. **Three findings, two
+subfamilies, three repair classes** — the label was accurate and no common abstraction was forced.
+**CCF-004 stays closed 8/8 and gained no member**: SR-AUD-131 and SR-AUD-135 are recorded as
+*occurrences*, the convention already used for T-F, T-A, T-C and N-B, and SR-AUD-180 is not a member
+or an adjacency at all. **Ten premise corrections, every one measured**, including two the brief got
+wrong: `TimeProvider` carries a **second** undefined operation that GCC's default
+`-fsanitize=undefined` set cannot report, and **SR-AUD-180 is not ASan-decidable at all** — the
+over-read is inside glibc, and a guard page, not a sanitizer, is what proves it. **15 mutations: 14
+killed, 1 equivalent** (said plainly, not counted). **Doxygen, `ccache` and the `/rv` reference tree
+are all absent** and were not installed. **CCF-019 untouched and open; CCF-021/#2131 and
+CCF-022/#2109 remain unminted.** #2215, #1773, #1962 and every other blocked, `needs_user` and
+deferred ticket remain exactly as inherited. See the first handoff below.*
+
+---
+
+## Batch record — the bounded `modules/core` defined-arithmetic and bounded-parse family, closed (#2217–#2222)
+
+**Three audit findings. All three remediated. No residual.** Six ticket commits plus this
+handoff, seven pushes, every one a normal fast-forward.
+
+### 1. Work unit 1 — the scope, verified rather than inherited
+
+`audit/AUDIT_FINDINGS_INDEX.md` was re-parsed **by finding identifier**, not by column count:
+**178 remediated / 131 confirmed / 55 confirmed(design-complete) = 364**, matching the inherited
+triple exactly. The brief's warning held — SR-AUD-029 carries a seventh column, and so do
+SR-AUD-286 and SR-AUD-307; three more carry six.
+
+All owning reports were read in full. `plan.sqlite3` holds **no** other ticket naming any of the
+three, so #2217 was not stale; no ticket was `doing`; the working tree was clean; #2215 is still
+`needs_user` and #1773/#1962 still `blocked`.
+
+**Of the inherited handoff's four claims, three hold and one does not.** All three findings are
+high, unblocked, unclaimed, and decidable without the absent `/rv` tree. But *"all three
+sanitizer-decidable"* is **wrong for SR-AUD-180** and wrong for half of SR-AUD-131 — see §3.
+
+### 2. The three findings are TWO subfamilies, not one, and three repair classes
+
+The inherited label *"defined arithmetic and bounded parse"* names two things, and there really are
+two. No common abstraction was forced.
+
+- **DAB-A — CCF-004's cause** (SR-AUD-131, SR-AUD-135): a public .NET-shaped operation whose
+  *defined* (C# unchecked) or *checked* arithmetic is computed with a raw signed C++ operator.
+  Even inside it the repairs differ by CCF-004 class: 131's subtractions are **class A** (wrap
+  intended, no value changes), 131's `TimeProvider` conversion and 135 are **class C**.
+- **DAB-B — an unbounded C parser handed a bounded range** (SR-AUD-180): no arithmetic at all. A
+  memory-range contract defect whose repair shares nothing with DAB-A's.
+
+**CCF-004 stays closed 8/8 and gained no member.** Both DAB-A members are recorded as
+*occurrences*, the convention the cross-cutting record already uses four times (T-F/#1947, T-A,
+T-C, N-B). The `TimeProvider` float→int half is CCF-004's shape *one layer up* — an undefined
+*conversion* rather than undefined *arithmetic* — which is exactly N-B's framing. **No policy issue
+arose and `docs/DefinedArithmeticBoundaryPlan.md` was not edited.** SR-AUD-180 is **not** a CCF-004
+member and not adjacent to it.
+
+### 3. Premise corrections, every one measured
+
+1. **`TimeProvider::GetElapsedTime` has TWO undefined operations on one line, at two columns, and
+   GCC's default `-fsanitize=undefined` set cannot see the second.** `float-cast-overflow` is
+   outside that group. `:74:34` is the signed subtraction the audit names; `:74:55` is an
+   out-of-range `double`→`long` conversion reachable **without** the first, on the **default**
+   provider: `GetElapsedTime(0, INT64_MAX)` returned `INT64_MIN` — a maximal *negative* duration for
+   a maximal *positive* interval. A repair aimed only at the subtraction would have left that
+   standing.
+2. **Nor is the exit code evidence for that sub-check.** `-fno-sanitize-recover=undefined` names the
+   `undefined` *group*; measured during a mutation, the float-cast diagnostic printed and the
+   process still **exited 0**. The final after-run uses `-fno-sanitize-recover=all`.
+3. **SR-AUD-180 is NOT ASan-decidable.** A two-byte heap block holding `"12"` with no NUL forces a
+   read one past the allocation and **ASan reports nothing** — the read is inside glibc's `strtod`,
+   neither instrumented nor intercepted. A `PROT_NONE` **guard page** does see it: `std::from_chars`
+   survived and the fallback **segfaulted**. That is the whole finding in two lines, with no
+   sanitizer involved.
+4. **The `PortableFromChars` header's own comment is false**, and this report's conclusion drew on
+   it. `Single`/`Double` `tryParseCore` trim surrounding whitespace *before* forming the range, so
+   `" 1.5 "` yields `first_offset=1 last_offset=4 char_at_last=32` — `last` is a **space**, not the
+   terminator. Stated precisely rather than overstated: the trimmed characters are whitespace and
+   the C parser stops at whitespace anyway, so **no in-repository input is known to produce a
+   different value today**; what changed is that the safety argument no longer rests on a false
+   premise.
+5. **SR-AUD-180's consequence is a wrong *value*, not only a wrong pointer**: `"1e3"` over `[0,1)`
+   returned **1000**.
+6. **SR-AUD-135 has TWO sites, not the one the finding names by line** — `:236` plain and `:249`
+   selector, each needing its own repair.
+7. **SR-AUD-135's domain is wider than the undefined behaviour.** `Sum<unsigned>` wraps by
+   definition and `Sum<short>` promotes to `int`; neither was ever undefined. Both are pinned
+   **unchanged**, which is what the finding's own remediation note asks for.
+8. **The sharpest LINQ case is one the framing misses.** `Sum<int>({INT_MAX, INT_MAX, INT_MIN})`
+   returned **2147483646 — the mathematically correct total** — through an undefined intermediate.
+   The defect is not "the answer is wrong"; it is that the program has no defined meaning.
+9. **Four public doors reach a defective SR-AUD-131 site, not the one the audit names**, and
+   `Stopwatch::GetElapsedTime(0, INT64_MAX)` is *not* defective while `TimeProvider`'s call with the
+   same arguments *is* — only the latter routes through a `double`.
+10. **`TimeProvider::GetLocalNow` was inventoried and is clear** — its sum cannot leave `int64` and
+    its clamp already uses CCF-004's own unsigned-compare idiom. A count that does not move is
+    recorded as deliberately as one that does.
+
+### 4. Ticket outcomes
+
+| # | Finding | Status |
+|---|---|---|
+| #2217 | review | **done** — `docs/CoreDefinedArithmeticBoundedParseFamilyPlan.md` |
+| #2218 | SR-AUD-131 (`Stopwatch`) | **done** |
+| #2219 | SR-AUD-131 (`TimeProvider`) | **done** — SR-AUD-131 → `remediated` |
+| #2220 | SR-AUD-135 | **done** — → `remediated` |
+| #2221 | SR-AUD-180 | **done** — → `remediated` |
+| #2222 | none (adjacent grammar divergence) | **done** |
+
+**The family is fully closed: no residual, no blocked ticket, no `needs_user` question arose.**
+
+### 5. What the repairs are, and every behaviour change
+
+- **#2218/#2219 subtractions** — unsigned domain, converted back. **No value changes at all**,
+  measured on both sides.
+- **#2219 conversion** — saturates to `INT64_MAX`/`INT64_MIN` (NaN → 0, unreachable but guarded).
+  `GetElapsedTime(0, INT64_MAX)` changes `INT64_MIN` → `INT64_MAX` and now **agrees with
+  `Stopwatch`**; the two APIs disagreeing about the same arguments was itself part of the defect.
+  The semantics are a **stated decision** — `/rv` is absent — justified by defined behaviour,
+  modern .NET's saturating float→int conversion, and that internal agreement.
+- **#2220** — checked accumulation for signed integral `T` **excluding `char` and `bool`**
+  (`char`'s signedness is implementation-defined, so throwing for it would make behaviour differ
+  between x86-64 and AArch64). Unsigned, floating and every other `T` pinned unchanged.
+  **Two changes are not UB removal and are said out loud**: `short`/`signed char` now throw where
+  they truncated silently, and the intermediate-overflow chain now throws where it returned the
+  correct total, because .NET checks **per element**.
+- **#2221** — the range is copied into a NUL-terminated buffer, parsed there, and the pointer
+  rebased. Exactly `length + 1` bytes; a **nothrow heap** path rather than truncation beyond 512,
+  because truncating a digit run changes the value.
+- **#2222** — the copy stops after the leading zero of a `0x`/`0X` prefix, matching
+  `chars_format::general`. Reference behaviour **measured** over thirteen shapes, not assumed.
+
+**One `noexcept` was ADDED** (`PortableFromCharsFloat`, `FromCharsFloat`) — a strengthening, the
+opposite direction from #2215, needing no approval, and load-bearing: `Single::tryParseCore` and
+`Single::TryParse` are `noexcept`, so a throwing helper would have called `std::terminate` on the
+fallback platform.
+
+**One property is pinned rather than changed**: `TimeProvider::GetElapsedTime` scales through a
+`double`, exactly as .NET's does, so ticks above 2^53 are inexact and `(double)(INT64_MIN + 1)`
+rounds to −2^63 and converts rather than saturating. Pre-existing; the test exists so a later reader
+does not mistake it for saturation.
+
+**No in-repository call site changes behaviour**: `Linq::Sum` has none outside its own tests, and on
+Linux `FromCharsFloat` selects the native overload so `Single`/`Double`/XPath never reach the
+repaired fallback (372/372 and 90/90 confirm it).
+
+### 6. Evidence
+
+- **Sanitizers.** All four production bodies are header-only, so the probe translation unit *is*
+  the production code. `-O0` with `volatile` operands (GCC folds a header-inline overflow at `-O1`),
+  **one process per case**, activation proved by `nm -C` and by controls that must still fire.
+  Under `-fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all`: **twelve
+  `Stopwatch`/`TimeProvider` cases exit 0**, **eight `Sum` shapes exit 0** with 1,000 throw/catch
+  cycles leaking nothing, and **fourteen parser cases exit 0**, each returning `std::from_chars`'s
+  exact answer. Every before-diagnostic is absent.
+- **Guard page.** `fallback` segfaulted before and survives after with `std::from_chars`'s exact
+  answer; `std` unchanged throughout.
+- **Activation controls.** While unrepaired sites remained they served as controls in the same
+  binary (`TimeProvider.hpp:74`, `Linq.hpp:236`, both exit 1). Once none remained, two deliberate
+  ones were added — a signed overflow and a 256-byte leak — and both fire.
+- **Mutations: 15 run, 14 killed, 1 EQUIVALENT.** #2218 ×2, #2219 ×4, #2220 ×5, #2221 ×4, #2222 ×3.
+  **Three of the kills are the sanitizer probe only** and are labelled as the weaker signal they
+  are — a value-preserving class A repair cannot be pinned by values, and the naive "add, then
+  inspect the result" LINQ repair passes every value test on this toolchain. **One mutation
+  (widening #2222's guard to any `x`) passes 27/27 and is an *equivalent* mutant, not a survivor**:
+  outside a leading `0x` the C parser already stops at the `x`, so no input can distinguish the two
+  forms. Recording it as a kill would have been false.
+- **+60 permanent tests**: 9 (#2218), 11 (#2219), 13 (#2220), 23 (#2221), 4 (#2222), including a
+  new suite that calls the Apple-only fallback **directly**, so it runs on the Linux gate.
+
+### 7. Work unit 2 — the measured next Core family
+
+Re-parsed after this batch: `modules/core` has **64 open findings — 1 high, 59 medium, 4 low, and
+1 medium design-complete** (67 before; exactly the three closed here). Ranked:
+
+| # | Candidate family | Findings | Count | Severity | Compatible est. | Blockers | Tool-decidable | `/rv` |
+|---|---|---|---:|---|---:|---|---|---|
+| **1** | **text input boundary** | **016, 017, 028, 048** | **4** | 4 medium | **~3** | 048 needs CCF-015's still-undecided policy | range probe on 016 | no |
+| 2 | PRNG / entropy | 050 | 1 | **1 high** | 1 | needs a 3-platform entropy design | none (statistical) | no |
+| 3 | delegate identity & composition | 118, 119, 120 | 3 | medium | 3 | possible public-shape question on Combine | none | no |
+| 4 | Environment surface | 105, 106, 107, 108 | 4 | medium | ~2 | 106 is a public-signature question | none | partly |
+| 5 | numeric special values | 011, 034, 037, 039, 040, 133 | 6 | medium | ~5 | none known | UBSan on 040 | partly |
+| 6 | exception boundary & diagnostics | 091, 092, 098, 101 | 4 | medium | ~2 | 092 is pinned by two green tests | compile-only on 091 | partly |
+| 7 | Lazy semantics | 064, 066 | 2 | medium | 2 | none known | none | no |
+| 8 | reflection-adjacent stubs | 109–114, 117 | 7 | medium/low | ~1 | permanent deviations | none | no |
+| 9 | public representation & immutability | 063, 068, 069, 110, 113, 115, 116, 127, 128, 129, 136, 137 | 12 | medium | **~1** | **~11 need layout/signature approval** | none | no |
+| 10 | Unicode data tables | 173, 174, 182 | 3 | medium | 0 | **needs ICU/UCD data** | none | **yes** |
+| 11 | attribute & property plumbing | 102, 103, 104, 122, 123, 124, 125, 126, 179, 181 | 10 | medium/low | ~6 | none known | none | partly |
+| 12 | test-fixture findings | 018, 056 | 2 | low/medium | 2 | none | none | no |
+
+**Selected next: family 1 — the `modules/core` text input-boundary family (SR-AUD-016, SR-AUD-017,
+SR-AUD-028, SR-AUD-048), tracked as review ticket #2223.** One coherent cause — *a public text
+operation judges raw bytes or an unchecked range instead of the unit or bound its .NET-shaped
+contract names* — with real correctness/safety value (016 returns a match **outside** its bounded
+search range, the same shape #2221 just repaired in a parser; 017 accepts an **overlong UTF-8**
+encoding as U+0000), strong local evidence, and two members governed by cross-cutting policies that
+already exist (**CCF-013**, whose plan is `docs/Base64FamilyPlan.md`, and **CCF-015**).
+
+**The runner-up is a high and is named rather than buried.** SR-AUD-050 (`Guid::NewGuid` and
+`CreateVersion7` from a seeded Mersenne Twister instead of an OS CSPRNG) is now the **only remaining
+high in `modules/core`**. It was not selected because it is one finding rather than a family and
+because the repair cannot reuse the existing `RandomNumberGenerator`: `Security.Cryptography.Random`
+depends on `Core`, so routing `Guid` through it would invert an existing component edge. `Core`
+therefore needs its own three-platform entropy path plus a stated determinism contract — design-first
+work that deserves its own design ticket rather than being folded into a remediation family. **It is
+the next thing after family 1.**
+
+Family 9 was **again** not selected, for the reason the previous batch gave and this batch
+re-verified: eleven of its twelve members need a public layout or signature change and would land
+blocked. Family 10 is unreachable without Unicode data.
+
+**No second family was implemented and no second plan was written**, per the brief. #2223 is the
+deliverable.
+
+### 8. Gate, tooling and process
+
+- **Gate: 38 executables run individually with a runner that continues after failure — 16,665 ran,
+  16,657 passed, 2 skipped, 6 failed.** The **+60** on the inherited 16,605 is exactly the five
+  tickets' own new tests (9 #2218, 11 #2219, 13 #2220, 23 #2221, 4 #2222), so nothing regressed.
+  The 6 failures are the same two measured causes, **re-verified this run**:
+  `/proc/sys/net/ipv4/ping_group_range` reads `1  0` so unprivileged `SOCK_DGRAM`/ICMP is denied
+  (5 `PingTests`, the real #1962 gap) and `/proc/net/if_inet6` is absent
+  (1 `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`). The 2 skips are
+  `CultureInvariantFormattingTests.NumericAndDateFormatting_UnaffectedByNonInvariantGlobalLocale`
+  and the guarded SR-AUD-255 pin. **Nothing disabled, weakened, skipped-to-hide-a-failure or
+  recategorized.**
+- **Build:** 0 errors, 0 warnings, `--parallel 2` throughout. **Maximum aggregate compiler
+  concurrency observed: 2** — `cc1plus` sampled by exact process name every 10 s across the whole
+  selective run (**72 samples**) never exceeded 2.
+- **Selective components: passed**, **one run**, **735 s**, 10 components, all 10 isolated consumer
+  checks passed. Launched with `$!` captured (`build-probe/2217_selective.pid` = 16623), verified
+  with `ps -p`, monitored by exact `cc1plus` process name via `ps -e -o pid,comm=`. **No `pgrep -f`,
+  no fuzzy matching, no duplicate run**, and no other compiler-producing task ran alongside it.
+- **`local_ci_check.sh build`**: boundaries **41/92**, catalogue current, seams **3 / 20**, negative
+  fixtures **14 files / 120 sites** (peak 2 jobs, 45.3 s), configure and build clean
+  (**0 warnings, 0 errors**) — then its **known #1962 Ping stop**, reported separately from the full
+  gate above because that script exits on the first failing binary.
+- All eight required validations green; `git diff --check` clean; the 3 tracked `__pycache__` files
+  unchanged (every Python invocation used `PYTHONDONTWRITEBYTECODE=1`).
+- **Doxygen, `ccache` and `/rv` are all absent** and were not installed; no package was installed.
+- **Filesystem policy honoured**: every probe, binary and log lived under `build-probe/` or
+  `build-tmp/`, never `/tmp`, `/var/tmp`, `/dev/shm` or `$HOME`. No new build directory was invented;
+  every probe artefact is prefixed by its ticket number inside `build-probe/`.
+- Build directories: `build/` 1.8 G, `build-probe/` 56 M, `build-tmp/` 60 M.
+
+### 9. Inherited state, unchanged
+
+`#1773` and `#1962` remain **blocked** and were not investigated; **#2215 remains `needs_user`** and
+was not implemented. **CCF-004 stays closed 8/8**, was not reopened, and
+`docs/DefinedArithmeticBoundaryPlan.md` was not edited — the two occurrences are recorded in this
+family's own plan instead. **CCF-019 stays open** and has **no member here**. **CCF-021/#2131 and
+CCF-022/#2109 stay unminted.** Every other blocked, `needs_user` and deferred ticket — #2207, #2208,
+#2209, #2199, #2185, #2186, #2170, #2172, #2175, #2150, #2152, #2155, #2166, #2192, #2194 — is
+exactly as inherited. **`modules/core` is NOT closed**: 64 findings remain open there, including
+SR-AUD-130, which shares a file and a report with SR-AUD-131 and was deliberately left `confirmed`.
+**CNA, mobile-eggbert and every sibling, parent and downstream repository were not inspected,
+searched, built or modified.**
 
 ---
 

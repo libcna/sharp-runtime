@@ -1,46 +1,82 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-08-10 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
-harness-designated branch. **Pushed after every commit**, per `CLAUDE.md` rule 13 — six commits,
-six pushes, all normal fast-forwards. No merge, rebase, tag, force-push, PR, publication, amend or
+harness-designated branch. **Pushed after every commit**, per `CLAUDE.md` rule 13 — seven commits,
+seven pushes, all normal fast-forwards. No merge, rebase, tag, force-push, PR, publication, amend or
 history rewrite; all commits unsigned. This batch reviewed and **closed the bounded `modules/core`
-memory-safety family** (#2210) — **SR-AUD-044, 045, 051, 054 and 067, all five remediated**, one
-with a named residual. It is **one bounded family of `modules/core`, not a namespace review**: 67
-findings in that module stay open and the measured next family is selected as ticket **#2217**.
-The five findings turned out **not** to share one cause and were split into four subfamilies rather
-than a family that is not there, and **two of them are not sanitizer-decidable at all** — overlapping
-element assignment is memory-safe and merely loses data, a non-advancing enumerator is a liveness
-defect, and both ran clean under ASan **and** UBSan before the fix while a deliberate control fired
-in the same binary. Conversely **one door was decidable and no report said so** (`memcpy-param-overlap`
-in the raw `Array::Copy`). Twelve premise corrections were measured, including that the audit's
-predicted defect classes are wrong in three places on this toolchain (GCC 13.3 at `-O1` with
-`_FORTIFY_SOURCE` inlines the checked builtins past libsanitizer's interceptors), that SR-AUD-067 is
-three doors and SR-AUD-051 four, that SR-AUD-054 is **twelve** doors of which only two are
-memory-unsafe and whose indexers already threw *the wrong exception type*, and that **`int` cannot
-prove a copy-direction claim** because libstdc++ lowers both `std::copy` and `std::copy_backward` to
-`__builtin_memmove` — measured when an unconditionally backward mutant passed every `int` assertion.
-#2211 gave `SpanSplitEnumerator` .NET's `EmptySequence` mode (1000 non-terminating moves → 1);
-#2212 validated the raw `BlockCopy`'s three signed arguments; #2213 made the raw `Array::Copy` copy
-**elements** overlap-aware and constrained `Buffer`'s four generic members to trivially copyable
-element types — **the family's only source break, a compile-time one**, with no in-repo call site
-affected; #2214 added one `throwIfDefault()` to ten `ArraySegment` doors while asserting that the
-eight .NET does not guard stay unguarded; #2216 routed eleven copy doors through one
-direction-**selecting** helper. **One residual is stated rather than folded in**: `ArraySegment`'s
-`begin()`/`end()` still iterate a default segment zero times, because guarding them needs an approved
-`noexcept` drop (**#2215**, `needs_user`, #1854's precedent), pinned by a test that inverts the day it
-ships. **No `SR-AUD-*` identifier created — numbering frozen at 364**; audit **178 remediated / 131
-confirmed / 55 confirmed (design-complete) / 364 total**. Gate **16,605 across 38 executables,
-16,597 passing, 2 skipped, 6 failing** for the same two measured causes (**+42, exactly the five
-tickets' own new tests, so no regression anywhere**). Graph **41 / 92** and seams **3 / 20**
-unchanged; negative fixtures **13 → 14 files, 116 → 120 sites**. **25 of 25 mutations killed** — one
-after being strengthened, and two whose kill signal is honestly weaker (a process abort, and a
-fixture-checker failure) are labelled as such. **Doxygen, `ccache` and `/rv` all absent.** CCF-019
-open and with **no member in this family**; CCF-005 recorded as adjacency **without being reopened**;
-CCF-021/#2131 and CCF-022/#2109 unminted; #1773, #1962, #2150, #2152, #2155, #2166, #2170, #2172,
-#2175, #2185, #2186, #2192, #2194, #2199, #2207, #2208 and #2209 unchanged. **Next unit, measured:
-`modules/core` family 1 — defined arithmetic and bounded parse (SR-AUD-131, 135, 180), all three
-high, all sanitizer-decidable, none blocked, no `/rv` needed** (#2217). Maximum aggregate compiler
-parallelism **2 jobs**.*
+defined-arithmetic and bounded-parse family** (#2217) — **SR-AUD-131, SR-AUD-135 and SR-AUD-180, all
+three remediated**, with **no residual, no blocked ticket and no `needs_user` question**. It is **one
+bounded family of `modules/core`, not a namespace review**: **64** findings in that module stay open
+and the measured next family is selected as review ticket **#2223**. The three did **not** share one
+cause: they split into **DAB-A** (CCF-004's cause — a public .NET-shaped operation whose defined or
+checked arithmetic is computed with signed C++ overflow) and **DAB-B** (an unbounded C parser handed
+a bounded range, no arithmetic at all), with **three** repair classes across them. **CCF-004 stays
+closed 8/8 and gained no member** — both DAB-A members are recorded as *occurrences*, the convention
+the cross-cutting record already uses for T-F, T-A, T-C and N-B — and SR-AUD-180 is not a member or
+an adjacency. **Ten premise corrections, every one measured**, two of which contradict the brief:
+`TimeProvider::GetElapsedTime` carries a **second** undefined operation, an out-of-range
+`double`→`long` conversion at a different column of the same line that GCC's default
+`-fsanitize=undefined` set **cannot report** (`float-cast-overflow` is outside that group) and that is
+reachable on the **default** provider **without** the subtraction overflow, returning the most
+negative representable duration for a maximal positive interval; and **SR-AUD-180 is not
+ASan-decidable at all**, because the over-read happens inside glibc's `strtod`, so a `PROT_NONE`
+guard page — where the fallback segfaulted and `std::from_chars` survived — is what proves it.
+Further corrections: `-fno-sanitize-recover=undefined` does **not** cover `float-cast-overflow`, so
+for that sub-check the exit code is not evidence; the `PortableFromChars` header's own comment about
+whole-string call sites is **false**, because `Single`/`Double` trim whitespace before forming the
+range; SR-AUD-135 has **two** sites and a domain **wider** than its undefined behaviour, and its
+sharpest case returned the **mathematically correct** total through an undefined intermediate.
+#2218/#2219 moved both `GetElapsedTime` subtractions into the unsigned domain with **every value
+byte-identical**, and made `TimeProvider`'s conversion saturate so it finally agrees with `Stopwatch`
+on the same arguments; #2220 gave integral `Linq::Sum` .NET's checked accumulation, deliberately
+excluding `char` (implementation-defined signedness) and pinning unsigned wrap and floating infinity
+**unchanged**; #2221 bounded the C parser to `[first, last)` and **added** `noexcept` — load-bearing,
+because `Single::tryParseCore` is `noexcept` and a throwing helper would have called
+`std::terminate`; #2222 closed an adjacent hexadecimal-grammar divergence in the same helper.
+**+60 permanent tests** (16,605 → **16,665**, exactly the five tickets' own), **15 mutations of which
+14 killed and 1 *equivalent*** — said plainly rather than counted — and **three of the kills are the
+sanitizer probe only**, which is inherent to a value-preserving repair and is labelled as the weaker
+signal it is. Gate **16,665 / 38 executables, 16,657 passing, 2 skipped, 6 failing** for the same two
+inherited causes; graph **41 / 92**, seams **3 / 20**, negative fixtures **14 / 120**, build clean.
+Selective components passed in **one** run, 735 s, peak **2** compilers. **No `SR-AUD-*` identifier
+created — numbering frozen at 364** (**181 remediated / 128 confirmed / 55 design-complete**).
+**CCF-019 untouched and open; CCF-021 and CCF-022 remain unminted; #2215, #1773 and #1962 are exactly
+as inherited.*
+
+
+## 2026-08-10 — the bounded `modules/core` defined-arithmetic and bounded-parse family, closed (#2217–#2222)
+
+**SR-AUD-131, SR-AUD-135 and SR-AUD-180 are all `remediated`. The family is fully closed with no
+residual.** Plan: `docs/CoreDefinedArithmeticBoundedParseFamilyPlan.md`. Full record: `NEXT.md`.
+
+- **#2217** (review) — scope verified by re-parsing the index **by identifier** (178/131/55 of 364,
+  matching the inherited triple); the three group as **two** subfamilies, not one; **CCF-004 stays
+  closed 8/8** and both arithmetic members are recorded as *occurrences*; five bounded
+  implementation tickets, all compatible-ready.
+- **#2218** — `Stopwatch::GetElapsedTime` subtracts in the unsigned domain (CCF-004 class A).
+  Four measured wrapping shapes keep **byte-identical** values. +9 tests.
+- **#2219** — `TimeProvider::GetElapsedTime` had **two** undefined operations on one line: the same
+  subtraction, and an out-of-range `double`→`long` conversion invisible to GCC's default UBSan set
+  and reachable on the **default** provider without the first. The conversion now saturates, so
+  `GetElapsedTime(0, INT64_MAX)` returns `INT64_MAX` rather than `INT64_MIN` and agrees with
+  `Stopwatch`. **No member added**, layout `static_assert`ed. +11 tests. SR-AUD-131 → `remediated`.
+- **#2220** — integral `Linq::Sum` accumulates in a checked domain and raises `OverflowException`,
+  for signed integral `T` **excluding `char` and `bool`**; unsigned wrap, floating infinity and every
+  other `T` pinned **unchanged**. Two sites, not one. +13 tests. SR-AUD-135 → `remediated`.
+- **#2221** — `PortableFromCharsFloat` copies `[first, last)` into a NUL-terminated buffer and
+  rebases the returned pointer, so it never reads at or past `last`; both entry points **gain**
+  `noexcept`. Proven by a guard page, because **ASan cannot see this defect**. +23 tests in a new
+  suite that calls the Apple-only fallback directly. SR-AUD-180 → `remediated`.
+- **#2222** — the same helper's accepted grammar now matches `chars_format::general`: a `0x`/`0X`
+  prefix stops at the `x`. Reference behaviour **measured** over thirteen shapes. +4 tests. No
+  `SR-AUD-*` identifier.
+
+**Work unit 2:** `modules/core` now has **64** open findings (1 high, 59 medium, 4 low, 1
+design-complete). Twelve candidate families were ranked; **family 1, the text input-boundary family
+(SR-AUD-016, 017, 028, 048), is selected as review ticket #2223**. The runner-up is named rather than
+buried: **SR-AUD-050 is now the only remaining high in `modules/core`** and needs its own design
+ticket, because `Security.Cryptography.Random` depends on `Core` so the repair cannot reuse the
+existing `RandomNumberGenerator` and `Core` needs its own three-platform entropy path.
 
 
 ## 2026-08-10 — the bounded `modules/core` memory-safety family, closed (#2210–#2216)
