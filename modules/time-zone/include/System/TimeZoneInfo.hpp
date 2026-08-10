@@ -564,6 +564,14 @@ namespace System {
          * @brief Tries to find a time zone by ID; returns false instead of throwing.
          *
          * C++ counterpart of .NET TimeZoneInfo.TryFindSystemTimeZoneById(string, out TimeZoneInfo).
+         *
+         * On failure @p result is set to @c nullptr, mirroring .NET's assignment of @c null to the
+         * @c out parameter. A caller that reuses one variable across several lookups therefore
+         * cannot be handed the previous zone by a lookup that failed.
+         *
+         * @param id     The time zone identifier to look up.
+         * @param result Receives the zone on success and @c nullptr on failure.
+         * @return true if the zone was found.
          */
         static bool TryFindSystemTimeZoneById(const std::string& id,
                                               std::shared_ptr<TimeZoneInfo>& result) {
@@ -571,6 +579,7 @@ namespace System {
                 result = FindSystemTimeZoneById(id);
                 return true;
             } catch (...) {
+                result.reset();
                 return false;
             }
         }

@@ -606,3 +606,60 @@ TEST(TimeZoneInfoTests, TransitionTime_GetHashCode_FloatingRule) {
         tod, 10, 4, System::DayOfWeek::Sunday);
     EXPECT_EQ(t.GetHashCode(), 10 ^ (4 << 8));
 }
+
+// ---------------------------------------------------------------------------
+// Ticket #2177 (SR-AUD-224): a failed TryFindSystemTimeZoneById must clear the
+// caller's out parameter. Before this fix the catch-all returned false without
+// touching `result`, so a caller reusing one variable across several lookups was
+// handed the previous zone by a lookup that had failed. Measured before the fix
+// (build-probe/2176_probe1_surface.log): TryFind("Mars/Olympus", out) returned
+// false with out still holding "UTC". Real .NET assigns null to the out parameter.
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, TryFind_Failure_ClearsPreviouslyPopulatedOutParameter) {
+    std::shared_ptr<TimeZoneInfo> tz = TimeZoneInfo::FindSystemTimeZoneById("UTC");
+    ASSERT_NE(tz, nullptr);
+    ASSERT_EQ(tz->getIdProperty(), "UTC");
+    EXPECT_FALSE(TimeZoneInfo::TryFindSystemTimeZoneById("Mars/Olympus", tz));
+    EXPECT_EQ(tz, nullptr);
+}
+
+TEST(TimeZoneInfoTests, TryFind_Failure_EmptyId_ClearsOutParameter) {
+    std::shared_ptr<TimeZoneInfo> tz = TimeZoneInfo::FindSystemTimeZoneById("UTC");
+    ASSERT_NE(tz, nullptr);
+    EXPECT_FALSE(TimeZoneInfo::TryFindSystemTimeZoneById("", tz));
+    EXPECT_EQ(tz, nullptr);
+}
+
+TEST(TimeZoneInfoTests, TryFind_Failure_PathTraversal_ClearsOutParameter) {
+    std::shared_ptr<TimeZoneInfo> tz = TimeZoneInfo::FindSystemTimeZoneById("UTC");
+    ASSERT_NE(tz, nullptr);
+    EXPECT_FALSE(TimeZoneInfo::TryFindSystemTimeZoneById("../../etc/passwd", tz));
+    EXPECT_EQ(tz, nullptr);
+}
+
+TEST(TimeZoneInfoTests, TryFind_Failure_AfterFailureLeavesNullNotStale) {
+    // Two failures in a row must both leave the parameter null, not resurrect anything.
+    std::shared_ptr<TimeZoneInfo> tz;
+    EXPECT_FALSE(TimeZoneInfo::TryFindSystemTimeZoneById("Mars/Olympus", tz));
+    EXPECT_EQ(tz, nullptr);
+    EXPECT_FALSE(TimeZoneInfo::TryFindSystemTimeZoneById("Venus/Maxwell", tz));
+    EXPECT_EQ(tz, nullptr);
+}
+
+TEST(TimeZoneInfoTests, TryFind_Success_OverwritesAPreviousZone) {
+    // The success path must still replace whatever was there.
+    std::shared_ptr<TimeZoneInfo> tz = TimeZoneInfo::FindSystemTimeZoneById("Europe/Prague");
+    ASSERT_NE(tz, nullptr);
+    ASSERT_TRUE(TimeZoneInfo::TryFindSystemTimeZoneById("UTC", tz));
+    ASSERT_NE(tz, nullptr);
+    EXPECT_EQ(tz->getIdProperty(), "UTC");
+}
+
+TEST(TimeZoneInfoTests, TryFind_SuccessThenFailure_DoesNotKeepTheSuccess) {
+    std::shared_ptr<TimeZoneInfo> tz;
+    ASSERT_TRUE(TimeZoneInfo::TryFindSystemTimeZoneById("Europe/Prague", tz));
+    ASSERT_NE(tz, nullptr);
+    EXPECT_FALSE(TimeZoneInfo::TryFindSystemTimeZoneById("Europe/Nowhere", tz));
+    EXPECT_EQ(tz, nullptr);
+}
