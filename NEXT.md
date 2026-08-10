@@ -4,23 +4,198 @@
 # NEXT.md
 
 *Last verified: 2026-08-10. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
-harness-designated branch**. **Pushed after every commit**, per `CLAUDE.md` rule 13 — four commits,
-four pushes, every one a normal fast-forward. No merge, rebase, tag, force-push, PR, publication,
+harness-designated branch**. **Pushed after every commit**, per `CLAUDE.md` rule 13 — six commits,
+six pushes, every one a normal fast-forward. No merge, rebase, tag, force-push, PR, publication,
 amend or history rewrite; all commits unsigned (`git -c commit.gpgsign=false`) — no usable private
-signing key exists here. This batch **reviewed `modules/xml-linq` and landed its whole compatible
-queue** (#2195 review, #2196, #2197, #2198): **two findings remediated outright, one reclassified and
-pinned, one left blocked**. Audit **172 remediated / 137 confirmed / 55 confirmed (design-complete) /
-364 total**; **no `SR-AUD-*` identifier created — numbering frozen at 364.** Gate **16,505 tests
-across 37 executables: 16,497 passing, 2 skipped, 6 failing** for the same two measured causes,
-unchanged and not hidden (**+99 on the inherited 16,406 — exactly this batch's additions, so no
-regression anywhere**). Graph **41 / 92**, seams **3 / 20**, negative fixtures **13 / 116** — all
-three unchanged. **ASan+UBSan+LSan and non-recovering UBSan over the changed production bodies: exit
-0, zero reports**, each with a deliberate out-of-bounds control in the same build proving the
-instrumentation fires; §9 says what they cannot reach. **Doxygen, `ccache` and the `/rv` reference
-tree are all absent** and were not installed. **CCF-019 open; CCF-021/#2131 and CCF-022/#2109 remain
-unminted, and family X-C is deliberately unminted too.** #1773, #1962, #2150, #2152, #2155, #2166,
-#2170, #2172, #2175, #2185, #2186, #2192 and #2194 remain exactly as inherited. **The measured next
-unit is `modules/io-isolated-storage`** (§7). See the first handoff below.*
+signing key exists here. This batch **reviewed `modules/io-isolated-storage` and closed its whole
+compatible queue** (#2203 review, #2204, #2205, #2206): **the corpus's last unblocked high-severity
+finding, SR-AUD-241, is remediated**. Audit **173 remediated / 136 confirmed / 55 confirmed
+(design-complete) / 364 total**; **no `SR-AUD-*` identifier created — numbering frozen at 364.**
+Gate **16,563 tests across 38 executables: 16,555 passing, 2 skipped, 6 failing** for the same two
+measured causes, unchanged and not hidden (**+58 on the inherited 16,505 — exactly the new
+executable's own tests, so no regression anywhere**). **The executable count moved 37 → 38**: the
+module had no dedicated test target and now has `SharpRuntimeTests_IO_IsolatedStorage`. Graph
+**41 / 92**, seams **3 / 20**, negative fixtures **13 / 116** — all three unchanged. **ASan+UBSan+LSan
+and non-recovering UBSan over the changed production body: exit 0, zero reports**, with a deliberate
+out-of-bounds control firing in the same build; **7 of 7 mutations killed**. **Doxygen, `ccache` and
+the `/rv` reference tree are all absent** and were not installed. **CCF-019 open; CCF-021/#2131 and
+CCF-022/#2109 remain unminted.** #1773, #1962, #2150, #2152, #2155, #2166, #2170, #2172, #2175,
+#2185, #2186, #2192, #2194 and #2199 remain exactly as inherited. **The measured next unit is
+`modules/core`, split into families** (§7). See the first handoff below.*
+
+---
+
+## Batch record — `modules/io-isolated-storage` reviewed and closed for compatible work (#2203–#2206)
+
+**One audit finding. Remediated.** Two adjacent post-audit defects closed with it, two residuals
+recorded as blocked tickets rather than folded in.
+
+### 1. Work unit 1 — the selection, verified rather than inherited
+
+`audit/AUDIT_FINDINGS_INDEX.md` was re-parsed **by finding identifier**, not by column count:
+**172 remediated / 137 confirmed / 55 confirmed(design-complete) = 364**, matching the inherited
+triple. The brief's warning held — SR-AUD-029 carries a seventh column and a strict six-column regex
+reports a false 363/169.
+
+Filtering that index for this module returns **exactly one row**, SR-AUD-241. All eight per-file
+reports were read in full to prove nothing was hidden by file/module mapping; the other five end
+with *"no defect was demonstrated"*. The unit was compared against every alternative and **no
+candidate outranks it**: it was the only unreviewed unit whose high-severity finding is neither
+blocked nor approval-gated, it needs no reference data, and the whole module is 606 lines.
+
+### 2. Eleven premise corrections, every one measured
+
+The five that changed the work:
+
+- **The module was not untested — it was unsecured.** The inherited handoff said "ZERO tests".
+  True of its own `tests/` tree only: **34 isolated-storage tests already ran in three other
+  executables** via `modules/io`'s `TEST_DEPENDENCIES`. None of them touched containment. The
+  37 → 38 executable prediction still held, for a different reason than stated.
+- **SR-AUD-241 is thirteen caller path arguments across ten members, not one door**, and **all four
+  effect classes escape**: an outside file *read*, an outside file and an outside directory
+  *deleted*, files *created and written* outside, store content *moved out*, and outside content
+  *imported in* through `CopyFile`'s source and `MoveDirectory`'s source.
+- **.NET's repair is necessary and not sufficient**, exactly as the brief warned. Stripping leading
+  separators closes the audit's named probe; `../outside/x`, `a/../../outside/x` and symbolic links
+  at final, intermediate and chained components all still escape. The owning per-file report had
+  *explicitly declined* to count them.
+- **`DeleteFile("")` deleted the store root.** `fullPath("")` is the root and
+  `std::filesystem::remove` removes an empty directory. Separately measured; it is what makes the
+  empty-path rejection load-bearing rather than cosmetic.
+- **The escape reaches `/` on a privileged process.** The first probe run passed `"/leading_sep_dir"`
+  and created a directory at the real filesystem root — this container runs as uid 0. It was removed
+  by hand and the probe re-scoped to a sandbox-relative rooted path so re-running can never write
+  outside `build-tmp/` again. Recorded rather than repeated.
+
+Plus: four members missing the disposed guard, four doors leaking `std::filesystem_error`, an
+embedded NUL silently truncating a filesystem name, and the enumeration doors being a **parity** gap
+rather than a confinement gap (neither can leave the root).
+
+### 3. Ticket outcomes
+
+| Ticket | Outcome | Commit |
+|---|---|---|
+| **#2203** review | **done** | `ffe1d02` |
+| **#2204** SR-AUD-241 confinement + first dedicated test executable | **done — remediated** | `b23f5ad`, `52bc46f` |
+| **#2205** four missing disposed guards | **done** | `e60c160` |
+| **#2206** four `std::filesystem_error` leaks | **done** | `e1c5a44` |
+| **#2207** DESIGN — TOCTOU-proof fd-relative confinement | **blocked** | — |
+| **#2208** DESIGN/APPROVAL — confine the `IsolatedStorageFileStream` constructor | **blocked** | — |
+| **#2209** DEFERRED VERIFICATION — directory-qualified search patterns | **todo** | — |
+
+Namespace totals: `io-isolated-storage` **0 → 58** dedicated tests, 1 finding, **1 remediated,
+0 unaddressed**.
+
+### 4. The repair, and what it deliberately does not do
+
+`fullPath()` became a validating resolver run **before any filesystem effect**: reject an embedded
+NUL, **strip** leading separators (.NET `GetFullPath` parity — a rooted path is *reinterpreted*
+store-relative, not honoured and not rejected), reject what strips to nothing, reject a surviving
+drive/UNC root rather than invent Windows semantics, require lexical containment, then require
+containment again after `weakly_canonical` resolves every link. The operation runs on the
+**lexically normalized** path, so deleting a symlink still deletes the link.
+
+**A real bug was found while testing, not by inspection.** `CopyFile`, `MoveFile` and
+`MoveDirectory` validated inside the call expression, and **C++ leaves call-argument evaluation
+order unspecified** — GCC evaluates right to left, so a doubly-invalid call named
+`destinationFileName` instead of `sourceFileName`. Both are now resolved into locals in declared
+order, which makes the validation order a contract instead of a compiler artefact.
+
+**Two residuals are stated, not implied away.** The design is **check-then-use**: a process that can
+write *inside* the store root can still swap a component for a symlink between the check and the
+operation (**#2207**, blocked — needs `openat(O_NOFOLLOW)` per-component resolution, an
+fd-accepting `FileStream` this port does not have, and a Windows/Emscripten story). And
+**`IsolatedStorageFileStream`'s public constructor is not a confinement boundary at all**
+(**#2208**, blocked on a public signature change); its header now carries an explicit `@warning`
+and a test pins the current behaviour so the day #2208 ships the pin *inverts* rather than passing
+silently.
+
+### 5. Evidence
+
+- **Direct filesystem observation** is the primary evidence — `exists()` before and after plus full
+  recursive snapshots of **both** trees — with a **vulnerable control**
+  (`Control_RawJoinStillDiscardsTheRootForAnAbsolutePath`) proving the escape is still reachable
+  through the raw join the repair replaced. Every escape in the pre-repair matrix inverts;
+  `stream_ctor.escaped_exists` stays `1`, by design.
+- **Mutation testing: 7 of 7 killed.** M4 ("delete the empty rejection") killed **nothing** on the
+  first pass, because an empty path is still rejected one layer down by the lexical check. Layer
+  redundancy is right and bad for mutation visibility, so each rejection reason's **message** is now
+  pinned, making the layers separately observable. That is reported as a property of the design, not
+  hidden.
+- **ASan+UBSan+LSan and non-recovering UBSan** over the changed production body: **exit 0, zero
+  reports**, with a deliberate heap-buffer-overflow control reporting in the same build. Sanitizers
+  prove nothing about confinement and are not offered as if they did.
+- **One honest non-result**: the audit's suggested unreadable-subdirectory reproduction for #2206
+  does not work here — uid 0, permissions do not bind. A root-is-a-file reproduction was used.
+
+### 6. Gate, tooling and process
+
+- **Gate: 38 executables run individually — 16,563 ran, 16,555 passed, 2 skipped, 6 failed** (**+58**
+  on the inherited 16,505, exactly the new executable's own tests). The six are the same two measured
+  causes, **re-verified this run**: `ping_group_range = "1 0"` with unprivileged `SOCK_DGRAM/ICMP`
+  denied (5 `PingTests`, the real #1962 gap) and no IPv6 in this container
+  (1 `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`; `/proc/net/if_inet6` absent).
+  Skips are 2 tests (`CultureInvariantFormattingTests` and the guarded SR-AUD-255 pin) printed
+  across 6 `[  SKIPPED ]` lines. **Nothing disabled, weakened, skipped-to-hide-a-failure or
+  recategorized.**
+- **Build:** 0 errors, 0 warnings, `--parallel 2` throughout. **Maximum aggregate compiler
+  concurrency observed: 2** — `cc1plus` sampled every 5 s across both long runs never exceeded 2.
+- **Selective components: passed**, **one run**, 687 s, launched with `$!` captured
+  (`build-probe/2204_selective.pid`), verified with `ps -p`, monitored by exact `cc1plus` count. No
+  `pgrep -f`, no `setsid`, no duplicate run. `IO.IsolatedStorage`'s isolated consumer check passed
+  with its 58 tests.
+- **`local_ci_check.sh build`**: boundaries **41/92**, catalogue current, seams **3 / 20**, negative
+  fixtures **13 files / 116 sites** (peak 2 jobs, 42.4 s), configure and build clean (0 warnings,
+  0 errors) — then its **known #1962 Ping stop**, reported separately from the full gate above.
+- All eight required validations green; `git diff --check` clean; tracked `__pycache__` files
+  unchanged (every Python invocation used `PYTHONDONTWRITEBYTECODE=1`).
+- **Filesystem policy honoured**: every probe and test tree lived under `build-tmp/` or the test
+  executable's own working directory, never `/tmp`, `/var/tmp`, `/dev/shm` or `$HOME`. The one
+  escape to `/` was the *defect being measured*, was cleaned up immediately, and cannot recur.
+
+### 7. Work unit 3 — the measured next unit
+
+Re-parsed after this batch: **173 remediated / 191 confirmed (136 plain + 55 design-complete) of
+364.** Every open finding was mapped to its owning module through its per-file report link, and
+every module with a `docs/*NamespaceReviewPlan.md` excluded:
+
+| Unreviewed candidate | Open | high | Blocked/gated highs | Evidence needed | Note |
+|---|---:|---:|---|---|---|
+| **`core`** | **72** | **9** | **none** | **none for the memory-safety family** | the umbrella: `Span`, `Memory`, `Array`, `Buffer`, `Guid`, `Linq`, `Stopwatch`, `PortableFromChars` |
+| `globalization` | 7 | 1 | — | **ICU/reference data, absent** | SR-AUD-280 is a process-global mutable culture (TSan) |
+| `collections-object-model` | 1 | 1 | likely (raw-`this` capture) | none | SR-AUD-237 is CCF-019-shaped |
+| `text-regular-expressions` | 1 | 1 | likely (raw-`this` capture) | none | SR-AUD-245 is CCF-019-shaped |
+| `security`, `collections-blocking`, `security-cryptography-random`, `collections` | 1 each | 0 | — | — | low value alone |
+
+**Selected for next: `modules/core`, and it must be split into families rather than reviewed as one
+unit.** It is the largest unreviewed block in the corpus by a wide margin, its nine high findings are
+**none of them blocked and none of them claimed by an existing ticket** (checked against
+`plan.sqlite3`), and most are decidable here with ASan/UBSan and no reference data:
+
+- **Memory-safety family (recommended first):** SR-AUD-044 (overlapping copies lose source data
+  across `Span`/`Memory`/`Array`/`ArraySegment`), SR-AUD-051 (unchecked byte copy for nontrivial
+  types, ASan-confirmed), SR-AUD-054 (default `ArraySegment` reaches a sanitizer-confirmed null
+  dereference), SR-AUD-067 (negative count casts to `size_t` and reaches an unbounded `memmove`,
+  ASan-confirmed), SR-AUD-045 (empty exact-sequence split never advances — **infinite** iteration).
+- **Defined-arithmetic family:** SR-AUD-131, SR-AUD-135 (UBSan-confirmed signed overflow).
+- **SR-AUD-050** is separately notable: `NewGuid`/`CreateVersion7` derive from a seeded Mersenne
+  Twister rather than an OS CSPRNG — a **predictability** defect, and the natural successor to this
+  batch's security work. Note #1901 already gave it a per-thread generator; check what that left.
+- **SR-AUD-180** has **no ticket at all** and is a drop-in-range violation in `strtof`/`strtod`
+  handling — an over-read shape.
+
+**No second review was started.** The brief permits one "if context remains strong" and forbids a
+second implementation family. `modules/core` has **72 open findings**; opening it at the end of a
+batch would produce exactly the half-built plan the last five handoffs declined to produce. The
+measured scoring and the recommended family split above are the deliverable instead.
+
+### 8. Inherited state, unchanged
+
+`#1773` and `#1962` remain **blocked** and were not investigated. **CCF-019 stays open**;
+**CCF-021/#2131 and CCF-022/#2109 stay unminted** — this batch minted nothing and consumed no
+approval. Every other blocked, `needs_user` and deferred ticket is exactly as inherited. **CNA,
+mobile-eggbert and every sibling, parent and downstream repository were not inspected, searched,
+built or modified.**
 
 ---
 

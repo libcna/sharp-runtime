@@ -1,37 +1,66 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-08-10 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
-harness-designated branch. **Pushed after every commit**, per `CLAUDE.md` rule 13 — four commits,
-four pushes, all normal fast-forwards. No merge, rebase, tag, force-push, PR, publication, amend or
-history rewrite; all commits unsigned. This batch **reviewed `modules/xml-linq`** (#2195) and landed
-**its whole compatible queue**: #2196 (SR-AUD-335 — the direct `SerializeTo` serializers emitted
-`]]>`, `--` and `?>` unprotected and never validated a processing-instruction target, while the
-`WriteTo` door of the *same objects* already did all four; **five doors, not three node kinds**, and
-the three consequences were three different shapes — CDATA lossy, the PI **silently dropping data**,
-the comment corruption entirely **silent**) and #2197 (SR-AUD-334 — namespace URIs discarded on parse
-and on serialization; **not only a fidelity gap: it emitted XML this module's own parser rejects**,
-and an `xmlns:p` declaration built the .NET way degraded into an ordinary attribute). Both are family
-**X-C** — a public door bypassing a validator or resolver the module already ships — exactly as
-`docs/SystemXmlNamespaceReviewPlan.md` §17 predicted **in writing** for this module.
-**SR-AUD-336 was reclassified**: not compatible-actionable. Two structural blockers — per-object
-handler storage grows `sizeof(XObject)` 16 → 24 (**the same growth the user declined on 2026-07-31**
-for #1896) and `std::function` is not equality-comparable so `remove_Changed` cannot name a
-registration — both proved structurally. It split into landed **#2198** (the inert contract is now
-pinned and **discriminating**, mutation-checked against a deliberate half-implementation) and blocked
-**#2199** (approvals XL-1/XL-2). **SR-AUD-333/CCF-019 was re-measured only**, and a twelve-row
-borrowed-edge inventory was contributed to it including one **new** callback-capture edge; no
-ownership policy was chosen. **No `SR-AUD-*` identifier created — numbering frozen at 364**; audit
-**172 remediated / 137 confirmed / 55 confirmed (design-complete) / 364 total**. Gate **16,505 across
-37 executables, 16,497 passing, 2 skipped, 6 failing** for the same two measured causes (**+99,
-exactly this batch's additions, so no regression anywhere**). Graph **41 / 92**, seams **3 / 20**,
-negative fixtures **13 / 116** — all unchanged. ASan+UBSan+LSan and non-recovering UBSan over the
-changed production bodies: exit 0, **zero reports**, each with a deliberate out-of-bounds control in
-the same build proving the instrumentation fires. **Doxygen, `ccache` and `/rv` all absent.**
-CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted, and family **X-C** deliberately unminted too;
-#1773, #1962, #2150, #2152, #2155, #2166, #2170, #2172, #2175, #2185, #2186, #2192 and #2194
-unchanged. **Next unit, measured: `modules/io-isolated-storage`** — one high-severity,
-security-relevant finding (SR-AUD-241), 606 lines, and **zero tests today**. Maximum aggregate
-compiler parallelism **2 jobs**.*
+harness-designated branch. **Pushed after every commit**, per `CLAUDE.md` rule 13 — six commits,
+six pushes, all normal fast-forwards. No merge, rebase, tag, force-push, PR, publication, amend or
+history rewrite; all commits unsigned. This batch **reviewed `modules/io-isolated-storage`** (#2203)
+and **closed its whole compatible queue**, remediating **the corpus's last unblocked high-severity
+finding**. #2204 (SR-AUD-241 — the store's only confinement was `rootDirectory_ / relativePath`, and
+`std::filesystem`'s `operator/` *discards the root* when the right operand is absolute; the promise
+was false at **thirteen path arguments across ten members**, and **all four effect classes escaped** —
+an outside file read, an outside file and an outside directory **deleted**, files created and written
+outside, store content moved out, and outside content **imported in** through `CopyFile`'s source and
+`MoveDirectory`'s source). **.NET's own repair is necessary and not sufficient**: stripping leading
+separators closes the audit's named probe and leaves `../outside/x`, `a/../../outside/x` and symbolic
+links at final, intermediate and chained components escaping — the owning per-file report had
+*explicitly declined* to count them. `DeleteFile("")` **deleted the store root**. On this uid-0
+container a leading `/` reached the real filesystem root, which the first probe run demonstrated by
+accident and which was cleaned up by hand. Plus #2205 (four members never checked the disposed flag,
+so a closed store still reported its size and still deleted itself) and #2206 (four doors handed
+callers a native `std::filesystem_error` instead of `IsolatedStorageException`). **A real bug was
+found while testing, not by inspection**: `CopyFile`/`MoveFile`/`MoveDirectory` validated inside the
+call expression, and C++ leaves call-argument evaluation order unspecified — GCC evaluated right to
+left, so a doubly-invalid call named the *destination* parameter. **Two residuals are stated rather
+than folded in**: the check-then-use **TOCTOU** race (#2207, blocked) and
+`IsolatedStorageFileStream`'s **unconfined public constructor** (#2208, blocked on a public signature
+change), the latter pinned by a test that inverts the day #2208 ships. **No `SR-AUD-*` identifier
+created — numbering frozen at 364**; audit **173 remediated / 136 confirmed / 55 confirmed
+(design-complete) / 364 total**. Gate **16,563 across 38 executables, 16,555 passing, 2 skipped,
+6 failing** for the same two measured causes (**+58, exactly the new executable's own tests, so no
+regression anywhere**); **the executable count moved 37 → 38** because the module had no dedicated
+test target and now has `SharpRuntimeTests_IO_IsolatedStorage` (58 tests, up from 0). Graph
+**41 / 92**, seams **3 / 20**, negative fixtures **13 / 116** — all unchanged. **7 of 7 mutations
+killed**; ASan+UBSan+LSan and non-recovering UBSan over the changed production body: exit 0, **zero
+reports**, with a deliberate out-of-bounds control firing in the same build — and sanitizers are not
+offered as confinement evidence, which comes from direct filesystem snapshots with a vulnerable
+control. **Doxygen, `ccache` and `/rv` all absent.** CCF-019 open; CCF-021/#2131 and CCF-022/#2109
+unminted; #1773, #1962, #2150, #2152, #2155, #2166, #2170, #2172, #2175, #2185, #2186, #2192, #2194
+and #2199 unchanged. **Next unit, measured: `modules/core`, split into families** — 72 open findings,
+**9 high, none blocked and none claimed by an existing ticket**, starting with the ASan-decidable
+memory-safety family (SR-AUD-044/045/051/054/067). Maximum aggregate compiler parallelism **2 jobs**.*
+
+## 2026-08-10 — `modules/io-isolated-storage` reviewed and closed for compatible work (#2203–#2206)
+
+**One audit finding. Remediated.** `docs/SystemIOIsolatedStorageNamespaceReviewPlan.md` is the
+durable record; `docs/Migration-IsolatedStorageConfinement.md` states what callers must change and
+**where this port is deliberately stricter than .NET Core**, which strips leading separators, does
+not reject `..`, and whose own documentation declines to treat isolated storage as a security
+boundary. This port keeps .NET's strip verbatim and adds lexical and link-resolved containment on
+top, because *this repository's* documented contract for the type is confinement — a strict superset
+of rejections, so no input .NET rejects is accepted here.
+
+**The module was not untested — it was unsecured.** The inherited handoff recorded "ZERO tests",
+true only of its own `tests/` tree: **34 isolated-storage tests already ran in three other
+executables** through `modules/io`'s `TEST_DEPENDENCIES`, and not one of them touched containment.
+The 37 → 38 executable transition still happened, for a different reason than predicted.
+
+**Mutation testing was where the suite got honest.** Six of seven mutations died immediately; the
+survivor was "delete the empty-path rejection", which killed nothing because an empty path is still
+refused one layer down by the lexical check. Layer redundancy is the right design and is bad for
+mutation visibility, so each rejection reason's exact message is now pinned. That is recorded as a
+property of the design rather than quietly dropped — as is the one non-discriminating measurement of
+the batch, the audit's suggested unreadable-subdirectory reproduction, which cannot work on a
+container running as uid 0.
 
 ## 2026-08-10 — the `modules/xml-linq` review (#2195) and its whole compatible queue (#2196–#2198)
 
