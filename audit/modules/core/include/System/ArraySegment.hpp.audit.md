@@ -95,3 +95,114 @@ The bounded construction/slicing repair is sound, but non-owning/default-state
 handling and copy semantics leave a sanitizer-confirmed crash and several
 observable .NET divergences.  No production source was modified during this
 audit.
+
+---
+
+## SR-AUD-054 — REMEDIATED, with one named residual (ticket #2214, 2026-08-10, family CMS-B)
+
+The original evidence above is retained unchanged. **Only SR-AUD-054 is closed by this
+ticket.** SR-AUD-055 (the vector `CopyTo` resize) and the SR-AUD-018 extension in this same
+report stay `confirmed` and are **not touched**; the SR-AUD-043 extension was closed
+earlier by #1852, and the SR-AUD-044 extension is closed by #2216. **No `SR-AUD-*`
+identifier was created**; numbering stays frozen at 364. Family record:
+`docs/CoreMemorySafetyFamilyPlan.md`.
+
+### The finding is twelve doors, of which only two are memory-unsafe
+
+The audit named `Slice(0)` and said other operations "are not consistently safer".
+Enumerated from the source and measured on 2026-08-10 under ASan+UBSan over the
+instrumented header body itself (`build-probe/2210_before.log`, case
+`obs.segment_default_others`):
+
+| Door | Before | After |
+|---|---|---|
+| `Slice(intcs)` | UBSan *reference binding to null pointer* (`ArraySegment.hpp:180`) → member call on null (`:73`) → **ASan SEGV** in `vector::size()` | `InvalidOperationException` |
+| `Slice(intcs, intcs)` | the same, at `ArraySegment.hpp:198` — **not named by the audit** | `InvalidOperationException` |
+| `operator[](intcs)` | `ArgumentOutOfRangeException` | `InvalidOperationException` |
+| `operator[](intcs) const` | `ArgumentOutOfRangeException` — **not named by the audit** | `InvalidOperationException` |
+| `CopyTo(vector&, intcs)` | silent no-op | `InvalidOperationException` |
+| `CopyTo(vector&)` | silent no-op | `InvalidOperationException` |
+| `CopyTo(ArraySegment&)` | silent no-op | `InvalidOperationException` |
+| `ToArray()` | empty vector | `InvalidOperationException` |
+| `Contains(const T&)` | `false` | `InvalidOperationException` |
+| `IndexOf(const T&)` | `-1` — **not named by the audit** | `InvalidOperationException` |
+| `begin()` / `end()` | `nullptr`, zero iterations | **unchanged — residual #2215** |
+
+**Premise correction: the indexers already threw, with the wrong type.** `count_ == 0` on
+a default segment makes the range check fire before the null dereference can, so
+`ArraySegment<int>()[0]` raised `ArgumentOutOfRangeException` where .NET raises
+`InvalidOperationException`. That is a silent-wrong-*exception* case the audit did not
+record, and it is why the guard has to run **first** rather than merely exist.
+
+**Premise correction: only two of the twelve doors are memory-unsafe.** The other ten are
+parity breaches with no memory error at all. Saying so keeps the ASan evidence honest —
+this finding's sanitizer reports come from `Slice` and nowhere else.
+
+### The repair
+
+One private `throwIfDefault()`, the port's counterpart of .NET's
+`ThrowInvalidOperationIfDefault()`, throwing `InvalidOperationException` with .NET's own
+`SR.InvalidOperation_NullArray` text, **"The underlying array is null."** It is the first
+statement of all ten guarded doors. `CopyTo(ArraySegment&)` checks **this** segment, then
+the destination, then the length — .NET's exact order. In `CopyTo(vector&, intcs)` the
+guard precedes the destination `resize`, so a rejected call cannot even change the
+destination's size.
+
+**Deliberately unguarded, matching .NET:** `getArrayProperty`, `getOffsetProperty`,
+`getCountProperty`, `Equals`, `operator==`, `operator!=`, `GetHashCode`, `getEmpty`. .NET's
+`Array`/`Offset`/`Count`/`Equals`/`GetHashCode` do not call
+`ThrowInvalidOperationIfDefault` either, and a test asserts they are **not** guarded so an
+over-correction fails. `ArraySegment<T>::Empty` is a real segment over a shared empty
+vector, not a default one, so every guarded door still works on it.
+
+### The residual, stated rather than implied away
+
+`begin()`/`end()` are this port's `GetEnumerator()` counterpart, and .NET's
+`GetEnumerator()` throws for a default segment. Guarding them requires **dropping
+`noexcept`**, an exception-specification change this repository treats as approval-gated —
+the precedent is ticket #1854, which needed explicit user approval for exactly that on
+`ReadOnlyMemory`'s constructors. Tracked as **ticket #2215 (`needs_user`)**. The header
+carries an explicit `@warning`, and
+`CoreMemorySafetyDefaultSegmentTests.PIN_2215_EnumerationDoorIsStillUnguarded` pins the
+current behaviour — including two `static_assert`s on the `noexcept` specification — so the
+day #2215 ships the pin **fails loudly** instead of the divergence quietly persisting.
+
+### Closure evidence
+
+After-log `build-probe/2214_after.log`: both `Slice` SEGVs and all three UBSan
+null-reference reports **absent**, each replaced by
+`InvalidOperationException: The underlying array is null.`; the deliberate
+`heap-buffer-overflow` control still reports in the same binary. A side effect worth
+recording: the guard also removed the probe's `-Wnonnull` warning from
+`stl_algobase.h`, which came from `ToArray`/`CopyTo` forming a null-to-null range.
+
+**+8 permanent regressions**: both `Slice` overloads with the exact message; both indexers
+with the corrected exception **type**, including a const segment and an independently
+out-of-range index; all three `CopyTo` forms with the destination proved unmodified;
+source-before-destination-before-length order for `CopyTo(ArraySegment&)`, including the
+case where a short destination would otherwise win; `ToArray`/`Contains`/`IndexOf`; the
+eight unguarded doors still answering, plus `Empty` still working through every guarded
+door; a non-default segment producing every previous result and every previous
+out-of-range diagnostic; and the #2215 pin.
+
+`SharpRuntimeTests_Core_Base` **5,617/5,617** (1 pre-existing skip); `ArraySegmentTests`
+45/45, `SharpRuntimeTests_Buffers` 618/618 and `SharpRuntimeIntegrationTests` 893/893 all
+unchanged and green. Whole repository builds with zero errors and zero warnings.
+
+### Six mutations, six killed — all by assertion
+
+M1 delete the `ToArray` guard. M2 delete the `Contains` guard. M3 delete **only** the
+`const` indexer's guard (proving both overloads are separately covered). M4 move the two
+guards after the length check in `CopyTo(ArraySegment&)` — killed by the valid-source /
+default-destination case, which then reports `ArgumentException`. M5 delete the
+`CopyTo(vector&, intcs)` guard. M6 over-reject by adding `|| count_ == 0` — killed by the
+unguarded-doors test **and** by the pre-existing `ArraySegmentTests.ToArray_EmptySegment_EmptyVector`.
+
+### Source, ABI and layout consequences
+
+**None.** `throwIfDefault()` is a private, non-virtual member function; `ArraySegment<T>`
+has no virtual functions, so no vtable exists to change, and no data member was added,
+removed or reordered, so `sizeof`/`alignof` are unchanged. No public signature, no
+`noexcept` specification (that is exactly what #2215 is for), no default argument and no
+mangled symbol changed. One new intra-module include
+(`System/InvalidOperationException.hpp`), so no component boundary or dependency edge moved.

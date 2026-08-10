@@ -8,18 +8,24 @@
 // premise corrections and exclusions -- is docs/CoreMemorySafetyFamilyPlan.md.
 #include <gtest/gtest.h>
 
+#include <functional>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Array.hpp"
+#include "System/ArraySegment.hpp"
 #include "System/Buffer.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Exception.hpp"
 #include "System/SpanSplitEnumerator.hpp"
 
 using SharpRuntime::intcs;
+using System::ArraySegment;
 using System::ReadOnlySpan;
 using System::SpanSplitEnumerator;
 
@@ -443,4 +449,145 @@ TEST(CoreMemorySafetyBufferGenericTests, TriviallyCopyableElementTypesStillWork)
 
     std::vector<double> d{1.0, 2.0};
     EXPECT_EQ(System::Buffer::ByteLength(d), 16);
+}
+
+// ===========================================================================
+// SR-AUD-054 (CMS-B) -- the default ArraySegment is a guarded invalid state
+// ===========================================================================
+
+namespace {
+    const char* kNullArrayMessage = "The underlying array is null.";
+
+    std::string messageOf(const std::function<void()>& call) {
+        try { call(); }
+        catch (const System::InvalidOperationException& e) { return std::string(e.what()); }
+        catch (const System::Exception& e) { return std::string("<wrong type> ") + e.what(); }
+        return std::string("<no throw>");
+    }
+}
+
+TEST(CoreMemorySafetyDefaultSegmentTests, SliceOverloadsRejectTheDefaultSegment) {
+    // Both used to bind a reference to the null array pointer (UBSan) and then read
+    // through it (ASan SEGV). Slice(0, 0) was not named by the audit at all.
+    ArraySegment<int> seg;
+    EXPECT_THROW((void)seg.Slice(0), System::InvalidOperationException);
+    EXPECT_THROW((void)seg.Slice(0, 0), System::InvalidOperationException);
+    EXPECT_EQ(messageOf([&] { (void)seg.Slice(0); }), kNullArrayMessage);
+    EXPECT_EQ(messageOf([&] { (void)seg.Slice(0, 0); }), kNullArrayMessage);
+}
+
+TEST(CoreMemorySafetyDefaultSegmentTests, IndexersRejectWithInvalidOperationNotOutOfRange) {
+    // These already threw -- with the WRONG type, because count_ == 0 made the range
+    // check fire before the null dereference could. .NET checks the default state first.
+    ArraySegment<int> seg;
+    const ArraySegment<int> constSeg;
+    EXPECT_THROW((void)seg[0], System::InvalidOperationException);
+    EXPECT_THROW((void)constSeg[0], System::InvalidOperationException);
+    EXPECT_EQ(messageOf([&] { (void)seg[0]; }), kNullArrayMessage);
+    EXPECT_EQ(messageOf([&] { (void)constSeg[5]; }), kNullArrayMessage);
+    // Even an index that is out of range on its own terms reports the default state first.
+    EXPECT_THROW((void)seg[-1], System::InvalidOperationException);
+}
+
+TEST(CoreMemorySafetyDefaultSegmentTests, CopyToFormsRejectTheDefaultSegment) {
+    ArraySegment<int> seg;
+    std::vector<int> dst{7, 7, 7};
+    EXPECT_THROW(seg.CopyTo(dst), System::InvalidOperationException);
+    EXPECT_THROW(seg.CopyTo(dst, 1), System::InvalidOperationException);
+    ArraySegment<int> otherDefault;
+    EXPECT_THROW(seg.CopyTo(otherDefault), System::InvalidOperationException);
+    // The destination was neither resized nor written by any rejected call.
+    EXPECT_EQ(dst.size(), 3u);
+    EXPECT_EQ(dst[0], 7);
+}
+
+TEST(CoreMemorySafetyDefaultSegmentTests, CopyToSegmentChecksSourceBeforeDestination) {
+    // .NET's order: this.ThrowInvalidOperationIfDefault(), then
+    // destination.ThrowInvalidOperationIfDefault(), then the length check.
+    std::vector<int> v{1, 2, 3};
+    ArraySegment<int> valid(v);
+    ArraySegment<int> defaulted;
+
+    // A valid source with a default destination is still rejected.
+    EXPECT_THROW(valid.CopyTo(defaulted), System::InvalidOperationException);
+    // A default source with a valid destination is rejected too...
+    ArraySegment<int> validDst(v);
+    EXPECT_THROW(defaulted.CopyTo(validDst), System::InvalidOperationException);
+    // ...and when the destination is also too short, the default state still wins,
+    // proving the guard runs before the length check.
+    std::vector<int> small{0};
+    ArraySegment<int> shortDst(small);
+    EXPECT_THROW(defaulted.CopyTo(shortDst), System::InvalidOperationException);
+    // A valid source with a short valid destination reports the length instead.
+    EXPECT_THROW(valid.CopyTo(shortDst), System::ArgumentException);
+}
+
+TEST(CoreMemorySafetyDefaultSegmentTests, ToArraySearchAndIndexOfRejectTheDefaultSegment) {
+    ArraySegment<int> seg;
+    EXPECT_THROW((void)seg.ToArray(), System::InvalidOperationException);
+    EXPECT_THROW((void)seg.Contains(1), System::InvalidOperationException);
+    EXPECT_THROW((void)seg.IndexOf(1), System::InvalidOperationException);
+    EXPECT_EQ(messageOf([&] { (void)seg.ToArray(); }), kNullArrayMessage);
+}
+
+TEST(CoreMemorySafetyDefaultSegmentTests, TheUnguardedDoorsStillAnswer) {
+    // .NET's Array/Offset/Count/Equals/GetHashCode do NOT call
+    // ThrowInvalidOperationIfDefault, and neither do these. Guarding them would be an
+    // over-correction, so it is asserted that they are NOT guarded.
+    ArraySegment<int> seg;
+    EXPECT_EQ(seg.getArrayProperty(), nullptr);
+    EXPECT_EQ(seg.getOffsetProperty(), 0);
+    EXPECT_EQ(seg.getCountProperty(), 0);
+    ArraySegment<int> other;
+    EXPECT_TRUE(seg.Equals(other));
+    EXPECT_TRUE(seg == other);
+    EXPECT_FALSE(seg != other);
+    EXPECT_NO_THROW((void)seg.GetHashCode());
+    EXPECT_NO_THROW((void)ArraySegment<int>::getEmpty());
+    // ArraySegment<T>::Empty is a real, non-default segment over a shared empty vector,
+    // so every guarded door works on it.
+    auto empty = ArraySegment<int>::getEmpty();
+    EXPECT_NO_THROW((void)empty.ToArray());
+    EXPECT_NO_THROW((void)empty.Slice(0));
+    EXPECT_FALSE(empty.Contains(1));
+}
+
+TEST(CoreMemorySafetyDefaultSegmentTests, NonDefaultSegmentsAreUnaffected) {
+    std::vector<int> v{10, 20, 30, 40, 50};
+    ArraySegment<int> seg(v, 1, 3);
+    EXPECT_EQ(seg[0], 20);
+    EXPECT_EQ(seg.Slice(1).getCountProperty(), 2);
+    EXPECT_EQ(seg.Slice(1, 1).getCountProperty(), 1);
+    EXPECT_EQ(seg.ToArray(), (std::vector<int>{20, 30, 40}));
+    EXPECT_TRUE(seg.Contains(30));
+    EXPECT_EQ(seg.IndexOf(40), 2);
+    std::vector<int> dst;
+    seg.CopyTo(dst);
+    EXPECT_EQ(dst, (std::vector<int>{20, 30, 40}));
+    // The out-of-range diagnostics on a real segment are unchanged.
+    EXPECT_THROW((void)seg[3], System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)seg.Slice(4), System::ArgumentOutOfRangeException);
+}
+
+TEST(CoreMemorySafetyDefaultSegmentTests, PIN_2215_EnumerationDoorIsStillUnguarded) {
+    // ####################################################################
+    // #  INVERT THIS TEST WHEN TICKET #2215 SHIPS.                       #
+    // ####################################################################
+    // begin()/end() are the port's GetEnumerator() counterpart. .NET's GetEnumerator()
+    // calls ThrowInvalidOperationIfDefault(); guarding these two requires dropping their
+    // noexcept, an exception-specification change this repository treats as
+    // approval-gated (ticket #1854's precedent). Until that approval exists, a range-for
+    // over a default segment silently performs zero iterations, and THAT is what this
+    // test pins -- so the day #2215 lands, this assertion fails loudly instead of the
+    // divergence quietly persisting.
+    ArraySegment<int> seg;
+    static_assert(noexcept(std::declval<ArraySegment<int>&>().begin()),
+                  "#2215 not shipped yet: begin() is still noexcept");
+    static_assert(noexcept(std::declval<ArraySegment<int>&>().end()),
+                  "#2215 not shipped yet: end() is still noexcept");
+    EXPECT_EQ(seg.begin(), nullptr);
+    EXPECT_EQ(seg.end(), nullptr);
+    int iterations = 0;
+    for (int& x : seg) { (void)x; ++iterations; }
+    EXPECT_EQ(iterations, 0);
 }

@@ -8,6 +8,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/detail/SpanLength.hpp"
 
 namespace System {
@@ -29,6 +30,38 @@ namespace System {
         std::vector<T>* array_ = nullptr;
         intcs offset_ = 0;
         intcs count_  = 0;
+
+        /**
+         * @brief Rejects the default (invalid) segment before any operation that needs a
+         * real underlying array.
+         *
+         * C++ counterpart of .NET ArraySegment&lt;T&gt;.ThrowInvalidOperationIfDefault(),
+         * which every .NET member that touches the array calls first, with exactly this
+         * message (`SR.InvalidOperation_NullArray`).
+         *
+         * The default segment deliberately stores a null array pointer, matching .NET's
+         * default value. Before ticket #2214 nothing checked it, and the consequences were
+         * measured (SR-AUD-054): both `Slice` overloads bound a reference to the null
+         * pointer -- UndefinedBehaviorSanitizer reported *reference binding to null pointer*
+         * -- then called `size()` through it and reached an AddressSanitizer **SEGV**; and
+         * `ToArray`, all three `CopyTo` forms, `Contains` and `IndexOf` completed silently,
+         * reporting an empty result instead of an invalid state. Both indexers already threw,
+         * but `ArgumentOutOfRangeException` rather than .NET's `InvalidOperationException`,
+         * because `count_ == 0` made the range check fire first.
+         *
+         * @note `begin()`/`end()` are the port's `GetEnumerator()` counterpart and are
+         * **not** guarded, because guarding them requires dropping their `noexcept` -- an
+         * exception-specification change this repository treats as approval-gated (ticket
+         * #1854's precedent). That residual is ticket #2215, and the current zero-iteration
+         * behaviour is pinned by a test that must be inverted when it ships.
+         *
+         * @throws System::InvalidOperationException if this is a default segment.
+         * @see docs/CoreMemorySafetyFamilyPlan.md (family CMS-B)
+         */
+        void throwIfDefault() const {
+            if (array_ == nullptr)
+                throw System::InvalidOperationException("The underlying array is null.");
+        }
 
     public:
         // -----------------------------------------------------------------------
@@ -126,10 +159,13 @@ namespace System {
          *
          * C++ counterpart of .NET ArraySegment<T>[int] setter.
          * @param index Zero-based index within the segment.
+         * @throws System::InvalidOperationException if this is a default segment (checked
+         *         first, matching .NET).
          * @throws System::ArgumentOutOfRangeException if @p index is outside [0, Count).
          */
         [[nodiscard]] T& operator[](intcs index)
         {
+            throwIfDefault();
             if (index < 0 || index >= count_)
                 throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
             return (*array_)[offset_ + index];
@@ -140,10 +176,13 @@ namespace System {
          *
          * C++ counterpart of .NET ArraySegment<T>[int] getter.
          * @param index Zero-based index within the segment.
+         * @throws System::InvalidOperationException if this is a default segment (checked
+         *         first, matching .NET).
          * @throws System::ArgumentOutOfRangeException if @p index is outside [0, Count).
          */
         [[nodiscard]] const T& operator[](intcs index) const
         {
+            throwIfDefault();
             if (index < 0 || index >= count_)
                 throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
             return (*array_)[offset_ + index];
@@ -153,7 +192,18 @@ namespace System {
         // Range-for / iteration support
         // -----------------------------------------------------------------------
 
-        /** @brief Returns a pointer to the first element of the segment. */
+        /**
+         * @brief Returns a pointer to the first element of the segment.
+         *
+         * @warning **This is the port's `GetEnumerator()` counterpart, and unlike every other
+         * array-touching member it does NOT reject a default segment** -- it returns
+         * `nullptr`, so a range-`for` over a default segment performs zero iterations where
+         * .NET's `GetEnumerator()` throws `InvalidOperationException`. Adding the guard means
+         * dropping `noexcept` here and on `end()`, an exception-specification change this
+         * repository treats as approval-gated (ticket #1854's precedent). Tracked as ticket
+         * **#2215**; a test pins the current behaviour so that pin inverts the day #2215
+         * ships. See docs/CoreMemorySafetyFamilyPlan.md §10.
+         */
         T*       begin()       noexcept { return array_ ? array_->data() + offset_ : nullptr; }
         /** @brief Returns a pointer past the last element of the segment. */
         T*       end()         noexcept { return array_ ? array_->data() + offset_ + count_ : nullptr; }
@@ -171,10 +221,13 @@ namespace System {
          *
          * C++ counterpart of .NET ArraySegment<T>.Slice(int).
          * @param index The zero-based starting index of the slice within the segment.
+         * @throws System::InvalidOperationException if this is a default segment (checked
+         *         first, matching .NET; before #2214 this reached a null dereference).
          * @throws System::ArgumentOutOfRangeException if @p index is out of range.
          */
         [[nodiscard]] ArraySegment<T> Slice(intcs index) const
         {
+            throwIfDefault();
             if (index < 0 || index > count_)
                 throw System::ArgumentOutOfRangeException("index", "ArraySegment::Slice: index out of range");
             return ArraySegment<T>(*array_, offset_ + index, count_ - index);
@@ -186,10 +239,13 @@ namespace System {
          * C++ counterpart of .NET ArraySegment<T>.Slice(int, int).
          * @param index Zero-based start index within the segment.
          * @param count Number of elements in the slice.
+         * @throws System::InvalidOperationException if this is a default segment (checked
+         *         first, matching .NET; before #2214 this reached a null dereference).
          * @throws System::ArgumentOutOfRangeException if the parameters are out of range.
          */
         [[nodiscard]] ArraySegment<T> Slice(intcs index, intcs count) const
         {
+            throwIfDefault();
             // See the (vector&, offset, count) constructor above: same overflow-bypasses-the-
             // check bug, same fix.
             if (static_cast<SharpRuntime::uintcs>(index) > static_cast<SharpRuntime::uintcs>(count_) ||
@@ -208,6 +264,7 @@ namespace System {
          * C++ counterpart of .NET ArraySegment<T>.CopyTo(T[]).
          * @param destination The target vector. It must have capacity for at least Count elements
          *                    (elements are written via push_back / assignment into existing slots).
+         * @throws System::InvalidOperationException if this is a default segment.
          */
         void CopyTo(std::vector<T>& destination) const
         {
@@ -223,9 +280,12 @@ namespace System {
          * @param destination      The target vector.
          * @param destinationIndex Zero-based index in @p destination at which to start writing.
          * The destination vector is automatically resized (never throws for insufficient room).
+         * @throws System::InvalidOperationException if this is a default segment (checked
+         *         first, matching .NET, and therefore before the destination is resized).
          */
         void CopyTo(std::vector<T>& destination, intcs destinationIndex) const
         {
+            throwIfDefault();
             if (destinationIndex < 0)
                 throw System::ArgumentOutOfRangeException("destinationIndex", "Non-negative number required.");
             // Widen to SharpRuntime::longcs so a destinationIndex near INT32_MAX cannot
@@ -243,10 +303,14 @@ namespace System {
          *
          * C++ counterpart of .NET ArraySegment<T>.CopyTo(ArraySegment<T>).
          * @param destination The target segment; must be at least as large as this segment.
+         * @throws System::InvalidOperationException if this segment, or @p destination, is a
+         *         default segment -- this one checked first, exactly as .NET orders it.
          * @throws System::ArgumentException if the destination is too short.
          */
         void CopyTo(ArraySegment<T>& destination) const
         {
+            throwIfDefault();
+            destination.throwIfDefault();
             if (count_ > destination.count_)
                 throw System::ArgumentException("Destination ArraySegment is too short.");
             std::copy(begin(), end(), destination.begin());
@@ -261,9 +325,11 @@ namespace System {
          *
          * C++ counterpart of .NET ArraySegment<T>.ToArray().
          * @return A new std::vector<T> containing exactly the Count elements of this segment.
+         * @throws System::InvalidOperationException if this is a default segment.
          */
         [[nodiscard]] std::vector<T> ToArray() const
         {
+            throwIfDefault();
             return std::vector<T>(begin(), end());
         }
 
@@ -277,9 +343,11 @@ namespace System {
          * C++ counterpart of ICollection<T>.Contains from .NET ArraySegment<T>.
          * @param item The element to locate.
          * @return true if the item is found; otherwise false.
+         * @throws System::InvalidOperationException if this is a default segment.
          */
         [[nodiscard]] bool Contains(const T& item) const
         {
+            throwIfDefault();
             return std::find(begin(), end(), item) != end();
         }
 
@@ -289,9 +357,11 @@ namespace System {
          * C++ counterpart of IList<T>.IndexOf from .NET ArraySegment<T>.
          * @param item The element to locate.
          * @return The segment-local index, or -1 if not found.
+         * @throws System::InvalidOperationException if this is a default segment.
          */
         [[nodiscard]] intcs IndexOf(const T& item) const
         {
+            throwIfDefault();
             const T* p = std::find(begin(), end(), item);
             if (p == end()) return -1;
             return static_cast<intcs>(p - begin());
