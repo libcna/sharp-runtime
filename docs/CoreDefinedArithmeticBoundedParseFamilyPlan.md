@@ -615,3 +615,62 @@ The family is complete when **all** of:
 SR-AUD-131, SR-AUD-135 and SR-AUD-180 all keep status `confirmed` at the close of #2217. Audit
 numbering stays frozen at **364**; the index reads **178 remediated / 131 confirmed / 55 confirmed
 (design-complete)**.
+
+---
+
+## 20. What #2218 measured (2026-08-10)
+
+`Stopwatch`'s half of SR-AUD-131 is implemented. One local, file-scoped spelling of CCF-004's
+class A transformation — `subtractTimestamps` and `addNanoseconds`, both `static constexpr
+noexcept` private members — is used at the three sites §3.1 lists. **No shared repository-wide
+arithmetic helper was created**, as §18 exclusion 6 requires.
+
+### 20.1 The class A claim is proven, not asserted
+
+Under `-fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=undefined` at `-O0`
+with `volatile` operands, one process per case (`build-probe/2218_after.log`):
+
+| Case | Before | After | Diagnostic before | Diagnostic after |
+|---|---|---|---|---|
+| S1 `(INT64_MIN, INT64_MAX)` | `ticks=-1` | `ticks=-1` | `Stopwatch.hpp:133:83` | **none**, exit 0 |
+| S2 `(0, INT64_MAX)` | `ticks=9223372036854775807` | identical | none | none |
+| S3 `(INT64_MAX, INT64_MIN)` | `ticks=1` | `ticks=1` | `:133:83` | **none**, exit 0 |
+| S4 `(-1, INT64_MAX)` | `ticks=-9223372036854775808` | identical | `:133:83` | **none**, exit 0 |
+| S5 `(1000, 3000)` | `ticks=2000` | identical | none | none |
+| S6 one-argument door | negative | negative | `:133:83` | **none**, exit 0 |
+
+**Every value is byte-identical.** That is what "class A, no observable change" has to mean, and it
+is measured on both sides rather than argued from the transformation.
+
+### 20.2 Activation proved in the same binary
+
+An aborting build that reports nothing is indistinguishable from one whose flags did not take. The
+same `build-probe/2217_probe_after` binary was run on two sites this ticket deliberately did **not**
+repair, and both still abort:
+
+```
+T1 -> TimeProvider.hpp:74:34 signed integer overflow ... exit=1
+L1 -> Linq.hpp:236:48       signed integer overflow ... exit=1
+```
+
+### 20.3 Two mutations, and one of them has a weaker kill signal — said plainly
+
+| Mutation | Killed by | Signal |
+|---|---|---|
+| **M1** — narrow the unsigned domain from `ulongcs` to `uintcs` | **6 of the 9 permanent tests fail** | a gate test |
+| **M2** — revert to the raw signed `a - b` | the sanitizer probe aborts (exit 1) at `Stopwatch.hpp:162:24` for S1, S3, S4 and S6 | **the probe only — all 9 permanent tests still PASS** |
+
+M2's signal is genuinely weaker and is not dressed up as an equal one. It cannot be otherwise: a
+class A repair is value-preserving *by definition*, and the gate build is uninstrumented, so on
+this toolchain the mutant computes the same numbers. The permanent tests pin the **values**; only
+the sanitizer can pin the **definedness**. Both are recorded, and a reader can see which is which.
+
+### 20.4 Consequences
+
++9 permanent regressions in `modules/core/tests/System/Diagnostics/StopwatchTests.cpp`
+(`StopwatchDefinedArithmeticTests`), including the seven-point signed sweep, an exhaustive 8×8
+pair matrix asserting the exact two's-complement identity, both public doors and an ordinary
+instance measurement. `StopwatchTests` 29/29. No signature, member ordering, `noexcept`, layout or
+vtable change: the two additions are private `static constexpr` member functions, which are
+neither virtual nor data members. **SR-AUD-131 stays `confirmed`** — it is not remediated until
+#2219 lands its `TimeProvider` half.

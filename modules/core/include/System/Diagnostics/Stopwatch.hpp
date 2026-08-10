@@ -50,8 +50,13 @@ namespace System::Diagnostics {
         /** @brief Stops measuring elapsed time for an interval. */
         void Stop() {
             if (running_) {
-                elapsed_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                   Clock::now() - start_).count();
+                // Defined accumulation, for the reason GetElapsedTime states below. This site
+                // is NOT publicly reachable -- elapsed_ns_ is private with no setter and would
+                // need roughly 292 years of measured interval to reach INT64_MAX -- so this is
+                // hardening rather than a reproduced defect, and no probe case claims otherwise.
+                elapsed_ns_ = addNanoseconds(
+                    elapsed_ns_, std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     Clock::now() - start_).count());
                 running_ = false;
             }
         }
@@ -130,7 +135,16 @@ namespace System::Diagnostics {
          * Frequency == TimeSpan.TicksPerSecond.
          */
         [[nodiscard]] static System::TimeSpan GetElapsedTime(longcs startingTimestamp, longcs endingTimestamp) {
-            return System::TimeSpan::FromTicks(endingTimestamp - startingTimestamp);
+            // CCF-004 class A -- defined wrap (docs/DefinedArithmeticBoundaryPlan.md section 4.1,
+            // applied here as an occurrence; that family stays closed 8/8 and gains no member).
+            // Real .NET evaluates `endingTimestamp - startingTimestamp` in C#'s *unchecked*
+            // integral model, where two's-complement wrap is defined and is the intended result.
+            // Signed overflow is undefined in C++, and UBSan confirmed it at this line for
+            // (INT64_MIN, INT64_MAX), (INT64_MAX, INT64_MIN), (-1, INT64_MAX) and the
+            // one-argument door, so the same wrap is produced in the unsigned domain and
+            // converted back. Every representable difference is byte-identical to before, and the
+            // four wrapping shapes keep the exact values they had (SR-AUD-131, ticket #2218).
+            return System::TimeSpan::FromTicks(subtractTimestamps(endingTimestamp, startingTimestamp));
         }
 
         /** @brief Returns the elapsed time formatted the same way as Elapsed.ToString(). */
@@ -139,11 +153,27 @@ namespace System::Diagnostics {
         }
 
     private:
+        // The one shared spelling of CCF-004's class A transformation for this type: perform the
+        // operation in the unsigned counterpart, where wrap is defined, and convert back (the
+        // conversion is itself well defined since C++20). Deliberately NOT a new shared arithmetic
+        // helper across the repository -- docs/DefinedArithmeticBoundaryPlan.md section 10
+        // exclusion 2 forbids that -- only a local, file-scoped spelling used three times here.
+        [[nodiscard]] static constexpr longcs subtractTimestamps(longcs a, longcs b) noexcept {
+            return static_cast<longcs>(static_cast<SharpRuntime::ulongcs>(a) -
+                                       static_cast<SharpRuntime::ulongcs>(b));
+        }
+
+        [[nodiscard]] static constexpr longcs addNanoseconds(longcs a, longcs b) noexcept {
+            return static_cast<longcs>(static_cast<SharpRuntime::ulongcs>(a) +
+                                       static_cast<SharpRuntime::ulongcs>(b));
+        }
+
         [[nodiscard]] longcs currentNs() const {
             longcs ns = elapsed_ns_;
             if (running_)
-                ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
-                          Clock::now() - start_).count();
+                // Same hardening as Stop(); see the note there.
+                ns = addNanoseconds(ns, std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                            Clock::now() - start_).count());
             return ns;
         }
     };

@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <thread>
 #include <chrono>
+#include <limits>
 #include "System/Diagnostics/Stopwatch.hpp"
 
 using System::Diagnostics::Stopwatch;
@@ -169,4 +170,97 @@ TEST(StopwatchTests, ToString_MatchesElapsedToString) {
     sw.Start();
     sw.Stop();
     EXPECT_EQ(sw.ToString(), sw.getElapsedProperty().ToString());
+}
+
+// ---------------------------------------------------------------------------
+// SR-AUD-131 / ticket #2218 -- defined elapsed-time arithmetic.
+//
+// `GetElapsedTime(endingTimestamp, startingTimestamp)` used to evaluate the difference as a
+// signed `longcs`, which UBSan confirmed as undefined behaviour at Stopwatch.hpp for four
+// measured shapes.  Real .NET performs the same subtraction in C#'s *unchecked* integral model,
+// where two's-complement wrap is defined and intended, so this is CCF-004 class A: the wrap is
+// now produced in the unsigned domain and every value is byte-identical to the pre-fix
+// measurement recorded in docs/CoreDefinedArithmeticBoundedParseFamilyPlan.md section 5.1.
+//
+// These assertions therefore pin the values as they were BEFORE the repair.  A change to any of
+// them is a regression, not an improvement.
+// ---------------------------------------------------------------------------
+
+namespace {
+constexpr long long kLongMin = std::numeric_limits<long long>::min();
+constexpr long long kLongMax = std::numeric_limits<long long>::max();
+}  // namespace
+
+TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_MinToMax_WrapsToMinusOne) {
+    // Probe case S1: the audited input.  Was UB, produced -1, and must keep producing -1.
+    EXPECT_EQ(-1, Stopwatch::GetElapsedTime(kLongMin, kLongMax).getTicksProperty());
+}
+
+TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_MaxToMin_WrapsToOne) {
+    // Probe case S3: the reversed pair.
+    EXPECT_EQ(1, Stopwatch::GetElapsedTime(kLongMax, kLongMin).getTicksProperty());
+}
+
+TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_MinusOneToMax_WrapsToMin) {
+    // Probe case S4: one past the largest representable difference.
+    EXPECT_EQ(kLongMin, Stopwatch::GetElapsedTime(-1, kLongMax).getTicksProperty());
+}
+
+TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_ZeroToMax_IsExactlyMax) {
+    // Probe case S2: the largest difference that never overflowed, so the guard must not be
+    // inverted into rejecting or clamping it.
+    EXPECT_EQ(kLongMax, Stopwatch::GetElapsedTime(0, kLongMax).getTicksProperty());
+}
+
+TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_SignedSweep) {
+    // The seven-point sweep the family plan requires, taken against a fixed start of 0 so that
+    // the expected value is the ending timestamp itself.
+    const long long points[] = {kLongMin, kLongMin + 1, -1, 0, 1, kLongMax - 1, kLongMax};
+    for (long long p : points)
+        EXPECT_EQ(p, Stopwatch::GetElapsedTime(0, p).getTicksProperty()) << "ending=" << p;
+}
+
+TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_WrapIsExactTwosComplement) {
+    // Every pair, wrapping or not, must equal the unsigned difference reinterpreted as signed.
+    const long long points[] = {kLongMin, kLongMin + 1, -1, 0, 1, 1000, kLongMax - 1, kLongMax};
+    for (long long a : points) {
+        for (long long b : points) {
+            const auto expected = static_cast<long long>(
+                static_cast<unsigned long long>(b) - static_cast<unsigned long long>(a));
+            EXPECT_EQ(expected, Stopwatch::GetElapsedTime(a, b).getTicksProperty())
+                << "start=" << a << " end=" << b;
+        }
+    }
+}
+
+TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_OrdinaryPairIsUnchanged) {
+    EXPECT_EQ(2000, Stopwatch::GetElapsedTime(1000, 3000).getTicksProperty());
+}
+
+TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_SingleTimestampDoorReachesTheSameSite) {
+    // Probe case S6: the one-argument overload forwards to the same subtraction with
+    // `ending = GetTimestamp()`, so an extreme start must be defined there too.  The timestamp is
+    // an arbitrary positive monotonic value, so the wrapped result is negative but must exist.
+    const System::TimeSpan elapsed = Stopwatch::GetElapsedTime(kLongMin);
+    EXPECT_LT(elapsed.getTicksProperty(), 0);
+    // And the ordinary use of the same door is still non-negative and small.
+    const long long now = Stopwatch::GetTimestamp();
+    EXPECT_GE(Stopwatch::GetElapsedTime(now).getTicksProperty(), 0);
+}
+
+TEST(StopwatchDefinedArithmeticTests, InstanceMeasurementIsUnaffected) {
+    // The accumulator sites converted alongside the subtraction are not publicly reachable, so
+    // the only thing a test can assert is that ordinary measurement still behaves.
+    Stopwatch sw;
+    sw.Start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    sw.Stop();
+    const long long first = sw.getElapsedTicksProperty();
+    EXPECT_GT(first, 0);
+    sw.Start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    sw.Stop();
+    EXPECT_GT(sw.getElapsedTicksProperty(), first);
+    sw.Reset();
+    EXPECT_EQ(0, sw.getElapsedTicksProperty());
 }
