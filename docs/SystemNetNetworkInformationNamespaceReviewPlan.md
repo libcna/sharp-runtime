@@ -391,6 +391,32 @@ container** (the one `SocketTests` failure, a different module) and `getifaddrs`
 disposal-during-operation, cancellation and completion-after-owner-destruction checks have exactly
 one applicable target: the `this` capture, which #2191 removes.
 
+### 15.1 Sanitizer and direct-resource matrix
+
+The three module bodies are compiled **with** the sanitizer; the rest of the runtime is linked from
+the ordinary archives. Reported as *instrumented over the production `net-network-information`
+bodies*, never as a whole-program run. Workload: every one of the sixteen public doors ×3 rounds,
+plus every rejected-argument door, plus 20 owner-destroyed-during-operation rounds, plus 4 threads
+× 10 rounds through the shared `sequenceCounter`, plus `NetworkInterface` enumeration.
+
+| Tool | Command | Result |
+|---|---|---|
+| ASan + UBSan + LSan | `build-probe/2193_san_compile.sh`, `detect_leaks=1` | **exit 0, zero reports** (`2193_asan_ubsan_lsan.log`) |
+| UBSan, non-recovering | `-fsanitize=undefined -fno-sanitize-recover=undefined` | **exit 0** (`2193_ubsan.log`) |
+| TSan | `-fsanitize=thread`, 4 threads over the process-wide counter | **exit 0, zero reports** (`2193_tsan.log`) |
+| Descriptor accounting | `/proc/self/fd`, 250 reachable sends, deliberate leaked-fd control | **delta 0**; control moves the counter by exactly 1 |
+| Thread accounting | `/proc/self/task`, 8 rejected async calls | **delta 0** after #2188 (was ≥1 per call) |
+
+TSan is run because the module holds real shared mutable state — the file-static
+`std::atomic<uint16_t> sequenceCounter` and the resolver — not as a formality. A clean run is
+reported as *no report on this workload*, never as "the module is thread-safe".
+
+**What the sanitizers cannot reach here.** Every send fails at socket creation, so the packet
+construction, checksum, `sendto`, `recv` and reply-parsing code in `sendPingCore` is **not executed
+under any sanitizer in this container**. That is #1962's shadow and it is stated rather than
+implied: the clean runs cover the forwarding layer, the exception boundary, the descriptor owner's
+construction and destruction, and `NetworkInterface`, not the wire path.
+
 ---
 
 ## 16. Test matrix

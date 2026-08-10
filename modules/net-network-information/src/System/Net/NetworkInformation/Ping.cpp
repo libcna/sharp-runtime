@@ -143,14 +143,40 @@ namespace {
         }
     }
 
-    int createIcmpSocket(bool isIPv6) {
+    /**
+     * Owns an open descriptor for the rest of the enclosing scope -- ticket #2193.
+     *
+     * `sendPingCore` used to hold a bare `int` and call `::close` by hand on each of its four
+     * exits, but between the socket call and those exits it resizes a packet vector of up to
+     * 65508 bytes, allocates a 65535-byte receive buffer, calls `GetAddressBytes()`, assigns a
+     * reply buffer and constructs a `PingReply`. An exception from any of those leaked the
+     * descriptor. Non-copyable and non-movable on purpose: there is exactly one owner and it never
+     * changes hands.
+     */
+    class OwnedDescriptor {
+        int fd_;
+
+    public:
+        explicit OwnedDescriptor(int fd) noexcept : fd_(fd) {}
+        OwnedDescriptor(const OwnedDescriptor&) = delete;
+        OwnedDescriptor& operator=(const OwnedDescriptor&) = delete;
+        ~OwnedDescriptor() {
+            if (fd_ >= 0) {
+                ::close(fd_);
+            }
+        }
+
+        [[nodiscard]] int get() const noexcept { return fd_; }
+    };
+
+    OwnedDescriptor createIcmpSocket(bool isIPv6) {
         int family = isIPv6 ? static_cast<int>(AF_INET6) : static_cast<int>(AF_INET);
         int protocol = isIPv6 ? static_cast<int>(IPPROTO_ICMPV6) : static_cast<int>(IPPROTO_ICMP);
         int fd = ::socket(family, SOCK_DGRAM, protocol);
         if (fd < 0) {
             throw NetworkInformationException();
         }
-        return fd;
+        return OwnedDescriptor(fd);
     }
 
     void applyOptions(int fd, bool isIPv6, const PingOptions* options) {
@@ -174,7 +200,10 @@ namespace {
 PingReply Ping::sendPingCore(const System::Net::IPAddress& address, const std::vector<SharpRuntime::bytecs>& buffer,
                                SharpRuntime::intcs timeout, const PingOptions* options) {
     bool isIPv6 = address.getIsIPv6Property();
-    int fd = createIcmpSocket(isIPv6);
+    // Ticket #2193: the descriptor is owned for the rest of this function, so every exit --
+    // including an exception thrown by one of the allocations below -- releases it.
+    OwnedDescriptor socket = createIcmpSocket(isIPv6);
+    const int fd = socket.get();
     applyOptions(fd, isIPv6, options);
 
     timeval tv{};
@@ -256,15 +285,16 @@ PingReply Ping::sendPingCore(const System::Net::IPAddress& address, const std::v
     auto start = std::chrono::steady_clock::now();
     ssize_t sent = ::sendto(fd, packet.data(), packet.size(), 0, reinterpret_cast<sockaddr*>(&dest), destLen);
     if (sent < 0) {
-        int err = errno;
-        ::close(fd);
-        throw NetworkInformationException(err);
+        throw NetworkInformationException(errno);
     }
 
     std::vector<uint8_t> recvBuf(65535);
     ssize_t received = ::recv(fd, recvBuf.data(), recvBuf.size(), 0);
     auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
-    ::close(fd);
+    // The descriptor stays owned until this function returns (ticket #2193). The `::close(fd)`
+    // that used to sit here also ran BEFORE the `errno` reads below, and `close()` is allowed to
+    // set `errno`, so the recv error being reported could be the close's instead of the recv's.
+    // Letting OwnedDescriptor close at scope exit removes that window as well as the leak.
 
     if (received < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {

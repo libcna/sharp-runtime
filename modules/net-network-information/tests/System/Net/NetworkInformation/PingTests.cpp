@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include <dirent.h>
 #include <exception>
+#include <fcntl.h>
+#include <unistd.h>
 #include <optional>
 #include <string>
 #include <typeinfo>
@@ -47,6 +49,20 @@ namespace {
             }
         }
         return {};
+    }
+
+    /** Open-descriptor count of this process, or -1 when `/proc/self/fd` cannot be read. */
+    int countOwnDescriptors() {
+        DIR* dir = ::opendir("/proc/self/fd");
+        if (dir == nullptr) {
+            return -1;
+        }
+        int entries = 0;
+        while (::readdir(dir) != nullptr) {
+            ++entries;
+        }
+        ::closedir(dir);
+        return entries - 3; // ".", ".." and opendir's own descriptor
     }
 
     /** Live thread count of this process, or -1 when `/proc/self/task` cannot be read. */
@@ -412,6 +428,60 @@ TEST(PingTests, SendPingAsync_OwnerDestroyedBeforeCompletion_TaskStillCompletes)
     } catch (const PingException&) {
         SUCCEED() << "task completed by faulting, which is the expected outcome without ICMP";
     }
+}
+
+// --- Ticket #2193: the send core owns its descriptor ------------------------------------------
+//
+// This is a regression guard, not a reproduction: the leak it closes needs an allocation to throw
+// between socket() and close(), which has no practical trigger here. What it does prove is that
+// every reachable path is balanced, and the control below proves the measurement can see a leak
+// at all -- without it, "delta 0" would be indistinguishable from a broken counter.
+TEST(PingTests, Send_ReachablePaths_LeakNoDescriptors) {
+    Ping ping;
+    std::vector<SharpRuntime::bytecs> buffer{1, 2, 3};
+    PingOptions options(64, true);
+
+    // Quiesce first: the very first call pulls in lazily initialised state, so a baseline taken
+    // before it would report that setup as growth.
+    try {
+        static_cast<void>(ping.Send(IPAddress::Loopback, 1000));
+    } catch (const PingException&) {
+    }
+    const int baseline = countOwnDescriptors();
+    ASSERT_GT(baseline, 0) << "/proc/self/fd unreadable; the measurement below would be meaningless";
+
+    for (int i = 0; i < 50; ++i) {
+        try {
+            static_cast<void>(ping.Send(IPAddress::Loopback, 1000, buffer));
+        } catch (const PingException&) {
+        }
+        try {
+            static_cast<void>(ping.Send(IPAddress::Loopback, 1000, buffer, options));
+        } catch (const PingException&) {
+        }
+        try {
+            static_cast<void>(ping.Send(std::string("127.0.0.1"), 1000, buffer));
+        } catch (const PingException&) {
+        }
+        try {
+            static_cast<void>(ping.Send(IPAddress::IPv6Loopback, 1000, buffer));
+        } catch (const PingException&) {
+        }
+        try {
+            static_cast<void>(ping.SendPingAsync(IPAddress::Loopback, 1000, buffer).getResultProperty());
+        } catch (const PingException&) {
+        }
+    }
+    EXPECT_EQ(countOwnDescriptors(), baseline) << "a Ping path leaked a descriptor";
+
+    // Control: a deliberately leaked descriptor must move the number, or the assertion above
+    // proves nothing. The leak is closed again so the suite leaves no descriptor behind.
+    const int beforeLeak = countOwnDescriptors();
+    int leaked = ::open("/dev/null", O_RDONLY);
+    ASSERT_GE(leaked, 0);
+    EXPECT_EQ(countOwnDescriptors(), beforeLeak + 1) << "descriptor accounting cannot see a leak";
+    ::close(leaked);
+    EXPECT_EQ(countOwnDescriptors(), beforeLeak);
 }
 
 // Ticket #2192 (deferred verification): a resolver failure is raised OUTSIDE the wrapper, so it
