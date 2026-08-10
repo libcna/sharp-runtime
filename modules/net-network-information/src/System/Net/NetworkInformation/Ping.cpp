@@ -8,6 +8,7 @@
 #include "System/Net/NetworkInformation/NetworkInformationException.hpp"
 #include "System/Net/NetworkInformation/PingException.hpp"
 #include "System/PlatformNotSupportedException.hpp"
+#include <exception>
 
 #if defined(_WIN32)
 // No Windows PAL implemented yet.
@@ -322,9 +323,24 @@ namespace {
             return core(address, buffer, timeout, options);
         } catch (const System::PlatformNotSupportedException&) {
             throw;
-        } catch (const std::exception& e) {
+        } catch (...) {
+            // Ticket #2189 (SR-AUD-254). This used to read
+            //   catch (const std::exception& e) { ... std::make_exception_ptr(e) ... }
+            // which captures by the handler parameter's STATIC type: make_exception_ptr
+            // copy-constructs a `std::exception`, so the object stored was the base subobject of
+            // whatever was thrown. Measured before the fix, every wrapped Ping failure in a
+            // container that denies ICMP carried inner type `St9exception` with message
+            // "std::exception", while the object actually thrown was
+            // NetworkInformationException("Win32 error 13") with getErrorCodeProperty() == 13 --
+            // the type, the message and the native error code were all destroyed at the moment
+            // of capture, not at rethrow.
+            //
+            // std::current_exception() instead returns an exception_ptr to the exception object
+            // CURRENTLY BEING HANDLED, so the dynamic type and every payload survive, and the
+            // catch-all means a cause that does not derive from std::exception is preserved too
+            // rather than escaping this wrapper unwrapped.
             throw PingException("An exception occurred while sending or receiving the ICMP message.",
-                                 std::make_exception_ptr(e));
+                                 std::current_exception());
         }
     }
 
