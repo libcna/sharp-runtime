@@ -4,6 +4,232 @@
 # NEXT.md
 
 *Last verified: 2026-08-10. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
+harness-designated branch**. **Pushed immediately after each commit**, per `CLAUDE.md` rule 13 — two
+commits, two pushes, both normal fast-forwards, both **verified present on the remote** (`8107eca`
+and `66c1d78`). No merge, rebase, tag, force-push, PR, publication or history rewrite; both commits
+are unsigned (`git -c commit.gpgsign=false`) — this environment has no usable private signing key.
+This batch **reviewed and closed the bounded Core numeric special-value and rounding-contract
+family** (#2229 review, #2230, #2231, #2232, #2233): **four findings, four remediated, none
+blocked**. It also opened **#2234**, a deferred verification. Audit **189 remediated / 120 confirmed
+/ 55 confirmed (design-complete) / 364 total**, recounted **by finding identifier**; **no `SR-AUD-*`
+identifier created — numbering frozen at 364.** `modules/core` open **60 → 56**. Gate **16,708 tests
+across 38 executables: 16,700 passing, 2 skipped, 6 failing** for the same two measured causes —
+**exactly +16 on the inherited 16,692, which is precisely this batch's own new tests, so no
+regression anywhere.** Graph **41 / 92**, seams **3 / 20**, negative fixtures **14 / 120** — all
+unchanged. **Doxygen, `ccache` and the `/rv` reference tree are all absent** and were not installed.
+**CCF-007 was considered and deliberately NOT extended; CCF-008 stays closed; no new CCF minted.
+CCF-019 stays open; CCF-021/#2131 and CCF-022/#2109 stay unminted.** #2228, #2215, #1773, #1962 and
+every other inherited blocked/deferred ticket are exactly as inherited. **The inherited
+`modules/timers` runner-up is STALE and is corrected in §9**: that namespace was reviewed and closed
+by #2153/#2154 on 2026-08-09, its high SR-AUD-238 is `remediated`, and its one survivor is medium
+and blocked on a layout/vtable change. See the first handoff below.*
+
+---
+
+## Batch record — the bounded Core numeric special-value and rounding-contract family, closed (#2229–#2233)
+
+**Four findings. Four remediated. None blocked.** One deferred-verification ticket opened.
+
+### 1. Starting state, verified
+
+`5f4ae7f`, working tree clean, HEAD identical to `origin/`. The audit was recounted **by finding
+identifier**, not by column position — rows SR-AUD-029/033/249/286/307 carry extra columns and a
+fixed-column parser reports a false 363. Parsed correctly: **364 unique identifiers, contiguous
+1–364, no duplicates**; **185 remediated / 124 confirmed / 55 design-complete**, matching the
+inherited triple exactly, with **60** `modules/core` findings open. #2228 confirmed still `blocked`
+in `plan.sqlite3`; no user decision had appeared, so the block was preserved and SR-AUD-050 was not
+touched.
+
+### 2. Why this family, and why not the others
+
+Every member is **a public numeric operation whose .NET contract names a specific special-value or
+rounding outcome, implemented by delegating to a C++ primitive or comparison that does not provide
+it.** What makes it more than a theme: **three of the four have an in-repository sibling that
+already implements the contract correctly**, so each divergence is measurable rather than arguable.
+
+| Finding | The wrong door | The already-correct sibling |
+|---|---|---|
+| SR-AUD-034 | `Single::IsPositive` adds `&& !isnan(value)` to the sign-bit test | `Double::IsPositive` — bare `signbit` |
+| SR-AUD-039 | `Math::Log(double, newBase)` is a bare `log(a)/log(b)` | `MathF::Log(float, float)` — all four .NET guards |
+| SR-AUD-040 | `MathF`/`Single`/`Double` ties-to-even is `std::nearbyint` | `Math::roundToEvenImpl` — a `floor`/`fmod` funnel |
+| SR-AUD-037 | `Decimal::ToOACurrency` scales then **truncates** | *(none — the one cause-only member)* |
+
+The ranked shortlist that lost, with the actual reason each lost:
+
+| Candidate | Findings | Why not |
+|---|---|---|
+| **Lazy\<T\>** | SR-AUD-064, 066 | Genuinely coherent and compatible — the strongest runner-up — but only two, and both turn on `LazyThreadSafetyMode` **policy** rather than a measurable value, so the before/after evidence would be weaker. |
+| **Delegate** | SR-AUD-118, 119, 120 | 118 needs a concrete-type-preservation design decision (Combine/Remove must return the derived multicast type), which is a design boundary, not a bounded repair. |
+| **Environment** | SR-AUD-105–108 | Mixed: 107 is a clean bounded fix, but 106 needs a **nullable-value signature change** and 105 needs an XDG special-folder design. |
+| **NumberStyles** | SR-AUD-177, 178 | Two findings, but 178 is a behaviour **tightening** (reject unknown style masks) that needs its own compatibility call. |
+| **CharUnicodeInfo / normalization** | SR-AUD-173, 174, 182 | Need generated Unicode data or ICU — excessive scope, not a bounded family. |
+| **BFloat16** | SR-AUD-175, 176 | 175 is bounded; 176 is a large API addition. Mixed sizes, so the family would not be coherent. |
+| **public-representation group** | ~12 | **Rejected for the third time, same reason:** eleven of twelve need a public layout or signature change and would land blocked. Not reframed as internal cleanup. |
+| **SR-AUD-050 / #2228** | 1 | **Blocked**, preserved. A completed design is not approval. |
+
+### 3. Premise corrections — two, both measured
+
+1. **SR-AUD-040 reaches four production doors, not two.** The finding names the two `MathF` doors
+   and calls *"the sibling double Math API"* mode-independent. That is true of **`Math`** and false
+   of **`Double`**: `Double.hpp:292` was `std::nearbyint`, as was `Single.hpp:247`. A
+   repository-wide grep for `nearbyint`/`rint` outside `tests/` returns exactly those four sites.
+   It is also **not `FE_UPWARD`-only**: `FE_DOWNWARD`/`FE_TOWARDZERO` turned `Round(3.5f)` into `3`
+   and `Round(-2.5f)` into `-3`.
+2. **The review probe's own first draft was wrong**, and the control caught it. It expected
+   `Math::Log(1, 0) == +0` and flagged both the `Math` case *and* the `MathF` control. A control
+   failing is the discriminator: .NET's `(a != 1) && (base == 0 || IsPositiveInfinity(base))` guard
+   does **not** fire at `a == 1`, so `Log(1, 0)` is `-0` and `Log(1, +Inf)` is `+0` — signed zeros
+   the port already returned. Corrected before the baseline was taken (27 wrong, not 29), and both
+   are now pinned as the over-rejection control.
+
+### 4. Evidence
+
+Three probes, all in `build-probe/` under the shared-directory rule, prefixed by ticket number.
+
+| Probe | Purpose | Result |
+|---|---|---|
+| `2229_probe1_before` | before-evidence over the shipped library, OK/BAD per case | **106 cases, 27 wrong** → **4 wrong** |
+| `2229_probe2_digits` | attribute the four residual rows | see below |
+| `2229_probe3_contract` | the precise post-repair contract | **104 cases, 0 wrong** |
+
+Per group on probe 1: SR-AUD-034 1 → 0, SR-AUD-037 5 → 0, SR-AUD-039 3 → 0, SR-AUD-040 18 → 4.
+
+**The four residual rows are attributed, not waved away.** Under `FE_DOWNWARD`/`FE_TOWARDZERO` the
+*digits* overloads differ in the final ULP. Probe 2 shows `Math::Round(2.25, 1)` — the sibling this
+family treats as the correct reference, untouched by this batch — deviating **identically** and
+matching a bare `22.0 / 10.0` to the bit. The scale round trip's final **division** observes the
+ambient mode like every other C++ float operation, including `printf`'s own decimal conversion. So
+it is ambient-mode arithmetic, not a rounding-rule defect. **It gets no ticket**, deliberately: a
+ticket scoped to `Round` would misdescribe a condition that applies to every `float`/`double`
+expression in the library. Probe 1 was left **unamended** so its log and its source keep matching;
+probe 3 states the claim the repair actually makes.
+
+**+16 permanent regressions** (`modules/core/tests/System/NumericSpecialValueTests.cpp`);
+`SharpRuntimeTests_Core_Base` **5,704 → 5,720**. Each suite asserts the repaired door *and* that the
+pair now **agrees**, rather than each half being separately plausible.
+
+### 5. The one thing deferred rather than decided — #2234
+
+`Decimal::ToOACurrency`'s **tie rule**. Neither value the .NET documentation tabulates is a
+midpoint, so the examples cannot decide it. `ToEven` was implemented because .NET reduces the scale
+through `DecCalc.VarCyFromDec` → `InternalRound(…, MidpointRounding.ToEven)` and because every other
+rounding funnel in this port defaults to it; `/rv` is absent to confirm. The behaviour is **pinned
+by three tests** (`1.00005` → `10000`, `1.00015` → `10002`, `-1.00005` → `-10000`; under
+`AwayFromZero` they would be `10001`, `10002`, `-10001`) and #2234 carries the question, following
+the #2060 / #2070 / #2130 convention.
+
+### 6. CCF discipline
+
+- **CCF-007 was considered and deliberately NOT extended.** Its membership is explicit and complete
+  (SR-AUD-029..033, all `remediated`) and its subjects are rounding precision, `IsPow2`, `ilogb`,
+  Pi-scaled trigonometry and text conversion — none of them a sign-bit predicate, a logarithm base
+  guard, a currency conversion or an ambient-FP-mode dependency. **Adjacent, not members.**
+- **CCF-008 stays closed.** SR-AUD-040 shares its *files* and none of its subject; its
+  `MidpointRounding` validation is untouched and pinned by a test.
+- **No new CCF minted.** The shape is recorded in `AUDIT_CROSS_CUTTING_FINDINGS.md` without an
+  identifier, per the #2148 precedent — and it would be born closed, since these tickets repair
+  every occurrence it has in the corpus.
+- **CCF-019, CCF-021/#2131, CCF-022/#2109 untouched.**
+
+### 7. Validation
+
+| Check | Result |
+|---|---|
+| `cmake --build build --parallel 2` | **0 errors, 0 warnings** |
+| Full gate, 38 executables run individually | **16,708: 16,700 pass, 6 fail, 2 skip** (+16, exactly this batch's tests) |
+| `validate_module_boundaries.py` (+ self-test) | OK — **41 / 92**; 7 / 7 |
+| `generate_component_catalog.py --check` | OK — unchanged |
+| `db_consistency_check.py` | OK |
+| `check_version_seam_odr.py` (+ self-test) | OK — **3 seams / 20 definitions**; 15 / 15 |
+| `check_negative_consumer_fixtures.py --jobs 2` | OK — **14 fixtures / 120 sites**, 134 invocations, **peak 2 jobs**, 44.6 s |
+| `git diff --check` | clean |
+| tracked `__pycache__` | unchanged — every Python call used `PYTHONDONTWRITEBYTECODE=1` |
+
+The six failures are the inherited ones, unchanged and not hidden: **5 × PingTests** (#1962,
+raw-ICMP receive-path gap) and **1 × SocketTests** (no IPv6 in this container). **No test was
+disabled, weakened, skipped or recategorised.**
+
+**`scripts/run_component_tests.sh` cannot produce a full total in this container** and that is worth
+recording: it `exit 1`s at the first failing executable, so it stops at
+`SharpRuntimeTests_Net_NetworkInformation` and never reaches the remaining binaries. The gate above
+was produced by running all 38 executables individually and parsing each captured log — the same
+method the previous batches used.
+
+**Selective-components was NOT re-run.** This batch changed no component boundary and added no
+module edge (the one new include, `Decimal.hpp` → `OverflowException.hpp`, is intra-`Core.Base`, and
+the boundary validator confirms 41 / 92 unchanged), and the catalogue check is current. Re-running a
+735-second matrix for ceremony is exactly what the SSD-saving policy forbids.
+
+**No sanitizer was run, and that is a decision with a reason.** Every defect here produces a *wrong
+answer* from fully defined operations — a comparison with an extra term, a truncation where rounding
+was specified, a missing special case, and a correctly defined library call that reads a mutable
+global mode. There is no out-of-bounds access, no uninitialised read, no signed overflow and no
+invalid conversion in any of the four repairs, so ASan/UBSan/`float-cast-overflow` cannot
+discriminate the failure class. Same discipline as #2223. **No mutation testing** either: each
+repair is a two-to-six-line body whose every branch is directly asserted, and probe 1's 27 → 4
+delta already demonstrates the tests fail against the unrepaired code.
+
+### 8. Environment and process
+
+Maximum compiler concurrency **2**, verified with `ps -C cc1plus`; the fixture checker reports its
+own measured **peak 2 jobs**. **Doxygen, `ccache` and `/rv` absent** and not installed. No build tree
+under `/tmp`, `/var/tmp` or `/dev/shm`; `build-tmp/` was used as the repository-local scratch. Only
+the fixed build directories were used: `build/` and `build-probe/`, with every probe artefact
+prefixed `2229_`.
+
+### 9. Next work, ranked — **and the inherited runner-up is stale, measured here**
+
+**`modules/timers` is NOT available, and the inherited description of it is wrong for the current
+index.** The handoff that opened this batch carried it as *"2 open findings, 1 HIGH; one issue
+involves an exception escaping a worker thread and terminating the process"*. Recounted from
+`AUDIT_FINDINGS_INDEX.md` today, `modules/timers` has **one** open finding, it is **medium**, and it
+is **`confirmed (design-complete)`**:
+
+- **SR-AUD-238** — *the* high, the exception escaping the worker `std::thread` and aborting the
+  process — is **`remediated`**, closed by **#2154** on 2026-08-09 with one `catch (...)` around the
+  callback body.
+- **SR-AUD-239** is the only survivor, and its implementation ticket **#2155 is `blocked`** on an
+  **object-layout + vtable change** (`Elapsed` reports a null sender because `Timer` has no
+  `System::Object` base, and `nullptr` is the only value that *compiles*).
+- The whole namespace was reviewed and closed by **#2153** the same day.
+
+The inherited text described the state **before** that batch landed. Do not carry it forward again.
+
+**`modules/threading` is the largest remaining high concentration — 17 open, 6 high — and every one
+of those six is already claimed by a blocked design ticket**, so it is not ordinary compatible work
+either: SR-AUD-187 and SR-AUD-221 belong to **#1959** (CCF-019, borrowed raw pointers, `blocked`),
+SR-AUD-203 to **#1956** (`blocked`; its compatible half already landed as #1955), and SR-AUD-202,
+204 and 210 to **#1957** (`blocked`). Checked by querying `plan.sqlite3` for each identifier, not
+assumed.
+
+The ranking that survives that check:
+
+1. **Another bounded Core family from the remaining 56 — the strongest is `Lazy<T>`, SR-AUD-064 +
+   066.** Two findings, one file, one subject: `LazyThreadSafetyMode` contract handling. 064 —
+   mode-taking constructors retain an invalid enum value and dispatch it as `PublicationOnly`
+   instead of throwing an argument-range error. 066 — an unconditional reentrancy guard throws for
+   `PublicationOnly`, which .NET reserves the recursive-`Value` exception for `None` and
+   `ExecutionAndPublication` only. **Verified unclaimed: `plan.sqlite3` has no ticket naming either
+   identifier.** Compatible (both repairs are body-local), with .NET's own documented behaviour as
+   the oracle and a discriminating test for each.
+2. **`Environment`'s compatible slice — SR-AUD-107 + 108, also verified unclaimed.** 107 is a fixed
+   4 KiB `getcwd` buffer that turns a real 4,866-byte current directory into an **empty string**;
+   108 joins arguments with raw spaces, so whitespace or quotes make them ambiguous where .NET has
+   `PasteArguments`. Both are bounded and body-local. Deliberately **excludes** SR-AUD-106, which
+   needs a nullable-value **signature change**, and SR-AUD-105, which needs an XDG design.
+3. **#2228 / SR-AUD-050** — still `modules/core`'s last high, still **blocked**, and it must stay
+   blocked until someone answers the Emscripten question: `Guid::NewGuid` cannot throw today, the
+   cryptographic entropy path throws there, and a silent fallback re-creates the defect class the
+   finding names. **Not** implementable from repository evidence.
+
+**Not** the twelve-member public-representation Core group while its approval requirements are
+unresolved.
+
+---
+
+*Prior handoff, retained historically:*
+
+*Last verified: 2026-08-10. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
 harness-designated branch**. **Pushed immediately after the commit**, per `CLAUDE.md` rule 13, and
 **verified present on the remote** (`09461f2` on both sides). No merge, rebase, tag, force-push, PR,
 publication, amend or history rewrite; the commit is unsigned (`git -c commit.gpgsign=false`) — this

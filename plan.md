@@ -1,6 +1,31 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-08-10 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
+harness-designated branch, at `66c1d78`, **pushed and verified on the remote**. This batch reviewed
+and **closed the bounded Core numeric special-value and rounding-contract family** (#2229 review,
+#2230/#2231/#2232/#2233): **four findings, four remediated, none blocked**, and opened **#2234**, a
+deferred verification for the one element the documented .NET examples cannot decide. Audit **189
+remediated / 120 confirmed / 55 confirmed (design-complete) / 364 total**, recounted **by finding
+identifier**; **no `SR-AUD-*` created — numbering frozen at 364.** `modules/core` open **60 → 56**.
+Gate **16,708 across 38 executables: 16,700 passing, 2 skipped, 6 failing** for the same two
+inherited causes — **+16 exactly, this batch's own tests, so no regression anywhere.** Graph
+**41 / 92**, seams **3 / 20**, negative fixtures **14 / 120** — all unchanged. Two premise
+corrections, both measured: SR-AUD-040 reaches **four** production doors, not the two it names
+(`Double::Round(double)` and `Single::Round(float)` carried the identical `std::nearbyint`), and it
+is **not `FE_UPWARD`-only**; and the review probe's own first draft was wrong about
+`Math::Log(1, 0)`, caught by the `MathF` control disagreeing. A measured **residual** in the digits
+overloads is attributed to shared ambient-mode arithmetic — `Math::Round(2.25, 1)`, the untouched
+reference sibling, deviates identically — and deliberately carries **no ticket**. **CCF-007 was
+considered and deliberately NOT extended**; CCF-008 stays closed; **no new CCF minted**. #2228,
+#2215, #1773, #1962, CCF-019, CCF-021/#2131 and CCF-022/#2109 are exactly as inherited. See
+`docs/CoreNumericSpecialValueRoundingFamilyPlan.md`. The inherited `modules/timers` runner-up is
+**stale** — that namespace was reviewed and closed by #2153/#2154 on 2026-08-09, its high
+SR-AUD-238 is `remediated`, and its one survivor is medium and blocked on a layout/vtable change;
+the corrected ranking is in `NEXT.md` §9.*
+
+*Prior snapshot, retained historically:*
+
+*Last verified: 2026-08-10 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
 harness-designated branch, at `09461f2`, **pushed and verified on the remote**. This batch reviewed
 and **closed the bounded Core text input-boundary family** (#2223 review, #2224/#2225/#2226/#2227):
 **four findings, four remediated, none blocked**, and opened **#2228** — the SR-AUD-050 design
