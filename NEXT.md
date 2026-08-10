@@ -4,37 +4,238 @@
 # NEXT.md
 
 *Last verified: 2026-08-10. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
-harness-designated branch**. **Pushed immediately after each commit**, per `CLAUDE.md` rule 13 —
-**six commits, six pushes**, all normal fast-forwards, all **verified present on the remote**:
-`1f3fc03`, `ddbfadc`, `5be561b`, `be2f906`, `f7681f0`, **and this handoff commit itself**, whose
-hash cannot be written from inside it — that gap is exactly what produced the previous handoff's
-"four commits / five hashes" discrepancy, so it is stated here rather than left to be re-derived.
-No merge, rebase, tag, force-push, PR,
-publication or history rewrite; every commit is unsigned (`git -c commit.gpgsign=false`) — this
-environment has no usable private signing key. This batch **reviewed and closed two bounded Core
-slices**: the **`Experimental::Property` slice** (#2243 review, #2244, #2245) and the **`AppDomain`
-compatible slice** (#2248 review, #2249, #2251). **Four findings: three remediated
-(SR-AUD-179, SR-AUD-181, SR-AUD-104), one half-remediated (SR-AUD-103, data half done, switch half
-ticketed) and therefore still `confirmed`** — the convention SR-AUD-259 already uses. Five further
-tickets opened: **#2246** (approval, `Property<T>` layout), **#2247** (post-audit adjacency, empty
-getter), **#2250** (approval, `IsCompatibilitySwitchSet` nullable + `noexcept` drop), **#2252**
-(deferred verification, `SR.Argument_StringZeroLength` text). Audit **196 remediated / 113 confirmed
-/ 55 confirmed (design-complete) / 364 total**, recounted **by finding identifier**; **no `SR-AUD-*`
-identifier created — numbering frozen at 364.** `modules/core` open **52 → 49**. Gate **16,756 tests
-across 38 executables: 16,748 passing, 2 skipped, 6 failing** for the same two inherited causes —
-**exactly +26 on the inherited 16,730, which is precisely this batch's own new tests (12 Property,
-14 AppDomain), so no regression anywhere.** Graph **41 / 92**, seams **3 / 20**, negative fixtures
-**14 / 120** (134 invocations, peak 2 jobs), catalogue current — all unchanged, so
-**selective-components was NOT rerun** and §2.6 says why. **Doxygen, `ccache` and the `/rv`
-reference tree are all absent** and were not installed. **No CCF minted or extended: CCF-011 was
-considered for `Property`'s empty getter and recorded as adjacency (#2247), CCF-005 for SR-AUD-104
-and CCF-019 for the `void*` data store likewise; CCF-019 stays open; CCF-021/#2131 and
-CCF-022/#2109 stay unminted.** #2228, #2234, #2238, #2242, #2215, #1773, #1962 and every other
-inherited blocked/deferred ticket are exactly as inherited. **`SR-AUD-091` was assessed and
-deliberately NOT started** — §2.7 gives the reason and the design work already done for it. **The
-`modules/timers` and `modules/threading` runner-ups remain STALE.** **Read §2.5 before trusting any
-single-suite validation**: this batch pushed a commit that left one test failing in a different
-executable from the one it was validated against. See the first handoff below.*
+harness-designated branch**. **Pushed immediately after every commit**, per `CLAUDE.md` rule 13 —
+**five commits, five pushes**, all normal fast-forwards, all **verified present on the remote**:
+`75a7129`, `bf5a50e`, `52512a8`, `a53efe1`, `8c81961`, **and this handoff commit itself**, whose
+hash cannot be written from inside it. No merge, rebase, tag, force-push, PR, publication or history
+rewrite; every commit is unsigned (`git -c commit.gpgsign=false`) — this environment has no usable
+private signing key. This batch **closed the Core `ArgumentOutOfRangeException` guard-domain slice**
+(#2253 review, #2254), **completed the `AppContext` named-data design** (#2255 approval, #2256
+compatible), **closed the `Property<T>` empty-getter defect** (#2247), and **opened #2257** after a
+recorded three-way scope check. **Two findings and one post-audit defect: SR-AUD-091 remediated,
+SR-AUD-102 design-completed and still `confirmed`, #2247 closed.** Audit **197 remediated / 111
+confirmed / 56 confirmed (design-complete) / 364 total**, recounted **by finding identifier**; **no
+`SR-AUD-*` identifier created — numbering frozen at 364.** `modules/core` open **49 → 48**. Gate
+**16,801 tests across 38 executables: 16,793 passing, 2 skipped, 6 failing** for the same two
+inherited causes — **exactly +45 on the inherited 16,756, which is precisely this batch's own new
+tests (26 guard-domain, 10 AppContext, 9 Property), so no regression anywhere.** SR-AUD-091's
+compile domain went **99 OK / 99 FAIL → 135 OK / 63 FAIL** over 22 types × 9 guards, with **zero**
+previously accepted pairs regressed and **zero** remaining rejections reported inside libstdc++.
+Graph **41 / 92**, seams **3 / 20**, negative fixtures **14 / 120 → 15 / 126** (141 invocations,
+peak 2 jobs), catalogue current. **Selective components WAS rerun** — production header code
+changed in `Core.Base` — and **passed all ten components**; §6 records the PID discipline.
+**Doxygen, `ccache` and the `/rv` reference tree are all absent** and were not installed. **No CCF
+minted, extended or closed: CCF-011 stays closed (its policy was reused for #2247 as an adjacency,
+not a membership), CCF-019 stays open and unextended (recorded as an adjacency for the `AppContext`
+`void*` store), CCF-021/#2131 and CCF-022/#2109 stay unminted.** #2246, #2250, #2215, #2228, #2238,
+#1773, #1962 and every other inherited blocked/`needs_user` ticket are exactly as inherited.
+**The full gate was run BEFORE each push, not after** — the §2.5 lesson from the previous handoff,
+which mattered here because `ArgumentOutOfRangeException.hpp` is included by **404** translation
+units. **The `modules/timers` and `modules/threading` runner-ups remain STALE.**
+See the first handoff below.*
+
+---
+
+## Batch record — the Core `ArgumentOutOfRangeException` guard domain, the `AppContext` named-data design and the `Property` empty getter (#2253–#2257, #2247)
+
+**Two findings and one post-audit defect. One remediated, one design-completed, one closed.**
+One approval ticket and one review ticket opened.
+
+### 1. Starting state, verified
+
+Branch `claude/remediation-batch-1804-namespace-b1yjh5`, HEAD `b04dcca`, working tree clean, HEAD
+present on `origin` (0 ahead / 0 behind). Audit recounted **by finding identifier**, never by column
+position: **364 unique, contiguous 001–364, no duplicates**, decomposing **196 remediated / 113
+confirmed / 55 confirmed (design-complete)**, with **49** `modules/core` findings open — exactly the
+inherited triple. No ticket was `doing`. Every inherited blocked/deferred ticket was verified in
+`plan.sqlite3` before starting: **#2246**, **#2250**, **#2215**, **#2238**, **#2170**, **#2172**,
+**#2185** and **#2128** `needs_user`; **#2109** and **#2131** `needs_user` (CCF-021 and CCF-022
+still unminted); **#1773** and **#1962** `blocked`; **#2247** `todo`. No user decision had appeared
+for any of them, and none was touched except #2247, which this batch was asked to process.
+
+### 2. `SR-AUD-091` — the guard-template compile domain (#2253 review, #2254)
+
+`docs/CoreArgumentOutOfRangeGuardDomainPlan.md`. The inherited top-ranked work, and the design
+question §2.7 left open — **diagnose versus widen** — was settled as **both**, on a compatibility
+argument rather than a preference.
+
+**The measurement is the ticket.** `build-probe/2253_probe1_matrix.cpp` compiles **one
+`(type, guard)` pair per translation unit**, so no broken pair can mask another: 22 candidate types
+× 9 guards = 198 compilations. **99 OK / 99 FAIL before; 135 OK / 63 FAIL after; 0 of the 99
+previously accepted pairs regressed; 0 of the 63 remaining rejections reported inside libstdc++.**
+
+**Why both routes.** Diagnose alone would have *frozen* an accidental arithmetic-only domain — the
+audit's own reference note records that .NET leaves `ThrowIfEqual<T>` unconstrained — and left
+`ThrowIfEqual(std::string("a"), std::string("a"), "p")` permanently rejected. Widen alone leaves the
+boundary undiagnosed. So the guards now share one private ordered `if constexpr` formatter **whose
+first branch is the same `std::to_string(value)` call**, followed by `ToString()`, enum-underlying,
+`string_view`-convertible, `string`-convertible and ADL `to_string` branches, plus a
+`static_assert` per guard for the one comparison expression it evaluates. Branch 1's position is
+what makes the widening free: every previously accepted type takes the identical path and emits
+byte-identical text, and all **121** first-party call sites instantiate an arithmetic `T`.
+
+**Four premise corrections.**
+
+1. **The rejected surface is far wider than the finding's synthetic `OrderedOnly` reproducer**, which
+   reads as an edge case: `enum class`, `std::string`, `std::string_view` and every pointer type were
+   also rejected.
+2. **14 of the 99 failures are not this defect.** `EqualityOnly` on the six ordering guards and
+   `InequalityOnly` on the eight guards needing `==`/`<`/`<=`/`>`/`>=` fail on an operator the type
+   genuinely lacks — correct behaviour a repair must *preserve*. Separating the two causes is what
+   turned the report's "no concept, `static_assert`, or diagnostic" remark into a second declared
+   contract.
+3. **The port already carried an invisible split**: an *unscoped* enumeration compiled and printed
+   its integer, because integral promotion selects `std::to_string(int)`; a *scoped* one did not
+   compile at all.
+4. **A second undeclared requirement the finding never mentions**: the three unary guards compare
+   against `T{}`, so all three require `T` to be default-constructible.
+
+**Two narrowings kept, both now declared.** Raw pointers are excluded — a `std::string_view` from a
+null pointer is undefined behaviour, and `ThrowIfEqual("a", "b", "p")` deduces `const char*` by
+array-to-pointer decay and would compare **addresses**. And the finding's own `OrderedOnly` is
+**still rejected** — by a sentence naming the six supported shapes and the ADL extension point,
+instead of by nine `std::to_string` candidates in `<bits/basic_string.h>`. That is the finding's
+demand met, not evaded.
+
+**§2.7's `operator<<` branch was rejected on a measurement**, and the correction is recorded rather
+than the sketch quietly dropped: supporting it forces `<sstream>` into a header **404** translation
+units depend on, at **+2,819 preprocessed lines (+4.6 %)** each, against **+2** for
+`<string_view>`/`<type_traits>` — both of which already arrive transitively via `<string>`. The ADL
+branch reaches the same types for **+0**.
+
+**Recorded, not repaired**: all nine guards take `T` **by value**, so a non-copyable comparable type
+can never bind, whatever its rendering. That is a public signature question (`const T&`), outside
+SR-AUD-091's premise, and is documented in the header.
+
+### 3. `SR-AUD-102` — `AppContext` named data (#2255 approval, #2256 compatible)
+
+`docs/CoreAppContextNamedDataDesign.md`. **Design-first by instruction, and the approval boundary is
+real in both halves.** Both premises reproduce **exactly as filed** and **nothing needed
+correcting** — worth recording, because each of the five preceding Core units corrected something.
+
+Three routes priced, none chosen by default: **(A)** type the data store — the only faithful route,
+but a **public signature change on four members across two classes**, because **#2249** made
+`AppDomain::SetData`/`GetData` forwarders eleven days ago, and it retires three pins; **(B)**
+`reinterpret_cast` the `void*` for the two special keys — **rejected as undefined behaviour by
+construction**, since a `void*` carries no type, so the assumption is unfalsifiable *at the point of
+use* and the correct and memory-corrupting cases are the same instruction sequence; **(C)** a
+separate typed string channel — rejected as inventing public API .NET does not have. A **fourth**
+obstacle applies to the `BaseDirectory` half alone and **route A does not solve it**: the property
+returns `const std::string&`, so an override sourced from the store would have no liveness boundary
+— the **CCF-019** shape, recorded as an adjacency and **not extended**.
+
+**#2255 (`needs_user`)** carries one decision with three priced options. **#2256** landed the
+compatible remainder — the borrowed-pointer ownership, the replacement rule, both divergences and
+the reflection deviation are now documented, and **+10 tests** pin the current contract, including
+**both divergences as *observable*** rather than merely asserted in a doc-comment. **No behaviour
+changed**, so SR-AUD-102 stays **`confirmed`**, now with the `design-complete` qualifier.
+**#2250 is unreachable from here and untouched.**
+
+### 4. `#2247` — the `Property<T>` empty getter, closed
+
+CCF-011's policy applied **unchanged**, so **no family was reopened, extended, renumbered or
+minted**. The constructor now throws `System::ArgumentNullException("customGetter")` before anything
+is done with either callable, instead of letting `std::bad_function_call` — a *native* exception
+`catch (const System::Exception&)` does not see — escape at the first read.
+
+**Premise correction to #2247's own acceptance criterion**, which says "ReadOnlyProperty is
+unaffected". `ReadOnlyProperty` **does** exist — the file is `Experimental/ReadonlyProperty.hpp`,
+spelling the second word with a lowercase `o`, which is why searching for the class name misses it —
+and it is **not** unaffected: it forwards its getter here and inherits the rejection. That is
+correct and is pinned. What is genuinely unaffected is the read-only *spelling*, an empty **setter**.
+**#2246 was not absorbed**; the vestigial `cachedValue` and its `sizeof` pin are untouched.
+
+### 5. What the mutations taught
+
+Eight mutations, each applied to production source, rebuilt and re-run, all caught, controls green.
+Three are worth more than their verdict:
+
+- **Dropping the pointer exclusion** was caught by negative-fixture site 2 (`const char*`) and
+  **correctly not** by site 1 (`int*`), which is not `string_view`-convertible and still reaches the
+  rendering assertion. The two sites test different things, which is why both exist.
+- **Deleting one comparison assertion** left the site still failing to compile — on
+  `no match for 'operator<'` instead of the declared sentence. A whole-file "does this fixture
+  fail?" check would have reported a **false pass**: the #1801 lesson, reproduced on new ground.
+- **Over-reaching to reject an empty setter** failed **11** tests, so the read-only spelling is
+  genuinely protected rather than merely documented.
+
+**Most branch-order permutations of the formatter are not observable, and saying so is more useful
+than claiming otherwise**: an arithmetic type has no `ToString()`, is not `string_view`-convertible
+and finds nothing by ADL, so branch 1 is the only branch it can match wherever it sits. The one
+observable ordering is enumeration-versus-ADL, and only for a scoped enumeration that *also* has a
+user `to_string` — the fixture constructs exactly that shape.
+
+### 6. Validation
+
+| Measure | Value |
+|---|---|
+| Executables | 38 |
+| Tests run | **16,801** (16,756 → 16,782 after #2254 → 16,801; **+45, exactly this batch's own tests**) |
+| Passing | 16,793 |
+| Skipped | 2 |
+| Failing | **6 — the inherited set exactly** |
+| Build | `cmake --build build --parallel 2`, **0 errors, 0 warnings** |
+
+The six are **5 × `PingTests`** (#1962, no unprivileged ICMP socket here) and **1 ×
+`SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`** (no usable IPv6 in this
+container). None was disabled, weakened, hidden or recategorised, and **the gate is not green.**
+Both totals came from running **all 38 executables individually** (`build-tmp/full_gate.log`,
+`full_gate2.log`), because `run_component_tests.sh` and `local_ci_check.sh` both stop at the first
+failing executable.
+
+**The full gate was run BEFORE each push**, not after — the §2.5 lesson from the previous handoff,
+which mattered more than usual here: `ArgumentOutOfRangeException.hpp` is included by **404**
+translation units.
+
+Validators, all at ≤2 jobs: boundaries **OK (41 modules, 92 edges)**, self-test OK; catalogue
+**current**; seam ODR **OK (3 seams, 20 specialisations)**, self-test OK; negative consumer fixtures
+**OK — 15 files, 126 sites** (was 14/120), every site rejected, 141 invocations, peak 2 jobs, 62.9 s;
+fixture-checker self-test OK; `db_consistency_check` OK; `git diff --check` clean. The three tracked
+`__pycache__` files are untouched — every Python invocation used `PYTHONDONTWRITEBYTECODE=1`.
+
+**Selective components WAS rerun this time**, unlike the previous two batches, because production
+header code changed in `Core.Base`. **Result: `==> Selective component checks passed`** — all ten components isolated, configured and built from scratch in a fresh matrix root under the repository-local `TMPDIR`, at `SHARP_RUNTIME_BUILD_JOBS=2`. `Core.Base` **5,792**, `Collections.Blocking` 8, `Text.Json` 293, `Net.Http.Headers` 423, `Net.WebSockets` 83, `IO.Compression` 101, `IO.IsolatedStorage` 58, `Xml.Linq` 283 tests passed in isolation; every isolated consumer check passed, including the **widened `Core.Base` positive fixture**, which is *executed*, not merely compiled; and all three forbidden fixtures were still rejected. **Exactly one run**, started with `$!`, verified with `ps -p`, waited on by that exact PID and never by `pgrep -f`; `cc1plus` was sampled repeatedly and never exceeded **2**.
+
+**Sanitizers were not run, and that is a decision.** SR-AUD-091 is a *translation* defect: the
+affected programs produce no binary, so ASan/UBSan/LSan/TSan cannot discriminate it, and the compile
+matrix plus the per-site negative fixture are the primary evidence. #2256 changes no executable
+statement, and #2247 replaces an uncatchable later failure with a defined earlier throw.
+
+### 7. Rebuild scope, actually measured
+
+`build/` was **reused, never cleaned or reconfigured**. The `ArgumentOutOfRangeException.hpp` change
+dirtied **404** translation units and took **≈13 minutes** of wall clock at `--parallel 2` across two
+invocations (the first hit a 10-minute harness timeout after building most of the library; the
+second finished the remaining 83 targets in **163 s**). Mutation rebuilds were scoped to a single
+target — `SharpRuntimeTests_Core_Base` (120 steps) or `SharpRuntimeIntegrationTests` (3 steps) —
+rather than the whole tree, and the two compile-domain mutations needed **no build tree at all**,
+because the negative-fixture checker compiles each site with `-fsyntax-only`. That is what kept a
+mutation matrix affordable for a header in this position.
+
+### 8. Next work, ranked
+
+1. **`SR-AUD-011`** (`Version.hpp`) — **#2257 is already open** with the scope check recorded.
+   `Version(1, 2).ToString(3)` emits `"1.2.-1"`, the `Build` sentinel, because `ToString(fieldCount)`
+   validates only the interval 0–4. Chosen over the other two singletons on measured grounds: medium
+   severity, the .NET rule is stated in the audit report so no `/rv` access is needed for the
+   premise, **only 14** translation units depend on the header, and — measured — **no existing test
+   pins the defective output**, because `VersionTests` only calls `ToString(N)` on fully specified
+   four-component versions. Narrowing an argument domain to match .NET is established as compatible
+   remediation here by #2251 and #2236.
+2. **`SR-AUD-053`** (`Array.hpp`) — real but **low**: `MaxLengthProperty` returns `INT32_MAX` where
+   .NET documents `0x7FFFFFC7`. One constant; better batched than taken alone.
+3. **`SR-AUD-092` / `SR-AUD-098` / `SR-AUD-101`** — the rest of the exception-shape cluster.
+   Confirmed again this batch to be three different files and three different root causes; 092 and
+   098 change emitted diagnostic text that green tests pin, and 101 is additive public API. Each
+   needs its own compatibility call.
+
+**Do not** reach for **`SR-AUD-063`** (`Tuple.hpp`) without approval: making `TupleN`'s public
+mutable `ItemN` fields private with getters is a public source break for every `t.Item1 = x` and is
+adjacent to the public-representation family this repository has declined four times. **Do not**
+reach for the public-representation Core family, `modules/timers`, `modules/threading`, **#2228**, or
+any `needs_user` ticket — none of their states changed.
+
+**The `modules/timers` and `modules/threading` runner-ups remain STALE.**
 
 ---
 
