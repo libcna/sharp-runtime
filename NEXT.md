@@ -4,30 +4,235 @@
 # NEXT.md
 
 *Last verified: 2026-08-10. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
-harness-designated branch**. **Pushed immediately after each commit**, per `CLAUDE.md` rule 13 — four
-commits, four pushes, all normal fast-forwards, all **verified present on the remote** (`5df587e`,
-`224852a`, `6f74c1a`, `742ad7c`). No merge, rebase, tag, force-push, PR, publication or history
-rewrite; every commit is unsigned (`git -c commit.gpgsign=false`) — this environment has no usable
-private signing key. This batch **reviewed and closed two bounded Core units**: the **`Lazy<T>`
-thread-safety-mode boundary family** (#2235 review, #2236, #2237) and the **`Environment` compatible
-slice** (#2239 review, #2240, #2241). **Four findings, four remediated, none blocked** — but read
-§2.2 before quoting that: **SR-AUD-066 is closed by its own finding's second stated option
-(document and deliberately expose), so its behavioural divergence is RETAINED BY DESIGN** and the
-behaviour change is deferred to **#2238 (`needs_user`)**. Two further tickets opened: **#2238**
-design/approval and **#2242** deferred verification. Audit **193 remediated / 116 confirmed / 55
-confirmed (design-complete) / 364 total**, recounted **by finding identifier**; **no `SR-AUD-*`
-identifier created — numbering frozen at 364.** `modules/core` open **56 → 52**. Gate **16,730 tests
-across 38 executables: 16,722 passing, 2 skipped, 6 failing** for the same two measured causes —
-**exactly +22 on the inherited 16,708, which is precisely this batch's own new tests (13 Lazy, 9
-Environment), so no regression anywhere.** Graph **41 / 92**, seams **3 / 20**, negative fixtures
-**14 / 120** — all unchanged, so **selective-components was NOT rerun** and §2.5 says why.
-**Doxygen, `ccache` and the `/rv` reference tree are all absent** and were not installed. **No CCF
-minted or extended: CCF-011 was considered for SR-AUD-064 and rejected as adjacency, CCF-021 for
-SR-AUD-108 and likewise rejected; CCF-019 stays open; CCF-021/#2131 and CCF-022/#2109 stay
-unminted.** #2228, #2234, #2215, #1773, #1962 and every other inherited blocked/deferred ticket are
-exactly as inherited. **The `modules/timers` and `modules/threading` runner-ups remain STALE** for
-the reasons the previous handoff recorded; nothing this batch measured changes them. See the first
-handoff below.*
+harness-designated branch**. **Pushed immediately after each commit**, per `CLAUDE.md` rule 13 —
+**six commits, six pushes**, all normal fast-forwards, all **verified present on the remote**:
+`1f3fc03`, `ddbfadc`, `5be561b`, `be2f906`, `f7681f0`, **and this handoff commit itself**, whose
+hash cannot be written from inside it — that gap is exactly what produced the previous handoff's
+"four commits / five hashes" discrepancy, so it is stated here rather than left to be re-derived.
+No merge, rebase, tag, force-push, PR,
+publication or history rewrite; every commit is unsigned (`git -c commit.gpgsign=false`) — this
+environment has no usable private signing key. This batch **reviewed and closed two bounded Core
+slices**: the **`Experimental::Property` slice** (#2243 review, #2244, #2245) and the **`AppDomain`
+compatible slice** (#2248 review, #2249, #2251). **Four findings: three remediated
+(SR-AUD-179, SR-AUD-181, SR-AUD-104), one half-remediated (SR-AUD-103, data half done, switch half
+ticketed) and therefore still `confirmed`** — the convention SR-AUD-259 already uses. Five further
+tickets opened: **#2246** (approval, `Property<T>` layout), **#2247** (post-audit adjacency, empty
+getter), **#2250** (approval, `IsCompatibilitySwitchSet` nullable + `noexcept` drop), **#2252**
+(deferred verification, `SR.Argument_StringZeroLength` text). Audit **196 remediated / 113 confirmed
+/ 55 confirmed (design-complete) / 364 total**, recounted **by finding identifier**; **no `SR-AUD-*`
+identifier created — numbering frozen at 364.** `modules/core` open **52 → 49**. Gate **16,756 tests
+across 38 executables: 16,748 passing, 2 skipped, 6 failing** for the same two inherited causes —
+**exactly +26 on the inherited 16,730, which is precisely this batch's own new tests (12 Property,
+14 AppDomain), so no regression anywhere.** Graph **41 / 92**, seams **3 / 20**, negative fixtures
+**14 / 120** (134 invocations, peak 2 jobs), catalogue current — all unchanged, so
+**selective-components was NOT rerun** and §2.6 says why. **Doxygen, `ccache` and the `/rv`
+reference tree are all absent** and were not installed. **No CCF minted or extended: CCF-011 was
+considered for `Property`'s empty getter and recorded as adjacency (#2247), CCF-005 for SR-AUD-104
+and CCF-019 for the `void*` data store likewise; CCF-019 stays open; CCF-021/#2131 and
+CCF-022/#2109 stay unminted.** #2228, #2234, #2238, #2242, #2215, #1773, #1962 and every other
+inherited blocked/deferred ticket are exactly as inherited. **`SR-AUD-091` was assessed and
+deliberately NOT started** — §2.7 gives the reason and the design work already done for it. **The
+`modules/timers` and `modules/threading` runner-ups remain STALE.** **Read §2.5 before trusting any
+single-suite validation**: this batch pushed a commit that left one test failing in a different
+executable from the one it was validated against. See the first handoff below.*
+
+---
+
+## Batch record — the Core `Experimental::Property` and `AppDomain` slices, closed (#2243–#2252)
+
+**Four findings. Three remediated, one half-remediated with its remainder ticketed. None blocked.**
+Two approval tickets, one post-audit defect and one deferred verification opened.
+
+### 1. Starting state, verified
+
+Branch `claude/remediation-batch-1804-namespace-b1yjh5`, HEAD `cd3c5d6`, working tree clean, HEAD
+present on `origin` (0 ahead / 0 behind). **The inherited "four commits / five hashes" discrepancy
+is resolved from git**: `git rev-list --count 9857041..HEAD` is **5**, and the fifth is `cd3c5d6`
+itself — the handoff commit, which could not name its own hash while writing the list. The previous
+report's prose was the error; the hash list was right.
+
+Audit recounted **by finding identifier**, never by column position (five rows —
+SR-AUD-029/033/249/286/307 — carry embedded `|` characters and defeat a fixed-column parser):
+**364 unique, contiguous 001–364, no duplicates**, decomposing **193 remediated / 116 confirmed /
+55 confirmed (design-complete)**, with **52** `modules/core` findings open. Every inherited
+blocked/deferred ticket was verified in `plan.sqlite3` before starting: **#2228 `blocked`**,
+**#2234 `todo`**, **#2238 `needs_user`**, **#2242 `todo`**, **#2215 `needs_user`**, **#1773** and
+**#1962 `blocked`**, **#2109** and **#2131 `needs_user`**. No user decision had appeared for any of
+them, and none was touched.
+
+### 2. What this batch did
+
+#### 2.1 `Experimental::Property` — SR-AUD-179 and SR-AUD-181 (#2243)
+
+`docs/CoreExperimentalPropertySlicePlan.md`. Before: `build-probe/2243_probe1_before.log`; after:
+`2243_probe3_after.log`. Both findings reproduce exactly as filed, including SR-AUD-179's printed
+evidence `stored=new assignment_result=` verbatim.
+
+**They are not a cause family** — one is value semantics in the class, the other a preprocessor
+name — so they took independent implementation tickets. **Three premise sharpenings, measured:**
+for a scalar `T` the returned value was **indeterminate**, not merely stale (two runs of the same
+binary printed `535613888` and `-455742320`); the returned `T&` also **silently swallowed writes**;
+and a *synchronised* cache would not have been a repair, because a clamping setter would make it
+report a value the property does not hold. **#2244** makes `operator=` return `T` by value from the
+getter — the `std::atomic` answer. `T& r = (p = v);` no longer compiles, which *was* the defect;
+there is no first-party use of `operator=` on this type. **#2245** re-spells the two `DEF_PROP_*`
+macros, and the durable half is that `MacroWidget` now compiles all four documented pairs in the
+test build.
+
+**The layout deliberately did not move.** Deleting the vestigial `cachedValue` would take
+`sizeof(Property<int>)` 72 → 64 — an object-layout change, which needs approval (#1788/#1789 are
+the precedent). It is retained, `[[maybe_unused]]`, documented (including the `T`
+default-constructible requirement it alone imposes) and pinned by a test that names itself as the
+one #2246 must update.
+
+#### 2.2 `AppDomain` — SR-AUD-103 and SR-AUD-104 (#2248)
+
+`docs/CoreAppDomainCompatibleSlicePlan.md`. Before `build-probe/2248_probe1_before.log`: 14 rows,
+8 OK / 6 BAD, including SR-AUD-104's own `nul_policy_length=2`. After
+(`2248_probe2_after.log`): **13 OK / 1 BAD**, the single remaining `BAD` being the half #2250
+carries, still failing on purpose.
+
+**SR-AUD-103 is not internally one thing.** Its **data half** (#2249) is ordinary forwarding:
+`SetData`/`GetData` are now the `AppContext` calls .NET implements them as, moved out of line
+because `AppContext.hpp` includes `AppDomain.hpp` and the include cannot run both ways — an
+additive ABI change of two symbols. Its **switch half** (#2250, `needs_user`) cannot be forwarded
+compatibly and is left untouched, documented and pinned: a `bool` cannot distinguish
+"explicitly false" from "unset", and `AppContext::TryGetSwitch("")` **throws** (measured) besides
+taking a mutex, so forwarding from a `noexcept` member would be `std::terminate`. The `noexcept`
+drop is approval-bound on the **#2215** precedent. A third route — keep the signature, pre-check
+empty, return `false` — was considered and rejected as inventing policy.
+
+**SR-AUD-104** (#2251) rejects an empty name and a leading-NUL name with .NET's parameter name and
+each branch's own message, and **deliberately does not over-reach**: .NET checks `assemblyName[0]`
+only, so `"a\0b"` is still returned unchanged. **#2252** carries the one thing this container
+cannot verify — the exact `SR.Argument_StringZeroLength` text, `/rv` being absent — rather than
+claiming a parity it cannot show.
+
+### 2.3 A mutation that SURVIVED, and what it taught
+
+Mutation M2 on `ApplyPolicy` — delete the empty-string guard — **passed every test** in the first
+matrix. The reason is a property of `std::string`, not of the repair: for a `const std::string&`,
+`assemblyName[0]` with `size() == 0` is **well-defined** and yields the null character, so the
+leading-NUL branch alone already threw for an empty name — same exception type, same parameter
+name, different message. Two message assertions were added; M2 now fails exactly one test. **The
+matrix was wrong, not the mutation.** This is why a mutation that survives must be diagnosed rather
+than reclassified as equivalent.
+
+### 2.4 Two audit premises corrected against the port, and one against the report
+
+- SR-AUD-179 under-states its own severity (indeterminate, not stale; and writes are lost too).
+- SR-AUD-181 is *bounded* more tightly than filed: the namespace is the whole defect, verified by
+  recompiling the identical source with only the two type names re-spelled.
+- **The `AppDomain.hpp` report is simply wrong on coverage.** It says "no dedicated `AppDomain`
+  fixture exists" and "no test invokes any of these public `AppDomain` members".
+  `tests/integration/Task42Tests.cpp` already had a 16-test `AppDomainTests` suite, and its
+  `SetGetData_Stubs_NoThrow` asserted `GetData(...) == nullptr` immediately after a `SetData` — it
+  **pinned the stub the finding is about**. The auditor's recorded validation filter
+  (`AppContextExtraTests.*:AppDomainSetupTests.*`) does not select it.
+
+### 2.5 The process failure this batch made, recorded rather than folded away
+
+Commit **`be2f906`** was validated against `SharpRuntimeTests_Core_Base`, the module that owns
+`AppDomain.hpp`, which was green — and **pushed with one test failing in the integration
+executable**, the stale pin above. It surfaced only in the full 38-executable run afterwards, and
+`f7681f0` repairs it (the test is inverted to `SetGetData_ForwardsToAppContext`, not deleted; the
+module-owned fixture is renamed `AppDomainDataPolicyTests` so the two suites do not collide).
+
+**The rule this establishes: the owning module's suite is not a sufficient gate for a change to a
+header other modules include.** `AppDomain.hpp` is included by `AppContext.hpp` and by
+`tests/integration/Task42Tests.cpp`; `Property.hpp` happened to have only one consumer, which is
+why the first slice did not hit this. Run the full gate before pushing a header change, not after.
+
+### 2.6 Why selective-components was NOT rerun
+
+The evidence-based rule from the previous batch applies unchanged: the module graph is still
+**41 modules / 92 edges**, the generated catalogue still reports current, the seam inventory is
+still **3 seams / 20 specialisations**, and the negative-fixture inventory is still **14 files /
+120 sites**. No `PUBLIC_DEPENDENCIES`, `PRIVATE_DEPENDENCIES` or `TEST_DEPENDENCIES` entry changed,
+no module was added, and no CMake file was edited — the one new test source
+(`modules/core/tests/System/AppDomainTests.cpp`) is picked up by the module's existing
+`CONFIGURE_DEPENDS` glob into a target it already owns. Nothing a selective run measures could have
+moved.
+
+### 2.7 `SR-AUD-091` — assessed, designed, and deliberately not started
+
+It **is** isolated from SR-AUD-092/098/101 (those are `Exception`'s default message text,
+`AggregateException`'s message composition, and absent `IOException` overloads — three different
+files and three different root causes). It is unclaimed. The design question was worked out and is
+recorded here so the next session does not redo it:
+
+- The defect is real and wider than the finding's `OrderedOnly` reproducer:
+  `ThrowIfEqual(std::string("a"), std::string("a"), "p")` **does not compile today**, because every
+  guard formats through `std::to_string`, which has no `std::string` overload. Comparing two
+  strings is an obvious call.
+- The finding offers two routes: *declare and diagnose* the formatting requirement, or *format
+  through a separate policy*. The strongest repair is both at once — a private
+  `if constexpr` formatter that accepts `std::to_string`-able types, string-convertible types,
+  enums (via the underlying value) and `operator<<`-insertable types, and `static_assert`s with a
+  clear message otherwise. That widens the API strictly (previously ill-formed code becomes
+  well-formed; nothing that compiled changes) with no signature, layout or `noexcept` change.
+
+**Why it was not started**: `ArgumentOutOfRangeException.hpp` is included nearly everywhere, so any
+edit to it forces a near-whole-repository rebuild — which `CLAUDE.md`'s SSD-saving policy says to
+avoid unless justified — and the "diagnose vs widen, and with what text for an unformattable type"
+choice deserves its own review rather than being appended to a batch that had already closed two
+slices. It is the **top-ranked next work**, not a blocked item.
+
+### 3. Validation
+
+**The full total was obtained by running all 38 executables individually**, because both
+`scripts/run_component_tests.sh` and `scripts/local_ci_check.sh` **stop at the first failing
+executable** and cannot produce it while the six inherited failures remain. Per-executable results
+are in `build-tmp/full_gate.log`.
+
+| Measure | Value |
+|---|---|
+| Executables | 38 |
+| Tests run | **16,756** (+26 on 16,730; 12 Property, 14 AppDomain) |
+| Passing | 16,748 |
+| Skipped | 2 (`CultureInvariantFormattingTests` 1, `Net_NetworkInformation` 1) |
+| Failing | **6 — the inherited set exactly** |
+| Build | `cmake --build build --parallel 2`, **0 errors, 0 warnings** |
+
+The six failures are **5 × `PingTests`** (tracked by **#1962** — the unprivileged `SOCK_DGRAM` ICMP
+socket fails wherever `ping_group_range` is closed) and **1 × `SocketTests.Connect_ByHostname_
+NoMatchingAddressFamily_Throws`** (this container has no usable IPv6). Neither was disabled,
+weakened, hidden or recategorised, and **the gate is not green.**
+
+Validators, all run with at most two jobs: module boundaries **OK (41 modules, 92 edges)**;
+validator self-test **7/7**; generated catalogue **current**; seam ODR **OK (3 seams, 20
+specialisations)**; seam self-test **15/15**; negative consumer fixtures **OK (14 files, 120 sites,
+every site rejected, 134 compiler invocations, peak 2 jobs, 51.1 s)**; fixture-checker self-test
+**45/45**. `git diff --check` clean. The three tracked `__pycache__` files are byte-identical —
+every Python invocation used `PYTHONDONTWRITEBYTECODE=1`.
+
+**Sanitizers were not run**, deliberately, for either slice: SR-AUD-181 and the `AppDomain`
+findings are translation-failure and wrong-value classes a sanitizer cannot discriminate, and
+SR-AUD-179's indeterminate read lives in a caller-provided automatic object that ASan does not
+model and MSan cannot see through an uninstrumented `std::function` — valgrind memcheck was silent
+while the defect was plainly present, and the run-to-run value variation is the stronger evidence.
+
+### 4. Next work, ranked
+
+1. **`SR-AUD-091`** — `ArgumentOutOfRangeException.hpp`. Isolated, unclaimed, compatible, and the
+   design is already worked out in §2.7. Budget it for the whole-repository rebuild its header
+   position forces.
+2. **`SR-AUD-102`** — `AppContext.hpp`, the sibling of the slice just closed and now the only
+   remaining open finding in that pair of files. Needs a decision about the `void*` data store
+   carrying a string (`APP_CONTEXT_BASE_DIRECTORY`, string-valued switches), so verify the approval
+   boundary before committing to it.
+3. **`#2247`** — the `Property<T>` empty-getter door this batch opened. Small, compatible,
+   CCF-011's established policy applies unchanged, and the file is now well covered.
+4. **`SR-AUD-011`** (`Version.hpp`), **`SR-AUD-053`** (`Array.hpp`), **`SR-AUD-063`** (`Tuple.hpp`)
+   — the remaining `modules/core` singletons that are neither reflection stubs nor
+   public-representation members. Each needs its own scope check first.
+
+**Do not** reach for the public-representation Core family (≈12 findings, 11 needing layout or
+signature approval), `modules/timers`, `modules/threading`, **#2228**, or the mixed exception-shape
+cluster (SR-AUD-092/098/101): every one of those was checked this batch and none of their
+block/claim/approval states has changed.
+
+---
 
 ---
 
