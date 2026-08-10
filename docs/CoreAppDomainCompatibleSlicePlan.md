@@ -255,3 +255,55 @@ discriminate nothing.
 4. No signature, layout or `noexcept` change.
 5. Every deliberately-not-done item carries a ticket: #2250 (approval), #2252
    (deferred verification).
+## 11. Outcome, measured 2026-08-10
+
+`build-probe/2248_probe2_after.log`, the identical probe source recompiled
+against the repaired library: **13 OK / 1 BAD**, down from 8/6. The single
+remaining `BAD` is `103 domain_switch_true` — the half #2250 carries, still
+failing on purpose.
+
+```
+OK   103 domain_reads_context  GetData=ptr
+OK   103 domain_roundtrip_context  AppContext::GetData=ptr
+OK   103 domain_roundtrip_self  AppDomain::GetData=ptr
+BAD  103 domain_switch_true  got false
+OK   104 empty_rejected  threw: The value cannot be an empty string. (Parameter 'assemblyName')
+OK   104 leading_nul_rejected  threw: String cannot be of zero length. (Parameter 'assemblyName')
+OK   104 interior_nul_accepted_unchanged  returned len=3 [a\0b]
+```
+
+`SharpRuntimeTests_Core_Base`: 5,742 → 5,756 tests (5,741 → 5,755 passing, the
+same 1 skipped throughout, 0 failing) — exactly the fourteen added here.
+
+### 11.1 Mutation checks, and the one that first survived
+
+Every mutation was applied to production source, rebuilt with
+`cmake --build build --parallel 2`, and re-run
+(`build-probe/2248_mutations.log`).
+
+- **M1** — `SetData`/`GetData` restored to the stub bodies. **3 tests fail**
+  (matrix rows 1–3). Rows 4–5 correctly survive: `nullptr` for an unknown key and
+  for a stored null value is what a stub also returns, so those rows are controls
+  by construction, not blind spots.
+- **M2** — `ApplyPolicy` drops the empty-string guard. **This mutation SURVIVED
+  the first version of the test matrix**, and the reason is worth recording,
+  because it is a property of `std::string` rather than of the repair: for a
+  `const std::string&`, `assemblyName[0]` with `size() == 0` is **well-defined**
+  and yields the null character, so the *leading-NUL* branch alone already throws
+  for an empty name — same exception type, same parameter name, different
+  message. Two tests were added to assert the **message** of each branch; M2 now
+  fails exactly one test. The matrix was wrong, not the mutation.
+- **M3** — `ApplyPolicy` over-reaches to `find('\0') != npos`, i.e. rejects an
+  interior NUL as the finding's wording could be read to ask. **1 test fails**
+  (row 13). This is the mutation that proves the port stayed as strict as .NET
+  and no stricter.
+
+No mutation was skipped as unsafe, and none is equivalent.
+
+### 11.2 What did not change
+
+`AppContext.hpp` (SR-AUD-102 untouched), the six other `noexcept` members, the
+event stubs, the obsolete path stubs, `sizeof(AppDomain)`, the component graph,
+the component catalogue and the module boundaries. The new test file is a
+`modules/core` test source discovered by the module's existing glob, so no CMake
+file changed either.

@@ -4,6 +4,7 @@
 #pragma once
 #include <functional>
 #include <string>
+#include "System/ArgumentException.hpp"
 #include "System/EventArgs.hpp"
 #include "System/MarshalByRefObject.hpp"
 #include "System/UnhandledExceptionEventHandler.hpp"
@@ -145,11 +146,26 @@ namespace System {
          * assembly name.
          *
          * C++ counterpart of .NET AppDomain.ApplyPolicy(string).
-         * Returns @p assemblyName unchanged (no policy engine in this port).
+         * There is no policy engine in this port, so a valid name is returned
+         * unchanged — but the identity route is applied only to input .NET itself
+         * accepts. .NET rejects a null or empty @p assemblyName, and rejects a name
+         * whose *first* character is NUL (the native identity parser sees a
+         * zero-length string). A NUL anywhere else is accepted and returned
+         * unchanged, which this port reproduces rather than "improving on".
+         *
+         * The null case is unrepresentable here: the parameter is a
+         * @c const std::string&.
+         *
          * @param assemblyName The assembly display name to map.
          * @return @p assemblyName unchanged.
+         * @throws System::ArgumentException if @p assemblyName is empty or begins
+         *         with a NUL character.
          */
         [[nodiscard]] std::string ApplyPolicy(const std::string& assemblyName) const {
+            if (assemblyName.empty())
+                throw System::ArgumentException("The value cannot be an empty string.", "assemblyName");
+            if (assemblyName[0] == '\0')
+                throw System::ArgumentException("String cannot be of zero length.", "assemblyName");
             return assemblyName;
         }
 
@@ -163,28 +179,38 @@ namespace System {
         }
 
         // -----------------------------------------------------------------------
-        // Data store (stubs)
+        // Data store
         // -----------------------------------------------------------------------
 
         /**
          * @brief Assigns a value to the named data element of the current domain.
          *
-         * C++ counterpart of .NET AppDomain.SetData(string, object).
-         * Stub — stores nothing; provided for API compatibility.
+         * C++ counterpart of .NET AppDomain.SetData(string, object), which is a
+         * direct AppContext.SetData forwarding call. This port forwards to
+         * System::AppContext for the same reason: there is one domain, so the
+         * domain's data store and the context's data store are the same store.
+         *
+         * The body is out of line because System/AppContext.hpp includes this
+         * header for BaseDirectory; the include may not run the other way.
+         *
          * @param name The name of the data element.
-         * @param data A pointer to the value (ignored).
+         * @param data A pointer to the value to associate with @p name. The store
+         *             holds the pointer and owns nothing; keeping the pointee alive
+         *             is the caller's responsibility.
          */
-        void SetData(const std::string& /*name*/, void* /*data*/) {}
+        void SetData(const std::string& name, void* data);
 
         /**
          * @brief Gets the value stored in the current domain under the given name.
          *
-         * C++ counterpart of .NET AppDomain.GetData(string).
-         * Stub — always returns nullptr; provided for API compatibility.
+         * C++ counterpart of .NET AppDomain.GetData(string), which is a direct
+         * AppContext.GetData forwarding call.
+         *
          * @param name The name of the data element.
-         * @return Always nullptr in this port.
+         * @return The pointer stored under @p name, or nullptr if @p name has no
+         *         entry.
          */
-        void* GetData(const std::string& /*name*/) { return nullptr; }
+        void* GetData(const std::string& name);
 
         // -----------------------------------------------------------------------
         // Events (stubs)
@@ -254,8 +280,20 @@ namespace System {
          * @brief Determines whether a compatibility switch is set.
          *
          * C++ counterpart of .NET AppDomain.IsCompatibilitySwitchSet(string).
-         * Always returns false in this port (no switch registry).
+         * Always returns false in this port: it does NOT consult the
+         * System::AppContext switch registry that SetData/GetData above now share.
+         *
+         * @warning This is a known, ticketed divergence, not an oversight. .NET
+         * forwards to AppContext.TryGetSwitch and returns @c bool? — and this port
+         * cannot follow it without two changes that need explicit approval, which
+         * ticket #2250 carries: the return type must become nullable to keep
+         * "explicitly false" distinguishable from "unset", and the @c noexcept must
+         * go, because AppContext::TryGetSwitch throws System::ArgumentException for
+         * an empty switch name (and takes a mutex, which can throw too). Forwarding
+         * while still declared @c noexcept would turn both into std::terminate.
+         *
          * @param value The name of the compatibility switch.
+         * @return Always false.
          */
         [[nodiscard]] bool IsCompatibilitySwitchSet(const std::string& /*value*/) const noexcept {
             return false;

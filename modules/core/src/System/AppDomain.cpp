@@ -3,6 +3,10 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/AppDomain.hpp"
 
+// AppContext.hpp includes AppDomain.hpp for BaseDirectory, so the data-store
+// forwarding below has to live here rather than in the header.
+#include "System/AppContext.hpp"
+
 #if defined(_WIN32)
 #  include <windows.h>
 #elif defined(__EMSCRIPTEN__)
@@ -59,6 +63,14 @@ AppDomain::AppDomain() {
         baseDirectory_ = "./";
     }
 #endif
+}
+
+void AppDomain::SetData(const std::string& name, void* data) {
+    AppContext::SetData(name, data);
+}
+
+void* AppDomain::GetData(const std::string& name) {
+    return AppContext::GetData(name);
 }
 
 } // namespace System
