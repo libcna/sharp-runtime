@@ -1,34 +1,67 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-08-10 — branch `claude/remediation-batch-1804-namespace-b1yjh5`, the
-harness-designated branch. **Pushed after every commit**, per `CLAUDE.md` rule 13 — five commits,
-five pushes, all normal fast-forwards. No merge, rebase, tag, force-push, PR, publication, amend or
-history rewrite; all commits unsigned. This batch **reviewed `modules/net-network-information`**
-(#2187) and landed **its whole compatible queue**: #2189 (SR-AUD-254 — the exception wrapper caught
-by base reference and stored `make_exception_ptr(e)`, so every Ping failure arrived as a bare
-`std::exception` with its type, message **and native error code** destroyed), #2188 (SR-AUD-253 —
-**all eight** `SendPingAsync` overloads validated on the worker, so an already-invalid argument got a
-task and an OS thread instead of a throw), #2190 (SR-AUD-255 — three doors invented a default
-`PingOptions` where the fourth already forwarded `nullptr`), #2191 (both async lambdas captured a raw
-`this`; `sizeof(Ping) == 1`, so the capture was removable outright — this does **not** touch the
-blocked stateful family #2066/#2088/#2134) and #2193 (the send core held a raw descriptor across five
-allocating operations, and closed it **before** reading the `errno` it reports).
-**`modules/net-network-information` is closed except for two remainders**, neither of them an audit
-finding: **#2192** (deferred verification — a DNS failure escapes the wrapper as `SocketException`
-while the module's own unresolvable-host `PingException` is practically unreachable; needs `/rv` or a
-managed runtime, current behaviour pinned) and **#2194** (blocked — the receive path matches no
-source/identifier/sequence and discards every `setsockopt` result, untestable while every send fails
-at socket creation). **No `SR-AUD-*` identifier created — numbering frozen at 364**; audit
-**170 remediated / 194 confirmed / 364 total**, of which **54** carry `confirmed (design-complete)`,
-unchanged. Gate **16,406 across 37 executables, 16,398 passing, 2 skipped, 6 failing** for the same
-two measured causes (+23, exactly this batch's additions, so no regression anywhere). Graph
-**41 / 92**, seams **3 / 20**, negative fixtures **13 / 116** — all unchanged. ASan+UBSan+LSan,
-non-recovering UBSan and **TSan** over the production module bodies: exit 0, **zero reports** — and
-what they cannot reach is stated too. **Doxygen, `ccache` and `/rv` all absent.** CCF-019 open;
-CCF-021/#2131 and CCF-022/#2109 unminted; #1773, #1962, #2150, #2152, #2155, #2166, #2170, #2172,
-#2175, #2185 and #2186 unchanged. **Next unit, measured: `modules/xml-linq`** — 4 open, of which 3
-are compatible-actionable and the one high **is** CCF-019, already design-complete and blocked.
-Maximum aggregate compiler parallelism **2 jobs**.*
+harness-designated branch. **Pushed after every commit**, per `CLAUDE.md` rule 13 — four commits,
+four pushes, all normal fast-forwards. No merge, rebase, tag, force-push, PR, publication, amend or
+history rewrite; all commits unsigned. This batch **reviewed `modules/xml-linq`** (#2195) and landed
+**its whole compatible queue**: #2196 (SR-AUD-335 — the direct `SerializeTo` serializers emitted
+`]]>`, `--` and `?>` unprotected and never validated a processing-instruction target, while the
+`WriteTo` door of the *same objects* already did all four; **five doors, not three node kinds**, and
+the three consequences were three different shapes — CDATA lossy, the PI **silently dropping data**,
+the comment corruption entirely **silent**) and #2197 (SR-AUD-334 — namespace URIs discarded on parse
+and on serialization; **not only a fidelity gap: it emitted XML this module's own parser rejects**,
+and an `xmlns:p` declaration built the .NET way degraded into an ordinary attribute). Both are family
+**X-C** — a public door bypassing a validator or resolver the module already ships — exactly as
+`docs/SystemXmlNamespaceReviewPlan.md` §17 predicted **in writing** for this module.
+**SR-AUD-336 was reclassified**: not compatible-actionable. Two structural blockers — per-object
+handler storage grows `sizeof(XObject)` 16 → 24 (**the same growth the user declined on 2026-07-31**
+for #1896) and `std::function` is not equality-comparable so `remove_Changed` cannot name a
+registration — both proved structurally. It split into landed **#2198** (the inert contract is now
+pinned and **discriminating**, mutation-checked against a deliberate half-implementation) and blocked
+**#2199** (approvals XL-1/XL-2). **SR-AUD-333/CCF-019 was re-measured only**, and a twelve-row
+borrowed-edge inventory was contributed to it including one **new** callback-capture edge; no
+ownership policy was chosen. **No `SR-AUD-*` identifier created — numbering frozen at 364**; audit
+**172 remediated / 137 confirmed / 55 confirmed (design-complete) / 364 total**. Gate **16,505 across
+37 executables, 16,497 passing, 2 skipped, 6 failing** for the same two measured causes (**+99,
+exactly this batch's additions, so no regression anywhere**). Graph **41 / 92**, seams **3 / 20**,
+negative fixtures **13 / 116** — all unchanged. ASan+UBSan+LSan and non-recovering UBSan over the
+changed production bodies: exit 0, **zero reports**, each with a deliberate out-of-bounds control in
+the same build proving the instrumentation fires. **Doxygen, `ccache` and `/rv` all absent.**
+CCF-019 open; CCF-021/#2131 and CCF-022/#2109 unminted, and family **X-C** deliberately unminted too;
+#1773, #1962, #2150, #2152, #2155, #2166, #2170, #2172, #2175, #2185, #2186, #2192 and #2194
+unchanged. **Next unit, measured: `modules/io-isolated-storage`** — one high-severity,
+security-relevant finding (SR-AUD-241), 606 lines, and **zero tests today**. Maximum aggregate
+compiler parallelism **2 jobs**.*
+
+## 2026-08-10 — the `modules/xml-linq` review (#2195) and its whole compatible queue (#2196–#2198)
+
+**Selected by recount, not inheritance.** The audit index was re-parsed row by row: **170
+remediated / 140 confirmed / 54 design-complete = 364**, matching the inherited triple exactly. One
+parsing note for the next recount: **SR-AUD-029 carries a seventh column**, so a strict six-column
+regex silently reports 363/169 and drops it.
+
+`modules/xml-linq` was taken ahead of the strong small alternative `io-isolated-storage` for four
+measured reasons, none of them raw severity: it is the only candidate where **two** findings close
+outright in one context; both close a **shared** root cause; its high is already design-complete and
+partially repaired, so the compatible remainder is genuinely separable; and §4.2 measured that its
+"fidelity gap" actually emits text this module's own parser rejects. `io-isolated-storage` is the
+recorded next unit, not a rejected one.
+
+Deliverables: `docs/SystemXmlLinqNamespaceReviewPlan.md` (21 sections, including a completion
+reconciliation) and `docs/Migration-XmlLinqNamespaces.md`.
+
+**Eleven premise corrections**, every one additive and measured — the sharpest being that
+SR-AUD-334 emits malformed XML rather than merely losing namespaces, that SR-AUD-335's writer doors
+were already correct so the defect was confined to the direct serializers, and that SR-AUD-336 is not
+compatible-actionable at all. Module coverage **184 → 283 tests**. **Ten mutations built, executed
+and restored; nine discriminated immediately and the tenth did not**, so a test for it was added and
+the mutation re-run — recorded rather than quietly fixed.
+
+Three post-audit defects were recorded with ordinary ticket numbers and **no `SR-AUD-*` identifier**:
+#2200 (`XDocumentType`'s quoted literals, twin of #2084), #2201 (an embedded NUL crossing the direct
+serializers — the **mirror image** of #2085: the Linq door *emits* the NUL where the writer door
+*truncates* at it) and #2202 (the parser accepts a processing instruction only before every other
+node, measured independent of SR-AUD-335 with the emitted text held constant).
 
 ## 2026-08-10 — the `modules/net-network-information` review (#2187) and its whole compatible queue (#2188–#2193)
 

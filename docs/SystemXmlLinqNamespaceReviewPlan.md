@@ -811,3 +811,61 @@ approval XL-1's or XL-2's premise goes stale.
 `design-complete` qualifier — the selected repair and its blocked implementation ticket (#2199)
 are recorded. The decomposition moves from 172/138/54 to **172 remediated / 137 confirmed /
 55 confirmed (design-complete) = 364**.
+
+---
+
+## 21. Completion reconciliation — `modules/xml-linq`'s compatible queue is exhausted
+
+### 21.1 All four findings, one disposition each, none lost
+
+| Finding | Severity | Status at review start | Status now | Disposition |
+|---|---|---|---|---|
+| **SR-AUD-333** | high | `confirmed (design-complete)` | **`confirmed (design-complete)` — unchanged** | **Blocked, CCF-019.** Re-measured only (§4.4, §7). X15/X17 still ASan-confirmed use-after-free, X21 still the authorised deviation. No ownership policy chosen; nothing implemented; **not** marked remediated. #1899, #1894, #1896 all stay blocked; #1892/#1893 stay `wontfix`. |
+| **SR-AUD-334** | medium | `confirmed` | **`remediated`** | Compatible implementation, #2197. |
+| **SR-AUD-335** | medium | `confirmed` | **`remediated`** | Compatible implementation, #2196. |
+| **SR-AUD-336** | medium | `confirmed` | **`confirmed (design-complete)`** | Split: compatible pin landed (#2198); implementation **blocked** on two approvals (#2199). |
+
+**Audit decomposition: 170/140/54 at review start → 172 remediated / 137 confirmed /
+55 confirmed (design-complete) = 364.** Two findings moved `confirmed → remediated`; one moved
+`confirmed → confirmed (design-complete)`, which is a qualifier, not a status change — it is
+still counted as `confirmed` and still open. **No `SR-AUD-*` identifier was issued; numbering
+stays frozen at 364.**
+
+### 21.2 Is the compatible queue exhausted? Yes — and here is everything left
+
+| Remainder | Kind | Blocked on |
+|---|---|---|
+| #1899 | SR-AUD-333 borrowed views | one approval question (options B/D/E), recommendation recorded |
+| #1894 | SR-AUD-333 negative fixtures | nothing to pin until #1888 or #1899 lands |
+| #1896 | CCF-019 quadratic attach | layout approval **declined** 2026-07-31 |
+| #2199 | SR-AUD-336 implementation | approvals **XL-1** (layout) and **XL-2** (handler identity), plus one CCF-019 lifetime question |
+| #2200 | `XDocumentType` quoted literals | #2084's delimiter/escaping decision |
+| #2201 | NUL through the direct serializers | #2085's `CheckCharacters` decision |
+| #2202 | parser accepts a PI only before everything else | a parser change bounded by a vendored substrate that is never edited |
+
+**Nothing in that list is compatible-and-ready.** Every entry is waiting on a decision, an
+approval, or another module's ticket. There is no further compatible work in `modules/xml-linq`.
+
+### 21.3 What the pins hold, and that they discriminate
+
+Module coverage **184 → 283 tests** (+99: 28 from #2196, 48 from #2197, 23 from #2198). **Ten
+mutations were built, executed and restored.** Nine discriminated on the first attempt; the
+tenth — allowing an attribute name to take the default namespace's prefix — did **not**, so a
+test for it was added and the mutation re-run against it. That is recorded in §20.2 rather than
+quietly fixed. The #2198 pins were checked with the **inverse** mutation: a deliberate
+half-implementation of change notification, which the new suite fails and the pre-existing test
+passes unchanged.
+
+### 21.4 The status of `modules/xml-linq`
+
+**Closed for compatible work; not fully closed.** Two of four findings are remediated, one is
+pinned and design-complete, and one is the CCF-019 high. **It must not be called fully closed
+while CCF-019 is unresolved**, and this review does not.
+
+### 21.5 No family was minted
+
+CCF-021 is **not** minted, and §8 records SR-AUD-335 as a re-verified **non-member** with the
+reason. CCF-022 is **not** minted. Family **X-C** now has three members across two modules and is
+**not** minted either — a namespace review does not mint on its own authority (#2109). #2131's
+notes carry this review's evidence; its status is unchanged.
+

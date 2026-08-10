@@ -4,24 +4,234 @@
 # NEXT.md
 
 *Last verified: 2026-08-10. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
-harness-designated branch**. **Pushed after every commit**, per `CLAUDE.md` rule 13 — five commits,
-five pushes, every one a normal fast-forward. No merge, rebase, tag, force-push, PR, publication,
+harness-designated branch**. **Pushed after every commit**, per `CLAUDE.md` rule 13 — four commits,
+four pushes, every one a normal fast-forward. No merge, rebase, tag, force-push, PR, publication,
 amend or history rewrite; all commits unsigned (`git -c commit.gpgsign=false`) — no usable private
-signing key exists here. This batch **reviewed `modules/net-network-information` and landed its whole
-compatible queue** (#2187 review, #2188–#2191, #2193): **all three findings remediated outright**.
-The namespace is **closed except for two remainders, neither of them an audit finding** — #2192
-(deferred verification) and #2194 (blocked on #1962's testability). Audit **170 remediated /
-194 confirmed / 364 total**, of which **54** carry `confirmed (design-complete)`, unchanged; **no
-`SR-AUD-*` identifier created — numbering frozen at 364.** Gate **16,406 tests across 37
-executables: 16,398 passing, 2 skipped, 6 failing** for the same two measured causes, unchanged and
-not hidden (**+23 on the inherited 16,383 — exactly this batch's additions, so no regression
-anywhere**). Graph **41 / 92**, seams **3 / 20**, negative fixtures **13 / 116** — all three
-unchanged. **ASan+UBSan+LSan, non-recovering UBSan and TSan over the production module bodies: exit
-0, zero reports** — and §9 says what they cannot reach. **Doxygen, `ccache` and the `/rv` reference
+signing key exists here. This batch **reviewed `modules/xml-linq` and landed its whole compatible
+queue** (#2195 review, #2196, #2197, #2198): **two findings remediated outright, one reclassified and
+pinned, one left blocked**. Audit **172 remediated / 137 confirmed / 55 confirmed (design-complete) /
+364 total**; **no `SR-AUD-*` identifier created — numbering frozen at 364.** Gate **16,505 tests
+across 37 executables: 16,497 passing, 2 skipped, 6 failing** for the same two measured causes,
+unchanged and not hidden (**+99 on the inherited 16,406 — exactly this batch's additions, so no
+regression anywhere**). Graph **41 / 92**, seams **3 / 20**, negative fixtures **13 / 116** — all
+three unchanged. **ASan+UBSan+LSan and non-recovering UBSan over the changed production bodies: exit
+0, zero reports**, each with a deliberate out-of-bounds control in the same build proving the
+instrumentation fires; §9 says what they cannot reach. **Doxygen, `ccache` and the `/rv` reference
 tree are all absent** and were not installed. **CCF-019 open; CCF-021/#2131 and CCF-022/#2109 remain
-unminted.** #1773, #1962, #2150, #2152, #2155, #2166, #2170, #2172, #2175, #2185 and #2186 remain
-exactly as inherited. **The measured next unit is `modules/xml-linq`** (§7). See the first handoff
-below.*
+unminted, and family X-C is deliberately unminted too.** #1773, #1962, #2150, #2152, #2155, #2166,
+#2170, #2172, #2175, #2185, #2186, #2192 and #2194 remain exactly as inherited. **The measured next
+unit is `modules/io-isolated-storage`** (§7). See the first handoff below.*
+
+---
+
+## Batch record — `modules/xml-linq` reviewed and its whole compatible queue landed (#2195–#2198)
+
+**Four findings. Two remediated, one reclassified-and-pinned, one blocked.** The namespace is
+**closed for compatible work and deliberately not called fully closed**, because its high-severity
+finding is CCF-019's.
+
+### 1. Work unit 1 — the selection, verified rather than inherited
+
+`audit/AUDIT_FINDINGS_INDEX.md` was re-parsed row by row: **170 remediated / 140 confirmed /
+54 confirmed(design-complete) = 364**, matching the inherited triple and this batch's brief exactly.
+**One parsing trap for the next recount: SR-AUD-029 carries a seventh column**, so a strict
+six-column regex silently reports 363/169 and drops it.
+
+All five inherited claims about `xml-linq` were checked. Four held. **The fifth did not**: the
+handoff said three findings were compatible-actionable; **two are, and the third is not** (§4).
+
+`modules/xml-linq` was taken ahead of `io-isolated-storage` — which carries the single
+highest-consequence *unblocked* defect in the corpus — for four measured reasons, none of them raw
+severity: it is the only candidate where **two** findings close outright in one context; both close a
+**shared** root cause rather than two unrelated ones; its high is already design-complete and
+partially repaired (#1890/#1891/#1895/#1898 landed), so the compatible remainder is genuinely
+separable; and its "fidelity gap" turned out to emit text **this module's own parser rejects**.
+`io-isolated-storage` is the recorded next unit (§7), not a rejected one.
+
+Deliverables: `docs/SystemXmlLinqNamespaceReviewPlan.md` (#2195, `bcdb5aa`) and
+`docs/Migration-XmlLinqNamespaces.md`.
+
+### 2. Eleven premise corrections, every one measured
+
+The four sharpest:
+
+- **SR-AUD-334 does not merely lose namespaces — it emits malformed XML.** Two attributes differing
+  only by namespace serialised as `<r x="1" x="2"/>`, and re-reading that throws
+  `XML_ERROR_PARSING_ATTRIBUTE` from this module's own parser. And an `xmlns:p` declaration built the
+  way .NET builds one (`XAttribute(XNamespace::Xmlns + "p", …)`) degraded into an **ordinary
+  attribute named `p`**, silently unbinding the prefix for a whole subtree.
+- **SR-AUD-335's writer doors were already correct.** `System::Xml::XmlWriter` has always shipped the
+  three self-healing transforms and always validated the PI target. The defect was confined to
+  `SerializeTo`. And it is **five doors, not three node kinds** — the PI *target* is a fifth and it
+  failed differently: emitted through one door, **thrown** by the other.
+- **SR-AUD-336 is not compatible-actionable.** Two structural blockers (§4.3), one of which is the
+  *same* `sizeof(XObject)` 16 → 24 growth the user **declined on 2026-07-31** for #1896.
+- **`getIsNamespaceDeclarationProperty()` was wrong for parsed input, inconsistently** — `0` for
+  `xmlns:p`, `1` for `xmlns`, the latter right only by accident.
+
+Both SR-AUD-334 and SR-AUD-335 are family **X-C** — a public door bypassing a validator or resolver
+the module already ships. `docs/SystemXmlNamespaceReviewPlan.md` §17 predicted that **in writing**
+for this module and named SR-AUD-335; the prediction was right and *under*-stated.
+
+### 3. Ticket outcomes
+
+| Ticket | Outcome | Commit |
+|---|---|---|
+| **#2195** review | **done** | `bcdb5aa` |
+| **#2196** SR-AUD-335 | **done — remediated** | `a061556` |
+| **#2197** SR-AUD-334 | **done — remediated** | `c912042` |
+| **#2198** SR-AUD-336 pin | **done** — contract pinned, no behaviour change | `d20e7a8` |
+| **#2199** SR-AUD-336 implementation | **blocked** — approvals XL-1 and XL-2 | — |
+| **#2200** `XDocumentType` quoted literals | **todo, deferred** on #2084's decision | — |
+| **#2201** NUL through the direct serializers | **todo, deferred** on #2085's decision | — |
+| **#2202** PI parser-position limit | **todo** — a parser change bounded by a vendored substrate | — |
+
+Namespace totals: `xml-linq` **184 → 283** tests, 4 findings, **2 remediated, 1 design-complete,
+1 blocked (CCF-019), 0 unaddressed**.
+
+### 4. The two approvals #2199 needs, stated verbatim
+
+> **XL-1 (object layout).** *"Approve adding one pointer-sized handler-storage field to
+> `System::Xml::Linq::XObject`, growing `sizeof(XObject)` from 16 to 24 and growing every derived
+> node type with it — `XNode` 16→24, `XContainer` 40→48, `XElement` 128→136, `XAttribute` 120→128,
+> `XText`/`XCData`/`XComment` 48→56, `XProcessingInstruction` 80→88, `XDocument` 56→64 — in exchange
+> for working `Changed`/`Changing` notification. The break is binary-only and silent; every consumer
+> must rebuild completely."*
+
+> **XL-2 (handler identity).** `XObjectChangeEventHandler` is `std::function`, which is **not
+> equality-comparable**, so `remove_Changed(handler)` cannot identify which registration to drop.
+> Choose: **(a)** registration returns a token that removal consumes; **(b)** `remove_Changed`
+> removes **all** handlers; or **(c)** it removes the **most recently added** one.
+
+A third question **CCF-019 owns** must be answered with them: **may a registered handler outlive the
+`XObject` it was registered on?** That is edge 10 of this review's borrowed-edge inventory.
+
+**XL-1 is the same growth declined on 2026-07-31.** A different motive neither carries the earlier
+refusal over nor reverses it.
+
+### 5. SR-AUD-333 / CCF-019 — re-measured, untouched, still blocked
+
+X15 (`Extensions::Ancestors`' raw `XElement*`, four overloads) and X17 (`getAttributesProperty()`'s
+reference) are still ASan-confirmed use-after-free; X21's documented move-on-`Add` is unchanged.
+**Neither X15 nor X17 was dereferenced by this batch's probe, deliberately** — their use-after-free is
+already recorded and re-triggering it would only make every other measurement in the run unreadable.
+That is stated as a non-result, not implied away.
+
+This review's contribution to CCF-019 is a **twelve-row borrowed-edge inventory** (plan §7)
+classifying every borrowed edge reachable from the public surface by kind, including **one new
+callback-capture edge** — the discarded event registrations, currently inert. **No ownership policy
+was chosen, nothing was marked remediated, and #1899/#1894/#1896 all stay blocked.**
+
+### 6. CCF-021 — the adjacency answered, the family still unminted
+
+The brief warned SR-AUD-335 is adjacent to candidate CCF-021. **It is a non-member, structurally**:
+what crosses the door is a multi-character **markup delimiter**, not a control character; what it
+terminates is a **document lexical construct** the same process re-reads, not a protocol field a peer
+parses; and **the correct repair is the opposite one** — CCF-021's five members all **reject**, while
+SR-AUD-335's correct behaviour (already shipped in `modules/xml`, matching .NET) is **self-healing**.
+A family whose members need opposite repairs is not one family. The determination was appended to
+**#2131's evidence**; its status is unchanged and **nothing was minted**. Family **X-C** now has three
+members across two modules and is **also** not minted — a namespace review does not mint on its own
+authority (#2109).
+
+### 7. Work unit 3 — the measured next unit
+
+Re-parsed after this batch: **172 remediated / 192 confirmed (137 plain + 55 design-complete) of
+364.** Among units with **no review plan and at most three open findings**:
+
+| Candidate | Open | high | Compatible-ready | Blocked/gated | Security consequence | Reference data | Size today | Tests today |
+|---|---:|---:|---:|---:|---|---|---|---|
+| **`io-isolated-storage`** | **1** | **1** | **1** | 0 | **high — an absolute caller path escapes the store, giving arbitrary filesystem access** | **no** | **606 lines**, 5 headers + 3 sources | **zero** |
+| `diagnostics` | 3 | 2 | ~0 | both highs are the blocked `Process` family (#2029/#2030) | medium | no | large | yes |
+| `collections-object-model` | 1 | 1 | ~0 | likely (stateful raw-`this`) | low | no | tiny | yes |
+| `text-regular-expressions` | 1 | 1 | ~0 | likely (stateful raw-`this`) | low | no | tiny | yes |
+| `threading-tasks` | 1 | 1 | 0 | blocked (#1970) | low | no | medium | yes |
+| `net-sockets` | 2 | 1 | 0 | blocked (#2134 CCF-019, #2138 needs_user) | medium | no | large | yes |
+
+**Selected for next: `modules/io-isolated-storage`.** It is now the only unreviewed unit with a
+high-severity finding that is **neither blocked nor approval-gated**, it needs no reference data, and
+the whole module is 606 lines. **SR-AUD-241 is confirmed with a direct probe already recorded**: the
+public contract promises paths are relative to the store root, but `fullPath()` computes
+`rootDirectory_ / relativePath`, and a rooted right-hand `std::filesystem::path` **discards the
+root** — the audit's probe printed `escaped_exists=1 root_child_exists=0` after
+`CreateDirectory(absolutePath)`. .NET strips leading separators first. One helper feeds file
+existence/open/create/delete, copy/move and every directory operation.
+
+**Two cautions for whoever takes it, both measured here.**
+
+1. **The module has ZERO tests today** (`modules/io-isolated-storage/tests/.gitkeep`). A repair needs
+   a new `SharpRuntimeTests_IO_IsolatedStorage` executable wired into the module's `CMakeLists.txt`,
+   which takes the gate from **37 to 38 executables** and may require regenerating the component
+   catalogue. Budget for that before budgeting for the fix.
+2. **Stripping leading separators is necessary and not sufficient.** It closes the audit's exact
+   probe and leaves `..` traversal, symlinks, canonicalisation and TOCTOU open. Do not settle for a
+   string-prefix check; confine against a canonicalised root, and use repository-local temporary
+   roots only (`build-tmp/`), never `/tmp`.
+
+**No second review was started.** The brief permits one "if context remains strong" and forbids a
+second implementation family. Starting a review of a module with no test infrastructure, whose repair
+is a security-confinement problem needing symlink and TOCTOU analysis, would have produced a
+half-built plan — worse than none, which is the reason the last four batches gave for the same call.
+The measured scoring above is the deliverable instead.
+
+### 8. Gate, tooling and process
+
+- **Gate: 37 executables run individually — 16,505 ran, 16,497 passed, 2 skipped, 6 failed**
+  (**+99** on the inherited 16,406: 28 from #2196, 48 from #2197, 23 from #2198 — **exactly** this
+  batch's additions, so no regression anywhere). The six are the same two measured causes,
+  **re-verified this run**: `ping_group_range = "1 0"` with `SOCK_DGRAM/ICMP` denied (errno 13) and
+  `SOCK_RAW/ICMP` succeeding (5 `PingTests`, the real #1962 gap), and no IPv6 in this container
+  (1 `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`; `/proc/net/if_inet6` absent).
+  Skips are 2: `CultureInvariantFormattingTests` and the deliberately guarded SR-AUD-255 pin.
+  **Nothing disabled, weakened, skipped-to-hide-a-failure or recategorized.** Note the count of
+  `[  SKIPPED ]` *lines* is 6 for 2 skipped tests — gtest prints each one three times across two
+  executables. `scripts/run_component_tests.sh` stops at the first failing executable, which is why
+  the gate is run per-executable.
+- **Build:** 0 errors, 0 warnings, `--parallel 2` throughout. **Maximum aggregate compiler
+  concurrency observed: 2** — `cc1plus` sampled every 5 s across the selective-components and
+  local-CI runs never exceeded 2.
+- **Selective components: passed**, 10 components, **one run**, launched with `$!` captured
+  (`build-probe/2195_selective.pid`), verified with `ps -p`, monitored by exact `cc1plus` count. No
+  `pgrep -f`, no `setsid`, no duplicate run. `Xml.Linq` isolated consumer check passed with 283 tests.
+- **`local_ci_check.sh build`**: boundaries **41/92**, catalogue current, seams **3 / 20**, negative
+  fixtures **13 files / 116 sites** (peak 2 jobs, 56.8 s), configure and build clean (0 warnings,
+  0 errors) — then its **known #1962 Ping stop**, reported separately from the full gate above.
+- All eight required validations green; `git diff --check` clean.
+- **Sanitizers**, with the changed production bodies compiled **with** the sanitizer and the rest of
+  the runtime linked from the ordinary archives — reported as *instrumented over the changed
+  production bodies*, never as a whole-program run. #2196: a 28-value boundary workload over all five
+  doors plus the rejecting path. #2197: a 60-deep rebinding chain, a 200-attribute prefix-allocator
+  stress with `p1`–`p50` pre-taken, undeclaration, reserved prefixes and every rejecting door.
+  **ASan+UBSan+LSan exit 0, zero reports; non-recovering UBSan exit 0**; and **both are
+  discriminating**, because a deliberate out-of-bounds read compiled into the *same* build
+  configuration **did** report (`build-probe/2196_control.log`, `build-probe/2197_control.log`).
+  **TSan was not run**, and the reason is stated rather than omitted: neither ticket introduces
+  shared mutable state, and the module's one `thread_local` (#1895's teardown worklist) is untouched.
+- **Doxygen, `ccache` and `/rv` absent** and not installed. Tracked `scripts/__pycache__/*.pyc`
+  unchanged; every Python invocation used `PYTHONDONTWRITEBYTECODE=1`.
+- **Four commits, four pushes**, every one a normal fast-forward, per `CLAUDE.md` rule 13. All
+  unsigned. No merge, rebase, tag, force-push, amend, PR, publication or history rewrite.
+
+### 9. Honest limitations
+
+- **Ten mutations were run; one did not discriminate.** Allowing an attribute name to take the
+  default namespace's prefix — the XML Namespaces rule most often got wrong — passed the entire
+  47-test namespace suite. A test for it was added and the mutation re-run against it. That gap
+  existed and is recorded, not quietly closed.
+- **X15 and X17 were not dereferenced.** Their use-after-free is asserted from the existing #1885
+  record, not re-triggered here (§5).
+- **The generated prefix spelling is unverified against .NET.** `p1`, `p2`, … match .NET's shape as
+  far as this repository can establish, but `/rv` is absent and the exact spelling is not claimed.
+  `XAttribute::ToString()` on a **detached** qualified attribute is the sharpest case: the shape
+  (qualified name plus its declaration) is required for well-formedness; the prefix name is a choice.
+- **An undeclared namespace prefix is still accepted and unresolved.** #2083 owns that narrowing
+  question at the DOM layer and this batch deliberately did not settle it from the Linq side.
+- **`SaveOptions::OmitDuplicateNamespaces` is still inert.** #2197 emits a declaration only where one
+  is needed, which is close to the flag's effect, but the flag is not consulted.
+- **Windows, Emscripten and macOS were compiled by nobody here.** Nothing in this batch is
+  platform-conditional, but that is read from the source rather than measured.
+- **SR-AUD-336's repair has never been executed.** #2198 pins the *absence* of notification; no line
+  of a working implementation exists to have been tested.
 
 ---
 
