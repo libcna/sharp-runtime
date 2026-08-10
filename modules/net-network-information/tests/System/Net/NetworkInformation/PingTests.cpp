@@ -2,9 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <dirent.h>
 #include <exception>
+#include <optional>
 #include <string>
 #include <typeinfo>
+#include <vector>
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Net/NetworkInformation/NetworkInformationException.hpp"
@@ -44,6 +47,20 @@ namespace {
             }
         }
         return {};
+    }
+
+    /** Live thread count of this process, or -1 when `/proc/self/task` cannot be read. */
+    int countOwnThreads() {
+        DIR* dir = ::opendir("/proc/self/task");
+        if (dir == nullptr) {
+            return -1;
+        }
+        int entries = 0;
+        while (::readdir(dir) != nullptr) {
+            ++entries;
+        }
+        ::closedir(dir);
+        return entries - 2; // "." and ".."
     }
 
     /** Rethrows @p p and returns the mangled dynamic type name of whatever comes out. */
@@ -201,6 +218,199 @@ TEST(PingTests, Send_WrappedFailure_OuterMessageIsUnchanged) {
     } catch (const PingException& pe) {
         EXPECT_EQ(std::string(pe.what()),
                   "An exception occurred while sending or receiving the ICMP message.");
+    }
+}
+
+// --- Ticket #2188 (SR-AUD-253): every async door validates at the CALL --------------------------
+//
+// EXPECT_THROW around the *call expression alone* is the synchronous assertion: the returned task
+// is never awaited, so a deferred fault -- which is what all eight overloads used to produce --
+// cannot satisfy it.
+
+TEST(PingTests, SendPingAsync_NegativeTimeout_Address_ThrowsSynchronously) {
+    Ping ping;
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(IPAddress::Loopback, -1)),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(PingTests, SendPingAsync_NegativeTimeout_AddressBuffer_ThrowsSynchronously) {
+    Ping ping;
+    std::vector<SharpRuntime::bytecs> buffer{1, 2, 3};
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(IPAddress::Loopback, -1, buffer)),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(PingTests, SendPingAsync_NegativeTimeout_AddressBufferOptions_ThrowsSynchronously) {
+    Ping ping;
+    std::vector<SharpRuntime::bytecs> buffer{1, 2, 3};
+    PingOptions options(64, true);
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(IPAddress::Loopback, -1, buffer, options)),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(PingTests, SendPingAsync_NegativeTimeout_Host_ThrowsSynchronously) {
+    Ping ping;
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(std::string("127.0.0.1"), -1)),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(PingTests, SendPingAsync_NegativeTimeout_HostBuffer_ThrowsSynchronously) {
+    Ping ping;
+    std::vector<SharpRuntime::bytecs> buffer{1, 2, 3};
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(std::string("127.0.0.1"), -1, buffer)),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(PingTests, SendPingAsync_NegativeTimeout_HostBufferOptions_ThrowsSynchronously) {
+    Ping ping;
+    std::vector<SharpRuntime::bytecs> buffer{1, 2, 3};
+    PingOptions options(64, true);
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(std::string("127.0.0.1"), -1, buffer, options)),
+                 System::ArgumentOutOfRangeException);
+}
+
+// A non-literal host name must be validated before the resolver runs, not after it.
+TEST(PingTests, SendPingAsync_NegativeTimeout_UnresolvableHost_ThrowsSynchronously) {
+    Ping ping;
+    std::vector<SharpRuntime::bytecs> buffer{1, 2, 3};
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(std::string("no-such-host.invalid.example"), -1, buffer)),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(PingTests, SendPingAsync_OversizedBuffer_ThrowsSynchronously) {
+    Ping ping;
+    std::vector<SharpRuntime::bytecs> buffer(65501);
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(IPAddress::Loopback, 5000, buffer)),
+                 System::ArgumentException);
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(std::string("127.0.0.1"), 5000, buffer)),
+                 System::ArgumentException);
+}
+
+TEST(PingTests, SendPingAsync_WildcardAddress_ThrowsSynchronously) {
+    Ping ping;
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(IPAddress::Any)), System::ArgumentException);
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(IPAddress::IPv6Any)), System::ArgumentException);
+    // ...including when it arrives as a literal string through a host-name overload.
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(std::string("0.0.0.0"))), System::ArgumentException);
+}
+
+TEST(PingTests, SendPingAsync_EmptyHostName_ThrowsSynchronously) {
+    Ping ping;
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(std::string(""))), System::ArgumentException);
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(std::string(""), 5000)), System::ArgumentException);
+    std::vector<SharpRuntime::bytecs> buffer{1, 2, 3};
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(std::string(""), 5000, buffer)), System::ArgumentException);
+    PingOptions options(64, true);
+    EXPECT_THROW(static_cast<void>(ping.SendPingAsync(std::string(""), 5000, buffer, options)),
+                 System::ArgumentException);
+}
+
+// The delivery point moved; the exception type and message must not have.
+TEST(PingTests, SendPingAsync_RejectionMatchesTheSynchronousDoor) {
+    Ping ping;
+    std::string syncMessage;
+    std::string asyncMessage;
+    try {
+        static_cast<void>(ping.Send(IPAddress::Loopback, -1));
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        syncMessage = e.what();
+    }
+    try {
+        static_cast<void>(ping.SendPingAsync(IPAddress::Loopback, -1));
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        asyncMessage = e.what();
+    }
+    EXPECT_FALSE(syncMessage.empty());
+    EXPECT_EQ(syncMessage, asyncMessage);
+}
+
+// Corroborating measurement rather than the pin: TaskT's callable constructor is
+// std::async(std::launch::async, ...), so an argument rejected at the call cannot have started a
+// worker. Exact after the fix -- nothing is ever constructed -- which is why == is safe here.
+TEST(PingTests, SendPingAsync_InvalidArgument_StartsNoWorker) {
+    const int baseline = countOwnThreads();
+    ASSERT_GT(baseline, 0) << "/proc/self/task unreadable; the measurement below would be meaningless";
+    Ping ping;
+    for (int i = 0; i < 8; ++i) {
+        EXPECT_THROW(static_cast<void>(ping.SendPingAsync(IPAddress::Loopback, -1)),
+                     System::ArgumentOutOfRangeException);
+        EXPECT_EQ(countOwnThreads(), baseline) << "a worker was started for an already-invalid argument";
+    }
+}
+
+// --- Ticket #2190 (SR-AUD-255): absence is forwarded, not a fabricated default -----------------
+//
+// PingReply's representation of "no options" is deterministic here and is pinned unconditionally.
+// The end-to-end half needs a reply, which needs a working ICMP socket -- see the guarded test.
+
+TEST(PingTests, PingReply_DefaultConstructed_ReportsNoOptions) {
+    PingReply reply;
+    EXPECT_FALSE(reply.getOptionsProperty().has_value());
+}
+
+TEST(PingTests, PingReply_AbsentOptions_IsDistinctFromDefaultOptions) {
+    PingReply absent(IPAddress::Loopback, std::nullopt, IPStatus::Success, 1, {});
+    PingReply fabricated(IPAddress::Loopback, std::make_optional(PingOptions()), IPStatus::Success, 1, {});
+    EXPECT_FALSE(absent.getOptionsProperty().has_value());
+    ASSERT_TRUE(fabricated.getOptionsProperty().has_value());
+    // The value the three repaired doors used to invent, spelled out so the pin names it.
+    EXPECT_EQ(fabricated.getOptionsProperty()->getTtlProperty(), 128);
+    EXPECT_FALSE(fabricated.getOptionsProperty()->getDontFragmentProperty());
+}
+
+TEST(PingTests, PingReply_SuppliedOptions_AreReportedVerbatim) {
+    PingReply reply(IPAddress::Loopback, std::make_optional(PingOptions(64, true)), IPStatus::Success, 1, {});
+    ASSERT_TRUE(reply.getOptionsProperty().has_value());
+    EXPECT_EQ(reply.getOptionsProperty()->getTtlProperty(), 64);
+    EXPECT_TRUE(reply.getOptionsProperty()->getDontFragmentProperty());
+}
+
+// The end-to-end half of SR-AUD-255. It is guarded rather than asserted unconditionally because
+// every send fails at socket creation wherever ping_group_range forbids unprivileged ICMP sockets
+// (this container: "1 0"). That is #1962's gap, which stays blocked; the five PingTests that fail
+// for the same reason are deliberately left failing and are NOT weakened by this guard.
+TEST(PingTests, NoOptionsDoors_ReportAbsentOptions) {
+    Ping ping;
+    std::vector<SharpRuntime::bytecs> buffer{7, 7, 7};
+    PingReply probe;
+    try {
+        probe = ping.Send(IPAddress::Loopback, 5000, buffer);
+    } catch (const PingException&) {
+        GTEST_SKIP() << "no unprivileged ICMP socket on this host (see #1962); the structural half "
+                        "of SR-AUD-255 is pinned by the PingReply tests above";
+    }
+    EXPECT_FALSE(probe.getOptionsProperty().has_value());
+    EXPECT_FALSE(ping.Send(std::string("127.0.0.1"), 5000, buffer).getOptionsProperty().has_value());
+    EXPECT_FALSE(
+        ping.SendPingAsync(IPAddress::Loopback, 5000, buffer).getResultProperty().getOptionsProperty().has_value());
+    EXPECT_FALSE(ping.SendPingAsync(std::string("127.0.0.1"), 5000, buffer)
+                     .getResultProperty()
+                     .getOptionsProperty()
+                     .has_value());
+    // The options-carrying doors are unchanged and still report what was supplied.
+    PingOptions options(64, true);
+    PingReply withOptions = ping.Send(IPAddress::Loopback, 5000, buffer, options);
+    ASSERT_TRUE(withOptions.getOptionsProperty().has_value());
+    EXPECT_EQ(withOptions.getOptionsProperty()->getTtlProperty(), 64);
+}
+
+// --- Ticket #2191: the worker lambdas no longer capture a raw `this` --------------------------
+//
+// Before the repair the worker called a non-static member through a captured `this`, so destroying
+// the Ping while its task ran was undefined behaviour. `Ping` declares no data members, so nothing
+// was ever dereferenced and no runtime detector -- ASan included -- could report it; the repair's
+// evidence is the capture list plus the fact that this test is now well-defined rather than
+// merely lucky. It is kept because it is the only executable statement of the contract.
+TEST(PingTests, SendPingAsync_OwnerDestroyedBeforeCompletion_TaskStillCompletes) {
+    auto* ping = new Ping();
+    std::vector<SharpRuntime::bytecs> buffer{1, 2, 3};
+    auto task = ping->SendPingAsync(IPAddress::Loopback, 1000, buffer);
+    delete ping;
+    try {
+        PingReply reply = task.getResultProperty();
+        SUCCEED() << "task completed with status " << static_cast<int>(reply.getStatusProperty());
+    } catch (const PingException&) {
+        SUCCEED() << "task completed by faulting, which is the expected outcome without ICMP";
     }
 }
 

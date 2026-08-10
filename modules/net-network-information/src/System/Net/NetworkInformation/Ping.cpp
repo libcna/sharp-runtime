@@ -313,12 +313,19 @@ PingReply Ping::sendPingCore(const System::Net::IPAddress&, const std::vector<Sh
 
 namespace {
 
+    /**
+     * The platform send core, as a plain function pointer. `Ping::sendPingCore` is a private
+     * static member, so the file-local helpers below cannot name it; every public door forms this
+     * pointer in its own (member) scope and hands it down, which is the idiom this file already
+     * used before ticket #2188 and the reason none of that ticket's restructuring needed a change
+     * to `Ping.hpp`.
+     */
+    using PingCore = PingReply (*)(const System::Net::IPAddress&, const std::vector<SharpRuntime::bytecs>&,
+                                    SharpRuntime::intcs, const PingOptions*);
+
     PingReply sendWithExceptionWrapping(const System::Net::IPAddress& address,
                                           const std::vector<SharpRuntime::bytecs>& buffer, SharpRuntime::intcs timeout,
-                                          const PingOptions* options,
-                                          PingReply (*core)(const System::Net::IPAddress&,
-                                                             const std::vector<SharpRuntime::bytecs>&,
-                                                             SharpRuntime::intcs, const PingOptions*)) {
+                                          const PingOptions* options, PingCore core) {
         try {
             return core(address, buffer, timeout, options);
         } catch (const System::PlatformNotSupportedException&) {
@@ -344,6 +351,31 @@ namespace {
         }
     }
 
+    /**
+     * Resolves @p hostNameOrAddress and sends to its first address.
+     *
+     * Preconditions, both established at the public door before this is reached: the host name is
+     * non-empty and is NOT an IP literal (a literal short-circuits to the address overload), and
+     * @p timeout / @p buffer have already been validated. Ticket #2188 moved that validation to
+     * the door precisely so this function -- which runs on a worker thread for the asynchronous
+     * doors -- performs I/O only.
+     *
+     * @note `System::Net::Dns::GetHostAddresses` throws on every resolver failure, so the empty
+     * check below is reached only if the resolver succeeds while yielding no address of a
+     * collectable family. That asymmetry -- a `SocketException` escaping unwrapped where the very
+     * next line declares a `PingException` -- is ticket #2192, deliberately left as-is and pinned
+     * by test until a .NET reference is available to settle it.
+     */
+    PingReply sendToResolvedHost(const std::string& hostNameOrAddress, SharpRuntime::intcs timeout,
+                                  const std::vector<SharpRuntime::bytecs>& buffer, const PingOptions* options,
+                                  PingCore core) {
+        auto addresses = System::Net::Dns::GetHostAddresses(hostNameOrAddress);
+        if (addresses.empty()) {
+            throw PingException("Could not resolve host name or address.");
+        }
+        return sendWithExceptionWrapping(addresses[0], buffer, timeout, options, core);
+    }
+
 } // namespace
 
 PingReply Ping::Send(const std::string& hostNameOrAddress) {
@@ -364,7 +396,21 @@ PingReply Ping::Send(const System::Net::IPAddress& address, SharpRuntime::intcs 
 
 PingReply Ping::Send(const std::string& hostNameOrAddress, SharpRuntime::intcs timeout,
                       const std::vector<SharpRuntime::bytecs>& buffer) {
-    return Send(hostNameOrAddress, timeout, buffer, PingOptions());
+    // Ticket #2190 (SR-AUD-255). This used to read
+    //   return Send(hostNameOrAddress, timeout, buffer, PingOptions());
+    // which invented a default PingOptions{ttl = 128, dontFragment = false} the caller never
+    // supplied, so a successful reply reported options that were never requested and the socket
+    // had its TTL forced to 128. .NET passes null here, and so does this file's own sibling
+    // Send(address, timeout, buffer) three lines below -- the inconsistency was internal.
+    System::ArgumentException::ThrowIfNullOrEmpty(hostNameOrAddress, "hostNameOrAddress");
+
+    System::Net::IPAddress parsed;
+    if (System::Net::IPAddress::TryParse(hostNameOrAddress, parsed)) {
+        return Send(parsed, timeout, buffer);
+    }
+
+    checkArgs(timeout, buffer);
+    return sendToResolvedHost(hostNameOrAddress, timeout, buffer, nullptr, &Ping::sendPingCore);
 }
 
 PingReply Ping::Send(const System::Net::IPAddress& address, SharpRuntime::intcs timeout,
@@ -383,11 +429,7 @@ PingReply Ping::Send(const std::string& hostNameOrAddress, SharpRuntime::intcs t
     }
 
     checkArgs(timeout, buffer);
-    auto addresses = System::Net::Dns::GetHostAddresses(hostNameOrAddress);
-    if (addresses.empty()) {
-        throw PingException("Could not resolve host name or address.");
-    }
-    return sendWithExceptionWrapping(addresses[0], buffer, timeout, &options, &Ping::sendPingCore);
+    return sendToResolvedHost(hostNameOrAddress, timeout, buffer, &options, &Ping::sendPingCore);
 }
 
 PingReply Ping::Send(const System::Net::IPAddress& address, SharpRuntime::intcs timeout,
@@ -414,32 +456,78 @@ System::Threading::Tasks::TaskT<PingReply> Ping::SendPingAsync(const std::string
     return SendPingAsync(hostNameOrAddress, timeout, defaultSendBuffer());
 }
 
+// The four asynchronous doors below all share the shape ticket #2188 (SR-AUD-253) introduced:
+// validate at the CALL, then construct the task. They used to construct `TaskT<PingReply>` around
+// a lambda that called `Send`, so `checkArgs` ran on the worker: every one of the eight overloads
+// returned a task for an argument that was already invalid and faulted later, where .NET throws
+// before it creates the async operation. Because `TaskT`'s callable constructor is
+// `std::async(std::launch::async, ...)`, that also started a real OS thread per rejected argument.
+//
+// Each worker lambda now captures values only, and calls the file-local send helpers through a
+// `PingCore` pointer formed here, in member scope. That is ticket #2191: the lambdas used to
+// capture a raw `this` and call a non-static member on it from the worker, so destroying the Ping
+// while its task ran called a member function on a destroyed object. `sizeof(Ping) == 1` -- the
+// class declares no data members -- so the capture was removable outright, which is NOT the case
+// for the blocked stateful raw-`this` family (#2066, #2088, #2134); nothing here resolves or
+// pre-empts those.
+
 System::Threading::Tasks::TaskT<PingReply> Ping::SendPingAsync(const System::Net::IPAddress& address,
                                                                  SharpRuntime::intcs timeout,
                                                                  const std::vector<SharpRuntime::bytecs>& buffer) {
-    return SendPingAsync(address, timeout, buffer, PingOptions());
+    checkArgs(address, timeout, buffer);
+    const PingCore core = &Ping::sendPingCore;
+    // nullptr, not PingOptions(): ticket #2190 (SR-AUD-255), same reason as the synchronous door.
+    return System::Threading::Tasks::TaskT<PingReply>([address, timeout, buffer, core]() {
+        return sendWithExceptionWrapping(address, buffer, timeout, nullptr, core);
+    });
 }
 
 System::Threading::Tasks::TaskT<PingReply> Ping::SendPingAsync(const std::string& hostNameOrAddress,
                                                                  SharpRuntime::intcs timeout,
                                                                  const std::vector<SharpRuntime::bytecs>& buffer) {
-    return SendPingAsync(hostNameOrAddress, timeout, buffer, PingOptions());
+    System::ArgumentException::ThrowIfNullOrEmpty(hostNameOrAddress, "hostNameOrAddress");
+
+    System::Net::IPAddress parsed;
+    if (System::Net::IPAddress::TryParse(hostNameOrAddress, parsed)) {
+        return SendPingAsync(parsed, timeout, buffer);
+    }
+
+    checkArgs(timeout, buffer);
+    const PingCore core = &Ping::sendPingCore;
+    return System::Threading::Tasks::TaskT<PingReply>([hostNameOrAddress, timeout, buffer, core]() {
+        return sendToResolvedHost(hostNameOrAddress, timeout, buffer, nullptr, core);
+    });
 }
 
 System::Threading::Tasks::TaskT<PingReply> Ping::SendPingAsync(const System::Net::IPAddress& address,
                                                                  SharpRuntime::intcs timeout,
                                                                  const std::vector<SharpRuntime::bytecs>& buffer,
                                                                  const PingOptions& options) {
-    return System::Threading::Tasks::TaskT<PingReply>(
-        [this, address, timeout, buffer, options]() { return Send(address, timeout, buffer, options); });
+    checkArgs(address, timeout, buffer);
+    const PingCore core = &Ping::sendPingCore;
+    // `options` is captured BY VALUE, so `&options` inside the body is the address of the closure's
+    // own copy -- live for the whole call, and never a pointer back into the caller's frame.
+    return System::Threading::Tasks::TaskT<PingReply>([address, timeout, buffer, options, core]() {
+        return sendWithExceptionWrapping(address, buffer, timeout, &options, core);
+    });
 }
 
 System::Threading::Tasks::TaskT<PingReply> Ping::SendPingAsync(const std::string& hostNameOrAddress,
                                                                  SharpRuntime::intcs timeout,
                                                                  const std::vector<SharpRuntime::bytecs>& buffer,
                                                                  const PingOptions& options) {
-    return System::Threading::Tasks::TaskT<PingReply>(
-        [this, hostNameOrAddress, timeout, buffer, options]() { return Send(hostNameOrAddress, timeout, buffer, options); });
+    System::ArgumentException::ThrowIfNullOrEmpty(hostNameOrAddress, "hostNameOrAddress");
+
+    System::Net::IPAddress parsed;
+    if (System::Net::IPAddress::TryParse(hostNameOrAddress, parsed)) {
+        return SendPingAsync(parsed, timeout, buffer, options);
+    }
+
+    checkArgs(timeout, buffer);
+    const PingCore core = &Ping::sendPingCore;
+    return System::Threading::Tasks::TaskT<PingReply>([hostNameOrAddress, timeout, buffer, options, core]() {
+        return sendToResolvedHost(hostNameOrAddress, timeout, buffer, &options, core);
+    });
 }
 
 } // namespace System::Net::NetworkInformation

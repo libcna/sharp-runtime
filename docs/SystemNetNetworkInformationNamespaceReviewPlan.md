@@ -408,6 +408,24 @@ one applicable target: the `this` capture, which #2191 removes.
 | 19 | `NoOptionsDoors_ReportAbsentOptions` | SR-AUD-255 end-to-end | **guarded** — skips when ICMP is unavailable, §17 |
 | 20 | `Send_DescriptorsBalanced` | #2193 | **yes**, with a deliberate leaked-fd control |
 
+### 16.1 Mutation results — including the one that does not discriminate
+
+| Mutation | What it restores | Intended failures | Controls |
+|---|---|---|---|
+| **M1** | `catch (const std::exception& e)` + `make_exception_ptr(e)` | **3** — sliced type, lost message, lost native code | outer-message and #2192 pins stable |
+| **M2** | `Dns` moved *inside* the wrapper (over-wrapping) | **1** — the #2192 pin | all four SR-AUD-254 tests stable |
+| **M3** | validation deferred to the worker again, at one async door | **8** — seven synchronous-throw tests plus the no-worker measurement | the options-carrying doors, the `PingReply` structural pins and the owner-destroyed test stable |
+| **M4** | `PingOptions()` fabricated again at all three doors | **0 — it does not discriminate here** | — |
+
+**M4 is recorded as a failure of this container, not as a passing result.** The only test that can
+observe SR-AUD-255's end-to-end consequence needs a reply, and every send here fails at socket
+creation, so the suite is byte-identical with and without the defect restored. The repair is still
+correct — it is justified by the file's own internal inconsistency (§5) and by the audit's finding —
+but **this batch cannot demonstrate a discriminating test for #2190 in this environment**, and the
+guarded test is what will discriminate wherever an unprivileged ICMP socket exists. Raising
+`ping_group_range` would make it discriminate and is deliberately not done: modifying system
+networking configuration is outside this batch's boundary.
+
 **Why test 19 is guarded and the five existing `PingTests` are not.** The five existing failures are
 the repository's standing evidence for #1962 and the brief forbids weakening them; they stay
 failing. A *new* test whose only purpose is to observe a reply cannot assert anything here, and
