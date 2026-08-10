@@ -663,3 +663,205 @@ TEST(TimeZoneInfoTests, TryFind_SuccessThenFailure_DoesNotKeepTheSuccess) {
     EXPECT_FALSE(TimeZoneInfo::TryFindSystemTimeZoneById("Europe/Nowhere", tz));
     EXPECT_EQ(tz, nullptr);
 }
+
+// ---------------------------------------------------------------------------
+// Ticket #2178 (SR-AUD-225): CreateCustomTimeZone copied every input without
+// validation, so it minted zones .NET cannot represent. Measured before the fix
+// (build-probe/2176_probe1_surface.log): id="" accepted; +15h, -15h, a 90-second
+// offset and TimeSpan::MinValue all accepted. The audit's current-.NET probe
+// records ArgumentException for the empty id and ArgumentOutOfRangeException for
+// the out-of-range offset. The whole-minute rule is the same class -- a value the
+// managed counterpart cannot represent -- and is listed in #2186 for text-level
+// verification against the reference.
+//
+// The offset bound also closes a reachable arithmetic door: a zone built with
+// TimeSpan::MinValue made ConvertTimeToUtc evaluate -baseUtcOffset_ and report
+// "Negating the minimum value of a twos complement number is invalid." from a
+// public conversion rather than rejecting the argument where it was supplied.
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, CreateCustomTimeZone_EmptyId_ThrowsArgumentException) {
+    EXPECT_THROW(TimeZoneInfo::CreateCustomTimeZone("", TimeSpan::Zero, "D", "S"),
+                 System::ArgumentException);
+}
+
+TEST(TimeZoneInfoTests, CreateCustomTimeZone_SingleCharacterId_IsStillAccepted) {
+    auto tz = TimeZoneInfo::CreateCustomTimeZone("X", TimeSpan::Zero, "D", "S");
+    ASSERT_NE(tz, nullptr);
+    EXPECT_EQ(tz->getIdProperty(), "X");
+}
+
+TEST(TimeZoneInfoTests, CreateCustomTimeZone_OffsetAbovePlus14Hours_Throws) {
+    EXPECT_THROW(TimeZoneInfo::CreateCustomTimeZone("X", TimeSpan::FromHours(15), "D", "S"),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(TimeZoneInfo::CreateCustomTimeZone(
+                     "X", TimeSpan(TimeZoneInfo::MaxUtcOffsetTicks + TimeSpan::TicksPerMinute),
+                     "D", "S"),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(TimeZoneInfoTests, CreateCustomTimeZone_OffsetBelowMinus14Hours_Throws) {
+    EXPECT_THROW(TimeZoneInfo::CreateCustomTimeZone("X", TimeSpan::FromHours(-15), "D", "S"),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(TimeZoneInfo::CreateCustomTimeZone(
+                     "X", TimeSpan(-TimeZoneInfo::MaxUtcOffsetTicks - TimeSpan::TicksPerMinute),
+                     "D", "S"),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(TimeZoneInfoTests, CreateCustomTimeZone_Exactly14Hours_IsAcceptedInBothDirections) {
+    // +/-14 hours is the inclusive bound, matching Etc/GMT-14 which really exists.
+    auto plus = TimeZoneInfo::CreateCustomTimeZone("+14", TimeSpan::FromHours(14), "D", "S");
+    auto minus = TimeZoneInfo::CreateCustomTimeZone("-14", TimeSpan::FromHours(-14), "D", "S");
+    EXPECT_EQ(plus->getBaseUtcOffsetProperty().getTicksProperty(),
+              TimeZoneInfo::MaxUtcOffsetTicks);
+    EXPECT_EQ(minus->getBaseUtcOffsetProperty().getTicksProperty(),
+              -TimeZoneInfo::MaxUtcOffsetTicks);
+}
+
+TEST(TimeZoneInfoTests, CreateCustomTimeZone_SubMinuteOffset_ThrowsArgumentException) {
+    EXPECT_THROW(TimeZoneInfo::CreateCustomTimeZone("X", TimeSpan::FromSeconds(90), "D", "S"),
+                 System::ArgumentException);
+    EXPECT_THROW(TimeZoneInfo::CreateCustomTimeZone("X", TimeSpan(1), "D", "S"),
+                 System::ArgumentException);
+}
+
+TEST(TimeZoneInfoTests, CreateCustomTimeZone_WholeMinuteOffsets_AreAccepted) {
+    // 45-minute and 30-minute zones are real (Asia/Kathmandu, Asia/Kolkata).
+    auto k = TimeZoneInfo::CreateCustomTimeZone("+0545", TimeSpan::FromMinutes(345), "D", "S");
+    EXPECT_EQ(k->getBaseUtcOffsetProperty().getTicksProperty(), 345 * TimeSpan::TicksPerMinute);
+    auto neg = TimeZoneInfo::CreateCustomTimeZone("-0330", TimeSpan::FromMinutes(-210), "D", "S");
+    EXPECT_EQ(neg->getBaseUtcOffsetProperty().getTicksProperty(), -210 * TimeSpan::TicksPerMinute);
+}
+
+TEST(TimeZoneInfoTests, CreateCustomTimeZone_TimeSpanExtremes_AreRejectedAtTheFactory) {
+    // Before this fix TimeSpan::MinValue produced a zone whose ConvertTimeToUtc reported a
+    // two's-complement negation diagnostic. The argument is now rejected where it is supplied.
+    EXPECT_THROW(TimeZoneInfo::CreateCustomTimeZone("X", TimeSpan::MinValue, "D", "S"),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(TimeZoneInfo::CreateCustomTimeZone("X", TimeSpan::MaxValue, "D", "S"),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(TimeZoneInfoTests, CreateCustomTimeZone_ValidationOrder_IdBeforeOffset) {
+    // Both inputs invalid: the id diagnostic wins, so the caller is told about the first
+    // argument rather than the second.
+    EXPECT_THROW(TimeZoneInfo::CreateCustomTimeZone("", TimeSpan::FromHours(15), "D", "S"),
+                 System::ArgumentException);
+    bool sawOutOfRange = false;
+    try {
+        TimeZoneInfo::CreateCustomTimeZone("", TimeSpan::FromHours(15), "D", "S");
+    } catch (const System::ArgumentOutOfRangeException&) {
+        sawOutOfRange = true;
+    } catch (const System::ArgumentException&) {
+    }
+    EXPECT_FALSE(sawOutOfRange);
+}
+
+TEST(TimeZoneInfoTests, CreateCustomTimeZone_RejectionMessages) {
+    // The exception types are what the audit's managed probe establishes; the exact .NET
+    // resource text is unverifiable in this container and is pinned here so it cannot drift
+    // silently (#2186 carries the verification question).
+    try {
+        TimeZoneInfo::CreateCustomTimeZone("", TimeSpan::Zero, "D", "S");
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_NE(std::string(e.what()).find("not a valid time zone ID"), std::string::npos);
+    }
+    try {
+        TimeZoneInfo::CreateCustomTimeZone("X", TimeSpan::FromHours(15), "D", "S");
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_NE(std::string(e.what()).find("plus or minus 14.0 hours"), std::string::npos);
+    }
+    try {
+        TimeZoneInfo::CreateCustomTimeZone("X", TimeSpan::FromSeconds(90), "D", "S");
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_NE(std::string(e.what()).find("whole minutes"), std::string::npos);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Ticket #2180 (SR-AUD-227): Equals compared id_ byte-for-byte while GetHashCode
+// lowercased it, so two zones could compare unequal and still hash equal.
+// Measured before the fix (build-probe/2176_probe1_surface.log):
+// Equals("Zone","zone") = 0 with equal hashes. The audit's current-.NET probe
+// records that custom "Zone"/"zone" compare true, because .NET compares ids with
+// StringComparer.OrdinalIgnoreCase.
+//
+// The old fold also ran through std::tolower, whose result depends on the process
+// LC_CTYPE, so the hash of a non-ASCII id was a function of a global the caller
+// may change at any time. Both sides now share one ordinal ASCII fold.
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, Equals_CaseVariantIds_AreEqual) {
+    auto a = TimeZoneInfo::CreateCustomTimeZone("Zone", TimeSpan::Zero, "d", "s");
+    auto b = TimeZoneInfo::CreateCustomTimeZone("zone", TimeSpan::Zero, "d", "s");
+    auto c = TimeZoneInfo::CreateCustomTimeZone("ZONE", TimeSpan::Zero, "d", "s");
+    EXPECT_TRUE(a->Equals(*b));
+    EXPECT_TRUE(a->Equals(*c));
+    EXPECT_TRUE(b->Equals(*c));
+    EXPECT_TRUE(*a == *b);
+    EXPECT_FALSE(*a != *b);
+}
+
+TEST(TimeZoneInfoTests, Equals_AndHash_AgreeForCaseVariantIds) {
+    // The contract the old pair broke: equal implies equal hash.
+    auto a = TimeZoneInfo::CreateCustomTimeZone("Europe/Prague", TimeSpan::Zero, "d", "s");
+    auto b = TimeZoneInfo::CreateCustomTimeZone("europe/PRAGUE", TimeSpan::Zero, "d", "s");
+    ASSERT_TRUE(a->Equals(*b));
+    EXPECT_EQ(a->GetHashCode(), b->GetHashCode());
+}
+
+TEST(TimeZoneInfoTests, Equals_GenuinelyDifferentIds_StillUnequal) {
+    auto a = TimeZoneInfo::CreateCustomTimeZone("Zone", TimeSpan::Zero, "d", "s");
+    auto b = TimeZoneInfo::CreateCustomTimeZone("Zones", TimeSpan::Zero, "d", "s");
+    auto c = TimeZoneInfo::CreateCustomTimeZone("Zon", TimeSpan::Zero, "d", "s");
+    EXPECT_FALSE(a->Equals(*b));
+    EXPECT_FALSE(a->Equals(*c));
+    EXPECT_TRUE(*a != *b);
+}
+
+TEST(TimeZoneInfoTests, Equals_IsReflexiveSymmetricAndTransitive) {
+    auto a = TimeZoneInfo::CreateCustomTimeZone("Tz", TimeSpan::Zero, "d", "s");
+    auto b = TimeZoneInfo::CreateCustomTimeZone("tZ", TimeSpan::Zero, "d", "s");
+    auto c = TimeZoneInfo::CreateCustomTimeZone("TZ", TimeSpan::Zero, "d", "s");
+    EXPECT_TRUE(a->Equals(*a));
+    EXPECT_EQ(a->Equals(*b), b->Equals(*a));
+    EXPECT_TRUE(a->Equals(*b) && b->Equals(*c) && a->Equals(*c));
+}
+
+TEST(TimeZoneInfoTests, GetHashCode_FoldIsOrdinalNotLocaleDependent) {
+    // Non-ASCII bytes must be left exactly as they are, whatever LC_CTYPE says. Two ids
+    // that differ only in a high byte must stay distinct, and an id whose only difference
+    // is ASCII case must stay equal, under any locale the platform happens to be in.
+    auto highA = TimeZoneInfo::CreateCustomTimeZone(std::string("Zone\xC3\xA9"), TimeSpan::Zero,
+                                                    "d", "s");
+    auto highB = TimeZoneInfo::CreateCustomTimeZone(std::string("zone\xC3\xA9"), TimeSpan::Zero,
+                                                    "d", "s");
+    auto highC = TimeZoneInfo::CreateCustomTimeZone(std::string("Zone\xC3\x89"), TimeSpan::Zero,
+                                                    "d", "s");
+    EXPECT_TRUE(highA->Equals(*highB));
+    EXPECT_EQ(highA->GetHashCode(), highB->GetHashCode());
+    EXPECT_FALSE(highA->Equals(*highC));
+}
+
+TEST(TimeZoneInfoTests, Equals_BytesBetweenTheCaseRanges_AreNotFolded) {
+    // '[' (0x5B) sits immediately after 'Z' and '@' (0x40) immediately before 'A'; a fold
+    // written with an off-by-one range would map them into the letters.
+    auto a = TimeZoneInfo::CreateCustomTimeZone("[", TimeSpan::Zero, "d", "s");
+    auto b = TimeZoneInfo::CreateCustomTimeZone("{", TimeSpan::Zero, "d", "s");
+    auto c = TimeZoneInfo::CreateCustomTimeZone("@", TimeSpan::Zero, "d", "s");
+    auto d = TimeZoneInfo::CreateCustomTimeZone("`", TimeSpan::Zero, "d", "s");
+    EXPECT_FALSE(a->Equals(*b));
+    EXPECT_FALSE(c->Equals(*d));
+}
+
+TEST(TimeZoneInfoTests, Equals_SystemZoneComparesCaseInsensitivelyToACustomOne) {
+    auto sys = TimeZoneInfo::FindSystemTimeZoneById("Europe/Prague");
+    auto custom = TimeZoneInfo::CreateCustomTimeZone("EUROPE/prague", TimeSpan::FromHours(1),
+                                                     "d", "s");
+    EXPECT_TRUE(sys->Equals(*custom));
+    EXPECT_EQ(sys->GetHashCode(), custom->GetHashCode());
+}

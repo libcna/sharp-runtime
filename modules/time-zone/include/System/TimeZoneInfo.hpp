@@ -266,15 +266,35 @@ namespace System {
             bool operator!=(const AdjustmentRule& o) const { return !Equals(o); }
 
             /**
+             * @brief Validates the effective date range of a candidate adjustment rule.
+             *
+             * C++ counterpart of the date-range half of .NET
+             * AdjustmentRule.CreateAdjustmentRule's argument validation: a rule whose
+             * DateEnd precedes its DateStart describes an empty period and cannot be
+             * applied to any instant, so .NET rejects it rather than storing it.
+             * @param dateStart The first date the rule applies to.
+             * @param dateEnd   The last date the rule applies to; must not precede @p dateStart.
+             * @throws ArgumentException if @p dateEnd is earlier than @p dateStart.
+             */
+            static void validateDateRange(const DateTime& dateStart, const DateTime& dateEnd) {
+                if (dateEnd.getTicksProperty() < dateStart.getTicksProperty())
+                    throw System::ArgumentException(
+                        "The DateStart property must come before the DateEnd property.",
+                        "dateStart");
+            }
+
+            /**
              * @brief Creates an adjustment rule with zero BaseUtcOffsetDelta.
              *
              * C++ counterpart of .NET AdjustmentRule.CreateAdjustmentRule(DateTime, DateTime,
              * TimeSpan, TransitionTime, TransitionTime).
+             * @throws ArgumentException if @p dateEnd is earlier than @p dateStart.
              */
             static std::shared_ptr<AdjustmentRule> CreateAdjustmentRule(
                 DateTime dateStart, DateTime dateEnd, TimeSpan daylightDelta,
                 TransitionTime daylightTransitionStart, TransitionTime daylightTransitionEnd)
             {
+                validateDateRange(dateStart, dateEnd);
                 auto r = std::shared_ptr<AdjustmentRule>(new AdjustmentRule());
                 r->dateStart_               = dateStart;
                 r->dateEnd_                 = dateEnd;
@@ -293,12 +313,14 @@ namespace System {
              * TimeSpan, TransitionTime, TransitionTime, TimeSpan).
              * @param baseUtcOffsetDelta The delta from the zone's default UTC offset that
              *                           applies during this rule's period.
+             * @throws ArgumentException if @p dateEnd is earlier than @p dateStart.
              */
             static std::shared_ptr<AdjustmentRule> CreateAdjustmentRule(
                 DateTime dateStart, DateTime dateEnd, TimeSpan daylightDelta,
                 TransitionTime daylightTransitionStart, TransitionTime daylightTransitionEnd,
                 TimeSpan baseUtcOffsetDelta)
             {
+                validateDateRange(dateStart, dateEnd);
                 auto r = std::shared_ptr<AdjustmentRule>(new AdjustmentRule());
                 r->dateStart_               = dateStart;
                 r->dateEnd_                 = dateEnd;
@@ -485,21 +507,44 @@ namespace System {
         }
 
         /**
-         * @brief Returns true if this zone has the same ID as @p other.
+         * @brief Folds a zone identifier to its ordinal (locale-independent) lower case.
          *
-         * C++ counterpart of .NET TimeZoneInfo.Equals(TimeZoneInfo).
+         * Both Equals() and GetHashCode() answer the same question -- "are these two
+         * identifiers the same zone id?" -- so both are computed from this one function.
+         * Only the 26 ASCII letters are folded: unlike @c std::tolower this does not consult
+         * the process @c LC_CTYPE, so two callers on different locales cannot disagree about
+         * whether two ids are equal.
+         *
+         * @param id The identifier to fold.
+         * @return @p id with A-Z mapped to a-z and every other byte left alone.
          */
-        [[nodiscard]] bool Equals(const TimeZoneInfo& other) const { return id_ == other.id_; }
+        [[nodiscard]] static std::string foldZoneId(const std::string& id) {
+            std::string folded = id;
+            for (auto& c : folded)
+                if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+            return folded;
+        }
+
+        /**
+         * @brief Returns true if this zone has the same ID as @p other, ignoring ASCII case.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.Equals(TimeZoneInfo), which compares ids with
+         * @c StringComparer.OrdinalIgnoreCase. Comparing case-sensitively here while
+         * GetHashCode() folded case was also an equality/hash contract breach in its own
+         * right: two zones could compare unequal and still hash equal.
+         */
+        [[nodiscard]] bool Equals(const TimeZoneInfo& other) const {
+            return foldZoneId(id_) == foldZoneId(other.id_);
+        }
 
         /**
          * @brief Returns a hash code based on the zone ID (case-insensitive).
          *
-         * C++ counterpart of .NET TimeZoneInfo.GetHashCode().
+         * C++ counterpart of .NET TimeZoneInfo.GetHashCode(). Computed from the same fold
+         * Equals() uses, so equal zones always hash equally.
          */
         [[nodiscard]] intcs GetHashCode() const {
-            std::string lower = id_;
-            for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            return static_cast<intcs>(std::hash<std::string>{}(lower));
+            return static_cast<intcs>(std::hash<std::string>{}(foldZoneId(id_)));
         }
 
         /**
@@ -601,14 +646,57 @@ namespace System {
         }
 
         /**
+         * @brief The largest UTC offset a time zone may declare, in ticks (+14 hours).
+         *
+         * C++ counterpart of the bound .NET's TimeZoneInfo.UtcOffsetOutOfRange enforces.
+         */
+        static constexpr longcs MaxUtcOffsetTicks = 14LL * 60LL * 60LL * 10000000LL;
+
+        /**
+         * @brief Validates a candidate base UTC offset the way .NET's ValidateTimeZoneInfo does.
+         *
+         * @param utcOffset The offset to check.
+         * @throws ArgumentOutOfRangeException if @p utcOffset is outside ±14 hours.
+         * @throws ArgumentException if @p utcOffset is not a whole number of minutes.
+         */
+        static void validateUtcOffset(const TimeSpan& utcOffset) {
+            longcs ticks = utcOffset.getTicksProperty();
+            if (ticks > MaxUtcOffsetTicks || ticks < -MaxUtcOffsetTicks)
+                throw ArgumentOutOfRangeException(
+                    "baseUtcOffset: The TimeSpan parameter must be within plus or minus 14.0 hours.");
+            if (ticks % TimeSpan::TicksPerMinute != 0)
+                throw ArgumentException(
+                    "The TimeSpan parameter cannot be specified more precisely than whole minutes.",
+                    "baseUtcOffset");
+        }
+
+        /**
          * @brief Creates a fixed-offset custom time zone.
          *
          * C++ counterpart of .NET TimeZoneInfo.CreateCustomTimeZone(string, TimeSpan, string, string).
+         *
+         * The inputs are validated the way .NET's TimeZoneInfo.ValidateTimeZoneInfo validates
+         * them, so this factory can no longer mint a zone .NET could not represent: an identifier
+         * is required, and the offset must be a whole number of minutes within ±14 hours. The
+         * offset bound also closes a door that reached TimeSpan's negation guard — a zone built
+         * with TimeSpan::MinValue made ConvertTimeToUtc report a two's-complement diagnostic
+         * instead of the argument being rejected where it was supplied.
+         *
+         * @param id           The zone identifier; must not be empty.
+         * @param utcOffset    The zone's fixed offset from UTC; whole minutes, within ±14 hours.
+         * @param displayName  The display name.
+         * @param standardName The standard-time name, also used as the daylight name.
+         * @throws ArgumentException if @p id is empty or @p utcOffset is finer than whole minutes.
+         * @throws ArgumentOutOfRangeException if @p utcOffset is outside ±14 hours.
          */
         static std::shared_ptr<TimeZoneInfo> CreateCustomTimeZone(
             const std::string& id, const TimeSpan& utcOffset,
             const std::string& displayName, const std::string& standardName)
         {
+            if (id.empty())
+                throw ArgumentException("The specified ID parameter is not a valid time zone ID.",
+                                        "id");
+            validateUtcOffset(utcOffset);
             return std::shared_ptr<TimeZoneInfo>(
                 new TimeZoneInfo(id, utcOffset, displayName, standardName, standardName, false));
         }
