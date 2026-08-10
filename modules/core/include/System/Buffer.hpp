@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cstring>
+#include <type_traits>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
@@ -111,7 +112,8 @@ namespace System {
          * C++ counterpart of .NET Buffer.BlockCopy(Array, int, Array, int, int)
          * for arbitrary primitive element types.
          *
-         * @tparam T Element type (must be trivially-copyable).
+         * @tparam T Element type. **Enforced**: must be trivially copyable; a call with any
+         *         other element type is rejected at compile time (SR-AUD-051, #2213).
          * @param src       Source vector.
          * @param srcOffset Byte offset into @p src raw memory.
          * @param dst       Destination vector.
@@ -125,6 +127,7 @@ namespace System {
         template<typename T>
         static void BlockCopy(const std::vector<T>& src, intcs srcOffset,
                                std::vector<T>& dst, intcs dstOffset, intcs count) {
+            requireTriviallyCopyable<T>();
             requireValidBlockCopyRange(static_cast<intcs>(src.size() * sizeof(T)), srcOffset,
                                         static_cast<intcs>(dst.size() * sizeof(T)), dstOffset, count);
             std::memmove(reinterpret_cast<bytecs*>(dst.data()) + dstOffset,
@@ -142,12 +145,14 @@ namespace System {
          * C++ counterpart of .NET Buffer.ByteLength(Array).
          * Equal to @c array.size() * sizeof(T).
          *
-         * @tparam T Element type (must be a primitive / trivially-copyable type).
+         * @tparam T Element type. **Enforced**: must be trivially copyable; a call with any
+         *         other element type is rejected at compile time (SR-AUD-051, #2213).
          * @param  array The vector whose byte length is returned.
          * @return Total byte count.
          */
         template<typename T>
         static intcs ByteLength(const std::vector<T>& array) {
+            requireTriviallyCopyable<T>();
             return static_cast<intcs>(array.size() * sizeof(T));
         }
 
@@ -163,7 +168,7 @@ namespace System {
          * The value is read from the underlying memory of the vector element
          * storage in native byte order.
          *
-         * @tparam T Element type.
+         * @tparam T Element type. **Enforced**: must be trivially copyable (SR-AUD-051, #2213).
          * @param  array The vector to read from.
          * @param  index Zero-based byte index into the raw memory.
          * @return The byte at @p index.
@@ -172,6 +177,7 @@ namespace System {
          */
         template<typename T>
         static bytecs GetByte(const std::vector<T>& array, intcs index) {
+            requireTriviallyCopyable<T>();
             requireValidByteIndex(static_cast<intcs>(array.size() * sizeof(T)), index);
             return reinterpret_cast<const bytecs*>(array.data())[index];
         }
@@ -182,7 +188,7 @@ namespace System {
          *
          * C++ counterpart of .NET Buffer.SetByte(Array, int, byte).
          *
-         * @tparam T    Element type.
+         * @tparam T    Element type. **Enforced**: must be trivially copyable (SR-AUD-051, #2213).
          * @param  array The vector to modify.
          * @param  index Zero-based byte index into the raw memory.
          * @param  value The byte value to write.
@@ -191,6 +197,7 @@ namespace System {
          */
         template<typename T>
         static void SetByte(std::vector<T>& array, intcs index, bytecs value) {
+            requireTriviallyCopyable<T>();
             requireValidByteIndex(static_cast<intcs>(array.size() * sizeof(T)), index);
             reinterpret_cast<bytecs*>(array.data())[index] = value;
         }
@@ -245,6 +252,31 @@ namespace System {
         }
 
     private:
+        // System.Buffer is a byte-oriented API: every member above reinterprets a vector's
+        // element storage as raw bytes. That is only meaningful for a type whose value IS
+        // its object representation. The four generic members SAID so in their doc-comments
+        // ("must be a primitive / trivially-copyable type") and enforced nothing, so
+        // `std::vector<std::string>` compiled and reached `memmove`, duplicating each
+        // string's owning pointer and producing an AddressSanitizer-confirmed DOUBLE-FREE at
+        // vector destruction (SR-AUD-051, ticket #2213). Real .NET rejects the same call at
+        // run time -- `Buffer.BlockCopy` throws ArgumentException("Object must be an array of
+        // primitives.") -- but in C++ the element type is known at compile time, so the
+        // faithful counterpart is to refuse to compile. `std::is_trivially_copyable_v` is the
+        // exact property that makes the byte copy defined; it is slightly wider than .NET's
+        // "primitive" (it also admits trivially copyable structs and enums), a deliberate
+        // widening recorded in docs/CoreMemorySafetyFamilyPlan.md rather than a slip.
+        //
+        // Migration for a caller this rejects: copy elements with System::Array::Copy, or
+        // convert to a std::vector<bytecs> first and use the byte overload above. The
+        // rejection is pinned by test/consumer/core_buffer_trivially_copyable_negative.cpp.
+        template<typename T>
+        static constexpr void requireTriviallyCopyable() {
+            static_assert(std::is_trivially_copyable_v<T>,
+                          "System::Buffer operates on the raw object representation, so its "
+                          "element type must be trivially copyable (.NET requires an array of "
+                          "primitives). Copy elements with System::Array::Copy instead.");
+        }
+
         // Every std::vector-backed overload above previously did zero bounds validation before
         // raw memmove/index arithmetic -- a count exceeding either vector's actual size, or a
         // negative offset/count/index, reaches memmove/pointer-arithmetic unchecked, a genuine

@@ -222,7 +222,15 @@ Compile-time evidence recorded alongside: GCC 13.3 emits `-Wstringop-overflow=` 
 10. **`SpanSplitEnumerator` has no in-repo production consumer** — the only non-header
     reference in the whole repository is its own test file, so its repair cannot regress
     anything but its own suite.
-11. **The raw doors have no in-repo production consumer either.** `Array::Copy(T*, …)`,
+11. **`std::copy` and `std::copy_backward` are indistinguishable for a trivially copyable
+    element type**, because libstdc++ lowers both to `__builtin_memmove`, which is correct
+    in either direction. Measured while mutation-testing #2213: an unconditional backward
+    copy passed every `int` overlap assertion and only failed once an owning element type
+    was used (`bcdd` became `dddd`). This is the same masking the audit noticed for the
+    forward case and generalises it: **every direction assertion in this family must use a
+    non-trivially-copyable element type**, or it proves nothing. Recorded because the
+    first version of the #2213 test did exactly that and let a mutant survive.
+12. **The raw doors have no in-repo production consumer either.** `Array::Copy(T*, …)`,
     `Buffer::BlockCopy(const void*, …)` and the generic `Buffer` vector templates are
     referenced only from `modules/core/tests`. Every in-repo call site uses a
     trivially-copyable element type.

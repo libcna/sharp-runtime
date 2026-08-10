@@ -234,3 +234,123 @@ instantiations. **Ten mutations**, one of them a deliberate *negative* control
 that must still pass. ASan/UBSan/LSan clean with activation proved separately;
 TSan recorded **not applicable** — nothing in the family has shared mutable
 state. Full record: `docs/ComparisonContractPlan.md`.
+
+---
+
+## SR-AUD-051 — REMEDIATED (ticket #2213, 2026-08-10, family CMS-A)
+
+The original evidence above is retained unchanged. **Only SR-AUD-051 is closed by this
+ticket** — including its extension into `Buffer.hpp` recorded in that file's own report.
+SR-AUD-044 and SR-AUD-053 in this same report stay `confirmed`; SR-AUD-044 is closed
+separately by ticket #2216 and **SR-AUD-053 (`MaxLengthProperty`) is not touched at all**.
+**No `SR-AUD-*` identifier was created**; numbering stays frozen at 364. Family record:
+`docs/CoreMemorySafetyFamilyPlan.md`.
+
+### The finding is four doors, not two
+
+The audit recorded two reproductions (nontrivial `T`, and negative `length`). Measured on
+2026-08-10 under AddressSanitizer over the instrumented header body itself
+(`build-probe/2210_before.log`), the raw overload fails in **four** distinct ways, of which
+two are new:
+
+| Input | Before | After |
+|---|---|---|
+| `length = -1` | **AddressSanitizer: unknown-crash** in `memcpy` (`Array.hpp:154`) | `ArgumentOutOfRangeException (Parameter 'length')` |
+| `srcIndex = -4` | **stack-buffer-underflow** in `memcpy` — **not recorded by the audit** | `ArgumentOutOfRangeException (Parameter 'srcIndex')` |
+| two `std::string` elements | **double-free** at `operator delete` | copies cleanly; ASan **and** LeakSanitizer silent |
+| overlapping `int` ranges | **memcpy-param-overlap** — **not recorded by the audit** | `1123`, .NET's `memmove` answer |
+
+The audit predicted `negative-size-param` for the negative length and "attempting free on
+address which was not `malloc()`-ed" for the nontrivial case; this toolchain reports
+`unknown-crash` and `double-free`. GCC 13.3 at `-O1` with `_FORTIFY_SOURCE` inlines
+`__memcpy_chk`, so libsanitizer's `memcpy` interceptor — which is what emits
+`negative-size-param` — never runs. The after-log is `build-probe/2213_after.log`; the
+deliberate `heap-buffer-overflow` control still reports in the same binary.
+
+### The repair keeps generic value semantics
+
+The audit offered two designs: constrain the overload to trivially copyable values, or
+"preserve generic value semantics with directional element assignment". **The second was
+chosen**, because .NET's `Array.Copy` works for every element type and constraining this
+overload would have been a source break with no .NET counterpart. The body now:
+
+1. rejects a negative `srcIndex`, then `dstIndex`, then `length`, **before forming any
+   pointer** — which is the difference between throwing and having already computed an
+   invalid pointer;
+2. rejects a null buffer **when `length > 0`**. A null pointer with a zero length is the
+   ordinary C++ empty-range idiom and is accepted; .NET rejects a null array
+   unconditionally, and that divergence is deliberate and documented in the header;
+3. copies through `System::detail::copyOverlapAware` (new,
+   `System/detail/OverlapCopy.hpp`) — element assignment, with the direction **selected**
+   from the operands' relative addresses using `std::less` (relational comparison of
+   pointers into different objects is unspecified in ISO C++; `std::less` is required to
+   totally order them).
+
+`Array::Copy`'s documented capacity limitation is unchanged and still stated: a raw pointer
+carries no length, and that remains the caller's responsibility.
+
+### The `Buffer` extension is closed by refusing to compile
+
+`Buffer::BlockCopy(const std::vector<T>&, …)`, `ByteLength`, `GetByte` and `SetByte` said
+in their doc-comments that `T` had to be primitive or trivially copyable and enforced
+nothing, so `std::vector<std::string>` compiled, reached `memmove` and produced an
+ASan-confirmed **double-free**. All four now call one shared private
+`requireTriviallyCopyable<T>()`. .NET rejects the equivalent call at run time
+(`ArgumentException("Object must be an array of primitives.")`); in C++ the element type is
+known at compile time, so the faithful counterpart is a `static_assert`.
+
+**This is the family's only compile-time source break.** It is stated rather than smoothed
+over: a call with an owning element type stops compiling. Every such call was already
+corrupting memory, no in-repo call site is affected (every one uses `int`, `double`,
+`bytecs` or an enum), and the migration is named in the header and in the fixture —
+`System::Array::Copy` for elements, or the `std::vector<bytecs>` overload for bytes.
+`std::is_trivially_copyable_v` is deliberately **wider** than .NET's "primitive": it also
+admits trivially copyable structs and enums, which is the property that actually makes the
+byte copy defined.
+
+### Closure evidence
+
+**+9 permanent regressions** in `modules/core/tests/System/CoreMemorySafetyTests.cpp`:
+all four negative-argument rejections including `INTCS_MIN`; the exact `paramName` and the
+`srcIndex` → `dstIndex` → `length` order; null rejected only when it would be touched, and
+the zero-length null idiom still accepted; owning elements copied as values with distinct
+storage afterwards; overlap correct in **both** directions plus exact-self, adjacent, zero
+length and one element; ordinary disjoint copies unchanged; catchability as
+`System::Exception`; the requirement pinned as exactly `is_trivially_copyable`; and every
+trivially copyable element type (struct, enum, `double`) still working through all four
+`Buffer` members.
+
+**+4 negative consumer sites**, `test/consumer/core_buffer_trivially_copyable_negative.cpp`
+(component `Core.Base`), one per constrained member, each `#else` branch carrying the
+accepted trivially-copyable spelling. Baseline compiles with zero diagnostics; all four
+sites rejected.
+
+`SharpRuntimeTests_Core_Base` **5,609/5,609** (1 pre-existing skip); `ArrayTests`,
+`Batch11ArrayTests`, `BufferTests` and `Batch13BufferTests` unchanged and green. Whole
+repository builds with zero errors and zero warnings.
+
+### Six mutations, six killed — and one that survived first, reported
+
+M1 delete the `srcIndex` guard → 2 fail. M2 delete the `dstIndex` guard → 2 fail. M3
+`if (length >= 0)` for the null check (over-rejects the legal zero-length null idiom) → 1
+fail. M4 forward-only `std::copy` (restore the defect) → 1 fail. M6 drop one
+`requireTriviallyCopyable` → the negative fixture checker reports
+`site 1 COMPILED; lines 53-59 are legal again`.
+
+**M5 — an unconditional `std::copy_backward` — survived the first run, and that is the most
+useful result of the ticket.** libstdc++ lowers **both** `std::copy` and
+`std::copy_backward` over a trivially copyable type to `__builtin_memmove`, which is
+correct in either direction, so the `int` overlap assertions could not tell a
+direction-*selecting* copy from an unconditionally backward one. This is the same masking
+the audit noticed for the forward case, generalised: **a direction assertion in this family
+proves nothing unless its element type is non-trivially-copyable.** A `std::string`
+left-overlap assertion was added; M5 then failed with `dddd` where `bcdd` is required.
+
+### Source, ABI and layout consequences
+
+None, other than the deliberate compile-time rejection above. `Array` and `Buffer` are
+static-only classes with no data members and no virtual functions; every entry is a
+function template or an inline static member, so no `sizeof`, `alignof`, vtable, `noexcept`
+specification, default argument or mangled symbol changed. `System/detail/OverlapCopy.hpp`
+is a new header inside the same `Core.Base` module — no component boundary or dependency
+edge changed.

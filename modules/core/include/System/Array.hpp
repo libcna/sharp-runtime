@@ -14,6 +14,7 @@
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/detail/ComparisonPolicy.hpp"
+#include "System/detail/OverlapCopy.hpp"
 
 namespace System {
 
@@ -138,20 +139,56 @@ namespace System {
         }
 
         /**
-         * @brief Copies @p length elements from raw C-array @p src into @p dst using memcpy.
+         * @brief Copies @p length elements from raw C-array @p src into @p dst.
          *
-         * @note Unlike the std::vector<T> overloads above, this cannot validate bounds -- a raw
-         * pointer carries no length information for either side, matching the same structural
-         * limitation as the other raw-pointer buffer methods across this codebase (e.g.
-         * Buffer::BlockCopy(const void*, ...)). The caller is responsible for ensuring both
-         * buffers are large enough. The former ArrayList::CopyTo(void*, int) precedent is
+         * C++ counterpart of .NET Array.Copy(Array, int, Array, int, int) for a raw buffer.
+         * Copies **elements**, not their object representation, and preserves the whole
+         * source when the two ranges overlap — the same contract as the std::vector
+         * overloads above and as .NET, whose Array.Copy is specified in terms of `Memmove`.
+         *
+         * @note Unlike the std::vector<T> overloads above, this cannot validate *capacity* -- a
+         * raw pointer carries no length information for either side, matching the same
+         * structural limitation as the other raw-pointer buffer methods across this codebase
+         * (e.g. Buffer::BlockCopy(const void*, ...)). The caller is responsible for ensuring
+         * both buffers are large enough. The former ArrayList::CopyTo(void*, int) precedent is
          * deliberately no longer cited: ticket #1771 removed that raw collection boundary in
          * favour of the length-aware System::Collections::ObjectSpan destination, so it is no
          * longer an example of an accepted limitation.
+         *
+         * @note What that limitation does **not** excuse (SR-AUD-051). This overload used to
+         * `std::memcpy` `length * sizeof(T)` bytes for every `T` and every signed argument.
+         * Measured under AddressSanitizer: `length = -1` cast to `size_t` and reported an
+         * **unknown-crash** in `memcpy`; `srcIndex = -4` reported a **stack-buffer-underflow**;
+         * two `std::string` elements produced a **double-free**, because a byte copy
+         * duplicates the owning pointer instead of assigning the value; and two overlapping
+         * `int` ranges reported **memcpy-param-overlap**, since `memcpy` is not `memmove`.
+         * All four are closed here: the three signed arguments are validated before any
+         * pointer is formed, a null buffer is rejected when it would actually be read or
+         * written, and the copy itself is overlap-aware element assignment, which is correct
+         * for owning element types. See `docs/CoreMemorySafetyFamilyPlan.md` (family CMS-A).
+         *
+         * @param src      Pointer to the source buffer.
+         * @param srcIndex Index of the first element to read.
+         * @param dst      Pointer to the destination buffer.
+         * @param dstIndex Index of the first element to write.
+         * @param length   Number of elements to copy.
+         * @throws System::ArgumentOutOfRangeException if @p srcIndex, @p dstIndex or
+         *         @p length is negative.
+         * @throws System::ArgumentNullException if @p src or @p dst is null while
+         *         @p length is greater than zero. A null pointer with a zero length is the
+         *         ordinary C++ empty-range idiom and is accepted; .NET's Array.Copy rejects a
+         *         null array unconditionally, and that difference is deliberate.
          */
         template<typename T>
         static void Copy(const T* src, intcs srcIndex, T* dst, intcs dstIndex, intcs length) {
-            std::memcpy(dst + dstIndex, src + srcIndex, static_cast<size_t>(length) * sizeof(T));
+            System::ArgumentOutOfRangeException::ThrowIfNegative(srcIndex, "srcIndex");
+            System::ArgumentOutOfRangeException::ThrowIfNegative(dstIndex, "dstIndex");
+            System::ArgumentOutOfRangeException::ThrowIfNegative(length, "length");
+            if (length > 0) {
+                if (src == nullptr) throw System::ArgumentNullException("src");
+                if (dst == nullptr) throw System::ArgumentNullException("dst");
+            }
+            detail::copyOverlapAware(src + srcIndex, static_cast<size_t>(length), dst + dstIndex);
         }
 
         /**
