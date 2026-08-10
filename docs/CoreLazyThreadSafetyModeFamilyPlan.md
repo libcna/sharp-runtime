@@ -274,3 +274,34 @@ Both findings dispositioned in `audit/AUDIT_FINDINGS_INDEX.md` and in the Lazy
 per-file report; #2238 recorded as `needs_user`; zero build warnings; no test
 regression; the before-probe re-run after the repair with every BAD row turned
 OK and the DEVIATION row unchanged and now documented.
+
+---
+
+## 12. Outcome, measured 2026-08-10
+
+Both members landed in one change. The family probe, unchanged between the two
+runs and compiled against the pre-repair header for the "before" column
+(`build-probe/2235_before_include/System/Lazy.hpp`, taken from `git show
+HEAD:…`), moved from **10 OK / 5 BAD / 1 DEVIATION** to **15 OK / 0 BAD /
+1 DEVIATION**. The surviving DEVIATION row is SR-AUD-066's, unchanged by design
+and now documented.
+
+`LazyTests` 60/60 (+13: 8 for #2236, 5 for #2237). Build clean, zero warnings.
+
+Mutation checks, each rebuilt and re-run rather than reasoned about:
+
+| Mutation | Result |
+|---|---|
+| drop `requireValidMode(mode_)` from `Lazy(F&&, LazyThreadSafetyMode)` | 3 tests fail (`InvalidMode_FactoryForm_Throws`, `…_IsCatchableAsSystemException`, `…_ThrowingConstructorLeavesNothingBehind`) |
+| swap to `requireValidMode(); requireFactory();` | 1 test fails (`InvalidMode_FactoryIsCheckedFirst`) |
+| weaken the pinned recursion message | 1 test fails (`RecursiveValueAccess_MessageIsStable`) |
+
+The one mutation deliberately **not** run is disabling `checkNotReentrant()` for
+`PublicationOnly`: that mutation is itself undefined behaviour (a non-recursive
+`std::mutex` re-locked on the owning thread), so it cannot produce a trustworthy
+verdict. #2237's testable surface is the three-mode pin and the message, both of
+which a mutation does reach.
+
+No sanitizer run was used for either verdict, for the reason §10 gives. The
+LeakSanitizer-visible risk — a leaked `std::function` target on the new throwing
+constructor path — is covered by a 1,000-iteration test rather than by a probe.

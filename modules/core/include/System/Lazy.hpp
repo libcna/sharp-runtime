@@ -12,6 +12,7 @@
 #include <thread>
 #include <type_traits>
 #include "System/ArgumentNullException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Threading/LazyThreadSafetyMode.hpp"
 
@@ -27,12 +28,30 @@ namespace System {
      * constructor; the default is ExecutionAndPublication (exactly one thread
      * runs the factory; all others block until it completes).
      *
-     * Deviation from .NET: in real PublicationOnly mode, multiple threads may run the
-     * factory concurrently and race to publish, with the losers' results discarded.
-     * This port instead serializes PublicationOnly behind a mutex (a single factory
-     * call at a time) to avoid data races that would be undefined behavior in C++;
-     * the observable contract that matters for game code - a failed attempt doesn't
-     * poison the instance, and the next access retries - is preserved.
+     * Deviation from .NET (1/2) - PublicationOnly is serialized: in real PublicationOnly
+     * mode, multiple threads may run the factory concurrently and race to publish, with
+     * the losers' results discarded. This port instead serializes PublicationOnly behind
+     * a mutex (a single factory call at a time) to avoid data races that would be
+     * undefined behavior in C++; the observable contract that matters for game code - a
+     * failed attempt doesn't poison the instance, and the next access retries - is
+     * preserved.
+     *
+     * Deviation from .NET (2/2) - PublicationOnly also rejects recursive Value(): a
+     * factory that re-enters getValueProperty()/Value() on the *same* instance gets
+     * System::InvalidOperationException in ALL THREE modes. .NET raises that exception
+     * for None and ExecutionAndPublication only; its PublicationOnly does not detect
+     * recursion at all - the nested access simply invokes the factory again, and the
+     * first publication wins. This port cannot do that as written: the recursive call
+     * would re-lock publicationOnlyMutex_, and re-locking a non-recursive std::mutex from
+     * the thread that already owns it is undefined behavior
+     * ([thread.mutex.requirements.mutex]). Implementing .NET's rule needs either
+     * publish-only locking - which reverses deviation (1/2) above and lets factories run
+     * concurrently again - or a same-thread reentrancy path with a first-publication-wins
+     * discard rule; both also allow an unconditionally recursive factory to recurse
+     * without bound, i.e. they trade a clean catchable exception for stack exhaustion.
+     * The restriction is therefore deliberate and permanent unless ticket #2238 decides
+     * otherwise; SR-AUD-066, docs/CoreLazyThreadSafetyModeFamilyPlan.md section 4.2.
+     * Recursion into a *different* Lazy<T> instance is unaffected and always legal.
      *
      * Note: Lazy<T> is not copyable or movable because it owns synchronization
      * primitives (std::once_flag, std::mutex). Store it as a direct member or
@@ -58,13 +77,6 @@ namespace System {
         mutable std::atomic<bool>          isValueCreated_{false};
         LazyThreadSafetyMode               mode_;
 
-        // Detects the factory recursively accessing Value()/getValueProperty() on this
-        // same instance from the same thread. .NET turns this into a clean
-        // InvalidOperationException; left unguarded, the ExecutionAndPublication path
-        // below would instead deadlock (recursive std::call_once on the same flag from
-        // the same thread is undefined behavior). Must run *before* dispatching into
-        // std::call_once / the lock, since the deadlock happens at that layer, not
-        // inside the factory call itself.
         // Rejects an *empty* std::function factory at construction, the way .NET rejects a
         // null Func<T> (`Lazy.cs`: `ArgumentNullException.ThrowIfNull(valueFactory)`).
         // The `requires` clauses on the three factory constructors only check that the
@@ -78,6 +90,39 @@ namespace System {
             if (!factory_) throw ArgumentNullException("valueFactory");
         }
 
+        // Rejects a LazyThreadSafetyMode value outside the three defined enumerators. .NET
+        // routes every mode-taking constructor through LazyHelper.Create, whose switch has
+        // exactly these three cases and a `default:` that throws
+        // ArgumentOutOfRangeException(nameof(mode), SR.Lazy_ctor_ModeInvalid) -- so an
+        // invalid mode fails at the constructor, before any lazy state exists. Without this
+        // check the value was stored, stayed observable through getModeProperty(), and was
+        // then routed by the `default:` label of getValueProperty()'s switch into the
+        // PublicationOnly arm: the instance did not merely tolerate the invalid value, it
+        // silently acquired another mode's fault-caching contract. Measured before the fix
+        // (build-probe/2235_probe1_before.log): Lazy<int>(static_cast<LazyThreadSafetyMode>(99))
+        // constructed, reported mode 99, and invoked a throwing factory twice.
+        // Ticket #2236 / SR-AUD-064; see docs/CoreLazyThreadSafetyModeFamilyPlan.md.
+        static void requireValidMode(LazyThreadSafetyMode mode) {
+            switch (mode) {
+                case LazyThreadSafetyMode::None:
+                case LazyThreadSafetyMode::PublicationOnly:
+                case LazyThreadSafetyMode::ExecutionAndPublication:
+                    return;
+                default:
+                    throw ArgumentOutOfRangeException(
+                        "mode", "The mode argument specifies an invalid value.");
+            }
+        }
+
+        // Rejects a factory that re-enters Value() on this same instance from this same
+        // thread. See the class doc-comment's deviation (2/2): this fires in all three
+        // modes, where .NET fires it for None and ExecutionAndPublication only, because
+        // the ExecutionAndPublication path would otherwise deadlock (recursive
+        // std::call_once on the same flag from the same thread is undefined behavior) and
+        // the PublicationOnly path would otherwise re-lock a non-recursive std::mutex
+        // (likewise undefined). Must run *before* dispatching into std::call_once / the
+        // lock, since the undefined behaviour is at that layer, not inside the factory call
+        // itself. Ticket #2237 / SR-AUD-066; reopening path is ticket #2238.
         void checkNotReentrant() const {
             if (creatingThreadId_.load(std::memory_order_acquire) == std::this_thread::get_id()) {
                 throw InvalidOperationException("ValueFactory attempted to access the Value property of this instance.");
@@ -157,9 +202,11 @@ namespace System {
          *
          * C++ counterpart of .NET Lazy<T>(LazyThreadSafetyMode mode).
          * @param mode The thread-safety mode to use.
+         * @throws ArgumentOutOfRangeException if @p mode is not one of the three defined
+         *         LazyThreadSafetyMode enumerators, matching .NET's LazyHelper.Create.
          */
         explicit Lazy(LazyThreadSafetyMode mode)
-            : factory_([] { return T{}; }), mode_(mode) {}
+            : factory_([] { return T{}; }), mode_(mode) { requireValidMode(mode_); }
 
         /**
          * @brief Initializes a Lazy<T> with the specified factory and thread-safety flag.
@@ -186,12 +233,17 @@ namespace System {
          * @param mode         The thread-safety mode to use.
          * @throws ArgumentNullException if @p valueFactory is an empty std::function,
          *         matching .NET's null-Func rejection at the constructor boundary.
+         * @throws ArgumentOutOfRangeException if @p mode is not one of the three defined
+         *         LazyThreadSafetyMode enumerators, matching .NET's LazyHelper.Create.
+         *         The factory is checked first, as .NET's
+         *         Lazy(Func<T>, LazyThreadSafetyMode) does.
          */
         template<typename F>
             requires (std::is_invocable_r_v<T, std::decay_t<F>>
                    && !std::is_same_v<std::decay_t<F>, bool>)
         Lazy(F&& valueFactory, LazyThreadSafetyMode mode)
-            : factory_(std::forward<F>(valueFactory)), mode_(mode) { requireFactory(); }
+            : factory_(std::forward<F>(valueFactory)), mode_(mode)
+        { requireFactory(); requireValidMode(mode_); }
 
         // Lazy is not copyable or movable (std::once_flag constraint).
         Lazy(const Lazy&)            = delete;
@@ -217,7 +269,10 @@ namespace System {
          * @return Const reference to the initialized value.
          * @throws Any exception thrown by the factory (propagated to the caller), or
          *         InvalidOperationException if the factory recursively accesses this
-         *         same Value() while it is already running.
+         *         same Value() while it is already running. Note that .NET raises that
+         *         exception for None and ExecutionAndPublication only; this port raises it
+         *         for PublicationOnly too, deliberately - see the class doc-comment's
+         *         deviation (2/2), SR-AUD-066 and ticket #2238.
          */
         [[nodiscard]] const T& getValueProperty() const {
             checkNotReentrant();
@@ -237,6 +292,12 @@ namespace System {
                     if (!isValueCreated_) initValue(/*cacheFaults=*/true);
                     return *value_;
                 }
+                // The two labels stay fused: since ticket #2236 every constructor validates
+                // its mode and Lazy<T> has neither a mode setter nor a copy/move assignment,
+                // so mode_ is always one of the three defined values and `default:` is
+                // unreachable. It used to be the door through which an invalid mode silently
+                // acquired PublicationOnly's contract (SR-AUD-064). Splitting it now would
+                // mean inventing a behaviour for a state construction forbids.
                 case LazyThreadSafetyMode::PublicationOnly:
                 default: {
                     std::lock_guard<std::mutex> lock(publicationOnlyMutex_);
