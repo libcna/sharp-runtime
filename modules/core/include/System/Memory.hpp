@@ -11,6 +11,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/detail/SpanLength.hpp"
+#include "System/detail/OverlapCopy.hpp"
 #include "System/Span.hpp"
 #include "System/ArraySegment.hpp"
 #include "System/ReadOnlyMemory.hpp"
@@ -186,9 +187,9 @@ namespace System {
             if (length_ > destination.length_)
                 throw System::ArgumentException("Memory<T>::CopyTo: destination too short");
             if (data_ == nullptr || length_ == 0) return;
-            std::copy(data_->data() + offset_,
-                      data_->data() + offset_ + length_,
-                      destination.data_->data() + destination.offset_);
+            System::detail::copyOverlapAware(data_->data() + offset_,
+                                             static_cast<std::size_t>(length_),
+                                             destination.data_->data() + destination.offset_);
         }
 
         /**
@@ -201,9 +202,9 @@ namespace System {
         {
             if (length_ > destination.length_) return false;
             if (data_ == nullptr || length_ == 0) return true;
-            std::copy(data_->data() + offset_,
-                      data_->data() + offset_ + length_,
-                      destination.data_->data() + destination.offset_);
+            System::detail::copyOverlapAware(data_->data() + offset_,
+                                             static_cast<std::size_t>(length_),
+                                             destination.data_->data() + destination.offset_);
             return true;
         }
 

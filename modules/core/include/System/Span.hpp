@@ -12,6 +12,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IndexOutOfRangeException.hpp"
 #include "System/detail/SpanLength.hpp"
+#include "System/detail/OverlapCopy.hpp"
 
 namespace System {
 
@@ -182,11 +183,21 @@ namespace System {
          * C++ counterpart of .NET Span&lt;T&gt;.CopyTo(Span&lt;T&gt;).
          * @param destination The span to copy items into.
          * @throws System::ArgumentException if the destination is shorter than this span.
+         *
+         * @note **Overlap-safe (SR-AUD-044, #2216).** .NET requires the entire source to be
+         * copied even when source and destination overlap, as if the source had been
+         * staged in a temporary. A forward `std::copy` does not do that: with the
+         * destination starting inside the source, the first assignments overwrite
+         * elements later ones still have to read, and copying the first three of
+         * `{{a,b,c,d}}` one place right produced `aaaa` instead of `aabc`. The copy now
+         * runs through `System::detail::copyOverlapAware`, which selects the direction
+         * from the operands' addresses. See docs/CoreMemorySafetyFamilyPlan.md (CMS-C).
          */
         void CopyTo(Span<T> destination) const {
             if (length_ > destination.getLengthProperty())
                 throw System::ArgumentException("Destination is too short.");
-            std::copy(ptr_, ptr_ + length_, destination.getPointer());
+            System::detail::copyOverlapAware(ptr_, static_cast<std::size_t>(length_),
+                                             destination.getPointer());
         }
 
         /**
@@ -195,10 +206,14 @@ namespace System {
          * C++ counterpart of .NET Span&lt;T&gt;.TryCopyTo(Span&lt;T&gt;).
          * @param destination The span to copy items into.
          * @return true if the copy succeeded; false if the destination is too short.
+         *
+         * @note Overlap-safe since #2216; see CopyTo(Span<T>). The length check still runs
+         * first, so a `false` return still writes nothing.
          */
         [[nodiscard]] bool TryCopyTo(Span<T> destination) const noexcept {
             if (length_ > destination.getLengthProperty()) return false;
-            std::copy(ptr_, ptr_ + length_, destination.getPointer());
+            System::detail::copyOverlapAware(ptr_, static_cast<std::size_t>(length_),
+                                             destination.getPointer());
             return true;
         }
 
@@ -421,11 +436,14 @@ namespace System {
          * C++ counterpart of .NET ReadOnlySpan&lt;T&gt;.CopyTo(Span&lt;T&gt;).
          * @param destination The span to copy items into.
          * @throws System::ArgumentException if the destination is shorter than this span.
+         *
+         * @note Overlap-safe since #2216; see Span<T>::CopyTo(Span<T>).
          */
         void CopyTo(Span<T> destination) const {
             if (length_ > destination.getLengthProperty())
                 throw System::ArgumentException("Destination is too short.");
-            std::copy(ptr_, ptr_ + length_, destination.getPointer());
+            System::detail::copyOverlapAware(ptr_, static_cast<std::size_t>(length_),
+                                             destination.getPointer());
         }
 
         /**
@@ -434,10 +452,14 @@ namespace System {
          * C++ counterpart of .NET ReadOnlySpan&lt;T&gt;.TryCopyTo(Span&lt;T&gt;).
          * @param destination The span to copy items into.
          * @return true if the copy succeeded; false if the destination is too short.
+         *
+         * @note Overlap-safe since #2216; see Span<T>::CopyTo(Span<T>). The length check
+         * still runs first, so a `false` return still writes nothing.
          */
         [[nodiscard]] bool TryCopyTo(Span<T> destination) const noexcept {
             if (length_ > destination.getLengthProperty()) return false;
-            std::copy(ptr_, ptr_ + length_, destination.getPointer());
+            System::detail::copyOverlapAware(ptr_, static_cast<std::size_t>(length_),
+                                             destination.getPointer());
             return true;
         }
 

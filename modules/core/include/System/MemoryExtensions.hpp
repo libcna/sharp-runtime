@@ -12,6 +12,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Span.hpp"
 #include "System/detail/ComparisonPolicy.hpp"
+#include "System/detail/OverlapCopy.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
@@ -437,7 +438,9 @@ namespace System {
         static void CopyTo(ReadOnlySpan<T> source, Span<T> destination) {
             if (source.getLengthProperty() > destination.getLengthProperty())
                 throw System::ArgumentException("Destination is too short.");
-            std::copy(source.begin(), source.end(), destination.begin());
+            System::detail::copyOverlapAware(source.getPointer(),
+                                             static_cast<std::size_t>(source.getLengthProperty()),
+                                             destination.getPointer());
         }
 
         template<typename T>

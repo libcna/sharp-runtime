@@ -119,8 +119,9 @@ namespace System {
         static void Copy(const std::vector<T>& src, std::vector<T>& dst, intcs length) {
             requireValidRange(static_cast<intcs>(src.size()), 0, length);
             requireValidRange(static_cast<intcs>(dst.size()), 0, length);
-            for (intcs i = 0; i < length; ++i)
-                dst[static_cast<size_t>(i)] = src[static_cast<size_t>(i)];
+            // src and dst may name the SAME vector -- binding one object to a const and a
+            // non-const reference parameter is legal -- so this must be overlap-safe.
+            detail::copyOverlapAware(src.data(), static_cast<size_t>(length), dst.data());
         }
 
         /**
@@ -134,8 +135,10 @@ namespace System {
                          std::vector<T>& dst, intcs dstIndex, intcs length) {
             requireValidRange(static_cast<intcs>(src.size()), srcIndex, length);
             requireValidRange(static_cast<intcs>(dst.size()), dstIndex, length);
-            for (intcs i = 0; i < length; ++i)
-                dst[dstIndex + i] = src[srcIndex + i];
+            // See the three-argument overload: src and dst may be the same vector, and a
+            // forward loop then loses the tail for a rightward copy (SR-AUD-044).
+            detail::copyOverlapAware(src.data() + srcIndex, static_cast<size_t>(length),
+                                     dst.data() + dstIndex);
         }
 
         /**

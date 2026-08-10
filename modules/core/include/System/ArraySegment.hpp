@@ -10,6 +10,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/detail/SpanLength.hpp"
+#include "System/detail/OverlapCopy.hpp"
 
 namespace System {
 
@@ -295,7 +296,11 @@ namespace System {
                                            static_cast<SharpRuntime::longcs>(count_);
             if (static_cast<SharpRuntime::longcs>(destination.size()) < needed)
                 destination.resize(static_cast<size_t>(needed));
-            std::copy(begin(), end(), destination.begin() + destinationIndex);
+            // The destination may BE the backing vector, so this must be overlap-safe
+            // (SR-AUD-044). The pointers are taken after the resize above, so a
+            // reallocation cannot leave them dangling.
+            System::detail::copyOverlapAware(begin(), static_cast<std::size_t>(count_),
+                                             destination.data() + destinationIndex);
         }
 
         /**
@@ -313,7 +318,9 @@ namespace System {
             destination.throwIfDefault();
             if (count_ > destination.count_)
                 throw System::ArgumentException("Destination ArraySegment is too short.");
-            std::copy(begin(), end(), destination.begin());
+            // Two segments over the same vector overlap; see CopyTo(std::vector<T>&, intcs).
+            System::detail::copyOverlapAware(begin(), static_cast<std::size_t>(count_),
+                                             destination.begin());
         }
 
         // -----------------------------------------------------------------------
