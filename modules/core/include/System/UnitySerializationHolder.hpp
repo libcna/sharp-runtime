@@ -23,9 +23,24 @@ namespace System {
      *
      * The .NET type implements ISerializable and IObjectReference (both tied to
      * BinaryFormatter infrastructure); this port omits those interfaces because
-     * BinaryFormatter is not implemented in sharp-runtime.  The public API surface
-     * — the NullUnity constant, GetRealObject(), and GetObjectData() — is
-     * preserved for source-compatibility.
+     * BinaryFormatter is not implemented in sharp-runtime, and because
+     * serialization infrastructure (`[Serializable]`, `SerializationInfo`) is a
+     * permanent deviation of this project rather than an unfinished port.
+     *
+     * @warning **This class is not source-compatible with .NET, and this header
+     * previously claimed that it was.** In .NET the type itself is `internal`,
+     * `NullUnity` and both fields are private, the only constructor takes
+     * `SerializationInfo` plus `StreamingContext`, and `GetObjectData` and
+     * `GetRealObject` take those types too. Here the type, the constant and
+     * accessors for both fields are public, the constructor takes a raw code and
+     * string, and the two methods take no arguments — so an ordinary caller can
+     * fabricate a holder state that .NET only ever builds from a serialization
+     * stream, and C# code written against .NET's signatures does not compile
+     * against this header. Treat this as a project-specific stand-in and do not
+     * rely on its shape: whether to withdraw that surface, which would be a public
+     * source break, or to reintroduce the serialization boundary, which would
+     * reverse the project's permanent serialization deviation, is an open decision
+     * (SR-AUD-137, tickets #2279 and #2281).
      *
      * @note This class is @b obsolete even in .NET 6+ and exists only for
      *       legacy deserialization compatibility.  New code should not use it.
