@@ -236,8 +236,13 @@ TEST(TimeOnlyTests, GetHashCode_SameTime_SameHash) {
               TimeOnly(12, 30, 45, 500).GetHashCode());
 }
 
-TEST(TimeOnlyTests, GetHashCode_DifferentTime_DifferentHash) {
-    EXPECT_NE(TimeOnly(12, 0).GetHashCode(), TimeOnly(13, 0).GetHashCode());
+// Replaces GetHashCode_DifferentTime_DifferentHash: TimeOnly::GetHashCode folds 64 tick bits
+// into 32 (TimeOnly.hpp:267), so unequal times may legally collide
+// (docs/HashAssertionContractRule.md R2). GetHashCode_SameTime_SameHash above owns the contract
+// direction; the value inequality the removed assertion stood in for is asserted here.
+TEST(TimeOnlyTests, DifferentTime_AreUnequal) {
+    EXPECT_FALSE(TimeOnly(12, 0).Equals(TimeOnly(13, 0)));
+    EXPECT_NE(TimeOnly(12, 0), TimeOnly(13, 0));
 }
 
 // ---------------------------------------------------------------------------

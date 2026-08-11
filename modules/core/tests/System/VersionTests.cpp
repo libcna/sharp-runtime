@@ -252,8 +252,16 @@ TEST(VersionTests, GetHashCode_SameVersion_SameHash) {
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
-TEST(VersionTests, GetHashCode_DifferentVersions_DifferentHash) {
-    EXPECT_NE(Version(1, 2, 3, 4).GetHashCode(), Version(1, 2, 3, 5).GetHashCode());
+// Replaces GetHashCode_DifferentVersions_DifferentHash, which asserted that two unequal versions
+// cannot collide. They can, and this is one: Version::GetHashCode packs Revision into 12 bits
+// (`Revision & 0x00000FFF`, Version.hpp:120), so 4 and 4100 land on identical bits while the
+// versions stay unequal. Together with GetHashCode_ZeroVersion_Zero below -- a perfectly legal
+// hash code of zero -- this is the direct evidence for docs/HashAssertionContractRule.md R2/R6.
+TEST(VersionTests, GetHashCode_UnequalVersionsMayCollide) {
+    const Version a(1, 2, 3, 4);
+    const Version wrapped(1, 2, 3, 4 + 0x1000);
+    EXPECT_FALSE(a.Equals(wrapped));
+    EXPECT_EQ(a.GetHashCode(), wrapped.GetHashCode());
 }
 
 TEST(VersionTests, GetHashCode_ZeroVersion_Zero) {

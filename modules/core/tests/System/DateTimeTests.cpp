@@ -530,9 +530,18 @@ TEST(DateTimeTests, GetHashCode_SameTicksMatch) {
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
-TEST(DateTimeTests, GetHashCode_DifferentTicksDiffer) {
+// Replaces GetHashCode_DifferentTicksDiffer, which forbade a collision the contract permits.
+// DateTime::GetHashCode folds 64 tick bits into 32 (`ticks ^ (ticks >> 32)`, DateTime.hpp:386),
+// so collisions are not merely legal, they are reachable -- the second pair below is one. The
+// contract direction is GetHashCode_SameTicksMatch above (docs/HashAssertionContractRule.md R2).
+TEST(DateTimeTests, DifferentTicks_AreUnequal_AndMayShareAHash) {
     DateTime a(1000LL), b(2000LL);
-    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+    EXPECT_FALSE(a.Equals(b));
+    EXPECT_NE(a, b);
+
+    DateTime low(1LL), high(0x100000000LL);
+    EXPECT_NE(low, high);
+    EXPECT_EQ(low.GetHashCode(), high.GetHashCode());
 }
 
 // ---------------------------------------------------------------------------

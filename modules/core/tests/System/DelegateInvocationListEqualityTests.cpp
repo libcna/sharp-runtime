@@ -141,12 +141,13 @@ TEST(DelegateInvocationListEqualityTests, SameEntryPointers_StayEqual) {
 
 // A list whose entries have no comparable target folds exactly the addresses the
 // pre-repair code folded, so its hash is unchanged by this ticket.
-TEST(DelegateInvocationListEqualityTests, LambdaEntryList_HashIsStableAndNonZero) {
+// Stability is this ticket's claim; the removed EXPECT_NE(..., 0u) was not, because zero is a
+// legal hash code and an XOR fold can produce it (docs/HashAssertionContractRule.md R6).
+TEST(DelegateInvocationListEqualityTests, LambdaEntryList_HashIsStable) {
     auto l = Delegate::Combine(std::make_shared<Delegate>([]{}),
                                std::make_shared<Delegate>([]{}));
     ASSERT_TRUE(l);
     EXPECT_EQ(l->GetHashCode(), l->GetHashCode());
-    EXPECT_NE(l->GetHashCode(), 0u);
 }
 
 // ---------------------------------------------------------------------------

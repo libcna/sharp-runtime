@@ -47,9 +47,13 @@ TEST(TupleTests, Tuple1_GetHashCode_Consistent) {
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
-TEST(TupleTests, Tuple1_GetHashCode_Differs) {
+// Replaces Tuple1_GetHashCode_Differs. Unequal tuples may legally hash equally
+// (docs/HashAssertionContractRule.md R2); the tuple hash arithmetic itself is pinned by exact
+// value in TupleTests.cpp, which is a stronger statement than any single inequality.
+TEST(TupleTests, Tuple1_DifferentItems_AreUnequal) {
     System::Tuple1<int> a(1), b(2);
-    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+    EXPECT_FALSE(a == b);
+    EXPECT_TRUE(a == System::Tuple1<int>(1));
 }
 
 // ===========================================================================
@@ -71,9 +75,13 @@ TEST(TupleTests, Tuple2_GetHashCode_SameValues_Equal) {
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
-TEST(TupleTests, Tuple2_GetHashCode_DiffValues_Differ) {
+// Replaces Tuple2_GetHashCode_DiffValues_Differ. The real property behind the (1,2)/(2,1) pair
+// is that tuple EQUALITY is order-sensitive; the hash inequality was standing in for it and is
+// not something the contract guarantees (docs/HashAssertionContractRule.md R2).
+TEST(TupleTests, Tuple2_EqualityIsOrderSensitive) {
     System::Tuple2<int, int> a(1, 2), b(2, 1);
-    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+    EXPECT_FALSE(a == b);
+    EXPECT_TRUE((a == System::Tuple2<int, int>(1, 2)));
 }
 
 // ===========================================================================

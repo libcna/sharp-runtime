@@ -322,17 +322,24 @@ TEST(ArraySegmentTests, GetHashCode_SameSegment_SameHash) {
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
-TEST(ArraySegmentTests, GetHashCode_NonNegative) {
+// Not the general contract -- a signed hash code may legally be negative -- but
+// ArraySegment<T>::GetHashCode deliberately ends with `h & 0x7fffffff` (ArraySegment.hpp:414),
+// so this pins that implementation choice (docs/HashAssertionContractRule.md R5).
+TEST(ArraySegmentTests, GetHashCode_MasksTheSignBit) {
     std::vector<int> v{1, 2, 3};
     ArraySegment<int> seg(v);
     EXPECT_GE(seg.GetHashCode(), 0);
 }
 
-TEST(ArraySegmentTests, GetHashCode_DifferentOffset_DifferentHash) {
+// Replaces GetHashCode_DifferentOffset_DifferentHash. Two segments over one array that differ
+// only in offset are permitted to hash equally (docs/HashAssertionContractRule.md R2); what they
+// are not permitted to do is compare equal, and that is what is asserted.
+TEST(ArraySegmentTests, DifferentOffset_AreUnequal) {
     std::vector<int> v{1, 2, 3};
     ArraySegment<int> a(v, 0, 2);
     ArraySegment<int> b(v, 1, 2);
-    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+    EXPECT_FALSE(a.Equals(b));
+    EXPECT_EQ(a.GetHashCode(), a.GetHashCode());
 }
 
 // ---------------------------------------------------------------------------

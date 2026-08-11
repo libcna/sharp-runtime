@@ -313,8 +313,11 @@ TEST(TupleHashDefinedArithmeticTests, EqualTuplesStillHashEquallyAcrossOverflowi
     // platform-dependent and therefore deliberately not pinned above.
     Tuple2<SharpRuntime::intcs, SharpRuntime::intcs> a(0x03ffffff, 0), b(0x03ffffff, 0);
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
-    EXPECT_NE(a.GetHashCode(), (Tuple2<SharpRuntime::intcs, SharpRuntime::intcs>(
-                                    0x03fffffe, 0).GetHashCode()));
+    // A neighbouring input is a different tuple -- asserted on equality, not on hash codes. The
+    // hash inequality that used to stand here claimed the defined arithmetic cannot collide,
+    // which is not a property it has (docs/HashAssertionContractRule.md R2); the arithmetic
+    // itself is pinned by exact value in the two tests above.
+    EXPECT_FALSE(a == (Tuple2<SharpRuntime::intcs, SharpRuntime::intcs>(0x03fffffe, 0)));
 
     Tuple2<std::string, std::string> s1("alpha", "beta"), s2("alpha", "beta");
     EXPECT_EQ(s1.GetHashCode(), s2.GetHashCode());

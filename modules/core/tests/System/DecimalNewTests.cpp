@@ -101,12 +101,21 @@ TEST(DecimalTests, GetHashCode_DifferentScaleSameValue_SameHash) {
               Decimal::Parse("1.00").GetHashCode());
 }
 
-TEST(DecimalTests, GetHashCode_DifferentValues_DifferentHash) {
-    EXPECT_NE(Decimal(1).GetHashCode(), Decimal(2).GetHashCode());
+// Replaces GetHashCode_DifferentValues_DifferentHash. Unequal decimals are permitted to hash
+// equally (docs/HashAssertionContractRule.md R2) -- Decimal::GetHashCode folds a 128-bit mantissa,
+// a scale and a sign into 31 bits, so it must collide somewhere. The contract direction is the
+// two EXPECT_EQ tests above; the claim the removed assertion stood in for is this one.
+TEST(DecimalTests, DifferentValues_AreUnequal) {
+    EXPECT_NE(Decimal(1), Decimal(2));
+    EXPECT_FALSE(Decimal(1).Equals(Decimal(2)));
 }
 
-TEST(DecimalTests, GetHashCode_NonNegative) {
+// Not the general contract -- a signed hash code may legally be negative -- but
+// Decimal::GetHashCode deliberately ends with `h & 0x7fffffff` (Decimal.hpp:246), so this pins
+// that implementation choice, including for a negative value (docs/HashAssertionContractRule.md R5).
+TEST(DecimalTests, GetHashCode_MasksTheSignBit) {
     EXPECT_GE(Decimal::Parse("3.14").GetHashCode(), 0);
+    EXPECT_GE(Decimal::Parse("-3.14").GetHashCode(), 0);
 }
 
 // ---------------------------------------------------------------------------

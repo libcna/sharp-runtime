@@ -229,10 +229,9 @@ TEST(DateOnlyTests, GetHashCode_MatchesDayNumber) {
     EXPECT_EQ(d.GetHashCode(), d.getDayNumberProperty());
 }
 
-TEST(DateOnlyTests, GetHashCode_DifferentDatesDiffer) {
-    System::DateOnly a(2025, 6, 14), b(2025, 6, 15);
-    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
-}
+// GetHashCode_DifferentDatesDiffer was removed by #2284: GetHashCode_MatchesDayNumber directly
+// above pins the hash to the day number exactly, which is strictly stronger than any statement
+// that two particular dates do not collide (docs/HashAssertionContractRule.md R2/R3).
 
 TEST(DateOnlyTests, ToDateTime_CombinesDateAndTime) {
     DateOnly d(2025, 6, 14);

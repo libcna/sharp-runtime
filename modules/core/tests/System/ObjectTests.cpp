@@ -3,7 +3,6 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <memory>
-#include <climits>
 #include <typeinfo>
 #include "System/Object.hpp"
 #include "System/Type.hpp"
@@ -161,14 +160,14 @@ TEST(ObjectTests, ReferenceEquals_EqualByValue_StillFalse) {
 // GetHashCode
 // ---------------------------------------------------------------------------
 
-TEST(ObjectTests, GetHashCode_IsNonNegativeValue) {
+// A signed hash code may legally be negative, so this is NOT the general contract
+// (docs/HashAssertionContractRule.md R5). It is a deliberate pin on an implementation choice:
+// System::Object::GetHashCode ends with `hash & 0x7fffffff` (Object.cpp:43), clearing the sign
+// bit on every result. It replaces the pair GetHashCode_IsNonNegativeValue /
+// GetHashCode_WithinIntRange, whose second half asserted `int <= INT_MAX` and could not fail.
+TEST(ObjectTests, GetHashCode_MasksTheSignBit) {
     SimpleObj o;
     EXPECT_GE(o.GetHashCode(), 0);
-}
-
-TEST(ObjectTests, GetHashCode_WithinIntRange) {
-    SimpleObj o;
-    EXPECT_LE(o.GetHashCode(), INT_MAX);
 }
 
 TEST(ObjectTests, GetHashCode_Consistent) {
@@ -181,9 +180,16 @@ TEST(ObjectTests, GetHashCode_Override_BasedOnValue) {
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
-TEST(ObjectTests, GetHashCode_Override_DifferentValues_MayDiffer) {
+// The old body asserted EXPECT_NE on the two hash codes although its own name said "MayDiffer".
+// A collision between two unequal values is legal and forbidding it tests the standard library's
+// string hash, not this override (docs/HashAssertionContractRule.md R2). What is asserted is the
+// distinction that really exists -- the override compares by value -- plus the one hash direction
+// the contract owns, which GetHashCode_Override_BasedOnValue covers for the equal case.
+TEST(ObjectTests, GetHashCode_Override_DifferentValues_AreUnequalObjects) {
     NamedObj a("alpha"), b("beta");
-    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+    EXPECT_FALSE(a.Equals(&b));
+    EXPECT_FALSE(b.Equals(&a));
+    EXPECT_EQ(a.GetHashCode(), a.GetHashCode());
 }
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@
 //
 // Tests for System::String static helpers.
 #include <gtest/gtest.h>
+#include <string>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include "System/String.hpp"
@@ -861,8 +862,13 @@ TEST(StringTests, ToCharArray_Range_ZeroLength) {
 TEST(StringTests, GetHashCode_Consistent) {
     EXPECT_EQ(String::GetHashCode("hello"), String::GetHashCode("hello"));
 }
-TEST(StringTests, GetHashCode_DifferentStrings) {
-    EXPECT_NE(String::GetHashCode("abc"), String::GetHashCode("xyz"));
+// Replaces GetHashCode_DifferentStrings, which forbade a collision the contract permits
+// (docs/HashAssertionContractRule.md R2) and in practice only tested libstdc++'s string hash.
+// The direction that matters -- and that a hashed container depends on -- is that equal strings
+// hash equally however they were built.
+TEST(StringTests, GetHashCode_EqualStringsBuiltDifferently) {
+    EXPECT_EQ(String::GetHashCode(std::string("ab") + "c"), String::GetHashCode("abc"));
+    EXPECT_EQ(String::GetHashCode(std::string(3, 'a')), String::GetHashCode("aaa"));
 }
 TEST(StringTests, GetHashCode_EmptyString) {
     EXPECT_EQ(String::GetHashCode(""), String::GetHashCode(""));

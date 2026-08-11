@@ -473,8 +473,15 @@ TEST(TimeSpanTests, GetHashCode_SameTicks_SameHash) {
     EXPECT_EQ(TimeSpan(12345LL).GetHashCode(), TimeSpan(12345LL).GetHashCode());
 }
 
-TEST(TimeSpanTests, GetHashCode_DifferentTicks_DifferentHash) {
-    EXPECT_NE(TimeSpan(12345LL).GetHashCode(), TimeSpan(54321LL).GetHashCode());
+// Replaces GetHashCode_DifferentTicks_DifferentHash. TimeSpan::GetHashCode folds 64 tick bits
+// into 32 (TimeSpan.cpp:219), so collisions are reachable, not merely permitted -- the second
+// pair below is one. GetHashCode_SameTicks_SameHash above owns the contract direction
+// (docs/HashAssertionContractRule.md R2).
+TEST(TimeSpanTests, DifferentTicks_AreUnequal_AndMayShareAHash) {
+    EXPECT_NE(TimeSpan(12345LL), TimeSpan(54321LL));
+
+    EXPECT_NE(TimeSpan(1LL), TimeSpan(0x100000000LL));
+    EXPECT_EQ(TimeSpan(1LL).GetHashCode(), TimeSpan(0x100000000LL).GetHashCode());
 }
 
 // --- NaN handling throws ArgumentException, not ArgumentOutOfRangeException ---

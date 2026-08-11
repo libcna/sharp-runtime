@@ -2,7 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <functional>
 #include "System/Nullable.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 using System::Nullable;
 using System::NullableHelper;
@@ -65,9 +67,16 @@ TEST(NullableTest, GetHashCode_Empty_IsZero) {
     EXPECT_EQ(n.GetHashCode(), 0u);
 }
 
-TEST(NullableTest, GetHashCode_WithValue) {
+// Zero is a legal hash code, and GetHashCode_Empty_IsZero directly above documents one for this
+// very type, so "has a value therefore nonzero" was never the contract
+// (docs/HashAssertionContractRule.md R6): Nullable<int>(0) hashes as std::hash<int>{}(0), which
+// on this toolchain is 0, colliding with the empty state entirely legitimately. What
+// Nullable<T>::GetHashCode does document is that a present value hashes as the wrapped value's
+// default hash.
+TEST(NullableTest, GetHashCode_WithValue_IsTheWrappedValuesHash) {
     Nullable<int> n(42);
-    EXPECT_NE(n.GetHashCode(), 0u);
+    EXPECT_EQ(n.GetHashCode(), static_cast<SharpRuntime::intcs>(std::hash<int>{}(42)));
+    EXPECT_EQ(n.GetHashCode(), Nullable<int>(42).GetHashCode());
 }
 
 TEST(NullableTest, ToString_Empty) {

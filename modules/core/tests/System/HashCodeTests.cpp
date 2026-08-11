@@ -13,9 +13,16 @@
 
 using System::HashCode;
 
-TEST(HashCodeTests, ToHashCode_DefaultIsNonZero) {
+// A hash code of zero is legal (docs/HashAssertionContractRule.md R6), and System::HashCode makes
+// zero genuinely reachable rather than academic: the initial state is `2166136261u ^ GlobalSeed()`
+// (HashCode.hpp:34-39), so one process seed in 2^32 leaves an untouched accumulator holding
+// exactly 0. What a default HashCode does promise is that it is the same for every instance
+// within one process, which is what the seed being per-process rather than per-object means.
+TEST(HashCodeTests, ToHashCode_DefaultIsStableWithinTheProcess) {
     HashCode hc;
-    EXPECT_NE(hc.ToHashCode(), 0);
+    EXPECT_EQ(hc.ToHashCode(), hc.ToHashCode());
+    HashCode other;
+    EXPECT_EQ(hc.ToHashCode(), other.ToHashCode());
 }
 
 TEST(HashCodeTests, Add_SameValuesTwice_SameResult) {
@@ -25,11 +32,20 @@ TEST(HashCodeTests, Add_SameValuesTwice_SameResult) {
     EXPECT_EQ(hc1.ToHashCode(), hc2.ToHashCode());
 }
 
-TEST(HashCodeTests, Add_DifferentValues_DifferentResult) {
-    HashCode hc1, hc2;
-    hc1.Add(1);
-    hc2.Add(2);
-    EXPECT_NE(hc1.ToHashCode(), hc2.ToHashCode());
+// The designed property is that the accumulator depends on the value added at all; two unequal
+// inputs are still permitted to collide. Stated over a family rather than over one pair because
+// the per-process seed makes any single pair non-reproducible across runs
+// (docs/HashAssertionContractRule.md R4). An Add() that discarded its argument -- or a mix() that
+// dropped the xor -- would make every one of these sixteen comparisons agree.
+TEST(HashCodeTests, Add_ResultDependsOnTheValueAdded) {
+    int differing = 0;
+    for (int v = 1; v <= 16; ++v) {
+        HashCode zero, other;
+        zero.Add(0);
+        other.Add(v);
+        if (zero.ToHashCode() != other.ToHashCode()) ++differing;
+    }
+    EXPECT_GT(differing, 0) << "an accumulator that ignored Add()'s argument would give 0 of 16";
 }
 
 TEST(HashCodeTests, Combine1_Consistent) {
@@ -40,8 +56,19 @@ TEST(HashCodeTests, Combine2_Consistent) {
     EXPECT_EQ(HashCode::Combine(1, 2), HashCode::Combine(1, 2));
 }
 
-TEST(HashCodeTests, Combine2_OrderMatters) {
-    EXPECT_NE(HashCode::Combine(1, 2), HashCode::Combine(2, 1));
+// Order sensitivity is the designed property of HashCode::Combine: it is a sequential FNV-1a
+// fold, not a commutative combiner such as xor or addition. Asserted over a family of pairs
+// rather than over Combine(1,2) vs Combine(2,1), because the per-process seed (HashCode.hpp:34-39)
+// makes any individual pair a coin flip that no run is guaranteed to win
+// (docs/HashAssertionContractRule.md R4). A commutative combiner scores 0 here; the real one
+// scores 28.
+TEST(HashCodeTests, Combine2_IsOrderSensitiveNotCommutative) {
+    int swapsThatChangeTheResult = 0;
+    for (int a = 1; a <= 8; ++a)
+        for (int b = a + 1; b <= 8; ++b)
+            if (HashCode::Combine(a, b) != HashCode::Combine(b, a)) ++swapsThatChangeTheResult;
+    EXPECT_GT(swapsThatChangeTheResult, 0)
+        << "a commutative combiner would give 0 of 28 order-sensitive pairs";
 }
 
 TEST(HashCodeTests, Combine3_Consistent) {

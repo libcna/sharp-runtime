@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 #include "System/StringComparer.hpp"
 #include "System/ArgumentException.hpp"
 
@@ -106,9 +107,26 @@ TEST(OrdinalComparerTests, GetHashCode_SameString_SameHash) {
     EXPECT_EQ(cmp.GetHashCode("test"), cmp.GetHashCode("test"));
 }
 
-TEST(OrdinalComparerTests, GetHashCode_CaseSensitive_DifferentCaseDifferentHash) {
-    OrdinalComparer cmp(false);
-    EXPECT_NE(cmp.GetHashCode("ABC"), cmp.GetHashCode("abc"));
+// Replaces GetHashCode_CaseSensitive_DifferentCaseDifferentHash. The comparer's case sensitivity
+// is a genuine designed property, but it lives on Equals/Compare -- pinned by
+// Equals_DifferentCase_False and Compare_CaseSensitive_DifferentCase above -- and a hash
+// inequality is not part of the contract, which only owes agreement in one direction
+// (docs/HashAssertionContractRule.md R2, class B). That obligation is what is checked here, over
+// every pair of a small vocabulary in BOTH modes rather than over one hand-picked pair: a
+// GetHashCode that ignored ignoreCase_ would fail the ignore-case half immediately.
+TEST(OrdinalComparerTests, GetHashCode_AgreesWithEqualsInBothModes) {
+    const std::string words[] = {"ABC", "abc", "AbC", "abd", "", "ABCD"};
+    for (bool ignoreCase : {false, true}) {
+        OrdinalComparer cmp(ignoreCase);
+        for (const std::string& x : words) {
+            for (const std::string& y : words) {
+                if (cmp.Equals(x, y)) {
+                    EXPECT_EQ(cmp.GetHashCode(x), cmp.GetHashCode(y))
+                        << "ignoreCase=" << ignoreCase << " x='" << x << "' y='" << y << "'";
+                }
+            }
+        }
+    }
 }
 
 TEST(OrdinalComparerTests, GetHashCode_IgnoreCase_SameHashForDifferentCase) {

@@ -5,6 +5,10 @@
 // Tests for: System enums, Nullable, Lazy, HashCode, ArraySegment,
 //            Index, Range, ValueTuple, DateOnly, WeakReference.
 #include <gtest/gtest.h>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -219,9 +223,13 @@ TEST(NullableTests, Equals_BothNull_True) {
     EXPECT_TRUE(a.Equals(b));
 }
 
-TEST(NullableTests, GetHashCode_HasValue_NonZero) {
+// Zero is a legal hash code, and this very type documents one for its empty state
+// (GetHashCode_NoValue_IsZero below), so "has a value therefore nonzero" was never the contract
+// (docs/HashAssertionContractRule.md R6). What Nullable<T>::GetHashCode documents is that a
+// present value hashes as the wrapped value's default hash, which is what is asserted.
+TEST(NullableTests, GetHashCode_HasValue_IsTheWrappedValuesHash) {
     Nullable<int> n(42);
-    EXPECT_NE(n.GetHashCode(), static_cast<std::size_t>(0));
+    EXPECT_EQ(n.GetHashCode(), static_cast<SharpRuntime::intcs>(std::hash<int>{}(42)));
 }
 
 TEST(NullableTests, GetHashCode_NoValue_IsZero) {
@@ -368,19 +376,58 @@ TEST(LazyTests, ToString_PrecomputedIsCreated) {
 
 // ===========================================================================
 // HashCode
+//
+// The CombineN_Works tests below pin determinism -- the direction the equals/hash contract
+// actually owns. They used to pin sensitivity too, one argument at a time, with an EXPECT_NE
+// against a neighbouring input. Those seven lines were removed by #2284: System::HashCode mixes
+// a std::random_device seed into its initial state once per process (HashCode.hpp:34-39), so an
+// inequality between two of its results is not reproducible across runs
+// (docs/HashAssertionContractRule.md R4). CombineN_ResultDependsOnEveryArgument replaces them
+// with a statement that covers every argument of every arity instead of only the last.
 // ===========================================================================
+
+namespace {
+/** Calls the HashCode::Combine overload of arity @p n with the first @p n elements of @p v. */
+int combineArity(int n, const std::array<int, 8>& v) {
+    switch (n) {
+        case 1:  return HashCode::Combine(v[0]);
+        case 2:  return HashCode::Combine(v[0], v[1]);
+        case 3:  return HashCode::Combine(v[0], v[1], v[2]);
+        case 4:  return HashCode::Combine(v[0], v[1], v[2], v[3]);
+        case 5:  return HashCode::Combine(v[0], v[1], v[2], v[3], v[4]);
+        case 6:  return HashCode::Combine(v[0], v[1], v[2], v[3], v[4], v[5]);
+        case 7:  return HashCode::Combine(v[0], v[1], v[2], v[3], v[4], v[5], v[6]);
+        default: return HashCode::Combine(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]);
+    }
+}
+} // namespace
 
 TEST(HashCodeTests, Combine1_SameValueSameHash) {
     EXPECT_EQ(HashCode::Combine(42), HashCode::Combine(42));
 }
-TEST(HashCodeTests, Combine1_DifferentValueDifferentHash) {
-    EXPECT_NE(HashCode::Combine(1), HashCode::Combine(2));
+// Every Combine overload must read every argument it is handed. Stated as "some perturbation of
+// argument i changes the result" rather than "this perturbation does": an overload that dropped
+// an argument scores 0 for that (arity, position) pair, while the real implementation scores 8.
+TEST(HashCodeTests, CombineN_ResultDependsOnEveryArgument) {
+    const std::array<int, 8> zeros{};
+    for (int arity = 1; arity <= 8; ++arity) {
+        const int baseline = combineArity(arity, zeros);
+        for (int position = 0; position < arity; ++position) {
+            int perturbationsThatChangeTheResult = 0;
+            for (int value = 1; value <= 8; ++value) {
+                std::array<int, 8> args{};
+                args[static_cast<std::size_t>(position)] = value;
+                if (combineArity(arity, args) != baseline) ++perturbationsThatChangeTheResult;
+            }
+            EXPECT_GT(perturbationsThatChangeTheResult, 0)
+                << "Combine with " << arity << " arguments ignores argument " << position;
+        }
+    }
 }
 TEST(HashCodeTests, Combine2_Works) {
     int h1 = HashCode::Combine(1, 2);
     int h2 = HashCode::Combine(1, 2);
     EXPECT_EQ(h1, h2);
-    EXPECT_NE(h1, HashCode::Combine(2, 1));
 }
 TEST(HashCodeTests, Combine3_Works) {
     int h = HashCode::Combine(1, 2, 3);
@@ -389,7 +436,6 @@ TEST(HashCodeTests, Combine3_Works) {
 TEST(HashCodeTests, Combine4_Works) {
     int h = HashCode::Combine(1, 2, 3, 4);
     EXPECT_EQ(h, HashCode::Combine(1, 2, 3, 4));
-    EXPECT_NE(h, HashCode::Combine(1, 2, 3, 5));
 }
 TEST(HashCodeTests, AddAndToHashCode) {
     HashCode hc;
@@ -403,22 +449,18 @@ TEST(HashCodeTests, AddAndToHashCode) {
 TEST(HashCodeTests, Combine5_Works) {
     int h = HashCode::Combine(1, 2, 3, 4, 5);
     EXPECT_EQ(h, HashCode::Combine(1, 2, 3, 4, 5));
-    EXPECT_NE(h, HashCode::Combine(1, 2, 3, 4, 6));
 }
 TEST(HashCodeTests, Combine6_Works) {
     int h = HashCode::Combine(1, 2, 3, 4, 5, 6);
     EXPECT_EQ(h, HashCode::Combine(1, 2, 3, 4, 5, 6));
-    EXPECT_NE(h, HashCode::Combine(1, 2, 3, 4, 5, 7));
 }
 TEST(HashCodeTests, Combine7_Works) {
     int h = HashCode::Combine(1, 2, 3, 4, 5, 6, 7);
     EXPECT_EQ(h, HashCode::Combine(1, 2, 3, 4, 5, 6, 7));
-    EXPECT_NE(h, HashCode::Combine(1, 2, 3, 4, 5, 6, 8));
 }
 TEST(HashCodeTests, Combine8_Works) {
     int h = HashCode::Combine(1, 2, 3, 4, 5, 6, 7, 8);
     EXPECT_EQ(h, HashCode::Combine(1, 2, 3, 4, 5, 6, 7, 8));
-    EXPECT_NE(h, HashCode::Combine(1, 2, 3, 4, 5, 6, 7, 9));
 }
 TEST(HashCodeTests, AddWithComparer_UsesComparerHash) {
     struct ConstComparer : System::Collections::Generic::IEqualityComparer<int> {
@@ -438,11 +480,20 @@ TEST(HashCodeTests, AddBytes_SameInput_SameHash) {
     hc2.AddBytes(bytes);
     EXPECT_EQ(hc1.ToHashCode(), hc2.ToHashCode());
 }
-TEST(HashCodeTests, AddBytes_DifferentInput_DifferentHash) {
-    HashCode hc1, hc2;
-    hc1.AddBytes({1, 2, 3});
-    hc2.AddBytes({4, 5, 6});
-    EXPECT_NE(hc1.ToHashCode(), hc2.ToHashCode());
+// AddBytes must read the bytes it is given. Stated over a family for the same reason as
+// CombineN_ResultDependsOnEveryArgument: a single pair is not reproducible across process seeds
+// (docs/HashAssertionContractRule.md R4). An AddBytes that ignored its input, or that mixed only
+// the length, would score 0 of 8 here.
+TEST(HashCodeTests, AddBytes_ResultDependsOnTheBytes) {
+    HashCode baseline;
+    baseline.AddBytes(std::vector<uint8_t>{0, 0, 0});
+    int differing = 0;
+    for (uint8_t b = 1; b <= 8; ++b) {
+        HashCode other;
+        other.AddBytes(std::vector<uint8_t>{b, 0, 0});
+        if (other.ToHashCode() != baseline.ToHashCode()) ++differing;
+    }
+    EXPECT_GT(differing, 0) << "an AddBytes that ignored its input would give 0 of 8";
 }
 TEST(HashCodeTests, AddBytes_RawPointer_MatchesVector) {
     uint8_t buf[] = {10, 20, 30};

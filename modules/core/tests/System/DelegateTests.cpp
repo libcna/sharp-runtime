@@ -286,15 +286,18 @@ TEST(DelegateTests, GetHashCode_SingleTarget_Consistent) {
     EXPECT_EQ(d->GetHashCode(), d->GetHashCode());
 }
 
-TEST(DelegateTests, GetHashCode_Multicast_DiffersFromEmpty) {
+TEST(DelegateTests, GetHashCode_MulticastIsStable_AndEmptyIsTheDocumentedZero) {
     auto d1 = std::make_shared<Delegate>([]{});
     auto d2 = std::make_shared<Delegate>([]{});
     auto combined = Delegate::Combine(d1, d2);
     // Not asserting a specific value -- only documented as "XOR-folds the pointer hashes of
-    // its entries", i.e. an implementation detail -- just that it is stable and doesn't
-    // collide with the documented empty-delegate value of 0.
+    // its entries", i.e. an implementation detail -- just that it is stable. The old body also
+    // required the fold to be nonzero, which is not a contract: zero is a legal hash code for
+    // any state (docs/HashAssertionContractRule.md R6), and an XOR fold can reach it. The one
+    // value Delegate::GetHashCode actually documents is the empty delegate's, pinned directly.
     EXPECT_EQ(combined->GetHashCode(), combined->GetHashCode());
-    EXPECT_NE(combined->GetHashCode(), 0u);
+    Delegate empty;
+    EXPECT_EQ(empty.GetHashCode(), 0u);
 }
 
 TEST(DelegateTests, GetTargetProperty_AlwaysNull) {
