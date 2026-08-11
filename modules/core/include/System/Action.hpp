@@ -180,6 +180,10 @@ namespace System {
      * C++ counterpart of .NET System.Converter<TInput, TOutput>.
      * @tparam TInput  The type to convert from.
      * @tparam TOutput The type to convert to.
+     *
+     * Declared identically in `System/Converter.hpp`, which carries the
+     * SR-AUD-126 note: `TOutput` is unconstrained, so `Converter<T, void>` is
+     * the same type as `ActionT<T>` here and is not expressible in .NET at all.
      */
     template<typename TInput, typename TOutput>
     using Converter = std::function<TOutput(TInput)>;

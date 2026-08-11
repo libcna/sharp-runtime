@@ -8,10 +8,41 @@
 namespace System {
 
     /**
+     * @name Func aliases
+     * @{
+     *
+     * @note **Arity is part of the spelling here.** .NET has one overloaded
+     * generic name, `Func<...>`; C++ alias templates cannot overload on
+     * parameter count, so the arity appears in the name — `Func<R>`,
+     * `FuncT<T, R>`, `FuncT2<T1, T2, R>` … `FuncT16<…>`. Ported code changes
+     * spelling with arity, and the result type is always **last**, as in .NET.
+     *
+     * @warning **`R` is unconstrained, so `Func<void>` compiles and is the very
+     * same type as `Action`** — not merely convertible to it, the same type,
+     * because both are aliases of `std::function<void()>`. `Converter<T, void>`
+     * and `ActionT<T>` coincide the same way. .NET keeps the two categories
+     * apart and can do so structurally: `void` is not a permitted C# generic
+     * argument at all, so `Func<void>` does not exist there. **No alias-based
+     * design can restore that distinction** — an alias introduces no new type,
+     * so nothing declared in terms of these names can accept `Action` while
+     * rejecting `Func<void>`, or the reverse. That is SR-AUD-126, and it is
+     * **not** repaired by this note. Constraining `R` to non-`void` is
+     * available (it is a `static_assert` or a constraint away) but it is a
+     * compile-domain public source break — anything downstream spelling
+     * `Func<void>` stops compiling — so it is a decision, ticket #2299, not
+     * something to assume. Until then: prefer `Action`/`ActionT<…>` when you
+     * mean "returns nothing", and do not rely on any API distinguishing the two.
+     */
+
+    /**
      * @brief Encapsulates a method that has no parameters and returns a value
      * of type R.
      *
      * C++ counterpart of the .NET System.Func<TResult> delegate.
+     *
+     * An empty `Func` is callable in the sense that the call compiles; invoking
+     * it throws `std::bad_function_call`, which is `std::function`'s own
+     * diagnostic and not a `System::Exception`.
      */
     template<typename R>
     using Func = std::function<R()>;
@@ -162,5 +193,7 @@ namespace System {
              typename T13, typename T14, typename T15, typename T16, typename R>
     using FuncT16 = std::function<R(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13,
                                      T14, T15, T16)>;
+
+    /** @} */
 
 } // namespace System
