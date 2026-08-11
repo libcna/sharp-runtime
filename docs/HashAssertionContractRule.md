@@ -104,9 +104,20 @@ sampling loop that tolerates failure, never a "likely" in a test name.
 
 Review #2283 recorded **45 hash-inequality assertions in 31 files, plus 7
 nonnegative/nonzero assertions**, and stored no per-site list. #2284's
-implementation scope is therefore re-measured here with a reproducible
-definition, `build-tmp/2284/scan_hash_assertions.py`, which parses whole
-assertion statements (so a site spanning several physical lines counts once).
+implementation scope is therefore re-measured here with an explicit definition,
+stated in full so it can be reproduced without the throwaway probe that ran it
+(`build-tmp/2284/scan_hash_assertions.py`, deleted with the batch's other probe
+artefacts per `CLAUDE.md` build-resource rule 11):
+
+> Over every `.cpp` under `modules/*/tests`, `tests/` and `test/`: find each
+> `EXPECT_*`/`ASSERT_*` macro and take the **whole** parenthesised statement,
+> balanced across newlines and string literals, so a site spanning several
+> physical lines counts once. A statement is a **hash-inequality** site when the
+> macro is `_NE` and both operands are hash-producing expressions
+> (`GetHashCode(`, `ToHashCode(`, `HashCode::Combine(`, `std::hash<...>{}(`,
+> `GetCurrentHashAs*(`, or a local assigned from one). It is a **nonzero /
+> nonnegative** site when the macro is `_NE` against a literal zero, or `_GE`/`_GT`
+> against zero, with one hash-producing operand.
 
 | Measure | #2283 recorded | Re-measured 2026-08-11 |
 |---|---|---|
