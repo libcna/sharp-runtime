@@ -27,6 +27,41 @@ The 70 green direct tests verify only target invocation and list lengths.  The
 MulticastDelegate fixture even labels Combine as producing a shared base
 Delegate, so it does not assert the required dynamic type or mismatch failure.
 
+### Status: CONFIRMED (design-complete) — #2270 review, #2271 `needs_user` (2026-08-11)
+
+Reproduced exactly as filed, against the current tree rather than the audit's
+own probe (which lived under `/tmp` and is gone):
+`combined_dynamic_type_preserved=0`, `mixed_types_accepted=1`,
+`remove_result_dynamic_type` also base `Delegate`. No premise needed
+correction.
+
+**The finding's two halves cannot be separated, and that is measured.** A
+same-type guard alone is not implementable: `Combine(Combine(a,b),c)` presents a
+base `Delegate` and a `MulticastDelegate` to its second step
+(`chained_step2_operand_types_equal=0`), which is the exact shape of two
+currently green fixtures, so `typeid` equality would reject a chain the port
+supports today. A type check is coherent only once results preserve their type.
+
+**Two independent gates, neither of which this session may pass.** (1) A
+*representation* decision: preserving the concrete type needs either a new
+virtual factory on a public polymorphic base — a vtable change, hence an ABI
+break, plus a silent-degradation contract for any subclass that does not
+override it — or the reuse of the existing public virtual `Clone()`, which makes
+`Combine` invoke user-overridable code and copies the left operand's subclass
+state into the result. (2) An *approval*: rejecting a mismatch makes
+`Delegate::Combine` calls that succeed today throw `ArgumentException`, the same
+tightening class as SR-AUD-178/#2269 and the date/time parsers.
+
+One adjacent consequence is carried by #2271 rather than by a separate ticket,
+because it needs the identical decision and is not separately implementable:
+`Equals` is type-blind too (`cross_type_single_equals=1`), where .NET's
+`MulticastDelegate.Equals` begins with `InternalEqualTypes`. It is **not**
+absorbed into this finding's frozen text.
+
+SR-AUD-119 and SR-AUD-120 were reviewed with this finding and are **not** part of
+its cause; see their own sections and `docs/CoreDelegateCompositionContractPlan.md`
+§1. No CCF is minted — a shared file is adjacency, not causation.
+
 ## SR-AUD-119 — medium — Delegate equality compares multicast entries by shared-pointer identity instead of delegate equality
 
 Single plain function pointers receive a special value-equality path
