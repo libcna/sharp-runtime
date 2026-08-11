@@ -52,10 +52,29 @@ class AggregateException : public Exception {
         }
     }
 
-    /** @brief Returns @p exs after rejecting any null entry; see requireNoNullElements(). */
-    static std::vector<std::exception_ptr> validatedInner(std::vector<std::exception_ptr> exs) {
+    /**
+     * @brief Rejects any null entry in @p exs and returns its first element, or a null
+     *        `std::exception_ptr` when @p exs is empty.
+     *
+     * This is the value every constructor that stores inner exceptions hands to the
+     * `Exception(msg, inner)` base constructor, so that the base
+     * `getInnerExceptionProperty()` names the first cause instead of reporting none.
+     *
+     * `System::Exception` documents `getInnerExceptionProperty()` as "the exception that
+     * caused the current exception". Before ticket #2307 every one of this class's six
+     * constructors left that field null while `getInnerExceptionsProperty()` held the
+     * causes -- an aggregate that stored N causes reported none. The frozen SR-AUD-098
+     * text names only the message-taking constructors; measured per constructor, the plain
+     * vector and initializer-list constructors had the identical gap, so the repair is
+     * applied to all of them. See docs/AggregateExceptionCausalPlan.md.
+     *
+     * A base-class initializer is sequenced before every member initializer, so calling
+     * this from the base initializer also moves the null-element rejection ahead of
+     * `innerExceptions_`, without changing which exception type is thrown.
+     */
+    static std::exception_ptr firstValidatedInnerOf(const std::vector<std::exception_ptr>& exs) {
         requireNoNullElements(exs);
-        return exs;
+        return exs.empty() ? std::exception_ptr() : exs.front();
     }
 
     /**
@@ -111,7 +130,7 @@ public:
      * @throws System::ArgumentException if any entry is a null `std::exception_ptr`.
      */
     explicit AggregateException(std::vector<std::exception_ptr> innerExceptions)
-        : Exception(buildMessage(innerExceptions)),
+        : Exception(buildMessage(innerExceptions), firstValidatedInnerOf(innerExceptions)),
           innerExceptions_(std::move(innerExceptions)) {}
 
     /**
@@ -126,7 +145,8 @@ public:
      * @throws System::ArgumentException if any entry is a null `std::exception_ptr`.
      */
     AggregateException(const std::string& message, std::vector<std::exception_ptr> innerExceptions)
-        : Exception(message), innerExceptions_(validatedInner(std::move(innerExceptions))) {}
+        : Exception(message, firstValidatedInnerOf(innerExceptions)),
+          innerExceptions_(std::move(innerExceptions)) {}
 
     /**
      * @brief Initializes a new instance with a message and a single inner exception.
@@ -139,8 +159,8 @@ public:
      * @throws System::ArgumentNullException if @p innerException is null.
      */
     AggregateException(const std::string& message, std::exception_ptr innerException)
-        : Exception(message),
-          innerExceptions_({requireNonNullInner(std::move(innerException))}) {}
+        : Exception(message, requireNonNullInner(innerException)),
+          innerExceptions_({innerException}) {}
 
     /**
      * @brief Gets the read-only collection of inner exceptions that caused this aggregate exception.

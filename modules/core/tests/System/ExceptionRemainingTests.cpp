@@ -315,7 +315,108 @@ TEST(AggregateExceptionTests, MessageAndSingle_Ctor_StoresInner) {
     auto ep = std::make_exception_ptr(std::runtime_error("inner"));
     System::AggregateException ex("outer", ep);
     EXPECT_EQ(ex.getInnerExceptionsProperty().size(), 1u);
+    EXPECT_EQ(ex.getInnerExceptionProperty(), ep);
+    // The bare "outer" is the message this port stores today: the custom-message
+    // constructors do not append the contained diagnostics the way the default-message
+    // constructors do. That asymmetry is SR-AUD-098 clause C2 and is DEFERRED to ticket
+    // #2309, not endorsed here -- closing it requires an object-layout change and .NET
+    // reference text that are both unavailable. See docs/AggregateExceptionCausalPlan.md.
     EXPECT_STREQ(ex.what(), "outer");
+}
+
+// ---------------------------------------------------------------------------
+// AggregateException — the base Exception::innerException_ names the first cause
+// (ticket #2307 / SR-AUD-098 clause C1)
+//
+// System::Exception documents getInnerExceptionProperty() as "the exception that caused
+// the current exception". Every constructor of this class used to leave it null while
+// getInnerExceptionsProperty() held the causes, so an aggregate over N causes reported
+// none. The frozen finding names only the message-taking constructors; measured, all six
+// had the gap. See docs/AggregateExceptionCausalPlan.md.
+// ---------------------------------------------------------------------------
+
+TEST(AggregateExceptionTests, VectorCtor_BaseInnerExceptionIsTheFirstInner) {
+    auto ep1 = std::make_exception_ptr(std::runtime_error("a"));
+    auto ep2 = std::make_exception_ptr(std::runtime_error("b"));
+    System::AggregateException ex(std::vector<std::exception_ptr>{ep1, ep2});
+    EXPECT_EQ(ex.getInnerExceptionProperty(), ep1);
+    EXPECT_NE(ex.getInnerExceptionProperty(), ep2);
+}
+TEST(AggregateExceptionTests, InitializerListCtor_BaseInnerExceptionIsTheFirstInner) {
+    auto ep1 = std::make_exception_ptr(std::runtime_error("a"));
+    auto ep2 = std::make_exception_ptr(std::runtime_error("b"));
+    System::AggregateException ex({ep1, ep2});
+    EXPECT_EQ(ex.getInnerExceptionProperty(), ep1);
+}
+TEST(AggregateExceptionTests, MessageAndVectorCtor_BaseInnerExceptionIsTheFirstInner) {
+    auto ep1 = std::make_exception_ptr(std::runtime_error("a"));
+    auto ep2 = std::make_exception_ptr(std::runtime_error("b"));
+    System::AggregateException ex("outer", std::vector<std::exception_ptr>{ep1, ep2});
+    EXPECT_EQ(ex.getInnerExceptionProperty(), ep1);
+}
+TEST(AggregateExceptionTests, ConstructorsThatStoreNoCause_LeaveTheBaseInnerNull) {
+    EXPECT_EQ(System::AggregateException().getInnerExceptionProperty(), nullptr);
+    EXPECT_EQ(System::AggregateException("outer").getInnerExceptionProperty(), nullptr);
+    EXPECT_EQ(System::AggregateException(std::vector<std::exception_ptr>{})
+                  .getInnerExceptionProperty(),
+              nullptr);
+}
+TEST(AggregateExceptionTests, BaseInnerExceptionIsRethrowableAsTheOriginalLeaf) {
+    auto ep = std::make_exception_ptr(std::invalid_argument("leaf detail"));
+    System::AggregateException ex({ep});
+    ASSERT_TRUE(ex.getInnerExceptionProperty() != nullptr);
+    try {
+        std::rethrow_exception(ex.getInnerExceptionProperty());
+        FAIL() << "expected the stored leaf";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_STREQ(e.what(), "leaf detail");
+    }
+}
+TEST(AggregateExceptionTests, NamingTheFirstCauseDoesNotChangeAnyMessage) {
+    // Control: the C1 repair touches only the base inner-exception field. Every message
+    // this class produced before it is byte-identical after it.
+    auto ep1 = std::make_exception_ptr(std::runtime_error("a"));
+    auto ep2 = std::make_exception_ptr(std::runtime_error("b"));
+    EXPECT_STREQ(System::AggregateException().what(), "One or more errors occurred.");
+    EXPECT_STREQ(System::AggregateException(std::vector<std::exception_ptr>{}).what(),
+                 "One or more errors occurred.");
+    EXPECT_STREQ(System::AggregateException(std::vector<std::exception_ptr>{ep1, ep2}).what(),
+                 "One or more errors occurred. (a) (b)");
+    EXPECT_STREQ(System::AggregateException("outer", std::vector<std::exception_ptr>{ep1}).what(),
+                 "outer");
+    EXPECT_STREQ(System::AggregateException("outer", ep1).what(), "outer");
+}
+TEST(AggregateExceptionTests, NullRejectionKeepsItsExactTypeAndTextAfterC1) {
+    // The C1 repair moved the null-element scan into the base-class initializer, which is
+    // sequenced ahead of innerExceptions_. The exception type, message and paramName that
+    // ticket #1807 / SR-AUD-097 pinned must be unchanged by that move.
+    try {
+        System::AggregateException ex(std::vector<std::exception_ptr>{nullptr});
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentNullException&) {
+        FAIL() << "a null ELEMENT must stay an ArgumentException, not ArgumentNullException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_STREQ(e.what(), "An element of innerExceptions was null.");
+    }
+    try {
+        System::AggregateException ex("outer", std::exception_ptr());
+        FAIL() << "expected ArgumentNullException";
+    } catch (const System::ArgumentNullException& e) {
+        EXPECT_STREQ(e.what(), "Value cannot be null. (Parameter 'innerException')");
+    }
+}
+TEST(AggregateExceptionTests, HandleRethrow_NamesItsOwnFirstUnhandledLeaf) {
+    auto ep1 = std::make_exception_ptr(std::runtime_error("a"));
+    auto ep2 = std::make_exception_ptr(std::runtime_error("b"));
+    auto ep3 = std::make_exception_ptr(std::runtime_error("c"));
+    System::AggregateException ex({ep1, ep2, ep3});
+    try {
+        ex.Handle([&](std::exception_ptr ep) { return ep == ep1; });
+        FAIL() << "expected the unhandled leaves to be rethrown";
+    } catch (const System::AggregateException& out) {
+        ASSERT_EQ(out.getInnerExceptionCountProperty(), 2u);
+        EXPECT_EQ(out.getInnerExceptionProperty(), ep2);
+    }
 }
 TEST(AggregateExceptionTests, GetBaseException_SingleInner_ReturnsInner) {
     auto ep = std::make_exception_ptr(std::runtime_error("leaf"));
