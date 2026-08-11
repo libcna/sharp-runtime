@@ -48,20 +48,39 @@ bool Delegate::Equals(const Delegate& other) const {
         return ta.has_value() && tb.has_value() && *ta == *tb;
     }
     if (la.size() != lb.size()) return false;
-    for (std::size_t i = 0; i < la.size(); ++i)
-        if (la[i].get() != lb[i].get()) return false;
+    // Compare the entries themselves, not the addresses they happen to live at.
+    // CoreCLR's MulticastDelegate.EqualInvocationLists calls each entry's Equals, so two
+    // independently created invocation lists over the same methods are equal. The port
+    // already implements that value comparison for a single target above; this loop used
+    // to decline to ask for it, which made [First, Second] != [First, Second] whenever the
+    // two lists were built from separately allocated entries (SR-AUD-119). Pointer-identical
+    // entries still short-circuit through Equals()'s own `this == &other` fast path, so this
+    // only ever adds equal pairs -- it can never take one away.
+    for (std::size_t i = 0; i < la.size(); ++i) {
+        const Delegate* x = la[i].get();
+        const Delegate* y = lb[i].get();
+        if (x == y) continue;
+        if (!x || !y) return false;
+        if (!x->Equals(*y)) return false;
+    }
     return true;
 }
 
 std::size_t Delegate::GetHashCode() const noexcept {
     // Empty delegate (no target, no list)
     if (!invoke_ && invocationList_.empty()) return 0;
-    // Multicast: fold pointer hashes
+    // Multicast: fold the entries' hash codes.
+    // This folded each entry's ADDRESS until SR-AUD-119 made two invocation lists over the
+    // same methods compare equal; an address fold cannot represent that, so equal lists
+    // would have hashed differently and broken the contract the single-target path above
+    // already honours. The mixing function is deliberately unchanged -- only the hashed
+    // value moved. For an entry with no comparable target GetHashCode() returns
+    // std::hash<const Delegate*>{}(this), i.e. exactly the address this used to fold, so
+    // such lists keep their previous hash.
     if (!invocationList_.empty()) {
         std::size_t h = 0;
-        std::hash<Delegate*> hasher;
         for (const auto& d : invocationList_) {
-            std::size_t p = hasher(d.get());
+            const std::size_t p = d ? d->GetHashCode() : 0u;
             h ^= p + 0x9e3779b9u + (h << 6) + (h >> 2);
         }
         return h;

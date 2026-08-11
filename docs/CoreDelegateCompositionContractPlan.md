@@ -284,7 +284,19 @@ is shown to hold rather than asserted.
 
 ### 7.1 #2272 (SR-AUD-119)
 
-*Recorded by #2272.*
+`build-probe/2270_probe2_after_2272.log`, the identical probe re-run against the
+relinked `build/libsharp_runtime_core.a`.
+
+| Line | Before | After |
+|---|---|---|
+| `119a equal_function_lists_equal` | 0 | **1** |
+| `119a equal_function_lists_hash_equal` | 0 | **1** |
+| `119b different_lists_equal` / `reordered_lists_equal` | 0 / 0 | 0 / 0 |
+| `119c lambda_lists_equal` | 0 | 0 |
+| `119d same_pointer_lists_equal` / `hash_equal` | 1 / 1 | 1 / 1 |
+
+Two cells move, both widenings. Every `118*` cell is byte-identical to §3, and
+so is every `120*` cell — this ticket touches neither.
 
 ### 7.2 #2273 (SR-AUD-120)
 
@@ -339,10 +351,11 @@ matrix in §10.
 source, the affected object is rebuilt with two jobs, and the new tests are run.
 Results are recorded by the owning ticket.
 
-| # | Ticket | Mutation | Expected |
+| # | Ticket | Mutation | Result |
 |---|---|---|---|
-| 1 | #2272 | `Equals` list loop back to `la[i].get() != lb[i].get()` | caught (SR-AUD-119 regressions fail) |
-| 2 | #2272 | `GetHashCode` folds `d.get()` again instead of `d->GetHashCode()` | caught (hash-agreement test fails) |
+| 1 | #2272 | `Equals` list loop back to `la[i].get() != lb[i].get()` | **caught** — 3 tests fail (`build-probe/2272_mutations.log`) |
+| 2 | #2272 | `GetHashCode` folds `d.get()` again instead of `d->GetHashCode()` | **caught** — 3 tests fail |
+| 0 | #2272 | control, unmutated | survived, as required |
 | 3 | #2273 | subsequence scan runs forwards, taking the **first** match | caught (last-occurrence test fails) |
 | 4 | #2273 | subsequence branch drops the `vl.size() > sl.size()` guard | caught (longer-value test fails) |
 | 5 | #2273 | subsequence removal returns a 1-entry multicast instead of the entry | caught (leaves-one test fails) |
@@ -355,5 +368,5 @@ Results are recorded by the owning ticket.
 |---|---|---|
 | #2270 | review | done |
 | #2271 | SR-AUD-118 | `needs_user` — representation route **and** tightening approval, plus the §4.4 `Equals` type-blindness |
-| #2272 | SR-AUD-119 | implementation, compatible, no approval needed |
+| #2272 | SR-AUD-119 | **done** — `remediated`, +13 tests |
 | #2273 | SR-AUD-120 | implementation, compatible, no approval needed |

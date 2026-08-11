@@ -88,12 +88,18 @@ public:
      * @brief Determines whether this delegate equals other.
      *
      * C++ counterpart of .NET MulticastDelegate.Equals(object).
-     * Compares the invocation lists element-by-element by pointer identity.
-     * Single-target delegates compare as equal only when they wrap the same
-     * underlying shared_ptr-managed object.
+     * Multicast delegates are equal when their invocation lists have the same
+     * length and corresponding entries compare equal to each other, so two
+     * independently built lists over the same targets are equal.
      *
-     * @return true if both invocation lists have the same length and
-     *         corresponding entries are pointer-identical.
+     * A single-target delegate is compared by value where C++ permits it: two
+     * delegates wrapping the identical plain function pointer are equal. A
+     * delegate wrapping a lambda or any other closure cannot be compared this
+     * way — C++ defines no equality for closures — so those compare equal only
+     * to themselves. Unlike .NET this comparison does not consider the
+     * delegates' concrete types.
+     *
+     * @return true if the two delegates have equal invocation lists.
      */
     [[nodiscard]] virtual bool Equals(const Delegate& other) const;
 
@@ -103,8 +109,10 @@ public:
      * C++ counterpart of .NET MulticastDelegate.GetHashCode().
      * The hash is derived from the invocation list contents:
      *   - An empty (no-target) delegate returns 0.
-     *   - A single-target delegate hashes its internal callable address.
-     *   - A multicast delegate XOR-folds the pointer hashes of its entries.
+     *   - A single-target delegate hashes the plain function pointer it wraps
+     *     where it wraps one, and its own address otherwise.
+     *   - A multicast delegate XOR-folds the hash codes of its entries, so that
+     *     delegates that compare equal hash equal.
      */
     [[nodiscard]] std::size_t GetHashCode() const noexcept;
 
