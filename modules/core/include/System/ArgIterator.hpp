@@ -17,6 +17,15 @@ namespace System {
      * **Status: STUB** — ArgIterator depends on the CLR `__arglist` keyword,
      * `RuntimeArgumentHandle`, and `TypedReference`, none of which exist in C++.
      * All methods throw NotSupportedException at runtime.
+     *
+     * @note Both constructors are `[[noreturn]]`, and declaring them suppresses the
+     * implicit default constructor, so **no public construction of an ArgIterator can
+     * succeed**: the instance members below are unreachable through the public API. That
+     * is a consequence of the stub, not a separate contract, and whether those members
+     * should become reachable, become `static`, or stay as they are is an open question
+     * (ticket #2276). It is recorded here because a fixture that needs an instance has no
+     * legitimate ordinary route to one, and reaching for raw storage instead is undefined
+     * behaviour rather than a workaround (SR-AUD-112).
      */
     struct ArgIterator {
         /**
