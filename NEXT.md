@@ -5,33 +5,169 @@
 
 *Last verified: 2026-08-11. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
 harness-designated branch**. **Pushed immediately after every commit**, per `CLAUDE.md` rule 13 —
-**four commits, four pushes**, all normal fast-forwards, all **verified present on the remote**:
-`8b9837f`, `0fd560d`, `bdfb9d9`, **and this handoff commit itself**, whose hash cannot be written
-from inside it. No merge, rebase, tag, force-push, PR, publication or history rewrite; every commit
-is unsigned (`git -c commit.gpgsign=false`) — this environment has no usable private signing key.
-This batch **remediated SR-AUD-011** (`Version::ToString(fieldCount)`, #2257 review / #2258),
-**remediated SR-AUD-175** (`BFloat16` float-conversion rounding, #2261 review / #2262), and
-**closed one post-audit defect the first unit's own test matrix discovered** (#2259). **Two findings
-remediated, one new defect found and closed.** Audit **199 remediated / 109 confirmed / 56 confirmed
+**four commits, four pushes**, all normal fast-forwards, all **verified present on the remote** by
+re-reading `origin/<branch>` after each: `7c9c2aa`, `5eede76`, `2b68979`, **and this handoff commit
+itself**, whose hash cannot be written from inside it. No merge, rebase, tag, force-push, PR,
+publication or history rewrite; every commit is unsigned (`git -c commit.gpgsign=false`) — this
+environment has no usable private signing key. This batch **remediated SR-AUD-111**
+(`ModuleHandle.hpp` public-header self-sufficiency, #2263 review / #2264), **remediated SR-AUD-109**
+(`Activator::CreateInstance` construction path, #2265 review / #2266), and **reviewed the
+SR-AUD-177 / SR-AUD-178 pairing and refuted it** (#2267). **Two findings remediated, one
+shared-cause hypothesis disproved.** Audit **201 remediated / 107 confirmed / 56 confirmed
 (design-complete) / 364 total**, recounted **by finding identifier**, unique and contiguous; **no
-`SR-AUD-*` identifier created — numbering frozen at 364.** `modules/core` open **48 → 46**. Gate
-**16,836 tests across 38 executables: 16,828 passing, 2 skipped, 6 failing** for the same two
-inherited causes — **exactly +35 on the inherited 16,801, which is precisely this batch's own new
-tests (15 + 3 + 17), so no regression anywhere.** SR-AUD-011's matrix went **48 OK / 8 BAD → 56 OK /
-0 BAD** over every (defined-component-count, `fieldCount`) pair, with the `OK`-cell diff showing
-**additions only**; SR-AUD-175's went **14 OK / 12 BAD → 26 OK / 0 BAD** over exact float bit
-patterns. Graph **41 / 92**, seams **3 / 20**, negative fixtures **15 / 126** (141 invocations, peak
-2 jobs), catalogue current, build **0 errors / 0 warnings**. **Selective components was NOT rerun**,
-and §7 states why: nothing in this batch touched a module boundary, the component catalogue or the
-dependency graph, all three of which were revalidated unchanged. **Doxygen, `ccache` and the `/rv`
+`SR-AUD-*` identifier created — numbering frozen at 364.** `modules/core` open **46 → 44**. Gate
+**16,856 tests across 38 executables: 16,848 passing, 2 skipped, 6 failing** for the same two
+inherited causes — **exactly +20 on the inherited 16,836, which is precisely this batch's own new
+tests (6 + 14), so no regression anywhere.** The 38-executable total came from
+`build-tmp/full_gate.sh`, which runs every executable individually and continues past failures;
+both repository runners stop at the first failing executable and **cannot** produce a complete
+total. Its printed `skipped` field triple-counts (per-test line, summary header, listing), so the
+**true skip count is 2**, which the arithmetic confirms: 16,848 + 6 + 2 = 16,856. SR-AUD-111 moved
+`modules/core` public-header self-sufficiency from **222/223 to 223/223**, measured over every one
+of the 223 headers; SR-AUD-109 changed the compile domain by **zero losses and one widening**,
+measured over twelve type categories. Graph **41 / 92**, seams **3 / 20**, negative fixtures **16 /
+128** (144 invocations, peak 2 jobs) — **+1 fixture, +2 sites**, the only inherited-baseline number
+this batch moved. Catalogue current, build **0 errors / 0 warnings**, `git diff --check` clean,
+tracked `__pycache__` byte-identical. **Selective components was NOT rerun**, and §8 of each plan
+states why: SR-AUD-111's new include is **intra-component** (`Core.Base` → `Core.Base`) and nothing
+in this batch touched a module boundary, the component catalogue or the dependency graph, all three
+of which were revalidated unchanged. **No sanitizer run**, deliberately: one defect is a
+translation-time constraint violation and the other is compile-time constructor selection, neither
+of which has a runtime component a sanitizer can observe. **Doxygen, `ccache` and the `/rv`
 reference tree are all absent** and were not installed. **No CCF minted, extended or closed:
 CCF-011 stays closed, CCF-019 stays open and unextended, CCF-021/#2131 and CCF-022/#2109 stay
-unminted.** #2246, #2250, #2252, #2255, #2215, #2228, #2238, #1773, #1962 and every other inherited
-blocked/`needs_user` ticket are exactly as inherited. **Two findings were deliberately rejected from
-this batch and stay `confirmed` and unclaimed: SR-AUD-063** (a public source break needing approval)
-**and SR-AUD-176** (a large additive API port, rejected even though it shares a header with the
-finding that was repaired). **The `modules/timers` and `modules/threading` runner-ups remain STALE.**
-See the batch record below.*
+unminted.** #2246, #2250, #2252, #2255, #2260, #1773, #1962 and every other inherited
+blocked/`needs_user` ticket are exactly as inherited. **Three findings were deliberately left
+`confirmed`: SR-AUD-063** (a public source break needing approval), **SR-AUD-176** (a large additive
+API port), **and SR-AUD-053** (still deferred, not absorbed into unrelated `Version` work).
+**SR-AUD-177 and SR-AUD-178 are also still `confirmed`**, now with separate owners — #2268
+(deferred on evidence) and #2269 (`needs_user`) — because the review found they do **not** share a
+cause. **The `modules/timers` and `modules/threading` runner-ups remain STALE.** See the batch
+record below.*
+
+---
+
+## Batch record — the `ModuleHandle` self-sufficiency and `Activator` construction-path singletons, and the `IntegerNumberStylesParser` pairing review (#2263–#2269)
+
+**Two frozen findings remediated, one pairing hypothesis refuted.** Three review tickets, two
+implementation tickets, two new owner tickets for a pair that was found not to be a pair.
+
+### 1. SR-AUD-111 — `ModuleHandle.hpp` could not be included on its own (#2263 review, #2264)
+
+`ModuleHandle.hpp` forward-declared `RuntimeTypeHandle` and then **defined** `ResolveTypeHandle`
+with that incomplete type as its return type. [dcl.fct]/12 forbids exactly that for a definition
+though it permits it for a declaration, so a translation unit whose only include was this public
+header failed at `ModuleHandle.hpp:41`. `RuntimeTypeHandle.hpp` masked it by completing itself
+before including this header — which is why `Batch15TypesTests.cpp` (`RuntimeTypeHandle.hpp` at
+line 8, this header at line 11) could never observe the fault.
+
+The repair declares the method in-class and defines it after a deferred
+`#include "System/RuntimeTypeHandle.hpp"`, mirroring the idiom `RuntimeTypeHandle.hpp:67-73`
+already used for the other half of the same cycle, so **either** header may now be named first.
+Both are `Core.Base`, so the edge is **intra-component**: no new component dependency, graph
+unchanged at 41/92.
+
+**Premise refinement the finding does not state.** Whether the defect was systemic was *measured*,
+not assumed: every one of the 223 `modules/core` public headers was compiled as the sole include of
+its own translation unit, and **222 were already self-sufficient** — this header the only
+exception, all five sibling handle headers clean. SR-AUD-111 is therefore a **true singleton**, and
+**no ordinary defect ticket is owed for a neighbouring header** because there is no affected
+neighbour. After the repair the sweep reads **223/223**.
+
+Regression coverage is `ModuleHandleStandaloneIncludeTests.cpp`, whose **first** include — ahead of
+`<gtest/gtest.h>` — is the header under test. Four mutations: reverting the in-class body, hoisting
+the deferred include above the class (which fails at `RuntimeTypeHandle.hpp:71`, confirming the
+placement is load-bearing) and deleting the deferred include are all **caught**; restoring the
+masking include order compiles and is labelled **equivalent by design**, which is the mutation that
+justifies the comment forbidding a reorder. Behaviour, layout and symbols were diffed from one
+probe source compiled against both header revisions in the same include order: `sizeof`/`alignof`
+1/1, message byte-identical, `noexcept` surface unchanged, symbol table identical. **+6 tests.**
+`docs/CoreModuleHandleHeaderSelfSufficiencyPlan.md`.
+
+### 2. SR-AUD-109 — `Activator::CreateInstance` chose the wrong constructor (#2265 review, #2266)
+
+`CreateInstance<T, Args...>` returned `T{std::forward<Args>(args)...}`, and a braced-init-list
+considers `initializer_list` constructors before every other candidate, so
+`CreateInstance<std::vector<int>>(3, 7)` built `{3, 7}` rather than three sevens while
+`CreateInstancePtr` reached the intended constructor through `make_unique`. **Perfect forwarding
+was never at fault** — value category, move-only arguments, explicit constructors and constructor
+exception propagation are all measured identical.
+
+**The audited repair was not implemented, and that is the review's main result.** Measured over
+twelve type categories, switching unconditionally to parentheses **stops four categories that
+compile today from compiling** — `std::array<int,3>(1,2,3)`, nested-aggregate brace elision,
+`std::vector<int>(1,2,3)` and any `initializer_list`-only type — and additionally starts silently
+**accepting** narrowing conversions braces reject. Under the SR-AUD-063 precedent that is an
+approval boundary. **No ticket is opened for it**, because #2266 already repairs the finding's
+actual complaint.
+
+#2266 forwards to a constructor only where the type has one:
+`is_class_v<T> && !is_aggregate_v<T> && is_constructible_v<T, Args...>` selects `T(...)`, everything
+else keeps `T{...}`. An aggregate has no constructor to forward to, and braces alone carry brace
+elision and still refuse to narrow. The repaired contract, stated exactly: **wherever both creation
+forms are well-formed they now construct identically**; where only the value form is, it keeps
+today's behaviour. That domain asymmetry is **pre-existing** — `make_unique` uses parentheses and
+already rejected all four categories, verified by real instantiation — and the audited repair would
+have "resolved" it by deleting capability. **Zero compile-domain losses; one widening**,
+`std::string(3,'x')`, ill-formed under braces only because the `3` is a forwarded parameter rather
+than a constant expression, which the pointer form already accepted, so it **removes** a
+value/pointer disagreement.
+
+**No first-party production call site exists**; all seven pre-existing `ActivatorTests` pass
+unmodified. **+14 tests**, plus `test/consumer/core_activator_construction_negative.cpp` (2 sites)
+pinning that narrowing stays rejected for aggregates and scalars. Four mutations, **all caught,
+none equivalent** — including unconditional parentheses, which fails on `std::array` **and** makes
+both negative sites compile, the repository's own tooling measuring the source break; and dropping
+either conjunct, each of which flips **exactly one** site, proving both are load-bearing.
+
+**A measurement error was caught mid-review and is recorded.** A SFINAE probe on `CreateInstance`
+reports every call well-formed, because both overloads are unconstrained so an ill-formed body is a
+hard error rather than a substitution failure; the compiler caught it when two assertions failed.
+The same error had made an earlier `std::make_unique` domain measurement wrong, and every such
+claim was re-measured by real instantiation. `docs/CoreActivatorConstructionPathPlan.md`.
+
+### 3. SR-AUD-177 / SR-AUD-178 — the pairing is refuted (#2267 review only)
+
+The inherited ranking paired the two `IntegerNumberStylesParser.hpp` findings and asked for the
+shared cause to be verified first. **It is false. They are adjacent, not a family.** Both
+reproducers were verified against the current parser: `TryParse("1E2"/"1E+2"/"1e2", AllowExponent)`
+all return `false`/`0`; `Parse("42", (NumberStyles)0x8000)` returns `42`; `Parse("2A", HexFloat)`
+returns hexadecimal `42`.
+
+| | SR-AUD-177 | SR-AUD-178 |
+|---|---|---|
+| Defect | a grammar production never written | a precondition check that does not exist |
+| Direction | **widens** what is accepted | **tightens** what is accepted |
+| Authority | none needed | an explicit compatibility decision |
+| Owner | **#2268**, deferred on evidence | **#2269**, `needs_user` |
+
+They do not interact: .NET's `ValidateParseStyleInteger` does not reject `AllowExponent`, which is
+inside the valid mask. A common file and a common `style` parameter are adjacency, not causation,
+so **no CCF is minted**.
+
+**Premise correction, fixed in the header.** The parser's scope comment called `AllowExponent` a
+"non-gap" because only `Float`/`HexFloat` carry it and those "don't apply to integer types". This
+port's own `NumberStyles::Any` is `0x1FF` and **includes** `AllowExponent` `0x80`, so
+`Int32::Parse("1E2", NumberStyles::Any)` throws where .NET returns `100`. It is a real gap across
+all eight wrappers.
+
+**SR-AUD-177 was not implemented despite being compatible**, and the reason is deliberate: an
+exponent grammar must agree with .NET on how the exponent folds into `number.scale` and how that
+meets the significant-digits-exceed-scale overflow rule this file documents as *confirmed against
+the source, not guessed* — which decides `"1.5E1"`, `"100E-2"` and `"1E-2"`. The reference source
+is unavailable, and a partial grammar would replace a documented uniform absence with an
+undocumented partial divergence. #2268 follows the #2260/#2252 deferred-verification precedent.
+
+### 4. Ranked next work
+
+1. **#2268 / SR-AUD-177** once reference evidence or a bounded-subset decision exists — the
+   strongest Core candidate on impact (eight wrappers), and compatible.
+2. **Delegate SR-AUD-118 / 119 / 120** — still requires a dedicated bounded review first; not
+   started, deliberately, and not to be entered directly.
+3. Another small unclaimed Core singleton from the remaining **44**.
+4. **SR-AUD-053** — still LOW, a single constant, still deferred.
+5. Blocked/design-heavy work (**#2255**, **#2250**, **#2246**, **#2269**) stays blocked; severity
+   alone does not promote it.
 
 ---
 
