@@ -269,3 +269,53 @@ positive — and each of the four ways to express "no value" costs a source
 break, a silent behaviour change, or incompleteness. `SetEnvironmentVariable`
 has **zero** first-party production call sites outside `Environment` itself,
 which does not authorise a source break in a published header.
+
+## SR-AUD-105 review, 2026-08-11 (#2319) — still confirmed, nothing implemented
+
+`docs/CoreSpecialFolderPolicyReview.md`. Reviewed **alone**: it shares this file
+with SR-AUD-106 and was excluded by the same sentence of #2239, but that is
+adjacency, not a cause. No CCF minted or extended, and no inference was drawn
+about SR-AUD-106's unverified empty-value premise while reviewing this.
+
+**All four clauses reproduce live** (`build-probe/2319_probe1_specialfolder.cpp`,
+linked against the shipped library with `HOME` pinned): absolute
+`XDG_CONFIG_HOME`/`XDG_DATA_HOME` change nothing (`honoured=0`, and no `XDG_`
+string exists anywhere in this repository); `None`, `DoNotVerify`, `Create` and
+an undefined `0x1234` all return the same string with no throw; `Create` does
+not create and `None` returns a path that is not on disk; and `0x0001`,
+`0x0003`, `0x0FFF`, `-1`, `999` all return `""`.
+
+**Premise correction — `default:` is not the undefined-value path.** The enum
+declares **47 enumerators / 46 distinct values** (`Personal` == `MyDocuments` ==
+`0x0005`), and **32 of the 46 defined values also fall through to
+`default: return ""`**; only **14** are mapped. An empty return therefore
+already carries the meaning *defined, but this platform has no such folder*.
+So C4 cannot be repaired the way SR-AUD-064 was — there the enum had three
+values and `default:` was unambiguously the error path, whereas here definedness
+must be enumerated **separately from mappability**: 46 accepted values, 14
+undefined holes inside `0x0000`–`0x003B` alone, plus everything outside it.
+That is a table, not a guard, and it makes
+`docs/CoreEnvironmentCompatibleSlicePlan.md`'s "same shape as SR-AUD-064" note
+an even weaker analogy than that plan already treated it as.
+
+**Consumer surface: none in production.** The only in-repository callers are
+`Environment::getSystemDirectoryProperty()` — itself called only from a test —
+and `EnvironmentTests`; `modules/io-isolated-storage` resolves its own paths.
+Every clause is therefore priced for downstream consumers, not for this
+repository. Two existing tests deliberately pin the behaviour a repair would
+change: `GetFolderPath_WithNone_SameAsWithout` and
+`_WithDoNotVerify_SameAsWithout`.
+
+**Split by blocker.** **#2320 (`needs_user`)** carries C1 and C3, which are
+**policy**: honouring XDG moves where a shipped build reads and writes user
+data on any host that sets those variables, and the finding names only two
+variables while the port also maps `Desktop`, `MyMusic`, `MyPictures`,
+`MyVideos` and `Templates` that .NET resolves through
+`~/.config/user-dirs.dirs`, so *how far* is as much a question as *whether*;
+and C3 would put a `stat` and a `mkdir -p` inside a `[[nodiscard]] static
+std::string` getter. **#2321 (`todo`, deferred)** carries C2 and C4, which are
+**evidence-blocked on .NET's exact exception identity** (type, message,
+`paramName`) with `/rv` absent — the same class as #2252/#2260 — and which
+follow #2320, because .NET validates the option precisely because it acts on
+it. No XDG semantics were assumed beyond the frozen finding's own wording and
+no message text was invented. SR-AUD-105 stays `confirmed`.
