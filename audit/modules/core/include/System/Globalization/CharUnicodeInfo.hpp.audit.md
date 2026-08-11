@@ -69,3 +69,56 @@ numeric/category methods describe.
 
 The header has two confirmed Unicode-data/category defects (SR-AUD-173 and
 SR-AUD-174).  No source or test was modified.
+
+
+## SR-AUD-174 review, 2026-08-11 (#2314) — still confirmed, split by data dependency
+
+`docs/CoreUnicodeCategoryTablePlan.md`. Re-verified against live source: the
+header is 182 lines and contains **no Unicode data**; the `isw*` ladder can name
+at most **8 of `UnicodeCategory`'s 30** values, so every mark, symbol,
+non-`Other` punctuation class, `PrivateUse`, `Surrogate` and `Format` code point
+is reported `OtherNotAssigned`.
+
+**Ownership premise corrected.** SR-AUD-174 was believed to have no ticket
+reference at all. It has one — #1766 names it as the compressed run
+`SR-AUD-173/174`, which a `LIKE '%SR-AUD-174%'` scan cannot see. #1766 is the
+audit that discovered it, not an owner, so the finding was indeed unowned; but
+the same search defect was hiding others, and expanding those runs is what
+produced #2317.
+
+**Not wholly a table port.** Two clauses need no Unicode data and are #2316:
+
+* **Locale dependence.** `isw*` are locale-sensitive, and this repository itself
+  installs a non-invariant global locale under an RAII guard in
+  `CultureInvariantFormattingTests`. On a host where those locales exist, the
+  same source returns different categories for the same code point — a
+  reproducibility defect independent of any Unicode version, and undocumented:
+  the header states only the non-BMP limitation. That the suite *skips* here
+  (one of the gate's two skips) confirms this container has no locales
+  installed, exactly as the finding assumes.
+* **Surrogates.** `Char::IsSurrogate` is `c >= 0xD800u && c <= 0xDFFFu`
+  (`Char.hpp:245`), so this port already asserts in-repo that those code points
+  are surrogates, while `GetUnicodeCategory` answers `OtherNotAssigned` — *not
+  assigned* — for the same input. **The header contradicts itself**, provably,
+  with no external reference; and this report's own managed probe already
+  records the expected `16 (Surrogate)`.
+
+**Evidence boundary, carried into #2316.** The same probe records
+`17 (PrivateUse)` for U+E000, but that is **one code point**, and no private-use
+range constant exists anywhere in this repository — unlike the surrogate range,
+which `Char.hpp` fixes. Extending U+E000 to a range would be an inference from
+the encoding architecture, not a repository fact, and must be treated as one.
+
+**The table clause is #2315 (`blocked`), and its decision is already open.**
+There is no Unicode character database here — no `UnicodeData.txt`, no
+`DerivedGeneralCategory.txt`, no generated table, no generator;
+`System/Text/Unicode/UnicodeRanges.hpp` is named **block** data and cannot
+answer category questions. The approval required is already worded as
+**Approval F / ticket #2018** (`blocked`) for `System::Text::Rune`: a generated
+Unicode category table *including its data source, its attribution, and a
+stated Unicode version with a policy for updating it*. `CharUnicodeInfo` is a
+second consumer of that one decision, so it is gated on it rather than asked
+again. **No Unicode data was hand-authored**, for the reason #2018 records: a
+partial or remembered table is worse than a declared reduction, because it is
+wrong where no test looks. SR-AUD-173, the sibling numeric finding in this
+report, shares the same dependency and is claimed by #2317, not by this review.

@@ -215,3 +215,57 @@ SR-AUD-105 and SR-AUD-106 in this same report remain **confirmed and unclaimed**
 design entangled with option semantics, filesystem verification and directory
 creation from a getter. The report's four "other missing assertions" bullets are
 likewise untouched.
+
+## SR-AUD-106 review, 2026-08-11 (#2311) — still confirmed, one clause closed
+
+`docs/CoreEnvironmentEmptyValuePlan.md`. SR-AUD-105 keeps its status above;
+SR-AUD-106 is now owned, and the paragraph above needs three corrections.
+
+**The named remedy is a source break, not an addition.** "A public signature
+change (an `std::optional<std::string>` overload or equivalent)" reads as
+additive. Measured (`build-probe/2311_probe2_optional_overload.cpp`), adding
+that overload beside the current one makes `SetEnvironmentVariable("A", "b")`
+**ambiguous** — `const char*` converts to `const std::string&` and to
+`std::optional<std::string>` by equal-rank user-defined conversions — so every
+string-literal call site stops compiling, not only the ones that wanted
+deletion. Of the four options measured in the plan §6.2, this is the one that
+breaks the most source.
+
+**The defect is not confined to the setter.** `GetEnvironmentVariable` returns
+`std::string` and answers `""` for a present-empty variable and for an absent
+one alike (`indistinguishable=1`), which `Environment.hpp:243-252` states as a
+deliberate port-wide "empty-string null-equivalent" convention. Repairing the
+setter alone would leave a state that the matching getter still cannot read.
+
+**`GetEnvironmentVariables()` already represents the state.** `splitEnvEntry`
+rejects only a missing `=` and a leading `=`, so an empty value survives
+(`map_contains_present_empty=1`, `map_value_len=0`), and the platform supports
+it (`os_setenv_empty_in_block=1`). The observability channel exists; only the
+two single-name members conflate.
+
+**This report's test claim is wrong, and in the more dangerous direction.**
+`EnvironmentTests.Set_Empty_RemovesVar` did not "lock the incompatible
+behavior": its whole assertion was `GetEnvironmentVariable(...).empty()`, which
+by the paragraph above holds whether the key was removed, was left present with
+an empty value, or was never set. Changing `SetEnvironmentVariable` to store an
+empty value would have left the entire suite green — measured, as mutation 1
+below.
+
+**Test clause remediated (#2312), test-only.** Removal is asserted through
+`GetEnvironmentVariables()` membership, and a POSIX-guarded companion pins that
+an out-of-band empty value survives in the map while the getter cannot
+distinguish it from absence. +1 test. Two valid mutations, two caught, each by
+the test written for it: storing instead of removing fails the membership
+assertion at line 163 **while the old getter assertion still passes**, and
+dropping empty-valued entries from the map fails the companion. No production
+file, signature, layout, vtable, `noexcept`, symbol or component-dependency
+change; sanitizers deliberately not run — nothing here involves memory,
+lifetime, threading or overflow.
+
+**Representational clause deferred to #2313 (`needs_user`)** on two independent
+grounds: the .NET premise is unverified and load-bearing — if .NET treats an
+empty value as `null`, this port is already correct and SR-AUD-106 is a false
+positive — and each of the four ways to express "no value" costs a source
+break, a silent behaviour change, or incompleteness. `SetEnvironmentVariable`
+has **zero** first-party production call sites outside `Environment` itself,
+which does not authorise a source break in a published header.
