@@ -11,6 +11,20 @@ namespace System {
      * C++ counterpart of .NET System.LoaderOptimization.
      * Note: multi-domain and domain-mask values are legacy; modern .NET uses a
      * single AppDomain.
+     *
+     * @warning **The `@deprecated` tags below are prose, not a compiler
+     * diagnostic.** .NET marks `DomainMask` and `DisallowBindings` with
+     * `Obsolete`, so naming either in C# produces a compiler warning; naming
+     * either here compiles silently, because the declarations carry a Doxygen
+     * tag rather than C++ `[[deprecated]]`. That is the whole of SR-AUD-117, and
+     * it is **not** repaired by this note: adding `[[deprecated]]` turns every
+     * use into a hard error under this repository's own `-Wall -Wextra -Werror`
+     * (measured), so it can break a consumer build and needs a decision this
+     * repository has not taken — see ticket #2289, which also covers the three
+     * other prose-only deprecations in this port
+     * (`AppDomain::GetCurrentThreadId`, `CultureTypes::WindowsOnlyCultures`,
+     * `CultureTypes::FrameworkCultures`). Until then, treat the tags as advice
+     * your compiler will not repeat.
      */
     enum class LoaderOptimization {
         /** @brief No optimization is specified. */
