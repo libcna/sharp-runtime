@@ -9,7 +9,9 @@ namespace System {
 
 using SharpRuntime::intcs;
 
-// Forward declaration — full definition in RuntimeTypeHandle.hpp (included by callers).
+// Forward declaration — the definition arrives with the deferred include at the
+// bottom of this header, which is what lets ModuleHandle and RuntimeTypeHandle
+// refer to each other by value without either header having to be included first.
 struct RuntimeTypeHandle;
 
 /**
@@ -37,12 +39,33 @@ struct ModuleHandle {
 
     // Token-resolution methods — all throw NotSupportedException.
 
-    /** @brief Not supported — throws NotSupportedException. */
-    [[noreturn]] RuntimeTypeHandle ResolveTypeHandle([[maybe_unused]] intcs typeToken) const {
-        throw System::NotSupportedException("ModuleHandle.ResolveTypeHandle is not supported.");
-    }
+    /**
+     * @brief Not supported — throws NotSupportedException.
+     *
+     * Only declared here: a function *definition* needs a complete return type
+     * ([dcl.fct]/12), while a declaration does not, so the body is deferred to
+     * the bottom of this header.
+     */
+    [[noreturn]] RuntimeTypeHandle ResolveTypeHandle([[maybe_unused]] intcs typeToken) const;
 };
 
 inline const ModuleHandle ModuleHandle::EmptyHandle{};
+
+} // namespace System
+
+// Deferred: include RuntimeTypeHandle so that ResolveTypeHandle() can be defined
+// with a complete return type. RuntimeTypeHandle.hpp defers its GetModuleHandle()
+// body across the same cycle in the same way, so whichever of the two headers a
+// translation unit names first, the other is fully defined before either body is
+// compiled and both headers stand alone. Do not move this include above the
+// definition of ModuleHandle, and do not move the body back into the class.
+#include "System/RuntimeTypeHandle.hpp"
+
+namespace System {
+
+[[noreturn]] inline RuntimeTypeHandle
+ModuleHandle::ResolveTypeHandle([[maybe_unused]] intcs typeToken) const {
+    throw System::NotSupportedException("ModuleHandle.ResolveTypeHandle is not supported.");
+}
 
 } // namespace System
