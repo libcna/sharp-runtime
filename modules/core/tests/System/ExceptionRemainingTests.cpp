@@ -405,6 +405,134 @@ TEST(AggregateExceptionTests, NullRejectionKeepsItsExactTypeAndTextAfterC1) {
         EXPECT_STREQ(e.what(), "Value cannot be null. (Parameter 'innerException')");
     }
 }
+// ---------------------------------------------------------------------------
+// AggregateException — Flatten walks a queue, not a recursion
+// (ticket #2308 / SR-AUD-098 clause C5)
+//
+// SR-AUD-098 records both the algorithm and the expected output: the recursive
+// depth-first walk "emits nested leaves before a later direct leaf (a,b,c)" where
+// "current .NET's queue algorithm returns direct leaves before queued nested leaves
+// (c,a,b)". Direct leaves of one aggregate now precede any leaf drawn from an aggregate
+// nested inside it. See docs/AggregateExceptionCausalPlan.md.
+// ---------------------------------------------------------------------------
+
+namespace {
+/** @brief Comma-joined what() of each leaf, in stored order. */
+std::string aggregateLeafOrder(const System::AggregateException& ex) {
+    std::string out;
+    for (const auto& ep : ex.getInnerExceptionsProperty()) {
+        if (!out.empty()) out += ",";
+        try {
+            std::rethrow_exception(ep);
+        } catch (const std::exception& e) {
+            out += e.what();
+        } catch (...) {
+            out += "?";
+        }
+    }
+    return out;
+}
+} // namespace
+
+TEST(AggregateExceptionTests, Flatten_NestedBeforeDirectLeaf_EmitsTheDirectLeafFirst) {
+    // The finding's own shape. Before this repair it returned a,b,c.
+    auto a = std::make_exception_ptr(std::runtime_error("a"));
+    auto b = std::make_exception_ptr(std::runtime_error("b"));
+    auto c = std::make_exception_ptr(std::runtime_error("c"));
+    auto nested = std::make_exception_ptr(System::AggregateException({a, b}));
+    System::AggregateException outer({nested, c});
+    EXPECT_EQ(aggregateLeafOrder(outer.Flatten()), "c,a,b");
+}
+TEST(AggregateExceptionTests, Flatten_DirectLeafBeforeNested_IsUnchanged) {
+    // Control: both algorithms agree on this shape, so it must be byte-identical.
+    auto a = std::make_exception_ptr(std::runtime_error("a"));
+    auto b = std::make_exception_ptr(std::runtime_error("b"));
+    auto c = std::make_exception_ptr(std::runtime_error("c"));
+    auto nested = std::make_exception_ptr(System::AggregateException({b, c}));
+    System::AggregateException outer({a, nested});
+    EXPECT_EQ(aggregateLeafOrder(outer.Flatten()), "a,b,c");
+}
+TEST(AggregateExceptionTests, Flatten_AlreadyFlat_IsUnchanged) {
+    auto a = std::make_exception_ptr(std::runtime_error("a"));
+    auto b = std::make_exception_ptr(std::runtime_error("b"));
+    System::AggregateException ex({a, b});
+    EXPECT_EQ(aggregateLeafOrder(ex.Flatten()), "a,b");
+}
+TEST(AggregateExceptionTests, Flatten_TwoNestedThenDirect_EmitsTheDirectLeafFirst) {
+    auto a = std::make_exception_ptr(std::runtime_error("a"));
+    auto b = std::make_exception_ptr(std::runtime_error("b"));
+    auto c = std::make_exception_ptr(std::runtime_error("c"));
+    auto d = std::make_exception_ptr(std::runtime_error("d"));
+    auto e = std::make_exception_ptr(std::runtime_error("e"));
+    auto n1 = std::make_exception_ptr(System::AggregateException({a, b}));
+    auto n2 = std::make_exception_ptr(System::AggregateException({c, d}));
+    System::AggregateException outer({n1, n2, e});
+    // The queue is drained in insertion order, so n1's leaves precede n2's.
+    EXPECT_EQ(aggregateLeafOrder(outer.Flatten()), "e,a,b,c,d");
+}
+TEST(AggregateExceptionTests, Flatten_ThreeLevels_EmitsOneLevelAtATime) {
+    auto a = std::make_exception_ptr(std::runtime_error("a"));
+    auto b = std::make_exception_ptr(std::runtime_error("b"));
+    auto c = std::make_exception_ptr(std::runtime_error("c"));
+    auto d = std::make_exception_ptr(std::runtime_error("d"));
+    auto deep = std::make_exception_ptr(System::AggregateException({a, b}));
+    auto mid = std::make_exception_ptr(System::AggregateException({deep, c}));
+    System::AggregateException outer({mid, d});
+    EXPECT_EQ(aggregateLeafOrder(outer.Flatten()), "d,c,a,b");
+}
+TEST(AggregateExceptionTests, Flatten_PreservesLeafIdentityAndCount) {
+    auto a = std::make_exception_ptr(std::runtime_error("a"));
+    auto b = std::make_exception_ptr(std::runtime_error("b"));
+    auto c = std::make_exception_ptr(std::runtime_error("c"));
+    auto nested = std::make_exception_ptr(System::AggregateException({a, b}));
+    System::AggregateException outer({nested, c});
+    auto flat = outer.Flatten();
+    ASSERT_EQ(flat.getInnerExceptionCountProperty(), 3u);
+    // Reordering must move the very same exception_ptr values, not copies of them.
+    EXPECT_EQ(flat.getInnerExceptionsProperty()[0], c);
+    EXPECT_EQ(flat.getInnerExceptionsProperty()[1], a);
+    EXPECT_EQ(flat.getInnerExceptionsProperty()[2], b);
+}
+TEST(AggregateExceptionTests, Flatten_EmptyNestedAggregateContributesNoLeaf) {
+    auto a = std::make_exception_ptr(std::runtime_error("a"));
+    auto empty = std::make_exception_ptr(
+        System::AggregateException(std::vector<std::exception_ptr>{}));
+    System::AggregateException outer({empty, a});
+    auto flat = outer.Flatten();
+    EXPECT_EQ(flat.getInnerExceptionCountProperty(), 1u);
+    EXPECT_EQ(aggregateLeafOrder(flat), "a");
+}
+TEST(AggregateExceptionTests, Flatten_MessageListsTheLeavesInTheNewOrder) {
+    // The default message is composed from the leaves in leaf order, so reordering the
+    // leaves necessarily reorders the text. This is a consequence of clause C5, not an
+    // independent message decision: clause C2/C3/C4 stay deferred to ticket #2309.
+    auto a = std::make_exception_ptr(std::runtime_error("a"));
+    auto b = std::make_exception_ptr(std::runtime_error("b"));
+    auto c = std::make_exception_ptr(std::runtime_error("c"));
+    auto nested = std::make_exception_ptr(System::AggregateException({a, b}));
+    System::AggregateException outer({nested, c});
+    EXPECT_STREQ(outer.Flatten().what(), "One or more errors occurred. (c) (a) (b)");
+}
+TEST(AggregateExceptionTests, Flatten_DeepNestingIsIterative) {
+    // One aggregate per level, each holding the next level plus one direct leaf. The
+    // queue form uses no stack frame per level; the depth-first form used one.
+    constexpr int kDepth = 200;
+    auto current = std::make_exception_ptr(
+        System::AggregateException({std::make_exception_ptr(std::runtime_error("L0"))}));
+    for (int i = 1; i <= kDepth; ++i) {
+        auto direct = std::make_exception_ptr(std::runtime_error("L" + std::to_string(i)));
+        current = std::make_exception_ptr(System::AggregateException({current, direct}));
+    }
+    System::AggregateException outermost("root", current);
+    auto flat = outermost.Flatten();
+    ASSERT_EQ(flat.getInnerExceptionCountProperty(),
+              static_cast<std::size_t>(kDepth) + 1u);
+    // Outermost direct leaf first, innermost last.
+    const auto order = aggregateLeafOrder(flat);
+    EXPECT_EQ(order.substr(0, order.find(',')), "L" + std::to_string(kDepth));
+    EXPECT_EQ(order.substr(order.rfind(',') + 1), "L0");
+}
+
 TEST(AggregateExceptionTests, HandleRethrow_NamesItsOwnFirstUnhandledLeaf) {
     auto ep1 = std::make_exception_ptr(std::runtime_error("a"));
     auto ep2 = std::make_exception_ptr(std::runtime_error("b"));

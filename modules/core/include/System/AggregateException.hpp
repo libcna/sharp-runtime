@@ -66,7 +66,7 @@ class AggregateException : public Exception {
      * causes -- an aggregate that stored N causes reported none. The frozen SR-AUD-098
      * text names only the message-taking constructors; measured per constructor, the plain
      * vector and initializer-list constructors had the identical gap, so the repair is
-     * applied to all of them. See docs/AggregateExceptionCausalPlan.md.
+     * applied to all of them.
      *
      * A base-class initializer is sequenced before every member initializer, so calling
      * this from the base initializer also moves the null-element rejection ahead of
@@ -211,10 +211,48 @@ public:
      * @brief Flattens nested AggregateExceptions into a single flat AggregateException.
      *
      * C++ counterpart of .NET AggregateException.Flatten().
+     *
+     * Leaves come out in breadth-first order: every direct leaf of one aggregate is
+     * emitted before any leaf drawn from an aggregate nested inside it. For
+     * `{ Aggregate{a, b}, c }` that is `c, a, b`.
+     *
+     * This replaced a recursive depth-first walk that emitted nested leaves before a
+     * later direct leaf -- `a, b, c` for the same input. SR-AUD-098 records both the
+     * algorithm ("current .NET's queue algorithm returns direct leaves before queued
+     * nested leaves") and that exact expected output, and the pre-repair `a, b, c` was
+     * reproduced for the shape before the change (ticket #2308).
+     *
+     * Shapes on which the two algorithms agree -- an already flat aggregate, and any
+     * aggregate whose nested entries all follow its direct leaves -- are unchanged.
+     * Leaf identity and leaf count are unchanged for every shape; only the order is.
+     * Because this class composes its default message from the leaves in leaf order,
+     * a nested aggregate's flattened message lists the same leaves in the new order.
+     *
+     * Being iterative also removes the one stack frame per nesting level the recursion
+     * needed, so flattening depth is bounded by heap rather than by stack.
      */
     [[nodiscard]] AggregateException Flatten() const {
         std::vector<std::exception_ptr> flat;
-        collectLeaves(innerExceptions_, flat);
+
+        // FIFO of the inner lists still to be walked, seeded with this aggregate's own.
+        // Walked by index rather than popped, and each list is COPIED out of the queue
+        // before use: the push_back below can reallocate `pending`, which would leave a
+        // reference into it dangling.
+        std::vector<std::vector<std::exception_ptr>> pending;
+        pending.push_back(innerExceptions_);
+
+        for (std::size_t head = 0; head < pending.size(); ++head) {
+            const std::vector<std::exception_ptr> current = pending[pending.size() - 1 - head];
+            for (const auto& ep : current) {
+                try {
+                    std::rethrow_exception(ep);
+                } catch (const AggregateException& ae) {
+                    pending.push_back(ae.innerExceptions_);
+                } catch (...) {
+                    flat.push_back(ep);
+                }
+            }
+        }
         return AggregateException(std::move(flat));
     }
 
@@ -242,20 +280,6 @@ public:
             if (!predicate(ep)) unhandled.push_back(ep);
         }
         if (!unhandled.empty()) throw AggregateException(std::move(unhandled));
-    }
-
-private:
-    static void collectLeaves(const std::vector<std::exception_ptr>& exs,
-                              std::vector<std::exception_ptr>& result) {
-        for (auto& ep : exs) {
-            try {
-                std::rethrow_exception(ep);
-            } catch (const AggregateException& ae) {
-                collectLeaves(ae.innerExceptions_, result);
-            } catch (...) {
-                result.push_back(ep);
-            }
-        }
     }
 };
 
