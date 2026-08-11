@@ -162,3 +162,102 @@ first-inner identity, custom-message aggregation, `Handle` message/order
 preservation, predicate exceptions, nested/direct leaf order, the
 `GetBaseException` value-API adaptation and the HResult assertion — are **not**
 closed by this ticket.
+
+---
+
+## SR-AUD-098 — PARTIALLY REMEDIATED, STAYS `confirmed` (tickets #2306-#2310, 2026-08-11)
+
+The audit evidence above is retained unchanged. **SR-AUD-098 remains
+`confirmed`.** It is a conjunction of six clauses; two close here and four do
+not, so the finding does not transition. The full review record is
+`docs/AggregateExceptionCausalPlan.md` (ticket #2306).
+
+`/rv/tmp/runtime/src/libraries/` is **not present in this environment.** Every
+.NET statement below is quoted from the frozen finding text itself — repository-
+owned recorded evidence — and nothing is recalled from memory.
+
+**The finding split by assertion, and its disposition:**
+
+| Clause | Frozen assertion | Ticket | Disposition |
+|---|---|---|---|
+| C1 | base `Exception::innerException_` not set to the first inner | #2307 | **closed** |
+| C2 | contained messages not appended to `what()` | #2309 | deferred, `needs_user` |
+| C3 | `Handle` rebuilds with the generic default text | #2309 | deferred, `needs_user` |
+| C4 | `Flatten` discards the caller's message | #2309 | deferred, `needs_user` |
+| C5 | depth-first `a,b,c` where .NET's queue returns `c,a,b` | #2308 + #2310 | **closed** |
+| C6 | a green test locks the incomplete text | #2309 | follows C2 |
+
+**C1 needed no external authority.** `System::Exception` documents
+`getInnerExceptionProperty()` as "the exception that caused the current
+exception", and every one of this class's six constructors left it null while
+`getInnerExceptionsProperty()` held the causes — an aggregate that stored *N*
+causes reported none. That is a violation of this port's own base-class
+contract. *Premise extension, measured per constructor:* the frozen text names
+only the "message-plus-inner/vector constructors", but the plain vector and
+initializer-list constructors had the identical gap; all six were measured, the
+four that store a cause now name it, and the two that store none stay null.
+
+**C5 needed no external authority either, because the finding itself records
+the answer** — both the algorithm ("current .NET's queue algorithm returns
+direct leaves before queued nested leaves") and the exact expected output
+(`c,a,b`). That recorded evidence is used exactly as scoped. Ordering was not
+guessed; had the finding recorded only "different leaf order", C5 would have
+been deferred with the rest.
+
+**C2/C3/C4 are one decision, not three, and it is approval-bound.** This class
+has no raw-message field: it stores only the composed `what()` string, so a
+constructor that composed `"m (a) (b)"` cannot later be asked for `"m"` to
+rebuild a derived aggregate from. Preserving the message through
+`Handle`/`Flatten` and composing contained messages into it therefore cannot
+both hold without a new member — a public representation change — and the
+composed text itself (wording, punctuation, separator) is the unavailable fact.
+Writing a plausible string would present invention as parity. Ticket #2309.
+
+**A defect in the C5 repair, found and fixed in the same batch (ticket #2310).**
+Ticket #2308 introduced the queue but subscripted it
+`pending[pending.size() - 1 - head]`. `pending` grows by one entry per enqueued
+list, so `pending.size()` and `head` advance in lockstep and the index stays
+pinned at `0`: the seed list is re-walked forever, and the loop condition
+`head < pending.size()` never fails because the body keeps extending what it
+tests against. Measured with `build-probe/2309_flatten_defect.cpp` under
+`timeout 25` and `ulimit -v`:
+
+| Shape | #2308 as shipped | After #2310 |
+|---|---|---|
+| `{a, b}` — already flat | `a,b` | `a,b` |
+| `{a, Aggregate{b,c}}` — #2308's own *control* | **did not terminate** | `a,b,c` |
+| `{Aggregate{a,b}, c}` — the finding's shape | not reached | `c,a,b` |
+
+The hang reached **every caller of `Flatten()` on a nested aggregate**, which is
+the only case `Flatten()` exists for. The repair is `pending[head]`; termination
+then holds because each iteration consumes exactly one list and each nested
+aggregate contributes exactly one, over a finite tree. #2308's own order tests
+cover the hanging shapes and would have caught this by hanging — they were never
+run, and #2308's commit message asserts a validation that did not happen. #2310
+adds two assertions on exact leaf multiset and count so a future queue that
+terminates but re-walks a list fails fast instead of hanging.
+
+**Source, ABI and layout consequences: none.** `AggregateException` is
+header-only. No public signature, overload, base, member, object layout, vtable,
+`noexcept` specification, exported symbol or module edge changed;
+`sizeof`/`alignof` stay 192/8.
+
+**Behavioural transitions, both required by the frozen finding.** An aggregate
+that stores causes now reports its first cause through the inherited
+`getInnerExceptionProperty()` instead of null; no first-party production code
+reads that property on an aggregate, every use in the repository is in a test
+tree, and none pinned it as null. `Flatten()` returns the same leaves, with the
+same identities and count, in queue order rather than depth-first order; shapes
+on which the two algorithms agree are byte-identical. Because the default
+message is composed from the leaves in leaf order, a flattened aggregate's
+default message lists the same leaves in the new order — a consequence of C5,
+not an independent message decision. C1's null-element scan moved into the
+base-class initializer, sequenced before every member initializer, so ticket
+#1807's `ArgumentException` / `ArgumentNullException` split, both message texts
+and the `paramName` survive verbatim.
+
+The "Other missing assertions and diagnostics" list is **not** closed beyond
+first-inner identity and nested/direct leaf order: custom-message aggregation,
+`Handle` message/order preservation, predicate exceptions, the
+`GetBaseException` value-API adaptation and the HResult assertion remain open
+under C2/C3/C4 and the residual list.
