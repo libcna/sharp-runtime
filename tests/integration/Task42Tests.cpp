@@ -249,7 +249,10 @@ TEST(ObjectTests, ReferenceEquals_DifferentPointers) {
     EXPECT_FALSE(System::Object::ReferenceEquals(&a, &b));
 }
 
-TEST(ObjectTests, GetHashCode_NonNegative) {
+// Not the general contract -- a signed hash code may legally be negative -- but
+// System::Object::GetHashCode deliberately ends with `hash & 0x7fffffff` (Object.cpp:43), so this
+// pins that implementation choice (docs/HashAssertionContractRule.md R5).
+TEST(ObjectTests, GetHashCode_MasksTheSignBit) {
     TestObject o;
     EXPECT_GE(o.GetHashCode(), 0);
 }
@@ -312,10 +315,10 @@ TEST(TypeTests, ToString_NotNull) {
     EXPECT_NE(t.ToString(), "(null)");
 }
 
-TEST(TypeTests, GetHashCode_NonZero) {
-    auto t = System::Type::From<int>();
-    EXPECT_NE(t.GetHashCode(), 0u);
-}
+// GetHashCode_NonZero was removed by #2284: zero is a legal hash code
+// (docs/HashAssertionContractRule.md R6), and this type documents one -- a Type carrying no
+// type_info hashes to 0 (Type.hpp:141). No coverage was lost: DefaultCtor_GetHashCode_Zero below
+// pins that documented zero and GetHashCode_SameTypeConsistent pins the contract direction.
 
 TEST(TypeTests, GetHashCode_SameTypeConsistent) {
     auto a = System::Type::From<std::string>();
@@ -482,7 +485,14 @@ TEST(UInt64Tests, CompareTo_Equal)        { EXPECT_EQ(System::UInt64::CompareTo(
 TEST(UInt64Tests, CompareTo_Greater)      { EXPECT_GT(System::UInt64::CompareTo(9ULL, 3ULL), 0); }
 TEST(UInt64Tests, Equals_True)            { EXPECT_TRUE(System::UInt64::Equals(42ULL, 42ULL)); }
 TEST(UInt64Tests, Equals_False)           { EXPECT_FALSE(System::UInt64::Equals(1ULL, 2ULL)); }
-TEST(UInt64Tests, GetHashCode_NonZero)    { EXPECT_NE(System::UInt64::GetHashCode(0x0001000200030004ULL), 0); }
+// GetHashCode_NonZero was replaced by #2284. Zero is a legal hash code, and this very function
+// reaches it for a nonzero input because it folds the two halves of the value together --
+// UInt64::GetHashCode is `value ^ (value >> 32)`, matching .NET's (int)value ^ (int)(value >> 32).
+// A known-answer check and a reachable zero say more than "not zero" ever did
+// (docs/HashAssertionContractRule.md R6).
+TEST(UInt64Tests, GetHashCode_FoldsTheHalves)  { EXPECT_EQ(System::UInt64::GetHashCode(0x0001000200030004ULL), 131078); }  // 0x00030004 ^ 0x00010002
+TEST(UInt64Tests, GetHashCode_ZeroIsReachable) { EXPECT_EQ(System::UInt64::GetHashCode(0x0000000100000001ULL), 0);
+                                                 EXPECT_EQ(System::UInt64::GetHashCode(0ULL), 0); }
 TEST(UInt64Tests, Max)                    { EXPECT_EQ(System::UInt64::Max(10ULL, 20ULL), 20ULL); }
 TEST(UInt64Tests, Min)                    { EXPECT_EQ(System::UInt64::Min(10ULL, 20ULL), 10ULL); }
 TEST(UInt64Tests, Clamp_InRange)          { EXPECT_EQ(System::UInt64::Clamp(50ULL, 10ULL, 100ULL), 50ULL); }
