@@ -159,6 +159,36 @@ std::shared_ptr<Delegate> Delegate::Remove(
         return source;
     }
 
+    const auto& vl = value->invocationList_;
+    if (!vl.empty()) {
+        // The value is itself a multicast delegate, so what has to be removed is its whole
+        // invocation list as a contiguous subsequence -- CoreCLR's MulticastDelegate.RemoveImpl
+        // scans candidate start positions from the last one backwards and deletes the LAST
+        // match. Before SR-AUD-120 this case fell into the single-entry loop below, where a
+        // one-target entry was compared against the whole multi-entry value and could never
+        // match (Equals rejects it on length alone), so Remove always returned the source
+        // unchanged -- even when the source's entries were the identical shared_ptrs the value
+        // held. RemoveAll inherits this branch by repeating Remove.
+        if (vl.size() > sl.size()) return source;
+        for (std::size_t start = sl.size() - vl.size() + 1; start-- > 0; ) {
+            bool match = true;
+            for (std::size_t j = 0; j < vl.size(); ++j) {
+                const Delegate* x = sl[start + j].get();
+                const Delegate* y = vl[j].get();
+                if (x == y) continue;
+                if (!x || !y || !x->Equals(*y)) { match = false; break; }
+            }
+            if (!match) continue;
+            auto remaining = sl;
+            const auto first = remaining.begin() + static_cast<std::ptrdiff_t>(start);
+            remaining.erase(first, first + static_cast<std::ptrdiff_t>(vl.size()));
+            if (remaining.empty()) return nullptr;
+            if (remaining.size() == 1) return remaining[0];
+            return std::shared_ptr<Delegate>(new Delegate(MulticastTag{}, std::move(remaining)));
+        }
+        return source; // Not found — return unchanged
+    }
+
     auto list = sl;
     for (SharpRuntime::intcs i = static_cast<SharpRuntime::intcs>(list.size()) - 1; i >= 0; --i) {
         if (list[i].get() == value.get() || list[i]->Equals(*value)) {

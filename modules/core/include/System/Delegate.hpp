@@ -151,9 +151,15 @@ public:
 
     /**
      * @brief Removes the last occurrence of value from source's invocation list.
+     *
+     * When value is itself a multicast delegate, its whole invocation list is removed as a
+     * contiguous subsequence — the last matching one — as .NET does. A single-target value
+     * removes the last equal entry.
+     *
      * @param source The delegate to remove from; null returns null.
      * @param value  The delegate to remove; null returns source unchanged.
-     * @return New delegate without the removed entry, or null if the list becomes empty.
+     * @return New delegate without the removed entries, or null if the list becomes empty.
+     *         A list left with a single entry is returned as that entry itself.
      *         Returns source unchanged (same pointer) if value was not found.
      */
     static std::shared_ptr<Delegate> Remove(

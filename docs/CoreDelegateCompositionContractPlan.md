@@ -300,7 +300,26 @@ so is every `120*` cell — this ticket touches neither.
 
 ### 7.2 #2273 (SR-AUD-120)
 
-*Recorded by #2273.*
+`build-probe/2270_probe3_after_2273.log`, the identical probe **relinked**
+against the rebuilt `build/libsharp_runtime_core.a`. (Relinking is not
+ceremony: the probe links the archive statically, and a first run of the stale
+binary reported every `120*` cell unchanged while the new suite was already
+green.)
+
+| Line | Before | After |
+|---|---|---|
+| `120a remove_multicast_subsequence_size` / `unchanged` | 4 / 1 | **2 / 0** |
+| `120b remove_same_pointer_subsequence_size` / `unchanged` | 4 / 1 | **2 / 0** |
+| `120c remove_entire_list_null` / `size` | 0 / 2 | **1 / 0** |
+| `120d remove_leaving_one_size` / `is_a` | 3 / 0 | **1 / 1** |
+| `120e longer_value_unchanged` | 1 | 1 |
+| `120f removeall_subsequence_size` / `null` | 4 / 0 | **0 / 1** |
+| `120g remove_single_last_occurrence_size` | 2 | 2 |
+| `120g after_remove first/second` | 1 / 1 | 1 / 1 |
+
+Five cells move, all widenings. Every `118*` cell is byte-identical to §3, and
+every `119*` cell is identical to §7.1 — the two implemented repairs do not
+interact, which is what "adjacent, not one cause" has to mean in practice.
 
 ---
 
@@ -347,18 +366,35 @@ matrix in §10.
 
 ## 10. Mutations
 
-`build-probe/2270_run_mutations.sh`. Each mutation is applied to the repaired
-source, the affected object is rebuilt with two jobs, and the new tests are run.
-Results are recorded by the owning ticket.
+`build-probe/2272_run_mutations.sh` and `build-probe/2273_run_mutations.sh`. Each
+mutation is applied to the repaired source, the affected object is rebuilt with
+two jobs, and the delegate suites are run. Results are recorded by the owning
+ticket.
 
 | # | Ticket | Mutation | Result |
 |---|---|---|---|
 | 1 | #2272 | `Equals` list loop back to `la[i].get() != lb[i].get()` | **caught** — 3 tests fail (`build-probe/2272_mutations.log`) |
 | 2 | #2272 | `GetHashCode` folds `d.get()` again instead of `d->GetHashCode()` | **caught** — 3 tests fail |
 | 0 | #2272 | control, unmutated | survived, as required |
-| 3 | #2273 | subsequence scan runs forwards, taking the **first** match | caught (last-occurrence test fails) |
-| 4 | #2273 | subsequence branch drops the `vl.size() > sl.size()` guard | caught (longer-value test fails) |
-| 5 | #2273 | subsequence removal returns a 1-entry multicast instead of the entry | caught (leaves-one test fails) |
+| 3 | #2273 | subsequence scan runs forwards, taking the **first** match | **caught** — 1 test fails (`build-probe/2273_mutations.log`) |
+| 4 | #2273 | guard boundary `>=` instead of `>` | **caught** — 2 tests fail |
+| 5 | #2273 | a one-entry remainder stays a multicast | **caught** — 1 test fails |
+| 6 | #2273 | subsequence matched by address only, never by `Equals` | **caught** — 8 tests fail |
+| 0 | #2273 | control, unmutated | survived, as required |
+
+**One mutation was deliberately not executed.** Removing the
+`vl.size() > sl.size()` guard outright is unsafe by construction rather than
+merely failing: `sl.size() - vl.size() + 1` is unsigned, so a value two or more
+entries longer than the source underflows the start index and `sl[start + j]`
+reads out of bounds — undefined behaviour, which is not a measurement. Running it
+to raise a mutation count is exactly the practice the repository forbids. The
+guard's **boundary** is measured instead, by mutation 4: moving it one position
+tighter is caught, so `>` is neither too loose nor too tight.
+
+Mutation 6 leaves `if (x == y) continue;` in place, so
+`MulticastValue_SameEntryPointers_Removed` correctly survives it — identical
+pointers still match. That the suite distinguishes the two match routes is the
+point.
 
 ---
 
@@ -369,4 +405,4 @@ Results are recorded by the owning ticket.
 | #2270 | review | done |
 | #2271 | SR-AUD-118 | `needs_user` — representation route **and** tightening approval, plus the §4.4 `Equals` type-blindness |
 | #2272 | SR-AUD-119 | **done** — `remediated`, +13 tests |
-| #2273 | SR-AUD-120 | implementation, compatible, no approval needed |
+| #2273 | SR-AUD-120 | **done** — `remediated`, +17 tests |

@@ -125,6 +125,43 @@ from `[First, Second, First, Second]` and prints
 `remove_multicast_subsequence_size=4` instead of the expected remaining size
 two; `RemoveAll` inherits the fault.
 
+### Status: REMEDIATED (#2270 review, #2273 implementation, 2026-08-11)
+
+Reproduced exactly, and the *reason* the entry loop cannot match was measured
+rather than assumed: a single-target entry compared against a multi-entry value
+is rejected by `Equals` on length alone, so the answer is always "not found".
+That also fixes the repair's regression surface at **empty** — every reachable
+multicast-value removal shape returns the source unchanged today, including
+`remove_same_pointer_subsequence_size=4`, where the source's entries are the
+*identical* `shared_ptr`s the value holds. The new branch can therefore only fire
+where the current answer is "unchanged": **no existing outcome can change.**
+
+`Remove` now branches on whether the value is itself multicast, as
+`MulticastDelegate.RemoveImpl` does. For a multicast value it scans candidate
+start positions from the last one backwards and deletes the **last** matching
+contiguous subsequence. Measured after: `remove_multicast_subsequence_size` and
+`remove_same_pointer_subsequence_size` both `4 → 2`, `remove_entire_list_null`
+`0 → 1`, `remove_leaving_one_size/is_a` `3/0 → 1/1`, and
+`removeall_subsequence_size/null` `4/0 → 0/1`, so `RemoveAll` inherits the fix
+exactly as this finding says it inherits the fault. `longer_value_unchanged` and
+the whole single-target path are unchanged.
+
+Boundaries: a value longer than the source leaves the source unchanged; emptying
+the list returns `nullptr`; a remainder of one entry is returned as that entry
+itself, the convention the existing single-entry removal path already used. The
+`vl.size() > sl.size()` guard is load-bearing — without it the unsigned start
+index underflows — and its boundary is pinned by a mutation rather than by
+removing it, which would be undefined behaviour rather than a measurement.
+
+**Independent of SR-AUD-118.** The multi-entry result is built with the same
+`new Delegate(MulticastTag{}, …)` the existing single-entry path already uses, so
+this adds no new type-loss and no new debt against #2271: whichever
+representation #2271 selects will apply to both paths at once.
+
++17 tests (`DelegateSubsequenceRemovalTests`). Four mutations executed, all
+caught, plus one documented as deliberately not executed. No signature, layout,
+vtable, `noexcept` or symbol change.
+
 ## Other missing assertions and diagnostics
 
 - No test covers same-type enforcement, dynamic result preservation, equal
