@@ -3,6 +3,23 @@
 
 # NEXT.md
 
+> **Test-count floor, 2026-08-11 — #2284 / SR-AUD-018 lowered it by 5, deliberately.** The
+> complete 38-executable gate now reads **16,941 run: 16,933 passed, 2 skipped, 6 failed**
+> (16,933 + 6 + 2 = 16,941), against the **16,946** that batch inherited. The −5 is five deleted
+> tests, each removed because a strictly stronger statement already stood beside it in the same
+> suite — `ObjectTests.GetHashCode_WithinIntRange` (which asserted `int <= INT_MAX` and could not
+> fail), `DateOnlyTests.GetHashCode_DifferentDatesDiffer`,
+> `NonRandomizedStringEqualityComparerTest.DifferentStringsLikelyDifferentHash`, and two
+> `SocketsSupportTests` hash tests whose own `Equality` neighbour already asserts the same pair.
+> Three further deletions are offset by three additions, so two files net to zero. Every site is
+> enumerated in **`docs/HashAssertionContractRule.md` §8**, which is also the repository-wide rule
+> (R1–R6) that keeps the pattern from coming back. The six failures are the inherited ones — five
+> `PingTests` (#1962) and `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`, which
+> needs usable IPv6 this environment does not provide — and are untouched. This note is the
+> documented reason `CLAUDE.md` rule 2 requires before the floor may be lowered. **The blocks
+> below are earlier batches' handoffs, each dated and scoped to itself; none of them has been
+> rewritten, and the topmost one predates this batch.**
+
 *Last verified: 2026-08-11. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
 harness-designated branch**. **Pushed immediately after every commit**, per `CLAUDE.md` rule 13 —
 **five commits, five pushes**, all normal fast-forwards, all **verified present on the remote** by

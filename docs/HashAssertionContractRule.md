@@ -268,3 +268,100 @@ Not run. SR-AUD-018 is a test-contract correctness problem: no site involves
 memory access, lifetime, threading or integer overflow, and no disposition
 changes any production instruction. A sanitizer run would add no discriminating
 evidence.
+
+---
+
+## 7. Mutation evidence
+
+Eight mutations were applied to production code, each rebuilt at two jobs and
+run against the specific test it targets, then reverted. Two further attempts
+were **discarded as invalid**: the first forms of M2 and M5 failed to compile
+under `-Werror` (`unused-parameter`, `misleading-indentation`), so their test
+runs came from a stale binary and are not counted; both were rewritten into the
+compiling forms below and re-run.
+
+| # | Mutation | Target of the mutation | Result |
+|---|---|---|---|
+| M1 | `HashCode::mix` drops the FNV multiply, becoming commutative | `HashCode.hpp` | **caught** — `Combine2_IsOrderSensitiveNotCommutative` fails. `CombineN_ResultDependsOnEveryArgument` and `Add_ResultDependsOnTheValueAdded` correctly survive: a commutative combiner is still sensitive to each argument, and the two tests claim different things. |
+| M2 | `Combine(v1..v4)` silently drops `v3` | `HashCode.hpp` | **caught** — `CombineN_ResultDependsOnEveryArgument` fails. `Combine4_Works`, the determinism half that survived the removal of the old `EXPECT_NE`, **passes** — evidence that the new test, not the old one, carries this coverage. |
+| M3 | `OrdinalComparer::GetHashCode` ignores `ignoreCase_` | `StringComparer.hpp` | **caught** — `GetHashCode_AgreesWithEqualsInBothModes` fails, alongside the pre-existing `GetHashCode_IgnoreCase_SameHashForDifferentCase`. `Equals_IgnoreCase_DifferentCase_True` passes, confirming the mutation is hash-side only. |
+| M4a | `Version::GetHashCode` drops the 12-bit `Revision` mask (`hash \|= Revision`) | `Version.hpp` | **equivalent, discarded** — `\|=` cannot clear the `0x3000` that `Build` already set, so 4 and 4100 still collide and `GetHashCode_UnequalVersionsMayCollide` still passes. Labelled equivalent rather than counted as a survivor. |
+| M4b | `Version::GetHashCode` folds `Revision` with `^=` and no mask | `Version.hpp` | **caught** — `GetHashCode_UnequalVersionsMayCollide` fails; `GetHashCode_SameVersion_SameHash` and `GetHashCode_ZeroVersion_Zero` pass. |
+| M5 | `HashCode::AddBytes` reads each byte but always mixes `0` | `HashCode.hpp` | **caught** — `AddBytes_ResultDependsOnTheBytes` fails; `AddBytes_SameData_SameHash` and `AddBytes_SameInput_SameHash` pass. |
+| M6 | `IPAddress::GetHashCode` combines `numbers_[0..3]` only — the exact pre-repair defect | `IPAddress.cpp` | **caught** — `GetHashCode_ReadsTheLower64BitsToo` fails. This is the load-bearing result of the batch: it proves the reformulated test preserves the regression coverage the removed pairwise inequality carried. |
+| M7 | `Decimal::GetHashCode` stops masking the sign bit | `Decimal.hpp` | **caught** — `GetHashCode_MasksTheSignBit` fails. The second value the test gained (`"-3.14"`) is what makes the detection deterministic rather than a coin flip on one datum. |
+
+Seven valid non-equivalent mutations, seven caught; one equivalent mutation
+labelled; two invalid mutations discarded. Every counted result involved a real
+source edit, a real rebuild and a real run.
+
+## 8. Closing state
+
+Re-measured after the three implementation commits, with the same scanner:
+
+| | Before | After |
+|---|---|---|
+| Hash-inequality assertions | 51 | **14** |
+| — of which `io-hashing`, out of scope (§3.1) | 7 | 7 |
+| — of which retained class B (`TotalOrderIeee754Comparer`) | 5 | 5 |
+| — of which retained class B-guard (`std::hash` preconditions) | 2 | 2 |
+| — **class A, the defect itself** | **37** | **0** |
+| Nonzero / nonnegative assertions | 14 | **8** |
+| — retained C1, inside the six `GetHashCode_MasksTheSignBit` tests | 6 | 8 |
+| — **C2 nonzero (`!= 0`) claims** | **8** | **0** |
+
+(The C1 count rises from 6 to 8 because `Decimal`'s and `BinaryData`'s pins each
+gained a second value — a negative decimal and the empty payload — which is what
+makes mutation M7 deterministic.)
+
+Every one of the 65 measured sites is dispositioned. No class-A site and no
+nonzero claim remains anywhere in the repository.
+
+**Test count.** Complete 38-executable gate: 16,941 run, 16,933 passed, 6
+failed, 2 skipped — `16,933 + 6 + 2 = 16,941`, a delta of **−5** from the
+inherited 16,946. The six failures are the inherited ones (five `PingTests`,
+ticket #1962; one `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`,
+no usable IPv6 in this environment) and are untouched by this batch. Counting
+`TEST`/`TEST_F`/`TEST_P` declarations across the 35 changed files gives
+2,321 → 2,316, the same −5, from exactly five deletions:
+
+| File | Test deleted | Why nothing was lost |
+|---|---|---|
+| `ObjectTests.cpp` | `GetHashCode_WithinIntRange` | asserted `int <= INT_MAX`; could not fail |
+| `DateOnlyTimeOnlyTests.cpp` | `GetHashCode_DifferentDatesDiffer` | `GetHashCode_MatchesDayNumber` pins the hash exactly |
+| `SpecialComparersTests.cpp` | `DifferentStringsLikelyDifferentHash` | three neighbouring tests already carry Equals, stability and the contract direction |
+| `SocketsSupportTests.cpp` | `IPPacketInformationTests.GetHashCode_DifferingInterfaceDiffers` | the `Equality` test above asserts the same pair |
+| `SocketsSupportTests.cpp` | `UnixDomainSocketEndPointTests.GetHashCode_DifferingPathDiffers` | the `Equality` test above asserts the same pair |
+
+Three tests were added — `CombineN_ResultDependsOnEveryArgument`,
+`UInt64Tests.GetHashCode_FoldsTheHalves` and
+`UInt64Tests.GetHashCode_ZeroIsReachable` — and three deleted alongside them
+(`Combine1_DifferentValueDifferentHash`, `TypeTests.GetHashCode_NonZero`,
+`UInt64Tests.GetHashCode_NonZero`), which is why those two files net to zero.
+**Correction to commit `05bef4f`'s message**, which states the integration
+fixture moved by "+1 net": it did not — one deletion plus one
+replaced-by-two nets to zero, and the arithmetic above is the accurate record.
+
+Forty-four hash-inequality assertions and eight nonzero assertions were removed
+or replaced; six nonnegative assertions were retained and restated; twenty-eight
+tests were rewritten in place without a count change.
+
+**Validation.** Build 0 errors / 0 warnings; module graph 41 modules / 92 edges;
+seams 3 / 20; negative fixtures 16 files / 128 sites / 144 compiler invocations
+at peak 2 jobs; generated catalogue current; validator self-tests OK; DB
+consistency OK; `git diff --check` clean; tracked `scripts/__pycache__` 3 files,
+unmodified. Maximum aggregate compiler parallelism throughout: **2**.
+
+`scripts/run_component_tests.sh` and `scripts/local_ci_check.sh` both stop at the
+first failing executable and therefore cannot produce a complete total while the
+six inherited failures stand; the 38-executable total above comes from
+`build-tmp/full_gate.sh`, which runs each executable independently and continues
+past failures.
+
+**Selective components was not rerun.** #2284 changed no component boundary, no
+`PUBLIC_DEPENDENCIES`, `PRIVATE_DEPENDENCIES` or `TEST_DEPENDENCIES`, no module
+graph entry and no catalogue entry. The only include lines added are standard
+headers (`<array>`, `<cstddef>`, `<cstdint>`, `<functional>`, `<set>`,
+`<string>`) plus `SharpRuntime/SharpRuntimeHelper.hpp`, which is inside the
+`core` module's own include root and creates no new edge. The boundary validator
+and the catalogue check both confirm the graph is unchanged at 41 / 92.
