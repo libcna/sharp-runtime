@@ -42,6 +42,54 @@ The managed probe throws `ArgumentException` for the unknown bit.  This turns
 invalid caller configuration into unrelated successful values or normal parse
 errors rather than the required immediate argument failure.
 
+### Review of the SR-AUD-177 / SR-AUD-178 pairing (#2267, 2026-08-11)
+
+An inherited ranking paired these two findings and recommended verifying the
+shared cause before treating them as a family. **The shared-cause hypothesis is
+false. They are adjacent, not a family, and must not share an implementation
+ticket.**
+
+Both reproducers were verified against the current parser rather than taken from
+this report. `TryParse("1E2"/"1E+2"/"1e2", AllowExponent)` all return `false`
+with `0`; `Parse("42", static_cast<NumberStyles>(0x8000))` returns `42`; and
+`Parse("2A", NumberStyles::HexFloat)` returns hexadecimal `42`.
+
+| | SR-AUD-177 | SR-AUD-178 |
+|---|---|---|
+| Kind of defect | a grammar production was never written | a precondition check does not exist |
+| Immediate cause | an incorrect premise recorded in the file's own scope comment | no counterpart to .NET's `ValidateParseStyleInteger` at any entry point |
+| Repair site | the digit/grammar state machine | a new validation call before parsing, at each public overload |
+| Direction | **widens** — currently rejected input becomes accepted | **tightens** — currently accepted configuration becomes an exception |
+| Authority needed | none; a widening cannot break a caller | an explicit compatibility decision |
+| Owner | #2268 (deferred on evidence) | #2269 (`needs_user`) |
+
+They share a file and a `style` parameter. Under this repository's cross-cutting
+rules a common file and a common implementation technique do not establish a
+common cause, so **no CCF is minted**. They do not interact either: .NET's
+`ValidateParseStyleInteger` does not reject `AllowExponent` — the flag is inside
+the valid mask — so neither repair implies or blocks the other.
+
+**Premise correction, now fixed in the header.** The parser's scope comment
+called `AllowExponent` a "non-gap" because only `NumberStyles.Float`/`.HexFloat`
+carry the flag and those "don't apply to integer types". That is refuted by this
+port's own header: `NumberStyles::Any` is `0x1FF` and **includes**
+`AllowExponent` `0x80` (`NumberStyles.hpp:34`), it is a public style accepted by
+every integer overload, and the flag can be passed alone besides. Measured,
+`Int32::Parse("1E2", NumberStyles::Any)` throws `FormatException` where .NET
+returns `100`. SR-AUD-177 is a real functional gap across all eight wrappers.
+
+Neither finding is remediated by this review; both remain `confirmed`.
+SR-AUD-177 is **not** implemented here despite being compatible, because this
+file's own standard of evidence cannot currently be met: an exponent grammar has
+to agree with .NET on how the exponent folds into `number.scale` and how that
+meets `TryNumberBufferToBinaryInteger`'s "significant digits exceed scale"
+overflow rule — the rule this file documents as *confirmed against the source,
+not guessed* — which is what decides `"1.5E1"`, `"100E-2"` and `"1E-2"`. The
+reference source is unavailable, and a partial grammar that handled `"1E2"`
+while guessing those would replace a documented, uniform absence with an
+undocumented partial divergence. That is #2268, on the #2260/#2252
+deferred-verification precedent.
+
 ## Assessment
 
 The implemented invariant decimal, group, currency, parentheses, trailing

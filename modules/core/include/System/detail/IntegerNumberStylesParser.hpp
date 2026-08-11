@@ -43,9 +43,30 @@ using System::Globalization::NumberStyles;
 // int.Parse("123-  ", NumberStyles.Number) == -123 requires whitespace to be tolerated AFTER a
 // trailing sign, not just immediately after the digits.
 //
-// AllowExponent is still NOT implemented (out of scope: NumberStyles.Number/.Currency don't
-// include it either in real .NET -- only .Float/.HexFloat do, which don't apply to integer
-// types -- so this is a non-gap, not a scope reduction).
+// AllowExponent is NOT implemented. This was previously recorded here as a "non-gap" on the
+// grounds that only NumberStyles.Float/.HexFloat carry the flag and those "don't apply to
+// integer types". Ticket #2267 (finding SR-AUD-177) measured that premise and it is WRONG, on
+// this port's own evidence: NumberStyles::Any is 0x1FF and INCLUDES AllowExponent 0x80
+// (NumberStyles.hpp:34), it is a public style accepted by every integer Parse/TryParse overload,
+// and the flag can be passed on its own besides. Real .NET parses "1E2", "1E+2" and "1e2" as
+// 100; this parser returns false / throws FormatException for all three, and for
+// Int32::Parse("1E2", NumberStyles::Any) as well. It is therefore a real functional gap across
+// all eight wrappers, not a scope reduction and not a non-gap.
+//
+// It is left unimplemented pending ticket #2268, NOT because the gap is disputed but because
+// this file's standard of evidence cannot currently be met: an exponent grammar has to agree
+// with .NET on how the exponent folds into number.scale and how that interacts with
+// TryNumberBufferToBinaryInteger's "significant digits exceed scale" overflow rule -- the very
+// rule documented above as "confirmed against TryNumberBufferToBinaryInteger", not guessed --
+// which decides "1.5E1", "100E-2" and "1E-2". The reference source is unavailable, and a partial
+// exponent grammar that handled "1E2" while guessing those would replace a documented, uniform
+// absence with an undocumented partial divergence.
+//
+// Style-mask validation is a SEPARATE finding (SR-AUD-178, approval ticket #2269) and NOT the
+// same defect: it is a missing precondition check rather than a missing grammar production, and
+// repairing it TIGHTENS what the parser accepts where AllowExponent WIDENS it. .NET's
+// ValidateParseStyleInteger does not reject AllowExponent -- the flag is inside the valid mask --
+// so neither repair implies or blocks the other.
 //
 // A faithful, deliberate quirk carried over from real .NET: a decimal point followed by only
 // zero digits (e.g. "123.00") parses successfully, but a decimal point followed by any NONZERO
