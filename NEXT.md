@@ -5,45 +5,231 @@
 
 *Last verified: 2026-08-11. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
 harness-designated branch**. **Pushed immediately after every commit**, per `CLAUDE.md` rule 13 —
-**four commits, four pushes**, all normal fast-forwards, all **verified present on the remote** by
-re-reading `origin/<branch>` after each: `7c9c2aa`, `5eede76`, `2b68979`, **and this handoff commit
-itself**, whose hash cannot be written from inside it. No merge, rebase, tag, force-push, PR,
-publication or history rewrite; every commit is unsigned (`git -c commit.gpgsign=false`) — this
-environment has no usable private signing key. This batch **remediated SR-AUD-111**
-(`ModuleHandle.hpp` public-header self-sufficiency, #2263 review / #2264), **remediated SR-AUD-109**
-(`Activator::CreateInstance` construction path, #2265 review / #2266), and **reviewed the
-SR-AUD-177 / SR-AUD-178 pairing and refuted it** (#2267). **Two findings remediated, one
-shared-cause hypothesis disproved.** Audit **201 remediated / 107 confirmed / 56 confirmed
-(design-complete) / 364 total**, recounted **by finding identifier**, unique and contiguous; **no
-`SR-AUD-*` identifier created — numbering frozen at 364.** `modules/core` open **46 → 44**. Gate
-**16,856 tests across 38 executables: 16,848 passing, 2 skipped, 6 failing** for the same two
-inherited causes — **exactly +20 on the inherited 16,836, which is precisely this batch's own new
-tests (6 + 14), so no regression anywhere.** The 38-executable total came from
-`build-tmp/full_gate.sh`, which runs every executable individually and continues past failures;
-both repository runners stop at the first failing executable and **cannot** produce a complete
-total. Its printed `skipped` field triple-counts (per-test line, summary header, listing), so the
-**true skip count is 2**, which the arithmetic confirms: 16,848 + 6 + 2 = 16,856. SR-AUD-111 moved
-`modules/core` public-header self-sufficiency from **222/223 to 223/223**, measured over every one
-of the 223 headers; SR-AUD-109 changed the compile domain by **zero losses and one widening**,
-measured over twelve type categories. Graph **41 / 92**, seams **3 / 20**, negative fixtures **16 /
-128** (144 invocations, peak 2 jobs) — **+1 fixture, +2 sites**, the only inherited-baseline number
-this batch moved. Catalogue current, build **0 errors / 0 warnings**, `git diff --check` clean,
-tracked `__pycache__` byte-identical. **Selective components was NOT rerun**, and §8 of each plan
-states why: SR-AUD-111's new include is **intra-component** (`Core.Base` → `Core.Base`) and nothing
-in this batch touched a module boundary, the component catalogue or the dependency graph, all three
-of which were revalidated unchanged. **No sanitizer run**, deliberately: one defect is a
-translation-time constraint violation and the other is compile-time constructor selection, neither
-of which has a runtime component a sanitizer can observe. **Doxygen, `ccache` and the `/rv`
-reference tree are all absent** and were not installed. **No CCF minted, extended or closed:
+**five commits, five pushes**, all normal fast-forwards, all **verified present on the remote** by
+re-reading `origin/<branch>` after each: `627163c`, `7348fc9`, `0680483`, `1feec47`, **and this
+handoff commit itself**, whose hash cannot be written from inside it. No merge, rebase, tag,
+force-push, PR, publication or history rewrite; every commit is unsigned
+(`git -c commit.gpgsign=false`) — this environment has no usable private signing key. This batch
+**reviewed the three `Delegate` findings and proved they are three causes, not one** (#2270),
+**remediated SR-AUD-119** (invocation-list equality, #2272), **remediated SR-AUD-120** (multicast
+subsequence removal, #2273), and **remediated SR-AUD-112** (the `ArgIterator` fixture's object
+lifetime, #2274 review / #2275). **Three findings remediated, one grouping hypothesis refuted, one
+design gate opened.** Audit **204 remediated / 103 confirmed / 57 confirmed (design-complete) / 364
+total**, recounted **by finding identifier**, unique and contiguous; **no `SR-AUD-*` identifier
+created — numbering frozen at 364.** `modules/core` open **44 → 41**. Gate **16,890 tests across 38
+executables: 16,882 passing, 2 skipped, 6 failing** for the same two inherited causes — **exactly
++34 on the inherited 16,856, which is precisely this batch's own new tests (13 + 17 + 4), so no
+regression anywhere.** The 38-executable total came from `build-tmp/full_gate.sh`, which runs every
+executable individually and continues past failures; both repository runners stop at the first
+failing executable and **cannot** produce a complete total. Its skip counter was **fixed this
+batch** — it used to `grep -c` a marker GoogleTest prints three times per skip, so it reported 6
+where the truth is **2 distinct skipped tests**; it now parses the summary count line the way the
+failure counter already did, and the arithmetic confirms it: 16,882 + 6 + 2 = 16,890. Graph **41 /
+92**, seams **3 / 20**, negative fixtures **16 / 128** (144 invocations, peak 2 jobs) — **all four
+unchanged**, no inherited-baseline number moved. Catalogue regenerated and **byte-identical**,
+build **0 errors / 0 warnings**, `git diff --check` clean, tracked `__pycache__` byte-identical
+(every Python command ran with `PYTHONDONTWRITEBYTECODE=1`). **Selective components was NOT
+rerun**: nothing in this batch touched a module boundary, a `PUBLIC`/`PRIVATE`/`TEST` dependency
+declaration, the component catalogue or the dependency graph, all of which were revalidated
+unchanged; the one new include is `<bit>` in a test. **Sanitizers were not run on the two
+`Delegate` repairs** — both are wrong *answers*, which a sanitizer is silent about — **and for
+SR-AUD-112 they were run and measured NON-DISCRIMINATING**: an ASan+UBSan reproduction of the
+fixture's exact shape completes with **no diagnostic and exit 0**, so running them for ceremony
+would have argued the opposite of the truth. **Doxygen, `ccache` and the `/rv` reference tree are
+all absent** and were not installed; **CNA, mobile-eggbert and every sibling/parent/downstream
+repository were not inspected, searched, built or modified.** **No CCF minted, extended or closed:
 CCF-011 stays closed, CCF-019 stays open and unextended, CCF-021/#2131 and CCF-022/#2109 stay
-unminted.** #2246, #2250, #2252, #2255, #2260, #1773, #1962 and every other inherited
-blocked/`needs_user` ticket are exactly as inherited. **Three findings were deliberately left
-`confirmed`: SR-AUD-063** (a public source break needing approval), **SR-AUD-176** (a large additive
-API port), **and SR-AUD-053** (still deferred, not absorbed into unrelated `Version` work).
-**SR-AUD-177 and SR-AUD-178 are also still `confirmed`**, now with separate owners — #2268
-(deferred on evidence) and #2269 (`needs_user`) — because the review found they do **not** share a
-cause. **The `modules/timers` and `modules/threading` runner-ups remain STALE.** See the batch
+unminted** — a shared file is adjacency, not causation, the same discipline #2267 applied.
+**#2268 was re-checked and preserved**: neither authoritative .NET exponent evidence nor a
+bounded-subset decision has appeared, `/rv` is still absent and
+`docs/RemainingApprovalDecisions.md` is untouched since 2026-08-03, so SR-AUD-177 was **not**
+implemented. **#2269 stays `needs_user`** — no user compatibility decision appeared, so no
+tightening was implemented. #2246, #2250, #2252, #2255, #2260, #1773, #1962 and every other
+inherited blocked/`needs_user` ticket are exactly as inherited. **Two new `needs_user` tickets:
+#2271** (the `Delegate` type-preservation representation *and* the mismatch-rejection approval) and
+**#2276** (whether `ArgIterator`'s unreachable instance members should become reachable). **Three
+findings were deliberately left `confirmed`: SR-AUD-063** (a public source break needing approval),
+**SR-AUD-176** (a large additive API port), **and SR-AUD-053** (still deferred; it was considered
+and rejected in favour of a stronger candidate, not absorbed into unrelated work). See the batch
 record below.*
+
+---
+
+## Batch record — the `Delegate` composition/equality/removal review and the `ArgIterator` fixture lifetime (#2270–#2276)
+
+**Three frozen findings remediated, one three-way grouping hypothesis refuted, two design gates
+opened.** Two review tickets, three implementation tickets, two new `needs_user` owners.
+
+### 1. The `Delegate` review (#2270) — three causes, not one
+
+An inherited ranking grouped SR-AUD-118, SR-AUD-119 and SR-AUD-120 by the file they were filed
+against and warned that 118 needs a type-preservation design. Reviewed independently, **they are not
+a family**:
+
+| Finding | Root cause | Class | Outcome |
+|---|---|---|---|
+| SR-AUD-118 | the port has **no representation** for a delegate's concrete type in a composed result | design **+** behaviour-incompatible tightening | `confirmed (design-complete)`, **#2271 `needs_user`** |
+| SR-AUD-119 | the **wrong comparison primitive** in code that already exists | compatible widening | **#2272**, remediated |
+| SR-AUD-120 | an **algorithm that was never written** | compatible widening | **#2273**, remediated |
+
+119 and 120 are **adjacent, not one cause**: different functions, independently reproducible,
+independently repairable, and §7 of the plan measures that neither repair moves the other's cells.
+Two implementation tickets, not one. **No CCF minted.**
+
+Every value was re-measured against the current tree — the audit's own probe binary lived under
+`/tmp` and is gone. All four of its recorded values reproduce exactly, and **no premise needed
+correcting**, which is worth recording because this file's recent neighbours (#2258, #2265, #2267)
+each corrected one.
+
+**Three facts the findings do not state came out of the same run, and each decided a scoping
+question:**
+
+- `chained_step2_operand_types_equal=0` — `Combine(Combine(a,b),c)` presents a **base `Delegate`**
+  and a `MulticastDelegate` to its second step, so a `typeid` guard alone would reject a chain that
+  **two currently green fixtures already use**. SR-AUD-118's two halves are one coupled repair,
+  measured rather than assumed.
+- `entry_pairs_equal=1 1` — the entries of the two independently built lists **already answer
+  `Equals` correctly**, so SR-AUD-119 is purely a loop that declines to ask them.
+- every multicast-value removal shape returns the source unchanged today, **including when the
+  source's entries are the identical `shared_ptr`s the value holds**, so SR-AUD-120's repair has an
+  **empty regression surface**.
+
+### 2. SR-AUD-118 — why it is a decision, not an implementation (#2271 `needs_user`)
+
+`Combine` and multicast `Remove` both end in `new Delegate(MulticastTag{}, …)` and never compare
+dynamic types. Current .NET rejects a mismatch with `ArgumentException` **and** creates the same
+runtime delegate type. **Two gates, neither passable autonomously:**
+
+1. **Representation.** Route **A**, a new virtual factory on a public polymorphic base — a vtable
+   change, hence an **ABI break**, plus silent degradation for any subclass that does not override
+   it. Route **B**, reuse of the existing public virtual `Clone()` — no vtable change, but `Combine`
+   would invoke **user-overridable** code and copy the left operand's subclass state into the
+   result. Route **C**, the status quo the finding rejects.
+2. **Approval.** Rejecting a mismatch makes `Combine` calls that succeed today **throw** — the same
+   tightening class as SR-AUD-178/#2269 and the date/time parsers.
+
+#2271 also carries one **adjacent** consequence, named rather than given its own ticket because it
+is not separately implementable and needs the identical decision: `Equals` is type-blind too
+(`cross_type_single_equals=1`), where .NET's `Equals` begins with `InternalEqualTypes`. It is **not**
+absorbed into SR-AUD-118's frozen text.
+
+### 3. SR-AUD-119 — the primitive, not the policy (#2272)
+
+`Equals` now compares `la[i]` against `lb[i]` with `Equals`, matching CoreCLR's
+`EqualInvocationLists`. **Strict widening**: pointer-identical entries short-circuit through
+`Equals`'s own `this == &other` fast path, so **no pair equal today can become unequal**. Measured
+`equal_function_lists_equal` and its hash counterpart both **0 → 1**, while `different_lists_equal`,
+`reordered_lists_equal` and `lambda_lists_equal` stay `0` and `same_pointer_lists_equal` stays `1`.
+
+The finding's own coupling note is honoured in the same change: `GetHashCode` folds each entry's
+**hash code** rather than its address. The mixing function is **deliberately untouched** — only the
+hashed value moved — and an entry with no comparable target still hashes as its own address, so
+**lambda-entry multicast hashes are unchanged**. Both header doc-comments that described the
+replaced pointer-identity contract were corrected rather than left to rot. **+13 tests**, 2
+mutations, both caught.
+
+### 4. SR-AUD-120 — missing code, not wrong code (#2273)
+
+`Remove` now branches on whether the value is itself multicast and, for a multicast value, scans
+candidate start positions **backwards** and deletes the **last** matching contiguous subsequence.
+Measured `remove_multicast_subsequence_size` and its same-pointer twin both **4 → 2**,
+`remove_entire_list_null` **0 → 1**, `remove_leaving_one_size`/`is_a` **3/0 → 1/1**, and
+`removeall_subsequence_size`/`null` **4/0 → 0/1** — so `RemoveAll` **inherits the fix exactly as the
+finding says it inherits the fault**. `longer_value_unchanged`, the whole single-target path, and
+**every SR-AUD-118 and SR-AUD-119 cell** are byte-identical.
+
+The `vl.size() > sl.size()` guard is **load-bearing** — without it the unsigned start index
+underflows into an out-of-bounds read — so its boundary is pinned by moving it one position tighter
+rather than by deleting it. **Deleting it is undefined behaviour, not a measurement, and is recorded
+as deliberately not run.** **Independent of SR-AUD-118**: the multi-entry result uses the same
+base-`Delegate` construction the existing removal path already used, so **no new debt** against
+#2271. **+17 tests**, 4 mutations executed, all caught.
+
+### 5. SR-AUD-112 — the `ArgIterator` fixture held no object (#2274 review, #2275)
+
+Selected as the additional small Core unit after the `Delegate` review yielded only a two-of-three
+subset. Both `ArgIterator` constructors are `[[noreturn]]`, and declaring them suppresses the
+implicit default one, so **the type cannot be constructed at all** (`is_default_constructible_v` is
+`false`, measured). The fixture therefore `reinterpret_cast` an aligned `char` buffer to
+`ArgIterator*` and called members through it — **undefined behaviour** that appeared to work only
+because the methods are empty.
+
+**Premise refinement: six tests do this, not five, holding seven fabricated objects** —
+`Equals_ReturnsFalse` builds two.
+
+A legitimate route exists and **needs no production change**: `std::bit_cast` is constrained only on
+trivial copyability and equal size — both measured true, `sizeof` 1, `is_empty_v` true — needs no
+constructor, and **returns an object**, so the missing lifetime actually begins. All seven
+fabrications became one such object each with **every pre-existing assertion retained verbatim**.
+**+4 tests** pin what the mechanism depends on; 3 mutations, all caught, and giving `ArgIterator`
+state is caught **at compile time**, which is precisely the loud failure the design claims.
+
+The residual the audit itself raises — no public construction can succeed, so the instance members
+are unreachable and "need a deliberate static or unsupported-operation design" — is **#2276
+(`needs_user`)**, is now **documented in the header**, and is deliberately **not** absorbed into
+SR-AUD-112's frozen text, which is about the fixture's access route.
+
+### 6. #2268 and #2269 re-checked and preserved
+
+**#2268 (SR-AUD-177) stays `todo`/deferred.** Neither of its two unblocking conditions appeared:
+`/rv` is still absent, and `docs/RemainingApprovalDecisions.md` has not been touched since
+2026-08-03 and contains no `AllowExponent` or `ValidateParseStyleInteger` entry. The exponent
+grammar was **not** implemented and **no .NET semantics were invented**. The #2267 premise
+correction stands unchanged: `NumberStyles::Any = 0x1FF` **includes** `AllowExponent (0x80)`, so the
+divergence is reachable.
+
+**#2269 (SR-AUD-178) stays `needs_user`.** No user compatibility decision appeared. Nothing was
+tightened, and authorisation was **not** inferred from SR-AUD-177 being compatible in direction.
+
+### 7. Validation
+
+| Item | Result |
+|---|---|
+| build | `cmake --build build --parallel 2` — **0 errors, 0 warnings** |
+| gate | **38 executables, 16,890 run, 16,882 passed, 2 skipped, 6 failed** (`build-tmp/full_gate.sh`) |
+| delta | **+34** = 13 (#2272) + 17 (#2273) + 4 (#2275), exact |
+| failures | **all 6 inherited** — 5 × `PingTests` (#1962, blocked) and 1 × `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws` (no usable IPv6 here). **The gate is not green and is not described as green.** |
+| graph | **41 modules / 92 edges** — unchanged |
+| seams | **3 seams / 20 specialisations** — unchanged |
+| negative fixtures | **16 files / 128 sites**, 144 invocations, **peak 2 jobs** — unchanged |
+| catalogue | regenerated, **byte-identical** |
+| DB self-test | `scripts/db_consistency_check.py` — **OK**, run after every ticket |
+| `git diff --check` | clean |
+| tracked `__pycache__` | 3 files, **byte-identical** |
+| max aggregate compiler jobs | **2**, everywhere — `--parallel 2` for every build, `--jobs 2` for the fixture checker, single `g++` invocations for probes |
+| build directories used | `build/`, `build-probe/`, `build-tmp/` — **no new directory name invented** |
+
+**The skip counter was corrected, not worked around.** `build-tmp/full_gate.sh` counted
+`[  SKIPPED ]` with `grep -c`, and GoogleTest prints that marker **three times per skip** (inline,
+summary header, summary listing), so it reported 6 where the truth is 2. It now parses the summary
+count line exactly as the failure counter already did, with a distinct-name fallback for the
+zero-skip case. That is a local measurement fix, in a file that is not repository tooling.
+
+### 8. Next work, ranked from the resulting state
+
+1. **The compatible `Delegate` remainder is empty** — 119 and 120 are done and 118 is gated. Do not
+   reopen 118 without the #2271 decision.
+2. **Another small unclaimed Core singleton.** `modules/core` open is **41**. Ranked by how little
+   they need: **SR-AUD-101** (three exception types are missing public overloads — a pure
+   *addition*, no behaviour change, though it spans `core` and `security-cryptography`);
+   **SR-AUD-127** and **SR-AUD-137** (public types with no first-party consumer — likely
+   documentation-and-tests units); **SR-AUD-018** (tests that forbid legal hash collisions —
+   test-only, same class as the SR-AUD-112 unit just closed).
+3. **Do not promote** #2269, #2255, #2250, #2246 or #2271/#2276 — each needs a decision that has not
+   appeared.
+4. **#2268 only if evidence appears.** It is compatible and needs no approval, but a partial grammar
+   would replace a documented uniform absence with an undocumented partial divergence.
+5. **SR-AUD-053 stays deferred.** It was considered this batch and rejected: a single constant with
+   an undocumented vector-adaptation decision behind it is not stronger than the candidates above,
+   and elevating it merely to move the remediation count is the practice this file forbids.
+
+### 9. Known limitations, unchanged
+
+- `scripts/__pycache__/*.pyc` remain tracked; every Python command ran with
+  `PYTHONDONTWRITEBYTECODE=1` and none were staged. Still worth its own untrack ticket.
+- Both repository test runners stop at the first failing executable, so a complete total needs
+  `build-tmp/full_gate.sh` for as long as the six inherited failures exist.
+- `/rv`, Doxygen and `ccache` are absent; none were installed.
 
 ---
 
