@@ -413,7 +413,8 @@ TEST(AggregateExceptionTests, NullRejectionKeepsItsExactTypeAndTextAfterC1) {
 // depth-first walk "emits nested leaves before a later direct leaf (a,b,c)" where
 // "current .NET's queue algorithm returns direct leaves before queued nested leaves
 // (c,a,b)". Direct leaves of one aggregate now precede any leaf drawn from an aggregate
-// nested inside it. See docs/AggregateExceptionCausalPlan.md.
+// nested inside it. That expected output is quoted from the frozen finding, not inferred
+// from a .NET reference -- none is available here. See docs/AggregateExceptionCausalPlan.md.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -531,6 +532,56 @@ TEST(AggregateExceptionTests, Flatten_DeepNestingIsIterative) {
     const auto order = aggregateLeafOrder(flat);
     EXPECT_EQ(order.substr(0, order.find(',')), "L" + std::to_string(kDepth));
     EXPECT_EQ(order.substr(order.rfind(',') + 1), "L0");
+}
+
+// ---------------------------------------------------------------------------
+// AggregateException — Flatten consumes its queue once (ticket #2310)
+//
+// Ticket #2308 introduced the queue but subscripted it `pending.size() - 1 - head`.
+// `pending` grows by one entry per enqueued list, so on any aggregate holding a nested
+// aggregate that index stayed pinned to 0: the seed list was re-walked forever, its
+// leaves appended to the result and a fresh copy of the nested list appended to the
+// queue on every pass. Flatten() did not return at all for such an aggregate.
+//
+// The order tests above pin the same repair, but they detect this particular break only
+// by never finishing. These two assert the finite property directly -- every leaf is
+// emitted exactly as many times as it occurs in the tree -- so a future queue that
+// terminates but re-walks a list fails fast instead of hanging.
+// ---------------------------------------------------------------------------
+
+TEST(AggregateExceptionTests, Flatten_EmitsEachLeafExactlyOnce) {
+    auto a = std::make_exception_ptr(std::runtime_error("a"));
+    auto b = std::make_exception_ptr(std::runtime_error("b"));
+    auto c = std::make_exception_ptr(std::runtime_error("c"));
+    auto d = std::make_exception_ptr(std::runtime_error("d"));
+    auto e = std::make_exception_ptr(std::runtime_error("e"));
+    // Two sibling nested aggregates plus a direct leaf: the shape the broken subscript
+    // corrupted, and the one where a re-walk shows up as a duplicated leaf.
+    auto n1 = std::make_exception_ptr(System::AggregateException({a, b}));
+    auto n2 = std::make_exception_ptr(System::AggregateException({c, d}));
+    System::AggregateException outer({n1, n2, e});
+
+    const auto flat = outer.Flatten();
+    ASSERT_EQ(flat.getInnerExceptionCountProperty(), 5u);
+    const std::vector<std::exception_ptr> expected{e, a, b, c, d};
+    EXPECT_EQ(flat.getInnerExceptionsProperty(), expected);
+}
+
+TEST(AggregateExceptionTests, Flatten_DirectLeafBeforeNested_EmitsEachLeafExactlyOnce) {
+    // `{ a, Aggregate{b, c} }`. Both algorithms agree on this shape's ORDER, which is why
+    // it is the control above -- yet it was one of the shapes the broken subscript hung
+    // on, because it too holds a nested aggregate. Count is the assertion that separates
+    // "order happens to match" from "the walk actually terminated once".
+    auto a = std::make_exception_ptr(std::runtime_error("a"));
+    auto b = std::make_exception_ptr(std::runtime_error("b"));
+    auto c = std::make_exception_ptr(std::runtime_error("c"));
+    auto nested = std::make_exception_ptr(System::AggregateException({b, c}));
+    System::AggregateException outer({a, nested});
+
+    const auto flat = outer.Flatten();
+    ASSERT_EQ(flat.getInnerExceptionCountProperty(), 3u);
+    const std::vector<std::exception_ptr> expected{a, b, c};
+    EXPECT_EQ(flat.getInnerExceptionsProperty(), expected);
 }
 
 TEST(AggregateExceptionTests, HandleRethrow_NamesItsOwnFirstUnhandledLeaf) {

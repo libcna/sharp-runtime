@@ -235,14 +235,24 @@ public:
         std::vector<std::exception_ptr> flat;
 
         // FIFO of the inner lists still to be walked, seeded with this aggregate's own.
-        // Walked by index rather than popped, and each list is COPIED out of the queue
-        // before use: the push_back below can reallocate `pending`, which would leave a
-        // reference into it dangling.
+        // Walked by index rather than popped: `head` is the front of the queue and the
+        // push_back below appends to the back, so lists come out in the order they went
+        // in. Each list is COPIED out of the queue before use, because that push_back can
+        // reallocate `pending` and would leave a reference into it dangling.
+        //
+        // The subscript must be `head`. Ticket #2308 shipped `pending.size() - 1 - head`,
+        // which does not walk a queue at all: `pending` grows by one entry for each list
+        // enqueued, so on any aggregate holding a nested aggregate the index stayed pinned
+        // to 0 and the loop re-walked the seed list forever, appending its leaves to `flat`
+        // and a fresh copy of the nested list to `pending` on every pass -- a
+        // non-terminating loop with unbounded memory growth, reached by every caller of
+        // Flatten() on a nested aggregate. Repaired by ticket #2310, which measured it
+        // directly; the tests below pin termination as well as order.
         std::vector<std::vector<std::exception_ptr>> pending;
         pending.push_back(innerExceptions_);
 
         for (std::size_t head = 0; head < pending.size(); ++head) {
-            const std::vector<std::exception_ptr> current = pending[pending.size() - 1 - head];
+            const std::vector<std::exception_ptr> current = pending[head];
             for (const auto& ep : current) {
                 try {
                     std::rethrow_exception(ep);
