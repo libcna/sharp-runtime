@@ -24,6 +24,47 @@ the bottom bits in both cases, returning the lower payload.  Arithmetic also
 constructs through this path, so results can be biased downward after every
 operation.
 
+### Status: REMEDIATED (#2261 review, #2262 implementation, 2026-08-11)
+
+Both of this finding's probes reproduced **exactly as filed**. A 26-case probe
+over exact float bit patterns read **14 OK / 12 BAD** before and **26 OK / 0
+BAD** after.
+
+The probe added four facts this report does not state. The sharpest: **the
+truncation turned a NaN into an infinity.** `0x7F800001` is a signalling NaN
+whose upper 16 bits are exactly the `+Infinity` pattern `0x7F80`, so `u >> 16`
+answered "infinity" for a NaN input, in both signs. Second: a rounding bias
+cannot simply be applied to a NaN either, because it can carry into the exponent
+and produce that same silent infinity — which is precisely why .NET rounds only
+*non-NaN* bits, and why the repair needs a NaN branch and not just a better
+bias. Third: overflow-to-infinity is correct rounding rather than a defect,
+since the exact tie at (BFloat16 max + half ulp) rounds to the even neighbour,
+and that neighbour *is* the infinity pattern. Fourth: underflow has its own tie,
+at `0x00008000`, exactly between `+0` and `Epsilon`.
+
+The repair handles NaN first — sign preserved, quiet bit set, payload discarded
+— and otherwise rounds half to even by adding `0x7FFF` plus the low bit of the
+retained payload, letting the mantissa carry reach the exponent by itself.
+
+**Premise correction to this report.** Its "Other missing assertions" section
+states that the direct tests never construct from float or perform arithmetic.
+That is true of `BitConverterTests.cpp` and **false of the repository**:
+`tests/integration/Task40Tests.cpp` carries a 14-test `BFloat16Tests` suite that
+constructs from float, adds, negates and compares. The conclusion survives —
+every value it uses has zero discarded bits, so none of the 14 pinned
+truncation, none was retired, and all 14 pass unchanged as the compatibility
+control.
+
++17 tests, including a sweep of every single-bit NaN mantissa in both signs.
+Four mutations, all caught, among them the plausible wrong repair of fixing the
+rounding while forgetting that a NaN cannot be rounded. `sizeof`/`alignof`
+measured 2/2 before and after; no signature, layout, vtable, `noexcept` or
+symbol change. `docs/CoreBFloat16RoundingPlan.md`.
+
+**SR-AUD-176 below is deliberately NOT part of that unit** and remains
+`confirmed`: a shared header is not a shared root cause, and it is a large
+additive API port rather than a defect in an existing behaviour.
+
 ## SR-AUD-176 — medium — public BFloat16 is a narrow bit-wrapper rather than the current .NET numeric value-type contract
 
 The header exposes raw construction/property access, float arithmetic and a

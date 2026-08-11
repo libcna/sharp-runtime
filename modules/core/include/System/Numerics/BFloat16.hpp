@@ -15,15 +15,41 @@ namespace System::Numerics {
  * the upper 16 bits of a 32-bit IEEE 754 float (1 sign, 8 exponent, 7 mantissa bits).
  * 
  * BFloat16 has the same dynamic range as float32 but less precision than float16.
- * Arithmetic is performed by promoting to float, computing, then truncating back.
+ * Arithmetic is performed by promoting to float, computing, then converting back
+ * with IEEE round-to-nearest-even.
  */
 class BFloat16 {
     uint16_t bits_;
 
+    /**
+     * Converts a float to the BFloat16 payload with IEEE round-to-nearest-even,
+     * matching current .NET, which passes non-NaN float bits through
+     * RoundMidpointToEven(bits, 16) before taking the upper half (SR-AUD-175).
+     *
+     * Simply shifting right by 16 truncates instead, which biased every
+     * conversion — and every arithmetic result, since arithmetic constructs
+     * through this path — toward zero, and, worse, turned a NaN whose payload
+     * lives only in the discarded low bits into an infinity: 0x7F800001 is a
+     * signalling NaN whose upper half is exactly the +Infinity pattern.
+     *
+     * NaN is therefore handled before rounding rather than by it. Adding a
+     * rounding bias to a NaN can carry into the exponent and produce that same
+     * silent infinity, so a NaN keeps its sign and is made quiet directly.
+     */
     static uint16_t fromFloat(float f) {
         uint32_t u;
         std::memcpy(&u, &f, 4);
-        return static_cast<uint16_t>(u >> 16);
+        if ((u & 0x7F800000u) == 0x7F800000u && (u & 0x007FFFFFu) != 0u) {
+            // NaN: preserve the sign, set the quiet bit, discard the payload.
+            return static_cast<uint16_t>((u >> 16) | 0x0040u);
+        }
+        // Round half to even: add half an ulp, plus one more when the retained
+        // payload is odd, so an exact midpoint lands on the even neighbour. A
+        // carry out of the mantissa flows into the exponent on its own, which is
+        // also how a finite value at or above (MaxValue + half ulp) becomes an
+        // infinity — ordinary IEEE overflow-on-rounding.
+        const uint32_t rounded = u + 0x7FFFu + ((u >> 16) & 1u);
+        return static_cast<uint16_t>(rounded >> 16);
     }
     static float toFloat(uint16_t bits) {
         uint32_t u = static_cast<uint32_t>(bits) << 16;
@@ -37,7 +63,7 @@ public:
     constexpr BFloat16() : bits_(0) {}
     /** Constructs BFloat16 from raw 16-bit pattern (no conversion). */
     constexpr explicit BFloat16(uint16_t rawBits) : bits_(rawBits) {}
-    /** Converts a float to BFloat16 by truncating the lower 16 mantissa bits. */
+    /** Converts a float to BFloat16, rounding to nearest with ties to even. */
     explicit BFloat16(float v) : bits_(fromFloat(v)) {}
 
     /** @return BFloat16 representation of 0. */
