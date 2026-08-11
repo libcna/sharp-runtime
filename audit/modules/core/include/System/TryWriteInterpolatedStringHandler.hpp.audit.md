@@ -148,3 +148,123 @@ object rather than a compiler-generated `ref struct`, with no diagnostic
 preventing it from being copied, escaping, or being used without the .NET
 `MemoryExtensions.TryWrite` completion boundary — is **not** addressed here. It is
 a design question about the shape of the type, and it belongs with SR-AUD-133.
+
+## Post-audit remediation for SR-AUD-133 (review #2303, tickets #2304/#2305, 2026-08-11): REMEDIATED
+
+The audit evidence above is retained unchanged. `docs/InterpolatedHandlerFormattingPlan.md`
+is the design record; this note is the summary.
+
+**One root cause.** `formatValue<T>` was a hand-written type→text map that did
+not consult this repository's own formatters and **had no parameter for the
+specifier at all**. The discarded format string and the hardcoded C++ spellings
+are two faces of that single fact, so one delegation change closes both.
+
+**The finding's three examples are all real, and the finding is understated in
+four places.** Measured over a bounded 75-cell matrix before any production
+change (the 75-cell matrix of `docs/InterpolatedHandlerFormattingPlan.md` §6; `build-probe/` is untracked, so the values are transcribed there):
+
+| Input | Before | After |
+|---|---|---|
+| `true` | `'1'` | `'True'` |
+| `255` with `"X2"` | `'255'` | `'FF'` |
+| `3.14` | `'3.140000'` | `'3.14'` |
+| **`"lit"` (a string literal)** | **`'[?]'`** | `'lit'` |
+| `2.5f` | `'2.500000'` | `'2.5'` |
+| `42` with `"Q"` | `'42'` | `FormatException` |
+| a real `IFormattable` | **`'[?]'`** | its own text |
+
+1. **A string literal lost its value entirely.** `T` deduces to `char[N]` for a
+   literal, which never matched the `const char*` arm, so the most ordinary
+   interpolation argument imaginable fell into the placeholder branch. Every
+   other divergence renders the value *differently*; this one **discards it**.
+   `std::string_view` and any `char[N]` behaved the same.
+2. `float` diverges as well as `double`.
+3. **Every unrecognised or malformed specifier was silently accepted** — the
+   exact fallback CCF-006 (#1847/#1849) removed from all twelve numeric
+   wrappers.
+4. The advertised `IFormattable` fallback did not merely ignore the format: it
+   produced `"[?]"`. The class doc-comment claiming that fallback was false.
+
+**No formatting semantics were guessed.** `/rv` is absent and was not needed:
+every arm now delegates to a public, tested, already-remediated sibling in the
+same module and component — `Boolean::ToString`; `SByte`/`Int16`/`Int32`/`Int64`
+and `Byte`/`UInt16`/`UInt32`/`UInt64::ToString`, chosen by width and signedness;
+`Single`/`Double::ToString`; and the value's own `ToString(format)` (which is
+`System::IFormattable`'s sole pure virtual) or `ToString()`. No format grammar
+is written in this header, so the emitted text cannot be wrong unless the
+sibling API is, and cannot drift from it later.
+`System::detail::runCompositeFormat` was evaluated and correctly **rejected**:
+it parses a *composite format string* into items, a problem this handler does
+not have, because the value and the specifier arrive already split.
+
+**Two boundaries are deliberately unchanged rather than guessed**, documented at
+the point of decision: `long double` keeps `std::to_string` (this repository has
+no extended-precision formatter, and narrowing to `double` would silently lose
+precision), and `char16_t` stays on the integral path (whether that door means
+"a character" or "a 16-bit integer" is not answerable from this type's own
+contract). A type with no `ToString` at all still yields `"[?]"` — narrowed in
+reach, not removed.
+
+**Compatibility.** 35 of 75 cells changed; **40 are byte-identical**, including
+every integer, `char`, `std::string`, a `const char*` lvalue, and — measured
+separately — **all capacity and failure behaviour and all layout and trait
+facts**. The only transition from a succeeding call to a throw is five
+malformed specifiers, which is inherited from CCF-006's settled policy rather
+than invented, and which is validated **before** any byte reaches `appendRaw`,
+so a rejected specifier leaves `pos_` and `success_` exactly as they were and
+the handler stays usable. Two tests pinned the defect and were replaced:
+`AppendFormatted_Bool` asserted `"1"`, and `AppendFormatted_WithFormat_Ignored`
+asserted only that the result was non-empty — an assertion that held equally
+well whether or not the format was honoured, so it could never have detected
+this repair. **There is no first-party production consumer**: changing the
+header recompiled exactly one object file, its own test.
+
+**Source and ABI consequences: none.** No public signature, overload set,
+template constraint, member layout (`sizeof`/`alignof` 32/8), vtable, `noexcept`
+specification, exported symbol or module dependency edge changed. The two new
+concepts are used only inside `if constexpr`, never as constraints, so the set
+of calls that compile is unchanged. The header's new transitive `__int128`
+exposure through `Int64.hpp`/`Double.hpp` is disclosed in the plan §9.
+
+Closure evidence: **+31 permanent tests (25 → 56)**, one per production door and
+per boundary. Nine mutations, eight valid and **all eight caught**; the ninth is
+proved equivalent over eleven wrappers rather than assumed. Two mutations
+initially survived and are why two tests are stronger than they would otherwise
+have been — `2.5` is exact in both binary precisions, so the float test uses
+`0.1f`; every unformatted integer reads the same at any width, so the width test
+pins `-1` in hexadecimal. Sanitizers were run **only where they discriminate**:
+ASan is the sole thing that separates the bounded array read from
+`std::string(v)`, and it caught that mutation. Repository gate: 0 errors, 0
+warnings, **16,972 tests across 38 executables** (was 16,941), with the six
+inherited failures unchanged (5 × `PingTests`, #1962; 1 × `SocketTests`, no
+usable IPv6 in this environment).
+
+**Cross-cutting: adjacency, not membership, and no `CCF-*` is minted or
+extended.** This handler contains no brace grammar — it never sees a composite
+format string — so it is not a third implementation of CCF-012's grammar, and
+CCF-012 remains open and unchanged, closable only by #2020. It is not a numeric
+wrapper, so it is not a CCF-006 member either; what it shared was that closed
+cause's *shape*, which is now gone here by delegating to the cause's own
+remediated members. The repair required no new policy, only the application of
+two that already exist.
+
+**A separate defect found in the same member — ordinary ticket #2305, no
+`SR-AUD-*` identifier, numbering still frozen at 364.**
+`AppendFormatted(const char*)` reached `return std::string(v);`, whose
+NUL-terminated-array precondition a null violates. `AppendLiteral(const char*)`
+has rejected null since #1810; this door did not. Measured
+(transcribed in `docs/InterpolatedHandlerFormattingPlan.md` §7; `build-probe/` is untracked): libstdc++ diagnoses the
+precondition itself and throws `std::logic_error`, which escapes this
+`System`-shaped public API with nothing to catch it, so **the process aborts,
+exit 134**. **ASan and UBSan report nothing** — and that silence was the
+discriminating evidence, establishing that the mechanism is an escaping
+non-`System` exception rather than a memory error. Fixed with
+`ArgumentNullException("value")`, the same exception type and parameter name
+#1810 settled for the sibling door.
+
+The report's structural observation that this is an ordinary C++ object rather
+than a compiler-generated `ref struct`, with no diagnostic preventing it from
+being copied, escaping, or being used without the .NET `MemoryExtensions.TryWrite`
+completion boundary, is **still not addressed**. It is a design question about
+the shape of the type, not about its formatting semantics, and it is unaffected
+by this ticket.
