@@ -174,3 +174,161 @@ No `SR-AUD-*` identifier is created; numbering stays frozen at 364. SR-AUD-174
 stays **`confirmed`** — its table clause is blocked and its two data-free
 clauses are open in #2316. SR-AUD-173, the sibling numeric-value finding in the
 same report, shares §3's root dependency and is **not** claimed by this review.
+
+---
+
+# Part II — #2316 implementation record (the two data-free clauses)
+
+Ticket **#2316**, implemented 2026-08-11. SR-AUD-174 stays **`confirmed`**: this closes
+its locale clause and its surrogate clause, and leaves its table clause open in **#2315**,
+blocked on Approval F / **#2018**. Nothing below uses, downloads, generates, infers or
+hand-writes Unicode character-database content.
+
+## 8. Before-state, measured
+
+Two probes over the **whole** code space U+0000–U+10FFFF (1,114,112 code points), linked
+against the live tree (`build-probe/2316_probe1_locale_surrogate.cpp`,
+`build-probe/2316_probe2_points.cpp`).
+
+### 8.1 The locale clause reproduces *in this container* — a premise correction
+
+Part I §4.1 and #2316's own description say this container has **no locales installed**, so
+the locale dependence could only be demonstrated "on a host where those locales exist".
+**That is wrong.** `locale -a` lists three: `C`, `POSIX` and **`C.utf8`**. `C.utf8` is a
+non-invariant locale for wide-character classification, and installing it through the
+repository's own mechanism — `std::locale::global(std::locale("C.utf8"))`, exactly what
+`ScopedGlobalLocale` does — changed the category of
+
+> **287,218 of 1,114,112 code points (25.8%)**, first at U+0080.
+
+`CultureInvariantFormattingTests` skips here not because no locale exists but because it
+probes exactly four names — `en_US.utf8`, `en_US.UTF-8`, `de_DE.utf8`, `de_DE.UTF-8` — and
+never probes `C.utf8`. The inference "it skips, therefore nothing is installed" does not
+hold. The locale clause was therefore directly measurable, not hypothetical.
+
+Every one of the 287,218 moves **out of** `OtherNotAssigned` into a positive category (the
+`OtherNotAssigned` census falls by exactly 287,218 and no code point moves the other way):
+148,166 → `OtherPunctuation`, 134,531 → `OtherLetter`, 2,518 → `LowercaseLetter`, 1,956 →
+`UppercaseLetter`, 32 → `Control`, 15 → `SpaceSeparator`.
+
+### 8.2 The ladder produced 7 categories here, not the 8 Part I estimated
+
+Part I says the ladder "can name at most 8 of the enum's 30". Measured, the ceiling is 8 but
+the **actual** count is locale-dependent too: in the `C` locale it produces **7** —
+`OtherLetter` is unreachable, because every `iswalpha` character is already caught by
+`iswupper` or `iswlower` — and under `C.utf8` it produces 8.
+
+### 8.3 The C-locale answer is exactly reproducible without any locale facet
+
+The `C` locale's `isw*` classification is fixed by the C standard over the basic execution
+character set. Restating it as explicit ASCII ranges and comparing against the live
+pre-change implementation over all 1,114,112 code points gives **0 mismatches**. This is
+what makes the repair provably behaviour-preserving in the invariant locale rather than
+merely intended to be.
+
+### 8.4 The surrogate clause is locale-invariant
+
+Under **both** `C` and `C.utf8`, all 2,048 code points U+D800–U+DFFF answered
+`OtherNotAssigned`: 0/2048 non-default under `C.utf8`. So the two clauses do not interact,
+and `Char::IsSurrogate` disagreed with `category == Surrogate` at exactly **2,048** code
+points.
+
+### 8.5 The documented non-BMP limitation was untrue on two axes — a second premise correction
+
+The header's only stated limitation was "non-BMP code points are mapped to
+OtherNotAssigned". Neither half held:
+
+* **On a 32-bit-`wchar_t` target** (Linux; `WCHAR_MAX` = 2,147,483,647) supplementary code
+  points were *not* substituted at all — they went straight into the `isw*` ladder, and
+  under `C.utf8` most of them received a positive category.
+* **On a 16-bit-`wchar_t` target** (Windows) `wc` became `L'\0'`, which is not `< 32` (the
+  guard tests `codePoint`, not `wc`), fails every classification test, and then satisfies
+  `iswcntrl(0)` — so every supplementary code point returned **`Control`**, not
+  `OtherNotAssigned`. Checked by replaying the exact expression with `WCHAR_MAX` forced to
+  `0xFFFF` (`build-tmp/2316_win_wchar.cpp`): U+10000, U+1F600 and U+10FFFF all → 14.
+
+After the repair the documented behaviour is true for the first time, on every target.
+
+## 9. What was implemented
+
+One header, `modules/core/include/System/Globalization/CharUnicodeInfo.hpp`, inside
+`GetUnicodeCategory(intcs)` and its doc-comments only.
+
+1. **The `isw*` ladder is replaced by explicit ASCII ranges** — Control (U+0000–U+001F and
+   U+007F), `A`–`Z`, `a`–`z`, `0`–`9`, U+0020, and the four punctuation runs — reproducing
+   the `C`-locale answer exactly (§8.3) with no locale facet consulted.
+2. **U+D800–U+DFFF returns `UnicodeCategory::Surrogate`**, the range taken from this port's
+   own `Char::IsSurrogate` (`Char.hpp:245`) and the value from the frozen finding's own
+   managed probe.
+3. **`<climits>` and `<cwctype>` are dropped** — they existed only for `WCHAR_MAX` and the
+   `isw*` calls. (`Char.hpp` includes `<cwctype>` itself, so its consumers are unaffected.)
+4. **The doc-comments state the real contract**: the classification is locale-independent
+   and is a *declared reduction* to ASCII plus the surrogate range, `OtherNotAssigned` is a
+   statement about what this port knows rather than a claim about Unicode, and the rest
+   waits on a database, an attribution and a stated version.
+
+### 9.1 Deliberately not done
+
+* **ASCII punctuation subcategories.** `$` is `CurrencySymbol`, `+`/`<`/`=`/`>`/`|`/`~` are
+  `MathSymbol`, `(`/`[`/`{` are `OpenPunctuation`, `-` is `DashPunctuation`, `_` is
+  `ConnectorPunctuation` and `^`/`` ` `` are `ModifierSymbol` in .NET; all 32 stay
+  `OtherPunctuation` here. Correcting them is table work with a behaviour change in the
+  default locale, i.e. #2315's clause, not #2316's — and the reduction is now documented
+  rather than silent.
+* **`PrivateUse` for U+E000.** The probe evidence is one code point; no private-use *range*
+  is fixed anywhere in this repository, unlike the surrogate range. Part I §4.2's evidence
+  boundary is carried into a test that asserts U+E000 is *not* `PrivateUse`.
+* **SR-AUD-173.** The numeric methods are untouched.
+
+## 10. After-state, measured
+
+Genuine before/after: the pre-change header was extracted with
+`git show HEAD:…/CharUnicodeInfo.hpp` into `build-probe/2316_before/`, one probe
+(`build-probe/2316_probe3_sweep.cpp`) was compiled against each tree, and both dumps —
+1,114,112 lines each — were diffed, under the `C` locale and under `C.utf8`.
+
+| Measurement | Before | After |
+|---|---|---|
+| Code points whose category changes when the global locale goes `C` → `C.utf8` | **287,218** | **0** |
+| Code points where `Char::IsSurrogate` ≠ (`category == Surrogate`) | **2,048** | **0** |
+| Category changes in the invariant locale, before → after | — | **2,048**, all `OtherNotAssigned` → `Surrogate`, exactly U+D800–U+DFFF |
+| `Char::IsNumber`/`IsSeparator`/`IsControl`/`IsSurrogate` answers changed over U+0000–U+FFFF, invariant locale | — | **0** |
+
+**In the invariant locale — the container default, and tracked CI — the only observable
+change in the entire code space is the 2,048 surrogates.** Nothing else moved.
+
+### 10.1 The price, stated exactly
+
+On a host that installs a UTF-8 global locale, 287,218 categories are **withdrawn** to
+`OtherNotAssigned` (289,266 total changes = 287,218 withdrawn + 2,048 surrogates). Those
+answers were unreproducible across hosts and mostly wrong: of the frozen finding's own
+non-ASCII probe rows, `C.utf8` got U+0301 as `OtherPunctuation` (Unicode: `NonSpacingMark`),
+U+2014 as `OtherPunctuation` (`DashPunctuation`), U+E000 as `OtherPunctuation`
+(`PrivateUse`) and U+1F600 as `OtherPunctuation` (`OtherSymbol`) — four confident, wrong,
+positive claims where `OtherNotAssigned` is at least an honest one. Only U+00C9 was right
+(`UppercaseLetter`), and it is among the 4,474 letter classifications withdrawn.
+
+**One first-party consequence, on such a host only:** `Char::IsSeparator` returns `false`
+where it returned `true` for 15 code points — U+1680, U+2000–U+2006, U+2008–U+200A, U+2028,
+U+2029, U+205F, U+3000. (`Char::IsSeparator` short-circuits below U+0100, so ASCII and
+Latin-1 are untouched.) Those are genuinely separators in Unicode; answering them correctly
+and *reproducibly* is #2315's table, not a locale accident. No other `Char` predicate moves
+on any host.
+
+## 11. Compatibility
+
+No public signature, no object layout, no vtable, no `noexcept` specification and no
+exported symbol changes: `CharUnicodeInfo` is a `static`-only class with a deleted
+constructor and every member is an inline function template-free body in the header. The
+out-of-range `ArgumentOutOfRangeException("codePoint")` guard, its `paramName` and its
+position (first) are untouched, as are all three other overloads' bodies and both numeric
+method families. The rebuild is broad — the header is reached transitively through
+`Char.hpp` — but the change is confined to one function body and its comments.
+
+## 12. Why SR-AUD-174 stays open
+
+Its table clause is untouched and unblocked only by Approval F / #2018 (#2315, `blocked`).
+The finding's own probe rows for U+0301, U+2014, U+E000 and U+1F600 still diverge from .NET
+and are now *pinned* as the declared reduction, so the gap is permanently visible instead of
+resting on ambient locale state. The audit index records partial closure; the status stays
+`confirmed`.

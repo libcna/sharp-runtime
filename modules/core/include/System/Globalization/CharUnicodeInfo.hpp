@@ -2,8 +2,6 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <climits>
-#include <cwctype>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -19,6 +17,18 @@ using SharpRuntime::intcs;
  *
  * C++ counterpart of .NET System.Globalization.CharUnicodeInfo.
  * All methods are static; this class cannot be instantiated.
+ *
+ * @note <b>Category classification is a declared reduction, and is locale-independent.</b>
+ *       GetUnicodeCategory answers from this port's own knowledge only: the ASCII range
+ *       U+0000–U+007F, and the surrogate range U+D800–U+DFFF that
+ *       System::Char::IsSurrogate already fixes. Every other code point — every
+ *       assigned non-ASCII letter, every combining mark, every symbol, every private-use
+ *       code point, and every supplementary code point — is reported
+ *       UnicodeCategory::OtherNotAssigned. That value is a statement about what this port
+ *       knows, not a claim that the code point is unassigned in Unicode. Answering for the
+ *       rest of the code space requires a Unicode character database, its attribution and a
+ *       stated Unicode version with an update policy; that decision is open and no partial
+ *       table is hand-authored here.
  */
 class CharUnicodeInfo {
     /** @brief Throws ArgumentOutOfRangeException if @p index is out of bounds for @p s. */
@@ -150,7 +160,16 @@ public:
      * @brief Gets the Unicode category for a character specified by code point.
      *
      * C++ counterpart of .NET CharUnicodeInfo.GetUnicodeCategory(int) (for supplementary chars).
-     * Uses POSIX wide-character classification; non-BMP code points are mapped to OtherNotAssigned.
+     *
+     * The answer is <b>locale-independent</b>: no C or C++ locale facet is consulted, so a
+     * process that installs a different global locale gets the same category for the same
+     * code point. It is also <b>reduced</b>: only U+0000–U+007F and the surrogate range
+     * U+D800–U+DFFF are classified, and every other code point — BMP or
+     * supplementary — returns OtherNotAssigned (see the class note). Within ASCII, every
+     * punctuation and symbol character is reported OtherPunctuation rather than its finer
+     * .NET subcategory (MathSymbol, CurrencySymbol, OpenPunctuation, DashPunctuation, ...);
+     * that too is part of the reduction and is unchanged here.
+     *
      * @param codePoint The Unicode code point to categorize.
      * @return The UnicodeCategory value for the code point.
      * @throws System::ArgumentOutOfRangeException if @p codePoint is not in [0, 0x10FFFF].
@@ -159,22 +178,28 @@ public:
         if (codePoint < 0 || codePoint > 0x10FFFF) {
             throw System::ArgumentOutOfRangeException("codePoint");
         }
-        wchar_t wc = (codePoint >= 0 && codePoint <= static_cast<intcs>(WCHAR_MAX))
-                     ? static_cast<wchar_t>(codePoint) : L'\0';
-        // C0 controls (U+0000-U+001F) must be classified as Control before any of the
-        // iswupper/iswdigit/iswspace/iswpunct checks below: several of them (TAB U+0009,
-        // LF U+000A, VT U+000B, FF U+000C, CR U+000D) also satisfy iswspace() in the C
-        // locale, so checking iswspace() first previously misclassified them as
-        // SpaceSeparator instead of Control -- confirmed against the real Unicode category
-        // database (all of U+0000-U+001F are Cc; only U+0020 itself is Zs).
-        if (codePoint < 32)    return UnicodeCategory::Control;
-        if (std::iswupper(wc)) return UnicodeCategory::UppercaseLetter;
-        if (std::iswlower(wc)) return UnicodeCategory::LowercaseLetter;
-        if (std::iswdigit(wc)) return UnicodeCategory::DecimalDigitNumber;
-        if (std::iswspace(wc)) return UnicodeCategory::SpaceSeparator;
-        if (std::iswpunct(wc)) return UnicodeCategory::OtherPunctuation;
-        if (std::iswalpha(wc)) return UnicodeCategory::OtherLetter;
-        if (std::iswcntrl(wc)) return UnicodeCategory::Control;
+        // ASCII, U+0000-U+007F. These ranges reproduce exactly what the previous
+        // std::iswupper/iswlower/iswdigit/iswspace/iswpunct/iswalpha/iswcntrl ladder
+        // returned in the "C" locale, restated as explicit ranges. The isw* functions are
+        // locale-sensitive, so the old ladder gave a different category for the same code
+        // point once any process installed a different global locale -- the very thing a
+        // culture-insensitive CharUnicodeInfo must not do.
+        //
+        // C0 controls (U+0000-U+001F) and DEL (U+007F) are Cc; only U+0020 itself is Zs, so
+        // TAB/LF/VT/FF/CR must be Control and not SpaceSeparator.
+        if (codePoint < 0x20 || codePoint == 0x7F)      return UnicodeCategory::Control;
+        if (codePoint >= 'A' && codePoint <= 'Z')       return UnicodeCategory::UppercaseLetter;
+        if (codePoint >= 'a' && codePoint <= 'z')       return UnicodeCategory::LowercaseLetter;
+        if (codePoint >= '0' && codePoint <= '9')       return UnicodeCategory::DecimalDigitNumber;
+        if (codePoint == ' ')                           return UnicodeCategory::SpaceSeparator;
+        if ((codePoint >= 0x21 && codePoint <= 0x2F) || (codePoint >= 0x3A && codePoint <= 0x40)
+            || (codePoint >= 0x5B && codePoint <= 0x60) || (codePoint >= 0x7B && codePoint <= 0x7E))
+            return UnicodeCategory::OtherPunctuation;
+        // Surrogate code points. This is not Unicode-table knowledge: the range is already
+        // fixed by this port itself in System::Char::IsSurrogate ("c >= 0xD800u && c <=
+        // 0xDFFFu"), and answering OtherNotAssigned here made the two contradict each other
+        // -- one calling U+D800-U+DFFF surrogates, the other calling them unassigned.
+        if (codePoint >= 0xD800 && codePoint <= 0xDFFF) return UnicodeCategory::Surrogate;
         return UnicodeCategory::OtherNotAssigned;
     }
 };
