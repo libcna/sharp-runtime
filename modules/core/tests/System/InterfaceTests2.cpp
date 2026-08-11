@@ -4,10 +4,16 @@
 // Tests for: IFormatProvider, IFormattable, IObservable, IObserver,
 //            IParsable, IProgress, IServiceProvider, ISpanFormattable
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <cstddef>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <typeinfo>
 #include <vector>
+#include "System/ArgumentNullException.hpp"
+#include "System/IDisposable.hpp"
 #include "System/IFormatProvider.hpp"
 #include "System/IFormattable.hpp"
 #include "System/IObservable.hpp"
@@ -63,21 +69,88 @@ struct IntObserver2 : public System::IObserver<int> {
     void OnError(const std::exception&) override { errored = true; }
 };
 
+// SR-AUD-056 (#2302). This fixture is used as behavioural evidence, so it must
+// honour the two contracts its own interfaces document, not merely compile:
+// IObservable<T>::Subscribe returns an IDisposable "that allows observers to
+// stop receiving notifications before the provider has finished sending them",
+// and IObserver<T> states that after a terminal OnError or OnCompleted the
+// provider makes no further OnNext or OnCompleted call. The previous version
+// returned nullptr from Subscribe and left Emit fully functional after
+// Complete(), so a future implementation could have copied both defects without
+// a failing regression.
+//
+// The observer list lives in a State that the provider and every subscription
+// co-own, which is how this repository already isolates a view's storage from
+// its owner's lifetime (SortedSet<T>, ticket #1786). A subscription therefore
+// stays safe to dispose whatever order things are destroyed in, and there is no
+// ownership cycle: the subscription owns State, State owns the observers, and an
+// observer owns nothing.
 struct IntObservable2 : public System::IObservable<int> {
-    std::vector<std::shared_ptr<System::IObserver<int>>> observers;
+    struct State {
+        std::vector<std::pair<int, std::shared_ptr<System::IObserver<int>>>> observers;
+        bool terminated = false;
+    };
+
+    // A subscription is the fixture's IDisposable: disposing it unsubscribes
+    // exactly its own observer, and disposing twice is a no-op, as IDisposable
+    // requires of every implementation.
+    class Subscription final : public System::IDisposable {
+        std::shared_ptr<State> state_;
+        int token_;
+    public:
+        Subscription(std::shared_ptr<State> state, int token)
+            : state_(std::move(state)), token_(token) {}
+        void Dispose() override {
+            if (!state_) { return; }
+            std::erase_if(state_->observers,
+                          [this](const auto& entry) { return entry.first == token_; });
+            state_.reset();
+        }
+        // Deliberately NOT disposing here. Unsubscription is tied to Dispose(),
+        // as IObservable<T> documents, not to the handle's lifetime: dropping
+        // the returned shared_ptr must leave the observer subscribed, which is
+        // what .NET does and what this file's first two cases rely on.
+        ~Subscription() override = default;
+    };
+
+    std::shared_ptr<State> state = std::make_shared<State>();
+    int nextToken = 0;
+
     std::shared_ptr<System::IDisposable> Subscribe(
             std::shared_ptr<System::IObserver<int>> obs) override {
-        observers.push_back(obs);
-        return nullptr;
+        if (!obs) {
+            throw System::ArgumentNullException("observer");
+        }
+        const int token = nextToken++;
+        state->observers.emplace_back(token, std::move(obs));
+        return std::make_shared<Subscription>(state, token);
     }
-    void Emit(int v) { for (auto& o : observers) o->OnNext(v); }
-    void Complete() { for (auto& o : observers) o->OnCompleted(); }
+
+    /** Delivers a value, unless a terminal notification has already been sent. */
+    void Emit(int v) {
+        if (state->terminated) { return; }
+        for (auto& [token, o] : state->observers) { (void)token; o->OnNext(v); }
+    }
+    /** Terminal path one. Subsequent Emit/Complete/Fail deliver nothing. */
+    void Complete() {
+        if (state->terminated) { return; }
+        state->terminated = true;
+        for (auto& [token, o] : state->observers) { (void)token; o->OnCompleted(); }
+    }
+    /** Terminal path two, the one the report notes was never covered. */
+    void Fail(const std::exception& error) {
+        if (state->terminated) { return; }
+        state->terminated = true;
+        for (auto& [token, o] : state->observers) { (void)token; o->OnError(error); }
+    }
+    [[nodiscard]] std::size_t subscriberCount() const { return state->observers.size(); }
 };
 
 TEST(IObservableTests2, Subscribe_AndReceiveValues) {
     IntObservable2 src;
     auto obs = std::make_shared<IntObserver2>();
-    src.Subscribe(obs);
+    auto subscription = src.Subscribe(obs);
+    ASSERT_NE(subscription, nullptr);
     src.Emit(10); src.Emit(20);
     ASSERT_EQ(obs->received.size(), 2u);
     EXPECT_EQ(obs->received[0], 10);
@@ -87,9 +160,98 @@ TEST(IObservableTests2, Subscribe_AndReceiveValues) {
 TEST(IObserverTests2, OnCompleted_SetsFlag) {
     IntObservable2 src;
     auto obs = std::make_shared<IntObserver2>();
-    src.Subscribe(obs);
+    auto subscription = src.Subscribe(obs);
     src.Complete();
     EXPECT_TRUE(obs->completed);
+}
+
+// The subscription handle is what IObservable<T> documents Subscribe to return.
+TEST(IObservableTests2, Subscribe_ReturnsADisposableSubscription) {
+    IntObservable2 src;
+    auto obs = std::make_shared<IntObserver2>();
+    std::shared_ptr<System::IDisposable> subscription = src.Subscribe(obs);
+    ASSERT_NE(subscription, nullptr);
+    EXPECT_EQ(src.subscriberCount(), 1u);
+}
+
+TEST(IObservableTests2, DisposedSubscription_StopsReceivingValues) {
+    IntObservable2 src;
+    auto obs = std::make_shared<IntObserver2>();
+    auto subscription = src.Subscribe(obs);
+    src.Emit(1);
+    subscription->Dispose();
+    EXPECT_EQ(src.subscriberCount(), 0u);
+    src.Emit(2);
+    ASSERT_EQ(obs->received.size(), 1u);
+    EXPECT_EQ(obs->received[0], 1);
+}
+
+TEST(IObservableTests2, DisposingASubscriptionTwiceIsANoOp) {
+    IntObservable2 src;
+    auto first = std::make_shared<IntObserver2>();
+    auto second = std::make_shared<IntObserver2>();
+    auto firstSubscription = src.Subscribe(first);
+    src.Subscribe(second);
+    ASSERT_EQ(src.subscriberCount(), 2u);
+
+    firstSubscription->Dispose();
+    firstSubscription->Dispose();
+    EXPECT_EQ(src.subscriberCount(), 1u);
+
+    src.Emit(7);
+    EXPECT_TRUE(first->received.empty());
+    ASSERT_EQ(second->received.size(), 1u);
+    EXPECT_EQ(second->received[0], 7);
+}
+
+TEST(IObservableTests2, SubscribeRejectsANullObserver) {
+    IntObservable2 src;
+    EXPECT_THROW(src.Subscribe(nullptr), System::ArgumentNullException);
+    EXPECT_EQ(src.subscriberCount(), 0u);
+}
+
+// IObserver<T> guarantees no OnNext or OnCompleted follows a terminal call.
+TEST(IObserverTests2, NoValueIsDeliveredAfterCompletion) {
+    IntObservable2 src;
+    auto obs = std::make_shared<IntObserver2>();
+    src.Subscribe(obs);
+    src.Emit(1);
+    src.Complete();
+    src.Emit(2);
+    ASSERT_EQ(obs->received.size(), 1u);
+    EXPECT_EQ(obs->received[0], 1);
+    EXPECT_TRUE(obs->completed);
+    EXPECT_FALSE(obs->errored);
+}
+
+TEST(IObserverTests2, CompletionIsNotDeliveredTwice) {
+    IntObservable2 src;
+    struct CountingObserver final : public System::IObserver<int> {
+        int completions = 0;
+        void OnNext(const int&) override {}
+        void OnCompleted() override { ++completions; }
+        void OnError(const std::exception&) override {}
+    };
+    auto obs = std::make_shared<CountingObserver>();
+    src.Subscribe(obs);
+    src.Complete();
+    src.Complete();
+    EXPECT_EQ(obs->completions, 1);
+}
+
+// OnError is the other terminal path, and the report notes it was never covered.
+TEST(IObserverTests2, OnError_IsTerminalToo) {
+    IntObservable2 src;
+    auto obs = std::make_shared<IntObserver2>();
+    src.Subscribe(obs);
+    src.Fail(std::runtime_error("provider failed"));
+    EXPECT_TRUE(obs->errored);
+    EXPECT_FALSE(obs->completed);
+
+    src.Emit(5);
+    src.Complete();
+    EXPECT_TRUE(obs->received.empty());
+    EXPECT_FALSE(obs->completed);
 }
 
 // ---------------------------------------------------------------------------
