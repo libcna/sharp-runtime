@@ -26,6 +26,49 @@ crash-diagnostic implementation or explicitly designate/document it as a
 project-specific public diagnostic type rather than calling it a .NET
 counterpart.
 
+### Status: REMEDIATED (#2279 review, #2280 implementation, 2026-08-11)
+
+Repaired by **this finding's own second alternative**, taken deliberately and
+recorded as such. The first alternative — moving the enum into an internal
+implementation — withdraws a published, independently includable `System::`
+header from the `Core.Base` include tree, which is a public source break and an
+approval boundary this batch does not cross; downstream consumers exist and this
+batch may not inspect them.
+
+The finding's substantive complaints are both statements about what the header
+says — it "promises stable consumer access where .NET intentionally makes none"
+and "provides no visibility or NativeAOT-only diagnostic explaining why an
+internal runtime concept is exposed from Core.Base" — and both are now false. The
+doc-comment states that .NET publishes no `System.CrashReason`, that the
+counterpart is the `internal` nested `System.CrashInfo.CrashReason`, that this
+enumeration is published on the project's own authority so that a later change to
+.NET's internal enum is not by itself a defect here, that there is no first-party
+production consumer so the constants are a porting vocabulary rather than a
+runtime contract, why the type stays published, and that the enumeration is not
+closed over its underlying type.
+
+**Nothing in the compiled surface changed** — no enumerator, value, underlying
+type, name or include — so there is no ABI, layout, vtable, `noexcept`, symbol or
+component-dependency consequence.
+
+The consumer inventory was re-measured rather than inherited: **zero** production
+consumers, one test file.
+
+The missing vectors this report lists were added, 5 tests → 9, none retired. The
+"no full pairwise-distinctness vector" observation was accurate: the five old
+tests check each enumerator once and compare **two of the six** pairs, so two
+enumerators could have collided unnoticed. Added: all six pairs, contiguity from
+zero, the `int` underlying type and scopedness, and an unlisted-value vector for
+`4` and `-1`. Two mutations, both caught by the new tests as well as an old one.
+
+**Verdict on the ranking that paired this with SR-AUD-137: not a family.** They
+share a characteristic — a .NET-internal type republished publicly with no
+first-party consumer — not a cause: this one is republished *verbatim*, that one
+with a *different* shape plus a false source-compatibility claim, and SR-AUD-137
+has no available compatible repair (#2281, `needs_user`). No CCF minted; the same
+characteristic also runs through SR-AUD-124/125/126/128/129/136.
+`docs/CoreCrashReasonAndUnityHolderPlan.md`.
+
 ## Other missing assertions and diagnostics
 
 - No production crash/FailFast path consumes the enum, so no test validates
