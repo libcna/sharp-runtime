@@ -23,4 +23,9 @@ namespace System::IO {
         : IOException(message), directoryPath_(directoryPath) {
         setHResultProperty(CorEDirectoryNotFound);
     }
+    DirectoryNotFoundException::DirectoryNotFoundException(const std::string& message, const std::string& directoryPath,
+                                                          std::exception_ptr inner)
+        : IOException(message, std::move(inner)), directoryPath_(directoryPath) {
+        setHResultProperty(CorEDirectoryNotFound);
+    }
 } // namespace System::IO

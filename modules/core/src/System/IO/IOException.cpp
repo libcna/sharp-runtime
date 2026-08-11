@@ -30,4 +30,11 @@ namespace System::IO {
         setHResultProperty(CorEIo);
     }
 
+    IOException::IOException(const std::string& message, SharpRuntime::intcs hresult)
+        : System::SystemException(message) {
+        // .NET assigns the caller's code unconditionally rather than defaulting to
+        // COR_E_IO first, so an explicit 0x80131620 and an explicit 0 are both honoured.
+        setHResultProperty(hresult);
+    }
+
 } // namespace System::IO

@@ -19,6 +19,17 @@ namespace System::IO {
         DirectoryNotFoundException(const std::string& message, std::exception_ptr inner);
         /** Initializes a DirectoryNotFoundException with a message and the directory path that could not be found. */
         DirectoryNotFoundException(const std::string& message, const std::string& directoryPath);
+        /**
+         * @brief Initializes a DirectoryNotFoundException with a message, the directory path
+         * that could not be found, and the exception that caused the failure.
+         *
+         * Completes this port's directory-path family so that a caller no longer has to
+         * discard either the failed path or its cause, matching the
+         * `(message, fileName, inner)` shape `System::IO::FileNotFoundException` and
+         * `System::IO::FileLoadException` already provide.
+         */
+        DirectoryNotFoundException(const std::string& message, const std::string& directoryPath,
+                                   std::exception_ptr inner);
 
         /** @return The directory path that could not be found, or an empty string if not set. */
         [[nodiscard]] const std::string& getDirectoryPathProperty() const { return directoryPath_; }
