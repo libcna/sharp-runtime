@@ -3,36 +3,226 @@
 
 # NEXT.md
 
-*Last verified: 2026-08-10. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
+*Last verified: 2026-08-11. Branch `claude/remediation-batch-1804-namespace-b1yjh5` — **the
 harness-designated branch**. **Pushed immediately after every commit**, per `CLAUDE.md` rule 13 —
-**five commits, five pushes**, all normal fast-forwards, all **verified present on the remote**:
-`75a7129`, `bf5a50e`, `52512a8`, `a53efe1`, `8c81961`, **and this handoff commit itself**, whose
-hash cannot be written from inside it. No merge, rebase, tag, force-push, PR, publication or history
-rewrite; every commit is unsigned (`git -c commit.gpgsign=false`) — this environment has no usable
-private signing key. This batch **closed the Core `ArgumentOutOfRangeException` guard-domain slice**
-(#2253 review, #2254), **completed the `AppContext` named-data design** (#2255 approval, #2256
-compatible), **closed the `Property<T>` empty-getter defect** (#2247), and **opened #2257** after a
-recorded three-way scope check. **Two findings and one post-audit defect: SR-AUD-091 remediated,
-SR-AUD-102 design-completed and still `confirmed`, #2247 closed.** Audit **197 remediated / 111
-confirmed / 56 confirmed (design-complete) / 364 total**, recounted **by finding identifier**; **no
-`SR-AUD-*` identifier created — numbering frozen at 364.** `modules/core` open **49 → 48**. Gate
-**16,801 tests across 38 executables: 16,793 passing, 2 skipped, 6 failing** for the same two
-inherited causes — **exactly +45 on the inherited 16,756, which is precisely this batch's own new
-tests (26 guard-domain, 10 AppContext, 9 Property), so no regression anywhere.** SR-AUD-091's
-compile domain went **99 OK / 99 FAIL → 135 OK / 63 FAIL** over 22 types × 9 guards, with **zero**
-previously accepted pairs regressed and **zero** remaining rejections reported inside libstdc++.
-Graph **41 / 92**, seams **3 / 20**, negative fixtures **14 / 120 → 15 / 126** (141 invocations,
-peak 2 jobs), catalogue current. **Selective components WAS rerun** — production header code
-changed in `Core.Base` — and **passed all ten components**; §6 records the PID discipline.
-**Doxygen, `ccache` and the `/rv` reference tree are all absent** and were not installed. **No CCF
-minted, extended or closed: CCF-011 stays closed (its policy was reused for #2247 as an adjacency,
-not a membership), CCF-019 stays open and unextended (recorded as an adjacency for the `AppContext`
-`void*` store), CCF-021/#2131 and CCF-022/#2109 stay unminted.** #2246, #2250, #2215, #2228, #2238,
-#1773, #1962 and every other inherited blocked/`needs_user` ticket are exactly as inherited.
-**The full gate was run BEFORE each push, not after** — the §2.5 lesson from the previous handoff,
-which mattered here because `ArgumentOutOfRangeException.hpp` is included by **404** translation
-units. **The `modules/timers` and `modules/threading` runner-ups remain STALE.**
-See the first handoff below.*
+**four commits, four pushes**, all normal fast-forwards, all **verified present on the remote**:
+`8b9837f`, `0fd560d`, `bdfb9d9`, **and this handoff commit itself**, whose hash cannot be written
+from inside it. No merge, rebase, tag, force-push, PR, publication or history rewrite; every commit
+is unsigned (`git -c commit.gpgsign=false`) — this environment has no usable private signing key.
+This batch **remediated SR-AUD-011** (`Version::ToString(fieldCount)`, #2257 review / #2258),
+**remediated SR-AUD-175** (`BFloat16` float-conversion rounding, #2261 review / #2262), and
+**closed one post-audit defect the first unit's own test matrix discovered** (#2259). **Two findings
+remediated, one new defect found and closed.** Audit **199 remediated / 109 confirmed / 56 confirmed
+(design-complete) / 364 total**, recounted **by finding identifier**, unique and contiguous; **no
+`SR-AUD-*` identifier created — numbering frozen at 364.** `modules/core` open **48 → 46**. Gate
+**16,836 tests across 38 executables: 16,828 passing, 2 skipped, 6 failing** for the same two
+inherited causes — **exactly +35 on the inherited 16,801, which is precisely this batch's own new
+tests (15 + 3 + 17), so no regression anywhere.** SR-AUD-011's matrix went **48 OK / 8 BAD → 56 OK /
+0 BAD** over every (defined-component-count, `fieldCount`) pair, with the `OK`-cell diff showing
+**additions only**; SR-AUD-175's went **14 OK / 12 BAD → 26 OK / 0 BAD** over exact float bit
+patterns. Graph **41 / 92**, seams **3 / 20**, negative fixtures **15 / 126** (141 invocations, peak
+2 jobs), catalogue current, build **0 errors / 0 warnings**. **Selective components was NOT rerun**,
+and §7 states why: nothing in this batch touched a module boundary, the component catalogue or the
+dependency graph, all three of which were revalidated unchanged. **Doxygen, `ccache` and the `/rv`
+reference tree are all absent** and were not installed. **No CCF minted, extended or closed:
+CCF-011 stays closed, CCF-019 stays open and unextended, CCF-021/#2131 and CCF-022/#2109 stay
+unminted.** #2246, #2250, #2252, #2255, #2215, #2228, #2238, #1773, #1962 and every other inherited
+blocked/`needs_user` ticket are exactly as inherited. **Two findings were deliberately rejected from
+this batch and stay `confirmed` and unclaimed: SR-AUD-063** (a public source break needing approval)
+**and SR-AUD-176** (a large additive API port, rejected even though it shares a header with the
+finding that was repaired). **The `modules/timers` and `modules/threading` runner-ups remain STALE.**
+See the batch record below.*
+
+---
+
+## Batch record — the `Version` field-count singleton and the `BFloat16` rounding singleton (#2257–#2262)
+
+**Two frozen findings remediated, one post-audit defect found and closed.** Two review tickets, two
+implementation tickets, one discovered-defect ticket, one deferred verification opened.
+
+### 1. Starting state, verified rather than assumed
+
+HEAD `6aaae36` on the designated branch, working tree clean, HEAD present on `origin`. The audit
+index parsed **by finding identifier** — never by column position, and tolerating irregular rows —
+gave **364 unique, contiguous `SR-AUD-001..364`**, split **197 remediated / 111 confirmed / 56
+confirmed (design-complete)**, with **48** open in `modules/core`. #2257 was `todo`, #2255 was
+`needs_user`. Every inherited premise held.
+
+### 2. SR-AUD-011 — `Version::ToString(fieldCount)` (#2257 review, #2258)
+
+`ToString(intcs fieldCount)` validated only the numeric interval 0–4 and then appended `Build` and
+`Revision` unconditionally, so `Version(1, 2).ToString(3)` emitted `"1.2.-1"`.
+
+**The finding reproduced exactly as filed — no premise correction was needed**, which is worth
+recording because the preceding five `modules/core` units each corrected something. The before-probe
+walked **all 56** (defined-component-count, `fieldCount`) pairs and read **48 OK / 8 BAD**, and it
+added three facts the finding does not state: the **parsed** spellings reach the same cells, so the
+repair belongs in `ToString` and not in a constructor; **`Version()` is itself a two-component
+version** whose `.ToString(3)` was bad and which no report or test named; and **zero is a defined
+component**, so the repair could not be written as "skip a falsy component".
+
+Confirmed by measurement: **14 dependent translation units**, and **no existing test pinned the
+defect** — all seven pre-existing `ToString(fieldCount)` tests use a fully specified four-component
+subject and the two rejection tests assert only the exception type. **Nothing was retired.**
+
+The repair adds two guards testing `Build` and then `Revision` **independently, in .NET's order**,
+rather than deriving a component count — independent tests are the only well-defined choice here,
+because this port's public mutable fields can hold an undefined `Build` beside a defined `Revision`,
+a state no .NET constructor produces. They test `< 0`, not `== -1`. The pre-existing out-of-interval
+branch keeps its exact message and still runs **first**, so no already-correct rejection changed;
+.NET's own resource text and its instance-dependent out-of-interval bound are unverifiable with
+`/rv` absent and are deferred to **#2260**. After: **56 OK / 0 BAD**, `OK`-cell diff additions only,
+no-argument control **byte-identical**. **+15 tests; 5 mutations, 5 caught.**
+
+### 3. #2259 — a defect the test matrix found, not the audit
+
+Test row 14's first draft expected `"1.2"` from the **no-argument** `ToString()` for a version whose
+`Build` had been overwritten with `-5`. It measured **`"1.2.4"`**: `ToString()` tested `Build >= 0`
+and `Revision >= 0` in two *independent* `if`s, so it omitted an undefined leading component while
+still emitting a defined trailing one — printing `Revision` in `Build`'s position. .NET's
+`ToString()` delegates to `ToString(n)` with a **short-circuiting** field count and truncates at two
+fields.
+
+Three things recorded rather than collapsed: it is a **real divergence, not a test typo**; it is
+**not SR-AUD-011**, so with numbering frozen it carries **no `SR-AUD-*` identifier**; and it is
+reachable only because `Build`/`Revision` are public mutable fields — the **SR-AUD-063 shape**, an
+**adjacency and not membership**, and the repair does not touch field visibility. It was
+**deliberately not absorbed** into #2258: that unit landed first, pinning only what the frozen
+finding owns.
+
+`ToString()` now delegates to `ToString(defaultFieldCount())`, so the two overloads agree **by
+construction** rather than through two hand-maintained copies of one predicate. **+3 tests; 3
+mutations, 3 caught.** The byte-identity control added by #2258 passed unchanged **and did not fail
+under any mutation** — the strongest available statement that reachable output is untouched.
+
+### 4. SR-AUD-175 — `BFloat16` float conversion (#2261 review, #2262)
+
+Selected by ranking the 47 remaining open Core findings, not inherited by numeric proximity.
+`fromFloat` was a bare `u >> 16`, truncating where current .NET passes non-NaN float bits through
+`RoundMidpointToEven(bits, 16)`.
+
+The 26-case probe — every case an **exact 32-bit float bit pattern**, so nothing depends on literal
+parsing or the host rounding mode — read **14 OK / 12 BAD**, and added four facts the finding does
+not state:
+
+1. **Truncation turned a NaN into an infinity.** `0x7F800001` is a signalling NaN whose upper 16
+   bits are exactly the `+Infinity` pattern; the finding describes only a downward bias.
+2. **A rounding bias must not reach a NaN either** — it can carry into the exponent and produce that
+   same silent infinity, which is why .NET rounds only non-NaN bits and why the repair needs a NaN
+   branch rather than merely a better bias.
+3. **Overflow-to-infinity is correct rounding, not a defect**: the tie at max + half ulp rounds to
+   the even neighbour, which *is* the infinity pattern.
+4. **Underflow has its own tie**, at `0x00008000` between `+0` and `Epsilon`.
+
+**Premise correction to the audit report:** it states that no direct test constructs from float or
+performs arithmetic. That is true of `BitConverterTests.cpp` and **false of the repository** —
+`tests/integration/Task40Tests.cpp` carries a 14-test `BFloat16Tests` suite that does both. The
+report's conclusion survives: every value those tests use has zero discarded bits, so none pinned
+truncation and none was retired; all 14 pass unchanged and are the compatibility control.
+
+Two of the reviewer's **own** drafts were wrong and are recorded rather than quietly corrected: a
+probe expectation (the tie at max + half ulp rounds to infinity, so the before-state is 14/12 and
+not 15/11) and a test (doubling a BFloat16 is **always** exact, so the arithmetic pin had to sum two
+*different* payloads). After: **26 OK / 0 BAD. +17 tests; 4 mutations, 4 caught** — including P2,
+the plausible wrong repair of fixing the rounding while forgetting that a NaN cannot be rounded,
+caught only by the NaN tests.
+
+**SR-AUD-176 was rejected from the unit** and stays `confirmed` and unclaimed: a shared header is
+not a shared root cause, and it is a large additive API port — most of a 2,152-line .NET type —
+rather than a defect in an existing behaviour. Ranking it here would have made the unit unbounded.
+
+### 5. Compatibility
+
+Both repairs are observable behaviour changes and both are deliberate parity restorations. Neither
+changed a signature, a layout (`sizeof`/`alignof` measured **16 / 4** for `Version` and **2 / 2**
+for `BFloat16`, before and after), a vtable, a `noexcept`, or an exported symbol. `Version.hpp` has
+**14** dependent translation units and **no first-party call site uses the `fieldCount` overload at
+all**; `BFloat16.hpp` has **4**, and `BitConverter`'s BFloat16 entry points are raw-bit
+reinterpretation that never calls `fromFloat`.
+
+### 6. Validation
+
+| Check | Result |
+|---|---|
+| Build, `--parallel 2` | **0 errors / 0 warnings** |
+| Full gate, 38 executables run individually | **16,836 run: 16,828 pass, 2 skip, 6 fail** (**+35**, exactly this batch's tests) |
+| Module boundaries | **41 modules / 92 edges** |
+| Validator self-test | 7 tests OK |
+| Component catalogue `--check` | current |
+| Seam ODR | **3 seams / 20 specialisations**; self-test 15 tests OK |
+| Negative consumer fixtures | **15 files / 126 sites**, 141 invocations, **peak 2 jobs**; self-test 45 tests OK |
+| Mutations | **12 run, 12 caught** (5 + 3 + 4) |
+| `git diff --check` | clean |
+| Tracked `__pycache__` | 3 files, unchanged |
+
+The six failures are the inherited ones and nothing else: **5 × `PingTests`** (#1962) and **1 ×
+`SocketTests`** (this environment lacks the IPv6 capability the test expects). **The gate is not
+green and is not described as green.** Both `scripts/run_component_tests.sh` and
+`scripts/local_ci_check.sh` `exit 1` at the **first failing executable**, so neither can produce a
+complete total; the figures above came from running **all 38 executables individually** with a
+runner that continues past failure (`build-tmp/full_gate.sh`, logs in
+`build-tmp/full_gate_logs/`). The gate was re-run after the final relink so the totals correspond to
+the committed tree, and read identically both times.
+
+Sanitizers were **not** run for either finding, deliberately: SR-AUD-011 produced a wrong *string*
+on a well-defined path, and SR-AUD-175 a wrong `uint16_t` on one — the `memcpy` pun, the shift and
+the `uint32_t` addition are all defined, and unsigned overflow wraps by definition. Neither
+ASan/UBSan nor TSan can discriminate before from after, so running them would have lengthened the
+evidence list without adding evidence. Same judgement, same reason, as #2254.
+
+### 7. Why selective components was NOT rerun
+
+Every change in this batch is an inline header body, a test, a doc-comment, a `docs/` plan, an audit
+record or `plan.sqlite3`. **No module boundary, component catalogue entry or dependency graph edge
+changed**, and all three were revalidated **unchanged** (41 / 92, catalogue current) rather than
+merely assumed. One new test file was added, `modules/core/tests/System/BFloat16RoundingTests.cpp`,
+and it includes only `Core.Base`'s own header — `validate_module_boundaries.py`, which validates
+test-only dependency edges, passed. Under current policy that is the case where the expensive
+selective run need not be repeated, so it was not.
+
+### 8. Build-resource policy compliance
+
+Build directories used: **`build/`** (reused, never cleaned or reconfigured), **`build-probe/`**
+(probes and mutation scripts), **`build-tmp/`** (repository-local `TMPDIR`, the gate runner and its
+logs). No new directory name was invented; each ticket separated its work by **file-name prefix**.
+Maximum parallel job count **2**, everywhere — `cmake --build … --parallel 2` for every build,
+`--jobs 2` passed explicitly to `check_negative_consumer_fixtures.py` (which reported **peak 2
+jobs** itself), and every mutation rebuild scoped to a single target rather than the whole tree.
+`PYTHONDONTWRITEBYTECODE=1` on every Python invocation. Nothing was built under `/tmp`, `/var/tmp`
+or `/dev/shm`.
+
+### 9. Next work, ranked — from the resulting state, with evidence
+
+1. **`SR-AUD-111`** (`ModuleHandle.hpp`) — **verified this batch, not inherited**: a translation
+   unit containing nothing but `#include "System/ModuleHandle.hpp"` **fails to compile**,
+   `error: return type 'struct System::RuntimeTypeHandle' is incomplete` at line 41. A public header
+   that cannot be included on its own is the cleanest possible bounded defect: the contract is a
+   compile, the blast radius is one include, and existing tests hide it only by including something
+   else first. No approval boundary.
+2. **`SR-AUD-109`** (`Activator.hpp`) — **verified this batch**:
+   `Activator::CreateInstance<std::vector<int>>(3, 7)` returns **size 2, first element 3** — the
+   braced `initializer_list` was selected over the requested `(count, value)` constructor, exactly
+   as filed. An ordinary C++-mapping defect with an exactly measurable contract and a small,
+   testable repair.
+3. **`SR-AUD-177` / `SR-AUD-178`** (`IntegerNumberStylesParser.hpp`) — two findings in one header
+   that plausibly share one root cause, the style mask not being honoured: 177 rejects valid
+   `AllowExponent` text such as `1E2`, 178 lets unknown masks parse anyway. **Verify the shared
+   cause before treating them as a family** — this batch is a reminder that a shared header is not
+   one, and both directions are observable across every integer wrapper, so price the blast radius
+   first.
+4. **`SR-AUD-118` / `SR-AUD-119` / `SR-AUD-120`** (`Delegate.cpp`) — three findings in one file
+   about `Combine`/`Remove` multicast semantics. Larger, and delegate equality is load-bearing;
+   worth a review ticket before any repair.
+5. **`SR-AUD-053`** (`Array.hpp`) — still real, still **low**, still a single constant
+   (`INT32_MAX` vs `0x7FFFFFC7`). Better batched than taken alone; deferred a second time.
+
+**Do not** reach for **`SR-AUD-063`** (`Tuple.hpp`) — a public source break needing approval — or
+**`SR-AUD-176`** (`BFloat16.hpp`), which is a large additive API port and was rejected from this
+batch *despite* sharing its header with the finding that was repaired. **Do not** reach for
+**#2228**, **#2250**, **#2255**, **#1773**, **#1962** or any other `needs_user`/blocked ticket:
+**none of their states changed.**
+
+**The `modules/timers` and `modules/threading` runner-ups remain STALE.**
 
 ---
 
