@@ -2,11 +2,54 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <concepts>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include "System/ArgumentNullException.hpp"
+#include "System/Boolean.hpp"
+#include "System/Byte.hpp"
+#include "System/Double.hpp"
+#include "System/Int16.hpp"
+#include "System/Int32.hpp"
+#include "System/Int64.hpp"
+#include "System/SByte.hpp"
+#include "System/Single.hpp"
 #include "System/Span.hpp"
+#include "System/UInt16.hpp"
+#include "System/UInt32.hpp"
+#include "System/UInt64.hpp"
+
+namespace System::detail {
+
+    /**
+     * @brief The `IFormattable` shape: a `ToString` that accepts a format string.
+     *
+     * `System::IFormattable` implementers satisfy this by construction — its sole
+     * pure virtual is `ToString(const std::string&)` — and so does any type that
+     * simply offers the same member. Matching on the shape rather than on
+     * `is_base_of_v<IFormattable, T>` keeps this header from depending on the
+     * interface, while still covering every implementer of it.
+     */
+    template <typename T>
+    concept InterpolatedFormattableWithSpec = requires(const T& v, const std::string& f) {
+        { v.ToString(f) } -> std::convertible_to<std::string>;
+    };
+
+    /**
+     * @brief The `System::Object` shape: a no-argument `ToString`.
+     *
+     * Every `System::Object` descendant satisfies this, as does any plain struct
+     * that offers `ToString()`. There is nowhere for a format specifier to go, so
+     * one supplied alongside such a value is ignored.
+     */
+    template <typename T>
+    concept InterpolatedHasToString = requires(const T& v) {
+        { v.ToString() } -> std::convertible_to<std::string>;
+    };
+
+} // namespace System::detail
 
 namespace System {
 
@@ -96,22 +139,57 @@ namespace System {
         }
 
         /**
-         * @brief Appends a formatted value into the buffer.
-         * Converts via std::to_string (numeric types) or falls back to
-         * the value's ToString() if it inherits from IFormattable.
+         * @brief Appends a value into the buffer using this port's default format.
+         *
+         * The text is whatever this repository's own formatter for @p value's
+         * category already answers — `Boolean::ToString` for `bool`, the matching
+         * fixed-width integer wrapper for an integral type, `Single`/`Double`
+         * `ToString` for the binary floats, the value itself for text, and the
+         * value's own `ToString` for a type that has one. No spelling is invented
+         * here; see formatValue() for the complete map and its two deliberate
+         * boundaries.
+         *
+         * @param value The value to append.
+         * @return true if the formatted text fit; false if the buffer is full.
+         * @throws System::ArgumentNullException if @p value is a null `char` pointer.
          */
         template<typename T>
         bool AppendFormatted(const T& value) {
-            return AppendLiteral(formatValue(value));
+            return AppendLiteral(formatValue(value, std::string_view{}));
         }
 
         /**
-         * @brief Appends a formatted value with an explicit format string.
-         * Format string is currently ignored (stub — passes through to AppendFormatted<T>).
+         * @brief Appends a value into the buffer using an explicit format string.
+         *
+         * @p format is passed to the same sibling formatter the unformatted
+         * overload uses, so `AppendFormatted(255, "X2")` yields exactly what
+         * `Int32::ToString(255, "X2")` yields. An empty @p format is the default
+         * format and is routed to the single-argument formatter, so it cannot
+         * differ from the unformatted overload.
+         *
+         * Three categories have no formatter that accepts a specifier — text
+         * (`std::string`, `std::string_view`, `char` pointers and arrays, `char`),
+         * `bool`, and `long double` — and one more, a type whose only `ToString`
+         * takes no argument. For those @p format is ignored. That is not a silent
+         * widening: it is the pre-existing behaviour of those categories, it
+         * matches .NET (where `string` is not `IFormattable`, so a specifier on a
+         * string is discarded there too), and each is pinned by a test.
+         *
+         * @param value  The value to append.
+         * @param format A format specifier accepted by @p value's sibling formatter.
+         * @return true if the formatted text fit; false if the buffer is full.
+         * @throws System::FormatException if @p format is not one the sibling
+         *         formatter accepts. The throw happens before anything is written,
+         *         so a rejected specifier leaves the handler exactly as it was.
+         *         This is inherited, not invented: raising `FormatException` for an
+         *         unrecognised specifier is the policy CCF-006 settled across all
+         *         twelve numeric wrappers (tickets #1847/#1849), and delegating to
+         *         them necessarily delegates their validation too.
+         * @throws System::ArgumentNullException if @p value is a null `char` pointer.
          */
         template<typename T>
-        bool AppendFormatted(const T& value, const std::string& /*format*/) {
-            return AppendFormatted(value);
+        bool AppendFormatted(const T& value, const std::string& format) {
+            return AppendLiteral(formatValue(value, std::string_view(format)));
         }
 
         // ---------------------------------------------------------------
@@ -177,13 +255,154 @@ namespace System {
             return true;
         }
 
+        /**
+         * @brief Calls one sibling formatter, choosing its overload by @p spec.
+         *
+         * An empty specifier is routed to the single-argument `ToString`, rather
+         * than to `ToString(value, "")`, so the unformatted overload's text is by
+         * construction the sibling's own unformatted text and cannot drift if a
+         * wrapper ever changes how it reads an empty format string.
+         */
+        template<class Wrapper, class V>
+        static std::string viaWrapper(V v, std::string_view spec) {
+            if (spec.empty()) return Wrapper::ToString(v);
+            return Wrapper::ToString(v, std::string(spec));
+        }
+
+        /**
+         * @brief Maps one value to text, delegating to this repository's formatters.
+         *
+         * Before ticket #2304 (SR-AUD-133) this was a hand-written type map that
+         * discarded the format specifier outright and answered with C++ default
+         * spellings: `true` was `"1"`, `3.14` was `"3.140000"`, `255` with `"X2"`
+         * was `"255"`, and every type that was neither arithmetic, `std::string`,
+         * `const char*` nor `char` — **including a string literal**, whose deduced
+         * type is `char[N]` and never matched the pointer arm — collapsed to the
+         * placeholder `"[?]"`, losing the value entirely. The class doc-comment
+         * claimed an `IFormattable` fallback that did not exist: a real
+         * `System::IFormattable` implementer also produced `"[?]"`.
+         *
+         * The map now delegates, so no format grammar is written here and no text
+         * is invented. Each arm answers with exactly what an existing, tested,
+         * already-remediated sibling API answers for the same input:
+         *
+         * | Category | Authority |
+         * |---|---|
+         * | `bool` | `Boolean::ToString` |
+         * | signed integral, by width | `SByte`/`Int16`/`Int32`/`Int64::ToString` |
+         * | unsigned integral, by width | `Byte`/`UInt16`/`UInt32`/`UInt64::ToString` |
+         * | `float` / `double` | `Single`/`Double::ToString` |
+         * | text and `char` | the characters themselves |
+         * | a type with `ToString(format)` | the value itself (covers `IFormattable`) |
+         * | a type with `ToString()` | the value itself |
+         *
+         * Two boundaries are deliberate and unchanged rather than guessed:
+         *
+         * - **`long double`** keeps `std::to_string`. This repository has no
+         *   extended-precision formatter, and narrowing to `double` to reach
+         *   `Double::ToString` would silently lose precision. It is the one
+         *   arithmetic arm whose text did not change.
+         * - **`char16_t`** stays on the integral path and keeps emitting a number,
+         *   even though `SharpRuntime::charcs` is `char16_t`. Whether that door
+         *   means "a character" or "a 16-bit integer" is not answerable from this
+         *   type's own contract, and changing it would be a guess.
+         *
+         * An integral type of some other width — `__int128` is the only one GCC
+         * offers — reaches the same `std::to_string` fallback it reached before,
+         * which is ill-formed for it now exactly as it was then; the compile-domain
+         * behaviour of this template is unchanged.
+         *
+         * A type with no `ToString` at all still yields `"[?]"`.
+         *
+         * @param v    The value to render.
+         * @param spec The requested format, or empty for the default format.
+         */
         template<typename T>
-        static std::string formatValue(const T& v) {
-            if constexpr (std::is_same_v<T, std::string>) return v;
-            else if constexpr (std::is_same_v<T, const char*>) return std::string(v);
-            else if constexpr (std::is_same_v<T, char>) return std::string(1, v);
-            else if constexpr (std::is_arithmetic_v<T>) return std::to_string(v);
-            else return std::string("[?]");
+        static std::string formatValue(const T& v, std::string_view spec) {
+            // --- Text. .NET's String is not IFormattable, so a specifier does not
+            // apply to it there either; the same holds for this port's char types.
+            if constexpr (std::is_same_v<T, std::string>) {
+                (void)spec;
+                return v;
+            } else if constexpr (std::is_same_v<T, std::string_view>) {
+                (void)spec;
+                return std::string(v);
+            } else if constexpr (std::is_same_v<T, const char*> || std::is_same_v<T, char*>) {
+                (void)spec;
+                // std::string(const char*) requires a NUL-terminated array. Before
+                // ticket #2305 a null reached it and libstdc++ threw std::logic_error
+                // out of a System-shaped API with nothing to catch it, aborting the
+                // process (exit 134). Rejected here on exactly the terms #1810 settled
+                // for AppendLiteral(const char*).
+                if (v == nullptr) throw System::ArgumentNullException("value");
+                return std::string(v);
+            } else if constexpr (std::is_array_v<T> &&
+                                 std::is_same_v<std::remove_cv_t<std::remove_extent_t<T>>, char>) {
+                // A string literal deduces to char[N], which never matched the pointer
+                // arm and so used to collapse to "[?]". Read within the array bounds
+                // and stop at the first NUL, so an array that happens not to be
+                // NUL-terminated is still safe -- unlike std::string(v), which would
+                // run off the end of it.
+                const std::string_view all(static_cast<const char*>(v), std::extent_v<T>);
+                const std::size_t z = all.find('\0');
+                (void)spec;
+                return std::string(z == std::string_view::npos ? all : all.substr(0, z));
+            } else if constexpr (std::is_same_v<T, char>) {
+                (void)spec;
+                return std::string(1, v);
+            }
+            // --- bool, before the integral arm: bool is an integral type, and
+            // Boolean has no format overload, so a specifier is ignored for it.
+            else if constexpr (std::is_same_v<T, bool>) {
+                (void)spec;
+                return System::Boolean::ToString(v);
+            }
+            // --- Integral, routed to the wrapper of matching width and signedness.
+            else if constexpr (std::is_integral_v<T>) {
+                if constexpr (std::is_signed_v<T>) {
+                    if constexpr (sizeof(T) == 1)
+                        return viaWrapper<System::SByte>(static_cast<SharpRuntime::sbytecs>(v), spec);
+                    else if constexpr (sizeof(T) == 2)
+                        return viaWrapper<System::Int16>(static_cast<SharpRuntime::shortcs>(v), spec);
+                    else if constexpr (sizeof(T) == 4)
+                        return viaWrapper<System::Int32>(static_cast<SharpRuntime::intcs>(v), spec);
+                    else if constexpr (sizeof(T) == 8)
+                        return viaWrapper<System::Int64>(static_cast<SharpRuntime::longcs>(v), spec);
+                    else { (void)spec; return std::to_string(v); }
+                } else {
+                    if constexpr (sizeof(T) == 1)
+                        return viaWrapper<System::Byte>(static_cast<SharpRuntime::bytecs>(v), spec);
+                    else if constexpr (sizeof(T) == 2)
+                        return viaWrapper<System::UInt16>(static_cast<SharpRuntime::ushortcs>(v), spec);
+                    else if constexpr (sizeof(T) == 4)
+                        return viaWrapper<System::UInt32>(static_cast<SharpRuntime::uintcs>(v), spec);
+                    else if constexpr (sizeof(T) == 8)
+                        return viaWrapper<System::UInt64>(static_cast<SharpRuntime::ulongcs>(v), spec);
+                    else { (void)spec; return std::to_string(v); }
+                }
+            }
+            // --- Binary floats.
+            else if constexpr (std::is_same_v<T, float>) {
+                return viaWrapper<System::Single>(v, spec);
+            } else if constexpr (std::is_same_v<T, double>) {
+                return viaWrapper<System::Double>(v, spec);
+            }
+            // --- The one arithmetic category this repository has no formatter for.
+            else if constexpr (std::is_arithmetic_v<T>) {
+                (void)spec;
+                return std::to_string(v);
+            }
+            // --- The value's own contract. This is the fallback the class
+            // doc-comment has always advertised and never performed.
+            else if constexpr (detail::InterpolatedFormattableWithSpec<T>) {
+                return v.ToString(std::string(spec));
+            } else if constexpr (detail::InterpolatedHasToString<T>) {
+                (void)spec;
+                return v.ToString();
+            } else {
+                (void)spec;
+                return std::string("[?]");
+            }
         }
     };
 
