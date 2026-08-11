@@ -348,3 +348,48 @@ collapsed:
 
 It was deliberately **not absorbed** into #2258. #2258 landed first, pinning
 only what SR-AUD-011 owns; #2259 is the separate bounded repair.
+
+### 13.1 #2259, implemented 2026-08-11
+
+`ToString()` now derives its field count the way .NET does and delegates:
+
+```cpp
+[[nodiscard]] std::string ToString() const { return ToString(defaultFieldCount()); }
+
+// private, mirroring .NET's Version.DefaultFormatFieldCount
+[[nodiscard]] intcs defaultFieldCount() const {
+    if (Build    < 0) return 2;
+    if (Revision < 0) return 3;
+    return 4;
+}
+```
+
+Delegation is the point, not an economy: it makes the two overloads agree **by
+construction** rather than by two hand-maintained copies of the same predicate.
+The derived count is always 2, 3 or 4 and can only name components that are
+defined, so the guards #2258 added can never reject it — `ToString()` still
+never throws for any component state, which is pinned rather than asserted.
+
+**Compatibility.** The only state whose text changes is an undefined `Build`
+beside a defined `Revision`, which **no constructor and no `parse()` produces**.
+Every constructor- and parser-reachable version keeps its exact text: the
+control test `ToString_NoArgument_ByteIdenticalAcrossTheMatrix`, added by
+#2258 over the probe's eight subjects, passes unchanged and — measured — did
+**not** fail under any of the three mutations below, which is the strongest
+statement available that reachable output is untouched. No signature, layout,
+vtable, `noexcept` or symbol change; `defaultFieldCount()` is a private inline
+member of a header-only class.
+
+**Tests: +3** (`VersionTests` 68 → 71). Mutations: **3 planned, 3 run, 3
+caught** (`build-probe/2259_mutations.log`).
+
+| Mutation | Result |
+|---|---|
+| N1 restore the pre-repair independent `if`s | CAUGHT — 2 tests fail |
+| N2 short-circuit on the trailing component instead of the leading one | CAUGHT — 3 tests fail |
+| N3 `== -1` instead of `< 0` in `defaultFieldCount` | CAUGHT — 4 tests fail |
+
+N2 is the interesting one: deriving the count from `Revision` first returns 4
+for the very state this ticket is about, and `ToString(4)` then **throws** out
+of a no-argument formatter — which is why
+`ToString_NoArgument_NeverRejectsItsOwnFieldCount` exists.

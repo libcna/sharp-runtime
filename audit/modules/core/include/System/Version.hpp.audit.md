@@ -92,6 +92,17 @@ overload emitting a sentinel it was asked for — audit numbering is frozen, and
 it therefore carries **no `SR-AUD-*` identifier** and takes ordinary ticket
 #2259.
 
+**#2259 closed 2026-08-11.** `ToString()` now derives its field count with
+.NET's short-circuit (`Build < 0 ? 2 : Revision < 0 ? 3 : 4`) and delegates to
+`ToString(fieldCount)`, so the two overloads agree by construction rather than
+through two hand-maintained copies of the same predicate, and the derived count
+can never name an undefined component. The only state whose text changes is
+unreachable through every constructor and through `parse()`; the byte-identity
+control added by #2258 passes unchanged and did not fail under any of the three
+mutations, all of which were caught. +3 tests. No signature, layout, vtable,
+`noexcept` or symbol change. SR-AUD-011's own status is unaffected by this
+ticket.
+
 ## Final assessment
 
 Parsing and comparison are robust; field-count formatting had a confirmed

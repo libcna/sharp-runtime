@@ -476,3 +476,56 @@ TEST(VersionTests, ToString_NoArgument_ByteIdenticalAcrossTheMatrix) {
     EXPECT_EQ(Version("1.2.3.4").ToString(),   "1.2.3.4");
     EXPECT_EQ(Version(0, 0, 0, 0).ToString(),  "0.0.0.0");
 }
+
+// ---------------------------------------------------------------------------
+// ToString() truncates at the first unspecified component (ticket #2259, a
+// post-audit defect with no SR-AUD identifier -- it is NOT SR-AUD-011, which is
+// about the fieldCount overload emitting a sentinel it was asked for).
+//
+// Before the repair ToString() tested Build >= 0 and Revision >= 0 in two
+// INDEPENDENT ifs, so it omitted an undefined leading component while still
+// emitting a defined trailing one: Build = -5 on 1.2.3.4 rendered "1.2.4",
+// printing Revision in Build's position.  .NET's ToString() delegates to
+// ToString(n) with a short-circuiting field count and truncates at two fields.
+//
+// The state is reachable only because Build and Revision are public mutable
+// fields; no constructor and no parse() produces it, which is why
+// ToString_NoArgument_ByteIdenticalAcrossTheMatrix above is unaffected and
+// stands as this ticket's compatibility control.
+// ---------------------------------------------------------------------------
+
+TEST(VersionTests, ToString_UndefinedBuildTruncatesBeforeDefinedRevision) {
+    Version v(1, 2, 3, 4);
+    v.Build = -5;
+    EXPECT_EQ(v.ToString(), "1.2");
+
+    Version w(1, 2);
+    w.Revision = 5;
+    EXPECT_EQ(w.ToString(), "1.2");
+}
+
+// ToString() never rejects its own derived field count, for any component
+// state -- the derived count can only name components that are defined.
+TEST(VersionTests, ToString_NoArgument_NeverRejectsItsOwnFieldCount) {
+    for (System::intcs build : {-5, -1, 0, 3}) {
+        for (System::intcs revision : {-5, -1, 0, 4}) {
+            Version v(1, 2);
+            v.Build    = build;
+            v.Revision = revision;
+            EXPECT_NO_THROW((void)v.ToString())
+                << "Build=" << build << " Revision=" << revision;
+        }
+    }
+}
+
+// The no-argument overload and the fieldCount overload agree: ToString() is
+// exactly ToString(n) for the largest n this instance can serve.
+TEST(VersionTests, ToString_NoArgument_AgreesWithFieldCountOverload) {
+    EXPECT_EQ(Version(1, 2).ToString(),       Version(1, 2).ToString(2));
+    EXPECT_EQ(Version(1, 2, 3).ToString(),    Version(1, 2, 3).ToString(3));
+    EXPECT_EQ(Version(1, 2, 3, 4).ToString(), Version(1, 2, 3, 4).ToString(4));
+
+    Version v(1, 2, 3, 4);
+    v.Build = -5;
+    EXPECT_EQ(v.ToString(), v.ToString(2));
+}

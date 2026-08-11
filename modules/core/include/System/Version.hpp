@@ -123,15 +123,18 @@ namespace System {
 
         /**
          * @brief Returns the version as a dot-separated string,
-         * omitting unspecified (negative) components.
+         * truncated at the first unspecified (negative) component.
+         *
+         * Matching .NET's Version.ToString(), which delegates to ToString(int) with a
+         * short-circuiting field count, this stops at the first component the instance
+         * does not define rather than testing each component independently. The two
+         * differ only for an undefined Build beside a defined Revision — a state no
+         * constructor and no parse() reaches, but which this port's public mutable
+         * fields admit — where testing independently would print Revision in Build's
+         * position, as "1.2.4" (ticket #2259).
          */
         [[nodiscard]] std::string ToString() const {
-            std::ostringstream oss;
-            oss.imbue(std::locale::classic());
-            oss << Major << '.' << Minor;
-            if (Build    >= 0) oss << '.' << Build;
-            if (Revision >= 0) oss << '.' << Revision;
-            return oss.str();
+            return ToString(defaultFieldCount());
         }
 
         /**
@@ -187,6 +190,21 @@ namespace System {
         bool operator>=(const Version& o) const { return cmp(o) >= 0; }
 
     private:
+        /**
+         * @brief The number of components the no-argument ToString() emits.
+         *
+         * Mirrors .NET's private Version.DefaultFormatFieldCount
+         * (`_Build == -1 ? 2 : _Revision == -1 ? 3 : 4`), short-circuiting at the first
+         * unspecified component. The result is always 2, 3 or 4, and by construction
+         * never names a component this instance does not define, so the ToString(intcs)
+         * it feeds can never reject it.
+         */
+        [[nodiscard]] intcs defaultFieldCount() const {
+            if (Build    < 0) return 2;
+            if (Revision < 0) return 3;
+            return 4;
+        }
+
         static void requireNonNegative(intcs value, const char* name) {
             if (value < 0)
                 throw System::ArgumentOutOfRangeException(name, std::string(name) + " must be greater than or equal to zero.");
