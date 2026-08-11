@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstddef>
+#include <cstdlib>
 #include <string>
 #include <vector>
 #include <gtest/gtest.h>
@@ -147,11 +148,42 @@ TEST(EnvironmentTests, SetGet_RoundTrip) {
     EXPECT_EQ(Environment::GetEnvironmentVariable("SHARP_TEST_VAR"), "hello");
 }
 
+// GetEnvironmentVariable alone cannot pin removal: it returns "" for an absent variable
+// *and* for one that is present with an empty value, so the assertion this test used to
+// make held whether the key was removed, was left present-but-empty, or had never been
+// set at all. GetEnvironmentVariables() is the one public channel that tells those states
+// apart -- splitEnvEntry keeps an entry whose value is empty -- so the removal this test
+// is named for is asserted there, and the getter assertion is kept beside it as a
+// statement about the getter. Whether an empty value should delete at all is SR-AUD-106
+// and is deliberately NOT settled here (docs/CoreEnvironmentEmptyValuePlan.md, #2313).
 TEST(EnvironmentTests, Set_Empty_RemovesVar) {
     Environment::SetEnvironmentVariable("SHARP_TEST_VAR2", "value");
+    ASSERT_EQ(Environment::GetEnvironmentVariables().count("SHARP_TEST_VAR2"), std::size_t(1));
     Environment::SetEnvironmentVariable("SHARP_TEST_VAR2", "");
+    EXPECT_EQ(Environment::GetEnvironmentVariables().count("SHARP_TEST_VAR2"), std::size_t(0));
     EXPECT_TRUE(Environment::GetEnvironmentVariable("SHARP_TEST_VAR2").empty());
 }
+
+#ifndef _WIN32
+// The state the public setter cannot create is nevertheless representable by the platform
+// and IS surfaced by GetEnvironmentVariables(), which is what makes the SR-AUD-106
+// decision observable either way. Installed out of band, an empty value survives with an
+// empty string; the single-name getter still answers "" for it and for an absent name
+// alike, so neither this test nor the one above relies on that getter to tell them apart.
+// POSIX-only: the Windows CRT removes a variable set to "", so the state is unreachable
+// there through _putenv_s as well.
+TEST(EnvironmentTests, PresentEmptyValue_IsRepresentableButGetterCannotDistinguishIt) {
+    ASSERT_EQ(::setenv("SHARP_PRESENT_EMPTY", "", 1), 0);
+    const auto vars = Environment::GetEnvironmentVariables();
+    const auto it = vars.find("SHARP_PRESENT_EMPTY");
+    ASSERT_NE(it, vars.end());
+    EXPECT_TRUE(it->second.empty());
+    EXPECT_EQ(vars.count("SHARP_ABSENT_NEVER_SET"), std::size_t(0));
+    EXPECT_EQ(Environment::GetEnvironmentVariable("SHARP_PRESENT_EMPTY"),
+              Environment::GetEnvironmentVariable("SHARP_ABSENT_NEVER_SET"));
+    ASSERT_EQ(::unsetenv("SHARP_PRESENT_EMPTY"), 0);
+}
+#endif // !_WIN32
 
 // ---------------------------------------------------------------------------
 // ExpandEnvironmentVariables
