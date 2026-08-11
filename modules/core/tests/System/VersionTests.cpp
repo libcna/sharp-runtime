@@ -317,3 +317,162 @@ TEST(VersionTests, Parse_NoTrailingDot_StillWorks) {
     EXPECT_EQ(v.Build, 3);
     EXPECT_EQ(v.Revision, 4);
 }
+
+// ---------------------------------------------------------------------------
+// ToString(fieldCount) -- an undefined component may not be requested
+// (SR-AUD-011, ticket #2258).  Before the repair the overload validated only
+// the numeric interval 0-4 and then appended Build and Revision
+// unconditionally, so Version(1, 2).ToString(3) emitted the "-1" sentinel as
+// "1.2.-1".  .NET's Version.ToString(int) rejects a fieldCount that requests a
+// component the instance does not define.
+//
+// The seven ToString(fieldCount) tests above are the unchanged control: they
+// all use a fully specified four-component subject and never enter a guard.
+// ---------------------------------------------------------------------------
+
+// The finding's own three required assertions.
+
+TEST(VersionTests, ToString_FieldCount3_OnTwoComponentVersion_Throws) {
+    EXPECT_THROW(Version(1, 2).ToString(3), System::ArgumentException);
+}
+
+TEST(VersionTests, ToString_FieldCount4_OnTwoComponentVersion_Throws) {
+    EXPECT_THROW(Version(1, 2).ToString(4), System::ArgumentException);
+}
+
+TEST(VersionTests, ToString_FieldCount4_OnThreeComponentVersion_Throws) {
+    EXPECT_THROW(Version(1, 2, 3).ToString(4), System::ArgumentException);
+}
+
+// The default constructor is a two-component version (0.0), so it is subject to
+// the same rejection.  No report or test named this instance.
+
+TEST(VersionTests, ToString_FieldCountBeyondDefault_Throws) {
+    EXPECT_THROW(Version().ToString(3), System::ArgumentException);
+    EXPECT_THROW(Version().ToString(4), System::ArgumentException);
+}
+
+// parse() reaches Build == -1 / Revision == -1 by a different route than the
+// defaulted member initialisers, so the parsed spellings are pinned separately.
+
+TEST(VersionTests, ToString_FieldCountBeyondParsedComponents_Throws) {
+    EXPECT_THROW(Version("1.2").ToString(3),   System::ArgumentException);
+    EXPECT_THROW(Version("1.2").ToString(4),   System::ArgumentException);
+    EXPECT_THROW(Version("1.2.3").ToString(4), System::ArgumentException);
+}
+
+// Exception identity, not merely the type: the parameter name, and a message
+// that distinguishes the two new guards from each other AND from the
+// pre-existing out-of-interval guard.  Without the message assertion a single
+// over-broad guard could serve both branches and still pass.
+
+TEST(VersionTests, ToString_UndefinedBuild_ExceptionIdentity) {
+    try {
+        (void)Version(1, 2).ToString(3);
+        FAIL() << "expected System::ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "fieldCount");
+        EXPECT_STREQ(e.what(), "fieldCount must be 0-2 (Parameter 'fieldCount')");
+    }
+}
+
+TEST(VersionTests, ToString_UndefinedRevision_ExceptionIdentity) {
+    try {
+        (void)Version(1, 2, 3).ToString(4);
+        FAIL() << "expected System::ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "fieldCount");
+        EXPECT_STREQ(e.what(), "fieldCount must be 0-3 (Parameter 'fieldCount')");
+    }
+}
+
+// The pre-existing out-of-interval branch keeps its exact message and keeps
+// running FIRST -- both are deliberately unchanged by #2258.  A two-component
+// subject is used precisely because the new guards would otherwise be able to
+// claim these inputs and report the instance-dependent bound instead.
+
+TEST(VersionTests, ToString_OutOfInterval_KeepsIntervalMessageAndRunsFirst) {
+    for (System::intcs fieldCount : {-1, 5}) {
+        try {
+            (void)Version(1, 2).ToString(fieldCount);
+            FAIL() << "expected System::ArgumentException for fieldCount " << fieldCount;
+        } catch (const System::ArgumentException& e) {
+            EXPECT_EQ(e.getParamNameProperty(), "fieldCount");
+            EXPECT_STREQ(e.what(), "fieldCount must be 0-4 (Parameter 'fieldCount')");
+        }
+    }
+}
+
+// Every field count a partially specified instance CAN serve still works.
+
+TEST(VersionTests, ToString_FieldCountsWithinTwoComponentVersion_Unchanged) {
+    EXPECT_EQ(Version(1, 2).ToString(0), "");
+    EXPECT_EQ(Version(1, 2).ToString(1), "1");
+    EXPECT_EQ(Version(1, 2).ToString(2), "1.2");
+}
+
+TEST(VersionTests, ToString_FieldCountsWithinThreeComponentVersion_Unchanged) {
+    EXPECT_EQ(Version(1, 2, 3).ToString(0), "");
+    EXPECT_EQ(Version(1, 2, 3).ToString(1), "1");
+    EXPECT_EQ(Version(1, 2, 3).ToString(2), "1.2");
+    EXPECT_EQ(Version(1, 2, 3).ToString(3), "1.2.3");
+}
+
+// Zero is a defined component, not a sentinel: the guards test for a negative
+// value, so an all-zero version must still format every field.
+
+TEST(VersionTests, ToString_ZeroComponentsAreDefined) {
+    EXPECT_EQ(Version(0, 0, 0, 0).ToString(3), "0.0.0");
+    EXPECT_EQ(Version(0, 0, 0, 0).ToString(4), "0.0.0.0");
+}
+
+// Build and Revision are public mutable fields, so this port can reach a state
+// no .NET constructor produces: an undefined Build alongside a defined
+// Revision.  .NET tests _Build first, so both 3 and 4 are rejected on the Build
+// guard and report its bound.
+
+TEST(VersionTests, ToString_UndefinedBuildWithDefinedRevision_RejectsOnBuildGuard) {
+    Version v(1, 2);
+    v.Revision = 5;
+    for (System::intcs fieldCount : {3, 4}) {
+        try {
+            (void)v.ToString(fieldCount);
+            FAIL() << "expected System::ArgumentException for fieldCount " << fieldCount;
+        } catch (const System::ArgumentException& e) {
+            EXPECT_STREQ(e.what(), "fieldCount must be 0-2 (Parameter 'fieldCount')");
+        }
+    }
+}
+
+// "Specified" means non-negative, matching the predicate the no-argument
+// ToString() already used, rather than exactly the -1 sentinel -- otherwise the
+// two overloads would disagree about which components exist for any other
+// negative value a caller writes into these public fields.
+
+TEST(VersionTests, ToString_AnyNegativeComponentIsUnspecified) {
+    Version v(1, 2, 3, 4);
+    v.Build = -5;
+    EXPECT_THROW(v.ToString(3), System::ArgumentException);
+    EXPECT_THROW(v.ToString(4), System::ArgumentException);
+    EXPECT_EQ(v.ToString(2), "1.2");
+
+    Version w(1, 2, 3, 4);
+    w.Revision = -5;
+    EXPECT_THROW(w.ToString(4), System::ArgumentException);
+    EXPECT_EQ(w.ToString(3), "1.2.3");
+    EXPECT_EQ(w.ToString(), "1.2.3");
+}
+
+// The no-argument ToString() is the control for the whole repair: it already
+// omitted unspecified components and must stay byte-identical.
+
+TEST(VersionTests, ToString_NoArgument_ByteIdenticalAcrossTheMatrix) {
+    EXPECT_EQ(Version().ToString(),            "0.0");
+    EXPECT_EQ(Version(1, 2).ToString(),        "1.2");
+    EXPECT_EQ(Version(1, 2, 3).ToString(),     "1.2.3");
+    EXPECT_EQ(Version(1, 2, 3, 4).ToString(),  "1.2.3.4");
+    EXPECT_EQ(Version("1.2").ToString(),       "1.2");
+    EXPECT_EQ(Version("1.2.3").ToString(),     "1.2.3");
+    EXPECT_EQ(Version("1.2.3.4").ToString(),   "1.2.3.4");
+    EXPECT_EQ(Version(0, 0, 0, 0).ToString(),  "0.0.0.0");
+}

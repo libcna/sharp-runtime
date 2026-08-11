@@ -588,6 +588,19 @@ TEST(EnvironmentTests, Version_MinorNonNegative) {
     EXPECT_GE(v.Minor, 0);
 }
 
+// Environment::Version is Version(1, 0, 0) -- a three-component version, and the
+// only partially specified Version any first-party API hands out. Since #2258
+// (SR-AUD-011) asking it for a fourth field is rejected rather than answered
+// with the "-1" sentinel, so this pins the one place the narrowed argument
+// domain is reachable from a public property rather than from a literal.
+TEST(EnvironmentTests, Version_RevisionIsUndefinedAndCannotBeRequested) {
+    System::Version v = Environment::getVersionProperty();
+    ASSERT_LT(v.Revision, 0);
+    EXPECT_EQ(v.ToString(), "1.0.0");
+    EXPECT_EQ(v.ToString(3), "1.0.0");
+    EXPECT_THROW(v.ToString(4), System::ArgumentException);
+}
+
 // ---------------------------------------------------------------------------
 // EnvironmentVariableTarget — User/Machine are no-ops (matches .NET on non-Windows)
 // ---------------------------------------------------------------------------

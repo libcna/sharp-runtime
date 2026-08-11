@@ -136,13 +136,34 @@ namespace System {
 
         /**
          * @brief Returns the version string with exactly fieldCount components.
-         * @param fieldCount Number of components to include (1–4).
-         * @throws System::ArgumentException if fieldCount is out of range.
+         *
+         * A component that this instance does not define — Build on a version built
+         * from two components, Revision on a version built from fewer than four — may
+         * not be requested. Matching .NET's Version.ToString(int), such a fieldCount is
+         * rejected rather than serialized; emitting the -1 sentinel would produce text
+         * like "1.2.-1", which is not a valid version representation (SR-AUD-011).
+         *
+         * The two guards test Build and then Revision independently, in .NET's own
+         * order, rather than deriving a component count: Build and Revision are public
+         * mutable fields here, so an instance can hold an undefined Build alongside a
+         * defined Revision — a state no .NET constructor can produce — and the
+         * independent tests give that state .NET's answer. They use the same
+         * "specified means non-negative" predicate the no-argument ToString() applies
+         * to each component, so the two overloads agree about which components exist.
+         *
+         * @param fieldCount Number of components to include (0–4, and no greater than
+         *        the number of components this instance defines).
+         * @throws System::ArgumentException if fieldCount lies outside 0–4, or requests
+         *         a component this instance does not define.
          */
         [[nodiscard]] std::string ToString(intcs fieldCount) const {
             if (fieldCount < 0 || fieldCount > 4)
                 throw System::ArgumentException("fieldCount must be 0-4", "fieldCount");
             if (fieldCount == 0) return "";
+            if (fieldCount >= 3 && Build < 0)
+                throw System::ArgumentException("fieldCount must be 0-2", "fieldCount");
+            if (fieldCount >= 4 && Revision < 0)
+                throw System::ArgumentException("fieldCount must be 0-3", "fieldCount");
             std::ostringstream oss;
             oss.imbue(std::locale::classic());
             oss << Major;
