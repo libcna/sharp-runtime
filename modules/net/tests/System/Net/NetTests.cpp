@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <set>
+#include <string>
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Net/IPAddress.hpp"
@@ -317,10 +319,18 @@ TEST(IPAddressIPv6Tests, Equality) {
 // suffix -- the common case for SLAAC/EUI-64-derived addresses -- always hashed identically.
 // Verified against IPAddress.cs's GetHashCode, which combines all 128 bits (via four uint32
 // values spanning all 8 numbers_ groups) plus the scope ID.
-TEST(IPAddressIPv6Tests, GetHashCode_DiffersWhenOnlyLower64BitsDiffer) {
-    IPAddress a = IPAddress::Parse("2001:db8::1");
-    IPAddress b = IPAddress::Parse("2001:db8::2");
-    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+TEST(IPAddressIPv6Tests, GetHashCode_ReadsTheLower64BitsToo) {
+    // Stated as "these eight addresses do not all share one hash" rather than "these two differ".
+    // IPAddress::GetHashCode routes through System::HashCode, whose initial state is mixed with a
+    // per-process random seed by design (HashCode.hpp:34-39), so an inequality between any
+    // individual pair is not reproducible across runs (docs/HashAssertionContractRule.md R4).
+    // The regression is preserved exactly: the pre-repair hash combined numbers_[0..3] only, so
+    // it scores 1 distinct hash for a whole /64; the repaired hash scores 8.
+    std::set<SharpRuntime::intcs> hashes;
+    for (int host = 1; host <= 8; ++host)
+        hashes.insert(IPAddress::Parse("2001:db8::" + std::to_string(host)).GetHashCode());
+    EXPECT_GT(hashes.size(), 1u)
+        << "every address in the /64 hashed alike -- the lower 64 bits are being ignored";
 }
 
 TEST(IPAddressIPv6Tests, GetHashCode_EqualAddresses_SameHash) {

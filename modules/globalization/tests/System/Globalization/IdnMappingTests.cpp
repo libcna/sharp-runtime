@@ -122,8 +122,15 @@ TEST(IdnMappingTests, ValidMultiByteUtf8_StillAccepted) {
 TEST(IdnMappingTests, GetHashCode_MatchesForEqualInstances) {
     IdnMapping a, b;
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+    // The removed second half asserted that changing a property changes the hash. Equal values
+    // hashing equally is the contract; unequal values hashing differently is not
+    // (docs/HashAssertionContractRule.md R2), and the Equality test below already pins that the
+    // two instances stop comparing equal. What stays assertable on the hash side is the same
+    // contract direction after the change.
     b.setAllowUnassignedProperty(true);
-    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+    IdnMapping alsoAllowing;
+    alsoAllowing.setAllowUnassignedProperty(true);
+    EXPECT_EQ(b.GetHashCode(), alsoAllowing.GetHashCode());
 }
 
 TEST(IdnMappingTests, Equality) {

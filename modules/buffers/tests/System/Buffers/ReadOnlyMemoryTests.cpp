@@ -130,12 +130,18 @@ TEST(ReadOnlyMemoryTest, GetHashCode_SameRegion_SameHash) {
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
-TEST(ReadOnlyMemoryTest, GetHashCode_DifferentRegion_LikelyDifferent) {
+// Replaces GetHashCode_DifferentRegion_LikelyDifferent, whose own name conceded that the claim
+// was probabilistic: two distinct regions are permitted to hash equally
+// (docs/HashAssertionContractRule.md R2). What is NOT probabilistic, and what this pair of
+// equal-content vectors exists to show, is that ReadOnlyMemory identity is the region rather
+// than the contents.
+TEST(ReadOnlyMemoryTest, DifferentRegion_EqualContent_IsNotEqual) {
     std::vector<int> v1 = {1, 2, 3};
     std::vector<int> v2 = {1, 2, 3};
     ReadOnlyMemory<int> a(v1);
     ReadOnlyMemory<int> b(v2);
-    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+    EXPECT_FALSE(a.Equals(b));
+    EXPECT_EQ(a.GetHashCode(), a.GetHashCode());
 }
 
 TEST(ReadOnlyMemoryTest, CopyTo_CopiesElements) {

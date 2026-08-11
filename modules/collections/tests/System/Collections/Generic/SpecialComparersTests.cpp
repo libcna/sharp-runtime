@@ -33,10 +33,11 @@ TEST(NonRandomizedStringEqualityComparerTest, EqualStringsHaveSameHash) {
     EXPECT_EQ(cmp.GetHashCode("abc"), cmp.GetHashCode("abc"));
 }
 
-TEST(NonRandomizedStringEqualityComparerTest, DifferentStringsLikelyDifferentHash) {
-    const auto& cmp = NonRandomizedStringEqualityComparer::getOrdinalInstance();
-    EXPECT_NE(cmp.GetHashCode("hello"), cmp.GetHashCode("world"));
-}
+// DifferentStringsLikelyDifferentHash was removed by #2284 -- its own name conceded the claim
+// was probabilistic, and a collision is legal (docs/HashAssertionContractRule.md R2). No coverage
+// was lost: UnequalStrings above pins the Equals distinction, HashCodeIsStable pins the
+// determinism this comparer is named for, and EqualStringsHaveSameHash pins the contract
+// direction.
 
 TEST(NonRandomizedStringEqualityComparerTest, IgnoreCaseEquals) {
     const auto& cmp = NonRandomizedStringEqualityComparer::getOrdinalIgnoreCaseInstance();

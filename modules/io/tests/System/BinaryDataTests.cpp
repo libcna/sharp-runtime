@@ -37,9 +37,13 @@ TEST(BinaryDataTests, GetHashCode_SameContent_SameHash) {
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
-TEST(BinaryDataTests, GetHashCode_NonNegative) {
-    auto bd = BinaryData::FromString("test");
-    EXPECT_GE(bd.GetHashCode(), 0);
+// Not the general contract -- a signed hash code may legally be negative -- but
+// BinaryData::GetHashCode deliberately ends with `h & 0x7fffffff` (BinaryData.hpp:391), so this
+// pins that implementation choice. #2284 asked whether the masking was intended: it is, and it is
+// the same one-line idiom in six independent types (docs/HashAssertionContractRule.md R5).
+TEST(BinaryDataTests, GetHashCode_MasksTheSignBit) {
+    EXPECT_GE(BinaryData::FromString("test").GetHashCode(), 0);
+    EXPECT_GE(BinaryData::FromString("").GetHashCode(), 0);
 }
 
 TEST(BinaryDataTests, FromBytes_VectorWithMediaType_Stored) {

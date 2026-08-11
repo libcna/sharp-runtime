@@ -143,7 +143,11 @@ TEST(IPNetworkScopeTests, NetworksOnDifferentLinksAreNoLongerEqual) {
     const IPNetwork onLink7(IPAddress::Parse("fe80::1%7"), 64);
     const IPNetwork onLink9(IPAddress::Parse("fe80::1%9"), 64);
     EXPECT_NE(onLink7, onLink9);
-    EXPECT_NE(onLink7.GetHashCode(), onLink9.GetHashCode());
+    // The hash is deliberately NOT asserted to differ. Equal-implies-equal is the whole of the
+    // contract, unequal keys are permitted to collide, and a hashed container keeps colliding
+    // keys apart by Equals -- so the inequality above is what rules the silent merge out.
+    // IPNetwork also hashes through the per-process-seeded System::HashCode, which makes any
+    // such inequality unreproducible across runs (docs/HashAssertionContractRule.md R2/R4).
     EXPECT_EQ(onLink7.ToString(), "fe80::%7/64");
     EXPECT_EQ(onLink9.ToString(), "fe80::%9/64");
 

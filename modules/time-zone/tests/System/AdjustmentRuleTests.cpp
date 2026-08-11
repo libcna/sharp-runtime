@@ -189,14 +189,20 @@ TEST(AdjustmentRuleTests, GetHashCode_SameStart_SameHash) {
     EXPECT_EQ(a->GetHashCode(), b->GetHashCode());
 }
 
-TEST(AdjustmentRuleTests, GetHashCode_DiffStart_LikelyDiffHash) {
+// Replaces GetHashCode_DiffStart_LikelyDiffHash, whose own name conceded the claim was
+// probabilistic. The hash folds 64 tick bits into 32, so two rules with different starts may
+// legally collide (docs/HashAssertionContractRule.md R2); what they must not do is compare
+// equal. GetHashCode_SameStartDifferentDelta_SameHash above pins that the hash reads DateStart
+// and nothing else.
+TEST(AdjustmentRuleTests, DiffStart_RulesAreUnequal) {
     DateTime start1(2020, 1, 1), start2(2021, 1, 1);
     DateTime end(2025, 12, 31);
     auto a = TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
         start1, end, TimeSpan::Zero, fixedTT(), floatTT());
     auto b = TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
         start2, end, TimeSpan::Zero, fixedTT(), floatTT());
-    EXPECT_NE(a->GetHashCode(), b->GetHashCode());
+    EXPECT_FALSE(a->Equals(*b));
+    EXPECT_NE(*a, *b);
 }
 
 TEST(AdjustmentRuleTests, GetHashCode_IsConsistent) {

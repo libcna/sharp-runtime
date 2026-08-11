@@ -32,9 +32,16 @@ TEST(EqualityComparerTest, DefaultHashCodeConsistent) {
     EXPECT_EQ(c.GetHashCode(42), c.GetHashCode(42));
 }
 
-TEST(EqualityComparerTest, DefaultHashCodeDifferent) {
+// Replaces DefaultHashCodeDifferent, which forbade a collision the contract permits
+// (docs/HashAssertionContractRule.md R2). The obligation a comparer owes is agreement in one
+// direction only -- equal values, equal hashes -- which is what is checked here.
+TEST(EqualityComparerTest, DefaultHashCodeAgreesWithEquals) {
     const auto& c = EqualityComparer<int>::Default();
-    EXPECT_NE(c.GetHashCode(1), c.GetHashCode(2));
+    EXPECT_FALSE(c.Equals(1, 2));
+    for (int x : {-7, 0, 1, 2, 42}) {
+        EXPECT_TRUE(c.Equals(x, x));
+        EXPECT_EQ(c.GetHashCode(x), c.GetHashCode(x));
+    }
 }
 
 TEST(EqualityComparerTest, CreateCustomEquals) {

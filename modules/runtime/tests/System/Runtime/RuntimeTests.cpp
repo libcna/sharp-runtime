@@ -294,7 +294,11 @@ TEST(RuntimeHelpersTests, IdentityHashAndObjectValue_FollowCppObjectIdentity) {
     auto otherObject = std::make_shared<ConditionalWeakTableValue>();
     EXPECT_TRUE(RuntimeHelpers::Equals(object, sameObject));
     EXPECT_FALSE(RuntimeHelpers::Equals(object, otherObject));
-    EXPECT_NE(RuntimeHelpers::GetHashCode(object), 0);
+    // The removed EXPECT_NE(..., 0) was not a contract: zero is a legal hash code
+    // (docs/HashAssertionContractRule.md R6), and the only zero RuntimeHelpers::GetHashCode
+    // documents is the null one, asserted below. What an identity hash does owe is that the same
+    // reference hashes the same, which is what replaces it.
+    EXPECT_EQ(RuntimeHelpers::GetHashCode(object), RuntimeHelpers::GetHashCode(sameObject));
     EXPECT_EQ(RuntimeHelpers::GetHashCode(std::shared_ptr<ConditionalWeakTableValue>{}), 0);
     EXPECT_EQ(RuntimeHelpers::GetObjectValue(object), object);
     EXPECT_EQ(RuntimeHelpers::GetObjectValue(5), 5);

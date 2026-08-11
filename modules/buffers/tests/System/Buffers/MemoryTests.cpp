@@ -315,7 +315,10 @@ TEST(MemoryTests, GetHashCode_SameRegion_SameHash) {
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
-TEST(MemoryTests, GetHashCode_NonNegative) {
+// Not the general contract -- a signed hash code may legally be negative -- but
+// Memory<T>::GetHashCode deliberately ends with `h & 0x7fffffff` (Memory.hpp:280), so this pins
+// that implementation choice (docs/HashAssertionContractRule.md R5).
+TEST(MemoryTests, GetHashCode_MasksTheSignBit) {
     std::vector<int> v{1, 2, 3};
     Memory<int> m(v);
     EXPECT_GE(m.GetHashCode(), 0);

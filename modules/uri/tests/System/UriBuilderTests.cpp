@@ -361,9 +361,10 @@ TEST(UriBuilderTest, DeliberatelyUnequalPairsStayUnequal_PinsTheGatedIdentityCha
     EXPECT_FALSE(lower.Equals(upperHost));
     EXPECT_FALSE(lower.Equals(upperScheme));
     EXPECT_FALSE(lower.Equals(defaultPort));
-    EXPECT_NE(lower.GetHashCode(), upperHost.GetHashCode());
-    EXPECT_NE(lower.GetHashCode(), upperScheme.GetHashCode());
-    EXPECT_NE(lower.GetHashCode(), defaultPort.GetHashCode());
+    // The three matching hash inequalities were removed by #2284. They restated the gate on a
+    // channel that does not carry it: unequal values are permitted to hash equally
+    // (docs/HashAssertionContractRule.md R2), so only the Equals assertions above are the pin,
+    // and only they have to be updated when #1995 lands.
 }
 
 TEST(UriBuilderTest, UriIdentityItselfIsUnchangedByThisTicket) {
@@ -374,12 +375,13 @@ TEST(UriBuilderTest, UriIdentityItselfIsUnchangedByThisTicket) {
     System::Uri b("http://example.com/p");
     System::Uri caseDiff("HTTP://EXAMPLE.COM/p");
     System::Uri explicitDefaultPort("http://example.com:80/p");
+    // Equal Uris hash equally -- the contract direction, kept. The two matching inequalities for
+    // the unequal pairs were removed by #2284: a collision between unequal values is legal
+    // (docs/HashAssertionContractRule.md R2), so the operator== assertions carry the pin.
     EXPECT_TRUE(a == b);
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
     EXPECT_FALSE(a == caseDiff);
-    EXPECT_NE(a.GetHashCode(), caseDiff.GetHashCode());
     EXPECT_FALSE(a == explicitDefaultPort);
-    EXPECT_NE(a.GetHashCode(), explicitDefaultPort.GetHashCode());
 }
 
 TEST(UriBuilderTest, Layout_SizeOfUriBuilderIsPinned) {

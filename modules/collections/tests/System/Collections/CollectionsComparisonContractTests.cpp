@@ -74,6 +74,13 @@ double payloadNaN() {
     return d;
 }
 
+/** The raw binary64 pattern of @p d, for preconditions that mean "these are different values". */
+std::uint64_t bitsOf(double d) {
+    std::uint64_t bits;
+    std::memcpy(&bits, &d, sizeof bits);
+    return bits;
+}
+
 /** The `float` counterpart of payloadNaN(). */
 float payloadNaNf() {
     std::uint32_t bits = 0x7FC00007U;
@@ -1034,8 +1041,14 @@ TEST(CollectionsComparisonContract, HashedContainersFindANaNKeyByADifferentNaN) 
     const double a = kNaN;
     const double b = payloadNaN();
     ASSERT_TRUE(std::isnan(a) && std::isnan(b));
+    ASSERT_NE(bitsOf(a), bitsOf(b)) << "the two NaNs must be different values";
+    // A test-precondition GUARD on the standard library's hasher, not a claim about any
+    // sharp-runtime contract: mutation M8 -- restore std::hash as the backing hasher -- is only
+    // detectable while std::hash keeps these two payloads in different buckets. Retained for
+    // that reason and labelled so it is not copied as a hash-contract assertion
+    // (docs/HashAssertionContractRule.md section 4.2, class B-guard).
     ASSERT_NE(std::hash<double>{}(a), std::hash<double>{}(b))
-        << "the two NaNs must have different raw hashes, or this test proves nothing";
+        << "std::hash folds these two NaNs together, so this test could not see mutation M8";
 
     G::OrderedDictionary<double, int> od;
     od.Add(a, 1);
@@ -1120,8 +1133,11 @@ TEST(CollectionsComparisonContract, SortedSetAcceptsANaNAddedLast) {
 }
 
 TEST(CollectionsComparisonContract, SortedSetHoldsEveryNaNPayloadExactlyOnce) {
-    ASSERT_NE(std::hash<double>{}(kNaN), std::hash<double>{}(payloadNaN()))
-        << "the two NaNs must differ bitwise, or this test proves nothing";
+    // SortedSet is comparison-based and never hashes anything, so the precondition here is
+    // exactly what the old message claimed -- the two NaNs are different values -- and is now
+    // asserted on the bit patterns rather than through std::hash
+    // (docs/HashAssertionContractRule.md R2).
+    ASSERT_NE(bitsOf(kNaN), bitsOf(payloadNaN())) << "the two NaNs must differ bitwise";
     G::SortedSet<double> s;
     EXPECT_TRUE(s.Add(kNaN));
     EXPECT_FALSE(s.Add(payloadNaN()));    // ordering-equivalent, so a duplicate
@@ -1253,8 +1269,12 @@ TEST(CollectionsComparisonContract, DictionaryFindsANaNKeyAmongOrdinaryKeys) {
 }
 
 TEST(CollectionsComparisonContract, DictionaryFindsANaNKeyStoredUnderADifferentPayload) {
+    ASSERT_NE(bitsOf(kNaN), bitsOf(payloadNaN())) << "the two NaNs must be different values";
+    // Test-precondition guard on the standard library's hasher, as in
+    // HashedContainersFindANaNKeyByADifferentNaN above -- not a hash-contract assertion
+    // (docs/HashAssertionContractRule.md section 4.2, class B-guard).
     ASSERT_NE(std::hash<double>{}(kNaN), std::hash<double>{}(payloadNaN()))
-        << "the two NaNs must hash differently raw, or this test proves nothing";
+        << "std::hash folds these two NaNs together, so this test could not see mutation M8";
     G::Dictionary<double, int> d;
     d.Add(kNaN, 7);
     EXPECT_TRUE(d.ContainsKey(payloadNaN()));

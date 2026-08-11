@@ -830,7 +830,9 @@ TEST(UriTests, DocumentedContract_CaseDifferingUrisAreNotEqualYet) {
     Uri a("HTTP://EXAMPLE.COM:80/Path");
     Uri b("http://example.com/Path");
     EXPECT_FALSE(a == b);
-    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+    // The matching hash inequality was removed by #2284: unequal values are permitted to hash
+    // equally (docs/HashAssertionContractRule.md R2), so identity is pinned on operator== alone
+    // and that is the single line #1995 has to update.
 }
 
 TEST(UriTests, DocumentedContract_MixedCaseSchemeHasNoDefaultPort) {
@@ -1408,11 +1410,13 @@ TEST(UriTests, EmbeddedNul_IsCarriedThroughEveryComponentWithoutTruncation) {
 
 TEST(UriTests, EmbeddedNul_DoesNotProduceAPrefixOnlyParse) {
     // The dangerous failure this ticket exists to rule out: a URI that silently means only
-    // the text before the NUL. It does not — the two are unequal and hash differently.
+    // the text before the NUL. It does not — the two are unequal, and a caller keeps them apart
+    // by that inequality. (#2284 removed a matching hash inequality here: unequal values are
+    // permitted to hash equally, and a hashed container separates colliding keys by Equals
+    // anyway — docs/HashAssertionContractRule.md R2.)
     Uri withNul(std::string("http://h/a\0b", 12));
     Uri prefix("http://h/a");
     EXPECT_FALSE(withNul == prefix);
-    EXPECT_NE(withNul.GetHashCode(), prefix.GetHashCode());
     Uri reparsed(withNul.getAbsoluteUriProperty());
     EXPECT_TRUE(reparsed == withNul);
 }

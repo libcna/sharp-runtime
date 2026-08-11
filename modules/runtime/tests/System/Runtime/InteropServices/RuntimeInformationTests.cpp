@@ -40,8 +40,13 @@ TEST(OSPlatformTests, GetHashCode_MatchesForCaseInsensitivelyEqualValues) {
     EXPECT_EQ(a.GetHashCode(), OSPlatform::Linux.GetHashCode());
 }
 
-TEST(OSPlatformTests, GetHashCode_DiffersForDistinctValues) {
-    EXPECT_NE(OSPlatform::Linux.GetHashCode(), OSPlatform::Windows.GetHashCode());
+// Replaces GetHashCode_DiffersForDistinctValues: two distinct platforms are permitted to hash
+// equally (docs/HashAssertionContractRule.md R2). The distinction that is guaranteed is on
+// Equals, and the hash direction the contract owns is the case-insensitive agreement pinned by
+// GetHashCode_MatchesForCaseInsensitivelyEqualValues above.
+TEST(OSPlatformTests, DistinctPlatformsAreUnequal) {
+    EXPECT_NE(OSPlatform::Linux, OSPlatform::Windows);
+    EXPECT_FALSE(OSPlatform::Linux.Equals(OSPlatform::Windows));
 }
 
 TEST(RuntimeInformationTests, IsOSPlatform_MatchesLinuxOnThisSandbox) {

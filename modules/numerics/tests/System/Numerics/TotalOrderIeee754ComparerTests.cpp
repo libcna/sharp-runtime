@@ -134,6 +134,12 @@ TEST(TotalOrderIeee754ComparerTests, Float_EqualsAgreesWithCompareOnEveryVector)
                 << "a bits=" << std::bit_cast<uint32_t>(a) << " b bits=" << std::bit_cast<uint32_t>(b);
 }
 
+// The hash inequalities in this suite are retained deliberately. They are not the collision
+// assumption SR-AUD-018 outlaws: TotalOrderIeee754Comparer's header states, as behaviour, that
+// "-0 and +0 hash differently, and so do distinct NaN payloads" and that the binary64 hash folds
+// the wide pattern rather than truncating it. For float and Half the hash IS the bit pattern
+// widened, so the property is injective by construction, not lucky
+// (docs/HashAssertionContractRule.md R3, class B).
 TEST(TotalOrderIeee754ComparerTests, Float_SignedZerosAreDistinct) {
     TotalOrderIeee754Comparer<float> cmp;
     EXPECT_FALSE(cmp.Equals(-0.0f, 0.0f));

@@ -85,11 +85,9 @@ TEST(IPPacketInformationTests, GetHashCode_EqualInstancesMatch) {
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
-TEST(IPPacketInformationTests, GetHashCode_DifferingInterfaceDiffers) {
-    IPPacketInformation a(IPAddress::Loopback, 3);
-    IPPacketInformation b(IPAddress::Loopback, 4);
-    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
-}
+// GetHashCode_DifferingInterfaceDiffers was removed by #2284: unequal values are permitted to
+// hash equally (docs/HashAssertionContractRule.md R2), and the Equality test above already
+// asserts EXPECT_NE(info, IPPacketInformation(IPAddress::Loopback, 4)) for this very pair.
 
 TEST(SocketReceiveFromResultTests, DefaultAndAssign) {
     SocketReceiveFromResult result;
@@ -123,11 +121,15 @@ TEST(UdpReceiveResultTests, GetHashCode_EqualInstancesMatch) {
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
-TEST(UdpReceiveResultTests, GetHashCode_DifferingBufferDiffers) {
+// Replaces GetHashCode_DifferingBufferDiffers: two results with different buffers are permitted
+// to hash equally (docs/HashAssertionContractRule.md R2), but they must not compare equal, which
+// is the claim that assertion was standing in for.
+TEST(UdpReceiveResultTests, DifferingBuffer_AreUnequal) {
     IPEndPoint remote(IPAddress::Loopback, 1234);
     UdpReceiveResult a(std::vector<SharpRuntime::bytecs>{1, 2, 3}, remote);
     UdpReceiveResult b(std::vector<SharpRuntime::bytecs>{4, 5, 6}, remote);
-    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+    EXPECT_NE(a, b);
+    EXPECT_FALSE(a.Equals(b));
 }
 
 // --- LingerOption / MulticastOption -----------------------------------------------------------
@@ -149,10 +151,16 @@ TEST(LingerOptionTests, GetHashCode_EqualInstancesMatch) {
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
-TEST(LingerOptionTests, GetHashCode_DifferingTimeDiffers) {
+// Replaces GetHashCode_DifferingTimeDiffers. LingerOption::GetHashCode is
+// System::HashCode::Combine(enabled_, lingerTime_), and System::HashCode mixes a per-process
+// random seed into its initial state by design (HashCode.hpp:34-39), so an inequality between
+// two of its results is not reproducible across runs (docs/HashAssertionContractRule.md R4).
+// The value inequality is, and is what the assertion was standing in for.
+TEST(LingerOptionTests, DifferingTime_AreUnequal) {
     LingerOption a(true, 30);
     LingerOption b(true, 45);
-    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+    EXPECT_NE(a, b);
+    EXPECT_FALSE(a.Equals(b));
 }
 
 TEST(MulticastOptionTests, GroupOnly) {
@@ -248,11 +256,9 @@ TEST(UnixDomainSocketEndPointTests, GetHashCode_EqualInstancesMatch) {
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
-TEST(UnixDomainSocketEndPointTests, GetHashCode_DifferingPathDiffers) {
-    UnixDomainSocketEndPoint a("/tmp/a.sock");
-    UnixDomainSocketEndPoint c("/tmp/b.sock");
-    EXPECT_NE(a.GetHashCode(), c.GetHashCode());
-}
+// GetHashCode_DifferingPathDiffers was removed by #2284: unequal endpoints are permitted to hash
+// equally (docs/HashAssertionContractRule.md R2), and the Equality test above already asserts
+// EXPECT_NE(a, c) for this very pair of paths.
 
 // --- Ticket #2135 / SR-AUD-264 / cause NS-D -----------------------------------------------------
 //

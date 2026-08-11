@@ -160,10 +160,17 @@ TEST(Matrix4x4Tests, GetHashCode_EqualMatrices_SameHash) {
     auto b = Matrix4x4{1,2,3,4, 5,6,7,8, 9,10,11,12, 13,14,15,16};
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
-TEST(Matrix4x4Tests, GetHashCode_DifferentMatrices_DifferentHash) {
+// Replaces GetHashCode_DifferentMatrices_DifferentHash. Matrix4x4::GetHashCode is built from
+// five System::HashCode::Combine calls, and System::HashCode mixes a per-process random seed into
+// its initial state by design (HashCode.hpp:34-39), so an inequality between two of its results
+// is not reproducible across runs (docs/HashAssertionContractRule.md R4). The value inequality
+// is, and is what the assertion was standing in for; GetHashCode_EqualMatrices_SameHash above
+// owns the contract direction.
+TEST(Matrix4x4Tests, DifferentMatrices_AreUnequal) {
     auto a = Matrix4x4::Identity();
     auto b = Matrix4x4::CreateTranslation(1,2,3);
-    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+    EXPECT_FALSE(a.Equals(b));
+    EXPECT_TRUE(a.Equals(Matrix4x4::Identity()));
 }
 TEST(Matrix4x4Tests, Lerp_ZeroAmount_ReturnsFirst) {
     auto a = Matrix4x4::Identity();
