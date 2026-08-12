@@ -10,6 +10,7 @@
 #include "System/Xml/XmlConvert.hpp"
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlWriter.hpp"
+#include "System/Xml/detail/XmlLexicalSanitizer.hpp"
 
 namespace System::Xml {
 
@@ -236,9 +237,25 @@ namespace System::Xml {
 
     XmlDocumentType* XmlDocument::CreateDocumentType(const std::string& name, const std::string& publicId,
                                                      const std::string& systemId, const std::string& /*internalSubset*/) {
+        // Ticket #2084: the SECOND producer of an ExternalID in this module. It builds the
+        // same three-literal text by the same raw concatenation as XmlWriter::WriteDocType,
+        // so it carried the same defect and takes the same repair -- the finding named only
+        // the writer door. Validation runs before the node is created, so a rejected call
+        // leaves the document untouched.
+        (void)XmlConvert::VerifyName(name);
+        (void)XmlConvert::VerifyPublicId(publicId);
+        (void)XmlConvert::VerifyXmlChars(systemId);
+        if (detail::ExternalIdLiteralTerminatesDeclaration(systemId))
+            throw XmlException("XmlDocument::CreateDocumentType: the system identifier contains '>', "
+                               "which would terminate the DOCTYPE declaration: '" + systemId + "'.");
+        const char systemQuote = detail::SelectExternalIdDelimiter(systemId);
+        if (systemQuote == '\0')
+            throw XmlException("XmlDocument::CreateDocumentType: the system identifier contains "
+                               "both a double quote and an apostrophe and cannot be represented "
+                               "in a DOCTYPE system literal: '" + systemId + "'.");
         std::string text = "DOCTYPE " + name;
-        if (!publicId.empty()) text += " PUBLIC \"" + publicId + "\" \"" + systemId + "\"";
-        else if (!systemId.empty()) text += " SYSTEM \"" + systemId + "\"";
+        if (!publicId.empty()) text += " PUBLIC \"" + publicId + "\" " + systemQuote + systemId + systemQuote;
+        else if (!systemId.empty()) { text += " SYSTEM "; text += systemQuote + systemId + systemQuote; }
         auto* native = doc_.NewUnknown(text.c_str());
         auto wrapper = std::make_unique<XmlDocumentType>(native, this, name, publicId, systemId);
         auto* raw = wrapper.get();

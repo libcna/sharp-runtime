@@ -32,6 +32,16 @@ namespace System::Xml::detail {
      *
      * All three are pure, allocate only their result, and never throw except for
      * `std::bad_alloc` from that result.
+     *
+     * **The fourth entry is a selector, not a transform (ticket #2084).** A DOCTYPE
+     * `ExternalID`'s `PubidLiteral`/`SystemLiteral` has **no** escape mechanism -- this
+     * runtime's own DOCTYPE reader (`ParseDoctype`'s `readQuoted` in `XmlDocument.cpp`)
+     * ends a literal at the first occurrence of its opening quote and never un-escapes
+     * anything, so writing `&quot;` inside one would store the six literal characters
+     * rather than a quote. Self-healing is therefore impossible for this input class; the
+     * only well-formed choices are to re-delimit or to reject. `SelectExternalIdDelimiter`
+     * makes that choice and stays pure and non-throwing like its three neighbours, leaving
+     * the rejection to its caller.
      */
 
     /**
@@ -92,6 +102,53 @@ namespace System::Xml::detail {
             }
         }
         return out;
+    }
+
+    /**
+     * @brief Chooses the quote character that can delimit @p literal inside a DOCTYPE
+     * `ExternalID`, or reports that no such character exists.
+     *
+     * XML gives a `SystemLiteral`/`PubidLiteral` exactly two possible delimiters and no way
+     * to escape either one inside the literal, so a value is representable only if it omits
+     * at least one of them. This runtime's own DOCTYPE reader accepts both delimiters
+     * (`XmlDocument.cpp`'s `readQuoted` tests for `"` and `'` and then scans to the matching
+     * quote), which is what makes re-delimiting a read-back-preserving repair rather than a
+     * guess.
+     *
+     * `"` is preferred so that every value not containing one keeps its existing byte-for-byte
+     * output.
+     *
+     * @return `'"'` when @p literal contains no double quote; `'\''` when it contains a double
+     *         quote but no apostrophe; `'\0'` when it contains both and is therefore
+     *         unrepresentable.
+     */
+    [[nodiscard]] inline char SelectExternalIdDelimiter(const std::string& literal) {
+        if (literal.find('"') == std::string::npos) return '"';
+        return literal.find('\'') == std::string::npos ? '\'' : '\0';
+    }
+
+    /**
+     * @brief Reports whether @p literal would terminate the DOCTYPE declaration that contains
+     * it, regardless of which delimiter quotes it.
+     *
+     * This runtime represents a DOCTYPE as a single `>`-terminated node (tinyxml2 has no
+     * DOCTYPE type, so `XmlDocument` stores one as an `XMLUnknown` and `ParseDoctype` reads it
+     * back), and that scan is **not** quote-aware. A `>` inside an `ExternalID` literal
+     * therefore ends the declaration early even though XML itself permits it there, leaving
+     * the remainder of the declaration to be re-read as document markup.
+     *
+     * Rejecting it costs nothing legitimate: a system identifier is a URI reference, and
+     * RFC 3986 excludes `>` from every URI production -- a real one carries `%3E` instead.
+     * `XmlConvert::VerifyPublicId` already rejects `>` for the public identifier, because `>`
+     * is not a `PubidChar`, so only the system identifier needs this test.
+     *
+     * The same limitation applies to a DOCTYPE internal subset, where it is **not** repairable
+     * this way: an ordinary subset such as `<!ENTITY a "b">` contains a `>` that XML requires,
+     * so the declaration is lost on read-back with no well-formed alternative spelling. That
+     * half is tracked separately and is documented on `XmlDocumentType`.
+     */
+    [[nodiscard]] inline bool ExternalIdLiteralTerminatesDeclaration(const std::string& literal) {
+        return literal.find('>') != std::string::npos;
     }
 
 } // namespace System::Xml::detail

@@ -353,3 +353,203 @@ TEST(XmlWriterValidationTests, WriterAndDomAgreeOnEveryProbedName) {
         EXPECT_EQ(writerThrew, domThrew) << "name: " << name;
     }
 }
+
+// ===========================================================================
+// #2084 — the DOCTYPE ExternalID quoted literals
+//
+// #2076 repaired every NAME door and deliberately left the LITERAL doors open, because the
+// repair looked like a delimiter/escaping decision with no repository evidence to settle it.
+// Measured (build-probe/2084_probe2_before.log, 17 cases), it is settled by this module's
+// own DOCTYPE reader:
+//
+//   * ParseDoctype's readQuoted accepts BOTH '"' and '\'' and scans to the matching quote,
+//     so RE-DELIMITING is read-back-preserving -- not a guess.
+//   * It never un-escapes anything, so writing "&quot;" inside a literal would store six
+//     literal characters. Escaping is therefore a corruption, not a repair.
+//
+// Three premise corrections the before-state forced, all recorded in the plan:
+//
+//   1. The finding names TWO reproductions; SEVEN of the 17 cases were broken, and FIVE of
+//      the seven failed SILENTLY -- the document parsed and the recovered identifier was
+//      simply wrong -- rather than producing unparseable text.
+//   2. The finding names one door; XmlDocument::CreateDocumentType builds the same ExternalID
+//      by the same raw concatenation and carried the same defect.
+//   3. The finding attributes the internal-subset break to a ']'. Measured, the terminator is
+//      '>': a bare ']' subset round-trips fine, while the most ordinary subset there is --
+//      <!ENTITY a "b"> -- was ALREADY lossy before this ticket. That half is NOT repaired
+//      here; see the WriteDocType_InternalSubset_* pins below.
+// ===========================================================================
+
+namespace {
+
+/// Round-trips a DOCTYPE through this module's own reader and returns the recovered
+/// identifiers, which is a strictly stronger oracle than "LoadXml did not throw": three of
+/// the before-state failures parsed cleanly and returned a truncated identifier.
+void ExpectDocTypeRoundTrip(const std::string& publicId, const std::string& systemId) {
+    auto w = NewWriter();
+    ASSERT_NO_THROW(w->WriteDocType("r", publicId, systemId, ""));
+    w->WriteStartElement("r");
+    w->WriteEndElement();
+    const std::string xml = w->ToString();
+    ExpectReReadable(xml);
+
+    XmlDocument doc;
+    ASSERT_NO_THROW(doc.LoadXml(xml)) << xml;
+    auto* dt = doc.getDocumentTypeProperty();
+    ASSERT_NE(dt, nullptr) << xml;
+    EXPECT_EQ(dt->getPublicIdProperty(), publicId) << xml;
+    EXPECT_EQ(dt->getSystemIdProperty(), systemId) << xml;
+}
+
+} // namespace
+
+TEST(XmlWriterValidationTests, WriteDocType_PublicIdWithQuote_Throws) {
+    // The shipped XmlConvert::VerifyPublicId already rejects '"' -- it is not a PubidChar.
+    // Before: emitted <!DOCTYPE r PUBLIC "pu"b" "s"> and the reader recovered "pu".
+    auto w = NewWriter();
+    try {
+        w->WriteDocType("r", "pu\"b", "s", "");
+        FAIL() << "expected XmlException";
+    } catch (const XmlException& e) {
+        EXPECT_NE(e.getMessageProperty().find("public identifier"), std::string::npos)
+            << e.getMessageProperty();
+    }
+}
+
+TEST(XmlWriterValidationTests, WriteDocType_PublicIdApostropheAndControls) {
+    // An apostrophe IS a PubidChar and must stay accepted; a control character is not.
+    ExpectDocTypeRoundTrip("pub'lic", "sys");
+    auto w = NewWriter();
+    EXPECT_THROW(w->WriteDocType("r", "a\x01" "b", "", ""), XmlException);
+}
+
+TEST(XmlWriterValidationTests, WriteDocType_SystemIdWithQuote_ReDelimitsAndRoundTrips) {
+    // The finding's headline case. Before: <!DOCTYPE r SYSTEM "a"b"> recovered "a".
+    // After: the literal is re-delimited and the FULL value survives the round trip.
+    auto w = NewWriter();
+    ASSERT_NO_THROW(w->WriteDocType("r", "", "a\"b", ""));
+    w->WriteStartElement("r");
+    w->WriteEndElement();
+    EXPECT_EQ(w->ToString(), "<!DOCTYPE r SYSTEM 'a\"b'><r/>");
+    ExpectDocTypeRoundTrip("", "a\"b");
+}
+
+TEST(XmlWriterValidationTests, WriteDocType_SystemIdWithBothQuotes_Throws) {
+    // Unrepresentable: XML gives a SystemLiteral exactly two delimiters and no escape.
+    auto w = NewWriter();
+    try {
+        w->WriteDocType("r", "", "a\"b'c", "");
+        FAIL() << "expected XmlException";
+    } catch (const XmlException& e) {
+        EXPECT_NE(e.getMessageProperty().find("cannot be represented"), std::string::npos)
+            << e.getMessageProperty();
+    }
+}
+
+TEST(XmlWriterValidationTests, WriteDocType_SystemIdWithGreaterThan_Throws) {
+    // '>' ends the declaration whatever quotes it, because this runtime stores a DOCTYPE as a
+    // '>'-terminated node. Both of the finding's own unparseable reproductions reduce to this.
+    for (const char* systemId : {"a>b", "s\">x<!--"}) {
+        auto w = NewWriter();
+        try {
+            w->WriteDocType("r", "", systemId, "");
+            FAIL() << "expected XmlException for: " << systemId;
+        } catch (const XmlException& e) {
+            EXPECT_NE(e.getMessageProperty().find("terminate the DOCTYPE"), std::string::npos)
+                << e.getMessageProperty();
+        }
+    }
+}
+
+TEST(XmlWriterValidationTests, WriteDocType_SystemIdWithNulOrControl_Throws) {
+    // The NUL case is #2085's c_str() truncation reaching a FOURTH door: before this ticket
+    // the systemId "a\0b" emitted <!DOCTYPE r SYSTEM "a> -- the closing quote was lost
+    // entirely, so the emitted text was malformed, not merely wrong.
+    auto w1 = NewWriter();
+    EXPECT_THROW(w1->WriteDocType("r", "", std::string("a\0b", 3), ""), XmlException);
+    auto w2 = NewWriter();
+    EXPECT_THROW(w2->WriteDocType("r", "", "a\x01" "b", ""), XmlException);
+    auto w3 = NewWriter();
+    EXPECT_THROW(w3->WriteDocType("r", "", "a\x0c" "b", ""), XmlException);
+}
+
+TEST(XmlWriterValidationTests, WriteDocType_ValidIdentifiers_ByteIdenticalOutput) {
+    // Every value that does not contain a '"' keeps its existing output character for
+    // character: '"' stays the preferred delimiter precisely so this holds.
+    struct Case { const char* pub; const char* sys; const char* expected; };
+    for (const Case& c : {
+             Case{"", "", "<!DOCTYPE r><r/>"},
+             Case{"", "about:legacy-compat", "<!DOCTYPE r SYSTEM \"about:legacy-compat\"><r/>"},
+             Case{"-//W3C//DTD XHTML 1.0//EN", "http://www.w3.org/x.dtd",
+                  "<!DOCTYPE r PUBLIC \"-//W3C//DTD XHTML 1.0//EN\" \"http://www.w3.org/x.dtd\"><r/>"},
+             Case{"", "sys'tem", "<!DOCTYPE r SYSTEM \"sys'tem\"><r/>"},
+             Case{"pub'lic", "", "<!DOCTYPE r PUBLIC \"pub'lic\" \"\"><r/>"},
+         }) {
+        auto w = NewWriter();
+        ASSERT_NO_THROW(w->WriteDocType("r", c.pub, c.sys, ""));
+        w->WriteStartElement("r");
+        w->WriteEndElement();
+        EXPECT_EQ(w->ToString(), c.expected) << c.pub << " | " << c.sys;
+    }
+}
+
+TEST(XmlWriterValidationTests, WriteDocType_ApostropheInSystemIdKeepsDoubleQuote) {
+    // Delimiter PREFERENCE, not merely availability: an apostrophe alone must not flip the
+    // literal to single quotes, or every existing caller's output would change.
+    auto w = NewWriter();
+    ASSERT_NO_THROW(w->WriteDocType("r", "", "sys'tem", ""));
+    w->WriteStartElement("r");
+    w->WriteEndElement();
+    EXPECT_NE(w->ToString().find("SYSTEM \"sys'tem\""), std::string::npos) << w->ToString();
+}
+
+TEST(XmlWriterValidationTests, WriteDocType_InternalSubset_NotRepairedHere_SubstrateBounded) {
+    // Pins the SCOPE boundary and the corrected premise, so a later reader does not assume
+    // the subset half was covered. An ordinary subset containing '>' is accepted and emitted
+    // exactly as before -- its output is well-formed XML; only THIS runtime's '>'-terminated
+    // DOCTYPE representation loses it on read-back, which XmlDocumentType's doc-comment
+    // already concedes. A bare ']', which the finding blamed, is not the terminator at all.
+    auto w = NewWriter();
+    ASSERT_NO_THROW(w->WriteDocType("r", "", "", "<!ENTITY a \"b\">"));
+    w->WriteStartElement("r");
+    w->WriteEndElement();
+    EXPECT_EQ(w->ToString(), "<!DOCTYPE r [<!ENTITY a \"b\">]><r/>");
+
+    auto w2 = NewWriter();
+    ASSERT_NO_THROW(w2->WriteDocType("r", "", "", "]"));
+    w2->WriteStartElement("r");
+    w2->WriteEndElement();
+    EXPECT_EQ(w2->ToString(), "<!DOCTYPE r []]><r/>");
+}
+
+// --- the second producer: the DOM door ------------------------------------------------
+
+TEST(XmlWriterValidationTests, CreateDocumentType_SameLiteralRulesAsTheWriterDoor) {
+    // Premise correction 2: the finding named only XmlWriter::WriteDocType, but this door
+    // built the same ExternalID by the same concatenation. The two must now agree exactly.
+    for (const char* systemId : {"a\"b'c", "a>b", "a\x01" "b"}) {
+        bool writerThrew = false;
+        bool domThrew = false;
+        try {
+            auto w = NewWriter();
+            w->WriteDocType("r", "", systemId, "");
+        } catch (const XmlException&) { writerThrew = true; }
+        try {
+            XmlDocument doc;
+            (void)doc.CreateDocumentType("r", "", systemId, "");
+        } catch (const XmlException&) { domThrew = true; }
+        EXPECT_TRUE(writerThrew) << "systemId: " << systemId;
+        EXPECT_EQ(writerThrew, domThrew) << "systemId: " << systemId;
+    }
+}
+
+TEST(XmlWriterValidationTests, CreateDocumentType_ReDelimitsAndLeavesValidInputUnchanged) {
+    XmlDocument doc;
+    auto* dt = doc.CreateDocumentType("r", "", "a\"b", "");
+    ASSERT_NE(dt, nullptr);
+    // The wrapper caches the caller's value; the repair is in the EMITTED text.
+    EXPECT_EQ(dt->getSystemIdProperty(), "a\"b");
+
+    XmlDocument doc2;
+    EXPECT_THROW((void)doc2.CreateDocumentType("r", "pu\"b", "s", ""), XmlException);
+}

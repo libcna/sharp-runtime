@@ -182,12 +182,30 @@ void XmlWriter::WriteDocType(const std::string& name, const std::string& publicI
                               const std::string& systemId, const std::string& internalSubset) {
     ThrowIfClosed(state_.get(), "WriteDocType");
     (void)XmlConvert::VerifyName(name); // the DOCTYPE root-element name is an XML name
+    // Ticket #2084: the two ExternalID literals are validated with the validators this
+    // module already ships, exactly as #2076 routed the four NAME doors through VerifyName.
+    // VerifyPublicId rejects '"' outright (it is not a PubidChar), so a PubidLiteral is
+    // always representable with the '"' this writer emits; a SystemLiteral may legally
+    // contain '"', so it picks its delimiter instead. Both run BEFORE the nodeStack check,
+    // so an invalid literal is reported whether or not a document is open -- the same
+    // ordering VerifyName above already has.
+    (void)XmlConvert::VerifyPublicId(publicId);
+    (void)XmlConvert::VerifyXmlChars(systemId);
+    if (detail::ExternalIdLiteralTerminatesDeclaration(systemId))
+        throw XmlException("XmlWriter::WriteDocType: the system identifier contains '>', "
+                           "which would terminate the DOCTYPE declaration: '" + systemId + "'.");
+    const char systemQuote = detail::SelectExternalIdDelimiter(systemId);
+    if (systemQuote == '\0')
+        throw XmlException("XmlWriter::WriteDocType: the system identifier contains both a "
+                           "double quote and an apostrophe and cannot be represented in a "
+                           "DOCTYPE system literal: '" + systemId + "'.");
     if (!state_ || state_->nodeStack.empty()) return;
     std::string text = "DOCTYPE " + name;
     if (!publicId.empty()) {
-        text += " PUBLIC \"" + publicId + "\" \"" + systemId + "\"";
+        text += " PUBLIC \"" + publicId + "\" " + systemQuote + systemId + systemQuote;
     } else if (!systemId.empty()) {
-        text += " SYSTEM \"" + systemId + "\"";
+        text += " SYSTEM ";
+        text += systemQuote + systemId + systemQuote;
     }
     if (!internalSubset.empty()) text += " [" + internalSubset + "]";
     tinyxml2::XMLUnknown* dt = state_->doc.NewUnknown(text.c_str());

@@ -81,8 +81,24 @@ introduce in order to complete an event pair. The silence is deliberate, documen
 
 ## 5. Known remaining strictness gaps
 
-Recorded rather than silently left open, each with its own ticket: `WriteDocType`'s
-`publicId`/`systemId`/`internalSubset` are still unvalidated quoted literals that can escape
-their own delimiter (**#2084**); an embedded NUL still silently truncates writer content at
-three doors (**#2085**); and `RemoveAllChildren`'s event pair is still absent for the lifetime
-reason in §3 (**#2086**).
+Recorded rather than silently left open, each with its own ticket: an embedded NUL still
+silently truncates writer content at three doors (**#2085**), and `RemoveAllChildren`'s event
+pair is still absent for the lifetime reason in §3 (**#2086**).
+
+**Closed since (#2084, 2026-08-12) — a source-compatible narrowing worth knowing about.**
+`WriteDocType` and `XmlDocument::CreateDocumentType` now validate the DOCTYPE `ExternalID`
+literals instead of concatenating them raw. Calls that previously produced malformed or
+silently truncated output now throw `XmlException`:
+
+| Input | Before | After |
+|---|---|---|
+| `publicId` containing `"` | `<!DOCTYPE r PUBLIC "pu"b" "s">`, read back as `pu` | throws — `"` is not a `PubidChar` |
+| `systemId` containing `"` (only) | read back truncated at the quote | **accepted**, re-delimited to `'…'`, full value round-trips |
+| `systemId` containing both `"` and `'` | truncated | throws — unrepresentable, XML has no escape here |
+| `systemId` containing `>` | terminated the declaration early | throws — RFC 3986 excludes `>` from a URI |
+| `systemId` containing NUL or a control character | truncated at the NUL, losing the closing quote | throws |
+
+**Every value that does not contain `"` keeps its exact previous output**, byte for byte: `"`
+remains the preferred delimiter for that reason, and an apostrophe alone does not flip it. The
+`internalSubset` is **unchanged** and still emitted verbatim — its read-back limitation is
+substrate-bounded and tracked as **#2348**.

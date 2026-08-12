@@ -1051,7 +1051,8 @@ behaviour is untouched, which the pins now enforce.
 | **#2080** | deferred verification (SR-AUD-354) | needs .NET's `xs:duration` grammar and year/month factors; `/rv/tmp/runtime/` absent |
 | **#2082** | deferred verification (post-audit) | narrowing parser acceptance on an unverified premise |
 | **#2083** | deferred verification (post-audit) | same |
-| **#2084** | post-audit, ready but **split from #2076 on purpose** | the `systemId`/`internalSubset` repair is a delimiter/escaping *decision* with no repository evidence; `publicId` alone already has a validator |
+| **#2084** | **REMEDIATED (2026-08-12)** — see §21.5 | the delimiter decision turned out to be settled by this module's own DOCTYPE reader; the internal-subset half split to **#2348** |
+| **#2348** | post-audit, split from #2084 | a well-formed-internal-subset rule needs a DTD subset scanner this port deliberately does not have |
 | **#2085** | post-audit, ready | must first decide whether `XmlWriterSettings::CheckCharacters` governs rejection |
 | **#2086** | post-audit, ready | completing `RemoveAllChildren`'s event pair safely needs a lifetime decision (detach vs delete) that is **not** compatible |
 
@@ -1059,3 +1060,60 @@ behaviour is untouched, which the pins now enforce.
 `SR-AUD-*` finding is either remediated or deferred-with-a-pin, and the three post-audit tickets
 this batch created (#2084, #2085, #2086) are each blocked on a stated decision rather than on
 effort. **No `SR-AUD-*` identifier was created; audit numbering stays frozen at 364.**
+
+### 21.5 #2084 — the "unsettled decision" was settled by this module's own reader
+
+§21.4 recorded #2084 as blocked on a delimiter/escaping decision "with no repository
+evidence". That was wrong, and the evidence was one function away.
+
+**The authority is `XmlDocument.cpp`'s `ParseDoctype`, specifically its `readQuoted` lambda.**
+It accepts **both** `"` and `'` as literal delimiters and scans to the matching quote, and it
+un-escapes **nothing**. Two consequences settle the decision without inventing any grammar:
+
+- **Escaping is a corruption, not a repair.** `&quot;` written inside a literal would be read
+  back as the six characters `&quot;`, so the value would not survive its own round trip.
+- **Re-delimiting is read-back-preserving.** A literal containing `"` can be emitted with `'`
+  and this runtime's own reader recovers the original value exactly.
+
+**Three premise corrections the before-state forced** (`build-probe/2084_probe1_doctype.cpp`,
+`2084_probe2_roundtrip.cpp`; logs `2084_probe1_before.log`, `2084_probe2_before.log` /
+`_after.log`; 17 cases):
+
+1. **The finding names two reproductions; seven cases were broken, and five of the seven
+   failed *silently*.** `publicId = "pu\"b"` emitted `<!DOCTYPE r PUBLIC "pu"b" "s">`, which
+   this module's reader parses **without error** and from which it recovers the identifier
+   `pu`. The finding's framing — "this module's OWN XmlReader rejects both" — is true of its
+   two examples and false of the majority of the surface. Silent truncation of an identifier is
+   the more dangerous half.
+2. **Two producers, not one.** `XmlDocument::CreateDocumentType` builds the same `ExternalID`
+   by the same raw concatenation and carried the same defect. Both are repaired and a test
+   pins that they now agree.
+3. **The internal subset's terminator is `>`, not `]`.** A bare `]` subset emits
+   `<!DOCTYPE r []]>` and round-trips fine, while the most ordinary subset there is —
+   `<!ENTITY a "b">` — was **already** lossy before this ticket, dropping `]>` into a stray
+   document-level `#text` node. The acceptance criterion's `]` rule would therefore have been
+   both over- and under-broad.
+
+**The scope line, stated once because it is the reusable part:** *reject what makes the
+emitted document malformed XML; never reject spec-valid output merely because this runtime's
+reader cannot read it back.* `<!DOCTYPE r [<!ENTITY a "b">]><r/>` is well-formed XML — the
+writer is right and the `>`-terminated DOCTYPE node is the limited half, which
+`XmlDocumentType`'s doc-comment already concedes as "not something this port can work around".
+Narrowing a correct writer to fit that would be a regression, so the internal-subset half is
+**#2348** rather than a rule guessed from the DTD grammar this port does not parse.
+
+The one apparent exception is deliberate and justified independently: `>` **is** rejected in a
+`systemId`, because a system identifier is a URI reference and RFC 3986 excludes `>` from every
+URI production — a real one carries `%3E`. No legitimate value is lost. `>` in a `publicId`
+needed nothing: it is not a `PubidChar`, so the shipped validator already rejected it.
+
+**Result:** 7 BAD → 1 BAD, the survivor being #2348's subset case. Every control byte-identical
+(the before/after logs differ only in the six repaired rows and the count line). `"` stays the
+preferred delimiter precisely so that holds. +10 permanent tests; **6 mutations, all 6 caught**,
+including "restore the pre-#2084 delimiter choice" and "repair only the writer door".
+`detail::SelectExternalIdDelimiter` and `detail::ExternalIdLiteralTerminatesDeclaration` live in
+`System/Xml/detail/XmlLexicalSanitizer.hpp` — the one-definition home #2196 created for exactly
+this `XmlWriter`/`Xml::Linq` duplication — so **#2200 reuses them rather than growing a second
+copy**. `XDocumentType::WriteTo` already delegates to `WriteDocType` and inherits the repair
+today; its `SerializeTo` path duplicates the concatenation and does not, which is #2200's
+remaining work. No signature, layout, vtable or exception-specification change.
