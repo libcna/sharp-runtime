@@ -67,6 +67,59 @@ namespace System::Threading {
             return slot;
         }
 
+        /**
+         * @brief Shared body of both Wait overloads; millisecondsTimeout == -1 waits indefinitely.
+         *
+         * .NET's Monitor.Wait releases the *whole* recursive count held by the calling thread and
+         * restores it on reacquisition.  std::condition_variable_any::wait releases the supplied
+         * lock exactly once, which for a std::recursive_timed_mutex means only one level, so the
+         * levels beyond the first are released here and reacquired afterwards.  Ticket #2341 /
+         * SR-AUD-202: without that, a caller at depth n >= 2 kept n-1 levels locked for the whole
+         * wait, so no other thread could Enter() the monitor to Pulse() it and the wait never ended.
+         *
+         * The registry's owner/depth bookkeeping is written to its absolute values rather than
+         * stepped by one, because the whole depth changes at once here.  Every one of those stores
+         * happens while this thread holds the mutex, so no other thread can be inside
+         * onAcquired()/onReleasing() concurrently; publishing a zero depth before waiting is what
+         * lets a different thread's Enter() during the wait window claim ownership.
+         */
+        static bool WaitCore(const void* obj, intcs millisecondsTimeout) {
+            auto state = GetOrCreate(obj);
+            if (!state->heldByCurrentThread()) throw System::Threading::SynchronizationLockException();
+
+            const int depth = state->depth.load(std::memory_order_relaxed);
+            const int extra = depth > 0 ? depth - 1 : 0;
+            for (int i = 0; i < extra; ++i) state->mutex.unlock();
+
+            std::unique_lock<std::recursive_timed_mutex> lock(state->mutex, std::adopt_lock);
+            // Clearing the owner keeps the registry invariant "owner is empty whenever depth
+            // is zero" true for the whole wait.  It is not independently observable -- the
+            // zero depth alone already makes the next Enter() claim ownership, and ticket
+            // #2341 measured that dropping this store kills no test -- but a half-true
+            // invariant is what made the original bug hard to see.
+            state->owner.store(std::thread::id(), std::memory_order_relaxed);
+            state->depth.store(0, std::memory_order_relaxed);
+
+            bool ok;
+            if (millisecondsTimeout == -1) {
+                state->cv.wait(lock);
+                ok = true;
+            } else {
+                ok = state->cv.wait_for(lock, std::chrono::milliseconds(millisecondsTimeout)) == std::cv_status::no_timeout;
+            }
+
+            // No exception path guards the restoration below, deliberately.  Both
+            // condition_variable_any::wait and ::wait_for reacquire the caller's lock from a
+            // destructor whose postcondition is "lock is held", so a failure to reacquire
+            // calls std::terminate rather than unwinding through here; there is no reachable
+            // route on which this function returns or propagates without holding one level.
+            for (int i = 0; i < extra; ++i) state->mutex.lock();
+            state->owner.store(std::this_thread::get_id(), std::memory_order_relaxed);
+            state->depth.store(depth, std::memory_order_relaxed);
+            lock.release();
+            return ok;
+        }
+
     public:
         /** Prevents instantiation — all members are static. */
         Monitor() = delete;
@@ -124,45 +177,20 @@ namespace System::Threading {
 
         /**
          * @brief Releases the lock on obj and blocks until it is reacquired via Pulse/PulseAll.
-         * @note Assumes the calling thread holds the lock at recursion depth 1 (the common case for
-         * lock(obj){ Monitor.Wait(obj); } patterns); deeper recursion is not unwound and reacquired.
+         * @note Every recursion level the calling thread holds is released for the duration of
+         * the wait and restored before this returns, matching .NET Monitor.Wait. Ticket #2341 /
+         * SR-AUD-202: this previously released a single level, so a caller at depth >= 2 kept the
+         * mutex locked while it waited and the signalling thread could never Enter/Pulse.
          * @throws System::Threading::SynchronizationLockException if the calling thread does not hold the lock.
          */
-        static bool Wait(const void* obj) {
-            auto state = GetOrCreate(obj);
-            if (!state->heldByCurrentThread()) throw System::Threading::SynchronizationLockException();
-            std::unique_lock<std::recursive_timed_mutex> lock(state->mutex, std::adopt_lock);
-            // cv.wait() internally unlocks state->mutex for the duration of the wait and
-            // relocks it before returning; mirror that in our owner/depth tracking so a
-            // different thread's Enter() during the wait window is correctly recognized
-            // as the new owner.
-            state->onReleasing();
-            state->cv.wait(lock);
-            state->onAcquired();
-            lock.release();
-            return true;
-        }
+        static bool Wait(const void* obj) { return WaitCore(obj, -1); }
 
         /**
          * @brief Releases the lock on obj and blocks until reacquired or millisecondsTimeout elapses.
+         * @note Releases and restores the full recursion depth, exactly as the untimed overload does.
          * @throws System::Threading::SynchronizationLockException if the calling thread does not hold the lock.
          */
-        static bool Wait(const void* obj, intcs millisecondsTimeout) {
-            auto state = GetOrCreate(obj);
-            if (!state->heldByCurrentThread()) throw System::Threading::SynchronizationLockException();
-            std::unique_lock<std::recursive_timed_mutex> lock(state->mutex, std::adopt_lock);
-            state->onReleasing();
-            bool ok;
-            if (millisecondsTimeout == -1) {
-                state->cv.wait(lock);
-                ok = true;
-            } else {
-                ok = state->cv.wait_for(lock, std::chrono::milliseconds(millisecondsTimeout)) == std::cv_status::no_timeout;
-            }
-            state->onAcquired();
-            lock.release();
-            return ok;
-        }
+        static bool Wait(const void* obj, intcs millisecondsTimeout) { return WaitCore(obj, millisecondsTimeout); }
 
         /**
          * @brief Notifies a thread in the waiting queue of a change in the locked object's state.

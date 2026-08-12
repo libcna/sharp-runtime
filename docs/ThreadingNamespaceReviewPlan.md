@@ -1484,3 +1484,89 @@ The selection §1 made was still correct: `System::Threading` had 38 findings an
 highs and was rightly first. Only the *reason given for deferring `runtime`* was
 wrong. `docs/SystemRuntimeNamespaceReviewPlan.md` §1 carries the corrected selection
 argument.
+
+---
+
+## 23. The SR-AUD-202 split from #1957, and what it did *not* unblock (ticket #2341, 2026-08-12)
+
+§20.2 item 1 recorded that `Monitor::Wait` "**could be split out to land without approval if
+the depth bookkeeping is proven exact**", because `Monitor` is a static-only class whose
+per-pointer `State` lives in a private static registry and therefore has no public object
+layout at all. Ticket **#2341** proved the bookkeeping and landed exactly that member, on the
+same pattern by which **#1971** took SR-AUD-214 and SR-AUD-189 out of the blocked #1958.
+
+**#1957 remains `blocked` and keeps SR-AUD-201, SR-AUD-204 and SR-AUD-210.** Its §9 approval
+question 2 is unchanged and still unanswered; that question names `ReaderWriterLockSlim` and
+`PeriodicTimer` and did not reach `Monitor`.
+
+### What was measured
+
+`build-probe/2341_probe1_monitor_depth.cpp`, every scenario time-boxed:
+
+| scenario | before | after |
+|---|---|---|
+| depth 1 wait/pulse | `ok` | `ok` |
+| depth 2 wait/pulse | **`TIMEOUT`** | `ok` |
+| depth 3 wait/pulse | **`TIMEOUT`** | `ok` |
+| depth 3, then exactly three `Exit`s, then a foreign `TryEnter` | never reached | `31` (three exits, foreign entry succeeded) |
+
+The repair reads the caller's recursion depth, releases every level for the wait — the
+condition variable releases one, `WaitCore` releases the rest — and restores exactly that many.
+No public signature, layout, vtable or exception contract changed.
+
+### A correction to §20.2's own mutation expectations, and one equivalent mutation
+
+§20.2 anticipated the depth bookkeeping as the whole risk. Mutation testing found one of its
+two published stores is **not independently observable**: dropping the pre-wait
+`owner.store(std::thread::id())` kills no test, because the pre-wait `depth.store(0)` already
+forces the next `Enter()` to claim ownership. It is retained on invariant grounds and the
+header says so. Restoring `depth - 1`, or reverting to the single-level release, each kill four
+tests.
+
+### SR-AUD-210 (`Barrier`): the "to be determined" field question is now answered — **no new
+field is needed**, and it is still approval-gated
+
+§20.2 left `Barrier`'s cost open ("Likely **no new member**, but … that may cost a field") and
+the Consequences row says "`Barrier` to be determined". Determined, by reading the type rather
+than by estimate:
+
+Measured first, so the determination rests on the live type rather than on §20.2's estimate
+(`build-probe/2341_probe3_barrier_state.cpp`):
+
+| row | value |
+|---|---|
+| `barrier.sizeof` / `alignof` | **160 / 8** (unchanged since #1955) |
+| `barrier.callback_reads_currentphase` | **`TIMEOUT`** — SR-AUD-210 is still live |
+| `barrier.callback_phase_value` | `-1`, i.e. the callback never got to read it |
+| `barrier.callback_reads_participantcount` | `ok`, value `1` — #1955's control still holds |
+
+1. The "phase is finishing" state §20.2 asks for **already exists**. `actionCallerId_` is an
+   existing `std::atomic<std::thread::id>` that `FinishPhase()` sets before the post-phase
+   action and clears after it — precisely the interval during which `mutex_` would now be
+   released. Any admission guard the restructure needs can read that field, so
+   `sizeof(Barrier)` stays 160 and `alignof` stays 8.
+2. The transition must also be **reordered**, not merely unlocked. `FinishPhase()` today does
+   `++phaseCount_` and `remainingCount_ = participantCount_` *before* invoking the action, and
+   every blocked participant waits on the predicate `phaseCount_ > myPhase`. Releasing `mutex_`
+   with that predicate already true would let waiters resume *during* the action and read a
+   `lastPostPhaseException_` still holding the previous phase's value. Deferring both writes
+   until after the action fixes that **and** independently gives the callback the completing
+   phase — `phase=0`, which is what the audit's .NET 10 probe printed and what §20.2 requires
+   the design to state.
+
+So the repair is: defer the phase transition past the action, run the action with `mutex_`
+released, guard other callers on the existing `actionCallerId_`, and keep both the reentrancy
+guard and the exception propagation. **It is nevertheless not landable here.** Unlike
+`Monitor`, this changes a *synchronisation guarantee* rather than only fixing a hang: the
+barrier's lock is observable to third parties for the duration of a user callback, and §20.2's
+"Exact approval request" asks about `Barrier` by name. What #2341 removes is only the *layout*
+half of the objection — the remaining question is a pure lock-discipline one, and it is the
+user's.
+
+### Remaining T-E/2 members
+
+| Finding | Owner | Why not here |
+|---|---|---|
+| SR-AUD-201 `PeriodicTimer` | #1957, blocked | needs a new in-flight-consumer field (§9 q2) **and** the still-unverified .NET question of whether a second concurrent `WaitForNextTick` throws or blocks; `/rv` is absent |
+| SR-AUD-204 `ReaderWriterLockSlim` | #1957, blocked | needs a new waiting-writer field (§9 q2) and introduces writer preference, a fairness change that is part of what is being approved |
+| SR-AUD-210 `Barrier` | #1957, blocked | layout question answered above; the lock-discipline question is unanswered |
