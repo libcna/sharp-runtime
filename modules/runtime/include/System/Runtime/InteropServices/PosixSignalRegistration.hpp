@@ -65,7 +65,23 @@ namespace System::Runtime::InteropServices {
          */
         static PosixSignalRegistration Create(PosixSignal signal, Handler handler);
 
-        /** @brief Unregisters the handler. C++ counterpart of .NET PosixSignalRegistration.Dispose(). */
+        /**
+         * @brief Unregisters the handler. C++ counterpart of .NET PosixSignalRegistration.Dispose().
+         *
+         * Once this returns, the handler will not be invoked again, and it is safe to destroy
+         * anything the handler captured. Guaranteeing that costs a **wait**: a signal dispatch
+         * already in progress holds its own copy of the handler, so if one is pending for this
+         * registration, `Dispose()` blocks until that invocation has finished (ticket #1986).
+         * The wait is therefore inherited by `~PosixSignalRegistration()` and by move
+         * assignment, which both dispose the registration they replace.
+         *
+         * The wait is skipped when `Dispose()` is called from inside a handler on the watcher
+         * thread, so a handler may still dispose itself or another registration without
+         * deadlocking; in that one case the currently running invocation is not waited for,
+         * because it is the caller.
+         *
+         * Disposing more than once, or disposing a moved-from registration, is a no-op.
+         */
         void Dispose();
 
     private:

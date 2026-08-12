@@ -941,7 +941,8 @@ component edge changed — the entire repair is inside an anonymous namespace in
 `PosixSignalRegistration.cpp`. One new failure mode is added and documented: if `fcntl`
 cannot set `O_NONBLOCK`, `Create` throws `System::IO::IOException` after closing both
 descriptors, rather than proceeding with a pipe that can hang. `O_CLOEXEC` is
-deliberately **not** added here (§15, ticket #1985).
+deliberately **not** added here (§15, ticket #1985). Ticket #1986 — the late-callback
+defect §19.4 records — is repaired in §26.
 
 ---
 
@@ -1297,3 +1298,148 @@ runtime effect.
 **Maximum aggregate compilation parallelism: two jobs**, never exceeded. No two
 compilations ran concurrently — the batch waited for `check_selective_components.sh` to
 finish before starting the test gate.
+
+---
+
+## 26. What #1986 measured (2026-08-12) — the late-callback lifetime defect
+
+**No audit row changed.** #1986 is a **post-audit** defect with **no `SR-AUD-*`
+identifier**; numbering stays frozen at **364**, and `modules/runtime`'s open-finding
+count is **unchanged at 14**. This section records a repair, not a finding closure.
+
+### 26.1 Why this ticket and not a runtime audit finding
+
+All 14 open `modules/runtime` findings are individually owned and **none is
+implementation-ready**. The three approval-gated causes (#1979 R-C, #1980 R-G, #1981
+R-H) each wait on a user approval sentence in §10, #1983 (R-K) waits on the three absent
+pieces of evidence listed in §14, and SR-AUD-168's structural half is a CLAUDE.md
+permanent deviation (§4.7, §15). #1986 is the one **unblocked, bounded,
+evidence-complete** defect in the namespace, and it needs no `/rv` reference material at
+all: it is a C++ **lifetime** error in this port's own dispatcher, not a .NET parity
+question. That distinction is what separates it from #1979, which §10.1 gates precisely
+because the reference basis is unavailable here.
+
+### 26.2 The defect, reproduced
+
+`dispatchSignal()` copies the matching entries — **including each `std::function`
+handler** — into a local snapshot under `registryMutex_`, releases the mutex, and only
+then invokes them. `Dispose()` takes the same mutex and erases the entry. The erase
+therefore stops *future* dispatches but not the *pending* one, so a dispatch that already
+holds its snapshot invokes its copy of the handler after `Dispose()` has returned — and a
+handler capturing caller stack state by reference, which is how every handler in
+`PosixSignalTests.cpp` is written, then touches a dead frame.
+
+Reproduced **deterministically**, with no race to win: two registrations share `SIGWINCH`,
+the one registered last runs first and parks the watcher inside the callback, so the
+snapshot demonstrably contains both handlers while the first registration is disposed.
+
+| | before | after |
+|---|---|---|
+| `dispose_returned_while_dispatch_parked` | **1** | **0** |
+| `victim_handler_ran_AFTER_dispose_returned` | **1** | **0** |
+| `victim_handler_ran_at_all` | 1 | 1 (unchanged — the repair **waits**, it does not cancel) |
+
+`build-probe/1986_probe1_before.log` → `build-probe/1986_probe1_after.log`.
+
+### 26.3 The consequence, under AddressSanitizer
+
+`build-probe/1986_probe2_asan_scope.cpp` gives the handler a `volatile int` in the
+caller's frame. The releaser unparks the dispatch a fixed delay after the park and never
+depends on the victim scope having exited, so **one probe source is valid before and
+after**.
+
+| | result |
+|---|---|
+| before | `AddressSanitizer: stack-use-after-scope`, WRITE of size 4, thread T2, frame `#5 dispatchSignal … PosixSignalRegistration.cpp:140`, variable `'canary'` — exit 1 |
+| after | **0 reports**, `victim_handler_ran=1`, exit 0 |
+
+`build-probe/1986_probe2_before.log` → `build-probe/1986_probe2_after.log`. ASan is the
+**right** instrument here and is not ceremonial: the defect is a memory-lifetime error,
+which is exactly what ASan decides. TSan was **not** run, deliberately — the defect is
+not a data race (both threads are correctly serialised by `registryMutex_`; the error is
+that the *object's lifetime* ends while a correctly-synchronised call is still pending),
+so TSan would report nothing before **or** after and could not discriminate. §12's
+matrix is not weakened: this is the same "recorded honestly as a non-discriminator"
+reasoning §19.2 applied to TSan for the liveness defect.
+
+### 26.4 The repair
+
+Entirely inside `PosixSignalRegistration.cpp`'s anonymous namespace plus the body of
+`Dispose()`:
+
+1. `inFlightTokens_` records, **under the same lock that produced the snapshot**, every
+   token whose handler a dispatch has copied and may still invoke — so there is no window
+   in which a copied handler exists but a concurrent `Dispose()` cannot see it;
+2. an RAII `InFlightRetire` guard removes them once the last handler in that snapshot has
+   returned — RAII rather than a trailing statement so an exception escaping a handler
+   cannot strand a token and wedge every later `Dispose()` of it;
+3. `Dispose()` erases the registration as before, then waits on `inFlightCv_` until its
+   own token is no longer in flight, and only then calls `uninstallIfUnused()`.
+
+The wait is **skipped** when the caller is the dispatching thread (`thread_local bool
+dispatchingOnThisThread_`). A handler is expressly allowed to dispose itself or a
+sibling, and every token in the running snapshot is in flight by definition, so an
+unconditional wait would be the watcher thread waiting for itself. This is also why the
+repair cannot simply hold `registryMutex_` across invocation — which is the deadlock the
+snapshot exists to avoid in the first place. Because dispatch runs on the **single**
+watcher thread, no two dispatches can wait on each other, so the new wait cannot form a
+cycle among dispatches.
+
+### 26.5 Consequences
+
+No public signature, object layout, vtable, `noexcept` specification, mangled symbol or
+component edge changed. `PosixSignalRegistration` keeps both its data members and its
+size; all added state is file-static.
+
+One **deliberate observable change**, documented in the header: `Dispose()` — and
+therefore `~PosixSignalRegistration()` and move assignment, which both dispose the
+registration they replace — now **blocks** while an in-flight dispatch of that same
+registration is still running its handler. That is exactly the guarantee being bought:
+when `Dispose()` returns, destroying what the handler captured is safe. A consumer whose
+handler blocks indefinitely, and which disposes it from another thread, will now block
+where it previously returned at once; the wait is otherwise bounded by the handler's own
+duration. Nothing that succeeded before begins to fail, and no handler that used to run
+stops running — measurably, `victim_handler_ran_at_all` is 1 both before and after.
+
+**Not** addressed, and deliberately out of scope: the pre-existing shutdown race in which
+the detached watcher thread may still be inside `dispatchSignal()` while the
+anonymous-namespace globals are destroyed at process exit. It predates this ticket, is
+not made worse by it, and is what makes mutation M2 below unsafe to run in-suite.
+
+### 26.6 Tests and mutations
+
+Two permanent regressions in `PosixSignalTests.cpp`, both keeping their shared state at
+**namespace** scope on purpose — the same choice §19.3 made, and for a sharper reason
+here: a regression must surface as a failed expectation, not as this suite corrupting its
+own stack.
+
+* `Dispose_DoesNotReturnWhileAnInFlightDispatchCanStillRunTheHandler` — the primary
+  assertion is an exact happens-before (`lateVictimRanAfterDispose == 0`), not a sleep:
+  after the repair the pending handler *must* complete before `Dispose()` returns. The
+  bounded 500 ms check on `returnedWhileParked` is a secondary witness and can only ever
+  produce a false PASS on a very slow machine, never a false FAIL.
+* `Dispose_CalledFromInsideItsOwnHandler_DoesNotDeadlock` — pins the reentrancy skip. If
+  it ever regresses the **watcher** thread wedges, not the main thread: `Dispose()` clears
+  `token_` before it waits, so the destructors stay no-ops and teardown still completes.
+
+`SharpRuntimeTests_Runtime` **161 → 163**.
+
+| Mutation | Change | Verdict |
+|---|---|---|
+| **M1** | drop the `Dispose()` wait entirely | **killed** — ordering test fails (`returnedWhileParked=true`, `lateVictimRan=0`) |
+| **M2** | drop the reentrancy guard, wait unconditionally | **killed** — self-dispose deadlocks (`self_dispose_returned=0`, exit 124) |
+| **M3** | retire the in-flight records *before* invoking instead of after | **killed** — ordering test fails |
+
+**M2 was measured in its own process**, `build-probe/1986_probe3_reentrant_dispose.cpp`,
+not in the test executable. Run in-suite it does not merely fail: the stuck waiter
+outlives the anonymous-namespace `condition_variable` it is parked on (§26.5) and the
+**runner hangs at exit**, which is precisely the "destabilises the whole test runner"
+mutation CLAUDE.md requires be isolated to a child process. Its control run against the
+repaired source returns `VERDICT=ok`, exit 0.
+
+### 26.7 What this ticket did not touch
+
+**#1985** (self-pipe descriptors inherited across `exec()`) is a separate defect in the
+same body and is **not** folded in here, for the same reason §15 kept it out of #1974: it
+changes `exec()` inheritance, which is its own observable transition and deserves its own
+before/after.

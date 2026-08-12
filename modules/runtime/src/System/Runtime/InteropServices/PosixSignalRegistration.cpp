@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <condition_variable>
 #include <csignal>
 #include <cstdio>
 #include <mutex>
@@ -99,6 +100,22 @@ namespace {
     std::vector<InstalledSignal> installedSignals_;
     SharpRuntime::intcs nextToken_ = 0;
 
+    // Tokens whose handler some dispatch has already copied into its snapshot and may still
+    // invoke. Guarded by registryMutex_. Dispose() waits on inFlightCv_ until its own token is
+    // gone from here, so it cannot return while a pending invocation of that handler remains
+    // (ticket #1986). Erasing the registration alone is not enough: the snapshot holds a COPY
+    // of the std::function, so the erase stops future dispatches but not the pending one.
+    std::vector<SharpRuntime::intcs> inFlightTokens_;
+    std::condition_variable inFlightCv_;
+
+    // True only on the watcher thread, and only between taking a dispatch snapshot and
+    // finishing the last handler in it. A handler is expressly allowed to dispose itself or a
+    // sibling registration, and every token in the running snapshot is in flight by
+    // definition, so a Dispose() reached from inside a callback must NOT wait -- that would be
+    // the watcher thread waiting for itself. This is why the repair cannot simply hold
+    // registryMutex_ across invocation, which is what the snapshot exists to avoid.
+    thread_local bool dispatchingOnThisThread_ = false;
+
     // Async-signal-safe pending-signal flags, indexed directly by native signal number. sig_atomic_t
     // writes/reads are guaranteed atomic with respect to signal delivery on the same thread by the
     // C standard; combined with the self-pipe write below, this is the standard safe pattern for
@@ -129,8 +146,30 @@ namespace {
             std::lock_guard<std::mutex> lock(registryMutex_);
             for (const auto& e : registrations_)
                 if (toNativeSignalNumber(e.signal) == signo) snapshot.push_back(e);
+            if (snapshot.empty()) return;
+            // Published under the SAME lock that produced the snapshot, so there is no window
+            // in which a copied handler exists but a concurrent Dispose() cannot see it.
+            for (const auto& e : snapshot) inFlightTokens_.push_back(e.token);
         }
-        if (snapshot.empty()) return;
+
+        // Retires this dispatch's in-flight records on every exit path. RAII rather than a
+        // trailing statement because an exception escaping a handler would otherwise strand a
+        // token in flight forever and wedge every later Dispose() of it.
+        struct InFlightRetire {
+            const std::vector<Entry>& entries;
+            ~InFlightRetire() {
+                {
+                    std::lock_guard<std::mutex> lock(registryMutex_);
+                    for (const auto& e : entries) {
+                        auto it = std::find(inFlightTokens_.begin(), inFlightTokens_.end(), e.token);
+                        if (it != inFlightTokens_.end()) inFlightTokens_.erase(it);
+                    }
+                }
+                dispatchingOnThisThread_ = false;
+                inFlightCv_.notify_all();
+            }
+        } retire{snapshot};
+        dispatchingOnThisThread_ = true;
 
         // Reverse registration order, matching real .NET's PosixSignalRegistration.Unix.cs.
         PosixSignalContext context(snapshot.back().signal);
@@ -282,12 +321,31 @@ void PosixSignalRegistration::Dispose() {
     SharpRuntime::intcs token = token_;
     token_ = -1;
 
-    std::lock_guard<std::mutex> lock(registryMutex_);
+    std::unique_lock<std::mutex> lock(registryMutex_);
     int signo = toNativeSignalNumber(signal_);
     registrations_.erase(
         std::remove_if(registrations_.begin(), registrations_.end(),
                         [token](const Entry& e) { return e.token == token; }),
         registrations_.end());
+
+    // The erase above stops FUTURE dispatches from seeing this registration, but a dispatch
+    // that already took its snapshot holds a copy of the handler and will still invoke it.
+    // Returning here would let the caller destroy whatever that handler captured -- typically
+    // its own stack frame, which is how every handler in this port's tests is written -- while
+    // the call is still pending; ASan reports the resulting stack-use-after-scope
+    // (build-probe/1986_probe2_before.log). So wait until no pending invocation of this token
+    // remains. Ticket #1986.
+    //
+    // Not waited on when the caller IS the dispatching thread: see dispatchingOnThisThread_.
+    // Because dispatch runs on the single watcher thread, no two dispatches can wait on each
+    // other, so this wait cannot form a cycle among dispatches.
+    if (!dispatchingOnThisThread_) {
+        inFlightCv_.wait(lock, [token] {
+            return std::find(inFlightTokens_.begin(), inFlightTokens_.end(), token)
+                   == inFlightTokens_.end();
+        });
+    }
+
     uninstallIfUnused(signo);
 }
 

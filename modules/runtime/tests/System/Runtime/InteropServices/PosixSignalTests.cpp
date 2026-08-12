@@ -6,6 +6,7 @@
 #include <chrono>
 #include <csignal>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 #include <unistd.h>
@@ -494,4 +495,143 @@ TEST(PosixSignalTests, Create_RawSignal_RestoresTheDispositionOnDispose) {
     EXPECT_EQ(after.sa_handler, SIG_IGN);
 
     sigaction(SIGUSR2, &saved, nullptr);
+}
+
+// ---------------------------------------------------------------------------------------
+// Ticket #1986 -- a handler could be invoked AFTER its registration's Dispose() returned.
+//
+// dispatchSignal() copies the matching entries -- including each std::function handler --
+// into a local snapshot under registryMutex_, releases the mutex, and only then invokes
+// them. Dispose() takes the same mutex and erases the entry, so the erase stops FUTURE
+// dispatches but not the pending one: a dispatch that already has its snapshot still runs
+// its copy of the handler after Dispose() has come back. A handler capturing caller stack
+// state by reference -- the natural way to write one, and what every test above does --
+// then touches a dead frame. Measured before the repair as
+// `dispose_returned_while_dispatch_parked=1` / `victim_handler_ran_AFTER_dispose_returned=1`
+// (build-probe/1986_probe1_before.log) and, under ASan, as a stack-use-after-scope written
+// from dispatchSignal (build-probe/1986_probe2_before.log). It is a LIFETIME defect, not a
+// timing one; the sleep-based Dispose checks above only make it unlikely.
+//
+// No SR-AUD identifier was issued: audit numbering stays frozen at 364.
+//
+// Both tests below keep their shared state at NAMESPACE scope, deliberately. A regression
+// must be reported as a failed expectation, not as this suite corrupting its own stack --
+// the state a late callback touches has to outlive the test frame for the assertion to be
+// trustworthy.
+namespace {
+    std::atomic<bool> lateParked{false};
+    std::atomic<bool> lateRelease{false};
+    std::atomic<bool> lateDisposeReturned{false};
+    std::atomic<int>  lateVictimRan{0};
+    std::atomic<int>  lateVictimRanAfterDispose{0};
+
+    // Waits for `flag`, returning false on timeout instead of spinning forever, so no
+    // failure path in these tests can wedge the executable.
+    bool waitForFlag(std::atomic<bool>& flag, bool want, int timeoutMs) {
+        auto start = std::chrono::steady_clock::now();
+        while (flag.load() != want) {
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - start).count() > timeoutMs) return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return true;
+    }
+}
+
+// The ordering assertion is exact, not probabilistic: two registrations share SIGWINCH, the
+// one registered LAST runs FIRST, and it parks the watcher inside the callback. The dispatch
+// snapshot is therefore already taken and already contains BOTH handlers while the main
+// thread disposes the first registration. Whether the victim's handler observes
+// lateDisposeReturned is then decided purely by the happens-before the repair establishes.
+TEST(PosixSignalTests, Dispose_DoesNotReturnWhileAnInFlightDispatchCanStillRunTheHandler) {
+    lateParked.store(false);
+    lateRelease.store(false);
+    lateDisposeReturned.store(false);
+    lateVictimRan.store(0);
+    lateVictimRanAfterDispose.store(0);
+
+    // Registered FIRST -> invoked SECOND. This is the registration under test.
+    auto victim = PosixSignalRegistration::Create(PosixSignal::Sigwinch, [](PosixSignalContext& ctx) {
+        ctx.setCancelProperty(true);
+        if (lateDisposeReturned.load()) lateVictimRanAfterDispose.fetch_add(1);
+        lateVictimRan.fetch_add(1);
+    });
+
+    // Registered SECOND -> invoked FIRST. Parks the dispatch mid-snapshot. Only the first
+    // invocation parks, so nothing can deadlock during teardown.
+    auto parker = PosixSignalRegistration::Create(PosixSignal::Sigwinch, [](PosixSignalContext& ctx) {
+        ctx.setCancelProperty(true);
+        if (!lateParked.exchange(true)) waitForFlag(lateRelease, true, 30000);
+    });
+
+    kill(getpid(), SIGWINCH);
+    ASSERT_TRUE(waitForFlag(lateParked, true, 5000))
+        << "the watcher never entered the parking callback, so this test would prove nothing";
+
+    // Dispose on a worker: a correctly waiting Dispose() blocks, and must not block the
+    // thread that is going to release the parked watcher.
+    std::thread disposer([&] {
+        victim.Dispose();
+        lateDisposeReturned.store(true);
+    });
+
+    // A Dispose() that returns while the dispatch is parked has already broken the contract.
+    // Bounded, and only ever produces a false PASS on a very slow machine, never a false FAIL.
+    const bool returnedWhileParked = waitForFlag(lateDisposeReturned, true, 500);
+
+    // Released unconditionally and before any assertion below, so a regression cannot leave
+    // the watcher thread or the disposer parked.
+    lateRelease.store(true);
+    disposer.join();
+    EXPECT_TRUE(waitForFlag(lateDisposeReturned, true, 5000));
+
+    EXPECT_EQ(lateVictimRanAfterDispose.load(), 0)
+        << "the handler ran after its own Dispose() returned: the caller was free to destroy "
+           "everything that handler captured while the call was still pending (ticket #1986)";
+    EXPECT_FALSE(returnedWhileParked)
+        << "Dispose() returned while a dispatch holding a copy of this handler was still parked";
+    EXPECT_EQ(lateVictimRan.load(), 1)
+        << "the repair must make Dispose() WAIT for the pending invocation, not cancel it";
+}
+
+namespace {
+    std::atomic<bool> reentrantParked{false};
+    std::atomic<int>  reentrantCompleted{0};
+    std::optional<PosixSignalRegistration> reentrantSelf;
+}
+
+// The wait added above must not be taken when the caller IS the dispatching thread. A handler
+// is expressly allowed to dispose itself -- its own token is in flight by definition, so a
+// Dispose() that waited unconditionally would be the watcher thread waiting for itself, and
+// the snapshot exists precisely so that registryMutex_ is not held across invocation.
+//
+// If this ever regresses, the watcher thread wedges rather than the main thread: Dispose()
+// clears token_ before it waits, so the destructors below stay no-ops and teardown still
+// completes. The bounded wait then fails loudly instead of hanging the executable.
+TEST(PosixSignalTests, Dispose_CalledFromInsideItsOwnHandler_DoesNotDeadlock) {
+    reentrantParked.store(false);
+    reentrantCompleted.store(0);
+
+    reentrantSelf.emplace(PosixSignalRegistration::Create(
+        PosixSignal::Sigwinch, [](PosixSignalContext& ctx) {
+            ctx.setCancelProperty(true);
+            reentrantParked.store(true);
+            reentrantSelf->Dispose();   // self-dispose from the watcher thread
+            reentrantCompleted.fetch_add(1);
+        }));
+
+    kill(getpid(), SIGWINCH);
+
+    ASSERT_TRUE(waitForFlag(reentrantParked, true, 5000)) << "the handler never ran";
+    auto start = std::chrono::steady_clock::now();
+    while (reentrantCompleted.load() == 0 &&
+           std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now() - start).count() < 5000) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(reentrantCompleted.load(), 1)
+        << "Dispose() called from inside the handler did not return: the watcher thread is "
+           "waiting for its own in-flight dispatch (ticket #1986)";
+
+    reentrantSelf.reset();
 }
