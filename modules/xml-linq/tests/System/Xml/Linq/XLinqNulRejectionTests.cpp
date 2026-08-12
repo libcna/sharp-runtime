@@ -39,7 +39,9 @@
 // separately. NonNulControlCharacters_StillEmittedByTheDirectDoor below pins that boundary, the
 // mirror of the pin #2085 left at the writer door. This clause also does not impose the XML name
 // grammar on an element or attribute name at the direct door: it rejects a NUL there and nothing
-// more.
+// more. (Ticket #2350 later did impose that grammar, at the same two doors and with the same
+// boundary -- see XLinqNameValidationTests. The NUL guard still runs FIRST, so every diagnostic
+// pinned below is unchanged.)
 
 #include <gtest/gtest.h>
 

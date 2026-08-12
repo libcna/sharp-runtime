@@ -1060,3 +1060,80 @@ Sanitizers were **not** run, and for a reason rather than by omission: a NUL cro
 `std::ostream <<` is a *content* bug, not a memory bug. Nothing is read out of bounds, nothing is
 freed early, no `const char*` boundary is involved on this path at all — ASan and UBSan have
 nothing to observe here, exactly as #2085 recorded for the truncation half.
+
+---
+
+## 24. #2350 — the name grammar at the direct door, and why the narrowing is measurably empty
+
+#2201 §23.4 left this open deliberately: the `XElement`/`XAttribute` direct doors checked names
+for a NUL and nothing more, so they still emitted names the sibling `WriteTo()` door rejects.
+#2350 closes it. The ticket's acceptance criteria set a gate before any repair — *"decide first
+whether the direct door should enforce the full XML name grammar … needs its own measurement of
+what currently-accepted trees would start throwing"* — because `XName` is the name type for every
+element and attribute in the component. That measurement was made first, and it is what
+authorised the repair.
+
+### 24.1 The before-state, measured
+
+`build-probe/2350_probe1_names.log`: over 37 probed names, the two doors disagreed on **26**, at
+**both** the element door and the attribute door. The finding named three (`"a b"`, `"1bad"`,
+`"a<b"`). All ten valid controls — including both UTF-8 names — agreed, emitted, and read back.
+
+Two shapes the ticket did not name:
+
+- **A default-constructed `XName`.** `XName()` bypasses `XName::Get`, so it is empty *without*
+  throwing; the direct door serialised that element as `</>` while the writer door already threw.
+- **`XAttribute::ToString`'s qualified branch**, which emits `p1:local` plus its own declaration
+  and is reached by no `XNode::SerializeTo`.
+
+### 24.2 The premise correction that decides the repair
+
+The string to validate is **not** `XName::ToString()`. That is Clark notation (`{uri}local`),
+it contains `{` and `}`, `VerifyName` rejects it — and **no door ever emits it**. Both doors
+serialise the *resolved qualified name* that `ResolveStartTag` produces (`c`, `p:c`, `xmlns:p`),
+which is exactly the string `XmlWriter::WriteStartElement`/`WriteAttributeString` have routed
+through `XmlConvert::VerifyName` since #2076. Validating the resolved name is therefore a
+door-for-door match; validating the Clark form would have been a fabricated break. Mutation **M3**
+does precisely that and is killed by **eight** pre-existing `XLinqNamespaceTests` cases.
+
+### 24.3 Why the narrowing is empty in practice
+
+| Question | Measured answer |
+|---|---|
+| Can an invalid `XName` be constructed? | **Yes** — unchanged. The two-argument ctor validates nothing; `Get` checks only the expanded-form shape. |
+| Stored, mutated into a live node, compared, hashed? | **Yes** — unchanged. `setNameProperty` still accepts anything. |
+| Does the parser ever produce one? | **No.** 12 of 12 parsed trees survive the writer door (`2350_probe3_roundtrip.log`), so `VerifyName` accepts every resolved name this parser can build — namespace-prefixed and UTF-8 included, since `IsStartNCNameChar`/`IsNCNameChar` treat every byte ≥ 128 as a name character. The parser rejects `<1bad/>`, `<.lead/>`, `<-lead/>`, `<a$b/>`, `<r 1x='v'/>` outright and normalises `<:lead/>` to `lead`. |
+| First-party production consumers? | **None** — 0 of 607 scanned name-literal construction sites (`2350_probe4_consumers.log`). The 11 apparent hits are the two-argument `XName(namespaceName, localName)` form, where the *URI* was captured, not the name. |
+| Tests constructing an invalid name to serialise it? | **None.** All 319 pre-existing cases pass unmodified. |
+
+### 24.4 The one genuine narrowing, and where it is recorded
+
+A **leading colon** (`":x"`) used to emit from the direct door and could be read back — but not
+faithfully: the reader silently renames it to `x`, so that round trip already lost the colon.
+It is now rejected at both doors. This is the same extra narrowing #2076 recorded for the writer
+door, and it is documented for callers in `docs/Migration-XmlLinqNameValidation.md`. Everything
+else this door now rejects produced output this runtime's own reader already refused to parse.
+
+### 24.5 Boundary, compatibility, pins and mutations
+
+Validation lives **at the two serialisation doors, never at `XName` construction** — the boundary
+#2196 (PI target) and #2200 (DOCTYPE name) already hold, and the one #2350's acceptance criteria
+requires. The validator is the shipped `XmlConvert::VerifyName`; no name grammar is duplicated.
+The NUL guard deliberately still runs **first**, so #2201's more specific diagnostics are
+unchanged. Implementation-only: no public signature, layout, vtable, `noexcept` specification,
+exported symbol or component edge changed.
+
+**15 permanent tests** (`XLinqNameValidationTests`, module 319 → 334). **Three mutations built,
+executed and restored; all three caught** — M1 (drop the element-door check), M2 (drop
+`XAttribute::ToString`'s check, caught only by the qualified-branch case) and M3 above.
+
+Sanitizers were **not** run, for the reason #2201 and #2085 both recorded: a name crossing a
+`std::ostream <<` is a *content* bug. Nothing is read out of bounds, nothing is freed early, and
+no `const char*` boundary exists on this path — ASan and UBSan have nothing to observe.
+
+### 24.6 What #2350 does NOT close
+
+- **`XName` construction stays permissive**, by design. Validating there is a strictly wider
+  break and is not authorised by any precedent this component holds.
+- **#2349** (whether `CheckCharacters` governs non-`Char` characters) and **#2348** (the DOCTYPE
+  internal subset) are untouched.

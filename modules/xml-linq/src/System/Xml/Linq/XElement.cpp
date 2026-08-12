@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/Linq/XElement.hpp"
 #include "System/Xml/Linq/detail/XLinqSerializationGuards.hpp"
+#include "System/Xml/XmlConvert.hpp"
 #include <algorithm>
 #include <fstream>
 #include "System/ArgumentException.hpp"
@@ -310,14 +311,25 @@ namespace System::Xml::Linq {
         ResolveStartTag(scope, qualifiedName, attributes);
 
         // Ticket #2201. Guarded here rather than in the escapers, so the diagnostic can name
-        // which part of the start tag carried the NUL. This is the NUL clause ONLY: it does not
-        // impose the XML name grammar on an element or attribute name at this door, which stays
-        // as permissive as it has always been -- a wider accepted-input question than #2201.
+        // which part of the start tag carried the NUL. VerifyName below would reject a NUL too
+        // (it is not a name character), but only this guard can say *which* part carried it, so
+        // it deliberately runs first and keeps #2201's diagnostics unchanged.
         detail::ThrowIfContainsNul(qualifiedName, "XElement::SerializeTo", "element name");
         for (const auto& a : attributes) {
             detail::ThrowIfContainsNul(a.first, "XElement::SerializeTo", "attribute name");
             detail::ThrowIfContainsNul(a.second, "XElement::SerializeTo", "attribute value");
         }
+
+        // Ticket #2350. The names validated here are exactly the strings ResolveStartTag just
+        // produced -- the *resolved* qualified names, never XName::ToString()'s Clark notation
+        // ("{uri}local"), which no serializer ever emits. The sibling WriteTo() door hands those
+        // same two strings to XmlWriter::WriteStartElement/WriteAttributeString, which have
+        // routed them through XmlConvert::VerifyName since #2076, so this door now rejects
+        // exactly what that one rejects and no more. Same validator, same diagnostic, same
+        // boundary #2196 and #2200 already hold for the PI target and the DOCTYPE name:
+        // validate where the text is produced, never at XName construction.
+        (void)System::Xml::XmlConvert::VerifyName(qualifiedName);
+        for (const auto& a : attributes) (void)System::Xml::XmlConvert::VerifyName(a.first);
 
         std::string pad = indent ? std::string(static_cast<size_t>(depth) * 2, ' ') : "";
         os << pad << "<" << qualifiedName;

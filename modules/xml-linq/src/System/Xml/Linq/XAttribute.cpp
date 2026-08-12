@@ -7,6 +7,7 @@
 #include "System/Xml/Linq/XElement.hpp"
 #include "System/Xml/Linq/XNamespace.hpp"
 #include "System/Xml/Linq/detail/XLinqSerializationGuards.hpp"
+#include "System/Xml/XmlConvert.hpp"
 #include "NamespaceScope.hpp"
 
 namespace System::Xml::Linq {
@@ -110,26 +111,42 @@ namespace System::Xml::Linq {
         detail::ThrowIfContainsNul(uri, "XAttribute::ToString", "attribute namespace name");
         detail::ThrowIfContainsNul(value_, "XAttribute::ToString", "attribute value");
 
+        // Ticket #2350. The emitted name is built first so it can be validated as the single
+        // string this door actually writes -- which is NOT always the local name: a declaration
+        // renders as `xmlns`/`xmlns:p` and a qualified attribute as `prefix:local`. Every
+        // branch's prefix is one this door chose and is itself a valid name, so the check falls
+        // on the caller-supplied part exactly as XmlWriter::WriteAttributeString's does.
+        std::string emittedName;
+        std::string trailer; // an extra declaration this door must carry so the text stands alone
+
         // A declaration renders as itself. Before #2197 this door rendered `{xmlns-uri}p` as the
         // bare local name `p`, turning a namespace declaration into an ordinary attribute.
         if (getIsNamespaceDeclarationProperty()) {
-            return detail::DeclarationAttributeName(detail::DeclaredPrefix(uri, local)) +
-                   "=\"" + EscapeValue(value_) + "\"";
+            emittedName = detail::DeclarationAttributeName(detail::DeclaredPrefix(uri, local));
+        } else if (uri.empty()) {
+            emittedName = local;
+        } else {
+            // A qualified name needs a prefix. Ask the owning element for one it already has in
+            // scope; a detached attribute, or one whose namespace nothing declares, gets a
+            // generated prefix and carries its own declaration so the text stands alone.
+            std::string prefix;
+            if (const XElement* owner = getParentProperty())
+                prefix = owner->GetPrefixOfNamespace(XNamespace(uri));
+            if (!prefix.empty()) {
+                emittedName = prefix + ":" + local;
+            } else if (uri == detail::kXmlNamespaceUri) {
+                emittedName = "xml:" + local;
+            } else {
+                emittedName = "p1:" + local;
+                trailer = " xmlns:p1=\"" + EscapeValue(uri) + "\"";
+            }
         }
-        if (uri.empty()) return local + "=\"" + EscapeValue(value_) + "\"";
 
-        // A qualified name needs a prefix. Ask the owning element for one it already has in
-        // scope; a detached attribute, or one whose namespace nothing declares, gets a
-        // generated prefix and carries its own declaration so the text stands alone.
-        if (const XElement* owner = getParentProperty()) {
-            std::string prefix = owner->GetPrefixOfNamespace(XNamespace(uri));
-            if (!prefix.empty())
-                return prefix + ":" + local + "=\"" + EscapeValue(value_) + "\"";
-        }
-        if (uri == detail::kXmlNamespaceUri)
-            return "xml:" + local + "=\"" + EscapeValue(value_) + "\"";
-        return "p1:" + local + "=\"" + EscapeValue(value_) + "\" xmlns:p1=\"" +
-               EscapeValue(uri) + "\"";
+        // Same validator, same diagnostic and same boundary as the element door and as #2196's
+        // PI target: reject a name the sibling writer door already rejects, at the point the
+        // text is produced -- never at XName construction.
+        (void)System::Xml::XmlConvert::VerifyName(emittedName);
+        return emittedName + "=\"" + EscapeValue(value_) + "\"" + trailer;
     }
 
     XAttribute* XAttribute::getPreviousAttributeProperty() const {
