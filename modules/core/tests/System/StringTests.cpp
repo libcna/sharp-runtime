@@ -897,6 +897,53 @@ TEST(StringNormalizationExtensionsTests, Normalize_EmptyString) {
     EXPECT_EQ(System::StringNormalizationExtensions::Normalize(""), "");
 }
 
+// --- SR-AUD-182 gated-behaviour pins (ticket #2337). Every test above uses ASCII or
+// the empty string, so all of them pass identically before and after real Unicode
+// normalization lands: the divergence had no pin at all. These four record it, so a
+// future normalization implementation cannot change it silently. They are statements
+// about the CURRENT stub, and each must be inverted by the repair (#2338).
+
+TEST(StringNormalizationExtensionsTests, Pin_DecomposedTextIsReportedNormalizedForFormC) {
+    // "e" + U+0301 COMBINING ACUTE ACCENT, UTF-8 65 CC 81. .NET answers false for FormC
+    // and composes it to U+00E9 (UTF-8 C3 A9); the stub answers true and returns it
+    // unchanged. The audit measured exactly this pair of probes.
+    const std::string decomposed = "\x65\xCC\x81";
+    EXPECT_TRUE(System::StringNormalizationExtensions::IsNormalized(
+        decomposed, System::Text::NormalizationForm::FormC));
+    EXPECT_EQ(System::StringNormalizationExtensions::Normalize(
+        decomposed, System::Text::NormalizationForm::FormC), decomposed);
+    EXPECT_NE(System::StringNormalizationExtensions::Normalize(
+        decomposed, System::Text::NormalizationForm::FormC), std::string("\xC3\xA9"));
+}
+
+TEST(StringNormalizationExtensionsTests, Pin_ComposedTextIsReportedNormalizedForFormD) {
+    // The other direction: U+00E9 is NOT Form D, and .NET decomposes it back to 65 CC 81.
+    const std::string composed = "\xC3\xA9";
+    EXPECT_TRUE(System::StringNormalizationExtensions::IsNormalized(
+        composed, System::Text::NormalizationForm::FormD));
+    EXPECT_EQ(System::StringNormalizationExtensions::Normalize(
+        composed, System::Text::NormalizationForm::FormD), composed);
+}
+
+TEST(StringNormalizationExtensionsTests, Pin_CompatibilityFormsAreNoOpsToo) {
+    // U+FB01 LATIN SMALL LIGATURE FI, UTF-8 EF AC 81. .NET's FormKC/FormKD expand it to
+    // "fi"; both stub overloads return it unchanged and call it normalized.
+    const std::string ligature = "\xEF\xAC\x81";
+    for (auto form : {System::Text::NormalizationForm::FormKC,
+                      System::Text::NormalizationForm::FormKD}) {
+        EXPECT_TRUE(System::StringNormalizationExtensions::IsNormalized(ligature, form));
+        EXPECT_EQ(System::StringNormalizationExtensions::Normalize(ligature, form), ligature);
+    }
+}
+
+TEST(StringNormalizationExtensionsTests, Pin_AnUndefinedNormalizationFormIsAccepted) {
+    // .NET reports an argument error for a form value that is not one of the four; the
+    // stub ignores the argument entirely, so an undefined value succeeds like any other.
+    const auto bogus = static_cast<System::Text::NormalizationForm>(0x1234);
+    EXPECT_TRUE(System::StringNormalizationExtensions::IsNormalized("abc", bogus));
+    EXPECT_EQ(System::StringNormalizationExtensions::Normalize("abc", bogus), "abc");
+}
+
 // ---------------------------------------------------------------------------
 // Composite-format boundary — ticket #1882 (SR-AUD-015, CCF-012)
 //
