@@ -3,6 +3,87 @@
 
 # NEXT.md
 
+> **Test-count floor, 2026-08-12 — 17,049 / 38 (#2344, #2345).** The complete 38-executable
+> gate reads **17,049 run: 17,041 passed, 2 skipped, 6 failed** (17,041 + 6 + 2 = 17,049),
+> **+16** on the 17,033 below — exactly the sixteen `WatcherReconfigurationFixture` cases this
+> batch added (`SharpRuntimeTests_IO` 644 → 660; no other executable's count changed), so no
+> regression anywhere. The six failures are the same inherited ones — five `PingTests` (#1962)
+> and `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`, which needs usable IPv6
+> this environment does not provide — untouched, not disabled, not weakened, not recategorised,
+> and **the gate is not green**.
+> Audit: **215 remediated / 87 confirmed / 62 confirmed (design-complete) = 364**, open **149**
+> (SR-AUD-339 `confirmed` → `remediated`; **SR-AUD-346 deliberately stays `confirmed`**).
+> Numbering stays frozen at 364; no `SR-AUD-*` created.
+
+## Autonomous batch handoff, 2026-08-12 (`modules/io` #2102 split → #2344 + #2345 + #2346)
+
+### 1. #2102 was NOT one implementation-ready unit, and the reason is measured
+
+Reviewed against the live tree rather than the inherited I-D/I-E labels. Both labels survive, but
+**the second one's shape was wrong**:
+
+| Clause | Live status | Owner |
+|---|---|---|
+| **I-E** — `setPathProperty` never re-arms | unambiguous, implementable, **and a data race** | **#2344, landed.** SR-AUD-339 → `remediated` |
+| **I-D** — class-crossing filter admission | unambiguous, implementable | **#2345, landed.** SR-AUD-346 stays `confirmed` |
+| **I-D** — within-class mapping | policy, not derivable with `/rv` absent | **#2346, `needs_user`** |
+
+`#2102` is closed as **split with no orphan clause**. Its own acceptance criterion — "each
+`NotifyFilters` value alone admits the events it names" — is **not literally realizable on
+inotify** and is explicitly handed to #2346 rather than quietly dropped.
+
+### 2. Two premise corrections, both measured
+
+**(a) I-E is undefined behaviour, which neither SR-AUD-339 nor #2102 says.** `watchLoop()` reads
+`directory_` on the watcher thread while `setPathProperty` writes that `std::string` on the
+caller thread. TSan: **3 data races, exit 66** before; **0, exit 0** after, over 400 path flips
+and 1,749 events. The symptom the finding *does* describe — an event from the old directory
+carrying a `FullPath` built from the new one, `B/sentinelOnA.txt` — **names a file that does not
+exist**, and is the benign-looking face of the race.
+
+**(b) "A `Size`-only watcher raises `Created`" has NO independent mechanism.** The handoff
+expected it might (over-broad mask, misclassified event, switch fallthrough). Measured over all
+ten filter configurations × seven operations: **every configuration produced the byte-identical
+seven events, including `NotifyFilters(0)`**. One cause, ten identical cells. What divides is the
+**repair**, not the cause.
+
+### 3. What #2345 could decide without authority, and what it could not
+
+The public values split into a **name class** (`FileName`, `DirectoryName`) and a **content
+class** (`Attributes`, `Size`, `LastWrite`, `LastAccess`, `CreationTime`, `Security`); no value in
+one class can justify an event from the other. That much needs no reference tree, and is all that
+landed. Ten rows before → after: **7,7,7,7,7,7,7,7,7,7 → 7,5,5,2,2,2,2,2,2,0**, with the
+**default** filter byte-identical because it spans both classes.
+
+Left to #2346, priced option-by-option in `docs/SystemIONamespaceReviewPlan.md` §21.10: whether
+`IN_MODIFY` serves `Size` or `LastWrite` or both; how `IN_ATTRIB` is allocated across five
+values; that `CreationTime` has **no** inotify event at all; that `LastAccess` is unserved
+because `IN_ACCESS` is in no mask; and `FileName` versus `DirectoryName`, which `IN_ISDIR` could
+separate. All six content values stay mutually indistinguishable — **the tests pin that rather
+than hide it**, so whichever option is chosen will surface as a test change, not as silent drift.
+
+### 4. Next work, ranked
+
+1. **#2104 (`modules/io`, `todo`, P3, S)** — documentation and behaviour pins, sequenced **LAST**
+   in the namespace by plan §15 and now genuinely unblocked on that count: #2099–#2103 have all
+   landed and #2102 is dispositioned. **But its scope grew**, and honestly so: it must now also
+   pin #2346's undecided mapping alongside #2105's and #2106's deferred behaviours, and its
+   required `docs/Migration-IOLifecycleAndArgumentStrictness.md` covers #2098–#2103 while #2098
+   itself is still `blocked` on Approval IO-1. It is implementation-ready; it is not trivial.
+2. **#2346 (`needs_user`)** — one decision per question, already priced. Nothing else in
+   `modules/io` unblocks without it.
+3. **#2105, #2106 (deferred verification)** — both still need the absent reference tree. #2105
+   (can a handler run after `EnableRaisingEvents = false` returns?) was **not** folded into this
+   batch, exactly as #2102 required, though the TSan harness built here would serve it.
+4. Then re-compare `modules/uri` and `modules/net-http`, **checking their ordinary post-audit
+   backlogs separately from the frozen audit index** — that method is what redirected the last
+   batch to IO and what found #1985/#1986 in Runtime.
+
+**Not reopened by this batch:** `modules/core` (33 open, 0 ready), `modules/threading` (16, 0),
+`modules/runtime` (14, 0), `modules/text` (11, all blocked), `modules/uri` (10, 0),
+`modules/net-http` (6, 0). #2098 stays `blocked`; #2105/#2106 stay deferred; no CCF was minted or
+extended.
+
 > **Test-count floor, 2026-08-12 — 17,033 / 38 (#2099).** The complete 38-executable gate
 > reads **17,033 run: 17,025 passed, 2 skipped, 6 failed** (17,025 + 6 + 2 = 17,033), **+9** on
 > the 17,024 below — exactly the nine `ClosedFileStreamFixture` cases this batch added
