@@ -74,7 +74,17 @@ namespace System::IO
         /** Reads all remaining characters from the current position to the end. */
         [[nodiscard]] std::string ReadToEnd() override;
 
-        /** Closes the underlying stream. */
+        /**
+         * @brief Closes the underlying stream, unless this reader was constructed with leaveOpen.
+         *
+         * Matches StreamReader.cs, whose Dispose(true) checks _closable before closing the
+         * stream, and matches this type's own destructor.
+         *
+         * <b>It does not close the READER.</b> After Close() this reader still reads: with
+         * leaveOpen true the underlying stream is still open and Read() returns its bytes. That
+         * is SR-AUD-337, still open, and the repair is ticket #2098, BLOCKED on Approval IO-1
+         * because recording the closed state changes this type's object layout.
+         */
         void Close() override;
     };
 }

@@ -36,6 +36,18 @@ namespace System {
      *  - Equals/operator== compare by content (bytes + media type). .NET BinaryData.Equals
      *    uses reference equality and is marked [EditorBrowsable(Never)].
      *  - GetHashCode is content-based (consistent with content-based Equals).
+     *
+     * Two divergences from .NET are KNOWN, MEASURED and DEFERRED under ticket #2106, because
+     * neither can be settled without the .NET reference tree, which is absent. Both are pinned
+     * by tests so no resolution can land silently:
+     *  - <b>SR-AUD-185</b> -- ToString() performs no UTF-8 validation, so invalid bytes are
+     *    returned unchanged where .NET's decoder substitutes U+FFFD. See ToString().
+     *  - <b>SR-AUD-186</b> -- every construction path COPIES its source, including the
+     *    ReadOnlyMemory ones, which current .NET wraps. The finding's implicit direction is
+     *    INVERTED: .NET's behaviour is the aliasing one and this port's is the defensive one,
+     *    so "fixing" it means making BinaryData alias caller memory it does not own. That also
+     *    needs a decision about which .NET overload is meant -- BinaryData(byte[]) copies,
+     *    BinaryData(ReadOnlyMemory&lt;byte&gt;) wraps. See FromBytes.
      */
     class BinaryData {
         std::vector<uint8_t> bytes_;
@@ -141,7 +153,13 @@ namespace System {
         // -----------------------------------------------------------------------
 
         /**
-         * @brief Creates a BinaryData instance by wrapping the provided ReadOnlyMemory.
+         * @brief Creates a BinaryData instance by COPYING the bytes of the provided ReadOnlyMemory.
+         *
+         * Current .NET's BinaryData(ReadOnlyMemory&lt;byte&gt;) WRAPS its argument and observes
+         * the caller's later writes; this overload snapshots them instead, so the result is
+         * independent of the source's lifetime and of any later mutation. That divergence is
+         * SR-AUD-186, deferred under #2106 and pinned by test -- see the class doc-comment.
+         *
          * @param data Byte data to copy.
          * @return New BinaryData instance.
          */
@@ -150,8 +168,12 @@ namespace System {
         }
 
         /**
-         * @brief Creates a BinaryData instance by wrapping the provided ReadOnlyMemory
+         * @brief Creates a BinaryData instance by COPYING the bytes of the provided ReadOnlyMemory
          * and sets the media type.
+         *
+         * Copies for the same reason as the single-argument overload above, and diverges from
+         * .NET in the same way (SR-AUD-186, deferred under #2106).
+         *
          * @param data      Byte data to copy.
          * @param mediaType MIME type string.
          * @return New BinaryData instance.
@@ -269,8 +291,17 @@ namespace System {
         // -----------------------------------------------------------------------
 
         /**
-         * @brief Converts the value of this instance to a string using UTF-8 decoding.
-         * @return A string decoded from the bytes of this instance.
+         * @brief Returns the bytes of this instance as a std::string, VERBATIM.
+         *
+         * Named for its .NET counterpart, which UTF-8-decodes and substitutes U+FFFD
+         * (EF BF BD) for each invalid sequence. This port performs no validation and no
+         * substitution: the byte range is copied as-is, so 0xFF comes back as 0xFF and a
+         * truncated multi-byte sequence comes back truncated. For well-formed UTF-8 -- which
+         * every direct call site in this repository uses -- the two are identical. The
+         * divergence is SR-AUD-185, deferred under #2106 and pinned by test; see the class
+         * doc-comment.
+         *
+         * @return A string holding a copy of this instance's bytes.
          */
         [[nodiscard]] std::string ToString() const {
             return std::string(reinterpret_cast<const char*>(bytes_.data()), bytes_.size());
@@ -295,7 +326,10 @@ namespace System {
         }
 
         /**
-         * @brief Converts the BinaryData to a read-only MemoryStream over the underlying bytes.
+         * @brief Converts the BinaryData to a read-only MemoryStream over a COPY of the bytes.
+         *
+         * MemoryStream(const bytecs*, intcs, bool) copies its source range, so the returned
+         * stream does not alias this instance and outliving it is safe.
          *
          * C++ counterpart of .NET BinaryData.ToStream().
          * @return A MemoryStream wrapping a copy of the underlying bytes.

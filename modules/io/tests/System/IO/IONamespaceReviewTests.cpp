@@ -41,11 +41,13 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/BinaryData.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/IO/Directory.hpp"
 #include "System/IO/DirectoryInfo.hpp"
 #include "System/IO/File.hpp"
 #include "System/IO/FileInfo.hpp"
+#include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/FileStream.hpp"
 #include "System/IO/FileSystemWatcher.hpp"
 #include "System/IO/IOException.hpp"
@@ -1389,3 +1391,188 @@ TEST_F(WatcherReconfigurationFixture, AnInvalidNotifyFilterIsRejectedBeforeAnyth
 }
 
 #endif // __linux__
+
+// ===========================================================================================
+// #2104 — the pins. This ticket changes NO production behaviour; it makes the doc-comments true
+// and pins what a future resolution of a DEFERRED or BLOCKED item would silently change.
+//
+// Three subjects, each pinned for a different reason:
+//
+//   (1) Plan §6.2's second measured POSITIVE. §6.2 recorded two: no descriptor is leaked over a
+//       double Close(), and none over a THROWING constructor. #2099 pinned the first (100
+//       cycles, above). The second was measured and left unpinned — so it is pinned here, and
+//       plan §14 requires the number to be REPORTED, not merely asserted.
+//
+//   (2) #2105 (deferred) — whether a handler can be invoked after EnableRaisingEvents = false
+//       RETURNS. What is pinned below is the OBSERVABLE behaviour only. #2105's own question is
+//       NOT answered here and must not be read into these tests: it asks about a handler already
+//       EXECUTING when the setter is called, which needs TSan plus a blocking-handler harness,
+//       and its acceptance criteria says so.
+//
+//   (3) #2106 (deferred) — BinaryData decodes invalid UTF-8 as raw bytes (SR-AUD-185) and COPIES
+//       where .NET's ReadOnlyMemory overload wraps (SR-AUD-186). Plan §6.1 records that
+//       SR-AUD-186's premise is INVERTED: .NET's behaviour is the aliasing one and the port's is
+//       the defensive one, so "fixing" it means making BinaryData alias caller memory it does not
+//       own. Neither is decidable with the reference tree absent. Both are pinned as they stand.
+// ===========================================================================================
+
+TEST_F(IoReviewFixture, AThrowingFileStreamConstructorLeaksNoDescriptor) {
+    // Plan §6.2, second positive: 20 constructors that throw (FileMode::Open on a missing file)
+    // moved /proc/self/fd by 0. Pinned at 100 rather than 20 — a leak of one descriptor per
+    // construction would be unmissable at either count, and the larger number costs nothing.
+    auto fdCount = [] {
+        int n = 0; std::error_code ec;
+        for (auto& e : std::filesystem::directory_iterator("/proc/self/fd", ec)) { (void)e; ++n; }
+        return n;
+    };
+    const std::string missing = under("no-such-file.txt");
+    ASSERT_FALSE(std::filesystem::exists(missing));
+
+    const int before = fdCount();
+    for (int i = 0; i < 100; ++i) {
+        EXPECT_THROW(FileStream(missing, FileMode::Open, FileAccess::Read),
+                     System::IO::FileNotFoundException);
+    }
+    const int after = fdCount();
+    RecordProperty("fd_before", before);
+    RecordProperty("fd_after", after);
+    EXPECT_EQ(after, before) << "descriptor delta across 100 throwing FileStream constructors";
+
+    // The file must not have been created on the way out: FileMode::Open does not create, and a
+    // rejection that left a file behind would be a different defect wearing the same symptom.
+    EXPECT_FALSE(std::filesystem::exists(missing));
+}
+
+#if defined(__linux__)
+
+TEST_F(WatcherReconfigurationFixture, NoHandlerRunsForActivityAfterEnableRaisingEventsGoesFalse) {
+    // #2105 PIN — the OBSERVABLE half only. Deterministic: after the setter returns, activity in
+    // the watched directory is followed by a RE-ENABLED sentinel. Once the sentinel arrives the
+    // watcher is demonstrably live again, so anything the disabled window was going to report
+    // would already have been reported. No sleep is used as synchronisation.
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+
+    touchNew(dirA / "whileEnabled");
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "whileEnabled"))
+        << "the watcher was never live, so the rest of this test would prove nothing";
+
+    w.setEnableRaisingEventsProperty(false);
+
+    // Everything below happens with the watcher off.
+    touchNew(dirA / "whileDisabled1");
+    touchNew(dirA / "whileDisabled2");
+    std::filesystem::remove(dirA / "whileDisabled1");
+
+    w.setEnableRaisingEventsProperty(true);
+    touchNew(dirA / "sentinelAfterReEnable");
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "sentinelAfterReEnable"));
+
+    EXPECT_FALSE(r.sawName("whileDisabled1"))
+        << "activity during a disabled window was reported — #2105's OBSERVABLE half changed";
+    EXPECT_FALSE(r.sawName("whileDisabled2"));
+    EXPECT_FALSE(r.handlerFailed());
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, DisablingIsIdempotentAndTheWatcherStaysUsableAfterwards) {
+    // The second observable half: disabling twice is safe, and the watcher is not left in a state
+    // that cannot be re-armed. Pinned because #2105's eventual answer could plausibly change the
+    // disable path (a drain, a flag, a second thread), and any of those would show up here.
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+
+    w.setEnableRaisingEventsProperty(true);
+    w.setEnableRaisingEventsProperty(false);
+    w.setEnableRaisingEventsProperty(false);
+    EXPECT_FALSE(w.getEnableRaisingEventsProperty());
+
+    w.setEnableRaisingEventsProperty(true);
+    touchNew(dirA / "afterTheSecondEnable");
+    EXPECT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "afterTheSecondEnable"));
+    EXPECT_FALSE(r.handlerFailed());
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+#endif // __linux__
+
+// -------------------------------------------------------------------------------------------
+// #2106 PIN — BinaryData. Both findings are DEFERRED, so what is pinned is the CURRENT answer,
+// stated in both directions: what the port does, and what the finding says .NET does. A future
+// resolution has to edit these tests, which is exactly the point.
+// -------------------------------------------------------------------------------------------
+
+TEST(BinaryDataDeferredBehaviourPins, ToStringReturnsInvalidUtf8BytesUNCHANGED) {
+    // SR-AUD-185: ToString() of 0xFF returns FF. .NET's UTF-8 decoder substitutes U+FFFD
+    // (EF BF BD). The port does no validation at all — ToString is a byte-range copy.
+    const std::vector<uint8_t> invalid{0xFF};
+    const System::BinaryData bd(invalid);
+    const std::string text = bd.ToString();
+
+    ASSERT_EQ(text.size(), 1u) << "a substituting decoder would produce 3 bytes, not 1";
+    EXPECT_EQ(static_cast<unsigned char>(text[0]), 0xFFu);
+    EXPECT_NE(text, std::string("\xEF\xBF\xBD"))
+        << "U+FFFD substitution landed without #2106 being resolved";
+}
+
+TEST(BinaryDataDeferredBehaviourPins, ATruncatedMultiByteSequenceIsAlsoPassedThroughUnchanged) {
+    // Widens the pin past the finding's single byte: a lead byte with no continuation is the
+    // other shape a decoder would have to substitute for, and it is equally untouched here.
+    const std::vector<uint8_t> truncated{0xE2, 0x82};   // first two bytes of U+20AC
+    const System::BinaryData bd(truncated);
+    const std::string text = bd.ToString();
+
+    ASSERT_EQ(text.size(), 2u);
+    EXPECT_EQ(static_cast<unsigned char>(text[0]), 0xE2u);
+    EXPECT_EQ(static_cast<unsigned char>(text[1]), 0x82u);
+}
+
+TEST(BinaryDataDeferredBehaviourPins, ValidUtf8IsUnaffectedEitherWay) {
+    // The control. Every case the audit could reach directly used valid ASCII, which is why the
+    // finding could sit undetected; a resolution of #2106 must not disturb this row.
+    const System::BinaryData bd(std::string("hello"));
+    EXPECT_EQ(bd.ToString(), "hello");
+}
+
+TEST(BinaryDataDeferredBehaviourPins, EveryConstructionPathCOPIESItsSource) {
+    // SR-AUD-186, and plan §6.1's INVERTED premise: .NET's ReadOnlyMemory overload WRAPS and
+    // observes the caller's later writes; this port copies and does not. Pinned across all four
+    // doors, because "fixing" this means making BinaryData alias memory it does not own — a
+    // borrowed-pointer lifetime hazard of exactly the CCF-019 shape, in a type that has none.
+    std::vector<uint8_t> source{0x01};
+
+    const System::BinaryData fromVectorCtor(source);
+    const System::BinaryData fromVectorFactory = System::BinaryData::FromBytes(source);
+    const System::ReadOnlyMemory<uint8_t> view(source.data(), 1);
+    const System::BinaryData fromMemoryCtor{view};
+    const System::BinaryData fromMemoryFactory = System::BinaryData::FromBytes(view);
+
+    source[0] = 0x02;   // the caller mutates the source AFTER construction
+
+    EXPECT_EQ(fromVectorCtor[0], 0x01) << "the vector constructor started aliasing its source";
+    EXPECT_EQ(fromVectorFactory[0], 0x01);
+    EXPECT_EQ(fromMemoryCtor[0], 0x01)
+        << "the ReadOnlyMemory constructor started WRAPPING — #2106 resolved without a decision";
+    EXPECT_EQ(fromMemoryFactory[0], 0x01)
+        << "FromBytes(ReadOnlyMemory) started WRAPPING — #2106 resolved without a decision";
+}
+
+TEST(BinaryDataDeferredBehaviourPins, TheCopyOutlivesASourceThatIsGoneEntirely) {
+    // The consequence that makes the current behaviour the DEFENSIVE one, and the reason §6.1
+    // says the finding's direction is inverted: a wrapping BinaryData built this way would be
+    // reading freed memory here.
+    System::BinaryData bd = System::BinaryData::FromBytes(std::vector<uint8_t>{});
+    {
+        std::vector<uint8_t> shortLived{0x07, 0x08};
+        bd = System::BinaryData::FromBytes(
+            System::ReadOnlyMemory<uint8_t>(shortLived.data(), 2));
+    }
+    ASSERT_EQ(bd.getLengthProperty(), 2);
+    EXPECT_EQ(bd[0], 0x07);
+    EXPECT_EQ(bd[1], 0x08);
+}

@@ -103,7 +103,15 @@ namespace System::IO {
 
         /** Flushes any buffered output to the underlying device. */
         virtual void Flush() {}
-        /** Closes the writer. */
+        /**
+         * @brief Closes the writer.
+         *
+         * <b>This base implementation does nothing.</b> StringWriter does not override it, so
+         * after Close() a Write still appends and ToString() still returns the text. That is
+         * SR-AUD-343 on the writer side; it is still open, and for the same reason as
+         * TextReader::Close() -- recording the closed state is an object-layout change in a
+         * public type, and the decision is ticket #2098, BLOCKED on Approval IO-1.
+         */
         virtual void Close() {}
 
     protected:

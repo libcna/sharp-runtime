@@ -1103,3 +1103,106 @@ supported outcome** — it is simply not one this review may take on the user's 
 taken, all six content values are mutually indistinguishable and `FileName` is indistinguishable
 from `DirectoryName`; the permanent tests **pin that** rather than assume it away, so whichever
 option is chosen will show up as a test change and not as a silent drift.
+
+### 20.9 #2104 landed, and the namespace is closed for autonomous work
+
+#2104 was the review's `LAND LAST` ticket. Its closure criterion is **not** "everything is
+remediated" — §19 states it as *"`modules/io` is closed for compatible work when #2098–#2104 are
+`done`…"*, and three of the items it covers were dispositioned rather than fixed, each by design
+and each with a named owner. What #2104 had to do was make that true on paper and unfalsifiable in
+code. **No production behaviour changed**: the diff is doc-comments, tests, one new document, the
+audit index and the ticket database.
+
+#### The four acceptance criteria, and what each actually required
+
+| Criterion | State on arrival | What #2104 did |
+|---|---|---|
+| Every contract this review corrected is stated in the owning header | #2099, #2100, #2101, #2103 and #2108 already carried theirs; #2344's `setPathProperty` did too | **#2345's did not.** `setNotifyFilterProperty` had a two-line doc-comment that named only its `ArgumentException`, so the header said nothing about the class boundary that had just landed **or** about the mapping #2346 owns |
+| The measured no-descriptor-leak result is pinned | §6.2 recorded **two** positives; #2099 pinned only the double-close one | pinned the second — 100 throwing `FileStream` constructors, `/proc/self/fd` 4 → 4, delta **0**, reported via `RecordProperty` as §14 requires |
+| #2105 and #2106 each carry a behaviour pin | neither had one; no test in the repository mentioned either ticket | +7 pins (2 for #2105, 5 for #2106), and the #2105 ones are deliberately restricted to the **observable** half |
+| A migration note covers #2098–#2103 together | absent | `docs/Migration-IOLifecycleAndArgumentStrictness.md`, which also had to cover **#2108, #2344 and #2345** — three tickets that did not exist when §12 was written |
+
+#### Two premise corrections
+
+**§7.1 is wrong about `TextWriter`.** It says *"`TextReader::Close()` is `{}` and `TextWriter` has
+no `Close()` at all"*. `TextWriter.hpp` has carried `virtual void Close() {}` since the first
+commit in this history (`9b657c85`, verified with `git log -S`), so the two base classes are the
+**same** shape, not two different ones. §7.1's conclusion survives untouched — a `{}` `Close()` is
+no disposal contract — but the asymmetry it asserts does not exist, and #2098's option (b) is
+therefore a symmetric change to two identical bases rather than an addition to one and an edit to
+the other.
+
+**Four `Close()` doc-comments claimed a contract the code does not have**, which is the defect
+#2104's own description names ("make the doc-comments true"). `TextReader::Close()` said *"Closes
+the reader and releases any resources"* while being `{}`; `TextWriter::Close()` said *"Closes the
+writer"*; `StreamWriter::Close()` said *"Closes the writer and the underlying stream"* when with
+`leaveOpen` it closes **neither**. All four now state what actually happens and name #2098 and its
+approval gate. This is the reverse of the usual risk: the headers were documenting the repair that
+Approval IO-1 has not authorised.
+
+#### A real defect found while writing the #2105 pin — ticket #2347, no `SR-AUD-*`
+
+Writing "can a handler run after `EnableRaisingEvents = false` returns?" means reading the disable
+path, and the disable path is `stopWatchingIfRunning()` → `watchThread_.join()`. That answers the
+**observable** half immediately (the thread is joined, so nothing can be invoked afterwards), and
+raises a question the review never asked: what happens when the **handler** turns the watcher off?
+
+Measured, both ways (`build-probe/2104_probe1_watcher_handler_reentrancy.cpp`):
+
+| Mode | Result |
+|---|---|
+| handler catches | `std::system_error`, `"Resource deadlock avoided"`, `code=35`, `generic` category (`_modeB.log`) |
+| handler does not catch — what a ported caller writes | **`std::terminate`, SIGABRT, exit 134** (`_modeA.log`) |
+
+`join()` on the calling thread's own `std::thread` is
+`resource_deadlock_would_occur`, and `watchLoop` invokes handlers with **no `try`/`catch`**, so the
+exception has nowhere to land. All three reconfiguring members reach it — `EnableRaisingEvents`,
+`Path` and `NotifyFilter` — and .NET permits the pattern. **Not implemented here**: it is a
+concurrency repair with real design content (a deferred-teardown queue, a thread-identity check, or
+a handler-invocation `try`/`catch` that changes what a throwing handler does), and folding it into
+a documentation ticket would be exactly the silent scope growth this review keeps refusing.
+Recorded in `FileSystemWatcher.hpp`, in the migration note §6, and as ticket **#2347**.
+**Audit numbering stays frozen at 364.**
+
+#### What the pins deliberately do NOT say
+
+The #2105 pins assert only that activity **after** the setter returns raises nothing, and that
+disabling is idempotent and leaves the watcher re-armable. #2105's actual question — whether a
+handler already *executing* can still be running when the setter returns — needs TSan and a
+blocking-handler harness, which is its own acceptance criteria, and is **not** answered. A test
+that appeared to answer it by timing would be the kind of measurement §6.5 already rejected.
+
+The #2106 pins state the current answer **in both directions** — what the port does *and* what the
+finding says .NET does — so a resolution has to edit them. `EveryConstructionPathCOPIESItsSource`
+covers all four doors rather than the one SR-AUD-186 names, and
+`TheCopyOutlivesASourceThatIsGoneEntirely` records why the current behaviour is the defensive one
+(§6.1): a wrapping `BinaryData` built that way would be reading freed memory.
+
+#### Gates
+
+`SharpRuntimeTests_IO` **660 → 668, +8 on Linux** — 1 descriptor pin, 2 for #2105, 5 for #2106
+(the two watcher pins are `#if defined(__linux__)` like every other watcher test in the file, so a
+non-Linux count would be +6). Add-only; no pre-existing assertion was edited or deleted. Build 0
+errors / 0 warnings at **2 jobs**. Repository total **17,049 → 17,057**.
+
+**No sanitizer run, and no mutation testing** — deliberately, and this is the honest reason rather
+than an omission: #2104 changes no executable production statement. There is nothing for TSan,
+ASan or UBSan to discriminate that #2344's and #2345's runs did not already cover, and a mutation
+of a doc-comment is not a mutation. The one measurement #2104 *did* need was the #2347 probe, and
+that was taken rather than asserted.
+
+#### Final disposition of `modules/io`
+
+| Item | Owner | State |
+|---|---|---|
+| SR-AUD-338, 339, 340, 341, 342, 344, 345, 347 | #2099–#2103, #2108, #2344 | **remediated** |
+| SR-AUD-337, SR-AUD-343 | **#2098** | open — blocked on Approval IO-1 |
+| SR-AUD-346 | **#2346** | open — `needs_user`, the mapping policy |
+| SR-AUD-185, SR-AUD-186 | **#2106** | open — deferred, reference tree absent |
+| watcher handler-after-disable question | **#2105** | deferred, needs TSan |
+| reentrant reconfiguration → `std::terminate` | **#2347** | new, todo, not implementation-ready as a documentation ticket's side effect |
+
+**Five open findings, five owners, zero orphans.** `modules/io` has **no implementation-ready
+autonomous work left**: every remaining item is blocked on a user approval, waiting on a user
+policy decision, waiting on evidence that does not exist in this container, or is a newly minted
+concurrency ticket that needs its own design pass.

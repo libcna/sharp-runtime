@@ -137,6 +137,34 @@ namespace System::IO {
 
         /**
          * @brief Gets or sets the type of changes to watch for.
+         *
+         * The value is applied to the kernel-side watch, and changing it on a live watcher
+         * re-arms through the same join -> write -> arm sequence Path uses, because the inotify
+         * mask is fixed when the watch is armed. A reconfiguration discards events already queued
+         * but not yet delivered, exactly as disabling does.
+         *
+         * <b>What this filters, exactly.</b> The defined values fall into two classes, and no
+         * value in one class admits an event from the other:
+         *
+         * - <b>name class</b> -- FileName, DirectoryName -> Created, Deleted, Renamed;
+         * - <b>content class</b> -- Attributes, Size, LastWrite, LastAccess, CreationTime,
+         *   Security -> Changed.
+         *
+         * NotifyFilters(0) is a valid value naming no change: nothing is watched, and a later
+         * filter change re-arms.
+         *
+         * <b>UNRESOLVED, and deliberately so (ticket #2346, SR-AUD-346 remains `confirmed`).</b>
+         * Allocation of events WITHIN a class is a mapping policy this port has not chosen,
+         * because Linux does not give the information the .NET vocabulary assumes: IN_MODIFY
+         * cannot say whether the size changed, so Size and LastWrite are indistinguishable;
+         * IN_ATTRIB covers chmod/chown/link-count/utimes without saying which, so all six content
+         * values share it; inotify cannot report a creation-time change at all; LastAccess is
+         * served by no mask this watcher registers; and FileName is not separated from
+         * DirectoryName even though IN_ISDIR would allow it. Until #2346 is decided the six
+         * content values are mutually indistinguishable and FileName behaves as DirectoryName
+         * does. That is pinned by tests rather than assumed, so whichever mapping is eventually
+         * chosen shows up as a test change and not as a silent drift.
+         *
          * @throws System::ArgumentException if @p value contains bits outside the defined NotifyFilters values.
          */
         [[nodiscard]] NotifyFilters getNotifyFilterProperty() const { return notifyFilter_; }
@@ -160,6 +188,22 @@ namespace System::IO {
          * On other platforms this remains a documented stub: the flag is tracked faithfully so
          * ported C# code reading EnableRaisingEvents back gets the value it set, but no real
          * monitoring occurs.
+         *
+         * Setting this to false joins the watcher thread before returning, so no handler is
+         * invoked for activity that happens afterwards, and events queued but not yet delivered
+         * are discarded with the watch. Whether a handler that is ALREADY EXECUTING can still be
+         * running when this setter returns is a concurrency question this port has NOT measured;
+         * it is ticket #2105 (deferred -- it needs ThreadSanitizer and a blocking-handler
+         * harness), and it is recorded as an open question rather than asserted either way.
+         *
+         * <b>Handlers run on the watcher thread, and this setter must not be called from one.</b>
+         * All three reconfiguring members -- this one, Path and NotifyFilter -- join that thread,
+         * so calling any of them from inside a handler is a self-join: it raises
+         * std::system_error ("Resource deadlock avoided"), and because handler invocation is not
+         * wrapped in a try/catch the exception reaches std::terminate rather than the caller
+         * (measured, `build-probe/2104_probe1_modeA.log`, SIGABRT). .NET permits the pattern, so
+         * this is a real divergence and a real crash; it is ticket #2347 and carries no
+         * SR-AUD-* identifier. Until it is fixed, stop a watcher from the thread that owns it.
          */
         [[nodiscard]] bool getEnableRaisingEventsProperty() const { return enabled_; }
         void setEnableRaisingEventsProperty(bool value);

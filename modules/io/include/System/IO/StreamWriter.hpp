@@ -68,7 +68,13 @@ namespace System::IO {
 
         /** Flushes any buffered data to the underlying stream. */
         void Flush() override;
-        /** Closes the writer and the underlying stream. */
+        /**
+         * @brief Closes the underlying stream, unless this writer was constructed with leaveOpen.
+         *
+         * <b>It does not close the WRITER</b>, and with leaveOpen true it closes nothing at all:
+         * a Write after Close() succeeds and the underlying stream grows. That is SR-AUD-337 on
+         * the writer side, still open, repaired by ticket #2098, BLOCKED on Approval IO-1.
+         */
         void Close() override;
     };
 
