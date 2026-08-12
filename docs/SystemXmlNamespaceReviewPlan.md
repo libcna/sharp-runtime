@@ -1055,7 +1055,7 @@ behaviour is untouched, which the pins now enforce.
 | **#2348** | post-audit, split from #2084 | a well-formed-internal-subset rule needs a DTD subset scanner this port deliberately does not have |
 | **#2085** | **REMEDIATED (2026-08-12)** — see §21.6 | the NUL half needed no decision; the `CheckCharacters` half split to **#2349** |
 | **#2349** | post-audit, split from #2085 | genuinely a `CheckCharacters` decision: both branches are implementable and rejecting would narrow past this runtime's own reader |
-| **#2086** | post-audit, ready | completing `RemoveAllChildren`'s event pair safely needs a lifetime decision (detach vs delete) that is **not** compatible |
+| **#2086** | **BLOCKED**, reviewed 2026-08-12 — see §21.7 | the detach-vs-delete decision is CCF-019's, and the cost is now measured rather than asserted |
 
 **`System::Xml` is complete except for deferred work**, in the precise sense that every
 `SR-AUD-*` finding is either remediated or deferred-with-a-pin, and the three post-audit tickets
@@ -1156,3 +1156,40 @@ Sanitizers were deliberately **not** run: `c_str()` truncation reads a well-form
 NUL-terminated buffer, so it is a length bug, not a memory error, and ASan/UBSan would add no
 evidence. `detail::ContainsNul` is in the shared header, so **#2201 converges on this policy**
 rather than inventing a second one.
+
+### 21.7 #2086 — reviewed, still blocked, and the blocker is now a number
+
+The premise holds verbatim: `RemoveAllChildren` `PurgeCache()`es every wrapper and
+`DeleteChildren()`s the natives, so a `NodeRemoved` handler's `XmlNode*` would name freed
+storage.
+
+**The asymmetry with `RemoveChild` is the whole finding.** `RemoveChild` calls
+`doc->DetachNode()`, which moves the native under the document's scratch parent, so the node
+**survives** — measured, the returned wrapper is still alive and still answers
+`getNameProperty()`. That is exactly why its pair is safe on both sides of the mutation, and
+it makes the "obvious" repair obvious: detach instead of delete.
+
+**That repair was costed, not dismissed** (`build-probe/2086_probe1_lifetime.log`):
+
+| path | 20,000 removals |
+|---|---|
+| detach (what a safe event pair would require) | **+5,937,424 bytes retained**, ~297 per node, never freed until the document dies |
+| destroy (today) | **+0 bytes** |
+| `setInnerText` × 20,000 (routes through destroy) | +4,048 bytes |
+
+`RemoveAllChildren` is on `setInnerText`'s and `setInnerXml`'s **hot path** — both call it on
+every assignment — so the third row would become roughly 5.9 MB, about **1,460×**. Trading a
+bounded operation for unbounded retention is a removal-ownership decision, not a bounded
+repair.
+
+**There is no independently safe subset, and this was checked rather than assumed.** Raising
+only the `Changing` half looks safe, since every child is alive when it fires. It is not: it
+would newly hand a handler a pointer **guaranteed** to dangle the moment the call returns —
+the exact CCF-019 shape — and a `Changing` with no matching `Changed` misreports a completed
+change as a cancelled one. Half a pair is worse than silence.
+
+**CCF-019 relationship:** #2086 is an **occurrence/consumer** of CCF-019, not a new cause and
+not a member requiring the cross-cutting finding to be extended. **CCF-019 stays open and
+unextended; no CCF was minted.** The existing pin
+`RemoveAllDispatchesNothing_PinnedLifetimeDecision` and mutation E6 are unchanged. Nothing was
+implemented and no behaviour changed.
