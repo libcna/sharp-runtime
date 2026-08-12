@@ -26,6 +26,7 @@
 #include <gtest/gtest.h>
 
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <chrono>
@@ -906,6 +907,24 @@ public:
         return findLocked(name) != nullptr;
     }
 
+    /// Name alone is not enough once one file carries several event kinds (a file that is
+    /// created and then modified produces two events with the same Name).
+    bool awaitEvent(WatcherChangeTypes t, const std::string& name,
+                    std::chrono::milliseconds budget = std::chrono::milliseconds(5000)) {
+        std::unique_lock<std::mutex> lock(m_);
+        return cv_.wait_for(lock, budget, [&] { return findLocked(t, name) != nullptr; });
+    }
+
+    [[nodiscard]] bool sawEvent(WatcherChangeTypes t, const std::string& name) {
+        std::lock_guard<std::mutex> lock(m_);
+        return findLocked(t, name) != nullptr;
+    }
+
+    [[nodiscard]] std::size_t size() {
+        std::lock_guard<std::mutex> lock(m_);
+        return events_.size();
+    }
+
     [[nodiscard]] std::string fullPathOf(const std::string& name) {
         std::lock_guard<std::mutex> lock(m_);
         const Seen* s = findLocked(name);
@@ -921,6 +940,13 @@ private:
     const Seen* findLocked(const std::string& name) const {
         for (const auto& e : events_) {
             if (e.name == name) return &e;
+        }
+        return nullptr;
+    }
+
+    const Seen* findLocked(WatcherChangeTypes t, const std::string& name) const {
+        for (const auto& e : events_) {
+            if (e.type == t && e.name == name) return &e;
         }
         return nullptr;
     }
@@ -1153,6 +1179,211 @@ TEST_F(WatcherReconfigurationFixture, APathChangeIsSafeWhileEventsAreStillArrivi
     touchNew(dirB / "settled");
     EXPECT_TRUE(r.awaitName("settled")) << "the watcher stopped working after repeated re-arms";
     EXPECT_FALSE(r.handlerFailed());
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+#endif // __linux__
+
+// ===========================================================================================
+// #2345 / SR-AUD-346 class-crossing half, split from #2102 — the inotify mask was a constexpr
+// constant, so NotifyFilter was validated, stored, and read by nothing.
+//
+// Before-state, measured over ALL TEN filter configurations × seven operations
+// (build-probe/2102_probe2_before.log): every configuration produced the byte-identical seven
+// events, including NotifyFilters(0). "A Size-only watcher raises Created" is therefore not an
+// independent defect with its own mechanism — it is one cell of a table in which every cell was
+// equal, and there was exactly one cause.
+//
+// What lands here is only the half that needs NO mapping policy: the public values fall into a
+// NAME class (FileName, DirectoryName) and a CONTENT class (Attributes, Size, LastWrite,
+// LastAccess, CreationTime, Security), and no value in one class can justify an event from the
+// other. Allocating events WITHIN a class — IN_MODIFY to Size or LastWrite, IN_ATTRIB across
+// five values, CreationTime which inotify cannot report at all, LastAccess which no mask serves,
+// FileName versus DirectoryName which IN_ISDIR could separate — is ticket #2346 (needs_user).
+// SR-AUD-346 therefore stays CONFIRMED; these tests pin only the class boundary.
+// ===========================================================================================
+
+#if defined(__linux__)
+
+TEST_F(WatcherReconfigurationFixture, ASizeOnlyWatcherRaisesNoCreatedDeletedOrRenamed) {
+    // The finding's own headline. The sentinel is an IN_MODIFY, which a Size-only mask still
+    // admits, and inotify delivers in queue order within one instance — so once the sentinel
+    // arrives, any Created/Deleted/Renamed the watcher was going to raise already has.
+    touchNew(dirA / "sentinel");
+    touchNew(dirA / "victim");
+    touchNew(dirA / "renameMe");
+
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    w.setNotifyFilterProperty(NotifyFilters::Size);
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+
+    touchNew(dirA / "made");
+    std::filesystem::remove(dirA / "victim");
+    std::filesystem::rename(dirA / "renameMe", dirA / "renamed");
+    appendByte(dirA / "sentinel");
+
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Changed, "sentinel"));
+    EXPECT_FALSE(r.sawEvent(WatcherChangeTypes::Created, "made"))
+        << "a Size-only watcher raised Created — the defect SR-AUD-346 names";
+    EXPECT_FALSE(r.sawEvent(WatcherChangeTypes::Deleted, "victim"));
+    EXPECT_FALSE(r.sawEvent(WatcherChangeTypes::Renamed, "renamed"));
+    EXPECT_FALSE(r.handlerFailed());
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, EveryContentClassFilterAloneStillAdmitsChanged) {
+    // Excluding the name class must not silence the class the caller DID ask for. All six are
+    // checked because #2346 has not decided which of them IN_MODIFY actually serves — until it
+    // does, they are deliberately indistinguishable, and that is pinned rather than assumed.
+    const std::pair<const char*, NotifyFilters> contentFilters[] = {
+        {"Attributes", NotifyFilters::Attributes}, {"Size", NotifyFilters::Size},
+        {"LastWrite", NotifyFilters::LastWrite},   {"LastAccess", NotifyFilters::LastAccess},
+        {"CreationTime", NotifyFilters::CreationTime}, {"Security", NotifyFilters::Security},
+    };
+    for (const auto& [label, filter] : contentFilters) {
+        const std::filesystem::path dir = root / label;
+        std::filesystem::create_directories(dir);
+        touchNew(dir / "subject");
+
+        WatchRecorder r;
+        FileSystemWatcher w(dir.string());
+        w.setNotifyFilterProperty(filter);
+        subscribeAll(w, r);
+        w.setEnableRaisingEventsProperty(true);
+
+        appendByte(dir / "subject");
+        EXPECT_TRUE(r.awaitEvent(WatcherChangeTypes::Changed, "subject")) << label;
+        w.setEnableRaisingEventsProperty(false);
+    }
+}
+
+TEST_F(WatcherReconfigurationFixture, ANameOnlyWatcherRaisesNoChanged) {
+    // The mirror image of the finding's headline, and unambiguous for exactly the same reason:
+    // FileName and DirectoryName describe directory entries, not file content or metadata.
+    touchNew(dirA / "subject");
+
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    w.setNotifyFilterProperty(NotifyFilters::FileName);
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+
+    appendByte(dirA / "subject");
+    ASSERT_EQ(::chmod((dirA / "subject").c_str(), 0600), 0);
+    touchNew(dirA / "sentinel");                      // IN_CREATE: in a name-class mask
+
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "sentinel"));
+    EXPECT_FALSE(r.sawEvent(WatcherChangeTypes::Changed, "subject"))
+        << "a FileName-only watcher raised Changed";
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, TheDefaultFilterIsCompletelyUNAFFECTED) {
+    // The default is LastWrite|FileName|DirectoryName, which spans BOTH classes, so it must see
+    // exactly what it saw before this repair. Every existing end-to-end watcher test relies on
+    // this, and none of them sets a filter at all.
+    touchNew(dirA / "subject");
+    touchNew(dirA / "attrib");
+    touchNew(dirA / "victim");
+    touchNew(dirA / "renameMe");
+
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+
+    touchNew(dirA / "made");
+    appendByte(dirA / "subject");
+    ASSERT_EQ(::chmod((dirA / "attrib").c_str(), 0600), 0);
+    std::filesystem::remove(dirA / "victim");
+    std::filesystem::rename(dirA / "renameMe", dirA / "renamed");
+    touchNew(dirA / "sentinel");
+
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "sentinel"));
+    EXPECT_TRUE(r.sawEvent(WatcherChangeTypes::Created, "made"));
+    EXPECT_TRUE(r.sawEvent(WatcherChangeTypes::Changed, "subject"));
+    EXPECT_TRUE(r.sawEvent(WatcherChangeTypes::Changed, "attrib"))
+        << "IN_ATTRIB no longer reaches Changed under the default filter";
+    EXPECT_TRUE(r.sawEvent(WatcherChangeTypes::Deleted, "victim"));
+    EXPECT_TRUE(r.sawEvent(WatcherChangeTypes::Renamed, "renamed"));
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, NotifyFiltersZeroNamesNoChangeAndAdmitsNothing) {
+    // NotifyFilters(0) passes validation (it has no bit outside the valid mask) and names no
+    // change to watch. It is the ONE case with no sentinel available, so the deadline below is
+    // load-bearing and is called out as such rather than dressed up as an event wait.
+    touchNew(dirA / "subject");
+
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    w.setNotifyFilterProperty(static_cast<NotifyFilters>(0));
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+
+    touchNew(dirA / "made");
+    appendByte(dirA / "subject");
+
+    EXPECT_FALSE(r.awaitName("made", std::chrono::milliseconds(750)));
+    EXPECT_EQ(r.size(), 0u) << "a filter naming no change still admitted events";
+    EXPECT_TRUE(w.getEnableRaisingEventsProperty())
+        << "an empty filter must be inert, not an error";
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, ChangingNotifyFilterWhileEnabledTakesEffect) {
+    // The mask is fixed when the watch is armed, so the property is only genuinely consulted if
+    // changing it rebuilds the watch.
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    w.setNotifyFilterProperty(NotifyFilters::Size);
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+
+    w.setNotifyFilterProperty(NotifyFilters::FileName);
+    EXPECT_TRUE(w.getEnableRaisingEventsProperty());
+
+    touchNew(dirA / "afterWiden");
+    EXPECT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "afterWiden"))
+        << "NotifyFilter changed on a live watcher never reached the kernel-side mask";
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, SettingNotifyFilterToItsCurrentValueIsANoOp) {
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+
+    w.setNotifyFilterProperty(NotifyFilters::LastWrite | NotifyFilters::FileName |
+                              NotifyFilters::DirectoryName);   // the default, unchanged
+
+    touchNew(dirA / "survives");
+    EXPECT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "survives"));
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, AnInvalidNotifyFilterIsRejectedBeforeAnythingIsTornDown) {
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+
+    EXPECT_THROW(w.setNotifyFilterProperty(static_cast<NotifyFilters>(0x40000)),
+                 System::ArgumentException);
+
+    touchNew(dirA / "stillWatched");
+    EXPECT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "stillWatched"))
+        << "a rejected NotifyFilter tore down a watch it had no business touching";
 
     w.setEnableRaisingEventsProperty(false);
 }

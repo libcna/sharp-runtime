@@ -83,7 +83,16 @@ namespace System::IO {
         if ((static_cast<int>(value) & ~ValidNotifyFiltersMask) != 0) {
             throw System::ArgumentException("The value of the NotifyFilter property is invalid.", "value");
         }
+        if (value == notifyFilter_) return;
+
+        // The kernel-side mask is fixed when the watch is armed, so a filter changed on a live
+        // watcher only takes effect if that watch is rebuilt. Unlike directory_, notifyFilter_ is
+        // read only by the arming path on the caller thread, so this teardown is not there to
+        // remove a race -- it is there because a narrower or wider mask needs a new watch.
+        const bool wasEnabled = enabled_;
+        stopWatchingIfRunning();
         notifyFilter_ = value;
+        if (wasEnabled) startWatchingIfPossible();
     }
 
     void FileSystemWatcher::setEnableRaisingEventsProperty(bool value) {
@@ -116,6 +125,45 @@ namespace System::IO {
             }
             return false;
         }
+
+        // NotifyFilters and inotify do not share a vocabulary, and this translation deliberately
+        // resolves only the part of the mapping that needs no policy decision. The public values
+        // fall into two classes:
+        //
+        //   name class     FileName, DirectoryName              -- a directory ENTRY changed
+        //   content class  Attributes, Size, LastWrite,         -- the file BEHIND an entry changed
+        //                  LastAccess, CreationTime, Security
+        //
+        // No value in one class can justify an event from the other, so a filter naming no
+        // name-class value must not admit Created/Deleted/Renamed, and a filter naming no
+        // content-class value must not admit Changed. That much is unambiguous with no reference
+        // tree. Allocating events WITHIN a class is not, and is NOT decided here: IN_MODIFY could
+        // serve Size or LastWrite or both; IN_ATTRIB could serve any of five; CreationTime has no
+        // inotify event at all; LastAccess is unserved because IN_ACCESS is in no mask; and
+        // FileName is not discriminated from DirectoryName even though IN_ISDIR would allow it.
+        // Those five choices are ticket #2346 and are left exactly as they were measured -- this
+        // function narrows the mask, it does not decide the mapping.
+        constexpr int kNameClassFilters =
+            static_cast<int>(NotifyFilters::FileName) | static_cast<int>(NotifyFilters::DirectoryName);
+        constexpr int kContentClassFilters =
+            static_cast<int>(NotifyFilters::Attributes)   | static_cast<int>(NotifyFilters::Size)     |
+            static_cast<int>(NotifyFilters::LastWrite)    | static_cast<int>(NotifyFilters::LastAccess) |
+            static_cast<int>(NotifyFilters::CreationTime) | static_cast<int>(NotifyFilters::Security);
+
+        uint32_t inotifyMaskFor(NotifyFilters filter) {
+            const int bits = static_cast<int>(filter);
+            uint32_t mask = 0;
+            // IN_MOVED_FROM and IN_MOVED_TO travel with IN_CREATE/IN_DELETE rather than forming a
+            // class of their own: watchLoop pairs them by cookie to report a single Renamed, so
+            // admitting one half of a pair would turn a rename into a spurious Created or Deleted.
+            if ((bits & kNameClassFilters) != 0) {
+                mask |= IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO;
+            }
+            if ((bits & kContentClassFilters) != 0) {
+                mask |= IN_MODIFY | IN_ATTRIB;
+            }
+            return mask;
+        }
     } // namespace
 
     void FileSystemWatcher::startWatchingIfPossible() {
@@ -124,6 +172,13 @@ namespace System::IO {
         // EnableRaisingEvents before Path in some order real .NET itself does not forbid either.
         if (directory_.empty()) return;
         if (watchThread_.joinable()) return;
+
+        // NotifyFilters(0) is a valid value that names no change to watch. inotify_add_watch
+        // rejects a zero mask with EINVAL, which would surface as an Error event for a request
+        // that is not an error, so it is treated the way an unconfigured directory already is:
+        // the flag is tracked, nothing is watched, and a later NotifyFilter change re-arms.
+        const uint32_t mask = inotifyMaskFor(notifyFilter_);
+        if (mask == 0) return;
 
         inotifyFd_ = inotify_init1(IN_CLOEXEC);
         if (inotifyFd_ < 0) {
@@ -137,7 +192,6 @@ namespace System::IO {
             return;
         }
 
-        constexpr uint32_t mask = IN_CREATE | IN_DELETE | IN_MODIFY | IN_ATTRIB | IN_MOVED_FROM | IN_MOVED_TO;
         watchDescriptor_ = inotify_add_watch(inotifyFd_, directory_.c_str(), mask);
         if (watchDescriptor_ < 0) {
             ::close(inotifyFd_);

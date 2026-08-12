@@ -1049,3 +1049,57 @@ teardown is the same question as #2105's and is not answered here.
 
 No public signature, member, base, virtual, vtable, object-layout or exception-specification
 change; the header was touched for doc-comments only. Component graph unchanged.
+
+### 20.8 #2345 landed — the half of I-D that needs no mapping policy
+
+The measured before-state (§20.7) leaves exactly one defensible repair that decides nothing:
+`NotifyFilters` values split into two classes, and **no value in one class can justify an event
+from the other**.
+
+| Class | Values | inotify bits | Public events |
+|---|---|---|---|
+| name | `FileName`, `DirectoryName` | `IN_CREATE`, `IN_DELETE`, `IN_MOVED_FROM`, `IN_MOVED_TO` | `Created`, `Deleted`, `Renamed` |
+| content | `Attributes`, `Size`, `LastWrite`, `LastAccess`, `CreationTime`, `Security` | `IN_MODIFY`, `IN_ATTRIB` | `Changed` |
+
+`IN_MOVED_FROM`/`IN_MOVED_TO` sit in the name class rather than forming a third one because
+`watchLoop` pairs them by cookie into a single `Renamed`; admitting half a pair would turn a
+rename into a spurious `Created` or `Deleted`.
+
+**Measured result** — ten filter rows × seven operations, before → after:
+
+| Filter | Before | After |
+|---|---|---|
+| Default (`LastWrite\|FileName\|DirectoryName`) | 7 events | **7 events, byte-identical** |
+| `FileName` alone / `DirectoryName` alone | 7 | 5 (`Created`/`Deleted`/`Renamed` only) |
+| each of the six content values alone | 7 | 2 (`Changed` only) |
+| `NotifyFilters(0)` | 7 | **0** |
+
+`NotifyFilters(0)` is a valid value naming no change. A zero mask makes `inotify_add_watch` fail
+with `EINVAL`, which would surface an `Error` event for a request that is not an error, so it is
+treated the way an unconfigured `Path` already is: the flag is tracked, nothing is watched, and a
+later filter change re-arms. `setNotifyFilterProperty` re-arms through the same
+join → write → arm sequence #2344 introduced, because the mask is fixed when the watch is armed
+and the property would otherwise still be inert on a live watcher.
+
+**Recorded, not hidden:** a reconfiguration discards events already queued but not yet delivered,
+exactly as disabling does. 6 mutations, all caught (3/3/1/1/1/1); the first attempt at the
+"restore the original constant mask" mutation was rejected by `-Werror=unused-function` and is
+recorded as **invalid and re-run correctly**, not as a survivor.
+
+### 21.10 #2346 — the mapping decision this review will NOT make
+
+Five questions remain. Each is priced; none is derivable with `/rv` absent.
+
+| # | Question | What Linux gives | Options | Cost of each |
+|---|---|---|---|---|
+| 1 | Which value does `IN_MODIFY` serve? | one bit for "content was written"; **no** way to know whether the size changed | (a) `Size` and `LastWrite` both — *current*; (b) `LastWrite` only; (c) `Size` only; (d) `Size` only when `stat` shows the length changed | (a) false positives for `Size` on same-length writes; (b) `Size`-only watchers go silent — a **behaviour removal**; (c) `LastWrite`-only watchers go silent; (d) a `stat` per event, still racy, and turns the watcher into a poller |
+| 2 | Which values does `IN_ATTRIB` serve? | one bit for chmod/chown/link-count/`utimes` — **not** which of them | (a) all six content values — *current*; (b) `Attributes` and `Security` only; (c) `Attributes` only | (a) `Size`-only watchers see chmod; (b)/(c) `LastWrite`/`LastAccess` watchers stop seeing `utimes` |
+| 3 | `CreationTime` | **nothing** — inotify cannot report a btime change at all | (a) approximate via the content class — *current*; (b) admit nothing; (c) reject the value at the setter | (a) pure false positives; (b) a silently inert filter; (c) a **new** `ArgumentException` on a value .NET accepts |
+| 4 | `LastAccess` | `IN_ACCESS`, which is in **no** mask today, so reads are never reported | (a) leave unserved — *current*; (b) add `IN_ACCESS` to the content class; (c) add it only when `LastAccess` is named | (a) a named filter that cannot fire for its own operation; (b) every read wakes every content watcher — a large volume change; (c) correct but makes the mask filter-dependent in a second dimension |
+| 5 | `FileName` vs `DirectoryName` | `IN_ISDIR` on each event — the information **is** available | (a) do not discriminate — *current*; (b) gate `Created`/`Deleted`/`Renamed` on `IN_ISDIR` against the two values | (a) a `FileName`-only watcher reports subdirectory creation; (b) correct, but changes the events a name-class watcher receives and needs a dispatch-side change, not just a mask change |
+
+Every "current" option is the state #2345 leaves behind, so **taking no decision is itself a
+supported outcome** — it is simply not one this review may take on the user's behalf. Until it is
+taken, all six content values are mutually indistinguishable and `FileName` is indistinguishable
+from `DirectoryName`; the permanent tests **pin that** rather than assume it away, so whichever
+option is chosen will show up as a test change and not as a silent drift.
