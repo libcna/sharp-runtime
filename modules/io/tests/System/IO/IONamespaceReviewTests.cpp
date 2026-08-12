@@ -29,6 +29,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <atomic>
+#include <thread>
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
@@ -42,6 +44,7 @@
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/BinaryData.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/IO/Directory.hpp"
 #include "System/IO/DirectoryInfo.hpp"
@@ -1497,6 +1500,228 @@ TEST_F(WatcherReconfigurationFixture, DisablingIsIdempotentAndTheWatcherStaysUsa
     EXPECT_FALSE(r.handlerFailed());
 
     w.setEnableRaisingEventsProperty(false);
+}
+
+// --- Ticket #2347: reconfiguring from inside a handler ------------------------------------
+//
+// Handlers run ON the watcher thread. All three reconfiguring members routed through
+// stopWatchingIfRunning(), which called watchThread_.join() unconditionally -- so calling any of
+// them from a handler was a self-join, raising std::system_error("Resource deadlock avoided",
+// code 35). watchLoop invoked handlers with NO try/catch, so with the handler not wrapping the
+// call -- which is what a ported caller writes -- that exception reached std::terminate: measured
+// SIGABRT, exit 134 (build-probe/2104_probe1_modeA.log). Every test below crashed the whole
+// executable before the repair, which is why they assert on a flag set AFTER the call returns
+// rather than merely on the absence of an exception.
+
+TEST_F(WatcherReconfigurationFixture, DisablingFromInsideItsOwnHandlerReturnsInsteadOfTerminating) {
+    // .NET permits a handler to stop its own watcher, so this is a permitted call, not a rejected
+    // one: the stop is signalled and the thread is reaped later instead of being joined here.
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+
+    std::atomic<bool> setterReturned{false};
+    std::atomic<bool> threw{false};
+    w.Created.push_back([&](void*, const FileSystemEventArgs&) {
+        try {
+            w.setEnableRaisingEventsProperty(false);
+            setterReturned.store(true);
+        } catch (...) {
+            threw.store(true);
+        }
+    });
+
+    w.setEnableRaisingEventsProperty(true);
+    touchNew(dirA / "selfStop");
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "selfStop"));
+
+    // Waiting on the recorder proves the handler ran; this proves it got PAST the setter rather
+    // than dying inside it.
+    for (int i = 0; i < 2000 && !setterReturned.load() && !threw.load(); ++i)
+        std::this_thread::yield();
+    EXPECT_TRUE(setterReturned.load()) << "the setter never returned to the handler that called it";
+    EXPECT_FALSE(threw.load()) << "the self-join exception is still raised";
+    EXPECT_FALSE(w.getEnableRaisingEventsProperty());
+}
+
+TEST_F(WatcherReconfigurationFixture, AWatcherDisabledFromItsOwnHandlerCanStillBeReEnabled) {
+    // The self-stopped thread stays joinable until an external caller reaps it, so without
+    // reapSelfStoppedThread() the arming path would mistake it for a live watch and return
+    // quietly -- leaving the watcher enabled and permanently inert.
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+
+    std::atomic<int> stops{0};
+    w.Created.push_back([&](void*, const FileSystemEventArgs&) {
+        if (stops.load() == 0) {
+            w.setEnableRaisingEventsProperty(false);
+            stops.fetch_add(1);
+        }
+    });
+
+    w.setEnableRaisingEventsProperty(true);
+    touchNew(dirA / "first");
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "first"));
+    for (int i = 0; i < 2000 && stops.load() == 0; ++i) std::this_thread::yield();
+
+    w.setEnableRaisingEventsProperty(true); // reaps the self-stopped thread, then arms afresh
+    EXPECT_TRUE(w.getEnableRaisingEventsProperty());
+    touchNew(dirA / "afterReEnable");
+    EXPECT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "afterReEnable"))
+        << "the watcher was never re-armed after a handler stopped it";
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, SettingPathFromInsideAHandlerThrowsAndChangesNothing) {
+    // Rejected rather than deferred: re-arming retires the inotify watch this very thread is
+    // dispatching from. The watcher's state must survive the rejection untouched.
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+
+    std::atomic<bool> sawInvalidOperation{false};
+    std::atomic<bool> sawSomethingElse{false};
+    w.Created.push_back([&](void*, const FileSystemEventArgs&) {
+        try {
+            w.setPathProperty(dirB.string());
+            sawSomethingElse.store(true); // returned normally: also a failure
+        } catch (const System::InvalidOperationException&) {
+            sawInvalidOperation.store(true);
+        } catch (...) {
+            sawSomethingElse.store(true);
+        }
+    });
+
+    w.setEnableRaisingEventsProperty(true);
+    touchNew(dirA / "pathProbe");
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "pathProbe"));
+    for (int i = 0; i < 2000 && !sawInvalidOperation.load() && !sawSomethingElse.load(); ++i)
+        std::this_thread::yield();
+
+    EXPECT_TRUE(sawInvalidOperation.load())
+        << "Path= from a handler did not report InvalidOperationException";
+    EXPECT_FALSE(sawSomethingElse.load());
+    EXPECT_EQ(w.getPathProperty(), dirA.string()) << "the rejected change was partly applied";
+
+    // Still live on the original directory: the rejection tore nothing down.
+    touchNew(dirA / "stillWatching");
+    EXPECT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "stillWatching"));
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, SettingNotifyFilterFromInsideAHandlerThrowsAndChangesNothing) {
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+    const NotifyFilters before = w.getNotifyFilterProperty();
+
+    std::atomic<bool> sawInvalidOperation{false};
+    w.Created.push_back([&](void*, const FileSystemEventArgs&) {
+        try {
+            w.setNotifyFilterProperty(NotifyFilters::Size);
+        } catch (const System::InvalidOperationException&) {
+            sawInvalidOperation.store(true);
+        } catch (...) {
+        }
+    });
+
+    w.setEnableRaisingEventsProperty(true);
+    touchNew(dirA / "filterProbe");
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "filterProbe"));
+    for (int i = 0; i < 2000 && !sawInvalidOperation.load(); ++i) std::this_thread::yield();
+
+    EXPECT_TRUE(sawInvalidOperation.load());
+    EXPECT_EQ(w.getNotifyFilterProperty(), before);
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, ReconfiguringFromAnotherThreadIsUnaffected) {
+    // The control the rejections need: the thread-identity check must reject ONLY the watcher's
+    // own thread. A different thread reconfigures exactly as it always did.
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+    touchNew(dirA / "control");
+    ASSERT_TRUE(r.awaitName("control"));
+
+    std::thread other([&] {
+        w.setPathProperty(dirB.string());
+        w.setNotifyFilterProperty(NotifyFilters::FileName | NotifyFilters::LastWrite);
+    });
+    other.join();
+
+    EXPECT_EQ(w.getPathProperty(), dirB.string());
+    touchNew(dirB / "afterOtherThread");
+    EXPECT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "afterOtherThread"));
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, AnExceptionEscapingAHandlerReachesErrorInsteadOfTerminating) {
+    // The second half of the same mechanism: handler invocation had no try/catch at all, so ANY
+    // exception escaping ANY handler -- not only the self-join -- ended the process.
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+
+    std::atomic<int> errorsSeen{0};
+    w.Error.push_back([&](void*, const System::IO::ErrorEventArgs&) { errorsSeen.fetch_add(1); });
+    w.Created.push_back([](void*, const FileSystemEventArgs&) {
+        throw System::InvalidOperationException("a handler that throws");
+    });
+
+    w.setEnableRaisingEventsProperty(true);
+    touchNew(dirA / "throwingHandler");
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "throwingHandler"));
+    for (int i = 0; i < 2000 && errorsSeen.load() == 0; ++i) std::this_thread::yield();
+
+    EXPECT_GE(errorsSeen.load(), 1) << "the escaped exception was not delivered to Error";
+
+    // The watch survives a throwing handler rather than dying with it.
+    touchNew(dirA / "afterTheThrow");
+    EXPECT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "afterTheThrow"));
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, AnErrorHandlerThatThrowsIsSwallowedRatherThanRecursing) {
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+
+    std::atomic<int> errorCalls{0};
+    w.Error.push_back([&](void*, const System::IO::ErrorEventArgs&) {
+        errorCalls.fetch_add(1);
+        throw System::InvalidOperationException("an Error handler that throws");
+    });
+    w.Created.push_back([](void*, const FileSystemEventArgs&) {
+        throw System::InvalidOperationException("a handler that throws");
+    });
+
+    w.setEnableRaisingEventsProperty(true);
+    touchNew(dirA / "doubleThrow");
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "doubleThrow"));
+    for (int i = 0; i < 2000 && errorCalls.load() == 0; ++i) std::this_thread::yield();
+    EXPECT_EQ(errorCalls.load(), 1) << "a throwing Error handler was re-entered";
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, DestroyingAWatcherThatStoppedItselfDoesNotHangOrCrash) {
+    // The destructor runs on a thread that is NOT the watcher thread, so it must still join and
+    // close the descriptors the self-stop deliberately left open.
+    WatchRecorder r;
+    {
+        FileSystemWatcher w(dirA.string());
+        subscribeAll(w, r);
+        w.Created.push_back([&](void*, const FileSystemEventArgs&) {
+            w.setEnableRaisingEventsProperty(false);
+        });
+        w.setEnableRaisingEventsProperty(true);
+        touchNew(dirA / "stopThenDestroy");
+        ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "stopThenDestroy"));
+    }
+    SUCCEED() << "the watcher was destroyed after stopping itself";
 }
 
 #endif // __linux__

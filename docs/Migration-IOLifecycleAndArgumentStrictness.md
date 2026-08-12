@@ -181,10 +181,24 @@ resolution cannot land silently. They are not guarantees; they are a record of t
   (SR-AUD-186). Both need the absent reference tree. SR-AUD-186's premise is **inverted**: .NET's
   behaviour is the aliasing one and this port's is the defensive one, so "fixing" it means making
   `BinaryData` alias caller memory it does not own.
-- **#2347 — new, found while writing #2104's #2105 pin.** Calling `EnableRaisingEvents`, `Path` or
-  `NotifyFilter` **from inside a handler** self-joins the watcher thread: `std::system_error`
-  ("Resource deadlock avoided") is raised on the watcher thread, and because handler invocation is
-  not wrapped in a `try`/`catch` it reaches `std::terminate`. Measured, `SIGABRT`
-  (`build-probe/2104_probe1_modeA.log`). .NET permits the pattern. **Until #2347 is fixed, stop a
-  watcher from the thread that owns it, not from its callback.** No `SR-AUD-*` identifier is
-  issued; audit numbering stays frozen at 364.
+- **#2347 — found while writing #2104's #2105 pin; REMEDIATED 2026-08-12.** Calling
+  `EnableRaisingEvents`, `Path` or `NotifyFilter` **from inside a handler** self-joined the watcher
+  thread: `std::system_error` ("Resource deadlock avoided") was raised on the watcher thread, and
+  because handler invocation was not wrapped in a `try`/`catch` it reached `std::terminate`.
+  Measured, `SIGABRT` (`build-probe/2104_probe1_modeA.log`). .NET permits the pattern. **What
+  changed:**
+  - `EnableRaisingEvents = false` **from a handler is now permitted**, matching .NET. The stop is
+    signalled and the thread is not joined; the loop exits when the handler returns, and the
+    thread is reaped by the next reconfiguration or by the destructor. The setter returns at once.
+  - `Path` and `NotifyFilter` **from a handler now throw `System::InvalidOperationException`**
+    while a watch is live, leaving the watcher's state exactly as it was. Rejection rather than
+    deferral is deliberate: both re-arm by retiring the inotify watch the calling thread is
+    dispatching from, and .NET's exact semantics for that case are not measurable here (`/rv`
+    absent). Reconfiguring from any other thread is unchanged.
+  - **An exception escaping any handler no longer reaches `std::terminate`**: it is delivered to
+    the `Error` handlers, and an `Error` handler that itself throws is swallowed rather than
+    allowed to recurse.
+
+  If your code relied on the old behaviour it was crashing, so there is nothing to migrate except
+  the two rejected setters — move those to another thread. No `SR-AUD-*` identifier is issued;
+  audit numbering stays frozen at 364.

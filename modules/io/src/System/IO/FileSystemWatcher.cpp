@@ -5,6 +5,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/IO/Directory.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/PlatformNotSupportedException.hpp"
 
 #if defined(__linux__)
@@ -48,6 +49,41 @@ namespace System::IO {
         stopWatchingIfRunning();
     }
 
+    namespace {
+        // The watcher this thread is currently running the watch loop for, or nullptr. Set by
+        // watchLoop() on entry and cleared on exit. Ticket #2347's first cut compared
+        // watchThread_.get_id() instead, which ThreadSanitizer correctly reported as a data race:
+        // the watcher thread read that std::thread while an external thread re-armed the watcher
+        // by assigning it. A thread_local is private to the reading thread, so it cannot race.
+        thread_local const FileSystemWatcher* tlsCurrentWatcher = nullptr;
+
+        /** @brief Marks the calling thread as @p w's watch thread for the duration of the loop. */
+        struct WatchThreadMarker {
+            explicit WatchThreadMarker(const FileSystemWatcher* w) { tlsCurrentWatcher = w; }
+            ~WatchThreadMarker() { tlsCurrentWatcher = nullptr; }
+            WatchThreadMarker(const WatchThreadMarker&) = delete;
+            WatchThreadMarker& operator=(const WatchThreadMarker&) = delete;
+        };
+    }
+
+    bool FileSystemWatcher::onWatcherThread() const noexcept {
+        // Ticket #2347. Handlers run ON watchThread_, so this is what separates "stop the
+        // watcher" from "stop the watcher FROM INSIDE the watcher", which used to be a self-join.
+        return tlsCurrentWatcher == this;
+    }
+
+    void FileSystemWatcher::reportHandlerFault(std::exception_ptr fault) {
+        // Ticket #2347's second half: watchLoop invoked handlers with no try/catch, so ANY
+        // exception escaping a handler -- not only the self-join -- reached std::terminate.
+        // It is delivered here instead, on the same thread, as the asynchronous fault it is.
+        if (Error.empty()) return;
+        System::IO::ErrorEventArgs args(fault);
+        for (auto& handler : Error) {
+            // An Error handler that throws is swallowed: routing it back here would recurse.
+            try { handler(this, args); } catch (...) {}
+        }
+    }
+
     void FileSystemWatcher::setPathProperty(const std::string& value) {
         if (directory_ == value) return;
         // Validation runs FIRST, before anything is torn down: a rejected path must leave a live
@@ -59,6 +95,18 @@ namespace System::IO {
             throw System::ArgumentException("The directory name " + value + " does not exist.", "Path");
         }
 
+        // Ticket #2347. Re-arming retires the current inotify watch and builds a new one, which
+        // cannot be done from the thread that is inside that watch's own dispatch -- and the old
+        // code tried to, by joining the calling thread with itself. Reject instead of deferring:
+        // the caller's state is left exactly as it was, so a retry from another thread works.
+        if (onWatcherThread()) {
+            throw System::InvalidOperationException(
+                "FileSystemWatcher::Path cannot be set from an event handler, because the "
+                "handler runs on the watcher thread that the change has to retire. Set "
+                "EnableRaisingEvents = false from the handler instead, or reconfigure from "
+                "another thread.");
+        }
+
         // watchLoop() reads directory_ on the WATCHER thread to build every FileSystemEventArgs,
         // so assigning it here while that thread runs is a data race -- ThreadSanitizer reported
         // it against the pre-repair tree, and its visible symptom was an event from the OLD
@@ -66,7 +114,7 @@ namespace System::IO {
         // exists. Joining the watcher thread before the write removes the race BY CONSTRUCTION
         // rather than by adding a lock, and it is also exactly what re-arming requires -- the old
         // inotify watch has to be retired before the new directory can be armed.
-        const bool wasEnabled = enabled_;
+        const bool wasEnabled = enabled_.load();
         stopWatchingIfRunning();
         directory_ = value;
         // Gated on enabled_ rather than on a watch having actually been running, so that the
@@ -85,19 +133,31 @@ namespace System::IO {
         }
         if (value == notifyFilter_) return;
 
+        // Ticket #2347. Re-arming retires the current inotify watch and builds a new one, which
+        // cannot be done from the thread that is inside that watch's own dispatch -- and the old
+        // code tried to, by joining the calling thread with itself. Reject instead of deferring:
+        // the caller's state is left exactly as it was, so a retry from another thread works.
+        if (onWatcherThread()) {
+            throw System::InvalidOperationException(
+                "FileSystemWatcher::NotifyFilter cannot be set from an event handler, because the "
+                "handler runs on the watcher thread that the change has to retire. Set "
+                "EnableRaisingEvents = false from the handler instead, or reconfigure from "
+                "another thread.");
+        }
+
         // The kernel-side mask is fixed when the watch is armed, so a filter changed on a live
         // watcher only takes effect if that watch is rebuilt. Unlike directory_, notifyFilter_ is
         // read only by the arming path on the caller thread, so this teardown is not there to
         // remove a race -- it is there because a narrower or wider mask needs a new watch.
-        const bool wasEnabled = enabled_;
+        const bool wasEnabled = enabled_.load();
         stopWatchingIfRunning();
         notifyFilter_ = value;
         if (wasEnabled) startWatchingIfPossible();
     }
 
     void FileSystemWatcher::setEnableRaisingEventsProperty(bool value) {
-        if (value == enabled_) return;
-        enabled_ = value;
+        if (value == enabled_.load()) return;
+        enabled_.store(value);
         if (value) startWatchingIfPossible();
         else stopWatchingIfRunning();
     }
@@ -171,6 +231,11 @@ namespace System::IO {
         // watch nothing) rather than throwing -- matches ported C# code that sets
         // EnableRaisingEvents before Path in some order real .NET itself does not forbid either.
         if (directory_.empty()) return;
+        // Ticket #2347. Arming from the watcher thread would assign watchThread_ while that very
+        // thread runs, so a handler that re-enables a watcher it just disabled is a no-op; the
+        // watch is reaped and re-armed by the next external call instead.
+        if (onWatcherThread()) return;
+        reapSelfStoppedThread(); // joinable-but-finished is not "already running"
         if (watchThread_.joinable()) return;
 
         // NotifyFilters(0) is a valid value that names no change to watch. inotify_add_watch
@@ -182,7 +247,7 @@ namespace System::IO {
 
         inotifyFd_ = inotify_init1(IN_CLOEXEC);
         if (inotifyFd_ < 0) {
-            enabled_ = false;
+            enabled_.store(false);
             if (!Error.empty()) {
                 auto ex = std::make_exception_ptr(
                     System::IO::IOException("Unable to initialize inotify: " + std::string(std::strerror(errno))));
@@ -196,7 +261,7 @@ namespace System::IO {
         if (watchDescriptor_ < 0) {
             ::close(inotifyFd_);
             inotifyFd_ = -1;
-            enabled_ = false;
+            enabled_.store(false);
             if (!Error.empty()) {
                 auto ex = std::make_exception_ptr(System::IO::IOException(
                     "Unable to watch directory '" + directory_ + "': " + std::string(std::strerror(errno))));
@@ -212,7 +277,7 @@ namespace System::IO {
             ::close(inotifyFd_);
             inotifyFd_ = -1;
             watchDescriptor_ = -1;
-            enabled_ = false;
+            enabled_.store(false);
             return;
         }
 
@@ -231,7 +296,7 @@ namespace System::IO {
             inotifyFd_ = -1;
             watchDescriptor_ = -1;
             stopEventFd_ = -1;
-            enabled_ = false;
+            enabled_.store(false);
             if (!Error.empty()) {
                 auto ex = std::make_exception_ptr(
                     System::IO::IOException("Unable to start the file system watcher thread."));
@@ -241,8 +306,28 @@ namespace System::IO {
         }
     }
 
+    void FileSystemWatcher::reapSelfStoppedThread() {
+        // Ticket #2347. A thread that stopped ITSELF is still joinable, so every path that asks
+        // "is a watch running?" would otherwise mistake a finished watch for a live one and
+        // silently do nothing -- leaving the watcher permanently inert after a handler disabled
+        // it. Reaping is only ever done from a thread that is NOT the watcher thread.
+        if (!selfStopPending_.load() || onWatcherThread()) return;
+        if (watchThread_.joinable()) watchThread_.join();
+        if (watchDescriptor_ >= 0 && inotifyFd_ >= 0) inotify_rm_watch(inotifyFd_, watchDescriptor_);
+        if (inotifyFd_ >= 0) ::close(inotifyFd_);
+        if (stopEventFd_ >= 0) ::close(stopEventFd_);
+        inotifyFd_ = watchDescriptor_ = stopEventFd_ = -1;
+        selfStopPending_.store(false);
+    }
+
     void FileSystemWatcher::stopWatchingIfRunning() {
-        if (!watchThread_.joinable()) return;
+        // Ticket #2347. The identity check runs BEFORE watchThread_ is touched at all: reading
+        // that std::thread from the watcher thread is itself a race with an external re-arm.
+        const bool selfStop = onWatcherThread();
+        if (!selfStop) {
+            reapSelfStoppedThread();
+            if (!watchThread_.joinable()) return;
+        }
 
         if (stopEventFd_ >= 0) {
             uint64_t one = 1;
@@ -254,6 +339,18 @@ namespace System::IO {
             ssize_t written = ::write(stopEventFd_, &one, sizeof(one));
             (void)written;
         }
+
+        // Ticket #2347. .NET permits a handler to stop its own watcher, and this is the call it
+        // makes. The stop has been signalled, so the loop exits as soon as the handler returns;
+        // joining here is what raised std::system_error("Resource deadlock avoided") and, with no
+        // try/catch around handler invocation, reached std::terminate. The descriptors are NOT
+        // closed either -- the loop is still polling them. Both are done when an external caller
+        // or the destructor reaps the thread.
+        if (selfStop) {
+            selfStopPending_.store(true);
+            return;
+        }
+
         watchThread_.join();
 
         if (watchDescriptor_ >= 0 && inotifyFd_ >= 0) inotify_rm_watch(inotifyFd_, watchDescriptor_);
@@ -263,6 +360,7 @@ namespace System::IO {
     }
 
     void FileSystemWatcher::watchLoop() {
+        const WatchThreadMarker marker(this); // ticket #2347: identifies this thread to onWatcherThread()
         constexpr size_t kEventBufSize = 16 * (sizeof(struct inotify_event) + NAME_MAX + 1);
         std::vector<char> buf(kEventBufSize);
 
@@ -306,21 +404,31 @@ namespace System::IO {
                         auto it = pendingMovedFrom.find(ev->cookie);
                         if (it != pendingMovedFrom.end()) {
                             RenamedEventArgs args(WatcherChangeTypes::Renamed, directory_, name, it->second);
-                            for (auto& handler : Renamed) handler(this, args);
+                            for (auto& handler : Renamed)
+                                try { handler(this, args); }
+                                catch (...) { reportHandlerFault(std::current_exception()); }
                             pendingMovedFrom.erase(it);
                         } else {
                             FileSystemEventArgs args(WatcherChangeTypes::Created, directory_, name);
-                            for (auto& handler : Created) handler(this, args);
+                            for (auto& handler : Created)
+                                try { handler(this, args); }
+                                catch (...) { reportHandlerFault(std::current_exception()); }
                         }
                     } else if (ev->mask & IN_CREATE) {
                         FileSystemEventArgs args(WatcherChangeTypes::Created, directory_, name);
-                        for (auto& handler : Created) handler(this, args);
+                        for (auto& handler : Created)
+                            try { handler(this, args); }
+                            catch (...) { reportHandlerFault(std::current_exception()); }
                     } else if (ev->mask & IN_DELETE) {
                         FileSystemEventArgs args(WatcherChangeTypes::Deleted, directory_, name);
-                        for (auto& handler : Deleted) handler(this, args);
+                        for (auto& handler : Deleted)
+                            try { handler(this, args); }
+                            catch (...) { reportHandlerFault(std::current_exception()); }
                     } else if (ev->mask & (IN_MODIFY | IN_ATTRIB)) {
                         FileSystemEventArgs args(WatcherChangeTypes::Changed, directory_, name);
-                        for (auto& handler : Changed) handler(this, args);
+                        for (auto& handler : Changed)
+                            try { handler(this, args); }
+                            catch (...) { reportHandlerFault(std::current_exception()); }
                     }
                 }
 
@@ -330,7 +438,9 @@ namespace System::IO {
             for (const auto& [cookie, name] : pendingMovedFrom) {
                 (void)cookie;
                 FileSystemEventArgs args(WatcherChangeTypes::Deleted, directory_, name);
-                for (auto& handler : Deleted) handler(this, args);
+                for (auto& handler : Deleted)
+                    try { handler(this, args); }
+                    catch (...) { reportHandlerFault(std::current_exception()); }
             }
         }
     }
@@ -349,6 +459,7 @@ namespace System::IO {
     }
     void FileSystemWatcher::stopWatchingIfRunning() {}
     void FileSystemWatcher::watchLoop() {}
+    void FileSystemWatcher::reapSelfStoppedThread() {}
 
 #endif
 

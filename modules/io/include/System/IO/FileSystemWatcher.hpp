@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
+#include <atomic>
+#include <exception>
 #include <thread>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -40,7 +42,10 @@ namespace System::IO {
         std::vector<std::string> filters_;
         NotifyFilters notifyFilter_ = NotifyFilters::LastWrite | NotifyFilters::FileName | NotifyFilters::DirectoryName;
         bool includeSubdirectories_ = false;
-        bool enabled_ = false;
+        // std::atomic because ticket #2347 lets the WATCHER thread write it (a handler calling
+        // EnableRaisingEvents = false) while another thread reads it. Same size and alignment as
+        // the bool it replaces, so the object layout is unchanged.
+        std::atomic<bool> enabled_{false};
         unsigned int internalBufferSize_ = 8192;
 
         // Backing state for the real inotify-based watch thread (Linux only; unused elsewhere).
@@ -55,12 +60,31 @@ namespace System::IO {
         int inotifyFd_ = -1;
         int watchDescriptor_ = -1;
         int stopEventFd_ = -1;
+        // Set when the watcher thread stopped ITSELF -- a handler called EnableRaisingEvents =
+        // false, so the stop was signalled but the thread could not be joined from inside itself
+        // (ticket #2347). The thread object stays joinable until an external caller reaps it, so
+        // this flag is what tells the arming path "joinable does not mean running here".
+        std::atomic<bool> selfStopPending_{false};
 #endif
         std::thread watchThread_;
 
         void startWatchingIfPossible();
         void stopWatchingIfRunning();
         void watchLoop();
+
+        /**
+         * @return true when the CALLING thread is this watcher's own watch thread.
+         * @note Answered from a thread_local marker the watch loop sets, NOT by reading
+         * watchThread_: reading that std::thread from the watcher thread races with the external
+         * thread that re-arms the watcher by assigning it (ThreadSanitizer-confirmed against the
+         * first cut of ticket #2347). A thread_local is per-thread by construction, so this adds
+         * no shared state and no member.
+         */
+        [[nodiscard]] bool onWatcherThread() const noexcept;
+        /** @brief Joins and cleans up a thread that stopped itself; a no-op otherwise. */
+        void reapSelfStoppedThread();
+        /** @brief Delivers an exception that escaped an event handler to the Error handlers. */
+        void reportHandlerFault(std::exception_ptr fault);
 
         static constexpr int ValidNotifyFiltersMask =
             static_cast<int>(NotifyFilters::Attributes)    | static_cast<int>(NotifyFilters::CreationTime) |
@@ -196,16 +220,31 @@ namespace System::IO {
          * it is ticket #2105 (deferred -- it needs ThreadSanitizer and a blocking-handler
          * harness), and it is recorded as an open question rather than asserted either way.
          *
-         * <b>Handlers run on the watcher thread, and this setter must not be called from one.</b>
-         * All three reconfiguring members -- this one, Path and NotifyFilter -- join that thread,
-         * so calling any of them from inside a handler is a self-join: it raises
-         * std::system_error ("Resource deadlock avoided"), and because handler invocation is not
-         * wrapped in a try/catch the exception reaches std::terminate rather than the caller
+         * <b>Handlers run on the watcher thread, and this setter MAY be called from one</b>
+         * (ticket #2347). Until #2347 all three reconfiguring members joined that thread
+         * unconditionally, so calling any of them from a handler was a self-join: it raised
+         * std::system_error ("Resource deadlock avoided") and, because handler invocation was not
+         * wrapped in a try/catch, the exception reached std::terminate rather than the caller
          * (measured, `build-probe/2104_probe1_modeA.log`, SIGABRT). .NET permits the pattern, so
-         * this is a real divergence and a real crash; it is ticket #2347 and carries no
-         * SR-AUD-* identifier. Until it is fixed, stop a watcher from the thread that owns it.
+         * that was both a real divergence and a real crash. Now:
+         *
+         * - <b>`EnableRaisingEvents = false` from a handler is permitted</b>, matching .NET. The
+         *   stop is signalled and the thread is NOT joined; the watch loop exits as soon as the
+         *   current handler returns, and the thread is reaped by the next reconfiguration or by
+         *   the destructor. The setter returns immediately, so a handler cannot wait on itself.
+         * - <b>`Path` and `NotifyFilter` from a handler throw</b>
+         *   `System::InvalidOperationException` while a watch is live, and are unchanged when no
+         *   watch thread is running. Rejection rather than deferral is deliberate: both re-arm by
+         *   retiring the current inotify watch and building a new one, which cannot be done from
+         *   the thread that is inside that watch's own dispatch, and .NET's exact semantics for
+         *   the case are not measurable here (`/rv` absent). The watcher's state is left exactly
+         *   as it was, so a caller may retry from another thread.
+         *
+         * An exception that escapes any event handler no longer reaches std::terminate either: it
+         * is delivered to the Error handlers, and an Error handler that itself throws is
+         * swallowed rather than allowed to recurse.
          */
-        [[nodiscard]] bool getEnableRaisingEventsProperty() const { return enabled_; }
+        [[nodiscard]] bool getEnableRaisingEventsProperty() const { return enabled_.load(); }
         void setEnableRaisingEventsProperty(bool value);
     };
 

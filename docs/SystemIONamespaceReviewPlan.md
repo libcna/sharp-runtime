@@ -1200,9 +1200,58 @@ that was taken rather than asserted.
 | SR-AUD-346 | **#2346** | open — `needs_user`, the mapping policy |
 | SR-AUD-185, SR-AUD-186 | **#2106** | open — deferred, reference tree absent |
 | watcher handler-after-disable question | **#2105** | deferred, needs TSan |
-| reentrant reconfiguration → `std::terminate` | **#2347** | new, todo, not implementation-ready as a documentation ticket's side effect |
+| reentrant reconfiguration → `std::terminate` | **#2347** | **remediated** 2026-08-12 — see §20.10 |
 
-**Five open findings, five owners, zero orphans.** `modules/io` has **no implementation-ready
-autonomous work left**: every remaining item is blocked on a user approval, waiting on a user
-policy decision, waiting on evidence that does not exist in this container, or is a newly minted
-concurrency ticket that needs its own design pass.
+**Five open findings, five owners, zero orphans.** Every remaining item is blocked on a user
+approval, waiting on a user policy decision, or waiting on evidence that does not exist in this
+container.
+
+**Correction to this section's exhaustion claim (2026-08-12).** It said `modules/io` had *no
+implementation-ready autonomous work left*, counting #2347 as "a newly minted concurrency ticket
+that needs its own design pass". The design pass was the work, not a blocker: #2347 carried a
+measured reproduction, named its own three candidate semantics, depended on no reference tree and
+on no approval, and was implemented in one bounded change (§20.10). The lesson is narrow and
+worth keeping: *needs a design pass* is not the same as *not implementation-ready*, and an
+ordinary post-audit ticket with a reproduction can outrank a namespace's entire open finding
+count. #2347 carries no `SR-AUD-*` identifier, so any ranking driven by frozen-audit volume would
+have skipped it entirely.
+
+### 20.10 #2347 — the self-join, and the race the first cut introduced
+
+**Before.** All three reconfiguring members routed through `stopWatchingIfRunning()`, which called
+`watchThread_.join()` unconditionally. Handlers run *on* that thread, so a handler calling any of
+them self-joined: `std::system_error`, `resource_deadlock_would_occur`, code 35. `watchLoop`
+invoked handlers with **no** `try`/`catch`, so with the handler not wrapping the call — what a
+ported caller writes — the exception reached `std::terminate`. Re-measured live before the repair:
+mode A `SIGABRT`/exit 134, mode B the exception identity above.
+
+**Chosen semantics, and why each.** The ticket offered deferred teardown, a thread-identity check,
+or documented rejection. The repair uses the first two where .NET's behaviour is known and the
+third only where it is not:
+
+| Called from a handler | Behaviour | Reason |
+|---|---|---|
+| `EnableRaisingEvents = false` | **permitted**, deferred teardown | .NET permits it. The stop is signalled, the thread is not joined, the loop exits when the handler returns, and an external caller or the destructor reaps it. |
+| `Path =`, `NotifyFilter =` | **`InvalidOperationException`**, state untouched | Both re-arm by retiring the inotify watch the calling thread is dispatching from. `/rv` is absent, so .NET's exact semantics here are unmeasurable; rejecting loudly beats guessing, and a retry from another thread works. |
+| any handler throwing | delivered to `Error` | The missing `try`/`catch` is the second half of the same mechanism, as the acceptance criteria required. A throwing `Error` handler is swallowed rather than re-entered. |
+
+**The race the first cut introduced, and how it was removed.** The first implementation answered
+"am I the watcher thread?" with `watchThread_.get_id() == std::this_thread::get_id()`.
+ThreadSanitizer reported that as a data race, correctly: the watcher thread read that `std::thread`
+while an external thread re-armed the watcher by assigning it. It is now answered from a
+`thread_local` marker the watch loop sets — private to the reading thread, so it cannot race, and
+it adds no member. `enabled_` and `selfStopPending_` became `std::atomic<bool>` for the same
+reason, both the same size and alignment as the `bool` they replace. **`sizeof`/`alignof` measured
+before and after: 216/8 both times — no layout change.** The identity check also had to move
+*ahead* of every `watchThread_` access in `stopWatchingIfRunning()`, since reading it at all from
+the watcher thread is the race.
+
+**Validation.** +8 tests (`WatcherReconfigurationFixture` 18 → 26; `SharpRuntimeTests_IO`
+668 → 676), all deterministic — every wait is on an event or an atomic, never a sleep. **Five
+mutations built, executed and restored; all five caught**, including N3 (drop the handler
+`try`/`catch`) and N1 (restore the unconditional join), which abort the executable with exit 134 —
+the exact pre-repair symptom. ThreadSanitizer: **0 warnings across five runs** of a harness that
+exercises self-stop, external reap-and-re-arm, a rejected reconfiguration racing an external one,
+a throwing handler, and destruction with a self-stop pending. TSan was warranted here, unlike the
+XML content tickets, because the defect *is* thread state. No public signature, vtable, `noexcept`
+specification or component edge changed.
