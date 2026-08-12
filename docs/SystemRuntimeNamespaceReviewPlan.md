@@ -1443,3 +1443,72 @@ repaired source returns `VERDICT=ok`, exit 0.
 same body and is **not** folded in here, for the same reason §15 kept it out of #1974: it
 changes `exec()` inheritance, which is its own observable transition and deserves its own
 before/after.
+
+---
+
+## 27. What #1985 measured (2026-08-12) — the self-pipe was inherited across `exec()`
+
+**No audit row changed.** Like #1986, this is a **post-audit** defect with **no
+`SR-AUD-*` identifier**; numbering stays frozen at **364** and `modules/runtime`'s open
+count is still **14**.
+
+### 27.1 The defect
+
+`ensureWatcherStarted()` called `::pipe()` with no close-on-exec, so both ends survived an
+`exec()` in a child: the child held a **write** end to a pipe whose watcher thread does not
+exist in it — `fork()` gives the child no watcher — and a **read** end that kept the pipe
+alive for as long as the child ran. Neither descriptor has any meaning after `exec()`.
+
+| | before | after |
+|---|---|---|
+| `FD_CLOEXEC` on the descriptor `pipe()` returned | **0** | **1** |
+| pipe descriptors open in the process without `FD_CLOEXEC` | **2** | **0** |
+
+`build-probe/1985_probe1_before.log` → `build-probe/1985_probe1_after.log`, both captured
+with stdout redirected to a file. The first `before` capture was taken through a `| tee`
+pipeline and reported **3**; that third descriptor was the shell's own stdout pipe, not the
+library's, and the logs were re-taken with matching redirection rather than explained away.
+
+A naive scan sees only **one** of the two ends (`new_pipe_fds=1`) because `::pipe()` reuses
+the descriptor number the scan's own directory handle had just released. That artefact is
+why the permanent regression below classifies descriptors by **type** rather than by
+presence.
+
+### 27.2 The repair, and why `fcntl` rather than `pipe2`
+
+Both ends get `FD_CLOEXEC` via `fcntl(F_GETFD/F_SETFD)`, and a failure closes both
+descriptors and throws `System::IO::IOException` — the same rollback shape #1974 gave the
+`O_NONBLOCK` step immediately above.
+
+`pipe2(O_CLOEXEC)` would set the flag atomically but does not exist on every POSIX platform
+this port builds for — notably macOS, which the downstream Apple Clang builds use — so it
+would need a second, untestable code path. The cost of `fcntl` is stated rather than hidden:
+setting the flag is **not** atomic with `pipe()`, so a `fork`+`exec` on another thread landing
+between the two statements still inherits the pair. That window is two adjacent statements,
+entered once per process at the first `Create()` and under `registryMutex_`, and a `fork`
+landing in it is no worse than the unconditional inheritance being replaced.
+
+### 27.3 Test and mutation
+
+`PosixSignalTests.SelfPipe_DescriptorsAreCloseOnExec` is **one test with two roles**. The
+self-pipe is built once per process, so any earlier case in this suite has already built it
+and an in-place before/after would be vacuous; the test therefore `fork`s and `exec`s a fresh
+image of the test executable, and the child role — selected by `SHARP_RUNTIME_CLOEXEC_CHILD`
+— makes the first `Create()` in that process, requires **exactly two** new pipe descriptors,
+asserts `FD_CLOEXEC` on both, and then `fork`+`exec`s `/bin/sh` to confirm neither is still
+open in the exec'd image. It `_exit()`s with a distinct code per failure mode before
+GoogleTest reports, so it adds **no** second case and **no** skip to the suite. Guarded on
+`__linux__`: it reads `/proc/self/fd`.
+
+`SharpRuntimeTests_Runtime` **163 → 164**.
+
+| Mutation | Change | Verdict |
+|---|---|---|
+| **M4** | set `FD_CLOEXEC` on the read end only, leaving the write end inheritable | **killed** — child exit **11** (`FD_CLOEXEC` missing) |
+
+Removing the flag from both ends is the pre-repair state and yields the same exit 11; it is
+recorded as **equivalent to M4**, not counted twice. The exec-survival branch (child exit
+**12**) is reachable by construction but is **not** independently mutation-killable on Linux:
+once `FD_CLOEXEC` is set, closure on `exec()` is a kernel guarantee, so no source mutation can
+set the flag and still leak the descriptor. It is kept because it checks the consequence the
+ticket names rather than only the flag.

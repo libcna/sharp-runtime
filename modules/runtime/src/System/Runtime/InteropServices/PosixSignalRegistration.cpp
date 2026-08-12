@@ -232,6 +232,31 @@ namespace {
             throw System::IO::IOException(
                 "Failed to initialize POSIX signal handling (could not make the self-pipe non-blocking).");
         }
+        // Both ends must also be close-on-exec. Without it they survive an exec() in a child,
+        // which leaves that child holding a WRITE end to a pipe whose watcher thread does not
+        // exist in it -- fork() gives the child no watcher -- and a READ end that keeps the
+        // pipe alive for as long as the child does. Neither descriptor has any meaning after
+        // exec(), so both are pure leak (ticket #1985).
+        //
+        // Done with fcntl rather than pipe2(O_CLOEXEC) to stay portable to POSIX platforms
+        // without pipe2 (notably macOS, which this port's downstream Apple Clang builds use),
+        // and to match the O_NONBLOCK handling immediately above. The cost is that setting the
+        // flag is not atomic with pipe(): a fork+exec on another thread landing in that window
+        // still inherits the pair. The window is two adjacent statements, entered once per
+        // process at the first Create() and under registryMutex_, and a fork landing in it is
+        // no worse than the unconditional inheritance this replaces.
+        for (int end = 0; end < 2; ++end) {
+            int fdFlags = ::fcntl(selfPipe_[end], F_GETFD, 0);
+            if (fdFlags == -1 || ::fcntl(selfPipe_[end], F_SETFD, fdFlags | FD_CLOEXEC) != 0) {
+                int savedErrno = errno;
+                ::close(selfPipe_[0]);
+                ::close(selfPipe_[1]);
+                selfPipe_[0] = selfPipe_[1] = -1;
+                errno = savedErrno;
+                throw System::IO::IOException(
+                    "Failed to initialize POSIX signal handling (could not make the self-pipe close-on-exec).");
+            }
+        }
         watcherRunning_.store(true);
         watcherThread_ = std::thread(watcherLoop);
         watcherThread_.detach();

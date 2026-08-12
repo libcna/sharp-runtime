@@ -8,7 +8,14 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <set>
 #include <vector>
+#include <cstdio>
+#include <cstdlib>
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include "System/ArgumentNullException.hpp"
 #include "System/PlatformNotSupportedException.hpp"
@@ -635,3 +642,109 @@ TEST(PosixSignalTests, Dispose_CalledFromInsideItsOwnHandler_DoesNotDeadlock) {
 
     reentrantSelf.reset();
 }
+
+// ---------------------------------------------------------------------------------------
+// Ticket #1985 -- the self-pipe descriptors were inherited across exec().
+//
+// ensureWatcherStarted() called ::pipe() with no close-on-exec, so both ends survived an
+// exec() in a child process: the child held a WRITE end to a pipe whose watcher thread does
+// not exist in it (fork() gives the child no watcher) and a READ end keeping the pipe alive
+// for as long as the child ran. Measured before the repair as
+// `new_pipe_fds=1 with_cloexec=0` (build-probe/1985_probe1_before.log; only one end shows up
+// in a naive scan because pipe() reuses the descriptor number the scan itself had just
+// released -- which is exactly why the test below classifies descriptors by TYPE rather than
+// by presence).
+//
+// This is a SEPARATE defect from SR-AUD-172, which is about the write BLOCKING, and it was
+// deliberately kept out of #1974 so that a change to exec() inheritance would not land under
+// cover of a liveness repair (docs/SystemRuntimeNamespaceReviewPlan.md §15). No SR-AUD
+// identifier was issued: numbering stays frozen at 364.
+#if defined(__linux__)
+namespace {
+    // Descriptor numbers that are currently open AND are pipes. Classifying by type, not by
+    // presence, is what makes the before/after difference exact: the directory handle the scan
+    // itself opens releases a low descriptor number that ::pipe() then immediately reuses, so a
+    // plain set-difference of open descriptors misses one of the two ends.
+    std::set<int> openPipeFds() {
+        std::set<int> out;
+        DIR* d = ::opendir("/proc/self/fd");
+        if (d == nullptr) return out;
+        while (dirent* e = ::readdir(d)) {
+            if (e->d_name[0] == '.') continue;
+            int fd = std::atoi(e->d_name);
+            struct stat st{};
+            if (::fstat(fd, &st) == 0 && S_ISFIFO(st.st_mode)) out.insert(fd);
+        }
+        ::closedir(d);
+        return out;
+    }
+
+    // Child role: a FRESH process, so this Create() is the one that builds the self-pipe and
+    // the before/after difference is unambiguous. Never returns.
+    [[noreturn]] void runCloexecChildRoleAndExit() {
+        const std::set<int> before = openPipeFds();
+        auto reg = PosixSignalRegistration::Create(
+            PosixSignal::Sigwinch, [](PosixSignalContext& ctx) { ctx.setCancelProperty(true); });
+
+        std::vector<int> created;
+        for (int fd : openPipeFds())
+            if (!before.count(fd)) created.push_back(fd);
+
+        // Exactly the two ends of one self-pipe, or the probe proves nothing.
+        if (created.size() != 2) _exit(10);
+        for (int fd : created) {
+            int flags = ::fcntl(fd, F_GETFD, 0);
+            if (flags == -1 || !(flags & FD_CLOEXEC)) _exit(11);
+        }
+
+        // ...and confirm the consequence rather than only the flag: exec a shell and let it
+        // report whether either descriptor is still open in the exec'd image.
+        char script[256];
+        std::snprintf(script, sizeof(script),
+                      "if [ -e /proc/self/fd/%d ] || [ -e /proc/self/fd/%d ]; then exit 12; fi; exit 0",
+                      created[0], created[1]);
+        pid_t grandchild = ::fork();
+        if (grandchild == 0) {
+            ::execl("/bin/sh", "sh", "-c", script, static_cast<char*>(nullptr));
+            _exit(13);
+        }
+        if (grandchild < 0) _exit(14);
+        int gstatus = 0;
+        if (::waitpid(grandchild, &gstatus, 0) != grandchild) _exit(15);
+        if (!WIFEXITED(gstatus) || WEXITSTATUS(gstatus) != 0) _exit(WIFEXITED(gstatus) ? WEXITSTATUS(gstatus) : 16);
+        _exit(0);
+    }
+}
+
+// One test, two roles. The child role runs in a fresh image of this executable -- which is the
+// only way to observe the descriptors being created, since the self-pipe is built once per
+// process and any earlier test in this suite has already built it -- and _exit()s with its
+// verdict before GoogleTest reports, so it adds no second case and no skip to the suite.
+TEST(PosixSignalTests, SelfPipe_DescriptorsAreCloseOnExec) {
+    if (::getenv("SHARP_RUNTIME_CLOEXEC_CHILD") != nullptr) runCloexecChildRoleAndExit();
+
+    char exePath[4096];
+    ssize_t n = ::readlink("/proc/self/exe", exePath, sizeof(exePath) - 1);
+    ASSERT_GT(n, 0) << "cannot locate this executable, so the child role cannot be launched";
+    exePath[n] = '\0';
+
+    pid_t child = ::fork();
+    ASSERT_GE(child, 0) << "fork() failed";
+    if (child == 0) {
+        ::setenv("SHARP_RUNTIME_CLOEXEC_CHILD", "1", 1);
+        ::execl(exePath, exePath,
+                "--gtest_filter=PosixSignalTests.SelfPipe_DescriptorsAreCloseOnExec",
+                static_cast<char*>(nullptr));
+        _exit(90);
+    }
+
+    int status = 0;
+    ASSERT_EQ(::waitpid(child, &status, 0), child);
+    ASSERT_TRUE(WIFEXITED(status)) << "the child role did not exit normally";
+    const int code = WEXITSTATUS(status);
+    EXPECT_EQ(code, 0)
+        << "self-pipe close-on-exec check failed (child exit " << code << "): "
+        << "10=did not observe exactly two new pipe descriptors, 11=FD_CLOEXEC missing, "
+        << "12=a descriptor survived exec(), 13/90=exec failed, 14/15/16=fork/wait failed";
+}
+#endif // __linux__
