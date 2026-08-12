@@ -3,6 +3,31 @@
 
 # NEXT.md
 
+> **Test-count floor, 2026-08-12 — 17,024 / 38 (#1986, #1985).** The complete 38-executable
+> gate reads **17,024 run: 17,016 passed, 2 skipped, 6 failed** (17,016 + 6 + 2 = 17,024),
+> **+3** on #2341's 17,021 — exactly the three `PosixSignalTests` cases this batch added
+> (`SharpRuntimeTests_Runtime` 161 → 164; no other executable's count changed), so no
+> regression anywhere. The six failures are the inherited ones — five `PingTests` (#1962) and
+> `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`, which needs usable IPv6 this
+> environment does not provide — untouched, not disabled, not weakened, not recategorised, and
+> **the gate is not green**. `CLAUDE.md` rule 2's figure is raised to this reading under the
+> rule's own closing sentence, with #2341's 17,021 kept as the immediately preceding checkpoint.
+>
+> **This batch, in one line.** `modules/runtime` has **14** open findings and, on strict
+> ownership, **zero** implementation-ready: #1979/#1980/#1981 each wait on a user approval
+> sentence in `docs/SystemRuntimeNamespaceReviewPlan.md` §10, #1983 waits on three absent pieces
+> of evidence, and SR-AUD-168's structural half is a CLAUDE.md permanent deviation. The
+> `ThreadingNamespaceReviewPlan.md` §22 candidate — "three high-severity POSIX signal defects in
+> one `.cpp` body" — **collapsed on inspection**: it was written on 2026-08-03, and two of its
+> three members (SR-AUD-169, SR-AUD-172) have since been remediated by #1975/#1974, leaving only
+> SR-AUD-171, which is exactly the approval-gated one. What *was* implementable in that same body
+> were the two post-audit tickets recorded beside it: **#1986**, a lifetime defect letting a
+> handler run after its own `Dispose()` returned (ASan stack-use-after-scope before, none after),
+> and **#1985**, self-pipe descriptors inherited across `exec()`. Both are repaired here. **No
+> `SR-AUD-*` identifier was minted**; numbering stays frozen at 364 and the audit buckets are
+> unchanged at 213 remediated / 89 confirmed / 62 confirmed (design-complete). Details in
+> `docs/SystemRuntimeNamespaceReviewPlan.md` §26 and §27.
+
 > **Test-count floor, 2026-08-12 — 17,021 / 38 (#2341, #2342).** The complete 38-executable gate
 > reads **17,021 run: 17,013 passed, 2 skipped, 6 failed** (17,013 + 6 + 2 = 17,021), **+7** on
 > #2318's 17,014 — exactly the seven `ThreadingMonitorRecursionTests` cases #2341 added for
