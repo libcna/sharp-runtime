@@ -983,3 +983,69 @@ block of the probe is **byte-identical** before and after.
 
 **Still open in this namespace after #2099:** #2098 (blocked, Approval IO-1), #2102 (todo),
 #2104 (todo, LAST), #2105 and #2106 (deferred verification, both need the absent reference tree).
+
+### 20.7 #2102 SPLIT by measured cause, and #2344 landed the whole of I-E
+
+**#2102 was not one implementation-ready unit.** Measured against the live tree on 2026-08-12,
+its two named causes have different evidence status, so it was split into three bounded tickets
+— the same shape the #2098 → #2108 and #2099 splits already used in this namespace:
+
+| Ticket | Owns | State |
+|---|---|---|
+| **#2344** | I-E in full — `setPathProperty` never re-arms, **and races the watcher thread** | landed, SR-AUD-339 → `remediated` |
+| **#2345** | I-D's **class-crossing** half — no filter may admit events from the other class | landed, SR-AUD-346 stays `confirmed` |
+| **#2346** | I-D's remainder — the `NotifyFilters` → inotify mapping policy | `needs_user`, §21.10 |
+
+#### The inherited decomposition was right about the split and wrong about the second cause
+
+The handoff expected the "`Size`-only watcher raises `Created`" symptom to be *potentially
+independently repairable*, i.e. to have its own mechanism — an over-broad mask, a misclassified
+event, a switch fallthrough. **It has none.** Measured over all ten filter configurations ×
+seven file-system operations (`build-probe/2102_probe2_before.log`), **every configuration
+produces the byte-identical seven events, including `NotifyFilters(0)`**. There is exactly one
+cause — `notifyFilter_` is read by nothing and the `inotify_add_watch` mask is a `constexpr`
+constant — and "Size-only raises Created" is one cell of a table in which every cell is equal.
+So **#2102 is two causes with a non-uniform split, not two causes with three mechanisms**: I-E is
+one cause, I-D is one cause whose *repair* divides into a policy-free half and a policy-bound
+half.
+
+#### I-E is undefined behaviour, which neither the finding nor the ticket says
+
+`watchLoop()` builds every `FileSystemEventArgs` from `directory_` on the watcher thread, while
+`setPathProperty` assigns that `std::string` on the caller thread. ThreadSanitizer reported
+**3 data races, exit 66** against the pre-repair tree
+(`build-probe/2102_probe3_tsan_before.log`). The visible symptom the finding *does* describe —
+an event from the old directory carrying a `FullPath` built from the new one,
+`B/sentinelOnA.txt`, **a path naming no file that exists** — is the benign-looking face of it.
+
+#### The repair, and why it needed no lock
+
+Validation first, then **join**, then write, then arm:
+
+1. a rejected path (empty or non-existent) throws before anything is torn down, so a live watch
+   survives a bad `Path` completely untouched;
+2. `stopWatchingIfRunning()` joins the watcher thread, after which no other thread can observe
+   `directory_` — the race is removed **by construction**, and re-arming needed that teardown
+   anyway;
+3. the re-arm is gated on `enabled_`, **not** on a thread already running, so the
+   *EnableRaisingEvents-before-Path* ordering `startWatchingIfPossible()` deliberately tolerates
+   now arms instead of leaving the watcher enabled and permanently inert;
+4. a failed arm keeps the existing contract — `EnableRaisingEvents` goes false and `Error` is
+   raised — and the old watch is **not** kept as a fallback, because keeping it *is* the defect.
+
+**Recorded, not hidden:** events queued for the old directory but not yet delivered are discarded
+with the watch, exactly as they are when `EnableRaisingEvents` is set to false. Draining before
+teardown is the same question as #2105's and is not answered here.
+
+#### Evidence
+
+| Instrument | Result |
+|---|---|
+| Functional, deterministic | `build-probe/2102_probe1_before.log` → `_after.log`: the reported event moves from `A`-sourced/`B`-named to `B`-sourced/`B`-named, and now names a file that exists |
+| **TSan** | **3 data races (exit 66) → 0 (exit 0)**, 400 path flips, 1,749 events, 21 `__tsan_*` symbols |
+| Descriptors | delta **0** over 50 re-arms and over 20 arm/change/disarm cycles (`/proc/self/fd`, never LSan — §14) |
+| Tests | +8, all event-driven; **no sleep is used as synchronisation anywhere**, deadlines exist only so a wedged watcher fails instead of hanging |
+| Mutations | 5 against the shipped source: `no-rearm` 4 tests, `keep-old-watch` 3, `gate-on-thread-not-enabled` 1, `teardown-before-validation` 1, and **`write-before-teardown` 0 — functionally identical, caught only by TSan** (3 races, exit 66). That fifth mutation is why TSan is recorded here as discriminating rather than ceremonial |
+
+No public signature, member, base, virtual, vtable, object-layout or exception-specification
+change; the header was touched for doc-comments only. Component graph unchanged.

@@ -50,13 +50,33 @@ namespace System::IO {
 
     void FileSystemWatcher::setPathProperty(const std::string& value) {
         if (directory_ == value) return;
+        // Validation runs FIRST, before anything is torn down: a rejected path must leave a live
+        // watch exactly as it was, still armed on the directory the caller already configured.
         if (value.empty()) {
             throw System::ArgumentException("Empty path.", "Path");
         }
         if (!Directory::Exists(value)) {
             throw System::ArgumentException("The directory name " + value + " does not exist.", "Path");
         }
+
+        // watchLoop() reads directory_ on the WATCHER thread to build every FileSystemEventArgs,
+        // so assigning it here while that thread runs is a data race -- ThreadSanitizer reported
+        // it against the pre-repair tree, and its visible symptom was an event from the OLD
+        // directory carrying a FullPath built from the NEW one: a path naming no file that
+        // exists. Joining the watcher thread before the write removes the race BY CONSTRUCTION
+        // rather than by adding a lock, and it is also exactly what re-arming requires -- the old
+        // inotify watch has to be retired before the new directory can be armed.
+        const bool wasEnabled = enabled_;
+        stopWatchingIfRunning();
         directory_ = value;
+        // Gated on enabled_ rather than on a watch having actually been running, so that the
+        // "EnableRaisingEvents before Path" ordering startWatchingIfPossible() deliberately
+        // tolerates (it returns quietly when no directory is configured yet) arms here, instead
+        // of leaving the watcher enabled and permanently inert. If the new directory cannot be
+        // armed, startWatchingIfPossible()'s existing contract applies unchanged: EnableRaisingEvents
+        // goes false and Error is raised. The old watch is NOT kept as a fallback -- keeping it is
+        // the defect this repair removes.
+        if (wasEnabled) startWatchingIfPossible();
     }
 
     void FileSystemWatcher::setNotifyFilterProperty(NotifyFilters value) {

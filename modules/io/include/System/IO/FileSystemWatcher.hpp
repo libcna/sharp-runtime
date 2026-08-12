@@ -105,7 +105,21 @@ namespace System::IO {
 
         /**
          * @brief Gets or sets the path of the directory to watch.
+         *
+         * Setting a different path while EnableRaisingEvents is true retires the existing watch
+         * and arms the new directory: the watcher thread is joined before the new path is stored,
+         * so events from the old directory stop and no event can be reported against a directory
+         * the caller no longer asked for. Events already queued for the old directory but not yet
+         * delivered are discarded with the watch, exactly as they are when EnableRaisingEvents is
+         * set to false. If the new directory cannot be armed, EnableRaisingEvents becomes false
+         * and Error is raised, the same contract EnableRaisingEvents = true already carries; the
+         * old watch is not retained as a fallback. A rejected value leaves the watcher completely
+         * unchanged, still armed on the current directory.
+         *
          * @throws System::ArgumentException if @p value is empty or is not an existing directory.
+         * @throws System::PlatformNotSupportedException on a platform with no watch backend, if
+         *         the watcher is enabled -- the same exception EnableRaisingEvents = true raises
+         *         there, from whichever setter triggers the arm.
          */
         [[nodiscard]] const std::string& getPathProperty() const { return directory_; }
         void setPathProperty(const std::string& value);

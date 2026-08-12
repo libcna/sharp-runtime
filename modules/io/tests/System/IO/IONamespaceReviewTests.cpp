@@ -13,6 +13,10 @@
 //   #2099 / SR-AUD-342, cause I-A — six FileStream members ignored Close(): Length re-stat'd the
 //          path, Position returned the sentinel -1, Position=, Seek and Flush all succeeded, and
 //          two members checked their ARGUMENT before the closed state.
+//   #2344 / SR-AUD-339, cause I-E, split from #2102 — FileSystemWatcher::setPathProperty stored
+//          the new directory and did nothing else, so the old inotify watch stayed armed while
+//          its events were reported with a FullPath built from the NEW directory. Also a data
+//          race on directory_ between the caller and the watcher thread (TSan: 3 before, 0 after).
 //   #2100 / SR-AUD-340, cause I-B — RandomAccess::Write accepted a negative count SILENTLY, and
 //          every other rejection in the class was untyped: a bare IOException that named neither
 //          the offending parameter nor the native reason. GetLength returned the sentinel -1.
@@ -24,7 +28,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <chrono>
+#include <condition_variable>
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -39,6 +46,7 @@
 #include "System/IO/File.hpp"
 #include "System/IO/FileInfo.hpp"
 #include "System/IO/FileStream.hpp"
+#include "System/IO/FileSystemWatcher.hpp"
 #include "System/IO/IOException.hpp"
 #include "System/IO/RandomAccess.hpp"
 #include "System/IO/StreamReader.hpp"
@@ -836,3 +844,317 @@ TEST_F(ClosedFileStreamFixture, RepeatedRejectionsLeakNoDescriptor) {
     RecordProperty("fd_after", after);
     EXPECT_EQ(after, before) << "descriptor delta across 100 closed-stream rejection cycles";
 }
+
+// ===========================================================================================
+// #2344 / SR-AUD-339, cause I-E, split from #2102 — FileSystemWatcher::setPathProperty never
+// re-armed the inotify watch, and raced the watcher thread while doing it.
+//
+// Before-state, measured (build-probe/2102_probe1_before.log): after setPathProperty(B) on an
+// enabled watcher, a file created in the OLD directory A was still reported, and its FullPath
+// was built from the NEW directory — "B/sentinelOnA.txt", naming a file that does not exist.
+// A file created in B raised nothing at all.
+//
+// The finding called that a stale watch. It is also UNDEFINED BEHAVIOUR: watchLoop() reads
+// directory_ on the watcher thread while setPathProperty() writes that std::string on the
+// caller thread. ThreadSanitizer reported 3 data races against the pre-repair tree and 0 after
+// (build-probe/2102_probe3_tsan_before.log / _after.log, 400 path flips, 1,749 events).
+//
+// DETERMINISM: no sleep is used as synchronisation anywhere below. Every wait is on an EVENT,
+// with a deadline that exists only so a wedged watcher FAILS instead of hanging. Handlers run
+// on the watcher thread, so each one captures any exception it throws and the test surfaces it
+// rather than letting it reach std::terminate.
+// ===========================================================================================
+
+namespace {
+
+#if defined(__linux__)
+
+/// Collects watcher callbacks off the watcher thread and lets a test wait for a NAMED event.
+class WatchRecorder {
+public:
+    struct Seen {
+        WatcherChangeTypes type;
+        std::string name;
+        std::string fullPath;
+    };
+
+    void add(WatcherChangeTypes t, const std::string& n, const std::string& fp) {
+        try {
+            {
+                std::lock_guard<std::mutex> lock(m_);
+                events_.push_back(Seen{t, n, fp});
+            }
+            cv_.notify_all();
+        } catch (...) {
+            // A handler runs on the watcher thread: letting anything escape it would call
+            // std::terminate and take the whole test executable down with no diagnostic.
+            std::lock_guard<std::mutex> lock(m_);
+            handlerFailed_ = true;
+        }
+    }
+
+    /// True when an event named @p name has been observed. The deadline is a failsafe, never a
+    /// synchronisation mechanism: a test that relies on it timing out says so at the call site.
+    bool awaitName(const std::string& name,
+                   std::chrono::milliseconds budget = std::chrono::milliseconds(5000)) {
+        std::unique_lock<std::mutex> lock(m_);
+        return cv_.wait_for(lock, budget, [&] { return findLocked(name) != nullptr; });
+    }
+
+    [[nodiscard]] bool sawName(const std::string& name) {
+        std::lock_guard<std::mutex> lock(m_);
+        return findLocked(name) != nullptr;
+    }
+
+    [[nodiscard]] std::string fullPathOf(const std::string& name) {
+        std::lock_guard<std::mutex> lock(m_);
+        const Seen* s = findLocked(name);
+        return s ? s->fullPath : std::string();
+    }
+
+    [[nodiscard]] bool handlerFailed() {
+        std::lock_guard<std::mutex> lock(m_);
+        return handlerFailed_;
+    }
+
+private:
+    const Seen* findLocked(const std::string& name) const {
+        for (const auto& e : events_) {
+            if (e.name == name) return &e;
+        }
+        return nullptr;
+    }
+
+    std::mutex m_;
+    std::condition_variable cv_;
+    std::vector<Seen> events_;
+    bool handlerFailed_ = false;
+};
+
+void subscribeAll(FileSystemWatcher& w, WatchRecorder& r) {
+    w.Created.push_back([&r](void*, const FileSystemEventArgs& e) {
+        r.add(e.getChangeTypeProperty(), e.getNameProperty(), e.getFullPathProperty());
+    });
+    w.Deleted.push_back([&r](void*, const FileSystemEventArgs& e) {
+        r.add(e.getChangeTypeProperty(), e.getNameProperty(), e.getFullPathProperty());
+    });
+    w.Changed.push_back([&r](void*, const FileSystemEventArgs& e) {
+        r.add(e.getChangeTypeProperty(), e.getNameProperty(), e.getFullPathProperty());
+    });
+    w.Renamed.push_back([&r](void*, const RenamedEventArgs& e) {
+        r.add(e.getChangeTypeProperty(), e.getNameProperty(), e.getFullPathProperty());
+    });
+}
+
+/// Creates an empty file: exactly one in-mask inotify event (IN_CREATE).
+void touchNew(const std::filesystem::path& p) {
+    const int fd = ::open(p.c_str(), O_CREAT | O_WRONLY, 0644);
+    ASSERT_GE(fd, 0) << "could not create " << p;
+    ::close(fd);
+}
+
+/// Appends one byte to an existing file: exactly one in-mask inotify event (IN_MODIFY).
+void appendByte(const std::filesystem::path& p) {
+    const int fd = ::open(p.c_str(), O_WRONLY | O_APPEND);
+    ASSERT_GE(fd, 0) << "could not open " << p;
+    const char c = 'x';
+    const ssize_t n = ::write(fd, &c, 1);
+    ASSERT_EQ(n, 1);
+    ::close(fd);
+}
+
+/// The number of descriptors this process currently holds. Declared here rather than reused
+/// from the #2100 fixture, which owns its copy as a private static member.
+int watcherFdCount() {
+    int n = 0;
+    std::error_code ec;
+    for (auto& entry : std::filesystem::directory_iterator("/proc/self/fd", ec)) {
+        (void)entry;
+        ++n;
+    }
+    return n;
+}
+
+class WatcherReconfigurationFixture : public IoReviewFixture {
+protected:
+    std::filesystem::path dirA, dirB;
+
+    void SetUp() override {
+        IoReviewFixture::SetUp();
+        dirA = root / "A";
+        dirB = root / "B";
+        std::filesystem::create_directories(dirA);
+        std::filesystem::create_directories(dirB);
+    }
+};
+
+#endif // __linux__
+
+} // namespace
+
+#if defined(__linux__)
+
+TEST_F(WatcherReconfigurationFixture, ChangingPathWhileEnabledArmsTheNewDirectoryAndRetiresTheOld) {
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+
+    // Control: the watch really is live on A before anything is reconfigured. Without this a
+    // later "no event from A" assertion would also pass against a watcher that never worked.
+    touchNew(dirA / "control");
+    ASSERT_TRUE(r.awaitName("control")) << "the watcher was never armed on the original directory";
+
+    w.setPathProperty(dirB.string());
+    EXPECT_EQ(w.getPathProperty(), dirB.string());
+
+    touchNew(dirA / "afterOnA");   // must NOT be reported: A is no longer the watched directory
+    touchNew(dirB / "afterOnB");   // must be reported: B is
+
+    EXPECT_TRUE(r.awaitName("afterOnB"))
+        << "the new directory was never armed — before the repair this timed out, because the "
+           "watch stayed on the old directory forever";
+    EXPECT_FALSE(r.sawName("afterOnA"))
+        << "a stale watch on the old directory survived the path change";
+    EXPECT_FALSE(r.handlerFailed());
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, TheReportedFullPathNamesAFileThatActuallyExists) {
+    // The pre-repair symptom was not merely a stale watch: the event came from directory A and
+    // the FullPath was built from directory B, so it named a path that existed nowhere.
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+    w.setPathProperty(dirB.string());
+
+    touchNew(dirB / "real");
+    ASSERT_TRUE(r.awaitName("real"));
+
+    const std::string reported = r.fullPathOf("real");
+    EXPECT_EQ(reported, (dirB / "real").string());
+    EXPECT_TRUE(std::filesystem::exists(reported))
+        << "the watcher reported a FullPath that names no existing file: " << reported;
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, ARejectedPathChangeLeavesTheOldWatchLiveAndUntouched) {
+    // Validation runs before any teardown, so a bad path costs the caller nothing.
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+
+    EXPECT_THROW(w.setPathProperty(""), System::ArgumentException);
+    EXPECT_THROW(w.setPathProperty((root / "does_not_exist").string()), System::ArgumentException);
+
+    EXPECT_EQ(w.getPathProperty(), dirA.string());
+    EXPECT_TRUE(w.getEnableRaisingEventsProperty());
+
+    touchNew(dirA / "stillWatched");
+    EXPECT_TRUE(r.awaitName("stillWatched"))
+        << "a rejected path change tore down a watch it had no business touching";
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, ChangingPathWhileDisabledTakesEffectOnTheNextEnable) {
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+
+    w.setPathProperty(dirB.string());          // disabled: nothing to re-arm
+    EXPECT_FALSE(w.getEnableRaisingEventsProperty());
+
+    w.setEnableRaisingEventsProperty(true);
+    touchNew(dirA / "onA");
+    touchNew(dirB / "onB");
+
+    EXPECT_TRUE(r.awaitName("onB"));
+    EXPECT_FALSE(r.sawName("onA"));
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, EnablingBeforeAPathIsSetStillArmsWhenThePathArrives) {
+    // startWatchingIfPossible() deliberately tolerates EnableRaisingEvents being set before Path
+    // (it returns quietly when no directory is configured). That ordering only actually watches
+    // anything because the re-arm is gated on enabled_ rather than on a thread already running.
+    WatchRecorder r;
+    FileSystemWatcher w;
+    subscribeAll(w, r);
+
+    w.setEnableRaisingEventsProperty(true);
+    ASSERT_TRUE(w.getPathProperty().empty());
+
+    w.setPathProperty(dirA.string());
+    touchNew(dirA / "late");
+
+    EXPECT_TRUE(r.awaitName("late"))
+        << "a watcher enabled before its Path was set stayed permanently inert";
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, SettingPathToItsCurrentValueIsANoOpAndTheWatchSurvives) {
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+
+    w.setPathProperty(dirA.string());          // identical value: the early return
+    EXPECT_TRUE(w.getEnableRaisingEventsProperty());
+
+    touchNew(dirA / "survives");
+    EXPECT_TRUE(r.awaitName("survives"));
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+TEST_F(WatcherReconfigurationFixture, RepeatedPathChangesLeakNoDescriptor) {
+    // Plan §14: /proc/self/fd is the primary instrument for this module, not LSan. Each re-arm
+    // creates a fresh inotify instance and eventfd, so a missing teardown would show up here.
+    const int before = watcherFdCount();
+    {
+        FileSystemWatcher w(dirA.string());
+        w.setEnableRaisingEventsProperty(true);
+        for (int i = 0; i < 50; ++i) {
+            w.setPathProperty((i % 2 ? dirB : dirA).string());
+        }
+        w.setEnableRaisingEventsProperty(false);
+    }
+    const int after = watcherFdCount();
+    RecordProperty("fd_before", before);
+    RecordProperty("fd_after", after);
+    EXPECT_EQ(after, before) << "descriptor delta across 50 path re-arms";
+}
+
+TEST_F(WatcherReconfigurationFixture, APathChangeIsSafeWhileEventsAreStillArriving) {
+    // The reconfiguration joins the watcher thread before writing directory_, which is what
+    // makes this race-free; TSan proved it (3 reports before, 0 after). Here it is pinned as an
+    // ordinary functional test: the watcher must still be usable after churn, not merely quiet.
+    WatchRecorder r;
+    FileSystemWatcher w(dirA.string());
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+
+    for (int i = 0; i < 20; ++i) {
+        touchNew(dirA / ("churnA" + std::to_string(i)));
+        touchNew(dirB / ("churnB" + std::to_string(i)));
+        appendByte(dirA / ("churnA" + std::to_string(i)));   // Changed as well as Created
+        appendByte(dirB / ("churnB" + std::to_string(i)));
+        w.setPathProperty((i % 2 ? dirB : dirA).string());
+    }
+
+    w.setPathProperty(dirB.string());
+    touchNew(dirB / "settled");
+    EXPECT_TRUE(r.awaitName("settled")) << "the watcher stopped working after repeated re-arms";
+    EXPECT_FALSE(r.handlerFailed());
+
+    w.setEnableRaisingEventsProperty(false);
+}
+
+#endif // __linux__
