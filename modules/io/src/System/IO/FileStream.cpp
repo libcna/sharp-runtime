@@ -124,6 +124,16 @@ namespace System::IO
 
     FileStream::~FileStream() { Close(); }
 
+    // Ticket #2099 (SR-AUD-342's surviving half, cause I-A). One funnel, routed through by
+    // every member that depends on the open file -- including Read/Write/WriteByte/SetLength,
+    // which were already correct -- so the six that were wrong and the four that were right
+    // cannot drift apart again. The message is the one those four already raised, unchanged.
+    void FileStream::EnsureNotClosed() const
+    {
+        if (!file_.is_open())
+            throw System::ObjectDisposedException("Cannot access a closed file.");
+    }
+
     // The canRead_/canWrite_ tests in Read(), Write() and WriteByte() are ticket #1825.
     // Verified against Strategies/OSFileStreamStrategy.cs:208-217 and 232-241, whose
     // synchronous Read and Write both check the handle's closed state FIRST and the access
@@ -141,8 +151,7 @@ namespace System::IO
     // these messages for exactly this condition; FileStream was the last stream that did not.
     intcs FileStream::Read(bytecs buffer[], intcs offset, intcs count)
     {
-        if (!file_.is_open())
-            throw System::ObjectDisposedException("Cannot access a closed file.");
+        EnsureNotClosed();
         if (!canRead_)
             throw System::NotSupportedException("Stream does not support reading.");
         if (buffer == nullptr)
@@ -158,8 +167,7 @@ namespace System::IO
 
     void FileStream::Write(const bytecs buffer[], intcs offset, intcs count)
     {
-        if (!file_.is_open())
-            throw System::ObjectDisposedException("Cannot access a closed file.");
+        EnsureNotClosed();
         if (!canWrite_)
             throw System::NotSupportedException("Stream does not support writing.");
         if (buffer == nullptr)
@@ -182,16 +190,19 @@ namespace System::IO
     // inherits both checks; this now matches by performing both in the same order.
     void FileStream::WriteByte(bytecs value)
     {
-        if (!file_.is_open())
-            throw System::ObjectDisposedException("Cannot access a closed file.");
+        EnsureNotClosed();
         if (!canWrite_)
             throw System::NotSupportedException("Stream does not support writing.");
         file_.put(static_cast<char>(value));
     }
 
+    // Flushing a closed file silently did nothing, so a caller could not tell a successful
+    // flush from a lost one. .NET's Stream.Flush is documented to throw once the stream is
+    // disposed, and this module's UnmanagedMemoryStream::Flush already did (#2108).
     void FileStream::Flush()
     {
-        if (file_.is_open()) file_.flush();
+        EnsureNotClosed();
+        file_.flush();
     }
 
     void FileStream::Close()
@@ -206,7 +217,8 @@ namespace System::IO
         // previously only updated length_ from SetLength(), so a Write() that extended the
         // file left getLengthProperty() returning the stale construction-time length (often 0
         // for a freshly created file) until the stream was closed and reopened.
-        if (file_.is_open() && canWrite_) {
+        EnsureNotClosed();
+        if (canWrite_) {
             auto& f = const_cast<std::fstream&>(file_);
             f.flush();
         }
@@ -217,15 +229,25 @@ namespace System::IO
 
     bool FileStream::IsOpen() const { return file_.is_open(); }
 
+    // Before #2099 this returned tellg()/tellp() on a closed fstream, which is -1: a sentinel
+    // where every sibling stream raises. Worse, the sentinel did not stay local -- Stream::Seek
+    // adds it to the requested offset, so Seek(0, SeekOrigin::Current) on a closed FileStream
+    // reported IOException("...before the beginning of the stream."), a diagnostic about the
+    // seek target rather than about the closed file.
     intcs FileStream::getPositionProperty() const
     {
+        EnsureNotClosed();
         auto& f = const_cast<std::fstream&>(file_);
         std::streampos pos = canRead_ ? f.tellg() : f.tellp();
         return static_cast<intcs>(pos);
     }
 
+    // The closed test precedes the argument test: a closed stream reports ObjectDisposedException
+    // whatever the argument is, which is the order Read/Write already used and the order #2108
+    // established for this module after finding UnmanagedMemoryStream::SetLength reversed.
     void FileStream::setPositionProperty(intcs value)
     {
+        EnsureNotClosed();
         if (value < 0)
             throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
         file_.clear();
@@ -233,16 +255,16 @@ namespace System::IO
         if (canWrite_) file_.seekp(static_cast<std::streamoff>(value));
     }
 
+    // Check open state before canWrite_: canWrite_ reflects the access mode requested at
+    // construction and is never reset by Close(), so without this check SetLength() after
+    // Close() would still resize the file on disk via path_ below despite the stream
+    // claiming to be closed. #2099 additionally moved it before the value test, which was
+    // the one place in this file where an argument check preceded the closed check.
     void FileStream::SetLength(intcs value)
     {
+        EnsureNotClosed();
         if (value < 0)
             throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
-        // Check open state before canWrite_: canWrite_ reflects the access mode requested at
-        // construction and is never reset by Close(), so without this check SetLength() after
-        // Close() would still resize the file on disk via path_ below despite the stream
-        // claiming to be closed.
-        if (!file_.is_open())
-            throw System::ObjectDisposedException("Cannot access a closed file.");
         if (!canWrite_)
             throw System::NotSupportedException("Stream does not support writing.");
 

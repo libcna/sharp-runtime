@@ -10,6 +10,9 @@
 //   #2103 / SR-AUD-345, cause I-F — FileInfo::Delete DELETED a directory while its sibling
 //          File::Delete threw on the same input. The only finding in this namespace that
 //          destroys user data.
+//   #2099 / SR-AUD-342, cause I-A — six FileStream members ignored Close(): Length re-stat'd the
+//          path, Position returned the sentinel -1, Position=, Seek and Flush all succeeded, and
+//          two members checked their ARGUMENT before the closed state.
 //   #2100 / SR-AUD-340, cause I-B — RandomAccess::Write accepted a negative count SILENTLY, and
 //          every other rejection in the class was untyped: a bare IOException that named neither
 //          the offending parameter nor the native reason. GetLength returned the sentinel -1.
@@ -35,6 +38,7 @@
 #include "System/IO/DirectoryInfo.hpp"
 #include "System/IO/File.hpp"
 #include "System/IO/FileInfo.hpp"
+#include "System/IO/FileStream.hpp"
 #include "System/IO/IOException.hpp"
 #include "System/IO/RandomAccess.hpp"
 #include "System/IO/StreamReader.hpp"
@@ -653,4 +657,182 @@ TEST(IoLayoutPinTests, BothBaseClassesAlreadyExposeAVirtualCloseSoNoVtableSlotIs
     StringReader reader("x");
     TextReader& asBase = reader;
     EXPECT_NO_THROW(asBase.Close()) << "TextReader::Close() is a non-pure virtual no-op";
+}
+
+
+// ===========================================================================
+// #2099 / SR-AUD-342 (surviving half) — FileStream members that ignored Close()
+//
+// SR-AUD-342 named "OpenOrCreate+Read can write a new file, and closed metadata remains usable".
+// Plan §6.2 measured the write half as NO LONGER REPRODUCIBLE and scoped this ticket to the
+// closed-state half. Measured again for #2099 (build-probe/2099_probe1_before.log), that half is
+// SIX members, not the three §6.2 lists, and one of the six fails in a way §6.2 did not predict.
+//
+// LAYOUT-NEUTRAL, and that is why this did not wait for #2098's Approval IO-1: FileStream needs
+// no `closed_` flag because file_.is_open() already IS one. sizeof stayed 576 across the repair.
+// ===========================================================================
+
+namespace {
+
+/// A closed FileStream over a real 5-byte file that still exists on disk. The file outliving the
+/// stream is the point: every rejection below is about the stream's state, never about a missing
+/// file, and getLengthProperty() could still have answered from the path if it were allowed to.
+class ClosedFileStreamFixture : public IoReviewFixture {
+protected:
+    std::filesystem::path path;
+
+    void SetUp() override {
+        IoReviewFixture::SetUp();
+        path = root / "subject.bin";
+        FileStream seed(path.string(), FileMode::Create, FileAccess::Write);
+        const SharpRuntime::bytecs data[] = {'h', 'e', 'l', 'l', 'o'};
+        seed.Write(data, 0, 5);
+        seed.Close();
+    }
+
+    FileStream opened() { return FileStream(path.string(), FileMode::Open, FileAccess::Read); }
+};
+
+} // namespace
+
+TEST_F(ClosedFileStreamFixture, TheSixMembersThatIgnoredTheClosedStateNowThrow) {
+    // Measured before the repair (build-probe/2099_probe1_before.log): getLength returned 5 by
+    // re-stat'ing path_, getPosition returned -1, and setPosition/Seek/Flush all SUCCEEDED.
+    FileStream fs = opened();
+    fs.Close();
+    EXPECT_THROW((void)fs.getLengthProperty(), System::ObjectDisposedException);
+    EXPECT_THROW((void)fs.getPositionProperty(), System::ObjectDisposedException);
+    EXPECT_THROW(fs.setPositionProperty(0), System::ObjectDisposedException);
+    EXPECT_THROW((void)fs.Seek(0, SeekOrigin::Begin), System::ObjectDisposedException);
+    EXPECT_THROW((void)fs.Seek(0, SeekOrigin::End), System::ObjectDisposedException);
+    EXPECT_THROW(fs.Flush(), System::ObjectDisposedException);
+}
+
+TEST_F(ClosedFileStreamFixture, SeekCurrentReportedTheWrongDIAGNOSTICNotMerelyTheWrongOutcome) {
+    // The one §6.2 did not predict. §6.2 says "Seek() succeeds outright"; for SeekOrigin::Current
+    // it did not succeed — it threw IOException("...before the beginning of the stream."), because
+    // getPositionProperty()'s -1 sentinel does not stay local: Stream::Seek adds it to the offset,
+    // making the sum negative. So a closed FileStream reported a complaint about the SEEK TARGET.
+    // A bare EXPECT_THROW would have passed before the repair; only the TYPE discriminates.
+    FileStream fs = opened();
+    fs.Close();
+    EXPECT_THROW((void)fs.Seek(0, SeekOrigin::Current), System::ObjectDisposedException);
+}
+
+TEST_F(ClosedFileStreamFixture, TheClosedCheckPRECEDESTheArgumentCheck) {
+    // Two members tested their argument first, so a closed stream reported the argument rather
+    // than the disposal — the same reversal #2108 corrected in UnmanagedMemoryStream.
+    FileStream fs = opened();
+    fs.Close();
+    EXPECT_THROW(fs.setPositionProperty(-1), System::ObjectDisposedException);
+    EXPECT_THROW(fs.SetLength(-1), System::ObjectDisposedException);
+
+    // On an OPEN stream the argument check is still reached and still reports the argument.
+    FileStream open(path.string(), FileMode::Open, FileAccess::ReadWrite);
+    EXPECT_THROW(open.setPositionProperty(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(open.SetLength(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST_F(ClosedFileStreamFixture, TheMembersThatWereAlreadyCorrectStayCorrect) {
+    FileStream fs = opened();
+    fs.Close();
+    SharpRuntime::bytecs out[2] = {};
+    EXPECT_THROW((void)fs.Read(out, 0, 2), System::ObjectDisposedException);
+    EXPECT_THROW(fs.SetLength(0), System::ObjectDisposedException);
+    // The capability properties answer "can I", so a closed stream returns a plain false.
+    EXPECT_FALSE(fs.getCanReadProperty());
+    EXPECT_FALSE(fs.getCanWriteProperty());
+    EXPECT_FALSE(fs.getCanSeekProperty());
+    EXPECT_FALSE(fs.IsOpen());
+    EXPECT_NO_THROW(fs.Close()); // double Close() stays safe
+}
+
+TEST_F(ClosedFileStreamFixture, EveryRejectionCarriesTheSameClosedFileMessage) {
+    // One EnsureNotClosed() funnel means one message. If a member ever grows its own throw again,
+    // this is what fails.
+    FileStream fs = opened();
+    fs.Close();
+    const std::string expected = "Cannot access a closed file.";
+    auto messageOf = [&](auto&& call) {
+        try { call(); } catch (const System::ObjectDisposedException& e) { return std::string(e.what()); }
+        return std::string("<no throw>");
+    };
+    EXPECT_NE(messageOf([&]{ (void)fs.getLengthProperty(); }).find(expected), std::string::npos);
+    EXPECT_NE(messageOf([&]{ (void)fs.getPositionProperty(); }).find(expected), std::string::npos);
+    EXPECT_NE(messageOf([&]{ fs.setPositionProperty(0); }).find(expected), std::string::npos);
+    EXPECT_NE(messageOf([&]{ fs.Flush(); }).find(expected), std::string::npos);
+    EXPECT_NE(messageOf([&]{ fs.SetLength(0); }).find(expected), std::string::npos);
+}
+
+TEST_F(ClosedFileStreamFixture, AnOpenStreamIsCompletelyUNAFFECTED) {
+    // The whole open-stream control block of build-probe/2099_probe1_*.log is byte-identical
+    // before and after the repair. This is that block as a permanent regression.
+    FileStream fs = opened();
+    EXPECT_EQ(fs.getLengthProperty(), 5);
+    EXPECT_EQ(fs.getPositionProperty(), 0);
+    EXPECT_EQ(fs.Seek(2, SeekOrigin::Begin), 2);
+    EXPECT_EQ(fs.getPositionProperty(), 2);
+    EXPECT_EQ(fs.Seek(0, SeekOrigin::End), 5);
+    EXPECT_EQ(fs.Seek(-1, SeekOrigin::Current), 4);
+    EXPECT_NO_THROW(fs.Flush());
+    EXPECT_TRUE(fs.IsOpen());
+
+    // A read still returns the original bytes: nothing in this repair touched the data path.
+    fs.setPositionProperty(0);
+    SharpRuntime::bytecs back[5] = {};
+    EXPECT_EQ(fs.Read(back, 0, 5), 5);
+    EXPECT_EQ(std::string(reinterpret_cast<const char*>(back), 5), "hello");
+}
+
+TEST_F(ClosedFileStreamFixture, TheFileOnDiskIsNeverTouchedByARejectedCall) {
+    // setPositionProperty and SetLength both reach path_-based work once past their guards, so a
+    // rejection that ran anyway would be observable on disk. It is not: the file stays 5 bytes.
+    FileStream fs = opened();
+    fs.Close();
+    for (int i = 0; i < 50; ++i) {
+        EXPECT_THROW(fs.SetLength(0), System::ObjectDisposedException);
+        EXPECT_THROW(fs.setPositionProperty(0), System::ObjectDisposedException);
+        EXPECT_THROW(fs.Flush(), System::ObjectDisposedException);
+    }
+    EXPECT_EQ(std::filesystem::file_size(path), 5u);
+}
+
+TEST_F(ClosedFileStreamFixture, TheRESIDUALSeekOrderingCaseIsSHAREDWithItsSiblingNotSpecificToFileStream) {
+    // FileStream deliberately does NOT override Seek. Stream::Seek tests a negative RESULTING
+    // position before delegating, so on a CLOSED stream Seek(-1, Begin) still reports IOException
+    // rather than ObjectDisposedException. Measured (build-probe/2099_probe2_seek_residue.log),
+    // UnmanagedMemoryStream — repaired by #2108 — does exactly the same. Overriding Seek in
+    // FileStream alone would CREATE a divergence between two siblings that agree today, so the
+    // residue is pinned here rather than removed. Changing Stream::Seek is not this ticket.
+    FileStream fs = opened();
+    fs.Close();
+    EXPECT_THROW((void)fs.Seek(-1, SeekOrigin::Begin), System::IO::IOException);
+
+    SharpRuntime::bytecs backing[4] = {1, 2, 3, 4};
+    UnmanagedMemoryStream ums(backing, 4);
+    ums.Close();
+    EXPECT_THROW((void)ums.Seek(-1, SeekOrigin::Begin), System::IO::IOException);
+}
+
+TEST_F(ClosedFileStreamFixture, RepeatedRejectionsLeakNoDescriptor) {
+    // Plan §6.2 recorded a measured positive — FileStream leaks no descriptor over 20 double-close
+    // cycles — and #2099's acceptance criteria asks for the number to be REPORTED, not asserted.
+    auto fdCount = [] {
+        int n = 0; std::error_code ec;
+        for (auto& e : std::filesystem::directory_iterator("/proc/self/fd", ec)) { (void)e; ++n; }
+        return n;
+    };
+    const int before = fdCount();
+    for (int i = 0; i < 100; ++i) {
+        FileStream fs(path.string(), FileMode::Open, FileAccess::Read);
+        fs.Close();
+        EXPECT_THROW((void)fs.getLengthProperty(), System::ObjectDisposedException);
+        EXPECT_THROW((void)fs.getPositionProperty(), System::ObjectDisposedException);
+        EXPECT_THROW(fs.Flush(), System::ObjectDisposedException);
+        fs.Close();
+    }
+    const int after = fdCount();
+    RecordProperty("fd_before", before);
+    RecordProperty("fd_after", after);
+    EXPECT_EQ(after, before) << "descriptor delta across 100 closed-stream rejection cycles";
 }

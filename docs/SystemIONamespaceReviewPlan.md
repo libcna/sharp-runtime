@@ -362,6 +362,11 @@ Recorded so a future reader does not merge them. **CCF-012 is not marked closed.
 #2098  enforce the closed state in the text wrappers and UnmanagedMemoryStream  (P2, M)
          └─ answers the base-vs-leaf design question §7.1 FIRST; #2099 follows its answer
 #2099  FileStream Length/Position/Seek after Close                              (P2, S) ── AFTER #2098
+         └─ CORRECTED 2026-08-12 by #2099: the "AFTER #2098" edge was a STORAGE-decision
+            dependency, and FileStream has no storage decision to inherit -- file_.is_open()
+            already IS the closed flag. Measured layout-neutral (sizeof 576 before and after),
+            so #2099 landed WITHOUT Approval IO-1, exactly as #2108 did. #2098 is unaffected
+            and stays blocked on that approval for its four text wrappers.
 #2100  RandomAccess argument domain and GetLength                               (P2, S) ── independent
 #2101  empty-path FileSystemInfo leaks std::filesystem_error                    (P2, S) ── independent
 #2102  FileSystemWatcher: NotifyFilter ignored, Path does not re-arm            (P2, M) ── independent
@@ -885,3 +890,96 @@ raw-pointer getter unguarded → **2**.
 `UnmanagedMemoryStream.cpp` compiled into the instrumented translation unit.
 
 **#2098 is now `blocked`**, scoped to SR-AUD-337 and SR-AUD-343 only, pending Approval IO-1.
+
+
+---
+
+### 20.6 #2099 landed, and the surviving half was SIX members with two wrong premises
+
+**Ticket #2099 (SR-AUD-342 surviving half, cause I-A) — `todo` → `done`, 2026-08-12.
+SR-AUD-342 `confirmed` → `remediated`.**
+
+#### The dependency that did not apply
+
+§9 sequenced #2099 "AFTER #2098" so it could inherit the storage answer. **There is no storage
+question for `FileStream`**: `file_.is_open()` already is the closed state, `Close()` already
+clears it, and `getCanRead`/`getCanWrite`/`getCanSeek` already consult it. `sizeof(FileStream)`
+is **576** and `alignof` **8**, before and after. So #2099 is layout-neutral, needs no approval,
+and split out on exactly the reasoning #2108 used for `UnmanagedMemoryStream`. #2098 keeps its
+four text wrappers and stays blocked on Approval IO-1 — nothing here consumed or pre-empted it.
+
+The ticket's own note anticipated this ("VERIFY FIRST whether FileStream already has a closed
+flag — if so this is layout-neutral"). It does; it is.
+
+#### What §6.2 got wrong
+
+§6.2 scoped the surviving half to three members and said `Seek()` "succeeds outright". Measured
+(`build-probe/2099_probe1_before.log`), it is **six** members, and `Seek` is not uniform:
+
+| Member | Before | §6.2 predicted |
+|---|---|---|
+| `getLengthProperty()` | returned `5` — re-`stat`s `path_` | yes ("stale 5" — actually *live*, from the path) |
+| `getPositionProperty()` | returned `-1` | yes |
+| `setPositionProperty(0)` | succeeded | no |
+| `Seek(0, Begin)` / `Seek(0, End)` | succeeded | yes |
+| `Seek(0, Current)` | **threw `IOException`** | **no — §6.2 says it succeeds** |
+| `Flush()` | succeeded silently | no |
+| `setPositionProperty(-1)`, `SetLength(-1)` | argument checked **before** closed state | no |
+
+1. **`Seek(0, Current)` reported the wrong *diagnostic*, not merely the wrong outcome.** The `-1`
+   from `getPositionProperty()` does not stay local — `Stream::Seek` adds it to the requested
+   offset and rejects the negative sum — so a **closed** stream complained *about the seek
+   target*: `IOException("An attempt was made to move the position before the beginning of the
+   stream.")`. A bare `EXPECT_THROW` would have passed against the old code. Only the exception
+   type discriminates, which is why the pin asserts the type.
+2. **Two members tested their argument first**, the same reversal #2108 found in
+   `UnmanagedMemoryStream::SetLength`. `FileStream` had it in *two* places.
+
+Also re-measured and recorded: `getLengthProperty()` was not returning a *cached* stale value —
+it answers from `std::filesystem::file_size(path_)`, so a closed stream reported the file's
+**current** length. The observable is the same; the mechanism is not what §6.2 implies.
+
+#### The repair
+
+One private `EnsureNotClosed()`, routed through by every dependent member **including the four
+that were already correct** (`Read`, `Write`, `WriteByte`, `SetLength`), so they cannot drift
+apart again. The message is the one those four already raised, unchanged
+(`ObjectDisposedException("Cannot access a closed file.")`). `Seek` is not overridden: it is
+inherited from `Stream` and expressed in terms of the position and length members, so all three
+origins now report the closed file through them.
+
+#### The residue, pinned rather than removed
+
+On a **closed** stream, `Seek(-1, Begin)` still reports `IOException`, because `Stream::Seek`
+tests a negative *resulting* position before delegating. Measured
+(`build-probe/2099_probe2_seek_residue.log`), **`UnmanagedMemoryStream` does exactly the same**
+after #2108. This is a property of the shared base algorithm, not a `FileStream` defect;
+overriding `Seek` in `FileStream` alone would create a divergence between two siblings that
+agree today. It is pinned by test. Whether `Stream::Seek` should check disposal before the
+seek-target rule is a separate question for the whole hierarchy and is **not ticketed here**.
+
+#### Gates
+
+`SharpRuntimeTests_IO` **635 → 644, +9, add-only**; no pre-existing assertion edited or deleted.
+Five implementation mutations, each rebuilt and relinked, discriminating **4 / 1 / 4 / 3 / 1**
+distinct tests, with a clean control and a byte-identical restore verified by `sha256sum`:
+
+| Mutation | Caught by |
+|---|---|
+| M1 `getPositionProperty` guard removed (restores the `-1` sentinel) | 4 |
+| M2 `setPositionProperty` argument-before-closed order restored | 1 |
+| M3 `Flush` silently no-ops again | 4 |
+| M4 `getLengthProperty` guard removed | 3 |
+| M5 `SetLength` argument-before-closed order restored | 1 |
+
+**ASan + UBSan + LSan clean** with `FileStream.cpp` and `Stream.cpp` compiled from source into the
+instrumented translation unit — justified here because the repair adds unwind paths through
+members that previously returned normally, not run ceremonially. **Descriptor delta 0** across 100
+closed-stream rejection cycles, *reported* rather than asserted as the acceptance criteria asks
+(the test also asserts equality, which is strictly stronger and costs nothing).
+
+No signature, object-layout, vtable, mangled-symbol or `noexcept` change. The open-stream control
+block of the probe is **byte-identical** before and after.
+
+**Still open in this namespace after #2099:** #2098 (blocked, Approval IO-1), #2102 (todo),
+#2104 (todo, LAST), #2105 and #2106 (deferred verification, both need the absent reference tree).

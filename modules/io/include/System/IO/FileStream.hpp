@@ -26,6 +26,22 @@ namespace System::IO
         bool         canRead_;
         bool         canWrite_;
 
+        /**
+         * @brief Throws if the file has been closed.
+         *
+         * Ticket #2099 (SR-AUD-342, cause I-A). `FileStream` needs no `closed_` flag of its
+         * own: `file_.is_open()` already *is* the closed state, `Close()` already clears it,
+         * and the three capability properties already consult it. That is why this repair is
+         * layout-neutral and did not have to wait for #2098's storage decision (Approval
+         * IO-1) -- the same reason #2108 split `UnmanagedMemoryStream` out of #2098.
+         *
+         * Every member that depends on the closed file routes through here, including the
+         * four that were already correct, so they cannot drift apart again. It is checked
+         * BEFORE any argument-domain check, which is the order `Read` and `Write` already use
+         * and the order this file's transcribed .NET note records.
+         */
+        void EnsureNotClosed() const;
+
     public:
         /**
          * @brief Opens a file for reading (FileMode::Open).
@@ -88,10 +104,16 @@ namespace System::IO
         void  WriteByte(bytecs value) override;
         /** Closes the file stream. */
         void  Close() override;
-        /** Flushes any buffered data to the file. */
+        /**
+         * @brief Flushes any buffered data to the file.
+         * @throws System::ObjectDisposedException if the file has been closed.
+         */
         void  Flush() override;
 
-        /** Returns the length of the file in bytes. */
+        /**
+         * @brief Returns the length of the file in bytes.
+         * @throws System::ObjectDisposedException if the file has been closed.
+         */
         [[nodiscard]] intcs getLengthProperty() const override;
         /**
          * @brief Returns true if the stream is open with write access -- false once closed.
@@ -122,11 +144,36 @@ namespace System::IO
 
         /** Returns true if the underlying file is open (FileStream always supports seeking while open). */
         [[nodiscard]] bool  getCanSeekProperty() const override { return file_.is_open(); }
-        /** Returns the current read/write position within the file. */
+        /**
+         * @brief Returns the current read/write position within the file.
+         *
+         * Until #2099 a closed stream returned the sentinel -1 here, which `Stream::Seek`
+         * then turned into an `IOException` for `SeekOrigin::Current` -- a wrong diagnostic
+         * for a closed stream, and the reason `Seek` is not listed as "succeeds outright"
+         * for all three origins.
+         *
+         * @throws System::ObjectDisposedException if the file has been closed.
+         */
         [[nodiscard]] intcs getPositionProperty() const override;
-        /** Sets the current read/write position within the file. Throws ArgumentOutOfRangeException if negative. */
+        /**
+         * @brief Sets the current read/write position within the file.
+         *
+         * `FileStream` does not override `Seek`; the inherited `Stream::Seek` is expressed in
+         * terms of this setter and of `getLengthProperty()`, so all three origins report a
+         * closed stream through them. See `Stream::Seek` for the one residual ordering case.
+         *
+         * @throws System::ObjectDisposedException if the file has been closed, checked before
+         *         the argument-domain test.
+         * @throws System::ArgumentOutOfRangeException if @p value is negative.
+         */
         void setPositionProperty(intcs value) override;
-        /** Truncates or extends the file to the given length. */
+        /**
+         * @brief Truncates or extends the file to the given length.
+         * @throws System::ObjectDisposedException if the file has been closed, checked before
+         *         the argument-domain test.
+         * @throws System::ArgumentOutOfRangeException if @p value is negative.
+         * @throws System::NotSupportedException if this stream was not opened with write access.
+         */
         void SetLength(intcs value) override;
     };
 }
