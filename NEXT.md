@@ -3,6 +3,98 @@
 
 # NEXT.md
 
+> **Test-count floor, 2026-08-12 — 17,033 / 38 (#2099).** The complete 38-executable gate
+> reads **17,033 run: 17,025 passed, 2 skipped, 6 failed** (17,025 + 6 + 2 = 17,033), **+9** on
+> the 17,024 below — exactly the nine `ClosedFileStreamFixture` cases this batch added
+> (`SharpRuntimeTests_IO` 635 → 644; no other executable's count changed), so no regression
+> anywhere. The six failures are the same inherited ones — five `PingTests` (#1962) and
+> `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`, which needs usable IPv6 this
+> environment does not provide — untouched, not disabled, not weakened, not recategorised.
+> Audit: **214 remediated / 88 confirmed / 62 confirmed (design-complete) = 364**, open **150**
+> (SR-AUD-342 `confirmed` → `remediated`). Numbering stays frozen at 364; no `SR-AUD-*` created.
+
+## Autonomous batch handoff, 2026-08-12 (`modules/text` inventory → `modules/io` #2099)
+
+### 1. `modules/text` was the target and is EXHAUSTED for autonomous work
+
+Recounted from source, not inherited: **11 open findings** own `modules/text`
+(SR-AUD-288, 289, 290, 291, 292, 293, 294, 296, 297, 298, 299), which matches the inherited
+estimate exactly. **All eleven are `confirmed (design-complete)`; not one is plain `confirmed`.**
+Strict ownership: nine tickets **#2013–#2021**, every one `blocked`, each behind a named approval
+in `docs/SystemTextApprovalPackage.md` (causes T-F … T-N). No finding is unowned.
+**Implementation-ready: 0.**
+
+The namespace's *compatible* half was already closed by the #2006 review batch (#2007–#2012),
+which is why nothing is left: `SharpRuntimeTests_Text` went 238 → 288 there.
+
+**The post-audit backlog was checked separately and independently of the audit index** — the
+explicit lesson from the Runtime batch, whose value came from #1985/#1986 rather than from any
+frozen finding. Result for Text: **zero** open ordinary post-audit tickets. Every open ticket
+touching `modules/text` is one of the nine blocked design tickets. Two adjacent post-audit
+defects exist in *other* namespaces (#2003 Uri, #2085 Xml) and are not Text.
+
+**So the answer to "did the post-audit backlog contain work the audit index would have missed?"
+is: for Text, no. For IO, yes — see below.** The method still earned its keep: it is what
+redirected this batch instead of stalling.
+
+### 2. Why `modules/io`, and what the comparison showed
+
+Per the handoff instruction, IO / URI / net-http were compared with the same strict method:
+
+| Namespace | Open findings | Owning ticket states | Implementation-ready |
+|---|---|---|---|
+| `modules/uri` | 10 | #1995–#1999, **all blocked** | 0 |
+| `modules/net-http` | 6 | #2066–#2071, #2131 — blocked / `needs_user` / deferred | 0 |
+| **`modules/io`** | **7** | #2098 blocked, #2106 deferred, #2109 `needs_user`, **#2099 `todo`**, **#2102 `todo`** | **2** |
+
+`modules/io` is the only one of the three with ordinary `todo` implementation tickets, and both
+came from its namespace review (#2097), not from the audit index. This batch took **#2099**.
+
+### 3. #2099 landed — and the dependency that blocked it on paper did not exist
+
+`docs/SystemIONamespaceReviewPlan.md` §9 sequenced #2099 "AFTER #2098", which is `blocked` on
+Approval IO-1. **That edge was a *storage-decision* dependency, and `FileStream` has no storage
+decision to inherit**: `file_.is_open()` already *is* the closed flag. Measured `sizeof` **576**
+and `alignof` **8**, unchanged across the repair — layout-neutral, no approval consumed, exactly
+the split #2108 made for `UnmanagedMemoryStream`. **#2098 is untouched and stays blocked.**
+
+Two premise corrections, both measured (`build-probe/2099_probe1_before.log`):
+
+1. The surviving half is **six** members, not the three §6.2 predicts, plus **two** that checked
+   their *argument* before the closed state.
+2. §6.2's "`Seek()` succeeds outright" is **wrong for `SeekOrigin::Current`**, which *threw*
+   `IOException` — `getPositionProperty()`'s `-1` sentinel does not stay local, `Stream::Seek`
+   adds it to the offset — so a closed stream complained **about the seek target**. A bare
+   `EXPECT_THROW` would have passed against the old code.
+
+One residue is **pinned, not removed**: a closed `Seek(-1, Begin)` still reports `IOException`,
+measured **identical** in `UnmanagedMemoryStream`, so `FileStream` deliberately does not override
+`Seek` — doing so would create a divergence between two siblings that agree today.
+
+### 4. Next work, ranked by evidence readiness
+
+1. **#2102 (`modules/io`, `todo`, P2, M) — FileSystemWatcher, SR-AUD-339 + SR-AUD-346.**
+   Its **I-E half is unambiguous and implementable now**: `setPathProperty` assigns `directory_`
+   and does nothing else, so while enabled the old inotify watch stays on the old directory while
+   events are reported with a `FullPath` built from the new one. Its **I-D half needs one
+   documented mapping decision first**: `notifyFilter_` is stored and never read, but the
+   `NotifyFilters` → inotify translation is not repository-owned and cannot be derived from the
+   absent reference — `CreationTime` has **no** inotify event at all, and `Size` and `LastWrite`
+   both collapse onto `IN_MODIFY`, so the ticket's "each value alone admits the events it names"
+   is not literally achievable on inotify. The *named* defect (a `Size`-only watcher raising
+   `Created`) is unambiguous and can land without settling the rest. **Recommendation: split
+   I-E + the named `Created` exclusion from the full mapping table**, the same split #2099/#2108
+   made against #2098. Also needs a deterministic no-sleep harness; TSan applies (the module's
+   only concurrent surface).
+2. **#2104 (`modules/io`, `todo`, P3, S)** — documentation and gated-behaviour pins; explicitly
+   sequenced **LAST** in the namespace, so it should follow #2102.
+3. **#2105, #2106 (`modules/io`, deferred verification)** — both need the absent reference tree.
+4. Then re-compare `modules/uri` and `modules/net-http`, both of which currently have **zero**
+   implementation-ready work and would need an approval or a decision to move.
+
+**Not reopened by this batch:** `modules/core` (33 open, 0 ready), `modules/threading` (16 open,
+0 ready), `modules/runtime` (14 open, 0 ready), and all nine `modules/text` gates.
+
 > **Test-count floor, 2026-08-12 — 17,024 / 38 (#1986, #1985).** The complete 38-executable
 > gate reads **17,024 run: 17,016 passed, 2 skipped, 6 failed** (17,016 + 6 + 2 = 17,024),
 > **+3** on #2341's 17,021 — exactly the three `PosixSignalTests` cases this batch added
