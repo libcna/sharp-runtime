@@ -3,6 +3,26 @@
 
 # NEXT.md
 
+> **Test-count floor, 2026-08-12 — 17,021 / 38 (#2341, #2342).** The complete 38-executable gate
+> reads **17,021 run: 17,013 passed, 2 skipped, 6 failed** (17,013 + 6 + 2 = 17,021), **+7** on
+> #2318's 17,014 — exactly the seven `ThreadingMonitorRecursionTests` cases #2341 added for
+> SR-AUD-202, so no regression anywhere. `SharpRuntimeTests_Threading` moved 456 → 463 and no
+> other executable's count changed. The six failures are the inherited ones — five `PingTests`
+> (#1962) and `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`, which needs usable
+> IPv6 this environment does not provide — untouched, not disabled, not weakened, not
+> recategorised, and **the gate is not green**. `CLAUDE.md` rule 2's figure is raised to this
+> reading under the rule's own closing sentence, with #2318's 17,014 kept as the immediately
+> preceding checkpoint; the reconstructed chain below is unchanged.
+>
+> **This batch, in one line.** `modules/threading` had 17 open findings, every one of them owned
+> and none of them implementable — except SR-AUD-202, which
+> `docs/ThreadingNamespaceReviewPlan.md` §20.2 item 1 had *pre-authorised* for a split because
+> `Monitor` is static-only and has no public object layout. #2341 took it: `Monitor::Wait` now
+> releases every recursion level instead of one, so a depth-2 wait stops deadlocking. #2342
+> records the strict ownership of the remaining 16 and answers the readiness question with a
+> number: **zero**. Details in `docs/ThreadingOpenFindingOwnership.md` and
+> `ThreadingNamespaceReviewPlan.md` §23.
+
 > **Test-count floor, 2026-08-12 — 17,014 / 38, and the provenance chain from 15,071 / 37 is
 > reconstructed (#2318).** The complete 38-executable gate reads **17,014 run: 17,006 passed,
 > 2 skipped, 6 failed** (17,006 + 6 + 2 = 17,014), **+11** on the inherited 17,003 — exactly
