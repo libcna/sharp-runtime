@@ -3,6 +3,112 @@
 
 # NEXT.md
 
+> **Test-count floor, 2026-08-12 — 17,057 / 38 (#2104).** The complete 38-executable gate
+> reads **17,057 run: 17,049 passed, 2 skipped, 6 failed** (17,049 + 6 + 2 = 17,057), **+8** on
+> the 17,049 below — exactly the eight pins #2104 added (`SharpRuntimeTests_IO` 660 → 668; no
+> other executable's count changed), so no regression anywhere. #2104 changed **no production
+> statement**: doc-comments, tests, one new migration note, the audit index and `plan.sqlite3`.
+> The six failures are the same inherited ones — five `PingTests` (#1962) and
+> `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`, which needs usable IPv6 this
+> environment does not provide — untouched, not disabled, not weakened, not recategorised, and
+> **the gate is not green**.
+> Audit: **215 remediated / 87 confirmed / 62 confirmed (design-complete) = 364**, open **149**
+> — **unchanged**, as a documentation ticket must leave it. Numbering stays frozen at 364; no
+> `SR-AUD-*` created. One ordinary ticket **was** created: **#2347**.
+
+## Autonomous batch handoff, 2026-08-12 (`modules/io` closed — #2104, the review's LAST ticket)
+
+### 1. `modules/io` is EXHAUSTED for autonomous implementation work
+
+Five findings remain open in the namespace. **Each has exactly one owner, and not one of them is
+implementation-ready:**
+
+| Open item | Owner | Why it cannot be started autonomously |
+|---|---|---|
+| SR-AUD-337, SR-AUD-343 — text wrappers keep working after `Close()` | **#2098** | `blocked` on **Approval IO-1**. Recording the closed state is an object-layout change in a public type; the three costed options and the exact approval sentence are plan §21.2–§21.8 |
+| SR-AUD-346 — `NotifyFilters` → inotify mapping *within* a class | **#2346** | `needs_user`. Five priced questions in plan §21.10; **taking no decision is itself a supported outcome**, and it is not one this review may take on the user's behalf |
+| SR-AUD-185, SR-AUD-186 — `BinaryData` decoding and copy-vs-wrap | **#2106** | deferred; both need `/rv`, which is absent. SR-AUD-186's premise is **inverted** — .NET's behaviour is the aliasing one |
+| handler-after-`EnableRaisingEvents = false` | **#2105** | deferred; needs TSan plus a blocking-handler harness, per its own acceptance criteria |
+| reentrant reconfiguration → `std::terminate` | **#2347** | **new**, created by #2104. A concurrency repair with real design content — see §3 |
+
+**Zero orphans.** `#2102` is not reopened: it is closed as split (#2344 I-E, #2345 the policy-free
+half of I-D, #2346 the remainder), and that decomposition is preserved intact.
+
+### 2. What #2104 actually was, and the premises it corrected
+
+Its `LAND LAST` marker is **not** "everything must be remediated". Plan §19 states the criterion as
+*"closed for compatible work when #2098–#2104 are `done`"*, and three covered items were
+dispositioned rather than fixed. Its four acceptance criteria, and the state each was in:
+
+- **headers** — #2099/#2100/#2101/#2103/#2108 and #2344's `setPathProperty` already carried their
+  contracts; **#2345's did not**. `setNotifyFilterProperty` said nothing about the class boundary
+  that had just landed or about the mapping #2346 owns.
+- **descriptor pin** — plan §6.2 measured **two** positives; #2099 pinned only the double-close
+  one. The throwing-constructor half is now pinned: 100 constructors, `/proc/self/fd` **4 → 4**.
+- **#2105 / #2106 pins** — neither existed; no test in the repository mentioned either ticket.
+- **migration note** — absent, and its required span had grown: §12 says "#2098–#2103", but
+  **#2108, #2344 and #2345** did not exist when §12 was written and all three landed behaviour
+  changes. `docs/Migration-IOLifecycleAndArgumentStrictness.md` covers all of them and says
+  plainly, in §6, that #2098 is blocked and the namespace is not finished.
+
+**Two premise corrections.** Plan §7.1 says *"`TextWriter` has no `Close()` at all"* — it has
+carried `virtual void Close() {}` since this history's first commit (`9b657c85`, `git log -S`), so
+the two bases are the **same** shape and #2098's base-class option is symmetric. And four `Close()`
+doc-comments described the repair Approval IO-1 has **not** authorised (`TextReader::Close()` said
+it "releases any resources" while being `{}`; `StreamWriter::Close()` said it closes the writer and
+the stream when with `leaveOpen` it closes **neither**).
+
+### 3. #2347 — a real crash, found while writing the #2105 pin, NOT implemented
+
+Reading the disable path to pin #2105 exposed a question the review never asked. All three
+reconfiguring members route through `stopWatchingIfRunning()` → `watchThread_.join()`, and handlers
+run **on that thread**, so a handler that turns its own watcher off self-joins. Measured
+(`build-probe/2104_probe1_watcher_handler_reentrancy.cpp`):
+
+| Mode | Result |
+|---|---|
+| handler catches | `std::system_error`, `"Resource deadlock avoided"`, `code=35`, `generic` |
+| handler does not catch — what a ported caller writes | **`std::terminate`, SIGABRT, exit 134** |
+
+`watchLoop` invokes handlers with **no `try`/`catch`**, so the exception has nowhere to land. .NET
+permits stopping a watcher from its own callback. Left unimplemented deliberately: the repair has
+real design content (deferred teardown, a thread-identity check, or a handler-invocation
+`try`/`catch` that also decides what a *throwing* handler does), and folding it into a
+documentation ticket would be the silent scope growth this review keeps refusing. Recorded in
+`FileSystemWatcher.hpp`, migration note §6, plan §20.9, and ticket #2347. **No `SR-AUD-*`.**
+
+### 4. What the #2105 and #2106 pins deliberately do NOT say
+
+The #2105 pins assert only that activity **after** the setter returns raises nothing, and that
+disabling is idempotent and leaves the watcher re-armable. #2105's real question — whether a
+handler already *executing* can still be running when the setter returns — is **not answered**; a
+test that appeared to answer it by timing would be the measurement-through-UB plan §6.5 already
+rejected. The #2106 pins state the current answer in **both** directions (what the port does *and*
+what the finding says .NET does) across all four construction doors, so a resolution must edit
+them.
+
+### 5. Validation actually performed
+
+Full gate **because test and header code changed** — not ceremonially. 38 executables run
+independently, continuing past failures: **17,057 run / 17,049 passed / 6 failed / 2 skipped**,
+arithmetic exact, delta **+8** and confined to `SharpRuntimeTests_IO`. Build **0 errors / 0
+warnings** at **2 jobs** (the ceiling, never exceeded, on every build and probe). Module graph OK
+(41 modules, 92 edges), seam ODR OK (3 seams, 20 definitions), negative consumer fixtures OK (16
+fixtures, 128 sites, peak 2 jobs), generated catalogue current, DB consistency OK,
+`git diff --check` clean, no `__pycache__` churn. **Selective-components deliberately not run:** no
+`CMakeLists.txt`, no `PUBLIC_`/`PRIVATE_`/`TEST_DEPENDENCIES` and no graph or catalogue
+relationship changed, and both the boundary validator and the catalogue check confirm it. **No
+sanitizer and no mutation run**, for the honest reason that #2104 changes no executable production
+statement — a doc-comment has no mutant, and #2344's TSan evidence (3 races → 0) is not repeated.
+
+### 6. Next unit — do NOT assume from frozen-audit counts alone
+
+`modules/io` joins Core, Threading, Runtime, Text, URI and net-http as having **0 autonomous
+implementation-ready work**. Both IO and Runtime demonstrated that a namespace's *ordinary
+post-audit backlog* is where the live work is, and that a blocked top finding says nothing about
+it — so the next context should run an ordinary-ticket **and** frozen-audit comparison across the
+not-yet-inventoried modules before choosing, rather than ranking by raw open-finding count.
+
 > **Test-count floor, 2026-08-12 — 17,049 / 38 (#2344, #2345).** The complete 38-executable
 > gate reads **17,049 run: 17,041 passed, 2 skipped, 6 failed** (17,041 + 6 + 2 = 17,049),
 > **+16** on the 17,033 below — exactly the sixteen `WatcherReconfigurationFixture` cases this
