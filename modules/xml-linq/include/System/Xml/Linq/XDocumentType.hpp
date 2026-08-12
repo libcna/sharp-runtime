@@ -15,6 +15,21 @@ namespace System::Xml::Linq {
      * @note InternalSubset is always "" when parsed from XML — this runtime's tinyxml2-backed
      * DOM layer does not parse the internal DTD subset (see System::Xml::XmlDocumentType's doc
      * comment); settable/gettable here for API completeness and manual construction.
+     *
+     * @note **Validation happens at serialization, not at construction** (ticket #2200, the
+     * Xml.Linq half of #2084). Both doors — `WriteTo(XmlWriter&)`, which delegates to
+     * `XmlWriter::WriteDocType`, and `SerializeTo(ostream&)` behind `ToString()`/`Save()` —
+     * reject a name that is not an XML name, a public identifier containing a non-`PubidChar`
+     * (which includes `"`), and a system identifier that contains `>` or both quote characters.
+     * A system identifier containing only `"` is re-delimited with `'` rather than escaped: a
+     * DOCTYPE `SystemLiteral` has no escape mechanism, and this runtime's own DOCTYPE reader
+     * never un-escapes one. The constructor and the setters deliberately accept anything, the
+     * same boundary XProcessingInstruction records for its target.
+     *
+     * @note The internal subset is **not** validated or repaired at either door. This runtime
+     * stores a DOCTYPE as a single `>`-terminated node, so an ordinary subset such as
+     * `<!ENTITY a "b">` is lost on read-back — a pre-existing limitation with no well-formed
+     * alternative spelling, tracked separately from #2200.
      */
     class XDocumentType : public XNode {
         std::string name_;

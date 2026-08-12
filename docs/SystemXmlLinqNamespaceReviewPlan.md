@@ -869,3 +869,104 @@ reason. CCF-022 is **not** minted. Family **X-C** now has three members across t
 **not** minted either — a namespace review does not mint on its own authority (#2109). #2131's
 notes carry this review's evidence; its status is unchanged.
 
+
+---
+
+## 22. #2200 — the twin was a *delegator and a duplicate*, and the finding named three fields of four
+
+`XDocumentType` has two serialisation doors. §21.2 recorded #2200 as blocked on "#2084's
+delimiter/escaping decision"; that blocker is **discharged** — #2084 settled the decision and
+put it in the one place both components can reach — and the ticket landed as a one-path reuse.
+
+### 22.1 The two doors were never twins
+
+| Door | Reached by | Before #2200 |
+|---|---|---|
+| `WriteTo(XmlWriter&)` | `Save(XmlWriter&)` | **delegates** to `XmlWriter::WriteDocType` — inherited #2084's repair with **no edit in this component** (the suite stayed 283/283 green after #2084 landed) |
+| `SerializeTo(ostream&)` | `ToString()`, `ToString(SaveOptions)`, `Save(fileName)`, and every containing `XDocument`/`XElement` serialisation | **duplicated** the old three-literal concatenation and did not |
+
+So #2200 was never "apply #2084 twice". It was "delete the one remaining copy of the pre-#2084
+concatenation", which is why the repair adds no new definition: `detail::SelectExternalIdDelimiter`
+and `detail::ExternalIdLiteralTerminatesDeclaration` already live in
+`System/Xml/detail/XmlLexicalSanitizer.hpp` — the one-definition home #2196 created for exactly
+this `XmlWriter`/`Xml::Linq` duplication — and `modules/xml-linq` already includes that header in
+three other files. No component edge changed (`Xml.Linq` already declares `Xml` public).
+
+### 22.2 Measured before/after (`build-probe/2200_probe1_before.log`)
+
+Eighteen declarations were serialised through **both** doors. They disagreed on **eleven**:
+
+| Input | direct door, before | writer door (already correct) |
+|---|---|---|
+| systemId `sys"tem` | `… "sys"tem">` — reader recovers `sys` | re-delimited `'sys"tem'` |
+| systemId `sys"te'm` | emitted anyway | **throws**, unrepresentable |
+| systemId `sys>tem` | `… SYSTEM "sys>tem">` — declaration ends early | **throws** |
+| publicId `pub"lic` | `… PUBLIC "pub"lic" …` | **throws** (not a `PubidChar`) |
+| publicId `pub>lic` | emitted | **throws** |
+| name `ro ot` | `<!DOCTYPE ro ot>` | **throws** (not an XML name) |
+| NUL in name / publicId / systemId | emitted raw | **throws** |
+| the ticket's own case | `<!DOCTYPE root PUBLIC "pub"lic" "sys"tem" []>]>` | **throws** |
+
+The seven that already agreed — including `sys'tem`, `pub'lic` and both internal-subset rows —
+are **byte-identical** after the repair. `"` stays the preferred delimiter precisely so that
+holds.
+
+### 22.3 Premise correction: **four** fields, not the three the ticket names
+
+#2200's title says "three unvalidated quoted literals". The DOCTYPE **root-element name** is a
+fourth unvalidated field at the same door, and it fails the same way: the direct door emitted
+`<!DOCTYPE ro ot>` while `WriteTo` has rejected that name since #2076. It is repaired here, in
+the same statement sequence, for the reason #2196 gives for the processing-instruction *target*:
+validation belongs at the **serialisation** doors, not at construction, because narrowing
+construction is a wider accepted-input change than the finding calls for. `#2084` made the same
+kind of correction in the other direction (it found a *second producer*, `XmlDocument::CreateDocumentType`,
+that the finding never named); this is that pattern applied to the field list.
+
+`ConstructionAndSettersStillDoNotValidate` pins the boundary that was **not** moved.
+
+### 22.4 Not repaired here: the internal subset
+
+Deliberately untouched and **not** absorbed. Its `>` problem is this runtime's `>`-terminated
+DOCTYPE representation, not a delimiter choice — an ordinary `<!ENTITY a "b">` contains a `>`
+that XML *requires*, so no re-delimiting exists — and it was already lossy before this ticket.
+`InternalSubset_IsEmittedExactlyAsBefore_StillOutsideThisTicket` pins that the emitted bytes are
+unchanged and still match the writer door character for character, so a later reader cannot
+mistake the pin for coverage. That half is **#2348**, and closing it needs a real DTD
+internal-subset scanner this port deliberately does not have.
+
+The embedded NUL in the **internal subset** is likewise not #2200's: `VerifyName`,
+`VerifyPublicId` and `VerifyXmlChars` reject a NUL in the other three fields as a side effect of
+the ExternalID repair (exactly as they do at the writer door), and the fourth field is **#2201**.
+
+### 22.5 Compatibility
+
+Implementation-only. No public signature, layout, vtable, `noexcept` specification, exported
+symbol or component dependency changed — the diff is one `.cpp` body plus four `#include`s and a
+header doc-comment. It **is** a behaviour narrowing for input that previously produced
+unparseable or silently-truncated output, which is the point of the ticket, and it narrows to
+**exactly** what the sibling door already rejected; `BothDoorsAcceptOrRejectEveryProbedDeclaration`
+is the property that keeps them from drifting apart again.
+
+### 22.6 Pins and mutations
+
+**18 permanent tests** (`XLinqDocTypeSerializationTests`, module 283 → 301). **Six mutations
+were built, executed and restored; all six were caught**, each by a test that names its own
+concern:
+
+| Mutation | Killed by |
+|---|---|
+| M1 restore the pre-#2200 body verbatim | 11 tests |
+| M2 force `"` regardless of content | 6 |
+| M3 drop `VerifyPublicId` | 3 |
+| M4 attribute-style `&quot;` escaping instead of re-delimiting | 8 |
+| M5 drop the `>`-terminates-the-declaration check | 4 |
+| M6 drop `VerifyName` | 2 |
+
+M4 is the mutation that matters most: it *looks* like a repair and passes a naive
+"no bare quote in the output" assertion, but `ExpectDirectDocTypeRoundTrip` catches it, because
+this runtime's DOCTYPE reader never un-escapes a literal and hands back the six characters
+`&quot;`.
+
+Sanitizers were **not** run, for the reason #2085 gives: the defect is wrong serialised text
+produced by ordinary `std::string` concatenation, with no allocation, indexing or lifetime
+mechanism for ASan/UBSan to observe. The probe was rebuilt and re-run instead.
