@@ -1193,3 +1193,99 @@ not a member requiring the cross-cutting finding to be extended. **CCF-019 stays
 unextended; no CCF was minted.** The existing pin
 `RemoveAllDispatchesNothing_PinnedLifetimeDecision` and mutation E6 are unchanged. Nothing was
 implemented and no behaviour changed.
+---
+
+## 22. #2349 — the decision record, priced. **No policy is selected here.**
+
+#2085 split this out and stated the question. It did not price the answers, and two facts
+measured since (`build-probe/2349_probe1_surface.log`, `build-probe/2349_probe2_utf8.log`,
+`build-probe/2201_probe1_doors.log`) change what the options actually cost. This section adds
+the option table so the decision can be made on evidence. **Nothing was implemented and no
+option was chosen** — that is a user decision.
+
+### 22.1 The question
+
+`XmlWriterSettings::CheckCharacters` defaults to `true` and its doc-comment says *"Not currently
+enforced."* Does it govern rejection of characters outside the XML 1.0 `Char` production **other
+than NUL**? NUL is settled and stays rejected unconditionally either way (#2085): the `Char`
+production excludes U+0000 and a character reference must itself match `Char`, so it has only one
+implementable branch. Everything below is about the rest.
+
+### 22.2 The measured surface
+
+29 bytes in `0x00`–`0x1F` fall outside `Char` (tab, LF and CR are inside it). After #2085 and
+#2201:
+
+| | writer doors | Xml.Linq direct doors | this runtime's own reader |
+|---|---|---|---|
+| NUL (`0x00`) | rejects | rejects | rejects (`XML_ERROR_PARSING_*`) |
+| the other **28** | **emits all 28** | **emits all 28** | **accepts all 28** |
+
+Controls: `0x7F` and tab/LF/CR are inside `Char`, are emitted by both doors and accepted by the
+reader — any repair must leave them alone.
+
+So the two writing doors already agree with each other *and* with the reader. Rejecting would
+narrow **past** this runtime's own reader, which is the reverse of the closure property
+(*whatever this writer emits, this reader must consume*) that SR-AUD-349, #2076, #2084, #2085,
+#2196, #2200 and #2201 all leant on.
+
+### 22.3 The fact that changes the pricing: `VerifyXmlChars` is a **byte** validator
+
+The acceptance criterion drafted on #2349 says "reject via the shipped
+`XmlConvert::VerifyXmlChars`". Measured, that validator iterates `char` and therefore checks
+**bytes, not codepoints**:
+
+| input | `VerifyXmlChars` | correct per XML `Char` |
+|---|---|---|
+| `0x01`, `0x0C`, `0x1F` | rejects | reject ✓ |
+| U+00E9, U+20AC, U+10348 (valid UTF-8) | accepts | accept ✓ |
+| **U+FFFE** (`EF BF BE`) | **accepts** | **reject** ✗ |
+| **U+FFFF** (`EF BF BF`) | **accepts** | **reject** ✗ |
+| **U+D800** lone surrogate (`ED A0 80`) | **accepts** | **reject** ✗ |
+| raw `0xFE` / `0xFF` | rejects | (cannot occur in valid UTF-8) |
+
+"Enforce `CheckCharacters` with the validator we already ship" therefore buys **C0 controls
+only**, not `Char` conformance. Full conformance needs a UTF-8 decoder this module does not have.
+A decision that assumes otherwise would ship a flag that claims more than it does.
+
+### 22.4 The second fact: the Xml.Linq doors **cannot see the flag**
+
+#2201 surveyed them. `XNode::SerializeTo(std::ostream&, int depth, bool indent)` takes no
+settings, and its public entry points are `ToString()`, `ToString(SaveOptions)` and
+`Save(fileName, SaveOptions)` — `SaveOptions` has exactly three values (`None`,
+`DisableFormatting`, `OmitDuplicateNamespaces`) and no character-checking member. `XmlWriter` can
+consult `state_->settings`; the Linq direct doors have nothing to consult.
+
+That is why "honour both branches of the flag" is **not** a same-shaped change on both sides: on
+the Linq side it needs a new way to carry the setting (a public signature change, a new
+`SaveOptions` value, or an ambient default), which is a design decision of its own — or the two
+doors deliberately stop agreeing, which every ticket in this namespace has so far treated as the
+defect rather than the design.
+
+### 22.5 The options, priced
+
+| | Option | What it does | Cost / risk | Doors that can implement it |
+|---|---|---|---|---|
+| **A** | **Reject unconditionally**, ignore the flag | writer and Linq doors reject the 28 | narrows past this runtime's own reader; breaks any caller that round-trips C0 bytes today; contradicts a `true`-by-default flag having a `false` branch | both, today, with `VerifyXmlChars` — but only for C0 (§22.3) |
+| **B** | **Honour the flag**: `true` rejects, `false` emits | matches .NET's stated contract most closely | needs a settings channel at the Linq doors that does not exist (§22.4); `true` is the default, so the *default* behaviour still narrows exactly as in A | writer yes; Linq **not without an API change** |
+| **C** | **Keep today's permissiveness**, document the flag as advisory | zero behaviour change; the two doors and the reader keep agreeing | leaves emitted documents that are not well-formed XML by the letter of `Char`; the flag stays a property bag entry | both, trivially — it is the status quo |
+| **D** | **Reject at the writer only, when `CheckCharacters`** | uses the channel that already exists | the two doors of one node kind deliberately disagree — the exact defect shape #2196/#2200/#2201 each closed | writer only |
+| **E** | **Widen the reader too**, then reject at both doors | restores the closure property under A/B by making the reader reject as well | much larger: the reader is tinyxml2, and `vendor/` is never edited (the #2202 blocker) | neither, without a substrate change |
+
+Two cross-cutting notes for whoever decides:
+
+* Whatever is chosen, `NonNulControlCharacters_StillEmitted_PinnedScopeBoundary`
+  (`SharpRuntimeTests_Xml`) and `NonNulControlCharacters_StillEmittedByTheDirectDoor`
+  (`SharpRuntimeTests_Xml_Linq`) are **updated, not deleted** — they exist to make this decision
+  visible when it is made. #2201's mutation N5 confirms they discriminate: widening the NUL guard
+  to the whole `Char` production is killed by them and by nothing else.
+* `XmlReaderSettings::CheckCharacters` exists too, also defaults to `true`, and is also
+  unenforced. Options A, B and D leave a documented write-rejects/read-accepts asymmetry; only C
+  and E avoid it.
+
+### 22.6 Scope: #2349 now covers both components
+
+#2201 made the Xml.Linq direct doors reject NUL and **only** NUL, so their non-`Char` behaviour
+is now measurably identical to the writer doors' (§22.2). #2349 therefore owns one policy for
+both, exactly as its own notes anticipated ("sibling #2201 … should be settled with it"). It stays
+`todo`; **no branch was implemented and no option was selected in this batch.**
