@@ -4,6 +4,7 @@
 #include "System/Xml/Linq/XCData.hpp"
 #include "System/Xml/XmlWriter.hpp"
 #include "System/Xml/detail/XmlLexicalSanitizer.hpp"
+#include "System/Xml/Linq/detail/XLinqSerializationGuards.hpp"
 
 namespace System::Xml::Linq {
 
@@ -18,6 +19,9 @@ namespace System::Xml::Linq {
         // `right]]>` -- one node became two and the concatenated value became `leftright]]>`.
         // The sibling WriteTo() door above was never affected, because XmlWriter::WriteCData
         // has always split the section. Both doors now share one definition of the split.
+        // Ticket #2201. XCData derives from XText but overrides SerializeTo, so it needs its
+        // own guard: the base class's never runs for a CDATA node.
+        detail::ThrowIfContainsNul(getValueProperty(), "XCData::SerializeTo", "CDATA section text");
         os << "<![CDATA[" << System::Xml::detail::SanitizeCDataText(getValueProperty()) << "]]>";
     }
 

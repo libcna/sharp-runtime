@@ -5,6 +5,7 @@
 #include "System/Xml/XmlConvert.hpp"
 #include "System/Xml/XmlWriter.hpp"
 #include "System/Xml/detail/XmlLexicalSanitizer.hpp"
+#include "System/Xml/Linq/detail/XLinqSerializationGuards.hpp"
 
 namespace System::Xml::Linq {
 
@@ -30,6 +31,10 @@ namespace System::Xml::Linq {
         // accepted-input change than this finding calls for. Serialization is where the writer
         // already rejects, so this is where the two doors are made to agree.
         (void)System::Xml::XmlConvert::VerifyName(target_);
+        // Ticket #2201. The TARGET needs no separate guard -- VerifyName above already rejects a
+        // NUL, since it is not an NCName character -- but the DATA had none.
+        detail::ThrowIfContainsNul(data_, "XProcessingInstruction::SerializeTo",
+                                   "processing-instruction data");
         if (indent) os << std::string(static_cast<size_t>(depth) * 2, ' ');
         os << "<?" << target_;
         if (!data_.empty()) os << " " << System::Xml::detail::SanitizeProcessingInstructionText(data_);

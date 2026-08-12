@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/Linq/XElement.hpp"
+#include "System/Xml/Linq/detail/XLinqSerializationGuards.hpp"
 #include <algorithm>
 #include <fstream>
 #include "System/ArgumentException.hpp"
@@ -307,6 +308,16 @@ namespace System::Xml::Linq {
         std::string qualifiedName;
         std::vector<std::pair<std::string, std::string>> attributes;
         ResolveStartTag(scope, qualifiedName, attributes);
+
+        // Ticket #2201. Guarded here rather than in the escapers, so the diagnostic can name
+        // which part of the start tag carried the NUL. This is the NUL clause ONLY: it does not
+        // impose the XML name grammar on an element or attribute name at this door, which stays
+        // as permissive as it has always been -- a wider accepted-input question than #2201.
+        detail::ThrowIfContainsNul(qualifiedName, "XElement::SerializeTo", "element name");
+        for (const auto& a : attributes) {
+            detail::ThrowIfContainsNul(a.first, "XElement::SerializeTo", "attribute name");
+            detail::ThrowIfContainsNul(a.second, "XElement::SerializeTo", "attribute value");
+        }
 
         std::string pad = indent ? std::string(static_cast<size_t>(depth) * 2, ' ') : "";
         os << pad << "<" << qualifiedName;

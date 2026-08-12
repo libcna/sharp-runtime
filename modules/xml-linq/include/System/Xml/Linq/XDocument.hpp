@@ -44,15 +44,12 @@ namespace System::Xml::Linq {
          * .NET's nullable-string default, consistent with encoding/standalone's existing
          * handling below) -- version is NOT defaulted to "1.0" when unset, since real .NET
          * doesn't default-fill it either.
+         *
+         * @throws System::Xml::XmlException if any of the three carries an embedded NUL, which
+         * no XML document can represent (ticket #2201). The body lives in XDocument.cpp so this
+         * header does not have to reach the guard.
          */
-        [[nodiscard]] std::string ToString() const {
-            std::string s = "<?xml";
-            if (!version_.empty()) s += " version=\"" + version_ + "\"";
-            if (!encoding_.empty()) s += " encoding=\"" + encoding_ + "\"";
-            if (!standalone_.empty()) s += " standalone=\"" + standalone_ + "\"";
-            s += "?>";
-            return s;
-        }
+        [[nodiscard]] std::string ToString() const;
     };
 
     /**

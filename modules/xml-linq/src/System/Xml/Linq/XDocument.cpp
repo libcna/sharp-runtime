@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/Linq/XDocument.hpp"
+#include "System/Xml/Linq/detail/XLinqSerializationGuards.hpp"
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -17,6 +18,21 @@
 #include "NamespaceScope.hpp"
 
 namespace System::Xml::Linq {
+
+    std::string XDeclaration::ToString() const {
+        // Ticket #2201: the declaration is a direct serializer too, reached both on its own and
+        // through XDocument::SerializeTo. Before the guard, an encoding carrying a NUL emitted
+        // `<?xml version="1.0" encoding="a\0b"?>`, which this runtime's own reader rejects.
+        detail::ThrowIfContainsNul(version_, "XDeclaration::ToString", "version");
+        detail::ThrowIfContainsNul(encoding_, "XDeclaration::ToString", "encoding");
+        detail::ThrowIfContainsNul(standalone_, "XDeclaration::ToString", "standalone value");
+        std::string s = "<?xml";
+        if (!version_.empty()) s += " version=\"" + version_ + "\"";
+        if (!encoding_.empty()) s += " encoding=\"" + encoding_ + "\"";
+        if (!standalone_.empty()) s += " standalone=\"" + standalone_ + "\"";
+        s += "?>";
+        return s;
+    }
 
     using System::Xml::XmlNodeType;
 

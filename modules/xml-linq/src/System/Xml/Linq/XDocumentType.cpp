@@ -6,6 +6,7 @@
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlWriter.hpp"
 #include "System/Xml/detail/XmlLexicalSanitizer.hpp"
+#include "System/Xml/Linq/detail/XLinqSerializationGuards.hpp"
 
 namespace System::Xml::Linq {
 
@@ -55,6 +56,11 @@ namespace System::Xml::Linq {
                 "and an apostrophe and cannot be represented in a DOCTYPE system literal: '" +
                 systemId_ + "'.");
 
+        // Ticket #2201: the fourth field. #2200's three validators reject a NUL in the name and
+        // the two identifiers as a side effect (VerifyName, VerifyPublicId and VerifyXmlChars all
+        // do), exactly as they do at the writer door; the internal subset passes through none of
+        // them, so it needs the guard XmlWriter::WriteDocType already applies to it.
+        detail::ThrowIfContainsNul(internalSubset_, "XDocumentType::SerializeTo", "internal subset");
         if (indent) os << std::string(static_cast<size_t>(depth) * 2, ' ');
         os << "<!DOCTYPE " << name_;
         if (!publicId_.empty()) {

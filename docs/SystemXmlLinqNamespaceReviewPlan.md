@@ -970,3 +970,93 @@ this runtime's DOCTYPE reader never un-escapes a literal and hands back the six 
 Sanitizers were **not** run, for the reason #2085 gives: the defect is wrong serialised text
 produced by ordinary `std::string` concatenation, with no allocation, indexing or lifetime
 mechanism for ASan/UBSan to observe. The probe was rebuilt and re-run instead.
+
+---
+
+## 23. #2201 — the mirror image of #2085, and **nine** doors where the ticket named two
+
+`XText`/`XCData` are what #2201's description names. Measured across every public Xml.Linq
+serialisation door (`build-probe/2201_probe1_doors.log`), **nine** emitted an embedded NUL.
+
+### 23.1 Why this is a mirror image, not a copy
+
+| | writer door (`WriteTo` → `XmlWriter`) | direct door (`SerializeTo`/`ToString`) |
+|---|---|---|
+| boundary | `std::string::c_str()` into tinyxml2's `const char*` API | none — bytes go straight to the stream |
+| before | **truncated** at the NUL, silently | **emitted** the NUL |
+| repaired by | #2085 | #2201 |
+
+Lost one way, unreadable the other. Measured, this runtime's own reader rejects all four shapes:
+`XML_ERROR_PARSING_TEXT`, `_ATTRIBUTE`, `_CDATA`, `_COMMENT`. One policy now answers both doors,
+and it is #2085's: **NUL is rejected unconditionally.** That is not a `CheckCharacters`
+preference — the XML `Char` production excludes U+0000 and a character reference must itself
+match `Char`, so "emit it in full" is not an implementable branch. A flag can only govern a
+choice whose branches both exist.
+
+### 23.2 The nine doors, and the three that already rejected
+
+| Door | Before | Now |
+|---|---|---|
+| `XText::SerializeTo` (text) | emitted | rejected |
+| `XCData::SerializeTo` (value) — overrides `XText`'s, so it needs its own guard | emitted | rejected |
+| `XComment::SerializeTo` (value) | emitted | rejected |
+| `XProcessingInstruction::SerializeTo` (**data**) | emitted | rejected |
+| `XDocumentType::SerializeTo` (**internal subset**) | emitted | rejected |
+| `XAttribute::ToString` (name, namespace name, value) | emitted | rejected |
+| `XElement::SerializeElementTo` (element name) | emitted | rejected |
+| `XElement::SerializeElementTo` (attribute name, attribute value) | emitted | rejected |
+| `XDeclaration::ToString` (version, encoding, standalone) | emitted | rejected |
+| `XProcessingInstruction` **target** | already rejected — `XmlConvert::VerifyName` (#2196) | unchanged, pinned |
+| `XDocumentType` name / publicId / systemId | already rejected — #2200's three validators | unchanged, pinned |
+| `XStreamingElement` | already rejected — routes through `XmlWriter` | unchanged, pinned |
+
+`XCData` is the trap worth naming: it derives from `XText` but **overrides** `SerializeTo`, so a
+guard placed only in the base class never runs for a CDATA node.
+
+### 23.3 One detector, one wrapper, and where validation lives
+
+`System::Xml::detail::ContainsNul` — the single detector #2085 put in the shared header — is
+reused unchanged; no second scanner was written. The only new code is the throwing wrapper
+`System::Xml::Linq::detail::ThrowIfContainsNul`, in the new header
+`System/Xml/Linq/detail/XLinqSerializationGuards.hpp`, so the eight source files that need it
+share one definition and one diagnostic shape rather than eight file-local statics. It
+deliberately mirrors `XmlWriter.cpp`'s file-local `ThrowIfContainsNul`, and `modules/xml`'s copy
+was **not** touched — #2085's message pins stay valid.
+
+**Validation happens at serialisation, not at construction**, which answers the review question
+directly: the Xml.Linq object model deliberately permits states that only fail when written. That
+is the boundary #2196 set for the processing-instruction target and #2200 kept for the DOCTYPE
+fields, and `ConstructionAndMutationStillAcceptANul` pins it — an `XText` still *holds* a
+three-byte value containing a NUL, and `getValueProperty().size()` still returns 3.
+
+`XDeclaration::ToString`'s body moved from the header to `XDocument.cpp` so a public header does
+not have to reach the guard. Same signature, same output, same `[[nodiscard]]`.
+
+### 23.4 What #2201 does NOT close
+
+- **The non-`Char` policy (#2349).** 0x01, 0x0C and 0x1F are still emitted, byte for byte.
+  `NonNulControlCharacters_StillEmittedByTheDirectDoor` pins that — the mirror of the pin #2085
+  left at the writer door — and mutation **N5**, which widens the guard to the whole `Char`
+  production, is killed by exactly that test. So #2349's decision cannot be made here by
+  accident.
+- **The XML name grammar at the direct door.** `XElement`/`XAttribute` names are checked for a
+  NUL and nothing more; the direct door still accepts names the writer door rejects. That is a
+  separate, much wider accepted-input question and is **#2350**, filed rather than absorbed.
+- **The internal subset's `>` (#2348)** and everything else #2200 left alone.
+
+### 23.5 Compatibility, pins and mutations
+
+Implementation-only: no public signature, layout, vtable, `noexcept` specification, exported
+symbol or component dependency changed (`Xml.Linq` already declares `Xml` public, and the new
+header is inside `Xml.Linq`'s own include root). Every value without a NUL keeps its bytes —
+tab/CR/LF, multi-byte UTF-8, `]]>`, `--`, `?>` and the escapes are all pinned identical.
+
+**18 permanent tests** (`XLinqNulRejectionTests`, module 301 → 319). **Eight mutations were
+built, executed and restored; all eight were caught.** N2 is the sharpest of the removals — a
+detector that only sees an *interior* NUL — which is why every guard is tested at four positions
+(leading, interior, trailing, and a value that is nothing but a NUL) rather than one.
+
+Sanitizers were **not** run, and for a reason rather than by omission: a NUL crossing a
+`std::ostream <<` is a *content* bug, not a memory bug. Nothing is read out of bounds, nothing is
+freed early, no `const char*` boundary is involved on this path at all — ASan and UBSan have
+nothing to observe here, exactly as #2085 recorded for the truncation half.

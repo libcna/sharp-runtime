@@ -6,6 +6,7 @@
 #include "System/InvalidOperationException.hpp"
 #include "System/Xml/Linq/XElement.hpp"
 #include "System/Xml/Linq/XNamespace.hpp"
+#include "System/Xml/Linq/detail/XLinqSerializationGuards.hpp"
 #include "NamespaceScope.hpp"
 
 namespace System::Xml::Linq {
@@ -101,6 +102,13 @@ namespace System::Xml::Linq {
     std::string XAttribute::ToString() const {
         const std::string& uri = name_.getNamespaceNameProperty();
         const std::string& local = name_.getLocalNameProperty();
+
+        // Ticket #2201. This is a direct serializer in its own right -- it is not reached through
+        // any XNode::SerializeTo -- so it carries its own guard. The sibling path, an attribute
+        // emitted as part of its element, is guarded in XElement::SerializeElementTo.
+        detail::ThrowIfContainsNul(local, "XAttribute::ToString", "attribute name");
+        detail::ThrowIfContainsNul(uri, "XAttribute::ToString", "attribute namespace name");
+        detail::ThrowIfContainsNul(value_, "XAttribute::ToString", "attribute value");
 
         // A declaration renders as itself. Before #2197 this door rendered `{xmlns-uri}p` as the
         // bare local name `p`, turning a namespace declaration into an ordinary attribute.
