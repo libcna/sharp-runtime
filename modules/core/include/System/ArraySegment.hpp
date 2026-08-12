@@ -263,8 +263,16 @@ namespace System {
          * @brief Copies the segment's elements into a destination vector (starting at index 0).
          *
          * C++ counterpart of .NET ArraySegment<T>.CopyTo(T[]).
-         * @param destination The target vector. It must have capacity for at least Count elements
-         *                    (elements are written via push_back / assignment into existing slots).
+         *
+         * @note Corrected by ticket #2329: this comment used to require the destination to
+         * "have capacity for at least Count elements" and describe the elements as "written
+         * via push_back". Neither is true, and the second overload -- the one this forwards
+         * to -- documents the opposite. There is no push_back, and an undersized destination
+         * is not rejected: it is resized. Whether that resize is the intended adaptation or a
+         * divergence to repair is SR-AUD-055's open question and is not settled here.
+         *
+         * @param destination The target vector. It is resized to hold Count elements if it
+         *                    is shorter than that; see CopyTo(std::vector<T>&, intcs).
          * @throws System::InvalidOperationException if this is a default segment.
          */
         void CopyTo(std::vector<T>& destination) const

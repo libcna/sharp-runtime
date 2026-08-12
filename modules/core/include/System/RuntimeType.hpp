@@ -8,10 +8,24 @@ namespace System {
     /**
      * @brief Identifies the runtime category of a type token.
      *
-     * C++ counterpart of the internal .NET System.RuntimeType enumeration.
-     * In the CLR this is used internally to distinguish value types, reference
-     * types, and special runtime constructs. The values here match the documented
-     * internal constants used in CoreCLR.
+     * @warning <b>This is not a counterpart of any .NET type, and it is not used by
+     * anything.</b> Two claims that stood here until ticket #2333 were wrong and are
+     * withdrawn: .NET's `System.RuntimeType` is an <i>internal sealed class</i> deriving
+     * from `TypeInfo` and carrying type handles, metadata and assembly information -- it
+     * is not an enumeration -- and the six values below are not "documented internal
+     * constants used in CoreCLR", they are this port's own invention. `None`,
+     * `Primitive`, `ValueType`, `ReferenceType`, `Array` and `GenericParameter` name a
+     * category scheme that has no .NET original, so nothing here can be checked against
+     * one.
+     *
+     * @note What it is instead: a port-local classifier with <b>no production consumer</b>.
+     * The only file in this repository that includes this header is
+     * `modules/core/tests/System/RuntimeTypeTests.cpp`, which asserts the six integer
+     * values and nothing else. Whether the type is kept, renamed out of the way of the
+     * .NET name, or removed is an open decision; note that CLAUDE.md lists reflection
+     * (`System::Type`, `System::Activator`, ...) as a permanent deviation that is out of
+     * scope, so the .NET class whose name this occupies is never going to be ported here
+     * and will never need the name back.
      */
     enum class RuntimeType {
         /** @brief No runtime type or unknown. */

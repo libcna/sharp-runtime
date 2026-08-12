@@ -29,6 +29,20 @@ using SharpRuntime::intcs;
  *       rest of the code space requires a Unicode character database, its attribution and a
  *       stated Unicode version with an update policy; that decision is open and no partial
  *       table is hand-authored here.
+ *
+ * @note <b>The three numeric queries are a declared reduction too, and a much narrower
+ *       one.</b> GetDecimalDigitValue answers only for U+0030-U+0039; GetDigitValue adds
+ *       only U+00B9, U+00B2 and U+00B3 (superscript one, two, three); GetNumericValue adds
+ *       to those only U+00BC, U+00BD and U+00BE (the vulgar fractions one quarter, one half,
+ *       three quarters). <b>Sixteen code points in total.</b> Every other code point gets
+ *       -1 (or -1.0), including code points that really do carry a Unicode numeric value:
+ *       U+0665 ARABIC-INDIC DIGIT FIVE answers -1 here where .NET answers 5, U+216B ROMAN
+ *       NUMERAL TWELVE answers -1.0 where .NET answers 12, and U+2153 VULGAR FRACTION ONE
+ *       THIRD answers -1.0 where .NET answers 0.333.... As with the category above, -1
+ *       states what this port knows, not that the character has no numeric value; the
+ *       Numeric_Type/Numeric_Value data needed to answer properly is part of the same open
+ *       Unicode-data decision and is not hand-authored here either. `System::Char::
+ *       GetNumericValue` forwards to GetNumericValue and inherits the reduction exactly.
  */
 class CharUnicodeInfo {
     /** @brief Throws ArgumentOutOfRangeException if @p index is out of bounds for @p s. */
@@ -42,11 +56,14 @@ public:
     CharUnicodeInfo() = delete;
 
     /**
-     * @brief Gets the decimal digit value of a character, or -1 if not a decimal digit.
+     * @brief Gets the decimal digit value of a character, or -1 if this port has none.
      *
-     * C++ counterpart of .NET CharUnicodeInfo.GetDecimalDigitValue(char).
+     * C++ counterpart of .NET CharUnicodeInfo.GetDecimalDigitValue(char), reduced to
+     * <b>ASCII U+0030-U+0039 only</b> (see the class note). A non-ASCII decimal digit
+     * such as U+0665 returns -1 here and 5 in .NET.
      * @param ch The character to evaluate.
-     * @return The decimal digit value (0–9), or -1 if @p ch is not a decimal digit.
+     * @return The decimal digit value (0–9) for U+0030-U+0039; -1 for every other
+     *         character, whether or not it is a decimal digit in Unicode.
      */
     static intcs GetDecimalDigitValue(charcs ch) {
         if (ch >= u'0' && ch <= u'9') return static_cast<intcs>(ch - u'0');
@@ -59,7 +76,8 @@ public:
      * C++ counterpart of .NET CharUnicodeInfo.GetDecimalDigitValue(string, int).
      * @param s     The string containing the character.
      * @param index The zero-based index of the character.
-     * @return The decimal digit value (0–9), or -1 if the character is not a decimal digit.
+     * @return The decimal digit value (0–9) for U+0030-U+0039; -1 otherwise, under the
+     *         same reduction as the single-character overload.
      */
     static intcs GetDecimalDigitValue(const std::u16string& s, intcs index) {
         CheckIndex(s, index);
@@ -67,14 +85,17 @@ public:
     }
 
     /**
-     * @brief Gets the digit value of a character, or -1 if not a digit.
+     * @brief Gets the digit value of a character, or -1 if this port has none.
      *
      * C++ counterpart of .NET CharUnicodeInfo.GetDigitValue(char).
      * Unlike GetDecimalDigitValue, this also recognizes characters whose Unicode
      * Numeric_Type is Digit rather than Decimal (e.g. superscript digits), matching
-     * .NET's distinction between the two methods.
+     * .NET's distinction between the two methods -- but only for the three superscripts
+     * it hard-codes. <b>Reduced to U+0030-U+0039 plus U+00B9/U+00B2/U+00B3</b> (see the
+     * class note); every other Numeric_Type Digit character returns -1.
      * @param ch The character to evaluate.
-     * @return The digit value (0–9), or -1 if @p ch is not a digit.
+     * @return The digit value (0–9) for the thirteen characters above; -1 for every
+     *         other character, whether or not it is a digit in Unicode.
      */
     static intcs GetDigitValue(charcs ch) {
         intcs decimalValue = GetDecimalDigitValue(ch);
@@ -93,7 +114,8 @@ public:
      * C++ counterpart of .NET CharUnicodeInfo.GetDigitValue(string, int).
      * @param s     The string containing the character.
      * @param index The zero-based index of the character.
-     * @return The digit value (0–9), or -1 if the character is not a digit.
+     * @return The digit value (0–9) for the thirteen recognized characters; -1 otherwise,
+     *         under the same reduction as the single-character overload.
      */
     static intcs GetDigitValue(const std::u16string& s, intcs index) {
         CheckIndex(s, index);
@@ -103,10 +125,13 @@ public:
     /**
      * @brief Gets the numeric value associated with a Unicode character.
      *
-     * C++ counterpart of .NET CharUnicodeInfo.GetNumericValue(char).
-     * Returns -1.0 if the character has no numeric value.
+     * C++ counterpart of .NET CharUnicodeInfo.GetNumericValue(char), <b>reduced to
+     * sixteen code points</b>: U+0030-U+0039, the superscripts U+00B9/U+00B2/U+00B3, and
+     * the vulgar fractions U+00BC/U+00BD/U+00BE (see the class note). U+216B answers -1.0
+     * here where .NET answers 12, and U+2153 answers -1.0 where .NET answers 0.333....
      * @param ch The character to evaluate.
-     * @return The numeric value, or -1.0 if @p ch is not a numeric character.
+     * @return The numeric value for the sixteen characters above; -1.0 for every other
+     *         character, whether or not it carries a Unicode numeric value.
      */
     static double GetNumericValue(charcs ch) {
         if (ch >= u'0' && ch <= u'9') return static_cast<double>(ch - u'0');
@@ -125,7 +150,8 @@ public:
      * C++ counterpart of .NET CharUnicodeInfo.GetNumericValue(string, int).
      * @param s     The string containing the character.
      * @param index The zero-based index of the character.
-     * @return The numeric value, or -1.0 if the character has no numeric value.
+     * @return The numeric value for the sixteen recognized characters; -1.0 otherwise,
+     *         under the same reduction as the single-character overload.
      */
     static double GetNumericValue(const std::u16string& s, intcs index) {
         CheckIndex(s, index);
