@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -60,6 +61,83 @@ TEST(SequencePositionTests, Inequality_EqualValues_ReturnsFalse) {
     SequencePosition a(nullptr, 0);
     SequencePosition b(nullptr, 0);
     EXPECT_FALSE(a != b);
+}
+
+// --- SR-AUD-069 clause B (ticket #2331): the value-level Equals/GetHashCode contract.
+// Before #2331 the type had operator==/!= and no named Equals and no hash at all, and
+// every direct test above compares NULL-segment positions only.
+
+TEST(SequencePositionTests, Equals_AgreesWithOperatorForNonNullSegments) {
+    int first = 0, second = 0;
+    const SequencePosition a(&first, 3);
+    const SequencePosition sameAsA(&first, 3);
+    const SequencePosition differentSegment(&second, 3);
+    const SequencePosition differentInteger(&first, 4);
+
+    EXPECT_TRUE(a.Equals(sameAsA));
+    EXPECT_TRUE(a == sameAsA);
+    EXPECT_FALSE(a.Equals(differentSegment));
+    EXPECT_TRUE(a != differentSegment);
+    EXPECT_FALSE(a.Equals(differentInteger));
+    EXPECT_TRUE(a != differentInteger);
+}
+
+TEST(SequencePositionTests, Equals_DefaultPositionsAreEqual) {
+    const SequencePosition a;
+    const SequencePosition b;
+    EXPECT_TRUE(a.Equals(b));
+    EXPECT_TRUE(a.Equals(SequencePosition(nullptr, 0)));
+}
+
+TEST(SequencePositionTests, GetHashCode_EqualPositionsShareAHash) {
+    // The whole of the contract a hashed container depends on, in the direction that
+    // is assertable (docs/HashAssertionContractRule.md R1).
+    int segment = 0;
+    EXPECT_EQ(SequencePosition().GetHashCode(), SequencePosition(nullptr, 0).GetHashCode());
+    EXPECT_EQ(SequencePosition(nullptr, 9).GetHashCode(),
+              SequencePosition(nullptr, 9).GetHashCode());
+    EXPECT_EQ(SequencePosition(&segment, 12).GetHashCode(),
+              SequencePosition(&segment, 12).GetHashCode());
+}
+
+TEST(SequencePositionTests, GetHashCode_IsStableForOneValue) {
+    int segment = 0;
+    const SequencePosition p(&segment, -7);
+    const auto first = p.GetHashCode();
+    EXPECT_EQ(p.GetHashCode(), first);
+    EXPECT_EQ(p.GetHashCode(), first);
+}
+
+TEST(SequencePositionTests, GetHashCode_NullSegmentHashIsTheIntegerItself) {
+    // R3 exact pin: with a null segment the folded pointer half is zero, so the combine
+    // ((h1 << 5) + h1) ^ h2 reduces to h2 -- the integer's own bit pattern. This is the
+    // only part of the hash that is reproducible across processes, and it is what proves
+    // the integer component reaches the hash at all.
+    EXPECT_EQ(SequencePosition(nullptr, 0).GetHashCode(), 0);
+    EXPECT_EQ(SequencePosition(nullptr, 1).GetHashCode(), 1);
+    EXPECT_EQ(SequencePosition(nullptr, 123456).GetHashCode(), 123456);
+    EXPECT_EQ(SequencePosition(nullptr, -1).GetHashCode(), -1);
+}
+
+TEST(SequencePositionTests, GetHashCode_DependsOnTheSegmentComponent) {
+    // Stated over a family, never as one pair: a hash that ignored the segment would
+    // make all eight of these agree. Collisions among them stay legal (R2).
+    int segments[8] = {};
+    std::vector<int32_t> hashes;
+    for (int& s : segments) hashes.push_back(SequencePosition(&s, 4).GetHashCode());
+    const bool allEqual = std::all_of(hashes.begin(), hashes.end(),
+                                      [&](auto h) { return h == hashes.front(); });
+    EXPECT_FALSE(allEqual);
+}
+
+TEST(SequencePositionTests, Equals_ComponentEqualityIsNotSequenceLocationIdentity) {
+    // Documented caveat, pinned: nothing ties a position to the sequence that made it,
+    // so two positions carrying the same pair are equal even when their creators differ.
+    int shared = 0;
+    const SequencePosition fromOneSequence(&shared, 2);
+    const SequencePosition fromAnother(&shared, 2);
+    EXPECT_TRUE(fromOneSequence.Equals(fromAnother));
+    EXPECT_EQ(fromOneSequence.GetHashCode(), fromAnother.GetHashCode());
 }
 
 // ===========================================================================
