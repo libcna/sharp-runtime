@@ -3,6 +3,102 @@
 
 # NEXT.md
 
+> **Test-count floor, 2026-08-12 — 17,014 / 38, and the provenance chain from 15,071 / 37 is
+> reconstructed (#2318).** The complete 38-executable gate reads **17,014 run: 17,006 passed,
+> 2 skipped, 6 failed** (17,006 + 6 + 2 = 17,014), **+11** on the inherited 17,003 — exactly
+> this batch's own new tests (7 in `SharpRuntimeTests_Buffers` for #2331, 4 in
+> `SharpRuntimeTests_Core_Base` for #2337), so no regression anywhere. The six failures are the
+> inherited ones — five `PingTests` (#1962) and
+> `SocketTests.Connect_ByHostname_NoMatchingAddressFamily_Throws`, which needs usable IPv6 this
+> environment does not provide — and are untouched, not disabled, not weakened, not
+> recategorised. **`CLAUDE.md` rule 2's figure is refreshed to this reading**, with the
+> attribution the rule's own convention requires and by the authority of the rule's own closing
+> sentence ("This floor should be raised as new tests are added"). No other clause of rule 2,
+> and no other rule, is altered.
+>
+> **Why the chain had to be reconstructed first.** Rule 2 is a normative rule with a factual
+> baseline embedded in it, and its body is a *provenance chain* — each figure attributed to the
+> tickets that measured it, with the intervening batches delegated to this file. Swapping
+> 15,071 / 37 for 17,014 / 38 without repairing the chain would have left the rule asserting a
+> 2026-08-12 figure on top of a citation trail that stops at #1932 on 2026-08-01. **Premise
+> correction to #2318's own description:** it reports this file's "most recent gate line" as
+> 16,052 / 37, which is a block from the middle of the file; the top block was already
+> 16,941 / 38 after #2284. This file was two batches and one un-blocked batch behind, not
+> nine hundred tests behind.
+>
+> **The chain, checkpoint by checkpoint.** Every figure below is a complete-gate reading already
+> recorded in this file, in the block that measured it; the tail after #2284 is new here. The
+> figures are unbroken, and each step matches its batch's own stated additions.
+>
+> | Gate | Exes | Recorded in |
+> |---|---|---|
+> | 15,071 | 37 | `CLAUDE.md` rule 2 (after **#1932**, 2026-08-01) and this file |
+> | 15,081 → 15,092 → 15,105 → 15,165 → 15,253 → 15,288 | 37 | successive batch blocks below |
+> | 15,352 → 15,411 → 15,461 → 15,469 → 15,529 → 15,535 → 15,619 | 37 | successive batch blocks below |
+> | 15,692 → 15,706 → 15,771 → 15,869 → 15,925 → 15,967 → 16,005 | 37 | successive batch blocks below |
+> | 16,052 → 16,082 → 16,152 → 16,274 → 16,310 → 16,383 → 16,406 | 37 | successive batch blocks below |
+> | **16,505** | **37** | the **last 37-executable gate** |
+> | **16,563** | **38** | `SharpRuntimeTests_IO_IsolatedStorage` added by the `modules/io-isolated-storage` batch (**#2203–#2206**); **+58, exactly the new executable's own tests** |
+> | 16,605 → 16,665 → 16,692 → 16,708 → 16,730 → 16,756 → 16,782 → 16,801 → 16,836 → 16,856 → 16,890 | 38 | successive batch blocks below |
+> | 16,946 | 38 | the SR-AUD-101/136/113/117/124/125/115/116/126/128/129/056 batch (**#2285–#2302**), **+56** |
+> | **16,941** | 38 | **#2284** — the chain's **only decrease**, −5, documented in the block immediately below and in `docs/HashAssertionContractRule.md` §8 |
+> | 16,972 | 38 | **#2303–#2305**, SR-AUD-133, **+31** |
+> | 16,991 | 38 | **#2306–#2310**, SR-AUD-098, **+19** |
+> | 16,992 | 38 | **#2312**, the SR-AUD-106 removal pin, **+1** — the figure #2318 measured |
+> | 17,003 | 38 | **#2316**, SR-AUD-174's data-free clauses, **+11** |
+> | **17,014** | **38** | **this batch** — #2331 **+7**, #2337 **+4** |
+>
+> **How the five post-#2284 links were established, since they had no block here.** Not from
+> memory: for each commit range, the net change in `TEST`/`TEST_F` macro declarations under the
+> test trees was counted from git (`git diff <range> --unified=0 -- '*Tests*.cpp' '*tests*'`).
+> `eee8be3f..7eee314f` = **+56**, which is exactly the 16,946 #2284 recorded as inherited;
+> `7eee314f..52d7311b` = **−5**, exactly #2284's documented deletion; `52d7311b..cc6761d0` =
+> **+31**; `cc6761d0..6c763265` = **+19**; `6c763265..02972a54` = **+1**, landing on the 16,992
+> #2318 itself measured on 2026-08-11; `02972a54..84d6cac1` = **+11**, landing on 17,003; and
+> `84d6cac1..1da5c7d7` = **+11**, landing on the 17,014 measured today. **Two independent
+> methods agree at every checkpoint that has a recorded gate** — the measured gate figure and
+> the macro count — which is why the reconstruction is offered as evidence rather than as a
+> narrative.
+>
+> **The blocks below are earlier batches' handoffs, each dated and scoped to itself; none of
+> them has been rewritten, and the topmost one predates this batch.**
+
+*Last verified: 2026-08-12. Branch `claude/core-audit-findings-triage-02tydm` — **the
+harness-designated branch**. **Pushed immediately after every commit**, per `CLAUDE.md` rule 13:
+`8ea069ff`, `cd96447c`, `23a214c5`, `1da5c7d7` **and this handoff commit itself**, whose hash
+cannot be written from inside it — five commits, five pushes, all normal fast-forwards, each
+verified present on the remote by re-reading `origin/<branch>` afterwards. No merge, rebase, tag,
+force-push, amend, PR, publication or history rewrite; every commit unsigned
+(`git -c commit.gpgsign=false`). This batch **closed #2317** by reviewing its last seven Core
+findings individually — **SR-AUD-053, 055, 063, 069, 110, 173, 182**, seven headers and seven
+causes, **not a family** — and then, when the umbrella closed, found and closed **two findings it
+had been carrying**: **SR-AUD-114**, listed among #2317's claims but never reviewed, and
+**SR-AUD-176**, which #2317 only ever mentioned as the *parsing example* "`SR-AUD-175/176`".
+**Three of the seven were conjunctions with a genuinely compatible clause**, and those landed:
+`SequencePosition` gained the `Equals`/`GetHashCode` contract it never had (#2331, +7 tests, 3
+mutations caught), three headers stopped documenting behaviour they do not have (#2329, #2333,
+#2335), and the always-normalized normalization stub was pinned before it can change silently
+(#2337, +4 tests). Audit **212 remediated / 90 confirmed / 62 confirmed (design-complete) / 364
+total**, recounted **by finding identifier**, unique and contiguous; **no `SR-AUD-*` identifier
+created — numbering frozen at 364**, and all nine findings touched stay `confirmed`.
+`modules/core` open **33, unchanged**. **Strict ownership now passes at its strongest reading:
+all 33 open Core findings have an open ticket that NAMES them in its title** — 25 `needs_user`,
+3 `todo`/deferred, 5 `blocked`, and **zero implementation-ready**. **Approval F / #2018 is
+consumed twice more, as a gate only** (#2336 numeric table, #2338 normalization); no second
+approval was raised, and the four tickets behind that one gate need four different payloads.
+Graph **41 / 92**, seams **3 / 20** — both unchanged. Build **0 errors / 0 warnings**,
+`--parallel 2` throughout, maximum aggregate compiler concurrency **2**. `git diff --check`
+clean, tracked `__pycache__` byte-identical (`PYTHONDONTWRITEBYTECODE=1` on every Python
+command). **Selective components was NOT rerun**: nothing touched a module boundary, a
+`PUBLIC`/`PRIVATE`/`TEST` dependency declaration, the catalogue or the graph, and the boundary
+validator confirms 41 / 92 unchanged. **Sanitizers were not run**: the one production change is
+an added value contract on a type with no allocation, no lifetime and no signed arithmetic (its
+combine is deliberately `uintcs`), so they could not discriminate. **Doxygen, `ccache` and the
+`/rv` reference tree are absent** and were not installed; **CNA, mobile-eggbert and every
+sibling/parent/downstream repository were not inspected, searched, built or modified.** **No CCF
+minted, extended or closed: CCF-011 stays closed, CCF-012 open, CCF-019 open and unextended,
+CCF-021 and CCF-022 unminted.**
+
 > **Test-count floor, 2026-08-11 — #2284 / SR-AUD-018 lowered it by 5, deliberately.** The
 > complete 38-executable gate now reads **16,941 run: 16,933 passed, 2 skipped, 6 failed**
 > (16,933 + 6 + 2 = 16,941), against the **16,946** that batch inherited. The −5 is five deleted
