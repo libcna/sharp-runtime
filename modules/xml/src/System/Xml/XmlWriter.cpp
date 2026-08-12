@@ -45,6 +45,16 @@ struct XmlWriterState {
 /// Rejects any write once Close() has been called. Close() itself, Flush() and ToString()
 /// stay usable -- ToString() is how an in-memory writer's result is read back, and the
 /// destructor calls Close() unconditionally.
+/// Rejects content that would be silently truncated at the tinyxml2 `const char*` boundary
+/// (ticket #2085). Measured, SIX public doors lost every byte after an embedded NUL and gave
+/// the caller no diagnostic; the finding named three. See detail::ContainsNul for why NUL is
+/// rejected unconditionally while the other non-Char characters are a separate decision.
+static void ThrowIfContainsNul(const std::string& text, const char* member, const char* what) {
+    if (detail::ContainsNul(text))
+        throw XmlException(std::string("XmlWriter::") + member + ": the " + what +
+                           " contains a NUL character, which cannot be represented in XML.");
+}
+
 static void ThrowIfClosed(const XmlWriterState* state, const char* member) {
     if (state && state->closed)
         throw System::InvalidOperationException(std::string("XmlWriter::") + member +
@@ -124,12 +134,14 @@ void XmlWriter::WriteEndElement() {
 void XmlWriter::WriteAttributeString(const std::string& name, const std::string& value) {
     ThrowIfClosed(state_.get(), "WriteAttributeString");
     (void)XmlConvert::VerifyName(name);
+    ThrowIfContainsNul(value, "WriteAttributeString", "attribute value");
     ThrowIfNoOpenElement(state_.get(), "WriteAttributeString");
     state_->nodeStack.top()->ToElement()->SetAttribute(name.c_str(), value.c_str());
 }
 
 void XmlWriter::WriteString(const std::string& text) {
     ThrowIfClosed(state_.get(), "WriteString");
+    ThrowIfContainsNul(text, "WriteString", "text");
     if (!state_ || state_->nodeStack.empty()) return;
     tinyxml2::XMLText* tn = state_->doc.NewText(text.c_str());
     state_->nodeStack.top()->InsertEndChild(tn);
@@ -151,6 +163,7 @@ void XmlWriter::WriteElementString(const std::string& name, const std::string& v
 
 void XmlWriter::WriteComment(const std::string& text) {
     ThrowIfClosed(state_.get(), "WriteComment");
+    ThrowIfContainsNul(text, "WriteComment", "comment text");
     if (!state_ || state_->nodeStack.empty()) return;
     tinyxml2::XMLComment* cmt = state_->doc.NewComment(SanitizeCommentText(text).c_str());
     state_->nodeStack.top()->InsertEndChild(cmt);
@@ -158,6 +171,7 @@ void XmlWriter::WriteComment(const std::string& text) {
 
 void XmlWriter::WriteCData(const std::string& text) {
     ThrowIfClosed(state_.get(), "WriteCData");
+    ThrowIfContainsNul(text, "WriteCData", "CDATA section text");
     if (!state_ || state_->nodeStack.empty()) return;
     tinyxml2::XMLText* tn = state_->doc.NewText(SanitizeCDataText(text).c_str());
     tn->SetCData(true);
@@ -171,6 +185,7 @@ void XmlWriter::WriteProcessingInstruction(const std::string& target, const std:
     // instruction early and spilled the rest into document-level text. sanitizeProcessing-
     // InstructionText already protects the DATA; the target had no such door.
     (void)XmlConvert::VerifyName(target);
+    ThrowIfContainsNul(data, "WriteProcessingInstruction", "processing-instruction data");
     if (!state_ || state_->nodeStack.empty()) return;
     std::string sanitizedData = SanitizeProcessingInstructionText(data);
     std::string text = sanitizedData.empty() ? target : (target + " " + sanitizedData);
@@ -191,6 +206,8 @@ void XmlWriter::WriteDocType(const std::string& name, const std::string& publicI
     // ordering VerifyName above already has.
     (void)XmlConvert::VerifyPublicId(publicId);
     (void)XmlConvert::VerifyXmlChars(systemId);
+    // The last NUL vector at this door: #2084 closed publicId/systemId, the subset stayed open.
+    ThrowIfContainsNul(internalSubset, "WriteDocType", "internal subset");
     if (detail::ExternalIdLiteralTerminatesDeclaration(systemId))
         throw XmlException("XmlWriter::WriteDocType: the system identifier contains '>', "
                            "which would terminate the DOCTYPE declaration: '" + systemId + "'.");

@@ -32,6 +32,7 @@
 #include "System/Xml/XmlReader.hpp"
 #include "System/Xml/XmlTextWriter.hpp"
 #include "System/Xml/XmlWriter.hpp"
+#include "System/Xml/XmlWriterSettings.hpp"
 
 using System::ArgumentException;
 using System::InvalidOperationException;
@@ -552,4 +553,97 @@ TEST(XmlWriterValidationTests, CreateDocumentType_ReDelimitsAndLeavesValidInputU
 
     XmlDocument doc2;
     EXPECT_THROW((void)doc2.CreateDocumentType("r", "pu\"b", "s", ""), XmlException);
+}
+
+// ===========================================================================
+// #2085 — an embedded NUL silently truncated writer content
+//
+// Every writer body hands std::string::c_str() to tinyxml2, whose API is const char*, so the
+// byte count died at that boundary. Measured (build-probe/2085_probe1_before.log): the finding
+// names THREE doors; SIX lost data, and the caller got no diagnostic from any of them.
+//
+// Why rejection, and why unconditionally: the XML Char production excludes U+0000, and a
+// character reference must itself match Char, so there is NO spelling that carries a NUL
+// through a document. "Write it in full" is not an implementable branch, and this runtime's
+// own parser already rejects an embedded NUL (XML_ERROR_PARSING_TEXT), so rejecting here makes
+// the writer and the reader agree rather than narrowing past them.
+//
+// Deliberately NOT covered here: the other characters outside Char (0x01, 0x0C, ...). They are
+// emitted faithfully rather than lost, and measured (2085_probe2_reader.log) this module's own
+// reader ACCEPTS them in text, attributes, CDATA and comments. Both "reject" and "emit" are
+// implementable there, which is exactly what makes it an XmlWriterSettings::CheckCharacters
+// decision -- a flag can only govern a choice whose branches both exist. That is #2349.
+// ===========================================================================
+
+TEST(XmlWriterValidationTests, EveryContentDoor_EmbeddedNul_Throws) {
+    // All six measured doors, including the two the finding did not name (WriteComment and
+    // WriteProcessingInstruction) and WriteElementString, which inherits WriteString's guard.
+    const std::string embedded("a\0b", 3);
+    const std::string leading("\0ab", 3);
+    for (const std::string& v : {embedded, leading}) {
+        { auto w = NewWriter(); w->WriteStartElement("e");
+          EXPECT_THROW(w->WriteString(v), XmlException); }
+        { auto w = NewWriter(); w->WriteStartElement("e");
+          EXPECT_THROW(w->WriteAttributeString("a", v), XmlException); }
+        { auto w = NewWriter(); w->WriteStartElement("e");
+          EXPECT_THROW(w->WriteCData(v), XmlException); }
+        { auto w = NewWriter(); w->WriteStartElement("e");
+          EXPECT_THROW(w->WriteComment(v), XmlException); }
+        { auto w = NewWriter(); w->WriteStartElement("e");
+          EXPECT_THROW(w->WriteProcessingInstruction("p", v), XmlException); }
+        { auto w = NewWriter();
+          EXPECT_THROW(w->WriteElementString("e", v), XmlException); }
+        { auto w = NewWriter(); w->WriteStartElement("e");
+          EXPECT_THROW(w->WriteDocType("r", "", "", v), XmlException); }
+    }
+}
+
+TEST(XmlWriterValidationTests, NulDiagnostic_NamesTheDoorAndTheCause) {
+    // The whole point of the repair is that the caller now LEARNS about the loss.
+    auto w = NewWriter();
+    w->WriteStartElement("e");
+    try {
+        w->WriteCData(std::string("c\0d", 3));
+        FAIL() << "expected XmlException";
+    } catch (const XmlException& e) {
+        EXPECT_NE(e.getMessageProperty().find("WriteCData"), std::string::npos)
+            << e.getMessageProperty();
+        EXPECT_NE(e.getMessageProperty().find("NUL"), std::string::npos)
+            << e.getMessageProperty();
+    }
+}
+
+TEST(XmlWriterValidationTests, ContentWithoutNul_ByteIdenticalAtEveryDoor) {
+    // The compatibility half: everything that is not a NUL keeps its exact previous output,
+    // including valid multi-byte UTF-8 and the three whitespace characters Char allows.
+    struct Case { const char* value; const char* expected; };
+    for (const Case& c : {
+             Case{"ab", "<e>ab</e>"},
+             Case{"a\tb\nc", "<e>a\tb\nc</e>"},
+             Case{"caf\xc3\xa9", "<e>caf\xc3\xa9</e>"},
+             Case{"\xe4\xb8\xad\xe6\x96\x87", "<e>\xe4\xb8\xad\xe6\x96\x87</e>"},
+         }) {
+        auto w = NewWriter();
+        w->WriteStartElement("e");
+        ASSERT_NO_THROW(w->WriteString(c.value)) << c.value;
+        w->WriteEndElement();
+        EXPECT_EQ(w->ToString(), c.expected);
+    }
+}
+
+TEST(XmlWriterValidationTests, NonNulControlCharacters_StillEmitted_PinnedScopeBoundary) {
+    // Pins the SCOPE line so a later reader does not assume #2085 covered the Char production.
+    // These characters are outside XML 1.0 Char, so this output is NOT valid XML -- but it is
+    // emitted rather than lost, and this module's own reader accepts it. Whether the writer
+    // should reject it is #2349's CheckCharacters decision, and this pin fails loudly if that
+    // decision is ever made silently.
+    auto w = NewWriter();
+    w->WriteStartElement("e");
+    ASSERT_NO_THROW(w->WriteString("a\x01" "b"));
+    w->WriteEndElement();
+    EXPECT_EQ(w->ToString(), "<e>a\x01" "b</e>");
+
+    // ... and the flag that would govern it is still documented as not enforced.
+    System::Xml::XmlWriterSettings settings;
+    EXPECT_TRUE(settings.CheckCharacters);
 }

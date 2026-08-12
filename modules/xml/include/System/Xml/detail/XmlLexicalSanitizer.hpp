@@ -151,4 +151,29 @@ namespace System::Xml::detail {
         return literal.find('>') != std::string::npos;
     }
 
+    /**
+     * @brief Reports whether @p text contains a NUL byte, which no XML document can carry.
+     *
+     * Every writer body in this runtime hands `std::string::c_str()` to the tinyxml2
+     * substrate, whose API is `const char*`, so the byte count is lost at that boundary and a
+     * value is silently truncated at its first NUL. That is a **length** boundary, not a
+     * missing validator, which is why it gets its own predicate rather than reusing
+     * `XmlConvert::VerifyXmlChars`.
+     *
+     * NUL is the one character for which rejection is not a policy choice. The XML `Char`
+     * production excludes U+0000 outright and a character reference must itself match `Char`,
+     * so there is **no** spelling -- literal or escaped -- that carries a NUL through a
+     * document; "write it in full" is not an implementable branch. This runtime's own parser
+     * agrees, rejecting an embedded NUL in text with `XML_ERROR_PARSING_TEXT`.
+     *
+     * Other characters outside `Char` (0x01, 0x0C, ...) are a **different** question and are
+     * deliberately not covered here: they are emitted faithfully rather than lost, this
+     * runtime's own reader accepts them, and both "reject" and "emit" are implementable -- so
+     * whether they are rejected is a `XmlWriterSettings::CheckCharacters` decision, tracked
+     * separately. A flag can only govern a choice whose branches both exist.
+     */
+    [[nodiscard]] inline bool ContainsNul(const std::string& text) {
+        return text.find('\0') != std::string::npos;
+    }
+
 } // namespace System::Xml::detail

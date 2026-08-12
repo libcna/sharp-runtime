@@ -1053,7 +1053,8 @@ behaviour is untouched, which the pins now enforce.
 | **#2083** | deferred verification (post-audit) | same |
 | **#2084** | **REMEDIATED (2026-08-12)** — see §21.5 | the delimiter decision turned out to be settled by this module's own DOCTYPE reader; the internal-subset half split to **#2348** |
 | **#2348** | post-audit, split from #2084 | a well-formed-internal-subset rule needs a DTD subset scanner this port deliberately does not have |
-| **#2085** | post-audit, ready | must first decide whether `XmlWriterSettings::CheckCharacters` governs rejection |
+| **#2085** | **REMEDIATED (2026-08-12)** — see §21.6 | the NUL half needed no decision; the `CheckCharacters` half split to **#2349** |
+| **#2349** | post-audit, split from #2085 | genuinely a `CheckCharacters` decision: both branches are implementable and rejecting would narrow past this runtime's own reader |
 | **#2086** | post-audit, ready | completing `RemoveAllChildren`'s event pair safely needs a lifetime decision (detach vs delete) that is **not** compatible |
 
 **`System::Xml` is complete except for deferred work**, in the precise sense that every
@@ -1117,3 +1118,41 @@ this `XmlWriter`/`Xml::Linq` duplication — so **#2200 reuses them rather than 
 copy**. `XDocumentType::WriteTo` already delegates to `WriteDocType` and inherits the repair
 today; its `SerializeTo` path duplicates the concatenation and does not, which is #2200's
 remaining work. No signature, layout, vtable or exception-specification change.
+
+
+### 21.6 #2085 — the family classification did the scoping work
+
+The ticket filed this as **family X-A** (silent loss on a public door) rather than X-C (a
+door bypassing a shipped validator), and that classification turned out to be the whole
+answer.
+
+**Premise correction: six doors, not three** (`build-probe/2085_probe1_before.log`).
+`WriteComment` and `WriteProcessingInstruction`'s data truncate identically and were unnamed;
+`WriteElementString` is an **occurrence** of `WriteString` rather than an independent door;
+`WriteWhitespace` was already safe, because its own whitespace validator rejects a NUL before
+the boundary is reached; and `WriteDocType`'s `internalSubset` was a seventh vector left over
+from #2084. The single shared cause was **confirmed, not assumed**: every body hands
+`std::string::c_str()` to tinyxml2, whose API is `const char*`.
+
+**The decision the ticket said had to be made turned out to be two decisions, only one of
+which is open.** `XmlWriterSettings::CheckCharacters` can only govern a choice whose branches
+both exist:
+
+- **NUL — one implementable branch.** The `Char` production excludes U+0000, and a character
+  reference must itself match `Char`, so there is no spelling that carries a NUL through a
+  document. "Write it in full" does not exist, and the alternative to rejecting is the silent
+  data loss being repaired. Rejected unconditionally; no flag decision needed. This also makes
+  the writer agree with this runtime's own parser, which already rejects an embedded NUL.
+- **Other non-`Char` characters — two implementable branches.** They are emitted faithfully
+  rather than lost, and measured (`2085_probe2_reader.log`) this module's own reader **accepts**
+  them in text, attributes, CDATA and comments. Rejecting them would narrow *past* the reader,
+  which is the opposite of the SR-AUD-349 closure property every other repair in this namespace
+  leant on. That is the real `CheckCharacters` decision, and it is **#2349**.
+
+**Result:** 6 LOST rows → 0, with every non-NUL value byte-identical, including tab/CR/LF and
+multi-byte UTF-8. +4 permanent tests; **6 mutations, all 6 caught**, one of them the mutation
+that silently makes #2349's decision by widening the guard to the whole `Char` production.
+Sanitizers were deliberately **not** run: `c_str()` truncation reads a well-formed
+NUL-terminated buffer, so it is a length bug, not a memory error, and ASan/UBSan would add no
+evidence. `detail::ContainsNul` is in the shared header, so **#2201 converges on this policy**
+rather than inventing a second one.

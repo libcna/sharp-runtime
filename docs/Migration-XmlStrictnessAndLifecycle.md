@@ -81,9 +81,26 @@ introduce in order to complete an event pair. The silence is deliberate, documen
 
 ## 5. Known remaining strictness gaps
 
-Recorded rather than silently left open, each with its own ticket: an embedded NUL still
-silently truncates writer content at three doors (**#2085**), and `RemoveAllChildren`'s event
-pair is still absent for the lifetime reason in §3 (**#2086**).
+Recorded rather than silently left open, each with its own ticket: `RemoveAllChildren`'s
+event pair is still absent for the lifetime reason in §3 (**#2086**); characters outside the
+XML 1.0 `Char` production other than NUL are still emitted raw, pending the
+`CheckCharacters` decision (**#2349**); and a DOCTYPE internal subset is still lost on
+read-back (**#2348**).
+
+**Closed since (#2085, 2026-08-12) — writer content doors now reject an embedded NUL.**
+Every writer body handed `std::string::c_str()` to tinyxml2, whose API is `const char*`, so
+content was silently truncated at its first NUL with no diagnostic. Measured, **six** doors
+did this, not the three originally recorded: `WriteString`, `WriteAttributeString` (value),
+`WriteCData`, `WriteComment`, `WriteProcessingInstruction` (data) and — via `WriteString` —
+`WriteElementString`, plus `WriteDocType`'s internal subset. All now throw `XmlException`
+naming the door and the cause.
+
+Rejection is not a policy choice here and is **not** governed by
+`XmlWriterSettings::CheckCharacters`: the XML `Char` production excludes U+0000 and a
+character reference must itself match `Char`, so no spelling carries a NUL through a
+document, and this runtime's own parser already rejects one. **Content that does not contain
+a NUL is completely unaffected**, byte for byte — including tab, CR, LF and multi-byte UTF-8.
+Characters outside `Char` other than NUL are still emitted raw; that is **#2349**.
 
 **Closed since (#2084, 2026-08-12) — a source-compatible narrowing worth knowing about.**
 `WriteDocType` and `XmlDocument::CreateDocumentType` now validate the DOCTYPE `ExternalID`
