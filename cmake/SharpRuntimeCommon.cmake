@@ -15,7 +15,14 @@ target_compile_features(sharp_runtime_headers INTERFACE cxx_std_23)
 
 function(sharp_runtime_apply_build_options target)
     if(MSVC)
-        target_compile_options("${target}" PRIVATE /W4 /WX)
+        # /utf-8 states what every source file in this repository already is. Without it MSVC
+        # decodes sources in the host's ANSI code page, so a multi-byte UTF-8 sequence inside a
+        # char32_t or char16_t literal arrives as several characters -- IdnMapping's U+3002,
+        # U+FF0E and U+FF61 label separators fail with C2015 for exactly that reason -- and every
+        # other literal is decoded against a code page that varies by machine. GCC and Clang
+        # already treat both the source and execution charset as UTF-8, so this is what makes the
+        # three compilers agree rather than a Windows-specific concession.
+        target_compile_options("${target}" PRIVATE /W4 /WX /utf-8)
     else()
         target_compile_options("${target}" PRIVATE -Wall -Wextra -Werror)
 
