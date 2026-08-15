@@ -7,12 +7,12 @@
 
 #include "System/TimeSpan.hpp"
 
-#include <cstdio>
 #include <iomanip>
 
 #include "System/FormatException.hpp"
 #include "System/Int64.hpp"
 #include "System/OverflowException.hpp"
+#include "SharpRuntime/PortableScan.hpp"
 #include "System/detail/DateTimeTextScanner.hpp"
 
 namespace System {
@@ -491,10 +491,10 @@ namespace System {
         long long days = 0, hours = 0, minutes = 0, seconds = 0;
         int matched = 0;
         if (hasDot) {
-            matched = std::sscanf(p, "%lld.%lld:%lld:%lld", &days, &hours, &minutes, &seconds);
+            matched = SHARP_RUNTIME_SSCANF(p, "%lld.%lld:%lld:%lld", &days, &hours, &minutes, &seconds);
             if (matched != 4) return TimeSpanParseOutcome::BadFormat;
         } else {
-            matched = std::sscanf(p, "%lld:%lld:%lld", &hours, &minutes, &seconds);
+            matched = SHARP_RUNTIME_SSCANF(p, "%lld:%lld:%lld", &hours, &minutes, &seconds);
             if (matched != 3) return TimeSpanParseOutcome::BadFormat;
         }
         if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59)

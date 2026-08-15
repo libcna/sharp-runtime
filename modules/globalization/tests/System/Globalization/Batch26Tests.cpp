@@ -9,6 +9,7 @@
 //   CalendarWeekRule:      enum values
 //   CharUnicodeInfo:       all methods
 #include <gtest/gtest.h>
+#include <limits>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/Calendar.hpp"
 #include "System/Globalization/CalendarAlgorithmType.hpp"
@@ -72,6 +73,44 @@ TEST(CalendarBatch26Test, AddMilliseconds) {
     auto result = cal.AddMilliseconds(dt, 1500.0);
     EXPECT_EQ(result.getSecondProperty(), 1);
     EXPECT_EQ(result.getMillisecondProperty(), 500);
+}
+
+// .NET's Calendar.Add rounds the requested amount half away from zero -- `value + (value >= 0 ?
+// 0.5 : -0.5)` truncated -- rather than truncating the amount itself toward zero.
+TEST(CalendarBatch26Test, AddMilliseconds_RoundsHalfAwayFromZero) {
+    GregorianLikeCalendar cal;
+    DateTime dt(2024, 1, 1, 0, 0, 0, 0);
+    EXPECT_EQ(cal.AddMilliseconds(dt, 0.5).getTicksProperty() - dt.getTicksProperty(),
+              DateTime::TicksPerMillisecond);
+    EXPECT_EQ(cal.AddMilliseconds(dt, -0.5).getTicksProperty() - dt.getTicksProperty(),
+              -DateTime::TicksPerMillisecond);
+    EXPECT_EQ(cal.AddMilliseconds(dt, 1.4).getTicksProperty() - dt.getTicksProperty(),
+              DateTime::TicksPerMillisecond);
+    EXPECT_EQ(cal.AddMilliseconds(dt, 0.4).getTicksProperty(), dt.getTicksProperty());
+}
+
+// An amount beyond int range is ordinary: 2^31 milliseconds is only about 24.9 days. This used
+// to narrow to int on its way to DateTime::AddMilliseconds(intcs) and offset by an
+// implementation-defined wrapped amount instead.
+TEST(CalendarBatch26Test, AddMilliseconds_AmountWiderThanInt) {
+    GregorianLikeCalendar cal;
+    DateTime dt(2024, 1, 1, 0, 0, 0, 0);
+    constexpr double amount = 3000000000.0; // ~34.7 days, above INT32_MAX
+    const auto result = cal.AddMilliseconds(dt, amount);
+    EXPECT_EQ(result.getTicksProperty() - dt.getTicksProperty(),
+              3000000000LL * DateTime::TicksPerMillisecond);
+    EXPECT_EQ(result.getDayProperty(), 4);
+    EXPECT_EQ(result.getMonthProperty(), 2);
+}
+
+TEST(CalendarBatch26Test, AddMilliseconds_OutOfRangeAmountThrows) {
+    GregorianLikeCalendar cal;
+    DateTime dt(2024, 1, 1, 0, 0, 0, 0);
+    EXPECT_THROW(cal.AddMilliseconds(dt, 1e18), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.AddMilliseconds(dt, -1e18), System::ArgumentOutOfRangeException);
+    // NaN compares false against both bounds, so .NET's negated range check rejects it too.
+    EXPECT_THROW(cal.AddMilliseconds(dt, std::numeric_limits<double>::quiet_NaN()),
+                 System::ArgumentOutOfRangeException);
 }
 
 TEST(CalendarBatch26Test, GetMonthsInYear) {

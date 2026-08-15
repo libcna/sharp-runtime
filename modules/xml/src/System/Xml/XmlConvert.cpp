@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <limits>
 
+#include "SharpRuntime/PortableScan.hpp"
 #include "System/Boolean.hpp"
 #include "System/Byte.hpp"
 #include "System/Char.hpp"
@@ -126,7 +127,7 @@ namespace System::Xml {
                 std::isxdigit(static_cast<unsigned char>(name[i + 4])) &&
                 std::isxdigit(static_cast<unsigned char>(name[i + 5]))) {
                 unsigned int code = 0;
-                std::sscanf(name.c_str() + i + 2, "%4x", &code);
+                SHARP_RUNTIME_SSCANF(name.c_str() + i + 2, "%4x", &code);
                 result += static_cast<char>(code);
                 i += 7;
             } else {
@@ -204,7 +205,9 @@ namespace System::Xml {
 
     std::string XmlConvert::ToString(bool value) { return value ? "true" : "false"; }
     std::string XmlConvert::ToString(SharpRuntime::charcs value) { return System::Char::ToString(value); }
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
     std::string XmlConvert::ToString(System::Decimal value) { return value.ToString(); }
+#endif
     std::string XmlConvert::ToString(SharpRuntime::sbytecs value) { return System::SByte::ToString(value); }
     std::string XmlConvert::ToString(SharpRuntime::shortcs value) { return System::Int16::ToString(value); }
     std::string XmlConvert::ToString(SharpRuntime::intcs value) { return System::Int32::ToString(value); }
@@ -257,6 +260,7 @@ namespace System::Xml {
         throw System::FormatException("String '" + s + "' was not recognized as a valid Boolean.");
     }
     SharpRuntime::charcs XmlConvert::ToChar(const std::string& s) { return System::Char::Parse(s); }
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
     // Verified against XmlConvert.cs's ToDecimal(string), which passes NumberStyles.
     // AllowLeadingWhite | AllowTrailingWhite to decimal.Parse. XML decimal content with
     // surrounding whitespace -- common from document formatting/indentation -- previously
@@ -265,6 +269,7 @@ namespace System::Xml {
     // explicit TrimXmlWhitespace is retained: it also governs the INF/-INF token check and
     // keeps XmlConvert independent of the exact whitespace set Decimal happens to accept.)
     System::Decimal XmlConvert::ToDecimal(const std::string& s) { return System::Decimal::Parse(TrimXmlWhitespace(s)); }
+#endif
     SharpRuntime::sbytecs XmlConvert::ToSByte(const std::string& s) { return System::SByte::Parse(s); }
     SharpRuntime::shortcs XmlConvert::ToInt16(const std::string& s) { return System::Int16::Parse(s); }
     SharpRuntime::intcs XmlConvert::ToInt32(const std::string& s) { return System::Int32::Parse(s); }

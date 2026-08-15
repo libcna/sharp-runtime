@@ -15,9 +15,10 @@ namespace System::IO::Hashing {
      * @brief A 128-bit hash value, represented as independent high/low 64-bit halves.
      *
      * C++ counterpart of the pair returned by .NET's XxHash128.GetCurrentHashAsUInt128()/
-     * HashToUInt128() (System.UInt128); this codebase's System::UInt128 requires GCC/Clang's
-     * unsigned __int128 (see System/UInt128.hpp), so XxHash128 exposes a portable, dependency-free
-     * Hash128 struct instead, usable on every platform this runtime targets (including MSVC).
+     * HashToUInt128() (System.UInt128); this codebase's System::UInt128 requires a
+     * compiler-provided 16-byte @c unsigned @c __int128 type and is gated by
+     * @c SHARP_RUNTIME_HAS_NATIVE_INT128. XxHash128 therefore exposes a portable,
+     * dependency-free Hash128 struct usable on every platform this runtime targets.
      */
     struct Hash128 {
         /** The low 64 bits of the hash. */

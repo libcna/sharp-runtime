@@ -5,6 +5,15 @@ function(_sharp_runtime_setup_core_base target)
     # Preserve the historical archive filename for consumers that inspect
     # build artifacts, while the CMake target name remains unambiguous.
     set_target_properties("${target}" PROPERTIES OUTPUT_NAME sharp_runtime_core)
+
+    # FINAL-STAB-001 i686 dependency boundary: without native __int128 the Decimal
+    # implementation is outside the supported surface (its header hard-errors), so the
+    # translation unit must leave the build exactly as it left the monolithic source list.
+    if(NOT SHARP_RUNTIME_COMPILER_HAS_NATIVE_INT128)
+        get_target_property(_core_base_sources "${target}" SOURCES)
+        list(FILTER _core_base_sources EXCLUDE REGEX "/System/Decimal\\.cpp$")
+        set_target_properties("${target}" PROPERTIES SOURCES "${_core_base_sources}")
+    endif()
 endfunction()
 
 sharp_runtime_register_module(

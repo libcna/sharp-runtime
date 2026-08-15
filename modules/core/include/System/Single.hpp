@@ -133,9 +133,8 @@ public:
      */
     [[nodiscard]] static bool IsPow2(float value) noexcept {
         if (value <= 0.0f || !std::isfinite(value)) return false;
-        uint32_t bits;
         static_assert(sizeof(float) == sizeof(uint32_t));
-        __builtin_memcpy(&bits, &value, sizeof(bits));
+        const uint32_t bits = std::bit_cast<uint32_t>(value);
         constexpr uint32_t BiasedExponentMask   = 0x7F80'0000u;
         constexpr uint32_t TrailingMask         = 0x007F'FFFFu;
         // SR-AUD-030 (#1860): a subnormal (biased exponent 0) power of two carries exactly
@@ -878,9 +877,8 @@ public:
      * considered Equals() (see above) always produce the same hash code.
      */
     [[nodiscard]] static intcs GetHashCode(float value) noexcept {
-        uint32_t bits;
-        static_assert(sizeof(bits) == sizeof(value));
-        __builtin_memcpy(&bits, &value, sizeof(bits));
+        static_assert(sizeof(uint32_t) == sizeof(value));
+        uint32_t bits = std::bit_cast<uint32_t>(value);
         if (std::isnan(value) || value == 0.0f) {
             constexpr uint32_t PositiveInfinityBits = 0x7F80'0000u;
             bits &= PositiveInfinityBits;

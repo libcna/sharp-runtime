@@ -167,9 +167,8 @@ public:
     static bool IsPow2(double value)
     {
         if (value <= 0.0 || !IsFinite(value)) return false;
-        uint64_t bits;
         static_assert(sizeof(double) == sizeof(uint64_t));
-        __builtin_memcpy(&bits, &value, sizeof(bits));
+        const uint64_t bits = std::bit_cast<uint64_t>(value);
         constexpr uint64_t BiasedExponentMask = 0x7FF0'0000'0000'0000ull;
         // Trailing significand must be zero for a normal power of two (only the implicit
         // leading 1 bit); SR-AUD-030 (#1860): a subnormal (biased exponent 0) power of two
@@ -997,9 +996,8 @@ public:
      */
     [[nodiscard]] static intcs GetHashCode(double value) noexcept
     {
-        uint64_t bits;
-        static_assert(sizeof(bits) == sizeof(value));
-        __builtin_memcpy(&bits, &value, sizeof(bits));
+        static_assert(sizeof(uint64_t) == sizeof(value));
+        uint64_t bits = std::bit_cast<uint64_t>(value);
         if (std::isnan(value) || value == 0.0) {
             constexpr uint64_t PositiveInfinityBits = 0x7FF0'0000'0000'0000ull;
             bits &= PositiveInfinityBits;

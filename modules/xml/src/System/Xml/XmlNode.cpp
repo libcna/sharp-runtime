@@ -217,11 +217,14 @@ namespace System::Xml {
         // half is silent here for the same lifetime reason RemoveAllChildren records.
         XmlDocument* eventDoc = GetDocument();
         for (tinyxml2::XMLNode* child : cloned) {
-            XmlNode* wrapped = eventDoc ? eventDoc->WrapNode(child) : nullptr;
-            detail::RaiseNodeChanging(eventDoc, wrapped, nullptr, this, "", "",
+            // Named for the node it wraps rather than reusing `wrapped`, which is already the
+            // wrapped *markup* string earlier in this function -- two unrelated meanings for one
+            // name in one body, and what MSVC /W4 reports as C4456.
+            XmlNode* wrappedChild = eventDoc ? eventDoc->WrapNode(child) : nullptr;
+            detail::RaiseNodeChanging(eventDoc, wrappedChild, nullptr, this, "", "",
                                       XmlNodeChangedAction::Insert);
             native_->InsertEndChild(child);
-            detail::RaiseNodeChanged(eventDoc, wrapped, nullptr, this, "", "",
+            detail::RaiseNodeChanged(eventDoc, wrappedChild, nullptr, this, "", "",
                                      XmlNodeChangedAction::Insert);
         }
     }

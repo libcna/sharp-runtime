@@ -12,9 +12,12 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Half.hpp"
-#include "System/Int128.hpp"
-#include "System/UInt128.hpp"
 #include "System/Numerics/BFloat16.hpp"
+
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
+#  include "System/Int128.hpp"
+#  include "System/UInt128.hpp"
+#endif
 
 namespace System {
 
@@ -104,6 +107,7 @@ namespace System {
             uint16_t raw = value.getBitsProperty();
             std::array<bytecs,2> b; std::memcpy(b.data(), &raw, 2); return b;
         }
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
         /** @brief Returns the specified 128-bit signed integer value as an array of bytes. */
         [[nodiscard]] static std::array<bytecs,16> GetBytes(Int128 value) {
             std::array<bytecs,16> b; std::memcpy(b.data(), &value, 16); return b;
@@ -112,6 +116,7 @@ namespace System {
         [[nodiscard]] static std::array<bytecs,16> GetBytes(UInt128 value) {
             std::array<bytecs,16> b; std::memcpy(b.data(), &value, 16); return b;
         }
+#endif
 
         // -----------------------------------------------------------------------
         // To* — byte array → value (raw pointer overloads)
@@ -141,10 +146,12 @@ namespace System {
         [[nodiscard]] static Half     ToHalf   (const bytecs* v, intcs i) { Half     r; std::memcpy(&r, v+i, 2); return r; }
         /** @brief Returns a BFloat16 value converted from two bytes at a specified position. */
         [[nodiscard]] static BFloat16 ToBFloat16(const bytecs* v, intcs i) { uint16_t raw; std::memcpy(&raw, v+i, 2); return BFloat16(raw); }
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
         /** @brief Returns a 128-bit signed integer converted from sixteen bytes at a specified position. */
         [[nodiscard]] static Int128   ToInt128  (const bytecs* v, intcs i) { Int128   r; std::memcpy(&r, v+i, 16); return r; }
         /** @brief Returns a 128-bit unsigned integer converted from sixteen bytes at a specified position. */
         [[nodiscard]] static UInt128  ToUInt128 (const bytecs* v, intcs i) { UInt128  r; std::memcpy(&r, v+i, 16); return r; }
+#endif
 
         // -----------------------------------------------------------------------
         // To* — vector overloads
@@ -184,10 +191,12 @@ namespace System {
         [[nodiscard]] static Half     ToHalf   (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 2);  return ToHalf   (v.data(), i); }
         /** @brief Returns a BFloat16 value converted from two bytes in a byte vector. */
         [[nodiscard]] static BFloat16 ToBFloat16(const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 2);  return ToBFloat16(v.data(), i); }
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
         /** @brief Returns a 128-bit signed integer converted from sixteen bytes in a byte vector. */
         [[nodiscard]] static Int128   ToInt128  (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 16); return ToInt128  (v.data(), i); }
         /** @brief Returns a 128-bit unsigned integer converted from sixteen bytes in a byte vector. */
         [[nodiscard]] static UInt128  ToUInt128 (const std::vector<bytecs>& v, intcs i) { validateDecodeRange(v.size(), i, 16); return ToUInt128 (v.data(), i); }
+#endif
 
         // -----------------------------------------------------------------------
         // Bit-reinterpretation methods

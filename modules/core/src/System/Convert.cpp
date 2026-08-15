@@ -249,7 +249,6 @@ namespace System {
                 if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(c - 'a' + 10);
                 if (c >= 'A' && c <= 'F') return static_cast<uint8_t>(c - 'A' + 10);
                 throw FormatException("Invalid hex character.");
-                return 0;
             };
             result.push_back(static_cast<bytecs>((hexVal(s[i]) << 4) | hexVal(s[i + 1])));
         }
@@ -330,7 +329,6 @@ namespace System {
             if (c == '+') return 62;
             if (c == '/') return 63;
             throw FormatException("Invalid Base64 character.");
-            return 0;
         };
 
         // Step 1 — remove the whitespace the contract permits. .NET ignores space, tab, CR and LF

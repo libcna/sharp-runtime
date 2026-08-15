@@ -8,6 +8,25 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SHARP_RUNTIME_BUILD_TESTS "Build sharp-runtime tests" ON)
 option(SHARP_RUNTIME_BUILD_BENCHMARKS "Build sharp-runtime standalone micro-benchmarks" OFF)
+option(SHARP_RUNTIME_BUILD_I686_REGRESSION "Build the i686 MinGW compile/link boundary regression" OFF)
+
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles([=[
+int main()
+{
+    __int128 signedValue = 1;
+    unsigned __int128 unsignedValue = 1;
+    static_assert(sizeof(signedValue) == 16);
+    static_assert(sizeof(unsignedValue) == 16);
+    return 0;
+}
+]=] SHARP_RUNTIME_COMPILER_HAS_NATIVE_INT128)
+
+if(SHARP_RUNTIME_COMPILER_HAS_NATIVE_INT128)
+    set(SHARP_RUNTIME_NATIVE_INT128_VALUE 1)
+else()
+    set(SHARP_RUNTIME_NATIVE_INT128_VALUE 0)
+endif()
 
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR
         AND NOT DEFINED SHARP_RUNTIME_COMPONENTS)
@@ -21,6 +40,12 @@ endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/SharpRuntimeModules.cmake")
 
+# FINAL-STAB-001: publish the native-__int128 capability to every component and consumer.
+# The monolithic root carried this PUBLIC on the SHARP_RUNTIME archive; the modular carrier
+# is the shared headers surface every component and consumer links transitively.
+target_compile_definitions(sharp_runtime_headers INTERFACE
+        SHARP_RUNTIME_HAS_NATIVE_INT128=${SHARP_RUNTIME_NATIVE_INT128_VALUE})
+
 if(NOT DEFINED SHARP_RUNTIME_COMPONENTS
         OR SHARP_RUNTIME_COMPONENTS STREQUAL "")
     set(sharp_runtime_requested_components All)
@@ -29,6 +54,33 @@ else()
 endif()
 
 sharp_runtime_enable_components(${sharp_runtime_requested_components})
+
+set(SHARP_RUNTIME_I686_REGRESSION_SOURCE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/Platform/SharpRuntimeI686CompileBoundary.cpp")
+
+if(SHARP_RUNTIME_BUILD_I686_REGRESSION)
+    if(NOT MINGW OR NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
+        message(FATAL_ERROR
+            "SHARP_RUNTIME_BUILD_I686_REGRESSION requires a 32-bit MinGW toolchain.")
+    endif()
+    if(SHARP_RUNTIME_BUILD_TESTS)
+        message(FATAL_ERROR
+            "SHARP_RUNTIME_BUILD_I686_REGRESSION requires SHARP_RUNTIME_BUILD_TESTS=OFF; "
+            "the native-128 test suites are outside the supported i686 boundary.")
+    endif()
+    if(SHARP_RUNTIME_COMPILER_HAS_NATIVE_INT128)
+        message(FATAL_ERROR
+            "The i686 regression must exercise a compiler without native __int128 support.")
+    endif()
+
+    add_executable(SharpRuntimeI686CompileBoundary
+            ${SHARP_RUNTIME_I686_REGRESSION_SOURCE})
+    target_link_libraries(SharpRuntimeI686CompileBoundary PRIVATE SHARP_RUNTIME)
+    target_compile_options(SharpRuntimeI686CompileBoundary PRIVATE -Wall -Wextra -Werror)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(SharpRuntimeI686CompileBoundary PRIVATE -Wno-format-truncation)
+    endif()
+endif()
 
 if(SHARP_RUNTIME_BUILD_TESTS)
     if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/googletest/CMakeLists.txt")

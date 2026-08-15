@@ -3,9 +3,13 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/DateTime.hpp"
-#include "System/Decimal.hpp"
 #include "System/TypeCode.hpp"
+
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
+#  include "System/Decimal.hpp"
+#endif
 
 namespace System {
 
@@ -49,8 +53,10 @@ namespace System {
         [[nodiscard]] virtual float ToSingle() const = 0;
         /** @brief Converts this value to a double-precision floating-point number. */
         [[nodiscard]] virtual double ToDouble() const = 0;
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
         /** @brief Converts this value to a Decimal number. */
         [[nodiscard]] virtual Decimal ToDecimal() const = 0;
+#endif
         /** @brief Converts this value to a DateTime. */
         [[nodiscard]] virtual DateTime ToDateTime() const = 0;
         /** @brief Converts this value to its string representation. */

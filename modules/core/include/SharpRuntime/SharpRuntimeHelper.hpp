@@ -9,6 +9,25 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+
+/**
+ * @brief Indicates whether the active compiler provides a native 16-byte @c __int128 type.
+ *
+ * CMake defines this macro from a compile probe for built targets. The fallback keeps public
+ * headers usable by consumers that do not build sharp-runtime through its CMake target.
+ */
+#ifndef SHARP_RUNTIME_HAS_NATIVE_INT128
+#  if defined(__SIZEOF_INT128__) && __SIZEOF_INT128__ == 16
+#    define SHARP_RUNTIME_HAS_NATIVE_INT128 1
+#  else
+#    define SHARP_RUNTIME_HAS_NATIVE_INT128 0
+#  endif
+#endif
+
+#if SHARP_RUNTIME_HAS_NATIVE_INT128 != 0 && SHARP_RUNTIME_HAS_NATIVE_INT128 != 1
+#  error "SHARP_RUNTIME_HAS_NATIVE_INT128 must be defined as 0 or 1."
+#endif
+
 #define CONTAINS(STRING, SUBSTR) ((STRING).find(SUBSTR) != std::string::npos)
 #define INTERNAL
 

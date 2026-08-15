@@ -13,8 +13,8 @@
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 
-#if defined(_MSC_VER)
-#  error "UInt128 requires unsigned __int128 (GCC/Clang only). MSVC is not supported for this type."
+#if !SHARP_RUNTIME_HAS_NATIVE_INT128
+#  error "UInt128 requires a compiler-provided 16-byte unsigned __int128 type."
 #endif
 
 namespace System {
@@ -22,7 +22,7 @@ namespace System {
     using SharpRuntime::intcs;
 
     /**
-     * @brief 128-bit unsigned integer, mirroring .NET System.UInt128 (GCC/Clang only).
+     * @brief 128-bit unsigned integer, mirroring .NET System.UInt128.
      *
      * C++ counterpart of .NET System.UInt128.
      * Arithmetic and bitwise operators, conversions, and ToString are provided.

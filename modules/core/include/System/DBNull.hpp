@@ -170,6 +170,7 @@ namespace System {
             throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
 
+#if SHARP_RUNTIME_HAS_NATIVE_INT128
         /**
          * @brief Not supported. Always throws InvalidCastException.
          *
@@ -179,6 +180,7 @@ namespace System {
         [[nodiscard]] Decimal ToDecimal() const override {
             throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
+#endif
 
         /**
          * @brief Not supported. Always throws InvalidCastException.

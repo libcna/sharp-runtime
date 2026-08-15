@@ -225,7 +225,11 @@ namespace System
                     oss.imbue(std::locale::classic());
                     if (sc == 'X') oss << std::uppercase;
                     oss << std::hex;
-                    if (width > 0) oss << std::setw(static_cast<std::streamsize>(width)) << std::setfill('0');
+                    // std::setw takes an int, so the streamsize cast only widened the value on
+                    // its way back down again -- a 64-to-32 narrowing MSVC /W4 reports as C4244.
+                    // parseSpecNumber accepts at most 999'999'999, so the int cast is exact for
+                    // every value that can reach here, exactly like the precision cast below.
+                    if (width > 0) oss << std::setw(static_cast<int>(width)) << std::setfill('0');
                     oss << static_cast<unsigned int>(value);
                     return oss.str();
                 } catch (const std::bad_alloc&) {

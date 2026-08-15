@@ -111,7 +111,7 @@ TcpClient::TcpClient(const IPEndPoint& localEP) {
     addr.sin_addr.s_addr = htonl(localEP.getAddressProperty().getAddressProperty());
     addr.sin_port        = htons(static_cast<uint16_t>(localEP.getPortProperty()));
 
-    if (::bind(toSk(sock), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
+    if (::bind(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
         auto code = lastErrorCode();
         auto err  = netErr();
         closeSk(toFd(sock));
@@ -298,7 +298,7 @@ void TcpListener::Start() {
 
 #  if defined(_WIN32)
     BOOL opt = TRUE;
-    ::setsockopt(toSk(sock), SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
+    ::setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
 #  else
     int opt = 1;
     ::setsockopt(toFd(sock), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -309,7 +309,7 @@ void TcpListener::Start() {
     addr.sin_addr.s_addr = htonl(local_.getAddressProperty().getAddressProperty());
     addr.sin_port        = htons(static_cast<uint16_t>(local_.getPortProperty()));
 
-    if (::bind(toSk(sock), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
+    if (::bind(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
         closeSk(toFd(sock));
@@ -321,7 +321,7 @@ void TcpListener::Start() {
     // to e.g. /proc/sys/net/core/somaxconn on Linux internally); this port previously
     // hardcoded a backlog of 5, which could silently start dropping incoming connections
     // under any real concurrent load far below what the OS would otherwise allow.
-    if (::listen(toSk(sock), std::numeric_limits<int>::max()) < 0) {
+    if (::listen(sock, std::numeric_limits<int>::max()) < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
         closeSk(toFd(sock));

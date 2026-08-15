@@ -12,8 +12,8 @@
 #include "System/OverflowException.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
-#if defined(_MSC_VER)
-#  error "Decimal requires unsigned __int128 (GCC/Clang only). MSVC is not supported for this type."
+#if !SHARP_RUNTIME_HAS_NATIVE_INT128
+#  error "Decimal requires a compiler-provided 16-byte unsigned __int128 type."
 #endif
 
 namespace System {
@@ -36,7 +36,7 @@ namespace System {
  *
  * C++ counterpart of .NET System.Decimal.
  *
- * @note POSIX/GCC/Clang only — uses unsigned __int128 which MSVC does not support.
+ * @note Requires a compiler-provided 16-byte @c unsigned @c __int128 type.
  * @note Deviations from .NET, consistent with project-wide out-of-scope decisions:
  *   - GetBits(decimal) returns its four 32-bit words via out-parameters instead of
  *     an int[4], since System::Array does not exist in sharp-runtime.

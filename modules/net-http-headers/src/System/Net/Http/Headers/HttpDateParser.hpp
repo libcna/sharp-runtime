@@ -43,6 +43,7 @@
 // does is the still-open question **#2130**, and it is a widening, not something this ticket
 // may guess at.
 
+#include "SharpRuntime/PortableScan.hpp"
 #include "System/DateTimeOffset.hpp"
 #include "System/TimeSpan.hpp"
 
@@ -77,9 +78,13 @@ namespace System::Net::Http::Headers::detail {
         // so it is rejected before c_str() hides the rest of the value.
         if (s.find('\0') != std::string::npos) return false;
 
-        const int matched = std::sscanf(s.c_str(), "%3[A-Za-z], %d %3[A-Za-z] %d %d:%d:%d %3s%n",
-                                        dayName, &day, monthName, &year, &hour, &minute, &second,
-                                        gmt, &consumed);
+        // The three character-array arguments carry their buffer size on MSVC, which its secure
+        // scanf requires for %[ and %s; %n and the numeric conversions take no extra argument
+        // there, so the conversion string and its result are the same on every compiler.
+        const int matched = SHARP_RUNTIME_SSCANF(
+            s.c_str(), "%3[A-Za-z], %d %3[A-Za-z] %d %d:%d:%d %3s%n",
+            SHARP_RUNTIME_SCANF_BUFFER(dayName), &day, SHARP_RUNTIME_SCANF_BUFFER(monthName),
+            &year, &hour, &minute, &second, SHARP_RUNTIME_SCANF_BUFFER(gmt), &consumed);
         if (matched != 8) return false;
         if (consumed < 0) return false;
         if (std::strcmp(gmt, "GMT") != 0) return false;

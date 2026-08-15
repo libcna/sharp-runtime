@@ -208,7 +208,23 @@ Other platform evidence is narrower:
 | Windows/MinGW | MinGW-w64 GCC 14-win32/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. GoogleTest was not cross-built and repository CI remains Ubuntu-only. |
 | Emscripten | Emscripten 5.0.7/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. Tests were not cross-built or run, and some runtime APIs deliberately throw `PlatformNotSupportedException`. |
 | macOS/Apple Clang | Real downstream Xcode 15.4 builds drove portability fixes on 2026-07-20; this repository has no macOS job or recorded full standalone test baseline. |
+| Windows/i686 MinGW | Supported compile/link boundary (FINAL-STAB-001): i686 MinGW GCC provides no native `__int128`, so `System::Decimal`, `Int128`, `UInt128`, and only the members that expose them are outside the boundary; everything else compiles and links. Consumers can test the public `SHARP_RUNTIME_HAS_NATIVE_INT128` macro (always `0` or `1`) before exposing dependent APIs. |
 | MSVC | `Decimal`, `Int128`, and `UInt128` remain unsupported because they require the GCC/Clang `__int128` extension. |
+
+The i686 boundary has a dedicated regression target that configures and builds
+the complete supported surface without requiring Wine:
+
+```bash
+cmake -S . -B cmake-build-mingw-i686 -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/mingw-w64-i686.cmake \
+  -DSHARP_RUNTIME_BUILD_TESTS=OFF \
+  -DSHARP_RUNTIME_BUILD_I686_REGRESSION=ON \
+  -DZLIB_INCLUDE_DIR=/path/to/i686/include \
+  -DZLIB_LIBRARY=/path/to/i686/lib/libz.a \
+  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+cmake --build cmake-build-mingw-i686 \
+  --target SharpRuntimeI686CompileBoundary --parallel 4
+```
 
 Compile portability and runtime feature availability are separate. Unsupported
 operations should compile and fail explicitly with
