@@ -64,6 +64,29 @@ namespace {
         value = entry.substr(eq + 1);
         return true;
     }
+
+    bool tryGetEnvironmentVariable(
+            const std::string& name, std::string& value) {
+        // getenv("") is unspecified by POSIX. Real .NET returns null for an empty name, which
+        // this runtime represents as an unsuccessful lookup and an empty public return value.
+        if (name.empty()) return false;
+#if defined(_WIN32)
+        char* rawValue = nullptr;
+        std::size_t valueLength = 0;
+        if (_dupenv_s(&rawValue, &valueLength, name.c_str()) != 0 || rawValue == nullptr) {
+            std::free(rawValue);
+            return false;
+        }
+        value.assign(rawValue);
+        std::free(rawValue);
+        return true;
+#else
+        const char* rawValue = std::getenv(name.c_str());
+        if (rawValue == nullptr) return false;
+        value.assign(rawValue);
+        return true;
+#endif
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +245,11 @@ std::vector<std::string> Environment::GetLogicalDrives() {
 #endif
 }
 
+std::string Environment::GetEnvironmentVariable(const std::string& name) {
+    std::string value;
+    return tryGetEnvironmentVariable(name, value) ? value : std::string();
+}
+
 // Ported from real .NET's Environment.ExpandEnvironmentVariablesCore (Environment.UnixOrBrowser.cs)
 // rather than a from-scratch %VAR% scanner, since the reference algorithm has a non-obvious
 // property the previous implementation here didn't reproduce: when a %name% token fails to
@@ -241,12 +269,9 @@ std::string Environment::ExpandEnvironmentVariables(const std::string& name) {
     while (lastPos < name.size() && (pos = name.find('%', lastPos + 1)) != std::string::npos) {
         if (name[lastPos] == '%') {
             std::string key = name.substr(lastPos + 1, pos - lastPos - 1);
-            // getenv("") is unspecified by POSIX ("If name is an empty string ... the behavior
-            // is undefined") -- guard it explicitly rather than relying on every libc happening
-            // to return null gracefully for "%%".
-            const char* val = key.empty() ? nullptr : std::getenv(key.c_str());
-            if (val != nullptr) {
-                result += val;
+            std::string value;
+            if (tryGetEnvironmentVariable(key, value)) {
+                result += value;
                 lastPos = pos + 1;
                 continue;
             }
