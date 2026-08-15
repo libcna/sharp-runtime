@@ -80,6 +80,15 @@ intcs CheckedVectorCount(std::size_t size) {
     return static_cast<intcs>(size);
 }
 
+// Every caller of the two helpers below sits in a _WIN32 or POSIX branch, and each of those
+// three-way #if blocks answers Emscripten with PlatformNotSupportedException instead. So on that
+// target the helpers genuinely have no caller, and Clang -- which Emscripten uses, where GCC does
+// not diagnose this -- reports "unused function 'ThrowNative'" against -Werror and the build stops.
+// Compiling them only where they are used fixes it without a suppression, and keeps the dead code
+// out of the wasm binary. NativeDetail has exactly one caller, ThrowNative, so both must be inside
+// the same guard: excluding only ThrowNative moves the same error one line up.
+#if !defined(__EMSCRIPTEN__)
+
 /// The native reason a syscall failed, appended to the IOException message. Before #2100 every
 /// failure surfaced as a bare "RandomAccess::<member> failed" with the reason discarded, so a
 /// caller could not tell EBADF from EINVAL from ENOSPC.
@@ -93,6 +102,8 @@ std::string NativeDetail(int code) {
 [[noreturn]] void ThrowNative(const char* member, int code) {
     throw IOException(std::string(member) + " failed: " + NativeDetail(code));
 }
+
+#endif // !defined(__EMSCRIPTEN__)
 
 } // namespace
 
