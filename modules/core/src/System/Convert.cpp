@@ -249,7 +249,6 @@ namespace System {
                 if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(c - 'a' + 10);
                 if (c >= 'A' && c <= 'F') return static_cast<uint8_t>(c - 'A' + 10);
                 throw FormatException("Invalid hex character.");
-                return 0;
             };
             result.push_back(static_cast<bytecs>((hexVal(s[i]) << 4) | hexVal(s[i + 1])));
         }
@@ -318,7 +317,6 @@ namespace System {
             if (c == '/') return 63;
             if (c == '=') return -1;
             throw FormatException("Invalid Base64 character.");
-            return 0;
         };
         if (s.size() % 4 != 0) throw FormatException("Base64 string length must be a multiple of 4.");
         std::vector<bytecs> out;
