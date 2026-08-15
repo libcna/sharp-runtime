@@ -569,11 +569,32 @@ public:
      *
      * C++ counterpart of .NET Calendar.AddMilliseconds(DateTime, double).
      * @param time         The starting DateTime.
-     * @param milliseconds The number of milliseconds to add.
+     * @param milliseconds The number of milliseconds to add, rounded half away from zero.
      * @return A new DateTime offset by @p milliseconds.
+     * @throws System::ArgumentOutOfRangeException If the rounded amount is outside the range a
+     *         DateTime can express, or is not a number.
      */
     virtual System::DateTime AddMilliseconds(const System::DateTime& time, double milliseconds) const {
-        return time.AddMilliseconds(static_cast<long long>(milliseconds));
+        // .NET's Calendar.AddMilliseconds delegates to Calendar.Add(time, value, scale), which
+        // rounds the amount half away from zero, range-checks it and then offsets by *ticks*.
+        // Delegating to DateTime::AddMilliseconds(intcs) instead narrowed the amount to int, so
+        // any amount beyond int range -- 2^31 ms is only about 24.9 days, well inside what a
+        // DateTime can express -- produced an implementation-defined wrapped offset instead of
+        // the requested one. That narrowing is also what MSVC /W4 reports as C4244: the
+        // diagnostic was pointing at a real defect, not at compiler noise.
+        //
+        // maxMillis is .NET's own MaxMillis bound (DaysTo10000 * MillisPerDay ==
+        // 315537897600000). MaxTicks is one tick short of that many whole milliseconds, so the
+        // integer division truncates and the +1 recovers the exact .NET value.
+        constexpr SharpRuntime::longcs maxMillis =
+            System::DateTime::MaxTicks / System::DateTime::TicksPerMillisecond + 1;
+        const double rounded = milliseconds + (milliseconds >= 0 ? 0.5 : -0.5);
+        // Negated conjunction, exactly as .NET writes the same check, so that a NaN amount --
+        // which compares false against both bounds -- is rejected rather than passed through.
+        if (!(rounded > -static_cast<double>(maxMillis) && rounded < static_cast<double>(maxMillis)))
+            throw System::ArgumentOutOfRangeException("value", "Value to add was out of range.");
+        return time.AddTicks(static_cast<SharpRuntime::longcs>(rounded) *
+                             System::DateTime::TicksPerMillisecond);
     }
 
     /**
