@@ -33,10 +33,12 @@
  * @brief Passes a character array to SHARP_RUNTIME_SSCANF with the size `sscanf_s` requires.
  *
  * The argument must be a real array, not a decayed pointer, because the size comes from
- * `sizeof`. It is passed as `std::size_t`, which is what the secure CRT reads it back as.
+ * `sizeof`. The size is narrowed to `unsigned`, which is the type the secure CRT reads back out
+ * of the variadic list -- passing `std::size_t` is what MSVC reports as C4477. Every buffer here
+ * is a small fixed-size local, so the conversion cannot lose anything.
  */
 #if defined(_MSC_VER)
-#  define SHARP_RUNTIME_SCANF_BUFFER(buffer) (buffer), sizeof(buffer)
+#  define SHARP_RUNTIME_SCANF_BUFFER(buffer) (buffer), static_cast<unsigned>(sizeof(buffer))
 #else
 #  define SHARP_RUNTIME_SCANF_BUFFER(buffer) (buffer)
 #endif
