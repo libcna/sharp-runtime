@@ -19,6 +19,9 @@
 #  include <fcntl.h>
 #  include <cerrno>
 #  include <cstring>
+#  if defined(__APPLE__)
+#    include <crt_externs.h>
+#  endif
 #  define SHARP_RUNTIME_PROCESS_POSIX 1
 #endif
 
@@ -103,6 +106,14 @@ namespace {
         if (fds[1] >= 0) ::close(fds[1]);
         fds[0] = -1;
         fds[1] = -1;
+    }
+
+    char*** processEnvironmentSlot() noexcept {
+#if defined(__APPLE__)
+        return _NSGetEnviron();
+#else
+        return &::environ;
+#endif
     }
 
 }
@@ -240,7 +251,8 @@ bool Process::Start() {
     // can be empty or contain '='.
     std::vector<std::string> envStorage;
     const auto& envOverrides = si.getEnvironmentVariablesProperty();
-    for (char** entry = ::environ; entry != nullptr && *entry != nullptr; ++entry) {
+    char*** environmentSlot = processEnvironmentSlot();
+    for (char** entry = *environmentSlot; entry != nullptr && *entry != nullptr; ++entry) {
         const char* separator = std::strchr(*entry, '=');
         const std::string name =
             separator != nullptr
@@ -321,7 +333,7 @@ bool Process::Start() {
 #else
         // Where execvpe is absent (notably macOS), replacing the global environ pointer is a
         // single store -- async-signal-safe -- and execvp then passes it to the new image.
-        ::environ = envp.data();
+        *environmentSlot = envp.data();
         ::execvp(argv[0], argv.data());
 #endif
         reportChildStartupFailure(startupStatusPipe[1], errno); // exec only returns on failure
