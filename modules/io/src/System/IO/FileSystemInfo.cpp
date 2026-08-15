@@ -30,27 +30,36 @@ namespace System::IO {
 
         // C++20 [time.clock.file] lets an implementation give file_clock *either* to_sys/from_sys
         // *or* to_utc/from_utc, and both choices are conforming: libstdc++ and libc++ provide the
-        // sys pair, Microsoft's STL provides the utc pair and no to_sys at all. std::chrono::
-        // clock_cast converts whichever pair exists, so these two helpers detect the direct
-        // members with a `requires` expression -- the same technique PortableFromChars.hpp uses
-        // for the same reason -- and fall back to clock_cast rather than guessing from the
-        // platform. The direct member stays the path taken wherever it exists, so no existing
-        // build changes behavior.
+        // sys pair, Microsoft's STL provides the utc pair plus std::chrono::clock_cast, which
+        // converts between whichever pair exists.
+        //
+        // This has to be a preprocessor split, not a `requires` detection or an if-constexpr
+        // fallback. Both alternatives were measured on real CI runners and both are hard errors:
+        // on Microsoft's STL `requires { file_clock::to_sys(ft); }` is a diagnosable error rather
+        // than an unsatisfied requirement, because file_clock is not a dependent type there; and
+        // Apple's libc++ does not declare std::chrono::clock_cast at all, so naming it even in a
+        // discarded if-constexpr branch fails at definition time. Only text the preprocessor
+        // removes is safe here. _MSVC_STL_VERSION identifies the library rather than the
+        // compiler, which is what actually decides the member set.
+#if defined(_MSVC_STL_VERSION)
         std::chrono::system_clock::time_point fileTimeToSystemTime(std::filesystem::file_time_type ft) {
-            if constexpr (requires { std::chrono::file_clock::to_sys(ft); })
-                return std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-                    std::chrono::file_clock::to_sys(ft));
-            else
-                return std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-                    std::chrono::clock_cast<std::chrono::system_clock>(ft));
+            return std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                std::chrono::clock_cast<std::chrono::system_clock>(ft));
         }
 
         std::filesystem::file_time_type systemTimeToFileTime(std::chrono::system_clock::time_point sys) {
-            if constexpr (requires { std::chrono::file_clock::from_sys(sys); })
-                return std::chrono::file_clock::from_sys(sys);
-            else
-                return std::chrono::clock_cast<std::chrono::file_clock>(sys);
+            return std::chrono::clock_cast<std::chrono::file_clock>(sys);
         }
+#else
+        std::chrono::system_clock::time_point fileTimeToSystemTime(std::filesystem::file_time_type ft) {
+            return std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                std::chrono::file_clock::to_sys(ft));
+        }
+
+        std::filesystem::file_time_type systemTimeToFileTime(std::chrono::system_clock::time_point sys) {
+            return std::chrono::file_clock::from_sys(sys);
+        }
+#endif
 
         System::DateTime fromFileClock(std::filesystem::file_time_type ft) {
             // The conversion may yield a finer-grained duration than system_clock::time_point
