@@ -7,12 +7,12 @@
 
 #include "System/TimeSpan.hpp"
 
-#include <cstdio>
 #include <iomanip>
 
 #include "System/FormatException.hpp"
 #include "System/Int64.hpp"
 #include "System/OverflowException.hpp"
+#include "SharpRuntime/PortableScan.hpp"
 #include "System/detail/DateTimeTextScanner.hpp"
 
 namespace System {
@@ -455,20 +455,6 @@ namespace System {
 
     } // namespace
 
-// MSVC's secure CRT deprecates std::sscanf (C4996) and this build treats /W4 warnings as errors,
-// so the two conversions below are spelled sscanf_s there. The two functions differ only in the
-// string and character conversions (%s, %c, %[), which take an extra buffer-size argument in the
-// secure variant; this parser converts nothing but %lld, so the accepted grammar -- including
-// sscanf's leading-sign and whitespace-skipping leniencies that the surrounding checks are
-// written against -- is byte-for-byte the same on every compiler. A macro rather than a wrapper
-// function keeps the format string a literal at the call site, so GCC and Clang still check the
-// conversions against the argument types.
-#if defined(_MSC_VER)
-#  define SHARP_RUNTIME_TIMESPAN_SSCANF ::sscanf_s
-#else
-#  define SHARP_RUNTIME_TIMESPAN_SSCANF std::sscanf
-#endif
-
     // Internal linkage: TimeSpan.hpp is unchanged by this repair.
     static TimeSpanParseOutcome parseTimeSpanCore(const std::string& s, TimeSpan& result) {
         if (s.empty()) return TimeSpanParseOutcome::BadFormat;
@@ -505,10 +491,10 @@ namespace System {
         long long days = 0, hours = 0, minutes = 0, seconds = 0;
         int matched = 0;
         if (hasDot) {
-            matched = SHARP_RUNTIME_TIMESPAN_SSCANF(p, "%lld.%lld:%lld:%lld", &days, &hours, &minutes, &seconds);
+            matched = SHARP_RUNTIME_SSCANF(p, "%lld.%lld:%lld:%lld", &days, &hours, &minutes, &seconds);
             if (matched != 4) return TimeSpanParseOutcome::BadFormat;
         } else {
-            matched = SHARP_RUNTIME_TIMESPAN_SSCANF(p, "%lld:%lld:%lld", &hours, &minutes, &seconds);
+            matched = SHARP_RUNTIME_SSCANF(p, "%lld:%lld:%lld", &hours, &minutes, &seconds);
             if (matched != 3) return TimeSpanParseOutcome::BadFormat;
         }
         if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59)

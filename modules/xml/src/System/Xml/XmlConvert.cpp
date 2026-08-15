@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <limits>
 
+#include "SharpRuntime/PortableScan.hpp"
 #include "System/Boolean.hpp"
 #include "System/Byte.hpp"
 #include "System/Char.hpp"
@@ -126,7 +127,7 @@ namespace System::Xml {
                 std::isxdigit(static_cast<unsigned char>(name[i + 4])) &&
                 std::isxdigit(static_cast<unsigned char>(name[i + 5]))) {
                 unsigned int code = 0;
-                std::sscanf(name.c_str() + i + 2, "%4x", &code);
+                SHARP_RUNTIME_SSCANF(name.c_str() + i + 2, "%4x", &code);
                 result += static_cast<char>(code);
                 i += 7;
             } else {
