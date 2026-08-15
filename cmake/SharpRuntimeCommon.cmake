@@ -23,6 +23,14 @@ function(sharp_runtime_apply_build_options target)
         # already treat both the source and execution charset as UTF-8, so this is what makes the
         # three compilers agree rather than a Windows-specific concession.
         target_compile_options("${target}" PRIVATE /W4 /WX /utf-8)
+
+        # <windows.h> defines function-like min and max macros unless NOMINMAX is set, and
+        # <winsock2.h> pulls it in. Every std::min, std::max and numeric_limits<T>::max() in a
+        # translation unit that reaches a Windows header is then mangled into a macro invocation
+        # -- Socket.cpp and TcpClient.cpp fail with C2589 and C4003 for that reason alone. Set
+        # once for the whole library rather than defined ahead of each of the eleven Windows
+        # include blocks, where a single wrong ordering would bring the macros back.
+        target_compile_definitions("${target}" PRIVATE NOMINMAX)
     else()
         target_compile_options("${target}" PRIVATE -Wall -Wextra -Werror)
 
