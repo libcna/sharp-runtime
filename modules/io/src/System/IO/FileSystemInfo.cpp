@@ -28,14 +28,36 @@ namespace System::IO {
             return System::DateTime(ticks);
         }
 
+        // C++20 [time.clock.file] lets an implementation give file_clock *either* to_sys/from_sys
+        // *or* to_utc/from_utc, and both choices are conforming: libstdc++ and libc++ provide the
+        // sys pair, Microsoft's STL provides the utc pair and no to_sys at all. std::chrono::
+        // clock_cast converts whichever pair exists, so these two helpers detect the direct
+        // members with a `requires` expression -- the same technique PortableFromChars.hpp uses
+        // for the same reason -- and fall back to clock_cast rather than guessing from the
+        // platform. The direct member stays the path taken wherever it exists, so no existing
+        // build changes behavior.
+        std::chrono::system_clock::time_point fileTimeToSystemTime(std::filesystem::file_time_type ft) {
+            if constexpr (requires { std::chrono::file_clock::to_sys(ft); })
+                return std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                    std::chrono::file_clock::to_sys(ft));
+            else
+                return std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                    std::chrono::clock_cast<std::chrono::system_clock>(ft));
+        }
+
+        std::filesystem::file_time_type systemTimeToFileTime(std::chrono::system_clock::time_point sys) {
+            if constexpr (requires { std::chrono::file_clock::from_sys(sys); })
+                return std::chrono::file_clock::from_sys(sys);
+            else
+                return std::chrono::clock_cast<std::chrono::file_clock>(sys);
+        }
+
         System::DateTime fromFileClock(std::filesystem::file_time_type ft) {
-            // file_clock::to_sys() may return a finer-grained duration than
-            // system_clock::time_point (e.g. nanoseconds on libc++/Emscripten vs.
-            // microseconds on libstdc++); to_time_t() only accepts the exact
-            // system_clock::time_point type, so cast explicitly.
-            auto sysTime = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-                std::chrono::file_clock::to_sys(ft));
-            return fromUnixTime(static_cast<longcs>(std::chrono::system_clock::to_time_t(sysTime)));
+            // The conversion may yield a finer-grained duration than system_clock::time_point
+            // (e.g. nanoseconds on libc++/Emscripten vs. microseconds on libstdc++); to_time_t()
+            // only accepts the exact system_clock::time_point type, so the helper casts.
+            return fromUnixTime(
+                static_cast<longcs>(std::chrono::system_clock::to_time_t(fileTimeToSystemTime(ft))));
         }
 
         struct RawTimes {
@@ -101,7 +123,7 @@ namespace System::IO {
     void FileSystemInfo::setLastWriteTimeUtcProperty(const System::DateTime& value) {
         longcs unixSeconds = (value.getTicksProperty() - System::DateTime::UnixEpochTicks) / System::DateTime::TicksPerSecond;
         auto sysTime = std::chrono::system_clock::from_time_t(static_cast<std::time_t>(unixSeconds));
-        auto fileTime = std::chrono::file_clock::from_sys(sysTime);
+        auto fileTime = systemTimeToFileTime(sysTime);
         std::error_code ec;
         std::filesystem::last_write_time(fullPath_, fileTime, ec);
         if (ec) throw IOException("Failed to set last write time of '" + fullPath_.string() + "': " + ec.message());
