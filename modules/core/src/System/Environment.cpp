@@ -15,6 +15,7 @@
 #  include <psapi.h>
 #  include <shlobj.h>
 #  undef GetCurrentDirectory   // windows.h macro collides with our method name
+#  undef GetEnvironmentVariable // windows.h macro collides with our method name
 #  undef SetCurrentDirectory   // windows.h macro collides with our method name
 #  undef SetEnvironmentVariable // windows.h macro collides with our method name
 #elif defined(__EMSCRIPTEN__)
@@ -112,9 +113,13 @@ System::OperatingSystem Environment::getOSVersionProperty() {
     OSVERSIONINFOEXW osvi{};
     osvi.dwOSVersionInfoSize = sizeof(osvi);
 #if defined(_MSC_VER)
-#pragma warning(suppress: 4996)
+#pragma warning(push)
+#pragma warning(disable: 4996)
 #endif
     GetVersionExW(reinterpret_cast<OSVERSIONINFOW*>(&osvi));
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
     Version v(static_cast<int>(osvi.dwMajorVersion),
                static_cast<int>(osvi.dwMinorVersion),
                static_cast<int>(osvi.dwBuildNumber),
