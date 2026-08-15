@@ -18,6 +18,11 @@
 #  include <mutex>
 namespace {
     using SockFd = SOCKET;
+    // Winsock's recv/send/recvfrom take an int transfer length where POSIX takes size_t.
+    // Every call site here passes either an intcs count or a fixed 65536 buffer size, so the
+    // conversion is exact; naming the platform's own type keeps it from being an implicit
+    // 64-to-32 narrowing (MSVC C4267).
+    using SockLen = int;
     static const SockFd kBad = INVALID_SOCKET;
     inline int    toFd(SockFd s)  { return static_cast<int>(s); }
     inline SockFd toSk(int fd)    { return static_cast<SockFd>(fd); }
@@ -54,6 +59,8 @@ namespace {
 #  include <cstring>
 namespace {
     using SockFd = int;
+    // POSIX recv/send/recvfrom take a size_t transfer length; see the Windows branch above.
+    using SockLen = std::size_t;
     static const SockFd kBad = -1;
     inline int    toFd(SockFd s)  { return s; }
     inline SockFd toSk(int fd)    { return fd; }
@@ -203,7 +210,7 @@ int UdpClient::Send(const std::vector<SharpRuntime::bytecs>& dgram, int bytes) {
     if (!hasRemote_)
         throw System::InvalidOperationException("UdpClient::Send: must call Connect() before Send().");
     auto n = ::send(toSk(fd_), reinterpret_cast<const char*>(dgram.data()),
-                    static_cast<size_t>(bytes), 0);
+                    static_cast<SockLen>(bytes), 0);
     if (n < 0)
         throw SocketException(toSocketError(lastErrorCode()), "UdpClient::Send: send() failed: " + netErr());
     return static_cast<int>(n);
@@ -218,7 +225,7 @@ std::vector<SharpRuntime::bytecs> UdpClient::Receive(Net::IPEndPoint& remoteEP) 
     std::vector<SharpRuntime::bytecs> buf(65536);
     struct sockaddr_in sender{};
     socklen_t len = sizeof(sender);
-    auto n = ::recvfrom(toSk(fd_), reinterpret_cast<char*>(buf.data()), buf.size(), 0,
+    auto n = ::recvfrom(toSk(fd_), reinterpret_cast<char*>(buf.data()), static_cast<SockLen>(buf.size()), 0,
                         reinterpret_cast<struct sockaddr*>(&sender), &len);
     if (n < 0)
         throw SocketException(toSocketError(lastErrorCode()), "UdpClient::Receive: recvfrom() failed: " + netErr());

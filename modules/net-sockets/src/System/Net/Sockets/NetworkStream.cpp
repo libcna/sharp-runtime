@@ -18,6 +18,11 @@
 #  endif
 namespace {
     using SockFd = SOCKET;
+    // Winsock's recv/send/recvfrom take an int transfer length where POSIX takes size_t.
+    // Every call site here passes either an intcs count or a fixed 65536 buffer size, so the
+    // conversion is exact; naming the platform's own type keeps it from being an implicit
+    // 64-to-32 narrowing (MSVC C4267).
+    using SockLen = int;
     inline SockFd toSk(int fd)    { return static_cast<SockFd>(fd); }
     inline bool   validFd(int fd) { return toSk(fd) != INVALID_SOCKET; }
     inline void   closeSk(int fd) { ::closesocket(toSk(fd)); }
@@ -72,6 +77,8 @@ namespace {
 #  include <cstring>
 namespace {
     using SockFd = int;
+    // POSIX recv/send/recvfrom take a size_t transfer length; see the Windows branch above.
+    using SockLen = std::size_t;
     inline SockFd toSk(int fd)    { return fd; }
     inline bool   validFd(int fd) { return fd >= 0; }
     inline void   closeSk(int fd) { ::close(fd); }
@@ -180,7 +187,7 @@ intcs NetworkStream::Read(bytecs buffer[], intcs offset, intcs count) {
     ThrowIfClosed();
     if (count == 0) return 0;
     auto n = ::recv(toSk(fd_), reinterpret_cast<char*>(buffer + offset),
-                    static_cast<size_t>(count), 0);
+                    static_cast<SockLen>(count), 0);
     if (n < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
@@ -203,7 +210,7 @@ void NetworkStream::Write(const bytecs buffer[], intcs offset, intcs count) {
     ThrowIfClosed();
     if (count == 0) return;
     auto n = ::send(toSk(fd_), reinterpret_cast<const char*>(buffer + offset),
-                    static_cast<size_t>(count), 0);
+                    static_cast<SockLen>(count), 0);
     if (n < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
