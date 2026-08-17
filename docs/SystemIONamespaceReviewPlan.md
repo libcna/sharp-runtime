@@ -891,6 +891,78 @@ raw-pointer getter unguarded → **2**.
 
 **#2098 is now `blocked`**, scoped to SR-AUD-337 and SR-AUD-343 only, pending Approval IO-1.
 
+### 21.10 #2098 LANDED — 2026-08-17, and half of SR-AUD-337 was a false positive
+
+**Approval IO-1 was granted** as `docs/StandingApprovals.md` SA-3, which authorises exactly the
+shape §21.8 costed: option (a), one private `bool` per leaf, no base-class flag. SR-AUD-337 and
+SR-AUD-343 are **remediated**.
+
+#### The layout came in exactly as costed
+
+`sizeof(StringWriter)` **384 → 392**; `StringReader` 48, `StreamReader` 24 and `StreamWriter` 24
+are **unchanged**, the flag landing in existing tail padding in all three. Both bases stay at 8.
+`IoLayoutPinTests` now asserts the *after* state and additionally compares each unchanged type
+against a shadow **without** the flag, so "the flag was free" is measured rather than predicted.
+No vtable, mangled-symbol, signature or `noexcept` change.
+
+#### The premise correction — SR-AUD-337's writer half does not reproduce against .NET
+
+The reference tree is available again (`docs/StandingApprovals.md` §5.1), and it says the two
+stream wrappers **deliberately disagree**:
+
+| Type | Where `_disposed` is set | Consequence with `leaveOpen: true` |
+|---|---|---|
+| `StreamReader` | `Dispose(bool)`, **unconditionally**, before the `if (_closable)` (`StreamReader.cs:243-268`) | the reader **is** disposed; later reads throw |
+| `StreamWriter` | only inside `CloseStreamFromDispose`, under `if (_closable && !_disposed)` (`StreamWriter.cs:221-244`) | the writer is **never** disposed; later writes succeed |
+
+`_closable` is `!leaveOpen` in both (`StreamReader.cs:176`, `StreamWriter.cs:129`). So the
+finding's writer evidence — *"`StreamWriter` grows the underlying stream by 11 bytes after
+`Close()`"* — is **.NET's own behaviour**, and repairing it would have been a divergence. #2098
+therefore reproduces the asymmetry and pins it. What the writer half actually repairs is the
+**non-`leaveOpen`** case, where a write after `Close()` reached a closed stream instead of
+throwing `ObjectDisposedException`.
+
+This is the second premise correction this ticket has produced; §21.1 recorded the first three.
+
+#### Exception identity, transcribed rather than chosen
+
+| Type | objectName | Message |
+|---|---|---|
+| `StringReader` | *(null → empty)* | `Cannot read from a closed TextReader.` |
+| `StringWriter` | *(null → empty)* | `Cannot write to a closed TextWriter.` |
+| `StreamReader` | `StreamReader` | same reader text, plus the object-name line |
+| `StreamWriter` | `StreamWriter` | same writer text, plus the object-name line |
+
+The in-memory pair passes `null` (`StringReader.cs:325-328`, `StringWriter.cs:73-75`) and the
+stream pair passes `GetType().Name` (`StreamReader.cs:1408`, `StreamWriter.cs:1015`). The resource
+texts are `SR.ObjectDisposed_ReaderClosed` and `SR.ObjectDisposed_WriterClosed`
+(`Strings.resx:3230-3235`).
+
+#### Three members that deliberately keep working
+
+`StringWriter::ToString()` and `GetStringBuilder()` (no `_isOpen` check in .NET) and both
+`getBaseStreamProperty()` accessors (`BaseStream` is a bare field read). Guarding any of them
+would be a divergence. `Write(const char*)` with a null pointer also stays a silent no-op on a
+closed writer, because .NET's `Write(string?)` returns before its disposal check.
+
+#### A defect found while implementing, and fixed here
+
+Both stream wrappers' **destructors re-closed a stream that an explicit `Close()` had already
+closed**. .NET does not: `StreamReader.Dispose` returns early when `_disposed`, and
+`StreamWriter`'s guard includes `!_disposed`. Both destructors now carry the same `!closed_`
+term, and the double close is pinned by a `Close()`-counting stream double.
+
+#### Downstream, measured under SA-2
+
+`cna`: **zero** uses of any of the four types. `mobile-eggbert`: **one**, `Worlds.cpp:154`, which
+never calls `StreamReader::Close()` and therefore sees no behaviour change — but must be rebuilt,
+like every consumer. Neither repository was modified.
+
+#### Still not in scope
+
+§21.5's pre-existing hazard stands untouched and unticketed by #2098: `StreamReader` and
+`StreamWriter` remain implicitly copyable while holding a raw `Stream*` and an `ownsStream_` flag.
+
 
 ---
 
@@ -1196,15 +1268,17 @@ that was taken rather than asserted.
 | Item | Owner | State |
 |---|---|---|
 | SR-AUD-338, 339, 340, 341, 342, 344, 345, 347 | #2099–#2103, #2108, #2344 | **remediated** |
-| SR-AUD-337, SR-AUD-343 | **#2098** | open — blocked on Approval IO-1 |
+| SR-AUD-337, SR-AUD-343 | **#2098** | **remediated** 2026-08-17 — see §21.10 |
 | SR-AUD-346 | **#2346** | open — `needs_user`, the mapping policy |
-| SR-AUD-185, SR-AUD-186 | **#2106** | open — deferred, reference tree absent |
+| SR-AUD-185, SR-AUD-186 | **#2106** | open — deferred; the reference tree is available again |
 | watcher handler-after-disable question | **#2105** | deferred, needs TSan |
 | reentrant reconfiguration → `std::terminate` | **#2347** | **remediated** 2026-08-12 — see §20.10 |
 
-**Five open findings, five owners, zero orphans.** Every remaining item is blocked on a user
-approval, waiting on a user policy decision, or waiting on evidence that does not exist in this
-container.
+**Zero orphans**, and as of 2026-08-17 the table above has changed twice. Approval IO-1 was
+granted (`docs/StandingApprovals.md` SA-3) and #2098 landed; and the premise "waiting on evidence
+that does not exist in this container" no longer holds — `/rv/tmp/runtime` **is** present
+(`docs/StandingApprovals.md` §5.1), so **#2106 is unblocked in principle** and needs only the
+work. #2346 remains a genuine user policy decision and #2105 a genuine measurement task.
 
 **Correction to this section's exhaustion claim (2026-08-12).** It said `modules/io` had *no
 implementation-ready autonomous work left*, counting #2347 as "a newly minted concurrency ticket

@@ -4,6 +4,7 @@
 #include "System/IO/StreamWriter.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/IO/FileStream.hpp"
 
 #include <cstring>
@@ -49,9 +50,17 @@ namespace System::IO {
     StreamWriter::StreamWriter(const std::string& path)
         : stream_(new FileStream(path, FileMode::Create)), leaveOpen_(false), ownsStream_(true) {}
 
+    // The `!closed_` term is .NET's `if (_closable && !_disposed)` guard (StreamWriter.cs:225)
+    // expressed on the destructor side: once Close() has run for a non-leaveOpen writer, the
+    // stream has already been closed exactly once and must not be closed a second time here.
     StreamWriter::~StreamWriter() {
-        if (!leaveOpen_) stream_->Close();
+        if (!leaveOpen_ && !closed_) stream_->Close();
         if (ownsStream_) delete stream_;
+    }
+
+    void StreamWriter::ThrowIfClosed() const {
+        if (closed_)
+            throw System::ObjectDisposedException("StreamWriter", "Cannot write to a closed TextWriter.");
     }
 
     void StreamWriter::WriteRaw(const char* data, size_t len) {
@@ -59,7 +68,10 @@ namespace System::IO {
                        static_cast<SharpRuntime::intcs>(len));
     }
 
-    void StreamWriter::Write(const std::string& value) { WriteRaw(value.data(), value.size()); }
+    void StreamWriter::Write(const std::string& value) {
+        ThrowIfClosed();
+        WriteRaw(value.data(), value.size());
+    }
 
     // A null value writes nothing, matching TextWriter::Write(const char*) and, through it,
     // .NET's TextWriter.cs:277-283 rule for a null string. This is the one override of that
@@ -69,18 +81,45 @@ namespace System::IO {
     // build-probe/1823_prefix_defects.log cases 22 and 23 -- case 23 arrives here through
     // TextWriter::WriteLine(const char*), which is why fixing only the base class would have
     // left the crash reachable).
+    //
+    // The null test stays FIRST, ahead of the closed check: .NET's TextWriter.Write(string?)
+    // returns without ever reaching a disposal check when the value is null, so a closed writer
+    // handed a null pointer throws nothing there either.
     void StreamWriter::Write(const char* value) {
         if (value == nullptr) return;
+        ThrowIfClosed();
         WriteRaw(value, std::strlen(value));
     }
 
-    void StreamWriter::Flush() { stream_->Flush(); }
+    void StreamWriter::Flush() {
+        ThrowIfClosed();
+        stream_->Flush();
+    }
 
     // Verified against StreamWriter.cs: Close() delegates to Dispose(true), which checks
     // _closable (i.e. !leaveOpen) before closing the underlying stream -- matching this type's
     // own destructor (above), which already got this right. This method previously closed the
     // stream unconditionally, defeating leaveOpen's entire purpose for any caller that called
     // Close() explicitly instead of only relying on the destructor.
-    void StreamWriter::Close() { if (!leaveOpen_) stream_->Close(); }
+    //
+    // Ticket #2098 / SR-AUD-337, writer half. `closed_` is set INSIDE the leaveOpen test, and
+    // that placement is transcribed rather than chosen. StreamWriter.cs never assigns _disposed
+    // in Dispose(bool) itself; it does so only in CloseStreamFromDispose:
+    //
+    //     if (_closable && !_disposed)
+    //     { try { if (disposing) _stream.Close(); }
+    //       finally { _disposed = true; ... } }
+    //
+    // (StreamWriter.cs:221-244), with `_closable = !leaveOpen` (StreamWriter.cs:129). A
+    // leaveOpen writer therefore never becomes disposed in .NET and keeps writing after
+    // Close() -- so SR-AUD-337's writer half, which reported exactly that as a divergence, is
+    // a false positive against the reference. The sibling StreamReader sets its flag
+    // unconditionally; the asymmetry is upstream's, and is pinned by test so it cannot be
+    // "tidied up" into a symmetry .NET does not have.
+    void StreamWriter::Close() {
+        if (leaveOpen_ || closed_) return;
+        closed_ = true;
+        stream_->Close();
+    }
 
 } // namespace System::IO

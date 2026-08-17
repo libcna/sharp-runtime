@@ -4,6 +4,7 @@
 #include "System/IO/StreamReader.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/IO/FileStream.hpp"
 #include "System/IO/FileMode.hpp"
 #include "System/IO/FileAccess.hpp"
@@ -64,14 +65,25 @@ namespace System::IO
     {
     }
 
+    // The `!closed_` term is .NET's `if (_disposed) return;` early exit (StreamReader.cs:245-248)
+    // expressed on the destructor side: once Close() has run, the stream has already been closed
+    // exactly once and must not be closed a second time here. Without it, an explicit Close()
+    // followed by ordinary destruction closed the same stream twice.
     StreamReader::~StreamReader()
     {
-        if (!leaveOpen_) stream_->Close();
+        if (!leaveOpen_ && !closed_) stream_->Close();
         if (ownsStream_) delete stream_;
+    }
+
+    void StreamReader::ThrowIfClosed() const
+    {
+        if (closed_)
+            throw System::ObjectDisposedException("StreamReader", "Cannot read from a closed TextReader.");
     }
 
     intcs StreamReader::Peek()
     {
+        ThrowIfClosed();
         if (hasPeeked_) return static_cast<intcs>(peeked_);
 
         bytecs b;
@@ -85,6 +97,7 @@ namespace System::IO
 
     intcs StreamReader::Read()
     {
+        ThrowIfClosed();
         if (hasPeeked_)
         {
             hasPeeked_ = false;
@@ -105,6 +118,10 @@ namespace System::IO
     // separate lines into one, with the '\r' left embedded in the middle of the result.
     std::string StreamReader::ReadLine()
     {
+        // Guarded at entry, not left to the Read() below: .NET checks in every member
+        // (StreamReader.cs:1281, 1299 and their siblings), and a guard that fired only part-way
+        // through would already have mutated this reader's state.
+        ThrowIfClosed();
         intcs c = Read();
         if (c == -1) return "";
 
@@ -120,6 +137,7 @@ namespace System::IO
 
     std::string StreamReader::ReadToEnd()
     {
+        ThrowIfClosed();
         std::string result;
         if (hasPeeked_)
         {
@@ -139,6 +157,19 @@ namespace System::IO
         // type's own destructor (above), which already got this right. This method previously
         // closed the stream unconditionally, defeating leaveOpen's entire purpose for any
         // caller that called Close() explicitly instead of only relying on the destructor.
+        //
+        // Ticket #2098 / SR-AUD-337, reader half. `closed_` is set FIRST and UNCONDITIONALLY,
+        // because that is where StreamReader.cs puts it: `Dispose(bool)` opens with
+        //
+        //     if (_disposed) { return; }
+        //     _disposed = true;
+        //     if (_closable) { ... _stream.Close(); ... }
+        //
+        // (StreamReader.cs:243-268). `leaveOpen` therefore decides the STREAM's fate only; the
+        // reader is disposed either way. Note that the sibling StreamWriter does NOT share this
+        // shape -- see StreamWriter::Close() -- and the difference is .NET's, not this port's.
+        if (closed_) return;
+        closed_ = true;
         if (!leaveOpen_) stream_->Close();
     }
 }

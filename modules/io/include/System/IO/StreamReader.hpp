@@ -27,6 +27,19 @@ namespace System::IO
         bool    ownsStream_;
         bool    hasPeeked_ = false;
         bytecs  peeked_ = 0;
+        /**
+         * Records the closed state -- .NET's own `_disposed` field (StreamReader.cs:48).
+         * Lands in this type's existing tail padding, so `sizeof(StreamReader)` is unchanged
+         * at 24 (ticket #2098, Approval IO-1 under `docs/StandingApprovals.md` SA-3).
+         */
+        bool    closed_ = false;
+
+        /**
+         * Throws `ObjectDisposedException("StreamReader", "Cannot read from a closed
+         * TextReader.")`, matching StreamReader.cs:1401-1408, whose `ThrowIfDisposed()` passes
+         * `GetType().Name` as the object name -- unlike `StringReader`, which passes null.
+         */
+        void ThrowIfClosed() const;
 
     public:
         /**
@@ -62,28 +75,41 @@ namespace System::IO
         /** Returns the underlying stream. */
         [[nodiscard]] Stream* getBaseStreamProperty() const { return stream_; }
 
-        /** Returns the next character without advancing the position, or -1 at end. */
+        /**
+         * @brief Returns the next character without advancing the position, or -1 at end.
+         * @throws System::ObjectDisposedException if the reader has been closed.
+         */
         intcs Peek() override;
 
-        /** Reads and returns the next character, or -1 at end. */
+        /**
+         * @brief Reads and returns the next character, or -1 at end.
+         * @throws System::ObjectDisposedException if the reader has been closed.
+         */
         intcs Read() override;
 
-        /** Reads the next line, stripping the line terminator. */
+        /**
+         * @brief Reads the next line, stripping the line terminator.
+         * @throws System::ObjectDisposedException if the reader has been closed.
+         */
         [[nodiscard]] std::string ReadLine() override;
 
-        /** Reads all remaining characters from the current position to the end. */
+        /**
+         * @brief Reads all remaining characters from the current position to the end.
+         * @throws System::ObjectDisposedException if the reader has been closed.
+         */
         [[nodiscard]] std::string ReadToEnd() override;
 
         /**
-         * @brief Closes the underlying stream, unless this reader was constructed with leaveOpen.
+         * @brief Closes the reader, and the underlying stream unless leaveOpen was set.
          *
-         * Matches StreamReader.cs, whose Dispose(true) checks _closable before closing the
-         * stream, and matches this type's own destructor.
+         * <b>The READER is closed either way.</b> Verified against StreamReader.cs:243-268,
+         * whose `Dispose(bool)` sets `_disposed = true` **before** and **outside** the
+         * `if (_closable)` that closes the stream. So `leaveOpen` governs the stream's fate and
+         * nothing else: after Close() every read member throws `ObjectDisposedException` even
+         * though the base stream is still open and still usable by its owner.
          *
-         * <b>It does not close the READER.</b> After Close() this reader still reads: with
-         * leaveOpen true the underlying stream is still open and Read() returns its bytes. That
-         * is SR-AUD-337, still open, and the repair is ticket #2098, BLOCKED on Approval IO-1
-         * because recording the closed state changes this type's object layout.
+         * Ticket #2098 / SR-AUD-337 (reader half). Before it, Close() with leaveOpen left this
+         * reader fully functional and Read() kept returning the stream's bytes.
          */
         void Close() override;
     };

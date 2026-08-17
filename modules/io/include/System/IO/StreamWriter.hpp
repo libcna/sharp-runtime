@@ -24,6 +24,22 @@ namespace System::IO {
         Stream* stream_;
         bool    leaveOpen_;
         bool    ownsStream_ = false;
+        /**
+         * Records the closed state -- .NET's own `_disposed` field (StreamWriter.cs:42).
+         * Lands in this type's existing tail padding, so `sizeof(StreamWriter)` is unchanged
+         * at 24 (ticket #2098, Approval IO-1 under `docs/StandingApprovals.md` SA-3).
+         *
+         * Unlike StreamReader's flag, this one is set **only when the writer owns the close**
+         * -- see Close(). That asymmetry is .NET's.
+         */
+        bool    closed_ = false;
+
+        /**
+         * Throws `ObjectDisposedException("StreamWriter", "Cannot write to a closed
+         * TextWriter.")`, matching StreamWriter.cs:1008-1015, whose `ThrowIfDisposed()` passes
+         * `GetType().Name` as the object name -- unlike `StringWriter`, which passes null.
+         */
+        void ThrowIfClosed() const;
 
         void WriteRaw(const char* data, size_t len);
 
@@ -53,7 +69,12 @@ namespace System::IO {
         using TextWriter::Write;
         using TextWriter::WriteLine;
 
-        /** Writes a string to the stream. */
+        /**
+         * @brief Writes a string to the stream.
+         * @throws System::ObjectDisposedException if the writer has been closed -- which,
+         *         per Close(), happens only when this writer was NOT constructed with
+         *         leaveOpen.
+         */
         void Write(const std::string& value) override;
         /**
          * @brief Writes a null-terminated character array to the stream.
@@ -63,17 +84,34 @@ namespace System::IO {
          * (TextWriter.cs:277-283). @see TextWriter::Write(const char*)
          *
          * @param value Null-terminated string to write, or null to write nothing.
+         * @throws System::ObjectDisposedException if the writer has been closed and @p value
+         *         is not null. A null @p value writes nothing and throws nothing, because
+         *         .NET's own `Write(string?)` returns before reaching its disposal check
+         *         (TextWriter.cs:277-283).
          */
         void Write(const char* value) override;
 
-        /** Flushes any buffered data to the underlying stream. */
+        /**
+         * @brief Flushes any buffered data to the underlying stream.
+         * @throws System::ObjectDisposedException if the writer has been closed
+         *         (StreamWriter.cs:283, whose Flush opens with ThrowIfDisposed()).
+         */
         void Flush() override;
         /**
          * @brief Closes the underlying stream, unless this writer was constructed with leaveOpen.
          *
-         * <b>It does not close the WRITER</b>, and with leaveOpen true it closes nothing at all:
-         * a Write after Close() succeeds and the underlying stream grows. That is SR-AUD-337 on
-         * the writer side, still open, repaired by ticket #2098, BLOCKED on Approval IO-1.
+         * <b>With leaveOpen the writer stays usable, and that is .NET's behaviour, not a
+         * defect.</b> StreamWriter.cs sets `_disposed = true` only inside
+         * `CloseStreamFromDispose`, under `if (_closable && !_disposed)`
+         * (StreamWriter.cs:221-244), and `_closable` is `!leaveOpen` (StreamWriter.cs:129). So a
+         * leaveOpen writer is never marked disposed and a Write after Close() legitimately
+         * succeeds. The sibling StreamReader is different -- it marks itself disposed
+         * unconditionally -- and the two disagreeing is upstream's choice.
+         *
+         * Ticket #2098 / SR-AUD-337, writer half. The finding reported the leaveOpen writer's
+         * post-Close growth as a divergence; measured against the reference it is **not** one,
+         * so what #2098 repairs here is the non-leaveOpen case, where a Write after Close()
+         * used to reach a closed stream instead of throwing ObjectDisposedException.
          */
         void Close() override;
     };

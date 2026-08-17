@@ -21,8 +21,13 @@
 //          every other rejection in the class was untyped: a bare IOException that named neither
 //          the offending parameter nor the native reason. GetLength returned the sentinel -1.
 //
-// Reference tree absent: every exception type and paramName asserted here is recorded as this
-// port's choice in the plan, not as a verified match to .NET.
+//   #2098 / SR-AUD-337 + SR-AUD-343 — the four text wrappers ignored Close() entirely, so a
+//          closed reader kept reading and a closed writer kept writing.
+//
+// Reference tree absent WHEN THE TICKETS ABOVE #2098 WERE WRITTEN: every exception type and
+// paramName asserted by those sections is recorded as this port's choice in the plan, not as a
+// verified match to .NET. The #2098 section is different — the reference tree is available
+// again (docs/StandingApprovals.md §5.1) and its assertions are transcribed from it.
 #include <gtest/gtest.h>
 
 #include <fcntl.h>
@@ -606,11 +611,14 @@ namespace {
 /// reorders a member, its shadow stops matching and the pin fails -- which is the point.
 struct ShadowTextReader { virtual ~ShadowTextReader() = default; virtual SharpRuntime::intcs Read() { return -1; } };
 struct ShadowTextWriter { virtual ~ShadowTextWriter() = default; virtual void Write(const std::string&) {} };
-struct ShadowStringReader : ShadowTextReader { std::string s_; SharpRuntime::intcs pos_ = 0; };
+struct ShadowStringReader : ShadowTextReader { std::string s_; SharpRuntime::intcs pos_ = 0; bool closed_ = false; };
 struct ShadowStreamReader : ShadowTextReader {
     Stream* stream_; bool leaveOpen_; bool ownsStream_; bool hasPeeked_; SharpRuntime::bytecs peeked_;
+    bool closed_ = false;
 };
-struct ShadowStreamWriter : ShadowTextWriter { Stream* stream_; bool leaveOpen_; bool ownsStream_; };
+struct ShadowStreamWriter : ShadowTextWriter {
+    Stream* stream_; bool leaveOpen_; bool ownsStream_; bool closed_ = false;
+};
 struct ShadowUnmanaged {
     virtual ~ShadowUnmanaged() = default;
     SharpRuntime::bytecs* buffer_; SharpRuntime::intcs length_; SharpRuntime::intcs capacity_;
@@ -635,28 +643,34 @@ TEST(IoLayoutPinTests, TheFiveWrapperLayoutsAreExactlyWhatApprovalIO1WasCostedAg
     EXPECT_EQ(sizeof(StreamReader), sizeof(ShadowStreamReader));
     EXPECT_EQ(sizeof(StreamWriter), sizeof(ShadowStreamWriter));
     EXPECT_EQ(sizeof(UnmanagedMemoryStream), sizeof(ShadowUnmanaged));
-    // StringWriter is the ONE type Approval IO-1 says will grow. Its size is dominated by
-    // std::ostringstream, which is a standard-library implementation detail, so it is pinned as
-    // a relationship rather than a literal: it is the base's vtable pointer plus the stream.
-    EXPECT_EQ(sizeof(StringWriter), sizeof(void*) + sizeof(std::ostringstream));
+    // StringWriter is the ONE type Approval IO-1 said would grow, and #2098 has now made it
+    // grow: 384 -> 392, the flag plus its alignment padding. Its size is dominated by
+    // std::ostringstream, a standard-library implementation detail, so it is pinned as a
+    // relationship rather than a literal: the base's vtable pointer, plus the stream, plus one
+    // aligned slot for `closed_`.
+    EXPECT_EQ(sizeof(StringWriter),
+              sizeof(void*) + sizeof(std::ostringstream) + alignof(std::ostringstream))
+        << "Approval IO-1 costed StringWriter at exactly one extra aligned slot";
     EXPECT_EQ(alignof(StringWriter), alignof(std::ostringstream));
 }
 
-TEST(IoLayoutPinTests, ThreeOfTheFourTextWrappersHaveSPARETAILPADDINGForApprovalIO1sFlag) {
-    // Approval IO-1 claims a private bool costs StringReader, StreamReader and StreamWriter
-    // NOTHING because it lands in existing tail padding. This asserts the padding is really
-    // there, by measuring the shadow WITH the flag added.
-    struct WithFlagStringReader : ShadowTextReader { std::string s_; SharpRuntime::intcs pos_ = 0; bool closed_ = false; };
-    struct WithFlagStreamReader : ShadowTextReader {
+TEST(IoLayoutPinTests, ThreeOfTheFourTextWrappersPAIDNOTHINGForApprovalIO1sFlag) {
+    // Approval IO-1 claimed a private bool costs StringReader, StreamReader and StreamWriter
+    // NOTHING because it lands in existing tail padding. #2098 has landed the flag, so this is
+    // no longer a prediction: it compares each real type against a shadow that has the flag and
+    // against the same shadow WITHOUT it. Both must match, which is only possible if the flag
+    // really was free.
+    struct NoFlagStringReader : ShadowTextReader { std::string s_; SharpRuntime::intcs pos_ = 0; };
+    struct NoFlagStreamReader : ShadowTextReader {
         Stream* stream_; bool leaveOpen_; bool ownsStream_; bool hasPeeked_;
-        SharpRuntime::bytecs peeked_; bool closed_ = false;
+        SharpRuntime::bytecs peeked_;
     };
-    struct WithFlagStreamWriter : ShadowTextWriter { Stream* stream_; bool leaveOpen_; bool ownsStream_; bool closed_ = false; };
-    EXPECT_EQ(sizeof(WithFlagStringReader), sizeof(ShadowStringReader))
+    struct NoFlagStreamWriter : ShadowTextWriter { Stream* stream_; bool leaveOpen_; bool ownsStream_; };
+    EXPECT_EQ(sizeof(StringReader), sizeof(NoFlagStringReader))
         << "StringReader's flag was costed as free";
-    EXPECT_EQ(sizeof(WithFlagStreamReader), sizeof(ShadowStreamReader))
+    EXPECT_EQ(sizeof(StreamReader), sizeof(NoFlagStreamReader))
         << "StreamReader's flag was costed as free";
-    EXPECT_EQ(sizeof(WithFlagStreamWriter), sizeof(ShadowStreamWriter))
+    EXPECT_EQ(sizeof(StreamWriter), sizeof(NoFlagStreamWriter))
         << "StreamWriter's flag was costed as free";
 }
 
@@ -671,6 +685,263 @@ TEST(IoLayoutPinTests, BothBaseClassesAlreadyExposeAVirtualCloseSoNoVtableSlotIs
     StringReader reader("x");
     TextReader& asBase = reader;
     EXPECT_NO_THROW(asBase.Close()) << "TextReader::Close() is a non-pure virtual no-op";
+}
+
+
+// ===========================================================================
+// #2098 / SR-AUD-337 + SR-AUD-343 — the four text wrappers enforce their closed state
+//
+// Landed under Approval IO-1, granted as `docs/StandingApprovals.md` SA-3 (2026-08-17).
+// The layout cost is exactly what the approval quoted: StringWriter 384 -> 392, the other
+// three free — asserted by the pins above, not by this section.
+//
+// The reference tree IS available for this ticket (docs/StandingApprovals.md §5.1), so unlike
+// the sections above, every exception identity and message below is a VERIFIED match to
+// .NET rather than this port's own choice. It is read from a .NET 11 preview snapshot.
+//
+// The measurement that changed the design: .NET's two stream wrappers DISAGREE about whether
+// `leaveOpen` also suppresses disposal of the wrapper.
+//
+//   StreamReader.cs:243-268    _disposed = true;  THEN  if (_closable) { _stream.Close(); }
+//   StreamWriter.cs:221-244    if (_closable && !_disposed) { ... finally { _disposed = true; } }
+//
+// So a leaveOpen READER is disposed by Close() and a leaveOpen WRITER is not. SR-AUD-337
+// reported both halves as divergences; only the reader half is one.
+// ===========================================================================
+
+namespace {
+
+/// Counts Close() calls, so "the destructor must not close a stream the explicit Close()
+/// already closed" is a measurable claim rather than an assertion about intent.
+class CloseCountingStream final : public System::IO::Stream {
+public:
+    int closeCount = 0;
+    int flushCount = 0;
+    std::string written;
+    std::string source;
+    std::size_t readPos = 0;
+
+    intcs Read(SharpRuntime::bytecs* buffer, intcs offset, intcs count) override {
+        intcs n = 0;
+        while (n < count && readPos < source.size()) {
+            buffer[offset + n] = static_cast<SharpRuntime::bytecs>(source[readPos++]);
+            ++n;
+        }
+        return n;
+    }
+    void Write(const SharpRuntime::bytecs* buffer, intcs offset, intcs count) override {
+        for (intcs i = 0; i < count; ++i) written.push_back(static_cast<char>(buffer[offset + i]));
+    }
+    void Close() override { ++closeCount; }
+    void Flush() override { ++flushCount; }
+    [[nodiscard]] intcs getLengthProperty() const override {
+        return static_cast<intcs>(source.size());
+    }
+    [[nodiscard]] bool getCanWriteProperty() const override { return true; }
+};
+
+/// The exact text .NET produces for each of the four, per SR.ObjectDisposed_ReaderClosed /
+/// SR.ObjectDisposed_WriterClosed and each type's choice of object name.
+constexpr const char* kStringReaderClosed = "Cannot read from a closed TextReader.";
+constexpr const char* kStringWriterClosed = "Cannot write to a closed TextWriter.";
+constexpr const char* kStreamReaderClosed =
+    "Cannot read from a closed TextReader.\nObject name: 'StreamReader'.";
+constexpr const char* kStreamWriterClosed =
+    "Cannot write to a closed TextWriter.\nObject name: 'StreamWriter'.";
+
+} // namespace
+
+TEST(TextWrapperClosedStateTests, StringReaderRejectsEveryReadMemberAfterClose) {
+    // Before #2098 this reader was ENTIRELY unaffected by Close(): the audit measured
+    // Peek()=104, Read()=104 and ReadToEnd()="ello" after closing a StringReader("hello")
+    // that had already consumed one character.
+    StringReader r("hello");
+    EXPECT_EQ(r.Read(), 'h');
+    r.Close();
+    EXPECT_THROW((void)r.Peek(), System::ObjectDisposedException);
+    EXPECT_THROW((void)r.Read(), System::ObjectDisposedException);
+    EXPECT_THROW((void)r.ReadLine(), System::ObjectDisposedException);
+    EXPECT_THROW((void)r.ReadToEnd(), System::ObjectDisposedException);
+}
+
+TEST(TextWrapperClosedStateTests, StringReaderCarriesDotNetsExactMessageAndItsNullObjectName) {
+    // StringReader.cs:325-328 passes objectName = null, so there is NO "Object name:" suffix.
+    // This is the half that distinguishes it from StreamReader, and it is easy to get wrong.
+    StringReader r("hello");
+    r.Close();
+    try {
+        (void)r.Read();
+        FAIL() << "expected ObjectDisposedException";
+    } catch (const System::ObjectDisposedException& e) {
+        EXPECT_STREQ(e.what(), kStringReaderClosed);
+        EXPECT_EQ(e.getObjectNameProperty(), std::string());
+    }
+}
+
+TEST(TextWrapperClosedStateTests, StringReaderClosingTwiceIsSafeAndAnOpenReaderIsUnaffected) {
+    StringReader closed("hello");
+    closed.Close();
+    EXPECT_NO_THROW(closed.Close());
+    EXPECT_THROW((void)closed.Read(), System::ObjectDisposedException);
+
+    StringReader open("hello");
+    EXPECT_EQ(open.Peek(), 'h');
+    EXPECT_EQ(open.ReadLine(), "hello");
+    EXPECT_EQ(open.ReadToEnd(), "");
+}
+
+TEST(TextWrapperClosedStateTests, StringWriterRejectsEveryWriteOverloadAfterClose) {
+    // Every inherited overload funnels through Write(const std::string&), which is how one
+    // guard covers what .NET spells as nine separate _isOpen checks.
+    StringWriter w;
+    w.Write(std::string("kept"));
+    w.Close();
+    EXPECT_THROW(w.Write(std::string("x")), System::ObjectDisposedException);
+    EXPECT_THROW(w.Write("literal"), System::ObjectDisposedException);
+    EXPECT_THROW(w.Write('c'), System::ObjectDisposedException);
+    EXPECT_THROW(w.Write(static_cast<SharpRuntime::intcs>(7)), System::ObjectDisposedException);
+    EXPECT_THROW(w.Write(true), System::ObjectDisposedException);
+    EXPECT_THROW(w.WriteLine(), System::ObjectDisposedException);
+    EXPECT_THROW(w.WriteLine(std::string("x")), System::ObjectDisposedException);
+}
+
+TEST(TextWrapperClosedStateTests, StringWriterKEEPSItsTextReadableAfterClose) {
+    // DELIBERATELY not guarded. StringWriter.cs:309-312 defines ToString() as a bare
+    // `return _sb.ToString();` and :64-67 GetStringBuilder() as a bare `return _sb;`, neither
+    // of which consults _isOpen. Guarding them would be a divergence, not a stricter repair.
+    StringWriter w;
+    w.Write(std::string("kept"));
+    w.Close();
+    EXPECT_EQ(w.ToString(), "kept");
+    EXPECT_EQ(w.GetStringBuilder(), "kept");
+    EXPECT_NO_THROW(w.Close());
+    EXPECT_EQ(w.ToString(), "kept") << "a second Close() must not discard the buffer either";
+}
+
+TEST(TextWrapperClosedStateTests, StringWriterCarriesDotNetsExactMessageAndItsNullObjectName) {
+    StringWriter w;
+    w.Close();
+    try {
+        w.Write(std::string("x"));
+        FAIL() << "expected ObjectDisposedException";
+    } catch (const System::ObjectDisposedException& e) {
+        EXPECT_STREQ(e.what(), kStringWriterClosed);
+        EXPECT_EQ(e.getObjectNameProperty(), std::string());
+    }
+}
+
+TEST(TextWrapperClosedStateTests, StreamReaderIsDisposedByCloseEVENWithLeaveOpen) {
+    // The headline of SR-AUD-337's reader half: the audit measured Read() returning 97 after
+    // Close() on a leaveOpen reader. .NET sets _disposed OUTSIDE its _closable test, so the
+    // reader is disposed while the stream it does not own stays open.
+    CloseCountingStream s;
+    s.source = "abc";
+    StreamReader r(&s, /*leaveOpen=*/true);
+    EXPECT_EQ(r.Read(), 'a');
+    r.Close();
+
+    EXPECT_EQ(s.closeCount, 0) << "leaveOpen still governs the STREAM";
+    EXPECT_THROW((void)r.Peek(), System::ObjectDisposedException);
+    EXPECT_THROW((void)r.Read(), System::ObjectDisposedException);
+    EXPECT_THROW((void)r.ReadLine(), System::ObjectDisposedException);
+    EXPECT_THROW((void)r.ReadToEnd(), System::ObjectDisposedException);
+
+    // ...and the stream really is still usable by whoever kept ownership of it.
+    SharpRuntime::bytecs buf[1] = {0};
+    EXPECT_EQ(s.Read(buf, 0, 1), 1);
+    EXPECT_EQ(buf[0], static_cast<SharpRuntime::bytecs>('b'));
+}
+
+TEST(TextWrapperClosedStateTests, StreamReaderCarriesItsTYPENAMEWhereStringReaderCarriesNone) {
+    CloseCountingStream s;
+    s.source = "abc";
+    StreamReader r(&s, true);
+    r.Close();
+    try {
+        (void)r.Read();
+        FAIL() << "expected ObjectDisposedException";
+    } catch (const System::ObjectDisposedException& e) {
+        EXPECT_STREQ(e.what(), kStreamReaderClosed);
+        EXPECT_EQ(e.getObjectNameProperty(), "StreamReader")
+            << "StreamReader.cs:1408 passes GetType().Name; StringReader.cs:327 passes null";
+    }
+}
+
+TEST(TextWrapperClosedStateTests, StreamReaderBaseStreamStaysReadableAfterCloseAndCloseIsIdempotent) {
+    CloseCountingStream s;
+    s.source = "abc";
+    {
+        StreamReader r(&s, /*leaveOpen=*/false);
+        EXPECT_EQ(r.getBaseStreamProperty(), &s);
+        r.Close();
+        EXPECT_EQ(s.closeCount, 1);
+        // .NET's BaseStream (StreamReader.cs:274) is a bare `=> _stream` with no disposal
+        // check, so this member deliberately keeps working.
+        EXPECT_EQ(r.getBaseStreamProperty(), &s);
+        r.Close();
+        EXPECT_EQ(s.closeCount, 1) << "Dispose returns early when already disposed";
+    }
+    EXPECT_EQ(s.closeCount, 1) << "the destructor must not re-close what Close() already closed";
+}
+
+TEST(TextWrapperClosedStateTests, StreamWriterKEEPSWORKINGAfterCloseWithLeaveOpen_MatchingDotNet) {
+    // SR-AUD-337's writer half is a FALSE POSITIVE against the reference, and this pins that.
+    // StreamWriter.cs assigns _disposed only inside `if (_closable && !_disposed)`, and
+    // _closable is !leaveOpen — so a leaveOpen writer is never disposed and its post-Close
+    // writes are correct behaviour. The audit measured "the stream grows by 11 bytes"; .NET
+    // grows it too.
+    CloseCountingStream s;
+    StreamWriter w(&s, /*leaveOpen=*/true);
+    w.Write(std::string("before"));
+    w.Close();
+    EXPECT_EQ(s.closeCount, 0);
+    EXPECT_NO_THROW(w.Write(std::string("-after")));
+    EXPECT_NO_THROW(w.Flush());
+    EXPECT_EQ(s.written, "before-after");
+}
+
+TEST(TextWrapperClosedStateTests, StreamWriterRejectsWritesAfterCloseWhenItOwnsTheClose) {
+    CloseCountingStream s;
+    StreamWriter w(&s, /*leaveOpen=*/false);
+    w.Write(std::string("before"));
+    w.Close();
+    EXPECT_EQ(s.closeCount, 1);
+    EXPECT_THROW(w.Write(std::string("x")), System::ObjectDisposedException);
+    EXPECT_THROW(w.Write("literal"), System::ObjectDisposedException);
+    EXPECT_THROW(w.Write('c'), System::ObjectDisposedException);
+    EXPECT_THROW(w.WriteLine(), System::ObjectDisposedException);
+    EXPECT_THROW(w.Flush(), System::ObjectDisposedException);
+    EXPECT_EQ(s.written, "before") << "nothing reached the stream after Close()";
+}
+
+TEST(TextWrapperClosedStateTests, StreamWriterCarriesItsTypeNameAndStillAcceptsANullPointer) {
+    CloseCountingStream s;
+    StreamWriter w(&s, false);
+    w.Close();
+    try {
+        w.Write(std::string("x"));
+        FAIL() << "expected ObjectDisposedException";
+    } catch (const System::ObjectDisposedException& e) {
+        EXPECT_STREQ(e.what(), kStreamWriterClosed);
+        EXPECT_EQ(e.getObjectNameProperty(), "StreamWriter");
+    }
+    // .NET's Write(string?) returns before its disposal check when the value is null
+    // (TextWriter.cs:277-283), so a null pointer stays a silent no-op even on a closed writer.
+    const char* nothing = nullptr;
+    EXPECT_NO_THROW(w.Write(nothing));
+    EXPECT_EQ(w.getBaseStreamProperty(), &s) << "BaseStream has no disposal check either";
+}
+
+TEST(TextWrapperClosedStateTests, StreamWriterDestructorDoesNotRECloseAfterAnExplicitClose) {
+    CloseCountingStream s;
+    {
+        StreamWriter w(&s, /*leaveOpen=*/false);
+        w.Close();
+        EXPECT_EQ(s.closeCount, 1);
+        w.Close();
+        EXPECT_EQ(s.closeCount, 1);
+    }
+    EXPECT_EQ(s.closeCount, 1);
 }
 
 

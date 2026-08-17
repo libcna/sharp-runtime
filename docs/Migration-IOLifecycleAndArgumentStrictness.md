@@ -9,14 +9,19 @@ been dispositioned now, so this is that note — written last, as #2104's `LAND 
 requires, and covering the tickets the review's ticket list did not yet contain when §12 was
 written: **#2108**, **#2344** and **#2345**, which are splits of #2098 and #2102.
 
-Everything below is **source-, ABI-, layout-, vtable- and `noexcept`-compatible**. Not one public
-signature, member, base, virtual, object layout or exception specification changed in any of these
+Everything in **§1–§6** is **source-, ABI-, layout-, vtable- and `noexcept`-compatible**. Not one
+public signature, member, base, virtual, object layout or exception specification changed in those
 tickets. What did change is **behaviour, deliberately and in one direction**: calls that used to
 succeed quietly on invalid input now throw, and a watcher now honours the filter it was given.
 
-**This note is not a claim that the namespace is finished.** Three things are still open and each
-has a named owner; §6 says exactly what they are, and §5 says what a caller can still rely on that
-a future resolution would take away.
+**§7 is different, and was added later.** Ticket #2098 landed on 2026-08-17 under Approval IO-1
+and **does change one object layout** — `sizeof(StringWriter)` 384 → 392 — so it carries a
+full-consumer-rebuild requirement that §1–§6 do not. It is still source-, ABI-, vtable- and
+`noexcept`-compatible. Read §7 as well as §2 before upgrading.
+
+**This note is not a claim that the namespace is finished.** Things are still open and each has a
+named owner; §6 says exactly what they are, and §5 says what a caller can still rely on that a
+future resolution would take away.
 
 ---
 
@@ -124,8 +129,10 @@ watcher. A rejected path — empty, or not an existing directory — still throw
   of **0** across 100 throwing `FileStream` constructors, 100 closed-stream rejection cycles, 200
   rejected `RandomAccess` calls, and 50 watcher path re-arms.
 - **`leaveOpen` still governs the underlying stream** in `StreamReader`/`StreamWriter`, exactly as
-  before. What it does *not* yet govern is the wrapper itself — see §6.
-- **No layout, vtable or `noexcept` change**, in any ticket, anywhere in the namespace.
+  before. Whether it *also* governs the wrapper's own disposal is answered by #2098 in §7 — and
+  the answer is not the same for the reader and the writer.
+- **No layout, vtable or `noexcept` change in any ticket of §1.** #2098, added in §7, changes one
+  layout; nothing in this section is affected by it.
 
 ---
 
@@ -154,7 +161,7 @@ resolution cannot land silently. They are not guarantees; they are a record of t
 | Behaviour | Owner |
 |---|---|
 | The six content-class `NotifyFilters` values are mutually indistinguishable, and `FileName` behaves as `DirectoryName` does | **#2346** (`needs_user`) |
-| A text wrapper keeps working after `Close()` | **#2098** (blocked, Approval IO-1) |
+| ~~A text wrapper keeps working after `Close()`~~ — **resolved by #2098**, see §7 | — |
 | `BinaryData::ToString()` returns invalid UTF-8 bytes unchanged rather than substituting U+FFFD | **#2106** (deferred) |
 | Every `BinaryData` construction path copies its source, including the `ReadOnlyMemory` ones | **#2106** (deferred) |
 | No handler is invoked for activity occurring after `EnableRaisingEvents = false` returns | **#2105** (deferred) |
@@ -163,11 +170,9 @@ resolution cannot land silently. They are not guarantees; they are a record of t
 
 ## 6. What is still open
 
-- **#2098 — BLOCKED on Approval IO-1.** `StringReader`, `StringWriter`, `StreamReader` and
-  `StreamWriter` still keep working after `Close()` (SR-AUD-337, SR-AUD-343). Recording the closed
-  state needs somewhere to put it, and every option is an object-layout change in a public type;
-  the measured decision and its exact approval sentence are plan §21. `UnmanagedMemoryStream`, the
-  fifth member of the original ticket, needed no new storage and landed separately as **#2108**.
+- **#2098 — LANDED 2026-08-17**, see §7. Approval IO-1 was granted as `docs/StandingApprovals.md`
+  SA-3. `UnmanagedMemoryStream`, the fifth member of the original ticket, needed no new storage and
+  had already landed separately as **#2108**.
 - **#2346 — `needs_user`.** The `NotifyFilters` → inotify mapping *within* each class. Five
   questions, each priced in plan §21.10: which value `IN_MODIFY` serves, which values `IN_ATTRIB`
   serves, what to do about `CreationTime` (inotify cannot report it at all), whether to add
@@ -202,3 +207,91 @@ resolution cannot land silently. They are not guarantees; they are a record of t
   If your code relied on the old behaviour it was crashing, so there is nothing to migrate except
   the two rejected setters — move those to another thread. No `SR-AUD-*` identifier is issued;
   audit numbering stays frozen at 364.
+
+---
+
+## 7. #2098 — the four text wrappers now enforce their closed state (2026-08-17)
+
+**Approval IO-1 was granted** as `docs/StandingApprovals.md` SA-3. SR-AUD-337 and SR-AUD-343 are
+remediated. This section is the migration record; the design is plan §21 and the corrections
+below.
+
+### 7.1 The layout change, and who must rebuild
+
+| Type | `sizeof` before | `sizeof` after |
+|---|---:|---:|
+| `StringWriter` | 384 | **392** |
+| `StringReader` | 48 | 48 |
+| `StreamReader` | 24 | 24 |
+| `StreamWriter` | 24 | 24 |
+| `TextReader`, `TextWriter` (bases) | 8 | 8 |
+
+One type grows, by one aligned slot; the other three absorb the flag into existing tail padding.
+**Every consumer must be fully recompiled** — a `sizeof` change across a stale-header boundary is
+an ODR violation with no diagnostic. sharp-runtime ships as a static library built from source, so
+this is a rebuild requirement, not a broken distributed binary. **No vtable, mangled-symbol,
+signature or `noexcept` change is involved**, and both base classes are untouched, so no type
+derived from them outside this module changes shape.
+
+Both layouts are pinned by `IoLayoutPinTests`, which now asserts the *after* state.
+
+### 7.2 What starts throwing
+
+After `Close()`, these throw `System::ObjectDisposedException`:
+
+| Type | Members | Message | `getObjectNameProperty()` |
+|---|---|---|---|
+| `StringReader` | `Peek`, `Read`, `ReadLine`, `ReadToEnd` | `Cannot read from a closed TextReader.` | *(empty)* |
+| `StringWriter` | every `Write`/`WriteLine` overload | `Cannot write to a closed TextWriter.` | *(empty)* |
+| `StreamReader` | `Peek`, `Read`, `ReadLine`, `ReadToEnd` | same, plus `\nObject name: 'StreamReader'.` | `StreamReader` |
+| `StreamWriter` | every `Write`/`WriteLine` overload, `Flush` | same, plus `\nObject name: 'StreamWriter'.` | `StreamWriter` |
+
+The empty object name is not an oversight: `StringReader.cs:325-328` and `StringWriter.cs:73-75`
+pass `null`, while `StreamReader.cs:1408` and `StreamWriter.cs:1015` pass `GetType().Name`. The
+port reproduces the difference.
+
+**To migrate:** stop using a wrapper after closing it, or drop the `Close()` call and let the
+destructor do the work — which is what it was already doing.
+
+### 7.3 What deliberately keeps working
+
+- **`StringWriter::ToString()` and `GetStringBuilder()`** still return the text written before
+  the close. `StringWriter.cs:309-312` and `:64-67` have no `_isOpen` check, so guarding them
+  would be a divergence.
+- **`StreamReader::getBaseStreamProperty()` and `StreamWriter::getBaseStreamProperty()`** still
+  return the stream. `BaseStream` is a bare field read in both .NET types.
+- **A `leaveOpen` `StreamWriter` keeps writing after `Close()`** — see §7.4.
+- **`StreamWriter::Write(const char*)` with a null pointer** still writes nothing and throws
+  nothing, even on a closed writer, because .NET's `Write(string?)` returns before its disposal
+  check.
+- Closing twice is safe everywhere, and the destructor no longer re-closes a stream that an
+  explicit `Close()` already closed.
+
+### 7.4 A premise correction: half of SR-AUD-337 was a false positive
+
+The finding reported that a `leaveOpen` `StreamWriter` grows its underlying stream after
+`Close()`. Measured against the reference tree, **.NET does that too**, and the two stream
+wrappers disagree with each other by design:
+
+```csharp
+// StreamReader.cs:243-268     _disposed = true;  THEN  if (_closable) { _stream.Close(); }
+// StreamWriter.cs:221-244     if (_closable && !_disposed) { ... finally { _disposed = true; } }
+```
+
+`_closable` is `!leaveOpen` in both. So a `leaveOpen` **reader** is disposed by `Close()` and a
+`leaveOpen` **writer** is not. #2098 reproduces that asymmetry rather than tidying it away, and
+pins it by test. What the writer half actually repairs is the *non*-`leaveOpen` case, where a
+write after `Close()` used to reach a closed stream instead of throwing.
+
+### 7.5 Downstream impact, measured
+
+Per `docs/StandingApprovals.md` SA-2 condition 5, both consumer checkouts were searched:
+
+- **`cna`** — **zero** uses of any of the four types. Its `StringReader` hits are CNA's own
+  `CNA::Internal::Xnb::StringReader` content reader, an unrelated type.
+- **`mobile-eggbert`** — **one** use, `Worlds.cpp:154`: a `StreamReader` constructed over a
+  stream, read with `ReadToEnd()`, after which the *stream* is closed directly and the reader is
+  destroyed. It never calls `StreamReader::Close()`, so no member of it starts throwing. It must
+  still be rebuilt, like every consumer.
+
+Neither repository was modified.
