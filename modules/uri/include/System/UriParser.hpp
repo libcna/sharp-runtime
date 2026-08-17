@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <cctype>
 #include <string>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/NotImplementedException.hpp"
+#include "System/Uri.hpp"
 #include "System/UriComponents.hpp"
 #include "System/UriFormat.hpp"
 #include "System/UriFormatException.hpp"
@@ -68,6 +70,21 @@ namespace System {
          * @param schemeName The scheme name to check (case-insensitive).
          */
         static bool IsKnownScheme(const std::string& schemeName) {
+            // Ticket #1998 (SR-AUD-147). This lower-cased any string and returned false, so ""
+            // and "ht tp" were reported as merely UNKNOWN schemes rather than invalid arguments
+            // -- a caller could not tell "I do not recognise this scheme" from "that is not a
+            // scheme". .NET rejects the second outright (UriScheme.cs:186-195):
+            //
+            //     ArgumentNullException.ThrowIfNull(schemeName);
+            //     if (!Uri.CheckSchemeName(schemeName))
+            //         throw new ArgumentOutOfRangeException(nameof(schemeName));
+            //
+            // The null check has no C++ counterpart: the parameter is a const std::string&.
+            if (!Uri::CheckSchemeName(schemeName)) {
+                throw System::ArgumentOutOfRangeException(
+                    "schemeName", "The scheme name is not a valid URI scheme.");
+            }
+
             // Matches the exact built-in registration table in real .NET's UriSyntax.cs
             // (s_table, populated from HttpUri/HttpsUri/WsUri/WssUri/FtpUri/FileUri/GopherUri/
             // NntpUri/NewsUri/MailToUri/UuidUri/TelnetUri/LdapUri/NetTcpUri/NetPipeUri/

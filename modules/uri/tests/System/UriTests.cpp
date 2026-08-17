@@ -7,6 +7,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Uri.hpp"
+#include "System/UriParser.hpp"
 #include "System/UriFormatException.hpp"
 
 using System::Uri;
@@ -1458,4 +1459,53 @@ TEST(UriTests, Whitespace_TrailingWhitespaceIsAcceptedIntoThePath) {
 TEST(UriTests, Whitespace_InternalWhitespaceIsAcceptedVerbatim) {
     EXPECT_EQ(Uri("http://exa mple.com/").getHostProperty(), "exa mple.com");
     EXPECT_EQ(Uri("http://h/a b").getAbsolutePathProperty(), "/a b");
+}
+
+// ---------------------------------------------------------------------------
+// Ticket #1998 (SR-AUD-147) -- IsKnownScheme rejects a malformed scheme.
+//
+// The ticket was blocked because "no evidence for the .NET behaviour survives in this
+// environment: the audit's C# probe directory is absent and /rv/tmp/runtime/src/libraries/ is
+// absent. This is the same line #1963 sits on and it is respected." That was the correct call
+// then. The reference is present now, and it says exactly what SR-AUD-147 recorded.
+// ---------------------------------------------------------------------------
+
+TEST(UriParserSchemeValidationTests, Fix1998_AMalformedSchemeIsRejectedNotReportedUnknown) {
+    // UriScheme.cs:186-195 -- `if (!Uri.CheckSchemeName(schemeName)) throw new
+    // ArgumentOutOfRangeException(nameof(schemeName));` BEFORE the registration lookup. Before
+    // this, a caller could not tell "I do not recognise this scheme" from "that is not a
+    // scheme at all": both answered false.
+    for (const char* bad : {"", " ", "ht tp", "1http", "-http", "http:", "ht\ttp", "http/",
+                            "ht\nttp", "http?"}) {
+        SCOPED_TRACE(bad);
+        EXPECT_THROW((void)System::UriParser::IsKnownScheme(bad),
+                     System::ArgumentOutOfRangeException);
+    }
+}
+
+TEST(UriParserSchemeValidationTests, Fix1998_AWellFormedSchemeStillAnswersTrueOrFalse) {
+    // The invariance row: a syntactically valid scheme still gets a yes/no answer, and the
+    // registration table is untouched.
+    EXPECT_TRUE(System::UriParser::IsKnownScheme("http"));
+    EXPECT_TRUE(System::UriParser::IsKnownScheme("HTTP"));
+    EXPECT_TRUE(System::UriParser::IsKnownScheme("net.tcp"));   // '.' is a legal scheme char
+    EXPECT_TRUE(System::UriParser::IsKnownScheme("net.pipe"));
+    EXPECT_FALSE(System::UriParser::IsKnownScheme("wais"));      // valid syntax, not registered
+    EXPECT_FALSE(System::UriParser::IsKnownScheme("a+b-c.d1"));  // every legal punctuation
+}
+
+TEST(UriParserSchemeValidationTests, Fix1998_CheckSchemeNameIsDotNetsGrammar) {
+    // Uri.cs:1485-1488 with s_schemeChars from :1477-1478 -- RFC 3986 3.1's
+    // ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ). Public in .NET, so public here.
+    EXPECT_TRUE(System::Uri::CheckSchemeName("h"));
+    EXPECT_TRUE(System::Uri::CheckSchemeName("a+b-c.d0123456789"));
+    EXPECT_TRUE(System::Uri::CheckSchemeName("Z"));
+    EXPECT_FALSE(System::Uri::CheckSchemeName(""));
+    EXPECT_FALSE(System::Uri::CheckSchemeName("0a")) << "the first character must be a letter";
+    EXPECT_FALSE(System::Uri::CheckSchemeName("+a")) << "...and '+' is not one, even though it "
+                                                        "is legal later in the scheme";
+    EXPECT_FALSE(System::Uri::CheckSchemeName("a b"));
+    EXPECT_FALSE(System::Uri::CheckSchemeName("a_b")) << "'_' is not in s_schemeChars";
+    EXPECT_FALSE(System::Uri::CheckSchemeName(std::string("ab\0c", 4)))
+        << "a NUL is not a scheme character either";
 }

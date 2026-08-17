@@ -190,6 +190,44 @@ namespace System {
          */
         static bool TryCreate(const std::string& uriString, UriKind uriKind,
                                std::shared_ptr<Uri>& result);
+
+        /**
+         * @brief Determines whether @p schemeName is a syntactically valid URI scheme.
+         *
+         * C++ counterpart of .NET `Uri.CheckSchemeName(string)` (`Uri.cs:1485-1488`),
+         * transcribed exactly:
+         *
+         * ```csharp
+         * !string.IsNullOrEmpty(schemeName) &&
+         * char.IsAsciiLetter(schemeName[0]) &&
+         * !schemeName.AsSpan().ContainsAnyExcept(s_schemeChars);
+         * ```
+         *
+         * where `s_schemeChars` is `"+-." + digits + letters` (`Uri.cs:1477-1478`), i.e. RFC
+         * 3986 §3.1's `ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`.
+         *
+         * Added by ticket #1998, which needed it: `UriParser::IsKnownScheme` must **reject** a
+         * malformed scheme rather than report it as merely unknown, and .NET expresses that by
+         * calling this. It is public here because it is public in .NET.
+         *
+         * @note Case-insensitive by construction — both cases are in the allowed set. `net.tcp`
+         *       and `net.pipe`, two of the schemes this port registers, rely on `.` being
+         *       allowed.
+         */
+        [[nodiscard]] static bool CheckSchemeName(const std::string& schemeName) noexcept {
+            if (schemeName.empty()) return false;
+            const unsigned char first = static_cast<unsigned char>(schemeName[0]);
+            const bool firstIsLetter =
+                (first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z');
+            if (!firstIsLetter) return false;
+            for (char raw : schemeName) {
+                const unsigned char c = static_cast<unsigned char>(raw);
+                const bool allowed = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                                     (c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.';
+                if (!allowed) return false;
+            }
+            return true;
+        }
     };
 
 } // namespace System
