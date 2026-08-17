@@ -30,6 +30,7 @@
 #include "System/Net/Cookie.hpp"
 #include "System/Net/CookieCollection.hpp"
 #include "System/Net/CookieContainer.hpp"
+#include "System/Net/CookieException.hpp"
 #include "System/Net/WebUtility.hpp"
 #include "System/Uri.hpp"
 
@@ -43,26 +44,90 @@ using System::Uri;
 // #2040 -- the cookie origin policy. Approval sentence: plan §14.1.
 // ===========================================================================
 
-TEST(NetGatedBehaviourPinTests, Pin2040_CrossOriginExplicitDomainIsStoredAndEmitted) {
-    // Measured 2026-08-04 (build-probe/2034_probe1_net_before.log). A cookie handed to the
-    // container from origin.invalid, carrying Domain=.unrelated.invalid, comes back out for
-    // unrelated.invalid. THIS IS THE DEFECT, pinned so #2040 cannot land unnoticed.
+// #2040 LANDED 2026-08-17. All four pins below are INVERTED, which is what the ticket said
+// would happen if the rule were ever settled. It was, against the reference tree:
+// Cookie.VerifyAndSetDefaults (Cookie.cs:358-424) validates an explicitly supplied Domain
+// against the request URI's host and throws CookieException when it does not domain-match, and
+// .NET's constructors assign through the properties (Cookie.cs:108-118), so a caller-supplied
+// path or domain is never marked implicit.
+
+TEST(NetGatedBehaviourPinTests, Pin2040_CrossOriginExplicitDomainIsREJECTED) {
+    // THE DEFECT, now repaired. Measured before (build-probe/2034_probe1_net_before.log): a
+    // cookie handed to the container from origin.invalid carrying Domain=.unrelated.invalid was
+    // stored and handed back out for unrelated.invalid.
     CookieContainer container;
     Cookie cookie("session", "isolated");
     cookie.setDomainProperty(".unrelated.invalid");
-    container.Add(Uri("http://origin.invalid/"), cookie);
 
-    EXPECT_EQ(container.GetCookieHeader(Uri("http://unrelated.invalid/")), "session=isolated");
-    EXPECT_EQ(container.getCountProperty(), 1);
+    EXPECT_THROW(container.Add(Uri("http://origin.invalid/"), cookie),
+                 System::Net::CookieException);
+    EXPECT_EQ(container.getCountProperty(), 0) << "a rejected cookie must not be stored";
+    EXPECT_EQ(container.GetCookieHeader(Uri("http://unrelated.invalid/")), "");
 }
 
-TEST(NetGatedBehaviourPinTests, Pin2040_ConstructorSuppliedPathIsMarkedImplicit) {
-    // The constructor and the setter disagree about the same value: only the setter clears the
-    // flag. That flag is the INPUT to the domain-matching rule #2040 must define, which is why
-    // SR-AUD-305 and SR-AUD-306 are one decision.
+TEST(NetGatedBehaviourPinTests, Pin2040_TheRejectionCarriesDotNetsMessage) {
+    CookieContainer container;
+    Cookie cookie("session", "isolated");
+    cookie.setDomainProperty(".unrelated.invalid");
+    try {
+        container.Add(Uri("http://origin.invalid/"), cookie);
+        FAIL() << "expected CookieException";
+    } catch (const System::Net::CookieException& e) {
+        // SR.net_cookie_attribute is "The '{0}'='{1}' part of the cookie is invalid."
+        // (System.Net.Primitives/src/Resources/Strings.resx:93).
+        EXPECT_EQ(std::string(e.what()),
+                  "The 'Domain'='.unrelated.invalid' part of the cookie is invalid.");
+    }
+}
+
+TEST(NetGatedBehaviourPinTests, Pin2040_AnExplicitDomainTHATDoesMatchIsStillAccepted) {
+    // The repair must not reject the legitimate case it exists to permit: a cookie scoped to a
+    // parent domain of its own origin. This is the assertion that would catch a guard that
+    // simply rejected every explicit domain.
+    CookieContainer container;
+    Cookie cookie("session", "shared");
+    cookie.setDomainProperty(".example.invalid");
+    container.Add(Uri("http://www.example.invalid/"), cookie);
+
+    EXPECT_EQ(container.getCountProperty(), 1);
+    EXPECT_EQ(container.GetCookieHeader(Uri("http://api.example.invalid/")), "session=shared");
+    EXPECT_EQ(container.GetCookieHeader(Uri("http://www.example.invalid/")), "session=shared");
+}
+
+TEST(NetGatedBehaviourPinTests, Pin2040_SingleLabelDomainsAndIpHostsNeedAnExactMatch) {
+    // The two compatibility conditions .NET adds on top of RFC 6265 (Cookie.cs:347-349):
+    // the domain must itself contain a dot, and the host must not be an IP literal. Without
+    // them, Domain=invalid would attach to every *.invalid host and Domain=1.2.3 to 1.2.3.4.
+    {
+        CookieContainer container;
+        Cookie tooBroad("n", "v");
+        tooBroad.setDomainProperty("invalid");
+        EXPECT_THROW(container.Add(Uri("http://origin.invalid/"), tooBroad),
+                     System::Net::CookieException);
+    }
+    {
+        CookieContainer container;
+        Cookie ipSuffix("n", "v");
+        ipSuffix.setDomainProperty("2.3.4");
+        EXPECT_THROW(container.Add(Uri("http://1.2.3.4/"), ipSuffix),
+                     System::Net::CookieException);
+    }
+    {
+        // ...and the exact match those two conditions still permit.
+        CookieContainer container;
+        Cookie exact("n", "v");
+        exact.setDomainProperty("1.2.3.4");
+        EXPECT_NO_THROW(container.Add(Uri("http://1.2.3.4/"), exact));
+        EXPECT_EQ(container.GetCookieHeader(Uri("http://1.2.3.4/")), "n=v");
+    }
+}
+
+TEST(NetGatedBehaviourPinTests, Pin2040_ConstructorSuppliedPathIsEXPLICIT) {
+    // The constructor and the setter now agree about the same value. That flag is the INPUT to
+    // the domain rule above, which is why SR-AUD-305 and SR-AUD-306 were one decision.
     const Cookie viaConstructor("n", "v", "/explicit");
     EXPECT_EQ(viaConstructor.getPathProperty(), "/explicit");
-    EXPECT_TRUE(viaConstructor.getPathImplicitProperty());
+    EXPECT_FALSE(viaConstructor.getPathImplicitProperty());
 
     Cookie viaSetter("n", "v");
     viaSetter.setPathProperty("/explicit");
@@ -70,10 +135,10 @@ TEST(NetGatedBehaviourPinTests, Pin2040_ConstructorSuppliedPathIsMarkedImplicit)
     EXPECT_FALSE(viaSetter.getPathImplicitProperty());
 }
 
-TEST(NetGatedBehaviourPinTests, Pin2040_ConstructorSuppliedDomainIsMarkedImplicit) {
+TEST(NetGatedBehaviourPinTests, Pin2040_ConstructorSuppliedDomainIsEXPLICIT) {
     const Cookie viaConstructor("n", "v", "/p", ".d.invalid");
     EXPECT_EQ(viaConstructor.getDomainProperty(), ".d.invalid");
-    EXPECT_TRUE(viaConstructor.getDomainImplicitProperty());
+    EXPECT_FALSE(viaConstructor.getDomainImplicitProperty());
 
     Cookie viaSetter("n", "v");
     viaSetter.setDomainProperty(".d.invalid");
@@ -81,16 +146,33 @@ TEST(NetGatedBehaviourPinTests, Pin2040_ConstructorSuppliedDomainIsMarkedImplici
     EXPECT_FALSE(viaSetter.getDomainImplicitProperty());
 }
 
-TEST(NetGatedBehaviourPinTests, Pin2040_ContainerOverwritesConstructorSuppliedPathAndDomain) {
-    // The consequence of the two pins above: because the flags stay set, Add() replaces the
-    // caller's own explicit values with the request URI's.
+TEST(NetGatedBehaviourPinTests, Pin2040_ContainerKEEPSConstructorSuppliedPathAndDomain) {
+    // The consequence of the two cases above, and the user-visible half of the repair: because
+    // the flags are now cleared, Add() no longer replaces the caller's own values with the
+    // request URI's. The domain is chosen to domain-match the origin so the new validation
+    // accepts it -- ".d.invalid" from the original pin would now be rejected, which is the point.
     CookieContainer container;
-    container.Add(Uri("http://origin.invalid/some/where"), Cookie("n", "v", "/explicit", ".d.invalid"));
+    container.Add(Uri("http://sub.origin.invalid/some/where"),
+                  Cookie("n", "v", "/explicit", ".origin.invalid"));
 
-    const CookieCollection stored = container.GetCookies(Uri("http://origin.invalid/some/where"));
+    const CookieCollection stored = container.GetCookies(Uri("http://sub.origin.invalid/explicit"));
     ASSERT_EQ(stored.getCountProperty(), 1);
-    EXPECT_EQ(stored[0].getPathProperty(), "/some/where");
+    EXPECT_EQ(stored[0].getPathProperty(), "/explicit");
+    EXPECT_EQ(stored[0].getDomainProperty(), ".origin.invalid");
+}
+
+TEST(NetGatedBehaviourPinTests, Pin2040_AnImplicitDomainStaysImplicitAfterBeingDefaulted) {
+    // .NET's SetDomainAndKey writes the domain and leaves m_domain_implicit alone
+    // (Cookie.cs:310-314): the flag records where the value CAME FROM, so defaulting it from the
+    // request URI must not make the cookie claim the caller chose it.
+    CookieContainer container;
+    container.Add(Uri("http://origin.invalid/a/b"), Cookie("n", "v"));
+
+    const CookieCollection stored = container.GetCookies(Uri("http://origin.invalid/a/b"));
+    ASSERT_EQ(stored.getCountProperty(), 1);
     EXPECT_EQ(stored[0].getDomainProperty(), "origin.invalid");
+    EXPECT_TRUE(stored[0].getDomainImplicitProperty());
+    EXPECT_TRUE(stored[0].getPathImplicitProperty());
 }
 
 // ===========================================================================

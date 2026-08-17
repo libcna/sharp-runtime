@@ -27,13 +27,13 @@ namespace System::Net {
      * Cookie aging/eviction policies (MaxCookieSize, PerDomainCapacity, Capacity) are not
      * enforced -- this container never evicts cookies on its own.
      *
-     * @warning KNOWN GAP, measured and pinned, not yet repaired (SR-AUD-305, ticket #2040,
-     * blocked on approval -- `docs/SystemNetNamespaceReviewPlan.md` §14.1). There is **no
-     * origin check**: an explicitly supplied `Domain` is never validated against the URI the
-     * cookie arrived from, so a cookie added from `origin.invalid` carrying
-     * `Domain=.unrelated.invalid` is stored and later emitted by `GetCookieHeader` for
-     * `unrelated.invalid`. .NET's `Cookie.VerifyAndSetDefaults` rejects that relation. Pinned by
-     * `NetGatedBehaviourPinTests.Pin2040_CrossOriginExplicitDomainIsStoredAndEmitted`.
+     * <b>Origin check (SR-AUD-305, ticket #2040, landed 2026-08-17).</b> An explicitly supplied
+     * `Domain` is validated against the URI the cookie arrives from, and a cookie whose domain
+     * does not domain-match that host is rejected with `CookieException` and not stored --
+     * transcribed from `Cookie.VerifyAndSetDefaults` (`Cookie.cs:358-424`). A `Domain` the
+     * caller did not supply is defaulted from the URI's host and is never validated, because the
+     * host it is being set to is by construction its own origin. One rule serves both the
+     * validation and the emission match, as it does in .NET.
      *
      * @warning KNOWN GAP, measured and pinned, not yet repaired (SR-AUD-308, ticket #2042,
      * blocked on approval -- plan §14.2). Storage is **unbounded in every direction**: no
@@ -48,10 +48,13 @@ namespace System::Net {
         /**
          * @brief Adds a Cookie for the given URI, applying the URI's host as the cookie's domain
          * if unset.
-         * @warning An explicitly supplied `Domain` is accepted **without any relation check
-         * against @p uri** — see the class note (SR-AUD-305, #2040). A `Path` or `Domain` that
-         * came from a `Cookie` constructor rather than a setter is **overwritten** by @p uri's,
-         * because the constructors leave the implicit flags set (SR-AUD-306, #2040).
+         * An explicitly supplied `Domain` must domain-match @p uri's host; one that does not is
+         * rejected rather than stored. A `Path` or `Domain` the caller supplied — through a
+         * setter **or** through a constructor, which agree since #2040 — is kept as given and
+         * never replaced by @p uri's.
+         *
+         * @throws System::Net::CookieException if @p cookie carries an explicit `Domain` that is
+         *         not a valid domain name or does not domain-match @p uri's host.
          */
         void Add(const System::Uri& uri, const Cookie& cookie);
 

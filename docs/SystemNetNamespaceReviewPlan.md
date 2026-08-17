@@ -464,6 +464,48 @@ leave. **Recommended: A**, precisely because it needs **no layout change**.
 > accepting that cookies which are stored and emitted today begin to be rejected, and that a
 > container stops overwriting a constructor-supplied path or domain. Ticket **#2040**.
 
+#### 14.1.1 LANDED 2026-08-17 — option A, and the inferred rule turned out to be exact
+
+The approval above was **granted under `docs/StandingApprovals.md` SA-5**, which makes aligning to
+the reference ordinary work rather than an approval request; and the half this section marked
+*"inferred, not verifiable here"* is now **read from the source**, because `/rv/tmp/runtime` is
+present in this container (SA §5.1). `Cookie.VerifyAndSetDefaults` (`Cookie.cs:358-424`) is:
+
+```csharp
+if (m_domain_implicit) { SetDomainAndKey(host); }
+else if (!IsValidDomainName(m_domainKey) || !HostMatchesDomain(host, m_domainKey))
+    throw new CookieException(SR.Format(SR.net_cookie_attribute, "Domain", m_domain));
+```
+
+The inference was right in shape and added three details it could not have supplied:
+
+1. **The message is exact.** `SR.net_cookie_attribute` is `"The '{0}'='{1}' part of the cookie is
+   invalid."` (`System.Net.Primitives/src/Resources/Strings.resx:93`), so the rejection reads
+   `The 'Domain'='.unrelated.invalid' part of the cookie is invalid.`
+2. **Defaulting must NOT clear the implicit flag.** `SetDomainAndKey` (`Cookie.cs:310-314`) writes
+   the domain and the derived key and never touches `m_domain_implicit`, because the flag records
+   *where the value came from*. The port needed a private origin-defaulting setter and
+   `friend class CookieContainer` — the boundary .NET draws with `internal`.
+3. **`HostMatchesDomain` carries two conditions on top of RFC 6265** (`Cookie.cs:347-349`): the
+   domain must itself contain a dot, and the host must not be an IP literal, so single-label
+   domains and IP hosts require an exact match. Both were absent from this port's
+   `domainMatches`, which is the **emission** side — so adopting the reference rule fixed the
+   validation and the emission match together, from **one** function. Two functions that were
+   meant to agree is the shape this repository keeps having to repair.
+
+**Option C's cost is confirmed avoided:** no data member was added to `Cookie`, so there is no
+layout change in a header-only type. No signature, vtable or `noexcept` change either.
+
+**+8 tests**, replacing the four #2047 pins, every one of which is **inverted** — which is what
+#2047 said would happen if the rule were ever settled. **Four mutations, all caught**: dropping
+the origin check fails three cases, dropping the two compatibility conditions fails the
+single-label/IP case, restoring the direct field assignment in the constructors fails three, and
+defaulting through the public setter instead of `applyOriginDomain` fails the implicit-flag case.
+M1's first attempt was rejected by `-Werror` and re-run correctly.
+
+**Downstream, measured under SA-2:** neither `cna` nor `mobile-eggbert` names `Cookie`,
+`CookieContainer` or any cookie type — **zero sites in both**. Neither repository was modified.
+
 ### 14.2 #2042 — N-F, the storage bound (SR-AUD-308)
 
 **Now:** unbounded (10,000 retained, measured). **Alternatives:** (A) .NET's documented defaults —
@@ -534,7 +576,7 @@ two HTML encoders in one repository with two different escape sets is the CCF-01
 | #2038 | N-D | 303 | **DONE** 2026-08-04 — see §17.5 |
 | #2039 | N-C | 304 (3 halves) | **DONE** 2026-08-04 — see §17.6 |
 | #2041 | N-B | 307 | **DONE** 2026-08-04 — see §17.1 |
-| #2040 | N-E | 305, 306 | **blocked**, design complete (§14.1); behaviour pinned by #2047 |
+| #2040 | N-E | 305, 306 | **done** 2026-08-17 under SA-5 (§14.1.1); the #2047 pins are inverted |
 | #2042 | N-F | 308 | **blocked**, design complete (§14.2); behaviour pinned by #2047 |
 | #2043 | N-C | 304 (wildcard half) | **blocked**, design complete (§14.3); behaviour pinned by #2039 |
 | #2044 | N-G | 309 | **blocked**, deferred (§14.4), coupled to #2019; behaviour pinned by #2047 |

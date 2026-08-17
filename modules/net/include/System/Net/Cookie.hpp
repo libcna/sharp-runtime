@@ -20,14 +20,15 @@ namespace System::Net {
      * implemented -- real-world cookies overwhelmingly use the simple Version-0 "Netscape"
      * shape this class targets.
      *
-     * @warning KNOWN GAP, measured and pinned, not yet repaired (SR-AUD-306, ticket #2040,
-     * blocked on approval — `docs/SystemNetNamespaceReviewPlan.md` §14.1). The path- and
-     * domain-accepting constructors below assign `path_`/`domain_` **directly** rather than
-     * through their setters, so `PathImplicit`/`DomainImplicit` stay **true** for a value the
-     * caller supplied explicitly, while the equivalent setters correctly clear them. Because
-     * `CookieContainer::Add` overwrites any value still marked implicit, a path or domain
-     * passed to a constructor is silently replaced by the request URI's. Pinned by
-     * `NetGatedBehaviourPinTests.Pin2040_*`.
+     * <b>Implicit versus explicit.</b> `PathImplicit` and `DomainImplicit` record whether the
+     * value was *supplied by the caller* or is to be *defaulted from the request URI* when the
+     * cookie is inserted into a `CookieContainer`. Every route that takes a caller-supplied
+     * value clears the corresponding flag — the setters and, since ticket #2040, the
+     * constructors too, which is exactly what .NET does by writing `Path = path;` and
+     * `Domain = domain;` in constructor bodies rather than assigning the fields
+     * (`Cookie.cs:108-118`). Before #2040 the constructors assigned the fields directly, so a
+     * path or domain the caller passed to a constructor stayed marked implicit and was then
+     * silently overwritten by `CookieContainer::Add` with the request URI's value.
      */
     class Cookie {
     public:
@@ -41,22 +42,29 @@ namespace System::Net {
 
         /**
          * @brief Initializes a new instance with the given name, value, and path.
-         * @warning The path is stored but `PathImplicit` stays **true** — see the class note.
+         *
+         * The path is a caller-supplied value, so `PathImplicit` becomes false and
+         * `CookieContainer::Add` will not replace it. Routed through the setter for the same
+         * reason .NET routes it through its property (`Cookie.cs:108-112`): the flag is part of
+         * what setting the value *means*, not a separate step a constructor may skip.
          */
         Cookie(const std::string& name, const std::string& value, const std::string& path)
             : Cookie(name, value) {
-            path_ = path;
+            setPathProperty(path);
         }
 
         /**
          * @brief Initializes a new instance with the given name, value, path, and domain.
-         * @warning Both are stored but `PathImplicit` and `DomainImplicit` stay **true** — see
-         * the class note.
+         *
+         * Both are caller-supplied, so both implicit flags become false
+         * (`Cookie.cs:114-118`). A domain set here is validated against the request URI when the
+         * cookie is added to a `CookieContainer`, and a cookie whose domain does not
+         * domain-match that URI's host is rejected — see `CookieContainer::Add`.
          */
         Cookie(const std::string& name, const std::string& value, const std::string& path,
                const std::string& domain)
             : Cookie(name, value, path) {
-            domain_ = domain;
+            setDomainProperty(domain);
         }
 
         /**
@@ -152,6 +160,24 @@ namespace System::Net {
                     return false;
             return true;
         }
+
+        friend class CookieContainer;
+
+        /**
+         * Applies the request URI's host as this cookie's domain WITHOUT clearing
+         * `domainImplicit_`.
+         *
+         * .NET does the same: `VerifyAndSetDefaults` reaches `SetDomainAndKey(host)`
+         * (`Cookie.cs:310-314`), which writes `m_domain` and the derived key and never touches
+         * `m_domain_implicit`. The flag records where the value CAME FROM, so defaulting it from
+         * the URI must not make the cookie claim the caller chose it. Only `CookieContainer` may
+         * call this, which is why it is private and `CookieContainer` is a friend — the same
+         * boundary .NET draws with `internal`.
+         */
+        void applyOriginDomain(const std::string& host) { domain_ = host; }
+
+        /** As applyOriginDomain, for the path (`Cookie.cs:424-460`). */
+        void applyOriginPath(const std::string& path) { path_ = path; }
 
         std::string name_;
         std::string value_;

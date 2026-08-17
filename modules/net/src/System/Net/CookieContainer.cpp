@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/CookieContainer.hpp"
+#include "System/Net/CookieException.hpp"
+#include "System/Net/IPAddress.hpp"
 #include <algorithm>
 #include <cctype>
 #include <sstream>
@@ -13,19 +15,53 @@ std::string CookieContainer::toLowerAscii(std::string s) {
     return s;
 }
 
-// RFC 6265 5.1.3 domain-match: the cookie's domain-value is either identical to the request
-// host, or the request host is a subdomain of it (host ends with "." + domain).
+namespace {
+
+// Cookie.IsValidDomainName (`Cookie.cs:489-491`): non-empty, and built only from the domain
+// character set. .NET's s_domainChars is the ASCII letters, digits, '.', '-' and '_', which also
+// covers the leading dot a Domain attribute may carry.
+bool isValidDomainName(const std::string& domain) {
+    if (domain.empty()) return false;
+    for (const char c : domain) {
+        const unsigned char u = static_cast<unsigned char>(c);
+        const bool ok = (u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z') || (u >= '0' && u <= '9') ||
+                        c == '.' || c == '-' || c == '_';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+} // namespace
+
+// RFC 6265 5.1.3 domain-match, transcribed from Cookie.HostMatchesDomain (`Cookie.cs:331-350`)
+// so that ONE rule serves both jobs it has: deciding whether an explicitly supplied Domain may
+// be accepted for a given request URI (CookieContainer::Add) and deciding whether a stored
+// cookie may be emitted for one (GetCookies). .NET uses the single function for both, and two
+// functions that were meant to agree is the shape this repository keeps having to repair.
+//
+// A host domain-matches a domain when either:
+//   - they are identical after stripping the domain's optional leading dot; or
+//   - the domain is a suffix of the host, the character of the host immediately before it is a
+//     '.', the DOMAIN ITSELF CONTAINS A DOT, and the HOST IS NOT AN IP LITERAL.
+//
+// Ticket #2040 added the last two conditions, which .NET states as compatibility rules on top
+// of RFC 6265: a single-label domain ("com", "localhost") and an IP-literal host both require an
+// exact match, so `Domain=com` cannot be attached to `example.com` and `Domain=1.2.3` cannot be
+// attached to `1.2.3.4`. Both are narrowings and both are .NET's.
 bool CookieContainer::domainMatches(const std::string& cookieDomain, const std::string& host) {
     if (cookieDomain.empty()) return true; // host-only cookie stored without an explicit domain
     std::string domain = toLowerAscii(cookieDomain);
     std::string h      = toLowerAscii(host);
     if (!domain.empty() && domain[0] == '.') domain = domain.substr(1);
+    if (domain.empty()) return false;
     if (h == domain) return true;
-    if (h.size() > domain.size() &&
-        h.compare(h.size() - domain.size(), domain.size(), domain) == 0 &&
-        h[h.size() - domain.size() - 1] == '.')
-        return true;
-    return false;
+    if (h.size() <= domain.size()) return false;
+    if (h.compare(h.size() - domain.size(), domain.size(), domain) != 0) return false;
+    if (h[h.size() - domain.size() - 1] != '.') return false;
+    if (domain.find('.') == std::string::npos) return false;   // single-label: exact match only
+    System::Net::IPAddress parsed;
+    if (System::Net::IPAddress::TryParse(host, parsed)) return false;  // IP literal: exact only
+    return true;
 }
 
 // RFC 6265 5.1.4 path-match: identical, a proper "/"-terminated prefix, or the cookie path is "/".
@@ -39,10 +75,33 @@ bool CookieContainer::pathMatches(const std::string& cookiePath, const std::stri
     return false;
 }
 
+// Ticket #2040 / SR-AUD-305 and SR-AUD-306, which are one decision because the implicit flags
+// are the INPUT to the domain rule. Transcribed from Cookie.VerifyAndSetDefaults
+// (`Cookie.cs:358-424`), whose domain half is exactly:
+//
+//     if (m_domain_implicit) { SetDomainAndKey(host); }
+//     else if (!IsValidDomainName(m_domainKey) || !HostMatchesDomain(host, m_domainKey))
+//         throw new CookieException(SR.Format(SR.net_cookie_attribute, "Domain", m_domain));
+//
+// Before this ticket there was no origin check at all: a cookie added from origin.invalid
+// carrying Domain=.unrelated.invalid was stored and later handed to unrelated.invalid by
+// GetCookieHeader. Note the ORDER, which is .NET's and matters: the implicit case is defaulted
+// and never validated, because the host it is being set to is by construction its own origin.
 void CookieContainer::Add(const System::Uri& uri, const Cookie& cookie) {
     Cookie stored = cookie;
-    if (stored.getDomainImplicitProperty()) stored.setDomainProperty(uri.getHostProperty());
-    if (stored.getPathImplicitProperty())   stored.setPathProperty(uri.getAbsolutePathProperty());
+    const std::string host = uri.getHostProperty();
+
+    if (stored.getDomainImplicitProperty()) {
+        // applyOriginDomain rather than the setter: .NET's SetDomainAndKey leaves
+        // m_domain_implicit alone, because the flag records where the value came from.
+        stored.applyOriginDomain(host);
+    } else if (!isValidDomainName(stored.getDomainProperty()) ||
+               !domainMatches(stored.getDomainProperty(), host)) {
+        throw System::Net::CookieException("The 'Domain'='" + stored.getDomainProperty() +
+                                           "' part of the cookie is invalid.");
+    }
+
+    if (stored.getPathImplicitProperty()) stored.applyOriginPath(uri.getAbsolutePathProperty());
 
     // Replace an existing cookie with the same Name/Domain/Path (matches real .NET's
     // "adding a cookie with the same identity overwrites/refreshes it" semantics).

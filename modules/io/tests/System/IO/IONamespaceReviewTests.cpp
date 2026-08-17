@@ -1265,6 +1265,24 @@ void appendByte(const std::filesystem::path& p) {
     ::close(fd);
 }
 
+/// Waits until an atomic counter becomes non-zero, or the deadline expires.
+///
+/// Ticket #2352. The three call sites below used `for (int i = 0; i < 2000; ++i) yield()`, which
+/// is a bounded SPIN, not a wait: 2,000 yields is however long 2,000 yields happen to take, so on
+/// a loaded machine it can expire while the watcher thread has not been scheduled even once. That
+/// is exactly how AnExceptionEscapingAHandlerReachesErrorInsteadOfTerminating failed inside a
+/// full-suite run while passing every time in isolation. The deadline here is a FAILSAFE, never a
+/// synchronisation mechanism -- the same convention WatchRecorder::awaitName already documents.
+bool awaitCounter(const std::atomic<int>& counter,
+                  std::chrono::milliseconds budget = std::chrono::milliseconds(5000)) {
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    while (counter.load() == 0) {
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
 /// Reads one byte from an existing file: exactly one in-mask inotify event (IN_ACCESS), and the
 /// only way to observe #2346's decision 4(c) from a test.
 void readByte(const std::filesystem::path& p) {
@@ -2024,7 +2042,7 @@ TEST_F(WatcherReconfigurationFixture, AWatcherDisabledFromItsOwnHandlerCanStillB
     w.setEnableRaisingEventsProperty(true);
     touchNew(dirA / "first");
     ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "first"));
-    for (int i = 0; i < 2000 && stops.load() == 0; ++i) std::this_thread::yield();
+    awaitCounter(stops);
 
     w.setEnableRaisingEventsProperty(true); // reaps the self-stopped thread, then arms afresh
     EXPECT_TRUE(w.getEnableRaisingEventsProperty());
@@ -2136,7 +2154,7 @@ TEST_F(WatcherReconfigurationFixture, AnExceptionEscapingAHandlerReachesErrorIns
     w.setEnableRaisingEventsProperty(true);
     touchNew(dirA / "throwingHandler");
     ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "throwingHandler"));
-    for (int i = 0; i < 2000 && errorsSeen.load() == 0; ++i) std::this_thread::yield();
+    awaitCounter(errorsSeen);
 
     EXPECT_GE(errorsSeen.load(), 1) << "the escaped exception was not delivered to Error";
 
@@ -2163,7 +2181,7 @@ TEST_F(WatcherReconfigurationFixture, AnErrorHandlerThatThrowsIsSwallowedRatherT
     w.setEnableRaisingEventsProperty(true);
     touchNew(dirA / "doubleThrow");
     ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "doubleThrow"));
-    for (int i = 0; i < 2000 && errorCalls.load() == 0; ++i) std::this_thread::yield();
+    awaitCounter(errorCalls);
     EXPECT_EQ(errorCalls.load(), 1) << "a throwing Error handler was re-entered";
     w.setEnableRaisingEventsProperty(false);
 }
