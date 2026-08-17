@@ -745,11 +745,13 @@ public:
      * later decimal digits outright, returning `1234` and `-792281` for those two values and `0`
      * for every magnitude below `0.00005`.
      *
-     * **Midpoints break to even.** Neither value the documentation tabulates is a midpoint, so the
-     * tie rule cannot be derived from them; .NET performs the scale reduction through
-     * `DecCalc.VarCyFromDec` → `InternalRound(…, MidpointRounding.ToEven)`, which is also this
-     * port's own default in `Decimal::Round`, `Math::Round` and `MathF::Round`. The choice is
-     * pinned by tests and the residual verification is ticket #2234.
+     * **Midpoints break to even — VERIFIED, ticket #2234.** Neither value the documentation
+     * tabulates is a midpoint, so the tie rule cannot be derived from them. It is now read
+     * directly from the reference: `DecCalc.VarCyFromDec` reduces the scale with
+     * `InternalRound(ref pdecIn, (uint)scale, MidpointRounding.ToEven)`
+     * (`Decimal.DecCalc.cs:1296-1297`), which is also this port's own default in
+     * `Decimal::Round`, `Math::Round` and `MathF::Round`. #2231's inference was correct and
+     * nothing changed.
      *
      * @return OA Currency representation of this value.
      * @throws System::OverflowException if the scaled value is outside the Currency (Int64) range.

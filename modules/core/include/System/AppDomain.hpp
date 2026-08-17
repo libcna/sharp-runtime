@@ -156,6 +156,17 @@ namespace System {
          * The null case is unrepresentable here: the parameter is a
          * @c const std::string&.
          *
+         * **Both rejections carry the same message, and that is .NET's** (ticket #2260's
+         * sibling #2252, resolved against the reference tree). `AppDomain.ApplyPolicy`
+         * rejects the empty name through `ArgumentException.ThrowIfNullOrEmpty`, which
+         * throws `ArgumentException(SR.Argument_EmptyString, paramName)`
+         * (`ArgumentException.cs:126-130`), and rejects the leading-NUL name with
+         * `ArgumentException(SR.Argument_EmptyString, nameof(assemblyName))`
+         * (`AppDomain.cs:104-110`) — the *same* resource, which reads **"The value cannot be
+         * an empty string."** (`Strings.resx:3992`). The `Argument_StringZeroLength` resource
+         * this port previously quoted for the second case is a .NET Framework-era string that
+         * **does not exist anywhere in the reference tree**.
+         *
          * @param assemblyName The assembly display name to map.
          * @return @p assemblyName unchanged.
          * @throws System::ArgumentException if @p assemblyName is empty or begins
@@ -165,7 +176,7 @@ namespace System {
             if (assemblyName.empty())
                 throw System::ArgumentException("The value cannot be an empty string.", "assemblyName");
             if (assemblyName[0] == '\0')
-                throw System::ArgumentException("String cannot be of zero length.", "assemblyName");
+                throw System::ArgumentException("The value cannot be an empty string.", "assemblyName");
             return assemblyName;
         }
 

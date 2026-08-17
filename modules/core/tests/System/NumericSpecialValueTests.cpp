@@ -137,11 +137,12 @@ TEST(NumericSpecialValueTests, DecimalToOACurrencyRoundsRatherThanDiscarding) {
 }
 
 // PINS the tie rule. Neither documented .NET value is a midpoint, so the examples cannot decide
-// how a tie breaks. ToEven is implemented because .NET's DecCalc.VarCyFromDec reduces the scale
-// through InternalRound(..., MidpointRounding.ToEven) and because every other rounding funnel in
-// this port defaults to ToEven. Under AwayFromZero these three would be 10001, 10002 and -10001.
-// Ticket #2234 is the deferred verification against the .NET reference.
-TEST(NumericSpecialValueTests, DecimalToOACurrencyBreaksMidpointsToEven_PinnedBy2234) {
+// how a tie breaks. #2234 has now VERIFIED the rule against the reference tree instead of
+// inferring it: DecCalc.VarCyFromDec reduces the scale with
+// InternalRound(ref pdecIn, (uint)scale, MidpointRounding.ToEven) at Decimal.DecCalc.cs:1296-1297.
+// #2231's inference was correct, so every expectation below stands unchanged.
+// Under AwayFromZero these four would be 10001, 10002, -10001 and -10002.
+TEST(NumericSpecialValueTests, DecimalToOACurrencyBreaksMidpointsToEven_VerifiedBy2234) {
     EXPECT_EQ(Decimal::Parse("1.00005").ToOACurrency(), 10000LL);
     EXPECT_EQ(Decimal::Parse("1.00015").ToOACurrency(), 10002LL);
     EXPECT_EQ(Decimal::Parse("-1.00005").ToOACurrency(), -10000LL);

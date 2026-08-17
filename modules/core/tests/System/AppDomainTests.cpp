@@ -135,14 +135,21 @@ TEST(AppDomainDataPolicyTests, ApplyPolicy_LeadingNul_ThrowsArgumentException) {
                  System::ArgumentException);
 }
 
-TEST(AppDomainDataPolicyTests, ApplyPolicy_LeadingNul_CarriesTheParameterNameAndTheZeroLengthMessage) {
+// #2252 resolved this message against the reference tree, and it is NOT the one #2251
+// assumed. AppDomain.cs:104-110 throws ArgumentException(SR.Argument_EmptyString,
+// nameof(assemblyName)) for the leading NUL -- the SAME resource its empty-name check
+// reaches through ArgumentException.ThrowIfNullOrEmpty -- and Argument_StringZeroLength,
+// the .NET Framework-era string #2251 quoted, does not exist anywhere in the tree.
+// So the two rejections are deliberately indistinguishable by message, and the test that
+// used to assert they differed is what was wrong.
+TEST(AppDomainDataPolicyTests, ApplyPolicy_LeadingNul_CarriesTheParameterNameAndTheEmptyStringMessage) {
     const std::string leadingNul("\0x", 2);
     try {
         (void)AppDomain::CurrentDomain().ApplyPolicy(leadingNul);
         FAIL() << "expected System::ArgumentException";
     } catch (const System::ArgumentException& e) {
         EXPECT_EQ(e.getParamNameProperty(), "assemblyName");
-        EXPECT_NE(e.getMessageProperty().find("String cannot be of zero length."),
+        EXPECT_NE(e.getMessageProperty().find("The value cannot be an empty string."),
                   std::string::npos)
             << "actual: " << e.getMessageProperty();
     }

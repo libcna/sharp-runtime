@@ -373,6 +373,13 @@ TEST(VersionTests, ToString_FieldCountBeyondParsedComponents_Throws) {
 // that distinguishes the two new guards from each other AND from the
 // pre-existing out-of-interval guard.  Without the message assertion a single
 // over-broad guard could serve both branches and still pass.
+//
+// #2260 resolved the message text against the reference tree, which was absent
+// when #2258 wrote these: .NET formats all three from
+// SR.ArgumentOutOfRange_Bounds_Lower_Upper, "Argument must be between {0} and
+// {1}." (Strings.resx:1762), with lower bound "0" and an instance-dependent
+// upper bound (Version.cs:204-224).  Only the text changed -- every bound this
+// port already reported was already .NET's.
 
 TEST(VersionTests, ToString_UndefinedBuild_ExceptionIdentity) {
     try {
@@ -380,7 +387,7 @@ TEST(VersionTests, ToString_UndefinedBuild_ExceptionIdentity) {
         FAIL() << "expected System::ArgumentException";
     } catch (const System::ArgumentException& e) {
         EXPECT_EQ(e.getParamNameProperty(), "fieldCount");
-        EXPECT_STREQ(e.what(), "fieldCount must be 0-2 (Parameter 'fieldCount')");
+        EXPECT_STREQ(e.what(), "Argument must be between 0 and 2. (Parameter 'fieldCount')");
     }
 }
 
@@ -390,14 +397,17 @@ TEST(VersionTests, ToString_UndefinedRevision_ExceptionIdentity) {
         FAIL() << "expected System::ArgumentException";
     } catch (const System::ArgumentException& e) {
         EXPECT_EQ(e.getParamNameProperty(), "fieldCount");
-        EXPECT_STREQ(e.what(), "fieldCount must be 0-3 (Parameter 'fieldCount')");
+        EXPECT_STREQ(e.what(), "Argument must be between 0 and 3. (Parameter 'fieldCount')");
     }
 }
 
-// The pre-existing out-of-interval branch keeps its exact message and keeps
-// running FIRST -- both are deliberately unchanged by #2258.  A two-component
-// subject is used precisely because the new guards would otherwise be able to
-// claim these inputs and report the instance-dependent bound instead.
+// The out-of-interval branch keeps running FIRST.  A two-component subject is
+// used precisely because the new guards would otherwise be able to claim these
+// inputs and report the instance-dependent bound instead.  This is also the
+// case #2260 suspected of diverging: it does NOT.  .NET switches on
+// (uint)fieldCount and tests `case > 4` before either component case, so
+// Version(1,2).ToString(5) reports bound 4 in .NET exactly as it does here --
+// the suspected bound of 2 would require the component case to run first.
 
 TEST(VersionTests, ToString_OutOfInterval_KeepsIntervalMessageAndRunsFirst) {
     for (System::intcs fieldCount : {-1, 5}) {
@@ -406,7 +416,7 @@ TEST(VersionTests, ToString_OutOfInterval_KeepsIntervalMessageAndRunsFirst) {
             FAIL() << "expected System::ArgumentException for fieldCount " << fieldCount;
         } catch (const System::ArgumentException& e) {
             EXPECT_EQ(e.getParamNameProperty(), "fieldCount");
-            EXPECT_STREQ(e.what(), "fieldCount must be 0-4 (Parameter 'fieldCount')");
+            EXPECT_STREQ(e.what(), "Argument must be between 0 and 4. (Parameter 'fieldCount')");
         }
     }
 }
@@ -447,7 +457,7 @@ TEST(VersionTests, ToString_UndefinedBuildWithDefinedRevision_RejectsOnBuildGuar
             (void)v.ToString(fieldCount);
             FAIL() << "expected System::ArgumentException for fieldCount " << fieldCount;
         } catch (const System::ArgumentException& e) {
-            EXPECT_STREQ(e.what(), "fieldCount must be 0-2 (Parameter 'fieldCount')");
+            EXPECT_STREQ(e.what(), "Argument must be between 0 and 2. (Parameter 'fieldCount')");
         }
     }
 }

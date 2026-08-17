@@ -154,19 +154,31 @@ namespace System {
          * "specified means non-negative" predicate the no-argument ToString() applies
          * to each component, so the two overloads agree about which components exist.
          *
+         * The rejection message is .NET's own, resolved from the reference tree by ticket
+         * #2260: `SR.Format(SR.ArgumentOutOfRange_Bounds_Lower_Upper, "0", bound)`, where
+         * `ArgumentOutOfRange_Bounds_Lower_Upper` reads **"Argument must be between {0} and
+         * {1}."** (`Strings.resx:1762`). The upper bound is instance-dependent, and this
+         * port's three guards already select it exactly as `Version.TryFormatCore` does
+         * (`Version.cs:204-224`): the out-of-interval case is tested **first**, so a
+         * `fieldCount` of 5 reports bound 4 even on a two-component version — #2260's
+         * suspicion that .NET reports 2 there was wrong, and no bound changed.
+         *
          * @param fieldCount Number of components to include (0–4, and no greater than
          *        the number of components this instance defines).
          * @throws System::ArgumentException if fieldCount lies outside 0–4, or requests
          *         a component this instance does not define.
          */
         [[nodiscard]] std::string ToString(intcs fieldCount) const {
+            // .NET switches on `(uint)fieldCount`, so a negative value lands in the same
+            // `> 4` case rather than in one of the component-specific ones. The `< 0` test
+            // here is that cast written out.
             if (fieldCount < 0 || fieldCount > 4)
-                throw System::ArgumentException("fieldCount must be 0-4", "fieldCount");
+                throw System::ArgumentException("Argument must be between 0 and 4.", "fieldCount");
             if (fieldCount == 0) return "";
             if (fieldCount >= 3 && Build < 0)
-                throw System::ArgumentException("fieldCount must be 0-2", "fieldCount");
+                throw System::ArgumentException("Argument must be between 0 and 2.", "fieldCount");
             if (fieldCount >= 4 && Revision < 0)
-                throw System::ArgumentException("fieldCount must be 0-3", "fieldCount");
+                throw System::ArgumentException("Argument must be between 0 and 3.", "fieldCount");
             std::ostringstream oss;
             oss.imbue(std::locale::classic());
             oss << Major;
