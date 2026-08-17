@@ -110,6 +110,24 @@ public:
     void setBaseAddressProperty(const std::string& v)               { baseAddress_ = v; }
 
     void setDefaultHeader(const std::string& name, const std::string& value);
+
+    /**
+     * @brief The largest response body this client will accumulate, in bytes.
+     *
+     * Ticket #2071. C++ counterpart of .NET `HttpClient.MaxResponseContentBufferSize`, default
+     * `int.MaxValue` (`HttpClient.cs:149`, `HttpContent.cs:25`). A response larger than this
+     * raises `HttpRequestException(HttpRequestError::ConfigurationLimitExceeded, …)`.
+     *
+     * @note The value lives on `HttpClientHandler`, because this port's handler reads the whole
+     *       body eagerly where .NET's streams and lets the client bound it afterwards. These two
+     *       members forward, so the knob has .NET's name and .NET's default at .NET's place. A
+     *       client built on a **custom** handler has nowhere to forward to and reports the
+     *       default unchanged — which is honest: a custom handler does its own reading and this
+     *       client cannot bound it.
+     */
+    [[nodiscard]] SharpRuntime::longcs getMaxResponseContentBufferSizeProperty() const;
+    /** @brief Sets the response-body ceiling. @see getMaxResponseContentBufferSizeProperty */
+    void setMaxResponseContentBufferSizeProperty(SharpRuntime::longcs value);
     [[nodiscard]] std::string getDefaultHeader(const std::string& name) const;
 
     // ---- URL parser (public for testability) ----

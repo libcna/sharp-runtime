@@ -163,7 +163,22 @@ static std::string recvLine(SocketFd fd, std::string& buf) {
 // Real .NET surfaces this as an IOException with HttpRequestError.ResponseEnded ("The response
 // ended prematurely."); mirrored here via the matching HttpRequestException overload for
 // consistency with every other malformed-response failure path in this file.
-static std::vector<uint8_t> recvExact(SocketFd fd, std::string& buf, size_t count) {
+// #2071: the ceiling every accumulating read is checked against. Raised as
+// HttpRequestError::ConfigurationLimitExceeded, which is the error .NET raises for the same
+// condition (HttpContent.cs:780).
+[[noreturn]] static void throwResponseTooLarge(SharpRuntime::longcs limit) {
+    throw HttpRequestException(
+        HttpRequestError::ConfigurationLimitExceeded,
+        "HttpClient: the response body exceeds MaxResponseContentBufferSize (" +
+            std::to_string(limit) + " bytes).");
+}
+
+static std::vector<uint8_t> recvExact(SocketFd fd, std::string& buf, size_t count,
+                                       SharpRuntime::longcs limit) {
+    // #2071: checked BEFORE a single byte is read, so a Content-Length or chunk-size header
+    // claiming more than the ceiling costs nothing to reject. That matters: the old code would
+    // happily begin accumulating toward a number the server never had to back with real bytes.
+    if (count > static_cast<size_t>(limit)) throwResponseTooLarge(limit);
     while (buf.size() < count) {
         char tmp[4096];
         size_t want = std::min(sizeof(tmp), count - buf.size());
@@ -181,12 +196,16 @@ static std::vector<uint8_t> recvExact(SocketFd fd, std::string& buf, size_t coun
 }
 
 // Read until connection closes.
-static std::vector<uint8_t> recvAll(SocketFd fd, std::string& buf) {
+static std::vector<uint8_t> recvAll(SocketFd fd, std::string& buf, SharpRuntime::longcs limit) {
     char tmp[4096];
     for (;;) {
         int n = static_cast<int>(::recv(fd, tmp, sizeof(tmp), 0));
         if (n <= 0) break;
         buf.append(tmp, static_cast<size_t>(n));
+        // #2071: a response with no Content-Length and no chunking is read until the peer hangs
+        // up, so this is the one path with no declared size at all -- the ceiling is checked per
+        // chunk read rather than up front.
+        if (buf.size() > static_cast<size_t>(limit)) throwResponseTooLarge(limit);
     }
     std::vector<uint8_t> result(buf.begin(), buf.end());
     buf.clear();
@@ -257,6 +276,10 @@ std::shared_ptr<HttpResponseMessage> HttpClientHandler::Send(std::shared_ptr<Htt
         detail::ThrowIfControlCharacter(cookieHeader, "Cookie header value");
         if (!cookieHeader.empty()) reqHeaders["Cookie"] = cookieHeader;
     }
+
+    // #2071: read once, before any I/O, so the ceiling in force for this exchange cannot move
+    // underneath it if another thread reconfigures the handler mid-request.
+    const SharpRuntime::longcs maxBody = getMaxResponseContentBufferSizeProperty();
 
     // The guard, not the control flow, owns this descriptor from here on (#2065).
     SocketGuard socket(connectToHost(purl.host, purl.port));
@@ -414,19 +437,24 @@ std::shared_ptr<HttpResponseMessage> HttpClientHandler::Send(std::shared_ptr<Htt
                 // HttpRequestException.
                 size_t chunkSize;
                 try {
+                    // #2071: std::stoul accepts up to SIZE_MAX, so "FFFFFFFFFFFFFFFF" used to
+                    // become a request to accumulate 18 exabytes. recvExact rejects it against
+                    // the ceiling below, but the parse itself is bounded here too so a value no
+                    // size_t can hold raises the same FormatException path as any other
+                    // malformed chunk size rather than throwing std::out_of_range.
                     chunkSize = std::stoul(chunkLine, nullptr, 16);
                 } catch (...) {
                     throw HttpRequestException("HttpClient: malformed chunk size: '" + chunkLine + "'");
                 }
                 if (chunkSize == 0) { recvLine(fd, buf); break; } // trailing CRLF
-                auto chunk = recvExact(fd, buf, chunkSize);
+                auto chunk = recvExact(fd, buf, chunkSize, maxBody);
                 bodyBytes.insert(bodyBytes.end(), chunk.begin(), chunk.end());
                 recvLine(fd, buf); // chunk-trailing CRLF
             }
         } else if (contentLength >= 0) {
-            bodyBytes = recvExact(fd, buf, static_cast<size_t>(contentLength));
+            bodyBytes = recvExact(fd, buf, static_cast<size_t>(contentLength), maxBody);
         } else {
-            bodyBytes = recvAll(fd, buf);
+            bodyBytes = recvAll(fd, buf, maxBody);
         }
     }
 

@@ -2046,10 +2046,12 @@ TEST(NetHttpGatedBehaviourPins, Pin2070_StringContentEmitsStorageBytesUnderAnyCh
     EXPECT_EQ(content.getCharSetProperty(), "utf-16");
 }
 
-// #2071 (SR-AUD-318's limits half) -- response reads are unbounded. This pins
-// that no maximum is applied at a modest size; it deliberately does NOT try to
-// exhaust memory.
-TEST(NetHttpGatedBehaviourPins, Pin2071_ResponseReadsAreUnbounded) {
+// #2071 (SR-AUD-318's limits half) LANDED. Response reads are bounded by
+// MaxResponseContentBufferSize, whose default is .NET's -- HttpContent.MaxBufferSize, i.e.
+// int.MaxValue (HttpContent.cs:25, assigned at HttpClient.cs:149).
+TEST(NetHttpGatedBehaviourPins, Fix2071_AModestResponseIsStillAcceptedUnderTheDefaultCeiling) {
+    // The invariance row. The default ceiling is two gigabytes, so nothing an ordinary caller
+    // does may start failing.
     std::shared_ptr<System::Net::Sockets::Socket> listener;
     SharpRuntime::intcs port = startMockHttpServer(listener);
 
@@ -2068,12 +2070,10 @@ TEST(NetHttpGatedBehaviourPins, Pin2071_ResponseReadsAreUnbounded) {
     });
 
     HttpClient client;
+    EXPECT_EQ(client.getMaxResponseContentBufferSizeProperty(), 2147483647)
+        << "the default must be .NET's, not a number this port invented";
     std::string body;
     std::string threwWhat;
-    // The join must happen whatever the client does. Without this, an approved
-    // #2071 that started rejecting an over-large response would leave the server
-    // thread unjoined and std::terminate the whole executable, hiding every
-    // other result behind one abort instead of reporting one failing pin.
     try {
         body = client.GetString("http://127.0.0.1:" + std::to_string(port) + "/");
     } catch (const System::Exception& e) {
@@ -2083,10 +2083,143 @@ TEST(NetHttpGatedBehaviourPins, Pin2071_ResponseReadsAreUnbounded) {
     serverThread.join();
     listener->Close();
 
-    EXPECT_EQ(threwWhat, "") << "no response-size limit exists to reject this today";
-    EXPECT_EQ(body.size(), bodySize)
-        << "no maximum response size is applied -- .NET's MaxResponseContentBufferSize "
-           "has no equivalent here (#2071, NOT APPROVED)";
+    EXPECT_EQ(threwWhat, "");
+    EXPECT_EQ(body.size(), bodySize);
+}
+
+TEST(NetHttpGatedBehaviourPins, Fix2071_AnOversizedContentLengthIsRejectedBeforeAnyBytesArrive) {
+    // The defect this closes: a Content-Length header is a CLAIM, and the old reader began
+    // accumulating toward it before the server had to back it with a single byte. The check is
+    // therefore made up front -- the server below sends the header and NOTHING else, and the
+    // client must still fail rather than sit there.
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    std::thread serverThread([&]() {
+        try {
+            auto server = listener->Accept();
+            std::vector<SharpRuntime::bytecs> reqBuf(4096);
+            server->Receive(reqBuf);
+            server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\n"));
+            server->Close();
+        } catch (const System::Exception&) {
+        }
+    });
+
+    HttpClient client;
+    client.setMaxResponseContentBufferSizeProperty(1024);
+    std::string threwWhat;
+    try {
+        (void)client.GetString("http://127.0.0.1:" + std::to_string(port) + "/");
+    } catch (const System::Exception& e) {
+        threwWhat = e.getMessageProperty();
+    }
+    if (!threwWhat.empty()) pokeMockServer(port);
+    serverThread.join();
+    listener->Close();
+
+    EXPECT_NE(threwWhat.find("MaxResponseContentBufferSize"), std::string::npos)
+        << "the failure must name the limit that caused it, got: " << threwWhat;
+}
+
+TEST(NetHttpGatedBehaviourPins, Fix2071_AnUnbounddedBodyIsCutOffAtTheCeiling) {
+    // The one path with no declared size at all: no Content-Length and no chunking, so the body
+    // runs until the peer hangs up. There is nothing to check up front, so the ceiling is
+    // applied per read.
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    std::thread serverThread([&]() {
+        try {
+            auto server = listener->Accept();
+            std::vector<SharpRuntime::bytecs> reqBuf(4096);
+            server->Receive(reqBuf);
+            server->Send(toBytes("HTTP/1.1 200 OK\r\n\r\n" + std::string(64u * 1024u, 'y')));
+            server->Close();
+        } catch (const System::Exception&) {
+        }
+    });
+
+    HttpClient client;
+    client.setMaxResponseContentBufferSizeProperty(4096);
+    std::string threwWhat;
+    try {
+        (void)client.GetString("http://127.0.0.1:" + std::to_string(port) + "/");
+    } catch (const System::Exception& e) {
+        threwWhat = e.getMessageProperty();
+    }
+    if (!threwWhat.empty()) pokeMockServer(port);
+    serverThread.join();
+    listener->Close();
+
+    EXPECT_NE(threwWhat.find("MaxResponseContentBufferSize"), std::string::npos)
+        << "got: " << threwWhat;
+}
+
+TEST(NetHttpGatedBehaviourPins, Fix2071_AnAbsurdChunkSizeIsRejected) {
+    // std::stoul(chunkLine, nullptr, 16) accepted a chunk size up to SIZE_MAX, so
+    // "FFFFFFFFFFFFFFFF" used to become a request to accumulate eighteen exabytes.
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    std::thread serverThread([&]() {
+        try {
+            auto server = listener->Accept();
+            std::vector<SharpRuntime::bytecs> reqBuf(4096);
+            server->Receive(reqBuf);
+            server->Send(toBytes("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+                                 "FFFFFFFFFFFFFFF\r\n"));
+            server->Close();
+        } catch (const System::Exception&) {
+        }
+    });
+
+    HttpClient client;
+    std::string threwWhat;
+    try {
+        (void)client.GetString("http://127.0.0.1:" + std::to_string(port) + "/");
+    } catch (const System::Exception& e) {
+        threwWhat = e.getMessageProperty();
+    }
+    if (!threwWhat.empty()) pokeMockServer(port);
+    serverThread.join();
+    listener->Close();
+
+    EXPECT_FALSE(threwWhat.empty()) << "an absurd chunk size must be rejected, not attempted";
+}
+
+TEST(NetHttpGatedBehaviourPins, Fix2071_TheHandlerValidatesItsOwnCeilingToo) {
+    // HttpClientHandler is public API in its own right, so a caller can reach the ceiling
+    // without going through HttpClient. Validating in only one of the two places would leave
+    // the direct door open.
+    auto handler = std::make_shared<HttpClientHandler>();
+    EXPECT_EQ(handler->getMaxResponseContentBufferSizeProperty(), 2147483647);
+    EXPECT_THROW(handler->setMaxResponseContentBufferSizeProperty(0),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(handler->setMaxResponseContentBufferSizeProperty(-5),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(handler->setMaxResponseContentBufferSizeProperty(2147483648LL),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_NO_THROW(handler->setMaxResponseContentBufferSizeProperty(8192));
+    EXPECT_EQ(handler->getMaxResponseContentBufferSizeProperty(), 8192);
+
+    // ...and a client built on it reports the handler's value, not a default of its own.
+    HttpClient client(handler);
+    EXPECT_EQ(client.getMaxResponseContentBufferSizeProperty(), 8192);
+}
+
+TEST(NetHttpGatedBehaviourPins, Fix2071_TheCeilingValidatesItsArgumentTheWayDotNetDoes) {
+    // HttpClient.cs:117-131: ThrowIfNegativeOrZero, then a ceiling of HttpContent.MaxBufferSize.
+    HttpClient client;
+    EXPECT_THROW(client.setMaxResponseContentBufferSizeProperty(0),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(client.setMaxResponseContentBufferSizeProperty(-1),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(client.setMaxResponseContentBufferSizeProperty(2147483648LL),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_NO_THROW(client.setMaxResponseContentBufferSizeProperty(2147483647LL));
+    EXPECT_NO_THROW(client.setMaxResponseContentBufferSizeProperty(1));
+    EXPECT_EQ(client.getMaxResponseContentBufferSizeProperty(), 1);
 }
 
 // ---------------------------------------------------------------------------

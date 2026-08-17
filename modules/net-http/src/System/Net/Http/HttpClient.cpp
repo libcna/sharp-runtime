@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 
 #include "System/Net/Http/HttpClient.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -449,6 +450,29 @@ void HttpClient::setDefaultHeader(const std::string& name, const std::string& va
 
 std::string HttpClient::getDefaultHeader(const std::string& name) const {
     return detail::GetFieldIgnoringCase(defaultHeaders_, name);   // #2068
+}
+
+SharpRuntime::longcs HttpClient::getMaxResponseContentBufferSizeProperty() const {
+    if (auto* h = dynamic_cast<HttpClientHandler*>(handler_.get())) {
+        return h->getMaxResponseContentBufferSizeProperty();
+    }
+    return static_cast<SharpRuntime::longcs>(SharpRuntime::INTCS_MAX);
+}
+
+void HttpClient::setMaxResponseContentBufferSizeProperty(SharpRuntime::longcs value) {
+    // Validated here as well as on the handler, so a custom-handler client still rejects a
+    // nonsensical value instead of silently accepting one it cannot apply.
+    if (value <= 0) {
+        throw System::ArgumentOutOfRangeException("value",
+            "MaxResponseContentBufferSize must be greater than zero.");
+    }
+    if (value > static_cast<SharpRuntime::longcs>(SharpRuntime::INTCS_MAX)) {
+        throw System::ArgumentOutOfRangeException("value",
+            "MaxResponseContentBufferSize must not exceed 2147483647.");
+    }
+    if (auto* h = dynamic_cast<HttpClientHandler*>(handler_.get())) {
+        h->setMaxResponseContentBufferSizeProperty(value);
+    }
 }
 
 } // namespace System::Net::Http
