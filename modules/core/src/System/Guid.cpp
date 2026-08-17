@@ -8,10 +8,19 @@
 #include "System/OverflowException.hpp"
 #include "System/DateTimeOffset.hpp"
 
-#include <atomic>
-#include <random>
 #include <algorithm>
+#include <array>
+#include <cstddef>
+#include <thread>
 #include <utility>
+
+#if defined(_WIN32)
+#include <windows.h>
+#include <bcrypt.h>
+#else
+#include <cerrno>
+#include <unistd.h>
+#endif
 
 namespace System {
 
@@ -340,45 +349,102 @@ namespace System {
     namespace {
 
         // -------------------------------------------------------------------
-        // Per-thread generator for NewGuid (CCF-009 / SR-AUD-010, ticket #1901).
+        // The platform CSPRNG, for NewGuid (SR-AUD-050, ticket #2228).
         //
-        // These were function-local `static`s, i.e. one process-wide engine and
-        // distribution that every caller advanced with no synchronisation.
-        // C++11 guarantees only that their *initialisation* is thread-safe, not
-        // the mutation that follows, so concurrent NewGuid() calls raced on the
-        // engine's internal state -- ThreadSanitizer reported it. Nothing is
-        // handed out to the caller here (unlike Random::getSharedProperty(),
-        // which must keep one stable address), so giving each thread its own
-        // engine is a complete and exactly equivalent repair.
-        std::mt19937_64& newGuidEngine() {
-            // Seeded from a per-thread sequence rather than std::random_device
-            // alone: a platform whose random_device is deterministic -- as
-            // MinGW-w64's historically was -- would otherwise hand every thread
-            // the identical seed and so the identical GUID stream, turning a
-            // data race into duplicate GUIDs. `base` contributes real entropy
-            // once per process where it exists; the counter guarantees the
-            // seeds are distinct even where it does not.
-            static std::atomic<uint64_t> counter{0};
-            static const uint64_t base =
-                (static_cast<uint64_t>(std::random_device{}()) << 32) ^ std::random_device{}();
-
-            static thread_local std::mt19937_64 engine{[] {
-                const uint64_t n = counter.fetch_add(1, std::memory_order_relaxed);
-                // Multiplying by an odd constant is a bijection modulo 2^64, so
-                // distinct counter values always yield distinct seeds.
-                return base + n * 0x9E3779B97F4A7C15ULL;
-            }()};
-            return engine;
+        // WHAT THIS REPLACED, and why it was a defect rather than a style
+        // choice. Until #2228 every GUID byte came from a `std::mt19937_64`
+        // seeded once per thread. Mersenne Twister is not a cryptographic
+        // generator: 2,496 bytes of its output recover its entire internal
+        // state, after which every subsequent GUID is predictable. .NET
+        // documents 122 bits of strong entropy from the platform CSPRNG, and
+        // `Guid.Unix.cs:18` says why in its own comment -- "Guid.NewGuid is
+        // often used as a cheap source of random data that are sometimes used
+        // for security purposes... We use secure RNG for Unix too to avoid
+        // subtle security vulnerabilities in applications that depend on it."
+        // The output was a structurally valid v4 UUID either way, which is
+        // exactly why no shape or uniqueness test could see the downgrade.
+        //
+        // WHY THIS IS FILE-LOCAL rather than a call into
+        // System::Security::Cryptography::RandomNumberGenerator. `Core.Base`
+        // cannot depend on `Security.Cryptography.Random`: the dependency runs
+        // the other way, and inverting it would put a cryptography component
+        // under every consumer of `Guid`. This is therefore a `.cpp`-only
+        // change -- no new public header, no new component edge, no layout,
+        // vtable, signature or `noexcept` change -- and it deliberately mirrors
+        // `RandomNumberGenerator.cpp`'s three-platform shape rather than
+        // inventing a fourth.
+        //
+        // WHY IT DOES NOT THROW ANYWHERE, which is what #2228 was blocked on.
+        // The ticket recorded that a CSPRNG would make a previously
+        // non-throwing public function able to throw on Emscripten, and asked
+        // for a decision between that and a silent weak fallback. Measured,
+        // the premise is false: Emscripten's libc declares `getentropy()` in
+        // `<unistd.h>` and implements it as `__wasi_random_get()`
+        // (`system/lib/libc/musl/src/misc/getentropy.c`), which the runtime
+        // backs with the host's `crypto.getRandomValues`. .NET reaches the same
+        // source there -- `minipal_get_cryptographically_secure_random_bytes`
+        // calls `SystemJS_RandomBytes` under `__EMSCRIPTEN__`
+        // (`src/native/minipal/random.c:83-93`). So all three platforms have a
+        // real CSPRNG and there is no decision left to take.
+        //
+        // The failure path is deliberately NOT an exception either. `NewGuid()`
+        // is `noexcept`-shaped in practice and callers treat it as infallible;
+        // a CSPRNG that has already been reached successfully does not
+        // intermittently fail, and on the platforms above a failure means the
+        // process has no entropy source at all. `std::terminate` via an
+        // uncaught exception would be a worse outcome than a loud abort, so the
+        // one unreachable-in-practice failure is handled by looping on EINTR
+        // and, for anything else, by falling back to the SAME syscall after a
+        // yield -- never by producing bytes from a weaker source, which is the
+        // defect class this ticket exists to remove.
+        void fillWithPlatformEntropy(bytecs* buffer, std::size_t length) {
+#if defined(_WIN32)
+            // BCRYPT_USE_SYSTEM_PREFERRED_RNG needs no algorithm handle, which
+            // is what lets this stay a leaf call with no initialisation state.
+            while (length > 0) {
+                const ULONG chunk =
+                    static_cast<ULONG>(length > 0xFFFFFFFFull ? 0xFFFFFFFFull : length);
+                if (BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(buffer), chunk,
+                                    BCRYPT_USE_SYSTEM_PREFERRED_RNG) >= 0) {
+                    buffer += chunk;
+                    length -= chunk;
+                }
+            }
+#else
+            // getentropy() rather than getrandom(): getrandom() is Linux-only
+            // (undeclared on Apple/BSD, and Emscripten declares it but backs
+            // getentropy with __wasi_random_get), while getentropy() is present
+            // on all three. Its hard 256-byte-per-call maximum is a documented
+            // EIO, not a silent truncation, so the loop chunks for it -- the
+            // same reasoning RandomNumberGenerator.cpp records.
+            constexpr std::size_t maxChunk = 256;
+            while (length > 0) {
+                const std::size_t chunk = length < maxChunk ? length : maxChunk;
+                if (::getentropy(buffer, chunk) == 0) {
+                    buffer += chunk;
+                    length -= chunk;
+                } else if (errno != EINTR) {
+                    // Not reachable on a system with a working entropy source.
+                    // Retrying the same call is the only correct response: the
+                    // alternative -- filling from anything weaker -- is the
+                    // defect SR-AUD-050 names.
+                    std::this_thread::yield();
+                }
+            }
+#endif
         }
 
     } // namespace
 
     Guid Guid::NewGuid() {
-        std::mt19937_64& rng = newGuidEngine();
-        static thread_local std::uniform_int_distribution<uint32_t> dist(0, 255);
-
+        // #1901's concurrency property is preserved by construction rather than
+        // by a per-thread engine: there is no engine state left to race on.
+        // Every call reads the OS directly, so concurrent NewGuid() has nothing
+        // shared to synchronise, and the distinct-seed argument #1901 needed for
+        // platforms with a deterministic std::random_device no longer applies at
+        // all -- std::random_device is gone from this path.
         std::array<bytecs, 16> b{};
-        for (auto& byte : b) byte = static_cast<bytecs>(dist(rng));
+        fillWithPlatformEntropy(b.data(), b.size());
         // RFC 4122 version 4
         b[6] = (b[6] & 0x0F) | 0x40;
         b[8] = (b[8] & 0x3F) | 0x80;

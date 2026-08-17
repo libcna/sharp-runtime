@@ -3,6 +3,12 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 
+#ifndef _WIN32
+#include <sys/wait.h>
+#include <unistd.h>
+#include <cstring>
+#endif
+
 #include <set>
 #include <thread>
 #include <vector>
@@ -449,11 +455,20 @@ TEST(GuidTests, CreateVersion7_TwoCallsDiffer) {
 //
 // NewGuid() used to advance one process-wide std::mt19937_64 with no
 // synchronisation, and CreateVersion7() reaches the same engine through it;
-// ThreadSanitizer reported the race. The engine is now per-thread. These tests
-// pin the observable consequences of that ownership boundary: the results stay
-// unique and well-formed under concurrency, and -- the failure mode a naive
+// ThreadSanitizer reported the race. #1901 made the engine per-thread. These
+// tests pin the observable consequences of that ownership boundary: the results
+// stay unique and well-formed under concurrency, and -- the failure mode a naive
 // per-thread engine would introduce -- distinct threads do not produce the same
 // stream.
+//
+// #2228 (2026-08-17) removed the engine entirely: NewGuid now reads the platform
+// CSPRNG on every call. #1901's property is therefore preserved BY CONSTRUCTION
+// rather than by ownership -- there is no engine, no thread_local, no function
+// static and no std::random_device left on this path, so the race surface is
+// empty and there is nothing for a distinct-seed argument to be about. These
+// cases are kept exactly as they were: they still assert the same observable
+// contract, and a repair that reintroduced ANY shared generator state would have
+// to satisfy them again.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -748,4 +763,126 @@ TEST(GuidTests, GetHashCode_EqualGuidsHaveEqualHashCodes) {
 TEST(GuidTests, GetHashCode_EmptyIsZero) {
     // All 16 bytes zero XORs to zero regardless of byte order.
     EXPECT_EQ(Guid::Empty.GetHashCode(), 0);
+}
+
+
+// ===========================================================================================
+// #2228 / SR-AUD-050 — NewGuid draws from the platform CSPRNG, not from a Mersenne Twister
+//
+// The hard part of this finding is that its symptom is INVISIBLE to ordinary tests: a
+// mt19937_64 produces structurally valid v4 UUIDs that never repeat, so no shape test, no
+// uniqueness test and no byte-distribution test can tell the two implementations apart. The
+// audit says so itself. Writing a test that "passes either way" and calling the finding closed
+// would be the worst outcome available here.
+//
+// The case below is the one observable difference, and it is the finding's own claim reduced to
+// its simplest reachable form: a userspace PRNG has STATE, and fork() duplicates it. The old
+// implementation seeded a thread_local mt19937_64 on first use and then advanced it
+// deterministically, so a parent and a child that both call NewGuid() after the fork draw from
+// the SAME state and produce the SAME GUID. A CSPRNG has no such state to inherit -- each call
+// reads the kernel -- so they differ.
+//
+// This is not a contrived probe: PRNG-state duplication across fork is a real and repeatedly
+// exploited class of vulnerability, and it is precisely "recovering the generator state predicts
+// subsequent UUIDs" observed from the outside.
+// ===========================================================================================
+
+#ifndef _WIN32
+TEST(GuidTests, NewGuidDoesNotInheritGeneratorStateAcrossFork) {
+    // Draw once BEFORE forking. Under the old implementation this is what initialised the
+    // thread_local engine, so the child inherits a fully seeded, deterministic generator.
+    const std::string before = System::Guid::NewGuid().ToString();
+    ASSERT_EQ(before.size(), 36u);
+
+    int pipeFds[2] = {-1, -1};
+    ASSERT_EQ(::pipe(pipeFds), 0);
+
+    const pid_t child = ::fork();
+    ASSERT_GE(child, 0);
+
+    if (child == 0) {
+        ::close(pipeFds[0]);
+        const std::string childGuid = System::Guid::NewGuid().ToString();
+        const ssize_t written = ::write(pipeFds[1], childGuid.data(), childGuid.size());
+        ::close(pipeFds[1]);
+        ::_exit(written == static_cast<ssize_t>(childGuid.size()) ? 0 : 1);
+    }
+
+    ::close(pipeFds[1]);
+    const std::string parentGuid = System::Guid::NewGuid().ToString();
+
+    std::string received;
+    char buffer[64];
+    ssize_t n = 0;
+    while ((n = ::read(pipeFds[0], buffer, sizeof(buffer))) > 0) {
+        received.append(buffer, static_cast<std::size_t>(n));
+    }
+    ::close(pipeFds[0]);
+
+    int status = 0;
+    ASSERT_EQ(::waitpid(child, &status, 0), child);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0) << "the child could not report its GUID";
+    ASSERT_EQ(received.size(), 36u) << "received: [" << received << "]";
+
+    EXPECT_NE(received, parentGuid)
+        << "parent and child produced the SAME GUID after fork(), which means NewGuid is drawing "
+           "from inherited userspace generator state rather than from the platform CSPRNG";
+    EXPECT_NE(received, before);
+    EXPECT_NE(parentGuid, before);
+}
+
+TEST(GuidTests, CreateVersion7AlsoDoesNotInheritGeneratorStateAcrossFork) {
+    // CreateVersion7 builds on NewGuid, so it inherits the repair -- but it overwrites the first
+    // 48 bits with a millisecond timestamp, which parent and child will usually share. The
+    // assertion is therefore on the RANDOM tail (the last 8 bytes of the canonical form), which
+    // is the part the entropy source actually supplies.
+    (void)System::Guid::CreateVersion7();
+
+    int pipeFds[2] = {-1, -1};
+    ASSERT_EQ(::pipe(pipeFds), 0);
+
+    const pid_t child = ::fork();
+    ASSERT_GE(child, 0);
+
+    if (child == 0) {
+        ::close(pipeFds[0]);
+        const std::string childGuid = System::Guid::CreateVersion7().ToString();
+        const ssize_t written = ::write(pipeFds[1], childGuid.data(), childGuid.size());
+        ::close(pipeFds[1]);
+        ::_exit(written == static_cast<ssize_t>(childGuid.size()) ? 0 : 1);
+    }
+
+    ::close(pipeFds[1]);
+    const std::string parentGuid = System::Guid::CreateVersion7().ToString();
+
+    std::string received;
+    char buffer[64];
+    ssize_t n = 0;
+    while ((n = ::read(pipeFds[0], buffer, sizeof(buffer))) > 0) {
+        received.append(buffer, static_cast<std::size_t>(n));
+    }
+    ::close(pipeFds[0]);
+
+    int status = 0;
+    ASSERT_EQ(::waitpid(child, &status, 0), child);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_EQ(received.size(), 36u);
+
+    // "xxxxxxxx-xxxx-xxxx-yyyy-yyyyyyyyyyyy": the trailing 17 characters are the random tail.
+    EXPECT_NE(received.substr(19), parentGuid.substr(19))
+        << "the version-7 random tail was inherited across fork()";
+}
+#endif // !_WIN32
+
+TEST(GuidTests, NewGuidKeepsItsVersionAndVariantBitsAfterTheEntropyChange) {
+    // The entropy source changed; the RFC 4122 bit fixing must not have. Cheap, and it is the
+    // assertion that catches a repair that forgot to re-apply the masks over the new bytes.
+    for (int i = 0; i < 256; ++i) {
+        const std::string text = System::Guid::NewGuid().ToString();
+        ASSERT_EQ(text.size(), 36u);
+        EXPECT_EQ(text[14], '4') << text;                       // version 4
+        EXPECT_NE(std::string("89ab").find(text[19]), std::string::npos) << text;  // variant 10xx
+    }
 }
