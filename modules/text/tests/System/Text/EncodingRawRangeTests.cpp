@@ -359,14 +359,12 @@ TEST(EncodingRawRangeTests, KnownConversionsAreUnchanged) {
     EXPECT_EQ("???", ASCIIEncoding().GetString(euro.data(), 0, 3));
     EXPECT_EQ("AB", UnicodeEncoding(false, false).GetString(utf16le.data(), 0, 4));
     EXPECT_EQ("A", UTF32Encoding(false, false).GetString(utf32le.data(), 0, 4));
-    // The documented reductions are gated on approval (#2014 for Latin-1's storage-byte
-    // mapping, #2015 for the byte-vs-character unit), so they are pinned here as they ARE,
-    // not as .NET has them -- a repair that silently adopted .NET must fail this test and
-    // reach its approval sentence instead.
+    // #2014 landed, so Latin-1 now maps CODE POINTS: U+00E9 is the single byte e9, not its two
+    // UTF-8 storage bytes. #2015 (the byte-vs-character unit) is still gated, and the
+    // GetCharCount row below is pinned as it IS rather than as .NET has it.
     const auto latin1Bytes = Latin1Encoding().GetBytes("\xC3\xA9");
-    ASSERT_EQ(2u, latin1Bytes.size()) << "#2014 is gated; Latin-1 still maps storage bytes";
-    EXPECT_EQ(0xC3, latin1Bytes[0]);
-    EXPECT_EQ(0xA9, latin1Bytes[1]);
+    ASSERT_EQ(1u, latin1Bytes.size());
+    EXPECT_EQ(0xE9, latin1Bytes[0]);
     const std::vector<bytecs> grin{0xF0, 0x9F, 0x98, 0x80};
     EXPECT_EQ(4, UTF8Encoding().GetCharCount(grin.data(), 0, 4))
         << "#2015 is gated; GetCharCount still counts UTF-8 bytes";

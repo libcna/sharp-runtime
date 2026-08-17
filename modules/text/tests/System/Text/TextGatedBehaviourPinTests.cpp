@@ -29,6 +29,7 @@
 // reach its approval sentence rather than pass unnoticed.
 
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -113,7 +114,13 @@ TEST(TextGatedBehaviourPinTests, RuneIsWhiteSpaceIsUnicodeAwareAndIncludesOneSca
 // SR-AUD-299 / #2021 (cause T-F) — EncodingInfo::GetEncoding ignores its declared code page.
 // ---------------------------------------------------------------------------------------
 
-TEST(TextGatedBehaviourPinTests, EncodingInfoStillIgnoresItsOwnCodePage) {
+TEST(TextGatedBehaviourPinTests, Fix2021_EncodingInfoResolvesItsOwnCodePage) {
+    // #2021 LANDED 2026-08-17, and this pin is INVERTED. GetEncoding() returned
+    // Encoding::UTF8() unconditionally, so EncodingInfo(20127, "us-ascii", ...) handed back an
+    // object whose getCodePageProperty() was 65001 and which encoded "é" as UTF-8 -- an object
+    // that REPORTS one code page and BEHAVES as another, which is worse than one that refuses.
+    // .NET's EncodingInfo.GetEncoding() is Provider?.GetEncoding(CodePage) ??
+    // Encoding.GetEncoding(CodePage) (EncodingInfo.cs:56) -- it resolves its own code page.
     const EncodingInfo ascii(20127, "us-ascii", "US-ASCII");
     EXPECT_EQ(20127, ascii.getCodePageProperty());
     EXPECT_EQ("us-ascii", ascii.getNameProperty());
@@ -121,26 +128,37 @@ TEST(TextGatedBehaviourPinTests, EncodingInfoStillIgnoresItsOwnCodePage) {
 
     const auto resolved = ascii.GetEncoding();
     ASSERT_NE(nullptr, resolved);
-    EXPECT_EQ(65001, resolved->getCodePageProperty())
-        << "gated by #2021 (plan §14.9): the resolved encoding should be code page 20127";
+    EXPECT_EQ(20127, resolved->getCodePageProperty());
+    EXPECT_EQ(Encoding::ASCII().get(), resolved.get());
 
-    // It does not merely report the wrong code page — it encodes as UTF-8.
+    // It does not merely report the right code page -- it behaves as that encoding.
     const auto bytes = resolved->GetBytes("\xC3\xA9");
-    ASSERT_EQ(2u, bytes.size()) << "gated by #2021: ASCII would emit one '?' byte";
-    EXPECT_EQ(0xC3, bytes[0]);
-    EXPECT_EQ(0xA9, bytes[1]);
+    ASSERT_EQ(1u, bytes.size()) << "ASCII emits one '?' byte for a non-ASCII scalar";
+    EXPECT_EQ('?', bytes[0]);
 
-    // And the object it hands out is the shared, publicly mutable factory instance #2013
-    // owns — so #2021 and #2013 must be decided together, which plan §14.9 does not say.
-    EXPECT_EQ(Encoding::UTF8().get(), resolved.get())
-        << "gated by #2021 + #2013: EncodingInfo hands out the shared mutable singleton";
+    // Every code page this component implements resolves to its own encoding.
+    EXPECT_EQ(65001, EncodingInfo(65001, "utf-8", "Unicode (UTF-8)").GetEncoding()->getCodePageProperty());
+    EXPECT_EQ(1200,  EncodingInfo(1200, "utf-16", "Unicode").GetEncoding()->getCodePageProperty());
+    EXPECT_EQ(1201,  EncodingInfo(1201, "utf-16BE", "Unicode (Big-Endian)").GetEncoding()->getCodePageProperty());
+    EXPECT_EQ(12000, EncodingInfo(12000, "utf-32", "Unicode (UTF-32)").GetEncoding()->getCodePageProperty());
+    EXPECT_EQ(12001, EncodingInfo(12001, "utf-32BE", "Unicode (UTF-32 Big-Endian)").GetEncoding()->getCodePageProperty());
+    EXPECT_EQ(65000, EncodingInfo(65000, "utf-7", "Unicode (UTF-7)").GetEncoding()->getCodePageProperty());
+    EXPECT_EQ(28591, EncodingInfo(28591, "iso-8859-1", "Western European (ISO)").GetEncoding()->getCodePageProperty());
+}
 
-    // Every other code page resolves to the same object today, including one this port does
-    // not implement at all.
-    EXPECT_EQ(Encoding::UTF8().get(), EncodingInfo(1200, "utf-16", "Unicode").GetEncoding().get());
-    EXPECT_EQ(Encoding::UTF8().get(), EncodingInfo(28591, "iso-8859-1", "Latin 1").GetEncoding().get());
-    EXPECT_EQ(Encoding::UTF8().get(), EncodingInfo(437, "ibm437", "OEM US").GetEncoding().get())
-        << "gated by #2021: an unimplemented code page would start throwing";
+TEST(TextGatedBehaviourPinTests, Fix2021_AnUnimplementedCodePageIsRejectedRatherThanSubstituted) {
+    // The half that matters most. This port has no EncodingProvider registry, so a code page it
+    // does not implement cannot be resolved -- and returning SOMETHING is exactly the defect.
+    // .NET rejects with ArgumentException and Argument_EncodingNotSupported.
+    const EncodingInfo shiftJis(932, "shift_jis", "Japanese (Shift-JIS)");
+    EXPECT_THROW((void)shiftJis.GetEncoding(), System::ArgumentException);
+    try {
+        (void)shiftJis.GetEncoding();
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_NE(std::string(e.what()).find("is not a supported encoding name"), std::string::npos)
+            << e.what();
+    }
 }
 
 // ---------------------------------------------------------------------------------------

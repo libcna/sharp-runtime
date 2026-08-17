@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <cstdint>
+#include "System/Text/detail/Utf8Scalar.hpp"
 #include <memory>
 #include <string>
 #include <vector>
@@ -39,25 +41,54 @@ namespace System::Text {
         [[nodiscard]] bool getIsSingleByteProperty() const override { return true; }
 
         /**
-         * Copies the UTF-8 storage bytes of @p s through unchanged.
+         * @brief Encodes @p s to ISO-8859-1 bytes: one byte per Unicode scalar, not per UTF-8
+         * storage byte.
          *
-         * Despite the class name this is **not** an ISO-8859-1 conversion: see the class
-         * warning above and ticket #2014. `GetBytes(u8"é")` returns `c3 a9`, not `e9`.
+         * Ticket #2014 (SR-AUD-289). Before it, this copied the UTF-8 storage bytes through
+         * unchanged, so `GetBytes(u8"é")` returned `c3 a9` where ISO-8859-1 is the single byte
+         * `e9`. `Latin1Encoding` was the only encoding in the component that did not decode the
+         * storage representation into scalars first -- `ASCIIEncoding`, `UnicodeEncoding` and
+         * `UTF32Encoding` all do -- so the repair is the shape those three already had.
+         *
+         * A scalar outside U+0000..U+00FF cannot be represented in ISO-8859-1 and becomes `?`,
+         * which is what `Latin1Encoding` does in .NET (its default encoder fallback is the
+         * replacement fallback with `"?"`) and what this component's `ASCIIEncoding` already
+         * does for the same reason. A supplementary-plane scalar produces **two** `?`, matching
+         * the two UTF-16 code units .NET would encode it from -- again as `ASCIIEncoding` does.
          */
         [[nodiscard]] std::vector<SharpRuntime::bytecs> GetBytes(const std::string& s) const override {
             std::vector<SharpRuntime::bytecs> result;
             result.reserve(s.size());
-            for (unsigned char c : s)
-                result.push_back(static_cast<SharpRuntime::bytecs>(c));
+            std::size_t i = 0;
+            while (i < s.size()) {
+                std::uint32_t cp = 0;
+                std::size_t len = 0;
+                detail::DecodeUtf8Scalar(s, i, cp, len);
+                i += len;
+                if (cp <= 0xFF) {
+                    result.push_back(static_cast<SharpRuntime::bytecs>(cp));
+                } else if (cp < 0x10000) {
+                    result.push_back(static_cast<SharpRuntime::bytecs>('?'));
+                } else {
+                    result.push_back(static_cast<SharpRuntime::bytecs>('?'));
+                    result.push_back(static_cast<SharpRuntime::bytecs>('?'));
+                }
+            }
             return result;
         }
 
         /**
-         * Copies the byte range through unchanged as if it were already UTF-8.
+         * @brief Decodes ISO-8859-1 bytes: every byte is the scalar of the same value, re-encoded
+         * into this runtime's UTF-8 `System::String` representation.
          *
-         * Despite the class name this is **not** an ISO-8859-1 conversion: see the class
-         * warning above and ticket #2014. A byte in 0x80–0xFF is emitted verbatim, which can
-         * make the returned string ill-formed UTF-8.
+         * Ticket #2014. Before it, the bytes were copied through as if they were already UTF-8,
+         * so `GetString({0xE9})` returned the ill-formed single byte `e9` where the UTF-8 answer
+         * is `c3 a9`. ISO-8859-1 is the one encoding where the byte value **is** the scalar
+         * value, so this needs no table -- and that is also why the previous behaviour looked
+         * plausible while being wrong at exactly the bytes that matter.
+         *
+         * Unlike the encode direction this **cannot fail**: every one of the 256 byte values is
+         * a valid ISO-8859-1 character, so no fallback is reachable here.
          *
          * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
          * @throws System::ArgumentNullException if @p data is null and @p count is positive.
@@ -74,8 +105,10 @@ namespace System::Text {
             const auto range = detail::checkedRawDecodeRange(data, index, count);
             std::string result;
             result.reserve(range.end - range.begin);
-            for (std::size_t i = range.begin; i < range.end; ++i)
-                result += static_cast<char>(static_cast<unsigned char>(data[i]));
+            for (std::size_t i = range.begin; i < range.end; ++i) {
+                detail::AppendUtf8Scalar(result, static_cast<std::uint32_t>(
+                                                     static_cast<unsigned char>(data[i])));
+            }
             return result;
         }
     };

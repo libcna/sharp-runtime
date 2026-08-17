@@ -2,57 +2,16 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Text/ASCIIEncoding.hpp"
+#include "System/Text/detail/Utf8Scalar.hpp"
 #include "System/Text/detail/RawDecodeRange.hpp"
 
 namespace System::Text {
 
-namespace {
+// #2014 moved this file's UTF-8 decode into System/Text/detail/Utf8Scalar.hpp. It had been
+// duplicated five ways across modules/text, and Latin1Encoding needed a sixth; one shared body
+// is what stops the copies drifting apart, which is the defect this repository keeps repairing.
+using System::Text::detail::DecodeUtf8Scalar;
 
-    // Decodes one UTF-8 sequence starting at s[i], validating continuation bytes and
-    // rejecting overlong encodings -- the same conformance logic already applied this
-    // session to Rune::TryGetRuneAt/UnicodeEncoding/UTF32Encoding's decode loops. An
-    // ill-formed sequence decodes to U+FFFD (length 1, resuming one byte later).
-    void decodeUtf8(const std::string& s, size_t i, uint32_t& codePoint, size_t& length) {
-        auto isContinuation = [](unsigned char b) { return (b & 0xC0) == 0x80; };
-        unsigned char c0 = static_cast<unsigned char>(s[i]);
-        uint32_t cp; size_t len;
-        if (c0 < 0x80) {
-            cp = c0; len = 1;
-        } else if ((c0 & 0xE0) == 0xC0 && i + 1 < s.size() &&
-                   isContinuation(static_cast<unsigned char>(s[i + 1]))) {
-            cp = (static_cast<uint32_t>(c0 & 0x1F) << 6) | (static_cast<unsigned char>(s[i + 1]) & 0x3F);
-            len = 2;
-            if (cp < 0x80) { codePoint = 0xFFFD; length = 1; return; }
-        } else if ((c0 & 0xF0) == 0xE0 && i + 2 < s.size() &&
-                   isContinuation(static_cast<unsigned char>(s[i + 1])) &&
-                   isContinuation(static_cast<unsigned char>(s[i + 2]))) {
-            cp = (static_cast<uint32_t>(c0 & 0x0F) << 12) | ((static_cast<unsigned char>(s[i + 1]) & 0x3F) << 6) |
-                 (static_cast<unsigned char>(s[i + 2]) & 0x3F);
-            len = 3;
-            if (cp < 0x800) { codePoint = 0xFFFD; length = 1; return; }
-        } else if ((c0 & 0xF8) == 0xF0 && i + 3 < s.size() &&
-                   isContinuation(static_cast<unsigned char>(s[i + 1])) &&
-                   isContinuation(static_cast<unsigned char>(s[i + 2])) &&
-                   isContinuation(static_cast<unsigned char>(s[i + 3]))) {
-            cp = (static_cast<uint32_t>(c0 & 0x07) << 18) | ((static_cast<unsigned char>(s[i + 1]) & 0x3F) << 12) |
-                 ((static_cast<unsigned char>(s[i + 2]) & 0x3F) << 6) | (static_cast<unsigned char>(s[i + 3]) & 0x3F);
-            len = 4;
-            if (cp < 0x10000) { codePoint = 0xFFFD; length = 1; return; }
-        } else {
-            codePoint = 0xFFFD;
-            length = 1;
-            return;
-        }
-        if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
-            codePoint = 0xFFFD;
-            length = 1;
-            return;
-        }
-        codePoint = cp;
-        length = len;
-    }
-
-} // namespace
 
     /**
      * Encodes @p str (this runtime's UTF-8 representation) to ASCII bytes, one output byte
@@ -72,7 +31,7 @@ namespace {
         while (i < str.size()) {
             uint32_t cp;
             size_t len;
-            decodeUtf8(str, i, cp, len);
+            DecodeUtf8Scalar(str, i, cp, len);
             i += len;
             if (cp <= 127) {
                 result.push_back(static_cast<SharpRuntime::bytecs>(cp));

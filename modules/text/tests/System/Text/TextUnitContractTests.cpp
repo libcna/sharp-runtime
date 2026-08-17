@@ -74,21 +74,49 @@ TEST(TextUnitContractTests, StringBuilderIndexedMutationCanSplitACharacter) {
     EXPECT_EQ(std::string("\xC3" "X" "\xA9" "A"), sb2.ToString());
 }
 
-TEST(TextUnitContractTests, Latin1MapsStorageBytesNotCodePoints) {
+TEST(TextUnitContractTests, Fix2014_Latin1MapsCODEPOINTSNotStorageBytes) {
+    // #2014 LANDED 2026-08-17, and this pin is INVERTED. Latin1Encoding was the ONLY encoding in
+    // this component that did not decode the UTF-8 storage representation into scalars first --
+    // ASCIIEncoding, UnicodeEncoding and UTF32Encoding all do -- so it mapped storage bytes and
+    // called the result ISO-8859-1.
     Latin1Encoding l;
-    const auto bytes = l.GetBytes("\xC3\xA9");
-    ASSERT_EQ(2u, bytes.size()) << "gated by #2014 (plan section 14.2): ISO-8859-1 is one byte, e9";
-    EXPECT_EQ(0xC3, bytes[0]);
-    EXPECT_EQ(0xA9, bytes[1]);
+    const auto bytes = l.GetBytes("\xC3\xA9");           // U+00E9, two UTF-8 storage bytes
+    ASSERT_EQ(1u, bytes.size()) << "ISO-8859-1 encodes U+00E9 as the single byte e9";
+    EXPECT_EQ(0xE9, bytes[0]);
 
     const std::vector<bytecs> e9{0xE9};
     const std::string decoded = l.GetString(e9.data(), 0, 1);
-    ASSERT_EQ(1u, decoded.size()) << "gated by #2014: the UTF-8 answer is c3 a9";
-    EXPECT_EQ('\xE9', decoded[0]);
+    ASSERT_EQ(2u, decoded.size()) << "the UTF-8 representation of U+00E9 is c3 a9";
+    EXPECT_EQ('\xC3', decoded[0]);
+    EXPECT_EQ('\xA9', decoded[1]);
 
-    // ASCII round-trips correctly in both directions, which is the whole of what works.
+    // ASCII round-trips in both directions, exactly as it did before -- the repair must not have
+    // moved the range that was already right.
     const auto hi = l.GetBytes("Hi");
     EXPECT_EQ("Hi", l.GetString(hi.data(), 0, static_cast<SharpRuntime::intcs>(hi.size())));
+
+    // And the whole ISO-8859-1 range now round-trips, which is the property that was missing.
+    for (int b = 0; b < 256; ++b) {
+        const std::vector<bytecs> one{static_cast<bytecs>(b)};
+        const std::string text = l.GetString(one.data(), 0, 1);
+        const auto back = l.GetBytes(text);
+        ASSERT_EQ(1u, back.size()) << "byte " << b;
+        EXPECT_EQ(b, back[0]) << "byte " << b << " did not round-trip";
+    }
+}
+
+TEST(TextUnitContractTests, Fix2014_UnrepresentableScalarsBecomeQuestionMarks) {
+    // ISO-8859-1 covers U+0000..U+00FF and nothing else, so a scalar above that cannot be
+    // represented. .NET's Latin1Encoding uses the replacement fallback "?" for it, and this
+    // component's ASCIIEncoding already did the same for the same reason -- including the part
+    // that is easy to miss: a supplementary-plane scalar produces TWO '?', matching the two
+    // UTF-16 code units .NET would encode it from.
+    Latin1Encoding l;
+    EXPECT_EQ(std::vector<bytecs>{static_cast<bytecs>('?')}, l.GetBytes("\xE2\x82\xAC"));  // U+20AC
+    const auto grin = l.GetBytes("\xF0\x9F\x98\x80");                                     // U+1F600
+    EXPECT_EQ(2u, grin.size());
+    EXPECT_EQ('?', grin[0]);
+    EXPECT_EQ('?', grin[1]);
 }
 
 TEST(TextUnitContractTests, Fix2013_TheFactoryEncodingsAreSharedAndREADONLY) {
