@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <unordered_map>
 
 #include <string>
 
@@ -87,6 +88,78 @@ inline void ThrowIfControlCharacterArgument(const std::string& text, const char*
                         "character."),
             std::string(paramName));
     }
+}
+
+
+/**
+ * @brief Compares two HTTP field names the way RFC 9110 §5.1 says they compare: case-insensitively.
+ *
+ * Ticket #2068. `HttpRequestMessage`, `HttpResponseMessage` and `HttpClient`'s default headers all
+ * store their fields in a plain `std::unordered_map<std::string, std::string>`, whose key equality
+ * is byte equality. Measured, that made `Content-Type` and `content-type` **two different
+ * headers**: setting both left two entries and both went on the wire, and
+ * `getHeader("content-type")` returned `""` after `setHeader("Content-Type", …)`.
+ *
+ * .NET compares field names case-insensitively everywhere — `HeaderDescriptor` is built on
+ * `StringComparer.OrdinalIgnoreCase` — so this is parity, not a house rule.
+ *
+ * @note The **map type stays exactly as it was.** Giving it a case-insensitive hash and equality
+ *       would change `getHeadersProperty()`'s return type, which is a public source break for
+ *       every caller that names it, for no observable gain: the collections hold a handful of
+ *       entries, so a linear case-insensitive scan is free in practice and free of SA-2's
+ *       machinery in principle.
+ */
+inline bool FieldNamesMatch(const std::string& a, const std::string& b) noexcept {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        const unsigned char lhs = static_cast<unsigned char>(a[i]);
+        const unsigned char rhs = static_cast<unsigned char>(b[i]);
+        // Deliberately ASCII-only and locale-free. A field name is a token (RFC 9110 §5.6.2),
+        // which is ASCII by definition, and std::tolower with a non-"C" locale would fold bytes
+        // a token can never contain.
+        const unsigned char lo = (lhs >= 'A' && lhs <= 'Z') ? static_cast<unsigned char>(lhs + 32) : lhs;
+        const unsigned char ro = (rhs >= 'A' && rhs <= 'Z') ? static_cast<unsigned char>(rhs + 32) : rhs;
+        if (lo != ro) return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Stores @p value under @p name, replacing any entry whose name matches case-insensitively.
+ *
+ * Ticket #2068. Without the erase, `setHeader("Content-Type", …)` followed by
+ * `setHeader("content-type", …)` left both entries in the map and emitted both on the wire.
+ * The **caller's** spelling of the name is kept, matching .NET, which preserves the string it
+ * was given rather than canonicalising it.
+ */
+inline void SetFieldReplacingCaseVariants(std::unordered_map<std::string, std::string>& fields,
+                                          const std::string& name, const std::string& value) {
+    for (auto it = fields.begin(); it != fields.end(); ++it) {
+        if (FieldNamesMatch(it->first, name)) {
+            fields.erase(it);
+            break;   // at most one can match, precisely because this function is the only door
+        }
+    }
+    fields[name] = value;
+}
+
+/** @brief Case-insensitive lookup; returns an empty string when the field is absent. */
+[[nodiscard]] inline std::string GetFieldIgnoringCase(
+    const std::unordered_map<std::string, std::string>& fields, const std::string& name) {
+    for (const auto& [key, value] : fields) {
+        if (FieldNamesMatch(key, name)) return value;
+    }
+    return "";
+}
+
+/** @brief Whether any field in @p fields has the name @p name, compared case-insensitively. */
+[[nodiscard]] inline bool HasField(const std::unordered_map<std::string, std::string>& fields,
+                                   const std::string& name) {
+    for (const auto& [key, value] : fields) {
+        (void)value;
+        if (FieldNamesMatch(key, name)) return true;
+    }
+    return false;
 }
 
 } // namespace System::Net::Http::detail

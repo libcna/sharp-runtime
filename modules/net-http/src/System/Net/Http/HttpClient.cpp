@@ -303,8 +303,10 @@ std::shared_ptr<HttpResponseMessage> HttpClient::Send(
     // to the handler chain -- matching real .NET's HttpClient applying DefaultRequestHeaders
     // ahead of invoking the handler pipeline.
     for (const auto& [k, v] : defaultHeaders_) {
-        if (request->getHeadersProperty().find(k) == request->getHeadersProperty().end())
-            request->setHeader(k, v);
+        // Ticket #2068: the "did the caller already set it" test is case-insensitive too. A
+        // byte-exact find() meant a default named `Accept` was merged on top of a request that
+        // already carried `accept`, so both went on the wire.
+        if (!detail::HasField(request->getHeadersProperty(), k)) request->setHeader(k, v);
     }
 
     return handler_->Send(std::move(request));
@@ -442,12 +444,11 @@ HttpClient::GetByteArrayAsync(const std::string& url) {
 void HttpClient::setDefaultHeader(const std::string& name, const std::string& value) {
     detail::ThrowIfControlCharacter(name, "header name");
     detail::ThrowIfControlCharacter(value, "header value");
-    defaultHeaders_[name] = value;
+    detail::SetFieldReplacingCaseVariants(defaultHeaders_, name, value);   // #2068
 }
 
 std::string HttpClient::getDefaultHeader(const std::string& name) const {
-    auto it = defaultHeaders_.find(name);
-    return it != defaultHeaders_.end() ? it->second : "";
+    return detail::GetFieldIgnoringCase(defaultHeaders_, name);   // #2068
 }
 
 } // namespace System::Net::Http

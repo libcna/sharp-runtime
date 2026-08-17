@@ -92,13 +92,15 @@ public:
     void setHeader(const std::string& name, const std::string& value) {
         detail::ThrowIfControlCharacter(name, "header name");
         detail::ThrowIfControlCharacter(value, "header value");
-        headers_[name] = value;
+        // Ticket #2068: case-insensitive, as RFC 9110 5.1 requires.
+        detail::SetFieldReplacingCaseVariants(headers_, name, value);
     }
 
     /** @return The value of the named header, or "" if not present. */
     [[nodiscard]] std::string getHeader(const std::string& name) const {
-        auto it = headers_.find(name);
-        return it != headers_.end() ? it->second : "";
+        // Ticket #2068: this used to be a byte-exact find(), so getHeader("content-type")
+        // returned "" after setHeader("Content-Type", ...).
+        return detail::GetFieldIgnoringCase(headers_, name);
     }
 
     /** @return The map of all response headers. */

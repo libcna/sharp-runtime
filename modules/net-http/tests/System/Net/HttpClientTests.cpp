@@ -1905,15 +1905,23 @@ static_assert(sizeof(HttpResponseMessage) == sizeof(HttpResponseMessageLayoutPro
               "#2068/#2069 must not add state to HttpResponseMessage -- SR-AUD-315/316, "
               "NOT APPROVED");
 
-// The comparator of the returned map is PUBLIC SURFACE: #2068 cannot make the
-// lookup case-insensitive without changing this type, which is why it is
-// blocked rather than merely unimplemented.
+// The comparator of the returned map is PUBLIC SURFACE. #2062's review concluded from that
+// that #2068 "cannot make the lookup case-insensitive without changing this type, which is why
+// it is blocked rather than merely unimplemented".
+//
+// #2068 LANDED WITHOUT CHANGING IT, so these assertions now say something stronger than they
+// did: the case-insensitive rule was implemented as a case-insensitive LOOKUP over an unchanged
+// map, not as a changed map type. The collections hold a handful of entries, so a linear scan
+// costs nothing measurable -- and it costs nothing of SA-2's machinery either. They stay as
+// pins: swapping the comparator in later is still a public source break.
 static_assert(std::is_same_v<decltype(std::declval<const HttpRequestMessage&>().getHeadersProperty()),
                              const std::unordered_map<std::string, std::string>&>,
-              "#2068 would change the PUBLIC returned map type -- SR-AUD-315, NOT APPROVED");
+              "changing the PUBLIC returned map type is a source break -- #2068 deliberately "
+              "did not need to");
 static_assert(std::is_same_v<decltype(std::declval<const HttpResponseMessage&>().getHeadersProperty()),
                              const std::unordered_map<std::string, std::string>&>,
-              "#2068 would change the PUBLIC returned map type -- SR-AUD-315, NOT APPROVED");
+              "changing the PUBLIC returned map type is a source break -- #2068 deliberately "
+              "did not need to");
 
 TEST(NetHttpGatedBehaviourPins, LayoutAndOwnershipModelAreStaticallyAsserted) {
     // The static_asserts above are the test; this keeps them visible in the
@@ -1935,26 +1943,52 @@ TEST(NetHttpGatedBehaviourPins, Pin2067_OneRequestMessageCanStillBeSentTwice) {
         << "the SAME message object reaches the handler a second time";
 }
 
-// #2068 (SR-AUD-315) -- HTTP field names are case-insensitive; these maps are
-// not.
-TEST(NetHttpGatedBehaviourPins, Pin2068_HeaderMapsAreCaseSensitive) {
+// #2068 (SR-AUD-315) LANDED -- field names are compared case-insensitively, as RFC 9110 5.1
+// requires and as .NET does everywhere (HeaderDescriptor is built on OrdinalIgnoreCase).
+TEST(NetHttpGatedBehaviourPins, Fix2068_HeaderNamesAreCaseInsensitive) {
     HttpRequestMessage request;
     request.setHeader("Content-Type", "a");
     request.setHeader("content-type", "b");
-    EXPECT_EQ(request.getHeadersProperty().size(), 2u)
-        << "two spellings of one field are still two entries";
+    EXPECT_EQ(request.getHeadersProperty().size(), 1u)
+        << "two spellings of one field are ONE header";
+    EXPECT_EQ(request.getHeader("CONTENT-TYPE"), "b") << "last write wins, and lookup is blind to case";
 
     HttpResponseMessage response;
     response.setHeader("Content-Type", "a");
-    EXPECT_EQ(response.getHeader("content-type"), "")
-        << "a differently cased lookup still misses";
+    EXPECT_EQ(response.getHeader("content-type"), "a");
     EXPECT_EQ(response.getHeader("Content-Type"), "a");
+    EXPECT_EQ(response.getHeader("CoNtEnT-tYpE"), "a");
+    EXPECT_EQ(response.getHeader("Content-Typ"), "") << "a genuinely different name still misses";
+
+    // The CALLER's spelling is what is stored, matching .NET, which keeps the string it was
+    // given rather than canonicalising it.
+    EXPECT_TRUE(request.getHeadersProperty().count("content-type") == 1);
+    EXPECT_TRUE(request.getHeadersProperty().count("Content-Type") == 0);
 }
 
-// #2068's second half, which SR-AUD-315 does not name and #2062's review
-// measured: the handler writes Host/User-Agent/Accept/Connection
-// unconditionally, BEFORE the caller's map, so a caller-set Host is sent twice.
-TEST(NetHttpGatedBehaviourPins, Pin2068_HandlerEmitsADuplicateDefaultHeader) {
+TEST(NetHttpGatedBehaviourPins, Fix2068_ClientDefaultHeadersAreCaseInsensitiveToo) {
+    // The merge in HttpClient::Send tested "did the caller already set it" with a byte-exact
+    // find(), so a default named `Accept` was merged on top of a request already carrying
+    // `accept` and both went on the wire.
+    auto handler = std::make_shared<RecordingHandler>();
+    HttpClient client(handler);
+    client.setDefaultHeader("Accept", "application/json");
+    EXPECT_EQ(client.getDefaultHeader("accept"), "application/json");
+
+    auto request = std::make_shared<HttpRequestMessage>(HttpMethod::Get(), "http://example.com/");
+    request->setHeader("accept", "text/plain");
+    (void)client.Send(request);
+    EXPECT_EQ(handler->receivedRequest->getHeadersProperty().size(), 1u)
+        << "the client default must not be merged on top of the caller's own spelling";
+    EXPECT_EQ(handler->receivedRequest->getHeader("Accept"), "text/plain");
+}
+
+// #2068's second half, which SR-AUD-315 does not name and #2062's review measured: the handler
+// wrote Host/User-Agent/Accept/Connection UNCONDITIONALLY, before the caller's map, so a
+// caller-set Host went on the wire TWICE -- request-smuggling-adjacent, because two
+// intermediaries may pick different ones. Each is now a default, emitted only when the caller
+// supplied nothing with that name.
+TEST(NetHttpGatedBehaviourPins, Fix2068_TheHandlersDefaultFieldsYieldToTheCallers) {
     std::shared_ptr<System::Net::Sockets::Socket> listener;
     SharpRuntime::intcs port = startMockHttpServer(listener);
 
@@ -1986,7 +2020,9 @@ TEST(NetHttpGatedBehaviourPins, Pin2068_HandlerEmitsADuplicateDefaultHeader) {
     size_t hosts = 0;
     for (size_t at = raw.find("Host: "); at != std::string::npos; at = raw.find("Host: ", at + 1))
         ++hosts;
-    EXPECT_EQ(hosts, 2u) << "the handler's Host and the caller's Host are both on the wire";
+    EXPECT_EQ(hosts, 1u) << "exactly one Host field may reach the wire";
+    EXPECT_NE(raw.find("Host: caller.example"), std::string::npos)
+        << "and it must be the caller's, not the handler's";
 }
 
 // #2069 (SR-AUD-316's status-code half) -- the constructor accepts any number.

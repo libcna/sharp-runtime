@@ -271,12 +271,26 @@ std::shared_ptr<HttpResponseMessage> HttpClientHandler::Send(std::shared_ptr<Htt
     std::string method = request->getMethodProperty().getMethodProperty();
     std::ostringstream req;
     req << method << " " << purl.path << " HTTP/1.1\r\n";
-    req << "Host: " << purl.host;
-    if (purl.port != 80) req << ":" << purl.port;
-    req << "\r\n";
-    req << "User-Agent: SharpRuntime-HttpClient/1.0\r\n";
-    req << "Accept: */*\r\n";
-    req << "Connection: close\r\n";
+
+    // Ticket #2068, the half the finding does not name. These four fields were written
+    // UNCONDITIONALLY, before the caller's map, so a caller who set `Host` sent TWO Host fields
+    // in one request -- which is request-smuggling-adjacent, because two intermediaries may pick
+    // different ones. Each is now a DEFAULT: emitted only when the caller supplied nothing with
+    // that name, compared case-insensitively. That comparison is why this half belongs to this
+    // ticket rather than to a compatible one -- it needs the lookup this ticket introduces.
+    //
+    // .NET does the same: HttpConnection.WriteHeadersAsync writes its own Host only when the
+    // request carries none.
+    if (!detail::HasField(reqHeaders, "Host")) {
+        req << "Host: " << purl.host;
+        if (purl.port != 80) req << ":" << purl.port;
+        req << "\r\n";
+    }
+    if (!detail::HasField(reqHeaders, "User-Agent")) {
+        req << "User-Agent: SharpRuntime-HttpClient/1.0\r\n";
+    }
+    if (!detail::HasField(reqHeaders, "Accept")) req << "Accept: */*\r\n";
+    if (!detail::HasField(reqHeaders, "Connection")) req << "Connection: close\r\n";
 
     // Ticket #2128. RFC 9112 6.1 requires Content-Length to be ignored, or the message rejected,
     // when Transfer-Encoding is present -- a request carrying both is the exact shape a
@@ -291,24 +305,11 @@ std::shared_ptr<HttpResponseMessage> HttpClientHandler::Send(std::shared_ptr<Htt
     //   - it is suppressed when the caller declared Transfer-Encoding;
     //   - it is suppressed when the caller already supplied a Content-Length, which would
     //     otherwise emit the field twice in one message.
-    const auto namesHeader = [](const std::string& actual, const char* expected) {
-        // Field names are case-insensitive (RFC 9110 5.1), so the test must be too, or
-        // "content-length" would be a second door onto the very shape this closes.
-        const std::size_t n = std::strlen(expected);
-        if (actual.size() != n) return false;
-        for (std::size_t i = 0; i < n; ++i) {
-            if (std::tolower(static_cast<unsigned char>(actual[i])) !=
-                std::tolower(static_cast<unsigned char>(expected[i]))) return false;
-        }
-        return true;
-    };
-    bool callerDeclaredTransferEncoding = false;
-    bool callerDeclaredContentLength    = false;
-    for (const auto& [k, v] : reqHeaders) {
-        (void)v;
-        if (namesHeader(k, "Transfer-Encoding")) callerDeclaredTransferEncoding = true;
-        if (namesHeader(k, "Content-Length"))    callerDeclaredContentLength = true;
-    }
+    // #2068 replaced this file's local `namesHeader` lambda with the shared
+    // detail::FieldNamesMatch, so the case-insensitive rule has ONE definition rather than one
+    // per site -- which is what let the Host/User-Agent/Accept/Connection defaults above reuse it.
+    const bool callerDeclaredTransferEncoding = detail::HasField(reqHeaders, "Transfer-Encoding");
+    const bool callerDeclaredContentLength    = detail::HasField(reqHeaders, "Content-Length");
 
     for (const auto& [k, v] : reqHeaders) req << k << ": " << v << "\r\n";
 

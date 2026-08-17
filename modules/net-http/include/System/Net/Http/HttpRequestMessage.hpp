@@ -73,7 +73,20 @@ public:
     void setHeader(const std::string& name, const std::string& value) {
         detail::ThrowIfControlCharacter(name, "header name");
         detail::ThrowIfControlCharacter(value, "header value");
-        headers_[name] = value;
+        // Ticket #2068. Field names are case-insensitive (RFC 9110 5.1), and .NET compares them
+        // that way everywhere. Before this, `Content-Type` and `content-type` were two entries
+        // and BOTH went on the wire.
+        detail::SetFieldReplacingCaseVariants(headers_, name, value);
+    }
+
+    /**
+     * @brief Returns this request's header value, or an empty string if it has none.
+     *
+     * Ticket #2068. Case-insensitive, as RFC 9110 5.1 requires: `getHeader("content-type")`
+     * finds a header set as `Content-Type`.
+     */
+    [[nodiscard]] std::string getHeader(const std::string& name) const {
+        return detail::GetFieldIgnoringCase(headers_, name);
     }
 
     /** Returns the map of all request headers. */
