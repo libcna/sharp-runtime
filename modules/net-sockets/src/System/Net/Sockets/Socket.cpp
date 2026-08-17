@@ -3,7 +3,10 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Sockets/Socket.hpp"
 #include <array>
+#include <condition_variable>
 #include <cstring>
+#include <memory>
+#include <mutex>
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
 #include "System/Net/Sockets/UnixDomainSocketEndPoint.hpp"
@@ -214,7 +217,8 @@ namespace {
 #endif // !__EMSCRIPTEN__
 
 Socket::Socket(AddressFamily addressFamily, SocketType socketType, ProtocolType protocolType)
-    : addressFamily_(addressFamily), socketType_(socketType), protocolType_(protocolType) {
+    : addressFamily_(addressFamily), socketType_(socketType), protocolType_(protocolType),
+      asyncOps_(std::make_shared<AsyncOperations>()) {
 #if defined(__EMSCRIPTEN__)
     throw System::PlatformNotSupportedException("Socket is not supported on Emscripten.");
 #else
@@ -227,12 +231,90 @@ Socket::Socket(AddressFamily addressFamily, SocketType socketType, ProtocolType 
 #endif
 }
 
-Socket::~Socket() { Close(); }
+// ---------------------------------------------------------------------------------------------
+// #2134 / SR-AUD-263 (CCF-019) — the liveness boundary for the four *Async members.
+//
+// Each of them returns a TaskT whose body runs on a std::async thread and calls back into this
+// object. Socket is move-assignable and destructible with no join, no shared_from_this and no
+// retention, so destroying or move-assigning one while a body is running read freed storage.
+//
+// .NET needs no boundary because the GC keeps the object alive for as long as the captured
+// delegate can reach it; C++ has no such mechanism, so this port takes the RAII answer -- the
+// object outlives the work because its destructor waits for it. That is the same shape #2347
+// gave FileSystemWatcher, and it keeps every one of #2139's four pins intact: Socket does not
+// become enable_shared_from_this, ~Socket stays noexcept, Socket stays move-assignable and
+// non-copyable, and the async return types are unchanged.
+//
+// NOTE the order in waitForAsyncOperations(): shutdown() FIRST, then wait, then Close(). A
+// worker blocked in recv()/accept() will not return on its own, and closing the descriptor
+// before it does would leave that worker operating on a number the process may already have
+// reused for something else.
+struct Socket::AsyncOperations {
+    std::mutex              mutex;
+    std::condition_variable idle;
+    int                     inFlight = 0;
+    /// Set by the boundary before it waits. Only AcceptAsync observes it -- see that member for
+    /// why `shutdown()` alone cannot cross the boundary for a listening socket.
+    bool                    stopping = false;
+};
 
+Socket::Socket(intcs fd, System::Net::Sockets::AddressFamily family, System::Net::Sockets::SocketType type,
+               System::Net::Sockets::ProtocolType protocol)
+    : fd_(fd), addressFamily_(family), socketType_(type), protocolType_(protocol), connected_(fd >= 0),
+      asyncOps_(std::make_shared<AsyncOperations>()) {}
+
+struct Socket::AsyncOperationScope {
+    std::shared_ptr<AsyncOperations> ops;
+    ~AsyncOperationScope() {
+        if (!ops) return;
+        {
+            std::lock_guard<std::mutex> lock(ops->mutex);
+            --ops->inFlight;
+        }
+        ops->idle.notify_all();
+    }
+};
+
+std::shared_ptr<Socket::AsyncOperations> Socket::beginAsyncOperation() {
+    auto ops = asyncOps_;
+    {
+        std::lock_guard<std::mutex> lock(ops->mutex);
+        ++ops->inFlight;
+    }
+    return ops;
+}
+
+void Socket::waitForAsyncOperations() noexcept {
+    if (!asyncOps_) return;
+    {
+        std::unique_lock<std::mutex> lock(asyncOps_->mutex);
+        asyncOps_->stopping = true;
+        if (asyncOps_->inFlight == 0) return;
+    }
+#if !defined(__EMSCRIPTEN__)
+    // Wake a worker blocked in recv()/accept(). shutdown() is deliberate rather than close():
+    // it unblocks without retiring the descriptor number, so the worker's own syscall returns an
+    // error on a descriptor that is still its own.
+    if (fd_ >= 0) ::shutdown(static_cast<int>(fd_), SHUT_RDWR);
+#endif
+    std::unique_lock<std::mutex> lock(asyncOps_->mutex);
+    asyncOps_->idle.wait(lock, [this] { return asyncOps_->inFlight == 0; });
+}
+
+Socket::~Socket() {
+    waitForAsyncOperations();
+    Close();
+}
+
+// #2134: the moved-FROM socket keeps its own AsyncOperations rather than handing it over. Any
+// async body already in flight captured `other`'s address, so it is `other`'s destructor that
+// must wait for it -- moving the guard away would leave that destructor with nothing to wait on
+// and put the use-after-free back. The destination starts with a fresh, empty guard, which is
+// correct because no body can yet have captured it.
 Socket::Socket(Socket&& other) noexcept
     : fd_(other.fd_), addressFamily_(other.addressFamily_), socketType_(other.socketType_),
       protocolType_(other.protocolType_), connected_(other.connected_), bound_(other.bound_),
-      blocking_(other.blocking_) {
+      blocking_(other.blocking_), asyncOps_(std::make_shared<AsyncOperations>()) {
     other.fd_ = -1;
     other.connected_ = false;
     other.bound_ = false;
@@ -240,6 +322,9 @@ Socket::Socket(Socket&& other) noexcept
 
 Socket& Socket::operator=(Socket&& other) noexcept {
     if (this != &other) {
+        // Same boundary as the destructor, and for the same reason: this object's descriptor and
+        // fields are about to be replaced while an async body may still be reading them.
+        waitForAsyncOperations();
         Close();
         fd_ = other.fd_;
         addressFamily_ = other.addressFamily_;
@@ -814,25 +899,67 @@ System::Threading::Tasks::TaskT<bool> Socket::ConnectAsync(const System::Net::En
         throw System::ArgumentException("ConnectAsync only supports IPEndPoint in this runtime.", "remoteEP");
     }
     System::Net::IPEndPoint copy(*ip);
-    return System::Threading::Tasks::TaskT<bool>([this, copy]() {
+    // #2134: registered on THIS thread, before the task exists. Doing it inside the body would
+    // leave a window in which the socket is destroyed before the body starts, the destructor's
+    // wait sees no operation, and the boundary does nothing at all.
+    auto ops = beginAsyncOperation();
+    return System::Threading::Tasks::TaskT<bool>([this, copy, ops]() {
+        AsyncOperationScope release{ops};
         Connect(copy);
         return true;
     });
 }
 
 System::Threading::Tasks::TaskT<std::shared_ptr<Socket>> Socket::AcceptAsync() {
-    return System::Threading::Tasks::TaskT<std::shared_ptr<Socket>>([this]() { return Accept(); });
+    // #2134's awkward case, and the reason this member differs from its three siblings.
+    //
+    // The destructor's boundary wakes a worker with `shutdown()`, which reliably unblocks
+    // `recv()` and `send()` -- but on Linux it does NOT unblock a `accept()` on a listening
+    // socket (it returns ENOTCONN and the accept stays blocked), and neither does `close()`,
+    // which is additionally unsafe while another thread is inside the syscall. A boundary that
+    // could never be crossed would turn a use-after-free into a hang, which is not a repair.
+    //
+    // So the body waits on `poll()` in bounded slices and re-checks the stop flag between them,
+    // and only calls `Accept()` once the descriptor is actually readable. `Accept()`'s own
+    // behaviour is unchanged for every caller: from the outside this is still one blocking
+    // accept, and the synchronous `Accept()` is untouched.
+    auto ops = beginAsyncOperation();
+    return System::Threading::Tasks::TaskT<std::shared_ptr<Socket>>([this, ops]() {
+        AsyncOperationScope release{ops};
+        for (;;) {
+            {
+                std::lock_guard<std::mutex> lock(ops->mutex);
+                if (ops->stopping) {
+                    throw System::Net::Sockets::SocketException(
+                        static_cast<intcs>(System::Net::Sockets::SocketError::OperationAborted),
+                        "AcceptAsync: the socket was destroyed while the accept was pending.");
+                }
+            }
+            // Poll() rather than a raw poll(): it is this type's own portable readiness check,
+            // built on select(), which both Winsock2 and POSIX provide -- a raw poll() would not
+            // compile on Windows.
+            if (Poll(50 * 1000 /* 50 ms, in microseconds */, SelectMode::SelectRead)) {
+                return Accept();
+            }
+        }
+    });
 }
 
 System::Threading::Tasks::TaskT<intcs> Socket::SendAsync(std::vector<bytecs> buffer, SocketFlags flags) {
-    return System::Threading::Tasks::TaskT<intcs>([this, buffer = std::move(buffer), flags]() {
+    auto ops = beginAsyncOperation();
+    return System::Threading::Tasks::TaskT<intcs>([this, buffer = std::move(buffer), flags, ops]() {
+        AsyncOperationScope release{ops};
         return Send(buffer, flags);
     });
 }
 
 System::Threading::Tasks::TaskT<intcs> Socket::ReceiveAsync(std::shared_ptr<std::vector<bytecs>> buffer,
                                                               SocketFlags flags) {
-    return System::Threading::Tasks::TaskT<intcs>([this, buffer, flags]() { return Receive(*buffer, flags); });
+    auto ops = beginAsyncOperation();
+    return System::Threading::Tasks::TaskT<intcs>([this, buffer, flags, ops]() {
+        AsyncOperationScope release{ops};
+        return Receive(*buffer, flags);
+    });
 }
 
 } // namespace System::Net::Sockets

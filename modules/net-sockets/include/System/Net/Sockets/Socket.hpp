@@ -56,9 +56,53 @@ namespace System::Net::Sockets {
         bool bound_ = false;
         bool blocking_ = true;
 
+        /**
+         * The liveness boundary for the four `*Async` members (ticket #2134, CCF-019).
+         *
+         * Each of them returns a `TaskT` whose body runs on a `std::async` thread and calls back
+         * into this object. Without a boundary, destroying or move-assigning the `Socket` while
+         * one of those bodies is running reads freed storage: `Socket` is move-assignable and
+         * destructible with no join, no `shared_from_this` and no retention of any kind.
+         *
+         * .NET does not need one because the GC keeps the object alive for as long as the
+         * captured delegate can reach it. C++ has no such mechanism, and this port's answer is
+         * the RAII one: the object outlives the work because its **destructor waits for it** --
+         * the same shape `FileSystemWatcher` took in #2347. `Close()` cannot simply run first,
+         * because a worker blocked in `recv()`/`accept()` would then be operating on a
+         * descriptor number the process may already have reused.
+         *
+         * Defined in the `.cpp`; never null on a live `Socket`.
+         */
+        struct AsyncOperations;
+        /**
+         * Decrements the in-flight count and wakes the boundary, on every exit path from an async
+         * BODY -- including one that leaves by exception. It has to be constructed inside the
+         * body rather than captured by it: `std::async` keeps the callable alive until the last
+         * future referring to its shared state is destroyed, so a guard captured BY the lambda is
+         * released when the caller drops the `TaskT`, not when the work finishes. A boundary
+         * built on that would wait for the caller instead of for the work, which deadlocks
+         * whenever the caller holds the task across the socket's destruction -- the exact case
+         * this ticket exists to make safe.
+         */
+        struct AsyncOperationScope;
+        std::shared_ptr<AsyncOperations> asyncOps_;
+
+        /**
+         * Registers one in-flight async operation, and returns the guard the operation's body
+         * holds for its lifetime. Called on the CALLER's thread, before the task is constructed:
+         * doing it inside the task body would leave a window in which the socket is destroyed
+         * before the body starts, the wait sees no operation, and the boundary does nothing.
+         */
+        [[nodiscard]] std::shared_ptr<AsyncOperations> beginAsyncOperation();
+
+        /**
+         * Wakes any worker blocked on this descriptor and waits until every in-flight async
+         * operation has finished. Idempotent, and a no-op when none is in flight.
+         */
+        void waitForAsyncOperations() noexcept;
+
         Socket(intcs fd, System::Net::Sockets::AddressFamily family, System::Net::Sockets::SocketType type,
-               System::Net::Sockets::ProtocolType protocol)
-            : fd_(fd), addressFamily_(family), socketType_(type), protocolType_(protocol), connected_(fd >= 0) {}
+               System::Net::Sockets::ProtocolType protocol);
 
     public:
         /** @brief Creates a new socket of the given address family, type, and protocol. */
