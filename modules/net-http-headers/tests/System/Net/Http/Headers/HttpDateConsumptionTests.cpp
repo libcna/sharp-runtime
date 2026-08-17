@@ -158,22 +158,115 @@ TEST(HttpDateConsumptionTests, TrailingWHITESPACEIsStillAcceptedBecauseItIsNotTh
     EXPECT_TRUE(tab.getDateProperty().has_value());
 }
 
-TEST(HttpDateConsumptionTests, THEPINTheTwoObsoleteFormatsWereNeverAcceptedAndStillAreNot) {
-    // #2125's acceptance criteria require the existing RFC 850 / asctime behaviour to be PINNED
-    // so the full-consumption repair cannot have narrowed a required form away. Measured: the
-    // conversion string demands a comma immediately after a three-letter day name, which BOTH
-    // obsolete forms fail, so neither was ever accepted and #2125 removed nothing.
+TEST(HttpDateConsumptionTests, Fix2130_AllThreeFormsRFC9110RequiresAreAccepted) {
+    // #2125 pinned that neither obsolete form had EVER been accepted, so its full-consumption
+    // repair could not have narrowed a required form away -- and recorded that closing the gap
+    // "is a WIDENING and belongs to #2130, which is deferred because /rv is absent and .NET's
+    // own behaviour cannot be established here".
     //
-    // RFC 9110 §5.6.7 requires a RECIPIENT to accept all three forms, so this is a real gap --
-    // but closing it is a WIDENING and belongs to #2130, which is deferred because /rv is absent
-    // and .NET's own behaviour cannot be established here.
+    // It can now. HttpDateParser.TryParse tries strict "r" and then TWENTY-ONE format strings,
+    // of which four are RFC 850 and one is ANSI C's asctime
+    // (Common/src/System/Net/HttpDateParser.cs:9-32). RFC 9110 5.6.7 requires a RECIPIENT to
+    // accept all three, and all three are now accepted.
     RetryConditionHeaderValue parsed{System::TimeSpan::Zero};
-    EXPECT_FALSE(RetryConditionHeaderValue::TryParse("Sunday, 06-Nov-94 08:49:37 GMT", parsed))
-        << "RFC 850 form: not accepted before #2125 either -- see #2130";
-    EXPECT_FALSE(RetryConditionHeaderValue::TryParse("Sun Nov  6 08:49:37 1994", parsed))
-        << "ANSI C asctime form: not accepted before #2125 either -- see #2130";
-    // And the preferred form is accepted, so the pin cannot pass vacuously.
-    EXPECT_TRUE(RetryConditionHeaderValue::TryParse(kValid, parsed));
+
+    ASSERT_TRUE(RetryConditionHeaderValue::TryParse(kValid, parsed)) << "IMF-fixdate";
+    const auto preferred = parsed.getDateProperty();
+    ASSERT_TRUE(preferred.has_value());
+
+    // All three spellings denote the SAME instant, which is the point of accepting them.
+    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sunday, 06-Nov-94 08:49:37 GMT", parsed))
+        << "RFC 850 form";
+    ASSERT_TRUE(parsed.getDateProperty().has_value());
+    EXPECT_EQ(parsed.getDateProperty()->getUtcTicksProperty(), preferred->getUtcTicksProperty());
+
+    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sun Nov  6 08:49:37 1994", parsed))
+        << "ANSI C asctime form";
+    ASSERT_TRUE(parsed.getDateProperty().has_value());
+    EXPECT_EQ(parsed.getDateProperty()->getUtcTicksProperty(), preferred->getUtcTicksProperty());
+}
+
+TEST(HttpDateConsumptionTests, Fix2130_TheRFC850TwoDigitYearWindowIsDotNets) {
+    // The easy mistake in RFC 850 support: a naive `1900 + yy` turns 06 into 1906.
+    // DateTimeFormatInfo.InvariantInfo's Gregorian calendar has TwoDigitYearMax == 2029, so
+    // 00..29 are 2000..2029 and 30..99 are 1930..1999. Both ends of the window are pinned.
+    RetryConditionHeaderValue parsed{System::TimeSpan::Zero};
+
+    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sunday, 06-Nov-29 08:49:37 GMT", parsed));
+    EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 2029) << "29 is the last 20xx year";
+
+    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sunday, 06-Nov-30 08:49:37 GMT", parsed));
+    EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 1930) << "30 is the first 19xx year";
+
+    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sunday, 06-Nov-94 08:49:37 GMT", parsed));
+    EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 1994);
+}
+
+TEST(HttpDateConsumptionTests, Fix2130_TheObsoleteFormsObeyEveryRuleThePreferredFormDoes) {
+    // Widening the grammar must not widen the CONSUMPTION rule #2125 established, nor the NUL
+    // guard. Both obsolete forms go through the same OnlyTrailingWhitespace and the same
+    // embedded-NUL rejection.
+    RetryConditionHeaderValue parsed{System::TimeSpan::Zero};
+    for (const char* good : {"Sunday, 06-Nov-94 08:49:37 GMT", "Sun Nov  6 08:49:37 1994"}) {
+        SCOPED_TRACE(good);
+        EXPECT_TRUE(RetryConditionHeaderValue::TryParse(good, parsed));
+        EXPECT_FALSE(RetryConditionHeaderValue::TryParse(std::string(good) + " trailing", parsed))
+            << "trailing text must still invalidate the value";
+        EXPECT_FALSE(
+            RetryConditionHeaderValue::TryParse(std::string(good) + std::string("\0junk", 5), parsed))
+            << "an embedded NUL must still not truncate the value into a valid date";
+    }
+
+    // A calendar-invalid date is still rejected in the obsolete forms too.
+    EXPECT_FALSE(RetryConditionHeaderValue::TryParse("Sunday, 31-Feb-94 08:49:37 GMT", parsed));
+    EXPECT_FALSE(RetryConditionHeaderValue::TryParse("Sun Feb 31 08:49:37 1994", parsed));
+    // ...and so is a month name that is not one.
+    EXPECT_FALSE(RetryConditionHeaderValue::TryParse("Sunday, 06-Xxx-94 08:49:37 GMT", parsed));
+}
+
+TEST(HttpDateConsumptionTests, Fix2130_AShortYearOnAnIMFDateWasSILENTLYWRONGNotRejected) {
+    // A LATENT DEFECT the widening uncovered, and it is a correction rather than a widening.
+    // The IMF conversion string read the year with %d, so "Sun, 06 Nov 94 08:49:37 GMT" was
+    // ACCEPTED and reported the year **94 AD** -- a silently wrong instant, off by nineteen
+    // centuries. .NET accepts the same text and reads 1994
+    // ("ddd, d MMM yy H:m:s 'GMT'", HttpDateParser.cs:17), so the port's answer was WRONG
+    // rather than merely strict, and no test had noticed.
+    RetryConditionHeaderValue parsed{System::TimeSpan::Zero};
+    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sun, 06 Nov 94 08:49:37 GMT", parsed));
+    EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 1994)
+        << "this used to report 94";
+
+    // The same window as RFC 850's, because it is the same calendar rule.
+    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sun, 06 Nov 29 08:49:37 GMT", parsed));
+    EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 2029);
+
+    // ONLY an exactly-two-digit token is expanded, so a four-digit year is untouched and a
+    // three-digit one keeps whatever it had -- nothing else moves.
+    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sun, 06 Nov 0094 08:49:37 GMT", parsed));
+    EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 94)
+        << "a four-digit year means exactly what it says";
+}
+
+TEST(HttpDateConsumptionTests, Pin2130_TheLENIENTDotNetVariantsAreDELIBERATELYNotAccepted) {
+    // .NET accepts sixteen further formats, and they are LENIENCY rather than required forms: a
+    // UTC zone token instead of GMT, no zone token at all, a missing day-of-week, a two-digit
+    // year on an IMF-fixdate, and RFC 5322 numeric offsets. Adopting them would accept text
+    // RFC 9110 does not define as an HTTP-date -- a much larger widening than #2130 asked for,
+    // and each has its own ambiguity (a bare time with no zone is only UTC because .NET ASSUMES
+    // it is). That gap is ticket #2360, and this pin is what stops it landing by accident.
+    RetryConditionHeaderValue parsed{System::TimeSpan::Zero};
+    for (const char* lenient : {
+             "Sun, 06 Nov 1994 08:49:37 UTC",      // HttpDateParser.cs:12
+             "Sun, 06 Nov 1994 08:49:37",          // :13, no zone
+             "06 Nov 1994 08:49:37 GMT",           // :14, no day-of-week
+             "Sun, 06 Nov 1994 08:49:37 +0000",    // :29, RFC 5322 offset
+             "Sunday, 06-Nov-94 08:49:37 UTC",      // :23, RFC 850 with UTC
+             "Sunday, 06-Nov-94 08:49:37",          // :25, RFC 850 with no zone
+         }) {
+        SCOPED_TRACE(lenient);
+        EXPECT_FALSE(RetryConditionHeaderValue::TryParse(lenient, parsed))
+            << "if this now parses, #2360 landed and this pin must be updated in that change";
+    }
 }
 
 TEST(HttpDateConsumptionTests, AnEmbeddedNULCannotTruncateTheValueIntoAValidDate) {
