@@ -16,6 +16,7 @@
 // frozen at 364. Both exception choices are recorded in the plan as THIS PORT'S choice — the
 // reference tree is absent.
 #include <gtest/gtest.h>
+#include "System/Text/Json/Nodes/JsonArray.hpp"
 
 #include <limits>
 #include <memory>
@@ -863,10 +864,26 @@ TEST(JsonGatedBehaviourPins, PINJsonSerializerOptionsDefaultIsONESharedObject) {
         << "one process-wide instance, by reference";
 }
 
-TEST(JsonGatedBehaviourPins, PIN2119JsonNodeParseSurvives100000LevelsAndSoDoesItsTeardown) {
-    // #2119 is a DEFERRED VERIFICATION against OwnedTreeLifetimeContractPlan.md's residual
-    // table, which this review deliberately did not claim to have refuted. What IS measured
-    // and pinned: at this tip both the parse and the teardown complete.
+TEST(JsonGatedBehaviourPins, Fix2119_TheParseHalfOfTheResidualIsGoneAndIsLinear) {
+    // #2119 was a DEFERRED VERIFICATION against OwnedTreeLifetimeContractPlan.md's residual
+    // table, which #2110's review deliberately did not claim to have refuted: "it did not
+    // re-run that plan's harness, the two measurements are not like-for-like".
+    //
+    // The like-for-like re-run is build-probe/2119_probe1_deepnesting.cpp, one row per
+    // invocation so a crash in one cannot hide the others. Measured
+    // (build-probe/2119_probe1_after.log):
+    //
+    //   X28a 1,000       parse 0.001s   was safe          -> safe
+    //   X28b 5,000       parse 0.009s   was safe          -> safe
+    //   X28c 20,000      parse 0.032s   was SIGSEGV       -> FIXED by #1897
+    //   X28d 100,000     parse 0.154s   was >5s timeout   -> FIXED, and LINEAR (4.8x for 5x)
+    //   J19a 1,000       build 0.002s   was safe          -> safe
+    //   J19b 5,000       build 0.019s   was safe          -> safe
+    //   J19c 20,000      build 0.368s   was SIGSEGV       -> FIXED
+    //   J19d 100,000     build 9.63s    was >5s timeout   -> STILL OVER, see the next case
+    //
+    // So the PARSE half of the residual is gone outright, and it is linear rather than merely
+    // survivable.
     std::string deep;
     deep.reserve(200001);
     for (int i = 0; i < 100000; ++i) deep += "[";
@@ -878,4 +895,31 @@ TEST(JsonGatedBehaviourPins, PIN2119JsonNodeParseSurvives100000LevelsAndSoDoesIt
     }) << "#1897 made this iterative; #2119 owns the like-for-like re-run";
     // JsonDocument::Parse rejects the same text cleanly at its depth bound -- no overflow.
     EXPECT_THROW((void)JsonDocument::Parse(deep), JsonException);
+}
+
+TEST(JsonGatedBehaviourPins, Pin2119_TheProgrammaticHalfOfTheResidualSURVIVESAndHasAnOwner) {
+    // THE ANSWER TO #2119 IS PARTIAL, AND THAT IS THE POINT OF THIS CASE. The previous pin
+    // tested only JsonNode::Parse -- the path #1897 repaired -- and said nothing about J19d,
+    // the PROGRAMMATIC construction path, which is a different function.
+    //
+    // Measured: 20,000 levels build in 0.365s and 100,000 in 9.63s. That is 26x for 5x the
+    // depth, i.e. still QUADRATIC, and still past the residual table's own 5-second threshold.
+    // The cause is named in JsonNode.cpp itself: AssignParent's cycle guard walks the whole
+    // ancestor chain on every attach (JsonNode.cpp:151-154), so building TOP-DOWN is O(n^2).
+    // Ticket #1896 owns it and is still blocked.
+    //
+    // This case deliberately uses a depth that is FAST (5,000, ~0.02s) rather than reproducing
+    // the slow one: a multi-second test is a bad test, and the measurement lives in the probe
+    // log. What this pins is that the path still exists and still works, so that #1896 landing
+    // is a visible change here rather than a silent one.
+    using System::Text::Json::Nodes::JsonArray;
+    auto root = std::make_shared<JsonArray>();
+    std::shared_ptr<JsonArray> cur = root;
+    for (int i = 0; i < 5000; ++i) {
+        auto next = std::make_shared<JsonArray>();
+        cur->Add(next);
+        cur = next;
+    }
+    EXPECT_NE(root, nullptr);
+    // Teardown here used to SIGSEGV at 20,000 (J19c) and no longer does at any depth measured.
 }

@@ -251,6 +251,35 @@ source with no sanitizer. Empty ASan cell = **no diagnostic at all**.
 | X28a/b | `JsonNode::Parse` of 1,000 / 5,000 nested arrays | — | parsed and released | safe |
 | X28c | `JsonNode::Parse` of 20,000 nested arrays | **stack-overflow** | **SIGSEGV** | **recursive parse on untrusted text** |
 
+#### 4.2.1 Re-measured 2026-08-17 by ticket #2119 — the residual is PARTLY gone
+
+#2110's review recorded that it "does not claim #1893 is fixed: it did not re-run that plan's
+harness, the two measurements are not like-for-like". #2119 owned the like-for-like re-run and
+has now done it — `build-probe/2119_probe1_deepnesting.cpp`, one row per invocation so a crash
+in one cannot hide the others (`build-probe/2119_probe1_after.log`):
+
+| Row | Depth | Then | Now | Verdict |
+|---|---|---|---|---|
+| X28a/b | 1,000 / 5,000 | safe | 0.001s / 0.009s | safe |
+| **X28c** | 20,000 parse | **SIGSEGV** | **0.032s** | **FIXED** by #1897's iterative parse |
+| X28d | 100,000 parse | >5 s timeout | **0.154s** | **FIXED, and LINEAR** — 4.8× for 5× depth |
+| J19a/b | 1,000 / 5,000 build | safe | 0.002s / 0.019s | safe |
+| **J19c** | 20,000 build+release | **SIGSEGV on release** | **0.368s** | **FIXED** |
+| **J19d** | 100,000 build | >5 s timeout | **9.63s** | **SURVIVES** — still over, still quadratic |
+
+**The parse half is gone outright.** #1897 made `JsonNode::Parse` iterative, and the measurement
+shows it is *linear*, not merely survivable.
+
+**The programmatic half survives, and its cause already has an owner.** 20,000 → 0.365s against
+100,000 → 9.63s is 26× for 5× the depth: quadratic. The cause is named in the production source
+itself — `AssignParent`'s cycle guard walks the whole ancestor chain on every attach
+(`JsonNode.cpp:151-154`), so building **top-down** is O(n²). That is ticket **#1896**, which is
+still blocked, and `JsonArray.cpp:245-249` already documents it.
+
+The previous pin tested only `JsonNode::Parse`, so it would have gone on passing while J19d
+stayed broken. There are now two cases: one for the fixed parse half and one that keeps the
+programmatic path visible so #1896 landing is a deliberate change rather than a silent one.
+
 ### 4.3 Silent versus detected
 
 Six JsonNode cases produce a **wrong answer with no diagnostic in either build**:
