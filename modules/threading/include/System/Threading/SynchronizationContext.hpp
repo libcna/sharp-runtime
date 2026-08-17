@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <memory>
 #include <functional>
 #include "System/NullReferenceException.hpp"
 #include "System/Threading/ThreadPool.hpp"
@@ -67,15 +68,37 @@ namespace System::Threading {
             d(state);
         }
 
-        /** Returns the synchronization context set for the current thread via SetSynchronizationContext(), or nullptr if none. */
-        static SynchronizationContext* getCurrentProperty() { return CurrentSlot(); }
+        /**
+         * @brief Returns the synchronization context set for the current thread, or null if none.
+         *
+         * **Returns a `std::shared_ptr` since ticket #1959** (SR-AUD-221, CCF-019). The slot
+         * used to hold a non-owning raw pointer with no destruction or reset hook, so `Current`
+         * outlived its target: setting it to a stack-derived context, leaving the scope and
+         * calling `Current->Send` reached a virtual call through freed storage, which ASan
+         * reported as stack-use-after-scope. .NET has no such hazard because the thread-static
+         * field is a GC reference that keeps the context alive; owning the pointer is this
+         * port's counterpart of that.
+         */
+        static std::shared_ptr<SynchronizationContext> getCurrentProperty() { return CurrentSlot(); }
 
-        /** Sets the synchronization context for the current thread. */
-        static void SetSynchronizationContext(SynchronizationContext* syncContext) { CurrentSlot() = syncContext; }
+        /**
+         * @brief Sets the synchronization context for the current thread, taking a share of its
+         * ownership.
+         *
+         * The context stays alive for at least as long as this thread's slot refers to it, so a
+         * caller may drop its own reference immediately. Passing `nullptr` clears the slot.
+         *
+         * @note **Source break, ticket #1959.** This took a raw `SynchronizationContext*` before,
+         * and `getCurrentProperty()` returned one. See
+         * `docs/Migration-BorrowedCallbackOwnership.md`.
+         */
+        static void SetSynchronizationContext(std::shared_ptr<SynchronizationContext> syncContext) {
+            CurrentSlot() = std::move(syncContext);
+        }
 
     private:
-        static SynchronizationContext*& CurrentSlot() {
-            thread_local SynchronizationContext* current = nullptr;
+        static std::shared_ptr<SynchronizationContext>& CurrentSlot() {
+            thread_local std::shared_ptr<SynchronizationContext> current;
             return current;
         }
     };

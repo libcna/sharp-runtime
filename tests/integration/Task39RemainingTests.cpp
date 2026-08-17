@@ -83,11 +83,37 @@ TEST(SynchronizationContextTests, SetSynchronizationContext_NoThrow) {
 TEST(SynchronizationContextTests, SetSynchronizationContext_RoundTrips) {
     // Regression: SetSynchronizationContext()/getCurrentProperty() previously didn't round-trip at
     // all -- getCurrentProperty() always returned nullptr regardless of what had been set.
-    SynchronizationContext ctx;
-    SynchronizationContext::SetSynchronizationContext(&ctx);
-    EXPECT_EQ(SynchronizationContext::getCurrentProperty(), &ctx);
+    // #1959: the slot now OWNS the context, so both sides are shared_ptr.
+    auto ctx = std::make_shared<SynchronizationContext>();
+    SynchronizationContext::SetSynchronizationContext(ctx);
+    EXPECT_EQ(SynchronizationContext::getCurrentProperty(), ctx);
     SynchronizationContext::SetSynchronizationContext(nullptr); // reset for other tests on this thread
     EXPECT_EQ(SynchronizationContext::getCurrentProperty(), nullptr);
+}
+
+// #1959 / SR-AUD-221 (CCF-019). The defect: the slot held a NON-OWNING raw pointer with no
+// destruction or reset hook, so Current outlived its target -- set it to a stack-derived
+// context, leave the scope, call Current->Send, and ASan reported stack-use-after-scope at the
+// virtual call. .NET has no such hazard because the thread-static field is a GC reference.
+TEST(SynchronizationContextTests, CurrentKeepsItsContextAliveAfterTheSetterDropsIt) {
+    std::weak_ptr<SynchronizationContext> observer;
+    {
+        auto ctx = std::make_shared<SynchronizationContext>();
+        observer = ctx;
+        SynchronizationContext::SetSynchronizationContext(ctx);
+    }   // the caller's reference is gone; before #1959 the slot now dangled
+
+    ASSERT_FALSE(observer.expired()) << "the slot did not keep its context alive";
+    auto current = SynchronizationContext::getCurrentProperty();
+    ASSERT_NE(current, nullptr);
+    // The virtual call that used to reach freed storage.
+    int ran = 0;
+    EXPECT_NO_THROW(current->Send([&ran](void*) { ++ran; }, nullptr));
+    EXPECT_EQ(ran, 1);
+
+    SynchronizationContext::SetSynchronizationContext(nullptr);
+    current.reset();
+    EXPECT_TRUE(observer.expired()) << "clearing the slot must release the context";
 }
 
 // ===========================================================================

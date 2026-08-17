@@ -8,6 +8,7 @@
 // WaitHandle::WaitAll/WaitAny, Barrier post-phase exception wrapping, and Mutex's
 // initiallyOwned/timeout fixes.
 #include <gtest/gtest.h>
+#include <memory>
 #include <atomic>
 #include <chrono>
 #include <stdexcept>
@@ -472,12 +473,42 @@ namespace {
 }
 
 TEST(IThreadPoolWorkItemTests, UnsafeQueueUserWorkItem_ExecutesWorkItem) {
+    // #1959: the queue now takes a share of the item's ownership, so this is a shared_ptr.
     std::atomic<int> counter{0};
-    CountingWorkItem item(&counter);
-    ThreadPool::UnsafeQueueUserWorkItem(&item, false);
+    auto item = std::make_shared<CountingWorkItem>(&counter);
+    ThreadPool::UnsafeQueueUserWorkItem(item, false);
     for (int i = 0; i < 100 && counter.load() == 0; ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     EXPECT_EQ(counter.load(), 1);
+}
+
+// #1959 / SR-AUD-187 (CCF-019). The defect this replaces: the queue captured a BORROWED raw
+// pointer in a DETACHED lambda, so an item deleted while Execute() was running was a
+// heap-use-after-free -- the audit's probe queued a heap item, waited until Execute had entered,
+// deleted it, and let Execute touch a member.
+//
+// A detached thread has no owner to wait for it, so the boundary #2134 gave Socket (a destructor
+// that waits) is not available here. The queue must hold a share instead, which is what .NET's
+// GC reference does. This case asserts exactly that: the caller drops its reference immediately
+// and the item still runs to completion.
+TEST(IThreadPoolWorkItemTests, UnsafeQueueUserWorkItem_KeepsTheItemAliveAfterTheCallerDropsIt) {
+    std::atomic<int> counter{0};
+    std::weak_ptr<CountingWorkItem> observer;
+    {
+        auto item = std::make_shared<CountingWorkItem>(&counter);
+        observer = item;
+        ThreadPool::UnsafeQueueUserWorkItem(item, false);
+    }   // the caller's reference is gone here, while Execute may not have started
+
+    for (int i = 0; i < 200 && counter.load() == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_EQ(counter.load(), 1) << "the work item was destroyed before it ran";
+
+    // ...and once it has run, nothing keeps it alive: the queue's share is released with the
+    // thread's lambda, so this is not a leak dressed up as a repair.
+    for (int i = 0; i < 200 && !observer.expired(); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_TRUE(observer.expired()) << "the queue retained the item after Execute() returned";
 }
 
 // ===========================================================================

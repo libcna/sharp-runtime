@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <memory>
 #include <functional>
 #include <future>
 #include <mutex>
@@ -179,14 +180,35 @@ namespace System::Threading {
             return true;
         }
 
-        /** Queues an IThreadPoolWorkItem's Execute() for execution on a detached thread; returns true on success. */
-        static bool UnsafeQueueUserWorkItem(IThreadPoolWorkItem* callBack, bool /*preferLocal*/) {
+        /**
+         * @brief Queues an IThreadPoolWorkItem's Execute() for execution on a detached thread.
+         *
+         * **Takes a `std::shared_ptr` since ticket #1959** (SR-AUD-187, CCF-019). This used to
+         * capture a borrowed raw pointer in a DETACHED lambda and call `Execute()` on it with no
+         * ownership, join or retention of any kind: the ASan probe queued a heap item, waited
+         * until `Execute` had entered, deleted it, and let `Execute` touch a member --
+         * heap-use-after-free. A detached thread has no owner to wait for it, so a boundary in
+         * some destructor (the answer #2134 gave `Socket`) is not available here; the queue must
+         * hold a share of the item instead, which is exactly what .NET's GC reference does.
+         *
+         * @param callBack The work item. Kept alive until `Execute()` returns.
+         * @param preferLocal Ignored by this port, as it is by .NET outside its own scheduler.
+         * @return true on success.
+         * @throws System::ArgumentNullException if @p callBack is null.
+         * @note **Source break, ticket #1959.** This took a raw `IThreadPoolWorkItem*` before.
+         *       See `docs/Migration-BorrowedCallbackOwnership.md`.
+         */
+        static bool UnsafeQueueUserWorkItem(std::shared_ptr<IThreadPoolWorkItem> callBack,
+                                             bool /*preferLocal*/) {
             if (!callBack)
                 throw System::ArgumentNullException("callBack");
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             throw System::PlatformNotSupportedException("ThreadPool::UnsafeQueueUserWorkItem requires pthreads (not available in Emscripten single-threaded build)");
 #else
-            std::thread([callBack]{ callBack->Execute(); }).detach();
+            // The captured shared_ptr IS the liveness boundary: the detached thread holds a share
+            // for as long as the body runs, so the item cannot be destroyed under it however
+            // early the caller drops its own reference.
+            std::thread([callBack = std::move(callBack)]{ callBack->Execute(); }).detach();
             return true;
 #endif
         }
