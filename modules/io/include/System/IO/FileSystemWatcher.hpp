@@ -177,17 +177,31 @@ namespace System::IO {
          * NotifyFilters(0) is a valid value naming no change: nothing is watched, and a later
          * filter change re-arms.
          *
-         * <b>UNRESOLVED, and deliberately so (ticket #2346, SR-AUD-346 remains `confirmed`).</b>
-         * Allocation of events WITHIN a class is a mapping policy this port has not chosen,
-         * because Linux does not give the information the .NET vocabulary assumes: IN_MODIFY
-         * cannot say whether the size changed, so Size and LastWrite are indistinguishable;
-         * IN_ATTRIB covers chmod/chown/link-count/utimes without saying which, so all six content
-         * values share it; inotify cannot report a creation-time change at all; LastAccess is
-         * served by no mask this watcher registers; and FileName is not separated from
-         * DirectoryName even though IN_ISDIR would allow it. Until #2346 is decided the six
-         * content values are mutually indistinguishable and FileName behaves as DirectoryName
-         * does. That is pinned by tests rather than assumed, so whichever mapping is eventually
-         * chosen shows up as a test change and not as a silent drift.
+         * <b>Allocation WITHIN a class, on Linux (ticket #2346, decided 2026-08-17 as
+         * `docs/StandingApprovals.md` SA-7).</b> Linux does not give the information the .NET
+         * vocabulary assumes, so this is a mapping policy rather than a translation, and it is
+         * chosen to be permissive where inotify genuinely cannot discriminate and discriminating
+         * where it can:
+         *
+         * - <b>Size, LastWrite</b> -- both are served by IN_MODIFY. Linux reports "content was
+         *   written" as one bit and cannot say whether the length changed, so serving only one of
+         *   the two would silently remove behaviour from the other.
+         * - <b>Attributes, Security, CreationTime, and the other three</b> -- all six content
+         *   values are served by IN_ATTRIB, which covers chmod/chown/link-count/utimes without
+         *   saying which of them happened. A filter naming only these does <b>not</b> see a
+         *   content write.
+         * - <b>CreationTime</b> -- inotify cannot report a creation-time change at all, so it is
+         *   approximated through the content class above. It is never rejected at this setter:
+         *   .NET accepts the value, and a filter that throws would be a worse failure than one
+         *   that over-reports.
+         * - <b>LastAccess</b> -- and only LastAccess -- additionally registers IN_ACCESS, so a
+         *   read raises Changed for a watcher that named it and for no other.
+         * - <b>FileName vs DirectoryName</b> -- separated on IN_ISDIR, which travels on the event
+         *   rather than on the subscription, so the split is applied when the event is
+         *   dispatched. It governs Created, Deleted and both halves of a rename.
+         *
+         * Every one of those is pinned by its own test, so a future change to the mapping shows
+         * up as a test change and not as a silent drift.
          *
          * @throws System::ArgumentException if @p value contains bits outside the defined NotifyFilters values.
          */

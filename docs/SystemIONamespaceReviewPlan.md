@@ -1066,7 +1066,7 @@ its two named causes have different evidence status, so it was split into three 
 |---|---|---|
 | **#2344** | I-E in full — `setPathProperty` never re-arms, **and races the watcher thread** | landed, SR-AUD-339 → `remediated` |
 | **#2345** | I-D's **class-crossing** half — no filter may admit events from the other class | landed, SR-AUD-346 stays `confirmed` |
-| **#2346** | I-D's remainder — the `NotifyFilters` → inotify mapping policy | `needs_user`, §21.10 |
+| **#2346** | I-D's remainder — the `NotifyFilters` → inotify mapping policy | **done** 2026-08-17 under SA-7, §21.11 |
 
 #### The inherited decomposition was right about the split and wrong about the second cause
 
@@ -1158,9 +1158,9 @@ exactly as disabling does. 6 mutations, all caught (3/3/1/1/1/1); the first atte
 "restore the original constant mask" mutation was rejected by `-Werror=unused-function` and is
 recorded as **invalid and re-run correctly**, not as a survivor.
 
-### 21.10 #2346 — the mapping decision this review will NOT make
+### 21.11 #2346 — the mapping decision, priced here and TAKEN on 2026-08-17
 
-Five questions remain. Each is priced; none is derivable with `/rv` absent.
+Five questions. Each is priced; **none is derivable from the reference tree, and none ever will be** — `NotifyFilters` names the notifications Win32's `ReadDirectoryChangesW` produces, and inotify's event set is not a relabelling of it. That is why this one survived the reference tree becoming available while so many sibling deferrals did not: it was never an evidence gap. The answers are §21.11.1.
 
 | # | Question | What Linux gives | Options | Cost of each |
 |---|---|---|---|---|
@@ -1170,11 +1170,48 @@ Five questions remain. Each is priced; none is derivable with `/rv` absent.
 | 4 | `LastAccess` | `IN_ACCESS`, which is in **no** mask today, so reads are never reported | (a) leave unserved — *current*; (b) add `IN_ACCESS` to the content class; (c) add it only when `LastAccess` is named | (a) a named filter that cannot fire for its own operation; (b) every read wakes every content watcher — a large volume change; (c) correct but makes the mask filter-dependent in a second dimension |
 | 5 | `FileName` vs `DirectoryName` | `IN_ISDIR` on each event — the information **is** available | (a) do not discriminate — *current*; (b) gate `Created`/`Deleted`/`Renamed` on `IN_ISDIR` against the two values | (a) a `FileName`-only watcher reports subdirectory creation; (b) correct, but changes the events a name-class watcher receives and needs a dispatch-side change, not just a mask change |
 
-Every "current" option is the state #2345 leaves behind, so **taking no decision is itself a
-supported outcome** — it is simply not one this review may take on the user's behalf. Until it is
-taken, all six content values are mutually indistinguishable and `FileName` is indistinguishable
-from `DirectoryName`; the permanent tests **pin that** rather than assume it away, so whichever
-option is chosen will show up as a test change and not as a silent drift.
+Every "current" option is the state #2345 leaves behind, so **taking no decision was itself a
+supported outcome** — it was simply not one this review could take on the user's behalf. The
+permanent tests pinned the undecided state rather than assuming it away, which is why the
+decision below shows up as a test change and not as a silent drift.
+
+#### 21.11.1 The answer — `docs/StandingApprovals.md` SA-7, granted 2026-08-17
+
+**1(a), 2(a), 3(a), 4(c), 5(b).** The shape is *permissive where Linux genuinely cannot
+discriminate, discriminating where it can*: over-notification is recoverable by a caller and
+silence is not, which decides 1, 2 and 3; where the information does exist the two filters are
+meant to differ, which decides 5; and 4 avoids waking every content watcher on every read while
+still letting a caller who names `LastAccess` receive events for it.
+
+| # | Answer | Where it lives | What changed |
+|---|---|---|---|
+| 1 | `IN_MODIFY` ⇒ `Size` **and** `LastWrite` | mask, `kWriteServedFilters` | `Attributes`, `CreationTime` and `Security` alone **stop** seeing a content write |
+| 2 | `IN_ATTRIB` ⇒ all six content values | mask, `kContentClassFilters` | unchanged |
+| 3 | `CreationTime` approximated through the content class | falls out of 2 | it keeps `IN_ATTRIB` and loses `IN_MODIFY` |
+| 4 | `IN_ACCESS` **only** when `LastAccess` is named | mask | `LastAccess` **starts** firing for a read; nothing else does |
+| 5 | `FileName` / `DirectoryName` split on `IN_ISDIR` | **dispatch**, `nameClassAdmits()` | a `FileName`-only watcher **stops** reporting subdirectories, and vice versa |
+
+Decision 5 is the only one that could not be expressed in the subscription mask: `IN_ISDIR`
+travels on the *event*, so both name-class values subscribe to the same four inotify events and
+the split happens where they are dispatched. It reaches `Created`, `Deleted`, **both halves of a
+rename**, and the unpaired `IN_MOVED_FROM` that a cross-directory move leaves behind — that last
+one is reported as a `Deleted`, so it is governed by the value that governs a `Deleted`.
+
+**Five tests, one per decision**, replacing `EveryContentClassFilterAloneStillAdmitsChanged`,
+which asserted the very indistinguishability decision 1(a) removes. `SharpRuntimeTests_IO`
+689 → 693.
+
+**Three mutations, all caught.** M1 (serve `IN_MODIFY` to the whole content class — the state
+before this ticket) fails `Decision1a`. M2 (option 4(b), `IN_ACCESS` for the whole content class)
+fails `Decision4c`. M3 (option 5(a), no discrimination) fails **both** `Decision5b` cases. M3's
+first attempt was rejected by `-Werror=unused-function` — `nameClassAdmits` became unreachable —
+and is recorded as **invalid and re-run correctly**, not as a survivor, exactly as #2345's
+equivalent was.
+
+No signature, layout, vtable or `noexcept` change. Downstream, measured under SA-2: neither
+`cna` nor `mobile-eggbert` constructs a `FileSystemWatcher` or names a `NotifyFilters` value.
+
+**SR-AUD-346 is `remediated`, and `modules/io` now has no open implementation work at all.**
 
 ### 20.9 #2104 landed, and the namespace is closed for autonomous work
 
@@ -1269,7 +1306,7 @@ that was taken rather than asserted.
 |---|---|---|
 | SR-AUD-338, 339, 340, 341, 342, 344, 345, 347 | #2099–#2103, #2108, #2344 | **remediated** |
 | SR-AUD-337, SR-AUD-343 | **#2098** | **remediated** 2026-08-17 — see §21.10 |
-| SR-AUD-346 | **#2346** | open — `needs_user`, the mapping policy |
+| SR-AUD-346 | **#2346** | **remediated** 2026-08-17 — see §21.11 |
 | SR-AUD-185, SR-AUD-186 | **#2106** | open — deferred; the reference tree is available again |
 | watcher handler-after-disable question | **#2105** | deferred, needs TSan |
 | reentrant reconfiguration → `std::terminate` | **#2347** | **remediated** 2026-08-12 — see §20.10 |

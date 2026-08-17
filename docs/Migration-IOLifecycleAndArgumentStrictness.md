@@ -160,7 +160,7 @@ resolution cannot land silently. They are not guarantees; they are a record of t
 
 | Behaviour | Owner |
 |---|---|
-| The six content-class `NotifyFilters` values are mutually indistinguishable, and `FileName` behaves as `DirectoryName` does | **#2346** (`needs_user`) |
+| ~~The six content-class `NotifyFilters` values are mutually indistinguishable, and `FileName` behaves as `DirectoryName` does~~ — **resolved by #2346**, see §8 | — |
 | ~~A text wrapper keeps working after `Close()`~~ — **resolved by #2098**, see §7 | — |
 | `BinaryData::ToString()` returns invalid UTF-8 bytes unchanged rather than substituting U+FFFD | **#2106** (deferred) |
 | Every `BinaryData` construction path copies its source, including the `ReadOnlyMemory` ones | **#2106** (deferred) |
@@ -174,7 +174,7 @@ resolution cannot land silently. They are not guarantees; they are a record of t
   SA-3. `UnmanagedMemoryStream`, the fifth member of the original ticket, needed no new storage and
   had already landed separately as **#2108**.
 - **#2346 — `needs_user`.** The `NotifyFilters` → inotify mapping *within* each class. Five
-  questions, each priced in plan §21.10: which value `IN_MODIFY` serves, which values `IN_ATTRIB`
+  questions, each priced in plan §21.11: which value `IN_MODIFY` serves, which values `IN_ATTRIB`
   serves, what to do about `CreationTime` (inotify cannot report it at all), whether to add
   `IN_ACCESS` for `LastAccess`, and whether to separate `FileName` from `DirectoryName` using
   `IN_ISDIR`. Taking **no** decision is a supported outcome — it is simply not one this review may
@@ -295,3 +295,42 @@ Per `docs/StandingApprovals.md` SA-2 condition 5, both consumer checkouts were s
   still be rebuilt, like every consumer.
 
 Neither repository was modified.
+
+
+---
+
+## 8. #2346 — the `NotifyFilters` → inotify mapping, decided (2026-08-17)
+
+`docs/StandingApprovals.md` SA-7 answers the five questions plan §21.11 priced: **1(a), 2(a),
+3(a), 4(c), 5(b)**. This is the one deferral in the namespace the reference tree could not
+settle and never will — `NotifyFilters` names what Win32's `ReadDirectoryChangesW` produces, and
+inotify's event set is not a relabelling of it.
+
+**Linux only.** On every other platform `EnableRaisingEvents` still throws, so nothing here
+applies.
+
+### 8.1 What starts and stops arriving
+
+| Configuration | Was | Is |
+|---|---|---|
+| `Attributes`, `CreationTime` or `Security`, alone or together, **without** `Size`/`LastWrite` | `Changed` on a content write | **no** `Changed` on a content write; still `Changed` on chmod/chown/utimes |
+| `LastAccess` | never fired for a read | **`Changed` on a read** |
+| `FileName` without `DirectoryName` | `Created`/`Deleted`/`Renamed` for subdirectories too | file entries only |
+| `DirectoryName` without `FileName` | `Created`/`Deleted`/`Renamed` for files too | directory entries only |
+| `Size` or `LastWrite` | `Changed` on a content write | unchanged |
+| the default `LastWrite \| FileName \| DirectoryName` | — | **byte-identical**: it names `LastWrite`, so it keeps `IN_MODIFY`, and it names both name-class values, so the `IN_ISDIR` split admits everything |
+
+**To migrate:** a watcher that wants content writes must name `Size` or `LastWrite` — naming only
+`Attributes` no longer implies them. A watcher that wants both files and directories must name
+both `FileName` and `DirectoryName`; that is what .NET's own default does.
+
+### 8.2 What did not change
+
+`NotifyFilters(0)` still names no change and still watches nothing. An undefined bit is still
+rejected with `ArgumentException` before anything is torn down. Reconfiguring from inside a
+handler still behaves as #2347 left it. No signature, layout, vtable or `noexcept` change.
+
+### 8.3 Downstream, measured
+
+Neither `cna` nor `mobile-eggbert` constructs a `FileSystemWatcher` or names a `NotifyFilters`
+value — **zero sites in both**. Neither repository was modified.

@@ -181,7 +181,7 @@ not green"*.
 
 ## 4d. SA-7 — the `NotifyFilters` → inotify mapping (ticket #2346)
 
-> Answer the five priced questions of `docs/SystemIONamespaceReviewPlan.md` §21.10 as
+> Answer the five priced questions of `docs/SystemIONamespaceReviewPlan.md` §21.11 as
 > **1a, 2a, 3a, 4c, 5b**.
 
 Granted 2026-08-17. This one is **not** derivable from the reference and never will be: .NET's

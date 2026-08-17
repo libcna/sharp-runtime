@@ -196,19 +196,42 @@ namespace System::IO {
         //
         // No value in one class can justify an event from the other, so a filter naming no
         // name-class value must not admit Created/Deleted/Renamed, and a filter naming no
-        // content-class value must not admit Changed. That much is unambiguous with no reference
-        // tree. Allocating events WITHIN a class is not, and is NOT decided here: IN_MODIFY could
-        // serve Size or LastWrite or both; IN_ATTRIB could serve any of five; CreationTime has no
-        // inotify event at all; LastAccess is unserved because IN_ACCESS is in no mask; and
-        // FileName is not discriminated from DirectoryName even though IN_ISDIR would allow it.
-        // Those five choices are ticket #2346 and are left exactly as they were measured -- this
-        // function narrows the mask, it does not decide the mapping.
+        // content-class value must not admit Changed. That much was unambiguous with no reference
+        // tree and landed as #2345.
+        //
+        // Allocating events WITHIN a class is ticket #2346, and it is NOT derivable from the
+        // reference and never will be: `NotifyFilters` names the notifications Win32's
+        // ReadDirectoryChangesW produces, and inotify's event set is not a relabelling of it. It
+        // is therefore a user decision, taken on 2026-08-17 and recorded as
+        // `docs/StandingApprovals.md` SA-7. The shape of the answer is *permissive where Linux
+        // genuinely cannot discriminate, discriminating where it can*: over-notification is
+        // recoverable by a caller, silence is not, but where the information does exist the two
+        // filters are meant to differ.
+        //
+        //   1 (a)  IN_MODIFY serves Size AND LastWrite. Linux gives one bit for "content was
+        //          written" and no way to know whether the length changed, so serving only one of
+        //          the two would silently remove behaviour from the other.
+        //   2 (a)  IN_ATTRIB serves ALL SIX content values. It is one bit for
+        //          chmod/chown/link-count/utimes and does not say which of them happened.
+        //   3 (a)  CreationTime is approximated through the content class. inotify cannot report a
+        //          btime change at all; rejecting the value at the setter (option c) would throw
+        //          for a value .NET accepts, and admitting nothing (option b) would make a
+        //          configured filter silently inert.
+        //   4 (c)  IN_ACCESS is admitted ONLY when LastAccess is named. Adding it to the whole
+        //          content class would make every read wake every content watcher; leaving it out
+        //          entirely left a named filter unable to fire for its own operation.
+        //   5 (b)  FileName and DirectoryName are separated, in DISPATCH rather than in the mask,
+        //          because IN_ISDIR travels on the event and not on the subscription. See
+        //          nameClassAdmits() below.
         constexpr int kNameClassFilters =
             static_cast<int>(NotifyFilters::FileName) | static_cast<int>(NotifyFilters::DirectoryName);
         constexpr int kContentClassFilters =
             static_cast<int>(NotifyFilters::Attributes)   | static_cast<int>(NotifyFilters::Size)     |
             static_cast<int>(NotifyFilters::LastWrite)    | static_cast<int>(NotifyFilters::LastAccess) |
             static_cast<int>(NotifyFilters::CreationTime) | static_cast<int>(NotifyFilters::Security);
+        // Decision 1(a): the two values a "content was written" notification can honestly serve.
+        constexpr int kWriteServedFilters =
+            static_cast<int>(NotifyFilters::Size) | static_cast<int>(NotifyFilters::LastWrite);
 
         uint32_t inotifyMaskFor(NotifyFilters filter) {
             const int bits = static_cast<int>(filter);
@@ -216,13 +239,35 @@ namespace System::IO {
             // IN_MOVED_FROM and IN_MOVED_TO travel with IN_CREATE/IN_DELETE rather than forming a
             // class of their own: watchLoop pairs them by cookie to report a single Renamed, so
             // admitting one half of a pair would turn a rename into a spurious Created or Deleted.
+            // Both name-class values subscribe to the same events; decision 5(b) separates them
+            // afterwards, on IN_ISDIR, which is not expressible in a mask.
             if ((bits & kNameClassFilters) != 0) {
                 mask |= IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO;
             }
+            if ((bits & kWriteServedFilters) != 0) {
+                mask |= IN_MODIFY;                       // decision 1(a)
+            }
             if ((bits & kContentClassFilters) != 0) {
-                mask |= IN_MODIFY | IN_ATTRIB;
+                mask |= IN_ATTRIB;                       // decisions 2(a) and 3(a)
+            }
+            if ((bits & static_cast<int>(NotifyFilters::LastAccess)) != 0) {
+                mask |= IN_ACCESS;                       // decision 4(c)
             }
             return mask;
+        }
+
+        /**
+         * Decision 5(b). `IN_ISDIR` is set on the event, so the name-class split can only be
+         * applied where the event is dispatched, never in the subscription mask.
+         *
+         * A directory entry is either a directory or it is not, so exactly one of the two values
+         * governs any given `Created`/`Deleted`/`Renamed`. A watcher naming neither never reaches
+         * here, because `inotifyMaskFor` subscribed to none of those events.
+         */
+        bool nameClassAdmits(NotifyFilters filter, bool isDirectory) {
+            const int bits = static_cast<int>(filter);
+            const auto governing = isDirectory ? NotifyFilters::DirectoryName : NotifyFilters::FileName;
+            return (bits & static_cast<int>(governing)) != 0;
         }
     } // namespace
 
@@ -390,41 +435,66 @@ namespace System::IO {
             // batch: a paired rename's two halves are always delivered in the same batch, so
             // anything left unpaired at the end of this batch genuinely moved out of the watched
             // directory and is reported as Deleted, matching what the caller would observe.
-            std::unordered_map<uint32_t, std::string> pendingMovedFrom;
+            // The pending half of a rename carries its IN_ISDIR with it: decision 5(b) has to be
+            // applied to the whole pair, and an IN_MOVED_FROM left unpaired at the end of the
+            // batch is reported as a Deleted, which is governed by the same value.
+            struct PendingMove {
+                std::string name;
+                bool        isDirectory = false;
+            };
+            std::unordered_map<uint32_t, PendingMove> pendingMovedFrom;
 
             size_t i = 0;
             while (i + sizeof(struct inotify_event) <= static_cast<size_t>(len)) {
                 auto* ev = reinterpret_cast<struct inotify_event*>(buf.data() + i);
                 std::string name = ev->len > 0 ? std::string(ev->name) : std::string();
+                // Decision 5(b), ticket #2346 / docs/StandingApprovals.md SA-7. Reading
+                // notifyFilter_ here is safe for the same reason reading directory_ is: every
+                // reconfiguring member joins the watcher thread before writing (#2344), and the
+                // one path that cannot -- a handler reconfiguring the watcher it is running on --
+                // is rejected outright (#2347).
+                const bool isDirectory = (ev->mask & IN_ISDIR) != 0;
+                const bool nameAdmitted = nameClassAdmits(notifyFilter_, isDirectory);
 
                 if (name.empty() || matchesAnyFilter(filters_, name)) {
                     if (ev->mask & IN_MOVED_FROM) {
-                        pendingMovedFrom[ev->cookie] = name;
+                        pendingMovedFrom[ev->cookie] = PendingMove{name, isDirectory};
                     } else if (ev->mask & IN_MOVED_TO) {
                         auto it = pendingMovedFrom.find(ev->cookie);
                         if (it != pendingMovedFrom.end()) {
-                            RenamedEventArgs args(WatcherChangeTypes::Renamed, directory_, name, it->second);
-                            for (auto& handler : Renamed)
-                                try { handler(this, args); }
-                                catch (...) { reportHandlerFault(std::current_exception()); }
+                            if (nameAdmitted) {
+                                RenamedEventArgs args(WatcherChangeTypes::Renamed, directory_, name,
+                                                      it->second.name);
+                                for (auto& handler : Renamed)
+                                    try { handler(this, args); }
+                                    catch (...) { reportHandlerFault(std::current_exception()); }
+                            }
+                            // Erased whether or not it was reported: the pair is resolved either
+                            // way, and leaving it behind would resurface as a spurious Deleted.
                             pendingMovedFrom.erase(it);
-                        } else {
+                        } else if (nameAdmitted) {
                             FileSystemEventArgs args(WatcherChangeTypes::Created, directory_, name);
                             for (auto& handler : Created)
                                 try { handler(this, args); }
                                 catch (...) { reportHandlerFault(std::current_exception()); }
                         }
                     } else if (ev->mask & IN_CREATE) {
-                        FileSystemEventArgs args(WatcherChangeTypes::Created, directory_, name);
-                        for (auto& handler : Created)
-                            try { handler(this, args); }
-                            catch (...) { reportHandlerFault(std::current_exception()); }
+                        if (nameAdmitted) {
+                            FileSystemEventArgs args(WatcherChangeTypes::Created, directory_, name);
+                            for (auto& handler : Created)
+                                try { handler(this, args); }
+                                catch (...) { reportHandlerFault(std::current_exception()); }
+                        }
                     } else if (ev->mask & IN_DELETE) {
-                        FileSystemEventArgs args(WatcherChangeTypes::Deleted, directory_, name);
-                        for (auto& handler : Deleted)
-                            try { handler(this, args); }
-                            catch (...) { reportHandlerFault(std::current_exception()); }
-                    } else if (ev->mask & (IN_MODIFY | IN_ATTRIB)) {
+                        if (nameAdmitted) {
+                            FileSystemEventArgs args(WatcherChangeTypes::Deleted, directory_, name);
+                            for (auto& handler : Deleted)
+                                try { handler(this, args); }
+                                catch (...) { reportHandlerFault(std::current_exception()); }
+                        }
+                    } else if (ev->mask & (IN_MODIFY | IN_ATTRIB | IN_ACCESS)) {
+                        // IN_ACCESS is in the mask only when LastAccess is named (decision 4(c)),
+                        // so its mere arrival means the configured filter admits it.
                         FileSystemEventArgs args(WatcherChangeTypes::Changed, directory_, name);
                         for (auto& handler : Changed)
                             try { handler(this, args); }
@@ -435,9 +505,12 @@ namespace System::IO {
                 i += sizeof(struct inotify_event) + ev->len;
             }
 
-            for (const auto& [cookie, name] : pendingMovedFrom) {
+            for (const auto& [cookie, pending] : pendingMovedFrom) {
                 (void)cookie;
-                FileSystemEventArgs args(WatcherChangeTypes::Deleted, directory_, name);
+                // Decision 5(b) again: an unpaired IN_MOVED_FROM is reported as a Deleted, so it
+                // is governed by the value that governs a Deleted of the same entry kind.
+                if (!nameClassAdmits(notifyFilter_, pending.isDirectory)) continue;
+                FileSystemEventArgs args(WatcherChangeTypes::Deleted, directory_, pending.name);
                 for (auto& handler : Deleted)
                     try { handler(this, args); }
                     catch (...) { reportHandlerFault(std::current_exception()); }

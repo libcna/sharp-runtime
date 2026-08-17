@@ -1265,6 +1265,17 @@ void appendByte(const std::filesystem::path& p) {
     ::close(fd);
 }
 
+/// Reads one byte from an existing file: exactly one in-mask inotify event (IN_ACCESS), and the
+/// only way to observe #2346's decision 4(c) from a test.
+void readByte(const std::filesystem::path& p) {
+    const int fd = ::open(p.c_str(), O_RDONLY);
+    ASSERT_GE(fd, 0) << "could not open " << p;
+    char c = 0;
+    const ssize_t n = ::read(fd, &c, 1);
+    ASSERT_GE(n, 0);
+    ::close(fd);
+}
+
 /// The number of descriptors this process currently holds. Declared here rather than reused
 /// from the #2100 fixture, which owns its copy as a private static member.
 int watcherFdCount() {
@@ -1511,17 +1522,33 @@ TEST_F(WatcherReconfigurationFixture, ASizeOnlyWatcherRaisesNoCreatedDeletedOrRe
     w.setEnableRaisingEventsProperty(false);
 }
 
-TEST_F(WatcherReconfigurationFixture, EveryContentClassFilterAloneStillAdmitsChanged) {
-    // Excluding the name class must not silence the class the caller DID ask for. All six are
-    // checked because #2346 has not decided which of them IN_MODIFY actually serves — until it
-    // does, they are deliberately indistinguishable, and that is pinned rather than assumed.
+// ===========================================================================================
+// #2346 / SR-AUD-346, the remainder — allocating events WITHIN a class
+//
+// #2345 landed the half that needed no policy. This is the half that does, and it is NOT
+// derivable from the reference tree and never will be: NotifyFilters names the notifications
+// Win32's ReadDirectoryChangesW produces, and inotify's event set is not a relabelling of it.
+// The five questions are priced in docs/SystemIONamespaceReviewPlan.md, and the user answered
+// them on 2026-08-17 as docs/StandingApprovals.md SA-7: 1(a), 2(a), 3(a), 4(c), 5(b).
+//
+// The shape of the answer is *permissive where Linux genuinely cannot discriminate,
+// discriminating where it can*. The cases below are one per decision, and each is written so
+// that the OPPOSITE decision would fail it.
+// ===========================================================================================
+
+TEST_F(WatcherReconfigurationFixture, Decision2a_IN_ATTRIB_ServesAllSixContentFilters) {
+    // 2(a). IN_ATTRIB is one bit for chmod/chown/link-count/utimes and does not say which of
+    // them happened, so every content-class value is served by it. This is the case that
+    // guarantees no content filter is silently inert -- including CreationTime, which is
+    // decision 3(a): inotify cannot report a btime change at all, so the content class is the
+    // approximation it gets.
     const std::pair<const char*, NotifyFilters> contentFilters[] = {
         {"Attributes", NotifyFilters::Attributes}, {"Size", NotifyFilters::Size},
         {"LastWrite", NotifyFilters::LastWrite},   {"LastAccess", NotifyFilters::LastAccess},
         {"CreationTime", NotifyFilters::CreationTime}, {"Security", NotifyFilters::Security},
     };
     for (const auto& [label, filter] : contentFilters) {
-        const std::filesystem::path dir = root / label;
+        const std::filesystem::path dir = root / (std::string("attrib_") + label);
         std::filesystem::create_directories(dir);
         touchNew(dir / "subject");
 
@@ -1531,10 +1558,173 @@ TEST_F(WatcherReconfigurationFixture, EveryContentClassFilterAloneStillAdmitsCha
         subscribeAll(w, r);
         w.setEnableRaisingEventsProperty(true);
 
-        appendByte(dir / "subject");
+        ASSERT_EQ(::chmod((dir / "subject").c_str(), 0600), 0);
         EXPECT_TRUE(r.awaitEvent(WatcherChangeTypes::Changed, "subject")) << label;
         w.setEnableRaisingEventsProperty(false);
     }
+}
+
+TEST_F(WatcherReconfigurationFixture, Decision1a_IN_MODIFY_ServesSizeAndLastWriteAndNothingElse) {
+    // 1(a). A content write is reported to Size and to LastWrite -- Linux gives one bit and no
+    // way to tell whether the length changed, so serving only one of the two would silently
+    // remove behaviour from the other. It is NOT reported to the four values that describe
+    // metadata rather than content.
+    //
+    // "written" and "sentinel" are separate files precisely so the two Changed events can be
+    // told apart; a single subject would make the negative half unassertable.
+    struct Row { const char* label; NotifyFilters filter; bool expectsWrite; };
+    const Row rows[] = {
+        {"Size",         NotifyFilters::Size,         true},
+        {"LastWrite",    NotifyFilters::LastWrite,    true},
+        {"Attributes",   NotifyFilters::Attributes,   false},
+        {"CreationTime", NotifyFilters::CreationTime, false},
+        {"Security",     NotifyFilters::Security,     false},
+    };
+    for (const auto& row : rows) {
+        const std::filesystem::path dir = root / (std::string("modify_") + row.label);
+        std::filesystem::create_directories(dir);
+        touchNew(dir / "written");
+        touchNew(dir / "sentinel");
+
+        WatchRecorder r;
+        FileSystemWatcher w(dir.string());
+        w.setNotifyFilterProperty(row.filter);
+        subscribeAll(w, r);
+        w.setEnableRaisingEventsProperty(true);
+
+        appendByte(dir / "written");
+        // Every row admits IN_ATTRIB (decision 2(a)), so the chmod is a sentinel that arrives
+        // for all five and orders the negative assertion: inotify delivers in queue order
+        // within one instance, so once it lands, any write event was already going to be there.
+        ASSERT_EQ(::chmod((dir / "sentinel").c_str(), 0600), 0);
+        ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Changed, "sentinel")) << row.label;
+
+        EXPECT_EQ(r.sawEvent(WatcherChangeTypes::Changed, "written"), row.expectsWrite)
+            << row.label << ": IN_MODIFY serves Size and LastWrite only";
+        w.setEnableRaisingEventsProperty(false);
+    }
+}
+
+TEST_F(WatcherReconfigurationFixture, Decision4c_IN_ACCESS_ArrivesOnlyWhenLastAccessIsNamed) {
+    // 4(c). Before #2346, IN_ACCESS was in no mask at all, so LastAccess was a named filter that
+    // could not fire for its own operation. Adding it to the whole content class (option b)
+    // would make every read wake every content watcher, which is a large volume change on a
+    // busy directory; adding it only when LastAccess is named costs nothing to anyone else.
+    {
+        const std::filesystem::path dir = root / "access_named";
+        std::filesystem::create_directories(dir);
+        touchNew(dir / "readme");
+        // The file must have content before the watcher is armed: a read() that returns zero
+        // bytes at end-of-file produces no IN_ACCESS, so an empty subject would make this case
+        // pass or fail for a reason that has nothing to do with the filter.
+        appendByte(dir / "readme");
+
+        WatchRecorder r;
+        FileSystemWatcher w(dir.string());
+        w.setNotifyFilterProperty(NotifyFilters::LastAccess);
+        subscribeAll(w, r);
+        w.setEnableRaisingEventsProperty(true);
+
+        readByte(dir / "readme");
+        EXPECT_TRUE(r.awaitEvent(WatcherChangeTypes::Changed, "readme"))
+            << "a LastAccess watcher must fire for a read";
+        w.setEnableRaisingEventsProperty(false);
+    }
+    {
+        const std::filesystem::path dir = root / "access_unnamed";
+        std::filesystem::create_directories(dir);
+        touchNew(dir / "readme");
+        appendByte(dir / "readme");     // as above: an empty file cannot produce IN_ACCESS
+        touchNew(dir / "sentinel");
+
+        WatchRecorder r;
+        FileSystemWatcher w(dir.string());
+        w.setNotifyFilterProperty(NotifyFilters::Size);
+        subscribeAll(w, r);
+        w.setEnableRaisingEventsProperty(true);
+
+        readByte(dir / "readme");
+        appendByte(dir / "sentinel");       // IN_MODIFY: admitted by Size, orders the negative
+        ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Changed, "sentinel"));
+        EXPECT_FALSE(r.sawEvent(WatcherChangeTypes::Changed, "readme"))
+            << "a Size-only watcher must not be woken by every read";
+        w.setEnableRaisingEventsProperty(false);
+    }
+}
+
+TEST_F(WatcherReconfigurationFixture, Decision5b_FileNameAndDirectoryNameDiscriminateOnIN_ISDIR) {
+    // 5(b). IN_ISDIR travels on the event, so this is the one decision that could not be made in
+    // the subscription mask and had to be made in dispatch. The information exists and the two
+    // filters are meant to differ, so before #2346 a FileName-only watcher reported subdirectory
+    // creation and a DirectoryName-only watcher reported file creation.
+    {
+        const std::filesystem::path dir = root / "isdir_file";
+        std::filesystem::create_directories(dir);
+
+        WatchRecorder r;
+        FileSystemWatcher w(dir.string());
+        w.setNotifyFilterProperty(NotifyFilters::FileName);
+        subscribeAll(w, r);
+        w.setEnableRaisingEventsProperty(true);
+
+        std::filesystem::create_directory(dir / "kidDir");
+        touchNew(dir / "kidFile");
+        ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "kidFile"));
+        EXPECT_FALSE(r.sawEvent(WatcherChangeTypes::Created, "kidDir"))
+            << "a FileName-only watcher reported a subdirectory";
+        w.setEnableRaisingEventsProperty(false);
+    }
+    {
+        const std::filesystem::path dir = root / "isdir_dir";
+        std::filesystem::create_directories(dir);
+
+        WatchRecorder r;
+        FileSystemWatcher w(dir.string());
+        w.setNotifyFilterProperty(NotifyFilters::DirectoryName);
+        subscribeAll(w, r);
+        w.setEnableRaisingEventsProperty(true);
+
+        touchNew(dir / "kidFile");
+        std::filesystem::create_directory(dir / "kidDir");
+        ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Created, "kidDir"));
+        EXPECT_FALSE(r.sawEvent(WatcherChangeTypes::Created, "kidFile"))
+            << "a DirectoryName-only watcher reported a file";
+        w.setEnableRaisingEventsProperty(false);
+    }
+}
+
+TEST_F(WatcherReconfigurationFixture, Decision5b_AppliesToDeletedAndToBothHalvesOfARename) {
+    // The discrimination has to reach every name-class event, not only Created -- and a rename
+    // is the awkward one, because it is assembled from two inotify events and its IN_ISDIR
+    // arrives on both. A watcher naming only DirectoryName must report the directory rename and
+    // neither half of the file rename.
+    const std::filesystem::path dir = root / "isdir_rename";
+    std::filesystem::create_directories(dir);
+    touchNew(dir / "oldFile");
+    std::filesystem::create_directory(dir / "oldDir");
+    touchNew(dir / "doomedFile");
+    std::filesystem::create_directory(dir / "doomedDir");
+
+    WatchRecorder r;
+    FileSystemWatcher w(dir.string());
+    w.setNotifyFilterProperty(NotifyFilters::DirectoryName);
+    subscribeAll(w, r);
+    w.setEnableRaisingEventsProperty(true);
+
+    std::filesystem::rename(dir / "oldFile", dir / "newFile");
+    std::filesystem::remove(dir / "doomedFile");
+    std::filesystem::rename(dir / "oldDir", dir / "newDir");
+    std::filesystem::remove(dir / "doomedDir");
+
+    ASSERT_TRUE(r.awaitEvent(WatcherChangeTypes::Deleted, "doomedDir"));
+    EXPECT_TRUE(r.sawEvent(WatcherChangeTypes::Renamed, "newDir"));
+    EXPECT_FALSE(r.sawEvent(WatcherChangeTypes::Renamed, "newFile"))
+        << "a DirectoryName-only watcher reported a file rename";
+    EXPECT_FALSE(r.sawEvent(WatcherChangeTypes::Deleted, "doomedFile"))
+        << "a DirectoryName-only watcher reported a file deletion";
+    EXPECT_FALSE(r.handlerFailed());
+
+    w.setEnableRaisingEventsProperty(false);
 }
 
 TEST_F(WatcherReconfigurationFixture, ANameOnlyWatcherRaisesNoChanged) {

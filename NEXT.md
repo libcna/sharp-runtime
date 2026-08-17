@@ -26,7 +26,7 @@ implementation-ready:**
 | Open item | Owner | Why it cannot be started autonomously |
 |---|---|---|
 | SR-AUD-337, SR-AUD-343 — text wrappers keep working after `Close()` | **#2098** | `blocked` on **Approval IO-1**. Recording the closed state is an object-layout change in a public type; the three costed options and the exact approval sentence are plan §21.2–§21.8 |
-| SR-AUD-346 — `NotifyFilters` → inotify mapping *within* a class | **#2346** | `needs_user`. Five priced questions in plan §21.10; **taking no decision is itself a supported outcome**, and it is not one this review may take on the user's behalf |
+| SR-AUD-346 — `NotifyFilters` → inotify mapping *within* a class | **#2346** | `needs_user`. Five priced questions in plan §21.11; **taking no decision is itself a supported outcome**, and it is not one this review may take on the user's behalf |
 | SR-AUD-185, SR-AUD-186 — `BinaryData` decoding and copy-vs-wrap | **#2106** | deferred; both need `/rv`, which is absent. SR-AUD-186's premise is **inverted** — .NET's behaviour is the aliasing one |
 | handler-after-`EnableRaisingEvents = false` | **#2105** | deferred; needs TSan plus a blocking-handler harness, per its own acceptance criteria |
 | reentrant reconfiguration → `std::terminate` | **#2347** | **new**, created by #2104. A concurrency repair with real design content — see §3 |
@@ -161,7 +161,7 @@ one class can justify an event from the other. That much needs no reference tree
 landed. Ten rows before → after: **7,7,7,7,7,7,7,7,7,7 → 7,5,5,2,2,2,2,2,2,0**, with the
 **default** filter byte-identical because it spans both classes.
 
-Left to #2346, priced option-by-option in `docs/SystemIONamespaceReviewPlan.md` §21.10: whether
+Left to #2346, priced option-by-option in `docs/SystemIONamespaceReviewPlan.md` §21.11: whether
 `IN_MODIFY` serves `Size` or `LastWrite` or both; how `IN_ATTRIB` is allocated across five
 values; that `CreationTime` has **no** inotify event at all; that `LastAccess` is unserved
 because `IN_ACCESS` is in no mask; and `FileName` versus `DirectoryName`, which `IN_ISDIR` could
