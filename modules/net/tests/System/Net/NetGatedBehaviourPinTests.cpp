@@ -207,9 +207,18 @@ TEST(NetGatedBehaviourPinTests, Pin2042_ExpiredCookiesAreRetainedNotPurged) {
 }
 
 // ===========================================================================
-// #2044 -- the HTML escaping policy. Approval sentence: plan §14.4, and it is
-// coupled to System::Text's #2019: two HTML encoders in one repository must not
-// diverge. DEFERRED, not merely blocked.
+// #2044 RESOLVED -- the HTML escaping policy, and the coupling premise was wrong.
+//
+// The deferral said this was "coupled to System::Text's #2019: two HTML encoders in one
+// repository must not diverge". The reference answers that directly: .NET HAS EXACTLY TWO HTML
+// ENCODERS, WITH EXACTLY TWO DIFFERENT ESCAPE SETS, DELIBERATELY.
+//
+//   * System.Text.Encodings.Web.HtmlEncoder -- an ALLOW-LIST, Basic Latin only, everything
+//     above escaped as &#xHH; UPPERCASE HEX. A defence-in-depth encoder. That is #2019, landed.
+//   * System.Net.WebUtility.HtmlEncode -- the five specials, plus 160..255 and supplementary
+//     scalars as &#NNN; DECIMAL, and everything else passed through (WebUtility.cs:78-140).
+//
+// So each matches its own counterpart, and a repository-wide "consistency" would match neither.
 // ===========================================================================
 
 TEST(NetGatedBehaviourPinTests, Pin2044_HtmlEncodeEscapesExactlyFiveAsciiCharacters) {
@@ -220,17 +229,51 @@ TEST(NetGatedBehaviourPinTests, Pin2044_HtmlEncodeEscapesExactlyFiveAsciiCharact
               "azAZ09 -_.!*()~`@#$%^+=[]{}|\\:;,/?");
 }
 
-TEST(NetGatedBehaviourPinTests, Pin2044_HtmlEncodePassesEveryNonAsciiBytethrough) {
-    // The gated half: .NET numeric-entity-encodes U+00A0-U+00FF and non-BMP characters. This
-    // port passes the raw UTF-8 bytes through unchanged.
-    const std::string latin1Supplement = "caf\xC3\xA9";        // café, U+00E9
-    const std::string euro = "\xE2\x82\xAC";                    // U+20AC
-    const std::string nonBmp = "\xF0\x9F\x98\x80";              // U+1F600
-    const std::string nbsp = "\xC2\xA0";                        // U+00A0
-    EXPECT_EQ(WebUtility::HtmlEncode(latin1Supplement), latin1Supplement);
-    EXPECT_EQ(WebUtility::HtmlEncode(euro), euro);
-    EXPECT_EQ(WebUtility::HtmlEncode(nonBmp), nonBmp);
-    EXPECT_EQ(WebUtility::HtmlEncode(nbsp), nbsp);
+TEST(NetGatedBehaviourPinTests, Fix2044_TheLatin1SupplementAndSupplementaryScalarsAreEncoded) {
+    // WebUtility.cs:110 -- "The seemingly arbitrary 160 comes from RFC" -- and :113-124 for the
+    // surrogate pair. DECIMAL, not hex: that is WebUtility's form, where HtmlEncoder's is
+    // &#xHH; uppercase hex.
+    EXPECT_EQ(WebUtility::HtmlEncode("caf\xC3\xA9"), "caf&#233;");        // U+00E9
+    EXPECT_EQ(WebUtility::HtmlEncode("\xC2\xA0"), "&#160;");             // U+00A0, the boundary
+    EXPECT_EQ(WebUtility::HtmlEncode("\xC3\xBF"), "&#255;");             // U+00FF, the other end
+    EXPECT_EQ(WebUtility::HtmlEncode("\xF0\x9F\x98\x80"), "&#128512;")  // U+1F600
+        << "one reference for the whole scalar, not one per surrogate half";
+}
+
+TEST(NetGatedBehaviourPinTests, Fix2044_EverythingOutsideThatWindowStillPassesThrough) {
+    // NOT an oversight in .NET, and pinned so it is not "tidied" later: 128..159 and every BMP
+    // scalar above 255 pass through unchanged. They need no escaping in HTML, and escaping them
+    // would change nothing but the length.
+    EXPECT_EQ(WebUtility::HtmlEncode("\xE2\x82\xAC"), "\xE2\x82\xAC");   // U+20AC, above 255
+    EXPECT_EQ(WebUtility::HtmlEncode("\xC2\x85"), "\xC2\x85");           // U+0085, below 160
+    EXPECT_EQ(WebUtility::HtmlEncode("\xC2\x9F"), "\xC2\x9F");           // U+009F, the boundary
+    EXPECT_EQ(WebUtility::HtmlEncode("\xE4\xB8\xAD"), "\xE4\xB8\xAD");   // U+4E2D
+}
+
+TEST(NetGatedBehaviourPinTests, Fix2044_ThisEncoderDIFFERSFromHtmlEncoderAndThatIsDotNets) {
+    // THE PREMISE CORRECTION, pinned. The deferral held that "two HTML encoders in one
+    // repository must not be given two different escape sets". .NET has exactly two, with
+    // exactly two different sets, deliberately -- so each must match its own counterpart.
+    //
+    // This half asserts WHAT THIS ENCODER DOES. The other half lives where it belongs, in
+    // SharpRuntimeTests_Text: HtmlEncoderRangeTests.Fix2019_TheDefaultEncodersEscape-
+    // OutsideBasicLatin pins that HtmlEncoder emits "&#xE9;" and "&#x20AC;" for these same two
+    // scalars. Deliberately NOT asserted here by including HtmlEncoder: that would need a
+    // test-only component edge from Net to Text, which is a real change to the module graph
+    // for a comparison two independent pins make just as well.
+    EXPECT_EQ(WebUtility::HtmlEncode("\xC3\xA9"), "&#233;")
+        << "DECIMAL here; HtmlEncoder emits &#xE9; -- uppercase hex";
+    EXPECT_EQ(WebUtility::HtmlEncode("\xE2\x82\xAC"), "\xE2\x82\xAC")
+        << "passed through here; HtmlEncoder emits &#x20AC;";
+}
+
+TEST(NetGatedBehaviourPinTests, Fix2044_EncodeThenDecodeIsStillTheIdentity) {
+    // The property that matters to a caller, and the one the widening could have broken.
+    for (const char* text : {"caf\xC3\xA9", "<a href=\"x\">&'", "\xF0\x9F\x98\x80",
+                             "\xC2\xA0", "\xE2\x82\xAC", "plain ascii"}) {
+        SCOPED_TRACE(text);
+        EXPECT_EQ(WebUtility::HtmlDecode(WebUtility::HtmlEncode(text)), text);
+    }
 }
 
 TEST(NetGatedBehaviourPinTests, Pin2044_HtmlDecodeUnderstandsMoreThanTheEncoderProduces) {

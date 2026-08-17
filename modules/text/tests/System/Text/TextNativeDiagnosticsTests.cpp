@@ -298,6 +298,13 @@ TEST(HtmlEncoderRangeTests, EveryInRangeCallIsUnchanged) {
 // (DefaultHtmlEncoder.cs:13, DefaultJavaScriptEncoder.cs:11), i.e. U+0000..U+007F and nothing
 // else. The target set was the half the old approval package recorded as unverifiable; the
 // reference tree settles it.
+// #2044's other half. `System::Net::WebUtility::HtmlEncode` and this encoder use DIFFERENT
+// escape sets, deliberately, exactly as .NET's two HTML encoders do: WebUtility emits DECIMAL
+// references for U+00A0..U+00FF and passes U+20AC through, while this one escapes everything
+// above Basic Latin as uppercase hex. The counterpart pin is
+// NetGatedBehaviourPinTests.Fix2044_ThisEncoderDIFFERSFromHtmlEncoderAndThatIsDotNets, and the
+// two are kept in their own suites on purpose -- asserting the comparison in one place would
+// need a component edge between Net and Text for no gain.
 TEST(HtmlEncoderRangeTests, Fix2019_TheDefaultEncodersEscapeOutsideBasicLatin) {
     // &#x + the SCALAR in uppercase hex, no padding, then ';' (DefaultHtmlEncoder.cs:98-126) --
     // one escape for the whole scalar, not one per surrogate half.

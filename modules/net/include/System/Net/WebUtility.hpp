@@ -6,7 +6,10 @@
 #include <cctype>
 #include <iomanip>
 #include <sstream>
+#include <cstdint>
 #include <string>
+
+#include "System/detail/Utf8Scalar.hpp"
 
 namespace System::Net {
 
@@ -66,17 +69,57 @@ namespace System::Net {
          * Encodes special HTML characters in @p value (e.g. '&' becomes "&amp;").
          * @return The HTML-encoded string.
          */
+        /**
+         * @brief HTML-encodes @p value, exactly as `System.Net.WebUtility.HtmlEncode` does.
+         *
+         * Ticket #2044 (SR-AUD-309). This escaped only the five ASCII specials and passed every
+         * non-ASCII byte through, so the **decoder understood more than the encoder could ever
+         * emit** -- `HtmlDecode` accepts `&copy;`, `&#169;` and `&#xA9;`, none of which
+         * `HtmlEncode` produced.
+         *
+         * Transcribed from `WebUtility.cs:78-140`:
+         *   - `<` `>` `"` `&` become named references, and `'` becomes **`&#39;`** -- .NET uses
+         *     the numeric form there, not `&apos;`, and this port already matched;
+         *   - a scalar in **160..255** becomes `&#NNN;` in **decimal**. The comment in the
+         *     reference is worth keeping: *"The seemingly arbitrary 160 comes from RFC"*;
+         *   - a **supplementary** scalar (above U+FFFF) becomes `&#NNNNN;` for the whole scalar,
+         *     not one reference per surrogate half;
+         *   - **everything else passes through**, including 128..159 and every BMP scalar above
+         *     255. That is not an oversight in .NET: those characters need no escaping in
+         *     HTML and escaping them would change nothing but the length.
+         *
+         * @note **This is NOT the same policy as `System::Text::Encodings::Web::HtmlEncoder`,
+         *       and it is not supposed to be.** The ticket's premise was that "two HTML encoders
+         *       in one repository must not be given two different escape sets"; .NET has exactly
+         *       two, with exactly two different escape sets, deliberately. `HtmlEncoder`'s
+         *       default is an **allow-list** -- Basic Latin only, everything above escaped as
+         *       `&#xHH;` (ticket #2019) -- because it is a defence-in-depth encoder for
+         *       untrusted output. `WebUtility` is the older, laxer, decimal-emitting one. Each
+         *       matches its own counterpart, and a repository-wide "consistency" would match
+         *       neither.
+         */
         static std::string HtmlEncode(const std::string& value) {
             std::string out;
             out.reserve(value.size());
-            for (unsigned char c : value) {
-                switch (c) {
-                    case '&':  out += "&amp;";  break;
-                    case '<':  out += "&lt;";   break;
-                    case '>':  out += "&gt;";   break;
-                    case '"':  out += "&quot;"; break;
-                    case '\'': out += "&#39;";  break;
-                    default:   out += c;        break;
+            for (std::size_t i = 0; i < value.size();) {
+                std::uint32_t scalar = 0;
+                std::size_t   length = 0;
+                System::detail::DecodeUtf8Scalar(value, i, scalar, length);
+                i += length;
+
+                switch (scalar) {
+                    case '&':  out += "&amp;";  continue;
+                    case '<':  out += "&lt;";   continue;
+                    case '>':  out += "&gt;";   continue;
+                    case '"':  out += "&quot;"; continue;
+                    case '\'': out += "&#39;";  continue;
+                    default: break;
+                }
+                // WebUtility.cs:110 -- "The seemingly arbitrary 160 comes from RFC".
+                if ((scalar >= 160 && scalar <= 255) || scalar > 0xFFFF) {
+                    out += "&#" + std::to_string(scalar) + ";";
+                } else {
+                    appendUtf8(out, scalar);
                 }
             }
             return out;
