@@ -3,6 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 
 #include "System/Net/Http/HttpClient.hpp"
+#include <condition_variable>
+#include <memory>
+#include <mutex>
 #include "System/Net/Http/ByteArrayContent.hpp"
 #include "System/Net/Http/HttpClientHandler.hpp"
 #include "System/Net/Http/HttpRequestException.hpp"
@@ -270,13 +273,15 @@ HttpClient::ParsedStatusLine HttpClient::parseStatusLine(const std::string& stat
 // (System::Net::Http::HttpClientHandler, see HttpClientHandler.cpp) so that HttpClient can be
 // pointed at a custom HttpMessageHandler/DelegatingHandler chain instead (ticket 1496).
 
-HttpClient::HttpClient() : handler_(std::make_shared<HttpClientHandler>()) {}
+HttpClient::HttpClient() : handler_(std::make_shared<HttpClientHandler>()),
+                           asyncOps_(std::make_shared<AsyncOperations>()) {}
 
-HttpClient::HttpClient(std::shared_ptr<HttpMessageHandler> handler) : handler_(std::move(handler)) {
+HttpClient::HttpClient(std::shared_ptr<HttpMessageHandler> handler)
+    : handler_(std::move(handler)), asyncOps_(std::make_shared<AsyncOperations>()) {
     System::ArgumentNullException::ThrowIfNull(handler_.get(), "handler");
 }
 
-HttpClient::~HttpClient() = default;
+HttpClient::~HttpClient() { waitForAsyncOperations(); }   // #2066: see the header
 
 std::shared_ptr<HttpResponseMessage> HttpClient::Send(
     std::shared_ptr<HttpRequestMessage> request)
@@ -334,34 +339,100 @@ std::vector<SharpRuntime::bytecs> HttpClient::GetByteArray(const std::string& ur
         : std::vector<SharpRuntime::bytecs>{};
 }
 
+// ---------------------------------------------------------------------------------------------
+// #2066 / SR-AUD-310 (CCF-019) — the liveness boundary for the five *Async members.
+//
+// Each builds a TaskT from a lambda capturing raw `this`, and TaskT dispatches immediately, so a
+// task outliving its client read a freed defaultHeaders_ and a freed handler_. .NET needs no
+// boundary because the GC keeps the client alive for as long as the captured delegate can reach
+// it; C++ has no such mechanism, so the destructor waits -- the same shape #2134 gave Socket and
+// #2347 gave FileSystemWatcher.
+//
+// Note what is NOT here, deliberately: Socket needed a stop flag and a polling accept because
+// shutdown() cannot unblock accept(). A request has no equivalent -- the socket it uses is
+// created inside the handler and is not reachable from this object -- so the bound is the
+// request's own connect/read timeout and there is nothing to interrupt.
+struct HttpClient::AsyncOperations {
+    std::mutex              mutex;
+    std::condition_variable idle;
+    int                     inFlight = 0;
+};
+
+// Constructed INSIDE each async body rather than captured by it: std::async keeps the callable
+// alive until the last future to its shared state is destroyed, so a guard captured by the
+// lambda is released when the CALLER drops the TaskT, not when the work finishes -- a boundary
+// built on that waits for the caller and deadlocks. #2134 hit this and it is written down here
+// so the next member added to this file does not hit it again.
+struct HttpClient::AsyncOperationScope {
+    std::shared_ptr<AsyncOperations> ops;
+    ~AsyncOperationScope() {
+        if (!ops) return;
+        {
+            std::lock_guard<std::mutex> lock(ops->mutex);
+            --ops->inFlight;
+        }
+        ops->idle.notify_all();
+    }
+};
+
+std::shared_ptr<HttpClient::AsyncOperations> HttpClient::beginAsyncOperation() {
+    auto ops = asyncOps_;
+    {
+        std::lock_guard<std::mutex> lock(ops->mutex);
+        ++ops->inFlight;
+    }
+    return ops;
+}
+
+void HttpClient::waitForAsyncOperations() noexcept {
+    if (!asyncOps_) return;
+    std::unique_lock<std::mutex> lock(asyncOps_->mutex);
+    asyncOps_->idle.wait(lock, [this] { return asyncOps_->inFlight == 0; });
+}
+
 System::Threading::Tasks::TaskT<std::shared_ptr<HttpResponseMessage>>
 HttpClient::SendAsync(std::shared_ptr<HttpRequestMessage> request) {
-    return System::Threading::Tasks::TaskT<std::shared_ptr<HttpResponseMessage>>(
-        [this, request]() { return Send(request); });
+    auto ops = beginAsyncOperation();
+    return System::Threading::Tasks::TaskT<std::shared_ptr<HttpResponseMessage>>([this, request, ops]() {
+        AsyncOperationScope release{ops};
+        return Send(request);
+    });
 }
 
 System::Threading::Tasks::TaskT<std::shared_ptr<HttpResponseMessage>>
 HttpClient::GetAsync(const std::string& url) {
-    return System::Threading::Tasks::TaskT<std::shared_ptr<HttpResponseMessage>>(
-        [this, url]() { return Get(url); });
+    auto ops = beginAsyncOperation();
+    return System::Threading::Tasks::TaskT<std::shared_ptr<HttpResponseMessage>>([this, url, ops]() {
+        AsyncOperationScope release{ops};
+        return Get(url);
+    });
 }
 
 System::Threading::Tasks::TaskT<std::shared_ptr<HttpResponseMessage>>
 HttpClient::PostAsync(const std::string& url, std::shared_ptr<HttpContent> content) {
-    return System::Threading::Tasks::TaskT<std::shared_ptr<HttpResponseMessage>>(
-        [this, url, content]() { return Post(url, content); });
+    auto ops = beginAsyncOperation();
+    return System::Threading::Tasks::TaskT<std::shared_ptr<HttpResponseMessage>>([this, url, content, ops]() {
+        AsyncOperationScope release{ops};
+        return Post(url, content);
+    });
 }
 
 System::Threading::Tasks::TaskT<std::string>
 HttpClient::GetStringAsync(const std::string& url) {
-    return System::Threading::Tasks::TaskT<std::string>(
-        [this, url]() { return GetString(url); });
+    auto ops = beginAsyncOperation();
+    return System::Threading::Tasks::TaskT<std::string>([this, url, ops]() {
+        AsyncOperationScope release{ops};
+        return GetString(url);
+    });
 }
 
 System::Threading::Tasks::TaskT<std::vector<SharpRuntime::bytecs>>
 HttpClient::GetByteArrayAsync(const std::string& url) {
-    return System::Threading::Tasks::TaskT<std::vector<SharpRuntime::bytecs>>(
-        [this, url]() { return GetByteArray(url); });
+    auto ops = beginAsyncOperation();
+    return System::Threading::Tasks::TaskT<std::vector<SharpRuntime::bytecs>>([this, url, ops]() {
+        AsyncOperationScope release{ops};
+        return GetByteArray(url);
+    });
 }
 
 // Ticket #2063 (SR-AUD-313, cause NH-B). A default header is merged onto every request this

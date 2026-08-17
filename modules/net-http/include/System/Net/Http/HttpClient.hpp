@@ -43,9 +43,29 @@ public:
      */
     explicit HttpClient(std::shared_ptr<HttpMessageHandler> handler);
 
+    /**
+     * @brief Destroys the client, waiting for any in-flight `*Async` request to finish.
+     *
+     * Ticket #2066 / SR-AUD-310 (CCF-019). The five `*Async` members each build a `TaskT` from a
+     * lambda capturing raw `this`, and `TaskT` dispatches immediately, so a task outliving its
+     * client read a freed `defaultHeaders_` and a freed `handler_` -- the audit confirmed it
+     * under ASan.
+     *
+     * .NET needs no boundary because the GC keeps the client alive for as long as the captured
+     * delegate can reach it. C++ has no such mechanism, and this port's answer is the RAII one:
+     * the client outlives the work because its destructor waits for it.
+     *
+     * **The wait is as long as the request takes.** Unlike `Socket`, there is nothing to
+     * interrupt here -- the socket a request uses is created inside the handler and is not
+     * reachable from this object -- so the bound is the request's own connect/read timeout.
+     * Awaiting your tasks before dropping the client, which is the ordinary shape, makes this a
+     * no-op.
+     */
     ~HttpClient();
 
-    // Non-copyable — sockets are not trivially copyable
+    // Non-copyable — sockets are not trivially copyable. (Non-movable too, as a consequence:
+    // a user-declared copy constructor suppresses the implicit move operations, so the
+    // destructor #2066 adds below takes nothing away that was there before.)
     HttpClient(const HttpClient&) = delete;
     HttpClient& operator=(const HttpClient&) = delete;
 
@@ -158,6 +178,16 @@ private:
     std::string                                  baseAddress_;
     std::unordered_map<std::string, std::string> defaultHeaders_;
     std::shared_ptr<HttpMessageHandler>           handler_;
+
+    /// The liveness boundary for the five `*Async` members (#2066). Defined in the `.cpp`;
+    /// never null on a live client. See `Socket`'s equivalent for the shape and for why the
+    /// decrement must be body-local rather than captured.
+    struct AsyncOperations;
+    struct AsyncOperationScope;
+    std::shared_ptr<AsyncOperations> asyncOps_;
+
+    [[nodiscard]] std::shared_ptr<AsyncOperations> beginAsyncOperation();
+    void waitForAsyncOperations() noexcept;
 };
 
 } // namespace System::Net::Http

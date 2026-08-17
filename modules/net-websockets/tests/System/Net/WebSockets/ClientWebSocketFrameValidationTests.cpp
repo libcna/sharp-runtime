@@ -394,13 +394,19 @@ struct ClientWebSocketLayoutProbe {
     size_t                                  recvLeftoverPos;
     WebSocketMessageType                    recvLeftoverType;
     std::mutex                              sendMutex;
+    // #2088 added this one, and only this one: the liveness boundary's shared state. Declared
+    // last, matching the class, so the probe stays a field-for-field shadow rather than a
+    // number to re-guess.
+    std::shared_ptr<void>                   asyncOps;
 };
 
 } // namespace
 
 static_assert(sizeof(ClientWebSocket) == sizeof(ClientWebSocketLayoutProbe),
-              "ClientWebSocket's object layout moved. #2090 added frame validation only; a new "
-              "data member here is an object-layout change. See "
+              "ClientWebSocket's object layout moved. The probe above is a field-for-field "
+              "shadow; #2088 added exactly one member to it (the liveness boundary's shared "
+              "state) under docs/StandingApprovals.md SA-3. Any further data member here is a "
+              "new object-layout change and needs its own approval. See "
               "docs/SystemNetWebSocketsNamespaceReviewPlan.md section 11.");
 static_assert(alignof(ClientWebSocket) == alignof(ClientWebSocketLayoutProbe),
               "ClientWebSocket alignment moved");

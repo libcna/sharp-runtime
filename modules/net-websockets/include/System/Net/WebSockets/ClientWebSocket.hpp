@@ -59,10 +59,35 @@ namespace System::Net::WebSockets {
 
     public:
         ClientWebSocket() = default;
-        ~ClientWebSocket() override { Dispose(); }
+        /**
+         * @brief Destroys the socket, waiting for any in-flight `*Async` body to finish.
+         *
+         * Ticket #2088 / SR-AUD-247 (CCF-019). Every `*Async` member returns a task whose body
+         * captures raw `this` and runs on a `std::async` thread; nothing kept this object alive
+         * until it ran, and the audit confirmed the use-after-free under ASan.
+         *
+         * .NET needs no boundary because the GC keeps the socket alive for as long as the
+         * captured delegate can reach it. C++ has no such mechanism, so this port takes the RAII
+         * answer -- the same shape `Socket` (#2134) and `FileSystemWatcher` (#2347) took.
+         * `Dispose()` still runs afterwards, so the close handshake is unchanged.
+         */
+        ~ClientWebSocket() override;
 
         /** @return The options used to configure the connection. Must be set before ConnectAsync(). */
         [[nodiscard]] ClientWebSocketOptions& getOptionsProperty() { return options_; }
+
+    private:
+        /// The liveness boundary for the five `*Async` members (#2088). Defined in the `.cpp`.
+        /// See `Socket`'s equivalent for why the decrement must be body-local rather than
+        /// captured by the lambda.
+        struct AsyncOperations;
+        struct AsyncOperationScope;
+        std::shared_ptr<AsyncOperations> asyncOps_ = nullptr;
+
+        [[nodiscard]] std::shared_ptr<AsyncOperations> beginAsyncOperation();
+        void waitForAsyncOperations() noexcept;
+
+    public:
 
         [[nodiscard]] std::optional<WebSocketCloseStatus> getCloseStatusProperty() const override { return closeStatus_; }
         [[nodiscard]] std::optional<std::string> getCloseStatusDescriptionProperty() const override {

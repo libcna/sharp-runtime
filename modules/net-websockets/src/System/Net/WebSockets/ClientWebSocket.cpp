@@ -2,6 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/WebSockets/ClientWebSocket.hpp"
+#include <condition_variable>
+#include <memory>
+#include <mutex>
 #include <array>
 #include <cstring>
 #include <map>
@@ -262,6 +265,75 @@ void ClientWebSocket::performHandshake(const System::Uri& uri) {
     }
 
     state_ = WebSocketState::Open;
+}
+
+// ---------------------------------------------------------------------------------------------
+// #2088 / SR-AUD-247 (CCF-019) — the liveness boundary for the five *Async members.
+//
+// Every one of them returns a task whose body captures raw `this` and runs on a std::async
+// thread, with nothing keeping this object alive until it ran. .NET needs no boundary because
+// the GC does that job; C++ has no such mechanism, so the destructor waits -- the same shape
+// #2134 gave Socket and #2347 gave FileSystemWatcher.
+//
+// The decrement is constructed INSIDE each body rather than captured by it, because std::async
+// keeps the callable alive until the last future to its shared state is destroyed: a guard
+// captured by the lambda is released when the CALLER drops the task, so a boundary built on it
+// waits for the caller and deadlocks. #2134 hit exactly that.
+struct ClientWebSocket::AsyncOperations {
+    std::mutex              mutex;
+    std::condition_variable idle;
+    int                     inFlight = 0;
+};
+
+struct ClientWebSocket::AsyncOperationScope {
+    std::shared_ptr<AsyncOperations> ops;
+    ~AsyncOperationScope() {
+        if (!ops) return;
+        {
+            std::lock_guard<std::mutex> lock(ops->mutex);
+            --ops->inFlight;
+        }
+        ops->idle.notify_all();
+    }
+};
+
+std::shared_ptr<ClientWebSocket::AsyncOperations> ClientWebSocket::beginAsyncOperation() {
+    if (!asyncOps_) asyncOps_ = std::make_shared<AsyncOperations>();
+    auto ops = asyncOps_;
+    {
+        std::lock_guard<std::mutex> lock(ops->mutex);
+        ++ops->inFlight;
+    }
+    return ops;
+}
+
+void ClientWebSocket::waitForAsyncOperations() noexcept {
+    if (!asyncOps_) return;
+    {
+        std::unique_lock<std::mutex> lock(asyncOps_->mutex);
+        if (asyncOps_->inFlight == 0) return;
+    }
+    // A pending ReceiveAsync is blocked in recv() waiting for a frame the peer may never send,
+    // so the boundary has to be able to CROSS -- otherwise it turns a use-after-free into a
+    // hang, which is not a repair. shutdown() unblocks recv() reliably (this is the case where
+    // it does; #2134 records the one where it does not, a listening socket's accept()).
+    // Deliberately not Close(): the descriptor stays this object's until Dispose() retires it,
+    // so a worker returning from recv() is not left holding a number the process has reused.
+    if (socket_) {
+        try {
+            socket_->Shutdown(System::Net::Sockets::SocketShutdown::Both);
+        } catch (...) {
+            // Already closed or never connected: there is nothing to wake, and the wait below
+            // is then the whole boundary.
+        }
+    }
+    std::unique_lock<std::mutex> lock(asyncOps_->mutex);
+    asyncOps_->idle.wait(lock, [this] { return asyncOps_->inFlight == 0; });
+}
+
+ClientWebSocket::~ClientWebSocket() {
+    waitForAsyncOperations();
+    Dispose();
 }
 
 System::Threading::Tasks::Task
@@ -580,7 +652,16 @@ System::Threading::Tasks::Task
 ClientWebSocket::SendAsync(const std::vector<bytecs>& buffer, intcs offset, intcs count, WebSocketMessageType messageType,
                             bool endOfMessage, System::Threading::CancellationToken /*cancellationToken*/) {
     validateWebSocketBuffer(buffer, offset, count);
-    return System::Threading::Tasks::Task([this, &buffer, offset, count, messageType, endOfMessage]() {
+    // #2088's second half, which the finding recorded as wider than its headline: this used to
+    // capture `&buffer`, so the CALLER's vector was a second borrowed object the task could
+    // outlive. The destructor boundary below cannot help there -- the buffer is not this object.
+    // Send takes it by const reference and only reads it, so copying the bytes it will actually
+    // send is a complete fix at the cost of one copy.
+    std::vector<bytecs> payload(buffer.begin() + offset, buffer.begin() + offset + count);
+    auto ops = beginAsyncOperation();
+    return System::Threading::Tasks::Task([this, payload = std::move(payload), count, messageType,
+                                            endOfMessage, ops]() {
+        AsyncOperationScope release{ops};
         WebSocket::ThrowOnInvalidState(state_, {WebSocketState::Open, WebSocketState::CloseReceived});
         bytecs opcode;
         if (sendContinuation_) {
@@ -588,7 +669,7 @@ ClientWebSocket::SendAsync(const std::vector<bytecs>& buffer, intcs offset, intc
         } else {
             opcode = messageType == WebSocketMessageType::Text ? 0x1 : 0x2;
         }
-        sendFrame(opcode, buffer.data() + offset, static_cast<size_t>(count), endOfMessage);
+        sendFrame(opcode, payload.data(), static_cast<size_t>(count), endOfMessage);
         sendContinuation_ = !endOfMessage;
     });
 }
@@ -597,7 +678,13 @@ System::Threading::Tasks::TaskT<WebSocketReceiveResult>
 ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs count,
                                System::Threading::CancellationToken /*cancellationToken*/) {
     validateWebSocketBuffer(buffer, offset, count);
-    return System::Threading::Tasks::TaskT<WebSocketReceiveResult>([this, &buffer, offset, count]() {
+    // Receive keeps the reference, and that is not an oversight: `buffer` is the OUT-parameter
+    // this operation writes its result into, so a caller that destroys it before awaiting has
+    // discarded the result it asked for. The destructor boundary covers `this`; the buffer's
+    // lifetime is the caller's, exactly as it is for the synchronous overload.
+    auto ops = beginAsyncOperation();
+    return System::Threading::Tasks::TaskT<WebSocketReceiveResult>([this, &buffer, offset, count, ops]() {
+        AsyncOperationScope release{ops};
         WebSocket::ThrowOnInvalidState(state_, {WebSocketState::Open, WebSocketState::CloseSent});
 
         if (recvLeftoverPos_ < recvLeftover_.size()) {

@@ -18,6 +18,7 @@
 // Nothing here is an endorsement, and none of these findings is remediated by this file
 // existing.
 #include <gtest/gtest.h>
+#include <optional>
 
 #include <array>
 #include <memory>
@@ -318,3 +319,107 @@ TEST(WebSocketsGatedBehaviourPins, Pin2095_ANewDataFrameArrivingMidFragmentIsAcc
 //
 // #2096 is recorded here so that a reader looking for its pin finds this explanation instead of
 // concluding one was forgotten.
+
+
+// ===========================================================================================
+// #2088 / SR-AUD-247 (CCF-019) — the liveness boundary, REPAIRED 2026-08-17
+//
+// Every *Async member returns a task whose body captures raw `this` and runs on a std::async
+// thread, with nothing keeping this object alive until it ran. ~ClientWebSocket now waits.
+//
+// A pending ReceiveAsync is blocked in recv() waiting for a frame the peer may never send, so
+// the boundary shuts the socket down before waiting -- otherwise it would turn a use-after-free
+// into a hang. This is the case where shutdown() works; #2134 records the one where it does not.
+// ===========================================================================================
+
+TEST(WebSocketsGatedBehaviourPins, Fix2088_DestroyingTheSocketWaitsForAPendingReceive) {
+    Socket listener(System::Net::Sockets::AddressFamily::InterNetwork,
+                    System::Net::Sockets::SocketType::Stream,
+                    System::Net::Sockets::ProtocolType::Tcp);
+    listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    listener.Listen();
+    auto local = std::dynamic_pointer_cast<IPEndPoint>(listener.getLocalEndPointProperty());
+    ASSERT_NE(local, nullptr);
+    const SharpRuntime::intcs port = local->getPortProperty();
+
+    // The server completes the handshake and then sends NOTHING, so the client's receive stays
+    // blocked -- which is the case the boundary has to be able to cross.
+    std::thread serverThread([&]() {
+        try {
+            auto server = listener.Accept();
+            const std::string request = readHeaders(*server);
+            const size_t keyPos = request.find("Sec-WebSocket-Key: ");
+            if (keyPos == std::string::npos) return;
+            const size_t keyStart = keyPos + std::string("Sec-WebSocket-Key: ").size();
+            const std::string key = request.substr(keyStart, request.find("\r\n", keyStart) - keyStart);
+            const auto digest = pinSha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+            const std::string accept =
+                System::Convert::ToBase64String(std::vector<bytecs>(digest.begin(), digest.end()));
+            server->Send(toBytes("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                                 "Connection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n"));
+            // Hold the connection open without ever sending a frame.
+            std::this_thread::sleep_for(std::chrono::milliseconds(600));
+            server->Close();
+        } catch (...) {
+        }
+    });
+
+    std::vector<bytecs> buffer(64);
+    std::optional<System::Threading::Tasks::TaskT<WebSocketReceiveResult>> pending;
+    const auto started = std::chrono::steady_clock::now();
+    {
+        ClientWebSocket client;
+        System::Uri uri("ws://127.0.0.1:" + std::to_string(port) + "/");
+        client.ConnectAsync(uri).Wait();
+        ASSERT_EQ(client.getStateProperty(), WebSocketState::Open);
+        pending = client.ReceiveAsync(buffer, 0, static_cast<SharpRuntime::intcs>(buffer.size()));
+        std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    }   // ~ClientWebSocket must shut the socket down and WAIT here
+
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    EXPECT_LT(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(), 10)
+        << "the destructor could not cross its own boundary";
+    // ASSERT rather than EXPECT: without the boundary this case would hang at teardown instead
+    // of failing, because the orphaned body would still be reading a destroyed object.
+    ASSERT_TRUE(pending->getIsCompletedProperty())
+        << "the destructor returned while an async receive was still running";
+
+    serverThread.join();
+    listener.Close();
+}
+
+TEST(WebSocketsGatedBehaviourPins, Fix2088_SendAsyncAcceptsATemporaryBuffer) {
+    // The finding is wider than its headline: SendAsync captured `&buffer`, so the CALLER's
+    // vector was a second borrowed object the task could outlive -- and the destructor boundary
+    // cannot help there, because the buffer is not this object. Send only reads it, so #2088
+    // copies the bytes it will actually send.
+    //
+    // HONEST LIMIT OF THIS CASE. The copy is guaranteed BY CONSTRUCTION, not by this assertion.
+    // TaskT dispatches with std::async(std::launch::async), which starts the body immediately,
+    // so a test that mutated the caller's buffer after the call and expected the OLD bytes on
+    // the wire is a RACE: it passes whenever the body wins, which it usually does. That version
+    // was written, measured against the borrowing mutation, found to pass anyway, and removed
+    // rather than kept as a test that cannot fail. What is asserted here instead is the shape a
+    // caller actually writes -- a temporary argument, which under borrowing is destroyed before
+    // the body can read it -- and that the right bytes arrive.
+    std::vector<bytecs> sent;
+    RunAgainstServer(
+        [](ClientWebSocketOptions&) {},
+        [&sent](Socket& server) {
+            std::vector<bytecs> frame(64);
+            const auto n = server.Receive(frame);
+            sent.assign(frame.begin(), frame.begin() + n);
+        },
+        [](ClientWebSocket& client) {
+            client.SendAsync(std::vector<bytecs>{'a', 'b', 'c'}, 0, 3,
+                             WebSocketMessageType::Binary, true).Wait();
+        });
+
+    ASSERT_GE(sent.size(), 7u);
+    const std::size_t maskOffset = sent.size() - 3 - 4;
+    std::vector<bytecs> unmasked;
+    for (std::size_t i = 0; i < 3; ++i) {
+        unmasked.push_back(static_cast<bytecs>(sent[sent.size() - 3 + i] ^ sent[maskOffset + i]));
+    }
+    EXPECT_EQ(unmasked, (std::vector<bytecs>{'a', 'b', 'c'}));
+}

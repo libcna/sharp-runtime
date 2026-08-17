@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 #include <gtest/gtest.h>
+#include <optional>
 #include <functional>
 #include <any>
 #include <atomic>
@@ -987,6 +988,56 @@ TEST(HttpClientWireFormatTests, AnOrdinaryRequestStillCarriesItsContentLength) {
     });
 
     EXPECT_NE(sent.find("\r\nContent-Length: 7\r\n"), std::string::npos) << sent;
+}
+
+// ---------------------------------------------------------------------------
+// #2066 / SR-AUD-310 (CCF-019) — the liveness boundary
+//
+// SendAsync/GetAsync/PostAsync/GetStringAsync/GetByteArrayAsync each build a TaskT from a lambda
+// capturing raw `this`; a task outliving its client read a freed defaultHeaders_ and a freed
+// handler_, which the audit confirmed under ASan. .NET needs no boundary because the GC keeps
+// the client alive for as long as the captured delegate can reach it; C++ has no such mechanism,
+// so ~HttpClient waits -- the same shape #2134 gave Socket.
+// ---------------------------------------------------------------------------
+
+TEST(HttpClientLivenessTests, DestroyingTheClientWaitsForAnInFlightRequest) {
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    // The server holds the request open briefly, so the destructor really meets an in-flight
+    // body rather than winning a race against one that has already finished.
+    std::thread serverThread([&]() {
+        auto server = listener->Accept();
+        std::vector<SharpRuntime::bytecs> reqBuf(4096);
+        (void)server->Receive(reqBuf);
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"));
+        server->Close();
+    });
+
+    std::optional<System::Threading::Tasks::TaskT<std::string>> pending;
+    {
+        HttpClient client;
+        pending = client.GetStringAsync("http://127.0.0.1:" + std::to_string(port) + "/");
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    }   // ~HttpClient must WAIT here
+
+    // THE assertion: the destructor must not RETURN until the body is finished. Checked before
+    // anything else can let the body catch up, and as an ASSERT because getResultProperty()
+    // below blocks -- without the boundary this would hang rather than fail.
+    ASSERT_TRUE(pending->getIsCompletedProperty())
+        << "the destructor returned while an async request was still running";
+    EXPECT_EQ(pending->getResultProperty(), "OK");
+    serverThread.join();
+}
+
+TEST(HttpClientLivenessTests, TheBoundaryIsANoOpWhenNothingIsInFlight) {
+    // The control: a client with no outstanding work must not pay for the boundary, and a
+    // destructor that waited unconditionally would hang here rather than return.
+    const auto started = std::chrono::steady_clock::now();
+    { HttpClient client; }
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(), 1000);
 }
 
 TEST(HttpMessageHandlerTests, DelegatingHandler_NoInnerHandler_Throws) {
