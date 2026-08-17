@@ -21,6 +21,7 @@
 #include <optional>
 
 #include <array>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <thread>
@@ -28,6 +29,7 @@
 
 #include "System/Convert.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/OperationCanceledException.hpp"
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/Sockets/Socket.hpp"
 #include "System/Net/WebSockets/ClientWebSocket.hpp"
@@ -98,6 +100,23 @@ std::string readHeaders(Socket& socket) {
     return response;
 }
 
+/// #2093 exposed a defect in this harness: if `clientBody` throws -- which it now legitimately
+/// does, because a cancelled operation faults -- `serverThread.join()` was skipped and
+/// ~std::thread on a joinable thread called std::terminate. The whole suite died with
+/// "terminate called without an active exception" and no failing test name. The join is RAII
+/// now, so a throwing body reports itself instead of taking the process down.
+struct ServerJoiner {
+    std::thread thread;
+    Socket*     listener;
+    ~ServerJoiner() {
+        try {
+            listener->Close();
+        } catch (...) {
+        }
+        if (thread.joinable()) thread.join();
+    }
+};
+
 void RunAgainstServer(const std::function<void(ClientWebSocketOptions&)>& configure,
                       const std::function<void(Socket&)>& afterHandshake,
                       const std::function<void(ClientWebSocket&)>& clientBody) {
@@ -129,6 +148,8 @@ void RunAgainstServer(const std::function<void(ClientWebSocketOptions&)>& config
         }
     });
 
+    ServerJoiner joiner{std::move(serverThread), &listener};
+
     ClientWebSocket client;
     configure(client.getOptionsProperty());
     System::Uri uri("ws://127.0.0.1:" + std::to_string(port) + "/");
@@ -136,8 +157,6 @@ void RunAgainstServer(const std::function<void(ClientWebSocketOptions&)>& config
     ASSERT_EQ(client.getStateProperty(), WebSocketState::Open);
     clientBody(client);
     client.Dispose();
-    serverThread.join();
-    listener.Close();
 }
 
 void noConfig(ClientWebSocketOptions&) {}
@@ -174,13 +193,16 @@ TEST(WebSocketsGatedBehaviourPins, Pin2092_WebSocketExceptionDiscardsItsInnerExc
 // SR-AUD-251 → #2093, BLOCKED: every CancellationToken is ignored
 // ===========================================================================
 
-TEST(WebSocketsGatedBehaviourPins, Pin2093_AnAlreadyCancelledTokenDoesNotPreventTheOperation) {
-    // All five async members take a token and none consults it. The tasks run a BLOCKING
-    // Socket::Receive, so real cancellation needs a socket timeout, a poll-based read loop, or a
-    // shutdown-based interrupt — a transport-level design touching modules/net-sockets.
+TEST(WebSocketsGatedBehaviourPins, Fix2093_AnAlreadyCancelledTokenPreventsTheOperation) {
+    // #2093 LANDED. This pin used to assert that the token was IGNORED; it now asserts the
+    // contract, and the contract is .NET's: an already-cancelled token means the operation never
+    // runs, and a cancelled operation reports OperationCanceledException.
     //
-    // WHEN #2093 IS APPROVED AND IMPLEMENTED, THIS PIN MUST FAIL: an already-cancelled token
-    // should make these operations fault rather than complete.
+    // The design the ticket was blocked on turned out not to be transport-level at all. .NET
+    // registers Abort() on the token -- `cancellationToken.Register(static s =>
+    // ((ManagedWebSocket)s!).Abort(), this)`, ManagedWebSocket.cs:608,789 -- so cancelling ANY
+    // WebSocket operation aborts the whole WebSocket. No socket timeout, no poll loop, no change
+    // to modules/net-sockets.
     System::Threading::CancellationTokenSource cts;
     cts.Cancel();
 
@@ -189,12 +211,85 @@ TEST(WebSocketsGatedBehaviourPins, Pin2093_AnAlreadyCancelledTokenDoesNotPrevent
         [&](Socket& server) { server.Send(std::vector<bytecs>{0x81, 0x02, 'o', 'k'}); },
         [&](ClientWebSocket& client) {
             std::vector<bytecs> buffer(1024);
-            // Completes normally despite the cancelled token.
-            auto result = client.ReceiveAsync(buffer, 0, 1024, cts.getTokenProperty()).getResultProperty();
-            EXPECT_EQ(result.getCountProperty(), 2)
-                << "SR-AUD-251: the token is currently IGNORED. If this now throws or faults, "
-                   "#2093 landed and this pin must be updated in that change.";
+            EXPECT_THROW((void)client.ReceiveAsync(buffer, 0, 1024, cts.getTokenProperty())
+                             .getResultProperty(),
+                         System::OperationCanceledException);
         });
+}
+
+TEST(WebSocketsGatedBehaviourPins, Fix2093_ANonCancelledTokenChangesNothing) {
+    // Invariance, and the row that matters most: wiring cancellation in must not disturb the
+    // ordinary path. A live-but-unfired token behaves exactly as the default None token did.
+    System::Threading::CancellationTokenSource cts;
+
+    RunAgainstServer(
+        noConfig,
+        [&](Socket& server) { server.Send(std::vector<bytecs>{0x81, 0x02, 'o', 'k'}); },
+        [&](ClientWebSocket& client) {
+            std::vector<bytecs> buffer(1024);
+            auto result = client.ReceiveAsync(buffer, 0, 1024, cts.getTokenProperty()).getResultProperty();
+            EXPECT_EQ(result.getCountProperty(), 2);
+            EXPECT_EQ(client.getStateProperty(), WebSocketState::Open)
+                << "a live but unfired token must not abort anything";
+        });
+}
+
+TEST(WebSocketsGatedBehaviourPins, Fix2093_CancellingMidOperationAbortsTheWebSocket) {
+    // The half a pre-cancelled token cannot show: a token that fires WHILE a receive is parked in
+    // the blocking read. .NET's contract is that this aborts the WebSocket, and the abort is also
+    // what unblocks this port -- Abort() shuts the socket down under #2096's shared ownership.
+    //
+    // Without the repair this hangs, because the server deliberately never sends a frame.
+    System::Threading::CancellationTokenSource cts;
+
+    RunAgainstServer(
+        noConfig,
+        [&](Socket& server) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(400));
+            (void)server;
+        },
+        [&](ClientWebSocket& client) {
+            std::vector<bytecs> buffer(1024);
+            auto task = client.ReceiveAsync(buffer, 0, 1024, cts.getTokenProperty());
+            std::thread canceller([&] {
+                std::this_thread::sleep_for(std::chrono::milliseconds(60));
+                cts.Cancel();
+            });
+            EXPECT_THROW((void)task.getResultProperty(), System::OperationCanceledException);
+            canceller.join();
+            EXPECT_EQ(client.getStateProperty(), WebSocketState::Aborted)
+                << "cancellation aborts the whole WebSocket, which is .NET's documented contract";
+        });
+}
+
+TEST(WebSocketsGatedBehaviourPins, Fix2093_EveryOneOfTheFiveMembersHonoursTheToken) {
+    // SR-AUD-251 names all five. A repair that reached only the one with a test would be exactly
+    // the "one-off partial fix for just this one" the old CloseAsync comment warned against.
+    System::Threading::CancellationTokenSource cts;
+    cts.Cancel();
+    const auto token = cts.getTokenProperty();
+
+    RunAgainstServer(
+        noConfig,
+        [&](Socket& server) { (void)server; },
+        [&](ClientWebSocket& client) {
+            std::vector<bytecs> buffer(64, 0);
+            EXPECT_THROW(client.SendAsync(buffer, 0, 4, WebSocketMessageType::Binary, true, token).Wait(),
+                         System::OperationCanceledException);
+            EXPECT_THROW((void)client.ReceiveAsync(buffer, 0, 4, token).getResultProperty(),
+                         System::OperationCanceledException);
+            EXPECT_THROW(client.CloseOutputAsync(WebSocketCloseStatus::NormalClosure, std::nullopt, token).Wait(),
+                         System::OperationCanceledException);
+            EXPECT_THROW(client.CloseAsync(WebSocketCloseStatus::NormalClosure, std::nullopt, token).Wait(),
+                         System::OperationCanceledException);
+        });
+
+    // ConnectAsync is the fifth, and the one the ticket's own example names: a pre-cancelled
+    // connect must report cancellation rather than the PlatformNotSupportedException a `wss` URI
+    // would otherwise produce.
+    ClientWebSocket fresh;
+    EXPECT_THROW(fresh.ConnectAsync(System::Uri("wss://example.invalid/"), token).Wait(),
+                 System::OperationCanceledException);
 }
 
 // ===========================================================================

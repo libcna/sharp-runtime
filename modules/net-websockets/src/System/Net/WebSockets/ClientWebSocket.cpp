@@ -17,6 +17,7 @@
 #include "System/Net/detail/ProtocolFieldValidation.hpp"
 #include "System/Net/WebSockets/WebSocketException.hpp"
 #include "System/PlatformNotSupportedException.hpp"
+#include "System/Threading/Tasks/TaskCanceledException.hpp"
 
 namespace System::Net::WebSockets {
 
@@ -320,6 +321,35 @@ std::optional<std::string> ClientWebSocket::getSubProtocolProperty() const {
 WebSocketState ClientWebSocket::getStateProperty() const { return loadState(); }
 
 // ---------------------------------------------------------------------------------------------
+// #2093 — cancellation. See CancellationScope's doc-comment for why this is nine lines rather
+// than the transport-level redesign the ticket expected.
+// ---------------------------------------------------------------------------------------------
+
+ClientWebSocket::CancellationScope::CancellationScope(ClientWebSocket* owner,
+                                                      System::Threading::CancellationToken token)
+    : owner_(owner), token_(token) {
+    // A token already cancelled means the operation never starts. .NET reaches the same place by
+    // awaiting its receive/send mutex with the token, which throws before any I/O.
+    token_.ThrowIfCancellationRequested();
+    registration_ = token_.Register([owner] { owner->Abort(); });
+}
+
+ClientWebSocket::CancellationScope::~CancellationScope() { registration_.Dispose(); }
+
+bool ClientWebSocket::CancellationScope::cancelled() const {
+    return token_.getIsCancellationRequestedProperty();
+}
+
+void ClientWebSocket::CancellationScope::rethrowAsCancelled() const {
+    // The body failed and the token has fired, so the abort is the cause and the caller asked
+    // for it. Reporting the WebSocketException the abort produced would be technically true and
+    // useless: a caller cancelling its own operation wants OperationCanceledException, which is
+    // what every .NET awaiter of a cancelled WebSocket call observes.
+    throw System::Threading::Tasks::TaskCanceledException(
+        "The WebSocket operation was canceled.");
+}
+
+// ---------------------------------------------------------------------------------------------
 // #2088 / SR-AUD-247 (CCF-019) — the liveness boundary for the five *Async members.
 //
 // Every one of them returns a task whose body captures raw `this` and runs on a std::async
@@ -405,7 +435,7 @@ ClientWebSocket::~ClientWebSocket() {
 }
 
 System::Threading::Tasks::Task
-ClientWebSocket::ConnectAsync(const System::Uri& uri, System::Threading::CancellationToken /*cancellationToken*/) {
+ClientWebSocket::ConnectAsync(const System::Uri& uri, System::Threading::CancellationToken cancellationToken) {
     if (connectStarted_) {
         throw System::InvalidOperationException("ConnectAsync may only be called once.");
     }
@@ -417,12 +447,17 @@ ClientWebSocket::ConnectAsync(const System::Uri& uri, System::Threading::Cancell
     // boundary. ConnectAsync, CloseAsync and CloseOutputAsync capture raw `this` exactly the same
     // way, so all five now do.
     auto ops = beginAsyncOperation();
-    return System::Threading::Tasks::Task([this, uri, ops]() {
+    return System::Threading::Tasks::Task([this, uri, ops, cancellationToken]() {
         AsyncOperationScope release{ops};
+        // #2093: constructed BEFORE the handshake, so a token already cancelled here throws
+        // without opening a socket -- which is the case the ticket names, where a pre-cancelled
+        // `wss` connect used to fault with PlatformNotSupportedException.
+        CancellationScope cancellation{this, cancellationToken};
         try {
             performHandshake(uri);
         } catch (...) {
             Dispose();
+            if (cancellation.cancelled()) cancellation.rethrowAsCancelled();
             throw;
         }
     });
@@ -731,7 +766,7 @@ void ClientWebSocket::sendCloseFrame(WebSocketCloseStatus closeStatus, const std
 
 System::Threading::Tasks::Task
 ClientWebSocket::SendAsync(const std::vector<bytecs>& buffer, intcs offset, intcs count, WebSocketMessageType messageType,
-                            bool endOfMessage, System::Threading::CancellationToken /*cancellationToken*/) {
+                            bool endOfMessage, System::Threading::CancellationToken cancellationToken) {
     validateWebSocketBuffer(buffer, offset, count);
     // #2088's second half, which the finding recorded as wider than its headline: this used to
     // capture `&buffer`, so the CALLER's vector was a second borrowed object the task could
@@ -741,31 +776,40 @@ ClientWebSocket::SendAsync(const std::vector<bytecs>& buffer, intcs offset, intc
     std::vector<bytecs> payload(buffer.begin() + offset, buffer.begin() + offset + count);
     auto ops = beginAsyncOperation();
     return System::Threading::Tasks::Task([this, payload = std::move(payload), count, messageType,
-                                            endOfMessage, ops]() {
+                                            endOfMessage, ops, cancellationToken]() {
         AsyncOperationScope release{ops};
-        WebSocket::ThrowOnInvalidState(loadState(), {WebSocketState::Open, WebSocketState::CloseReceived});
-        bytecs opcode;
-        if (sendContinuation_) {
-            opcode = 0x0;
-        } else {
-            opcode = messageType == WebSocketMessageType::Text ? 0x1 : 0x2;
+        CancellationScope cancellation{this, cancellationToken};
+        try {
+            WebSocket::ThrowOnInvalidState(loadState(), {WebSocketState::Open, WebSocketState::CloseReceived});
+            bytecs opcode;
+            if (sendContinuation_) {
+                opcode = 0x0;
+            } else {
+                opcode = messageType == WebSocketMessageType::Text ? 0x1 : 0x2;
+            }
+            sendFrame(opcode, payload.data(), static_cast<size_t>(count), endOfMessage);
+            sendContinuation_ = !endOfMessage;
+        } catch (...) {
+            if (cancellation.cancelled()) cancellation.rethrowAsCancelled();
+            throw;
         }
-        sendFrame(opcode, payload.data(), static_cast<size_t>(count), endOfMessage);
-        sendContinuation_ = !endOfMessage;
     });
 }
 
 System::Threading::Tasks::TaskT<WebSocketReceiveResult>
 ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs count,
-                               System::Threading::CancellationToken /*cancellationToken*/) {
+                               System::Threading::CancellationToken cancellationToken) {
     validateWebSocketBuffer(buffer, offset, count);
     // Receive keeps the reference, and that is not an oversight: `buffer` is the OUT-parameter
     // this operation writes its result into, so a caller that destroys it before awaiting has
     // discarded the result it asked for. The destructor boundary covers `this`; the buffer's
     // lifetime is the caller's, exactly as it is for the synchronous overload.
     auto ops = beginAsyncOperation();
-    return System::Threading::Tasks::TaskT<WebSocketReceiveResult>([this, &buffer, offset, count, ops]() {
+    return System::Threading::Tasks::TaskT<WebSocketReceiveResult>(
+        [this, &buffer, offset, count, ops, cancellationToken]() -> WebSocketReceiveResult {
         AsyncOperationScope release{ops};
+        CancellationScope cancellation{this, cancellationToken};
+        try {
         WebSocket::ThrowOnInvalidState(loadState(), {WebSocketState::Open, WebSocketState::CloseSent});
 
         if (recvLeftoverPos_ < recvLeftover_.size()) {
@@ -844,36 +888,47 @@ ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs c
                 }
             }
         }
+        } catch (...) {
+            if (cancellation.cancelled()) cancellation.rethrowAsCancelled();
+            throw;
+        }
     });
 }
 
 System::Threading::Tasks::Task
 ClientWebSocket::CloseOutputAsync(WebSocketCloseStatus closeStatus, const std::optional<std::string>& statusDescription,
-                                    System::Threading::CancellationToken /*cancellationToken*/) {
+                                    System::Threading::CancellationToken cancellationToken) {
     auto ops = beginAsyncOperation();  // #2096: was outside the #2088 boundary
-    return System::Threading::Tasks::Task([this, closeStatus, statusDescription, ops]() {
+    return System::Threading::Tasks::Task([this, closeStatus, statusDescription, ops, cancellationToken]() {
         AsyncOperationScope release{ops};
-        WebSocket::ThrowOnInvalidState(loadState(), {WebSocketState::Open, WebSocketState::CloseReceived});
-        sendCloseFrame(closeStatus, statusDescription);
-        std::lock_guard<std::mutex> lock(stateMutex_);
-        state_ = state_ == WebSocketState::CloseReceived ? WebSocketState::Closed : WebSocketState::CloseSent;
+        CancellationScope cancellation{this, cancellationToken};
+        try {
+            WebSocket::ThrowOnInvalidState(loadState(), {WebSocketState::Open, WebSocketState::CloseReceived});
+            sendCloseFrame(closeStatus, statusDescription);
+            std::lock_guard<std::mutex> lock(stateMutex_);
+            state_ = state_ == WebSocketState::CloseReceived ? WebSocketState::Closed : WebSocketState::CloseSent;
+        } catch (...) {
+            if (cancellation.cancelled()) cancellation.rethrowAsCancelled();
+            throw;
+        }
     });
 }
 
 System::Threading::Tasks::Task
 ClientWebSocket::CloseAsync(WebSocketCloseStatus closeStatus, const std::optional<std::string>& statusDescription,
-                              System::Threading::CancellationToken /*cancellationToken*/) {
-    // Unlike ConnectAsync/SendAsync/ReceiveAsync (which all consistently comment out this same
-    // parameter), this one used to be captured by name and threaded into the lambda without
-    // ever actually being checked anywhere in the close-handshake wait loop below -- silently
-    // misleading, since the parameter's presence implies cancellation works here specifically.
-    // Wiring up real cancellation would need to interrupt the loop's blocking socket read
-    // mid-flight, which only makes sense done consistently across all of this file's async
-    // methods at once, not as a one-off partial fix for just this one; left for a follow-up
-    // ticket, matching the honest "not implemented" stance the other three already take.
+                              System::Threading::CancellationToken cancellationToken) {
+    // The old comment here was right about the problem and wrong about the cost. It said real
+    // cancellation "would need to interrupt the loop's blocking socket read mid-flight, which
+    // only makes sense done consistently across all of this file's async methods at once". The
+    // first half is true; the second turned out to be nine lines, because .NET's answer is to
+    // ABORT the whole WebSocket on cancellation rather than to interrupt one read
+    // (ManagedWebSocket.cs:608,789). #2093 does it consistently across all five members, which
+    // is what that comment asked for.
     auto ops = beginAsyncOperation();  // #2096: was outside the #2088 boundary
-    return System::Threading::Tasks::Task([this, closeStatus, statusDescription, ops]() {
+    return System::Threading::Tasks::Task([this, closeStatus, statusDescription, ops, cancellationToken]() {
         AsyncOperationScope release{ops};
+        CancellationScope cancellation{this, cancellationToken};
+        try {
         if (loadState() == WebSocketState::Open) {
             sendCloseFrame(closeStatus, statusDescription);
             storeState(WebSocketState::CloseSent);
@@ -900,6 +955,10 @@ ClientWebSocket::CloseAsync(WebSocketCloseStatus closeStatus, const std::optiona
                 }
                 // Any other frame received while waiting for the close handshake is discarded.
             }
+        }
+        } catch (...) {
+            if (cancellation.cancelled()) cancellation.rethrowAsCancelled();
+            throw;
         }
     });
 }

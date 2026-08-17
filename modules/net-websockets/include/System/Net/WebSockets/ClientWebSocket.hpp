@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include "System/Net/Sockets/Socket.hpp"
+#include "System/Threading/CancellationTokenRegistration.hpp"
 #include "System/Net/WebSockets/ClientWebSocketOptions.hpp"
 #include "System/Net/WebSockets/WebSocket.hpp"
 #include "System/Net/WebSockets/WebSocketMessageType.hpp"
@@ -98,6 +99,50 @@ namespace System::Net::WebSockets {
          * other would be worse than either; the exception-type question is ticket **#2357**.
          */
         [[nodiscard]] std::shared_ptr<System::Net::Sockets::Socket> socketForIo() const;
+
+        /**
+         * @brief Registers `Abort()` on @p token for the lifetime of one operation.
+         *
+         * Ticket #2093. All five `*Async` members took a `CancellationToken` and none consulted
+         * it. The ticket was blocked on a design it expected to be transport-level — a socket
+         * timeout, a poll-based non-blocking read loop, or a shutdown-based interrupt — and the
+         * reference shows the answer is none of those:
+         *
+         * ```csharp
+         * registration = cancellationToken.Register(static s => ((ManagedWebSocket)s!).Abort(), this);
+         * ```
+         *
+         * `ManagedWebSocket.cs:608,789`. **Cancelling any WebSocket operation aborts the whole
+         * WebSocket in .NET** — that is the documented contract, not an implementation shortcut,
+         * and it is why no per-read polling is needed. This port's `Abort()` already shuts the
+         * socket down under #2096's shared ownership, which is exactly what unblocks a worker
+         * parked in `recv()`.
+         *
+         * The scope also gives the two ends of the operation: a token already cancelled on entry
+         * means the body never runs, and a body that failed *because* the token fired reports
+         * `TaskCanceledException` rather than the `WebSocketException` the abort produced.
+         *
+         * @note The registration is disposed by the scope's destructor, outside any lock. The
+         *       shared `CancellationTokenRegistration::Dispose()` waits for an in-flight callback,
+         *       and that callback takes @ref stateMutex_ — so unregistering while holding it
+         *       would deadlock.
+         */
+        class CancellationScope {
+            ClientWebSocket*                              owner_;
+            System::Threading::CancellationToken          token_;
+            System::Threading::CancellationTokenRegistration registration_;
+
+        public:
+            CancellationScope(ClientWebSocket* owner, System::Threading::CancellationToken token);
+            ~CancellationScope();
+            CancellationScope(const CancellationScope&) = delete;
+            CancellationScope& operator=(const CancellationScope&) = delete;
+
+            /** @brief Rethrows a failure as `TaskCanceledException` when the token is the cause. */
+            [[noreturn]] void rethrowAsCancelled() const;
+            /** @return true if the token has fired. */
+            [[nodiscard]] bool cancelled() const;
+        };
 
         /** @brief Reads @ref state_ under @ref stateMutex_. */
         [[nodiscard]] WebSocketState loadState() const;
