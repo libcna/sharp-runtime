@@ -2,13 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <algorithm>
-#include <cctype>
-#include <stdexcept>
 #include <string>
-#include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/FormatException.hpp"
+#include "System/detail/CompositeFormat.hpp"
 
 namespace System::Text {
 
@@ -35,64 +32,56 @@ namespace System::Text {
         //     count is a silent wrong result, which the finding does not name and which is worse
         //     than the leak it does.
         //
-        // The digits are therefore accumulated in a wider type with an explicit bound. The bound
-        // is INT32_MAX - 1, i.e. the largest index whose `+ 1` is representable -- deliberately
-        // NOT .NET's kCompositeIndexLimit of 1,000,000, which would additionally reject
-        // "{1000000}".."{2147483646}", inputs this parser accepts today with a defined positive
-        // answer. That narrowing belongs to the approval-gated ticket #2020, which adopts
-        // System::detail::runCompositeFormat's grammar wholesale; #2010 stops exactly one value
-        // short of it.
-        static constexpr long long kMaxRepresentableIndex =
-            static_cast<long long>(SharpRuntime::INTCS_MAX) - 1;
-
-        static SharpRuntime::intcs countPlaceholders(const std::string& fmt) {
-            long long maxIdx = -1;
-            for (std::size_t i = 0; i < fmt.size(); ) {
-                char c = fmt[i];
-                if (c == '{') {
-                    if (i + 1 < fmt.size() && fmt[i + 1] == '{') { i += 2; continue; }
-                    std::size_t j = i + 1;
-                    while (j < fmt.size() && fmt[j] != '}' && fmt[j] != ',' && fmt[j] != ':') ++j;
-                    if (j >= fmt.size())
-                        throw System::FormatException("Input string was not in a correct format.");
-                    std::string idxStr = fmt.substr(i + 1, j - i - 1);
-                    if (idxStr.empty() ||
-                        !std::all_of(idxStr.begin(), idxStr.end(), [](unsigned char ch) { return std::isdigit(ch) != 0; }))
-                        throw System::FormatException("Input string was not in a correct format.");
-                    // Bounded accumulation: no std:: exception can escape, and the loop stops as
-                    // soon as the value can no longer be represented, so a long digit run costs
-                    // no more than a short one.
-                    long long idx = 0;
-                    for (unsigned char ch : idxStr) {
-                        idx = idx * 10 + (ch - '0');
-                        if (idx > kMaxRepresentableIndex)
-                            throw System::FormatException("Input string was not in a correct format.");
-                    }
-                    if (idx > maxIdx) maxIdx = idx;
-                    while (j < fmt.size() && fmt[j] != '}') ++j;
-                    if (j >= fmt.size())
-                        throw System::FormatException("Input string was not in a correct format.");
-                    i = j + 1;
-                } else if (c == '}') {
-                    if (i + 1 < fmt.size() && fmt[i + 1] == '}') { i += 2; continue; }
-                    throw System::FormatException("Input string was not in a correct format.");
-                } else {
-                    ++i;
-                }
-            }
-            return static_cast<SharpRuntime::intcs>(maxIdx + 1);
-        }
+        // Ticket #2020 (the grammar half of the same finding, cause T-N, CCF-012) removed the
+        // hand-written scanner that used to live here. It was a THIRD composite-format grammar --
+        // exactly what CCF-012 warns about -- and it skipped everything between the index and the
+        // closing brace, so `{0,not-a-width}` and `{0,-}` parsed happily. The scan is now
+        // System::detail::scanCompositeFormat, shared with String::Format and
+        // FormattableString::ToString, under the digit policy .NET's own CompositeFormat.Parse
+        // uses.
+        //
+        // THE POLICY MATTERS AND THE PLAN HAD IT BACKWARDS. #2020's description asserts that
+        // `Parse("{1500000}")` should be rejected "where .NET's AppendFormatHelper index limit is
+        // 1,000,000". .NET's CompositeFormat.Parse has NO index limit: TryParseLiterals writes
+        // `while (char.IsAsciiDigit(ch))` (CompositeFormat.cs:201,258) where AppendFormatHelper
+        // writes `while (char.IsAsciiDigit(ch) && index < IndexLimit)`
+        // (ValueStringBuilder.AppendFormat.cs:99,140), and nothing else between the two differs.
+        // Adopting the formatter's limits here would have introduced a new divergence while
+        // claiming to remove one, so `{1000000}`..`{2147483646}` keep the answers #2010 gave them.
 
     public:
         /**
          * @brief Parses a composite format string and returns a CompositeFormat instance.
-         * @throws System::FormatException if @p format contains an invalid format item
-         *         (unterminated placeholder, stray '}', or a non-numeric/empty argument index).
+         *
+         * Transcribed from .NET's `CompositeFormat.TryParseLiterals`
+         * (`CompositeFormat.cs:112-352`) by way of the shared
+         * `System::detail::scanCompositeFormat`: an item is an opening brace, at least one
+         * ASCII digit, optional spaces, an optional `,`-introduced alignment (itself optional
+         * spaces, an optional `-`, at least one digit, optional spaces), an optional
+         * `:`-introduced specifier that may not contain `{`, and a closing brace. `{{` and `}}`
+         * are escapes; any other unescaped `}` is an error.
+         *
+         * `MinimumArgumentCount` is one more than the largest index any item names, which is
+         * .NET's `_argsRequired` (`CompositeFormat.cs:55`).
+         *
+         * @throws System::FormatException if @p format contains an invalid format item, or an
+         *         argument index too large for `intcs` — see
+         *         `System::detail::kCompositeMaxRepresentableIndex`, which records why that last
+         *         case deviates from .NET 11 on purpose.
          */
         static CompositeFormat Parse(const std::string& format) {
             CompositeFormat cf;
             cf.format_ = format;
-            cf.minArgCount_ = countPlaceholders(format);
+
+            long long maxIdx = -1;
+            System::detail::scanCompositeFormat(
+                format, System::detail::CompositeDigitPolicy::UnboundedLikeParse,
+                [](std::string_view) {},  // Parse keeps the original text, so literals are dropped.
+                [&](long long index, long long, bool, std::string_view) {
+                    if (index > maxIdx) maxIdx = index;
+                });
+
+            cf.minArgCount_ = static_cast<SharpRuntime::intcs>(maxIdx + 1);
             return cf;
         }
 

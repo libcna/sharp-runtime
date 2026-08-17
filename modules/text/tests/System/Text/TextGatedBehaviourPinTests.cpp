@@ -288,27 +288,28 @@ TEST(TextGatedBehaviourPinTests, Fix2017_ATruncatedTrailingUnitReachesTheFallbac
 }
 
 // ---------------------------------------------------------------------------------------
-// SR-AUD-298 / #2020 (cause T-N) — the row where the shared grammar WIDENS acceptance.
+// SR-AUD-298 / #2020 (cause T-N) — LANDED. This pin used to hold the gate shut; it now holds
+// the answer, and the answer is not the one the plan proposed.
 // ---------------------------------------------------------------------------------------
 
-TEST(TextGatedBehaviourPinTests, CompositeFormatParseStillRejectsAnItemTheSharedGrammarAccepts) {
-    // Measured (#2022, build-probe/2022_probe1_verify.log §A): adopting
-    // System::detail::runCompositeFormat in #2020 does not only narrow. "{0 }" — a trailing
-    // space inside the item — is a FormatException here today and is ACCEPTED by the shared
-    // grammar, which skips spaces after the index. plan §14.8's approval sentence describes
-    // narrowing only, and this row is the counter-example it has to name.
-    EXPECT_THROW((void)CompositeFormat::Parse("{0 }"), System::FormatException)
-        << "gated by #2020: the shared grammar accepts this and would return minArgCount 1";
-    EXPECT_THROW((void)CompositeFormat::Parse("{0  ,5}"), System::FormatException)
-        << "gated by #2020: the shared grammar accepts spaces before the alignment comma too";
+TEST(TextGatedBehaviourPinTests, Fix2020_ParseWidensExactlyWhereDotNetWidens) {
+    // #2022 measured (build-probe/2022_probe1_verify.log §A) that adopting the shared grammar
+    // would not only narrow: "{0 }" — a trailing space inside the item — was a FormatException
+    // and the shared scanner accepts it. That measurement was right, and #2020 landed the
+    // widening rather than treating it as a reason to stay put: it is .NET's own rule
+    // (CompositeFormat.cs:211-217 consumes spaces after the index).
+    EXPECT_EQ(1, CompositeFormat::Parse("{0 }").getMinimumArgumentCountProperty());
+    EXPECT_EQ(1, CompositeFormat::Parse("{0  ,5}").getMinimumArgumentCountProperty());
 
-    // And the index ceiling is not where §14.8 says it is: the shared grammar stops consuming
-    // digits once the index reaches 1,000,000, so {1000000} … {9999999} are ACCEPTED there,
-    // while {10000000} and {2147483646} are not. Both are pinned as currently accepted here.
+    // The index ceiling, however, is not where plan §14.8 puts it and not where #2022's
+    // correction (i) puts it either. Both readings assumed Parse must adopt
+    // AppendFormatHelper's IndexLimit; .NET's Parse HAS NO INDEX LIMIT — TryParseLiterals
+    // writes `while (char.IsAsciiDigit(ch))` (CompositeFormat.cs:201) against the formatter's
+    // `&& index < IndexLimit` (ValueStringBuilder.AppendFormat.cs:99). So all four of these
+    // keep the answers #2010 gave them, and they are now confirmed against the reference
+    // rather than pinned pending an approval.
     EXPECT_EQ(1000001, CompositeFormat::Parse("{1000000}").getMinimumArgumentCountProperty());
     EXPECT_EQ(10000000, CompositeFormat::Parse("{9999999}").getMinimumArgumentCountProperty());
-    EXPECT_EQ(10000001, CompositeFormat::Parse("{10000000}").getMinimumArgumentCountProperty())
-        << "gated by #2020: the shared grammar rejects this one";
-    EXPECT_EQ(2147483647, CompositeFormat::Parse("{2147483646}").getMinimumArgumentCountProperty())
-        << "gated by #2020: the shared grammar rejects this one";
+    EXPECT_EQ(10000001, CompositeFormat::Parse("{10000000}").getMinimumArgumentCountProperty());
+    EXPECT_EQ(2147483647, CompositeFormat::Parse("{2147483646}").getMinimumArgumentCountProperty());
 }

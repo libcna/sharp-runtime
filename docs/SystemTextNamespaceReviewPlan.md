@@ -761,6 +761,59 @@ third engine disagrees (§4.6).
 > `{0,not-a-width}`, `{0,-}` and any index at or above 1,000,000 begin to throw
 > `System::FormatException`. Ticket **#2020**.
 
+---
+
+#### 14.8.1 LANDED 2026-08-17 — and **half the approval sentence above is wrong**
+
+#2020 landed under `docs/StandingApprovals.md` SA-5. The reference tree, absent when §14.8
+and #2022's §25 corrections were written, settles the question the approval sentence could
+only frame — and it does not settle it the way either of them assumed.
+
+**.NET has two composite-format grammars, and the index limit is exactly where they differ.**
+`CompositeFormat.TryParseLiterals` says of itself *"This parsing logic is copied from
+string.Format"* (`CompositeFormat.cs:113-116`), and it is, with two conditions removed:
+
+| | index digits | alignment digits |
+|---|---|---|
+| `AppendFormatHelper` (`ValueStringBuilder.AppendFormat.cs:99,140`) | `while (IsAsciiDigit(ch) && index < IndexLimit)` | `… && width < WidthLimit` |
+| `TryParseLiterals` (`CompositeFormat.cs:201,258`) | `while (IsAsciiDigit(ch))` | `while (IsAsciiDigit(ch))` |
+
+Nothing else between the two differs. So:
+
+* **"including its one-million index limit" was not implemented, and must not be.** .NET's
+  `Parse` has no index limit. `{1000000}`, `{1500000}`, `{9999999}`, `{10000000}` and
+  `{2147483646}` keep the answers #2010 gave them, which were already right. Applying the
+  formatter's limit here would have introduced a *new* divergence while claiming to remove
+  one — pinned as the `Fix2020_ParseHasNoIndexLimitAndTheFindingSaidItShould` test and caught
+  by mutation M2.
+* **The alignment and specifier rules were implemented, and are the whole repair.**
+  `{0,not-a-width}`, `{0,-}`, `{0,}`, `{0,- 5}`, `{0,x}` and `{0,+5}` now throw. The old
+  scanner never read an alignment component at all — it skipped from the index to the closing
+  brace — which is why a typo parsed cleanly and failed only later at a formatting call.
+* **§25's correction (ii) is confirmed and was landed rather than treated as a blocker.**
+  Adoption widens as well: `{0 }`, `{0  ,5}`, `{0 :X}`, `{0,5 }`, `{0, -5}` and `{0,  5  }`
+  are now accepted, because .NET consumes spaces after the index, after the alignment comma
+  and after the alignment digits. A **leading** space (`{ 0 }`) is still rejected, which is
+  .NET's own asymmetry (`CompositeFormat.cs:186-190`).
+* **§25's structural correction was right.** `runCompositeFormat` is a formatting engine that
+  pads while validating, so `Parse` could not call it. The scan is now
+  `System::detail::scanCompositeFormat`, a non-rendering template in `modules/core` taking two
+  callbacks and a `CompositeDigitPolicy`; `runCompositeFormat` is a thin adaptor over it and
+  is behaviour-preserving to the byte.
+
+**CCF-012 closes**, and as an assertion rather than a claim:
+`Fix2020_ParseAndFormatNowAgreeOnEveryBraceRule` walks a 31-row corpus and requires the two
+doors to accept and reject identically.
+
+**One deliberate deviation, unchanged from #2010 and now measured.** `Parse` throws for an
+index above `2147483646`; .NET wraps into a negative `ArgIndex` the constructor counts as
+neither literal nor hole (`CompositeFormat.cs:48-56`), and one value earlier reports
+`MinimumArgumentCount == 0` for a format needing two billion arguments. C++ signed overflow is
+undefined rather than wrapping, so that behaviour is unavailable, not merely unwanted.
+
+Record: `docs/Migration-CompositeFormatSharedGrammar.md`. Four mutations, all caught. Gate
+17,204 run / 0 failed. Downstream: zero `CompositeFormat` sites in either consumer.
+
 ### 14.9 #2021 — T-F, `EncodingInfo::GetEncoding` (SR-AUD-299)
 
 **Now:** always UTF-8, whatever the code page says.

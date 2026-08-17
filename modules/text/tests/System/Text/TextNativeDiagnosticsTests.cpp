@@ -22,8 +22,10 @@
 //   HtmlEncoder::Default().Encode("abc",0,99) -> "abc"                     <-- silent clamp
 //
 // The tests that pin what is DELIBERATELY UNCHANGED matter as much as the ones that pin the
-// repairs: the grammar halves of both findings are approval-gated (#2020 and #2019), and a
-// later change that quietly adopted them must fail here rather than pass unnoticed.
+// repairs. Both grammar halves have since landed -- #2019 (the Web encoders' Basic Latin
+// allow-list) and #2020 (one shared composite-format scanner) -- so the pins that used to hold
+// those gates shut now hold their answers instead, and in #2020's case the answer contradicts
+// the plan: .NET's CompositeFormat.Parse has no index limit, and this port's was already right.
 
 #include <gtest/gtest.h>
 
@@ -31,6 +33,7 @@
 
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
+#include "System/String.hpp"
 #include "System/Text/CompositeFormat.hpp"
 #include "System/Text/Encodings/Web/HtmlEncoder.hpp"
 #include "System/Text/Encodings/Web/JavaScriptEncoder.hpp"
@@ -105,13 +108,86 @@ TEST(CompositeFormatBoundaryTests, EveryPreviouslyRejectedFormatIsStillRejected)
     }
 }
 
-TEST(CompositeFormatBoundaryTests, TheGatedGrammarRowsAreDeliberatelyStillAccepted) {
-    // #2020 would make these throw. #2010 must NOT, and this test is what stops the
-    // narrowing landing without its approval sentence (plan §14.8).
-    EXPECT_EQ(1, CompositeFormat::Parse("{0,not-a-width}").getMinimumArgumentCountProperty());
-    EXPECT_EQ(1, CompositeFormat::Parse("{0,-}").getMinimumArgumentCountProperty());
-    EXPECT_EQ(1000001, CompositeFormat::Parse("{1000000}").getMinimumArgumentCountProperty())
-        << "adopting System::detail::kCompositeIndexLimit here is #2020, not #2010";
+// ---------------------------------------------------------------------------------------
+// #2020 -- the grammar half. The hand-written scanner is gone; Parse now shares
+// System::detail::scanCompositeFormat with String::Format and FormattableString::ToString.
+// ---------------------------------------------------------------------------------------
+
+TEST(CompositeFormatBoundaryTests, Fix2020_AnAlignmentThatIsNotANumberIsRejected) {
+    // The defect: the old scanner skipped everything between the index and the closing
+    // brace, so an alignment component was never read at all. .NET requires an ASCII digit
+    // after the optional minus sign -- `width = ch - '0'; if ((uint)width >= 10u) goto
+    // FailureExpectedAsciiDigit;` (CompositeFormat.cs:249-253) -- and so does String::Format
+    // here, which is the divergence CCF-012 names.
+    for (const char* fmt : {"{0,not-a-width}", "{0,-}", "{0,}", "{0,- 5}", "{0,x}", "{0,+5}"}) {
+        SCOPED_TRACE(fmt);
+        EXPECT_THROW((void)CompositeFormat::Parse(fmt), System::FormatException);
+    }
+}
+
+TEST(CompositeFormatBoundaryTests, Fix2020_TheSpacesDotNetAllowsInsideAnItemAreNowAccepted) {
+    // Adoption is not only a narrowing. .NET consumes spaces after the index
+    // (CompositeFormat.cs:211-217), after the alignment comma (228-235) and after the
+    // alignment digits (269-275); the old scanner rejected every one of them because a
+    // trailing space made its index substring non-numeric.
+    for (const char* fmt : {"{0 }", "{0  ,5}", "{0 :X}", "{0,5 }", "{0, -5}", "{0,  5  }"}) {
+        SCOPED_TRACE(fmt);
+        EXPECT_EQ(1, CompositeFormat::Parse(fmt).getMinimumArgumentCountProperty());
+    }
+}
+
+TEST(CompositeFormatBoundaryTests, Fix2020_ALeadingSpaceIsStillRejected) {
+    // The asymmetry is .NET's, not an oversight: the FIRST character after `{` is read as a
+    // digit before any whitespace rule applies (`int index = ch - '0'; if ((uint)index >= 10u)`
+    // -- CompositeFormat.cs:186-190), so a space may follow the index but never precede it.
+    for (const char* fmt : {"{ 0}", "{ 0 }", "{ }"}) {
+        SCOPED_TRACE(fmt);
+        EXPECT_THROW((void)CompositeFormat::Parse(fmt), System::FormatException);
+    }
+}
+
+TEST(CompositeFormatBoundaryTests, Fix2020_ParseHasNoIndexLimitAndTheFindingSaidItShould) {
+    // #2020's description asserts that Parse("{1500000}") should be rejected "where .NET's
+    // AppendFormatHelper index limit is 1,000,000". It is measurably wrong, and this is the
+    // test that keeps it wrong. .NET has TWO composite-format grammars and they differ on
+    // exactly this: TryParseLiterals writes `while (char.IsAsciiDigit(ch))`
+    // (CompositeFormat.cs:201) where AppendFormatHelper writes
+    // `while (char.IsAsciiDigit(ch) && index < IndexLimit)`
+    // (ValueStringBuilder.AppendFormat.cs:99). Adopting the formatter's limit here would have
+    // introduced a NEW divergence while claiming to remove one.
+    EXPECT_EQ(1000001, CompositeFormat::Parse("{1000000}").getMinimumArgumentCountProperty());
+    EXPECT_EQ(1500001, CompositeFormat::Parse("{1500000}").getMinimumArgumentCountProperty());
+    EXPECT_EQ(10000000, CompositeFormat::Parse("{9999999}").getMinimumArgumentCountProperty());
+    EXPECT_EQ(10000001, CompositeFormat::Parse("{10000000}").getMinimumArgumentCountProperty());
+    EXPECT_EQ(2147483647, CompositeFormat::Parse("{2147483646}").getMinimumArgumentCountProperty());
+
+    // And the alignment has no limit either, so a digit run no int could hold is ACCEPTED --
+    // .NET wraps the value, this port saturates it, and neither exposes it.
+    EXPECT_EQ(1, CompositeFormat::Parse("{0,99999999999999999999}")
+                     .getMinimumArgumentCountProperty());
+}
+
+TEST(CompositeFormatBoundaryTests, Fix2020_ParseAndFormatNowAgreeOnEveryBraceRule) {
+    // The CCF-012 closure, stated as an assertion rather than a claim: for every format
+    // string whose indices are small enough that the argument list cannot be the reason,
+    // Parse accepts exactly what String::Format accepts. Before #2020 these were two
+    // hand-written grammars and six of these rows disagreed.
+    for (const char* fmt : {"", "no items", "{0}", "{0} {1}", "{1} {0}", "{{0}}", "{0:X}",
+                            "{0,10}", "{0,-10:D3}", "{{{0}}}", "{0 }", "{0  ,5}", "{0 :X}",
+                            "{0,5 }", "{0, -5}", "{0,- 5}", "{ 0 }", "{0,not-a-width}",
+                            "{0,-}", "{0,}", "{0:{1}}", "Hello {", "a } b", "{}", "{-1}",
+                            "{abc}", "}}", "{{", "{0:}", "{0::}", "{0:a}b{1}"}) {
+        SCOPED_TRACE(fmt);
+        bool parseThrew = false, formatThrew = false;
+        try {
+            (void)CompositeFormat::Parse(fmt);
+        } catch (const System::FormatException&) { parseThrew = true; }
+        try {
+            (void)System::String::Format(fmt, std::string("x"), std::string("y"));
+        } catch (const System::FormatException&) { formatThrew = true; }
+        EXPECT_EQ(parseThrew, formatThrew)
+            << "the two doors disagree on this format string, which is CCF-012 exactly";
+    }
 }
 
 // ---------------------------------------------------------------------------------------

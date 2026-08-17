@@ -882,10 +882,36 @@ Approval C3 — #2017  Every encoding routes through its configured fallback.
                      SEPARATE QUESTION: may the fallback surface widen from
                      char to a scalar type?                           with C1+C2
 Approval D  — #2020  One shared, non-rendering composite-format scanner;
-                     Parse both narrows and widens.  CLOSES CCF-012.  RECOMMENDED
+                     Parse both narrows and widens.  CLOSES CCF-012.  LANDED 2026-08-17
+                     (SA-5) — but WITHOUT the index limit: .NET's Parse
+                     has none.  See §5.6.
 Approval E  — #2019  Default Web encoders' allow-list.                DEFER — no evidence
 Approval F  — #2018  Real Unicode tables in Rune.                     DEFER — no data source
 ```
+
+---
+
+## 5.6 Addendum, 2026-08-17 — Family D landed, and the reference refuted half of it
+
+#2020 landed under `docs/StandingApprovals.md` SA-5, with the reference tree available for the
+first time. **The structural half of §5 was right and the behavioural half was half wrong.**
+
+*Right:* `runCompositeFormat` could not be called by `Parse` — it is a formatting engine that
+needs an `argCount` and a render callable and pads while validating. The ticket did extract a
+non-rendering `System::detail::scanCompositeFormat` into `modules/core`, and
+`runCompositeFormat` is now a thin, byte-for-byte behaviour-preserving adaptor over it.
+
+*Wrong:* the accepted-grammar question was never one question. .NET's
+`CompositeFormat.TryParseLiterals` is `AppendFormatHelper` **with the index and alignment
+limits removed** — `while (IsAsciiDigit(ch))` against `while (IsAsciiDigit(ch) && index <
+IndexLimit)` (`CompositeFormat.cs:201,258` against `ValueStringBuilder.AppendFormat.cs:99,140`),
+and nothing else differs. So the one-million index limit named in §14.8's approval sentence and
+in §25's correction (i) was **not** adopted and must not be: `{1000000}`..`{2147483646}` keep
+the answers they had. The alignment and specifier rules were adopted, and are the repair.
+
+The single axis is now a parameter, `System::detail::CompositeDigitPolicy`, rather than two
+functions that would drift. Full record: `docs/Migration-CompositeFormatSharedGrammar.md` and
+`docs/SystemTextNamespaceReviewPlan.md` §14.8.1.
 
 ---
 
