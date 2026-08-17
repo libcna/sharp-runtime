@@ -315,10 +315,19 @@ TEST(UTF32EncodingTests, CodePage_Is12000) {
     EXPECT_EQ(enc.getCodePageProperty(), 12000);
 }
 
-TEST(UTF32EncodingTests, GetBytes_WithBOM_SizeIs8ForSingleChar) {
-    UTF32Encoding enc(false, true);
-    auto bytes = enc.GetBytes("A");
-    EXPECT_EQ(bytes.size(), 8u);
+// #2016 (SR-AUD-291): GetBytes no longer prepends the byte-order mark, on any encoding or
+// setting -- .NET keeps the mark in GetPreamble() and out of GetBytes entirely
+// (UTF32Encoding.cs:1113-1128). A mark emitted as payload is concatenated into strings, counted
+// in lengths, and written a second time by anything that also writes a preamble. So the BOM
+// setting no longer changes GetBytes at all; it changes what GetPreamble() reports.
+TEST(UTF32EncodingTests, GetBytes_IgnoresTheBomSetting) {
+    EXPECT_EQ(UTF32Encoding(false, true).GetBytes("A").size(), 4u);
+    EXPECT_EQ(UTF32Encoding(false, false).GetBytes("A").size(), 4u);
+}
+
+TEST(UTF32EncodingTests, GetPreamble_ReportsTheBomInstead) {
+    EXPECT_EQ(UTF32Encoding(false, true).GetPreamble().size(), 4u);
+    EXPECT_TRUE(UTF32Encoding(false, false).GetPreamble().empty());
 }
 
 TEST(UTF32EncodingTests, GetBytes_NoBOM_SizeIs4ForSingleChar) {

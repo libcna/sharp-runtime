@@ -44,6 +44,30 @@ namespace System::Text {
         [[nodiscard]] bool getByteOrderMarkProperty() const { return byteOrderMark_; }
 
         /**
+         * @brief Returns the byte-order mark this encoding declares, or an empty vector.
+         *
+         * Ticket #2016 (SR-AUD-291). Until it, `GetBytes` PREPENDED the mark to its output, so
+         * `Encoding::UTF32()->GetBytes("A")` returned eight bytes for one character and the mark
+         * travelled as payload -- it was concatenated into strings, counted in lengths and
+         * written a second time by anything that also wrote a preamble.
+         *
+         * .NET keeps the two apart: the mark is what `GetPreamble()` returns (`UnicodeEncoding.cs`), and
+         * `GetBytes` never emits it. A caller that wants a BOM writes the preamble itself, which
+         * is what `StreamWriter` does.
+         *
+         * @note **Not virtual, and not on `Encoding`.** .NET declares `GetPreamble` on the base,
+         *       but adding a virtual to a public base class is precisely what
+         *       `docs/StandingApprovals.md` SA-3 excludes from standing approval, so it lives on
+         *       the concrete encodings that have a mark. A caller holding only an `Encoding&`
+         *       does not need it: an encoding with no mark has nothing to write.
+         */
+        [[nodiscard]] std::vector<SharpRuntime::bytecs> GetPreamble() const {
+            if (!byteOrderMark_) return {};
+            return bigEndian_ ? std::vector<SharpRuntime::bytecs>{0xFE, 0xFF}
+                              : std::vector<SharpRuntime::bytecs>{0xFF, 0xFE};
+        }
+
+        /**
          * @brief Encodes a string (decoded from UTF-8) to UTF-16 bytes, in the configured endianness.
          * @note Pre-sizes the output buffer to its exact worst case (2 output bytes per input
          * UTF-8 byte -- every decode path here emits at most 2 output bytes per byte consumed,
@@ -66,8 +90,6 @@ namespace System::Text {
                     out[pos++] = static_cast<SharpRuntime::bytecs>((unit >> 8) & 0xFF);
                 }
             };
-            if (byteOrderMark_) writeUnit(0xFEFF);
-
             size_t i = 0;
             while (i < s.size()) {
                 uint32_t cp;

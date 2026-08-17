@@ -43,6 +43,31 @@ namespace System::Text {
         [[nodiscard]] bool getByteOrderMarkProperty() const { return byteOrderMark_; }
 
         /**
+         * @brief Returns the byte-order mark this encoding declares, or an empty vector.
+         *
+         * Ticket #2016 (SR-AUD-291). Until it, `GetBytes` PREPENDED the mark to its output, so
+         * `Encoding::UTF32()->GetBytes("A")` returned eight bytes for one character and the mark
+         * travelled as payload -- it was concatenated into strings, counted in lengths and
+         * written a second time by anything that also wrote a preamble.
+         *
+         * .NET keeps the two apart: the mark is what `GetPreamble()` returns (`UTF32Encoding.cs:1113-1128`), and
+         * `GetBytes` never emits it. A caller that wants a BOM writes the preamble itself, which
+         * is what `StreamWriter` does.
+         *
+         * @note **Not virtual, and not on `Encoding`.** .NET declares `GetPreamble` on the base,
+         *       but adding a virtual to a public base class is precisely what
+         *       `docs/StandingApprovals.md` SA-3 excludes from standing approval, so it lives on
+         *       the concrete encodings that have a mark. A caller holding only an `Encoding&`
+         *       does not need it: an encoding with no mark has nothing to write.
+         */
+        [[nodiscard]] std::vector<SharpRuntime::bytecs> GetPreamble() const {
+            if (!byteOrderMark_) return {};
+            return bigEndian_
+                       ? std::vector<SharpRuntime::bytecs>{0x00, 0x00, 0xFE, 0xFF}
+                       : std::vector<SharpRuntime::bytecs>{0xFF, 0xFE, 0x00, 0x00};
+        }
+
+        /**
          * @brief Encodes a string (decoded from UTF-8) to a UTF-32 byte sequence.
          * @note Pre-sizes the output buffer to its exact worst case (every decoded code point
          * emits exactly 4 bytes, and there are at most `s.size()` code points, so
@@ -56,10 +81,6 @@ namespace System::Text {
         [[nodiscard]] std::vector<SharpRuntime::bytecs> GetBytes(const std::string& s) const override {
             std::vector<SharpRuntime::bytecs> result(s.size() * 4 + 4);
             size_t pos = 0;
-            if (byteOrderMark_) {
-                writeUnit(result, pos, 0x0000FEFF);
-            }
-
             size_t i = 0;
             while (i < s.size()) {
                 uint32_t cp;

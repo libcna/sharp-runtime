@@ -165,30 +165,45 @@ TEST(TextGatedBehaviourPinTests, Fix2021_AnUnimplementedCodePageIsRejectedRather
 // SR-AUD-291 / #2016 (cause T-J) — the halves plan §14.4 does not name.
 // ---------------------------------------------------------------------------------------
 
-TEST(TextGatedBehaviourPinTests, BothBomEmittingFactoriesArePinnedNotOnlyUtf32) {
-    // plan §14.4 names Encoding::UTF32() only. Measured (#2022): BigEndianUnicode() is
-    // constructed as UnicodeEncoding(true, true) and emits a byte-order mark as payload too,
-    // so the approval covers TWO default factories, not one.
+TEST(TextGatedBehaviourPinTests, Fix2016_GetBytesEmitsNoByteOrderMarkOnAnyFactory) {
+    // #2016 LANDED 2026-08-17, and this pin is INVERTED. plan §14.4 named Encoding::UTF32()
+    // only; #2022 measured that BigEndianUnicode() is constructed as UnicodeEncoding(true, true)
+    // and emitted a mark as payload too, so the repair had to cover BOTH default factories.
+    //
+    // .NET keeps the mark out of GetBytes entirely: it is what GetPreamble() returns
+    // (UTF32Encoding.cs:1113-1128). A mark emitted as payload is concatenated into strings,
+    // counted in lengths, and written a second time by anything that also writes a preamble.
     const auto be = Encoding::BigEndianUnicode()->GetBytes("A");
-    ASSERT_EQ(4u, be.size()) << "gated by #2016: without the BOM this is 2 bytes";
-    EXPECT_EQ(0xFE, be[0]);
-    EXPECT_EQ(0xFF, be[1]);
-    EXPECT_EQ(0x00, be[2]);
-    EXPECT_EQ('A', be[3]);
+    ASSERT_EQ(2u, be.size());
+    EXPECT_EQ(0x00, be[0]);
+    EXPECT_EQ('A', be[1]);
 
-    const auto le32 = Encoding::UTF32()->GetBytes("A");
-    ASSERT_EQ(8u, le32.size()) << "gated by #2016";
-    EXPECT_EQ(0xFF, le32[0]);
-    EXPECT_EQ(0xFE, le32[1]);
-
-    // The little-endian UTF-16 factory does not, which is what makes the inconsistency
-    // visible from inside the library.
+    EXPECT_EQ(4u, Encoding::UTF32()->GetBytes("A").size());
     EXPECT_EQ(2u, Encoding::Unicode()->GetBytes("A").size());
 
-    // The non-default constructors decide it per instance; only the factories are gated.
+    // The per-instance BOM setting no longer changes GetBytes at all -- it only changes what
+    // GetPreamble() reports, which is the whole point of the split.
     EXPECT_EQ(2u, System::Text::UnicodeEncoding(false, false).GetBytes("A").size());
-    EXPECT_EQ(4u, System::Text::UnicodeEncoding(false, true).GetBytes("A").size());
+    EXPECT_EQ(2u, System::Text::UnicodeEncoding(false, true).GetBytes("A").size());
     EXPECT_EQ(4u, System::Text::UTF32Encoding(false, false).GetBytes("A").size());
+    EXPECT_EQ(4u, System::Text::UTF32Encoding(false, true).GetBytes("A").size());
+}
+
+TEST(TextGatedBehaviourPinTests, Fix2016_TheMarkIsAvailableFromGetPreambleInstead) {
+    // The repair must not have DELETED the byte-order mark, only moved it to where a caller can
+    // ask for it -- otherwise code that legitimately wants a BOM would have no way to get one.
+    EXPECT_EQ((std::vector<bytecs>{0xFF, 0xFE}),
+              System::Text::UnicodeEncoding(false, true).GetPreamble());
+    EXPECT_EQ((std::vector<bytecs>{0xFE, 0xFF}),
+              System::Text::UnicodeEncoding(true, true).GetPreamble());
+    EXPECT_EQ((std::vector<bytecs>{0xFF, 0xFE, 0x00, 0x00}),
+              System::Text::UTF32Encoding(false, true).GetPreamble());
+    EXPECT_EQ((std::vector<bytecs>{0x00, 0x00, 0xFE, 0xFF}),
+              System::Text::UTF32Encoding(true, true).GetPreamble());
+
+    // ...and an encoding configured without a mark reports none.
+    EXPECT_TRUE(System::Text::UnicodeEncoding(false, false).GetPreamble().empty());
+    EXPECT_TRUE(System::Text::UTF32Encoding(false, false).GetPreamble().empty());
 }
 
 TEST(TextGatedBehaviourPinTests, TheDecodeDirectionStillConsumesALeadingByteOrderMark) {

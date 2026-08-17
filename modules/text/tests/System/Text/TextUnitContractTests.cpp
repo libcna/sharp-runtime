@@ -172,12 +172,11 @@ TEST(TextUnitContractTests, Fix2013_AnEncodingTheCallerConstructedIsStillConfigu
 }
 
 TEST(TextUnitContractTests, TheGatedBomAndFallbackBehavioursAreStillWhatTheyWere) {
-    // #2016 (plan section 14.4): the DEFAULT UTF-32 factory prepends a byte-order mark as
-    // payload, which .NET states GetBytes does not do; the UTF-16 factory does not.
+    // #2016 LANDED: no factory prepends a byte-order mark to GetBytes any more; the mark is
+    // what GetPreamble() reports. The two encodings now agree, which they did not before.
     const auto utf32 = Encoding::UTF32()->GetBytes("A");
-    ASSERT_EQ(8u, utf32.size()) << "gated by #2016";
-    EXPECT_EQ(0xFF, utf32[0]);
-    EXPECT_EQ(0xFE, utf32[1]);
+    ASSERT_EQ(4u, utf32.size());
+    EXPECT_EQ('A', utf32[0]);
     const auto utf16 = Encoding::Unicode()->GetBytes("A");
     ASSERT_EQ(2u, utf16.size());
     EXPECT_EQ('A', utf16[0]);
