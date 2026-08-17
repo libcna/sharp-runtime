@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 #include <gtest/gtest.h>
+#include <functional>
 #include <any>
 #include <atomic>
 #include <chrono>
@@ -904,6 +905,88 @@ TEST(HttpMessageHandlerTests, HttpClient_CustomHandlerChain_IsInvokedEndToEnd) {
     EXPECT_TRUE(spy->invoked);
     EXPECT_EQ(body, "OK");
     EXPECT_NE(receivedRequest.find("X-Spy-Injected: yes"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// #2128 -- RFC 9112 6.1 on the wire, which is the only place it can be enforced
+//
+// Transfer-Encoding is a REQUEST header and Content-Length a CONTENT header. They live in two
+// collections that cannot see each other, which is why neither this port's header collections
+// nor .NET's enforce their coexistence rule -- the message writer does. These two cases assert
+// the rule where it actually applies: on the bytes that leave the socket.
+// ---------------------------------------------------------------------------
+
+namespace {
+std::string captureRequestBytes(const std::function<void(HttpClient&, const std::string&)>& act) {
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    std::string received;
+    std::thread serverThread([&]() {
+        auto server = listener->Accept();
+        std::vector<SharpRuntime::bytecs> reqBuf(8192);
+        SharpRuntime::intcs n = server->Receive(reqBuf);
+        received.assign(reqBuf.begin(), reqBuf.begin() + n);
+        server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"));
+        server->Close();
+    });
+
+    HttpClient client;
+    act(client, "http://127.0.0.1:" + std::to_string(port) + "/");
+    serverThread.join();
+    return received;
+}
+
+bool mentionsHeader(const std::string& request, const std::string& name) {
+    return request.find("\r\n" + name + ":") != std::string::npos;
+}
+} // namespace
+
+TEST(HttpClientWireFormatTests, RequestWithTransferEncodingOmitsContentLength) {
+    // A request carrying BOTH is the exact shape a request-smuggling chain relies on two
+    // intermediaries disagreeing about: one frames by Content-Length, the other by chunks.
+    const std::string sent = captureRequestBytes([](HttpClient& client, const std::string& url) {
+        auto request = std::make_shared<HttpRequestMessage>(HttpMethod::Post(), url);
+        request->setContentProperty(std::make_shared<StringContent>("payload"));
+        request->setHeader("Transfer-Encoding", "chunked");
+        (void)client.Send(request);
+    });
+
+    EXPECT_TRUE(mentionsHeader(sent, "Transfer-Encoding")) << sent;
+    EXPECT_FALSE(mentionsHeader(sent, "Content-Length"))
+        << "RFC 9112 6.1: Content-Length must not accompany Transfer-Encoding\n" << sent;
+}
+
+TEST(HttpClientWireFormatTests, ACallerSuppliedContentLengthIsNotEmittedTwice) {
+    // The handler derives its own Content-Length from the body. Before #2128 it emitted that
+    // line unconditionally, so a caller who set the header themselves got the field twice in one
+    // message -- the same disagreement, reached by a different route.
+    const std::string sent = captureRequestBytes([](HttpClient& client, const std::string& url) {
+        auto request = std::make_shared<HttpRequestMessage>(HttpMethod::Post(), url);
+        request->setContentProperty(std::make_shared<StringContent>("payload"));
+        request->setHeader("Content-Length", "7");
+        (void)client.Send(request);
+    });
+
+    std::size_t count = 0;
+    for (std::size_t at = sent.find("\r\nContent-Length:"); at != std::string::npos;
+         at = sent.find("\r\nContent-Length:", at + 1)) {
+        ++count;
+    }
+    EXPECT_EQ(count, 1u) << "Content-Length was emitted " << count << " times\n" << sent;
+}
+
+TEST(HttpClientWireFormatTests, AnOrdinaryRequestStillCarriesItsContentLength) {
+    // The control the two cases above need: without Transfer-Encoding and without a
+    // caller-supplied value, the handler's own Content-Length is still emitted, so neither rule
+    // above can be satisfied by simply never sending the header.
+    const std::string sent = captureRequestBytes([](HttpClient& client, const std::string& url) {
+        auto request = std::make_shared<HttpRequestMessage>(HttpMethod::Post(), url);
+        request->setContentProperty(std::make_shared<StringContent>("payload"));
+        (void)client.Send(request);
+    });
+
+    EXPECT_NE(sent.find("\r\nContent-Length: 7\r\n"), std::string::npos) << sent;
 }
 
 TEST(HttpMessageHandlerTests, DelegatingHandler_NoInnerHandler_Throws) {

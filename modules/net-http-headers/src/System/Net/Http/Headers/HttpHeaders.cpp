@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Http/Headers/HttpHeaders.hpp"
+#include <cctype>
+#include <cstring>
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
 #include "System/InvalidOperationException.hpp"
@@ -40,6 +42,43 @@ namespace System::Net::Http::Headers {
         // the family's single body, rather than leaving a hand-written fourth copy of the same
         // three characters in this module. The accepted/rejected set is byte-for-byte identical;
         // only the number of places the rule is written down changed.
+        /**
+         * The header names .NET treats as single-value, derived from the reference rather than
+         * chosen (ticket #2128, SR-AUD-... none -- post-audit P1).
+         *
+         * `HttpHeaders.AddParsedValue` rejects a second value with
+         * `FormatException(SR.net_http_headers_single_value_header)` whenever
+         * `HeaderStoreItemInfo.CanAddParsedValue` says no (`HttpHeaders.cs:1107-1111`,
+         * `:1365-1380`), and that answer is `parser.SupportsMultipleValues`. The set below is
+         * every entry of `KnownHeaders.cs` whose parser is constructed with
+         * `supportsMultipleValues: false` -- the explicitly single-value `GenericHeaderParser`
+         * fields, plus `Int64NumberHeaderParser`, `Int32NumberHeaderParser`, `DateHeaderParser`,
+         * `TimeSpanHeaderParser` and `UriHeaderParser`, all of which pass `false` to their base.
+         *
+         * Twenty-two names. `Content-Length` and `Host` are the two the finding named; the other
+         * twenty come with them because they are the same rule, and leaving them out would make
+         * this port's single-value set a subset nobody could justify.
+         */
+        bool isSingleValueHeader(const std::string& name) {
+            static const char* const kSingleValue[] = {
+                "Age", "Authorization", "Content-Disposition", "Content-Length",
+                "Content-Location", "Content-Range", "Content-Type", "Date", "ETag", "Expires",
+                "From", "Host", "If-Modified-Since", "If-Range", "If-Unmodified-Since",
+                "Last-Modified", "Location", "Max-Forwards", "Proxy-Authorization", "Range",
+                "Referer", "Retry-After",
+            };
+            for (const char* candidate : kSingleValue) {
+                if (name.size() != std::strlen(candidate)) continue;
+                bool equal = true;
+                for (std::size_t i = 0; i < name.size(); ++i) {
+                    if (std::tolower(static_cast<unsigned char>(name[i])) !=
+                        std::tolower(static_cast<unsigned char>(candidate[i]))) { equal = false; break; }
+                }
+                if (equal) return true;
+            }
+            return false;
+        }
+
         void checkValueChars(const std::string& value) {
             if (System::Net::detail::ContainsProtocolFieldTerminator(value)) {
                 throw System::FormatException("The value contains invalid CR, LF, or NUL characters.");
@@ -47,12 +86,31 @@ namespace System::Net::Http::Headers {
         }
     }
 
+    // Ticket #2128. A second value for a single-value header is rejected, not comma-joined.
+    // Before this, Add("Content-Length", "10") followed by Add("Content-Length", "20")
+    // serialized `Content-Length: 10,20`, and two Hosts serialized `Host: a.example,b.example`.
+    // A comma-joined Content-Length is precisely the message a request-smuggling chain relies on
+    // two intermediaries disagreeing about, so the collection is where it has to stop.
+    //
+    // .NET does the same, and this is transcribed rather than invented: AddParsedValue throws
+    // `FormatException(SR.Format(SR.net_http_headers_single_value_header, descriptor.Name))`
+    // when CanAddParsedValue says no (HttpHeaders.cs:1107-1111), and that answer is the header
+    // parser's SupportsMultipleValues. The message is "Cannot add value because header '{0}'
+    // does not support multiple values." (System.Net.Http/src/Resources/Strings.resx:135).
+    //
+    // TryAddWithoutValidation deliberately does NOT get this check: .NET's bypasses the parser
+    // entirely and stores the raw value, so the raw store can still hold two. "Without
+    // validation" means what it says, and narrowing it would be a divergence.
     void HttpHeaders::Add(const std::string& name, const std::string& value) {
         System::ArgumentException::ThrowIfNullOrEmpty(name, "name");
         if (!isToken(name)) {
             throw System::FormatException("The header name is not a valid HTTP token: " + name);
         }
         checkValueChars(value);
+        if (isSingleValueHeader(name) && Contains(name)) {
+            throw System::FormatException("Cannot add value because header '" + name +
+                                          "' does not support multiple values.");
+        }
         headers_.Add(name, value);
     }
 

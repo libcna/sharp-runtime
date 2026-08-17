@@ -297,6 +297,55 @@ message rejected when `Transfer-Encoding` is present.
 or at serialization — and it changes what a long-standing public API accepts. Filed as the design
 ticket **#2128**, not silently implemented.
 
+#### 6.1.1 DECIDED AND LANDED 2026-08-17 — and the reference splits the question in two
+
+`/rv/tmp/runtime` is present in this container (`docs/StandingApprovals.md` §5.1), so the design
+question stopped being one: the reference answers **both halves, differently**, and the
+disagreement is the point.
+
+**The singleton half → the COLLECTION, option (a).** `HttpHeaders.AddParsedValue` throws
+`FormatException(SR.Format(SR.net_http_headers_single_value_header, descriptor.Name))` when
+`HeaderStoreItemInfo.CanAddParsedValue` says no (`HttpHeaders.cs:1107-1111`, `:1365-1380`), and
+that answer is the header parser's `SupportsMultipleValues`. The message is *"Cannot add value
+because header '{0}' does not support multiple values."*
+(`System.Net.Http/src/Resources/Strings.resx:135`).
+
+The single-value set is **derived, not chosen**: every entry of `KnownHeaders.cs` whose parser is
+constructed with `supportsMultipleValues: false` — the explicitly single-value `GenericHeaderParser`
+fields, plus `Int64NumberHeaderParser`, `Int32NumberHeaderParser`, `DateHeaderParser`,
+`TimeSpanHeaderParser` and `UriHeaderParser`, all of which pass `false` to their base. **Twenty-two
+names**: `Age`, `Authorization`, `Content-Disposition`, `Content-Length`, `Content-Location`,
+`Content-Range`, `Content-Type`, `Date`, `ETag`, `Expires`, `From`, `Host`, `If-Modified-Since`,
+`If-Range`, `If-Unmodified-Since`, `Last-Modified`, `Location`, `Max-Forwards`,
+`Proxy-Authorization`, `Range`, `Referer`, `Retry-After`. `Content-Length` and `Host` are the two
+§6.1 named; the other twenty come with them because they are the same rule, and a subset would be
+one nobody could justify. The test asserts all twenty-two **and** that `Accept`, `Cache-Control`,
+`Via`, `Warning`, `Transfer-Encoding`, `Set-Cookie` and an unknown header still accumulate, so this
+cannot decay into a blanket ban.
+
+`TryAddWithoutValidation` deliberately does **not** get the check, and that is pinned: .NET's
+bypasses the parser entirely and stores the raw value, so the raw store can still hold two.
+"Without validation" means what it says.
+
+**The TE+CL half → the WIRE, and NOT the collection.** .NET's header collections do not enforce
+RFC 9112 §6.1 either, and §6.1's own third row shows why they cannot: `Transfer-Encoding` is a
+**request** header and `Content-Length` a **content** header, they live in two collections, and
+neither can see the other. .NET resolves the coexistence where the message is written, so this port
+does too — `HttpClientHandler` now suppresses its own derived `Content-Length` line when the caller
+declared `Transfer-Encoding`, **and** when the caller already supplied a `Content-Length`, which
+before this ticket emitted the field twice in one message by a different route. Pinned by
+`HttpClientWireFormatTests`, with a control asserting an ordinary request still carries its
+`Content-Length` — otherwise both rules could be satisfied by never sending the header at all.
+
+§4.6's observation that this module is not on this repository's own wire path is therefore
+**answered rather than relied on**: `net-http` *is* that wire path, and it is where the rule landed.
+
+**Four mutations, all caught.** Removing the single-value check fails five cases; making the name
+test case-sensitive fails the case-insensitivity case; emitting `Content-Length` unconditionally
+fails both wire cases. That last one's first attempt was rejected by `-Werror=unused-variable` and
+is recorded as **invalid and re-run correctly**. No layout, vtable, signature or `noexcept` change;
+downstream, neither `cna` nor `mobile-eggbert` uses these types.
+
 ### 6.2 Measured positives, recorded so they are not re-investigated
 
 - **`HttpHeaders::Add` is correct** for CR/LF/NUL in **both** name and value, for whitespace-padded

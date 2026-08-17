@@ -28,54 +28,121 @@
 
 using namespace System::Net::Http::Headers;
 
-// --- #2128: the singleton / TE+CL shape, PINNED, NOT REPAIRED ---------------------------------
+// --- #2128: the singleton / TE+CL shape, REPAIRED 2026-08-17 -----------------------------------
+//
+// The collection half is transcribed from .NET, not chosen: HttpHeaders.AddParsedValue throws
+// FormatException(SR.Format(SR.net_http_headers_single_value_header, name)) when
+// HeaderStoreItemInfo.CanAddParsedValue says no (HttpHeaders.cs:1107-1111, :1365-1380), and that
+// answer is the header parser's SupportsMultipleValues. The single-value set is every entry of
+// KnownHeaders.cs whose parser is built with supportsMultipleValues: false -- twenty-two names,
+// of which Content-Length and Host are the two this ticket named.
+//
+// The TE+CL half is decided the other way, and also by the reference: see
+// PIN2128TransferEncodingAndContentLengthCoexist below.
 
-TEST(HeadersGatedBehaviourPins, PIN2128SingletonHeadersAreJoinedWithAComma) {
+TEST(HeadersGatedBehaviourPins, Fix2128SingletonHeadersRejectASecondValue) {
     // RFC 9110 §8.6 requires a Content-Length field-value to be a single 1*DIGIT. A comma-joined
     // pair is precisely the message a request-smuggling chain relies on two intermediaries
-    // disagreeing about.
+    // disagreeing about, so the collection is where it has to stop.
     HttpContentHeaders content;
     content.Add("Content-Length", "10");
-    content.Add("Content-Length", "20");
-    EXPECT_EQ(content.ToString(), "Content-Length: 10,20\r\n\r\n");
+    EXPECT_THROW(content.Add("Content-Length", "20"), System::FormatException);
+    EXPECT_EQ(content.ToString(), "Content-Length: 10\r\n\r\n") << "the rejected value must not be stored";
 
     // RFC 9110 §7.2 requires exactly one Host.
     HttpRequestHeaders request;
     request.Add("Host", "a.example");
-    request.Add("Host", "b.example");
-    EXPECT_EQ(request.ToString(), "Host: a.example,b.example\r\n\r\n");
+    EXPECT_THROW(request.Add("Host", "b.example"), System::FormatException);
+    EXPECT_EQ(request.ToString(), "Host: a.example\r\n\r\n");
 
-    // Identical repeats are joined too, so "the values agree" is not a special case today.
+    // An identical repeat is rejected too: .NET's CanAddParsedValue asks only whether a value is
+    // already present, never whether the new one agrees with it.
     HttpContentHeaders same;
     same.Add("Content-Length", "10");
-    same.Add("Content-Length", "10");
-    EXPECT_EQ(same.ToString(), "Content-Length: 10,10\r\n\r\n");
+    EXPECT_THROW(same.Add("Content-Length", "10"), System::FormatException);
 }
 
-TEST(HeadersGatedBehaviourPins, PIN2128TheTwoTypedAccessorsDISAGREEAboutTheJoinedValue) {
-    // A fact #2128's design must weigh and which the review did not record: the two typed
-    // accessors over a comma-joined singleton already behave DIFFERENTLY.
-    //
-    //   Content-Length -> the accessor reports the parameter ABSENT (option (b)'s posture, by
-    //                     accident of the numeric parse failing on "10,20")
-    //   Host           -> the accessor hands back the joined text "a.example,b.example"
-    //
-    // So the port is already half-way to enforcing at the typed accessor for one header and not at
-    // all for the other. Whichever option #2128 chooses, it has to reconcile these two.
+TEST(HeadersGatedBehaviourPins, Fix2128TheRejectionCarriesDotNetsMessage) {
     HttpContentHeaders content;
     content.Add("Content-Length", "10");
-    content.Add("Content-Length", "20");
-    EXPECT_FALSE(content.getContentLengthProperty().has_value());
+    try {
+        content.Add("Content-Length", "20");
+        FAIL() << "expected FormatException";
+    } catch (const System::FormatException& e) {
+        // SR.net_http_headers_single_value_header, System.Net.Http/src/Resources/Strings.resx:135
+        EXPECT_EQ(std::string(e.what()),
+                  "Cannot add value because header 'Content-Length' does not support multiple values.");
+    }
+}
+
+TEST(HeadersGatedBehaviourPins, Fix2128TheSingleValueSetIsTheReferencesAndTheRestStillAccumulate) {
+    // The twenty-two, so the set cannot silently shrink to the two the finding named.
+    for (const char* name : {"Age", "Authorization", "Content-Disposition", "Content-Length",
+                             "Content-Location", "Content-Range", "Content-Type", "Date", "ETag",
+                             "Expires", "From", "Host", "If-Modified-Since", "If-Range",
+                             "If-Unmodified-Since", "Last-Modified", "Location", "Max-Forwards",
+                             "Proxy-Authorization", "Range", "Referer", "Retry-After"}) {
+        HttpRequestHeaders h;
+        h.Add(name, "first");
+        EXPECT_THROW(h.Add(name, "second"), System::FormatException) << name;
+    }
+    // ...and the multi-value headers must keep accumulating, or this would be a blanket ban
+    // rather than the reference's rule.
+    for (const char* name : {"Accept", "Cache-Control", "Via", "Warning", "Transfer-Encoding",
+                             "Set-Cookie", "X-Custom"}) {
+        HttpRequestHeaders h;
+        h.Add(name, "a");
+        EXPECT_NO_THROW(h.Add(name, "b")) << name;
+    }
+}
+
+TEST(HeadersGatedBehaviourPins, Fix2128TheSingleValueTestIsCaseInsensitive) {
+    // Header names are case-insensitive, so the guard must be too -- otherwise
+    // "content-length" would be a second door onto the same defect.
+    HttpContentHeaders h;
+    h.Add("Content-Length", "10");
+    EXPECT_THROW(h.Add("content-length", "20"), System::FormatException);
+    EXPECT_THROW(h.Add("CONTENT-LENGTH", "20"), System::FormatException);
+}
+
+TEST(HeadersGatedBehaviourPins, Fix2128TryAddWithoutValidationDeliberatelyKeepsBOTH) {
+    // "Without validation" means what it says. .NET's TryAddWithoutValidation bypasses the
+    // parser entirely and stores the raw value (HttpHeaders.cs), so the raw store can still hold
+    // two -- narrowing it here would be a divergence, not a stricter repair. This is pinned
+    // rather than left implicit precisely because it is the one door the fix does not close.
+    HttpContentHeaders h;
+    EXPECT_TRUE(h.TryAddWithoutValidation("Content-Length", "10"));
+    EXPECT_TRUE(h.TryAddWithoutValidation("Content-Length", "20"));
+    EXPECT_EQ(h.ToString(), "Content-Length: 10,20\r\n\r\n");
+}
+
+TEST(HeadersGatedBehaviourPins, Fix2128TheTwoTypedAccessorsNoLongerSeeAJoinedValue) {
+    // Before the fix the two typed accessors over a comma-joined singleton behaved DIFFERENTLY:
+    // Content-Length reported the value absent, by accident of the numeric parse failing on
+    // "10,20", while Host handed back the joined text "a.example,b.example". Rejecting at the
+    // collection reconciles them, because neither can be reached with a joined value any more.
+    HttpContentHeaders content;
+    content.Add("Content-Length", "10");
+    EXPECT_THROW(content.Add("Content-Length", "20"), System::FormatException);
+    EXPECT_EQ(content.getContentLengthProperty().value_or(-1), 10);
 
     HttpRequestHeaders request;
     request.Add("Host", "a.example");
-    request.Add("Host", "b.example");
-    EXPECT_EQ(request.getHostProperty().value_or(""), "a.example,b.example");
+    EXPECT_THROW(request.Add("Host", "b.example"), System::FormatException);
+    EXPECT_EQ(request.getHostProperty().value_or(""), "a.example");
 }
 
-TEST(HeadersGatedBehaviourPins, PIN2128TransferEncodingAndContentLengthCoexist) {
-    // RFC 9112 §6.1 requires Content-Length to be ignored, or the message rejected, when
-    // Transfer-Encoding is present. Nothing here does either.
+TEST(HeadersGatedBehaviourPins, Fix2128TransferEncodingAndContentLengthCoexistINTHECOLLECTION) {
+    // #2128's TE+CL half is decided the OTHER way, and by the reference. .NET's header
+    // collections do not enforce RFC 9112 §6.1 either, and the second half of this case shows
+    // why they cannot: Transfer-Encoding is a REQUEST header and Content-Length is a CONTENT
+    // header, they live in two collections, and neither can see the other. .NET resolves the
+    // coexistence where the message is actually written -- so this port does too, in
+    // HttpClientHandler, and the rule is pinned there by
+    // HttpClientHandlerTests.RequestWithTransferEncodingOmitsContentLength.
+    //
+    // Recording it here rather than deleting the case is deliberate: "the collection is
+    // permissive about TE+CL" is now a decision with a reason, not an unexamined gap.
     HttpRequestHeaders both;
     both.Add("Transfer-Encoding", "chunked");
     both.Add("Content-Length", "5");

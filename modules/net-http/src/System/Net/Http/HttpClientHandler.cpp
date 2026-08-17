@@ -31,6 +31,7 @@
 #include "System/Uri.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -277,6 +278,38 @@ std::shared_ptr<HttpResponseMessage> HttpClientHandler::Send(std::shared_ptr<Htt
     req << "Accept: */*\r\n";
     req << "Connection: close\r\n";
 
+    // Ticket #2128. RFC 9112 6.1 requires Content-Length to be ignored, or the message rejected,
+    // when Transfer-Encoding is present -- a request carrying both is the exact shape a
+    // request-smuggling chain relies on two intermediaries disagreeing about. The header
+    // COLLECTIONS cannot enforce this and .NET's do not try: Transfer-Encoding is a request
+    // header and Content-Length a content header, they live in two collections, and neither can
+    // see the other. .NET resolves it where the message is written, so this is where the port
+    // resolves it too.
+    //
+    // Two rules, both applied to this handler's OWN Content-Length line, which is derived from
+    // the body it is about to send:
+    //   - it is suppressed when the caller declared Transfer-Encoding;
+    //   - it is suppressed when the caller already supplied a Content-Length, which would
+    //     otherwise emit the field twice in one message.
+    const auto namesHeader = [](const std::string& actual, const char* expected) {
+        // Field names are case-insensitive (RFC 9110 5.1), so the test must be too, or
+        // "content-length" would be a second door onto the very shape this closes.
+        const std::size_t n = std::strlen(expected);
+        if (actual.size() != n) return false;
+        for (std::size_t i = 0; i < n; ++i) {
+            if (std::tolower(static_cast<unsigned char>(actual[i])) !=
+                std::tolower(static_cast<unsigned char>(expected[i]))) return false;
+        }
+        return true;
+    };
+    bool callerDeclaredTransferEncoding = false;
+    bool callerDeclaredContentLength    = false;
+    for (const auto& [k, v] : reqHeaders) {
+        (void)v;
+        if (namesHeader(k, "Transfer-Encoding")) callerDeclaredTransferEncoding = true;
+        if (namesHeader(k, "Content-Length"))    callerDeclaredContentLength = true;
+    }
+
     for (const auto& [k, v] : reqHeaders) req << k << ": " << v << "\r\n";
 
     if (content && !body.empty()) {
@@ -287,7 +320,9 @@ std::shared_ptr<HttpResponseMessage> HttpClientHandler::Send(std::shared_ptr<Htt
             if (!cs.empty()) req << "; charset=" << cs;
             req << "\r\n";
         }
-        req << "Content-Length: " << body.size() << "\r\n";
+        if (!callerDeclaredTransferEncoding && !callerDeclaredContentLength) {
+            req << "Content-Length: " << body.size() << "\r\n";
+        }
     }
     req << "\r\n";
     if (!body.empty()) req << body;
