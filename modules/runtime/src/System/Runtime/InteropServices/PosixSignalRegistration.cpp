@@ -126,7 +126,59 @@ namespace {
     std::thread watcherThread_;
     std::atomic<bool> watcherRunning_{false};
 
+    /**
+     * True for the three signals whose ORIGINAL disposition .NET treats as "would terminate the
+     * app, and that termination is what PosixSignal lets you cancel".
+     * `IsCancelableTerminationSignal`, `pal_signal.c:53-58`.
+     */
+    static bool isCancelableTerminationSignal(int signo) {
+        return signo == SIGINT || signo == SIGQUIT || signo == SIGTERM;
+    }
+
+    /**
+     * The saved original disposition for @p signo, or nullptr if this signal is not installed.
+     * Must only be read where the registry lock is held, or from the signal handler, where
+     * §1979's comment explains why it is safe.
+     */
+    const struct sigaction* originalDispositionFor(int signo) {
+        for (const auto& installed : installedSignals_) {
+            if (installed.signo == signo) return &installed.previous;
+        }
+        return nullptr;
+    }
+
+    static bool isSigDfl(const struct sigaction& action) {
+        return (action.sa_flags & SA_SIGINFO) == 0 && action.sa_handler == SIG_DFL;
+    }
+    static bool isSigIgn(const struct sigaction& action) {
+        return (action.sa_flags & SA_SIGINFO) == 0 && action.sa_handler == SIG_IGN;
+    }
+
     void onNativeSignal(int signo) {
+        // Ticket #1979 / SR-AUD-169, second half. .NET invokes the original disposition
+        // IMMEDIATELY, inside the raw handler, for every signal that is not one of the three
+        // cancelable termination signals -- `SignalHandler`, `pal_signal.c:229-246`, whose own
+        // comment is "For other signals, we immediately invoke the original handler." Doing it
+        // here rather than after the callbacks is what makes the callbacks observers of a signal
+        // the process was already going to handle, instead of a gate in front of it.
+        //
+        // Reading installedSignals_ without the lock is deliberate and is the same trade .NET
+        // makes: taking a mutex inside a signal handler is not async-signal-safe, and the vector
+        // is only mutated while installing or uninstalling, which a program does not do
+        // concurrently with the delivery it is installing for. The alternative -- a lock -- would
+        // be a deadlock hazard in exactly the place it must not be.
+        if (!isCancelableTerminationSignal(signo)) {
+            if (const struct sigaction* original = originalDispositionFor(signo)) {
+                if (!isSigDfl(*original) && !isSigIgn(*original)) {
+                    if ((original->sa_flags & SA_SIGINFO) != 0) {
+                        if (original->sa_sigaction != nullptr) original->sa_sigaction(signo, nullptr, nullptr);
+                    } else if (original->sa_handler != nullptr) {
+                        original->sa_handler(signo);
+                    }
+                }
+            }
+        }
+
         if (signo >= 0 && signo < kMaxSignalNumber) pending_[signo] = 1;
         char byte = 0;
         // write() to a pipe is async-signal-safe; ignore errors. EAGAIN on a full pipe just means
@@ -139,6 +191,11 @@ namespace {
         ssize_t ignored = ::write(selfPipe_[1], &byte, 1);
         (void)ignored;
     }
+
+    // Defined below; declared here because dispatchSignal calls the first and it, in turn,
+    // calls the second.
+    void handleNonCanceledPosixSignal(int signo);
+    void reinstallHandlerLocked(int signo);
 
     void dispatchSignal(int signo) {
         std::vector<Entry> snapshot;
@@ -181,15 +238,77 @@ namespace {
         }
 
         if (!canceled) {
-            // Run the OS default disposition: temporarily restore SIG_DFL and re-raise, matching
-            // real .NET's Interop.Sys.HandleNonCanceledPosixSignal. For most of these signals
-            // (SIGTERM/SIGINT/SIGQUIT/SIGHUP) the default disposition terminates the process.
-            std::signal(signo, SIG_DFL);
-            ::raise(signo);
-            // Only reached for signals whose default disposition doesn't terminate (e.g. SIGCHLD,
-            // SIGCONT, SIGWINCH, SIGTTIN/SIGTTOU default to ignore/stop-and-continue) -- reinstall
-            // our handler so future deliveries are still caught.
-            std::signal(signo, onNativeSignal);
+            handleNonCanceledPosixSignal(signo);
+        }
+    }
+
+    /**
+     * @brief What happens after the callbacks return without cancelling.
+     *
+     * Ticket #1979 / SR-AUD-169 and SR-AUD-171. Transcribed from
+     * `SystemNative_HandleNonCanceledPosixSignal` (`pal_signal.c:260-315`), which the design in
+     * `docs/SystemRuntimeNamespaceReviewPlan.md` §10.1 could only propose from a reading taken
+     * when the reference tree was absent. It is present now, and it corrects the proposal in two
+     * places -- see §10.1.1.
+     *
+     * Before this, EVERY non-cancelled delivery ran `std::signal(signo, SIG_DFL); ::raise(signo);`
+     * unconditionally. For `SIGTSTP`/`SIGTTIN`/`SIGTTOU` the default disposition is Stop, so
+     * merely OBSERVING a job-control signal suspended the observing process -- measured,
+     * `child_stopped_by=20 (WIFSTOPPED)` with `callbacks=1`.
+     */
+    void handleNonCanceledPosixSignal(int signo) {
+        switch (signo) {
+            case SIGCONT:
+                // Default disposition is Continue. .NET additionally reinitializes the terminal
+                // here; this port owns no terminal state, so there is nothing to reinitialize.
+                break;
+            case SIGTSTP:
+            case SIGTTIN:
+            case SIGTTOU:
+                // Default disposition is Stop. THE HEADLINE OF THIS TICKET: no-op, so observing
+                // a job-control signal no longer suspends the observer.
+                break;
+            case SIGCHLD:
+            case SIGURG:
+            case SIGWINCH:
+                // Default disposition is Ignore. Raising these was harmless in effect but still
+                // wrong in mechanism, because the raise ran with the handler uninstalled.
+                break;
+            default: {
+                // Default disposition is Terminate.
+                const struct sigaction* original = nullptr;
+                {
+                    std::lock_guard<std::mutex> lock(registryMutex_);
+                    if (const struct sigaction* found = originalDispositionFor(signo)) {
+                        static thread_local struct sigaction copy;
+                        copy = *found;
+                        original = &copy;
+                    }
+                }
+                if (original != nullptr) {
+                    if (!isCancelableTerminationSignal(signo) && !isSigDfl(*original)) {
+                        // Already invoked in onNativeSignal, exactly as .NET records at
+                        // pal_signal.c:293-297 ("We've already called the original handler in
+                        // SignalHandler").
+                        break;
+                    }
+                    if (isSigIgn(*original)) break;   // the original does nothing
+                    // Restore the ORIGINAL disposition -- not SIG_DFL, which is what this code
+                    // used to impose -- and re-raise into it.
+                    std::lock_guard<std::mutex> lock(registryMutex_);
+                    sigaction(signo, original, nullptr);
+                } else {
+                    std::signal(signo, SIG_DFL);
+                }
+                ::raise(signo);
+                // Only reached when the restored disposition did not terminate. Reinstall our
+                // handler so later deliveries are still observed.
+                {
+                    std::lock_guard<std::mutex> lock(registryMutex_);
+                    reinstallHandlerLocked(signo);
+                }
+                break;
+            }
         }
     }
 
@@ -260,6 +379,26 @@ namespace {
         watcherRunning_.store(true);
         watcherThread_ = std::thread(watcherLoop);
         watcherThread_.detach();
+    }
+
+    /**
+     * Re-arms this port's handler for @p signo after handleNonCanceledPosixSignal restored the
+     * original disposition and re-raised into it, WITHOUT disturbing the saved original: the
+     * entry in installedSignals_ still describes what the process had before this port touched
+     * it, and that is what Dispose() must put back.
+     *
+     * Caller already holds registryMutex_.
+     */
+    void reinstallHandlerLocked(int signo) {
+        for (const auto& installed : installedSignals_) {
+            if (installed.signo != signo) continue;
+            struct sigaction sa{};
+            sa.sa_handler = onNativeSignal;
+            sigemptyset(&sa.sa_mask);
+            sa.sa_flags = SA_RESTART;
+            sigaction(signo, &sa, nullptr);
+            return;
+        }
     }
 
     void installIfNeeded(int signo) {

@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <atomic>
+#include <functional>
+#include <tuple>
 #include <chrono>
 #include <csignal>
 #include <mutex>
@@ -746,5 +748,179 @@ TEST(PosixSignalTests, SelfPipe_DescriptorsAreCloseOnExec) {
         << "self-pipe close-on-exec check failed (child exit " << code << "): "
         << "10=did not observe exactly two new pipe descriptors, 11=FD_CLOEXEC missing, "
         << "12=a descriptor survived exec(), 13/90=exec failed, 14/15/16=fork/wait failed";
+}
+#endif // __linux__
+
+// ===========================================================================================
+// #1979 / SR-AUD-169 + SR-AUD-171 — what happens after the callbacks return
+//
+// Every non-cancelled delivery used to run `std::signal(signo, SIG_DFL); ::raise(signo);`
+// unconditionally. Two consequences, both measured before the repair:
+//
+//   * for SIGTSTP/SIGTTIN/SIGTTOU the default disposition is STOP, so merely OBSERVING a
+//     job-control signal suspended the observing process -- child_stopped_by=20 (WIFSTOPPED)
+//     with callbacks=1;
+//   * a saved original disposition, which #1975 had begun preserving, was never invoked: the
+//     raise went to SIG_DFL, not to it.
+//
+// The design (docs/SystemRuntimeNamespaceReviewPlan.md §10.1) could only PROPOSE .NET's rule,
+// because the reference tree was absent when it was written and the audit's basis was a reading
+// with no managed probe. It is present now, and §10.1.1 records where the proposal was wrong.
+// The behaviour asserted here is transcribed from SystemNative_HandleNonCanceledPosixSignal
+// (pal_signal.c:260-315) and SignalHandler (:215-246).
+//
+// WHY THESE RE-EXEC RATHER THAN MERELY FORK. A test that asserted "the process was not stopped"
+// in-process would suspend the test runner if it failed, so a child is mandatory. But a plain
+// fork() is not enough either, and finding out why is worth recording: this module starts a
+// watcher thread lazily on the first Create(), and fork() gives the child the "already started"
+// flag WITHOUT the thread, so a forked child's registrations never dispatch at all. Whether the
+// suite had already run another signal test therefore decided the result -- these cases passed
+// in isolation and failed inside the full run. Re-executing the test binary gives the child a
+// process that has never started a watcher, which is the only way to observe the real behaviour.
+// (.NET has no pthread_atfork handling here either; the port's fork behaviour is not this
+// ticket's subject and is untouched by it.)
+// ===========================================================================================
+
+#if defined(__linux__)
+namespace {
+
+constexpr const char* kSignalChildModeEnv = "SHARP_RUNTIME_SIGNAL_CHILD_MODE";
+
+/// Re-executes this test binary so that only PosixSignalChildBody runs, with @p mode selecting
+/// which body, and returns the child's wait status. WUNTRACED is essential: without it waitpid
+/// does not report a STOPPED child at all, and the defect this ticket removes would be
+/// indistinguishable from success.
+int runChildMode(const char* mode) {
+    const pid_t child = ::fork();
+    if (child == 0) {
+        ::setenv(kSignalChildModeEnv, mode, 1);
+        ::execl("/proc/self/exe", "SharpRuntimeTests_Runtime",
+                "--gtest_filter=PosixSignalChildBody.Run", "--gtest_brief=1",
+                static_cast<char*>(nullptr));
+        ::_exit(90);   // exec failed
+    }
+    if (child < 0) return -1;
+    int status = 0;
+    if (::waitpid(child, &status, WUNTRACED) != child) return -1;
+    if (WIFSTOPPED(status)) {
+        // Let a stopped child finish, so a failing run leaves no suspended process behind.
+        ::kill(child, SIGCONT);
+        ::kill(child, SIGKILL);
+        int discard = 0;
+        ::waitpid(child, &discard, 0);
+    }
+    return status;
+}
+
+/// Waits until @p counter moves, with a deadline that is a failsafe rather than a
+/// synchronisation mechanism.
+bool awaitCallback(const std::atomic<int>& counter) {
+    for (int i = 0; i < 400; ++i) {
+        if (counter.load() > 0) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return counter.load() > 0;
+}
+
+} // namespace
+
+// The child half of the three cases below. It exits with a distinct code per failure so the
+// parent can say WHICH step failed rather than only that something did. It is a test only
+// because re-execing this binary is how a fresh process is obtained; in an ordinary run the
+// environment variable is absent and it does nothing.
+TEST(PosixSignalChildBody, Run) {
+    const char* mode = ::getenv(kSignalChildModeEnv);
+    if (mode == nullptr) {
+        SUCCEED() << "child-body driver; runs only when re-executed by a #1979 parent case";
+        return;
+    }
+    const std::string which(mode);
+
+    if (which == "jobcontrol-tstp" || which == "jobcontrol-ttin" || which == "jobcontrol-ttou") {
+        const int nativeSignal = which == "jobcontrol-tstp" ? SIGTSTP
+                               : which == "jobcontrol-ttin" ? SIGTTIN
+                                                            : SIGTTOU;
+        const PosixSignal managed = which == "jobcontrol-tstp" ? PosixSignal::Sigtstp
+                                  : which == "jobcontrol-ttin" ? PosixSignal::Sigttin
+                                                               : PosixSignal::Sigttou;
+        std::atomic<int> seen{0};
+        auto registration = PosixSignalRegistration::Create(
+            managed, [&seen](PosixSignalContext&) { seen.fetch_add(1); });
+        ::raise(nativeSignal);
+        ::_exit(awaitCallback(seen) ? 0 : 20);
+    }
+
+    if (which == "cancelled-tstp") {
+        std::atomic<int> seen{0};
+        auto registration = PosixSignalRegistration::Create(
+            PosixSignal::Sigtstp, [&seen](PosixSignalContext& context) {
+                seen.fetch_add(1);
+                context.setCancelProperty(true);
+            });
+        ::raise(SIGTSTP);
+        ::_exit(awaitCallback(seen) ? 0 : 40);
+    }
+
+    if (which == "chain-saved") {
+        static std::atomic<int> originalRan{0};
+        struct Local { static void handler(int) { originalRan.fetch_add(1); } };
+        struct sigaction previous{};
+        struct sigaction installed{};
+        installed.sa_handler = &Local::handler;
+        sigemptyset(&installed.sa_mask);
+        installed.sa_flags = SA_RESTART;
+        if (::sigaction(SIGWINCH, &installed, &previous) != 0) ::_exit(30);
+
+        std::atomic<int> seen{0};
+        auto registration = PosixSignalRegistration::Create(
+            PosixSignal::Sigwinch, [&seen](PosixSignalContext&) { seen.fetch_add(1); });
+        ::raise(SIGWINCH);
+        if (!awaitCallback(seen)) ::_exit(31);
+        if (originalRan.load() == 0) ::_exit(32);
+        ::_exit(0);
+    }
+
+    ::_exit(99);   // unknown mode
+}
+
+TEST(PosixSignalTests, JobControlSignalDoesNotStopTheObservingProcess) {
+    // THE HEADLINE. pal_signal.c:270-275 makes SIGTSTP/SIGTTIN/SIGTTOU a no-op after the
+    // callbacks, with the comment "Default disposition is Stop. // no-op."
+    for (const char* mode : {"jobcontrol-tstp", "jobcontrol-ttin", "jobcontrol-ttou"}) {
+        const int status = runChildMode(mode);
+        ASSERT_NE(status, -1) << mode;
+        EXPECT_FALSE(WIFSTOPPED(status))
+            << mode << ": observing a job-control signal SUSPENDED the observer";
+        ASSERT_TRUE(WIFEXITED(status)) << mode;
+        EXPECT_EQ(WEXITSTATUS(status), 0)
+            << mode << " (20 = the handler never ran, 90 = the child could not re-exec)";
+    }
+}
+
+TEST(PosixSignalTests, ACancelledJobControlSignalIsStillNotAStop) {
+    // The control for the headline: cancelling was ALREADY a no-op before #1979, so a test that
+    // exercised only the cancelled path would pass either way. Asserting that the two paths now
+    // agree is what makes the uncancelled case meaningful.
+    const int status = runChildMode("cancelled-tstp");
+    ASSERT_NE(status, -1);
+    EXPECT_FALSE(WIFSTOPPED(status));
+    ASSERT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(WEXITSTATUS(status), 0);
+}
+
+TEST(PosixSignalTests, ASavedNonDefaultDispositionIsInvokedRatherThanDiscarded) {
+    // SR-AUD-171's half. #1975 began saving the original disposition; before #1979 nothing ever
+    // invoked it, because the non-cancelled path raised into SIG_DFL. .NET invokes it inside the
+    // handler for every signal that is not a cancelable termination signal
+    // (pal_signal.c:229-246, "For other signals, we immediately invoke the original handler").
+    //
+    // SIGWINCH is the subject because its DEFAULT disposition is Ignore, so the assertion is
+    // unambiguous: if the original handler runs at all, it can only be because it was chained.
+    const int status = runChildMode("chain-saved");
+    ASSERT_NE(status, -1);
+    ASSERT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(WEXITSTATUS(status), 0)
+        << "31 = the registration never fired; 32 = the saved original disposition was never "
+           "invoked, which is SR-AUD-171";
 }
 #endif // __linux__

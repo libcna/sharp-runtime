@@ -639,6 +639,64 @@ was changed). SR-AUD-171 is on #1963's side of that line.
 > and that .NET's behaviour here is evidenced by the audit's reading of
 > `pal_signal.c` rather than by a managed probe."*
 
+#### 10.1.1 LANDED 2026-08-17 — alternative 4 chose itself, and the proposal was wrong twice
+
+This section's alternative 4 was *"defer until the reference tree is available"*. It became
+available (`docs/StandingApprovals.md` §5.1), which converts the gate from an approval into a
+**derivation** under SA-5 — and the derivation corrects the proposal in two places, which is
+exactly why deferring was right.
+
+**Correction 1 — the no-op set is larger than three.**
+`SystemNative_HandleNonCanceledPosixSignal` (`pal_signal.c:260-315`) is a switch, and **seven**
+signals never reach a raise:
+
+| Signal | .NET's stated reason |
+|---|---|
+| `SIGCONT` | "Default disposition is Continue" (plus a terminal reinitialisation this port has no state for) |
+| `SIGTSTP`, `SIGTTIN`, `SIGTTOU` | "Default disposition is Stop. // no-op." |
+| `SIGCHLD` | "Default disposition is Ignore" |
+| `SIGURG`, `SIGWINCH` | "Default disposition is Ignore" |
+
+The proposal named only the three job-control signals. Raising the other four was harmless *in
+effect* — their default dispositions are Ignore or Continue — but wrong in *mechanism*, because
+the raise ran with this port's handler uninstalled.
+
+**Correction 2 — the chaining is not where the proposal put it.** The proposal said to *"chain to
+the saved handler instead of raising"* in the non-cancelled path. .NET does not: `SignalHandler`
+(`pal_signal.c:215-246`) invokes the original disposition **immediately, inside the raw handler**,
+for every signal that is not one of the three cancelable termination signals `SIGINT`/`SIGQUIT`/
+`SIGTERM` — its own comment reads *"For other signals, we immediately invoke the original
+handler."* By the time the non-cancelled path runs, that has already happened, which is why its
+default branch simply breaks with the comment *"We've already called the original handler in
+SignalHandler."*
+
+Putting the chaining in the later path, as proposed, would have made the callbacks a **gate in
+front of** the process's existing handler rather than **observers of** a signal it was always
+going to handle — a different contract from .NET's, reached by following a plausible reading of
+half the mechanism. Both halves are implemented.
+
+**Correction 3 — the default branch restores the ORIGINAL disposition, not `SIG_DFL`.** The old
+code imposed `SIG_DFL` before re-raising, which is the very defect #1975 removed from `Dispose`.
+It now restores the saved `struct sigaction` and re-raises into that.
+
+**Tests.** Three cases plus a child-body driver. All of them **re-exec the test binary** rather
+than merely forking, and finding out why is worth keeping: this module starts its watcher thread
+lazily on the first `Create()`, and `fork()` gives the child the *already started* flag **without
+the thread**, so a forked child's registrations never dispatch at all. Whether an earlier test in
+the suite had already started a watcher therefore decided the result — the first cut passed in
+isolation and failed inside the full run. (.NET has no `pthread_atfork` handling here either; the
+port's fork behaviour is not this ticket's subject and is untouched by it.)
+
+**Two mutations, each caught by exactly one case.** Restoring the pre-#1979 unconditional
+`SIG_DFL`-and-raise fails `JobControlSignalDoesNotStopTheObservingProcess`; removing the
+handler-time chaining fails `ASavedNonDefaultDispositionIsInvokedRatherThanDiscarded`. The
+cancelled-path case is the control that keeps the first one honest, since cancelling was already
+a no-op before this ticket.
+
+**Consequences as predicted:** no public signature, layout, vtable or `noexcept` change; one
+`.cpp` body. The migration is unchanged — a consumer relying on the job-control stop has no
+opt-in replacement, because .NET offers none.
+
 ### 10.2 #1980 — R-G: the ten public-shape divergences
 
 Grouped by what each would break, so the answer can be partial:
