@@ -181,15 +181,15 @@ TEST(TextUnitContractTests, TheGatedBomAndFallbackBehavioursAreStillWhatTheyWere
     ASSERT_EQ(2u, utf16.size());
     EXPECT_EQ('A', utf16[0]);
 
-    // #2017 (plan section 14.5): a configured EXCEPTION decoder fallback is inert outside
-    // UTF8Encoding, and a truncated trailing fixed-width unit is dropped without reaching a
-    // fallback at all.
-    System::Text::UnicodeEncoding u16(false, false);
-    u16.setDecoderFallbackProperty(System::Text::DecoderFallback::ExceptionFallback());
+    // #2017 LANDED: a configured fallback reaches every encoding, and a truncated trailing
+    // fixed-width unit is substituted rather than dropped. Asserted in full by
+    // TextGatedBehaviourPinTests.Fix2017_*; the rows kept here are the DEFAULT-configuration
+    // ones, which is what this contract file is for.
     const std::vector<bytecs> loneSurrogate{0x00, 0xD8};
-    EXPECT_NO_THROW((void)u16.GetString(loneSurrogate.data(), 0, 2)) << "gated by #2017";
+    EXPECT_EQ("\xEF\xBF\xBD",
+              System::Text::UnicodeEncoding(false, false).GetString(loneSurrogate.data(), 0, 2));
 
     const std::vector<bytecs> oddLength{'A', 0x00, 'B'};
-    EXPECT_EQ("A", System::Text::UnicodeEncoding(false, false).GetString(oddLength.data(), 0, 3))
-        << "gated by #2017: the trailing byte is dropped, not substituted";
+    EXPECT_EQ("A\xEF\xBF\xBD",
+              System::Text::UnicodeEncoding(false, false).GetString(oddLength.data(), 0, 3));
 }

@@ -29,6 +29,7 @@
 // reach its approval sentence rather than pass unnoticed.
 
 #include <gtest/gtest.h>
+#include "System/Text/DecoderFallback.hpp"
 #include "System/ArgumentException.hpp"
 
 #include <cstdint>
@@ -229,25 +230,61 @@ TEST(TextGatedBehaviourPinTests, TheDecodeDirectionStillConsumesALeadingByteOrde
 // SR-AUD-292 / #2017 (cause T-K) — the encoder direction of the inert fallback policy.
 // ---------------------------------------------------------------------------------------
 
-TEST(TextGatedBehaviourPinTests, AConfiguredEncoderReplacementIsStillIgnoredByAscii) {
+TEST(TextGatedBehaviourPinTests, Fix2017_AConfiguredEncoderReplacementIsHonouredByAscii) {
+    // #2017 LANDED 2026-08-17, and this pin is INVERTED. ASCIIEncoding hard-coded '?' for an
+    // unencodable scalar, so a configured EncoderReplacementFallback("!") was accepted, stored,
+    // and then ignored -- a policy the caller could set and never observe.
     System::Text::ASCIIEncoding ascii;
     ascii.setEncoderFallbackProperty(std::make_shared<System::Text::EncoderReplacementFallback>("!"));
-    const auto bytes = ascii.GetBytes("\xC3\xA9");
+    const auto bytes = ascii.GetBytes("\xC3\xA9");   // U+00E9, not representable in ASCII
     ASSERT_EQ(1u, bytes.size());
-    EXPECT_EQ('?', bytes[0]) << "gated by #2017 (plan §14.5): the configured \"!\" is ignored; "
-                                "ASCIIEncoding::GetBytes hard-codes '?'";
+    EXPECT_EQ('!', bytes[0]);
 
-    // The exception fallback is inert in the same direction, for the same reason.
-    ascii.setEncoderFallbackProperty(System::Text::EncoderFallback::ExceptionFallback());
-    EXPECT_NO_THROW((void)ascii.GetBytes("\xC3\xA9")) << "gated by #2017";
+    // The DEFAULT is unchanged, which is what keeps this a repair rather than a behaviour swap:
+    // ASCIIEncoding's default is the replacement fallback with "?" (ASCIIEncoding.cs:56-61).
+    EXPECT_EQ('?', System::Text::ASCIIEncoding().GetBytes("\xC3\xA9")[0]);
+}
 
-    // UTF8Encoding is the one encoding that does route through the configured object, which
-    // is what makes this an inconsistency rather than a uniform reduction.
-    System::Text::UTF8Encoding utf8;
-    utf8.setEncoderFallbackProperty(std::make_shared<System::Text::EncoderReplacementFallback>("!"));
-    const auto viaUtf8 = utf8.GetBytes("\xFF");
-    ASSERT_EQ(1u, viaUtf8.size());
-    EXPECT_EQ('!', viaUtf8[0]);
+TEST(TextGatedBehaviourPinTests, Fix2017_AConfiguredExceptionFallbackReachesEveryEncoding) {
+    // The headline. A configured EXCEPTION decoder fallback threw only in UTF-8; UTF-16, UTF-32,
+    // ASCII and Latin-1 substituted directly and never consulted it.
+    const std::vector<bytecs> loneSurrogate{0x00, 0xD8};
+    System::Text::UnicodeEncoding u16(false, false);
+    u16.setDecoderFallbackProperty(System::Text::DecoderFallback::ExceptionFallback());
+    EXPECT_THROW((void)u16.GetString(loneSurrogate.data(), 0, 2),
+                 System::Text::DecoderFallbackException);
+
+    const std::vector<bytecs> outOfRange{0x00, 0x00, 0x11, 0x00};   // > U+10FFFF, little-endian
+    System::Text::UTF32Encoding u32(false, false);
+    u32.setDecoderFallbackProperty(System::Text::DecoderFallback::ExceptionFallback());
+    EXPECT_THROW((void)u32.GetString(outOfRange.data(), 0, 4),
+                 System::Text::DecoderFallbackException);
+
+    const std::vector<bytecs> highByte{0xE9};
+    System::Text::ASCIIEncoding ascii;
+    ascii.setDecoderFallbackProperty(System::Text::DecoderFallback::ExceptionFallback());
+    EXPECT_THROW((void)ascii.GetString(highByte.data(), 0, 1),
+                 System::Text::DecoderFallbackException);
+}
+
+TEST(TextGatedBehaviourPinTests, Fix2017_ATruncatedTrailingUnitReachesTheFallback) {
+    // #2017's second finding. A truncated trailing unit was DISCARDED outright:
+    // UTF16LE.GetString(3 bytes) returned one character and the odd byte vanished with no
+    // diagnostic of any kind. It is undecodable input like any other.
+    const std::vector<bytecs> oddLength{'A', 0x00, 'B'};
+    EXPECT_EQ("A\xEF\xBF\xBD",
+              System::Text::UnicodeEncoding(false, false).GetString(oddLength.data(), 0, 3))
+        << "the trailing byte must be substituted, not dropped";
+
+    System::Text::UnicodeEncoding throwing(false, false);
+    throwing.setDecoderFallbackProperty(System::Text::DecoderFallback::ExceptionFallback());
+    EXPECT_THROW((void)throwing.GetString(oddLength.data(), 0, 3),
+                 System::Text::DecoderFallbackException)
+        << "an exception fallback must be able to report the truncation";
+
+    const std::vector<bytecs> sixBytes{'A', 0x00, 0x00, 0x00, 'B', 0x00};
+    EXPECT_EQ("A\xEF\xBF\xBD",
+              System::Text::UTF32Encoding(false, false).GetString(sixBytes.data(), 0, 6));
 }
 
 // ---------------------------------------------------------------------------------------

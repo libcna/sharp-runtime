@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "System/Text/detail/FallbackDispatch.hpp"
 #include <memory>
 #include <cstdint>
 #include <string>
@@ -27,10 +28,10 @@ namespace System::Text {
 
     public:
         /** Constructs a UTF-32 LE encoding with a byte-order mark. */
-        UTF32Encoding() : bigEndian_(false), byteOrderMark_(true) {}
+        UTF32Encoding() : bigEndian_(false), byteOrderMark_(true) { setDefaultFallbacks(); }
         /** Constructs a UTF-32 encoding with the specified endianness and BOM setting. */
         UTF32Encoding(bool bigEndian, bool byteOrderMark)
-            : bigEndian_(bigEndian), byteOrderMark_(byteOrderMark) {}
+            : bigEndian_(bigEndian), byteOrderMark_(byteOrderMark) { setDefaultFallbacks(); }
 
         /** Returns the encoding name "utf-32". */
         [[nodiscard]] std::string getEncodingNameProperty() const override { return "utf-32"; }
@@ -124,15 +125,42 @@ namespace System::Text {
                     start += 4;
                 }
             }
-            for (std::size_t i = start; i + 3 < end; i += 4) {
+            // #2017 (SR-AUD-292/293): every undecodable unit goes through the CONFIGURED
+            // decoder fallback rather than being substituted with U+FFFD directly. The default
+            // fallback for this encoding is the U+FFFD replacement (UTF32Encoding.cs:65-76), so
+            // the default output is byte-identical to before -- what changes is that a caller
+            // who CONFIGURED something else finally gets it.
+            std::size_t i = start;
+            for (; i + 3 < end; i += 4) {
                 uint32_t cp = readUnit(data, i);
-                if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;
-                encodeUtf8(cp, result);
+                if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+                    detail::AppendDecoderFallback(result, *this, data + i, 4);
+                } else {
+                    encodeUtf8(cp, result);
+                }
+            }
+            // #2017's second half: a truncated trailing unit used to be discarded outright --
+            // UTF32LE.GetString(6 bytes) returned one character and the other two bytes vanished
+            // with no diagnostic. It is undecodable input like any other.
+            if (i < end) {
+                detail::AppendDecoderFallback(result, *this, data + i, end - i);
             }
             return result;
         }
 
     private:
+        /**
+         * .NET's UTF32Encoding.SetDefaultFallbacks (`UTF32Encoding.cs:65-76`) installs a U+FFFD
+         * replacement fallback rather than the base's "?" -- "For UTF-X encodings, we use a
+         * replacement fallback". Needed here for the same reason as in UnicodeEncoding: once the
+         * decode routes through the configured fallback, the DEFAULT fallback decides the
+         * default output, and U+FFFD is what this encoding substituted before #2017.
+         */
+        void setDefaultFallbacks() {
+            setEncoderFallbackProperty(std::make_shared<EncoderReplacementFallback>("\xEF\xBF\xBD"));
+            setDecoderFallbackProperty(std::make_shared<DecoderReplacementFallback>("\xEF\xBF\xBD"));
+        }
+
         void writeUnit(std::vector<SharpRuntime::bytecs>& out, size_t& pos, uint32_t cp) const {
             if (!bigEndian_) {
                 out[pos++] = static_cast<SharpRuntime::bytecs>(cp & 0xFF);

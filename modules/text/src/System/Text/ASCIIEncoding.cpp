@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Text/ASCIIEncoding.hpp"
+#include "System/Text/detail/FallbackDispatch.hpp"
 #include "System/Text/detail/Utf8Scalar.hpp"
 #include "System/Text/detail/RawDecodeRange.hpp"
 
@@ -36,10 +37,17 @@ using System::Text::detail::DecodeUtf8Scalar;
             if (cp <= 127) {
                 result.push_back(static_cast<SharpRuntime::bytecs>(cp));
             } else if (cp < 0x10000) {
-                result.push_back('?');
+                // #2017: the CONFIGURED encoder fallback, not a hard-coded '?'. The default is
+                // still the replacement fallback with "?", so nothing moves unless a caller
+                // asked it to -- which is the whole complaint: a configured policy was accepted,
+                // stored, and then ignored.
+                detail::AppendEncoderFallback(result, *this, cp);
             } else {
-                result.push_back('?');
-                result.push_back('?');
+                // A supplementary scalar is two UTF-16 code units in .NET, so its fallback runs
+                // twice -- the behaviour this encoding already had, now expressed through the
+                // configured policy rather than by pushing two literal '?'.
+                detail::AppendEncoderFallback(result, *this, cp);
+                detail::AppendEncoderFallback(result, *this, cp);
             }
         }
         return result;
@@ -56,8 +64,12 @@ using System::Text::detail::DecodeUtf8Scalar;
         std::string result;
         result.reserve(range.end - range.begin);
         for (size_t i = range.begin; i < range.end; ++i) {
-            auto b = data[i];
-            result.push_back(b <= 127 ? static_cast<char>(b) : '?');
+            const auto b = data[i];
+            if (b <= 127) {
+                result.push_back(static_cast<char>(b));
+            } else {
+                detail::AppendDecoderFallback(result, *this, data + i, 1);
+            }
         }
         return result;
     }

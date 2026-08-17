@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cstdint>
+#include "System/Text/detail/FallbackDispatch.hpp"
 #include "System/Text/detail/Utf8Scalar.hpp"
 #include <memory>
 #include <string>
@@ -68,10 +69,13 @@ namespace System::Text {
                 if (cp <= 0xFF) {
                     result.push_back(static_cast<SharpRuntime::bytecs>(cp));
                 } else if (cp < 0x10000) {
-                    result.push_back(static_cast<SharpRuntime::bytecs>('?'));
+                    // #2017: the CONFIGURED encoder fallback. The default is the replacement
+                    // fallback with "?", so the observable result is unchanged unless a caller
+                    // asked for something else.
+                    detail::AppendEncoderFallback(result, *this, cp);
                 } else {
-                    result.push_back(static_cast<SharpRuntime::bytecs>('?'));
-                    result.push_back(static_cast<SharpRuntime::bytecs>('?'));
+                    detail::AppendEncoderFallback(result, *this, cp);
+                    detail::AppendEncoderFallback(result, *this, cp);
                 }
             }
             return result;

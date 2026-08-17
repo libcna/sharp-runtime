@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "System/Text/detail/FallbackDispatch.hpp"
 #include <memory>
 #include <cstdint>
 #include <string>
@@ -29,9 +30,10 @@ namespace System::Text {
 
     public:
         /** Constructs a UTF-16 LE encoding with no byte-order mark. */
-        UnicodeEncoding() : bigEndian_(false), byteOrderMark_(false) {}
+        UnicodeEncoding() : bigEndian_(false), byteOrderMark_(false) { setDefaultFallbacks(); }
         /** Constructs a UTF-16 encoding with the specified endianness and BOM setting. */
-        UnicodeEncoding(bool bigEndian, bool byteOrderMark) : bigEndian_(bigEndian), byteOrderMark_(byteOrderMark) {}
+        UnicodeEncoding(bool bigEndian, bool byteOrderMark)
+            : bigEndian_(bigEndian), byteOrderMark_(byteOrderMark) { setDefaultFallbacks(); }
 
         /** Returns the encoding name ("utf-16" or "utf-16BE"). */
         [[nodiscard]] std::string getEncodingNameProperty() const override { return bigEndian_ ? "utf-16BE" : "utf-16"; }
@@ -140,10 +142,19 @@ namespace System::Text {
                 if (bom == 0xFEFF) i += 2;
             }
 
+            // #2017 (SR-AUD-292/293): every undecodable unit goes through the CONFIGURED
+            // decoder fallback. Before it this substituted U+FFFD directly, so a caller who
+            // installed DecoderFallback::ExceptionFallback() got silence where .NET throws --
+            // a policy that was accepted, stored, and then ignored. The default fallback for
+            // this encoding is the U+FFFD replacement (matching UnicodeEncoding.cs:56-68), so
+            // the default output is byte-identical to before.
             while (i + 1 < end) {
+                const std::size_t unitStart = i;
                 uint16_t unit = readUnit(data, i);
                 i += 2;
                 uint32_t cp = unit;
+                bool undecodable = false;
+                std::size_t badLength = 2;
                 if (unit >= 0xD800 && unit <= 0xDBFF) {
                     if (i + 1 < end) {
                         uint16_t low = readUnit(data, i);
@@ -151,20 +162,45 @@ namespace System::Text {
                             cp = 0x10000 + ((static_cast<uint32_t>(unit - 0xD800) << 10) | (low - 0xDC00));
                             i += 2;
                         } else {
-                            cp = 0xFFFD; // unpaired high surrogate
+                            undecodable = true;   // unpaired high surrogate
                         }
                     } else {
-                        cp = 0xFFFD; // unpaired high surrogate at end of input
+                        undecodable = true;       // unpaired high surrogate at end of input
                     }
                 } else if (unit >= 0xDC00 && unit <= 0xDFFF) {
-                    cp = 0xFFFD; // lone low surrogate
+                    undecodable = true;           // lone low surrogate
                 }
-                encodeUtf8(cp, out);
+                if (undecodable) {
+                    detail::AppendDecoderFallback(out, *this, data + unitStart, badLength);
+                } else {
+                    encodeUtf8(cp, out);
+                }
+            }
+
+            // #2017's second half: a TRUNCATED trailing unit used to be discarded outright, so
+            // UTF16LE.GetString(3 bytes) returned one character and the odd byte vanished with
+            // no diagnostic of any kind. It is undecodable input like any other and now reaches
+            // the fallback, which is what makes an exception fallback able to report it.
+            if (i < end) {
+                detail::AppendDecoderFallback(out, *this, data + i, end - i);
             }
             return out;
         }
 
     private:
+        /**
+         * .NET's UnicodeEncoding.SetDefaultFallbacks (`UnicodeEncoding.cs:56-68`) installs a
+         * U+FFFD replacement fallback rather than the base's "?", with the comment "For UTF-X
+         * encodings, we use a replacement fallback". #2017 needs that default here for the same
+         * reason .NET has it: once the decode routes through the configured fallback, the
+         * DEFAULT fallback is what decides the default output, and U+FFFD is what this encoding
+         * substituted before.
+         */
+        void setDefaultFallbacks() {
+            setEncoderFallbackProperty(std::make_shared<EncoderReplacementFallback>("\xEF\xBF\xBD"));
+            setDecoderFallbackProperty(std::make_shared<DecoderReplacementFallback>("\xEF\xBF\xBD"));
+        }
+
         [[nodiscard]] uint16_t readUnit(const SharpRuntime::bytecs* data, std::size_t i) const {
             uint8_t b0 = data[i];
             uint8_t b1 = data[i + 1];
