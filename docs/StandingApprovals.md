@@ -128,6 +128,82 @@ needs a UAX #15 algorithm, not only a table).
 
 ---
 
+## 4b. SA-5 — aligning to the reference is ordinary work, not an approval request
+
+> When the reference tree says unambiguously what .NET does, align the port — **including where
+> a call that succeeds today starts throwing, or emitted text changes.** Do not ask per ticket.
+
+Granted 2026-08-17, and it is the single largest unblocking decision on this page. Before `/rv`
+was available, such a change would have been a **guess** dressed as parity, which is why the
+review deferred so many of them; with the source in hand it is a **derivation**.
+
+**Every change under SA-5 must carry all four.**
+
+1. **A citation**, in the code comment and in the ticket: file and line in
+   `/rv/tmp/runtime/src/libraries/`, quoted closely enough that a reader can check it.
+2. **A migration note** whenever accepted input, emitted text or exception identity moves.
+3. **The full gate**, with no test-count regression.
+4. **The measured downstream report** of SA-2 condition 5 whenever a public spelling is
+   affected.
+
+**Two limits.** SA-5 does not license a **layout** change (that is SA-3's four conditions) or a
+**source break** (SA-2's five). And it does not license inventing .NET behaviour: where the
+reference is ambiguous, platform-split, or simply absent for the case in hand, the question is
+still deferred or asked — SA-5 covers derivation, never guesswork. Note the recurring hazard
+recorded in §5.1: this is a **.NET 11** snapshot, so a behaviour that could plausibly have moved
+since .NET 8 must be reported as .NET 11's rather than as timeless parity.
+
+**Why it was granted, in one measurement.** Of the first seven tickets settled against the
+restored reference, **five had pinned an answer the reference contradicts** — #1963, #2242
+(twice over: the question asked *and* a platform split the ticket never suspected), #2192 (three
+ways), #2252 and #2260's second half. Only #2234 and #2260's first half confirmed what the port
+already did. Deferring in the absence of evidence was correct; leaving those pins standing once
+the evidence exists would not be.
+
+---
+
+## 4c. SA-6 — a test that encodes an environment version is a defect in the test
+
+> Where the gate fails because a test hard-codes something the environment now reports
+> differently, and the port is measurably right, **fix the test** — derive the expectation from
+> the same source the production code reads.
+
+Granted 2026-08-17 for the two `TimeZoneInfo` `BaseUtcOffset` cases (ticket **#2351**), and as a
+general rule for the same shape. The obligation is the same one that applies to any test change:
+the repaired test must still fail for the defect it was written to catch, demonstrated by
+**mutation**, and never merely by being made weaker.
+
+**This is how the complete independent gate first became green** — 17,150 run, 0 failed, 38
+executables, 2026-08-17. Every earlier checkpoint in `CLAUDE.md` rule 2 ends with *"the gate is
+not green"*.
+
+---
+
+## 4d. SA-7 — the `NotifyFilters` → inotify mapping (ticket #2346)
+
+> Answer the five priced questions of `docs/SystemIONamespaceReviewPlan.md` §21.10 as
+> **1a, 2a, 3a, 4c, 5b**.
+
+Granted 2026-08-17. This one is **not** derivable from the reference and never will be: .NET's
+`NotifyFilters` vocabulary describes Win32 `ReadDirectoryChangesW` notifications, and inotify's
+event set is not a relabelling of it. The decision is therefore the user's, and it is:
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | `IN_MODIFY` serves… | **(a)** `Size` + `LastWrite` |
+| 2 | `IN_ATTRIB` serves… | **(a)** all six attribute-class filters |
+| 3 | `CreationTime`, for which no inotify event exists | **(a)** approximate through the content class |
+| 4 | `LastAccess`, currently unserved | **(c)** add `IN_ACCESS` **only** when `LastAccess` is named |
+| 5 | `FileName` vs `DirectoryName` | **(b)** gate `Created`/`Deleted`/`Renamed` on `IN_ISDIR` |
+
+The shape of the answer is *permissive where Linux genuinely cannot discriminate, discriminating
+where it can*. Over-notification is recoverable by a caller; silence is not — which is what
+decides 1, 2 and 3. Where the information does exist, the two filters are meant to differ, which
+decides 5. And 4 avoids making every read wake every content watcher while still letting a
+caller who names `LastAccess` receive events for it.
+
+---
+
 ## 5. Environment facts, measured 2026-08-17
 
 These are measurements of this container, not decisions. They are recorded because a large number

@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <cstdlib>
+#include <ctime>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -898,6 +900,66 @@ SharpRuntime::longcs offsetMinutes(const TimeZoneInfo& tz) {
     return tz.getBaseUtcOffsetProperty().getTicksProperty() / TimeSpan::TicksPerMinute;
 }
 
+/// What .NET would report as this zone's base UTC offset, computed from the SAME tzdata the
+/// port reads, through an independent oracle: glibc's own TZ handling.
+///
+/// TimeZoneInfo.Unix.cs:81-93 walks the zone's transitions up to `DateTime.UtcNow` and keeps
+/// the offset of the last one whose type is NOT daylight; the daylight name comes from the
+/// last one that is. This reproduces that rule by sampling the trailing year monthly and
+/// taking the most recent sample with `tm_isdst == 0`.
+///
+/// Deriving the expectation rather than writing a literal is what ticket #2351 changed, and
+/// it matters for exactly one class of zone: NEGATIVE-DST zones, where the standard offset is
+/// the LARGER one. Under tzdata 2018a and later, Europe/Dublin marks IST (+1) as standard and
+/// GMT (+0) as daylight, and Africa/Casablanca marks +01 as standard and its Ramadan
+/// reversion to +00 as daylight. A literal "Dublin's standard offset is 0" was correct when
+/// it was written and became a tzdata-version assertion afterwards.
+struct ZoneOracle {
+    bool     available = false;
+    long     standardOffsetMinutes = 0;
+    long     daylightOffsetMinutes = 0;
+    bool     observesDaylight = false;
+    std::string standardAbbrev;
+    std::string daylightAbbrev;
+};
+
+ZoneOracle oracleFor(const std::string& id) {
+    ZoneOracle out;
+    const char* previous = ::getenv("TZ");
+    const std::string saved = previous != nullptr ? std::string(previous) : std::string();
+    const bool hadTz = previous != nullptr;
+
+    ::setenv("TZ", id.c_str(), 1);
+    ::tzset();
+
+    const std::time_t now = std::time(nullptr);
+    bool sawStandard = false;
+    // Monthly samples over the trailing year, oldest first, so the LAST standard sample seen
+    // is the most recent one -- the same "last non-DST transition at or before now" rule.
+    for (int monthsBack = 12; monthsBack >= 0; --monthsBack) {
+        const std::time_t sample = now - static_cast<std::time_t>(monthsBack) * 30 * 24 * 3600;
+        std::tm local{};
+        if (::localtime_r(&sample, &local) == nullptr) continue;
+        const long offset = local.tm_gmtoff / 60;
+        const std::string abbrev = local.tm_zone != nullptr ? std::string(local.tm_zone) : std::string();
+        if (local.tm_isdst == 0) {
+            out.standardOffsetMinutes = offset;
+            out.standardAbbrev = abbrev;
+            sawStandard = true;
+        } else if (local.tm_isdst > 0) {
+            out.daylightOffsetMinutes = offset;
+            out.daylightAbbrev = abbrev;
+            out.observesDaylight = true;
+        }
+    }
+
+    if (hadTz) ::setenv("TZ", saved.c_str(), 1); else ::unsetenv("TZ");
+    ::tzset();
+
+    out.available = sawStandard;
+    return out;
+}
+
 } // namespace
 
 TEST(TimeZoneInfoTests, BaseUtcOffset_NewYork_IsStandardMinusFive_NotTheCurrentOffset) {
@@ -917,15 +979,35 @@ TEST(TimeZoneInfoTests, BaseUtcOffset_Prague_IsStandardPlusOne) {
     EXPECT_EQ(tz->getDaylightNameProperty(), "CEST");
 }
 
-TEST(TimeZoneInfoTests, BaseUtcOffset_Dublin_StandardIsZeroWithAPositiveDaylight) {
-    // Dublin is the case where the standard offset is 0 and the daylight offset is +1;
-    // the old snapshot reported +60/IST for both names during the summer.
+// Dublin is a NEGATIVE-DST zone in tzdata 2018a and later: IST (+1) is marked standard and
+// GMT (+0) is marked daylight, which is the reverse of the intuitive reading. The offsets are
+// therefore derived from the installed tzdata rather than written as literals -- see
+// oracleFor(). Ticket #2351; before it, this case asserted "standard is 0, daylight is +1",
+// which was a tzdata-version assertion in disguise and failed on tzdata 2026b.
+//
+// The invariant being tested is unchanged and is the one #2181 introduced: BaseUtcOffset is
+// the STANDARD offset, whichever of the two that is, and it does not move with the season.
+TEST(TimeZoneInfoTests, BaseUtcOffset_Dublin_IsTheStandardOffsetEvenWhenDaylightIsNegative) {
     auto tz = zoneOrNull("Europe/Dublin");
     if (!tz) GTEST_SKIP() << "Europe/Dublin is not installed";
-    EXPECT_EQ(offsetMinutes(*tz), 0);
-    EXPECT_EQ(tz->getStandardNameProperty(), "GMT");
-    EXPECT_EQ(tz->getDaylightNameProperty(), "IST");
+    const ZoneOracle oracle = oracleFor("Europe/Dublin");
+    if (!oracle.available) GTEST_SKIP() << "no standard-time sample for Europe/Dublin";
+
+    EXPECT_EQ(offsetMinutes(*tz), oracle.standardOffsetMinutes)
+        << "BaseUtcOffset must be the standard offset the installed tzdata declares";
+    EXPECT_EQ(tz->getStandardNameProperty(), oracle.standardAbbrev);
     EXPECT_TRUE(tz->getSupportsDaylightSavingTimeProperty());
+    if (oracle.observesDaylight) {
+        EXPECT_EQ(tz->getDaylightNameProperty(), oracle.daylightAbbrev);
+        EXPECT_NE(tz->getStandardNameProperty(), tz->getDaylightNameProperty());
+        // The whole point of the zone: the two offsets differ by an hour in one direction or
+        // the other, and the port must not silently pick the seasonal one.
+        EXPECT_EQ(std::abs(oracle.standardOffsetMinutes - oracle.daylightOffsetMinutes), 60);
+        // Season-independent anti-regression assertion, and the one that keeps #2181's defect
+        // caught here whatever month the suite runs in: whichever of the two offsets is
+        // current today, BaseUtcOffset must not be the DAYLIGHT one.
+        EXPECT_NE(offsetMinutes(*tz), oracle.daylightOffsetMinutes);
+    }
 }
 
 TEST(TimeZoneInfoTests, BaseUtcOffset_SouthernHemisphere_IsTheSameRuleAsNorthern) {
@@ -967,15 +1049,23 @@ TEST(TimeZoneInfoTests, BaseUtcOffset_NonWholeHourZonesWithoutDaylight) {
     if (tehran) { EXPECT_EQ(offsetMinutes(*tehran), 210); }
 }
 
+// Africa/Casablanca is the other negative-DST zone here: it is on the same offset in both
+// January and July, so the two-sample probe this case originally replaced could not see the
+// Ramadan reversion at all. Which of the two offsets tzdata calls "standard" has since moved
+// -- current data marks +01 standard and the reversion daylight -- so the expectation is
+// derived, not written. Ticket #2351.
 TEST(TimeZoneInfoTests, BaseUtcOffset_AllYearDaylightZoneUsesItsStandardReversion) {
-    // Africa/Casablanca is daylight time in BOTH January and July, which is exactly what the
-    // two-sample probe this replaced could not see: it reported +01. Twelve samples find the
-    // Ramadan reversion to +00, which is the zone's standard offset.
     auto tz = zoneOrNull("Africa/Casablanca");
     if (!tz) GTEST_SKIP() << "Africa/Casablanca is not installed";
-    EXPECT_EQ(offsetMinutes(*tz), 0);
-    EXPECT_EQ(tz->getStandardNameProperty(), "+00");
+    const ZoneOracle oracle = oracleFor("Africa/Casablanca");
+    if (!oracle.available) GTEST_SKIP() << "no standard-time sample for Africa/Casablanca";
+
+    EXPECT_EQ(offsetMinutes(*tz), oracle.standardOffsetMinutes);
+    EXPECT_EQ(tz->getStandardNameProperty(), oracle.standardAbbrev);
     EXPECT_TRUE(tz->getSupportsDaylightSavingTimeProperty());
+    if (oracle.observesDaylight) {
+        EXPECT_NE(offsetMinutes(*tz), oracle.daylightOffsetMinutes);
+    }
 }
 
 TEST(TimeZoneInfoTests, BaseUtcOffset_FixedOffsetZonesAreUnchanged) {
