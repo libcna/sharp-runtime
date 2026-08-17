@@ -1044,12 +1044,16 @@ ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs c
             size_t n = std::min(static_cast<size_t>(count), remaining);
             std::memcpy(buffer.data() + offset, recvLeftover_.data() + recvLeftoverPos_, n);
             recvLeftoverPos_ += n;
-            bool isLast = recvLeftoverPos_ == recvLeftover_.size();
-            if (isLast) {
+            bool drained = recvLeftoverPos_ == recvLeftover_.size();
+            if (drained) {
                 recvLeftover_.clear();
                 recvLeftoverPos_ = 0;
             }
-            return WebSocketReceiveResult(static_cast<intcs>(n), recvLeftoverType_, isLast);
+            // #2095: `endOfMessage` is the FRAME's FIN, not the buffer's exhaustion. This used to
+            // report true whenever the leftover ran out, so the tail of a non-final frame claimed
+            // the message had ended -- .NET returns header.EndOfMessage (ManagedWebSocket.cs:995).
+            return WebSocketReceiveResult(static_cast<intcs>(n), recvLeftoverType_,
+                                           drained && recvLeftoverFinal_);
         }
 
         while (true) {
@@ -1086,9 +1090,29 @@ ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs c
                     return WebSocketReceiveResult(0, WebSocketMessageType::Close, true, receivedStatus, receivedDescription);
                 }
                 default: { // Continuation(0x0)/Text(0x1)/Binary(0x2)
+                    // #2095 / RFC 6455 §5.4, and .NET does check it (ManagedWebSocket.cs:1382-1411).
+                    // The review deferred this because "rejecting is defensible and so is
+                    // tolerating, and .NET's exact choice is not verifiable with /rv absent". It
+                    // is verifiable now, and .NET REJECTS both orderings -- with these messages.
+                    if (frame.opcode == 0x0) {
+                        if (lastReceivedFrameWasFinal_) {
+                            throw WebSocketException(
+                                WebSocketError::Faulted,
+                                "The WebSocket received a continuation frame from a previous final message.");
+                        }
+                    } else if (!lastReceivedFrameWasFinal_) {
+                        throw WebSocketException(
+                            WebSocketError::Faulted,
+                            "The WebSocket expected a continuation frame after having received a "
+                            "previous non-final frame.");
+                    }
+
                     WebSocketMessageType type =
                         frame.opcode == 0x0 ? fragmentType_ : (frame.opcode == 0x1 ? WebSocketMessageType::Text : WebSocketMessageType::Binary);
                     if (frame.opcode != 0x0) fragmentType_ = type;
+                    // Only DATA frames update it, matching .NET: control frames never reach
+                    // `_lastReceiveHeader = header`.
+                    lastReceivedFrameWasFinal_ = frame.fin;
 
                     // Ticket #2091 / RFC 6455 §8.1: a Text message must be valid UTF-8.
                     //
@@ -1118,6 +1142,7 @@ ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs c
                     recvLeftover_.assign(frame.payload.begin() + count, frame.payload.end());
                     recvLeftoverPos_ = 0;
                     recvLeftoverType_ = type;
+                    recvLeftoverFinal_ = frame.fin;   // #2095: carried so the tail reports the FRAME's FIN
                     return WebSocketReceiveResult(count, type, false);
                 }
             }

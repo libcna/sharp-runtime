@@ -397,6 +397,9 @@ struct ClientWebSocketLayoutProbe {
     std::vector<bytecs>                     recvLeftover;
     size_t                                  recvLeftoverPos;
     WebSocketMessageType                    recvLeftoverType;
+    // #2095 added two flags: the leftover frame's FIN, and .NET's _lastReceiveHeader.Fin.
+    bool                                    recvLeftoverFinal;
+    bool                                    lastReceivedFrameWasFinal;
     std::mutex                              sendMutex;
     // #2094 added the keep-alive heartbeat's shared state, declared here to match the class.
     std::shared_ptr<void>                   keepAlive;

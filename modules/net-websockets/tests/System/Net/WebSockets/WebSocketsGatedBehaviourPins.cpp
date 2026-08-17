@@ -647,41 +647,36 @@ TEST(WebSocketsGatedBehaviourPins, Fix2094_AnInfiniteOrZeroIntervalStartsNoHeart
 }
 
 // ===========================================================================
-// #2095, DEFERRED VERIFICATION: fragmentation ordering is never checked
+// #2095 RESOLVED: .NET rejects both orderings, and now so does this port
 // ===========================================================================
 
-TEST(WebSocketsGatedBehaviourPins, Pin2095_AContinuationFrameWithNoMessageInProgressIsAccepted) {
-    // Plan §7.9. ReceiveAsync never checks fragmentation ordering: a continuation frame (0x0)
-    // arriving with NO message in progress is accepted and reported with `fragmentType_`'s
-    // current value. The ticket is DEFERRED rather than compatible because exactly which
-    // ordering violations .NET rejects, and with what error, cannot be determined without the
-    // absent reference tree — so the measured behaviour is pinned instead of guessed at.
+TEST(WebSocketsGatedBehaviourPins, Fix2095_ABareContinuationFrameIsRejected) {
+    // The ticket deferred this because "RFC 6455 §5.4 does not by itself decide what a CLIENT
+    // LIBRARY should surface here -- rejecting is defensible and so is tolerating, and .NET's
+    // exact choice is not verifiable with /rv/tmp/runtime absent". It is verifiable now, and the
+    // answer is REJECT: ManagedWebSocket.cs:1382-1396 returns
+    // net_Websockets_ContinuationFromFinalFrame when _lastReceiveHeader.Fin is set.
     //
-    // MEASURED, and not what was first assumed: `fragmentType_` is declared
-    // `= WebSocketMessageType::Binary` (ClientWebSocket.hpp:44), so a bare continuation arriving
-    // on a fresh connection is reported as **Binary** — a message type chosen by a member
-    // initialiser rather than by anything the server sent. Writing this pin against the assumed
-    // default of Text made it fail, which is precisely what a pin is for.
+    // Before this, a bare continuation was accepted and reported with fragmentType_'s member
+    // initialiser -- so the message TYPE came from a C++ default rather than from anything the
+    // server sent. That is the part of the old pin worth remembering: the previous behaviour was
+    // not merely lax, it was arbitrary.
     RunAgainstServer(
         noConfig,
         [&](Socket& server) {
-            // A lone continuation frame, FIN=1, with nothing in progress.
-            server.Send(std::vector<bytecs>{0x80, 0x02, 'h', 'i'});
+            server.Send(std::vector<bytecs>{0x80, 0x02, 'h', 'i'});  // continuation, FIN=1
         },
         [&](ClientWebSocket& client) {
             std::vector<bytecs> buffer(1024);
-            auto result = client.ReceiveAsync(buffer, 0, 1024).getResultProperty();
-            EXPECT_EQ(result.getCountProperty(), 2)
-                << "#2095: a bare continuation frame is currently ACCEPTED.";
-            EXPECT_EQ(result.getMessageTypeProperty(), WebSocketMessageType::Binary)
-                << "#2095: it is reported with fragmentType_'s current value, whose member "
-                   "initialiser is Binary. If this now throws, #2095 was resolved and this pin "
-                   "must be updated in that change.";
+            EXPECT_THROW((void)client.ReceiveAsync(buffer, 0, 1024).getResultProperty(),
+                         WebSocketException);
         });
 }
 
-TEST(WebSocketsGatedBehaviourPins, Pin2095_ANewDataFrameArrivingMidFragmentIsAccepted) {
-    // The other half of §7.9: a fresh data frame while a fragmented message is in progress.
+TEST(WebSocketsGatedBehaviourPins, Fix2095_ANewDataFrameArrivingMidFragmentIsRejected) {
+    // The other half: ManagedWebSocket.cs:1403-1411 returns
+    // net_Websockets_NonContinuationAfterNonFinalFrame when a Text/Binary frame arrives while
+    // _lastReceiveHeader.Fin is clear. Message boundaries were server-controllable before this.
     RunAgainstServer(
         noConfig,
         [&](Socket& server) {
@@ -692,10 +687,65 @@ TEST(WebSocketsGatedBehaviourPins, Pin2095_ANewDataFrameArrivingMidFragmentIsAcc
             std::vector<bytecs> buffer(1024);
             auto first = client.ReceiveAsync(buffer, 0, 1024).getResultProperty();
             EXPECT_FALSE(first.getEndOfMessageProperty());
-            auto second = client.ReceiveAsync(buffer, 0, 1024).getResultProperty();
-            EXPECT_EQ(second.getMessageTypeProperty(), WebSocketMessageType::Binary)
-                << "#2095: message boundaries are currently server-controllable. If this now "
-                   "throws, #2095 was resolved and this pin must be updated.";
+            EXPECT_THROW((void)client.ReceiveAsync(buffer, 0, 1024).getResultProperty(),
+                         WebSocketException);
+        });
+}
+
+TEST(WebSocketsGatedBehaviourPins, Fix2095_AWellFormedFragmentedMessageStillWorks) {
+    // The invariance row. The check must not reject the sequence it exists to protect, and a
+    // control frame in the middle must not disturb the tracking -- .NET assigns
+    // _lastReceiveHeader only after a continuation has been rewritten to its parent opcode, so
+    // control frames never touch it.
+    RunAgainstServer(
+        noConfig,
+        [&](Socket& server) {
+            server.Send(std::vector<bytecs>{0x01, 0x02, 'a', 'b'});  // text, FIN=0
+            sendServerFrame(server, 0xA, {});                        // an unsolicited Pong between them
+            server.Send(std::vector<bytecs>{0x00, 0x02, 'c', 'd'});  // continuation, FIN=0
+            server.Send(std::vector<bytecs>{0x80, 0x02, 'e', 'f'});  // continuation, FIN=1
+            server.Send(std::vector<bytecs>{0x81, 0x02, 'g', 'h'});  // a fresh text message
+        },
+        [&](ClientWebSocket& client) {
+            std::vector<bytecs> buffer(1024);
+            for (int i = 0; i < 2; ++i) {
+                auto part = client.ReceiveAsync(buffer, 0, 1024).getResultProperty();
+                EXPECT_EQ(part.getMessageTypeProperty(), WebSocketMessageType::Text);
+                EXPECT_FALSE(part.getEndOfMessageProperty());
+            }
+            auto last = client.ReceiveAsync(buffer, 0, 1024).getResultProperty();
+            EXPECT_TRUE(last.getEndOfMessageProperty());
+            // ...and a new message after a completed one is accepted, which is the case the
+            // continuation check must not break.
+            auto fresh = client.ReceiveAsync(buffer, 0, 1024).getResultProperty();
+            EXPECT_EQ(fresh.getMessageTypeProperty(), WebSocketMessageType::Text);
+            EXPECT_TRUE(fresh.getEndOfMessageProperty());
+        });
+}
+
+TEST(WebSocketsGatedBehaviourPins, Fix2095_TheTailOfANonFinalFrameDoesNotClaimTheMessageEnded) {
+    // A SECOND defect, found while implementing the first and fixed with it because it is the
+    // same state. When a frame is larger than the caller's buffer the remainder is buffered, and
+    // draining the last of that buffer used to report endOfMessage = true from the BUFFER's
+    // exhaustion -- so the tail of a non-final frame claimed the message had ended. .NET reports
+    // header.EndOfMessage, which is the frame's FIN (ManagedWebSocket.cs:995).
+    RunAgainstServer(
+        noConfig,
+        [&](Socket& server) {
+            server.Send(std::vector<bytecs>{0x01, 0x04, 'a', 'b', 'c', 'd'});  // text, FIN=0, 4 bytes
+            server.Send(std::vector<bytecs>{0x80, 0x02, 'e', 'f'});            // continuation, FIN=1
+        },
+        [&](ClientWebSocket& client) {
+            std::vector<bytecs> buffer(1024);
+            auto first = client.ReceiveAsync(buffer, 0, 2).getResultProperty();   // 2 of 4 bytes
+            EXPECT_EQ(first.getCountProperty(), 2);
+            EXPECT_FALSE(first.getEndOfMessageProperty());
+            auto tail = client.ReceiveAsync(buffer, 0, 2).getResultProperty();    // the leftover
+            EXPECT_EQ(tail.getCountProperty(), 2);
+            EXPECT_FALSE(tail.getEndOfMessageProperty())
+                << "the frame was not final, so its tail must not report the end of the message";
+            auto fin = client.ReceiveAsync(buffer, 0, 1024).getResultProperty();
+            EXPECT_TRUE(fin.getEndOfMessageProperty());
         });
 }
 

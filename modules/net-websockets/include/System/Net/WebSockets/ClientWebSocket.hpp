@@ -72,6 +72,23 @@ namespace System::Net::WebSockets {
         std::vector<SharpRuntime::bytecs> recvLeftover_;
         size_t recvLeftoverPos_ = 0;
         WebSocketMessageType recvLeftoverType_ = WebSocketMessageType::Binary;
+        /**
+         * Whether the frame the leftover came from was final.
+         *
+         * Ticket #2095. Draining the last of a leftover used to report `endOfMessage = true`
+         * from the buffer's own exhaustion, so the tail of a **non-final** frame claimed the
+         * message had ended. .NET reports `header.EndOfMessage`, which is the frame's FIN.
+         */
+        bool recvLeftoverFinal_ = true;
+        /**
+         * .NET's `_lastReceiveHeader.Fin`, initialised true exactly as .NET initialises it
+         * (`ManagedWebSocket.cs:98` — `{ Opcode = Text, Fin = true, Processed = true }`).
+         *
+         * Ticket #2095. Only **data** frames update it; control frames do not, matching .NET,
+         * which assigns `_lastReceiveHeader` only after a continuation has been rewritten to its
+         * parent opcode.
+         */
+        bool lastReceivedFrameWasFinal_ = true;
         std::mutex sendMutex_;
 
         /**
