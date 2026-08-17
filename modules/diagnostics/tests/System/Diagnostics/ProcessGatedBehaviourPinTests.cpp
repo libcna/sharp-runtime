@@ -29,6 +29,9 @@
 // reference, and it refers to storage the object keeps rather than a copy.
 
 #include <gtest/gtest.h>
+#include <atomic>
+#include <thread>
+#include <vector>
 
 #include <fcntl.h>
 #include <sys/types.h>
@@ -141,76 +144,134 @@ TEST(ProcessGatedBehaviourPinTests, Pin2029_UnredirectedDestructionLeavesAZombie
         << "nobody had reaped the child, which is exactly what this pin asserts";
 }
 
-// PIN FOR BLOCKED TICKET #2029, the OPPOSITE failure mode. Destroying a Process whose child is
-// REDIRECTED and still running BLOCKS, because ~Impl joins the pipe readers and a reader
-// cannot finish until the child closes stdout. Measured 2005 ms for a 2 s child by #2023.
-// Option C detaches the readers instead, so destruction would become prompt and this fails.
-TEST(ProcessGatedBehaviourPinTests, Pin2029_RedirectedDestructionBlocksForTheChildLifetime) {
+// #2029 LANDED 2026-08-17, and this pin is INVERTED. Destroying a Process whose child is
+// REDIRECTED and still running used to BLOCK FOR THE CHILD'S WHOLE LIFETIME -- ~Impl joins the
+// pipe readers, and a reader calling a bare blocking read() cannot finish until the child closes
+// stdout. Measured 2005 ms for a 2 s child by #2023, and unbounded in general.
+//
+// .NET does not do that: Process.Close() (Process.cs:761-805) stops watching for exit, releases
+// the handle and CANCELS the async read before disposing the stream. It never waits for the
+// child. The readers now poll in bounded slices and observe a stop flag, which is that
+// cancellation expressed with the tools a C++ pipe reader has.
+//
+// The join itself is KEPT, deliberately. The plan's option C said to detach the readers, but a
+// detached reader keeps appending into the Process's own string after the object is gone -- a
+// use-after-free, which would trade this defect for a worse one. Bounding the wait, rather than
+// removing it, gets the same promptness without that.
+TEST(ProcessGatedBehaviourPinTests, Fix2029_RedirectedDestructionIsPrompt) {
     pid_t childPid = -1;
     const auto started = std::chrono::steady_clock::now();
     {
         Process process = Process::Start(shellStartInfo("exec sleep 1", true));
         childPid = static_cast<pid_t>(process.getIdProperty());
-    }   // ~Process joins the reader, which waits for the child to close stdout.
+    }   // ~Process must NOT wait for the 1 s child.
     const long destructionMs = elapsedMsSince(started);
 
-    EXPECT_GE(destructionMs, 700)
-        << "destroying a redirected Process returned promptly -- #2029 appears to have landed; "
-           "retire this pin";
+    EXPECT_LT(destructionMs, 500)
+        << "destroying a redirected Process still waited for the child (" << destructionMs
+        << " ms); the readers are not observing the stop flag";
 
-    // The destructor blocked but still did not reap, so this pin cleans up after itself too.
+    // Destruction is prompt but still does not REAP a running child: .NET reaps process-wide
+    // from a SIGCHLD-driven wait state, which this port cannot replicate without colliding with
+    // PosixSignalRegistration (#1975/#1979). That divergence is documented, and this pin cleans
+    // up after itself rather than leaving the zombie behind for the rest of the suite.
     int status = 0;
     pid_t reaped = -1;
     while ((reaped = ::waitpid(childPid, &status, 0)) < 0 && errno == EINTR) {}
     EXPECT_EQ(reaped, childPid);
 }
 
+// The control the case above needs: making destruction prompt must not have been achieved by
+// dropping output on the floor. A child that has already written and exited still has its
+// output captured in full.
+TEST(ProcessGatedBehaviourPinTests, Fix2029_PromptDestructionDidNotCostCapturedOutput) {
+    Process process = Process::Start(shellStartInfo("printf 'hello-2029'", true));
+    process.WaitForExit();
+    EXPECT_EQ(process.getStandardOutputTextProperty(), "hello-2029");
+}
+
 // ===========================================================================
 // #2030 (SR-AUD-271) -- captured output is handed out by reference.
 // ===========================================================================
 
-// PIN FOR BLOCKED TICKET #2030. Both captured-output getters return a REFERENCE into storage
-// the Process keeps, which is what lets a caller hold it while the internal reader thread
-// appends. Plan section 14.2 changes both to return std::string BY VALUE -- the only public
-// declaration change in this namespace -- and these static_asserts fail the moment it lands.
-TEST(ProcessGatedBehaviourPinTests, Pin2030_CapturedOutputIsReturnedByReference) {
+// #2030 LANDED 2026-08-17, and both of its pins are INVERTED.
+//
+// Both captured-output getters returned a REFERENCE into storage the internal reader thread was
+// still appending to -- the audit measured the SAME reference reading 4 bytes mid-run and 8
+// bytes after exit. There is no reference a caller can hold safely while another thread appends,
+// so the getters now return BY VALUE and take the copy under the lock the readers append under.
+// That is the only public declaration change in this namespace, and it is source-compatible for
+// the ordinary spelling: a returned value still binds to `const std::string&`.
+TEST(ProcessGatedBehaviourPinTests, Fix2030_CapturedOutputIsReturnedByValue) {
     static_assert(
         std::is_same_v<decltype(std::declval<const Process&>().getStandardOutputTextProperty()),
-                       const std::string&>,
-        "getStandardOutputTextProperty no longer returns const std::string& -- #2030 appears to "
-        "have landed; retire this pin with it");
+                       std::string>,
+        "getStandardOutputTextProperty must return by value; a reference into a buffer the "
+        "reader thread appends to cannot be made safe");
     static_assert(
         std::is_same_v<decltype(std::declval<const Process&>().getStandardErrorTextProperty()),
-                       const std::string&>,
-        "getStandardErrorTextProperty no longer returns const std::string& -- #2030 appears to "
-        "have landed; retire this pin with it");
+                       std::string>,
+        "getStandardErrorTextProperty must return by value, for the same reason");
 
     Process process = Process::Start(shellStartInfo("printf pinned", true));
     process.WaitForExit();
 
-    // The reference denotes storage the object owns: two calls yield the SAME object, not two
-    // copies. This is the property that makes the race in SR-AUD-271 possible at all.
-    const std::string& first = process.getStandardOutputTextProperty();
-    const std::string& second = process.getStandardOutputTextProperty();
-    EXPECT_EQ(&first, &second)
-        << "the getter returned a copy -- #2030 appears to have landed; retire this pin";
+    // Two calls now yield two independent copies. Mutating one cannot be observed through the
+    // other, which is precisely what makes SR-AUD-271's race unreachable through this door.
+    std::string first = process.getStandardOutputTextProperty();
+    const std::string second = process.getStandardOutputTextProperty();
+    EXPECT_NE(&first, &second);
     EXPECT_EQ(first, "pinned");
+    first.append("-mutated");
+    EXPECT_EQ(second, "pinned") << "the getter handed out shared storage";
+    EXPECT_EQ(process.getStandardOutputTextProperty(), "pinned")
+        << "mutating a returned copy reached the process's own buffer";
 }
 
-// PIN FOR BLOCKED TICKET #2030. getHasExitedProperty() is declared const and MUTATES the
-// object's exit state through reapIfNeeded(), so const conveys no thread-safety here. This is
-// plan section 16 row 5, an observation #2023 added to the finding.
-TEST(ProcessGatedBehaviourPinTests, Pin2030_ConstHasExitedMutatesObservableState) {
+// The second half. getHasExitedProperty() is declared const and MUTATES the object's exit state
+// through reapIfNeeded(), which is .NET's shape too -- HasExited reaps lazily -- so the repair
+// is NOT to stop mutating but to make the mutation safe against a concurrent reader. The
+// mutation stays, and this case still asserts it; what changed is that it now happens under a
+// lock, so `const` no longer silently implies "safe to call from two threads".
+TEST(ProcessGatedBehaviourPinTests, Fix2030_ConstHasExitedStillMutatesButIsNowGuarded) {
     Process process = Process::Start(shellStartInfo("exit 4"));
     const Process& asConst = process;
 
-    // Reading a const-qualified property is what makes the exit code become available.
     ASSERT_TRUE(waitForProcessState(static_cast<pid_t>(process.getIdProperty()), 'Z',
                                     std::chrono::seconds(5)));
     EXPECT_TRUE(asConst.getHasExitedProperty());
-    EXPECT_EQ(asConst.getExitCodeProperty(), 4)
-        << "a const getter no longer transitions the object to the exited state -- if #2030 "
-           "landed, retire this pin";
+    EXPECT_EQ(asConst.getExitCodeProperty(), 4);
+}
+
+// Concurrent readers of the captured output and of the exit state must not tear or crash. This
+// is the case that would have reproduced SR-AUD-271 before the lock: several threads copying
+// the output while the reader appends to it.
+TEST(ProcessGatedBehaviourPinTests, Fix2030_ConcurrentReadersSeeAConsistentBuffer) {
+    Process process = Process::Start(
+        shellStartInfo("for i in 1 2 3 4 5 6 7 8 9 10; do printf 'chunk-%s;' \"$i\"; done", true));
+
+    std::atomic<bool> stop{false};
+    std::atomic<int> reads{0};
+    std::vector<std::thread> readers;
+    for (int i = 0; i < 4; ++i) {
+        readers.emplace_back([&] {
+            while (!stop.load()) {
+                const std::string text = process.getStandardOutputTextProperty();
+                // A torn copy would show up as a partial trailing record; every complete read
+                // must end at a record boundary or be empty.
+                if (!text.empty()) { EXPECT_EQ(text.back(), ';') << text; }
+                reads.fetch_add(1);
+            }
+        });
+    }
+
+    process.WaitForExit();
+    stop.store(true);
+    for (auto& reader : readers) reader.join();
+
+    EXPECT_GT(reads.load(), 0);
+    EXPECT_EQ(process.getStandardOutputTextProperty(),
+              "chunk-1;chunk-2;chunk-3;chunk-4;chunk-5;chunk-6;chunk-7;chunk-8;chunk-9;chunk-10;");
 }
 
 // ===========================================================================

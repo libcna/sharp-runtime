@@ -2,6 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Diagnostics/Process.hpp"
+#include <atomic>
+#include <mutex>
+#include <poll.h>
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
@@ -40,6 +43,20 @@ constexpr intcs TimeoutInfinite = -1;
 
 struct Process::Impl {
     ProcessStartInfo startInfo;
+    /**
+     * Set by the destructor before it joins, and observed by the pipe readers between poll
+     * slices (ticket #2029).
+     *
+     * Without it, destroying a redirected Process BLOCKED FOR THE CHILD'S WHOLE LIFETIME:
+     * `read()` on the pipe cannot return until the child closes its end, so joining the reader
+     * meant waiting for the child. Measured, 2005 ms for a 2 s child and unbounded in general.
+     *
+     * .NET does not do that. `Process.Close()` (`Process.cs:761-805`) stops watching for exit,
+     * releases the handle and **cancels** the async read before disposing the stream -- it never
+     * waits for the child. This flag is that cancellation, expressed with the tools a C++ pipe
+     * reader has.
+     */
+    std::atomic<bool> readersStopping{false};
 #if defined(SHARP_RUNTIME_PROCESS_POSIX)
     pid_t pid = -1;
 #endif
@@ -47,12 +64,46 @@ struct Process::Impl {
     bool hasExited = false;
     bool isCurrentProcess = false;
     intcs exitCode = 0;
+    /**
+     * Guards `stdoutText`/`stderrText` against the pipe readers (ticket #2030).
+     *
+     * Both getters used to return a `const std::string&` INTO storage an internal thread was
+     * still appending to -- measured, the SAME reference read 4 bytes mid-run and 8 bytes after
+     * exit. There is no reference a caller can hold safely while another thread appends, so the
+     * getters return by value now and take this lock to make the copy.
+     *
+     * `mutable` because both getters are `const`, which this class means as "does not change the
+     * observable process state", not as "is thread-safe" -- see `stateMutex`.
+     */
+    mutable std::mutex outputMutex;
     std::string stdoutText;
     std::string stderrText;
+
+    /**
+     * Guards `hasExited`/`exitCode` (ticket #2030's second half).
+     *
+     * `getHasExitedProperty()` is `const` and yet MUTATES both, through `reapIfNeeded`. That is
+     * .NET's shape too -- `HasExited` reaps lazily -- so the repair is not to stop mutating but
+     * to make the mutation safe against a concurrent reader.
+     */
+    mutable std::mutex stateMutex;
     std::thread stdoutReader;
     std::thread stderrReader;
 
+    /**
+     * Ticket #2029. The join stays -- a DETACHED reader would keep writing into `stdoutText`
+     * after this object is gone, which is a use-after-free and would trade one defect for a
+     * worse one -- but it is now bounded, because `readersStopping` makes each reader return
+     * within one poll slice instead of waiting for the child to exit.
+     *
+     * What this deliberately does NOT do is reap a still-running child. .NET reaps process-wide
+     * from a SIGCHLD-driven wait state (`ProcessWaitState.Unix.cs`), which this port cannot
+     * replicate without colliding with `PosixSignalRegistration` (#1975/#1979) -- so a child
+     * that outlives its `Process` object is left to the OS, and that divergence is documented
+     * rather than papered over. A child that has ALREADY exited is reaped, by `reapIfNeeded`.
+     */
     ~Impl() {
+        readersStopping.store(true, std::memory_order_relaxed);
         if (stdoutReader.joinable()) stdoutReader.join();
         if (stderrReader.joinable()) stderrReader.join();
     }
@@ -81,11 +132,38 @@ namespace {
     // established pattern (Timer, Socket's async methods) of using std::thread for blocking I/O
     // rather than requiring the caller to poll -- avoids the classic pipe deadlock where the child
     // blocks writing to a full pipe buffer while nobody is reading it.
-    void drainPipe(int fd, std::string* out) {
+    // Ticket #2029. This used to call a bare blocking read(), which cannot return until the
+    // child closes its end of the pipe -- so joining the reader meant waiting for the child, and
+    // destroying a redirected Process blocked for the child's whole lifetime.
+    //
+    // It now waits on poll() in bounded slices and re-checks the stop flag between them, which
+    // is the same shape #2134 had to give Socket::AcceptAsync for the same reason: a boundary
+    // that cannot be crossed turns one defect into a hang. Nothing about what is READ changes --
+    // the loop still drains to EOF and still retries on EINTR -- only how long it is willing to
+    // wait for the next byte when it has been asked to stop.
+    void drainPipe(int fd, std::string* out, std::mutex* outMutex, const std::atomic<bool>* stopping) {
         char buf[4096];
         for (;;) {
+            if (stopping != nullptr && stopping->load(std::memory_order_relaxed)) break;
+
+            struct pollfd waiter{};
+            waiter.fd = fd;
+            waiter.events = POLLIN;
+            const int ready = ::poll(&waiter, 1, 50);
+            if (ready < 0) {
+                if (errno == EINTR) continue;
+                break;
+            }
+            if (ready == 0) continue;   // nothing yet; re-check the stop flag
+
             ssize_t n = ::read(fd, buf, sizeof(buf));
-            if (n > 0) { out->append(buf, static_cast<size_t>(n)); continue; }
+            if (n > 0) {
+                // #2030: every append is under the same lock the getters copy under, so a
+                // caller can never observe a half-written buffer.
+                std::lock_guard<std::mutex> lock(*outMutex);
+                out->append(buf, static_cast<size_t>(n));
+                continue;
+            }
             if (n == 0) break; // EOF
             if (errno == EINTR) continue;
             break;
@@ -144,6 +222,10 @@ bool Process::getHasExitedProperty() const {
 #if defined(SHARP_RUNTIME_PROCESS_POSIX)
     if (!impl_->started) throw System::InvalidOperationException("No process is associated with this object.");
     if (impl_->isCurrentProcess) return false;
+    // #2030: this member is `const` and yet mutates hasExited/exitCode through reapIfNeeded --
+    // that is .NET's shape too, since HasExited reaps lazily, so the repair is not to stop
+    // mutating but to make the mutation safe against a concurrent reader.
+    std::lock_guard<std::mutex> lock(impl_->stateMutex);
     reapIfNeeded(*impl_);
     return impl_->hasExited;
 #else
@@ -161,17 +243,23 @@ intcs Process::getExitCodeProperty() const {
 #endif
 }
 
-const std::string& Process::getStandardOutputTextProperty() const {
+// Ticket #2030 / SR-AUD-271. BY VALUE, under the lock the readers append under. A reference
+// into this buffer cannot be made safe: the reader thread is still appending to it, and the
+// audit measured the SAME reference reading 4 bytes mid-run and 8 bytes after exit. The copy is
+// the only thing a caller can hold.
+std::string Process::getStandardOutputTextProperty() const {
     if (!impl_->startInfo.getRedirectStandardOutputProperty())
         throw System::InvalidOperationException(
             "StandardOut has not been redirected. Set RedirectStandardOutput on ProcessStartInfo before starting the process.");
+    std::lock_guard<std::mutex> lock(impl_->outputMutex);
     return impl_->stdoutText;
 }
 
-const std::string& Process::getStandardErrorTextProperty() const {
+std::string Process::getStandardErrorTextProperty() const {
     if (!impl_->startInfo.getRedirectStandardErrorProperty())
         throw System::InvalidOperationException(
             "StandardError has not been redirected. Set RedirectStandardError on ProcessStartInfo before starting the process.");
+    std::lock_guard<std::mutex> lock(impl_->outputMutex);
     return impl_->stderrText;
 }
 
@@ -374,11 +462,13 @@ bool Process::Start() {
     impl_->stderrText.clear();
     if (redirOut) {
         ::close(stdoutPipe[1]);
-        impl_->stdoutReader = std::thread(drainPipe, stdoutPipe[0], &impl_->stdoutText);
+        impl_->stdoutReader = std::thread(drainPipe, stdoutPipe[0], &impl_->stdoutText,
+                                          &impl_->outputMutex, &impl_->readersStopping);
     }
     if (redirErr) {
         ::close(stderrPipe[1]);
-        impl_->stderrReader = std::thread(drainPipe, stderrPipe[0], &impl_->stderrText);
+        impl_->stderrReader = std::thread(drainPipe, stderrPipe[0], &impl_->stderrText,
+                                          &impl_->outputMutex, &impl_->readersStopping);
     }
     impl_->pid = pid;
     impl_->started = true;

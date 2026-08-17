@@ -167,7 +167,7 @@ namespace System::Diagnostics {
          *
          * @throws System::InvalidOperationException unless RedirectStandardOutput was set before Start().
          */
-        [[nodiscard]] const std::string& getStandardOutputTextProperty() const;
+        [[nodiscard]] std::string getStandardOutputTextProperty() const;
 
         /**
          * @brief Gets the captured standard error text.
@@ -177,7 +177,7 @@ namespace System::Diagnostics {
          *
          * @throws System::InvalidOperationException unless RedirectStandardError was set before Start().
          */
-        [[nodiscard]] const std::string& getStandardErrorTextProperty() const;
+        [[nodiscard]] std::string getStandardErrorTextProperty() const;
 
         /**
          * @brief Immediately stops the associated process by sending SIGKILL to it alone.
