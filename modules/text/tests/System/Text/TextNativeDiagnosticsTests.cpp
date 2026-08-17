@@ -215,10 +215,45 @@ TEST(HtmlEncoderRangeTests, EveryInRangeCallIsUnchanged) {
     EXPECT_EQ("&lt;b&gt;", HtmlEncoder::Default().Encode("x<b>y", 1, 3));
 }
 
-TEST(HtmlEncoderRangeTests, TheGatedDefaultPolicyIsDeliberatelyUnchanged) {
-    // #2019 would escape these. #2011 must not (plan §14.7).
-    EXPECT_EQ("\xC3\xA9", HtmlEncoder::Encode("\xC3\xA9"));
-    EXPECT_EQ("\xC3\xA9", JavaScriptEncoder::Encode("\xC3\xA9"));
-    // The five ASCII escapes the encoder does implement are unchanged.
+// #2019 LANDED 2026-08-17, and this pin is INVERTED. The default encoders passed every
+// non-ASCII scalar through unchanged; .NET's defaults are built with an ALLOW-LIST and escape
+// everything outside it -- DefaultHtmlEncoder.BasicLatinSingleton and its JavaScript sibling are
+// both `new Default…Encoder(new TextEncoderSettings(UnicodeRanges.BasicLatin))`
+// (DefaultHtmlEncoder.cs:13, DefaultJavaScriptEncoder.cs:11), i.e. U+0000..U+007F and nothing
+// else. The target set was the half the old approval package recorded as unverifiable; the
+// reference tree settles it.
+TEST(HtmlEncoderRangeTests, Fix2019_TheDefaultEncodersEscapeOutsideBasicLatin) {
+    // &#x + the SCALAR in uppercase hex, no padding, then ';' (DefaultHtmlEncoder.cs:98-126) --
+    // one escape for the whole scalar, not one per surrogate half.
+    EXPECT_EQ("&#xE9;", HtmlEncoder::Encode("\xC3\xA9"));            // U+00E9
+    EXPECT_EQ("&#x20AC;", HtmlEncoder::Encode("\xE2\x82\xAC"));      // U+20AC
+    EXPECT_EQ("&#x1F600;", HtmlEncoder::Encode("\xF0\x9F\x98\x80")); // U+1F600
+
+    // \uXXXX with four uppercase hex digits, and a SURROGATE PAIR for a supplementary scalar,
+    // because that is what a JavaScript string literal can express
+    // (DefaultJavaScriptEncoder.cs:129-150).
+    EXPECT_EQ("\\u00E9", JavaScriptEncoder::Encode("\xC3\xA9"));
+    EXPECT_EQ("\\uD83D\\uDE00", JavaScriptEncoder::Encode("\xF0\x9F\x98\x80"));
+
+    // The five ASCII escapes the encoder already implemented are unchanged, and Basic Latin
+    // still passes through -- an allow-list that escaped everything would be useless.
     EXPECT_EQ("&amp;&lt;&gt;&quot;&#x27;", HtmlEncoder::Encode("&<>\"'"));
+    EXPECT_EQ("abcXYZ 0189~", HtmlEncoder::Encode("abcXYZ 0189~"));
+    EXPECT_EQ("abcXYZ 0189~", JavaScriptEncoder::Encode("abcXYZ 0189~"));
+}
+
+TEST(HtmlEncoderRangeTests, Fix2019_TheDefaultIsConservativeOnPurpose) {
+    // Stated as a test rather than only in a comment: this is a NARROWING, and it is the safe
+    // direction. An allow-list escapes a character nobody thought about; a deny-list ships it.
+    // A caller who needs non-ASCII text to survive unescaped needs a relaxed encoder, which .NET
+    // also requires and which this port does not yet provide.
+    for (const char* text : {"\xC3\xA9", "\xE2\x82\xAC", "\xF0\x9F\x98\x80",
+                             "\xEF\xBB\xBF", "\xC2\xA0"}) {
+        const std::string encoded = HtmlEncoder::Encode(text);
+        EXPECT_NE(encoded, text) << "[" << text << "] survived the allow-list";
+        for (char c : encoded) {
+            EXPECT_LT(static_cast<unsigned char>(c), 0x80u)
+                << "the encoded form must itself be Basic Latin";
+        }
+    }
 }
