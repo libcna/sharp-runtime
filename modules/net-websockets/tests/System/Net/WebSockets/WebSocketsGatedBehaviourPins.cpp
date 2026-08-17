@@ -20,6 +20,7 @@
 #include <gtest/gtest.h>
 #include <optional>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <memory>
@@ -116,6 +117,53 @@ struct ServerJoiner {
         if (thread.joinable()) thread.join();
     }
 };
+
+/// Reads one whole client frame, unmasking its payload. A client always masks (RFC 6455 §5.1),
+/// so a server that wants to see WHICH control frames arrive has to undo it. Returns false at
+/// end of stream.
+bool readClientFrame(Socket& socket, SharpRuntime::bytecs& opcode, std::vector<bytecs>& payload) {
+    auto readExactly = [&socket](std::vector<bytecs>& into, size_t n) {
+        into.assign(n, 0);
+        size_t total = 0;
+        while (total < n) {
+            std::vector<bytecs> chunk(n - total);
+            const auto got = socket.Receive(chunk);
+            if (got <= 0) return false;
+            std::copy(chunk.begin(), chunk.begin() + got, into.begin() + static_cast<long>(total));
+            total += static_cast<size_t>(got);
+        }
+        return true;
+    };
+
+    std::vector<bytecs> header;
+    if (!readExactly(header, 2)) return false;
+    opcode = static_cast<SharpRuntime::bytecs>(header[0] & 0x0F);
+    const bool masked = (header[1] & 0x80) != 0;
+    size_t len = static_cast<size_t>(header[1] & 0x7F);
+    if (len == 126) {
+        std::vector<bytecs> ext;
+        if (!readExactly(ext, 2)) return false;
+        len = (static_cast<size_t>(ext[0]) << 8) | static_cast<size_t>(ext[1]);
+    }
+    std::vector<bytecs> mask;
+    if (masked && !readExactly(mask, 4)) return false;
+    if (!readExactly(payload, len)) return false;
+    if (masked) {
+        for (size_t i = 0; i < payload.size(); ++i) {
+            payload[i] = static_cast<bytecs>(payload[i] ^ mask[i % 4]);
+        }
+    }
+    return true;
+}
+
+/// Sends an unmasked server frame (a server must NOT mask -- RFC 6455 §5.1).
+void sendServerFrame(Socket& socket, SharpRuntime::bytecs opcode, const std::vector<bytecs>& payload) {
+    std::vector<bytecs> frame;
+    frame.push_back(static_cast<bytecs>(0x80 | (opcode & 0x0F)));
+    frame.push_back(static_cast<bytecs>(payload.size()));
+    frame.insert(frame.end(), payload.begin(), payload.end());
+    socket.Send(frame);
+}
 
 void RunAgainstServer(const std::function<void(ClientWebSocketOptions&)>& configure,
                       const std::function<void(Socket&)>& afterHandshake,
@@ -296,52 +344,264 @@ TEST(WebSocketsGatedBehaviourPins, Fix2093_EveryOneOfTheFiveMembersHonoursTheTok
 // SR-AUD-252 → #2094, BLOCKED: KeepAliveInterval/Timeout are inert
 // ===========================================================================
 
-TEST(WebSocketsGatedBehaviourPins, Pin2094_KeepAliveSettingsAreStoredAndNeverConsulted) {
-    // Both are validated, stored and returned, and nothing reads them. Driving them needs a
-    // background timer thread sending Pings and tracking Pong deadlines — new concurrency in a
-    // class that today has one mutex and races on state_ (#2096).
+TEST(WebSocketsGatedBehaviourPins, Fix2094_TheDefaultStrategyIsAnUnsolicitedPong) {
+    // #2094 LANDED. This pin used to assert that NO PING IS EVER SENT; it now asserts which
+    // frame is sent, and the answer is a Pong, not a Ping.
     //
-    // Half the pin is that the values round-trip; the other half is that NO PING IS EVER SENT.
-    ClientWebSocketOptions options;
-    options.setKeepAliveIntervalProperty(System::TimeSpan::FromMilliseconds(1));
-    options.setKeepAliveTimeoutProperty(System::TimeSpan::FromMilliseconds(1));
-    EXPECT_EQ(options.getKeepAliveIntervalProperty().getTicksProperty(),
-              System::TimeSpan::FromMilliseconds(1).getTicksProperty());
-
-    bool sawClientFrame = false;
+    // .NET picks between two strategies by whether KeepAliveTimeout is positive
+    // (ManagedWebSocket.cs:169-198). The DEFAULT timeout is Timeout.InfiniteTimeSpan
+    // (WebSocketDefaults.cs:17), which this port already matched, so the default strategy is
+    // UNSOLICITED PONG: send an empty Pong every interval and expect nothing back. It therefore
+    // cannot fault, which is what makes it safe as a default.
+    std::vector<SharpRuntime::bytecs> opcodes;
     RunAgainstServer(
         [](ClientWebSocketOptions& o) {
-            o.setKeepAliveIntervalProperty(System::TimeSpan::FromMilliseconds(1));
+            o.setKeepAliveIntervalProperty(System::TimeSpan::FromMilliseconds(40));
         },
         [&](Socket& server) {
-            // Deterministic exchange, no sleeps: the server sends a message, the client receives
-            // it, then the client sends one. The only frame the server ever reads is that reply.
-            // A working keep-alive would interleave an unsolicited Ping here.
-            server.Send(std::vector<bytecs>{0x81, 0x02, 'h', 'i'});
-            std::vector<bytecs> header(2);
-            if (server.Receive(header) == 2) {
-                sawClientFrame = true;
-                EXPECT_EQ(header[0] & 0x0F, 0x2)
-                    << "SR-AUD-252: the first client frame must be the test's own Binary send, "
-                       "not a keep-alive Ping. If it is 0x9, #2094 landed and this pin must be "
-                       "updated in that change.";
-                std::vector<bytecs> rest(4 + (header[1] & 0x7F));
-                size_t total = 0;
-                while (total < rest.size()) {
-                    std::vector<bytecs> chunk(rest.size() - total);
-                    const auto n = server.Receive(chunk);
-                    if (n == 0) break;
-                    total += static_cast<size_t>(n);
-                }
+            SharpRuntime::bytecs opcode = 0;
+            std::vector<bytecs> payload;
+            for (int i = 0; i < 3 && readClientFrame(server, opcode, payload); ++i) {
+                opcodes.push_back(opcode);
             }
         },
         [&](ClientWebSocket& client) {
-            std::vector<bytecs> buffer(1024);
-            (void)client.ReceiveAsync(buffer, 0, 1024).getResultProperty();
-            std::vector<bytecs> out{0x01, 0x02};
-            client.SendAsync(out, 0, 2, WebSocketMessageType::Binary, true).Wait();
+            (void)client;
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
         });
-    EXPECT_TRUE(sawClientFrame) << "the exchange must have happened, or nothing was measured";
+
+    ASSERT_FALSE(opcodes.empty()) << "no keep-alive frame arrived at all";
+    for (auto opcode : opcodes) {
+        EXPECT_EQ(opcode, 0xA) << "the default strategy sends Pong (0xA), never Ping (0x9)";
+    }
+}
+
+TEST(WebSocketsGatedBehaviourPins, Fix2094_SettingATimeoutSwitchesToPingPong) {
+    // With a positive KeepAliveTimeout, .NET creates a KeepAlivePingState and sends PINGs
+    // carrying an 8-byte big-endian counter (ManagedWebSocket.KeepAlive.cs:108-123). The payload
+    // matters: only a Pong echoing it clears the outstanding Ping.
+    std::vector<SharpRuntime::bytecs> opcodes;
+    std::vector<std::vector<bytecs>>  payloads;
+    RunAgainstServer(
+        [](ClientWebSocketOptions& o) {
+            o.setKeepAliveIntervalProperty(System::TimeSpan::FromMilliseconds(40));
+            o.setKeepAliveTimeoutProperty(System::TimeSpan::FromSeconds(30));
+        },
+        [&](Socket& server) {
+            SharpRuntime::bytecs opcode = 0;
+            std::vector<bytecs> payload;
+            for (int i = 0; i < 2 && readClientFrame(server, opcode, payload); ++i) {
+                opcodes.push_back(opcode);
+                payloads.push_back(payload);
+                // Echo it back so the ping never times out during this test.
+                sendServerFrame(server, 0xA, payload);
+            }
+        },
+        [&](ClientWebSocket& client) {
+            (void)client;
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        });
+
+    ASSERT_FALSE(opcodes.empty()) << "no keep-alive frame arrived at all";
+    EXPECT_EQ(opcodes.front(), 0x9) << "a positive timeout selects the Ping/Pong strategy";
+    ASSERT_FALSE(payloads.empty());
+    EXPECT_EQ(payloads.front().size(), 8u) << "the ping payload is an 8-byte counter";
+}
+
+TEST(WebSocketsGatedBehaviourPins, Fix2094_APingThatIsNeverAnsweredFaultsTheConnection) {
+    // The half that makes KeepAliveTimeout mean anything: a server that reads the Ping and never
+    // answers must lose the connection, and the caller must be told WHY -- not merely that the
+    // socket became unusable. .NET surfaces the same cause (ManagedWebSocket.cs:1016-1021).
+    RunAgainstServer(
+        [](ClientWebSocketOptions& o) {
+            o.setKeepAliveIntervalProperty(System::TimeSpan::FromMilliseconds(40));
+            o.setKeepAliveTimeoutProperty(System::TimeSpan::FromMilliseconds(80));
+        },
+        [&](Socket& server) {
+            // Read whatever arrives and answer nothing at all.
+            SharpRuntime::bytecs opcode = 0;
+            std::vector<bytecs> payload;
+            while (readClientFrame(server, opcode, payload)) {
+            }
+        },
+        [&](ClientWebSocket& client) {
+            std::vector<bytecs> buffer(64);
+            // The receive parks; the heartbeat times out and aborts underneath it.
+            EXPECT_THROW((void)client.ReceiveAsync(buffer, 0, 64).getResultProperty(),
+                         WebSocketException);
+            EXPECT_EQ(client.getStateProperty(), WebSocketState::Aborted);
+        });
+}
+
+TEST(WebSocketsGatedBehaviourPins, Fix2094_AnAnsweredPingKeepsTheConnectionAliveWhileReceiving) {
+    // The invariance row, and the one that proves the payload comparison is real rather than
+    // "any Pong clears any Ping": the server echoes each Ping's payload and the connection
+    // survives well past several timeouts.
+    //
+    // The client must be RECEIVING for this to work, and that is not a quirk of the test -- see
+    // the next case, which pins the limitation. A Pong is only observed inside ReceiveAsync,
+    // because this port has no independent receive pump and neither does .NET's
+    // ManagedWebSocket, which also processes pongs inside ReceiveAsyncPrivate.
+    RunAgainstServer(
+        [](ClientWebSocketOptions& o) {
+            o.setKeepAliveIntervalProperty(System::TimeSpan::FromMilliseconds(30));
+            o.setKeepAliveTimeoutProperty(System::TimeSpan::FromMilliseconds(120));
+        },
+        [&](Socket& server) {
+            SharpRuntime::bytecs opcode = 0;
+            std::vector<bytecs> payload;
+            const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+            while (std::chrono::steady_clock::now() < until && readClientFrame(server, opcode, payload)) {
+                if (opcode == 0x9) sendServerFrame(server, 0xA, payload);
+            }
+        },
+        [&](ClientWebSocket& client) {
+            // A receive that will never complete on its own -- the server sends no data frame --
+            // but which keeps the pong-reading path running for its whole duration.
+            std::vector<bytecs> buffer(64);
+            auto pending = client.ReceiveAsync(buffer, 0, 64);
+            std::this_thread::sleep_for(std::chrono::milliseconds(400));
+            EXPECT_EQ(client.getStateProperty(), WebSocketState::Open)
+                << "an answered ping must not fault the connection";
+            EXPECT_FALSE(pending.getIsCompletedProperty())
+                << "the receive is still waiting, which is what makes this a live connection";
+        });
+}
+
+TEST(WebSocketsGatedBehaviourPins, Fix2094_PingPongNeedsAReceiverAndThatLimitIsPinnedNotHidden) {
+    // THE LIMITATION, ASSERTED RATHER THAN ONLY COMMENTED. A Pong is observed only inside
+    // ReceiveAsync. So a caller who enables the Ping/Pong strategy and then never receives will
+    // lose the connection even against a perfectly healthy server that answers every Ping.
+    //
+    // This is why the DEFAULT strategy is unsolicited Pong (KeepAliveTimeout defaults to
+    // Timeout.InfiniteTimeSpan in .NET and here): it expects nothing back, so it cannot fault.
+    // Closing this gap needs an independent receive pump, which is new concurrency and new
+    // buffering, and is deliberately not in #2094.
+    RunAgainstServer(
+        [](ClientWebSocketOptions& o) {
+            o.setKeepAliveIntervalProperty(System::TimeSpan::FromMilliseconds(30));
+            o.setKeepAliveTimeoutProperty(System::TimeSpan::FromMilliseconds(60));
+        },
+        [&](Socket& server) {
+            // A COOPERATIVE server: it answers every single Ping correctly.
+            SharpRuntime::bytecs opcode = 0;
+            std::vector<bytecs> payload;
+            const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(400);
+            while (std::chrono::steady_clock::now() < until && readClientFrame(server, opcode, payload)) {
+                if (opcode == 0x9) sendServerFrame(server, 0xA, payload);
+            }
+        },
+        [&](ClientWebSocket& client) {
+            // ...and a client that never receives.
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            EXPECT_EQ(client.getStateProperty(), WebSocketState::Aborted)
+                << "if this is Open, an independent receive pump was added and this pin, the "
+                   "doc-comment on ClientWebSocket::KeepAlive and the migration note must all "
+                   "be updated in that change";
+        });
+}
+
+TEST(WebSocketsGatedBehaviourPins, Fix2094_AWrongPongPayloadDoesNotClearTheOutstandingPing) {
+    // OnPongResponseReceived compares the payload (ManagedWebSocket.KeepAlive.cs:174-184): only a
+    // Pong echoing the outstanding Ping's counter clears it. A server that answers every Ping
+    // with a DIFFERENT payload -- or an unsolicited Pong of its own -- must not keep the
+    // connection alive, or the timeout means nothing.
+    RunAgainstServer(
+        [](ClientWebSocketOptions& o) {
+            o.setKeepAliveIntervalProperty(System::TimeSpan::FromMilliseconds(30));
+            o.setKeepAliveTimeoutProperty(System::TimeSpan::FromMilliseconds(60));
+        },
+        [&](Socket& server) {
+            SharpRuntime::bytecs opcode = 0;
+            std::vector<bytecs> payload;
+            const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(400);
+            while (std::chrono::steady_clock::now() < until && readClientFrame(server, opcode, payload)) {
+                if (opcode == 0x9) sendServerFrame(server, 0xA, std::vector<bytecs>(8, 0x00));
+            }
+        },
+        [&](ClientWebSocket& client) {
+            std::vector<bytecs> buffer(64);
+            auto pending = client.ReceiveAsync(buffer, 0, 64);
+            EXPECT_THROW((void)pending.getResultProperty(), WebSocketException);
+            EXPECT_EQ(client.getStateProperty(), WebSocketState::Aborted)
+                << "a mismatched pong must not count as an answer";
+        });
+}
+
+TEST(WebSocketsGatedBehaviourPins, Fix2094_DestroyingTheSocketReturnsEvenIfTheHeartbeatIsParkedInSend) {
+    // The heartbeat can be blocked inside a blocking Send when the peer has stopped reading, so
+    // setting its stop flag is not enough to reach the join. stopKeepAlive() shuts the socket
+    // down first -- the same thing waitForAsyncOperations() does, and the reason #2358 had to
+    // make a send to a dead peer raise an ERROR rather than SIGPIPE before this could work.
+    //
+    // Deliberately NOT using RunAgainstServer: that harness calls Dispose() before the object
+    // dies, which shuts the socket down and hides the case. This destroys the object outright.
+    Socket listener(System::Net::Sockets::AddressFamily::InterNetwork,
+                    System::Net::Sockets::SocketType::Stream,
+                    System::Net::Sockets::ProtocolType::Tcp);
+    listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    listener.Listen();
+    auto local = std::dynamic_pointer_cast<IPEndPoint>(listener.getLocalEndPointProperty());
+    ASSERT_NE(local, nullptr);
+    const SharpRuntime::intcs port = local->getPortProperty();
+
+    std::thread serverThread([&]() {
+        try {
+            auto server = listener.Accept();
+            const std::string request = readHeaders(*server);
+            const size_t keyPos = request.find("Sec-WebSocket-Key: ");
+            if (keyPos == std::string::npos) return;
+            const size_t keyStart = keyPos + std::string("Sec-WebSocket-Key: ").size();
+            const std::string key = request.substr(keyStart, request.find("\r\n", keyStart) - keyStart);
+            const auto digest = pinSha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+            const std::string accept =
+                System::Convert::ToBase64String(std::vector<bytecs>(digest.begin(), digest.end()));
+            server->Send(toBytes("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                                 "Connection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n"));
+            // Read nothing at all, then hang up: the client's keep-alive frames pile up against a
+            // peer that has stopped reading, which is what parks its Send.
+            std::this_thread::sleep_for(std::chrono::milliseconds(120));
+            server->Close();
+        } catch (...) {
+        }
+    });
+
+    const auto started = std::chrono::steady_clock::now();
+    {
+        auto client = std::make_unique<ClientWebSocket>();
+        client->getOptionsProperty().setKeepAliveIntervalProperty(System::TimeSpan::FromMilliseconds(10));
+        client->ConnectAsync(System::Uri("ws://127.0.0.1:" + std::to_string(port) + "/")).Wait();
+        ASSERT_EQ(client->getStateProperty(), WebSocketState::Open);
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        client.reset();   // ~ClientWebSocket must join the heartbeat, not wait on it forever
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    EXPECT_LT(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(), 10)
+        << "the destructor could not join a heartbeat parked in send()";
+
+    serverThread.join();
+    listener.Close();
+}
+
+TEST(WebSocketsGatedBehaviourPins, Fix2094_AnInfiniteOrZeroIntervalStartsNoHeartbeatAtAll) {
+    // ManagedWebSocket.cs:169 gates the whole timer on `keepAliveInterval > TimeSpan.Zero`, so
+    // both spellings of "off" must produce no frames and no thread.
+    for (auto interval : {System::TimeSpan::FromTicks(System::Threading::Timeout::InfiniteTimeSpan),
+                          System::TimeSpan::FromTicks(0)}) {
+        bool sawAnything = false;
+        RunAgainstServer(
+            [&](ClientWebSocketOptions& o) { o.setKeepAliveIntervalProperty(interval); },
+            [&](Socket& server) {
+                SharpRuntime::bytecs opcode = 0;
+                std::vector<bytecs> payload;
+                if (readClientFrame(server, opcode, payload)) sawAnything = true;
+            },
+            [&](ClientWebSocket& client) {
+                (void)client;
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            });
+        EXPECT_FALSE(sawAnything) << "a disabled keep-alive must send nothing";
+    }
 }
 
 // ===========================================================================

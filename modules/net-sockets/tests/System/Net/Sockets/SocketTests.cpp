@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <vector>
+#include <chrono>
 #include <thread>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Net/IPEndPoint.hpp"
@@ -307,4 +309,51 @@ TEST(SocketTests, MoveConstructor) {
     intcs originalHandle = original.getHandleProperty();
     Socket moved(std::move(original));
     EXPECT_EQ(moved.getHandleProperty(), originalHandle);
+}
+
+// ---------------------------------------------------------------------------------------
+// #2358 -- Send to a closed peer must THROW, not kill the process.
+// ---------------------------------------------------------------------------------------
+
+TEST(SocketSignalSafetyTests, Fix2358_SendingToAClosedPeerThrowsInsteadOfRaisingSIGPIPE) {
+    // Socket::Send called ::send() without MSG_NOSIGNAL, so writing to a socket whose peer had
+    // closed raised SIGPIPE and the default disposition TERMINATED THE PROCESS. Measured before
+    // the repair (build-probe/2094_probe1_sendafterclose.cpp): the fourth send succeeded and the
+    // fifth killed the process with exit 141 (128 + 13) -- no exception, no return value, no
+    // stack. .NET never does this; SystemNative_Send passes MSG_NOSIGNAL, or sets SO_NOSIGPIPE
+    // on platforms that lack it.
+    //
+    // WITHOUT THE REPAIR THIS TEST DOES NOT FAIL -- IT TAKES THE WHOLE SUITE DOWN. That is the
+    // point: a defect whose symptom is process death cannot be pinned by an assertion alone, so
+    // the pin is that the loop below is REACHED AT ALL.
+    Socket listener(AddressFamily::InterNetwork, SocketType::Stream, ProtocolType::Tcp);
+    listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    listener.Listen(1);
+    auto local = listener.getLocalEndPointProperty();
+    const auto port = dynamic_cast<IPEndPoint*>(local.get())->getPortProperty();
+
+    std::thread server([&] {
+        auto accepted = listener.Accept();
+        std::vector<SharpRuntime::bytecs> buffer(8);
+        for (int i = 0; i < 2; ++i) (void)accepted->Receive(buffer);
+        accepted->Close();
+    });
+
+    Socket client(AddressFamily::InterNetwork, SocketType::Stream, ProtocolType::Tcp);
+    client.Connect("127.0.0.1", port);
+
+    const std::vector<SharpRuntime::bytecs> payload(8, 0x41);
+    bool threw = false;
+    for (int i = 0; i < 12 && !threw; ++i) {
+        try {
+            (void)client.Send(payload);
+        } catch (const System::Exception&) {
+            threw = true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_TRUE(threw) << "a send to a closed peer must report an error the caller can catch";
+
+    server.join();
+    listener.Close();
 }

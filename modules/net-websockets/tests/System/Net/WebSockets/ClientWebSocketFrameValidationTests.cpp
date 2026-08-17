@@ -398,9 +398,10 @@ struct ClientWebSocketLayoutProbe {
     size_t                                  recvLeftoverPos;
     WebSocketMessageType                    recvLeftoverType;
     std::mutex                              sendMutex;
-    // #2088 added this one, and only this one: the liveness boundary's shared state. Declared
-    // last, matching the class, so the probe stays a field-for-field shadow rather than a
-    // number to re-guess.
+    // #2094 added the keep-alive heartbeat's shared state, declared here to match the class.
+    std::shared_ptr<void>                   keepAlive;
+    // #2088 added this one: the liveness boundary's shared state. Declared last, matching the
+    // class, so the probe stays a field-for-field shadow rather than a number to re-guess.
     std::shared_ptr<void>                   asyncOps;
 };
 
@@ -408,9 +409,10 @@ struct ClientWebSocketLayoutProbe {
 
 static_assert(sizeof(ClientWebSocket) == sizeof(ClientWebSocketLayoutProbe),
               "ClientWebSocket's object layout moved. The probe above is a field-for-field "
-              "shadow; #2088 added the liveness boundary's shared state and #2096 widened the "
-              "socket to a shared_ptr and added stateMutex_, both under "
-              "docs/StandingApprovals.md SA-3. Any further data member here is a new "
+              "shadow; #2088 added the liveness boundary's shared state, #2096 widened the "
+              "socket to a shared_ptr and added stateMutex_, and #2094 added the keep-alive "
+              "heartbeat's shared state -- all under docs/StandingApprovals.md SA-3. Any "
+              "further data member here is a new "
               "object-layout change and needs its own approval. See "
               "docs/SystemNetWebSocketsNamespaceReviewPlan.md section 11.");
 static_assert(alignof(ClientWebSocket) == alignof(ClientWebSocketLayoutProbe),

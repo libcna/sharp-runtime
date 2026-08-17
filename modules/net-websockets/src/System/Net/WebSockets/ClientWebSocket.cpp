@@ -18,6 +18,9 @@
 #include "System/Net/WebSockets/WebSocketException.hpp"
 #include "System/PlatformNotSupportedException.hpp"
 #include "System/Threading/Tasks/TaskCanceledException.hpp"
+#include <chrono>
+#include <condition_variable>
+#include <thread>
 
 namespace System::Net::WebSockets {
 
@@ -274,6 +277,7 @@ void ClientWebSocket::performHandshake(const System::Uri& uri) {
     }
 
     storeState(WebSocketState::Open);
+    startKeepAlive();   // #2094: only once the connection is actually usable
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -340,6 +344,77 @@ bool ClientWebSocket::CancellationScope::cancelled() const {
     return token_.getIsCancellationRequestedProperty();
 }
 
+// ---------------------------------------------------------------------------------------------
+// #2094 — the keep-alive heartbeat, transcribed from ManagedWebSocket.KeepAlive.cs.
+//
+// .NET has TWO strategies and picks between them by whether KeepAliveTimeout is positive
+// (ManagedWebSocket.cs:169-198):
+//
+//   * interval <= 0                  -> no heartbeat at all;
+//   * interval > 0, timeout <= 0     -> UNSOLICITED PONG: send an empty Pong every interval and
+//                                       expect nothing back. This is the DEFAULT, because .NET's
+//                                       own default timeout is Timeout.InfiniteTimeSpan
+//                                       (WebSocketDefaults.cs:15-17) and this port already
+//                                       matched both defaults;
+//   * interval > 0, timeout > 0      -> PING/PONG: send a Ping carrying an 8-byte big-endian
+//                                       counter and require a matching Pong within `timeout`,
+//                                       else fault the connection.
+//
+// The heartbeat ticks at max(min(delay, timeout) / 4, 1) ms in Ping/Pong mode and at `interval`
+// in unsolicited mode -- KeepAlivePingState.HeartBeatIntervalMs, ManagedWebSocket.KeepAlive.cs:135.
+//
+// ONE LIMITATION, STATED RATHER THAN DISCOVERED LATER. A Pong is only observed while a
+// ReceiveAsync is running, because this port has no independent receive pump -- and neither does
+// .NET's ManagedWebSocket, which also processes pongs inside ReceiveAsyncPrivate. So a caller who
+// enables Ping/Pong and then never receives will time out. That is why the DEFAULT is unsolicited
+// Pong, where nothing is ever expected back and the strategy cannot fault.
+struct ClientWebSocket::KeepAlive {
+    std::mutex              mutex;
+    std::condition_variable wake;
+    bool                    stop = false;
+
+    long long delayMs   = 0;   // KeepAliveInterval
+    long long timeoutMs = 0;   // KeepAliveTimeout; <= 0 means the unsolicited-Pong strategy
+    long long tickMs    = 0;   // HeartBeatIntervalMs
+
+    // Ping/Pong bookkeeping. Guarded by `mutex`.
+    bool      pingSent            = false;
+    long long pingPayload         = 0;
+    long long pingTimeoutTick     = 0;
+    long long nextPingRequestTick = 0;
+    bool      faulted             = false;
+
+    std::thread thread;
+
+    [[nodiscard]] bool usesPingPong() const { return timeoutMs > 0; }
+
+    static long long nowMs() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    }
+
+    /// .NET's OnDataReceived: ANY received frame pushes the next ping out.
+    void onDataReceived() {
+        std::lock_guard<std::mutex> lock(mutex);
+        nextPingRequestTick = nowMs() + delayMs;
+    }
+
+    /// .NET's OnPongResponseReceived: only a Pong whose payload matches the outstanding Ping
+    /// clears it. An unsolicited Pong from the peer is ignored rather than treated as an answer.
+    void onPongReceived(const std::vector<SharpRuntime::bytecs>& payload) {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (!pingSent || payload.size() != 8) return;
+        long long value = 0;
+        for (std::size_t i = 0; i < 8; ++i) {
+            value = (value << 8) | static_cast<unsigned char>(payload[i]);
+        }
+        if (value != pingPayload) return;
+        pingSent = false;
+        pingTimeoutTick = 0;
+    }
+};
+
 void ClientWebSocket::CancellationScope::rethrowAsCancelled() const {
     // The body failed and the token has fired, so the abort is the cause and the caller asked
     // for it. Reporting the WebSocketException the abort produced would be technically true and
@@ -347,6 +422,155 @@ void ClientWebSocket::CancellationScope::rethrowAsCancelled() const {
     // what every .NET awaiter of a cancelled WebSocket call observes.
     throw System::Threading::Tasks::TaskCanceledException(
         "The WebSocket operation was canceled.");
+}
+
+void ClientWebSocket::startKeepAlive() {
+    const auto interval = options_.getKeepAliveIntervalProperty();
+    const auto timeout  = options_.getKeepAliveTimeoutProperty();
+
+    // Timeout::InfiniteTimeSpan and zero both mean "no heartbeat" for the interval, and
+    // "no deadline" for the timeout. Matching ManagedWebSocket.cs:169-173's `> TimeSpan.Zero`.
+    const long long intervalMs =
+        interval.getTicksProperty() == System::Threading::Timeout::InfiniteTimeSpan
+            ? 0
+            : static_cast<long long>(interval.getTotalMillisecondsProperty());
+    const long long timeoutMs =
+        timeout.getTicksProperty() == System::Threading::Timeout::InfiniteTimeSpan
+            ? 0
+            : static_cast<long long>(timeout.getTotalMillisecondsProperty());
+    if (intervalMs <= 0) return;
+
+    auto state       = std::make_shared<KeepAlive>();
+    state->delayMs   = intervalMs;
+    state->timeoutMs = timeoutMs;
+    // HeartBeatIntervalMs, ManagedWebSocket.KeepAlive.cs:135. In unsolicited-Pong mode there is
+    // nothing to poll for, so the tick IS the interval.
+    state->tickMs = timeoutMs > 0 ? std::max((std::min)(intervalMs, timeoutMs) / 4, 1LL) : intervalMs;
+    state->nextPingRequestTick = KeepAlive::nowMs() + intervalMs;
+
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        keepAlive_ = state;
+    }
+    state->thread = std::thread([this, state] {
+        std::unique_lock<std::mutex> lock(state->mutex);
+        while (!state->stop) {
+            state->wake.wait_for(lock, std::chrono::milliseconds(state->tickMs),
+                                 [&state] { return state->stop; });
+            if (state->stop) break;
+            lock.unlock();
+            keepAliveHeartBeat(state);
+            lock.lock();
+        }
+    });
+}
+
+void ClientWebSocket::stopKeepAlive() noexcept {
+    std::shared_ptr<KeepAlive> state;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        state = keepAlive_;
+    }
+    if (!state) return;
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->stop = true;
+    }
+    state->wake.notify_all();
+    // The heartbeat may be inside a blocking Send rather than waiting on the condition variable,
+    // so setting the flag is not enough to reach the join below. Shutting the socket down is what
+    // makes a blocked send return -- the same reason waitForAsyncOperations() does it, and the
+    // reason #2358 had to make that return an ERROR rather than a SIGPIPE first. Only the
+    // destructor calls this, so the socket is being retired anyway.
+    std::shared_ptr<System::Net::Sockets::Socket> socket;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        socket = socket_;
+    }
+    if (socket) {
+        try {
+            socket->Shutdown(System::Net::Sockets::SocketShutdown::Both);
+        } catch (...) {
+        }
+    }
+    // Never called from the heartbeat thread itself -- only the destructor calls this, and the
+    // destructor cannot run on a thread this object is still joining. A self-join is the defect
+    // #2347 removed from FileSystemWatcher and it is deliberately not reintroduced here: the
+    // heartbeat's own fault path calls Abort(), which sets the flag but does NOT join.
+    if (state->thread.joinable()) state->thread.join();
+}
+
+void ClientWebSocket::keepAliveHeartBeat(const std::shared_ptr<KeepAlive>& state) {
+    // One decision, taken under the lock; every action happens after it is released, because
+    // sendFrame() blocks and Abort() takes stateMutex_.
+    enum class Action { Nothing, UnsolicitedPong, SendPing, Fault };
+    Action    action      = Action::Nothing;
+    long long pingPayload = 0;
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        if (state->faulted) return;
+
+        if (!state->usesPingPong()) {
+            action = Action::UnsolicitedPong;
+        } else if (state->pingSent) {
+            if (KeepAlive::nowMs() > state->pingTimeoutTick) {
+                // KeepAlivePingHeartBeat's timeout branch (ManagedWebSocket.KeepAlive.cs:71-85):
+                // .NET records the exception and aborts. So does this, and the recorded reason is
+                // what throwIfKeepAliveFaulted surfaces, so a caller learns WHY the socket died
+                // rather than only that it did.
+                state->faulted = true;
+                action         = Action::Fault;
+            }
+        } else if (KeepAlive::nowMs() > state->nextPingRequestTick) {
+            // OnNextPingRequestCore (:188-195).
+            state->pingSent        = true;
+            state->pingTimeoutTick = KeepAlive::nowMs() + state->timeoutMs;
+            ++state->pingPayload;
+            action      = Action::SendPing;
+            pingPayload = state->pingPayload;
+        }
+    }
+
+    if (action == Action::Fault) {
+        // Abort() sets the stop flag through Dispose() but never joins, so this thread is not
+        // self-joining -- the defect #2347 removed from FileSystemWatcher.
+        Abort();
+        return;
+    }
+    if (action == Action::Nothing) return;
+
+    try {
+        if (action == Action::SendPing) {
+            std::vector<bytecs> payload(8);
+            for (int i = 0; i < 8; ++i) {
+                payload[static_cast<std::size_t>(i)] = static_cast<bytecs>(
+                    (static_cast<unsigned long long>(pingPayload) >> ((7 - i) * 8)) & 0xFF);
+            }
+            sendFrame(0x9, payload.data(), payload.size(), true);
+        } else {
+            sendFrame(0xA, nullptr, 0, true);
+        }
+    } catch (...) {
+        // .NET's TrySendKeepAliveFrameAsync deliberately swallows: "we can't send any frames, but
+        // no need to throw as we are not observing errors anyway" (ManagedWebSocket.KeepAlive.cs
+        // :38-46). A socket that has gone away is the ordinary case here, not an error worth
+        // reporting from a background thread nobody is awaiting.
+    }
+}
+
+std::shared_ptr<ClientWebSocket::KeepAlive> ClientWebSocket::keepAliveState() const {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    return keepAlive_;
+}
+
+void ClientWebSocket::throwIfKeepAliveFaulted() const {
+    auto state = keepAliveState();
+    if (!state) return;
+    std::lock_guard<std::mutex> lock(state->mutex);
+    if (state->faulted) {
+        throw WebSocketException(WebSocketError::Faulted,
+                                  "The WebSocket keep-alive ping timed out.");
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -430,6 +654,9 @@ void ClientWebSocket::waitForAsyncOperations() noexcept {
 }
 
 ClientWebSocket::~ClientWebSocket() {
+    // #2094: the heartbeat first. It is the only thread that outlives an operation, and joining
+    // it here -- never from itself -- is what keeps `this` alive for its whole run.
+    stopKeepAlive();
     waitForAsyncOperations();
     Dispose();
 }
@@ -827,12 +1054,19 @@ ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs c
 
         while (true) {
             RawFrame frame = readFrame();
+            // #2094 / OnDataReceived (ManagedWebSocket.KeepAlive.cs:154-160): ANY received frame
+            // pushes the next ping out, so a busy connection is never pinged.
+            if (auto ka = keepAliveState()) ka->onDataReceived();
             switch (frame.opcode) {
                 case 0x9: { // Ping
                     sendFrame(0xA, frame.payload.data(), frame.payload.size(), true);
                     continue;
                 }
                 case 0xA: // Pong
+                    // #2094: a Pong whose payload matches the outstanding Ping clears it. An
+                    // unsolicited Pong from the peer is ignored rather than treated as an answer,
+                    // matching OnPongResponseReceived (ManagedWebSocket.KeepAlive.cs:162-185).
+                    if (auto ka = keepAliveState()) ka->onPongReceived(frame.payload);
                     continue;
                 case 0x8: { // Close
                     std::optional<WebSocketCloseStatus> receivedStatus;
@@ -890,6 +1124,10 @@ ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs c
         }
         } catch (...) {
             if (cancellation.cancelled()) cancellation.rethrowAsCancelled();
+            // #2094: if the keep-alive aborted the socket, say so. Otherwise the caller sees only
+            // the generic invalid-state failure the abort produced and cannot tell a dead peer
+            // from a local Dispose(). .NET surfaces the same cause (ManagedWebSocket.cs:1016-1021).
+            throwIfKeepAliveFaulted();
             throw;
         }
     });

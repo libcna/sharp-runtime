@@ -124,6 +124,33 @@ namespace {
 #endif
     }
 
+    /**
+     * @brief Flags a *send* must carry so a dead peer raises an error instead of a signal.
+     *
+     * Ticket #2358. `::send()` on a socket whose peer has closed raises **SIGPIPE**, whose
+     * default disposition terminates the process. Measured with a thirty-line probe
+     * (`build-probe/2094_probe1_sendafterclose.cpp`): peer reads three datagrams and closes,
+     * sender's fourth `Send` succeeds, fifth **kills the process** with exit 141 (128 + 13). No
+     * exception, no return value, no stack — the process is simply gone.
+     *
+     * .NET never does this: `SystemNative_Send` passes `MSG_NOSIGNAL` where the platform has it
+     * and sets `SO_NOSIGPIPE` where it does not, so the caller gets a `SocketException` with
+     * `SocketError.Shutdown`/`ConnectionReset`. This port now does the same, which is what turns
+     * "the process died" into "`Send` threw", the only form a caller can handle.
+     *
+     * The flag is added to **sends only**. A receive cannot raise SIGPIPE, and adding a flag a
+     * platform does not define would not compile.
+     */
+    int nativeSendFlags(SocketFlags flags) {
+#if defined(MSG_NOSIGNAL)
+        return nativeSocketFlags(flags) | MSG_NOSIGNAL;
+#else
+        // Windows has no SIGPIPE at all; Apple platforms use the SO_NOSIGPIPE socket option,
+        // applied at construction instead.
+        return nativeSocketFlags(flags);
+#endif
+    }
+
     // Builds a native sockaddr for `ep` into `storage`, returning the address length.
     // Supports IPEndPoint (v4/v6) and UnixDomainSocketEndPoint.
     socklen_t buildNativeAddress(const System::Net::EndPoint& ep, sockaddr_storage& storage) {
@@ -228,6 +255,15 @@ Socket::Socket(AddressFamily addressFamily, SocketType socketType, ProtocolType 
         throwSocketError("Socket::Socket: socket() failed");
     }
     fd_ = toFd(sock);
+#if !defined(MSG_NOSIGNAL) && defined(SO_NOSIGPIPE)
+    // Ticket #2358. Apple platforms have no MSG_NOSIGNAL, so the equivalent is the per-socket
+    // SO_NOSIGPIPE option -- the same split .NET's SystemNative_Send makes. Without it, writing
+    // to a closed peer terminates the process instead of raising a SocketException.
+    {
+        int on = 1;
+        (void)::setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
+    }
+#endif
 #endif
 }
 
@@ -660,7 +696,7 @@ intcs Socket::Send(const std::vector<bytecs>& buffer, intcs offset, intcs count,
     int sent = ::send(toSk(fd_), reinterpret_cast<const char*>(buffer.data() + offset), count,
                        nativeSocketFlags(flags));
 #else
-    ssize_t sent = ::send(fd_, buffer.data() + offset, static_cast<size_t>(count), nativeSocketFlags(flags));
+    ssize_t sent = ::send(fd_, buffer.data() + offset, static_cast<size_t>(count), nativeSendFlags(flags));
 #endif
     if (sent < 0) {
         throwSocketError("Socket::Send: send() failed");
@@ -700,7 +736,7 @@ intcs Socket::SendTo(const std::vector<bytecs>& buffer, intcs offset, intcs coun
     int sent = ::sendto(toSk(fd_), reinterpret_cast<const char*>(buffer.data() + offset), count,
                          nativeSocketFlags(flags), reinterpret_cast<sockaddr*>(&storage), static_cast<int>(len));
 #else
-    ssize_t sent = ::sendto(fd_, buffer.data() + offset, static_cast<size_t>(count), nativeSocketFlags(flags),
+    ssize_t sent = ::sendto(fd_, buffer.data() + offset, static_cast<size_t>(count), nativeSendFlags(flags),
                              reinterpret_cast<sockaddr*>(&storage), len);
 #endif
     if (sent < 0) {

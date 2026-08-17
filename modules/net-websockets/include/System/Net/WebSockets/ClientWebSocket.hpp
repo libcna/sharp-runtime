@@ -74,7 +74,33 @@ namespace System::Net::WebSockets {
         WebSocketMessageType recvLeftoverType_ = WebSocketMessageType::Binary;
         std::mutex sendMutex_;
 
+        /**
+         * @brief The keep-alive heartbeat, or null when the options disable it.
+         *
+         * Ticket #2094. `KeepAliveInterval` and `KeepAliveTimeout` were validated, stored and
+         * returned, and nothing read them. The ticket was blocked on the concurrency it would
+         * need — "a BACKGROUND TIMER THREAD in a class that today has exactly one mutex
+         * (`sendMutex_`) and already races on `state_` (#2096)". #2096 removed that race and
+         * #2093 made `Abort()` safe to call from another thread, so the objection is answered
+         * rather than ignored.
+         *
+         * Owned through a `shared_ptr` so the heartbeat body can hold its own state alive
+         * independently of when the owner drops it. Defined in the `.cpp`.
+         */
+        struct KeepAlive;
+        std::shared_ptr<KeepAlive> keepAlive_;
+
         void performHandshake(const System::Uri& uri);
+        /** @brief Starts the heartbeat if the options ask for one. Called once, when Open. */
+        void startKeepAlive();
+        /** @brief Stops and joins the heartbeat. Never called from the heartbeat thread itself. */
+        void stopKeepAlive() noexcept;
+        /** @brief The heartbeat body — one tick of .NET's `HeartBeat()`. */
+        void keepAliveHeartBeat(const std::shared_ptr<KeepAlive>& state);
+        /** @brief Rethrows the keep-alive's own failure when it is the reason an operation failed. */
+        void throwIfKeepAliveFaulted() const;
+        /** @return A strong reference to the heartbeat state, or null when there is none. */
+        [[nodiscard]] std::shared_ptr<KeepAlive> keepAliveState() const;
         void sendFrame(SharpRuntime::bytecs opcode, const SharpRuntime::bytecs* data, size_t len, bool fin);
         struct RawFrame {
             SharpRuntime::bytecs opcode = 0;
