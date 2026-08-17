@@ -2206,34 +2206,53 @@ TEST_F(WatcherReconfigurationFixture, DestroyingAWatcherThatStoppedItselfDoesNot
 #endif // __linux__
 
 // -------------------------------------------------------------------------------------------
-// #2106 PIN — BinaryData. Both findings are DEFERRED, so what is pinned is the CURRENT answer,
-// stated in both directions: what the port does, and what the finding says .NET does. A future
-// resolution has to edit these tests, which is exactly the point.
+// #2106 — BinaryData. The finding has TWO halves and they were answered DIFFERENTLY: the
+// decoding half is repaired, the aliasing half is a deliberate permanent deviation. Both are
+// pinned, in both directions.
 // -------------------------------------------------------------------------------------------
 
-TEST(BinaryDataDeferredBehaviourPins, ToStringReturnsInvalidUtf8BytesUNCHANGED) {
-    // SR-AUD-185: ToString() of 0xFF returns FF. .NET's UTF-8 decoder substitutes U+FFFD
-    // (EF BF BD). The port does no validation at all — ToString is a byte-range copy.
+TEST(BinaryDataDeferredBehaviourPins, Fix2106_ToStringSubstitutesUFFFDForIllFormedBytes) {
+    // SR-AUD-185. ToString() of 0xFF returned FF -- a std::string that is not valid UTF-8, from
+    // a method whose .NET counterpart is Encoding.UTF8.GetString(_bytes.Span)
+    // (BinaryData.cs:419) and always is.
     const std::vector<uint8_t> invalid{0xFF};
     const System::BinaryData bd(invalid);
-    const std::string text = bd.ToString();
-
-    ASSERT_EQ(text.size(), 1u) << "a substituting decoder would produce 3 bytes, not 1";
-    EXPECT_EQ(static_cast<unsigned char>(text[0]), 0xFFu);
-    EXPECT_NE(text, std::string("\xEF\xBF\xBD"))
-        << "U+FFFD substitution landed without #2106 being resolved";
+    EXPECT_EQ(bd.ToString(), std::string("\xEF\xBF\xBD"));
 }
 
-TEST(BinaryDataDeferredBehaviourPins, ATruncatedMultiByteSequenceIsAlsoPassedThroughUnchanged) {
-    // Widens the pin past the finding's single byte: a lead byte with no continuation is the
-    // other shape a decoder would have to substitute for, and it is equally untouched here.
-    const std::vector<uint8_t> truncated{0xE2, 0x82};   // first two bytes of U+20AC
+TEST(BinaryDataDeferredBehaviourPins, Fix2106_ATruncatedMultiByteSequenceIsSubstitutedToo) {
+    // Wider than the finding's single byte: a lead byte with no continuation is the other shape
+    // a decoder has to substitute for. One replacement per ill-formed BYTE, because the decoder
+    // resumes one byte later -- which is what stops a truncated sequence swallowing what follows.
+    const std::vector<uint8_t> truncated{0xE2, 0x82};   // the first two bytes of U+20AC
     const System::BinaryData bd(truncated);
-    const std::string text = bd.ToString();
+    EXPECT_EQ(bd.ToString(), std::string("\xEF\xBF\xBD\xEF\xBF\xBD"));
 
-    ASSERT_EQ(text.size(), 2u);
-    EXPECT_EQ(static_cast<unsigned char>(text[0]), 0xE2u);
-    EXPECT_EQ(static_cast<unsigned char>(text[1]), 0x82u);
+    // ...and a valid scalar after ill-formed bytes still comes through.
+    const std::vector<uint8_t> mixed{0xFF, 'a', 0xE2, 0x82, 0xAC};   // FF, 'a', U+20AC
+    EXPECT_EQ(System::BinaryData(mixed).ToString(), std::string("\xEF\xBF\xBD" "a" "\xE2\x82\xAC"));
+}
+
+TEST(BinaryDataDeferredBehaviourPins, Pin2106_TheALIASINGHalfIsADELIBERATEPermanentDeviation) {
+    // The finding's second half: .NET's BinaryData(byte[]) WRAPS its argument -- `_bytes = data`,
+    // BinaryData.cs:60-63 -- so a later mutation of the caller's array is observable through the
+    // BinaryData. This port COPIES, and will keep copying.
+    //
+    // Reproducing .NET here would mean holding a reference to storage this object does not own,
+    // in a language with no GC to keep it alive. That is precisely the borrowed-reference defect
+    // CCF-019 exists to remove and that #1959, #2029, #2066, #2088, #2096 and #2134 have spent
+    // this programme removing. A managed alias is safe because the runtime keeps the array
+    // reachable; a C++ one is a use-after-free waiting for the caller's vector to go out of
+    // scope.
+    //
+    // So this is a deviation with a reason, not an unfinished repair, and it is pinned in that
+    // direction.
+    std::vector<uint8_t> source{0x01};
+    const System::BinaryData bd(source);
+    source[0] = 0x02;
+    ASSERT_EQ(bd.ToArray().size(), 1u);
+    EXPECT_EQ(bd.ToArray()[0], 0x01)
+        << "BinaryData must not observe a later mutation of the caller's buffer";
 }
 
 TEST(BinaryDataDeferredBehaviourPins, ValidUtf8IsUnaffectedEitherWay) {

@@ -10,6 +10,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "System/detail/Utf8Scalar.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ReadOnlyMemory.hpp"
 #include "System/IO/Stream.hpp"
@@ -291,20 +293,32 @@ namespace System {
         // -----------------------------------------------------------------------
 
         /**
-         * @brief Returns the bytes of this instance as a std::string, VERBATIM.
+         * @brief UTF-8-decodes this instance's bytes, substituting U+FFFD for each ill-formed
+         *        sequence.
          *
-         * Named for its .NET counterpart, which UTF-8-decodes and substitutes U+FFFD
-         * (EF BF BD) for each invalid sequence. This port performs no validation and no
-         * substitution: the byte range is copied as-is, so 0xFF comes back as 0xFF and a
-         * truncated multi-byte sequence comes back truncated. For well-formed UTF-8 -- which
-         * every direct call site in this repository uses -- the two are identical. The
-         * divergence is SR-AUD-185, deferred under #2106 and pinned by test; see the class
-         * doc-comment.
+         * Ticket #2106 (SR-AUD-185). This used to copy the byte range VERBATIM, so `0xFF` came
+         * back as `0xFF` and a truncated multi-byte sequence came back truncated -- a
+         * `std::string` that is not valid UTF-8, from a method whose .NET counterpart is
+         * `Encoding.UTF8.GetString(_bytes.Span)` (`BinaryData.cs:419`) and always is.
          *
-         * @return A string holding a copy of this instance's bytes.
+         * For well-formed UTF-8 -- which every direct call site in this repository uses -- the
+         * output is **byte-identical** to before. Only ill-formed input moves, and it moves from
+         * "invalid bytes handed to the caller" to "U+FFFD", which is what .NET produces.
+         *
+         * @return A string holding this instance's bytes decoded as UTF-8.
          */
         [[nodiscard]] std::string ToString() const {
-            return std::string(reinterpret_cast<const char*>(bytes_.data()), bytes_.size());
+            const std::string raw(reinterpret_cast<const char*>(bytes_.data()), bytes_.size());
+            std::string decoded;
+            decoded.reserve(raw.size());
+            for (std::size_t i = 0; i < raw.size();) {
+                std::uint32_t scalar = 0;
+                std::size_t   length = 0;
+                System::detail::DecodeUtf8Scalar(raw, i, scalar, length);
+                System::detail::AppendUtf8Scalar(decoded, scalar);
+                i += length;
+            }
+            return decoded;
         }
 
         /**
