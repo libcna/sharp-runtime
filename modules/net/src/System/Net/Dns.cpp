@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Dns.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
 #include <array>
 #include <cstring>
@@ -189,6 +190,32 @@ namespace System::Net {
         // and found nothing'". docs/SystemNetNamespaceReviewPlan.md §7.3 predicted an empty
         // result for the AddressFamily::Unix row; that prediction was made without those tests
         // in view and is corrected in §17.6 rather than followed.
+        /**
+         * @brief Rejects the two unspecified ("wildcard") addresses, as .NET does.
+         *
+         * Ticket #2043 (SR-AUD-304's wildcard half). `GetHostAddresses("0.0.0.0")` returned the
+         * wildcard address, and the ticket was split out of #2039 precisely because this is the
+         * one half that **removes a working, meaningful result** -- so it needed evidence rather
+         * than judgement. The reference supplies it: `Dns.cs:686-690` in the string path and
+         * `:46-50`, `:158-162` in the `IPAddress` overloads all raise
+         * `ArgumentException(SR.net_invalid_ip_addr)` for `IPAddress.Any` or `IPAddress.IPv6Any`.
+         *
+         * .NET's message says why, and it is transcribed rather than paraphrased: these are
+         * *unspecified* addresses. They name "every local interface" to `bind`, and nothing at
+         * all to `connect` -- so resolving one to itself hands a caller a target it cannot use.
+         *
+         * @param parameterName `"hostName"` on the string path and `"address"` on the
+         *        `IPAddress` one, matching .NET's own `nameof` at each site.
+         */
+        void throwIfUnspecifiedAddress(const IPAddress& address, const char* parameterName) {
+            if (address == IPAddress::Any || address == IPAddress::IPv6Any) {
+                throw System::ArgumentException(
+                    "IPv4 address 0.0.0.0 and IPv6 address ::0 are unspecified addresses that "
+                    "cannot be used as a target address.",
+                    parameterName);
+            }
+        }
+
         [[noreturn]] void throwNoAddressOfRequestedFamily(const std::string& host, AddressFamily family) {
             throw SocketException(SocketError::HostNotFound,
                                   "Dns: host '" + host + "' has no address in the requested address family '" +
@@ -224,6 +251,9 @@ namespace System::Net {
         throw System::PlatformNotSupportedException("Dns.GetHostAddresses is not supported on Emscripten.");
 #else
         if (auto literal = tryParseIPLiteral(hostNameOrAddress)) {
+            // #2043: BEFORE the family check, matching Dns.cs:686-690, which tests the wildcard
+            // immediately after IPAddress.TryParse and before anything else looks at the value.
+            throwIfUnspecifiedAddress(*literal, "hostNameOrAddress");
             if (!literalSatisfiesFamily(family, *literal)) {
                 throwNoAddressOfRequestedFamily(hostNameOrAddress, family);
             }

@@ -27,6 +27,7 @@
 // These tests use only IP literals and names this container resolves from /etc/hosts, so none
 // of them needs a network. The one place a real DNS answer would be required is guarded.
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -265,21 +266,57 @@ TEST(DnsErrorMessageTests, GetHostEntryFailureDoesNotNameAWin32Error) {
 }
 
 // ---------------------------------------------------------------------------
-// The wildcard is DELIBERATELY unchanged -- it is the gated ticket #2043's half
-// of SR-AUD-304, and this pin exists so that ticket cannot land silently.
+// #2043 RESOLVED -- the wildcard literals are rejected.
+//
+// The ticket was split out of #2039 precisely because this is the one half of SR-AUD-304 that
+// REMOVES A WORKING, MEANINGFUL RESULT, so it needed evidence rather than judgement. The
+// reference supplies it: Dns.cs:686-690 on the string path, and :46-50 / :158-162 on the
+// IPAddress overloads, all raise ArgumentException(SR.net_invalid_ip_addr) for IPAddress.Any or
+// IPAddress.IPv6Any.
 // ---------------------------------------------------------------------------
 
-TEST(DnsWildcardPinTests, WildcardLiteralsStillResolveToThemselves_SeeTicket2043) {
-    const std::vector<IPAddress> v4 = Dns::GetHostAddresses("0.0.0.0");
-    ASSERT_EQ(v4.size(), 1u);
-    EXPECT_EQ(v4[0], IPAddress::Any);
+TEST(DnsWildcardPinTests, Fix2043_WildcardLiteralsAreRejected) {
+    // .NET's message says WHY, and it is transcribed rather than paraphrased: these are
+    // UNSPECIFIED addresses. They name "every local interface" to bind, and nothing at all to
+    // connect -- so resolving one to itself hands a caller a target it cannot use.
+    for (const char* wildcard : {"0.0.0.0", "::"}) {
+        SCOPED_TRACE(wildcard);
+        EXPECT_THROW((void)Dns::GetHostAddresses(wildcard), System::ArgumentException);
+        EXPECT_THROW((void)Dns::GetHostAddresses(wildcard, AddressFamily::InterNetwork),
+                     System::ArgumentException);
+        EXPECT_THROW((void)Dns::GetHostAddresses(wildcard, AddressFamily::InterNetworkV6),
+                     System::ArgumentException);
+    }
 
-    const std::vector<IPAddress> v6 = Dns::GetHostAddresses("::");
-    ASSERT_EQ(v6.size(), 1u);
-    EXPECT_EQ(v6[0], IPAddress::IPv6Any);
+    // The rejection comes BEFORE the family check, matching Dns.cs:686-690, which tests the
+    // wildcard immediately after TryParse and before anything else looks at the value. So
+    // "0.0.0.0" with an IPv6-only request is an ArgumentException, not a SocketException about
+    // the family.
+    try {
+        (void)Dns::GetHostAddresses("0.0.0.0", AddressFamily::InterNetworkV6);
+        ADD_FAILURE() << "expected an ArgumentException";
+    } catch (const System::ArgumentException&) {
+        SUCCEED();
+    } catch (const SocketException&) {
+        ADD_FAILURE() << "the family check ran first; the wildcard check must come before it";
+    }
+}
 
-    const std::vector<IPAddress> v4Family =
-        Dns::GetHostAddresses("0.0.0.0", AddressFamily::InterNetwork);
-    ASSERT_EQ(v4Family.size(), 1u);
-    EXPECT_EQ(v4Family[0], IPAddress::Any);
+TEST(DnsWildcardPinTests, Fix2043_EveryOtherLiteralStillResolvesToItself) {
+    // The invariance row: only the two unspecified addresses moved. A loopback literal is not
+    // one of them, and neither is any ordinary address.
+    const std::vector<IPAddress> loopback = Dns::GetHostAddresses("127.0.0.1");
+    ASSERT_EQ(loopback.size(), 1u);
+    EXPECT_EQ(loopback[0], IPAddress::Loopback);
+
+    const std::vector<IPAddress> v6Loopback = Dns::GetHostAddresses("::1");
+    ASSERT_EQ(v6Loopback.size(), 1u);
+    EXPECT_EQ(v6Loopback[0], IPAddress::IPv6Loopback);
+
+    const std::vector<IPAddress> ordinary = Dns::GetHostAddresses("8.8.8.8");
+    ASSERT_EQ(ordinary.size(), 1u);
+
+    // ...and 0.0.0.1 is NOT the wildcard, so the check must be an equality rather than a
+    // "starts with zero" test.
+    EXPECT_NO_THROW((void)Dns::GetHostAddresses("0.0.0.1"));
 }
