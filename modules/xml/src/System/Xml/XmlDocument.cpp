@@ -4,6 +4,8 @@
 #include "System/Xml/XmlDocument.hpp"
 
 #include <cctype>
+#include <vector>
+#include <string>
 #include <tinyxml2/tinyxml2.h>
 
 #include "System/ArgumentException.hpp"
@@ -15,6 +17,206 @@
 namespace System::Xml {
 
     namespace {
+
+        // ===================================================================================
+        // Ticket #2082 -- an undeclared entity reference.
+        //
+        // Measured by #2073's public-input sweep: LoadXml("<r>&nope;</r>") was ACCEPTED and
+        // round-tripped as "<r>&amp;nope;</r>", so the DOCUMENT'S OWN TEXT CHANGED. That is
+        // worse than mere acceptance: a caller who loads and saves a document silently rewrites
+        // it. .NET throws XmlException("Reference to undeclared entity '{0}'.")
+        // (XmlTextReaderImpl.cs:3829, Strings.resx Xml_UndeclaredEntity).
+        //
+        // THE CHECK MUST RUN ON THE RAW TEXT, and that is not a preference. tinyxml2 DECODES
+        // the five predefined entities during parsing, so by the time the tree exists,
+        // "&amp;nope;" (legal -- the text `&nope;`) and "&nope;" (undeclared) are the same five
+        // characters in the same text node. A post-parse walk cannot tell them apart.
+        // ===================================================================================
+
+        /** @brief XML Names 1.0 NameStartChar, as far as an entity name needs it. */
+        bool IsEntityNameStart(unsigned char c) {
+            return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || c == ':' ||
+                   c >= 0x80;   // any non-ASCII byte: this scan does not decode UTF-8
+        }
+
+        /** @brief XML Names 1.0 NameChar. */
+        bool IsEntityNameChar(unsigned char c) {
+            return IsEntityNameStart(c) || (c >= '0' && c <= '9') || c == '-' || c == '.';
+        }
+
+        /**
+         * @brief Collects the general-entity names declared in a DOCTYPE internal subset.
+         *
+         * Ticket #2082. The check below must reject an **undeclared** entity, not merely a
+         * non-predefined one, and those are different sets: a document may declare its own with
+         * `<!ENTITY name "...">`. Getting this wrong was caught immediately -- the first cut
+         * rejected the repository's own billion-laughs pin, which declares two entities and
+         * then references one.
+         *
+         * Parameter entities (`<!ENTITY % name ...>`) are skipped: they are referenced with `%`
+         * inside the DTD, never with `&` in content, so they cannot declare a content entity.
+         */
+        std::vector<std::string> DeclaredEntityNames(const std::string& xml) {
+            std::vector<std::string> names;
+            const std::size_t doctype = xml.find("<!DOCTYPE");
+            if (doctype == std::string::npos) return names;
+            const std::size_t open = xml.find('[', doctype);
+            if (open == std::string::npos) return names;
+            const std::size_t close = xml.find(']', open);
+            if (close == std::string::npos) return names;
+
+            const std::string subset = xml.substr(open + 1, close - open - 1);
+            for (std::size_t i = subset.find("<!ENTITY"); i != std::string::npos;
+                 i = subset.find("<!ENTITY", i + 1)) {
+                std::size_t j = i + 8;
+                while (j < subset.size() && std::isspace(static_cast<unsigned char>(subset[j]))) ++j;
+                if (j < subset.size() && subset[j] == '%') continue;   // a parameter entity
+                const std::size_t nameStart = j;
+                while (j < subset.size() && IsEntityNameChar(static_cast<unsigned char>(subset[j]))) ++j;
+                if (j > nameStart) names.push_back(subset.substr(nameStart, j - nameStart));
+            }
+            return names;
+        }
+
+        /**
+         * @brief Rejects any entity reference that is neither predefined, nor a character
+         *        reference, nor declared by the document's own DOCTYPE internal subset.
+         *
+         * Regions where `&` is ordinary data are skipped: comments, CDATA sections, processing
+         * instructions, and the DOCTYPE internal subset itself, whose ENTITY declarations
+         * legitimately contain references.
+         *
+         * A bare `&` that begins no complete reference is left alone. That is a different
+         * well-formedness rule and a different finding; widening this check to cover it would
+         * reject input on a premise this ticket did not establish.
+         *
+         * @note A **declared** entity is accepted and, as before, is **not expanded** -- it
+         *       stays inert literal text. That parity gap is pre-existing, is deliberately not
+         *       touched here, and is what keeps this port free of the billion-laughs exposure
+         *       (`XmlContractPinTests.InternalEntitiesAreNeverExpanded_NoBillionLaughsExposure`).
+         *       This ticket is about the **undeclared** case, where .NET throws and this port
+         *       silently rewrote the document's own text.
+         */
+        void ThrowIfUndeclaredEntityReference(const std::string& xml) {
+            static const char* const predefined[] = {"amp", "lt", "gt", "quot", "apos"};
+            const std::vector<std::string> declaredNames = DeclaredEntityNames(xml);
+
+            for (std::size_t i = 0; i < xml.size();) {
+                if (xml.compare(i, 4, "<!--") == 0) {
+                    const std::size_t end = xml.find("-->", i + 4);
+                    i = (end == std::string::npos) ? xml.size() : end + 3;
+                    continue;
+                }
+                if (xml.compare(i, 9, "<![CDATA[") == 0) {
+                    const std::size_t end = xml.find("]]>", i + 9);
+                    i = (end == std::string::npos) ? xml.size() : end + 3;
+                    continue;
+                }
+                if (xml.compare(i, 2, "<?") == 0) {
+                    const std::size_t end = xml.find("?>", i + 2);
+                    i = (end == std::string::npos) ? xml.size() : end + 2;
+                    continue;
+                }
+                if (xml.compare(i, 9, "<!DOCTYPE") == 0) {
+                    const std::size_t open  = xml.find('[', i);
+                    const std::size_t close = xml.find('>', i);
+                    if (open != std::string::npos && (close == std::string::npos || open < close)) {
+                        const std::size_t end = xml.find(']', open);
+                        i = (end == std::string::npos) ? xml.size() : end + 1;
+                    } else {
+                        i = (close == std::string::npos) ? xml.size() : close + 1;
+                    }
+                    continue;
+                }
+
+                if (xml[i] != '&') { ++i; continue; }
+
+                std::size_t j = i + 1;
+                if (j < xml.size() && xml[j] == '#') { ++i; continue; }   // character reference
+                if (j >= xml.size() || !IsEntityNameStart(static_cast<unsigned char>(xml[j]))) {
+                    ++i;   // a bare '&' -- see the doc-comment
+                    continue;
+                }
+                while (j < xml.size() && IsEntityNameChar(static_cast<unsigned char>(xml[j]))) ++j;
+                if (j >= xml.size() || xml[j] != ';') { ++i; continue; }   // incomplete
+
+                const std::string name = xml.substr(i + 1, j - i - 1);
+                bool known = false;
+                for (const char* candidate : predefined) {
+                    if (name == candidate) { known = true; break; }
+                }
+                for (const std::string& candidate : declaredNames) {
+                    if (known) break;
+                    if (name == candidate) known = true;
+                }
+                if (!known) throw XmlException("Reference to undeclared entity '" + name + "'.");
+                i = j + 1;
+            }
+        }
+
+        // ===================================================================================
+        // Ticket #2083 -- an undeclared namespace prefix.
+        //
+        // Measured by #2073's public-input sweep: LoadXml("<p:r/>") was ACCEPTED with no
+        // namespace resolution and round-tripped unchanged, so a document naming a namespace it
+        // never declares looked well-formed. .NET throws
+        // XmlException("'{0}' is an undeclared prefix.") (XmlTextReaderImpl.cs:7787,
+        // Strings.resx Xml_UnknownNs).
+        //
+        // Unlike #2082 this CAN be checked on the parsed tree, because a prefix survives parsing
+        // intact.
+        // ===================================================================================
+
+        /** @brief The prefix of a qualified name, or "" when it has none. */
+        std::string PrefixOf(const char* qualifiedName) {
+            if (!qualifiedName) return "";
+            const std::string name(qualifiedName);
+            const std::size_t colon = name.find(':');
+            return colon == std::string::npos ? std::string() : name.substr(0, colon);
+        }
+
+        void ThrowIfUndeclaredPrefix(const tinyxml2::XMLElement* element,
+                                     std::vector<std::string> inScope) {
+            if (!element) return;
+
+            // Declarations on THIS element are in scope for it, including for its own name --
+            // XML Names 1.0 3: the scope of a declaration includes the start-tag it appears on.
+            for (const tinyxml2::XMLAttribute* a = element->FirstAttribute(); a; a = a->Next()) {
+                const std::string attributeName(a->Name() ? a->Name() : "");
+                if (attributeName.rfind("xmlns:", 0) == 0 && attributeName.size() > 6) {
+                    inScope.push_back(attributeName.substr(6));
+                }
+            }
+
+            const auto declared = [&inScope](const std::string& prefix) {
+                // "xml" is bound by the specification itself and is never declared; "xmlns" is
+                // reserved and never appears as a name's prefix outside a declaration.
+                if (prefix.empty() || prefix == "xml" || prefix == "xmlns") return true;
+                for (const std::string& candidate : inScope) {
+                    if (candidate == prefix) return true;
+                }
+                return false;
+            };
+
+            const std::string elementPrefix = PrefixOf(element->Name());
+            if (!declared(elementPrefix)) {
+                throw XmlException("'" + elementPrefix + "' is an undeclared prefix.");
+            }
+            for (const tinyxml2::XMLAttribute* a = element->FirstAttribute(); a; a = a->Next()) {
+                const std::string attributeName(a->Name() ? a->Name() : "");
+                if (attributeName.rfind("xmlns:", 0) == 0 || attributeName == "xmlns") continue;
+                const std::string attributePrefix = PrefixOf(a->Name());
+                if (!declared(attributePrefix)) {
+                    throw XmlException("'" + attributePrefix + "' is an undeclared prefix.");
+                }
+            }
+
+            for (const tinyxml2::XMLElement* child = element->FirstChildElement(); child;
+                 child = child->NextSiblingElement()) {
+                ThrowIfUndeclaredPrefix(child, inScope);
+            }
+        }
+
         // VersionNum ::= '1.' [0-9]+  (XmlDeclaration.cs IsValidXmlVersion)
         bool IsValidXmlVersion(const std::string& ver) {
             if (ver.size() < 3 || ver[0] != '1' || ver[1] != '.') return false;
@@ -349,6 +551,10 @@ namespace System::Xml {
         if (doc_.LoadFile(filename.c_str()) != tinyxml2::XML_SUCCESS)
             throw XmlException("XmlDocument::Load: failed to load '" + filename + "': " +
                                (doc_.ErrorStr() ? doc_.ErrorStr() : "unknown error"));
+        // #2083. The entity check (#2082) cannot run here: it needs the RAW text, and this door
+        // hands the file straight to tinyxml2 without ever holding it. That asymmetry between
+        // the two doors is recorded rather than hidden -- see ticket #2361.
+        ThrowIfUndeclaredPrefix(doc_.RootElement(), {});
         // tinyxml2::XMLDocument::LoadFile() clears and frees every previously-allocated node
         // (including detachedHolder_ from the constructor, or a prior Load/LoadXml call) before
         // parsing; recreate it now, or IsDetached()/getParentNodeProperty() etc. would compare
@@ -357,10 +563,14 @@ namespace System::Xml {
     }
 
     void XmlDocument::LoadXml(const std::string& xml) {
+        // #2082: BEFORE the parse, because tinyxml2 decodes the predefined entities and the
+        // distinction is gone afterwards.
+        ThrowIfUndeclaredEntityReference(xml);
         nodeCache_.clear();
         if (doc_.Parse(xml.c_str()) != tinyxml2::XML_SUCCESS)
             throw XmlException(std::string("XmlDocument::LoadXml: parse error: ") +
                                (doc_.ErrorStr() ? doc_.ErrorStr() : "unknown error"));
+        ThrowIfUndeclaredPrefix(doc_.RootElement(), {});   // #2083
         // See the comment in Load() above: Parse() also clears and frees prior nodes.
         detachedHolder_ = doc_.NewElement("#detached-holder");
     }

@@ -30,6 +30,7 @@
 #include "System/Xml/XmlConvert.hpp"
 #include "System/Xml/XmlDocument.hpp"
 #include "System/Xml/XmlElement.hpp"
+#include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlNodeChangedEventArgs.hpp"
 #include "System/Xml/XmlNamespaceManager.hpp"
 #include "System/Xml/XmlNameTable.hpp"
@@ -150,35 +151,94 @@ TEST(XmlContractPinTests, Pin2080_ToStringEmitsTheColonFormNotAnXsdDuration) {
 }
 
 // ===========================================================================
-// #2082 — DEFERRED VERIFICATION: an undeclared entity reference
+// #2082 RESOLVED — an undeclared entity reference is rejected
 // ===========================================================================
 //
-// Measured (plan §7): "<r>&nope;</r>" is ACCEPTED and round-trips as "<r>&amp;nope;</r>" — the
-// reference is silently reinterpreted as literal text AND re-escaped, so the document's own
-// text changes. Narrowing parser acceptance needs reference evidence this container lacks.
+// Measured (plan §7): "<r>&nope;</r>" was ACCEPTED and round-tripped as "<r>&amp;nope;</r>" --
+// the reference was silently reinterpreted as literal text AND re-escaped, so the DOCUMENT'S OWN
+// TEXT CHANGED. The deferral said "narrowing parser acceptance needs reference evidence this
+// container lacks", which was right; the reference now supplies it. .NET throws
+// XmlException("Reference to undeclared entity '{0}'.") -- XmlTextReaderImpl.cs:3829,
+// Strings.resx Xml_UndeclaredEntity.
 
-TEST(XmlContractPinTests, Pin2082_AnUndeclaredEntityIsAcceptedAndReEscaped) {
+TEST(XmlContractPinTests, Fix2082_AnUndeclaredEntityIsRejected) {
     XmlDocument d;
-    ASSERT_NO_THROW(d.LoadXml("<r>&nope;</r>"));
-    EXPECT_EQ(d.getOuterXmlProperty(), "<r>&amp;nope;</r>")
-        << "pinned round-trip; #2082 tracks whether .NET rejects this instead";
+    EXPECT_THROW(d.LoadXml("<r>&nope;</r>"), System::Xml::XmlException);
+    // ...in an attribute value too, which is the other place a reference may appear.
+    EXPECT_THROW(d.LoadXml("<r a='&nope;'/>"), System::Xml::XmlException);
+}
+
+TEST(XmlContractPinTests, Fix2082_ThePredefinedFiveAndCharacterReferencesAreUntouched) {
+    // The invariance row. Rejecting an undeclared entity must not reject a legal one, and the
+    // five predefined names plus both character-reference forms are the legal set.
+    XmlDocument d;
+    EXPECT_NO_THROW(d.LoadXml("<r>&amp;&lt;&gt;&quot;&apos;</r>"));
+    EXPECT_NO_THROW(d.LoadXml("<r>&#65;&#x41;</r>"));
+    // A '&' that begins no complete reference is a DIFFERENT well-formedness rule and is
+    // deliberately left to the parser, not to this check.
+    EXPECT_NO_THROW(d.LoadXml("<r>a &amp; b</r>"));
+}
+
+TEST(XmlContractPinTests, Fix2082_ADECLAREDEntityIsStillAcceptedBecauseUndeclaredIsTheRule) {
+    // The first cut of this check rejected anything not predefined, and the repository's own
+    // billion-laughs pin caught it immediately: that document DECLARES two entities and then
+    // references one. "Undeclared" and "not predefined" are different sets, and the check has
+    // to mean the first.
+    XmlDocument d;
+    EXPECT_NO_THROW(d.LoadXml("<!DOCTYPE r [<!ENTITY greeting \"hello\">]><r>&greeting;</r>"));
+    // ...and an UNdeclared one is still rejected even when a DOCTYPE is present.
+    EXPECT_THROW(d.LoadXml("<!DOCTYPE r [<!ENTITY greeting \"hello\">]><r>&other;</r>"),
+                 System::Xml::XmlException);
+}
+
+TEST(XmlContractPinTests, Fix2082_WhereAnAmpersandIsNotMarkupIsSkipped) {
+    // A comment, a CDATA section and a processing instruction all carry '&' as ordinary data.
+    // Scanning them would reject documents that are perfectly well-formed.
+    XmlDocument d;
+    EXPECT_NO_THROW(d.LoadXml("<r><!-- &nope; --></r>"));
+    EXPECT_NO_THROW(d.LoadXml("<r><![CDATA[&nope;]]></r>"));
+    EXPECT_NO_THROW(d.LoadXml("<?pi &nope; ?><r/>"));
 }
 
 // ===========================================================================
-// #2083 — DEFERRED VERIFICATION: an undeclared namespace prefix
+// #2083 RESOLVED — an undeclared namespace prefix is rejected
 // ===========================================================================
 //
-// Measured (plan §7): "<p:r/>" is ACCEPTED, never resolved, and round-trips unchanged.
+// Measured (plan §7): "<p:r/>" was ACCEPTED, never resolved, and round-tripped unchanged. .NET
+// throws XmlException("'{0}' is an undeclared prefix.") -- XmlTextReaderImpl.cs:7787,
+// Strings.resx Xml_UnknownNs.
 
-TEST(XmlContractPinTests, Pin2083_AnUndeclaredNamespacePrefixIsAccepted) {
+TEST(XmlContractPinTests, Fix2083_AnUndeclaredPrefixIsRejected) {
     XmlDocument d;
-    ASSERT_NO_THROW(d.LoadXml("<p:r/>"));
-    EXPECT_EQ(d.getOuterXmlProperty(), "<p:r/>");
-    auto* root = d.getDocumentElementProperty();
-    ASSERT_NE(root, nullptr);
-    EXPECT_EQ(root->getNameProperty(), "p:r");
-    EXPECT_EQ(root->getNamespaceURIProperty(), "")
-        << "pinned: the prefix is never resolved; #2083 tracks whether .NET rejects it instead";
+    EXPECT_THROW(d.LoadXml("<p:r/>"), System::Xml::XmlException);
+    EXPECT_THROW(d.LoadXml("<r><p:child/></r>"), System::Xml::XmlException) << "a nested element too";
+    EXPECT_THROW(d.LoadXml("<r p:a='1'/>"), System::Xml::XmlException) << "an attribute's prefix too";
+}
+
+TEST(XmlContractPinTests, Fix2083_ADeclaredPrefixIsAccepted) {
+    XmlDocument d;
+    EXPECT_NO_THROW(d.LoadXml("<p:r xmlns:p='urn:x'/>"))
+        << "a declaration is in scope for the start-tag it appears on (XML Names 1.0 3)";
+    EXPECT_NO_THROW(d.LoadXml("<r xmlns:p='urn:x'><p:child/></r>")) << "and for descendants";
+    EXPECT_NO_THROW(d.LoadXml("<r xmlns:p='urn:x' p:a='1'/>")) << "and for attributes";
+    EXPECT_NO_THROW(d.LoadXml("<r xmlns='urn:d'><child/></r>")) << "a default declaration";
+    EXPECT_NO_THROW(d.LoadXml("<r/>")) << "no prefix at all";
+}
+
+TEST(XmlContractPinTests, Fix2083_TheReservedPrefixesNeedNoDeclaration) {
+    // XML Names 1.0 3: "xml" is bound by the specification itself and MUST NOT be declared;
+    // "xmlns" is reserved. Requiring a declaration for either would reject conforming
+    // documents -- xml:lang and xml:space are the everyday cases.
+    XmlDocument d;
+    EXPECT_NO_THROW(d.LoadXml("<r xml:lang='en'/>"));
+    EXPECT_NO_THROW(d.LoadXml("<r xml:space='preserve'/>"));
+}
+
+TEST(XmlContractPinTests, Fix2083_ADeclarationDoesNotEscapeItsElement) {
+    // Scope is the element it appears on and its descendants -- not its siblings. A declaration
+    // that leaked would make this document look well-formed when it is not.
+    XmlDocument d;
+    EXPECT_THROW(d.LoadXml("<r><a xmlns:p='urn:x'/><p:b/></r>"), System::Xml::XmlException);
 }
 
 // ===========================================================================

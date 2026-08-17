@@ -153,22 +153,28 @@ TEST(XLinqNamespaceTests, Parse_DefaultDeclaration_IsRecognisedAsANamespaceDecla
     EXPECT_TRUE(decl->getIsNamespaceDeclarationProperty());
 }
 
-// --- Parse: what is deliberately left unchanged ----------------------------------------------
+// --- Parse: the DOM-layer decision reaches here too -------------------------------------------
 
-TEST(XLinqNamespaceTests, Parse_UndeclaredPrefix_IsStillAcceptedAndStillUnresolved) {
-    // Deliberately NOT narrowed by #2197. .NET's reader rejects an undeclared prefix, but
-    // narrowing what this runtime accepts is the open question #2083 already owns at the DOM
-    // layer; answering it from the Linq side would settle it by accident. Pinned so that a
-    // later change to it is a decision rather than a side effect.
-    auto e = XElement::Parse("<p:root/>");
-    EXPECT_EQ(e->getNameProperty().getLocalNameProperty(), "p:root");
-    EXPECT_EQ(e->getNameProperty().getNamespaceNameProperty(), "");
+TEST(XLinqNamespaceTests, Fix2083_ParseRejectsAnUndeclaredPrefix) {
+    // These two cases used to pin the OPPOSITE, and said exactly why: ".NET's reader rejects an
+    // undeclared prefix, but narrowing what this runtime accepts is the open question #2083
+    // already owns at the DOM layer; answering it from the Linq side would settle it by
+    // accident. Pinned so that a later change to it is a DECISION rather than a side effect."
+    //
+    // #2083 has now been answered at the DOM layer, from the reference
+    // (XmlTextReaderImpl.cs:7787, Strings.resx Xml_UnknownNs). XElement::Parse goes through
+    // XDocument::Parse and the shared loader, so the decision reaches here -- which is the
+    // consistent outcome those pins were protecting, and this is the change that updates them.
+    EXPECT_THROW((void)XElement::Parse("<p:root/>"), System::Xml::XmlException);
+    EXPECT_THROW((void)XElement::Parse("<r p:x=\"1\"/>"), System::Xml::XmlException);
 }
 
-TEST(XLinqNamespaceTests, Parse_UndeclaredAttributePrefix_IsStillAcceptedAndStillUnresolved) {
-    auto e = XElement::Parse("<r p:x=\"1\"/>");
-    ASSERT_EQ(e->getAttributesProperty().size(), 1u);
-    EXPECT_EQ(e->getAttributesProperty()[0]->getNameProperty(), XName("p:x"));
+TEST(XLinqNamespaceTests, Fix2083_ParseStillAcceptsADeclaredPrefix) {
+    // The invariance row: only the UNDECLARED case moved.
+    auto e = XElement::Parse("<p:root xmlns:p=\"urn:x\"/>");
+    ASSERT_NE(e, nullptr);
+    auto withAttribute = XElement::Parse("<r xmlns:p=\"urn:x\" p:x=\"1\"/>");
+    ASSERT_EQ(withAttribute->getAttributesProperty().size(), 2u);
 }
 
 // --- Serialize: qualified names and their declarations ----------------------------------------
