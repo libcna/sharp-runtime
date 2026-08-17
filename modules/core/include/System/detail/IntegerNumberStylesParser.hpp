@@ -43,24 +43,64 @@ using System::Globalization::NumberStyles;
 // int.Parse("123-  ", NumberStyles.Number) == -123 requires whitespace to be tolerated AFTER a
 // trailing sign, not just immediately after the digits.
 //
-// AllowExponent is NOT implemented. This was previously recorded here as a "non-gap" on the
-// grounds that only NumberStyles.Float/.HexFloat carry the flag and those "don't apply to
-// integer types". Ticket #2267 (finding SR-AUD-177) measured that premise and it is WRONG, on
-// this port's own evidence: NumberStyles::Any is 0x1FF and INCLUDES AllowExponent 0x80
-// (NumberStyles.hpp:34), it is a public style accepted by every integer Parse/TryParse overload,
-// and the flag can be passed on its own besides. Real .NET parses "1E2", "1E+2" and "1e2" as
-// 100; this parser returns false / throws FormatException for all three, and for
-// Int32::Parse("1E2", NumberStyles::Any) as well. It is therefore a real functional gap across
-// all eight wrappers, not a scope reduction and not a non-gap.
+// AllowExponent IS implemented, as of ticket #2268 (2026-08-17). It was previously recorded here
+// as a "non-gap" on the grounds that only NumberStyles.Float/.HexFloat carry the flag and those
+// "don't apply to integer types". Ticket #2267 (finding SR-AUD-177) measured that premise and it
+// is WRONG, on this port's own evidence: NumberStyles::Any is 0x1FF and INCLUDES AllowExponent
+// 0x80 (NumberStyles.hpp:34), it is a public style accepted by every integer Parse/TryParse
+// overload, and the flag can be passed on its own besides. Real .NET parses "1E2", "1E+2" and
+// "1e2" as 100; this parser returned FormatException for all three, and for
+// Int32::Parse("1E2", NumberStyles::Any) as well.
 //
-// It is left unimplemented pending ticket #2268, NOT because the gap is disputed but because
-// this file's standard of evidence cannot currently be met: an exponent grammar has to agree
-// with .NET on how the exponent folds into number.scale and how that interacts with
-// TryNumberBufferToBinaryInteger's "significant digits exceed scale" overflow rule -- the very
-// rule documented above as "confirmed against TryNumberBufferToBinaryInteger", not guessed --
-// which decides "1.5E1", "100E-2" and "1E-2". The reference source is unavailable, and a partial
-// exponent grammar that handled "1E2" while guessing those would replace a documented, uniform
-// absence with an undocumented partial divergence.
+// #2268 was the deferred VERIFICATION, not an approval: the gap was never disputed, but writing
+// the grammar to this file's standard needed .NET's exact rule for how an exponent folds into
+// number.Scale and how that interacts with TryNumberBufferToBinaryInteger's "significant digits
+// exceed scale" rule. Both are now transcribed rather than inferred, and .NET's own test suite
+// pins the decisive rows:
+//
+//   Int32Tests.cs:353-358   "1E2"/"1E+2"/"1e2" -> 100, "1E0" -> 1, "-1E2" -> -100,
+//                           "(1E2)" with AllowParentheses -> -100
+//   Int32Tests.cs:473       "1E23" under NumberStyles.Integer -> FormatException (no flag, no
+//                           exponent -- the 'E' is simply trailing garbage)
+//   Int32Tests.cs:546-548   "65E10", "65E+10" -> OverflowException,
+//                           and "65E-1" -> OverflowException.  <-- the row that settles the
+//                           negative-exponent question the ticket was blocked on
+//   Int32Tests.cs:665       "2E10" -> OverflowException
+//
+// The model, from Number.Parsing.Common.cs:98-232 and Number.Parsing.cs:150-208, is a digit
+// buffer plus a scale:
+//
+//   * `digits` holds the SIGNIFICANT digits: leading zeros are never stored, and for
+//     NumberBufferKind.Integer a TRAILING zero does not advance DigitsCount either
+//     (`if ((ch != '0') || (number.Kind != NumberBufferKind.Integer)) digEnd = digCount + 1;`
+//     -- Number.Parsing.Common.cs:109-112). So "100" is digits "1" with Scale 3, not "100".
+//   * `Scale` counts digits before the decimal separator, and decrements for each leading zero
+//     AFTER it (":126-129" and ":146-149").
+//   * The exponent is added to Scale wholesale (":212"), with an overflow cap: at 100,000,000 the
+//     exponent becomes int.MaxValue and Scale is reset to 0 first (":191-203"), which makes any
+//     exponent of that magnitude overflow whichever way it is signed.
+//   * The value is then `digits * 10^(Scale - DigitsCount)`, and the conversion FAILS -- as
+//     OverflowException, never FormatException -- when `Scale > MaxDigitCount` or
+//     `Scale < DigitsCount` (Number.Parsing.cs:157).
+//
+// That single rule decides every case the ticket named: "1.5E1" is digits "15" with Scale 2, so
+// 15; "100E-2" is digits "1" with Scale 1, so 1; "1E-2" is digits "1" with Scale -1, and -1 < 1
+// is an OverflowException. It is also the rule the pre-existing "123.5 overflows" quirk
+// documented below already followed, so the exponent is an extension of that model rather than
+// a second one beside it.
+//
+// ONE DELIBERATE DEVIATION, and it is a NON-CHANGE rather than a new one. Read literally, the
+// same rule makes an all-zero magnitude with a fractional part overflow: "0.0" leaves Scale at
+// -1 (the fractional zero takes the `Scale--` branch, because StateNonZero was never set by the
+// leading zero) against DigitsCount 0, and -1 < 0 fails. So does "000.000", and so does "0E-2".
+// This port keeps returning 0 for an all-zero magnitude. The reason is not disagreement: it is
+// that .NET's own test suite pins no such row, the reading is a source trace that cannot be
+// executed here, and turning `Parse("0.0", NumberStyles::Number)` -- an input that looks valid,
+// is valid for every other numeric type, and works today -- into an OverflowException is a
+// narrowing SR-AUD-177 never asked for. It is recorded as follow-up ticket #2356 rather than
+// smuggled in beside a widening. This mirrors the unsigned-negative deviation already documented
+// below: the port declines one .NET edge case whose only effect is which exception a degenerate
+// input raises.
 //
 // Style-mask validation is a SEPARATE finding (SR-AUD-178, approval ticket #2269) and NOT the
 // same defect: it is a missing precondition check rather than a missing grammar production, and
@@ -95,6 +135,133 @@ struct IntegerNumberStylesParser {
     static constexpr char kDecimalSeparator = '.';
     static constexpr std::string_view kCurrencySymbol = "\xC2\xA4"; // UTF-8 for U+00A4 "¤"
 
+    // .NET checks `Scale > TInteger.MaxDigitCount` per target type. This shared core produces a
+    // 64-bit magnitude and every caller applies its own range check afterwards, so the widest
+    // value here -- UInt64Precision, Number.NumberBuffer.cs:22 -- is the equivalent bound: a
+    // scale a narrower type cannot hold still fails, just one step later and with the same
+    // OverflowException. It also stops a scale of a hundred million from driving the
+    // trailing-zero expansion below into a loop that would never finish.
+    static constexpr long long kMaxSignificantScale = 20;
+
+    /**
+     * @brief .NET's `NumberBuffer` digits-and-scale state, shared by the signed and unsigned
+     *        cores so the two grammars cannot drift apart.
+     *
+     * The value a successful scan represents is `magnitude * 10^(scale - digitsCount)`; see the
+     * class doc-comment for the transcription and its citations.
+     */
+    struct DigitScan {
+        uint64_t  magnitude   = 0;      ///< The significant digits, as a number (.NET's `Digits`).
+        int       digitsCount = 0;      ///< .NET's `number.DigitsCount`.
+        long long scale       = 0;      ///< .NET's `number.Scale`.
+        bool      any         = false;  ///< .NET's `StateDigits` — at least one digit was seen.
+        bool      overflowed  = false;  ///< The significant digits do not fit in 64 bits.
+    };
+
+    /**
+     * @brief Consumes digits, an optional decimal separator, group separators and — when the
+     *        style allows one — an exponent, advancing @p i past everything it consumed.
+     *
+     * Transcribed from `Number.Parsing.Common.cs:98-219`. Two details are easy to get wrong and
+     * are both deliberate here: a zero is only *stored* once a nonzero digit has been seen
+     * (leading zeros never enter the buffer at all), and a **trailing** zero does not advance
+     * `digitsCount` for an integer buffer — it becomes part of the value only if a later nonzero
+     * digit follows it. That is what makes `"100"` digits `"1"` with scale 3 rather than digits
+     * `"100"` with scale 3, and it is what lets `"100E-2"` be exactly 1.
+     */
+    static void ScanDigitsAndExponent(const std::string& s, std::size_t& i, NumberStyles style,
+                                      DigitScan& scan) {
+        const std::size_t n = s.size();
+        const bool allowThousands    = (style & NumberStyles::AllowThousands)    != NumberStyles::None;
+        const bool allowDecimalPoint = (style & NumberStyles::AllowDecimalPoint) != NumberStyles::None;
+        const bool allowExponent     = (style & NumberStyles::AllowExponent)     != NumberStyles::None;
+
+        bool sawDecimal = false, sawNonZero = false;
+        int  pendingZeros = 0;  // stored in .NET's buffer, but `digEnd` has not passed them yet
+        while (i < n) {
+            if (std::isdigit(static_cast<unsigned char>(s[i]))) {
+                const unsigned digit = static_cast<unsigned>(s[i] - '0');
+                scan.any = true;
+                if (digit != 0 || sawNonZero) {
+                    if (digit != 0) {
+                        // A nonzero digit makes every zero since the last one significant.
+                        for (; pendingZeros > 0; --pendingZeros) {
+                            if (scan.magnitude > UINT64_MAX / 10) scan.overflowed = true;
+                            else scan.magnitude *= 10;
+                            ++scan.digitsCount;
+                        }
+                        if (scan.magnitude > (UINT64_MAX - digit) / 10) scan.overflowed = true;
+                        else scan.magnitude = scan.magnitude * 10 + digit;
+                        ++scan.digitsCount;
+                    } else {
+                        ++pendingZeros;
+                    }
+                    if (!sawDecimal) ++scan.scale;
+                    sawNonZero = true;
+                } else if (sawDecimal) {
+                    --scan.scale;  // a leading zero after the separator, e.g. "0.001"
+                }
+                ++i;
+            } else if (allowDecimalPoint && !sawDecimal && s[i] == kDecimalSeparator) {
+                sawDecimal = true; ++i;
+            } else if (allowThousands && scan.any && !sawDecimal && s[i] == kGroupSeparator) {
+                ++i;
+            } else break;
+        }
+
+        if (!scan.any || !allowExponent) return;
+        if (i >= n || (s[i] != 'E' && s[i] != 'e')) return;
+
+        const std::size_t rewind = i;
+        ++i;
+        bool negativeExponent = false;
+        if (i < n && (s[i] == '+' || s[i] == '-')) { negativeExponent = (s[i] == '-'); ++i; }
+        if (i >= n || !std::isdigit(static_cast<unsigned char>(s[i]))) {
+            // .NET rewinds to the 'E' (`p = temp`), which then fails as trailing garbage --
+            // a FormatException, not an OverflowException. So "1E" and "1E+" are malformed.
+            i = rewind;
+            return;
+        }
+
+        long long exponent = 0;
+        while (i < n && std::isdigit(static_cast<unsigned char>(s[i]))) {
+            if (exponent >= 100'000'000) {
+                // .NET's own cap: the exponent becomes int.MaxValue and the scale is reset to
+                // zero first, so an exponent this large overflows whichever way it is signed.
+                exponent   = 2147483647LL;
+                scan.scale = 0;
+                while (i < n && std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
+                break;
+            }
+            exponent = exponent * 10 + (s[i] - '0');
+            ++i;
+        }
+        scan.scale += negativeExponent ? -exponent : exponent;
+    }
+
+    /**
+     * @brief `TryNumberBufferToBinaryInteger`'s preconditions and its trailing-zero expansion.
+     *
+     * Transcribed from `Number.Parsing.cs:150-187`. Returns false when the scan cannot be
+     * represented, which the callers report as **OverflowException** — never FormatException,
+     * however small the number looks. `"65E-1"` is 6.5 and fails here, which is exactly what
+     * .NET's own `Int32Tests.cs:548` pins.
+     *
+     * @note An all-zero magnitude with a non-positive scale is the one case this port does not
+     *       follow; see the class doc-comment's deviation note and ticket #2356.
+     */
+    static bool TryFoldScale(DigitScan& scan) {
+        if (scan.overflowed) return false;
+        if (scan.scale > kMaxSignificantScale) return false;
+        if (scan.digitsCount == 0) { scan.magnitude = 0; return true; }
+        if (scan.scale < scan.digitsCount) return false;
+        for (long long k = scan.scale - scan.digitsCount; k > 0; --k) {
+            if (scan.magnitude > UINT64_MAX / 10) return false;
+            scan.magnitude *= 10;
+        }
+        return true;
+    }
+
     // Parses the full Integer/Number/Currency-style grammar (sign, parentheses, currency
     // symbol, decimal digits, thousands separators, an optional trailing-zeros-only decimal
     // point, and surrounding whitespace, in any style-permitted combination) into a 64-bit
@@ -112,8 +279,7 @@ struct IntegerNumberStylesParser {
         const bool allowTrailingSign  = (style & NumberStyles::AllowTrailingSign)  != NumberStyles::None;
         const bool allowParens        = (style & NumberStyles::AllowParentheses)   != NumberStyles::None;
         const bool allowCurrency      = (style & NumberStyles::AllowCurrencySymbol) != NumberStyles::None;
-        const bool allowThousands     = (style & NumberStyles::AllowThousands)     != NumberStyles::None;
-        const bool allowDecimalPoint  = (style & NumberStyles::AllowDecimalPoint)  != NumberStyles::None;
+        // AllowThousands, AllowDecimalPoint and AllowExponent are read by ScanDigitsAndExponent.
 
         // Leading tokens: whitespace (if allowed), a sign, an opening '(', and/or a currency
         // symbol, interleaved in any order, each token matched at most once (mirrors real
@@ -140,26 +306,9 @@ struct IntegerNumberStylesParser {
             }
         }
 
-        uint64_t magnitude = 0;
-        bool any = false, sawDecimal = false, fracNonZero = false;
-        while (i < n) {
-            if (std::isdigit(static_cast<unsigned char>(s[i]))) {
-                unsigned digit = static_cast<unsigned>(s[i] - '0');
-                if (!sawDecimal) {
-                    if (magnitude > (UINT64_MAX - digit) / 10) { overflowed = true; }
-                    else { magnitude = magnitude * 10 + digit; }
-                } else if (digit != 0) {
-                    fracNonZero = true;
-                }
-                any = true;
-                ++i;
-            } else if (allowDecimalPoint && !sawDecimal && s[i] == kDecimalSeparator) {
-                sawDecimal = true; ++i;
-            } else if (allowThousands && any && !sawDecimal && s[i] == kGroupSeparator) {
-                ++i;
-            } else break;
-        }
-        if (!any) return false;
+        DigitScan scan;
+        ScanDigitsAndExponent(s, i, style, scan);
+        if (!scan.any) return false;
 
         if (allowTrailingWhite)
             while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
@@ -186,9 +335,10 @@ struct IntegerNumberStylesParser {
 
         if (haveParen) return false;   // '(' opened but never closed
         if (i != n) return false;
-        // Format-grammar validity takes precedence over the fractional-overflow quirk, matching
-        // real .NET's own documented precedence rule -- checked only after the two lines above.
-        if (fracNonZero) { overflowed = true; return true; }
+        // Format-grammar validity takes precedence over the scale overflow, matching real .NET's
+        // own documented precedence rule -- checked only after the two lines above.
+        if (!TryFoldScale(scan)) { overflowed = true; return true; }
+        const uint64_t magnitude = scan.magnitude;
 
         // Magnitude of Int64::MinValue (9223372036854775808) doesn't fit in a signed longcs,
         // but does fit as the unsigned two's-complement magnitude -- handle the boundary
@@ -224,8 +374,7 @@ struct IntegerNumberStylesParser {
         const bool allowTrailingSign  = (style & NumberStyles::AllowTrailingSign)  != NumberStyles::None;
         const bool allowParens        = (style & NumberStyles::AllowParentheses)   != NumberStyles::None;
         const bool allowCurrency      = (style & NumberStyles::AllowCurrencySymbol) != NumberStyles::None;
-        const bool allowThousands     = (style & NumberStyles::AllowThousands)     != NumberStyles::None;
-        const bool allowDecimalPoint  = (style & NumberStyles::AllowDecimalPoint)  != NumberStyles::None;
+        // AllowThousands, AllowDecimalPoint and AllowExponent are read by ScanDigitsAndExponent.
 
         // Leading tokens: whitespace (if allowed), a literal '+', and/or a currency symbol,
         // interleaved in any order -- see TryParseSignedCore's identical leading-loop comment
@@ -255,26 +404,9 @@ struct IntegerNumberStylesParser {
         }
         if (i < n && (s[i] == '-' || (allowParens && s[i] == '('))) return false;
 
-        uint64_t magnitude = 0;
-        bool any = false, sawDecimal = false, fracNonZero = false;
-        while (i < n) {
-            if (std::isdigit(static_cast<unsigned char>(s[i]))) {
-                unsigned digit = static_cast<unsigned>(s[i] - '0');
-                if (!sawDecimal) {
-                    if (magnitude > (UINT64_MAX - digit) / 10) { overflowed = true; }
-                    else { magnitude = magnitude * 10 + digit; }
-                } else if (digit != 0) {
-                    fracNonZero = true;
-                }
-                any = true;
-                ++i;
-            } else if (allowDecimalPoint && !sawDecimal && s[i] == kDecimalSeparator) {
-                sawDecimal = true; ++i;
-            } else if (allowThousands && any && !sawDecimal && s[i] == kGroupSeparator) {
-                ++i;
-            } else break;
-        }
-        if (!any) return false;
+        DigitScan scan;
+        ScanDigitsAndExponent(s, i, style, scan);
+        if (!scan.any) return false;
 
         if (allowTrailingWhite)
             while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
@@ -299,9 +431,9 @@ struct IntegerNumberStylesParser {
         if (i < n && s[i] == '-') return false; // trailing minus: same rejection as leading
 
         if (i != n) return false;
-        if (fracNonZero) { overflowed = true; return true; }
+        if (!TryFoldScale(scan)) { overflowed = true; return true; }
 
-        result = static_cast<SharpRuntime::ulongcs>(magnitude);
+        result = static_cast<SharpRuntime::ulongcs>(scan.magnitude);
         return true;
     }
 

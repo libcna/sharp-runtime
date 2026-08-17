@@ -320,3 +320,136 @@ TEST(NumberStylesExtendedTests, UnsignedParse_SingleSign_StillAccepted) {
     EXPECT_EQ(UInt32::Parse("5+", NumberStyles::Integer | NumberStyles::AllowTrailingSign, nullptr), 5u);
     EXPECT_EQ(Byte::Parse("+5", NumberStyles::Integer, nullptr), 5u);
 }
+
+// ---------------------------------------------------------------------------------------
+// #2268 / SR-AUD-177 -- NumberStyles::AllowExponent on the integer parsers.
+//
+// Every expectation below is transcribed from .NET's OWN test suite where it pins a row, and
+// otherwise derived from the digit-buffer-and-scale model in Number.Parsing.Common.cs and
+// Number.Parsing.cs. The ticket was blocked on evidence, not on approval, and this is it.
+// ---------------------------------------------------------------------------------------
+
+TEST(IntegerAllowExponentTests, Fix2268_TheRowsDotNetsOwnTestSuitePins) {
+    // Int32Tests.cs:353-358 -- the whole reason SR-AUD-177 exists.
+    const auto E = NumberStyles::AllowExponent;
+    EXPECT_EQ(100, Int32::Parse("1E2", E, nullptr));
+    EXPECT_EQ(100, Int32::Parse("1E+2", E, nullptr));
+    EXPECT_EQ(100, Int32::Parse("1e2", E, nullptr));
+    EXPECT_EQ(1, Int32::Parse("1E0", E, nullptr));
+    EXPECT_EQ(-100, Int32::Parse("-1E2", E | NumberStyles::AllowLeadingSign, nullptr));
+    EXPECT_EQ(-100, Int32::Parse("(1E2)", E | NumberStyles::AllowParentheses, nullptr));
+
+    // Int32Tests.cs:546-548 and :665 -- and note the exception TYPE. An exponent that cannot be
+    // represented is an OverflowException, never a FormatException, however small the number
+    // it denotes.
+    EXPECT_THROW((void)Int32::Parse("65E10", E, nullptr), System::OverflowException);
+    EXPECT_THROW((void)Int32::Parse("65E+10", E, nullptr), System::OverflowException);
+    EXPECT_THROW((void)Int32::Parse("2E10", E, nullptr), System::OverflowException);
+
+    // Int32Tests.cs:548. THIS is the row the ticket was blocked on: 65E-1 is 6.5, and .NET
+    // reports it as an overflow because scale 1 cannot carry two significant digits.
+    EXPECT_THROW((void)Int32::Parse("65E-1", E, nullptr), System::OverflowException);
+
+    // Int32Tests.cs:473 -- without the flag the 'E' is simply trailing garbage.
+    EXPECT_THROW((void)Int32::Parse("1E23", NumberStyles::Integer, nullptr),
+                 System::FormatException);
+}
+
+TEST(IntegerAllowExponentTests, Fix2268_ANegativeExponentIsAcceptedWhenTheScaleStillCarriesTheDigits) {
+    // The rule is `Scale >= DigitsCount`, not "the exponent must be non-negative". A trailing
+    // zero does not advance DigitsCount for an integer buffer, so "100" is digits "1" at scale
+    // 3 -- which is exactly what lets 100E-2 be 1 while 1E-2 overflows.
+    const auto E = NumberStyles::AllowExponent;
+    EXPECT_EQ(1, Int32::Parse("100E-2", E, nullptr));
+    EXPECT_EQ(10, Int32::Parse("1000E-2", E, nullptr));
+    EXPECT_EQ(5, Int32::Parse("5E-0", E, nullptr));
+    EXPECT_THROW((void)Int32::Parse("1E-2", E, nullptr), System::OverflowException);
+    EXPECT_THROW((void)Int32::Parse("12E-1", E, nullptr), System::OverflowException);
+}
+
+TEST(IntegerAllowExponentTests, Fix2268_TheExponentCombinesWithADecimalPoint) {
+    // 1.5E1 is digits "15" at scale 1+1 = 2, so 15. 1.5E0 is the same digits at scale 1, which
+    // cannot carry them -- the same rule that has always made "123.5" an overflow here.
+    const auto ANY = NumberStyles::Any;
+    EXPECT_EQ(15, Int32::Parse("1.5E1", ANY, nullptr));
+    EXPECT_EQ(150, Int32::Parse("1.5E2", ANY, nullptr));
+    EXPECT_EQ(1234, Int32::Parse("1.234E3", ANY, nullptr));
+    EXPECT_EQ(1, Int32::Parse("0.001E3", ANY, nullptr));
+    EXPECT_EQ(1, Int32::Parse("1,000E-3", ANY, nullptr));
+    EXPECT_THROW((void)Int32::Parse("1.5E0", ANY, nullptr), System::OverflowException);
+    EXPECT_THROW((void)Int32::Parse("0.001E2", ANY, nullptr), System::OverflowException);
+    EXPECT_THROW((void)Int32::Parse("1.2345E3", ANY, nullptr), System::OverflowException);
+}
+
+TEST(IntegerAllowExponentTests, Fix2268_AnExponentWithoutDigitsIsAFormatError) {
+    // .NET rewinds to the 'E' when no digit follows it (`p = temp`), so the 'E' is left as
+    // trailing garbage and the parse fails on the GRAMMAR -- not as an overflow.
+    const auto E = NumberStyles::AllowExponent;
+    for (const char* text : {"1E", "1E+", "1E-", "E2", "1EE2", "1E2E3"}) {
+        SCOPED_TRACE(text);
+        EXPECT_THROW((void)Int32::Parse(text, E, nullptr), System::FormatException);
+    }
+}
+
+TEST(IntegerAllowExponentTests, Fix2268_AnAbsurdExponentOverflowsEitherWayItIsSigned) {
+    // .NET caps the exponent at int.MaxValue once it reaches 100,000,000, resetting the scale
+    // to zero first, so the sign cannot rescue it. This also has to terminate promptly rather
+    // than multiplying by ten a hundred million times.
+    const auto E = NumberStyles::AllowExponent;
+    EXPECT_THROW((void)Int32::Parse("1E100000000", E, nullptr), System::OverflowException);
+    EXPECT_THROW((void)Int32::Parse("1E-100000000", E, nullptr), System::OverflowException);
+    EXPECT_THROW((void)Int32::Parse("1E999999999999999999999", E, nullptr),
+                 System::OverflowException);
+}
+
+TEST(IntegerAllowExponentTests, Fix2268_EveryIntegerWrapperGotTheFlagNotJustInt32) {
+    // SR-AUD-177 is a gap across all eight wrappers; a repair in the shared core has to show up
+    // in all eight, and the per-type range check has to keep working on top of it.
+    const auto E = NumberStyles::AllowExponent;
+    EXPECT_EQ(100, Int16::Parse("1E2", E, nullptr));
+    EXPECT_EQ(100, Int64::Parse("1E2", E, nullptr));
+    EXPECT_EQ(100, SByte::Parse("1E2", E, nullptr));
+    EXPECT_EQ(100u, UInt16::Parse("1E2", E, nullptr));
+    EXPECT_EQ(100u, UInt32::Parse("1E2", E, nullptr));
+    EXPECT_EQ(100u, UInt64::Parse("1E2", E, nullptr));
+    EXPECT_EQ(100u, System::Byte::Parse("1E2", E, nullptr));
+
+    // 1E3 is 1000: inside Int16 and out of range for SByte and Byte.
+    EXPECT_EQ(1000, Int16::Parse("1E3", E, nullptr));
+    EXPECT_THROW((void)SByte::Parse("1E3", E, nullptr), System::OverflowException);
+    EXPECT_THROW((void)System::Byte::Parse("1E3", E, nullptr), System::OverflowException);
+
+    // And an exponent no 64-bit type can hold.
+    EXPECT_THROW((void)UInt64::Parse("1E20", E, nullptr), System::OverflowException);
+    EXPECT_EQ(10000000000000000000ull, UInt64::Parse("1E19", E, nullptr));
+}
+
+TEST(IntegerAllowExponentTests, Fix2268_TheAllZeroMagnitudeIsTheOneDeliberateDeviation) {
+    // Read literally, `Scale < DigitsCount` makes "0.0" an OverflowException in .NET: the
+    // fractional zero takes the `Scale--` branch and leaves scale -1 against a digits count of
+    // 0. This port keeps returning 0, because .NET's own suite pins no such row, the reading is
+    // an unexecutable source trace, and it is a narrowing SR-AUD-177 never asked for. Ticket
+    // #2356 holds the question; this test is what stops the answer changing by accident.
+    EXPECT_EQ(0, Int32::Parse("0.0", NumberStyles::Number, nullptr));
+    EXPECT_EQ(0, Int32::Parse("000.000", NumberStyles::Number, nullptr));
+    EXPECT_EQ(0, Int32::Parse("0E-2", NumberStyles::AllowExponent, nullptr));
+    EXPECT_EQ(0, Int32::Parse("0E2", NumberStyles::AllowExponent, nullptr));
+
+    // The deviation is confined to a NON-POSITIVE scale. An all-zero magnitude with an absurd
+    // positive exponent still overflows, exactly as .NET does.
+    EXPECT_THROW((void)Int32::Parse("0E100000000", NumberStyles::AllowExponent, nullptr),
+                 System::OverflowException);
+}
+
+TEST(IntegerAllowExponentTests, Fix2268_TheDecimalPointRowsAreUntouched) {
+    // The scale model replaced a `fracNonZero` flag, so every pre-existing decimal-point answer
+    // has to be reproduced by the new code rather than merely left alone.
+    const auto N = NumberStyles::Number;
+    EXPECT_EQ(123, Int32::Parse("123.00", N, nullptr));
+    EXPECT_EQ(1, Int32::Parse("1.0", N, nullptr));
+    EXPECT_EQ(10, Int32::Parse("10.0", N, nullptr));
+    EXPECT_EQ(1, Int32::Parse("1.", N, nullptr));
+    EXPECT_THROW((void)Int32::Parse("123.5", N, nullptr), System::OverflowException);
+    EXPECT_THROW((void)Int32::Parse("0.5", N, nullptr), System::OverflowException);
+    EXPECT_THROW((void)Int32::Parse(".5", N, nullptr), System::OverflowException);
+}
