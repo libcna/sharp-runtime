@@ -30,6 +30,24 @@ namespace System::Buffers {
         std::vector<T> data_;
         intcs start_ = 0;
         intcs end_   = 0;
+        /**
+         * @brief Whether this sequence was built from a buffer at all.
+         *
+         * Ticket #2057 (SR-AUD-074). A default-constructed `ReadOnlySequence<T>` enumerated
+         * **one** segment; .NET yields **zero**, and reserves one for `Empty`. The difference is
+         * real API surface, not a curiosity: .NET's `Empty` is
+         * `new ReadOnlySequence<T>(Array.Empty<T>())` (`ReadOnlySequence.cs:26`) — an
+         * array-backed sequence with a non-null start object — while `default` has a null one,
+         * and `Enumerator.MoveNext` returns false immediately for it
+         * (`ReadOnlySequence.cs:642-650`).
+         *
+         * This flag is the port's `_startObject != null`. A `std::vector` cannot express it:
+         * `default` and `Empty` both hold an empty one, which is exactly why the review recorded
+         * that "distinguishing them needs state the type does not have".
+         *
+         * `sizeof(ReadOnlySequence<int>)` 32 → 40 under `docs/StandingApprovals.md` SA-3.
+         */
+        bool hasBuffer_ = false;
 
         /**
          * @brief Copies @p length elements from @p ptr after validating the metadata.
@@ -58,7 +76,14 @@ namespace System::Buffers {
         }
 
     public:
-        /** @brief Constructs an empty ReadOnlySequence. */
+        /**
+         * @brief Constructs the **default** sequence, which enumerates **no** segments.
+         *
+         * Ticket #2057. Distinct from `getEmpty()`, which enumerates one segment of length
+         * zero — the same distinction .NET draws between `default(ReadOnlySequence<T>)` and
+         * `ReadOnlySequence<T>.Empty`. Both are empty, both report `getLengthProperty() == 0`,
+         * and only enumeration tells them apart.
+         */
         ReadOnlySequence() = default;
 
         /**
@@ -66,7 +91,8 @@ namespace System::Buffers {
          * @param data Source data vector.
          */
         explicit ReadOnlySequence(std::vector<T> data)
-            : data_(std::move(data)), start_(0), end_(static_cast<intcs>(data_.size())) {}
+            : data_(std::move(data)), start_(0), end_(static_cast<intcs>(data_.size())),
+              hasBuffer_(true) {}   // #2057: built from a buffer, so it has a start object
 
         /**
          * @brief Constructs a ReadOnlySequence by copying @p length elements from @p ptr.
@@ -81,7 +107,8 @@ namespace System::Buffers {
          */
         ReadOnlySequence(const T* ptr, intcs length)
             : data_(validatedCopy(ptr, length)), start_(0),
-              end_(static_cast<intcs>(data_.size())) {}
+              end_(static_cast<intcs>(data_.size())),
+              hasBuffer_(true) {}   // #2057: built from a buffer, even `(nullptr, 0)`
 
         /**
          * @brief Returns a shared empty ReadOnlySequence.
@@ -95,7 +122,17 @@ namespace System::Buffers {
          * layout. Blocked ticket **#2057**; see docs/BuffersNamespaceReviewPlan.md §4.5. The
          * current behaviour is pinned by a permanent test.
          */
-        [[nodiscard]] static ReadOnlySequence<T> getEmpty() { return ReadOnlySequence<T>(); }
+        /**
+         * @brief The empty sequence, which enumerates **one** zero-length segment.
+         *
+         * Ticket #2057. .NET's `Empty` is `new ReadOnlySequence<T>(Array.Empty<T>())`
+         * (`ReadOnlySequence.cs:26`), so it is buffer-backed and yields one segment — unlike the
+         * default-constructed sequence, which yields none. This used to return the default and
+         * the two were indistinguishable.
+         */
+        [[nodiscard]] static ReadOnlySequence<T> getEmpty() {
+            return ReadOnlySequence<T>(std::vector<T>{});
+        }
 
         /**
          * @brief Returns the SequencePosition representing the start of the sequence.
@@ -354,6 +391,10 @@ namespace System::Buffers {
              * @return true on the first call (the single segment); false thereafter.
              */
             bool MoveNext() {
+                // #2057: a sequence with no buffer -- the default-constructed one -- has no
+                // segments at all. .NET's MoveNext returns false immediately when its start
+                // object is null (ReadOnlySequence.cs:642-647); this is the same test.
+                if (!seq_->hasBuffer_) return false;
                 ++step_;
                 return step_ == 0;
             }

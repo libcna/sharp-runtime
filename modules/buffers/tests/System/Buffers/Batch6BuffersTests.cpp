@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ObjectDisposedException.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <string>
@@ -247,10 +248,14 @@ TEST(MemoryPoolTests, Rent_DefaultSize_ReturnsUsableBuffer) {
     EXPECT_GT(owner->getMemoryProperty().getLengthProperty(), 0);
 }
 
-TEST(MemoryPoolTests, Dispose_ClearsBuffer) {
+TEST(MemoryPoolTests, Dispose_MakesTheOwnerUnusable) {
+    // Ticket #2056(a). This used to assert that a disposed owner returns a ZERO-LENGTH Memory,
+    // which is what made a disposed owner indistinguishable from a live Rent(0). .NET's
+    // ArrayMemoryPoolBuffer.Memory throws ObjectDisposedException instead
+    // (ArrayMemoryPool.ArrayMemoryPoolBuffer.cs:18-25), and so does this now.
     auto owner = MemoryPool<uint8_t>::Shared().Rent(8);
     owner->Dispose();
-    EXPECT_EQ(owner->getMemoryProperty().getLengthProperty(), 0);
+    EXPECT_THROW((void)owner->getMemoryProperty(), System::ObjectDisposedException);
 }
 
 TEST(MemoryPoolTests, Rent_DefaultSize_AccountsForSizeofT) {

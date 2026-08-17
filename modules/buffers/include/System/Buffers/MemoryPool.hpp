@@ -8,6 +8,7 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/Buffers/IMemoryOwner.hpp"
 
 namespace System::Buffers {
@@ -85,6 +86,27 @@ namespace System::Buffers {
     template<typename T>
     class MemoryPoolHeapOwner_ : public IMemoryOwner<T> {
         std::vector<T> buf_;
+        /**
+         * @brief Whether Dispose() has run.
+         *
+         * Ticket #2056(a). `getMemoryProperty()` had no disposed check and returned a
+         * **zero-length** `Memory` after `Dispose()`, where .NET's `ArrayMemoryPoolBuffer.Memory`
+         * throws `ObjectDisposedException` (`ArrayMemoryPool.ArrayMemoryPoolBuffer.cs:18-25`).
+         * A caller could not tell a disposed owner from a live `Rent(0)`.
+         *
+         * **Why a flag and not .NET's own discriminator.** .NET needs no flag: it nulls
+         * `_array` and tests `array is null`. The port's natural equivalent would be a
+         * `std::unique_ptr<std::vector<T>>`, which would even make the object *smaller*. It was
+         * rejected deliberately: `reset()` frees the storage **deterministically**, whereas
+         * `clear() + shrink_to_fit()` today is non-binding — and half (b) of this ticket, a
+         * `Memory<T>` retained across `Dispose()`, is still open. Turning that latent
+         * use-after-free from "usually survives" into "always broken" while nothing yet fixes it
+         * would be a practical regression dressed as parity. The storage lifetime is therefore
+         * left exactly as it was.
+         *
+         * `sizeof(MemoryPoolHeapOwner_<int>)` 32 → 40 under `docs/StandingApprovals.md` SA-3.
+         */
+        bool disposed_ = false;
     public:
         explicit MemoryPoolHeapOwner_(intcs size) : buf_(static_cast<std::size_t>(size)) {
             // Deliberately in the CONSTRUCTOR body, not at class scope: the member
@@ -96,8 +118,28 @@ namespace System::Buffers {
                 "default-constructible: the rented block is a value-initialized "
                 "std::vector<T>. See docs/BuffersNamespaceReviewPlan.md, ticket #2054.");
         }
-        System::Memory<T> getMemoryProperty() override { return System::Memory<T>(buf_); }
-        void Dispose() override { buf_.clear(); buf_.shrink_to_fit(); }
+        /**
+         * @return The rented block.
+         * @throws System::ObjectDisposedException if `Dispose()` has already run (#2056).
+         *
+         * @warning **Half (b) of #2056 is still open**: a `Memory<T>` obtained *before*
+         *          `Dispose()` keeps a pointer and a length over storage `Dispose()` may have
+         *          released. Repairing that is a `Memory<T>` ownership change in `Core.Base`,
+         *          not a change to this type, and this member cannot defend against it — by the
+         *          time the caller holds the `Memory`, this object is no longer in the path.
+         */
+        System::Memory<T> getMemoryProperty() override {
+            System::ObjectDisposedException::ThrowIf(disposed_, "MemoryPool<T>.Rent()");
+            return System::Memory<T>(buf_);
+        }
+        /** @brief Releases the rented block. Idempotent, as .NET's is. */
+        void Dispose() override {
+            // The storage handling is deliberately unchanged; only the flag is new. See the
+            // disposed_ doc-comment for why the .NET-shaped null discriminator was rejected.
+            disposed_ = true;
+            buf_.clear();
+            buf_.shrink_to_fit();
+        }
     };
 
     /** @brief Concrete default pool implementation returned by Shared(). */

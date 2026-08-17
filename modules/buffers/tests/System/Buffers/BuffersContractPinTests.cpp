@@ -13,6 +13,7 @@
 // Nothing here approves, implements or preselects any part of #2056, #2057, #2058,
 // #2059 or #2060.
 #include <gtest/gtest.h>
+#include "System/ObjectDisposedException.hpp"
 #include <cstdint>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -48,12 +49,16 @@ using System::Buffers::Text::Utf8Parser;
 // edit to this file.
 // ===========================================================================
 
-static_assert(sizeof(ReadOnlySequence<int>) == 32,
-              "#2057/#2058 would change ReadOnlySequence<T>'s public object layout");
+static_assert(sizeof(ReadOnlySequence<int>) == 40,
+              "#2057 added exactly one member -- the has-a-buffer discriminator, 32 -> 40 -- "
+              "under docs/StandingApprovals.md SA-3. #2058 is still open and any further data "
+              "member here needs its own approval.");
 static_assert(sizeof(ReadOnlySequence<int>::Enumerator) == 16,
               "#2057/#2058 would change the enumerator's object layout");
-static_assert(sizeof(MemoryPoolHeapOwner_<int>) == 32,
-              "#2056's terminal disposed flag would take this to 40");
+static_assert(sizeof(MemoryPoolHeapOwner_<int>) == 40,
+              "#2056(a) added exactly one member -- the terminal disposed flag, 32 -> 40 -- "
+              "under docs/StandingApprovals.md SA-3. Any further data member here is a new "
+              "object-layout change and needs its own approval.");
 static_assert(sizeof(ArrayBufferWriter<char>) == 40,
               "#2051 must not have added state");
 static_assert(sizeof(StandardFormat) == 2,
@@ -66,37 +71,48 @@ TEST(BuffersLayoutPinTests, LayoutsAreStaticallyAsserted) {
 }
 
 // ===========================================================================
-// SR-AUD-071 — no terminal disposed state (blocked #2056)
-//
-// DIVERGES FROM .NET: .NET's pool owner throws ObjectDisposedException from its
-// Memory getter once disposed. This port returns an empty Memory.
+// SR-AUD-071 — half (a) LANDED (#2056). Half (b) is still open, and is pinned
+// as such rather than quietly bundled.
 // ===========================================================================
 
-TEST(MemoryOwnerDisposedPinTests, GetMemoryAfterDispose_ReturnsEmptyAndDoesNotThrow) {
+TEST(MemoryOwnerDisposedPinTests, Fix2056_GetMemoryAfterDisposeThrows) {
+    // .NET's ArrayMemoryPoolBuffer.Memory does exactly this -- ObjectDisposedException.ThrowIf
+    // on a null array (ArrayMemoryPool.ArrayMemoryPoolBuffer.cs:18-25). Before #2056 this port
+    // returned a ZERO-LENGTH Memory, which a caller could not tell from a live Rent(0).
     auto owner = MemoryPool<int>::Shared().Rent(16);
     ASSERT_EQ(owner->getMemoryProperty().getLengthProperty(), 16);
 
     owner->Dispose();
-
-    // .NET would throw ObjectDisposedException here. #2056.
-    EXPECT_NO_THROW({
-        auto after = owner->getMemoryProperty();
-        EXPECT_EQ(after.getLengthProperty(), 0);
-    });
+    EXPECT_THROW((void)owner->getMemoryProperty(), System::ObjectDisposedException);
 }
 
-TEST(MemoryOwnerDisposedPinTests, RepeatedDisposeIsIdempotent) {
+TEST(MemoryOwnerDisposedPinTests, Fix2056_RepeatedDisposeIsStillIdempotent) {
     auto owner = MemoryPool<int>::Shared().Rent(8);
     owner->Dispose();
     EXPECT_NO_THROW(owner->Dispose());
-    EXPECT_EQ(owner->getMemoryProperty().getLengthProperty(), 0);
+    EXPECT_THROW((void)owner->getMemoryProperty(), System::ObjectDisposedException);
 }
 
-TEST(MemoryOwnerDisposedPinTests, MemoryRetainedAcrossDispose_KeepsItsStaleLength) {
-    // The length is what makes this dangerous: a retained view still claims to cover
-    // storage the owner has released, so a caller that trusts it reads freed memory.
-    // Reading THROUGH the view is deliberately not attempted here -- it is undefined
-    // behaviour and would make this suite unrunnable under AddressSanitizer. #2056.
+TEST(MemoryOwnerDisposedPinTests, Fix2056_AZeroLengthRentIsNowDistinguishableFromADisposedOwner) {
+    // The row that made the flag necessary. A live Rent(0) answers; a disposed owner throws.
+    auto live = MemoryPool<int>::Shared().Rent(0);
+    auto dead = MemoryPool<int>::Shared().Rent(4);
+    dead->Dispose();
+
+    EXPECT_NO_THROW((void)live->getMemoryProperty());
+    EXPECT_EQ(live->getMemoryProperty().getLengthProperty(), 0);
+    EXPECT_THROW((void)dead->getMemoryProperty(), System::ObjectDisposedException);
+}
+
+TEST(MemoryOwnerDisposedPinTests, Pin2056b_MemoryRetainedAcrossDisposeStillKeepsItsStaleLength) {
+    // HALF (b) IS STILL OPEN, and this pin says so rather than letting half a repair look
+    // whole. A Memory<T> obtained BEFORE Dispose keeps a pointer and a length over storage the
+    // owner has released. getMemoryProperty() cannot defend against it -- by the time the
+    // caller holds the Memory, this object is no longer in the path -- and repairing it is a
+    // Memory<T> ownership change in Core.Base.
+    //
+    // Reading THROUGH the view is deliberately not attempted: it is undefined behaviour and
+    // would make this suite unrunnable under AddressSanitizer.
     auto owner = MemoryPool<int>::Shared().Rent(16);
     auto retained = owner->getMemoryProperty();
     ASSERT_EQ(retained.getLengthProperty(), 16);
@@ -104,16 +120,23 @@ TEST(MemoryOwnerDisposedPinTests, MemoryRetainedAcrossDispose_KeepsItsStaleLengt
     owner->Dispose();
 
     EXPECT_EQ(retained.getLengthProperty(), 16)
-        << "if this becomes 0, the ownership half of #2056 has landed";
+        << "if this becomes 0, the ownership half of #2056 has landed and this pin must be "
+           "updated in that change";
 }
 
-TEST(MemoryOwnerDisposedPinTests, ZeroLengthRentIsIndistinguishableFromADisposedOwner) {
-    // This is precisely why #2056 needs a flag rather than a cleverly overloaded state.
-    auto live = MemoryPool<int>::Shared().Rent(0);
-    auto dead = MemoryPool<int>::Shared().Rent(4);
-    dead->Dispose();
-    EXPECT_EQ(live->getMemoryProperty().getLengthProperty(),
-              dead->getMemoryProperty().getLengthProperty());
+TEST(MemoryOwnerDisposedPinTests, Fix2056_TheStorageLifetimeIsDELIBERATELYUnchanged) {
+    // .NET needs no flag: it nulls _array and tests `array is null`. The port's natural
+    // equivalent is a unique_ptr, which would even make the object SMALLER -- and it was
+    // rejected on purpose. reset() frees the storage DETERMINISTICALLY, where clear() +
+    // shrink_to_fit() is non-binding; with half (b) still open, that would turn a latent
+    // use-after-free from "usually survives" into "always broken" while nothing yet fixes it.
+    //
+    // This case exists so that reasoning is a decision on the record rather than a comment: if
+    // a future change adopts the null discriminator, it must confront half (b) at the same time.
+    auto owner = MemoryPool<int>::Shared().Rent(16);
+    auto retained = owner->getMemoryProperty();
+    owner->Dispose();
+    EXPECT_EQ(retained.getLengthProperty(), 16);
 }
 
 // ===========================================================================
@@ -130,13 +153,19 @@ static int countSegments(const ReadOnlySequence<int>& seq) {
     return n;
 }
 
-TEST(ReadOnlySequenceDefaultPinTests, DefaultAndEmptyBothEnumerateExactlyOneSegment) {
+TEST(ReadOnlySequenceDefaultPinTests, Fix2057_DefaultEnumeratesNoSegmentsAndEmptyEnumeratesOne) {
+    // #2057 LANDED. .NET's Empty is `new ReadOnlySequence<T>(Array.Empty<T>())`
+    // (ReadOnlySequence.cs:26) -- buffer-backed, so it has a start object and yields ONE
+    // segment. The default-constructed sequence has a null start object, and MoveNext returns
+    // false immediately for it (ReadOnlySequence.cs:642-647). Both used to yield one here.
     ReadOnlySequence<int> def;
-    EXPECT_EQ(countSegments(def), 1) << ".NET yields 0 here; #2057";
+    EXPECT_EQ(countSegments(def), 0);
     EXPECT_EQ(countSegments(ReadOnlySequence<int>::getEmpty()), 1);
 }
 
-TEST(ReadOnlySequenceDefaultPinTests, DefaultAndEmptyAgreeOnEveryOtherObservable) {
+TEST(ReadOnlySequenceDefaultPinTests, Fix2057_DefaultAndEmptyStillAgreeOnEveryOtherObservable) {
+    // The invariance row, and the reason the distinction needed a member: everything ELSE about
+    // the two is identical, so only enumeration can tell them apart. .NET is the same.
     ReadOnlySequence<int> def;
     auto empty = ReadOnlySequence<int>::getEmpty();
     EXPECT_EQ(def.getLengthProperty(), empty.getLengthProperty());
@@ -146,12 +175,23 @@ TEST(ReadOnlySequenceDefaultPinTests, DefaultAndEmptyAgreeOnEveryOtherObservable
     EXPECT_TRUE(def.getIsSingleSegmentProperty());
 }
 
-TEST(ReadOnlySequenceDefaultPinTests, TheSingleEnumeratedSegmentIsEmpty) {
-    ReadOnlySequence<int> def;
-    auto e = def.GetEnumerator();
+TEST(ReadOnlySequenceDefaultPinTests, Fix2057_EmptysSingleSegmentIsZeroLength) {
+    auto empty = ReadOnlySequence<int>::getEmpty();
+    auto e = empty.GetEnumerator();
     ASSERT_TRUE(e.MoveNext());
     EXPECT_EQ(e.getCurrentProperty().getLengthProperty(), 0);
     EXPECT_FALSE(e.MoveNext());
+}
+
+TEST(Fix2057_EveryBufferBackedConstructionYieldsASegment, IncludingTheDegenerateOnes) {
+    // The discriminator must be set by EVERY buffer-taking constructor, not just the one the
+    // test happened to use. `(nullptr, 0)` is the trap: it is a valid buffer-backed sequence
+    // with no bytes, and it must still enumerate one segment.
+    EXPECT_EQ(countSegments(ReadOnlySequence<int>(std::vector<int>{})), 1);
+    EXPECT_EQ(countSegments(ReadOnlySequence<int>(std::vector<int>{1, 2, 3})), 1);
+    EXPECT_EQ(countSegments(ReadOnlySequence<int>(static_cast<const int*>(nullptr), 0)), 1);
+    std::vector<int> data{7, 8};
+    EXPECT_EQ(countSegments(ReadOnlySequence<int>(data.data(), 2)), 1);
 }
 
 // ===========================================================================
