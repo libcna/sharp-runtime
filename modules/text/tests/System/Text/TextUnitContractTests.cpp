@@ -193,3 +193,74 @@ TEST(TextUnitContractTests, TheGatedBomAndFallbackBehavioursAreStillWhatTheyWere
     EXPECT_EQ("A\xEF\xBF\xBD",
               System::Text::UnicodeEncoding(false, false).GetString(oddLength.data(), 0, 3));
 }
+
+
+// ===========================================================================================
+// #2015 / SR-AUD-290 + SR-AUD-296 (cause T-I) — DECIDED 2026-08-17 as a DECLARED DEVIATION
+//
+// Plan §14.3 offered three options for what a public index means in System::Text: (A) UTF-16
+// code units, (B) scalar counts, (C) keep UTF-8 storage bytes and declare it. The ticket's own
+// constraint decides it: the unit "should not be decided without deciding it for System::String,
+// which carries the same adaptation" -- and System::String IS a UTF-8 std::string throughout
+// this runtime, so options A and B are not a change to System::Text, they are a re-architecture
+// of every index in the port.
+//
+// What makes (C) the FAITHFUL answer rather than merely the cheap one is the measurement below:
+// a byte index into UTF-8 is the exact analogue of a code-unit index into UTF-16, INCLUDING the
+// ability to split a character. .NET's StringBuilder.Remove validates only the numeric range
+// (StringBuilder.cs:1024-1042) -- there is no surrogate-pair guard -- so removing one unit of a
+// surrogate pair leaves a LONE SURROGATE and an ill-formed string. This port removing one byte
+// of a two-byte sequence leaves an ill-formed UTF-8 string. Same hazard, same absence of a
+// guard, different unit. Adopting .NET's UNIT would not have removed the hazard; it would have
+// moved it to a different character.
+//
+// These cases pin the declared contract so it cannot drift into an undeclared one.
+// ===========================================================================================
+
+TEST(TextUnitContractTests, Decl2015_PublicIndicesAndCountsAreUtf8StorageBytes) {
+    // U+1F600 is four UTF-8 bytes here and two UTF-16 code units in .NET.
+    const std::vector<bytecs> grin{0xF0, 0x9F, 0x98, 0x80};
+    EXPECT_EQ(4, System::Text::UTF8Encoding().GetCharCount(grin.data(), 0, 4))
+        << "declared: GetCharCount counts UTF-8 storage bytes, .NET counts UTF-16 code units";
+
+    System::Text::StringBuilder sb;
+    sb.Append("\xC3\xA9");                 // U+00E9, two storage bytes
+    EXPECT_EQ(2, sb.getLengthProperty())
+        << "declared: StringBuilder::Length is a byte count";
+}
+
+TEST(TextUnitContractTests, Decl2015_SplittingACharacterIsPossibleHereAndInDotNetAlike) {
+    // The hazard the unit choice does NOT remove, in either runtime. Removing one byte of a
+    // two-byte sequence leaves ill-formed UTF-8 -- exactly as removing one unit of a surrogate
+    // pair leaves a lone surrogate in .NET, whose StringBuilder.Remove has no guard either.
+    System::Text::StringBuilder sb;
+    sb.Append("\xC3\xA9");   // U+00E9
+    sb.Append("A");
+    sb.Remove(1, 1);
+    const std::string result = sb.ToString();
+    ASSERT_EQ(2u, result.size());
+    EXPECT_EQ('\xC3', result[0]) << "the leading byte of the split sequence survives";
+    EXPECT_EQ('A', result[1]);
+
+    // Stated plainly so the pin cannot be mistaken for an endorsement of the OUTPUT: this is
+    // ill-formed UTF-8, it is reachable through a documented public API, and it is reachable
+    // through .NET's equivalent too. What is asserted is that the behaviour is the DECLARED one.
+}
+
+TEST(TextUnitContractTests, Decl2015_TheUnitIsCONSISTENTAcrossTheComponent) {
+    // The property that actually matters for a caller, and the one an undeclared unit would
+    // break: every index-taking member agrees about what an index is. A mixture would be far
+    // worse than either unit consistently applied.
+    System::Text::StringBuilder sb;
+    sb.Append("\xC3\xA9");   // 2 bytes
+    sb.Append("\xE2\x82\xAC");   // U+20AC, 3 bytes
+    ASSERT_EQ(5, sb.getLengthProperty());
+
+    sb.Insert(2, "X");        // at the boundary between the two characters
+    EXPECT_EQ("\xC3\xA9" "X" "\xE2\x82\xAC", sb.ToString());
+    EXPECT_EQ(6, sb.getLengthProperty());
+
+    const auto bytes = System::Text::UTF8Encoding().GetBytes(sb.ToString());
+    EXPECT_EQ(static_cast<std::size_t>(sb.getLengthProperty()), bytes.size())
+        << "Length and GetBytes must agree about the unit";
+}
