@@ -8,6 +8,7 @@
 // TaskCanceledException, TaskSchedulerException, UnobservedTaskExceptionEventArgs,
 // TaskScheduler, TaskFactory.
 #include <gtest/gtest.h>
+#include <future>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -1464,10 +1465,26 @@ TEST(TaskCanceledExceptionTests, MessageCtor_UsesGivenMessage) {
     EXPECT_STREQ(ex.what(), "custom message");
 }
 
-TEST(TaskCanceledExceptionTests, TaskCtor_StoresTaskPointer) {
+// #1970 inverted this case, and the reason is worth stating rather than just editing.
+//
+// It asserted ADDRESS identity -- that getTaskProperty() hands back the caller's own pointer --
+// which is exactly the property SR-AUD-230 reports as the defect: the exception borrowed a
+// pointer it did not own, and reading through it after the referenced Task went out of scope was
+// ASan-confirmed stack-use-after-scope.
+//
+// Address identity is also the WRONG analogue of .NET's contract. There, `Task` is a reference
+// type and `TaskCanceledException.Task` is the same object, so reference identity holds. Here
+// `Task` is a value-semantics HANDLE over a std::shared_ptr<State>; the counterpart of "the same
+// object" is therefore "the same STATE", not "the same address". That is what this case now
+// asserts, and TheHandleKeepsObservingRatherThanSnapshotting asserts the observable consequence.
+TEST(TaskCanceledExceptionTests, TaskCtor_RetainsTheSameTaskState) {
     Task t = Task::CompletedTask();
     TaskCanceledException ex(&t);
-    EXPECT_EQ(ex.getTaskProperty(), &t);
+    ASSERT_NE(ex.getTaskProperty(), nullptr);
+    EXPECT_NE(ex.getTaskProperty(), &t)
+        << "the exception must own its handle rather than borrow the caller's";
+    EXPECT_EQ(ex.getTaskProperty()->getIsCompletedProperty(), t.getIsCompletedProperty());
+    EXPECT_EQ(ex.getTaskProperty()->getIsCanceledProperty(), t.getIsCanceledProperty());
 }
 
 TEST(TaskCanceledExceptionTests, NullTaskCtor_TaskPropertyIsNull) {
@@ -1731,4 +1748,74 @@ TEST(ParallelLoopStateTests, Break_TracksLowestCallingIteration) {
     state.Break();
     ASSERT_TRUE(state.getLowestBreakIterationProperty().has_value());
     EXPECT_EQ(state.getLowestBreakIterationProperty().value(), 0);
+}
+
+// ===========================================================================================
+// #1970 / SR-AUD-230 — TaskCanceledException::getTaskProperty returned a borrowed raw pointer
+//
+// The Task-taking constructor stored `const Task*` and the getter handed it straight back with
+// no ownership and no validity check. ASan reported stack-use-after-scope reading
+// getTaskProperty()->getStatusProperty() when the referenced Task was local to the construction
+// scope -- which is the ORDINARY case, because a task that has just been cancelled and thrown
+// out of is usually a local. The header documented the hazard, and the audit's position was that
+// documenting it does not make an ordinary public property safe to call.
+//
+// The repair costs no public signature: a `Task` is a HANDLE over a std::shared_ptr<State>, so
+// the exception owns a copy of the handle. That keeps the state alive AND keeps observing it,
+// which is .NET's contract -- TaskCanceledException.Task is a GC-tracked reference to the same
+// task object, not a snapshot.
+//
+// std::shared_ptr<const Task> rather than std::optional<Task> because Task.hpp includes
+// TaskCanceledException.hpp, so the complete type is unavailable in that header.
+// ===========================================================================================
+
+TEST(TaskCanceledExceptionLifetimeTests, TheReferencedTaskSurvivesItsConstructionScope) {
+    // Before #1970 this read freed stack memory. The Task is deliberately destroyed before the
+    // exception is examined, because that is the shape the finding reproduced.
+    std::unique_ptr<System::Threading::Tasks::TaskCanceledException> captured;
+    {
+        System::Threading::Tasks::Task local =
+            System::Threading::Tasks::Task::Run([] { });
+        local.Wait();
+        captured = std::make_unique<System::Threading::Tasks::TaskCanceledException>(&local);
+    }   // `local` is gone here
+
+    ASSERT_NE(captured->getTaskProperty(), nullptr);
+    EXPECT_TRUE(captured->getTaskProperty()->getIsCompletedProperty())
+        << "the retained handle no longer observes the task it names";
+}
+
+TEST(TaskCanceledExceptionLifetimeTests, TheHandleKeepsObservingRatherThanSnapshotting) {
+    // The distinction that makes this the .NET contract rather than merely a safe one: the
+    // exception shares the task's state, so a status change AFTER construction is visible
+    // through getTaskProperty(). A defensive copy of the observable fields would not do this.
+    auto gate = std::make_shared<std::promise<void>>();
+    auto blocked = System::Threading::Tasks::Task::Run(
+        [gate] { gate->get_future().wait(); });
+
+    System::Threading::Tasks::TaskCanceledException exception(&blocked);
+    ASSERT_NE(exception.getTaskProperty(), nullptr);
+    EXPECT_FALSE(exception.getTaskProperty()->getIsCompletedProperty());
+
+    gate->set_value();
+    blocked.Wait();
+    EXPECT_TRUE(exception.getTaskProperty()->getIsCompletedProperty())
+        << "the exception reported a snapshot rather than the live task";
+}
+
+TEST(TaskCanceledExceptionLifetimeTests, ANullTaskIsStillNull) {
+    System::Threading::Tasks::TaskCanceledException exception(
+        static_cast<const System::Threading::Tasks::Task*>(nullptr));
+    EXPECT_EQ(exception.getTaskProperty(), nullptr);
+}
+
+TEST(TaskCanceledExceptionLifetimeTests, LayoutPin_TheCostOfOwningTheHandle) {
+    // SA-3 requires the before/after sizeof to be pinned rather than asserted in prose.
+    // Measured: 192 -> 200, alignof 8 both sides. Pinned as a RELATIONSHIP so a standard-library
+    // change to either component does not turn this into a false failure: the exception is its
+    // base plus exactly one shared_ptr, which is the whole cost of the repair.
+    EXPECT_EQ(sizeof(System::Threading::Tasks::TaskCanceledException),
+              sizeof(System::OperationCanceledException) + sizeof(std::shared_ptr<void>));
+    EXPECT_EQ(alignof(System::Threading::Tasks::TaskCanceledException),
+              alignof(System::OperationCanceledException));
 }
