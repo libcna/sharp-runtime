@@ -34,11 +34,17 @@ namespace System::Net::WebSockets {
         /** @brief Constructs from a WebSocketError value with a custom message. */
         WebSocketException(WebSocketError error, const std::string& message) : Win32Exception(0, message), errorCode_(error) {}
 
-        /** @brief Constructs from a WebSocketError value with a custom message and inner exception. */
+        /**
+         * @brief Constructs from a WebSocketError value with a custom message and inner exception.
+         *
+         * Ticket #2092 (SR-AUD-250). This used to contain a literal `(void)innerException;` --
+         * the causal exception was accepted and silently dropped, so a caller who passed one got
+         * a `WebSocketException` indistinguishable from the two-argument form. The forwarding
+         * constructor it needed now exists on `Win32Exception`, and adding it moved no layout:
+         * `System::Exception` has carried `innerException_` all along.
+         */
         WebSocketException(WebSocketError error, const std::string& message, std::exception_ptr innerException)
-            : Win32Exception(0, message), errorCode_(error) {
-            (void)innerException; // Win32Exception has no inner-exception-carrying constructor to forward to.
-        }
+            : Win32Exception(0, message, std::move(innerException)), errorCode_(error) {}
 
         /** @brief Constructs with a custom message and WebSocketError::Faulted. */
         explicit WebSocketException(const std::string& message) : Win32Exception(0, message), errorCode_(WebSocketError::Faulted) {}

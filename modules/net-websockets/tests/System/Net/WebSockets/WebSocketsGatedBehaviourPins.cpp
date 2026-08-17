@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "System/Convert.hpp"
+#include "System/ComponentModel/Win32Exception.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/OperationCanceledException.hpp"
 #include "System/Net/IPEndPoint.hpp"
@@ -215,13 +216,19 @@ void noConfig(ClientWebSocketOptions&) {}
 // SR-AUD-250 → #2092, BLOCKED: the inner exception is discarded
 // ===========================================================================
 
-TEST(WebSocketsGatedBehaviourPins, Pin2092_WebSocketExceptionDiscardsItsInnerException) {
-    // The three-argument constructor contains a literal `(void)innerException;`. The comment
-    // explaining it is ACCURATE, which is exactly what blocks the repair: Win32Exception has no
-    // inner-exception-carrying constructor to forward to, so fixing this is a public
-    // base-class change in modules/component-model or modules/core — another component.
+TEST(WebSocketsGatedBehaviourPins, Fix2092_WebSocketExceptionKeepsItsInnerException) {
+    // #2092 LANDED, and the analysis that blocked it was half wrong. The three-argument
+    // constructor did contain a literal `(void)innerException;` and the comment explaining it --
+    // "Win32Exception has no inner-exception-carrying constructor to forward to" -- was accurate.
+    // What did not follow was the review's conclusion that fixing it meant "a PUBLIC CONSTRUCTOR
+    // ADDITION ON A WIDELY DERIVED BASE and possibly an OBJECT-LAYOUT CHANGE on every exception
+    // type in the repository".
     //
-    // WHEN #2092 IS APPROVED AND IMPLEMENTED, THIS PIN MUST FAIL.
+    // System::Exception has carried innerException_ and Exception(message, exception_ptr) all
+    // along, so nothing gained a member and no layout moved. And .NET's own Win32Exception has
+    // exactly this shape -- `public Win32Exception(string? message, Exception? innerException)
+    // : base(message, innerException)` (Win32Exception.cs:56) -- so the port was missing a
+    // constructor the reference HAS, not inventing one. The repair is purely additive.
     std::exception_ptr inner;
     try {
         throw System::InvalidOperationException("the causal exception");
@@ -231,10 +238,45 @@ TEST(WebSocketsGatedBehaviourPins, Pin2092_WebSocketExceptionDiscardsItsInnerExc
     ASSERT_TRUE(static_cast<bool>(inner));
 
     const WebSocketException ex(WebSocketError::Faulted, "outer message", inner);
-    EXPECT_EQ(std::string(ex.what()).find("outer message") != std::string::npos, true);
-    EXPECT_FALSE(static_cast<bool>(ex.getInnerExceptionProperty()))
-        << "SR-AUD-250: the inner exception is currently DISCARDED. If this now holds the "
-           "causal exception, #2092 landed and this pin must be updated in that change.";
+    EXPECT_NE(std::string(ex.what()).find("outer message"), std::string::npos);
+    ASSERT_TRUE(static_cast<bool>(ex.getInnerExceptionProperty()))
+        << "the causal exception must survive the constructor";
+
+    // ...and it must be the SAME exception, not merely some exception.
+    try {
+        std::rethrow_exception(ex.getInnerExceptionProperty());
+        FAIL() << "rethrow produced nothing";
+    } catch (const System::InvalidOperationException& e) {
+        EXPECT_NE(std::string(e.what()).find("the causal exception"), std::string::npos);
+    } catch (...) {
+        FAIL() << "the inner exception changed type on its way through";
+    }
+
+    // The other constructors keep reporting no inner exception, so the repair adds a capability
+    // rather than inventing a cause.
+    EXPECT_FALSE(static_cast<bool>(
+        WebSocketException(WebSocketError::Faulted, "no cause").getInnerExceptionProperty()));
+    EXPECT_FALSE(static_cast<bool>(WebSocketException().getInnerExceptionProperty()));
+}
+
+TEST(WebSocketsGatedBehaviourPins, Fix2092_Win32ExceptionItselfCarriesTheCause) {
+    // The repair lives in modules/component-model, so it is pinned there too rather than only
+    // through its first caller. The error code must survive alongside the inner exception.
+    std::exception_ptr inner;
+    try {
+        throw System::InvalidOperationException("root cause");
+    } catch (...) {
+        inner = std::current_exception();
+    }
+    const System::ComponentModel::Win32Exception ex(1234, "win32 message", inner);
+    EXPECT_EQ(ex.getNativeErrorCodeProperty(), 1234);
+    EXPECT_NE(std::string(ex.what()).find("win32 message"), std::string::npos);
+    EXPECT_TRUE(static_cast<bool>(ex.getInnerExceptionProperty()));
+
+    // The pre-existing two-argument form is untouched.
+    const System::ComponentModel::Win32Exception plain(5, "plain");
+    EXPECT_EQ(plain.getNativeErrorCodeProperty(), 5);
+    EXPECT_FALSE(static_cast<bool>(plain.getInnerExceptionProperty()));
 }
 
 // ===========================================================================
