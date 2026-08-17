@@ -2528,3 +2528,76 @@ TEST(HttpParserInteractionTests, AuthorityOnlyQueryReachesTheWireAsTheRequestTar
     EXPECT_EQ(raw.find("key=secret\r\n"), std::string::npos)
         << "and must not appear as the tail of the Host header";
 }
+
+// ---------------------------------------------------------------------------
+// Ticket #2072 (post-audit defect, deferred verification) -- userinfo and the
+// text after an IPv6 bracket.
+// ---------------------------------------------------------------------------
+
+TEST(HttpClientParseUrlUserInfoTests, Fix2072_UserInfoIsNotPartOfTheHost) {
+    // RFC 3986 3.2 spells the authority `[ userinfo "@" ] host [ ":" port ]`, and this parser
+    // had no userinfo rule at all: `http://user@host/p` returned host "user@host", which then
+    // went to getaddrinfo as a DNS NAME and into the `Host:` header. .NET keeps UserInfo as its
+    // own component and its Host never contains it.
+    auto p = HttpClient::parseUrl("http://user@example.com/p");
+    EXPECT_EQ(p.host, "example.com");
+    EXPECT_EQ(p.port, 80);
+    EXPECT_EQ(p.path, "/p");
+
+    // ...with a password, which used to throw for an unrelated reason: rfind(':') made
+    // "pass@example.com" the PORT text, so the failure was accidental rather than a rule.
+    auto withPassword = HttpClient::parseUrl("http://user:pass@example.com/p");
+    EXPECT_EQ(withPassword.host, "example.com");
+    EXPECT_EQ(withPassword.port, 80);
+
+    // ...and with a port after it, which is the combination that proves the split happens in
+    // the right order.
+    auto withPort = HttpClient::parseUrl("http://user:pass@example.com:8080/p");
+    EXPECT_EQ(withPort.host, "example.com");
+    EXPECT_EQ(withPort.port, 8080);
+}
+
+TEST(HttpClientParseUrlUserInfoTests, Fix2072_TheLastAtSignIsTheDelimiter) {
+    // RFC 3986 3.2.1: a '@' is legal INSIDE the userinfo, and the host production admits none,
+    // so the FINAL one is the delimiter. Splitting on the first would make "b@example.com" the
+    // host of "http://a@b@example.com/".
+    auto p = HttpClient::parseUrl("http://a@b@example.com/p");
+    EXPECT_EQ(p.host, "example.com");
+}
+
+TEST(HttpClientParseUrlUserInfoTests, Fix2072_AnEmptyHostAfterUserInfoIsRejected) {
+    EXPECT_THROW((void)HttpClient::parseUrl("http://user@/p"), System::UriFormatException);
+    EXPECT_THROW((void)HttpClient::parseUrl("http://@/p"), System::UriFormatException);
+}
+
+TEST(HttpClientParseUrlUserInfoTests, Fix2072_TextAfterAnIPv6BracketIsRejectedNotDiscarded) {
+    // Measured before this, `http://[::1]x/p` returned host "::1" and SILENTLY DISCARDED the
+    // 'x' -- so the URL the caller wrote and the URL the client connected to differed, with no
+    // diagnostic. RFC 3986 3.2.2 allows only `":" port` after the closing bracket.
+    EXPECT_THROW((void)HttpClient::parseUrl("http://[::1]x/p"), System::UriFormatException);
+    EXPECT_THROW((void)HttpClient::parseUrl("http://[::1]8080/p"), System::UriFormatException);
+
+    // The two legal shapes still work.
+    auto bare = HttpClient::parseUrl("http://[::1]/p");
+    EXPECT_EQ(bare.host, "::1");
+    EXPECT_EQ(bare.port, 80);
+    auto withPort = HttpClient::parseUrl("http://[::1]:8080/p");
+    EXPECT_EQ(withPort.host, "::1");
+    EXPECT_EQ(withPort.port, 8080);
+    // ...including with userinfo in front of the literal.
+    auto withUser = HttpClient::parseUrl("http://user@[::1]:8080/p");
+    EXPECT_EQ(withUser.host, "::1");
+    EXPECT_EQ(withUser.port, 8080);
+}
+
+TEST(HttpClientParseUrlUserInfoTests, Fix2072_AUrlWithoutUserInfoIsUntouched) {
+    // The invariance row: the '@' rule must not disturb anything that has no '@'.
+    auto plain = HttpClient::parseUrl("http://example.com:8080/a/b?q=1");
+    EXPECT_EQ(plain.host, "example.com");
+    EXPECT_EQ(plain.port, 8080);
+    EXPECT_EQ(plain.path, "/a/b?q=1");
+    // An '@' in the PATH is not an authority delimiter, because the authority ended first.
+    auto atInPath = HttpClient::parseUrl("http://example.com/a@b");
+    EXPECT_EQ(atInPath.host, "example.com");
+    EXPECT_EQ(atInPath.path, "/a@b");
+}

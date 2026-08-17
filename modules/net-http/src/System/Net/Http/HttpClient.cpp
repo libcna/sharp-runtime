@@ -149,6 +149,28 @@ HttpClient::ParsedUrl HttpClient::parseUrl(const std::string& url) {
     if (requestTarget.empty()) requestTarget = "/";
     result.path = requestTarget;
 
+    // Ticket #2072 (post-audit defect, deferred verification). RFC 3986 §3.2 spells the
+    // authority `[ userinfo "@" ] host [ ":" port ]`, and this parser had no userinfo rule at
+    // all -- measured, `http://user@host/p` returned host `"user@host"`, which then went to
+    // getaddrinfo as a DNS name and into the `Host:` header. .NET separates it: `Uri.UserInfo`
+    // is its own component and `Uri.Host` never contains it (`Uri.cs:3708-3760`, the
+    // MayHaveUserInfo branch of ParseAuthority).
+    //
+    // The userinfo is DISCARDED rather than surfaced, and that is a deliberate scope decision
+    // recorded rather than glossed: `ParsedUrl` has no userinfo field, this handler has no
+    // authentication path to hand it to, and inventing one is new API. What matters here is
+    // that it stops being part of the HOST -- a name that reaches DNS and the `Host:` header.
+    //
+    // Splitting on the LAST '@' is RFC 3986's rule: a '@' inside the userinfo is legal
+    // (percent-encoded or not, per §3.2.1's `userinfo` production), while the host production
+    // admits none, so the final one is the delimiter.
+    const size_t userInfoEnd = authority.rfind('@');
+    if (userInfoEnd != std::string::npos) authority = authority.substr(userInfoEnd + 1);
+    // No empty-authority check here on purpose: `http://user@/p` leaves an empty authority,
+    // which the empty-host check at the end of this function already rejects. A second check
+    // would be dead code -- a mutation removing it changed nothing, which is how that was
+    // established rather than assumed.
+
     std::string portText;
     bool        hasPort = false;
 
@@ -161,7 +183,14 @@ HttpClient::ParsedUrl HttpClient::parseUrl(const std::string& url) {
         if (closeBracket == std::string::npos)
             throw System::UriFormatException("HttpClient: unterminated IPv6 literal in URL: " + url);
         result.host = authority.substr(1, closeBracket - 1);
-        if (closeBracket + 1 < authority.size() && authority[closeBracket + 1] == ':') {
+        if (closeBracket + 1 < authority.size()) {
+            // #2072: anything after the closing bracket must be a port and nothing else.
+            // Measured before this, `http://[::1]x/p` returned host `"::1"` and SILENTLY
+            // DISCARDED the `x` -- so a URL the caller wrote and a URL the client connected to
+            // differed, with no diagnostic. RFC 3986 §3.2.2 allows only `":" port` there.
+            if (authority[closeBracket + 1] != ':')
+                throw System::UriFormatException(
+                    "HttpClient: unexpected text after the IPv6 literal in URL: " + url);
             portText = authority.substr(closeBracket + 2);
             hasPort  = true;
         }
