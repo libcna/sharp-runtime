@@ -373,6 +373,39 @@ ticket, using the **probe-struct** technique (`docs/SystemXmlNamespaceReviewPlan
 
 ---
 
+---
+
+## 11.1 #2096 LANDED 2026-08-17 — and the defect was worse than §7.11 recorded
+
+#2096 landed under `docs/StandingApprovals.md` SA-3 (the `sizeof` change) with the reference
+tree available. Three things are worth carrying forward.
+
+**The race was four members wide, not one.** §7.11 names `state_`. Measured, `closeStatus_`,
+`closeStatusDescription_` and `subProtocol_` have the identical shape — written by a task thread,
+read by a public getter, unsynchronised. All four are now guarded by one `stateMutex_`. .NET
+makes its own state atomic for the same reason (`ClientWebSocket.cs:104,132`).
+
+**`Dispose()` did not merely risk a null dereference — it hung.** Running the new
+`ClientWebSocketConcurrencyTests` against the pre-#2096 production code under ASan, **all five
+hang**. `Close()` does not reliably wake a thread already parked in `recv()` on Linux, so the old
+code freed the `Socket` object under the worker *and* left the worker parked forever. The repair
+is shared ownership plus `Shutdown()`: the member is taken away under the lock so no new
+operation can start, the socket is shut down to wake any worker, and only then is `Dispose()`'s
+own reference dropped. It deliberately no longer calls `Close()` — closing a descriptor another
+thread is blocked on is the hazard, not the fix.
+
+**#2088's boundary covered two of five.** `ConnectAsync`, `CloseAsync` and `CloseOutputAsync`
+never called `beginAsyncOperation()`, so they captured raw `this` with exactly the lifetime
+defect #2088 was written to remove. All five now join it; ASan reports `heap-use-after-free` the
+moment `ConnectAsync` is taken back out.
+
+`sizeof(ClientWebSocket)` 360 → 408, `alignof` 8 unchanged, pinned by the layout probe in
+`ClientWebSocketFrameValidationTests.cpp`. Record:
+`docs/Migration-ClientWebSocketConcurrencySafety.md`. The exception-type question the racy-loss
+path raised is ticket **#2357**; #2093 (cancellation) and #2094 (keep-alive) remain open, and
+this ticket deliberately does not pre-empt their design.
+
+
 ## 12. Observable semantic consequences
 
 - **#2089** — `SetRequestHeader` and `AddSubProtocol` throw for text that would corrupt the

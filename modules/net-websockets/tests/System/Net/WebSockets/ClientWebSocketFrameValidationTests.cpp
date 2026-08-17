@@ -382,7 +382,11 @@ namespace {
 struct ClientWebSocketLayoutProbe {
     virtual ~ClientWebSocketLayoutProbe() = default; // ClientWebSocket : WebSocket (polymorphic)
     ClientWebSocketOptions                  options;
-    std::unique_ptr<int>                    socket;
+    // #2096 changed this from std::unique_ptr and added stateMutex_ after it. The socket is now
+    // SHARED so a task thread can hold a strong reference across its I/O while Dispose() takes
+    // the member away -- the repair for the null dereference the finding names.
+    std::shared_ptr<int>                    socket;
+    mutable std::mutex                      stateMutex;
     WebSocketState                          state;
     bool                                    connectStarted;
     std::optional<std::string>              subProtocol;
@@ -404,9 +408,10 @@ struct ClientWebSocketLayoutProbe {
 
 static_assert(sizeof(ClientWebSocket) == sizeof(ClientWebSocketLayoutProbe),
               "ClientWebSocket's object layout moved. The probe above is a field-for-field "
-              "shadow; #2088 added exactly one member to it (the liveness boundary's shared "
-              "state) under docs/StandingApprovals.md SA-3. Any further data member here is a "
-              "new object-layout change and needs its own approval. See "
+              "shadow; #2088 added the liveness boundary's shared state and #2096 widened the "
+              "socket to a shared_ptr and added stateMutex_, both under "
+              "docs/StandingApprovals.md SA-3. Any further data member here is a new "
+              "object-layout change and needs its own approval. See "
               "docs/SystemNetWebSocketsNamespaceReviewPlan.md section 11.");
 static_assert(alignof(ClientWebSocket) == alignof(ClientWebSocketLayoutProbe),
               "ClientWebSocket alignment moved");

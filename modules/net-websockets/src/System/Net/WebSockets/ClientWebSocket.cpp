@@ -150,10 +150,17 @@ void ClientWebSocket::performHandshake(const System::Uri& uri) {
     intcs port = uri.getPortProperty();
     if (port <= 0) port = 80;
 
-    socket_ = std::make_unique<System::Net::Sockets::Socket>(
+    // #2096: built into a local, published under stateMutex_, then used through the local. A
+    // concurrent Dispose() can take the member away at any point after the publish; the local
+    // keeps this handshake's socket alive until the handshake returns.
+    auto socket = std::make_shared<System::Net::Sockets::Socket>(
         System::Net::Sockets::AddressFamily::InterNetwork, System::Net::Sockets::SocketType::Stream,
         System::Net::Sockets::ProtocolType::Tcp);
-    socket_->Connect(uri.getHostProperty(), port);
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        socket_ = socket;
+    }
+    socket->Connect(uri.getHostProperty(), port);
 
     auto keyBytes = randomBytes16();
     std::string secWebSocketKey = System::Convert::ToBase64String(std::vector<bytecs>(keyBytes.begin(), keyBytes.end()));
@@ -179,13 +186,13 @@ void ClientWebSocket::performHandshake(const System::Uri& uri) {
     request += "\r\n";
 
     auto requestBytes = toBytes(request);
-    socket_->Send(requestBytes);
+    socket->Send(requestBytes);
 
     // Read the HTTP response headers, one byte at a time, until "\r\n\r\n".
     std::string response;
     std::vector<bytecs> one(1);
     while (response.size() < 4 || response.compare(response.size() - 4, 4, "\r\n\r\n") != 0) {
-        intcs n = socket_->Receive(one);
+        intcs n = socket->Receive(one);
         if (n == 0) {
             throw WebSocketException(WebSocketError::ConnectionClosedPrematurely,
                                       "The connection was closed before the WebSocket handshake completed.");
@@ -261,11 +268,56 @@ void ClientWebSocket::performHandshake(const System::Uri& uri) {
                     ? "The server returned a WebSocket subprotocol although none was requested."
                     : "The server returned a WebSocket subprotocol that was not requested.");
         }
+        std::lock_guard<std::mutex> lock(stateMutex_);
         subProtocol_ = protoIt->second;
     }
 
-    state_ = WebSocketState::Open;
+    storeState(WebSocketState::Open);
 }
+
+// ---------------------------------------------------------------------------------------------
+// #2096 — the state and socket accessors every other member goes through.
+// ---------------------------------------------------------------------------------------------
+
+WebSocketState ClientWebSocket::loadState() const {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    return state_;
+}
+
+void ClientWebSocket::storeState(WebSocketState next) {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    state_ = next;
+}
+
+std::shared_ptr<System::Net::Sockets::Socket> ClientWebSocket::socketForIo() const {
+    std::shared_ptr<System::Net::Sockets::Socket> socket;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        socket = socket_;
+    }
+    if (!socket) {
+        throw WebSocketException(WebSocketError::InvalidState,
+                                  "The WebSocket is in an invalid state for this operation.");
+    }
+    return socket;
+}
+
+std::optional<WebSocketCloseStatus> ClientWebSocket::getCloseStatusProperty() const {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    return closeStatus_;
+}
+
+std::optional<std::string> ClientWebSocket::getCloseStatusDescriptionProperty() const {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    return closeStatusDescription_;
+}
+
+std::optional<std::string> ClientWebSocket::getSubProtocolProperty() const {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    return subProtocol_;
+}
+
+WebSocketState ClientWebSocket::getStateProperty() const { return loadState(); }
 
 // ---------------------------------------------------------------------------------------------
 // #2088 / SR-AUD-247 (CCF-019) — the liveness boundary for the five *Async members.
@@ -298,8 +350,15 @@ struct ClientWebSocket::AsyncOperationScope {
 };
 
 std::shared_ptr<ClientWebSocket::AsyncOperations> ClientWebSocket::beginAsyncOperation() {
-    if (!asyncOps_) asyncOps_ = std::make_shared<AsyncOperations>();
-    auto ops = asyncOps_;
+    std::shared_ptr<AsyncOperations> ops;
+    {
+        // #2096: the lazy initialisation was itself a race -- two threads starting their first
+        // *Async member at the same time could each construct an AsyncOperations, and the loser's
+        // in-flight count would then be invisible to the destructor boundary.
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        if (!asyncOps_) asyncOps_ = std::make_shared<AsyncOperations>();
+        ops = asyncOps_;
+    }
     {
         std::lock_guard<std::mutex> lock(ops->mutex);
         ++ops->inFlight;
@@ -308,10 +367,17 @@ std::shared_ptr<ClientWebSocket::AsyncOperations> ClientWebSocket::beginAsyncOpe
 }
 
 void ClientWebSocket::waitForAsyncOperations() noexcept {
-    if (!asyncOps_) return;
+    std::shared_ptr<AsyncOperations> ops;
+    std::shared_ptr<System::Net::Sockets::Socket> socket;
     {
-        std::unique_lock<std::mutex> lock(asyncOps_->mutex);
-        if (asyncOps_->inFlight == 0) return;
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        ops = asyncOps_;
+        socket = socket_;
+    }
+    if (!ops) return;
+    {
+        std::unique_lock<std::mutex> lock(ops->mutex);
+        if (ops->inFlight == 0) return;
     }
     // A pending ReceiveAsync is blocked in recv() waiting for a frame the peer may never send,
     // so the boundary has to be able to CROSS -- otherwise it turns a use-after-free into a
@@ -319,16 +385,18 @@ void ClientWebSocket::waitForAsyncOperations() noexcept {
     // it does; #2134 records the one where it does not, a listening socket's accept()).
     // Deliberately not Close(): the descriptor stays this object's until Dispose() retires it,
     // so a worker returning from recv() is not left holding a number the process has reused.
-    if (socket_) {
+    if (socket) {
         try {
-            socket_->Shutdown(System::Net::Sockets::SocketShutdown::Both);
+            socket->Shutdown(System::Net::Sockets::SocketShutdown::Both);
         } catch (...) {
             // Already closed or never connected: there is nothing to wake, and the wait below
             // is then the whole boundary.
         }
     }
-    std::unique_lock<std::mutex> lock(asyncOps_->mutex);
-    asyncOps_->idle.wait(lock, [this] { return asyncOps_->inFlight == 0; });
+    // #2096: `ops`, not `asyncOps_` -- the member may not be read here without stateMutex_, and
+    // taking it while waiting would hold a lock across an unbounded wait.
+    std::unique_lock<std::mutex> lock(ops->mutex);
+    ops->idle.wait(lock, [&ops] { return ops->inFlight == 0; });
 }
 
 ClientWebSocket::~ClientWebSocket() {
@@ -342,10 +410,15 @@ ClientWebSocket::ConnectAsync(const System::Uri& uri, System::Threading::Cancell
         throw System::InvalidOperationException("ConnectAsync may only be called once.");
     }
     connectStarted_ = true;
-    state_ = WebSocketState::Connecting;
+    storeState(WebSocketState::Connecting);
     options_.setToReadOnly();
 
-    return System::Threading::Tasks::Task([this, uri]() {
+    // #2096 also closes a gap #2088 left: only SendAsync and ReceiveAsync joined the liveness
+    // boundary. ConnectAsync, CloseAsync and CloseOutputAsync capture raw `this` exactly the same
+    // way, so all five now do.
+    auto ops = beginAsyncOperation();
+    return System::Threading::Tasks::Task([this, uri, ops]() {
+        AsyncOperationScope release{ops};
         try {
             performHandshake(uri);
         } catch (...) {
@@ -356,6 +429,10 @@ ClientWebSocket::ConnectAsync(const System::Uri& uri, System::Threading::Cancell
 }
 
 void ClientWebSocket::sendFrame(bytecs opcode, const bytecs* data, size_t len, bool fin) {
+    // #2096: taken BEFORE sendMutex_ and held for the whole call, so a concurrent Dispose() can
+    // neither delete the socket under `Send` nor leave this thread dereferencing null. Taking it
+    // first also keeps the lock order (stateMutex_ then sendMutex_) the same everywhere.
+    auto socket = socketForIo();
     std::lock_guard<std::mutex> lock(sendMutex_);
 
     std::vector<bytecs> frame;
@@ -388,7 +465,7 @@ void ClientWebSocket::sendFrame(bytecs opcode, const bytecs* data, size_t len, b
         frame[frameHeaderLen + i] = static_cast<bytecs>(data[i] ^ maskBytes[i % 4]);
     }
 
-    socket_->Send(frame);
+    socket->Send(frame);
 }
 
 namespace {
@@ -558,8 +635,12 @@ namespace {
 } // namespace
 
 ClientWebSocket::RawFrame ClientWebSocket::readFrame() {
+    // #2096: one strong reference for the whole frame. `readExact(*socket_, …)` dereferenced the
+    // member three times per frame, and a Dispose() between any two of them was a null
+    // dereference on a thread the caller could not see.
+    auto socket = socketForIo();
     std::vector<bytecs> header;
-    readExact(*socket_, header, 2);
+    readExact(*socket, header, 2);
 
     bool fin = (header[0] & 0x80) != 0;
     bytecs opcode = header[0] & 0x0F;
@@ -604,11 +685,11 @@ ClientWebSocket::RawFrame ClientWebSocket::readFrame() {
 
     if (len == 126) {
         std::vector<bytecs> ext;
-        readExact(*socket_, ext, 2);
+        readExact(*socket, ext, 2);
         len = (static_cast<uint64_t>(ext[0]) << 8) | ext[1];
     } else if (len == 127) {
         std::vector<bytecs> ext;
-        readExact(*socket_, ext, 8);
+        readExact(*socket, ext, 8);
         len = 0;
         for (int i = 0; i < 8; ++i) len = (len << 8) | ext[static_cast<size_t>(i)];
     }
@@ -632,7 +713,7 @@ ClientWebSocket::RawFrame ClientWebSocket::readFrame() {
     RawFrame result;
     result.fin = fin;
     result.opcode = opcode;
-    readExact(*socket_, result.payload, static_cast<size_t>(len));
+    readExact(*socket, result.payload, static_cast<size_t>(len));
     return result;
 }
 
@@ -662,7 +743,7 @@ ClientWebSocket::SendAsync(const std::vector<bytecs>& buffer, intcs offset, intc
     return System::Threading::Tasks::Task([this, payload = std::move(payload), count, messageType,
                                             endOfMessage, ops]() {
         AsyncOperationScope release{ops};
-        WebSocket::ThrowOnInvalidState(state_, {WebSocketState::Open, WebSocketState::CloseReceived});
+        WebSocket::ThrowOnInvalidState(loadState(), {WebSocketState::Open, WebSocketState::CloseReceived});
         bytecs opcode;
         if (sendContinuation_) {
             opcode = 0x0;
@@ -685,7 +766,7 @@ ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs c
     auto ops = beginAsyncOperation();
     return System::Threading::Tasks::TaskT<WebSocketReceiveResult>([this, &buffer, offset, count, ops]() {
         AsyncOperationScope release{ops};
-        WebSocket::ThrowOnInvalidState(state_, {WebSocketState::Open, WebSocketState::CloseSent});
+        WebSocket::ThrowOnInvalidState(loadState(), {WebSocketState::Open, WebSocketState::CloseSent});
 
         if (recvLeftoverPos_ < recvLeftover_.size()) {
             size_t remaining = recvLeftover_.size() - recvLeftoverPos_;
@@ -715,9 +796,15 @@ ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs c
                     // Ticket #2091. Throws before closeStatus_/state_ are touched, so a
                     // malformed close frame cannot leave the socket reporting a clean close.
                     parseClosePayload(frame.payload, receivedStatus, receivedDescription);
-                    closeStatus_ = receivedStatus;
-                    closeStatusDescription_ = receivedDescription;
-                    state_ = state_ == WebSocketState::CloseSent ? WebSocketState::Closed : WebSocketState::CloseReceived;
+                    {
+                        // #2096: one critical section, so a reader never sees the close status
+                        // published against the old state or the new state against the old status.
+                        std::lock_guard<std::mutex> lock(stateMutex_);
+                        closeStatus_ = receivedStatus;
+                        closeStatusDescription_ = receivedDescription;
+                        state_ = state_ == WebSocketState::CloseSent ? WebSocketState::Closed
+                                                                     : WebSocketState::CloseReceived;
+                    }
                     return WebSocketReceiveResult(0, WebSocketMessageType::Close, true, receivedStatus, receivedDescription);
                 }
                 default: { // Continuation(0x0)/Text(0x1)/Binary(0x2)
@@ -763,9 +850,12 @@ ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs c
 System::Threading::Tasks::Task
 ClientWebSocket::CloseOutputAsync(WebSocketCloseStatus closeStatus, const std::optional<std::string>& statusDescription,
                                     System::Threading::CancellationToken /*cancellationToken*/) {
-    return System::Threading::Tasks::Task([this, closeStatus, statusDescription]() {
-        WebSocket::ThrowOnInvalidState(state_, {WebSocketState::Open, WebSocketState::CloseReceived});
+    auto ops = beginAsyncOperation();  // #2096: was outside the #2088 boundary
+    return System::Threading::Tasks::Task([this, closeStatus, statusDescription, ops]() {
+        AsyncOperationScope release{ops};
+        WebSocket::ThrowOnInvalidState(loadState(), {WebSocketState::Open, WebSocketState::CloseReceived});
         sendCloseFrame(closeStatus, statusDescription);
+        std::lock_guard<std::mutex> lock(stateMutex_);
         state_ = state_ == WebSocketState::CloseReceived ? WebSocketState::Closed : WebSocketState::CloseSent;
     });
 }
@@ -781,13 +871,19 @@ ClientWebSocket::CloseAsync(WebSocketCloseStatus closeStatus, const std::optiona
     // mid-flight, which only makes sense done consistently across all of this file's async
     // methods at once, not as a one-off partial fix for just this one; left for a follow-up
     // ticket, matching the honest "not implemented" stance the other three already take.
-    return System::Threading::Tasks::Task([this, closeStatus, statusDescription]() {
-        if (state_ == WebSocketState::Open) {
+    auto ops = beginAsyncOperation();  // #2096: was outside the #2088 boundary
+    return System::Threading::Tasks::Task([this, closeStatus, statusDescription, ops]() {
+        AsyncOperationScope release{ops};
+        if (loadState() == WebSocketState::Open) {
             sendCloseFrame(closeStatus, statusDescription);
-            state_ = WebSocketState::CloseSent;
+            storeState(WebSocketState::CloseSent);
         }
-        if (state_ == WebSocketState::CloseSent) {
-            while (state_ != WebSocketState::Closed) {
+        if (loadState() == WebSocketState::CloseSent) {
+            // #2096: the loop condition is re-read under the lock on every turn, and readFrame()
+            // now throws rather than dereferencing null if Dispose() takes the socket away -- so
+            // an aborted close handshake ends with a WebSocketException instead of a crash or an
+            // endless wait for a state another thread will never publish.
+            while (loadState() != WebSocketState::Closed) {
                 RawFrame frame = readFrame();
                 if (frame.opcode == 0x8) {
                     // Ticket #2091: the same parser as ReceiveAsync's, not a second copy of it.
@@ -797,6 +893,7 @@ ClientWebSocket::CloseAsync(WebSocketCloseStatus closeStatus, const std::optiona
                     std::optional<WebSocketCloseStatus> receivedStatus;
                     std::optional<std::string> receivedDescription;
                     parseClosePayload(frame.payload, receivedStatus, receivedDescription);
+                    std::lock_guard<std::mutex> lock(stateMutex_);
                     closeStatus_ = receivedStatus;
                     closeStatusDescription_ = receivedDescription;
                     state_ = WebSocketState::Closed;
@@ -808,19 +905,41 @@ ClientWebSocket::CloseAsync(WebSocketCloseStatus closeStatus, const std::optiona
 }
 
 void ClientWebSocket::Abort() {
-    if (state_ != WebSocketState::Aborted && state_ != WebSocketState::Closed) {
-        state_ = WebSocketState::Aborted;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        if (state_ != WebSocketState::Aborted && state_ != WebSocketState::Closed) {
+            state_ = WebSocketState::Aborted;
+        }
     }
     Dispose();
 }
 
 void ClientWebSocket::Dispose() {
-    if (socket_) {
-        socket_->Close();
-        socket_.reset();
+    // #2096. This used to call socket_->Close() and reset the unique_ptr while a task thread
+    // could be inside Send() or recv() on that very descriptor: first a null dereference for
+    // whichever call came next, and -- worse -- a closed file descriptor number the process is
+    // free to hand to something else while a worker is still syscalling on it.
+    //
+    // Shared ownership makes the order safe. The member is taken away under the lock so no new
+    // operation can start on it, then the socket is SHUT DOWN (which unblocks a worker parked in
+    // recv), and only then is this function's own reference dropped. If a worker still holds one,
+    // the descriptor stays open until that worker returns -- microseconds, and never reused
+    // underneath it. Deliberately not Close(): closing a descriptor another thread is blocked on
+    // is the hazard this repair exists to remove, not a way to implement it.
+    std::shared_ptr<System::Net::Sockets::Socket> socket;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        socket.swap(socket_);
+        if (state_ != WebSocketState::Aborted) {
+            state_ = WebSocketState::Closed;
+        }
     }
-    if (state_ != WebSocketState::Aborted) {
-        state_ = WebSocketState::Closed;
+    if (socket) {
+        try {
+            socket->Shutdown(System::Net::Sockets::SocketShutdown::Both);
+        } catch (...) {
+            // Never connected, or already shut down by waitForAsyncOperations().
+        }
     }
 }
 

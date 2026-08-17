@@ -34,7 +34,33 @@ namespace System::Net::WebSockets {
      */
     class ClientWebSocket : public WebSocket {
         ClientWebSocketOptions options_;
-        std::unique_ptr<System::Net::Sockets::Socket> socket_;
+
+        /**
+         * Ticket #2096. This was a `std::unique_ptr`, and `Dispose()`/`Abort()` reset it while a
+         * task thread was inside `socket_->Send` or `readExact(*socket_, …)` — an unguarded
+         * **null dereference**, with the `ThrowOnInvalidState` check in `SendAsync`/`ReceiveAsync`
+         * a TOCTOU against it. Shared ownership is the repair: an operation takes a strong
+         * reference under @ref stateMutex_ before any I/O, so the socket cannot be destroyed
+         * underneath it, and `Dispose()` hands its own reference over instead of deleting.
+         */
+        std::shared_ptr<System::Net::Sockets::Socket> socket_;
+
+        /**
+         * Guards @ref socket_, @ref state_, @ref closeStatus_, @ref closeStatusDescription_ and
+         * @ref subProtocol_ — every member a task thread writes and a public getter reads.
+         *
+         * Ticket #2096. The finding named `state_`; measured, **four** members had the same
+         * unsynchronised write-from-a-task-thread / read-from-a-public-getter shape. .NET makes
+         * its own state atomic for exactly this reason — `Interlocked.CompareExchange(ref _state,
+         * …)` in `ClientWebSocket.cs:104,132`.
+         *
+         * **This mutex is never held across socket I/O.** It is taken to read or publish a field,
+         * or to take a strong reference to the socket, and released before anything can block —
+         * otherwise `Dispose()` would deadlock behind a `ReceiveAsync` waiting for a frame the
+         * peer may never send.
+         */
+        mutable std::mutex stateMutex_;
+
         WebSocketState state_ = WebSocketState::None;
         bool connectStarted_ = false;
         std::optional<std::string> subProtocol_;
@@ -56,6 +82,27 @@ namespace System::Net::WebSockets {
         };
         RawFrame readFrame();
         void sendCloseFrame(WebSocketCloseStatus closeStatus, const std::optional<std::string>& statusDescription);
+
+        /**
+         * @brief A strong reference to the live socket, or a throw if there is none.
+         *
+         * Ticket #2096. Every I/O path calls this instead of touching @ref socket_ directly, so
+         * the window between "the state said Open" and "the socket is used" cannot end in a null
+         * dereference. It raises the **same** `WebSocketException(InvalidState)` the state check
+         * would have raised a microsecond earlier, deliberately: a caller racing `Dispose()`
+         * against `SendAsync` cannot tell which side it landed on, and should not have to.
+         *
+         * .NET raises `ObjectDisposedException` here (`ClientWebSocket.cs:166`), but it raises it
+         * for the *non-racy* path too, where this port has always raised
+         * `WebSocketException(InvalidState)`. Matching .NET on one side of the race and not the
+         * other would be worse than either; the exception-type question is ticket **#2357**.
+         */
+        [[nodiscard]] std::shared_ptr<System::Net::Sockets::Socket> socketForIo() const;
+
+        /** @brief Reads @ref state_ under @ref stateMutex_. */
+        [[nodiscard]] WebSocketState loadState() const;
+        /** @brief Writes @ref state_ under @ref stateMutex_. */
+        void storeState(WebSocketState next);
 
     public:
         ClientWebSocket() = default;
@@ -89,12 +136,14 @@ namespace System::Net::WebSockets {
 
     public:
 
-        [[nodiscard]] std::optional<WebSocketCloseStatus> getCloseStatusProperty() const override { return closeStatus_; }
-        [[nodiscard]] std::optional<std::string> getCloseStatusDescriptionProperty() const override {
-            return closeStatusDescription_;
-        }
-        [[nodiscard]] std::optional<std::string> getSubProtocolProperty() const override { return subProtocol_; }
-        [[nodiscard]] WebSocketState getStateProperty() const override { return state_; }
+        // Ticket #2096: all four take stateMutex_. Each is written by a task thread and read here
+        // from whichever thread the caller happens to be on, which was an unsynchronised race on
+        // a public property -- undefined behaviour, not merely a stale read. Defined in the .cpp
+        // so the mutex is not part of the header's inline surface.
+        [[nodiscard]] std::optional<WebSocketCloseStatus> getCloseStatusProperty() const override;
+        [[nodiscard]] std::optional<std::string> getCloseStatusDescriptionProperty() const override;
+        [[nodiscard]] std::optional<std::string> getSubProtocolProperty() const override;
+        [[nodiscard]] WebSocketState getStateProperty() const override;
 
         /** @brief Connects to the WebSocket server at @p uri (scheme must be "ws"; "wss" is unsupported — no TLS). */
         System::Threading::Tasks::Task
