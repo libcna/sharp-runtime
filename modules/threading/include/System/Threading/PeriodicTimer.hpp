@@ -30,22 +30,42 @@ namespace System::Threading {
     public:
         /**
          * @brief Constructs a PeriodicTimer with the specified period.
+         *
          * @throws System::ArgumentOutOfRangeException unless @p period is
-         * Timeout::InfiniteTimeSpan or represents a whole number of milliseconds in
-         * [1, uint.MaxValue - 1].
-         * @note Verified against PeriodicTimer.cs's TryGetMilliseconds: real .NET validates the
-         * period exactly this way. This port previously performed no validation at all --
-         * TimeSpan::Zero or a negative (non-Infinite) period silently constructed a timer whose
-         * next_ was already <= now(), so WaitForNextTick() would busy-loop at 100% CPU
-         * (sleep_until a point already in the past returns immediately) instead of throwing a
-         * clear error.
+         * Timeout::InfiniteTimeSpan or its millisecond count, **truncated towards zero**,
+         * lies in [1, uint.MaxValue - 1].
+         *
+         * @note A **fractional** period is accepted and truncated, not rejected. Verified
+         * against `PeriodicTimer.TryGetMilliseconds` (PeriodicTimer.cs:110-121):
+         *
+         *     long ms = (long)value.TotalMilliseconds;
+         *     if ((ms >= 1 && ms <= Timer.MaxSupportedTimeout) || value == Timeout.InfiniteTimeSpan)
+         *
+         * The cast is truncating and happens **before** the range test, so .NET schedules
+         * `TimeSpan::FromMilliseconds(1.5)` as 1 ms. SR-AUD-200 concluded that such a period
+         * "must be rejected"; ticket #1954 declined to implement that on the reading that .NET
+         * truncates, and #1963 has now confirmed the reading from the reference. Rejecting
+         * would be a narrowing **away** from .NET, refusing input that `TimeSpan::FromTicks`
+         * arithmetic produces easily.
+         *
+         * @note The truncation is also why this port compares the **truncated** count rather
+         * than the double: testing `ms <= MaxSupportedTimeoutMs` on the double rejected a
+         * period whose fractional part pushed it past the ceiling but whose truncated value
+         * did not -- `MaxSupportedTimeoutMs + 0.5` threw here and is accepted by .NET.
+         *
+         * @note This port previously performed no validation at all -- TimeSpan::Zero or a
+         * negative (non-Infinite) period silently constructed a timer whose next_ was already
+         * <= now(), so WaitForNextTick() would busy-loop at 100% CPU (sleep_until a point
+         * already in the past returns immediately) instead of throwing a clear error.
          */
         explicit PeriodicTimer(const System::TimeSpan& period)
             : infinite_(period.getTicksProperty() == System::Threading::Timeout::InfiniteTimeSpan) {
-            double ms = period.getTotalMillisecondsProperty();
-            if (!infinite_ && !(ms >= 1.0 && ms <= static_cast<double>(MaxSupportedTimeoutMs)))
+            // TimeSpan's ticks are a 64-bit count, so TotalMilliseconds cannot exceed ~9.2e14
+            // and the cast is always in range for long long.
+            const long long ms = static_cast<long long>(period.getTotalMillisecondsProperty());
+            if (!infinite_ && !(ms >= 1 && ms <= MaxSupportedTimeoutMs))
                 throw System::ArgumentOutOfRangeException("period");
-            period_ = std::chrono::milliseconds(static_cast<long long>(ms));
+            period_ = std::chrono::milliseconds(ms);
             next_ = std::chrono::steady_clock::now() + period_;
         }
 

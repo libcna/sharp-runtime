@@ -917,17 +917,53 @@ TEST(EnvironmentTests, CommandLine_EveryCaseRoundTripsThroughAReferenceParser) {
     }
 }
 
-TEST(EnvironmentTests, CommandLine_ArgV0_UsesTheArgV0Rules) {
-    // argv[0] parses under different rules: a backslash is an ordinary character and quotes
-    // exist only to carry whitespace.
+// Ticket #2242 resolved two things from the reference tree that #2241 could not.
+//
+// FIRST, and bigger than the question the ticket asked: PasteArguments is a partial class
+// with two Paste implementations, and PasteArguments.Unix.cs states in its own doc-comment
+// that "the rules for parsing the executable name (argv[0]) are ignored" -- it routes every
+// argument, argv[0] included, through AppendArgument. Only PasteArguments.Windows.cs honours
+// the flag. This port applied the argv[0] rules on every platform.
+//
+// SECOND, the question as asked: under the Windows rules a literal quote in argv[0] is
+// REJECTED, not emitted -- `throw new ApplicationException(SR.Argv_IncludeDoubleQuote)`,
+// "The argv[0] argument cannot include a double quote." (Strings.resx:4049). #2241's pin,
+// which chose to emit it verbatim, was wrong.
+//
+// The two rule sets agree on everything else that matters here, so three of these four rows
+// are byte-identical under both.
+TEST(EnvironmentTests, CommandLine_ArgV0_FollowsThePlatformsOwnRuleSet) {
     EXPECT_EQ(commandLineOf({"my prog", "x"}), "\"my prog\" x");
     EXPECT_EQ(commandLineOf({"C:\\dir\\prog", "x"}), "C:\\dir\\prog x");
     EXPECT_EQ(commandLineOf({""}), "\"\"");
-    // PINNED, and deferred to ticket #2242: argv[0]'s rules cannot represent a literal
-    // quote, and what .NET does when asked to is not decidable in this container. This port
-    // emits it verbatim rather than throwing from a public diagnostic property.
-    EXPECT_EQ(commandLineOf({"pro\"g", "x"}), "pro\"g x");
+
+#ifdef _WIN32
+    // argv[0] rules: no escape exists, so the quote is rejected.
+    EXPECT_THROW((void)commandLineOf({"pro\"g", "x"}), System::ApplicationException);
+#else
+    // No argv[0] rules at all: the quote is escaped exactly as it would be in any other
+    // argument, and the result round-trips.
+    EXPECT_EQ(commandLineOf({"pro\"g", "x"}), "\"pro\\\"g\" x");
+#endif
 }
+
+#ifndef _WIN32
+// The consequence of routing argv[0] through AppendArgument on Unix is that the WHOLE command
+// line round-trips through one parser, argv[0] included -- which the argv[0] rules could not
+// promise for a name containing a quote.
+TEST(EnvironmentTests, CommandLine_OnUnixTheWholeLineRoundTripsIncludingArgV0) {
+    const std::vector<std::vector<std::string>> cases = {
+        {"prog", "arg1"},
+        {"my prog", "x"},
+        {"pro\"g", "x"},
+        {"C:\\dir\\prog", "x"},
+    };
+    for (const auto& argv : cases) {
+        const std::string text = commandLineOf(argv);
+        EXPECT_EQ(parseCommandLineTail(text), argv) << "emitted: " << text;
+    }
+}
+#endif
 
 TEST(EnvironmentTests, CommandLine_EmptyArgvIsStillEmpty) {
     EXPECT_EQ(commandLineOf({}), "");

@@ -577,8 +577,9 @@ TEST(ThreadingNullArgumentTests, CancellationToken_LiveState_Unaffected) {
 // ===========================================================================
 // #1954 / SR-AUD-184, 205 and SR-AUD-213 (timeout half), cause T-C -- out-of-domain values.
 //
-// SR-AUD-200 (PeriodicTimer's fractional period) is deliberately NOT repaired here; the
-// control below pins the current behaviour so ticket #1963 can change it only on purpose.
+// SR-AUD-200 (PeriodicTimer's fractional period) was deliberately NOT repaired here. Ticket
+// #1963 has since settled it against the reference tree and REFUTED the finding's conclusion;
+// see the two cases at the end of this section.
 // ===========================================================================
 
 // SR-AUD-184. An undeclared EventResetMode used to produce a handle that is neither kind of
@@ -692,14 +693,17 @@ TEST(ThreadingArgumentDomainTests, SpinWait_ValidTimeouts_Unchanged) {
     EXPECT_FALSE(SpinWait::SpinUntil([] { return false; }, 5));
 }
 
-// SR-AUD-200 is NOT repaired by #1954 and stays confirmed. Its per-file report carries no
-// managed probe, and .NET's PeriodicTimer converts with (long)period.TotalMilliseconds -- a
-// truncating cast, exactly as Timer(TimerCallback, object?, TimeSpan, TimeSpan) does -- so
-// rejecting a fractional period would narrow away from .NET rather than repair a divergence.
-// The reference tree is absent from this environment, so the current behaviour is pinned
-// here and the question is carried by ticket #1963. This case documents the status quo; it
-// is not an endorsement of it.
-TEST(ThreadingArgumentDomainTests, PeriodicTimer_FractionalPeriod_StillTruncates_SeeTicket1963) {
+// SR-AUD-200's CONCLUSION IS REFUTED, and #1963 settled it from the reference tree rather
+// than from recollection. PeriodicTimer.TryGetMilliseconds (PeriodicTimer.cs:110-121) reads
+//
+//     long ms = (long)value.TotalMilliseconds;
+//     if ((ms >= 1 && ms <= Timer.MaxSupportedTimeout) || value == Timeout.InfiniteTimeSpan)
+//
+// so .NET truncates a fractional period and schedules it. #1954 declined to implement the
+// finding's "the input must be rejected" on exactly this reading, and the reading was right;
+// rejecting would narrow AWAY from .NET. The cases below are therefore no longer a pin on an
+// unendorsed status quo -- they assert .NET's own domain.
+TEST(ThreadingArgumentDomainTests, PeriodicTimer_FractionalPeriodIsTruncated_NotRejected) {
     EXPECT_NO_THROW({
         PeriodicTimer t(System::TimeSpan::FromMilliseconds(1.5));
         t.Dispose();
@@ -708,9 +712,30 @@ TEST(ThreadingArgumentDomainTests, PeriodicTimer_FractionalPeriod_StillTruncates
         PeriodicTimer t(System::TimeSpan::FromMilliseconds(2.0));
         t.Dispose();
     });
-    // the range boundary that IS validated today, unchanged by this ticket
+    // A period that truncates BELOW one millisecond is out of domain in .NET too, because the
+    // cast runs before the >= 1 test.
+    EXPECT_THROW(PeriodicTimer(System::TimeSpan::FromMilliseconds(0.9)),
+                 System::ArgumentOutOfRangeException);
     EXPECT_THROW(PeriodicTimer(System::TimeSpan::FromMilliseconds(0.0)),
                  System::ArgumentOutOfRangeException);
     EXPECT_THROW(PeriodicTimer(System::TimeSpan::FromMilliseconds(-5.0)),
+                 System::ArgumentOutOfRangeException);
+}
+
+// The order of truncation and comparison is observable at the CEILING, and this is where
+// #1963 changed behaviour. .NET truncates first, so a period whose fractional part alone
+// pushes it past Timer.MaxSupportedTimeout is still accepted; this port compared the double
+// and rejected it. Timer.MaxSupportedTimeout is 0xFFFFFFFE.
+TEST(ThreadingArgumentDomainTests, PeriodicTimer_CeilingIsTestedAfterTruncation) {
+    constexpr double kMax = 4294967294.0;   // 0xFFFFFFFE
+    EXPECT_NO_THROW({
+        PeriodicTimer t(System::TimeSpan::FromMilliseconds(kMax));
+        t.Dispose();
+    });
+    EXPECT_NO_THROW({
+        PeriodicTimer t(System::TimeSpan::FromMilliseconds(kMax + 0.5));
+        t.Dispose();
+    }) << "the fractional part alone must not push a period out of domain";
+    EXPECT_THROW(PeriodicTimer(System::TimeSpan::FromMilliseconds(kMax + 1.0)),
                  System::ArgumentOutOfRangeException);
 }

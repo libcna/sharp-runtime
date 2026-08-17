@@ -2,6 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Environment.hpp"
+#ifdef _WIN32
+#include "System/ApplicationException.hpp"
+#endif
 #include "System/IO/DirectoryNotFoundException.hpp"
 
 #if defined(_WIN32)
@@ -607,21 +610,31 @@ namespace {
         out += '"';
     }
 
+#ifdef _WIN32
     // PasteArguments.Paste's pasteFirstArgumentUsingArgV0Rules branch. argv[0] parses under
     // different rules: a backslash is always an ordinary character and quotes exist only to
     // carry whitespace, so there is no way to escape anything.
+    //
+    // WINDOWS ONLY, and that is .NET's split, resolved by ticket #2242 from the reference
+    // tree: PasteArguments has two partial implementations, and the Unix one
+    // (PasteArguments.Unix.cs) IGNORES pasteFirstArgumentUsingArgV0Rules entirely -- every
+    // argument, argv[0] included, goes through AppendArgument. See getCommandLineProperty().
     void appendArgV0(std::string& out, const std::string& argument) {
         bool hasWhitespace = false;
-        for (char c : argument)
-            if (isArgWhitespace(c)) { hasWhitespace = true; break; }
+        for (char c : argument) {
+            if (c == '"') {
+                // A literal '"' cannot be represented under these rules at all, and .NET
+                // rejects it rather than emitting something that will not parse back:
+                // PasteArguments.Windows.cs throws ApplicationException(
+                // SR.Argv_IncludeDoubleQuote) from inside this very loop. #2241 emitted it
+                // verbatim on the reasoning that a throwing diagnostic property is worse than
+                // an unparseable one; #2242 measured the reference and that pin was wrong.
+                throw System::ApplicationException("The argv[0] argument cannot include a double quote.");
+            }
+            if (isArgWhitespace(c)) hasWhitespace = true;
+        }
 
         if (argument.empty() || hasWhitespace) {
-            // A literal '"' cannot be represented under these rules at all. This port emits
-            // it verbatim rather than rejecting the argument, because a public diagnostic
-            // property that throws for a legal argv[0] would be a worse failure than an
-            // unparseable one. What .NET does here is not derivable from the finding and
-            // /rv is absent in this container, so the choice is PINNED by a test and
-            // deferred to ticket #2242 rather than guessed.
             out += '"';
             out += argument;
             out += '"';
@@ -629,6 +642,7 @@ namespace {
             out += argument;
         }
     }
+#endif // _WIN32
 
 } // namespace
 
@@ -642,10 +656,31 @@ std::string Environment::getCommandLineProperty() {
     // build-probe/2239_probe1_before.log, 16 of 18 rows wrong. An argument that is non-empty
     // and free of whitespace and quotes is still emitted verbatim, so the common case is
     // byte-identical to the old output. Ticket #2241 / SR-AUD-108.
+    //
+    // Ticket #2242 added the platform split, and it is transcribed rather than invented.
+    // .NET's PasteArguments is a partial class with two implementations of Paste:
+    //
+    //   PasteArguments.Windows.cs  honours pasteFirstArgumentUsingArgV0Rules
+    //   PasteArguments.Unix.cs     "On Unix: the rules for parsing the executable name
+    //                              (argv[0]) are ignored" -- every argument, argv[0]
+    //                              included, goes through AppendArgument
+    //
+    // Environment.cs:125 passes `pasteFirstArgumentUsingArgV0Rules: true` on both, so the
+    // flag is honoured on Windows and discarded everywhere else. This port applied the
+    // argv[0] rules unconditionally, which diverged on its own baseline platform.
+    //
+    // The two rule sets agree on almost everything, so the observable Linux change is small:
+    // an argv[0] with whitespace is quoted either way, one containing only backslashes is
+    // emitted verbatim either way, and an empty argv[0] becomes "" either way. They differ
+    // for an argv[0] containing a quote -- now escaped as `"pro\"g"` rather than emitted raw.
     std::string result;
     for (std::size_t i = 0; i < s_commandLineArgs.size(); ++i) {
+#ifdef _WIN32
         if (i == 0) appendArgV0(result, s_commandLineArgs[i]);
         else        appendArgument(result, s_commandLineArgs[i]);
+#else
+        appendArgument(result, s_commandLineArgs[i]);
+#endif
     }
     return result;
 }

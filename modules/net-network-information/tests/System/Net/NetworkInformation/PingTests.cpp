@@ -224,7 +224,12 @@ TEST(PingTests, Send_WrappedFailure_NetworkInformationExceptionKeepsItsNativeErr
     }
 }
 
-TEST(PingTests, Send_WrappedFailure_OuterMessageIsUnchanged) {
+// #2192 replaced this port's two invented PingException messages with the ONE the reference
+// uses. SR.net_ping is "An exception occurred during a Ping request."
+// (System.Net.Ping/src/Resources/Strings.resx:75) and it is the message at every PingException
+// construction site in .NET -- Ping.cs:411, Ping.Windows.cs:283, Ping.PingUtility.cs:69 and :104.
+// There is no separate resource for a resolver failure and none for an ICMP failure.
+TEST(PingTests, Send_WrappedFailure_CarriesTheReferenceMessage) {
     std::exception_ptr raised = firstRefusedSend();
     if (!raised) {
         GTEST_SKIP() << "every candidate ICMP send succeeded on this host";
@@ -232,8 +237,7 @@ TEST(PingTests, Send_WrappedFailure_OuterMessageIsUnchanged) {
     try {
         std::rethrow_exception(raised);
     } catch (const PingException& pe) {
-        EXPECT_EQ(std::string(pe.what()),
-                  "An exception occurred while sending or receiving the ICMP message.");
+        EXPECT_EQ(std::string(pe.what()), "An exception occurred during a Ping request.");
     }
 }
 
@@ -484,13 +488,36 @@ TEST(PingTests, Send_ReachablePaths_LeakNoDescriptors) {
     EXPECT_EQ(countOwnDescriptors(), beforeLeak);
 }
 
-// Ticket #2192 (deferred verification): a resolver failure is raised OUTSIDE the wrapper, so it
-// escapes as a SocketException rather than as a PingException, while the module's own
-// "Could not resolve host name or address." PingException sits on a branch Dns::GetHostAddresses
-// makes practically unreachable. Which of the two .NET produces cannot be settled in this
-// container. Pinning the current answer is what stops it from changing silently.
-TEST(PingTests, Send_UnresolvableHost_ThrowsSocketExceptionUnwrapped_PIN2192) {
+// Ticket #2192, SETTLED against the reference. Ping.GetAddressAndSend (Ping.cs:686-702) puts
+// Dns.GetHostAddresses INSIDE the same try as the send:
+//
+//     try { IPAddress[] addresses = Dns.GetHostAddresses(hostNameOrAddress);
+//           return SendPingCore(addresses[0], buffer, timeout, options); }
+//     catch (Exception e) when (e is not PlatformNotSupportedException)
+//     { throw new PingException(SR.net_ping, e); }
+//
+// so a resolver failure reaches the caller as a PingException carrying the SocketException as
+// its INNER exception. This port raised it outside the wrapper and let the SocketException
+// escape bare. The pin is inverted, which is what the ticket said would happen if the
+// reference disagreed.
+TEST(PingTests, Send_UnresolvableHost_IsWrappedInPingException) {
     Ping ping;
     EXPECT_THROW(static_cast<void>(ping.Send(std::string("no-such-host.invalid.example"))),
-                 System::Net::Sockets::SocketException);
+                 PingException);
+}
+
+// The wrapping must not destroy the cause: .NET passes the original exception as the inner one,
+// and #2189 already established that this port captures it with std::current_exception() so the
+// dynamic type survives. Together those mean the SocketException is still reachable.
+TEST(PingTests, Send_UnresolvableHost_KeepsTheResolverFailureAsTheInnerException) {
+    Ping ping;
+    try {
+        static_cast<void>(ping.Send(std::string("no-such-host.invalid.example")));
+        FAIL() << "expected PingException";
+    } catch (const PingException& pe) {
+        EXPECT_EQ(std::string(pe.what()), "An exception occurred during a Ping request.");
+        std::exception_ptr inner = pe.getInnerExceptionProperty();
+        ASSERT_TRUE(inner) << "the resolver failure was discarded";
+        EXPECT_THROW(std::rethrow_exception(inner), System::Net::Sockets::SocketException);
+    }
 }

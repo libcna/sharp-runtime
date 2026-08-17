@@ -4,6 +4,7 @@
 #include "System/Net/NetworkInformation/Ping.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/IndexOutOfRangeException.hpp"
 #include "System/Net/Dns.hpp"
 #include "System/Net/NetworkInformation/NetworkInformationException.hpp"
 #include "System/Net/NetworkInformation/PingException.hpp"
@@ -353,6 +354,18 @@ namespace {
     using PingCore = PingReply (*)(const System::Net::IPAddress&, const std::vector<SharpRuntime::bytecs>&,
                                     SharpRuntime::intcs, const PingOptions*);
 
+    /**
+     * The ONE message .NET gives every `PingException` it raises.
+     *
+     * Ticket #2192 read it out of the reference: `SR.net_ping` is
+     * "An exception occurred during a Ping request." (`System.Net.Ping/src/Resources/Strings.resx:75`),
+     * and it is the message at **every** `PingException` construction site in the reference —
+     * `Ping.cs:411`, `Ping.Windows.cs:283`, `Ping.PingUtility.cs:69` and `:104`. There is no
+     * separate resource for a resolver failure and none for an ICMP failure. The two distinct
+     * texts this port used before #2192 were invented here.
+     */
+    constexpr const char* PingFailureMessage = "An exception occurred during a Ping request.";
+
     PingReply sendWithExceptionWrapping(const System::Net::IPAddress& address,
                                           const std::vector<SharpRuntime::bytecs>& buffer, SharpRuntime::intcs timeout,
                                           const PingOptions* options, PingCore core) {
@@ -376,8 +389,7 @@ namespace {
             // CURRENTLY BEING HANDLED, so the dynamic type and every payload survive, and the
             // catch-all means a cause that does not derive from std::exception is preserved too
             // rather than escaping this wrapper unwrapped.
-            throw PingException("An exception occurred while sending or receiving the ICMP message.",
-                                 std::current_exception());
+            throw PingException(PingFailureMessage, std::current_exception());
         }
     }
 
@@ -390,20 +402,45 @@ namespace {
      * the door precisely so this function -- which runs on a worker thread for the asynchronous
      * doors -- performs I/O only.
      *
-     * @note `System::Net::Dns::GetHostAddresses` throws on every resolver failure, so the empty
-     * check below is reached only if the resolver succeeds while yielding no address of a
-     * collectable family. That asymmetry -- a `SocketException` escaping unwrapped where the very
-     * next line declares a `PingException` -- is ticket #2192, deliberately left as-is and pinned
-     * by test until a .NET reference is available to settle it.
+     * @note **Resolution happens INSIDE the wrapper, and that is .NET's shape** (ticket #2192,
+     * settled against the reference). `Ping.GetAddressAndSend` is
+     *
+     *     try { IPAddress[] addresses = Dns.GetHostAddresses(hostNameOrAddress);
+     *           return SendPingCore(addresses[0], buffer, timeout, options); }
+     *     catch (Exception e) when (e is not PlatformNotSupportedException)
+     *     { throw new PingException(SR.net_ping, e); }
+     *
+     * (`Ping.cs:686-702`) — **one** `try` covering both the resolve and the send. Before #2192
+     * this port called `Dns::GetHostAddresses` outside the wrapper, so an unresolvable host
+     * escaped as a bare `System::Net::Sockets::SocketException` where .NET reports a
+     * `PingException` carrying that `SocketException` as its inner exception.
+     *
+     * @note The empty-list branch is also .NET's, in the only form .NET has: the reference
+     * indexes `addresses[0]` with no emptiness check at all, so an empty result raises
+     * `IndexOutOfRangeException` **inside** the try and reaches the caller as a `PingException`
+     * wrapping it. Throwing that exception explicitly reproduces the observable outcome without
+     * relying on `std::vector::operator[]`, whose out-of-range behaviour is undefined. The port's
+     * former "Could not resolve host name or address." message has no counterpart in the
+     * reference and is gone.
+     *
+     * @note There is deliberately no nested call to `sendWithExceptionWrapping` here — that
+     * would wrap a `PingException` inside another `PingException`, which .NET's single `try`
+     * cannot produce.
      */
     PingReply sendToResolvedHost(const std::string& hostNameOrAddress, SharpRuntime::intcs timeout,
                                   const std::vector<SharpRuntime::bytecs>& buffer, const PingOptions* options,
                                   PingCore core) {
-        auto addresses = System::Net::Dns::GetHostAddresses(hostNameOrAddress);
-        if (addresses.empty()) {
-            throw PingException("Could not resolve host name or address.");
+        try {
+            auto addresses = System::Net::Dns::GetHostAddresses(hostNameOrAddress);
+            if (addresses.empty()) {
+                throw System::IndexOutOfRangeException();
+            }
+            return core(addresses[0], buffer, timeout, options);
+        } catch (const System::PlatformNotSupportedException&) {
+            throw;
+        } catch (...) {
+            throw PingException(PingFailureMessage, std::current_exception());
         }
-        return sendWithExceptionWrapping(addresses[0], buffer, timeout, options, core);
     }
 
 } // namespace
