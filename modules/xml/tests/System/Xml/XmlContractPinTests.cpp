@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "System/TimeSpan.hpp"
+#include "System/FormatException.hpp"
 #include "System/Xml/XmlConvert.hpp"
 #include "System/Xml/XmlDocument.hpp"
 #include "System/Xml/XmlElement.hpp"
@@ -128,26 +129,80 @@ TEST(XmlContractPinTests, TheSixNodeChangeHandlersAreStillPublicDataMembers) {
 // #2080 (SR-AUD-354) — DEFERRED VERIFICATION: XmlConvert's TimeSpan lexical space
 // ===========================================================================
 //
-// SR-AUD-354 is correct: XmlConvert uses the framework's colon form, not the XSD duration
-// lexical space. The repair is NOT decidable in this container. xs:duration carries years and
-// months, which have no fixed length in ticks; .NET resolves that with a specific documented
-// approximation, and choosing a different one produces silently wrong durations rather than a
-// visible error. Three sub-questions have no repository-contained answer: the year/month
-// conversion factors, whether the native "1.00:00:00" form stays accepted (a widening
-// question), and the exact exception identity. All four measured behaviours are pinned here.
+// SR-AUD-354 was correct: XmlConvert used the framework's colon form, not the XSD duration
+// lexical space. The deferral listed three sub-questions with no repository-contained answer --
+// the year/month conversion factors, whether the native form stays accepted, and the exact
+// exception identity -- and every one of them is answered by the reference now.
+//
+//   * Year/month factors: XsdDuration ESTIMATES, 365 days to the year and 30 to the month, and
+//     says so in as many words (XsdDuration.cs:243-244). Reproduced, not improved on: a
+//     "better" estimate would disagree with every .NET-produced value.
+//   * The native form: NOT accepted. XsdDuration's parser requires a leading 'P', and
+//     XmlConvert.ToTimeSpan goes straight to it (XmlConvert.cs:1109-1127).
+//   * The exception: FormatException, always. XmlConvert.ToTimeSpan wraps every XsdDuration
+//     failure -- including OverflowException -- in one, "Remap exception for v1 compatibility"
+//     (:1118-1122).
 
-TEST(XmlContractPinTests, Pin2080_XsdDurationIsRejectedAndTheColonFormIsAccepted) {
-    EXPECT_ANY_THROW((void)XmlConvert::ToTimeSpan("P1D"));
-    EXPECT_ANY_THROW((void)XmlConvert::ToTimeSpan("PT1H30M"));
-    EXPECT_NO_THROW((void)XmlConvert::ToTimeSpan("1.00:00:00")); // the native form is accepted
-    EXPECT_EQ(XmlConvert::ToTimeSpan("1.00:00:00"), TimeSpan::FromDays(1));
+TEST(XmlContractPinTests, Fix2080_TheXsdDurationFormIsParsed) {
+    EXPECT_EQ(XmlConvert::ToTimeSpan("P1D"), TimeSpan::FromDays(1));
+    EXPECT_EQ(XmlConvert::ToTimeSpan("PT1H30M"), TimeSpan::FromMinutes(90));
+    EXPECT_EQ(XmlConvert::ToTimeSpan("P1DT2H3M4S").getTicksProperty(), 937840000000LL);
+    EXPECT_EQ(XmlConvert::ToTimeSpan("PT0S"), TimeSpan::FromTicks(0));
+    EXPECT_EQ(XmlConvert::ToTimeSpan("-P1D"), TimeSpan::FromDays(-1));
+    // A fractional second, and the tick is its limit: 0.1234567 s is 1,234,567 ticks.
+    EXPECT_EQ(XmlConvert::ToTimeSpan("PT0.1234567S").getTicksProperty(), 1234567LL);
+    // Years and months use .NET's OWN estimate -- 365 and 30 days.
+    EXPECT_EQ(XmlConvert::ToTimeSpan("P1Y"), TimeSpan::FromDays(365));
+    EXPECT_EQ(XmlConvert::ToTimeSpan("P1M"), TimeSpan::FromDays(30));
+    EXPECT_EQ(XmlConvert::ToTimeSpan("P12M"), TimeSpan::FromDays(365)) << "12 months round to a year";
 }
 
-TEST(XmlContractPinTests, Pin2080_ToStringEmitsTheColonFormNotAnXsdDuration) {
-    const std::string emitted = XmlConvert::ToString(TimeSpan::FromDays(1));
-    EXPECT_NE(emitted.find("00:00:00"), std::string::npos) << "emitted: " << emitted;
-    EXPECT_EQ(emitted.find('P'), std::string::npos)
-        << "an xs:duration would start with 'P'; emitted: " << emitted;
+TEST(XmlContractPinTests, Fix2080_TheNativeColonFormIsNoLongerAccepted) {
+    // The narrowing, and it is .NET's: XsdDuration requires a leading 'P'. Accepting both would
+    // make this method's contract "either grammar", which no reference or schema defines.
+    EXPECT_THROW((void)XmlConvert::ToTimeSpan("1.00:00:00"), System::FormatException);
+    EXPECT_THROW((void)XmlConvert::ToTimeSpan("00:00:01"), System::FormatException);
+}
+
+TEST(XmlContractPinTests, Fix2080_TheGrammarIsRejectedWhereDotNetRejectsIt) {
+    for (const char* bad : {"", "P", "-P", "1D", "PD", "PT", "P1", "P1T1H", "PT1H30",
+                            "P1DX", "P1D "}) {
+        SCOPED_TRACE(bad);
+        EXPECT_THROW((void)XmlConvert::ToTimeSpan(bad), System::FormatException);
+    }
+    // "P1Y2M3DT4H5M6S" is the fully populated form and must still be accepted, so the rejections
+    // above cannot be passing vacuously.
+    EXPECT_NO_THROW((void)XmlConvert::ToTimeSpan("P1Y2M3DT4H5M6S"));
+
+    // "PT.5S" IS accepted, and that surprised this ticket's first cut. .NET's '.' branch does
+    // NOT require a digit before the point -- unlike every other component, it never checks
+    // numDigits (XsdDuration.cs, the `if (s[pos] == '.')` branch) -- and XML Schema agrees:
+    // duSecondFrag admits `('.' fracFrag)` with no leading digits. The expectation was wrong,
+    // not the parser, and this row records that so it is not "fixed" later.
+    EXPECT_EQ(XmlConvert::ToTimeSpan("PT.5S"), TimeSpan::FromTicks(5000000LL));
+}
+
+TEST(XmlContractPinTests, Fix2080_ToStringEmitsAnXsdDuration) {
+    EXPECT_EQ(XmlConvert::ToString(TimeSpan::FromDays(1)), "P1D");
+    EXPECT_EQ(XmlConvert::ToString(TimeSpan::FromTicks(0)), "PT0S") << "zero is PT0S";
+    EXPECT_EQ(XmlConvert::ToString(TimeSpan::FromMinutes(90)), "PT1H30M");
+    EXPECT_EQ(XmlConvert::ToString(TimeSpan::FromTicks(937840000000LL)), "P1DT2H3M4S");
+    EXPECT_EQ(XmlConvert::ToString(TimeSpan::FromDays(-1)), "-P1D");
+    // A fractional second is nine digits with trailing zeros stripped, so a tick shows as
+    // seven significant digits and no more.
+    EXPECT_EQ(XmlConvert::ToString(TimeSpan::FromTicks(1)), "PT0.0000001S");
+    EXPECT_EQ(XmlConvert::ToString(TimeSpan::FromTicks(1234567LL)), "PT0.1234567S");
+    EXPECT_EQ(XmlConvert::ToString(TimeSpan::FromTicks(5000000LL)), "PT0.5S");
+}
+
+TEST(XmlContractPinTests, Fix2080_ToStringAndToTimeSpanRoundTrip) {
+    // The property that makes the pair usable at all, asserted rather than assumed.
+    for (long long ticks : {0LL, 1LL, -1LL, 937840000000LL, -937840000000LL, 864000000000LL,
+                            1234567LL, 36000000000LL}) {
+        SCOPED_TRACE(ticks);
+        const auto original = TimeSpan::FromTicks(ticks);
+        EXPECT_EQ(XmlConvert::ToTimeSpan(XmlConvert::ToString(original)), original);
+    }
 }
 
 // ===========================================================================

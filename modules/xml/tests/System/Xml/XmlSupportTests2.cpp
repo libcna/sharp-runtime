@@ -287,18 +287,28 @@ TEST(XmlNodeChangedEventArgsTests, StoresConstructorArguments) {
 //
 // Ticket #1836 (SR-AUD-008, CCF-004 class C). docs/DefinedArithmeticBoundaryPlan.md section 15
 // requires enumerating every public door onto a repaired site, including the ones in other
-// modules. XmlConvert::ToTimeSpan forwards straight to System::TimeSpan::Parse, so before the
-// repair it returned a wrapped negative duration for a large positive day count. It now
-// surfaces the same OverflowException the underlying parser raises.
+// modules. XmlConvert::ToTimeSpan used to forward straight to System::TimeSpan::Parse, so before
+// that repair it returned a wrapped negative duration for a large positive day count.
 //
-// This does not narrow the separately documented gap that this method parses .NET's native
-// colon-separated TimeSpan format rather than the XML Schema `duration` lexical form.
+// TICKET #2080 REPLACED THE GRAMMAR UNDER THIS DOOR. XmlConvert::ToTimeSpan now parses the XML
+// Schema `duration` form, as .NET's does, and no longer accepts the native colon form at all --
+// so these two cases are rewritten in the new grammar rather than deleted. The property #1836
+// cares about is unchanged and is what they still assert: an out-of-range duration RAISES
+// instead of wrapping to a negative value.
 
-TEST(XmlConvertTests, ToTimeSpan_ValidNativeFormat_1836) {
-    const System::TimeSpan ts = XmlConvert::ToTimeSpan("1.02:03:04");
+TEST(XmlConvertTests, ToTimeSpan_ValidDuration_1836) {
+    // "1.02:03:04" in the old grammar; the same instant is "P1DT2H3M4S" in this one.
+    const System::TimeSpan ts = XmlConvert::ToTimeSpan("P1DT2H3M4S");
     EXPECT_EQ(ts.getTicksProperty(), 937840000000LL);
 }
 
-TEST(XmlConvertTests, ToTimeSpan_DayCountBeyondRange_ThrowsOverflow_1836) {
-    EXPECT_THROW(XmlConvert::ToTimeSpan("2147483647.00:00:00"), System::OverflowException);
+TEST(XmlConvertTests, ToTimeSpan_DayCountBeyondRange_Throws_1836) {
+    // #1836's property: an out-of-range day count must RAISE, not wrap to a negative duration.
+    // The exception TYPE changed with the grammar and that is .NET's own behaviour --
+    // XmlConvert.ToTimeSpan wraps every XsdDuration failure in a FormatException
+    // ("Remap exception for v1 compatibility", XmlConvert.cs:1118-1122), so an overflow that
+    // XsdDuration reports as OverflowException reaches the caller as FormatException.
+    EXPECT_THROW((void)XmlConvert::ToTimeSpan("P2147483647DT0H0M0S"), System::FormatException);
+    // ...and the wrapped value is not produced under any spelling.
+    EXPECT_THROW((void)XmlConvert::ToTimeSpan("P999999999999999999999D"), System::FormatException);
 }
