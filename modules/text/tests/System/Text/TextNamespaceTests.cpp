@@ -105,7 +105,10 @@ TEST(EncodingTests, DecoderFallback_DefaultIsReplacement) {
 }
 
 TEST(EncodingTests, SetDecoderFallback_Roundtrips) {
-    auto utf8 = Encoding::UTF8();
+    // #2013: the FACTORY instance is read-only, so this round-trip is exercised on an encoding
+    // the caller owns -- which is also what a caller must now write. Mutating Encoding::UTF8()
+    // changed what every other caller in the process decoded and raced a concurrent conversion.
+    auto utf8 = std::make_shared<System::Text::UTF8Encoding>();
     auto originalFallback = utf8->getDecoderFallbackProperty();
     auto exceptionFallback = DecoderFallback::ExceptionFallback();
     utf8->setDecoderFallbackProperty(exceptionFallback);

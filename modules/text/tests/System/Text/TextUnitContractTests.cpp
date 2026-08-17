@@ -15,6 +15,8 @@
 // (plan sections 14.2 and 14.3) rather than pass unnoticed.
 
 #include <gtest/gtest.h>
+#include "System/Text/EncoderFallback.hpp"
+#include "System/InvalidOperationException.hpp"
 
 #include <string>
 #include <vector>
@@ -89,22 +91,56 @@ TEST(TextUnitContractTests, Latin1MapsStorageBytesNotCodePoints) {
     EXPECT_EQ("Hi", l.GetString(hi.data(), 0, static_cast<SharpRuntime::intcs>(hi.size())));
 }
 
-TEST(TextUnitContractTests, TheFactoryEncodingsAreStillOneSharedMutableObject) {
-    // Pinned for #2013 (plan section 14.1): .NET's factory encodings are read-only, and this
-    // port's are not. A repair that makes the setter throw must fail here and reach its
-    // approval sentence.
+TEST(TextUnitContractTests, Fix2013_TheFactoryEncodingsAreSharedAndREADONLY) {
+    // #2013 LANDED 2026-08-17, and this pin is INVERTED. The seven factory encodings are still
+    // ONE shared object each -- that part was never the defect and .NET does the same -- but a
+    // caller can no longer mutate it, so it can no longer change what every other caller in the
+    // process decodes. .NET's answer is exactly this: ASCIIEncoding.s_default and its siblings
+    // are read-only and their fallback setters throw InvalidOperationException
+    // (Encoding.cs:485-497), with SR.InvalidOperation_ReadOnly = "Instance is read-only."
     EXPECT_EQ(Encoding::UTF8().get(), Encoding::UTF8().get());
     EXPECT_EQ(Encoding::ASCII().get(), Encoding::ASCII().get());
 
-    auto saved = Encoding::UTF8()->getDecoderFallbackProperty();
-    Encoding::UTF8()->setDecoderFallbackProperty(
-        std::make_shared<System::Text::DecoderReplacementFallback>("<X>"));
+    for (const auto& factory : {Encoding::UTF8(), Encoding::ASCII(), Encoding::Unicode(),
+                                Encoding::BigEndianUnicode(), Encoding::UTF32(),
+                                Encoding::UTF7(), Encoding::Latin1()}) {
+        EXPECT_TRUE(factory->getIsReadOnlyProperty());
+        EXPECT_THROW(factory->setDecoderFallbackProperty(
+                         std::make_shared<System::Text::DecoderReplacementFallback>("<X>")),
+                     System::InvalidOperationException);
+        EXPECT_THROW(factory->setEncoderFallbackProperty(
+                         System::Text::EncoderFallback::ExceptionFallback()),
+                     System::InvalidOperationException);
+    }
+
+    // ...and the shared instance still decodes the way it always did, because nothing reached it.
     const std::vector<bytecs> bad{0xFF};
-    EXPECT_EQ("<X>", Encoding::UTF8()->GetString(bad.data(), 0, 1))
-        << "gated by #2013: a caller mutating the shared factory instance changes what every "
-           "other caller decodes";
-    Encoding::UTF8()->setDecoderFallbackProperty(saved);
     EXPECT_EQ("\xEF\xBF\xBD", Encoding::UTF8()->GetString(bad.data(), 0, 1));
+}
+
+TEST(TextUnitContractTests, Fix2013_TheReadOnlyTestPrecedesTheNullTest) {
+    // Order matters and is .NET's: Encoding.cs:490-494 checks IsReadOnly BEFORE
+    // ArgumentNullException.ThrowIfNull, so a null handed to a shared factory instance reports
+    // the read-only violation rather than the null one.
+    EXPECT_THROW(Encoding::UTF8()->setDecoderFallbackProperty(nullptr),
+                 System::InvalidOperationException);
+    EXPECT_THROW(Encoding::UTF8()->setEncoderFallbackProperty(nullptr),
+                 System::InvalidOperationException);
+}
+
+TEST(TextUnitContractTests, Fix2013_AnEncodingTheCallerConstructedIsStillConfigurable) {
+    // The control, and the migration path. Making the factories read-only must not have made
+    // the fallback setters useless: an encoding the caller constructed is writable, and its
+    // configuration is its own -- it does not leak into the shared instance.
+    auto own = std::make_shared<System::Text::UTF8Encoding>();
+    EXPECT_FALSE(own->getIsReadOnlyProperty());
+    own->setDecoderFallbackProperty(
+        std::make_shared<System::Text::DecoderReplacementFallback>("<X>"));
+
+    const std::vector<bytecs> bad{0xFF};
+    EXPECT_EQ("<X>", own->GetString(bad.data(), 0, 1));
+    EXPECT_EQ("\xEF\xBF\xBD", Encoding::UTF8()->GetString(bad.data(), 0, 1))
+        << "configuring a caller-owned encoding reached the shared factory instance";
 }
 
 TEST(TextUnitContractTests, TheGatedBomAndFallbackBehavioursAreStillWhatTheyWere) {

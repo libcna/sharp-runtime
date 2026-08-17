@@ -443,12 +443,37 @@ TEST(TextLayoutPinTests, PublicTypeLayoutIsUnchanged) {
     // These are the measured sizes on the verified Linux/GCC x86-64 baseline. They exist so a
     // repair that adds a data member -- the one thing that would break a consumer without a
     // compiler diagnostic -- fails here.
-    EXPECT_EQ(sizeof(void*) + 2 * sizeof(std::shared_ptr<int>), sizeof(Encoding));
+    //
+    // #2013 added ONE member, `Encoding::isReadOnly_`, and the measurement is worth stating
+    // exactly because it is not the obvious one:
+    //
+    //     Encoding          40 -> 48   the vtable pointer and two shared_ptrs used all 40
+    //                                  bytes, so the bool costs a whole aligned slot
+    //     UnicodeEncoding   48 -> 48   UNCHANGED: its own bool used to sit in ITS tail padding
+    //     UTF32Encoding     48 -> 48   and now sits in the base's, which the new slot created
+    //
+    // So the derived encodings did NOT grow, and asserting that is the point: a pin written as
+    // "base + sizeof(void*)" would have been wrong in both directions. Landed under
+    // docs/StandingApprovals.md SA-3; docs/Migration-EncodingReadOnlyFactories.md records the
+    // full-consumer-rebuild requirement.
+    struct EncodingShadow {
+        virtual ~EncodingShadow() = default;
+        std::shared_ptr<int> decoderFallback;
+        std::shared_ptr<int> encoderFallback;
+        bool isReadOnly;
+    };
+    EXPECT_EQ(sizeof(Encoding), sizeof(EncodingShadow));
     EXPECT_EQ(sizeof(Encoding), sizeof(UTF8Encoding));
     EXPECT_EQ(sizeof(Encoding), sizeof(ASCIIEncoding));
     EXPECT_EQ(sizeof(Encoding), sizeof(Latin1Encoding));
-    EXPECT_EQ(sizeof(Encoding) + sizeof(void*), sizeof(UnicodeEncoding));
-    EXPECT_EQ(sizeof(Encoding) + sizeof(void*), sizeof(UTF32Encoding));
+
+    struct EndiannessShadow : EncodingShadow {
+        bool bigEndian;
+        bool byteOrderMark;
+    };
+    EXPECT_EQ(sizeof(UnicodeEncoding), sizeof(EndiannessShadow))
+        << "the endian-aware encodings' own flags must still fit in the base's tail padding";
+    EXPECT_EQ(sizeof(UTF32Encoding), sizeof(EndiannessShadow));
     EXPECT_EQ(4u, sizeof(Rune));
     EXPECT_EQ(4u, alignof(Rune));
     EXPECT_EQ(sizeof(std::string), sizeof(StringBuilder));

@@ -14,43 +14,106 @@ namespace System::Text
 {
     std::shared_ptr<Encoding> Encoding::UTF8()
     {
-        static std::shared_ptr<Encoding> instance = std::make_shared<UTF8Encoding>();
+        static std::shared_ptr<Encoding> instance = [] {
+            auto e = std::make_shared<UTF8Encoding>();
+            // #2013: the seven factory instances are READ-ONLY, matching .NET's
+            // ASCIIEncoding.s_default and its siblings. A caller that wants to install a
+            // fallback calls Clone() first; before this, mutating one of these changed what
+            // every other caller in the process decoded, with a measured race against a
+            // concurrent conversion.
+            e->markReadOnly();
+            return e;
+        }();
         return instance;
     }
 
     std::shared_ptr<Encoding> Encoding::ASCII()
     {
-        static std::shared_ptr<Encoding> instance = std::make_shared<ASCIIEncoding>();
+        static std::shared_ptr<Encoding> instance = [] {
+            auto e = std::make_shared<ASCIIEncoding>();
+            // #2013: the seven factory instances are READ-ONLY, matching .NET's
+            // ASCIIEncoding.s_default and its siblings. A caller that wants to install a
+            // fallback calls Clone() first; before this, mutating one of these changed what
+            // every other caller in the process decoded, with a measured race against a
+            // concurrent conversion.
+            e->markReadOnly();
+            return e;
+        }();
         return instance;
     }
 
     std::shared_ptr<Encoding> Encoding::Unicode()
     {
-        static std::shared_ptr<Encoding> instance = std::make_shared<UnicodeEncoding>();
+        static std::shared_ptr<Encoding> instance = [] {
+            auto e = std::make_shared<UnicodeEncoding>();
+            // #2013: the seven factory instances are READ-ONLY, matching .NET's
+            // ASCIIEncoding.s_default and its siblings. A caller that wants to install a
+            // fallback calls Clone() first; before this, mutating one of these changed what
+            // every other caller in the process decoded, with a measured race against a
+            // concurrent conversion.
+            e->markReadOnly();
+            return e;
+        }();
         return instance;
     }
 
     std::shared_ptr<Encoding> Encoding::BigEndianUnicode()
     {
-        static std::shared_ptr<Encoding> instance = std::make_shared<UnicodeEncoding>(true, true);
+        static std::shared_ptr<Encoding> instance = [] {
+            auto e = std::make_shared<UnicodeEncoding>(true, true);
+            // #2013: the seven factory instances are READ-ONLY, matching .NET's
+            // ASCIIEncoding.s_default and its siblings. A caller that wants to install a
+            // fallback calls Clone() first; before this, mutating one of these changed what
+            // every other caller in the process decoded, with a measured race against a
+            // concurrent conversion.
+            e->markReadOnly();
+            return e;
+        }();
         return instance;
     }
 
     std::shared_ptr<Encoding> Encoding::UTF32()
     {
-        static std::shared_ptr<Encoding> instance = std::make_shared<UTF32Encoding>();
+        static std::shared_ptr<Encoding> instance = [] {
+            auto e = std::make_shared<UTF32Encoding>();
+            // #2013: the seven factory instances are READ-ONLY, matching .NET's
+            // ASCIIEncoding.s_default and its siblings. A caller that wants to install a
+            // fallback calls Clone() first; before this, mutating one of these changed what
+            // every other caller in the process decoded, with a measured race against a
+            // concurrent conversion.
+            e->markReadOnly();
+            return e;
+        }();
         return instance;
     }
 
     std::shared_ptr<Encoding> Encoding::UTF7()
     {
-        static std::shared_ptr<Encoding> instance = std::make_shared<UTF7Encoding>();
+        static std::shared_ptr<Encoding> instance = [] {
+            auto e = std::make_shared<UTF7Encoding>();
+            // #2013: the seven factory instances are READ-ONLY, matching .NET's
+            // ASCIIEncoding.s_default and its siblings. A caller that wants to install a
+            // fallback calls Clone() first; before this, mutating one of these changed what
+            // every other caller in the process decoded, with a measured race against a
+            // concurrent conversion.
+            e->markReadOnly();
+            return e;
+        }();
         return instance;
     }
 
     std::shared_ptr<Encoding> Encoding::Latin1()
     {
-        static std::shared_ptr<Encoding> instance = std::make_shared<Latin1Encoding>();
+        static std::shared_ptr<Encoding> instance = [] {
+            auto e = std::make_shared<Latin1Encoding>();
+            // #2013: the seven factory instances are READ-ONLY, matching .NET's
+            // ASCIIEncoding.s_default and its siblings. A caller that wants to install a
+            // fallback calls Clone() first; before this, mutating one of these changed what
+            // every other caller in the process decoded, with a measured race against a
+            // concurrent conversion.
+            e->markReadOnly();
+            return e;
+        }();
         return instance;
     }
 

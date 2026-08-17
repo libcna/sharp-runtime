@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "System/InvalidOperationException.hpp"
 
 #include <memory>
 #include <string>
@@ -31,17 +32,28 @@ namespace System::Text
      *       the unit is the approval-gated ticket **#2015**
      *       (`docs/SystemTextNamespaceReviewPlan.md` §14.3) and is not done here.
      *
-     * @note **The factory instances are shared and mutable.** `UTF8()` and its six siblings
-     *       each return the *same* object on every call, so a caller that installs a fallback
-     *       on one changes what every other caller decodes, and there is a measured data race
-     *       between a setter and a concurrent conversion. .NET's factory encodings are
-     *       read-only. Making these read-only is the approval-gated ticket **#2013**
-     *       (SR-AUD-288, plan §14.1).
+     * @note **The factory instances are shared and READ-ONLY** since ticket #2013 (SR-AUD-288).
+     *       `UTF8()` and its six siblings each return the same object on every call, so a
+     *       caller that installed a fallback on one changed what every other caller decoded --
+     *       and there was a measured data race between the setter and a concurrent conversion.
+     *       .NET solves this by making exactly those instances read-only
+     *       (`ASCIIEncoding.s_default` and friends) and rejecting a fallback setter on them
+     *       with `InvalidOperationException` (`Encoding.cs:485-497`). Call `Clone()` for a
+     *       writable copy, which is what .NET's own `Clone` is for -- it clears the flag
+     *       (`Encoding.cs:499-506`).
      */
     class Encoding
     {
         std::shared_ptr<DecoderFallback> decoderFallback_ = DecoderFallback::ReplacementFallback();
         std::shared_ptr<EncoderFallback> encoderFallback_ = EncoderFallback::ReplacementFallback();
+        /**
+         * Whether this instance rejects fallback mutation (ticket #2013).
+         *
+         * `false` for an encoding a caller constructed or cloned, `true` for the seven shared
+         * factory instances. .NET spells the same state as `Encoding._isReadOnly`, set on its
+         * `s_default` singletons and cleared by `Clone()`.
+         */
+        bool isReadOnly_ = false;
 
     public:
         virtual ~Encoding() = default;
@@ -149,6 +161,11 @@ namespace System::Text
          *       raises the same exception for the same reason.
          */
         void setDecoderFallbackProperty(std::shared_ptr<DecoderFallback> value) {
+            // #2013: the read-only test runs FIRST, and that order is .NET's --
+            // `Encoding.cs:490-494` checks IsReadOnly before ArgumentNullException.ThrowIfNull,
+            // so a null value handed to a shared factory instance reports the read-only
+            // violation rather than the null one.
+            throwIfReadOnly();
             if (value == nullptr) {
                 throw System::ArgumentNullException("value");
             }
@@ -166,6 +183,7 @@ namespace System::Text
          *       repairing one setter would have left the other.
          */
         void setEncoderFallbackProperty(std::shared_ptr<EncoderFallback> value) {
+            throwIfReadOnly();
             if (value == nullptr) {
                 throw System::ArgumentNullException("value");
             }
@@ -180,7 +198,32 @@ namespace System::Text
         /** @return A hash code derived from the code page identifier. */
         [[nodiscard]] virtual SharpRuntime::intcs GetHashCode() const { return getCodePageProperty(); }
 
+        /**
+         * @brief Whether this instance rejects fallback mutation.
+         *
+         * True for the seven shared factory instances, false for anything a caller constructed
+         * or obtained from `Clone()`. C++ counterpart of .NET `Encoding.IsReadOnly`
+         * (`Encoding.cs:508-512`).
+         */
+        [[nodiscard]] bool getIsReadOnlyProperty() const { return isReadOnly_; }
+
     protected:
         Encoding() = default;
+
+        /**
+         * Throws `InvalidOperationException("Instance is read-only.")` when this instance is one
+         * of the shared factory encodings. The message is .NET's `SR.InvalidOperation_ReadOnly`
+         * (`Strings.resx:2753`).
+         */
+        void throwIfReadOnly() const {
+            if (isReadOnly_) {
+                throw System::InvalidOperationException("Instance is read-only.");
+            }
+        }
+
+        /** Marks this instance read-only. Used by the factory singletons only. */
+        void markReadOnly() { isReadOnly_ = true; }
+
+
     };
 }
