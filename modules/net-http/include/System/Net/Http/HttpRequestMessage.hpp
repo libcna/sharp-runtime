@@ -8,6 +8,7 @@
 #include "System/Net/Http/detail/HttpFieldValidation.hpp"
 #include <memory>
 #include <string>
+#include <atomic>
 #include <unordered_map>
 
 namespace System::Net::Http {
@@ -29,6 +30,25 @@ class HttpRequestMessage {
     std::shared_ptr<HttpContent>                   content_;
     std::unordered_map<std::string, std::string>   headers_;
     HttpRequestOptions                              options_;
+    /**
+     * @brief Whether an `HttpClient` has already sent this message.
+     *
+     * Ticket #2067 (SR-AUD-314, CCF-019). .NET throws `InvalidOperationException` when one
+     * `HttpRequestMessage` is sent twice; this port had no such state, and a counting handler
+     * received the exact same object twice. That is not merely untidy: the second send reuses a
+     * content object the first send may already have consumed, and both sends share one headers
+     * map that the first one's handler may have mutated.
+     *
+     * .NET's flag is `_sendStatus`, set with an interlocked compare-and-exchange
+     * (`HttpRequestMessage.cs:26,173`) so two concurrent sends of one message cannot both win.
+     * `std::atomic_flag`'s `test_and_set` is the same operation, so this port gets the same
+     * guarantee rather than a racy approximation of it.
+     *
+     * Landed under `docs/StandingApprovals.md` SA-3: a private member, no vtable, base-class,
+     * signature or `noexcept` change, `sizeof` pinned by the layout probe.
+     */
+    std::atomic_flag sent_ = ATOMIC_FLAG_INIT;
+
 public:
     /** Constructs an HttpRequestMessage with the default GET method and an empty URI. */
     HttpRequestMessage() : method_(HttpMethod::Get()) {}
@@ -92,6 +112,25 @@ public:
     /** Returns the map of all request headers. */
     [[nodiscard]] const std::unordered_map<std::string, std::string>& getHeadersProperty() const {
         return headers_;
+    }
+
+    /**
+     * @brief Claims this message for one send, returning false if it was already claimed.
+     *
+     * Ticket #2067. The counterpart of .NET's `MarkAsSent()`
+     * (`HttpRequestMessage.cs:173`), which is an interlocked compare-and-exchange for the same
+     * reason this is a `test_and_set`: two threads sending one message must not both succeed.
+     *
+     * `HttpClient::Send` calls it and raises `InvalidOperationException` with .NET's own message
+     * when it returns false. It is public rather than private because a custom
+     * `HttpMessageHandler` invoked directly, without an `HttpClient`, is a legitimate caller.
+     */
+    bool MarkAsSent() noexcept { return !sent_.test_and_set(std::memory_order_acq_rel); }
+
+    /** @return Whether an `HttpClient` has already sent this message (#2067). */
+    [[nodiscard]] bool getWasSentProperty() const noexcept {
+        // test() is const-correct on the flag's value without claiming it.
+        return sent_.test(std::memory_order_acquire);
     }
 
     /** Gets the per-request option collection. */

@@ -4,6 +4,7 @@
 #pragma once
 #include "System/Net/Http/HttpContent.hpp"
 #include "System/Net/Http/HttpRequestException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Net/Http/detail/HttpFieldValidation.hpp"
 #include "System/Net/HttpStatusCode.hpp"
 #include <memory>
@@ -19,13 +20,55 @@ class HttpResponseMessage {
     std::string                                    reasonPhrase_;
     std::shared_ptr<HttpContent>                   content_;
     std::unordered_map<std::string, std::string>   headers_;
+    /**
+     * @brief `0 <= code <= 999`, exactly .NET's bound.
+     *
+     * Ticket #2069 (SR-AUD-316's status-code half). Measured before it, `-1`, `0`, `1000` and
+     * `99999` all constructed, and `getIsSuccessStatusCodeProperty()` answered false for each --
+     * so a nonsense code was indistinguishable from a real failure. .NET validates in both the
+     * constructor and the setter, with the same two checks in the same order
+     * (`HttpResponseMessage.cs:152-159` and `:65-76`):
+     *
+     * ```csharp
+     * ArgumentOutOfRangeException.ThrowIfNegative((int)value, nameof(value));
+     * ArgumentOutOfRangeException.ThrowIfGreaterThan((int)value, 999, nameof(value));
+     * ```
+     *
+     * The upper bound is **999**, not 599: RFC 9112 §4 makes a status code three digits, and
+     * .NET accepts every three-digit value rather than only the registered ranges. `0` is
+     * accepted too, and that is .NET's choice, not an oversight here.
+     */
+    static void throwIfStatusCodeOutOfRange(System::Net::HttpStatusCode value) {
+        const int code = static_cast<int>(value);
+        if (code < 0) {
+            throw System::ArgumentOutOfRangeException("value", "The status code must not be negative.");
+        }
+        if (code > 999) {
+            throw System::ArgumentOutOfRangeException("value", "The status code must not exceed 999.");
+        }
+    }
+
 public:
+    /**
+     * @brief Constructs a response with @p statusCode.
+     * @throws System::ArgumentOutOfRangeException if @p statusCode is negative or above 999.
+     * @see throwIfStatusCodeOutOfRange
+     */
     explicit HttpResponseMessage(
         System::Net::HttpStatusCode statusCode = System::Net::HttpStatusCode::OK)
-        : statusCode_(statusCode) {}
+        : statusCode_(statusCode) {
+        throwIfStatusCodeOutOfRange(statusCode);
+    }
 
     [[nodiscard]] System::Net::HttpStatusCode getStatusCodeProperty() const { return statusCode_; }
-    void setStatusCodeProperty(System::Net::HttpStatusCode v)               { statusCode_ = v; }
+    /**
+     * @brief Sets the status code.
+     * @throws System::ArgumentOutOfRangeException if @p v is negative or above 999 (#2069).
+     */
+    void setStatusCodeProperty(System::Net::HttpStatusCode v) {
+        throwIfStatusCodeOutOfRange(v);
+        statusCode_ = v;
+    }
 
     [[nodiscard]] const std::string& getReasonPhraseProperty() const { return reasonPhrase_; }
 

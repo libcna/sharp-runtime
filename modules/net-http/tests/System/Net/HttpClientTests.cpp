@@ -1888,6 +1888,10 @@ struct HttpRequestMessageLayoutProbe {
     std::shared_ptr<HttpContent>                 content;
     std::unordered_map<std::string, std::string> headers;
     HttpRequestOptions                           options;
+    // #2067 added exactly one member: the send-once flag, an atomic_flag for the same reason
+    // .NET uses an interlocked compare-and-exchange -- two threads sending one message must not
+    // both succeed.
+    std::atomic_flag                             sent;
 };
 struct HttpResponseMessageLayoutProbe {
     System::Net::HttpStatusCode                  statusCode;
@@ -1899,11 +1903,13 @@ struct HttpResponseMessageLayoutProbe {
 } // namespace
 
 static_assert(sizeof(HttpRequestMessage) == sizeof(HttpRequestMessageLayoutProbe),
-              "#2067's sent-state flag would grow HttpRequestMessage -- SR-AUD-314, "
-              "OBJECT LAYOUT CHANGE, NOT APPROVED");
+              "HttpRequestMessage's object layout moved. #2067 added exactly one member -- the "
+              "send-once flag -- under docs/StandingApprovals.md SA-3. Any further data member "
+              "here is a new object-layout change and needs its own approval.");
 static_assert(sizeof(HttpResponseMessage) == sizeof(HttpResponseMessageLayoutProbe),
-              "#2068/#2069 must not add state to HttpResponseMessage -- SR-AUD-315/316, "
-              "NOT APPROVED");
+              "HttpResponseMessage gained state. #2068 (case-insensitive lookup) and #2069 "
+              "(status-code validation) both landed WITHOUT adding a member -- neither "
+              "needed one, which is why neither needed an approval.");
 
 // The comparator of the returned map is PUBLIC SURFACE. #2062's review concluded from that
 // that #2068 "cannot make the lookup case-insensitive without changing this type, which is why
@@ -1930,17 +1936,52 @@ TEST(NetHttpGatedBehaviourPins, LayoutAndOwnershipModelAreStaticallyAsserted) {
     EXPECT_EQ(sizeof(HttpResponseMessage), sizeof(HttpResponseMessageLayoutProbe));
 }
 
-// #2067 (SR-AUD-314) -- .NET throws InvalidOperationException when one
-// HttpRequestMessage is sent twice. This port has no sent state.
-TEST(NetHttpGatedBehaviourPins, Pin2067_OneRequestMessageCanStillBeSentTwice) {
+// #2067 (SR-AUD-314) LANDED -- one HttpRequestMessage may be sent once, as in .NET.
+TEST(NetHttpGatedBehaviourPins, Fix2067_OneRequestMessageCannotBeSentTwice) {
+    // .NET's CheckRequestMessage, with .NET's own message
+    // (HttpClient.cs:745-751, SR.net_http_client_request_already_sent). The second send is not
+    // merely untidy: it reuses a content object the first send may already have consumed, and
+    // both sends share one headers map the first handler may have mutated.
     auto handler = std::make_shared<RecordingHandler>();
     HttpClient client(handler);
     auto request = std::make_shared<HttpRequestMessage>(HttpMethod::Get(), "http://example.com/");
 
+    EXPECT_FALSE(request->getWasSentProperty());
     EXPECT_NO_THROW((void)client.Send(request));
-    EXPECT_NO_THROW((void)client.Send(request));
-    EXPECT_EQ(handler->receivedRequest, request)
-        << "the SAME message object reaches the handler a second time";
+    EXPECT_TRUE(request->getWasSentProperty());
+    EXPECT_THROW((void)client.Send(request), System::InvalidOperationException);
+
+    // A DIFFERENT message is unaffected, and so is a second client.
+    auto fresh = std::make_shared<HttpRequestMessage>(HttpMethod::Get(), "http://example.com/");
+    EXPECT_NO_THROW((void)client.Send(fresh));
+    HttpClient other(handler);
+    EXPECT_THROW((void)other.Send(request), System::InvalidOperationException)
+        << "the flag belongs to the MESSAGE, not to the client that sent it";
+}
+
+TEST(NetHttpGatedBehaviourPins, Fix2067_TheSendOnceClaimIsAtomic) {
+    // .NET uses an interlocked compare-and-exchange, so two concurrent sends of one message
+    // cannot both win. std::atomic_flag::test_and_set is the same operation; this asserts the
+    // guarantee rather than trusting the type name.
+    // Repeated, because a lost update is probabilistic: one round of a non-atomic
+    // read-then-set usually still yields one winner. Two hundred rounds of eight threads
+    // released together does not.
+    for (int round = 0; round < 200; ++round) {
+        auto request = std::make_shared<HttpRequestMessage>(HttpMethod::Get(), "http://example.com/");
+        std::atomic<int>  winners{0};
+        std::atomic<bool> go{false};
+        std::vector<std::thread> threads;
+        for (int i = 0; i < 8; ++i) {
+            threads.emplace_back([&] {
+                while (!go.load(std::memory_order_acquire)) { /* spin to the same starting line */ }
+                if (request->MarkAsSent()) ++winners;
+            });
+        }
+        go.store(true, std::memory_order_release);
+        for (auto& t : threads) t.join();
+        ASSERT_EQ(winners.load(), 1)
+            << "exactly one caller may claim the message (round " << round << ")";
+    }
 }
 
 // #2068 (SR-AUD-315) LANDED -- field names are compared case-insensitively, as RFC 9110 5.1
@@ -2025,14 +2066,35 @@ TEST(NetHttpGatedBehaviourPins, Fix2068_TheHandlersDefaultFieldsYieldToTheCaller
         << "and it must be the caller's, not the handler's";
 }
 
-// #2069 (SR-AUD-316's status-code half) -- the constructor accepts any number.
-TEST(NetHttpGatedBehaviourPins, Pin2069_ResponseAcceptsAnyStatusNumber) {
-    for (int code : {-1, 0, 1000, 99999}) {
-        HttpResponseMessage response(static_cast<HttpStatusCode>(code));
-        EXPECT_EQ(static_cast<int>(response.getStatusCodeProperty()), code);
-        EXPECT_FALSE(response.getIsSuccessStatusCodeProperty());
-        EXPECT_THROW(response.EnsureSuccessStatusCode(), HttpRequestException);
+// #2069 (SR-AUD-316's status-code half) LANDED -- the domain is 0..999, exactly .NET's.
+TEST(NetHttpGatedBehaviourPins, Fix2069_TheStatusCodeDomainIsZeroToNineHundredNinetyNine) {
+    // HttpResponseMessage.cs:152-159 (constructor) and :65-76 (setter), same two checks in the
+    // same order. Before this, -1, 0, 1000 and 99999 all constructed and
+    // getIsSuccessStatusCodeProperty answered false for each -- a nonsense code was
+    // indistinguishable from a real failure.
+    for (int code : {-1, -1000, 1000, 99999}) {
+        SCOPED_TRACE(code);
+        EXPECT_THROW(HttpResponseMessage(static_cast<HttpStatusCode>(code)),
+                     System::ArgumentOutOfRangeException);
+        HttpResponseMessage response;
+        EXPECT_THROW(response.setStatusCodeProperty(static_cast<HttpStatusCode>(code)),
+                     System::ArgumentOutOfRangeException);
     }
+
+    // The bound is 999, not 599: RFC 9112 4 makes a status code three digits and .NET accepts
+    // every three-digit value rather than only the registered ranges. 0 is accepted too, and
+    // that is .NET's choice rather than an oversight here.
+    for (int code : {0, 1, 100, 599, 998, 999}) {
+        SCOPED_TRACE(code);
+        EXPECT_NO_THROW(HttpResponseMessage(static_cast<HttpStatusCode>(code)));
+    }
+
+    // ...and an out-of-range code never reaches the object, so a rejected value cannot be read
+    // back later.
+    HttpResponseMessage response(HttpStatusCode::OK);
+    EXPECT_THROW(response.setStatusCodeProperty(static_cast<HttpStatusCode>(1000)),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_EQ(response.getStatusCodeProperty(), HttpStatusCode::OK);
 }
 
 // #2070 (SR-AUD-317) -- the charset is a label; the bytes are always the

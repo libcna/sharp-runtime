@@ -4,6 +4,7 @@
 
 #include "System/Net/Http/HttpClient.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -303,6 +304,16 @@ std::shared_ptr<HttpResponseMessage> HttpClient::Send(
     // override a header the caller already set on this specific request) before handing off
     // to the handler chain -- matching real .NET's HttpClient applying DefaultRequestHeaders
     // ahead of invoking the handler pipeline.
+    // Ticket #2067. .NET's CheckRequestMessage does exactly this, with exactly this message
+    // (HttpClient.cs:745-751, SR.net_http_client_request_already_sent). Sending one message
+    // twice reuses a content object the first send may already have consumed and shares one
+    // headers map the first handler may have mutated.
+    if (!request->MarkAsSent()) {
+        throw System::InvalidOperationException(
+            "The request message was already sent. Cannot send the same request message "
+            "multiple times.");
+    }
+
     for (const auto& [k, v] : defaultHeaders_) {
         // Ticket #2068: the "did the caller already set it" test is case-insensitive too. A
         // byte-exact find() meant a default named `Accept` was merged on top of a request that
