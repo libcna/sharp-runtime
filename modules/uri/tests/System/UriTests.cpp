@@ -1427,33 +1427,64 @@ TEST(UriTests, EmbeddedNul_InThePortPositionIsStillRejected) {
 }
 
 // ---------------------------------------------------------------------------
-// Surrounding whitespace — ticket #2005, DEFERRED VERIFICATION, pinned only.
+// Surrounding whitespace — ticket #2005 RESOLVED.
 //
-// Whether .NET trims before parsing cannot be measured in this environment
-// (/rv/tmp/runtime/src/libraries/ is absent, and the audit's C# probe directories are gone),
-// so nothing is changed. The current behaviour is asymmetric and that asymmetry is recorded
-// rather than tidied: LEADING whitespace makes the reference relative (since #1988), while
-// TRAILING whitespace on an otherwise absolute URI is accepted into the path.
-// See docs/SystemUriNamespaceReviewPlan.md §31.
+// The deferral was correct: whether .NET trims could not be measured, so nothing was changed
+// and the ASYMMETRY was recorded rather than tidied — leading whitespace made the reference
+// relative, while trailing whitespace on an otherwise absolute URI was accepted into the path.
+//
+// With the reference present, .NET trims BOTH ends before parsing: leading in ParseScheme
+// (Uri.cs:3513-3518) and trailing in GetCanonicalPath and CreateThis (:3464-3469, :1992-1993),
+// in both cases with UriHelper.IsLWS — space, LF, CR and TAB, and nothing else
+// (UriHelper.cs:556-559). See docs/SystemUriNamespaceReviewPlan.md §31.
 // ---------------------------------------------------------------------------
 
-TEST(UriTests, Whitespace_LeadingWhitespaceMakesTheReferenceRelative) {
+TEST(UriTests, Fix2005_SurroundingWhitespaceIsTrimmedBeforeParsing) {
+    // The headline: this used to be a RELATIVE reference whose whole path was the padded text.
     Uri padded("  http://example.com/  ");
-    EXPECT_FALSE(padded.getIsAbsoluteUriProperty());
-    EXPECT_EQ(padded.getAbsolutePathProperty(), "  http://example.com/  ");
+    EXPECT_TRUE(padded.getIsAbsoluteUriProperty());
+    EXPECT_EQ(padded.getSchemeProperty(), "http");
+    EXPECT_EQ(padded.getHostProperty(), "example.com");
+    EXPECT_EQ(padded.getAbsolutePathProperty(), "/");
 
-    Uri leading(" http://example.com/");
-    EXPECT_FALSE(leading.getIsAbsoluteUriProperty());
-
-    Uri tab("\thttp://h/");
-    EXPECT_FALSE(tab.getIsAbsoluteUriProperty());
+    // The asymmetry is gone: both ends now behave the same way.
+    EXPECT_TRUE(Uri(" http://example.com/").getIsAbsoluteUriProperty());
+    EXPECT_EQ(Uri("http://example.com/ ").getAbsolutePathProperty(), "/");
 }
 
-TEST(UriTests, Whitespace_TrailingWhitespaceIsAcceptedIntoThePath) {
-    Uri trailing("http://example.com/ ");
-    EXPECT_TRUE(trailing.getIsAbsoluteUriProperty());
-    EXPECT_EQ(trailing.getHostProperty(), "example.com");
-    EXPECT_EQ(trailing.getAbsolutePathProperty(), "/ ");
+TEST(UriTests, Fix2005_TheTrimmedSetIsExactlyDotNetsIsLWS) {
+    // UriHelper.cs:556-559 -- space, LF, CR, TAB. Deliberately NOT std::isspace, which also
+    // folds vertical tab and form feed and is locale-sensitive.
+    for (const char* pad : {" ", "\t", "\r", "\n", " \t\r\n "}) {
+        SCOPED_TRACE(pad);
+        Uri padded(std::string(pad) + "http://h/p" + pad);
+        EXPECT_TRUE(padded.getIsAbsoluteUriProperty());
+        EXPECT_EQ(padded.getHostProperty(), "h");
+        EXPECT_EQ(padded.getAbsolutePathProperty(), "/p");
+    }
+
+    // A vertical tab is NOT linear whitespace, so it is left to fail as an ordinary bad
+    // character rather than being trimmed away.
+    EXPECT_FALSE(Uri("\vhttp://h/p").getIsAbsoluteUriProperty())
+        << "trimming more than IsLWS would accept text .NET rejects";
+}
+
+TEST(UriTests, Fix2005_AWhitespaceOnlyStringIsStillEmpty) {
+    // Trimming must not turn "   " into a URI. It becomes the empty string, which the
+    // constructor already rejects.
+    for (const char* blank : {" ", "\t", " \r\n\t "}) {
+        SCOPED_TRACE(blank);
+        EXPECT_THROW((void)Uri(std::string(blank)), System::UriFormatException);
+    }
+}
+
+TEST(UriTests, Fix2005_AnUnpaddedUriIsUntouched) {
+    // The invariance row.
+    Uri plain("http://example.com/a/b?q=1#f");
+    EXPECT_EQ(plain.getAbsoluteUriProperty(), "http://example.com/a/b?q=1#f");
+    EXPECT_EQ(plain.getAbsolutePathProperty(), "/a/b");
+    EXPECT_EQ(plain.getQueryProperty(), "?q=1");
+    EXPECT_EQ(plain.getFragmentProperty(), "#f");
 }
 
 TEST(UriTests, Whitespace_InternalWhitespaceIsAcceptedVerbatim) {

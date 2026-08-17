@@ -114,7 +114,34 @@ namespace {
     }
 }
 
-void Uri::parse(const std::string& uriString) {
+/**
+ * @brief .NET's `UriHelper.IsLWS`: space, LF, CR and TAB, and nothing else.
+ *
+ * Ticket #2005. Transcribed from `UriHelper.cs:556-559` --
+ * `(ch <= ' ') && (ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t')`. Deliberately NOT
+ * `std::isspace`, which also folds vertical tab and form feed and is locale-sensitive: .NET
+ * trims exactly these four and leaves the rest to fail as ordinary bad characters.
+ */
+static bool isLinearWhiteSpace(char raw) {
+    const unsigned char ch = static_cast<unsigned char>(raw);
+    return ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t';
+}
+
+void Uri::parse(const std::string& rawUriString) {
+    // Ticket #2005 (post-audit defect, deferred verification). Measured before it,
+    // Uri("  http://example.com/  ") threw UriFormatException("URI scheme must start with a
+    // letter") -- the leading spaces reached the scheme parser. .NET trims BOTH ends before
+    // parsing: leading in ParseScheme (Uri.cs:3513-3518) and trailing in GetCanonicalPath and
+    // CreateThis (Uri.cs:3464-3469 and :1992-1993), in both cases with UriHelper.IsLWS.
+    //
+    // The deferral was correct -- the reference was absent and the audit's probe directories
+    // were gone -- and this is what the reference says.
+    std::size_t begin = 0;
+    std::size_t end   = rawUriString.size();
+    while (begin < end && isLinearWhiteSpace(rawUriString[begin])) ++begin;
+    while (end > begin && isLinearWhiteSpace(rawUriString[end - 1])) --end;
+    const std::string uriString = rawUriString.substr(begin, end - begin);
+
     if (uriString.empty())
         throw System::UriFormatException("URI string must not be empty");
 
