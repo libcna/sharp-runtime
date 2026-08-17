@@ -13,6 +13,7 @@
 // Nothing here approves, implements or preselects any part of #2056, #2057, #2058,
 // #2059 or #2060.
 #include <gtest/gtest.h>
+#include <cstring>
 #include "System/ObjectDisposedException.hpp"
 #include <cstdint>
 #include <vector>
@@ -286,24 +287,55 @@ TEST(MemoryHandlePinTests, ACopyStillReferencesTheSamePinnable) {
 }
 
 // ===========================================================================
-// SR-AUD-086 — the leading '+' asymmetry (deferred #2060)
+// SR-AUD-086 — the leading '+' asymmetry (#2060 RESOLVED).
 //
-// All four combinations pinned, so the verification lands against a measured baseline.
+// The finding made TWO claims about .NET and pinned all four combinations so the verification
+// could land against a measured baseline. That was the right shape, and the reference settles
+// both claims -- with only ONE of them a defect here:
+//
+//   * Signed D accepts '+'   (Utf8Parser.Integer.Signed.D.cs:16-31)   -> this port did NOT. FIXED.
+//   * Unsigned D rejects '+' (Utf8Parser.Integer.Unsigned.D.cs -- no sign handling at all)
+//                                                                     -> this port already did. KEPT.
+//   * Signed N accepts '+'   (Utf8Parser.Integer.Signed.N.cs:24)      -> already right.
+//   * Unsigned N accepts '+' (Utf8Parser.Integer.Unsigned.N.cs:18)    -> already right.
+//
+// So the "internal inconsistency" between unsigned D and unsigned N is .NET's OWN, and is
+// reproduced deliberately rather than tidied away.
 // ===========================================================================
 
-TEST(Utf8ParserPlusSignPinTests, SignedDefaultAndDRejectALeadingPlus) {
+TEST(Utf8ParserPlusSignPinTests, Fix2060_SignedDefaultAndDNowAcceptALeadingPlus) {
     const uint8_t text[] = {'+', '4', '2'};
     System::ReadOnlySpan<uint8_t> src(text, 3);
     for (char format : {'\0', 'G', 'D'}) {
+        int32_t value = 0;
+        intcs consumed = 0;
+        ASSERT_TRUE(Utf8Parser::TryParse(src, value, consumed, format)) << "format " << (int)format;
+        EXPECT_EQ(value, 42);
+        EXPECT_EQ(consumed, 3) << "the '+' is consumed, just as a '-' is";
+    }
+}
+
+TEST(Utf8ParserPlusSignPinTests, Fix2060_ASignWithNoDigitsIsStillNotAnInteger) {
+    // Signed.D.cs:19-22 and :26-29 -- after consuming the sign, running out of input is a
+    // FalseExit. "+" and "-" alone are not integers, and the '+' path must not be laxer than
+    // the '-' path it was modelled on.
+    for (const char* text : {"+", "-", "+x", "-x", "+ 1"}) {
+        SCOPED_TRACE(text);
+        System::ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(text),
+                                          static_cast<intcs>(std::strlen(text)));
         int32_t value = 99;
         intcs consumed = 99;
-        EXPECT_FALSE(Utf8Parser::TryParse(src, value, consumed, format)) << "format " << (int)format;
+        EXPECT_FALSE(Utf8Parser::TryParse(src, value, consumed, 'D'));
         EXPECT_EQ(value, 0);       // CCF-014: both outputs normalized on failure
         EXPECT_EQ(consumed, 0);
     }
 }
 
-TEST(Utf8ParserPlusSignPinTests, UnsignedDefaultAndDRejectALeadingPlus) {
+TEST(Utf8ParserPlusSignPinTests, Fix2060_UnsignedDefaultAndDStillRejectALeadingPlus_AndThatIsDotNets) {
+    // NOT a defect, and NOT tidied. Utf8Parser.Integer.Unsigned.D.cs has no sign handling at
+    // all -- it goes straight to ParserHelpers.IsDigit -- while Unsigned.N.cs:18 accepts '+'.
+    // The asymmetry the finding called an inconsistency is .NET's own, and #2060's second
+    // claim is therefore refuted rather than implemented.
     const uint8_t text[] = {'+', '4', '2'};
     System::ReadOnlySpan<uint8_t> src(text, 3);
     for (char format : {'\0', 'G', 'D'}) {

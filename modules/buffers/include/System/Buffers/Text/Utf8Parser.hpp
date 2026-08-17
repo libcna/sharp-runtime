@@ -259,11 +259,32 @@ private:
         out = v; return n > 0;
     }
 
+    /**
+     * @brief The `D`/`G`/default grammar for a SIGNED integer.
+     *
+     * Ticket #2060 (SR-AUD-085's grammar half, deferred verification). This recognised only
+     * `'-'`, so `"+42"` failed here while it parsed under `'N'` for the same type. The finding
+     * called that an internal inconsistency and made **two** claims about .NET; the reference
+     * settles both, and **only one of them was a defect here**:
+     *
+     *   * **Signed `D` accepts a leading `+`** — `Utf8Parser.Integer.Signed.D.cs:16-31` handles
+     *     `'-'` and then `else if (num == '+')`. This port did not. **That is this repair.**
+     *   * **Unsigned `D` does NOT** — `Utf8Parser.Integer.Unsigned.D.cs` has no sign handling at
+     *     all, and goes straight to `ParserHelpers.IsDigit(num)`. This port already required a
+     *     digit, so it was **already right**, and the "inconsistency" with unsigned `'N'`
+     *     (`Utf8Parser.Integer.Unsigned.N.cs:18`, which *does* accept `'+'`) is **.NET's own**
+     *     and is reproduced deliberately rather than tidied away.
+     *
+     * A sign with no digit after it fails, matching `:19-22` and `:26-29` — `"+"` and `"-"`
+     * alone are not integers.
+     */
     static bool tryParseInt(System::ReadOnlySpan<uint8_t> src, int64_t& out, intcs& n) {
         intcs len = src.getLengthProperty();
         const uint8_t* p = src.getPointer();
         bool neg = (len > 0 && p[0] == '-');
-        System::ReadOnlySpan<uint8_t> rest(p + (neg ? 1 : 0), len - (neg ? 1 : 0));
+        const bool plus = (len > 0 && p[0] == '+');   // #2060
+        const intcs signLength = (neg || plus) ? 1 : 0;
+        System::ReadOnlySpan<uint8_t> rest(p + signLength, len - signLength);
         uint64_t v = 0; intcs digits = 0;
         if (!tryParseUInt(rest, v, digits)) return false;
         if (neg) {
@@ -283,7 +304,7 @@ private:
             if (v > static_cast<uint64_t>(INT64_MAX)) return false;
             out = static_cast<int64_t>(v);
         }
-        n = digits + (neg ? 1 : 0);
+        n = digits + signLength;   // #2060: a '+' is consumed just as a '-' is
         return true;
     }
 
