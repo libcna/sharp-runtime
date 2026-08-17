@@ -101,24 +101,31 @@ struct Vector3 {
     /**
      * @return Unit vector in the direction of @p v.
      *
-     * @note **Actual contract, wider than "length is zero"** (SR-AUD-276, #2173/#2175). The guard
-     * is `Length() > 0`, false in three distinct situations, all returning @p v **unchanged**:
-     * the zero vector (signed zeros preserved); **any NaN component**, because `NaN > 0` is false,
-     * so `{NaN,0,0}` returns `{NaN,0,0}` and `{inf,NaN,-inf}` returns itself; and **any vector
-     * whose squared length underflows to zero** (components below roughly 1e-22), a normalizable
-     * direction returned unnormalized.
+     * @note **This divides unconditionally, so a zero vector normalizes to NaN** (SR-AUD-276,
+     * #2175). That is .NET's contract, not an oversight: `public static {T} Normalize({T} value)
+     * => value / value.Length();` -- `Vector3.cs:852`. There is no guard of any kind, in any of
+     * `Vector2`, `Vector3`, `Vector4` or `Quaternion`.
      *
-     * Two dependents inherit this: `Plane::CreateFromVertices` on identical or collinear points
-     * yields a `(0,0,0)` normal, and `Matrix4x4::CreateLookAt` with `eye == target` yields a
-     * **singular** view matrix — both silently.
+     * Until #2175 this port wrote `l > 0 ? v / l : v`, which was **wider than "the length is
+     * zero"** and silently wrong in three ways: the zero vector came back unchanged, **any NaN
+     * component** came back unchanged (because `NaN > 0` is false) so a NaN was swallowed rather
+     * than propagated, and **any vector whose squared length underflows** (components below
+     * roughly 1e-22) was returned unnormalized although its direction is perfectly
+     * representable. All three now follow .NET.
      *
-     * .NET is believed to divide unconditionally and produce NaN, but that is a reading rather
-     * than a measurement and `/rv` is absent; **#2175** owns it, and the behaviour above is
-     * pinned by test. `Quaternion::Normalize` already divides unconditionally and is the control.
+     * **A zero vector therefore yields `NaN` in every component, with no diagnostic.** That is
+     * the point of the contract: normalizing a direction that has no direction is a caller
+     * error, and NaN makes it visible instead of returning a vector that is silently not a unit
+     * vector. Callers that need a fallback must test `LengthSquared()` themselves, which is what
+     * .NET's own callers do.
+     *
+     * `Plane::Normalize` is deliberately **not** this: it carries .NET's own DirectXMath
+     * infinity mask. See its note.
+     *
      * Overflow is a separate, .NET-shared limitation: components near `FLT_MAX` give an infinite
-     * length and normalize to zero.
+     * length, and dividing by infinity gives zero.
      */
-    static Vector3 Normalize(Vector3 v)                    { float l=v.Length(); return l>0?v/l:v; }
+    static Vector3 Normalize(Vector3 v)                    { return v / v.Length(); }
     /** @return Reflection of @p v about surface normal @p n. */
     static Vector3 Reflect(Vector3 v, Vector3 n)           { return v - 2.0f*Dot(v,n)*n; }
     /** @return Component-wise absolute value of @p v. */

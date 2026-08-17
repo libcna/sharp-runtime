@@ -313,6 +313,48 @@ NaN semantics, and choosing whether `Plane` gets that fast path, from recollecti
 this programme forbids. **#2175 owns the question; #2173 pins the current behaviour so it cannot
 change silently.**
 
+#### 6.2.1 LANDED 2026-08-17 — the reading was right, and the `Plane` half was not
+
+#2175 landed under `docs/StandingApprovals.md` SA-5. The reference tree, absent when §6.2 was
+written, resolves both halves — and only one of them the way §6.2 assumed.
+
+**The vector half: the auditor's reading was exactly right.** .NET has no guard of any kind —
+`public static Vector3 Normalize(Vector3 value) => value / value.Length();` (`Vector2.cs:822`,
+`Vector3.cs:852`, `Vector4.cs:902`, `Quaternion.cs:380`). §6.2's caution was the correct call
+*at the time*: this was a recollection, and the cost of being wrong was NaN in geometry code.
+With the source in hand it is a derivation, which is what SA-5 exists for.
+
+**The `Plane` half: §6.2's premise is wrong.** .NET's `Plane.Normalize` carries **no**
+already-normalized epsilon fast path — that is a pre-.NET-5 memory. What it carries is
+DirectXMath's *overflow* mask (`Plane.cs:127-138`): divide all four lanes unconditionally, then
+force every lane to zero **iff the squared length was `+Infinity`**. So `Plane` genuinely differs
+from the vectors, SR-AUD-276 was right to ask, and the difference is about overflow rather than
+smallness. The port's `< 1e-10f` threshold had no counterpart in .NET at all.
+
+**The risk assessment §6.2 could not make is now measured, and it is empty.** `cna` references
+`System::Numerics` in **zero** places, and so does `mobile-eggbert`. `cna` has 46 `Normalize`
+call sites and every one resolves to its own `Microsoft::Xna::Framework` vector types in
+`cna/modules/math/`, which this change does not touch.
+
+Both dependents follow from the same source rather than from a choice: `Plane.CreateFromVertices`
+(`Plane.cs:84`) and `Matrix4x4.Impl.CreateLookToLeftHanded` (`Matrix4x4.Impl.cs:365-366`) both
+call the unconditional `Vector3.Normalize`, so a degenerate triangle and an `eye == target`
+camera are `NaN` in .NET too.
+
+One detail worth recording because it is easy to get wrong: an **underflowing** vector normalizes
+to `+Infinity`, not `NaN`. `Length()` is `sqrt(+0)`, and a nonzero component over `+0` is an
+infinity; only a zero component gives `NaN`. The old guard treated underflow and zero
+identically, and .NET does not.
+
+#2173's pin file is rewritten rather than deleted — it now holds the answers, including the
+invariance rows that keep ordinary vectors bit-identical. Test count is unchanged at 16, so the
+evidence here is the **four mutations**, all caught. Note the third: the first cut of the
+infinity-mask test passed *without* the mask, because an all-finite normal divided by
+`+Infinity` already gives zero; the mask is observable only when a **component itself** is
+infinite, and the test now covers that.
+
+Record: `docs/Migration-NumericsNormalizeDividesUnconditionally.md`.
+
 ### 6.3 Why #2172 is gated and #2171 is not
 
 `Abs`'s return type is a public signature change with no conversion path (§4.6) → approval, wording
