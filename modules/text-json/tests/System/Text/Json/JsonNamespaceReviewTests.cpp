@@ -228,19 +228,96 @@ TEST(JsonReviewPinTests, TwoOfTheFourDocumentOptionsDOWork) {
     EXPECT_THROW((void)JsonDocument::Parse("[]", negative), System::ArgumentOutOfRangeException);
 }
 
-TEST(JsonReviewPinTests, TheTwoINERTDocumentOptionsAreStillInertAndThatIsTicketed) {
-    // PIN of a known defect, NOT an endorsement: #2115 is the open design ticket. Recorded as a
-    // test so that whichever way #2115 is decided, the change is deliberate and visible.
+TEST(JsonReviewPinTests, Fix2115_BothDocumentOptionsAreREALNow) {
+    // INVERTED. Both flags were validated, stored and NEVER CONSULTED. The user chose the full
+    // repair over the cheaper honest option of making Validate() throw for whichever could not be
+    // implemented, on the grounds that a switch which does nothing is worse than one that does not
+    // exist. nlohmann/json supports neither natively, so each is honoured differently: trailing
+    // commas by preprocessing the text, duplicates through the parser callback -- the one place a
+    // key can be seen BEFORE nlohmann's silent overwrite.
     JsonDocumentOptions trailing;
     trailing.AllowTrailingCommas = true;
-    EXPECT_THROW((void)JsonDocument::Parse("[1,]", trailing), JsonException)
-        << "AllowTrailingCommas is inert -- #2115";
+    EXPECT_NO_THROW((void)JsonDocument::Parse("[1,]", trailing));
+    EXPECT_EQ(1, JsonDocument::Parse("[1,]", trailing)->getRootElementProperty().GetArrayLength());
+    EXPECT_NO_THROW((void)JsonDocument::Parse("{\"a\":1,}", trailing));
+
+    // Each flag is honoured ONLY when set, so the default path is byte-identical and cannot
+    // regress -- which is why the preprocessing is conditional rather than unconditional.
+    JsonDocumentOptions strict;
+    EXPECT_THROW((void)JsonDocument::Parse("[1,]", strict), JsonException);
 
     JsonDocumentOptions noDuplicates;
     noDuplicates.AllowDuplicateProperties = false;
-    auto doc = JsonDocument::Parse("{\"x\":1,\"x\":2}", noDuplicates);
-    EXPECT_EQ(doc->getRootElementProperty().GetProperty("x").GetInt32(), 2)
-        << "AllowDuplicateProperties is inert and the last value wins -- #2115";
+    EXPECT_THROW((void)JsonDocument::Parse("{\"x\":1,\"x\":2}", noDuplicates), JsonException);
+    // ...and the default still accepts them, last value winning, as .NET's default does.
+    EXPECT_EQ(2, JsonDocument::Parse("{\"x\":1,\"x\":2}")
+                     ->getRootElementProperty().GetProperty("x").GetInt32());
+}
+
+TEST(JsonReviewPinTests, Fix2115_TheTrailingCommaScannerIsNotASearch) {
+    // A `,` inside a STRING is data and a `,` inside a COMMENT is nothing, so the rewrite is a
+    // scanner. And it removes a comma before a CLOSER and nothing else: .NET's
+    // AllowTrailingCommas permits exactly one trailing comma per container, not a missing element,
+    // so a rewrite that dropped every comma next to a bracket would silently accept documents
+    // .NET rejects.
+    JsonDocumentOptions trailing;
+    trailing.AllowTrailingCommas = true;
+
+    auto inString = JsonDocument::Parse("[\"a,]\"]", trailing);
+    EXPECT_EQ(1, inString->getRootElementProperty().GetArrayLength());
+    EXPECT_EQ("a,]", inString->getRootElementProperty()[0].GetString())
+        << "a comma inside a string literal must survive untouched";
+
+    EXPECT_THROW((void)JsonDocument::Parse("[1,,2]", trailing), JsonException)
+        << "a MISSING ELEMENT is still malformed";
+    EXPECT_THROW((void)JsonDocument::Parse("[,1]", trailing), JsonException)
+        << "a LEADING comma is still malformed";
+
+    // Nested containers each get their own trailing comma.
+    EXPECT_NO_THROW((void)JsonDocument::Parse("{\"a\":[1,],\"b\":{\"c\":2,},}", trailing));
+}
+
+TEST(JsonReviewPinTests, Fix2115_DuplicateDetectionIsScopedToOneObject) {
+    // The same key in two DIFFERENT objects is not a duplicate, and a scoped-per-object check is
+    // the only kind that gets that right -- a flat set of every key seen would reject a perfectly
+    // ordinary document.
+    JsonDocumentOptions noDuplicates;
+    noDuplicates.AllowDuplicateProperties = false;
+
+    EXPECT_NO_THROW((void)JsonDocument::Parse("{\"a\":{\"x\":1},\"b\":{\"x\":2}}", noDuplicates));
+    EXPECT_THROW((void)JsonDocument::Parse("{\"a\":{\"x\":1,\"x\":2}}", noDuplicates), JsonException)
+        << "...and a duplicate NESTED inside must still be caught";
+
+    // THE SHAPE THAT ACTUALLY PROVES THE SCOPE CLOSES, and the two sibling objects above do NOT:
+    // measured, a callback that never pops still accepts them, because their keys land in two
+    // different (leaked) sets by accident. A key at the ROOT reappearing AFTER a nested object is
+    // the shape that collides -- the root's key would be looked up in the stale inner set.
+    EXPECT_NO_THROW((void)JsonDocument::Parse("{\"a\":{\"x\":1},\"x\":2}", noDuplicates))
+        << "a root key may repeat a NESTED key: the scope must have closed";
+    EXPECT_NO_THROW((void)JsonDocument::Parse("{\"a\":{\"x\":1},\"b\":[{\"x\":2}],\"x\":3}",
+                                              noDuplicates));
+
+    // The message is .NET's SR.DuplicatePropertiesNotAllowed_NameSpan, and the 15-character
+    // truncation is .NET's too (ThrowHelper.Serialization.cs:361-364,373): a document can carry an
+    // arbitrarily long key, and echoing it whole into an exception is what the reference declines.
+    try {
+        (void)JsonDocument::Parse("{\"x\":1,\"x\":2}", noDuplicates);
+        ADD_FAILURE() << "expected JsonException";
+    } catch (const JsonException& e) {
+        EXPECT_STREQ("Duplicate property \'x\' encountered during deserialization.", e.what());
+    }
+    try {
+        (void)JsonDocument::Parse(
+            "{\"averyveryverylongpropertyname\":1,\"averyveryverylongpropertyname\":2}",
+            noDuplicates);
+        ADD_FAILURE() << "expected JsonException";
+    } catch (const JsonException& e) {
+        // Exactly 15 characters then three dots -- ThrowHelper.Serialization.cs:372-385, whose
+        // MaxLength is 15 and which appends three '.' rather than an ellipsis character. The first
+        // cut of this row wrote 16 and the implementation was right.
+        EXPECT_STREQ("Duplicate property \'averyveryverylo...\' encountered during deserialization.",
+                     e.what());
+    }
 }
 
 TEST(JsonReviewPinTests, JsonElementSIntegerAccessorsAreALREADYCorrect) {
@@ -690,25 +767,25 @@ TEST(JsonSerializerOptionForwardingTests, THEDEFAULTPathIsUnchangedForOrdinaryDo
               "{\"a\":1}");
 }
 
-TEST(JsonSerializerOptionForwardingTests, TheTwoINERTFlagsAreFORWARDEDEvenThoughTheyDoNothingYET) {
-    // Forwarding only the two options that work would have re-created the divergence #2116
-    // exists to remove. All four are forwarded, so whatever #2115 decides takes effect at both
-    // entry points with no further change. This test pins TODAY's behaviour: the two inert
-    // flags still do nothing, at the serializer exactly as at JsonDocument::Parse. If either
-    // starts working, #2115 has been decided and this test must be updated with it.
+TEST(JsonSerializerOptionForwardingTests, Fix2115_BothFlagsWorkAtBOTHDoorsIdentically) {
+    // #2116's forwarding is what made this free: it forwarded ALL FOUR options rather than only
+    // the two that worked, precisely so that whatever #2115 decided would take effect at both
+    // entry points with no further change. It did -- #2115 touched only the shared parse core,
+    // and the serializer door followed. This test is that claim, inverted.
     JsonSerializerOptions trailing;
     trailing.setAllowTrailingCommasProperty(true);
-    EXPECT_THROW((void)JsonSerializer::Deserialize("[1,]", trailing), JsonException)
-        << "still inert -- #2115";
+    EXPECT_NO_THROW((void)JsonSerializer::Deserialize("[1,]", trailing));
     JsonDocumentOptions documentTrailing;
     documentTrailing.AllowTrailingCommas = true;
-    EXPECT_THROW((void)JsonDocument::Parse("[1,]", documentTrailing), JsonException)
-        << "the sibling door is inert in exactly the same way -- that is the point";
+    EXPECT_NO_THROW((void)JsonDocument::Parse("[1,]", documentTrailing))
+        << "the sibling door behaves identically -- that is the point";
 
     JsonSerializerOptions noDuplicates;
     noDuplicates.setAllowDuplicatePropertiesProperty(false);
-    auto doc = JsonSerializer::Deserialize("{\"x\":1,\"x\":2}", noDuplicates);
-    EXPECT_EQ(doc->getRootElementProperty().GetProperty("x").GetInt32(), 2) << "still inert -- #2115";
+    EXPECT_THROW((void)JsonSerializer::Deserialize("{\"x\":1,\"x\":2}", noDuplicates), JsonException);
+    JsonDocumentOptions documentNoDuplicates;
+    documentNoDuplicates.AllowDuplicateProperties = false;
+    EXPECT_THROW((void)JsonDocument::Parse("{\"x\":1,\"x\":2}", documentNoDuplicates), JsonException);
 }
 
 TEST(JsonEmbeddedNulTests, ALLFIVEParseDoorsRejectAnEmbeddedNulIncludingTheOneNumber2112Missed) {
@@ -803,25 +880,30 @@ TEST(JsonGatedBehaviourPins, PIN2117TheDisposalFlagIsNotPropagatedToElementsHand
     EXPECT_EQ(array.GetArrayLength(), 2);
 }
 
-TEST(JsonGatedBehaviourPins, PIN2115TheTwoINERTOptionsAreInertAtBOTHDoorsIdentically) {
-    // Already pinned at JsonDocument::Parse by #2111/#2112; #2116 made the serializer forward
-    // them, so the pin must now cover both doors or the two could drift again.
+TEST(JsonGatedBehaviourPins, Fix2115_BothOptionsWorkAtBOTHDoorsIdentically) {
+    // INVERTED. The pin covered both doors precisely so they could not drift apart, and they have
+    // not: #2115 touched only the shared parse core, so the serializer door followed for free --
+    // which is #2116's forwarding paying off.
     JsonDocumentOptions trailingDoc;   trailingDoc.AllowTrailingCommas = true;
     JsonSerializerOptions trailingSer; trailingSer.setAllowTrailingCommasProperty(true);
-    EXPECT_THROW((void)JsonDocument::Parse("[1,]", trailingDoc), JsonException);
-    EXPECT_THROW((void)JsonSerializer::Deserialize("[1,]", trailingSer), JsonException);
+    EXPECT_NO_THROW((void)JsonDocument::Parse("[1,]", trailingDoc));
+    EXPECT_NO_THROW((void)JsonSerializer::Deserialize("[1,]", trailingSer));
 
     JsonDocumentOptions noDupDoc;   noDupDoc.AllowDuplicateProperties = false;
     JsonSerializerOptions noDupSer; noDupSer.setAllowDuplicatePropertiesProperty(false);
-    EXPECT_EQ(JsonDocument::Parse("{\"x\":1,\"x\":2}", noDupDoc)
-                  ->getRootElementProperty().GetProperty("x").GetInt32(), 2);
-    EXPECT_EQ(JsonSerializer::Deserialize("{\"x\":1,\"x\":2}", noDupSer)
-                  ->getRootElementProperty().GetProperty("x").GetInt32(), 2);
-    // And Validate() still says nothing about either flag -- #2120 §7.3, folded into #2115.
+    EXPECT_THROW((void)JsonDocument::Parse("{\"x\":1,\"x\":2}", noDupDoc), JsonException);
+    EXPECT_THROW((void)JsonSerializer::Deserialize("{\"x\":1,\"x\":2}", noDupSer), JsonException);
+
+    // Validate() STILL says nothing about either flag -- and that is now CORRECT rather than a
+    // gap. #2120 §7.3 folded the complaint into #2115 because the flags were inert and a caller
+    // could not discover it from the API; they are not inert any more, so there is nothing for
+    // Validate() to warn about. The cheaper option the user was offered -- make Validate() throw
+    // for whichever flag could not be implemented -- was declined in favour of implementing both.
     JsonDocumentOptions both;
     both.AllowTrailingCommas = true;
     both.AllowDuplicateProperties = false;
-    EXPECT_NO_THROW(both.Validate()) << "#2115: the inertness is not discoverable from the API";
+    EXPECT_NO_THROW(both.Validate())
+        << "#2115: nothing to report -- both flags do what they say";
 }
 
 TEST(JsonGatedBehaviourPins, PINCCF019JsonNodeSParentIsABorrowedPointerAndDetachIsPublic) {

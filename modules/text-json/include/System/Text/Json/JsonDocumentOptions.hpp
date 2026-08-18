@@ -17,7 +17,14 @@ namespace System::Text::Json {
      *
      * @note **Two of the four options are currently INERT** — SR-AUD-326, cause TJ-B, ticket
      * **#2115**, awaiting a decision. `CommentHandling` and `MaxDepth` **are** applied;
-     * `AllowTrailingCommas` and `AllowDuplicateProperties` are validated, stored and never
+     * **Ticket #2115 made both flags real; the paragraph below is the historical record.**
+     * `AllowTrailingCommas` is honoured by preprocessing the document text -- only when the flag
+     * is set, so the default path is byte-identical -- and `AllowDuplicateProperties = false` is
+     * honoured through nlohmann's parser callback, the one place a key can be seen before its
+     * silent overwrite. `Validate()` still says nothing about either, and that is now correct
+     * rather than a gap: there is no inertness left to report.
+     *
+     * WAS: `AllowTrailingCommas` and `AllowDuplicateProperties` were validated, stored and never
      * consulted, and `Validate()` says nothing about either, so the inertness is not discoverable
      * from the API. The two are **not equally fixable**: the vendored parser offers no
      * trailing-comma mode at all, while `AllowDuplicateProperties = false` is reachable through
