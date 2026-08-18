@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Sockets/UdpClient.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "AddressFamilyValidation.hpp"
 #include "PortValidation.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
@@ -126,6 +127,7 @@ UdpClient::UdpClient(int port) {
 }
 
 UdpClient::UdpClient(const Net::IPEndPoint& localEP) {
+    detail::ValidateIPv4EndPoint(localEP, "localEP");
 #if defined(__EMSCRIPTEN__)
     (void)localEP;
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
@@ -180,6 +182,7 @@ void UdpClient::Connect(const std::string& hostname, int port) {
 }
 
 void UdpClient::Connect(const Net::IPEndPoint& remoteEP) {
+    detail::ValidateIPv4EndPoint(remoteEP, "remoteEP");
 #if defined(__EMSCRIPTEN__)
     (void)remoteEP;
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");

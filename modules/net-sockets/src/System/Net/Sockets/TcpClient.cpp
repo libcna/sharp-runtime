@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Sockets/TcpClient.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "AddressFamilyValidation.hpp"
 #include "PortValidation.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
 #include "System/Net/Sockets/detail/ErrnoTranslation.hpp"
@@ -97,6 +98,7 @@ TcpClient::TcpClient() = default;
 // connected_ from the fd), so it is available to mean exactly this. sizeof(TcpClient) is
 // unchanged and no member moves.
 TcpClient::TcpClient(const IPEndPoint& localEP) {
+    detail::ValidateIPv4EndPoint(localEP, "localEP");
 #if defined(__EMSCRIPTEN__)
     (void)localEP;
     throw System::PlatformNotSupportedException("TcpClient is not supported on Emscripten.");
@@ -173,6 +175,7 @@ void TcpClient::Connect(const std::string& hostname, int port) {
 }
 
 void TcpClient::Connect(const IPEndPoint& remoteEP) {
+    detail::ValidateIPv4EndPoint(remoteEP, "remoteEP");
 #if defined(__EMSCRIPTEN__)
     (void)remoteEP;
     throw System::PlatformNotSupportedException("TcpClient is not supported on Emscripten.");
@@ -278,10 +281,19 @@ std::shared_ptr<NetworkStream> TcpClient::GetStream() const {
 // TcpListener
 // ---------------------------------------------------------------------------
 
-TcpListener::TcpListener(const IPEndPoint& localEP) : local_(localEP) {}
+// Both listener constructors reject at CONSTRUCTION, not at Start(). Before #2138 they only
+// stored the endpoint, so an IPv6 address survived construction and was diagnosed later, from
+// inside Start() -- reporting at a different moment from the four other endpoint doors, and by
+// the same accident (see AddressFamilyValidation.hpp). The earliest honest point is the door
+// that took the argument.
+TcpListener::TcpListener(const IPEndPoint& localEP) : local_(localEP) {
+    detail::ValidateIPv4EndPoint(localEP, "localEP");
+}
 
 TcpListener::TcpListener(const IPAddress& addr, int port)
-    : local_(addr, static_cast<SharpRuntime::intcs>(port)) {}
+    : local_(addr, static_cast<SharpRuntime::intcs>(port)) {
+    detail::ValidateIPv4Address(addr, "addr");
+}
 
 TcpListener::~TcpListener() { Stop(); }
 
