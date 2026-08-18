@@ -234,7 +234,12 @@ TEST(NetworkExceptionHResultPropagationTests, StructuralSurfaceRemainsTheMeasure
 TEST(NetworkExceptionHResultPropagationTests, ConstructorsWithoutInnerRetainBaseValuesAndMetadata) {
     const auto nullInner = makeInnerCases().front();
 
-    expectHttpState(HttpRequestException{}, kCorEException, "", HttpRequestError::Unknown,
+    // #2323: a default-constructed HttpRequestException now carries .NET's fallback message,
+    // naming ITS OWN type rather than System.Exception -- .NET's ctor is `{ }`
+    // (HttpRequestException.cs:10-11), so Message falls through to Exception's formatted default.
+    expectHttpState(HttpRequestException{}, kCorEException,
+                    "Exception of type 'System.Net.Http.HttpRequestException' was thrown.",
+                    HttpRequestError::Unknown,
                     std::nullopt, nullInner);
     expectHttpState(HttpRequestException{"http-\xCF\x80"}, kCorEException, "http-\xCF\x80",
                     HttpRequestError::Unknown, std::nullopt, nullInner);

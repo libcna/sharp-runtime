@@ -23,7 +23,19 @@ namespace System::Net::Http {
 
     public:
         /** Creates a new instance with no message. */
-        HttpRequestException() = default;
+        /**
+         * @brief Constructs an exception with .NET's fallback message for this type.
+         *
+         * Ticket #2323. .NET's `HttpRequestException()` is `{ }` (HttpRequestException.cs:10-11),
+         * so `Message` falls through to `Exception`'s
+         * `SR.Format(SR.Exception_WasThrown, GetClassName())` and names THIS type. `{0}` is
+         * reflection, which this port does not have, so it is resolved statically here -- by the
+         * one entity that knows the answer. Inheriting the base's string would have named
+         * `System.Exception`, which is a lie rather than an absence.
+         */
+        HttpRequestException()
+            : System::Exception(
+                  "Exception of type 'System.Net.Http.HttpRequestException' was thrown.") {}
 
         /** Creates a new instance with the specified message. */
         explicit HttpRequestException(const std::string& message) : System::Exception(message) {}

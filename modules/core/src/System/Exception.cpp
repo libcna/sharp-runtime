@@ -9,8 +9,24 @@
 
 namespace System {
 
+    // Ticket #2323 (SR-AUD-092, 2026-08-18). This used to leave the message EMPTY, where .NET's
+    // is `_message ?? SR.Format(SR.Exception_WasThrown, GetClassName())` (Exception.cs:61,65) --
+    // "Exception of type '{0}' was thrown.", Strings.resx:2333, with {0} the RUNTIME TYPE NAME.
+    //
+    // The review recorded two blockers. The first, the exact resource text, is simply readable
+    // now. The second is real and permanent: {0} is reflection, which this port does not have.
+    //
+    // WHAT DISSOLVES IT is that .NET computes the fallback LAZILY only so that `_message` can
+    // stay null for serialization; the observable is identical if the constructor just stores it,
+    // which is what a hundred subclasses in this repository already do. So {0} is resolved
+    // STATICALLY, at each site, by the one entity that knows the answer -- the type itself. No
+    // reflection, no new virtual, no layout change, no signature change.
+    //
+    // Hard-coding this string into the base and letting subclasses inherit it was the option the
+    // review rejected, and rightly: a message naming the WRONG type is a lie, where an empty one
+    // is merely an absence. The two subclasses that reach here are given their own (#2323).
     Exception::Exception()
-        : message_("") {
+        : message_("Exception of type 'System.Exception' was thrown.") {
     }
 
     Exception::Exception(const char* msg)

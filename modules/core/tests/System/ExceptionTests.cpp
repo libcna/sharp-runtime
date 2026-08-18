@@ -45,9 +45,14 @@ using System::ObjectDisposedException;
 // Exception (base)
 // ---------------------------------------------------------------------------
 
-TEST(ExceptionTests, DefaultCtorEmptyMessage) {
+// FLIPPED by #2323 (2026-08-18) -- see ExceptionNewTests for the reference lines. An
+// EXPLICITLY empty message is still empty, which is also .NET: its fallback fires on a NULL
+// message, and `new Exception("")` has `Message == ""`.
+TEST(ExceptionTests, DefaultCtorCarriesTheDotNetFallbackButAnExplicitEmptyStringDoesNot) {
     Exception e;
-    EXPECT_TRUE(e.getMessageProperty().empty() || e.getMessageProperty() == "");
+    EXPECT_EQ(e.getMessageProperty(), "Exception of type 'System.Exception' was thrown.");
+    Exception explicitlyEmpty("");
+    EXPECT_TRUE(explicitlyEmpty.getMessageProperty().empty());
 }
 
 TEST(ExceptionTests, MessageFromCString) {

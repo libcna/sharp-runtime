@@ -23,7 +23,17 @@ namespace System::Text::Json {
         std::optional<std::string> path_;
 
     public:
-        JsonException() = default;
+        /**
+         * @brief Constructs an exception with .NET's fallback message for this type.
+         *
+         * Ticket #2323. .NET's `JsonException()` is `: base() { }` (JsonException.cs:78) and its
+         * `Message` override is `_message ?? base.Message` (:141-147), so it reaches
+         * `Exception`'s `SR.Format(SR.Exception_WasThrown, GetClassName())` and names THIS type.
+         * See HttpRequestException for why `{0}` is resolved statically.
+         */
+        JsonException()
+            : System::Exception(
+                  "Exception of type 'System.Text.Json.JsonException' was thrown.") {}
         explicit JsonException(const std::string& message) : System::Exception(message) {}
         JsonException(const std::string& message, std::exception_ptr innerException)
             : System::Exception(message, innerException) {}
