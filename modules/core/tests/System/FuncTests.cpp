@@ -2,6 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/Action.hpp"
+#include "System/Converter.hpp"
+#include <type_traits>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -145,4 +148,55 @@ TEST(FuncTests, ReferenceResultIsNotCopied) {
     byReference() = 11;
     EXPECT_EQ(storage, 11);
     EXPECT_EQ(&byReference(), &storage);
+}
+
+// ---------------------------------------------------------------------------
+// #2299 / SR-AUD-126 — Func<void> and Converter<T, void> no longer exist
+// ---------------------------------------------------------------------------
+
+namespace detail2299 {
+/// Detection idiom over the alias templates: an ill-formed spelling must be expressible as a
+/// value rather than as a hard error.
+template <typename R>
+concept FuncIsSpellable = requires { typename System::Func<R>; };
+template <typename T, typename R>
+concept ConverterIsSpellable = requires { typename System::Converter<T, R>; };
+}  // namespace detail2299
+
+TEST(FuncTests, Fix2299_FuncOfVoidIsIllFormed) {
+    // THE FINDING. `Func<void>` used to compile, and it was THE SAME TYPE as Action -- not
+    // convertible to it, the same type, because an alias template introduces no new type. .NET
+    // cannot express this at all: `void` is not a permitted C# generic argument, so `Func<void>`
+    // does not exist there, and the port was merging two delegate categories under incompatible
+    // public names.
+    static_assert(!detail2299::FuncIsSpellable<void>, "#2299: Func<void> is ill-formed");
+    static_assert(detail2299::FuncIsSpellable<int>, "...and every ordinary result type still works");
+    static_assert(detail2299::FuncIsSpellable<std::string>, "including a non-trivial one");
+
+    static_assert(!detail2299::ConverterIsSpellable<int, void>,
+                  "#2299: Converter<T, void> is ill-formed too -- it collapsed onto ActionT<T>");
+    static_assert(detail2299::ConverterIsSpellable<int, std::string>,
+                  "...and an ordinary conversion still works");
+}
+
+TEST(FuncTests, Decl2299_TheCATEGORIESStillCannotBeSeparated) {
+    // WHAT #2299 DID NOT DO, AND CANNOT. The finding's second prescription -- "prevent APIs that
+    // require .NET parity from accepting the substitute aliases" -- is STRUCTURALLY IMPOSSIBLE
+    // with alias templates: there is only one type, so no declaration can accept an Action and
+    // reject a Func-shaped callable. Constraining removes the SPELLING; it cannot create a
+    // category.
+    //
+    // Preserving the category would mean replacing every alias with a distinct class type, a
+    // whole-API break this repository has not asked for. This row records that limit as a
+    // declaration rather than leaving it to be rediscovered as a gap.
+    static_assert(std::is_same_v<System::Action, std::function<void()>>,
+                  "Action is still a bare alias, so it has no identity of its own");
+    static_assert(std::is_same_v<System::Func<int>, std::function<int()>>,
+                  "and so is Func -- the constraint is on the SPELLING, not on the type");
+
+    // An ordinary Action still works, unchanged.
+    int calls = 0;
+    System::Action a = [&calls] { ++calls; };
+    a();
+    EXPECT_EQ(1, calls);
 }

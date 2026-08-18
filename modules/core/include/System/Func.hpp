@@ -4,6 +4,7 @@
 #pragma once
 
 #include <functional>
+#include <type_traits>
 
 namespace System {
 
@@ -17,7 +18,20 @@ namespace System {
      * `FuncT<T, R>`, `FuncT2<T1, T2, R>` … `FuncT16<…>`. Ported code changes
      * spelling with arity, and the result type is always **last**, as in .NET.
      *
-     * @warning **`R` is unconstrained, so `Func<void>` compiles and is the very
+     * @par `R` is constrained to a non-void type since ticket #2299
+     * `Func<void>` used to compile, and it was **the same type as** `Action` — not convertible
+     * to it, the same type, because an alias template introduces no new type. `Converter<T,
+     * void>` and `ActionT<T>` coincided the same way. .NET cannot express any of this: `void` is
+     * not a permitted C# generic argument, so `Func<void>` does not exist there and the port was
+     * merging two delegate categories under incompatible public names.
+     *
+     * `NonVoidResult` makes the spelling ill-formed, which is as far as an alias can go. **The
+     * finding's second prescription is structurally impossible and is not attempted**: with
+     * aliases there is only ONE type, so no declaration can accept `Action` and reject
+     * `Func<void>`. Preserving the category would mean replacing every alias with a distinct
+     * class type — a whole-API break this repository has not asked for.
+     *
+     * @warning **Historical note.** Before #2299, `R` was unconstrained, so `Func<void>` was the very
      * same type as `Action`** — not merely convertible to it, the same type,
      * because both are aliases of `std::function<void()>`. `Converter<T, void>`
      * and `ActionT<T>` coincide the same way. .NET keeps the two categories
@@ -44,7 +58,17 @@ namespace System {
      * it throws `std::bad_function_call`, which is `std::function`'s own
      * diagnostic and not a `System::Exception`.
      */
+    /**
+     * @brief The constraint every `Func`/`FuncT*` result type must satisfy (ticket #2299).
+     *
+     * `void` is not a permitted generic argument in C#, so .NET has no `Func<void>`. Spelling one
+     * here produced `Action` — the same type, not merely a convertible one — which merged two
+     * delegate categories under incompatible public names.
+     */
     template<typename R>
+    concept NonVoidResult = !std::is_void_v<R>;
+
+    template<NonVoidResult R>
     using Func = std::function<R()>;
 
     /**
@@ -52,7 +76,7 @@ namespace System {
      *
      * C++ counterpart of the .NET System.Func<T, TResult> delegate.
      */
-    template<typename T, typename R>
+    template<typename T, NonVoidResult R>
     using FuncT = std::function<R(T)>;
 
     /**
@@ -60,7 +84,7 @@ namespace System {
      *
      * C++ counterpart of the .NET System.Func<T1, T2, TResult> delegate.
      */
-    template<typename T1, typename T2, typename R>
+    template<typename T1, typename T2, NonVoidResult R>
     using FuncT2 = std::function<R(T1, T2)>;
 
     /**
@@ -68,7 +92,7 @@ namespace System {
      *
      * C++ counterpart of the .NET System.Func<T1, T2, T3, TResult> delegate.
      */
-    template<typename T1, typename T2, typename T3, typename R>
+    template<typename T1, typename T2, typename T3, NonVoidResult R>
     using FuncT3 = std::function<R(T1, T2, T3)>;
 
     /**
@@ -76,7 +100,7 @@ namespace System {
      *
      * C++ counterpart of the .NET System.Func<T1, T2, T3, T4, TResult> delegate.
      */
-    template<typename T1, typename T2, typename T3, typename T4, typename R>
+    template<typename T1, typename T2, typename T3, typename T4, NonVoidResult R>
     using FuncT4 = std::function<R(T1, T2, T3, T4)>;
 
     /**
@@ -84,7 +108,7 @@ namespace System {
      *
      * C++ counterpart of the .NET System.Func<T1, T2, T3, T4, T5, TResult> delegate.
      */
-    template<typename T1, typename T2, typename T3, typename T4, typename T5, typename R>
+    template<typename T1, typename T2, typename T3, typename T4, typename T5, NonVoidResult R>
     using FuncT5 = std::function<R(T1, T2, T3, T4, T5)>;
 
     /**
@@ -93,7 +117,7 @@ namespace System {
      * C++ counterpart of the .NET System.Func<T1..T6, TResult> delegate.
      */
     template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6,
-             typename R>
+             NonVoidResult R>
     using FuncT6 = std::function<R(T1, T2, T3, T4, T5, T6)>;
 
     /**
@@ -102,7 +126,7 @@ namespace System {
      * C++ counterpart of the .NET System.Func<T1..T7, TResult> delegate.
      */
     template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6,
-             typename T7, typename R>
+             typename T7, NonVoidResult R>
     using FuncT7 = std::function<R(T1, T2, T3, T4, T5, T6, T7)>;
 
     /**
@@ -111,7 +135,7 @@ namespace System {
      * C++ counterpart of the .NET System.Func<T1..T8, TResult> delegate.
      */
     template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6,
-             typename T7, typename T8, typename R>
+             typename T7, typename T8, NonVoidResult R>
     using FuncT8 = std::function<R(T1, T2, T3, T4, T5, T6, T7, T8)>;
 
     /**
@@ -120,7 +144,7 @@ namespace System {
      * C++ counterpart of the .NET System.Func<T1..T9, TResult> delegate.
      */
     template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6,
-             typename T7, typename T8, typename T9, typename R>
+             typename T7, typename T8, typename T9, NonVoidResult R>
     using FuncT9 = std::function<R(T1, T2, T3, T4, T5, T6, T7, T8, T9)>;
 
     /**
@@ -129,7 +153,7 @@ namespace System {
      * C++ counterpart of the .NET System.Func<T1..T10, TResult> delegate.
      */
     template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6,
-             typename T7, typename T8, typename T9, typename T10, typename R>
+             typename T7, typename T8, typename T9, typename T10, NonVoidResult R>
     using FuncT10 = std::function<R(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)>;
 
     /**
@@ -138,7 +162,7 @@ namespace System {
      * C++ counterpart of the .NET System.Func<T1..T11, TResult> delegate.
      */
     template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6,
-             typename T7, typename T8, typename T9, typename T10, typename T11, typename R>
+             typename T7, typename T8, typename T9, typename T10, typename T11, NonVoidResult R>
     using FuncT11 = std::function<R(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)>;
 
     /**
@@ -148,7 +172,7 @@ namespace System {
      */
     template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6,
              typename T7, typename T8, typename T9, typename T10, typename T11, typename T12,
-             typename R>
+             NonVoidResult R>
     using FuncT12 = std::function<R(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12)>;
 
     /**
@@ -158,7 +182,7 @@ namespace System {
      */
     template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6,
              typename T7, typename T8, typename T9, typename T10, typename T11, typename T12,
-             typename T13, typename R>
+             typename T13, NonVoidResult R>
     using FuncT13 = std::function<R(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13)>;
 
     /**
@@ -168,7 +192,7 @@ namespace System {
      */
     template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6,
              typename T7, typename T8, typename T9, typename T10, typename T11, typename T12,
-             typename T13, typename T14, typename R>
+             typename T13, typename T14, NonVoidResult R>
     using FuncT14 = std::function<R(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13,
                                      T14)>;
 
@@ -179,7 +203,7 @@ namespace System {
      */
     template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6,
              typename T7, typename T8, typename T9, typename T10, typename T11, typename T12,
-             typename T13, typename T14, typename T15, typename R>
+             typename T13, typename T14, typename T15, NonVoidResult R>
     using FuncT15 = std::function<R(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13,
                                      T14, T15)>;
 
@@ -190,7 +214,7 @@ namespace System {
      */
     template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6,
              typename T7, typename T8, typename T9, typename T10, typename T11, typename T12,
-             typename T13, typename T14, typename T15, typename T16, typename R>
+             typename T13, typename T14, typename T15, typename T16, NonVoidResult R>
     using FuncT16 = std::function<R(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13,
                                      T14, T15, T16)>;
 

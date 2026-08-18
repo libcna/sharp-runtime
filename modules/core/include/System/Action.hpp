@@ -4,6 +4,7 @@
 #pragma once
 
 #include <functional>
+#include "System/Func.hpp"
 #include "System/Span.hpp"
 
 namespace System {
@@ -185,7 +186,7 @@ namespace System {
      * SR-AUD-126 note: `TOutput` is unconstrained, so `Converter<T, void>` is
      * the same type as `ActionT<T>` here and is not expressible in .NET at all.
      */
-    template<typename TInput, typename TOutput>
+    template<typename TInput, NonVoidResult TOutput>
     using Converter = std::function<TOutput(TInput)>;
 
 } // namespace System

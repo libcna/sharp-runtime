@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <functional>
+#include "System/Func.hpp"
 
 namespace System {
 
@@ -24,7 +25,7 @@ namespace System {
  * is a compile-domain public source break either way. This alias is declared
  * identically in `System/Action.hpp`; both spellings mean the same type.
  */
-template<typename TInput, typename TOutput>
+template<typename TInput, NonVoidResult TOutput>
 using Converter = std::function<TOutput(TInput)>;
 
 } // namespace System
