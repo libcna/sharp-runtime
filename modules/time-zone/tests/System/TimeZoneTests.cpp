@@ -182,8 +182,19 @@ TEST(TimeZoneTest, CurrentTimeZone_AmbiguousHourIsDeterministicRegardlessOfCallO
     // the first call in a process, -300 right after a standard-time conversion and -240 right
     // after a daylight one -- the same argument giving three different answers depending on
     // unrelated earlier calls. The adapter resolves the ambiguity explicitly, so the answer is
-    // now a function of the argument alone. Which of the two readings is preferred (standard,
-    // matching what .NET documents for GetUtcOffset) is carried by #2186.
+    // now a function of the argument alone.
+    //
+    // #2186 question 5, answered 2026-08-18: the STANDARD reading is .NET's, and #2182 chose
+    // right. TimeZone.CalculateUtcOffset first decides isDst from the DST window, and then, for a
+    // time INSIDE the ambiguous window, overrides it:
+    //
+    //     if (isDst && time >= ambiguousStart && time < ambiguousEnd)
+    //         isDst = time.IsAmbiguousDaylightSavingTime();     -- TimeZone.cs:237-240
+    //
+    // That flag is set only by a prior UTC-to-local conversion, so a DateTime constructed from
+    // its fields carries false and the answer is the STANDARD offset. Reading only the window
+    // test above it -- which puts 01:30 inside daylight -- gives the opposite answer, and that is
+    // the trap in this function: the override is what decides it, not the window.
     if (!zoneInstalled("America/New_York")) GTEST_SKIP() << "America/New_York is not installed";
     ScopedTestTz tz("America/New_York");
     const TimeZone& ctz = TimeZone::CurrentTimeZone();

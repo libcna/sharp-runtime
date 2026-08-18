@@ -294,6 +294,68 @@ namespace System {
             }
 
             /**
+             * @brief The three further validations .NET's ValidateAdjustmentRule performs.
+             *
+             * Ticket #2186 (2026-08-18). #2179 measured all three as accepted here and
+             * deliberately did not repair them, because "the audit's managed probe covers only
+             * the reversed date range, and inventing three more rejections on a recollection of
+             * the .NET source is exactly what this review declines to do". The reference is
+             * available now (`TimeZoneInfo.AdjustmentRule.cs:174-223`), and it **corrects the
+             * ticket's own statement of two of the three**:
+             *
+             *   - the `daylightDelta` range is NOT +/-14 hours. It is `-23.0 .. 14.0`, and .NET
+             *     explains why in a comment of its own: Samoa moved across the International Date
+             *     Line, so describing its daylight delta needs -23. The MESSAGE still says "plus
+             *     or minus 14.0 hours", because it is shared with `UtcOffsetOutOfRange`. That
+             *     inconsistency is .NET's and is transcribed rather than tidied;
+             *   - the seconds check is not "sub-minute". It is "not a whole number of minutes",
+             *     so 1h30m30s fails as surely as 30s does;
+             *   - the time-of-day check EXEMPTS `DateTime::MinValue` for `dateStart` and
+             *     `MaxValue` for `dateEnd`, which is how a rule that spans all time is spelled.
+             */
+            static void validateAdjustmentRule(const DateTime& dateStart, const DateTime& dateEnd,
+                                               const TimeSpan& daylightDelta) {
+                validateDateRange(dateStart, dateEnd);
+
+                // TimeZoneInfo.AdjustmentRule.cs:206-209.
+                constexpr double kMinDaylightDeltaHours = -23.0;
+                constexpr double kMaxDaylightDeltaHours = 14.0;
+                if (daylightDelta.getTotalHoursProperty() < kMinDaylightDeltaHours ||
+                    daylightDelta.getTotalHoursProperty() > kMaxDaylightDeltaHours) {
+                    throw System::ArgumentOutOfRangeException(
+                        "daylightDelta", daylightDelta.ToString(),
+                        "The TimeSpan parameter must be within plus or minus 14.0 hours.");
+                }
+
+                // :211-214.
+                if (daylightDelta.getTicksProperty() % TimeSpan::TicksPerMinute != 0) {
+                    throw System::ArgumentException(
+                        "The TimeSpan parameter cannot be specified more precisely than whole "
+                        "minutes.",
+                        "daylightDelta");
+                }
+
+                // :216-223. This port has no DateTimeKind (a permanent deviation), so the
+                // `Kind == Unspecified` conjunct is not reproducible and is simply absent -- which
+                // makes this port's check STRICTER than .NET's for a UTC-kinded argument, and
+                // identical for every argument this port can express.
+                if (dateStart != DateTime::MinValue &&
+                    dateStart.getTimeOfDayProperty() != TimeSpan::Zero) {
+                    throw System::ArgumentException(
+                        "The supplied DateTime includes a TimeOfDay setting.   This is not "
+                        "supported.",
+                        "dateStart");
+                }
+                if (dateEnd != DateTime::MaxValue &&
+                    dateEnd.getTimeOfDayProperty() != TimeSpan::Zero) {
+                    throw System::ArgumentException(
+                        "The supplied DateTime includes a TimeOfDay setting.   This is not "
+                        "supported.",
+                        "dateEnd");
+                }
+            }
+
+            /**
              * @brief Creates an adjustment rule with zero BaseUtcOffsetDelta.
              *
              * C++ counterpart of .NET AdjustmentRule.CreateAdjustmentRule(DateTime, DateTime,
@@ -304,7 +366,7 @@ namespace System {
                 DateTime dateStart, DateTime dateEnd, TimeSpan daylightDelta,
                 TransitionTime daylightTransitionStart, TransitionTime daylightTransitionEnd)
             {
-                validateDateRange(dateStart, dateEnd);
+                validateAdjustmentRule(dateStart, dateEnd, daylightDelta);
                 auto r = std::shared_ptr<AdjustmentRule>(new AdjustmentRule());
                 r->dateStart_               = dateStart;
                 r->dateEnd_                 = dateEnd;
@@ -330,7 +392,7 @@ namespace System {
                 TransitionTime daylightTransitionStart, TransitionTime daylightTransitionEnd,
                 TimeSpan baseUtcOffsetDelta)
             {
-                validateDateRange(dateStart, dateEnd);
+                validateAdjustmentRule(dateStart, dateEnd, daylightDelta);
                 auto r = std::shared_ptr<AdjustmentRule>(new AdjustmentRule());
                 r->dateStart_               = dateStart;
                 r->dateEnd_                 = dateEnd;
@@ -782,11 +844,47 @@ namespace System {
          *
          * C++ counterpart of .NET TimeZoneInfo.ConvertTime(DateTime, TimeZoneInfo, TimeZoneInfo).
          */
+        /**
+         * @brief `DateTime` from a tick count, clamped to the representable range.
+         *
+         * Ticket #2186 (2026-08-18) answered question 1. The three conversion doors used
+         * `DateTime::Add`, whose overflow is an `ArgumentOutOfRangeException`; .NET **clamps**:
+         *
+         * @code
+         * private static DateTime SafeCreateDateTimeFromTicks(long ticks, DateTimeKind kind = …)
+         *     => (ulong)ticks <= DateTime.MaxTicks ? new DateTime(ticks, kind)
+         *                                          : (ticks < 0 ? DateTime.MinValue : DateTime.MaxValue);
+         * @endcode
+         * (`TimeZoneInfo.Cache.cs:340-342`), and `ConvertTime` builds its result through it
+         * (`TimeZoneInfo.cs:685`).
+         *
+         * **The cast to `ulong` is the whole trick and is reproduced deliberately**: a negative
+         * tick count wraps to something enormous, so one unsigned comparison rejects both ends of
+         * the range at once. Spelling it as two signed comparisons would be equivalent, and this
+         * spelling is kept because it is the reference's.
+         *
+         * .NET does NOT clamp everywhere. Its invalid-time compatibility path builds a raw
+         * `new DateTime(...)` and lets it throw, with a comment saying so explicitly
+         * (`TimeZoneInfo.cs:661-667`) — that path needs `TimeZoneInfoOptions` and adjustment
+         * rules this port's `TimeZoneInfo` does not model, so it is not reachable here.
+         */
+        [[nodiscard]] static DateTime safeFromTicks(SharpRuntime::longcs ticks) {
+            const auto unsignedTicks = static_cast<unsigned long long>(ticks);
+            if (unsignedTicks <= static_cast<unsigned long long>(DateTime::MaxTicks))
+                return DateTime(ticks);
+            return ticks < 0 ? DateTime::MinValue : DateTime::MaxValue;
+        }
+
         static DateTime ConvertTime(const DateTime& dt,
                                     const TimeZoneInfo& sourceTimeZone,
                                     const TimeZoneInfo& destinationTimeZone) {
-            DateTime utc = dt.Add(-sourceTimeZone.baseUtcOffset_);
-            return utc.Add(destinationTimeZone.baseUtcOffset_);
+            // #2186: the intermediate UTC ticks may leave the range while the final local ticks
+            // land back inside it, which is why .NET computes the result "from raw ticks to avoid
+            // precision loss from double-clamping" (TimeZoneInfo.cs:683-685) and clamps only once,
+            // at the end.
+            const SharpRuntime::longcs utcTicks =
+                dt.getTicksProperty() - sourceTimeZone.baseUtcOffset_.getTicksProperty();
+            return safeFromTicks(utcTicks + destinationTimeZone.baseUtcOffset_.getTicksProperty());
         }
 
         /**
@@ -796,7 +894,8 @@ namespace System {
          */
         static DateTime ConvertTimeFromUtc(const DateTime& dt,
                                            const TimeZoneInfo& destinationTimeZone) {
-            return dt.Add(destinationTimeZone.baseUtcOffset_);
+            return safeFromTicks(dt.getTicksProperty() +
+                                 destinationTimeZone.baseUtcOffset_.getTicksProperty());   // #2186
         }
 
         /**
@@ -805,7 +904,8 @@ namespace System {
          * C++ counterpart of .NET TimeZoneInfo.ConvertTimeToUtc(DateTime, TimeZoneInfo).
          */
         static DateTime ConvertTimeToUtc(const DateTime& dt, const TimeZoneInfo& sourceTimeZone) {
-            return dt.Add(-sourceTimeZone.baseUtcOffset_);
+            return safeFromTicks(dt.getTicksProperty() -
+                                 sourceTimeZone.baseUtcOffset_.getTicksProperty());   // #2186
         }
 
         /**

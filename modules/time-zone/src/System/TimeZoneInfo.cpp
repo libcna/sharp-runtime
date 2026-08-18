@@ -5,6 +5,7 @@
 #include "System/PlatformNotSupportedException.hpp"
 #include "System/TimeZoneNotFoundException.hpp"
 #include "TimeZonePosixSupport.hpp"
+#include "System/InvalidTimeZoneException.hpp"
 #include <cstdlib>
 #include <ctime>
 
@@ -102,12 +103,28 @@ bool hasTzifMagic(const std::string& path) {
 
 } // namespace
 
+// Ticket #2186, question 4. #2183 folded three distinct failures into one boolean and kept
+// TimeZoneNotFoundException for all of them "rather than guessing InvalidTimeZoneException".
+// The guess is unnecessary now: .NET raises TimeZoneNotFoundException when the id names nothing,
+// and InvalidTimeZoneException when the file EXISTS but is not usable zone data
+// (`TimeZoneInfo.Unix.cs:697`, SR.InvalidTimeZone_NoTTInfoStructures). The two are different
+// answers to different questions -- "there is no such zone" versus "that is not a zone" -- and a
+// caller that catches only the first would previously have swallowed the second.
+//
+// TryFindSystemTimeZoneById is unaffected: .NET's discards the exception entirely
+// (`TimeZoneInfo.cs:526-527`), so it returns false for every failure, and this port's `catch (...)`
+// already did the same.
 static bool zoneFileExists(const std::string& id) {
     if (!isWellFormedZoneId(id)) return false;
     std::string path = "/usr/share/zoneinfo/" + id;
     struct stat st {};
-    if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return false;
-    return hasTzifMagic(path);
+    return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+}
+
+// True when a file that EXISTS does not carry zone data. Separated from zoneFileExists so the
+// caller can tell the two failures apart; see the comment above.
+static bool zoneFileIsNotZoneData(const std::string& id) {
+    return !hasTzifMagic("/usr/share/zoneinfo/" + id);
 }
 #endif
 
@@ -262,6 +279,10 @@ std::shared_ptr<TimeZoneInfo> TimeZoneInfo::FindSystemTimeZoneById(const std::st
     if (!zoneFileExists(id))
         throw System::TimeZoneNotFoundException(
             "The time zone ID '" + id + "' was not found on the local computer.");
+    if (zoneFileIsNotZoneData(id))
+        throw System::InvalidTimeZoneException(
+            "There are no ttinfo structures in the tzfile.  At least one ttinfo structure is "
+            "required in order to construct a TimeZoneInfo object.");
 
     detail::ZoneMetadata meta;
     {

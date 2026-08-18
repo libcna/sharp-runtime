@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/InvalidTimeZoneException.hpp"
+#include <filesystem>
 #include <cstdlib>
 #include <ctime>
 #include <memory>
@@ -1130,6 +1132,44 @@ TEST(TimeZoneInfoTests, StandardAndDaylightNames_DifferExactlyWhenTheZoneObserve
 // that nothing has to be written into system zoneinfo.
 // ---------------------------------------------------------------------------
 
+// #2186, question 4, answered 2026-08-18. #2183 kept TimeZoneNotFoundException for a file that
+// exists but is not zone data, "rather than guessing InvalidTimeZoneException". The guess is
+// unnecessary now: .NET raises InvalidTimeZoneException there
+// (TimeZoneInfo.Unix.cs:697, SR.InvalidTimeZone_NoTTInfoStructures) and reserves
+// TimeZoneNotFoundException for an id that names nothing. Those are different answers to
+// different questions -- "there is no such zone" versus "that is not a zone" -- and a caller
+// catching only the first used to swallow the second.
+TEST(TimeZoneInfoTests, Fix2186_NotZoneDataIsInvalidNotNotFound) {
+    // The six data files shipped inside /usr/share/zoneinfo exist and are not TZif.
+    int checked = 0;
+    for (const char* id : {"zone.tab", "zone1970.tab", "iso3166.tab", "tzdata.zi",
+                           "leapseconds", "leap-seconds.list"}) {
+        if (!std::filesystem::exists(std::string("/usr/share/zoneinfo/") + id)) continue;
+        ++checked;
+        EXPECT_THROW((void)TimeZoneInfo::FindSystemTimeZoneById(id),
+                     System::InvalidTimeZoneException) << id;
+    }
+    if (checked == 0) GTEST_SKIP() << "no non-TZif data files are installed here";
+
+    // An id that names NOTHING is still not-found, which is what makes the split meaningful.
+    EXPECT_THROW((void)TimeZoneInfo::FindSystemTimeZoneById("No/Such/Zone/Anywhere"),
+                 System::TimeZoneNotFoundException);
+    // ...and so is a malformed one, which never reaches the file at all.
+    EXPECT_THROW((void)TimeZoneInfo::FindSystemTimeZoneById("America//New_York"),
+                 System::TimeZoneNotFoundException);
+
+    // TryFindSystemTimeZoneById returns FALSE for every failure and throws none of them, which is
+    // .NET's other half of this question: its Try form discards the exception outright
+    // (TimeZoneInfo.cs:526-527).
+    std::shared_ptr<TimeZoneInfo> tz;
+    EXPECT_FALSE(TimeZoneInfo::TryFindSystemTimeZoneById("zone.tab", tz));
+    EXPECT_EQ(tz, nullptr);
+    EXPECT_FALSE(TimeZoneInfo::TryFindSystemTimeZoneById("No/Such/Zone/Anywhere", tz));
+    EXPECT_EQ(tz, nullptr);
+    EXPECT_TRUE(TimeZoneInfo::TryFindSystemTimeZoneById("UTC", tz));
+    EXPECT_NE(tz, nullptr);
+}
+
 TEST(TimeZoneInfoTests, FindSystemTimeZoneById_NonTzifDataFiles_AreRejected) {
     int checked = 0;
     for (const char* id : {"zone.tab", "zone1970.tab", "iso3166.tab", "tzdata.zi",
@@ -1260,19 +1300,45 @@ TEST(TimeZoneInfoTests, PIN_TimeZoneInfoObjectLayoutIsUnchanged) {
 // later is a deliberate act with a failing test attached, not a silent drift.
 // ---------------------------------------------------------------------------
 
-TEST(TimeZoneInfoTests, PIN_ConversionOverflowThrowsRatherThanClamping) {
-    // .NET's ConvertUtcToTimeZone appears to clamp to DateTime.MinValue/MaxValue; this port
-    // propagates DateTime::Add's ArgumentOutOfRangeException. Unverifiable here (#2186).
-    auto plus14 = TimeZoneInfo::CreateCustomTimeZone("+14", TimeSpan::FromHours(14), "d", "s");
+// FLIPPED by #2186 (2026-08-18), question 1. The pin recorded that .NET "appears to clamp" and
+// that it was "unverifiable here". It clamps, and the mechanism is one line:
+//
+//     private static DateTime SafeCreateDateTimeFromTicks(long ticks, DateTimeKind kind = …)
+//         => (ulong)ticks <= DateTime.MaxTicks ? new DateTime(ticks, kind)
+//                                              : (ticks < 0 ? DateTime.MinValue : DateTime.MaxValue);
+//                                                        -- TimeZoneInfo.Cache.cs:340-342
+//
+// with ConvertTime building its result through it (TimeZoneInfo.cs:685).
+TEST(TimeZoneInfoTests, Fix2186_ConversionOverflowClampsRatherThanThrowing) {
+    auto plus14  = TimeZoneInfo::CreateCustomTimeZone("+14", TimeSpan::FromHours(14), "d", "s");
     auto minus14 = TimeZoneInfo::CreateCustomTimeZone("-14", TimeSpan::FromHours(-14), "d", "s");
-    EXPECT_THROW((void)TimeZoneInfo::ConvertTimeFromUtc(DateTime::MaxValue, *plus14),
-                 System::ArgumentOutOfRangeException);
-    EXPECT_THROW((void)TimeZoneInfo::ConvertTimeFromUtc(DateTime::MinValue, *minus14),
-                 System::ArgumentOutOfRangeException);
-    EXPECT_THROW((void)TimeZoneInfo::ConvertTimeToUtc(DateTime::MinValue, *plus14),
-                 System::ArgumentOutOfRangeException);
-    EXPECT_THROW((void)TimeZoneInfo::ConvertTimeToUtc(DateTime::MaxValue, *minus14),
-                 System::ArgumentOutOfRangeException);
+
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeFromUtc(DateTime::MaxValue, *plus14), DateTime::MaxValue);
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeFromUtc(DateTime::MinValue, *minus14), DateTime::MinValue);
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeToUtc(DateTime::MinValue, *plus14), DateTime::MinValue);
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeToUtc(DateTime::MaxValue, *minus14), DateTime::MaxValue);
+
+    // BOTH ENDS, and the sign of the excess is what picks the bound -- clamping the wrong way
+    // would still "not throw" and would still pass a test that only asserted that.
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeFromUtc(DateTime::MinValue, *plus14),
+              DateTime::MinValue.AddHours(14)) << "an in-range result is not clamped at all";
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeFromUtc(DateTime::MaxValue, *minus14),
+              DateTime::MaxValue.AddHours(-14));
+
+    // The three-argument ConvertTime clamps ONCE, at the end. .NET computes the result "from raw
+    // ticks to avoid precision loss from double-clamping" (TimeZoneInfo.cs:683-685), so an
+    // intermediate UTC value that leaves the range must not drag the final answer to a bound when
+    // the final answer is representable.
+    EXPECT_EQ(TimeZoneInfo::ConvertTime(DateTime::MaxValue, *minus14, *minus14),
+              DateTime::MaxValue)
+        << "the intermediate UTC ticks overflow; the final local ticks do not";
+    EXPECT_EQ(TimeZoneInfo::ConvertTime(DateTime::MinValue, *plus14, *plus14),
+              DateTime::MinValue);
+
+    // The ordinary rows, unmoved.
+    const DateTime noon(2025, 6, 15, 12, 0, 0);
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeFromUtc(noon, *plus14), noon.AddHours(14));
+    EXPECT_EQ(TimeZoneInfo::ConvertTimeToUtc(noon, *plus14), noon.AddHours(-14));
 }
 
 TEST(TimeZoneInfoTests, PIN_ClearCachedDataIsInertAndGetSystemTimeZonesReturnsTwo) {
@@ -1287,21 +1353,84 @@ TEST(TimeZoneInfoTests, PIN_ClearCachedDataIsInertAndGetSystemTimeZonesReturnsTw
         << "PIN (#2186): the database holds hundreds of zones; this returns UTC and Local.";
 }
 
-TEST(TimeZoneInfoTests, PIN_AdjacentAdjustmentRuleValidationsAreStillAbsent) {
-    // Measured as missing alongside SR-AUD-226 but NOT repaired: the audit's managed probe
-    // covers only the reversed date range, and inventing three more rejections on a
-    // recollection of the .NET source is exactly what this review declines to do (#2186).
+// FLIPPED by #2186 (2026-08-18), questions 2 and 3. #2179 measured all three as accepted and
+// declined to repair them, because "inventing three more rejections on a recollection of the .NET
+// source is exactly what this review declines to do". That was the right call, and the reference
+// now supplies all three -- AND CORRECTS THE TICKET'S OWN STATEMENT OF TWO OF THEM.
+TEST(TimeZoneInfoTests, Fix2186_AdjacentAdjustmentRuleValidationsArePresent) {
     DateTime tod;
-    auto tt = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    auto tt  = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    auto tt2 = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 10, 7);
+
+    // A dateStart or dateEnd carrying a time-of-day (AdjustmentRule.cs:216-223).
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     DateTime(2025, 1, 1, 5, 30, 0), DateTime(2025, 12, 31), TimeSpan::Zero, tt, tt2),
+                 System::ArgumentException);
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     DateTime(2025, 1, 1), DateTime(2025, 12, 31, 5, 30, 0), TimeSpan::Zero, tt, tt2),
+                 System::ArgumentException);
+    // ...but MinValue and MaxValue are EXEMPT, which is how a rule spanning all time is spelled.
+    // Both carry a zero time-of-day anyway; the exemption matters for the reference's Kind
+    // conjunct, and reproducing the shape keeps this a transcription.
     EXPECT_NO_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
-        DateTime(2025, 1, 1, 5, 30, 0), DateTime(2025, 12, 31), TimeSpan::Zero, tt, tt))
-        << "PIN (#2186): a dateStart carrying a time-of-day is still accepted.";
+        DateTime::MinValue, DateTime::MaxValue, TimeSpan::Zero, tt, tt2));
+
+    // THE RANGE IS NOT +/-14 HOURS, which is what the ticket said. .NET's check is
+    // `daylightDelta.TotalHours < -23.0 || > 14.0` (:206-208), and it explains why in a comment:
+    // Samoa moved across the International Date Line, so describing its delta needs -23. The
+    // MESSAGE still says "plus or minus 14.0 hours" because it is shared with UtcOffsetOutOfRange
+    // -- that inconsistency is .NET's, and it is transcribed rather than tidied.
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     DateTime(2025, 1, 1), DateTime(2025, 12, 31), TimeSpan::FromHours(15), tt, tt2),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     DateTime(2025, 1, 1), DateTime(2025, 12, 31), TimeSpan::FromHours(-24), tt, tt2),
+                 System::ArgumentOutOfRangeException);
+    // -23 is accepted and -14 is not the boundary. A symmetric +/-14 check would reject this row.
     EXPECT_NO_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
-        DateTime(2025, 1, 1), DateTime(2025, 12, 31), TimeSpan::FromHours(15), tt, tt))
-        << "PIN (#2186): a daylightDelta beyond +/-14 hours is still accepted.";
+        DateTime(2025, 1, 1), DateTime(2025, 12, 31), TimeSpan::FromHours(-23), tt, tt2));
     EXPECT_NO_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
-        DateTime(2025, 1, 1), DateTime(2025, 12, 31), TimeSpan::FromSeconds(30), tt, tt))
-        << "PIN (#2186): a sub-minute daylightDelta is still accepted.";
+        DateTime(2025, 1, 1), DateTime(2025, 12, 31), TimeSpan::FromHours(14), tt, tt2));
+
+    // THE SECONDS CHECK IS NOT "SUB-MINUTE" EITHER. It is "not a whole number of minutes"
+    // (:211-214), so a large delta with a stray 30 seconds fails as surely as 30 seconds does.
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     DateTime(2025, 1, 1), DateTime(2025, 12, 31), TimeSpan::FromSeconds(30), tt, tt2),
+                 System::ArgumentException);
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     DateTime(2025, 1, 1), DateTime(2025, 12, 31),
+                     TimeSpan::FromHours(1) + TimeSpan::FromSeconds(30), tt, tt2),
+                 System::ArgumentException);
+    EXPECT_NO_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+        DateTime(2025, 1, 1), DateTime(2025, 12, 31), TimeSpan::FromMinutes(90), tt, tt2));
+
+    // The exact texts, which is question 3: the exception TYPES came from the audit probe and the
+    // TEXT did not, so the text is what this asserts.
+    try {
+        (void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+            DateTime(2025, 1, 1), DateTime(2025, 12, 31), TimeSpan::FromSeconds(30), tt, tt2);
+        FAIL();
+    } catch (const System::ArgumentException& e) {
+        EXPECT_NE(std::string(e.what()).find(
+                      "The TimeSpan parameter cannot be specified more precisely than whole "
+                      "minutes."),
+                  std::string::npos) << e.what();
+    }
+    try {
+        (void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+            DateTime(2025, 1, 1, 5, 30, 0), DateTime(2025, 12, 31), TimeSpan::Zero, tt, tt2);
+        FAIL();
+    } catch (const System::ArgumentException& e) {
+        EXPECT_NE(std::string(e.what()).find(
+                      "The supplied DateTime includes a TimeOfDay setting.   This is not "
+                      "supported."),
+                  std::string::npos) << e.what();
+    }
+
+    // The pre-existing reversed-range rejection is unmoved.
+    EXPECT_THROW((void)TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+                     DateTime(2025, 12, 31), DateTime(2025, 1, 1), TimeSpan::Zero, tt, tt2),
+                 System::ArgumentException);
 }
 
 TEST(TimeZoneInfoTests, PIN_TimeZoneInfoItselfModelsNoDaylightTransitions) {
