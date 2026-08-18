@@ -39,6 +39,9 @@
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/Sockets/Socket.hpp"
 #include "System/Net/WebSockets/ClientWebSocket.hpp"
+#include "System/InvalidOperationException.hpp"
+#include "System/ObjectDisposedException.hpp"
+#include "System/Net/WebSockets/WebSocket.hpp"
 #include "System/Net/WebSockets/WebSocketException.hpp"
 #include "System/Net/WebSockets/WebSocketState.hpp"
 #include "System/Uri.hpp"
@@ -103,6 +106,15 @@ private:
     std::atomic<bool>       acceptedFlag_{false};
     std::thread             thread_;
     SharpRuntime::intcs     port_ = 0;
+};
+
+/// Reaches `WebSocket::ThrowOnInvalidState`, which is `protected static` here exactly as it is in
+/// .NET. Deriving is the language's own way in; widening the production declaration for a test's
+/// convenience is not.
+struct InnerStateCheck : System::Net::WebSockets::WebSocket {
+    static void Check(WebSocketState state, std::initializer_list<WebSocketState> valid) {
+        System::Net::WebSockets::WebSocket::ThrowOnInvalidState(state, valid);
+    }
 };
 
 std::string wsUriFor(SharpRuntime::intcs port) {
@@ -194,12 +206,15 @@ TEST(ClientWebSocketConcurrencyTests, Fix2096_TheStatePropertyIsSafeToReadWhileA
     EXPECT_EQ(ws.getStateProperty(), WebSocketState::Closed);
 }
 
-TEST(ClientWebSocketConcurrencyTests, Fix2096_AnOperationAfterDisposeThrowsRatherThanDereferencingNull) {
-    // The non-racy half of the same door: once Dispose() has taken the socket away, every
-    // operation must raise, and it must raise the SAME exception whichever check catches it
-    // first. socketForIo() deliberately reuses WebSocketException(InvalidState) for that reason
-    // -- see its doc-comment, and ticket #2357 for whether the whole family should be
-    // ObjectDisposedException the way .NET's is.
+TEST(ClientWebSocketConcurrencyTests, Fix2357_AnOperationAfterDisposeRaisesObjectDisposedException) {
+    // REWRITTEN BY #2357, WHICH INVERTED THIS PIN. #2096 deliberately raised
+    // WebSocketException(InvalidState) on both sides of the Dispose race, because matching .NET
+    // on one side and not the other would be worse than either -- and it recorded #2357 as the
+    // ticket that would move the whole family at once. It has.
+    //
+    // .NET's outer gate (`ClientWebSocket.cs:163-177`) raises ObjectDisposedException for a
+    // disposed instance and InvalidOperationException for one that was never connected. Neither
+    // is WebSocketException. The two sides of the race still agree, which is what #2096 required.
     SilentServer server;
     ClientWebSocket ws;
     auto task = ws.ConnectAsync(System::Uri(wsUriFor(server.port())));
@@ -209,13 +224,76 @@ TEST(ClientWebSocketConcurrencyTests, Fix2096_AnOperationAfterDisposeThrowsRathe
 
     std::vector<SharpRuntime::bytecs> buffer(16, 0);
     auto send = ws.SendAsync(buffer, 0, 4, System::Net::WebSockets::WebSocketMessageType::Binary, true);
-    EXPECT_THROW(send.Wait(), WebSocketException);
+    EXPECT_THROW(send.Wait(), System::ObjectDisposedException);
 
     auto receive = ws.ReceiveAsync(buffer, 0, 4);
-    EXPECT_THROW((void)receive.getResultProperty(), WebSocketException);
+    EXPECT_THROW((void)receive.getResultProperty(), System::ObjectDisposedException);
+
+    // CloseAsync used to be asserted as a no-op here. It is not one after DISPOSE: .NET routes it
+    // through the same gate, so a disposed instance faults. A close on an already-closed but
+    // still-live socket is still a no-op -- that is a different case, and this row does not
+    // weaken it.
+    auto close = ws.CloseAsync(System::Net::WebSockets::WebSocketCloseStatus::NormalClosure, std::nullopt);
+    EXPECT_THROW(close.Wait(), System::ObjectDisposedException);
+
+    auto closeOutput = ws.CloseOutputAsync(System::Net::WebSockets::WebSocketCloseStatus::NormalClosure,
+                                            std::nullopt);
+    EXPECT_THROW(closeOutput.Wait(), System::ObjectDisposedException);
+}
+
+TEST(ClientWebSocketConcurrencyTests, Fix2357_AnOperationBeforeConnectRaisesInvalidOperationException) {
+    // The gate's other half, which had no counterpart in this port at all: an instance that was
+    // NEVER connected is not disposed, and .NET says so with a different exception and a
+    // different sentence -- "The WebSocket is not connected."
+    ClientWebSocket ws;
+    std::vector<SharpRuntime::bytecs> buffer(16, 0);
+
+    auto send = ws.SendAsync(buffer, 0, 4, System::Net::WebSockets::WebSocketMessageType::Binary, true);
+    EXPECT_THROW(send.Wait(), System::InvalidOperationException);
+
+    auto receive = ws.ReceiveAsync(buffer, 0, 4);
+    try {
+        (void)receive.getResultProperty();
+        ADD_FAILURE() << "expected InvalidOperationException";
+    } catch (const System::ObjectDisposedException&) {
+        ADD_FAILURE() << "a never-connected instance is not a DISPOSED one";
+    } catch (const System::InvalidOperationException& e) {
+        EXPECT_STREQ(e.what(), "The WebSocket is not connected.");
+    }
 
     auto close = ws.CloseAsync(System::Net::WebSockets::WebSocketCloseStatus::NormalClosure, std::nullopt);
-    EXPECT_NO_THROW(close.Wait()) << "a close on an already-closed socket is a no-op, not a fault";
+    EXPECT_THROW(close.Wait(), System::InvalidOperationException);
+}
+
+TEST(ClientWebSocketConcurrencyTests, Fix2357_TheInnerPerOperationStateCheckKeepsWebSocketException) {
+    // THE TICKET'S FRAMING WAS TOO SIMPLE AND THE REFERENCE CORRECTED IT. It reported that .NET
+    // "never" raises WebSocketException at these doors. .NET has TWO layers, and the INNER one --
+    // WebSocketStateHelper.ThrowIfInvalidState (`WebSocketStateHelper.cs:21-41`), run per
+    // operation by ManagedWebSocket -- raises exactly WebSocketException(InvalidState). This
+    // port's WebSocket::ThrowOnInvalidState IS that layer and was already right; rewriting it
+    // would have replaced a correct exception with a wrong one.
+    //
+    // No live socket is used, deliberately. Parking a real connection in CloseSent needs a
+    // cooperating server, and the claim under test is about the LAYER, not about any transport.
+    // The helper is `protected static`, exactly as .NET declares it, so this reaches it through a
+    // local subclass rather than by widening production surface for a test's convenience.
+    EXPECT_THROW(InnerStateCheck::Check(WebSocketState::CloseSent, {WebSocketState::Open}),
+                 WebSocketException);
+    EXPECT_THROW(InnerStateCheck::Check(WebSocketState::None, {WebSocketState::Open}),
+                 WebSocketException);
+    EXPECT_NO_THROW(
+        InnerStateCheck::Check(WebSocketState::Open, {WebSocketState::Open, WebSocketState::CloseReceived}));
+
+    // ...and the inner layer is NOT an ObjectDisposedException door. That is the outer gate's
+    // job, and conflating the two is exactly what this ticket had to avoid.
+    try {
+        InnerStateCheck::Check(WebSocketState::Closed, {WebSocketState::Open});
+        ADD_FAILURE() << "expected a WebSocketException";
+    } catch (const System::ObjectDisposedException&) {
+        ADD_FAILURE() << "the inner state check must not raise ObjectDisposedException";
+    } catch (const WebSocketException&) {
+        SUCCEED();
+    }
 }
 
 TEST(ClientWebSocketConcurrencyTests, Fix2096_AllFiveAsyncMembersJoinTheLivenessBoundary) {

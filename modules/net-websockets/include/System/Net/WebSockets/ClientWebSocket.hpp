@@ -118,6 +118,11 @@ namespace System::Net::WebSockets {
         void throwIfKeepAliveFaulted() const;
         /** @return A strong reference to the heartbeat state, or null when there is none. */
         [[nodiscard]] std::shared_ptr<KeepAlive> keepAliveState() const;
+        /// #2357: .NET's outer `ConnectedWebSocket` gate -- ObjectDisposedException when this
+        /// instance is disposed, InvalidOperationException when it was never connected or is
+        /// still connecting. Adds no data member; see the definition for the state mapping.
+        void throwIfNotConnected() const;
+
         void sendFrame(SharpRuntime::bytecs opcode, const SharpRuntime::bytecs* data, size_t len, bool fin);
         struct RawFrame {
             SharpRuntime::bytecs opcode = 0;

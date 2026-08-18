@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/WebSockets/ClientWebSocket.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -294,6 +295,45 @@ void ClientWebSocket::storeState(WebSocketState next) {
     state_ = next;
 }
 
+// #2357: .NET's OUTER gate, `ClientWebSocket.ConnectedWebSocket` (`ClientWebSocket.cs:163-177`).
+//
+// THE TICKET'S FRAMING WAS TOO SIMPLE, AND THE REFERENCE CORRECTS IT. It reported that every door
+// here raises WebSocketException(InvalidState) where .NET "never" does. .NET actually has TWO
+// layers, and only the outer one avoids WebSocketException:
+//
+//   * OUTER -- `ConnectedWebSocket`: ObjectDisposedException if the instance is disposed,
+//     InvalidOperationException("The WebSocket is not connected.") if it was never connected or
+//     is still connecting. This layer did not exist here at all.
+//   * INNER -- `WebSocketStateHelper.ThrowIfInvalidState` (`WebSocketStateHelper.cs:21-41`), run
+//     per operation by ManagedWebSocket: WebSocketException(InvalidState) when the CURRENT state
+//     forbids the operation. That is exactly what this port's WebSocket::ThrowOnInvalidState
+//     already did, and it is KEPT. Rewriting it would have replaced a correct exception with a
+//     wrong one.
+//
+// NO NEW DATA MEMBER IS NEEDED, so sizeof(ClientWebSocket) is unchanged and this is not an SA-3
+// change. .NET's InternalState maps exactly onto state this class already holds, because
+// `Abort()` calls `Dispose()` (`ClientWebSocket.cs:179-193`) so Aborted IS Disposed there, and
+// because `socket_` is assigned only on a successful connect and cleared only by Dispose():
+//
+//     Created    !connectStarted_
+//     Connecting  connectStarted_ && !socket_ && state_ == Connecting
+//     Disposed    connectStarted_ && !socket_ && state_ != Connecting
+//     Connected   socket_ != nullptr        (CloseAsync does NOT clear it, matching .NET, where
+//                                            a closed socket is still InternalState.Connected and
+//                                            the INNER layer reports the state)
+void ClientWebSocket::throwIfNotConnected() const {
+    bool disposed = false;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        if (socket_) return;                       // Connected -- the inner check decides
+        disposed = connectStarted_ && state_ != WebSocketState::Connecting;
+    }
+    if (disposed) {
+        throw System::ObjectDisposedException("System.Net.WebSockets.ClientWebSocket");
+    }
+    throw System::InvalidOperationException("The WebSocket is not connected.");
+}
+
 std::shared_ptr<System::Net::Sockets::Socket> ClientWebSocket::socketForIo() const {
     std::shared_ptr<System::Net::Sockets::Socket> socket;
     {
@@ -301,8 +341,14 @@ std::shared_ptr<System::Net::Sockets::Socket> ClientWebSocket::socketForIo() con
         socket = socket_;
     }
     if (!socket) {
-        throw WebSocketException(WebSocketError::InvalidState,
-                                  "The WebSocket is in an invalid state for this operation.");
+        // #2357: this is reached when Dispose()/Abort() took the socket away underneath an
+        // operation that had already passed the outer gate -- so it is the DISPOSED case, and
+        // throwIfNotConnected() names it as such. #2096 deliberately raised
+        // WebSocketException(InvalidState) here to match the non-racy path; now that the non-racy
+        // path raises ObjectDisposedException, matching it means raising that. The two sides of
+        // the race still agree, which is what #2096 required.
+        throwIfNotConnected();
+        throw System::ObjectDisposedException("System.Net.WebSockets.ClientWebSocket");
     }
     return socket;
 }
@@ -1007,6 +1053,7 @@ ClientWebSocket::SendAsync(const std::vector<bytecs>& buffer, intcs offset, intc
         AsyncOperationScope release{ops};
         CancellationScope cancellation{this, cancellationToken};
         try {
+            throwIfNotConnected();   // #2357: the OUTER gate, before the per-operation state check
             WebSocket::ThrowOnInvalidState(loadState(), {WebSocketState::Open, WebSocketState::CloseReceived});
             bytecs opcode;
             if (sendContinuation_) {
@@ -1037,6 +1084,7 @@ ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs c
         AsyncOperationScope release{ops};
         CancellationScope cancellation{this, cancellationToken};
         try {
+        throwIfNotConnected();   // #2357: the OUTER gate, before the per-operation state check
         WebSocket::ThrowOnInvalidState(loadState(), {WebSocketState::Open, WebSocketState::CloseSent});
 
         if (recvLeftoverPos_ < recvLeftover_.size()) {
@@ -1166,6 +1214,7 @@ ClientWebSocket::CloseOutputAsync(WebSocketCloseStatus closeStatus, const std::o
         AsyncOperationScope release{ops};
         CancellationScope cancellation{this, cancellationToken};
         try {
+            throwIfNotConnected();   // #2357: the OUTER gate, before the per-operation state check
             WebSocket::ThrowOnInvalidState(loadState(), {WebSocketState::Open, WebSocketState::CloseReceived});
             sendCloseFrame(closeStatus, statusDescription);
             std::lock_guard<std::mutex> lock(stateMutex_);
@@ -1192,6 +1241,11 @@ ClientWebSocket::CloseAsync(WebSocketCloseStatus closeStatus, const std::optiona
         AsyncOperationScope release{ops};
         CancellationScope cancellation{this, cancellationToken};
         try {
+        // #2357: CloseAsync goes through .NET's ConnectedWebSocket gate too, so a DISPOSED
+        // instance faults here rather than treating the call as a no-op. It has no
+        // per-operation ThrowOnInvalidState of its own -- a close on an already-closed but
+        // still-live socket really is a no-op, and stays one.
+        throwIfNotConnected();
         if (loadState() == WebSocketState::Open) {
             sendCloseFrame(closeStatus, statusDescription);
             storeState(WebSocketState::CloseSent);
