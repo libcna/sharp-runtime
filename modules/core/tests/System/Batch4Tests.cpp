@@ -6,6 +6,7 @@
 // (EXCEPT_SIMPLE covers DefaultCtor_WhatNotEmpty/MessageCtor/IsA for the exception types)
 #include <any>
 #include <gtest/gtest.h>
+#include <optional>
 #include "System/ResolveEventHandler.hpp"
 #include "System/ResolveEventArgs.hpp"
 #include "System/IAsyncResult.hpp"
@@ -150,4 +151,52 @@ TEST(GCGenerationInfoTests, SizeAfterBytes_IsZero) {
 TEST(GCGenerationInfoTests, FragmentationAfterBytes_IsZero) {
     System::GCGenerationInfo gi;
     EXPECT_EQ(gi.getFragmentationAfterBytesProperty(), 0LL);
+}
+
+// ---------------------------------------------------------------------------
+// #2325 / SR-AUD-123 — the handler can say "unresolved"
+// ---------------------------------------------------------------------------
+
+TEST(ResolveEventHandlerTests, Fix2325_TheReturnIsOptionalSoAHandlerCanDecline) {
+    // .NET's delegate returns `Assembly?` (`ResolveEventHandler.cs:8`) and null means "I could
+    // not resolve this", after which the runtime tries the next handler. This port returned a
+    // plain std::string -- a TOTAL function, with no way to decline.
+    //
+    // The empty string could NOT be borrowed for it: empty already means "absent requesting
+    // assembly" elsewhere in ResolveEventArgs, so a documented sentinel would have been
+    // unenforceable by the type, which is the defect rather than a repair for it. These three
+    // states must therefore be distinguishable, and this row is that assertion.
+    System::ResolveEventArgs args("Some.Assembly");
+
+    System::ResolveEventHandler resolves = [](void*, System::ResolveEventArgs&) {
+        return std::optional<std::string>("Resolved.Assembly");
+    };
+    System::ResolveEventHandler declines = [](void*, System::ResolveEventArgs&) {
+        return std::optional<std::string>{};
+    };
+    System::ResolveEventHandler resolvesToEmpty = [](void*, System::ResolveEventArgs&) {
+        return std::optional<std::string>("");
+    };
+
+    EXPECT_EQ(std::optional<std::string>("Resolved.Assembly"), resolves(nullptr, args));
+    EXPECT_EQ(std::nullopt, declines(nullptr, args));
+    EXPECT_EQ(std::optional<std::string>(""), resolvesToEmpty(nullptr, args));
+    EXPECT_NE(declines(nullptr, args), resolvesToEmpty(nullptr, args))
+        << "'unresolved' and 'resolved to an empty name' were indistinguishable before #2325";
+}
+
+TEST(ResolveEventHandlerTests, Fix2325_AHandlerThatAlwaysSucceedsNeedsNoEdit) {
+    // The change is a WIDENING on the handler side: a lambda returning std::string still binds,
+    // because std::string converts implicitly to std::optional<std::string>. Only a CALLER that
+    // assigned the result to a std::string breaks, and nothing in this repository calls it --
+    // the assembly-resolution surface is still a stub (SR-AUD-103).
+    System::ResolveEventArgs args("Some.Assembly");
+    System::ResolveEventHandler legacyShape = [](void*, System::ResolveEventArgs& a) -> std::string {
+        return a.getNameProperty() + ".dll";
+    };
+    ASSERT_TRUE(static_cast<bool>(legacyShape));
+    EXPECT_EQ(std::optional<std::string>("Some.Assembly.dll"), legacyShape(nullptr, args));
+
+    System::ResolveEventHandler empty;
+    EXPECT_FALSE(static_cast<bool>(empty));
 }
