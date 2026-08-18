@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/Text/detail/Utf8Scalar.hpp"
 
 namespace System::Text {
 
@@ -68,49 +69,18 @@ namespace System::Text {
                 bytesConsumed = 0;
                 return false;
             }
-            // A UTF-8 continuation byte must match the bit pattern 10xxxxxx (0x80-0xBF).
-            auto isContinuation = [](unsigned char b) { return (b & 0xC0) == 0x80; };
-
-            unsigned char c0 = static_cast<unsigned char>(value[index]);
-            uint32_t cp;
-            size_t len;
-            if (c0 < 0x80) {
-                cp = c0;
-                len = 1;
-            } else if ((c0 & 0xE0) == 0xC0 && index + 1 < value.size() &&
-                       isContinuation(static_cast<unsigned char>(value[index + 1]))) {
-                cp = (static_cast<uint32_t>(c0 & 0x1F) << 6) | (static_cast<unsigned char>(value[index + 1]) & 0x3F);
-                len = 2;
-                // Reject overlong encodings: the shortest form of any code point < 0x80 is 1 byte.
-                if (cp < 0x80) { bytesConsumed = 1; return false; }
-            } else if ((c0 & 0xF0) == 0xE0 && index + 2 < value.size() &&
-                       isContinuation(static_cast<unsigned char>(value[index + 1])) &&
-                       isContinuation(static_cast<unsigned char>(value[index + 2]))) {
-                cp = (static_cast<uint32_t>(c0 & 0x0F) << 12) | ((static_cast<unsigned char>(value[index + 1]) & 0x3F) << 6) |
-                     (static_cast<unsigned char>(value[index + 2]) & 0x3F);
-                len = 3;
-                // Reject overlong encodings: the shortest form of any code point < 0x800 is <= 2 bytes.
-                if (cp < 0x800) { bytesConsumed = 1; return false; }
-            } else if ((c0 & 0xF8) == 0xF0 && index + 3 < value.size() &&
-                       isContinuation(static_cast<unsigned char>(value[index + 1])) &&
-                       isContinuation(static_cast<unsigned char>(value[index + 2])) &&
-                       isContinuation(static_cast<unsigned char>(value[index + 3]))) {
-                cp = (static_cast<uint32_t>(c0 & 0x07) << 18) | ((static_cast<unsigned char>(value[index + 1]) & 0x3F) << 12) |
-                     ((static_cast<unsigned char>(value[index + 2]) & 0x3F) << 6) |
-                     (static_cast<unsigned char>(value[index + 3]) & 0x3F);
-                len = 4;
-                // Reject overlong encodings: the shortest form of any code point < 0x10000 is <= 3 bytes.
-                if (cp < 0x10000) { bytesConsumed = 1; return false; }
-            } else {
-                bytesConsumed = 1;
+            // Ticket #2354 (2026-08-18): this was the third and last header-inline COPY of
+            // the one UTF-8 scalar decode (System/detail/Utf8Scalar.hpp, factored out by #2014).
+            // Rune needs the REPORTING form rather than the substituting one every Encoding
+            // uses, and the two differ on exactly one input class: a structurally valid encoding
+            // of a non-scalar -- a surrogate, or a value above U+10FFFF. Rune reports the
+            // sequence's own length there, so a caller can skip the whole thing; an Encoding
+            // reports 1, so it emits one U+FFFD per byte. That difference is why the shared
+            // header has two entry points instead of one, and it is preserved exactly.
+            uint32_t cp = 0;
+            if (!System::detail::TryDecodeUtf8Scalar(value, index, cp, bytesConsumed))
                 return false;
-            }
-            if (!IsValidCodePoint(cp)) {
-                bytesConsumed = len;
-                return false;
-            }
             result = Rune(cp);
-            bytesConsumed = len;
             return true;
         }
 
@@ -149,21 +119,7 @@ namespace System::Text {
         /** Returns the UTF-8 encoded string representation of this Rune. */
         [[nodiscard]] std::string ToString() const {
             std::string s;
-            if (value_ < 0x80) {
-                s += static_cast<char>(value_);
-            } else if (value_ < 0x800) {
-                s += static_cast<char>(0xC0 | (value_ >> 6));
-                s += static_cast<char>(0x80 | (value_ & 0x3F));
-            } else if (value_ < 0x10000) {
-                s += static_cast<char>(0xE0 | (value_ >> 12));
-                s += static_cast<char>(0x80 | ((value_ >> 6) & 0x3F));
-                s += static_cast<char>(0x80 | (value_ & 0x3F));
-            } else {
-                s += static_cast<char>(0xF0 | (value_ >> 18));
-                s += static_cast<char>(0x80 | ((value_ >> 12) & 0x3F));
-                s += static_cast<char>(0x80 | ((value_ >> 6) & 0x3F));
-                s += static_cast<char>(0x80 | (value_ & 0x3F));
-            }
+            System::detail::AppendUtf8Scalar(s, value_);
             return s;
         }
 

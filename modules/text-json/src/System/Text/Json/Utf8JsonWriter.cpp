@@ -9,53 +9,16 @@
 #include "System/Text/Json/JsonException.hpp"
 #include "System/Text/Json/detail/JsonParseGuard.hpp"
 #include "nlohmann/json.hpp"
+#include "System/detail/Utf8Scalar.hpp"
 
 namespace System::Text::Json {
 
 namespace {
 
-    // Decodes one UTF-8 sequence starting at s[i], validating continuation bytes and
-    // rejecting overlong encodings -- the same conformance logic already applied elsewhere
-    // in this codebase (Rune::TryGetRuneAt/UnicodeEncoding/UTF32Encoding/ASCIIEncoding/
-    // IdnMapping's decode loops). An ill-formed sequence decodes to U+FFFD (length 1).
+    // Ticket #2354 (2026-08-18) found this copy, which the ticket itself did not name: it is
+    // byte-for-byte the shared decode. The rule lives in System/detail/Utf8Scalar.hpp.
     void decodeUtf8(const std::string& s, size_t i, uint32_t& codePoint, size_t& length) {
-        auto isContinuation = [](unsigned char b) { return (b & 0xC0) == 0x80; };
-        unsigned char c0 = static_cast<unsigned char>(s[i]);
-        uint32_t cp; size_t len;
-        if (c0 < 0x80) {
-            cp = c0; len = 1;
-        } else if ((c0 & 0xE0) == 0xC0 && i + 1 < s.size() &&
-                   isContinuation(static_cast<unsigned char>(s[i + 1]))) {
-            cp = (static_cast<uint32_t>(c0 & 0x1F) << 6) | (static_cast<unsigned char>(s[i + 1]) & 0x3F);
-            len = 2;
-            if (cp < 0x80) { codePoint = 0xFFFD; length = 1; return; }
-        } else if ((c0 & 0xF0) == 0xE0 && i + 2 < s.size() &&
-                   isContinuation(static_cast<unsigned char>(s[i + 1])) &&
-                   isContinuation(static_cast<unsigned char>(s[i + 2]))) {
-            cp = (static_cast<uint32_t>(c0 & 0x0F) << 12) | ((static_cast<unsigned char>(s[i + 1]) & 0x3F) << 6) |
-                 (static_cast<unsigned char>(s[i + 2]) & 0x3F);
-            len = 3;
-            if (cp < 0x800) { codePoint = 0xFFFD; length = 1; return; }
-        } else if ((c0 & 0xF8) == 0xF0 && i + 3 < s.size() &&
-                   isContinuation(static_cast<unsigned char>(s[i + 1])) &&
-                   isContinuation(static_cast<unsigned char>(s[i + 2])) &&
-                   isContinuation(static_cast<unsigned char>(s[i + 3]))) {
-            cp = (static_cast<uint32_t>(c0 & 0x07) << 18) | ((static_cast<unsigned char>(s[i + 1]) & 0x3F) << 12) |
-                 ((static_cast<unsigned char>(s[i + 2]) & 0x3F) << 6) | (static_cast<unsigned char>(s[i + 3]) & 0x3F);
-            len = 4;
-            if (cp < 0x10000) { codePoint = 0xFFFD; length = 1; return; }
-        } else {
-            codePoint = 0xFFFD;
-            length = 1;
-            return;
-        }
-        if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
-            codePoint = 0xFFFD;
-            length = 1;
-            return;
-        }
-        codePoint = cp;
-        length = len;
+        System::detail::DecodeUtf8Scalar(s, i, codePoint, length);
     }
 
 } // namespace

@@ -9,6 +9,7 @@
 #include <vector>
 #include "System/Text/Encoding.hpp"
 #include "System/Text/detail/RawDecodeRange.hpp"
+#include "System/Text/detail/Utf8Scalar.hpp"
 
 namespace System::Text {
 
@@ -207,68 +208,19 @@ namespace System::Text {
             return bigEndian_ ? static_cast<uint16_t>((b0 << 8) | b1) : static_cast<uint16_t>((b1 << 8) | b0);
         }
 
-        // Validates and decodes one UTF-8 sequence starting at s[i]. Rejects ill-formed input
-        // (bad continuation bytes, overlong encodings, surrogate/out-of-range code points) by
-        // substituting U+FFFD for a single byte and resuming there, matching .NET's default
-        // DecoderFallback replacement behavior, instead of the previous code's silent
-        // acceptance of invalid sequences (verified with a compiled reproduction: an overlong
-        // encoding of U+0000, "\xC0\x80", used to decode straight through to real U+0000).
+        // Ticket #2354 (2026-08-18): this was a header-inline COPY of the one UTF-8 scalar
+        // decode. #2014 factored the rule into System/detail/Utf8Scalar.hpp and moved the two
+        // .cpp copies onto it; the three header-inline ones were left because they are
+        // entangled with their types' own loops. They are not entangled -- they are the same
+        // rule with a different wrapper, which is exactly why five copies accumulated. What is
+        // preserved is the CONTRACT this door needs: an ill-formed sequence becomes U+FFFD over
+        // a single byte, matching .NET's default DecoderFallback.
         static void decodeUtf8(const std::string& s, size_t i, uint32_t& codePoint, size_t& length) {
-            auto isContinuation = [](unsigned char b) { return (b & 0xC0) == 0x80; };
-            unsigned char c0 = static_cast<unsigned char>(s[i]);
-            uint32_t cp; size_t len;
-            if (c0 < 0x80) {
-                cp = c0; len = 1;
-            } else if ((c0 & 0xE0) == 0xC0 && i + 1 < s.size() &&
-                       isContinuation(static_cast<unsigned char>(s[i + 1]))) {
-                cp = (static_cast<uint32_t>(c0 & 0x1F) << 6) | (static_cast<unsigned char>(s[i + 1]) & 0x3F);
-                len = 2;
-                if (cp < 0x80) { codePoint = 0xFFFD; length = 1; return; }
-            } else if ((c0 & 0xF0) == 0xE0 && i + 2 < s.size() &&
-                       isContinuation(static_cast<unsigned char>(s[i + 1])) &&
-                       isContinuation(static_cast<unsigned char>(s[i + 2]))) {
-                cp = (static_cast<uint32_t>(c0 & 0x0F) << 12) | ((static_cast<unsigned char>(s[i + 1]) & 0x3F) << 6) |
-                     (static_cast<unsigned char>(s[i + 2]) & 0x3F);
-                len = 3;
-                if (cp < 0x800) { codePoint = 0xFFFD; length = 1; return; }
-            } else if ((c0 & 0xF8) == 0xF0 && i + 3 < s.size() &&
-                       isContinuation(static_cast<unsigned char>(s[i + 1])) &&
-                       isContinuation(static_cast<unsigned char>(s[i + 2])) &&
-                       isContinuation(static_cast<unsigned char>(s[i + 3]))) {
-                cp = (static_cast<uint32_t>(c0 & 0x07) << 18) | ((static_cast<unsigned char>(s[i + 1]) & 0x3F) << 12) |
-                     ((static_cast<unsigned char>(s[i + 2]) & 0x3F) << 6) | (static_cast<unsigned char>(s[i + 3]) & 0x3F);
-                len = 4;
-                if (cp < 0x10000) { codePoint = 0xFFFD; length = 1; return; }
-            } else {
-                codePoint = 0xFFFD;
-                length = 1;
-                return;
-            }
-            if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
-                codePoint = 0xFFFD;
-                length = 1;
-                return;
-            }
-            codePoint = cp;
-            length = len;
+            System::detail::DecodeUtf8Scalar(s, i, codePoint, length);
         }
 
         static void encodeUtf8(uint32_t cp, std::string& out) {
-            if (cp < 0x80) {
-                out += static_cast<char>(cp);
-            } else if (cp < 0x800) {
-                out += static_cast<char>(0xC0 | (cp >> 6));
-                out += static_cast<char>(0x80 | (cp & 0x3F));
-            } else if (cp < 0x10000) {
-                out += static_cast<char>(0xE0 | (cp >> 12));
-                out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-                out += static_cast<char>(0x80 | (cp & 0x3F));
-            } else {
-                out += static_cast<char>(0xF0 | (cp >> 18));
-                out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
-                out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-                out += static_cast<char>(0x80 | (cp & 0x3F));
-            }
+            System::detail::AppendUtf8Scalar(out, cp);
         }
     };
 

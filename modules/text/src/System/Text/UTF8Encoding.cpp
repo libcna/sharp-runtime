@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Text/UTF8Encoding.hpp"
 #include "System/Text/detail/RawDecodeRange.hpp"
+#include "System/detail/Utf8Scalar.hpp"
 #include <cstdint>
 
 namespace System::Text {
@@ -10,33 +11,21 @@ namespace System::Text {
 namespace {
 
     // Returns the byte length (1-4) of a well-formed UTF-8 sequence starting at data[i] within
-    // [i, end), or 0 if the byte at i does not begin (or complete) a well-formed sequence --
-    // same conformance rules (continuation-byte, overlong-encoding, surrogate, and out-of-range
-    // rejection) as the decodeUtf8 helper duplicated across ASCIIEncoding.cpp/UnicodeEncoding.hpp/
-    // UTF32Encoding.hpp, but reporting a validity length instead of substituting a code point --
+    // [i, end), or 0 if the byte at i does not begin (or complete) a well-formed sequence.
     // UTF8Encoding's well-formed bytes pass through unchanged (source and destination are both
-    // UTF-8), so there's no re-encoding step to fold the substitution into.
+    // UTF-8), so there is no re-encoding step to fold a substitution into -- which is why this
+    // door wants a validity LENGTH rather than a code point.
+    //
+    // Ticket #2354 (2026-08-18): this was the copy #2014 could not move, because it reads a
+    // (pointer, end) range rather than a std::string. That is now a parameter of the shared
+    // decode rather than a reason to hold a sixth copy of the rule.
     size_t wellFormedUtf8Length(const SharpRuntime::bytecs* data, size_t i, size_t end) {
-        auto isContinuation = [](SharpRuntime::bytecs b) { return (b & 0xC0) == 0x80; };
-        SharpRuntime::bytecs c0 = data[i];
-        if (c0 < 0x80) return 1;
-        if ((c0 & 0xE0) == 0xC0 && i + 1 < end && isContinuation(data[i + 1])) {
-            uint32_t cp = (static_cast<uint32_t>(c0 & 0x1F) << 6) | (data[i + 1] & 0x3F);
-            return cp >= 0x80 ? 2 : 0;
-        }
-        if ((c0 & 0xF0) == 0xE0 && i + 2 < end && isContinuation(data[i + 1]) && isContinuation(data[i + 2])) {
-            uint32_t cp = (static_cast<uint32_t>(c0 & 0x0F) << 12) |
-                          (static_cast<uint32_t>(data[i + 1] & 0x3F) << 6) | (data[i + 2] & 0x3F);
-            return (cp >= 0x800 && !(cp >= 0xD800 && cp <= 0xDFFF)) ? 3 : 0;
-        }
-        if ((c0 & 0xF8) == 0xF0 && i + 3 < end && isContinuation(data[i + 1]) && isContinuation(data[i + 2]) &&
-            isContinuation(data[i + 3])) {
-            uint32_t cp = (static_cast<uint32_t>(c0 & 0x07) << 18) |
-                          (static_cast<uint32_t>(data[i + 1] & 0x3F) << 12) |
-                          (static_cast<uint32_t>(data[i + 2] & 0x3F) << 6) | (data[i + 3] & 0x3F);
-            return (cp >= 0x10000 && cp <= 0x10FFFF) ? 4 : 0;
-        }
-        return 0;
+        std::uint32_t cp  = 0;
+        std::size_t   len = 0;
+        return System::detail::TryDecodeUtf8Scalar(reinterpret_cast<const char*>(data), end, i,
+                                                   cp, len)
+                   ? len
+                   : 0;
     }
 
 } // namespace

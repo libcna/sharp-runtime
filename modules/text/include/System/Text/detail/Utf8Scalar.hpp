@@ -9,7 +9,8 @@
  * @brief Re-exports the one UTF-8 scalar decode, which lives in `Core.Base`.
  *
  * Ticket #2014 factored this rule out of five copies; ticket **#2106** moved the definition from
- * `modules/text` to `modules/core`, because `System::BinaryData` needs the same decode and
+ * `modules/text` to `modules/core`, and ticket **#2354** collapsed the last three header-inline
+ * copies (`UnicodeEncoding.hpp`, `UTF32Encoding.hpp`, `Rune.hpp`) onto it, because `System::BinaryData` needs the same decode and
  * `modules/io` does not depend on `Text`. The alternatives were a sixth copy or a new **public**
  * component edge from `io` to `Text`; moving the single definition to a component everything
  * already depends on costs neither.
@@ -20,6 +21,7 @@
 namespace System::Text::detail {
 
     using System::detail::DecodeUtf8Scalar;
+    using System::detail::TryDecodeUtf8Scalar;
     using System::detail::AppendUtf8Scalar;
 
 } // namespace System::Text::detail
