@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <limits>
 #include <algorithm>
 #include <functional>
 #include <string>
@@ -382,8 +383,23 @@ TEST(ArrayTests, LastIndexOf_NotFound) { EXPECT_EQ(Array::LastIndexOf<int>({1,2,
 // ---------------------------------------------------------------------------
 // MaxLengthProperty
 // ---------------------------------------------------------------------------
-TEST(ArrayTests, MaxLength_IsPositive) {
-    EXPECT_GT(Array::MaxLengthProperty(), 0);
+
+TEST(ArrayTests, Fix2327_MaxLengthIsDotNetsValueNotIntMaxValue) {
+    // .NET's Array.MaxLength is 0x7FFFFFC7 (`Array.cs:2641-2643`), which is 56 LESS than
+    // int.MaxValue. This port answered int.MaxValue until #2327, promising 56 elements the
+    // reference refuses to allocate.
+    //
+    // The exact number is asserted, not a range: the gap is the whole finding, and an assertion
+    // like "greater than zero" -- which is what this row used to be -- passes for both values.
+    EXPECT_EQ(2147483591, Array::MaxLengthProperty());
+    EXPECT_EQ(0x7FFFFFC7, Array::MaxLengthProperty());
+    EXPECT_LT(Array::MaxLengthProperty(), std::numeric_limits<SharpRuntime::intcs>::max());
+    EXPECT_EQ(56, std::numeric_limits<SharpRuntime::intcs>::max() - Array::MaxLengthProperty());
+
+    // Still a compile-time constant, as .NET's is a compile-time-foldable property: this is a
+    // value change, not a signature change.
+    static_assert(Array::MaxLengthProperty() == 0x7FFFFFC7,
+                  "#2327: Array::MaxLength must stay usable in a constant expression");
 }
 
 // ---------------------------------------------------------------------------

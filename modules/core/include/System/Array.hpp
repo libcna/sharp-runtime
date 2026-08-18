@@ -33,10 +33,22 @@ namespace System {
         /**
          * @brief Gets the maximum number of elements supported by the array.
          *
-         * C++ counterpart of .NET Array.MaxLength.
+         * C++ counterpart of .NET `Array.MaxLength` (`Array.cs:2641-2643`), whose value is
+         * `0x7FFFFFC7` — **56 less than `int.MaxValue`**. This port published `int.MaxValue`
+         * until ticket #2327.
+         *
+         * The gap is not arbitrary and is not this port's to choose: .NET's own comment says
+         * *"Keep in sync with `inline SIZE_T MaxArrayLength()` from gchelpers and
+         * HashHelpers.MaxPrimeArrayLength"*, i.e. the number is the GC's allocation ceiling, and
+         * the documented contract is that *"all attempts to allocate a larger array will fail"*.
+         * A port that answers `int.MaxValue` promises 56 elements the reference refuses.
+         *
+         * @note This runtime allocates through `std::vector`, so nothing here enforces the limit;
+         *       the value is a **published constant** that ported code compares against, and its
+         *       job is to give the same answer .NET gives.
          */
         [[nodiscard]] static constexpr intcs MaxLengthProperty() noexcept {
-            return std::numeric_limits<intcs>::max();
+            return static_cast<intcs>(0x7FFFFFC7);
         }
 
         /**
