@@ -9,6 +9,7 @@
 // Action/Func/Predicate, MarshalByRefObject, ThreadStart, ApplicationId,
 // IsolatedStorage, GenericMathInterfaces, KeyedCollection.
 #include <gtest/gtest.h>
+#include <any>
 #include <optional>
 #include <atomic>
 #include <chrono>
@@ -539,14 +540,18 @@ TEST(AppContextTests, TargetFrameworkName_IsEmpty) {
 }
 
 TEST(AppContextTests, SetGetData_RoundTrip) {
-    int dummy = 42;
-    System::AppContext::SetData("task42_key", &dummy);
-    void* got = System::AppContext::GetData("task42_key");
-    EXPECT_EQ(got, &dummy);
+    // #2255 typed the store, so the round trip carries a VALUE and its type rather than a
+    // borrowed void*.
+    System::AppContext::SetData("task42_key", 42);
+    const std::any got = System::AppContext::GetData("task42_key");
+    ASSERT_TRUE(got.has_value());
+    EXPECT_EQ(42, std::any_cast<int>(got));
 }
 
-TEST(AppContextTests, GetData_MissingKey_ReturnsNull) {
-    EXPECT_EQ(System::AppContext::GetData("__nonexistent_key_task42__"), nullptr);
+TEST(AppContextTests, GetData_MissingKey_ReturnsAnEmptyAny) {
+    // #2255: an absent key is an EMPTY std::any. It used to be nullptr -- which a STORED nullptr
+    // was indistinguishable from, a second thing the untyped store could not express.
+    EXPECT_FALSE(System::AppContext::GetData("__nonexistent_key_task42__").has_value());
 }
 
 TEST(AppContextTests, SetSwitch_TryGetSwitch) {
@@ -625,10 +630,10 @@ TEST(AppDomainTests, BaseDirectory_Linux_IsAbsolutePath) {
 // modules/core/tests/System/AppDomainTests.cpp, and this one keeps the
 // cross-module route covered from the integration binary.
 TEST(AppDomainTests, SetGetData_ForwardsToAppContext) {
-    int x = 1;
-    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().SetData("Task42Tests.k", &x));
-    EXPECT_EQ(System::AppDomain::CurrentDomain().GetData("Task42Tests.k"), &x);
-    EXPECT_EQ(System::AppDomain::CurrentDomain().GetData("Task42Tests.neverStored"), nullptr);
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().SetData("Task42Tests.k", 1));
+    EXPECT_EQ(1, std::any_cast<int>(System::AppDomain::CurrentDomain().GetData("Task42Tests.k")));
+    EXPECT_FALSE(
+        System::AppDomain::CurrentDomain().GetData("Task42Tests.neverStored").has_value());
 }
 
 TEST(AppDomainTests, Id_IsOne) {

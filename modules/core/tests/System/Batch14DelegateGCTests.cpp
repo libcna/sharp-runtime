@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <any>
 #include "System/Delegate.hpp"
 #include "System/MulticastDelegate.hpp"
 #include "System/MulticastNotSupportedException.hpp"
@@ -126,12 +127,13 @@ TEST(AppContextExtraTests, SetSwitch_ThenGet_RoundTrip) {
 }
 
 TEST(AppContextExtraTests, SetData_GetData_RoundTrip) {
-    int value = 42;
-    System::AppContext::SetData("test.data.key", &value);
-    void* result = System::AppContext::GetData("test.data.key");
-    EXPECT_EQ(result, &value);
+    // #2255 typed the store: the round trip carries a value and its type, not a borrowed void*.
+    System::AppContext::SetData("test.data.key", 42);
+    const std::any result = System::AppContext::GetData("test.data.key");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(42, std::any_cast<int>(result));
 }
 
-TEST(AppContextExtraTests, GetData_UnknownKey_ReturnsNullptr) {
-    EXPECT_EQ(System::AppContext::GetData("sharp-runtime.unknown.data.xyz"), nullptr);
+TEST(AppContextExtraTests, GetData_UnknownKey_ReturnsAnEmptyAny) {
+    EXPECT_FALSE(System::AppContext::GetData("sharp-runtime.unknown.data.xyz").has_value());
 }

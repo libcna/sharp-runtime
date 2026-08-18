@@ -18,6 +18,7 @@
 // that the two fixtures, which live in different executables, do not share a
 // name in filters and logs.
 #include <gtest/gtest.h>
+#include <any>
 #include <optional>
 
 #include <string>
@@ -43,31 +44,39 @@ int payloadB = 2;
 // ---------------------------------------------------------------------------
 
 TEST(AppDomainDataPolicyTests, GetData_ReadsWhatAppContextStored) {
+    // #2255 typed the store; these forwarders carry a std::any now.
     AppContext::SetData("AppDomainDataPolicyTests.readsContext", &payloadA);
-    EXPECT_EQ(AppDomain::CurrentDomain().GetData("AppDomainDataPolicyTests.readsContext"), &payloadA);
+    EXPECT_EQ(&payloadA, std::any_cast<int*>(
+                             AppDomain::CurrentDomain().GetData("AppDomainDataPolicyTests.readsContext")));
 }
 
 TEST(AppDomainDataPolicyTests, SetData_IsVisibleThroughAppContext) {
     AppDomain::CurrentDomain().SetData("AppDomainDataPolicyTests.toContext", &payloadB);
-    EXPECT_EQ(AppContext::GetData("AppDomainDataPolicyTests.toContext"), &payloadB);
+    EXPECT_EQ(&payloadB,
+              std::any_cast<int*>(AppContext::GetData("AppDomainDataPolicyTests.toContext")));
 }
 
 TEST(AppDomainDataPolicyTests, SetData_RoundTripsThroughTheDomainItself) {
     AppDomain& domain = AppDomain::CurrentDomain();
     domain.SetData("AppDomainDataPolicyTests.roundTrip", &payloadA);
-    EXPECT_EQ(domain.GetData("AppDomainDataPolicyTests.roundTrip"), &payloadA);
+    EXPECT_EQ(&payloadA, std::any_cast<int*>(domain.GetData("AppDomainDataPolicyTests.roundTrip")));
     domain.SetData("AppDomainDataPolicyTests.roundTrip", &payloadB);
-    EXPECT_EQ(domain.GetData("AppDomainDataPolicyTests.roundTrip"), &payloadB);
+    EXPECT_EQ(&payloadB, std::any_cast<int*>(domain.GetData("AppDomainDataPolicyTests.roundTrip")));
 }
 
-TEST(AppDomainDataPolicyTests, GetData_UnknownName_ReturnsNullptr) {
-    EXPECT_EQ(AppDomain::CurrentDomain().GetData("AppDomainDataPolicyTests.neverStored"), nullptr);
+TEST(AppDomainDataPolicyTests, GetData_UnknownName_ReturnsAnEmptyAny) {
+    EXPECT_FALSE(
+        AppDomain::CurrentDomain().GetData("AppDomainDataPolicyTests.neverStored").has_value());
 }
 
 TEST(AppDomainDataPolicyTests, SetData_NullValue_IsStoredAndReadBack) {
     AppDomain& domain = AppDomain::CurrentDomain();
-    domain.SetData("AppDomainDataPolicyTests.nullValue", nullptr);
-    EXPECT_EQ(domain.GetData("AppDomainDataPolicyTests.nullValue"), nullptr);
+    // #2255: a stored null POINTER now HAS a value, where the void* store made it
+    // indistinguishable from an absent key.
+    domain.SetData("AppDomainDataPolicyTests.nullValue", static_cast<int*>(nullptr));
+    const std::any stored = domain.GetData("AppDomainDataPolicyTests.nullValue");
+    EXPECT_TRUE(stored.has_value());
+    EXPECT_TRUE(std::any_cast<int*>(stored) == nullptr);
 }
 
 // ---------------------------------------------------------------------------

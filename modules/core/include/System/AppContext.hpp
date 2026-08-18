@@ -4,6 +4,8 @@
 #pragma once
 #include <mutex>
 #include <string>
+#include <any>
+#include <cctype>
 #include <unordered_map>
 #include "System/AppDomain.hpp"
 #include "System/ArgumentException.hpp"
@@ -44,7 +46,20 @@ namespace System {
          * the process-lifetime AppDomain), so it is safe to hold.
          * @return The base directory path (ends with a directory separator).
          */
-        static const std::string& getBaseDirectoryProperty() {
+        static std::string getBaseDirectoryProperty() {
+            // .NET's own resolution (`AppContext.cs:28-32`):
+            //     GetData("APP_CONTEXT_BASE_DIRECTORY") as string ?? GetBaseDirectoryCore()
+            // and its comment says the value "has to be a string and it is not allowed to be any
+            // other type" -- an `as string` cast, so a non-string entry falls through silently
+            // rather than throwing. #2255 makes that expressible: `std::any_cast<std::string>`
+            // on a pointer answers the question a `void*` could only be reinterpreted blindly to.
+            //
+            // The return type moved from `const std::string&` to a value with #2255, because the
+            // override is materialised here and there is no stable storage to lend.
+            if (const std::string* override_ = std::any_cast<std::string>(&dataStoreEntry_(
+                    "APP_CONTEXT_BASE_DIRECTORY"))) {
+                return *override_;
+            }
             return AppDomain::CurrentDomain().getBaseDirectoryProperty();
         }
 
@@ -93,33 +108,40 @@ namespace System {
         /**
          * @brief Returns the value of the named data element assigned to the current application.
          *
-         * C++ counterpart of .NET AppContext.GetData(string).
-         * Returns the borrowed pointer exactly as it was stored, including a null one --
-         * a stored `nullptr` is therefore indistinguishable from an absent key.
+         * C++ counterpart of .NET `AppContext.GetData(string)`, which returns `object?`.
+         *
+         * @par Ticket #2255 typed the store
+         * It was a `std::unordered_map<std::string, void*>`, which carries **no type tag and no
+         * ownership** -- so nothing could ask whether an entry was a string, and a caller who
+         * stored a pointer to a temporary left a dangling entry `GetData` handed straight back.
+         * A `std::any` carries both.
+         *
          * @param name The name of the data element.
-         * @return A pointer to the stored value, or nullptr if @p name is not found.
+         * @return The stored value, or an empty `std::any` if @p name is not found.
          */
-        static void* GetData(const std::string& name) {
+        static std::any GetData(const std::string& name) {
             std::lock_guard<std::mutex> lock(mutex_());
             auto& store = dataStore_();
             auto it = store.find(name);
-            return (it != store.end()) ? it->second : nullptr;
+            return (it != store.end()) ? it->second : std::any{};
         }
 
         /**
          * @brief Assigns a value to the named data element of the current application context.
          *
-         * C++ counterpart of .NET AppContext.SetData(string, object).
-         * Stores @p data as a BORROWED pointer -- see the ownership note above. Storing a
-         * name that already has an entry REPLACES it; the previous pointer is dropped and
-         * not deleted, because this class never owned it. .NET's own SetData likewise
-         * overwrites.
+         * C++ counterpart of .NET `AppContext.SetData(string, object)`, which stores a **boxed
+         * object whose runtime type can be interrogated**. Since ticket #2255 this port stores a
+         * `std::any`, which is that -- so the store now OWNS its values, and the dangling-entry
+         * hazard the `void*` carried is gone.
+         *
+         * Storing a name that already has an entry REPLACES it, as .NET's does.
+         *
          * @param name The name of the data element.
-         * @param data A pointer to the value to associate with @p name.
+         * @param data The value to associate with @p name.
          */
-        static void SetData(const std::string& name, void* data) {
+        static void SetData(const std::string& name, std::any data) {
             std::lock_guard<std::mutex> lock(mutex_());
-            dataStore_()[name] = data;
+            dataStore_()[name] = std::move(data);
         }
 
         // -----------------------------------------------------------------------
@@ -131,11 +153,17 @@ namespace System {
          *
          * C++ counterpart of .NET AppContext.TryGetSwitch(string, out bool).
          *
-         * DOCUMENTED DIVERGENCE (finding SR-AUD-102). Current .NET falls back to the named
-         * data store when no explicit switch entry exists and parses a STRING value there
-         * as the switch's boolean. This port keeps the two maps independent, for the same
-         * reason as above: a `void*` entry cannot be recognised as a string. Approval-bound,
-         * ticket #2255.
+         * @par The string fallback works since ticket #2255
+         * .NET falls back to the named data store when no explicit switch entry exists and
+         * parses a **string** value there as the switch's boolean (`AppContext.cs:158-161`):
+         * `if (GetData(switchName) is string value && bool.TryParse(value, out isEnabled))`.
+         * This port could not do it while the store held `void*`, because a `void*` cannot be
+         * recognised as a string -- reading one back AS a `std::string` would have been
+         * undefined behaviour, unfalsifiable at the point of use. `std::any` makes the question
+         * answerable, so the fallback is real.
+         *
+         * The parse is .NET's `bool.TryParse`, which accepts only `"True"`/`"False"`
+         * case-insensitively with surrounding whitespace trimmed -- not `"1"`, not `"yes"`.
          * @param switchName The name of the switch.
          * @param isEnabled  Set to the switch value on success, or false on failure.
          * @return true if the switch was found and its value was assigned to @p isEnabled;
@@ -152,6 +180,17 @@ namespace System {
                 isEnabled = it->second;
                 return true;
             }
+
+            // .NET's fallback, now reachable because the store is typed. The lock is already
+            // held, so the entry is read directly rather than through GetData().
+            auto& store = dataStore_();
+            auto entry = store.find(switchName);
+            if (entry != store.end()) {
+                if (const std::string* text = std::any_cast<std::string>(&entry->second)) {
+                    if (tryParseBoolean(*text, isEnabled)) return true;
+                }
+            }
+
             isEnabled = false;
             return false;
         }
@@ -172,12 +211,37 @@ namespace System {
         }
 
     private:
+        /// .NET's `bool.TryParse`: only "True"/"False", case-insensitive, surrounding whitespace
+        /// trimmed. Deliberately NOT "1"/"0"/"yes" -- a laxer parser here would accept switch
+        /// values .NET rejects, which is the kind of quiet widening this port avoids.
+        static bool tryParseBoolean(const std::string& text, bool& value) {
+            const auto first = text.find_first_not_of(" \t\n\r\f\v");
+            if (first == std::string::npos) return false;
+            const auto last = text.find_last_not_of(" \t\n\r\f\v");
+            std::string trimmed = text.substr(first, last - first + 1);
+            for (char& c : trimmed) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (trimmed == "true")  { value = true;  return true; }
+            if (trimmed == "false") { value = false; return true; }
+            return false;
+        }
+
+        /// Returns a reference to the stored entry, or to a shared empty `std::any` when absent.
+        /// Used only by getBaseDirectoryProperty, which needs a POINTER-form any_cast so a
+        /// non-string entry falls through rather than throwing -- matching .NET's `as string`.
+        static const std::any& dataStoreEntry_(const std::string& name) {
+            static const std::any kAbsent{};
+            std::lock_guard<std::mutex> lock(mutex_());
+            auto& store = dataStore_();
+            auto it = store.find(name);
+            return (it != store.end()) ? it->second : kAbsent;
+        }
+
         static std::mutex& mutex_() {
             static std::mutex m;
             return m;
         }
-        static std::unordered_map<std::string, void*>& dataStore_() {
-            static std::unordered_map<std::string, void*> s;
+        static std::unordered_map<std::string, std::any>& dataStore_() {
+            static std::unordered_map<std::string, std::any> s;
             return s;
         }
         static std::unordered_map<std::string, bool>& switches_() {

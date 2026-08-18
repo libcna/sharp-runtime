@@ -24,6 +24,9 @@
 // a future approved AppDomain::IsCompatibilitySwitchSet forwarding would observe.
 
 #include <gtest/gtest.h>
+#include <type_traits>
+#include <any>
+#include <typeinfo>
 
 #include <atomic>
 #include <string>
@@ -36,106 +39,176 @@
 using System::AppContext;
 
 // ---------------------------------------------------------------------------
-// The two divergences, pinned rather than described.
+// #2255 — the two divergences are GONE, and both pins below are inverted.
+//
+// Both needed the store to carry a runtime TYPE, which a std::unordered_map<std::string, void*>
+// cannot. Reading a void* back AS a std::string for two special keys was the alternative the
+// review priced and rejected: undefined behaviour by construction, and unfalsifiable at the point
+// of use. std::any makes the question answerable, so both behaviours are real rather than
+// documented away.
 // ---------------------------------------------------------------------------
 
-TEST(AppContextNamedDataTests, Divergence_BaseDirectoryIgnoresTheAppContextBaseDirectoryKey) {
-    // .NET resolves BaseDirectory from this key first. This port computes it unconditionally.
-    // Storing a std::string under the key must change nothing -- and must not be read back
-    // through the void*, which would be undefined behaviour for any other stored type.
+TEST(AppContextNamedDataTests, Fix2255_BaseDirectoryHonoursTheAppContextBaseDirectoryKey) {
+    // .NET resolves BaseDirectory from this key first (`AppContext.cs:28-32`):
+    //     GetData("APP_CONTEXT_BASE_DIRECTORY") as string ?? GetBaseDirectoryCore()
     const std::string before = AppContext::getBaseDirectoryProperty();
-    std::string override = "/sharp-runtime-2256-override/";
-    AppContext::SetData("APP_CONTEXT_BASE_DIRECTORY", &override);
-    EXPECT_EQ(AppContext::getBaseDirectoryProperty(), before);
-    // The entry itself round-trips like any other -- it is simply never consulted.
-    EXPECT_EQ(AppContext::GetData("APP_CONTEXT_BASE_DIRECTORY"), &override);
-    AppContext::SetData("APP_CONTEXT_BASE_DIRECTORY", nullptr);
+    AppContext::SetData("APP_CONTEXT_BASE_DIRECTORY", std::string("/sharp-runtime-2256-override/"));
+    EXPECT_EQ("/sharp-runtime-2256-override/", AppContext::getBaseDirectoryProperty());
+
+    // `as string` -- so a NON-string entry falls through SILENTLY to the computed default rather
+    // than throwing. .NET's own comment says the value "has to be a string and it is not allowed
+    // to be any other type", and an `as` cast is how it enforces that. This row is the reason the
+    // pointer form of any_cast is used rather than the throwing one.
+    AppContext::SetData("APP_CONTEXT_BASE_DIRECTORY", 42);
+    EXPECT_EQ(before, AppContext::getBaseDirectoryProperty());
+
+    AppContext::SetData("APP_CONTEXT_BASE_DIRECTORY", std::any{});
+    EXPECT_EQ(before, AppContext::getBaseDirectoryProperty());
 }
 
-TEST(AppContextNamedDataTests, Divergence_TryGetSwitchIgnoresAStringValuedDataEntry) {
-    // .NET falls back to the data store and parses a string value there as the switch's boolean.
-    // This port keeps the two maps independent.
-    std::string enabledText = "true";
-    AppContext::SetData("sharp-runtime.2256.stringSwitch", &enabledText);
-    bool isEnabled = true;
+TEST(AppContextNamedDataTests, Fix2255_TryGetSwitchFallsBackToAStringValuedDataEntry) {
+    // `AppContext.cs:158-161`:
+    //     if (GetData(switchName) is string value && bool.TryParse(value, out isEnabled))
+    AppContext::SetData("sharp-runtime.2256.stringSwitch", std::string("true"));
+    bool isEnabled = false;
+    EXPECT_TRUE(AppContext::TryGetSwitch("sharp-runtime.2256.stringSwitch", isEnabled));
+    EXPECT_TRUE(isEnabled);
+
+    AppContext::SetData("sharp-runtime.2256.stringSwitch", std::string("  FALSE  "));
+    isEnabled = true;
+    EXPECT_TRUE(AppContext::TryGetSwitch("sharp-runtime.2256.stringSwitch", isEnabled));
+    EXPECT_FALSE(isEnabled) << "bool.TryParse is case-insensitive and trims whitespace";
+
+    // THE PARSE IS .NET's bool.TryParse AND NOT A LAXER ONE. "1", "yes" and "on" are NOT booleans
+    // there, and accepting them here would be a quiet widening -- a switch .NET reports as unset
+    // would report as ON.
+    for (const char* notABool : {"1", "0", "yes", "on", "", "truthy"}) {
+        SCOPED_TRACE(notABool);
+        AppContext::SetData("sharp-runtime.2256.stringSwitch", std::string(notABool));
+        isEnabled = true;
+        EXPECT_FALSE(AppContext::TryGetSwitch("sharp-runtime.2256.stringSwitch", isEnabled));
+        EXPECT_FALSE(isEnabled) << "set to false on failure, per the contract";
+    }
+
+    // A NON-string entry is not a switch either, and must not be reinterpreted as one.
+    AppContext::SetData("sharp-runtime.2256.stringSwitch", true);
+    isEnabled = true;
     EXPECT_FALSE(AppContext::TryGetSwitch("sharp-runtime.2256.stringSwitch", isEnabled));
-    EXPECT_FALSE(isEnabled);  // set to false on failure, per the documented contract
-    AppContext::SetData("sharp-runtime.2256.stringSwitch", nullptr);
+
+    // An EXPLICIT switch still wins over the data entry, as .NET checks the switch map first.
+    AppContext::SetData("sharp-runtime.2256.stringSwitch", std::string("false"));
+    AppContext::SetSwitch("sharp-runtime.2256.stringSwitch", true);
+    isEnabled = false;
+    EXPECT_TRUE(AppContext::TryGetSwitch("sharp-runtime.2256.stringSwitch", isEnabled));
+    EXPECT_TRUE(isEnabled) << "the explicit switch map is consulted first";
+
+    AppContext::SetData("sharp-runtime.2256.stringSwitch", std::any{});
 }
 
 TEST(AppContextNamedDataTests, TheDataAndSwitchMapsAreIndependent) {
-    int payload = 7;
-    AppContext::SetData("sharp-runtime.2256.independent", &payload);
+    AppContext::SetData("sharp-runtime.2256.independent", 7);
     AppContext::SetSwitch("sharp-runtime.2256.independent", true);
 
     // Same name, two maps, two unrelated answers.
-    EXPECT_EQ(AppContext::GetData("sharp-runtime.2256.independent"), &payload);
+    EXPECT_EQ(7, std::any_cast<int>(AppContext::GetData("sharp-runtime.2256.independent")));
     bool isEnabled = false;
     EXPECT_TRUE(AppContext::TryGetSwitch("sharp-runtime.2256.independent", isEnabled));
     EXPECT_TRUE(isEnabled);
 
     // And setting one does not disturb the other.
     AppContext::SetSwitch("sharp-runtime.2256.independent", false);
-    EXPECT_EQ(AppContext::GetData("sharp-runtime.2256.independent"), &payload);
+    EXPECT_EQ(7, std::any_cast<int>(AppContext::GetData("sharp-runtime.2256.independent")));
 }
 
 // ---------------------------------------------------------------------------
 // The data store's ownership and replacement contract.
 // ---------------------------------------------------------------------------
 
-TEST(AppContextNamedDataTests, StoredNullIsIndistinguishableFromAnAbsentKey) {
-    // Documented consequence of the void* adaptation, and the reason there is no removal door:
-    // a caller cannot tell "stored nullptr" from "never stored".
-    EXPECT_EQ(AppContext::GetData("sharp-runtime.2256.neverStored"), nullptr);
-    AppContext::SetData("sharp-runtime.2256.storedNull", nullptr);
-    EXPECT_EQ(AppContext::GetData("sharp-runtime.2256.storedNull"), nullptr);
+TEST(AppContextNamedDataTests, Fix2255_AStoredNullPointerIsDistinguishableFromAnAbsentKey) {
+    // INVERTED BY #2255. With a void* store, "stored nullptr" and "never stored" were ONE state,
+    // which is why there was no removal door and no way to say "present but null". A std::any
+    // holding a null pointer HAS a value; an absent key does not.
+    EXPECT_FALSE(AppContext::GetData("sharp-runtime.2256.neverStored").has_value());
+
+    AppContext::SetData("sharp-runtime.2256.storedNull", static_cast<int*>(nullptr));
+    const std::any stored = AppContext::GetData("sharp-runtime.2256.storedNull");
+    EXPECT_TRUE(stored.has_value()) << "a stored null POINTER is a present value";
+    EXPECT_TRUE(std::any_cast<int*>(stored) == nullptr);
+
+    // ...and storing an EMPTY any is how a caller now says "no value", which is the closest thing
+    // to a removal door and did not exist before.
+    AppContext::SetData("sharp-runtime.2256.storedNull", std::any{});
+    EXPECT_FALSE(AppContext::GetData("sharp-runtime.2256.storedNull").has_value());
 }
 
 TEST(AppContextNamedDataTests, SetDataReplacesAnExistingKey) {
-    int first = 1;
-    int second = 2;
-    AppContext::SetData("sharp-runtime.2256.replace", &first);
-    ASSERT_EQ(AppContext::GetData("sharp-runtime.2256.replace"), &first);
-    AppContext::SetData("sharp-runtime.2256.replace", &second);
-    EXPECT_EQ(AppContext::GetData("sharp-runtime.2256.replace"), &second);
+    AppContext::SetData("sharp-runtime.2256.replace", 1);
+    ASSERT_EQ(1, std::any_cast<int>(AppContext::GetData("sharp-runtime.2256.replace")));
+    AppContext::SetData("sharp-runtime.2256.replace", 2);
+    EXPECT_EQ(2, std::any_cast<int>(AppContext::GetData("sharp-runtime.2256.replace")));
+
+    // #2255: replacing with a DIFFERENT TYPE is legal too, and the type moves with the value --
+    // which the untyped store could not have represented at all.
+    AppContext::SetData("sharp-runtime.2256.replace", std::string("three"));
+    EXPECT_EQ("three", std::any_cast<std::string>(AppContext::GetData("sharp-runtime.2256.replace")));
 }
 
-TEST(AppContextNamedDataTests, SetDataStoresABorrowedPointerAndCopiesNothing) {
-    // The stored pointer must be the caller's own address, not a copy of the pointee: a caller
-    // who mutates the target afterwards must see the new value through GetData. This is what
-    // "borrowed" means, and it is the property that makes the lifetime warning necessary.
+TEST(AppContextNamedDataTests, Fix2255_TheStoreOwnsItsValuesAndCarriesTheirType) {
+    // INVERTED BY #2255. This test used to pin that the store held a BORROWED pointer -- so a
+    // caller who mutated the target afterwards saw the new value, and a caller who stored a
+    // pointer to a temporary left a dangling entry GetData handed straight back. .NET's SetData
+    // stores a BOXED OBJECT, which owns its value and can be asked its runtime type.
     int payload = 10;
-    AppContext::SetData("sharp-runtime.2256.borrowed", &payload);
+    AppContext::SetData("sharp-runtime.2256.borrowed", payload);
     payload = 20;
-    void* stored = AppContext::GetData("sharp-runtime.2256.borrowed");
-    ASSERT_EQ(stored, &payload);
-    EXPECT_EQ(*static_cast<int*>(stored), 20);
+    const std::any stored = AppContext::GetData("sharp-runtime.2256.borrowed");
+    ASSERT_TRUE(stored.has_value());
+    EXPECT_EQ(10, std::any_cast<int>(stored)) << "the store OWNS a copy -- 20 would mean it borrowed";
+
+    // The type is interrogable, which is the property both of SR-AUD-102's behaviours needed and
+    // which a void* could not provide at all.
+    EXPECT_TRUE(stored.type() == typeid(int));
+    EXPECT_TRUE(std::any_cast<std::string>(&stored) == nullptr)
+        << "asking the wrong type is now SAFE -- a void* could only be reinterpreted blindly";
+
+    // A pointer can still be stored, for a caller that genuinely wants one -- it is simply no
+    // longer the only thing the store can hold.
+    AppContext::SetData("sharp-runtime.2256.pointer", &payload);
+    EXPECT_EQ(&payload, std::any_cast<int*>(AppContext::GetData("sharp-runtime.2256.pointer")));
 }
 
 TEST(AppContextNamedDataTests, AppDomainSeesTheSameStore) {
     // #2249 made AppDomain::SetData/GetData forwarders. This pins the direction #2255's route A
     // would have to change on BOTH classes at once.
     int payload = 42;
-    AppContext::SetData("sharp-runtime.2256.shared", &payload);
-    EXPECT_EQ(System::AppDomain::CurrentDomain().GetData("sharp-runtime.2256.shared"), &payload);
+    AppContext::SetData("sharp-runtime.2256.shared", payload);
+    EXPECT_EQ(42, std::any_cast<int>(
+                      System::AppDomain::CurrentDomain().GetData("sharp-runtime.2256.shared")));
 }
 
 // ---------------------------------------------------------------------------
 // Reference lifetime and the reflection deviation.
 // ---------------------------------------------------------------------------
 
-TEST(AppContextNamedDataTests, BaseDirectoryReferenceOutlivesItsCallAndIsStable) {
-    // Today the reference binds to process-lifetime storage owned by AppDomain, so holding it is
-    // safe. That is exactly what an APP_CONTEXT_BASE_DIRECTORY override would put at risk, and
-    // why #2255's option (a) also asks about the return type.
-    const std::string& held = AppContext::getBaseDirectoryProperty();
-    const std::string copy = held;
-    for (int i = 0; i < 100; ++i) {
-        (void)AppContext::getBaseDirectoryProperty();
-    }
-    EXPECT_EQ(held, copy);
-    EXPECT_EQ(&held, &AppContext::getBaseDirectoryProperty());
+TEST(AppContextNamedDataTests, Fix2255_BaseDirectoryReturnsByValueNow) {
+    // INVERTED BY #2255, AND THIS TEST PREDICTED IT: its old comment said the stable reference is
+    // "exactly what an APP_CONTEXT_BASE_DIRECTORY override would put at risk, and why #2255's
+    // option (a) also asks about the return type". It does, and the answer is a VALUE -- the
+    // override is materialised inside the accessor, so there is no stable storage to lend.
+    static_assert(std::is_same_v<decltype(AppContext::getBaseDirectoryProperty()), std::string>,
+                  "#2255: by value, because the override has no process-lifetime home");
+
+    const std::string held = AppContext::getBaseDirectoryProperty();
     EXPECT_FALSE(held.empty());
+    for (int i = 0; i < 100; ++i) {
+        EXPECT_EQ(held, AppContext::getBaseDirectoryProperty()) << "the VALUE is still stable";
+    }
+
+    // ...and it tracks the override, which is the whole reason the reference had to go.
+    AppContext::SetData("APP_CONTEXT_BASE_DIRECTORY", std::string("/sharp-runtime-2255-value/"));
+    EXPECT_EQ("/sharp-runtime-2255-value/", AppContext::getBaseDirectoryProperty());
+    AppContext::SetData("APP_CONTEXT_BASE_DIRECTORY", std::any{});
+    EXPECT_EQ(held, AppContext::getBaseDirectoryProperty());
 }
 
 TEST(AppContextNamedDataTests, TargetFrameworkNameIsTheDeclaredReflectionDeviation) {
@@ -166,7 +239,9 @@ TEST(AppContextNamedDataTests, ConcurrentDataAndSwitchUseIsSerialised) {
             for (int i = 0; i < kIterations; ++i) {
                 AppContext::SetData(dataKey, &payloads[static_cast<std::size_t>(t)]);
                 AppContext::SetSwitch(switchKey, (i % 2) == 0);
-                if (AppContext::GetData(dataKey) != &payloads[static_cast<std::size_t>(t)]) {
+                const std::any read = AppContext::GetData(dataKey);
+                const int* const* stored = std::any_cast<int*>(&read);
+                if (stored == nullptr || *stored != &payloads[static_cast<std::size_t>(t)]) {
                     ++mismatches;
                 }
                 bool isEnabled = false;
@@ -181,7 +256,8 @@ TEST(AppContextNamedDataTests, ConcurrentDataAndSwitchUseIsSerialised) {
     }
     EXPECT_EQ(mismatches.load(), 0);
     for (int t = 0; t < kThreads; ++t) {
-        EXPECT_EQ(AppContext::GetData("sharp-runtime.2256.concurrent.data." + std::to_string(t)),
-                  &payloads[static_cast<std::size_t>(t)]);
+        EXPECT_EQ(&payloads[static_cast<std::size_t>(t)],
+                  std::any_cast<int*>(
+                      AppContext::GetData("sharp-runtime.2256.concurrent.data." + std::to_string(t))));
     }
 }

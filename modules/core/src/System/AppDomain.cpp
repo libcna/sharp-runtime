@@ -77,11 +77,11 @@ std::optional<bool> AppDomain::IsCompatibilitySwitchSet(const std::string& value
     return std::nullopt;
 }
 
-void AppDomain::SetData(const std::string& name, void* data) {
-    AppContext::SetData(name, data);
+void AppDomain::SetData(const std::string& name, std::any data) {
+    AppContext::SetData(name, std::move(data));
 }
 
-void* AppDomain::GetData(const std::string& name) {
+std::any AppDomain::GetData(const std::string& name) {
     return AppContext::GetData(name);
 }
 

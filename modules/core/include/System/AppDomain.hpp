@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <functional>
+#include <any>
 #include <string>
 #include <optional>
 #include "System/ArgumentException.hpp"
@@ -206,11 +207,11 @@ namespace System {
          * header for BaseDirectory; the include may not run the other way.
          *
          * @param name The name of the data element.
-         * @param data A pointer to the value to associate with @p name. The store
-         *             holds the pointer and owns nothing; keeping the pointee alive
-         *             is the caller's responsibility.
+         * @param data The value to associate with @p name. Since ticket #2255 the store OWNS it:
+         *             it was a borrowed `void*`, so a caller who stored a pointer to a temporary
+         *             left a dangling entry `GetData` handed straight back.
          */
-        void SetData(const std::string& name, void* data);
+        void SetData(const std::string& name, std::any data);
 
         /**
          * @brief Gets the value stored in the current domain under the given name.
@@ -219,10 +220,9 @@ namespace System {
          * AppContext.GetData forwarding call.
          *
          * @param name The name of the data element.
-         * @return The pointer stored under @p name, or nullptr if @p name has no
-         *         entry.
+         * @return The value stored under @p name, or an empty `std::any` if it has no entry.
          */
-        void* GetData(const std::string& name);
+        std::any GetData(const std::string& name);
 
         // -----------------------------------------------------------------------
         // Events (stubs)
