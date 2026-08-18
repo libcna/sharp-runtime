@@ -1325,6 +1325,134 @@ protected:
 
 #if defined(__linux__)
 
+// ===========================================================================
+// #2105 — can a handler be invoked after EnableRaisingEvents = false RETURNS?
+// ===========================================================================
+//
+// The #2097 review did not measure this, because "doing it properly needs TSan plus a
+// deterministic harness". The harness is deterministic without TSan, and it is the batch that
+// makes it so: inotify delivers many events in one read(), and this port's watch loop dispatches
+// the whole batch before it next reaches poll(). So creating N files quickly and stopping the
+// watcher from the FIRST handler answers the question with no timing race at all -- either the
+// remaining N-1 handlers run or they do not.
+//
+// .NET's answer, for comparison: Stop() takes a lock, sets _emitEvents = false and completes the
+// event-queue writer (FileSystemWatcher.Linux.cs:1071-1093), and QueueEvent drops anything
+// arriving afterwards (`if (!_emitEvents) return;`, :1211-1217). The gate is checked PER EVENT,
+// so no handler runs after the setter returns. .NET does NOT join its dispatch thread.
+TEST_F(WatcherReconfigurationFixture, Fix2105_ASelfStoppingHandlerStopsTheRestOfTheBatchToo) {
+    std::atomic<int>  invocations{0};
+    std::atomic<bool> stopped{false};
+    FileSystemWatcher w(dirA.string());
+    w.Created.push_back([&](void*, const FileSystemEventArgs&) {
+        const int n = ++invocations;
+        if (n == 1) {
+            // .NET permits this, and #2347 made it safe here. The question is what happens to
+            // the events already sitting in the same read() batch behind this one.
+            w.setEnableRaisingEventsProperty(false);
+            stopped.store(true);
+        }
+    });
+    w.setEnableRaisingEventsProperty(true);
+
+    // One batch: created back to back with no waiting, so inotify coalesces them.
+    constexpr int kFiles = 24;
+    for (int i = 0; i < kFiles; ++i) touchNew(dirA / ("batch" + std::to_string(i)));
+
+    // Wait for the stop to have happened, then give the loop time to do the wrong thing.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!stopped.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    ASSERT_TRUE(stopped.load()) << "the first Created handler never ran; the harness is broken";
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    EXPECT_EQ(invocations.load(), 1)
+        << "handlers kept running after EnableRaisingEvents = false returned: the rest of the "
+           "inotify batch was dispatched. .NET checks _emitEvents per event "
+           "(FileSystemWatcher.Linux.cs:1211-1217), so it delivers none of them.";
+}
+
+// The gate has a SECOND site, and it needs its own case: an IN_MOVED_FROM whose paired
+// IN_MOVED_TO never arrives is reported as a Deleted from a loop that runs AFTER the batch, so a
+// gate on the per-event loop alone would let that one through. Found by mutation -- removing the
+// second gate passed every other test in the repository.
+TEST_F(WatcherReconfigurationFixture, Fix2105_AnUnpairedRenameIsNotReportedAfterASelfStop) {
+    // The file that will be moved OUT of the watched directory must exist before the watch starts,
+    // so its move produces an IN_MOVED_FROM with no pair inside the batch.
+    touchNew(dirA / "movesAway");
+
+    std::atomic<int>  created{0};
+    std::atomic<int>  deleted{0};
+    std::atomic<bool> stopped{false};
+    FileSystemWatcher w(dirA.string());
+    w.Created.push_back([&](void*, const FileSystemEventArgs&) {
+        if (++created == 1) {
+            w.setEnableRaisingEventsProperty(false);
+            stopped.store(true);
+        }
+    });
+    w.Deleted.push_back([&](void*, const FileSystemEventArgs&) { ++deleted; });
+    w.setEnableRaisingEventsProperty(true);
+
+    // ORDER IS THE WHOLE TEST, and getting it backwards makes the case vacuous. The move-out
+    // must come FIRST, so its IN_MOVED_FROM is recorded into pendingMovedFrom while the watcher
+    // is still enabled; the create follows in the same read() and its handler stops the watcher.
+    // Only then does the after-the-batch loop find an entry to report with enabled_ already
+    // false. With the create first, the per-event gate drops the move-out before it is ever
+    // recorded, and the second gate is unreachable -- which is exactly what the first cut of
+    // this test measured.
+    std::filesystem::rename(dirA / "movesAway", dirB / "movesAway");
+    touchNew(dirA / "trigger");
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!stopped.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    ASSERT_TRUE(stopped.load()) << "the Created handler never ran; the harness is broken";
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    EXPECT_EQ(created.load(), 1);
+    EXPECT_EQ(deleted.load(), 0)
+        << "an unpaired rename was reported as a Deleted after the watcher was told to stop";
+}
+
+// The EXTERNAL half of the same question, which has a different mechanism and the same answer.
+// An outside caller's setEnableRaisingEventsProperty(false) JOINS the watch thread, so it cannot
+// return while a handler is still running -- a stronger guarantee than .NET's flag, and one the
+// self-stop path cannot use because joining yourself is a deadlock (#2347).
+TEST_F(WatcherReconfigurationFixture, Fix2105_AnExternalStopCannotReturnWhileAHandlerIsRunning) {
+    std::atomic<int>  running{0};
+    std::atomic<int>  maxConcurrent{0};
+    std::atomic<bool> sawFirst{false};
+    FileSystemWatcher w(dirA.string());
+    w.Created.push_back([&](void*, const FileSystemEventArgs&) {
+        const int now = ++running;
+        int previous = maxConcurrent.load();
+        while (previous < now && !maxConcurrent.compare_exchange_weak(previous, now)) {}
+        sawFirst.store(true);
+        std::this_thread::sleep_for(std::chrono::milliseconds(120));
+        --running;
+    });
+    w.setEnableRaisingEventsProperty(true);
+    touchNew(dirA / "external0");
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!sawFirst.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    ASSERT_TRUE(sawFirst.load()) << "no event was delivered; the harness is broken";
+
+    // The handler is sleeping right now. This must block until it returns.
+    w.setEnableRaisingEventsProperty(false);
+    EXPECT_EQ(running.load(), 0)
+        << "the setter returned while a handler was still on the watch thread";
+
+    // ...and nothing new is delivered afterwards.
+    const int after = maxConcurrent.load();
+    touchNew(dirA / "external1");
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    EXPECT_EQ(maxConcurrent.load(), after);
+    EXPECT_EQ(running.load(), 0);
+}
+
 TEST_F(WatcherReconfigurationFixture, ChangingPathWhileEnabledArmsTheNewDirectoryAndRetiresTheOld) {
     WatchRecorder r;
     FileSystemWatcher w(dirA.string());

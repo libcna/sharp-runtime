@@ -453,6 +453,30 @@ namespace System::IO {
                 // reconfiguring member joins the watcher thread before writing (#2344), and the
                 // one path that cannot -- a handler reconfiguring the watcher it is running on --
                 // is rejected outright (#2347).
+                // Ticket #2105 (2026-08-18). inotify delivers many events in one read(), and
+                // this loop used to dispatch the WHOLE batch regardless of state -- so a handler
+                // that stopped its own watcher still saw the rest of the batch arrive after
+                // setEnableRaisingEventsProperty(false) had returned. Measured: 13 further
+                // invocations out of a 24-file batch.
+                //
+                // .NET gates this PER EVENT rather than per batch: Stop() sets `_emitEvents =
+                // false` under a lock (FileSystemWatcher.Linux.cs:1071-1093) and QueueEvent
+                // returns early on it (`if (!_emitEvents) return;`, :1211-1217). The event is
+                // DROPPED, not merely deferred, and the loop keeps walking. `continue` mirrors
+                // that. It is NOT load-bearing here and the honest record is that a mutation
+                // replacing it with `break` is not caught: the unpaired-rename loop below is
+                // gated on the same flag, so the two spellings are observably identical. The
+                // reason to prefer `continue` is fidelity to the reference, not a test.
+                //
+                // The EXTERNAL stop needs no gate of its own: it joins the watch thread
+                // (stopWatchingIfRunning), so it cannot return while a handler is running. Only
+                // the self-stop path can reach here with enabled_ already false, because joining
+                // yourself is a deadlock (#2347).
+                if (!enabled_.load()) {
+                    i += sizeof(struct inotify_event) + ev->len;
+                    continue;
+                }
+
                 const bool isDirectory = (ev->mask & IN_ISDIR) != 0;
                 const bool nameAdmitted = nameClassAdmits(notifyFilter_, isDirectory);
 
@@ -507,6 +531,9 @@ namespace System::IO {
 
             for (const auto& [cookie, pending] : pendingMovedFrom) {
                 (void)cookie;
+                // #2105: the same gate. A rename whose second half never arrived is reported as
+                // a Deleted, and that report is an event like any other.
+                if (!enabled_.load()) break;
                 // Decision 5(b) again: an unpaired IN_MOVED_FROM is reported as a Deleted, so it
                 // is governed by the value that governs a Deleted of the same entry kind.
                 if (!nameClassAdmits(notifyFilter_, pending.isDirectory)) continue;
