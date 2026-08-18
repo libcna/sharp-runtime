@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <functional>
+#include <typeinfo>
 #include <initializer_list>
 #include <memory>
 #include <stdexcept>
@@ -22,6 +23,31 @@ namespace System {
  */
 class AggregateException : public Exception {
     std::vector<std::exception_ptr> innerExceptions_;
+
+    /**
+     * @brief The message the CALLER supplied, before composition.
+     *
+     * Ticket #2309 (SR-AUD-098 clauses C2/C3/C4), landed under `docs/StandingApprovals.md` SA-3.
+     *
+     * .NET stores the raw message and composes `Message` on every access
+     * (`AggregateException.cs:339-360`); this port stored only the composed result. The ticket
+     * measured why one string cannot serve both: closing C2 alone works, closing C3/C4 alone
+     * works, and closing BOTH under one stored string yields
+     * `"custom outer (a) (b) (a) (b)"` and **grows without bound under repeated `Flatten()`**.
+     * A second field is the only escape, and it is exactly SA-3's case.
+     *
+     * The composition happens in the constructor rather than in the getter, and that is
+     * observationally identical rather than a shortcut: `innerExceptions_` is fixed at
+     * construction and never mutated, in this port and in .NET (`_innerExceptions` is a
+     * `ReadOnlyCollection` assigned once). Composing on access would additionally require
+     * `getMessageProperty()` to stop returning `const std::string&`, which is a public signature
+     * change this needs no part of.
+     *
+     * `sizeof(AggregateException)` grows **192 → 224** and
+     * `sizeof(UnobservedTaskExceptionEventArgs)` — a public header holding one by value —
+     * **208 → 240**. Both are pinned by a layout test; consumers must rebuild.
+     */
+    std::string rawMessage_;
 
     /**
      * @brief Rejects a null entry in a collection of inner exceptions.
@@ -98,32 +124,57 @@ class AggregateException : public Exception {
         // initializer is sequenced before every member initializer, so validating here
         // also protects innerExceptions_ in the constructors that build their message
         // from the same vector.
+        return composeMessage("One or more errors occurred.", exs);
+    }
+
+    /**
+     * @brief .NET's `Message` composition, transcribed.
+     *
+     * @code
+     * if (_innerExceptions.Length == 0) return base.Message;
+     * sb.Append(base.Message); sb.Append(' ');
+     * for (…) { sb.Append('('); sb.Append(_innerExceptions[i].Message); sb.Append(") "); }
+     * sb.Length--;                                   // AggregateException.cs:339-360
+     * @endcode
+     *
+     * Ticket #2309 corrected two things here. First, the composition is **unconditional** when
+     * there are inner exceptions: this port composed only when the message was the default one,
+     * so `AggregateException("custom outer", {a, b})` reported `"custom outer"` and **discarded
+     * the leaves**, which is C2. Second, the separator is `") ("` in both, but the trailing
+     * `sb.Length--` means .NET ends at `")"` with **no** trailing space — reproduced by
+     * appending `") "` and dropping the last character, rather than by special-casing the last
+     * element, so the two spellings cannot drift.
+     */
+    static std::string composeMessage(const std::string& raw,
+                                      const std::vector<std::exception_ptr>& exs) {
+        // Ahead of the loop below, because that loop is the first of the three
+        // std::rethrow_exception call sites a null entry would reach. A base-class
+        // initializer is sequenced before every member initializer, so validating here
+        // also protects innerExceptions_ in the constructors that build their message
+        // from the same vector.
         requireNoNullElements(exs);
-        if (exs.empty()) return "One or more errors occurred.";
-        std::string m = "One or more errors occurred. (";
-        bool first = true;
+        if (exs.empty()) return raw;
+        std::string m = raw;
+        m += ' ';
         for (auto& ep : exs) {
+            m += '(';
             try { std::rethrow_exception(ep); }
-            catch (const std::exception& e) {
-                if (!first) m += ") (";
-                m += e.what();
-                first = false;
-            } catch (...) {
-                if (!first) m += ") (";
-                m += "unknown error";
-                first = false;
-            }
+            catch (const std::exception& e) { m += e.what(); }
+            catch (...) { m += "unknown error"; }
+            m += ") ";
         }
-        m += ")";
+        m.pop_back();
         return m;
     }
 
 public:
     /** @brief Initializes a new instance with the default aggregate error message. */
-    AggregateException() : Exception("One or more errors occurred.") {}
+    AggregateException() : Exception("One or more errors occurred."),
+                           rawMessage_("One or more errors occurred.") {}
 
     /** @brief Initializes a new instance with the specified error message. */
-    explicit AggregateException(const std::string& message) : Exception(message) {}
+    explicit AggregateException(const std::string& message)
+        : Exception(message), rawMessage_(message) {}
 
     /**
      * @brief Initializes a new instance with a collection of inner exceptions.
@@ -131,7 +182,8 @@ public:
      */
     explicit AggregateException(std::vector<std::exception_ptr> innerExceptions)
         : Exception(buildMessage(innerExceptions), firstValidatedInnerOf(innerExceptions)),
-          innerExceptions_(std::move(innerExceptions)) {}
+          innerExceptions_(std::move(innerExceptions)),
+          rawMessage_("One or more errors occurred.") {}
 
     /**
      * @brief Initializes a new instance with an initializer list of inner exceptions.
@@ -145,8 +197,10 @@ public:
      * @throws System::ArgumentException if any entry is a null `std::exception_ptr`.
      */
     AggregateException(const std::string& message, std::vector<std::exception_ptr> innerExceptions)
-        : Exception(message, firstValidatedInnerOf(innerExceptions)),
-          innerExceptions_(std::move(innerExceptions)) {}
+        : Exception(composeMessage(message, innerExceptions),
+                    firstValidatedInnerOf(innerExceptions)),
+          innerExceptions_(std::move(innerExceptions)),
+          rawMessage_(message) {}
 
     /**
      * @brief Initializes a new instance with a message and a single inner exception.
@@ -159,8 +213,9 @@ public:
      * @throws System::ArgumentNullException if @p innerException is null.
      */
     AggregateException(const std::string& message, std::exception_ptr innerException)
-        : Exception(message, requireNonNullInner(innerException)),
-          innerExceptions_({innerException}) {}
+        : Exception(composeMessage(message, {innerException}), requireNonNullInner(innerException)),
+          innerExceptions_({innerException}),
+          rawMessage_(message) {}
 
     /**
      * @brief Gets the read-only collection of inner exceptions that caused this aggregate exception.
@@ -263,7 +318,20 @@ public:
                 }
             }
         }
-        return AggregateException(std::move(flat));
+        // #2309. .NET is
+        //     new AggregateException(GetType() == typeof(AggregateException) ? base.Message
+        //                                                                    : Message, ...)
+        //                                                    -- AggregateException.cs:335
+        // The RAW message for a plain AggregateException, the COMPOSED one for a derived type.
+        // That discrimination is what stops repeated Flatten() from accreting leaf text: passing
+        // the composed message here yields "custom outer (a) (b) (a) (b)" and grows without
+        // bound, which is exactly the pathology this ticket measured before the raw field existed.
+        //
+        // typeid is the C++ counterpart of GetType(), and this class is polymorphic, so it reads
+        // the DYNAMIC type -- a derived aggregate takes the other arm, as .NET's does.
+        return AggregateException(
+            typeid(*this) == typeid(AggregateException) ? rawMessage_ : getMessageProperty(),
+            std::move(flat));
     }
 
     /**
@@ -289,7 +357,12 @@ public:
         for (auto& ep : innerExceptions_) {
             if (!predicate(ep)) unhandled.push_back(ep);
         }
-        if (!unhandled.empty()) throw AggregateException(std::move(unhandled));
+        // #2309. Handle passes the COMPOSED message, not the raw one --
+        // `throw new AggregateException(Message, unhandledExceptions.ToArray(), ...)`
+        // (AggregateException.cs:281). It differs from Flatten deliberately and the two are
+        // transcribed separately rather than being given one shared helper that would hide it.
+        if (!unhandled.empty())
+            throw AggregateException(getMessageProperty(), std::move(unhandled));
     }
 };
 

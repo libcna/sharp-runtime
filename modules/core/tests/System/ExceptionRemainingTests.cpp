@@ -317,11 +317,11 @@ TEST(AggregateExceptionTests, MessageAndSingle_Ctor_StoresInner) {
     EXPECT_EQ(ex.getInnerExceptionsProperty().size(), 1u);
     EXPECT_EQ(ex.getInnerExceptionProperty(), ep);
     // The bare "outer" is the message this port stores today: the custom-message
-    // constructors do not append the contained diagnostics the way the default-message
-    // constructors do. That asymmetry is SR-AUD-098 clause C2 and is DEFERRED to ticket
-    // #2309, not endorsed here -- closing it requires an object-layout change and .NET
-    // reference text that are both unavailable. See docs/AggregateExceptionCausalPlan.md.
-    EXPECT_STREQ(ex.what(), "outer");
+    // FLIPPED by #2309 (2026-08-18). The asymmetry was SR-AUD-098 clause C2: a custom message
+    // discarded the contained diagnostics where a default message appended them. .NET composes
+    // UNCONDITIONALLY whenever there are inner exceptions (AggregateException.cs:339-360), so the
+    // custom message is a PREFIX, not a replacement.
+    EXPECT_STREQ(ex.what(), "outer (inner)");
 }
 
 // ---------------------------------------------------------------------------
@@ -382,9 +382,10 @@ TEST(AggregateExceptionTests, NamingTheFirstCauseDoesNotChangeAnyMessage) {
                  "One or more errors occurred.");
     EXPECT_STREQ(System::AggregateException(std::vector<std::exception_ptr>{ep1, ep2}).what(),
                  "One or more errors occurred. (a) (b)");
+    // #2309: composed unconditionally, so a custom message prefixes the leaves.
     EXPECT_STREQ(System::AggregateException("outer", std::vector<std::exception_ptr>{ep1}).what(),
-                 "outer");
-    EXPECT_STREQ(System::AggregateException("outer", ep1).what(), "outer");
+                 "outer (a)");
+    EXPECT_STREQ(System::AggregateException("outer", ep1).what(), "outer (a)");
 }
 TEST(AggregateExceptionTests, NullRejectionKeepsItsExactTypeAndTextAfterC1) {
     // The C1 repair moved the null-element scan into the base-class initializer, which is
@@ -720,7 +721,7 @@ TEST(AggregateExceptionTests, ValidInnerExceptionsStillWorkAfterValidationAdded)
 
     System::AggregateException withMessage("outer", ep1);
     EXPECT_EQ(withMessage.getInnerExceptionCountProperty(), 1u);
-    EXPECT_EQ(std::string(withMessage.what()), "outer");
+    EXPECT_EQ(std::string(withMessage.what()), "outer (boom)");   // #2309
 
     System::AggregateException empty(std::vector<std::exception_ptr>{});
     EXPECT_EQ(empty.getInnerExceptionCountProperty(), 0u);
@@ -1039,4 +1040,104 @@ TEST(DerivedExceptionHResultTests, ContextMarshalException_EveryCtor) {
     } catch (const System::SystemException& e) {
         EXPECT_EQ(e.getHResultProperty(), kCorEContextMarshal);
     }
+}
+
+// ===========================================================================
+// #2309 — SR-AUD-098 clauses C2/C3/C4, and the layout change that closes them
+// ===========================================================================
+//
+// The ticket was blocked on two grounds and both are answered. Ground 1: composition and
+// preservation cannot both hold under ONE stored string -- measured, closing both yields
+// "custom outer (a) (b) (a) (b)" and GROWS WITHOUT BOUND under repeated Flatten(). Ground 2: the
+// exact composed grammar and what Flatten/Handle pass were unverifiable with /rv absent.
+//
+// /rv answers ground 2 exactly, and the answer is what makes ground 1's second field work:
+// Flatten passes the RAW message for a plain AggregateException and the COMPOSED one for a
+// derived type (AggregateException.cs:335), while Handle passes the COMPOSED one (:281). Those
+// two differ deliberately.
+
+TEST(AggregateExceptionLayoutTests, Fix2309_TheRawMessageFieldGrowsTheObject) {
+    // SA-3's pin. The second std::string is the only escape from the composition/preservation
+    // conflict, and it costs 32 bytes on each of the two public types that hold one by value.
+    // Consumers must rebuild; no source change is needed.
+    EXPECT_EQ(sizeof(System::AggregateException), 224u) << "was 192 before #2309";
+    EXPECT_EQ(alignof(System::AggregateException), 8u);
+}
+
+TEST(AggregateExceptionTests, Fix2309_MessageIsComposedUnconditionallyWhenThereAreLeaves) {
+    auto ep1 = std::make_exception_ptr(std::runtime_error("a"));
+    auto ep2 = std::make_exception_ptr(std::runtime_error("b"));
+
+    // C2: a custom message is a PREFIX, not a replacement.
+    EXPECT_EQ(std::string(System::AggregateException("custom outer",
+                                                    std::vector<std::exception_ptr>{ep1, ep2}).what()),
+              "custom outer (a) (b)");
+    // ...and the default message composes exactly as it always did.
+    EXPECT_EQ(std::string(System::AggregateException(std::vector<std::exception_ptr>{ep1, ep2}).what()),
+              "One or more errors occurred. (a) (b)");
+
+    // NO TRAILING SPACE. .NET appends ") " per leaf and then does `sb.Length--`
+    // (AggregateException.cs:355-357), so the string ends at ")". Reproducing that by appending
+    // and dropping, rather than by special-casing the last element, is why the two cannot drift.
+    const std::string composed = System::AggregateException("x", std::vector<std::exception_ptr>{ep1}).what();
+    EXPECT_EQ(composed.back(), ')');
+    EXPECT_EQ(composed, "x (a)");
+
+    // With NO leaves the message is returned untouched -- .NET returns base.Message directly
+    // (:341-344), so there is no stray trailing space there either.
+    EXPECT_EQ(std::string(System::AggregateException("bare").what()), "bare");
+    EXPECT_EQ(std::string(System::AggregateException(std::vector<std::exception_ptr>{}).what()),
+              "One or more errors occurred.");
+}
+
+TEST(AggregateExceptionTests, Fix2309_FlattenPreservesTheCallersMessageAndDoesNotAccrete) {
+    auto ep1 = std::make_exception_ptr(std::runtime_error("a"));
+    auto ep2 = std::make_exception_ptr(std::runtime_error("b"));
+    System::AggregateException outer("custom outer", std::vector<std::exception_ptr>{ep1, ep2});
+    EXPECT_EQ(std::string(outer.what()), "custom outer (a) (b)");
+
+    // C3/C4: Flatten keeps the caller's message rather than discarding it...
+    const auto flat = outer.Flatten();
+    EXPECT_EQ(std::string(flat.what()), "custom outer (a) (b)");
+
+    // ...AND IT DOES NOT ACCRETE. This is the pathology the ticket measured: passing the COMPOSED
+    // message to the new aggregate yields "custom outer (a) (b) (a) (b)", and again on the next
+    // call, without bound. Flatten passes the RAW message precisely to stop that
+    // (AggregateException.cs:335).
+    EXPECT_EQ(std::string(flat.Flatten().what()), "custom outer (a) (b)");
+    EXPECT_EQ(std::string(flat.Flatten().Flatten().what()), "custom outer (a) (b)");
+
+    // A default-message aggregate is unchanged by all of this.
+    System::AggregateException plain(std::vector<std::exception_ptr>{ep1, ep2});
+    EXPECT_EQ(std::string(plain.Flatten().what()), "One or more errors occurred. (a) (b)");
+
+    // Flattening a NESTED aggregate still lifts its leaves, and the outer message still leads.
+    auto nested = std::make_exception_ptr(
+        System::AggregateException(std::vector<std::exception_ptr>{ep1, ep2}));
+    System::AggregateException withNested("top", std::vector<std::exception_ptr>{nested});
+    const auto liftedFlat = withNested.Flatten();
+    EXPECT_EQ(liftedFlat.getInnerExceptionCountProperty(), 2u);
+    EXPECT_EQ(std::string(liftedFlat.what()), "top (a) (b)");
+}
+
+TEST(AggregateExceptionTests, Fix2309_HandlePassesTheComposedMessageWhereFlattenPassesTheRaw) {
+    // The two differ in .NET and are transcribed separately rather than sharing a helper that
+    // would hide the difference: Handle is `new AggregateException(Message, ...)` (:281) while
+    // Flatten is `new AggregateException(GetType() == typeof(AggregateException) ? base.Message
+    // : Message, ...)` (:335).
+    auto ep1 = std::make_exception_ptr(std::runtime_error("a"));
+    auto ep2 = std::make_exception_ptr(std::runtime_error("b"));
+    System::AggregateException outer("custom outer", std::vector<std::exception_ptr>{ep1, ep2});
+
+    try {
+        outer.Handle([](const std::exception_ptr&) { return false; });
+        FAIL() << "nothing was handled, so Handle must rethrow";
+    } catch (const System::AggregateException& rethrown) {
+        // The composed message becomes the new aggregate's RAW message, so its own composition
+        // appends the leaves a second time. That is .NET's behaviour, not an accident here.
+        EXPECT_EQ(std::string(rethrown.what()), "custom outer (a) (b) (a) (b)");
+    }
+
+    // A predicate that handles everything throws nothing at all.
+    EXPECT_NO_THROW(outer.Handle([](const std::exception_ptr&) { return true; }));
 }

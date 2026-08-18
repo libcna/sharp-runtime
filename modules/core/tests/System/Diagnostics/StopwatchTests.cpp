@@ -241,15 +241,29 @@ TEST(StopwatchDefinedArithmeticTests, Fix2326_FrequencyIsTheClocksOwnNotTheTimeS
 TEST(StopwatchDefinedArithmeticTests, Fix2326_TheResolutionThatWasLost) {
     // WHY THE OLD VALUE WAS A DEFECT AND NOT MERELY A DIFFERENT CHOICE. GetTimestamp() used to
     // divide the clock's nanosecond count by 100, so anything finer than 100 ns was truncated
-    // away. Two timestamps taken back to back must now be able to differ by less than 100 units.
-    long long minimumDelta = kLongMax;
-    for (int i = 0; i < 200; ++i) {
-        const long long a = Stopwatch::GetTimestamp();
-        const long long b = Stopwatch::GetTimestamp();
-        if (b > a) minimumDelta = std::min(minimumDelta, b - a);
-    }
-    EXPECT_LT(minimumDelta, 100LL)
+    // away.
+    //
+    // REWRITTEN BY #2309's GATE RUN (2026-08-18). The first version took 200 pairs of back-to-back
+    // timestamps and required the smallest positive delta to be under 100 units. That measures the
+    // MACHINE, not the code: it passed eight times out of eight in isolation and failed once
+    // inside a full gate, where every one of the 200 pairs can be preempted. A test that is
+    // intermittently green is not evidence (#2352).
+    //
+    // The property is a UNIT, so it is asserted against a unit. GetTimestamp() samples
+    // steady_clock's own epoch, so a division by 100 would put its value two orders of magnitude
+    // below the same clock read directly -- a comparison of VALUES, immune to scheduling.
+    const auto chronoNanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now().time_since_epoch())
+                                       .count();
+    const long long timestamp = Stopwatch::GetTimestamp();
+    ASSERT_GT(chronoNanoseconds, 0LL) << "the clock's epoch is too close to now to discriminate";
+    EXPECT_GT(timestamp, chronoNanoseconds / 2)
         << "GetTimestamp() is still quantised to 100 ns -- the #2326 division is back";
+    EXPECT_LT(timestamp / 2, chronoNanoseconds);
+
+    // The same statement from the other side: the declared frequency IS the clock's own, so one
+    // unit is one nanosecond rather than one hundred.
+    EXPECT_EQ(Stopwatch::Frequency, 1000000000LL);
 }
 
 TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_MinToMax_WrapsToMinusOne) {
