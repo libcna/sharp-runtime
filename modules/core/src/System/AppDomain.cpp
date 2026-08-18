@@ -65,6 +65,18 @@ AppDomain::AppDomain() {
 #endif
 }
 
+// #2250 / SR-AUD-103. Transcribed from .NET's AppDomain.cs:171-174:
+//     return AppContext.TryGetSwitch(value, out bool result) ? result : default(bool?);
+//
+// It used to `return false` unconditionally without consulting the switch registry at all, so a
+// switch a caller had explicitly SET TO TRUE still reported as unset. Out of line for the same
+// reason SetData/GetData below are: AppContext.hpp includes AppDomain.hpp for BaseDirectory.
+std::optional<bool> AppDomain::IsCompatibilitySwitchSet(const std::string& value) const {
+    bool result = false;
+    if (AppContext::TryGetSwitch(value, result)) return result;
+    return std::nullopt;
+}
+
 void AppDomain::SetData(const std::string& name, void* data) {
     AppContext::SetData(name, data);
 }

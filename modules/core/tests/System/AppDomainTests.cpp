@@ -18,6 +18,7 @@
 // that the two fixtures, which live in different executables, do not share a
 // name in filters and logs.
 #include <gtest/gtest.h>
+#include <optional>
 
 #include <string>
 
@@ -70,30 +71,58 @@ TEST(AppDomainDataPolicyTests, SetData_NullValue_IsStoredAndReadBack) {
 }
 
 // ---------------------------------------------------------------------------
-// SR-AUD-103, switch half / ticket #2250 (needs_user). This pins the CURRENT
-// divergence deliberately: IsCompatibilitySwitchSet does not consult AppContext,
-// because forwarding needs a nullable return type and a noexcept drop, both of
-// which need approval. If #2250 is approved, this is the test that must change.
+// SR-AUD-103, switch half / ticket #2250 — SHIPPED, and both pins below inverted
+//
+// IsCompatibilitySwitchSet used to `return false` unconditionally, without consulting the switch
+// registry at all -- so a switch a caller had explicitly SET TO TRUE still reported as unset.
+// .NET's is `AppContext.TryGetSwitch(value, out bool result) ? result : default(bool?)`
+// (`AppDomain.cs:171-174`).
+//
+// Following it needed two approval-bound changes TOGETHER, and SA-10 covers both: the return type
+// had to become nullable, because a C++ bool cannot distinguish an explicitly-FALSE switch from
+// an UNSET one -- which is the whole reason .NET's is `bool?` -- and the noexcept had to go,
+// because AppContext::TryGetSwitch raises for an empty name and takes a mutex whose lock() can
+// throw. Forwarding from a noexcept member would have turned both into std::terminate, so the
+// drop is the only safe way to forward at all rather than a stylistic relaxation.
 // ---------------------------------------------------------------------------
 
-TEST(AppDomainDataPolicyTests, IsCompatibilitySwitchSet_DoesNotYetConsultAppContext) {
+TEST(AppDomainDataPolicyTests, Fix2250_IsCompatibilitySwitchSetConsultsAppContext) {
     AppContext::SetSwitch("AppDomainDataPolicyTests.switchOn", true);
     ASSERT_TRUE([] {
         bool enabled = false;
         return AppContext::TryGetSwitch("AppDomainDataPolicyTests.switchOn", enabled) && enabled;
     }()) << "positive control: AppContext itself must report the switch as set";
-    EXPECT_FALSE(AppDomain::CurrentDomain().IsCompatibilitySwitchSet("AppDomainDataPolicyTests.switchOn"));
+    EXPECT_EQ(std::optional<bool>(true),
+              AppDomain::CurrentDomain().IsCompatibilitySwitchSet("AppDomainDataPolicyTests.switchOn"));
 }
 
-TEST(AppDomainDataPolicyTests, IsCompatibilitySwitchSet_IsStillNoexcept) {
-    // The reference and the argument are bound outside the noexcept operand on
-    // purpose: CurrentDomain() is not itself noexcept, and neither is the
-    // const char* -> std::string conversion, so either one inside the operand
-    // would answer a different question.
+TEST(AppDomainDataPolicyTests, Fix2250_ExplicitlyFalseIsNotUnset) {
+    // THE DISTINCTION THE NULLABLE RETURN EXISTS FOR, and the reason a bool could not have
+    // carried the repair: these two states used to be one, and both used to read as `false`.
+    AppContext::SetSwitch("AppDomainDataPolicyTests.switchOff", false);
+    AppDomain& domain = AppDomain::CurrentDomain();
+
+    EXPECT_EQ(std::optional<bool>(false),
+              domain.IsCompatibilitySwitchSet("AppDomainDataPolicyTests.switchOff"));
+    EXPECT_EQ(std::nullopt,
+              domain.IsCompatibilitySwitchSet("AppDomainDataPolicyTests.neverSet"));
+    EXPECT_NE(domain.IsCompatibilitySwitchSet("AppDomainDataPolicyTests.switchOff"),
+              domain.IsCompatibilitySwitchSet("AppDomainDataPolicyTests.neverSet"))
+        << "explicitly false and unset were indistinguishable before #2250";
+}
+
+TEST(AppDomainDataPolicyTests, Fix2250_ItIsNoLongerNoexceptAndTheDiagnosticReachesTheCaller) {
+    // The reference and the argument are bound outside the noexcept operand on purpose:
+    // CurrentDomain() is not itself noexcept, and neither is the const char* -> std::string
+    // conversion, so either one inside the operand would answer a different question.
     AppDomain& domain = AppDomain::CurrentDomain();
     const std::string name("AppDomainDataPolicyTests.switchOn");
-    EXPECT_TRUE(noexcept(domain.IsCompatibilitySwitchSet(name)));
-    EXPECT_NO_THROW((void)domain.IsCompatibilitySwitchSet(std::string()));
+    EXPECT_FALSE(noexcept(domain.IsCompatibilitySwitchSet(name)));
+
+    // An empty name used to be swallowed by the unconditional `false`. It now reaches the caller
+    // as AppContext::TryGetSwitch's own diagnostic -- which is what the noexcept drop buys, and
+    // why keeping the noexcept would have meant std::terminate instead.
+    EXPECT_THROW((void)domain.IsCompatibilitySwitchSet(std::string()), System::ArgumentException);
 }
 
 // ---------------------------------------------------------------------------

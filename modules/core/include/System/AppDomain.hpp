@@ -4,6 +4,7 @@
 #pragma once
 #include <functional>
 #include <string>
+#include <optional>
 #include "System/ArgumentException.hpp"
 #include "System/EventArgs.hpp"
 #include "System/MarshalByRefObject.hpp"
@@ -290,25 +291,39 @@ namespace System {
         /**
          * @brief Determines whether a compatibility switch is set.
          *
-         * C++ counterpart of .NET AppDomain.IsCompatibilitySwitchSet(string).
-         * Always returns false in this port: it does NOT consult the
-         * System::AppContext switch registry that SetData/GetData above now share.
+         * C++ counterpart of .NET `AppDomain.IsCompatibilitySwitchSet(string)`
+         * (`AppDomain.cs:171-174`), transcribed:
          *
-         * @warning This is a known, ticketed divergence, not an oversight. .NET
-         * forwards to AppContext.TryGetSwitch and returns @c bool? — and this port
-         * cannot follow it without two changes that need explicit approval, which
-         * ticket #2250 carries: the return type must become nullable to keep
-         * "explicitly false" distinguishable from "unset", and the @c noexcept must
-         * go, because AppContext::TryGetSwitch throws System::ArgumentException for
-         * an empty switch name (and takes a mutex, which can throw too). Forwarding
-         * while still declared @c noexcept would turn both into std::terminate.
+         * ```csharp
+         * return AppContext.TryGetSwitch(value, out bool result) ? result : default(bool?);
+         * ```
+         *
+         * @par Ticket #2250 made both approval-bound changes together
+         * It used to `return false` unconditionally, without consulting the `System::AppContext`
+         * switch registry at all — so a switch a caller had explicitly **set to true** still
+         * reported as unset. Following .NET needed two changes that had to land together, and
+         * SA-10 covers both:
+         *
+         *  - **the return type is `std::optional<bool>`**, because a C++ `bool` cannot
+         *    distinguish an explicitly-false switch from an unset one — which is precisely the
+         *    distinction `bool?` exists to carry;
+         *  - **the `noexcept` is gone**, because `AppContext::TryGetSwitch` raises
+         *    `System::ArgumentException` for an empty switch name and takes a `std::mutex` whose
+         *    `lock()` can throw. Forwarding from a `noexcept` member would have turned both into
+         *    `std::terminate`, so the drop is not a stylistic relaxation but the only safe way to
+         *    forward at all.
          *
          * @param value The name of the compatibility switch.
-         * @return Always false.
+         * @return The switch's value, or `std::nullopt` if it is not set.
+         * @throws System::ArgumentException if @p value is empty, exactly as
+         *         `AppContext::TryGetSwitch` does — the diagnostic now reaches the caller instead
+         *         of being swallowed by an unconditional `false`.
+         *
+         * @note The body is out of line for the same reason `SetData`/`GetData` above are:
+         *       `System/AppContext.hpp` includes this header for `BaseDirectory`, so the include
+         *       may not run the other way.
          */
-        [[nodiscard]] bool IsCompatibilitySwitchSet(const std::string& /*value*/) const noexcept {
-            return false;
-        }
+        [[nodiscard]] std::optional<bool> IsCompatibilitySwitchSet(const std::string& value) const;
 
         // -----------------------------------------------------------------------
         // Additional static methods
