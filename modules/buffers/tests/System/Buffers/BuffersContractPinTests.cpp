@@ -13,6 +13,8 @@
 // Nothing here approves, implements or preselects any part of #2056, #2057, #2058,
 // #2059 or #2060.
 #include <gtest/gtest.h>
+#include "System/SequencePosition.hpp"
+#include <type_traits>
 #include <cstring>
 #include "System/ObjectDisposedException.hpp"
 #include <cstdint>
@@ -447,4 +449,46 @@ TEST(MemoryPoolPinTests, RentBoundsAreUnchanged) {
     auto defaulted = MemoryPool<int>::Shared().Rent();
     EXPECT_EQ(defaulted->getMemoryProperty().getLengthProperty(),
               1 + (4095 / static_cast<intcs>(sizeof(int))));
+}
+
+// ---------------------------------------------------------------------------
+// #2332 / SR-AUD-069 — SequencePosition's components are private
+// ---------------------------------------------------------------------------
+
+TEST(BuffersContractPinTests, Fix2332_TheComponentsArePrivateAndOnlyTheAccessorsRemain) {
+    // .NET's SequencePosition is a readonly struct with private readonly fields, and documents
+    // that its parts must not be interpreted by anything except the sequence that created it.
+    // This port published both as MUTABLE data members, so a caller could rewrite a position
+    // after the sequence handed it out -- to an unrelated segment, a dangling pointer, or an
+    // offset the owner never produced.
+    //
+    // The compile-domain half is pinned by test/consumer/core_sequenceposition_private_negative
+    // .cpp, which is where a rejection can actually be asserted. This row pins the observable
+    // consequence: the type is no longer an aggregate, so the two spellings that depend on that
+    // -- structured bindings and designated initialisers -- are gone.
+    static_assert(!std::is_aggregate_v<System::SequencePosition>,
+                  "#2332: private components mean this is not an aggregate");
+
+    // WHAT DID NOT CHANGE, and had to not change: construction, reading, copying and comparison.
+    // Brace initialisation with two arguments still compiles -- through the constructor rather
+    // than as an aggregate -- which is what keeps every existing call site working.
+    int segment = 0;
+    const System::SequencePosition braced{&segment, 7};
+    EXPECT_EQ(&segment, braced.GetObject());
+    EXPECT_EQ(7, braced.GetInteger());
+
+    const System::SequencePosition defaulted{};
+    EXPECT_EQ(nullptr, defaulted.GetObject());
+    EXPECT_EQ(0, defaulted.GetInteger());
+
+    const System::SequencePosition copied = braced;
+    EXPECT_TRUE(copied == braced);
+    EXPECT_TRUE(copied.Equals(braced));
+    static_assert(std::is_trivially_copyable_v<System::SequencePosition>,
+                  "#2332 must not have cost trivial copyability");
+
+    // The layout is untouched: making members private changes access, not storage.
+    static_assert(sizeof(System::SequencePosition) == sizeof(void*) + sizeof(SharpRuntime::intcs) +
+                                                      (alignof(void*) - sizeof(SharpRuntime::intcs)),
+                  "#2332 is an access change, not a layout change");
 }

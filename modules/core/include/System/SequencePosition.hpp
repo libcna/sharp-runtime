@@ -15,23 +15,32 @@ namespace System {
      * that segment. For single-segment sequences, the object pointer is typically
      * null and the integer is an absolute byte offset.
      *
-     * @note <b>The two components are public and mutable here; .NET's are private and
-     * readonly.</b> .NET documents that the parts of a position must not be interpreted
-     * by anything except the sequence that created it; this port cannot enforce that,
-     * because a caller can assign `object_` or `integer_` directly after the sequence
-     * handed the position out. Nothing inside this repository does: every other use --
-     * ReadOnlySequence, SequenceReader, BuffersExtensions and their suites -- goes
-     * through the constructor and through GetObject()/GetInteger(), and the only direct
-     * field access anywhere is inside this type. Closing the hole means making the two
-     * members private, which is a public source break for any consumer that does touch
-     * them; that decision is open and is not taken here.
+     * @note <b>The two components are private since ticket #2332, matching .NET's private
+     * readonly fields.</b> .NET documents that the parts of a position must not be interpreted
+     * by anything except the sequence that created it, and it enforces that in the language;
+     * this port used to publish both components as mutable data members, so a caller could
+     * rewrite a position after the sequence handed it out -- to an unrelated segment, a dangling
+     * pointer, or an offset the owning sequence never produced.
+     *
+     * Nothing inside this repository ever did: every other use -- ReadOnlySequence,
+     * SequenceReader, BuffersExtensions and their suites -- already went through the constructor
+     * and through GetObject()/GetInteger(), which is why the change needed no first-party
+     * migration at all.
+     *
+     * What it removes for a consumer is the three spellings that reach a public data member:
+     * structured bindings (`auto [o, i] = pos`), designated initialisers, and direct assignment.
+     * The two-argument constructor and the two accessors cover every legitimate use, and
+     * `SequencePosition{obj, 5}` still compiles -- through that constructor rather than as an
+     * aggregate. See docs/Migration-SequencePositionPrivateComponents.md.
      */
     struct SequencePosition {
+    private:
         /** @brief The segment object (may be null for single-segment sequences). */
         void* object_ = nullptr;
         /** @brief The integer offset within the segment. */
         SharpRuntime::intcs integer_ = 0;
 
+    public:
         /** @brief Default constructor — represents position zero with no segment. */
         SequencePosition() = default;
 
