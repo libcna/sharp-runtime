@@ -2022,6 +2022,126 @@ says so; the evidence is `docs/NegativeConsumerFixtureValidation.md` §18 and
 
 - `scripts/check_version_seam_odr.py.audit.md`, `scripts/local_ci_check.sh.audit.md`.
 
+## CCF-021 — caller- or peer-supplied text becomes protocol structure at a field terminator
+
+**MINTED 2026-08-18 by ticket #2131, and CLOSED in the same act: all five members are
+remediated.** The maintainer resolved the authority question that had parked it — see the
+`SA-11` entry in `docs/StandingApprovals.md` — with the instruction *mint both*. The reasoning
+recorded at grant time: a cause that spans more than one namespace cannot be owned by any single
+namespace review, and the number is what holds the sites together when somebody other than their
+discoverer repairs them.
+
+**The identifier names the field-terminator family**, discharging the ambiguity the evidence
+appendix flagged. The competing proposal — the `SearchValues.hpp` per-file report's *public
+generic surface* shape — does **not** get this number; `AUDIT_PROGRESS.md` already records it as
+module-local and deliberately not minted.
+
+### The cause
+
+Caller- or peer-supplied text is concatenated into a protocol frame without rejecting the
+characters that **terminate a field**, so the text becomes additional protocol structure. CR, LF
+and NUL are the terminators; a caller who can place one can inject a header, split a request, or
+truncate a frame.
+
+### Membership — five findings, three modules, all remediated
+
+| # | Finding | Module | Door | Field boundary | Remediated by |
+|---|---|---|---|---|---|
+| 1 | SR-AUD-313 | `net-http` | ten frame doors | request line + header field | #2063 |
+| 2 | SR-AUD-316 (reason half) | `net-http` | status reason phrase | status line | #2063 |
+| 3 | SR-AUD-248 | `net-websockets` | `SetRequestHeader`, request URI, `Host:` | handshake request line + headers | #2089 |
+| 4 | SR-AUD-319 | `net-http-headers` | **nine** typed value doors | header field value | #2124 |
+| 5 | SR-AUD-322 | `net-http-headers` | `TryAddWithoutValidation` | header field **name** | #2123 |
+
+One cause, **one predicate body in the whole repository** —
+`System::Net::detail::ContainsProtocolFieldTerminator` in `modules/net`, with
+`System::Net::Http::detail::ContainsProtocolControlCharacter` kept as a forwarder under its
+original name — and one validation timing: at the public door, before storage.
+
+### The one boundary difference, stated rather than papered over
+
+For members 1–3 the guarantee is *no byte reaches the wire*. For members 4 and 5 it is one step
+earlier — *no field terminator appears in the serialized text* — because `modules/net-http-headers`
+is measurably **not on this repository's own wire path**: `HttpRequestMessage` stores a raw
+`std::unordered_map` and `HttpClientHandler` serializes from that, so this module's `ToString()`
+reaches a socket only through a consumer. That is a difference in *where the boundary sits*, not
+in the cause, the predicate or the timing.
+
+### Non-members, carried forward so the count cannot drift
+
+* **SR-AUD-249** (`AddSubProtocol` accepting RFC 7230 separators) — a **token grammar** defect.
+  It shares ticket #2089 and a file with SR-AUD-248 and sits beside it in the plan, which makes it
+  easy to miscount as a member. All three terminators are `<= 0x20` and the pre-existing validator
+  already rejected that range, so a subprotocol never was a CR/LF/NUL door. Cause W-C.
+* **SR-AUD-320, SR-AUD-321** — grammar and full-consumption defects.
+* **#2129** (an RFC 5987 value decoding to a raw CR/LF) — the family's **closest call**, excluded
+  because its CR/LF travels *inward, to the caller*; `ToString()` percent-encodes it, so no field
+  terminator ever appears in serialized text. Cause NH-K.
+* **#2128** (singleton headers joined with a comma; `Transfer-Encoding` beside `Content-Length`) —
+  a request-smuggling shape, but no field terminator is involved and a comma is a legal character.
+  Cause NH-L.
+
+### Component-graph note
+
+#2124 declared the private edge `Net.Http.Headers` → `Net` (91 → 92) so member 4 could reach the
+single predicate instead of growing a second copy. It is **private**: no public header in
+`modules/net-http-headers` includes anything from `Net`, so no consumer's include surface grew.
+
+---
+
+## CCF-022 — a public lifecycle state is recorded but not enforced
+
+**MINTED 2026-08-18 by ticket #2109, and CLOSED in the same act: all seven sites are remediated.**
+Same authority resolution as CCF-021.
+
+### The cause
+
+A type records that it has been closed or disposed, and then goes on serving public members that
+depend on the closed resource. The state is observable and truthful; it simply governs nothing.
+
+**The policy statement had to be widened at mint time, and the reason is worth keeping.** Drafted
+from the `io` and `xml` sites alone it read *"…must enforce it at every public member that depends
+on the closed resource, **not only at the data-transfer ones**"* — because in those six the state
+*was* enforced at read/write and missed at the peripheral members. The seventh site refutes that
+clause: `NetworkStream` enforced it **nowhere**. The family statement is therefore the
+unqualified one:
+
+> A type that records being closed must enforce that state at **every** public member that depends
+> on the closed resource.
+
+### Membership — seven sites, three modules, all remediated
+
+| Module | Finding | Site | Remediated by |
+|---|---|---|---|
+| `xml` | SR-AUD-349 | `XmlWriter` keeps writing after `Close` | #2076 |
+| `xml` | SR-AUD-348 | `XmlReader::Close` is unobservable — `Read()` keeps advancing | #2078 |
+| `io` | SR-AUD-344 | `UnmanagedMemoryStream` exposes `Length` and a mutable `Position` after `Close` | #2108 |
+| `io` | SR-AUD-337 | `leaveOpen` text wrappers stay usable after `Close` | #2098 |
+| `io` | SR-AUD-343 | `StringReader`/`StringWriter` inherit a no-op `Close` | #2098 |
+| `io` | SR-AUD-342 (`Length`/`Position`/`Seek` half) | closed `FileStream` | #2099 |
+| `net-sockets` | SR-AUD-265 (closed half) | `NetworkStream::Read`/`Write` after `Close` | #2136 |
+
+**The seventh is the family's strongest form and its most dangerous.** `Read` answered `0` — a
+clean end-of-stream, as far as any caller can tell — and `Write`, being `void`, returned normally
+having written nothing. A silent wrong answer, where the other six at least kept working on a
+resource that was gone.
+
+### Non-member, carried forward
+
+`net-websockets` contributes **none**. §7.11's disposed-socket race (#2096) is a **concurrency**
+defect — a data race and a use-after-free — not a recorded-but-unenforced state, and #2096 is
+deliberately left without a behavioural pin because a passing test would be asserting on the
+outcome of undefined behaviour.
+
+### One member's finding did not reproduce, and that is recorded rather than hidden
+
+Half of SR-AUD-337 turned out **not to reproduce against .NET**: a `leaveOpen` `StreamWriter` is
+never marked disposed upstream either. #2098 therefore *reproduces and pins* that asymmetry with
+`StreamReader` rather than "repairing" it. A family closure that silently counted it as a repair
+would be claiming parity work that was never done.
+
+---
+
 ## CCF-016 conditional propagation follow-through — ticket #1932 (2026-08-01)
 
 The historical #1875 extraction is complete under exact Option 2R. The five
@@ -2706,6 +2826,9 @@ are `remediated` on their own repairs, independently of the family label.
 
 ---
 
+
+**SUPERSEDED 2026-08-18.** The authority question this section leaves open was answered by the maintainer (`docs/StandingApprovals.md`, SA-11): *mint both*. The family is now minted as a numbered section at the top of this document, and closed there — see `## CCF-021` and `## CCF-022`. Nothing in this section is edited; it is the record of why the mint waited.
+
 ## CCF-022 — a seventh site, measured and now remediated, and still not minted (2026-08-08, #2136)
 
 *Appended additively. Nothing above is edited.*
@@ -2747,6 +2870,9 @@ reads **149 remediated / 215 confirmed / 364 total**, of which **49** carry the
 **No `SR-AUD-*` identifier was issued; numbering stays frozen at 364.**
 
 ---
+
+
+**SUPERSEDED 2026-08-18.** The authority question this section leaves open was answered by the maintainer (`docs/StandingApprovals.md`, SA-11): *mint both*. The family is now minted as a numbered section at the top of this document, and closed there — see `## CCF-021` and `## CCF-022`. Nothing in this section is edited; it is the record of why the mint waited.
 
 ## The signed-length-into-an-unsigned-native-count idiom — a family, recorded and deliberately NOT minted (2026-08-09, #2148 closing the record #2146 promised)
 
