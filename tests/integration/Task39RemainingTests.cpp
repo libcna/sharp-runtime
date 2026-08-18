@@ -621,19 +621,27 @@ TEST(ExperimentalPropertyTests, Assignment_ReadOnlyPropertyThroughBaseReference_
     EXPECT_EQ(ro.get(), "read-only");
 }
 
-// Layout pin.  #2244 deliberately retained the now-vestigial cachedValue member
-// so that sizeof(Property<T>) did not move; ticket #2246 carries the approval
-// request to remove it.  If that approval lands, this test is the one that must
-// be updated in the same change.
-// The concrete sizes are libstdc++-specific (the trailing member is padded to
-// the callables' alignment), so the pin is the invariant rather than a number:
-// the object is strictly larger than its two callables, i.e. the cache is still
-// in the layout.
-TEST(ExperimentalPropertyTests, Layout_CachedValueIsStillPartOfTheObject) {
-    EXPECT_GT(sizeof(Property<int>), 2 * sizeof(std::function<int()>));
-    EXPECT_GE(sizeof(Property<std::string>),
-              2 * sizeof(std::function<std::string()>) + sizeof(std::string));
+// Layout pin, INVERTED BY #2246.  #2244 deliberately retained the then-vestigial cachedValue
+// member so that sizeof(Property<T>) did not move, and named #2246 as the approval request to
+// remove it.  That approval is docs/StandingApprovals.md SA-3, and #2246 landed under it.
+//
+// The pin is still the invariant rather than a number -- the concrete sizes were
+// libstdc++-specific, because the trailing member was padded to the callables' alignment -- but
+// the invariant is now the opposite one: the object is EXACTLY its two callables, so the cache is
+// no longer in the layout.  PropertyLayoutTests carries the field-for-field probe; this row is
+// the integration-side statement of the same fact.
+TEST(ExperimentalPropertyTests, Fix2246_TheCachedValueIsNoLongerPartOfTheObject) {
+    EXPECT_EQ(sizeof(Property<int>), 2 * sizeof(std::function<int()>));
+    EXPECT_EQ(sizeof(Property<std::string>), 2 * sizeof(std::function<std::string()>));
+
+    // The size no longer depends on T at all.  Before #2246 these two differed by sizeof(T)
+    // plus padding; that they now agree IS the removal, stated in the form a caller would notice.
+    EXPECT_EQ(sizeof(Property<int>), sizeof(Property<std::string>));
+
+    // ReadOnlyProperty adds nothing of its own and moved with the base, as it always has.
     EXPECT_EQ(sizeof(SharpRuntime::Experimental::ReadOnlyProperty<int>), sizeof(Property<int>));
+    EXPECT_EQ(sizeof(SharpRuntime::Experimental::ReadOnlyProperty<std::string>),
+              sizeof(Property<std::string>));
 }
 
 // ---------------------------------------------------------------------------

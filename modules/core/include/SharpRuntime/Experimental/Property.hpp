@@ -39,9 +39,10 @@ namespace SharpRuntime::Experimental {
     /// Experimental property wrapper that delegates get/set to std::function objects.
     /// Prefer SharpRuntime::Prop.hpp in production code; this class adds per-instance overhead.
     ///
-    /// @tparam T  The property's value type. It must be default-constructible: the
-    ///            vestigial @c cachedValue member below is default-initialised by every
-    ///            constructor. Nothing else in this class needs the requirement.
+    /// @tparam T  The property's value type. **It need not be default-constructible.** It used
+    ///            to have to be, purely because a vestigial @c cachedValue member was
+    ///            default-initialised by every constructor; ticket #2246 removed that member, so
+    ///            a getter/setter wrapper no longer imposes a requirement it never used.
     template <typename T>
     class Property {
     public:
@@ -106,14 +107,12 @@ namespace SharpRuntime::Experimental {
     private:
         std::function<T()> getter;
         std::function<void(const T&)> setter;
-        /// Vestigial. This member is never read and never written: the value a
-        /// property holds lives in whatever storage the supplied getter/setter close
-        /// over, so a cache here can only ever disagree with it (which is what
-        /// SR-AUD-179 measured, ticket #2244). It is retained only because removing
-        /// it changes @c sizeof(Property<T>) -- an object-layout change, which needs
-        /// explicit approval; ticket #2246 carries that request. While it is here,
-        /// @c T must be default-constructible.
-        [[maybe_unused]] T cachedValue;
+        // #2246 removed a vestigial `T cachedValue` here. It was never read and never written:
+        // the value a property holds lives in whatever storage the supplied getter/setter close
+        // over, so a cache here could only ever DISAGREE with it -- which is what SR-AUD-179
+        // measured and #2244 recorded. Removing it is an object-layout change and landed under
+        // docs/StandingApprovals.md SA-3, with the before/after sizeof pinned by
+        // PropertyLayoutTests. Two members remain, and both are used.
     };
 
 }
