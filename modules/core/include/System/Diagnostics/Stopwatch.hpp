@@ -106,17 +106,44 @@ namespace System::Diagnostics {
 
         /**
          * @brief Gets the frequency of the timer as the number of ticks per second.
-         * Returns 10,000,000 to match the .NET tick resolution (100 ns per tick).
+         *
+         * C++ counterpart of .NET `Stopwatch.Frequency`, which is `public static readonly long`
+         * and **platform-determined**: `Stopwatch.Unix.cs:8-12` returns 1,000,000,000 and the
+         * Windows build returns `QueryPerformanceFrequency`.
+         *
+         * @par This was 10,000,000 until ticket #2326, and the old value cost RESOLUTION
+         * The port reported .NET's `TimeSpan` tick rate rather than its own clock's, and
+         * `GetTimestamp()` divided by 100 to match — so two events 30 ns apart received the
+         * **same** timestamp here and different ones in .NET. The pair was self-consistent, and
+         * every elapsed time it computed was correct; what it could not do was resolve anything
+         * finer than 100 ns.
+         *
+         * The value is derived from `Clock::period`, which is the frequency of the clock this
+         * type actually reads. That is deliberate and is not the same as transcribing .NET's
+         * Windows branch: reporting `QueryPerformanceFrequency` while sampling
+         * `std::chrono::steady_clock` would be a lie about a different timer. On libstdc++ and
+         * MSVC alike `steady_clock::period` is `std::nano`, so this is 1,000,000,000 — .NET's
+         * own Unix answer.
+         *
+         * @note It stays `constexpr`, where .NET's is a runtime `static readonly`, because
+         *       `Clock::period` is a compile-time property. That is a *stronger* guarantee than
+         *       .NET gives, not a weaker one, so no caller can be surprised by it.
          */
-        static constexpr longcs Frequency = 10'000'000LL;
+        static constexpr longcs Frequency =
+            static_cast<longcs>(Clock::period::den) / static_cast<longcs>(Clock::period::num);
 
         /** @brief Indicates whether the Stopwatch timer is based on a high-resolution performance counter. */
         static constexpr bool IsHighResolution = true;
 
-        /** @brief Returns the current high-frequency timestamp in Frequency units (100-ns ticks since epoch). */
+        /**
+         * @brief Returns the current high-frequency timestamp, in `Frequency` units.
+         *
+         * Since ticket #2326 this is the clock's own raw count — nanoseconds on every platform
+         * this port builds for — rather than that count divided by 100. The division was what
+         * cost the resolution described on `Frequency`.
+         */
         [[nodiscard]] static longcs GetTimestamp() {
-            return std::chrono::duration_cast<std::chrono::nanoseconds>(
-                       Clock::now().time_since_epoch()).count() / 100LL;
+            return static_cast<longcs>(Clock::now().time_since_epoch().count());
         }
 
         /**
@@ -129,10 +156,15 @@ namespace System::Diagnostics {
 
         /**
          * @brief Gets the elapsed time between two timestamps previously retrieved via
-         * GetTimestamp(). Both @p startingTimestamp and @p endingTimestamp are already expressed
-         * in Frequency (100-ns tick) units on this port, so no unit conversion is needed --
-         * real .NET's own s_tickFrequency scaling factor reduces to exactly 1.0 here since
-         * Frequency == TimeSpan.TicksPerSecond.
+         * GetTimestamp().
+         *
+         * @par The scaling factor is no longer 1.0 (#2326)
+         * It used to be, because `Frequency` was `TimeSpan::TicksPerSecond` and the timestamps
+         * were already `TimeSpan` ticks. Now `Frequency` is the clock's own — 1,000,000,000 —
+         * so this applies .NET's `s_tickFrequency = TimeSpan.TicksPerSecond / Frequency`
+         * (`Stopwatch.cs:18`) like the reference does. The delta is still computed in the
+         * unsigned domain first, for the CCF-004 reason below, and the scaling saturates rather
+         * than overflowing.
          */
         [[nodiscard]] static System::TimeSpan GetElapsedTime(longcs startingTimestamp, longcs endingTimestamp) {
             // CCF-004 class A -- defined wrap (docs/DefinedArithmeticBoundaryPlan.md section 4.1,
@@ -144,7 +176,22 @@ namespace System::Diagnostics {
             // one-argument door, so the same wrap is produced in the unsigned domain and
             // converted back. Every representable difference is byte-identical to before, and the
             // four wrapping shapes keep the exact values they had (SR-AUD-131, ticket #2218).
-            return System::TimeSpan::FromTicks(subtractTimestamps(endingTimestamp, startingTimestamp));
+            const longcs delta = subtractTimestamps(endingTimestamp, startingTimestamp);
+            if constexpr (Frequency == System::TimeSpan::TicksPerSecond) {
+                return System::TimeSpan::FromTicks(delta);
+            } else {
+                // .NET's own conversion, and it must SATURATE rather than overflow: the domain of
+                // a nanosecond delta is wider than the TimeSpan tick domain by a factor of 100,
+                // so a large-but-representable delta scales past INT64_MAX. The bounds are the
+                // same ones TimeProvider::GetElapsedTime uses, for the same reason.
+                const double scaled = static_cast<double>(delta) *
+                    (static_cast<double>(System::TimeSpan::TicksPerSecond) /
+                     static_cast<double>(Frequency));
+                constexpr double twoPow63 = 9223372036854775808.0;   // 2^63 exactly
+                if (scaled >= twoPow63)  return System::TimeSpan::FromTicks(std::numeric_limits<longcs>::max());
+                if (scaled < -twoPow63)  return System::TimeSpan::FromTicks(std::numeric_limits<longcs>::min());
+                return System::TimeSpan::FromTicks(static_cast<longcs>(scaled));
+            }
         }
 
         /** @brief Returns the elapsed time formatted the same way as Elapsed.ToString(). */

@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <thread>
 #include <chrono>
 #include <limits>
@@ -145,7 +146,7 @@ TEST(StopwatchTests, AccumulatesAcrossMultipleStartStop) {
 }
 
 TEST(StopwatchTests, Frequency_Is10MHz) {
-    EXPECT_EQ(Stopwatch::Frequency, 10'000'000LL);
+    EXPECT_EQ(Stopwatch::Frequency, 1'000'000'000LL);   // #2326: the clock's own, not the TimeSpan tick rate
 }
 
 TEST(StopwatchTests, IsHighResolution_True) {
@@ -153,10 +154,14 @@ TEST(StopwatchTests, IsHighResolution_True) {
 }
 
 TEST(StopwatchTests, GetElapsedTime_TwoTimestamps_MatchesDelta) {
+    // #2326: `Frequency` timestamp units are one SECOND, and one second is
+    // TimeSpan::TicksPerSecond ticks -- not `Frequency` ticks. The two used to be the same
+    // number, which is why this row could conflate them; it now says which is which.
     long long start = Stopwatch::GetTimestamp();
-    long long end = start + Stopwatch::Frequency; // exactly 1 second later, in ticks
+    long long end = start + Stopwatch::Frequency;   // exactly 1 second later, in timestamp units
     System::TimeSpan elapsed = Stopwatch::GetElapsedTime(start, end);
-    EXPECT_EQ(elapsed.getTicksProperty(), Stopwatch::Frequency);
+    EXPECT_EQ(elapsed.getTicksProperty(), System::TimeSpan::TicksPerSecond);
+    EXPECT_EQ(1.0, elapsed.getTotalSecondsProperty());
 }
 
 TEST(StopwatchTests, GetElapsedTime_SingleTimestamp_IsNonNegative) {
@@ -191,50 +196,123 @@ constexpr long long kLongMin = std::numeric_limits<long long>::min();
 constexpr long long kLongMax = std::numeric_limits<long long>::max();
 }  // namespace
 
+// #2326 RESCALED EVERY EXPECTATION BELOW, AND THE CLAIM THEY DEFEND IS UNCHANGED.
+//
+// These cases are CCF-004's evidence: the subtraction `ending - starting` must be DEFINED, not
+// undefined behaviour, and must produce the exact two's-complement wrap. That is still what they
+// assert. What moved is the reported TICK value: before #2326 `Frequency` was
+// TimeSpan::TicksPerSecond, so .NET's `s_tickFrequency = TicksPerSecond / Frequency` reduced to
+// exactly 1.0 and the delta WAS the tick count. `Frequency` is now the clock's own 1,000,000,000,
+// so the factor is 0.01 -- which is .NET's own value on Unix (`Stopwatch.cs:18`,
+// `Stopwatch.Unix.cs:8-12`), and these results are therefore .NET's, not this port's.
+//
+// The concrete rows below are hand-computed from `(long)(delta * 0.01)` rather than from the
+// implementation, because a test that only mirrors the formula it is testing proves nothing.
+
+namespace {
+/// .NET's conversion, written out for the sweeps: `(long)((end - start) * s_tickFrequency)` with
+/// the saturating float-to-integer conversion modern .NET adopted.
+long long dotNetElapsedTicks(long long start, long long end) {
+    const long long delta = static_cast<long long>(
+        static_cast<unsigned long long>(end) - static_cast<unsigned long long>(start));
+    if (Stopwatch::Frequency == 10'000'000LL) return delta;   // the pre-#2326 unit, if ever restored
+    const double scaled = static_cast<double>(delta) *
+        (10'000'000.0 / static_cast<double>(Stopwatch::Frequency));
+    constexpr double twoPow63 = 9223372036854775808.0;
+    if (scaled >= twoPow63)  return kLongMax;
+    if (scaled < -twoPow63)  return kLongMin;
+    return static_cast<long long>(scaled);
+}
+}  // namespace
+
+TEST(StopwatchDefinedArithmeticTests, Fix2326_FrequencyIsTheClocksOwnNotTheTimeSpanTickRate) {
+    // The change itself. 1,000,000,000 is .NET's Unix answer AND this port's actual clock period,
+    // which is why it is derived from Clock::period rather than transcribed: reporting
+    // QueryPerformanceFrequency while sampling steady_clock would be a lie about a different timer.
+    EXPECT_EQ(1'000'000'000LL, Stopwatch::Frequency);
+    EXPECT_NE(System::TimeSpan::TicksPerSecond, Stopwatch::Frequency)
+        << "the two used to be equal, which is what made the scale factor 1.0";
+    static_assert(Stopwatch::Frequency ==
+                      static_cast<long long>(std::chrono::steady_clock::period::den) /
+                          static_cast<long long>(std::chrono::steady_clock::period::num),
+                  "#2326: Frequency is the clock's, and stays a constant expression");
+}
+
+TEST(StopwatchDefinedArithmeticTests, Fix2326_TheResolutionThatWasLost) {
+    // WHY THE OLD VALUE WAS A DEFECT AND NOT MERELY A DIFFERENT CHOICE. GetTimestamp() used to
+    // divide the clock's nanosecond count by 100, so anything finer than 100 ns was truncated
+    // away. Two timestamps taken back to back must now be able to differ by less than 100 units.
+    long long minimumDelta = kLongMax;
+    for (int i = 0; i < 200; ++i) {
+        const long long a = Stopwatch::GetTimestamp();
+        const long long b = Stopwatch::GetTimestamp();
+        if (b > a) minimumDelta = std::min(minimumDelta, b - a);
+    }
+    EXPECT_LT(minimumDelta, 100LL)
+        << "GetTimestamp() is still quantised to 100 ns -- the #2326 division is back";
+}
+
 TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_MinToMax_WrapsToMinusOne) {
-    // Probe case S1: the audited input.  Was UB, produced -1, and must keep producing -1.
-    EXPECT_EQ(-1, Stopwatch::GetElapsedTime(kLongMin, kLongMax).getTicksProperty());
+    // Probe case S1: the audited input. The DELTA is still exactly -1 -- that is the CCF-004
+    // claim -- and -1 scaled by 0.01 truncates toward zero, so the reported tick count is 0.
+    EXPECT_EQ(0, Stopwatch::GetElapsedTime(kLongMin, kLongMax).getTicksProperty());
+    EXPECT_EQ(dotNetElapsedTicks(kLongMin, kLongMax),
+              Stopwatch::GetElapsedTime(kLongMin, kLongMax).getTicksProperty());
 }
 
 TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_MaxToMin_WrapsToOne) {
-    // Probe case S3: the reversed pair.
-    EXPECT_EQ(1, Stopwatch::GetElapsedTime(kLongMax, kLongMin).getTicksProperty());
+    // Probe case S3: the reversed pair. Delta +1, scaled to 0.
+    EXPECT_EQ(0, Stopwatch::GetElapsedTime(kLongMax, kLongMin).getTicksProperty());
 }
 
 TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_MinusOneToMax_WrapsToMin) {
-    // Probe case S4: one past the largest representable difference.
-    EXPECT_EQ(kLongMin, Stopwatch::GetElapsedTime(-1, kLongMax).getTicksProperty());
+    // Probe case S4: one past the largest representable difference. The delta is still exactly
+    // INT64_MIN; scaled by 0.01 it is representable, so this does NOT saturate.
+    const long long ticks = Stopwatch::GetElapsedTime(-1, kLongMax).getTicksProperty();
+    EXPECT_EQ(-92233720368547760LL, ticks);
+    EXPECT_GT(ticks, kLongMin) << "0.01 * INT64_MIN is representable, so no clamp should occur";
+    EXPECT_EQ(dotNetElapsedTicks(-1, kLongMax), ticks);
 }
 
 TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_ZeroToMax_IsExactlyMax) {
-    // Probe case S2: the largest difference that never overflowed, so the guard must not be
-    // inverted into rejecting or clamping it.
-    EXPECT_EQ(kLongMax, Stopwatch::GetElapsedTime(0, kLongMax).getTicksProperty());
+    // Probe case S2: the largest difference that never overflowed. The guard must still not be
+    // inverted into rejecting or clamping it -- and after scaling it lands well inside the range.
+    const long long ticks = Stopwatch::GetElapsedTime(0, kLongMax).getTicksProperty();
+    EXPECT_EQ(92233720368547760LL, ticks);
+    EXPECT_LT(ticks, kLongMax) << "0.01 * INT64_MAX is representable, so no clamp should occur";
 }
 
 TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_SignedSweep) {
-    // The seven-point sweep the family plan requires, taken against a fixed start of 0 so that
-    // the expected value is the ending timestamp itself.
+    // The seven-point sweep the family plan requires, taken against a fixed start of 0.
     const long long points[] = {kLongMin, kLongMin + 1, -1, 0, 1, kLongMax - 1, kLongMax};
     for (long long p : points)
-        EXPECT_EQ(p, Stopwatch::GetElapsedTime(0, p).getTicksProperty()) << "ending=" << p;
+        EXPECT_EQ(dotNetElapsedTicks(0, p), Stopwatch::GetElapsedTime(0, p).getTicksProperty())
+            << "ending=" << p;
 }
 
 TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_WrapIsExactTwosComplement) {
-    // Every pair, wrapping or not, must equal the unsigned difference reinterpreted as signed.
+    // THE CCF-004 CLAIM ITSELF, and it is unchanged by #2326: every pair, wrapping or not, must
+    // behave as the unsigned difference reinterpreted as signed -- and then scaled. The sign and
+    // the ordering are what a scale cannot disturb, so they are asserted separately from the
+    // magnitude, which double precision above 2^53 can.
     const long long points[] = {kLongMin, kLongMin + 1, -1, 0, 1, 1000, kLongMax - 1, kLongMax};
     for (long long a : points) {
         for (long long b : points) {
-            const auto expected = static_cast<long long>(
+            const long long delta = static_cast<long long>(
                 static_cast<unsigned long long>(b) - static_cast<unsigned long long>(a));
-            EXPECT_EQ(expected, Stopwatch::GetElapsedTime(a, b).getTicksProperty())
-                << "start=" << a << " end=" << b;
+            const long long ticks = Stopwatch::GetElapsedTime(a, b).getTicksProperty();
+            EXPECT_EQ(dotNetElapsedTicks(a, b), ticks) << "start=" << a << " end=" << b;
+            if (delta > 0) { EXPECT_GE(ticks, 0) << "start=" << a << " end=" << b; }
+            if (delta < 0) { EXPECT_LE(ticks, 0) << "start=" << a << " end=" << b; }
         }
     }
 }
 
 TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_OrdinaryPairIsUnchanged) {
-    EXPECT_EQ(2000, Stopwatch::GetElapsedTime(1000, 3000).getTicksProperty());
+    // An ordinary interval: 2000 nanoseconds is 20 TimeSpan ticks. Before #2326 the same call
+    // reported 2000, because the arguments were read as 100-ns ticks rather than nanoseconds.
+    EXPECT_EQ(20, Stopwatch::GetElapsedTime(1000, 3000).getTicksProperty());
+    EXPECT_EQ(System::TimeSpan::FromTicks(20), Stopwatch::GetElapsedTime(1000, 3000));
 }
 
 TEST(StopwatchDefinedArithmeticTests, GetElapsedTime_SingleTimestampDoorReachesTheSameSite) {

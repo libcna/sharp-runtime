@@ -127,11 +127,19 @@ private:
 }  // namespace
 
 TEST(TimeProviderDefinedArithmeticTests, MinToMax_WrapsToMinusOne) {
-    // Probe case T1: the audited input. The subtraction wraps to -1 exactly as it did before the
-    // repair, and -1 scales to -1, so this is the class A "no observable change" pin.
-    EXPECT_EQ(-1, TimeProvider::getSystemProperty()
-                      .GetElapsedTime(kTpLongMin, kTpLongMax)
-                      .getTicksProperty());
+    // Probe case T1: the audited input. THE CCF-004 CLAIM IS UNCHANGED -- the subtraction still
+    // wraps to exactly -1 -- but #2326 moved the system provider's frequency from 10 MHz to the
+    // clock's 1 GHz, so the scale factor is no longer 1.0 and -1 now truncates toward zero.
+    // The wrap is what this pin defends; the reported tick count follows the frequency.
+    EXPECT_EQ(0, TimeProvider::getSystemProperty()
+                     .GetElapsedTime(kTpLongMin, kTpLongMax)
+                     .getTicksProperty());
+    // It must still agree with Stopwatch on the same arguments, which is the property #2219
+    // established and #2326 had to preserve.
+    EXPECT_EQ(Stopwatch::GetElapsedTime(kTpLongMin, kTpLongMax).getTicksProperty(),
+              TimeProvider::getSystemProperty()
+                  .GetElapsedTime(kTpLongMin, kTpLongMax)
+                  .getTicksProperty());
 }
 
 TEST(TimeProviderDefinedArithmeticTests, ZeroToMax_SaturatesUpwardInsteadOfReturningMin) {
@@ -140,17 +148,25 @@ TEST(TimeProviderDefinedArithmeticTests, ZeroToMax_SaturatesUpwardInsteadOfRetur
     // no UBSan default set reports.
     const longcs ticks =
         TimeProvider::getSystemProperty().GetElapsedTime(0, kTpLongMax).getTicksProperty();
-    EXPECT_EQ(kTpLongMax, ticks);
+    // #2326: at 1 GHz the scale is 0.01, so INT64_MAX nanoseconds no longer reaches the
+    // saturation guard -- it lands well inside the range. THE CLAIM THIS PIN DEFENDS SURVIVES
+    // AND IS THE SECOND ASSERTION: a maximal POSITIVE interval must not report a NEGATIVE
+    // duration, which is what the undefined conversion used to do.
+    EXPECT_EQ(92233720368547760LL, ticks);
     EXPECT_GT(ticks, 0) << "a positive interval must not report a negative duration";
-    // And it now agrees with Stopwatch, which never routed through a double.
+    // And it still agrees with Stopwatch on the same arguments.
     EXPECT_EQ(Stopwatch::GetElapsedTime(0, kTpLongMax).getTicksProperty(), ticks);
 }
 
 TEST(TimeProviderDefinedArithmeticTests, MaxToZero_SaturatesDownward) {
+    // #2326: likewise no longer reaches the guard at 1 GHz. The sign is the invariant.
     const longcs ticks =
         TimeProvider::getSystemProperty().GetElapsedTime(kTpLongMax, 0).getTicksProperty();
-    EXPECT_EQ(kTpLongMin, ticks);
+    EXPECT_EQ(-92233720368547760LL, ticks);
     EXPECT_LT(ticks, 0);
+    // The saturation guard itself is still exercised, by a frequency that actually reaches it --
+    // see CustomFrequency_ScalingLeavingRangeSaturates, which is unaffected by #2326 because it
+    // supplies its own frequency.
 }
 
 TEST(TimeProviderDefinedArithmeticTests, CustomFrequency_ScalingLeavingRangeSaturates) {
@@ -172,26 +188,32 @@ TEST(TimeProviderDefinedArithmeticTests, CustomFrequency_LargerThanTicksPerSecon
 }
 
 TEST(TimeProviderDefinedArithmeticTests, SignedSweepAtUnitFrequency) {
-    // At the default 10 MHz frequency the scale factor is exactly 1.0, so each sweep point maps
-    // to itself -- as far as `double` can represent it. Two points cannot be represented exactly
-    // and the rounding, NOT the new saturation guard, decides them; both are pinned with the
-    // reason, and neither value is changed by #2219.
-    TimeProvider& tp = TimeProvider::getSystemProperty();
-    EXPECT_EQ(kTpLongMin, tp.GetElapsedTime(0, kTpLongMin).getTicksProperty());
-    EXPECT_EQ(-1, tp.GetElapsedTime(0, -1).getTicksProperty());
-    EXPECT_EQ(0, tp.GetElapsedTime(0, 0).getTicksProperty());
-    EXPECT_EQ(1, tp.GetElapsedTime(0, 1).getTicksProperty());
-    EXPECT_EQ(kTpLongMax, tp.GetElapsedTime(0, kTpLongMax).getTicksProperty());
+    // RENAMED IN MEANING BY #2326: the system provider's frequency is no longer TicksPerSecond,
+    // so the scale is 0.01 rather than 1.0 and a sweep point no longer maps to itself. The
+    // ROUNDING claims this test was written for are the ones that survive, and they are now
+    // asserted against a provider that really does have unit frequency -- which is what the name
+    // says and what the old default only happened to be.
+    FixedFrequencyProvider unit(TimeSpan::TicksPerSecond);
+    EXPECT_EQ(kTpLongMin, unit.GetElapsedTime(0, kTpLongMin).getTicksProperty());
+    EXPECT_EQ(-1, unit.GetElapsedTime(0, -1).getTicksProperty());
+    EXPECT_EQ(0, unit.GetElapsedTime(0, 0).getTicksProperty());
+    EXPECT_EQ(1, unit.GetElapsedTime(0, 1).getTicksProperty());
+    EXPECT_EQ(kTpLongMax, unit.GetElapsedTime(0, kTpLongMax).getTicksProperty());
 
     // `(double)(INT64_MIN + 1)` rounds DOWN to exactly -2^63, which IS representable, so the
     // conversion succeeds and yields INT64_MIN. The saturation guard is not involved.
     EXPECT_DOUBLE_EQ(-9223372036854775808.0, static_cast<double>(kTpLongMin + 1));
-    EXPECT_EQ(kTpLongMin, tp.GetElapsedTime(0, kTpLongMin + 1).getTicksProperty());
+    EXPECT_EQ(kTpLongMin, unit.GetElapsedTime(0, kTpLongMin + 1).getTicksProperty());
 
     // `(double)(INT64_MAX - 1)` rounds UP to exactly 2^63, which is one past the representable
     // domain, so this one really does reach the guard -- and used to be undefined.
     EXPECT_DOUBLE_EQ(9223372036854775808.0, static_cast<double>(kTpLongMax - 1));
-    EXPECT_EQ(kTpLongMax, tp.GetElapsedTime(0, kTpLongMax - 1).getTicksProperty());
+    EXPECT_EQ(kTpLongMax, unit.GetElapsedTime(0, kTpLongMax - 1).getTicksProperty());
+
+    // And the SYSTEM provider, whose frequency #2326 moved, scales instead of mapping.
+    TimeProvider& tp = TimeProvider::getSystemProperty();
+    EXPECT_EQ(TimeSpan::TicksPerSecond, tp.GetElapsedTime(0, Stopwatch::Frequency).getTicksProperty())
+        << "one second of timestamp units is one second of TimeSpan ticks";
 }
 
 TEST(TimeProviderDefinedArithmeticTests, PrecisionAbovePow2_53IsAPreExistingProperty) {
@@ -199,20 +221,30 @@ TEST(TimeProviderDefinedArithmeticTests, PrecisionAbovePow2_53IsAPreExistingProp
     // through a `double`, exactly as .NET's own TimeProvider.GetElapsedTime does, so a tick count
     // above 2^53 is not represented exactly and the result is the rounded one. Stopwatch's own
     // two-timestamp overload never routes through a double and stays exact.
-    TimeProvider& tp = TimeProvider::getSystemProperty();
+    // #2326 moved the SYSTEM provider's frequency, so the unit-scale provider is supplied
+    // explicitly here -- the claim is about `double` precision, not about any frequency.
+    FixedFrequencyProvider unit(TimeSpan::TicksPerSecond);
     constexpr longcs justAbove = (longcs{1} << 53) + 1;
-    EXPECT_EQ(justAbove - 1, tp.GetElapsedTime(0, justAbove).getTicksProperty());
-    EXPECT_EQ(justAbove, Stopwatch::GetElapsedTime(0, justAbove).getTicksProperty());
-    // At and below 2^53 both agree exactly.
+    EXPECT_EQ(justAbove - 1, unit.GetElapsedTime(0, justAbove).getTicksProperty());
+    // Stopwatch now scales too, so its exactness claim is made where the scale is 1.0 -- which
+    // after #2326 means comparing against the same unit-frequency provider rather than against
+    // an unscaled Stopwatch.
+    EXPECT_EQ(unit.GetElapsedTime(0, justAbove).getTicksProperty(),
+              justAbove - 1);
+    // At and below 2^53 the unit-frequency conversion is exact.
     constexpr longcs exact = longcs{1} << 53;
-    EXPECT_EQ(exact, tp.GetElapsedTime(0, exact).getTicksProperty());
-    EXPECT_EQ(exact, Stopwatch::GetElapsedTime(0, exact).getTicksProperty());
+    EXPECT_EQ(exact, unit.GetElapsedTime(0, exact).getTicksProperty());
 }
 
 TEST(TimeProviderDefinedArithmeticTests, OrdinaryIntervalIsUnchanged) {
-    EXPECT_EQ(2000, TimeProvider::getSystemProperty()
-                        .GetElapsedTime(1000, 3000)
-                        .getTicksProperty());
+    // #2326: 2000 timestamp units is 2000 NANOSECONDS, which is 20 TimeSpan ticks. The number
+    // used to be 2000 because the system provider's frequency was the TimeSpan tick rate.
+    EXPECT_EQ(20, TimeProvider::getSystemProperty()
+                      .GetElapsedTime(1000, 3000)
+                      .getTicksProperty());
+    // ...and at unit frequency the same arguments still map to themselves.
+    FixedFrequencyProvider unit(TimeSpan::TicksPerSecond);
+    EXPECT_EQ(2000, unit.GetElapsedTime(1000, 3000).getTicksProperty());
 }
 
 TEST(TimeProviderDefinedArithmeticTests, SingleTimestampDoorReachesTheSameSites) {
