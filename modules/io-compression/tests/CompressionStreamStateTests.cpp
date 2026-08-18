@@ -230,12 +230,21 @@ TEST(CompressionStreamClosedStateTests, BufferArgumentsAreStillValidatedFirst) {
 TEST(CompressionStreamClosedStateTests, AZeroCountWriteOnAClosedStreamAlsoThrows) {
     // The closed check is deliberately placed BEFORE the `count == 0` early return, so "nothing to
     // write" cannot launder a use-after-close into a success.
+    //
+    // #2152 (2026-08-18) sharpened this: the MODE check now runs before the closed check, matching
+    // .NET (DeflateStream.cs:305-308, 569-570). So each door must be exercised on a stream whose
+    // mode ALLOWS it, or the mode error masks the closed one -- which is itself .NET's answer and
+    // is pinned separately below.
     MemoryStream inner;
     DeflateStream w(&inner, CompressionMode::Compress, true);
     w.Close();
     bytecs buf[1] = {};
     EXPECT_THROW(w.Write(buf, 0, 0), System::ObjectDisposedException);
-    EXPECT_THROW((void)w.Read(buf, 0, 0), System::ObjectDisposedException);
+
+    MemoryStream innerRead;
+    DeflateStream r(&innerRead, CompressionMode::Decompress, true);
+    r.Close();
+    EXPECT_THROW((void)r.Read(buf, 0, 0), System::ObjectDisposedException);
 }
 
 // ---------------------------------------------------------------------------
@@ -276,26 +285,96 @@ TEST(CompressionStreamStateControlTests, RoundTripStillWorksForEveryWrapper) {
 }
 
 // ---------------------------------------------------------------------------
-// PINS for the two doors ticket #2148 deliberately did NOT change (new ticket #2152)
+// The two doors ticket #2148 deliberately did NOT change -- CLOSED by #2152
 // ---------------------------------------------------------------------------
 
-TEST(CompressionStreamStatePinTests, ReadOnACompressModeStreamStillAnswersZero_SeeTicket2152) {
-    // .NET throws InvalidOperationException("Reading is not supported on this stream.") here. This
-    // port answers 0 -- a silent wrong answer -- and this test pins that, rather than changing it
-    // on recollection: the exception type cannot be confirmed with /rv absent, and SR-AUD-258 does
-    // not name this door. Ticket #2152 owns it.
-    MemoryStream inner;
-    DeflateStream w(&inner, CompressionMode::Compress, true);
-    bytecs buf[16] = {};
-    EXPECT_EQ(w.Read(buf, 0, 16), 0);
+// FLIPPED by #2152 (2026-08-18). These two used to pin the divergence, because /rv was absent and
+// the exception type could not be confirmed. It is present now and settles both: .NET guards each
+// direction with EnsureDecompressionMode/EnsureCompressionMode (DeflateStream.cs:387-403) and
+// raises InvalidOperationException carrying SR.CannotReadFromDeflateStream /
+// SR.CannotWriteToDeflateStream, whose exact text is in Strings.resx:122,125.
+TEST(CompressionStreamStatePinTests, Fix2152_ReadOnACompressModeStreamThrowsInsteadOfAnsweringZero) {
+    // Answering 0 was the worse of the two defects: a caller cannot distinguish it from
+    // end-of-stream, so a read loop terminates normally having produced nothing.
+    const auto expectRefusal = [](auto&& stream, const char* what) {
+        bytecs buf[16] = {};
+        try {
+            (void)stream.Read(buf, 0, 16);
+            ADD_FAILURE() << what << ": Read on a Compress-mode stream returned instead of throwing";
+        } catch (const System::InvalidOperationException& e) {
+            EXPECT_STREQ(e.what(), "Reading from the compression stream is not supported.") << what;
+        }
+    };
+    MemoryStream a, b, c;
+    expectRefusal(DeflateStream(&a, CompressionMode::Compress, true), "DeflateStream");
+    expectRefusal(GZipStream(&b, CompressionMode::Compress, true), "GZipStream");
+    expectRefusal(ZLibStream(&c, CompressionMode::Compress, true), "ZLibStream");
 }
 
-TEST(CompressionStreamStatePinTests, WriteOnADecompressModeStreamStillThrowsIOException_SeeTicket2152) {
-    // Same door, opposite direction: this one does throw, but with zlib's raw Z_STREAM_ERROR
-    // surfaced as an IOException ("deflate error -2") rather than .NET's InvalidOperationException.
-    MemoryStream inner;
-    DeflateStream w(&inner, CompressionMode::Decompress, true);
+TEST(CompressionStreamStatePinTests, Fix2152_WriteOnADecompressModeStreamThrowsTheCallerFacingError) {
+    // Same door, opposite direction. This one already threw, but with zlib's raw Z_STREAM_ERROR
+    // surfaced as IOException("deflate error -2") -- an internal error code reported for what is a
+    // caller mistake.
     const auto payload = samplePayload();
-    EXPECT_THROW(w.Write(payload.data(), 0, static_cast<intcs>(payload.size())),
-                 System::IO::IOException);
+    const auto expectRefusal = [&payload](auto&& stream, const char* what) {
+        try {
+            stream.Write(payload.data(), 0, static_cast<intcs>(payload.size()));
+            ADD_FAILURE() << what << ": Write on a Decompress-mode stream returned instead of throwing";
+        } catch (const System::InvalidOperationException& e) {
+            EXPECT_STREQ(e.what(), "Writing to the compression stream is not supported.") << what;
+        }
+    };
+    MemoryStream a, b, c;
+    expectRefusal(DeflateStream(&a, CompressionMode::Decompress, true), "DeflateStream");
+    expectRefusal(GZipStream(&b, CompressionMode::Decompress, true), "GZipStream");
+    expectRefusal(ZLibStream(&c, CompressionMode::Decompress, true), "ZLibStream");
+}
+
+// The ORDER is transcribed, not chosen: .NET's ReadCore opens with EnsureDecompressionMode() and
+// only then EnsureNotDisposed() (DeflateStream.cs:305-308), so a stream that is BOTH disposed and
+// in the wrong mode reports the mode. Getting this backwards would be invisible to every test
+// above, since each exercises one fault at a time.
+TEST(CompressionStreamStatePinTests, Fix2152_TheModeCheckRunsBeforeTheDisposedCheck) {
+    // THE TYPE ALONE CANNOT EXPRESS THIS, and a mutation proved it: ObjectDisposedException
+    // DERIVES from InvalidOperationException here as it does in .NET, so EXPECT_THROW(...,
+    // InvalidOperationException) is satisfied by BOTH orders. The message is the only
+    // discriminator, so the message is what is asserted.
+    MemoryStream inner;
+    DeflateStream w(&inner, CompressionMode::Compress, true);
+    w.Close();
+    bytecs buf[4] = {};
+    try {
+        (void)w.Read(buf, 0, 4);
+        ADD_FAILURE() << "a closed Compress-mode Read must throw";
+    } catch (const System::InvalidOperationException& e) {
+        EXPECT_STREQ(e.what(), "Reading from the compression stream is not supported.");
+    }
+
+    MemoryStream innerRead;
+    DeflateStream r(&innerRead, CompressionMode::Decompress, true);
+    r.Close();
+    try {
+        r.Write(buf, 0, 4);
+        ADD_FAILURE() << "a closed Decompress-mode Write must throw";
+    } catch (const System::InvalidOperationException& e) {
+        EXPECT_STREQ(e.what(), "Writing to the compression stream is not supported.");
+    }
+
+    // ...but the BUFFER arguments are validated before either, which is also .NET's order
+    // (Read(byte[],int,int) runs ValidateBufferArguments and only then calls ReadCore).
+    DeflateStream stillOpen(&inner, CompressionMode::Compress, true);
+    EXPECT_THROW((void)stillOpen.Read(nullptr, 0, 4), System::ArgumentNullException);
+    EXPECT_THROW((void)stillOpen.Read(buf, -1, 4), System::ArgumentOutOfRangeException);
+}
+
+// Flush deliberately gets NO mode guard: .NET's opens with EnsureNotDisposed() alone and then
+// no-ops for a Decompress-mode stream (DeflateStream.cs:210-215). A guard here would be a
+// plausible-looking symmetry that the reference does not have.
+TEST(CompressionStreamStatePinTests, Fix2152_FlushHasNoModeGuard) {
+    MemoryStream inner;
+    DeflateStream r(&inner, CompressionMode::Decompress, true);
+    EXPECT_NO_THROW(r.Flush());
+    MemoryStream innerW;
+    DeflateStream w(&innerW, CompressionMode::Compress, true);
+    EXPECT_NO_THROW(w.Flush());
 }

@@ -92,17 +92,75 @@ namespace System::IO::Compression::Detail {
     /**
      * @brief Throws `ArgumentException("Enum value was out of legal range.", paramName)`.
      *
-     * The **base** `ArgumentException`, not the derived `ArgumentOutOfRangeException`, because the
-     * audit's own managed probe for SR-AUD-258 recorded the category .NET reports for this exact
-     * call as `ArgumentException` (`audit/.../DeflateStream.cpp.audit.md`, "current .NET prints
-     * `invalidMode=ArgumentException`"), and `/rv` is absent here to narrow it further. Same
-     * choice, for the same reason, as `System::Threading`'s `EventWaitHandle` (#1954) and
-     * `System::Uri`'s `Uri(string, UriKind)` (#1992).
+     * The **base** `ArgumentException`, not the derived `ArgumentOutOfRangeException`. #2148 chose
+     * this from the audit's own managed probe and recorded that `/rv` was absent to narrow it
+     * further. **It is present now, and it confirms the choice exactly**: `DeflateStream.cs:99` is
+     * `throw new ArgumentException(SR.ArgumentOutOfRange_Enum, nameof(mode))`, and
+     * `ArgumentOutOfRange_Enum` is *"Enum value was out of legal range."* — the same type, the same
+     * message and the same parameter name. Verified 2026-08-18 by ticket #2152.
      */
     [[noreturn]] void ThrowInvalidCompressionMode(const char* paramName);
 
     /** @brief Throws `ObjectDisposedException(typeName, "Cannot access a closed Stream.")`. */
     [[noreturn]] void ThrowStreamClosed(const char* typeName);
+
+    /**
+     * @brief Throws `InvalidOperationException("Reading from the compression stream is not supported.")`.
+     *
+     * .NET's `SR.CannotReadFromDeflateStream`, transcribed
+     * (`System.IO.Compression/src/Resources/Strings.resx:122`). The message names *the compression
+     * stream* rather than the concrete type, so all three wrappers share one string, exactly as
+     * .NET's three do — `GZipStream` and `ZLibStream` delegate to `DeflateStream` there.
+     */
+    [[noreturn]] void ThrowCannotReadFromCompressionStream();
+
+    /**
+     * @brief Throws `InvalidOperationException("Writing to the compression stream is not supported.")`.
+     *
+     * .NET's `SR.CannotWriteToDeflateStream` (`Strings.resx:125`).
+     */
+    [[noreturn]] void ThrowCannotWriteToCompressionStream();
+
+    /**
+     * @brief Rejects a read on a stream that was opened to **compress**.
+     *
+     * Ticket #2152 (SR-AUD post-audit, measured under #2148 and deliberately left then). Before it,
+     * a `Read` on an open Compress-mode stream returned **0** — a silent wrong answer a caller
+     * cannot distinguish from end-of-stream — and a `Write` on an open Decompress-mode stream
+     * surfaced zlib's `Z_STREAM_ERROR` as `IOException("DeflateStream: deflate error -2")`, naming
+     * an internal error code for a caller mistake. .NET guards both
+     * (`DeflateStream.cs:387-403`).
+     *
+     * **The position matters and is transcribed rather than chosen.** .NET runs
+     * `ValidateBufferArguments` in `Read(byte[], int, int)`, then `ReadCore` opens with
+     * `EnsureDecompressionMode(); EnsureNotDisposed();` — in that order (`DeflateStream.cs:284-309`).
+     * So the mode check sits **between** the argument validation and the disposed check, and a
+     * *disposed* Compress-mode stream reports the **mode** error, not `ObjectDisposedException`.
+     *
+     * `Flush()` deliberately gets **no** guard: .NET's opens with `EnsureNotDisposed()` alone and
+     * then no-ops for a Decompress-mode stream (`DeflateStream.cs:210-215`).
+     *
+     * @throws System::InvalidOperationException when @p mode is not `Decompress`.
+     */
+    inline void EnsureDecompressionMode(CompressionMode mode) {
+        if (mode != CompressionMode::Decompress) {
+            ThrowCannotReadFromCompressionStream();
+        }
+    }
+
+    /**
+     * @brief Rejects a write on a stream that was opened to **decompress**.
+     *
+     * The mirror of EnsureDecompressionMode; see that function for the ordering rule and for what
+     * each door did before ticket #2152.
+     *
+     * @throws System::InvalidOperationException when @p mode is not `Compress`.
+     */
+    inline void EnsureCompressionMode(CompressionMode mode) {
+        if (mode != CompressionMode::Compress) {
+            ThrowCannotWriteToCompressionStream();
+        }
+    }
 
     /**
      * @brief Rejects a `CompressionMode` outside the two members the enum declares.

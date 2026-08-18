@@ -136,6 +136,11 @@ SharpRuntime::intcs ZLibStream::Read(SharpRuntime::bytecs* buffer,
     if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
     // Ticket #2148: a closed stream used to answer 0 here, indistinguishable from "the
     // compressed stream is exhausted". Buffer arguments are validated first, as .NET does.
+    // Ticket #2152: .NET runs EnsureDecompressionMode BEFORE EnsureNotDisposed
+    // (DeflateStream.cs:305-308), so a disposed Compress-mode stream reports the MODE
+    // error rather than ObjectDisposedException. This used to return 0 -- a silent wrong
+    // answer a caller cannot tell from end-of-stream.
+    Detail::EnsureDecompressionMode(mode_);
     Detail::ThrowIfStreamClosed(state_ && state_->initialized, "ZLibStream");
     if (state_->finished || count == 0) return 0;
 
@@ -176,6 +181,11 @@ void ZLibStream::Write(const SharpRuntime::bytecs* buffer,
     if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
     // Ticket #2148: this is the door the finding names. A write to a closed stream used to
     // return silently, so the caller's bytes vanished with no diagnostic at all.
+    // Ticket #2152, the mirror of Read's guard and in the same position
+    // (DeflateStream.cs:569). This used to reach deflate() and surface zlib's
+    // Z_STREAM_ERROR as IOException("ZLibStream: deflate error -2"), naming an
+    // internal error code for what is a caller mistake.
+    Detail::EnsureCompressionMode(mode_);
     Detail::ThrowIfStreamClosed(state_ && state_->initialized, "ZLibStream");
     if (count == 0) return;
 

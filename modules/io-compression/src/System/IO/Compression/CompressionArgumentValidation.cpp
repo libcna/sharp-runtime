@@ -6,6 +6,7 @@
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ObjectDisposedException.hpp"
+#include "System/InvalidOperationException.hpp"
 
 #include <zlib.h>
 
@@ -35,6 +36,18 @@ namespace System::IO::Compression::Detail {
 
     void ThrowStreamClosed(const char* typeName) {
         throw System::ObjectDisposedException(typeName, "Cannot access a closed Stream.");
+    }
+
+    // Ticket #2152. Both messages are SR.CannotReadFromDeflateStream / SR.CannotWriteToDeflateStream
+    // transcribed from System.IO.Compression/src/Resources/Strings.resx:122,125. They name "the
+    // compression stream" rather than a concrete type, so all three wrappers share one string --
+    // which is what .NET does too, since GZipStream and ZLibStream delegate here.
+    void ThrowCannotReadFromCompressionStream() {
+        throw System::InvalidOperationException("Reading from the compression stream is not supported.");
+    }
+
+    void ThrowCannotWriteToCompressionStream() {
+        throw System::InvalidOperationException("Writing to the compression stream is not supported.");
     }
 
     intcs ResolveZLibStrategy(ZLibCompressionStrategy strategy) {
