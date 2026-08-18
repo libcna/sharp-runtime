@@ -7,6 +7,8 @@
 // (NEXT.md 2026-07-13 task: extend ticket 1717's NumberStyles-aware integer parser to also
 // support NumberStyles.Number and NumberStyles.Currency, not just .Integer/.HexNumber).
 #include <gtest/gtest.h>
+#include <string>
+#include <utility>
 #include "System/Byte.hpp"
 #include "System/Int16.hpp"
 #include "System/Int32.hpp"
@@ -508,4 +510,123 @@ TEST(IntegerAllowExponentTests, Fix2268_TheDecimalPointRowsAreUntouched) {
     EXPECT_THROW((void)Int32::Parse("123.5", N, nullptr), System::OverflowException);
     EXPECT_THROW((void)Int32::Parse("0.5", N, nullptr), System::OverflowException);
     EXPECT_THROW((void)Int32::Parse(".5", N, nullptr), System::OverflowException);
+}
+
+// ---------------------------------------------------------------------------
+// #2269 / SR-AUD-178 — the style itself is validated
+// ---------------------------------------------------------------------------
+//
+// .NET calls NumberFormatInfo.ValidateParseStyleInteger at EVERY integer style overload
+// (`NumberFormatInfo.cs:810-826`). This port validated NOTHING: measured before #2269,
+// Parse("42", (NumberStyles)0x8000) returned 42 and Parse("2A", NumberStyles::HexFloat) returned
+// hexadecimal 42 -- a style .NET rejects outright was silently honoured as if it were HexNumber.
+
+TEST(IntegerStyleValidationTests, Fix2269_AnUndefinedBitIsRejected) {
+    // Every bit above 0x400 is undefined. .NET's InvalidNumberStyles is ~(the defined set).
+    for (int bit : {0x800, 0x1000, 0x8000, 0x40000000}) {
+        SCOPED_TRACE(bit);
+        const auto style = static_cast<NumberStyles>(bit);
+        EXPECT_THROW((void)Int32::Parse("42", style, nullptr), System::ArgumentException);
+        SharpRuntime::intcs out = 0;
+        EXPECT_THROW((void)Int32::TryParse("42", style, nullptr, out), System::ArgumentException)
+            << "TryParse throws too: an invalid style is an ARGUMENT error, not a parse failure";
+    }
+
+    // ...and an undefined bit is rejected even when combined with a perfectly good style, so the
+    // check is on the BITS and not on whether the value happens to parse.
+    EXPECT_THROW((void)Int32::Parse("42", NumberStyles::Integer | static_cast<NumberStyles>(0x8000),
+                                    nullptr),
+                 System::ArgumentException);
+}
+
+TEST(IntegerStyleValidationTests, Fix2269_AHexOrBinarySpecifierAdmitsOnlyWhitespaceFlags) {
+    // The second rule: with AllowHexSpecifier or AllowBinarySpecifier set, the ONLY other bits
+    // permitted are AllowLeadingWhite and AllowTrailingWhite -- i.e. the style must be a subset
+    // of HexNumber or of BinaryNumber.
+    EXPECT_THROW((void)Int32::Parse("2A", NumberStyles::HexFloat, nullptr),
+                 System::ArgumentException)
+        << "HexFloat adds sign, decimal point and exponent to a hex specifier";
+    EXPECT_THROW((void)Int32::Parse("2A", NumberStyles::AllowHexSpecifier |
+                                              NumberStyles::AllowLeadingSign, nullptr),
+                 System::ArgumentException);
+    EXPECT_THROW((void)Int32::Parse("10", NumberStyles::AllowBinarySpecifier |
+                                              NumberStyles::AllowThousands, nullptr),
+                 System::ArgumentException);
+
+    // The permitted combinations still work, so the check is a subset test and not a blanket ban.
+    EXPECT_EQ(42, Int32::Parse("2A", NumberStyles::HexNumber, nullptr));
+    EXPECT_EQ(42, Int32::Parse("  2A  ", NumberStyles::AllowHexSpecifier |
+                                            NumberStyles::AllowLeadingWhite |
+                                            NumberStyles::AllowTrailingWhite, nullptr));
+    EXPECT_EQ(2, Int32::Parse("10", NumberStyles::BinaryNumber, nullptr));
+    EXPECT_EQ(42, Int32::Parse("42", NumberStyles::Any, nullptr));
+}
+
+TEST(IntegerStyleValidationTests, Fix2269_TheTwoMessagesAreDistinctAndOrderedAsDotNetOrdersThem) {
+    // .NET picks the message by testing `(value & InvalidNumberStyles) != 0` FIRST, so a style
+    // carrying BOTH an undefined bit and a hex specifier reports "undefined" -- not the hex
+    // message. Only an ordered check gets that right, and this row is what pins the order.
+    try {
+        (void)Int32::Parse("42", static_cast<NumberStyles>(0x8000), nullptr);
+        ADD_FAILURE() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_NE(std::string(e.what()).find("An undefined NumberStyles value is being used."),
+                  std::string::npos) << e.what();
+    }
+
+    try {
+        (void)Int32::Parse("2A", NumberStyles::HexFloat, nullptr);
+        ADD_FAILURE() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_NE(std::string(e.what()).find("With the AllowHexSpecifier or AllowBinarySpecifier"),
+                  std::string::npos) << e.what();
+    }
+
+    // Both bits at once: the UNDEFINED message wins.
+    try {
+        (void)Int32::Parse("2A", NumberStyles::AllowHexSpecifier |
+                                     static_cast<NumberStyles>(0x8000), nullptr);
+        ADD_FAILURE() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_NE(std::string(e.what()).find("An undefined NumberStyles value is being used."),
+                  std::string::npos)
+            << "the undefined test runs first, as NumberFormatInfo.cs:822 does: " << e.what();
+    }
+}
+
+TEST(IntegerStyleValidationTests, Fix2269_AllEightWrappersValidateAndFourLostTheirNoexcept) {
+    // .NET validates at EVERY integer overload. Four of this port's eight TryParse(style)
+    // overloads were noexcept and four were not -- so validating only the four that could throw
+    // would have left the port inconsistent with itself, and calling a throwing validator from a
+    // noexcept member would have been std::terminate rather than a diagnostic. All four lost
+    // their noexcept under SA-10.
+    const auto bad = static_cast<NumberStyles>(0x8000);
+    SharpRuntime::bytecs   b  = 0;
+    SharpRuntime::sbytecs  sb = 0;
+    short                  s16 = 0;
+    unsigned short         u16 = 0;
+    SharpRuntime::intcs    i32 = 0;
+    SharpRuntime::uintcs   u32 = 0;
+    SharpRuntime::longcs   i64 = 0;
+    SharpRuntime::ulongcs  u64 = 0;
+
+    EXPECT_THROW((void)Byte::TryParse("1", bad, nullptr, b), System::ArgumentException);
+    EXPECT_THROW((void)SByte::TryParse("1", bad, nullptr, sb), System::ArgumentException);
+    EXPECT_THROW((void)Int16::TryParse("1", bad, nullptr, s16), System::ArgumentException);
+    EXPECT_THROW((void)UInt16::TryParse("1", bad, nullptr, u16), System::ArgumentException);
+    EXPECT_THROW((void)Int32::TryParse("1", bad, nullptr, i32), System::ArgumentException);
+    EXPECT_THROW((void)UInt32::TryParse("1", bad, nullptr, u32), System::ArgumentException);
+    EXPECT_THROW((void)Int64::TryParse("1", bad, nullptr, i64), System::ArgumentException);
+    EXPECT_THROW((void)UInt64::TryParse("1", bad, nullptr, u64), System::ArgumentException);
+
+    // The four that lost it, asserted by specification rather than by behaviour -- a throwing
+    // noexcept function terminates, so no test could observe the difference any other way.
+    static_assert(!noexcept(Byte::TryParse(std::declval<const std::string&>(), bad, nullptr, b)),
+                  "#2269: Byte::TryParse(style) is no longer noexcept");
+    static_assert(!noexcept(SByte::TryParse(std::declval<const std::string&>(), bad, nullptr, sb)),
+                  "#2269: SByte::TryParse(style) is no longer noexcept");
+    static_assert(!noexcept(UInt32::TryParse(std::declval<const std::string&>(), bad, nullptr, u32)),
+                  "#2269: UInt32::TryParse(style) is no longer noexcept");
+    static_assert(!noexcept(Int64::TryParse(std::declval<const std::string&>(), bad, nullptr, i64)),
+                  "#2269: Int64::TryParse(style) is no longer noexcept");
 }

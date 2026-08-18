@@ -145,6 +145,10 @@ public:
     static bool TryParse(const std::string& s, System::Globalization::NumberStyles style,
                           const IFormatProvider* provider, SharpRuntime::intcs& result) {
         (void)provider;
+        // #2269: .NET validates the style at every integer overload
+        // (NumberFormatInfo.ValidateParseStyleInteger). An invalid style is an ARGUMENT error,
+        // so this THROWS rather than returning false -- .NET's TryParse throws for it too.
+        System::detail::IntegerNumberStylesParser::ValidateParseStyleInteger(style);
         using System::Globalization::NumberStyles;
         result = 0;
         if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {

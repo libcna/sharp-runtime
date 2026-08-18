@@ -132,8 +132,15 @@ namespace System {
          * C++ counterpart of .NET SByte.TryParse(string, NumberStyles, IFormatProvider, out sbyte).
          */
         static bool TryParse(const std::string& s, System::Globalization::NumberStyles style,
-                              const IFormatProvider* provider, sbytecs& result) noexcept {
+                              const IFormatProvider* provider, sbytecs& result) {
             (void)provider;
+            // #2269: the noexcept is GONE here, and it had to be. .NET validates the style at
+            // every integer overload (NumberFormatInfo.ValidateParseStyleInteger) and an invalid
+            // style is an ARGUMENT error, so TryParse throws for it -- calling a throwing
+            // validator from a noexcept member would have been std::terminate instead. Four of
+            // the eight wrappers were noexcept and four were not; validating only the four that
+            // could throw would have been worse than validating none.
+            System::detail::IntegerNumberStylesParser::ValidateParseStyleInteger(style);
             using System::Globalization::NumberStyles;
             result = 0;
             if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {

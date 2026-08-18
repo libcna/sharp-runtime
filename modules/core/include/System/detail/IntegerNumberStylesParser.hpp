@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <type_traits>
+#include "System/ArgumentException.hpp"
 #include <cctype>
 #include <cstdint>
 #include <string>
@@ -238,6 +240,62 @@ struct IntegerNumberStylesParser {
             ++i;
         }
         scan.scale += negativeExponent ? -exponent : exponent;
+    }
+
+    /**
+     * @brief .NET's `NumberFormatInfo.ValidateParseStyleInteger`, transcribed.
+     *
+     * `NumberFormatInfo.cs:810-826`:
+     *
+     * ```csharp
+     * if ((style & (InvalidNumberStyles | AllowHexSpecifier | AllowBinarySpecifier)) != 0 &&
+     *     (style & ~NumberStyles.HexNumber) != 0 &&
+     *     (style & ~NumberStyles.BinaryNumber) != 0)
+     * ```
+     *
+     * Two rules in one expression, and the port validated **neither** before ticket #2269 —
+     * measured, `Parse("42", (NumberStyles)0x8000)` returned 42 and
+     * `Parse("2A", NumberStyles::HexFloat)` returned hexadecimal 42:
+     *
+     *  - an **undefined** bit is rejected outright;
+     *  - `AllowHexSpecifier` or `AllowBinarySpecifier` may be combined only with
+     *    `AllowLeadingWhite`/`AllowTrailingWhite` — i.e. the style must be a subset of
+     *    `HexNumber` or of `BinaryNumber`.
+     *
+     * The **message** distinguishes the two, and the order matters: an undefined bit reports
+     * "undefined" even when a hex bit is also present, because .NET tests
+     * `(value & InvalidNumberStyles) != 0` first.
+     *
+     * @note Both messages are `Strings.resx` verbatim, and the exception is `ArgumentException`
+     *       with `paramName == "style"` — so `TryParse` **throws** here rather than returning
+     *       false. An invalid style is an argument error, not a parse failure, and .NET's
+     *       `TryParse` throws for it too.
+     */
+    static void ValidateParseStyleInteger(NumberStyles style) {
+        // NumberStyles has no operator~, and adding one to a public header for a detail check
+        // would be new public surface; the bit arithmetic is done on the underlying type instead.
+        using Bits = std::underlying_type_t<NumberStyles>;
+        constexpr Bits kDefined      = 0x000007FF;   // every bit .NET defines
+        constexpr Bits kHexNumber    = static_cast<Bits>(NumberStyles::HexNumber);
+        constexpr Bits kBinaryNumber = static_cast<Bits>(NumberStyles::BinaryNumber);
+        constexpr Bits kSpecifiers   = static_cast<Bits>(NumberStyles::AllowHexSpecifier) |
+                                        static_cast<Bits>(NumberStyles::AllowBinarySpecifier);
+
+        const Bits bits        = static_cast<Bits>(style);
+        const Bits invalidBits = bits & ~kDefined;
+
+        if ((invalidBits | (bits & kSpecifiers)) == 0) return;
+        if ((bits & ~kHexNumber) == 0) return;
+        if ((bits & ~kBinaryNumber) == 0) return;
+
+        if (invalidBits != 0) {
+            throw System::ArgumentException("An undefined NumberStyles value is being used.", "style");
+        }
+        throw System::ArgumentException(
+            "With the AllowHexSpecifier or AllowBinarySpecifier bit set in the enum bit field, the "
+            "only other valid bits that can be combined into the enum value must be "
+            "AllowLeadingWhite and AllowTrailingWhite.",
+            "style");
     }
 
     /**
