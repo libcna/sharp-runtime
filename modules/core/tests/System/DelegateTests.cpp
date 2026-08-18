@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/Delegate.hpp"
 #include "System/NotImplementedException.hpp"
 
@@ -303,4 +304,112 @@ TEST(DelegateTests, GetHashCode_MulticastIsStable_AndEmptyIsTheDocumentedZero) {
 TEST(DelegateTests, GetTargetProperty_AlwaysNull) {
     auto d = std::make_shared<Delegate>([]{});
     EXPECT_EQ(d->getTargetProperty(), nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// #2271 / SR-AUD-118 — a composed delegate carries its concrete type
+// ---------------------------------------------------------------------------
+//
+// .NET's CombineImpl (`MulticastDelegate.CoreCLR.cs:212-220`) and Delegate.Remove
+// (`Delegate.cs:158-169`) both refuse operands whose runtime types differ, with
+// ArgumentException(SR.Arg_DlgtTypeMis) — "Delegates must be of the same type."
+//
+// THE FINDING'S TWO HALVES ARE INSEPARABLE, and these tests are why. A same-type guard alone
+// would break the chained form Combine(Combine(a, b), c): step one returns a multicast Delegate,
+// whose own typeid is `Delegate` rather than the operands' type, so step two would compare
+// `Delegate` against `C` and reject a combination .NET accepts. The repair reads a multicast's
+// type from its ENTRIES — which Combine itself guarantees are uniform — so no data member was
+// needed and sizeof(Delegate) is unchanged.
+
+namespace {
+
+class AlphaDelegate : public Delegate {
+public:
+    using Delegate::Delegate;
+};
+
+class BetaDelegate : public Delegate {
+public:
+    using Delegate::Delegate;
+};
+
+}  // namespace
+
+TEST(DelegateTypeIdentityTests, Fix2271_CombiningDifferentConcreteTypesIsRejected) {
+    auto alpha = std::make_shared<AlphaDelegate>([] {});
+    auto beta  = std::make_shared<BetaDelegate>([] {});
+
+    EXPECT_THROW((void)Delegate::Combine(alpha, beta), System::ArgumentException);
+    EXPECT_THROW((void)Delegate::Combine(beta, alpha), System::ArgumentException);
+
+    try {
+        (void)Delegate::Combine(alpha, beta);
+        ADD_FAILURE() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        // .NET's own sentence, transcribed rather than paraphrased.
+        EXPECT_STREQ(e.what(), "Delegates must be of the same type.");
+    }
+}
+
+TEST(DelegateTypeIdentityTests, Fix2271_TheChainedFormStillWorks) {
+    // THE ROW THE FINDING SAID COULD NOT BE SATISFIED BY A GUARD ALONE. Step one returns a
+    // multicast whose own typeid is `Delegate`; if that were the type compared in step two, this
+    // would throw.
+    int calls = 0;
+    auto a = std::make_shared<AlphaDelegate>([&] { ++calls; });
+    auto b = std::make_shared<AlphaDelegate>([&] { ++calls; });
+    auto c = std::make_shared<AlphaDelegate>([&] { ++calls; });
+
+    std::shared_ptr<Delegate> ab;
+    ASSERT_NO_THROW(ab = Delegate::Combine(a, b));
+    std::shared_ptr<Delegate> abc;
+    ASSERT_NO_THROW(abc = Delegate::Combine(ab, c));
+    ASSERT_NE(nullptr, abc);
+    abc->Invoke();
+    EXPECT_EQ(3, calls);
+
+    // ...and the composed delegate really does carry the type, rather than merely tolerating the
+    // second step: adding a foreign operand to it is still refused.
+    auto foreign = std::make_shared<BetaDelegate>([] {});
+    EXPECT_THROW((void)Delegate::Combine(abc, foreign), System::ArgumentException);
+    EXPECT_THROW((void)Delegate::Combine(foreign, abc), System::ArgumentException);
+}
+
+TEST(DelegateTypeIdentityTests, Fix2271_RemoveAndRemoveAllRefuseAForeignType) {
+    // `Delegate.cs:166-167` applies the SAME check to Remove, and RemoveAll inherits it because
+    // it is defined in terms of Remove — in .NET and here alike.
+    auto a = std::make_shared<AlphaDelegate>([] {});
+    auto b = std::make_shared<AlphaDelegate>([] {});
+    auto combined = Delegate::Combine(a, b);
+    auto foreign = std::make_shared<BetaDelegate>([] {});
+
+    EXPECT_THROW((void)Delegate::Remove(combined, foreign), System::ArgumentException);
+    EXPECT_THROW((void)Delegate::RemoveAll(combined, foreign), System::ArgumentException);
+
+    // The same-type removal is untouched.
+    auto afterRemove = Delegate::Remove(combined, b);
+    ASSERT_NE(nullptr, afterRemove);
+    EXPECT_TRUE(afterRemove->getHasSingleTargetProperty());
+}
+
+TEST(DelegateTypeIdentityTests, Fix2271_TheNullOrderingIsDotNetsAndTheBaseTypeIsUnaffected) {
+    // .NET checks the types INSIDE CombineImpl, which a null `a` never reaches, so
+    // Combine(nullptr, b) returns b unchecked. Remove's check likewise runs after both null
+    // tests. The ordering is deliberate and asserted so it cannot drift.
+    auto beta = std::make_shared<BetaDelegate>([] {});
+    EXPECT_EQ(beta, Delegate::Combine(nullptr, beta));
+    EXPECT_EQ(beta, Delegate::Combine(beta, nullptr));
+    EXPECT_EQ(nullptr, Delegate::Remove(nullptr, beta));
+    EXPECT_EQ(beta, Delegate::Remove(beta, nullptr));
+
+    // Plain Delegate instances all share one type, so every pre-existing combination keeps
+    // working. That is the whole of the narrowing: it bites only across two DIFFERENT derived
+    // types, which is exactly .NET's rule.
+    int calls = 0;
+    auto p = std::make_shared<Delegate>([&] { ++calls; });
+    auto q = std::make_shared<Delegate>([&] { ++calls; });
+    auto pq = Delegate::Combine(p, q);
+    ASSERT_NE(nullptr, pq);
+    pq->Invoke();
+    EXPECT_EQ(2, calls);
 }

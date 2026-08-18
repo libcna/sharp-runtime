@@ -2,8 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Delegate.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/NotImplementedException.hpp"
 #include <functional>
+#include <typeinfo>
 #include <optional>
 
 namespace System {
@@ -122,10 +124,39 @@ std::any Delegate::DynamicInvoke(const std::vector<std::any>&) {
     throw NotImplementedException("DynamicInvoke is not supported in sharp-runtime");
 }
 
+namespace {
+
+// #2271 / SR-AUD-118. .NET's Delegate carries its own runtime type, and both CombineImpl
+// (`MulticastDelegate.CoreCLR.cs:212-220`) and Remove (`Delegate.cs:158-169`) refuse operands
+// whose types differ, with ArgumentException(SR.Arg_DlgtTypeMis).
+//
+// THE TWO HALVES OF THE FINDING ARE INSEPARABLE, and this function is why. A same-type guard
+// alone would break the chained form Combine(Combine(a, b), c): step one returns a multicast
+// Delegate, whose own `typeid` is `Delegate` and not the operands' type, so step two would
+// compare `Delegate` against `C` and reject a combination .NET accepts.
+//
+// NO DATA MEMBER IS NEEDED TO CARRY THE TYPE. A multicast delegate's type is the type of its
+// entries -- which Combine itself guarantees are all the same -- so it can be READ from the list
+// rather than stored beside it. A leaf delegate's type is simply its own. `sizeof(Delegate)` is
+// unchanged and this is not an SA-3 change.
+const std::type_info& effectiveDelegateType(const Delegate& d,
+                                            const std::vector<std::shared_ptr<Delegate>>& list) {
+    return list.empty() ? typeid(d) : typeid(*list.front());
+}
+
+}  // namespace
+
 std::shared_ptr<Delegate> Delegate::Combine(
         std::shared_ptr<Delegate> a, std::shared_ptr<Delegate> b) {
+    // .NET checks the types inside CombineImpl, which a null `a` never reaches -- so
+    // Combine(nullptr, b) returns b unchecked, and this ordering is deliberate.
     if (!a) return b;
     if (!b) return a;
+
+    if (effectiveDelegateType(*a, a->invocationList_) !=
+        effectiveDelegateType(*b, b->invocationList_)) {
+        throw System::ArgumentException("Delegates must be of the same type.");
+    }
 
     std::vector<std::shared_ptr<Delegate>> combined;
 
@@ -151,6 +182,14 @@ std::shared_ptr<Delegate> Delegate::Remove(
         std::shared_ptr<Delegate> source, std::shared_ptr<Delegate> value) {
     if (!source) return nullptr;
     if (!value)  return source;
+
+    // `Delegate.cs:166-167`: the SAME check as Combine's, and it runs AFTER the two null tests.
+    // RemoveAll inherits it, because it is defined in terms of Remove here exactly as it is in
+    // .NET (`Delegate.cs:172-183`).
+    if (effectiveDelegateType(*source, source->invocationList_) !=
+        effectiveDelegateType(*value, value->invocationList_)) {
+        throw System::ArgumentException("Delegates must be of the same type.");
+    }
 
     const auto& sl = source->invocationList_;
     if (sl.empty()) {
