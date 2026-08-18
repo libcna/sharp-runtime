@@ -28,29 +28,29 @@ namespace System {
      * constructor; the default is ExecutionAndPublication (exactly one thread
      * runs the factory; all others block until it completes).
      *
-     * Deviation from .NET (1/2) - PublicationOnly is serialized: in real PublicationOnly
-     * mode, multiple threads may run the factory concurrently and race to publish, with
-     * the losers' results discarded. This port instead serializes PublicationOnly behind
-     * a mutex (a single factory call at a time) to avoid data races that would be
-     * undefined behavior in C++; the observable contract that matters for game code - a
-     * failed attempt doesn't poison the instance, and the next access retries - is
-     * preserved.
+     * PublicationOnly matches .NET as of ticket #2238, and BOTH of the deviations this
+     * doc-comment used to record are gone. They are described here in the past tense because
+     * the change REVERSED a guarantee this class advertised for its whole life, and a reader
+     * who remembers the old contract needs to be told, not left to discover it.
      *
-     * Deviation from .NET (2/2) - PublicationOnly also rejects recursive Value(): a
-     * factory that re-enters getValueProperty()/Value() on the *same* instance gets
-     * System::InvalidOperationException in ALL THREE modes. .NET raises that exception
-     * for None and ExecutionAndPublication only; its PublicationOnly does not detect
-     * recursion at all - the nested access simply invokes the factory again, and the
-     * first publication wins. This port cannot do that as written: the recursive call
-     * would re-lock publicationOnlyMutex_, and re-locking a non-recursive std::mutex from
-     * the thread that already owns it is undefined behavior
-     * ([thread.mutex.requirements.mutex]). Implementing .NET's rule needs either
-     * publish-only locking - which reverses deviation (1/2) above and lets factories run
-     * concurrently again - or a same-thread reentrancy path with a first-publication-wins
-     * discard rule; both also allow an unconditionally recursive factory to recurse
-     * without bound, i.e. they trade a clean catchable exception for stack exhaustion.
-     * The restriction is therefore deliberate and permanent unless ticket #2238 decides
-     * otherwise; SR-AUD-066, docs/CoreLazyThreadSafetyModeFamilyPlan.md section 4.2.
+     * WAS: PublicationOnly serialized the factory behind a mutex, so it ran at most once, and a
+     * factory that re-entered Value() on the same instance got InvalidOperationException in all
+     * three modes. NOW: the factory runs with no lock held, exactly as .NET's
+     * PublicationOnlyViaFactory does (`Lazy.cs:351-378`), the first thread to publish wins, and
+     * every loser DISCARDS the value it computed.
+     *
+     * Two consequences follow, and both are the price of parity rather than oversights:
+     *
+     *  - **A PublicationOnly factory may now run concurrently on several threads**, and may run
+     *    more than once. That is what PublicationOnly MEANS in .NET. If your factory has side
+     *    effects, or is expensive, use ExecutionAndPublication -- which is still the default and
+     *    still runs the factory exactly once.
+     *  - **A recursive PublicationOnly factory now recurses.** It no longer receives a clean
+     *    catchable InvalidOperationException; an unconditionally recursive factory will exhaust
+     *    the stack, precisely as it does in .NET. The guard remains in force for None and
+     *    ExecutionAndPublication, where .NET also raises it and where the alternative would be
+     *    undefined behaviour (recursive std::call_once on one flag from one thread).
+     *
      * Recursion into a *different* Lazy<T> instance is unaffected and always legal.
      *
      * Note: Lazy<T> is not copyable or movable because it owns synchronization
@@ -269,13 +269,26 @@ namespace System {
          * @return Const reference to the initialized value.
          * @throws Any exception thrown by the factory (propagated to the caller), or
          *         InvalidOperationException if the factory recursively accesses this
-         *         same Value() while it is already running. Note that .NET raises that
-         *         exception for None and ExecutionAndPublication only; this port raises it
-         *         for PublicationOnly too, deliberately - see the class doc-comment's
-         *         deviation (2/2), SR-AUD-066 and ticket #2238.
+         *         same Value() while it is already running, in None or ExecutionAndPublication
+         *         mode. **PublicationOnly does not raise it** and never did in .NET: since
+         *         ticket #2238 a recursive PublicationOnly factory simply runs again, and an
+         *         unconditionally recursive one exhausts the stack. SR-AUD-066.
          */
         [[nodiscard]] const T& getValueProperty() const {
-            checkNotReentrant();
+            // #2238: the reentrancy guard applies to the two modes .NET applies it to, and NOT
+            // to PublicationOnly, whose factory now runs unlocked and therefore has no lock to
+            // re-enter. `requireValidMode` guarantees `mode_` is one of the three enumerators,
+            // so this test names PublicationOnly exactly.
+            //
+            // THIS CONDITION IS REDUNDANT TODAY, AND SAYS SO RATHER THAN LOOKING LOAD-BEARING.
+            // `creatingThreadId_` is written only by `initValue`, which the PublicationOnly arm
+            // no longer calls, so `checkNotReentrant()` could not fire on that path even if it
+            // ran. Mutation M1 of #2238 -- deleting this test -- is therefore NOT CAUGHT by any
+            // test, and the ticket records that instead of claiming coverage. It is kept because
+            // it states the contract at the place the contract is decided, and because it keeps
+            // the guard correct if a future change gives PublicationOnly a reason to record the
+            // creating thread again.
+            if (mode_ != LazyThreadSafetyMode::PublicationOnly) checkNotReentrant();
             switch (mode_) {
                 case LazyThreadSafetyMode::ExecutionAndPublication: {
                     std::call_once(onceflag_, [this] {
@@ -300,8 +313,31 @@ namespace System {
                 // mean inventing a behaviour for a state construction forbids.
                 case LazyThreadSafetyMode::PublicationOnly:
                 default: {
-                    std::lock_guard<std::mutex> lock(publicationOnlyMutex_);
-                    if (!isValueCreated_) initValue(/*cacheFaults=*/false);
+                    // .NET's PublicationOnlyViaFactory / PublicationOnly
+                    // (`Lazy.cs:351-378`), transcribed. THE FACTORY RUNS WITH NO LOCK HELD.
+                    // .NET calls `factory()` and only then attempts an
+                    // `Interlocked.CompareExchange` on the state; a thread that loses the
+                    // exchange DISCARDS the value it computed.
+                    if (isValueCreated_.load(std::memory_order_acquire)) return *value_;
+
+                    // Deliberately outside the lock, and deliberately not fault-cached: in
+                    // PublicationOnly a failed attempt does not poison the instance, so the next
+                    // access simply tries again.
+                    T candidate = factory_();
+
+                    {
+                        std::lock_guard<std::mutex> lock(publicationOnlyMutex_);
+                        if (!isValueCreated_.load(std::memory_order_relaxed)) {
+                            value_ = std::move(candidate);
+                            // Release, paired with the acquire above, so a thread that observes
+                            // the flag also observes the value. `value_` is written exactly once
+                            // -- the guard makes every later winner a no-op -- so the reference
+                            // returned below can never be rewritten under a reader.
+                            isValueCreated_.store(true, std::memory_order_release);
+                        }
+                        // ...and `candidate` is destroyed here if we lost. That discard IS the
+                        // contract, not a leak.
+                    }
                     return *value_;
                 }
             }

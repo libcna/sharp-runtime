@@ -2,6 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <atomic>
+#include <chrono>
+#include <thread>
+#include <vector>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -338,16 +342,15 @@ TEST(LazyTests, InvalidMode_ThrowingConstructorLeavesNothingBehind) {
     SUCCEED();
 }
 
-// --- PublicationOnly reentrancy is a DELIBERATE, documented deviation (#2237 / SR-AUD-066) ---
+// --- #2238: PublicationOnly now matches .NET, and BOTH old deviations are gone ---
 //
-// .NET raises InvalidOperationException for a recursive Value() in None and
-// ExecutionAndPublication only; its PublicationOnly does not detect recursion at all.
-// This port raises it in all three modes because the recursive call would otherwise
-// re-lock the non-recursive publicationOnlyMutex_ -- undefined behaviour per
-// [thread.mutex.requirements.mutex] -- and because both routes to .NET's behaviour let an
-// unconditionally recursive factory recurse without bound. These tests pin the deviation
-// so it cannot move silently in either direction; ticket #2238 is the reopening path.
-// See docs/CoreLazyThreadSafetyModeFamilyPlan.md section 4.2.
+// These tests replace the #2237 deviation pins rather than extending them. .NET raises
+// InvalidOperationException for a recursive Value() in None and ExecutionAndPublication only;
+// its PublicationOnly does not detect recursion at all (`Lazy.cs:351-378` -- the factory is
+// called with no lock held and the publish is an Interlocked.CompareExchange, so there is
+// nothing for a nested call to re-enter). The user decided on 2026-08-18 to align, having been
+// told the price first: a PublicationOnly factory may again run CONCURRENTLY and MORE THAN ONCE,
+// and a recursive one exhausts the stack instead of raising.
 
 namespace {
 // Builds a Lazy<int> whose factory re-enters getValueProperty() on the same instance.
@@ -359,25 +362,76 @@ void expectRecursionRejected(LazyThreadSafetyMode mode) {
 }
 } // namespace
 
-TEST(LazyTests, RecursiveValueAccess_RejectedInAllThreeModes) {
+TEST(LazyTests, Fix2238_RecursionIsRejectedInTheTwoModesDotNetRejectsIt) {
+    // Unchanged, and it must stay unchanged: in these two modes the guard is not a policy
+    // choice, it is what stops undefined behaviour. A recursive std::call_once on one flag from
+    // one thread is UB, and .NET raises here too.
     expectRecursionRejected(LazyThreadSafetyMode::None);
     expectRecursionRejected(LazyThreadSafetyMode::ExecutionAndPublication);
-    // The deliberate deviation: .NET would invoke the factory again here.
-    expectRecursionRejected(LazyThreadSafetyMode::PublicationOnly);
 }
 
-TEST(LazyTests, RecursiveValueAccess_MessageIsStable) {
-    Lazy<int>* self = nullptr;
-    Lazy<int> lz([&self]() -> int { return self->getValueProperty(); },
-                 LazyThreadSafetyMode::PublicationOnly);
+TEST(LazyTests, Fix2238_APublicationOnlyFactoryMayRecurse) {
+    // THE HEADLINE REVERSAL. Before #2238 this raised InvalidOperationException; .NET simply
+    // runs the factory again. The recursion is BOUNDED here on purpose -- an unconditionally
+    // recursive factory now exhausts the stack, in this port and in .NET alike, so a test that
+    // wrote one would hang the suite rather than assert anything. That is stated in the class
+    // doc-comment instead of demonstrated.
+    Lazy<int>* self  = nullptr;
+    int        depth = 0;
+    Lazy<int>  lz([&self, &depth]() -> int {
+                      if (++depth < 3) return self->getValueProperty() + 1;
+                      return 100;
+                  },
+                  LazyThreadSafetyMode::PublicationOnly);
     self = &lz;
-    try {
-        (void)lz.getValueProperty();
-        FAIL() << "expected InvalidOperationException";
-    } catch (const System::InvalidOperationException& e) {
-        EXPECT_STREQ(e.what(),
-                     "ValueFactory attempted to access the Value property of this instance.");
-    }
+
+    // The innermost call publishes 100 first; every outer frame then LOSES the publication race
+    // against a value that is already there and discards its own result. So the observable value
+    // is the innermost one, not the outermost -- first publication wins, exactly as .NET's
+    // CompareExchange decides it.
+    EXPECT_EQ(100, lz.getValueProperty());
+    EXPECT_EQ(3, depth) << "the factory really did run three times";
+    EXPECT_TRUE(lz.getIsValueCreatedProperty());
+}
+
+TEST(LazyTests, Fix2238_TheLosersResultIsDiscardedNotPublished) {
+    // First publication wins. A second concurrent-shaped attempt cannot overwrite a published
+    // value, which is what makes the discard safe: `value_` is written exactly once, so the
+    // reference handed to a caller can never be rewritten underneath it.
+    int calls = 0;
+    Lazy<int> lz([&calls] { return ++calls; }, LazyThreadSafetyMode::PublicationOnly);
+    EXPECT_EQ(1, lz.getValueProperty());
+    EXPECT_EQ(1, lz.getValueProperty());
+    EXPECT_EQ(1, calls) << "a published value must short-circuit before the factory";
+}
+
+TEST(LazyTests, Fix2238_ConcurrentFactoriesAreAllowedAndOnlyOneValueSurvives) {
+    // The other half of the reversal, and the one the old serialization was protecting against.
+    // The factory may now run on several threads AT ONCE. Every thread must observe the SAME
+    // value -- whichever won -- and no thread may observe a torn or absent one.
+    std::atomic<int> started{0};
+    std::atomic<int> ticket{0};
+    Lazy<int> lz([&started, &ticket]() -> int {
+                     started.fetch_add(1, std::memory_order_relaxed);
+                     // Hold long enough that the other threads are genuinely inside the factory
+                     // at the same time; under the old mutex this was impossible by construction.
+                     std::this_thread::sleep_for(std::chrono::milliseconds(30));
+                     return ticket.fetch_add(1, std::memory_order_relaxed) + 1;
+                 },
+                 LazyThreadSafetyMode::PublicationOnly);
+
+    constexpr int kThreads = 4;
+    std::vector<int>         observed(kThreads, -1);
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+    for (int i = 0; i < kThreads; ++i)
+        threads.emplace_back([&lz, &observed, i] { observed[i] = lz.getValueProperty(); });
+    for (auto& t : threads) t.join();
+
+    EXPECT_GT(started.load(), 1) << "the factory was still serialized -- #2238 did not land";
+    for (int i = 0; i < kThreads; ++i) EXPECT_EQ(observed[0], observed[i]) << "thread " << i;
+    EXPECT_EQ(observed[0], lz.getValueProperty());
+    EXPECT_TRUE(lz.getIsValueCreatedProperty());
 }
 
 TEST(LazyTests, PublicationOnly_NonRecursiveFactory_IsUnaffected) {
@@ -389,21 +443,19 @@ TEST(LazyTests, PublicationOnly_NonRecursiveFactory_IsUnaffected) {
     EXPECT_TRUE(lz.getIsValueCreatedProperty());
 }
 
-TEST(LazyTests, PublicationOnly_FaultStillRetries_AfterARejectedRecursion) {
-    // The reentrancy guard must not poison the instance: PublicationOnly does not cache
-    // faults, so a later non-recursive access still succeeds.
-    Lazy<int>* self = nullptr;
-    bool recurse = true;
-    Lazy<int> lz([&self, &recurse]() -> int {
-                     if (recurse) return self->getValueProperty();
+TEST(LazyTests, Fix2238_AThrowingPublicationOnlyFactoryStillDoesNotPoisonTheInstance) {
+    // Unchanged by #2238 and re-pinned because the code around it moved: PublicationOnly does
+    // not cache faults, so a failed attempt leaves the instance retryable.
+    bool fail = true;
+    Lazy<int> lz([&fail]() -> int {
+                     if (fail) throw System::InvalidOperationException("boom");
                      return 42;
                  },
                  LazyThreadSafetyMode::PublicationOnly);
-    self = &lz;
     EXPECT_THROW((void)lz.getValueProperty(), System::InvalidOperationException);
     EXPECT_FALSE(lz.getIsValueCreatedProperty());
-    recurse = false;
-    EXPECT_EQ(lz.getValueProperty(), 42);
+    fail = false;
+    EXPECT_EQ(42, lz.getValueProperty());
     EXPECT_TRUE(lz.getIsValueCreatedProperty());
 }
 
