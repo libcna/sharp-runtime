@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <gtest/gtest.h>
+#include <optional>
 #include "System/ArgumentException.hpp"
 #include "System/Environment.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
@@ -44,19 +45,21 @@ TEST(EnvironmentTests, GetCurrentDirectory_ReturnsNonEmptyString) {
 
 TEST(EnvironmentTests, GetEnvironmentVariable_KnownVar_DoesNotThrow) {
     // PATH is present on Linux/macOS; just verify no exception
-    std::string val = Environment::GetEnvironmentVariable("PATH");
-    (void)val;
+    const std::optional<std::string> val = Environment::GetEnvironmentVariable("PATH");
+    EXPECT_TRUE(val.has_value()) << "PATH is expected to be present";
 }
 
-TEST(EnvironmentTests, GetEnvironmentVariable_NonExistent_ReturnsEmpty) {
-    std::string val = Environment::GetEnvironmentVariable("SHARP_RUNTIME_NONEXISTENT_VAR_XYZ_12345");
-    EXPECT_TRUE(val.empty());
+TEST(EnvironmentTests, GetEnvironmentVariable_NonExistent_ReturnsNullopt) {
+    // #2313: nullopt, not "". The old assertion could not tell an absent variable from a present
+    // empty one, which is the whole finding.
+    EXPECT_EQ(std::nullopt,
+              Environment::GetEnvironmentVariable("SHARP_RUNTIME_NONEXISTENT_VAR_XYZ_12345"));
 }
 
 // getenv("") is unspecified by POSIX; this must not crash and must behave like "not found",
 // matching real .NET's GetEnvironmentVariable("") (returns null, no exception).
-TEST(EnvironmentTests, GetEnvironmentVariable_EmptyName_ReturnsEmpty) {
-    EXPECT_TRUE(Environment::GetEnvironmentVariable("").empty());
+TEST(EnvironmentTests, GetEnvironmentVariable_EmptyName_ReturnsNullopt) {
+    EXPECT_EQ(std::nullopt, Environment::GetEnvironmentVariable(""));
 }
 
 // ---------------------------------------------------------------------------
@@ -148,39 +151,66 @@ TEST(EnvironmentTests, SetGet_RoundTrip) {
     EXPECT_EQ(Environment::GetEnvironmentVariable("SHARP_TEST_VAR"), "hello");
 }
 
-// GetEnvironmentVariable alone cannot pin removal: it returns "" for an absent variable
-// *and* for one that is present with an empty value, so the assertion this test used to
-// make held whether the key was removed, was left present-but-empty, or had never been
-// set at all. GetEnvironmentVariables() is the one public channel that tells those states
-// apart -- splitEnvEntry keeps an entry whose value is empty -- so the removal this test
-// is named for is asserted there, and the getter assertion is kept beside it as a
-// statement about the getter. Whether an empty value should delete at all is SR-AUD-106
-// and is deliberately NOT settled here (docs/CoreEnvironmentEmptyValuePlan.md, #2313).
-TEST(EnvironmentTests, Set_Empty_RemovesVar) {
+// #2313 RESOLVED, AND IT REVERSED BOTH TESTS BELOW.
+//
+// The old comment here recorded the defect precisely: "GetEnvironmentVariable alone cannot pin
+// removal: it returns \"\" for an absent variable *and* for one that is present with an empty
+// value". That is fixed -- the getter returns std::optional<std::string> -- and the SETTER's rule
+// changed with it. `Environment.Variables.Unix.cs:49-57` removes ONLY on a null value and stores
+// everything else, empty strings included, and there is no empty-to-null conversion on the read
+// side either.
+TEST(EnvironmentTests, Fix2313_AnEmptyValueIsStoredAndOnlyNulloptRemoves) {
     Environment::SetEnvironmentVariable("SHARP_TEST_VAR2", "value");
     ASSERT_EQ(Environment::GetEnvironmentVariables().count("SHARP_TEST_VAR2"), std::size_t(1));
+
+    // THE BEHAVIOUR THAT REVERSED. This used to delete the variable.
     Environment::SetEnvironmentVariable("SHARP_TEST_VAR2", "");
+    EXPECT_EQ(Environment::GetEnvironmentVariables().count("SHARP_TEST_VAR2"), std::size_t(1))
+        << "an empty value must STORE, not remove";
+    EXPECT_EQ(std::optional<std::string>(""), Environment::GetEnvironmentVariable("SHARP_TEST_VAR2"))
+        << "present with an empty value";
+
+    // ...and the removal that used to be spelled "" is now spelled nullopt.
+    Environment::SetEnvironmentVariable("SHARP_TEST_VAR2", std::nullopt);
     EXPECT_EQ(Environment::GetEnvironmentVariables().count("SHARP_TEST_VAR2"), std::size_t(0));
-    EXPECT_TRUE(Environment::GetEnvironmentVariable("SHARP_TEST_VAR2").empty());
+    EXPECT_EQ(std::nullopt, Environment::GetEnvironmentVariable("SHARP_TEST_VAR2"));
+}
+
+TEST(EnvironmentTests, Fix2313_TheGetterTellsAbsentFromPresentEmpty) {
+    // The single assertion the whole finding is about, and the one the old suite explicitly could
+    // not make: these two states must now DIFFER.
+    Environment::SetEnvironmentVariable("SHARP_PRESENT_EMPTY_2313", "");
+    Environment::SetEnvironmentVariable("SHARP_ABSENT_2313", std::nullopt);
+
+    EXPECT_EQ(std::optional<std::string>(""),
+              Environment::GetEnvironmentVariable("SHARP_PRESENT_EMPTY_2313"));
+    EXPECT_EQ(std::nullopt, Environment::GetEnvironmentVariable("SHARP_ABSENT_2313"));
+    EXPECT_NE(Environment::GetEnvironmentVariable("SHARP_PRESENT_EMPTY_2313"),
+              Environment::GetEnvironmentVariable("SHARP_ABSENT_2313"))
+        << "these were indistinguishable before #2313";
+
+    Environment::SetEnvironmentVariable("SHARP_PRESENT_EMPTY_2313", std::nullopt);
 }
 
 #ifndef _WIN32
-// The state the public setter cannot create is nevertheless representable by the platform
-// and IS surfaced by GetEnvironmentVariables(), which is what makes the SR-AUD-106
-// decision observable either way. Installed out of band, an empty value survives with an
-// empty string; the single-name getter still answers "" for it and for an absent name
-// alike, so neither this test nor the one above relies on that getter to tell them apart.
-// POSIX-only: the Windows CRT removes a variable set to "", so the state is unreachable
-// there through _putenv_s as well.
-TEST(EnvironmentTests, PresentEmptyValue_IsRepresentableButGetterCannotDistinguishIt) {
+// The out-of-band route is kept because it proves the PLATFORM's state, independently of this
+// port's setter -- so if the setter ever regressed to deleting, this test would still hold and
+// the one above would be the one to fail. POSIX-only: the Windows CRT's _putenv_s removes a
+// variable set to "", which is why the setter now goes through SetEnvironmentVariableA there.
+TEST(EnvironmentTests, Fix2313_APlatformInstalledEmptyValueIsAlsoDistinguished) {
     ASSERT_EQ(::setenv("SHARP_PRESENT_EMPTY", "", 1), 0);
     const auto vars = Environment::GetEnvironmentVariables();
     const auto it = vars.find("SHARP_PRESENT_EMPTY");
     ASSERT_NE(it, vars.end());
     EXPECT_TRUE(it->second.empty());
     EXPECT_EQ(vars.count("SHARP_ABSENT_NEVER_SET"), std::size_t(0));
-    EXPECT_EQ(Environment::GetEnvironmentVariable("SHARP_PRESENT_EMPTY"),
+
+    // This assertion is INVERTED. It used to be EXPECT_EQ, pinning that the getter could not tell
+    // them apart.
+    EXPECT_NE(Environment::GetEnvironmentVariable("SHARP_PRESENT_EMPTY"),
               Environment::GetEnvironmentVariable("SHARP_ABSENT_NEVER_SET"));
+    EXPECT_EQ(std::optional<std::string>(""),
+              Environment::GetEnvironmentVariable("SHARP_PRESENT_EMPTY"));
     ASSERT_EQ(::unsetenv("SHARP_PRESENT_EMPTY"), 0);
 }
 #endif // !_WIN32
@@ -270,8 +300,8 @@ TEST(EnvironmentTests, GetFolderPath_Desktop_NonEmpty) {
 // ---------------------------------------------------------------------------
 
 TEST(EnvironmentTests, GetEnvironmentVariable_WithTarget_SameAsWithout) {
-    std::string a = Environment::GetEnvironmentVariable("PATH");
-    std::string b = Environment::GetEnvironmentVariable("PATH", System::EnvironmentVariableTarget::Process);
+    const auto a = Environment::GetEnvironmentVariable("PATH");
+    const auto b = Environment::GetEnvironmentVariable("PATH", System::EnvironmentVariableTarget::Process);
     EXPECT_EQ(a, b);
 }
 
@@ -662,14 +692,18 @@ TEST(EnvironmentTests, Version_RevisionIsUndefinedAndCannotBeRequested) {
 
 TEST(EnvironmentTests, GetEnvironmentVariable_UserTarget_ReturnsEmpty) {
     Environment::SetEnvironmentVariable("SHARP_TARGET_NOOP_VAR", "process-value");
-    EXPECT_TRUE(Environment::GetEnvironmentVariable(
-        "SHARP_TARGET_NOOP_VAR", System::EnvironmentVariableTarget::User).empty());
+    // #2313: nullopt, not "". A non-Process target has no store here, so nothing is PRESENT in
+    // it -- reporting "" would claim the variable exists and is empty.
+    EXPECT_EQ(std::nullopt, Environment::GetEnvironmentVariable(
+        "SHARP_TARGET_NOOP_VAR", System::EnvironmentVariableTarget::User));
 }
 
 TEST(EnvironmentTests, GetEnvironmentVariable_MachineTarget_ReturnsEmpty) {
     Environment::SetEnvironmentVariable("SHARP_TARGET_NOOP_VAR2", "process-value");
-    EXPECT_TRUE(Environment::GetEnvironmentVariable(
-        "SHARP_TARGET_NOOP_VAR2", System::EnvironmentVariableTarget::Machine).empty());
+    // #2313: nullopt, not "". A non-Process target has no store here, so nothing is PRESENT in
+    // it -- reporting "" would claim the variable exists and is empty.
+    EXPECT_EQ(std::nullopt, Environment::GetEnvironmentVariable(
+        "SHARP_TARGET_NOOP_VAR2", System::EnvironmentVariableTarget::Machine));
 }
 
 TEST(EnvironmentTests, SetEnvironmentVariable_UserTarget_DoesNotAffectProcess) {

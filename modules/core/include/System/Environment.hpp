@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -241,11 +242,16 @@ public:
     /**
      * @brief Gets the value of an environment variable of the current process.
      *
-     * C++ counterpart of .NET Environment.GetEnvironmentVariable(string).
+     * C++ counterpart of .NET Environment.GetEnvironmentVariable(string), whose return type is
+     * `string?`. **Since ticket #2313 this returns `std::optional<std::string>`**, because the
+     * previous `std::string` could not tell a variable that is ABSENT from one that is PRESENT
+     * WITH AN EMPTY VALUE -- a distinction .NET makes and POSIX makes, and which
+     * `SetEnvironmentVariable` can now create.
+     *
      * @param name The name of the environment variable.
-     * @return The value of the variable, or an empty string if not found.
+     * @return The value, or `std::nullopt` if the variable is not present.
      */
-    [[nodiscard]] static std::string GetEnvironmentVariable(const std::string& name);
+    [[nodiscard]] static std::optional<std::string> GetEnvironmentVariable(const std::string& name);
 
     /**
      * @brief Gets the value of an environment variable from the specified target.
@@ -255,9 +261,11 @@ public:
      * .NET's own behavior on non-Windows platforms — only EnvironmentVariableTarget::Process
      * is functional; User/Machine always return an empty string.
      */
-    [[nodiscard]] static std::string GetEnvironmentVariable(
+    [[nodiscard]] static std::optional<std::string> GetEnvironmentVariable(
             const std::string& name, EnvironmentVariableTarget target) {
-        if (target != EnvironmentVariableTarget::Process) return std::string();
+        // A non-Process target has no store here, so nothing is PRESENT in it -- nullopt, not an
+        // empty value. Reporting "" would claim the variable exists and is empty (#2313).
+        if (target != EnvironmentVariableTarget::Process) return std::nullopt;
         return GetEnvironmentVariable(name);
     }
 
@@ -285,12 +293,20 @@ public:
     /**
      * @brief Sets an environment variable for the current process.
      *
-     * C++ counterpart of .NET Environment.SetEnvironmentVariable(string, string).
-     * Pass an empty string for @p value to remove the variable.
+     * C++ counterpart of .NET Environment.SetEnvironmentVariable(string, string?).
+     *
+     * **Pass `std::nullopt` to REMOVE the variable. An empty string now STORES an empty value.**
+     * That reversed in ticket #2313: this port used to delete on an empty string, which is not
+     * what .NET does -- `Environment.Variables.Unix.cs:49-57` removes only when the value is
+     * `null`, and stores everything else, empty strings included. The parameter is
+     * `std::optional<std::string>` so a `const char*` or `std::string` argument still converts
+     * implicitly and every existing NON-EMPTY call is source-compatible.
+     *
      * @throws ArgumentException if @p name is empty, starts with a null character,
      *         or contains an '=' character (matches .NET Environment.ValidateVariable).
      */
-    static void SetEnvironmentVariable(const std::string& name, const std::string& value);
+    static void SetEnvironmentVariable(const std::string& name,
+                                       const std::optional<std::string>& value);
 
     /**
      * @brief Sets an environment variable for the specified target.
@@ -302,7 +318,7 @@ public:
      * @throws ArgumentException if @p name is empty, starts with a null character,
      *         or contains an '=' character (matches .NET Environment.ValidateVariable).
      */
-    static void SetEnvironmentVariable(const std::string& name, const std::string& value,
+    static void SetEnvironmentVariable(const std::string& name, const std::optional<std::string>& value,
                                        EnvironmentVariableTarget target);
 
     /**

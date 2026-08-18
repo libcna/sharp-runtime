@@ -245,22 +245,31 @@ static void validateEnvironmentVariableName(const std::string& name) {
         throw ArgumentException("Environment variable name cannot contain equal character.", "variable");
 }
 
-void Environment::SetEnvironmentVariable(const std::string& name, const std::string& value) {
+void Environment::SetEnvironmentVariable(const std::string& name,
+                                         const std::optional<std::string>& value) {
     validateEnvironmentVariableName(name);
+    // #2313: ONLY A NULL VALUE REMOVES. `Environment.Variables.Unix.cs:49-57` is unambiguous --
+    //     if (value == null) s_environment.Remove(variable);
+    //     else               s_environment[variable] = value;
+    // -- and there is no empty-to-null conversion anywhere on the read side either
+    // (`Environment.Variables.Unix.cs:19-33`). This port used to delete on an empty string, which
+    // made a PRESENT-BUT-EMPTY variable inexpressible; POSIX can express it and now so can this.
 #if defined(_WIN32)
-    if (value.empty())
-        _putenv_s(name.c_str(), "");
+    // Win32 SetEnvironmentVariable deletes on a NULL lpValue, and _putenv_s deletes on "" -- so
+    // the empty-value case has to go through the API that can distinguish them.
+    if (!value.has_value())
+        ::SetEnvironmentVariableA(name.c_str(), nullptr);
     else
-        _putenv_s(name.c_str(), value.c_str());
+        ::SetEnvironmentVariableA(name.c_str(), value->c_str());
 #else
-    if (value.empty())
+    if (!value.has_value())
         ::unsetenv(name.c_str());
     else
-        ::setenv(name.c_str(), value.c_str(), 1);
+        ::setenv(name.c_str(), value->c_str(), 1);
 #endif
 }
 
-void Environment::SetEnvironmentVariable(const std::string& name, const std::string& value,
+void Environment::SetEnvironmentVariable(const std::string& name, const std::optional<std::string>& value,
                                          EnvironmentVariableTarget target) {
     if (target == EnvironmentVariableTarget::Process) {
         SetEnvironmentVariable(name, value);
@@ -284,9 +293,12 @@ std::vector<std::string> Environment::GetLogicalDrives() {
 #endif
 }
 
-std::string Environment::GetEnvironmentVariable(const std::string& name) {
+std::optional<std::string> Environment::GetEnvironmentVariable(const std::string& name) {
+    // #2313: nullopt for ABSENT, an empty string for PRESENT-BUT-EMPTY. The internal helper
+    // already made that distinction; only the public return type threw it away.
     std::string value;
-    return tryGetEnvironmentVariable(name, value) ? value : std::string();
+    if (!tryGetEnvironmentVariable(name, value)) return std::nullopt;
+    return value;
 }
 
 // Ported from real .NET's Environment.ExpandEnvironmentVariablesCore (Environment.UnixOrBrowser.cs)
