@@ -43,6 +43,7 @@
 #include "System/Net/WebSockets/ClientWebSocket.hpp"
 #include "System/Net/WebSockets/ClientWebSocketOptions.hpp"
 #include "System/Uri.hpp"
+#include "System/UriFormatException.hpp"
 
 using namespace System::Net::WebSockets;
 using System::Net::IPAddress;
@@ -309,10 +310,22 @@ TEST(ClientWebSocketHandshakeValidationTests, ATerminatorInTheUriPathOrQueryIsRe
 }
 
 TEST(ClientWebSocketHandshakeValidationTests, ATerminatorInTheUriHostIsRejected) {
-    // The host is concatenated into `Host: <host>:<port>`.
+    // The host is concatenated into `Host: <host>:<port>`, so a CR/LF in it is header injection.
+    //
+    // TIGHTENED by #2359 (2026-08-18): the rejection now happens EARLIER, at Uri construction,
+    // because a CR or LF is not in .NET's DNS host character set (DomainNameHelper.cs:36-37) and
+    // no built-in scheme relaxes that. So this URI can no longer be built at all, and the
+    // WebSocket door never sees it. The assertion moves to where the refusal moved; asserting it
+    // at ConnectAsync would now pass for the wrong reason -- the constructor would throw first,
+    // outside the EXPECT_THROW.
+    EXPECT_THROW((void)System::Uri("ws://ho\r\nst:9/"), System::UriFormatException);
+    EXPECT_THROW((void)System::Uri("wss://ho\r\nst:9/"), System::UriFormatException);
+
+    // The ClientWebSocket guard is still there and still reachable through the PATH and QUERY,
+    // which the Uri host rule does not govern -- that is the row above this one in this file.
     ClientWebSocket client;
-    System::Uri uri("ws://ho\r\nst:9/");
-    EXPECT_THROW(client.ConnectAsync(uri).Wait(), System::ArgumentException);
+    System::Uri injectedPath("ws://127.0.0.1:9/a\r\nX-Injected: yes");
+    EXPECT_THROW(client.ConnectAsync(injectedPath).Wait(), System::ArgumentException);
     client.Dispose();
 }
 

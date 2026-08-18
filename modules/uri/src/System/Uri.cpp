@@ -5,6 +5,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/UriFormatException.hpp"
+#include "System/detail/Utf8Scalar.hpp"
 #include <algorithm>
 #include <cctype>
 #include <functional>
@@ -346,6 +347,54 @@ void Uri::parse(const std::string& rawUriString) {
     // fact (the reference tree is absent from this environment).
     if (host_.empty() && port_ != -1)
         throw System::UriFormatException("Invalid URI: The hostname could not be parsed.");
+
+    // Ticket #2359 (2026-08-18), the half #2005 deliberately left open. Measured before it,
+    // Uri("http://exa mple.com/") was ACCEPTED and reported the host "exa mple.com".
+    //
+    // #2005 recorded that settling this "needs a trace through .NET's host parser, not a line to
+    // quote", and named six ParsingError.BadHostName sites. The trace is short and it CORRECTS
+    // the framing: it does not matter which of the six a space reaches, because none of them is
+    // conditional on the scheme in the way the ticket implied.
+    //
+    //   1. DomainNameHelper.IsValid does `hostname.IndexOfAnyExcept(s_validChars)`, where
+    //      s_validChars is exactly "-0123456789A-Z_a-z." (DomainNameHelper.cs:36-37). A space is
+    //      not in it, and is not one of the delimiters '/', '\\', ':', '?' or '#' that truncate
+    //      the host instead, so IsValid returns false (:100-119).
+    //   2. The IRI path uses s_iriInvalidChars, which LISTS the space explicitly (:40-45), so it
+    //      refuses too.
+    //   3. With no host type parsed, CheckAuthorityHelper reaches
+    //      `if ((syntaxFlags & UriSyntaxFlags.AllowAnyOtherHost) != 0)` (Uri.cs:3902-3928) and,
+    //      failing it, sets ParsingError.BadHostName.
+    //   4. NO BUILT-IN SCHEME SETS AllowAnyOtherHost -- measured across all fourteen
+    //      UriSyntaxFlags constants in UriSyntax.cs. So the rule is uniform: every scheme .NET
+    //      ships rejects a host it cannot parse.
+    //
+    // A bracketed IPv6 literal takes IPv6AddressHelper and is already validated above, so it is
+    // exempt here. An IPv4 literal needs no exemption: digits and dots are in s_validChars.
+    if (!host_.empty() && host_.front() != '[') {
+        for (std::size_t i = 0; i < host_.size();) {
+            const unsigned char c = static_cast<unsigned char>(host_[i]);
+            if (c < 0x80) {
+                const bool valid = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
+                                   (c >= 'a' && c <= 'z') || c == '-' || c == '_' || c == '.';
+                if (!valid)
+                    throw System::UriFormatException(
+                        "Invalid URI: The hostname could not be parsed.");
+                ++i;
+                continue;
+            }
+            // The IRI path accepts any non-ASCII scalar EXCEPT U+0080-U+009F, which
+            // s_iriInvalidChars lists. Decoding rather than waving bytes through is what makes
+            // that exact -- and it costs nothing, because #2354 put the decoder in Core.Base,
+            // which this module already depends on.
+            std::uint32_t cp  = 0;
+            std::size_t   len = 0;
+            if (!System::detail::TryDecodeUtf8Scalar(host_, i, cp, len) ||
+                (cp >= 0x80 && cp <= 0x9F))
+                throw System::UriFormatException("Invalid URI: The hostname could not be parsed.");
+            i += len;
+        }
+    }
 
     absoluteUri_   = uriString;
     isAbsoluteUri_ = true;

@@ -1384,8 +1384,10 @@ TEST(UriTests, RelativeComponents_UriKindRelativeSeesTheSameSplit) {
 // ---------------------------------------------------------------------------
 
 TEST(UriTests, EmbeddedNul_IsCarriedThroughEveryComponentWithoutTruncation) {
-    Uri host(std::string("http://h\0st/p", 13));
-    EXPECT_EQ(host.getHostProperty(), std::string("h\0st", 4));
+    // #2359: a NUL in the HOST is now rejected, because NUL is not in DomainNameHelper's
+    // s_validChars either -- the same rule that rejects a space. Every other component is
+    // untouched, which is what this test is about.
+    EXPECT_THROW((void)Uri(std::string("http://h\0st/p", 13)), System::UriFormatException);
 
     Uri path(std::string("http://h/a\0b", 12));
     EXPECT_EQ(path.getAbsolutePathProperty(), std::string("/a\0b", 4));
@@ -1487,9 +1489,48 @@ TEST(UriTests, Fix2005_AnUnpaddedUriIsUntouched) {
     EXPECT_EQ(plain.getFragmentProperty(), "#f");
 }
 
-TEST(UriTests, Whitespace_InternalWhitespaceIsAcceptedVerbatim) {
-    EXPECT_EQ(Uri("http://exa mple.com/").getHostProperty(), "exa mple.com");
+// FLIPPED by #2359 (2026-08-18), the half #2005 deliberately left open. The HOST half is now a
+// rejection; the PATH half is unchanged, and keeping both in one test is what shows the narrowing
+// stopped where .NET's does.
+TEST(UriTests, Fix2359_WhitespaceInsideTheHostIsRejectedButNotInsideThePath) {
+    // DomainNameHelper.IsValid tests `IndexOfAnyExcept(s_validChars)` over exactly
+    // "-0123456789A-Z_a-z." (DomainNameHelper.cs:36-37, :100-119). A space is not in it and is
+    // not one of the delimiters that truncate the host instead, so the host does not parse -- and
+    // no built-in scheme sets AllowAnyOtherHost, so CheckAuthorityHelper reports BadHostName
+    // (Uri.cs:3902-3928, UriSyntax.cs, all fourteen flag constants).
+    EXPECT_THROW((void)Uri("http://exa mple.com/"), System::UriFormatException);
+    EXPECT_THROW((void)Uri("https://exa mple.com/"), System::UriFormatException);
+
+    // The PATH is a different production entirely and is untouched.
     EXPECT_EQ(Uri("http://h/a b").getAbsolutePathProperty(), "/a b");
+    EXPECT_EQ(Uri("http://h/p?a b").getQueryProperty(), "?a b");
+    EXPECT_EQ(Uri("http://h/p#a b").getFragmentProperty(), "#a b");
+}
+
+TEST(UriTests, Fix2359_TheHostCharacterSetIsDotNetsAndNothingWider) {
+    // Every character outside "-0-9A-Za-z." plus '_' fails, which is the whole rule rather than a
+    // special case for the space the ticket named.
+    for (const char* bad : {"http://ex$ample.com/", "http://ex ample.com/", "http://ex	ample.com/",
+                            "http://ex(ample.com/", "http://ex,ample.com/",
+                            "http://ex|ample.com/"}) {
+        SCOPED_TRACE(bad);
+        EXPECT_THROW((void)Uri(bad), System::UriFormatException);
+    }
+
+    // ...and everything IN the set still parses, including the historically tolerated underscore
+    // that .NET's own comment calls "formally invalid but ... especially on corpnets".
+    EXPECT_EQ(Uri("http://my_host-1.example.com/").getHostProperty(), "my_host-1.example.com");
+    EXPECT_EQ(Uri("http://192.168.1.1/").getHostProperty(), "192.168.1.1");
+    EXPECT_EQ(Uri("http://[::1]/").getHostProperty(), "[::1]")
+        << "a bracketed IPv6 literal takes IPv6AddressHelper and is exempt from this rule";
+
+    // NON-ASCII IS ACCEPTED, because .NET's IRI path takes anything outside ASCII -- EXCEPT
+    // U+0080-U+009F, which s_iriInvalidChars lists (DomainNameHelper.cs:40-45). Decoding the
+    // scalar rather than waving the bytes through is what makes that distinction reachable at
+    // all, and it costs nothing because #2354 put the decoder in Core.Base.
+    EXPECT_EQ(Uri("http://bÃ¼" "cher.example/").getHostProperty(), "bÃ¼" "cher.example");
+    EXPECT_THROW((void)Uri("http://exÂ" "ample.com/"), System::UriFormatException)
+        << "U+0085 is inside the excluded C1 range";
 }
 
 // ---------------------------------------------------------------------------
