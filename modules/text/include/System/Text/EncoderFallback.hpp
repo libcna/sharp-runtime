@@ -7,6 +7,7 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include <cstdio>
 
 namespace System::Text {
 
@@ -21,7 +22,19 @@ namespace System::Text {
      * runtime represents characters as UTF-8 bytes/`char`, not UTF-16 code units.
      */
     class EncoderFallbackException : public System::ArgumentException {
-        char charUnknown_ = '\0';
+        /**
+         * @brief The scalar that could not be encoded.
+         *
+         * Ticket #2355 widened this from `char` to `char32_t`, which is a public source break.
+         * .NET's field is a `char` and it has a second one for the low surrogate, because a
+         * UTF-16 `char` cannot hold a supplementary scalar -- and it reassembles the pair into a
+         * single integer for the message anyway
+         * (`EncoderExceptionFallback.cs:53-59`). This port has no surrogate pair to reassemble,
+         * so it carries the scalar directly and needs neither the second field nor the second
+         * overload. Reproducing them would be reproducing a limitation this port does not have,
+         * the same argument #2299 made about `Func<void>` and #2172 about `AbsD`.
+         */
+        char32_t charUnknown_ = U'\0';
         SharpRuntime::intcs index_ = 0;
 
     public:
@@ -33,11 +46,12 @@ namespace System::Text {
         EncoderFallbackException(const std::string& message, std::exception_ptr innerException)
             : System::ArgumentException(message, innerException) {}
         /** @brief Initializes a new EncoderFallbackException with the offending character and its index. */
-        EncoderFallbackException(const std::string& message, char charUnknown, SharpRuntime::intcs index)
+        EncoderFallbackException(const std::string& message, char32_t charUnknown,
+                                 SharpRuntime::intcs index)
             : System::ArgumentException(message), charUnknown_(charUnknown), index_(index) {}
 
-        /** @return The character that could not be encoded. */
-        [[nodiscard]] char getCharUnknownProperty() const { return charUnknown_; }
+        /** @return The Unicode scalar that could not be encoded. */
+        [[nodiscard]] char32_t getCharUnknownProperty() const { return charUnknown_; }
         /** @return The index position in the input buffer of the character that caused the exception. */
         [[nodiscard]] SharpRuntime::intcs getIndexProperty() const { return index_; }
     };
@@ -58,7 +72,8 @@ namespace System::Text {
         [[nodiscard]] virtual std::unique_ptr<EncoderFallbackBuffer> CreateFallbackBuffer() const = 0;
 
         /** Returns fallback bytes for a character that cannot be encoded (this runtime's simplified one-shot API). */
-        [[nodiscard]] virtual std::vector<SharpRuntime::bytecs> GetFallbackBytes(char unknownChar) const = 0;
+        [[nodiscard]] virtual std::vector<SharpRuntime::bytecs> GetFallbackBytes(
+            char32_t unknownChar) const = 0;
         /** Gets the maximum number of bytes produced by one fallback substitution. */
         [[nodiscard]] virtual SharpRuntime::intcs getMaxByteCountProperty() const = 0;
 
@@ -83,7 +98,7 @@ namespace System::Text {
         virtual ~EncoderFallbackBuffer() = default;
 
         /** @brief Prepares the fallback buffer to substitute for the given unencodable character. */
-        virtual bool Fallback(char charUnknown, SharpRuntime::intcs index) = 0;
+        virtual bool Fallback(char32_t charUnknown, SharpRuntime::intcs index) = 0;
 
         /** @return The next character in the fallback replacement, or '\0' if none remain. */
         virtual char GetNextChar() {
@@ -117,7 +132,7 @@ namespace System::Text {
         /** Constructs the fallback with the given replacement string (default "?"). */
         explicit EncoderReplacementFallback(const std::string& replacement = "?") : replacement_(replacement) {}
         /** Returns the replacement bytes for any unencodable character. */
-        [[nodiscard]] std::vector<SharpRuntime::bytecs> GetFallbackBytes(char) const override {
+        [[nodiscard]] std::vector<SharpRuntime::bytecs> GetFallbackBytes(char32_t) const override {
             return std::vector<SharpRuntime::bytecs>(replacement_.begin(), replacement_.end());
         }
         /** Gets the byte count of the replacement string. */
@@ -137,7 +152,7 @@ namespace System::Text {
             fallbackString_ = fallback.getDefaultStringProperty();
         }
         /** @brief Prepares the replacement string to be read back; returns true if it is non-empty. */
-        bool Fallback(char, SharpRuntime::intcs) override {
+        bool Fallback(char32_t, SharpRuntime::intcs) override {
             position_ = 0;
             return !fallbackString_.empty();
         }
@@ -151,7 +166,8 @@ namespace System::Text {
     class EncoderExceptionFallback : public EncoderFallback {
     public:
         /** Always throws EncoderFallbackException. */
-        [[nodiscard]] std::vector<SharpRuntime::bytecs> GetFallbackBytes(char unknownChar) const override;
+        [[nodiscard]] std::vector<SharpRuntime::bytecs> GetFallbackBytes(
+            char32_t unknownChar) const override;
         /** Returns 0 (no bytes produced; an exception is thrown instead). */
         [[nodiscard]] SharpRuntime::intcs getMaxByteCountProperty() const override { return 0; }
         [[nodiscard]] std::unique_ptr<EncoderFallbackBuffer> CreateFallbackBuffer() const override;
@@ -161,7 +177,7 @@ namespace System::Text {
     class EncoderExceptionFallbackBuffer : public EncoderFallbackBuffer {
     public:
         /** @brief Always throws EncoderFallbackException describing the unencodable character. */
-        bool Fallback(char charUnknown, SharpRuntime::intcs index) override;
+        bool Fallback(char32_t charUnknown, SharpRuntime::intcs index) override;
         /** @brief Never reached (Fallback always throws); returns '\0'. */
         char GetNextChar() override { return '\0'; }
         /** @brief Never reached (Fallback always throws); returns false. */
@@ -174,13 +190,24 @@ namespace System::Text {
         return std::make_unique<EncoderExceptionFallbackBuffer>();
     }
 
-    inline bool EncoderExceptionFallbackBuffer::Fallback(char charUnknown, SharpRuntime::intcs index) {
-        throw EncoderFallbackException("Unable to translate character '" + std::string(1, charUnknown) +
-                                            "' at index " + std::to_string(index) + " to the specified code page.",
-                                        charUnknown, index);
+    inline bool EncoderExceptionFallbackBuffer::Fallback(char32_t charUnknown,
+                                                        SharpRuntime::intcs index) {
+        // #2355 also adopts .NET's exact message, since the signature was changing anyway:
+        // SR.Argument_InvalidCodePageConversionIndex is
+        // "Unable to translate Unicode character \\u{0:X4} at index {1} to specified code page."
+        // (Strings.resx:1221), formatted with the SCALAR as an integer -- .NET's surrogate-pair
+        // overload reassembles the pair before formatting (EncoderExceptionFallback.cs:53-59),
+        // which is itself evidence that the scalar is the value a caller wants.
+        char hex[16] = {};
+        std::snprintf(hex, sizeof(hex), "\\u%04X", static_cast<unsigned>(charUnknown));
+        throw EncoderFallbackException(std::string("Unable to translate Unicode character ") + hex +
+                                           " at index " + std::to_string(index) +
+                                           " to specified code page.",
+                                       charUnknown, index);
     }
 
-    inline std::vector<SharpRuntime::bytecs> EncoderExceptionFallback::GetFallbackBytes(char unknownChar) const {
+    inline std::vector<SharpRuntime::bytecs> EncoderExceptionFallback::GetFallbackBytes(
+        char32_t unknownChar) const {
         EncoderExceptionFallbackBuffer buffer;
         buffer.Fallback(unknownChar, 0);
         return {}; // unreachable — Fallback() always throws

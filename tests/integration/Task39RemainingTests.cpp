@@ -242,15 +242,23 @@ TEST(ASCIIEncodingTests, GetBytes_ThreeByteUtf8Char_ProducesExactlyOneReplacemen
     EXPECT_EQ(bytes[0], uint8_t('?'));
 }
 
-// A supplementary-plane character (>= U+10000) is two UTF-16 code units (a surrogate pair)
-// in real .NET, so it maps to two '?' bytes, not one.
-TEST(ASCIIEncodingTests, GetBytes_SupplementaryPlaneChar_ProducesTwoReplacementBytes) {
+// CORRECTED BY #2355 (2026-08-19). This asserted TWO '?' for a supplementary-plane character,
+// reasoning that it is "two UTF-16 code units (a surrogate pair) in real .NET". The premise is
+// right and the conclusion does not follow: .NET delivers that pair to the encoder fallback in
+// ONE call -- `Fallback(charUnknownHigh, charUnknownLow, index)` -- and
+// EncoderReplacementFallback's pair overload sets `_fallbackCount = _strDefault.Length`, i.e. the
+// replacement string ONCE (EncoderReplacementFallback.cs:117-138). So
+// `Encoding.ASCII.GetBytes("\U0001F600")` is one '?'.
+//
+// The doubling here existed only because this port's fallback parameter was a `char` and could
+// not carry a supplementary scalar, so #2017 mimicked the pair by calling twice. #2355 widened
+// the parameter to a `char32_t`, and the workaround went with the limitation it worked around.
+TEST(ASCIIEncodingTests, GetBytes_SupplementaryPlaneChar_ProducesOneReplacementByte) {
     ASCIIEncoding enc;
     // U+1F600 GRINNING FACE, 4 UTF-8 bytes, one supplementary-plane character.
     auto bytes = enc.GetBytes("\xF0\x9F\x98\x80");
-    ASSERT_EQ(bytes.size(), 2u);
+    ASSERT_EQ(bytes.size(), 1u);
     EXPECT_EQ(bytes[0], uint8_t('?'));
-    EXPECT_EQ(bytes[1], uint8_t('?'));
 }
 
 // ===========================================================================

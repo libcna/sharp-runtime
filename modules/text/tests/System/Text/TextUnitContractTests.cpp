@@ -107,16 +107,22 @@ TEST(TextUnitContractTests, Fix2014_Latin1MapsCODEPOINTSNotStorageBytes) {
 
 TEST(TextUnitContractTests, Fix2014_UnrepresentableScalarsBecomeQuestionMarks) {
     // ISO-8859-1 covers U+0000..U+00FF and nothing else, so a scalar above that cannot be
-    // represented. .NET's Latin1Encoding uses the replacement fallback "?" for it, and this
-    // component's ASCIIEncoding already did the same for the same reason -- including the part
-    // that is easy to miss: a supplementary-plane scalar produces TWO '?', matching the two
-    // UTF-16 code units .NET would encode it from.
+    // represented. .NET's Latin1Encoding uses the replacement fallback "?" for it.
+    //
+    // CORRECTED BY #2355 (2026-08-19). This asserted that a supplementary-plane scalar produces
+    // TWO '?', "matching the two UTF-16 code units .NET would encode it from". Measured against
+    // the reference, that is wrong: .NET delivers a supplementary scalar to the fallback as a
+    // surrogate PAIR through ONE call, and EncoderReplacementFallback's pair overload sets
+    // `_fallbackCount = _strDefault.Length` -- the replacement string ONCE
+    // (EncoderReplacementFallback.cs:117-138). So Encoding.ASCII.GetBytes("\U0001F600") is one
+    // '?', not two. The doubling here existed only because the fallback parameter was a `char`
+    // and could not carry a supplementary scalar; #2355 widened it, and the workaround went with
+    // the limitation it worked around.
     Latin1Encoding l;
     EXPECT_EQ(std::vector<bytecs>{static_cast<bytecs>('?')}, l.GetBytes("\xE2\x82\xAC"));  // U+20AC
     const auto grin = l.GetBytes("\xF0\x9F\x98\x80");                                     // U+1F600
-    EXPECT_EQ(2u, grin.size());
+    EXPECT_EQ(1u, grin.size());
     EXPECT_EQ('?', grin[0]);
-    EXPECT_EQ('?', grin[1]);
 }
 
 TEST(TextUnitContractTests, Fix2013_TheFactoryEncodingsAreSharedAndREADONLY) {

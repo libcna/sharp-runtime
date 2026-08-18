@@ -43,10 +43,15 @@ using System::Text::detail::DecodeUtf8Scalar;
                 // stored, and then ignored.
                 detail::AppendEncoderFallback(result, *this, cp);
             } else {
-                // A supplementary scalar is two UTF-16 code units in .NET, so its fallback runs
-                // twice -- the behaviour this encoding already had, now expressed through the
-                // configured policy rather than by pushing two literal '?'.
-                detail::AppendEncoderFallback(result, *this, cp);
+                // #2355. This used to call the fallback TWICE for a supplementary scalar,
+                // because #2017 was mimicking .NET's delivery of one through a surrogate PAIR --
+                // the only shape a `char` parameter could express. Measured against the
+                // reference, .NET calls the fallback ONCE for a pair
+                // (`EncoderReplacementFallback.Fallback(high, low, index)` sets
+                // `_fallbackCount = _strDefault.Length`, EncoderReplacementFallback.cs:117-138),
+                // so `Encoding.ASCII.GetBytes("\U0001F600")` is ONE '?' and this port produced
+                // two. The doubling existed only to work around the narrow parameter, and the
+                // parameter is no longer narrow.
                 detail::AppendEncoderFallback(result, *this, cp);
             }
         }

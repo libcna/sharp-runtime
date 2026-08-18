@@ -74,7 +74,11 @@ namespace System::Text {
                     // asked for something else.
                     detail::AppendEncoderFallback(result, *this, cp);
                 } else {
-                    detail::AppendEncoderFallback(result, *this, cp);
+                    // #2355, the same repair as ASCIIEncoding's: the fallback used to run twice
+                    // for a supplementary scalar, mimicking .NET's surrogate-PAIR delivery, which
+                    // was the only shape a `char` parameter could express. .NET calls it ONCE for
+                    // a pair (EncoderReplacementFallback.cs:117-138). The doubling existed only to
+                    // work around the narrow parameter.
                     detail::AppendEncoderFallback(result, *this, cp);
                 }
             }

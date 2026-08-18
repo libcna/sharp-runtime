@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/Text/ASCIIEncoding.hpp"
+#include <memory>
 #include <vector>
 #include "System/IndexOutOfRangeException.hpp"
 #include "System/Text/DecoderFallback.hpp"
@@ -442,4 +444,100 @@ TEST(StringBuilderTests, Indexer_OutOfRange_Throws) {
     EXPECT_THROW((void)sb[-1], System::IndexOutOfRangeException);
     const StringBuilder& csb = sb;
     EXPECT_THROW((void)csb[5], System::IndexOutOfRangeException);
+}
+
+// ===========================================================================
+// #2355 — the encoder fallback sees the scalar, not a narrowed byte
+// ===========================================================================
+//
+// #2017 routed ASCIIEncoding and Latin1Encoding through their configured encoder fallback and had
+// to narrow the scalar to fit `GetFallbackBytes(char)`. The narrowing was
+// `static_cast<char>(scalar & 0x7F)`, so U+1F600 arrived as the byte 0x00 and every non-ASCII
+// scalar arrived as something that was not the character at all. Nothing shipped was wrong,
+// because both shipped fallbacks ignore the argument -- it was a surface that could not express
+// what a custom implementation needs.
+//
+// .NET's parameter is a `char` TOO, with a second overload taking a surrogate PAIR, because a
+// UTF-16 char cannot hold a supplementary scalar. It reassembles that pair into one integer
+// before formatting its message (EncoderExceptionFallback.cs:53-59), which is itself the evidence
+// that the scalar is the value a caller wants. This port has no pair to reassemble, so it carries
+// the scalar directly and needs neither the second field nor the second overload -- the same
+// argument #2299 made about Func<void> and #2172 about AbsD.
+
+namespace {
+/// A custom fallback that RECORDS what it was asked about, which is the thing the old signature
+/// made impossible.
+class RecordingEncoderFallback final : public System::Text::EncoderFallback {
+public:
+    mutable std::vector<char32_t> seen;
+    [[nodiscard]] std::vector<SharpRuntime::bytecs> GetFallbackBytes(
+        char32_t unknownChar) const override {
+        seen.push_back(unknownChar);
+        return {static_cast<SharpRuntime::bytecs>('!')};
+    }
+    [[nodiscard]] std::unique_ptr<System::Text::EncoderFallbackBuffer> CreateFallbackBuffer()
+        const override {
+        return nullptr;   // unused: these encodings call GetFallbackBytes directly
+    }
+    [[nodiscard]] SharpRuntime::intcs getMaxByteCountProperty() const override { return 1; }
+};
+} // namespace
+
+TEST(EncoderFallbackScalarTests, Fix2355_ACustomFallbackSeesTheWholeScalar) {
+    auto recorder = std::make_shared<RecordingEncoderFallback>();
+    // A fresh ASCIIEncoding rather than Encoding::ASCII(), because #2013 made the seven factory
+    // encodings READ-ONLY -- installing a fallback on a shared instance would change what every
+    // caller in the process decodes, which is the defect that ticket repaired.
+    System::Text::ASCIIEncoding configurable;
+    configurable.setEncoderFallbackProperty(recorder);
+
+    // U+1F600 is four UTF-8 bytes and is not representable in ASCII. Under the old signature the
+    // fallback was handed `static_cast<char>(0x1F600 & 0x7F)` -- the byte 0x00.
+    (void)configurable.GetBytes(std::string("\xF0\x9F\x98\x80"));
+    ASSERT_EQ(recorder->seen.size(), 1u);
+    EXPECT_EQ(recorder->seen[0], U'\U0001F600');
+
+    // ...and a Latin-1 scalar, which the old narrowing also mangled: 0xE9 & 0x7F is 0x69, 'i'.
+    recorder->seen.clear();
+    (void)configurable.GetBytes(std::string("\xC3\xA9"));
+    ASSERT_EQ(recorder->seen.size(), 1u);
+    EXPECT_EQ(recorder->seen[0], U'\u00E9');
+}
+
+TEST(EncoderFallbackScalarTests, Fix2355_TheExceptionCarriesTheScalarAndDotNetsMessage) {
+    System::Text::ASCIIEncoding configurable;
+    configurable.setEncoderFallbackProperty(System::Text::EncoderFallback::ExceptionFallback());
+    try {
+        (void)configurable.GetBytes(std::string("\xF0\x9F\x98\x80"));
+        FAIL() << "the exception fallback must throw";
+    } catch (const System::Text::EncoderFallbackException& e) {
+        EXPECT_EQ(e.getCharUnknownProperty(), U'\U0001F600');
+        // SR.Argument_InvalidCodePageConversionIndex (Strings.resx:1221), formatted with the
+        // scalar as an integer in at-least-four uppercase hex digits.
+        EXPECT_NE(std::string(e.what()).find("Unable to translate Unicode character \\u1F600"),
+                  std::string::npos) << e.what();
+        EXPECT_NE(std::string(e.what()).find("to specified code page."), std::string::npos)
+            << e.what();
+    }
+
+    // A BMP scalar renders in exactly four digits, which is what the X4 format specifier means --
+    // not "four digits, truncated".
+    try {
+        (void)configurable.GetBytes(std::string("\xC3\xA9"));
+        FAIL();
+    } catch (const System::Text::EncoderFallbackException& e) {
+        EXPECT_NE(std::string(e.what()).find("\\u00E9"), std::string::npos) << e.what();
+    }
+}
+
+TEST(EncoderFallbackScalarTests, Fix2355_TheShippedFallbacksAreUnchanged) {
+    // The invariance rows. Both shipped fallbacks ignore the argument, so no result moved.
+    auto replacement = System::Text::EncoderFallback::ReplacementFallback();
+    EXPECT_EQ(replacement->GetFallbackBytes(U'\U0001F600'),
+              replacement->GetFallbackBytes(U'x'));
+    EXPECT_EQ(System::Text::Encoding::ASCII()->GetBytes(std::string("\xF0\x9F\x98\x80")).size(), 1u)
+        << "#2355 also removed a DOUBLE call for a supplementary scalar: .NET's replacement "
+           "fallback runs ONCE for a surrogate pair (EncoderReplacementFallback.cs:117-138), and "
+           "the doubling existed only to mimic the pair through a narrow `char` parameter";
+    EXPECT_EQ(System::Text::Encoding::ASCII()->GetBytes(std::string("abc")).size(), 3u);
 }

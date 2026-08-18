@@ -38,18 +38,17 @@ namespace System::Text::detail {
     /**
      * @brief Routes an unencodable scalar through the configured encoder fallback.
      *
-     * @note **The scalar is narrowed to a `char`**, because that is what
-     *       `EncoderFallback::GetFallbackBytes` accepts. For the replacement fallbacks — the
-     *       default everywhere, and the only kind this component ships that inspects nothing —
-     *       the argument is unused, so the narrowing changes no result. A custom fallback that
-     *       wanted to see *which* scalar failed cannot, and widening that signature is a change
-     *       to a public virtual, which is recorded as ticket **#2355** rather than smuggled in
-     *       here.
+     * @note Ticket **#2355** widened `GetFallbackBytes` to take a `char32_t`, so the scalar
+     *       reaches the fallback intact. It used to be narrowed with
+     *       `static_cast<char>(scalar & 0x7F)` — which for `U+1F600` handed the fallback the
+     *       byte `0x00`, and for every non-ASCII scalar handed it something that was not the
+     *       character at all. No shipped result moved, because both shipped fallbacks ignore the
+     *       argument, but a custom fallback could not see what it was being asked about.
      */
     inline void AppendEncoderFallback(std::vector<SharpRuntime::bytecs>& out, const Encoding& owner,
                                       std::uint32_t unencodableScalar) {
         const auto fallback = owner.getEncoderFallbackProperty();
-        const auto bytes = fallback->GetFallbackBytes(static_cast<char>(unencodableScalar & 0x7F));
+        const auto bytes = fallback->GetFallbackBytes(static_cast<char32_t>(unencodableScalar));
         out.insert(out.end(), bytes.begin(), bytes.end());
     }
 
