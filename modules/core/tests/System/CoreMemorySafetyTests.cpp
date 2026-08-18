@@ -576,27 +576,68 @@ TEST(CoreMemorySafetyDefaultSegmentTests, NonDefaultSegmentsAreUnaffected) {
     EXPECT_THROW((void)seg.Slice(4), System::ArgumentOutOfRangeException);
 }
 
-TEST(CoreMemorySafetyDefaultSegmentTests, PIN_2215_EnumerationDoorIsStillUnguarded) {
-    // ####################################################################
-    // #  INVERT THIS TEST WHEN TICKET #2215 SHIPS.                       #
-    // ####################################################################
-    // begin()/end() are the port's GetEnumerator() counterpart. .NET's GetEnumerator()
-    // calls ThrowInvalidOperationIfDefault(); guarding these two requires dropping their
-    // noexcept, an exception-specification change this repository treats as
-    // approval-gated (ticket #1854's precedent). Until that approval exists, a range-for
-    // over a default segment silently performs zero iterations, and THAT is what this
-    // test pins -- so the day #2215 lands, this assertion fails loudly instead of the
-    // divergence quietly persisting.
+TEST(CoreMemorySafetyDefaultSegmentTests, Fix2215_TheEnumerationDoorRejectsADefaultSegment) {
+    // #2215 SHIPPED, AND THIS PIN IS INVERTED. begin()/end() are the port's GetEnumerator()
+    // counterpart, and .NET's GetEnumerator() calls ThrowInvalidOperationIfDefault()
+    // (`ArraySegment.cs:95-99`). They were the LAST unguarded door in the type: #2214 guarded
+    // the other ten and could not touch these two, because guarding them means dropping their
+    // noexcept -- a public signature change, now covered by docs/StandingApprovals.md SA-10.
+    static_assert(!noexcept(std::declval<ArraySegment<int>&>().begin()),
+                  "#2215: begin() must not be noexcept -- it throws for a default segment");
+    static_assert(!noexcept(std::declval<ArraySegment<int>&>().end()),
+                  "#2215: end() must not be noexcept");
+    static_assert(!noexcept(std::declval<const ArraySegment<int>&>().begin()),
+                  "#2215: the const overload too");
+    static_assert(!noexcept(std::declval<const ArraySegment<int>&>().end()),
+                  "#2215: the const overload too");
+
     ArraySegment<int> seg;
-    static_assert(noexcept(std::declval<ArraySegment<int>&>().begin()),
-                  "#2215 not shipped yet: begin() is still noexcept");
-    static_assert(noexcept(std::declval<ArraySegment<int>&>().end()),
-                  "#2215 not shipped yet: end() is still noexcept");
-    EXPECT_EQ(seg.begin(), nullptr);
-    EXPECT_EQ(seg.end(), nullptr);
+    EXPECT_THROW((void)seg.begin(), System::InvalidOperationException);
+    EXPECT_THROW((void)seg.end(), System::InvalidOperationException);
+
+    const ArraySegment<int>& cseg = seg;
+    EXPECT_THROW((void)cseg.begin(), System::InvalidOperationException);
+    EXPECT_THROW((void)cseg.end(), System::InvalidOperationException);
+
+    // THE BEHAVIOUR THAT CHANGED, stated as the loop a caller actually writes: this used to run
+    // zero times and report nothing. Silent emptiness is indistinguishable from a genuinely
+    // empty segment, which is exactly why .NET refuses it.
+    EXPECT_THROW({ for (int& x : seg) { (void)x; } }, System::InvalidOperationException);
+
+    // ...and the message is the type's own, shared with the other ten doors #2214 guarded, so
+    // the family cannot drift into two sentences for one condition.
+    try {
+        (void)seg.begin();
+        ADD_FAILURE() << "expected InvalidOperationException";
+    } catch (const System::InvalidOperationException& e) {
+        EXPECT_STREQ(e.what(), "The underlying array is null.");
+    }
+}
+
+TEST(CoreMemorySafetyDefaultSegmentTests, Fix2215_ANonDefaultSegmentIteratesExactlyAsBefore) {
+    // The narrowing must be confined to the DEFAULT segment. An ordinary one -- including a
+    // legitimately EMPTY one, which is the case most easily broken by a careless guard -- keeps
+    // iterating and keeps its pointers.
+    std::vector<int> data{10, 20, 30, 40};
+    ArraySegment<int> seg(data, 1, 2);
+    EXPECT_EQ(seg.end() - seg.begin(), 2);
+    std::vector<int> seen;
+    for (int& x : seg) seen.push_back(x);
+    EXPECT_EQ(seen, (std::vector<int>{20, 30}));
+
+    ArraySegment<int> empty(data, 2, 0);
+    EXPECT_NO_THROW((void)empty.begin());
+    EXPECT_EQ(empty.begin(), empty.end()) << "an empty segment is not a default segment";
     int iterations = 0;
-    for (int& x : seg) { (void)x; ++iterations; }
-    EXPECT_EQ(iterations, 0);
+    for (int& x : empty) { (void)x; ++iterations; }
+    EXPECT_EQ(0, iterations);
+
+    // An empty segment over an EMPTY vector is the sharpest form: data() may legitimately be
+    // null there, and the guard must still let it through, because the ARRAY is present.
+    std::vector<int> none;
+    ArraySegment<int> overEmpty(none, 0, 0);
+    EXPECT_NO_THROW((void)overEmpty.begin());
+    EXPECT_NO_THROW((void)overEmpty.end());
 }
 
 // ===========================================================================

@@ -50,11 +50,11 @@ namespace System {
          * but `ArgumentOutOfRangeException` rather than .NET's `InvalidOperationException`,
          * because `count_ == 0` made the range check fire first.
          *
-         * @note `begin()`/`end()` are the port's `GetEnumerator()` counterpart and are
-         * **not** guarded, because guarding them requires dropping their `noexcept` -- an
-         * exception-specification change this repository treats as approval-gated (ticket
-         * #1854's precedent). That residual is ticket #2215, and the current zero-iteration
-         * behaviour is pinned by a test that must be inverted when it ships.
+         * @note `begin()`/`end()` ARE guarded since ticket #2215, which dropped their
+         * `noexcept` under `docs/StandingApprovals.md` SA-10. They are the port's
+         * `GetEnumerator()` counterpart and .NET's `GetEnumerator()` calls this same check
+         * (`ArraySegment.cs:95-99`), so a range-`for` over a default segment now throws
+         * instead of silently performing zero iterations.
          *
          * @throws System::InvalidOperationException if this is a default segment.
          * @see docs/CoreMemorySafetyFamilyPlan.md (family CMS-B)
@@ -196,22 +196,29 @@ namespace System {
         /**
          * @brief Returns a pointer to the first element of the segment.
          *
-         * @warning **This is the port's `GetEnumerator()` counterpart, and unlike every other
-         * array-touching member it does NOT reject a default segment** -- it returns
-         * `nullptr`, so a range-`for` over a default segment performs zero iterations where
-         * .NET's `GetEnumerator()` throws `InvalidOperationException`. Adding the guard means
-         * dropping `noexcept` here and on `end()`, an exception-specification change this
-         * repository treats as approval-gated (ticket #1854's precedent). Tracked as ticket
-         * **#2215**; a test pins the current behaviour so that pin inverts the day #2215
-         * ships. See docs/CoreMemorySafetyFamilyPlan.md §10.
+         * This is the port's `GetEnumerator()` counterpart, and like every other
+         * array-touching member it rejects a default segment. .NET's `GetEnumerator()` calls
+         * `ThrowInvalidOperationIfDefault()` first (`ArraySegment.cs:95-99`).
+         *
+         * **These four are deliberately NOT `noexcept`**, and that is the whole of ticket
+         * #2215: they used to be, which is why they were the last unguarded door in the type
+         * and why a range-`for` over a default segment silently performed zero iterations.
+         * The `noexcept` drop is a public signature change and landed under
+         * `docs/StandingApprovals.md` SA-10 with SA-2's five conditions. See
+         * docs/Migration-ArraySegmentEnumerationGuard.md.
+         *
+         * @throws System::InvalidOperationException if this is a default segment.
          */
-        T*       begin()       noexcept { return array_ ? array_->data() + offset_ : nullptr; }
-        /** @brief Returns a pointer past the last element of the segment. */
-        T*       end()         noexcept { return array_ ? array_->data() + offset_ + count_ : nullptr; }
-        /** @brief Returns a const pointer to the first element of the segment. */
-        const T* begin() const noexcept { return array_ ? array_->data() + offset_ : nullptr; }
-        /** @brief Returns a const pointer past the last element of the segment. */
-        const T* end()   const noexcept { return array_ ? array_->data() + offset_ + count_ : nullptr; }
+        T*       begin()       { throwIfDefault(); return array_->data() + offset_; }
+        /** @brief Returns a pointer past the last element of the segment.
+         *  @throws System::InvalidOperationException if this is a default segment. */
+        T*       end()         { throwIfDefault(); return array_->data() + offset_ + count_; }
+        /** @brief Returns a const pointer to the first element of the segment.
+         *  @throws System::InvalidOperationException if this is a default segment. */
+        const T* begin() const { throwIfDefault(); return array_->data() + offset_; }
+        /** @brief Returns a const pointer past the last element of the segment.
+         *  @throws System::InvalidOperationException if this is a default segment. */
+        const T* end()   const { throwIfDefault(); return array_->data() + offset_ + count_; }
 
         // -----------------------------------------------------------------------
         // Slice
