@@ -7,6 +7,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #endif
 #include "System/IO/DirectoryNotFoundException.hpp"
+#include "System/detail/SpecialFolderDefinedness.hpp"
 
 #if defined(_WIN32)
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -397,6 +398,23 @@ std::string Environment::GetFolderPath(SpecialFolder folder, SpecialFolderOption
     }
 
 #if defined(_WIN32)
+    // #2378 (split out of #2321). .NET's WINDOWS core ends its folder switch in
+    // `throw new ArgumentOutOfRangeException(nameof(folder), folder, SR.Format(SR.Arg_EnumIllegalVal, folder))`
+    // (Environment.Windows.cs:768-770), above a Debug.Assert that every DEFINED value is handled
+    // before it. Its UNIX core does the opposite -- `GetSpecialFolder` returns null for anything
+    // unhandled and null becomes "" -- so this rejection belongs to this arm ALONE, and the POSIX
+    // arm below keeps answering "" for an undefined folder exactly as it did.
+    //
+    // The definedness table is not `Enum.IsDefined`: that is reflection, a permanent deviation
+    // here, so the value set is transcribed from the enum's own declaration. It lives in a detail
+    // header rather than inline here so that it is testable on the platform this repository's
+    // gate runs on -- the behaviour is Windows-only, the data is not.
+    if (!System::detail::IsDefinedSpecialFolder(folder)) {
+        const std::string value = std::to_string(static_cast<long long>(folder));
+        throw System::ArgumentOutOfRangeException("folder", value,
+                                                  "Illegal enum value: " + value + ".");
+    }
+
     // Windows resolves and applies the flags in one call: SpecialFolderOption's values ARE the
     // CSIDL flags, so they are simply OR-ed into the folder id, which is why this branch does not
     // repeat the POSIX verification below.

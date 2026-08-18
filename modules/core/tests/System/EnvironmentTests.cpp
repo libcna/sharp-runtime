@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <algorithm>
+#include "System/detail/SpecialFolderDefinedness.hpp"
 #include <cerrno>
 #include <cstddef>
 #include <cstdlib>
@@ -1191,6 +1192,70 @@ TEST(XdgAndFolderOptionTests, Fix2320_AnUndefinedOptionIsRejected) {
 // `throw new ArgumentOutOfRangeException(nameof(folder), folder, ...)`
 // (Environment.Windows.cs:768-770). That divergence is real, is unreachable from this gate, and
 // is ticket #2378.
+// #2378, split out of #2321. The BEHAVIOUR it governs is Windows-only -- .NET's Windows core
+// throws for an undefined SpecialFolder where its Unix core returns "" -- but the DEFINEDNESS
+// TABLE is platform-independent data, and a typo in it is the failure mode worth catching. So the
+// table is tested here, on the platform this repository's gate actually runs, and the Windows arm
+// that consumes it is compile-verified separately (see the ticket).
+TEST(XdgAndFolderOptionTests, Fix2378_TheDefinednessTableIsTheEnumsOwnDeclaration) {
+    using SF = Environment::SpecialFolder;
+
+    // Every enumerator is defined. Listing them by name rather than by value is what makes this a
+    // check of the TABLE against the ENUM, instead of the table against itself.
+    for (SF f : {SF::Desktop, SF::Programs, SF::MyDocuments, SF::Personal, SF::Favorites,
+                 SF::Startup, SF::Recent, SF::SendTo, SF::StartMenu, SF::MyMusic, SF::MyVideos,
+                 SF::DesktopDirectory, SF::MyComputer, SF::NetworkShortcuts, SF::Fonts,
+                 SF::Templates, SF::CommonStartMenu, SF::CommonPrograms, SF::CommonStartup,
+                 SF::CommonDesktopDirectory, SF::ApplicationData, SF::PrinterShortcuts,
+                 SF::LocalApplicationData, SF::InternetCache, SF::Cookies, SF::History,
+                 SF::CommonApplicationData, SF::Windows, SF::System, SF::ProgramFiles,
+                 SF::MyPictures, SF::UserProfile, SF::SystemX86, SF::ProgramFilesX86,
+                 SF::CommonProgramFiles, SF::CommonProgramFilesX86, SF::CommonTemplates,
+                 SF::CommonDocuments, SF::CommonAdminTools, SF::AdminTools, SF::CommonMusic,
+                 SF::CommonPictures, SF::CommonVideos, SF::Resources, SF::LocalizedResources,
+                 SF::CommonOemLinks, SF::CDBurning}) {
+        EXPECT_TRUE(System::detail::IsDefinedSpecialFolder(f))
+            << "value " << static_cast<int>(f);
+    }
+
+    // The 14 holes inside 0x00-0x3B, which is the half a table written by hand gets wrong. A
+    // predicate that answered "defined" for a contiguous range would pass every row above.
+    for (int hole : {0x01, 0x03, 0x04, 0x0A, 0x0C, 0x0F, 0x12, 0x1D, 0x1E, 0x1F,
+                     0x31, 0x32, 0x33, 0x34}) {
+        EXPECT_FALSE(System::detail::IsDefinedSpecialFolder(static_cast<SF>(hole))) << hole;
+    }
+
+    // ...and everything outside the range.
+    for (int outside : {-1, 0x3C, 0x40, 0x100, 12345}) {
+        EXPECT_FALSE(System::detail::IsDefinedSpecialFolder(static_cast<SF>(outside))) << outside;
+    }
+
+    // The counts the ticket recorded, asserted rather than trusted: 47 enumerators over 46
+    // distinct values, because Personal and MyDocuments share 0x05.
+    EXPECT_EQ(static_cast<int>(SF::Personal), static_cast<int>(SF::MyDocuments));
+    int defined = 0;
+    for (int v = 0; v <= 0x3B; ++v) {
+        if (System::detail::IsDefinedSpecialFolder(static_cast<SF>(v))) ++defined;
+    }
+    EXPECT_EQ(defined, 46);
+}
+
+// The POSIX arm is UNCHANGED by #2378, and saying so needs its own row: the table exists on this
+// platform too, and a careless implementation would have used it here.
+TEST(XdgAndFolderOptionTests, Fix2378_ThePosixAnswerIsUntouched) {
+#ifndef _WIN32
+    for (int raw : {12345, -1, 0x0100, 0x003C, 0x0001}) {
+        const auto folder = static_cast<Environment::SpecialFolder>(raw);
+        EXPECT_FALSE(System::detail::IsDefinedSpecialFolder(folder)) << raw;
+        std::string path;
+        EXPECT_NO_THROW(path = Environment::GetFolderPath(folder)) << raw;
+        EXPECT_TRUE(path.empty()) << raw;
+    }
+#else
+    GTEST_SKIP() << "Windows throws instead; that arm is verified by cross-compilation";
+#endif
+}
+
 TEST(XdgAndFolderOptionTests, Fix2321_AnUndefinedFolderReturnsEmptyOnPosixRatherThanThrowing) {
 #ifndef _WIN32
     for (int raw : {12345, -1, 0x0100, 0x003C}) {
