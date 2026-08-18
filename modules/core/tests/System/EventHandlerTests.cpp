@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <type_traits>
 #include <functional>
 #include <string>
 #include <vector>
@@ -295,4 +296,70 @@ TEST(EventHandlerTests, EmptyHandler_AddedDuringRaise_IsStillANoOp) {
     EXPECT_EQ(h.Size(), 1u);
     EXPECT_NO_THROW(h.Raise(nullptr, EventArgs::Empty));
     EXPECT_EQ(called, 2);
+}
+
+// ---------------------------------------------------------------------------
+// #2324 / SR-AUD-122 — event args are read-only to subscribers, DELIBERATELY
+// ---------------------------------------------------------------------------
+//
+// NOT A REPAIR — A MEASURED DECISION, pinned so it cannot later be mistaken for an oversight.
+//
+// .NET's `delegate void EventHandler<TEventArgs>(object? sender, TEventArgs e)` hands a
+// subscriber a mutable reference, which is what the acknowledgement and cancellation patterns
+// (CancelEventArgs.Cancel, HandledEventArgs.Handled) are built on. This port's HandlerType takes
+// `const TEventArgs&`, so a subscriber cannot write back.
+//
+// SA-8 DOES NOT DECIDE THIS ONE. It covers the case where this port is MORE PERMISSIVE than
+// .NET -- "a mutable or public representation where .NET's is private, readonly or absent". Here
+// the port is more RESTRICTIVE, which SA-8 says nothing about.
+//
+// THE REPAIR WAS BUILT AND MEASURED BEFORE BEING DECLINED (2026-08-18). Dropping the const across
+// all nine *EventHandler aliases costs:
+//
+//   * 29 first-party call sites, all of the shape `h.Raise(nullptr, EventArgs::Empty)`;
+//   * `EventArgs::Empty`, which is `static const EventArgs` and would have to become non-const --
+//     a process-wide mutable global. (.NET's `static readonly EventArgs Empty` is the same shape
+//     and is harmless only because EventArgs has no fields);
+//   * a deliberate tripwire belonging to ANOTHER ticket:
+//     XLinqChangeNotificationTests asserts "XObjectChangeEventHandler is no longer a bare
+//     std::function alias. SR-AUD-336's removal blocker was derived from that fact -- re-derive
+//     #2199 before proceeding."
+//
+// And it buys, today, NOTHING: measured, the only two EventArgs types in this repository with a
+// settable property -- ConsoleCancelEventArgs and CancelEventArgs -- are not delivered through
+// ANY handler alias. The pattern the finding invokes has no instance here.
+//
+// THE TRIGGER FOR REVISITING is therefore precise: the first event that delivers a settable args
+// object. At that point #2199 must be re-derived first, and EventArgs::Empty must move with the
+// aliases.
+
+TEST(EventHandlerContractTests, Decl2324_SubscribersReceiveEventArgsByConstReference) {
+    static_assert(
+        std::is_same_v<EventHandler<EventArgs>::HandlerType,
+                       std::function<void(System::Object*, const EventArgs&)>>,
+        "#2324: the const is deliberate; see the comment above for the measured cost of removing it");
+
+    // The observable half: a raiser may pass a const args object, which is what
+    // EventArgs::Empty is, and which a mutable-reference handler could not accept.
+    EventHandler<EventArgs> h;
+    int called = 0;
+    h += [&called](System::Object*, const EventArgs&) { ++called; };
+    h.Raise(nullptr, EventArgs::Empty);
+    EXPECT_EQ(1, called);
+    static_assert(std::is_const_v<std::remove_reference_t<decltype(EventArgs::Empty)>>,
+                  "#2324: EventArgs::Empty is const, and would have to stop being so");
+}
+
+TEST(EventHandlerContractTests, Decl2324_TheCancellableArgsTypesReachNoHandlerAlias) {
+    // The measurement that decided it, kept executable rather than left in a commit message: the
+    // two settable-property EventArgs types exist, and nothing delivers them. If that ever
+    // changes, this test is where the change should be noticed.
+    //
+    // It is deliberately a STRUCTURAL assertion about EventArgs, not a search: a test cannot
+    // grep. What it CAN pin is that the base every args type derives from is delivered by const
+    // reference, so adding a settable member to one changes nothing until an alias moves too.
+    static_assert(std::is_same_v<EventHandler<EventArgs>::HandlerType,
+                                 std::function<void(System::Object*, const EventArgs&)>>,
+                  "#2324");
+    SUCCEED() << "see the comment block above for the nine-alias measurement";
 }
