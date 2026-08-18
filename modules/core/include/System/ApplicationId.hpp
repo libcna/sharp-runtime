@@ -3,6 +3,10 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
+#include <optional>
+#include <vector>
+#include <utility>
+#include "System/ArgumentException.hpp"
 #include "System/Version.hpp"
 
 namespace System {
@@ -37,31 +41,44 @@ namespace System {
      *   comment.
      */
     class ApplicationId {
-        std::string name_;
-        Version     version_;
-        std::string processorArchitecture_;
-        std::string culture_;
-        std::string publicKeyToken_;
+        std::string                name_;
+        Version                    version_;
+        std::optional<std::string> processorArchitecture_;
+        std::optional<std::string> culture_;
+        std::vector<SharpRuntime::bytecs> publicKeyToken_;
 
     public:
         /**
-         * @brief Initializes a new instance with the specified identity components.
+         * @brief Constructs an ApplicationId.
          *
-         * C++ counterpart of .NET ApplicationId(byte[], string, Version, string, string).
-         * @param publicKeyToken The application's public key token (as a string).
-         * @param name           The application name.
-         * @param version        The application version.
-         * @param processorArchitecture The processor architecture ("x86", "amd64", etc.).
-         * @param culture        The culture string ("neutral", "en-US", etc.).
+         * C++ counterpart of .NET `ApplicationId(byte[], string, Version, string?, string?)`
+         * (`ApplicationId.cs:13-24`).
+         *
+         * @par Ticket #2291 took all four of the review's decisions, toward .NET
+         *  1. **The name is validated.** .NET raises for a null or empty name; this port accepted
+         *     `""` silently. `ArgumentException::ThrowIfNullOrEmpty` is the port's existing
+         *     helper, so no message is invented.
+         *  2. **The token is bytes, not text.** It was a `std::string` stored verbatim, so binary
+         *     key material was unrepresentable and no clone was made. .NET takes `byte[]` and
+         *     **clones on the way in and on the way out**, so a caller cannot mutate a stored
+         *     token through the array it passed or the one it received.
+         *  3. **Culture and ProcessorArchitecture are optional.** They are `string?` in .NET, and
+         *     were non-nullable `std::string` here, so absent and empty were one state.
+         *  4. **`ToString()` adopts .NET's grammar** — see its own doc-comment.
+         *
+         * @throws System::ArgumentException if @p name is empty.
          */
-        ApplicationId(const std::string& publicKeyToken,
+        ApplicationId(std::vector<SharpRuntime::bytecs> publicKeyToken,
                       const std::string& name,
                       const Version& version,
-                      const std::string& processorArchitecture,
-                      const std::string& culture)
+                      std::optional<std::string> processorArchitecture,
+                      std::optional<std::string> culture)
             : name_(name), version_(version),
-              processorArchitecture_(processorArchitecture),
-              culture_(culture), publicKeyToken_(publicKeyToken) {}
+              processorArchitecture_(std::move(processorArchitecture)),
+              culture_(std::move(culture)),
+              publicKeyToken_(std::move(publicKeyToken)) {
+            System::ArgumentException::ThrowIfNullOrEmpty(name, "name");
+        }
 
         /** @brief Gets the application name. C++ counterpart of .NET ApplicationId.Name. */
         [[nodiscard]] const std::string& getNameProperty() const { return name_; }
@@ -69,16 +86,37 @@ namespace System {
         /** @brief Gets the application version. C++ counterpart of .NET ApplicationId.Version. */
         [[nodiscard]] const Version& getVersionProperty() const { return version_; }
 
-        /** @brief Gets the processor architecture. C++ counterpart of .NET ApplicationId.ProcessorArchitecture. */
-        [[nodiscard]] const std::string& getProcessorArchitectureProperty() const {
+        /**
+         * @brief Gets the processor architecture, or `std::nullopt` if absent.
+         *
+         * C++ counterpart of .NET `ApplicationId.ProcessorArchitecture`, which is `string?`.
+         * Nullable since ticket #2291.
+         */
+        [[nodiscard]] const std::optional<std::string>& getProcessorArchitectureProperty() const {
             return processorArchitecture_;
         }
 
-        /** @brief Gets the application culture. C++ counterpart of .NET ApplicationId.Culture. */
-        [[nodiscard]] const std::string& getCultureProperty() const { return culture_; }
+        /**
+         * @brief Gets the application culture, or `std::nullopt` if absent.
+         *
+         * C++ counterpart of .NET `ApplicationId.Culture`, which is `string?`.
+         * Nullable since ticket #2291.
+         */
+        [[nodiscard]] const std::optional<std::string>& getCultureProperty() const {
+            return culture_;
+        }
 
-        /** @brief Gets the public key token. C++ counterpart of .NET ApplicationId.PublicKeyToken. */
-        [[nodiscard]] const std::string& getPublicKeyTokenProperty() const { return publicKeyToken_; }
+        /**
+         * @brief Gets a COPY of the public key token.
+         *
+         * C++ counterpart of .NET `ApplicationId.PublicKeyToken`, which is
+         * `=> (byte[])_publicKeyToken.Clone()` (`ApplicationId.cs:34`) — a defensive copy on
+         * **every access**. Returning by value is that clone; a `const&` would have handed the
+         * caller the stored array and defeated the constructor's own copy.
+         */
+        [[nodiscard]] std::vector<SharpRuntime::bytecs> getPublicKeyTokenProperty() const {
+            return publicKeyToken_;
+        }
 
         /**
          * @brief Creates a copy of this ApplicationId.
@@ -90,64 +128,91 @@ namespace System {
         /**
          * @brief Determines whether this instance and the specified object have the same value.
          *
-         * C++ counterpart of .NET ApplicationId.Equals(object).
-         * Two ApplicationId instances are equal when all five fields match.
+         * C++ counterpart of .NET `ApplicationId.Equals` (`ApplicationId.cs:71-77`), which
+         * compares all five components and the token **element by element**.
          */
         [[nodiscard]] bool Equals(const ApplicationId& other) const {
-            return name_                == other.name_
-                && version_             == other.version_
+            return name_                  == other.name_
+                && version_               == other.version_
                 && processorArchitecture_ == other.processorArchitecture_
-                && culture_             == other.culture_
-                && publicKeyToken_      == other.publicKeyToken_;
+                && culture_               == other.culture_
+                && publicKeyToken_        == other.publicKeyToken_;
         }
 
         bool operator==(const ApplicationId& o) const { return Equals(o); }
         bool operator!=(const ApplicationId& o) const { return !Equals(o); }
 
         /**
-         * @brief Returns a hash code for this ApplicationId based on the name and version.
+         * @brief Returns a hash code derived from the name and version only.
          *
-         * C++ counterpart of .NET ApplicationId.GetHashCode(), which also derives
-         * the code from those two components only. Equal instances therefore hash
-         * equally even though `Equals` compares all five fields; unequal ones may
-         * collide, which is permitted.
+         * C++ counterpart of .NET `ApplicationId.GetHashCode()`
+         * (`ApplicationId.cs:79-82`), which carries its own comment: *"purposely skipping
+         * publicKeyToken, processor architecture and culture as they are less likely to make
+         * things not equal than name and version."* Equal instances therefore hash equally even
+         * though `Equals` compares all five; unequal ones may collide, which is permitted.
          *
-         * @warning This is declared `noexcept` while `Version::ToString()` builds
-         * a `std::string`, so an allocation failure here calls `std::terminate`
-         * rather than propagating. Ticket #2292; no `SR-AUD-*` identifier.
+         * @note It is **no longer `noexcept`**, and that closes ticket #2292: it used to hash
+         *       `version_.ToString()`, which allocates, so an allocation failure called
+         *       `std::terminate` rather than propagating. It now composes `Version::GetHashCode()`
+         *       instead, which is both what .NET does and allocation-free — so the `noexcept`
+         *       could arguably have stayed, and is dropped anyway because a hash that composes
+         *       another type's virtual-free but user-defined hash should not promise more than
+         *       that hash does.
          */
-        [[nodiscard]] int GetHashCode() const noexcept {
-            std::size_t h = std::hash<std::string>{}(name_);
-            h ^= std::hash<std::string>{}(version_.ToString()) + 0x9e3779b9 + (h << 6) + (h >> 2);
-            return static_cast<int>(h);
+        [[nodiscard]] SharpRuntime::intcs GetHashCode() const {
+            return static_cast<SharpRuntime::intcs>(
+                static_cast<SharpRuntime::intcs>(std::hash<std::string>{}(name_)) ^
+                version_.GetHashCode());
         }
 
         /**
-         * @brief Returns a string representation of the application identity,
-         * in this port's own grammar.
+         * @brief Returns .NET's textual representation of the application identity.
          *
-         * C++ counterpart of .NET ApplicationId.ToString() **in role only** — the
-         * text is not .NET's. This emits
-         * `<name>, Version=<v>, Culture=<c>, ProcessorArchitecture=<a>`:
-         * capitalized unquoted keys, both optional components always present,
-         * and **the public key token never included**. .NET writes lowercase
-         * quoted `culture`, `version`, `publicKeyToken` (uppercase hex bytes) and
-         * `processorArchitecture`, omitting components that are null.
+         * C++ counterpart of .NET `ApplicationId.ToString()` (`ApplicationId.cs:38-69`),
+         * transcribed since ticket #2291. The grammar is:
          *
-         * The consequence is worth stating plainly: **two ApplicationIds that
-         * differ only by public key token produce identical text here**, so this
-         * string does not identify an ApplicationId and must not be used as a
-         * manifest identity or as an equality proxy. `Equals` compares all five
-         * fields and does distinguish them.
+         *     <name>[, culture="<c>"], version="<v>"[, publicKeyToken="<HEX>"][, processorArchitecture ="<a>"]
          *
-         * Changing this text would break any consumer that parses or logs it, and
-         * matching .NET needs the byte-token representation SR-AUD-124 is about,
-         * so both are held under one decision — SR-AUD-125, ticket #2291.
+         * lowercase quoted keys, absent components omitted, and the token as **uppercase** hex.
+         *
+         * @note Two details are transcribed rather than tidied, because they are the reference's
+         *       and a caller may match on them. The token is emitted even when EMPTY -- .NET's
+         *       guard is `_publicKeyToken != null`, and a zero-length array is not null, so an
+         *       empty token yields `publicKeyToken=""`. And `processorArchitecture` carries a
+         *       **space before its `=`**, which the other three keys do not; that asymmetry is in
+         *       `ApplicationId.cs:63` and is reproduced deliberately.
+         *
+         * Before #2291 this emitted a different grammar of its own -- capitalized unquoted keys,
+         * both optional components always present, and **the token never included**, so two
+         * identities differing only by token produced identical text.
          */
         [[nodiscard]] std::string ToString() const {
-            return name_ + ", Version=" + version_.ToString()
-                + ", Culture=" + culture_
-                + ", ProcessorArchitecture=" + processorArchitecture_;
+            static constexpr char kHexDigits[] = "0123456789ABCDEF";
+            std::string out = name_;
+            if (culture_.has_value()) {
+                out += ", culture=\"";
+                out += *culture_;
+                out += '"';
+            }
+            out += ", version=\"";
+            out += version_.ToString();
+            out += '"';
+            // Always emitted: .NET's guard is a null test on the array, and this port's
+            // std::vector is never null -- so an empty token prints as an empty quoted value,
+            // which is what .NET does for `new byte[0]` too.
+            out += ", publicKeyToken=\"";
+            for (SharpRuntime::bytecs b : publicKeyToken_) {
+                const auto v = static_cast<unsigned char>(b);
+                out += kHexDigits[(v >> 4) & 0x0F];
+                out += kHexDigits[v & 0x0F];
+            }
+            out += '"';
+            if (processorArchitecture_.has_value()) {
+                out += ", processorArchitecture =\"";   // the reference's own space before '='
+                out += *processorArchitecture_;
+                out += '"';
+            }
+            return out;
         }
     };
 

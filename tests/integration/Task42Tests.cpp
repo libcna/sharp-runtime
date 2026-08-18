@@ -9,6 +9,7 @@
 // Action/Func/Predicate, MarshalByRefObject, ThreadStart, ApplicationId,
 // IsolatedStorage, GenericMathInterfaces, KeyedCollection.
 #include <gtest/gtest.h>
+#include <optional>
 #include <atomic>
 #include <chrono>
 #include <string>
@@ -1486,18 +1487,21 @@ TEST(ThreadStartTests, ParameterizedThreadStart_IsCallable) {
 // ===========================================================================
 
 TEST(ApplicationIdTests, Properties_Accessible) {
+    // #2291: the token is a byte container and the two optional components are std::optional,
+    // matching .NET's byte[] and string?.
+    const std::vector<SharpRuntime::bytecs> token{0x70, 0x75, 0x62};
     System::Version ver(1, 2, 3, 4);
-    System::ApplicationId id("pubkey", "MyApp", ver, "x86", "neutral");
+    System::ApplicationId id(token, "MyApp", ver, "x86", "neutral");
     EXPECT_EQ(id.getNameProperty(), "MyApp");
-    EXPECT_EQ(id.getCultureProperty(), "neutral");
-    EXPECT_EQ(id.getProcessorArchitectureProperty(), "x86");
-    EXPECT_EQ(id.getPublicKeyTokenProperty(), "pubkey");
+    EXPECT_EQ(id.getCultureProperty(), std::optional<std::string>("neutral"));
+    EXPECT_EQ(id.getProcessorArchitectureProperty(), std::optional<std::string>("x86"));
+    EXPECT_EQ(id.getPublicKeyTokenProperty(), token);
     EXPECT_EQ(id.getVersionProperty(), ver);
 }
 
 TEST(ApplicationIdTests, ToString_ContainsName) {
     System::Version ver(2, 0, 0, 0);
-    System::ApplicationId id("tok", "TestApp", ver, "any", "en");
+    System::ApplicationId id(std::vector<SharpRuntime::bytecs>{0x74}, "TestApp", ver, "any", "en");
     EXPECT_NE(id.ToString().find("TestApp"), std::string::npos);
 }
 
