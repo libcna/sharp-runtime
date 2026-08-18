@@ -424,21 +424,77 @@ TEST(IntegerAllowExponentTests, Fix2268_EveryIntegerWrapperGotTheFlagNotJustInt3
     EXPECT_EQ(10000000000000000000ull, UInt64::Parse("1E19", E, nullptr));
 }
 
-TEST(IntegerAllowExponentTests, Fix2268_TheAllZeroMagnitudeIsTheOneDeliberateDeviation) {
-    // Read literally, `Scale < DigitsCount` makes "0.0" an OverflowException in .NET: the
-    // fractional zero takes the `Scale--` branch and leaves scale -1 against a digits count of
-    // 0. This port keeps returning 0, because .NET's own suite pins no such row, the reading is
-    // an unexecutable source trace, and it is a narrowing SR-AUD-177 never asked for. Ticket
-    // #2356 holds the question; this test is what stops the answer changing by accident.
+TEST(IntegerAllowExponentTests, Fix2356_AnAllZeroMagnitudeNeverOverflowsAtAnyExponent) {
+    // #2356 RESOLVED, AND IT REVERSED THE RECORDED ANSWER TWICE.
+    //
+    // The deferred pin this replaces asserted that an all-zero magnitude with an absurd POSITIVE
+    // exponent overflows "exactly as .NET does". It does not. The pin's own comment named the
+    // reason it was wrong -- "the reading is an unexecutable source trace" -- and the missing
+    // line is `Number.Parsing.Common.cs:259-268`, which runs after the trailing-token loop:
+    //
+    //     if ((state & StateNonZero) == 0) {
+    //         if (number.Kind != NumberBufferKind.Decimal)                  number.Scale = 0;
+    //         if (number.Kind == NumberBufferKind.Integer && !StateDecimal) number.IsNegative = false;
+    //     }
+    //
+    // `StateNonZero` is set only inside `if (ch != '0' || StateNonZero)`, so an all-zero magnitude
+    // never sets it, and the scale it would have overflowed on IS DISCARDED BEFORE THE CHECK.
+    //
+    // A middle answer was considered and is also wrong: because a LEADING zero skips that same
+    // block, it does not advance the scale either, so the count of zeros written cannot matter.
+    // "0E-2" and "00E-2" must agree, and this test pins that they do.
+    for (const char* zero : {"0", "00", "000"}) {
+        SCOPED_TRACE(zero);
+        EXPECT_EQ(0, Int32::Parse(zero, NumberStyles::Any, nullptr));
+    }
+    for (const char* text : {"0E-1", "0E-2", "00E-2", "000E-9", "0E1", "0E30", "0E100000000",
+                             "0E-100000000", "0.0E-5"}) {
+        SCOPED_TRACE(text);
+        EXPECT_EQ(0, Int32::Parse(text, NumberStyles::Any, nullptr));
+        EXPECT_EQ(0u, UInt32::Parse(text, NumberStyles::Any, nullptr));
+    }
+
+    // The decimal-point rows the old pin defended are unchanged, and now for the RIGHT reason:
+    // not "this port declines a narrowing", but "this is what .NET computes".
     EXPECT_EQ(0, Int32::Parse("0.0", NumberStyles::Number, nullptr));
     EXPECT_EQ(0, Int32::Parse("000.000", NumberStyles::Number, nullptr));
-    EXPECT_EQ(0, Int32::Parse("0E-2", NumberStyles::AllowExponent, nullptr));
-    EXPECT_EQ(0, Int32::Parse("0E2", NumberStyles::AllowExponent, nullptr));
 
-    // The deviation is confined to a NON-POSITIVE scale. An all-zero magnitude with an absurd
-    // positive exponent still overflows, exactly as .NET does.
-    EXPECT_THROW((void)Int32::Parse("0E100000000", NumberStyles::AllowExponent, nullptr),
+    // The normalisation is confined to an ALL-ZERO magnitude. One nonzero digit anywhere and the
+    // ordinary scale rules apply again -- 6.5 is not an integer, and .NET's own Int32Tests.cs:548
+    // pins that as an OverflowException.
+    EXPECT_THROW((void)Int32::Parse("65E-1", NumberStyles::Any, nullptr), System::OverflowException);
+    EXPECT_THROW((void)Int32::Parse("1E100000000", NumberStyles::Any, nullptr),
                  System::OverflowException);
+}
+
+TEST(IntegerAllowExponentTests, Fix2356_TheSignIsDroppedToo_ButOnlyWithoutADecimalSeparator) {
+    // The normalisation's second half, which is easy to miss because it is guarded differently
+    // from the first: .NET clears IsNegative only for an Integer-kind buffer that saw NO decimal
+    // separator. So "-0" loses its sign and "-0.0" keeps it.
+    //
+    // HONEST LIMIT OF THESE ROWS. On the signed path both spellings are 0 either way, and on the
+    // unsigned path a '-' never gets this far, so THE `!sawDecimal` GUARD IS CURRENTLY
+    // UNOBSERVABLE: a mutation that drops it is not caught, by this suite or any other, and was
+    // measured not to be (#2356 mutation M2). It is kept because it is a faithful transcription
+    // of the reference line and becomes live the moment #2362 lets a '-' reach the unsigned
+    // buffer -- not because a test defends it. The rows below still pin the values themselves.
+    EXPECT_EQ(0, Int32::Parse("-0", NumberStyles::Any, nullptr));
+    EXPECT_EQ(0, Int32::Parse("-0.0", NumberStyles::Number, nullptr));
+    EXPECT_EQ(0, Int32::Parse("-0E-1", NumberStyles::Any, nullptr));
+
+    // .NET applies the normalisation AFTER its trailing-token loop, which is what makes it reach
+    // a TRAILING sign as well as a leading one. This port transcribes that position.
+    EXPECT_EQ(0, Int32::Parse("0-", NumberStyles::Any, nullptr));
+
+    // WHERE THIS PORT STILL DIVERGES, PINNED RATHER THAN QUIETLY FIXED. On the UNSIGNED path a
+    // '-' is rejected by the grammar before any of this runs, so UInt32::Parse("-0") is a
+    // FormatException where .NET returns 0. That is not a #2356 defect: it is the long-standing,
+    // deliberate deviation documented on TryParseUnsignedCore, which declines to reproduce
+    // .NET's negative-unsigned-throws-OverflowException quirk. Repairing the "-0" row alone
+    // would align one spelling and leave "-1" diverging, which is worse than a consistent rule.
+    // Ticket #2362 holds it.
+    EXPECT_THROW((void)UInt32::Parse("-0", NumberStyles::Any, nullptr), System::FormatException);
+    EXPECT_THROW((void)UInt32::Parse("-1", NumberStyles::Any, nullptr), System::FormatException);
 }
 
 TEST(IntegerAllowExponentTests, Fix2268_TheDecimalPointRowsAreUntouched) {

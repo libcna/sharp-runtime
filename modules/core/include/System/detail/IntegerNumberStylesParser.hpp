@@ -155,6 +155,7 @@ struct IntegerNumberStylesParser {
         int       digitsCount = 0;      ///< .NET's `number.DigitsCount`.
         long long scale       = 0;      ///< .NET's `number.Scale`.
         bool      any         = false;  ///< .NET's `StateDigits` — at least one digit was seen.
+        bool      sawDecimal  = false;  ///< .NET's `StateDecimal` — a decimal separator was consumed.
         bool      overflowed  = false;  ///< The significant digits do not fit in 64 bits.
     };
 
@@ -203,7 +204,7 @@ struct IntegerNumberStylesParser {
                 }
                 ++i;
             } else if (allowDecimalPoint && !sawDecimal && s[i] == kDecimalSeparator) {
-                sawDecimal = true; ++i;
+                sawDecimal = true; scan.sawDecimal = true; ++i;
             } else if (allowThousands && scan.any && !sawDecimal && s[i] == kGroupSeparator) {
                 ++i;
             } else break;
@@ -247,13 +248,13 @@ struct IntegerNumberStylesParser {
      * however small the number looks. `"65E-1"` is 6.5 and fails here, which is exactly what
      * .NET's own `Int32Tests.cs:548` pins.
      *
-     * @note An all-zero magnitude with a non-positive scale is the one case this port does not
-     *       follow; see the class doc-comment's deviation note and ticket #2356.
+     * @note An all-zero magnitude needs no special case here: the caller has already applied
+     *       .NET's normalisation, which leaves it at scale 0 with no digits, so the general path
+     *       below accepts it and yields 0. Ticket #2356.
      */
     static bool TryFoldScale(DigitScan& scan) {
         if (scan.overflowed) return false;
         if (scan.scale > kMaxSignificantScale) return false;
-        if (scan.digitsCount == 0) { scan.magnitude = 0; return true; }
         if (scan.scale < scan.digitsCount) return false;
         for (long long k = scan.scale - scan.digitsCount; k > 0; --k) {
             if (scan.magnitude > UINT64_MAX / 10) return false;
@@ -335,6 +336,32 @@ struct IntegerNumberStylesParser {
 
         if (haveParen) return false;   // '(' opened but never closed
         if (i != n) return false;
+
+        // .NET's all-zero normalisation (`Number.Parsing.Common.cs:259-268`), transcribed at its
+        // own position -- AFTER the trailing-token loop, which is what makes it reach a TRAILING
+        // sign as well as a leading one.
+        //
+        //     if ((state & StateNonZero) == 0) {
+        //         if (number.Kind != NumberBufferKind.Decimal)                  number.Scale = 0;
+        //         if (number.Kind == NumberBufferKind.Integer && !StateDecimal) number.IsNegative = false;
+        //     }
+        //
+        // `StateNonZero` is set only inside .NET's `if (ch != '0' || StateNonZero)` block, so it
+        // means "a nonzero digit was seen" -- exactly this scan's `digitsCount != 0`, since a
+        // zero enters the buffer only once a nonzero digit has. TWO CONSEQUENCES, and both are
+        // easy to get wrong in opposite directions:
+        //
+        //   * an all-zero magnitude NEVER overflows, at ANY exponent, because the scale it would
+        //     have overflowed on is discarded first -- "0E30" and "0E100000000" are 0, not
+        //     OverflowException (ticket #2356, where the recorded premise was the reverse);
+        //   * the sign is dropped too, so `UInt32::Parse("-0")` is 0 -- but ONLY when no decimal
+        //     separator was seen, which is why `UInt32::Parse("-0.0")` still fails. That
+        //     asymmetry is .NET's, not this port's convenience.
+        if (scan.digitsCount == 0) {
+            scan.scale = 0;
+            if (!scan.sawDecimal) negative = false;
+        }
+
         // Format-grammar validity takes precedence over the scale overflow, matching real .NET's
         // own documented precedence rule -- checked only after the two lines above.
         if (!TryFoldScale(scan)) { overflowed = true; return true; }
@@ -431,6 +458,13 @@ struct IntegerNumberStylesParser {
         if (i < n && s[i] == '-') return false; // trailing minus: same rejection as leading
 
         if (i != n) return false;
+
+        // .NET's all-zero normalisation, the same transcription as the signed core above
+        // (`Number.Parsing.Common.cs:259-268`). Only the scale half applies here: a '-' never
+        // reaches this point on the unsigned path, which is this parser's own long-standing
+        // deviation and is documented on TryParseUnsignedCore.
+        if (scan.digitsCount == 0) scan.scale = 0;
+
         if (!TryFoldScale(scan)) { overflowed = true; return true; }
 
         result = static_cast<SharpRuntime::ulongcs>(scan.magnitude);
