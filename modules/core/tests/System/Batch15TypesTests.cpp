@@ -165,28 +165,40 @@ TEST(BadImageFormatExceptionExtraTests, DefaultCtor_EmptyFileName) {
 // ===========================================================================
 // ValueType
 // ===========================================================================
+//
+// #2322 made System::ValueType's constructor protected, matching .NET's `public abstract class
+// ValueType`. These five tests were direct instantiations of the base -- and the #2322 review
+// did NOT find them: it recorded that "the only derived types anywhere are SimpleValueType and
+// ConcreteValueType in ValueTypeTests.cpp", which was true of DERIVATIONS and missed these
+// INSTANTIATIONS in a different file. They now go through a local probe, which is what a caller
+// has to do too.
+
+namespace {
+/// The minimal legal way to reach the base after #2322.
+class ProbeValueType : public System::ValueType {};
+}  // namespace
 
 TEST(ValueTypeTests, DefaultCtor_Works) {
-    System::ValueType vt;
+    ProbeValueType vt;
     (void)vt;
     SUCCEED();
 }
 TEST(ValueTypeTests, GetHashCode_ReturnsInt) {
-    System::ValueType vt;
+    ProbeValueType vt;
     int h = vt.GetHashCode();
     (void)h;
     SUCCEED();
 }
 TEST(ValueTypeTests, ToString_NonEmpty) {
-    System::ValueType vt;
+    ProbeValueType vt;
     EXPECT_FALSE(vt.ToString().empty());
 }
 TEST(ValueTypeTests, Equals_SameObject) {
-    System::ValueType vt;
+    ProbeValueType vt;
     EXPECT_TRUE(vt.Equals(vt));
 }
 TEST(ValueTypeTests, Equals_DifferentObjects_False) {
-    System::ValueType a, b;
+    ProbeValueType a, b;
     EXPECT_FALSE(a.Equals(b));
 }
 
