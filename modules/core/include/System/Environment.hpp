@@ -108,8 +108,12 @@ public:
      * @brief Specifies options to use when getting the path to a system special folder.
      *
      * C++ counterpart of .NET System.Environment.SpecialFolderOption.
-     * Values correspond to Windows CSIDL flags and are meaningful only on Windows;
-     * on POSIX they are accepted for API compatibility and ignored.
+     *
+     * The values are the Windows CSIDL flags, and on Windows they are OR-ed into the folder id.
+     * **On POSIX they are honoured too, since ticket #2320** -- they used to be accepted and
+     * ignored. `DoNotVerify` returns the path unchecked, `None` (the default) returns `""` when
+     * the directory is not readable, and `Create` creates it. Transcribed from
+     * `Environment.GetFolderPathCore.Unix.cs:26-47`.
      */
     enum class SpecialFolderOption {
         /** @brief No option is specified. */
@@ -325,9 +329,7 @@ public:
      * C++ counterpart of .NET Environment.GetFolderPath(SpecialFolder, SpecialFolderOption).
      * The option is accepted for API compatibility but ignored on POSIX.
      */
-    [[nodiscard]] static std::string GetFolderPath(SpecialFolder folder, SpecialFolderOption) {
-        return GetFolderPath(folder);
-    }
+    [[nodiscard]] static std::string GetFolderPath(SpecialFolder folder, SpecialFolderOption option);
 
     /**
      * @brief Gets the path to the system directory.

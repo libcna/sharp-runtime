@@ -257,7 +257,11 @@ TEST(EnvironmentTests, GetFolderPath_UserProfile_NonEmpty) {
 }
 
 TEST(EnvironmentTests, GetFolderPath_Desktop_NonEmpty) {
-    std::string p = Environment::GetFolderPath(Environment::SpecialFolder::Desktop);
+    // DoNotVerify, because since #2320 the DEFAULT option verifies and returns "" for a
+    // directory that does not exist. This row is about the PATH being mapped at all, and a
+    // container without a ~/Desktop must not turn that into a failure (SA-6).
+    std::string p = Environment::GetFolderPath(Environment::SpecialFolder::Desktop,
+                                               Environment::SpecialFolderOption::DoNotVerify);
     EXPECT_FALSE(p.empty());
 }
 
@@ -434,14 +438,27 @@ TEST(EnvironmentTests, GetFolderPath_WithNone_SameAsWithout) {
     EXPECT_EQ(without, with);
 }
 
-TEST(EnvironmentTests, GetFolderPath_WithDoNotVerify_SameAsWithout) {
-    auto without = Environment::GetFolderPath(Environment::SpecialFolder::Desktop);
-    auto with    = Environment::GetFolderPath(Environment::SpecialFolder::Desktop,
-                                               Environment::SpecialFolderOption::DoNotVerify);
-    EXPECT_EQ(without, with);
+TEST(EnvironmentTests, GetFolderPath_WithDoNotVerify_AgreesOnlyWhenTheDirectoryExists) {
+    // REWRITTEN BY #2320, because it used to assert the opposite of the contract. `DoNotVerify`
+    // and the default AGREE exactly when the directory is readable, and DIFFER otherwise -- that
+    // difference is the whole point of the option, and the old row passed only because this
+    // machine happened to have a ~/Desktop.
+    const auto path     = Environment::GetFolderPath(Environment::SpecialFolder::Desktop,
+                                                     Environment::SpecialFolderOption::DoNotVerify);
+    const auto verified = Environment::GetFolderPath(Environment::SpecialFolder::Desktop);
+    ASSERT_FALSE(path.empty());
+    if (::access(path.c_str(), R_OK) == 0) {
+        EXPECT_EQ(path, verified);
+    } else {
+        EXPECT_TRUE(verified.empty()) << "an unreadable directory must verify to \"\"";
+    }
 }
 
-TEST(EnvironmentTests, GetFolderPath_WithCreate_SameAsWithout) {
+TEST(EnvironmentTests, GetFolderPath_WithCreate_AgreesWhenTheDirectoryAlreadyExists) {
+    // The home directory exists wherever this suite can run at all, so Create has nothing to do
+    // and must simply agree. The interesting half -- Create on a MISSING directory -- is
+    // XdgAndFolderOptionTests below, which builds its own missing directory rather than hoping
+    // for one.
     auto without = Environment::GetFolderPath(Environment::SpecialFolder::UserProfile);
     auto with    = Environment::GetFolderPath(Environment::SpecialFolder::UserProfile,
                                                Environment::SpecialFolderOption::Create);
@@ -575,15 +592,21 @@ TEST(EnvironmentTests, SpecialFolder_CDBurning_Is0x003B) {
 // ---------------------------------------------------------------------------
 
 TEST(EnvironmentTests, GetFolderPath_ApplicationData_NonEmpty) {
-    std::string p = Environment::GetFolderPath(Environment::SpecialFolder::ApplicationData);
+    // DoNotVerify -- see GetFolderPath_Desktop_NonEmpty; the default verifies since #2320.
+    std::string p = Environment::GetFolderPath(Environment::SpecialFolder::ApplicationData,
+                                               Environment::SpecialFolderOption::DoNotVerify);
     EXPECT_FALSE(p.empty());
 }
 TEST(EnvironmentTests, GetFolderPath_LocalApplicationData_NonEmpty) {
-    std::string p = Environment::GetFolderPath(Environment::SpecialFolder::LocalApplicationData);
+    // DoNotVerify -- see GetFolderPath_Desktop_NonEmpty; the default verifies since #2320.
+    std::string p = Environment::GetFolderPath(Environment::SpecialFolder::LocalApplicationData,
+                                               Environment::SpecialFolderOption::DoNotVerify);
     EXPECT_FALSE(p.empty());
 }
 TEST(EnvironmentTests, GetFolderPath_MyDocuments_NonEmpty) {
-    std::string p = Environment::GetFolderPath(Environment::SpecialFolder::MyDocuments);
+    // DoNotVerify -- see GetFolderPath_Desktop_NonEmpty; the default verifies since #2320.
+    std::string p = Environment::GetFolderPath(Environment::SpecialFolder::MyDocuments,
+                                               Environment::SpecialFolderOption::DoNotVerify);
     EXPECT_FALSE(p.empty());
 }
 TEST(EnvironmentTests, GetFolderPath_Temp_IsString) {
@@ -967,4 +990,137 @@ TEST(EnvironmentTests, CommandLine_OnUnixTheWholeLineRoundTripsIncludingArgV0) {
 
 TEST(EnvironmentTests, CommandLine_EmptyArgvIsStillEmpty) {
     EXPECT_EQ(commandLineOf({}), "");
+}
+
+// ---------------------------------------------------------------------------
+// #2320 — the XDG base directories, and SpecialFolderOption on POSIX
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Saves and restores a variable, so a test cannot leak its setting into the next one.
+class ScopedEnv {
+public:
+    ScopedEnv(const char* name, const char* value) : name_(name) {
+        const char* old = std::getenv(name);
+        had_ = (old != nullptr);
+        if (had_) saved_ = old;
+        if (value != nullptr) ::setenv(name, value, 1); else ::unsetenv(name);
+    }
+    ~ScopedEnv() {
+        if (had_) ::setenv(name_, saved_.c_str(), 1); else ::unsetenv(name_);
+    }
+    ScopedEnv(const ScopedEnv&) = delete;
+    ScopedEnv& operator=(const ScopedEnv&) = delete;
+private:
+    const char* name_;
+    std::string saved_;
+    bool        had_ = false;
+};
+
+}  // namespace
+
+TEST(XdgAndFolderOptionTests, Fix2320_AnAbsoluteXdgVariableIsHonoured) {
+#if !defined(_WIN32)
+    {
+        ScopedEnv cfg("XDG_CONFIG_HOME", "/tmp/sharp-runtime-2320-cfg");
+        EXPECT_EQ("/tmp/sharp-runtime-2320-cfg",
+                  Environment::GetFolderPath(Environment::SpecialFolder::ApplicationData,
+                                             Environment::SpecialFolderOption::DoNotVerify));
+    }
+    {
+        ScopedEnv data("XDG_DATA_HOME", "/tmp/sharp-runtime-2320-data");
+        EXPECT_EQ("/tmp/sharp-runtime-2320-data",
+                  Environment::GetFolderPath(Environment::SpecialFolder::LocalApplicationData,
+                                             Environment::SpecialFolderOption::DoNotVerify));
+    }
+#else
+    GTEST_SKIP() << "XDG is a POSIX rule";
+#endif
+}
+
+TEST(XdgAndFolderOptionTests, Fix2320_ARelativeOrEmptyXdgVariableIsIgnored) {
+#if !defined(_WIN32)
+    // The reference's test is `config is null || !config.StartsWith('/')`
+    // (Environment.GetFolderPathCore.Unix.cs:157-161), NOT "is it set". So a RELATIVE value falls
+    // back exactly as an unset one does -- and so does an EMPTY one, because an empty string does
+    // not start with '/' either. The XDG specification says the same: a relative value "must be
+    // ignored". This is the row a naive `getenv() != nullptr` implementation fails.
+    const std::string home = Environment::GetFolderPath(Environment::SpecialFolder::UserProfile,
+                                                        Environment::SpecialFolderOption::DoNotVerify);
+    ASSERT_FALSE(home.empty());
+
+    for (const char* bad : {"relative/path", "", "~/config", "./config"}) {
+        SCOPED_TRACE(bad);
+        ScopedEnv cfg("XDG_CONFIG_HOME", bad);
+        ScopedEnv data("XDG_DATA_HOME", bad);
+        EXPECT_EQ(home + "/.config",
+                  Environment::GetFolderPath(Environment::SpecialFolder::ApplicationData,
+                                             Environment::SpecialFolderOption::DoNotVerify));
+        EXPECT_EQ(home + "/.local/share",
+                  Environment::GetFolderPath(Environment::SpecialFolder::LocalApplicationData,
+                                             Environment::SpecialFolderOption::DoNotVerify));
+    }
+#else
+    GTEST_SKIP() << "XDG is a POSIX rule";
+#endif
+}
+
+TEST(XdgAndFolderOptionTests, Fix2320_UnsetXdgFallsBackToTheDocumentedDefaults) {
+#if !defined(_WIN32)
+    ScopedEnv cfg("XDG_CONFIG_HOME", nullptr);
+    ScopedEnv data("XDG_DATA_HOME", nullptr);
+    const std::string home = Environment::GetFolderPath(Environment::SpecialFolder::UserProfile,
+                                                        Environment::SpecialFolderOption::DoNotVerify);
+    EXPECT_EQ(home + "/.config",
+              Environment::GetFolderPath(Environment::SpecialFolder::ApplicationData,
+                                         Environment::SpecialFolderOption::DoNotVerify));
+    EXPECT_EQ(home + "/.local/share",
+              Environment::GetFolderPath(Environment::SpecialFolder::LocalApplicationData,
+                                         Environment::SpecialFolderOption::DoNotVerify));
+#else
+    GTEST_SKIP() << "XDG is a POSIX rule";
+#endif
+}
+
+TEST(XdgAndFolderOptionTests, Fix2320_TheThreeOptionsDifferOnAMissingDirectory) {
+#if !defined(_WIN32)
+    // Builds its own missing directory rather than hoping one exists, so the row means the same
+    // thing in every container.
+    const std::string missing = "/tmp/sharp-runtime-2320-missing/deep/tree";
+    ::system("rm -rf /tmp/sharp-runtime-2320-missing");
+    ScopedEnv data("XDG_DATA_HOME", missing.c_str());
+    const auto folder = Environment::SpecialFolder::LocalApplicationData;
+
+    // BEFORE #2320 ALL THREE OF THESE RETURNED THE PATH. The option was accepted and ignored on
+    // POSIX, so a caller could not tell a real directory from a name.
+    EXPECT_EQ(missing, Environment::GetFolderPath(folder, Environment::SpecialFolderOption::DoNotVerify));
+    EXPECT_EQ("",      Environment::GetFolderPath(folder, Environment::SpecialFolderOption::None))
+        << "the DEFAULT option verifies -- Environment.GetFolderPathCore.Unix.cs:26-40";
+    EXPECT_EQ(missing, Environment::GetFolderPath(folder, Environment::SpecialFolderOption::Create));
+
+    // Create really created it, every missing component of it, and the default now agrees.
+    EXPECT_EQ(0, ::access(missing.c_str(), R_OK));
+    EXPECT_EQ(missing, Environment::GetFolderPath(folder, Environment::SpecialFolderOption::None));
+    ::system("rm -rf /tmp/sharp-runtime-2320-missing");
+#else
+    GTEST_SKIP() << "the POSIX verification path";
+#endif
+}
+
+TEST(XdgAndFolderOptionTests, Fix2320_AnUndefinedOptionIsRejected) {
+    // `Environment.cs:149-163` validates the OPTION even though it deliberately does not validate
+    // the FOLDER -- an undefined folder legitimately returns "" (ticket #2321), an undefined
+    // option never does.
+    EXPECT_THROW((void)Environment::GetFolderPath(Environment::SpecialFolder::ApplicationData,
+                                                  static_cast<Environment::SpecialFolderOption>(12345)),
+                 System::ArgumentOutOfRangeException);
+
+    // ...and all three defined ones are accepted, so the check is a definedness test rather than
+    // an accidental range test.
+    for (auto option : {Environment::SpecialFolderOption::None,
+                        Environment::SpecialFolderOption::DoNotVerify,
+                        Environment::SpecialFolderOption::Create}) {
+        EXPECT_NO_THROW((void)Environment::GetFolderPath(Environment::SpecialFolder::UserProfile, option));
+    }
 }

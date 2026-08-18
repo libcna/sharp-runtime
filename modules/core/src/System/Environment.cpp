@@ -4,6 +4,7 @@
 #include "System/Environment.hpp"
 #ifdef _WIN32
 #include "System/ApplicationException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #endif
 #include "System/IO/DirectoryNotFoundException.hpp"
 
@@ -24,9 +25,11 @@
 #elif defined(__EMSCRIPTEN__)
 #  include <unistd.h>
 #  include <climits>
+#  include <sys/stat.h>   // GetFolderPath's SpecialFolderOption::Create (#2320)
 #else
 #  include <unistd.h>
 #  include <climits>
+#  include <sys/stat.h>   // GetFolderPath's SpecialFolderOption::Create (#2320)
 #  include <pwd.h>
 #  include <time.h>
 #  include <sys/resource.h>
@@ -319,32 +322,108 @@ std::string Environment::ExpandEnvironmentVariables(const std::string& name) {
     return result;
 }
 
+namespace {
+
+#if !defined(_WIN32)
+/// The XDG base-directory rule, transcribed from `Environment.GetFolderPathCore.Unix.cs:153-163`.
+///
+/// The test is `config is null || !config.StartsWith('/')` -- so a variable is honoured ONLY when
+/// it is set AND ABSOLUTE, and an empty value falls back exactly as an unset one does, because an
+/// empty string does not start with '/' either. The XDG specification says the same: a relative
+/// value "must be ignored". Ticket #2320 decision 1, answer (b).
+std::string xdgBase(const char* variable, const std::string& home, const char* fallback) {
+    const char* value = std::getenv(variable);
+    if (value != nullptr && value[0] == '/') return std::string(value);
+    return home + fallback;
+}
+
+/// `Interop.Sys.Access(path, R_OK) == 0` -- the verification .NET's DEFAULT option performs.
+bool readable(const std::string& path) {
+    return !path.empty() && ::access(path.c_str(), R_OK) == 0;
+}
+
+/// `Directory.CreateDirectory(path)`: creates every missing component, like `mkdir -p`.
+///
+/// Written with `::mkdir` rather than `System::IO::Directory` on purpose -- `Core.Base` does not
+/// depend on `modules/io`, and giving it that edge to create one directory would be a far larger
+/// change than the behaviour it buys.
+void createDirectoryTree(const std::string& path) {
+    if (path.empty()) return;
+    std::string partial;
+    partial.reserve(path.size());
+    for (std::size_t i = 0; i < path.size(); ++i) {
+        partial.push_back(path[i]);
+        const bool last = (i + 1 == path.size());
+        if (path[i] == '/' || last) {
+            if (partial != "/" ) ::mkdir(partial.c_str(), 0777);   // EEXIST is the normal case
+        }
+    }
+}
+#endif
+
+}  // namespace
+
 std::string Environment::GetFolderPath(SpecialFolder folder) {
+    return GetFolderPath(folder, SpecialFolderOption::None);
+}
+
+std::string Environment::GetFolderPath(SpecialFolder folder, SpecialFolderOption option) {
+    // `Environment.cs:149-163`: the OPTION is validated even though the FOLDER is not -- an
+    // undefined folder legitimately returns "" (see #2321), an undefined option never does.
+    if (option != SpecialFolderOption::None && option != SpecialFolderOption::Create &&
+        option != SpecialFolderOption::DoNotVerify) {
+        throw System::ArgumentOutOfRangeException(
+            "option", "Illegal enum value: " + std::to_string(static_cast<long long>(option)) + ".");
+    }
+
 #if defined(_WIN32)
+    // Windows resolves and applies the flags in one call: SpecialFolderOption's values ARE the
+    // CSIDL flags, so they are simply OR-ed into the folder id, which is why this branch does not
+    // repeat the POSIX verification below.
     char buf[MAX_PATH];
-    if (SHGetFolderPathA(nullptr, static_cast<int>(folder), nullptr, SHGFP_TYPE_CURRENT, buf) == S_OK)
+    const int csidl = static_cast<int>(folder) | static_cast<int>(option);
+    if (SHGetFolderPathA(nullptr, csidl, nullptr, SHGFP_TYPE_CURRENT, buf) == S_OK)
         return std::string(buf);
     return "";
 #else
     const char* home = std::getenv("HOME");
-    std::string h = home ? std::string(home) : std::string();
+    // `GetFolderPathCore.Unix.cs:76-81`: fall back to "/" when the home directory is unknown.
+    // .NET states the reason and it is a safety property rather than a tidy default -- "/" is not
+    // writable by a non-root user, so an application cannot silently write private data into a
+    // path built from an empty string.
+    std::string h = (home != nullptr && home[0] != '\0') ? std::string(home) : std::string("/");
+    if (h == "/") h.clear();   // so h + "/.config" stays "/.config" rather than "//.config"
+
+    std::string path;
     switch (folder) {
         case SpecialFolder::Personal:          // == MyDocuments (0x0005), returns home
-        case SpecialFolder::UserProfile:      return h;
+        case SpecialFolder::UserProfile:      path = h.empty() ? "/" : h; break;
         case SpecialFolder::Desktop:
-        case SpecialFolder::DesktopDirectory: return h + "/Desktop";
-        case SpecialFolder::MyMusic:          return h + "/Music";
-        case SpecialFolder::MyPictures:       return h + "/Pictures";
-        case SpecialFolder::MyVideos:         return h + "/Videos";
-        case SpecialFolder::ApplicationData:  return h + "/.config";
-        case SpecialFolder::LocalApplicationData: return h + "/.local/share";
-        case SpecialFolder::CommonApplicationData: return "/etc";
-        case SpecialFolder::ProgramFiles:     return "/usr";
-        case SpecialFolder::System:           return "/usr/lib";
-        case SpecialFolder::Fonts:            return "/usr/share/fonts";
-        case SpecialFolder::Templates:        return h + "/Templates";
+        case SpecialFolder::DesktopDirectory: path = h + "/Desktop"; break;
+        case SpecialFolder::MyMusic:          path = h + "/Music"; break;
+        case SpecialFolder::MyPictures:       path = h + "/Pictures"; break;
+        case SpecialFolder::MyVideos:         path = h + "/Videos"; break;
+        // The two XDG bases, and the ONLY two this ticket adopts -- see the migration note for
+        // the rest of the table, which diverges from the reference in six further places and is
+        // ticket #2364 rather than a silent widening here.
+        case SpecialFolder::ApplicationData:  path = xdgBase("XDG_CONFIG_HOME", h, "/.config"); break;
+        case SpecialFolder::LocalApplicationData:
+                                              path = xdgBase("XDG_DATA_HOME", h, "/.local/share"); break;
+        case SpecialFolder::CommonApplicationData: path = "/etc"; break;
+        case SpecialFolder::ProgramFiles:     path = "/usr"; break;
+        case SpecialFolder::System:           path = "/usr/lib"; break;
+        case SpecialFolder::Fonts:            path = "/usr/share/fonts"; break;
+        case SpecialFolder::Templates:        path = h + "/Templates"; break;
         default:                              return "";
     }
+
+    // `GetFolderPathCore.Unix.cs:26-47`. Note what the DEFAULT does: `None` VERIFIES, and returns
+    // "" when the directory is not readable. Before #2320 this port returned every path
+    // unconditionally, so a caller could not tell a real directory from a name.
+    if (path.empty() || option == SpecialFolderOption::DoNotVerify || readable(path)) return path;
+    if (option == SpecialFolderOption::None) return "";
+    createDirectoryTree(path);
+    return path;
 #endif
 }
 
