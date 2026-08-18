@@ -118,17 +118,28 @@ using System::Globalization::NumberStyles;
 // (e.g. trailing garbage after the number) still take precedence over this overflow, matching
 // real .NET's own explicitly-commented precedence rule.
 //
-// A deliberate, documented DEVIATION from real .NET for the *unsigned* parsers specifically:
-// real .NET's general (non-Integer-style) parse path allows a negative-indicating token (a
-// literal '-' or a closed '(...)') to reach an unsigned type's buffer conversion, where it then
-// fails with OverflowException (via TryNumberBufferToBinaryInteger's
-// `!TInteger.IsSigned && number.IsNegative` check) rather than FormatException -- except for an
-// all-zero magnitude ("-0"), which real .NET actually accepts as positive zero. This port does
-// not replicate that: consistent with this file's pre-existing Integer-style convention (a
-// leading '-' was already a hard, immediate reject before this extension), any negative-
-// indicating token in an unsigned parse is rejected outright as a format failure. This keeps
-// unsigned-parsing behavior uniform across every style rather than importing one more real-.NET
-// edge case whose only practical effect is which exception TYPE a clearly-invalid input throws.
+// THE UNSIGNED PARSERS' DEVIATION IS GONE (ticket #2362, 2026-08-18). It stood for a year and
+// it was recorded here, so it is worth stating what it was and why removing it was the right
+// call rather than the tidy one.
+//
+// Real .NET lets a negative-indicating token (a literal '-' or a closed "(...)") reach an
+// unsigned type's buffer conversion, where `!TInteger.IsSigned && number.IsNegative`
+// (Number.Parsing.cs:157) turns it into an OverflowException -- except for an all-zero magnitude
+// with no decimal separator, which is accepted as positive zero. This port used to reject every
+// such token in the GRAMMAR, as a FormatException, on the argument that the only practical
+// effect was which exception TYPE a clearly-invalid input throws.
+//
+// That argument was wrong on its own terms, and the reference is why: "-0" is not a
+// clearly-invalid input, it is a VALID one that returns 0. So the old rule did not merely
+// substitute one exception for another -- it rejected an input .NET accepts. And the two rows
+// could not be separated: repairing "-0" alone would have left "-1" diverging, which is worse
+// than the old consistent rule. The grammar, the all-zero normalisation and the
+// negative-is-overflow rejection therefore landed together.
+//
+//     UInt32::Parse("-1")     OverflowException
+//     UInt32::Parse("-0")     0
+//     UInt32::Parse("-0.0")   OverflowException   (a decimal separator keeps the sign)
+//
 struct IntegerNumberStylesParser {
 
     // Invariant-culture separators/symbol this port's Parse/TryParse grammar uses -- see the
@@ -443,12 +454,26 @@ struct IntegerNumberStylesParser {
         return true;
     }
 
-    // Unsigned counterpart of TryParseSignedCore. NumberStyles.Integer/.Number/.Currency as
-    // applied to an unsigned type still allow AllowLeadingSign/AllowTrailingSign in principle
-    // for a literal "+" (matching real .NET's UInt32.Parse accepting a leading '+'), but any
-    // token that would indicate a negative value ('-', or a closed "(...)") is always rejected
-    // as a format failure -- see the class doc-comment's "deliberate DEVIATION" note for why
-    // this port doesn't chase real .NET's negative-unsigned-throws-OverflowException quirk.
+    // Unsigned counterpart of TryParseSignedCore, and now a near-exact mirror of it.
+    //
+    // TICKET #2362 (2026-08-18) ended a long-standing deliberate deviation. This core used to
+    // reject a '-' or a '(' in the GRAMMAR, before any digit was folded, so UInt32::Parse("-1")
+    // was a FormatException. .NET accepts the sign grammatically and fails later, in
+    // TryNumberBufferToBinaryInteger's `(!TInteger.IsSigned && number.IsNegative)`
+    // (Number.Parsing.cs:157, and again at :369) -- which is an OverflowException.
+    //
+    // THE FAMILY HAD TO MOVE TOGETHER, because there are TWO rows and they disagree:
+    //
+    //     UInt32::Parse("-1")     .NET: OverflowException      here, before: FormatException
+    //     UInt32::Parse("-0")     .NET: 0                      here, before: FormatException
+    //     UInt32::Parse("-0.0")   .NET: OverflowException      here, before: FormatException
+    //
+    // "-0" does not fail at all, because Number.Parsing.Common.cs:259-268 clears IsNegative when
+    // StateNonZero was never set and no decimal separator was seen. Repairing only that row
+    // would have aligned one spelling and left "-1" diverging, which is worse than the old
+    // consistent rule -- so the grammar, the normalisation and the rejection all land together.
+    //
+    // A literal '+' was already accepted, matching .NET.
     static bool TryParseUnsignedCore(const std::string& s, NumberStyles style,
                                       SharpRuntime::ulongcs& result, bool& overflowed) {
         overflowed = false;
@@ -475,19 +500,21 @@ struct IntegerNumberStylesParser {
         // consumed a sign" check, so e.g. UInt32::TryParse("++5", NumberStyles::Integer, ...)
         // incorrectly returned true with result 5, and "5++" (multiple trailing signs) was
         // likewise wrongly accepted -- confirmed via a standalone repro before this fix.
-        bool haveSign = false, haveCurrency = false;
+        bool haveSign = false, haveCurrency = false, haveParen = false, negative = false;
         for (bool matched = true; matched; ) {
             matched = false;
             if (allowLeadingWhite && i < n && std::isspace(static_cast<unsigned char>(s[i]))) {
                 while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
                 matched = true;
-            } else if (allowLeadingSign && !haveSign && i < n && s[i] == '+') { haveSign = true; ++i; matched = true; }
-            else if (allowCurrency && !haveCurrency &&
+            } else if (allowLeadingSign && !haveSign && i < n && (s[i] == '+' || s[i] == '-')) {
+                negative = (s[i] == '-'); haveSign = true; ++i; matched = true;
+            } else if (allowParens && !haveSign && i < n && s[i] == '(') {
+                haveParen = true; haveSign = true; negative = true; ++i; matched = true;
+            } else if (allowCurrency && !haveCurrency &&
                      s.compare(i, kCurrencySymbol.size(), kCurrencySymbol) == 0) {
                 haveCurrency = true; i += kCurrencySymbol.size(); matched = true;
             }
         }
-        if (i < n && (s[i] == '-' || (allowParens && s[i] == '('))) return false;
 
         DigitScan scan;
         ScanDigitsAndExponent(s, i, style, scan);
@@ -497,15 +524,16 @@ struct IntegerNumberStylesParser {
             while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
 
         // Trailing tokens: same interleaved-whitespace treatment as the leading loop above (and
-        // TryParseSignedCore's trailing loop) -- see those comments for the full rationale. The
-        // trailing-minus rejection is checked after the loop settles, so it still correctly
-        // rejects a '-' appearing after a trailing '+'/currency/whitespace has been consumed.
+        // TryParseSignedCore's trailing loop) -- see those comments for the full rationale.
         // `haveSign` is the SAME flag the leading loop above uses, so a sign already consumed on
         // either side blocks a second one on the other -- see that loop's comment for why.
         for (bool matched = true; matched; ) {
             matched = false;
-            if (allowTrailingSign && !haveSign && i < n && s[i] == '+') { haveSign = true; ++i; matched = true; }
-            else if (allowCurrency && !haveCurrency &&
+            if (allowTrailingSign && !haveSign && i < n && (s[i] == '+' || s[i] == '-')) {
+                negative = (s[i] == '-'); haveSign = true; ++i; matched = true;
+            } else if (haveParen && i < n && s[i] == ')') {
+                haveParen = false; ++i; matched = true;
+            } else if (allowCurrency && !haveCurrency &&
                      s.compare(i, kCurrencySymbol.size(), kCurrencySymbol) == 0) {
                 haveCurrency = true; i += kCurrencySymbol.size(); matched = true;
             } else if (allowTrailingWhite && i < n && std::isspace(static_cast<unsigned char>(s[i]))) {
@@ -513,15 +541,26 @@ struct IntegerNumberStylesParser {
                 matched = true;
             }
         }
-        if (i < n && s[i] == '-') return false; // trailing minus: same rejection as leading
-
+        if (haveParen) return false;   // '(' opened but never closed
         if (i != n) return false;
 
         // .NET's all-zero normalisation, the same transcription as the signed core above
-        // (`Number.Parsing.Common.cs:259-268`). Only the scale half applies here: a '-' never
-        // reaches this point on the unsigned path, which is this parser's own long-standing
-        // deviation and is documented on TryParseUnsignedCore.
-        if (scan.digitsCount == 0) scan.scale = 0;
+        // (`Number.Parsing.Common.cs:259-268`). BOTH halves matter here, and the sign half is
+        // the whole reason #2362 could not repair one row at a time: it is what makes
+        // `UInt32::Parse("-0")` a plain 0 while `UInt32::Parse("-0.0")` overflows.
+        //
+        // Note for #2356: the `!sawDecimal` guard is UNOBSERVABLE in the signed core -- negating
+        // zero is zero either way, and that ticket recorded its mutation as not caught. Here it
+        // is observable, and it is the only thing separating those two rows.
+        if (scan.digitsCount == 0) {
+            scan.scale = 0;
+            if (!scan.sawDecimal) negative = false;
+        }
+
+        // .NET's `(!TInteger.IsSigned && number.IsNegative)` (Number.Parsing.cs:157). It sits in
+        // the SAME disjunction as the digit-count overflow there, so the two are indistinguishable
+        // to a caller -- both are OverflowException -- and the order between them here is free.
+        if (negative) { overflowed = true; return true; }
 
         if (!TryFoldScale(scan)) { overflowed = true; return true; }
 

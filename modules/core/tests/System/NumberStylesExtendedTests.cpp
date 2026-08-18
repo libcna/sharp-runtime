@@ -131,11 +131,15 @@ TEST(NumberStylesExtendedTests, AllowParentheses_UnclosedIsInvalid) {
 }
 
 TEST(NumberStylesExtendedTests, AllowParentheses_UnsignedTypeRejectsParens) {
-    // Parens always indicate a negative value; this port rejects that outright for unsigned
-    // types rather than importing real .NET's negative-unsigned-throws-Overflow quirk -- see
-    // TryParseUnsignedCore's doc-comment.
+    // Parens always indicate a negative value, so an unsigned parse still fails. #2362
+    // (2026-08-18) changed WHY: the port used to reject the token in the grammar, and now it
+    // accepts it and overflows, as .NET does. TryParse reports both the same way -- which is
+    // exactly why this test kept passing across the change and why Fix2362_* exists to pin the
+    // exception type that TryParse cannot show.
     SharpRuntime::uintcs out;
     EXPECT_FALSE(UInt32::TryParse("(5)", NumberStyles::Integer | NumberStyles::AllowParentheses, nullptr, out));
+    EXPECT_THROW((void)UInt32::Parse("(5)", NumberStyles::Integer | NumberStyles::AllowParentheses, nullptr),
+                 System::OverflowException);
 }
 
 // -----------------------------------------------------------------------
@@ -151,8 +155,11 @@ TEST(NumberStylesExtendedTests, AllowTrailingSign_PositiveAfterDigits) {
 }
 
 TEST(NumberStylesExtendedTests, AllowTrailingSign_UnsignedRejectsTrailingMinus) {
+    // As above: still a failure, but since #2362 it is a RANGE failure rather than a grammar one.
     SharpRuntime::uintcs out;
     EXPECT_FALSE(UInt32::TryParse("42-", NumberStyles::Integer | NumberStyles::AllowTrailingSign, nullptr, out));
+    EXPECT_THROW((void)UInt32::Parse("42-", NumberStyles::Integer | NumberStyles::AllowTrailingSign, nullptr),
+                 System::OverflowException);
 }
 
 TEST(NumberStylesExtendedTests, AllowTrailingSign_UnsignedAcceptsTrailingPlus) {
@@ -477,9 +484,10 @@ TEST(IntegerAllowExponentTests, Fix2356_TheSignIsDroppedToo_ButOnlyWithoutADecim
     // HONEST LIMIT OF THESE ROWS. On the signed path both spellings are 0 either way, and on the
     // unsigned path a '-' never gets this far, so THE `!sawDecimal` GUARD IS CURRENTLY
     // UNOBSERVABLE: a mutation that drops it is not caught, by this suite or any other, and was
-    // measured not to be (#2356 mutation M2). It is kept because it is a faithful transcription
-    // of the reference line and becomes live the moment #2362 lets a '-' reach the unsigned
-    // buffer -- not because a test defends it. The rows below still pin the values themselves.
+    // measured not to be (#2356 mutation M2). It stays unobservable HERE -- negating zero is
+    // zero either way -- but #2362 landed on 2026-08-18, so the same guard in the UNSIGNED core
+    // is now live and load-bearing: it is the only thing separating UInt32::Parse("-0") from
+    // UInt32::Parse("-0.0"). See Fix2362_* below. The rows below still pin the values themselves.
     EXPECT_EQ(0, Int32::Parse("-0", NumberStyles::Any, nullptr));
     EXPECT_EQ(0, Int32::Parse("-0.0", NumberStyles::Number, nullptr));
     EXPECT_EQ(0, Int32::Parse("-0E-1", NumberStyles::Any, nullptr));
@@ -488,15 +496,66 @@ TEST(IntegerAllowExponentTests, Fix2356_TheSignIsDroppedToo_ButOnlyWithoutADecim
     // a TRAILING sign as well as a leading one. This port transcribes that position.
     EXPECT_EQ(0, Int32::Parse("0-", NumberStyles::Any, nullptr));
 
-    // WHERE THIS PORT STILL DIVERGES, PINNED RATHER THAN QUIETLY FIXED. On the UNSIGNED path a
-    // '-' is rejected by the grammar before any of this runs, so UInt32::Parse("-0") is a
-    // FormatException where .NET returns 0. That is not a #2356 defect: it is the long-standing,
-    // deliberate deviation documented on TryParseUnsignedCore, which declines to reproduce
-    // .NET's negative-unsigned-throws-OverflowException quirk. Repairing the "-0" row alone
-    // would align one spelling and leave "-1" diverging, which is worse than a consistent rule.
-    // Ticket #2362 holds it.
-    EXPECT_THROW((void)UInt32::Parse("-0", NumberStyles::Any, nullptr), System::FormatException);
-    EXPECT_THROW((void)UInt32::Parse("-1", NumberStyles::Any, nullptr), System::FormatException);
+    // FLIPPED by #2362 (2026-08-18). This block used to pin the divergence: on the unsigned path
+    // a '-' was rejected by the grammar before any of the above ran, so UInt32::Parse("-0") was a
+    // FormatException where .NET returns 0. The two rows could not be separated -- repairing "-0"
+    // alone would have left "-1" diverging -- so the family moved together, and it has.
+    EXPECT_EQ(0u, UInt32::Parse("-0", NumberStyles::Any, nullptr));
+    EXPECT_THROW((void)UInt32::Parse("-1", NumberStyles::Any, nullptr), System::OverflowException);
+}
+
+// #2362 (2026-08-18) ended the unsigned parsers' one deliberate deviation: a negative-indicating
+// token is now grammar, and the rejection is RANGE, exactly as in .NET
+// (Number.Parsing.cs:157, `!TInteger.IsSigned && number.IsNegative`).
+//
+// The reason the family had to move together is the second row. "-0" is not a clearly-invalid
+// input whose exception type merely differed -- it is a VALID input that returns 0, because
+// Number.Parsing.Common.cs:259-268 clears IsNegative when no nonzero digit and no decimal
+// separator were seen. So the old rule rejected something .NET accepts, and fixing only that row
+// would have left "-1" throwing the wrong type.
+TEST(IntegerAllowExponentTests, Fix2362_ANegativeUnsignedValueOverflowsAndMinusZeroIsZero) {
+    const auto A = NumberStyles::Any;
+
+    // Row 1: a real negative magnitude. Overflow, not format.
+    EXPECT_THROW((void)UInt32::Parse("-1", A, nullptr), System::OverflowException);
+    EXPECT_THROW((void)UInt64::Parse("-1", A, nullptr), System::OverflowException);
+    EXPECT_THROW((void)UInt16::Parse("-1", A, nullptr), System::OverflowException);
+    EXPECT_THROW((void)Byte::Parse("-1", A, nullptr), System::OverflowException);
+
+    // Row 2: an all-zero magnitude with no decimal separator. The sign is dropped and the value
+    // is plain zero, at any exponent, because the scale is discarded in the same block.
+    EXPECT_EQ(0u, UInt32::Parse("-0", A, nullptr));
+    EXPECT_EQ(0u, UInt32::Parse("-000", A, nullptr));
+    EXPECT_EQ(0u, UInt32::Parse("-0E30", A, nullptr));
+    EXPECT_EQ(0u, UInt64::Parse("-0", A, nullptr));
+    EXPECT_EQ(0u, Byte::Parse("-0", A, nullptr));
+
+    // Row 3: the asymmetry. A decimal separator keeps the sign, so this one overflows. This is
+    // the single assertion that makes #2356's `!sawDecimal` guard observable anywhere.
+    EXPECT_THROW((void)UInt32::Parse("-0.0", NumberStyles::Number, nullptr), System::OverflowException);
+    EXPECT_THROW((void)UInt32::Parse("-0.", NumberStyles::Number, nullptr), System::OverflowException);
+
+    // The normalisation runs after the trailing-token loop, so it reaches a TRAILING sign too --
+    // the same position the signed core transcribes.
+    EXPECT_EQ(0u, UInt32::Parse("0-", A, nullptr));
+    EXPECT_THROW((void)UInt32::Parse("1-", A, nullptr), System::OverflowException);
+
+    // Parentheses are the other negative-indicating token, and they follow the same rule.
+    EXPECT_THROW((void)UInt32::Parse("(1)", A, nullptr), System::OverflowException);
+    EXPECT_EQ(0u, UInt32::Parse("(0)", A, nullptr));
+    // An unclosed paren is still a FORMAT failure -- the grammar never completed.
+    EXPECT_THROW((void)UInt32::Parse("(1", A, nullptr), System::FormatException);
+
+    // A literal '+' was always accepted and is unchanged, and two signs are still a format error.
+    EXPECT_EQ(42u, UInt32::Parse("+42", A, nullptr));
+    EXPECT_THROW((void)UInt32::Parse("--1", A, nullptr), System::FormatException);
+    EXPECT_THROW((void)UInt32::Parse("-1-", A, nullptr), System::FormatException);
+
+    // TryParse reports the same split through its bool, without throwing.
+    SharpRuntime::uintcs out = 7;
+    EXPECT_FALSE(UInt32::TryParse("-1", A, nullptr, out));
+    EXPECT_TRUE(UInt32::TryParse("-0", A, nullptr, out));
+    EXPECT_EQ(out, 0u);
 }
 
 TEST(IntegerAllowExponentTests, Fix2268_TheDecimalPointRowsAreUntouched) {

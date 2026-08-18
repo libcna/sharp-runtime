@@ -81,7 +81,9 @@ TEST(Ticket1717Tests, SByte_HexAndInteger) {
 TEST(Ticket1717Tests, UInt16_HexAndInteger) {
     EXPECT_EQ(UInt16::Parse("FFFF", NumberStyles::HexNumber, nullptr), 65535);
     EXPECT_EQ(UInt16::Parse("+42", NumberStyles::Integer, nullptr), 42);
-    EXPECT_THROW(UInt16::Parse("-1", NumberStyles::Integer, nullptr), System::FormatException);
+    // #2362 (2026-08-18): a negative unsigned value is an OverflowException, as .NET has it
+    // (Number.Parsing.cs:157), not a FormatException. The sign is grammar; the rejection is range.
+    EXPECT_THROW(UInt16::Parse("-1", NumberStyles::Integer, nullptr), System::OverflowException);
 }
 
 TEST(Ticket1717Tests, UInt32_HexAndInteger) {
@@ -98,7 +100,7 @@ TEST(Ticket1717Tests, UInt64_HexAndInteger) {
 
 TEST(Ticket1717Tests, Byte_HexAndInteger) {
     EXPECT_EQ(Byte::Parse("FF", NumberStyles::HexNumber, nullptr), 255);
-    EXPECT_THROW(Byte::Parse("-1", NumberStyles::Integer, nullptr), System::FormatException);
+    EXPECT_THROW(Byte::Parse("-1", NumberStyles::Integer, nullptr), System::OverflowException);   // #2362
     EXPECT_THROW(Byte::Parse("256", NumberStyles::Integer, nullptr), System::OverflowException);
 }
 
