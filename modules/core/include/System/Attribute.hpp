@@ -13,15 +13,47 @@ namespace System {
  *
  * C++ counterpart of .NET System.Attribute.
  *
- * In .NET, Attribute is abstract with a protected constructor and uses
- * reflection to implement field-by-field Equals/GetHashCode. In C++:
- * - The constructor is public so that the class can be instantiated in tests;
- *   treat it as logically abstract — derive from it, do not instantiate directly.
- * - Equals() and GetHashCode() default to object identity; subclasses should
- *   override them if they need value equality.
+ * In .NET, Attribute is abstract with a **protected** constructor and uses reflection to
+ * implement field-by-field Equals/GetHashCode.
+ *
+ * @par The constructor is protected too, since ticket #2339
+ * It used to be public, "so that the class can be instantiated in tests", with a doc-comment
+ * asking callers to *treat it as logically abstract*. A comment asking callers to behave is not a
+ * contract; .NET spells the same intent in the language, and so does this port now. `System::
+ * Attribute a;` no longer compiles — derive, as .NET requires.
+ *
+ * @par The identity Equals is a PERMANENT DEVIATION, not a TODO
+ * .NET compares every instance field and derives its hash from the first non-array one. **That is
+ * reflection**, which `CLAUDE.md` lists as permanently out of scope, and a C++ base class cannot
+ * enumerate a derived class's fields at all — so the gap is not closable rather than merely
+ * unclosed. What #2339 could do, and did, is make the incompatible default unreachable as a
+ * concrete type.
+ *
+ * **The consequence is measured and must not be forgotten: forty-six types in this repository
+ * derive from Attribute and not one overrides `Equals`, so all forty-six inherit object
+ * identity.** Two independently constructed `CLSCompliantAttribute(true)` objects therefore
+ * compare **unequal** here and **equal** in .NET.
+ *
+ * A subclass that needs value equality must override **both** `Equals` and `GetHashCode` — both
+ * are already `virtual`, so no new hook was invented for this. Overriding only one breaks the
+ * equals/hash contract silently.
+ *
  * - TypeId returns the std::type_info of the most-derived type.
  */
 class Attribute {
+protected:
+    /**
+     * @brief Protected default constructor, matching .NET's `protected Attribute()`.
+     *
+     * Ticket #2339 made this protected. The copy and move members are protected with it, so a
+     * caller cannot reach the base through a slice either.
+     */
+    Attribute() = default;
+    Attribute(const Attribute&) = default;
+    Attribute(Attribute&&) = default;
+    Attribute& operator=(const Attribute&) = default;
+    Attribute& operator=(Attribute&&) = default;
+
 public:
     /** @brief Virtual destructor for safe polymorphic destruction. */
     virtual ~Attribute() = default;
@@ -31,9 +63,10 @@ public:
     /**
      * @brief Determines whether this instance is equal to another attribute.
      *
-     * C++ counterpart of .NET Attribute.Equals(object). Default implementation
-     * uses object identity. Subclasses should override this to compare fields
-     * when value equality is required.
+     * C++ counterpart of .NET Attribute.Equals(object). **The default is object identity, and
+     * that is a permanent deviation** — .NET compares every instance field, which is reflection.
+     * See the class doc-comment. A subclass that needs value equality must override this AND
+     * GetHashCode; all forty-six subclasses in this repository currently override neither.
      * @param other The attribute to compare with.
      * @return true if the two attributes are the same object instance.
      */
