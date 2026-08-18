@@ -260,6 +260,14 @@ Unblocks **#2170, #2172, #2185, #2215, #2246, #2250, #2269, #2289, #2299**.
 **Unchanged:** a vtable or base-class change still asks per action, and #1888, #1889 and #1896
 stay declined.
 
+**One correction, recorded rather than quietly fixed.** SA-10's grant bulk-unblocked nine tickets,
+and **#2170 was among them in error**: it adds `IEqualityComparer<T>` as a **base class**, which
+introduces a second vptr — measured, `sizeof` 8 → 16 with the subobject at offset 8. That is a
+base-class change, which the paragraph above excludes in terms, so #2170 **returned to
+`needs_user`** on the same day. Two further notes named SA-10 where SA-3 (#2185, a private data
+member) and SA-5 (#2269, a behaviour narrowing) are the right approvals; those tickets stay
+unblocked and only the citation was wrong.
+
 ---
 
 ## 4h. SA-11 — five decisions taken on 2026-08-18
