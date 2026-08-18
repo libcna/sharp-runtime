@@ -18,6 +18,7 @@
 #include "System/Net/Http/HttpMethod.hpp"
 #include "System/Net/Http/HttpContent.hpp"
 #include "System/Net/Http/StringContent.hpp"
+#include "System/Text/Encoding.hpp"
 #include "System/Net/Http/ByteArrayContent.hpp"
 #include "System/Net/Http/HttpRequestMessage.hpp"
 #include "System/Net/Http/HttpResponseMessage.hpp"
@@ -147,7 +148,7 @@ TEST(StringContentTests, DefaultContentType) {
 }
 
 TEST(StringContentTests, CustomMediaType) {
-    StringContent c("{}", "utf-8", "application/json");
+    StringContent c("{}", System::Text::Encoding::UTF8(), "application/json");
     EXPECT_EQ(c.getContentTypeProperty(), "application/json");
     EXPECT_EQ(c.getCharSetProperty(), "utf-8");
 }
@@ -707,9 +708,9 @@ TEST(MultipartContentTests, ReadAsString_EmptyContent_JustBoundaries) {
 
 TEST(MultipartContentTests, ReadAsString_ThreeParts_ExactByteLayout) {
     MultipartContent c("mixed", "B");
-    c.Add(std::make_shared<StringContent>("one", "", ""));
-    c.Add(std::make_shared<StringContent>("two", "", ""));
-    c.Add(std::make_shared<StringContent>("three", "", ""));
+    c.Add(std::make_shared<StringContent>("one", nullptr, ""));
+    c.Add(std::make_shared<StringContent>("two", nullptr, ""));
+    c.Add(std::make_shared<StringContent>("three", nullptr, ""));
     std::string body = c.ReadAsString();
 
     EXPECT_EQ(body,
@@ -1712,8 +1713,11 @@ TEST(HttpControlCharacterTests, ParseStatusLine_ControlCharacter_ThrowsHttpReque
 
 TEST(HttpControlCharacterTests, ContentMediaTypeAndCharset_ControlCharacter_ThrowsFormatException) {
     for (const auto& bad : controlBearingFields()) {
-        EXPECT_THROW(StringContent("body", "utf-8", bad), System::FormatException);
-        EXPECT_THROW(StringContent("body", bad, "text/plain"), System::FormatException);
+        EXPECT_THROW(StringContent("body", System::Text::Encoding::UTF8(), bad),
+                     System::FormatException);
+        // #2070: the CHARSET can no longer carry a control character, because it is no longer a
+        // caller-supplied string -- it is the Encoding's own web name. The state is now
+        // unrepresentable rather than rejected, which is the stronger of the two.
         EXPECT_THROW(ByteArrayContent(std::vector<SharpRuntime::bytecs>{1, 2}, bad),
                      System::FormatException);
 
@@ -1728,7 +1732,7 @@ TEST(HttpControlCharacterTests, ContentMediaTypeAndCharset_ControlCharacter_Thro
 
 // The BODY is payload, not a protocol field, and must not be validated.
 TEST(HttpControlCharacterTests, ContentBodyWithControlCharacters_StillAccepted) {
-    StringContent content("line1\r\nline2\r\n", "utf-8", "text/plain");
+    StringContent content("line1\r\nline2\r\n", System::Text::Encoding::UTF8(), "text/plain");
     EXPECT_EQ(content.ReadAsString(), "line1\r\nline2\r\n");
     ByteArrayContent bytes(std::vector<SharpRuntime::bytecs>{'\r', '\n', 0, 'x'});
     EXPECT_EQ(bytes.ReadAsByteArray().size(), 4u);
@@ -2097,15 +2101,53 @@ TEST(NetHttpGatedBehaviourPins, Fix2069_TheStatusCodeDomainIsZeroToNineHundredNi
     EXPECT_EQ(response.getStatusCodeProperty(), HttpStatusCode::OK);
 }
 
-// #2070 (SR-AUD-317) -- the charset is a label; the bytes are always the
-// storage bytes. Whether .NET encodes through the label is unverified.
-TEST(NetHttpGatedBehaviourPins, Pin2070_StringContentEmitsStorageBytesUnderAnyCharsetLabel) {
-    StringContent content("\xc3\xa9", "utf-16", "text/plain");
-    auto bytes = content.ReadAsByteArray();
-    ASSERT_EQ(bytes.size(), 2u);
-    EXPECT_EQ(static_cast<unsigned>(bytes[0]), 0xc3u);
-    EXPECT_EQ(static_cast<unsigned>(bytes[1]), 0xa9u);
-    EXPECT_EQ(content.getCharSetProperty(), "utf-16");
+// #2070 (SR-AUD-317) RESOLVED, and the pin is inverted. The charset used to be a LABEL: the
+// bytes were always the storage bytes, so `StringContent("\xc3\xa9", "utf-16")` announced
+// charset=utf-16 and emitted the two UTF-8 bytes c3 a9. A conforming server decoded that pair as
+// one UTF-16 code unit and got U+A9C3 -- a wrong character, silently.
+//
+// .NET makes the contradiction UNREPRESENTABLE rather than validating against it: the
+// constructor takes an Encoding, serialises through it (StringContent.cs:90-98) and labels the
+// header with that same object's WebName (:73). One source of truth.
+TEST(NetHttpGatedBehaviourPins, Fix2070_TheBytesAreEncodedThroughTheDeclaredCharset) {
+    StringContent utf16("\xc3\xa9", System::Text::Encoding::Unicode(), "text/plain");
+    EXPECT_EQ(utf16.getCharSetProperty(), "utf-16");
+    const auto bytes = utf16.ReadAsByteArray();
+    ASSERT_EQ(bytes.size(), 2u) << "one UTF-16 code unit, not two UTF-8 storage bytes";
+    EXPECT_EQ(static_cast<unsigned>(bytes[0]), 0xe9u);
+    EXPECT_EQ(static_cast<unsigned>(bytes[1]), 0x00u);
+
+    // The default is UTF-8 and its bytes are the storage bytes, so nothing an ordinary caller
+    // does has moved.
+    StringContent def("\xc3\xa9");
+    EXPECT_EQ(def.getCharSetProperty(), "utf-8");
+    const auto defaultBytes = def.ReadAsByteArray();
+    ASSERT_EQ(defaultBytes.size(), 2u);
+    EXPECT_EQ(static_cast<unsigned>(defaultBytes[0]), 0xc3u);
+    EXPECT_EQ(static_cast<unsigned>(defaultBytes[1]), 0xa9u);
+    // ...and an explicit nullptr means the same thing, which is `encoding ??= DefaultStringEncoding`.
+    EXPECT_EQ(StringContent("\xc3\xa9", nullptr).ReadAsByteArray(), defaultBytes);
+    EXPECT_EQ(StringContent("\xc3\xa9", System::Text::Encoding::UTF8()).ReadAsByteArray(), defaultBytes);
+}
+
+TEST(NetHttpGatedBehaviourPins, Fix2070_TheLabelAndTheBytesCannotDisagreeForAnyEncoding) {
+    // The property, rather than one example of it: whatever encoding is handed in, the header
+    // names THAT encoding and the body is what THAT encoding produced. There is no third source.
+    struct Row { std::shared_ptr<System::Text::Encoding> encoding; const char* webName; };
+    const Row rows[] = {
+        {System::Text::Encoding::UTF8(), "utf-8"},
+        {System::Text::Encoding::Unicode(), "utf-16"},
+        {System::Text::Encoding::ASCII(), "us-ascii"},
+        {System::Text::Encoding::Latin1(), "iso-8859-1"},
+        {System::Text::Encoding::UTF32(), "utf-32"},
+    };
+    for (const Row& row : rows) {
+        SCOPED_TRACE(row.webName);
+        StringContent content("\xc3\xa9", row.encoding, "text/plain");
+        EXPECT_EQ(content.getCharSetProperty(), row.webName);
+        const auto expected = row.encoding->GetBytes(std::string("\xc3\xa9"));
+        EXPECT_EQ(content.ReadAsByteArray(), expected);
+    }
 }
 
 // #2071 (SR-AUD-318's limits half) LANDED. Response reads are bounded by
