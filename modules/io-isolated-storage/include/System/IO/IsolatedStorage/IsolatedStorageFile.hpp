@@ -67,6 +67,27 @@ namespace System::IO::IsolatedStorage
         [[nodiscard]] std::filesystem::path fullPath(const std::string& relativePath,
                                                      const char* paramName) const;
 
+        /**
+         * @brief Splits a search pattern into the directory to enumerate and the glob to match.
+         *
+         * Ticket #2209. `GetFileNames("sub/" "*")` must list `sub`'s files, matching .NET, whose two
+         * enumeration doors delegate to `Directory.EnumerateFiles(RootDirectory, searchPattern)`
+         * and whose `FileSystemEnumerableFactory.NormalizeInputs` splits the pattern at its last
+         * separator (`FileSystemEnumerableFactory.cs:45-56`).
+         *
+         * The directory half goes through fullPath(), so it stays inside the store. .NET's does
+         * **not** — see the implementation comment for why this port is deliberately the more
+         * restrictive of the two.
+         *
+         * @param searchPattern The caller's pattern.
+         * @param glob          Receives the final segment, or `"*"` when the pattern ends in a
+         *                      separator or is empty.
+         * @return The directory to enumerate.
+         * @throws System::ArgumentException if the directory half leaves the store.
+         */
+        [[nodiscard]] std::filesystem::path resolveSearchScope(const std::string& searchPattern,
+                                                               std::string&       glob) const;
+
         /** @throws System::ObjectDisposedException if this store has been Close()d/Remove()d/Dispose()d. */
         void throwIfDisposed() const;
 

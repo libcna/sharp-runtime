@@ -836,6 +836,82 @@ namespace {
     }
 
     // =====================================================================================
+    // Ticket #2209 -- a directory-qualified search pattern.
+    // =====================================================================================
+
+    TEST_F(IsolatedStorageConfinementTest, Fix2209_ADirectoryQualifiedPatternEnumeratesThatDirectory)
+    {
+        // Before #2209 both doors iterated the root and globbed the WHOLE pattern against a bare
+        // filename, so this returned nothing although the file exists. .NET's own source states
+        // the contract in a comment above each method -- "foo\\abc*.txt will give all abc*.txt
+        // files in foo directory" -- and implements it through
+        // FileSystemEnumerableFactory.NormalizeInputs (FileSystemEnumerableFactory.cs:45-56).
+        auto s = store();
+        s.CreateDirectory("sub");
+        s.CreateDirectory("sub/deeper");
+        { auto st = s.CreateFile("sub/nested.dat"); st.Close(); }
+        { auto st = s.CreateFile("sub/other.txt"); st.Close(); }
+        { auto st = s.CreateFile("root.dat"); st.Close(); }
+
+        EXPECT_EQ(s.GetFileNames("sub/*").size(), 2u);
+        EXPECT_EQ(s.GetFileNames("sub/*.dat"), std::vector<std::string>{"nested.dat"});
+        EXPECT_EQ(s.GetDirectoryNames("sub/*"), std::vector<std::string>{"deeper"});
+
+        // THE RESULT IS A BARE NAME, not a sub-path. .NET maps each hit through
+        // Path.GetFileName (IsolatedStorageFile.cs:177) precisely because the store hides its
+        // own root, so returning "sub/nested.dat" would leak a layout the type exists to hide.
+        const auto names = s.GetFileNames("sub/*.dat");
+        ASSERT_EQ(names.size(), 1u);
+        EXPECT_EQ(names[0].find('/'), std::string::npos);
+
+        // A trailing separator means "everything in that directory" --
+        // NormalizeInputs' own "we also allowed for expression to be \"foo\\\"".
+        EXPECT_EQ(s.GetFileNames("sub/").size(), 2u);
+
+        // An unqualified pattern is unchanged, and still does not descend.
+        EXPECT_EQ(s.GetFileNames("*"), std::vector<std::string>{"root.dat"});
+        EXPECT_EQ(s.GetDirectoryNames("*"), std::vector<std::string>{"sub"});
+
+        // A directory that does not exist is empty, not an error -- the same answer the root
+        // gives when the store has just been created.
+        EXPECT_TRUE(s.GetFileNames("nosuchdir/*").empty());
+    }
+
+    TEST_F(IsolatedStorageConfinementTest, Fix2209_TheDirectoryHalfIsConfinedAndDotNetsIsNot)
+    {
+        // A DELIBERATE NARROWING, pinned so it is a decision rather than an accident. .NET does
+        // not run the search pattern through its containment helper: GetFileNames and
+        // GetDirectoryNames are the only two doors on IsolatedStorageFile that bypass
+        // GetFullPath, so in .NET `GetFileNames("../*")` escapes the store and lists its parent.
+        // This port resolves the directory half through the same fullPath() every other door
+        // uses. Reproducing .NET here would mean opening a confinement hole to match a reference
+        // that has one.
+        auto s = store();
+        { auto st = s.CreateFile("inside.dat"); st.Close(); }
+
+        for (const char* escaping : {"../*", "sub/../../*", "../"}) {
+            EXPECT_THROW((void)s.GetFileNames(escaping), System::ArgumentException) << escaping;
+            EXPECT_THROW((void)s.GetDirectoryNames(escaping), System::ArgumentException) << escaping;
+        }
+
+        // A LEADING SEPARATOR IS NOT AN ESCAPE HERE, and that is a second, older divergence this
+        // test records rather than introduces. .NET rejects a rooted search pattern outright --
+        // NormalizeInputs opens with `if (Path.IsPathRooted(expression)) throw new
+        // ArgumentException(SR.Arg_Path2IsRooted, ...)` (FileSystemEnumerableFactory.cs:29-30).
+        // This port's fullPath() strips leading separators at EVERY door, so "/x" has always
+        // meant "x relative to the store". Rejecting it only in the pattern would make the type
+        // inconsistent with itself, which is worse than a divergence that is uniform.
+        EXPECT_EQ(s.GetFileNames("/*"), std::vector<std::string>{"inside.dat"});
+        EXPECT_TRUE(s.GetFileNames("/etc/*").empty());   // root/etc, which does not exist
+
+        // ...and a harmless ".." that stays inside is fine, because containment is about where
+        // the path LANDS, not about which characters it contains.
+        s.CreateDirectory("a");
+        { auto st = s.CreateFile("a/deep.dat"); st.Close(); }
+        EXPECT_EQ(s.GetFileNames("a/../a/*"), std::vector<std::string>{"deep.dat"});
+    }
+
+    // =====================================================================================
     // The residual this repair deliberately does not close (#2208).
     // =====================================================================================
 

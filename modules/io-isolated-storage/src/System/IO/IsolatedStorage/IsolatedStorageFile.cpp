@@ -237,20 +237,80 @@ namespace System::IO::IsolatedStorage
             throw IsolatedStorageException("Failed to move isolated storage file: " + src);
     }
 
+
+    // -----------------------------------------------------------------------------------------
+    // Ticket #2209 (2026-08-18): a DIRECTORY-QUALIFIED search pattern.
+    //
+    // Both enumeration doors used to iterate rootDirectory_ and glob the whole pattern against a
+    // bare filename, so GetFileNames("sub/*") returned nothing although sub/nested.dat existed.
+    // .NET's own source states the contract in a comment above each method:
+    //
+    //     // foo\abc*.txt will give all abc*.txt files in foo directory
+    //     // foo\data* will give all directory names in foo directory that starts with data
+    //
+    // and implements it by delegating to Directory.EnumerateFiles(RootDirectory, searchPattern),
+    // whose FileSystemEnumerableFactory.NormalizeInputs splits the pattern at its last separator,
+    // joins the directory half onto the root, and matches only the final segment
+    // (FileSystemEnumerableFactory.cs:45-56). The RESULT is still a bare name, not a sub-path:
+    // .NET maps each hit through Path.GetFileName (IsolatedStorageFile.cs:177) precisely because
+    // the store hides its own root.
+    //
+    // ONE DELIBERATE DEVIATION, and it is a narrowing on a security boundary. .NET does NOT run
+    // the pattern through its containment helper -- GetFileNames/GetDirectoryNames are the only
+    // two doors on the type that bypass GetFullPath -- so in .NET, GetFileNames("../*") escapes
+    // the store and lists its parent. This port resolves the directory half through the same
+    // fullPath() every other door uses, so it is rejected. Reproducing the escape would mean
+    // introducing a confinement hole to match a reference that has one; the port is more
+    // RESTRICTIVE here, which SA-8 does not reach, and the asymmetry is pinned by a test.
+    //
+    // "" and "sub/" both mean "everything in that directory", matching NormalizeInputs' own
+    // "We also allowed for expression to be \"foo\\\" which would translate to \"foo\\*\"".
+    std::filesystem::path IsolatedStorageFile::resolveSearchScope(const std::string& searchPattern,
+                                                                  std::string&       glob) const
+    {
+        if (searchPattern.find('\0') != std::string::npos)
+            throw System::ArgumentException("Path must not contain an embedded NUL character.",
+                                            "searchPattern");
+
+        std::size_t split = std::string::npos;
+        for (std::size_t i = 0; i < searchPattern.size(); ++i)
+            if (isDirectorySeparator(searchPattern[i])) split = i;
+
+        if (split == std::string::npos) {
+            glob = searchPattern.empty() ? "*" : searchPattern;
+            return rootDirectory_;
+        }
+
+        glob = searchPattern.substr(split + 1);
+        if (glob.empty()) glob = "*";
+
+        const std::string directoryPart = searchPattern.substr(0, split);
+        // A pattern that is nothing but separators names the root itself, which fullPath()
+        // rejects as empty -- correctly for every other door, and wrongly for this one.
+        std::size_t firstReal = 0;
+        while (firstReal < directoryPart.size() && isDirectorySeparator(directoryPart[firstReal]))
+            ++firstReal;
+        if (firstReal == directoryPart.size()) return rootDirectory_;
+
+        return fullPath(directoryPart, "searchPattern");
+    }
+
     std::vector<std::string> IsolatedStorageFile::GetFileNames(const std::string& searchPattern) const
     {
         throwIfDisposed();
         std::vector<std::string> names;
-        if (!std::filesystem::exists(rootDirectory_)) return names;
+        std::string              glob;
+        const std::filesystem::path scope = resolveSearchScope(searchPattern, glob);
+        if (!std::filesystem::exists(scope)) return names;
         std::error_code ec;
-        std::filesystem::directory_iterator it(rootDirectory_, ec);
+        std::filesystem::directory_iterator it(scope, ec);
         if (ec)
             throw IsolatedStorageException(
                 "Failed to enumerate isolated storage files (" + ec.message() + ")");
         for (const auto& entry : it) {
             if (!entry.is_regular_file(ec) || ec) { ec.clear(); continue; }
             std::string name = entry.path().filename().string();
-            if (globMatch(searchPattern, name))
+            if (globMatch(glob, name))
                 names.push_back(name);
         }
         std::sort(names.begin(), names.end());
@@ -305,16 +365,18 @@ namespace System::IO::IsolatedStorage
     {
         throwIfDisposed();
         std::vector<std::string> names;
-        if (!std::filesystem::exists(rootDirectory_)) return names;
+        std::string              glob;
+        const std::filesystem::path scope = resolveSearchScope(searchPattern, glob);
+        if (!std::filesystem::exists(scope)) return names;
         std::error_code ec;
-        std::filesystem::directory_iterator it(rootDirectory_, ec);
+        std::filesystem::directory_iterator it(scope, ec);
         if (ec)
             throw IsolatedStorageException(
                 "Failed to enumerate isolated storage directories (" + ec.message() + ")");
         for (const auto& entry : it) {
             if (!entry.is_directory(ec) || ec) { ec.clear(); continue; }
             std::string name = entry.path().filename().string();
-            if (globMatch(searchPattern, name))
+            if (globMatch(glob, name))
                 names.push_back(name);
         }
         std::sort(names.begin(), names.end());
