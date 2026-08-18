@@ -612,3 +612,166 @@ TEST(DateOnlyTests, Ticket1880_TryParseFailureAlwaysAssignsMinValue) {
                   "String was not recognized as a valid DateOnly: not-a-date");
     }
 }
+
+// ===========================================================================
+// #1939 — invariant single-format ParseExact (#1929 row 4A)
+// ===========================================================================
+//
+// The approval is deliberately smaller than .NET and does not pretend to be culture-aware: four
+// string-only providerless declarations, the invariant standard O/o and R/r, and a named custom
+// subset. Providers, styles, kind, multi-format and span APIs are other tickets by name.
+
+TEST(DateOnlyTests, Fix1939_TheApprovalsOwnWorkedExamples) {
+    // Quoted from docs/DateTimeExactParsingAndKindDesign.md's 4A approval.
+    EXPECT_EQ(System::DateOnly::ParseExact("2024-06-15", "O").getDayNumberProperty(), 739051);
+    EXPECT_EQ(System::TimeOnly::ParseExact("10:20:30.1234567", "O").getTicksProperty(),
+              372301234567LL);
+    EXPECT_EQ(System::DateOnly::ParseExact("2024-6-5", "yyyy-M-d"), System::DateOnly(2024, 6, 5));
+
+    System::TimeOnly out(1, 1);
+    EXPECT_FALSE(System::TimeOnly::TryParseExact("10:20:30.12345678", "HH:mm:ss.ffffffff", out));
+    EXPECT_EQ(out, System::TimeOnly::getMinValueProperty());
+
+    // ONE OF THE APPROVAL'S EXAMPLES IS NOW STALE, and correcting it is part of the work rather
+    // than a footnote: it says "the same unpadded text still fails general DateOnly::Parse".
+    // #1929 landed the day before and widened the general grammar to accept a one- or two-digit
+    // month and day, so it succeeds now. The example's POINT -- that exact and general parsing are
+    // separate grammars -- is unaffected, and is asserted below with text the general parser
+    // really does reject.
+    System::DateOnly general(1, 1, 1);
+    EXPECT_TRUE(System::DateOnly::TryParse("2024-6-5", general));   // #1929
+    EXPECT_FALSE(System::DateOnly::TryParse("15/06/2024", general));
+    EXPECT_EQ(System::DateOnly::ParseExact("15/06/2024", "dd/MM/yyyy"),
+              System::DateOnly(2024, 6, 15));
+}
+
+TEST(DateOnlyTests, Fix1939_StandardFormatsAndWeekdayAgreement) {
+    EXPECT_EQ(System::DateOnly::ParseExact("2024-06-15", "o"), System::DateOnly(2024, 6, 15));
+    EXPECT_EQ(System::DateOnly::ParseExact("Sat, 15 Jun 2024", "R"), System::DateOnly(2024, 6, 15));
+    EXPECT_EQ(System::DateOnly::ParseExact("Sat, 15 Jun 2024", "r"), System::DateOnly(2024, 6, 15));
+
+    // AGREEMENT is what makes R a validating format rather than a shape: 2024-06-15 is a
+    // Saturday, so naming any other weekday must fail.
+    System::DateOnly out(1, 1, 1);
+    EXPECT_FALSE(System::DateOnly::TryParseExact("Mon, 15 Jun 2024", "R", out));
+    EXPECT_EQ(out, System::DateOnly::MinValue);
+
+    // A one-character format that is not standard is NOT silently custom -- .NET requires "%d",
+    // because a bare "d" is the standard short-date pattern this port does not implement.
+    EXPECT_FALSE(System::DateOnly::TryParseExact("15", "d", out));
+    EXPECT_TRUE(System::DateOnly::TryParseExact("2024-06-15", "yyyy-MM-dd", out));
+}
+
+TEST(DateOnlyTests, Fix1939_TheDigitWidthRuleIsDotNetsNotTheSpecifierCount) {
+    // ParseDigits(str, 1) reads ONE OR TWO digits; ParseDigits(str, n>1) reads exactly n. A
+    // scanner written as "count the specifiers, read that many digits" gets the single-specifier
+    // case wrong in both directions.
+    System::DateOnly out(1, 1, 1);
+    EXPECT_TRUE(System::DateOnly::TryParseExact("2024-6-5", "yyyy-M-d", out));
+    EXPECT_TRUE(System::DateOnly::TryParseExact("2024-06-15", "yyyy-M-d", out))
+        << "one specifier accepts two digits too";
+    EXPECT_FALSE(System::DateOnly::TryParseExact("2024-6-5", "yyyy-MM-dd", out))
+        << "two specifiers accept exactly two";
+
+    // yy uses the invariant calendar's fixed TwoDigitYearMax of 2029, which is a property of the
+    // invariant culture rather than culture state -- so it is available here even though #1929
+    // declined a two-digit year in the GENERAL parser, where nothing says what was meant.
+    EXPECT_EQ(System::DateOnly::ParseExact("24-06-15", "yy-MM-dd"), System::DateOnly(2024, 6, 15));
+    EXPECT_EQ(System::DateOnly::ParseExact("30-06-15", "yy-MM-dd"), System::DateOnly(1930, 6, 15));
+}
+
+TEST(DateOnlyTests, Fix1939_NamesLiteralsAndEscapes) {
+    EXPECT_EQ(System::DateOnly::ParseExact("15 June 2024", "dd MMMM yyyy"),
+              System::DateOnly(2024, 6, 15));
+    EXPECT_EQ(System::DateOnly::ParseExact("15 Jun 2024", "dd MMM yyyy"),
+              System::DateOnly(2024, 6, 15));
+    // "June" must not be consumed as "Jun" with a stray 'e' left over, which is why the name
+    // match tries the longest candidate first.
+    System::DateOnly out(1, 1, 1);
+    EXPECT_FALSE(System::DateOnly::TryParseExact("15 June 2024", "dd MMM yyyy", out));
+
+    // The three literal mechanisms. Each still needs a complete year/month/day around it -- my
+    // first cut of this row wrote `"'on' yyyy"` and then asserted success, which the "one
+    // complete date" rule refuses and rightly.
+    EXPECT_EQ(System::DateOnly::ParseExact("on 2024-06-15", "'on' yyyy-MM-dd"),
+              System::DateOnly(2024, 6, 15));
+    EXPECT_EQ(System::DateOnly::ParseExact("on 2024-06-15", "\"on\" yyyy-MM-dd"),
+              System::DateOnly(2024, 6, 15));
+    EXPECT_EQ(System::DateOnly::ParseExact("d2024-06-15", "\\dyyyy-MM-dd"),
+              System::DateOnly(2024, 6, 15))
+        << "a backslash escape, so the 'd' is a literal rather than the day field";
+    EXPECT_EQ(System::DateOnly::ParseExact("2024-06-5", "yyyy-MM-%d"),
+              System::DateOnly(2024, 6, 5))
+        << "%% makes a single specifier custom rather than standard";
+}
+
+TEST(DateOnlyTests, Fix1939_WhatIsRejected) {
+    System::DateOnly out(1, 1, 1);
+    // A missing date component. There is no current-date default here: that is
+    // NoCurrentDateDefault, a STYLE, and styles are ticket #1942.
+    EXPECT_FALSE(System::DateOnly::TryParseExact("2024-06", "yyyy-MM", out));
+    EXPECT_FALSE(System::DateOnly::TryParseExact("06-15", "MM-dd", out));
+    // Time, zone and era tokens in a date format.
+    for (const char* bad : {"yyyy-MM-dd HH:mm", "yyyy-MM-ddzzz", "yyyy-MM-ddK", "gyyyy-MM-dd"}) {
+        EXPECT_FALSE(System::DateOnly::TryParseExact("2024-06-15", bad, out)) << bad;
+    }
+    // Whitespace is never free: it is a literal like any other, and there is no AllowLeadingWhite.
+    EXPECT_FALSE(System::DateOnly::TryParseExact(" 2024-06-15", "yyyy-MM-dd", out));
+    EXPECT_FALSE(System::DateOnly::TryParseExact("2024-06-15 ", "yyyy-MM-dd", out));
+    EXPECT_FALSE(System::DateOnly::TryParseExact("2024 -06-15", "yyyy-MM-dd", out));
+    // Trailing input, an unmatched literal, an unterminated quote, a duplicate field.
+    EXPECT_FALSE(System::DateOnly::TryParseExact("2024-06-15x", "yyyy-MM-dd", out));
+    EXPECT_FALSE(System::DateOnly::TryParseExact("2024/06/15", "yyyy-MM-dd", out));
+    EXPECT_FALSE(System::DateOnly::TryParseExact("x2024-06-15", "'x yyyy-MM-dd", out));
+    EXPECT_FALSE(System::DateOnly::TryParseExact("2024-06-15-15", "yyyy-MM-dd-dd", out));
+    // An impossible calendar date.
+    EXPECT_FALSE(System::DateOnly::TryParseExact("2023-02-29", "yyyy-MM-dd", out));
+    EXPECT_TRUE(System::DateOnly::TryParseExact("2024-02-29", "yyyy-MM-dd", out));
+    // Every failure writes MinValue and Parse throws the type's FormatException family.
+    EXPECT_EQ(out.getDayNumberProperty(), System::DateOnly(2024, 2, 29).getDayNumberProperty());
+    EXPECT_THROW((void)System::DateOnly::ParseExact("nope", "yyyy-MM-dd"), System::FormatException);
+    try {
+        (void)System::DateOnly::ParseExact("nope", "yyyy-MM-dd");
+        FAIL();
+    } catch (const System::FormatException& e) {
+        EXPECT_EQ(e.getHResultProperty(), static_cast<int>(0x80131537u));
+    }
+}
+
+TEST(TimeOnlyTests, Fix1939_TimeOnlyExactContract) {
+    EXPECT_EQ(System::TimeOnly::ParseExact("10:20:30", "R"), System::TimeOnly(10, 20, 30));
+    EXPECT_EQ(System::TimeOnly::ParseExact("10:20:30.1234567", "o").getTicksProperty(),
+              372301234567LL);
+
+    // Seconds are optional and default to zero; hour and minute are not.
+    EXPECT_EQ(System::TimeOnly::ParseExact("10:20", "HH:mm"), System::TimeOnly(10, 20));
+    System::TimeOnly out(1, 1);
+    EXPECT_FALSE(System::TimeOnly::TryParseExact("20", "mm", out));
+    EXPECT_FALSE(System::TimeOnly::TryParseExact("10", "HH", out));
+
+    // A 12-HOUR FORM REQUIRES t, and a 24-hour form must not carry one. Without the designator
+    // there is no way to say half past one in the AFTERNOON, so accepting "hh:mm" alone would
+    // silently answer half past one in the morning.
+    EXPECT_EQ(System::TimeOnly::ParseExact("01:30 PM", "hh:mm tt"), System::TimeOnly(13, 30));
+    EXPECT_EQ(System::TimeOnly::ParseExact("12:30 AM", "hh:mm tt"), System::TimeOnly(0, 30));
+    EXPECT_EQ(System::TimeOnly::ParseExact("12:30 PM", "hh:mm tt"), System::TimeOnly(12, 30));
+    EXPECT_FALSE(System::TimeOnly::TryParseExact("01:30", "hh:mm", out));
+    EXPECT_FALSE(System::TimeOnly::TryParseExact("01:30 PM", "HH:mm tt", out));
+    EXPECT_FALSE(System::TimeOnly::TryParseExact("13:30 PM", "hh:mm tt", out))
+        << "13 is not a 12-hour clock reading";
+
+    // f needs the exact digit count; F permits omitted low digits.
+    EXPECT_EQ(System::TimeOnly::ParseExact("10:20:30.123", "HH:mm:ss.fff").getTicksProperty(),
+              System::TimeOnly(10, 20, 30, 123).getTicksProperty());
+    EXPECT_FALSE(System::TimeOnly::TryParseExact("10:20:30.12", "HH:mm:ss.fff", out));
+    EXPECT_TRUE(System::TimeOnly::TryParseExact("10:20:30.12", "HH:mm:ss.FFF", out));
+    EXPECT_TRUE(System::TimeOnly::TryParseExact("10:20:30.", "HH:mm:ss.FFF", out));
+
+    // Date, zone and over-wide fractional tokens are rejected, and so is out-of-range input.
+    for (const char* bad : {"yyyy HH:mm", "HH:mmzzz", "HH:mm:ss.ffffffff", "HHH:mm"}) {
+        EXPECT_FALSE(System::TimeOnly::TryParseExact("10:20", bad, out)) << bad;
+    }
+    EXPECT_FALSE(System::TimeOnly::TryParseExact("24:00", "HH:mm", out));
+    EXPECT_FALSE(System::TimeOnly::TryParseExact("10:60", "HH:mm", out));
+    EXPECT_THROW((void)System::TimeOnly::ParseExact("nope", "HH:mm"), System::FormatException);
+}

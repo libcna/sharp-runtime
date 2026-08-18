@@ -176,6 +176,36 @@ namespace System {
          */
         static bool TryParse(const std::string& s, DateOnly& result);
 
+        /**
+         * @brief Parses @p input against exactly @p format, with invariant names and no provider.
+         *
+         * Ticket #1939 (#1929 row 4A). Supports the invariant standard formats `O`/`o`
+         * (`yyyy-MM-dd`) and `R`/`r` (`ddd, dd MMM yyyy`, with weekday agreement required), and a
+         * custom format that names one complete year, month and day using `y`..`yyyy`,
+         * `M`/`MM`/`MMM`/`MMMM` and `d`/`dd`, plus an optional `ddd`/`dddd` weekday. `%`, single
+         * and double quoted literals and backslash escapes are supported.
+         *
+         * A numeric field spelled with ONE specifier accepts one or two digits and one spelled
+         * with more accepts exactly that many, which is .NET's `ParseDigits` rule and not "read
+         * as many digits as there are specifiers".
+         *
+         * Rejected: a missing date component, time fields, zones, eras, calendars, a provider,
+         * styles, unsupported repetitions, unmatched literals, and any leading, trailing or extra
+         * inner whitespace. The whole input must be consumed.
+         *
+         * @throws System::FormatException for an input mismatch or a malformed/unsupported
+         *         format. Both report the same family, which is .NET's behaviour too.
+         */
+        [[nodiscard]] static DateOnly ParseExact(const std::string& input,
+                                                 const std::string& format);
+
+        /**
+         * @brief Non-throwing `ParseExact`; writes `MinValue` on every failure.
+         * @return true on success.
+         */
+        static bool TryParseExact(const std::string& input, const std::string& format,
+                                  DateOnly& result);
+
         /** @brief Returns true if this date equals the specified date. */
         bool operator==(const DateOnly& o) const { return year_==o.year_ && month_==o.month_ && day_==o.day_; }
         /** @brief Returns true if this date does not equal the specified date. */

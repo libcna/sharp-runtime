@@ -6,6 +6,7 @@
 #include "System/detail/DateTimeTextScanner.hpp"
 #include "System/DateTime.hpp"
 #include "System/FormatException.hpp"
+#include "System/detail/InvariantExactDateTimeParser.hpp"
 #include <algorithm>
 #include <cstdio>
 
@@ -148,5 +149,64 @@ std::string TimeOnly::ToString(const std::string& format) const {
     }
     return result;
 }
+
+} // namespace System
+
+// ---------------------------------------------------------------------------
+// ParseExact / TryParseExact -- ticket #1939 (#1929 row 4A)
+// ---------------------------------------------------------------------------
+
+namespace System {
+
+    bool TimeOnly::TryParseExact(const std::string& input, const std::string& format,
+                                 TimeOnly& result) {
+        result = TimeOnly::getMinValueProperty();
+
+        std::string pattern = detail::ExpandStandardFormat(format, /*forDate=*/false);
+        if (pattern.empty()) {
+            if (format.size() == 1) return false;   // see DateOnly::TryParseExact for why
+            pattern = format;
+        }
+
+        detail::ExactDateTimeFields fields;
+        if (!detail::MatchExactFormat(input, pattern, /*forDate=*/false, fields)) return false;
+
+        // One hour and one minute are required; seconds are optional and default to zero.
+        if (fields.hour < 0 || fields.minute < 0) return false;
+        const int second = fields.second < 0 ? 0 : fields.second;
+
+        // A 12-HOUR FORM REQUIRES `t`, and a 24-hour form must not carry one. Without this,
+        // "01:30" under "hh:mm" would silently mean 01:30 with no way to say half past one in the
+        // afternoon -- the designator is what carries that half of the value.
+        if (fields.twelveHour && fields.amPm < 0) return false;
+        if (!fields.twelveHour && fields.amPm >= 0) return false;
+
+        int hour = fields.hour;
+        if (fields.twelveHour) {
+            if (hour < 1 || hour > 12) return false;
+            if (fields.amPm == 1) hour = (hour == 12) ? 12 : hour + 12;
+            else                  hour = (hour == 12) ? 0  : hour;
+        } else if (hour > 23) {
+            return false;
+        }
+        if (fields.minute > 59 || second > 59) return false;
+
+        try {
+            result = TimeOnly(static_cast<SharpRuntime::longcs>(
+                hour * TimeSpan::TicksPerHour + fields.minute * TimeSpan::TicksPerMinute +
+                second * TimeSpan::TicksPerSecond + fields.fractionTicks));
+        } catch (...) {
+            result = TimeOnly::getMinValueProperty();
+            return false;
+        }
+        return true;
+    }
+
+    TimeOnly TimeOnly::ParseExact(const std::string& input, const std::string& format) {
+        TimeOnly result;
+        if (!TryParseExact(input, format, result))
+            throw FormatException("String was not recognized as a valid TimeOnly: " + input);
+        return result;
+    }
 
 } // namespace System

@@ -393,6 +393,31 @@ namespace System {
          */
         static bool TryParse(const std::string& s, TimeOnly& result);
 
+        /**
+         * @brief Parses @p input against exactly @p format, with invariant AM/PM and no provider.
+         *
+         * Ticket #1939 (#1929 row 4A). Supports the invariant standard formats `O`/`o`
+         * (`HH:mm:ss.fffffff`) and `R`/`r` (`HH:mm:ss`), and a custom format naming one hour and
+         * minute with `H`/`HH` or `h`/`hh` plus `m`/`mm`. Seconds `s`/`ss` are optional and
+         * default to zero. A 12-hour form REQUIRES `t`/`tt`. `f`..`fffffff` needs the exact digit
+         * count; `F`..`FFFFFFF` permits omitted low digits.
+         *
+         * Rejected: date, era and zone tokens, more than seven fractional specifiers or digits,
+         * mixing 12- and 24-hour fields, duplicate fields, a 12-hour form without `t`, and any
+         * leading, trailing or extra inner whitespace. The whole input must be consumed.
+         *
+         * @throws System::FormatException for an input mismatch or a malformed/unsupported format.
+         */
+        [[nodiscard]] static TimeOnly ParseExact(const std::string& input,
+                                                 const std::string& format);
+
+        /**
+         * @brief Non-throwing `ParseExact`; writes `MinValue` on every failure.
+         * @return true on success.
+         */
+        static bool TryParseExact(const std::string& input, const std::string& format,
+                                  TimeOnly& result);
+
         // -----------------------------------------------------------------------
         // Operators
         // -----------------------------------------------------------------------

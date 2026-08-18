@@ -8,6 +8,7 @@
 #include "System/TimeOnly.hpp"
 #include "System/FormatException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/detail/InvariantExactDateTimeParser.hpp"
 #include <algorithm>
 #include <cstdio>
 
@@ -251,5 +252,62 @@ std::string DateOnly::ToString(const std::string& format) const {
     }
     return result;
 }
+
+} // namespace System
+
+// ---------------------------------------------------------------------------
+// ParseExact / TryParseExact -- ticket #1939 (#1929 row 4A)
+// ---------------------------------------------------------------------------
+
+namespace System {
+
+    bool DateOnly::TryParseExact(const std::string& input, const std::string& format,
+                                 DateOnly& result) {
+        result = DateOnly::MinValue;
+
+        std::string pattern = detail::ExpandStandardFormat(format, /*forDate=*/true);
+        if (pattern.empty()) {
+            // A ONE-CHARACTER format that is not standard is not silently custom either: .NET
+            // requires "%d" for a single-specifier custom format, because a bare "d" is the
+            // standard short-date pattern. Preserving that distinction is what stops "d" from
+            // quietly meaning something this port does not implement.
+            if (format.size() == 1) return false;
+            pattern = format;
+        }
+
+        detail::ExactDateTimeFields fields;
+        if (!detail::MatchExactFormat(input, pattern, /*forDate=*/true, fields)) return false;
+
+        // The approval requires ONE COMPLETE year/month/day. There is no current-date default
+        // here -- that is NoCurrentDateDefault, a style, and styles are 4C.
+        if (fields.year < 0 || fields.month < 0 || fields.day < 0) return false;
+        if (fields.year < 1 || fields.year > 9999) return false;
+        if (fields.month < 1 || fields.month > 12) return false;
+        if (fields.day < 1 || fields.day > DateTime::DaysInMonth(fields.year, fields.month))
+            return false;
+
+        DateOnly candidate(1, 1, 1);
+        try {
+            candidate = DateOnly(fields.year, fields.month, fields.day);
+        } catch (...) {
+            return false;
+        }
+
+        // Weekday AGREEMENT, which is what makes `R` a validating format rather than a shape.
+        // "Mon, 15 Jun 2024" names a Saturday and must fail.
+        if (fields.weekday >= 0 &&
+            static_cast<int>(candidate.getDayOfWeekProperty()) != fields.weekday)
+            return false;
+
+        result = candidate;
+        return true;
+    }
+
+    DateOnly DateOnly::ParseExact(const std::string& input, const std::string& format) {
+        DateOnly result(1, 1, 1);
+        if (!TryParseExact(input, format, result))
+            throw FormatException("String was not recognized as a valid DateOnly: " + input);
+        return result;
+    }
 
 } // namespace System
