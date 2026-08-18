@@ -1150,6 +1150,27 @@ TEST(XdgAndFolderOptionTests, Fix2320_AnUndefinedOptionIsRejected) {
                                                   static_cast<Environment::SpecialFolderOption>(12345)),
                  System::ArgumentOutOfRangeException);
 
+    // #2321 verified the exception IDENTITY, which was the blocker that deferred this ticket:
+    // .NET's call is `new ArgumentOutOfRangeException(nameof(option), option,
+    // SR.Format(SR.Arg_EnumIllegalVal, option))`, and Arg_EnumIllegalVal is
+    // "Illegal enum value: {0}." (Strings.resx:346). All four parts are asserted, because a
+    // transcription that gets the type right and the text wrong is the divergence no later test
+    // could distinguish from the real thing.
+    try {
+        (void)Environment::GetFolderPath(Environment::SpecialFolder::ApplicationData,
+                                         static_cast<Environment::SpecialFolderOption>(12345));
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "option");
+        EXPECT_EQ(e.getActualValueProperty(), "12345");
+        const std::string message = e.what();
+        EXPECT_NE(message.find("Illegal enum value: 12345."), std::string::npos) << message;
+        EXPECT_NE(message.find("option"), std::string::npos) << message;
+        // The three-argument form is what adds this clause, and #2320 had used the two-argument
+        // one -- the only part of the transcription that was wrong.
+        EXPECT_NE(message.find("Actual value was 12345."), std::string::npos) << message;
+    }
+
     // ...and all three defined ones are accepted, so the check is a definedness test rather than
     // an accidental range test.
     for (auto option : {Environment::SpecialFolderOption::None,
@@ -1157,4 +1178,40 @@ TEST(XdgAndFolderOptionTests, Fix2320_AnUndefinedOptionIsRejected) {
                         Environment::SpecialFolderOption::Create}) {
         EXPECT_NO_THROW((void)Environment::GetFolderPath(Environment::SpecialFolder::UserProfile, option));
     }
+}
+
+// #2321 answered. Its C4 asked for a "definedness table" separating defined-but-unmapped folders
+// from undefined ones. THE REFERENCE SAYS NO SUCH TABLE IS NEEDED HERE, and says why in a
+// comment of its own: "No need to validate if 'folder' is defined; GetSpecialFolder handles this
+// check" (GetFolderPathCore.Unix.cs:22). GetSpecialFolder is a switch returning `null` for
+// anything unhandled, and GetFolderPathCore turns null into "" (:24). So on POSIX the two
+// categories are deliberately indistinguishable, and both answer "".
+//
+// .NET's WINDOWS core does the opposite -- its switch ends in
+// `throw new ArgumentOutOfRangeException(nameof(folder), folder, ...)`
+// (Environment.Windows.cs:768-770). That divergence is real, is unreachable from this gate, and
+// is ticket #2378.
+TEST(XdgAndFolderOptionTests, Fix2321_AnUndefinedFolderReturnsEmptyOnPosixRatherThanThrowing) {
+#ifndef _WIN32
+    for (int raw : {12345, -1, 0x0100, 0x003C}) {
+        const auto folder = static_cast<Environment::SpecialFolder>(raw);
+        std::string path;
+        EXPECT_NO_THROW(path = Environment::GetFolderPath(folder)) << raw;
+        EXPECT_TRUE(path.empty()) << raw << " -> " << path;
+        // ...and the option is still validated first, so the two checks do not interfere.
+        EXPECT_THROW((void)Environment::GetFolderPath(folder,
+                                                      static_cast<Environment::SpecialFolderOption>(999)),
+                     System::ArgumentOutOfRangeException) << raw;
+    }
+
+    // The property that makes the above a transcription rather than a shrug: a DEFINED folder
+    // this platform does not map gives the SAME answer as an undefined one. .NET makes them
+    // indistinguishable on purpose, so a test that only probed undefined values would pass
+    // against a definedness table that does not exist.
+    EXPECT_TRUE(Environment::GetFolderPath(Environment::SpecialFolder::Cookies).empty());
+    EXPECT_TRUE(Environment::GetFolderPath(Environment::SpecialFolder::SendTo).empty());
+    EXPECT_TRUE(Environment::GetFolderPath(Environment::SpecialFolder::StartMenu).empty());
+#else
+    GTEST_SKIP() << "the POSIX answer; Windows throws instead -- ticket #2378";
+#endif
 }

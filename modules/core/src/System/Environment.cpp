@@ -380,12 +380,20 @@ std::string Environment::GetFolderPath(SpecialFolder folder) {
 }
 
 std::string Environment::GetFolderPath(SpecialFolder folder, SpecialFolderOption option) {
-    // `Environment.cs:149-163`: the OPTION is validated even though the FOLDER is not -- an
-    // undefined folder legitimately returns "" (see #2321), an undefined option never does.
+    // `Environment.cs:149-163`: the OPTION is validated even though the FOLDER is not.
+    //
+    // #2320 transcribed this from the finding; ticket **#2321** verified it against the reference
+    // on 2026-08-18 and found one thing missing. .NET's call is the THREE-argument form,
+    // `new ArgumentOutOfRangeException(nameof(option), option, SR.Format(SR.Arg_EnumIllegalVal,
+    // option))`, so the composed message carries an "Actual value was N." clause after the
+    // parameter marker. The type, the parameter name and the format string
+    // ("Illegal enum value: {0}.", Strings.resx:346) were already exact; the actual value was
+    // being dropped.
     if (option != SpecialFolderOption::None && option != SpecialFolderOption::Create &&
         option != SpecialFolderOption::DoNotVerify) {
-        throw System::ArgumentOutOfRangeException(
-            "option", "Illegal enum value: " + std::to_string(static_cast<long long>(option)) + ".");
+        const std::string value = std::to_string(static_cast<long long>(option));
+        throw System::ArgumentOutOfRangeException("option", value,
+                                                  "Illegal enum value: " + value + ".");
     }
 
 #if defined(_WIN32)
@@ -426,6 +434,16 @@ std::string Environment::GetFolderPath(SpecialFolder folder, SpecialFolderOption
         case SpecialFolder::System:           path = "/usr/lib"; break;
         case SpecialFolder::Fonts:            path = "/usr/share/fonts"; break;
         case SpecialFolder::Templates:        path = h + "/Templates"; break;
+        // #2321, verified 2026-08-18. .NET's Unix `GetSpecialFolder` is a switch that returns
+        // `null` for anything it does not handle, and `GetFolderPathCore` turns that into `""`
+        // (`GetFolderPathCore.Unix.cs:20-24`) -- with the comment "No need to validate if
+        // 'folder' is defined". So on POSIX an undefined folder and a DEFINED-but-unmapped one
+        // give the same answer, and that answer is the empty string, not an exception.
+        //
+        // .NET's WINDOWS core does the opposite: its switch ends in
+        // `throw new ArgumentOutOfRangeException(nameof(folder), folder, ...)`
+        // (`Environment.Windows.cs:768-770`). That divergence is real, is not reachable from this
+        // gate, and is ticket #2378 rather than an untestable table added here.
         default:                              return "";
     }
 
