@@ -3,6 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
+#include "System/detail/Utf8Scalar.hpp"
+#include <cstdint>
+#include <cstdio>
 
 namespace System::Xml::detail {
 
@@ -166,14 +169,75 @@ namespace System::Xml::detail {
      * document; "write it in full" is not an implementable branch. This runtime's own parser
      * agrees, rejecting an embedded NUL in text with `XML_ERROR_PARSING_TEXT`.
      *
-     * Other characters outside `Char` (0x01, 0x0C, ...) are a **different** question and are
-     * deliberately not covered here: they are emitted faithfully rather than lost, this
-     * runtime's own reader accepts them, and both "reject" and "emit" are implementable -- so
-     * whether they are rejected is a `XmlWriterSettings::CheckCharacters` decision, tracked
-     * separately. A flag can only govern a choice whose branches both exist.
+     * Other characters outside `Char` (0x01, 0x0C, ...) were a **different** question, settled by
+     * ticket #2349 -- see FindNonCharCodePoint below.
      */
     [[nodiscard]] inline bool ContainsNul(const std::string& text) {
         return text.find('\0') != std::string::npos;
+    }
+
+    /**
+     * @brief Finds the first code point in @p text outside the XML 1.0 `Char` production.
+     *
+     * Ticket #2349 (2026-08-18), split from #2085. Characters outside `Char` other than NUL --
+     * `0x01`, `0x0C`, `0x0E`-`0x1F`, `U+FFFE`, `U+FFFF` -- were **emitted raw** at every writer
+     * content door and at every Xml.Linq direct door, so the emitted document was not
+     * well-formed XML. Measured: 28 of the 29 non-`Char` bytes in `0x00`-`0x1F` went through.
+     *
+     * **THE TICKET RECORDED THIS AS A USER DECISION WITH FIVE PRICED OPTIONS, AND THE REFERENCE
+     * COLLAPSES THEM TO ONE.** `XmlWriterSettings.CheckCharacters` defaults to `true`
+     * (`XmlWriterSettings.cs:513`) and is enforced: `XmlEncodedRawTextWriter.InvalidXmlChar`
+     * throws `XmlConvert.CreateInvalidCharException` when it is set and entitizes when it is not
+     * (`:1630-1654`). So .NET rejects by default, and the flag is what turns that off.
+     *
+     * **Both of the ticket's pricing complications are dissolved rather than accepted.**
+     *
+     *   1. It priced enforcement on `XmlConvert::VerifyXmlChars`, which iterates `char` and so
+     *      checks **bytes**: it accepts `U+FFFE`, `U+FFFF` and a lone surrogate encoded in UTF-8.
+     *      Ticket **#2354** moved a code-point decoder into `Core.Base` earlier the same day, and
+     *      both `modules/xml` and `modules/xml-linq` already depend on it -- so a code-point
+     *      correct check costs one call and no new component edge. The ticket priced this when
+     *      that decoder was not there.
+     *   2. It priced option B as "not a same-shaped change on both sides", because the Xml.Linq
+     *      direct doors take no settings. **.NET's do not either**: `XNode.GetXmlWriterSettings`
+     *      constructs a default `XmlWriterSettings` and touches only `Indent` and
+     *      `NamespaceHandling` (`XNode.cs:681-687`), inheriting `CheckCharacters = true`. So the
+     *      Linq side needs no new settings channel; it checks, exactly as a default-settings
+     *      writer does, and the two doors agree by construction.
+     *
+     * An **ill-formed UTF-8 sequence** is rejected too, and that is not an extension: .NET works
+     * in UTF-16 and a lone surrogate is outside `Char` there as surely as it is here.
+     *
+     * @return The offending code point's byte offset, or `std::string::npos` when every code
+     *         point is a `Char`.
+     */
+    [[nodiscard]] inline std::size_t FindNonCharCodePoint(const std::string& text) {
+        std::size_t i = 0;
+        while (i < text.size()) {
+            std::uint32_t cp  = 0;
+            std::size_t   len = 0;
+            if (!System::detail::TryDecodeUtf8Scalar(text, i, cp, len)) return i;
+            // Char ::= #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF].
+            // The decoder has already refused a surrogate and anything above U+10FFFF, so what is
+            // left to exclude is the C0 controls other than tab/LF/CR, and the two non-characters
+            // at the end of the BMP.
+            const bool isChar = cp == 0x09 || cp == 0x0A || cp == 0x0D ||
+                                (cp >= 0x20 && cp <= 0xD7FF) ||
+                                (cp >= 0xE000 && cp <= 0xFFFD) ||
+                                (cp >= 0x10000 && cp <= 0x10FFFF);
+            if (!isChar) return i;
+            i += len;
+        }
+        return std::string::npos;
+    }
+
+    /** @brief `.NET`'s `SR.Xml_InvalidCharacter`, formatted for @p codePoint. */
+    [[nodiscard]] inline std::string InvalidCharacterMessage(std::uint32_t codePoint) {
+        char hex[16] = {};
+        std::snprintf(hex, sizeof(hex), "0x%02X", codePoint);
+        std::string rendered;
+        if (codePoint >= 0x20 && codePoint < 0x7F) rendered.push_back(static_cast<char>(codePoint));
+        return "'" + rendered + "', hexadecimal value " + hex + ", is an invalid character.";
     }
 
 } // namespace System::Xml::detail

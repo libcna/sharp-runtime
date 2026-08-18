@@ -631,19 +631,77 @@ TEST(XmlWriterValidationTests, ContentWithoutNul_ByteIdenticalAtEveryDoor) {
     }
 }
 
-TEST(XmlWriterValidationTests, NonNulControlCharacters_StillEmitted_PinnedScopeBoundary) {
-    // Pins the SCOPE line so a later reader does not assume #2085 covered the Char production.
-    // These characters are outside XML 1.0 Char, so this output is NOT valid XML -- but it is
-    // emitted rather than lost, and this module's own reader accepts it. Whether the writer
-    // should reject it is #2349's CheckCharacters decision, and this pin fails loudly if that
-    // decision is ever made silently.
-    auto w = NewWriter();
-    w->WriteStartElement("e");
-    ASSERT_NO_THROW(w->WriteString("a\x01" "b"));
-    w->WriteEndElement();
-    EXPECT_EQ(w->ToString(), "<e>a\x01" "b</e>");
+// FLIPPED by #2349 (2026-08-18). This pinned the scope line #2085 left open: characters outside
+// the XML 1.0 Char production other than NUL were EMITTED, so the output was not valid XML.
+//
+// The ticket recorded five priced options and called it a user decision. THE REFERENCE COLLAPSES
+// THEM TO ONE: XmlWriterSettings.CheckCharacters defaults to true (XmlWriterSettings.cs:513) and
+// is enforced -- XmlEncodedRawTextWriter.InvalidXmlChar throws when it is set and entitizes when
+// it is not (:1630-1654). .NET rejects by default.
+TEST(XmlWriterValidationTests, Fix2349_NonCharCodePointsAreRejected) {
+    // The C0 controls other than tab, LF and CR.
+    for (int c : {0x01, 0x08, 0x0B, 0x0C, 0x0E, 0x1F}) {
+        auto w = NewWriter();
+        w->WriteStartElement("e");
+        EXPECT_THROW(w->WriteString(std::string("a") + static_cast<char>(c) + "b"),
+                     System::ArgumentException) << c;
+    }
 
-    // ... and the flag that would govern it is still documented as not enforced.
+    // CODE POINTS, NOT BYTES. XmlConvert::VerifyXmlChars -- the validator the ticket priced this
+    // against -- iterates `char`, so it accepts U+FFFE, U+FFFF and a lone surrogate encoded in
+    // UTF-8, all genuinely outside Char. #2354 put a code-point decoder in Core.Base earlier the
+    // same day, so this check sees scalars.
+    for (const char* utf8 : {"\xEF\xBF\xBE",          // U+FFFE
+                             "\xEF\xBF\xBF",          // U+FFFF
+                             "\xED\xA0\x80"}) {       // a lone surrogate, U+D800
+        auto w = NewWriter();
+        w->WriteStartElement("e");
+        EXPECT_THROW(w->WriteString(utf8), System::ArgumentException) << utf8;
+    }
+
+    // The three C0 characters that ARE Char still pass, so this is the Char production and not a
+    // blanket control-character ban.
+    {
+        auto w = NewWriter();
+        w->WriteStartElement("e");
+        ASSERT_NO_THROW(w->WriteString("a\tb\nc\rd"));
+        w->WriteEndElement();
+        EXPECT_NE(w->ToString().find('\t'), std::string::npos);
+    }
+    // ...and so does ordinary multi-byte text, which a byte-wise check could have broken.
+    {
+        auto w = NewWriter();
+        w->WriteStartElement("e");
+        ASSERT_NO_THROW(w->WriteString("h\xC3\xA9llo \xF0\x9F\x98\x80"));
+        w->WriteEndElement();
+        EXPECT_NE(w->ToString().find("\xF0\x9F\x98\x80"), std::string::npos);
+    }
+
+    // Every content door, not just WriteString -- the same guard serves them all.
+    {
+        auto w = NewWriter();
+        w->WriteStartElement("e");
+        EXPECT_THROW(w->WriteAttributeString("a", "x\x01y"), System::ArgumentException);
+        EXPECT_THROW(w->WriteComment("x\x01y"), System::ArgumentException);
+        EXPECT_THROW(w->WriteCData("x\x01y"), System::ArgumentException);
+        EXPECT_THROW(w->WriteProcessingInstruction("pi", "x\x01y"), System::ArgumentException);
+    }
+
+    // The exception is .NET's ArgumentException with its text, NOT this door's XmlException --
+    // the NUL guard keeps XmlException because it is this port's own truncation check (#2085),
+    // while this one transcribes XmlConvert.CreateInvalidCharException (XmlConvert.cs:1614-1622).
+    try {
+        auto w = NewWriter();
+        w->WriteStartElement("e");
+        w->WriteString("a\x01" "b");
+        FAIL() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_NE(std::string(e.what()).find("hexadecimal value 0x01, is an invalid character."),
+                  std::string::npos) << e.what();
+    }
+
+    // The flag still reads true, and now that is a statement about behaviour rather than a
+    // doc-comment saying "not currently enforced".
     System::Xml::XmlWriterSettings settings;
     EXPECT_TRUE(settings.CheckCharacters);
 }

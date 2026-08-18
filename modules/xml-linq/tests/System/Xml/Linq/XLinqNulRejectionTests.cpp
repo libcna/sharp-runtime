@@ -52,6 +52,7 @@
 #include <string>
 
 #include "System/Xml/Linq/SaveOptions.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/Xml/Linq/XAttribute.hpp"
 #include "System/Xml/Linq/XCData.hpp"
 #include "System/Xml/Linq/XComment.hpp"
@@ -334,20 +335,32 @@ TEST(XLinqNulRejectionTests, EmptyValuesAreStillAccepted) {
     EXPECT_EQ(direct(XComment("")), "<!---->");
 }
 
-TEST(XLinqNulRejectionTests, NonNulControlCharacters_StillEmittedByTheDirectDoor) {
-    // SCOPE BOUNDARY, and the mirror of the pin #2085 left at the writer door. 0x01, 0x0C and
-    // 0x1F are outside the XML `Char` production but are EMITTED faithfully rather than lost,
-    // and this runtime's own reader accepts them -- so both "reject" and "emit" are implementable
-    // and choosing between them is the XmlWriterSettings::CheckCharacters decision, tracked
-    // separately. #2201 deliberately does NOT make it. If a later ticket decides to reject them,
-    // it updates this pin rather than deleting it.
-    for (const char* v : {"a\x01" "b", "a\x0c" "b", "a\x1f" "b"}) {
-        std::string value(v);
-        EXPECT_NO_THROW((void)direct(XText(value))) << "0x" << static_cast<int>(value[1]);
-        EXPECT_EQ(direct(XText(value)), value);
-        EXPECT_NO_THROW((void)direct(XComment(value)));
-        EXPECT_NO_THROW((void)XAttribute(XName("a"), value).ToString());
+// FLIPPED by #2349 (2026-08-18), the mirror of the writer door's pin flipping in the same change.
+// #2201 deliberately did not make the CheckCharacters decision; the reference makes it.
+//
+// AND IT DISSOLVES THE REASON THIS DOOR WAS THOUGHT TO BE DIFFERENT. #2349 priced option B as
+// "not a same-shaped change on both sides", because XNode::SerializeTo takes no settings.
+// .NET's does not either: XNode.GetXmlWriterSettings builds a DEFAULT XmlWriterSettings and
+// touches only Indent and NamespaceHandling (XNode.cs:681-687), inheriting CheckCharacters = true.
+// So this door needs no settings channel of its own, and the two agree by construction.
+TEST(XLinqNulRejectionTests, Fix2349_NonCharCodePointsAreRejectedAtTheDirectDoorToo) {
+    for (const char* v : {"a\x01" "b", "a\x0c" "b", "a\x1f" "b", "a\x0b" "b"}) {
+        const std::string value(v);
+        EXPECT_THROW((void)direct(XText(value)), System::ArgumentException)
+            << "0x" << static_cast<int>(value[1]);
+        EXPECT_THROW((void)direct(XComment(value)), System::ArgumentException);
+        EXPECT_THROW((void)XAttribute(XName("a"), value).ToString(), System::ArgumentException);
     }
+
+    // Code points, not bytes: U+FFFE, U+FFFF and a lone surrogate are outside Char too, and a
+    // byte-wise check accepts all three.
+    for (const char* utf8 : {"\xEF\xBF\xBE", "\xEF\xBF\xBF", "\xED\xA0\x80"}) {
+        EXPECT_THROW((void)direct(XText(std::string(utf8))), System::ArgumentException) << utf8;
+    }
+
+    // Tab, LF and CR are Char and still pass, and so does ordinary multi-byte text.
+    EXPECT_NO_THROW((void)direct(XText(std::string("a\tb\nc\rd"))));
+    EXPECT_EQ(direct(XText(std::string("h\xC3\xA9llo"))), "h\xC3\xA9llo");
 }
 
 TEST(XLinqNulRejectionTests, ConstructionAndMutationStillAcceptANul) {

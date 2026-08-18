@@ -53,6 +53,22 @@ static void ThrowIfContainsNul(const std::string& text, const char* member, cons
     if (detail::ContainsNul(text))
         throw XmlException(std::string("XmlWriter::") + member + ": the " + what +
                            " contains a NUL character, which cannot be represented in XML.");
+
+    // Ticket #2349. The other characters outside the XML 1.0 Char production were emitted RAW,
+    // so the emitted document was not well-formed XML. .NET rejects them when
+    // XmlWriterSettings.CheckCharacters is set, which it is by default
+    // (XmlWriterSettings.cs:513; XmlEncodedRawTextWriter.cs:1630-1654). The exception TYPE is
+    // .NET's ArgumentException rather than this door's XmlException, because that is what
+    // XmlConvert.CreateInvalidCharException produces (XmlConvert.cs:1614-1622) -- the NUL case
+    // above keeps XmlException because it is this port's own truncation guard (#2085), not a
+    // transcription of a .NET check.
+    const std::size_t bad = detail::FindNonCharCodePoint(text);
+    if (bad != std::string::npos) {
+        std::uint32_t cp = 0;
+        std::size_t   len = 0;
+        if (!System::detail::TryDecodeUtf8Scalar(text, bad, cp, len)) cp = static_cast<unsigned char>(text[bad]);
+        throw System::ArgumentException(detail::InvalidCharacterMessage(cp));
+    }
 }
 
 static void ThrowIfClosed(const XmlWriterState* state, const char* member) {

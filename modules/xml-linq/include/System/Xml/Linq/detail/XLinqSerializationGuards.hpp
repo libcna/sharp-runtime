@@ -6,6 +6,7 @@
 
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/detail/XmlLexicalSanitizer.hpp"
+#include "System/ArgumentException.hpp"
 
 namespace System::Xml::Linq::detail {
 
@@ -32,12 +33,12 @@ namespace System::Xml::Linq::detail {
      * why `System::Xml::detail::ContainsNul` (the single detector, shared with the writer door)
      * says so in its own doc-comment.
      *
-     * **What this deliberately does NOT decide.** Characters outside `Char` other than NUL
-     * (0x01, 0x0C, 0x0E–0x1F) are a different question: both doors emit them faithfully rather
-     * than losing them, this runtime's own reader accepts them, and both "reject" and "emit" are
-     * implementable — so whether they are rejected is a `XmlWriterSettings::CheckCharacters`
-     * decision tracked separately. A flag can only govern a choice whose branches both exist.
-     * This guard tests for a NUL and nothing else.
+     * **The other non-`Char` characters, settled by #2349.** They were a different question when
+     * this comment was written; the reference settles it. .NET's Xml.Linq save path builds a
+     * DEFAULT `XmlWriterSettings` and touches only `Indent` and `NamespaceHandling`
+     * (`XNode.cs:681-687`), so it inherits `CheckCharacters = true` and checks exactly as any
+     * default-settings writer does. That is why this door needs no settings channel of its own,
+     * and why the two doors agree by construction rather than by coordination.
      *
      * The diagnostic deliberately mirrors `XmlWriter.cpp`'s file-local `ThrowIfContainsNul`, so
      * the two doors of one node kind report the same cause under different member names.
@@ -55,6 +56,19 @@ namespace System::Xml::Linq::detail {
             throw System::Xml::XmlException(std::string(member) + ": the " + what +
                                             " contains a NUL character, which cannot be "
                                             "represented in XML.");
+
+        // #2349, the same check the writer door runs and for the same reason. The exception TYPE
+        // is .NET's ArgumentException, not this door's XmlException: the NUL case above is this
+        // port's own truncation guard (#2085) while this one transcribes
+        // XmlConvert.CreateInvalidCharException (XmlConvert.cs:1614-1622).
+        const std::size_t bad = System::Xml::detail::FindNonCharCodePoint(text);
+        if (bad != std::string::npos) {
+            std::uint32_t cp = 0;
+            std::size_t   len = 0;
+            if (!System::detail::TryDecodeUtf8Scalar(text, bad, cp, len))
+                cp = static_cast<unsigned char>(text[bad]);
+            throw System::ArgumentException(System::Xml::detail::InvalidCharacterMessage(cp));
+        }
     }
 
 } // namespace System::Xml::Linq::detail
