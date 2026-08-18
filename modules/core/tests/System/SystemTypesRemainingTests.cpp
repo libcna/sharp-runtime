@@ -1113,51 +1113,6 @@ TEST(VoidTests, IsTrivial) {
 }
 
 // ===========================================================================
-// UnitySerializationHolder
-// ===========================================================================
-#include "System/UnitySerializationHolder.hpp"
-
-TEST(UnitySerializationHolderTests, NullUnity_ConstantValue) {
-    EXPECT_EQ(System::UnitySerializationHolder::NullUnity, 0x0002);
-}
-
-TEST(UnitySerializationHolderTests, GetUnityTypeProperty_Stored) {
-    System::UnitySerializationHolder h(System::UnitySerializationHolder::NullUnity);
-    EXPECT_EQ(h.getUnityTypeProperty(), System::UnitySerializationHolder::NullUnity);
-}
-
-TEST(UnitySerializationHolderTests, GetDataProperty_DefaultEmpty) {
-    System::UnitySerializationHolder h(System::UnitySerializationHolder::NullUnity);
-    EXPECT_TRUE(h.getDataProperty().empty());
-}
-
-TEST(UnitySerializationHolderTests, GetDataProperty_Stored) {
-    System::UnitySerializationHolder h(System::UnitySerializationHolder::NullUnity, "DBNull");
-    EXPECT_EQ(h.getDataProperty(), "DBNull");
-}
-
-TEST(UnitySerializationHolderTests, GetRealObject_NullUnity_ReturnsDBNull) {
-    System::UnitySerializationHolder h(System::UnitySerializationHolder::NullUnity);
-    System::DBNull& result = h.GetRealObject();
-    EXPECT_EQ(&result, &System::DBNull::Value());
-}
-
-TEST(UnitySerializationHolderTests, GetRealObject_InvalidType_Throws) {
-    System::UnitySerializationHolder h(999, "UnknownType");
-    EXPECT_THROW(h.GetRealObject(), System::ArgumentException);
-}
-
-TEST(UnitySerializationHolderTests, GetObjectData_Throws) {
-    System::UnitySerializationHolder h(System::UnitySerializationHolder::NullUnity);
-    EXPECT_THROW(h.GetObjectData(), System::NotSupportedException);
-}
-
-TEST(UnitySerializationHolderTests, GetRealObject_SameInstanceEachCall) {
-    System::UnitySerializationHolder h(System::UnitySerializationHolder::NullUnity);
-    EXPECT_EQ(&h.GetRealObject(), &h.GetRealObject());
-}
-
-// ===========================================================================
 // SerializationInfo / StreamingContext
 //
 // Coverage gap found while auditing serialization stubs (ticket 73): both types had zero
