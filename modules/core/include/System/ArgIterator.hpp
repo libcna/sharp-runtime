@@ -3,7 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
-#include "System/NotSupportedException.hpp"
+#include "System/PlatformNotSupportedException.hpp"
+#include "System/RuntimeTypeHandle.hpp"
 #include "System/RuntimeArgumentHandle.hpp"
 #include "System/TypedReference.hpp"
 
@@ -14,18 +15,30 @@ namespace System {
      *
      * C++ counterpart of .NET System.ArgIterator.
      *
-     * **Status: STUB** — ArgIterator depends on the CLR `__arglist` keyword,
-     * `RuntimeArgumentHandle`, and `TypedReference`, none of which exist in C++.
-     * All methods throw NotSupportedException at runtime.
+     * **Status: STUB, and .NET's own is one too.** `ArgIterator.cs:10-58` — the portable
+     * implementation, which is the one a port must follow — throws
+     * `PlatformNotSupportedException(SR.PlatformNotSupported_ArgIterator)` from **every single
+     * member**, constructors included. The type depends on the CLR `__arglist` keyword, which
+     * has no C++ counterpart, so there is nothing to implement on either side.
      *
-     * @note Both constructors are `[[noreturn]]`, and declaring them suppresses the
-     * implicit default constructor, so **no public construction of an ArgIterator can
-     * succeed**: the instance members below are unreachable through the public API. That
-     * is a consequence of the stub, not a separate contract, and whether those members
-     * should become reachable, become `static`, or stay as they are is an open question
-     * (ticket #2276). It is recorded here because a fixture that needs an instance has no
-     * legitimate ordinary route to one, and reaching for raw storage instead is undefined
-     * behaviour rather than a workaround (SR-AUD-112).
+     * @par Ticket #2276 settled the open question, and the reference answered it
+     * The question was whether the instance members should become reachable, become `static`,
+     * or stay as they are. **They stay instance members**, because .NET's are, and making them
+     * `static` would diverge from the very shape this stub exists to present. What #2276 *did*
+     * change is that they now behave like .NET's:
+     *
+     *  - `End()`, `Equals()` and `GetHashCode()` used to be `noexcept` and to return quietly
+     *    (a no-op, `false`, and `0`). .NET throws from all three, so **a caller who reached one
+     *    of them received a plausible answer where .NET reports an unsupported platform**;
+     *  - the exception is `PlatformNotSupportedException`, not `NotSupportedException`;
+     *  - `GetNextArgType()` returns `RuntimeTypeHandle`, as .NET's does, not `TypedReference`;
+     *  - the `GetNextArg(RuntimeTypeHandle)` overload was missing and is added.
+     *
+     * @note Both constructors are `[[noreturn]]`, and declaring them suppresses the implicit
+     * default constructor, so **no public construction can succeed** — exactly as in .NET, where
+     * both constructors throw. The instance members are therefore unreachable through ordinary
+     * use in both. A fixture that needs an instance has no legitimate route to one, and reaching
+     * for raw storage instead is undefined behaviour rather than a workaround (SR-AUD-112).
      */
     struct ArgIterator {
         /**
@@ -35,8 +48,7 @@ namespace System {
          * @param arglist Handle to the variable argument list.
          */
         [[noreturn]] explicit ArgIterator(RuntimeArgumentHandle /*arglist*/) {
-            throw NotSupportedException(
-                "ArgIterator requires CLR __arglist support and is not available in sharp-runtime.");
+            throw PlatformNotSupportedException("ArgIterator is not supported on this platform.");
         }
 
         /**
@@ -47,28 +59,38 @@ namespace System {
          * @param ptr     Pointer to the first argument descriptor.
          */
         [[noreturn]] ArgIterator(RuntimeArgumentHandle /*arglist*/, void* /*ptr*/) {
-            throw NotSupportedException(
+            throw PlatformNotSupportedException(
                 "ArgIterator requires CLR __arglist support and is not available in sharp-runtime.");
         }
 
         /**
          * @brief Concludes processing of the argument list.
          *
-         * No-op in this implementation (there is no list to finalize).
+         * Always throws, as .NET's does (`ArgIterator.cs:23-26`). It was a silent no-op until
+         * ticket #2276.
          */
-        void End() noexcept {}
+        [[noreturn]] void End() {
+            throw PlatformNotSupportedException("ArgIterator is not supported on this platform.");
+        }
 
         /**
-         * @brief Returns false — ArgIterator stubs are never equal.
-         * @return false.
+         * @brief Always throws, as .NET's override does (`ArgIterator.cs:28-31`).
+         *
+         * It returned `false` until ticket #2276 — a plausible answer where .NET reports an
+         * unsupported platform.
          */
-        [[nodiscard]] bool Equals(const ArgIterator& /*other*/) const noexcept { return false; }
+        [[noreturn]] bool Equals(const ArgIterator& /*other*/) const {
+            throw PlatformNotSupportedException("ArgIterator is not supported on this platform.");
+        }
 
         /**
-         * @brief Returns a hash code for this ArgIterator.
-         * @return 0 (stub).
+         * @brief Always throws, as .NET's override does (`ArgIterator.cs:33-36`).
+         *
+         * It returned `0` until ticket #2276.
          */
-        [[nodiscard]] int GetHashCode() const noexcept { return 0; }
+        [[noreturn]] int GetHashCode() const {
+            throw PlatformNotSupportedException("ArgIterator is not supported on this platform.");
+        }
 
         /**
          * @brief Returns the next argument in the variable-argument list.
@@ -76,18 +98,27 @@ namespace System {
          * Always throws NotSupportedException.
          */
         [[noreturn]] TypedReference GetNextArg() {
-            throw NotSupportedException(
-                "ArgIterator.GetNextArg requires CLR __arglist support and is not available in sharp-runtime.");
+            throw PlatformNotSupportedException("ArgIterator is not supported on this platform.");
         }
 
         /**
          * @brief Returns the next argument constrained to the specified runtime type.
          *
-         * Always throws NotSupportedException.
+         * Always throws. **Added by ticket #2276** — .NET has this overload
+         * (`ArgIterator.cs:44-48`) and this port did not.
          */
-        [[noreturn]] TypedReference GetNextArgType() {
-            throw NotSupportedException(
-                "ArgIterator.GetNextArgType requires CLR __arglist support and is not available in sharp-runtime.");
+        [[noreturn]] TypedReference GetNextArg(RuntimeTypeHandle /*rth*/) {
+            throw PlatformNotSupportedException("ArgIterator is not supported on this platform.");
+        }
+
+        /**
+         * @brief Returns the runtime type of the next argument.
+         *
+         * Always throws. **The return type changed from `TypedReference` to
+         * `RuntimeTypeHandle` in ticket #2276**, matching `ArgIterator.cs:50-53`.
+         */
+        [[noreturn]] RuntimeTypeHandle GetNextArgType() {
+            throw PlatformNotSupportedException("ArgIterator is not supported on this platform.");
         }
 
         /**
@@ -97,8 +128,7 @@ namespace System {
          * @return Never returns.
          */
         [[noreturn]] int GetRemainingCount() {
-            throw NotSupportedException(
-                "ArgIterator.GetRemainingCount requires CLR __arglist support and is not available in sharp-runtime.");
+            throw PlatformNotSupportedException("ArgIterator is not supported on this platform.");
         }
     };
 
