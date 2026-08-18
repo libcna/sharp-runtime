@@ -148,7 +148,8 @@ namespace System::Xml::detail {
      * The same limitation applies to a DOCTYPE internal subset, where it is **not** repairable
      * this way: an ordinary subset such as `<!ENTITY a "b">` contains a `>` that XML requires,
      * so the declaration is lost on read-back with no well-formed alternative spelling. That
-     * half is tracked separately and is documented on `XmlDocumentType`.
+     * half is `InternalSubsetTerminatesDeclaration` below, and it is a narrower rule for exactly
+     * that reason.
      */
     [[nodiscard]] inline bool ExternalIdLiteralTerminatesDeclaration(const std::string& literal) {
         return literal.find('>') != std::string::npos;
@@ -238,6 +239,63 @@ namespace System::Xml::detail {
         std::string rendered;
         if (codePoint >= 0x20 && codePoint < 0x7F) rendered.push_back(static_cast<char>(codePoint));
         return "'" + rendered + "', hexadecimal value " + hex + ", is an invalid character.";
+    }
+
+    /**
+     * @brief Reports whether a DOCTYPE internal subset closes the declaration it is written into.
+     *
+     * Ticket #2348 (2026-08-19), split from #2084. The subset is emitted as
+     * `<!DOCTYPE name [SUBSET]>`, so a `]` inside it that is followed by `>` closes the
+     * declaration **early** and hands everything after it to the parser as document markup.
+     * Measured, a subset of `]><evil/><!--` emits
+     *
+     *     <!DOCTYPE r []><evil/><!--]>
+     *
+     * which is malformed XML **and injects an element**.
+     *
+     * **THE RULE IS NOT "reject a subset containing `>`".** #2084 considered that and rejected it,
+     * correctly: `<!DOCTYPE r [<!ENTITY a "b">]><r/>` is well-formed XML that this port emits
+     * correctly, and only this runtime's `>`-terminated DOCTYPE node mis-reads it on the way back
+     * -- a reader limitation `XmlDocumentType`'s own doc-comment concedes. Narrowing a
+     * spec-valid writer to fit a known reader limitation would be a regression. The scope line
+     * #2084 drew is: **reject what makes the emitted document malformed, never what merely fails
+     * to survive this reader**, and this is that line.
+     *
+     * So the test is for a `]` followed (after optional whitespace) by `>`, and it is
+     * **quote-aware**: `<!ENTITY a "]>">` carries `]>` inside a literal, where XML permits it and
+     * a conforming parser tracking quotes reads it correctly.
+     *
+     * **.NET DOES NOT DO THIS, and that is measured rather than assumed.**
+     * `XmlWellFormedWriter.WriteDocType` validates the subset with `XmlCharType.IsOnlyCharData`
+     * alone -- a *character* check, which this port also performs (#2349) -- and then
+     * `XmlEncodedRawTextWriter` writes it with `RawText(subset)` between a literal `[` and `]`
+     * (`XmlEncodedRawTextWriter.cs:281-286`). .NET therefore emits the same malformed document.
+     *
+     * This is a deliberate narrowing past the reference, and it is the rule #2084 already applied
+     * **in this same function** to the `ExternalID` literals, where .NET likewise checks only
+     * characters. A writer that emits a declaration its own delimiters terminate early is
+     * producing an injection vector, and this repository has consistently refused to.
+     */
+    [[nodiscard]] inline bool InternalSubsetTerminatesDeclaration(const std::string& subset) {
+        char quote = '\0';
+        for (std::size_t i = 0; i < subset.size(); ++i) {
+            const char c = subset[i];
+            if (quote != '\0') {
+                if (c == quote) quote = '\0';
+                continue;
+            }
+            if (c == '"' || c == '\'') {
+                quote = c;
+                continue;
+            }
+            if (c != ']') continue;
+            for (std::size_t j = i + 1; j < subset.size(); ++j) {
+                const char after = subset[j];
+                if (after == '>') return true;
+                if (after != ' ' && after != '\t' && after != '\n' && after != '\r') break;
+            }
+        }
+        return false;
     }
 
 } // namespace System::Xml::detail

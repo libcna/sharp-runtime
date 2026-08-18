@@ -705,3 +705,82 @@ TEST(XmlWriterValidationTests, Fix2349_NonCharCodePointsAreRejected) {
     System::Xml::XmlWriterSettings settings;
     EXPECT_TRUE(settings.CheckCharacters);
 }
+
+// ===========================================================================
+// #2348 — a DOCTYPE internal subset must not close its own declaration
+// ===========================================================================
+//
+// Split from #2084, whose premise the measurement had already corrected once: the finding blamed
+// a ']' terminating the subset, and the terminator is '>'. What remained open was F2 -- a subset
+// of "]><evil/><!--" emits
+//
+//     <!DOCTYPE r []><evil/><!--]>
+//
+// which is malformed XML AND injects an element.
+//
+// THE REFERENCE CORRECTS THE TICKET AGAIN, in the opposite direction: .NET does not reject this
+// either. XmlWellFormedWriter.WriteDocType validates the subset with XmlCharType.IsOnlyCharData
+// alone -- a CHARACTER check, which this port also performs since #2349 -- and then
+// XmlEncodedRawTextWriter writes it with RawText(subset) between a literal '[' and ']'
+// (XmlEncodedRawTextWriter.cs:281-286). .NET emits the same malformed document.
+//
+// This is therefore a DELIBERATE NARROWING PAST THE REFERENCE, and it is the rule #2084 already
+// applied in this same function to the ExternalID literals, where .NET likewise checks only
+// characters. A writer that emits a declaration its own delimiters terminate early is producing
+// an injection vector.
+TEST(XmlWriterValidationTests, Fix2348_ASubsetThatClosesTheDeclarationIsRejected) {
+    auto w = NewWriter();
+    EXPECT_THROW(w->WriteDocType("r", "", "", "]><evil/><!--"), System::Xml::XmlException);
+
+    // Whitespace between the ']' and the '>' still terminates the declaration, so it is still
+    // the same injection.
+    auto w2 = NewWriter();
+    EXPECT_THROW(w2->WriteDocType("r", "", "", "]  ><evil/>"), System::Xml::XmlException);
+    auto w3 = NewWriter();
+    EXPECT_THROW(w3->WriteDocType("r", "", "", "]\n><evil/>"), System::Xml::XmlException);
+}
+
+TEST(XmlWriterValidationTests, Fix2348_TheRuleIsNotRejectEveryGreaterThan) {
+    // #2084 considered rejecting any '>' in the subset and rejected THAT, correctly: the most
+    // ordinary subset there is contains one, and the emitted document is well-formed. Only this
+    // runtime's '>'-terminated DOCTYPE node mis-reads it on the way back, which is a READER
+    // limitation, and narrowing a spec-valid writer to fit one would be a regression.
+    {
+        auto w = NewWriter();
+        ASSERT_NO_THROW(w->WriteDocType("r", "", "", "<!ENTITY a \"b\">"));
+    }
+    // A ']' that is not followed by '>' is not a terminator either.
+    {
+        auto w = NewWriter();
+        ASSERT_NO_THROW(w->WriteDocType("r", "", "", "]"));
+    }
+    {
+        auto w = NewWriter();
+        ASSERT_NO_THROW(w->WriteDocType("r", "", "", "<!ENTITY a \"b\"> ] <!ENTITY c \"d\">"));
+    }
+    // ...and an empty subset is untouched.
+    {
+        auto w = NewWriter();
+        ASSERT_NO_THROW(w->WriteDocType("r", "", "", ""));
+    }
+}
+
+TEST(XmlWriterValidationTests, Fix2348_TheCheckIsQuoteAware) {
+    // "]>" inside a quoted literal is where XML permits it, and a conforming parser tracking
+    // quotes reads it correctly. A check that scanned for "]>" without tracking quotes would
+    // reject this, which is the easy way to get this rule wrong.
+    {
+        auto w = NewWriter();
+        ASSERT_NO_THROW(w->WriteDocType("r", "", "", "<!ENTITY a \"]>\">"));
+    }
+    {
+        auto w = NewWriter();
+        ASSERT_NO_THROW(w->WriteDocType("r", "", "", "<!ENTITY a ']>'>"));
+    }
+    // ...but a literal that CLOSES before the "]>" does not protect it.
+    {
+        auto w = NewWriter();
+        EXPECT_THROW(w->WriteDocType("r", "", "", "<!ENTITY a \"b\">]><evil/>"),
+                     System::Xml::XmlException);
+    }
+}

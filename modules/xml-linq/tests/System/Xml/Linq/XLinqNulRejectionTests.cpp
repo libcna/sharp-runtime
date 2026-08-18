@@ -375,3 +375,22 @@ TEST(XLinqNulRejectionTests, ConstructionAndMutationStillAcceptANul) {
     EXPECT_NO_THROW(e->Add(std::make_shared<XAttribute>(XName("a"), kMid)));
     EXPECT_NO_THROW((void)XDocumentType("r", "", "", kMid));
 }
+
+// #2348, the Xml.Linq half. #2200 made XDocumentType::SerializeTo share the writer door's
+// DOCTYPE policy, so it shares this one too -- see XmlWriterValidationTests for why the rule is
+// "']' followed by '>'" rather than "any '>'", and for the measurement that .NET emits the
+// injection at both of its own doors.
+TEST(XLinqNulRejectionTests, Fix2348_ASubsetThatClosesTheDeclarationIsRejectedAtTheDirectDoorToo) {
+    EXPECT_THROW((void)direct(XDocumentType("r", "", "", "]><evil/><!--")),
+                 System::Xml::XmlException);
+    EXPECT_THROW((void)direct(XDocumentType("r", "", "", "]  ><evil/>")),
+                 System::Xml::XmlException);
+    EXPECT_THROW((void)direct(XDocumentType("r", "", "", "<!ENTITY a \"b\">]><evil/>")),
+                 System::Xml::XmlException);
+
+    // The invariance rows, identical to the writer door's.
+    EXPECT_NO_THROW((void)direct(XDocumentType("r", "", "", "<!ENTITY a \"b\">")));
+    EXPECT_NO_THROW((void)direct(XDocumentType("r", "", "", "]")));
+    EXPECT_NO_THROW((void)direct(XDocumentType("r", "", "", "<!ENTITY a \"]>\">")));
+    EXPECT_NO_THROW((void)direct(XDocumentType("r", "", "", "")));
+}

@@ -227,6 +227,13 @@ void XmlWriter::WriteDocType(const std::string& name, const std::string& publicI
     if (detail::ExternalIdLiteralTerminatesDeclaration(systemId))
         throw XmlException("XmlWriter::WriteDocType: the system identifier contains '>', "
                            "which would terminate the DOCTYPE declaration: '" + systemId + "'.");
+    // #2348, the subset half of the same rule. See detail::InternalSubsetTerminatesDeclaration
+    // for why this is `]` followed by `>` rather than any `>`, and for the measurement that .NET
+    // emits the injection too.
+    if (detail::InternalSubsetTerminatesDeclaration(internalSubset))
+        throw XmlException("XmlWriter::WriteDocType: the internal subset closes the DOCTYPE "
+                           "declaration early with ']>', which would inject the remainder as "
+                           "document markup: '" + internalSubset + "'.");
     const char systemQuote = detail::SelectExternalIdDelimiter(systemId);
     if (systemQuote == '\0')
         throw XmlException("XmlWriter::WriteDocType: the system identifier contains both a "

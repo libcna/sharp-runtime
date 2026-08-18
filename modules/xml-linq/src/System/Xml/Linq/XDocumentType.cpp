@@ -49,6 +49,12 @@ namespace System::Xml::Linq {
             throw System::Xml::XmlException(
                 "XDocumentType::SerializeTo: the system identifier contains '>', which would "
                 "terminate the DOCTYPE declaration: '" + systemId_ + "'.");
+        // #2348, the subset half, at the door #2200 made share this policy.
+        if (System::Xml::detail::InternalSubsetTerminatesDeclaration(internalSubset_))
+            throw System::Xml::XmlException(
+                "XDocumentType::SerializeTo: the internal subset closes the DOCTYPE declaration "
+                "early with ']>', which would inject the remainder as document markup: '" +
+                internalSubset_ + "'.");
         const char systemQuote = System::Xml::detail::SelectExternalIdDelimiter(systemId_);
         if (systemQuote == '\0')
             throw System::Xml::XmlException(
