@@ -1382,7 +1382,7 @@ TEST_F(WatcherReconfigurationFixture, Fix2105_AnUnpairedRenameIsNotReportedAfter
     touchNew(dirA / "movesAway");
 
     std::atomic<int>  created{0};
-    std::atomic<int>  deleted{0};
+    std::atomic<int>  deletedAfterStop{0};
     std::atomic<bool> stopped{false};
     FileSystemWatcher w(dirA.string());
     w.Created.push_back([&](void*, const FileSystemEventArgs&) {
@@ -1391,7 +1391,16 @@ TEST_F(WatcherReconfigurationFixture, Fix2105_AnUnpairedRenameIsNotReportedAfter
             stopped.store(true);
         }
     });
-    w.Deleted.push_back([&](void*, const FileSystemEventArgs&) { ++deleted; });
+    // COUNT ONLY WHAT ARRIVES AFTER THE STOP, which is the property under test. Asserting a bare
+    // "no Deleted at all" assumes the two events share one read(), and they do not always: the
+    // first cut of this test asserted that and passed three times in isolation, then FAILED inside
+    // the full gate, where the machine is busy enough to split the batch. A test that is
+    // intermittently green is not evidence (#2352), and a legitimate pre-stop delivery is not a
+    // defect. Counting post-stop deliveries catches the missing gate whenever the batch does
+    // coalesce and can never fail when it does not.
+    w.Deleted.push_back([&](void*, const FileSystemEventArgs&) {
+        if (stopped.load()) ++deletedAfterStop;
+    });
     w.setEnableRaisingEventsProperty(true);
 
     // ORDER IS THE WHOLE TEST, and getting it backwards makes the case vacuous. The move-out
@@ -1411,7 +1420,7 @@ TEST_F(WatcherReconfigurationFixture, Fix2105_AnUnpairedRenameIsNotReportedAfter
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
     EXPECT_EQ(created.load(), 1);
-    EXPECT_EQ(deleted.load(), 0)
+    EXPECT_EQ(deletedAfterStop.load(), 0)
         << "an unpaired rename was reported as a Deleted after the watcher was told to stop";
 }
 

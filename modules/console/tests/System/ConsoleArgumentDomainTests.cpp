@@ -225,38 +225,120 @@ TEST_F(ConsoleDomainTest, ClearStillResetsTheCachedPosition) {
 }
 
 // =================================================================================================
-// #2165 — pins. Everything below is behaviour this review deliberately did NOT change, because
-// .NET's answer for it is recollection rather than measurement. Ticket #2166 owns each one; if it
-// is ever answered, these tests are the record of what changed and the place to change it.
+// #2166 — ANSWERED. Everything below was pinned by #2165 as behaviour it deliberately did not
+// change, because ".NET's answer for it is recollection rather than measurement". /rv supplies the
+// measurement, and it corrects the framing in one important way: the cursor bound is NOT a belief
+// about a platform layer. .NET validates a cursor coordinate in Console.cs ITSELF, before dispatch
+// (Console.cs:550-558), so it applies on every platform.
+//
+// The other doors are different, and the difference is worth stating. .NET's UNIX pal throws
+// PlatformNotSupportedException for every one of them -- CursorSize's setter
+// (ConsolePal.Unix.cs:193-197), SetWindowSize (:387-394), SetWindowPosition (:744-747),
+// SetBufferSize (:727-730), the buffer setters (:305-315) and MoveBufferArea (:717-725) -- so on
+// this port's runtime platform .NET states no range for them at all. The ranges below are its
+// WINDOWS pal's, borrowed because they are the only ones .NET defines. Refusing outright would
+// remove a feature this port offers rather than repair one, which is the wrong direction for a
+// validation ticket.
 // =================================================================================================
 
-TEST_F(ConsoleDomainTest, PIN_NoUpperBoundIsEnforcedOnACursorCoordinate) {
-    // .NET is believed to reject a coordinate at or above short.MaxValue. The audit measured only
-    // the negative case and /rv is absent, so this stays accepted. See #2166.
+TEST_F(ConsoleDomainTest, Fix2166_ACursorCoordinateIsBoundedByShortMaxValueExclusive) {
+    // The bound is EXCLUSIVE -- .NET's test is `left >= short.MaxValue` -- so 32766 is the last
+    // accepted column and 32767 is the first rejected one. Getting that boundary off by one is the
+    // easy mistake, so both sides of it are asserted.
     EXPECT_NO_THROW(Console::SetCursorPosition(32766, 32766));
-    EXPECT_NO_THROW(Console::SetCursorPosition(32767, 0));
-    EXPECT_NO_THROW(Console::SetCursorPosition(INT_MAX, 0));
-    EXPECT_EQ(Console::getCursorLeftProperty(), INT_MAX);
+    EXPECT_THROW(Console::SetCursorPosition(32767, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Console::SetCursorPosition(0, 32767), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Console::SetCursorPosition(INT_MAX, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Console::SetCursorPosition(-1, 0), System::ArgumentOutOfRangeException);
+
+    // The identity, which is what makes this a transcription rather than a guess.
+    try {
+        Console::SetCursorPosition(32767, 0);
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "left");
+        EXPECT_EQ(e.getActualValueProperty(), "32767");
+        const std::string message = e.what();
+        EXPECT_NE(message.find("The value must be greater than or equal to zero and less than the "
+                               "console's buffer size in that dimension."),
+                  std::string::npos) << message;
+    }
+    // The SECOND parameter is named too, not just the first.
+    try {
+        Console::SetCursorPosition(0, -5);
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "top");
+    }
+
+    // ...and the property aliases inherit it, because .NET's CursorLeft/CursorTop setters
+    // delegate to SetCursorPosition.
+    EXPECT_THROW(Console::setCursorLeftProperty(32767), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Console::setCursorTopProperty(32767), System::ArgumentOutOfRangeException);
 }
 
-TEST_F(ConsoleDomainTest, PIN_TheCursorSizeDomainIsNotEnforced) {
-    // The doc-comment states a 1-100 percent domain; nothing enforces it. See #2166.
+TEST_F(ConsoleDomainTest, Fix2166_TheCursorSizeDomainIsEnforced) {
     const intcs original = Console::getCursorSizeProperty();
-    EXPECT_NO_THROW(Console::setCursorSizeProperty(0));
-    EXPECT_NO_THROW(Console::setCursorSizeProperty(-1));
-    EXPECT_NO_THROW(Console::setCursorSizeProperty(101));
-    EXPECT_EQ(Console::getCursorSizeProperty(), 101) << "the out-of-domain value is read back";
+    EXPECT_THROW(Console::setCursorSizeProperty(0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Console::setCursorSizeProperty(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Console::setCursorSizeProperty(101), System::ArgumentOutOfRangeException);
+    EXPECT_EQ(Console::getCursorSizeProperty(), original) << "a rejected value must not be stored";
+
+    // Both ends of the domain are accepted, so this is a domain check rather than a sign check.
+    EXPECT_NO_THROW(Console::setCursorSizeProperty(1));
+    EXPECT_NO_THROW(Console::setCursorSizeProperty(100));
+    EXPECT_EQ(Console::getCursorSizeProperty(), 100);
+
+    try {
+        Console::setCursorSizeProperty(101);
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const System::ArgumentOutOfRangeException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "value");
+        EXPECT_NE(std::string(e.what()).find(
+                      "The cursor size is invalid. It must be a percentage between 1 and 100."),
+                  std::string::npos) << e.what();
+    }
     Console::setCursorSizeProperty(original);
 }
 
-TEST_F(ConsoleDomainTest, PIN_TheWindowAndBufferDoorsAcceptNegativeArguments) {
-    // Six doors that accept the same shape of invalid input the two findings are about, with no
-    // managed probe anywhere for any of them. See #2166.
-    EXPECT_NO_THROW(Console::SetWindowSize(-1, -1));
-    EXPECT_NO_THROW(Console::SetWindowSize(0, 0));
-    EXPECT_NO_THROW(Console::SetWindowPosition(-1, -1));
-    EXPECT_NO_THROW(Console::SetBufferSize(-1, -1));
-    EXPECT_NO_THROW(Console::setBufferWidthProperty(-1));
-    EXPECT_NO_THROW(Console::setBufferHeightProperty(-1));
-    EXPECT_NO_THROW(Console::MoveBufferArea(-1, -1, -1, -1, -1, -1));
+TEST_F(ConsoleDomainTest, Fix2166_TheWindowAndBufferDoorsRejectInvalidArguments) {
+    EXPECT_THROW(Console::SetWindowSize(-1, -1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Console::SetWindowSize(0, 0), System::ArgumentOutOfRangeException)
+        << "a window of zero columns is not a window; .NET's check is ThrowIfNegativeOrZero";
+    EXPECT_THROW(Console::SetWindowPosition(-1, -1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Console::SetBufferSize(-1, -1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Console::SetBufferSize(0, 1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Console::SetBufferSize(32767, 1), System::ArgumentOutOfRangeException)
+        << "short.MaxValue is excluded here too";
+    EXPECT_THROW(Console::setBufferWidthProperty(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Console::setBufferHeightProperty(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Console::MoveBufferArea(-1, -1, -1, -1, -1, -1), System::ArgumentOutOfRangeException);
+
+    // Every one of MoveBufferArea's six coordinates is checked, and each names itself. A single
+    // check on the first argument would satisfy the row above and nothing else.
+    const char* names[] = {"sourceLeft", "sourceTop", "sourceWidth",
+                           "sourceHeight", "targetLeft", "targetTop"};
+    for (int bad = 0; bad < 6; ++bad) {
+        intcs a[6] = {0, 0, 0, 0, 0, 0};
+        a[bad] = -1;
+        try {
+            Console::MoveBufferArea(a[0], a[1], a[2], a[3], a[4], a[5]);
+            ADD_FAILURE() << "argument " << bad << " was not checked";
+        } catch (const System::ArgumentOutOfRangeException& e) {
+            EXPECT_EQ(e.getParamNameProperty(), names[bad]);
+        }
+    }
+    // The nine-argument overload delegates, so it inherits all six checks.
+    EXPECT_THROW(Console::MoveBufferArea(-1, 0, 0, 0, 0, 0, ' ',
+                                         System::ConsoleColor::Black, System::ConsoleColor::Black),
+                 System::ArgumentOutOfRangeException);
+
+    // The invariance rows: valid arguments still work, so this is validation and not a blanket
+    // refusal of the doors.
+    EXPECT_NO_THROW(Console::SetWindowSize(80, 25));
+    EXPECT_NO_THROW(Console::SetWindowPosition(0, 0));
+    EXPECT_NO_THROW(Console::SetBufferSize(80, 25));
+    EXPECT_NO_THROW(Console::setBufferWidthProperty(80));
+    EXPECT_NO_THROW(Console::setBufferHeightProperty(25));
+    EXPECT_NO_THROW(Console::MoveBufferArea(0, 0, 1, 1, 0, 0));
 }

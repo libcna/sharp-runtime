@@ -393,23 +393,79 @@ namespace System {
         // -----------------------------------------------------------------------
 
         /**
+         * @brief The console's coordinate ceiling, `short.MaxValue`, EXCLUSIVE.
+         *
+         * Ticket #2166 (2026-08-18). .NET validates a cursor coordinate in `Console.cs` itself,
+         * before it reaches any platform layer — `if (left < 0 || left >= short.MaxValue)`
+         * (`Console.cs:553-556`) — so this bound is platform-independent and is the one thing
+         * about these doors that .NET states unconditionally. `SetCursorPosition(32767, 0)` is
+         * therefore a rejection, not an acceptance: the comparison is `>=`.
+         */
+        static constexpr intcs kConsoleCoordinateCeiling = 32767;
+
+        /** @brief .NET's `SR.ArgumentOutOfRange_ConsoleBufferBoundaries` (Strings.resx:200). */
+        static constexpr const char* kBufferBoundariesMessage =
+            "The value must be greater than or equal to zero and less than the console's buffer "
+            "size in that dimension.";
+
+        /** @brief .NET's `SR.ArgumentOutOfRange_ConsoleWindowPos` (Strings.resx:203). */
+        static constexpr const char* kWindowPositionMessage =
+            "The window position must be set such that the current window size fits within the "
+            "console's buffer, and the numbers must not be negative.";
+
+        /** @brief .NET's `SR.ArgumentOutOfRange_ConsoleBufferLessThanWindowSize` (Strings.resx:209). */
+        static constexpr const char* kBufferExtentMessage =
+            "The console buffer size must not be less than the current size and position of the "
+            "console window, nor greater than or equal to short.MaxValue.";
+
+        /**
+         * @brief Rejects a buffer extent outside `[1, short.MaxValue)`.
+         *
+         * .NET's Windows pal checks `width < srWindow.Right + 1 || width >= short.MaxValue`
+         * (`ConsolePal.Windows.cs:897-901`). The lower half is window-relative and this port has
+         * no window geometry to compare against, so it enforces the part that needs none: an
+         * extent must be at least one column and below `short.MaxValue`.
+         */
+        static void throwIfInvalidBufferExtent(intcs value, const char* paramName) {
+            if (value < 1 || value >= kConsoleCoordinateCeiling) {
+                throw System::ArgumentOutOfRangeException(paramName, std::to_string(value),
+                                                          kBufferExtentMessage);
+            }
+        }
+
+        /**
+         * @brief Rejects a coordinate outside `[0, short.MaxValue)`.
+         *
+         * .NET passes the offending value as the exception's actual value, so the composed
+         * message carries an `Actual value was N.` clause. Reproduced.
+         */
+        static void throwIfOutsideBufferBoundaries(intcs value, const char* paramName) {
+            if (value < 0 || value >= kConsoleCoordinateCeiling) {
+                throw System::ArgumentOutOfRangeException(paramName, std::to_string(value),
+                                                          kBufferBoundariesMessage);
+            }
+        }
+
+        /**
          * @brief Sets the cursor position using an ANSI escape sequence (0-based).
          * @param left Column index (0-based).
          * @param top  Row index (0-based).
-         * @throws System::ArgumentOutOfRangeException if @p left or @p top is negative. The
-         *         coordinate is rejected before the cache is written or anything is emitted.
+         * @throws System::ArgumentOutOfRangeException if @p left or @p top is outside
+         *         `[0, short.MaxValue)`. The coordinate is rejected before the cache is written
+         *         or anything is emitted.
          *
-         * @note **No upper bound is enforced**, deliberately. Current .NET is believed to reject a
-         *   coordinate at or above `short.MaxValue`, but the audit measured only the negative case
-         *   and the `/rv` reference tree is absent here, so `SetCursorPosition(32767, 0)` and
-         *   `(INT_MAX, 0)` are still accepted and are pinned as such by test. Ticket #2166 owns
-         *   the question.
+         * @note **Ticket #2166 (2026-08-18) added the upper bound.** #2164 enforced only the
+         *   negative case and recorded that the .NET limit was "believed" but unmeasured. It is
+         *   measured now, and it is not a belief about a platform layer: .NET validates in
+         *   `Console.cs` itself, before dispatch (`Console.cs:550-558`), so the bound applies on
+         *   every platform. `SetCursorPosition(32767, 0)` is a **rejection**, because the
+         *   comparison is `>=`.
          */
         static void SetCursorPosition(intcs left, intcs top) {
             // The cache is a documented local reduction, so an invalid coordinate would survive in
             // the process even where the terminal ignores the sequence it produces (SR-AUD-244).
-            System::ArgumentOutOfRangeException::ThrowIfNegative(left, "left");
-            System::ArgumentOutOfRangeException::ThrowIfNegative(top, "top");
+            throwIfOutsideBufferBoundaries(left, "left");
+            throwIfOutsideBufferBoundaries(top, "top");
             cursorLeft_ = left;
             cursorTop_  = top;
             // The +1 converts 0-based to the ANSI 1-based convention, and it is computed in a wider
@@ -477,8 +533,29 @@ namespace System {
          * @return The stored cursor size (default 25).
          */
         [[nodiscard]] static intcs getCursorSizeProperty() { return cursorSize_; }
-        /** @brief Sets the cursor size (stored; not visually applied in this implementation). */
-        static void setCursorSizeProperty(intcs v) { cursorSize_ = v; }
+        /**
+         * @brief Sets the cursor size, as a percentage in `[1, 100]`.
+         *
+         * Ticket #2166. The value used to be stored unchecked against a domain the doc-comment
+         * itself declared, so `0`, `-1` and `101` were all readable back.
+         *
+         * The range and the message are .NET's Windows pal
+         * (`ConsolePal.Windows.cs:588-590`, `SR.ArgumentOutOfRange_CursorSize`). **On Unix .NET's
+         * setter throws `PlatformNotSupportedException` outright** (`ConsolePal.Unix.cs:193-197`),
+         * so it defines no range there at all — this port keeps the property working and borrows
+         * the only range .NET states. Refusing outright would remove a feature this port offers
+         * rather than repair one, which is the wrong direction for a validation ticket.
+         *
+         * @throws System::ArgumentOutOfRangeException if @p v is outside `[1, 100]`.
+         */
+        static void setCursorSizeProperty(intcs v) {
+            if (v < 1 || v > 100) {
+                throw System::ArgumentOutOfRangeException(
+                    "value", std::to_string(v),
+                    "The cursor size is invalid. It must be a percentage between 1 and 100.");
+            }
+            cursorSize_ = v;
+        }
 
         /**
          * @brief Gets a value indicating whether the cursor is visible.
@@ -536,6 +613,11 @@ namespace System {
          * @param height New window height in rows.
          */
         static void SetWindowSize(intcs width, intcs height) {
+            // Ticket #2166. .NET's Windows pal opens with ThrowIfNegativeOrZero on both
+            // (ConsolePal.Windows.cs:1020-1021); its Unix pal throws PlatformNotSupportedException
+            // and states no range. A window of zero or negative columns is not a window.
+            System::ArgumentOutOfRangeException::ThrowIfNegativeOrZero(width, "width");
+            System::ArgumentOutOfRangeException::ThrowIfNegativeOrZero(height, "height");
             std::printf("\033[8;%d;%dt", static_cast<int>(height), static_cast<int>(width));
             std::fflush(stdout);
         }
@@ -546,6 +628,18 @@ namespace System {
          * @param top  New top position in pixels.
          */
         static void SetWindowPosition(intcs left, intcs top) {
+            // Ticket #2166. .NET's Windows pal rejects a negative coordinate with
+            // SR.ArgumentOutOfRange_ConsoleWindowPos (ConsolePal.Windows.cs:995-1001). The rest of
+            // that check is buffer-relative and this port has no buffer geometry to check against,
+            // so only the half that needs none is reproduced -- see the migration note.
+            if (left < 0) {
+                throw System::ArgumentOutOfRangeException("left", std::to_string(left),
+                                                          kWindowPositionMessage);
+            }
+            if (top < 0) {
+                throw System::ArgumentOutOfRangeException("top", std::to_string(top),
+                                                          kWindowPositionMessage);
+            }
             std::printf("\033[3;%d;%dt", static_cast<int>(top), static_cast<int>(left));
             std::fflush(stdout);
         }
@@ -569,19 +663,22 @@ namespace System {
          * @brief Sets the screen buffer width (no-op in this implementation).
          * @param v New buffer width.
          */
-        static void setBufferWidthProperty(intcs v)  { (void)v; }
+        static void setBufferWidthProperty(intcs v)  { throwIfInvalidBufferExtent(v, "width"); }
         /**
          * @brief Sets the screen buffer height (no-op in this implementation).
          * @param v New buffer height.
          */
-        static void setBufferHeightProperty(intcs v) { (void)v; }
+        static void setBufferHeightProperty(intcs v) { throwIfInvalidBufferExtent(v, "height"); }
 
         /**
          * @brief Sets the screen buffer size (no-op in this implementation).
          * @param width  New buffer width.
          * @param height New buffer height.
          */
-        static void SetBufferSize(intcs width, intcs height) { (void)width; (void)height; }
+        static void SetBufferSize(intcs width, intcs height) {
+            throwIfInvalidBufferExtent(width, "width");
+            throwIfInvalidBufferExtent(height, "height");
+        }
 
         /**
          * @brief Copies a rectangular region of the buffer to another location (no-op stub).
@@ -589,8 +686,12 @@ namespace System {
         static void MoveBufferArea(intcs sourceLeft, intcs sourceTop,
                                     intcs sourceWidth, intcs sourceHeight,
                                     intcs targetLeft, intcs targetTop) {
-            (void)sourceLeft; (void)sourceTop; (void)sourceWidth;
-            (void)sourceHeight; (void)targetLeft; (void)targetTop;
+            throwIfOutsideBufferBoundaries(sourceLeft, "sourceLeft");
+            throwIfOutsideBufferBoundaries(sourceTop, "sourceTop");
+            throwIfOutsideBufferBoundaries(sourceWidth, "sourceWidth");
+            throwIfOutsideBufferBoundaries(sourceHeight, "sourceHeight");
+            throwIfOutsideBufferBoundaries(targetLeft, "targetLeft");
+            throwIfOutsideBufferBoundaries(targetTop, "targetTop");
         }
 
         /**
@@ -602,8 +703,7 @@ namespace System {
                                     char sourceChar,
                                     ConsoleColor sourceForeColor,
                                     ConsoleColor sourceBackColor) {
-            (void)sourceLeft; (void)sourceTop; (void)sourceWidth;
-            (void)sourceHeight; (void)targetLeft; (void)targetTop;
+            MoveBufferArea(sourceLeft, sourceTop, sourceWidth, sourceHeight, targetLeft, targetTop);
             (void)sourceChar; (void)sourceForeColor; (void)sourceBackColor;
         }
 
