@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/XmlDocument.hpp"
+#include <sstream>
+#include <fstream>
 
 #include <cctype>
 #include <vector>
@@ -97,6 +99,26 @@ namespace System::Xml {
          *       This ticket is about the **undeclared** case, where .NET throws and this port
          *       silently rewrote the document's own text.
          */
+        /**
+         * @brief Reads @p filename whole, in binary, into @p contents.
+         *
+         * Ticket #2361. `XmlDocument::Load` needs the raw bytes so that
+         * ThrowIfUndeclaredEntityReference can run at that door too, and binary mode matters:
+         * a text-mode read on Windows would collapse CRLF and change offsets the scanner walks.
+         *
+         * @return @c false if the file cannot be opened or read; the caller then lets tinyxml2
+         *         categorise the failure so the exception text is unchanged.
+         */
+        bool ReadWholeFile(const std::string& filename, std::string& contents) {
+            std::ifstream in(filename, std::ios::binary);
+            if (!in) return false;
+            std::ostringstream buffer;
+            buffer << in.rdbuf();
+            if (in.bad()) return false;
+            contents = buffer.str();
+            return true;
+        }
+
         void ThrowIfUndeclaredEntityReference(const std::string& xml) {
             static const char* const predefined[] = {"amp", "lt", "gt", "quot", "apos"};
             const std::vector<std::string> declaredNames = DeclaredEntityNames(xml);
@@ -548,13 +570,31 @@ namespace System::Xml {
 
     void XmlDocument::Load(const std::string& filename) {
         nodeCache_.clear();
-        if (doc_.LoadFile(filename.c_str()) != tinyxml2::XML_SUCCESS)
+
+        // #2361 (2026-08-18) closed the asymmetry #2082 left here. The entity check needs the
+        // RAW text -- tinyxml2 decodes the five predefined entities during parsing, after which
+        // "&amp;nope;" and "&nope;" are indistinguishable -- and this door used to hand the path
+        // straight to LoadFile without ever holding the bytes. So a document loaded FROM A FILE
+        // accepted an undeclared entity and then silently rewrote it on save, while the identical
+        // text through LoadXml was rejected. One door, two answers.
+        //
+        // This reads the file itself and then parses the buffer, which is what tinyxml2::LoadFile
+        // does internally anyway (read whole file, call Parse). The FAILURE path deliberately
+        // still goes through LoadFile: it is the thing that produces XML_ERROR_FILE_NOT_FOUND /
+        // FILE_COULD_NOT_BE_OPENED / FILE_READ_ERROR and the ErrorStr() this message has always
+        // carried, and reproducing those categories by hand would be inventing diagnostics rather
+        // than keeping them.
+        std::string contents;
+        if (!ReadWholeFile(filename, contents)) {
+            (void)doc_.LoadFile(filename.c_str());   // let tinyxml2 categorise its own failure
             throw XmlException("XmlDocument::Load: failed to load '" + filename + "': " +
                                (doc_.ErrorStr() ? doc_.ErrorStr() : "unknown error"));
-        // #2083. The entity check (#2082) cannot run here: it needs the RAW text, and this door
-        // hands the file straight to tinyxml2 without ever holding it. That asymmetry between
-        // the two doors is recorded rather than hidden -- see ticket #2361.
-        ThrowIfUndeclaredPrefix(doc_.RootElement(), {});
+        }
+        ThrowIfUndeclaredEntityReference(contents);   // #2082, now at BOTH doors
+        if (doc_.Parse(contents.c_str(), contents.size()) != tinyxml2::XML_SUCCESS)
+            throw XmlException("XmlDocument::Load: failed to load '" + filename + "': " +
+                               (doc_.ErrorStr() ? doc_.ErrorStr() : "unknown error"));
+        ThrowIfUndeclaredPrefix(doc_.RootElement(), {});   // #2083, always ran here
         // tinyxml2::XMLDocument::LoadFile() clears and frees every previously-allocated node
         // (including detachedHolder_ from the constructor, or a prior Load/LoadXml call) before
         // parsing; recreate it now, or IsDetached()/getParentNodeProperty() etc. would compare
