@@ -141,25 +141,37 @@ TEST(DnsTests, GetHostEntry_ByAddress_IPv6Loopback_ResolvesSomeName) {
 //
 // The addresses below are the RFC 5737 TEST-NET-1 and RFC 3849 documentation ranges, which are
 // reserved precisely so that they resolve to nothing anywhere, so this exercises the
-// no-reverse-mapping branch even on a host that does have an ::1 entry. The assertion is that
-// the call TERMINATES and reports the address it was asked about; a host that does return a
-// name for these is free to do so, and the entry is then whatever that name resolves to.
+// no-reverse-mapping branch even on a host that does have an ::1 entry.
+//
+// CORRECTION (ticket #2375, 2026-08-18). This used to require that the call RETURN an entry,
+// which is a third possible outcome the resolver gets to choose among, not a property of this
+// port. Caught by the full gate: one run raised `Temporary failure in name resolution`
+// (EAI_AGAIN) for 192.0.2.1 while five isolated runs passed. The finding is about
+// TERMINATION -- an unbounded mutual recursion overflows the stack and takes the process
+// down, so it can neither return nor throw -- and termination is what is asserted now.
+// A resolver that answers, one that says "no such name", and one that is briefly unreachable
+// are all acceptable; a stack overflow is not.
 TEST(DnsTests, GetHostEntry_ByAddress_WithNoReverseMapping_TerminatesInsteadOfRecursing) {
-    const IPAddress documentationV4 = IPAddress::Parse("192.0.2.1");
-    const IPHostEntry v4 = Dns::GetHostEntry(documentationV4);
-    EXPECT_FALSE(v4.getHostNameProperty().empty());
-    if (v4.getHostNameProperty() == documentationV4.ToString()) {
-        ASSERT_EQ(v4.getAddressListProperty().size(), 1u);
-        EXPECT_EQ(v4.getAddressListProperty()[0], documentationV4);
-    }
-
-    const IPAddress documentationV6 = IPAddress::Parse("2001:db8::1");
-    const IPHostEntry v6 = Dns::GetHostEntry(documentationV6);
-    EXPECT_FALSE(v6.getHostNameProperty().empty());
-    if (v6.getHostNameProperty() == documentationV6.ToString()) {
-        ASSERT_EQ(v6.getAddressListProperty().size(), 1u);
-        EXPECT_EQ(v6.getAddressListProperty()[0], documentationV6);
-    }
+    const auto terminatesForAddressLiteral = [](const char* text) {
+        const IPAddress address = IPAddress::Parse(text);
+        try {
+            const IPHostEntry entry = Dns::GetHostEntry(address);
+            // The resolver answered. Whatever it said, the entry must be well formed.
+            EXPECT_FALSE(entry.getHostNameProperty().empty()) << text;
+            if (entry.getHostNameProperty() == address.ToString()) {
+                // No reverse mapping: the port reports the address it was asked about,
+                // exactly once, rather than calling back in with it.
+                ASSERT_EQ(entry.getAddressListProperty().size(), 1u) << text;
+                EXPECT_EQ(entry.getAddressListProperty()[0], address) << text;
+            }
+        } catch (const SocketException&) {
+            // The resolver declined, or was momentarily unreachable. Reaching this line is
+            // itself the assertion: the call came back.
+            SUCCEED();
+        }
+    };
+    terminatesForAddressLiteral("192.0.2.1");
+    terminatesForAddressLiteral("2001:db8::1");
 }
 
 // The same termination guarantee for the loopback addresses the suite already uses, stated as

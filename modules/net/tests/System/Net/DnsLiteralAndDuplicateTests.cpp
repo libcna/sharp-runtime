@@ -26,6 +26,14 @@
 //
 // These tests use only IP literals and names this container resolves from /etc/hosts, so none
 // of them needs a network. The one place a real DNS answer would be required is guarded.
+//
+// CORRECTION (ticket #2375, 2026-08-18): that sentence was measured false for exactly one row.
+// MalformedLiteralTextIsStillRejected asserted that six strings fail to resolve, which is not a
+// property of this port at all -- it is the RESOLVER's opinion, and any wildcard DNS server can
+// change it. On this container "1.2.3." takes a 13 ms round trip and comes back as 1.2.0.3,
+// where "1.2.3" is answered by libc in 0.03 ms. The test now asks getaddrinfo itself and
+// requires the port to AGREE with it, which is the property #2039 was actually about and is
+// independent of what any resolver answers. See docs/DnsLiteralOracleTestDefect.md.
 #include <gtest/gtest.h>
 #include "System/ArgumentException.hpp"
 #include <algorithm>
@@ -37,6 +45,11 @@
 #include "System/Net/Sockets/AddressFamily.hpp"
 #include "System/Net/Sockets/SocketError.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
+#ifndef _WIN32
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#endif
 
 using System::Net::Dns;
 using System::Net::IPAddress;
@@ -97,9 +110,81 @@ TEST(DnsLiteralTests, LiteralIsInterpretedExactlyAsIPAddressParseDoes) {
     }
 }
 
-TEST(DnsLiteralTests, MalformedLiteralTextIsStillRejected) {
+// An independent oracle, in the shape #2351 established for tzdata: ask the system
+// resolver the same question through a different door, and require the port to give
+// the same answer. Nothing here asserts what that answer IS.
+namespace {
+struct ResolverAnswer {
+    bool                     resolved = false;
+    std::vector<std::string> addresses;
+};
+
+ResolverAnswer askTheSystemResolver(const char* text) {
+    ResolverAnswer answer;
+#ifdef _WIN32
+    (void)text;   // the oracle is POSIX-only; see the guard at the call site
+#else
+    ::addrinfo hints{};
+    hints.ai_family   = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    ::addrinfo* head  = nullptr;
+    if (::getaddrinfo(text, nullptr, &hints, &head) != 0 || head == nullptr) return answer;
+    answer.resolved = true;
+    for (::addrinfo* it = head; it != nullptr; it = it->ai_next) {
+        char buffer[INET6_ADDRSTRLEN] = {};
+        if (it->ai_family == AF_INET) {
+            ::inet_ntop(AF_INET,
+                        &reinterpret_cast<::sockaddr_in*>(it->ai_addr)->sin_addr,
+                        buffer, sizeof(buffer));
+        } else if (it->ai_family == AF_INET6) {
+            ::inet_ntop(AF_INET6,
+                        &reinterpret_cast<::sockaddr_in6*>(it->ai_addr)->sin6_addr,
+                        buffer, sizeof(buffer));
+        } else {
+            continue;
+        }
+        answer.addresses.emplace_back(buffer);
+    }
+    ::freeaddrinfo(head);
+#endif
+    return answer;
+}
+} // namespace
+
+// FLIPPED by #2375 (2026-08-18). This used to assert that six strings throw, which made the
+// suite depend on the container's DNS. What the port actually owes is narrower and testable:
+// text that IPAddress::Parse rejects must never be given a literal reading, and the answer
+// must be whatever the system resolver says -- including "nothing", which is what most
+// resolvers say about most of these.
+TEST(DnsLiteralTests, MalformedLiteralTextIsNeverGivenALiteralReading) {
     for (const char* text : {"1.2.3.4.5", "1.2.3.", "256.1.1.1", "1.2.3.4 ", "", "999.999.999.999"}) {
-        EXPECT_THROW((void)Dns::GetHostAddresses(text), SocketException) << text;
+        // 1. The port must not read any of these as a literal. This is the whole finding,
+        //    and it holds on every machine.
+        IPAddress parsed;
+        EXPECT_FALSE(IPAddress::TryParse(text, parsed)) << text;
+
+#ifdef _WIN32
+        // No oracle here; the literal claim above is still checked.
+        continue;
+#else
+        // 2. Whatever happens next is the resolver's business, and the port must report it
+        //    faithfully rather than inventing an answer.
+        const ResolverAnswer oracle = askTheSystemResolver(text);
+        if (!oracle.resolved) {
+            EXPECT_THROW((void)Dns::GetHostAddresses(text), SocketException) << text;
+            continue;
+        }
+        std::vector<std::string> got;
+        ASSERT_NO_THROW({
+            for (const IPAddress& address : Dns::GetHostAddresses(text))
+                got.push_back(address.ToString());
+        }) << text;
+        std::vector<std::string> expected = oracle.addresses;
+        std::sort(expected.begin(), expected.end());
+        expected.erase(std::unique(expected.begin(), expected.end()), expected.end());
+        std::sort(got.begin(), got.end());
+        EXPECT_EQ(got, expected) << text;
+#endif
     }
 }
 
