@@ -521,7 +521,31 @@ TEST(DateOnlyTests, Ccf002d_WellFormedDatesKeepTheirExactValues) {
     EXPECT_EQ(d.getDayProperty(), 15);
     // Previously-rejected shapes stay rejected.
     EXPECT_FALSE(System::DateOnly::TryParse("2024-02-30", d));
-    EXPECT_FALSE(System::DateOnly::TryParse("2024-6-15", d));
+    EXPECT_FALSE(System::DateOnly::TryParse("2024-6-15garbage", d));
+}
+
+// #1929 row 1 (decided 2026-08-18). DateOnly takes the same date widening as the
+// other two doors -- it must, or the port would disagree with itself about what a
+// date is.
+TEST(DateOnlyTests, Decided1929_SingleDigitMonthAndDayParseToTheSameValue) {
+    const char* spellings[] = {"2024-06-05", "2024-6-05", "2024-06-5", "2024-6-5"};
+    for (const char* text : spellings) {
+        System::DateOnly out(1, 1, 1);
+        ASSERT_TRUE(System::DateOnly::TryParse(text, out)) << text;
+        EXPECT_EQ(out, System::DateOnly(2024, 6, 5)) << text;
+        EXPECT_EQ(System::DateOnly::Parse(text), out) << text;
+    }
+    // The trailing UTC designator still rides along, and is still ignored.
+    System::DateOnly z(1, 1, 1);
+    ASSERT_TRUE(System::DateOnly::TryParse("2024-6-5Z", z));
+    EXPECT_EQ(z, System::DateOnly(2024, 6, 5));
+
+    // Range validation is unaffected by the width of the text that carries it.
+    System::DateOnly out(1, 1, 1);
+    EXPECT_FALSE(System::DateOnly::TryParse("2024-2-30", out));
+    EXPECT_FALSE(System::DateOnly::TryParse("2024-13-1", out));
+    EXPECT_FALSE(System::DateOnly::TryParse("2024-0-1", out));
+    EXPECT_FALSE(System::DateOnly::TryParse("2024-1-0", out));
 }
 
 TEST(DateOnlyTests, Approved1929_OuterWhitespaceAndUnapprovedDateWidths) {
@@ -538,8 +562,11 @@ TEST(DateOnlyTests, Approved1929_OuterWhitespaceAndUnapprovedDateWidths) {
     System::DateOnly out(1, 1, 1);
     const char* rejected[] = {
         "2024 -06-15", "2024- 06-15", "2024-06 -15", "2024-06- 15",
-        "2024-6-15", "2024-06-5", " \t\r\n ", "2024-06-15 Z",
-        "2024-06-15 garbage"
+        " \t\r\n ", "2024-06-15 Z", "2024-06-15 garbage",
+        // #1929 row 1 moved "2024-6-15" and "2024-06-5" out of this list on
+        // 2026-08-18. Internal whitespace is still grammar, and a year is still
+        // exactly four digits.
+        "24-06-15", "2024-006-15", "2024-06-015"
     };
     for (const char* text : rejected) EXPECT_FALSE(System::DateOnly::TryParse(text, out)) << text;
 

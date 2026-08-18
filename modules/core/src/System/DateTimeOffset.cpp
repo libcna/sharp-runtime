@@ -328,85 +328,60 @@ namespace System {
         // the outside boundary. Work from one trimmed view before this parser makes its
         // existing date and offset substrings; internal whitespace is untouched.
         const std::string_view input = detail::trimDateTimeText(s);
-        if (input.size() < 10) return fail();
 
-        // Find where the offset starts (after the time part)
-        // Look for 'Z' or '+'/'-' that appears after position 10
-        std::string dtStr(input);
+        // #1929 rows 1 and 3 (decided 2026-08-18) replaced this door's string surgery
+        // with the shared scanner. It used to copy the input into a std::string, search
+        // for a '+' or '-' starting at CHARACTER 10, and hand the prefix to
+        // DateTime::TryParse -- a split that is only correct while the date part is
+        // exactly ten characters wide. Widening the month and day makes "2024-6-5"
+        // eight characters, so the fixed offset was about to start reading inside the
+        // date. Scanning the grammar and asking the cursor where it stopped needs no
+        // such assumption, and it deletes the `input.size() < 10` precheck that was
+        // standing in for one.
+        detail::DateTimeTextScanner scanner(input);
+        detail::DateTimeParts      parts;
+        if (!detail::takeDateTimeParts(scanner, parts)) return fail();
+
         TimeSpan offset = TimeSpan::Zero;
+        if (!scanner.take('Z') && !scanner.take('z') && !scanner.atEnd()) {
+            int signedMinutes = 0;
+            if (!detail::takeUtcOffsetMinutes(scanner, signedMinutes)) return fail();
 
-        // Check trailing 'Z'
-        if (!input.empty() && (input.back() == 'Z' || input.back() == 'z')) {
-            dtStr.assign(input.substr(0, input.size() - 1));
-            offset = TimeSpan::Zero;
-        } else {
-            // Look for '+' or '-' after position 10 (skip date separators)
-            size_t offPos = std::string::npos;
-            for (size_t i = 10; i < input.size(); ++i) {
-                if (input[i] == '+' || input[i] == '-') { offPos = i; break; }
-            }
-            if (offPos != std::string::npos) {
-                dtStr.assign(input.substr(0, offPos));
-                const std::string offStr(input.substr(offPos));
-                bool neg = offStr[0] == '-';
-                int hh = 0, mm = 0;
-                // CCF-002 class D (ticket #1879, approved 2026-07-31). The
-                // std::sscanf PREFIX conversion accepted trailing text
-                // ("+02:00junk") and the UNPADDED form "+2:5" -- which, because
-                // %d then read 5 as the minute field, meant an offset of +125
-                // MINUTES the input never named, and one that survives
-                // round-tripping. Both rows are named in
-                // docs/DateTimeValidationBoundaryPlan.md §20.1. The offset
-                // grammar is now exactly two digits, a colon, two digits, and
-                // then the end of the offset text -- unlike TimeOnly's H:m:s,
-                // where the unpadded form is valid in .NET too.
-                {
-                    detail::DateTimeTextScanner offsetScanner(
-                        std::string_view(offStr).substr(1));
-                    if (!offsetScanner.takeDigits(2, 2, hh) ||
-                        !offsetScanner.take(':') ||
-                        !offsetScanner.takeDigits(2, 2, mm) ||
-                        !offsetScanner.atEnd())
-                        return fail();
-                }
-
-                // CCF-002 class C (SR-AUD-007a, ticket #1878). The two numeric fields were
-                // read and then used unchecked, which is three defects in one line.
-                //
-                //   1. An impossible minute field was silently ABSORBED by the TimeSpan and
-                //      therefore invisible to the whole-minute and +/-14h guards below.
-                //      "+02:75" meant +03:15, "+02:60" meant +03:00, "+02:99" meant +03:39 --
-                //      an offset the input never named.
-                //   2. A NEGATIVE field inverted the sign the caller wrote. The sign character
-                //      is consumed separately into `neg`, so a second one reaches sscanf as
-                //      part of the number: "+02:-30" meant +01:30, "+-05:00" meant *minus*
-                //      five hours, and "--05:00" meant *plus* five hours.
-                //   3. A large hour field made TryParse THROW. TimeSpan::FromSeconds ->
-                //      IntervalFromDoubleTicks rejects an out-of-int64 tick count with
-                //      OverflowException, and this call sits OUTSIDE the try/catch below --
-                //      so "+2147483647:00" escaped as an exception from a Try-style method
-                //      whose entire contract, as the comment below states, is to report
-                //      failure through its bool return (build-probe/1878_prefix.log). Parse
-                //      surfaced the same OverflowException instead of FormatException.
-                //
-                // One bounds-before-arithmetic guard closes all three, and the bounds are the
-                // ones .NET already enforces on the finished offset: whole hours in [0, 14]
-                // (the sign lives in `neg`) and minutes in [0, 59]. Nothing that used to
-                // produce a valid offset is rejected -- "+14:00", "-14:00", "+00:59" and
-                // "+00:00" all still parse to exactly the same values -- and "+15:00", which
-                // the +/-14h guard already rejected after the fact, is now rejected before the
-                // arithmetic instead. The accepted textual GRAMMAR is untouched: "%d:%d"
-                // still matches the same character sequences, including the unpadded "+2:5"
-                // form, which stays accepted pending ticket #1879's approval.
-                if (hh < 0 || hh > 14 || mm < 0 || mm > 59) return fail();
-
-                double secs = (hh * 3600.0 + mm * 60.0) * (neg ? -1.0 : 1.0);
-                offset = TimeSpan::FromSeconds(secs);
-            }
+            // CCF-002 class C (SR-AUD-007a, ticket #1878). The two numeric fields were
+            // read and then used unchecked, which is three defects in one line.
+            //
+            //   1. An impossible minute field was silently ABSORBED by the TimeSpan and
+            //      therefore invisible to the whole-minute and +/-14h guards below.
+            //      "+02:75" meant +03:15, "+02:60" meant +03:00, "+02:99" meant +03:39 --
+            //      an offset the input never named. The shared grammar now rejects a
+            //      minute field of 60 or more where .NET does, which is inside
+            //      ParseTimeZone (DateTimeParse.cs:565-568).
+            //   2. A NEGATIVE field inverted the sign the caller wrote. The sign is
+            //      consumed by the grammar and can appear only once, so "+02:-30" and
+            //      "--05:00" are now malformed rather than reinterpreted.
+            //   3. A large hour field made TryParse THROW, because TimeSpan::FromSeconds
+            //      rejects an out-of-int64 tick count with OverflowException from a
+            //      Try-style method whose whole contract is a bool. The scanner reads at
+            //      most four digits, so no arithmetic here can leave int's range.
+            //
+            // The +/-14h bound stays here rather than in the shared grammar because that
+            // is where .NET applies it: ParseTimeZone allows an hour up to 99 and the
+            // DateTimeOffset.MinOffset/MaxOffset test runs later, at the two sites that
+            // actually store an offset (DateTimeParse.cs:2777,2875). DateTime, which
+            // parses an offset and discards it, must not inherit the check.
+            if (signedMinutes < -14 * 60 || signedMinutes > 14 * 60) return fail();
+            offset = TimeSpan::FromMinutes(signedMinutes);
         }
+        if (!scanner.atEnd()) return fail();
 
         DateTime dt;
-        if (!DateTime::TryParse(dtStr, dt)) return fail();
+        try {
+            dt = DateTime(parts.year, parts.month, parts.day,
+                          parts.hour, parts.minute, parts.second)
+                     .AddTicks(parts.fractionTicks);
+        } catch (...) {
+            return fail();
+        }
         // The DateTimeOffset(DateTime, TimeSpan) constructor validates the offset (must be a
         // whole number of minutes, within +-14 hours, and produce a UTC instant within
         // DateTime's representable range) and throws ArgumentException/

@@ -178,12 +178,17 @@ bool DateOnly::TryParse(const std::string& s, DateOnly& result) {
     // "2024-06-15 10:20:30" -- a full timestamp silently truncated to its date.
     // The grammar is now required to match the WHOLE string:
     //
-    //     yyyy '-' MM '-' dd [ 'Z'|'z' ]
+    //     yyyy '-' M{1,2} '-' d{1,2} [ 'Z'|'z' ]
+    //
+    // #1929 row 1 (decided 2026-08-18): the month and day admit one or two digits,
+    // as .NET's do. The year stays exactly four -- three or fewer would collide with
+    // .NET's two-digit-year century window, which is culture state this port has no
+    // way to carry.
     detail::DateTimeTextScanner scanner(detail::trimDateTimeText(s));
     int y = 0, m = 0, d = 0;
     if (!scanner.takeDigits(4, 4, y) || !scanner.take('-') ||
-        !scanner.takeDigits(2, 2, m) || !scanner.take('-') ||
-        !scanner.takeDigits(2, 2, d))
+        !scanner.takeDigits(1, 2, m) || !scanner.take('-') ||
+        !scanner.takeDigits(1, 2, d))
         return fail();
     // A trailing UTC designator stays accepted and stays ignored, matching
     // DateTime::TryParse; "2024-06-15Z" parsed before this ticket and still does.

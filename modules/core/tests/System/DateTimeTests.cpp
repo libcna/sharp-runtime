@@ -968,14 +968,17 @@ TEST(DateTimeTests, Ccf002d_EveryDocumentedShapeKeepsItsExactValue) {
     EXPECT_EQ(dt.getDayProperty(), 29);
 }
 
+// FLIPPED by #1929 row 3 (decided 2026-08-18). The offset is still consumed in
+// full and still ignored, but its shape is now .NET's ParseTimeZone grammar
+// rather than a fixed +HH:MM.
 TEST(DateTimeTests, Ccf002d_TrailingOffsetKeepsItsTwoDigitFields) {
     // §20.1's "unchanged in every option" list names the ±HH:MM offset, so it
-    // stays accepted (and stays ignored -- this port has no DateTimeKind), but it
-    // is consumed strictly, exactly as DateTimeOffset consumes it.
+    // stays accepted (and stays ignored -- this port has no DateTimeKind).
     DateTime dt;
     ASSERT_TRUE(DateTime::TryParse("2024-06-15 10:30:45.56+02:00", dt));
     EXPECT_EQ(dt.getMillisecondProperty(), 560);
-    EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30+2:5", dt));
+    EXPECT_TRUE(DateTime::TryParse("2024-06-15T10:20:30+2:5", dt));
+    // Trailing content after the offset is still not an offset.
     EXPECT_FALSE(DateTime::TryParse("2024-06-15T10:20:30+02:00junk", dt));
 }
 
@@ -1064,14 +1067,82 @@ TEST(DateTimeTests, Approved1929_FractionFormattingRoundTripsAtTickPrecision) {
 // accepting the remaining date/offset/API/culture shapes.
 TEST(DateTimeTests, Approved1929_UnapprovedRowsRemainUnchanged) {
     DateTime out;
-    EXPECT_FALSE(DateTime::TryParse("2024-6-15", out));       // row 1: unpadded date
-    EXPECT_FALSE(DateTime::TryParse("2024-06-5", out));
-    EXPECT_FALSE(DateTime::TryParse("2024-06-15T1:2:3+2:5", out)); // row 3: short offset
+    // Rows 1 and 3 were decided on 2026-08-18 and moved to
+    // Decided1929_DateAndOffsetGrammarMatchDotNet below. What is left here is
+    // what the port still does NOT do: culture patterns, month names, a
+    // two-digit year, and a format run wider than seven fractional digits.
     EXPECT_FALSE(DateTime::TryParse("June 15 2024 1:2:3", out));   // culture/wider grammar
+    EXPECT_FALSE(DateTime::TryParse("24-06-15", out));             // two-digit year
     EXPECT_EQ(DateTime(1'234'567).ToString("ffffffff"), "123"); // unapproved >7 format run
     // Valid controls from the pre-approved subset remain accepted.
     EXPECT_TRUE(DateTime::TryParse("2024-06-15T01:02:03+02:05", out));
     EXPECT_TRUE(DateTime::TryParse("2024-06-15Z", out));
+}
+
+// #1929 rows 1 and 3, decided by the user on 2026-08-18: widen this port's date
+// and offset grammar to .NET's. Both are PURE widenings -- every string that
+// parsed before parses to the identical value -- which is why they needed no
+// source break and no migration of callers.
+//
+// Row 1 is derived, not guessed. .NET's lexer classifies a run of one or two
+// digits as a NumberToken and three or more as a YearNumberToken
+// (Globalization/DateTimeParse.cs:5593-5605), so "2024-6-15" reaches the same
+// year-month-day terminal state as "2024-06-15" and .NET accepts it.
+TEST(DateTimeTests, Decided1929_SingleDigitMonthAndDayParseToTheSameValue) {
+    const long long expected = DateTime(2024, 6, 5, 1, 2, 3).getTicksProperty();
+    const char* spellings[] = {
+        "2024-06-05T1:2:3", "2024-6-05T1:2:3", "2024-06-5T1:2:3", "2024-6-5T1:2:3"
+    };
+    for (const char* text : spellings) {
+        DateTime out;
+        ASSERT_TRUE(DateTime::TryParse(text, out)) << text;
+        EXPECT_EQ(out.getTicksProperty(), expected) << text;
+    }
+    // A bare date takes the same widening.
+    DateTime bare;
+    ASSERT_TRUE(DateTime::TryParse("2024-6-5", bare));
+    EXPECT_EQ(bare.getTicksProperty(), DateTime(2024, 6, 5).getTicksProperty());
+
+    // The YEAR is deliberately NOT widened. .NET would read a one- or two-digit
+    // run through Calendar.ToFourDigitYear's century window, which is culture
+    // state this port has no way to carry, so a short year stays a failure.
+    DateTime out;
+    EXPECT_FALSE(DateTime::TryParse("24-06-15", out));
+    EXPECT_FALSE(DateTime::TryParse("204-06-15", out));
+    // Nor is a field widened past two digits.
+    EXPECT_FALSE(DateTime::TryParse("2024-006-15", out));
+    EXPECT_FALSE(DateTime::TryParse("2024-06-015", out));
+}
+
+// Row 3. The offset is transcribed from ParseTimeZone (DateTimeParse.cs:530-556):
+// a one- or two-digit run is an hour and may be followed by ':' and a one- or
+// two-digit minute; a three- or four-digit run is split value/100 and value%100.
+// DateTime still IGNORES the offset -- it has no DateTimeKind (§16.4) -- so this
+// test is about which strings are accepted, and DateTimeOffsetTests2 is where the
+// values are pinned.
+TEST(DateTimeTests, Decided1929_OffsetGrammarIsDotNetsParseTimeZone) {
+    const long long expected = DateTime(2024, 6, 15, 10, 20, 30).getTicksProperty();
+    const char* offsets[] = {
+        "Z", "z", "+02:05", "+2:5", "+2:05", "+02:5",
+        "+8", "-8", "+08", "+800", "+0800", "-0530", "+14:00", "-14:00",
+        "+99", "+9959"   // ParseTimeZone's own ceiling; DateTimeOffset bounds it, DateTime does not
+    };
+    for (const char* suffix : offsets) {
+        const std::string text = std::string("2024-06-15T10:20:30") + suffix;
+        DateTime out;
+        ASSERT_TRUE(DateTime::TryParse(text, out)) << text;
+        EXPECT_EQ(out.getTicksProperty(), expected) << text;
+    }
+
+    DateTime out;
+    const char* rejected[] = {
+        "+", "-", "+2:", "+2:60", "+0860", "+12345", "+02:005",
+        "+02:00junk", "+ 2:05", "+2 :05"
+    };
+    for (const char* suffix : rejected) {
+        const std::string text = std::string("2024-06-15T10:20:30") + suffix;
+        EXPECT_FALSE(DateTime::TryParse(text, out)) << text;
+    }
 }
 
 TEST(DateTimeTests, Ccf002d_PreviouslyRejectedInputIsStillRejected) {
@@ -1082,7 +1153,7 @@ TEST(DateTimeTests, Ccf002d_PreviouslyRejectedInputIsStillRejected) {
     EXPECT_FALSE(DateTime::TryParse("2024-06-15 10:99:00", dt));
     EXPECT_FALSE(DateTime::TryParse("2024-13-01", dt));
     EXPECT_FALSE(DateTime::TryParse("2024-02-30", dt));
-    EXPECT_FALSE(DateTime::TryParse("2024-6-15", dt));
+    EXPECT_FALSE(DateTime::TryParse("2024-6-15garbage", dt));
 }
 
 // Ticket #1880: C# `out` is definitely assigned. Every non-throwing failure
@@ -1100,7 +1171,7 @@ TEST(DateTimeTests, Ticket1880_TryParseFailureAlwaysAssignsMinValue) {
     expectFailure("not-a-date");                            // malformed date
     expectFailure("2024-06-15T1:x:3");                      // malformed time
     expectFailure("2024-06-15T1:2:3.");                     // malformed fraction
-    expectFailure("2024-06-15T1:2:3+2:05");                // malformed offset
+    expectFailure("2024-06-15T1:2:3+2:60");                // malformed offset
     expectFailure("2024-06-15T1:2:3junk");                 // trailing content
     expectFailure("2024-02-30");                           // constructor rejection
     expectFailure("2024-06-15T1:2:3.12345678");            // precision boundary

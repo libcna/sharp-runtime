@@ -410,58 +410,50 @@ namespace System {
         // (docs/DateTimeValidationBoundaryPlan.md §16.4 keeps widening it out of
         // scope), now required to match the WHOLE string:
         //
-        //     W* yyyy '-' MM '-' dd
+        //     W* yyyy '-' M{1,2} '-' d{1,2}
         //        [ (' '|'T') H{1,2} ':' m{1,2} ':' s{1,2} [ '.' f{1,7} ] ]
-        //        [ 'Z'|'z' ] W*
+        //        [ 'Z'|'z' | ('+'|'-') offset ] W*
         //
         // Every currently-valid input still produces its exact previous value.
         // Correction/remediation (#1929 rows 5-6, approved 2026-08-01): the preceding
         // historical grammar accurately described the repaired #1879 subset, but it was
         // narrower than both the related port doors and current .NET. Outer invariant
         // whitespace, one-or-two digit clock fields, and one through seven fractional
-        // digits are now the approved shared contract. Date fields, offsets and internal
-        // whitespace remain deliberately fixed/rejected.
+        // digits became the approved shared contract then; internal whitespace is still
+        // grammar, and still rejected.
+        //
+        // #1929 rows 1 and 3 (decided 2026-08-18) finish the job: the MONTH and DAY
+        // admit one or two digits, and the offset is .NET's ParseTimeZone grammar. Both
+        // are pure widenings -- no string that parsed yesterday parses differently or
+        // fails today -- and both now live in System/detail/DateTimeTextScanner.hpp so
+        // that the three doors sharing them cannot drift apart again.
         detail::DateTimeTextScanner scanner(detail::trimDateTimeText(s));
-        int yr = 0, mo = 0, dy = 0, hr = 0, mn = 0, sc = 0, fractionTicks = 0;
-        if (!scanner.takeDigits(4, 4, yr) || !scanner.take('-') ||
-            !scanner.takeDigits(2, 2, mo) || !scanner.take('-') ||
-            !scanner.takeDigits(2, 2, dy))
-            return fail();
+        detail::DateTimeParts        parts;
+        if (!detail::takeDateTimeParts(scanner, parts)) return fail();
 
-        if (scanner.take(' ') || scanner.take('T')) {
-            if (!scanner.takeDigits(1, 2, hr) || !scanner.take(':') ||
-                !scanner.takeDigits(1, 2, mn) || !scanner.take(':') ||
-                !scanner.takeDigits(1, 2, sc))
-                return fail();
-            if (scanner.take('.')) {
-                // A fraction must have 1-7 digits. A bare ".", a non-numeric
-                // ".abc", and an eighth digit are rejected rather than read as a
-                // prefix. DateTime is tick-based, so every accepted digit is retained.
-                int digits = 0;
-                if (!scanner.takeDigits(1, 7, fractionTicks, &digits)) return fail();
-                while (digits < 7) { fractionTicks *= 10; ++digits; }
-            }
-        }
         // A trailing time-zone designator stays accepted, and stays ignored: this
         // port has no DateTimeKind (§16.4), so "…T10:20:30Z" and
         // "…T10:20:30.123+02:00" keep the exact values they have always had.
         // §20.1's "unchanged in every option" list names both spellings, and
-        // three DateTimeTests pin the offset one. The offset fields are two
-        // digits each, the same rule DateTimeOffset applies -- and the same rule
-        // the date fields have always had, since "2024-6-15" was never accepted
-        // either.
+        // three DateTimeTests pin the offset one.
+        //
+        // #1929 row 3 (decided 2026-08-18) widens WHICH offsets are accepted, not
+        // what any of them mean here: "+8", "+2:5", "+800" and "+0800" join
+        // "+02:05". The grammar lives in one place now, shared with
+        // DateTimeOffset, which is the door that actually uses the value.
         if (!scanner.take('Z') && !scanner.take('z')) {
-            if (scanner.take('+') || scanner.take('-')) {
-                int offsetHours = 0, offsetMinutes = 0;
-                if (!scanner.takeDigits(2, 2, offsetHours) || !scanner.take(':') ||
-                    !scanner.takeDigits(2, 2, offsetMinutes))
+            if (!scanner.atEnd()) {
+                int ignoredOffsetMinutes = 0;
+                if (!detail::takeUtcOffsetMinutes(scanner, ignoredOffsetMinutes))
                     return fail();
             }
         }
         if (!scanner.atEnd()) return fail();
 
         try {
-            result = DateTime(dateToTicks(yr, mo, dy, hr, mn, sc) + fractionTicks);
+            result = DateTime(dateToTicks(parts.year, parts.month, parts.day,
+                                          parts.hour, parts.minute, parts.second) +
+                              parts.fractionTicks);
             return true;
         } catch (...) { return fail(); }
     }

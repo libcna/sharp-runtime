@@ -476,15 +476,15 @@ TEST(DateTimeOffsetTests2, Ccf002_OutOfRangeOffsetHoursStillFailTheSameWay) {
     EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+14:01", out));
 }
 
-// FLIPPED by #1879 (approved 2026-07-31), which is exactly what this test said
-// would happen to it. The offset text must now be consumed in full and its two
-// fields must be two digits each.
+// FLIPPED TWICE. #1879 (approved 2026-07-31) made the offset text consume in
+// full AND demanded two digits in each field; #1929 row 3 (decided 2026-08-18)
+// kept the first half and dropped the second, which is the half .NET never had.
 TEST(DateTimeOffsetTests2, Ccf002_OffsetGrammarIsNowStrict) {
     DateTimeOffset out;
     EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+02:00junk", out));
-    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+2:5", out));
-    EXPECT_THROW(DateTimeOffset::Parse("2024-06-15T10:30:00+2:5"),
-                 System::FormatException);
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00+2:5", out));
+    EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 125);
+    EXPECT_NO_THROW((void)DateTimeOffset::Parse("2024-06-15T10:30:00+2:5"));
     // Every well-formed offset still parses to exactly its previous value.
     ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00+02:00", out));
     EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 120);
@@ -496,22 +496,24 @@ TEST(DateTimeOffsetTests2, Ccf002_OffsetGrammarIsNowStrict) {
     EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 0);
 }
 
-// PREMISE CORRECTION, recorded where the claim was made. The decision packet
-// §C.4 called "+2:5" a "wrong answer that survives round-tripping" because it
-// yields 125 minutes. Measured against the reference: .NET's ParseTimeZone
+// PREMISE CORRECTION, and then its consequence. The decision packet §C.4 called
+// "+2:5" a "wrong answer that survives round-tripping" because it yields 125
+// minutes. Measured against the reference: .NET's ParseTimeZone
 // (Globalization/DateTimeParse.cs:530-548) accepts a one- OR two-digit hour and
 // a one- or two-digit minute and builds `new TimeSpan(hourOffset, minuteOffset,
-// 0)`, so .NET reads "+2:5" as 2h05m -- 125 minutes, the very value the port
-// already produced. The port and .NET AGREED on this input; rejecting it is a
-// deliberate narrowing of the port's already-narrow fixed-width subset (which
-// likewise rejects "2024-6-15", as .NET does not), not the removal of a wrong
-// answer. Approved as such and recorded in
-// docs/DateTimeValidationBoundaryPlan.md §20.3; the wider question of whether
-// the port should accept .NET's full grammar is inactive ticket #1929.
+// 0)`, so .NET reads "+2:5" as 2h05m -- the very value the port already
+// produced. The port and .NET AGREED on this input, and #1879 rejecting it was
+// a deliberate narrowing of an already-narrow subset, not the removal of a
+// wrong answer. That is what this test recorded while the narrowing stood.
+//
+// #1929 row 3 (decided 2026-08-18) removed the narrowing. The test now pins the
+// agreement itself, which is what it was always about.
 TEST(DateTimeOffsetTests2, Ccf002_UnpaddedOffsetRejectionIsANarrowingNotAParityFix) {
     DateTimeOffset out;
-    EXPECT_FALSE(DateTimeOffset::TryParse("2024-06-15T10:30:00+2:5", out));
-    // The padded spelling of the same instant is the supported way to say it.
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00+2:5", out));
+    EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 125);
+    // The padded spelling of the same instant means the same thing, which is the
+    // whole point: neither spelling was ever the wrong answer.
     ASSERT_TRUE(DateTimeOffset::TryParse("2024-06-15T10:30:00+02:05", out));
     EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 125);
 }
@@ -548,9 +550,16 @@ TEST(DateTimeOffsetTests2, Approved1929_MalformedAndUnapprovedFormsRemainRejecte
         "2024-06-15T1:2:3.12345678Z", "2024-06-15T1:2:3.Z",
         "2024-06-15T1:2:3.abcZ", "2024-06-15T1:2:3.1garbageZ",
         "2024-06-15T1 :2:3Z", "2024-06-15T1: 2:3Z", "2024-06-15T1:2: 3Z",
-        "2024-6-15T1:2:3Z", "2024-06-5T1:2:3Z",
-        "2024-06-15T1:2:3+2:5", "2024-06-15T1:2:3+02:5",
-        "2024-06-15T1:2:3+2:05", " \t\r\n "
+        " \t\r\n ",
+        // #1929 rows 1 and 3 moved "2024-6-15T1:2:3Z", "2024-06-5T1:2:3Z",
+        // "+2:5", "+02:5" and "+2:05" out of this list on 2026-08-18. What
+        // replaces them is what the widened grammar still refuses.
+        "2024-06-15T1:2:3+2:60",     // minute field at 60
+        "2024-06-15T1:2:3+02:005",   // three-digit minute
+        "2024-06-15T1:2:3+12345",    // five-digit offset run
+        "2024-06-15T1:2:3+",         // sign with no digits
+        "2024-06-15T1:2:3+2:",       // colon with no minute
+        "24-06-15T1:2:3Z"            // two-digit year
     };
     for (const char* text : rejected) EXPECT_FALSE(DateTimeOffset::TryParse(text, out)) << text;
 
@@ -561,6 +570,68 @@ TEST(DateTimeOffsetTests2, Approved1929_MalformedAndUnapprovedFormsRemainRejecte
         EXPECT_EQ(e.getHResultProperty(), static_cast<int>(0x80131537u));
         EXPECT_EQ(std::string(e.what()), "String was not recognized as a valid DateTimeOffset.");
     }
+}
+
+// #1929 rows 1 and 3 (decided 2026-08-18). This is the door where the offset is
+// KEPT, so this is where its value is pinned. The three-or-four-digit split is
+// ParseTimeZone's `hourOffset = value / 100; minuteOffset = value % 100`
+// (DateTimeParse.cs:552-556) -- which is why "+800" and "+0800" agree.
+TEST(DateTimeOffsetTests2, Decided1929_OffsetSpellingsCarryTheirDotNetValues) {
+    struct Case { const char* suffix; int minutes; };
+    const Case cases[] = {
+        {"Z", 0},        {"z", 0},
+        {"+8", 480},     {"+08", 480},    {"+800", 480},   {"+0800", 480},
+        {"-8", -480},    {"-0800", -480},
+        {"+2:5", 125},   {"+02:05", 125}, {"+2:05", 125},  {"+02:5", 125},
+        {"+205", 125},   {"+0205", 125},
+        {"-5:30", -330}, {"-0530", -330},
+        {"+14:00", 840}, {"+1400", 840},  {"-1400", -840},
+        {"+0", 0},       {"+0000", 0},    {"-0", 0},
+    };
+    for (const Case& c : cases) {
+        const std::string text = std::string("2024-06-15T10:30:00") + c.suffix;
+        DateTimeOffset out;
+        ASSERT_TRUE(DateTimeOffset::TryParse(text, out)) << text;
+        EXPECT_EQ(out.getTotalOffsetMinutesProperty(), c.minutes) << text;
+        EXPECT_EQ(out.getTicksProperty(), 638540442000000000LL) << text;
+    }
+}
+
+// The +/-14h bound belongs HERE and not to the shared grammar, because that is
+// where .NET applies it: ParseTimeZone permits an hour up to 99 and the
+// MinOffset/MaxOffset test runs later, at the two sites that store an offset
+// (DateTimeParse.cs:2777,2875). DateTime, which parses an offset and discards
+// it, must not inherit the check -- and DateTimeTests pins that it does not.
+TEST(DateTimeOffsetTests2, Decided1929_TheFourteenHourBoundIsThisDoorsNotTheGrammars) {
+    DateTimeOffset out;
+    const char* rejected[] = {"+15", "+1500", "+14:01", "+1401", "-1401", "+99", "+9959"};
+    for (const char* suffix : rejected) {
+        const std::string text = std::string("2024-06-15T10:30:00") + suffix;
+        EXPECT_FALSE(DateTimeOffset::TryParse(text, out)) << text;
+    }
+    // The very same strings are accepted by DateTime, which ignores the value.
+    DateTime ignored;
+    for (const char* suffix : rejected) {
+        const std::string text = std::string("2024-06-15T10:30:00") + suffix;
+        EXPECT_TRUE(DateTime::TryParse(text, ignored)) << text;
+    }
+}
+
+// The old split searched for a sign from CHARACTER 10 and handed the prefix to
+// DateTime::TryParse. A one-digit month or day makes the date part shorter than
+// ten characters, so the search would have started inside the time -- or, for a
+// bare date, past the end. This is the case that forced the rewrite.
+TEST(DateTimeOffsetTests2, Decided1929_ShortDatePartStillFindsItsOffset) {
+    DateTimeOffset out;
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-6-5T1:2:3-05:00", out));
+    EXPECT_EQ(out.getTotalOffsetMinutesProperty(), -300);
+    EXPECT_EQ(out.getTicksProperty(), DateTime(2024, 6, 5, 1, 2, 3).getTicksProperty());
+
+    // A bare short date is eight characters; the removed `size() < 10` precheck
+    // rejected it before the grammar ever saw it.
+    ASSERT_TRUE(DateTimeOffset::TryParse("2024-6-5", out));
+    EXPECT_EQ(out.getTotalOffsetMinutesProperty(), 0);
+    EXPECT_EQ(out.getTicksProperty(), DateTime(2024, 6, 5).getTicksProperty());
 }
 
 TEST(DateTimeOffsetTests2, Ticket1880_TryParseFailureAlwaysAssignsMinValue) {
@@ -578,7 +649,7 @@ TEST(DateTimeOffsetTests2, Ticket1880_TryParseFailureAlwaysAssignsMinValue) {
     expectFailure("");                                      // too short / empty
     expectFailure(" \t\r\n ");                            // whitespace-only
     expectFailure("2024-06-15T1:2:3+02:60");                // offset range
-    expectFailure("2024-06-15T1:2:3+2:05");                 // offset grammar
+    expectFailure("2024-06-15T1:2:3+2:60");                 // offset grammar
     expectFailure("2024-02-30T1:2:3Z");                     // DateTime failure
     expectFailure("0001-01-01T0:0:0+14:00");                // UTC below MinValue
     expectFailure("9999-12-31T23:59:59-14:00");             // UTC above MaxValue
