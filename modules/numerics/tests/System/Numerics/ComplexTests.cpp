@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <type_traits>
 #include <cmath>
 #include <numbers>
 #include <limits>
@@ -190,16 +191,16 @@ TEST(ComplexTests, ConjugateTimesOriginalIsRealSquared) {
 // Abs
 // ---------------------------------------------------------------------------
 
-TEST(ComplexTests, AbsDThreeFourFive) {
-    EXPECT_NEAR(Complex::AbsD(Complex(3.0, 4.0)), 5.0, kEps);
+TEST(ComplexTests, Fix2172_AbsThreeFourFive) {
+    EXPECT_NEAR(Complex::Abs(Complex(3.0, 4.0)), 5.0, kEps);
 }
 
-TEST(ComplexTests, AbsDPureReal) {
-    EXPECT_NEAR(Complex::AbsD(Complex(-7.0, 0.0)), 7.0, kEps);
+TEST(ComplexTests, Fix2172_AbsPureReal) {
+    EXPECT_NEAR(Complex::Abs(Complex(-7.0, 0.0)), 7.0, kEps);
 }
 
-TEST(ComplexTests, AbsDZero) {
-    EXPECT_NEAR(Complex::AbsD(Complex::Zero), 0.0, kEps);
+TEST(ComplexTests, Fix2172_AbsZero) {
+    EXPECT_NEAR(Complex::Abs(Complex::Zero), 0.0, kEps);
 }
 
 // ---------------------------------------------------------------------------
@@ -372,4 +373,33 @@ TEST(ComplexTests, FromPolarCoordinates_UnitAngle) {
     Complex r = Complex::FromPolarCoordinates(1.0, 0.0);
     EXPECT_NEAR(r.getRealProperty(),      1.0, 1e-12);
     EXPECT_NEAR(r.getImaginaryProperty(), 0.0, 1e-12);
+}
+
+// ---------------------------------------------------------------------------
+// #2172 / SR-AUD-277 remainder — Abs returns a double
+// ---------------------------------------------------------------------------
+
+namespace detail2172 {
+/// Detection idiom for the removed `AbsD`. Written over a dependent type so the member's ABSENCE
+/// is a value rather than a compile error.
+template <typename T>
+concept HasAbsD = requires { T::AbsD(T(3.0, 4.0)); };
+}  // namespace detail2172
+
+TEST(ComplexTests, Fix2172_AbsReturnsADoubleAndAbsDIsGone) {
+    // .NET's `Complex.Abs(Complex)` returns double (`Complex.cs:292`). This port returned a
+    // Complex with a zero imaginary part -- a value .NET never produces -- which is why an
+    // invented `AbsD` had grown beside it. Only a TYPE assertion catches this: both spellings
+    // computed the same magnitude, so no value comparison could tell them apart.
+    static_assert(std::is_same_v<decltype(Complex::Abs(Complex(3.0, 4.0))), double>,
+                  "#2172: Abs returns a double, as .NET's does");
+
+    // `AbsD` had no .NET counterpart, so it is removed rather than kept as a synonym: its only
+    // purpose was to work around the wrong return type.
+    // The removal is asserted through a detection idiom rather than a bare `requires`, because
+    // an absent member must be expressible as absent rather than as a hard error.
+    static_assert(!detail2172::HasAbsD<Complex>,
+                  "#2172: AbsD was invented surface and is gone");
+
+    EXPECT_NEAR(5.0, Complex::Abs(Complex(3.0, 4.0)), kEps);
 }

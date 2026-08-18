@@ -124,6 +124,33 @@ LANGUAGE_STANDARD = "c++23"
 WARNING_OPTIONS = ("-Wall", "-Wextra", "-Wpedantic", "-Werror")
 
 _FIXTURE_DIRECTIVE_RE = re.compile(r"^\s*//\s*NEGATIVE-FIXTURE:\s*(?P<body>\S.*?)\s*$")
+
+#: The complete, closed set of relaxations a fixture may declare, and the flags each adds.
+#:
+#: A fixture asserts two things: that its BASELINE compiles cleanly, and that each site is
+#: rejected BY ITS OWN SOURCE. Both are claims about the fixture's translation unit. A diagnostic
+#: that comes from a PORT HEADER the fixture merely includes satisfies neither, and it can make
+#: the mechanism unusable for a whole area of the repository -- so a fixture may declare, by name,
+#: that it tolerates one.
+#:
+#: This is deliberately NOT a general escape hatch. Each entry is a specific, documented property
+#: of this codebase, and adding one is a decision rather than a convenience.
+#:
+#: ``int128-extension``  ``-Wpedantic`` rejects ``__int128``, which ``Math.hpp``, ``Decimal.hpp``,
+#:                       ``Int128.hpp`` and ``UInt128.hpp`` use deliberately -- see CLAUDE.md's
+#:                       ``SHARP_RUNTIME_HAS_NATIVE_INT128`` section, where the dependency is a
+#:                       documented, permanent platform boundary. Any fixture whose include chain
+#:                       reaches ``Double.hpp`` therefore had a broken baseline through no fault
+#:                       of its own, and a broken baseline means no site verdict can be attributed
+#:                       at all. Ticket #2172 hit exactly that.
+#:
+#:                       ``-isystem`` on the module roots was tried first and REJECTED: it
+#:                       suppresses warnings from headers wholesale, and measured, it made two
+#:                       live sites of ``core_activator_construction_negative.cpp`` stop being
+#:                       rejected, because their narrowing diagnostics originate inside a header.
+ALLOWED_RELAXATIONS: dict[str, tuple[str, ...]] = {
+    "int128-extension": ("-Wno-pedantic",),
+}
 _SITE_GUARD_RE = re.compile(
     rf"^\s*#\s*if\s+{SITE_MACRO}\s*==\s*(?P<number>\d+)\s*$"
 )
@@ -199,6 +226,8 @@ class NegativeFixture:
     definitions: tuple[str, ...]
     standard: str
     sites: tuple[NegativeSite, ...]
+    #: Narrow, named relaxations this fixture declares. See ``ALLOWED_RELAXATIONS``.
+    relaxations: tuple[str, ...] = ()
 
 
 @dataclass
@@ -360,6 +389,13 @@ def parse_fixture(path: Path, display: str, text: str) -> tuple[NegativeFixture 
         )
         return None, problems
     definitions = tuple(values.pop("define", []))
+    relaxations = tuple(values.pop("allow", []))
+    for relaxation in relaxations:
+        if relaxation not in ALLOWED_RELAXATIONS:
+            problems.append(
+                f"{display}: NEGATIVE-FIXTURE allow='{relaxation}' is not one of "
+                f"{sorted(ALLOWED_RELAXATIONS)}"
+            )
     standards = values.pop("standard", [])
     if len(standards) > 1:
         problems.append(f"{display}: NEGATIVE-FIXTURE names {len(standards)} standards")
@@ -368,7 +404,7 @@ def parse_fixture(path: Path, display: str, text: str) -> tuple[NegativeFixture 
     for unknown in sorted(values):
         problems.append(
             f"{display}: NEGATIVE-FIXTURE directive key '{unknown}' is not recognised "
-            "(component, define, standard)"
+            "(component, define, standard, allow)"
         )
 
     if _PRELUDE_RE.search(text) is None:
@@ -462,6 +498,7 @@ def parse_fixture(path: Path, display: str, text: str) -> tuple[NegativeFixture 
             definitions=definitions,
             standard=standard,
             sites=tuple(sites),
+            relaxations=relaxations,
         ),
         [],
     )
@@ -569,6 +606,10 @@ def build_command(
     command: list[str] = list(compiler_prefix)
     command.append(f"-std={fixture.standard}")
     command.extend(WARNING_OPTIONS)
+    # Declared relaxations come AFTER the warning options so they take effect, and are validated
+    # against the closed ALLOWED_RELAXATIONS set at parse time.
+    for relaxation in fixture.relaxations:
+        command.extend(ALLOWED_RELAXATIONS[relaxation])
     command.extend(("-fsyntax-only", unlimited_errors, "-fdiagnostics-color=never"))
     if vendor_directory is not None:
         command.extend(("-isystem", str(vendor_directory)))

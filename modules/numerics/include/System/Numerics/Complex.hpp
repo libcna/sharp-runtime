@@ -56,10 +56,24 @@ namespace System::Numerics {
         /** @return The complex conjugate z* = real - imaginary*i. */
         [[nodiscard]] Complex Conjugate() const { return Complex(std::conj(value)); }
 
-        /** @return The absolute value of @p c as a real Complex (imaginary part = 0). */
-        static Complex Abs(const Complex& c)                          { return Complex(std::abs(c.value), 0); }
-        /** @return The absolute value of @p c as a plain double. */
-        static double  AbsD(const Complex& c)                         { return std::abs(c.value); }
+        /**
+         * @brief Returns the magnitude of @p c.
+         *
+         * C++ counterpart of .NET `Complex.Abs(Complex)` (`Complex.cs:292`), which returns
+         * **`double`**.
+         *
+         * @par Ticket #2172 changed the return type, and removed an invented sibling
+         * This returned a `Complex` with a zero imaginary part until #2172 -- a value that is not
+         * what .NET's `Abs` produces and that no caller wanted, which is why the port had grown
+         * an `AbsD` returning `double` beside it. `AbsD` has no .NET counterpart at all, so it is
+         * removed with the same change: keeping it would leave invented surface whose only
+         * purpose was to work around the wrong return type.
+         *
+         * There is no implicit conversion in either direction, so an affected caller gets a hard
+         * compile error rather than a silent change (measured: `Complex(double, double)` has no
+         * defaulted second parameter).
+         */
+        static double Abs(const Complex& c)                           { return std::abs(c.value); }
         /** @return The complex square root of @p c. */
         static Complex Sqrt(const Complex& c)                         { return Complex(std::sqrt(c.value)); }
         /** @return e raised to the power @p c. */
