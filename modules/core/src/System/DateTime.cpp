@@ -19,11 +19,11 @@ namespace System {
     // Private helpers
     // -------------------------------------------------------------------------
 
-    // Converts ticks_ to a UTC std::tm via the C library.
+    // Converts ticks() to a UTC std::tm via the C library.
     // Uses int64 time_t so pre-1970 dates (negative Unix timestamp) work on
     // 64-bit Linux/MSVC builds.
     std::tm DateTime::toTm() const {
-        const longcs unixTicks = ticks_ - UnixEpochTicks;
+        const longcs unixTicks = ticks() - UnixEpochTicks;
         // Floor division toward -inf (C++ truncates toward 0, which is wrong
         // for negative values — e.g. pre-1970 dates lose 1 second).
         longcs q = unixTicks / TicksPerSecond;
@@ -67,7 +67,7 @@ namespace System {
         //      DateTime(2024,1,1,-1,0,0) returned 2023-12-31 23:00 -- a different *year*.
         //   2. A breach of this class's own documented [0, MaxTicks] invariant.
         //      DateTime(9999,12,31,24,0,0) stored MaxTicks + 1 and DateTime(1,1,1,-1,0,0)
-        //      stored a negative tick count; the component constructors initialise ticks_
+        //      stored a negative tick count; the component constructors initialise ticks()
         //      directly, so DateTime(longcs)'s range check never saw them.
         //   3. Undefined behaviour. `hour * TicksPerHour` is `(long long)hour * 36000000000`,
         //      which overflows int64 for |hour| > 256204778 -- UBSan-confirmed at this file's
@@ -111,29 +111,66 @@ namespace System {
     // -------------------------------------------------------------------------
 
     DateTime::DateTime()
-        : ticks_(0) {}
+        : dateData_(0) {}
+
+    namespace {
+        // #1941. .NET's packing constants, DateTime.cs:118-123.
+        constexpr int kKindShift = 62;   // FlagsMask is 0xC000000000000000; see DateTime.hpp
+
+        /// .NET's `(uint)kind > (uint)DateTimeKind.Local` (DateTime.cs:1309).
+        void throwIfInvalidKind(DateTimeKind kind) {
+            const auto raw = static_cast<unsigned int>(kind);
+            if (raw > static_cast<unsigned int>(DateTimeKind::Local))
+                throw System::ArgumentException("Invalid DateTimeKind value.", "kind");
+        }
+    }
 
     DateTime::DateTime(longcs ticks)
-        : ticks_(ticks) {
+        : dateData_(static_cast<unsigned long long>(ticks)) {
         if (ticks < 0 || ticks > MaxTicks)
             throw System::ArgumentOutOfRangeException("ticks", "Ticks must be between DateTime.MinValue.Ticks and DateTime.MaxValue.Ticks.");
     }
 
+    DateTime::DateTime(longcs ticks, DateTimeKind kind)
+        : dateData_(static_cast<unsigned long long>(ticks)) {
+        // The range check runs BEFORE packing, which the approval requires and which is not
+        // decoration: an out-of-range tick count would otherwise collide with the flag bits and
+        // silently report a kind the caller never asked for.
+        if (ticks < 0 || ticks > MaxTicks)
+            throw System::ArgumentOutOfRangeException("ticks", "Ticks must be between DateTime.MinValue.Ticks and DateTime.MaxValue.Ticks.");
+        throwIfInvalidKind(kind);
+        dateData_ |= static_cast<unsigned long long>(static_cast<unsigned int>(kind)) << kKindShift;
+    }
+
+    DateTimeKind DateTime::getKindProperty() const {
+        // .NET's bit trick, transcribed with its own comment: "values 0-2 map directly to
+        // DateTimeKind, 3 (LocalAmbiguousDst) needs to be mapped to 2 (Local) using bit0 NAND
+        // bit1" (DateTime.cs:1463-1465). Nothing in phase 1 sets the fourth encoding; the fold is
+        // reproduced so that phase 2 can start setting it without touching this accessor.
+        const auto kind = static_cast<unsigned int>(dateData_ >> kKindShift);
+        return static_cast<DateTimeKind>(kind & ~(kind >> 1));
+    }
+
+    DateTime DateTime::SpecifyKind(const DateTime& value, DateTimeKind kind) {
+        throwIfInvalidKind(kind);
+        return DateTime(value.ticks(), kind);
+    }
+
     DateTime::DateTime(int year, int month, int day)
-        : ticks_(dateToTicks(year, month, day)) {}
+        : dateData_(dateToTicks(year, month, day)) {}
 
     DateTime::DateTime(int year, int month, int day, int hour, int minute, int second)
-        : ticks_(dateToTicks(year, month, day, hour, minute, second)) {}
+        : dateData_(dateToTicks(year, month, day, hour, minute, second)) {}
 
     DateTime::DateTime(int year, int month, int day,
                        int hour, int minute, int second, int millisecond)
-        : ticks_(dateToTicks(year, month, day, hour, minute, second, millisecond)) {}
+        : dateData_(dateToTicks(year, month, day, hour, minute, second, millisecond)) {}
 
     // -------------------------------------------------------------------------
     // Properties — tick-level decomposition
     // -------------------------------------------------------------------------
 
-    longcs DateTime::getTicksProperty() const { return ticks_; }
+    longcs DateTime::getTicksProperty() const { return ticks(); }
 
     int DateTime::getYearProperty()        const { return toTm().tm_year + 1900; }
     int DateTime::getMonthProperty()       const { return toTm().tm_mon  + 1;    }
@@ -142,7 +179,7 @@ namespace System {
     int DateTime::getMinuteProperty()      const { return toTm().tm_min;          }
     int DateTime::getSecondProperty()      const { return toTm().tm_sec;          }
     int DateTime::getMillisecondProperty() const {
-        return static_cast<int>((ticks_ % TicksPerSecond) / TicksPerMillisecond);
+        return static_cast<int>((ticks() % TicksPerSecond) / TicksPerMillisecond);
     }
 
     DayOfWeek DateTime::getDayOfWeekProperty() const {
@@ -195,24 +232,24 @@ namespace System {
         // here for a TimeSpan near TimeSpan::MinValue/MaxValue), and the single unsigned
         // comparison catches every invalid case -- wrapped-negative-to-huge or genuinely
         // out-of-range -- the same way the constructor's own range check does.
-        const auto diff = static_cast<SharpRuntime::ulongcs>(ticks_) - static_cast<SharpRuntime::ulongcs>(value.getTicksProperty());
+        const auto diff = static_cast<SharpRuntime::ulongcs>(ticks()) - static_cast<SharpRuntime::ulongcs>(value.getTicksProperty());
         if (diff > static_cast<SharpRuntime::ulongcs>(MaxTicks))
             throw System::ArgumentOutOfRangeException("value", "Value to add was out of range.");
         return DateTime(static_cast<longcs>(diff));
     }
 
     TimeSpan DateTime::Subtract(const DateTime& value) const {
-        return TimeSpan(ticks_ - value.ticks_);
+        return TimeSpan(ticks() - value.ticks());
     }
 
     DateTime DateTime::AddTicks(longcs value) const {
         // Matches real .NET's DateTime.AddTicks: `ulong ticks = (ulong)(Ticks + value); if
-        // (ticks > MaxTicks) throw;`. Computing `ticks_ + value` directly in signed int64
+        // (ticks > MaxTicks) throw;`. Computing `ticks() + value` directly in signed int64
         // arithmetic (the previous version of this method) is undefined behavior in C++ when
-        // it overflows -- confirmed via UBSan for e.g. ticks_ == MaxTicks, value ==
+        // it overflows -- confirmed via UBSan for e.g. ticks() == MaxTicks, value ==
         // Int64::MaxValue. Unsigned addition wraps by well-defined C++ semantics instead, and
         // the single unsigned comparison against MaxTicks catches every invalid case.
-        const auto newTicks = static_cast<SharpRuntime::ulongcs>(ticks_) + static_cast<SharpRuntime::ulongcs>(value);
+        const auto newTicks = static_cast<SharpRuntime::ulongcs>(ticks()) + static_cast<SharpRuntime::ulongcs>(value);
         if (newTicks > static_cast<SharpRuntime::ulongcs>(MaxTicks))
             throw System::ArgumentOutOfRangeException("value", "Value to add was out of range.");
         return DateTime(static_cast<longcs>(newTicks));
@@ -235,7 +272,7 @@ namespace System {
             throw System::ArgumentOutOfRangeException("months", "DateTime: resulting year out of range");
 
         const int d = std::min(day, DaysInMonth(y, m));
-        const longcs timeOfDay = ticks_ % TicksPerDay;
+        const longcs timeOfDay = ticks() % TicksPerDay;
         return DateTime(dateToTicks(y, m, d) + timeOfDay);
     }
 
@@ -282,11 +319,11 @@ namespace System {
     DateTime DateTime::getTodayProperty() {
         const DateTime now = getNowProperty();
         // Truncate to midnight
-        return DateTime(now.ticks_ - (now.ticks_ % TicksPerDay));
+        return DateTime(now.ticks() - (now.ticks() % TicksPerDay));
     }
 
     TimeSpan DateTime::getTimeOfDayProperty() const {
-        return TimeSpan(ticks_ % TicksPerDay);
+        return TimeSpan(ticks() % TicksPerDay);
     }
 
     // -------------------------------------------------------------------------
@@ -309,7 +346,7 @@ namespace System {
         result.reserve(format.size() + 8);
         int yr  = getYearProperty(),   mo  = getMonthProperty(),  dy  = getDayProperty();
         int hr  = getHourProperty(),   mn  = getMinuteProperty(), sc  = getSecondProperty();
-        const int fractionTicks = static_cast<int>(ticks_ % TicksPerSecond);
+        const int fractionTicks = static_cast<int>(ticks() % TicksPerSecond);
 
         auto pad = [](int n, int w) -> std::string {
             std::string s = std::to_string(n);
@@ -470,12 +507,12 @@ namespace System {
     // Comparison operators
     // -------------------------------------------------------------------------
 
-    bool DateTime::operator==(const DateTime& o) const { return ticks_ == o.ticks_; }
-    bool DateTime::operator!=(const DateTime& o) const { return ticks_ != o.ticks_; }
-    bool DateTime::operator< (const DateTime& o) const { return ticks_ <  o.ticks_; }
-    bool DateTime::operator<=(const DateTime& o) const { return ticks_ <= o.ticks_; }
-    bool DateTime::operator> (const DateTime& o) const { return ticks_ >  o.ticks_; }
-    bool DateTime::operator>=(const DateTime& o) const { return ticks_ >= o.ticks_; }
+    bool DateTime::operator==(const DateTime& o) const { return ticks() == o.ticks(); }
+    bool DateTime::operator!=(const DateTime& o) const { return ticks() != o.ticks(); }
+    bool DateTime::operator< (const DateTime& o) const { return ticks() <  o.ticks(); }
+    bool DateTime::operator<=(const DateTime& o) const { return ticks() <= o.ticks(); }
+    bool DateTime::operator> (const DateTime& o) const { return ticks() >  o.ticks(); }
+    bool DateTime::operator>=(const DateTime& o) const { return ticks() >= o.ticks(); }
 
     GetTypeNameCPP(DateTime, "System::DateTime")
 

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <string>
+#include "System/DateTimeKind.hpp"
 
 #include "System/Object.hpp"
 #include "System/TimeSpan.hpp"
@@ -21,9 +22,12 @@ namespace System {
      *
      * Partial C++ counterpart of .NET System.DateTime.
      *
-     * @note Status: Partial — DateTimeKind is not stored/tracked (all values behave as
-     *   Unspecified/UTC); ToLocalTime/ToUniversalTime/SpecifyKind are therefore not
-     *   provided. OLE Automation date, FILETIME, and binary-serialization conversions
+     * @note Status: Partial — since ticket #1941 (#1929 row 4D, **phase 1**) `DateTimeKind` is
+     *   STORED and reported, and `SpecifyKind` and a kind-taking constructor exist. Nothing
+     *   CONVERTS by it: `ToLocalTime` and `ToUniversalTime` are still absent, as are offset/`Z`
+     *   parse conversion and the `AssumeLocal`/`AssumeUniversal`/`AdjustToUniversal`/
+     *   `RoundtripKind` styles. A phase-2 approval must name a date-sensitive timezone provider
+     *   before any of those can exist. OLE Automation date, FILETIME, and binary-serialization conversions
      *   (ToOADate/FromOADate, ToFileTime/FromFileTime, ToBinary/FromBinary) are out of
      *   scope. Culture-aware ToString/Parse overloads (IFormatProvider) are not provided;
      *   ToString(format)/Parse/TryParse use invariant numeric tokens only.
@@ -53,10 +57,35 @@ namespace System {
         static constexpr longcs MaxDays  = MaxTicks / TicksPerDay;
         static constexpr longcs MaxHours = MaxTicks / TicksPerHour;
 
-        longcs ticks_;
+        /**
+         * @brief The tick count with the kind packed into its two most significant bits.
+         *
+         * Ticket #1941 (#1929 row 4D, phase 1). .NET packs `DateTimeKind` into the top two bits
+         * of an unsigned 64-bit `_dateData` (`DateTime.cs:118-123,137`), which is what keeps
+         * `sizeof(DateTime)` unchanged: `MaxTicks` is `0x2BCA2875F4373FFF`, so 62 bits carry
+         * every representable value and two are free.
+         *
+         *     TicksMask  0x3FFFFFFFFFFFFFFF
+         *     FlagsMask  0xC000000000000000
+         *     Utc        0x4000000000000000
+         *     Local      0x8000000000000000
+         *     LocalAmbiguousDst 0xC000000000000000
+         *
+         * **The member is renamed, and that is the safety property.** A bare `ticks()` used to
+         * mean "the tick count"; after packing it would silently mean "the tick count with two
+         * flag bits on top", and every one of the thirty reads in this type would have had to be
+         * remembered. Renaming makes the compiler visit each one, and the masked value is
+         * reachable only through `ticks()`.
+         */
+        unsigned long long dateData_;
+
+        /** @brief The tick count, with the kind bits removed. .NET's `UTicks`. */
+        [[nodiscard]] constexpr longcs ticks() const noexcept {
+            return static_cast<longcs>(dateData_ & 0x3FFFFFFFFFFFFFFFULL);
+        }
 
         /**
-         * @brief Decomposes ticks_ into a UTC std::tm using the C standard library.
+         * @brief Decomposes ticks() into a UTC std::tm using the C standard library.
          *
          * Uses floor division so that pre-1970 (negative Unix-timestamp) dates are
          * decomposed correctly.
@@ -97,6 +126,24 @@ namespace System {
          * @throws System::ArgumentOutOfRangeException if @p ticks is negative or greater than MaxTicks.
          */
         explicit DateTime(longcs ticks);
+
+        /**
+         * @brief Initializes a new instance with the specified ticks and `DateTimeKind`.
+         *
+         * Ticket #1941 (#1929 row 4D, **phase 1 only**). The kind is *stored and reported*;
+         * nothing converts by it. `ToLocalTime`, `ToUniversalTime`, offset/`Z` parse conversion,
+         * `AssumeLocal`, `AssumeUniversal`, `AdjustToUniversal` and `RoundtripKind` are all
+         * explicitly outside this phase and remain absent — a phase-2 approval must name a
+         * date-sensitive timezone provider first.
+         *
+         * @param ticks A date and time expressed in 100-nanosecond ticks since 0001-01-01.
+         * @param kind  Whether @p ticks is UTC, local, or unspecified.
+         * @throws System::ArgumentOutOfRangeException if @p ticks is out of range.
+         * @throws System::ArgumentException if @p kind is not a declared `DateTimeKind` value.
+         *         .NET's test is `(uint)kind > (uint)DateTimeKind.Local` with
+         *         `SR.Argument_InvalidDateTimeKind` (`DateTime.cs:206,1309`).
+         */
+        DateTime(longcs ticks, DateTimeKind kind);
 
         /**
          * @brief Initializes a new instance with the specified year, month, and day.
@@ -153,6 +200,32 @@ namespace System {
          * @return Tick count (0 = 0001-01-01 00:00:00).
          */
         [[nodiscard]] longcs getTicksProperty() const;
+
+        /**
+         * @brief Gets whether this instance is UTC, local, or neither.
+         *
+         * Ticket #1941. Every constructor that does not take a kind produces `Unspecified`,
+         * which is .NET's default and this port's previous universal behaviour, so no existing
+         * value moved.
+         *
+         * .NET folds its fourth encoding — `LocalAmbiguousDst`, the marker a local time inside a
+         * repeated DST hour carries — onto `Local` here, with a bit trick whose comment explains
+         * it: *"values 0-2 map directly to DateTimeKind, 3 (LocalAmbiguousDst) needs to be mapped
+         * to 2 (Local)"* (`DateTime.cs:1458-1467`). The encoding reserves that fourth value even
+         * though nothing in this phase sets it, because reserving it now is what lets phase 2 add
+         * ambiguous-local handling without moving any bit.
+         */
+        [[nodiscard]] DateTimeKind getKindProperty() const;
+
+        /**
+         * @brief Returns a copy of @p value with the specified kind and the same ticks.
+         *
+         * C++ counterpart of .NET `DateTime.SpecifyKind` (`DateTime.cs:1307-1311`). It converts
+         * nothing: `SpecifyKind(t, Utc).getTicksProperty() == t.getTicksProperty()` always.
+         *
+         * @throws System::ArgumentException if @p kind is not a declared `DateTimeKind` value.
+         */
+        [[nodiscard]] static DateTime SpecifyKind(const DateTime& value, DateTimeKind kind);
 
         /**
          * @brief Gets the year component of this instance (1–9999).
@@ -372,8 +445,8 @@ namespace System {
          *         greater than zero if this instance is later than @p value.
          */
         [[nodiscard]] intcs CompareTo(const DateTime& value) const {
-            if (ticks_ > value.ticks_) return 1;
-            if (ticks_ < value.ticks_) return -1;
+            if (ticks() > value.ticks()) return 1;
+            if (ticks() < value.ticks()) return -1;
             return 0;
         }
 
@@ -383,7 +456,7 @@ namespace System {
          * C++ counterpart of .NET DateTime.GetHashCode().
          */
         [[nodiscard]] intcs GetHashCode() const override {
-            return static_cast<intcs>(ticks_) ^ static_cast<intcs>(ticks_ >> 32);
+            return static_cast<intcs>(ticks()) ^ static_cast<intcs>(ticks() >> 32);
         }
 
         /**

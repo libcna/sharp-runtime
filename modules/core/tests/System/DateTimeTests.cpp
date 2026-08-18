@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/DateTimeOffset.hpp"
+#include "System/DateTimeKind.hpp"
 
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
@@ -1191,4 +1193,140 @@ TEST(DateTimeTests, Ticket1880_TryParseFailureAlwaysAssignsMinValue) {
         EXPECT_EQ(std::string(e.what()),
                   "String was not recognized as a valid DateTime: not-a-date");
     }
+}
+
+// ===========================================================================
+// #1941 — DateTimeKind storage, phase 1 only (#1929 row 4D)
+// ===========================================================================
+//
+// The approval is narrow and is quoted here because the boundary is the point: encode
+// Unspecified/Utc/Local plus the reserved ambiguous-local marker in the high bits of an unsigned
+// 64-bit payload, PRESERVING the measured layouts; add a Kind accessor, kind-taking construction
+// and SpecifyKind; keep Ticks pure; range-check before packing; and audit arithmetic, comparison,
+// hashing, formatting and serialization so previously kindless results stay unchanged.
+//
+// NOT approved and NOT present: ToLocalTime, ToUniversalTime, offset/Z parse conversion,
+// AssumeLocal, AssumeUniversal, AdjustToUniversal, RoundtripKind parsing. A phase-2 approval must
+// name a date-sensitive timezone provider first.
+
+TEST(DateTimeKindStorageTests, Fix1941_TheLayoutIsUnchangedBecauseTheKindIsPacked) {
+    // This is what makes the phase implementable at all. MaxTicks is 0x2BCA2875F4373FFF, so 62
+    // bits carry every representable value and two are free -- .NET packs the kind into exactly
+    // those (DateTime.cs:118-123). A separate member would have grown the object.
+    EXPECT_EQ(sizeof(DateTime), 16u);
+    EXPECT_EQ(alignof(DateTime), 8u);
+    EXPECT_EQ(sizeof(System::DateTimeOffset), 48u);
+}
+
+TEST(DateTimeKindStorageTests, Fix1941_TicksStayPureAndEveryOldConstructorIsUnspecified) {
+    // The whole safety claim: packing must not leak into the tick count anywhere.
+    const SharpRuntime::longcs raw = 638540436301234567LL;
+    EXPECT_EQ(DateTime(raw).getTicksProperty(), raw);
+    EXPECT_EQ(DateTime(raw, System::DateTimeKind::Utc).getTicksProperty(), raw);
+    EXPECT_EQ(DateTime(raw, System::DateTimeKind::Local).getTicksProperty(), raw);
+    EXPECT_EQ(DateTime::MaxValue.getTicksProperty(), DateTime::MaxTicks);
+    EXPECT_EQ(DateTime::MinValue.getTicksProperty(), 0);
+
+    // MaxTicks with the Local flag set is the case that would break a mask off by one bit.
+    EXPECT_EQ(DateTime(DateTime::MaxTicks, System::DateTimeKind::Local).getTicksProperty(),
+              DateTime::MaxTicks);
+
+    // Every constructor that does not take a kind produces Unspecified, which is .NET's default
+    // and this port's previous universal behaviour -- so no existing value moved.
+    EXPECT_EQ(DateTime().getKindProperty(), System::DateTimeKind::Unspecified);
+    EXPECT_EQ(DateTime(raw).getKindProperty(), System::DateTimeKind::Unspecified);
+    EXPECT_EQ(DateTime(2024, 6, 15).getKindProperty(), System::DateTimeKind::Unspecified);
+    EXPECT_EQ(DateTime(2024, 6, 15, 1, 2, 3).getKindProperty(), System::DateTimeKind::Unspecified);
+    EXPECT_EQ(DateTime::MaxValue.getKindProperty(), System::DateTimeKind::Unspecified);
+}
+
+TEST(DateTimeKindStorageTests, Fix1941_KindIsReportedAndSpecifyKindConvertsNothing) {
+    const SharpRuntime::longcs raw = 638540436301234567LL;
+    EXPECT_EQ(DateTime(raw, System::DateTimeKind::Utc).getKindProperty(), System::DateTimeKind::Utc);
+    EXPECT_EQ(DateTime(raw, System::DateTimeKind::Local).getKindProperty(), System::DateTimeKind::Local);
+    EXPECT_EQ(DateTime(raw, System::DateTimeKind::Unspecified).getKindProperty(),
+              System::DateTimeKind::Unspecified);
+
+    const DateTime source(raw);
+    const DateTime utc = DateTime::SpecifyKind(source, System::DateTimeKind::Utc);
+    EXPECT_EQ(utc.getKindProperty(), System::DateTimeKind::Utc);
+    EXPECT_EQ(utc.getTicksProperty(), source.getTicksProperty())
+        << "SpecifyKind must convert NOTHING -- that is the whole difference between phase 1 and "
+           "the conversion phase this approval excludes";
+    EXPECT_EQ(DateTime::SpecifyKind(utc, System::DateTimeKind::Unspecified).getKindProperty(),
+              System::DateTimeKind::Unspecified);
+
+    // An undeclared kind is rejected at both doors, with .NET's exact text and parameter name
+    // (DateTime.cs:206,1309; SR.Argument_InvalidDateTimeKind).
+    for (int bad : {3, 4, -1, 12345}) {
+        const auto kind = static_cast<System::DateTimeKind>(bad);
+        EXPECT_THROW((void)DateTime(raw, kind), System::ArgumentException) << bad;
+        EXPECT_THROW((void)DateTime::SpecifyKind(source, kind), System::ArgumentException) << bad;
+    }
+    try {
+        (void)DateTime(raw, static_cast<System::DateTimeKind>(3));
+        FAIL();
+    } catch (const System::ArgumentException& e) {
+        EXPECT_EQ(e.getParamNameProperty(), "kind");
+        EXPECT_NE(std::string(e.what()).find("Invalid DateTimeKind value."), std::string::npos)
+            << e.what();
+    }
+    // Value 3 is the RESERVED LocalAmbiguousDst encoding, and it is reserved rather than
+    // reachable: nothing in phase 1 sets it, and the public constructor refuses it, exactly as
+    // .NET's does. A consequence worth stating: the fold in getKindProperty() is UNREACHABLE in
+    // this phase, so a mutation removing it is NOT caught, and was measured not to be. It is
+    // transcribed because phase 2 will start setting that encoding, and a fold added later would
+    // be a second change to a shipped accessor.
+
+    // THE RANGE CHECK RUNS BEFORE PACKING, which the approval requires explicitly. Without it an
+    // out-of-range tick count would collide with the flag bits and silently report a kind the
+    // caller never asked for -- so this is a correctness row, not a validation nicety.
+    EXPECT_THROW((void)DateTime(DateTime::MaxTicks + 1, System::DateTimeKind::Utc),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)DateTime(-1, System::DateTimeKind::Utc),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_NO_THROW((void)DateTime(DateTime::MaxTicks, System::DateTimeKind::Utc));
+}
+
+TEST(DateTimeKindStorageTests, Fix1941_TheKindDoesNotParticipateInAnyOldOperation) {
+    // The audit clause. Comparison, equality, hashing, arithmetic and formatting must all give
+    // the answers they gave before, which means none of them may see the flag bits.
+    const SharpRuntime::longcs raw = 638540436301234567LL;
+    const DateTime unspecified(raw);
+    const DateTime asUtc(raw, System::DateTimeKind::Utc);
+    const DateTime asLocal(raw, System::DateTimeKind::Local);
+
+    EXPECT_TRUE(unspecified == asUtc) << ".NET's operator== is ((d1^d2) << 2) == 0, which "
+                                         "discards the flag bits (DateTime.cs:1862)";
+    EXPECT_TRUE(asUtc == asLocal);
+    EXPECT_FALSE(unspecified != asLocal);
+    EXPECT_EQ(unspecified.CompareTo(asLocal), 0);
+    EXPECT_EQ(unspecified.GetHashCode(), asLocal.GetHashCode());
+    EXPECT_EQ(unspecified.ToString(), asLocal.ToString());
+    EXPECT_EQ(unspecified.getYearProperty(), asLocal.getYearProperty());
+    EXPECT_EQ((asUtc - unspecified).getTicksProperty(), 0);
+    EXPECT_EQ(asUtc.AddDays(1).getTicksProperty(), unspecified.AddDays(1).getTicksProperty());
+
+    // Arithmetic does NOT carry the kind in this phase, and that is stated rather than assumed:
+    // propagating it is a phase-2 question, because it is only meaningful once a conversion
+    // exists to be consistent with.
+    EXPECT_EQ(asUtc.AddDays(1).getKindProperty(), System::DateTimeKind::Unspecified);
+}
+
+namespace {
+// The detection idiom must take a DEPENDENT parameter. gcc evaluates a non-dependent `requires`
+// eagerly and reports "has no member named ToLocalTime" as a hard error instead of yielding
+// false, which is the trap #2299 recorded for the same shape.
+template <typename T> concept HasToLocalTime     = requires(T d) { d.ToLocalTime(); };
+template <typename T> concept HasToUniversalTime = requires(T d) { d.ToUniversalTime(); };
+} // namespace
+
+TEST(DateTimeKindStorageTests, Decl1941_TheConversionSurfaceIsStillAbsent) {
+    // Pinned as a declaration, so phase 2 is a deliberate act rather than a drift. If either of
+    // these ever compiles, the approval boundary moved and this test must move with it.
+    EXPECT_FALSE(HasToLocalTime<DateTime>);
+    EXPECT_FALSE(HasToUniversalTime<DateTime>);
+    // The control: a member that IS present, so the idiom is known to discriminate rather than
+    // always answering false.
+    EXPECT_TRUE((requires(DateTime d) { d.getKindProperty(); }));
 }
