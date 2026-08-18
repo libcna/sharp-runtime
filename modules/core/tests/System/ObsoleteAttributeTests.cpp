@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <optional>
 #include <cstddef>
 #include <string>
 #include <type_traits>
@@ -22,8 +23,10 @@ int legacyMarkedWithDeprecated() { return 7; }
 } // namespace
 
 TEST(ObsoleteAttributeTest, DefaultCtor) {
+    // #2295: absent, not empty. The old assertion could not tell the two apart, which is the
+    // finding.
     ObsoleteAttribute a;
-    EXPECT_TRUE(a.getMessageProperty().empty());
+    EXPECT_EQ(std::nullopt, a.getMessageProperty());
     EXPECT_FALSE(a.getIsErrorProperty());
 }
 
@@ -41,14 +44,14 @@ TEST(ObsoleteAttributeTest, MessageAndErrorCtor) {
 
 TEST(ObsoleteAttributeTest, DiagnosticId) {
     ObsoleteAttribute a("msg");
-    EXPECT_TRUE(a.getDiagnosticIdProperty().empty());
+    EXPECT_EQ(std::nullopt, a.getDiagnosticIdProperty());
     a.setDiagnosticIdProperty("SYSLIB0001");
     EXPECT_EQ(a.getDiagnosticIdProperty(), "SYSLIB0001");
 }
 
 TEST(ObsoleteAttributeTest, UrlFormat) {
     ObsoleteAttribute a("msg");
-    EXPECT_TRUE(a.getUrlFormatProperty().empty());
+    EXPECT_EQ(std::nullopt, a.getUrlFormatProperty());
     a.setUrlFormatProperty("https://example.com/{0}");
     EXPECT_EQ(a.getUrlFormatProperty(), "https://example.com/{0}");
 }
@@ -63,13 +66,49 @@ TEST(ObsoleteAttributeTest, IsAttribute) {
 // constructed attribute could reach a declaration. A pointer-sized member would
 // not fit in the padding the declared members already leave, so this trips on
 // exactly the shape an attempt to "implement" the attachment would take.
-TEST(ObsoleteAttributeTest, CarriesItsFourDeclaredMembersAndNoSideChannel) {
+TEST(ObsoleteAttributeTest, Fix2295_CarriesItsFourDeclaredMembersAndNoSideChannel) {
+    // #2295 grew the three string members into std::optional<std::string>, so
+    // sizeof(ObsoleteAttribute) moves 112 -> 136 under SA-3. The pin stays a RELATIONSHIP rather
+    // than a number: it is the base plus three optionals plus the bool, rounded to alignment, so
+    // it keeps proving there is no side channel rather than re-recording a compiler's answer.
     constexpr std::size_t declared =
-        sizeof(System::Attribute) + 3 * sizeof(std::string) + sizeof(bool);
+        sizeof(System::Attribute) + 3 * sizeof(std::optional<std::string>) + sizeof(bool);
     constexpr std::size_t align = alignof(ObsoleteAttribute);
     constexpr std::size_t rounded = ((declared + align - 1) / align) * align;
     EXPECT_EQ(sizeof(ObsoleteAttribute), rounded);
     EXPECT_TRUE((std::is_base_of_v<System::Attribute, ObsoleteAttribute>));
+
+    // ...and the growth is real and was measured, so a future edit that silently drops the
+    // optionals back to plain strings fails here rather than passing on a stale relationship.
+    EXPECT_GT(sizeof(ObsoleteAttribute),
+              sizeof(System::Attribute) + 3 * sizeof(std::string) + sizeof(bool));
+}
+
+TEST(ObsoleteAttributeTest, Fix2295_AbsentAndEmptyAreDifferentStates) {
+    // THE FINDING ITSELF. Measured before #2295, these two compared EQUAL: three non-nullable
+    // std::strings cannot express .NET's `string?`, and the boundary was on the way IN as well as
+    // on the way out -- the constructor and both setters took const std::string&, so a caller
+    // could neither supply an absent value nor return a component to that state.
+    const ObsoleteAttribute absent;
+    const ObsoleteAttribute empty(std::string{});
+    EXPECT_EQ(std::nullopt, absent.getMessageProperty());
+    EXPECT_EQ(std::optional<std::string>(""), empty.getMessageProperty());
+    EXPECT_NE(absent.getMessageProperty(), empty.getMessageProperty());
+
+    // The way IN, for the two settable components: a caller can now supply absence and take it
+    // back, which .NET allows and this port could not express at all.
+    ObsoleteAttribute a("msg");
+    a.setDiagnosticIdProperty("SYSLIB0001");
+    EXPECT_EQ(std::optional<std::string>("SYSLIB0001"), a.getDiagnosticIdProperty());
+    a.setDiagnosticIdProperty(std::string{});
+    EXPECT_EQ(std::optional<std::string>(""), a.getDiagnosticIdProperty());
+    a.setDiagnosticIdProperty(std::nullopt);
+    EXPECT_EQ(std::nullopt, a.getDiagnosticIdProperty());
+
+    // The constructor too: an explicitly absent message differs from an explicitly empty one.
+    EXPECT_EQ(std::nullopt, ObsoleteAttribute(std::nullopt).getMessageProperty());
+    EXPECT_EQ(std::nullopt, ObsoleteAttribute(std::nullopt, true).getMessageProperty());
+    EXPECT_TRUE(ObsoleteAttribute(std::nullopt, true).getIsErrorProperty());
 }
 
 // SR-AUD-115 (#2294). This is a LANGUAGE-BOUNDARY DEMONSTRATION, not a
@@ -125,7 +164,7 @@ TEST(ObsoleteAttributeTest, TextComponentsAreByteTransparent) {
     a.setUrlFormatProperty("https://example.com/dokumentace/{0}?jazyk=čeština");
 
     EXPECT_EQ(a.getMessageProperty(), message);
-    EXPECT_EQ(a.getMessageProperty().size(), message.size());
+    EXPECT_EQ(a.getMessageProperty().value().size(), message.size());
     EXPECT_EQ(a.getUrlFormatProperty(),
               "https://example.com/dokumentace/{0}?jazyk=čeština");
 }

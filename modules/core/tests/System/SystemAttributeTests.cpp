@@ -6,6 +6,7 @@
 // Attribute, AttributeTargets, AttributeUsageAttribute, CLSCompliantAttribute,
 // ObsoleteAttribute, FlagsAttribute, and other marker attributes.
 #include <gtest/gtest.h>
+#include <optional>
 #include <type_traits>
 #include <string>
 #include "System/Attribute.hpp"
@@ -242,9 +243,10 @@ TEST(CLSCompliantAttributeTests, IsCompliant_False) {
 // ObsoleteAttribute
 // ===========================================================================
 
-TEST(ObsoleteAttributeTests, DefaultCtor_MessageEmpty) {
+TEST(ObsoleteAttributeTests, DefaultCtor_MessageIsAbsent) {
+    // #2295: nullopt, not "". A default attribute has NO message in .NET, and now here too.
     ObsoleteAttribute attr;
-    EXPECT_TRUE(attr.getMessageProperty().empty());
+    EXPECT_EQ(std::nullopt, attr.getMessageProperty());
 }
 
 TEST(ObsoleteAttributeTests, MessageCtor_StoresMessage) {
@@ -267,9 +269,9 @@ TEST(ObsoleteAttributeTests, DefaultCtor_IsError_False) {
     EXPECT_FALSE(attr.getIsErrorProperty());
 }
 
-TEST(ObsoleteAttributeTests, DiagnosticId_DefaultEmpty) {
+TEST(ObsoleteAttributeTests, DiagnosticId_DefaultIsAbsent) {
     ObsoleteAttribute attr("msg");
-    EXPECT_TRUE(attr.getDiagnosticIdProperty().empty());
+    EXPECT_EQ(std::nullopt, attr.getDiagnosticIdProperty());
 }
 
 TEST(ObsoleteAttributeTests, SetDiagnosticId_Stored) {

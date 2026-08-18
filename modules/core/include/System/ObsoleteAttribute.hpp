@@ -2,7 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <optional>
 #include <string>
+#include <utility>
 #include "System/Attribute.hpp"
 
 namespace System {
@@ -58,12 +60,20 @@ namespace System {
      * left derivable rather than `final` because sealing it would reject code
      * that compiles today.
      *
-     * `Message`, `DiagnosticId` and `UrlFormat` are nullable (`string?`) in
-     * .NET, so a default-constructed attribute exposes `null` there and a
-     * caller can tell that apart from an explicitly supplied `""`. This port
-     * stores three non-nullable `std::string`s, so **an absent value and an
-     * empty one are the same state here** — SR-AUD-116, whose representation is
-     * under decision at ticket #2295 and must not be assumed either way.
+     * `Message`, `DiagnosticId` and `UrlFormat` are nullable (`string?`) in .NET, so a
+     * default-constructed attribute exposes `null` and a caller can tell that apart from an
+     * explicitly supplied `""`. **Since ticket #2295 this port can too**: all three are
+     * `std::optional<std::string>`, and the constructors and setters take one, so a caller can
+     * both supply an absent value and return a component to that state.
+     *
+     * They used to be three non-nullable `std::string`s, which made an absent value and an empty
+     * one **the same state** — measured, `ObsoleteAttribute def;` and
+     * `ObsoleteAttribute empty(std::string{});` compared equal. The boundary was on the way in as
+     * well as on the way out, so the gap was not closable by a getter alone.
+     *
+     * `sizeof(ObsoleteAttribute)` grows **112 → 136** (SA-3). `Message` and `IsError` stay
+     * getter-only and `DiagnosticId`/`UrlFormat` keep their setters, matching .NET's own
+     * `{ get; }` / `{ get; set; }` split.
      *
      * The class exists so that ported code naming `System::ObsoleteAttribute`
      * still compiles and so that the .NET intent stays readable beside the
@@ -73,10 +83,10 @@ namespace System {
      * SR-AUD-115, tickets #2293 (review) and #2294.
      */
     class ObsoleteAttribute : public Attribute {
-        std::string message_;
+        std::optional<std::string> message_;
         bool isError_ = false;
-        std::string diagnosticId_;
-        std::string urlFormat_;
+        std::optional<std::string> diagnosticId_;
+        std::optional<std::string> urlFormat_;
 
     public:
         /**
@@ -89,7 +99,7 @@ namespace System {
          * @brief Constructs an ObsoleteAttribute with the given informational message.
          * @param message Human-readable explanation of the obsolescence.
          */
-        explicit ObsoleteAttribute(const std::string& message) : message_(message) {}
+        explicit ObsoleteAttribute(std::optional<std::string> message) : message_(std::move(message)) {}
         /**
          * @brief Constructs an ObsoleteAttribute with a message and an error flag.
          * @param message Human-readable explanation of the obsolescence.
@@ -99,10 +109,11 @@ namespace System {
          * stored and returned unchanged, and no value of it makes any
          * declaration harder or easier to use.
          */
-        ObsoleteAttribute(const std::string& message, bool isError) : message_(message), isError_(isError) {}
+        ObsoleteAttribute(std::optional<std::string> message, bool isError)
+            : message_(std::move(message)), isError_(isError) {}
 
         /** Returns the informational message describing the obsolescence. */
-        [[nodiscard]] const std::string& getMessageProperty()      const { return message_; }
+        [[nodiscard]] const std::optional<std::string>& getMessageProperty()      const { return message_; }
         /**
          * Returns the recorded .NET error flag. It reports what .NET's compiler
          * would do with the declaration this attribute described; it does not
@@ -113,18 +124,18 @@ namespace System {
          * Returns the diagnostic ID associated with this obsolescence, or an
          * empty string where .NET would return null (SR-AUD-116).
          */
-        [[nodiscard]] const std::string& getDiagnosticIdProperty() const { return diagnosticId_; }
+        [[nodiscard]] const std::optional<std::string>& getDiagnosticIdProperty() const { return diagnosticId_; }
         /**
          * Returns the URL format string for further documentation, or an empty
          * string where .NET would return null (SR-AUD-116). Nothing in this
          * port formats it; it is metadata for a human reader.
          */
-        [[nodiscard]] const std::string& getUrlFormatProperty()    const { return urlFormat_; }
+        [[nodiscard]] const std::optional<std::string>& getUrlFormatProperty()    const { return urlFormat_; }
 
         /** Sets the diagnostic ID associated with this obsolescence. */
-        void setDiagnosticIdProperty(const std::string& v) { diagnosticId_ = v; }
+        void setDiagnosticIdProperty(std::optional<std::string> v) { diagnosticId_ = std::move(v); }
         /** Sets the URL format string pointing to further documentation. */
-        void setUrlFormatProperty(const std::string& v)    { urlFormat_ = v; }
+        void setUrlFormatProperty(std::optional<std::string> v)    { urlFormat_ = std::move(v); }
     };
 
 } // namespace System
