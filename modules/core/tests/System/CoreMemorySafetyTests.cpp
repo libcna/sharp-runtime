@@ -568,7 +568,9 @@ TEST(CoreMemorySafetyDefaultSegmentTests, NonDefaultSegmentsAreUnaffected) {
     EXPECT_EQ(seg.ToArray(), (std::vector<int>{20, 30, 40}));
     EXPECT_TRUE(seg.Contains(30));
     EXPECT_EQ(seg.IndexOf(40), 2);
-    std::vector<int> dst;
+    // #2328: the destination is sized by the caller now -- CopyTo rejects a short one rather
+    // than growing it, matching .NET's Array.Copy.
+    std::vector<int> dst(3);
     seg.CopyTo(dst);
     EXPECT_EQ(dst, (std::vector<int>{20, 30, 40}));
     // The out-of-range diagnostics on a real segment are unchanged.
@@ -874,9 +876,16 @@ TEST(CoreMemorySafetyOverlapTests, NonOverlappingCopiesKeepTheirPreviousResults)
     System::Array::Copy<int>(src, 1, dst2, 2, 2);
     EXPECT_EQ(dst2, (std::vector<int>{9, 9, 2, 3}));
 
-    std::vector<int> dst3;
+    // #2328 replaced SR-AUD-055's resize with a rejection, so the destination is sized here.
+    // #2214 had deliberately PRESERVED the resize while repairing this file's default-state and
+    // overlap defects; that preservation was correct then and is superseded now.
+    std::vector<int> dst3(4, 0);
     ArraySegment<int>(src, 0, 3).CopyTo(dst3, 1);
-    EXPECT_EQ(dst3, (std::vector<int>{0, 1, 2, 3}));   // SR-AUD-055's resize, unchanged
+    EXPECT_EQ(dst3, (std::vector<int>{0, 1, 2, 3}));
+
+    std::vector<int> dst3Short;
+    EXPECT_THROW(ArraySegment<int>(src, 0, 3).CopyTo(dst3Short, 1), System::ArgumentException);
+    EXPECT_TRUE(dst3Short.empty()) << "#2328: a rejected copy must not grow the destination";
 
     std::vector<int> short1(1, 0);
     EXPECT_THROW(Span<int>(src).CopyTo(Span<int>(short1)), System::ArgumentException);

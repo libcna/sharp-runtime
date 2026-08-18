@@ -288,16 +288,34 @@ namespace System {
         }
 
         /**
-         * @brief Copies the segment's elements into a destination vector starting at @p destinationIndex.
+         * @brief Copies the segment's elements into a `std::vector`, starting at
+         *        @p destinationIndex.
          *
-         * C++ counterpart of .NET ArraySegment<T>.CopyTo(T[], int).
-         * Ensures the destination vector has enough capacity; fills with default-constructed
-         * elements if necessary.
-         * @param destination      The target vector.
+         * C++ counterpart of .NET `ArraySegment<T>.CopyTo(T[], int)`, whose body is
+         * `Array.Copy(_array, _offset, destination, destinationIndex, _count)`
+         * (`ArraySegment.cs:106-110`).
+         *
+         * @par This REJECTS a short destination since ticket #2328; it used to RESIZE it
+         * .NET arrays cannot grow, so `Array.Copy` raises
+         * `ArgumentException(SR.Arg_LongerThanDestArray)` and the caller learns the destination
+         * was too small. This port took a `std::vector`, which *can* grow, and grew it — so a
+         * caller who passed the wrong destination got a silently enlarged one instead of a
+         * diagnostic, and a caller who sized a buffer deliberately had that size overwritten.
+         *
+         * It was also the **one place in the repository that broke its own convention**: of the
+         * twenty-six `CopyTo(std::vector<T>&, …)` overloads in `modules/`, twenty reject a short
+         * destination — thirteen with their own guard, five through
+         * `System::Collections::detail::requireValidCopyDestination`, and `ImmutableList`'s two
+         * forwarding forms through its four-argument body. The check is written out here rather
+         * than shared, because that helper lives in `Collections.Core` and `Core.Base` must not
+         * depend on it; the message is .NET's own, so the two cannot drift apart in wording.
+         *
+         * @param destination      The target vector. Must already be large enough.
          * @param destinationIndex Zero-based index in @p destination at which to start writing.
-         * The destination vector is automatically resized (never throws for insufficient room).
          * @throws System::InvalidOperationException if this is a default segment (checked
-         *         first, matching .NET, and therefore before the destination is resized).
+         *         first, matching .NET, and therefore before the destination is examined).
+         * @throws System::ArgumentOutOfRangeException if @p destinationIndex is negative.
+         * @throws System::ArgumentException if @p destination is too short.
          */
         void CopyTo(std::vector<T>& destination, intcs destinationIndex) const
         {
@@ -310,10 +328,12 @@ namespace System {
             SharpRuntime::longcs needed = static_cast<SharpRuntime::longcs>(destinationIndex) +
                                            static_cast<SharpRuntime::longcs>(count_);
             if (static_cast<SharpRuntime::longcs>(destination.size()) < needed)
-                destination.resize(static_cast<size_t>(needed));
+                throw System::ArgumentException(
+                    "Destination array was not long enough. Check the destination index, length, "
+                    "and the array's lower bounds.", "destination");
             // The destination may BE the backing vector, so this must be overlap-safe
-            // (SR-AUD-044). The pointers are taken after the resize above, so a
-            // reallocation cannot leave them dangling.
+            // (SR-AUD-044). Nothing reallocates now that the destination is never resized, so
+            // the pointers below cannot dangle.
             System::detail::copyOverlapAware(begin(), static_cast<std::size_t>(count_),
                                              destination.data() + destinationIndex);
         }

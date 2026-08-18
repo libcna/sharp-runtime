@@ -123,9 +123,11 @@ TEST(ArraySegmentTests, Slice1Arg_CorrectElements) {
 // ---------------------------------------------------------------------------
 
 TEST(ArraySegmentTests, CopyTo_Vector_CopiesAllElements) {
+    // #2328: the destination is SIZED BY THE CALLER now. It used to be an empty vector that
+    // CopyTo grew -- .NET arrays cannot grow, so Array.Copy raises instead.
     std::vector<int> v{10, 20, 30};
     ArraySegment<int> seg(v);
-    std::vector<int> dest;
+    std::vector<int> dest(3);
     seg.CopyTo(dest);
     EXPECT_EQ(dest, (std::vector<int>{10, 20, 30}));
 }
@@ -133,9 +135,59 @@ TEST(ArraySegmentTests, CopyTo_Vector_CopiesAllElements) {
 TEST(ArraySegmentTests, CopyTo_Vector_PartialSegment) {
     std::vector<int> v{1, 2, 3, 4, 5};
     ArraySegment<int> seg(v, 1, 3);
-    std::vector<int> dest;
+    std::vector<int> dest(3);
     seg.CopyTo(dest);
     EXPECT_EQ(dest, (std::vector<int>{2, 3, 4}));
+}
+
+TEST(ArraySegmentTests, Fix2328_AShortDestinationIsRejectedRatherThanResized) {
+    // THE BEHAVIOUR THAT REVERSED. `CopyTo(std::vector&, index)` used to call
+    // destination.resize() whenever the destination was shorter, so a caller who passed the
+    // wrong buffer got a silently enlarged one instead of a diagnostic, and a caller who sized a
+    // buffer deliberately had that size overwritten. .NET's body is
+    // Array.Copy(...) (`ArraySegment.cs:106-110`), and .NET arrays cannot grow.
+    //
+    // It was also the ONE place in the repository that broke its own convention: twenty of the
+    // twenty-six CopyTo(std::vector&, ...) overloads in modules/ already rejected a short
+    // destination.
+    std::vector<int> v{1, 2, 3};
+    ArraySegment<int> seg(v);
+
+    std::vector<int> tooShort(2);
+    EXPECT_THROW(seg.CopyTo(tooShort), System::ArgumentException);
+    EXPECT_EQ(2u, tooShort.size()) << "and the destination must be left alone, not grown";
+
+    std::vector<int> empty;
+    EXPECT_THROW(seg.CopyTo(empty), System::ArgumentException);
+    EXPECT_TRUE(empty.empty());
+
+    // The index counts against the room too: three elements at index 1 need four slots.
+    std::vector<int> exactButOffset(3);
+    EXPECT_THROW(seg.CopyTo(exactButOffset, 1), System::ArgumentException);
+
+    // .NET's own sentence, transcribed rather than paraphrased.
+    try {
+        seg.CopyTo(tooShort);
+        ADD_FAILURE() << "expected ArgumentException";
+    } catch (const System::ArgumentException& e) {
+        EXPECT_NE(std::string(e.what()).find("Destination array was not long enough."),
+                  std::string::npos) << e.what();
+    }
+
+    // EXACTLY large enough still works -- the check is a shortfall test, not an off-by-one.
+    std::vector<int> exact(3);
+    EXPECT_NO_THROW(seg.CopyTo(exact));
+    EXPECT_EQ(exact, (std::vector<int>{1, 2, 3}));
+
+    std::vector<int> offset(4, 0);
+    EXPECT_NO_THROW(seg.CopyTo(offset, 1));
+    EXPECT_EQ(offset, (std::vector<int>{0, 1, 2, 3}));
+
+    // The default-segment check still runs FIRST, before the destination is examined at all --
+    // matching .NET's ordering and unchanged by #2328.
+    ArraySegment<int> defaulted;
+    std::vector<int> alsoShort(0);
+    EXPECT_THROW(defaulted.CopyTo(alsoShort), System::InvalidOperationException);
 }
 
 // ---------------------------------------------------------------------------
@@ -154,14 +206,24 @@ TEST(ArraySegmentTests, CopyTo_VectorWithOffset_WritesAtCorrectIndex) {
     EXPECT_EQ(dest[1], 0);
 }
 
-TEST(ArraySegmentTests, CopyTo_VectorWithOffset_ExpandsDest) {
+TEST(ArraySegmentTests, Fix2328_CopyToVectorWithOffsetNoLongerExpandsDest) {
+    // INVERTED BY #2328. This test was named for the resize and asserted it directly: an empty
+    // destination plus index 3 grew to size 5. .NET's CopyTo cannot grow an array, so the same
+    // call is now an ArgumentException and the destination is untouched.
     std::vector<int> v{7, 8};
     ArraySegment<int> seg(v);
+
     std::vector<int> dest;
-    seg.CopyTo(dest, 3);
-    EXPECT_EQ(static_cast<intcs>(dest.size()), 5);
-    EXPECT_EQ(dest[3], 7);
-    EXPECT_EQ(dest[4], 8);
+    EXPECT_THROW(seg.CopyTo(dest, 3), System::ArgumentException);
+    EXPECT_TRUE(dest.empty()) << "#2328: a rejected copy leaves the destination alone";
+
+    // Sized by the caller, the write lands exactly where it used to.
+    std::vector<int> sized(5, 0);
+    seg.CopyTo(sized, 3);
+    EXPECT_EQ(static_cast<intcs>(sized.size()), 5);
+    EXPECT_EQ(sized[3], 7);
+    EXPECT_EQ(sized[4], 8);
+    EXPECT_EQ(sized[0], 0);
 }
 
 TEST(ArraySegmentTests, CopyTo_VectorNegativeDestinationIndex_Throws) {
