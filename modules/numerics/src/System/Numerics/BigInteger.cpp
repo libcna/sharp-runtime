@@ -332,21 +332,49 @@ int  BigInteger::Sign()                  const { return getIsZeroProperty() ? 0 
 // Parse / ToString
 // ---------------------------------------------------------------------------
 
+namespace {
+    // .NET's own whitespace predicate for number parsing: a space, or 0x09..0x0D
+    // (`Number.Parsing.Common.cs:309`). Deliberately NOT std::isspace.
+    //
+    // HONEST NOTE ON THE EVIDENCE: in the "C" locale those two sets are IDENTICAL, so a mutation
+    // replacing this body with `std::isspace(c) != 0` is NOT caught, and was measured not to be.
+    // They diverge only after a `std::setlocale` call, and a test that changed the global locale
+    // inside a shared test binary would leak that change into every other suite in it. The
+    // explicit set is chosen for locale-independence, not because a test distinguishes it.
+    bool isParseWhite(unsigned char c) {
+        return c == 0x20 || (c >= 0x09 && c <= 0x0D);
+    }
+}
+
 BigInteger BigInteger::Parse(const std::string& s) {
-    if (s.empty()) throw System::FormatException("The value could not be parsed.");
+    // Ticket #2174 (2026-08-18). `Parse(" 1")` and `Parse("1 ")` both threw, and .NET accepts
+    // both: `BigInteger.Parse(string)` is `Parse(value, NumberStyles.Integer)`
+    // (`BigInteger.cs:798-801`), and `NumberStyles.Integer` is
+    // `AllowLeadingWhite | AllowTrailingWhite | AllowLeadingSign`. So the whitespace is not a
+    // leniency this port declined -- it is the DEFAULT style's own contract, and rejecting it
+    // made `Parse` stricter than the style it claims to implement.
+    //
+    // The trimmed set is .NET's `IsWhite`, not `std::isspace`: 0x20 and 0x09..0x0D exactly.
+    // A vertical tab is inside that range and IS trimmed; a non-breaking space is not.
+    std::size_t first = 0, last = s.size();
+    while (first < last && isParseWhite(static_cast<unsigned char>(s[first]))) ++first;
+    while (last > first && isParseWhite(static_cast<unsigned char>(s[last - 1]))) --last;
+    const std::string trimmed = s.substr(first, last - first);
+
+    if (trimmed.empty()) throw System::FormatException("The value could not be parsed.");
     BigInteger r;
-    bool neg = (s[0] == '-');
-    size_t start = (neg || s[0] == '+') ? 1 : 0;
-    if (start >= s.size()) throw System::FormatException("The value could not be parsed.");
-    for (size_t k = start; k < s.size(); ++k)
-        if (s[k] < '0' || s[k] > '9')
+    bool neg = (trimmed[0] == '-');
+    size_t start = (neg || trimmed[0] == '+') ? 1 : 0;
+    if (start >= trimmed.size()) throw System::FormatException("The value could not be parsed.");
+    for (size_t k = start; k < trimmed.size(); ++k)
+        if (trimmed[k] < '0' || trimmed[k] > '9')
             throw System::FormatException("The value could not be parsed.");
 
     std::vector<uint32_t> m;
-    int i = static_cast<int>(s.size());
+    int i = static_cast<int>(trimmed.size());
     while (i > static_cast<int>(start)) {
         int from = std::max(static_cast<int>(start), i - 9);
-        m.push_back(static_cast<uint32_t>(std::stoul(s.substr(from, i - from))));
+        m.push_back(static_cast<uint32_t>(std::stoul(trimmed.substr(from, i - from))));
         i = from;
     }
     if (m.empty()) m.push_back(0);

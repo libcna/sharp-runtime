@@ -8,6 +8,7 @@
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/Numerics/detail/LaneMinMax.hpp"
 
 namespace System::Numerics {
 
@@ -153,9 +154,9 @@ struct Vector2 {
         return v - 2.0f * Dot(v, normal) * normal;
     }
     /** @return Component-wise minimum of @p a and @p b. */
-    static Vector2 Min(Vector2 a, Vector2 b)               { return {std::min(a.X,b.X), std::min(a.Y,b.Y)}; }
+    static Vector2 Min(Vector2 a, Vector2 b)               { return {detail::LaneMin(a.X,b.X), detail::LaneMin(a.Y,b.Y)}; }
     /** @return Component-wise maximum of @p a and @p b. */
-    static Vector2 Max(Vector2 a, Vector2 b)               { return {std::max(a.X,b.X), std::max(a.Y,b.Y)}; }
+    static Vector2 Max(Vector2 a, Vector2 b)               { return {detail::LaneMax(a.X,b.X), detail::LaneMax(a.Y,b.Y)}; }
     /** @return @p v clamped component-wise to [@p mn, @p mx]. */
     static Vector2 Clamp(Vector2 v, Vector2 mn, Vector2 mx){ return Min(Max(v,mn),mx); }
     /** @return Linear interpolation a + (b-a)*t; t=0 returns a, t=1 returns b. */

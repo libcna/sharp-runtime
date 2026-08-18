@@ -9,6 +9,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Numerics/Vector2.hpp"
 #include "System/Numerics/Vector3.hpp"
+#include "System/Numerics/detail/LaneMinMax.hpp"
 
 namespace System::Numerics {
 
@@ -135,9 +136,9 @@ struct Vector4 {
     /** @return Component-wise absolute value of @p v. */
     static Vector4 Abs(Vector4 v)                          { return {std::abs(v.X),std::abs(v.Y),std::abs(v.Z),std::abs(v.W)}; }
     /** @return Component-wise minimum of @p a and @p b. */
-    static Vector4 Min(Vector4 a, Vector4 b)               { return {std::min(a.X,b.X),std::min(a.Y,b.Y),std::min(a.Z,b.Z),std::min(a.W,b.W)}; }
+    static Vector4 Min(Vector4 a, Vector4 b)               { return {detail::LaneMin(a.X,b.X),detail::LaneMin(a.Y,b.Y),detail::LaneMin(a.Z,b.Z),detail::LaneMin(a.W,b.W)}; }
     /** @return Component-wise maximum of @p a and @p b. */
-    static Vector4 Max(Vector4 a, Vector4 b)               { return {std::max(a.X,b.X),std::max(a.Y,b.Y),std::max(a.Z,b.Z),std::max(a.W,b.W)}; }
+    static Vector4 Max(Vector4 a, Vector4 b)               { return {detail::LaneMax(a.X,b.X),detail::LaneMax(a.Y,b.Y),detail::LaneMax(a.Z,b.Z),detail::LaneMax(a.W,b.W)}; }
     /** @return @p v clamped component-wise to [@p mn, @p mx]. */
     static Vector4 Clamp(Vector4 v, Vector4 mn, Vector4 mx){ return Min(Max(v,mn),mx); }
     /** @return Linear interpolation a + (b-a)*t; t=0 returns a, t=1 returns b. */

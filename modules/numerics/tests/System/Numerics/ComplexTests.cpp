@@ -300,11 +300,17 @@ TEST(ComplexTests, ToStringPreservesNegativeZero) {
 }
 
 TEST(PIN_ComplexTests, ToStringSkeletonIsUnchangedAndIsNotDecidedHere) {
-    // DELIBERATELY PINNED, not repaired. SR-AUD-277 calls the "<a; b>" skeleton a divergence,
-    // citing .NET's constructor doc example "(26.1, 18.06)"; the same audit report also links the
-    // current .NET Complex source, which gives "<a; b>". The two citations disagree, /rv is
-    // absent and no managed probe measured this member, so #2174 owns the question. If it is ever
-    // answered, this is the test to change.
+    // #2174 ANSWERED IT, 2026-08-18, and the port was already right. SR-AUD-277 called the
+    // "<a; b>" skeleton a divergence, citing .NET's constructor doc example "(26.1, 18.06)"; the
+    // same report linked the .NET source, which gives "<a; b>". The two citations disagreed and
+    // the SOURCE wins -- the doc example is stale prose about a constructor, not about ToString:
+    //
+    //     handler.AppendLiteral("<");  handler.AppendFormatted(m_real, format);
+    //     handler.AppendLiteral("; "); handler.AppendFormatted(m_imaginary, format);
+    //     handler.AppendLiteral(">");                              -- Complex.cs:367-375
+    //
+    // Angle brackets, semicolon, space. Nothing to repair; the rows below are now a transcription
+    // rather than a placeholder.
     const std::string s = Complex(3.0, 4.0).ToString();
     ASSERT_FALSE(s.empty());
     EXPECT_EQ(s.front(), '<');

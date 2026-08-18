@@ -8,6 +8,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Numerics/Vector2.hpp"
+#include "System/Numerics/detail/LaneMinMax.hpp"
 
 namespace System::Numerics {
 
@@ -131,9 +132,9 @@ struct Vector3 {
     /** @return Component-wise absolute value of @p v. */
     static Vector3 Abs(Vector3 v)                          { return {std::abs(v.X),std::abs(v.Y),std::abs(v.Z)}; }
     /** @return Component-wise minimum of @p a and @p b. */
-    static Vector3 Min(Vector3 a, Vector3 b)               { return {std::min(a.X,b.X),std::min(a.Y,b.Y),std::min(a.Z,b.Z)}; }
+    static Vector3 Min(Vector3 a, Vector3 b)               { return {detail::LaneMin(a.X,b.X),detail::LaneMin(a.Y,b.Y),detail::LaneMin(a.Z,b.Z)}; }
     /** @return Component-wise maximum of @p a and @p b. */
-    static Vector3 Max(Vector3 a, Vector3 b)               { return {std::max(a.X,b.X),std::max(a.Y,b.Y),std::max(a.Z,b.Z)}; }
+    static Vector3 Max(Vector3 a, Vector3 b)               { return {detail::LaneMax(a.X,b.X),detail::LaneMax(a.Y,b.Y),detail::LaneMax(a.Z,b.Z)}; }
     /** @return @p v clamped component-wise to [@p mn, @p mx]. */
     static Vector3 Clamp(Vector3 v, Vector3 mn, Vector3 mx){ return Min(Max(v,mn),mx); }
     /** @return Linear interpolation a + (b-a)*t; t=0 returns a, t=1 returns b. */

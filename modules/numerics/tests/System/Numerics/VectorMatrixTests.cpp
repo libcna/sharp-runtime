@@ -301,3 +301,81 @@ TEST(ColorsTests, ArgbRoundtrip) {
     auto back = r.ToArgb();
     EXPECT_TRUE(back.Equals(a));
 }
+
+// ===========================================================================
+// #2174 — the vector half of the four parity questions, answered
+// ===========================================================================
+//
+// Both turn out to be MATCHES already, and both are now transcriptions rather than measurements
+// of this port against itself.
+
+TEST(VectorNaNSemanticsTests, Decl2174_MinAndMaxBothPropagateNaN) {
+    // .NET's Vector128.Max is
+    //     ConditionalSelect(LessThan(y, x) | IsNaN(x) | (Equals(x, y) & IsNegative(y)), x, y)
+    //                                                        -- VectorMath.cs:1512-1524
+    // and Min is its mirror (:1598-1610). Read it for each operand in turn:
+    //
+    //   x is NaN  -> IsNaN(x) is true          -> x is selected, so NaN is returned
+    //   y is NaN  -> LessThan(y, x) is false,
+    //                IsNaN(x) is false,
+    //                Equals(x, y) is false      -> y is selected, so NaN is returned
+    //
+    // So NaN propagates from EITHER side, in BOTH functions. This is not IEEE-754 `maximum`
+    // ordering by accident -- it is what those three predicates compose to, and the second row is
+    // the one that is easy to get wrong, because nothing in the expression mentions IsNaN(y).
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+
+    EXPECT_TRUE(std::isnan(System::Numerics::Vector3::Max({nan, 1, 1}, {0, 1, 1}).X));
+    EXPECT_TRUE(std::isnan(System::Numerics::Vector3::Max({0, 1, 1}, {nan, 1, 1}).X));
+    EXPECT_TRUE(std::isnan(System::Numerics::Vector3::Min({nan, 1, 1}, {0, 1, 1}).X));
+    EXPECT_TRUE(std::isnan(System::Numerics::Vector3::Min({0, 1, 1}, {nan, 1, 1}).X));
+
+    // The lanes without a NaN are unaffected, which is what makes this per-lane propagation
+    // rather than a whole-vector poison.
+    const auto maxed = System::Numerics::Vector3::Max({nan, 1, 5}, {0, 2, 3});
+    EXPECT_TRUE(std::isnan(maxed.X));
+    EXPECT_FLOAT_EQ(maxed.Y, 2.0f);
+    EXPECT_FLOAT_EQ(maxed.Z, 5.0f);
+
+    // Vector2 and Vector4 answer the same way; .NET routes all three through Vector128.
+    EXPECT_TRUE(std::isnan(System::Numerics::Vector2::Max({nan, 1}, {0, 1}).X));
+    EXPECT_TRUE(std::isnan(System::Numerics::Vector4::Min({0, 1, 1, 1}, {nan, 1, 1, 1}).X));
+}
+
+TEST(VectorNaNSemanticsTests, Decl2174_ClampWithInvertedBoundsFollowsHlslAndReturnsMax) {
+    // .NET's Clamp is `Min(Max(value, min), max)` with the comment "We must follow HLSL behavior
+    // in the case user specified min value is bigger than max value" (Vector128.cs:422-426).
+    // It does NOT validate that min <= max, and it does not swap them: with min=10 and max=0,
+    // Max(5, 10) is 10 and Min(10, 0) is 0, so the answer is MAX -- the inverted bound wins.
+    const auto clamped = System::Numerics::Vector3::Clamp({5, 5, 5}, {10, 10, 10}, {0, 0, 0});
+    EXPECT_FLOAT_EQ(clamped.X, 0.0f);
+    EXPECT_FLOAT_EQ(clamped.Y, 0.0f);
+    EXPECT_FLOAT_EQ(clamped.Z, 0.0f);
+
+    // The ordinary rows, so this is a statement about inverted bounds rather than about Clamp.
+    const auto inside = System::Numerics::Vector3::Clamp({5, -5, 50}, {0, 0, 0}, {10, 10, 10});
+    EXPECT_FLOAT_EQ(inside.X, 5.0f);
+    EXPECT_FLOAT_EQ(inside.Y, 0.0f);
+    EXPECT_FLOAT_EQ(inside.Z, 10.0f);
+}
+
+TEST(VectorNaNSemanticsTests, Fix2174_MinAndMaxAgreeWithDotNetOnSignedZeroToo) {
+    // The third disjunct of .NET's expression is a signed-zero rule, and it is NOT symmetric:
+    // Max tests IsNegative(y) and Min tests IsNegative(x) (VectorMath.cs:1518, 1604). So
+    // Max(+0, -0) and Max(-0, +0) are both +0, and Min(+0, -0) and Min(-0, +0) are both -0.
+    // std::max/std::min get this wrong too -- they return whichever operand they were handed
+    // second -- so it comes along with the NaN repair rather than being a separate one.
+    const float pos = 0.0f;
+    const float neg = -0.0f;
+    EXPECT_FALSE(std::signbit(System::Numerics::Vector3::Max({pos, 0, 0}, {neg, 0, 0}).X));
+    EXPECT_FALSE(std::signbit(System::Numerics::Vector3::Max({neg, 0, 0}, {pos, 0, 0}).X));
+    EXPECT_TRUE(std::signbit(System::Numerics::Vector3::Min({pos, 0, 0}, {neg, 0, 0}).X));
+    EXPECT_TRUE(std::signbit(System::Numerics::Vector3::Min({neg, 0, 0}, {pos, 0, 0}).X));
+
+    // The ordinary rows, unmoved: this is a NaN and signed-zero repair, not a reordering.
+    EXPECT_FLOAT_EQ(System::Numerics::Vector3::Max({1, 9, -3}, {2, 4, -7}).X, 2.0f);
+    EXPECT_FLOAT_EQ(System::Numerics::Vector3::Max({1, 9, -3}, {2, 4, -7}).Y, 9.0f);
+    EXPECT_FLOAT_EQ(System::Numerics::Vector3::Min({1, 9, -3}, {2, 4, -7}).Z, -7.0f);
+    EXPECT_FLOAT_EQ(System::Numerics::Vector2::Min({3, 4}, {1, 8}).X, 1.0f);
+    EXPECT_FLOAT_EQ(System::Numerics::Vector4::Max({1, 2, 3, 4}, {4, 3, 2, 1}).W, 4.0f);
+}

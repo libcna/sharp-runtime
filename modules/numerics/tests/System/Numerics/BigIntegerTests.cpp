@@ -478,3 +478,67 @@ TEST(BigIntegerTests, DivModIdentity_NegativeDividend) {
     BigInteger b = BigInteger::Parse("123456789");
     EXPECT_EQ((a / b) * b + (a % b), a);
 }
+
+// ===========================================================================
+// #2174 — two of the four parity questions, answered from the reference
+// ===========================================================================
+//
+// The ticket was BLOCKED ON EVIDENCE, not on approval: "/rv is absent and no managed runtime is
+// available to probe". /rv answers all four, and three of them turn out to be matches already.
+// The one repair is here.
+
+TEST(BigIntegerTests, Fix2174_ParseAcceptsLeadingAndTrailingWhitespace) {
+    // .NET's `BigInteger.Parse(string)` is `Parse(value, NumberStyles.Integer)`
+    // (BigInteger.cs:798-801), and NumberStyles.Integer is
+    // AllowLeadingWhite | AllowTrailingWhite | AllowLeadingSign. So the whitespace is not a
+    // leniency this port declined -- it is the DEFAULT STYLE'S OWN CONTRACT, and rejecting it
+    // made Parse stricter than the style it claims to implement.
+    EXPECT_EQ(BigInteger::Parse(" 1"), BigInteger(1));
+    EXPECT_EQ(BigInteger::Parse("1 "), BigInteger(1));
+    EXPECT_EQ(BigInteger::Parse("  -42\t"), BigInteger(-42));
+    EXPECT_EQ(BigInteger::Parse("\r\n+7\r\n"), BigInteger(7));
+
+    // The trimmed set is .NET's IsWhite -- 0x20 and 0x09..0x0D exactly
+    // (Number.Parsing.Common.cs:309) -- NOT std::isspace, whose set is locale-dependent.
+    // A vertical tab (0x0B) and a form feed (0x0C) are inside that range.
+    EXPECT_EQ(BigInteger::Parse("\v\f5\v\f"), BigInteger(5));
+    // ...and a non-breaking space is not, so it is still a format error.
+    EXPECT_THROW((void)BigInteger::Parse("\xC2\xA0" "5"), System::FormatException);
+
+    // Whitespace INSIDE the digits is still grammar, and still rejected.
+    EXPECT_THROW((void)BigInteger::Parse("1 2"), System::FormatException);
+    EXPECT_THROW((void)BigInteger::Parse("- 1"), System::FormatException);
+    // ...and whitespace alone is not a number.
+    EXPECT_THROW((void)BigInteger::Parse("   "), System::FormatException);
+    EXPECT_THROW((void)BigInteger::Parse(""), System::FormatException);
+
+    // TryParse reports the same answers through its bool.
+    BigInteger out;
+    EXPECT_TRUE(BigInteger::TryParse(" 1 ", out));
+    EXPECT_EQ(out, BigInteger(1));
+    EXPECT_FALSE(BigInteger::TryParse("1 2", out));
+}
+
+TEST(BigIntegerTests, Decl2174_TheShiftBoundsMatchDotNetAndAreNotADefect) {
+    // The ticket measured that `BigInteger(1) << INTCS_MAX` does not return within 30 s, and asked
+    // whether that is a defect. It is not: .NET's operator<< has no early-out for a large positive
+    // shift (BigInteger.cs:2566-2588), so it computes `digitShift = shift / BitsPerLimb` and
+    // allocates that many limbs -- 256 MB of them for int.MaxValue bits. .NET does the same
+    // unbounded work. There is nothing to repair, and no test may run it.
+    //
+    // The NEGATIVE bound is fast and IS testable, and it is the one .NET special-cases:
+    // `if (shift == int.MinValue) return value >> MinIntSplitShift >> BitsPerUInt32;` (:2573-2576),
+    // which is a RIGHT shift by more bits than any value has.
+    //
+    // MY FIRST EXPECTATION HERE WAS WRONG AND THE PORT WAS RIGHT: I asserted zero for both signs.
+    // BigInteger's `>>` is ARITHMETIC, so a negative value shifted right without limit converges
+    // on -1, not on 0 -- the sign bit is what is replicated. The ticket's own measurement said
+    // "<< INTCS_MIN returns 0 promptly" and had only probed the positive case.
+    EXPECT_EQ(BigInteger(1) << SharpRuntime::INTCS_MIN, BigInteger(0));
+    EXPECT_EQ(BigInteger(-1) << SharpRuntime::INTCS_MIN, BigInteger(-1));
+    EXPECT_EQ(BigInteger(-12345) << SharpRuntime::INTCS_MIN, BigInteger(-1));
+    // A negative shift other than INTCS_MIN is a right shift, which .NET states directly
+    // (`if (shift < 0) return value >> -shift;`, :2578-2581).
+    EXPECT_EQ(BigInteger(8) << -2, BigInteger(2));
+    EXPECT_EQ(BigInteger(1) << 0, BigInteger(1));
+}
