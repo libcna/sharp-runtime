@@ -145,6 +145,22 @@ namespace System::Net::Http::Headers::detail {
     // It is a pure widening.
     // -----------------------------------------------------------------------------------------
 
+    /**
+     * @brief The seven three-letter weekday names, for the `ddd` the other two shapes spell.
+     *
+     * Ticket #2376. .NET's `ddd` is `MatchAbbreviatedDayName`, which matches only these seven;
+     * `%3[A-Za-z]` matches any three letters, so `"Xyz, 06 Nov 1994 08:49:37 GMT"` parsed here
+     * and does not in .NET.
+     */
+    inline bool IsAbbreviatedWeekdayName(const std::string& name) {
+        static constexpr std::array<const char*, 7> days = {
+            "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+        for (const char* d : days) {
+            if (name == d) return true;
+        }
+        return false;
+    }
+
     /** @brief The seven full weekday names, for the RFC 850 shape's `dddd`. */
     inline bool IsFullWeekdayName(const std::string& name) {
         static constexpr std::array<const char*, 7> days = {
@@ -337,8 +353,12 @@ namespace System::Net::Http::Headers::detail {
             if (!haveWeekday || !IsFullWeekdayName(weekday)) return false;
             if (yearWidth != 2) return false;
         } else {
-            // RFC 1123 / RFC 5322: the weekday is optional and must be a three-letter name.
-            if (haveWeekday && weekday.size() != 3) return false;
+            // RFC 1123 / RFC 5322: the weekday is optional and must be one of the seven
+            // three-letter names. #2376: checking only the LENGTH accepted an invented
+            // abbreviation, and .NET's `ddd` is MatchAbbreviatedDayName -- a name table, not a
+            // width. The lenient arm needs the same rule as the strict ones, or a value the
+            // strict arm has just refused for a bad weekday is accepted here instead.
+            if (haveWeekday && !IsAbbreviatedWeekdayName(weekday)) return false;
             // THE TWO MISSING CELLS. A two-digit year with a numeric offset is not in .NET's
             // list -- neither "ddd, d MMM yy H:m:s zzz" nor "d MMM yy H:m:s zzz" appears -- so
             // it is rejected rather than completed by symmetry.
@@ -414,7 +434,14 @@ namespace System::Net::Http::Headers::detail {
                 SHARP_RUNTIME_SCANF_BUFFER(dayName), &day, SHARP_RUNTIME_SCANF_BUFFER(monthName),
                 &yearBegin, &year, &yearEnd, &hour, &minute, &second,
                 SHARP_RUNTIME_SCANF_BUFFER(zone), &consumed) == 8 &&
-            std::strcmp(zone, "GMT") == 0 && OnlyTrailingWhitespace(s, consumed)) {
+            std::strcmp(zone, "GMT") == 0 && OnlyTrailingWhitespace(s, consumed) &&
+            // Ticket #2376. sscanf's %d and %3[A-Za-z] do not bound a field, so this arm was
+            // WIDER than the format string it transcribes. .NET's `ddd` is MatchAbbreviatedDayName
+            // (seven names, not any three letters) and its `yyyy`/`yy` are ParseDigits with an
+            // EXACT width -- so "Sun, 06 Nov 199 08:49:37 GMT" parsed here as the year 199 AD and
+            // does not parse in .NET at all.
+            IsAbbreviatedWeekdayName(dayName) && yearBegin >= 0 &&
+            (yearEnd == yearBegin + 2 || yearEnd == yearBegin + 4)) {
             // #2130, and this is a CORRECTION rather than a widening. `%d` read a two-digit year
             // literally, so "Sun, 06 Nov 94 08:49:37 GMT" was ACCEPTED and reported the year
             // **94 AD** -- a silently wrong instant, off by nineteen centuries, not a rejected
@@ -443,7 +470,11 @@ namespace System::Net::Http::Headers::detail {
                 &twoDigitYear, &hour, &minute, &second, SHARP_RUNTIME_SCANF_BUFFER(zone),
                 &consumed) == 8 &&
             std::strcmp(zone, "GMT") == 0 && OnlyTrailingWhitespace(s, consumed) &&
-            twoDigitYear >= 0 && twoDigitYear <= 99) {
+            twoDigitYear >= 0 && twoDigitYear <= 99 &&
+            // #2376. .NET spells this shape's weekday `dddd` (HttpDateParser.cs:22-25), which
+            // matches a FULL name only, so "Sun, 06-Nov-94 08:49:37 GMT" parsed here and does not
+            // in .NET. %15[A-Za-z] accepts any run of up to fifteen letters.
+            IsFullWeekdayName(dayName)) {
             return BuildHttpDate(ExpandTwoDigitYear(twoDigitYear), MonthIndexFromName(monthName),
                                  day, hour, minute, second, result);
         }
@@ -454,11 +485,17 @@ namespace System::Net::Http::Headers::detail {
         std::memset(dayName, 0, sizeof(dayName));
         std::memset(monthName, 0, sizeof(monthName));
         consumed = -1;
+        int asctimeYearBegin = -1, asctimeYearEnd = -1;
         if (SHARP_RUNTIME_SSCANF(
-                s.c_str(), "%3[A-Za-z] %3[A-Za-z] %d %d:%d:%d %d%n",
+                s.c_str(), "%3[A-Za-z] %3[A-Za-z] %d %d:%d:%d %n%d%n",
                 SHARP_RUNTIME_SCANF_BUFFER(dayName), SHARP_RUNTIME_SCANF_BUFFER(monthName), &day,
-                &hour, &minute, &second, &year, &consumed) == 7 &&
-            OnlyTrailingWhitespace(s, consumed)) {
+                &hour, &minute, &second, &asctimeYearBegin, &year, &asctimeYearEnd) == 7 &&
+            OnlyTrailingWhitespace(s, asctimeYearEnd) &&
+            // #2376, the third site of the same defect. asctime's year is `yyyy` -- exactly four
+            // digits -- and its weekday is `ddd` (HttpDateParser.cs:26). The ticket named two
+            // sites and there are three; leaving the third would repair two thirds of one rule.
+            IsAbbreviatedWeekdayName(dayName) && asctimeYearBegin >= 0 &&
+            asctimeYearEnd == asctimeYearBegin + 4) {
             return BuildHttpDate(year, MonthIndexFromName(monthName), day, hour, minute, second,
                                  result);
         }

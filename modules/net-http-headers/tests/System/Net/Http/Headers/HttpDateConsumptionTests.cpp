@@ -369,25 +369,58 @@ TEST(HttpDateConsumptionTests, Fix2360_TheShapesDoNotCrossContaminate) {
     EXPECT_TRUE(RangeConditionHeaderValue::TryParse("Sun,  06   Nov  1994   08:49:37   GMT", parsed));
 }
 
-// TWO PRE-EXISTING LENIENCIES THAT #2360's OWN TESTS SURFACED, pinned rather than repaired.
+// FLIPPED by #2376 (2026-08-18). #2360's own tests surfaced these: the three strict arms are
+// sscanf conversions, and sscanf's %d and %[A-Za-z] do not bound a field's width, so each arm was
+// WIDER than the format string it transcribes.
 //
-// The three strict arms (#2125/#2130) are sscanf conversions, and sscanf's %d and %[A-Za-z] do
-// not bound a field's width. So the port accepts two things .NET's format strings reject: an
-// ABBREVIATED weekday on the hyphenated RFC 850 shape (.NET spells it dddd, which matches full
-// names only) and a THREE-digit year on the IMF-fixdate shape (.NET spells it yyyy, which is
-// exactly four).
-//
-// Both are NARROWINGS, and #2360 is a widening. Bundling a narrowing into a verified widening is
-// what #2005 recorded as the thing to avoid, so they are ticket #2376 and are pinned here so the
-// divergence is a decision rather than a gap nobody wrote down.
-TEST(HttpDateConsumptionTests, Pin2376_TheStrictArmsAreWiderThanTheirFormatStrings) {
+// THE TICKET NAMED TWO SITES AND THERE ARE THREE. It listed the abbreviated weekday on the
+// hyphenated RFC 850 shape and the three-digit year on IMF-fixdate; asctime carries the same
+// unbounded year and the same unvalidated weekday (HttpDateParser.cs:26), and repairing two
+// thirds of one rule is not repairing it.
+TEST(HttpDateConsumptionTests, Fix2376_TheStrictArmsMatchTheirFormatStrings) {
     RangeConditionHeaderValue parsed{std::string("\"x\"")};
-    EXPECT_TRUE(RangeConditionHeaderValue::TryParse("Sun, 06-Nov-94 08:49:37 GMT", parsed))
-        << "if this now fails, #2376 landed and this pin must be inverted in that change";
-    EXPECT_TRUE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 199 08:49:37 GMT", parsed))
-        << "if this now fails, #2376 landed and this pin must be inverted in that change";
-    ASSERT_TRUE(parsed.getDateProperty().has_value());
-    EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 199) << "read literally, not expanded";
+
+    // .NET's `ddd` is MatchAbbreviatedDayName -- seven names, not any three letters -- and its
+    // `dddd` is MatchDayName, full names only.
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Xyz, 06 Nov 1994 08:49:37 GMT", parsed))
+        << "an invented abbreviation on the IMF-fixdate shape";
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06-Nov-94 08:49:37 GMT", parsed))
+        << "an ABBREVIATED weekday on the hyphenated shape, which .NET spells dddd";
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Xyz Nov  6 08:49:37 1994", parsed))
+        << "an invented abbreviation on the asctime shape";
+
+    // `yyyy` and `yy` are ParseDigits with an EXACT width, so nothing between or beyond them
+    // parses. "Sun, 06 Nov 199 ..." used to be accepted and read as the year 199 AD.
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 199 08:49:37 GMT", parsed));
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 9 08:49:37 GMT", parsed));
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 19945 08:49:37 GMT", parsed));
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun Nov  6 08:49:37 199", parsed))
+        << "the asctime year is yyyy too";
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun Nov  6 08:49:37 19945", parsed));
+
+    // THE CONTROLS. Every form RFC 9110 5.6.7 requires still parses to the same instant, so this
+    // is a narrowing to the format strings and not a narrowing past them.
+    const System::DateTimeOffset expected(1994, 11, 6, 8, 49, 37, System::TimeSpan::Zero);
+    for (const char* good : {"Sun, 06 Nov 1994 08:49:37 GMT",     // IMF-fixdate
+                             "Sun, 06 Nov 94 08:49:37 GMT",       // the two-digit year (#2130)
+                             "Sunday, 06-Nov-94 08:49:37 GMT",    // RFC 850
+                             "Sun Nov  6 08:49:37 1994"}) {       // asctime
+        SCOPED_TRACE(good);
+        ASSERT_TRUE(RangeConditionHeaderValue::TryParse(good, parsed));
+        ASSERT_TRUE(parsed.getDateProperty().has_value());
+        EXPECT_EQ(parsed.getDateProperty()->getUtcTicksProperty(), expected.getUtcTicksProperty());
+    }
+    // All seven weekday names are accepted on both shapes, so this is a name check and not an
+    // accidental "Sun only".
+    for (const char* d : {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}) {
+        EXPECT_TRUE(RangeConditionHeaderValue::TryParse(
+            std::string(d) + ", 06 Nov 1994 08:49:37 GMT", parsed)) << d;
+    }
+    for (const char* d : {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+                          "Saturday"}) {
+        EXPECT_TRUE(RangeConditionHeaderValue::TryParse(
+            std::string(d) + ", 06-Nov-94 08:49:37 GMT", parsed)) << d;
+    }
 }
 
 TEST(HttpDateConsumptionTests, AnEmbeddedNULCannotTruncateTheValueIntoAValidDate) {
