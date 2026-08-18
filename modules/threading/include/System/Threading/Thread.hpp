@@ -9,6 +9,11 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <any>
+#include <map>
+#include <mutex>
+#include "System/ArgumentException.hpp"
+#include "System/LocalDataStoreSlot.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -333,6 +338,140 @@ namespace System::Threading {
          * @return CurrentThreadProxy for the thread calling this method.
          */
         static CurrentThreadProxy CurrentThread() { return CurrentThreadProxy{}; }
+
+        // -------------------------------------------------------------------------
+        // Thread-local data slots — ticket #2298 (SR-AUD-129)
+        // -------------------------------------------------------------------------
+        //
+        // C++ counterparts of .NET's `Thread.AllocateDataSlot`, `AllocateNamedDataSlot`,
+        // `GetNamedDataSlot`, `FreeNamedDataSlot`, `GetData` and `SetData`
+        // (`Thread.cs:502-507`, backed by `Thread.LocalDataStore` at `:660-729`).
+        //
+        // THIS SURFACE DID NOT EXIST HERE AT ALL before #2298, which is what made
+        // `System::LocalDataStoreSlot` a project-owned type wearing a .NET name: it had a public
+        // constructor and a getData/setData pair, and the single `std::any` it held was ONE VALUE
+        // SHARED BY EVERY THREAD. A write from any thread replaced what every other thread read.
+        //
+        // `docs/StandingApprovals.md` SA-9 authorised this new public surface explicitly, as the
+        // only way `LocalDataStoreSlot` could reach .NET's shape.
+        //
+        // THE STORAGE LIVES HERE RATHER THAN IN THE SLOT, and that is a module-graph decision
+        // rather than a design preference: `LocalDataStoreSlot` is in `Core.Base`, this class is
+        // in `modules/threading` which depends on it, so a slot holding a thread-local would
+        // invert the graph. The slot carries an opaque id; the per-thread map is below. The
+        // observable contract is .NET's either way.
+
+        /**
+         * @brief Allocates an unnamed thread-local data slot.
+         *
+         * C++ counterpart of .NET `Thread.AllocateDataSlot()`.
+         */
+        [[nodiscard]] static System::LocalDataStoreSlot AllocateDataSlot() {
+            return System::LocalDataStoreSlot(nextSlotId());
+        }
+
+        /**
+         * @brief Allocates a named thread-local data slot.
+         *
+         * C++ counterpart of .NET `Thread.AllocateNamedDataSlot(string)`, which adds to the map
+         * with `Dictionary.Add` and therefore **throws when the name already exists**
+         * (`Thread.cs:679-688`). `GetNamedDataSlot` is the get-or-create door; this one is not.
+         *
+         * @throws System::ArgumentException if @p name is already allocated.
+         */
+        [[nodiscard]] static System::LocalDataStoreSlot AllocateNamedDataSlot(const std::string& name) {
+            std::lock_guard<std::mutex> lock(namedSlotMutex());
+            auto& map = namedSlots();
+            if (map.find(name) != map.end()) {
+                throw System::ArgumentException(
+                    "Named data slot already exists for this name.", "name");
+            }
+            const System::LocalDataStoreSlot slot(nextSlotId());
+            map.emplace(name, slot);
+            return slot;
+        }
+
+        /**
+         * @brief Looks up a named slot, allocating it if it does not exist.
+         *
+         * C++ counterpart of .NET `Thread.GetNamedDataSlot(string)` (`Thread.cs:690-702`), which
+         * is get-or-create and never throws for an unknown name.
+         */
+        [[nodiscard]] static System::LocalDataStoreSlot GetNamedDataSlot(const std::string& name) {
+            std::lock_guard<std::mutex> lock(namedSlotMutex());
+            auto& map = namedSlots();
+            auto it = map.find(name);
+            if (it != map.end()) return it->second;
+            const System::LocalDataStoreSlot slot(nextSlotId());
+            map.emplace(name, slot);
+            return slot;
+        }
+
+        /**
+         * @brief Removes a name from the named-slot map.
+         *
+         * C++ counterpart of .NET `Thread.FreeNamedDataSlot(string)` (`Thread.cs:704-711`).
+         *
+         * @note It **does not destroy a slot a caller still holds**, and .NET's does not either —
+         *       there the map drops its reference and the garbage collector decides the rest.
+         *       Here the slot stays valid and keeps its per-thread values; only the *name*
+         *       stops resolving to it. Removing an unknown name is a no-op, as in .NET.
+         */
+        static void FreeNamedDataSlot(const std::string& name) {
+            std::lock_guard<std::mutex> lock(namedSlotMutex());
+            namedSlots().erase(name);
+        }
+
+        /**
+         * @brief Reads the CALLING THREAD's value for @p slot.
+         *
+         * C++ counterpart of .NET `Thread.GetData(LocalDataStoreSlot)`.
+         * @return The stored value, or an empty `std::any` if this thread never set one.
+         */
+        [[nodiscard]] static std::any GetData(const System::LocalDataStoreSlot& slot) {
+            auto& store = threadSlotStore();
+            auto it = store.find(slot.id());
+            return it == store.end() ? std::any{} : it->second;
+        }
+
+        /**
+         * @brief Writes the CALLING THREAD's value for @p slot.
+         *
+         * C++ counterpart of .NET `Thread.SetData(LocalDataStoreSlot, object?)`. No other thread
+         * observes the write — which is the whole point, and the opposite of what this type did
+         * before #2298.
+         */
+        static void SetData(const System::LocalDataStoreSlot& slot, std::any data) {
+            threadSlotStore()[slot.id()] = std::move(data);
+        }
+
+    private:
+        /// Monotonic slot ids. Shared across threads, so atomic; never reused, so a freed name
+        /// cannot alias a live slot.
+        static std::size_t nextSlotId() {
+            static std::atomic<std::size_t> counter{1};
+            return counter.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        /// The named-slot map and its lock. Process-wide, exactly as .NET's static map is.
+        static std::map<std::string, System::LocalDataStoreSlot>& namedSlots() {
+            static std::map<std::string, System::LocalDataStoreSlot> map;
+            return map;
+        }
+        static std::mutex& namedSlotMutex() {
+            static std::mutex m;
+            return m;
+        }
+
+        /// THE PER-THREAD STORAGE. `thread_local` is what makes GetData/SetData thread-local at
+        /// all; the pre-#2298 type had one shared value instead.
+        static std::map<std::size_t, std::any>& threadSlotStore() {
+            static thread_local std::map<std::size_t, std::any> store;
+            return store;
+        }
+
+    public:
+
     };
 
 } // namespace System::Threading

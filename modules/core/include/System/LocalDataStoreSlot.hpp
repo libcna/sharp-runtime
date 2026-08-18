@@ -2,75 +2,69 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <any>
+#include <cstddef>
+
+namespace System::Threading { class Thread; }
 
 namespace System {
 
     /**
-     * @brief Encapsulates a memory slot to store local data.
+     * @brief Encapsulates a memory slot to store thread-local data.
      *
-     * C++ counterpart of .NET System.LocalDataStoreSlot.
-     * In .NET, LocalDataStoreSlot is used with Thread.AllocateDataSlot() and
-     * Thread.GetData()/SetData() for thread-local storage.
-     * In sharp-runtime the slot stores a single std::any value (not per-thread;
-     * thread-local semantics require the caller to manage per-thread state).
+     * C++ counterpart of .NET `System.LocalDataStoreSlot`
+     * (`LocalDataStoreSlot.cs:9-23`), whose constructor is **internal**: a public caller never
+     * names it, and reaches a slot only through `Thread.AllocateDataSlot`,
+     * `Thread.AllocateNamedDataSlot`, `Thread.GetNamedDataSlot`, `Thread.FreeNamedDataSlot`,
+     * `Thread.GetData` and `Thread.SetData`.
      *
-     * @note Status: Stub — thread-local per-slot semantics are not implemented.
-     *       Use the `thread_local` storage-duration specifier, or
-     *       `Threading::ThreadLocal<T>`, for actual TLS.
+     * @par What ticket #2298 changed
+     * Before it, this type had a **public default constructor** and a `getData`/`setData` pair,
+     * and this repository had **no `Thread` data-slot API at all** — so the whole surface was
+     * project-owned, wearing a .NET name. Worse, the single `std::any` it held was **one value
+     * shared by every thread**: a write from any thread replaced what every other thread read,
+     * which is the opposite of what the name promises, and two threads touching one slot with at
+     * least one write was a data race.
      *
-     * @warning **The gap is wider than "not per-thread", and none of it is
-     * repaired by this note** (SR-AUD-129; the decision is ticket #2298).
+     * Route **B** of the ticket's four was taken, under `docs/StandingApprovals.md` SA-9, which
+     * authorised the new `Thread` surface explicitly: thread-indexed storage behind the .NET
+     * doors, **plus** a non-public constructor so the .NET door is the only one.
      *
-     * - **There is no door.** In .NET this type's constructor is *internal*: a
-     *   public caller never names it, and reaches a slot only through
-     *   `Thread.AllocateDataSlot`/`AllocateNamedDataSlot` and reads or writes it
-     *   through `Thread.GetData`/`SetData`. This repository has **no such
-     *   `Thread` API at all**, so the public default constructor and the
-     *   `getData`/`setData` pair below are a project-owned surface wearing a
-     *   .NET name, not a counterpart of one.
-     * - **One value, shared by every thread.** The single `std::any` below is
-     *   the whole storage. A write from any thread replaces what every other
-     *   thread reads — the opposite of what the .NET name promises.
-     * - **No synchronization policy, and none is implied.** Concurrent calls
-     *   touching the same slot, at least one of them a write, are a data race
-     *   with undefined behaviour; the `noexcept` on the mutators is a statement
-     *   about exceptions only. Callers must supply their own mutual exclusion.
+     * @par Why the slot holds an id rather than the storage
+     * .NET's slot holds a `ThreadLocal<object?>`. This type lives in `Core.Base` and `Thread`
+     * lives in `modules/threading`, which depends on `Core.Base` — so a slot holding a
+     * thread-local would invert the module graph. It holds an opaque **id** instead, and `Thread`
+     * keeps the per-thread storage. The observable contract is identical, and the graph is
+     * unchanged at 41/92.
      *
-     * The `noexcept` specifications themselves are sound and were checked:
-     * `std::any`'s move assignment and `reset()` are both `noexcept`, and the
-     * by-value parameter of `setData` is constructed at the call site, outside
-     * this function's exception specification, so no allocation failure can
-     * cross a `noexcept` boundary here.
+     * @note `FreeNamedDataSlot` removes a name from the map; it does not destroy a slot a caller
+     *       still holds, exactly as in .NET, where the map drops its reference and the GC decides
+     *       the rest. Here the slot stays valid and keeps its own per-thread values.
      */
     class LocalDataStoreSlot final {
-        std::any data_;
+        std::size_t id_ = 0;
+
+        /// Only `Thread` may mint a slot, matching .NET's internal constructor.
+        explicit LocalDataStoreSlot(std::size_t id) noexcept : id_(id) {}
+
+        [[nodiscard]] std::size_t id() const noexcept { return id_; }
+
+        friend class System::Threading::Thread;
 
     public:
-        /** @brief Constructs an empty LocalDataStoreSlot. */
-        LocalDataStoreSlot() = default;
+        /// Copyable and movable: a slot is a handle, and .NET's is a reference passed around
+        /// freely. Two copies name the same storage.
+        LocalDataStoreSlot(const LocalDataStoreSlot&) = default;
+        LocalDataStoreSlot(LocalDataStoreSlot&&) = default;
+        LocalDataStoreSlot& operator=(const LocalDataStoreSlot&) = default;
+        LocalDataStoreSlot& operator=(LocalDataStoreSlot&&) = default;
+        ~LocalDataStoreSlot() = default;
 
-        /**
-         * @brief Returns the data stored in this slot.
-         *
-         * C++ counterpart of reading back the value set via Thread.SetData.
-         * @return The stored std::any value (empty if nothing has been set).
-         */
-        [[nodiscard]] const std::any& getData() const noexcept { return data_; }
-
-        /**
-         * @brief Stores a value in this slot.
-         *
-         * C++ counterpart of Thread.SetData(LocalDataStoreSlot, object).
-         * @param value The value to store.
-         */
-        void setData(std::any value) noexcept { data_ = std::move(value); }
-
-        /** @brief Returns true if a value has been stored in this slot. */
-        [[nodiscard]] bool hasData() const noexcept { return data_.has_value(); }
-
-        /** @brief Clears the stored value. */
-        void clear() noexcept { data_.reset(); }
+        /// Two slots are the same slot when they name the same storage.
+        [[nodiscard]] bool Equals(const LocalDataStoreSlot& other) const noexcept {
+            return id_ == other.id_;
+        }
+        bool operator==(const LocalDataStoreSlot& o) const noexcept { return Equals(o); }
+        bool operator!=(const LocalDataStoreSlot& o) const noexcept { return !Equals(o); }
     };
 
 } // namespace System
