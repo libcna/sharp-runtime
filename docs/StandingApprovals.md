@@ -262,6 +262,40 @@ stay declined.
 
 ---
 
+## 4h. SA-11 — five decisions taken on 2026-08-18
+
+Not standing approvals but recorded here because each settles a ticket that repository evidence
+could not, and each must survive a context reset.
+
+| Ticket | Question | Decision |
+|---|---|---|
+| **#2109 / #2131** | mint CCF-021 and CCF-022? | **mint both** — a cause spanning more than one namespace cannot be owned by any single namespace review, and "the numbering is closed" was only ever scoped to namespace-local causes |
+| **#2320** | should POSIX `GetFolderPath` follow XDG? | **option B** — honour `XDG_CONFIG_HOME` / `XDG_DATA_HOME` when set **and absolute**; a relative value is ignored per the spec. Full XDG declined: part of it has no .NET mapping, so it would cross from parity into invention |
+| **#2238** | may `Lazy<T>` `PublicationOnly` match .NET? | **yes** — factory outside the mutex, mutex only across publication, first writer wins |
+| **#2115** | two inert `JsonDocumentOptions` flags | **make both real** |
+| **#2138** | `TcpClient`/`UdpClient` are AF_INET only | **reject an IPv6 endpoint loudly now**; full dual-stack becomes its own ticket |
+
+**Two of these have consequences that were stated before the decision and accepted with it, and
+must not be quietly softened later.**
+
+*#2238 reverses a documented deviation.* This port's `PublicationOnly` has serialised the factory
+since the type was ported, and the class doc-comment says so. After the repair a factory may again
+run **concurrently on several threads** — which is what `PublicationOnly` means in .NET. The
+doc-comment is to be rewritten rather than amended, and the migration note must say plainly that a
+factory previously guaranteed to run once may now run several times.
+
+*#2115 was chosen over a cheaper honest option.* `nlohmann/json` supports neither trailing commas
+nor duplicate-key detection natively, so the two flags are not equally cheap. The alternative
+offered was to make `Validate()` throw `NotSupportedException` for whichever could not be
+implemented. The answer was to implement both, because a switch that does nothing is worse than a
+switch that does not exist.
+
+**#2320's second clause is not a user question after all.** Whether a getter may verify or create
+directories is answered by .NET itself — `SpecialFolderOption.Create` / `DoNotVerify` — so it is
+derivable under SA-5 and will be taken from the reference rather than asked.
+
+---
+
 ## 4d. SA-7 — the `NotifyFilters` → inotify mapping (ticket #2346)
 
 > Answer the five priced questions of `docs/SystemIONamespaceReviewPlan.md` §21.11 as
