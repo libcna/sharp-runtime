@@ -179,6 +179,89 @@ not green"*.
 
 ---
 
+## 4e. SA-8 — public representation: match .NET, and migrate the sites
+
+> Where this port publishes a mutable or public representation and .NET's is private, readonly or
+> absent, **match .NET**. Break the source and migrate the first-party sites.
+
+Granted 2026-08-18, answering the nine-ticket family **#2322, #2324, #2325, #2326, #2327, #2328,
+#2330, #2332, #2339**.
+
+**The user chose against the recommendation, and did so knowing the price.** The alternative
+offered was to split the family by hazard — repair `SequencePosition` and `Attribute`, pin
+`Tuple::Item1` as cosmetic — and the objection stated at the time was that `t.Item1` becomes
+`t.getItem1Property()` under CLAUDE.md rule 5, permanently, in a CNA-facing API. The answer was
+*always match .NET*. That is the decision; it is not to be re-litigated ticket by ticket.
+
+**What it authorises**, over and above SA-2, whose five conditions still all apply to each landing:
+
+* making a public data member private and adding the rule-5 accessor pair;
+* migrating first-party read and write sites to the accessor spelling — 75 of them in `Tuple`
+  alone, all in this repository's own tests;
+* making a public default constructor protected, or a concrete class abstract, where .NET's is;
+* replacing an identity `Equals`/`GetHashCode` with .NET's field-wise definition.
+
+**What it does not authorise.** A vtable or base-class change still asks (SA-3's exclusion is
+unchanged). And SA-8 is not a licence to invent: where .NET's own shape is unclear the answer is
+still derived from the reference or deferred, never guessed — SA-5's limit applies here too.
+
+Each landing still carries its own migration note, per-spelling negative consumer fixture,
+downstream ticket, full gate and measured consumer impact.
+
+---
+
+## 4f. SA-9 — out-of-scope types wear .NET's shape and throw
+
+> For a type that exists only because .NET has one, and whose content is permanently out of scope
+> (reflection, serialization, remoting, interop): **the public shape matches .NET, and the bodies
+> throw.**
+
+Granted 2026-08-18, answering **#2276, #2281, #2291, #2295, #2297, #2298, #2334**.
+
+The rule resolves a third state these types are in today, which is the worst of the three: the
+surface is neither .NET's nor internal, so it is a project-owned API wearing a .NET name.
+`MarshalByRefObject` is directly constructible where .NET is abstract; `LocalDataStoreSlot` has a
+public default constructor .NET makes internal, and one `std::any` shared by every thread, which
+is a data race.
+
+**The shape:**
+
+* abstract where .NET is abstract, protected constructor where .NET's is protected, internal
+  constructor rendered unreachable where .NET's is internal;
+* members .NET keeps are **present**, so a caller receives a runtime diagnostic
+  (`PlatformNotSupportedException`, or `NotImplementedException` where CLAUDE.md's parity section
+  already names one) instead of a compile error;
+* members .NET does **not** have are removed.
+
+**One consequence was priced and accepted at grant time:** `LocalDataStoreSlot` reaches its .NET
+shape only behind a new `Thread::AllocateDataSlot` / `AllocateNamedDataSlot` / `GetData` /
+`SetData` / `FreeNamedDataSlot` surface, which this repository does not have. That is
+substantial new public API and it is authorised.
+
+CLAUDE.md's parity section already required a stub to throw "with a comment explaining why —
+never silently return a wrong value". SA-9 adds the half that was missing: the *shape* is .NET's
+too, not this project's invention.
+
+---
+
+## 4g. SA-10 — SA-2 covers a public signature change
+
+> A change to a public **signature** — return type, `noexcept`, nullability, `[[deprecated]]` — is
+> a public source break, and lands under SA-2's five conditions like any other.
+
+Confirmed 2026-08-18. This is a clarification, not a new grant: SA-2 already said "a public source
+break may land with a migration note, a per-spelling negative consumer fixture, a #1773-shaped
+downstream ticket, the full gate, and a measured impact report against the local `cna` and
+`mobile-eggbert` checkouts". Nine tickets were nonetheless recorded as `blocked` on the theory
+that SA-3's narrower object-layout wording was the only relevant approval. It is not.
+
+Unblocks **#2170, #2172, #2185, #2215, #2246, #2250, #2269, #2289, #2299**.
+
+**Unchanged:** a vtable or base-class change still asks per action, and #1888, #1889 and #1896
+stay declined.
+
+---
+
 ## 4d. SA-7 — the `NotifyFilters` → inotify mapping (ticket #2346)
 
 > Answer the five priced questions of `docs/SystemIONamespaceReviewPlan.md` §21.11 as

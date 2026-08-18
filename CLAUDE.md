@@ -53,7 +53,7 @@
     full-consumer-rebuild requirement, and the full gate runs — a vtable or base-class change
     still asks, and #1888, #1889 and #1896 stay declined; **SA-4** Unicode tables are derived
     from .NET's own generated data in `/rv` at **UCD 16.0**, cross-checked against Perl 15.0.0
-    and Python 15.1.0, version pinned until an explicit bump ticket. That document also records
+    and Python 15.1.0, version pinned until an explicit bump ticket. On 2026-08-18 the user granted three more: **SA-8** where this port publishes a mutable or public representation and .NET's is private, readonly or absent, **match .NET and migrate the first-party sites** — granted *against* the recommendation to split the family by hazard, and knowing that `t.Item1` becomes `t.getItem1Property()` permanently under rule 5; **SA-9** a type that exists only because .NET has one, and whose content is permanently out of scope, wears **.NET's public shape with bodies that throw** — which authorises the new `Thread` data-slot API that `LocalDataStoreSlot` needs; **SA-10** a public **signature** change (return type, `noexcept`, nullability, `[[deprecated]]`) is a public source break and lands under SA-2's five conditions, which nine tickets had wrongly treated as covered only by SA-3. That document also records
     the environment facts those approvals rest on: `/rv/tmp/runtime` **is present** in this
     container (a .NET **11** preview snapshot, so a behaviour read from it must be reported as
     .NET 11's, not as timeless parity), and so are both downstream consumers. A ticket whose only
