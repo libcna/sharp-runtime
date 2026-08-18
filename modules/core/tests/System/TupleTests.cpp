@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ValueTuple.hpp"
+#include <type_traits>
 #include <string>
 #include "System/Tuple.hpp"
 #include "System/TupleExtensions.hpp"
@@ -16,14 +18,14 @@ using System::Tuple4;
 
 TEST(TupleTests, Tuple2_ConstructAndAccessItems) {
     Tuple2<int, std::string> t(42, "hello");
-    EXPECT_EQ(t.Item1, 42);
-    EXPECT_EQ(t.Item2, "hello");
+    EXPECT_EQ(t.getItem1Property(), 42);
+    EXPECT_EQ(t.getItem2Property(), "hello");
 }
 
 TEST(TupleTests, Tuple2_IntInt_Items) {
     Tuple2<int, int> t(10, 20);
-    EXPECT_EQ(t.Item1, 10);
-    EXPECT_EQ(t.Item2, 20);
+    EXPECT_EQ(t.getItem1Property(), 10);
+    EXPECT_EQ(t.getItem2Property(), 20);
 }
 
 TEST(TupleTests, Tuple2_EqualityTrue) {
@@ -58,8 +60,8 @@ TEST(TupleTests, Tuple2_InequalityFalse_SameValues) {
 
 TEST(TupleTests, Tuple2_StringString) {
     Tuple2<std::string, std::string> t("key", "value");
-    EXPECT_EQ(t.Item1, "key");
-    EXPECT_EQ(t.Item2, "value");
+    EXPECT_EQ(t.getItem1Property(), "key");
+    EXPECT_EQ(t.getItem2Property(), "value");
 }
 
 TEST(TupleTests, Tuple2_DoubleDouble_Equality) {
@@ -70,8 +72,8 @@ TEST(TupleTests, Tuple2_DoubleDouble_Equality) {
 
 TEST(TupleTests, Tuple2_BoolInt) {
     Tuple2<bool, int> t(true, 99);
-    EXPECT_TRUE(t.Item1);
-    EXPECT_EQ(t.Item2, 99);
+    EXPECT_TRUE(t.getItem1Property());
+    EXPECT_EQ(t.getItem2Property(), 99);
 }
 
 // ---------------------------------------------------------------------------
@@ -80,16 +82,16 @@ TEST(TupleTests, Tuple2_BoolInt) {
 
 TEST(TupleTests, Tuple3_ConstructAndAccessItems) {
     Tuple3<int, std::string, double> t(1, "abc", 3.14);
-    EXPECT_EQ(t.Item1, 1);
-    EXPECT_EQ(t.Item2, "abc");
-    EXPECT_DOUBLE_EQ(t.Item3, 3.14);
+    EXPECT_EQ(t.getItem1Property(), 1);
+    EXPECT_EQ(t.getItem2Property(), "abc");
+    EXPECT_DOUBLE_EQ(t.getItem3Property(), 3.14);
 }
 
 TEST(TupleTests, Tuple3_IntIntInt_Items) {
     Tuple3<int, int, int> t(10, 20, 30);
-    EXPECT_EQ(t.Item1, 10);
-    EXPECT_EQ(t.Item2, 20);
-    EXPECT_EQ(t.Item3, 30);
+    EXPECT_EQ(t.getItem1Property(), 10);
+    EXPECT_EQ(t.getItem2Property(), 20);
+    EXPECT_EQ(t.getItem3Property(), 30);
 }
 
 TEST(TupleTests, Tuple3_EqualityTrue) {
@@ -118,9 +120,9 @@ TEST(TupleTests, Tuple3_InequalityFalse_SameValues) {
 
 TEST(TupleTests, Tuple3_StringIntBool) {
     Tuple3<std::string, int, bool> t("x", 42, false);
-    EXPECT_EQ(t.Item1, "x");
-    EXPECT_EQ(t.Item2, 42);
-    EXPECT_FALSE(t.Item3);
+    EXPECT_EQ(t.getItem1Property(), "x");
+    EXPECT_EQ(t.getItem2Property(), 42);
+    EXPECT_FALSE(t.getItem3Property());
 }
 
 // ---------------------------------------------------------------------------
@@ -129,26 +131,26 @@ TEST(TupleTests, Tuple3_StringIntBool) {
 
 TEST(TupleTests, Tuple4_ConstructAndAccessItems) {
     Tuple4<int, int, int, int> t(1, 2, 3, 4);
-    EXPECT_EQ(t.Item1, 1);
-    EXPECT_EQ(t.Item2, 2);
-    EXPECT_EQ(t.Item3, 3);
-    EXPECT_EQ(t.Item4, 4);
+    EXPECT_EQ(t.getItem1Property(), 1);
+    EXPECT_EQ(t.getItem2Property(), 2);
+    EXPECT_EQ(t.getItem3Property(), 3);
+    EXPECT_EQ(t.getItem4Property(), 4);
 }
 
 TEST(TupleTests, Tuple4_MixedTypes) {
     Tuple4<std::string, int, double, bool> t("hello", 7, 2.5, true);
-    EXPECT_EQ(t.Item1, "hello");
-    EXPECT_EQ(t.Item2, 7);
-    EXPECT_DOUBLE_EQ(t.Item3, 2.5);
-    EXPECT_TRUE(t.Item4);
+    EXPECT_EQ(t.getItem1Property(), "hello");
+    EXPECT_EQ(t.getItem2Property(), 7);
+    EXPECT_DOUBLE_EQ(t.getItem3Property(), 2.5);
+    EXPECT_TRUE(t.getItem4Property());
 }
 
 TEST(TupleTests, Tuple4_AllZero) {
     Tuple4<int, int, int, int> t(0, 0, 0, 0);
-    EXPECT_EQ(t.Item1, 0);
-    EXPECT_EQ(t.Item2, 0);
-    EXPECT_EQ(t.Item3, 0);
-    EXPECT_EQ(t.Item4, 0);
+    EXPECT_EQ(t.getItem1Property(), 0);
+    EXPECT_EQ(t.getItem2Property(), 0);
+    EXPECT_EQ(t.getItem3Property(), 0);
+    EXPECT_EQ(t.getItem4Property(), 0);
 }
 
 // ===========================================================================
@@ -199,20 +201,20 @@ TEST(TupleExtensionsTests, ToValueTuple_Tuple3) {
 TEST(TupleExtensionsTests, ToTuple_StdTuple2) {
     auto st = std::make_tuple(10, std::string("world"));
     auto t = System::TupleExtensions::ToTuple(st);
-    EXPECT_EQ(t.Item1, 10);
-    EXPECT_EQ(t.Item2, "world");
+    EXPECT_EQ(t.getItem1Property(), 10);
+    EXPECT_EQ(t.getItem2Property(), "world");
 }
 
 TEST(TupleExtensionsTests, ToTuple_StdTuple3) {
     auto st = std::make_tuple(1, 2, 3);
     auto t = System::TupleExtensions::ToTuple(st);
-    EXPECT_EQ(t.Item3, 3);
+    EXPECT_EQ(t.getItem3Property(), 3);
 }
 
 TEST(TupleExtensionsTests, ToTuple_StdTuple4) {
     auto st = std::make_tuple(1, 2, 3, 4);
     auto t = System::TupleExtensions::ToTuple(st);
-    EXPECT_EQ(t.Item4, 4);
+    EXPECT_EQ(t.getItem4Property(), 4);
 }
 
 TEST(TupleExtensionsTests, RoundTrip_Tuple2_ToValueTuple_ToTuple) {
@@ -332,4 +334,51 @@ TEST(TupleHashDefinedArithmeticTests, HelperRemainsNoexcept) {
     // of the public shape a consumer may already rely on.
     static_assert(noexcept(System::detail::tupleHashCombine(0, 0)));
     SUCCEED();
+}
+
+// ---------------------------------------------------------------------------
+// #2330 / SR-AUD-063 — Tuple's elements are getter-only
+// ---------------------------------------------------------------------------
+
+TEST(TupleContractPinTests, Fix2330_TheElementsAreGetterOnlyAsInDotNet) {
+    // .NET's TupleN holds PRIVATE READONLY fields behind getter-only properties; this port
+    // published them as public mutable data members, so `Tuple::Create(1, 2).Item1 = 99`
+    // compiled and stuck. Under CLAUDE.md rule 5 the accessor is getItem1Property().
+    const auto t = System::Tuple::Create(1, std::string("two"));
+    EXPECT_EQ(1, t.getItem1Property());
+    EXPECT_EQ("two", t.getItem2Property());
+
+    // Getter-only in the C++ sense that matters: the accessor hands back a CONST reference, so a
+    // caller cannot write through it either. A `T&` return would have satisfied rule 5 while
+    // leaving the finding intact.
+    static_assert(std::is_same_v<decltype(t.getItem1Property()), const int&>,
+                  "#2330: the accessor must return a const reference, not a mutable one");
+    static_assert(std::is_same_v<decltype(System::Tuple::Create(1).getItem1Property()), const int&>,
+                  "#2330: and that holds for a temporary too");
+}
+
+TEST(TupleContractPinTests, Fix2330_EveryArityMovedIncludingTuple8sRest) {
+    // All eight arities were changed, and Tuple8 also publishes Rest -- the member most easily
+    // forgotten, because it is the only one not called ItemN.
+    const auto t8 = System::Tuple::Create(1, 2, 3, 4, 5, 6, 7, 8);
+    EXPECT_EQ(1, t8.getItem1Property());
+    EXPECT_EQ(7, t8.getItem7Property());
+    EXPECT_EQ(8, t8.getRestProperty().getItem1Property())
+        << "Rest is a nested Tuple1, so it needs the accessor at both levels";
+
+    EXPECT_EQ(3, System::Tuple::Create(1, 2, 3).getItem3Property());
+    EXPECT_EQ(4, System::Tuple::Create(1, 2, 3, 4).getItem4Property());
+    EXPECT_EQ(5, System::Tuple::Create(1, 2, 3, 4, 5).getItem5Property());
+    EXPECT_EQ(6, System::Tuple::Create(1, 2, 3, 4, 5, 6).getItem6Property());
+}
+
+TEST(TupleContractPinTests, Decl2330_ValueTupleDeliberatelyKeepsItsPublicFields) {
+    // THE BOUNDARY, pinned so a later sweep cannot "finish the job" by mistake. .NET's ValueTuple
+    // is a struct with PUBLIC MUTABLE FIELDS -- `public T1 Item1;` -- where Tuple is a class with
+    // getter-only properties. The two differ deliberately in .NET, so they differ deliberately
+    // here, and ValueTuple was left untouched by #2330.
+    auto vt = System::ValueTuple1<int>(42);
+    EXPECT_EQ(42, vt.Item1);
+    vt.Item1 = 7;               // legal, and must stay legal
+    EXPECT_EQ(7, vt.Item1);
 }

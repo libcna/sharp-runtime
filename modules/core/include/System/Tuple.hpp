@@ -101,8 +101,12 @@ namespace detail {
  */
 template<typename T1>
 struct Tuple1 {
-    /** @brief The first element of the tuple. */
+private:
     T1 Item1;
+
+public:
+    /** @brief The element 1. Getter-only, matching .NET's `Item1 { get; }` (#2330). */
+    [[nodiscard]] const T1& getItem1Property() const noexcept { return Item1; }
 
     /** @brief Constructs a Tuple1 from one value. */
     explicit Tuple1(T1 i1) : Item1(std::move(i1)) {}
@@ -164,10 +168,15 @@ struct Tuple1 {
  */
 template<typename T1, typename T2>
 struct Tuple2 {
-    /** @brief The first element of the tuple. */
+private:
     T1 Item1;
-    /** @brief The second element of the tuple. */
     T2 Item2;
+
+public:
+    /** @brief The element 1. Getter-only, matching .NET's `Item1 { get; }` (#2330). */
+    [[nodiscard]] const T1& getItem1Property() const noexcept { return Item1; }
+    /** @brief The element 2. Getter-only, matching .NET's `Item2 { get; }` (#2330). */
+    [[nodiscard]] const T2& getItem2Property() const noexcept { return Item2; }
 
     /** @brief Constructs a Tuple2 from two values. */
     Tuple2(T1 i1, T2 i2) : Item1(std::move(i1)), Item2(std::move(i2)) {}
@@ -231,12 +240,18 @@ struct Tuple2 {
  */
 template<typename T1, typename T2, typename T3>
 struct Tuple3 {
-    /** @brief The first element of the tuple. */
+private:
     T1 Item1;
-    /** @brief The second element of the tuple. */
     T2 Item2;
-    /** @brief The third element of the tuple. */
     T3 Item3;
+
+public:
+    /** @brief The element 1. Getter-only, matching .NET's `Item1 { get; }` (#2330). */
+    [[nodiscard]] const T1& getItem1Property() const noexcept { return Item1; }
+    /** @brief The element 2. Getter-only, matching .NET's `Item2 { get; }` (#2330). */
+    [[nodiscard]] const T2& getItem2Property() const noexcept { return Item2; }
+    /** @brief The element 3. Getter-only, matching .NET's `Item3 { get; }` (#2330). */
+    [[nodiscard]] const T3& getItem3Property() const noexcept { return Item3; }
 
     /** @brief Constructs a Tuple3 from three values. */
     Tuple3(T1 i1, T2 i2, T3 i3)
@@ -313,14 +328,21 @@ struct Tuple3 {
  */
 template<typename T1, typename T2, typename T3, typename T4>
 struct Tuple4 {
-    /** @brief The first element of the tuple. */
+private:
     T1 Item1;
-    /** @brief The second element of the tuple. */
     T2 Item2;
-    /** @brief The third element of the tuple. */
     T3 Item3;
-    /** @brief The fourth element of the tuple. */
     T4 Item4;
+
+public:
+    /** @brief The element 1. Getter-only, matching .NET's `Item1 { get; }` (#2330). */
+    [[nodiscard]] const T1& getItem1Property() const noexcept { return Item1; }
+    /** @brief The element 2. Getter-only, matching .NET's `Item2 { get; }` (#2330). */
+    [[nodiscard]] const T2& getItem2Property() const noexcept { return Item2; }
+    /** @brief The element 3. Getter-only, matching .NET's `Item3 { get; }` (#2330). */
+    [[nodiscard]] const T3& getItem3Property() const noexcept { return Item3; }
+    /** @brief The element 4. Getter-only, matching .NET's `Item4 { get; }` (#2330). */
+    [[nodiscard]] const T4& getItem4Property() const noexcept { return Item4; }
 
     /** @brief Constructs a Tuple4 from four values. */
     Tuple4(T1 i1, T2 i2, T3 i3, T4 i4)
@@ -404,11 +426,24 @@ struct Tuple4 {
  */
 template<typename T1, typename T2, typename T3, typename T4, typename T5>
 struct Tuple5 {
-    T1 Item1; /**< @brief The first element. */
-    T2 Item2; /**< @brief The second element. */
-    T3 Item3; /**< @brief The third element. */
-    T4 Item4; /**< @brief The fourth element. */
-    T5 Item5; /**< @brief The fifth element. */
+private:
+    T1 Item1;
+    T2 Item2;
+    T3 Item3;
+    T4 Item4;
+    T5 Item5;
+
+public:
+    /** @brief The element 1. Getter-only, matching .NET's `Item1 { get; }` (#2330). */
+    [[nodiscard]] const T1& getItem1Property() const noexcept { return Item1; }
+    /** @brief The element 2. Getter-only, matching .NET's `Item2 { get; }` (#2330). */
+    [[nodiscard]] const T2& getItem2Property() const noexcept { return Item2; }
+    /** @brief The element 3. Getter-only, matching .NET's `Item3 { get; }` (#2330). */
+    [[nodiscard]] const T3& getItem3Property() const noexcept { return Item3; }
+    /** @brief The element 4. Getter-only, matching .NET's `Item4 { get; }` (#2330). */
+    [[nodiscard]] const T4& getItem4Property() const noexcept { return Item4; }
+    /** @brief The element 5. Getter-only, matching .NET's `Item5 { get; }` (#2330). */
+    [[nodiscard]] const T5& getItem5Property() const noexcept { return Item5; }
 
     /** @brief Constructs a Tuple5 from five values. */
     Tuple5(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5)
@@ -482,7 +517,27 @@ struct Tuple5 {
  */
 template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6>
 struct Tuple6 {
-    T1 Item1; T2 Item2; T3 Item3; T4 Item4; T5 Item5; T6 Item6;
+private:
+    T1 Item1;
+    T2 Item2;
+    T3 Item3;
+    T4 Item4;
+    T5 Item5;
+    T6 Item6;
+
+public:
+    /** @brief The element 1. Getter-only, matching .NET's `Item1 { get; }` (#2330). */
+    [[nodiscard]] const T1& getItem1Property() const noexcept { return Item1; }
+    /** @brief The element 2. Getter-only, matching .NET's `Item2 { get; }` (#2330). */
+    [[nodiscard]] const T2& getItem2Property() const noexcept { return Item2; }
+    /** @brief The element 3. Getter-only, matching .NET's `Item3 { get; }` (#2330). */
+    [[nodiscard]] const T3& getItem3Property() const noexcept { return Item3; }
+    /** @brief The element 4. Getter-only, matching .NET's `Item4 { get; }` (#2330). */
+    [[nodiscard]] const T4& getItem4Property() const noexcept { return Item4; }
+    /** @brief The element 5. Getter-only, matching .NET's `Item5 { get; }` (#2330). */
+    [[nodiscard]] const T5& getItem5Property() const noexcept { return Item5; }
+    /** @brief The element 6. Getter-only, matching .NET's `Item6 { get; }` (#2330). */
+    [[nodiscard]] const T6& getItem6Property() const noexcept { return Item6; }
 
     Tuple6(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5, T6 i6)
         : Item1(std::move(i1)), Item2(std::move(i2)), Item3(std::move(i3)),
@@ -556,7 +611,30 @@ struct Tuple6 {
 template<typename T1, typename T2, typename T3, typename T4,
          typename T5, typename T6, typename T7>
 struct Tuple7 {
-    T1 Item1; T2 Item2; T3 Item3; T4 Item4; T5 Item5; T6 Item6; T7 Item7;
+private:
+    T1 Item1;
+    T2 Item2;
+    T3 Item3;
+    T4 Item4;
+    T5 Item5;
+    T6 Item6;
+    T7 Item7;
+
+public:
+    /** @brief The element 1. Getter-only, matching .NET's `Item1 { get; }` (#2330). */
+    [[nodiscard]] const T1& getItem1Property() const noexcept { return Item1; }
+    /** @brief The element 2. Getter-only, matching .NET's `Item2 { get; }` (#2330). */
+    [[nodiscard]] const T2& getItem2Property() const noexcept { return Item2; }
+    /** @brief The element 3. Getter-only, matching .NET's `Item3 { get; }` (#2330). */
+    [[nodiscard]] const T3& getItem3Property() const noexcept { return Item3; }
+    /** @brief The element 4. Getter-only, matching .NET's `Item4 { get; }` (#2330). */
+    [[nodiscard]] const T4& getItem4Property() const noexcept { return Item4; }
+    /** @brief The element 5. Getter-only, matching .NET's `Item5 { get; }` (#2330). */
+    [[nodiscard]] const T5& getItem5Property() const noexcept { return Item5; }
+    /** @brief The element 6. Getter-only, matching .NET's `Item6 { get; }` (#2330). */
+    [[nodiscard]] const T6& getItem6Property() const noexcept { return Item6; }
+    /** @brief The element 7. Getter-only, matching .NET's `Item7 { get; }` (#2330). */
+    [[nodiscard]] const T7& getItem7Property() const noexcept { return Item7; }
 
     Tuple7(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5, T6 i6, T7 i7)
         : Item1(std::move(i1)), Item2(std::move(i2)), Item3(std::move(i3)),
@@ -638,22 +716,33 @@ struct Tuple7 {
 template<typename T1, typename T2, typename T3, typename T4,
          typename T5, typename T6, typename T7, typename TRest>
 struct Tuple8 {
-    /** @brief The first element of the tuple. */
+private:
     T1 Item1;
-    /** @brief The second element of the tuple. */
     T2 Item2;
-    /** @brief The third element of the tuple. */
     T3 Item3;
-    /** @brief The fourth element of the tuple. */
     T4 Item4;
-    /** @brief The fifth element of the tuple. */
     T5 Item5;
-    /** @brief The sixth element of the tuple. */
     T6 Item6;
-    /** @brief The seventh element of the tuple. */
     T7 Item7;
-    /** @brief The remaining elements (another TupleN). */
     TRest Rest;
+
+public:
+    /** @brief The element 1. Getter-only, matching .NET's `Item1 { get; }` (#2330). */
+    [[nodiscard]] const T1& getItem1Property() const noexcept { return Item1; }
+    /** @brief The element 2. Getter-only, matching .NET's `Item2 { get; }` (#2330). */
+    [[nodiscard]] const T2& getItem2Property() const noexcept { return Item2; }
+    /** @brief The element 3. Getter-only, matching .NET's `Item3 { get; }` (#2330). */
+    [[nodiscard]] const T3& getItem3Property() const noexcept { return Item3; }
+    /** @brief The element 4. Getter-only, matching .NET's `Item4 { get; }` (#2330). */
+    [[nodiscard]] const T4& getItem4Property() const noexcept { return Item4; }
+    /** @brief The element 5. Getter-only, matching .NET's `Item5 { get; }` (#2330). */
+    [[nodiscard]] const T5& getItem5Property() const noexcept { return Item5; }
+    /** @brief The element 6. Getter-only, matching .NET's `Item6 { get; }` (#2330). */
+    [[nodiscard]] const T6& getItem6Property() const noexcept { return Item6; }
+    /** @brief The element 7. Getter-only, matching .NET's `Item7 { get; }` (#2330). */
+    [[nodiscard]] const T7& getItem7Property() const noexcept { return Item7; }
+    /** @brief The nested tuple. Getter-only, matching .NET's `Rest { get; }` (#2330). */
+    [[nodiscard]] const TRest& getRestProperty() const noexcept { return Rest; }
 
     /** @brief Constructs a Tuple8 from seven values and a Rest tuple. */
     Tuple8(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5, T6 i6, T7 i7, TRest rest)

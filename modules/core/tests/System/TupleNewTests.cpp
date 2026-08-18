@@ -12,7 +12,7 @@
 
 TEST(TupleTests, Tuple1_ConstructAndAccess) {
     System::Tuple1<int> t(42);
-    EXPECT_EQ(t.Item1, 42);
+    EXPECT_EQ(t.getItem1Property(), 42);
 }
 
 TEST(TupleTests, Tuple1_EqualityTrue) {
@@ -138,8 +138,8 @@ TEST(TupleTests, Tuple4_GetHashCode_Consistent) {
 
 TEST(TupleTests, Tuple5_ConstructAndAccess) {
     System::Tuple5<int,int,int,int,int> t(1,2,3,4,5);
-    EXPECT_EQ(t.Item1, 1);
-    EXPECT_EQ(t.Item5, 5);
+    EXPECT_EQ(t.getItem1Property(), 1);
+    EXPECT_EQ(t.getItem5Property(), 5);
 }
 
 TEST(TupleTests, Tuple5_EqualityTrue) {
@@ -175,8 +175,8 @@ TEST(TupleTests, Tuple5_GetHashCode_Consistent) {
 
 TEST(TupleTests, Tuple6_ConstructAndAccess) {
     System::Tuple6<int,int,int,int,int,int> t(1,2,3,4,5,6);
-    EXPECT_EQ(t.Item1, 1);
-    EXPECT_EQ(t.Item6, 6);
+    EXPECT_EQ(t.getItem1Property(), 1);
+    EXPECT_EQ(t.getItem6Property(), 6);
 }
 
 TEST(TupleTests, Tuple6_EqualityTrue) {
@@ -205,8 +205,8 @@ TEST(TupleTests, Tuple6_GetHashCode_Consistent) {
 
 TEST(TupleTests, Tuple7_ConstructAndAccess) {
     System::Tuple7<int,int,int,int,int,int,int> t(1,2,3,4,5,6,7);
-    EXPECT_EQ(t.Item1, 1);
-    EXPECT_EQ(t.Item7, 7);
+    EXPECT_EQ(t.getItem1Property(), 1);
+    EXPECT_EQ(t.getItem7Property(), 7);
 }
 
 TEST(TupleTests, Tuple7_EqualityTrue) {
@@ -247,9 +247,9 @@ TEST(TupleTests, Tuple7_GetHashCode_Consistent) {
 TEST(TupleTests, Tuple8_ConstructAndAccess) {
     System::Tuple8<int,int,int,int,int,int,int,System::Tuple1<int>> t(
         1,2,3,4,5,6,7, System::Tuple1<int>(8));
-    EXPECT_EQ(t.Item1, 1);
-    EXPECT_EQ(t.Item7, 7);
-    EXPECT_EQ(t.Rest.Item1, 8);
+    EXPECT_EQ(t.getItem1Property(), 1);
+    EXPECT_EQ(t.getItem7Property(), 7);
+    EXPECT_EQ(t.getRestProperty().getItem1Property(), 8);
 }
 
 TEST(TupleTests, Tuple8_EqualityTrue) {
@@ -289,50 +289,50 @@ TEST(TupleTests, Tuple8_GetHashCode_Consistent) {
 
 TEST(TupleTests, TupleCreate1) {
     auto t = System::Tuple::Create(42);
-    EXPECT_EQ(t.Item1, 42);
+    EXPECT_EQ(t.getItem1Property(), 42);
 }
 
 TEST(TupleTests, TupleCreate2) {
     auto t = System::Tuple::Create(1, std::string("hi"));
-    EXPECT_EQ(t.Item1, 1);
-    EXPECT_EQ(t.Item2, "hi");
+    EXPECT_EQ(t.getItem1Property(), 1);
+    EXPECT_EQ(t.getItem2Property(), "hi");
 }
 
 TEST(TupleTests, TupleCreate3) {
     auto t = System::Tuple::Create(1, 2, 3);
-    EXPECT_EQ(t.Item3, 3);
+    EXPECT_EQ(t.getItem3Property(), 3);
 }
 
 TEST(TupleTests, TupleCreate4) {
     auto t = System::Tuple::Create(1, 2, 3, 4);
-    EXPECT_EQ(t.Item4, 4);
+    EXPECT_EQ(t.getItem4Property(), 4);
 }
 
 TEST(TupleTests, TupleCreate5) {
     auto t = System::Tuple::Create(1, 2, 3, 4, 5);
-    EXPECT_EQ(t.Item5, 5);
+    EXPECT_EQ(t.getItem5Property(), 5);
 }
 
 TEST(TupleTests, TupleCreate6) {
     auto t = System::Tuple::Create(1, 2, 3, 4, 5, 6);
-    EXPECT_EQ(t.Item6, 6);
+    EXPECT_EQ(t.getItem6Property(), 6);
 }
 
 TEST(TupleTests, TupleCreate7) {
     auto t = System::Tuple::Create(1, 2, 3, 4, 5, 6, 7);
-    EXPECT_EQ(t.Item7, 7);
+    EXPECT_EQ(t.getItem7Property(), 7);
 }
 
 TEST(TupleTests, TupleCreate8) {
     auto t = System::Tuple::Create(1, 2, 3, 4, 5, 6, 7, 8);
-    EXPECT_EQ(t.Item7, 7);
-    EXPECT_EQ(t.Rest.Item1, 8);
+    EXPECT_EQ(t.getItem7Property(), 7);
+    EXPECT_EQ(t.getRestProperty().getItem1Property(), 8);
 }
 
 TEST(TupleTests, TupleCreate2_TypeDeduction) {
     auto t = System::Tuple::Create(3.14, true);
-    EXPECT_DOUBLE_EQ(t.Item1, 3.14);
-    EXPECT_TRUE(t.Item2);
+    EXPECT_DOUBLE_EQ(t.getItem1Property(), 3.14);
+    EXPECT_TRUE(t.getItem2Property());
 }
 
 // ===========================================================================
@@ -348,7 +348,7 @@ TEST(TupleExtensionsTests, ToValueTuple_Tuple1) {
 TEST(TupleExtensionsTests, ToTuple_StdTuple1) {
     auto st = std::make_tuple(42);
     auto t = System::TupleExtensions::ToTuple(st);
-    EXPECT_EQ(t.Item1, 42);
+    EXPECT_EQ(t.getItem1Property(), 42);
 }
 
 TEST(TupleExtensionsTests, ToValueTuple_Tuple5) {
@@ -360,7 +360,7 @@ TEST(TupleExtensionsTests, ToValueTuple_Tuple5) {
 TEST(TupleExtensionsTests, ToTuple_StdTuple5) {
     auto st = std::make_tuple(1,2,3,4,5);
     auto t = System::TupleExtensions::ToTuple(st);
-    EXPECT_EQ(t.Item5, 5);
+    EXPECT_EQ(t.getItem5Property(), 5);
 }
 
 TEST(TupleExtensionsTests, ToValueTuple_Tuple6) {
@@ -372,7 +372,7 @@ TEST(TupleExtensionsTests, ToValueTuple_Tuple6) {
 TEST(TupleExtensionsTests, ToTuple_StdTuple6) {
     auto st = std::make_tuple(1,2,3,4,5,6);
     auto t = System::TupleExtensions::ToTuple(st);
-    EXPECT_EQ(t.Item6, 6);
+    EXPECT_EQ(t.getItem6Property(), 6);
 }
 
 TEST(TupleExtensionsTests, ToValueTuple_Tuple7) {
@@ -384,7 +384,7 @@ TEST(TupleExtensionsTests, ToValueTuple_Tuple7) {
 TEST(TupleExtensionsTests, ToTuple_StdTuple7) {
     auto st = std::make_tuple(1,2,3,4,5,6,7);
     auto t = System::TupleExtensions::ToTuple(st);
-    EXPECT_EQ(t.Item7, 7);
+    EXPECT_EQ(t.getItem7Property(), 7);
 }
 
 TEST(TupleExtensionsTests, RoundTrip_Tuple1) {
