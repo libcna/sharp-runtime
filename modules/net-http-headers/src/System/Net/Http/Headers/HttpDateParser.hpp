@@ -108,6 +108,253 @@ namespace System::Net::Http::Headers::detail {
         return true;
     }
 
+
+    // -----------------------------------------------------------------------------------------
+    // Ticket #2360 (2026-08-18) -- the sixteen LENIENT formats.
+    //
+    // #2130 adopted RFC 9110 5.6.7's three required forms and recorded the rest as "leniency,
+    // not required forms ... recorded as ticket #2360 rather than smuggled in here". This is that
+    // ticket. .NET's HttpDateParser tries strict "r" and then TWENTY-ONE format strings
+    // (Common/src/System/Net/HttpDateParser.cs:9-32) with
+    // DateTimeStyles.AllowInnerWhite | AssumeUniversal, and a recipient that rejects what .NET
+    // accepts will drop responses .NET's own clients read.
+    //
+    // Twenty-one format strings are not twenty-one grammars. They are three shapes crossed with
+    // three axes, and transcribing the CROSS rather than the list is what makes the gaps visible:
+    //
+    //   shape      day-of-week        date            year     zone
+    //   -------    ---------------    ------------    -----    ------------------------
+    //   RFC 1123   "Ddd," or absent   d MMM yyyy      4 or 2    GMT | UTC | zzz | absent
+    //   RFC 850    "Dddddd," only     d-MMM-yy        2 only    GMT | UTC | zzz | absent
+    //   asctime    "Ddd" no comma     MMM d ... yyyy  4 only    absent only
+    //
+    // TWO CELLS OF THAT CROSS ARE MISSING FROM .NET'S LIST and are therefore rejected here: a
+    // two-digit year combined with a numeric offset, with or without a day-of-week. Writing the
+    // table as a cross would have silently ADDED those two; they are excluded explicitly and
+    // pinned, because "the obvious completion of the pattern" is exactly the kind of widening
+    // that has no reference behind it.
+    //
+    // The zone token comes from .NET's `zzz` specifier, whose parser is ParseTimeZoneOffset
+    // (DateTimeParse.cs:3285-3345): a sign, one or two hour digits, then an OPTIONAL ':' before
+    // two minute digits -- so "-05:00" and "-0500" are both accepted, and the minute field is
+    // rejected at 60. A missing zone means UTC, which is DateTimeStyles.AssumeUniversal rather
+    // than an assumption of this port's.
+    //
+    // This runs AFTER the three strict arms above, and that ordering is the safety property: any
+    // value they accept never reaches here, so no already-parsing input can change its answer.
+    // It is a pure widening.
+    // -----------------------------------------------------------------------------------------
+
+    /** @brief The seven full weekday names, for the RFC 850 shape's `dddd`. */
+    inline bool IsFullWeekdayName(const std::string& name) {
+        static constexpr std::array<const char*, 7> days = {
+            "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+        for (const char* d : days) {
+            if (name == d) return true;
+        }
+        return false;
+    }
+
+    /** @brief A forward-only cursor, deliberately not `sscanf`: `%d` accepts a sign and `+3` is not a day. */
+    class HttpDateCursor {
+    public:
+        explicit HttpDateCursor(const std::string& text) noexcept : text_(text) {}
+
+        [[nodiscard]] bool atEnd() const noexcept { return index_ >= text_.size(); }
+        [[nodiscard]] std::size_t position() const noexcept { return index_; }
+        void seek(std::size_t position) noexcept { index_ = position; }
+
+        /** @brief Consumes any run of whitespace; `DateTimeStyles.AllowInnerWhite`. */
+        void skipWhite() noexcept {
+            while (index_ < text_.size() &&
+                   std::isspace(static_cast<unsigned char>(text_[index_])) != 0)
+                ++index_;
+        }
+
+        bool take(char c) noexcept {
+            if (index_ < text_.size() && text_[index_] == c) { ++index_; return true; }
+            return false;
+        }
+
+        /** @brief Consumes between @p minDigits and @p maxDigits ASCII digits, reporting the width. */
+        bool takeDigits(int minDigits, int maxDigits, int& value, int* width = nullptr) noexcept {
+            const std::size_t start = index_;
+            int accumulated = 0, count = 0;
+            while (index_ < text_.size() && count < maxDigits &&
+                   text_[index_] >= '0' && text_[index_] <= '9') {
+                accumulated = accumulated * 10 + (text_[index_] - '0');
+                ++index_; ++count;
+            }
+            if (count < minDigits) { index_ = start; return false; }
+            value = accumulated;
+            if (width != nullptr) *width = count;
+            return true;
+        }
+
+        /** @brief Consumes a run of ASCII letters, at most @p maxLetters of them. */
+        bool takeLetters(std::size_t maxLetters, std::string& out) {
+            const std::size_t start = index_;
+            while (index_ < text_.size() &&
+                   std::isalpha(static_cast<unsigned char>(text_[index_])) != 0 &&
+                   index_ - start < maxLetters)
+                ++index_;
+            if (index_ == start) return false;
+            out.assign(text_, start, index_ - start);
+            return true;
+        }
+
+    private:
+        const std::string& text_;
+        std::size_t        index_ = 0;
+    };
+
+    /** @brief The zone axis, as .NET's four possibilities. */
+    enum class HttpDateZone { Gmt, Utc, NumericOffset, Absent };
+
+    /**
+     * @brief Consumes an optional zone token, transcribing .NET's `zzz` where one is numeric.
+     *
+     * @param cursor Positioned after the seconds field.
+     * @param kind   Receives which of the four possibilities was found.
+     * @param offset Receives the offset; `TimeSpan::Zero` for `GMT`, `UTC` and absent, the latter
+     *               being `DateTimeStyles.AssumeUniversal` rather than a guess.
+     * @return @c false only for text that starts a zone token and then fails to be one.
+     */
+    inline bool TakeHttpDateZone(HttpDateCursor& cursor, HttpDateZone& kind,
+                                 System::TimeSpan& offset) {
+        kind   = HttpDateZone::Absent;
+        offset = System::TimeSpan::Zero;
+
+        const std::size_t beforeWhite = cursor.position();
+        cursor.skipWhite();
+        if (cursor.atEnd()) { cursor.seek(beforeWhite); return true; }
+
+        const std::size_t start = cursor.position();
+        std::string       token;
+        if (cursor.takeLetters(3, token)) {
+            if (token == "GMT") { kind = HttpDateZone::Gmt; return true; }
+            if (token == "UTC") { kind = HttpDateZone::Utc; return true; }
+            cursor.seek(start);
+            return false;
+        }
+
+        bool negative = false;
+        if (cursor.take('-')) {
+            negative = true;
+        } else if (!cursor.take('+')) {
+            cursor.seek(beforeWhite);
+            return true;   // not a zone token at all; the trailing-text check will judge it
+        }
+
+        int hours = 0, minutes = 0;
+        if (!cursor.takeDigits(1, 2, hours)) return false;
+        (void)cursor.take(':');                       // ':' is optional -- DateTimeParse.cs:3315
+        if (!cursor.takeDigits(2, 2, minutes)) return false;
+        if (minutes >= 60) return false;              // DateTimeParse.cs:3334
+
+        kind   = HttpDateZone::NumericOffset;
+        offset = System::TimeSpan::FromMinutes(negative ? -(hours * 60 + minutes)
+                                                        : (hours * 60 + minutes));
+        return true;
+    }
+
+    /**
+     * @brief Parses the sixteen lenient forms .NET accepts beyond RFC 9110's three.
+     *
+     * Runs only after the three strict arms have declined, so it can never change an answer an
+     * already-accepted value had.
+     */
+    inline bool TryParseLenientHttpDate(const std::string& s, System::DateTimeOffset& result) {
+        HttpDateCursor cursor(s);
+        cursor.skipWhite();
+
+        // The day-of-week is optional, and WHICH forms may carry which spelling depends on the
+        // date separator, which has not been seen yet. So it is captured now and judged below.
+        std::string       weekday;
+        const std::size_t beforeWeekday = cursor.position();
+        bool              haveWeekday   = false;
+        if (cursor.takeLetters(9, weekday)) {
+            cursor.skipWhite();
+            if (cursor.take(',')) {
+                haveWeekday = true;
+            } else {
+                cursor.seek(beforeWeekday);   // an asctime-shaped value, or no weekday at all
+                weekday.clear();
+            }
+        }
+        cursor.skipWhite();
+
+        int day = 0;
+        if (!cursor.takeDigits(1, 2, day)) return false;
+
+        // The separator picks the shape: '-' is RFC 850, whitespace is RFC 1123 / RFC 5322.
+        bool hyphenated = false;
+        if (cursor.take('-')) {
+            hyphenated = true;
+        } else {
+            const std::size_t beforeSpace = cursor.position();
+            cursor.skipWhite();
+            if (cursor.position() == beforeSpace) return false;
+        }
+
+        std::string monthName;
+        if (!cursor.takeLetters(3, monthName)) return false;
+        const int monthIndex = MonthIndexFromName(monthName.c_str());
+        if (monthIndex < 0) return false;
+
+        if (hyphenated) {
+            if (!cursor.take('-')) return false;
+        } else {
+            const std::size_t beforeSpace = cursor.position();
+            cursor.skipWhite();
+            if (cursor.position() == beforeSpace) return false;
+        }
+
+        int year = 0, yearWidth = 0;
+        if (!cursor.takeDigits(1, 4, year, &yearWidth)) return false;
+        if (yearWidth != 2 && yearWidth != 4) return false;   // .NET's yy and yyyy are exact
+
+        const std::size_t beforeTimeSpace = cursor.position();
+        cursor.skipWhite();
+        if (cursor.position() == beforeTimeSpace) return false;
+
+        int hour = 0, minute = 0, second = 0;
+        if (!cursor.takeDigits(1, 2, hour) || !cursor.take(':') ||
+            !cursor.takeDigits(1, 2, minute) || !cursor.take(':') ||
+            !cursor.takeDigits(1, 2, second))
+            return false;
+
+        HttpDateZone     zone{};
+        System::TimeSpan offset = System::TimeSpan::Zero;
+        if (!TakeHttpDateZone(cursor, zone, offset)) return false;
+
+        cursor.skipWhite();
+        if (!cursor.atEnd()) return false;   // trailing text, which #2125 made a failure
+
+        // Now judge the combination against .NET's twenty-one, rather than against the cross.
+        if (hyphenated) {
+            // RFC 850: the weekday is REQUIRED and must be a full name; the year is two digits.
+            if (!haveWeekday || !IsFullWeekdayName(weekday)) return false;
+            if (yearWidth != 2) return false;
+        } else {
+            // RFC 1123 / RFC 5322: the weekday is optional and must be a three-letter name.
+            if (haveWeekday && weekday.size() != 3) return false;
+            // THE TWO MISSING CELLS. A two-digit year with a numeric offset is not in .NET's
+            // list -- neither "ddd, d MMM yy H:m:s zzz" nor "d MMM yy H:m:s zzz" appears -- so
+            // it is rejected rather than completed by symmetry.
+            if (yearWidth == 2 && zone == HttpDateZone::NumericOffset) return false;
+        }
+
+        if (yearWidth == 2) year = ExpandTwoDigitYear(year);
+
+        try {
+            result = System::DateTimeOffset(year, monthIndex + 1, day, hour, minute, second, offset);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
     /**
      * @brief Parses one HTTP-date in any of RFC 9110 §5.6.7's three forms, consuming the whole
      *        value.
@@ -216,7 +463,9 @@ namespace System::Net::Http::Headers::detail {
                                  result);
         }
 
-        return false;
+        // 4. #2360 -- the sixteen lenient forms, tried last so the three strict arms above keep
+        //    every answer they already gave.
+        return TryParseLenientHttpDate(s, result);
     }
 
 } // namespace System::Net::Http::Headers::detail

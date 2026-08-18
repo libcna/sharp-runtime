@@ -254,19 +254,140 @@ TEST(HttpDateConsumptionTests, Pin2130_TheLENIENTDotNetVariantsAreDELIBERATELYNo
     // RFC 9110 does not define as an HTTP-date -- a much larger widening than #2130 asked for,
     // and each has its own ambiguity (a bare time with no zone is only UTC because .NET ASSUMES
     // it is). That gap is ticket #2360, and this pin is what stops it landing by accident.
-    RetryConditionHeaderValue parsed{System::TimeSpan::Zero};
+    // FLIPPED by #2360 (2026-08-18). Every row below now parses, and each carries the line of
+    // HttpDateParser.cs that authorises it. The instant is asserted, not just acceptance, because
+    // a lenient parser that accepts the right text and reports the wrong moment is worse than one
+    // that rejects it.
+    //
+    // The door is RangeConditionHeaderValue rather than RetryConditionHeaderValue, and that is a
+    // CORRECTION my first cut needed. Retry-After dispatches on the first character -- a digit
+    // means delta-seconds and the whole value must then be digits -- so a date with no
+    // day-of-week can never reach the date branch there. That is not a defect: .NET does exactly
+    // the same, and says so ("We either have a timespan or a date/time value. Determine which one
+    // we have by looking at the first char", RetryConditionHeaderValue.cs:94-98). If-Range has no
+    // such ambiguity, so it is the door that can see the whole grammar.
+    const System::DateTimeOffset expected(1994, 11, 6, 8, 49, 37, System::TimeSpan::Zero);
+    RangeConditionHeaderValue parsed{std::string("\"x\"")};
     for (const char* lenient : {
-             "Sun, 06 Nov 1994 08:49:37 UTC",      // HttpDateParser.cs:12
-             "Sun, 06 Nov 1994 08:49:37",          // :13, no zone
-             "06 Nov 1994 08:49:37 GMT",           // :14, no day-of-week
-             "Sun, 06 Nov 1994 08:49:37 +0000",    // :29, RFC 5322 offset
+             "Sun, 06 Nov 1994 08:49:37 UTC",       // HttpDateParser.cs:12
+             "Sun, 06 Nov 1994 08:49:37",           // :13, no zone -> AssumeUniversal
+             "06 Nov 1994 08:49:37 GMT",            // :14, no day-of-week
+             "06 Nov 1994 08:49:37 UTC",            // :15
+             "06 Nov 1994 08:49:37",                // :16
+             "Sun, 06 Nov 94 08:49:37 UTC",         // :18, short year
+             "Sun, 06 Nov 94 08:49:37",             // :19
+             "06 Nov 94 08:49:37 GMT",              // :20
+             "06 Nov 94 08:49:37 UTC",              // :21
+             "06 Nov 94 08:49:37",                  // :22
              "Sunday, 06-Nov-94 08:49:37 UTC",      // :23, RFC 850 with UTC
+             "Sunday, 06-Nov-94 08:49:37 +00:00",   // :24, RFC 850 with an offset
              "Sunday, 06-Nov-94 08:49:37",          // :25, RFC 850 with no zone
+             "Sun, 06 Nov 1994 08:49:37 +00:00",    // :28, RFC 5322
+             "06 Nov 1994 08:49:37 +00:00",         // :30, RFC 5322, no day-of-week
          }) {
         SCOPED_TRACE(lenient);
-        EXPECT_FALSE(RetryConditionHeaderValue::TryParse(lenient, parsed))
-            << "if this now parses, #2360 landed and this pin must be updated in that change";
+        ASSERT_TRUE(RangeConditionHeaderValue::TryParse(lenient, parsed));
+        ASSERT_TRUE(parsed.getDateProperty().has_value());
+        EXPECT_EQ(parsed.getDateProperty()->getUtcTicksProperty(), expected.getUtcTicksProperty());
     }
+
+    // Retry-After still sees the forms that do NOT start with a digit, which is the half of the
+    // widening that reaches it.
+    RetryConditionHeaderValue retry{System::TimeSpan::Zero};
+    ASSERT_TRUE(RetryConditionHeaderValue::TryParse("Sun, 06 Nov 1994 08:49:37 UTC", retry));
+    ASSERT_TRUE(retry.getDateProperty().has_value());
+    EXPECT_EQ(retry.getDateProperty()->getUtcTicksProperty(), expected.getUtcTicksProperty());
+    EXPECT_FALSE(RetryConditionHeaderValue::TryParse("06 Nov 1994 08:49:37 GMT", retry))
+        << "a leading digit means delta-seconds at THIS door, in .NET too "
+           "(RetryConditionHeaderValue.cs:94-98)";
+
+    // A numeric offset is APPLIED, not ignored -- otherwise "accepted" would be meaningless.
+    ASSERT_TRUE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 1994 08:49:37 -05:00", parsed));
+    ASSERT_TRUE(parsed.getDateProperty().has_value());
+    EXPECT_EQ(parsed.getDateProperty()->getUtcTicksProperty(),
+              System::DateTimeOffset(1994, 11, 6, 13, 49, 37, System::TimeSpan::Zero).getUtcTicksProperty());
+    // ...and .NET's zzz makes the ':' optional (DateTimeParse.cs:3315), so the RFC 5322 wire
+    // spelling works too and means the same thing.
+    ASSERT_TRUE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 1994 08:49:37 -0500", parsed));
+    ASSERT_TRUE(parsed.getDateProperty().has_value());
+    EXPECT_EQ(parsed.getDateProperty()->getUtcTicksProperty(),
+              System::DateTimeOffset(1994, 11, 6, 13, 49, 37, System::TimeSpan::Zero).getUtcTicksProperty());
+}
+
+// #2360. Twenty-one format strings are three shapes crossed with three axes, and the cross has
+// TWO CELLS .NET'S LIST DOES NOT CONTAIN: a two-digit year with a numeric offset, with and
+// without a day-of-week. Writing the parser as a cross would have added them silently, so they
+// are rejected explicitly and pinned here -- "the obvious completion of the pattern" is exactly
+// the widening that has no reference behind it.
+TEST(HttpDateConsumptionTests, Fix2360_TheTwoCellsMissingFromDotNetsListAreRejected) {
+    RangeConditionHeaderValue parsed{std::string("\"x\"")};
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 94 08:49:37 +00:00", parsed))
+        << "no such format between HttpDateParser.cs:9 and :32";
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("06 Nov 94 08:49:37 +00:00", parsed))
+        << "nor this one";
+    // The neighbouring cells that DO exist still parse, which is what makes the two above a
+    // deliberate exclusion rather than a broken short year or a broken offset.
+    EXPECT_TRUE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 94 08:49:37 GMT", parsed));
+    EXPECT_TRUE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 1994 08:49:37 +00:00", parsed));
+    EXPECT_TRUE(RangeConditionHeaderValue::TryParse("Sunday, 06-Nov-94 08:49:37 +00:00", parsed));
+}
+
+// The shape axes are not interchangeable, and each rejection below is a line .NET does not have.
+TEST(HttpDateConsumptionTests, Fix2360_TheShapesDoNotCrossContaminate) {
+    RangeConditionHeaderValue parsed{std::string("\"x\"")};
+    // RFC 850 requires a weekday at all, and requires a FULL name.
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("06-Nov-94 08:49:37 GMT", parsed))
+        << "no weekday on the hyphenated shape";
+    // The abbreviated-name rejection must be probed through a zone the STRICT arm declines,
+    // because that arm accepts an abbreviated name (#2376) and would otherwise answer first.
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06-Nov-94 08:49:37 UTC", parsed))
+        << "abbreviated weekday on the hyphenated shape";
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06-Nov-94 08:49:37", parsed));
+    EXPECT_TRUE(RangeConditionHeaderValue::TryParse("Sunday, 06-Nov-94 08:49:37 UTC", parsed))
+        << "the control: the full name is what makes it an RFC 850 date";
+    // ...and a four-digit year on it, which .NET's four RFC 850 formats all spell yy.
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sunday, 06-Nov-1994 08:49:37 GMT", parsed));
+    // The space-separated shape takes the ABBREVIATED name, never the full one.
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sunday, 06 Nov 1994 08:49:37 GMT", parsed));
+    // A year is exactly two or exactly four digits -- .NET's yy and yyyy are both exact widths.
+    // Probed through a zone the strict IMF-fixdate arm declines, for the same reason as above.
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 199 08:49:37 UTC", parsed))
+        << "three-digit year";
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("06 Nov 199 08:49:37 GMT", parsed))
+        << "three-digit year, no day-of-week";
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 9 08:49:37 UTC", parsed))
+        << "one-digit year";
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 19945 08:49:37 UTC", parsed))
+        << "five-digit year";
+
+    // A named zone .NET does not list, an out-of-range offset minute, and trailing text.
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 1994 08:49:37 EST", parsed));
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 1994 08:49:37 +00:60", parsed))
+        << "DateTimeParse.cs:3334 rejects a minute field at 60";
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 1994 08:49:37 GMT junk", parsed));
+    // Inner whitespace IS allowed -- DateTimeStyles.AllowInnerWhite.
+    EXPECT_TRUE(RangeConditionHeaderValue::TryParse("Sun,  06   Nov  1994   08:49:37   GMT", parsed));
+}
+
+// TWO PRE-EXISTING LENIENCIES THAT #2360's OWN TESTS SURFACED, pinned rather than repaired.
+//
+// The three strict arms (#2125/#2130) are sscanf conversions, and sscanf's %d and %[A-Za-z] do
+// not bound a field's width. So the port accepts two things .NET's format strings reject: an
+// ABBREVIATED weekday on the hyphenated RFC 850 shape (.NET spells it dddd, which matches full
+// names only) and a THREE-digit year on the IMF-fixdate shape (.NET spells it yyyy, which is
+// exactly four).
+//
+// Both are NARROWINGS, and #2360 is a widening. Bundling a narrowing into a verified widening is
+// what #2005 recorded as the thing to avoid, so they are ticket #2376 and are pinned here so the
+// divergence is a decision rather than a gap nobody wrote down.
+TEST(HttpDateConsumptionTests, Pin2376_TheStrictArmsAreWiderThanTheirFormatStrings) {
+    RangeConditionHeaderValue parsed{std::string("\"x\"")};
+    EXPECT_TRUE(RangeConditionHeaderValue::TryParse("Sun, 06-Nov-94 08:49:37 GMT", parsed))
+        << "if this now fails, #2376 landed and this pin must be inverted in that change";
+    EXPECT_TRUE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 199 08:49:37 GMT", parsed))
+        << "if this now fails, #2376 landed and this pin must be inverted in that change";
+    ASSERT_TRUE(parsed.getDateProperty().has_value());
+    EXPECT_EQ(parsed.getDateProperty()->getYearProperty(), 199) << "read literally, not expanded";
 }
 
 TEST(HttpDateConsumptionTests, AnEmbeddedNULCannotTruncateTheValueIntoAValidDate) {
@@ -281,8 +402,10 @@ TEST(HttpDateConsumptionTests, THECONTROLNonDateGarbageStillFailsEverywhere) {
     RetryConditionHeaderValue retry{System::TimeSpan::Zero};
     RangeConditionHeaderValue range{std::string("\"x\"")};
     EXPECT_FALSE(RetryConditionHeaderValue::TryParse(kGarbage, retry));
-    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 1994 08:49:37 UTC", range))
-        << "a non-GMT zone token was rejected before and still is";
+    EXPECT_TRUE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 1994 08:49:37 UTC", range))
+        << "#2360: a UTC zone token is now accepted, at every door, not only RetryCondition";
+    EXPECT_FALSE(RangeConditionHeaderValue::TryParse("Sun, 06 Nov 1994 08:49:37 EST", range))
+        << "...but only GMT and UTC; a named zone .NET does not list is still rejected";
     EXPECT_FALSE(RetryConditionHeaderValue::TryParse("Sun, 06 Xyz 1994 08:49:37 GMT", retry))
         << "an unknown month was rejected before and still is";
 }
